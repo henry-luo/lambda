@@ -1,0 +1,180 @@
+{
+  "name": "TransformedBackgroundsClipToTheirPaintBoxAndSvgZeroAxesStayZero",
+  "viewport": {
+    "width": 220,
+    "height": 100
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#zero",
+      "fields": {
+        "width": 0,
+        "height": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#repeat-x",
+      "fields": {
+        "background_repeat_x": 1,
+        "background_repeat_y": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#repeat-y",
+      "fields": {
+        "background_repeat_x": 0,
+        "background_repeat_y": 1
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          124,
+          84,
+          255,
+          255,
+          255
+        ],
+        [
+          174,
+          84,
+          255,
+          255,
+          255
+        ],
+        [
+          5,
+          5,
+          0,
+          255,
+          0
+        ],
+        [
+          30,
+          30,
+          255,
+          0,
+          0
+        ],
+        [
+          60,
+          30,
+          255,
+          255,
+          255
+        ],
+        [
+          130,
+          30,
+          255,
+          0,
+          0
+        ],
+        [
+          165,
+          30,
+          255,
+          255,
+          255
+        ],
+        [
+          25,
+          65,
+          128,
+          128,
+          128
+        ],
+        [
+          60,
+          65,
+          255,
+          255,
+          255
+        ]
+      ]
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          248,
+          168,
+          255,
+          255,
+          255
+        ],
+        [
+          348,
+          168,
+          255,
+          255,
+          255
+        ],
+        [
+          10,
+          10,
+          0,
+          255,
+          0
+        ],
+        [
+          60,
+          60,
+          255,
+          0,
+          0
+        ],
+        [
+          120,
+          60,
+          255,
+          255,
+          255
+        ],
+        [
+          260,
+          60,
+          255,
+          0,
+          0
+        ],
+        [
+          330,
+          60,
+          255,
+          255,
+          255
+        ],
+        [
+          50,
+          130,
+          128,
+          128,
+          128
+        ],
+        [
+          120,
+          130,
+          255,
+          255,
+          255
+        ]
+      ]
+    }
+  ]
+}

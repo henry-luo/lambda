@@ -1,0 +1,251 @@
+{
+  "name": "SvgSizingParityCoversRatioAttributesPercentLimitsFlexGridAndFallbacks",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "snapshot_render_stats",
+      "source": "view",
+      "target": "#svg-ratio",
+      "name": "ratio"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#scene-ratio",
+      "fields": {
+        "width": {
+          "baseline": "ratio",
+          "eq": 0
+        },
+        "height": {
+          "baseline": "ratio",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "view",
+      "target": "#svg-attributes",
+      "name": "attributes"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#scene-attributes",
+      "fields": {
+        "width": {
+          "baseline": "attributes",
+          "eq": 0
+        },
+        "height": {
+          "baseline": "attributes",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "view",
+      "target": "#svg-percent",
+      "name": "percent"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#scene-percent",
+      "fields": {
+        "width": {
+          "baseline": "percent",
+          "eq": 0
+        },
+        "height": {
+          "baseline": "percent",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "view",
+      "target": "#svg-limits",
+      "name": "limits"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#scene-limits",
+      "fields": {
+        "width": {
+          "baseline": "limits",
+          "eq": 0
+        },
+        "height": {
+          "baseline": "limits",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "view",
+      "target": "#svg-absent",
+      "name": "absent"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#scene-absent",
+      "fields": {
+        "width": {
+          "baseline": "absent",
+          "eq": 0
+        },
+        "height": {
+          "baseline": "absent",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "view",
+      "target": "#svg-invalid",
+      "name": "invalid"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#scene-invalid",
+      "fields": {
+        "width": {
+          "baseline": "invalid",
+          "eq": 0
+        },
+        "height": {
+          "baseline": "invalid",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "view",
+      "target": "#svg-zero",
+      "name": "zero"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#scene-zero",
+      "fields": {
+        "width": {
+          "baseline": "zero",
+          "eq": 0
+        },
+        "height": {
+          "baseline": "zero",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "view",
+      "target": "#svg-only",
+      "name": "only"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#scene-only",
+      "fields": {
+        "width": {
+          "baseline": "only",
+          "eq": 0
+        },
+        "height": {
+          "baseline": "only",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "view",
+      "target": "#svg-auto",
+      "name": "auto"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#scene-auto",
+      "fields": {
+        "width": {
+          "baseline": "auto",
+          "eq": 0
+        },
+        "height": {
+          "baseline": "auto",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "view",
+      "target": "#svg-flex",
+      "name": "flex"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#scene-flex",
+      "fields": {
+        "width": {
+          "baseline": "flex",
+          "eq": 0
+        },
+        "height": {
+          "baseline": "flex",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "view",
+      "target": "#svg-grid",
+      "name": "grid"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#scene-grid",
+      "fields": {
+        "width": {
+          "baseline": "grid",
+          "eq": 0
+        },
+        "height": {
+          "baseline": "grid",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#scene-ratio",
+      "fields": {
+        "width": 320,
+        "height": 180
+      }
+    }
+  ]
+}

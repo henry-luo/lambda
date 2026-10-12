@@ -1,0 +1,121 @@
+{
+  "name": "ParentTransformAndVisibilityUpdatePixels",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          80,
+          64,
+          0,
+          255,
+          0
+        ],
+        [
+          40,
+          64,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"object\").setAttribute(\"visible\",\"false\")"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          80,
+          64,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"object\").setAttribute(\"visible\",\"true\")"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('group').appendChild(document.getElementById('main'))"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          0,
+          255,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('main').removeAttribute('target')"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          0,
+          255,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"main\").setAttribute(\"rotation\",\"0 3.14159265 0\")"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    }
+  ]
+}

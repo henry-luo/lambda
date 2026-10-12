@@ -198,7 +198,7 @@ The native context menu (`event.hpp`) is a fixed 5-item popup — Cut/Copy/Paste
 
 `event_sim.cpp` is **not** production input. It is a JSON-driven test-automation and deterministic-replay harness whose entry helpers now feed the same record-backed dispatch builders as trusted input. Its value is that a scripted scenario exercises the same author/UA boundary, cancellation record, and settle stage as a real event.
 
-**Loading.** `event_sim_load` (`event_sim.cpp:1962`) parses a scenario JSON (the full schema is documented in the `event_sim.hpp` header comment, `event_sim.hpp:8-70`) into an `EventSimContext` holding an `ArrayList` of `SimEvent` (`event_sim.hpp:165`); `event_sim_load_replay_log` (`event_sim.cpp:2213`) instead loads an event/state JSONL replay so a recorded session can be re-run exactly (`SIM_EVENT_REPLAY_INPUT` replays the raw `input.raw` record verbatim).
+**Loading.** `event_sim_load` parses a scenario JSON into an `EventSimContext` holding an `ArrayList` of `SimEvent`; non-object events, unknown commands and rejected command arguments fail the load instead of silently omitting test coverage. `event_sim_load_replay_log` instead loads an event/state JSONL replay so a recorded session can be re-run exactly (`SIM_EVENT_REPLAY_INPUT` replays the raw `input.raw` record verbatim).
 
 **Ticking.** On each render tick, `event_sim_update` resolves a target by CSS selector, visible text, or index, then runs the corresponding native input or shared event-builder entry before evaluating assertions. Simulator-only selection and inspection actions remain test tooling; they do not bypass author or UA dispatch for user-visible events.
 
@@ -210,6 +210,26 @@ set the root `input_turn_ms` to `0`; callbacks still drain at the task boundary,
 and `advance_time` then supplies all elapsed time. Omitted values preserve the
 historical input latency. `wait` also advances virtual time, so real-time frame
 measurements use the native window loop without either time-advancing action.
+
+The root `event_interval_ms` defaults to 50; `0` runs adjacent commands without an implicit delay. Microtasks and pending host work still drain between commands. `initial_render: false` suppresses only the first headless raster pass, so vector-export regressions can prove that SVG paint prepares its own GPU snapshots. Other fixtures retain the initial render.
+
+### 8.1 Render and animation assertions
+
+`event_sim_render.{cpp,hpp}` supplies the Scene3D CLI integration vocabulary. These commands use the same assertion totals and `--event-result` JSON as the existing UI assertions. `script` fails on an exception; `assert_script` requires the boolean `true`. Script turns borrow the document evaluator and keep code/results in precise roots (**D5.3.3**), including script-less pages whose evaluator has not initialized its heap yet.
+
+| Commands | Arguments and observation |
+|---|---|
+| `scene3d` | `target` selector; `op` is `snapshot`, `lose_context`, `release`, `collect`, `seek`, `automatic`, `update`, `play`, `stop` or `configure`. Snapshots accept logical `width`/`height`, `scale`, expected `success` and a `diagnostic` substring. Playback uses `clip`, `seconds`, `enabled`, `once` and `clamp`. |
+| `animation_tick`, `animation_frame`, `css_animation` | Advance the document scheduler by `seconds`, flush rAF at absolute `ms` (optionally checking `callbacks`), or sample a target's CSS animation at absolute `seconds`. `collect_gc` performs a bounded `count` of precise collections. |
+| `snapshot_surface`, `release_surface`, `prepare_canvas` | Save a named surface lease plus an independent pixel copy, release that lease, or prepare document canvas snapshots. `lease: "display_list"` exercises display-list ownership. Sources are `page`, `canvas` and `scene3d`; `surface` addresses a saved lease. Generation-checked handles and leases follow **D4.5.1v4**, with owned pixel copies for comparisons. |
+| `assert_surface` | Physical-pixel probes `[x,y,r,g,b,alpha=255,tolerance=3]`; optional `premultiplied` / `premultiplied_pixels`. Count matching pixels in `[x,y,width,height]` using `rgba` channel bounds, a named `reference` (changed RGB, or RGBA with `alpha: true`), `different_from_pixel: [x,y]`, and/or `red_above_blue`. `count` requires `min`, `max` or `eq` bounds. |
+| `snapshot_render_stats`, `assert_render_stats` | Save named numeric metrics or compare a nonempty `fields` map. Sources: `scene3d`, `webgl`, `animation`, `svg_animation`, `scheduler`, `view`, `document`, `surface`, `measurement`. Field values are exact numbers or `{eq,ne,min,max,tolerance}`; `baseline` subtracts that field from a named checkpoint. Unknown fields/checkpoints fail. Optional `js` evaluates immediately before observation in the same turn, before the host paints again. |
+| `pointer_event` | Dispatch pointer down/up/cancel or raw mouse down/up at CSS `x`/`y`, or read coordinates from `position_from: {target,x: attribute,y: attribute}`. Optional `prevented` checks cancellation; the dispatch API's boolean is not a success flag. |
+| `capture_surface`, `measure_frames` | Capture a source/saved surface to PNG, or run `frames` calls to a global JS `callback`, reading the numeric `sample` global and painting each frame. Measurements run `setup` once and write numeric timing/cache/resource metrics to JSON; optional `fields` applies the usual comparisons. Both use `file` and optional `directory_env`, restricted to `temp/`. `enabled_env` makes opt-in captures/benchmarks conditional. Frame measurement requires a release host. |
+
+Scene metrics include `graphics.*` accounting, draw/frame/normalization counts, projection/snapshot generations and bytes, mesh/texture counts, raster size, camera aspect and animation identity. Animation metrics expose action identity, time and activity. View metrics cover size, typed backing attributes, SVG intrinsic width and background repeat/position. Surface metrics expose handle liveness, identity, generation and immutability. See the executable fixtures in `test/scene3d/events/` for complete field names and paired assertions.
+
+The Scene3D cases in `test_radiant_view_gtest` check the CLI exit and the entire versioned event-result object, including the exact executed event count. Their negative controls require failures for false/throwing scripts, wrong pixels, missing metrics/checkpoints, malformed commands and unavailable graphics. The separate `test_scene3d_unit_gtest` retains native math, shader, allocator and GC probes. Integration cases and controls share the View launcher, case workers, phase timings and report. Native units remain a separate Radiant baseline target.
 
 **Assertion vocabulary** — the reason the file is huge. Roughly forty `assert_*` kinds cover caret, selection, form-selection, preedit, target, text, value, checked, visible, focus, pseudo-state, scroll, rect, style, position, element-at, attribute, count, state-store (and snapshot), event-log, editing-event, editing-selection/value, pixel color channels, Mark state-dump against a fixture, reconcile-mode, and browser-reference pixel snapshot (`event_sim.hpp:117-162`).
 

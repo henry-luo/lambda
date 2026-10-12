@@ -1,0 +1,63 @@
+{
+  "name": "ConcaveFloorRemainsVisibleBesideNonoverlappingWallInEitherDomOrder",
+  "viewport": {
+    "width": 1280,
+    "height": 336
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          320,
+          104,
+          0,
+          128,
+          0,
+          255,
+          2
+        ],
+        [
+          960,
+          104,
+          0,
+          128,
+          0,
+          255,
+          2
+        ]
+      ]
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          640,
+          208,
+          0,
+          128,
+          0,
+          255,
+          2
+        ],
+        [
+          1920,
+          208,
+          0,
+          128,
+          0,
+          255,
+          2
+        ]
+      ]
+    }
+  ]
+}

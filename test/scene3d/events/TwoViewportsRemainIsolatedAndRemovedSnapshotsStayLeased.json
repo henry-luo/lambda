@@ -1,0 +1,170 @@
+{
+  "name": "TwoViewportsRemainIsolatedAndRemovedSnapshotsStayLeased",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "name": "old",
+      "width": 128,
+      "height": 128,
+      "lease": "display_list"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "name": "oldstats"
+    },
+    {
+      "type": "script",
+      "js": "const other=make('scene3d',document.body,{id:'other',background:'#00ff00'});make('camera',other,{type:'perspective',position:'0 0 4'})"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#other",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          0,
+          255,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#other",
+      "fields": {
+        "graphics.generation": {
+          "baseline": "oldstats",
+          "ne": 0
+        }
+      }
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"scene\").setAttribute(\"background\",\"#0000ff\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#scene"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          64,
+          64,
+          255,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "exists": 1,
+        "immutable": 1,
+        "generation": {
+          "baseline": "old",
+          "min": 1
+        }
+      },
+      "surface": "old"
+    },
+    {
+      "type": "assert_surface",
+      "surface": "old",
+      "pixels": [
+        [
+          64,
+          64,
+          255,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "scene3d",
+      "op": "release",
+      "target": "#scene"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "fields": {
+        "exists": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#other",
+      "fields": {
+        "exists": 1
+      }
+    },
+    {
+      "type": "assert_surface",
+      "surface": "old",
+      "pixels": [
+        [
+          64,
+          64,
+          255,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "release_surface",
+      "name": "old"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "surface",
+      "target": "#scene",
+      "fields": {
+        "exists": 0
+      },
+      "surface": "old"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('other').remove()"
+    },
+    {
+      "type": "scene3d",
+      "op": "collect",
+      "target": "#scene"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#other",
+      "fields": {
+        "exists": 0
+      }
+    }
+  ]
+}

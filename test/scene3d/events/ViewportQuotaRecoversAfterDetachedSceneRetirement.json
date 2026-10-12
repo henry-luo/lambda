@@ -1,0 +1,129 @@
+{
+  "name": "ViewportQuotaRecoversAfterDetachedSceneRetirement",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#scene"
+    },
+    {
+      "type": "script",
+      "js": "const s=make('scene3d',document.body,{id:'quota-0'});make('camera',s,{type:'perspective'})"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#quota-0",
+      "width": 16,
+      "height": 16,
+      "success": true
+    },
+    {
+      "type": "script",
+      "js": "const s=make('scene3d',document.body,{id:'quota-1'});make('camera',s,{type:'perspective'})"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#quota-1",
+      "width": 16,
+      "height": 16,
+      "success": true
+    },
+    {
+      "type": "script",
+      "js": "const s=make('scene3d',document.body,{id:'quota-2'});make('camera',s,{type:'perspective'})"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#quota-2",
+      "width": 16,
+      "height": 16,
+      "success": true
+    },
+    {
+      "type": "script",
+      "js": "const s=make('scene3d',document.body,{id:'quota-3'});make('camera',s,{type:'perspective'})"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#quota-3",
+      "width": 16,
+      "height": 16,
+      "success": true
+    },
+    {
+      "type": "script",
+      "js": "const s=make('scene3d',document.body,{id:'quota-4'});make('camera',s,{type:'perspective'})"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#quota-4",
+      "width": 16,
+      "height": 16,
+      "success": true
+    },
+    {
+      "type": "script",
+      "js": "const s=make('scene3d',document.body,{id:'quota-5'});make('camera',s,{type:'perspective'})"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#quota-5",
+      "width": 16,
+      "height": 16,
+      "success": true
+    },
+    {
+      "type": "script",
+      "js": "const s=make('scene3d',document.body,{id:'quota-6'});make('camera',s,{type:'perspective'})"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#quota-6",
+      "width": 16,
+      "height": 16,
+      "success": true
+    },
+    {
+      "type": "script",
+      "js": "const s=make('scene3d',document.body,{id:'quota-7'});make('camera',s,{type:'perspective'})"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#quota-7",
+      "width": 16,
+      "height": 16,
+      "success": false,
+      "diagnostic": "quota"
+    },
+    {
+      "type": "script",
+      "js": "scene.remove()"
+    },
+    {
+      "type": "scene3d",
+      "op": "collect",
+      "target": "#quota-7"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#quota-7",
+      "width": 16,
+      "height": 16
+    }
+  ]
+}

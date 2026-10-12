@@ -19,7 +19,13 @@ extern "C" Item mvp_lmd_iterator_get(MvpLmdProgram* program, Item source) {
     Rooted<Item> owner(roots, source), method(roots, ItemNull), iterator(roots, ItemNull), record(roots, ItemNull);
     Item name = {.item = s2it(well_known_name_ref(JS_SYMBOL_ITERATOR))};
     TypeId type = get_type_id(source);
-    method.set(type == LMD_TYPE_ARRAY || type == LMD_TYPE_STRING ? mvp_lmd_array_method_value(program, source, name) :
+    if (!iterator_object(source) && type != LMD_TYPE_STRING) {
+        // GetMethod boxes primitive lookup bases while getters and iterator calls receive the original value.
+        iterator.set(mvp_lmd_box_primitive(owner.get()));
+        if (item_is_error(iterator.get())) return iterator.get();
+        method.set(mvp_lmd_property_with_receiver(iterator.get(), name, ItemNull, LMD_PROP_GET, owner.get()));
+    } else method.set(type == LMD_TYPE_ARRAY || type == LMD_TYPE_STRING ?
+        mvp_lmd_array_method_value(program, source, name) :
         mvp_lmd_class_property(source, name, ItemNull, LMD_PROP_GET, NULL));
     if (item_is_error(method.get())) return method.get();
     if (!mvp_lmd_is_callable(method.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
@@ -28,7 +34,7 @@ extern "C" Item mvp_lmd_iterator_get(MvpLmdProgram* program, Item source) {
     if (!iterator_object(iterator.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     method.set(iterator_property(iterator.get(), "next"));
     if (item_is_error(method.get())) return method.get();
-    if (!mvp_lmd_is_callable(method.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    // GetIterator retains next without calling it; a pattern can close before its first step.
     record.set(mvp_lmd_array_new(0));
     if (item_is_error(record.get())) return record.get();
     Item stored = mvp_lmd_array_store(record.get(), 0, iterator.get());
@@ -354,10 +360,13 @@ Item mvp_lmd_generator_initialize(MvpLmdProgram* program, MvpLmdLibraryState* st
     const int prototypes[] = {LMD_LIBRARY_GENERATOR_PROTOTYPE, LMD_LIBRARY_ITERATOR_PROTOTYPE};
     for (int index : prototypes)
         if (!map_shape_set(state->values[index].map, key, identity.get())) return ItemError;
-    state->values[LMD_LIBRARY_SEQUENCE_ITERATOR] = mvp_lmd_native_function(program, NULL, sequence_iterator, 0);
+    state->values[LMD_LIBRARY_SEQUENCE_ITERATOR] = mvp_lmd_native_function(program, NULL, sequence_iterator, 0, "values");
     if (item_is_error(state->values[LMD_LIBRARY_SEQUENCE_ITERATOR])) return state->values[LMD_LIBRARY_SEQUENCE_ITERATOR];
     if (!map_shape_set((Map*)state->values[LMD_LIBRARY_ARRAY_PROTOTYPE].array, key,
             state->values[LMD_LIBRARY_SEQUENCE_ITERATOR])) return ItemError;
+    result = mvp_lmd_named_set(state->values[LMD_LIBRARY_ARRAY_PROTOTYPE], "values",
+        state->values[LMD_LIBRARY_SEQUENCE_ITERATOR], JSPD_NON_ENUMERABLE);
+    if (item_is_error(result)) return result;
     for (int set = 0; set < 2; set++) {
         int slot = set ? LMD_LIBRARY_SET : LMD_LIBRARY_MAP;
         result = mvp_lmd_library_class_initialize(program, state, set ? &state->set : &state->map,

@@ -1,0 +1,1273 @@
+{
+  "name": "RingworldAutoPlayToursCameraAndStopsWithoutPendingFrames",
+  "viewport": {
+    "width": 1120,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#ringworld"
+      },
+      "attribute": "data-ready",
+      "equals": "true"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#ringworld",
+      "width": 624,
+      "height": 342
+    },
+    {
+      "type": "script",
+      "js": "\n        globalThis.autoButton=document.getElementById('auto-play');\n        if(autoButton.getAttribute('aria-pressed')!=='false')throw new Error('auto play should start disabled');\n        document.getElementById('play').click();\n        globalThis.tourOrigin=ringworld.camera.position.clone();\n        globalThis.tourDistance=ringworld.controls.getDistance();\n        globalThis.tourTilt=ringworld.controls.getPolarAngle();\n        globalThis.tourAngle=ringworld.controls.getAzimuthalAngle();\n        autoButton.click();\n        if(autoButton.getAttribute('aria-pressed')!=='true'||autoButton.textContent!=='Stop Auto Play')\n            throw new Error('auto play toggle did not start');\n    "
+    },
+    {
+      "type": "animation_frame",
+      "ms": 1000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 1100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 1200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 1300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 1400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 1500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 1600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 1700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 1800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 1900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 2000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 2100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 2200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 2300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 2400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 2500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 2600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 2700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 2800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 2900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 3000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 3100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 3200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 3300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 3400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 3500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 3600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 3700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 3800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 3900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 4000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 4100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 4200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 4300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 4400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 4500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 4600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 4700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 4800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 4900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 5000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 5100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 5200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 5300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 5400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 5500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 5600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 5700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 5800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 5900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 6000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 6100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 6200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 6300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 6400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 6500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 6600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 6700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 6800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 6900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 7000,
+      "callbacks": 1
+    },
+    {
+      "type": "script",
+      "js": "\n        if(ringworld.controls.target.length()<.5)throw new Error('auto play did not pan');\n        if(Math.abs(ringworld.controls.getDistance()-tourDistance)<1)throw new Error('auto play did not zoom');\n        if(Math.abs(ringworld.controls.getPolarAngle()-tourTilt)<.2)throw new Error('auto play did not tilt');\n        if(Math.abs(ringworld.controls.getAzimuthalAngle()-tourAngle)<1)throw new Error('auto play did not orbit');\n        const position=document.getElementById('main').getAttribute('position').split(' ').map(Number);\n        if(ringworld.camera.position.distanceTo(ringworld.camera.position.clone().fromArray(position))>1e-6)\n            throw new Error('auto play did not sync native camera');\n        if(document.getElementById('play').getAttribute('aria-pressed')!=='false')\n            throw new Error('camera tour changed scene playback');\n    "
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#ringworld",
+      "width": 624,
+      "height": 342
+    },
+    {
+      "type": "animation_frame",
+      "ms": 7100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 7200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 7300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 7400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 7500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 7600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 7700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 7800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 7900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 8000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 8100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 8200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 8300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 8400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 8500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 8600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 8700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 8800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 8900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 9000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 9100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 9200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 9300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 9400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 9500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 9600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 9700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 9800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 9900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 10000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 10100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 10200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 10300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 10400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 10500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 10600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 10700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 10800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 10900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 11000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 11100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 11200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 11300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 11400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 11500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 11600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 11700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 11800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 11900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 12000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 12100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 12200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 12300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 12400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 12500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 12600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 12700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 12800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 12900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 13000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 13100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 13200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 13300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 13400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 13500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 13600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 13700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 13800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 13900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 14000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 14100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 14200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 14300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 14400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 14500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 14600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 14700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 14800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 14900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 15000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 15100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 15200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 15300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 15400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 15500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 15600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 15700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 15800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 15900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 16000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 16100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 16200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 16300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 16400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 16500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 16600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 16700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 16800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 16900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 17000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 17100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 17200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 17300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 17400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 17500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 17600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 17700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 17800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 17900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 18000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 18100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 18200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 18300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 18400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 18500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 18600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 18700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 18800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 18900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 19000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 19100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 19200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 19300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 19400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 19500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 19600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 19700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 19800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 19900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 20000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 20100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 20200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 20300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 20400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 20500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 20600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 20700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 20800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 20900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 21000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 21100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 21200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 21300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 21400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 21500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 21600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 21700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 21800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 21900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 22000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 22100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 22200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 22300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 22400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 22500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 22600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 22700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 22800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 22900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 23000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 23100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 23200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 23300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 23400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 23500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 23600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 23700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 23800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 23900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 24000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 24100,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 24200,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 24300,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 24400,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 24500,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 24600,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 24700,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 24800,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 24900,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 25000,
+      "callbacks": 1
+    },
+    {
+      "type": "script",
+      "js": "\n        if(ringworld.camera.position.distanceTo(tourOrigin)>1e-6||ringworld.controls.target.length()>1e-6)\n            throw new Error('camera tour did not loop');\n        autoButton.click();\n        globalThis.stoppedCamera=ringworld.camera.position.clone();\n        if(autoButton.getAttribute('aria-pressed')!=='false'||autoButton.textContent!=='Auto Play')\n            throw new Error('auto play toggle did not stop');\n    "
+    },
+    {
+      "type": "animation_frame",
+      "ms": 26000,
+      "callbacks": 0
+    },
+    {
+      "type": "script",
+      "js": "\n        if(ringworld.camera.position.distanceTo(stoppedCamera)>1e-6)throw new Error('stopped tour moved');\n        autoButton.click();autoButton.click();autoButton.click();\n    "
+    },
+    {
+      "type": "animation_frame",
+      "ms": 27000,
+      "callbacks": 1
+    },
+    {
+      "type": "script",
+      "js": "\n        document.getElementById('reset').click();\n        if(autoButton.getAttribute('aria-pressed')!=='false')throw new Error('manual reset did not stop auto play');\n        if(ringworld.camera.position.distanceTo(tourOrigin)>1e-6||ringworld.controls.target.length()>1e-6)\n            throw new Error('manual reset did not restore view');\n        autoButton.click();\n        window.dispatchEvent(new Event('pagehide'));\n        if(autoButton.getAttribute('aria-pressed')!=='false')throw new Error('pagehide did not stop auto play');\n    "
+    },
+    {
+      "type": "animation_frame",
+      "ms": 28000,
+      "callbacks": 0
+    }
+  ]
+}

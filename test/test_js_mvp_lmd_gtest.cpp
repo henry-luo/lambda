@@ -51,6 +51,471 @@ protected:
         return read_text_file(path);
     }
 };
+TEST_F(JsMvpLmd, NestedBindingPatterns) {
+    boolean(R"JS(
+        let [a,,{b:[c=3,...tail]},...rest]=[1,2,{b:[undefined,4,5]},6,7];
+        let {x:{y=8}={},...other}={z:9};
+        function f([x,{y=2},...tail]=[1,{}],{z=3,...other}={}) {
+            return [x,y,z,tail.length,Object.keys(other).length];
+        }
+        function g(...[x,...tail]) {return x+tail.length;}
+        let caught=0;
+        try {throw [10,{n:11}]} catch([x,{n}]) {caught=x+n;}
+        a===1 && c===3 && tail.join(',')==='4,5' && rest.join(',')==='6,7' &&
+            y===8 && other.z===9 && f().join(',')==='1,2,3,0,0' && g(4,5,6)===6 && caught===21;
+    )JS");
+    boolean(R"JS(
+        let closures=[];
+        for(let [a,{b=2},...rest] of [[1,{},3],[4,{b:5},6,7]]) closures.push(()=>a+b+rest.length);
+        let x='',y='';for([x,y] of ['ab']) {}
+        closures[0]()===4 && closures[1]()===11 && x==='a' && y==='b';
+    )JS");
+    error("let [x]=null;", "TypeError");
+    error("let []={length:0};", "TypeError");
+    error("[]=1;", "TypeError");
+    error("[,]=true;", "TypeError");
+    error("[]=Symbol();", "TypeError");
+    error("let [x=x]=[];", "ReferenceError");
+    error("function f([x=y],y=1){}f([])", "ReferenceError");
+    boolean(R"JS(
+        let [a=function(){},b=()=>{},c=(function(){}),d=(0,function(){}),e=function explicit(){}]=[];
+        let {f=function*(){}}={};
+        function g(h=()=>{}) {return h.name}
+        let descriptor=Object.getOwnPropertyDescriptor(a,'name');
+        a.name==='a' && b.name==='b' && c.name==='c' && d.name==='' && e.name==='explicit' &&
+            f.name==='f' && g()==='h' && !descriptor.writable && !descriptor.enumerable && descriptor.configurable;
+    )JS");
+}
+TEST_F(JsMvpLmd, PatternIteratorEffectsAndClose) {
+    boolean(R"JS(
+        let prototype=Object.getPrototypeOf([].values()),closed=0;
+        prototype.return=function(){closed++;return {}};
+        function f(){let a;[a]=[1,2];return a;}
+        let total=0,map=new Map([[1,2],[3,4]]);
+        for(let [key,value] of map)total+=key+value;
+        f()===1 && total===10 && closed===3;
+    )JS");
+    boolean(R"JS(
+        let log='',n=0;
+        let source={[Symbol.iterator](){log+='i';return {
+            next(){log+='n';return {get done(){log+='d';return false},get value(){log+='v';return ++n}}},
+            return(){log+='r';return {}}
+        }}};
+        let [,x]=source;
+        let first=log==='indndvr' && x===1;
+        log='';let []=source;
+        first && log==='ir';
+    )JS");
+    boolean(R"JS(
+        let marker={},close={},count=0,ok=true;
+        function fail(){throw marker}
+        for(let mode of ['next','done','value','bind']) {
+            let source={[Symbol.iterator](){return {
+                next(){if(mode==='next')fail();return {
+                    get done(){if(mode==='done')fail();return false},
+                    get value(){if(mode==='value')fail();return undefined}
+                }},return(){count++;throw close}
+            }}};
+            try {let [x=fail()]=source;ok=false} catch(e){ok=ok && e===marker}
+        }
+        ok && count===1;
+    )JS");
+    boolean(R"JS(
+        let log='',marker={};
+        let inner={[Symbol.iterator](){return {next(){throw marker},return(){log+='i';return {}}}}};
+        let outer={[Symbol.iterator](){return {next(){return {value:inner,done:false}},return(){log+='o';return {}}}}};
+        try {let [[x]]=outer;} catch(e) {e===marker && log==='o'}
+    )JS");
+    error("let [x]={[Symbol.iterator](){return {next(){return {value:1}},return(){return 1}}}}", "TypeError");
+    boolean(R"JS(
+        let closed=0,source={[Symbol.iterator](){return {return(){closed++;return {}}}}};
+        function* g(){[...{}[yield 1]]=source;}
+        let iterator=g();let first=iterator.next();let last=iterator.return(2);
+        first.value===1 && !first.done && last.value===2 && last.done && closed===1;
+    )JS");
+    boolean(R"JS(
+        let receiver=false,called=false;
+        Object.defineProperty(Number.prototype,Symbol.iterator,{get(){'use strict';receiver=this===7;
+            return function(){'use strict';called=this===7;return {next(){return {value:9,done:false}},return(){return {}}}}}});
+        let [x]=7;receiver && called && x===9;
+    )JS");
+}
+TEST_F(JsMvpLmd, PatternAssignmentOrder) {
+    boolean(R"JS(
+        let log='',target={},n=0;
+        function key(){log+='k';return 'x'}
+        function fallback(){log+='f';return 5}
+        let source={[Symbol.iterator](){return {
+            next(){log+='n';return {value:undefined,done:n++>0}},return(){log+='r';return {}}
+        }}};
+        [target[key()]=fallback()]=source;
+        let ok=log==='knfr' && target.x===5;
+        log='';n=0;[...target[key()]]=source;
+        ok=ok && log==='knn' && target.x.length===1;
+        log='';({get a(){log+='g';return undefined}});
+        ({a:target[key()]=fallback()}={get a(){log+='g';return undefined}});
+        ok && log==='kgf' && target.x===5;
+    )JS");
+    boolean("let a=0,b=0;let source=[1,2];let value=([a,b]=source);value===source && a===1 && b===2");
+    boolean(R"JS(let x,y;[x,y]='\u{1F600}a';x==='\u{1F600}' && y==='a')JS");
+    boolean("let x,y;[x,{a:y=3}]=[1,{}];x===1 && y===3");
+    boolean(R"JS(
+        let saved=[];
+        for(let [x,y] of [[1,2],'ab',[3],['c','d']]) saved.push(()=>[x,y]);
+        let first=saved[0](),second=saved[1](),third=saved[2](),fourth=saved[3]();
+        first[0]===1 && first[1]===2 && second[0]==='a' && second[1]==='b' &&
+            third[0]===3 && third[1]===undefined && fourth[0]==='c' && fourth[1]==='d';
+    )JS");
+    error("for(let [x,y] of [1]);", "TypeError");
+    boolean(R"JS(
+        let log='',target={},source={[Symbol.iterator](){return {
+            next(){log+='n';return {}},return(){log+='r';return {}}
+        }}};
+        function key(){log+='e';return {toString(){log+='k';return 'x'}}}
+        [target[key()]=(log+='f',1)]=source;
+        let ok=log==='enfkr' && target.x===1;
+        log='';try {[null[key()]]=source} catch(e){ok=ok && e instanceof TypeError}
+        ok && log==='enr';
+    )JS");
+}
+TEST_F(JsMvpLmd, ObjectRestPropertySemantics) {
+    boolean(R"JS(
+        let log='',s=Symbol('s'),t=Symbol('s'),source={a:1,b:2,[s]:3,[t]:4};
+        Object.defineProperty(source,'hidden',{value:5});
+        let proxy=new Proxy(source,{
+            ownKeys(o){log+='k';return Reflect.ownKeys(o)},
+            getOwnPropertyDescriptor(o,k){log+=typeof k==='symbol'?'s':k;return Reflect.getOwnPropertyDescriptor(o,k)},
+            get(o,k,r){log+=typeof k==='symbol'?'S':k.toUpperCase();return Reflect.get(o,k,r)}
+        });
+        let {a,[s]:symbol,...rest}=proxy;
+        let descriptor=Object.getOwnPropertyDescriptor(rest,'b');
+        a===1 && symbol===3 && rest.b===2 && rest[t]===4 && !Object.hasOwn(rest,s) &&
+            !Object.hasOwn(rest,'a') && !Object.hasOwn(rest,'hidden') &&
+            descriptor.writable && descriptor.enumerable && descriptor.configurable && log==='ASkbBhiddensS';
+    )JS");
+    boolean(R"JS(
+        let source={get a(){delete this.b;this.c=3;return 1},b:2};
+        let {...rest}=source;
+        let {[{toString(){return 'x'}}]:x,...other}={x:1,y:2};
+        let {0:first,...chars}='abc';
+        rest.a===1 && !Object.hasOwn(rest,'b') && !Object.hasOwn(rest,'c') &&
+            x===1 && other.y===2 && !Object.hasOwn(other,'x') && first==='a' && chars[1]==='b';
+    )JS");
+    boolean(R"JS(
+        function source(){};
+        Object.defineProperty(source,'x',{enumerable:true,get(){return this===source}});
+        let {...rest}=source;rest.x;
+    )JS");
+}
+TEST_F(JsMvpLmd, PatternEarlyErrors) {
+    const char* sources[] = {"for ({x:y?.z=42} of [{}]);", "for ({x:y?.z=42} in {});",
+        "([x?.y]=[1]);", "({x:y?.z=1}={});", "[null]=[1];", "let [null.x]=[];",
+        "[...x,]=[];", "({...x,}={});", "({cl\\u0061ss}={});", "function* f(){[yield]=[]}",
+        "'use strict';({x=yield}={});", "'use strict';[...x[yield]]=[];",
+        "for([...x,] of [[]]);", "for([...x,,] in {});",
+        "for(const [x]=1 of []);", "for(var {x}=1 of []);", "for(var [x]=1 in {});"};
+    for (const char* source : sources) {
+        mvp_lmd_destroy(execution); execution=mvp_lmd_execute(source, strlen(source));
+        MvpLmdFailurePhase phase; const char* type=nullptr;
+        mvp_lmd_diagnostic(execution,&phase,&type);
+        EXPECT_EQ(phase,MVP_LMD_PARSE_FAILURE) << source;
+        EXPECT_STREQ(type,"SyntaxError") << source;
+    }
+    boolean("let x={};[patternGlobal]=[2];({a:x.x}={a:3});patternGlobal===2 && x.x===3");
+    boolean("'use strict';function f(){return arguments[0]}f(true)");
+    boolean("let x=[0];for([x][0][0] of [3]);x[0]===3");
+}
+TEST_F(JsMvpLmd, ErrorConstructorsAndDescriptors) {
+    boolean(R"JS(
+        let constructors=[Error,EvalError,RangeError,ReferenceError,SyntaxError,TypeError,URIError];
+        let names=['Error','EvalError','RangeError','ReferenceError','SyntaxError','TypeError','URIError'];
+        let ok=true;
+        for(let i=0;i<constructors.length;i++) {
+            let C=constructors[i], cause={index:i}, e=new C('message',{cause:cause});
+            let descriptor=Object.getOwnPropertyDescriptor(e,'message');
+            let metadata=Object.getOwnPropertyDescriptor(C,'prototype');
+            ok=ok && e instanceof C && e instanceof Error && e.constructor===C &&
+                e.name===names[i] && e.message==='message' && e.cause===cause &&
+                e.toString()===names[i]+': message' && Object.keys(e).length===0 &&
+                descriptor.writable && descriptor.configurable && !descriptor.enumerable &&
+                !metadata.writable && !metadata.configurable && !metadata.enumerable &&
+                Object.prototype.toString.call(e)==='[object Error]' &&
+                !Object.hasOwn(C(),'message') && !Object.hasOwn(C(undefined),'message');
+            if(i) ok=ok && Object.getPrototypeOf(C)===Error &&
+                Object.getPrototypeOf(C.prototype)===Error.prototype;
+            try {throw e;} catch(thrown) {ok=ok && thrown===e;}
+        }
+        ok && TypeError.name==='TypeError' && TypeError.length===1 &&
+            Error.prototype.toString.call({name:'',message:'x'})==='x' &&
+            Error.prototype.toString.call({name:'x',message:''})==='x' &&
+            Error.prototype.toString.call({})==='Error';
+    )JS");
+}
+TEST_F(JsMvpLmd, NativeErrorIdentityAndConstructionOrder) {
+    boolean(R"JS(
+        let ok=true;
+        try {null.x;} catch(e) {ok=e instanceof TypeError && e.constructor===TypeError;}
+        try {new Array(-1);} catch(e) {ok=ok && e instanceof RangeError && e.constructor===RangeError;}
+        try {missingName;} catch(e) {ok=ok && e instanceof ReferenceError;}
+        try {JSON.parse('{');} catch(e) {ok=ok && e instanceof SyntaxError;}
+        let log='', cause={};
+        function Target(){}
+        let target=new Proxy(Target,{get(t,k,r){log+='p';return Reflect.get(t,k,r);}});
+        let message={toString(){log+='m';return 'message';}};
+        let options=new Proxy({cause:cause},{has(t,k){log+='h';return true;},get(t,k){log+='g';return t[k];}});
+        let e=Reflect.construct(TypeError,[message,options],target);
+        ok && log==='pmhg' && Object.getPrototypeOf(e)===Target.prototype &&
+            e.message==='message' && e.cause===cause && Object.prototype.toString.call(e)==='[object Error]';
+    )JS");
+    boolean("let marker={};try{new Error({toString(){throw marker}})}catch(e){e===marker}");
+    boolean("let marker={};try{Error.prototype.toString.call({get name(){throw marker}})}catch(e){e===marker}");
+    error("Error.prototype.toString.call(null)", "TypeError");
+}
+TEST_F(JsMvpLmd, AggregateErrorIterationAndCause) {
+    boolean(R"JS(
+        let order='', cause={};
+        let iterable={[Symbol.iterator](){order+='i';let n=0;return {next(){return {value:++n,done:n>2}}}}};
+        let e=AggregateError(iterable,{toString(){order+='m';return 'all'}},{get cause(){order+='c';return cause}});
+        let descriptor=Object.getOwnPropertyDescriptor(e,'errors');
+        e instanceof Error && e instanceof AggregateError && e.constructor===AggregateError &&
+            e.errors.join(',')==='1,2' && e.cause===cause && order==='mci' &&
+            e.toString()==='AggregateError: all' && AggregateError.length===2 &&
+            descriptor.writable && descriptor.configurable && !descriptor.enumerable;
+    )JS");
+    error("AggregateError({length:1,0:1})", "TypeError");
+}
+TEST_F(JsMvpLmd, FailurePhasesRemainDistinct) {
+    const char* sources[] = {"let = ;", "async function f(){}", "null.x", "throw new TypeError('x')", "1+1",
+        "eval('unknown')", "Function('return unknown')", "class E extends Error{};new E('x')",
+        "function f(){try{new RegExp('a','d')}finally{return 42}}f()",
+        "function f(){try{null.x}finally{return 42}}f()"};
+    MvpLmdFailurePhase expected[] = {MVP_LMD_PARSE_FAILURE, MVP_LMD_ADMISSION_FAILURE,
+        MVP_LMD_RUNTIME_FAILURE, MVP_LMD_RUNTIME_FAILURE, MVP_LMD_SUCCESS,
+        MVP_LMD_ADMISSION_FAILURE, MVP_LMD_ADMISSION_FAILURE, MVP_LMD_ADMISSION_FAILURE,
+        MVP_LMD_ADMISSION_FAILURE, MVP_LMD_SUCCESS};
+    for (int i=0;i<10;i++) {
+        mvp_lmd_destroy(execution); execution=mvp_lmd_execute(sources[i], strlen(sources[i]));
+        MvpLmdFailurePhase phase; const char* type=nullptr;
+        mvp_lmd_diagnostic(execution,&phase,&type);
+        EXPECT_EQ(phase,expected[i]);
+        if(i==0) EXPECT_STREQ(type,"SyntaxError");
+        else if(i==2 || i==3) EXPECT_STREQ(type,"TypeError");
+        else EXPECT_EQ(type,nullptr);
+    }
+}
+TEST_F(JsMvpLmd, PrimitiveBinaryConversions) {
+    boolean(R"JS(
+        let events='';
+        function add(a,b){return a+b;}
+        function less(a,b){return a<b;}
+        let left={valueOf(){events+='l';return 2;}}, right={valueOf(){events+='r';return 3;}};
+        let values=[2,1.5,'3',left,4n,new Number(2.5),null,undefined];
+        let ok=add(values[0],values[1])===3.5 && add(values[2],1)==='31' &&
+            add(values[3],right)===5 && events==='lr';
+        events='';
+        ok=ok && less(values[3],right) && events==='lr' && add(values[4],1n)===5n &&
+            add(values[5],1)===3.5 && add(values[6],2)===2 &&
+            !less(values[7],2) && !less(NaN,2) && less(2,Infinity) &&
+            1/add(-0,-0)===-Infinity;
+        let failures=0;
+        try{add(values[4],1);}catch(e){if(e instanceof TypeError)failures++;}
+        try{less(Symbol(),1);}catch(e){if(e instanceof TypeError)failures++;}
+        ok && failures===2;
+    )JS");
+}
+TEST_F(JsMvpLmd, PrimitiveWrapperIdentityAndStorage) {
+    boolean(R"JS(
+        let s=new String('a\ud83d\ude00'), n=new Number(1.25), b=new Boolean(false);
+        let symbol=Symbol('tag'), boxedSymbol=Object(symbol), bigint=Object(123n);
+        let descriptor=Object.getOwnPropertyDescriptor(s,'1');
+        let length=Object.getOwnPropertyDescriptor(s,'length');
+        s instanceof String && s.valueOf()==='a\ud83d\ude00' && s.toString()==='a\ud83d\ude00' &&
+            s.length===3 && s[0]==='a' && s[1]==='\ud83d' && s[2]==='\ude00' &&
+            Object.keys(s).join(',')==='0,1,2' && descriptor.enumerable &&
+            !descriptor.writable && !descriptor.configurable && !length.enumerable && !length.writable &&
+            n instanceof Number && n.valueOf()===1.25 && n.toString()==='1.25' &&
+            b instanceof Boolean && b.valueOf()===false && b.toString()==='false' && !!b &&
+            boxedSymbol.valueOf()===symbol && boxedSymbol.toString()==='Symbol(tag)' &&
+            bigint.valueOf()===123n && bigint.toString(16)==='7b' &&
+            Object.prototype.toString.call(s)==='[object String]' &&
+            Object.prototype.toString.call(n)==='[object Number]' &&
+            Object.prototype.toString.call(b)==='[object Boolean]' &&
+            Object.getPrototypeOf(5)===Number.prototype &&
+            Object.getPrototypeOf('x')===String.prototype &&
+            String.prototype.valueOf()==='' && Number.prototype.valueOf()===0 &&
+            Boolean.prototype.valueOf()===false;
+    )JS");
+    error("Number.prototype.valueOf.call({})", "TypeError");
+    error("String.prototype.valueOf.call(new Number(1))", "TypeError");
+    error("BigInt.prototype.valueOf()", "TypeError");
+    error("new BigInt(1)", "TypeError");
+    error("'use strict';let s=new String('abc');s[0]='d'", "TypeError");
+}
+TEST_F(JsMvpLmd, PrimitiveConstructorsAsValues) {
+    boolean(R"JS(
+        let text=String, number=Number, boolean=Boolean, integer=BigInt;
+        text() === '' && text(12)==='12' && text(Symbol('x'))==='Symbol(x)' &&
+            number()===0 && number('1.5')===1.5 && number(123n)===123 &&
+            boolean()===false && boolean({})===true && boolean(0)===false &&
+            integer('0xff')===255n && integer(true)===1n && integer(12)===12n &&
+            [1,2].map(text).join(',')==='1,2' && String(Symbol())==='Symbol()' &&
+            new Number().valueOf()===0 && new String().valueOf()==='' &&
+            Object.prototype.valueOf.call(7).valueOf()===7;
+    )JS");
+    error("BigInt(1.5)", "RangeError");
+    error("BigInt('abc')", "SyntaxError");
+    error("BigInt('0x+1')", "SyntaxError");
+    error("BigInt('0x 1')", "SyntaxError");
+    error("BigInt(undefined)", "TypeError");
+    error("String({[Symbol.toPrimitive](){return Symbol('x')}})", "TypeError");
+    error("new String(Symbol('x'))", "TypeError");
+    error("String(Object(Symbol('x')))", "TypeError");
+    boolean("let x={valueOf(){return 17n}};Number(x)===17 && (new Number(x)).valueOf()===17");
+    boolean("BigInt('\\u3000 42 \\ufeff')===42n && BigInt('\\u2029')===0n && BigInt(1e100).toString().length===101");
+    boolean("Error.prototype.toString.name==='toString' && Number.prototype.valueOf.name==='valueOf' && !Object.getOwnPropertyDescriptor(Number.prototype.valueOf,'name').writable");
+}
+TEST_F(JsMvpLmd, PrimitiveWrapperJsonAndGenericApply) {
+    boolean(R"JS(
+        let n=new Number(3),s=new String('x'),b=new Boolean(false), order='';
+        n.valueOf=function(){order+='n';return 9};
+        s.toString=function(){order+='s';return 'y'};
+        b.valueOf=function(){throw 1};
+        let json=JSON.stringify([n,s,b,Object(Symbol('x'))]);
+        function add(a,b){return this.offset+a+b}
+        let list={get length(){order+='l';return 2},get 0(){order+='a';return 3},get 1(){order+='b';return 4}};
+        json==='[9,"y",false,{}]' && order==='ns' &&
+            add.apply({offset:1},list)===8 && order==='nslab' &&
+            Object.prototype.toString.call(BigInt.prototype)==='[object BigInt]' &&
+            Object.prototype.toString.call(Symbol.prototype)==='[object Symbol]';
+    )JS");
+    error("JSON.stringify(Object(1n))", "TypeError");
+    error("(function(){}).apply(null,'abc')", "TypeError");
+}
+TEST_F(JsMvpLmd, Test262HostCompletionOwnership) {
+    MvpLmdHost host = {0, nullptr, nullptr, true};
+    Item result=run("globalThis.__lambda_test262_async_required=true;globalThis.__lambda_test262_async_done=true;({value:7})", &host);
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_MAP);
+    const char* source="globalThis.__lambda_test262_async_required=true;globalThis.__lambda_test262_async_done=false;function setTimeout(){};42";
+    mvp_lmd_destroy(execution);execution=mvp_lmd_execute(source,strlen(source),nullptr,&host);
+    ASSERT_NE(mvp_lmd_diagnostic(execution),nullptr);
+    EXPECT_NE(strstr(mvp_lmd_diagnostic(execution),"async test did not call $DONE"),nullptr);
+}
+TEST_F(JsMvpLmd, BoundFunctionObservableMetadata) {
+    boolean(R"JS(
+        function target(a,b,c){return this.base+a+b+c}
+        let bind=target.bind, normal=target.bind({base:1},2), order='', proto={};
+        let correct=normal.name==='bound target' && normal.length===2 && normal(3,4)===10 &&
+            !Object.getOwnPropertyDescriptor(normal,'length').writable;
+        Object.defineProperty(target,'length',{get(){order+='l';return Infinity},configurable:true});
+        Object.defineProperty(target,'name',{get(){order+='n';return 'renamed'},configurable:true});
+        let proxy=new Proxy(target,{
+            getPrototypeOf(t){order+='p';return proto},
+            getOwnPropertyDescriptor(t,k){if(k==='length')order+='h';return Reflect.getOwnPropertyDescriptor(t,k)}
+        });
+        let bound=bind.call(proxy,null,1);
+        correct && order==='phln' && bound.length===Infinity && bound.name==='bound renamed' &&
+            Object.getPrototypeOf(bound)===proto;
+    )JS");
+}
+TEST_F(JsMvpLmd, FunctionIntrinsicReflection) {
+    boolean(R"JS(
+        function named(a,b=1) { /* retained source */ return a+b; }
+        let p=Function.prototype, descriptor=Object.getOwnPropertyDescriptor(Function,'prototype');
+        let thrower=Object.getOwnPropertyDescriptor(p,'caller');
+        let ok=typeof p==='function' && p()===undefined && p.name==='' && p.length===0 &&
+            p.constructor===Function && Object.getPrototypeOf(named)===p && Object.getPrototypeOf(Function)===p &&
+            Object.getPrototypeOf(p)===Object.prototype && Function.name==='Function' && Function.length===1 &&
+            !descriptor.writable && !descriptor.enumerable && !descriptor.configurable &&
+            p.call.name==='call' && p.call.length===1 && p.apply.name==='apply' && p.apply.length===2 &&
+            p.bind.name==='bind' && p.bind.length===1 && named.name==='named' && named.length===1 &&
+            p.toString.call(named)==='function named(a,b=1) { /* retained source */ return a+b; }' &&
+            p.toString.call(named.bind(null)).indexOf('[native code]')>=0 &&
+            thrower.get===thrower.set && !Object.isExtensible(thrower.get);
+        try{p.caller;}catch(e){ok=ok && e instanceof TypeError;}
+        ok && Math.pow(2,32)===4294967296 && Math.pow(1,Infinity)!==Math.pow(1,Infinity);
+    )JS");
+    error("Function.prototype.toString.call({})", "TypeError");
+    error("new Function.prototype()", "TypeError");
+    boolean(R"JS(
+        class Explicit { constructor(){} method(a){return a;} }
+        class Implicit {}
+        Function.prototype.toString.call(Explicit)==='class Explicit { constructor(){} method(a){return a;} }' &&
+        Function.prototype.toString.call(Implicit)==='class Implicit {}' &&
+        Function.prototype.toString.call(Explicit.prototype.method)==='method(a){return a;}';
+    )JS");
+    boolean(R"JS(
+        let events='', pow=Math.pow;
+        let left={valueOf(){events+='l';return 2.5}}, right={valueOf(){events+='r';return 2}};
+        let ignored={valueOf(){throw 7}};
+        let ok=pow(left,right,ignored)===6.25 && events==='lr';
+        events='';ok && Math.pow(left,right,ignored)===6.25 && events==='lr';
+    )JS");
+}
+TEST_F(JsMvpLmd, ArgumentsMappingAndEscape) {
+    boolean(R"JS(
+        function make(a,b) {
+            let args=arguments;
+            a=2.25; let first=args[0]; args[1]=3.5;
+            return {args:args, first:first, second:b, read(){return a},write(x){a=x}};
+        }
+        let value=make(1.25,2.5,9);value.write(4.75);
+        let a=value.args;
+        let ok=a.length===3 && value.first===2.25 && value.second===3.5 && a[0]===4.75 && a[2]===9 &&
+            value.read()===4.75 && Object.prototype.toString.call(a)==='[object Arguments]' &&
+            !Array.isArray(a) && a.callee===make && Object.keys(a).join(',')==='0,1,2' &&
+            Object.values(a).join(',')==='4.75,3.5,9' && a[Symbol.iterator]===Array.prototype.values &&
+            Object.assign({},a)[0]===4.75 && JSON.stringify(a)==='{"0":4.75,"1":3.5,"2":9}';
+        let sum=0;for(let v of a)sum+=v;
+        a[0]=6.25;ok && sum===17.25 && value.read()===6.25;
+    )JS");
+    boolean("function f(a,a){arguments[0]=7;let x=a;arguments[1]=9;return x===2&&a===9&&arguments[0]===7;}f(1,2)");
+    boolean("function f(a){a=5;return arguments.length===0&&!Object.hasOwn(arguments,'0')}f()");
+    boolean("function f(x){return ()=>arguments}let read=f(7);read()===read()&&read()[0]===7");
+    boolean("function f(arguments){return arguments}f(9)===9");
+    boolean("function f(){var arguments;return arguments.length}f(1,2)===2");
+    boolean("function outer(){var arguments=undefined;return (function(a,b){return arguments.length})()}outer()===0");
+    boolean("function outer(){return ((arguments)=>()=>arguments)(7)()}outer(1)===7");
+    boolean("function outer(){return (()=>{let arguments=9;return ()=>arguments})()()}outer(1)===9");
+    boolean("(function arguments(){return typeof arguments})()==='object'");
+}
+TEST_F(JsMvpLmd, ArgumentsDescriptorsAndUnmapped) {
+    boolean(R"JS(
+        function f(a,b,c){
+            let x=arguments;
+            Object.defineProperty(x,'0',{writable:false});a=9;
+            Object.defineProperty(x,'1',{get(){return 8}});b=10;
+            delete x[2];x[2]=11;c=12;
+            return x[0]===1 && x[1]===8 && x[2]===11 && a===9 && b===10 && c===12;
+        }
+        function frozen(a){Object.freeze(arguments);a=7;return arguments[0]===1;}
+        function strict(a){'use strict';a=8;let x=arguments;
+            try{x.callee;}catch(e){return e instanceof TypeError && x[0]===1 && !Array.isArray(x);}}
+        function defaults(a=2,b=arguments[0]){a=7;return arguments[0]===1 && b===1;}
+        f(1,2,3)&&frozen(1)&&strict(1)&&defaults(1);
+    )JS");
+    boolean("function f(a=()=>arguments){var arguments=7;return a().length===0&&arguments===7}f()");
+    boolean("function f(a=()=>arguments){let arguments=7;return a().length===0&&arguments===7}f()");
+    boolean("function f(a=arguments.length){function arguments(){return 3}return a===0&&arguments()===3}f()");
+    boolean("function f(a=()=>arguments){var arguments;return a()===arguments}f()");
+    boolean("function f(a){let x=arguments,k=Symbol('0');x['00']=7;x['-0']=8;x[k]=9;return a===1&&x[0]===1&&x['00']===7&&x['-0']===8&&x[k]===9}f(1)");
+}
+TEST_F(JsMvpLmd, ArgumentsDescriptorAliasLifetime) {
+    boolean(R"JS(
+        function f(a) {
+            let x=arguments; a=3.25;
+            Object.defineProperty(x,'0',{configurable:false});
+            let rejected=Reflect.defineProperty(x,'0',{get(){return 9}});
+            a=8.25; let ok=!rejected && x[0]===8.25;
+            let child=Object.create(x); Reflect.set(x,'0',6.5,child);
+            ok=ok && a===8.25 && x[0]===8.25 && child[0]===6.5;
+            Object.seal(x); a=9.5;
+            ok=ok && x[0]===9.5 && Object.getOwnPropertyDescriptor(x,'0').value===9.5;
+            Object.freeze(x); a=10.75;
+            return ok && a===10.75 && x[0]===9.5;
+        }
+        f(1);
+    )JS");
+}
 TEST_F(JsMvpLmd, HostClockOutputAndFiles) {
     ASSERT_TRUE(create_dir("temp"));
     FILE* output = file_open_regular_write("temp/mvp_host_output.txt", true);

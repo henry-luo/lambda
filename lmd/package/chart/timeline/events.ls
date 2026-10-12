@@ -15,6 +15,9 @@ import media_playback: .media_playback
 import native_media: .native_media
 import filter_controls: .filter_controls
 import prepared: .prepared
+import motion: .motion
+import vector: .svg
+import event_index: .index
 
 fn wheel_allowed(options, evt) {
     let modifier=c.text(c.option(options,"wheel_modifier","none"));
@@ -34,7 +37,8 @@ pn canvas_point(host, model, spec, current, evt) {
     let bounds=if (canvas!=null) dom.bounding_box(canvas) else null;
     let x=if (evt.clientX!=null) evt.clientX else evt.x;
     let y=if (evt.clientY!=null) evt.clientY else evt.y;
-    let plan=if (bounds==null) null else if (overview!=null) navigator.plan(spec,model.viewport,current) else layout.normalized(spec,model.viewport,current);
+    let plan=if (bounds==null) null else if (overview!=null) navigator.plan(spec,model.viewport,current)
+        else if (model.displayed!=null) model.displayed.plan else layout.normalized(spec,model.viewport,current);
     if (plan is error) plan else if (bounds==null or bounds.width<=0 or bounds.height<=0 or not util.finite_number(x) or not util.finite_number(y)) null
     else {plan:plan,surface:if (overview!=null) "navigator" else "main",point:[(x-bounds.left)*plan.width/bounds.width,(y-bounds.top)*plan.height/bounds.height]}
 }
@@ -46,10 +50,30 @@ pub fn presentation(model, clock) {
     let normalized=cache.fallback;
     let current=if (normalized is error) normalized else reducer.reconcile(normalized,
         if (clock.interaction==null) reducer.initial(normalized) else clock.interaction);
+    let visual={*:editing.preview(normalized,current),view:current.view};
+    let sequence=visual.view=="cards" and visual.spacing=="sequence";
+    let displayed=if (sequence and clock.geometry_cache.key!=prepared.geometry_key(visual,model.viewport,current)) null else clock.motion.displayed;
     if (current is error) current else if (model.legacy_list==true)
-        present.cards({*:editing.preview(normalized,current),live_host:true},current)
-    else present.html({*:editing.preview(normalized,current),view:current.view},model.viewport,
-        {*:current,presentation_error:if (loaded is error) loaded else null})
+        present.cards({*:visual,live_host:true},current,displayed)
+    else present.html(visual,model.viewport,
+        {*:current,presentation_error:if (loaded is error) loaded else null},displayed)
+}
+
+// Sequence cards use their native flow boxes for FLIP; geometry views already have measured boxes.
+pn sequence_geometry(geometry, host, displayed = null) {
+    let root=dom.query_selector(host,"ol");
+    let origin=if (root!=null) dom.bounding_box(root) else null;
+    let previous=sort([for (item in displayed.plan.events) {id:item.id,item:item}],{by:(row)=>row.id});
+    let boxes=sort([for (node in dom.query_selector_all(root,"li[data-timeline-id]"),
+        let id=events.attribute(node,"data-timeline-id"),let box=dom.bounding_box(node),
+        let old=event_index.lookup(previous,id).item where events.closest(node,"[data-timeline-host]")==host)
+        {id:id,bounds:{left:box.left-(if (old.target_bounds!=null) old.bounds.left-old.target_bounds.left else 0),
+            top:box.top-(if (old.target_bounds!=null) old.bounds.top-old.target_bounds.top else 0),width:box.width,height:box.height}}],{by:(row)=>row.id});
+    let plan=geometry.plan;
+    {*:geometry,plan:{*:plan,sequence_origin:origin,events:[for (item in plan.events,
+        let box=event_index.lookup(boxes,item.id).bounds,
+        let bounds=if (box==null) item.bounds else {left:box.left,top:box.top,right:box.left+box.width,bottom:box.top+box.height})
+        {*:item,bounds:bounds,target_bounds:bounds}]}}
 }
 
 pn focus_pending(current, host) {
@@ -76,7 +100,7 @@ pub pn handle(model, clock, evt) {
         if (not c.has(changed,"source")) { return {*:clock,effects:[]} }
         if (clock.token>0) { dom.cancel_frame(evt.target,clock.token) }
         return {*:clock,source:changed.source,interaction:changed.state,token:0,disposition:'pass',
-            prepared:prepared.record(changed.source,changed.state,changed.normalized_spec),
+            prepared:prepared.record(changed.source,changed.state,changed.normalized_spec,clock.prepared),
             native_media_requests:[*c.items(clock.native_media_requests),*native_media.queued(changed.requests)],
             effects:[*changed.notifications,*[for (request in changed.requests) {name:"timeline_request",detail:request}]]}
     }
@@ -103,7 +127,7 @@ pub pn handle(model, clock, evt) {
     let ready=if (completed is error) restored else completed.state;
     let current=if (evt.type=="render") focus_pending(ready,host) else ready;
     let advancing=(tick or evt.type=="render") and current.playback.phase=="playing";
-    let retained={*:c.attrs(model),spec:source(model,clock)};
+    let retained={*:c.attrs(model),spec:source(model,clock),displayed:clock.motion.displayed};
     let reduced=if (advancing) dispatch(retained,current,{*:evt,type:"timeline_action",detail:{type:"tick"}},spec)
         else if (evt.type=="render" or tick) reducer.result(current) else dispatch(retained,current,evt,spec);
     let accepted_spec=c.option(reduced,"normalized_spec",spec);
@@ -122,12 +146,23 @@ pub pn handle(model, clock, evt) {
         next=started.state;
         effects=[*effects,{name:"timeline_request",detail:started.request}]
     }
+    let next_cache=prepared.record(source(model,clock),next,accepted_spec,cache);
+    let visual={*:editing.preview(next_cache.normalized,next),view:next.view};
+    let sequence=visual.view=="cards" and visual.spacing=="sequence";
+    let measured=if (spec.animate.enabled==true) prepared.geometry(visual,model.viewport,next,clock.geometry_cache) else null;
+    let changed=measured.key!=clock.geometry_cache.key;
+    let deferred=sequence and changed and evt.type!="render";
+    let geometry=if (deferred) clock.geometry_cache else if (sequence and changed and host!=null)
+        sequence_geometry(measured,host,if (clock.geometry_cache.key==measured.key) clock.motion.displayed else null) else measured;
+    let target=if (geometry!=null and not (geometry.plan is error)) {plan:geometry.plan,
+        svg:if (sequence) null else vector.render(geometry.plan,next,{unsupported:"omit",cards:next.view=="story"})} else null;
+    let animated=if (deferred) clock.motion else if (target!=null) motion.advance(clock.motion,target,evt.time_stamp,visual) else null;
     let pending=if (tick) 0 else clock.token;
-    let scheduled=next.playback.phase=="playing" or resource.needs_clock(accepted_spec,next) or native_media.needs_clock(owned.bindings);
+    let scheduled=next.playback.phase=="playing" or resource.needs_clock(accepted_spec,next) or native_media.needs_clock(owned.bindings) or animated.running==true;
     if (not scheduled and pending>0) { dom.cancel_frame(evt.target,pending) }
     let token=if (not scheduled) 0 else if (pending>0) pending else dom.request_frame(evt.target,"timeline_frame");
     {*:clock,interaction:next,token:token,effects:effects,bookmark_fragment:fragment,disposition:reduced.disposition,
-        prepared:prepared.record(source(model,clock),next,accepted_spec),
+        prepared:next_cache,geometry_cache:geometry,motion:animated,
         native_players:owned.bindings,native_media_requests:if (model.options.media==false) [] else
             [*(if (evt.type=="render") [] else c.items(clock.native_media_requests)),
                 *native_media.queued([for (effect in effects where effect.name=="timeline_request") effect.detail])]}

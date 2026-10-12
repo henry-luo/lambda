@@ -1,10 +1,10 @@
 # JS MVP Lmd — JavaScript MIR on the untyped Lambda substrate
 
-**Date:** 2026-10-10
+**Date:** 2026-10-12
 
 **Status:** scalar/dense-array/function MVP, integer tuning, and the map/plain-object
 phase implemented. Ordinary arrays and core strings are implemented (§18);
-the latest tuning measurements and validation status are recorded in §30.1.
+the latest tuning measurements and validation status are recorded in §31.
 The numeric-library phase is implemented in source (§15); its full feature
 edge matrix remains pending. §§16–17 record the subsequent tuning.
 Basic classes and single inheritance are implemented in source (§21);
@@ -14,6 +14,8 @@ Class property access and constructor allocation are tuned in §23.
 Benchmark/library expansion is implemented in §§29–30, with acceptance limits
 recorded there. Prototype, accessor, proxy and sparse-array expansion is implemented
 in source in §31; performance acceptance remains pending.
+Test262 parity with full LambdaJS is planned in §32, including interpreter-only
+dynamic source; it is not a current conformance claim.
 
 **Performance history:** [MVP_Result3–9](../../test/benchmark/js_mvp_lmd/README.md)
 retains one representative comparison per major tuning phase.
@@ -36,8 +38,8 @@ The four governing goals remain fixed (USER, 2026-10-07):
    difference, consider an explicit option on the existing function while
    preserving its default Lambda behavior. Count internal utilities, adapters,
    and shared additions too; notify the user before adding any new helper.
-3. **Implement exactly the admitted scope.** Section 3 describes the shipped
-   subset; §10 records the object/Map extension. Excluded capabilities receive
+3. **Implement exactly the admitted scope.** Section 3 records the initial
+   subset; §§10–31 record subsequent extensions. Excluded capabilities receive
    diagnostics, without reserved machinery for later features.
 4. **Keep the MVP as efficient as possible.** Preserve native computations and
    direct storage/calls where proven; measure release performance with fixed
@@ -50,10 +52,14 @@ justifies its MIR, helper-code, allocation, and execution cost.
 
 Keep the existing JS parser, AST, binding, validation, and applicable analysis.
 Use new MVP MIR lowering over Lambda `Item`, scalar lanes, containers, roots,
-and the shared emitter. **Call no existing JS runtime helper, directly or
-transitively**, including during collection, error handling, and teardown.
-Do not fall back into full LambdaJS or the retired private-value MVP.
-Present each new helper and its dependency closure for review before coding.
+and the shared emitter. MVP-authored MIR and its semantic helpers retain the
+audited Lambda/lib dependency boundary. **The approved §32 exception is dynamic
+source:** `eval` and the Function-family constructors use the existing JS AST
+interpreter, following **D8.1.3v24** (dynamic-source clauses v20–v21). Audit that
+entry's transitive dependencies, value compatibility, binding ownership and
+return path. Ordinary MVP code does not fall back into full LambdaJS or the
+retired private-value MVP. Disclose each new helper and its dependency closure
+before coding; reuse or parameterize existing functions first.
 
 The [formal semantics](../../doc/Lambda_Formal_Semantics.md) and
 [formal design](../../doc/Lambda_Formal_Design.md) govern this design:
@@ -95,8 +101,10 @@ null-on-missing conventions do not implement the corresponding JS operations.
 
 ## 3. Implemented admission boundary
 
-This table summarizes the implemented subset. Section 10 defines the detailed
-object/Map boundary and its scope decisions.
+This table records the initial admission boundary. Later implemented extensions
+in §§10–31 supersede its exclusions; §32 is planned work. In particular,
+BigInt, Symbols, generators, exceptions and property expansion already have
+implemented subsets. Section 10 defines the initial object/Map boundary.
 
 | Area | Implemented | Excluded from the implemented phase |
 |---|---|---|
@@ -208,8 +216,10 @@ performs the pending operation once and rejoins the same body.
 
 Use compile-predicted layout guards and shared physical operations on misses.
 No mutable inline caches, feedback vectors, speculative body/loop clones,
-deoptimizer, interpreter tier, or generic opcode dispatcher is introduced
-(**D8.4.1v2**). Keep analysis only where admission or emission consumes it.
+deoptimizer, ordinary-unit interpreter fallback, or generic opcode dispatcher
+is introduced (**D8.4.1v2**). Dynamic source uses the explicit interpreter
+boundary in §32 (**D8.1.3v24**). Keep analysis only where admission or emission
+consumes it.
 
 ## 6. Ownership and execution isolation
 
@@ -1472,3 +1482,78 @@ in the plan. Results3–9 are unchanged.
 
 Full dependencies, reuse/helper inventory, acceptance fixtures and commands:
 [implementation plan](../impl/JS_MVP_Lmd_Property_Expansion.md).
+
+## 32. Test262 parity with full LambdaJS
+
+**Implementation in progress (2026-10-12); P0 captured, P1/P2 partial.** Match the same
+**40,261 passing baseline tests** as full LJS, with the pinned corpus, harness,
+variants and exclusions. Establish an MVP-specific result first; the shared
+LambdaJS gate is not evidence of MVP conformance. Retain existing feature
+implementations and complete their ECMAScript behavior (**S1.11**).
+
+| Work | Scope |
+|---|---|
+| Harness and core identities | MVP Test262 route, genuine error constructors/prototypes, primitive wrappers, intrinsic metadata and applicable host hooks |
+| Language and classes | Arguments objects, complete patterns/rest/defaults, tagged templates, with/object environments, class expressions/computed/private members/static blocks and general construction |
+| Synchronous library | Array/String/Number/BigInt/Math/Date/JSON/Map/Set/Symbol completion, custom species, RegExp protocols and d/v support |
+| Storage and lifetime | Full typed arrays, buffers/views, detachment/resizing/transfer, shared memory/Atomics, weak collections and finalization |
+| Dynamic source | Direct/indirect eval and Function-family constructors execute in the existing AST interpreter, including later calls to dynamically created functions; no MIR promotion of dynamic bodies |
+| Async and modules | Promises/jobs, async functions/generators/iteration, ES-module linking/live bindings/cycles/namespaces, dynamic import, import.meta and top-level await |
+
+**Reuse untyped Lambda first** (**D1.3v3**): Item, nominal Maps and shape
+transitions, Array/ArrayNum storage, canonical keys, scalar homes, closure and
+environment storage, precise roots, activations, event-loop ownership and the
+module registry. Prefer an option on an existing function for small semantic
+differences; disclose every new helper before coding. JS retains its own
+observable semantics, mutable captures and prototype behavior; Lambda's
+default behavior and nominal ancestry remain intact (**D6.2.3v2**, **D2.6.10**).
+
+The interpreter exception follows **D8.1.3v24**: direct eval observes live
+caller bindings; indirect eval and Function constructors use the appropriate
+global environment. MIR/interpreter calls preserve identity, receiver,
+completions and rooted ownership. Reuse the existing interpreter through an
+audited compatible entry/profile rather than adding another interpreter.
+
+Preserve the no-is_normal design. Dynamic code and reentrant callbacks must
+invalidate affected closed-unit assumptions; functions with sufficient retained
+proofs keep direct storage and calls (**D8.2.1–D8.2.6**, **D8.4.1v2**). Require
+MVP-specific conformance, forced-GC and shared-engine gates, plus paired release,
+pinned-MIR self-timing evidence. Carry forward §31's unresolved Raytrace3D gap;
+the four jq timings remain historical-only. Existing LJS exclusions and general
+Node/DOM expansion stay outside this parity target.
+
+Implemented increments now cover intrinsic errors/wrappers, Function reflection
+and retained-source `toString`, mapped/unmapped arguments, and general
+array/object destructuring. The latest P2 increment adds nested/rest/default
+patterns, member assignment targets and bindings in parameters, catch and loop
+heads. Iterator closing, evaluation order, primitive iterator receivers, Symbol
+exclusions and default function names follow JS semantics over existing Lambda
+storage (**S1.11**, **D5.2–D5.3**). Simple closed array swaps and intrinsic
+Map-pair loops retain their fast paths (**D8.4.1v2**).
+
+Latest correctness results:
+
+- **181/181 MVP groups**, normally and under forced GC/poisoning.
+- Selected canonical patterns: **603 → 1,913 of 1,949**, with **1,310 gains and
+  zero lost passes**. The 36 remaining cases require class expressions or static
+  blocks. This is a selected population, not the full MVP parity score.
+- Shared gates: **6,793/6,793 Lambda** and **40,261/40,261 full LJS**. The plan
+  preserves earlier failed checkpoints and their subsequent validation.
+
+Global/with environments, tagged templates and the interpreter bridge remain
+open P2/P3 work; class/async patterns and typed-array reflection retain their
+later phase dependencies. Eval and Function bodies still await the shared
+interpreter bridge (**D8.1.3v24**). No normality flag or whole-unit fallback is
+added. Full parity remains open.
+
+The final pinned MIR release passes **84/84 non-jq output contracts** and
+completes a 30-workload timing screen. The severe Fasta allocation regression is fixed;
+its 31-round result is **0.909 vs 0.894 ms (+1.68%)**. **Performance acceptance
+remains open:** competing host workloads leave the smaller Fasta and noisy
+screen differences unresolved. Detailed timings and provenance are in plan §11.
+Earlier controls still have the **2.1% Navier–Stokes**, **1.17% three-way merge**
+and §31 Raytrace3D gaps; this entry comparison cannot close them. The four jq
+workloads retain historical evidence only. Results3–9 are unchanged.
+
+Dependencies, interpreter boundary, reuse inventory, helper disclosure and
+acceptance gates: [implementation plan](../impl/JS_MVP_Lmd_Test262_Parity.md).

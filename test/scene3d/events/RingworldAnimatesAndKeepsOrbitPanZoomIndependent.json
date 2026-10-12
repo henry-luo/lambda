@@ -1,0 +1,219 @@
+{
+  "name": "RingworldAnimatesAndKeepsOrbitPanZoomIndependent",
+  "viewport": {
+    "width": 1120,
+    "height": 900
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#ringworld"
+      },
+      "attribute": "data-ready",
+      "equals": "true"
+    },
+    {
+      "type": "collect_gc"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "document",
+      "target": "#scene",
+      "fields": {
+        "shared_runtime": 1
+      }
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#ringworld",
+      "width": 624,
+      "height": 342,
+      "name": "first"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "animation",
+      "target": "#ringworld",
+      "name": "action",
+      "clip": "orbits"
+    },
+    {
+      "type": "animation_tick",
+      "seconds": 1
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#ringworld",
+      "fields": {
+        "time": 1
+      },
+      "clip": "orbits"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#ringworld",
+      "width": 624,
+      "height": 342,
+      "reference": "first",
+      "count": {
+        "min": 1001
+      }
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('play').click()"
+    },
+    {
+      "type": "animation_tick",
+      "seconds": 1
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#ringworld",
+      "fields": {
+        "time": 1
+      },
+      "clip": "orbits"
+    },
+    {
+      "type": "script",
+      "js": "ringworld.autoplay(true);globalThis.cameraBefore=ringworld.camera.position.clone()"
+    },
+    {
+      "type": "mouse_down",
+      "x": 500,
+      "y": 400
+    },
+    {
+      "type": "mouse_move",
+      "x": 560,
+      "y": 430
+    },
+    {
+      "type": "mouse_up",
+      "x": 560,
+      "y": 430
+    },
+    {
+      "type": "script",
+      "js": "if(ringworld.camera.position.distanceTo(cameraBefore)<.1)throw new Error('native scene drag did not orbit')"
+    },
+    {
+      "type": "script",
+      "js": "if(document.getElementById('auto-play').getAttribute('aria-pressed')!=='false')throw new Error('drag did not stop auto play')"
+    },
+    {
+      "type": "script",
+      "js": "if(document.activeElement!==document.getElementById('ringworld'))throw new Error('scene did not receive keyboard focus')"
+    },
+    {
+      "type": "script",
+      "js": "ringworld.autoplay(true);globalThis.keyTargetBefore=ringworld.controls.target.clone();globalThis.tiltBefore=ringworld.controls.getPolarAngle()"
+    },
+    {
+      "type": "key_press",
+      "key": "Right",
+      "mods_str": ""
+    },
+    {
+      "type": "key_press",
+      "key": "Up",
+      "mods_str": "shift"
+    },
+    {
+      "type": "script",
+      "js": "\n        if(ringworld.controls.target.distanceTo(keyTargetBefore)<.001)throw new Error('arrow key did not pan');\n        if(Math.abs(ringworld.controls.getPolarAngle()-tiltBefore)<.001)throw new Error('shift-arrow did not tilt');\n        if(document.getElementById('auto-play').getAttribute('aria-pressed')!=='false')throw new Error('camera key did not stop auto play');\n    "
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('pan-mode').click();globalThis.targetBefore=ringworld.controls.target.clone()"
+    },
+    {
+      "type": "mouse_down",
+      "x": 500,
+      "y": 400
+    },
+    {
+      "type": "mouse_move",
+      "x": 560,
+      "y": 430
+    },
+    {
+      "type": "mouse_up",
+      "x": 560,
+      "y": 430
+    },
+    {
+      "type": "script",
+      "js": "if(ringworld.controls.target.distanceTo(targetBefore)<.1)throw new Error('pan mode did not move the target')"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#ringworld",
+      "width": 624,
+      "height": 342
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#ringworld",
+      "fields": {
+        "animation_id": {
+          "baseline": "action",
+          "eq": 0
+        },
+        "time": 1
+      },
+      "clip": "orbits"
+    },
+    {
+      "type": "script",
+      "js": "ringworld.autoplay(true);globalThis.zoomBefore=ringworld.camera.position.distanceTo(ringworld.controls.target)"
+    },
+    {
+      "type": "scroll",
+      "x": 500,
+      "y": 400,
+      "dy": 1
+    },
+    {
+      "type": "script",
+      "js": "\n        if(Math.abs(ringworld.camera.position.distanceTo(ringworld.controls.target)-zoomBefore)<.01)throw new Error('wheel did not zoom');\n        if(document.getElementById('auto-play').getAttribute('aria-pressed')!=='false')throw new Error('wheel did not stop auto play');\n        document.getElementById('tilt-up').click();document.getElementById('orbit-right').click();\n        document.getElementById('zoom-in').click();document.getElementById('zoom-out').click();\n        document.getElementById('top').click();\n        if(ringworld.controls.getPolarAngle()>.17)throw new Error('top preset');\n        document.getElementById('side').click();\n        if(Math.abs(ringworld.controls.getPolarAngle()-Math.PI/2)>1e-6)throw new Error('side preset');\n        for(let i=0;i<50;i++)ringworld.zoom(.5);\n        if(Math.abs(ringworld.controls.getDistance()-7)>1e-6)throw new Error('minimum zoom');\n        for(let i=0;i<50;i++)ringworld.zoom(2);\n        if(Math.abs(ringworld.controls.getDistance()-38)>1e-6)throw new Error('maximum zoom');\n        ringworld.orbit(0,-100);\n        if(ringworld.controls.getPolarAngle()<.0799)throw new Error('tilt limit');\n        document.getElementById('reset').click();\n        if(ringworld.camera.position.distanceTo({x:7.5,y:4.8,z:11})>1e-6||ringworld.controls.target.length()>1e-6)\n            throw new Error('reset camera and pan');\n        document.getElementById('rewind').click();\n    "
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#ringworld",
+      "fields": {
+        "time": 0
+      },
+      "clip": "orbits"
+    },
+    {
+      "type": "key_press",
+      "key": "Space",
+      "mods_str": ""
+    },
+    {
+      "type": "animation_tick",
+      "seconds": 0.25
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#ringworld",
+      "fields": {
+        "time": 0.25
+      },
+      "clip": "orbits"
+    }
+  ]
+}

@@ -29,6 +29,39 @@
     "3">>
 false
 true
+<list
+  <item
+    "ab-c:1">
+  ","
+  <item
+    "2">>
+<item
+  "x#1">
+<list
+  <item
+    "a-b=c">
+  ","
+  <item
+    "4">>
+<XPath
+  <Expr
+    <ParenthesizedExpr
+      <ExtensionExpr body: <EnclosedExpr
+          <Expr left: <Expr
+              <IntegerLiteral
+                "1">>, op: '+', right: <Expr
+              <IntegerLiteral
+                "2">>>>,
+        <Pragma name: "ns:p">>>>>
+<XPath
+  <Expr
+    <ParenthesizedExpr
+      <Expr
+        <IntegerLiteral
+          "1">>
+      <Expr
+        <DecimalLiteral
+          "2.5">>>>>
 <list start: 0, end: 4,
   <item start: 0, end: 1,
     "a">

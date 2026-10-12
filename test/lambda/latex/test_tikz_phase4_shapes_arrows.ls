@@ -1,4 +1,4 @@
-// Phase IV §9.6: arrows.meta tip specifications and shapes.geometric nodes.
+// Phase IV (Lambda_Pkg_Tikz §12): arrows.meta tip specifications and shapes.geometric nodes.
 // Tip defaults follow PGF 3.1.10 (pgflibraryarrows.meta, pgfcorearrows); anchor
 // geometry is checked against TeX in test_tikz_phase4_positioning.
 import tikz: lambda.doc.tikz.tikz

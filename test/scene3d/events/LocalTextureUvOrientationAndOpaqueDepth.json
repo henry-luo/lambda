@@ -1,0 +1,67 @@
+{
+  "name": "LocalTextureUvOrientationAndOpaqueDepth",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          51,
+          51,
+          255,
+          0,
+          0
+        ],
+        [
+          76,
+          51,
+          0,
+          255,
+          0
+        ],
+        [
+          51,
+          76,
+          0,
+          0,
+          255
+        ],
+        [
+          76,
+          76,
+          255,
+          255,
+          255
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "fields": {
+        "textures": 1
+      }
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"texture\").setAttribute(\"src\",\"missing.png\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#scene",
+      "success": false,
+      "diagnostic": "texture"
+    }
+  ]
+}

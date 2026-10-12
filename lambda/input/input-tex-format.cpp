@@ -1,4 +1,4 @@
-// Engine format images: TeX's \dump and undump (Lambda_Pkg_Latex3 §9.4, Phase IV M3).
+// Engine format images: TeX's \dump and undump (Lambda_Design_TeX_Engine §4, Phase IV M3).
 //
 // A format is the engine state after a preload (the Lambda kernel plus expl3), taken
 // where no group, conditional or input is open. Reading expl3-code.tex and the Unicode

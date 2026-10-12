@@ -52,6 +52,8 @@
     "lambda/module/node_core/node_trace_events.cpp",
     "lambda/module/node_core/node_url.cpp",
     "lambda/runtime/parser/source_parser.c",
+    "lambda/runtime/parser/lambda_lexer.c",
+    "lambda/runtime/parser/lambda_parser.c",
     "lambda/js/parser/js_lexer.c",
     "lambda/js/parser/js_parser.c",
     "lambda/js/js_direct_scope.cpp",
@@ -101,22 +103,6 @@
       "version": "0.25.0",
       "include": "lambda/tree-sitter/lib/include",
       "lib": "lambda/tree-sitter/libtree-sitter.a",
-      "link": "static"
-    },
-    {
-      "name": "tree-sitter-latex",
-      "version": "0.6.0",
-      "description": "Tree-sitter LaTeX parser library",
-      "include": "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
-      "lib": "lambda/tree-sitter-latex/libtree-sitter-latex.a",
-      "link": "static"
-    },
-    {
-      "name": "tree-sitter-latex-math",
-      "version": "0.1.0",
-      "description": "Tree-sitter LaTeX math mode parser library",
-      "include": "lambda/tree-sitter-latex-math/bindings/c",
-      "lib": "lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a",
       "link": "static"
     },
     {
@@ -705,9 +691,10 @@
         "lambda/module/node_core/node_trace_events.cpp",
         "lambda/module/node_core/node_url.cpp",
         "lambda/runtime/parser/source_parser.c",
+        "lambda/runtime/parser/lambda_lexer.c",
+        "lambda/runtime/parser/lambda_parser.c",
         "lambda/js/parser/js_lexer.c",
         "lambda/js/parser/js_parser.c",
-        "lambda/runtime/parse.c",
         "lambda/runtime/mir.c",
         "lambda/runtime/mir_dump.cpp",
         "lambda/runtime/path_runtime.c",
@@ -913,7 +900,7 @@
     },
     {
       "name": "lambda-cst",
-      "description": "Tree-sitter Lambda/JS/TS/LaTeX/Math CST differential verifier",
+      "description": "Tree-sitter Lambda/JS/TS CST differential verifier",
       "lang": "c++17",
       "source_files": [
         "test/lambda_parser_poc_diff.c",
@@ -929,8 +916,6 @@
         "tree-sitter-lambda",
         "tree-sitter-javascript",
         "tree-sitter-typescript",
-        "tree-sitter-latex",
-        "tree-sitter-latex-math",
         "utf8proc"
       ],
       "target_name": "lambda-cst",
@@ -955,7 +940,8 @@
       ],
       "source_files": [
         "lambda/runtime/parser/source_parser.c",
-        "lambda/runtime/parse.c",
+        "lambda/runtime/parser/lambda_lexer.c",
+        "lambda/runtime/parser/lambda_parser.c",
         "lambda/runtime/build_ast.cpp",
         "lambda/runtime/parse_type_pattern.cpp",
         "lambda/runtime/grammar/grammar_load.cpp",
@@ -1281,6 +1267,8 @@
       "source_files": [
         "lib/sqlite/sqlite3.c",
         "lambda/runtime/parser/source_parser.c",
+        "lambda/runtime/parser/lambda_lexer.c",
+        "lambda/runtime/parser/lambda_parser.c",
         "lambda/js/js_well_known_names.c"
       ],
       "exclude_source_files": [
@@ -2280,9 +2268,10 @@
         "lambda/runtime/module_registry.cpp",
         "lambda/runtime/no_js_stubs.cpp",
         "lambda/runtime/pack.cpp",
-        "lambda/runtime/parse.c",
         "lambda/runtime/parse_type_pattern.cpp",
         "lambda/runtime/parser/source_parser.c",
+        "lambda/runtime/parser/lambda_lexer.c",
+        "lambda/runtime/parser/lambda_parser.c",
         "lambda/runtime/radiant_event_hook.cpp",
         "lambda/runtime/re2_wrapper.cpp",
         "lambda/runtime/recovery_frame.c",
@@ -3440,8 +3429,9 @@
             "icon": "\ud83e\uddfe"
           },
           {
-            "source": "test/test_scene3d_gtest.cpp",
-            "name": "Native Scene3D Tests",
+            "source": "test/test_scene3d_unit_gtest.cpp",
+            "name": "Scene3D Native Unit Tests",
+            "case_workers": 2,
             "dependencies": [
               "lambda-rt",
               "node-core",
@@ -3472,9 +3462,8 @@
                 "WebKit"
               ]
             },
-            "binary": "test_scene3d_gtest.exe",
-            "icon": "\ud83c\udfa8",
-            "parallel": false
+            "binary": "test_scene3d_unit_gtest.exe",
+            "icon": "\ud83c\udfa8"
           },
           {
             "source": "test/test_map_gtest.cpp",
@@ -4025,6 +4014,8 @@
           {
             "source": "test/test_ui_automation_gtest.cpp",
             "name": "UI Automation Tests",
+            "worker_slots": 7,
+            "worker_slots_env": "LAMBDA_UI_TEST_JOBS",
             "dependencies": [
               "lambda-data"
             ],
@@ -4043,6 +4034,8 @@
           {
             "source": "test/test_ui_automation_gtest.cpp",
             "name": "Radiant View UI Fixtures",
+            "worker_slots": 2,
+            "worker_slots_env": "LAMBDA_UI_TEST_JOBS",
             "runner_only": true,
             "runner_name": "test_radiant_view_ui_gtest",
             "runner_args": [
@@ -4054,12 +4047,13 @@
               "gtest",
               "gtest_main"
             ],
-            "parallel": false,
             "icon": "\ud83d\uddb1\ufe0f"
           },
           {
             "source": "test/test_ui_automation_gtest.cpp",
             "name": "DOM UI Integration Tests",
+            "worker_slots": 2,
+            "worker_slots_env": "LAMBDA_UI_TEST_JOBS",
             "runner_only": true,
             "runner_name": "test_dom_ui_gtest",
             "runner_args": [
@@ -4071,12 +4065,13 @@
               "gtest",
               "gtest_main"
             ],
-            "parallel": false,
             "icon": "\ud83d\uddb1\ufe0f"
           },
           {
             "source": "test/test_page_load_gtest.cpp",
             "name": "Page Load Tests",
+            "worker_slots": 2,
+            "worker_args": ["--jobs"],
             "dependencies": [
               "lambda-lib"
             ],
@@ -4091,7 +4086,10 @@
           {
             "source": "test/test_radiant_view_gtest.cpp",
             "name": "Radiant View Tests",
-            "case_workers": 4,
+            "additional_sources": [
+              "test/test_radiant_view_scene3d.cpp"
+            ],
+            "case_workers": 3,
             "case_workers_env": "LAMBDA_RADIANT_VIEW_TEST_JOBS",
             "case_worker_args": [
               "--radiant-case-worker"
@@ -4113,6 +4111,8 @@
           {
             "source": "test/test_layout_fuzzy_gtest.cpp",
             "name": "Layout Fuzzy Tests",
+            "worker_slots": 2,
+            "worker_args": ["--jobs"],
             "dependencies": [
               "lambda-lib"
             ],

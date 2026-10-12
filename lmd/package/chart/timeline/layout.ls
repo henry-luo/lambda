@@ -16,14 +16,17 @@ import axis: .axis
 import search: .search
 import series: .series
 import card: .card
+import index: .index
 
 pub fn plain(value) => c.plain(value)
 
 pub fn extent(spec) {
+    if (spec._timeline!=null and spec.events==spec._timeline.index.events) spec._timeline.domain else {
     let points = [for (item in [*spec.events,*spec.eras]) for (value in [item.start.value,item.end.value] where value != null) value];
     if (spec.scale.domain is array) {from:dates.normalize(spec.scale.domain[0],spec.scale).value,to:dates.normalize(spec.scale.domain[1],spec.scale).value}
     else if (len(points) == 0) {from:0,to:1}
     else {from:min(points),to:if (min(points)==max(points)) max(points)+(if (spec.scale.kind=="calendar") 86400000 else 1) else max(points)}
+    }
 }
 fn date_option(value, scale) {
     let parsed=if (value!=null) dates.normalize(value,scale) else null;
@@ -64,15 +67,22 @@ fn ancestors_visible(group, groups, collapsed, seen = []) {
         if (parent==null or contains(seen,group.parent)) false else ancestors_visible(parent,groups,collapsed,[*seen,group.id])
     }
 }
+pub fn visibility_key(spec, snapshot = null) => {
+    collapsed:c.option(c.attrs(snapshot),"collapsed_groups",[for (group in spec.groups where group.collapsed==true) group.id]),
+    filters:search.filters(spec,snapshot),query:c.text(c.option(c.attrs(snapshot),"query",c.option(spec.search,"query","")))}
+
 pub fn visible(spec, snapshot = null) {
+    let cached=spec._timeline;
+    if (cached!=null and spec.events==cached.index.events and visibility_key(spec,snapshot)==cached.key) cached.visible else {
     let collapsed=c.option(c.attrs(snapshot),"collapsed_groups",[for (group in spec.groups where group.collapsed==true) group.id]);
     let groups=[for (group in spec.groups where ancestors_visible(group,spec.groups,collapsed)) group];
+    let group_index=sort(groups,{by:(group)=>group.id});
     let filters=search.filters(spec,snapshot);
     let query=c.text(c.option(c.attrs(snapshot),"query",c.option(spec.search,"query","")));
     let matches=[for (item in spec.events,
-        let group=if (item.group!=null) (groups |: ~.id==item.group)[0] else null,
+        let group=if (item.group!=null) index.lookup(group_index,item.group) else null,
         let subgroup=if (item.subgroup!=null) (c.items(group.subgroups) |: ~.id==item.subgroup)[0] else null,
-        let in_group=item.group==null or contains(groups |> ~.id,item.group) and not contains(collapsed,item.group) and subgroup.visible!=false,
+        let in_group=item.group==null or group!=null and not contains(collapsed,item.group) and subgroup.visible!=false,
         let accepted=search.accepts(item,filters),
         let eligible=item.visible!=false and in_group and accepted,
         let matched=if (eligible) search.matches(item,query,spec.search,{chart_id:spec.id,locale:spec.locale}) else false
@@ -80,6 +90,7 @@ pub fn visible(spec, snapshot = null) {
         if (matched is error) matched else {*:item,matched:matched}];
     let failure=util.first_error([filters,*matches]);
     if (failure is error) failure else {events:matches,groups:groups,matches:[for (item in matches where item.matched) item.id],query:query}
+    }
 }
 
 
@@ -127,16 +138,13 @@ pub fn normalized(spec, viewport, snapshot = null, resources = {}) {
     let path=coordinate.configure({*:spec.coordinate,reverse:(spec.direction=="rtl") != (spec.coordinate.reverse==true)},box,spec.orientation);
     let temporal=if (domain is error) domain else time_map.configure(spec.scale,domain);
     let shown=visible(spec,snapshot);
-    let candidates=if (spec.spacing=="time" and not (domain is error)) shown.events |: in_window(~,domain) else shown.events;
+    let indexed=spec._timeline!=null and spec.events==spec._timeline.index.events and visibility_key(spec,snapshot)==spec._timeline.key;
+    let queried=if (spec.spacing=="time" and not (domain is error) and indexed) index.query(spec._timeline.visible_index,domain) else null;
+    let candidates=if (queried!=null) queried.events else if (spec.spacing=="time" and not (domain is error)) shown.events |: in_window(~,domain) else shown.events;
     let grouped=lanes.configure(spec,{*:shown,events:candidates},snapshot);
-    let labels=[for (item in candidates) plain(item.title)];
-    let metrics=text.measure(labels,font);
-    let widths=[for (index,item in candidates) max(c.option(spec.cards,"min_width",1),
-        min(c.option(spec.cards,"max_width",max(1,box.width)),c.option(spec.cards,"width",max(100,min(240,metrics[index].width+32)))))];
-    let card_metrics=if (metrics is error) metrics else card.measure(candidates,spec,widths,vp,snapshot);
     let axes=if (spec.spacing=="time" and not (temporal is error) and not (path is error)) axis.prepare(spec,domain,temporal,path,font,box) else [];
     let annotations=annotation.resolve(spec.annotations,snapshot,spec.scale) |: ~!=null;
-    let failure=util.first_error([vp,path,domain,gutter,temporal,shown,metrics,card_metrics,axes,*annotations]);
+    let failure=util.first_error([vp,path,domain,gutter,temporal,shown,axes,*annotations]);
     if (failure is error) failure else {
         let geometry=[for (index,item in candidates,
             let start=if (item.start!=null) item.start.value else domain.from,
@@ -148,21 +156,28 @@ pub fn normalized(spec, viewport, snapshot = null, resources = {}) {
             let projected=coordinate.project(path,fraction,offset),
             let target=coordinate.project(path,if (spec.spacing=="sequence") fraction else time_map.fraction(temporal,end),offset),
             let sign=if (item.placement=="start" or item.placement=="auto" and index%2==0) -1.0 else 1.0,
-            let normal=[for (component in projected.normal) component*sign],
-            let card_width=card_metrics[index].width,
-            let card_height=card_metrics[index].height,
-            let center=[projected.point[0]+normal[0]*(card_width/2.0+24),projected.point[1]+normal[1]*(card_height/2.0+24)],
-            let bounds=if (resources.metrics[item.id]!=null) resources.metrics[item.id] else fit_box(box_at(center,card_width,card_height),box))
+            let normal=[for (component in projected.normal) component*sign])
             {id:item.id,event:item,layout_index:index,point:projected.point,end:target.point,fraction:fraction,normal:normal,tangent:projected.tangent,
-                angle:projected.angle,bounds:bounds,card:[(bounds.left+bounds.right)/2.0,(bounds.top+bounds.bottom)/2.0],
-                lane:lane.index,offset:offset,stack:lane.stack,metric:metrics[index],hidden:spec.spacing=="time" and mapped.hidden}];
+                angle:projected.angle,lane:lane.index,offset:offset,stack:lane.stack,hidden:spec.spacing=="time" and mapped.hidden}];
         let clustered=cluster.layout(geometry,path,{*:spec.cluster,locale:spec.locale,messages:spec.messages},snapshot);
-        let stacked=if (spec.cards.stack==false) clustered.events else stack(sort(clustered.events,
+        let labels=[for (item in clustered.events) plain(item.event.title)];
+        let metrics=text.measure(labels,font);
+        let widths=[for (position,item in clustered.events) max(c.option(spec.cards,"min_width",1),
+            min(c.option(spec.cards,"max_width",max(1,box.width)),c.option(spec.cards,"width",max(100,min(240,metrics[position].width+32)))))];
+        let card_metrics=if (metrics is error) metrics else card.measure(clustered.events |> ~.event,spec,widths,vp,snapshot);
+        let measured=[for (position,item in clustered.events,
+            let size=card_metrics[position],
+            let center=[item.point[0]+item.normal[0]*(size.width/2.0+24),item.point[1]+item.normal[1]*(size.height/2.0+24)],
+            let bounds=if (resources.metrics[item.id]!=null) resources.metrics[item.id] else fit_box(box_at(center,size.width,size.height),box))
+            {*:item,bounds:bounds,card:[(bounds.left+bounds.right)/2.0,(bounds.top+bounds.bottom)/2.0],metric:metrics[position]}];
+        let stacked=if (metrics is error) metrics else if (card_metrics is error) card_metrics else if (spec.cards.stack==false) measured else stack(sort(measured,
             {by:(item)=>c.option(item.event,"priority",0),dir:"desc"}),spec.gap);
         let placed=if (stacked is error) stacked else sort(stacked,{by:(item)=>item.layout_index});
         let base={spec:spec,width:width,height:height,box:box,path:path,time_map:temporal,window:domain,domain:extent(spec),
             events:placed,visible_events:candidates,total_events:len(spec.events),offscreen_count:len(shown.events)-len(candidates),
             clusters:clustered.clusters,annotations:annotations,groups:grouped.groups,lanes:grouped.rows,matches:shown.matches,font:font,
+            work:{indexed:indexed,examined:if (queried!=null) queried.examined else len(shown.events),
+                measured:len(measured),candidates:len(candidates)},
             axes:axes,ticks:[for (model in axes) for (tick in model.ticks) tick]};
         let overlays=series.prepare_all(spec,base);
         let value_axes=if (overlays is error) overlays else series.axes(spec,overlays,base);

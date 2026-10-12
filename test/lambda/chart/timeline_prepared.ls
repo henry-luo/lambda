@@ -19,7 +19,7 @@ let invalid=prepared.source(remote,{resources:{source:{*:entry,result:42}}},load
 let empty=prepared.source(remote,{resources:{source:{*:entry,result:[]}}},loaded);
 [
  ["initial preparation normalizes ordering",(first.normalized.events |> ~.id)==["b","a"]],
- ["selection and query do not change source inputs",prepared.source(raw,{selected_ids:["a"],query:"First"},first)==first],
+ ["selection and query retain source normalization",prepared.source(raw,{selected_ids:["a"],query:"First"},first).normalizations==first.normalizations],
  ["media results do not change source inputs",prepared.source(raw,{resources:{image:{status:"ready",result:"pixels"}}},first)==first],
  ["changed dates invalidate preparation",(updated.normalized.events |> ~.id)==["a","b"]],
  ["changed callback captures invalidate preparation",callback.normalized.events[1].title({}, {})=="Changed"],

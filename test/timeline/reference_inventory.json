@@ -3292,14 +3292,6 @@
             "test/ui/timeline/cards.json"
           ],
           "remaining": "Responsive constraint handling and scrolling/virtualization remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
         }
       }
     },
@@ -3324,14 +3316,6 @@
             "test/ui/timeline/gestures.json"
           ],
           "remaining": "Navigator, all axis options, and recurring-window pan policy remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
         }
       }
     },
@@ -3347,17 +3331,9 @@
             "test/lambda/chart/timeline_dates.ls",
             "test/lambda/chart/timeline_dates.txt"
           ],
-          "remaining": "Full locale/precision input and uncertainty rendering remain open."
+          "remaining": "Full retained precision input and uncertainty rendering remain open."
         },
         "native": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
           "status": "planned",
           "acceptance": []
         }
@@ -3378,14 +3354,6 @@
           "remaining": "Week numbering, scale formatting, and alternate-calendar adapters remain open."
         },
         "native": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
           "status": "planned",
           "acceptance": []
         }
@@ -3414,14 +3382,6 @@
             "test/ui/timeline/cards.json"
           ],
           "remaining": "All render slots and visual/overflow variants remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
         }
       }
     },
@@ -3440,7 +3400,7 @@
             "test/lambda/chart/timeline_bookmarks.ls",
             "test/lambda/chart/timeline_bookmarks.txt"
           ],
-          "remaining": "Full pinned narrative option parity and browser-host deep-link delivery remain open."
+          "remaining": "Full retained pinned narrative option parity remains open."
         },
         "native": {
           "status": "partial",
@@ -3454,15 +3414,7 @@
             "test/ui/window_subscriptions.ls",
             "test/ui/window_subscriptions.json"
           ],
-          "remaining": "Full pinned narrative option parity and browser-host deep-link delivery remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
+          "remaining": "Full retained pinned narrative option parity remains open."
         }
       }
     },
@@ -3487,14 +3439,6 @@
             "test/ui/timeline/navigation.json"
           ],
           "remaining": "Custom marker picking, connectors, and state recipes remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
         }
       }
     },
@@ -3510,7 +3454,7 @@
             "test/lambda/chart/timeline_schema.ls",
             "test/lambda/chart/timeline_schema.txt"
           ],
-          "remaining": "Status presentation and resource loading indicator policy remain open."
+          "remaining": "Complete retained pending/reverse presentation parity remains open; automatic loading lifecycle is excluded."
         },
         "native": {
           "status": "partial",
@@ -3518,15 +3462,7 @@
             "test/ui/timeline/cards.ls",
             "test/ui/timeline/cards.json"
           ],
-          "remaining": "Status presentation and resource loading indicator policy remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
+          "remaining": "Complete retained pending/reverse presentation parity remains open; automatic loading lifecycle is excluded."
         }
       }
     },
@@ -3551,14 +3487,6 @@
             "test/ui/timeline/groups.json"
           ],
           "remaining": "Group reordering/editing, lane overflow, and rich labels remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
         }
       }
     },
@@ -3573,14 +3501,6 @@
           "acceptance": []
         },
         "native": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
           "status": "planned",
           "acceptance": []
         }
@@ -3601,14 +3521,6 @@
           "remaining": "Clustering and bounded rendering remain open."
         },
         "native": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
           "status": "planned",
           "acceptance": []
         }
@@ -3638,14 +3550,6 @@
             "test/ui/timeline/search_overview.json"
           ],
           "remaining": "Overview handles, scroll preferences, keyboard focus, and wheel/native pinch coverage remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
         }
       }
     },
@@ -3670,14 +3574,6 @@
             "test/ui/timeline/navigation.json"
           ],
           "remaining": "Contiguous/per-group selection and complete focus behavior remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
         }
       }
     },
@@ -3703,7 +3599,7 @@
             "test/lambda/chart/timeline_search_content.ls",
             "test/lambda/chart/timeline_search_content.txt"
           ],
-          "remaining": "All pinned locale variants and large-data bounded work remain open."
+          "remaining": "Bounded large-data interaction and retained pinned option parity remain open."
         },
         "native": {
           "status": "partial",
@@ -3724,15 +3620,7 @@
             "test/ui/timeline/search_content.ls",
             "test/ui/timeline/search_content.json"
           ],
-          "remaining": "All pinned locale variants and bounded large-data interaction remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
+          "remaining": "Bounded large-data interaction and retained pinned option parity remain open."
         }
       }
     },
@@ -3759,20 +3647,12 @@
             "test/ui/timeline/editing.json"
           ],
           "remaining": "External drop creation, authoring controls, asynchronous validation presentation, and complete pinned option/example parity remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
         }
       }
     },
     {
       "family": "Live data",
-      "requirements": "Add/remove/reorder/update by ID, immutable source revisions, retain state, avoid stale validation/resource completions.",
+      "requirements": "Add/remove/reorder/update by ID, immutable source revisions, retain state, reject stale edit validation.",
       "schema": "`convert`, `update`, resource state",
       "references": "VT, RC",
       "hosts": {
@@ -3784,7 +3664,7 @@
             "test/lambda/chart/timeline_source.ls",
             "test/lambda/chart/timeline_source.txt"
           ],
-          "remaining": "Revision/descriptor cancellation, deadlines, retries, retained refresh data, and explicit status slots have evidence. Automatic asynchronous loading/disposal, media/font resource integration, bounded-work performance, and full pinned parity remain open."
+          "remaining": "Bounded source preparation and complete retained pinned option parity remain open."
         },
         "native": {
           "status": "partial",
@@ -3800,15 +3680,7 @@
             "test/ui/timeline/source.ls",
             "test/ui/timeline/source.json"
           ],
-          "remaining": "Native virtual-time cancellation/deadline/retry checks pass. Automatic asynchronous loading/disposal, media/font integration, bounded-work performance, and full pinned parity remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
+          "remaining": "Bounded source preparation and complete retained pinned option parity remain open."
         }
       }
     },
@@ -3846,14 +3718,6 @@
             "test/ui/timeline/native_media_end.json"
           ],
           "remaining": "Local macOS audio/video commands, native end notification, explicit clip-end completion, missing-source failure, iframe source ownership, retained settings, and removal pause have evidence. Remote/provider controllers, cross-platform playback, outgoing/keyed transitions, and full pinned parity remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
         }
       }
     },
@@ -3872,14 +3736,6 @@
           "remaining": "Provider resolution and live host/player parity remain open."
         },
         "native": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
           "status": "planned",
           "acceptance": []
         }
@@ -3910,14 +3766,6 @@
             "test/ui/timeline/controls.json"
           ],
           "remaining": "Complete toolbar actions, fullscreen, and quick jump remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
         }
       }
     },
@@ -3963,14 +3811,6 @@
             "test/ui/timeline/source.json"
           ],
           "remaining": "Local macOS audio/video commands, native end notification, explicit clip-end completion, missing-source failure, iframe source ownership, retained settings, and removal pause have evidence. Remote/provider controllers, cross-platform playback, outgoing/keyed transitions, and full pinned parity remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
         }
       }
     },
@@ -3998,14 +3838,6 @@
             "test/test_view_reuse_gtest.cpp"
           ],
           "remaining": "Incoming/outgoing story fade, slide/reveal samples, reverse/repeat boundaries, pause/resume, retirement, and reduced motion have evidence. Keyed event enter/update/exit, interrupted windows/guides, and full pinned option/example parity remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
         }
       }
     },
@@ -4024,14 +3856,6 @@
           "remaining": "Self-intersection policies, tangent labels, and complete path options remain open."
         },
         "native": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
           "status": "planned",
           "acceptance": []
         }
@@ -4055,14 +3879,6 @@
           "acceptance": [
             "test/ui/timeline/series.json"
           ]
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
         }
       }
     },
@@ -4078,7 +3894,7 @@
             "test/lambda/chart/timeline_layout.ls",
             "test/lambda/chart/timeline_layout.txt"
           ],
-          "remaining": "All token/part recipes, presets, renderers, and fonts remain open."
+          "remaining": "All token/part recipes, presets, renderers, remain open."
         },
         "native": {
           "status": "partial",
@@ -4086,75 +3902,7 @@
             "test/ui/timeline/cards.ls",
             "test/ui/timeline/cards.json"
           ],
-          "remaining": "All token/part recipes, presets, renderers, and fonts remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
-        }
-      }
-    },
-    {
-      "family": "Accessibility",
-      "requirements": "Semantic chronological list, labelled controls, keyboard/focus, screen-reader descriptions, contrast, non-color cues, motion preference.",
-      "schema": "Root, messages, presenters",
-      "references": "RC; Lambda requirement",
-      "hosts": {
-        "pure": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "native": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
-        }
-      }
-    },
-    {
-      "family": "Localization",
-      "requirements": "Dates/numbers/era labels, timezone, RTL, every control/status/help string, formatter callbacks and message interpolation.",
-      "schema": "`messages`, `scale`, root",
-      "references": "RC, KL, VT",
-      "hosts": {
-        "pure": {
-          "status": "partial",
-          "acceptance": [
-            "test/lambda/chart/timeline_locale.ls",
-            "test/lambda/chart/timeline_locale.txt"
-          ],
-          "remaining": "Further pinned reference languages, all provider/modal strings, and full locale/host fixture coverage remain open."
-        },
-        "native": {
-          "status": "partial",
-          "acceptance": [
-            "test/ui/timeline/locale.ls",
-            "test/ui/timeline/locale.json"
-          ],
-          "remaining": "Further pinned reference languages, all provider/modal strings, and full locale/host fixture coverage remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "partial",
-          "acceptance": [
-            "test/lambda/chart/timeline_locale.ls",
-            "test/lambda/chart/timeline_locale.txt"
-          ],
-          "remaining": "Further pinned reference languages, all provider/modal strings, and full locale/host fixture coverage remain open."
+          "remaining": "All token/part recipes, presets, renderers, remain open."
         }
       }
     },
@@ -4173,14 +3921,6 @@
           "remaining": "Full upstream field/option parity and source variants remain open."
         },
         "native": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
           "status": "planned",
           "acceptance": []
         }
@@ -4202,56 +3942,12 @@
         "native": {
           "status": "planned",
           "acceptance": []
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
-        }
-      }
-    },
-    {
-      "family": "Snapshot/export",
-      "requirements": "Static HTML, SVG/PNG/JPEG/PDF, print/full-domain/current-window views, expanded content, JSON/CSV/XLSX/HTML/PDF data export, deterministic time/font/media inputs.",
-      "schema": "`export`, explicit presenter",
-      "references": "AC; Lambda requirement",
-      "hosts": {
-        "pure": {
-          "status": "partial",
-          "acceptance": [
-            "test/lambda/chart/timeline_export.ls",
-            "test/lambda/chart/timeline_export.txt"
-          ],
-          "remaining": "Font/resource admission, full pagination and splitting policy, static rich-content fidelity, full-domain virtualized output acceptance, and all pinned upstream export options."
-        },
-        "native": {
-          "status": "partial",
-          "acceptance": [
-            "test/lambda/proc/timeline_export.ls",
-            "test/lambda/proc/timeline_export.txt"
-          ],
-          "remaining": "Font/resource admission, full pagination and splitting policy, static rich-content fidelity, full-domain virtualized output acceptance, and all pinned upstream export options."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "partial",
-          "acceptance": [
-            "test/lambda/proc/timeline_export.ls",
-            "test/lambda/proc/timeline_export.txt"
-          ],
-          "remaining": "Font/resource admission, full pagination and splitting policy, static rich-content fidelity, full-domain virtualized output acceptance, and all pinned upstream export options."
         }
       }
     },
     {
       "family": "Scale and diagnostics",
-      "requirements": "Windowed rendering, media prefetch, level-of-detail clusters, bounded work, capability reports, explicit empty/error/loading states.",
+      "requirements": "Indexed window queries, cached visibility, clustering before rich-card measurement, bounded work, release timings and memory measurements.",
       "schema": "`cluster`, resources, layout",
       "references": "VT, RC; Lambda requirement",
       "hosts": {
@@ -4261,7 +3957,7 @@
             "test/lambda/chart/timeline_resources.ls",
             "test/lambda/chart/timeline_resources.txt"
           ],
-          "remaining": "Revision/descriptor cancellation, deadlines, retries, retained refresh data, and explicit status slots have evidence. Automatic asynchronous loading/disposal, media/font resource integration, bounded-work performance, and full pinned parity remain open."
+          "remaining": "Interval-index integration, premeasurement clustering and release scalability measurements are the active implementation tranche."
         },
         "native": {
           "status": "partial",
@@ -4269,17 +3965,29 @@
             "test/ui/timeline/resource_lifetime.ls",
             "test/ui/timeline/resource_lifetime.json"
           ],
-          "remaining": "Native virtual-time cancellation/deadline/retry checks pass. Automatic asynchronous loading/disposal, media/font integration, bounded-work performance, and full pinned parity remain open."
-        },
-        "browser": {
-          "status": "planned",
-          "acceptance": []
-        },
-        "export": {
-          "status": "planned",
-          "acceptance": []
+          "remaining": "Interval-index integration, premeasurement clustering and release scalability measurements are the active implementation tranche."
         }
       }
     }
-  ]
+  ],
+  "scope": {
+    "revised_on": "2026-10-12",
+    "hosts": [
+      "pure",
+      "native"
+    ],
+    "excluded_requirements": [
+      "interactive browser support",
+      "automatic resource lifecycle",
+      "export",
+      "accessibility",
+      "localization"
+    ],
+    "excluded_families": [
+      "Snapshot/export",
+      "Accessibility",
+      "Localization"
+    ],
+    "example_policy": "Acceptance covers native equivalents of retained capabilities only; excluded capabilities do not gate parity."
+  }
 }

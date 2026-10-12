@@ -1,4 +1,4 @@
-// TeX expansion engine for the LaTeX input boundary (Lambda_Pkg_Latex3 §9).
+// TeX expansion engine for the LaTeX input boundary (Lambda_Design_TeX_Engine).
 //
 // The engine expands a document and the package files beside it, then hands
 // the direct LaTeX parser a reconstructed source plus an offset map
@@ -65,7 +65,7 @@ void engine_destroy(Engine* engine);
 size_t result_map_offset(const Result* result, size_t out_offset);
 
 // Directory of the engine's bundled resources (unmodified upstream programming
-// packages shipped with Lambda, §9.8). The runtime registers it at startup;
+// packages shipped with Lambda, Lambda_Design_TeX_Engine §4). The runtime registers it at startup;
 // without it, bundled packages are unavailable and reported as such.
 void set_resource_dir(const char* dir);
 

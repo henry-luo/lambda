@@ -1,32 +1,13 @@
-// docclass/book.ls — Book document class configuration
-// LaTeX book class: has chapters, parts, front/back matter.
+// docclass/book.ls — Book document class numbering
+// LaTeX book class: parts and chapters; \chapter is the top numbered level.
 
-// ============================================================
-// Section hierarchy
-// ============================================================
-
-// book has chapters; chapter is the top level
-pub let SECTION_LEVELS = {
-    part: 0,
-    chapter: 1,
-    section: 2,
-    subsection: 3,
-    subsubsection: 4,
-    paragraph: 5,
-    subparagraph: 6
-}
-
-pub let TOP_LEVEL = 1  // <h1> for \chapter
-
-// ============================================================
-// Section numbering
-// ============================================================
+import util: lambda.latex.util
 
 // format section number from counters
 // book: "1" (chapter), "1.1" (section), "1.1.1" (subsection)
 // in appendix: "A" (chapter), "A.1" (section)
 pub fn format_section_number(counters, counter_name, in_appendix) {
-    let chap = if (in_appendix) number_to_alph(counters.chapter) else string(counters.chapter)
+    let chap = if (in_appendix) util.upper_alph(counters.chapter) else string(counters.chapter)
     match counter_name {
         case "part":
             roman_numeral(counters.part)
@@ -40,66 +21,6 @@ pub fn format_section_number(counters, counter_name, in_appendix) {
             chap ++ "." ++ (counters.section) ++ "." ++ (counters.subsection) ++ "." ++ (counters.subsubsection)
         default: null
     }
-}
-
-// which counters reset when a parent increments
-pub fn step_counter(counters, counter_name) {
-    match counter_name {
-        case "part":
-            ({part: counters.part + 1, *:counters})
-        case "chapter":
-            ({chapter: counters.chapter + 1, section: 0, subsection: 0, subsubsection: 0, *:counters})
-        case "section":
-            ({section: counters.section + 1, subsection: 0, subsubsection: 0, *:counters})
-        case "subsection":
-            ({subsection: counters.subsection + 1, subsubsection: 0, *:counters})
-        case "subsubsection":
-            ({subsubsection: counters.subsubsection + 1, *:counters})
-        default: counters
-    }
-}
-
-// ============================================================
-// Caption labels
-// ============================================================
-
-// book: figures/tables numbered by chapter: "Figure 1.3"
-pub fn figure_label(counters, num) {
-    "Figure " ++ (counters.chapter) ++ "." ++ (num)
-}
-
-pub fn table_label(counters, num) {
-    "Table " ++ (counters.chapter) ++ "." ++ (num)
-}
-
-pub fn equation_label(counters, num) {
-    "(" ++ (counters.chapter) ++ "." ++ (num) ++ ")"
-}
-
-// ============================================================
-// Document structure
-// ============================================================
-
-pub let HAS_CHAPTERS = true
-pub let HAS_PARTS = true
-
-// book can have \frontmatter, \mainmatter, \backmatter
-pub let ABSTRACT_POSITION = "after_title"
-
-// ============================================================
-// Theorem numbering — book numbers by chapter: "Theorem 2.1"
-// ============================================================
-
-pub fn theorem_label(env_display_name, counters, num) {
-    env_display_name ++ " " ++ (counters.chapter) ++ "." ++ (num)
-}
-
-// ============================================================
-// Part display — "Part I", "Part II", etc.
-// ============================================================
-
-pub fn part_label(num) {
-    "Part " ++ roman_numeral(num)
 }
 
 // ============================================================
@@ -126,15 +47,4 @@ fn roman_rec(n, acc) {
     else if (n >= 4) roman_rec(n - 4, acc ++ "IV")
     else if (n >= 1) roman_rec(n - 1, acc ++ "I")
     else acc
-}
-
-// ============================================================
-// Appendix letter conversion: 1→A, 2→B, ... 26→Z
-// ============================================================
-
-let ALPH_TABLE = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"]
-
-fn number_to_alph(n) {
-    if (n >= 1 and n <= 26) ALPH_TABLE[n - 1]
-    else string(n)
 }

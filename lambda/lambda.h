@@ -3069,6 +3069,7 @@ extern "C" {
     Bool fn_is_nan(Item a);  // IEEE NaN check: expr is nan
     Bool fn_in(Item a, Item b);
     Bool fn_at(Item a, Item b);
+    Bool fn_of(Item a, Item b);
 
     // query operations: search data for items matching a type
     Item fn_query(Item data, Item type_val, int direct);

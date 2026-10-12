@@ -113,6 +113,7 @@ static Item mvp_lmd_inherited_member_flags(Item owner, const char* key, size_t l
     MvpLmdClass* cls = mvp_lmd_class_record(owner);
     if (!cls) return Item{.item = ITEM_JS_UNDEFINED};
     Item receiver = actual_receiver.item ? actual_receiver : owner;
+    MvpLmdLibraryState* library = mvp_lmd_program_library(cls->program);
     auto resolve = [&](Map* properties) -> Item {
         ShapeEntry* field = properties->type ? (identity
             ? typemap_hash_lookup_key((TypeMap*)properties->type, identity)
@@ -121,10 +122,13 @@ static Item mvp_lmd_inherited_member_flags(Item owner, const char* key, size_t l
         *found = true;
         if (descriptor) *descriptor = field;
         if (flags) { *flags = field->flags; return ItemNull; }
+        if (library && library->arguments_key && identity) {
+            Item cell = mvp_lmd_arguments_cell(Item{.map = properties}, identity);
+            if (get_type_id(cell) == LMD_TYPE_ARRAY) return cell.array->items[0];
+        }
         return field->flags & JSPD_IS_ACCESSOR ? mvp_lmd_accessor_call(receiver, field, ItemNull, LMD_PROP_GET)
             : map_shape_field_to_item(properties->data, field);
     };
-    MvpLmdLibraryState* library = mvp_lmd_program_library(cls->program);
     if (!library || !library->mutable_prototypes) {
         // closed units without reflective writers retain the declared-chain proof.
         bool statics = get_type_id(owner) == LMD_TYPE_FUNC || owner.map == mvp_lmd_class_values(cls)[2].map;
@@ -298,12 +302,17 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
                     (operation == LMD_PROP_GET || operation == LMD_PROP_CALLEE))
                 return mvp_lmd_accessor_call(receiver, field, ItemNull, LMD_PROP_GET);
             bool presence = operation == LMD_PROP_OWN || operation == LMD_PROP_HAS;
+            MvpLmdLibraryState* library = fixed ? NULL : mvp_lmd_program_library(cls->program);
+            if (library && library->arguments_key && found && !presence) {
+                Item cell = mvp_lmd_arguments_cell(owner, key);
+                // a mapped value belongs to its cell, never to a cached Map byte offset.
+                if (get_type_id(cell) == LMD_TYPE_ARRAY) return cell.array->items[0];
+            }
             Item result = found && !presence ? map_shape_field_to_item(map->data, field) : Item{.item = ITEM_JS_UNDEFINED};
             if (!found && operation != LMD_PROP_OWN) {
                 uint8_t flags;
                 result = mvp_lmd_inherited_member_flags(owner, key->chars, key->len, &found, presence ? &flags : NULL, key, NULL, receiver, true);
             }
-            MvpLmdLibraryState* library = fixed ? NULL : mvp_lmd_program_library(cls->program);
             if (!found && constructor && operation != LMD_PROP_OWN && (!library || !library->mutable_prototypes)) {
                 result = mvp_lmd_function_method(owner, key);
                 found = result.item != ITEM_JS_UNDEFINED;
@@ -518,7 +527,8 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
             if (cls->constructor_id < 0) return self.get();
         }
     } else if (new_target.item != ITEM_JS_UNDEFINED && fn->native_constructor) {
-        if (new_target.item != callee.item && fn->ptr != (fn_ptr)mvp_lmd_function_bound) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        if (new_target.item != callee.item && !fn->custom_new_target && fn->ptr != (fn_ptr)mvp_lmd_function_bound)
+            return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     } else if (new_target.item != ITEM_JS_UNDEFINED) {
         if (fn->non_constructible) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
         const AstFuncNode* ast = (const AstFuncNode*)fn->def;

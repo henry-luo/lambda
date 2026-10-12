@@ -1,0 +1,173 @@
+{
+  "name": "Keyed axis and sequence cards retain visible interruption samples and retire outgoing cards",
+  "html": "test/ui/timeline/keyed_motion.ls",
+  "viewport": {
+    "width": 850,
+    "height": 800
+  },
+  "input_turn_ms": 0,
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 20,
+      "steps": 1
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 10
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#motion-axis article[data-timeline-id='a']"
+      },
+      "property": "opacity",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#replace-axis"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 5
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#motion-axis article[data-timeline-id='c']"
+      },
+      "property": "opacity",
+      "equals": "0.5"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#motion-axis article[data-timeline-outgoing='a']"
+      },
+      "property": "opacity",
+      "equals": "0.5"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#motion-axis article[data-timeline-outgoing='a']"
+      },
+      "attribute": "aria-hidden",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#retarget-axis"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#motion-axis article[data-timeline-id='c']"
+      },
+      "property": "opacity",
+      "equals": "0.5"
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 5
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#motion-axis article[data-timeline-id='c']"
+      },
+      "property": "opacity",
+      "equals": "0.75"
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 5
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#motion-axis [data-timeline-outgoing]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#motion-axis article[data-timeline-id='c']"
+      },
+      "property": "opacity",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#replace-cards"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 5
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#motion-cards li[data-timeline-id='c']"
+      },
+      "property": "opacity",
+      "equals": "0.5"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#motion-cards li[data-timeline-outgoing='a']"
+      },
+      "property": "opacity",
+      "equals": "0.5"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#motion-cards li[data-timeline-outgoing='a']"
+      },
+      "attribute": "aria-hidden",
+      "equals": "true"
+    },
+    {
+      "type": "advance_time",
+      "ms": 100,
+      "steps": 5
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#motion-cards [data-timeline-outgoing]"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#motion-cards li[data-timeline-id]"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#motion-cards li[data-timeline-id='c']"
+      },
+      "property": "opacity",
+      "equals": "1"
+    }
+  ]
+}

@@ -1,11 +1,11 @@
 # Lambda TikZ Phase IV — progress note (M5)
 
-**Date:** 2026-10-07. **Status:** six §9.6 rows implemented in a worktree, uncommitted.
-**Design:** [Lambda_Pkg_Latex3 §9.6](../Lambda_Pkg_Latex3.md#96-extended-pgfpgfplots-native); the admitted profile and its boundaries are recorded in [Lambda_Pkg_Tikz §12](../Lambda_Pkg_Tikz.md#12-phase-iv-profile-additions-latex3-96).
+**Date:** 2026-10-07. **Status:** six §12.1 rows implemented; merged to master (708fb6633).
+**Design:** [Lambda_Pkg_Tikz §12.1](../Lambda_Pkg_Tikz.md#121-target-profile); the admitted profile and its boundaries are recorded in [Lambda_Pkg_Tikz §12](../Lambda_Pkg_Tikz.md#122-admitted-slices).
 
 ## What landed
 
-| §9.6 row | Where |
+| §12.1 row | Where |
 |---|---|
 | `positioning`, `calc` | `coords.ls` (new), `named.ls` (placement and routing), `tikz.ls` (`target_point`, calc path points); parser: options after a node name, `at_calc`/`calc`, `at_ref`/`at_anchor` |
 | `arrows.meta`, `shapes.geometric` | `arrows.ls`, `shapes.ls` (new); `named.ls` and `tikz.ls` draw tips and outlines through them |

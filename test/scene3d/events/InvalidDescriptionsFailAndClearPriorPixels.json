@@ -1,0 +1,86 @@
+{
+  "name": "InvalidDescriptionsFailAndClearPriorPixels",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#scene"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"main\").setAttribute(\"far\",\"0.01\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#scene",
+      "success": false,
+      "diagnostic": "camera"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"main\").setAttribute(\"far\",\"100\")"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"object\").setAttribute(\"scale\",\"nan 1 1\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#scene",
+      "success": false
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"object\").setAttribute(\"scale\",\"1 1 1\")"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"object\").setAttribute(\"position\",\"3e38 0 0\")"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"object\").setAttribute(\"instances\",\"1 0 0 0 0 1 0 0 0 0 1 0 1e38 0 0 1 1 0 0 0 0 1 0 0 0 0 1 0 1e38 0 0 1\")"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#scene",
+      "success": false,
+      "diagnostic": "overflow"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"object\").setAttribute(\"position\",\"0 0 0\")"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('object').removeAttribute('instances');make('scene3d',scene,{id:'nested'})"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#scene",
+      "success": false,
+      "diagnostic": "nested"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('nested').remove();make('camera',scene,{id:'main'})"
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#scene",
+      "success": false,
+      "diagnostic": "duplicate"
+    }
+  ]
+}

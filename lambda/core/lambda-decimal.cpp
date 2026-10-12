@@ -1436,7 +1436,8 @@ Item bigint_from_double(double val) {
     mpd_context_t* ctx = bigint_context();
     mpd_t* dec_val = mpd_new(ctx);
     if (!dec_val) return ItemError;
-    char str_buf[64];
+    // a finite binary64 integer may need 309 decimal digits plus sign and NUL.
+    char str_buf[DBL_MAX_10_EXP + 4];
     snprintf(str_buf, sizeof(str_buf), "%.0f", val);
     uint32_t status = 0;
     mpd_qset_string(dec_val, str_buf, ctx, &status);
@@ -1477,6 +1478,13 @@ Item bigint_from_string(const char* str, int len) {
         // use strtoull for up-to-64-bit, fall back to digit-by-digit for larger
         const char* hex = buf + 2;
         int hex_len = len - 2;
+        // strtoull accepts signs and whitespace, which are not radix digits.
+        for (int i = 0; i < hex_len; i++) {
+            char c = hex[i];
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+                mpd_del(dec_val); mem_free(buf); return ItemError;
+            }
+        }
         // each hex digit is 4 bits; if > 16 digits, won't fit in uint64
         if (hex_len <= 16) {
             char* endptr;

@@ -52,14 +52,21 @@ def check(require_complete=False):
         for example in reference.get("examples", []):
             evidence(example, name + ":" + example["path"])
     families = inventory.get("features", [])
-    if len(families) != 30 or len({row["family"] for row in families}) != 30:
-        failures.append("expected the proposal's 30 distinct feature families")
+    if len(families) != 27 or len({row["family"] for row in families}) != 27:
+        failures.append("expected the revised proposal's 27 distinct feature families")
+    scope = inventory.get("scope", {})
+    if scope.get("hosts") != ["pure", "native"]:
+        failures.append("revised scope requires pure/native acceptance only")
     for feature in families:
+        if feature["family"] in scope.get("excluded_families", []):
+            failures.append("excluded feature family remains in acceptance")
+        if set(feature["hosts"]) != set(scope.get("hosts", [])):
+            failures.append(feature["family"] + ": host records disagree with revised scope")
         for host, record in feature["hosts"].items():
             evidence(record, feature["family"] + ":" + host)
     if failures:
         raise SystemExit("Timeline inventory failed:\n" + "\n".join(failures))
-    print("Timeline inventory: 4 pinned references, 30 families; " +
+    print("Timeline inventory: 4 pinned references, 27 families; " +
           ", ".join(str(counts[status]) + " " + status for status in sorted(counts)))
 
 

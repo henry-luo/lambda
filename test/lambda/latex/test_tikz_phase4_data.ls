@@ -1,4 +1,4 @@
-// Phase IV §9.6: PGFPlots table sources (inline and beside the document) with
+// Phase IV (Lambda_Pkg_Tikz §12): PGFPlots table sources (inline and beside the document) with
 // column selection, symbolic x coordinates, and the document-directory gate.
 import tikz: lambda.doc.tikz.tikz
 import plots: lambda.doc.tikz.pgfplots

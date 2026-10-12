@@ -1,4 +1,4 @@
-// Phase IV §9.6: PGFPlots ybar/xbar (grouped and stacked), explicit error bars,
+// Phase IV (Lambda_Pkg_Tikz §12): PGFPlots ybar/xbar (grouped and stacked), explicit error bars,
 // \closedcycle area plots and fillbetween. Data semantics come from the
 // axis plan; geometry is read back from the rendered SVG in axis px.
 import tikz: lambda.doc.tikz.tikz

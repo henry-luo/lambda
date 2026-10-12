@@ -1,0 +1,11 @@
+// Negative controls must fail in the CLI and its machine-readable report.
+{"FalseScriptFails", "test/scene3d/events/IndexedCubeRendersRealPixelsAndCachesUnchangedFrame.html", "test/scene3d/contracts/FalseScriptFails.json", 1, true, false, false},
+{"ThrownScriptFails", "test/scene3d/events/IndexedCubeRendersRealPixelsAndCachesUnchangedFrame.html", "test/scene3d/contracts/ThrownScriptFails.json", 1, true, false, false},
+{"WrongPixelFails", "test/scene3d/events/IndexedCubeRendersRealPixelsAndCachesUnchangedFrame.html", "test/scene3d/contracts/WrongPixelFails.json", 1, true, false, false},
+{"MissingMetricFails", "test/scene3d/events/IndexedCubeRendersRealPixelsAndCachesUnchangedFrame.html", "test/scene3d/contracts/MissingMetricFails.json", 1, true, false, false},
+{"MissingCheckpointFails", "test/scene3d/events/IndexedCubeRendersRealPixelsAndCachesUnchangedFrame.html", "test/scene3d/contracts/MissingCheckpointFails.json", 1, true, false, false},
+{"UnknownOperationFails", "test/scene3d/events/IndexedCubeRendersRealPixelsAndCachesUnchangedFrame.html", "test/scene3d/contracts/UnknownOperationFails.json", 1, true, false, false},
+{"UnknownEventFailsLoading", "test/scene3d/events/IndexedCubeRendersRealPixelsAndCachesUnchangedFrame.html", "test/scene3d/contracts/UnknownEventFailsLoading.json", 0, true, true, false},
+{"MalformedEventFailsLoading", "test/scene3d/events/IndexedCubeRendersRealPixelsAndCachesUnchangedFrame.html", "test/scene3d/contracts/MalformedEventFailsLoading.json", 0, true, true, false},
+{"MissingScriptFailsLoading", "test/scene3d/events/IndexedCubeRendersRealPixelsAndCachesUnchangedFrame.html", "test/scene3d/contracts/MissingScriptFailsLoading.json", 0, true, true, false},
+{"MissingGraphicsFails", "test/scene3d/events/IndexedCubeRendersRealPixelsAndCachesUnchangedFrame.html", "test/scene3d/contracts/MissingGraphicsFails.json", 1, true, false, true},

@@ -1,0 +1,170 @@
+{
+  "name": "ThreePbrEnvironmentShadowsAndMultipassProduceRealPixels",
+  "viewport": {
+    "width": 848,
+    "height": 650
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-ready",
+      "equals": "true"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "region": [
+        160,
+        160,
+        520,
+        410
+      ],
+      "rgba": [
+        [
+          66,
+          255
+        ],
+        [
+          66,
+          255
+        ],
+        [
+          36,
+          255
+        ]
+      ],
+      "count": {
+        "min": 15001
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "webgl",
+      "target": "#observatory",
+      "fields": {
+        "graphics.draws": {
+          "min": 31
+        },
+        "graphics.shader_normalize_calls": {
+          "min": 13
+        }
+      }
+    },
+    {
+      "type": "capture_surface",
+      "file": "observatory-native.png",
+      "directory_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "enabled_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "source": "page"
+    },
+    {
+      "type": "script",
+      "js": "observatory.sample(1.25)"
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "baseline",
+      "source": "page"
+    },
+    {
+      "type": "capture_surface",
+      "file": "observatory-1.25-native.png",
+      "directory_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "enabled_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "surface": "baseline"
+    },
+    {
+      "type": "script",
+      "js": "observatory.sample(3.5)"
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "baseline",
+      "source": "page"
+    },
+    {
+      "type": "capture_surface",
+      "file": "observatory-3.5-native.png",
+      "directory_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "enabled_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "surface": "baseline"
+    },
+    {
+      "type": "script",
+      "js": "observatory.setShadows(false)"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "reference": "baseline",
+      "region": [
+        120,
+        400,
+        600,
+        180
+      ],
+      "count": {
+        "min": 101
+      }
+    },
+    {
+      "type": "capture_surface",
+      "file": "observatory-no-shadow-native.png",
+      "directory_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "enabled_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "source": "page"
+    },
+    {
+      "type": "snapshot_surface",
+      "name": "baseline",
+      "source": "page"
+    },
+    {
+      "type": "script",
+      "js": "observatory.composer.passes[1].enabled=false;observatory.render()"
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "reference": "baseline",
+      "count": {
+        "min": 101
+      }
+    },
+    {
+      "type": "capture_surface",
+      "file": "observatory-no-fxaa-native.png",
+      "directory_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "enabled_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "source": "page"
+    },
+    {
+      "type": "measure_frames",
+      "name": "pbr",
+      "enabled_env": "LAMBDA_SCENE3D_MEASURE_FRAMES",
+      "target": "#observatory",
+      "frames": 144,
+      "callback": "measureFrame",
+      "sample": "sampleMs",
+      "setup": "observatory.setShadows(true);observatory.composer.passes[1].enabled=true;globalThis.measureFrame=()=>{const begin=performance.now();observatory.mixer.update(1/60);globalThis.sampleMs=performance.now()-begin;observatory.render()}",
+      "file": "pbr-metrics.json",
+      "directory_env": "LAMBDA_EVENT_SIM_OUTPUT_DIR",
+      "fields": {
+        "vector_cache_entries_growth": {
+          "max": 128
+        },
+        "graphics.cpu_bytes_growth": {
+          "max": 1048576
+        },
+        "graphics.gpu_bytes_growth": {
+          "max": 1048576
+        }
+      }
+    }
+  ]
+}

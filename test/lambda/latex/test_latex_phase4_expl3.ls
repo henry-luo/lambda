@@ -1,4 +1,4 @@
-// Phase IV (Lambda_Pkg_Latex3 §9.4): a beside-document package written in
+// Phase IV (Lambda_Design_TeX_Engine §4): a beside-document package written in
 // expl3. The request for expl3 restarts the run from the engine's expl3 format
 // (bundled, unmodified expl3-code.tex). Expected text checked against pdflatex
 // (TeX Live 2025).

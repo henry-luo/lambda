@@ -82,6 +82,7 @@ typedef enum LambdaTokenKind {
     LAMBDA_TOK_IS,
     LAMBDA_TOK_IN,
     LAMBDA_TOK_AT,
+    LAMBDA_TOK_OF,
     LAMBDA_TOK_THAT,
     LAMBDA_TOK_WHERE,
     LAMBDA_TOK_ORDER,
@@ -360,6 +361,8 @@ enum {
     // `x: T to e` re-reads its whole span as one range type; the two parts
     // reduced on the way are its children, which the range type supersedes.
     LAMBDA_REDUCTION_FLAG_ANNOTATION_RANGE = 1u << 21,
+    // S8.1.1v2: the `of` axis -- the for binding walks IntKeys only
+    LAMBDA_REDUCTION_FLAG_INT_ONLY = 1u << 22,
 };
 
 // A reduction value is whatever the sink returned for it. A sink must never

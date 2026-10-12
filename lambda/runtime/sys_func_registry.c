@@ -2060,6 +2060,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_is_nan", FPTR(fn_is_nan)},
     {"fn_in", FPTR(fn_in)},
     {"fn_at", FPTR(fn_at)},
+    {"fn_of", FPTR(fn_of)},
 
     // ========================================================================
     // Pipe operations

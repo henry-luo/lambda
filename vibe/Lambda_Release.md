@@ -1,6 +1,8 @@
 # Lambda Release Packaging — Design & Implementation Proposal
 
 > **Superseded in part (2026-09-29).** The two-home scheme below (`./lambda` in dev, `./lmd` in release, `LAMBDA_HOME_RELEASE`) is retired. The source checkout now keeps runtime assets in `./lmd/` itself, and `g_lambda_home` is `"./lmd"` everywhere; `prepare_release.sh` copies `lmd/` unchanged. The former `input/` assets moved into their packages: validator schemas and view stylesheets to `lmd/package/doc/`, math/KaTeX CSS and fonts to `lmd/package/math/`, LaTeX CSS, CMU fonts and `base.js` to `lmd/package/latex/`. See D7.2.4's impl footnote.
+>
+> **Removed (2026-10-12).** The LaTeX.js-era `lmd/package/latex/css/` (`base.css`, `article.css`, `book.css`) and `lmd/package/latex/js/base.js` were deleted because nothing loaded them; LaTeX output styling comes from `lmd/package/latex/css.ls` and `fonts/cmu-combined.css`. The `lmd/package/math/katex.css` named below no longer exists either. Rows below that name these files are historical.
 
 ## 1. Overview
 

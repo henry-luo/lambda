@@ -17,6 +17,210 @@
 
 struct MvpLmdDate : Map { double milliseconds; };
 struct JsonAncestor { Item value; const JsonAncestor* parent; };
+const char* const mvp_lmd_error_names[LMD_ERROR_COUNT] = {"Error", "EvalError", "RangeError",
+    "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError"};
+const char* const mvp_lmd_primitive_names[LMD_PRIMITIVE_COUNT] = {"String", "Number", "Boolean", "BigInt"};
+
+static Item primitive_payload(Item object) {
+    MvpLmdLibraryState* state = mvp_lmd_program_library();
+    if (!state || !state->primitive_key || get_type_id(object) != LMD_TYPE_MAP || mvp_lmd_is_proxy(object))
+        return Item{.item = ITEM_JS_UNDEFINED};
+    ShapeEntry* field = typemap_hash_lookup_key((TypeMap*)object.map->type, state->primitive_key);
+    // this borrow is valid only while the wrapper stays rooted, until reentry.
+    return field ? map_shape_field_to_item(object.map->data, field) : Item{.item = ITEM_JS_UNDEFINED};
+}
+
+Item mvp_lmd_box_primitive(Item value, Item prototype) {
+    if (mvp_lmd_is_object(value)) return value;
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    MvpLmdLibraryState* state = mvp_lmd_program_library();
+    if (!state || !state->primitives) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    int kind = type == LMD_TYPE_STRING ? LMD_PRIMITIVE_STRING :
+        type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT ? LMD_PRIMITIVE_NUMBER :
+        type == LMD_TYPE_BOOL ? LMD_PRIMITIVE_BOOLEAN : type == LMD_TYPE_DECIMAL ? LMD_PRIMITIVE_BIGINT : -1;
+    if (kind < 0 && type != LMD_TYPE_SYMBOL) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    MvpLmdClass* cls = kind < 0 ? &state->symbol : &state->primitives[kind];
+    RootFrame roots(5);
+    if (!roots.valid()) return ItemError;
+    uint64_t home = 0;
+    Rooted<Item> primitive(roots, lambda_item_adopt_scalar_home(value, &home)), parent(roots, prototype),
+        object(roots, ItemNull), key(roots, ItemNull), character(roots, ItemNull);
+    object.set(mvp_lmd_object_new(&cls->shape, 0));
+    if (item_is_error(object.get())) return object.get();
+    // the private shape field owns scalar storage and cannot be forged by JS properties.
+    if (!map_shape_set(object.get().map, state->primitive_key, primitive.get())) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    if (parent.get().item != ITEM_JS_UNDEFINED && parent.get().item != mvp_lmd_class_values(cls)[1].item) {
+        Item linked = mvp_lmd_set_prototype(object.get(), parent.get());
+        if (item_is_error(linked)) return linked;
+    }
+    if (kind == LMD_PRIMITIVE_STRING) {
+        String* string = primitive.get().get_string();
+        Utf16Iterator iter = {(const unsigned char*)string->chars, string->len, 0, -1};
+        uint16_t unit; uint32_t length = 0;
+        while (utf16_iterator_next(&iter, &unit)) {
+            key.set(mvp_lmd_number_to_string(length++));
+            if (item_is_error(key.get())) return key.get();
+            character.set(mvp_lmd_string_at(ItemNull, unit, LMD_STRING_FROM_CODE));
+            if (item_is_error(character.get())) return character.get();
+            Item stored = mvp_lmd_named_set(object.get(), key.get().get_string()->chars, character.get(),
+                JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE);
+            if (item_is_error(stored)) return stored;
+        }
+        Item stored = mvp_lmd_named_set(object.get(), "length", Item{.item = i2it(length)},
+            JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE);
+        if (item_is_error(stored)) return stored;
+    }
+    return object.get();
+}
+
+static Item primitive_construct(Context*, MvpLmdProgram* program, Item* args, uint64_t count,
+        Item self, Item, Item target) {
+    MvpLmdLibraryState* state = mvp_lmd_program_library(program);
+    MvpLmdClass* cls = mvp_lmd_class_record(self);
+    int kind = (int)(cls - state->primitives);
+    bool construct = target.item != ITEM_JS_UNDEFINED;
+    if (construct && kind == LMD_PRIMITIVE_BIGINT) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    uint64_t home = 0;
+    Rooted<Item> value(roots, count ? lambda_item_adopt_scalar_home(args[0], &home) : Item{.item = ITEM_JS_UNDEFINED}),
+        prototype(roots, ItemNull);
+    if (kind == LMD_PRIMITIVE_STRING) {
+        value.set(count ? mvp_lmd_primitive_to_string(value.get(), construct ? 1 : 3) :
+            Item{.item = s2it(heap_create_name("", 0))});
+    } else if (kind == LMD_PRIMITIVE_BOOLEAN) {
+        value.set(Item{.item = b2it(mvp_lmd_truthy(value.get()))});
+    } else {
+        value.set(lambda_item_adopt_scalar_home(mvp_lmd_to_primitive(value.get(), 1), &home));
+        if (item_is_error(value.get())) return value.get();
+        TypeId type = get_type_id(value.get());
+        if (kind == LMD_PRIMITIVE_NUMBER) {
+            value.set(type == LMD_TYPE_DECIMAL ? push_d(bigint_to_double(value.get())) :
+                count ? mvp_lmd_primitive_to_number(value.get()) : Item{.item = i2it(0)});
+        } else if (type == LMD_TYPE_STRING) {
+            const char* bytes; size_t length;
+            mvp_lmd_numeric_string_span(value.get().get_string(), &bytes, &length);
+            Item parsed = bigint_from_string(bytes, (int)length);
+            value.set(item_is_error(parsed) ? mvp_lmd_fail(LMD_MVP_SYNTAX, 0) : parsed);
+        } else if (type == LMD_TYPE_BOOL) value.set(bigint_from_int64(value.get().bool_val));
+        else if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) {
+            double number = it2d(value.get());
+            value.set(isfinite(number) && number == trunc(number) ? bigint_from_double(number) : mvp_lmd_fail(LMD_MVP_RANGE, 0));
+        } else if (type != LMD_TYPE_DECIMAL) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    }
+    if (item_is_error(value.get())) return value.get();
+    value.set(lambda_item_adopt_scalar_home(value.get(), &home));
+    if (!construct) return get_type_id(value.get()) == LMD_TYPE_FLOAT ? push_d(it2d(value.get())) : value.get();
+    Item key = {.item = s2it(heap_create_name("prototype", 9))};
+    prototype.set(mvp_lmd_property_with_receiver(target, key, ItemNull, LMD_PROP_GET, target));
+    if (item_is_error(prototype.get())) return prototype.get();
+    if (!mvp_lmd_is_object(prototype.get())) prototype.set(mvp_lmd_class_values(cls)[1]);
+    return mvp_lmd_box_primitive(value.get(), prototype.get());
+}
+
+static Item primitive_method(Context*, MvpLmdProgram* program, Item* args, uint64_t count,
+        Item self, Item receiver, Item) {
+    intptr_t operation = (intptr_t)((MvpLmdNativeCallable*)self.function)->state;
+    int kind = (int)(operation / 2); bool stringify = operation & 1;
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    uint64_t home = 0;
+    Rooted<Item> value(roots, lambda_item_adopt_scalar_home(receiver, &home));
+    if (get_type_id(value.get()) == LMD_TYPE_MAP && !mvp_lmd_is_proxy(value.get())) {
+        value.set(lambda_item_adopt_scalar_home(primitive_payload(value.get()), &home));
+    }
+    TypeId type = get_type_id(value.get());
+    TypeId expected[] = {LMD_TYPE_STRING, LMD_TYPE_FLOAT, LMD_TYPE_BOOL, LMD_TYPE_DECIMAL, LMD_TYPE_SYMBOL};
+    if (type != expected[kind] && !(kind == LMD_PRIMITIVE_NUMBER && type == LMD_TYPE_INT))
+        return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (!stringify) return type == LMD_TYPE_FLOAT ? push_d(it2d(value.get())) : value.get();
+    if (kind == LMD_PRIMITIVE_NUMBER || kind == LMD_PRIMITIVE_BIGINT) {
+        Item radix = count && args[0].item != ITEM_JS_UNDEFINED ? mvp_lmd_primitive_to_number(args[0]) : Item{.item = i2it(10)};
+        if (item_is_error(radix)) return radix;
+        return kind == LMD_PRIMITIVE_NUMBER ? mvp_lmd_number_to_radix_string(it2d(value.get()), it2d(radix)) :
+            mvp_lmd_bigint_to_string(value.get(), it2d(radix));
+    }
+    return mvp_lmd_primitive_to_string(value.get(), 3);
+}
+
+static Item error_construct(Context*, MvpLmdProgram* program, Item* args, uint64_t count,
+        Item self, Item, Item target) {
+    MvpLmdClass* cls = mvp_lmd_class_record(self);
+    MvpLmdLibraryState* state = mvp_lmd_program_library(program);
+    bool aggregate = cls == &state->errors[LMD_ERROR_AGGREGATE];
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> object(roots, ItemNull), prototype(roots, ItemNull), text(roots, ItemNull), list(roots, ItemNull);
+    // GetPrototypeFromConstructor precedes message conversion and preserves the
+    // native Error brand while keeping the live JS prototype independent (D2.6.10).
+    prototype.set(mvp_lmd_class_values(cls)[1]);
+    if (target.item != ITEM_JS_UNDEFINED) {
+        Item key = {.item = s2it(heap_create_name("prototype", 9))};
+        prototype.set(mvp_lmd_property_with_receiver(target, key, ItemNull, LMD_PROP_GET, target));
+        if (item_is_error(prototype.get())) return prototype.get();
+        if (!mvp_lmd_is_object(prototype.get())) prototype.set(mvp_lmd_class_values(cls)[1]);
+    }
+    object.set(mvp_lmd_object_new(&cls->shape, 0));
+    if (item_is_error(object.get())) return object.get();
+    if (prototype.get().item != mvp_lmd_class_values(cls)[1].item) {
+        Item linked = mvp_lmd_set_prototype(object.get(), prototype.get());
+        if (item_is_error(linked)) return linked;
+    }
+    uint64_t message_index = aggregate ? 1 : 0;
+    Item message = count > message_index ? args[message_index] : Item{.item = ITEM_JS_UNDEFINED};
+    if (message.item != ITEM_JS_UNDEFINED) {
+        text.set(mvp_lmd_primitive_to_string(message));
+        if (item_is_error(text.get())) return text.get();
+        Item stored = mvp_lmd_named_set(object.get(), "message", text.get(), JSPD_NON_ENUMERABLE);
+        if (item_is_error(stored)) return stored;
+    }
+    Item options = count > message_index + 1 ? args[message_index + 1] : ItemNull;
+    if (mvp_lmd_is_object(options)) {
+        Item key = {.item = s2it(heap_create_name("cause", 5))};
+        Item present = mvp_lmd_property_with_receiver(options, key, ItemNull, LMD_PROP_HAS, options);
+        if (item_is_error(present)) return present;
+        if (present.item == ITEM_TRUE) {
+            text.set(mvp_lmd_property_with_receiver(options, key, ItemNull, LMD_PROP_GET, options));
+            if (item_is_error(text.get())) return text.get();
+            Item stored = mvp_lmd_named_set(object.get(), "cause", text.get(), JSPD_NON_ENUMERABLE);
+            if (item_is_error(stored)) return stored;
+        }
+    }
+    if (aggregate) {
+        list.set(mvp_lmd_array_new(0));
+        if (item_is_error(list.get())) return list.get();
+        Item absent = {.item = ITEM_JS_UNDEFINED};
+        list.set(mvp_lmd_iterator_collect(program, list.get(), count ? args[0] : absent, absent, absent));
+        if (item_is_error(list.get())) return list.get();
+        Item stored = mvp_lmd_named_set(object.get(), "errors", list.get(), JSPD_NON_ENUMERABLE);
+        if (item_is_error(stored)) return stored;
+    }
+    return object.get();
+}
+
+static Item error_to_string(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item receiver, Item) {
+    if (!mvp_lmd_is_object(receiver)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, receiver), name(roots, ItemNull), message(roots, ItemNull);
+    Item key = {.item = s2it(heap_create_name("name", 4))};
+    name.set(mvp_lmd_property_with_receiver(owner.get(), key, ItemNull, LMD_PROP_GET, owner.get()));
+    if (item_is_error(name.get())) return name.get();
+    name.set(name.get().item == ITEM_JS_UNDEFINED ? Item{.item = s2it(heap_create_name("Error", 5))} :
+        mvp_lmd_primitive_to_string(name.get()));
+    if (item_is_error(name.get())) return name.get();
+    key.item = s2it(heap_create_name("message", 7));
+    message.set(mvp_lmd_property_with_receiver(owner.get(), key, ItemNull, LMD_PROP_GET, owner.get()));
+    if (item_is_error(message.get())) return message.get();
+    message.set(message.get().item == ITEM_JS_UNDEFINED ? Item{.item = s2it(heap_create_name("", 0))} :
+        mvp_lmd_primitive_to_string(message.get()));
+    if (item_is_error(message.get())) return message.get();
+    if (!name.get().get_string()->len) return message.get();
+    if (!message.get().get_string()->len) return name.get();
+    name.set(mvp_lmd_string_concat(name.get(), Item{.item = s2it(heap_create_name(": ", 2))}));
+    return item_is_error(name.get()) ? name.get() : mvp_lmd_string_concat(name.get(), message.get());
+}
 
 extern "C" Item mvp_lmd_caught_value(MvpLmdLibraryState* state, Item carrier) {
     LambdaError* error = it2err(carrier);
@@ -24,20 +228,20 @@ extern "C" Item mvp_lmd_caught_value(MvpLmdLibraryState* state, Item carrier) {
     if (error->thrown_value_item) return Item{.item = error->thrown_value_item};
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
-    Rooted<Item> held(roots, carrier), object(roots, mvp_lmd_object_new(state->object_shape, 0)), text(roots, ItemNull);
+    Rooted<Item> held(roots, carrier), object(roots, ItemNull), text(roots, ItemNull);
+    int kind = error->code == ERR_TYPE_MISMATCH ? LMD_ERROR_TYPE :
+        error->code == ERR_UNDEFINED_VARIABLE ? LMD_ERROR_REFERENCE :
+        error->code == ERR_INDEX_OUT_OF_BOUNDS ? LMD_ERROR_RANGE : error->code == ERR_SYNTAX_ERROR ? LMD_ERROR_SYNTAX : LMD_ERROR_BASE;
+    if (!state->errors) return carrier;
+    const char* message = error->message ? error->message : "";
+    String* copied = heap_strcpy(message, strlen(message));
+    if (!copied) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    text.set(Item{.item = s2it(copied)});
+    Item argument = text.get();
+    MvpLmdClass* cls = &state->errors[kind];
+    object.set(error_construct(context, cls->program, &argument, 1,
+        mvp_lmd_class_values(cls)[0], ItemNull, Item{.item = ITEM_JS_UNDEFINED}));
     if (item_is_error(object.get())) return object.get();
-    const char* name = error->code == ERR_TYPE_MISMATCH ? "TypeError" :
-        error->code == ERR_UNDEFINED_VARIABLE ? "ReferenceError" :
-        error->code == ERR_INDEX_OUT_OF_BOUNDS ? "RangeError" : error->code == ERR_SYNTAX_ERROR ? "SyntaxError" : "Error";
-    const char* names[] = {"name", "message"};
-    const char* values[] = {name, error->message ? error->message : ""};
-    for (int i = 0; i < 2; i++) {
-        String* copied = heap_strcpy(values[i], strlen(values[i]));
-        if (!copied) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-        text.set(Item{.item = s2it(copied)});
-        Item stored = mvp_lmd_named_set(object.get(), names[i], text.get());
-        if (item_is_error(stored)) return stored;
-    }
     // Preserve Error identity if the same carrier crosses another catch boundary.
     error->thrown_value_item = object.get().item;
     return object.get();
@@ -102,17 +306,28 @@ static Item json_parse(Context*, MvpLmdProgram*, Item* args, uint64_t count, Ite
 
 static Item json_value(Item input, Item key) {
     MvpLmdLibraryState* state = mvp_lmd_program_library();
-    if (!mvp_lmd_is_object(input) || !state || !state->mutable_prototypes) return input;
+    if (!mvp_lmd_is_object(input) || !state || (!state->mutable_prototypes && !state->primitives)) return input;
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     Rooted<Item> owner(roots, input), property(roots, key), method(roots, ItemNull);
-    String* name = heap_create_name("toJSON", 6);
-    if (!name) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    method.set(mvp_lmd_property_with_receiver(owner.get(), Item{.item = s2it(name)}, ItemNull, LMD_PROP_GET, owner.get()));
-    if (item_is_error(method.get())) return method.get();
-    if (!mvp_lmd_is_callable(method.get())) return owner.get();
-    Item argument = property.get();
-    return mvp_lmd_class_invoke(method.get(), owner.get(), &argument, 1, Item{.item = ITEM_JS_UNDEFINED});
+    if (state->mutable_prototypes) {
+        String* name = heap_create_name("toJSON", 6);
+        if (!name) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        method.set(mvp_lmd_property_with_receiver(owner.get(), Item{.item = s2it(name)}, ItemNull, LMD_PROP_GET, owner.get()));
+        if (item_is_error(method.get())) return method.get();
+        if (mvp_lmd_is_callable(method.get())) {
+            Item argument = property.get();
+            owner.set(mvp_lmd_class_invoke(method.get(), owner.get(), &argument, 1, Item{.item = ITEM_JS_UNDEFINED}));
+            if (item_is_error(owner.get())) return owner.get();
+        }
+    }
+    TypeId type = get_type_id(primitive_payload(owner.get()));
+    // JSON unboxes after toJSON. Number/String retain observable conversion,
+    // Boolean/BigInt use their internal payload and Symbol stays an object.
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return mvp_lmd_primitive_to_number(owner.get());
+    if (type == LMD_TYPE_STRING) return mvp_lmd_primitive_to_string(owner.get());
+    if (type == LMD_TYPE_BOOL || type == LMD_TYPE_DECIMAL) return primitive_payload(owner.get());
+    return owner.get();
 }
 static Item json_write(StrBuf* buffer, Item input, const JsonAncestor* parent, int depth) {
     if (depth > 512) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
@@ -230,7 +445,8 @@ static Item date_value(Context*, MvpLmdProgram*, Item*, uint64_t, Item self, Ite
 }
 
 Item mvp_lmd_library_class_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state,
-        MvpLmdClass* cls, int index, const char* name, MvpLmdNativeEntry entry, uint8_t arity) {
+        MvpLmdClass* cls, int index, const char* name, MvpLmdNativeEntry entry, uint8_t arity,
+        bool immutable_metadata) {
     cls->values = state->values + index;
     cls->values[0] = mvp_lmd_native_function(program, state, entry, arity);
     if (item_is_error(cls->values[0])) return cls->values[0];
@@ -248,12 +464,14 @@ Item mvp_lmd_library_class_initialize(MvpLmdProgram* program, MvpLmdLibraryState
     }
     Item result = mvp_lmd_named_set(cls->values[1], "constructor", cls->values[0]);
     if (item_is_error(result)) return result;
-    result = mvp_lmd_named_set(cls->values[2], "prototype", cls->values[1]);
+    result = mvp_lmd_named_set(cls->values[2], "prototype", cls->values[1],
+        immutable_metadata ? JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE : -1);
     if (item_is_error(result)) return result;
     String* spelling = heap_create_name(name, strlen(name));
     if (!spelling) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    result = mvp_lmd_named_set(cls->values[2], "name", Item{.item = s2it(spelling)});
-    return item_is_error(result) ? result : mvp_lmd_named_set(cls->values[2], "length", Item{.item = i2it(arity)});
+    int flags = immutable_metadata ? JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE : -1;
+    result = mvp_lmd_named_set(cls->values[2], "name", Item{.item = s2it(spelling)}, flags);
+    return item_is_error(result) ? result : mvp_lmd_named_set(cls->values[2], "length", Item{.item = i2it(arity)}, flags);
 }
 static Item object_construct(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item self, Item, Item) {
     Item value = count ? args[0] : ItemNull;
@@ -262,8 +480,7 @@ static Item object_construct(Context*, MvpLmdProgram*, Item* args, uint64_t coun
         MvpLmdLibraryState* state = (MvpLmdLibraryState*)((MvpLmdNativeCallable*)self.function)->state;
         return mvp_lmd_object_new(state->object_shape, 0);
     }
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_ARRAY_NUM || type == LMD_TYPE_FUNC
-        ? value : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    return mvp_lmd_is_object(value) ? value : mvp_lmd_box_primitive(value);
 }
 static Item object_string(Context*, MvpLmdProgram*, Item*, uint64_t, Item self, Item receiver, Item) {
     TypeId type = get_type_id(receiver);
@@ -271,11 +488,20 @@ static Item object_string(Context*, MvpLmdProgram*, Item*, uint64_t, Item self, 
     const char* tag = type == LMD_TYPE_NULL ? "[object Null]" : type == LMD_TYPE_UNDEFINED ? "[object Undefined]" :
         type == LMD_TYPE_ARRAY ? "[object Array]" : type == LMD_TYPE_STRING ? "[object String]" :
         type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT ? "[object Number]" : type == LMD_TYPE_BOOL ? "[object Boolean]" :
-        type == LMD_TYPE_FUNC ? "[object Function]" : type == LMD_TYPE_DECIMAL ? "[object BigInt]" : "[object Object]";
+        type == LMD_TYPE_FUNC ? "[object Function]" : type == LMD_TYPE_DECIMAL ? "[object BigInt]" :
+        type == LMD_TYPE_SYMBOL ? "[object Symbol]" : "[object Object]";
     if (type == LMD_TYPE_MAP) {
         TypeNominal* nominal = ((TypeMap*)receiver.map->type)->nominal;
         if (nominal == &state->date.nominal) tag = "[object Date]";
         else if (nominal == &state->regexp.nominal) tag = "[object RegExp]";
+        else if (state->errors) for (int i = 0; i < LMD_ERROR_COUNT; i++)
+            if (nominal == &state->errors[i].nominal) { tag = "[object Error]"; break; }
+        if (state->arguments_key && typemap_hash_lookup_key((TypeMap*)receiver.map->type, state->arguments_key))
+            tag = "[object Arguments]";
+        TypeId primitive = get_type_id(primitive_payload(receiver));
+        if (primitive != LMD_TYPE_UNDEFINED)
+            tag = primitive == LMD_TYPE_STRING ? "[object String]" : primitive == LMD_TYPE_BOOL ? "[object Boolean]" :
+                primitive == LMD_TYPE_DECIMAL ? "[object BigInt]" : primitive == LMD_TYPE_SYMBOL ? "[object Symbol]" : "[object Number]";
     }
     if (state->mutable_prototypes && mvp_lmd_is_object(receiver)) {
         Item array = mvp_lmd_array_is_array(receiver);
@@ -315,9 +541,7 @@ static Item object_own(Context*, MvpLmdProgram*, Item* args, uint64_t count, Ite
     return mvp_lmd_class_property(owner.get(), key.get(), ItemNull, LMD_PROP_OWN, NULL);
 }
 Item mvp_lmd_object_value(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item receiver, Item) {
-    TypeId type = get_type_id(receiver);
-    return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_ARRAY_NUM || type == LMD_TYPE_FUNC
-        ? receiver : mvp_lmd_fail(type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED ? LMD_MVP_TYPE : LMD_MVP_CAPABILITY, 0);
+    return mvp_lmd_is_object(receiver) ? receiver : mvp_lmd_box_primitive(receiver);
 }
 static Item object_predicate(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item self, Item receiver, Item) {
     int operation = (intptr_t)((MvpLmdNativeCallable*)self.function)->state;
@@ -443,7 +667,9 @@ static Item object_assign(Context*, MvpLmdProgram*, Item* args, uint64_t count, 
     return target.get();
 }
 static Item object_prototype(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item self, Item, Item) {
-    return mvp_lmd_get_prototype(count ? args[0] : Item{.item = ITEM_JS_UNDEFINED});
+    Item object = count ? args[0] : Item{.item = ITEM_JS_UNDEFINED};
+    if (!mvp_lmd_is_object(object)) object = mvp_lmd_box_primitive(object);
+    return item_is_error(object) ? object : mvp_lmd_get_prototype(object);
 }
 static Item object_set_prototype(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item, Item, Item) {
     if (count < 2) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
@@ -552,6 +778,8 @@ Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
     if (item_is_error(result)) return result;
     result = mvp_lmd_library_class_initialize(program, state, &state->symbol, LMD_LIBRARY_SYMBOL, "Symbol", symbol_create, 0);
     if (item_is_error(result)) return result;
+    ((MvpLmdCallable*)state->symbol.values[0].function)->native_constructor = false;
+    ((MvpLmdCallable*)state->symbol.values[0].function)->non_constructible = true;
     state->values[LMD_LIBRARY_SYMBOL_VALUES] = mvp_lmd_array_new(0);
     if (item_is_error(state->values[LMD_LIBRARY_SYMBOL_VALUES])) return state->values[LMD_LIBRARY_SYMBOL_VALUES];
     const struct { const char* name; NameId id; } symbols[] = {
@@ -641,6 +869,80 @@ Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
     result = mvp_lmd_regexp_initialize(program, state);
     if (item_is_error(result)) return result;
     result = mvp_lmd_function_initialize(program, state);
+    if (item_is_error(result)) return result;
+    if (state->errors) for (int i = 0; i < LMD_ERROR_COUNT; i++) {
+        MvpLmdClass* cls = &state->errors[i];
+        result = mvp_lmd_library_class_initialize(program, state, cls,
+            (int)(state->error_values - state->values) + 3 * i, mvp_lmd_error_names[i], error_construct,
+            i == LMD_ERROR_AGGREGATE ? 2 : 1, true);
+        if (item_is_error(result)) return result;
+        ((MvpLmdCallable*)cls->values[0].function)->custom_new_target = true;
+        if (i) {
+            result = mvp_lmd_set_prototype(cls->values[0], state->error_values[0]);
+            if (item_is_error(result)) return result;
+        }
+        result = mvp_lmd_named_set(cls->values[1], "name",
+            Item{.item = s2it(heap_create_name(mvp_lmd_error_names[i], strlen(mvp_lmd_error_names[i])))}, JSPD_NON_ENUMERABLE);
+        if (!item_is_error(result)) result = mvp_lmd_named_set(cls->values[1], "message",
+            Item{.item = s2it(heap_create_name("", 0))}, JSPD_NON_ENUMERABLE);
+        if (item_is_error(result)) return result;
+        if (!i) {
+            result = mvp_lmd_named_set(cls->values[1], "toString",
+                mvp_lmd_native_function(program, state, error_to_string, 0, "toString"), JSPD_NON_ENUMERABLE);
+            if (item_is_error(result)) return result;
+        }
+    }
+    if (state->primitives) {
+        state->primitive_key = name_pool_create_unique_private(context->name_pool, {"MVP [[PrimitiveValue]]", 22});
+        if (!state->primitive_key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        for (int i = 0; i < LMD_PRIMITIVE_COUNT + 1; i++) {
+            MvpLmdClass* cls = i == LMD_PRIMITIVE_COUNT ? &state->symbol : &state->primitives[i];
+            if (i < LMD_PRIMITIVE_COUNT) {
+                result = mvp_lmd_library_class_initialize(program, state, cls,
+                    (int)(state->primitive_values - state->values) + 3 * i, mvp_lmd_primitive_names[i], primitive_construct, 1, true);
+                if (item_is_error(result)) return result;
+                ((MvpLmdCallable*)cls->values[0].function)->custom_new_target = true;
+                if (i == LMD_PRIMITIVE_BIGINT) {
+                    ((MvpLmdCallable*)cls->values[0].function)->native_constructor = false;
+                    ((MvpLmdCallable*)cls->values[0].function)->non_constructible = true;
+                }
+            }
+            if (i < LMD_PRIMITIVE_BIGINT) {
+                Item initial = i == LMD_PRIMITIVE_STRING ? Item{.item = s2it(heap_create_name("", 0))} :
+                    i == LMD_PRIMITIVE_BOOLEAN ? Item{.item = ITEM_FALSE} : Item{.item = i2it(0)};
+                if (!map_shape_set(cls->values[1].map, state->primitive_key, initial)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+                if (i == LMD_PRIMITIVE_STRING) {
+                    result = mvp_lmd_named_set(cls->values[1], "length", Item{.item = i2it(0)},
+                        JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE | JSPD_NON_CONFIGURABLE);
+                    if (item_is_error(result)) return result;
+                }
+            }
+            for (int method = 0; method < 2; method++) {
+                result = mvp_lmd_named_set(cls->values[1], method ? "toString" : "valueOf",
+                    mvp_lmd_native_function(program, (void*)(intptr_t)(i * 2 + method), primitive_method,
+                        method && (i == LMD_PRIMITIVE_NUMBER || i == LMD_PRIMITIVE_BIGINT) ? 1 : 0,
+                        method ? "toString" : "valueOf"), JSPD_NON_ENUMERABLE);
+                if (item_is_error(result)) return result;
+            }
+            if (i >= LMD_PRIMITIVE_BIGINT) {
+                JsPropertyDescriptor descriptor = {};
+                descriptor.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
+                js_pd_set_configurable(&descriptor, true);
+                const char* tag = i == LMD_PRIMITIVE_BIGINT ? "BigInt" : "Symbol";
+                descriptor.value = Item{.item = s2it(heap_create_name(tag, strlen(tag)))};
+                Item key = {.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))};
+                result = mvp_lmd_define_own_property(cls->values[1], key, &descriptor);
+                if (item_is_error(result)) return result;
+                if (i == LMD_PRIMITIVE_COUNT) {
+                    descriptor.value = mvp_lmd_native_function(program, (void*)(intptr_t)(i * 2), primitive_method, 1, "[Symbol.toPrimitive]");
+                    if (item_is_error(descriptor.value)) return descriptor.value;
+                    key.item = s2it(well_known_name_ref(JS_SYMBOL_TO_PRIMITIVE));
+                    result = mvp_lmd_define_own_property(cls->values[1], key, &descriptor);
+                    if (item_is_error(result)) return result;
+                }
+            }
+        }
+    }
     if (!item_is_error(result)) result = mvp_lmd_generator_initialize(program, state);
     if (!item_is_error(result)) result = mvp_lmd_reflect_initialize(program, state);
     return item_is_error(result) ? result : mvp_lmd_proxy_initialize(program, state);
@@ -695,7 +997,7 @@ extern "C" Item mvp_lmd_to_primitive(Item value, int64_t hint, int64_t library_o
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     Rooted<Item> owner(roots, value), callable(roots, ItemNull), result(roots, ItemNull);
-    if (mvp_lmd_program_library() && mvp_lmd_program_library()->mutable_prototypes) {
+    if (mvp_lmd_program_library() && (mvp_lmd_program_library()->mutable_prototypes || mvp_lmd_program_library()->primitives)) {
         Item key = {.item = s2it(well_known_name_ref(JS_SYMBOL_TO_PRIMITIVE))};
         callable.set(mvp_lmd_property_with_receiver(owner.get(), key, ItemNull, LMD_PROP_GET, owner.get()));
         if (item_is_error(callable.get())) return callable.get();
