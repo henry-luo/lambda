@@ -920,9 +920,9 @@ have been removed; use `lambda.doc.math.math`.
 
 ## 7. `latex` — LaTeX to HTML
 
-The latex package renders a parsed LaTeX document (`input(path, 'latex')` or `parse(text, 'latex')`) as HTML: the `article`, `book` and `report` document classes, sectioning with numbering, lists, tables, footnotes, boxes, colour, spacing, the `picture` environment, `\newcommand` macros, and math through the `math` package.
+The latex package renders a parsed LaTeX document as HTML. Parse with `latex.parse_file(path)` or `latex.parse_source(text, base)`. Every LaTeX parse first runs Lambda's TeX expansion engine (**D7.2.7**): document macros, `.sty`/`.cls` files beside the document, and bundled programming packages such as `etoolbox`, `xkeyval` and expl3 run as TeX, while Radiant keeps layout. A bare `input(path, 'latex')` also expands, but without the package's adapter registry, so parse through the package when you render. The package covers the `article`, `book` and `report` document classes, sectioning with numbering, lists, tables, footnotes, boxes, colour, spacing, the `picture` environment, `\newcommand` macros, and math through the `math` package.
 
-Common `\usepackage` declarations select the shipped script adapters for `amsmath`, `amssymb`, `graphicx`, `hyperref`, `geometry`, `xcolor`, `booktabs`, `biblatex`, `babel`, `enumitem`, `microtype`, `siunitx`, and TikZ. Package names select static source modules under **D7.2.1–D7.2.4**; document text is not executed as code (**S1.8**). The [package compatibility matrix](../vibe/Lambda_Pkg_Latex.md#9-compatibility-matrix) lists supported commands and output limits.
+Common `\usepackage` declarations select the shipped script adapters for `amsmath`, `amssymb`, `graphicx`, `hyperref`, `geometry`, `xcolor`, `booktabs`, `biblatex`, `babel`, `enumitem`, `microtype`, `siunitx`, and TikZ. Package names select static source modules under **D7.2.1–D7.2.4**; TeX source runs only as TeX inside the engine's sandbox and never becomes Lambda code (**S1.8, D7.2.7**). The [package compatibility matrix](../vibe/Lambda_Pkg_Latex.md#9-compatibility-matrix) lists supported commands and output limits.
 
 The bounded `biblatex` profile reads multiple local `.bib` resources, supports ten common entry types, six built-in citation/bibliography styles, source-order citation commands, `\nocite`, filtered and scoped `\printbibliography`, and English/German/French strings. It handles common BibTeX strings and inheritance, creates internal citation links, and reports missing or unsupported requests with source locations (**D7.1.2v2, S12.4.1, S7.4.1–S7.4.4**). `backend=biber` selects this local profile; no Biber process or arbitrary style file is run. See [Phase 2 behavior and boundaries](../vibe/latex/Lambda_Design_BibTeX_CSL.md#21-the-built-in-biblatex-and-natbib-profile).
 
@@ -932,13 +932,13 @@ For PDF export, `hyperref` links and anchors become link annotations and destina
 
 Phase III adds bounded theorem/proof, table, language, TikZ/PGFPlots, `natbib`, `caption`/`subcaption`, English `cleveref`, and unhighlighted `listings` profiles. Raw code and document-local `filecontents` bibliographies are preserved. `hyperref` headings and plain-text `\pdfbookmark` titles become hierarchical PDF outlines. `render_result.assets` records image/bibliography paths, origin, availability and source offsets; availability checks local existence, not successful decoding or remote fetching. See the [sample compatibility report](../test/latex/samples/COMPATIBILITY.md).
 
-For the shared paged PDF path, pass `{target: "pdf", paged: true}` while generating the standalone HTML, then export it with `lambda render --paged`. The bounded `fancyhdr`/`lastpage` profile supplies text, running marks and page counters. Continuous output diagnoses unresolved page counters. Paged tables and columns, native Thai shaping/line breaking, exact font substitutions, and TeX typography remain explicit limits (**S7.4.1–S7.4.4**). Unicode PDF glyphs use font outlines and are not searchable text; full ToUnicode font embedding is a separate host capability. Lua and arbitrary package/style-file execution are excluded (**S1.8**).
+For the shared paged PDF path, pass `{target: "pdf", paged: true}` while generating the standalone HTML, then export it with `lambda render --paged`. The bounded `fancyhdr`/`lastpage` profile supplies text, running marks and page counters. Continuous output diagnoses unresolved page counters. Paged tables and columns, native Thai shaping/line breaking, exact font substitutions, and TeX typography remain explicit limits (**S7.4.1–S7.4.4**). Unicode PDF glyphs use font outlines and are not searchable text; full ToUnicode font embedding is a separate host capability. Lua, biblatex style files, and package files from a TeX installation are excluded (**S1.8, D7.2.7**).
 
 ```lambda
 import latex: lambda.latex.latex
 
 let src = "\\documentclass{article}\n\\begin{document}\n\\section{Intro}\nHello \\textbf{world}.\n\\end{document}"
-let ast = parse(src, 'latex')^
+let ast = latex.parse_source(src, null)
 let body = latex.render(ast, null)
 name(body)                               // 'article'
 body.class                               // "latex-document latex-article"
@@ -951,13 +951,15 @@ name(page)                               // 'html'
 | `render(ast, options)` | Renders to an element tree: the `<article>` body (inside a `<div class: "latex-output">` together with a footnotes section when there are footnotes), or a complete `<html>` page with the LaTeX and math stylesheets when `options.standalone` is `true` |
 | `render_result(ast, options)` | Returns `{body, elements, stylesheet, metadata, packages, diagnostics, assets}`. Diagnostics have a code, package, item, message, and source offset under **S7.4.1–S7.4.4** |
 | `render_to_html(ast, options)` | The same, serialized to an HTML string |
-| `render_document(ast, options)` | The entry point the CLI uses; like `render`, but defaults to a standalone page unless `options.standalone` is explicitly `false` |
+| `parse_file(path)`, `parse_source(source, base)` | Parse LaTeX through the TeX engine with the package's adapter registry; `base` (a file path) resolves files beside the document. Return `null` when the source cannot be read or parsed |
+| `render_document(ast, options)` | Like `render`, but defaults to a standalone page unless `options.standalone` is explicitly `false` |
+| `render_document_file(path, options)` | The entry point the CLI and Radiant use: reads, parses and renders a file as `render_document` does, raising an error when the file cannot be read |
 | `render_default(ast)` | `render(ast, null)` |
 | `render_file(path)` | Parses a LaTeX file and renders it |
 | `render_file_to_html(path)` | Parses a LaTeX file and returns an HTML string |
 | `render_string(source)`, `render_string_to_html(source)` | Meant to render LaTeX source text; see the note below |
 
-`options` may be `null`. `standalone` selects a complete page; `base_uri` resolves relative graphics and bibliography resources; `target: "pdf"` or `target: "svg"` enables output-specific diagnostics. The file entry points derive `base_uri` from the file path. Parsed-document CLI transforms receive a neutral `source_path` option from the host, which the LaTeX package uses as the resource base when `base_uri` is absent (**D7.1.2v2**). The document class comes from `\documentclass` in the source. On the command line, `lambda convert paper.tex -t html -o paper.html` writes the rendered body without the LaTeX stylesheets, `--full-document` writes the standalone page instead, and the legacy `--font-option` switch does not change the math package's font selection; `lambda view`, `layout` and `render` always render the standalone page.
+`options` may be `null`. `standalone` selects a complete page; `base_uri` resolves relative graphics and bibliography resources; `target: "pdf"` or `target: "svg"` enables output-specific diagnostics. The file entry points derive `base_uri` from the file path. `render_document_file` sets `source_path`, which the LaTeX package uses as the resource base when `base_uri` is absent (**D7.1.2v2**). The document class comes from `\documentclass` in the source. On the command line, `lambda convert paper.tex -t html -o paper.html` writes the rendered body without the LaTeX stylesheets, `--full-document` writes the standalone page instead, and the legacy `--font-option` switch does not change the math package's font selection; `lambda view`, `layout` and `render` always render the standalone page.
 
 `render_string` and `render_string_to_html` parse source text directly. For resources referenced from a source string, parse it and call `render` or `render_result` with an explicit `base_uri`.
 

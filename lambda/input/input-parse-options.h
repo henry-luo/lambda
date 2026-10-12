@@ -9,7 +9,6 @@ typedef struct InputParseOptions {
     bool embedded_math;     // markup: attach each <math>'s parsed `ast` and list it on
                             // Input::embedded_math, for a display that renders it directly
     // latex/tex: the TeX expansion engine (Lambda_Design_TeX_Engine)
-    bool tex_expand;        // latex: expand with the engine before the direct parser
     bool tex_ini;           // tex: primitives only, no LaTeX kernel
     const char* tex_base;   // document path or URL; beside-document files resolve from it
     const char* const* tex_adapters;  // package/class names answered by script adapters

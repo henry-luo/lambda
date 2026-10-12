@@ -2502,17 +2502,13 @@ fn render_marginpar(el, info) {
     <span class: "latex-cmd-marginpar", for c in items { c }>
 }
 
+// D7.2.7: the TeX engine has already expanded every user macro, so an element
+// reaching here is a command it passed through on purpose: a custom theorem
+// environment, or an unsupported command that the fallback reports.
 fn render_generic(el, info) {
-    // check if this element is a macro invocation
-    let tag_str = string(name(el))
-    let macro_def = if (info.macros != null) macros.find_macro(info.macros, tag_str) else null
-    if (macro_def != null) { render_macro_invocation(el, info, macro_def) }
-    else {
-        // check if this is a custom theorem environment
-        let thm_def = util.lookup(info.theorem_defs, tag_str)
-        if (thm_def != null) { render_custom_theorem(el, info, thm_def) }
-        else { render_generic_default(el, info) }
-    }
+    let thm_def = util.lookup(info.theorem_defs, string(name(el)))
+    if (thm_def != null) { render_custom_theorem(el, info, thm_def) }
+    else { render_generic_default(el, info) }
 }
 
 fn render_custom_theorem(el, info, thm_def) {
@@ -2528,34 +2524,6 @@ fn render_custom_theorem(el, info, thm_def) {
         " "
         for c in items { c }
     >
-}
-
-fn render_macro_invocation(el, info, macro_def) {
-    if (info.macro_depth >= 32)
-        util.unsupported_element("latex", "Macro expansion depth exceeded",
-            el.source_offset)
-    else if (macro_def.source == null)
-        util.unsupported_element("latex", "Macro source was not preserved",
-            el.source_offset)
-    else {
-        let source = macros.substitute_source(macro_def.source, el, macro_def)
-        let parsed = parse(source, {type: "latex"}) ^ { null }
-        if (parsed == null)
-            util.unsupported_element("latex", "Macro expansion could not be parsed",
-                el.source_offset)
-        else {
-            let top = util.command_args(parsed)
-            // Fragment paragraphs are transparent at an inline macro call site.
-            let items = [for (node in top,
-                item in if (node is element and string(name(node)) == "paragraph")
-                    util.command_args(node) else [node]) item]
-            let rendered = render_items(items, 0, len(items),
-                {*:info, macro_depth: info.macro_depth + 1}, [])
-            if (len(rendered) == 0) null
-            else if (len(rendered) == 1) rendered[0]
-            else <span for c in rendered { c }>
-        }
-    }
 }
 
 fn render_items(items, i, n, info, acc) {
