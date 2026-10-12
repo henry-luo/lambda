@@ -1325,6 +1325,181 @@ are unchanged and no Result10 is published.
 The remaining compiler work concerns narrower proofs for property effects,
 array storage and scalar coercion; dynamic behavior must remain observable.
 
+#### Primitive batching and indexed-write follow-up (2026-10-11)
+
+Three general changes address avoidable work in the remaining regression paths:
+
+- Reuse `String.is_ascii` to prove canonical UTF-8 Map keys without a byte scan;
+  non-ASCII keys still use Lambda's canonicalization (**S8.2.2v5**, **D4.6.1v4**).
+  Property-key conversion now calls the existing `canonical_string` once.
+- Batch long primitive string chains through existing `fn_strcat_many`, using
+  Lambda's existing 64-piece ceiling. Promote `emit_vararg_call_common` to
+  shared `em_emit_vararg_call`; MVP imports the existing runtime join. Its
+  prototype identity includes the function because MVP creates one emitter
+  per function. Short chains retain fixed-arity calls; source evaluation and
+  conversion order, object/Symbol fallback and precise roots remain intact
+  (**S1.11**, **D5.2–D5.3**, **D8.2.1–D8.2.6**). No runtime helper is added.
+- Reorder indexed writes so an existing element needs one bounds decision.
+  The append edge alone checks capacity and updates length immediately before
+  the shared store, with no intervening safepoint. Sparse, descriptor and
+  scalar-home fallbacks remain intact (**D2.6.4**, **D2.7.1**, **D5.3**).
+
+The frozen `primitive-batch` candidate is
+`632fe75643ac6050ce94c6b23dee87a53bfacbda40957d96909309dbb8be679a`.
+Its current-HEAD control (`4cbe942fb4837861af56fae7193e546c8a2abdd3`)
+is `ad5a63bed23f4512fe0c65295f4e33260cc6bb3bcd9703ee8b4938ab85e8d587`.
+Both manifests and source provenance are under `temp/mvp_properties/`.
+The candidate passes **160/160** normal and forced-GC/poison groups and
+**653/653** extracted cases on both Node and the frozen release CLI.
+
+The first 31-round incremental timing capture is **diagnostic only**: concurrent
+Lambda-opus tests were observed, and identical controls show large variation.
+Keep every sample in `primitive-batch-incremental/comparison.json`; its
+disposition record documents the interference. Performance acceptance remains
+pending a quiet repeat and the broader prior-workload comparison. The first
+shared Test262 run recovered all **40,261** cases after seven SIGKILLed batches;
+this is not a clean gate and also requires a fresh run. The exact source of
+those external terminations has not been established.
+
+The byte-identical `primitive-batch-final` rebuild retains that SHA. Its shared
+Lambda gate is **6,706/6,707**, including **2,112/2,112** input cases. Only the
+LaTeX phase-3 corpus timed out at 60 seconds; its isolated replay passes in
+54.747 seconds. The earlier `edit_view_only` mismatch is fixed in current HEAD.
+A fresh shared LambdaJS Test262 gate passes **40,261/40,261** in 63.5 seconds,
+with zero killed batches and zero retries. These are shared-engine gates,
+not an MVP Test262 conformance claim.
+
+A second 31-round incremental capture finds Knucleotide and JSON Gen faster
+against both current-HEAD controls; Towers and Triangl are inconclusive.
+It remains qualified evidence: a new CPU-heavy `./lambda.exe` process was
+observed immediately afterward and may have overlapped. Its samples and
+disposition are retained in `primitive-batch-incremental-repeat/` and the
+adjacent disposition record.
+
+The next local-initializer refinement reuses `expression`'s existing scalar
+borrow option only for uncaptured, non-global, non-native local bindings,
+outside inlining, with no external/reflected/intrinsic binding. Initialization
+immediately invokes the existing `write_binding` adoption into the local home,
+without a call between the read and adoption. This removes an intermediate
+snapshot while retaining the final owned copy (**D2.7.1**, **D5.3**, **D8.2.1–D8.2.6**).
+Captured/global/native bindings and destructuring retain their existing path;
+callback reads retain their own lifetime safeguards. No helper is added.
+The `local-adopt` candidate, SHA-256
+`71cd2a3120e6c2b2bb327ec491868e14fceca0654cf66ec8a58d2c69eccd61bd`,
+passes **161/161** normal groups (22.771 seconds), **161/161** full forced-GC/
+poison groups (315.229 seconds), and **662/662** extracted cases on both Node
+and the frozen release CLI. Four additional focused forced-GC groups pass.
+Its runtime source remains the frozen patch; subsequent edits are documentation.
+
+The monitored 31-round incremental comparison against current HEAD establishes
+gains against both control copies for Towers, Knucleotide and JSON Gen
+(`local-adopt-incremental/comparison.json`). Triangl is inconclusive against
+the primary control and slightly slower against the peer, so no incremental
+Triangl gain is claimed. The separate **31-round phase-entry confirmation**
+clears all three outstanding regressions and finds a small Triangl gain:
+
+| Workload | Candidate ms | Phase-entry ms | Identical peer ms | Candidate/control 95% paired ratio interval |
+|---|---:|---:|---:|---|
+| Towers | 1.029 | 1.055 | 1.058 | 0.96978–0.98294 |
+| Knucleotide | 3.678 | 3.815 | 3.828 | 0.95489–0.97482 |
+| JSON Gen | 4.564 | 5.665 | 5.679 | 0.79655–0.80821 |
+| Triangl | 154.294 | 155.012 | 154.950 | 0.99411–0.99873 |
+
+All four candidate/peer intervals are also below 1; all control/control
+intervals contain 1. Both captures retain six rotating orders, unchanged
+source/output/backend contracts and self-reported workload timing. The
+five-second process log (`local-adopt-host.jsonl`) observes no unrelated build
+or test during these captures. Exact raw samples are in
+`local-adopt-phase-confirm/comparison.json`.
+
+The completed `local-adopt-nonjq/comparison.json` screen passes **83/83**
+output/backend contracts, with seven measured triples each. It finds 22
+workloads faster against both controls and two slower: Fasta and Raytrace3D.
+The process monitor observes no unrelated build/test during its 35.8-minute
+window. The four jq workloads were neither run nor preflighted.
+
+Both flags persist in a fresh 31-round phase-entry confirmation
+(`local-adopt-flags-confirm/comparison.json`): Fasta **0.897 vs 0.885 ms**
+(candidate/control interval **1.00224–1.02152**) and Raytrace3D **248.308 vs
+243.798 ms** (**1.01371–1.02522**). Both candidate/peer intervals exceed 1,
+and control/control intervals contain 1. Raytrace absolute times shifted
+from about 140 to 244 ms in all lanes during the capture; retain this host
+variation alongside the consistent paired gap. The monitor excludes observed
+build/test interference, not every source of operating-system load.
+
+The separate 31-round comparison against clean current HEAD
+(`local-adopt-flags-incremental/comparison.json`) finds neither workload
+newly slower against both controls. Fasta is inconclusive; Raytrace improves
+against the peer and narrowly overlaps 1 against the primary control
+(**0.98061–1.00009**). These small phase-entry gaps predate this tuning round;
+the phase's whole-population performance acceptance remains open.
+
+The following array-pair refinement reuses the existing `borrow_pair` local
+ownership proof for native Array destructuring. Both uncaptured local bindings
+adopt their components before body execution; callback-capable reads still
+snapshot immediately, so a second getter cannot overwrite the first value
+(**D2.7.1**, **D5.3**, **D8.2.1–D8.2.6**). No helper or representation flag is
+added. Among the 83 frozen benchmark sources, array-pattern loop heads occur
+in Fasta, Knucleotide, Regexredux and Map Iteration.
+
+The frozen `array-pair` release is
+`12de56e90f862f2dadc33d2f73f435d251cd93dba5fa63f9cce148b6564f50c7`.
+It passes **162/162** MVP groups normally (15.271 seconds) and with forced
+GC/poison (321.243 seconds), and **670/670** extracted cases on both Node and
+the frozen release. The added cases cover scalar mutation, captured bindings,
+object lifetime, reentrant getters, sparse pairs, globals and custom iterators.
+Final shared-code gates pass **6,709/6,709** Lambda baseline cases, including
+**2,112/2,112** input cases, and **40,261/40,261** LambdaJS Test262 baseline
+cases with no retries or unstable batches (2,652 cases remain skipped by that
+baseline). The earlier LaTeX timeout passes inside this aggregate run in
+34 seconds. These shared-engine checks do not assert MVP Test262 conformance.
+Logs are `test-lambda-baseline-array-pair.log` and
+`test262-baseline-array-pair.log`; baseline artifacts are in `array-pair-gates/`.
+
+Its fresh **31-round** phase-entry comparison covers all four affected sources
+and the regression sentinels (`array-pair-confirm/comparison.json`):
+
+| Workload | Candidate ms | Phase-entry ms | Identical peer ms | Candidate/control 95% paired ratio interval |
+|---|---:|---:|---:|---|
+| Towers | 1.037 | 1.059 | 1.060 | 0.97183–0.98673 |
+| Fasta | 0.882 | 0.883 | 0.882 | 0.98649–1.00681 |
+| Knucleotide | 3.639 | 3.795 | 3.783 | 0.95373–0.96588 |
+| Regexredux | 3.109 | 3.103 | 3.100 | 0.98626–1.01368 |
+| Raytrace3D | 142.382 | 139.804 | 139.317 | 1.01578–1.02138 |
+| Map Iteration | 1.185 | 1.284 | 1.284 | 0.92062–0.92723 |
+| JSON Gen | 4.498 | 5.619 | 5.665 | 0.79566–0.80713 |
+| Triangl | 153.364 | 154.236 | 154.351 | 0.99372–0.99488 |
+
+All eight oracle/backend contracts pass. Five workloads improve against both
+controls; Fasta and Regexredux are inconclusive. Raytrace3D remains slower
+against both. Every control/control interval contains 1. A separate 31-round
+incremental comparison against `local-adopt` finds all four affected workloads
+within noise (`array-pair-incremental/comparison.json`); it does not establish
+an independent causal speedup for the array-pair change.
+
+The shared Lambda check (`array-pair-lambda-peer/comparison.json`) passes all
+three unchanged output contracts with 21 measured triples. Sieve **0.026 vs
+0.026 ms**, JSON Gen **23.141 vs 23.097 ms**, and Deriv **21.383 vs 21.623 ms**
+all have candidate/control, candidate/peer and control/control intervals
+containing 1. Sieve's microsecond timing resolution limits sensitivity.
+
+The fresh Hashmap capture (`array-pair-hashmap/comparison.json`) passes all
+contracts with 15 measured runs: MVP **469.519 ms**, Node **15.049 ms**,
+canonical Lambda reference **71.571 ms**. The Lambda source is annotated and
+uses preallocated parallel arrays, while JS grows chained entry objects; the
+runner's historical `lambda_untyped` field is not a matched untyped comparison.
+The five-second host monitor observes no unrelated build/test in these four
+final captures (`array-pair-host-summary.json`); short windows limit its
+sampling coverage. Exact binaries, sources, samples and outputs are retained.
+
+Raytrace's diagnostic MIR still contains sparse-storage checks. Its closed-unit
+proof rejects unbounded writes through global loop indices and postincrements;
+the retained guards are required until a stronger proof establishes physical
+storage (**D2.6.4**, **D8.2.1–D8.2.6**). This identifies a code-generation
+limitation, not a measured attribution of the entire remaining 1.8% gap.
+The full 83-row screen belongs to `local-adopt`; the final release has this
+eight-row follow-up. No full-population, zero-regression claim is made.
+
 The earlier `passive-set` release passes 15 canonical Hashmap measurements
 (`passive-set-hashmap/comparison.json`): MVP **476.079 ms**, Node
 **15.116 ms**, canonical Lambda **72.611 ms**. The Lambda port is annotated

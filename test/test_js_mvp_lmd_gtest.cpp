@@ -3192,3 +3192,61 @@ TEST_F(JsMvpLmd, PropertyExpansionProjectionOrdering) {
     boolean("let o={a:5e-324,b:-0};let values=Object.values(o);o.a=7;o.b=8;let garbage=[];for(let i=0;i<2000;i++)garbage.push({i});values[0]===5e-324&&1/values[1]===-Infinity");
     boolean("Object.keys({}).length===0&&Object.values({x:7})[0]===7&&Object.entries({}).length===0");
 }
+
+TEST_F(JsMvpLmd, PropertyExpansionPrimitiveStringBatch) {
+    boolean("function f(n){return '['+n+','+(n+1)+','+(n+2)+','+(n+3)+','+(n+4)+','+(n+5)+']'}f(10)==='[10,11,12,13,14,15]'");
+    char* mir = dump("temp/mvp_lmd_primitive_string_batch.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "\timport\tfn_strcat_many\n"), nullptr);
+    mem_free(mir);
+    boolean("let n=0;function piece(){n++;return '['+n+']'}let s='>'+piece()+piece()+piece()+piece()+piece()+piece()+piece()+piece()+'<';s==='>[1][2][3][4][5][6][7][8]<'&&n===8");
+    boolean("function f(){let a=[];for(let i=0;i<1000;i++)a.push({i});return 'value'}let s=':'+f()+':'+f()+':'+f()+':'+f()+':'+f()+':'+f()+':';s===':value:value:value:value:value:value:'");
+    boolean("function f(n){return ''+n+':'+true+':'+null+':'+undefined+':'+(-0)+':'+NaN+':'+Infinity}f(7)==='7:true:null:undefined:0:NaN:Infinity'");
+    boolean("let a='a',b=a+'b',c=b+'c';let s=b+':'+c+':'+b+':'+c+':'+b+':'+c;b==='ab'&&c==='abc'&&s==='ab:abc:ab:abc:ab:abc'");
+    boolean("function f(s){return s+'\\0'+s+'é'+s+'😀'+s+'\\0'+s}let s=f('x');s==='x\\0xéx😀x\\0x'&&s.length===10");
+    boolean("let seen='',o={toString(){seen+='o';return 'O'}};function p(){seen+='p';return 'P'}let s='a'+p()+':'+p()+':'+o+':'+p()+':'+p();s==='aP:P:O:P:P'&&seen==='ppopp'");
+    boolean("let n=0;function p(){n++;if(n===4)throw 7;return 'x'}let caught=0;try{let s=':'+p()+p()+p()+p()+p()+p()+p()}catch(e){caught=e}n===4&&caught===7");
+    boolean("let n=0,sym=Symbol('x');function p(){n++;return 'x'}let caught=false;try{let s=':'+p()+p()+p()+sym+p()+p()+p()}catch(e){caught=true}caught&&n===3");
+    boolean("let s='a'+1+2+3+4+5+6+7+8+9+10+11+12+13+14+15+16+17+18+19+20+21+22+23+24+25+26+27+28+29+30+31+32+33+34+35+36+37+38+39+40+41+42+43+44+45+46+47+48+49+50+51+52+53+54+55+56+57+58+59+60+61+62+63+64+65+66+67+68+69+70;s.length===132&&s.slice(0,12)==='a12345678910'&&s.slice(-8)==='67686970'");
+}
+
+TEST_F(JsMvpLmd, PropertyExpansionAsciiMapKeys) {
+    boolean("let s='ACGTACGTACGTACGTACGT',m=new Map();for(let i=0;i<20;i++){let k=s.substring(0,12);m.set(k,(m.get(k)||0)+1)}m.size===1&&m.get('ACGTACGTACGT')===20&&m.has(s.substring(0,12))");
+    boolean("let m=new Map(),k='long\\0ascii-key';m.set(k,7);m.get('long'+'\\0'+'ascii-key')===7&&m.get('long')===undefined&&m.delete(k)&&m.size===0");
+    boolean("let m=new Map(),a='é'+'😀',b='é'+'\\ud83d'+'\\ude00';m.set(a,7);m.set(b,9);m.size===1&&m.get(a)===9&&m.has(b)&&m.delete(b)&&m.size===0");
+    boolean("let m=new Map(),s='éabcdefghijkl';m.set(s.substring(1),7);m.get('abcdefghijkl')===7&&m.has(s.substring(1))");
+    boolean("let m=new Map(),a='\\ud800',b='\\udc00';m.set(a,1);m.set(b,2);m.set(a+b,3);m.size===3&&m.get(a)===1&&m.get(b)===2&&m.get('𐀀')===3");
+    boolean("let o={},k='long\\0key';o[k]=7;o['long'+'\\0key']===7&&Object.hasOwn(o,k)&&o.long===undefined");
+}
+
+TEST_F(JsMvpLmd, PropertyExpansionArrayWriteBranches) {
+    boolean("function put(a,i,v){a[i]=v}let a=[1,2];put(a,0,7);put(a,2,9);put(a,9,11);a.length===10&&a[0]===7&&a[1]===2&&a[2]===9&&a[8]===undefined&&a[9]===11");
+    boolean("function put(a,i,v){a[i]=v}let a=new Array(3);put(a,1,7);put(a,-1,8);put(a,0.5,9);a.length===3&&!(0 in a)&&a[1]===7&&a[-1]===8&&a[0.5]===9");
+    boolean("function put(a,i,v){a[i]=v}let a=[1];put(a,100000,7);put(a,0,9);put(a,100000,11);a.length===100001&&a[0]===9&&a[100000]===11&&a[99999]===undefined");
+    boolean("function put(a,i,v){a[i]=v}let a=[];put(a,0,5e-324);put(a,1,-0);put(a,0,-5e-324);let b=[];for(let i=0;i<1000;i++)b.push({i});a.length===2&&a[0]===-5e-324&&1/a[1]===-Infinity");
+    boolean("function put(a,i,v){a[i]=v}let a=[1,2];Object.defineProperty(a,'length',{writable:false});put(a,0,7);put(a,2,9);a.length===2&&a[0]===7&&a[2]===undefined");
+    boolean("function put(a,i,v){a[i]=v}let n=0,a=[1,2];Object.defineProperty(a,'1',{set(v){n+=v}});put(a,1,7);put(a,2,9);n===7&&a.length===3&&a[2]===9");
+}
+
+TEST_F(JsMvpLmd, PropertyExpansionLocalScalarInitialization) {
+    boolean("function f(a){const x=a[0];a[0]=7;let b=[];for(let i=0;i<1000;i++)b.push({i});return x===5e-324}f([5e-324])");
+    boolean("function f(a){const x=a[0],y=x;a[0]=9;return x===-5e-324&&y===-5e-324}f([-5e-324])");
+    boolean("function f(a){let sum=0;for(let i=0;i<3;i++){const x=a[i];a[i]=7;if(x===undefined||x===5e-324||1/x===-Infinity)sum++}return sum}f([5e-324,-0])===3");
+    boolean("function f(a){const x=a[0];let saved=()=>x;a[0]=7;return saved()}f([5e-324])===5e-324");
+    boolean("function f(){let a=[5e-324];function read(){const x=a[0];a[0]=9;return x}return read()}f()===5e-324");
+    boolean("function f(a){const x=a[0];a[0]=7;let b=[];for(let i=0;i<1000;i++)b.push({i});return x.n}f([{n:9}])===9");
+    boolean("function f(a){const x=a[0];a[0]=7;return x}let n=0,a=[];Object.defineProperty(a,'0',{get(){n++;return 5e-324},set(v){n+=v}});f(a)===5e-324&&n===8");
+    boolean("function f(a){const x=a[100000];a[100000]=7;return x}let a=[];a[100000]=5e-324;f(a)===5e-324");
+    boolean("let x;function f(a){const local=a[0];x=local;a[0]=7}f([5e-324]);x===5e-324");
+}
+
+TEST_F(JsMvpLmd, PropertyExpansionArrayPairOwnership) {
+    boolean("function f(rows){let n=0;for(let [x,y] of rows){rows[0][0]=7;rows[0][1]=8;let a=[];for(let i=0;i<1000;i++)a.push({i});if(x===5e-324&&1/y===-Infinity)n++}return n}f([[5e-324,-0]])===1");
+    boolean("function f(rows){let saved=[];for(let [x,y] of rows){rows[0][0]=7;rows[0][1]=8;saved.push(()=>x,()=>y)}return saved[0]()===5e-324&&saved[1]()===-5e-324}f([[5e-324,-5e-324]])");
+    boolean("function f(rows){for(let [x,y] of rows){rows[0]=null;let a=[];for(let i=0;i<2000;i++)a.push({i});return x.n+y.n}}f([[{n:7},{n:9}]])===16");
+    boolean("function f(rows){for(let [x,y] of rows)return x===5e-324&&y===9}let pair=[5e-324,0];Object.defineProperty(pair,'1',{get(){pair[0]=7;let a=[];for(let i=0;i<1000;i++)a.push({i});return 9}});f([pair])");
+    boolean("function f(rows){for(let [x,y] of rows){rows[0][0]=7;return x===5e-324&&y===undefined}}let pair=[5e-324];pair[100000]=9;f([pair])");
+    boolean("let x,y,rows=[[5e-324,-0]];for([x,y] of rows){rows[0][0]=7;rows[0][1]=8}x===5e-324&&1/y===-Infinity");
+    boolean("function f(rows){for(let [x,y] of rows)return x===7&&y===5e-324}let rows=[[1,2]];rows[Symbol.iterator]=function*(){yield [7,5e-324]};f(rows)");
+    boolean("function f(rows){let sum=0;for(let [x,y] of rows){for(let [u,v] of rows){sum+=x+y+u+v}}return sum}f([[5e-324,5e-324]])===2e-323");
+}

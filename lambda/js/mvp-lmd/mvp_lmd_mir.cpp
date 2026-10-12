@@ -3641,7 +3641,7 @@ static void array_index_write(LmdCompiler* c, LmdReference ref, LmdValue value,
     if (guarded_write) branch(c, MIR_UBGE, c->dense_loop->bail, reg(c, ref.key), reg(c, size));
     if (!initialize && !ref.dense_storage && (callbacks || (c->program->array_holes && ref.lanes != LMD_ARRAY_ITEMS)))
         branch_sparse_array(c, slow, ref.owner.reg);
-    if (!reserved) branch(c, callbacks ? MIR_UBGE : MIR_UBGT, slow, reg(c, ref.key), reg(c, size));
+    if (!reserved && callbacks) branch(c, MIR_UBGE, slow, reg(c, ref.key), reg(c, size));
     if (callbacks) {
         MIR_reg_t current = em_load_at(&c->em, em_array_element_address(&c->em, ref.owner.reg, ref.key, 8), 0, MIR_T_I64, "own_element");
         branch(c, MIR_BEQ, slow, reg(c, current), integer(c, ITEM_JS_DELETED_SENTINEL));
@@ -3655,15 +3655,18 @@ static void array_index_write(LmdCompiler* c, LmdReference ref, LmdValue value,
     }
     if (!reserved) {
         branch(c, MIR_UBLT, store, reg(c, ref.key), reg(c, size));
+        branch(c, MIR_BNE, slow, reg(c, ref.key), reg(c, size));
         MIR_reg_t capacity = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_CAPACITY, MIR_T_I64, "capacity");
         MIR_reg_t extra = em_load_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_EXTRA, MIR_T_I64, "tail_homes");
         branch(c, MIR_UBGE, slow, reg(c, size), reg(c, op(c, MIR_SUB, reg(c, capacity), reg(c, extra))));
+        // only append changes length; no safepoint occurs before the owned slot is installed.
+        em_store_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64,
+            op(c, MIR_ADD, reg(c, size), integer(c, 1)));
     }
     put_label(c, store);
     em_store_at(&c->em, em_array_element_address(&c->em, ref.owner.reg, ref.key, 8), 0, MIR_T_I64, item.reg);
-    if (!reserved) branch(c, MIR_UBLT, done, reg(c, ref.key), reg(c, size));
-    em_store_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64,
-        reserved ? constant(c, ref.index + 1) : op(c, MIR_ADD, reg(c, size), integer(c, 1)));
+    if (reserved) em_store_at(&c->em, ref.owner.reg, LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64,
+        constant(c, ref.index + 1));
     if (reserved && !scalar_home) return;
     jump(c, done);
     put_label(c, slow);
@@ -5341,11 +5344,11 @@ static bool remainder_zero(LmdCompiler* c, AstBinaryNode* test, LmdValue* result
     return true;
 }
 static bool string_concat(LmdCompiler* c, AstBinaryNode* node, LmdValue* result) {
-    AstNode* leaves[6];
+    AstNode* leaves[LAMBDA_STRING_CONCAT_MAX_PARTS];
     int count = 0;
     AstNode* left = (AstNode*)node;
     const unsigned primitives = K_STRING | K_NUMBER | K_BOOL | K_NULL | K_UNDEFINED;
-    while (left->node_type == AST_NODE_BINARY && count < 5) {
+    while (left->node_type == AST_NODE_BINARY && count < LAMBDA_STRING_CONCAT_MAX_PARTS - 1) {
         AstBinaryNode* part = (AstBinaryNode*)left;
         unsigned right_kind = kind(c->program, part->right, c->inlining);
         if (part->op != OPERATOR_ADD || kind(c->program, part->left, c->inlining) != K_STRING ||
@@ -5354,14 +5357,21 @@ static bool string_concat(LmdCompiler* c, AstBinaryNode* node, LmdValue* result)
     }
     if (count < 2) return false;
     leaves[count++] = left;
-    MIR_type_t types[6]; MIR_op_t args[6];
+    MIR_type_t types[LAMBDA_STRING_CONCAT_MAX_PARTS]; MIR_op_t args[LAMBDA_STRING_CONCAT_MAX_PARTS];
     for (int i = 0; i < count; i++) {
         // only primitive conversions can be combined; retain source evaluation and conversion order.
         LmdValue part = to_string(c, expression(c, leaves[count - i - 1]));
         types[i] = MIR_T_P; args[i] = reg(c, payload(c, part.reg));
     }
     const char* helpers[] = {"fn_strcat3", "fn_strcat4", "fn_strcat5", "fn_strcat6"};
-    MIR_reg_t joined = em_call_with_args(&c->em, helpers[count - 3], MIR_T_P, count, types, args, true);
+    MIR_reg_t joined;
+    if (count <= 6) joined = em_call_with_args(&c->em, helpers[count - 3], MIR_T_P, count, types, args, true);
+    else {
+        // reuse Lambda's variadic ABI and precise root handling for long primitive chains.
+        MIR_var_t prefix[] = {{MIR_T_I64, "owned", 0}, {MIR_T_I64, "count", 0}};
+        MIR_op_t values[] = {integer(c, 0), integer(c, count)};
+        joined = em_emit_vararg_call(&c->em, "fn_strcat_many", MIR_T_P, 1, 2, prefix, values, count, args);
+    }
     MIR_label_t valid = label(c), invalid = label(c);
     branch_truth(c, invalid, joined, false);
     branch(c, MIR_BNE, valid, reg(c, joined), integer(c, (uint64_t)&STR_ERROR));
@@ -6470,7 +6480,7 @@ static void for_of(LmdCompiler* c, JsForOfNode* loop, const char* name = NULL, i
         // a local identifier adopts the scalar before the body; captured cells may allocate first.
         bool borrow_iteration = !enumerate && iteration_binding && iteration_binding->owner->id && !iteration_binding->captured &&
             !iteration_binding->external && !iteration_binding->reflected_global;
-        move(c, item, reg(c, box(c, array_read(c, element, borrow_iteration, false, object_projection)).reg)); jump(c, body);
+        move(c, item, reg(c, box(c, array_read(c, element, borrow_iteration || borrow_pair, false, object_projection)).reg)); jump(c, body);
     }
     put_label(c, map);
     MIR_reg_t entries = em_load_at(&c->em, owner.reg, offsetof(LambdaGcOrderedMapLayout, entries), MIR_T_I64, "ordered_entries");
@@ -6525,8 +6535,9 @@ static void for_of(LmdCompiler* c, JsForOfNode* loop, const char* name = NULL, i
             fail(c, LMD_MVP_CAPABILITY, head); put_label(c, pair);
         }
         if (direct_pair) {
+            // local pairs adopt both values without reentry; array_read still snapshots accessor results.
             if (!native_map) for (int i = 0; i < 2; i++) move(c, components[i], reg(c, box(c,
-                array_read(c, {NULL, value, constant(c, i), true, i})).reg));
+                array_read(c, {NULL, value, constant(c, i), true, i}, borrow_pair)).reg));
             put_label(c, bind_pair);
         }
     }
@@ -6663,7 +6674,10 @@ static void statement(LmdCompiler* c, AstNode* n) {
             if (declaration->init && b->target && (AstNode*)b->target->ast == declaration->init &&
                     b->target->closed_calls && !b->observed && !b->assigned) continue;
             if (declaration->init || ((AstVarDeclNode*)n)->kind != JS_VAR_VAR) {
-                LmdValue value = expression(c, declaration->init);
+                // an uncaptured local adopts the scalar immediately, with no intervening call.
+                bool borrow = !c->inlining && b->owner == c->function && b->owner->id &&
+                    !b->captured && !b->external && !b->reflected_global && !b->native && !b->intrinsic;
+                LmdValue value = expression(c, declaration->init, borrow);
                 if (!b->shape_hint || b->shape_hint->scalar_binding != b)
                     write_binding(c, b, value, d, true);
             }
@@ -6800,6 +6814,7 @@ static const LmdImport imports[] = {
     {"fn_strcat4", (void*)fn_strcat4, AUDIT(JIT_EFFECT_MAY_GC, GC_PTR, ARG(0,GC_PTR)|ARG(1,GC_PTR)|ARG(2,GC_PTR)|ARG(3,GC_PTR))},
     {"fn_strcat5", (void*)fn_strcat5, AUDIT(JIT_EFFECT_MAY_GC, GC_PTR, ARG(0,GC_PTR)|ARG(1,GC_PTR)|ARG(2,GC_PTR)|ARG(3,GC_PTR)|ARG(4,GC_PTR))},
     {"fn_strcat6", (void*)fn_strcat6, AUDIT(JIT_EFFECT_MAY_GC, GC_PTR, ARG(0,GC_PTR)|ARG(1,GC_PTR)|ARG(2,GC_PTR)|ARG(3,GC_PTR)|ARG(4,GC_PTR)|ARG(5,GC_PTR))},
+    {"fn_strcat_many", (void*)fn_strcat_many, AUDIT(JIT_EFFECT_MAY_GC, GC_PTR, ARG(0,SCALAR)|ARG(1,SCALAR))},
     {"fn_string_freeze", (void*)fn_string_freeze, AUDIT(JIT_EFFECT_NO_GC, GC_PTR, ARG(0,GC_PTR))},
     {"mvp_lmd_string_compare", (void*)mvp_lmd_string_compare, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,ITEM)|ARG(1,ITEM))},
     {"mvp_lmd_string_at", (void*)mvp_lmd_string_at, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR)|ARG(2,SCALAR))},

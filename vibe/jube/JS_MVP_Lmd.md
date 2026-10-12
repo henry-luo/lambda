@@ -1444,21 +1444,31 @@ pinned-MIR self-timing checks of all **87 Result9 workloads**. Preserve Result9'
 known gate and timing limitations; record new evidence independently. Disclose
 new helpers before coding. General async/Node expansion is outside this phase.
 
-The current release passes **157/157** MVP groups normally and with forced
-GC/poison; **631/631** extracted cases pass on both Node and the frozen release.
-Shared LambdaJS Test262 passes **40,261/40,261** without retries. The Lambda
-baseline is **6,702/6,703**; its only failure is the preexisting `edit_view_only`
-mismatch reproduced on the exact phase-entry binary. LaTeX phase 3 passes.
+The current `array-pair` release passes **162/162** MVP groups normally and
+with forced GC/poison; **670/670** extracted cases pass on both Node and the
+frozen release. Final shared-code gates pass **6,709/6,709** Lambda baseline
+cases and **40,261/40,261** LambdaJS Test262 baseline cases without retries.
+These are shared-engine gates; the Test262 result is not an MVP conformance
+claim. The earlier LaTeX timeout also passes in the final aggregate gate.
 
-All **83 non-jq** prior workload contracts pass a fresh seven-round release,
-pinned-MIR, self-timed comparison. Hashmap also passes 15 measurements. The
-four jq workloads retain historical evidence only. Hyphen and Map iteration
-improve; object growth is within measurement noise. **Performance acceptance
-remains open:** 31-round confirmation finds Towers about **1%**, Knucleotide
-**1.4%**, and JSON Gen **2%** slower than the phase-entry control. Shared Lambda
-checks establish no slowdown against both controls; the 26–28 microsecond
-Sieve row remains borderline. Capability boundaries, exact hashes and evidence
-are recorded in the plan. Results3–9 are unchanged.
+The latest tuning reuses Lambda's long-string join, existing ASCII metadata
+for canonical key identity, and destination-owned scalar storage for immediate
+local and array-pair initialization; it removes redundant array-write bounds
+decisions (**S8.2.2v5**, **D4.6.1v4**, **D2.7.1**,
+**D5.3**). No new runtime helper or container flag is introduced.
+
+A monitored **31-round release, pinned-MIR, self-timed** comparison clears the
+three outstanding regressions against both copies of the exact phase-entry
+control: Towers **1.037 vs 1.059 ms** (2.1% faster), Knucleotide **3.639 vs
+3.795 ms** (4.1% faster), and JSON Gen **4.498 vs 5.619 ms** (20.0% faster).
+Triangl and Map Iteration also improve. The preceding release's complete
+**83/83** non-jq contract screen identified two smaller gaps. After array-pair
+tuning, Fasta is within noise (**0.882 vs 0.883 ms**), while Raytrace3D remains
+**1.8% slower** (**142.382 vs 139.804 ms**). The latest eight-workload capture
+includes all four sources affected by the final refinement. **Whole-phase
+performance acceptance remains open.** The four jq workloads retain historical
+evidence only. Capability boundaries, exact hashes and evidence are recorded
+in the plan. Results3–9 are unchanged.
 
 Full dependencies, reuse/helper inventory, acceptance fixtures and commands:
 [implementation plan](../impl/JS_MVP_Lmd_Property_Expansion.md).

@@ -85,7 +85,8 @@ bool mvp_lmd_descriptor_compatible(bool extensible, const JsPropertyDescriptor* 
 static Item canonical_string(Item value) {
     if (get_type_id(value) != LMD_TYPE_STRING) return value;
     String* s = value.get_string();
-    if (utf8_key_is_canonical(s->chars, s->len)) return value;
+    // ASCII metadata already proves canonical UTF-8, including embedded NULs.
+    if (s->is_ascii || utf8_key_is_canonical(s->chars, s->len)) return value;
     if (!context->name_pool) context->name_pool = name_pool_create_runtime(context->pool);
     String* name = heap_create_name(s->chars, s->len);
     return name ? Item{.item = s2it(name)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
@@ -102,10 +103,7 @@ extern "C" Item mvp_lmd_property_key(Item string) {
         string = mvp_lmd_primitive_to_string(string);
         if (item_is_error(string)) return string;
     }
-    String* s = string.get_string();
-    // most keys are already canonical; keep array/string indexing allocation-free.
-    if (!utf8_key_is_canonical(s->chars, s->len)) return canonical_string(string);
-    return string;
+    return canonical_string(string);
 }
 extern "C" Item mvp_lmd_object_new(TypeMap* shape, int64_t collection) {
     if (!collection) {
@@ -1025,7 +1023,7 @@ extern "C" Item mvp_lmd_map_call(Item owner, Item method_item, Item key, Item va
     }
     if (method < 1 || method > 4) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     // canonical keys, immediate updates and read/delete hits need no GC-capable setup.
-    if (get_type_id(key) == LMD_TYPE_STRING &&
+    if (get_type_id(key) == LMD_TYPE_STRING && !key.get_string()->is_ascii &&
             !utf8_key_is_canonical(key.get_string()->chars, key.get_string()->len))
         return map_call_owned(owner, method_item, key, value, -1, 0, -1);
     uint64_t hash = 0;
