@@ -2,6 +2,9 @@
 
 #include "../lib/shell.h"
 
+// sustained replays include many redraws before shutdown, even on a virtual clock.
+constexpr int RADIANT_VIEW_REPLAY_TIMEOUT_MS = 180000;
+
 // share isolated workspaces, host selection and launch reporting across View cases.
 struct RadiantViewLaunch {
     const char* label;

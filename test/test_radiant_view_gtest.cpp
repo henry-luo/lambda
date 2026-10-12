@@ -775,7 +775,7 @@ static void test_radiant_view_run_case(size_t index) {
     RadiantViewLaunch launch = {};
     launch.label = view_case->label; launch.page = view_case->path; launch.quiet = true;
     launch.env = view_case->requires_clean_memtrack ? memtrack_env : nullptr;
-    launch.timeout_ms = 180000;
+    launch.timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS;
     launch.event_path = view_case->event_path ? file_realpath(view_case->event_path) : nullptr;
     if (!test_radiant_view_prepare_launch(&launch)) {
         snprintf(result->message, sizeof(result->message), "could not prepare isolated view: %s", view_case->label);
@@ -1816,24 +1816,23 @@ TEST(RadiantViewTest, ScriptTimeoutDuringPostLoadTimerReleasesLayoutPassResource
 }
 
 TEST(RadiantViewTest, TetrisClosesAfterSustainedReactiveRedraws) {
-    test_radiant_view_ensure_temp_dir();
-    const char* result_path = "./temp/test_radiant_view_tetris_close.json";
-    remove(result_path);
-    const char* args[] = {
-        "./lambda.exe", "view", "test/demo/tetris/tetris.ls", "--headless", "--no-log",
-        "--event-file", "test/demo/tetris/tetris_close.json",
-        "--event-result", result_path, nullptr,
-    };
-    ShellOptions options = {};
-    // bound a shutdown hang; the replay advances gameplay on the virtual clock.
-    options.timeout_ms = 30000;
-    options.merge_stderr = true;
-    ShellResult result = shell_exec("./lambda.exe", args, &options);
-    EXPECT_FALSE(result.timed_out);
-    EXPECT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+    RadiantViewLaunch launch = {};
+    launch.label = "tetris_close";
+    launch.page = "test/demo/tetris/tetris.ls";
+    launch.event_path = "test/demo/tetris/tetris_close.json";
+    launch.quiet = true;
+    // the deadline includes 420 reactive redraws; use the sustained-replay budget under contention.
+    launch.timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS;
+    ASSERT_TRUE(test_radiant_view_prepare_launch(&launch));
+    test_radiant_view_launch(&launch);
+    test_radiant_view_record_launch(launch.label, launch.elapsed_ms,
+        launch.log_path, launch.timing_path);
+    ShellResult& result = launch.result;
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_FALSE(result.timed_out) << output;
+    EXPECT_EQ(0, result.exit_code) << output;
+    EXPECT_TRUE(test_radiant_view_file_contains(launch.event_result, "\"result\":\"PASS\""));
     shell_result_free(&result);
-    EXPECT_TRUE(test_radiant_view_file_contains(result_path, "\"result\":\"PASS\""));
-    remove(result_path);
 }
 
 TEST(RadiantViewTest, RendersObjectBoundingBoxPatternWithoutUserUnitTiling) {
@@ -2765,7 +2764,8 @@ TEST(RadiantViewTest, LambdaSelectValueReadsLiveOptionSelectedness) {
 }
 
 static void test_radiant_view_expect_replay(const char* page, const char* replay,
-        const ShellEnvEntry* env, bool clean_memtrack = false, int timeout_ms = 180000) {
+        const ShellEnvEntry* env, bool clean_memtrack = false,
+        int timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS) {
     ShellResult result = test_radiant_view_run_logged_headless(
         page, replay, env, nullptr, nullptr, timeout_ms);
     const char* output = result.stdout_buf ? result.stdout_buf : "";
@@ -2798,7 +2798,7 @@ static void test_radiant_view_photo_replays(const char* const* replays,
         size_t i = tier * replay_count + replay;
         snprintf(labels[i], sizeof(labels[i]), "photo_%s_%s", tiers[tier], replays[replay]);
         launches[i].label = labels[i]; launches[i].page = "test/demo/photo/photo.ls";
-        launches[i].timeout_ms = 180000;
+        launches[i].timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS;
         char path[1024];
         snprintf(path, sizeof(path), "%s/test/demo/photo/tests/%s.json", g_radiant_view_root, replays[replay]);
         launches[i].event_path = file_realpath(path);
