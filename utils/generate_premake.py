@@ -2964,7 +2964,7 @@ class PremakeGenerator:
                             lib_path = f"../../{lib_path}"
 
                         # Special handling for tree-sitter libraries - add them to external_static_libs (linkoptions)
-                        if lib_name in ['tree-sitter', 'tree-sitter-latex-math']:
+                        if lib_name == 'tree-sitter':
                             external_static_libs.append(lib_path)
                         # On Linux/Windows, static libs need to come after internal libs in link order
                         # because internal libraries can have unresolved symbols that these libs provide

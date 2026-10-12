@@ -1,0 +1,189 @@
+{
+  "name": "AnimatedCustomFiltersUpdateWithoutLayoutAndKeepOverridesAndGeometryDependencies",
+  "viewport": {
+    "width": 320,
+    "height": 100
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "css_animation",
+      "target": "#paint",
+      "seconds": 0.5
+    },
+    {
+      "type": "css_animation",
+      "target": "#geometry",
+      "seconds": 0.5
+    },
+    {
+      "type": "css_animation",
+      "target": "#scroll",
+      "seconds": 0.5
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "css_animation",
+      "target": "#paint",
+      "fields": {
+        "layout_changed": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "css_animation",
+      "target": "#geometry",
+      "fields": {
+        "layout_changed": 1
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "css_animation",
+      "target": "#scroll",
+      "fields": {
+        "layout_changed": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#tile",
+      "fields": {
+        "background_position_x_is_percent": 0,
+        "background_position_x": {
+          "eq": 16.0,
+          "tolerance": 0.001
+        }
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          40,
+          40,
+          127,
+          127,
+          127,
+          255,
+          2
+        ],
+        [
+          140,
+          40,
+          64,
+          64,
+          64,
+          255,
+          2
+        ],
+        [
+          244,
+          20,
+          0,
+          255,
+          0
+        ],
+        [
+          280,
+          20,
+          255,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "css_animation",
+      "target": "#paint",
+      "seconds": 0.75
+    },
+    {
+      "type": "css_animation",
+      "target": "#geometry",
+      "seconds": 0.75
+    },
+    {
+      "type": "css_animation",
+      "target": "#scroll",
+      "seconds": 0.75
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "css_animation",
+      "target": "#paint",
+      "fields": {
+        "layout_changed": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "css_animation",
+      "target": "#geometry",
+      "fields": {
+        "layout_changed": 1
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "css_animation",
+      "target": "#scroll",
+      "fields": {
+        "layout_changed": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#tile",
+      "fields": {
+        "background_position_x_is_percent": 0,
+        "background_position_x": {
+          "eq": 24.0,
+          "tolerance": 0.001
+        }
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          40,
+          40,
+          191,
+          191,
+          191,
+          255,
+          2
+        ],
+        [
+          140,
+          40,
+          64,
+          64,
+          64,
+          255,
+          2
+        ],
+        [
+          244,
+          20,
+          0,
+          255,
+          0
+        ],
+        [
+          280,
+          20,
+          255,
+          0,
+          0
+        ]
+      ]
+    }
+  ]
+}

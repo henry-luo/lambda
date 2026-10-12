@@ -50,7 +50,7 @@ These statuses refer to the proposal's complete acceptance gates, not merely the
 | P5: integration | Opt-in render API; commands, sections/segments, print selection, destinations, assets, CSS, processor metadata | Viewer invalidation interaction tests, richer hash/coverage metadata and all auxiliary-command combinations |
 | P6: acceptance | Package goldens, differential acceptance, exploratory slice, rendered preview and broad baseline checks | Full suite, larger bibliographies/performance, more entry types per style and cross-platform/rendered-export gates |
 
-The initial useful milestone is available. P0–P6 are not all marked complete, and the separate Phase IV M4 TeX-style execution proposal is unchanged.
+The initial useful milestone is available. P0–P6 are not all marked complete, and the separate Phase IV M4 TeX-style execution proposal was dropped on 2026-10-12 in favor of mapping guide-level biblatex styles to CSL ([design §7.4](../latex/Lambda_Design_BibTeX_CSL.md#74-biblatex-style-names-mapped-to-csl)); that mapping is not yet built.
 
 ## Validation evidence
 
@@ -111,3 +111,10 @@ The last exploratory command intentionally exits nonzero while differences remai
 6. Add general work limits and release-build scaling measurements for larger bibliographies before considering a default migration.
 
 These are outstanding compatibility and production-readiness work. No default migration or complete CSL compliance is claimed by the delivered opt-in implementation.
+
+## 2026-10-12: biblatex style aliases (design §7.4)
+
+- **Delivered.** `lmd/package/latex/citeproc/aliases.ls` maps `apa`, `ieee`, `chicago-authordate` and `chicago-notes` to the bundled `apa`, `ieee`, `chicago-author-date` and `chicago-fullnote-bibliography` styles. `latex.render_result` uses the alias as the CSL request when the caller passes no `citeproc` option. `packages/registry.ls` gains `biblatex-chicago`, which implies `biblatex` with the Chicago style named by its option (default `notes`).
+- **Diagnostics.** `csl-style-alias` names the substitution; `csl-alias-option-ignored` and `csl-alias-customization` report what CSL cannot follow; the aliased name's `unsupported-bib-style` report is dropped. `result.metadata.bibliography.biblatex_style` records the biblatex name.
+- **Tests.** New `test_latex_csl_alias` (ten cases). `test_latex_biblatex_negative` used `style=apa` as its unsupported style; its fixture now uses the unmapped `style=mla`, so its golden is unchanged. All 59 `test/lambda/latex` scripts and the two LaTeX UI fixtures pass.
+- **Admission (same day).** The toolchain was installed into a private TeX Live user tree under `temp/` from the frozen TeX Live 2025 repository: biblatex 3.21, biblatex-apa 9.20, biblatex-ieee 1.4f, biblatex-chicago 3.18b, logreq and xstring. biber 2.21 is a binary package that user mode cannot install, so its archive was downloaded and checked against the repository's recorded SHA-512. The current TeX Live repository is the 2026 release, which a 2025 installation refuses, and one mirror served archives that failed their checksums; both were avoided by using the frozen repository. Four fixture documents in `fixtures/csl_alias/` were compiled with pdflatex, biber and pdflatex twice. The pinned PDFs, extracted text and manifest are in `test/latex/reference/csl_alias/`, and the new `test_latex_csl_alias_reference` compares every citation, entry and note. Its golden records the remaining differences, all explained in the reference README. The capture exposed one defect, now fixed in `render.ls`: a note-style `\autocite` mark now follows the punctuation after it (`autopunct`). All 60 `test/lambda/latex` scripts pass.

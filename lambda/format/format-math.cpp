@@ -1,10 +1,9 @@
 // format-math.cpp - Math expression formatter
 //
-// Formats MathNode trees to various output formats (LaTeX, Typst, ASCII, MathML).
-//
-// NOTE: The MathNode-based formatting (format-math2.cpp) has been removed.
-// These functions are temporarily stubbed out. Math formatting will be
-// reimplemented using the unified TeX/TexNode pipeline.
+// Formats parsed math ASTs back to source text. LaTeX and ASCII delegate to
+// the MarkReader-based formatters in format-math-latex.cpp and
+// format-math-ascii.cpp. Typst and MathML output are not implemented and
+// return null; their former MathNode/TexNode paths were removed.
 
 #include "format.h"
 #include "../../lib/log.h"
@@ -19,7 +18,7 @@ String* format_math_latex(Pool* pool, Item root_item) {
 String* format_math_typst(Pool* pool, Item root_item) {
     (void)pool;
     (void)root_item;
-    log_debug("format_math_typst: MathNode formatting disabled - to be reimplemented with TexNode");
+    log_debug("format_math_typst: Typst math output is not implemented");
     return nullptr;
 }
 
@@ -32,7 +31,7 @@ String* format_math_ascii(Pool* pool, Item root_item) {
 String* format_math_mathml(Pool* pool, Item root_item) {
     (void)pool;
     (void)root_item;
-    log_debug("format_math_mathml: MathNode formatting disabled - to be reimplemented with TexNode");
+    log_debug("format_math_mathml: MathML math output is not implemented");
     return nullptr;
 }
 

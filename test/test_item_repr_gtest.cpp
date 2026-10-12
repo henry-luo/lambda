@@ -288,6 +288,24 @@ protected:
     }
 };
 
+TEST_F(RuntimeShapeTransition, EvalThreadTransferPreservesQuiescentOwnerAndRejectsExecutingOwner) {
+    EvalContext other = {};
+    EXPECT_FALSE(eval_context_transfer_thread(nullptr));
+    EXPECT_EQ(context, &eval);
+    eval.execution_depth++;
+    EXPECT_TRUE(eval_context_transfer_thread(&eval));
+    EXPECT_FALSE(eval_context_transfer_thread(&other));
+    EXPECT_EQ(context, &eval);
+    eval.execution_depth--;
+    EXPECT_TRUE(eval_context_transfer_thread(&other));
+    EXPECT_EQ(context, &other);
+    EXPECT_NE(other.stack_limit, 0u);
+    EXPECT_FALSE(js_runtime_state_thread_matches(&eval));
+    EXPECT_TRUE(eval_context_transfer_thread(&eval));
+    EXPECT_EQ(context, &eval);
+    EXPECT_TRUE(js_runtime_state_init(&eval));
+}
+
 TEST_F(RuntimeShapeTransition, ArrayContractsKeepIdentityBeyondThirtyTwoSpellings) {
     TypeUnary* contracts = (TypeUnary*)pool_calloc(pool, 80 * sizeof(TypeUnary));
     ASSERT_NE(contracts, nullptr);

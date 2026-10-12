@@ -21,6 +21,7 @@ import bib_style: .packages.bib_style
 import bib_data: .packages.bib_data
 import csl_resources: .citeproc.resources
 import csl: .citeproc.adapter
+import csl_aliases: .citeproc.aliases
 import hyperref: .packages.hyperref
 import amsmath: .packages.amsmath
 import paths: lambda.edit.session
@@ -35,10 +36,11 @@ import caption: .packages.caption
 // Public API — HTML string output
 // ============================================================
 
-// §9.2: the TeX engine expands the document, and the package files beside
-// it, before the direct parser builds the AST
+// D7.2.7: every LaTeX parse expands with the TeX engine before the direct parser
+// builds the AST; the package supplies its adapter registry so local files never
+// shadow an adapter and adapter commands keep raw arguments
 pub fn parse_source(latex_source, base) =>
-    parse(latex_source, {type: "latex", expand: true, base: base,
+    parse(latex_source, {type: "latex", base: base,
         packages: registry.adapter_names(), raw: registry.RAW_ARGUMENT_COMMANDS}) ^ { null }
 
 pub fn parse_file(file_path) {
@@ -69,7 +71,7 @@ pub fn render_to_html(ast, options) {
 // ============================================================
 
 // render a LaTeX AST (already parsed) to HTML elements
-// options: {docclass, standalone, numbering, toc}
+// options: {standalone, base_uri, source_path, target, paged, citeproc, language}
 pub fn render(ast, options) {
     render_result(ast, options).elements
 }
@@ -86,13 +88,24 @@ pub fn render_result(ast, options) {
         amsmath.operators(ast) else {definitions: [], diagnostics: []}
     // package activation precedes counter and label analysis.
     let language = document_language(options, loaded.packages, polyglossia)
-    let csl_capture = if (options != null and options.citeproc != null)
-        csl_resources.load(ast, base_uri, options.citeproc, language) else null
+    let biblatex_options = registry.options_for(loaded.packages, "biblatex")
+    let explicit_citeproc = if (options == null) null else options.citeproc
+    // a guide-level biblatex style selects its CSL style unless the caller chose one
+    // (Lambda_Design_BibTeX_CSL §7.4)
+    let style_alias = if (explicit_citeproc != null) null
+        else csl_aliases.select(biblatex_options, ast,
+            registry.offset_for(loaded.packages, "biblatex"))
+    let citeproc_request = if (explicit_citeproc != null) explicit_citeproc
+        else if (style_alias != null) style_alias.citeproc else null
+    let csl_capture = if (citeproc_request != null)
+        csl_resources.load(ast, base_uri, citeproc_request, language) else null
     let base_info = analyzer.analyze_with_language(ast, loaded.packages, language,
         {citeproc: csl_capture != null, note_style: csl_capture.compiled.style.class == "note"})
     let bibliography = if (csl_capture != null)
         csl.prepare(ast, csl_capture, base_info.footnotes,
-            {*:options.citeproc, legacy_options: registry.options_for(loaded.packages, "biblatex")})
+            // under an alias the biblatex style is the request, not a conflict;
+            // the options CSL cannot follow are reported by the alias itself
+            {*:citeproc_request, legacy_options: if (style_alias != null) {} else biblatex_options})
         else if (registry.active(loaded.packages, "biblatex"))
         biblatex.prepare(ast, base_uri,
             registry.options_for(loaded.packages, "biblatex"), language)
@@ -143,7 +156,6 @@ pub fn render_result(ast, options) {
                 caption_options: caption.initial(registry.options_for(loaded.packages, "caption"),
                     registry.options_for(loaded.packages, "subcaption")),
                 caption_type: null, caption_number: null,
-                macro_depth: 0,
                 math_bold: false,
                 greek_polytonic: language_profile.greek_polytonic(ast),
                 font_size: null, line_height: null, font_groups: [],
@@ -160,7 +172,11 @@ pub fn render_result(ast, options) {
     } else {
         completed
     }
-    let diagnostics = engine_diagnostics(ast) ++ loaded.diagnostics ++ math_operators.diagnostics ++
+    // an aliased style is supported through CSL, so its unsupported-style report is dropped
+    let package_issues = if (style_alias == null) loaded.diagnostics
+        else [for (issue in loaded.diagnostics where not (issue.code == "unsupported-bib-style" and
+            issue.item == style_alias.biblatex_style)) issue] ++ style_alias.diagnostics
+    let diagnostics = engine_diagnostics(ast) ++ package_issues ++ math_operators.diagnostics ++
         bibliography.diagnostics ++ language_issues ++ cleveref_issues ++ font_issues ++
         math_font_issues ++ script_font_issues ++ greek_font_issues ++ helvet_issues ++
         hyperref.issues(link_settings, registry.offset_for(loaded.packages, "hyperref")) ++
@@ -195,7 +211,8 @@ pub fn render_result(ast, options) {
      stylesheet: css.get_stylesheet() ++ math.stylesheet(options) ++ package_stylesheet(info),
      metadata: if (csl_capture == null) hyperref.metadata(link_settings, info.title, info.author)
          else {*:hyperref.metadata(link_settings, info.title, info.author),
-             bibliography: bibliography.metadata},
+             bibliography: if (style_alias == null) bibliography.metadata
+                 else {*:bibliography.metadata, biblatex_style: style_alias.biblatex_style}},
      packages: loaded.packages, diagnostics: diagnostics,
      assets: registry.assets(ast, info.base_uri) ++ (if (csl_capture == null)
          bib_data.resource_assets(ast, info.base_uri) else bibliography.assets)}
@@ -208,7 +225,7 @@ fn document_language(options, packages, polyglossia) {
     else language_profile.babel_default(registry.options_for(packages, "babel"))
 }
 
-// §9.7: TeX engine errors are located diagnostics of the `tex` package
+// Lambda_Design_TeX_Engine §8: TeX engine errors are located diagnostics of the `tex` package
 fn engine_diagnostics(ast) {
     let issues = if (ast == null or ast.tex_diagnostics == null) [] else ast.tex_diagnostics;
     [for (issue in issues) util.diagnostic(issue.code, "tex", issue.file, issue.message, issue.offset)]
@@ -279,6 +296,16 @@ pub fn render_document(ast, options) {
         else if (options.standalone == null) {*:options, standalone: true}
         else options
     render(ast, effective)
+}
+
+// Path-source entry for the native document transform (CLI convert, Radiant):
+// parsing here, not natively, gives the engine the adapter registry (D7.2.7).
+pub fn render_document_file(file_path, options) any^ {
+    let source = input(file_path, "text") ^ { raise error("could not read " ++ file_path, ^) }
+    let ast = parse_source(source, file_path)
+    if (ast == null) raise error("could not parse LaTeX document " ++ file_path)
+    else render_document(ast, if (options == null) {source_path: file_path}
+        else {*:options, source_path: file_path})
 }
 
 fn is_standalone(options) {

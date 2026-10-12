@@ -66,6 +66,8 @@ LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1 LAMBDA_POST_LOAD_SETTLE_MS=200
 # known-failure inventories are not part of the fast Radiant baseline gate.
 # Derive native build projects from the same suite selection used for execution.
 RADIANT_BASELINE_TEST_PROJECTS = $(shell node test/test_run.js --target=radiant --category=baseline --list-build-targets)
+# Native runners can use release code for whole-gate performance measurements.
+RADIANT_TEST_CONFIG ?= debug_native
 # These are the native projects selected by test-lambda-baseline. Keep this
 # list aligned with the runner's non-extended config projects; otherwise a
 # clean baseline run reports a missing executable. The concurrency and Node
@@ -225,8 +227,6 @@ TREE_SITTER_JAVASCRIPT_LIB = lambda/tree-sitter-javascript/libtree-sitter-javasc
 TREE_SITTER_BASH_LIB = lambda/tree-sitter-bash/libtree-sitter-bash.a
 TREE_SITTER_TYPESCRIPT_LIB = lambda/tree-sitter-typescript/libtree-sitter-typescript.a
 TREE_SITTER_RUBY_LIB = lambda/tree-sitter-ruby/libtree-sitter-ruby.a
-TREE_SITTER_LATEX_LIB = lambda/tree-sitter-latex/libtree-sitter-latex.a
-TREE_SITTER_LATEX_MATH_LIB = lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a
 # RE2 is vendored in-tree at lib/re2 (see lib/re2/VENDOR.md), pinned to the last
 # release before upstream required Abseil. It is built out of tree with its own
 # CMake so the vendored directory stays clean. Like MIR, the patches under
@@ -272,16 +272,6 @@ TS_GRAMMAR_JS = lambda/tree-sitter-typescript/grammar.js
 TS_PARSER_C = lambda/tree-sitter-typescript/src/parser.c
 TS_SCANNER_C = lambda/tree-sitter-typescript/src/scanner.c
 TS_SCANNER_H = lambda/tree-sitter-typescript/scanner_v2.h
-
-# LaTeX grammar dependencies
-LATEX_GRAMMAR_JS = lambda/tree-sitter-latex/grammar.js
-LATEX_PARSER_C = lambda/tree-sitter-latex/src/parser.c
-LATEX_GRAMMAR_JSON = lambda/tree-sitter-latex/src/grammar.json
-LATEX_NODE_TYPES_JSON = lambda/tree-sitter-latex/src/node-types.json
-
-# LaTeX Math grammar dependencies
-LATEX_MATH_GRAMMAR_JS = lambda/tree-sitter-latex-math/grammar.js
-LATEX_MATH_PARSER_C = lambda/tree-sitter-latex-math/src/parser.c
 
 # Quietly build lambda/tree-sitter-$(1)'s static lib: run the sub-make with its
 # output captured and shown only on failure, so a successful parser build is a
@@ -344,23 +334,6 @@ $(TREE_SITTER_TYPESCRIPT_LIB): $(TS_PARSER_C) $(TS_SCANNER_C) $(TS_SCANNER_H)
 $(TREE_SITTER_RUBY_LIB): $(RUBY_GRAMMAR_JS) $(RUBY_SCANNER_C)
 	$(call ts_generate,ruby,--abi 14)
 	$(call ts_lib_build,ruby,)
-
-# Generate LaTeX parser from grammar.js when it changes
-$(LATEX_PARSER_C) $(LATEX_GRAMMAR_JSON) $(LATEX_NODE_TYPES_JSON): $(LATEX_GRAMMAR_JS)
-	@out=$$(cd lambda/tree-sitter-latex && $(TREE_SITTER_CLI) generate --abi 14 2>&1) || { printf '%s\n' "$$out"; exit 1; }
-
-# Build tree-sitter-latex library (depends on parser generation)
-$(TREE_SITTER_LATEX_LIB): $(LATEX_PARSER_C)
-	$(call ts_lib_build,latex,)
-
-# Generate LaTeX Math parser from grammar.js when it changes.
-# ABI 14, like the other vendored grammars (see TREE_SITTER_CLI).
-$(LATEX_MATH_PARSER_C): $(LATEX_MATH_GRAMMAR_JS)
-	@out=$$(cd lambda/tree-sitter-latex-math && $(TREE_SITTER_CLI) generate --abi 14 2>&1) || { printf '%s\n' "$$out"; exit 1; }
-
-# Build tree-sitter-latex-math library (depends on parser generation)
-$(TREE_SITTER_LATEX_MATH_LIB): $(LATEX_MATH_PARSER_C)
-	$(call ts_lib_build,latex-math,)
 
 # Build re2 library (reconfigures cmake if CMakeCache is stale/wrong platform)
 # On Windows/CLANG64: must pass explicit compiler flags so cmake uses clang++
@@ -583,8 +556,8 @@ define run_make_with_error_summary
 endef
 
 # All Tree-sitter grammars are reference-only and build exclusively for the
-# CST differential verifier, including Lambda/JS/TS and LaTeX/Math grammars.
-tree-sitter-cst-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
+# CST differential verifier: the Lambda, JS and TS grammars.
+tree-sitter-cst-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB)
 
 # Jube-only parser archives (Bash, Ruby) are built outside the host.
 tree-sitter-jube-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_RUBY_LIB)
@@ -662,7 +635,7 @@ help:
 	@echo "  test-js-parser-diff - JS/TS C parser versus Tree-sitter CST reference"
 	@echo "  generate-names - Regenerate immutable NameId catalogs from the Python source list"
 	@echo "  tree-sitter-libs - Build Tree-sitter libraries for Jube modules"
-	@echo "  tree-sitter-cst-libs - Build the isolated Lambda/JS/TS/LaTeX/Math reference grammars"
+	@echo "  tree-sitter-cst-libs - Build the isolated Lambda/JS/TS reference grammars"
 	@echo "                     Automatically regenerates reference parsers if grammar.js changes"
 	@echo ""
 	@echo "Development:"
@@ -1594,8 +1567,6 @@ clean-all: clean-premake clean-test
 	@rm -f lambda/tree-sitter-bash/libtree-sitter-bash.a lambda/tree-sitter-bash/src/*.o
 	@rm -f lambda/tree-sitter-typescript/libtree-sitter-typescript.a lambda/tree-sitter-typescript/src/*.o
 	@rm -f lambda/tree-sitter-ruby/libtree-sitter-ruby.a lambda/tree-sitter-ruby/src/*.o
-	@rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o
-	@rm -f lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a lambda/tree-sitter-latex-math/src/*.o
 	@rm -rf $(RE2_BUILD_DIR)
 	@$(MAKE) --no-print-directory clean-mir
 	@echo "All build directories and tree-sitter libraries cleaned."
@@ -2060,9 +2031,8 @@ LAYOUT_BASELINE_SUITES ?= form wpt-css-box wpt-css-text wpt-css-inline wpt-css-s
 # baseline regressions.
 # Keep one shared layout context per 100-file batch; the runner resets
 # document-scoped caches between files and reaps timed-out workers.
-LAYOUT_BASELINE_RUNNER = $(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --baseline-only --batch-size 100 --concurrency 1
-# Layout categories clear temp/ before each batch; keep aggregate records outside
-# that workspace so a later suite cannot erase an earlier suite's result.
+LAYOUT_BASELINE_CONCURRENCY ?= 4
+# Keep aggregate records separate from the layout harness's scratch artifacts.
 LAYOUT_BASELINE_RESULTS = test_output/_layout_baseline_results.txt
 
 # Keep the layout-only and full Radiant reports on the same aggregation and
@@ -2128,45 +2098,16 @@ endef
 # Run the shared layout baseline inventory without building. Suites with a
 # recorded baseline run only those entries; suites without one run in full.
 run-layout-baseline-suites:
-	@mkdir -p test_output; \
-	> $(LAYOUT_BASELINE_RESULTS); \
-	any_failed=0; \
-	echo ""; \
-	echo "📦 Layout Baseline Tests:"; \
-	for suite in $(LAYOUT_BASELINE_SUITES); do \
-		echo ""; \
-		echo "  ▸ $$suite:"; \
-		layout_log="test_output/_layout_baseline_$${suite}.log"; \
-		rm -f "$$layout_log"; \
-		layout_exit=0; \
-		s_start=$$(date +%s); \
-		$(LAYOUT_BASELINE_RUNNER) -c "$$suite" > "$$layout_log" 2>&1 || layout_exit=$$?; \
-		s_elapsed=$$(($$(date +%s) - s_start)); \
-		grep -E "Baseline-only:|No recorded baseline" "$$layout_log" | head -1 || true; \
-		grep -A5 "Summary:" "$$layout_log" | tail -6 || true; \
-		grep "Baseline Regressions" "$$layout_log" | head -1 || true; \
-		s_passed=$$(grep "   ✅ Successful:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_passed=$${s_passed:-0}; \
-		s_partial=$$(grep "   ⚠️  Partially Passing:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_partial=$${s_partial:-0}; \
-		s_skipped=$$(grep "Skipped:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_skipped=$${s_skipped:-0}; \
-		s_failed=$$(grep "   ❌ Failed:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_failed=$${s_failed:-0}; \
-		s_status="✅ PASS"; \
-		if grep -q "Baseline Regressions" "$$layout_log"; then \
-			s_status="❌ FAIL"; any_failed=1; \
-		elif [ $$layout_exit -ne 0 ] || ! grep -q "   ✅ Successful:" "$$layout_log"; then \
-			if [ $$s_failed -eq 0 ]; then s_failed=1; fi; \
-			s_status="❌ FAIL"; any_failed=1; \
-		fi; \
-		echo "$$suite|$$s_status|$$s_passed|$$s_partial|$$s_failed|$$s_skipped|$$s_elapsed" >> $(LAYOUT_BASELINE_RESULTS); \
-		rm -f "$$layout_log"; \
-	done; \
-	if [ $$any_failed -gt 0 ]; then exit 1; fi
+	@$(LAYOUT_TEST_ENV) node test/run_layout_baseline.js --suites "$(LAYOUT_BASELINE_SUITES)" \
+		--jobs $(LAYOUT_BASELINE_CONCURRENCY) --results "$(LAYOUT_BASELINE_RESULTS)"
 
 test-radiant-baseline: build-radiant-baseline
 	@$(MAKE) --no-print-directory run-radiant-baseline
 
 .PHONY: test-scene3d
 test-scene3d: build-radiant-baseline
-	@./test/test_scene3d_gtest.exe
+	@./test/test_radiant_view_gtest.exe --gtest_filter='Scene3dTest.*:EventSimRenderTest.*'
+	@./test/test_scene3d_unit_gtest.exe
 
 .PHONY: test-map
 test-map: build-radiant-baseline
@@ -2216,9 +2157,9 @@ test-svg-smil: build
 	@node test/svg/test_svg_smil.cjs $(ARGS)
 
 # All Radiant checks use the shared runner's JSON artifacts and final report.
-# Keep suite execution sequential: layout categories reuse and clear temp/.
+# Native and script pools share a worker budget; artifact-sharing checks remain exclusive.
 run-radiant-baseline:
-	@RADIANT_RENDER_JOBS=$(RADIANT_RENDER_JOBS) node test/test_run.js --target=radiant --category=baseline --sequential $(ARGS)
+	@RADIANT_RENDER_JOBS=$(RADIANT_RENDER_JOBS) node test/test_run.js --target=radiant --category=baseline $(ARGS)
 
 # Run only the shared layout baseline inventory; page snapshots belong to the
 # full Radiant baseline target.
@@ -3287,7 +3228,7 @@ build-radiant-baseline:
 	$(MAKE) generate-premake
 	cd build/premake && PATH="/clang64/bin:$$PATH" $(PREMAKE5) gmake --file=../../$(PREMAKE_FILE)
 	@echo "Building lambda-data static archive with $(TEST_JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_native lambda-data-cpp -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+	$(MAKE) -C build/premake config=$(RADIANT_TEST_CONFIG) lambda-data-cpp -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
 	@if [ -f .lambda_release_build ]; then \
 		echo "Rebuilding lambda.exe in release mode (incremental)..."; \
 		$(MAKE) -C build/premake config=release_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"; \
@@ -3296,8 +3237,8 @@ build-radiant-baseline:
 		rm -f lambda.exe; \
 		$(MAKE) -C build/premake config=debug_native lambda -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"; \
 	fi
-	@echo "Building Radiant baseline test executables (debug mode, $(TEST_JOBS) jobs)..."
-	PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=debug_native $(RADIANT_BASELINE_TEST_PROJECTS) -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+	@echo "Building Radiant baseline test executables ($(RADIANT_TEST_CONFIG), $(TEST_JOBS) jobs)..."
+	PATH="/clang64/bin:$$PATH" $(MAKE) -C build/premake config=$(RADIANT_TEST_CONFIG) $(RADIANT_BASELINE_TEST_PROJECTS) -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
 
 # Capture browser layout references using Puppeteer
 # Usage:

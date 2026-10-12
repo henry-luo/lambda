@@ -44,21 +44,23 @@ pub fn responsive(spec, viewport = null) {
         cards:{*:spec.cards,*:c.attrs(override.cards)}}
 }
 
-pub fn cards(spec, snapshot = null) {
+pub fn cards(spec, snapshot = null, displayed = null) {
     let p = theme.prefix(spec);
     let reversed = spec.cards.reverse == true;
     let pending = if (spec.pending != null and spec.pending != false) [{id:"pending",content:if (spec.pending is map) spec.pending.content else if (spec.pending == true) null else spec.pending,
         marker:spec.pending.marker,loading:true,placement:"start",color:spec.pending.color}] else [];
     let shown=layout.visible(spec,snapshot);
     let active=if (snapshot.active_id!=null) snapshot.active_id else spec.events[0].id;
-    let original = [*[for (item in shown.events where spec.cards.visibility!="active" or item.id==active) item], *pending];
+    let rows=if (displayed!=null) [for (item in displayed.plan.events) {*:item.event,_motion:item}] else shown.events;
+    let original = [*[for (item in rows where spec.cards.visibility!="active" or item.id==active) item], *pending];
     let ordered = if (reversed) reverse(original) else original;
     let items = ordered |: ~.visible != false;
     let labels = any([for (item in items) item.display_date != null]);
     let split = labels or spec.placement == "alternate";
     let root = theme.part(spec,"root",{*:c.attributes(spec),class:p ++ " " ++ p ++ "-" ++ spec.orientation ++
         (if (split) " " ++ p ++ "-labelled" else "") ++ (if (spec.placement == "end") " " ++ p ++ "-end" else "") ++
-        (if (spec.class != null) " " ++ spec.class else ""),style:theme.variables(spec,snapshot) ++ c.text(spec.style),dir:spec.direction});
+        (if (spec.class != null) " " ++ spec.class else ""),style:theme.variables(spec,snapshot) ++ c.text(spec.style) ++
+            (if (displayed!=null) ";position:relative;" else ""),dir:spec.direction});
     <ol *:root,'data-timeline-host':if (spec.live_host==true) c.text(spec.id) else null,
         *[for (index,item in items,
             let side=if (item.placement == "end") "end" else "start",
@@ -68,8 +70,11 @@ pub fn cards(spec, snapshot = null) {
             let attrs=theme.part(spec,"event",{*:c.attributes(item),id:if (spec.id != null) "timeline-" ++ util.binding_key([spec.id,item.id]) else null,
                 class:p ++ "-item " ++ p ++ "-item-" ++ side ++
                 (if (is_pending) " " ++ p ++ "-pending" else "") ++ (if (pending_rail) " " ++ p ++ "-rail-pending" else "") ++
-                (if (item.class != null) " " ++ item.class else ""),style:(if (item.color != null) "--" ++ p ++ "-color:" ++ item.color ++ ";" else "") ++ c.text(item.style),
-                'data-timeline-id':item.id,'aria-current':if (snapshot.active_id == item.id) "step" else null,
+                (if (item.class != null) " " ++ item.class else ""),
+                *:(if (item._motion.exiting==true) {'data-timeline-outgoing':item.id,inert:"",'aria-hidden':"true"} else {'data-timeline-id':item.id}),
+                style:(if (item.color != null) "--" ++ p ++ "-color:" ++ item.color ++ ";" else "") ++ c.text(item.style) ++
+                    (if (item._motion!=null) sequence_style(item._motion,displayed.plan) else ""),
+                'aria-current':if (snapshot.active_id == item.id) "step" else null,
                 tabindex:if (item.id==active) "0" else "-1",
                 'aria-selected':if (snapshot.selected_ids != null) c.text(contains(snapshot.selected_ids,item.id)) else null}))
             <li *:attrs,
@@ -79,12 +84,21 @@ pub fn cards(spec, snapshot = null) {
                 theme.render(spec,"card",item,<div *:theme.part(spec,"card",{class:p ++ "-content" ++ (if (spec.cards.text_overlay==true) " lambda-timeline-text-overlay" else ""),
                     style:theme.card_style(spec,item)}),
                     *[if (not split and item.display_date != null) <div class:p ++ "-title",style:theme.card_style(spec,item,"date"),callback(item.display_date,item,spec)> else null,
-                    *body(item,spec,snapshot)]>)]>]>
+                    *body(item,spec,if (item._motion.exiting==true) {*:c.attrs(snapshot),passive:true} else snapshot)]>)]>]>
+}
+fn sequence_style(item, plan) {
+    let bounds=item.bounds;
+    let target=item.target_bounds;
+    let origin=plan.sequence_origin;
+    "opacity:" ++ c.text(c.option(item,"opacity",1)) ++ ";" ++
+        (if (item.exiting==true) "position:absolute;left:" ++ c.text(bounds.left-c.option(origin,"left",0)) ++ "px;top:" ++
+            c.text(bounds.top-c.option(origin,"top",0)) ++ "px;width:" ++ c.text(bounds.right-bounds.left) ++ "px;"
+        else if (target!=null) "transform:translate(" ++ c.text(bounds.left-target.left) ++ "px," ++ c.text(bounds.top-target.top) ++ "px);" else "")
 }
 
-pub fn html(raw, viewport = null, snapshot = null) {
+pub fn html(raw, viewport = null, snapshot = null, displayed = null) {
     let spec=responsive(raw,viewport);
-    let plan=if (spec.view!="cards" or spec.spacing=="time") layout.normalized(spec,viewport,snapshot) else null;
+    let plan=if (displayed!=null) displayed.plan else if (spec.view!="cards" or spec.spacing=="time") layout.normalized(spec,viewport,snapshot) else null;
     let active=if (snapshot.active_id!=null) snapshot.active_id else if (spec.story.active_id!=null) c.text(spec.story.active_id)
         else story.items(spec,snapshot)[if (spec.story.start_at_end) len(story.items(spec,snapshot))-1 else 0].id;
     let sampled=story.frame(spec,snapshot);
@@ -106,21 +120,24 @@ pub fn html(raw, viewport = null, snapshot = null) {
         if (spec.toolbar.visible!=false and spec.toolbar.enabled!=false and spec.toolbar.position!="bottom") controls(spec,snapshot);
         if (len(spec.groups)>0) group_headers(spec,snapshot);
         editing.pending(spec,snapshot);
-        *(if (spec.view=="cards" and spec.spacing=="sequence") [cards(spec,snapshot)]
+        *(if (spec.view=="cards" and spec.spacing=="sequence") [cards(spec,snapshot,displayed)]
         else [if (spec.view=="story") story_stage(spec,snapshot,active,sampled),
             <div class:"lambda-timeline-canvas",style:"position:relative;width:" ++ c.text(plan.width) ++ "px;height:" ++ c.text(plan.height) ++ "px;",
-                vector.render(plan,snapshot,{unsupported:"omit",cards:spec.view=="story"});
+                if (displayed!=null) displayed.svg else vector.render(plan,snapshot,{unsupported:"omit",cards:spec.view=="story"});
                 *[for (item in plan.events where spec.view!="story" and (spec.cards.visibility!="active" or item.id==active),
                     let b=item.bounds)
                     <article *:theme.part(spec,"card",{class:"lambda-timeline-overlay-card" ++ (if (spec.cards.text_overlay==true) " lambda-timeline-text-overlay" else ""),
-                        *:(if (item.cluster==true) {'data-timeline-cluster':item.id} else {'data-timeline-id':item.id}),
+                        *:(if (item.exiting==true) {'data-timeline-outgoing':item.id,inert:"",'aria-hidden':"true"}
+                            else if (item.cluster==true) {'data-timeline-cluster':item.id} else {'data-timeline-id':item.id}),
                         tabindex:if (active==item.id) "0" else "-1",'aria-current':if (active==item.id) "step" else null,
                         style:"box-sizing:border-box;position:absolute;left:" ++ c.text(b.left) ++ "px;top:" ++ c.text(b.top) ++
                             "px;width:" ++ c.text(b.right-b.left) ++ "px;height:" ++ c.text(b.bottom-b.top) ++
-                            "px;" ++ card.overlay_style(spec,item.event,b.right-b.left,b.bottom-b.top)}),
+                            "px;" ++ (if (item.opacity!=null) "opacity:" ++ c.text(item.opacity) ++ ";" else "") ++
+                            card.overlay_style(spec,item.event,b.right-b.left,b.bottom-b.top)}),
                         if (item.cluster==true) <button type:"button",'data-timeline-action':format({type:"cluster_expand",id:item.id,ids:item.ids},'json'),
                             if (spec.cluster.renderer is fn) spec.cluster.renderer(item,{chart_id:spec.id}) else c.text(item.event.title)>
-                        else theme.render(spec,"card",item.event,card.slots(item.event,spec,snapshot))>]>,
+                        else theme.render(spec,"card",item.event,card.slots(item.event,spec,
+                            if (item.exiting==true) {*:c.attrs(snapshot),passive:true} else snapshot))>]>,
             <ol class:"lambda-timeline-chronology",style:"position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);",
                 *[for (item in plan.visible_events) <li 'data-timeline-id':item.id,
                     <time c.text(item.display_date)>

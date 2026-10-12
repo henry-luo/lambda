@@ -5,8 +5,6 @@
 lambda/tree-sitter/**        text eol=lf
 lambda/tree-sitter-lambda/** text eol=lf
 lambda/tree-sitter-javascript/** text eol=lf
-lambda/tree-sitter-latex/**  text eol=lf
-lambda/tree-sitter-latex-math/** text eol=lf
 
 # Binary files - don't touch
 *.a    binary

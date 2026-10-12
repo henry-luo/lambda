@@ -1,11 +1,11 @@
 # JS MVP: Test262 parity with full LambdaJS
 
-**Date:** 2026-10-12. **Status:** P0 captured; P1 in progress. Full parity remains open.
+**Date:** 2026-10-12. **Status:** P0 captured; P1 and P2 in progress. Full parity remains open.
 
 **Design:** [JS_MVP_Lmd §32](../jube/JS_MVP_Lmd.md#32-test262-parity-with-full-lambdajs).
 This plan follows the user's interpreter-only eval/Function decision and
-reuse-first requirement. The implemented increment and its measured limits
-are recorded in §9; the remaining work packages remain requirements.
+reuse-first requirement. The implemented increments and their measured limits
+are recorded in §9–§11; the remaining work packages remain requirements.
 
 ## 1. Target and starting evidence
 
@@ -497,3 +497,380 @@ intrinsic registration and place guards at a justified region boundary
 paths intact. Ordinary JSON's early return is restored when neither wrappers
 nor observable `toJSON` hooks are possible. The four jq workloads were not
 executed, and §31's earlier Raytrace3D gap remains a separate open item.
+
+
+## 10. Function reflection and arguments increment
+
+### 10.1 Implementation
+
+Expose `Function` and its callable prototype, constructor links, method
+names/lengths, `@@hasInstance` and the shared restricted-property thrower.
+`Function.prototype.toString` uses the retained AST/source for ordinary
+functions, methods, arrows and class constructors; bound/native/proxy
+callables use native-function syntax. Calling the dynamic constructor still
+reports an explicit capability failure. It does not compile dynamic source
+or disguise missing support as a catchable JS error (**D8.1.3v24**).
+
+Mapped arguments reuse the same mutable one-element Array cells as MVP
+closures (**D6.2.3v2**). A nominal Map holds the indexed properties and a
+private shape field holds the cell table; shared Lambda tracing and scalar
+homes own both (**D2.6.10**, **D5.2–D5.3**). Only the last duplicate formal
+maps, and missing actual arguments do not map. Strict/non-simple functions
+receive unmapped arguments and the shared throwing `callee` accessor.
+Arguments inherit the ordinary object prototype and share
+`Array.prototype.values` as their `@@iterator`.
+
+The existing descriptor kernel reads current cell values, commits mapped
+writes only after successful definition, and detaches aliases on successful
+delete, accessor conversion or a non-writable definition. Freeze snapshots
+the live parameter before detaching; seal retains the alias. Receiver-aware
+writes to a different object leave the original parameter intact. Inner
+functions shadow outer explicit `arguments` bindings; arrows retain their
+lexical binding. Default-parameter closures retain a separate arguments binding
+when the body declares a same-named var, lexical or function binding. The
+existing frontend observation analysis controls allocation; functions without
+a recorded arguments use keep their existing call path (**D8.4.1v2**).
+
+`Math.pow` reuses `mvp_lmd_number_pow`, including left-to-right conversion of
+its two operands. This allows the unmodified Test262 property helper to get
+past its primordial-function capture and argument-count checks (**S1.11**).
+
+### 10.2 Reuse and helper audit
+
+These additions were disclosed before implementation. No new Container flag,
+GC representation, dynamic-source evaluator or shared Lambda semantic change
+is introduced.
+
+| Entry | Reuse and ownership |
+|---|---|
+| `mvp_lmd_arguments_new` | Existing nominal Maps, descriptor operations, canonical names and Array storage; roots callee/table/object/key; incoming MIR argument span remains rooted |
+| `mvp_lmd_arguments_cell` | One lookup of the private mapping and existing numeric-key parser; no allocation or callback; returned cell is borrowed from its owner; detach clears only its table entry |
+| `mvp_lmd_function_source` | Retained frontend source spans and shared string allocation; never calls a proxy or exposes its target source |
+| `function_throw_type` | Existing native Error completion; one shared intrinsic identity |
+| Existing property/kernel operations | Reuse DefineOwnProperty, Delete, GetOwnProperty, Set and integrity operations for alias maintenance; fixed property paths remain unchanged |
+| Existing `sequence_iterator`, `function_prototype`, Math dispatch | Reuse the iterator carrier and numeric exponentiation helper; no second iterator or numeric implementation |
+
+Normal own-property reads consult the existing program metadata before looking
+for an alias. Named writes reject non-index prefixes before entering the alias
+helper; indexed candidates still use the existing canonical-key parser.
+Accessor reads return before the library lookup. These guards introduce no
+new helper or representation flag (**D8.4.1v2**).
+
+### 10.3 Evidence and remaining scope
+
+Evidence root: `temp/mvp_test262_parity2/`. Entry HEAD:
+`8347d3ac0e46eda3786348244812146b2bcffcee`. The initially reused executable was
+§9's `core10`; its recorded MVP source hashes match the entry checkout, but
+shared-runtime changes since its base HEAD prevent exact attribution. It is
+retained in `control/` as historical/diagnostic evidence. `control-exact/`
+is rebuilt from the entry HEAD, and `candidate4/` from the restored candidate
+sources, using the same `release_profile_native` build command. Each records
+its executable, source patch and hashes. Temporary source replacement/restoration
+and the checked backups are recorded in `exact_pair_build.py`; no Git state
+was changed.
+
+The selected canonical population is the union of §9's two subsets and
+baseline Function/arguments cases: **2,574 distinct IDs**. It uses the original
+JS harness with pinned MVP MIR and no LJS fallback. The first control run
+was contended (one timeout, 98 missing results) and is diagnostic only.
+`candidate2` completes cleanly at **1,222/2,574**, with 618 admission and 734
+runtime failures, including passes for all 43 selected mapped-arguments
+cases. This intermediate count predates the inner-binding/class-source fixes;
+the final evidence follows below.
+
+The clean `canonical5` checkpoint reaches **1,224/2,574** (618 admission,
+732 runtime failures; no missing results, crashes or timeouts). Its Function
+family passes **269/475**; the arguments family passes **137/261**, including
+**43/43** mapped cases. All 124 remaining arguments-family failures are
+admission boundaries, including class expressions/private members, async
+forms, eval and destructuring. Function-family gaps include intrinsic own-key
+order, global descriptors, dynamic bodies and RegExp protocol dependencies.
+
+The final `candidate6` repeats **1,224/2,574** in `canonical6`, again without
+crashes, timeouts or missing results. Against the exact entry build, the
+resolved comparison is **815 → 1,224 passing IDs: +409, zero lost passes**.
+`final-conformance.json` records every ID and failure category.
+
+The entry build initially reports 743 passes, two timeouts and 266 missing
+outcomes. Its worker exits after timeout/signal recovery because an interrupted
+MVP owner cannot safely enter LJS cleanup; another worker receives SIGKILL.
+All 268 affected IDs are replayed on **both binaries**, using the unchanged
+canonical harness and `--batch-chunk-size=1`. The entry build recovers 72
+passes; the final candidate's pass set is unchanged. Isolated runs leave
+only admission/runtime failures on both sides. The original batch-sensitive
+outcomes remain recorded; isolation is not a claimed runtime repair and no
+harness or baseline is changed.
+
+Pinned SHA-256: entry `fc39b9e2fc0597060f809751a247cd7207ad4d9e60e70428f233827cd071eb28`;
+final `8f796e581475526e261b8e4ecf74f58c60c68eefea95f6efd7dde4e25dd5876f`.
+Build/source manifests are in `control-exact/` and `candidate6/`.
+
+Some early standalone CLI probes mistakenly used `--mvp-lmd`, which is the
+Test262 runner option, instead of the CLI selector `--runtime=mvp-lmd`.
+Their results are not MVP evidence. The corrected commands and exclusion are
+recorded in `probes/README.md`. The MVP GTests and canonical Test262 runs used
+the correct engine throughout; no harness or baseline was weakened.
+
+P1/P2 remain partial: complete intrinsic metadata, general parameter/body
+scope separation and patterns, tagged templates, object/global environment
+records and the interpreter bridge still require work. P3–P9 remain open.
+The shared sequence iterator also needs P5's generic receiver completion:
+borrowed `Array.prototype.values` on strings currently follows the existing
+code-point iterator instead of the required indexed UTF-16 behavior.
+The final aggregate target remains 40,261; this subset must not be reported as
+full parity. The older Navier/three-way-merge and Raytrace3D performance gaps
+remain separate from this increment's performance comparison. No jq workload
+is executed or timed.
+
+
+### 10.4 Shared and focused gates
+
+- **176/176** MVP groups pass normally and under forced GC/poisoning in the
+  final release-profile build (`full6.log`, `forced6.log`). This includes
+  numeric-looking ordinary keys and Symbol keys beside mapped indices.
+  `validate6.py` recreates the shared archive/output paths to avoid retaining
+  the debug GTest link left by the aggregate gate. The earlier
+  `full-final.log`/`forced-final.log` runs are also green, in debug mode.
+- `make test-lambda-baseline`: **6,784/6,784** (2,112 input, 4,672 runtime).
+  The previous LaTeX phase-3 timeout passes in 44.315 seconds. The current
+  checkout has additional shared tests; this aggregate is not the older
+  6,738-case population.
+- The full-LJS baseline on pinned `candidate6`: **40,261/40,261**, no lost
+  cases (`ljs-baseline6.log`); the preceding `candidate5` checkpoint is also
+  fully green.
+- The two relocated GTest attempts in `full3.log`/`forced3.log` failed in the
+  dynamic loader before any test ran (`node-core.dylib` was not on their
+  relocated rpath). They are setup failures, not conformance results; the
+  final runs used the original executable location.
+- Contended `control-clean` and `candidate3-clean` runs are retained as
+  diagnostics despite their directory names: the former has two timeouts
+  and 170 missing cases; the latter has two workers killed by signal 9 and
+  80 missing cases. A separate Lambda checkout was running its aggregate
+  gate during this interval. No missing outcome is counted as passing.
+
+### 10.5 Performance and closeout
+
+`preflight6/comparison.json` passes **84/84 non-jq workloads** on the final
+binary: exact output contracts, source hashes and MVP MIR routing are checked.
+The four jq workloads are excluded from execution, preflight and timing.
+`normal-release6.log` records restoration of the ordinary release executable;
+all timing uses the separately pinned release-profile executables.
+
+The first 25-workload, five-round screen (`performance/`) identifies a new
+Hashmap gap: **504.368 vs 477.048 ms (+5.7%)**, with the ratio interval above
+parity against both control copies. Added arguments checks were performing
+context lookups on ordinary named properties. The final guards use existing
+program metadata, keep accessor returns ahead of the lookup, and reject named
+own writes before entering the alias helper. No Container flag is added.
+
+The final 24-workload screen (`performance6/`, five rounds) and four longer
+repeats (`repeat6/`, 31 rounds) cover **25 distinct workloads**. These use
+script self-times, pinned MIR, rotating candidate/control/identical-control
+order and the existing paired bootstrap. The longer repeats supersede their
+short-screen rows:
+
+| Workload | Final ms | Entry ms | Median change | 95% ratio interval |
+|---|---:|---:|---:|---:|
+| Hashmap | 492.527 | 490.666 | +0.38% | 0.9981–1.0105 |
+| Dense array | 58.948 | 58.800 | +0.25% | 0.9984–1.0061 |
+| Map iteration | 1.230 | 1.229 | +0.08% | 0.9984–1.0082 |
+| Map lookup | 7.630 | 7.562 | +0.90% | 0.9823–1.0274 |
+
+No final row has an interval wholly above parity against both control copies.
+**Performance sign-off remains open:** host monitors captured another checkout's
+benchmark campaign, including renamed/relative executable paths and jq work,
+during the repeat screens. The initial process-name filter missed those paths;
+the retained host logs expose the overlap. These results are provisional, not
+a quiet-host confirmation that the initial Hashmap regression is eliminated.
+The earlier Navier–Stokes, three-way-merge and Raytrace3D gaps are still open
+against their own phase controls. Results3–9 are unchanged.
+
+## 11. P2 increment: general destructuring
+
+Complete nested array/object binding and assignment patterns, elisions, rest,
+defaults, catch parameters and iteration heads. Preserve left-to-right target
+resolution, getter/default effects, IteratorClose and throwing-completion
+precedence (**S1.11**, **D5.2–D5.3**). Ordinary closed array swaps and Map-pair
+loops retain their existing lowering where iterator replacement is impossible
+(**D8.4.1v2**). This increment does not complete P2's global/with environments
+or the P3 interpreter boundary (**D8.1.3v24**).
+
+Reuse and helper disclosure:
+
+- Extend `mvp_lmd_object_copy(target, source, assign, excluded = ItemNull)`;
+  the optional ordinary Array holds canonical string/Symbol keys. Exclude keys
+  before querying descriptors or invoking getters. Existing spread/assign
+  callers keep their behavior. The helper retains all owners in precise roots
+  and uses existing shape transitions and scalar adoption.
+- Reuse `mvp_lmd_iterator_get/step/close`, `LmdControl` cleanup and Array storage;
+  extract a MIR `iterator_value` emitter for the existing step/done/value
+  sequence. Elisions omit Get(value); next/done/value failures mark the current
+  iterator done before propagation, while binding failures close it.
+- Promote the interpreter's pattern-reference recognizer into the shared JS
+  AST API (`js_ast_pattern_reference_target`), preserving full-LJS behavior.
+  Add a small MIR `pattern_reference` adapter to resolve references before
+  source reads. Extend `bind_pattern` to carry that reference through defaults.
+- Add a compile-time `simple_array_pattern` predicate shared by admission and
+  lowering, retaining only proven identifier-only optimizations. No new
+  container kind, runtime sentinel, collector or universal normality flag.
+- Share `pattern_iterators_are_intrinsic` across literal swaps and Map pairs.
+  Reflection and property overrides invalidate the shortcut even without an
+  explicit Symbol reference: `Object.getPrototypeOf([].values()).return` makes
+  closing observable. This is a compiler proof, not a runtime container flag.
+- Export the existing proxy key comparer as `mvp_lmd_property_key_equal` for
+  excluded keys; ordinary string value comparison cannot identify Symbols.
+  Extend `reference` with a compiler-only deferred-key option: target/key
+  expressions run before the source read, ToPropertyKey runs at PutValue.
+- Extend the existing first-party parser target routine to recognize member
+  targets with literal bases. Extend/rename the existing early-error target
+  visitor to `check_pattern_target`, rejecting optional chains in nested
+  assignment and loop patterns before MIR lowering. No parser or semantic
+  walker is duplicated; full LJS retains the same valid-source behavior.
+- Reuse `mvp_lmd_named_set` for anonymous default function names, through a
+  precisely audited MIR import, and route top-level parameter defaults through
+  `bind_pattern`. Reuse the reserved-name validator for assignment targets and
+  reject commas after rest in the existing parser. `mvp_lmd_iterator_get`
+  snapshots `next` without requiring it to be callable until IteratorStep.
+  Admission enables existing intrinsic metadata for anonymous function defaults,
+  including scripts with no property reads; ordinary defaults retain their path.
+- Add a reference-position option to the existing reserved-name checker, retaining
+  valid strict `arguments`/`eval` reads while rejecting strict `yield` in defaults
+  and computed targets. Extend the existing for-head probe with `parse_primary`
+  for failed cover patterns, so invalid rest commas cannot fall back to expression
+  lowering. Valid primary-member targets still use the ordinary expression path.
+- Reuse `mvp_lmd_box_primitive` and receiver-preserving property lookup for
+  primitive iterator sources; generic patterns request existing primitive
+  metadata. Non-iterables throw TypeError, and installed prototype iterators
+  observe the primitive receiver. Extend existing loop early errors to reject
+  declaration initializers while preserving Annex B's sloppy for-in var case.
+
+Freeze a new exact-entry release control; validate focused normal/forced-GC
+cases, canonical target families, shared Lambda/LJS gates and non-jq benchmark
+contracts. Performance uses pinned MIR and self-reported paired times with a
+duplicate control. Four jq workloads remain historical-only.
+
+### 11.1 Scope and provenance
+
+Artifacts live under `temp/mvp_test262_parity3/`. The exact-entry release-profile
+control comes from `ee20c8bc2230b2e8cdd45dbd2702f53514036d87`, with executable SHA-256
+`ae8f0b40a56662bf7516d5292e36bf01354dba4895eda4a9e1ea54aa5462b806`.
+`selection.json` freezes the unchanged 40,261-ID target and corpus revision,
+the runner, and 1,949 ordinary destructuring cases across assignment, parameter,
+declaration, catch and for-in/of families. These are a selected conformance
+population, not the full MVP inventory.
+
+The control's batch run has worker crashes followed by missing outcomes.
+`isolated-control/` replays the union of affected IDs individually;
+`resolved-control.json` records **603/1,949** passing, with four actual crashes
+remaining. Preserve original failures and replay evidence; the runner is unchanged.
+Earlier candidate checkpoints and their failures are retained separately.
+
+Class-expression defaults, eval interactions, async pattern contexts and typed
+array property reflection remain dependencies of P3–P7. Global/with environments
+and tagged templates remain open P2 work. This increment does not establish full
+P2 completion or interpreter interoperability.
+
+### 11.2 Canonical and focused results
+
+The final `candidate12` release-profile executable has SHA-256
+`50b1bd877b4680de0f781eb2ba56eeaa3bdcce2c5cbd890a9d77f566665fb64f`;
+its manifest includes source hashes and the exact patch. `canonical12/` and
+`resolved-candidate12.json` record **1,913/1,949**, up from **603**, with
+**1,310 gains and zero lost passes**. All 36 residuals are admission failures:
+32 class-expression cases and four class-static-block cases. There are no
+runtime failures, crashes, timeouts or missing results in this final run.
+
+All **181/181** MVP groups pass normally and with
+`LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1` (`full14.log`, `forced14.log`).
+Coverage includes nested/rest/default patterns, iterable closing and abrupt
+precedence, assignment/key order, fresh loop captures, primitive prototype
+iterator receivers, Symbol identity, getter/proxy effects, default function
+names and negative syntax. The existing default/rest test exposed missing
+metadata activation; the fix enables the existing metadata path at admission.
+The Node/MVP `super-pattern.js` probe also agrees on `nksr 3`.
+
+The earlier `canonical5` worker killed by signal 9 left 64 missing outcomes;
+none are counted as passes there. The final full selected run supplies every
+outcome. `ljs-baseline7` caught an overbroad reference-name check on dynamic
+`import()`; that special AST primary is now preserved. Original failure
+manifests remain available alongside the corrected run.
+
+### 11.3 Shared gates and performance
+
+The final pinned full-LJS baseline passes **40,261/40,261**
+(`ljs-baseline12.log`, zero failure rows in `ljs-failures12.tsv`). The unchanged
+harness and corpus are used throughout. This gate covers shared parser and
+runtime behavior; §11.2 supplies the separate MVP conformance evidence.
+
+The final sequential `make test-lambda-baseline` passes **6,793/6,793**
+(`lambda-baseline12.log`: 2,112 input and 4,681 runtime tests). It includes
+another **181/181** MVP run in the baseline's debug configuration. Performance
+uses only the separately pinned release-profile binaries. `normal-release12.log`
+records successful restoration of the ordinary release executable after the gate.
+
+Retain earlier failures: a concurrent aggregate checkpoint passed 6,789/6,793,
+with one JS fixture child exiting 137, a LaTeX phase-3 timeout, an incorrect
+Towers result and a Test262 preflight lock collision (`aggregate5/`). No harness
+or expected output was changed. Towers passed five isolated executions on each
+pinned entry/candidate5 binary (`towers-isolated.json`); that does not explain
+the earlier mismatch. The sequential candidate8, candidate9 and final candidate12
+aggregates all pass the previously failing cases.
+
+The iterator-prototype audit also invalidated literal-swap and Map-pair shortcuts
+under reflective mutation. The Node/MVP probe agrees on `1 1` after the guard.
+The superseded candidate8 capture stopped after 78 valid contracts; candidate9's
+84-contract run then exposed Fasta's allocation regression. §11.4 records that
+root cause, the final frozen implementation and its remaining performance limits.
+
+### 11.4 Destructuring performance follow-up
+
+The general iterator path initially made Fasta's hot `for (const [ch, prob]
+of table)` loop allocate an inner iterator for every array pair: **19.094 ms
+versus 0.861 ms** in the diagnostic capture. Restore direct pair reads behind
+an actual Array guard, retaining general iterable initialization for strings
+and other values. Both branches create fresh captured bindings in the same
+place. Existing array/map type facts remove outer protocol and collection
+kind dispatch; the proven Array type also reaches the existing element reader.
+Reflection still invalidates these shortcuts (**D8.4.1v2**). No runtime helper
+or container flag is added for this tuning.
+
+`candidate12` is the frozen release-profile result, executable SHA-256
+`50b1bd877b4680de0f781eb2ba56eeaa3bdcce2c5cbd890a9d77f566665fb64f`.
+Its source manifest matches the final compiler/runtime changes. All **181/181**
+MVP groups pass normally and with forced GC/poison (`full14.log`, `forced14.log`).
+`preflight12/` passes **84/84** non-jq contracts, checking exact output, source
+hashes and MVP MIR routing against the pinned entry binary and an identical
+control copy. The four jq workloads are never executed in this increment.
+
+The 31-round `fasta12/` repeat measures **0.909 vs 0.894 ms (+1.68%)**;
+the candidate/control 95% ratio interval is **0.9989–1.0633**, and the
+candidate/duplicate-control interval is **1.0079–1.0663**. This removes the large
+allocation regression but does not establish a quiet-host performance pass.
+The preceding `repeat11/` Hashmap repeat measured **490.399 vs 494.120 ms**;
+its earlier short-screen slowdown did not repeat.
+
+The final five-round screen (`performance12/`) completes **30/30 workloads**
+with correct outputs, pinned MIR and rotating candidate/control/duplicate-control
+order. No row has a 95% ratio interval wholly above parity against both control
+copies. Selected medians (the 31-round Fasta repeat supersedes its screen row):
+
+| Workload | Final ms | Entry ms | Change | Rounds |
+|---|---:|---:|---:|---:|
+| Fasta | 0.909 | 0.894 | +1.68% | 31 |
+| Hashmap | 496.683 | 498.165 | -0.30% | 5 |
+| CD | 163.273 | 163.798 | -0.32% | 5 |
+| Map iteration | 1.205 | 1.206 | -0.08% | 5 |
+| GCbench | 96.388 | 91.259 | +5.62% | 5 |
+| Three-way merge | 1,583.146 | 1,541.900 | +2.68% | 5 |
+
+**Performance acceptance remains open.** In particular, the Fasta, GCbench and
+three-way-merge differences are not cleared by this noisy screen.
+`performance12/audit.json` records another checkout using at least 50% CPU in
+**92/97** host samples during the screen. Original samples, both-control ratio
+intervals and the full host log remain available. All final correctness gates are recorded in §11.2–§11.3; performance
+acceptance remains separate and open.
+
+Host monitoring records another checkout's benchmark processes and system
+indexing activity. Retain that evidence alongside the paired self-times; do
+not call these uncontended measurements. Earlier Navier–Stokes, three-way-merge
+and Raytrace3D gaps remain open against their own phase controls.

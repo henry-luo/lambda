@@ -1,4 +1,4 @@
-// Phase IV §9.6: groupplots (\begin{groupplot}[group style={group size=C by R}]
+// Phase IV (Lambda_Pkg_Tikz §12): groupplots (\begin{groupplot}[group style={group size=C by R}]
 // with \nextgroupplot), including inherited axis defaults and LaTeX handoff.
 import tikz: lambda.doc.tikz.tikz
 import plots: lambda.doc.tikz.pgfplots

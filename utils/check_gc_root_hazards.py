@@ -21,8 +21,7 @@ MIGRATED_ROOTS = (ROOT / "lambda",)
 SKIP_PARTS = {
     "bash", "format", "input", "package", "py", "rb", "tree-sitter",
     "tree-sitter-bash", "tree-sitter-javascript", "tree-sitter-lambda",
-    "tree-sitter-latex", "tree-sitter-latex-math", "tree-sitter-python",
-    "tree-sitter-ruby", "tree-sitter-typescript",
+    "tree-sitter-python", "tree-sitter-ruby", "tree-sitter-typescript",
 }
 
 # These functions replace or destroy persistent backing storage. They must

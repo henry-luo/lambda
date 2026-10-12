@@ -2301,7 +2301,7 @@ extern "C" Item parse_math_direct_to_ast(Input* input, const char* math_source, 
     if (!input || !math_source) return ItemNull;
     bool ascii = flavor && (strcmp(flavor, "ascii") == 0 || strcmp(flavor, "asciimath") == 0);
     // ordinary formulas keep the recovery parser; definitions need scoped TeX expansion.
-    bool expand = !ascii && input->parse_options && input->parse_options->tex_expand;
+    bool expand = false;
     for (size_t p = 0; !ascii && !expand && p < math_len;) {
         if (math_source[p] == '%') {
             while (p < math_len && math_source[p] != '\n' && math_source[p] != '\r') p++;
@@ -2357,47 +2357,31 @@ static tex::Engine* run_tex_engine(const InputParseOptions* options, const char*
     return engine;
 }
 
-// LAMBDA_TEX_EXPAND=1 expands every LaTeX parse (the §9.9 front-end parity run)
-static bool tex_expand_by_default() {
-#ifdef LAMBDA_NO_AMBIENT_PROVIDERS
-    return false;
-#else
-    const char* value = shell_getenv("LAMBDA_TEX_EXPAND");
-    return value && strcmp(value, "1") == 0;
-#endif
-}
-
+// D7.2.7: every LaTeX parse expands before digestion; there is no unexpanded
+// front end, so one source yields one AST whatever the entry point.
 void parse_latex_direct(Input* input, const char* latex_string) {
     if (!input || !latex_string) return;
-    const InputParseOptions* options = input->parse_options;
-    InputParseOptions knob_options = {};
-    char* knob_base = nullptr;
-    if (!(options && options->tex_expand) && tex_expand_by_default()) {
-        knob_options.tex_expand = true;
+    InputParseOptions options = input->parse_options ? *input->parse_options : InputParseOptions{};
+    char* url_base = nullptr;
+    if (!options.tex_base && input->url) {
         // a file input resolves beside-document files from its own location
-        if (input->url) knob_base = url_to_local_path((const Url*)input->url);
-        knob_options.tex_base = knob_base;
-        options = &knob_options;
+        url_base = url_to_local_path((const Url*)input->url);
+        options.tex_base = url_base;
     }
-    if (options && options->tex_expand) {
-        // §9.2: expansion before digestion; the parser reads the engine's text
-        tex::Result result = {};
-        tex::Engine* engine = run_tex_engine(options, latex_string, strlen(latex_string), &result);
-        if (engine) {
-            InputContext context(input, result.text, result.length);
-            DirectLatexParser parser(context, &result);
-            input->root = parser.parse();
-            if (context.hasErrors()) context.logErrors();
-            tex::engine_destroy(engine);
-            if (knob_base) mem_free(knob_base);
-            return;
-        }
+    tex::Result result = {};
+    tex::Engine* engine = run_tex_engine(&options, latex_string, strlen(latex_string), &result);
+    if (!engine) {
+        // only allocation failure stops the engine; never fall back to an unexpanded parse
+        log_error("latex-parse: TeX engine could not start");
+        input->root = ItemError;
+    } else {
+        InputContext context(input, result.text, result.length);
+        DirectLatexParser parser(context, &result);
+        input->root = parser.parse();
+        if (context.hasErrors()) context.logErrors();
+        tex::engine_destroy(engine);
     }
-    if (knob_base) mem_free(knob_base);
-    InputContext context(input, latex_string);
-    DirectLatexParser parser(context);
-    input->root = parser.parse();
-    if (context.hasErrors()) context.logErrors();
+    if (url_base) mem_free(url_base);
 }
 
 void parse_tex_expansion(Input* input, const char* source) {

@@ -268,7 +268,7 @@
         "background-color"
       ],
       "qualification": "partial",
-      "scope": "single image-set URL/string selection uses the selected view device scale, supported MIME filtering before equal-density source order, shared responsive-image density preference, default/dpi/dpcm/dppx/x and typed math descriptors; invalid descriptors reject before cascade; raster natural sizes divide by selected density; source changes revalidate admission before warm reuse; inherited background gradients and stop/layer arrays retain independent ownership; 44 causal live assertions, 20 selected-image references at two device scales through PNG/SVG/PDF, and logical glyph bitmap/advance conversion in vector effects; background-specific ordered URL/selected-image/linear/radial/conic/none layers, independent component periods and computed inheritance, owner-unit position/size/radius/center/stop math, shared used-line color-stop fixup, full component getter strings, typed shorthand/longhand rejection and computed fallback, native clone/retirement and stable-pool controls, sharp tile/overflow intersections and causal font/box/scroll/DPR mutations through actual PNG/SVG/PDF paint (CI-18 / D4.5.1v4 / D4.1.4v5)",
+      "scope": "single image-set URL/string selection uses the selected view device scale, supported MIME filtering before equal-density source order, shared responsive-image density preference, default/dpi/dpcm/dppx/x and typed math descriptors; invalid descriptors reject before cascade; raster natural sizes divide by selected density; source changes revalidate admission before warm reuse; inherited background gradients and stop/layer arrays retain independent ownership; 44 causal live assertions, 20 selected-image references at two device scales through PNG/SVG/PDF, and logical glyph bitmap/advance conversion in vector effects; background-specific ordered URL/selected-image/linear/radial/conic/none layers, independent component periods and computed inheritance, owner-unit position/size/radius/center/stop math, shared used-line color-stop fixup, full component getter strings, typed shorthand/longhand rejection and computed fallback, native clone/retirement and stable-pool controls, sharp tile/overflow intersections and causal font/box/scroll/DPR mutations through actual PNG/SVG/PDF paint (CI-18 / D4.5.1v4 / D4.1.4v5); single linear-gradient text uses per-pixel glyph coverage and the owner positioning box while retaining foreground paint; selected-font SVG/PDF contours handle opaque constant intervals in canonical owner order, exact cardinal axes, repeats and two-glyph runs; 42 exact output comparisons at 1x/2x and 40 causal live size/direction/indent/clip/foreground/content assertions qualify the bounded consumer (CI-18 / D4.5.1v4); text-clipped color and linear layers share authored tile size/position/repetition/no-repeat and apply coverage before layer composition; native CPU blits preserve foreground source-over and captured clips, immutable publications retain deferred replay; 84 exact PNG/SVG/PDF references at 1x/2x, 24 further tile/color/rounded-ancestor live assertions, 32 replays after cache/style mutation and all coverage-byte source-over pairs qualify this increment (CI-18 / D4.5.1v4)",
       "evidence": [
         "test/ui/css_image_set_selection.json",
         "test/test_view_tree_model_gtest.cpp#CssImageSetsSelectDensityAfterTypeFilteringAndPreserveSourceOrder",
@@ -287,9 +287,19 @@
         "test/ui/css_gradient_centers.json",
         "test/ui/css_gradient_stops.json",
         "test/test_pdf_render_visual_gtest.cpp#BackgroundComputedComponentReadsReachAuthoredPaintAcrossOutputs",
-        "test/test_pdf_render_visual_gtest.cpp#GradientStopMathAndUsedFixupReachEveryImageOutput"
+        "test/test_pdf_render_visual_gtest.cpp#GradientStopMathAndUsedFixupReachEveryImageOutput",
+        "test/ui/css_gradient_text.json",
+        "test/test_rdt_vector_gtest.cpp#RewindReleasesDiscardedPayloadsAndRetainsEarlierCommands",
+        "test/test_rdt_vector_gtest.cpp#CardinalGradientAxesRetainExactOwnerBoundaries",
+        "test/test_pdf_render_visual_gtest.cpp#LinearBackgroundClipTextUsesGlyphCoverageAndOwnerBox",
+        "test/test_pdf_render_visual_gtest.cpp#HardGradientTextDirectionsRepeatsAndRunsUseOwnerGeometry",
+        "test/ui/css_text_background_tiles.json",
+        "test/ui/css_text_background_clip.json",
+        "test/test_pdf_render_visual_gtest.cpp#TextBackgroundTilesUseSizePositionRepeatAndColorLayers",
+        "test/test_rdt_vector_gtest.cpp#GlyphBackgroundSnapshotOwnsCoverageAfterCacheAndStyleChange",
+        "test/test_rdt_vector_gtest.cpp#GlyphCoverageAndImageSourceOverAgreeForEveryCoverageByte"
       ],
-      "limits": "full image/prelude/angle-percentage grammar and transition hints, outside-range vector stop positions, computed image/effect serialization, broad transformed/attachment/independent/paged consumers, generated-gradient replacement and the complete image family remain open; two ordered 2x PDF reader-edge assertions are preserved; selected generated-image controls retain the CI-17 CSS Content draft versus historical inline-baseline compatibility difference"
+      "limits": "full image/prelude/angle-percentage grammar and transition hints, outside-range vector stop positions, computed image/effect serialization, broad transformed/attachment/independent/paged consumers, generated-gradient replacement and the complete image family remain open; two ordered 2x PDF reader-edge assertions are preserved; selected generated-image controls retain the CI-17 CSS Content draft versus historical inline-baseline compatibility difference; text clipping remains bounded to tested linear/color/tile/layer consumers: URL/radial/conic, ancestor-owner/fragment/shaping/color-font coverage, transformed layer antialiasing, continuous/transparent vector edges, shadows/decoration/emphasis and independent/paged producers remain open"
     },
     {
       "properties": [
@@ -330,12 +340,61 @@
         "visibility"
       ],
       "qualification": "partial",
-      "scope": "computed self visibility suppresses hidden and ordinary non-table collapsed box/text/replaced-image/marker/outline/column-rule/scrollbar paint while explicitly visible descendants retain traversal; native pointer targets and programmatically scrolled hidden-overflow descendants use the same per-axis hit coordinates; ten PNG/SVG/PDF controls at1x/2x with positive paint and cleared own pixels, inherited/live parent-child changes, computed reads and72 causal live assertions; inline-SVG internal visibility stays covered (CI-18 / D4.5.1v4 / D4.1.4v5)",
+      "scope": "computed self visibility suppresses hidden and ordinary non-table collapsed box/text/replaced-image/marker/outline/column-rule/scrollbar paint while explicitly visible descendants retain traversal; native pointer targets and programmatically scrolled hidden-overflow descendants use the same per-axis hit coordinates; ten PNG/SVG/PDF controls at1x/2x with positive paint and cleared own pixels, inherited/live parent-child changes, computed reads and72 causal live assertions; inline-SVG internal visibility stays covered (CI-18 / D4.5.1v4 / D4.1.4v5); script/programmatic and sequential focus use live visibility and flat-tree display ancestry, including hidden attribute overrides, negative tabindex, transparent/zero-size controls and same-handler changes; committed hiding clears the focus area with ordered blur/focusout and activeElement body fallback; 104 further causal focus assertions at1x/2x and 4096 native reads without retained pool growth; flat PDF own-anchor annotations follow computed visibility/collapse while existing visible-descendant links remain present; ten URI-presence controls at both densities",
       "evidence": [
         "test/ui/css_visibility_paint.json",
-        "test/test_pdf_render_visual_gtest.cpp#HiddenAndCollapsedBoxesPreserveVisibleDescendantsAcrossOutputs"
+        "test/test_pdf_render_visual_gtest.cpp#HiddenAndCollapsedBoxesPreserveVisibleDescendantsAcrossOutputs",
+        "test/ui/css_visibility_focus.json",
+        "test/ui/css_rendered_focus.json",
+        "test/ui/css_focus_fixup.json",
+        "test/test_view_reuse_gtest.cpp#FocusRenderingUsesLiveDisplayAncestryAndReleasesScratch",
+        "test/test_view_reuse_gtest.cpp#FocusValidationUsesOwnedRootAfterReflow",
+        "test/test_pdf_render_visual_gtest.cpp#VisibilitySuppressesPdfLinkAnnotations"
       ],
-      "limits": "table collapse layout, focusability/keyboard order, hidden PDF link annotations, broader independent/paged/effect/3D interactions remain unqualified"
+      "limits": "table collapse layout; complete fragment/effect/backface PDF link semantics; broader independent/paged/effect/3D interactions; Chromium printing drops the visible-descendant annotation even though browsing activates that link"
+    },
+    {
+      "properties": [
+        "overflow"
+      ],
+      "qualification": "partial",
+      "scope": "bounded hidden-overflow paint uses owning-box coordinates for translated, scaled, reflected, rounded and nested clips; programmatic scroll and width/transform/radius mutations survive1x/2x; 40 Chromium/native causal pixel assertions and18 PNG/SVG/PDF transformed comparisons plus36 sharp rectangular intersection controls; common SVG path serialization preserves fractional contour coordinates (CI-18 / D4.5.1v4 / D4.1.4v5)",
+      "evidence": [
+        "test/ui/css_transformed_overflow.json",
+        "test/test_pdf_render_visual_gtest.cpp#TransformedOverflowClipsFollowOwningBoxesAcrossOutputs",
+        "test/test_pdf_render_visual_gtest.cpp#RectangularOverflowFillsUseIntersectedGeometryAcrossOutputs",
+        "test/test_rdt_vector_gtest.cpp#CompactRectangleAffineExpansionPreservesContourBounds"
+      ],
+      "limits": "full logical/axis-specific clipping and CSSOM, overflow-clip-margin geometry boxes, gradient/image boundary parity, broader independent/paged/effect/3D consumers and rounded transformed hit tests remain unqualified"
+    },
+    {
+      "properties": [
+        "text-shadow"
+      ],
+      "qualification": "partial",
+      "scope": "horizontal grayscale selected-font shadows preserve background/shadow/foreground order and first-authored-layer priority; each native blur layer captures only its own glyphs; 1x/2x PNG and SVG references cover transparent/sharp/blurred shadows, different radii/offsets, colored backdrop and foreground; selected-font PDF sharp shadows pass; live shadow/color/image/DPR mutations and captured-image replay after font, text and PaintIR retirement are verified (CI-18 / D4.5.1v4)",
+      "evidence": [
+        "test/ui/css_text_shadows.json",
+        "test/test_pdf_render_visual_gtest.cpp#TransparentTextShadowsPreserveClippedBackgroundPaint",
+        "test/test_pdf_render_visual_gtest.cpp#VisibleTextShadowsUseAuthoredOrderBetweenBackgroundAndText",
+        "test/test_pdf_render_visual_gtest.cpp#BlurredTextShadowsCaptureOnlyTheirGlyphs",
+        "test/test_pdf_render_visual_gtest.cpp#TextShadowLayersPreserveBackdropAndPerLayerBlur",
+        "test/test_rdt_vector_gtest.cpp#BlurredTextShadowPixelsSurviveFontAndSourceRetirement"
+      ],
+      "limits": "four exact 2x PDF blur comparisons remain failed; decoration/emphasis shadows, shaping/color fonts, fragmented/ancestor geometry, transformed blur, broader grammar/computed reads and independent/paged contexts remain unqualified"
+    },
+    {
+      "properties": [
+        "filter"
+      ],
+      "qualification": "partial",
+      "scope": "blur CSS lengths convert to device lengths at 1x/2x in native and export glyph captures; display-list arena copies preserve computed descriptors and captured glyph bounds include hinted bitmap extents (CI-18 / D4.5.1v4)",
+      "evidence": [
+        "test/test_pdf_render_visual_gtest.cpp#BlurredTextShadowsCaptureOnlyTheirGlyphs",
+        "test/test_pdf_render_visual_gtest.cpp#TextShadowLayersPreserveBackdropAndPerLayerBlur",
+        "test/test_rdt_vector_gtest.cpp#BlurredTextShadowPixelsSurviveFontAndSourceRetirement"
+      ],
+      "limits": "complete filter-function grammar, URL/resource contexts, nonuniform/projective transforms, backdrop semantics and exact PDF blur/profile parity remain separate partial work; these controls qualify glyph blur density only"
     }
   ]
 }

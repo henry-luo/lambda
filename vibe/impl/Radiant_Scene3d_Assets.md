@@ -24,12 +24,13 @@ Verification commands:
 
 ```sh
 make build
-make -C build/premake config=debug_native test_input_model_gtest test_scene3d_gtest
+make -C build/premake config=debug_native test_input_model_gtest test_radiant_view_gtest test_scene3d_unit_gtest
 ./test/test_input_model_gtest.exe
-./test/test_scene3d_gtest.exe
+./test/test_radiant_view_gtest.exe --gtest_filter='Scene3dTest.*:EventSimRenderTest.*'
+./test/test_scene3d_unit_gtest.exe
 ./lambda.exe test/lambda/scene3d/assets.ls
 mkdir -p temp/scene3d-assets
-LAMBDA_SCENE3D_CAPTURE_DIR=temp/scene3d-assets ./test/test_scene3d_gtest.exe \
+LAMBDA_SCENE3D_CAPTURE_DIR=temp/scene3d-assets ./test/test_radiant_view_gtest.exe \
   --gtest_filter='Scene3dTest.ImportedAssetGallery*'
 LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe render test/demo/scene3d/asset-gallery.ls \
   -o temp/scene3d-assets/gallery.png -vw 1280 -vh 520

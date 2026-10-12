@@ -1,0 +1,27 @@
+{
+  "name": "MissingGraphicsFails",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "initial_render": false,
+  "events": [
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          255,
+          0,
+          0
+        ]
+      ]
+    }
+  ]
+}

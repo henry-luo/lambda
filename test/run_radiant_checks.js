@@ -15,7 +15,8 @@ function run(command, args, options = {}) {
         const child = spawn(command, args, {
             cwd: ROOT,
             env: { LAMBDA_AUTO_CLOSE: '1', LAMBDA_POST_LOAD_SETTLE_MS: '200',
-                ...process.env, LAMBDA_ROOT: ROOT },
+                ...process.env, LAMBDA_ROOT: ROOT,
+                LAMBDA_HOME: path.resolve(ROOT, process.env.LAMBDA_HOME || 'lmd') },
             stdio: ['pipe', 'pipe', 'pipe'],
             ...spawnOptions,
         });
@@ -29,18 +30,46 @@ function run(command, args, options = {}) {
     });
 }
 
+function layoutWorkspace(check) {
+    // the external layout harness clears cwd/temp/layout; give each check its own cwd.
+    fs.mkdirSync(path.join(ROOT, 'temp'), { recursive: true });
+    const workspace = fs.mkdtempSync(path.join(ROOT, 'temp', `radiant-${check}-`));
+    fs.mkdirSync(path.join(workspace, 'temp'));
+    for (const name of ['test', 'lmd', 'ref', 'modules', 'assets', 'utils', 'log.conf', 'build_lambda_config.json', 'lambda.exe']) {
+        const source = path.resolve(ROOT, name === 'lambda.exe'
+            ? process.env.RADIANT_TEST_EXECUTABLE || name : name);
+        if (!fs.existsSync(source)) continue;
+        const destination = path.join(workspace, name);
+        if (fs.statSync(source).isDirectory()) fs.symlinkSync(source, destination, 'junction');
+        // file symlinks on Windows require privileges that directory junctions do not.
+        else if (process.platform === 'win32') fs.copyFileSync(source, destination);
+        else fs.symlinkSync(source, destination, 'file');
+    }
+    return workspace;
+}
+
 function count(output, pattern) {
     const match = output.match(pattern);
     return match ? Number(match[1]) : 0;
 }
 
+function checkJobs(requested) {
+    const limit = Number(process.env.LAMBDA_TEST_MAX_CONCURRENT);
+    const ceiling = Number.isInteger(limit) && limit > 0 ? limit : Math.max(1, os.cpus().length - 1);
+    const jobs = Number(requested);
+    return Math.min(ceiling, Number.isInteger(jobs) && jobs > 0 ? jobs : ceiling);
+}
+
 async function layout(report) {
     // The layout-only Make target owns baseline selection and classification.
-    // Its records live outside temp/, which each category clears before running.
+    const workspace = layoutWorkspace('layout');
     const resultFile = path.join(path.dirname(report), '_layout_baseline_results.txt');
     fs.rmSync(resultFile, { force: true });
-    const child = await run('make', ['--no-print-directory', 'run-layout-baseline-suites',
-        `LAYOUT_BASELINE_RESULTS=${resultFile}`]);
+    const child = await run('make', ['--no-print-directory', '-f', path.join(ROOT, 'Makefile'), 'run-layout-baseline-suites',
+        `LAYOUT_BASELINE_RESULTS=${resultFile}`,
+        `LAYOUT_BASELINE_CONCURRENCY=${checkJobs(process.env.LAYOUT_BASELINE_CONCURRENCY ||
+            process.env.LAMBDA_TEST_MAX_CONCURRENT || 4)}`],
+        { cwd: workspace });
     const suites = fs.readFileSync(resultFile, 'utf8').trim().split('\n').filter(Boolean).map(line => {
         const [name, status, passed, partial, failed, skipped, elapsed] = line.split('|');
         const numbers = [passed, partial, failed, skipped, elapsed].map(Number);
@@ -58,15 +87,17 @@ async function layout(report) {
     }
     if ((child.code !== 0 || child.signal) && summary.failed === 0) summary.failed = 1;
     summary.total = summary.passed + summary.partial + summary.failed + summary.skipped;
-    return { summary, suites, results: suites.map(s => ({ name: s.name, pass: !s.status.includes('FAIL') })) };
+    return { summary, suites, workspace,
+        results: suites.map(s => ({ name: s.name, pass: !s.status.includes('FAIL') })) };
 }
 
 async function snapshot() {
-    const measured = await run(process.execPath, ['test/layout/test_radiant_layout.js',
-        '--engine', 'lambda-css', '-c', 'page', '--json', '-j', '5']);
+    const workspace = layoutWorkspace('snapshot');
+    const measured = await run(process.execPath, [path.join(ROOT, 'test/layout/test_radiant_layout.js'),
+        '--engine', 'lambda-css', '-c', 'page', '--json', '-j', String(checkJobs(5))], { cwd: workspace });
     const checked = await run(process.execPath, ['test/layout/layout_suite_snapshot.js',
         '--check', 'page'], { input: measured.output });
-    return snapshot_result(measured, checked);
+    return { ...snapshot_result(measured, checked), workspace };
 }
 
 function snapshot_result(measured, checked) {
@@ -80,7 +111,7 @@ function snapshot_result(measured, checked) {
 }
 
 async function render() {
-    const jobs = process.env.RADIANT_RENDER_JOBS || String(Math.max(1, os.cpus().length - 1));
+    const jobs = String(checkJobs(process.env.RADIANT_RENDER_JOBS));
     const child = await run(process.execPath, ['test_radiant_render.js', '-j', jobs, '--baseline'],
         { cwd: path.join(ROOT, 'test/render') });
     const line = child.output.split('\n').reverse().find(line => line.startsWith('Results:')) || '';
@@ -100,8 +131,9 @@ async function render() {
 async function main() {
     const args = process.argv.slice(2);
     const reportIndex = args.indexOf('--report');
-    const report = args[reportIndex + 1];
-    if (reportIndex < 0 || !report) throw new Error('Expected --report <path>');
+    const reportArg = args[reportIndex + 1];
+    if (reportIndex < 0 || !reportArg) throw new Error('Expected --report <path>');
+    const report = path.resolve(reportArg);
     fs.mkdirSync(path.dirname(report), { recursive: true });
     const checks = { layout, snapshot, render };
     let result;

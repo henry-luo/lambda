@@ -1,4 +1,4 @@
-// Phase IV (Lambda_Pkg_Latex3 §9.6): a LaTeX document reads PGFPlots tables
+// Phase IV (Lambda_Pkg_Tikz §12): a LaTeX document reads PGFPlots tables
 // from files beside it; the render passes the document base to the TikZ bridge.
 import latex: lambda.latex.latex
 import html: lambda.latex.to_html

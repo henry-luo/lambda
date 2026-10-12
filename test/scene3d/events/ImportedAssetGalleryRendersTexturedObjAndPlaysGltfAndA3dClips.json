@@ -1,0 +1,492 @@
+{
+  "name": "ImportedAssetGalleryRendersTexturedObjAndPlaysGltfAndA3dClips",
+  "viewport": {
+    "width": 1200,
+    "height": 480
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#obj-view",
+      "width": 360,
+      "height": 320,
+      "region": [
+        0,
+        0,
+        360,
+        320
+      ],
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 4001
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#obj-view",
+      "width": 360,
+      "height": 320,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "red_above_blue": true,
+      "count": {
+        "min": 501
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#obj-view",
+      "fields": {
+        "meshes": 1,
+        "textures": 1
+      }
+    },
+    {
+      "type": "capture_surface",
+      "file": "obj-view-native.png",
+      "directory_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "enabled_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "source": "scene3d",
+      "target": "#obj-view",
+      "width": 360,
+      "height": 320
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#gltf-view",
+      "width": 360,
+      "height": 320,
+      "region": [
+        0,
+        0,
+        360,
+        320
+      ],
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 4001
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#gltf-view",
+      "width": 360,
+      "height": 320,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "red_above_blue": true,
+      "count": {
+        "min": 501
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#gltf-view",
+      "fields": {
+        "meshes": 3,
+        "textures": 1
+      }
+    },
+    {
+      "type": "capture_surface",
+      "file": "gltf-view-native.png",
+      "directory_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "enabled_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "source": "scene3d",
+      "target": "#gltf-view",
+      "width": 360,
+      "height": 320
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#gltf-view",
+      "width": 360,
+      "height": 320,
+      "pixels": [
+        [
+          249,
+          110,
+          63,
+          231,
+          149
+        ],
+        [
+          268,
+          219,
+          63,
+          231,
+          149
+        ]
+      ]
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#gltf-view",
+      "name": "before"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "animation",
+      "target": "#gltf-view",
+      "name": "action",
+      "clip": "gltf-asset-clip-0"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#gltf-view",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#gltf-view",
+      "width": 360,
+      "height": 320,
+      "name": "pose0"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#gltf-view",
+      "seconds": 1
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#gltf-view",
+      "width": 360,
+      "height": 320,
+      "name": "pose1"
+    },
+    {
+      "type": "capture_surface",
+      "file": "gltf-pose-0-native.png",
+      "directory_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "enabled_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "surface": "pose0"
+    },
+    {
+      "type": "capture_surface",
+      "file": "gltf-pose-1-native.png",
+      "directory_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "enabled_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "surface": "pose1"
+    },
+    {
+      "type": "assert_surface",
+      "surface": "pose1",
+      "reference": "pose0",
+      "alpha": true,
+      "count": {
+        "min": 4001
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#gltf-view",
+      "fields": {
+        "projection_generation": {
+          "baseline": "before",
+          "eq": 0
+        },
+        "graphics.resources": {
+          "baseline": "before",
+          "eq": 0
+        },
+        "graphics.allocated_bytes": {
+          "baseline": "before",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "lose_context",
+      "target": "#gltf-view"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#gltf-view",
+      "width": 360,
+      "height": 320,
+      "reference": "pose1",
+      "alpha": true,
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#gltf-view",
+      "fields": {
+        "animation_id": {
+          "baseline": "action",
+          "eq": 0
+        },
+        "action_id": {
+          "baseline": "action",
+          "eq": 0
+        }
+      },
+      "clip": "gltf-asset-clip-0"
+    },
+    {
+      "type": "scene3d",
+      "op": "stop",
+      "target": "#gltf-view",
+      "clip": "gltf-asset-clip-0"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#gltf-view",
+      "seconds": 0
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#gltf-view",
+      "width": 360,
+      "height": 320,
+      "reference": "pose0",
+      "alpha": true,
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"gltf-asset-material-0\").setAttribute(\"alpha-mode\",\"blend\")"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#gltf-view",
+      "width": 360,
+      "height": 320,
+      "reference": "pose0",
+      "alpha": true,
+      "count": {
+        "min": 4001
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#a3d-view",
+      "width": 360,
+      "height": 320,
+      "region": [
+        0,
+        0,
+        360,
+        320
+      ],
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 4001
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#a3d-view",
+      "width": 360,
+      "height": 320,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "red_above_blue": true,
+      "count": {
+        "min": 501
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#a3d-view",
+      "fields": {
+        "meshes": 1,
+        "textures": 0
+      }
+    },
+    {
+      "type": "capture_surface",
+      "file": "a3d-view-native.png",
+      "directory_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "enabled_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "source": "scene3d",
+      "target": "#a3d-view",
+      "width": 360,
+      "height": 320
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#a3d-view",
+      "name": "before"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "animation",
+      "target": "#a3d-view",
+      "name": "action",
+      "clip": "a3d-asset-clip-0"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#a3d-view",
+      "seconds": 0
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#a3d-view",
+      "width": 360,
+      "height": 320,
+      "name": "pose0"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#a3d-view",
+      "seconds": 1
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#a3d-view",
+      "width": 360,
+      "height": 320,
+      "name": "pose1"
+    },
+    {
+      "type": "capture_surface",
+      "file": "a3d-pose-0-native.png",
+      "directory_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "enabled_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "surface": "pose0"
+    },
+    {
+      "type": "capture_surface",
+      "file": "a3d-pose-1-native.png",
+      "directory_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "enabled_env": "LAMBDA_SCENE3D_CAPTURE_DIR",
+      "surface": "pose1"
+    },
+    {
+      "type": "assert_surface",
+      "surface": "pose1",
+      "reference": "pose0",
+      "alpha": true,
+      "count": {
+        "min": 4001
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#a3d-view",
+      "fields": {
+        "projection_generation": {
+          "baseline": "before",
+          "eq": 0
+        },
+        "graphics.resources": {
+          "baseline": "before",
+          "eq": 0
+        },
+        "graphics.allocated_bytes": {
+          "baseline": "before",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "lose_context",
+      "target": "#a3d-view"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#a3d-view",
+      "width": 360,
+      "height": 320,
+      "reference": "pose1",
+      "alpha": true,
+      "count": {
+        "eq": 0
+      }
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "animation",
+      "target": "#a3d-view",
+      "fields": {
+        "animation_id": {
+          "baseline": "action",
+          "eq": 0
+        },
+        "action_id": {
+          "baseline": "action",
+          "eq": 0
+        }
+      },
+      "clip": "a3d-asset-clip-0"
+    },
+    {
+      "type": "scene3d",
+      "op": "stop",
+      "target": "#a3d-view",
+      "clip": "a3d-asset-clip-0"
+    },
+    {
+      "type": "scene3d",
+      "op": "seek",
+      "target": "#a3d-view",
+      "seconds": 0
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#a3d-view",
+      "width": 360,
+      "height": 320,
+      "reference": "pose0",
+      "alpha": true,
+      "count": {
+        "eq": 0
+      }
+    }
+  ]
+}

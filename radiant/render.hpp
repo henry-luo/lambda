@@ -86,9 +86,9 @@ inline float radiant_linear_gradient_used_angle(const LinearGradient* gradient,
 }
 
 inline RadiantGradientLine radiant_linear_gradient_line(Rect rect, float angle) {
-    float angle_rad = math_degrees_to_radians(angle);
-    float dx = sinf(angle_rad);
-    float dy = -cosf(angle_rad);
+    float dx, cosine;
+    math_sincos_degrees_f(angle, &dx, &cosine);
+    float dy = -cosine;
     float half_w = rect.width * 0.5f;
     float half_h = rect.height * 0.5f;
     float cx = rect.x + half_w;
@@ -169,6 +169,7 @@ typedef struct {
 } RdtGradientStop;
 
 Color render_gradient_stop_color(const RdtGradientStop& stop);
+void render_set_uniform_gradient_stops(RdtGradientStop* stops, Color color);
 Color render_sample_gradient_stops(const RdtGradientStop* stops, int count, float position, float stop_scale);
 bool render_normalize_linear_gradient_range(RadiantGradientLine* line, RdtGradientStop* stops, int count);
 bool render_normalize_radial_gradient_range(RadiantRadialGeometry* geometry, RdtGradientStop* stops, int* count);
@@ -362,6 +363,7 @@ bool render_path_append_font_glyph(RdtPath* path, FontHandle* font, uint32_t cod
 bool render_path_append_font_glyph_index(RdtPath* path, FontHandle* font, uint32_t glyph,
     float x, float y, float scale_x, Arena* arena);
 bool render_path_append_svg(StrBuf* out, const RdtPath* path, int precision = 2);
+bool render_path_append_svg_roundtrip(StrBuf* out, const RdtPath* path);
 
 // Shared SVG geometry parsing for rendering and DOM geometry queries. The
 // returned path is caller-owned; transform coefficients are [a,b,c,d,e,f].
@@ -1739,6 +1741,7 @@ struct PaintList : lam::ArrayList<PaintCmd> {
 #ifdef __cplusplus
     void init(Arena* backing_arena);
     void clear();
+    bool rewind(size_t count);
     void destroy();
     int item_count() const;
 #endif
@@ -3421,6 +3424,30 @@ typedef struct RasterRenderContext RasterRenderContext;
 // rc_* — Render-context drawing wrappers (record through PaintIR/DisplayList)
 // ---------------------------------------------------------------------------
 
+template<typename Visitor> inline void render_visit_text_shadows_reverse(TextShadow* head, Visitor visit) {
+    int count = 0;
+    for (TextShadow* shadow = head; shadow; shadow = shadow->next) count++;
+    for (int index = count - 1; index >= 0; index--) {
+        TextShadow* shadow = head;
+        for (int step = 0; step < index; step++) shadow = shadow->next;
+        visit(shadow);
+    }
+}
+
+bool render_paint_solid_shape(PaintList* paint, RdtPath* shape, Color color, const RdtMatrix* transform);
+bool render_paint_text_shadows(PaintList* paint, UiContext* ui, const PaintGlyphRun* run, TextShadow* shadows);
+float render_filter_blur_support(float physical_sigma);
+FilterProp* dl_capture_filter_lengths(DisplayList* list, FilterProp* filter, float scale);
+float render_box_blur_half_width(float blur_radius);
+bool render_paint_text_background_glyph(RasterRenderContext* context, DomElement* parent,
+    Rect physical_border, const GlyphBitmap* bitmap, float x, float y);
+// shared positioning and paint boxes keep text clipping in the background owner's coordinates.
+bool render_paint_text_background(PaintList* paint, UiContext* ui, DomElement* parent,
+    const PaintGlyphRun* run, Rect border);
+void render_background_layer_rects(UiContext* ui, ViewBlock* view, BackgroundGeometry* background,
+    Rect rect, float scale, Rect* position_rect, Rect* paint_rect);
+PaintRecordTarget rc_record_target(RasterRenderContext* rdcon);
+bool render_painter_can_blit_surface(const RasterRenderContext* context);
 void rc_fill_rect(RasterRenderContext* rdcon, float x, float y, float w, float h, Color color);
 void rc_fill_rounded_rect(RasterRenderContext* rdcon, float x, float y, float w, float h,
                           float rx, float ry, Color color);
@@ -3699,7 +3726,8 @@ bool render_clip_overflow_geometry(ViewBlock* block, Bound* clip, Corner* radius
 bool render_clip_push_vector(PaintList* paint, ViewElement* element,
     float abs_x, float abs_y, RenderClipKind kind);
 RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bound* clip);
-RenderClipScope render_clip_push_overflow_scope(RasterRenderContext* rdcon);
+RenderClipScope render_clip_push_overflow_scope(RasterRenderContext* rdcon, ViewBlock* block,
+                                               float origin_x, float origin_y);
 void render_clip_pop_scope(RasterRenderContext* rdcon, RenderClipScope* scope);
 
 // ===== render_composite.hpp =====
@@ -3893,6 +3921,8 @@ bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, R
                              RenderExportTargetKind target);
 bool render_paint_gradient_image(PaintList* paint, const ListStyleImage* image, Rect rect,
                                 float pixel_ratio, const RdtMatrix* transform = nullptr);
+bool render_paint_gradient_shape(PaintList* paint, const ListStyleImage* image, Rect rect,
+    float pixel_ratio, const RdtMatrix* transform, RdtPath* shape);
 
 // Box shadow rendering
 void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);

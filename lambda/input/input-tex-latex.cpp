@@ -1,4 +1,4 @@
-// TeX expansion engine: the native LaTeX layer (Lambda_Pkg_Latex3 §9.3-9.4).
+// TeX expansion engine: the native LaTeX layer (Lambda_Design_TeX_Engine §4-5).
 //
 // Definitions, environments, counters, lengths, package/class resolution and
 // the package-author interface. Document-level commands stay constructors
@@ -303,7 +303,7 @@ static bool list_contains(Engine* e, const char* list, const char* item) {
 }
 
 // ======================================================================
-// local files (§9.7: read-only, beside the document)
+// local files (Lambda_Design_TeX_Engine §8: read-only, beside the document)
 // ======================================================================
 
 
@@ -422,7 +422,7 @@ void set_resource_dir(const char* dir) {
     if (canonical) mem_free(canonical);
 }
 
-// a bundled resource: Lambda's own copy, never a TeX installation (§9.4)
+// a bundled resource: Lambda's own copy, never a TeX installation (Lambda_Design_TeX_Engine §4)
 static bool bundled_path(const char* name, const char* ext, StrBuf* out) {
     if (!g_resource_dir[0] || !name || !*name || name[0] == '/' || strstr(name, "..")) return false;
     strbuf_reset(out);

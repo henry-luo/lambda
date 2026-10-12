@@ -58,15 +58,8 @@ float render_color_linear_to_srgb(float channel) {
 }
 
 uint32_t render_pixel_source_over_opaque(uint32_t destination, uint32_t source) {
-    uint32_t sa = source >> 24;
-    if (sa == 0) return destination;
-    if (sa == 255) return source | 0xFF000000u;
-    uint32_t inv = 255u - sa;
-    return raster_pack_pixel(
-        ((source & 0xFFu) * sa + (destination & 0xFFu) * inv) / 255u,
-        (((source >> 8) & 0xFFu) * sa + ((destination >> 8) & 0xFFu) * inv) / 255u,
-        (((source >> 16) & 0xFFu) * sa + ((destination >> 16) & 0xFFu) * inv) / 255u,
-        255u);
+    // glyph and image consumers share source-over rounding on an opaque destination.
+    return render_pixel_source_over_straight(destination | 0xff000000u, source, 255);
 }
 
 uint32_t render_pixel_source_over_straight(uint32_t destination, uint32_t source,
@@ -197,15 +190,11 @@ void render_pixel_source_over_coverage(uint8_t* destination, Color color,
     if (source_a == 0) return;
     uint32_t inverse = 255u - source_a;
     if (destination[3] == 255) {
-        if (color.c == 0xFF000000) {
-            destination[0] = destination[0] * inverse / 255u;
-            destination[1] = destination[1] * inverse / 255u;
-            destination[2] = destination[2] * inverse / 255u;
-        } else {
-            destination[0] = (destination[0] * inverse + color.r * source_a) / 255u;
-            destination[1] = (destination[1] * inverse + color.g * source_a) / 255u;
-            destination[2] = (destination[2] * inverse + color.b * source_a) / 255u;
-        }
+        uint32_t pixel;
+        memcpy(&pixel, destination, sizeof(pixel));
+        color.a = (uint8_t)source_a;
+        pixel = render_pixel_source_over_opaque(pixel, color.c);
+        memcpy(destination, &pixel, sizeof(pixel));
         return;
     }
     uint32_t destination_a = destination[3];

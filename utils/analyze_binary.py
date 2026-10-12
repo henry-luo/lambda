@@ -58,8 +58,6 @@ LIBRARY_GROUPS = {
     "tree-sitter":             "tree-sitter",
     "tree-sitter-lambda":      "tree-sitter",
     "tree-sitter-javascript":  "tree-sitter",
-    "tree-sitter-latex":       "tree-sitter",
-    "tree-sitter-latex-math":  "tree-sitter",
     # mbedTLS family
     "mbedtls":                 "mbedTLS",
     "mbedx509":                "mbedTLS",

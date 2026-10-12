@@ -489,3 +489,15 @@ fn lookup_rev(entries, k, i) {
     else if (string(entries[i].key) == string(k)) { entries[i].val }
     else { lookup_rev(entries, k, i - 1) }
 }
+
+// ============================================================
+// Counter letters (\Alph): 1→A, 2→B, ... 26→Z
+// ============================================================
+
+let ALPH_TABLE = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"]
+
+// shared by the document classes for appendix numbering; out of range falls back to digits
+pub fn upper_alph(n) {
+    if (n >= 1 and n <= 26) ALPH_TABLE[n - 1]
+    else string(n)
+}

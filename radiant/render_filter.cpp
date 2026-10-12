@@ -324,6 +324,17 @@ typedef struct FilterPixelRegion {
     int bottom;
 } FilterPixelRegion;
 
+float render_filter_blur_support(float physical_sigma) {
+#ifdef __APPLE__
+    float width = ceilf(physical_sigma * 2.0f);
+    if (width < 1.0f) width = 1.0f;
+    if (fmodf(width, 2.0f) == 0.0f) width += 1.0f;
+    return 3.0f * (width - 1.0f) * 0.5f;
+#else
+    return 3.0f * render_box_blur_half_width(physical_sigma * 2.0f);
+#endif
+}
+
 static bool render_filter_pixel_region(ImageSurface* surface, Rect* rect, Bound* clip,
                                        FilterPixelRegion* region) {
     if (!surface || !rect || !clip || !region) return false;

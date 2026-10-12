@@ -116,6 +116,11 @@ ImageSurface* image_surface_lookup(lam::Handle<ImageSurface> handle) {
     return before == handle.gen && after == handle.gen ? surface : nullptr;
 }
 
+void image_surface_snapshot_publish(ImageSurface* surface) {
+    // the fresh immutable publication holds one owner reference before display-list leases arrive.
+    if (surface) __atomic_store_n(&surface->snapshot_refs, 1u, __ATOMIC_RELEASE);
+}
+
 ImageSurface* image_surface_snapshot_retain(ImageSurface* surface) {
     if (!surface || !__atomic_load_n(&surface->snapshot_refs, __ATOMIC_ACQUIRE)) return nullptr;
     __atomic_add_fetch(&surface->snapshot_refs, 1u, __ATOMIC_RELAXED);

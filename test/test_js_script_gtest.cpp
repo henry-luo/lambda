@@ -252,6 +252,35 @@ TEST(JsModuleResolution, ResolvesHttpModuleSpecifiersAsUrls) {
     EXPECT_STREQ(resolved, "https://docs.example.test/vite/assets/root.js");
 }
 
+TEST(JsModuleResolution, CanonicalRegistryLookupsPreserveAliasesAndRuntimeOwnership) {
+    const char* path = "test/js/interp_esm/dep.mjs";
+    char* canonical = file_realpath(path);
+    ASSERT_NE(canonical, nullptr);
+    Runtime first = {}, second = {};
+    runtime_init(&first);
+    runtime_init(&second);
+    module_register_for_runtime(&first, path, "js", ItemNull, nullptr);
+    module_register_for_runtime(&second, canonical, "js", ItemNull, nullptr);
+    ModuleDescriptor* original = module_get_for_runtime(&first, path);
+    ModuleDescriptor* independent = module_get_for_runtime(&second, canonical);
+    EXPECT_NE(original, nullptr);
+    EXPECT_NE(independent, nullptr);
+    EXPECT_NE(original, independent);
+    EXPECT_EQ(module_get_for_runtime(&first, canonical), original);
+    EXPECT_EQ(module_get_for_runtime(&first, path), original);
+    EXPECT_EQ(module_get_for_runtime(&first, "test/js/interp_esm/../interp_esm/dep.mjs"), original);
+    EXPECT_EQ(module_get_for_runtime(&second, canonical), independent);
+    // updating through an alias must remain visible through the linked canonical key.
+    module_register_for_runtime(&first, path, "js", Item{.item = b2it(true)}, nullptr);
+    EXPECT_EQ(original ? original->namespace_obj.item : 0, b2it(true));
+    EXPECT_EQ(independent ? independent->namespace_obj.item : 0, ItemNull.item);
+    EXPECT_EQ(module_get_for_runtime(&first, canonical), original);
+    EXPECT_EQ(module_get_for_runtime(&first, "test/js/interp_esm/missing-registry-module.mjs"), nullptr);
+    runtime_cleanup(&second);
+    runtime_cleanup(&first);
+    mem_free(canonical);
+}
+
 #ifdef _WIN32
 TEST(JsModuleResolution, ResolvesImportsFromCanonicalWindowsPaths) {
     char resolved[256];

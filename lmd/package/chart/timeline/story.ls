@@ -6,6 +6,7 @@ import playback: lambda.chart.playback
 import easing: lambda.slide.easing
 import theme: .theme
 import media_playback: .media_playback
+import index: .index
 
 pub fn items(spec, snapshot = null) {
     let shown=layout.visible(spec,snapshot).events;
@@ -13,7 +14,16 @@ pub fn items(spec, snapshot = null) {
     let ordered=if (order is array) [for (id in order) (shown |: ~.id==c.text(id))[0]] |: ~!=null else shown;
     [if (c.option(c.attrs(snapshot),"view",spec.view)=="story" and spec.intro!=null and spec.intro.visible!=false) spec.intro,*ordered] |: ~!=null
 }
-pub fn item(spec, id) => if (spec.intro!=null and spec.intro.id==id) spec.intro else (spec.events |: ~.id==id)[0]
+pub fn item(spec, id) => if (spec.intro!=null and spec.intro.id==id) spec.intro
+    else if (spec._timeline!=null and spec.events==spec._timeline.index.events) index.event(spec._timeline.index,id)
+    else (spec.events |: ~.id==id)[0]
+pub fn contains_item(spec, snapshot, id) {
+    let cached=spec._timeline;
+    if (cached==null or spec.events!=cached.index.events or layout.visibility_key(spec,snapshot)!=cached.key)
+        contains(items(spec,snapshot) |> ~.id,id)
+    else if (snapshot.view=="story" and spec.intro!=null and spec.intro.id==id) spec.intro.visible!=false
+    else index.event(cached.visible_index,id)!=null and (not (spec.story.order is array) or contains(spec.story.order,id))
+}
 
 pub fn plan(spec, snapshot = null) {
     if (spec is error) spec else {

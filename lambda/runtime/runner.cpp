@@ -59,7 +59,6 @@
 extern "C" Item js_get_key_default(Item object, Item key);
 struct DomDocument;
 extern void free_document(DomDocument* doc);
-extern "C" bool radiant_eval_context_switch(EvalContext* target);
 
 #ifndef LAMBDA_MIR_CACHE_DEFAULT
 #define LAMBDA_MIR_CACHE_DEFAULT 1
@@ -343,7 +342,7 @@ void lambda_home_init(void) {
     const char* env = shell_getenv("LAMBDA_HOME");
     if (env && env[0]) g_lambda_home = env;
 #ifndef LAMBDA_NO_LATEX
-    // the TeX engine's bundled resources ship in the package tree (Lambda_Pkg_Latex3 §9.8)
+    // the TeX engine's bundled resources ship in the package tree (Lambda_Design_TeX_Engine §4)
     char* tex_dir = lambda_home_path("package/latex/tex");
     tex::set_resource_dir(tex_dir);
     if (tex_dir) mem_free(tex_dir);
@@ -1227,6 +1226,36 @@ const char* lambda_ast_overlay_string(Script* script, const char* text) {
 // their semantic owner instead of escaping into a thread-wide side channel.
 LambdaError* get_persistent_last_error() {
     return context ? context->last_error : NULL;
+}
+
+// full evaluator handoff needs JS teardown and native stack rebinding (D5.4.1).
+// D5.4.1: only a quiescent owner may release its thread and precise side-stack binding.
+bool eval_context_transfer_thread(EvalContext* target) {
+    if (!target) return false;
+    if (context == target) return true;
+    if (context) {
+        EvalContext* prev = context;
+        if (prev->execution_depth != 0) {
+            // D5.4.1: releasing a live guest owner invalidates its open frames.
+            log_error("eval-switch: outgoing context is executing");
+            return false;
+        }
+        // EO2: the JS cache is released with the binding it derives from
+        if (js_runtime_state_thread_matches(prev)) js_runtime_state_shutdown(prev);
+        if (!eval_context_shutdown(prev)) {
+            log_error("eval-switch: outgoing context refused release");
+            return false;
+        }
+    }
+    if (!eval_context_init(target)) {
+        log_error("eval-switch: incoming context refused binding");
+        return false;
+    }
+    // A document preloaded on a worker carries that worker's native stack
+    // limit until its evaluator is bound to this thread (D5.4.1).
+    lambda_stack_init();
+    target->stack_limit = lambda_stack_recoverable_limit();
+    return true;
 }
 
 void eval_context_set_last_error(EvalContext* ctx, LambdaError* error) {
@@ -3642,7 +3671,7 @@ void runtime_cleanup(Runtime* runtime) {
             runtime->dom_doc = NULL;
             // Child teardown can leave its evaluator and JS capsule bound here.
             if (!eval_context_matches(cleanup_context) &&
-                    !radiant_eval_context_switch(cleanup_context)) return;
+                    !eval_context_transfer_thread(cleanup_context)) return;
             if (js_runtime_state_for(cleanup_context) &&
                     !js_runtime_state_init(cleanup_context)) return;
         }

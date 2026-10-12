@@ -1,6 +1,6 @@
 # LaTeX Phase IV implementation plan
 
-**Design:** [Lambda_Pkg_Latex3.md §9](../Lambda_Pkg_Latex3.md#9-phase-iv--tex-engine-for-document-local-packages-and-styles-extended-pgfpgfplots-proposed).
+**Design:** [Lambda_Design_TeX_Engine.md](../latex/Lambda_Design_TeX_Engine.md) (formerly `Lambda_Pkg_Latex3.md` §9; section numbers cited below refer to that retired document, and §9.6 now lives in [Lambda_Pkg_Tikz.md §12](../Lambda_Pkg_Tikz.md#12-phase-iv-profile)).
 **Started:** 2026-10-07 (USER: "proceed to impl in a worktree"), branch `worktree-latex-phase4`.
 The §9.8 recommendations are taken as the working choices; each is revisited here if evidence contradicts it.
 
@@ -25,11 +25,13 @@ When nothing is expanded, the reconstruction is byte-identical to the input, so 
 | M1 | Engine core: catcode tokenizer with provenance, control-sequence table, save stack, registers, macros (delimited/undelimited, `\long`/`\outer`/`\protected`), all expandable primitives and conditionals (TeX + e-TeX), number/dimen/glue scanning with TeX's exact rounding, `\the`/`\meaning`/`\string`, budgets, reconstruction + offset map; native LaTeX layer (command/environment definitions with optional arguments, `\begin`/`\end`, raw captures, counters/lengths, options, `\usepackage`/`\RequirePackage`/`\documentclass` resolution to beside-document files); `parse(..., {type: "tex"})` diagnostic entry; digester integration | done |
 | M2 | Conformance corpus: `\immediate\write16` traces compared with `pdftex -ini -etex` from the local TeX Live 2025 for catcodes, expansion, conditionals, grouping, registers, arithmetic | done |
 | M3 | Bundled programming layer: `keyval`, `ifthen`, `calc`, `etoolbox`, `kvoptions`, `xkeyval`; expl3 generic loader; format snapshot cache | done; on-disk format cache open |
-| M4 | biblatex style files (`.bbx`/`.cbx`/`.lbx`/`.dbx`) on the two-pass model of §9.5 | — |
+| M4 | biblatex style files (`.bbx`/`.cbx`/`.lbx`/`.dbx`) on the two-pass model of §9.5 | Dropped by the user on 2026-10-12; guide-level biblatex styles map to CSL ([Lambda_Design_BibTeX_CSL §7.4](../latex/Lambda_Design_BibTeX_CSL.md#74-biblatex-style-names-mapped-to-csl)) |
 | M5 | PGF/PGFPlots native extensions (§9.6) and island expansion | six bounded rows done ([Tikz Phase IV](Lambda_Impl_Tikz_Phase4.md)); rest diagnosed |
 | M6 | Corpus of local packages, docs (§6 matrix, doc/dev), baselines | — |
 
 ## M4 design: biblatex style files on the engine
+
+> **Dropped (2026-10-12).** The user dropped M4; nothing below was built. The design is kept as a record. Guide-level biblatex styles map to CSL styles instead ([Lambda_Design_BibTeX_CSL §7.4](../latex/Lambda_Design_BibTeX_CSL.md#74-biblatex-style-names-mapped-to-csl)).
 
 This realizes §9.5 without moving package policy out of script.
 
@@ -131,3 +133,9 @@ Acceptance needs a pinned BibLaTeX/Biber reference run, which requires installin
     - The registry accepts the `calc` and `shapes.geometric` libraries.
   - **Results:** all 51 LaTeX tests pass.
   - **Found on the way:** a runtime defect. `++` flattens arrays of packed float arrays, and spreading them yields nulls. It is filed as a separate task; the plot code avoids it.
+- 2026-10-12, one front end (**D7.2.7**, ratified the same day):
+  - **Input layer.** `parse_latex_direct` always runs the engine; a file input without `base` resolves beside-document files from its own URL. The unexpanded branch, the `expand` parse option (`tex_expand`) and the `LAMBDA_TEX_EXPAND` knob are gone. An engine that cannot start (allocation failure) yields an error, never a raw parse. Math keeps its definition-triggered expansion.
+  - **Callers.** The native document transform now uses the path-source mode with `latex.render_document_file`, so `lambda convert` and Radiant's LaTeX loader parse through `latex.parse_source` and the engine receives the adapter registry. The doc viewer and the doc-editor UI test call `latex.parse_file`.
+  - **Script.** `render_generic` no longer substitutes macros; `macros.ls` keeps only `get_defs`/`find_macro` for TikZ islands, bussproofs and `\familydefault`. `macro_depth` is gone from the info record.
+  - **Tests.** `test_latex_phase3_boundaries` now expects TeX's control-word rule (`\course \H o` gives "Caféő"); `test_latex_macros` drops the retired `substitute_body` cases.
+  - **Results.** All 58 `test/lambda/latex` scripts pass; input/ext/math scripts 66/66; input-roundtrip 44/44, HTML-roundtrip 32/32, math gtest 11/11; the two LaTeX UI fixtures and the three Radiant view LaTeX tests pass (the math-intensive one only when run alone; it was killed under baseline load). `make test-lambda-baseline`: test_lambda_gtest 1416/1417, the miss being `test_latex_phase3_corpus` timing out under load (53 s alone on the debug build, passes alone; its parse path is unchanged), and the three known REPL `λ>` prompt assertions; everything else passes. `lambda convert` of `fixtures/local_packages/document.tex` went from eight unsupported commands to none.

@@ -1,10 +1,10 @@
-// latex/macros.ls — Basic \newcommand macro expansion
-// Pre-processes the AST to extract macro definitions.
-// Tree-sitter parses \newcommand{\name}[N]{body} as an element:
-//   <newcommand "\\name" <brack_group "N"> <curly_group ...body...>>
-// Macro invocations like \name{arg} become elements:
-//   <name "arg">
-// Expansion happens at render time via render.ls to avoid tree-rebuilding.
+// latex/macros.ls — the table of document macro definitions
+// The TeX engine expands every macro invocation before the direct parser runs
+// (D7.2.7) and echoes the \newcommand-family definitions into its output, so
+// the AST still holds <newcommand "\\name" ...> elements whose argument_groups
+// keep each group's raw source. This module collects those definitions as data
+// for the readers that need them: TikZ islands (tikz_bridge.ls), bussproofs
+// labels, and \familydefault. It never substitutes macros itself.
 
 import util: .util
 
@@ -18,11 +18,6 @@ pub fn get_defs(ast) {
     if (ast == null) { [] }
     else if (ast is element) { collect_all_defs(ast, 0, len(ast), []) }
     else { [] }
-}
-
-// expand is kept for backward compat — now just returns ast unchanged
-pub fn expand(ast) {
-    ast
 }
 
 // ============================================================
@@ -176,122 +171,4 @@ fn check_macro(defs, cmd_name, i) {
     let d = defs[i]
     if (d.name == cmd_name) d
     else find_macro_rec(defs, cmd_name, i + 1)
-}
-
-// ============================================================
-// Parameter substitution (used by render pass)
-// ============================================================
-
-// Reparse substituted TeX source so nested commands and environments keep structure.
-pub fn substitute_source(source, invocation, macro_def) {
-    let groups = invocation.argument_groups
-    let raw = if (groups == null) []
-        else [for (group in groups where group.kind == "optional" or
-            group.kind == "required") group.raw]
-    let args = if (macro_def.default_arg != null and
-        (groups == null or len(groups) == 0 or groups[0].kind != "optional"))
-        [macro_def.default_arg, *raw] else raw
-    substitute_text(source, args)
-}
-
-// substitute #1, #2 in body with arguments from invocation element
-// returns array of string/element items
-pub fn substitute_body(body_group, invocation) {
-    let n = len(body_group)
-    substitute_items(body_group, 0, n, invocation, [])
-}
-
-fn substitute_items(body, i, n, invocation, acc) {
-    if (i >= n) acc
-    else substitute_item(body, i, n, invocation, acc)
-}
-
-fn substitute_item(body, i, n, invocation, acc) {
-    let item = body[i]
-    if (item is string) substitute_text_item(body, i, n, invocation, acc, item)
-    else if (is_param_ref(item)) substitute_param_ref_item(body, i, n, invocation, acc, item)
-    else if (item is element) substitute_element_item(body, i, n, invocation, acc, item)
-    else substitute_items(body, i + 1, n, invocation, acc ++ [item])
-}
-
-// recursively substitute inside child elements too
-fn substitute_element_item(body, i, n, invocation, acc, el) {
-    let expanded = substitute_body(el, invocation)
-    substitute_items(body, i + 1, n, invocation, acc ++ expanded)
-}
-
-// check if node is a parameter reference like #1, #2, etc.
-// these nodes have name() returning "#1", "#2" etc but type() is null
-fn is_param_ref(node) {
-    let n = name(node)
-    if (n == null) false
-    else check_param_tag(string(n))
-}
-
-fn check_param_tag(tag) {
-    if len(tag) > 1 { slice(tag, 0, 1) == "#" }
-    else { false }
-}
-
-// replace a #N element with the corresponding invocation argument
-fn substitute_param_ref_item(body, i, n, invocation, acc, el) {
-    let tag = string(name(el))
-    let num_str = slice(tag, 1, len(tag))
-    let param_num = int(num_str)
-    let arg_idx = if (param_num != null) param_num - 1 else -1
-    let arg = if (arg_idx of invocation) get_invocation_arg(invocation, arg_idx) else ""
-    substitute_items(body, i + 1, n, invocation, acc ++ [arg])
-}
-
-fn substitute_text_item(body, i, n, invocation, acc, text) {
-    let subst = substitute_text(text, invocation)
-    substitute_items(body, i + 1, n, invocation, acc ++ [subst])
-}
-
-fn substitute_text(text, invocation) {
-    replace_params(text, invocation, 1)
-}
-
-fn replace_params(text, invocation, param_num) {
-    if (param_num > 9) text
-    else do_replace_param(text, invocation, param_num)
-}
-
-fn do_replace_param(text, invocation, param_num) {
-    let placeholder = "#" ++ (param_num)
-    let arg_idx = param_num - 1
-    let arg = if (arg_idx < len(invocation)) get_invocation_arg(invocation, arg_idx) else ""
-    let replaced = replace_all_occurrences(text, placeholder, arg)
-    replace_params(replaced, invocation, param_num + 1)
-}
-
-fn get_invocation_arg(invocation, idx) {
-    let child = invocation[idx]
-    if (child is string) child
-    else if (child is element) util.text_of(child)
-    else string(child)
-}
-
-fn replace_all_occurrences(text, pattern, replacement) {
-    if (len(pattern) == 0) text
-    else if (len(text) < len(pattern)) text
-    else try_replace_at(text, pattern, replacement, 0)
-}
-
-fn try_replace_at(text, pattern, replacement, pos) {
-    if (pos + len(pattern) > len(text)) text
-    else check_match_at(text, pattern, replacement, pos)
-}
-
-fn check_match_at(text, pattern, replacement, pos) {
-    let candidate = slice(text, pos, pos + len(pattern))
-    if (candidate == pattern) do_replace(text, pattern, replacement, pos)
-    else try_replace_at(text, pattern, replacement, pos + 1)
-}
-
-fn do_replace(text, pattern, replacement, pos) {
-    let before = slice(text, 0, pos)
-    let after = slice(text, pos + len(pattern), len(text))
-    let result = before ++ replacement ++ after
-    replace_all_occurrences(result, pattern, replacement)
 }

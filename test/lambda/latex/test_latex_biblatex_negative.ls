@@ -36,7 +36,7 @@ let locale_html = html_ser.to_html(unsupported_locale.elements)
     index_of(locale_html, "Unsupported biblatex profile") != null
 
 let invalid_opts_source = replace(input("test/lambda/latex/fixtures/biblatex_bad_style.tex", "text") ^ { "" },
-    "style=apa,sorting=locale,backend=bibtex",
+    "style=mla,sorting=locale,backend=bibtex",
     "style=authoryear,sorting=nyt,backend=biber,uniquename=guess,maxnames=0")
 let invalid_opts_ast = parse(invalid_opts_source, {type: "latex"}) ^ { null }
 let invalid_opts = latex.render_result(invalid_opts_ast, {base_uri: base})

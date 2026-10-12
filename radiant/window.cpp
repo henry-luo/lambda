@@ -1345,6 +1345,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         sim_ctx = replay_jsonl ? event_sim_load_replay_log(event_file) : event_sim_load(event_file);
         if (!sim_ctx) {
             log_error("Failed to load event file: %s", event_file);
+            return 1;
         } else {
             log_info("Event simulation loaded: %d events", sim_ctx->events->length);
         }
@@ -1696,7 +1697,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         uint64_t autofocus_start = time_now_ns();
         if (!paged_options) radiant_run_autofocus(&ui_context, doc); // ES30: package policy -> native focus
         phase_timing.autofocus_ms = view_phase_elapsed_ms(autofocus_start, time_now_ns());
-        if (doc && (doc->view_tree || ui_context.paged_view)) {
+        if (doc && (doc->view_tree || ui_context.paged_view) &&
+            !(headless && sim_ctx && !sim_ctx->initial_render)) {
             log_mem_stage("before-render");
             uint64_t render_start = time_now_ns();
             render_html_doc(&ui_context, doc->view_tree, NULL);
@@ -1778,7 +1780,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                 // Advance time by event interval
                 SimEvent* ev = (sim_ctx->current_index > 0 && sim_ctx->current_index <= sim_ctx->events->length)
                     ? (SimEvent*)sim_ctx->events->data[sim_ctx->current_index - 1] : NULL;
-                int wait_ms = 50;
+                double wait_ms = sim_ctx->event_interval_ms;
                 if (ev && ev->type == SIM_EVENT_WAIT) wait_ms = ev->wait_ms;
                 current_time += wait_ms / 1000.0;
             }

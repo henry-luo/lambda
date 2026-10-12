@@ -406,7 +406,7 @@ The live source uses the direct parser in `lambda/input/input-latex-c.cpp`, then
 
 The later producer should branch before lossy HTML serialization: preserve note anchors/bodies, figure placement preferences, distinct break-versus-flush commands, reference targets, marks and paragraph/box parameters. Existing semantic analysis and `lmd/package/math/box.ls` width/height/depth metrics are reuse candidates, not evidence of complete TeX layout compatibility. Keep any language-facing adapter within **D7.5.3** and follow **D7.2.4** for new shipped document packages.
 
-Historical documents such as [Latex_Pipeline_Design](../latex/Latex_Pipeline_Design.md) and [Latex_Typeset_Design2](../latex/Latex_Typeset_Design2.md) describe `lambda/tex/`, `TexNode` and DVI paths that are absent from this audited checkout. Their architecture is background, not an available implementation to revive or a prerequisite for this proposal. A fresh TeX implementation and compatibility scope should be designed against the contracts above when that future work starts.
+Historical documents such as `vibe/latex/Latex_Pipeline_Design.md` and `vibe/latex/Latex_Typeset_Design2.md` (retired 2026-10-12; in git history) describe `lambda/tex/`, `TexNode` and DVI paths that are absent from this audited checkout. Their architecture is background, not an available implementation to revive or a prerequisite for this proposal. A fresh TeX implementation and compatibility scope should be designed against the contracts above when that future work starts. The current LaTeX package design is [Lambda_Pkg_Latex](../Lambda_Pkg_Latex.md); its TeX engine expands but does not typeset ([Lambda_Design_TeX_Engine](../latex/Lambda_Design_TeX_Engine.md)).
 
 ## 4. CSS and page style resolution
 

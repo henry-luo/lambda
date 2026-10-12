@@ -1,0 +1,440 @@
+{
+  "name": "Rendered focus follows display ancestry, hidden overrides and dirty style changes",
+  "html": "test/ui/css_rendered_focus.html",
+  "viewport": {
+    "width": 640,
+    "height": 192
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-none",
+      "equals": "run"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-descendant",
+      "equals": "run"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-hidden",
+      "equals": "run"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-override",
+      "equals": "override"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-ancestor_override",
+      "equals": "hidden_child"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-transparent",
+      "equals": "transparent"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-zero",
+      "equals": "zero"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-negative",
+      "equals": "negative"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-show",
+      "equals": "none"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-hide",
+      "equals": "run"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-show_host",
+      "equals": "child"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-hide_host",
+      "equals": "run"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-hide_override",
+      "equals": "run"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-show_override",
+      "equals": "override"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-hide_ancestor_override",
+      "equals": "run"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-show_ancestor_override",
+      "equals": "hidden_child"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-hide_visibility",
+      "equals": "run"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-show_visibility",
+      "equals": "negative"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab_reset"
+      }
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#tab_start"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#override"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#hidden_child"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#transparent"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#zero"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "tab",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#transparent"
+      }
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-none",
+      "equals": "run"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-descendant",
+      "equals": "run"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-hidden",
+      "equals": "run"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-override",
+      "equals": "override"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-ancestor_override",
+      "equals": "hidden_child"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-transparent",
+      "equals": "transparent"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-zero",
+      "equals": "zero"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-negative",
+      "equals": "negative"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-show",
+      "equals": "none"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-hide",
+      "equals": "run"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-show_host",
+      "equals": "child"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-hide_host",
+      "equals": "run"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-hide_override",
+      "equals": "run"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-show_override",
+      "equals": "override"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-hide_ancestor_override",
+      "equals": "run"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-show_ancestor_override",
+      "equals": "hidden_child"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-hide_visibility",
+      "equals": "run"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run"
+      },
+      "attribute": "data-show_visibility",
+      "equals": "negative"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab_reset"
+      }
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#tab_start"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#override"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#hidden_child"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#transparent"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#zero"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "tab",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#transparent"
+      }
+    }
+  ]
+}

@@ -1,4 +1,6 @@
 #include "render.hpp"
+#include "render_effect_raster_fallback.hpp"
+#include "render_glyph_run_raster_lower.hpp"
 #include "layout.hpp"
 
 #include "../lib/tagged.hpp"
@@ -339,31 +341,21 @@ static void render_text_inline_background(RasterRenderContext* rdcon, ViewText* 
 static void render_text_inline_border(RasterRenderContext* rdcon, ViewText* text_view,
                                       TextRect* text_rect, DomElement* parent_elem,
                                       float x, float y, const Rect* bg_rect);
-static bool render_text_paint_blurred_shadows(RasterRenderContext* rdcon, unsigned char* str,
+static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon, unsigned char* str,
                                               TextRect* text_rect, TextShadow* text_shadow,
                                               CssEnum text_transform, bool preserve_spaces,
                                               float space_width, float scaled_space_width,
                                               float cjk_spacing,
-                                              float x, float y);
+                                              float x, float y, DomElement* parent_elem);
 static LoadedGlyph* render_text_load_glyph_for_paint(RasterRenderContext* rdcon,
                                                      uint32_t codepoint,
                                                      unsigned char* cursor,
                                                      unsigned char* end);
-static void render_text_paint_glyph_shadows(RasterRenderContext* rdcon, LoadedGlyph* glyph,
-                                            TextShadow* text_shadow, float x, float y,
-                                            float ascend);
+
 static float render_text_trailing_marks(RasterRenderContext* rdcon, TextRect* text_rect,
                                         float x, float y);
 static void render_text_decorations(RasterRenderContext* rdcon, unsigned char* str,
                                     TextRect* text_rect);
-static bool render_text_background_clip_linear_text(RasterRenderContext* rdcon,
-                                                    DomElement* parent_elem,
-                                                    TextRect* text_rect,
-                                                    float text_x, float text_y,
-                                                    LinearGradient** out_gradient,
-                                                    Rect* out_gradient_rect);
-static Color render_text_sample_linear_gradient(LinearGradient* gradient, Rect rect,
-                                                float px, float py, float scale);
 
 CssEnum render_text_inherited_transform(ViewText* text_view) {
     if (!text_view) return CSS_VALUE_NONE;
@@ -616,10 +608,11 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
         int char_index = text_rect->start_index;  // Track character offset for selection
         uint32_t previous_codepoint = 0;
 
-        bool shadow_needs_blur = render_text_paint_blurred_shadows(rdcon, str, text_rect,
-            text_shadow, text_transform, preserve_spaces, space_width,
-            scaled_space_width, text_justify == CSS_VALUE_INTER_WORD
-                ? 0.0f : justification_per_gap, x, y);
+        bool shadow_prepass = text_shadow != nullptr;
+        if (shadow_prepass && !render_text_paint_background_and_shadows(rdcon, str, text_rect,
+                text_shadow, text_transform, preserve_spaces, space_width,
+                scaled_space_width, text_justify == CSS_VALUE_INTER_WORD ? 0.0f : justification_per_gap, x, y, parent_elem))
+            log_error("[TEXT_SHADOW_CAPTURE] native glyph layer capture failed");
 
         while (p < end) {
             // Check if current character is in selection range
@@ -709,27 +702,15 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
 
                         uint64_t t3 = time_now_ns();
 
-                        // Render text-shadow glyphs BEFORE the main glyph
-                        // Skip if blur pre-pass already rendered shadows
-                        if (text_shadow && !shadow_needs_blur) {
-                            render_text_paint_glyph_shadows(rdcon, glyph, text_shadow, x, y, ascend);
+                        if (parent_elem && !shadow_prepass) {
+                            Rect border = {rdcon->block.x, rdcon->block.y,
+                                parent_elem->width * s, parent_elem->height * s};
+                            render_paint_text_background_glyph(rdcon, parent_elem, border, &glyph->bitmap,
+                                roundf(x + glyph->bitmap.bearing_x), roundf(y + ascend - glyph->bitmap.bearing_y));
                         }
-
-                        LinearGradient* text_gradient = nullptr;
-                        Rect text_gradient_rect = {};
-                        bool has_text_gradient = render_text_background_clip_linear_text(
-                            rdcon, parent_elem, text_rect,
-                            rdcon->block.x + text_rect->x * s, y,
-                            &text_gradient, &text_gradient_rect);
                         Color glyph_saved_color = rdcon->color;
-                        if (is_selected && has_selection_foreground) {
+                        if (is_selected && has_selection_foreground)
                             rdcon->color = parent_elem->inl()->selection_color;
-                        } else if (has_text_gradient) {
-                            float gx_center = x + glyph->bitmap.bearing_x + glyph->bitmap.width * 0.5f;
-                            float gy_center = y + ascend - glyph->bitmap.bearing_y + glyph->bitmap.height * 0.5f;
-                            rdcon->color = render_text_sample_linear_gradient(
-                                text_gradient, text_gradient_rect, gx_center, gy_center, s);
-                        }
                         draw_glyph(rdcon, &glyph->bitmap, lroundf(x + glyph->bitmap.bearing_x), lroundf(y + ascend - glyph->bitmap.bearing_y));
                         rdcon->color = glyph_saved_color;
                         float glyph_advance = glyph->advance_x;
@@ -867,131 +848,128 @@ typedef struct SkipInkGap {
     float x1;
 } SkipInkGap;
 
-static bool render_text_paint_blurred_shadows(RasterRenderContext* rdcon, unsigned char* str,
+static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon, unsigned char* str,
                                               TextRect* text_rect, TextShadow* text_shadow,
                                               CssEnum text_transform, bool preserve_spaces,
                                               float space_width, float scaled_space_width,
                                               float cjk_spacing,
-                                              float x, float y) {
+                                              float x, float y, DomElement* parent_elem) {
     if (!rdcon || !str || !text_rect || !text_shadow ||
-        !font_box_handle(&rdcon->font) || !rdcon->font.style) {
-        return false;
-    }
-
+        !font_box_handle(&rdcon->font) || !rdcon->font.style) return false;
     float s = rdcon->raster_scale;
-    float max_shadow_blur = 0;
-    TextShadow* ts = text_shadow;
-    while (ts) {
-        if (ts->blur_radius > 0) {
-            if (ts->blur_radius > max_shadow_blur) {
-                max_shadow_blur = ts->blur_radius;
-            }
+    bool background_painted = false, success = true;
+    render_visit_text_shadows_reverse(text_shadow, [&](TextShadow* shadow) {
+        OffscreenRenderArenas arenas;
+        if (!arenas.init("render.text.shadow", "render.text.shadow.list", "render.text.shadow.scratch")) {
+            success = false; return;
         }
-        ts = ts->next;
-    }
-    if (max_shadow_blur <= 0) {
-        return false;
-    }
+        DisplayList shadow_list = {}; dl_init(&shadow_list, arenas.list_arena);
+        float left = INFINITY, top = INFINITY, right = -INFINITY, bottom = -INFINITY;
+        unsigned char* sp = str + text_rect->start_index;
+        unsigned char* s_end = sp + text_rect->length;
+        float sx_pos = x;
+        bool s_has_space = render_text_source_has_space(str, text_rect->start_index, preserve_spaces);
+        FontStyleDesc sd = font_style_desc_from_prop(rdcon->font.style);
+        bool s_word_start = render_text_source_word_start(str, text_rect->start_index);
+        uint32_t previous_codepoint = 0;
 
-    unsigned char* sp = str + text_rect->start_index;
-    unsigned char* s_end = sp + text_rect->length;
-    float sx_pos = x;
-    bool s_has_space = render_text_source_has_space(str, text_rect->start_index, preserve_spaces);
-    FontStyleDesc sd = font_style_desc_from_prop(rdcon->font.style);
-    bool s_word_start = render_text_source_word_start(str, text_rect->start_index);
-    uint32_t previous_codepoint = 0;
-
-    while (sp < s_end) {
-        if (is_space(*sp)) {
-            if (preserve_spaces || !s_has_space) {
-                s_has_space = true;
-                sx_pos += space_width;
-            }
-            s_word_start = true;
-            previous_codepoint = 0;
-            sp++;
-            continue;
-        }
-
-        s_has_space = false;
-        uint32_t s_cp;
-        int s_bytes = str_utf8_decode((const char*)sp, (size_t)(s_end - sp), &s_cp);
-        if (s_bytes <= 0) {
-            sp++;
-            continue;
-        }
-        sp += s_bytes;
-
-        if (s_cp == 0x00AD) {
-            continue;
-        }
-
-        uint32_t s_tt_out[3];
-        int s_tt_count = apply_text_transform_full(s_cp, text_transform, s_word_start, s_tt_out);
-        s_word_start = false;
-
-        for (int sti = 0; sti < s_tt_count; sti++) {
-            uint32_t s_tt_cp = s_tt_out[sti];
-            if (s_tt_cp == 0) {
-                continue;
-            }
-            if (text_codepoint_has_zero_advance(s_tt_cp)) continue;
-            if (cjk_spacing > 0.0f &&
-                text_justify_cjk_gap(previous_codepoint, s_tt_cp))
-                sx_pos += cjk_spacing;
-            previous_codepoint = s_tt_cp;
-
-            LoadedGlyph* s_glyph = font_load_glyph(font_box_handle(&rdcon->font), &sd, s_tt_cp, true);
-            if (!s_glyph) {
-                sx_pos += scaled_space_width;
+        while (sp < s_end) {
+            if (is_space(*sp)) {
+                if (preserve_spaces || !s_has_space) {
+                    s_has_space = true;
+                    sx_pos += space_width;
+                }
+                s_word_start = true;
+                previous_codepoint = 0;
+                sp++;
                 continue;
             }
 
-            float s_ascend;
-            {
-                uint64_t tfm1 = time_now_ns();
-                s_ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * rdcon->raster_scale;
-                uint64_t tfm2 = time_now_ns();
-                render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_FONT_METRICS,
-                    time_elapsed_ms_f(tfm1, tfm2));
+            s_has_space = false;
+            uint32_t s_cp;
+            int s_bytes = str_utf8_decode((const char*)sp, (size_t)(s_end - sp), &s_cp);
+            if (s_bytes <= 0) {
+                sp++;
+                continue;
+            }
+            sp += s_bytes;
+
+            if (s_cp == 0x00AD) {
+                continue;
             }
 
-            Color saved_color = rdcon->color;
-            ts = text_shadow;
-            while (ts) {
-                rdcon->color = ts->color;
-                float gsx = sx_pos + s_glyph->bitmap.bearing_x + ts->offset_x * s;
-                float gsy = y + s_ascend - s_glyph->bitmap.bearing_y + ts->offset_y * s;
-                draw_glyph(rdcon, &s_glyph->bitmap, lroundf(gsx), lroundf(gsy));
-                ts = ts->next;
+            uint32_t s_tt_out[3];
+            int s_tt_count = apply_text_transform_full(s_cp, text_transform, s_word_start, s_tt_out);
+            s_word_start = false;
+
+            for (int sti = 0; sti < s_tt_count; sti++) {
+                uint32_t s_tt_cp = s_tt_out[sti];
+                if (s_tt_cp == 0) {
+                    continue;
+                }
+                if (text_codepoint_has_zero_advance(s_tt_cp)) continue;
+                if (cjk_spacing > 0.0f &&
+                    text_justify_cjk_gap(previous_codepoint, s_tt_cp))
+                    sx_pos += cjk_spacing;
+                previous_codepoint = s_tt_cp;
+
+                LoadedGlyph* s_glyph = font_load_glyph(font_box_handle(&rdcon->font), &sd, s_tt_cp, true);
+                if (!s_glyph) {
+                    sx_pos += scaled_space_width;
+                    continue;
+                }
+
+                float s_ascend;
+                {
+                    uint64_t tfm1 = time_now_ns();
+                    s_ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * rdcon->raster_scale;
+                    uint64_t tfm2 = time_now_ns();
+                    render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_FONT_METRICS,
+                        time_elapsed_ms_f(tfm1, tfm2));
+                }
+
+                float glyph_x = roundf(sx_pos + s_glyph->bitmap.bearing_x);
+                float glyph_y = roundf(y + s_ascend - s_glyph->bitmap.bearing_y);
+                if (!background_painted && parent_elem) {
+                    Rect border = {rdcon->block.x, rdcon->block.y,
+                        parent_elem->width * s, parent_elem->height * s};
+                    render_paint_text_background_glyph(rdcon, parent_elem, border, &s_glyph->bitmap, glyph_x, glyph_y);
+                }
+                float sx = glyph_x + roundf(shadow->offset_x * s);
+                float sy = glyph_y + roundf(shadow->offset_y * s);
+                dl_draw_glyph(&shadow_list, &s_glyph->bitmap,
+                    (int)sx, (int)sy, shadow->color, false, nullptr, nullptr, 0); // INT_CAST_OK: rounded glyph bitmap destination pixels
+                left = fminf(left, sx); top = fminf(top, sy);
+                right = fmaxf(right, sx + (float)s_glyph->bitmap.width);
+                bottom = fmaxf(bottom, sy + (float)s_glyph->bitmap.height);
+                sx_pos += s_glyph->advance_x + text_character_spacing(rdcon->font.style, s_tt_cp) * s;
             }
-            rdcon->color = saved_color;
-            sx_pos += s_glyph->advance_x + text_character_spacing(rdcon->font.style, s_tt_cp) * s;
         }
-    }
 
-    if (rdcon->ui_context->surface) {
-        float blur_extend = max_shadow_blur * 2;
-        float shadow_max_ox = 0;
-        float shadow_max_oy = 0;
-        ts = text_shadow;
-        while (ts) {
-            if (fabsf(ts->offset_x) > shadow_max_ox) {
-                shadow_max_ox = fabsf(ts->offset_x);
-            }
-            if (fabsf(ts->offset_y) > shadow_max_oy) {
-                shadow_max_oy = fabsf(ts->offset_y);
-            }
-            ts = ts->next;
+        background_painted = true;
+        if (!(right > left && bottom > top) || !shadow->color.a) {
+            dl_destroy(&shadow_list); arenas.destroy(); return;
         }
-        int bx = (int)floorf(x - blur_extend - shadow_max_ox * s);
-        int by = (int)floorf(y - blur_extend - shadow_max_oy * s);
-        int bw = (int)ceilf(text_rect->width * s + blur_extend * 2 + shadow_max_ox * s * 2);
-        int bh = (int)ceilf(text_rect->height * s + blur_extend * 2 + shadow_max_oy * s * 2);
-        rc_box_blur_region(rdcon, bx, by, bw, bh, max_shadow_blur, 0, nullptr);
-    }
-
-    return true;
+        float sigma = shadow->blur_radius * s * 0.5f;
+        float pad = render_filter_blur_support(sigma);
+        Bound bounds = {floorf(left - pad), floorf(top - pad), ceilf(right + pad), ceilf(bottom + pad)};
+        FilterFunction blur = {}; blur.type = FILTER_BLUR; blur.params.blur_radius = sigma;
+        FilterProp filter = {}; filter.functions = lam::own(&blur); filter.functions_borrowed = true;
+        if (sigma > 0.0f) dl_apply_filter(&shadow_list, bounds.left, bounds.top,
+            bounds.right - bounds.left, bounds.bottom - bounds.top, &filter, &bounds);
+        // only the glyph layer is filtered; the document backdrop is composited afterward.
+        ImageSurface* image = render_display_list_snapshot(&shadow_list,
+            mem_context_process(MEM_ROLE_RENDER), bounds, s);
+        dl_destroy(&shadow_list); arenas.destroy();
+        if (!image) { success = false; return; }
+        image_surface_snapshot_publish(image);
+        Rect destination = {bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top};
+        render_painter_blit_surface_scaled(rdcon, image, nullptr,
+            rdcon->ui_context->surface, &destination, &rdcon->block.clip, SCALE_MODE_NEAREST,
+            rdcon->clip_shapes, rdcon->clip_shape_depth, 255);
+        image_surface_snapshot_release(image);
+    });
+    return success;
 }
 
 static LoadedGlyph* render_text_load_glyph_for_paint(RasterRenderContext* rdcon, uint32_t codepoint,
@@ -1021,124 +999,6 @@ static LoadedGlyph* render_text_load_glyph_for_paint(RasterRenderContext* rdcon,
     render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_GLYPH_LOAD,
         time_elapsed_ms_f(t1, t2));
     return glyph;
-}
-
-static void render_text_paint_glyph_shadows(RasterRenderContext* rdcon, LoadedGlyph* glyph,
-                                            TextShadow* text_shadow, float x, float y,
-                                            float ascend) {
-    if (!rdcon || !glyph || !text_shadow) {
-        return;
-    }
-
-    Color saved_shadow_color = rdcon->color;
-    TextShadow* ts = text_shadow;
-    while (ts) {
-        rdcon->color = ts->color;
-        float sx = x + glyph->bitmap.bearing_x + ts->offset_x * rdcon->raster_scale;
-        float sy = y + ascend - glyph->bitmap.bearing_y + ts->offset_y * rdcon->raster_scale;
-        draw_glyph(rdcon, &glyph->bitmap, lroundf(sx), lroundf(sy));
-        ts = ts->next;
-    }
-    rdcon->color = saved_shadow_color;
-}
-
-static bool render_text_background_clip_linear_text(RasterRenderContext* rdcon,
-                                                    DomElement* parent_elem,
-                                                    TextRect* text_rect,
-                                                    float text_x, float text_y,
-                                                    LinearGradient** out_gradient,
-                                                    Rect* out_gradient_rect) {
-    if (out_gradient) *out_gradient = nullptr;
-    if (out_gradient_rect) *out_gradient_rect = {};
-    if (!rdcon || !parent_elem || !parent_elem->bound ||
-        !parent_elem->boundary()->background || !text_rect ||
-        !out_gradient || !out_gradient_rect) {
-        return false;
-    }
-
-    BackgroundProp* bg = parent_elem->boundary()->background;
-    if (bg->bg_clip != CSS_VALUE_TEXT ||
-        bg->gradient_type != GRADIENT_LINEAR ||
-        !bg->linear_gradient ||
-        bg->linear_gradient->stop_count < 2) {
-        return false;
-    }
-
-    float s = rdcon->raster_scale;
-    float width = parent_elem->content_width * s;
-    float height = parent_elem->content_height * s;
-    if (width <= 0.0f) {
-        width = text_rect->width * s;
-    }
-    if (height <= 0.0f) {
-        height = text_rect->height * s;
-    }
-    if (width <= 0.0f || height <= 0.0f) {
-        return false;
-    }
-
-    out_gradient_rect->x = text_x;
-    out_gradient_rect->y = text_y;
-    out_gradient_rect->width = width;
-    out_gradient_rect->height = height;
-    *out_gradient = bg->linear_gradient;
-    return true;
-}
-
-static unsigned char render_text_lerp_channel(unsigned char a, unsigned char b, float t) {
-    float v = (float)a + ((float)b - (float)a) * t;
-    if (v <= 0.0f) return 0;
-    if (v >= 255.0f) return 255;
-    return (unsigned char)lroundf(v);  // INT_CAST_OK: converting interpolated 8-bit color channel
-}
-
-static Color render_text_sample_linear_gradient(LinearGradient* gradient, Rect rect,
-                                                float px, float py, float scale) {
-    Color fallback = {0};
-    fallback.a = 255;
-    if (!gradient || gradient->stop_count <= 0 || rect.width <= 0.0f || rect.height <= 0.0f) {
-        return fallback;
-    }
-    if (gradient->stop_count == 1) {
-        return gradient->stops[0].color;
-    }
-
-    RadiantGradientLine line = radiant_linear_gradient_line(
-        rect, radiant_linear_gradient_used_angle(gradient, rect));
-    float vx = line.x2 - line.x1;
-    float vy = line.y2 - line.y1;
-    float len2 = vx * vx + vy * vy;
-    lam::Temp<RdtGradientStop> stops = lam::temp_array<RdtGradientStop>(gradient->stop_count, MEM_CAT_RENDER);
-    if (!stops || !render_copy_gradient_stops(gradient->stops, gradient->stop_count,
-            sqrtf(len2) / scale, stops.get(), gradient->stop_count, nullptr)) return fallback;
-    float pos = len2 > 1e-7f
-        ? ((px - line.x1) * vx + (py - line.y1) * vy) / len2
-        : 0.0f;
-    pos = fminf(1.0f, fmaxf(0.0f, pos));
-
-    int right = 0;
-    while (right < gradient->stop_count &&
-           stops[right].offset < pos) {
-        right++;
-    }
-    if (right <= 0) {
-        return gradient->stops[0].color;
-    }
-    if (right >= gradient->stop_count) {
-        return gradient->stops[gradient->stop_count - 1].color;
-    }
-
-    float left_pos = stops[right - 1].offset;
-    float right_pos = stops[right].offset;
-    float t = right_pos > left_pos ? (pos - left_pos) / (right_pos - left_pos) : 0.0f;
-    Color left = gradient->stops[right - 1].color;
-    Color right_color = gradient->stops[right].color;
-    Color out = {0};
-    out.r = render_text_lerp_channel(left.r, right_color.r, t);
-    out.g = render_text_lerp_channel(left.g, right_color.g, t);
-    out.b = render_text_lerp_channel(left.b, right_color.b, t);
-    out.a = render_text_lerp_channel(left.a, right_color.a, t);
-    return out;
 }
 
 static float render_text_trailing_marks(RasterRenderContext* rdcon, TextRect* text_rect,
@@ -1399,4 +1259,59 @@ static void render_text_decorations(RasterRenderContext* rdcon, unsigned char* s
     if (font->text_deco_extra & CSS_TEXT_DECO_LINE_THROUGH) {
         render_single_text_decoration(rdcon, str, text_rect, CSS_VALUE_LINE_THROUGH);
     }
+}
+
+
+bool render_paint_text_shadows(PaintList* paint, UiContext* ui,
+        const PaintGlyphRun* run, TextShadow* shadows) {
+    if (!paint || !run || !shadows) return false;
+    RdtPath* path = run->glyph_ids && run->count > 0 ? render_path_create_glyph_run(run)
+        : render_path_create_text_run(run, ui ? ui->font_ctx.get() : nullptr);
+    if (!path) return false;
+    bool recorded = false;
+    render_visit_text_shadows_reverse(shadows, [&](TextShadow* shadow) {
+        if (!shadow->color.a) return;
+        RdtMatrix offset = rdt_matrix_translate(shadow->offset_x, shadow->offset_y);
+        if (shadow->blur_radius <= 0.0f) {
+            recorded |= render_paint_solid_shape(paint, path, shadow->color, &offset);
+            return;
+        }
+        PaintGlyphRun colored = *run;
+        colored.owned_text = nullptr; colored.color = shadow->color;
+        colored.x += shadow->offset_x; colored.baseline_y += shadow->offset_y;
+        OffscreenRenderArenas bounds_arenas;
+        if (!bounds_arenas.init("render.text.shadow.bounds", "render.text.shadow.bounds.list",
+                "render.text.shadow.bounds.scratch")) return;
+        DisplayList glyphs = {}; dl_init(&glyphs, bounds_arenas.list_arena);
+        render_glyph_run_raster_lower(&colored, &glyphs);
+        // hinted bitmap extents can exceed the selected outline's contour bounds.
+        Bound ink = dl_content_bounds(&glyphs);
+        dl_destroy(&glyphs); bounds_arenas.destroy();
+        if (!(ink.right > ink.left && ink.bottom > ink.top)) return;
+        float sigma = shadow->blur_radius * 0.5f;
+        float density = ui_context_raster_scale(ui);
+        // all three convolution passes contribute to the finite capture extent.
+        float pad = render_filter_blur_support(sigma * density) / density;
+        Bound bounds = {ink.left - pad, ink.top - pad, ink.right + pad, ink.bottom + pad};
+        FilterFunction blur = {}; blur.type = FILTER_BLUR; blur.params.blur_radius = sigma;
+        FilterProp filter = {}; filter.functions = lam::own(&blur); filter.functions_borrowed = true;
+        PaintEffectGroup group = {}; group.bounds = bounds; group.opacity = 1; group.filter = lam::up(&filter);
+        PaintList shadow_paint;
+        paint_begin_effect_group(&shadow_paint, &group);
+        // filtered text uses the captured selected-font raster lowerer, as ordinary filter text does.
+        paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
+        paint_glyph_run(&shadow_paint, &colored);
+        paint_end_effect_group(&shadow_paint);
+        RenderEffectRasterImage image = {};
+        // the temporary filter is borrowed only during synchronous isolated capture (D4.5.1v4).
+        if (!render_effect_rasterize_paint_list(&shadow_paint, nullptr, &bounds,
+                bounds.right - bounds.left, bounds.bottom - bounds.top, false,
+                ui_context_raster_scale(ui), &image, "[TEXT_SHADOW_CAPTURE]") || !image.surface) return;
+        int before = paint_list_count(paint);
+        paint_draw_image_resource(paint, image.surface, image.x, image.y, image.width, image.height,
+            255, nullptr, image_surface_destroy);
+        recorded |= paint_list_count(paint) == before + 1;
+    });
+    rdt_path_free(path);
+    return recorded;
 }

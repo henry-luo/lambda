@@ -1,5 +1,31 @@
 #include "render.hpp"
+#include "view.hpp"
+#include <math.h>
 #include <string.h>
+
+FilterProp* dl_capture_filter_lengths(DisplayList* list, FilterProp* filter, float scale) {
+    if (!filter || !filter->functions || scale == 1.0f) return filter;
+    if (!list || !isfinite(scale) || scale <= 0.0f) return nullptr;
+    // display-list arena copies freeze device lengths without mutating computed CSS.
+    auto* result = (FilterProp*)scratch_alloc(&list->arena, sizeof(FilterProp));
+    if (!result) return nullptr;
+    *result = {}; result->functions_borrowed = true;
+    FilterFunction* tail = nullptr;
+    for (FilterFunction* source = filter->functions; source; source = source->next) {
+        auto* copy = (FilterFunction*)scratch_alloc(&list->arena, sizeof(FilterFunction));
+        if (!copy) return nullptr;
+        *copy = *source; copy->next = nullptr;
+        if (copy->type == FILTER_BLUR) copy->params.blur_radius *= scale;
+        else if (copy->type == FILTER_DROP_SHADOW) {
+            copy->params.drop_shadow.offset_x *= scale;
+            copy->params.drop_shadow.offset_y *= scale;
+            copy->params.drop_shadow.blur_radius *= scale;
+        }
+        if (tail) tail->next = lam::own(copy); else result->functions = lam::own(copy);
+        tail = copy;
+    }
+    return result;
+}
 
 static void dl_copy_effect_params(float* dst, int type, const float* params) {
     if (type && params) {

@@ -2740,35 +2740,18 @@ TEST(RenderOutputParity, SvgExportInlineSvgUsesSubsceneLowering) {
 }
 
 TEST(RenderOutputParity, SvgExportTextShadowWithoutAuthoredFont) {
-    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
-        GTEST_SKIP() << "lambda.exe is unavailable";
+    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white;width:200px;height:100px}.box{width:160px;height:40px}</style>";
+    char actual[2048], reference[2048];
+    snprintf(actual, sizeof(actual), "%s<div class=box style='text-shadow:2px 3px red'>Shadow</div>", prefix);
+    snprintf(reference, sizeof(reference), "%s<div style='position:relative;width:200px;height:40px'>"
+        "<div class=box style='position:absolute;left:2px;top:3px;color:red'>Shadow</div>"
+        "<div class=box style='position:absolute'>Shadow</div></div>", prefix);
+    // default-font shadows must reach pixels independently of the SVG representation.
+    for (int density = 1; density <= 2; density++) {
+        char name[128]; snprintf(name, sizeof(name), "text_shadow_default_font_%dx", density);
+        SCOPED_TRACE(name);
+        expect_html_pair_output_parity(name, actual, reference, true, density);
     }
-    ASSERT_TRUE(ensure_dir("temp"));
-    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
-
-    const char* html_path = "temp/render_output_parity/text_shadow_only.html";
-    const char* svg_path = "temp/render_output_parity/text_shadow_only.svg";
-    const char* html =
-        "<!doctype html><html><body>"
-        "<p style=\"text-shadow:2px 3px 0 red\">Shadow</p>"
-        "</body></html>";
-    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
-
-    char qhtml[PATH_MAX + 8];
-    char qsvg[PATH_MAX + 8];
-    char cmd[PATH_MAX * 3 + 256];
-    shell_quote(html_path, qhtml, sizeof(qhtml));
-    shell_quote(svg_path, qsvg, sizeof(qsvg));
-    snprintf(cmd, sizeof(cmd),
-             "%s render %s%s -o %s > temp/render_output_parity/text_shadow_only.out 2> temp/render_output_parity/text_shadow_only.err",
-             LAMBDA_EXE, lambda_no_log_arg(), qhtml, qsvg);
-
-    int status = system(cmd);
-    ASSERT_TRUE(WIFEXITED(status));
-    ASSERT_EQ(WEXITSTATUS(status), 0);
-    ASSERT_TRUE(file_exists(svg_path));
-    EXPECT_TRUE(file_contains_text(svg_path,
-        "text-shadow: 2.0px 3.0px 0.0px rgb(255,0,0)"));
 }
 
 TEST(RenderOutputParity, TextDecorationListPaintsBothLines) {
@@ -2908,24 +2891,10 @@ TEST(RenderOutputParity, TextJustifyNoneDoesNotExpandPaintedSpaces) {
     image_free(image.pixels);
 }
 
-TEST(RenderOutputParity, TextJustifyCjkAutoExpandsBetweenIdeographs) {
-    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
-        GTEST_SKIP() << "lambda.exe is unavailable";
-    }
-    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
-    const char* html_path = "temp/render_output_parity/text_justify_cjk.html";
-    const char* png_path = "temp/render_output_parity/text_justify_cjk.png";
-    const char* svg_path = "temp/render_output_parity/text_justify_cjk.svg";
-    const char* html =
-        "<!doctype html><style>html,body{margin:0}div{font:30px Arial;"
-        "width:160px;text-align:justify-all;white-space:nowrap;margin:10px 0}"
-        "#none{text-justify:none}#auto{text-justify:auto;text-shadow:0 0 4px red}"
-        "#word{text-justify:inter-word}</style>"
-        "<div id='none'>漢字</div><div id='auto'>漢字</div>"
-        "<div id='word'>漢字</div>";
-    ASSERT_TRUE(render_html_fixture(html_path, png_path, html));
+static void expect_cjk_justify_pixels(const char* path) {
+    SCOPED_TRACE(path);
     ImageData image = {};
-    ASSERT_TRUE(load_png_rgba(png_path, &image));
+    ASSERT_TRUE(load_png_rgba(path, &image));
     int right_pixels[3] = {};
     int right_shadow_pixels = 0;
     for (int row = 0; row < 3; row++) {
@@ -2945,8 +2914,31 @@ TEST(RenderOutputParity, TextJustifyCjkAutoExpandsBetweenIdeographs) {
     EXPECT_GT(right_shadow_pixels, 5);
     EXPECT_EQ(right_pixels[2], 0);
     image_free(image.pixels);
+}
+
+TEST(RenderOutputParity, TextJustifyCjkAutoExpandsBetweenIdeographs) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/text_justify_cjk.html";
+    const char* png_path = "temp/render_output_parity/text_justify_cjk.png";
+    const char* svg_path = "temp/render_output_parity/text_justify_cjk.svg";
+    const char* html =
+        "<!doctype html><style>html,body{margin:0}div{font:30px Arial;"
+        "width:160px;text-align:justify-all;white-space:nowrap;margin:10px 0}"
+        "#none{text-justify:none}#auto{text-justify:auto;text-shadow:0 0 4px red}"
+        "#word{text-justify:inter-word}</style>"
+        "<div id='none'>漢字</div><div id='auto'>漢字</div>"
+        "<div id='word'>漢字</div>";
+    ASSERT_TRUE(render_html_fixture(html_path, png_path, html));
+    expect_cjk_justify_pixels(png_path);
     ASSERT_TRUE(render_html_fixture(html_path, svg_path, html));
-    EXPECT_TRUE(file_contains_text(svg_path, "dx=\"0.00 100.00\""));
+    const char* raster_path = "temp/render_output_parity/text_justify_cjk_svg.png";
+    ASSERT_TRUE(command_exists("rsvg-convert"));
+    CommandResult raster = run_command_capture("rsvg-convert temp/render_output_parity/text_justify_cjk.svg -o temp/render_output_parity/text_justify_cjk_svg.png");
+    ASSERT_EQ(raster.exit_code, 0) << raster.output;
+    expect_cjk_justify_pixels(raster_path);
 }
 
 TEST(RenderOutputParity, LogicalFloatAndClearUseContainingBlockDirection) {
@@ -5868,21 +5860,21 @@ TEST(RenderOutputParity, SelectionBackgroundUsesPseudoStyle) {
         "\"target\":{\"selector\":\"#editor\"},\"start\":0,\"end\":6},"
         "{\"type\":\"assert_pixel\","
         "\"target\":{\"selector\":\"#editor\",\"offset_x\":15,"
-        "\"offset_y\":20,\"search_radius\":10,"
+        "\"offset_y\":20},\"search_radius\":10,"
         "\"min_g\":190,\"max_r\":80,\"max_b\":80},"
         "{\"type\":\"assert_pixel\","
         "\"target\":{\"selector\":\"#editor\",\"offset_x\":19,"
-        "\"offset_y\":20,\"search_radius\":12,"
+        "\"offset_y\":20},\"search_radius\":12,"
         "\"min_r\":190,\"max_g\":80,\"max_b\":80},"
         "{\"type\":\"set_editing_selection\","
         "\"target\":{\"selector\":\"#control\"},\"start\":0,\"end\":6},"
         "{\"type\":\"assert_pixel\","
         "\"target\":{\"selector\":\"#control\",\"offset_x\":15,"
-        "\"offset_y\":20,\"search_radius\":10,"
+        "\"offset_y\":20},\"search_radius\":10,"
         "\"min_b\":190,\"max_r\":80,\"max_g\":80},"
         "{\"type\":\"assert_pixel\","
         "\"target\":{\"selector\":\"#control\",\"offset_x\":19,"
-        "\"offset_y\":20,\"search_radius\":12,"
+        "\"offset_y\":20},\"search_radius\":12,"
         "\"min_r\":190,\"max_g\":80,\"max_b\":80}]}";
     ASSERT_TRUE(run_html_fixture_view(html_path, events_path, html, events));
 }
@@ -10315,5 +10307,214 @@ TEST(RenderOutputParity, OutsideGradientStopsPreserveColorsAcrossOutputs) {
             snprintf(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
             expect_png_channel_coverage(path, item.channel, 2, 1);
         }
+    }
+}
+
+TEST(RenderOutputParity, TransformedOverflowClipsFollowOwningBoxesAcrossOutputs) {
+    const struct { const char* name; const char* actual; const char* reference; } cases[] = {
+        {"scaled", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;transform-origin:0 0}.source{position:absolute;left:-24px;top:-16px;width:96px;height:64px;background:blue}</style><div class=frame style=\"transform:translate(8px,8px) scale(1.25)\"><div class=source></div></div>", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;transform-origin:0 0}.source{position:absolute;left:-24px;top:-16px;width:96px;height:64px;background:blue}</style><div class=frame style=\"transform:translate(8px,8px) scale(1.25);background:blue\"></div>"},
+        {"flipped", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;transform-origin:0 0}.source{position:absolute;left:-24px;top:-16px;width:96px;height:64px;background:blue}</style><div class=frame style=\"transform:translate(64px,8px) scaleX(-1)\"><div class=source></div></div>", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;transform-origin:0 0}.source{position:absolute;left:-24px;top:-16px;width:96px;height:64px;background:blue}</style><div class=frame style=\"transform:translate(64px,8px) scaleX(-1);background:blue\"></div>"},
+        {"nested_rounded", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;transform-origin:0 0}.source{position:absolute;left:-24px;top:-16px;width:96px;height:64px;background:blue}</style><div style=\"width:40px;height:28px;overflow:hidden;position:relative\"><div class=frame style=\"left:12px;top:4px;border-radius:8px;transform:translate(8px,8px) scale(1.25)\"><div class=source></div></div></div>", "<!doctype html><style>html,body{margin:0;background:white}.frame{width:48px;height:32px;position:relative;overflow:hidden;transform-origin:0 0}.source{position:absolute;left:-24px;top:-16px;width:96px;height:64px;background:blue}</style><div style=\"width:40px;height:28px;overflow:hidden;position:relative\"><div class=frame style=\"left:12px;top:4px;border-radius:8px;transform:translate(8px,8px) scale(1.25);background:blue\"></div></div>"},
+    };
+    for (const auto& item : cases) for (int scale = 1; scale <= 2; scale++) {
+        char name[128]; snprintf(name, sizeof(name), "transformed_overflow_%s_%dx", item.name, scale);
+        SCOPED_TRACE(name);
+        expect_html_pair_output_parity(name, item.actual, item.reference, true, scale);
+        const char* suffixes[] = {".png", "_0_svg.png", "_pdf.png"};
+        for (const char* suffix : suffixes) {
+            if (!strcmp(suffix, "_pdf.png") && !command_exists("sips") && !command_exists("pdftoppm")) continue;
+            char path[PATH_MAX]; snprintf(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
+            expect_png_channel_coverage(path, 2, 2, 1);
+        }
+    }
+}
+
+TEST(RenderOutputParity, VisibilitySuppressesPdfLinkAnnotations) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html = "<!doctype html><style>html,body{margin:0;font:16px Arial}"
+        "a{display:block;width:40px;height:24px}.hidden{visibility:hidden}"
+        ".collapsed{visibility:collapse}.visible{visibility:visible}</style>"
+        "<a class=hidden href='https://example.test/hidden'>Hidden</a>"
+        "<div class=hidden><a href='https://example.test/inherited'>Inherited</a></div>"
+        "<a class=collapsed href='https://example.test/collapsed'>Collapsed</a>"
+        "<a href='https://example.test/shown'>Shown</a>"
+        "<a class=hidden href='https://example.test/descendant'><span class=visible>Visible</span></a>";
+    for (int scale = 1; scale <= 2; scale++) {
+        char input[128], output[128], options[64];
+        snprintf(input, sizeof(input), "temp/render_output_parity/visibility_links_%dx.html", scale);
+        snprintf(output, sizeof(output), "temp/render_output_parity/visibility_links_%dx.pdf", scale);
+        snprintf(options, sizeof(options), "-vw 160 -vh 160 --pixel-ratio %d", scale);
+        SCOPED_TRACE(output);
+        ASSERT_TRUE(render_html_fixture(input, output, html, options));
+        EXPECT_FALSE(file_contains_text(output, "https://example.test/hidden"));
+        EXPECT_FALSE(file_contains_text(output, "https://example.test/inherited"));
+        EXPECT_FALSE(file_contains_text(output, "https://example.test/collapsed"));
+        EXPECT_TRUE(file_contains_text(output, "https://example.test/shown"));
+        EXPECT_TRUE(file_contains_text(output, "https://example.test/descendant"));
+    }
+}
+
+TEST(RenderOutputParity, LinearBackgroundClipTextUsesGlyphCoverageAndOwnerBox) {
+    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white}"
+        ".glyph{width:80px;height:100px;font:80px/1 Arial}.frame{position:absolute;overflow:hidden;height:100px}"
+        ".box{width:80px;height:100px;font:80px/1 Arial;color:transparent;"
+        "background-image:linear-gradient(to right,red 50%,blue 50%);background-clip:text}</style>";
+    const struct { const char* name; const char* style; const char* reference; } cases[] = {
+        {"single", "", "<div style='position:relative;width:80px;height:100px'>"
+            "<div class=frame style='left:0;width:40px'><div class=glyph style='color:red'>M</div></div>"
+            "<div class=frame style='left:40px;width:40px'><div class=glyph style='position:relative;left:-40px;color:blue'>M</div></div></div>"},
+        {"indent", "text-indent:16px", "<div style='position:relative;width:80px;height:100px'>"
+            "<div class=frame style='left:0;width:40px'><div class=glyph style='text-indent:16px;color:red'>M</div></div>"
+            "<div class=frame style='left:40px;width:40px'><div class=glyph style='position:relative;left:-40px;text-indent:16px;color:blue'>M</div></div></div>"},
+    };
+    for (const auto& item : cases) for (int scale = 1; scale <= 2; scale++) {
+        char name[128], actual[2048], reference[3072];
+        snprintf(name, sizeof(name), "text_clip_linear_%s_%dx", item.name, scale);
+        SCOPED_TRACE(name);
+        snprintf(actual, sizeof(actual), "%s<div class=box style='%s'>M</div>", prefix, item.style);
+        snprintf(reference, sizeof(reference), "%s%s", prefix, item.reference);
+        expect_html_pair_output_parity(name, actual, reference, true, scale);
+    }
+}
+
+TEST(RenderOutputParity, HardGradientTextDirectionsRepeatsAndRunsUseOwnerGeometry) {
+    const struct { const char* name; const char* gradient; const char* text; float width;
+        bool vertical; float band; const char* colors[4]; int bands; } cases[] = {
+        {"left", "linear-gradient(to left,red 50%,blue 50%)", "M", 80, false, 40, {"blue","red"}, 2},
+        {"down", "linear-gradient(to bottom,red 50%,blue 50%)", "M", 80, true, 50, {"red","blue"}, 2},
+        {"up", "linear-gradient(to top,red 50%,blue 50%)", "M", 80, true, 50, {"blue","red"}, 2},
+        {"repeat", "repeating-linear-gradient(to right,red 0px,red 20px,blue 20px,blue 40px)", "M", 80, false, 20, {"red","blue","red","blue"}, 4},
+        {"two_glyphs", "linear-gradient(to right,red 50%,blue 50%)", "MM", 160, false, 80, {"red","blue"}, 2},
+    };
+    for (const auto& item : cases) for (int density = 1; density <= 2; density++) {
+        char prefix[1024], actual[2048], name[128];
+        snprintf(prefix, sizeof(prefix), "<!doctype html><style>html,body{margin:0;background:white}"
+            ".glyph{width:%gpx;height:100px;font:80px/1 Arial}.frame{position:absolute;overflow:hidden}"
+            ".box{width:%gpx;height:100px;font:80px/1 Arial;color:transparent;background-clip:text}</style>", item.width, item.width);
+        snprintf(actual, sizeof(actual), "%s<div class=box style='background-image:%s'>%s</div>", prefix, item.gradient, item.text);
+        StrBuf* reference = strbuf_create(prefix);
+        ASSERT_NE(reference, nullptr);
+        strbuf_append_format(reference, "<div style='position:relative;width:%gpx;height:100px'>", item.width);
+        for (int band = 0; band < item.bands; band++) {
+            float start = (float)band * item.band;
+            float x = item.vertical ? 0.0f : start, y = item.vertical ? start : 0.0f;
+            float width = item.vertical ? item.width : item.band, height = item.vertical ? item.band : 100.0f;
+            strbuf_append_format(reference, "<div class=frame style='left:%gpx;top:%gpx;width:%gpx;height:%gpx'>"
+                "<div class=glyph style='position:relative;left:%gpx;top:%gpx;color:%s'>%s</div></div>",
+                x, y, width, height, -x, -y, item.colors[band], item.text);
+        }
+        strbuf_append_str(reference, "</div>");
+        snprintf(name, sizeof(name), "text_clip_hard_%s_%dx", item.name, density); SCOPED_TRACE(name);
+        expect_html_pair_output_parity(name, actual, reference->str, true, density);
+        strbuf_free(reference);
+    }
+}
+
+TEST(RenderOutputParity, TextBackgroundTilesUseSizePositionRepeatAndColorLayers) {
+    const struct { const char* name; const char* style; const char* colors[4]; int bands; float band; } cases[] = {
+        {"small_repeat", "background-size:40px 100px", {"red","blue","red","blue"}, 4, 20},
+        {"small_shift", "background-size:40px 100px;background-position:20px 0", {"blue","red","blue","red"}, 4, 20},
+        {"small_once", "background-size:40px 100px;background-repeat:no-repeat", {"red","blue","white","white"}, 4, 20},
+        {"shift_once", "background-size:40px 100px;background-position:20px 0;background-repeat:no-repeat", {"white","red","blue","white"}, 4, 20},
+        {"base_color", "background-size:40px 100px;background-repeat:no-repeat;background-color:lime", {"red","blue","lime","lime"}, 4, 20},
+        {"solid_color", "background-image:none;background-color:lime", {"lime"}, 1, 80},
+        {"layers", "background-image:linear-gradient(red,red),linear-gradient(blue,blue);background-size:40px 100px,80px 100px;background-repeat:no-repeat", {"red","blue"}, 2, 40},
+    };
+    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white}"
+        ".box,.glyph{width:80px;height:100px;font:80px/1 Arial}"
+        ".box{color:transparent;background-image:linear-gradient(to right,red 50%,blue 50%);background-clip:text}"
+        ".frame{position:absolute;overflow:hidden;top:0;height:100px}</style>";
+    for (const auto& item : cases) for (int density = 1; density <= 2; density++) {
+        char actual[2048], name[128];
+        snprintf(actual, sizeof(actual), "%s<div class=box style='%s'>M</div>", prefix, item.style);
+        StrBuf* reference = strbuf_create(prefix); ASSERT_NE(reference, nullptr);
+        strbuf_append_str(reference, "<div style='position:relative;width:80px;height:100px'>");
+        if (strcmp(item.name, "base_color") == 0 || strcmp(item.name, "layers") == 0) {
+            const char* color = strcmp(item.name, "base_color") == 0 ? "lime" : "blue";
+            strbuf_append_format(reference, "<div class=frame style='left:0;width:80px'><div class=glyph style='color:%s'>M</div></div>", color);
+        }
+        for (int band = 0; band < item.bands; band++) {
+            // image gaps add no paint; the optional base glyph already supplies the clipped lower layer.
+            if (strcmp(item.colors[band], "white") == 0 ||
+                (strcmp(item.name, "base_color") == 0 && band >= 2) ||
+                (strcmp(item.name, "layers") == 0 && band > 0)) continue;
+            float x = (float)band * item.band;
+            strbuf_append_format(reference, "<div class=frame style='left:%gpx;width:%gpx'>"
+                "<div class=glyph style='position:relative;left:%gpx;color:%s'>M</div></div>",
+                x, item.band, -x, item.colors[band]);
+        }
+        strbuf_append_str(reference, "</div>");
+        snprintf(name, sizeof(name), "text_clip_tile_%s_%dx", item.name, density); SCOPED_TRACE(name);
+        expect_html_pair_output_parity(name, actual, reference->str, true, density);
+        strbuf_free(reference);
+    }
+}
+
+TEST(RenderOutputParity, TransparentTextShadowsPreserveClippedBackgroundPaint) {
+    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white}.box{width:80px;height:100px;"
+        "font:80px/1 Arial;color:transparent;background-image:linear-gradient(to right,red 50%,blue 50%);background-clip:text}</style>";
+    const struct { const char* name; const char* shadow; const char* effect; } cases[] = {
+        {"zero", "0 0 transparent", ""},
+        {"blur", "2px 2px 4px rgba(0,0,0,0)", ""},
+        {"opacity", "0 0 transparent", "opacity:.5"},
+    };
+    for (const auto& item : cases) for (int density = 1; density <= 2; density++) {
+        char actual[2048], reference[2048], name[128];
+        snprintf(actual, sizeof(actual), "%s<div class=box style='text-shadow:%s;%s'>M</div>", prefix, item.shadow, item.effect);
+        snprintf(reference, sizeof(reference), "%s<div class=box style='%s'>M</div>", prefix, item.effect);
+        snprintf(name, sizeof(name), "text_clip_shadow_%s_%dx", item.name, density); SCOPED_TRACE(name);
+        expect_html_pair_output_parity(name, actual, reference, true, density);
+    }
+}
+
+TEST(RenderOutputParity, VisibleTextShadowsUseAuthoredOrderBetweenBackgroundAndText) {
+    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white}.box{width:80px;height:100px;font:80px/1 Arial}</style>";
+    const struct { const char* name; const char* shadow; const char* background; const char* color; } cases[] = {
+        {"solid", "0 0 lime", "", "lime"},
+        {"list", "0 0 red,0 0 blue", "", "red"},
+        {"clipped", "0 0 lime", "background-image:linear-gradient(to right,red 50%,blue 50%);background-clip:text;", "lime"},
+    };
+    for (const auto& item : cases) for (int density = 1; density <= 2; density++) {
+        char actual[2048], reference[2048], name[128];
+        snprintf(actual, sizeof(actual), "%s<div class=box style='%scolor:transparent;text-shadow:%s'>M</div>", prefix, item.background, item.shadow);
+        // independent foreground glyphs paint the same authored layers behind transparent text.
+        if (strcmp(item.name, "clipped") == 0)
+            snprintf(reference, sizeof(reference), "%s<div class=box style='%scolor:%s'>M</div>", prefix, item.background, item.color);
+        else if (strcmp(item.name, "list") == 0)
+            snprintf(reference, sizeof(reference), "%s<div style='position:relative;width:80px;height:100px'>"
+                "<div class=box style='position:absolute;color:blue'>M</div>"
+                "<div class=box style='position:absolute;color:red'>M</div></div>", prefix);
+        else snprintf(reference, sizeof(reference), "%s<div class=box style='color:%s'>M</div>", prefix, item.color);
+        snprintf(name, sizeof(name), "text_shadow_visible_%s_%dx", item.name, density); SCOPED_TRACE(name);
+        expect_html_pair_output_parity(name, actual, reference, true, density);
+    }
+}
+
+TEST(RenderOutputParity, BlurredTextShadowsCaptureOnlyTheirGlyphs) {
+    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white}.box{width:80px;height:100px;font:80px/1 Arial;position:absolute;left:16px;top:16px}</style>";
+    for (int density = 1; density <= 2; density++) {
+        char actual[2048], reference[2048], name[128];
+        snprintf(actual, sizeof(actual), "%s<div class=box style='color:transparent;text-shadow:0 0 4px lime'>M</div>", prefix);
+        snprintf(reference, sizeof(reference), "%s<div class=box style='color:lime;filter:blur(2px)'>M</div>", prefix);
+        snprintf(name, sizeof(name), "text_shadow_blur_%dx", density); SCOPED_TRACE(name);
+        expect_html_pair_output_parity(name, actual, reference, true, density);
+    }
+}
+
+TEST(RenderOutputParity, TextShadowLayersPreserveBackdropAndPerLayerBlur) {
+    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white;width:200px;height:180px}.box{width:80px;height:100px;font:80px/1 Arial;position:absolute;left:16px;top:16px}</style>";
+    const struct { const char* name; const char* background; const char* shadow; const char* layers; const char* foreground; } cases[] = {
+        {"backdrop", "<div style='position:absolute;left:0;top:0;width:120px;height:120px;background:linear-gradient(to right,orange 50%,cyan 50%)'></div>",
+            "0 0 4px lime", "<div class=box style='color:lime;filter:blur(2px)'>M</div>", "transparent"},
+        {"mixed", "", "8px -4px 6px red,-6px 3px 2px blue",
+            "<div class=box style='left:10px;top:19px;color:blue;filter:blur(1px)'>M</div><div class=box style='left:24px;top:12px;color:red;filter:blur(3px)'>M</div>", "transparent"},
+        {"foreground", "", "8px -4px 4px lime", "<div class=box style='left:24px;top:12px;color:lime;filter:blur(2px)'>M</div>", "black"},
+    };
+    for (const auto& item : cases) for (int density = 1; density <= 2; density++) {
+        char actual[4096], reference[4096], name[128];
+        snprintf(actual, sizeof(actual), "%s%s<div class=box style='color:%s;text-shadow:%s'>M</div>", prefix, item.background, item.foreground, item.shadow);
+        snprintf(reference, sizeof(reference), "%s%s%s<div class=box style='color:%s'>M</div>", prefix, item.background, item.layers, item.foreground);
+        snprintf(name, sizeof(name), "text_shadow_layers_%s_%dx", item.name, density); SCOPED_TRACE(name);
+        expect_html_pair_output_parity(name, actual, reference, true, density);
     }
 }

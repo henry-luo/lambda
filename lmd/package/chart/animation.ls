@@ -127,7 +127,9 @@ fn keyed(parent) {
 fn decorative(node) => if (not (node is element)) node else svg.rebuild(name(node),
     {*:map([for (key, value in map(node) where not starts_with(string(key), "data-chart-") and not contains(["tabindex","data-focus-key"],string(key)))
         for (part in [string(key), value]) part]), 'pointer-events': "none"}, content(node) |> decorative(~))
-fn faded(node, opacity, exit = false) => if (node == null) null else <g opacity: opacity, *:(if (exit) {'pointer-events': "none"} else {}),
+fn faded(node, opacity, exit = false) => if (node == null) null else <g opacity: opacity,
+    *:map([for (key,value in map(node) where contains(["data-chart-key","data-chart-view","data-chart-part","data-chart-animation"],string(key))) (key,value)]),
+    *:(if (exit) {'pointer-events': "none",inert:""} else {}),
     if (exit) decorative(node) else node>
 fn crossfade(a, b, t) => <g class: "chart-crossfade", faded(a, 1.0 - t, true); faded(b, t)>
 fn points(node) => if (contains(['path','rect','line','circle','ellipse'],name(node))) picking.outlines(node) else null
@@ -207,7 +209,7 @@ fn transition(node, config, phase, t) {
         svg.rebuild('path',{*:map(image),pathLength:1.0,'stroke-dasharray':"1",'stroke-dashoffset':1.0-progress},content(image))
     else faded(image,progress)
 }
-fn progress(config, elapsed) => if (config.progress!=null) config.progress else
+pub fn progress(config, elapsed) => if (config.progress!=null) config.progress else
     curve(config.easing,if (config.duration==0) (if (elapsed<config.delay) 0.0 else 1.0) else util.clamp_val((elapsed-config.delay)/config.duration,0.0,1.0))
 fn group_identity(node) => if (node["data-chart-group-key"]==null) null else
     format([node["data-chart-view"],node["data-chart-part"],node["data-chart-group-key"]],{type:"json",compact:true})
@@ -244,6 +246,10 @@ fn sample_node(a,b,elapsed,default_config,overall) {
     let boundary=if (config.boundary!=null) config.boundary else 0.5;
     if (disabled) b
     else if (t is error) t
+    // A retained frame may contain fade wrappers; recurse only after time advances.
+    else if (a!=null and b!=null and a["data-chart-key"]!=null and t<=0) if (a is element and b is element) svg.rebuild(name(a),{*:map(a),
+        *:map([for (key,value in map(b) where starts_with(string(key),"data-chart-") or string(key)=="data-focus-key")
+            for (part in [string(key),value]) part])},content(a)) else a
     else if (container and (a==null or a is element and name(a)==name(b))) (
         let attrs=if (a==null) map(b) else attributes_between(a,b,t,0.5,default_config),
         let children=children_between(a,b,elapsed,default_config,overall),

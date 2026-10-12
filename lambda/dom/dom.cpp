@@ -11,6 +11,8 @@
 #include "dom.h"
 #include "dom_graphics.h"
 #include "dom_style.h"
+#include "dom_collection_types.h"
+#include "dom_host_engine.h"
 #include "../../radiant/svg_animation.hpp"
 #include "dom_core.h"
 #include "realm/dom_realm.h"
@@ -2455,14 +2457,6 @@ JS_FORWARD_ITEM(dom_wrap_element, (void* dom_elem), radiant_dom_wrap_node, (dom_
 
 extern "C" void* radiant_dom_unwrap_node(Item item);
 extern "C" bool radiant_dom_is_node(Item item);
-extern "C" const void* radiant_dom_node_list_host_type(void);
-extern "C" const void* radiant_dom_html_collection_host_type(void);
-extern "C" const void* radiant_dom_html_options_collection_host_type(void);
-extern "C" const void* radiant_dom_html_form_controls_collection_host_type(void);
-extern "C" const void* radiant_dom_named_node_map_host_type(void);
-extern "C" const void* radiant_dom_token_list_host_type(void);
-extern "C" const void* radiant_dom_radio_node_list_host_type(void);
-extern "C" const void* radiant_dom_rect_list_host_type(void);
 
 // Jube POC: unwrap/type policy is exposed through the radiant module so DOM
 // nodes no longer depend on the retired DOM map wrapper shell.
@@ -2939,17 +2933,17 @@ extern "C" Item dom_static_collection_from_array(
 
 extern "C" Item dom_static_node_list_from_array(Item items) {
     return dom_static_collection_from_array(
-        items, radiant_dom_node_list_host_type());
+        items, dom_node_list_host_type());
 }
 
 extern "C" Item dom_static_radio_node_list_from_array(Item items) {
     return dom_static_collection_from_array(
-        items, radiant_dom_radio_node_list_host_type());
+        items, dom_radio_node_list_host_type());
 }
 
 extern "C" Item dom_static_rect_list_from_array(Item items) {
     return dom_static_collection_from_array(
-        items, radiant_dom_rect_list_host_type());
+        items, dom_rect_list_host_type());
 }
 
 static Item dom_collection_varray_new(Item owner,
@@ -2993,7 +2987,7 @@ extern "C" int dom_child_collection_named_get(Item receiver, Item key, Item* out
         key_root.set(js_name_item(name));
         *out = dom_collection_varray_new(collection->owner,
             DOM_VARRAY_FORM_ELEMENTS, key_root.get(), false,
-            radiant_dom_radio_node_list_host_type());
+            dom_radio_node_list_host_type());
         return 1;
     }
     if (first_root.get().item == ITEM_NULL) return 0;
@@ -3036,7 +3030,7 @@ static Item dom_live_table_collection(DomElement* elem,
     if (!elem) return ItemNull;
     Item owner = dom_wrap_element((void*)elem);
     return dom_collection_varray_new(owner, kind, ItemNull, false,
-        radiant_dom_html_collection_host_type());
+        dom_html_collection_host_type());
 }
 
 static Item dom_live_direct_tag_collection(DomElement* elem, const char* tag) {
@@ -3045,7 +3039,7 @@ static Item dom_live_direct_tag_collection(DomElement* elem, const char* tag) {
     Rooted<Item> owner(roots, dom_wrap_element((void*)elem));
     Rooted<Item> query(roots, js_name_item(tag));
     return dom_collection_varray_new(owner.get(), DOM_VARRAY_DIRECT_TAG,
-        query.get(), false, radiant_dom_html_collection_host_type());
+        query.get(), false, dom_html_collection_host_type());
 }
 
 static Item dom_table_first_section(DomElement* table, const char* tag) {
@@ -3080,8 +3074,8 @@ extern "C" Item dom_live_child_collection_bridge(void* elem_ptr, bool elements_o
     Item owner = dom_wrap_element((void*)elem);
     if (get_type_id(owner) != LMD_TYPE_VELMT) return ItemNull;
     const void* host_type = elements_only
-        ? radiant_dom_html_collection_host_type()
-        : radiant_dom_node_list_host_type();
+        ? dom_html_collection_host_type()
+        : dom_node_list_host_type();
     return dom_collection_varray_new(owner,
         elements_only ? DOM_VARRAY_ELEMENT_CHILDREN : DOM_VARRAY_CHILD_NODES,
         ItemNull, false, host_type);
@@ -3092,7 +3086,7 @@ extern "C" Item dom_attribute_collection_bridge(void* elem_ptr) {
     if (!elem) return ItemNull;
     Item owner = dom_wrap_element(elem);
     return dom_collection_varray_new(owner, DOM_VARRAY_ATTRIBUTES,
-        ItemNull, false, radiant_dom_named_node_map_host_type());
+        ItemNull, false, dom_named_node_map_host_type());
 }
 
 static Item dom_token_list_collection_bridge(DomElement* elem,
@@ -3100,27 +3094,27 @@ static Item dom_token_list_collection_bridge(DomElement* elem,
     if (!elem) return ItemNull;
     Item owner = dom_wrap_element(elem);
     return dom_collection_varray_new(owner, kind,
-        ItemNull, false, radiant_dom_token_list_host_type());
+        ItemNull, false, dom_token_list_host_type());
 }
 
 extern "C" Item dom_live_document_forms_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
     Item owner = doc && doc->root ? dom_wrap_element(doc->root) : ItemNull;
     return dom_collection_varray_new(owner, DOM_VARRAY_DOCUMENT_FORMS,
-        ItemNull, true, radiant_dom_html_collection_host_type());
+        ItemNull, true, dom_html_collection_host_type());
 }
 
 static Item dom_live_document_links_bridge(DomDocument* doc) {
     Item owner = doc && doc->root ? dom_wrap_element(doc->root) : ItemNull;
     return dom_collection_varray_new(owner, DOM_VARRAY_DOCUMENT_LINKS,
-        ItemNull, true, radiant_dom_html_collection_host_type());
+        ItemNull, true, dom_html_collection_host_type());
 }
 
 extern "C" Item dom_live_form_elements_bridge(void* elem_ptr) {
     DomElement* form = (DomElement*)elem_ptr;
     Item owner = form ? dom_wrap_element(form) : ItemNull;
     return dom_collection_varray_new(owner, DOM_VARRAY_FORM_ELEMENTS,
-        ItemNull, false, radiant_dom_html_form_controls_collection_host_type());
+        ItemNull, false, dom_html_form_controls_collection_host_type());
 }
 
 static Item dom_live_select_collection_bridge(DomElement* select,
@@ -3130,8 +3124,8 @@ static Item dom_live_select_collection_bridge(DomElement* select,
         selected_only ? DOM_VARRAY_SELECT_SELECTED_OPTIONS
                       : DOM_VARRAY_SELECT_OPTIONS,
         ItemNull, false,
-        selected_only ? radiant_dom_html_collection_host_type()
-                      : radiant_dom_html_options_collection_host_type());
+        selected_only ? dom_html_collection_host_type()
+                      : dom_html_options_collection_host_type());
 }
 
 #define JS_DOM_DOCUMENT_LOOKUP_BRIDGE(name, kind, host_type_fn) \
@@ -3149,14 +3143,14 @@ extern "C" Item name(void* elem_ptr, Item query) { \
     Rooted<Item> owner(roots, elem ? dom_wrap_element(elem) : ItemNull); \
     Rooted<Item> text(roots, js_to_string(query)); \
     return dom_collection_varray_new(owner.get(), kind, text.get(), false, \
-        radiant_dom_html_collection_host_type()); \
+        dom_html_collection_host_type()); \
 }
 JS_DOM_DOCUMENT_LOOKUP_BRIDGE(dom_live_document_get_elements_by_tag_name_bridge,
-    DOM_VARRAY_LOOKUP_TAG, radiant_dom_html_collection_host_type)
+    DOM_VARRAY_LOOKUP_TAG, dom_html_collection_host_type)
 JS_DOM_DOCUMENT_LOOKUP_BRIDGE(dom_live_document_get_elements_by_class_name_bridge,
-    DOM_VARRAY_LOOKUP_CLASS, radiant_dom_html_collection_host_type)
+    DOM_VARRAY_LOOKUP_CLASS, dom_html_collection_host_type)
 JS_DOM_DOCUMENT_LOOKUP_BRIDGE(dom_live_document_get_elements_by_name_bridge,
-    DOM_VARRAY_LOOKUP_NAME, radiant_dom_node_list_host_type)
+    DOM_VARRAY_LOOKUP_NAME, dom_node_list_host_type)
 JS_DOM_ELEMENT_LOOKUP_BRIDGE(dom_live_element_get_elements_by_tag_name_bridge,
     DOM_VARRAY_LOOKUP_TAG)
 JS_DOM_ELEMENT_LOOKUP_BRIDGE(dom_live_element_get_elements_by_class_name_bridge,
@@ -3327,7 +3321,7 @@ extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value) {
             // This binding only performs IDL coercion. The behavior package
             // canonicalizes the string and chooses the host transition; an
             // unavailable package deliberately leaves native editing disabled.
-            if (document && mode) radiant_dom_set_design_mode(document, mode);
+            if (document && mode) dom_engine_set_design_mode(document, mode);
             return value;
         }
     }
@@ -5055,7 +5049,11 @@ static int dom_default_tab_index(DomElement* elem) {
 static bool dom_is_script_focusable(DomElement* elem) {
     if (!elem || !dom_node_is_connected((DomNode*)elem)) return false;
     if (dom_engine_content_hidden_for_user_agent(elem)) return false;
-    if (elem->has_attribute("hidden")) return false;
+    // the rendering provider accounts for CSS overrides of the hidden attribute.
+    const DomStyleEngineOps* style = dom_style_engine_ops();
+    if (style) {
+        if (dom_provider_call(style, &DomStyleEngineOps::focus_is_hidden, elem)) return false;
+    } else if (elem->has_attribute("hidden")) return false;
     if (dom_is_disabled_for_focus(elem)) return false;
 
     long tabindex = 0;
@@ -6023,7 +6021,7 @@ extern "C" Item dom_core_parse_fragment(Item context, Item markup) {
     DomNode* ctx = (DomNode*)dom_unwrap_element(context);
     DomDocument* doc = ctx && ctx->is_element() ? ((DomElement*)ctx)->doc : nullptr;
     if (!doc || get_type_id(markup) != LMD_TYPE_STRING) return ItemNull;
-    DomElement* fragment = dom_element_create(doc, "#document-fragment", nullptr);
+    DomElement* fragment = dom_document_fragment_create(doc);
     if (!fragment) return ItemNull;
     if (!dom_parse_markup_into(fragment, fn_to_cstr(markup), false, ctx->as_element())) return ItemNull;
     return dom_wrap_element(fragment);
@@ -6136,8 +6134,6 @@ extern "C" bool dom_exec_insert_html(DomDocument* doc, const char* html_str) {
 
 extern "C" bool dom_engine_exec_command(void* document, const char* command,
                                         const char* value);
-extern Item radiant_dom_query_command(void* document, const char* query_kind,
-                                      const char* command);
 
 // F14.1/ES20: `document.execCommand` is now a thin dispatch into the dom
 // package's command set. It used to implement exactly one command here —
@@ -6184,7 +6180,7 @@ extern "C" Item dom_document_query_command_bridge(Item command_item,
     char* stable_kind = mem_strdup(kind, MEM_CAT_JS_RUNTIME);
     Item result = ItemNull;
     if (stable_command && stable_kind) {
-        result = radiant_dom_query_command(dom_get_document(), stable_kind,
+        result = dom_engine_query_command(dom_get_document(), stable_kind,
                                            stable_command);
     }
     mem_free(stable_kind);
@@ -6280,7 +6276,7 @@ static Item dom_create_document_fragment(DomDocument* doc) {
 
     // A fragment owns no Mark tree: its children are moved into the destination
     // element, which is the sole owner of their persistent backing entries.
-    DomElement* fragment = dom_element_create(doc, "#document-fragment", nullptr);
+    DomElement* fragment = dom_document_fragment_create(doc);
     return fragment ? dom_wrap_element(fragment) : ItemNull;
 }
 
@@ -6521,7 +6517,7 @@ JS_FORWARD_EXPRESSION(Item, dom_document_design_mode_bridge, (void),
 extern "C" Item dom_document_active_element_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
     DomElement* root = doc ? doc->root : nullptr;
-    DocState* state = dom_current_state();
+    DocState* state = doc ? doc->state : dom_current_state();
     View* focused = focus_get(state);
     if (focused && focused->is_element()) {
         return dom_wrap_element(((DomNode*)focused)->as_element());
@@ -6530,7 +6526,8 @@ extern "C" Item dom_document_active_element_bridge(void* doc_ptr) {
     if (active_element && active_element->doc == doc) {
         return dom_wrap_element(active_element);
     }
-    if (js_document_active_element &&
+    // native focus owns the committed area; a script mirror cannot restore a cleared target.
+    if (!state && js_document_active_element &&
         js_document_active_element->doc == doc &&
         dom_node_is_connected((DomNode*)js_document_active_element)) {
         return dom_wrap_element(js_document_active_element);

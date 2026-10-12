@@ -6188,7 +6188,7 @@ static Item fn_parse_highlight_spans(bool html, Item src_item, Item window_item,
     return {.array = result.get()};
 }
 
-// latex/tex options for the TeX expansion engine (Lambda_Pkg_Latex3 §9): the
+// latex/tex options for the TeX expansion engine (Lambda_Design_TeX_Engine): the
 // names stay owned by the caller's map for the duration of the parse
 static void collect_names(Map* options_map, const char* key, ArrayList* names) {
     bool is_found = false;
@@ -6204,8 +6204,6 @@ static void collect_names(Map* options_map, const char* key, ArrayList* names) {
 static bool parse_tex_options(Map* options_map, InputParseOptions* options,
                               ArrayList* adapter_names, ArrayList* raw_names) {
     bool is_found = false;
-    Item expand = _map_get((TypeMap*)options_map->type, options_map->data, "expand", &is_found);
-    if (is_found && get_type_id(expand) == LMD_TYPE_BOOL) options->tex_expand = it2b(expand);
     Item ini = _map_get((TypeMap*)options_map->type, options_map->data, "ini", &is_found);
     if (is_found && get_type_id(ini) == LMD_TYPE_BOOL) options->tex_ini = it2b(ini);
     Item base = _map_get((TypeMap*)options_map->type, options_map->data, "base", &is_found);
@@ -6216,7 +6214,8 @@ static bool parse_tex_options(Map* options_map, InputParseOptions* options,
     collect_names(options_map, "raw", raw_names);
     options->tex_raw_commands = (const char* const*)raw_names->data;
     options->tex_raw_command_count = raw_names->length;
-    return options->tex_expand || options->tex_ini || options->tex_base || options->tex_adapter_count;
+    return options->tex_ini || options->tex_base || options->tex_adapter_count ||
+        options->tex_raw_command_count;
 }
 
 // GM5.1: `parse(text, g)` runs the first rule of grammar g, `parse(text, g,

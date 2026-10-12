@@ -1,0 +1,286 @@
+{
+  "name": "Committed display and visibility changes clear focus with blur events while visible descendants retain focus",
+  "html": "test/ui/css_focus_fixup.html",
+  "viewport": {
+    "width": 640,
+    "height": 192
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#run_display"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 80
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_display"
+      },
+      "attribute": "data-events",
+      "equals": "blur,focusout"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_display"
+      },
+      "attribute": "data-active",
+      "equals": "body"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_display"
+      },
+      "attribute": "data-focus",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#run_visibility"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 80
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_visibility"
+      },
+      "attribute": "data-events",
+      "equals": "blur,focusout"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_visibility"
+      },
+      "attribute": "data-active",
+      "equals": "body"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_visibility"
+      },
+      "attribute": "data-focus",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#run_ancestor"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 80
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_ancestor"
+      },
+      "attribute": "data-events",
+      "equals": "blur,focusout"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_ancestor"
+      },
+      "attribute": "data-active",
+      "equals": "body"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_ancestor"
+      },
+      "attribute": "data-focus",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#run_visible"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 80
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_visible"
+      },
+      "attribute": "data-events",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_visible"
+      },
+      "attribute": "data-active",
+      "equals": "visible_child"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_visible"
+      },
+      "attribute": "data-focus",
+      "equals": "true"
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#run_display"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 80
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_display"
+      },
+      "attribute": "data-events",
+      "equals": "blur,focusout"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_display"
+      },
+      "attribute": "data-active",
+      "equals": "body"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_display"
+      },
+      "attribute": "data-focus",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#run_visibility"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 80
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_visibility"
+      },
+      "attribute": "data-events",
+      "equals": "blur,focusout"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_visibility"
+      },
+      "attribute": "data-active",
+      "equals": "body"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_visibility"
+      },
+      "attribute": "data-focus",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#run_ancestor"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 80
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_ancestor"
+      },
+      "attribute": "data-events",
+      "equals": "blur,focusout"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_ancestor"
+      },
+      "attribute": "data-active",
+      "equals": "body"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_ancestor"
+      },
+      "attribute": "data-focus",
+      "equals": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#run_visible"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 80
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_visible"
+      },
+      "attribute": "data-events",
+      "equals": ""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_visible"
+      },
+      "attribute": "data-active",
+      "equals": "visible_child"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#run_visible"
+      },
+      "attribute": "data-focus",
+      "equals": "true"
+    }
+  ]
+}

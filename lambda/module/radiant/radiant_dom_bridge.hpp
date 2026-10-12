@@ -2,6 +2,7 @@
 
 #include "../../jube/jube.h"
 #include "../../dom/dom_graphics.h"
+#include "../../dom/dom_event_host.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -117,14 +118,14 @@ RADIANT_C_API int radiant_dom_event_named_set(Item receiver, Item key,
 // host_data does. GC-owned container targets also have a traced backing-owner
 // edge; native DOM keys stay borrowed. The wrapper Item is
 // made on read, through the wrapper cache, so identity still holds.
-typedef enum RadiantEvtKeyKind {
-    RADIANT_EVT_KEY_NONE = 0,
-    RADIANT_EVT_KEY_NODE,        // ptr is a DomNode*
-    RADIANT_EVT_KEY_WINDOW,      // the realm global
-    RADIANT_EVT_KEY_DOCUMENT,    // the document object
-    RADIANT_EVT_KEY_CONTAINER,   // ptr is a plain EventTarget container (Map/VMap)
-} RadiantEvtKeyKind;
-typedef struct RadiantEvtKey { RadiantEvtKeyKind kind; void* ptr; } RadiantEvtKey;
+// public module spellings preserve the lower-owned key schema.
+using RadiantEvtKeyKind = DomEventTargetKeyKind;
+using RadiantEvtKey = DomEventTargetKey;
+#define RADIANT_EVT_KEY_NONE DOM_EVENT_KEY_NONE
+#define RADIANT_EVT_KEY_NODE DOM_EVENT_KEY_NODE
+#define RADIANT_EVT_KEY_WINDOW DOM_EVENT_KEY_WINDOW
+#define RADIANT_EVT_KEY_DOCUMENT DOM_EVENT_KEY_DOCUMENT
+#define RADIANT_EVT_KEY_CONTAINER DOM_EVENT_KEY_CONTAINER
 
 RADIANT_C_API void radiant_dom_event_set_target(Item event, Item target);
 RADIANT_C_API void radiant_dom_event_set_position_key(Item event, RadiantEvtKey key,

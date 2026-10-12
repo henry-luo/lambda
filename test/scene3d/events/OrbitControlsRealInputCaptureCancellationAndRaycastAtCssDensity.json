@@ -1,0 +1,163 @@
+{
+  "name": "OrbitControlsRealInputCaptureCancellationAndRaycastAtCssDensity",
+  "viewport": {
+    "width": 848,
+    "height": 650
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-ready",
+      "equals": "true"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.cameraBefore=observatory.camera.position.clone()"
+    },
+    {
+      "type": "mouse_down",
+      "x": 350,
+      "y": 300
+    },
+    {
+      "type": "mouse_move",
+      "x": 410,
+      "y": 320
+    },
+    {
+      "type": "mouse_up",
+      "x": 410,
+      "y": 320
+    },
+    {
+      "type": "script",
+      "js": "if(observatory.camera.position.distanceTo(cameraBefore)<.1)throw new Error('drag did not orbit')"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-gotpointercapture",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-lostpointercapture",
+      "equals": "true"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.zoomBefore=observatory.camera.position.distanceTo(observatory.controls.target)"
+    },
+    {
+      "type": "scroll",
+      "x": 350,
+      "y": 300,
+      "dy": 1
+    },
+    {
+      "type": "script",
+      "js": "if(Math.abs(observatory.camera.position.distanceTo(observatory.controls.target)-zoomBefore)<.01)throw new Error('wheel did not zoom')"
+    },
+    {
+      "type": "pointer_event",
+      "target": "#observatory",
+      "event": "pointerdown",
+      "x": 350,
+      "y": 300,
+      "buttons": 1
+    },
+    {
+      "type": "pointer_event",
+      "target": "#observatory",
+      "event": "pointercancel",
+      "x": 350,
+      "y": 300
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-pointercancel",
+      "equals": "true"
+    },
+    {
+      "type": "script",
+      "js": "\n            observatory.sample(.75);\n            const satellite=observatory.satellites[1];\n            const point=satellite.position.clone().applyMatrix4(satellite.parent.matrixWorld).project(observatory.camera);\n            const rect=observatory.renderer.domElement.getBoundingClientRect();\n            document.getElementById('status').setAttribute('data-pick-x',rect.left+(point.x+1)*rect.width/2);\n            document.getElementById('status').setAttribute('data-pick-y',rect.top+(1-point.y)*rect.height/2);\n        "
+    },
+    {
+      "type": "pointer_event",
+      "target": "#observatory",
+      "event": "mousedown",
+      "position_from": {
+        "target": "#status",
+        "x": "data-pick-x",
+        "y": "data-pick-y"
+      }
+    },
+    {
+      "type": "pointer_event",
+      "target": "#observatory",
+      "event": "mouseup",
+      "position_from": {
+        "target": "#status",
+        "x": "data-pick-x",
+        "y": "data-pick-y"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-selection",
+      "equals": "Satellite 2"
+    },
+    {
+      "type": "script",
+      "js": "\n                observatory.resize(400,250,2);\n                observatory.renderer.domElement.style.width='400px';observatory.renderer.domElement.style.height='250px';\n                observatory.renderer.domElement.style.transformOrigin='0 0';\n                observatory.renderer.domElement.style.transform='translate(20px,10px) scale(0.8)';\n            "
+    },
+    {
+      "type": "script",
+      "js": "\n            observatory.sample(.75);\n            const satellite=observatory.satellites[1];\n            const point=satellite.position.clone().applyMatrix4(satellite.parent.matrixWorld).project(observatory.camera);\n            const rect=observatory.renderer.domElement.getBoundingClientRect();\n            document.getElementById('status').setAttribute('data-pick-x',rect.left+(point.x+1)*rect.width/2);\n            document.getElementById('status').setAttribute('data-pick-y',rect.top+(1-point.y)*rect.height/2);\n        "
+    },
+    {
+      "type": "pointer_event",
+      "target": "#observatory",
+      "event": "mousedown",
+      "position_from": {
+        "target": "#status",
+        "x": "data-pick-x",
+        "y": "data-pick-y"
+      }
+    },
+    {
+      "type": "pointer_event",
+      "target": "#observatory",
+      "event": "mouseup",
+      "position_from": {
+        "target": "#status",
+        "x": "data-pick-x",
+        "y": "data-pick-y"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-selection",
+      "equals": "Satellite 2"
+    }
+  ]
+}

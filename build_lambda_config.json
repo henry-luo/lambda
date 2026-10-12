@@ -106,22 +106,6 @@
       "link": "static"
     },
     {
-      "name": "tree-sitter-latex",
-      "version": "0.6.0",
-      "description": "Tree-sitter LaTeX parser library",
-      "include": "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
-      "lib": "lambda/tree-sitter-latex/libtree-sitter-latex.a",
-      "link": "static"
-    },
-    {
-      "name": "tree-sitter-latex-math",
-      "version": "0.1.0",
-      "description": "Tree-sitter LaTeX math mode parser library",
-      "include": "lambda/tree-sitter-latex-math/bindings/c",
-      "lib": "lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a",
-      "link": "static"
-    },
-    {
       "name": "mir",
       "version": "1.0.0",
       "include": "lambda/mir",
@@ -916,7 +900,7 @@
     },
     {
       "name": "lambda-cst",
-      "description": "Tree-sitter Lambda/JS/TS/LaTeX/Math CST differential verifier",
+      "description": "Tree-sitter Lambda/JS/TS CST differential verifier",
       "lang": "c++17",
       "source_files": [
         "test/lambda_parser_poc_diff.c",
@@ -932,8 +916,6 @@
         "tree-sitter-lambda",
         "tree-sitter-javascript",
         "tree-sitter-typescript",
-        "tree-sitter-latex",
-        "tree-sitter-latex-math",
         "utf8proc"
       ],
       "target_name": "lambda-cst",
@@ -3447,8 +3429,9 @@
             "icon": "\ud83e\uddfe"
           },
           {
-            "source": "test/test_scene3d_gtest.cpp",
-            "name": "Native Scene3D Tests",
+            "source": "test/test_scene3d_unit_gtest.cpp",
+            "name": "Scene3D Native Unit Tests",
+            "case_workers": 2,
             "dependencies": [
               "lambda-rt",
               "node-core",
@@ -3479,9 +3462,8 @@
                 "WebKit"
               ]
             },
-            "binary": "test_scene3d_gtest.exe",
-            "icon": "\ud83c\udfa8",
-            "parallel": false
+            "binary": "test_scene3d_unit_gtest.exe",
+            "icon": "\ud83c\udfa8"
           },
           {
             "source": "test/test_map_gtest.cpp",
@@ -3994,7 +3976,9 @@
             "source": "test/wpt/test_wpt_input_events_gtest.cpp",
             "name": "WPT Input Events Tests",
             "category": "baseline",
-            "parallel": false,
+            "parallel": true,
+            "worker_slots": 2,
+            "worker_args": ["--jobs"],
             "dependencies": [],
             "binary": "test_wpt_input_events_gtest.exe",
             "libraries": [
@@ -4032,6 +4016,8 @@
           {
             "source": "test/test_ui_automation_gtest.cpp",
             "name": "UI Automation Tests",
+            "worker_slots": 7,
+            "worker_slots_env": "LAMBDA_UI_TEST_JOBS",
             "dependencies": [
               "lambda-data"
             ],
@@ -4050,6 +4036,8 @@
           {
             "source": "test/test_ui_automation_gtest.cpp",
             "name": "Radiant View UI Fixtures",
+            "worker_slots": 1,
+            "worker_slots_env": "LAMBDA_UI_TEST_JOBS",
             "runner_only": true,
             "runner_name": "test_radiant_view_ui_gtest",
             "runner_args": [
@@ -4061,12 +4049,13 @@
               "gtest",
               "gtest_main"
             ],
-            "parallel": false,
             "icon": "\ud83d\uddb1\ufe0f"
           },
           {
             "source": "test/test_ui_automation_gtest.cpp",
             "name": "DOM UI Integration Tests",
+            "worker_slots": 2,
+            "worker_slots_env": "LAMBDA_UI_TEST_JOBS",
             "runner_only": true,
             "runner_name": "test_dom_ui_gtest",
             "runner_args": [
@@ -4078,12 +4067,13 @@
               "gtest",
               "gtest_main"
             ],
-            "parallel": false,
             "icon": "\ud83d\uddb1\ufe0f"
           },
           {
             "source": "test/test_page_load_gtest.cpp",
             "name": "Page Load Tests",
+            "worker_slots": 2,
+            "worker_args": ["--jobs"],
             "dependencies": [
               "lambda-lib"
             ],
@@ -4098,7 +4088,10 @@
           {
             "source": "test/test_radiant_view_gtest.cpp",
             "name": "Radiant View Tests",
-            "case_workers": 4,
+            "additional_sources": [
+              "test/test_radiant_view_scene3d.cpp"
+            ],
+            "case_workers": 3,
             "case_workers_env": "LAMBDA_RADIANT_VIEW_TEST_JOBS",
             "case_worker_args": [
               "--radiant-case-worker"
@@ -4120,6 +4113,8 @@
           {
             "source": "test/test_layout_fuzzy_gtest.cpp",
             "name": "Layout Fuzzy Tests",
+            "worker_slots": 2,
+            "worker_args": ["--jobs"],
             "dependencies": [
               "lambda-lib"
             ],
@@ -6228,7 +6223,9 @@
         "args": [
           "layout"
         ],
-        "parallel": false
+        "parallel": true,
+        "worker_slots": 3,
+        "worker_slots_env": "LAYOUT_BASELINE_CONCURRENCY"
       },
       {
         "runner_name": "test_radiant_page_snapshot",
@@ -6239,7 +6236,8 @@
         "args": [
           "snapshot"
         ],
-        "parallel": false
+        "parallel": true,
+        "worker_slots": 2
       },
       {
         "runner_name": "test_radiant_render_baseline",

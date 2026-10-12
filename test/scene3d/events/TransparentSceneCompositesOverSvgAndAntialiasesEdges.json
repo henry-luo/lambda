@@ -1,0 +1,84 @@
+{
+  "name": "TransparentSceneCompositesOverSvgAndAntialiasesEdges",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "count": {
+        "min": 1
+      },
+      "rgba": [
+        [
+          0,
+          255
+        ],
+        [
+          0,
+          255
+        ],
+        [
+          0,
+          255
+        ],
+        [
+          1,
+          254
+        ]
+      ],
+      "premultiplied": true,
+      "premultiplied_pixels": true
+    },
+    {
+      "type": "navigate",
+      "url": "../alpha.html"
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "view",
+      "target": "#alpha-scene",
+      "fields": {
+        "width": 128,
+        "height": 128
+      }
+    },
+    {
+      "type": "assert_surface",
+      "source": "page",
+      "pixels": [
+        [
+          64,
+          64,
+          128,
+          127,
+          0,
+          255,
+          4
+        ],
+        [
+          8,
+          8,
+          0,
+          255,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#alpha-scene",
+      "fields": {
+        "graphics.frames": 1
+      }
+    }
+  ]
+}

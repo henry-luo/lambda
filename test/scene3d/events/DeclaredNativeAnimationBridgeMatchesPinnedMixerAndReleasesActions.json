@@ -1,0 +1,62 @@
+{
+  "name": "DeclaredNativeAnimationBridgeMatchesPinnedMixerAndReleasesActions",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-result",
+      "equals": "ready-for-gc"
+    },
+    {
+      "type": "script",
+      "js": "animationFrameProbe()"
+    },
+    {
+      "type": "animation_frame",
+      "ms": 1000,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 1250,
+      "callbacks": 1
+    },
+    {
+      "type": "animation_frame",
+      "ms": 1500,
+      "callbacks": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "autoSamples.length===3&&Math.abs(autoSamples[1][1]-.25)<1e-9&&Math.abs(autoSamples[2][1]-.5)<1e-9&&Math.abs(autoSamples[2][2])<2e-6"
+    },
+    {
+      "type": "collect_gc",
+      "count": 3
+    },
+    {
+      "type": "script",
+      "js": "animationLifetimeCheck()"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#result"
+      },
+      "attribute": "data-result",
+      "equals": "passed"
+    },
+    {
+      "type": "assert_script",
+      "js": "Number(document.getElementById('result').getAttribute('data-checks'))>=43"
+    }
+  ]
+}

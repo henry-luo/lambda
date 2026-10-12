@@ -11,6 +11,8 @@ import annotation: .annotation
 import zones: lambda.chart.timezone
 import locale: .locale
 import scales_engine: lambda.chart.scale
+import motion: .motion
+import event_index: .index
 
 let children = ["title", "description", "event", "era", "group", "data", "encoding", "transform", "source", "scale", "axis",
     "window", "coordinate", "navigator", "cards", "story", "markers", "interaction", "edit", "cluster", "search", "slideshow",
@@ -19,7 +21,7 @@ let repeated = {event:"events", era:"eras", group:"groups", scale:"scales", axis
 let slots = ["title", "description", "pending", "empty", "loading", "error"]
 let root_keys = ["id", "version", "view", "spacing", "orientation", "placement", "order", "width", "height",
     "min_width", "max_width", "min_height", "max_height", "padding", "gap", "time_scale", "value", "default_value",
-    "theme", "parts", "locale", "direction", "motion", "label", "description", "title", "events", "eras", "groups",
+    "theme", "parts", "locale", "direction", "motion", "animate", "label", "description", "title", "events", "eras", "groups",
     "data", "encoding", "transform", "source", "scales", "axes", "window", "coordinate", "navigator", "cards", "story",
     "markers", "interaction", "edit", "cluster", "search", "slideshow", "media_options", "toolbar", "pending", "empty",
     "loading", "error", "annotations", "series", "messages", "export"]
@@ -197,7 +199,8 @@ fn root(raw) {
 pub fn authored(raw) => root(raw)
 
 // strip derived layout fields before an immutable source edit is validated again.
-pub fn source_record(spec) => {*:map([for (key,value in c.attrs(spec) where contains(root_keys,string(key))) (key,value)]),
+pub fn source_record(spec) => {*:map([for (key,value in c.attrs(spec) where contains(root_keys,string(key)) and string(key)!="animate") (key,value)]),
+    animate:if (spec.animate.enabled==true) map([for (key,value in spec.animate where string(key)!="enabled") (key,value)]) else false,
     events:[for (item in spec.events) event_record(item)],groups:[for (item in spec.groups) group_record(item)],
     eras:[for (item in spec.eras) record_fields(item,"era")],annotations:[for (item in spec.annotations) record_fields(item,"annotation")]}
 fn record_fields(item, kind) => {*:map([for (key,value in c.attrs(item) where contains(definitions[kind],string(key))) (key,value)]),*:c.attributes(item)}
@@ -287,13 +290,15 @@ fn ancestry(group, groups, seen = []) {
     if (group.parent == null) null
     else if (contains(seen, group.parent) or group.id == group.parent) c.fail("groups.parent", "cyclic group hierarchy")
     else {
-        let parents = groups |: ~.id == group.parent;
-        if (len(parents) != 1) c.fail("groups.parent", "unknown parent") else ancestry(parents[0], groups, [*seen, group.id])
+        let parent = event_index.lookup(groups,group.parent);
+        if (parent == null) c.fail("groups.parent", "unknown parent") else ancestry(parent, groups, [*seen, group.id])
     }
 }
 fn unique_ids(values, path) {
-    let ids = values |> ~.id;
-    if (len(unique(ids)) != len(ids)) c.fail(path ++ ".id", "duplicate normalized ID") else null
+    // Canonical IDs are strings; adjacent sorted duplicates avoid quadratic unique().
+    let ids = sort(values |> ~.id);
+    if (ids is error) ids else if (any([for (position in 1 to (len(ids)-1)) ids[position]==ids[position-1]]))
+        c.fail(path ++ ".id", "duplicate normalized ID") else null
 }
 fn encoded(records, encoding) => if (encoding == null) records else [for (row in records)
     map([for (channel, definition in encoding) (channel, if (definition is fn) definition(row)
@@ -364,7 +369,7 @@ pub fn validate(input) {
             placement:c.text(c.option(raw, "placement", if (presentation == "cards") "alternate" else "auto")),
             order:c.text(c.option(raw, "order", if (spacing == "sequence") "source" else "chronological")),
             locale:language, direction:c.text(c.option(raw, "direction", locale.direction(language))),
-            motion:c.text(c.option(raw, "motion", "full")), scale:scale, scales:scales,time_scale:scale_id,
+            motion:c.text(c.option(raw, "motion", "full")),animate:motion.configure(raw.animate), scale:scale, scales:scales,time_scale:scale_id,
             width:c.option(raw, "width", "auto"), height:c.option(raw, "height", "auto"), gap:c.option(raw, "gap", 20),
             padding:sizing.normalize_padding(raw.padding)};
         let configurations = map([for (key in ["window", "coordinate", "navigator", "cards", "story", "markers", "interaction", "edit", "cluster", "search", "slideshow", "media_options", "toolbar", "source", "export"])
@@ -375,13 +380,14 @@ pub fn validate(input) {
         let values = if (transformed is error) [] else [*c.items(raw.events), *encoded(transformed, raw.encoding)];
         let events = [for (index, value in values) event(value, index, base)];
         let groups = flatten_groups(c.items(raw.groups));
+        let group_index=sort(groups,{by:(group)=>group.id});
         let eras = [for (index, value in c.items(raw.eras), let era = config(value, "era"))
             if (era is error) era else event({*:era, kind:"background"}, index, base)];
         let axes = [for (value in c.items(raw.axes)) config(value, "axis")];
         let annotations = [for (index,value in c.items(raw.annotations),let parsed=config(value,"annotation"))
             if (parsed is error) parsed else annotation.normalize(parsed,scale,index)];
         let series = [for (value in c.items(raw.series)) config(value, "series")];
-        let failure = util.first_error([c.properties(raw, root_keys, "chart", true), base.padding,
+        let failure = util.first_error([c.properties(raw, root_keys, "chart", true), base.padding,base.animate,
             if (not (language is string) or language=="") c.fail("locale","expected a locale identifier"),
             for (key, value in configurations) value, intro,*scales, *events, *groups, *eras, *axes, *annotations, *series, transformed,
             window_rules(configurations.window,scale),projection(raw.value,"value"),projection(raw.default_value,"default_value"),
@@ -428,11 +434,11 @@ pub fn validate(input) {
                 util.first_error([if (item.time_scale!=null and c.text(item.time_scale)!=scale_id) c.fail("series.time_scale","series must use the primary chronology"),
                     if (item.value_scale!=null and not contains(scales |> ~.id,c.text(item.value_scale))) c.fail("series.value_scale","unknown scale ID"),
                     if (item.value_scale!=null and chronology((scales |: ~.id==c.text(item.value_scale))[0].kind)) c.fail("series.value_scale","expected a quantitative scale")]),
-            for (group in groups) ancestry(group, groups),
+            for (group in groups) ancestry(group, group_index),
             for (item in [*events, *eras,*annotations] where item.group != null)
-                if (not contains(groups |> ~.id, item.group)) c.fail("event.group", "unknown group"),
+                if (event_index.lookup(group_index,item.group)==null) c.fail("event.group", "unknown group"),
             for (item in events where item.subgroup!=null,
-                let group=(groups |: ~.id==item.group)[0])
+                let group=event_index.lookup(group_index,item.group))
                 if (group==null or not contains(c.items(group.subgroups) |> ~.id,item.subgroup)) c.fail("event.subgroup","unknown subgroup in the event's group"),
             for (group in groups) for (item in [group,*c.items(group.subgroups)])
                 if (item.min_height!=null and item.max_height!=null and item.min_height>item.max_height) c.fail("group.height","contradictory height constraints"),

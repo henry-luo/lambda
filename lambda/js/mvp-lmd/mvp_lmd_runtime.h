@@ -70,7 +70,8 @@ enum MvpLmdLibraryBinding { LMD_LIBRARY_JSON, LMD_LIBRARY_DATE, LMD_LIBRARY_DATE
     LMD_LIBRARY_MAP, LMD_LIBRARY_MAP_PROTOTYPE, LMD_LIBRARY_MAP_STATICS,
     LMD_LIBRARY_SET, LMD_LIBRARY_SET_PROTOTYPE, LMD_LIBRARY_SET_STATICS,
     LMD_LIBRARY_MATH, LMD_LIBRARY_FUNCTION_PROTOTYPE, LMD_LIBRARY_SYMBOL_VALUES,
-    LMD_LIBRARY_REFLECT, LMD_LIBRARY_PROXY, LMD_LIBRARY_COUNT };
+    LMD_LIBRARY_REFLECT, LMD_LIBRARY_PROXY, LMD_LIBRARY_FUNCTION,
+    LMD_LIBRARY_THROW_TYPE, LMD_LIBRARY_FUNCTION_STRING, LMD_LIBRARY_COUNT };
 enum MvpLmdErrorKind { LMD_ERROR_BASE, LMD_ERROR_EVAL, LMD_ERROR_RANGE,
     LMD_ERROR_REFERENCE, LMD_ERROR_SYNTAX, LMD_ERROR_TYPE, LMD_ERROR_URI,
     LMD_ERROR_AGGREGATE, LMD_ERROR_COUNT };
@@ -100,6 +101,7 @@ struct MvpLmdLibraryState {
     MvpLmdClass* primitives;
     Item* primitive_values;
     NameRef primitive_key;      // boxed primitive payload, traced by the shared Map layout
+    NameRef arguments_key;      // private Array of aliases to existing mutable parameter cells
     int abort_kind;             // one-based non-JS failure, retained across finally completions
     int64_t abort_site;
 };
@@ -112,6 +114,9 @@ Item mvp_lmd_function_initialize(MvpLmdProgram* program, MvpLmdLibraryState* sta
 Item mvp_lmd_generator_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
 Item mvp_lmd_generator_call(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
 Item mvp_lmd_function_method(Item owner, String* name);
+Item mvp_lmd_function_source(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
+extern "C" Item mvp_lmd_arguments_new(Item function, Item* values, uint64_t count, Item cells, int64_t unmapped);
+Item mvp_lmd_arguments_cell(Item owner, String* key, bool detach = false);
 Item mvp_lmd_function_bound(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
 Item mvp_lmd_function_forward(Item function, Item receiver, Item prefix, Item* arguments,
     uint64_t count, int skip = 0, MvpLmdNativeEntry entry = nullptr,
@@ -278,7 +283,8 @@ Item mvp_lmd_property_set(Item owner, Item name, Item value);
 Item mvp_lmd_property_delete(Item owner, Item name);
 Item mvp_lmd_property_has(Item owner, Item name, int64_t inherited);
 Item mvp_lmd_object_project(Item owner, int64_t projection);
-Item mvp_lmd_object_copy(Item target, Item source, int64_t assign);
+Item mvp_lmd_object_copy(Item target, Item source, int64_t assign, Item excluded = ItemNull);
+bool mvp_lmd_property_key_equal(Item left, Item right);
 Item mvp_lmd_map_call(Item owner, Item method, Item key, Item value);
 int64_t mvp_lmd_map_next(Item owner, int64_t cursor);
 Item mvp_lmd_map_entry(Item owner, int64_t cursor, int64_t projection);

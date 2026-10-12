@@ -1,4 +1,4 @@
-// Phase IV §9.6: parameterized styles (.style with #1, .style 2 args, .default,
+// Phase IV (Lambda_Pkg_Tikz §12): parameterized styles (.style with #1, .style 2 args, .default,
 // .append style) and pic definitions (\tikzset{name/.pic={...}}, \pic {name}).
 import tikz: lambda.doc.tikz.tikz
 import latex: lambda.latex.latex

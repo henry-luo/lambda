@@ -2,6 +2,10 @@
 
 **Status:** Design proposal with an initial bounded implementation, 2026-10-10. The user authorized implementation in `lambda.latex`. Full conformance and the remaining completion gates are tracked in the [implementation record](../impl/Lambda_Impl_BibTeX_CSL.md); this document does not change a formal ruling.
 
+**Consolidation:** On 2026-10-12, §2.1 absorbed the built-in biblatex profile from the retired `Lambda_Pkg_Latex3.md`, and §4.1 was checked against the implemented API. The overall package design is [Lambda_Pkg_Latex.md](../Lambda_Pkg_Latex.md); the TeX engine, including the deferred biblatex style-file path, is [Lambda_Design_TeX_Engine.md](Lambda_Design_TeX_Engine.md).
+
+**Ruling (USER, 2026-10-12):** Phase IV M4, running biblatex style files on the TeX engine, is dropped. Documents that name a guide-level biblatex style reach the matching CSL style through the alias table in §7.4. That mapping is implemented and its four aliases are admitted against pinned biblatex output (§7.4).
+
 **Confirmed direction:** Use a CSL + citeproc pipeline comparable to Pandoc's. Implement the processor in **Lambda script**, as part of **`lambda.latex`**. Existing libraries may inform the implementation and supply reference results; they are not production runtime dependencies.
 
 **Scope:** Bibliography data, citation processing, and bibliography rendering through the existing LaTeX package and HTML/Radiant output path. Target standard CSL 1.0.2 in stages, with explicit coverage and limitations at every stage.
@@ -24,7 +28,7 @@ The first useful milestone is a general CSL evaluator working with checked numer
 
 ## 2. Current support and the gap
 
-Pre-implementation source snapshot: **2026-10-10, commit `30bb984ff`**. The observations below describe the starting point. Runtime evidence for the new processor belongs to the implementation record. Older notes under `vibe/latex` describing `lambda/tex` JSON adapters are not the current implementation map.
+Pre-implementation source snapshot: **2026-10-10, commit `30bb984ff`**. The observations below describe the starting point. Runtime evidence for the new processor belongs to the implementation record. Older notes under `vibe/latex` described `lambda/tex` JSON adapters; they were retired on 2026-10-12.
 
 | Existing component | Current responsibility | Proposed treatment |
 |---|---|---|
@@ -37,11 +41,28 @@ Pre-implementation source snapshot: **2026-10-10, commit `30bb984ff`**. The obse
 | [`packages/registry.ls`](../../lmd/package/latex/packages/registry.ls) | Package/option validation and located diagnostics | Validate selection of the citation pipeline and conflicting options |
 | [`to_html.ls`](../../lmd/package/latex/to_html.ls) | Escaped serialization of Lambda elements | Reuse as the HTML serialization boundary |
 
-The current bounded profile already handles multiple resources, ten entry types, six styles, notes, `\nocite`, filtered/repeated bibliographies, `refsection`/`refsegment`, and English/German/French strings. Its documented limits include arbitrary styles and exact locale collation. The natbib adapter explicitly emits `bibtex-style-approximation`. See [the current package profile, §§6–7](../Lambda_Pkg_Latex3.md#7-phase-2--common-biblatex-workflows-implemented).
+The current bounded profile is summarized in §2.1. Its documented limits include arbitrary styles and exact locale collation. The natbib adapter explicitly emits `bibtex-style-approximation`.
 
 The main missing capability is a standard style interpreter. Adding more punctuation templates to `bib_style.ls` would leave style maintenance, locale coverage, and document-level citation rules tied to Lambda-specific code.
 
-There is also an existing [Phase IV M4 proposal](../impl/Lambda_Impl_Latex_Phase4.md#m4-design-biblatex-style-files-on-the-engine) to execute BibLaTeX style files through the TeX expansion engine. That is a separate compatibility path. This proposal recommends prioritizing CSL for bibliography enhancement and deferring that M4 work. It does not claim that `.bbx`/`.cbx` styles become CSL styles or mark M4 complete. Reprioritizing its implementation record is a follow-up decision.
+The Phase IV M4 proposal to execute biblatex style files (`.bbx`/`.cbx`/`.lbx`/`.dbx`) on the TeX expansion engine was dropped by the user on 2026-10-12. Biblatex style files are never executed. Guide-level biblatex styles are instead mapped to CSL styles (§7.4).
+
+### 2.1 The built-in biblatex and natbib profile
+
+Before CSL, and still the default when `citeproc` is not requested, bibliography policy lives in the `bib_*` script modules and the `biblatex`/`natbib` adapters. The pipeline is parsed resources → normalized entries → source-order citation requests and bibliography scopes → labels → semantic HTML elements and diagnostics. One style-neutral citation model produces labels, punctuation, author–year suffixes, name disambiguation and range compression; no profile may rely on rewriting another profile's output strings.
+
+| Surface | Profile |
+|---|---|
+| Resources and data | Multiple local `\addbibresource` files and document-local `filecontents`; BibTeX syntax with braced or parenthesized records, nested and protected braces, quoted values, comments, `@string` constants and `#` concatenation; UTF-8 and case protection preserved. `crossref`/`xdata` inheritance with cycle detection. Ten entry types: `article`, `book`, `inbook`, `incollection`, `inproceedings`, `thesis`, `report`, `online`, `misc`, `unpublished`. Malformed records, undefined strings, duplicate keys, cycles and missing files are located diagnostics. |
+| Citations | `\cite`, `\parencite`, `\textcite`, `\autocite`, `\footcite`, `\citeauthor`, `\citetitle`, `\citeyear`, `\fullcite`, the plural `\cites` forms with per-item notes, `\nocite{*}` and keyed `\nocite`; `natbib=true` aliases `\citet`/`\citep`. Star variants are diagnosed unless a profile defines them. |
+| Styles and options | `numeric`, `numeric-comp`, `authoryear`, `authoryear-comp`, `alphabetic`, `authortitle`, with `style`, `citestyle` and `bibstyle`; `sorting=none/nty/nyt/ynt`; name limits, `giveninits`, `uniquename`, `doi`/`url`/`isbn` toggles, `backref`. `backend=biber` is accepted, but no Biber process runs. Unknown styles, sorting modes and backends are diagnosed, never silently replaced by `numeric`. |
+| Selection | Cited and `\nocite` entries only; repeated `\printbibliography` with `title`, `heading`, `type`/`nottype`, `keyword`/`notkeyword`, `section` and `segment` filters; `refsection` and `refsegment` scopes with their own numbering and unique link targets. |
+| Language | English, German and French strings and punctuation from script tables. Sorting is deterministic but not Biber/CLDR collation. |
+| natbib and BibTeX | `\citet`/`\citep`/`\cite`, local `\bibliography`, numeric and author–year bracket options, and `plain`/`unsrt`/`abbrv` plus their `*nat` forms as diagnosed approximations; `.bst` files are never executed. |
+| `thebibliography` | In-document `\bibitem` lists keep their numbering and links in the core analysis pass. |
+
+Representative output for all six styles is pinned to BibLaTeX 3.20 with Biber 2.20 (`test_latex_biblatex_reference`); intentional differences are HTML link and list markup, a retained nonbreaking space from `~`, and range compression that links visible endpoints while every entry keeps its target. Lambda never runs `pdflatex` or Biber during rendering.
+
 
 ## 3. Boundaries
 
@@ -83,19 +104,18 @@ Style compilation means converting parsed XML to a validated Lambda data structu
 
 The first engine API processes the complete ordered citation sequence. Internal state is an explicit value threaded through passes. Module bindings remain immutable and documents never share a mutable citation registry (**D7.2.1, S12.1.1v2**). Incremental processing is an optimization after batch correctness, with batch output as its oracle.
 
-### 4.1 Suggested API
+### 4.1 API
 
-Names and exact result types below are proposed. Resource loading stays in the package adapter; the low-level functions accept already captured data.
+The implemented surface differs in names from the original proposal (`bibtex_to_references`, `compile_style`, `to_elements` and so on); the contracts are the same. Resource loading stays in the package adapter; the processing functions accept already captured data.
 
 | Function | Contract |
 |---|---|
-| `bibtex_to_references(text, source, options)` | Reuse the shared parser, normalize references, return provenance and diagnostics |
-| `normalize_csl_json(value, source, options)` | Validate IDs/types and normalize CSL JSON to the same reference shape |
-| `compile_style(xml, parent_styles, options)` | Validate XML vocabulary, resolve macros and parent styles, return immutable style data or a raised error |
-| `compile_locales(locale_xml, options)` | Parse supplied locale values and build lookup data |
-| `process(style, locales, references, citations, options)` | Return all citation results, bibliography entries/layout metadata, diagnostics and capability information |
-| `to_elements(output, link_context)` | Project structured output into the package's HTML elements |
-| `to_text(output)` | Project the same output into plain text for diagnostics and tests |
+| `data.bibtex(text, source)` | Reuse the shared BibTeX parser, normalize references, return references with provenance and parser diagnostics |
+| `data.json(value, source)` | Validate IDs/types and normalize captured CSL JSON text or an array to the same reference shape; returns `map^` |
+| `citeproc.compile(style_xml, locales, options)` | Validate XML vocabulary, resolve macros, locales and supplied parent styles, return immutable compiled style data or a raised error |
+| `citeproc.process(compiled, references, requests, options)` | Process the complete request sequence; return `citations` and `bibliography` (each with plain `text` and rich `content`), resolved `references`, `diagnostics`, `style_id` and `locale` |
+| `resources.load(ast, base, options, language)` | Capture local bibliography, style, locale and parent files as assets at the input boundary |
+| `adapter.prepare`, `render_citation`, `render_bibliography` | Map LaTeX citation commands, scopes, notes and print filters to requests, and project results into the package's linked HTML elements; serialization goes through `lambda.latex.to_html` |
 
 Invalid styles and unusable reference sets use explicit raised errors at the package boundary (**S7.4.2**). A preview adapter may engage that error and display unsupported output with diagnostics; a strict export engages it and fails. Recoverable field issues are structured diagnostics. System faults retain their existing channel (**S7.4.3**).
 
@@ -285,6 +305,35 @@ CSL bibliography layout metadata such as hanging indentation, second-field align
 
 No new CLI flags are needed for the first implementation. A later proposal may expose `--citeproc`, `--bibliography`, `--csl`, and locale selection on conversion/render commands, reusing the package options. Those flags do not exist merely because they appear here.
 
+### 7.4 Biblatex style names mapped to CSL
+
+Contributed biblatex styles implement published style guides, and CSL styles implement the same guides. A document that names such a style can therefore be formatted by the corresponding CSL style. This replaces the dropped M4 path, which would have reimplemented biblatex's formatting layer on the TeX engine and could only have reached style files kept beside the document; installed CTAN styles such as biblatex-apa are never beside it.
+
+**Selection.** When no explicit `citeproc` render option is given, and the document selects a style in the alias table through `style=` (or through matching `citestyle=` and `bibstyle=`), or loads `biblatex-chicago`, the biblatex adapter selects the mapped CSL style automatically. It records the processor and style in result metadata and emits a located diagnostic naming the CSL style used, so the substitution is never silent. An explicit `citeproc` option still takes precedence, and a conflicting biblatex style alongside it keeps the existing `conflicting-citation-style` diagnostic. This adds behavior only for documents that are diagnosed as `unsupported-bib-style` today; documents using the built-in profile are unchanged, so it does not pre-empt the separate default-migration review in §9.
+
+**Initial alias table.** Only styles with a bundled, pinned CSL file are aliased:
+
+| biblatex request | CSL style |
+|---|---|
+| `style=apa` (biblatex-apa) | `apa` |
+| `style=ieee` (biblatex-ieee) | `ieee` |
+| `biblatex-chicago` with `authordate`, or `style=chicago-authordate` | `chicago-author-date` |
+| `biblatex-chicago` with `notes`, or `style=chicago-notes` | `chicago-fullnote-bibliography` |
+
+`biblatex-chicago` is a separate package rather than a `style=` value, so it needs a registry entry that routes to the biblatex adapter. Further guide-level styles, such as `mla`, `nature`, `science` and `phys`, join the table only after their CSL style is bundled and passes the admission rule below.
+
+**Admission rule.** Each alias needs fixtures that compare its citations and bibliography against the biblatex package's own output from a pinned toolchain, with intentional differences recorded, as §7.1 requires for any legacy-name alias. The two implementations follow the same guide but are independent, so edge cases, localization and punctuation may differ; the diagnostic tells users which formatter was used.
+
+**What is never mapped.**
+
+- biblatex's standard styles (`numeric`, `numeric-comp`, `alphabetic`, `authoryear`, `authoryear-comp`, `authortitle`) are generic families, not guides. They keep the native script implementation in §2.1. Alphabetic labels in particular have no reliable CSL equivalent.
+- A `citestyle=` and `bibstyle=` pair that names two different styles has no single CSL style and is diagnosed.
+- Style options that a CSL style fixes in its XML (`maxnames`, `giveninits`, `uniquename`, `sorting`, the `doi`/`url`/`isbn` toggles) are diagnosed as conflicting unless an explicit, tested translation exists, per §7.1.
+- Document-level TeX customization of the style (`\DeclareFieldFormat`, `\renewbibmacro`, `\DeclareNameFormat`, sorting templates) has no CSL counterpart and is diagnosed.
+- Any other style name keeps the `unsupported-bib-style` diagnostic.
+
+**Implementation (2026-10-12).** Implemented on 2026-10-12 in `citeproc/aliases.ls`. The four aliases were admitted the same day against biblatex 3.21 with biber 2.21, biblatex-apa 9.20, biblatex-ieee 1.4f and biblatex-chicago 3.18b on TeX Live 2025. The pinned PDFs and the recorded differences are in [`test/latex/reference/csl_alias/`](../../test/latex/reference/csl_alias/README.md), and `test_latex_csl_alias_reference` prints every citation, entry and note as `same` or as both texts. The differences come from title capitalization (biblatex sentence-cases APA and IEEE titles; CSL keeps the stored case), the CSL title-case word list, guide editions (the bundled Chicago author–date style follows the 18th edition, biblatex-chicago the 17th; the bundled IEEE style follows the 2023 guide), and one documented CSL style limitation. Capturing them also exposed a defect, now fixed: a note-style `\autocite` mark now follows the punctuation after it, as biblatex's default `autopunct` does. The alias table lives in `citeproc/aliases.ls`, and `latex.render_result` turns a selected alias into the CSL request when no `citeproc` option is given. Under an alias the biblatex style is the request rather than a conflict, so the legacy-option conflict check sees no options; the alias reports what CSL cannot follow instead. The diagnostics are `csl-style-alias` (the substitution, naming the CSL style), `csl-alias-option-ignored` (one per CSL-fixed option) and `csl-alias-customization` (one per style-customization command). The `unsupported-bib-style` report for the aliased name is dropped, and `result.metadata.bibliography.biblatex_style` records the biblatex name. `biblatex-chicago` is a registry entry that implies a `biblatex` declaration with `style=chicago-authordate` or `chicago-notes` (its default); loading it beside `biblatex` reports `conflicting-bibliography-packages`. `test_latex_csl_alias` covers the four aliases, ignored options and customization, an explicit `citeproc` option beside a biblatex style, a split citation and bibliography style, a standard style, an unmapped style and the double load.
+
 ## 8. References and reuse policy
 
 | Reference | Use in this project |
@@ -313,7 +362,7 @@ The engine language, package ownership and CSL pipeline are confirmed constraint
 | Initial public selection | Opt-in `render_result(..., {citeproc: ...})`; retain the existing default |
 | First production style set | Pinned IEEE/Vancouver numeric styles and APA/Chicago author–date once their complete feature inventories pass; note style follows the note gate |
 | Existing BibLaTeX style overrides | Diagnose conflicting requests; add translations only with explicit fixtures |
-| Phase IV M4 | Defer BibLaTeX style execution while the CSL pipeline is built |
+| Phase IV M4 | Dropped (USER, 2026-10-12); guide-level biblatex styles map to CSL styles (§7.4) |
 | Locale collation | Decide after a source audit and multilingual comparison; publish the selected policy |
 | Default migration | Separate review after parity, rendered-output and performance evidence |
 | Later CLI / Markdown exposure | Reuse these internal modules; keep outside the initial package change |

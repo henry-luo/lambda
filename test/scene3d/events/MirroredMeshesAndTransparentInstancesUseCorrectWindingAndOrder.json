@@ -1,0 +1,61 @@
+{
+  "name": "MirroredMeshesAndTransparentInstancesUseCorrectWindingAndOrder",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          255,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"object-material\").setAttribute(\"opacity\",\"0.5\")"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"object\").setAttribute(\"instances\",\"1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 1 1 0 0 0 0 1 0 0 0 0 1 0 0 0 -1 1\")"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          191,
+          0,
+          0,
+          191,
+          4
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "fields": {
+        "meshes": 2
+      }
+    }
+  ]
+}

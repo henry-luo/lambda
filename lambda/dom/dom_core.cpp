@@ -15,6 +15,7 @@
  * whose parse loop it shares; it is declared in dom_core.h like the rest.
  */
 
+#include "dom_event_host.h"
 #include "../lambda-data.hpp"
 #include "realm/dom_realm.h"
 #include "../runtime/lambda-root-frame.hpp"
@@ -303,7 +304,7 @@ extern "C" Item dom_core_create_node(Item doc, Item type, Item name, Item data) 
         return c ? dom_wrap_element((void*)c) : ItemNull;
     }
     case DOM_CORE_KIND_DOCUMENT_FRAGMENT: {
-        DomElement* f = dom_element_create(document, "#document-fragment", nullptr);
+        DomElement* f = dom_document_fragment_create(document);
         return f ? dom_wrap_element(f) : ItemNull;
     }
     default:
@@ -484,8 +485,8 @@ static bool dom_event_flag(Item event, const char* key, bool fallback) {
 
 // The live-event predicate is the module's: an event is a record-backed
 // wrapper, and only the module can say whether a wrapper is one of its own.
-extern "C" bool radiant_dom_event_is(Item item);
-extern "C" Item radiant_dom_event_create(const char* type, bool bubbles,
+extern "C" bool dom_event_host_is(Item item);
+extern "C" Item dom_event_host_create(const char* type, bool bubbles,
                                          bool cancelable, bool composed, int class_id);
 
 extern "C" Item dom_core_dispatch(Item n, Item event) {
@@ -496,7 +497,7 @@ extern "C" Item dom_core_dispatch(Item n, Item event) {
     // A live event goes straight through: it already carries the propagation
     // state a listener mutates, and dom_dispatch_event's F19/ES25 bridge enters
     // the engine's cascade with it.
-    if (radiant_dom_event_is(event)) {
+    if (dom_event_host_is(event)) {
         return dom_absent_to_null(dom_dispatch_event_bridge(n, event));
     }
     // A descriptor -- a name, or {type, bubbles, cancelable} -- says how to
@@ -544,7 +545,7 @@ extern "C" Item dom_core_dispatch(Item n, Item event) {
         Item b = { .item = b2it(bubbles) }, c = { .item = b2it(cancelable) };
         return dom_engine_dispatch_event(n, type_item, b, c);
     }
-    built_root.set(radiant_dom_event_create(type, bubbles, cancelable, composed, 0));
+    built_root.set(dom_event_host_create(type, bubbles, cancelable, composed, 0));
     if (get_type_id(built_root.get()) != LMD_TYPE_VMAP) return ItemNull;
     return dom_absent_to_null(dom_dispatch_event_bridge(node_root.get(), built_root.get()));
 }

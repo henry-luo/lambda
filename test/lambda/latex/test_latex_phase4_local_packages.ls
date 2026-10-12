@@ -1,4 +1,4 @@
-// Phase IV (Lambda_Pkg_Latex3 §9.4): a class and a package beside the
+// Phase IV (Lambda_Design_TeX_Engine §5): a class and a package beside the
 // document run on the TeX engine; adapters still answer what they require.
 import latex: lambda.latex.latex
 import html: lambda.latex.to_html

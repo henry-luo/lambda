@@ -67,8 +67,6 @@ if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
     rm -f lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter-lambda/src/*.o 2>/dev/null || true
     rm -f lambda/tree-sitter-javascript/libtree-sitter-javascript.a lambda/tree-sitter-javascript/src/*.o 2>/dev/null || true
     rm -f lambda/tree-sitter-python/libtree-sitter-python.a lambda/tree-sitter-python/src/*.o 2>/dev/null || true
-    rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o 2>/dev/null || true
-    rm -f lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a lambda/tree-sitter-latex-math/src/*.o 2>/dev/null || true
 
     # Clean build directories
     rm -rf build_win_native/ build/ build_debug/ 2>/dev/null || true
@@ -443,43 +441,6 @@ if [ ! -f "lambda/tree-sitter-javascript/libtree-sitter-javascript.a" ]; then
     cd - > /dev/null
 else
     echo "✅ Tree-sitter-javascript already built for Windows"
-fi
-
-# Build tree-sitter-latex
-if [ ! -f "lambda/tree-sitter-latex/libtree-sitter-latex.a" ]; then
-    echo "Building tree-sitter-latex for Windows..."
-    cd lambda/tree-sitter-latex
-
-    # Clean previous object files
-    rm -f src/*.o *.a *.so *.dylib
-
-    # Generate parser.c if it doesn't exist
-    if [ ! -f "src/parser.c" ]; then
-        echo "Generating parser.c for tree-sitter-latex..."
-        npx tree-sitter-cli@0.25.10 generate --abi 14
-    fi
-
-    # Compile .c files directly to avoid Makefile OS guard and regeneration rules
-    SRCS=$(find src -maxdepth 1 -name '*.c')
-    if [[ "$MSYSTEM" == "CLANG64" ]]; then
-        for f in $SRCS; do clang -std=c11 -fPIC -Isrc -O2 -c "$f" -o "${f%.c}.o"; done
-        llvm-ar rcs libtree-sitter-latex.a src/*.o
-    else
-        for f in $SRCS; do gcc -std=c11 -fPIC -Isrc -O2 -c "$f" -o "${f%.c}.o"; done
-        ar rcs libtree-sitter-latex.a src/*.o
-    fi
-
-    if [ -f "libtree-sitter-latex.a" ]; then
-        echo "✅ Tree-sitter-latex built successfully"
-    else
-        echo "❌ Tree-sitter-latex build failed"
-        cd - > /dev/null
-        exit 1
-    fi
-
-    cd - > /dev/null
-else
-    echo "✅ Tree-sitter-latex already built for Windows"
 fi
 
 # Function to download and extract if not exists
@@ -1133,7 +1094,6 @@ echo "  ✅ Image libraries (PNG, JPEG, GIF)"
 echo "  📦 Tree-sitter library (building from source - see verification below)"
 echo "  📦 Tree-sitter-lambda (building from source - see verification below)"
 echo "  📦 Tree-sitter-javascript (building from source - see verification below)"
-echo "  📦 Tree-sitter-latex (building from source - see verification below)"
 echo "  📦 utf8proc (building from source - see verification below)"
 echo "  📦 libcurl minimal static (building from source - HTTP/HTTPS only, no HTTP/2)"
 echo "  📦 ThorVG (building from source - vector graphics for SVG rendering)"
@@ -1159,12 +1119,6 @@ if [ -f "lambda/tree-sitter-javascript/libtree-sitter-javascript.a" ]; then
     echo "✅ Tree-sitter-javascript library available"
 else
     echo "⚠️  Tree-sitter-javascript library missing"
-fi
-
-if [ -f "lambda/tree-sitter-latex/libtree-sitter-latex.a" ]; then
-    echo "✅ Tree-sitter-latex library available"
-else
-    echo "⚠️  Tree-sitter-latex library missing"
 fi
 
 # Check utf8proc

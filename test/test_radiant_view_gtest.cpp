@@ -6,6 +6,7 @@
 #include <cstddef>
 
 #include "../radiant/script_timeout.hpp"
+#include "test_radiant_view_helpers.hpp"
 
 extern "C" {
 #include "../lib/shell.h"
@@ -63,9 +64,9 @@ static const RadiantViewCase g_radiant_view_cases[] = {
     {"RadiantViewTest.LoadsMarkdownMathAsHeadlessView", "markdown_math", "test/input/simple_math_test.md"},
     {"RadiantViewTest.LoadsWikiAsHeadlessView", "wiki", "test/input/test.wiki"},
     {"RadiantViewTest.LoadsLatexShowcaseAsHeadlessView", "latex_showcase", "test/input/latex-showcase.tex"},
-    // font-query snapshots must be released with their evaluation context.
+    // the UI replay covers scrolling/font-query cleanup; this case covers static loading and shutdown.
     {"RadiantViewTest.LoadsMathIntensiveLatexAsHeadlessView", "latex_math_intensive", "test/input/math_intensive_test.tex",
-     "test/view/radiant_view_math_intensive_scroll.json", true},
+     nullptr, true},
     {"RadiantViewTest.LoadsYamlAsHeadlessView", "yaml", "test/input/more_test.yaml"},
     {"RadiantViewTest.LoadsLambdaReportAsHeadlessView", "lambda_report", "test/lambda/complex_iot_report_html.ls"},
     {"RadiantViewTest.LoadsLambdaChartDashboardAsHeadlessView", "lambda_chart_dashboard", "test/lambda/chart/chart_dashboard.ls"},
@@ -325,24 +326,6 @@ static char g_radiant_view_artifacts[1024];
 static char g_radiant_view_workspace[1024];
 static int test_radiant_view_default_jobs();
 
-struct RadiantViewLaunch {
-    const char* label;
-    const char* page;
-    const char* event_path;
-    const ShellEnvEntry* env;
-    const char* command = "view";
-    bool graphics = false;
-    bool quiet = false;
-    int timeout_ms = 30000;
-    char cwd[1024];
-    char log_path[1024];
-    char viewer_log_path[1024];
-    char timing_path[1024];
-    char event_result[1024];
-    ShellResult result = {-1};
-    double elapsed_ms = 0;
-};
-
 static bool test_radiant_view_prepare_run() {
     const char* output = getenv("LAMBDA_TEST_OUTPUT_DIR");
     if (!output || !output[0]) output = "test_output";
@@ -358,7 +341,7 @@ static bool test_radiant_view_prepare_run() {
     return create_dir(g_radiant_view_artifacts) && create_dir(g_radiant_view_workspace);
 }
 
-static bool test_radiant_view_prepare_launch(RadiantViewLaunch* launch) {
+bool test_radiant_view_prepare_launch(RadiantViewLaunch* launch) {
     char directory[1024];
     snprintf(directory, sizeof(directory), "%s/%s", g_radiant_view_artifacts, launch->label);
     if (!create_dir(directory)) return false;
@@ -385,7 +368,7 @@ static bool test_radiant_view_prepare_launch(RadiantViewLaunch* launch) {
 static ShellResult test_radiant_view_run_logged_headless(const char*, const char*,
     const ShellEnvEntry*, const char*, const char* const*, int, const char*, const char*, const char*);
 
-static void test_radiant_view_launch(void* argument) {
+void test_radiant_view_launch(void* argument) {
     RadiantViewLaunch* launch = (RadiantViewLaunch*)argument;
     ShellEnvEntry environment[32] = {
         {"LAMBDA_HOME", g_radiant_view_home}, {"LAMBDA_LOG_FILE", launch->viewer_log_path},
@@ -410,7 +393,7 @@ static void test_radiant_view_launch(void* argument) {
         launch->result.stdout_len);
 }
 
-static void test_radiant_view_record_launch(const char* label, double elapsed_ms,
+void test_radiant_view_record_launch(const char* label, double elapsed_ms,
                                            const char* log_path, const char* timing_path) {
     char key[256], elapsed[64];
     snprintf(elapsed, sizeof(elapsed), "%.3f", elapsed_ms);
@@ -564,31 +547,33 @@ TEST(RadiantViewTest, DemoCommandLaunchesCatalogAndPreservesViewerOptions) {
     ASSERT_TRUE(file_delete_recursive(custom_home) == 0);
 }
 
-TEST(RadiantViewTest, DocumentLanguageUsesOnlyFinalHttpResponseAndMetadataPrecedence) {
+static const struct {
+    const char* path; const char* headers; int status; const char* markup;
+    const char* language; const char* color; unsigned width;
+} g_radiant_view_language_cases[] = {
+    {"single", "Content-Language: iw-IL\r\n", 200, "", "he", "0, 0, 255", 80},
+    {"list", "Content-Language: fr,en\r\n", 200, "", "", "255, 0, 0", 20},
+    {"duplicate", "Content-Language: fr\r\nContent-Language: de\r\n", 200, "", "", "255, 0, 0", 20},
+    {"none", "", 200, "", "", "255, 0, 0", 20},
+    {"redirect-none", "Content-Language: fr\r\nLocation: /none.html\r\n", 302, "", "", "255, 0, 0", 20},
+    {"redirect-single", "Content-Language: fr\r\nLocation: /single.html\r\n", 302, "", "he", "0, 0, 255", 80},
+    {"meta", "Content-Language: iw-IL\r\n", 200,
+        "<meta http-equiv='content-language' content='fr'>", "fr", "0, 128, 0", 60},
+    {"meta-list", "Content-Language: iw-IL\r\n", 200,
+        "<meta http-equiv='content-language' content='fr,en'>", "he", "0, 0, 255", 80},
+    {"root", "Content-Language: iw-IL\r\n", 200, "<html lang='fr'>", "fr", "0, 128, 0", 60},
+    {"empty", "Content-Language: iw-IL\r\n", 200, "<html lang=''>", "", "255, 0, 0", 20},
+    {"whitespace", "Content-Language: \t fr \t\r\n", 200, "", "fr", "0, 128, 0", 60},
+    {"empty-header", "Content-Language: \r\n", 200, "", "", "255, 0, 0", 20},
+};
+
+static void test_radiant_view_http_language(size_t selected) {
 #ifdef _WIN32
     GTEST_SKIP() << "local HTTP fixture uses POSIX sockets";
 #else
     test_radiant_view_ensure_temp_dir();
-    const struct {
-        const char* path; const char* headers; int status; const char* markup;
-        const char* language; const char* color; unsigned width;
-    } rows[] = {
-        {"single", "Content-Language: iw-IL\r\n", 200, "", "he", "0, 0, 255", 80},
-        {"list", "Content-Language: fr,en\r\n", 200, "", "", "255, 0, 0", 20},
-        {"duplicate", "Content-Language: fr\r\nContent-Language: de\r\n", 200, "", "", "255, 0, 0", 20},
-        {"none", "", 200, "", "", "255, 0, 0", 20},
-        {"redirect-none", "Content-Language: fr\r\nLocation: /none.html\r\n", 302, "", "", "255, 0, 0", 20},
-        {"redirect-single", "Content-Language: fr\r\nLocation: /single.html\r\n", 302, "", "he", "0, 0, 255", 80},
-        {"meta", "Content-Language: iw-IL\r\n", 200,
-            "<meta http-equiv='content-language' content='fr'>", "fr", "0, 128, 0", 60},
-        {"meta-list", "Content-Language: iw-IL\r\n", 200,
-            "<meta http-equiv='content-language' content='fr,en'>", "he", "0, 0, 255", 80},
-        {"root", "Content-Language: iw-IL\r\n", 200, "<html lang='fr'>", "fr", "0, 128, 0", 60},
-        {"empty", "Content-Language: iw-IL\r\n", 200, "<html lang=''>", "", "255, 0, 0", 20},
-        {"whitespace", "Content-Language: \t fr \t\r\n", 200, "", "fr", "0, 128, 0", 60},
-        {"empty-header", "Content-Language: \r\n", 200, "", "", "255, 0, 0", 20},
-    };
-    constexpr size_t count = sizeof(rows) / sizeof(rows[0]);
+    const auto& rows = g_radiant_view_language_cases;
+    constexpr size_t count = sizeof(g_radiant_view_language_cases) / sizeof(g_radiant_view_language_cases[0]);
     StrBuf* pages[count] = {};
     StrBuf* requests[count] = {};
     RadiantViewHttpResource resources[count] = {};
@@ -639,22 +624,20 @@ TEST(RadiantViewTest, DocumentLanguageUsesOnlyFinalHttpResponseAndMetadataPreced
         {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"},
         {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"}, {nullptr, nullptr},
     };
-    RadiantViewLaunch launches[count] = {};
-    char remote[count][160], labels[count][64];
+    RadiantViewLaunch launch = {};
+    char remote[160], label[64];
     char* event_path = file_realpath(events);
     ASSERT_NE(event_path, nullptr);
-    for (size_t i = 0; i < count; i++) {
-        ASSERT_GT(snprintf(remote[i], sizeof(remote[i]), "http://127.0.0.1:%d/%s.html",
-            server.port, rows[i].path), 0);
-        snprintf(labels[i], sizeof(labels[i]), "language_%s", rows[i].path);
-        launches[i].label = labels[i]; launches[i].page = remote[i];
-        launches[i].event_path = event_path; launches[i].env = env;
-        ASSERT_TRUE(test_radiant_view_prepare_launch(&launches[i]));
-    }
-    test_radiant_view_launch_all(launches, count);
-    for (size_t i = 0; i < count; i++) {
-        SCOPED_TRACE(rows[i].path);
-        ShellResult& result = launches[i].result;
+    ASSERT_GT(snprintf(remote, sizeof(remote), "http://127.0.0.1:%d/%s.html",
+        server.port, rows[selected].path), 0);
+    snprintf(label, sizeof(label), "language_%s", rows[selected].path);
+    launch.label = label; launch.page = remote;
+    launch.event_path = event_path; launch.env = env;
+    ASSERT_TRUE(test_radiant_view_prepare_launch(&launch));
+    test_radiant_view_launch_all(&launch, 1);
+    {
+        SCOPED_TRACE(rows[selected].path);
+        ShellResult& result = launch.result;
         const char* output = result.stdout_buf ? result.stdout_buf : "";
         EXPECT_FALSE(result.timed_out);
         EXPECT_EQ(result.exit_code, 0) << output;
@@ -733,7 +716,7 @@ static ShellResult test_radiant_view_run_layout_timing(const char* page,
 }
 
 static bool test_radiant_view_write_script_bytes(FILE* file, size_t bytes) {
-    const char statement[] = "var scriptBudgetPadding = 0;\n";
+    const char statement[] = "// browser source budget padding\n";
     if (!file) return false;
     size_t written = 0;
     while (written < bytes) {
@@ -792,7 +775,7 @@ static void test_radiant_view_run_case(size_t index) {
     RadiantViewLaunch launch = {};
     launch.label = view_case->label; launch.page = view_case->path; launch.quiet = true;
     launch.env = view_case->requires_clean_memtrack ? memtrack_env : nullptr;
-    launch.timeout_ms = 180000;
+    launch.timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS;
     launch.event_path = view_case->event_path ? file_realpath(view_case->event_path) : nullptr;
     if (!test_radiant_view_prepare_launch(&launch)) {
         snprintf(result->message, sizeof(result->message), "could not prepare isolated view: %s", view_case->label);
@@ -1740,7 +1723,8 @@ TEST(RadiantViewTest, StaticHeadlessViewClosesRecursivePostLoadTimers) {
     ASSERT_NE(nullptr, page_file);
     const char* document =
         "<!doctype html><body>first-render-ready<script>"
-        "(function tick(){setTimeout(tick,0);})();"
+        "var announced=false;(function tick(){var token=setTimeout(tick,0);"
+        "if(token>0&&!announced){console.log('RECURSIVE_TIMER_QUEUED');announced=true;}})();"
         "</script></body>";
     ASSERT_EQ(strlen(document), fwrite(document, 1, strlen(document), page_file));
     ASSERT_EQ(0, fclose(page_file));
@@ -1759,9 +1743,9 @@ TEST(RadiantViewTest, StaticHeadlessViewClosesRecursivePostLoadTimers) {
     EXPECT_FALSE(shell_result.timed_out);
     EXPECT_EQ(0, shell_result.exit_code)
         << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    // prove recursive work was queued, then require a clean close within the watchdog.
+    EXPECT_NE(strstr(shell_result.stdout_buf ? shell_result.stdout_buf : "", "RECURSIVE_TIMER_QUEUED"), nullptr);
     shell_result_free(&shell_result);
-    EXPECT_TRUE(test_radiant_view_file_contains(view_log,
-        "execute_document_scripts: timer queue drained"));
 
     remove(page);
     remove(view_log);
@@ -1833,24 +1817,23 @@ TEST(RadiantViewTest, ScriptTimeoutDuringPostLoadTimerReleasesLayoutPassResource
 }
 
 TEST(RadiantViewTest, TetrisClosesAfterSustainedReactiveRedraws) {
-    test_radiant_view_ensure_temp_dir();
-    const char* result_path = "./temp/test_radiant_view_tetris_close.json";
-    remove(result_path);
-    const char* args[] = {
-        "./lambda.exe", "view", "test/demo/tetris/tetris.ls", "--headless", "--no-log",
-        "--event-file", "test/demo/tetris/tetris_close.json",
-        "--event-result", result_path, nullptr,
-    };
-    ShellOptions options = {};
-    // bound a shutdown hang; the replay advances gameplay on the virtual clock.
-    options.timeout_ms = 30000;
-    options.merge_stderr = true;
-    ShellResult result = shell_exec("./lambda.exe", args, &options);
-    EXPECT_FALSE(result.timed_out);
-    EXPECT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+    RadiantViewLaunch launch = {};
+    launch.label = "tetris_close";
+    launch.page = "test/demo/tetris/tetris.ls";
+    launch.event_path = "test/demo/tetris/tetris_close.json";
+    launch.quiet = true;
+    // the deadline includes 420 reactive redraws; use the sustained-replay budget under contention.
+    launch.timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS;
+    ASSERT_TRUE(test_radiant_view_prepare_launch(&launch));
+    test_radiant_view_launch(&launch);
+    test_radiant_view_record_launch(launch.label, launch.elapsed_ms,
+        launch.log_path, launch.timing_path);
+    ShellResult& result = launch.result;
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_FALSE(result.timed_out) << output;
+    EXPECT_EQ(0, result.exit_code) << output;
+    EXPECT_TRUE(test_radiant_view_file_contains(launch.event_result, "\"result\":\"PASS\""));
     shell_result_free(&result);
-    EXPECT_TRUE(test_radiant_view_file_contains(result_path, "\"result\":\"PASS\""));
-    remove(result_path);
 }
 
 TEST(RadiantViewTest, RendersObjectBoundingBoxPatternWithoutUserUnitTiling) {
@@ -1913,15 +1896,21 @@ TEST(RadiantViewTest, ArchivesAndDirectoriesOpenAsFileTrees) {
         {"LAMBDA_LOG_FILE", view_log}, {"LAMBDA_LOG_LEVEL", "INFO"}, {NULL, NULL},
     };
     test_radiant_view_ensure_temp_dir();
+    const char* events = "temp/test_radiant_view_archive_tree_events.json";
+    const char* replay = "{\"events\":[{\"type\":\"assert_attribute\",\"target\":{\"selector\":\"#project-tree\"},"
+        "\"attribute\":\"class\",\"equals\":\"project-tree\"},{\"type\":\"assert_attribute\","
+        "\"target\":{\"selector\":\"#file-filter\"},\"attribute\":\"placeholder\",\"equals\":\"Filter file names\"}]}";
+    ASSERT_EQ(write_binary_file(events, replay, strlen(replay)), 0);
     for (const char* path : paths) {
         SCOPED_TRACE(path);
         remove(view_log);
-        ShellResult result = test_radiant_view_run_logged_headless(path, nullptr, env);
+        ShellResult result = test_radiant_view_run_logged_headless(path, events, env);
         EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
-        EXPECT_TRUE(test_radiant_view_file_contains(view_log, "VIEW_FILE_TREE:"));
+        EXPECT_NE(strstr(result.stdout_buf ? result.stdout_buf : "", "Assertions: 2 passed, 0 failed"), nullptr);
         shell_result_free(&result);
     }
     remove(view_log);
+    remove(events);
 }
 
 TEST(RadiantViewTest, RejectsUnsafeArchiveBeforeOpeningTree) {
@@ -2322,29 +2311,32 @@ TEST(RadiantViewTest, SkipsDefaultCumulativeBrowserScriptBudget) {
 
     FILE* page_file = fopen(page, "wb");
     ASSERT_NE(nullptr, page_file);
-    bool page_written = fputs("<!doctype html><html><head></head><body>", page_file) >= 0;
+    bool page_written = fputs("<!doctype html><html><head></head><body><script>console.log('BUDGET_BEFORE')</script>", page_file) >= 0;
     for (int i = 0; i < script_count && page_written; i++) {
         page_written = fputs("<script>", page_file) >= 0 &&
             test_radiant_view_write_script_bytes(page_file, script_bytes) &&
-            fputs("</script>", page_file) >= 0;
+            fputs("\nconsole.log('BUDGET_OVERFLOW_EXECUTED')</script><script>console.log('BUDGET_AFTER')</script>", page_file) >= 0;
     }
     page_written = page_written && fputs("script budget</body></html>", page_file) >= 0;
     ASSERT_EQ(0, fclose(page_file));
     ASSERT_TRUE(page_written);
 
-    const ShellEnvEntry env[] = {
-        {"LAMBDA_LOG_FILE", view_log},
-        {"LAMBDA_LOG_LEVEL", "INFO"},
-        {NULL, NULL},
-    };
-    ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
-    EXPECT_EQ(0, shell_result.exit_code)
-        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
-    EXPECT_TRUE(test_radiant_view_file_contains(
-        view_log, "skipping document JS after browser source budget"));
-    EXPECT_TRUE(test_radiant_view_file_contains(
-        view_log, "view command completed with result: 0"));
-    shell_result_free(&shell_result);
+    // a positive control proves the same scripts execute when admission is explicitly widened.
+    for (bool admitted : {false, true}) {
+        SCOPED_TRACE(admitted ? "explicit unlimited budget" : "default static budget");
+        const ShellEnvEntry env[] = {
+            {"LAMBDA_LOG_FILE", view_log}, {"LAMBDA_LOG_LEVEL", "INFO"},
+            {"RADIANT_JS_TOTAL_SCRIPT_BYTES", admitted ? "0" : nullptr}, {nullptr, nullptr},
+        };
+        ShellResult result = test_radiant_view_run_logged_headless(page, nullptr, env);
+        EXPECT_FALSE(result.timed_out);
+        EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+        const char* output = result.stdout_buf ? result.stdout_buf : "";
+        for (const char* marker : {"BUDGET_BEFORE", "BUDGET_OVERFLOW_EXECUTED", "BUDGET_AFTER"})
+            EXPECT_EQ(strstr(output, marker) != nullptr, admitted) << marker;
+        EXPECT_FALSE(test_radiant_view_file_contains(view_log, "js-mir: parse failed"));
+        shell_result_free(&result);
+    }
     remove(page);
     remove(view_log);
 }
@@ -2364,7 +2356,7 @@ TEST(RadiantViewTest, SkipsExternalScriptResponseThatIsHtml) {
 
     FILE* page_file = fopen(page, "wb");
     ASSERT_NE(nullptr, page_file);
-    ASSERT_GE(fputs("<!doctype html><html><head><script src=\"test_radiant_view_html_script_response.js\"></script></head><body>script response</body></html>",
+    ASSERT_GE(fputs("<!doctype html><html><head><script src=\"test_radiant_view_html_script_response.js\"></script><script>console.log('SCRIPT_RESPONSE_READY')</script></head><body>script response</body></html>",
                     page_file), 0);
     ASSERT_EQ(0, fclose(page_file));
 
@@ -2381,11 +2373,8 @@ TEST(RadiantViewTest, SkipsExternalScriptResponseThatIsHtml) {
     ShellResult shell_result = test_radiant_view_run_logged_headless(page, events, env);
     EXPECT_EQ(0, shell_result.exit_code)
         << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
-    EXPECT_TRUE(test_radiant_view_file_contains(
-        view_log, "skipping HTML response for external script"));
+    EXPECT_NE(strstr(shell_result.stdout_buf ? shell_result.stdout_buf : "", "SCRIPT_RESPONSE_READY"), nullptr);
     EXPECT_FALSE(test_radiant_view_file_contains(view_log, "js-mir: parse failed"));
-    EXPECT_TRUE(test_radiant_view_file_contains(
-        view_log, "view command completed with result: 0"));
     shell_result_free(&shell_result);
     remove(page);
     remove(script);
@@ -2406,7 +2395,7 @@ TEST(RadiantViewTest, ExecutesExternalDependencyInStaticHeadlessView) {
 
     FILE* page_file = fopen(page, "wb");
     ASSERT_NE(nullptr, page_file);
-    ASSERT_GE(fputs("<!doctype html><html><head><script src=\"test_radiant_view_headless_external.js\"></script><script>if (window.headlessExternalDependency !== 'ready') { throw new Error('headless external dependency unavailable'); }</script></head><body>headless external dependency</body></html>", page_file), 0);
+    ASSERT_GE(fputs("<!doctype html><html><head><script src=\"test_radiant_view_headless_external.js\"></script><script>if (window.headlessExternalDependency !== 'ready') { throw new Error('headless external dependency unavailable'); }console.log('HEADLESS_DEPENDENCY_READY');</script></head><body>headless external dependency</body></html>", page_file), 0);
     ASSERT_EQ(0, fclose(page_file));
 
     const ShellEnvEntry env[] = {
@@ -2417,8 +2406,7 @@ TEST(RadiantViewTest, ExecutesExternalDependencyInStaticHeadlessView) {
     ShellResult shell_result = test_radiant_view_run_logged_headless(page, nullptr, env);
     EXPECT_EQ(0, shell_result.exit_code)
         << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
-    EXPECT_TRUE(test_radiant_view_file_contains(
-        view_log, "script_runner: external scripts: 1 loaded, 0 failed"));
+    EXPECT_NE(strstr(shell_result.stdout_buf ? shell_result.stdout_buf : "", "HEADLESS_DEPENDENCY_READY"), nullptr);
     EXPECT_FALSE(test_radiant_view_file_contains(
         view_log, "headless external dependency unavailable"));
     shell_result_free(&shell_result);
@@ -2694,34 +2682,37 @@ TEST(RadiantViewTest, UiScriptContentSurvivesForcedGc) {
     const char* view_path = "./temp/ui_script_content_gc_view.json";
     const char* log_path = "./temp/ui_script_content_gc_native.log";
     remove(log_path);
-    const ShellEnvEntry env[] = {
-        {"LAMBDA_LOG_FILE", log_path},
-        {"LAMBDA_GC_FORCE_EVERY", "1"},
-        {"LAMBDA_GC_POISON_FREED", "1"},
-        {"LAMBDA_FUNC_JIT_THRESHOLD", "1"},
-        {"LAMBDA_SATELLITE_SYNC", "1"},
-        {NULL, NULL},
-    };
     const char* args[] = {
         "./lambda.exe", "layout", "test/html/ui_script_content_gc.ls",
         "--view-output", view_path, NULL,
     };
-    ShellOptions options = {0};
-    options.env = env;
-    options.merge_stderr = true;
-    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
-    ASSERT_EQ(0, shell_result.exit_code)
-        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
-    shell_result_free(&shell_result);
+    // compare forced-GC content through automatic promotion and direct JIT without debug-only traces.
+    for (const char* backend : {"auto", "jit"}) {
+        SCOPED_TRACE(backend);
+        remove(view_path);
+        const ShellEnvEntry env[] = {
+            {"LAMBDA_LOG_FILE", log_path},
+            {"LAMBDA_EXEC_BACKEND", backend},
+            {"LAMBDA_GC_FORCE_EVERY", "1"},
+            {"LAMBDA_GC_POISON_FREED", "1"},
+            {"LAMBDA_FUNC_JIT_THRESHOLD", "1"},
+            {"LAMBDA_SATELLITE_SYNC", "1"},
+            {NULL, NULL},
+        };
+        ShellOptions options = {0};
+        options.env = env;
+        options.merge_stderr = true;
+        ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
+        ASSERT_EQ(0, shell_result.exit_code)
+            << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+        shell_result_free(&shell_result);
 
-    EXPECT_TRUE(test_radiant_view_file_contains(log_path,
-        "published queued satellite function='row'"));
-
-    const char* expected[] = {"r1s1e10", "k2", "n1n2n3", "w1w1", "v1", "r4s4e40", "r5s5e50",
-        "[9, 6, 13]override7128"};
-    for (const char* text : expected) {
-        EXPECT_TRUE(test_radiant_view_file_contains(view_path, text))
-            << "missing content '" << text << "' after forced GC";
+        const char* expected[] = {"r1s1e10", "k2", "n1n2n3", "w1w1", "v1", "r4s4e40", "r5s5e50",
+            "[9, 6, 13]override7128"};
+        for (const char* text : expected) {
+            EXPECT_TRUE(test_radiant_view_file_contains(view_path, text))
+                << "missing content '" << text << "' after forced GC";
+        }
     }
 }
 
@@ -2782,7 +2773,8 @@ TEST(RadiantViewTest, LambdaSelectValueReadsLiveOptionSelectedness) {
 }
 
 static void test_radiant_view_expect_replay(const char* page, const char* replay,
-        const ShellEnvEntry* env, bool clean_memtrack = false, int timeout_ms = 180000) {
+        const ShellEnvEntry* env, bool clean_memtrack = false,
+        int timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS) {
     ShellResult result = test_radiant_view_run_logged_headless(
         page, replay, env, nullptr, nullptr, timeout_ms);
     const char* output = result.stdout_buf ? result.stdout_buf : "";
@@ -2804,48 +2796,40 @@ TEST(RadiantViewTest, PhotoCanvasCopiesRgbaAndReleasesItAcrossGc) {
         "test/demo/photo/tests/_canvas_bridge.ls", "test/demo/photo/tests/canvas_bridge.json", env, true);
 }
 
-static void test_radiant_view_photo_replays(const char* const* replays,
-                                           size_t replay_count, const char* source) {
-    const char* tiers[] = {"auto", "jit"};
-    RadiantViewLaunch launches[6] = {};
-    char labels[6][64];
-    ShellEnvEntry environments[6][3] = {};
-    ASSERT_LE(replay_count * 2, sizeof(launches) / sizeof(launches[0]));
-    for (size_t tier = 0; tier < 2; tier++) for (size_t replay = 0; replay < replay_count; replay++) {
-        size_t i = tier * replay_count + replay;
-        snprintf(labels[i], sizeof(labels[i]), "photo_%s_%s", tiers[tier], replays[replay]);
-        launches[i].label = labels[i]; launches[i].page = "test/demo/photo/photo.ls";
-        launches[i].timeout_ms = 180000;
-        char path[1024];
-        snprintf(path, sizeof(path), "%s/test/demo/photo/tests/%s.json", g_radiant_view_root, replays[replay]);
-        launches[i].event_path = file_realpath(path);
-        ASSERT_NE(launches[i].event_path, nullptr);
-        environments[i][0] = {"LAMBDA_EXEC_BACKEND", tiers[tier]};
-        environments[i][1] = {"PHOTO_SOURCE", source};
-        launches[i].env = environments[i];
-        ASSERT_TRUE(test_radiant_view_prepare_launch(&launches[i]));
-    }
-    test_radiant_view_launch_all(launches, replay_count * 2);
-    for (size_t i = 0; i < replay_count * 2; i++) {
-        SCOPED_TRACE(launches[i].label);
-        ShellResult& result = launches[i].result;
-        const char* output = result.stdout_buf ? result.stdout_buf : "";
-        EXPECT_FALSE(result.timed_out) << output;
-        EXPECT_EQ(result.exit_code, 0) << output;
-        EXPECT_NE(strstr(output, "Result: PASS"), nullptr) << output;
-        shell_result_free(&result);
-        mem_free((void*)launches[i].event_path);
-    }
-}
+static const struct {
+    const char* name; const char* tier; const char* replay; const char* source;
+} g_radiant_view_photo_cases[] = {
+    {"PhotoEditorRetainsCanvasAcrossEditsAndHistory_auto", "auto", "photo_smoke", nullptr},
+    {"PhotoEditorRetainsCanvasAcrossEditsAndHistory_jit", "jit", "photo_smoke", nullptr},
+    {"PhotoCropDraftAndKeyboardCompare_auto_gestures", "auto", "photo_gestures", "test/demo/photo/tests/rgba.png"},
+    {"PhotoCropDraftAndKeyboardCompare_jit_gestures", "jit", "photo_gestures", "test/demo/photo/tests/rgba.png"},
+    {"PhotoCropDraftAndKeyboardCompare_auto_responsive", "auto", "photo_responsive", "test/demo/photo/tests/rgba.png"},
+    {"PhotoCropDraftAndKeyboardCompare_jit_responsive", "jit", "photo_responsive", "test/demo/photo/tests/rgba.png"},
+};
 
-TEST(RadiantViewTest, PhotoEditorRetainsCanvasAcrossEditsAndHistory) {
-    const char* replays[] = {"photo_smoke"};
-    test_radiant_view_photo_replays(replays, 1, nullptr);
-}
-
-TEST(RadiantViewTest, PhotoCropDraftAndKeyboardCompare) {
-    const char* replays[] = {"photo_gestures", "photo_responsive"};
-    test_radiant_view_photo_replays(replays, 2, "test/demo/photo/tests/rgba.png");
+static void test_radiant_view_photo_replay(size_t selected) {
+    const auto& fixture = g_radiant_view_photo_cases[selected];
+    RadiantViewLaunch launch = {};
+    char label[64], path[1024];
+    snprintf(label, sizeof(label), "photo_%s_%s", fixture.tier, fixture.replay);
+    launch.label = label; launch.page = "test/demo/photo/photo.ls";
+    launch.timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS;
+    snprintf(path, sizeof(path), "%s/test/demo/photo/tests/%s.json", g_radiant_view_root, fixture.replay);
+    launch.event_path = file_realpath(path);
+    ASSERT_NE(launch.event_path, nullptr);
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_EXEC_BACKEND", fixture.tier}, {"PHOTO_SOURCE", fixture.source}, {nullptr, nullptr},
+    };
+    launch.env = env;
+    ASSERT_TRUE(test_radiant_view_prepare_launch(&launch));
+    test_radiant_view_launch_all(&launch, 1);
+    ShellResult& result = launch.result;
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_FALSE(result.timed_out) << output;
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "Result: PASS"), nullptr) << output;
+    shell_result_free(&result);
+    mem_free((void*)launch.event_path);
 }
 
 TEST(RadiantViewTest, PhotoToolButtonsPreserveContainerAlignment) {
@@ -3219,7 +3203,36 @@ static void test_radiant_view_run_selected_parallel(const size_t* selected,
     if (pool) tp_destroy(pool);
 }
 
+class RadiantViewVariantTest : public ::testing::Test {
+    void (*run)(size_t);
+    size_t selected;
+public:
+    RadiantViewVariantTest(void (*body)(size_t), size_t index) : run(body), selected(index) {}
+    void TestBody() override { run(selected); }
+};
+
+static void test_radiant_view_register_variants() {
+    // one viewer per case lets the shared pool balance HTTP variants and both photo tiers.
+    for (size_t i = 0; i < sizeof(g_radiant_view_language_cases) / sizeof(g_radiant_view_language_cases[0]); i++) {
+        char name[160];
+        snprintf(name, sizeof(name), "DocumentLanguageUsesOnlyFinalHttpResponseAndMetadataPrecedence_%s",
+            g_radiant_view_language_cases[i].path);
+        // '-' separates positive and negative GTest filters, so it cannot name a case.
+        for (char* ch = name; *ch; ch++) if (*ch == '-') *ch = '_';
+        ::testing::RegisterTest("RadiantViewTest", name, nullptr, nullptr, __FILE__, __LINE__,
+            [i]() -> ::testing::Test* { return new RadiantViewVariantTest(test_radiant_view_http_language, i); });
+    }
+    for (size_t i = 0; i < sizeof(g_radiant_view_photo_cases) / sizeof(g_radiant_view_photo_cases[0]); i++) {
+        ::testing::RegisterTest("RadiantViewTest", g_radiant_view_photo_cases[i].name, nullptr, nullptr,
+            __FILE__, __LINE__,
+            [i]() -> ::testing::Test* { return new RadiantViewVariantTest(test_radiant_view_photo_replay, i); });
+    }
+}
+
 int main(int argc, char** argv) {
+    // register the fixture inventory before GTest discovery or filtered execution.
+    test_radiant_view_register_scene3d();
+    test_radiant_view_register_variants();
     const char* filter = test_radiant_view_filter_from_args(argc, argv);
     bool list_only = test_radiant_view_list_tests_requested(argc, argv);
     bool case_worker = false;

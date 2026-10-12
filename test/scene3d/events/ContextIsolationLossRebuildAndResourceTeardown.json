@@ -1,0 +1,66 @@
+{
+  "name": "ContextIsolationLossRebuildAndResourceTeardown",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#scene"
+    },
+    {
+      "type": "snapshot_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "name": "before"
+    },
+    {
+      "type": "scene3d",
+      "op": "lose_context",
+      "target": "#scene"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#scene",
+      "width": 128,
+      "height": 128,
+      "pixels": [
+        [
+          64,
+          64,
+          255,
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "type": "assert_render_stats",
+      "source": "scene3d",
+      "target": "#scene",
+      "fields": {
+        "graphics.generation": {
+          "baseline": "before",
+          "ne": 0
+        },
+        "graphics.resources": {
+          "baseline": "before",
+          "eq": 0
+        }
+      }
+    },
+    {
+      "type": "scene3d",
+      "op": "snapshot",
+      "target": "#scene",
+      "width": 5000,
+      "success": false,
+      "diagnostic": "quota"
+    }
+  ]
+}

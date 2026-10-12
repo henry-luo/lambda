@@ -3,6 +3,7 @@
  */
 
 #include "event_sim.hpp"
+#include "event_sim_render.hpp"
 #include "event.hpp"
 #include "view.hpp"
 #include "render.hpp"
@@ -102,7 +103,7 @@ static bool sim_event_is_assertion(SimEventType type) {
     // Clipboard assertion predates the contiguous assertion enum block; keep it
     // in the common retry/schema path instead of requiring fixed waits around it.
     return type == SIM_EVENT_ASSERT_CLIPBOARD ||
-           (type >= SIM_EVENT_ASSERT_CARET && type <= SIM_EVENT_ASSERT_SNAPSHOT);
+           (type >= SIM_EVENT_ASSERT_CARET && type <= SIM_EVENT_ASSERT_RENDER);
 }
 
 static void sim_record_assertion(EventSimContext* ctx, bool passed) {
@@ -298,13 +299,13 @@ static bool sim_attribute_matches(const char* actual, SimEvent* ev) {
 
 // A fixture may create or overwrite only scratch files under ./temp/, never a
 // committed file: relative, rooted at temp/, and free of `..` components.
-static bool sim_path_is_temp_scratch(const char* path) {
+bool event_sim_path_is_temp_scratch(const char* path) {
     if (!path || !path[0] || path[0] == '/' || strstr(path, "..")) return false;
     if (strncmp(path, "./", 2) == 0) path += 2;
     return strncmp(path, "temp/", 5) == 0 && path[5] != '\0';
 }
 
-static bool sim_create_parent_dirs(const char* path) {
+bool event_sim_create_parent_dirs(const char* path) {
     char* dir = file_path_dirname(path);
     bool ok = dir && create_dir(dir);
     if (dir) mem_free(dir);
@@ -333,8 +334,6 @@ static bool sim_text_matches(const char* assertion, const char* actual,
     return passed;
 }
 
-static View* find_element_by_selector(DomDocument* doc, const char* selector_text,
-                                      int index = 0, bool flush_reflow = true);
 
 static bool sim_element_matches_assertions(const char* assertion, DomDocument* doc,
                                            View* found, const SimEvent* ev,
@@ -352,7 +351,7 @@ static bool sim_element_matches_assertions(const char* assertion, DomDocument* d
         }
     }
     if (ev->expected_at_selector && found_elem) {
-        View* expected = find_element_by_selector(doc, ev->expected_at_selector);
+        View* expected = event_sim_find_element(doc, ev->expected_at_selector);
         bool selector_matched = expected && expected == found;
         if (selector_allows_ancestor) {
             selector_matched = view_geometry_is_descendant(found, expected, true);
@@ -408,6 +407,8 @@ static EventSimContext* event_sim_create_context() {
     ctx->device_scale = 1.0f;
     ctx->default_timeout = 2000;
     ctx->input_turn_ms = 1000.0 / 60.0;
+    ctx->event_interval_ms = 50.0;
+    ctx->initial_render = true;
     ctx->replay_assert_state = g_replay_assert_state;
     ctx->replay_expected_focus_id = -1;
     ctx->replay_expected_caret_id = -1;
@@ -604,8 +605,6 @@ static View* find_text_view(DomDocument* doc, const char* target_text) {
                                     target_text);
 }
 
-static View* find_element_by_selector(DomDocument* doc, const char* selector_text,
-                                      int index, bool flush_reflow);
 
 static View* first_text_descendant(View* view) {
     return sim_find_text_descendant(view, nullptr);
@@ -617,7 +616,7 @@ static View* resolve_editing_range_view(DomDocument* doc, SimEvent* ev,
     if (!doc || !ev) return nullptr;
     View* view = nullptr;
     if (ev->target_selector) {
-        view = find_element_by_selector(doc, ev->target_selector,
+        view = event_sim_find_element(doc, ev->target_selector,
                                         ev->target_index);
     } else if (ev->target_text) {
         view = find_text_view(doc, ev->target_text);
@@ -697,7 +696,7 @@ static bool sim_parse_selector(DomDocument* doc, const char* selector_text,
 }
 
 // Find nth element matching a CSS selector in the document (0-based index)
-static View* find_element_by_selector(DomDocument* doc, const char* selector_text,
+View* event_sim_find_element(DomDocument* doc, const char* selector_text,
                                       int index, bool flush_reflow) {
     if (!doc || !doc->view_tree || !doc->view_tree->root || !selector_text) return NULL;
     if (flush_reflow) sim_flush_pending_reflow(doc);
@@ -871,7 +870,7 @@ static bool resolve_target(SimEvent* ev, DomDocument* doc, float* out_x, float* 
         // tree is built. Settle only that pending work; a clean document's
         // retained geometry is already valid for target resolution.
         sim_reflow_if_pending(doc, (DocState*)doc->state);
-        View* elem = find_element_by_selector(doc, ev->target_selector, ev->target_index);
+        View* elem = event_sim_find_element(doc, ev->target_selector, ev->target_index);
         if (elem) {
             if (ev->has_target_offset) {
                 float ex, ey, ew, eh;
@@ -916,7 +915,7 @@ static bool resolve_click_target(SimEvent* ev, UiContext* uicon,
     DomDocument* doc = uicon ? uicon->document : nullptr;
     if (!resolve_target(ev, doc, out_x, out_y)) return false;
     if (ev && ev->target_selector && doc) {
-        View* elem = find_element_by_selector(doc, ev->target_selector, ev->target_index);
+        View* elem = event_sim_find_element(doc, ev->target_selector, ev->target_index);
         if (elem && elem->is_element()) {
             bool clipped = *out_x < 0.0f || *out_y < 0.0f ||
                 *out_x >= uicon->viewport_width || *out_y >= uicon->viewport_height;
@@ -945,7 +944,7 @@ static bool resolve_click_target(SimEvent* ev, UiContext* uicon,
 static bool resolve_to_target_position(SimEvent* ev, DomDocument* doc,
                                        float* out_x, float* out_y) {
     if (ev->to_target_selector && doc) {
-        View* elem = find_element_by_selector(doc, ev->to_target_selector);
+        View* elem = event_sim_find_element(doc, ev->to_target_selector);
         if (!elem) {
             log_error("event_sim: to_target selector '%s' not found", ev->to_target_selector);
             return false;
@@ -992,7 +991,7 @@ static bool resolve_drag_positions(SimEvent* ev, DomDocument* doc,
 // Resolve a target to a View* element (for assertions and actions that need the element)
 static View* resolve_target_element(SimEvent* ev, DomDocument* doc) {
     if (ev->target_selector && doc) {
-        return find_element_by_selector(doc, ev->target_selector, ev->target_index);
+        return event_sim_find_element(doc, ev->target_selector, ev->target_index);
     }
     return NULL;
 }
@@ -1220,6 +1219,7 @@ static void parse_position_element(MapReader& reader, const char* key,
 
 static void sim_event_free_owned_fields(SimEvent* ev) {
     if (!ev) return;
+    event_sim_render_event_free(ev);
     if (ev->message) mem_free(ev->message);
     if (ev->file_path) mem_free(ev->file_path);
     if (ev->target_text) mem_free(ev->target_text);
@@ -1282,7 +1282,10 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         reader.get("scroll_into_view").asBool();
 
     // Parse event type
-    if (strcmp(type_str, "wait") == 0) {
+    if (event_sim_render_recognizes(type_str)) {
+        if (!event_sim_render_parse(reader, ev)) return parse_sim_event_fail(ev);
+    }
+    else if (strcmp(type_str, "wait") == 0) {
         ev->type = SIM_EVENT_WAIT;
         ev->wait_ms = reader.get("ms").asInt32();
         if (ev->wait_ms <= 0) ev->wait_ms = 100;
@@ -1905,7 +1908,7 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         const char* file = reader.get("path").cstring();
         const char* content = reader.get("content").cstring();
         // fixtures may only write scratch files; an edited working copy lives there
-        if (!sim_path_is_temp_scratch(file) || !content) {
+        if (!event_sim_path_is_temp_scratch(file) || !content) {
             log_error("event_sim: write_file requires a ./temp/ 'path' and 'content'");
             return parse_sim_event_fail(ev);
         }
@@ -2117,7 +2120,26 @@ EventSimContext* event_sim_load(const char* json_file) {
         ctx->input_turn_ms = sim_number_as_float(latency);
     }
 
+    if (root_map.has("initial_render")) {
+        if (!root_map.get("initial_render").isBool()) {
+            log_error("event_sim: initial_render must be boolean");
+            event_sim_free(ctx);
+            return nullptr;
+        }
+        ctx->initial_render = root_map.get("initial_render").asBool();
+    }
+
     // Parse each event
+    if (root_map.has("event_interval_ms")) {
+        ItemReader interval = root_map.get("event_interval_ms");
+        if ((!interval.isInt() && !interval.isFloat()) ||
+            !isfinite(sim_number_as_float(interval)) || sim_number_as_float(interval) < 0.0f) {
+            log_error("event_sim: event_interval_ms must be finite and nonnegative");
+            event_sim_free(ctx);
+            return nullptr;
+        }
+        ctx->event_interval_ms = sim_number_as_float(interval);
+    }
     int count = (int)events_arr.length();
     log_info("event_sim: parsing %d events", count);
 
@@ -2125,12 +2147,17 @@ EventSimContext* event_sim_load(const char* json_file) {
         ItemReader event_item = events_arr.get(i);
         if (!event_item.isMap()) {
             log_error("event_sim: event %d is not an object", i);
-            continue;
+            event_sim_free(ctx);
+            return nullptr;
         }
         MapReader event_map = event_item.asMap();
         SimEvent* ev = parse_sim_event(ctx, event_map);
         if (ev) {
             arraylist_append(ctx->events, ev);
+        } else {
+            // Invalid commands must fail the fixture rather than silently remove coverage.
+            event_sim_free(ctx);
+            return nullptr;
         }
     }
 
@@ -2374,6 +2401,7 @@ EventSimContext* event_sim_load_replay_log(const char* jsonl_file) {
 
 void event_sim_free(EventSimContext* ctx) {
     if (!ctx) return;
+    event_sim_render_free(ctx);
 
     if (ctx->events) {
         for (int i = 0; i < ctx->events->length; i++) {
@@ -3107,7 +3135,7 @@ static bool assert_target(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) 
 // ===== Phase 7: assert_snapshot pixel comparison =====
 
 // Helper: force render the current surface
-static void force_render_surface(UiContext* uicon) {
+void event_sim_render_surface(UiContext* uicon) {
     if (uicon->document && (uicon->document->view_tree || uicon->paged_view)) {
         DocState* state = (DocState*)uicon->document->state;
         // clock and intrinsic-size changes need layout before paint consumes their dirty flags.
@@ -3144,7 +3172,7 @@ static bool pixel_component_in_range(const char* name, int value, int min_value,
     return true;
 }
 
-static bool pixel_matches_bounds(uint32_t px, const SimEvent* ev, bool report_error) {
+bool event_sim_pixel_matches_bounds(uint32_t px, const SimEvent* ev, bool report_error) {
     bool ok = true;
     ok = pixel_component_in_range("r", px & 0xFF, ev->pixel_min_r, ev->pixel_max_r, report_error) && ok;
     ok = pixel_component_in_range("g", (px >> 8) & 0xFF, ev->pixel_min_g, ev->pixel_max_g, report_error) && ok;
@@ -3155,7 +3183,7 @@ static bool pixel_matches_bounds(uint32_t px, const SimEvent* ev, bool report_er
 
 static void assert_pixel_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
     DomDocument* doc = uicon ? uicon->document : NULL;
-    if (ev->pixel_force_render && uicon) force_render_surface(uicon);
+    if (ev->pixel_force_render && uicon) event_sim_render_surface(uicon);
 
     ImageSurface* actual = uicon ? uicon->surface : NULL;
     if (!actual || !actual->pixels) {
@@ -3184,7 +3212,7 @@ static void assert_pixel_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* 
     int stride = actual->pitch / 4; // INT_CAST_OK: pitch is bytes, pixel rows are uint32_t
     uint32_t* pixels = (uint32_t*)actual->pixels;
     uint32_t px = pixels[sample.y * stride + sample.x];
-    bool ok = pixel_matches_bounds(px, ev, false);
+    bool ok = event_sim_pixel_matches_bounds(px, ev, false);
     if (!ok && ev->pixel_search_radius > 0.0f) {
         // Rasterized glyph edges move across font backends; sample the nearby
         // title ink while keeping the exact channel bounds of the assertion.
@@ -3198,7 +3226,7 @@ static void assert_pixel_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* 
                 if (nearby.x < 0 || nearby.y < 0 ||
                     nearby.x >= actual->width || nearby.y >= actual->height) continue;
                 uint32_t nearby_px = pixels[nearby.y * stride + nearby.x];
-                if (pixel_matches_bounds(nearby_px, ev, false)) {
+                if (event_sim_pixel_matches_bounds(nearby_px, ev, false)) {
                     sample = nearby;
                     px = nearby_px;
                     ok = true;
@@ -3216,7 +3244,7 @@ static void assert_pixel_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* 
                  logical_x, logical_y, sample.x, sample.y, r, g, b, a);
         ctx->pass_count++;
     } else {
-        pixel_matches_bounds(px, ev, true);
+        event_sim_pixel_matches_bounds(px, ev, true);
         log_error("event_sim: assert_pixel FAIL at logical (%.2f,%.2f), device (%d,%d) rgba=(%d,%d,%d,%d)",
                   logical_x, logical_y, sample.x, sample.y, r, g, b, a);
         ctx->fail_count++;
@@ -3248,7 +3276,7 @@ static void assert_snapshot_impl(EventSimContext* ctx, UiContext* uicon, SimEven
     float threshold_pct = ev->snapshot_threshold > 0 ? ev->snapshot_threshold : 1.0f;
 
     // Step 1: Ensure surface is rendered
-    force_render_surface(uicon);
+    event_sim_render_surface(uicon);
 
     ImageSurface* actual = uicon->surface;
     if (!actual || !actual->pixels) {
@@ -3566,6 +3594,12 @@ static void sim_type_legacy_text(UiContext* uicon, const char* text) {
 // Process a single simulated event
 static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uicon, GLFWwindow* window) {
     switch (ev->type) {
+        case SIM_EVENT_ASSERT_RENDER:
+        case SIM_EVENT_RENDER_COMMAND: {
+            bool passed = event_sim_render_execute(ctx, uicon, ev);
+            sim_record_assertion(ctx, passed);
+            break;
+        }
         case SIM_EVENT_WAIT:
             log_info("event_sim: wait %d ms", ev->wait_ms);
             if (ev->wait_ms > 0) {
@@ -3681,7 +3715,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // Resolve drag source element
             View* src_view = nullptr;
             if (ev->target_selector) {
-                src_view = find_element_by_selector(doc, ev->target_selector);
+                src_view = event_sim_find_element(doc, ev->target_selector);
             }
             if (!src_view) {
                 log_error("event_sim: drag_and_drop - source element '%s' not found",
@@ -3746,7 +3780,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             if (!doc) break;
             View* src_view = nullptr;
             if (ev->target_selector) {
-                src_view = find_element_by_selector(doc, ev->target_selector,
+                src_view = event_sim_find_element(doc, ev->target_selector,
                                                     ev->target_index);
             } else if (ev->target_text) {
                 src_view = find_text_view(doc, ev->target_text);
@@ -3758,7 +3792,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             View* dst_view = nullptr;
             if (ev->to_target_selector) {
-                dst_view = find_element_by_selector(doc, ev->to_target_selector);
+                dst_view = event_sim_find_element(doc, ev->to_target_selector);
             } else if (ev->to_target_text) {
                 dst_view = find_text_view(doc, ev->to_target_text);
             }
@@ -3792,7 +3826,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 log_error("event_sim: editing_text_drag_drop failed");
                 ctx->fail_count++;
             }
-            force_render_surface(uicon);
+            event_sim_render_surface(uicon);
             break;
         }
 
@@ -3836,13 +3870,13 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 sim_scroll(uicon, scroll_x, scroll_y, ev->scroll_dx, ev->scroll_dy);
             }
             // Re-render after scroll to update surface pixels
-            force_render_surface(uicon);
+            event_sim_render_surface(uicon);
             break;
 
         case SIM_EVENT_REPLAY_INPUT:
             log_info("event_sim: replay input.raw '%s'", ev->replay_event_name ? ev->replay_event_name : "unknown");
             sim_replay_input(uicon, ev);
-            if (ev->replay_event_name && strcmp(ev->replay_event_name, "scroll") == 0) force_render_surface(uicon);
+            if (ev->replay_event_name && strcmp(ev->replay_event_name, "scroll") == 0) event_sim_render_surface(uicon);
             break;
 
         // ===== High-level actions =====
@@ -4083,7 +4117,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 radiant_dispatch_window_event(uicon, uicon->document, "resize");
             }
             // Re-render after resize to update surface pixels
-            force_render_surface(uicon);
+            event_sim_render_surface(uicon);
             break;
         }
 
@@ -4099,7 +4133,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                      scale, changed ? "changed" : "unchanged",
                      uicon->viewport_width, uicon->viewport_height,
                      physical_w, physical_h);
-            force_render_surface(uicon);
+            event_sim_render_surface(uicon);
             break;
         }
 
@@ -4674,7 +4708,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             float ax, ay, aw, ah;
             get_element_rect_abs(elem, &ax, &ay, &aw, &ah);
             if (ev->rect_relative_to) {
-                View* reference = find_element_by_selector(doc, ev->rect_relative_to);
+                View* reference = event_sim_find_element(doc, ev->rect_relative_to);
                 if (!reference) {
                     log_error("event_sim: assert_rect FAIL - relative_to element '%s' not found",
                         ev->rect_relative_to);
@@ -4751,12 +4785,12 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // Resolve element A
             View* elem_a = nullptr;
             if (ev->element_a_selector && doc) {
-                elem_a = find_element_by_selector(doc, ev->element_a_selector);
+                elem_a = event_sim_find_element(doc, ev->element_a_selector);
             }
             // Resolve element B
             View* elem_b = nullptr;
             if (ev->element_b_selector && doc) {
-                elem_b = find_element_by_selector(doc, ev->element_b_selector);
+                elem_b = event_sim_find_element(doc, ev->element_b_selector);
             }
             if (!elem_a || !elem_b) {
                 log_error("event_sim: assert_position - element(s) not found (a=%p, b=%p)", elem_a, elem_b);
@@ -4892,7 +4926,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             if (!doc) break;
             // Observe the committed child directly; selector assertions reflow
             // the parent and would conceal stale hit geometry after navigation.
-            View* frame_view = find_element_by_selector(doc, ev->frame_selector,
+            View* frame_view = event_sim_find_element(doc, ev->frame_selector,
                                                         0, false);
             DomElement* frame = frame_view && frame_view->is_element()
                 ? frame_view->as_element() : nullptr;
@@ -4913,7 +4947,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 // Attribute assertions share the indexed target contract used
                 // by input events; defaulting to match zero made assertions on
                 // repeated controls silently inspect the wrong element.
-                elem = find_element_by_selector(doc, ev->target_selector,
+                elem = event_sim_find_element(doc, ev->target_selector,
                     ev->target_index);
             }
             if (!elem) {
@@ -5206,7 +5240,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             float target_y = ev->expected_scroll_y;
             // If a target selector is given, scroll to that element's position
             if (ev->target_selector) {
-                View* target_elem = find_element_by_selector(doc, ev->target_selector, ev->target_index);
+                View* target_elem = event_sim_find_element(doc, ev->target_selector, ev->target_index);
                 if (target_elem) {
                     float ax, ay, aw, ah;
                     get_element_rect_abs(target_elem, &ax, &ay, &aw, &ah);
@@ -5227,7 +5261,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 doc_state_sync_viewport_scroll(state, doc, target_x, target_y);
             }
             if (doc->state) doc_state_request_repaint(doc->state);
-            force_render_surface(uicon);
+            event_sim_render_surface(uicon);
             break;
         }
 
@@ -5266,7 +5300,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 radiant_tick_document_animations(doc, base_time + ms / 1000.0, false);
             }
             // Re-render after advancing animation
-            force_render_surface(uicon);
+            event_sim_render_surface(uicon);
             break;
         }
 
@@ -5342,7 +5376,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             // find iframe element in current document
             DomDocument* cur_doc = uicon->document;
-            View* iframe_view = find_element_by_selector(cur_doc, ev->frame_selector);
+            View* iframe_view = event_sim_find_element(cur_doc, ev->frame_selector);
             if (!iframe_view || !iframe_view->is_element()) {
                 log_error("event_sim: switch_frame - iframe '%s' not found", ev->frame_selector);
                 ctx->fail_count++;
@@ -5375,18 +5409,19 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             {
                 log_info("event_sim: render to %s", ev->file_path);
                 // captures must also work in a clean checkout with no prior output directories.
-                if (!sim_create_parent_dirs(ev->file_path)) {
+                if (!event_sim_create_parent_dirs(ev->file_path)) {
                     log_error("event_sim: render FAIL - could not create parent for %s", ev->file_path);
                     ctx->fail_count++;
                     break;
                 }
-                // Captures must observe the same committed layout as screen paint.
-                render_pending_surface(uicon);
                 // Determine format from extension
                 const char* ext = file_path_ext(ev->file_path);
                 if (ext && (strcmp(ext, ".svg") == 0 || strcmp(ext, ".SVG") == 0)) {
+                    // Vector export must prepare its own GPU snapshots without a preceding raster pass.
+                    sim_flush_pending_reflow(uicon->document);
                     if (render_uicontext_to_svg(uicon, ev->file_path) != 0) ctx->fail_count++;
                 } else {
+                    render_pending_surface(uicon);
                     // Default to PNG
                     if (render_uicontext_to_png(uicon, ev->file_path) != 0) ctx->fail_count++;
                 }
@@ -5429,7 +5464,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
 
         case SIM_EVENT_WRITE_FILE: {
-            if (!sim_create_parent_dirs(ev->file_path) ||
+            if (!event_sim_create_parent_dirs(ev->file_path) ||
                 write_text_file_atomic(ev->file_path, ev->input_text) != 0) {
                 log_error("event_sim: write_file FAIL - could not write %s", ev->file_path);
                 sim_record_assertion(ctx, false);
@@ -5479,7 +5514,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // find the webview element by selector and execute JS in it
             DomDocument* doc = uicon->document;
             if (!doc) { log_warn("event_sim: webview_eval_js - no document (skipped)"); break; }
-            View* view = ev->target_selector ? find_element_by_selector(doc, ev->target_selector, ev->target_index) : nullptr;
+            View* view = ev->target_selector ? event_sim_find_element(doc, ev->target_selector, ev->target_index) : nullptr;
             if (!view || !view->is_element()) {
                 log_warn("event_sim: webview_eval_js - element '%s' not found (skipped)", ev->target_selector);
                 break;
@@ -5498,7 +5533,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // wait for webview to finish loading (poll loaded flag)
             DomDocument* doc = uicon->document;
             if (!doc) { log_warn("event_sim: webview_wait_load - no document (skipped)"); break; }
-            View* view = ev->target_selector ? find_element_by_selector(doc, ev->target_selector, ev->target_index) : nullptr;
+            View* view = ev->target_selector ? event_sim_find_element(doc, ev->target_selector, ev->target_index) : nullptr;
             if (!view || !view->is_element()) {
                 log_warn("event_sim: webview_wait_load - element '%s' not found (skipped)", ev->target_selector);
                 break;
@@ -5715,7 +5750,7 @@ bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, GLFWwindow* window,
     }
 
     // Calculate wait time for next event
-    int wait_ms = 50;  // default 50ms between events
+    double wait_ms = ctx->event_interval_ms;
     if (ev->type == SIM_EVENT_WAIT) {
         wait_ms = ev->wait_ms;
     }

@@ -28,9 +28,8 @@ SOURCE_ROOTS = (ROOT / "lambda", ROOT / "lib")
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hh", ".hpp"}
 SKIP_SOURCE_PARTS = {
     "node_modules", "package", "re2", "sqlite", "tree-sitter", "tree-sitter-bash",
-    "tree-sitter-javascript", "tree-sitter-lambda", "tree-sitter-latex",
-    "tree-sitter-latex-math", "tree-sitter-python", "tree-sitter-ruby",
-    "tree-sitter-typescript",
+    "tree-sitter-javascript", "tree-sitter-lambda", "tree-sitter-python",
+    "tree-sitter-ruby", "tree-sitter-typescript",
 }
 
 

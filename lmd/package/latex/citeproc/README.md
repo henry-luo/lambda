@@ -21,7 +21,7 @@ html.to_html(result.elements)
 
 Use `\addbibresource{references.bib}` or `\addbibresource{references.json}` and the existing citation commands and `\printbibliography`. `filecontents` resources, `\bibliography`, `\nocite`, `refsection`, `refsegment`, repeated prints, headings and the existing bibliography filters share the package's collection and selection code. Citation and bibliography targets remain linked. Note styles use the existing footnote plan for `\footcite` and `\autocite`; a citation inside an ordinary footnote remains inline.
 
-`citeproc` is opt-in. Omit it to use the existing built-in profile. CSL style selection conflicts with explicit BibLaTeX `style`, `citestyle`, `bibstyle`, `sorting`, and `\bibliographystyle`; these receive `conflicting-citation-style`. Resource and print options remain adapter responsibilities. Command-star variants receive diagnostics.
+`citeproc` is opt-in for most documents. Omit it to use the existing built-in profile. A document that names a guide-level biblatex style selects the matching bundled CSL style by itself: `style=apa`, `style=ieee`, `biblatex-chicago` (`authordate` or the default `notes`), or `style=chicago-authordate`/`chicago-notes`. The substitution is reported as `csl-style-alias`, and biblatex options or style customizations that CSL cannot follow are reported as `csl-alias-option-ignored` and `csl-alias-customization` (`vibe/latex/Lambda_Design_BibTeX_CSL.md` §7.4). CSL style selection conflicts with explicit BibLaTeX `style`, `citestyle`, `bibstyle`, `sorting`, and `\bibliographystyle`; these receive `conflicting-citation-style`. Resource and print options remain adapter responsibilities. Command-star variants receive diagnostics.
 
 | Option under `citeproc` | Meaning |
 |---|---|

@@ -1104,6 +1104,12 @@ DomElement* dom_element_create(DomDocument* doc, const char* tag_name, Element* 
     return DomElement::create(doc, tag_name, native_element);
 }
 
+// fragment allocation belongs to the document node factory, independently of Range/layout (D7.1.3).
+extern "C" DomElement* dom_document_fragment_create(DomDocument* doc) {
+    if (!doc) return nullptr;
+    return DomElement::create(doc, "#document-fragment", nullptr);
+}
+
 void dom_element_clear(DomElement* element) {
     if (!element) {
         return;

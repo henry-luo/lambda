@@ -1,6 +1,14 @@
 {
   "name": "Math intensive LaTeX wheel scrolling preserves viewport and SVG targeting",
   "html": "test/input/math_intensive_test.tex",
+  "env": [{"key": "VIEW_MEM_STAGES", "value": "1"}],
+  "assertions": [
+    {"output_contains": "[MEMTRACK_LIVE] bytes=0 count=0"},
+    {"output_not_contains": "[LAYOUT_PROF]"},
+    {"output_not_contains": "[RENDER_PROF]"},
+    {"output_not_contains": "[PEAK_FOOTPRINT]"},
+    {"output_not_contains": "view command completed"}
+  ],
   "viewport": {
     "width": 1200,
     "height": 800

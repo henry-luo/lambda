@@ -49,8 +49,6 @@ if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
     rm -f lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter-lambda/src/*.o 2>/dev/null || true
     rm -f lambda/tree-sitter-javascript/libtree-sitter-javascript.a lambda/tree-sitter-javascript/src/*.o 2>/dev/null || true
     rm -f lambda/tree-sitter-python/libtree-sitter-python.a lambda/tree-sitter-python/src/*.o 2>/dev/null || true
-    rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o 2>/dev/null || true
-    rm -f lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a lambda/tree-sitter-latex-math/src/*.o 2>/dev/null || true
 
     # Clean build directories
     rm -rf build/ build_debug/ 2>/dev/null || true
@@ -944,51 +942,6 @@ else
     echo "✅ Tree-sitter-javascript already built for Linux"
 fi
 
-# Build tree-sitter-latex for Linux
-if ! is_elf_archive "lambda/tree-sitter-latex/libtree-sitter-latex.a"; then
-    if [ -d "lambda/tree-sitter-latex" ]; then
-        echo "Building tree-sitter-latex for Linux..."
-        cd lambda/tree-sitter-latex
-        make clean || true
-
-        # Generate parser if needed
-        if [ ! -f "src/parser.c" ] || [ ! -f "src/grammar.json" ]; then
-            echo "Generating tree-sitter-latex parser..."
-            if command -v npx >/dev/null 2>&1; then
-                npx tree-sitter-cli@0.25.10 generate --abi 14
-            else
-                echo "Warning: npx not available, assuming parser files are already generated"
-            fi
-        fi
-
-        make TS="npx tree-sitter-cli@0.25.10" libtree-sitter-latex.a
-        cd - > /dev/null
-        echo "Tree-sitter-latex built successfully"
-    else
-        echo "❌ Directory lambda/tree-sitter-latex does not exist. Skipping tree-sitter-latex build."
-    fi
-else
-    echo "✅ Tree-sitter-latex already built for Linux"
-fi
-
-# Build tree-sitter-latex-math for Linux
-if ! is_elf_archive "lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a"; then
-    if [ -d "lambda/tree-sitter-latex-math" ]; then
-        echo "Building tree-sitter-latex-math for Linux..."
-        cd lambda/tree-sitter-latex-math
-        make clean || true
-
-        make TS="npx tree-sitter-cli@0.25.10" libtree-sitter-latex-math.a
-        cd - > /dev/null
-        echo "Tree-sitter-latex-math built successfully"
-    else
-        echo "❌ Directory lambda/tree-sitter-latex-math does not exist. Skipping."
-    fi
-else
-    echo "✅ Tree-sitter-latex-math already built for Linux"
-fi
-
-
 # Build ThorVG v1.0-pre34 for Linux using mac-deps/thorvg source (same source as Mac)
 echo "Setting up ThorVG v1.0-pre34..."
 
@@ -1189,7 +1142,6 @@ echo "Built dependencies:"
 echo "- Tree-sitter: $([ -f "lambda/tree-sitter/libtree-sitter.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- Tree-sitter-lambda: $([ -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- Tree-sitter-javascript: $([ -f "lambda/tree-sitter-javascript/libtree-sitter-javascript.a" ] && echo "✓ Built" || echo "✗ Missing")"
-echo "- Tree-sitter-latex: $([ -f "lambda/tree-sitter-latex/libtree-sitter-latex.a" ] && echo "✓ Built" || echo "✗ Missing")"
 
 # Detect architecture for library paths
 ARCH=$(uname -m)
