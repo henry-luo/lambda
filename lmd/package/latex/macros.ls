@@ -239,7 +239,7 @@ fn substitute_param_ref_item(body, i, n, invocation, acc, el) {
     let num_str = slice(tag, 1, len(tag))
     let param_num = int(num_str)
     let arg_idx = if (param_num != null) param_num - 1 else -1
-    let arg = if (arg_idx >= 0 and arg_idx < len(invocation)) get_invocation_arg(invocation, arg_idx) else ""
+    let arg = if (arg_idx of invocation) get_invocation_arg(invocation, arg_idx) else ""
     substitute_items(body, i + 1, n, invocation, acc ++ [arg])
 }
 

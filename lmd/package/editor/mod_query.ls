@@ -28,8 +28,8 @@ fn leaf_selected(path, leaf, lo, hi) {
 fn collect_leaves(n, path, lo, hi) {
   if (is_text(n)) { if (leaf_selected(path, n, lo, hi)) [n] else [] }
   else if (is_node(n)) {
-    [for (i in 0 to len(n.content) - 1)
-       for (leaf in collect_leaves(n.content[i], [*path, i], lo, hi)) leaf]
+    [for (i, child of n.content)
+       for (leaf in collect_leaves(child, [*path, i], lo, hi)) leaf]
   }
   else []
 }

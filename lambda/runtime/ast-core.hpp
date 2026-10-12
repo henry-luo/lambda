@@ -1782,6 +1782,9 @@ typedef struct FnPromotionCell {
     const struct AstFuncNode* loop_continuation;
     NameEntry* const* loop_live_ins;    // continuation parameters, in order
     uint8_t loop_live_in_count;
+    // D8.1.1v18: trailing hidden parameters a `for` continuation takes after
+    // its live-ins -- the walk's snapshot and its resume position; 0 for `while`
+    uint8_t loop_resume_arg_count;
     bool loop_entered;                  // first handoff logged
 } FnPromotionCell;
 

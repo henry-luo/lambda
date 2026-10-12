@@ -244,8 +244,7 @@ pn incremental_add(var p: Planner, ci: int) int {
     var out_idx = constraint_output(p, ci)
     var out_var: Variable = (p.vars)[out_idx]
     var cls = out_var.constraints
-    var i: int = 0
-    while (i < len(cls)) {
+    for i of cls {
         var oci = cls[i]
         if (oci != ci) {
             var oc: Constraint = (p.constraints)[oci]
@@ -253,7 +252,6 @@ pn incremental_add(var p: Planner, ci: int) int {
                 constraint_recalc(p, oci)
             }
         }
-        i = i + 1
     }
     return 0
 }

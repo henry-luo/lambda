@@ -33,7 +33,7 @@ fn indexed_color(scheme, raw) {
   if (colors == null or not digits(text, 0)) null
   else {
     let index = int(text) - 1;
-    if (index >= 0 and index < len(colors)) colors[index] else null
+    if (index of colors) colors[index] else null
   }
 }
 

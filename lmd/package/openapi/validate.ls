@@ -203,9 +203,9 @@ fn check_array(schema_obj, value, all_schemas, path) {
         ];
 
         let item_errors = if (items_schema != null) {
-            [for (i in 0 to len(value) - 1 where len(value) > 0) {
+            [for (i, item of value) {
                 let item_path = path ++ "[" ++ (i) ++ "]";
-                check_value(items_schema, value[i], all_schemas, item_path)
+                check_value(items_schema, item, all_schemas, item_path)
             }]
         } else [];
 

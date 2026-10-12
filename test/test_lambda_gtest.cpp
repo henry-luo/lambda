@@ -660,6 +660,21 @@ TEST(LambdaTierParityTests, SatellitePublicationKeepsTailCallIdentity) {
     }
 }
 
+// D8.1.1v18: a `for` statement hands its activation to compiled code at a head
+// test and the continuation resumes the walk on T0's snapshot. Low loop
+// thresholds force every shape in the fixture to hand off mid-walk, and
+// synchronous publication makes the handoff point deterministic.
+TEST(LambdaTierParityTests, ForStatementLoopHandoffResumesWalk) {
+    static const char* const thresholds[] = {"2", "5"};
+    ScopedTestEnv sync("LAMBDA_SATELLITE_SYNC", "1");
+    for (const char* threshold : thresholds) {
+        ScopedTestEnv loop_threshold("LAMBDA_LOOP_JIT_THRESHOLD", threshold);
+        SCOPED_TRACE(threshold);
+        test_lambda_script_against_file("test/lambda/proc/for_loop_handoff.ls",
+            "test/lambda/proc/for_loop_handoff.txt", true, "auto");
+    }
+}
+
 // LR07-46 (D5.3.3): a map filter loop re-stored its frame top beneath the key
 // list's RootFrame on the JIT only (a crash, or lost string members), while the
 // auto tier ran it in T0 and printed the golden.

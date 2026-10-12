@@ -761,3 +761,5 @@ test/lambda/pdf/phase7_text_state.ls	run
 test/lambda/pdf/phase8_cpp_parity_features.ls	run
 test/lambda/pdf/phase8_invoice_fixtures.ls	run
 test/lambda/pdf/phase9_inline_image_render.ls	run
+test/lambda/of_axis.ls	direct
+test/lambda/proc/for_loop_handoff.ls	run

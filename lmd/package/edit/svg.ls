@@ -114,7 +114,7 @@ pub fn node_xml(n, path, depth, attrs_of, keep) {
   else if (starts_with(string(n.tag), "?")) "<" ++ string(n.tag) ++ " " ++ node_plain_text(n) ++ "?>"
   else {
     let start_tag = "<" ++ string(n.tag) ++ attrs_xml(attrs_of(n, path))
-    let kids = [for (i in 0 to len(n.content) - 1) {child: n.content[i], path: [*path, i]}]
+    let kids = [for (i, child of n.content) {child: child, path: [*path, i]}]
     let shown = [for (k in kids where keep(k.child)) k]
     let end_tag = "</" ++ string(n.tag) ++ ">"
     if (len(shown) == 0) start_tag ++ "/>"
