@@ -19,9 +19,11 @@ pub fn issues(node, operators, packages) {
     else {
         let tag = string(name(node))
         // amsmath renders its environments from row sources, not the pre-parsed ast
+        let ensured = if (tag == "ensuremath") ensuremath_ast(node) else null
         let asts = if (adapter_math(node, tag, packages)) []
             else if (amsmath.handles(tag, packages)) amsmath.cell_asts(node, operators)
             else if (node.ast != null) [node.ast]
+            else if (ensured != null) [ensured]
             else null
         if (asts == null) [for (child in node, issue in issues(child, operators, packages)) issue]
         else [for (ast in asts, key in math.unmapped_commands(ast)
@@ -29,6 +31,12 @@ pub fn issues(node, operators, packages) {
             util.diagnostic("unsupported-math-command", "math", key,
                 "Unsupported math command \\" ++ key, node.source_offset)]
     }
+}
+
+// \ensuremath{…} typesets its raw argument as inline math in any mode
+pub fn ensuremath_ast(node) {
+    let raw = util.raw_argument(node, "required", 0)
+    if (raw == null) null else parse(raw, {type: "math", flavor: "latex"}) ^ { null }
 }
 
 // math an adapter typesets itself: bussproofs sequents and semantic inference rules

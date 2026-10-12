@@ -41,6 +41,8 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         subfloat_nums: [], subfigure_count: 0, subtable_count: 0,
         captionof_nums: [],
         docclass: "article",
+        class_options: [],
+        line_spread: null,
         title: null,
         title_el: null,
         author: null,
@@ -60,7 +62,7 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         heading_nums: [],
         heading_titles: [],
         labels: [],
-        footnote_map: [],
+        footnote_marks: [],
         footnotes: [],
         floats: [],
         theorems: [],
@@ -71,6 +73,7 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         last_enumerate_by_depth: [],
         list_depth: 0,
         slug_counts: [],
+        contents_anchors: [],
         in_appendix: false,
         secnumdepth: 3,
         custom_colors: [],
@@ -89,6 +92,8 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
     // keep entry arrays — render pass will use lookup functions
     {
         docclass: result.docclass,
+        class_options: result.class_options,
+        line_spread: result.line_spread,
         title: result.title,
         title_el: result.title_el,
         author: result.author,
@@ -100,7 +105,7 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         heading_titles: result.heading_titles,
         labels: result.labels,
         footnotes: result.footnotes,
-        footnote_map: result.footnote_map,
+        footnote_marks: result.footnote_marks,
         floats: result.floats,
         theorems: result.theorems,
         bibitems: result.bibitems,
@@ -113,7 +118,8 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         secnumdepth: result.secnumdepth,
         custom_colors: result.custom_colors,
         page_color: result.page_color,
-        theorem_defs: result.theorem_defs
+        theorem_defs: result.theorem_defs,
+        contents_anchors: result.contents_anchors
     }
 }
 
@@ -143,6 +149,7 @@ fn walk_element(el, st) {
     else match tag {
         // ---- preamble ----
         case 'documentclass': walk_documentclass(el, st)
+        case 'linespread': walk_linespread(el, st)
         case 'title': walk_title(el, st)
         case 'author': walk_author(el, st)
         case 'date': walk_date(el, st)
@@ -159,7 +166,9 @@ fn walk_element(el, st) {
 
         // ---- floats ----
         case 'figure': walk_float(el, st, "figure")
+        case 'figure*': walk_float(el, st, "figure")
         case 'table': walk_float(el, st, "table")
+        case 'table*': walk_float(el, st, "table")
         case 'longtable': walk_float(el, st, "table")
         case 'xltabular': walk_float(el, st, "table")
         // without caption, \captionof is unsupported and numbers nothing
@@ -170,6 +179,8 @@ fn walk_element(el, st) {
 
         // ---- footnotes ----
         case 'footnote': walk_footnote(el, st)
+        case 'footnotemark': walk_footnotemark(el, st)
+        case 'footnotetext': walk_footnotetext(el, st)
         case 'footcite': if (st.citeproc or registry.active(st.packages, "biblatex"))
             walk_footnote(el, st) else walk_children(el, 0, len(el), st)
 
@@ -205,6 +216,7 @@ fn walk_element(el, st) {
 
         // ---- appendix & counters ----
         case 'appendix': walk_appendix(el, st)
+        case 'addcontentsline': walk_addcontentsline(el, st)
         case 'setcounter': walk_setcounter(el, st)
         case 'addtocounter': walk_addtocounter(el, st)
         case 'stepcounter': walk_stepcounter(el, st, false)
@@ -241,8 +253,45 @@ fn walk_children(el, i, n, st) {
 
 fn walk_documentclass(el, st) {
     let cls = trim(util.text_of_skip_brack(el))
-    if cls != "" { {*:st, docclass: cls} }
+    let raw_options = util.optional_raw(el)
+    let options = if (raw_options == null) []
+        else [for (option in util.split_top_level(raw_options, ",") where trim(option) != "") trim(option)]
+    if cls != "" { {*:st, docclass: cls, class_options: options} }
     else { st }
+}
+
+// heading levels as the ToC renders them (walk_heading's html levels)
+let CONTENTS_LEVELS = {part: 1, chapter: 1, section: 2, subsection: 3, subsubsection: 4,
+    paragraph: 5, subparagraph: 6}
+
+// \addcontentsline{file}{level}{text}: an extra ToC heading or list entry,
+// anchored where the command stands. A leading \numberline{n} is its number.
+fn walk_addcontentsline(el, st) {
+    let args = util.command_args(el)
+    let file = if (len(args) > 0) trim(util.text_of(args[0])) else ""
+    let level = if (len(args) > 1) trim(util.text_of(args[1])) else ""
+    let entry_args = if (len(args) > 2) slice(args, 2, len(args)) else []
+    let numbered = len(entry_args) > 0 and entry_args[0] is element and
+        string(name(entry_args[0])) == "numberline"
+    let entry_number = if (numbered) trim(util.text_of(entry_args[0])) else null
+    let text = trim(util.text_of(if (numbered) slice(entry_args, 1, len(entry_args)) else entry_args))
+    let slug_info = make_unique_slug(util.slugify(text), st.slug_counts)
+    let anchored = {*:st, slug_counts: slug_info.counts,
+        contents_anchors: add_entry(st.contents_anchors, string(el.source_offset), slug_info.slug)}
+    let list_kind = if (file == "lof") "figure" else if (file == "lot") "table" else null
+    if (file == "toc" and CONTENTS_LEVELS[level] != null)
+        {*:anchored, headings: st.headings ++
+            [{level: CONTENTS_LEVELS[level], number: entry_number, text: text, id: slug_info.slug}]}
+    else if (list_kind != null)
+        {*:anchored, floats: st.floats ++ [{kind: list_kind, number: entry_number, content: text,
+            offset: null, caption: text, id: slug_info.slug}]}
+    else anchored
+}
+
+// a preamble \linespread scales the document's line height
+fn walk_linespread(el, st) {
+    let factor = float(trim(util.text_of(el))) ^ { null }
+    if (st.in_body or factor == null or factor <= 0.0) st else {*:st, line_spread: factor}
 }
 
 fn walk_title(el, st) {
@@ -793,16 +842,39 @@ fn walk_label(el, st) {
 // Footnotes
 // ============================================================
 
+// Footnotes are keyed by source offset, so notes with identical text keep their
+// own numbers. \footnote[n] and \footnotemark[n] use n and leave the counter alone.
 fn walk_footnote(el, st) {
-    let new_counters = step_counter(st, "footnote")
-    let fn_num = new_counters.footnote
-    // key by content text for lookup in pass 2
-    let content_text = trim(util.text_of(el))
-    let fn_key = util.slugify(content_text)
-    let entry = {number: fn_num, node: el}
-    let new_fn_map = add_entry(st.footnote_map, fn_key, entry)
-    let new_footnotes = st.footnotes ++ [entry]
-    {*:st, counters: new_counters, footnote_map: new_fn_map, footnotes: new_footnotes}
+    let explicit = explicit_footnote_number(el)
+    let new_counters = if (explicit != null) st.counters else step_counter(st, "footnote")
+    let fn_num = if (explicit != null) explicit else new_counters.footnote
+    let entry = {number: fn_num, node: el, offset: el.source_offset}
+    {*:st, counters: new_counters, footnotes: st.footnotes ++ [entry]}
+}
+
+// \footnotemark places a mark whose text a later \footnotetext supplies
+fn walk_footnotemark(el, st) {
+    let explicit = explicit_footnote_number(el)
+    let new_counters = if (explicit != null) st.counters else step_counter(st, "footnote")
+    let fn_num = if (explicit != null) explicit else new_counters.footnote
+    {*:st, counters: new_counters,
+        footnote_marks: add_entry(st.footnote_marks, string(el.source_offset), fn_num)}
+}
+
+// \footnotetext[n]{text} supplies the text for mark n, by default the current counter
+fn walk_footnotetext(el, st) {
+    let explicit = explicit_footnote_number(el)
+    let fn_num = if (explicit != null) explicit else counter_value(st.counters, "footnote")
+    {*:st, footnotes: st.footnotes ++ [{number: fn_num, node: el, offset: el.source_offset}]}
+}
+
+// the [n] of \footnote, \footnotemark or \footnotetext; citation footnotes read
+// their optional arguments as notes instead
+fn explicit_footnote_number(el) {
+    let tag = string(name(el))
+    let raw = util.optional_raw(el)
+    if (raw == null or (tag != "footnote" and tag != "footnotemark" and tag != "footnotetext")) null
+    else int(trim(raw)) ^ { null }
 }
 
 // ============================================================

@@ -9,9 +9,13 @@ let ENVIRONMENTS = ["equation*", "align", "align*", "alignat", "alignat*",
 
 pub fn is_environment(tag) => any([for (name in ENVIRONMENTS) tag == name])
 
+// LaTeX's own eqnarray shares the row model whether or not amsmath is loaded
+let KERNEL_ENVIRONMENTS = ["eqnarray", "eqnarray*"]
+
 // whether this adapter renders an environment from its row sources: amsmath's
-// (equation included), or IEEEtrantools' IEEEeqnarray
+// (equation included), IEEEtrantools' IEEEeqnarray, or the kernel's eqnarray
 pub fn handles(tag, packages) =>
+    (contains(KERNEL_ENVIRONMENTS, tag) or false) or
     (is_environment(tag) or tag == "equation") and (registry.active(packages, "amsmath") or
         ((starts_with(tag, "IEEEeqnarray") or false) and registry.active(packages, "IEEEtrantools")))
 
@@ -129,14 +133,12 @@ pub fn cell_asts(el, operators) {
         where ast != null) ast]
 }
 
-fn alignment_row(source, gathered, multline_align, anchor, display, bare_tag, operators, offset) {
+// cell_align(i) is the CSS alignment of the row's i-th cell
+fn alignment_row(source, gathered, cell_align, anchor, display, bare_tag, operators, offset) {
     let cells = row_cells(source, gathered);
     <div class: "latex-align-row", id: anchor,
         for (i, cell in cells)
-            <span class: "latex-align-cell",
-                style: if (multline_align != null) "text-align:" ++ multline_align
-                    else if (gathered) "text-align:center" else if (i % 2 == 0)
-                    "text-align:right" else "text-align:left",
+            <span class: "latex-align-cell", style: "text-align:" ++ cell_align(i),
                 math_cell(cell, false, operators, offset)>
         if (display != null) {
             <span class: "latex-align-number",
@@ -267,15 +269,18 @@ fn render_alignment(el, tag, rows, numbers, operators) {
         util.unsupported_element("amsmath", "Alignment intertext is not supported", el.source_offset)
     else {
         let gathered = starts_with(tag, "gather") or starts_with(tag, "multline")
-        let multline = starts_with(tag, "multline");
+        let multline = starts_with(tag, "multline")
+        // eqnarray's columns are rcl; amsmath alignments alternate rl
+        let columns = if (starts_with(tag, "eqnarray")) ["right", "center", "left"] else ["right", "left"];
         <div class: if (multline) "latex-align latex-align-multline" else "latex-align",
             for (i, row in rows)
                 if (row.error != null)
                     util.unsupported_element("amsmath", row.error, el.source_offset)
                 else alignment_row(row.math, gathered,
-                    if (multline and i == 0) "left"
-                    else if (multline and i == len(rows) - 1) "right"
-                    else null,
+                    if (multline and i == 0) (c) => "left"
+                    else if (multline and i == len(rows) - 1) (c) => "right"
+                    else if (gathered) (c) => "center"
+                    else (c) => columns[c % len(columns)],
                     if (row.label != null) util.slugify(row.label) else null,
                     if (numbers != null and i < len(numbers)) numbers[i].display else row.tag,
                     row.bare_tag, operators, el.source_offset)>

@@ -32,6 +32,7 @@ import tikz: .packages.tikz
 import page_style: .packages.page_style
 import listings: .packages.listings
 import caption: .packages.caption
+import font_decl: .elements.font_decl
 
 // ============================================================
 // Public API — HTML string output
@@ -166,10 +167,11 @@ pub fn render_result(ast, options) {
             [util.diagnostic("tikzpeople-shape-approximation", "tikzpeople", null,
                 "Named people use reusable vector silhouettes; CTAN artwork detail differs",
                 registry.offset_for(loaded.packages, "tikzpeople"))] else []) ++
-        (if (util.find_descendant(ast, "boldmath") == null) [] else
-            [util.diagnostic("math-bold-approximation", "latex", "boldmath",
+        (if (bold_math_request(ast) == null) [] else
+            [util.diagnostic("math-bold-approximation", "latex", string(name(bold_math_request(ast))),
                 "Bold math uses CSS font weight until bold math fonts are available",
-                util.find_descendant(ast, "boldmath").source_offset)]) ++
+                bold_math_request(ast).source_offset)]) ++
+        font_decl.substitution_issues(ast) ++
         (if (polyglossia == null) [] else language_profile.polyglossia_issues(
             polyglossia, registry.offset_for(loaded.packages, "polyglossia"))) ++
         language_profile.target_issues(polyglossia, if (options == null) null else options.target,
@@ -322,6 +324,15 @@ fn postprocess(html, info) {
     if (fn_section != null) wrap_with_footnotes(html, fn_section) else html
 }
 
+// the first \boldmath or \mathversion{bold}
+fn bold_math_request(ast) {
+    let boldmath = util.find_descendant(ast, "boldmath")
+    let version = util.find_descendant(ast, "mathversion")
+    if (boldmath != null) boldmath
+    else if (version != null and trim(util.text_of(version)) == "bold") version
+    else null
+}
+
 fn wrap_with_footnotes(body, footnotes_el) {
     <div class: "latex-output",
         body
@@ -336,22 +347,23 @@ fn render_footnotes_section(info) {
         <section class: "latex-footnotes",
             <hr>
             <ol
-                for (fn_entry in footnotes)
-                    render_footnote_item(fn_entry, info)
+                for (i, fn_entry in footnotes)
+                    render_footnote_item(fn_entry, i, info)
             >
         >
     )
 }
 
-fn render_footnote_item(fn_entry, info) {
+fn render_footnote_item(fn_entry, i, info) {
     let fn_num = fn_entry.number
     let content = if (info.biblatex_context != null and
         (string(name(fn_entry.node)) == "footcite" or
         (info.biblatex_context.processor == "csl" and
          (string(name(fn_entry.node)) == "autocite" or string(name(fn_entry.node)) == "autocites"))))
         [biblatex.render_footcite_content(fn_entry.node, info.biblatex_context)]
-        else dispatcher.render_children_of(fn_entry.node, info);
-    <li id: "fn-" ++ (fn_num),
+        else dispatcher.render_note_body(fn_entry.node, info);
+    // explicit or \footnotetext numbers can leave the list's own sequence
+    <li id: "fn-" ++ (fn_num), value: if (fn_num != i + 1) fn_num else null,
         for c in content { c }
         " "
         <a class: "footnote-backref", href: "#fnref-" ++ (fn_num), "\u21A9">

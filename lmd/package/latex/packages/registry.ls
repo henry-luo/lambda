@@ -25,9 +25,10 @@ pub let CATALOG = {
     bussproofs: {options: [], commands: ["prooftree"]},
     semantic: {options: ["inference", "tdiagram"]},
     IEEEtrantools: {options: ["retainorgcmds"]},
-    graphicx: {options: []},
+    graphicx: {options: [], commands: ["resizebox", "scalebox", "rotatebox", "reflectbox"]},
     hyperref: {options: ["colorlinks", "hidelinks", "linkcolor", "urlcolor", "citecolor", "pdfauthor", "pdftitle", "pdfsubject", "pdfkeywords", "pdfusetitle", "ocgcolorlinks", "bookmarks", "bookmarksnumbered"],
-        commands: ["pdfbookmark", "bookmark", "hypersetup"]},
+        commands: ["pdfbookmark", "bookmark", "hypersetup", "hypertarget", "hyperlink",
+            "phantomsection", "texorpdfstring"]},
     cleveref: {options: [], commands: ["cref", "Cref"]},
     listings: {options: [], commands: ["lstset", "lstinline", "lstlisting"]},
     tcolorbox: {options: [], commands: ["tcolorbox"]},
@@ -510,9 +511,20 @@ pub fn target_diagnostics(node, target, paged = false) {
             else if (tag == "thispagestyle")
                 [diagnostic("page-style-approximation", "fancyhdr", tag,
                     "Per-page style overrides are not represented by the document-wide margin profile", node)]
+            else if ((tag == "resizebox" or tag == "scalebox" or tag == "rotatebox") and
+                not lone_image(node))
+                [diagnostic("transform-approximation", "graphicx", tag,
+                    "The box is transformed in CSS; the surrounding layout keeps its untransformed size", node)]
             else []
         own ++ [for (child in node, issue in target_diagnostics(child, target, paged)) issue]
     }
+}
+
+// a graphicx box whose content is one \includegraphics, sized exactly through its keys
+fn lone_image(node) {
+    let args = util.command_args(node)
+    let body = slice(args, util.last_argument_start(node), len(args))
+    len(body) == 1 and body[0] is element and string(name(body[0])) == "includegraphics"
 }
 
 pub fn assets(node, base_uri) {

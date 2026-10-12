@@ -44,8 +44,9 @@ pub fn render_node(node, info) {
 }
 
 // render children of a node — used by postprocess for footnote bodies
-pub fn render_children_of(node, info) {
-    render_children(node, 0, info)
+// render a footnote's text for the footnote list; an explicit [n] is its number, not text
+pub fn render_note_body(node, info) {
+    render_children_skip_brack(node, info)
 }
 
 fn render_text(t, info) {
@@ -113,13 +114,49 @@ pub let PACKAGE_RENDER = {
     cleveref: {cref: (el, info) => render_cref(el, info, false),
         Cref: (el, info) => render_cref(el, info, true)},
     doi: {doi: (el, info) => render_doi(el)},
-    hyperref: {hypersetup: render_nothing},
+    hyperref: {hypersetup: render_nothing, hypertarget: render_hypertarget,
+        hyperlink: render_hyperlink,
+        // \addcontentsline anchors itself, so the phantom anchor adds nothing
+        phantomsection: render_nothing,
+        texorpdfstring: (el, info) => render_node(util.command_args(el)[0], info)},
     caption: {captionsetup: render_captionsetup},
+    graphicx: {resizebox: render_graphicx_box, scalebox: render_graphicx_box,
+        rotatebox: render_graphicx_box, reflectbox: render_graphicx_box},
     siunitx: {num: render_siunitx, si: render_siunitx, unit: render_siunitx,
         SI: render_siunitx, qty: render_siunitx}
 }
 
 fn render_nothing(el, info) => null
+
+// graphicx box commands: the content is the last argument; a lone image is
+// sized through its own keys
+fn render_graphicx_box(el, info) {
+    let start = util.last_argument_start(el)
+    let body = slice(util.command_args(el), start, len(util.command_args(el)))
+    let image = if (len(body) == 1 and body[0] is element and
+        string(name(body[0])) == "includegraphics") body[0] else null
+    graphicx.render_box(el, render_children(el, start, info), image, info.base_uri)
+}
+
+// \hypertarget{name}{text} and \hyperlink{name}{text}; names slug like labels
+fn render_hypertarget(el, info) {
+    let args = util.command_args(el);
+    <span id: util.slugify(trim(util.text_of(args[0]))),
+        for (arg in slice(args, 1, len(args))) render_node(arg, info)>
+}
+
+fn render_hyperlink(el, info) {
+    let args = util.command_args(el);
+    <a href: "#" ++ util.slugify(trim(util.text_of(args[0]))),
+        for (arg in slice(args, 1, len(args))) render_node(arg, info)>
+}
+
+fn render_ensuremath(el, info) {
+    let ast = math_bridge.ensuremath_ast(el)
+    if (ast == null) util.unsupported_element("latex", "Cannot parse the ensuremath argument",
+        el.source_offset)
+    else bold_math(math_bridge.render_inline_el({ast: ast}), info, false)
+}
 
 fn render_siunitx(el, info) => siunitx.render(el)
 
@@ -177,6 +214,15 @@ fn render_element(el, info) {
         case 'selectlanguage': null
         case 'boldmath': null
         case 'unboldmath': null
+        // \mathversion{bold} threads like \boldmath (next_render_info)
+        case 'mathversion': null
+        // NFSS declarations act as a group's leading declaration (font_decl.decl_css)
+        case 'fontfamily': null
+        case 'fontseries': null
+        case 'fontshape': null
+        case 'usefont': null
+        case 'linespread': null
+        case 'normalfont': null
         case 'languageattribute': null
         case 'spanishdecimal': null
         case 'foreignlanguage': render_foreignlanguage(el, info)
@@ -194,7 +240,11 @@ fn render_element(el, info) {
 
         // ---- title page ----
         case 'maketitle': render_maketitle(info)
+        case 'thanks': render_thanks_ref(el, info)
+        case 'and': <span class: "latex-and">
+        case 'titlepage': render_env_div(el, info, "latex-titlepage", null)
         case 'tableofcontents': render_toc(info)
+        case 'addcontentsline': render_contents_anchor(el, info)
 
         // ---- sections ----
         case 'part': render_heading(el, info, 1)
@@ -214,6 +264,12 @@ fn render_element(el, info) {
         case 'emph': render_styled(el, info, "em")
         case 'underline': render_styled(el, info, "u")
         case 'texttt': render_code(el, info)
+        case 'textup': render_font(el, info, "latex-up")
+        case 'textmd': render_font(el, info, "latex-md")
+        case 'textnormal': render_font(el, info, "latex-normal")
+        case 'textsuperscript': <sup for c in render_children(el, 0, info) { c }>
+        case 'textsubscript': <sub for c in render_children(el, 0, info) { c }>
+        case 'ensuremath': render_ensuremath(el, info)
         case 'verb': render_verb(el)
         case 'verb_command': render_verb_command(el)
 
@@ -289,6 +345,9 @@ fn render_element(el, info) {
         case 'enumerate': render_enumerate(el, info)
         case 'description': render_description(el, info)
         case 'item': null
+        case 'list': render_generic_list(el, info, false)
+        case 'trivlist': render_generic_list(el, info, true)
+        case 'tabbing': render_tabbing(el, info)
 
         // ---- environments ----
         case 'quote': render_env_block(el, info, "blockquote", "latex-quote")
@@ -302,6 +361,8 @@ fn render_element(el, info) {
         case 'lstlisting': render_verbatim_env(el, info)
         case 'abstract': render_abstract(el, info)
         case 'figure': render_figure(el, info)
+        case 'figure*': render_figure(el, info)
+        case 'table*': render_table_env(el, info)
         case 'picture': if (registry.active(info.packages, "semantic") and
             semantic.contains_diagram(el))
             semantic.render_tdiagram_picture(el) ^ {
@@ -360,6 +421,19 @@ fn render_element(el, info) {
         case 'clearpage': <hr class: "latex-pagebreak">
         case 'pagebreak': <hr class: "latex-pagebreak">
         case 'hfill': <span class: "latex-hfill">
+        case 'hfil': <span class: "latex-hfill">
+        case 'dotfill': <span class: "latex-dotfill">
+        case 'hrulefill': <span class: "latex-hrulefill">
+        case 'rule': boxes.render_rule(el)
+        case 'centerline': <div class: "latex-centerline", for c in render_children(el, 0, info) { c }>
+        case 'indent': <span class: "latex-indent">
+        case 'cleardoublepage': <hr class: "latex-pagebreak">
+        // with a bibliography, the citation handler takes \nocite; without one it has no effect
+        case 'nocite': null
+        case 'twocolumn': render_column_switch(el, info)
+        case 'onecolumn': render_column_switch(el, info)
+        case 'markboth': render_marks(el)
+        case 'markright': render_marks(el)
         case 'bigskip': spacing.render_bigskip_el()
         case 'medskip': spacing.render_medskip_el()
         case 'smallskip': spacing.render_smallskip_el()
@@ -405,6 +479,9 @@ fn render_element(el, info) {
 
         // ---- footnotes ----
         case 'footnote': render_footnote(el, info)
+        case 'footnotemark': render_footnotemark(el, info)
+        // the text joins the footnote list (analysis); nothing renders in place
+        case 'footnotetext': null
 
         // Captions render at their source position, preserving nested subfloat ownership.
         case 'caption': render_caption(el, info)
@@ -476,6 +553,14 @@ let SKIP_COMMANDS = {
     'newenvironment': true, 'renewenvironment': true,
     'setcounter': true, 'newcounter': true, 'addtocounter': true,
     'stepcounter': true, 'refstepcounter': true, 'comment': true,
+    // page-builder hints with no effect on continuous or Radiant-paged output
+    'nopagebreak': true, 'samepage': true, 'enlargethispage': true,
+    'raggedbottom': true, 'flushbottom': true, 'sloppy': true, 'fussy': true,
+    'vfill': true, 'vfil': true, 'null': true,
+    // read by page_style.prepare
+    'pagenumbering': true,
+    // arbitrary material written into the .toc; only formatting is lost
+    'addtocontents': true,
     'setlength': true, 'newlength': true,
     // picture sub-commands handled inside picture.render_picture
     'put': true, 'line': true, 'vector': true,
@@ -630,6 +715,10 @@ fn next_render_info(child, info) {
         {*:info, math_bold: true}
     } else if (child is element and string(name(child)) == "unboldmath") {
         {*:info, math_bold: false}
+    } else if (child is element and string(name(child)) == "mathversion") {
+        let version = trim(util.text_of(child))
+        if (version == "bold") {*:info, math_bold: true}
+        else if (version == "normal") {*:info, math_bold: false} else info
     } else if (child is element and string(name(child)) == "setlength"
                             and child.length_name == "unitlength"
                             and child.length_value != null) {
@@ -664,23 +753,13 @@ fn render_page_style(el, info) {
 fn render_document(el, info) {
     let doc_body = util.find_child(el, 'document')
     if (doc_body != null) { render_body(doc_body, info) }
-    else {
-        let items = render_children(el, 0, info);
-        <article class: "latex-document latex-" ++ info.docclass,
-            lang: language.code(info.language),
-            style: document_style(info),
-            if (info.running_style.header != null)
-                render_running_band(info.running_style.header, "header", info)
-            for c in items { c }
-            if (info.running_style.footer != null)
-                render_running_band(info.running_style.footer, "footer", info)
-        >
-    }
+    else { document_article(render_children(el, 0, info), info) }
 }
 
-fn render_body(el, info) {
-    let items = render_children(el, 0, info);
-    <article class: "latex-document latex-" ++ info.docclass,
+fn render_body(el, info) => document_article(render_children(el, 0, info), info)
+
+fn document_article(items, info) {
+    <article class: document_class(info),
         lang: language.code(info.language),
         style: document_style(info),
         if (info.running_style.header != null)
@@ -735,7 +814,32 @@ fn document_style(info) {
         else if (main_css != null) "font-family:" ++ main_css ++ ";"
         else if (sans_css != null) "font-family:" ++ sans_css ++ ";"
         else ""
-    if (background == "" and font == "") null else background ++ font
+    let spread = if (info.line_spread == null) ""
+        else "line-height:" ++ string(font_decl.line_height_for(info.line_spread)) ++ ";"
+    let style = background ++ font ++ spread
+    if (style == "") null else style
+}
+
+// the article's classes; the twocolumn class option sets the document in two columns
+fn document_class(info) {
+    "latex-document latex-" ++ info.docclass ++
+        (if (two_column(info)) " latex-twocolumn" else "")
+}
+
+fn two_column(info) => info.class_options != null and (contains(info.class_options, "twocolumn") or false)
+
+// \twocolumn[header]: the header spans both columns of a twocolumn document;
+// switching column count mid-document is not represented
+fn render_column_switch(el, info) {
+    let tag = string(name(el))
+    if (tag == "twocolumn" and two_column(info)) {
+        let header = util.find_child(el, 'brack_group')
+        if (header == null) null
+        else <div class: "latex-span-all", for c in render_children(header, 0, info) { c }>
+    }
+    else util.unsupported_element("latex",
+        "Changing the column count mid-document is not supported; use the twocolumn class option",
+        el.source_offset)
 }
 
 fn render_foreignlanguage(el, info) {
@@ -797,13 +901,42 @@ fn render_textporson(el, info) {
 }
 
 fn render_maketitle(info) {
-    let title_div = render_maketitle_div("title", info.title_el, info.title, info)
-    let author_div = render_maketitle_div("author", info.author_el, info.author, info)
-    let date_div = render_maketitle_div("date", info.date_el, info.date, info)
+    // \thanks notes in the title block are marked with footnote symbols, in source order
+    let thanks = [for (el in [info.title_el, info.author_el, info.date_el],
+        note in thanks_notes(el)) note]
+    let title_info = {*:info, thanks_marks: [for (i, note in thanks)
+        {key: string(note.source_offset), val: thanks_symbol(i)}]}
+    let title_div = render_maketitle_div("title", info.title_el, info.title, title_info)
+    let author_div = render_maketitle_div("author", info.author_el, info.author, title_info)
+    let date_div = render_maketitle_div("date", info.date_el, info.date, title_info)
     let parts = [title_div, author_div, date_div] |: (~ != null);
     <header class: "latex-title",
         for c in parts { c }
+        if (len(thanks) > 0) {
+            <div class: "latex-thanks",
+                for (i, note in thanks)
+                    <p <sup thanks_symbol(i)> " " for c in render_children(note, 0, info) { c }>>
+        }
     >
+}
+
+fn thanks_notes(node) {
+    if (not (node is element)) []
+    else if (string(name(node)) == "thanks") [node]
+    else [for (child in node, note in thanks_notes(child)) note]
+}
+
+// LaTeX's \fnsymbol sequence
+let THANKS_SYMBOLS = ["*", "†", "‡", "§", "¶", "‖", "**", "††", "‡‡"]
+
+fn thanks_symbol(i) => if (i < len(THANKS_SYMBOLS)) THANKS_SYMBOLS[i] else string(i + 1)
+
+fn render_thanks_ref(el, info) {
+    let mark = if (info.thanks_marks == null) null
+        else util.lookup(info.thanks_marks, string(el.source_offset))
+    if (mark == null) util.unsupported_element("latex",
+        "\\thanks belongs in \\title, \\author or \\date", el.source_offset)
+    else <sup class: "latex-thanks-ref", mark>
 }
 
 // render a preamble field div (title/author/date) using element children if available
@@ -816,6 +949,12 @@ fn render_maketitle_div(css_class, el, fallback_text, info) {
     }
     else if (fallback_text != null) { <div class: css_class, fallback_text> }
     else { null }
+}
+
+// the anchor a ToC or list entry from \addcontentsline links to
+fn render_contents_anchor(el, info) {
+    let id = util.lookup(info.contents_anchors, string(el.source_offset))
+    if (id == null) null else <a id: id>
 }
 
 fn render_toc(info) {
@@ -856,9 +995,12 @@ fn render_heading(el, info, html_level) {
 
     let num_span = if (sec_num != null) <span class: "sec-num",
         language.display_number(sec_num, info.polyglossia) ++ " "> else null
+    // \texorpdfstring gives outlines its PDF branch
+    let outline_text = if (title_el != null and util.find_descendant(title_el, 'texorpdfstring') != null)
+        util.pdf_text_of(title_el) else util.text_of(title_children)
     let outline_title = if (not hyperref.outlines_enabled(info.hyperref_settings)) null
         else (if (info.hyperref_settings.bookmarksnumbered == "true" and sec_num != null)
-            string(sec_num) ++ " " else "") ++ util.text_of(title_children)
+            string(sec_num) ++ " " else "") ++ outline_text
     build_heading_el(html_level, title_id, num_span, title_children, outline_title,
         info.running_style.header != null or info.running_style.footer != null)
 }
@@ -894,8 +1036,8 @@ fn render_paragraph(el, info) {
     }
     else {
         // check for leading font/alignment declaration
-        let decl_tag = find_leading_decl(el, 0, len(el))
-        if (decl_tag != null) { render_paragraph_with_decl(el, info, decl_tag) }
+        let decl = find_leading_decl(el, 0, len(el))
+        if (decl != null) { render_paragraph_with_decl(el, info, decl) }
         else {
             let items = render_children_with_color(el, info)
             if (len(util.trim_children(items)) == 0) { null }
@@ -904,8 +1046,9 @@ fn render_paragraph(el, info) {
                 if (len(parts) == 1) parts[0]
                 else parts
             }
-            else if (starts_with_noindent(el)) { <p style: "text-indent:0", for c in items { c }> }
-            else { <p for c in items { c }> }
+            else if (starts_with_noindent(el)) {
+                <p class: fill_class(items), style: "text-indent:0", for c in items { c }> }
+            else { <p class: fill_class(items), for c in items { c }> }
         }
     }
 }
@@ -958,12 +1101,34 @@ fn split_parbreaks_rec(el, i, n, current_children, acc, info) {
     }
 }
 
-fn render_paragraph_with_decl(el, info, decl_tag) {
+// CSS has no inline fill, so a line holding \hfill, \dotfill or \hrulefill lays out
+// as a flex row in which the fills grow
+fn fill_class(items) =>
+    if (any([for (item in items) item is element and
+        (item.class == "latex-hfill" or item.class == "latex-dotfill" or
+         item.class == "latex-hrulefill")])) "latex-fill-line" else null
+
+// \markboth{left}{right}, \markright{right}: set the running-head strings that
+// headings set, on a hidden element (Radiant's paged path reads hidden assignments)
+fn render_marks(el) {
+    let args = util.command_args(el)
+    let texts = [for (arg in args) trim(util.text_of(arg))]
+    let assignments = if (string(name(el)) == "markboth" and len(texts) >= 2)
+        ["latex-chapter " ++ page_style.quoted_content(texts[0]),
+         "latex-section " ++ page_style.quoted_content(texts[1])]
+        else if (len(texts) >= 1) ["latex-section " ++ page_style.quoted_content(texts[len(texts) - 1])]
+        else [];
+    <span class: "latex-mark", style: "display:none;string-set:" ++ join(assignments, ",")>
+}
+
+fn render_paragraph_with_decl(el, info, decl) {
+    let decl_tag = string(name(decl))
     let items = render_children_with_color(el, info)
     if (len(items) == 0) { null }
     else if (font_decl.is_font_decl(decl_tag)) {
-        let style = font_decl.font_decl_style(decl_tag);
-        <p style: style, for c in items { c }>
+        let style = font_decl.decl_css(decl);
+        if (style == null) <p for c in font_decl.wrap_font_decl(decl, items) { c }>
+        else <p style: style, for c in items { c }>
     }
     else if (color.is_color_decl(decl_tag)) {
         <p for c in items { c }>
@@ -1190,8 +1355,9 @@ fn is_item_node(child) {
     } else { false }
 }
 
-fn split_list_items(flat, info) {
-    split_items_rec(flat, 0, len(flat), [], false, [], info)
+// default_label marks items without their own \item[label] (the list environment)
+fn split_list_items(flat, info, default_label = null) {
+    split_items_rec(flat, 0, len(flat), [], false, [], info, default_label)
 }
 
 fn has_list_content(items) {
@@ -1204,18 +1370,55 @@ fn flush_list_item(current, custom, acc) {
     else acc ++ [<li for c in current { c }>]
 }
 
-fn split_items_rec(flat, i, n, current, custom, acc, info) {
+fn split_items_rec(flat, i, n, current, custom, acc, info, default_label) {
     if (i >= n) flush_list_item(current, custom, acc)
     else if (is_item_node(flat[i])) {
         let flushed = flush_list_item(current, custom, acc)
-        let label = get_item_custom_label(flat[i])
+        let own = get_item_custom_label(flat[i])
+        let label = if (own != null) own else default_label
         split_items_rec(flat, i + 1, n, if (label != null) [label] else [],
-            label != null, flushed, info)
+            label != null, flushed, info, default_label)
     } else {
         let rendered = render_node(flat[i], info)
         let new_current = if (rendered != null) current ++ [rendered] else current
-        split_items_rec(flat, i + 1, n, new_current, custom, acc, info)
+        split_items_rec(flat, i + 1, n, new_current, custom, acc, info, default_label)
     }
+}
+
+// tabbing as a grid: rows end at \\, and \= and \> separate cells, so the stops
+// set in the first row become columns. A \kill row sets stops without printing.
+// The other tab commands (\+ \- \< \' \`) reach the fallback and are reported.
+fn render_tabbing(el, info) {
+    let rows = split_nodes(flatten_paragraphs(el), 0, [], [],
+        (node) => node is symbol and string(node) == "row_sep");
+    <table class: "latex-tabbing",
+        <tbody for (row in rows where not is_blank_row(row) and
+            not any([for (node in row) node is element and string(name(node)) == "kill"]))
+            <tr for (cell in split_nodes(row, 0, [], [], (node) => node is element and
+                (string(name(node)) == "=" or string(name(node)) == ">")))
+                <td for (node in cell, let item = render_node(node, info) where item != null) item>>>>
+}
+
+fn is_blank_row(row) => all([for (node in row) node is string and len(trim(node)) == 0])
+
+// split a node list at separator nodes, which are dropped
+fn split_nodes(nodes, i, current, acc, is_separator) {
+    if (i >= len(nodes)) acc ++ [current]
+    else if (is_separator(nodes[i])) split_nodes(nodes, i + 1, [], acc ++ [current], is_separator)
+    else split_nodes(nodes, i + 1, current ++ [nodes[i]], acc, is_separator)
+}
+
+// \begin{list}{label}{declarations}: items show the label unless \item[x] gives
+// one; trivlist has none. Spacing declarations are not modelled.
+fn render_generic_list(el, info, trivial) {
+    let flat = flatten_paragraphs(el)
+    let item_positions = [for (i, node in flat where is_item_node(node)) i]
+    let start = if (len(item_positions) == 0) len(flat) else item_positions[0]
+    let groups = [for (node in slice(flat, 0, start)
+        where node is element and string(name(node)) == "curly_group") node]
+    let label = if (trivial or len(groups) == 0) null
+        else <span class: "latex-item-label", for c in render_children(groups[0], 0, info) { c }>;
+    <ul class: "latex-list", for li in split_list_items(slice(flat, start, len(flat)), info, label) { li }>
 }
 
 // get custom label from \item[label] as a rendered span, or null
@@ -1298,10 +1501,13 @@ fn render_figure(el, info) {
     let fig_num = get_float_num(el, info, "figure")
     let items = render_children(el, 0, {*:info, caption_type: "figure",
         caption_number: string(fig_num)});
-    <figure class: "latex-figure",
+    <figure class: "latex-figure" ++ spanning_class(el),
         for c in items { c }
     >
 }
+
+// figure* and table* span both columns of a twocolumn document
+fn spanning_class(el) => if (ends_with(string(name(el)), "*")) " latex-span-all" else ""
 
 fn render_caption(el, info) {
     if (info.caption_type == null) util.unsupported_element("caption",
@@ -1357,11 +1563,12 @@ fn get_float_num(el, info, kind) {
 
 // \listoffigures, \listoftables: the captions of one float kind, linked when labelled
 fn render_float_list(info, kind) {
-    let entries = [for (entry in info.floats where entry.kind == kind and entry.caption != null)
+    let entries = [for (entry in info.floats where entry.kind == kind and entry.caption != null,
+        let parts = [if (entry.number == null) null else <span class: "sec-num", string(entry.number)>,
+            entry.caption])
         <li class: "toc-l2",
-            if (entry.id != null) <a href: "#" ++ entry.id,
-                <span class: "sec-num", string(entry.number)> entry.caption>
-            else [<span class: "sec-num", string(entry.number)>, entry.caption]
+            if (entry.id != null) <a href: "#" ++ entry.id, for c in parts { c }>
+            else parts
         >];
     <nav class: "latex-toc latex-list-of latex-" ++ floats.KINDS[kind].list,
         <div class: "toc-title", floats.KINDS[kind].list_title>
@@ -1440,7 +1647,7 @@ fn render_table_env(el, info) {
     let tab_num = get_float_num(el, info, "table")
     let items = render_children(el, 0, {*:info, caption_type: "table",
         caption_number: string(tab_num)});
-    <div class: "latex-table-wrapper",
+    <div class: "latex-table-wrapper" ++ spanning_class(el),
         for c in items { c }
     >
 }
@@ -2249,28 +2456,29 @@ fn make_bib_li(key, content) {
 // Footnotes
 // ============================================================
 
+// a footnote's number by source offset, else by its text when offsets are absent
 fn render_footnote(el, info) {
-    let content_text = trim(util.text_of(el))
-    let fn_key = util.slugify(content_text)
-    let fn_num = find_footnote_num(info.footnotes, fn_key, 0);
+    let exact = [for (entry in info.footnotes where entry.offset != null and
+        entry.offset == el.source_offset) entry.number]
+    let key = util.slugify(trim(util.text_of(el)))
+    let by_text = [for (entry in info.footnotes
+        where util.slugify(trim(util.text_of(entry.node))) == key) entry.number]
+    footnote_ref(if (len(exact) > 0) exact[0] else if (len(by_text) > 0) by_text[0] else 0)
+}
+
+fn render_footnotemark(el, info) {
+    let mark = util.lookup(info.footnote_marks, string(el.source_offset))
+    if (mark == null) util.unsupported_element("latex", "Unnumbered footnote mark",
+        el.source_offset)
+    else footnote_ref(mark)
+}
+
+fn footnote_ref(fn_num) {
     <sup class: "latex-footnote-ref",
         <a href: "#fn-" ++ (fn_num), id: "fnref-" ++ (fn_num),
             string(fn_num)
         >
     >
-}
-
-fn find_footnote_num(footnotes, key, i) {
-    if (i >= len(footnotes)) 0
-    else find_footnote_by_key(footnotes, key, i)
-}
-
-fn find_footnote_by_key(footnotes, key, i) {
-    let entry = footnotes[i]
-    let entry_text = trim(util.text_of(entry.node))
-    let entry_key = util.slugify(entry_text)
-    if (entry_key == key) entry.number
-    else find_footnote_num(footnotes, key, i + 1)
 }
 
 // ============================================================
@@ -2385,8 +2593,8 @@ fn render_control_symbol(el) {
 
 fn render_group(el, info) {
     // check for leading font/alignment declaration in this group
-    let decl_tag = find_leading_decl(el, 0, len(el))
-    if (decl_tag != null) { render_group_with_decl(el, info, decl_tag) }
+    let decl = find_leading_decl(el, 0, len(el))
+    if (decl != null) { render_group_with_decl(el, info, decl) }
     else {
         let items = render_children_with_color(el, info)
         if (len(items) == 0) null
@@ -2395,7 +2603,7 @@ fn render_group(el, info) {
     }
 }
 
-// find the first font/alignment/color declaration tag among children (skipping whitespace)
+// find the first font/alignment/color declaration among children (skipping whitespace)
 fn find_leading_decl(el, i, n) {
     if (i >= n) { null }
     else {
@@ -2404,9 +2612,8 @@ fn find_leading_decl(el, i, n) {
             find_leading_decl(el, i + 1, n)
         } else if (child is element) {
             let tag_str = string(name(child))
-            if (font_decl.is_font_decl(tag_str)) tag_str
-            else if (font_decl.is_align_decl(tag_str)) tag_str
-            else if (color.is_color_decl(tag_str)) tag_str
+            if (font_decl.is_font_decl(tag_str) or font_decl.is_align_decl(tag_str) or
+                color.is_color_decl(tag_str)) child
             else null
         }
         else { null }
@@ -2414,11 +2621,12 @@ fn find_leading_decl(el, i, n) {
 }
 
 // render a group whose first significant child is a font/alignment/color declaration
-fn render_group_with_decl(el, info, decl_tag) {
+fn render_group_with_decl(el, info, decl) {
+    let decl_tag = string(name(decl))
     // render children after the declaration (the decl itself returns null)
     let items = render_children_with_color(el, info)
     if (font_decl.is_font_decl(decl_tag))
-        font_decl.wrap_font_decl(decl_tag, items)
+        font_decl.wrap_font_decl(decl, items)
     else if (color.is_color_decl(decl_tag))
         if (len(items) == 1) items[0] else <span for c in items { c }>
     else

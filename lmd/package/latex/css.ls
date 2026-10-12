@@ -188,6 +188,25 @@ table.latex-tabular tr.latex-cmidrule { height: 0; line-height: 0; }
 .latex-sc { font-variant: small-caps; }
 .latex-sl { font-style: oblique; }
 .latex-rm { font-family: 'Computer Modern Serif', 'Latin Modern Roman', serif; }
+.latex-resizebox > table { width: 100%; }
+.latex-list { list-style-type: none; padding-left: 2em; }
+.latex-tabbing { border-collapse: collapse; margin: 0.5em 0; }
+.latex-tabbing td { padding: 0 1em 0 0; vertical-align: baseline; }
+.latex-and { display: inline-block; width: 2em; }
+.latex-thanks { text-align: left; font-size: 0.85em; margin-top: 1em; }
+.latex-thanks p { margin: 0.2em 0; text-indent: 0; }
+.latex-titlepage { break-after: page; }
+.latex-fill-line { display: flex; flex-wrap: wrap; align-items: baseline; }
+.latex-hfill { flex: 1 1 0; }
+.latex-dotfill { flex: 1 1 0; min-width: 1em; margin: 0 0.25em; border-bottom: 1px dotted currentColor; }
+.latex-hrulefill { flex: 1 1 0; min-width: 1em; border-bottom: 0.4pt solid currentColor; }
+.latex-indent { display: inline-block; width: 1.5em; }
+.latex-centerline { text-align: center; }
+.latex-twocolumn { column-count: 2; column-gap: 2em; }
+.latex-twocolumn .latex-title, .latex-twocolumn .latex-span-all { column-span: all; }
+.latex-up { font-style: normal; }
+.latex-md { font-weight: normal; }
+.latex-normal { font-style: normal; font-weight: normal; font-variant: normal; }
 .latex-itshape { font-style: italic; }
 .latex-bfseries { font-weight: bold; }
 .latex-ttfamily { font-family: 'Computer Modern Typewriter', 'Latin Modern Mono', monospace; }

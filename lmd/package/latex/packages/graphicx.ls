@@ -29,7 +29,7 @@ fn style(opts) {
         (if (opts.height != null) "height:" ++ util.css_dimension(opts.height) ++ ";" else "")
     let fit = if (util.option_enabled(opts.keepaspectratio)) "object-fit:contain;" else ""
     let transform = (if (opts.scale != null) "scale(" ++ opts.scale ++ ") " else "") ++
-        (if (opts.angle != null) "rotate(" ++ opts.angle ++ "deg)" else "")
+        (if (opts.angle != null) css_rotation(opts.angle) else "")
     let rotated = if (trim(transform) != "") "transform:" ++ trim(transform) ++ ";" else ""
     let trimmed = if (opts.trim != null) split(trim(opts.trim), null) else []
     let clipping = if (util.option_enabled(opts.clip) and len(trimmed) == 4)
@@ -39,6 +39,9 @@ fn style(opts) {
         else ""
     size ++ fit ++ rotated ++ clipping
 }
+
+// graphicx angles turn counterclockwise; CSS rotate() turns clockwise
+fn css_rotation(angle) => "rotate(" ++ string(0.0 - float(trim(angle))) ++ "deg)"
 
 fn pdf_style(opts, svg) {
     let physical = if (opts.width == null and opts.height == null)
@@ -82,8 +85,9 @@ fn render_pdf(src, opts, id_prefix, offset) {
     }
 }
 
-pub fn render(el, base_uri) {
-    let opts = options(el)
+// `sizing` overrides the image's own keys when a box command sizes a lone image
+pub fn render(el, base_uri, sizing = null) {
+    let opts = if (sizing == null) options(el) else {*:options(el), *:sizing}
     let unknown = unsupported_keys(opts)
     let src = resolved_source(source(el), base_uri)
     let pdf_source = ends_with(lower(src), ".pdf")
@@ -109,4 +113,73 @@ pub fn render(el, base_uri) {
     else if (not starts_with(src, "data:") and index_of(src, "://") == null and
              not exists(src)) unsupported("Cannot read graphicx image " ++ src, el.source_offset)
     else <img class: "latex-image", src: src, alt: src, style: style(opts)>
+}
+
+// \resizebox, \scalebox, \rotatebox and \reflectbox. A lone image is sized through
+// its own keys; other content gets a CSS-transformed box whose layout size stays
+// untransformed, which registry.target_diagnostics reports.
+pub fn render_box(el, items, image, base_uri) {
+    let tag = string(name(el))
+    if (tag == "resizebox") render_resizebox(el, items, image, base_uri)
+    else if (tag == "scalebox") render_scalebox(el, items, image, base_uri)
+    else if (tag == "rotatebox") render_rotatebox(el, items, image, base_uri)
+    else transformed_box("latex-reflectbox", "transform:scaleX(-1)", items)
+}
+
+fn transformed_box(css_class, style, items) {
+    <span class: css_class, style: "display:inline-block;" ++ style, for c in items { c }>
+}
+
+// a \resizebox length; "!" keeps the aspect ratio and is null here
+fn box_length(raw) => if (raw == null or trim(raw) == "!") null else trim(raw)
+
+fn render_resizebox(el, items, image, base_uri) {
+    let width = box_length(util.raw_argument(el, "required", 0))
+    let height = box_length(util.raw_argument(el, "required", 1))
+    if ((width != null and util.css_dimension(width) == null) or
+        (height != null and util.css_dimension(height) == null) or (width == null and height == null))
+        unsupported("Unsupported resizebox dimensions", el.source_offset)
+    else if (image != null) render(image, base_uri, {width: width, height: height})
+    else transformed_box("latex-resizebox", "max-width:100%;" ++
+        (if (width == null) "" else "width:" ++ util.css_dimension(width) ++ ";") ++
+        (if (height == null) "" else "height:" ++ util.css_dimension(height) ++ ";"), items)
+}
+
+fn render_scalebox(el, items, image, base_uri) {
+    let horizontal = float(trim(util.raw_argument(el, "required", 0) or "")) ^ { null }
+    let raw_vertical = util.optional_raw(el)
+    let vertical = if (raw_vertical == null) horizontal else float(trim(raw_vertical)) ^ { null }
+    if (horizontal == null or vertical == null)
+        unsupported("Unsupported scalebox factor", el.source_offset)
+    else if (image != null and vertical == horizontal) render(image, base_uri, {scale: string(horizontal)})
+    else transformed_box("latex-scalebox", "transform:scale(" ++ string(horizontal) ++ "," ++
+        string(vertical) ++ ");transform-origin:left bottom", items)
+}
+
+// \rotatebox[origin=…]{angle}: LaTeX's default origin is the left baseline
+fn render_rotatebox(el, items, image, base_uri) {
+    let angle = util.raw_argument(el, "required", 0)
+    let opts = util.parse_kv_options(util.optional_raw(el))
+    let unknown = [for (key, value at opts where string(key) != "origin") string(key)]
+    let origin = rotation_origin(opts.origin)
+    if (angle == null or (float(trim(angle)) ^ { null }) == null)
+        unsupported("Unsupported rotatebox angle", el.source_offset)
+    else if (len(unknown) > 0 or origin == null)
+        unsupported("Unsupported rotatebox option: " ++ join(unknown ++ [string(opts.origin)], ", "),
+            el.source_offset)
+    else if (image != null and opts.origin == null) render(image, base_uri, {angle: trim(angle)})
+    else transformed_box("latex-rotatebox", "transform:" ++ css_rotation(angle) ++
+        ";transform-origin:" ++ origin, items)
+}
+
+fn rotation_origin(spec) {
+    if (spec == null) "left bottom"
+    else {
+        let letters = trim(spec)
+        let horizontal = if (contains(letters, "l")) "left" else if (contains(letters, "r")) "right" else "center"
+        let vertical = if (contains(letters, "t")) "top"
+            else if (contains(letters, "b") or contains(letters, "B")) "bottom" else "center"
+        let valid = all([for (i in 0 to len(letters) - 1) contains("lrtbBc", slice(letters, i, i + 1))])
+        if (letters == "" or not valid) null else horizontal ++ " " ++ vertical
+    }
 }

@@ -17,7 +17,8 @@ let host_html = latex.render_to_html(ast,
 "crop and rotation:"; index_of(html, "viewBox=\"0 0 400 300\"") != null and
     index_of(html, "matrix(0 1 -1 0 500 -50)") != null
 "selected second page:"; index_of(html, "viewBox=\"0 0 100 100\"") != null
-"graphic angle:"; index_of(html, "rotate(15deg)") != null
+// graphicx angles turn counterclockwise, which CSS writes as a negative rotation
+"graphic angle:"; index_of(html, "rotate(-15deg)") != null
 "portable embedded image:"; index_of(html, "data:image/jpeg;base64,") != null and
     index_of(html, "img:") == null
 "host source path:"; index_of(host_html, "viewBox=\"0 0 400 300\"") != null

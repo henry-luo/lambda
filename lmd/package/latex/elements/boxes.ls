@@ -85,6 +85,20 @@ pub fn render_raisebox(el, content_items) {
 // ============================================================
 
 // \llap{text} — left overlap (zero width, content extends left)
+// \rule[raise]{width}{height}: a solid box in the text color, raised from the baseline
+pub fn render_rule(el) {
+    let width = rule_dimension(util.raw_argument(el, "required", 0))
+    let height = rule_dimension(util.raw_argument(el, "required", 1))
+    let raw_lift = util.raw_argument(el, "optional", 0)
+    let lift = if (raw_lift == null) "0" else rule_dimension(raw_lift)
+    if (width == null or height == null or lift == null)
+        util.unsupported_element("latex", "Invalid rule dimensions", el.source_offset)
+    else <span class: "latex-rule", style: "display:inline-block;width:" ++ width ++
+        ";height:" ++ height ++ ";vertical-align:" ++ lift ++ ";background-color:currentColor">
+}
+
+fn rule_dimension(raw) => if (raw == null) null else util.css_dimension(raw)
+
 pub fn render_llap(items) {
     <span class: "latex-llap", style: "display:inline-block;width:0;text-align:right;overflow:visible", for c in items { c }>
 }

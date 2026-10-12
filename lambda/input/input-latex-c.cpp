@@ -1498,7 +1498,7 @@ public:
     DirectLatexParser(InputContext& context, const tex::Result* tex_result = nullptr)
         : ctx_(context), builder_(context.builder), source_(context.source()),
           length_(context.source_length()), position_(0), tabular_mode_(false),
-          tex_result_(tex_result) {}
+          tabbing_mode_(false), tex_result_(tex_result) {}
 
     Item parse() {
         ElementBuilder root = builder_.element("latex_document");
@@ -1514,6 +1514,8 @@ private:
     size_t length_;
     size_t position_;
     bool tabular_mode_;
+    // inside tabbing, \= \' \` are tab commands, not accents
+    bool tabbing_mode_;
     const tex::Result* tex_result_;
 
     void error(const char* message) {
@@ -1935,6 +1937,7 @@ private:
             nested.length_ = body_len;
             nested.position_ = 0;
             nested.tabular_mode_ = table_columns;
+            nested.tabbing_mode_ = strcmp(name, "tabbing") == 0;
             nested.parse_children(elem, 0, true);
         }
         position_ = after_end;
@@ -2073,7 +2076,9 @@ private:
         }
         if (strcmp(name, "\\") == 0) return builder_.createSymbolItem("row_sep");
         if (is_literal_text_escape(name)) return builder_.createStringItem(name, 1);
-        if (strlen(name) == 1 && strchr("'`^\"~=.uvHcdbtk", name[0])) {
+        // tabbing redefines \= \' \`; they stay commands like \> so the script sees the tab stops
+        if (strlen(name) == 1 && strchr("'`^\"~=.uvHcdbtk", name[0]) &&
+                !(tabbing_mode_ && strchr("='`", name[0]))) {
             // A text accent takes one token or one balanced group, never the following word.
             ElementBuilder accent = builder_.element("accent");
             accent.attr("command", name);

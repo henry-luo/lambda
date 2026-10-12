@@ -170,7 +170,26 @@ Built as a `CATALOG` row with no engine change. The engine records adapter names
 | `hyperref` | `\hyperlink`, `\hypertarget`, `\phantomsection`, `\texorpdfstring` | Anchors and links; `\phantomsection` anchors the next `\addcontentsline`; `\texorpdfstring` renders its first argument and feeds its second to outline titles |
 | `graphicx` | `\resizebox`, `\scalebox`, `\rotatebox`, `\reflectbox` | CSS sizing and transforms sharing `graphicx.ls`; `!` keeps the aspect ratio; layout-box effects of rotation are diagnosed as approximations |
 
-The §9 `hyperref` row claims "anchors", but `\hypertarget` is unsupported. Correct the row when M1 lands.
+The §9 `hyperref` row claimed "anchors" while `\hypertarget` was unsupported; the row was corrected when M1 landed.
+
+As built on 2026-10-13, every row above except `alltt` is supported. The notable choices:
+
+- **NFSS declarations** act as a group's or paragraph's leading declaration, like the other font switches. `font_decl.decl_css` reads their arguments, and a value outside the tables is reported in place. Family codes for faces Lambda does not ship (`ptm`, `phv`, …) report `font-substitution`. A preamble `\linespread` sets the document's line height to 1.2 × factor.
+- **Fills.** `\hfill` used to be an unstyled marker. A paragraph that holds `\hfill`, `\hfil`, `\dotfill`, `\hrulefill` or `\hspace{\stretch{n}}` now lays out as a flex row in which the fills grow, because CSS has no inline fill. `\vspace{\stretch{n}}` and `\vfill` render nothing.
+- **Marks.** `\markboth` and `\markright` set the `latex-chapter` and `latex-section` running strings through a hidden element, which Radiant's paged path reads (`paged_hidden_marks`).
+- **Page numbering.** `\pagenumbering` sets the page-counter style for `\thepage` and running heads. Output has one numbering, so a change reports `page-numbering-approximation` and the last style applies; `gobble` prints nothing.
+- **Columns.** The `twocolumn` class option sets the document in CSS columns; the title block, `\twocolumn[header]`, `figure*` and `table*` span them. Changing the column count mid-document is reported.
+- **Title.** `\thanks` marks use LaTeX's `\fnsymbol` sequence, and their notes follow the title block. Plain-text extraction now skips `\thanks`, renders `\and` as ", " and takes `\texorpdfstring`'s TeX branch, so title metadata no longer absorbs the notes.
+- **Footnotes** are keyed by source offset. This also fixes the Pkg_Latex §11.2 "identical footnote text" defect. `\footnote[n]` and `\footnotemark[n]` use n without stepping the counter, and `\footnotetext` takes n or the current counter. The footnote list writes `value` where a number leaves the sequence. The unused `footnote_map` was removed.
+- **Contents.** `\addcontentsline{toc|lof|lot}` adds an entry anchored at the call; a leading `\numberline{n}` is its number. `\addtocontents` writes arbitrary material into the `.toc`, so it is ignored and only formatting is lost.
+- **hyperref.** `\hypertarget`, `\hyperlink`, `\phantomsection` and `\texorpdfstring` are hyperref-owned handlers. Outline titles use `\texorpdfstring`'s PDF branch (`util.pdf_text_of`).
+- **Environments.** `tabbing` needed a neutral parser change ([Input_Latex.md](../input/Input_Latex.md)): `\=` had been read as a macron accent. It renders as a grid in which `\=` and `\>` separate cells and `\kill` rows are dropped. `eqnarray` uses the amsmath row model with rcl columns whether or not amsmath is loaded. `list` items show the label argument unless `\item[x]` gives one.
+- **graphicx.** The content of `\resizebox`, `\scalebox`, `\rotatebox` and `\reflectbox` is the last argument (`util.last_argument_start`).
+  - A lone `\includegraphics` is sized through its own keys, so its layout box is exact.
+  - Other content gets a CSS transform and a `transform-approximation` diagnostic.
+  - **Bug fixed:** the existing `\includegraphics[angle=…]` emitted CSS `rotate(θ)`, which turns clockwise, while graphicx angles turn counterclockwise. It now emits `rotate(-θ)`, and `test_latex_pdf_graphics` asserts the corrected form.
+- **`\nocite`.** Every bibliography path already collected `\nocite` through `bib_model`. Without a bibliography it renders nothing.
+- **Deferred: `alltt`.** Its body is raw, and parsing commands while keeping spaces and line breaks needs its own parser mode. It stays reported as unsupported, rather than showing commands as literal text.
 
 ## 6. M2: declarations and symbol tables
 
@@ -384,3 +403,7 @@ This is `lambda.doc.math` work, after M0.3. Every addition updates Pkg_Math §7.
   - New module `lmd/package/latex/floats.ls`; the math package gained `maps_command` and `unmapped_commands`.
   - New test `test/lambda/latex/test_latex_phase5_groundwork.ls` with its golden. The other 61 LaTeX scripts and the 32 math scripts match their goldens unchanged.
   - Removed: the custom-counter list and its per-counter match arms, `get_figure_num`/`get_table_num` and their text-matching duplicates, two copies of the amsmath environment condition (now `amsmath.handles`), and the duplicated `alltikzpeople` arms.
+- 2026-10-13: M0 committed on the worktree branch (547f9d76e). M1 was built as recorded in §5, except `alltt`.
+  - New test `test/lambda/latex/test_latex_phase5_kernel.ls` with its golden. The other 62 LaTeX scripts and the 32 math scripts match their goldens.
+  - `test_latex_font_decl` passes declaration elements to `wrap_font_decl`; its expected output is unchanged. `test_latex_pdf_graphics` asserts the corrected rotation sign.
+  - `render_document` and `render_body` share one article builder.

@@ -37,7 +37,33 @@ pub fn text_of(node) {
 }
 
 fn text_of_element(el) {
-    join_children_text(el)
+    let special = special_text(el, false)
+    if (special != null) special else join_children_text(el)
+}
+
+// Commands whose text is not their content joined: a \thanks note is a footnote,
+// never part of the text it marks; \and separates authors; \texorpdfstring's
+// text is its TeX branch. Null for every other element.
+fn special_text(el, rich) {
+    let tag = string(name(el))
+    if (tag == "thanks") ""
+    else if (tag == "and") ", "
+    else if (tag == "texorpdfstring") {
+        let first = command_args(el)[0]
+        if (rich) rich_text_of(first) else text_of(first)
+    }
+    else null
+}
+
+// plain text for PDF metadata and outlines: \texorpdfstring yields its PDF branch
+pub fn pdf_text_of(node) {
+    if (node is element and string(name(node)) == "texorpdfstring") {
+        let args = command_args(node)
+        text_of(if (len(args) > 1) args[1] else null)
+    }
+    else if (node is element or node is array or node is list)
+        str_join([for (child in (if (node is element) content(node) else node)) pdf_text_of(child)], "")
+    else text_of(node)
 }
 
 fn join_children_text(el, rich = false, skip_brack = false) {
@@ -62,7 +88,9 @@ pub fn rich_text_of(node) {
 
 fn rich_text_of_element(el) {
     let resolved = resolve_symbol_cmd(el)
+    let special = special_text(el, true)
     if (resolved != null) { resolved }
+    else if (special != null) { special }
     else {
         join_children_text(el, true)
     }
@@ -356,6 +384,37 @@ pub fn optional_raw(el) {
         if (bracket != null) text_of(bracket) else null
     }
 }
+
+// Index, among command_args(el), of the first node of the command's last
+// required argument. Each earlier optional group is one brack_group node; each
+// earlier required group is simple (a length or a number), one node per text
+// run and per control word.
+pub fn last_argument_start(el) {
+    let groups = if (el.argument_groups == null) [] else el.argument_groups
+    let last_required = [for (i, group in groups where group.kind == "required") i]
+    let stop = if (len(last_required) == 0) 0 else last_required[len(last_required) - 1]
+    sum([for (i, group in groups where i < stop)
+        if (group.kind == "required") simple_argument_nodes(group.raw) else 1])
+}
+
+fn simple_argument_nodes(raw) {
+    let pieces = split(raw, "\\")
+    let leading = if (len(trim(pieces[0])) > 0) 1 else 0
+    // each control word is a node, and text after it is another
+    leading + sum([for (i, piece in pieces where i > 0)
+        1 + (if (len(trim(trim_control_word(piece))) > 0) 1 else 0)])
+}
+
+// the text after a control word, or after a control symbol's single character
+fn trim_control_word(piece) {
+    let word_end = letters_end(piece, 0)
+    slice(piece, if (word_end == 0) min(1, len(piece)) else word_end, len(piece))
+}
+
+fn letters_end(text, i) =>
+    if (i < len(text) and is_letter(slice(text, i, i + 1))) letters_end(text, i + 1) else i
+
+fn is_letter(ch) => (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z")
 
 pub fn raw_argument(el, kind, ordinal) {
     let groups = el.argument_groups
