@@ -354,10 +354,13 @@ Item mvp_lmd_generator_initialize(MvpLmdProgram* program, MvpLmdLibraryState* st
     const int prototypes[] = {LMD_LIBRARY_GENERATOR_PROTOTYPE, LMD_LIBRARY_ITERATOR_PROTOTYPE};
     for (int index : prototypes)
         if (!map_shape_set(state->values[index].map, key, identity.get())) return ItemError;
-    state->values[LMD_LIBRARY_SEQUENCE_ITERATOR] = mvp_lmd_native_function(program, NULL, sequence_iterator, 0);
+    state->values[LMD_LIBRARY_SEQUENCE_ITERATOR] = mvp_lmd_native_function(program, NULL, sequence_iterator, 0, "values");
     if (item_is_error(state->values[LMD_LIBRARY_SEQUENCE_ITERATOR])) return state->values[LMD_LIBRARY_SEQUENCE_ITERATOR];
     if (!map_shape_set((Map*)state->values[LMD_LIBRARY_ARRAY_PROTOTYPE].array, key,
             state->values[LMD_LIBRARY_SEQUENCE_ITERATOR])) return ItemError;
+    result = mvp_lmd_named_set(state->values[LMD_LIBRARY_ARRAY_PROTOTYPE], "values",
+        state->values[LMD_LIBRARY_SEQUENCE_ITERATOR], JSPD_NON_ENUMERABLE);
+    if (item_is_error(result)) return result;
     for (int set = 0; set < 2; set++) {
         int slot = set ? LMD_LIBRARY_SET : LMD_LIBRARY_MAP;
         result = mvp_lmd_library_class_initialize(program, state, set ? &state->set : &state->map,

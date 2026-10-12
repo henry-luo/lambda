@@ -243,6 +243,105 @@ TEST_F(JsMvpLmd, BoundFunctionObservableMetadata) {
             Object.getPrototypeOf(bound)===proto;
     )JS");
 }
+TEST_F(JsMvpLmd, FunctionIntrinsicReflection) {
+    boolean(R"JS(
+        function named(a,b=1) { /* retained source */ return a+b; }
+        let p=Function.prototype, descriptor=Object.getOwnPropertyDescriptor(Function,'prototype');
+        let thrower=Object.getOwnPropertyDescriptor(p,'caller');
+        let ok=typeof p==='function' && p()===undefined && p.name==='' && p.length===0 &&
+            p.constructor===Function && Object.getPrototypeOf(named)===p && Object.getPrototypeOf(Function)===p &&
+            Object.getPrototypeOf(p)===Object.prototype && Function.name==='Function' && Function.length===1 &&
+            !descriptor.writable && !descriptor.enumerable && !descriptor.configurable &&
+            p.call.name==='call' && p.call.length===1 && p.apply.name==='apply' && p.apply.length===2 &&
+            p.bind.name==='bind' && p.bind.length===1 && named.name==='named' && named.length===1 &&
+            p.toString.call(named)==='function named(a,b=1) { /* retained source */ return a+b; }' &&
+            p.toString.call(named.bind(null)).indexOf('[native code]')>=0 &&
+            thrower.get===thrower.set && !Object.isExtensible(thrower.get);
+        try{p.caller;}catch(e){ok=ok && e instanceof TypeError;}
+        ok && Math.pow(2,32)===4294967296 && Math.pow(1,Infinity)!==Math.pow(1,Infinity);
+    )JS");
+    error("Function.prototype.toString.call({})", "TypeError");
+    error("new Function.prototype()", "TypeError");
+    boolean(R"JS(
+        class Explicit { constructor(){} method(a){return a;} }
+        class Implicit {}
+        Function.prototype.toString.call(Explicit)==='class Explicit { constructor(){} method(a){return a;} }' &&
+        Function.prototype.toString.call(Implicit)==='class Implicit {}' &&
+        Function.prototype.toString.call(Explicit.prototype.method)==='method(a){return a;}';
+    )JS");
+    boolean(R"JS(
+        let events='', pow=Math.pow;
+        let left={valueOf(){events+='l';return 2.5}}, right={valueOf(){events+='r';return 2}};
+        let ignored={valueOf(){throw 7}};
+        let ok=pow(left,right,ignored)===6.25 && events==='lr';
+        events='';ok && Math.pow(left,right,ignored)===6.25 && events==='lr';
+    )JS");
+}
+TEST_F(JsMvpLmd, ArgumentsMappingAndEscape) {
+    boolean(R"JS(
+        function make(a,b) {
+            let args=arguments;
+            a=2.25; let first=args[0]; args[1]=3.5;
+            return {args:args, first:first, second:b, read(){return a},write(x){a=x}};
+        }
+        let value=make(1.25,2.5,9);value.write(4.75);
+        let a=value.args;
+        let ok=a.length===3 && value.first===2.25 && value.second===3.5 && a[0]===4.75 && a[2]===9 &&
+            value.read()===4.75 && Object.prototype.toString.call(a)==='[object Arguments]' &&
+            !Array.isArray(a) && a.callee===make && Object.keys(a).join(',')==='0,1,2' &&
+            Object.values(a).join(',')==='4.75,3.5,9' && a[Symbol.iterator]===Array.prototype.values &&
+            Object.assign({},a)[0]===4.75 && JSON.stringify(a)==='{"0":4.75,"1":3.5,"2":9}';
+        let sum=0;for(let v of a)sum+=v;
+        a[0]=6.25;ok && sum===17.25 && value.read()===6.25;
+    )JS");
+    boolean("function f(a,a){arguments[0]=7;let x=a;arguments[1]=9;return x===2&&a===9&&arguments[0]===7;}f(1,2)");
+    boolean("function f(a){a=5;return arguments.length===0&&!Object.hasOwn(arguments,'0')}f()");
+    boolean("function f(x){return ()=>arguments}let read=f(7);read()===read()&&read()[0]===7");
+    boolean("function f(arguments){return arguments}f(9)===9");
+    boolean("function f(){var arguments;return arguments.length}f(1,2)===2");
+    boolean("function outer(){var arguments=undefined;return (function(a,b){return arguments.length})()}outer()===0");
+    boolean("function outer(){return ((arguments)=>()=>arguments)(7)()}outer(1)===7");
+    boolean("function outer(){return (()=>{let arguments=9;return ()=>arguments})()()}outer(1)===9");
+    boolean("(function arguments(){return typeof arguments})()==='object'");
+}
+TEST_F(JsMvpLmd, ArgumentsDescriptorsAndUnmapped) {
+    boolean(R"JS(
+        function f(a,b,c){
+            let x=arguments;
+            Object.defineProperty(x,'0',{writable:false});a=9;
+            Object.defineProperty(x,'1',{get(){return 8}});b=10;
+            delete x[2];x[2]=11;c=12;
+            return x[0]===1 && x[1]===8 && x[2]===11 && a===9 && b===10 && c===12;
+        }
+        function frozen(a){Object.freeze(arguments);a=7;return arguments[0]===1;}
+        function strict(a){'use strict';a=8;let x=arguments;
+            try{x.callee;}catch(e){return e instanceof TypeError && x[0]===1 && !Array.isArray(x);}}
+        function defaults(a=2,b=arguments[0]){a=7;return arguments[0]===1 && b===1;}
+        f(1,2,3)&&frozen(1)&&strict(1)&&defaults(1);
+    )JS");
+    boolean("function f(a=()=>arguments){var arguments=7;return a().length===0&&arguments===7}f()");
+    boolean("function f(a=()=>arguments){let arguments=7;return a().length===0&&arguments===7}f()");
+    boolean("function f(a=arguments.length){function arguments(){return 3}return a===0&&arguments()===3}f()");
+    boolean("function f(a=()=>arguments){var arguments;return a()===arguments}f()");
+    boolean("function f(a){let x=arguments,k=Symbol('0');x['00']=7;x['-0']=8;x[k]=9;return a===1&&x[0]===1&&x['00']===7&&x['-0']===8&&x[k]===9}f(1)");
+}
+TEST_F(JsMvpLmd, ArgumentsDescriptorAliasLifetime) {
+    boolean(R"JS(
+        function f(a) {
+            let x=arguments; a=3.25;
+            Object.defineProperty(x,'0',{configurable:false});
+            let rejected=Reflect.defineProperty(x,'0',{get(){return 9}});
+            a=8.25; let ok=!rejected && x[0]===8.25;
+            let child=Object.create(x); Reflect.set(x,'0',6.5,child);
+            ok=ok && a===8.25 && x[0]===8.25 && child[0]===6.5;
+            Object.seal(x); a=9.5;
+            ok=ok && x[0]===9.5 && Object.getOwnPropertyDescriptor(x,'0').value===9.5;
+            Object.freeze(x); a=10.75;
+            return ok && a===10.75 && x[0]===9.5;
+        }
+        f(1);
+    )JS");
+}
 TEST_F(JsMvpLmd, HostClockOutputAndFiles) {
     ASSERT_TRUE(create_dir("temp"));
     FILE* output = file_open_regular_write("temp/mvp_host_output.txt", true);
