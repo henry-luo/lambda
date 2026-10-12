@@ -1,10 +1,10 @@
 # Lambda Runtime — Parsing & AST Construction
 
-> **Last verified against tree:** 2026-08-28
+> **Last verified against tree:** 2026-10-12
 
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the front end: how the first-party C lexer and hybrid recursive-descent + Pratt parser reduce source directly to a typed AST. The Tree-sitter grammar is retained only as an isolated syntax-reference verifier. This document owns the direct reduction dispatch, shared AST construction seams, concrete node hierarchy, build-time (forward, local, structural) type inference, and scope / namespace / closure-capture machinery. It does *not* own the `Type*` objects it stamps onto nodes — those belong to [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md); nor the backends that consume the AST — [LR_06](LR_06_C_Transpiler.md) and [LR_07](LR_07_MIR_Transpiler_JIT.md).
 >
-> **Primary sources:** `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/ast_build.hpp`, `lambda/runtime/build_ast.cpp` (direct sink plus shared constructors), `lambda/runtime/parse.c` (direct parser translation unit), `lambda/tree-sitter-lambda/grammar.js` (the isolated reference grammar), `test/lambda_parser_poc_diff.c` (CST differential verifier), `lambda/runtime/ast.hpp` (the `AstNode` hierarchy + scope/closure model), and `lambda/runtime/emit_ast_dump.cpp` (a read-only structural AST-dump consumer).
+> **Primary sources:** `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/ast_build.hpp`, `lambda/runtime/build_ast.cpp` (direct sink plus shared constructors), `lambda/tree-sitter-lambda/grammar.js` (the isolated reference grammar), `test/lambda_parser_poc_diff.c` (CST differential verifier), `lambda/runtime/ast.hpp` (the `AstNode` hierarchy + scope/closure model), and `lambda/runtime/emit_ast_dump.cpp` (a read-only structural AST-dump consumer).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names.
 
 ---
@@ -25,9 +25,9 @@ Normal Lambda files and modules use the first-party parser by default. The lexer
 
 `SourceSpan` is the shared half-open source contract. The existing type pattern and static-path parsers consume the same spans, so the direct path does not synthesize `TSNode` objects or duplicate those subgrammars.
 
-### 2.2 Parser translation unit — `parse.c`
+### 2.2 Parser translation units
 
-`parse.c` embeds `lambda_lexer.c` and `lambda_parser.c` into the runtime parser translation unit. It does not create or retain a Tree-sitter parser. The isolated `lambda-cst` target separately compiles `test/lambda_parser_poc_diff.c` with the generated reference grammar.
+`lambda_lexer.c` and `lambda_parser.c` are ordinary translation units, listed by name in every runtime source list of `build_lambda_config.json` beside `source_parser.c`, as the JS front end lists `js_lexer.c` and `js_parser.c`. Neither creates or retains a Tree-sitter parser. The isolated `lambda-cst` target separately compiles `test/lambda_parser_poc_diff.c` with the generated reference grammar.
 
 ### 2.3 Reference grammar — `grammar.js`
 
@@ -187,7 +187,6 @@ The ledger carries the verification status of each entry (OPEN / PARTIAL / RESOL
 
 | File | Responsibility (this doc) |
 |---|---|
-| `lambda/runtime/parse.c` | Production parser translation unit embedding the C lexer and recursive-descent/Pratt parser. |
 | `lambda/tree-sitter-lambda/grammar.js` | Grammar source: top-level rules (`document`/`content`/`_statement`/`_expr`), precedence table, type sublanguage, conflicts. Auto-generates `src/parser.c`. |
 | `test/lambda_parser_poc_diff.c` | Isolated Tree-sitter/C parser differential verifier. |
 | `lambda/runtime/ast.hpp` | `AstNode` base + concrete node structs, `AstNodeType` enum, `NameScope`/`NameEntry`/`CaptureInfo`/`NamespaceEntry`, `AstScript`. |

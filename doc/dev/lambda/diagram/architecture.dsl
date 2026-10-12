@@ -10,7 +10,7 @@ workspace "Lambda Runtime" "Core language runtime of Lambda Script" {
       cli = container "CLI / REPL" "Dispatches subcommands, runs scripts, drives the REPL." "lambda/main.cpp, runner.cpp, main-repl.cpp"
 
       core = container "Core runtime engine" "Compiles Lambda to MIR and executes it." "lambda/ (core)" {
-        frontend = component "Front-end" "Tree-sitter parse, typed AST build, build-time type inference." "parse.c, build_ast.cpp, ast.hpp"
+        frontend = component "Front-end" "C lexer/parser, typed AST build, build-time type inference." "lambda_lexer.c, lambda_parser.c, build_ast.cpp, ast.hpp"
         c2mir = component "C transpiler (legacy)" "AST to C source text, then c2mir to MIR. ifdef-gated." "transpile.cpp, transpile-call.cpp, lambda-embed.h"
         mirdirect = component "MIR Direct transpiler" "AST lowered straight to MIR IR; inline boxing; root/number side frames." "transpile-mir.cpp"
         jit = component "JIT integration" "Import resolution, MIR_link and MIR_gen, debug table." "mir.c"
