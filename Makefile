@@ -2032,9 +2032,7 @@ LAYOUT_BASELINE_SUITES ?= form wpt-css-box wpt-css-text wpt-css-inline wpt-css-s
 # Keep one shared layout context per 100-file batch; the runner resets
 # document-scoped caches between files and reaps timed-out workers.
 LAYOUT_BASELINE_CONCURRENCY ?= 4
-LAYOUT_BASELINE_RUNNER = $(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --baseline-only --batch-size 100 --concurrency $(LAYOUT_BASELINE_CONCURRENCY)
-# Layout categories clear temp/ before each batch; keep aggregate records outside
-# that workspace so a later suite cannot erase an earlier suite's result.
+# Keep aggregate records separate from the layout harness's scratch artifacts.
 LAYOUT_BASELINE_RESULTS = test_output/_layout_baseline_results.txt
 
 # Keep the layout-only and full Radiant reports on the same aggregation and
@@ -2100,38 +2098,8 @@ endef
 # Run the shared layout baseline inventory without building. Suites with a
 # recorded baseline run only those entries; suites without one run in full.
 run-layout-baseline-suites:
-	@mkdir -p test_output; \
-	> $(LAYOUT_BASELINE_RESULTS); \
-	any_failed=0; \
-	echo ""; \
-	echo "📦 Layout Baseline Tests:"; \
-	for suite in $(LAYOUT_BASELINE_SUITES); do \
-		echo ""; \
-		echo "  ▸ $$suite:"; \
-		layout_log="test_output/_layout_baseline_$${suite}.log"; \
-		rm -f "$$layout_log"; \
-		layout_exit=0; \
-		s_start=$$(date +%s); \
-		$(LAYOUT_BASELINE_RUNNER) -c "$$suite" > "$$layout_log" 2>&1 || layout_exit=$$?; \
-		s_elapsed=$$(($$(date +%s) - s_start)); \
-		grep -E "Baseline-only:|No recorded baseline" "$$layout_log" | head -1 || true; \
-		grep -A5 "Summary:" "$$layout_log" | tail -6 || true; \
-		grep "Baseline Regressions" "$$layout_log" | head -1 || true; \
-		s_passed=$$(grep "   ✅ Successful:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_passed=$${s_passed:-0}; \
-		s_partial=$$(grep "   ⚠️  Partially Passing:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_partial=$${s_partial:-0}; \
-		s_skipped=$$(grep "Skipped:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_skipped=$${s_skipped:-0}; \
-		s_failed=$$(grep "   ❌ Failed:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_failed=$${s_failed:-0}; \
-		s_status="✅ PASS"; \
-		if grep -q "Baseline Regressions" "$$layout_log"; then \
-			s_status="❌ FAIL"; any_failed=1; \
-		elif [ $$layout_exit -ne 0 ] || ! grep -q "   ✅ Successful:" "$$layout_log"; then \
-			if [ $$s_failed -eq 0 ]; then s_failed=1; fi; \
-			s_status="❌ FAIL"; any_failed=1; \
-		fi; \
-		echo "$$suite|$$s_status|$$s_passed|$$s_partial|$$s_failed|$$s_skipped|$$s_elapsed" >> $(LAYOUT_BASELINE_RESULTS); \
-		rm -f "$$layout_log"; \
-	done; \
-	if [ $$any_failed -gt 0 ]; then exit 1; fi
+	@$(LAYOUT_TEST_ENV) node test/run_layout_baseline.js --suites "$(LAYOUT_BASELINE_SUITES)" \
+		--jobs $(LAYOUT_BASELINE_CONCURRENCY) --results "$(LAYOUT_BASELINE_RESULTS)"
 
 test-radiant-baseline: build-radiant-baseline
 	@$(MAKE) --no-print-directory run-radiant-baseline
@@ -2189,7 +2157,7 @@ test-svg-smil: build
 	@node test/svg/test_svg_smil.cjs $(ARGS)
 
 # All Radiant checks use the shared runner's JSON artifacts and final report.
-# Independent native suites share a worker budget; artifact-sharing checks remain exclusive.
+# Native and script pools share a worker budget; artifact-sharing checks remain exclusive.
 run-radiant-baseline:
 	@RADIANT_RENDER_JOBS=$(RADIANT_RENDER_JOBS) node test/test_run.js --target=radiant --category=baseline $(ARGS)
 

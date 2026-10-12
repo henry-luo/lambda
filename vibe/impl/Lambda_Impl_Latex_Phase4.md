@@ -25,11 +25,13 @@ When nothing is expanded, the reconstruction is byte-identical to the input, so 
 | M1 | Engine core: catcode tokenizer with provenance, control-sequence table, save stack, registers, macros (delimited/undelimited, `\long`/`\outer`/`\protected`), all expandable primitives and conditionals (TeX + e-TeX), number/dimen/glue scanning with TeX's exact rounding, `\the`/`\meaning`/`\string`, budgets, reconstruction + offset map; native LaTeX layer (command/environment definitions with optional arguments, `\begin`/`\end`, raw captures, counters/lengths, options, `\usepackage`/`\RequirePackage`/`\documentclass` resolution to beside-document files); `parse(..., {type: "tex"})` diagnostic entry; digester integration | done |
 | M2 | Conformance corpus: `\immediate\write16` traces compared with `pdftex -ini -etex` from the local TeX Live 2025 for catcodes, expansion, conditionals, grouping, registers, arithmetic | done |
 | M3 | Bundled programming layer: `keyval`, `ifthen`, `calc`, `etoolbox`, `kvoptions`, `xkeyval`; expl3 generic loader; format snapshot cache | done; on-disk format cache open |
-| M4 | biblatex style files (`.bbx`/`.cbx`/`.lbx`/`.dbx`) on the two-pass model of §9.5 | — |
+| M4 | biblatex style files (`.bbx`/`.cbx`/`.lbx`/`.dbx`) on the two-pass model of §9.5 | Dropped by the user on 2026-10-12; guide-level biblatex styles map to CSL ([Lambda_Design_BibTeX_CSL §7.4](../latex/Lambda_Design_BibTeX_CSL.md#74-biblatex-style-names-mapped-to-csl)) |
 | M5 | PGF/PGFPlots native extensions (§9.6) and island expansion | six bounded rows done ([Tikz Phase IV](Lambda_Impl_Tikz_Phase4.md)); rest diagnosed |
 | M6 | Corpus of local packages, docs (§6 matrix, doc/dev), baselines | — |
 
 ## M4 design: biblatex style files on the engine
+
+> **Dropped (2026-10-12).** The user dropped M4; nothing below was built. The design is kept as a record. Guide-level biblatex styles map to CSL styles instead ([Lambda_Design_BibTeX_CSL §7.4](../latex/Lambda_Design_BibTeX_CSL.md#74-biblatex-style-names-mapped-to-csl)).
 
 This realizes §9.5 without moving package policy out of script.
 

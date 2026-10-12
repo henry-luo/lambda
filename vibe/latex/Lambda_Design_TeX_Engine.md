@@ -136,7 +136,6 @@ Raw islands (`tikzpicture`, verbatim, math, `filecontents`) are copied as source
 
 - **Ratification.** Record the engine boundary (§1), the S1.8 reading (§2.4) and the file gate (§8) as a **D7** ruling.
 - **Resolution order.** The 2026-10-07 proposal listed script adapters before bundled packages. The code checks bundled packages first and also passes the declaration to an adapter of the same name. The two differ only for a name that is both, currently `ifthen`. Confirm the implemented order.
-- **Biblatex style files (M4).** The engine was to take biblatex's formatting role for `.bbx`/`.cbx`/`.lbx`/`.dbx` files beside the document: Lambda keeps Biber's role (parsing, inheritance, sorting, labels, uniqueness) and writes a `.bbl`-equivalent formatting program, and a Lambda-owned `lambda-biblatex.sty` implements the style-author interface (drivers, bibmacros, field/list/name formats, the punctuation tracker, `\DeclareCiteCommand`, strings). Bibmacros a local style leaves undefined fall back to the script styles. The [CSL design](Lambda_Design_BibTeX_CSL.md) recommends deferring this in favor of CSL. Nothing of M4 is built; decide whether to keep or drop it.
 - **Default expansion.** Approve making expansion the only front end (§6), including the control-space whitespace change.
 
 **Engineering gaps against this design**
@@ -156,7 +155,7 @@ Raw islands (`tikzpicture`, verbatim, math, `filecontents`) are copied as source
 
 - **Widen the bundled set** with further programming packages that emit no output, such as `xstring`, `environ`, `trimspaces`, `letltxmacro`, `xpatch`, `refcount`, `xfp` and `lastpage`'s programming layer. This is vendor and test work.
 - **Expose kernel internals as constructors.** Journal classes redefine `\section`, `\maketitle`, floats and captions through `\@startsection`, `\@maketitle`, `\@float`, `\@makecaption`, `\list`/`\@item` and the tabular and bibliography internals. If the kernel exposes those internals as constructors that map to semantic elements, a class that redefines through them still yields headings and figures. This is the LaTeXML binding model and the largest lever for real-world classes.
-- **Thin TeX bindings.** Where a package's user macros are option handling and argument parsing over a few output points, write the binding as a small `.sty` on the engine, as M4 planned for biblatex, instead of reimplementing the macros in script. The script adapter keeps the HTML semantics, and user `\renewcommand` of package commands works unchanged. `siunitx`, whose number parser is expl3, is a good first case.
+- **Thin TeX bindings.** Where a package's user macros are option handling and argument parsing over a few output points, write the binding as a small `.sty` on the engine, the pattern the dropped M4 design proposed for biblatex, instead of reimplementing the macros in script. The script adapter keeps the HTML semantics, and user `\renewcommand` of package commands works unchanged. `siunitx`, whose number parser is expl3, is a good first case.
 - **Corpus.** Build a corpus of real classes and packages kept beside their documents, with provenance and licenses: journal and thesis templates and macro packages that use delimited parameters, option processing, `etoolbox` hooks and expl3. Compare semantic HTML and selected visible text with pinned TeX output.
 
 ## Appendix A. Brief history
@@ -167,8 +166,10 @@ Raw islands (`tikzpicture`, verbatim, math, `filecontents`) are copied as source
 | 2026-10-07 | The user set the Phase IV scope: a full TeX engine for `.sty`/`.cls` and biblatex style files, files only from beside the document, and PGF/PGFPlots growth in native script rather than by running PGF. M1 (engine and digester integration), M2 (pdfTeX conformance) and M3 (bundled packages and expl3 through a cached format) landed the same day, then merged to master. |
 | 2026-10-10 | Math-mode expansion for formulas that contain definitions. The CSL design recommended deferring M4. |
 | 2026-10-12 | This design was extracted from `Lambda_Pkg_Latex3.md` §9 and checked against the code. |
+| 2026-10-12 | The user dropped M4 (biblatex style files on the engine) in favor of mapping guide-level biblatex styles to CSL. |
 
 ## Appendix B. Superseded rulings
 
 - ~~`\usepackage` text never becomes a native `.sty` loader; package selection is a static script registry only.~~ Replaced 2026-10-07: `.sty`/`.cls` files beside the document and the bundled programming packages run on this engine. The static adapter registry and the rule that no package text becomes a Lambda import remain (§2.4, §5).
+- ~~The engine takes biblatex's formatting role for `.bbx`/`.cbx`/`.lbx`/`.dbx` files beside the document (M4): Lambda keeps Biber's role and writes a `.bbl`-equivalent formatting program, and a Lambda-owned `lambda-biblatex.sty` implements the style-author interface.~~ Dropped by the user on 2026-10-12. It would have reimplemented biblatex's formatting layer for the few documents that keep style files beside them. Guide-level biblatex styles map to CSL styles instead ([Lambda_Design_BibTeX_CSL.md](Lambda_Design_BibTeX_CSL.md) §7.4), and biblatex style files are never executed.
 - ~~A complete TeX engine is deferred (TikZ proposal §10).~~ Replaced 2026-10-07 for expansion only; running PGF sources on the engine remains rejected (§7).

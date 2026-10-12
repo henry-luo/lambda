@@ -4,6 +4,8 @@
 
 **Consolidation:** On 2026-10-12, §2.1 absorbed the built-in biblatex profile from the retired `Lambda_Pkg_Latex3.md`, and §4.1 was checked against the implemented API. The overall package design is [Lambda_Pkg_Latex.md](../Lambda_Pkg_Latex.md); the TeX engine, including the deferred biblatex style-file path, is [Lambda_Design_TeX_Engine.md](Lambda_Design_TeX_Engine.md).
 
+**Ruling (USER, 2026-10-12):** Phase IV M4, running biblatex style files on the TeX engine, is dropped. Documents that name a guide-level biblatex style reach the matching CSL style through the alias table in §7.4. That mapping is designed but not yet built.
+
 **Confirmed direction:** Use a CSL + citeproc pipeline comparable to Pandoc's. Implement the processor in **Lambda script**, as part of **`lambda.latex`**. Existing libraries may inform the implementation and supply reference results; they are not production runtime dependencies.
 
 **Scope:** Bibliography data, citation processing, and bibliography rendering through the existing LaTeX package and HTML/Radiant output path. Target standard CSL 1.0.2 in stages, with explicit coverage and limitations at every stage.
@@ -43,7 +45,7 @@ The current bounded profile is summarized in §2.1. Its documented limits includ
 
 The main missing capability is a standard style interpreter. Adding more punctuation templates to `bib_style.ls` would leave style maintenance, locale coverage, and document-level citation rules tied to Lambda-specific code.
 
-There is also an existing [Phase IV M4 proposal](../impl/Lambda_Impl_Latex_Phase4.md#m4-design-biblatex-style-files-on-the-engine) to execute BibLaTeX style files through the TeX expansion engine. That is a separate compatibility path. This proposal recommends prioritizing CSL for bibliography enhancement and deferring that M4 work. It does not claim that `.bbx`/`.cbx` styles become CSL styles or mark M4 complete. Reprioritizing its implementation record is a follow-up decision.
+The Phase IV M4 proposal to execute biblatex style files (`.bbx`/`.cbx`/`.lbx`/`.dbx`) on the TeX expansion engine was dropped by the user on 2026-10-12. Biblatex style files are never executed. Guide-level biblatex styles are instead mapped to CSL styles (§7.4).
 
 ### 2.1 The built-in biblatex and natbib profile
 
@@ -303,6 +305,33 @@ CSL bibliography layout metadata such as hanging indentation, second-field align
 
 No new CLI flags are needed for the first implementation. A later proposal may expose `--citeproc`, `--bibliography`, `--csl`, and locale selection on conversion/render commands, reusing the package options. Those flags do not exist merely because they appear here.
 
+### 7.4 Biblatex style names mapped to CSL
+
+Contributed biblatex styles implement published style guides, and CSL styles implement the same guides. A document that names such a style can therefore be formatted by the corresponding CSL style. This replaces the dropped M4 path, which would have reimplemented biblatex's formatting layer on the TeX engine and could only have reached style files kept beside the document; installed CTAN styles such as biblatex-apa are never beside it.
+
+**Selection.** When no explicit `citeproc` render option is given, and the document selects a style in the alias table through `style=` (or through matching `citestyle=` and `bibstyle=`), or loads `biblatex-chicago`, the biblatex adapter selects the mapped CSL style automatically. It records the processor and style in result metadata and emits a located diagnostic naming the CSL style used, so the substitution is never silent. An explicit `citeproc` option still takes precedence, and a conflicting biblatex style alongside it keeps the existing `conflicting-citation-style` diagnostic. This adds behavior only for documents that are diagnosed as `unsupported-bib-style` today; documents using the built-in profile are unchanged, so it does not pre-empt the separate default-migration review in §9.
+
+**Initial alias table.** Only styles with a bundled, pinned CSL file are aliased:
+
+| biblatex request | CSL style |
+|---|---|
+| `style=apa` (biblatex-apa) | `apa` |
+| `style=ieee` (biblatex-ieee) | `ieee` |
+| `biblatex-chicago` with `authordate`, or `style=chicago-authordate` | `chicago-author-date` |
+| `biblatex-chicago` with `notes`, or `style=chicago-notes` | `chicago-fullnote-bibliography` |
+
+`biblatex-chicago` is a separate package rather than a `style=` value, so it needs a registry entry that routes to the biblatex adapter. Further guide-level styles, such as `mla`, `nature`, `science` and `phys`, join the table only after their CSL style is bundled and passes the admission rule below.
+
+**Admission rule.** Each alias needs fixtures that compare its citations and bibliography against the biblatex package's own output from a pinned toolchain, with intentional differences recorded, as §7.1 requires for any legacy-name alias. The two implementations follow the same guide but are independent, so edge cases, localization and punctuation may differ; the diagnostic tells users which formatter was used.
+
+**What is never mapped.**
+
+- biblatex's standard styles (`numeric`, `numeric-comp`, `alphabetic`, `authoryear`, `authoryear-comp`, `authortitle`) are generic families, not guides. They keep the native script implementation in §2.1. Alphabetic labels in particular have no reliable CSL equivalent.
+- A `citestyle=` and `bibstyle=` pair that names two different styles has no single CSL style and is diagnosed.
+- Style options that a CSL style fixes in its XML (`maxnames`, `giveninits`, `uniquename`, `sorting`, the `doi`/`url`/`isbn` toggles) are diagnosed as conflicting unless an explicit, tested translation exists, per §7.1.
+- Document-level TeX customization of the style (`\DeclareFieldFormat`, `\renewbibmacro`, `\DeclareNameFormat`, sorting templates) has no CSL counterpart and is diagnosed.
+- Any other style name keeps the `unsupported-bib-style` diagnostic.
+
 ## 8. References and reuse policy
 
 | Reference | Use in this project |
@@ -331,7 +360,7 @@ The engine language, package ownership and CSL pipeline are confirmed constraint
 | Initial public selection | Opt-in `render_result(..., {citeproc: ...})`; retain the existing default |
 | First production style set | Pinned IEEE/Vancouver numeric styles and APA/Chicago author–date once their complete feature inventories pass; note style follows the note gate |
 | Existing BibLaTeX style overrides | Diagnose conflicting requests; add translations only with explicit fixtures |
-| Phase IV M4 | Defer BibLaTeX style execution while the CSL pipeline is built |
+| Phase IV M4 | Dropped (USER, 2026-10-12); guide-level biblatex styles map to CSL styles (§7.4) |
 | Locale collation | Decide after a source audit and multilingual comparison; publish the selected policy |
 | Default migration | Separate review after parity, rendered-output and performance evidence |
 | Later CLI / Markdown exposure | Reuse these internal modules; keep outside the initial package change |

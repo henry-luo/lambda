@@ -216,7 +216,7 @@ The package offers four bibliography paths, in order of preference:
 - **natbib and BibTeX** with named-style approximations.
 - **In-document `thebibliography`.**
 
-All four share resource loading, citation collection, scopes and links. The design and the built-in profile are in [Lambda_Design_BibTeX_CSL.md](latex/Lambda_Design_BibTeX_CSL.md). Biblatex style files on the TeX engine remain a separate, deferred path (engine design §10).
+All four share resource loading, citation collection, scopes and links. The design and the built-in profile are in [Lambda_Design_BibTeX_CSL.md](latex/Lambda_Design_BibTeX_CSL.md). Biblatex style files are never executed. A document that names a guide-level biblatex style, such as `apa`, `ieee` or the biblatex-chicago styles, is formatted by the matching CSL style with a diagnostic naming it ([Lambda_Design_BibTeX_CSL.md](latex/Lambda_Design_BibTeX_CSL.md#74-biblatex-style-names-mapped-to-csl) §7.4). This mapping was decided on 2026-10-12 and is not yet built.
 
 ### 8.3 Graphics and drawing
 
@@ -282,7 +282,8 @@ The matrix was checked on 2026-10-07; the engine, bibliography, natbib and corpu
 
 - **Make expansion the only front end** and retire the raw parse branch and script macro substitution (§4.3, §5.4; engine design §6).
 - **Ratify the engine boundary** as a D7 ruling, and confirm its package resolution order (engine design §10).
-- **Keep or drop biblatex style files on the engine (M4).** The CSL design recommends deferring it.
+
+Decided on 2026-10-12 and not yet built: the biblatex-to-CSL style mapping (§8.2).
 
 ### 11.2 Correctness gaps in the script package
 
@@ -321,6 +322,7 @@ These were reproduced on 2026-10-12.
 | 2026-10-07 (Phase III) | Thirty-one Overleaf samples drove the shared table and theorem models, natbib, caption, cleveref, listings, language and page-style profiles, PDF outlines, raw-body parser preservation and the no-Lua rule. All samples parse and export. |
 | 2026-10-07 (Phase IV) | The TeX expansion engine, pdfTeX conformance, bundled programming packages and expl3, and six native PGF/PGFPlots slices. |
 | 2026-10-10 | The Lambda-script CSL citeproc, opt-in. |
+| 2026-10-12 (ruling) | The user dropped M4, running biblatex style files on the TeX engine, and chose to map guide-level biblatex styles to CSL styles instead. |
 | 2026-10-12 | This consolidation. The retired documents, all recoverable from git, are listed below. |
 | 2026-10-12 cleanup | Removed the unused LaTeX.js-era `css/` stylesheets and `js/base.js`, the unused document-class exports and dead macro helpers. The appendix-letter helper moved to `util.upper_alph`. |
 
