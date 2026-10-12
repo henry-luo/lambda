@@ -1,4 +1,4 @@
-// Phase IV §9.6: TikZ `positioning` placement and `calc` coordinates.
+// Phase IV (Lambda_Pkg_Tikz §12): TikZ `positioning` placement and `calc` coordinates.
 // Scene geometry is compared with a pinned PGF 3.1.10 reference
 // (test/latex/fixtures/tikz_phase4/positioning_reference.{tex,ref}).
 import tikz: lambda.doc.tikz.tikz

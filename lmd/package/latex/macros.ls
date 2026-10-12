@@ -1,10 +1,13 @@
 // latex/macros.ls — Basic \newcommand macro expansion
 // Pre-processes the AST to extract macro definitions.
-// Tree-sitter parses \newcommand{\name}[N]{body} as an element:
-//   <newcommand "\\name" <brack_group "N"> <curly_group ...body...>>
-// Macro invocations like \name{arg} become elements:
-//   <name "arg">
-// Expansion happens at render time via render.ls to avoid tree-rebuilding.
+// The direct parser yields \newcommand{\name}[N][default]{body} as an element
+// whose children are the name and argument groups, and whose argument_groups
+// attribute keeps each group's raw source; a definition records that raw body.
+// Macro invocations like \name{arg} become elements: <name "arg">.
+// render.ls substitutes the raw arguments into the raw body and re-parses it.
+// After TeX expansion, invocations are already expanded and definitions are
+// only echoed, so substitution matters on the unexpanded path
+// (vibe/latex/Lambda_Design_TeX_Engine.md §6).
 
 import util: .util
 

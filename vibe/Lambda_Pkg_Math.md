@@ -330,6 +330,8 @@ script/scriptscript style; `—` is an impossible pair after normalization.
 Explicit `\,`, `\:`, `\;` and `\!` use mu glue. `\quad`, `\qquad`
 and `\enspace` use text-em dimensions rather than shrinking with math style.
 
+Inter-atom glue uses only the natural widths of `\thinmuskip`, `\medmuskip` and `\thickmuskip` (3mu, 4mu, 5mu). Their stretch and shrink components are not modelled, because the static renderer never sets a math list to a target width: there is no line breaking and no `\hbox to`. A future width-setting feature must add the glue components from TeX's register defaults rather than scale the natural widths.
+
 AMS modulo commands contribute atoms and glue to the surrounding math list;
 boxing the entire command as an ordinary atom loses boundary spacing and
 binary normalization. `\bmod` surrounds its binary label with 5mu kerns
@@ -573,7 +575,7 @@ remaining obligations.
 |---|---|
 | Symbols and alphabets | Greek, binary/relation/arrow/AMS symbols, operator names, ordinary and specialist alphabets, and explicit atom classes. Coverage depends on command mapping and available glyphs. |
 | Text and mode changes | Scoped text styles, nested text commands, escaped specials, and embedded `$...$` math. Bundled verbatim uses the existing typewriter face and retains delimited source and starred visible spaces. Font requests follow structured commands rather than literal command text. Quote encoding and supplied-MATH-font text selection remain incomplete. |
-| Dimensions | Supported `em`, `ex`, `mu`, `pt`, `bp`, `pc`, `in`, `cm`, `mm`, `px`; TeX points and big points remain distinct. Kern dimensions end at their unit and preserve following tokens. |
+| Dimensions | Supported `em`, `ex`, `mu`, `pt`, `bp`, `pc`, `in`, `cm`, `mm`, `px`; TeX points and big points remain distinct. Kern dimensions end at their unit and preserve following tokens. Physical units resolve through the CSS reference of 96px per inch: `pt` is 96/72.27px, `bp` is 96/72px, `pc` is 12pt, and `in`/`cm`/`mm` follow from the inch. The result is divided by the caller's `font_size` (default 16px per em), so physical lengths do not scale with math style. `em` and `ex` use the current text size and the profile x-height; `mu` is the current math quad divided by 18. |
 | Arrays and AMS environments | Matrix families, cases/rcases/dcases, array, smallmatrix, subarray/substack, aligned/alignedat, gathered and related parsed environments; per-column alignment, starred matrix alignment, row gaps and solid/dashed rules. Cells scope infix fractions. This is bounded layout, not arbitrary TeX alignment/register execution. |
 | Array style | Small matrices/subarrays use script style; matrices use text style; supported AMS alignment/gathered environments and dcases use display style. Row placement accounts for cell heights/depths and centers the table on the axis. Complete strut/glue/rule derivation remains outstanding. |
 | Equation material | Parsed tags and nonprinting controls are retained. Numbering, references and outer display placement belong to the document layer; standalone math has no general line-breaking engine. |
@@ -818,6 +820,7 @@ current code, not permission to adopt their present behavior as a new rule.
 | Macro expansion and document registers | Extend modulo verification to following scripts, nested font/color macros and configurable math-glue registers. Integrate continued fractions with custom document baseline/strut registers and broaden nested/profile coverage. The default AMS glue and argument declaration scope, parenthesis phantom and cfrac alignment/text-strut contracts now have automated independent evidence. |
 | Decorations and framed boxes | Complete package-derived poor-man's-bold, strike/cancel, phase and actuarial geometry, box registers, bbox/enclose options and border/padding policy. Authored raise/reflection/vcenter support is not a certificate for these decorations. |
 | Text and quotes | Complete literal paired-quote/font-encoding behavior and text/typewriter selection with supplied MATH fonts. Preserve text/math scoping and escapes while adding typography coverage. Bundled verbatim typewriter selection is independently covered by content/font and native-paint checks. |
+| Negation | `\not` currently centres an upright `/` over the following relation's advance and keeps that relation's width and class (`negated` in `typeset.ls`). Plain TeX defines `\not` as a zero-width relation glyph from the symbol font (`\mathchar"3236`) that overstrikes the next relation at its natural position. The centring is fitted geometry under Rule 1; replace it with the TeX definition and verify it independently. Existing negated-relation tests check content, advance and roundtrip, not geometry. |
 | Logos, color and images | Complete standalone `\TeX` / `\LaTeX`; audit xcolor expressions/scoping and graphicx natural-size semantics. Keep the current bounded image convention explicit. |
 
 For each family, establish its command definition and available font data,
@@ -872,6 +875,8 @@ This document replaces `Lambda_Pkg_Math2.md`, `Lambda_Pkg_Math3.md`,
 `Lambda_Pkg_Math4.md`, `Lambda_Pkg_Math4_PhaseA_Roadmap.md` and
 `Lambda_Pkg_Math5.md`, as well as the original proposal/progress log formerly
 in this file. Git history retains their detailed implementation records.
+
+On 2026-10-12 the older math notes under `vibe/latex/` were retired into this document: `Latex_Math_Overall_Design.md`, `Latex_Math_Test.md`, `Mathlive.md`, `MathLive_Analysis.md`, `Math_Ascii.md`, `Math_Input.md` and `Math_Spacing.md`. They described the removed C++ `lambda/tex/` math pipeline, the MathLive-compatible HTML renderer, a standalone ASCII-math parser that was never adopted, and the old LaTeX-source spacing formatter. Their surviving facts are the dimension conversion basis in §7, the natural-width glue note in §6.1 and the `\not` gap in §10.1. Input-layer math parsing is documented in `vibe/input/Input_Math.md` and `vibe/input/Input_Latex_Math_Parser.md`.
 
 | Period | Design progression |
 |---|---|

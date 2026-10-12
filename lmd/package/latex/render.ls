@@ -2558,21 +2558,6 @@ fn render_macro_invocation(el, info, macro_def) {
     }
 }
 
-fn build_macro_args(el, macro_def) {
-    let args = util.command_args(el)
-    if (macro_def.default_arg == null) { args }
-    else if (has_optional_arg(args)) { args }
-    else { [macro_def.default_arg] ++ args }
-}
-
-fn has_optional_arg(el) {
-    if (len(el) > 0) {
-        let first = el[0];
-        (first is element and string(name(first)) == "brack_group")
-    }
-    else { false }
-}
-
 fn render_items(items, i, n, info, acc) {
     if (i >= n) { acc }
     else {

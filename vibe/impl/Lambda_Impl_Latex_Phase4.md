@@ -1,6 +1,6 @@
 # LaTeX Phase IV implementation plan
 
-**Design:** [Lambda_Pkg_Latex3.md §9](../Lambda_Pkg_Latex3.md#9-phase-iv--tex-engine-for-document-local-packages-and-styles-extended-pgfpgfplots-proposed).
+**Design:** [Lambda_Design_TeX_Engine.md](../latex/Lambda_Design_TeX_Engine.md) (formerly `Lambda_Pkg_Latex3.md` §9; section numbers cited below refer to that retired document, and §9.6 now lives in [Lambda_Pkg_Tikz.md §12](../Lambda_Pkg_Tikz.md#12-phase-iv-profile)).
 **Started:** 2026-10-07 (USER: "proceed to impl in a worktree"), branch `worktree-latex-phase4`.
 The §9.8 recommendations are taken as the working choices; each is revisited here if evidence contradicts it.
 

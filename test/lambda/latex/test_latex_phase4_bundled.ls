@@ -1,4 +1,4 @@
-// Phase IV (Lambda_Pkg_Latex3 §9.4): bundled LPPL programming packages
+// Phase IV (Lambda_Design_TeX_Engine §4): bundled LPPL programming packages
 // (kvoptions, etoolbox, ifthen, xkeyval, calc) run unmodified on the TeX
 // engine. Expected values were checked against pdflatex (TeX Live 2025).
 import latex: lambda.latex.latex

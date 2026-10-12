@@ -2357,7 +2357,7 @@ static tex::Engine* run_tex_engine(const InputParseOptions* options, const char*
     return engine;
 }
 
-// LAMBDA_TEX_EXPAND=1 expands every LaTeX parse (the §9.9 front-end parity run)
+// LAMBDA_TEX_EXPAND=1 expands every LaTeX parse (the Lambda_Design_TeX_Engine §6 front-end parity run)
 static bool tex_expand_by_default() {
 #ifdef LAMBDA_NO_AMBIENT_PROVIDERS
     return false;
@@ -2380,7 +2380,7 @@ void parse_latex_direct(Input* input, const char* latex_string) {
         options = &knob_options;
     }
     if (options && options->tex_expand) {
-        // §9.2: expansion before digestion; the parser reads the engine's text
+        // Lambda_Design_TeX_Engine §2: expansion before digestion; the parser reads the engine's text
         tex::Result result = {};
         tex::Engine* engine = run_tex_engine(options, latex_string, strlen(latex_string), &result);
         if (engine) {

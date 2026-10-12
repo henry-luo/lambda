@@ -1,20 +1,10 @@
-# LaTeX Math Test Framework
+# LaTeX Math Comparison Harness (historical)
 
-> The current math package emits outlined SVG. Its regression gates are
-> `make test-math-corpus` and the `test/lambda/math/` font/layout goldens.
-> This directory retains historical AST/HTML/DVI reference tools; DOM/class
-> comparison scores against MathLive do not establish SVG visual equivalence.
-
-
-Static HTML comparison framework for LaTeX math typesetting in Lambda.
+> **Status:** historical reference tooling, not a conformance gate. The math package (`lambda.doc.math`, design in `vibe/Lambda_Pkg_Math.md`) parses formulas with the direct LaTeX math parser and emits measured SVG with embedded fonts. Its regression gates are `make test-math-corpus`, `make test-mathcmp` (Lambda PNG versus pdfLaTeX) and the `test/lambda/math/` goldens. DOM/class comparison scores against MathLive and KaTeX do not establish SVG visual equivalence.
 
 ## Overview
 
-This framework compares Lambda's static LaTeX-to-HTML output against MathLive and KaTeX references.
-
-The retired `lambda.exe math --output-*` CLI formerly emitted a MathLive-shaped
-AST and DVI. The supported script-level math package exposes a tree-sitter AST
-and static HTML instead, so the active gate is HTML comparison.
+This framework compared Lambda's earlier static math HTML against MathLive and KaTeX references, and its earlier DVI output against pdfTeX. The retired `lambda.exe math --output-*` CLI emitted a MathLive-shaped AST and DVI; the script math package later emitted static HTML before it moved to SVG. The `make test-math*` targets below still run these comparisons.
 
 ## Quick Start
 

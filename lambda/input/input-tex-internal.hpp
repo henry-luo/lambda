@@ -2,7 +2,7 @@
 //
 // The engine follows the TeX82/e-TeX expansion semantics: tokens, meanings,
 // a save stack with TeX's level discipline, conditionals and macro calls.
-// Typesetting is not reproduced; Radiant owns layout (Lambda_Pkg_Latex3 §9.3).
+// Typesetting is not reproduced; Radiant owns layout (Lambda_Design_TeX_Engine §1).
 #pragma once
 
 #include "input-tex.hpp"

@@ -2,8 +2,8 @@
 
 These are unmodified copies of upstream LaTeX programming packages. Lambda's
 TeX expansion engine loads them as *bundled resources* when a document or a
-beside-document package requests them (`vibe/Lambda_Pkg_Latex3.md` §9.4,
-§9.8). They are never looked up in a TeX installation. Do not edit them in
+beside-document package requests them (`vibe/latex/Lambda_Design_TeX_Engine.md`
+§4). They are never looked up in a TeX installation. Do not edit them in
 place: a change belongs upstream, or in the engine, or in the Lambda-owned
 kernel (`lambda/input/input-tex-kernel.cpp`). See CLAUDE.md rule 16.
 

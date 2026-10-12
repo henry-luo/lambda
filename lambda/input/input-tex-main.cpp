@@ -936,7 +936,7 @@ Engine* engine_create(const EngineOptions* options) {
         }
         e->expl3_format = format > 0;
         if (!e->expl3_format) load_kernel(e);
-        // §9.2: adapter commands that read their arguments as tokens
+        // Lambda_Design_TeX_Engine §2.3: adapter commands that read their arguments as tokens
         for (int i = 0; i < options->raw_command_count; i++) {
             uint32_t cs = intern_cstr(e, options->raw_commands[i]);
             Meaning m = {};

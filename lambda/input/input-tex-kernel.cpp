@@ -3,7 +3,7 @@
 // A clean-room profile of the documented package-author interface, written
 // in TeX on top of the engine's native LaTeX layer (input-tex-latex.cpp).
 // Document-level commands are declared as constructors: defined to the
-// engine, passed through to the script adapters (Lambda_Pkg_Latex3 §9.3).
+// engine, passed through to the script adapters (Lambda_Design_TeX_Engine §2.2).
 #ifndef LAMBDA_NO_LATEX
 
 #include "input-tex-internal.hpp"
