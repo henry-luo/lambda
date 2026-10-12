@@ -46,6 +46,7 @@ struct MvpLmdCallable : Function {
     bool static_method;
     bool native_constructor;
     bool non_constructible;
+    bool custom_new_target;    // native constructor implements GetPrototypeFromConstructor
     uint8_t home_slot;          // one-based traced closure slot: literal home Map or enclosing method Function
     MvpLmdClass* properties;     // lazy ordinary-function own/prototype storage
 };
@@ -53,8 +54,9 @@ static_assert(sizeof(MvpLmdCallable) == sizeof(Function) + 4 * sizeof(void*),
     "the optional home slot must fit the existing callable padding");
 typedef Item (*MvpLmdNativeEntry)(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
 struct MvpLmdNativeCallable : MvpLmdCallable { void* state; };
-Item mvp_lmd_native_function(MvpLmdProgram* program, void* state, MvpLmdNativeEntry entry, uint8_t arity);
-Item mvp_lmd_named_set(Item owner, const char* key, Item value);
+Item mvp_lmd_native_function(MvpLmdProgram* program, void* state, MvpLmdNativeEntry entry, uint8_t arity,
+    const char* name = NULL);
+Item mvp_lmd_named_set(Item owner, const char* key, Item value, int descriptor_flags = -1);
 Item mvp_lmd_object_value(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item receiver, Item);
 enum MvpLmdLibraryBinding { LMD_LIBRARY_JSON, LMD_LIBRARY_DATE, LMD_LIBRARY_DATE_PROTOTYPE,
     LMD_LIBRARY_DATE_STATICS, LMD_LIBRARY_REGEXP, LMD_LIBRARY_REGEXP_PROTOTYPE,
@@ -69,6 +71,13 @@ enum MvpLmdLibraryBinding { LMD_LIBRARY_JSON, LMD_LIBRARY_DATE, LMD_LIBRARY_DATE
     LMD_LIBRARY_SET, LMD_LIBRARY_SET_PROTOTYPE, LMD_LIBRARY_SET_STATICS,
     LMD_LIBRARY_MATH, LMD_LIBRARY_FUNCTION_PROTOTYPE, LMD_LIBRARY_SYMBOL_VALUES,
     LMD_LIBRARY_REFLECT, LMD_LIBRARY_PROXY, LMD_LIBRARY_COUNT };
+enum MvpLmdErrorKind { LMD_ERROR_BASE, LMD_ERROR_EVAL, LMD_ERROR_RANGE,
+    LMD_ERROR_REFERENCE, LMD_ERROR_SYNTAX, LMD_ERROR_TYPE, LMD_ERROR_URI,
+    LMD_ERROR_AGGREGATE, LMD_ERROR_COUNT };
+extern const char* const mvp_lmd_error_names[LMD_ERROR_COUNT];
+enum MvpLmdPrimitiveKind { LMD_PRIMITIVE_STRING, LMD_PRIMITIVE_NUMBER,
+    LMD_PRIMITIVE_BOOLEAN, LMD_PRIMITIVE_BIGINT, LMD_PRIMITIVE_COUNT };
+extern const char* const mvp_lmd_primitive_names[LMD_PRIMITIVE_COUNT];
 struct MvpLmdLibraryState {
     Item* values;
     TypeMap* object_shape;
@@ -86,10 +95,18 @@ struct MvpLmdLibraryState {
     MvpLmdClass iterator;
     MvpLmdClass map;
     MvpLmdClass set;
+    MvpLmdClass* errors;        // optional nominal families; values live in registered program slots
+    Item* error_values;
+    MvpLmdClass* primitives;
+    Item* primitive_values;
+    NameRef primitive_key;      // boxed primitive payload, traced by the shared Map layout
+    int abort_kind;             // one-based non-JS failure, retained across finally completions
+    int64_t abort_site;
 };
 Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
 Item mvp_lmd_library_class_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state,
-    MvpLmdClass* cls, int index, const char* name, MvpLmdNativeEntry entry, uint8_t arity);
+    MvpLmdClass* cls, int index, const char* name, MvpLmdNativeEntry entry, uint8_t arity,
+    bool immutable_metadata = false);
 Item mvp_lmd_regexp_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
 Item mvp_lmd_function_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
 Item mvp_lmd_generator_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
@@ -151,6 +168,7 @@ Item mvp_lmd_array_own_item(Array* array, int64_t index);
 Item mvp_lmd_array_property(Item owner, Item key, Item value, int64_t operation, Item receiver);
 extern "C" Item mvp_lmd_array_index_property(Item owner, int64_t index, Item value, int64_t operation);
 Item mvp_lmd_object_create(MvpLmdProgram* program, Item prototype);
+Item mvp_lmd_box_primitive(Item value, Item prototype = Item{.item = ITEM_JS_UNDEFINED});
 extern const TypeNominalExtension mvp_lmd_plain_extension;
 extern const TypeNominalExtension mvp_lmd_class_extension;
 MvpLmdClass* mvp_lmd_class_record(Item owner);
@@ -206,7 +224,8 @@ double mvp_lmd_parse_number(String* string, int64_t prefix);
 Item mvp_lmd_number_to_string(double value);
 Item mvp_lmd_number_to_radix_string(double value, double radix);
 Item mvp_lmd_primitive_to_string(Item value, int64_t library_objects = 1);
-Item mvp_lmd_primitive_to_number(Item value);
+Item mvp_lmd_primitive_to_number(Item value, int64_t explicit_number = 0);
+void mvp_lmd_numeric_string_span(String* string, const char** bytes, size_t* length);
 Item mvp_lmd_to_primitive(Item value, int64_t hint, int64_t library_objects = 1);
 Item mvp_lmd_caught_value(MvpLmdLibraryState* state, Item error);
 Item mvp_lmd_generator_park(Item value, int64_t kind);

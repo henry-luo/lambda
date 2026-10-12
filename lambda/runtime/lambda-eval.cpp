@@ -4875,7 +4875,7 @@ Bool fn_at(Item a_item, Item b_item) {
         // where `for (k at e)` gives the attributes without the children.
         // Admitting indices here would delete that capability. Iteration always
         // agreed (`for (k at xs)` yields nothing); membership was the outlier.
-        // An index bound is written explicitly: `i < len(xs)`.
+        // Positions are the `of` axis: an index bound is `i of xs` (S8.1.1v2).
         return BOOL_FALSE;
     }
     if (b_type == LMD_TYPE_MAP) {
@@ -4887,16 +4887,59 @@ Bool fn_at(Item a_item, Item b_item) {
         return shape_has_named_key((TypeMap*)b_item.element->type, a_item) ? BOOL_TRUE : BOOL_FALSE;
     }
     if (b_type == LMD_TYPE_VMAP) {
+        // S8.2.2v6: `at` ranges over names only, so a VMap's IntKey entries are
+        // the `of` axis (fn_of) -- this arm used to admit any key by equality.
+        // A name is matched by contents whether spelled as a string or a symbol.
+        if (!is_text_type_id(get_type_id(a_item))) return BOOL_FALSE;
         VMap* vm = b_item.vmap;
         if (!vm || !vm->vtable) return BOOL_FALSE;
         int64_t count = vm->vtable->count(vm->data);
         for (int64_t i = 0; i < count; i++) {
-            if (fn_eq(vm->vtable->key_at(vm->data, i), a_item) == BOOL_TRUE) {
+            Item key = vm->vtable->key_at(vm->data, i);
+            if (is_text_type_id(get_type_id(key)) && key.get_len() == a_item.get_len() &&
+                    memcmp(key.get_chars(), a_item.get_chars(), key.get_len()) == 0) {
                 return BOOL_TRUE;
             }
         }
     }
     return BOOL_FALSE;
+}
+
+// S8.1.1v2: `i of c` -- position membership, the IntKey class. The left
+// operand normalizes exactly as a subscript does (S8.2.1v4), so `1.0 of a`
+// holds and `-1 of a`, `"1" of a` and `0 of {a: 1}` do not.
+Bool fn_of(Item a_item, Item b_item) {
+    // an error operand propagates, as for `in` and `at` (S7.6)
+    if (get_type_id(a_item) == LMD_TYPE_ERROR ||
+            get_type_id(b_item) == LMD_TYPE_ERROR) {
+        return BOOL_ERROR;
+    }
+    int64_t int_key = -1;
+    if (!lambda_item_to_int64_exact(a_item, &int_key)) return BOOL_FALSE;
+    TypeId b_type = get_type_id(b_item);
+    if (b_type == LMD_TYPE_VMAP) {
+        // a VMap's IntKeys are map keys, not positions, so they may be negative
+        VMap* vm = b_item.vmap;
+        if (!vm || !vm->vtable) return BOOL_FALSE;
+        int64_t count = vm->vtable->count(vm->data);
+        for (int64_t i = 0; i < count; i++) {
+            int64_t key = 0;
+            if (lambda_item_to_int64_exact(vm->vtable->key_at(vm->data, i), &key) &&
+                    key == int_key) {
+                return BOOL_TRUE;
+            }
+        }
+        return BOOL_FALSE;
+    }
+    if (int_key < 0) return BOOL_FALSE;
+    if (is_element_family_type_id(b_type)) {
+        // an element's IntKeys select its children; attributes are the `at` axis
+        return int_key < lambda_content_count(b_type, b_item.element) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    if (b_type == LMD_TYPE_MAP) return BOOL_FALSE;
+    // array, list, range and text: the positions 0 .. len-1; a scalar or null
+    // has no content, so its `len` is 0 and nothing is a position of it (S8.3.1v3)
+    return int_key < fn_len(b_item) ? BOOL_TRUE : BOOL_FALSE;
 }
 
 // use struct overlays for static String with flexible array member

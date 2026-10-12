@@ -4494,6 +4494,7 @@ bool lambda_binary_operator_from_spelling(StrView op, Operator* op_out) {
     else if (strview_equal(&op, "<:")) { *op_out = OPERATOR_SUBTYPE; }
     else if (strview_equal(&op, "in")) { *op_out = OPERATOR_IN; }
     else if (strview_equal(&op, "at")) { *op_out = OPERATOR_AT; }
+    else if (strview_equal(&op, "of")) { *op_out = OPERATOR_OF; }
     else { return false; }
     return true;
 }
@@ -8779,7 +8780,7 @@ static Type* direct_binary_result_type(Transpiler* tp, Operator op,
     if (op == OPERATOR_TO) return &TYPE_RANGE;
     if (op == OPERATOR_EQ || op == OPERATOR_NE || op == OPERATOR_REF_EQ ||
             op == OPERATOR_IS || op == OPERATOR_SUBTYPE || op == OPERATOR_IN ||
-            op == OPERATOR_AT) {
+            op == OPERATOR_AT || op == OPERATOR_OF) {
         return &TYPE_BOOL;
     }
     if (op == OPERATOR_LT || op == OPERATOR_LE || op == OPERATOR_GT ||
@@ -13463,16 +13464,18 @@ static AstLoopNode* build_loop_syntax(Transpiler* tp, SourceSpan span,
             source_span_text(tp, index_token.span)) : NULL;
     loop->as = source;
     loop->on = join;
-    loop->key_filter = (flags & LAMBDA_REDUCTION_FLAG_KEY_ONLY)
-        ? LOOP_KEY_SYMBOL : LOOP_KEY_ALL;
+    // S8.1.1v2: the axis picks the key class -- `at` the NameKeys, `of` the
+    // IntKeys, `in` both
+    loop->key_filter = (flags & LAMBDA_REDUCTION_FLAG_KEY_ONLY) ? LOOP_KEY_SYMBOL
+        : (flags & LAMBDA_REDUCTION_FLAG_INT_ONLY) ? LOOP_KEY_INT : LOOP_KEY_ALL;
     // S8.1.3: the AXIS (`in`/`at`) selects which members are walked — that is
     // `key_filter` above — while the ARITY selects the projection. `for (k at c)`
     // binds the key, but the paired `for (k, v at c)` walks the same name-keyed
     // members and binds (key, value): `index_name` is the key slot and `name` is
     // the value slot by construction, so key_only must not also redirect `name`
     // to the key. Leaving it set bound BOTH names to the key (LR02-8).
-    loop->key_only = (flags & LAMBDA_REDUCTION_FLAG_KEY_ONLY) != 0 &&
-        !loop->index_name;
+    loop->key_only = (flags & (LAMBDA_REDUCTION_FLAG_KEY_ONLY |
+        LAMBDA_REDUCTION_FLAG_INT_ONLY)) != 0 && !loop->index_name;
     loop->optional = (flags & LAMBDA_REDUCTION_FLAG_OPTIONAL) != 0;
     void** tail = syntax_tail((AstNode*)loop, sizeof(AstLoopNode));
     tail[0] = index_type;
@@ -13492,14 +13495,22 @@ static void resolve_loop(Transpiler* tp, AstLoopNode* loop) {
     AstNode* join = loop->on;
     void** tail = syntax_tail((AstNode*)loop, sizeof(AstLoopNode));
     AstNode* index_type = (AstNode*)tail[0];
-    loop->type = direct_loop_value_type(tp, source, loop->key_only);
+    // `for (i of c)` binds the position itself, a known int on every container
+    loop->type = loop->key_only && loop->key_filter == LOOP_KEY_INT ? &TYPE_INT
+        : direct_loop_value_type(tp, source, loop->key_only);
 
     Type* key_contract = index_type ? direct_function_contract(index_type) : NULL;
     if (loop->index_name && key_contract) {
-        if (key_contract->type_id == LMD_TYPE_INT) loop->key_filter = LOOP_KEY_INT;
-        else if (key_contract->type_id == LMD_TYPE_SYMBOL) loop->key_filter = LOOP_KEY_SYMBOL;
-        else record_semantic_error_span(tp, index_type->source_span,
+        // S8.1.3v2: the annotation names a key class. On `in` it narrows the
+        // walk; on `at`/`of` it must restate the axis, never contradict it.
+        int want = key_contract->type_id == LMD_TYPE_INT ? LOOP_KEY_INT
+            : key_contract->type_id == LMD_TYPE_SYMBOL ? LOOP_KEY_SYMBOL : LOOP_KEY_ALL;
+        if (want == LOOP_KEY_ALL) record_semantic_error_span(tp, index_type->source_span,
             ERR_INVALID_OPERATION, "for index type must be int or symbol");
+        else if (loop->key_filter != LOOP_KEY_ALL && loop->key_filter != want)
+            record_semantic_error_span(tp, index_type->source_span, ERR_INVALID_OPERATION,
+                "for index type contradicts the `at`/`of` axis: `at` walks symbol keys, `of` int keys");
+        else loop->key_filter = (LoopKeyFilter)want;
     }
     if (loop->index_name) {
         AstNamedNode* index = (AstNamedNode*)tail[1];

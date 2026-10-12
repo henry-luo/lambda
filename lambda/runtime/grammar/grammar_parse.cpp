@@ -202,7 +202,7 @@ size_t token_start(ParseState* S, size_t pos) {
 }
 
 bool match_literal(ParseState* S, GrammarExpr* e) {
-    skip_space(S);
+    if (!e->immediate) skip_space(S);
     size_t n = e->text->len;
     if (S->pos + n <= S->len && memcmp(S->src + S->pos, e->text->chars, n) == 0 &&
             !(e->word_boundary && S->pos + n < S->len && word_char(S->src[S->pos + n]))) {
@@ -214,9 +214,10 @@ bool match_literal(ParseState* S, GrammarExpr* e) {
     return false;
 }
 
-bool match_token(ParseState* S, uint32_t index, bool emit) {
+// `immediate`: the reference was written `~name` (GM13), so no space first
+bool match_token(ParseState* S, uint32_t index, bool emit, bool immediate) {
     GrammarRule* rule = S->g->rules[index];
-    if (!rule->is_space) skip_space(S);
+    if (!rule->is_space && !immediate) skip_space(S);
     size_t end = S->pos;
     // a keyword token (`for := 'for'`) matches whole words, as a literal does
     if (rule->pattern && pattern_match_prefix_at(rule->pattern, S->src, S->len, S->pos, &end) &&
@@ -251,7 +252,7 @@ bool parse_rule(ParseState* S, uint32_t index, uint32_t level, bool splice);
 
 bool call_rule(ParseState* S, GrammarExpr* e, bool splice) {
     GrammarRule* rule = S->g->rules[e->rule_index];
-    if (rule->is_token) return match_token(S, e->rule_index, !rule->hidden && !splice);
+    if (rule->is_token) return match_token(S, e->rule_index, !rule->hidden && !splice, e->immediate);
     uint32_t level = e->call_mode == GM_CALL_TRAILING ? e->prec : 0;
     return parse_rule(S, e->rule_index, level, splice || rule->hidden);
 }
@@ -493,7 +494,7 @@ bool parse_rule(ParseState* S, uint32_t index, uint32_t level, bool splice) {
 
 bool run(ParseState* S, uint32_t entry) {
     GrammarRule* rule = S->g->rules[entry];
-    bool ok = rule->is_token ? match_token(S, entry, true) : parse_rule(S, entry, 0, false);
+    bool ok = rule->is_token ? match_token(S, entry, true, false) : parse_rule(S, entry, 0, false);
     if (ok) {
         skip_space(S);
         if (S->pos != S->len) {

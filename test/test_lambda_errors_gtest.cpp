@@ -1424,6 +1424,13 @@ TEST_F(NegativeScriptTest, GrammarDuplicateRule) {
         "error[E209]: grammar 'g': rule 'a' is defined twice");
 }
 
+// S8.1.3v2: an index annotation names a key class and must restate the
+// `at`/`of` axis; `symbol` contradicts `of`, which walks IntKeys only.
+TEST_F(NegativeScriptTest, ForOfAxisContradictedByIndexType) {
+    ExpectErrorMessage("test/lambda/negative/semantic/for_of_axis_conflict.ls",
+        "for index type contradicts the `at`/`of` axis");
+}
+
 TEST_F(NegativeScriptTest, GrammarQuotedNameIsARuleName) {
     ExpectErrorMessage("test/lambda/negative/semantic/grammar_quoted_rule_name.ls",
         "error[E204]: grammar 'g': no rule named 'x'");
@@ -1452,6 +1459,17 @@ TEST_F(NegativeScriptTest, GrammarBodySyntaxError) {
 TEST_F(NegativeScriptTest, GrammarUnterminatedBody) {
     ExpectErrorMessage("test/lambda/negative/syntax/grammar_unterminated.ls",
         "expected '}' closing the grammar body");
+}
+
+// GM13: `~` marks a token, whose first character the space is kept away from
+TEST_F(NegativeScriptTest, GrammarImmediateMarksATokenRule) {
+    ExpectErrorMessage("test/lambda/negative/semantic/grammar_immediate_syntax_rule.ls",
+        "error[E200]: grammar 'g': `~` marks a literal or a `:=` rule, and 'b' is a `=` rule");
+}
+
+TEST_F(NegativeScriptTest, GrammarImmediateMarksOneAtom) {
+    ExpectErrorMessage("test/lambda/negative/syntax/grammar_immediate_group.ls",
+        "error[E100]: grammar 'g': `~` marks a literal or a rule name");
 }
 
 TEST_F(NegativeScriptTest, GrammarLintWarnsWithoutFailing) {

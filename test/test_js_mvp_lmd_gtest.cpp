@@ -51,6 +51,198 @@ protected:
         return read_text_file(path);
     }
 };
+TEST_F(JsMvpLmd, ErrorConstructorsAndDescriptors) {
+    boolean(R"JS(
+        let constructors=[Error,EvalError,RangeError,ReferenceError,SyntaxError,TypeError,URIError];
+        let names=['Error','EvalError','RangeError','ReferenceError','SyntaxError','TypeError','URIError'];
+        let ok=true;
+        for(let i=0;i<constructors.length;i++) {
+            let C=constructors[i], cause={index:i}, e=new C('message',{cause:cause});
+            let descriptor=Object.getOwnPropertyDescriptor(e,'message');
+            let metadata=Object.getOwnPropertyDescriptor(C,'prototype');
+            ok=ok && e instanceof C && e instanceof Error && e.constructor===C &&
+                e.name===names[i] && e.message==='message' && e.cause===cause &&
+                e.toString()===names[i]+': message' && Object.keys(e).length===0 &&
+                descriptor.writable && descriptor.configurable && !descriptor.enumerable &&
+                !metadata.writable && !metadata.configurable && !metadata.enumerable &&
+                Object.prototype.toString.call(e)==='[object Error]' &&
+                !Object.hasOwn(C(),'message') && !Object.hasOwn(C(undefined),'message');
+            if(i) ok=ok && Object.getPrototypeOf(C)===Error &&
+                Object.getPrototypeOf(C.prototype)===Error.prototype;
+            try {throw e;} catch(thrown) {ok=ok && thrown===e;}
+        }
+        ok && TypeError.name==='TypeError' && TypeError.length===1 &&
+            Error.prototype.toString.call({name:'',message:'x'})==='x' &&
+            Error.prototype.toString.call({name:'x',message:''})==='x' &&
+            Error.prototype.toString.call({})==='Error';
+    )JS");
+}
+TEST_F(JsMvpLmd, NativeErrorIdentityAndConstructionOrder) {
+    boolean(R"JS(
+        let ok=true;
+        try {null.x;} catch(e) {ok=e instanceof TypeError && e.constructor===TypeError;}
+        try {new Array(-1);} catch(e) {ok=ok && e instanceof RangeError && e.constructor===RangeError;}
+        try {missingName;} catch(e) {ok=ok && e instanceof ReferenceError;}
+        try {JSON.parse('{');} catch(e) {ok=ok && e instanceof SyntaxError;}
+        let log='', cause={};
+        function Target(){}
+        let target=new Proxy(Target,{get(t,k,r){log+='p';return Reflect.get(t,k,r);}});
+        let message={toString(){log+='m';return 'message';}};
+        let options=new Proxy({cause:cause},{has(t,k){log+='h';return true;},get(t,k){log+='g';return t[k];}});
+        let e=Reflect.construct(TypeError,[message,options],target);
+        ok && log==='pmhg' && Object.getPrototypeOf(e)===Target.prototype &&
+            e.message==='message' && e.cause===cause && Object.prototype.toString.call(e)==='[object Error]';
+    )JS");
+    boolean("let marker={};try{new Error({toString(){throw marker}})}catch(e){e===marker}");
+    boolean("let marker={};try{Error.prototype.toString.call({get name(){throw marker}})}catch(e){e===marker}");
+    error("Error.prototype.toString.call(null)", "TypeError");
+}
+TEST_F(JsMvpLmd, AggregateErrorIterationAndCause) {
+    boolean(R"JS(
+        let order='', cause={};
+        let iterable={[Symbol.iterator](){order+='i';let n=0;return {next(){return {value:++n,done:n>2}}}}};
+        let e=AggregateError(iterable,{toString(){order+='m';return 'all'}},{get cause(){order+='c';return cause}});
+        let descriptor=Object.getOwnPropertyDescriptor(e,'errors');
+        e instanceof Error && e instanceof AggregateError && e.constructor===AggregateError &&
+            e.errors.join(',')==='1,2' && e.cause===cause && order==='mci' &&
+            e.toString()==='AggregateError: all' && AggregateError.length===2 &&
+            descriptor.writable && descriptor.configurable && !descriptor.enumerable;
+    )JS");
+    error("AggregateError({length:1,0:1})", "TypeError");
+}
+TEST_F(JsMvpLmd, FailurePhasesRemainDistinct) {
+    const char* sources[] = {"let = ;", "async function f(){}", "null.x", "throw new TypeError('x')", "1+1",
+        "eval('unknown')", "Function('return unknown')", "class E extends Error{};new E('x')",
+        "function f(){try{new RegExp('a','d')}finally{return 42}}f()",
+        "function f(){try{null.x}finally{return 42}}f()"};
+    MvpLmdFailurePhase expected[] = {MVP_LMD_PARSE_FAILURE, MVP_LMD_ADMISSION_FAILURE,
+        MVP_LMD_RUNTIME_FAILURE, MVP_LMD_RUNTIME_FAILURE, MVP_LMD_SUCCESS,
+        MVP_LMD_ADMISSION_FAILURE, MVP_LMD_ADMISSION_FAILURE, MVP_LMD_ADMISSION_FAILURE,
+        MVP_LMD_ADMISSION_FAILURE, MVP_LMD_SUCCESS};
+    for (int i=0;i<10;i++) {
+        mvp_lmd_destroy(execution); execution=mvp_lmd_execute(sources[i], strlen(sources[i]));
+        MvpLmdFailurePhase phase; const char* type=nullptr;
+        mvp_lmd_diagnostic(execution,&phase,&type);
+        EXPECT_EQ(phase,expected[i]);
+        if(i==0) EXPECT_STREQ(type,"SyntaxError");
+        else if(i==2 || i==3) EXPECT_STREQ(type,"TypeError");
+        else EXPECT_EQ(type,nullptr);
+    }
+}
+TEST_F(JsMvpLmd, PrimitiveBinaryConversions) {
+    boolean(R"JS(
+        let events='';
+        function add(a,b){return a+b;}
+        function less(a,b){return a<b;}
+        let left={valueOf(){events+='l';return 2;}}, right={valueOf(){events+='r';return 3;}};
+        let values=[2,1.5,'3',left,4n,new Number(2.5),null,undefined];
+        let ok=add(values[0],values[1])===3.5 && add(values[2],1)==='31' &&
+            add(values[3],right)===5 && events==='lr';
+        events='';
+        ok=ok && less(values[3],right) && events==='lr' && add(values[4],1n)===5n &&
+            add(values[5],1)===3.5 && add(values[6],2)===2 &&
+            !less(values[7],2) && !less(NaN,2) && less(2,Infinity) &&
+            1/add(-0,-0)===-Infinity;
+        let failures=0;
+        try{add(values[4],1);}catch(e){if(e instanceof TypeError)failures++;}
+        try{less(Symbol(),1);}catch(e){if(e instanceof TypeError)failures++;}
+        ok && failures===2;
+    )JS");
+}
+TEST_F(JsMvpLmd, PrimitiveWrapperIdentityAndStorage) {
+    boolean(R"JS(
+        let s=new String('a\ud83d\ude00'), n=new Number(1.25), b=new Boolean(false);
+        let symbol=Symbol('tag'), boxedSymbol=Object(symbol), bigint=Object(123n);
+        let descriptor=Object.getOwnPropertyDescriptor(s,'1');
+        let length=Object.getOwnPropertyDescriptor(s,'length');
+        s instanceof String && s.valueOf()==='a\ud83d\ude00' && s.toString()==='a\ud83d\ude00' &&
+            s.length===3 && s[0]==='a' && s[1]==='\ud83d' && s[2]==='\ude00' &&
+            Object.keys(s).join(',')==='0,1,2' && descriptor.enumerable &&
+            !descriptor.writable && !descriptor.configurable && !length.enumerable && !length.writable &&
+            n instanceof Number && n.valueOf()===1.25 && n.toString()==='1.25' &&
+            b instanceof Boolean && b.valueOf()===false && b.toString()==='false' && !!b &&
+            boxedSymbol.valueOf()===symbol && boxedSymbol.toString()==='Symbol(tag)' &&
+            bigint.valueOf()===123n && bigint.toString(16)==='7b' &&
+            Object.prototype.toString.call(s)==='[object String]' &&
+            Object.prototype.toString.call(n)==='[object Number]' &&
+            Object.prototype.toString.call(b)==='[object Boolean]' &&
+            Object.getPrototypeOf(5)===Number.prototype &&
+            Object.getPrototypeOf('x')===String.prototype &&
+            String.prototype.valueOf()==='' && Number.prototype.valueOf()===0 &&
+            Boolean.prototype.valueOf()===false;
+    )JS");
+    error("Number.prototype.valueOf.call({})", "TypeError");
+    error("String.prototype.valueOf.call(new Number(1))", "TypeError");
+    error("BigInt.prototype.valueOf()", "TypeError");
+    error("new BigInt(1)", "TypeError");
+    error("'use strict';let s=new String('abc');s[0]='d'", "TypeError");
+}
+TEST_F(JsMvpLmd, PrimitiveConstructorsAsValues) {
+    boolean(R"JS(
+        let text=String, number=Number, boolean=Boolean, integer=BigInt;
+        text() === '' && text(12)==='12' && text(Symbol('x'))==='Symbol(x)' &&
+            number()===0 && number('1.5')===1.5 && number(123n)===123 &&
+            boolean()===false && boolean({})===true && boolean(0)===false &&
+            integer('0xff')===255n && integer(true)===1n && integer(12)===12n &&
+            [1,2].map(text).join(',')==='1,2' && String(Symbol())==='Symbol()' &&
+            new Number().valueOf()===0 && new String().valueOf()==='' &&
+            Object.prototype.valueOf.call(7).valueOf()===7;
+    )JS");
+    error("BigInt(1.5)", "RangeError");
+    error("BigInt('abc')", "SyntaxError");
+    error("BigInt('0x+1')", "SyntaxError");
+    error("BigInt('0x 1')", "SyntaxError");
+    error("BigInt(undefined)", "TypeError");
+    error("String({[Symbol.toPrimitive](){return Symbol('x')}})", "TypeError");
+    error("new String(Symbol('x'))", "TypeError");
+    error("String(Object(Symbol('x')))", "TypeError");
+    boolean("let x={valueOf(){return 17n}};Number(x)===17 && (new Number(x)).valueOf()===17");
+    boolean("BigInt('\\u3000 42 \\ufeff')===42n && BigInt('\\u2029')===0n && BigInt(1e100).toString().length===101");
+    boolean("Error.prototype.toString.name==='toString' && Number.prototype.valueOf.name==='valueOf' && !Object.getOwnPropertyDescriptor(Number.prototype.valueOf,'name').writable");
+}
+TEST_F(JsMvpLmd, PrimitiveWrapperJsonAndGenericApply) {
+    boolean(R"JS(
+        let n=new Number(3),s=new String('x'),b=new Boolean(false), order='';
+        n.valueOf=function(){order+='n';return 9};
+        s.toString=function(){order+='s';return 'y'};
+        b.valueOf=function(){throw 1};
+        let json=JSON.stringify([n,s,b,Object(Symbol('x'))]);
+        function add(a,b){return this.offset+a+b}
+        let list={get length(){order+='l';return 2},get 0(){order+='a';return 3},get 1(){order+='b';return 4}};
+        json==='[9,"y",false,{}]' && order==='ns' &&
+            add.apply({offset:1},list)===8 && order==='nslab' &&
+            Object.prototype.toString.call(BigInt.prototype)==='[object BigInt]' &&
+            Object.prototype.toString.call(Symbol.prototype)==='[object Symbol]';
+    )JS");
+    error("JSON.stringify(Object(1n))", "TypeError");
+    error("(function(){}).apply(null,'abc')", "TypeError");
+}
+TEST_F(JsMvpLmd, Test262HostCompletionOwnership) {
+    MvpLmdHost host = {0, nullptr, nullptr, true};
+    Item result=run("globalThis.__lambda_test262_async_required=true;globalThis.__lambda_test262_async_done=true;({value:7})", &host);
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_MAP);
+    const char* source="globalThis.__lambda_test262_async_required=true;globalThis.__lambda_test262_async_done=false;function setTimeout(){};42";
+    mvp_lmd_destroy(execution);execution=mvp_lmd_execute(source,strlen(source),nullptr,&host);
+    ASSERT_NE(mvp_lmd_diagnostic(execution),nullptr);
+    EXPECT_NE(strstr(mvp_lmd_diagnostic(execution),"async test did not call $DONE"),nullptr);
+}
+TEST_F(JsMvpLmd, BoundFunctionObservableMetadata) {
+    boolean(R"JS(
+        function target(a,b,c){return this.base+a+b+c}
+        let bind=target.bind, normal=target.bind({base:1},2), order='', proto={};
+        let correct=normal.name==='bound target' && normal.length===2 && normal(3,4)===10 &&
+            !Object.getOwnPropertyDescriptor(normal,'length').writable;
+        Object.defineProperty(target,'length',{get(){order+='l';return Infinity},configurable:true});
+        Object.defineProperty(target,'name',{get(){order+='n';return 'renamed'},configurable:true});
+        let proxy=new Proxy(target,{
+            getPrototypeOf(t){order+='p';return proto},
+            getOwnPropertyDescriptor(t,k){if(k==='length')order+='h';return Reflect.getOwnPropertyDescriptor(t,k)}
+        });
+        let bound=bind.call(proxy,null,1);
+        correct && order==='phln' && bound.length===Infinity && bound.name==='bound renamed' &&
+            Object.getPrototypeOf(bound)===proto;
+    )JS");
+}
 TEST_F(JsMvpLmd, HostClockOutputAndFiles) {
     ASSERT_TRUE(create_dir("temp"));
     FILE* output = file_open_regular_write("temp/mvp_host_output.txt", true);

@@ -1309,7 +1309,7 @@ for scalars".
     negation; `!` keeps its type-level roles (infix exclusion, complement).
     `!` becomes a pure infix token and moves from the S16.2.3 banned set to
     the S16.2.2 continuation set (§7.1).
-20. `not` re-tiers loose: below comparisons and `is`/`in`/`at`, above
+20. `not` re-tiers loose: below comparisons and `is`/`in`/`at`/`of`, above
     `and`/`or` — `not a == b` ≡ `not (a == b)`, the Python placement
     (§7.2).
 21. Sized floats accept integer spellings: `1f32` is a valid f32 literal,
@@ -1622,7 +1622,7 @@ Ruby, and SQL all bind word-`not` *below* comparisons. Every developer
 reads `not a == b` as `not (a == b)`.
 
 **Ruling.** `not` binds below the comparison tiers (`binary_relation`,
-`binary_eq`) and below `is`/`in`/`at`, above `and`/`or` — the Python
+`binary_eq`) and below `is`/`in`/`at`/`of`, above `and`/`or` — the Python
 placement, so `not a in b` means `not (a in b)`. Unary `-` keeps its tight
 arithmetic precedence; the unary tier no longer contains `not`.
 
@@ -3498,7 +3498,7 @@ makes `let type = 1` and `let int = 1` errors rather than the silent
 misreads they were before this ruling — both used to parse and then read the
 base type at the use site.
 
-### K.2 Allowed as binding names (28)
+### K.2 Allowed as binding names (29)
 
 Legal, and legal to shadow: these words carry no capture hazard because they
 never lead.
@@ -3506,7 +3506,7 @@ never lead.
 | Group | Words |
 |---|---|
 | Clause words (10) — only meaningful inside a `for` header | `order` `by` `group` `into` `limit` `offset` `asc` `desc` `where` `as` |
-| Infix word operators (14) — each takes a left operand | `and` `or` `to` `is` `in` `at` `div` `that` `eq` `ne` `lt` `le` `ge` `gt` |
+| Infix word operators (15) — each takes a left operand | `and` `or` `to` `is` `in` `at` `of` `div` `that` `eq` `ne` `lt` `le` `ge` `gt` |
 | Continuation-only words (4) — claimed by an enclosing `if`/`match`/view | `else` `case` `default` `on` |
 
 This group is why `let offset = 5` and `fn f(limit)` have always worked, and

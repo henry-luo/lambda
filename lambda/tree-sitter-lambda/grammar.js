@@ -146,6 +146,7 @@ function binary_rules($, in_element) {
     mk('<:', 'is_in', 'left'),
     mk('in', 'is_in', 'left'),
     mk($._at, 'is_in', 'left'),
+    mk($._of, 'is_in', 'left'),
   ];
   if (!in_element) {
     rules.push(
@@ -940,6 +941,7 @@ module.exports = grammar({
     current_error_expr: _ => prec(0, token('^')),
 
     _at: _ => token(prec(2, 'at')),
+    _of: _ => token(prec(2, 'of')),
     _into: _ => token(prec(2, 'into')),
 
     // §7.1: unary `!` is GONE from value expressions — `!true` used to mean
@@ -1151,7 +1153,7 @@ module.exports = grammar({
       seq(
         field('name', $.identifier),
         optional(field('optional', '?')),
-        field('op', choice('in', $._at)),
+        field('op', choice('in', $._at, $._of)),
         field('as', $._expr),
         optional(seq('on', field('on', $._expr))),
       ),
@@ -1160,7 +1162,7 @@ module.exports = grammar({
         optional(seq(':', field('index_type', choice($.base_type, $.identifier)))),
         ',', field('name', $.identifier),
         optional(field('optional', '?')),
-        'in', field('as', $._expr),
+        field('op', choice('in', $._at, $._of)), field('as', $._expr),
         optional(seq('on', field('on', $._expr))),
       ),
     ),

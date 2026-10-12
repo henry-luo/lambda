@@ -1,0 +1,25 @@
+"element addressBook { element card { element name { text }, element email { text } }* }  =>  <Schema <Element name: <Name "addressBook">, <Repeat pattern: <Element name: <Name "card">, <Group <Element name: <Name "name">, <Text>> <Element name: <Name "email">, <Text>>>>, op: '*'>>>
+default namespace = "http://example.com/ns"
+namespace a = "urn:a"
+datatypes xsd = "http://www.w3.org/2001/XMLSchema-datatypes"
+start = Card
+Card = element card { Name, attribute id { xsd:ID }?, mixed { text } }
+Name = element name { xsd:string { maxLength = "127" } }  =>  <Schema <DefaultNamespaceDecl uri: <Literal "http://example.com/ns">> <NamespaceDecl prefix: "a", uri: <Literal "urn:a">> <DatatypesDecl prefix: "xsd", uri: <Literal "http://www.w3.org/2001/XMLSchema-datatypes">> <Start assign: '=', <Ref name: "Card">> <Define name: "Card", assign: '=', <Element name: <Name "card">, <Group <Ref name: "Name"> <Repeat pattern: <Attribute name: <Name "id">, <Data type: "xsd:ID">>, op: '?'> <Mixed <Text>>>>> <Define name: "Name", assign: '=', <Element name: <Name "name">, <Data type: "xsd:string", <Param name: "maxLength", value: <Literal "127">>>>>>
+element doc { (a | b), (c & d) }  =>  <Schema <Element name: <Name "doc">, <Group <Choice <Ref name: "a"> <Ref name: "b">> <Interleave <Ref name: "c"> <Ref name: "d">>>>>
+element * - (foo | ns:*) { attribute lang { "en" | "f" ~ 'r' ~ "" }, list { xsd:integer+ } }  =>  <Schema <Element name: <AnyName except: <NameChoice <Name "foo"> <NsName prefix: "ns">>>, <Group <Attribute name: <Name "lang">, <Choice <Value value: <Literal "en">> <Value value: <Literal "fr">>>> <List <Repeat pattern: <Data type: "xsd:integer">, op: '+'>>>>>
+## Documentation line
+## second
+[ a:defaultValue = "x" ] start = element root { empty }  =>  <Schema <Start assign: '=', <Documentation "## Documentation line\n## second"> <Annotations <AnnotationAttribute name: "a:defaultValue", value: <Literal "x">>> <Element name: <Name "root">, <Empty>>>>
+\element = element element { text }  =>  <Schema <Define name: "element", assign: '=', <Element name: <Name "element">, <Text>>>>
+grammar { start = element x { notAllowed } include "a.rnc" inherit = foo { start |= y } div { y = parent z } }  =>  <Schema <GrammarBlock <Start assign: '=', <Element name: <Name "x">, <NotAllowed>>> <Include uri: <Literal "a.rnc">, inherit: <Inherit prefix: "foo">, <Start assign: '|=', <Ref name: "y">>> <Div <Define name: "y", assign: '=', <ParentRef name: "z">>>>>
+element element-name { xsd:token - "none" } # comment
+  =>  <Schema <Element name: <Name "element-name">, <Data type: "xsd:token", except: <Value value: <Literal "none">>>>>
+start = element a { text >> a:note [ "hi" ] }  =>  <Schema <Start assign: '=', <Element name: <Name "a">, <Annotated pattern: <Text>, <FollowAnnotation <AnnotationElement name: "a:note", <Literal "hi">>>>>>>
+start = element a { string """tri"ple""" | token '''x''' }  =>  <Schema <Start assign: '=', <Element name: <Name "a">, <Choice <Value type: "string", value: <Literal "tri\"ple">> <Value type: "token", value: <Literal "x">>>>>>
+external "other.rnc" inherit = a  =>  <Schema <External uri: <Literal "other.rnc">, inherit: <Inherit prefix: "a">>>
+a &= element b { empty }+ a:x [ y = "1" ]  =>  <Schema <Define name: "a", assign: '&=', <Repeat pattern: <Element name: <Name "b">, <Empty>>, op: '+'>> <AnnotationElement name: "a:x", <AnnotationAttribute name: "y", value: <Literal "1">>>>
+element doc { a, b | c }  =>  parse: grammar 'rnc': expected ">>", occurrence, "," or "}" at 1:20, found "|"
+element doc { a & b, c }  =>  parse: grammar 'rnc': expected ">>", occurrence, "&" or "}" at 1:20, found ","
+element = text  =>  parse: grammar 'rnc': expected "[", ncname, "*", cname, "\\" or "(" at 1:9, found "="
+start =  =>  parse: grammar 'rnc': expected doc, "[", 'element', 'attribute', 'list', 'mixed', "(", 'parent', 'empty', 'text', 'notAllowed', 'external', 'grammar', cname, builtin, "\"\"\"", "'''", "\"", "'", "\\" or ncname at 1:8, found end of input
+"

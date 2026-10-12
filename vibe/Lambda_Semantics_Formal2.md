@@ -2588,3 +2588,65 @@ proves them different.
 - **JavaScript symbols join the one name space through a namespace convention** under the
   host root `js` — proposed in Impl_Map_Transition_Coverage §2.9 and accepted the same day
   as NI18 and D3.4.4v4.
+
+### C22. The `of` axis: `IntKey` membership and iteration (2026-10-12) — RESOLVED
+
+**Spec linkage:** S8.1.1v2 (three axes), S8.1.2v3, S8.1.3v2, S8.2.2v6 (the
+index-bound idiom), S16.10.1v3 (`of` is a bindable infix word); editorial
+additions to S8.2.3 and S16.8.2. Design: no new ruling — the runtime already
+carried the `LOOP_KEY_INT` filter for the typed-index form `for (i: int, x in c)`.
+
+**The problem.** C5.3a ruled the `in`/`at` pair as the value/name axis, and point
+4 of that record read index possession into `at` (`i at arr` ⇔ `0 ≤ i < len(arr)`).
+S8.2.2 later narrowed `at` to names only, so that `for (k at e)` could give an
+element's attributes without its children — the right call, but it left
+S8.2.1v4's second canonical key class, `IntKey`, with no axis of its own: no
+membership test for a position (the documented idiom was `i < len(arr)`), and no
+walk of an element's children or an array's positions except through the paired,
+typed form `for (i: int, x in c)`, which is a projection rather than an axis and
+has no membership mirror.
+
+**The ruling (USER, 2026-10-12).** `of` is the third axis, and the rule is now
+stated by key class: `of` walks and tests the `IntKey` class, `at` the `NameKey`
+class, `in` both. `in` = `of` ∪ `at` as key sets, and the two are disjoint.
+Nothing existing changes — `for (k, v in c)` already exposed both classes
+uniformly (S8.2.1v4's own example).
+
+- **Mirror law (S8.1.1v2):** `for (i of c)` ↔ `i of c`. Membership normalizes the
+  left operand exactly as a subscript does (S8.2.1v4): `1.0 of [10, 20]` is true;
+  `-1 of a`, `"1" of a` and `0 of {a: 1}` are false. `i of arr` is the
+  index-bound test; S8.2.2v6 retires `i < len(arr)` as the documented idiom.
+- **What each container exposes (S8.1.2v3):** array, list, range and text — the
+  positions `0 … len-1`; element and object — content positions, attributes
+  excluded (the mirror of `at`); a structural map — nothing; a VMap — its `IntKey`
+  entries, which are keys, not positions, and may be negative.
+- **Arity (S8.1.3v2):** the one-name form binds the position, the paired form
+  `(position, value)`. An index annotation names a key class: on `in` it narrows
+  the walk (`for (i: int, x in c)` ≡ `for (i, x of c)`); on `at` or `of` it must
+  restate the axis, and `for (i: symbol, x of c)` is a compile error.
+- **Keyword class (S16.10.1v3):** `of` takes a left operand, so it never leads a
+  construct and stays a legal binding name, like `in` and `at`; Appendix K.2 of
+  Design_Syntax now lists 15 infix word operators.
+- **VMap `at` tightened in passing:** the VMap arm of `fn_at` had admitted any key
+  by equality, so `1 at map([1, "one"])` was true against S8.2.2; with `of` beside
+  it the overlap is removed — `at` on a VMap now admits names only, compared by
+  contents.
+
+**Alternatives considered.**
+- *Keep the typed-index projection as the spelling.* Rejected: an annotation on a
+  binding cannot be mirrored as an operator, and S8.2.2's "write `i < len(arr)`"
+  was a gap the ruling itself acknowledged.
+- *Another word.* `at` is the natural English for positions but is spent on names
+  (C5.3a); `by`, `on`, `to` and `into` are clause words or operators. `of` reads
+  as "index of" and costs no migration: no corpus file binds the name.
+- *The JavaScript collision — recorded and accepted.* JavaScript's `for (x of
+  arr)` binds values; Lambda's binds positions, by S8.1.3's rule that the one-name
+  form binds what the axis is named after (value, name, position). Lambda already
+  inverts JavaScript's `in` (values here, keys there), and LambdaJS keeps its own
+  semantics in its own realm. The user-facing docs state the difference in the
+  sentence that introduces `of`; it is not a reason to pick a worse word.
+
+**Residue.** A VMap's `IntKey` entries are walked by no axis: its `keys` vtable
+yields hash-strings (Type_Vmap, *Iteration*), so `for (i of vmap)` is empty while
+`i of vmap` answers correctly. The gap pre-dates `of` (`for (k, v in vmap)` shows
+the same hash-strings) and is recorded in Appendix A of the semantics spec.

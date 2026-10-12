@@ -196,7 +196,8 @@ static bool is_continuation_word(const char *w, unsigned n) {
     switch (n) {
         case 2:
             return !strcmp(w, "or") || !strcmp(w, "to") || !strcmp(w, "in") ||
-                !strcmp(w, "is") || !strcmp(w, "at") || !strcmp(w, "eq") ||
+                !strcmp(w, "is") || !strcmp(w, "at") || !strcmp(w, "of") ||
+                !strcmp(w, "eq") ||
                 !strcmp(w, "ne") || !strcmp(w, "lt") || !strcmp(w, "le") ||
                 !strcmp(w, "ge") || !strcmp(w, "gt") || !strcmp(w, "by") ||
                 !strcmp(w, "on");

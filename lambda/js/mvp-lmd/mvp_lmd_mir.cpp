@@ -22,10 +22,13 @@ enum LmdKind { K_UNDEFINED = 1, K_NULL = 2, K_BOOL = 4, K_NUMBER = 8,
     K_TYPED_ARRAY = 512, K_BIGINT = 1024, K_SYMBOL = 2048, K_ANY = 4095, K_BOXED = 4096 };
 enum LmdIntrinsic { I_UNDEFINED = 1, I_NAN, I_INFINITY, I_MAP, I_OBJECT,
     I_MATH, I_INT32_ARRAY, I_UINT8_ARRAY, I_FLOAT64_ARRAY, I_ARRAY, I_STRING, I_ERROR,
-    I_NUMBER, I_PARSE_INT, I_IS_NAN, I_PERFORMANCE, I_CONSOLE, I_PROCESS, I_REQUIRE, I_JSON, I_DATE, I_REGEXP, I_GLOBAL_THIS, I_SYMBOL, I_SET, I_REFLECT, I_PROXY, I_COUNT };
+    I_NUMBER, I_PARSE_INT, I_IS_NAN, I_PERFORMANCE, I_CONSOLE, I_PROCESS, I_REQUIRE, I_JSON, I_DATE, I_REGEXP, I_GLOBAL_THIS, I_SYMBOL, I_SET, I_REFLECT, I_PROXY,
+    I_EVAL_ERROR, I_RANGE_ERROR, I_REFERENCE_ERROR, I_SYNTAX_ERROR, I_TYPE_ERROR, I_URI_ERROR, I_AGGREGATE_ERROR,
+    I_BOOLEAN, I_BIGINT, I_COUNT };
 static const char* intrinsic_names[] = {"undefined", "NaN", "Infinity", "Map", "Object",
     "Math", "Int32Array", "Uint8Array", "Float64Array", "Array", "String", "Error",
-    "Number", "parseInt", "isNaN", "performance", "console", "process", "require", "JSON", "Date", "RegExp", "globalThis", "Symbol", "Set", "Reflect", "Proxy"};
+    "Number", "parseInt", "isNaN", "performance", "console", "process", "require", "JSON", "Date", "RegExp", "globalThis", "Symbol", "Set", "Reflect", "Proxy",
+    "EvalError", "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError", "Boolean", "BigInt"};
 static const ArrayNumElemType typed_lanes[] = {ELEM_INT32, ELEM_UINT8, ELEM_FLOAT64};
 static const struct { const char* name; const char* native; int arity;
     double (*unary)(double); double (*binary)(double, double); } math_operations[] = {
@@ -140,6 +143,7 @@ struct MvpLmdProgram {
     Item* slots;
     uint32_t slot_count;
     char diagnostic[192];
+    MvpLmdFailurePhase failure_phase;
     bool linked;
     MirImportEntry entry;
     LmdBinding intrinsics[I_COUNT - 1];
@@ -176,6 +180,10 @@ struct MvpLmdProgram {
     MvpLmdLibraryState* library;
     bool library_active;
     uint32_t library_slot;
+    bool errors;
+    uint32_t error_slot;
+    bool primitives;
+    uint32_t primitive_slot;
 };
 struct MvpLmdExecution {
     MvpLmdProgram program;
@@ -448,7 +456,7 @@ static void walk(AstNode* n, LmdWalk* state) {
         collect_scope(p, state->owner, ((AstScript*)n)->global_vars); break;
     case AST_NODE_BLOCK:
         collect_scope(p, state->owner, ((AstBlockNode*)n)->vars); break;
-    case AST_NODE_TRY_STAM: activate_library(p, n); break;
+    case AST_NODE_TRY_STAM: activate_library(p, n); p->errors = true; break;
     case AST_NODE_CATCH_CLAUSE: {
         JsCatchNode* handler = (JsCatchNode*)n;
         collect_scope(p, state->owner, handler->vars);
@@ -666,6 +674,11 @@ static void walk(AstNode* n, LmdWalk* state) {
     }
     case AST_NODE_IDENT: {
         AstIdentNode* id = (AstIdentNode*)n;
+        if (!id->entry && (named(id->name, "eval") || named(id->name, "Function"))) {
+            // these standard globals require D8.1.3v24's interpreter bridge;
+            // an unimplemented intrinsic must not masquerade as ReferenceError.
+            diagnostic(p, n, "dynamic source requires the shared interpreter bridge"); return;
+        }
         if (named(id->name, "this") && !state->owner->ast) {
             p->global_receiver = true; p->receiver_abi = true;
         }
@@ -700,8 +713,22 @@ static void walk(AstNode* n, LmdWalk* state) {
                         activate_library(p, n); p->property_callbacks = true;
                         p->array_method_overrides = p->map_method_overrides = true;
                     }
+                    if (i + 1 == I_OBJECT && ((!member_owner && !constructor) ||
+                            (constructor && ((AstCallNode*)parent)->arguments))) {
+                        activate_library(p, n); p->primitives = true;
+                    }
                 }
-                if (i + 1 == I_IS_NAN) activate_library(p, n);
+                if (i + 1 == I_ERROR || (i + 1 >= I_EVAL_ERROR && i + 1 <= I_AGGREGATE_ERROR)) {
+                    activate_library(p, n); p->errors = true;
+                    if (i + 1 == I_AGGREGATE_ERROR) p->iterators = true;
+                } else if (i + 1 == I_STRING || i + 1 == I_NUMBER || i + 1 == I_BOOLEAN || i + 1 == I_BIGINT) {
+                    bool direct = state->parent && state->parent->node_type == AST_NODE_CALL_EXPR &&
+                        ((AstCallNode*)state->parent)->callee == n;
+                    if (!direct || i + 1 == I_BOOLEAN || i + 1 == I_BIGINT) {
+                        activate_library(p, n); p->primitives = true;
+                    }
+                    if (i + 1 == I_BIGINT) p->bigints = true;
+                } else if (i + 1 == I_IS_NAN) activate_library(p, n);
                 else if (i + 1 == I_MATH && (!state->parent ||
                         state->parent->node_type != AST_NODE_MEMBER_EXPR)) {
                     p->math_observed = true; activate_library(p, n);
@@ -774,6 +801,11 @@ static void walk(AstNode* n, LmdWalk* state) {
             ((AstCallNode*)state->parent)->callee == n;
         AstNode* consumer = method_call ? ast_index_parent(&p->frontend->ast_index, state->parent) : NULL;
         AstIdentNode* receiver = field->object->node_type == AST_NODE_IDENT ? (AstIdentNode*)field->object : NULL;
+        if (receiver && !receiver->entry &&
+                ((named(spelling, "prototype") && (named(receiver->name, "Object") || named(receiver->name, "Symbol"))) ||
+                 (named(spelling, "getPrototypeOf") && named(receiver->name, "Object")))) {
+            activate_library(p, n); p->primitives = true;
+        }
         if (named(spelling, "create") || named(spelling, "getPrototypeOf") || named(spelling, "defineProperties") || named(spelling, "getOwnPropertyDescriptor") || named(spelling, "getOwnPropertyDescriptors") ||
                 named(spelling, "propertyIsEnumerable") || named(spelling, "isPrototypeOf") ||
                 named(spelling, "getOwnPropertyNames") || named(spelling, "getOwnPropertySymbols") || named(spelling, "preventExtensions") || named(spelling, "seal") ||
@@ -1971,8 +2003,9 @@ static MIR_reg_t coerce_noninline_number(void* owner, MIR_reg_t item) {
         fail(c, LMD_MVP_TYPE, NULL); put_label(c, other);
     }
     if (c->program->library_active) {
-        MIR_reg_t converted = em_call_1(&c->em, c->program->coercion_callbacks ?
-            "mvp_lmd_primitive_to_number" : "mvp_lmd_primitive_to_number_fixed", MIR_T_I64, MIR_T_I64, reg(c, item), true);
+        MIR_reg_t converted = em_call_2(&c->em, c->program->coercion_callbacks ?
+            "mvp_lmd_primitive_to_number" : "mvp_lmd_primitive_to_number_fixed", MIR_T_I64,
+            MIR_T_I64, reg(c, item), MIR_T_I64, integer(c, 0), true);
         // keep the uncommon object-conversion decoder out of every numeric loop's MIR body.
         check_error(c, converted);
         move(c, result, reg(c, em_call_1(&c->em, "it2d", MIR_T_D,
@@ -2105,7 +2138,7 @@ static LmdValue text(LmdCompiler* c, const char* bytes) {
     String* s = name_pool_create_len(c->program->frontend->name_pool, bytes, strlen(bytes));
     return boxed(c, constant(c, s2it(s)), K_STRING);
 }
-static LmdValue to_string(LmdCompiler* c, LmdValue v) {
+static LmdValue to_string(LmdCompiler* c, LmdValue v, bool explicit_string = false) {
     unsigned k = semantic(v);
     if (k == K_STRING) return box(c, v);
     if (k == K_ARRAY) {
@@ -2140,7 +2173,7 @@ static LmdValue to_string(LmdCompiler* c, LmdValue v) {
     // keep dynamic coercion out of numeric loops while preserving each unit's object boundary.
     MIR_reg_t converted = em_call_2(&c->em, c->program->coercion_callbacks ?
         "mvp_lmd_primitive_to_string" : "mvp_lmd_primitive_to_string_fixed", MIR_T_I64,
-        MIR_T_I64, reg(c, v.reg), MIR_T_I64, integer(c, c->program->library_active), true);
+        MIR_T_I64, reg(c, v.reg), MIR_T_I64, integer(c, c->program->library_active | (explicit_string ? 2 : 0)), true);
     check_error(c, converted); move(c, result, reg(c, converted));
     put_label(c, done); return boxed(c, result, K_STRING);
 }
@@ -2544,7 +2577,9 @@ static LmdValue read_binding(LmdCompiler* c, LmdBinding* b, AstNode* site, bool 
     }
     if (b->intrinsic == I_GLOBAL_THIS)
         return boxed(c, em_load_at(&c->em, module_slots(c), c->program->global_slot * sizeof(Item), MIR_T_I64, "global_this"), K_OBJECT);
-    if (b->intrinsic >= I_PERFORMANCE || ((b->intrinsic == I_OBJECT || b->intrinsic == I_ARRAY || b->intrinsic == I_MAP || b->intrinsic == I_MATH) && c->program->library_active))
+    if (b->intrinsic >= I_PERFORMANCE || ((b->intrinsic == I_ERROR ||
+            ((b->intrinsic == I_STRING || b->intrinsic == I_NUMBER) && c->program->primitives) ||
+            b->intrinsic == I_OBJECT || b->intrinsic == I_ARRAY || b->intrinsic == I_MAP || b->intrinsic == I_MATH) && c->program->library_active))
         return boxed(c, em_load_at(&c->em, module_slots(c), b->slot * sizeof(Item), MIR_T_I64,
             "host_binding"), b->kinds);
     if (b->intrinsic >= 4) { fail(c, LMD_MVP_CAPABILITY, site); return boxed(c, constant(c, ITEM_JS_UNDEFINED)); }
@@ -3883,7 +3918,9 @@ static LmdValue object_construct(LmdCompiler* c, AstCallNode* n) {
         move(c, result, reg(c, values[0].reg));
         const TypeId kinds[] = {LMD_TYPE_MAP, LMD_TYPE_ARRAY, LMD_TYPE_ARRAY_NUM, LMD_TYPE_FUNC};
         for (TypeId kind : kinds) branch(c, MIR_BEQ, done, reg(c, type), integer(c, kind));
-        fail(c, LMD_MVP_CAPABILITY, (AstNode*)n);
+        MIR_reg_t boxed_value = em_call_2(&c->em, "mvp_lmd_box_primitive", MIR_T_I64,
+            MIR_T_I64, reg(c, values[0].reg), MIR_T_I64, integer(c, ITEM_JS_UNDEFINED), true);
+        check_error(c, boxed_value); move(c, result, reg(c, boxed_value)); jump(c, done);
     }
     put_label(c, allocate);
     move(c, result, reg(c, em_call_2(&c->em, "mvp_lmd_object_new", MIR_T_I64,
@@ -4721,6 +4758,23 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
     if (intrinsic && (intrinsic->intrinsic == I_STRING || intrinsic->intrinsic == I_NUMBER)) {
         LmdValue* values = call_arguments(c, n, false);
         bool string = intrinsic->intrinsic == I_STRING;
+        if (!string && n->arguments && (semantic(values[0]) & (K_OBJECT | K_ARRAY | K_FUNCTION | K_TYPED_ARRAY))) {
+            // Number permits a BigInt produced by ToPrimitive; implicit ToNumber does not.
+            // preserve native numeric extraction before the observable conversion path.
+            MIR_reg_t result = em_new_reg(&c->em, "explicit_number", MIR_T_D);
+            LmdValue actual = box(c, values[0]);
+            MIR_reg_t type = tag(c, actual);
+            MIR_label_t numeric = label(c), done = label(c);
+            branch(c, MIR_BEQ, numeric, reg(c, type), integer(c, LMD_TYPE_INT));
+            branch(c, MIR_BEQ, numeric, reg(c, type), integer(c, LMD_TYPE_FLOAT));
+            MIR_reg_t converted = em_call_2(&c->em, "mvp_lmd_primitive_to_number", MIR_T_I64,
+                MIR_T_I64, reg(c, actual.reg), MIR_T_I64, integer(c, 1), true);
+            check_error(c, converted);
+            move(c, result, reg(c, to_number(c, boxed(c, converted, K_NUMBER))), true); jump(c, done);
+            put_label(c, numeric); move(c, result, reg(c, cold_unbox(c, actual.reg)), true);
+            put_label(c, done);
+            mem_free(values); return {result, K_NUMBER};
+        }
         if (!string && n->arguments && c->program->bigints && (semantic(values[0]) & K_BIGINT)) {
             // Number explicitly permits BigInt; implicit ToNumber and unary plus do not.
             MIR_reg_t result = em_new_reg(&c->em, "explicit_number", MIR_T_D);
@@ -4731,7 +4785,7 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
             put_label(c, ordinary); move(c, result, reg(c, to_number(c, values[0])), true);
             put_label(c, done); mem_free(values); return {result, K_NUMBER};
         }
-        LmdValue result = string ? (n->arguments ? to_string(c, values[0]) : text(c, ""))
+        LmdValue result = string ? (n->arguments ? to_string(c, values[0], true) : text(c, ""))
             : n->arguments ? LmdValue{to_number(c, values[0]), K_NUMBER} : number(c, 0);
         mem_free(values); return result;
     }
@@ -5736,7 +5790,8 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
             put_label(c, done); mem_free(values);
             return boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED);
         }
-        if (c->program->receiver_abi && (!b || !b->intrinsic || b->intrinsic >= I_JSON ||
+        if (c->program->receiver_abi && (!b || !b->intrinsic || b->intrinsic == I_ERROR ||
+                b->intrinsic == I_STRING || b->intrinsic == I_NUMBER || b->intrinsic >= I_JSON ||
                 (b->intrinsic == I_MAP && c->program->iterators))) {
             LmdValue constructor = box(c, expression(c, call->callee));
             MvpLmdClass* cls = class_plan(c->program, NULL, b);
@@ -6638,29 +6693,9 @@ static void statement(LmdCompiler* c, AstNode* n) {
     }
     case AST_NODE_RAISE_STAM: {
         AstNode* operand = ((AstRaiseNode*)n)->value;
-        // Error objects are admitted only as immediate uncaught throw operands in this phase.
-        bool error_constructor = operand->node_type == AST_NODE_NEW_EXPR &&
-            ((AstCallNode*)operand)->callee->node_type == AST_NODE_IDENT &&
-            identifier_binding(c->program, (AstIdentNode*)((AstCallNode*)operand)->callee) == &c->program->intrinsics[I_ERROR - 1];
-        LmdValue value;
-        if (error_constructor) {
-            AstCallNode* call = (AstCallNode*)operand;
-            if (call->arguments && call->arguments->next) {
-                diagnostic(c->program, n, "Error options"); break;
-            }
-            LmdValue* args = call_arguments(c, call, false);
-            value = text(c, "");
-            if (call->arguments) {
-                // an explicit undefined message has the same empty message as Error().
-                MIR_label_t done = label(c);
-                branch(c, MIR_BEQ, done, reg(c, box(c, args[0]).reg), integer(c, ITEM_JS_UNDEFINED));
-                move(c, value.reg, reg(c, to_string(c, args[0]).reg));
-                put_label(c, done);
-            }
-            mem_free(args);
-        } else value = expression(c, operand);
+        LmdValue value = expression(c, operand);
         MIR_reg_t error = em_call_2(&c->em, "mvp_lmd_throw", MIR_T_I64,
-            MIR_T_I64, reg(c, box(c, value).reg), MIR_T_I64, integer(c, error_constructor), true);
+            MIR_T_I64, reg(c, box(c, value).reg), MIR_T_I64, integer(c, 0), true);
         return_error(c, error); break;
     }
     case AST_NODE_VAR_STAM:
@@ -6799,7 +6834,8 @@ static const LmdImport imports[] = {
     {"mvp_lmd_array_flatten", (void*)mvp_lmd_array_flatten, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,SCALAR)|ARG(2,SCALAR))},
     {"mvp_lmd_array_to_string", (void*)mvp_lmd_array_to_string, {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR), JIT_IMPORT_SCALAR_RESULT(SCALAR_RETURN_NONE)|JIT_IMPORT_NUMBER_STACK_PRESERVES|JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}},
     COERCION_IMPORT(mvp_lmd_primitive_to_string, ARG(0,ITEM)|ARG(1,SCALAR)),
-    COERCION_IMPORT(mvp_lmd_primitive_to_number, ARG(0,ITEM)),
+    {"mvp_lmd_box_primitive", (void*)mvp_lmd_box_primitive, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM))},
+    COERCION_IMPORT(mvp_lmd_primitive_to_number, ARG(0,ITEM)|ARG(1,SCALAR)),
     COERCION_IMPORT(mvp_lmd_to_primitive, ARG(0,ITEM)|ARG(1,SCALAR)|ARG(2,SCALAR)),
     {"mvp_lmd_fail", (void*)mvp_lmd_fail, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,SCALAR)|ARG(1,SCALAR))},
     {"mvp_lmd_string_to_number", (void*)mvp_lmd_string_to_number, AUDIT(JIT_EFFECT_NO_GC, SCALAR, ARG(0,GC_PTR))},
@@ -7184,7 +7220,8 @@ extern "C" Item mvp_lmd_function_prepare(Item owner) {
     const char* names[] = {"constructor", "prototype", "name", "length"};
     const TypeId types[] = {LMD_TYPE_FUNC, LMD_TYPE_MAP, LMD_TYPE_STRING, LMD_TYPE_INT};
     for (int i = has_prototype ? 0 : 2; i < 4; i++) if (!plan_shape_field(p, i ? &cls->static_shape : &cls->prototype_shape,
-            name_pool_create_len(p->frontend->name_pool, names[i], strlen(names[i])), types[i], JSPD_NON_ENUMERABLE | (i == 1 ? JSPD_NON_CONFIGURABLE : 0)))
+            name_pool_create_len(p->frontend->name_pool, names[i], strlen(names[i])), types[i],
+            JSPD_NON_ENUMERABLE | (i == 1 ? JSPD_NON_CONFIGURABLE : i >= 2 ? JSPD_NON_WRITABLE : 0)))
         return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     typemap_hash_build(&cls->static_shape, p->frontend->pool);
     typemap_hash_build(&cls->prototype_shape, p->frontend->pool);
@@ -7238,6 +7275,11 @@ extern "C" Item mvp_lmd_class_new(MvpLmdClass* cls, Item base) {
             return mvp_lmd_fail(get_type_id(base) == LMD_TYPE_FUNC || get_type_id(base) == LMD_TYPE_TYPE
                 ? LMD_MVP_CAPABILITY : LMD_MVP_TYPE, 0);
         if (parent->program != cls->program) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+        MvpLmdCallable* parent_callable = (MvpLmdCallable*)base.function;
+        // builtin-derived allocation must retain the derived nominal family
+        // as well as its internal slots (D2.6.10); P4 owns that construction path.
+        if (parent_callable->native_constructor && parent_callable->custom_new_target)
+            return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
         cls->nominal.base = &parent->nominal;
         cls->prototype_nominal.base = &parent->prototype_nominal;
     }
@@ -7295,6 +7337,18 @@ extern "C" Item mvp_lmd_class_new(MvpLmdClass* cls, Item base) {
     return mvp_lmd_class_values(cls)[0];
 }
 
+static void plan_library_class(MvpLmdProgram* p, MvpLmdClass* cls, const char* name,
+        TypeId prototype_type = LMD_TYPE_MAP) {
+    mvp_lmd_nominal_initialize(cls, name_pool_create_len(p->frontend->name_pool, name, strlen(name)), p);
+    const char* common[] = {"constructor", "prototype", "name", "length"};
+    TypeId types[] = {LMD_TYPE_FUNC, prototype_type, LMD_TYPE_STRING, LMD_TYPE_INT};
+    for (int j = 0; j < 4; j++) {
+        uint8_t flags = JSPD_NON_ENUMERABLE;
+        if (!plan_shape_field(p, j ? &cls->static_shape : &cls->prototype_shape,
+                name_pool_create_len(p->frontend->name_pool, common[j], strlen(common[j])), types[j], flags))
+            diagnostic(p, NULL, "builtin common shape allocation");
+    }
+}
 static void plan_library_shapes(MvpLmdProgram* p, bool metadata_only = false) {
     // key admission inspects the native field inventory without enabling runtime coercion.
     if (!p->library) p->library = (MvpLmdLibraryState*)pool_calloc(p->frontend->pool, sizeof(MvpLmdLibraryState));
@@ -7302,14 +7356,8 @@ static void plan_library_shapes(MvpLmdProgram* p, bool metadata_only = false) {
     if (!p->library->object.shape.type_id) {
         MvpLmdClass* classes[] = {&p->library->date, &p->library->regexp, &p->library->object, &p->library->array, &p->library->generator, &p->library->symbol, &p->library->iterator, &p->library->map, &p->library->set};
         const char* names[] = {"Date", "RegExp", "Object", "Array", "Generator", "Symbol", "Iterator", "Map", "Set"};
-        const char* common[] = {"constructor", "prototype", "name", "length"};
-        TypeId common_types[] = {LMD_TYPE_FUNC, LMD_TYPE_MAP, LMD_TYPE_STRING, LMD_TYPE_INT};
-        for (int i = 0; i < 9; i++) {
-            mvp_lmd_nominal_initialize(classes[i], name_pool_create_len(p->frontend->name_pool, names[i], strlen(names[i])), p);
-            for (int j = 0; j < 4; j++) if (!plan_shape_field(p, j ? &classes[i]->static_shape : &classes[i]->prototype_shape,
-                    name_pool_create_len(p->frontend->name_pool, common[j], strlen(common[j])), i == 3 && j == 1 ? LMD_TYPE_ARRAY : common_types[j], JSPD_NON_ENUMERABLE))
-                diagnostic(p, NULL, "builtin common shape allocation");
-        }
+        for (int i = 0; i < 9; i++)
+            plan_library_class(p, classes[i], names[i], i == 3 ? LMD_TYPE_ARRAY : LMD_TYPE_MAP);
         p->library->regexp.nominal.base = &p->library->object.nominal;
         p->library->generator.nominal.base = &p->library->object.nominal;
         p->library->iterator.nominal.base = &p->library->object.nominal;
@@ -7386,6 +7434,36 @@ static void plan_library_shapes(MvpLmdProgram* p, bool metadata_only = false) {
         }
     }
     if (metadata_only) return;
+    if (p->errors && !p->library->errors) {
+        p->library->errors = (MvpLmdClass*)pool_calloc(p->frontend->pool, LMD_ERROR_COUNT * sizeof(MvpLmdClass));
+        if (!p->library->errors) { diagnostic(p, NULL, "error class metadata allocation"); return; }
+        p->error_slot = p->slot_count; p->slot_count += 3 * LMD_ERROR_COUNT;
+        for (int i = 0; i < LMD_ERROR_COUNT; i++) {
+            MvpLmdClass* cls = &p->library->errors[i];
+            plan_library_class(p, cls, mvp_lmd_error_names[i]);
+            cls->nominal.base = i ? &p->library->errors[0].nominal : &p->library->object.nominal;
+            for (const char* name : {"name", "message"})
+                if (!plan_shape_field(p, &cls->prototype_shape,
+                        name_pool_create_len(p->frontend->name_pool, name, strlen(name)), LMD_TYPE_STRING, JSPD_NON_ENUMERABLE))
+                    diagnostic(p, NULL, "error prototype shape allocation");
+            int intrinsic = i ? I_EVAL_ERROR + i - 1 : I_ERROR;
+            p->intrinsics[intrinsic - 1].kinds = K_FUNCTION;
+            p->intrinsics[intrinsic - 1].slot = p->error_slot + i * 3;
+        }
+    }
+    if (p->primitives && !p->library->primitives) {
+        p->library->primitives = (MvpLmdClass*)pool_calloc(p->frontend->pool, LMD_PRIMITIVE_COUNT * sizeof(MvpLmdClass));
+        if (!p->library->primitives) { diagnostic(p, NULL, "primitive class metadata allocation"); return; }
+        p->primitive_slot = p->slot_count; p->slot_count += 3 * LMD_PRIMITIVE_COUNT;
+        const int intrinsics[] = {I_STRING, I_NUMBER, I_BOOLEAN, I_BIGINT};
+        for (int i = 0; i < LMD_PRIMITIVE_COUNT; i++) {
+            MvpLmdClass* cls = &p->library->primitives[i];
+            plan_library_class(p, cls, mvp_lmd_primitive_names[i]);
+            cls->nominal.base = &p->library->object.nominal;
+            p->intrinsics[intrinsics[i] - 1].kinds = K_FUNCTION;
+            p->intrinsics[intrinsics[i] - 1].slot = p->primitive_slot + i * 3;
+        }
+    }
     p->roots[1]->nominal = &p->library->map.nominal;
     p->roots[0]->nominal = &p->library->object.nominal;
     p->library->object_shape = p->roots[0];
@@ -9117,6 +9195,7 @@ static int lower_pass(void* opaque) {
     return true;
 }
 static bool compile(MvpLmdProgram* p, const char* source, size_t length) {
+    p->failure_phase = MVP_LMD_INTERNAL_FAILURE;
     p->frontend = js_transpiler_create(NULL);
     if (!p->frontend) return false;
     if (length > UINT32_MAX) { diagnostic(p, NULL, "source is too large"); return false; }
@@ -9125,10 +9204,12 @@ static bool compile(MvpLmdProgram* p, const char* source, size_t length) {
     if (!retained) { diagnostic(p, NULL, "source allocation failed"); return false; }
     memcpy(retained, source, length); retained[length] = '\0';
     p->frontend->strict_js = true;
+    p->failure_phase = MVP_LMD_PARSE_FAILURE;
     if (!js_transpiler_parse_c(p->frontend, retained, length, JS_PARSE_SCRIPT) ||
             p->frontend->has_errors || !p->frontend->ast_root) {
         diagnostic(p, NULL, "JS parsing or validation failed"); return false;
     }
+    p->failure_phase = MVP_LMD_ADMISSION_FAILURE;
     // continue the retained frontend schedule; lowering consumes its bound, validated index.
     CompilerPassManager* manager = &p->frontend->pass_manager;
     const CompilerPassSpec passes[] = {
@@ -9154,6 +9235,7 @@ MvpLmdExecution* mvp_lmd_execute(const char* source, size_t length, double* exec
     e->result = Item{.item = ITEM_ERROR};
     e->program.host_enabled = host != NULL;
     if (!source || !compile(&e->program, source, length)) return e;
+    e->program.failure_phase = MVP_LMD_INTERNAL_FAILURE;
     if (context) { diagnostic(&e->program, NULL, "execution needs its own unbound evaluator thread"); return e; }
     lambda_stack_init();
     // use the shared recoverable budget and unwind headroom for native entry guards.
@@ -9193,6 +9275,8 @@ MvpLmdExecution* mvp_lmd_execute(const char* source, size_t length, double* exec
     }
     if (p->library_active) {
         p->library->values = p->slots + p->library_slot;
+        if (p->errors) p->library->error_values = p->slots + p->error_slot;
+        if (p->primitives) p->library->primitive_values = p->slots + p->primitive_slot;
         p->library->mutable_prototypes = p->property_callbacks;
         static const ContextCapsuleOps ops = {"js-mvp-library", CONTEXT_CAPSULE_LIFETIME_CONTEXT,
             sizeof(MvpLmdLibraryState*), NULL, NULL, NULL};
@@ -9242,17 +9326,66 @@ MvpLmdExecution* mvp_lmd_execute(const char* source, size_t length, double* exec
         : ((Entry)main->address)(&e->context, p, NULL, 0, undefined);
     if (execution_ms) *execution_ms = time_elapsed_ms_f(started, time_now_ns());
     result = lambda_item_resolve_pending_slot(result);
+    if (p->library_active && p->library->abort_kind)
+        result = mvp_lmd_fail(p->library->abort_kind - 1, p->library->abort_site);
+    if (host && host->test262 && p->global_receiver && !item_is_error(result)) {
+        // a script-defined setTimeout must not bypass host async completion.
+        RootFrame completion_roots(1);
+        if (!completion_roots.valid()) return e;
+        uint64_t completion_home = 0;
+        Rooted<Item> completion(completion_roots, lambda_item_adopt_scalar_home(result, &completion_home));
+        Item global = p->slots[p->global_slot];
+        const char required_key[] = "__lambda_test262_async_required";
+        const char done_key[] = "__lambda_test262_async_done";
+        // minimal scripts may never initialize the runtime name pool; these
+        // host keys can share the program-owned canonical pool like MIR literals.
+        String* required_name = name_pool_create_len(p->frontend->name_pool, required_key, sizeof(required_key) - 1);
+        if (!required_name) return e;
+        Item required = mvp_lmd_property_with_receiver(global, Item{.item = s2it(required_name)}, ItemNull, LMD_PROP_GET, global);
+        if (item_is_error(required)) completion.set(required);
+        else if (required.item == ITEM_TRUE) {
+            String* done_name = name_pool_create_len(p->frontend->name_pool, done_key, sizeof(done_key) - 1);
+            if (!done_name) return e;
+            Item done = mvp_lmd_property_with_receiver(global, Item{.item = s2it(done_name)}, ItemNull, LMD_PROP_GET, global);
+            if (item_is_error(done)) completion.set(done);
+            else if (done.item != ITEM_TRUE) {
+                LambdaError* error = err_create_heap(ERR_USER_ERROR, "async test did not call $DONE", NULL);
+                completion.set(error ? err2it(error) : ItemError);
+            }
+        }
+        e->result = runtime_publish_result(&e->context, completion.get());
+        return e;
+    }
     e->result = runtime_publish_result(&e->context, result);
     return e;
 }
 Item mvp_lmd_result(const MvpLmdExecution* e) { return e ? e->result : Item{.item = ITEM_ERROR}; }
-const char* mvp_lmd_diagnostic(const MvpLmdExecution* e) {
+const char* mvp_lmd_diagnostic(const MvpLmdExecution* e, MvpLmdFailurePhase* phase,
+        const char** error_type) {
+    if (phase) *phase = e ? e->program.failure_phase : MVP_LMD_INTERNAL_FAILURE;
+    if (error_type) *error_type = e && e->program.failure_phase == MVP_LMD_PARSE_FAILURE ? "SyntaxError" : NULL;
     if (!e) return "MVP allocation failed";
     if (e->program.diagnostic[0]) return e->program.diagnostic;
     if (get_type_id(e->result) == LMD_TYPE_ERROR) {
         LambdaError* error = it2err(e->result);
+        if (phase) *phase = !error || error->code == ERR_POOL_EXHAUSTED ? MVP_LMD_INTERNAL_FAILURE :
+            error->code == ERR_NOT_IMPLEMENTED ? MVP_LMD_ADMISSION_FAILURE : MVP_LMD_RUNTIME_FAILURE;
+        if (error_type && error && !error->thrown_value_item) {
+            *error_type = error->code == ERR_TYPE_MISMATCH ? "TypeError" :
+                error->code == ERR_UNDEFINED_VARIABLE ? "ReferenceError" :
+                error->code == ERR_INDEX_OUT_OF_BOUNDS ? "RangeError" :
+                error->code == ERR_SYNTAX_ERROR ? "SyntaxError" : NULL;
+        }
+        if (error_type && error && error->thrown_value_item && e->program.library && e->program.library->errors) {
+            Item thrown = {.item = error->thrown_value_item};
+            MvpLmdClass* cls = mvp_lmd_class_record(thrown);
+            for (int i = 0; i < LMD_ERROR_COUNT; i++) if (cls == &e->program.library->errors[i]) {
+                *error_type = mvp_lmd_error_names[i]; break;
+            }
+        }
         return error && error->message ? error->message : "MVP execution failed";
     }
+    if (phase) *phase = MVP_LMD_SUCCESS;
     return NULL;
 }
 void mvp_lmd_dump(const MvpLmdExecution* e, FILE* output) {

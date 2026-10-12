@@ -1,5 +1,6 @@
 #include "mvp_lmd.h"
 #include "mvp_lmd_runtime.h"
+#include "../js_props.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/heap_api.h"
 #include "../../runtime/runtime-state.h"
@@ -102,22 +103,43 @@ static Item host_write_file(Context*, MvpLmdProgram*, Item* arguments, uint64_t 
         return err2it(err_create_heap(ERR_FILE_WRITE_ERROR, "MVP file write failed", NULL));
     return Item{.item = ITEM_JS_UNDEFINED};
 }
-Item mvp_lmd_native_function(MvpLmdProgram* program, void* state, MvpLmdNativeEntry entry, uint8_t arity) {
+Item mvp_lmd_native_function(MvpLmdProgram* program, void* state, MvpLmdNativeEntry entry, uint8_t arity,
+        const char* name) {
     MvpLmdNativeCallable* function = (MvpLmdNativeCallable*)heap_calloc(sizeof(MvpLmdNativeCallable), LMD_TYPE_FUNC);
     if (!function) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     function_init_abi(function, LMD_TYPE_FUNC, FN_ENTRY_ABI_MVP_LMD);
     function->requires_runtime_context = true; function->runtime_context = context;
     function->ptr = (fn_ptr)entry; function->program = program;
     function->state = state; function->arity = arity;
-    return Item{.function = function};
+    Item result = {.function = function};
+    if (!name) return result;
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> held(roots, result);
+    String* spelling = heap_create_name(name, strlen(name));
+    if (!spelling) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    Item defined = mvp_lmd_named_set(held.get(), "name", Item{.item = s2it(spelling)}, JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
+    return item_is_error(defined) ? defined : held.get();
 }
-Item mvp_lmd_named_set(Item owner, const char* key, Item value) {
+Item mvp_lmd_named_set(Item owner, const char* key, Item value, int descriptor_flags) {
     if (item_is_error(value)) return value;
     RootFrame roots(2);
     if (!roots.valid()) return ItemError;
     Rooted<Item> object(roots, owner), held(roots, value);
     String* name = heap_create_name(key, strlen(key));
     if (!name) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    if (descriptor_flags >= 0) {
+        // intrinsic and error fields need DefineProperty attributes, independent
+        // of inherited setters; ordinary callers retain the existing Set path.
+        JsPropertyDescriptor descriptor = {};
+        descriptor.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
+        if (!(descriptor_flags & JSPD_NON_WRITABLE)) descriptor.flags |= JS_PD_WRITABLE;
+        if (!(descriptor_flags & JSPD_NON_ENUMERABLE)) descriptor.flags |= JS_PD_ENUMERABLE;
+        js_pd_set_configurable(&descriptor, !(descriptor_flags & JSPD_NON_CONFIGURABLE));
+        descriptor.value = held.get();
+        Item result = mvp_lmd_define_own_property(object.get(), Item{.item = s2it(name)}, &descriptor);
+        return item_is_error(result) ? result : result.item == ITEM_FALSE ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : held.get();
+    }
     return mvp_lmd_property_set(object.get(), Item{.item = s2it(name)}, held.get());
 }
 Item mvp_lmd_host_initialize(MvpLmdProgram* program, MvpLmdHostState* state,

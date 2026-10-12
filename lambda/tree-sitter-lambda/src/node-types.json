@@ -709,6 +709,10 @@
             "named": false
           },
           {
+            "type": "of",
+            "named": false
+          },
+          {
             "type": "or",
             "named": false
           },
@@ -3525,7 +3529,7 @@
       },
       "op": {
         "multiple": false,
-        "required": false,
+        "required": true,
         "types": [
           {
             "type": "at",
@@ -3533,6 +3537,10 @@
           },
           {
             "type": "in",
+            "named": false
+          },
+          {
+            "type": "of",
             "named": false
           }
         ]
@@ -6345,6 +6353,10 @@
   },
   {
     "type": "not",
+    "named": false
+  },
+  {
+    "type": "of",
     "named": false
   },
   {
