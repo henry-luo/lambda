@@ -487,6 +487,19 @@ bool utf_is_cursive_script(uint32_t cp) {
     return false;
 }
 
+bool utf_is_clustered_script(uint32_t cp) {
+    // Unicode Script blocks for CSS Text's clustered writing systems.
+    static const UtfCodepointRange ranges[] = {
+        {0x0E00, 0x0EFF}, {0x1000, 0x109F}, {0x1780, 0x17FF},
+        {0x1950, 0x19FF}, {0x1A20, 0x1AAF}, {0xA9E0, 0xA9FF},
+        {0xAA60, 0xAADF}
+    };
+    for (size_t i = 0; i < sizeof(ranges) / sizeof(ranges[0]); i++) {
+        if (cp >= ranges[i].first && cp <= ranges[i].last) return true;
+    }
+    return false;
+}
+
 int utf_bidi_strong_class(uint32_t cp) {
     if (cp > 0x10FFFF) return 0;
     // block membership cannot distinguish strong letters from digits or combining marks.

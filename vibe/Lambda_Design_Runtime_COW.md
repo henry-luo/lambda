@@ -1580,7 +1580,7 @@ first"), so CW25 is conformance work rather than new semantics.
 
 | Item | Source | Where it lives |
 |---|---|---|
-| Formal model: `⟨store⟩` cell only for `var` bindings; `let`-finality and COW-unobservability as *verifiable properties*; the `let g`/`var h` probe as a model-level regression fixture | C4.4 #5; §9.6 | Stage-4 semantics/DSL work (`vibe/Lambda_Semantics_DSL_Proposal.md` lineage), not an engine change |
+| Formal model: `⟨store⟩` cell only for `var` bindings; `let`-finality and COW-unobservability as *verifiable properties*; the `let g`/`var h` probe as a model-level regression fixture | C4.4 #5; §9.6 | Stage-4 semantics/DSL work (`vibe/Lambda_Semantics_DSL_POC.md` §12.4.3), not an engine change |
 
 ### B.4 COW-side deferral riding the same timeline (not a C4 item)
 

@@ -1883,28 +1883,6 @@ float layout_document_missing_glyph_advance(FontHandle* handle, uint32_t codepoi
         (raster_scale > 0.0f ? raster_scale : 1.0f);
 }
 
-bool layout_utf8_next_codepoint(const char** cursor, const char* end,
-                                uint32_t* codepoint) {
-    if (!cursor || !*cursor || !end || *cursor >= end || !codepoint) return false;
-    int bytes = str_utf8_decode(*cursor, (size_t)(end - *cursor), codepoint);
-    if (bytes <= 0 || bytes > end - *cursor) {
-        (*cursor)++;
-        return false;
-    }
-    *cursor += bytes;
-    return true;
-}
-
-bool layout_utf8_next_codepoint(const unsigned char** cursor,
-                                const unsigned char* end,
-                                uint32_t* codepoint) {
-    const char* text_cursor = cursor ? (const char*)*cursor : nullptr;
-    bool decoded = layout_utf8_next_codepoint(
-        &text_cursor, (const char*)end, codepoint);
-    if (cursor) *cursor = (const unsigned char*)text_cursor;
-    return decoded;
-}
-
 void layout_resolve_inherited_text_wrap(DomNode* node, CssEnum* overflow_wrap,
                                         CssEnum* word_break) {
     if (overflow_wrap) *overflow_wrap = CSS_VALUE_NORMAL;
@@ -1952,6 +1930,22 @@ float layout_measure_space_advance(LayoutContext* lycon, FontHandle* handle,
     float advance = layout_measure_glyph_advance(lycon, handle, style, (uint32_t)' ');
     if (advance > 0.0f) return advance;
     return style->space_width;
+}
+
+float layout_unicode_space_advance(LayoutContext* lycon, uint32_t codepoint) {
+    if (!lycon || !lycon->font.style) return 0.0f;
+    FontHandle* handle = font_box_handle(&lycon->font);
+    if (handle && font_has_codepoint(handle, codepoint)) {
+        return layout_measure_glyph_advance(lycon, handle, lycon->font.style, codepoint);
+    }
+    // use the face's actual metric first; a missing narrow no-break space
+    // uses half its regular space, matching the shaper's space synthesis.
+    if (codepoint == 0x202F) {
+        return 0.5f * layout_measure_space_advance(lycon, handle, lycon->font.style);
+    }
+    float em = lycon->font.current_font_size > 0.0f
+        ? lycon->font.current_font_size : lycon->font.style->font_size;
+    return max(text_unicode_space_width_em(codepoint), 0.0f) * em;
 }
 
 size_t layout_normalize_collapsible_whitespace(const char* text, size_t length,

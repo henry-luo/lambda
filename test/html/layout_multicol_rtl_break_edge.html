@@ -1,0 +1,19 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/support/fonts/Ahem.ttf'); }
+body { margin: 0; writing-mode: vertical-lr; }
+.columns { columns: 2; column-fill: auto; column-gap: 0; block-size: 60px; inline-size: 160px; }
+.paragraph { font: 20px/1 Ahem; inline-size: 80px; block-size: 120px; }
+.rtl { direction: rtl; }
+.ltr { direction: ltr; }
+</style>
+<body id="result">
+<div class="columns"><div class="paragraph rtl"><span>XX</span><span class="ltr">XX XXXX XXXX XXXX XXXX<br id="rtl-break">XXXX</span></div></div>
+<div class="columns"><div class="paragraph ltr">XX<span class="rtl">XX XXXX XXXX XXXX XXXX<br id="ltr-break">XXXX</span></div></div>
+<div class="columns"><div class="paragraph rtl"><span style="position: relative">X<span class="rtl">XX
+  <div style="position: absolute; display: inline; inset-block-end: 0; inset-inline-end: 0">XX</div>
+  XXXX XXXX XXXX XXXX
+  <div id="nested-end" style="position: absolute; display: inline; inset-block-start: 0; inset-inline-start: 0">XX</div>
+  <span>XX</span>X
+</span></span></div></div>
+</body>

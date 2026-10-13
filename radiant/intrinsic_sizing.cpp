@@ -951,7 +951,9 @@ static bool intrinsic_measure_shaped_run(LayoutContext* lycon,
                                          size_t* out_bytes,
                                          float* out_width,
                                          uint32_t* out_first_codepoint,
-                                         uint32_t* out_last_codepoint) {
+                                         uint32_t* out_last_codepoint,
+                                         const LayoutTextBreaks* breaks = nullptr,
+                                         size_t source_offset = 0) {
     if (!str || remaining == 0 || !out_bytes || !out_width ||
         !out_first_codepoint || !out_last_codepoint) {
         return false;
@@ -975,10 +977,11 @@ static bool intrinsic_measure_shaped_run(LayoutContext* lycon,
         first_codepoint = result.first_codepoint;
         last_codepoint = result.last_codepoint;
     } else {
-        LayoutBidiRun result = {};
-        if (!layout_measure_bidi_run(
+        LayoutScriptRun result = {};
+        if (!layout_measure_script_run(
                 lycon, str, remaining, text_transform, font_variant,
-                break_anywhere, break_word, false, text_autospace, &result)) {
+                break_anywhere, break_word, false, text_autospace, &result,
+                breaks, source_offset)) {
             return false;
         }
         bytes = result.bytes;
@@ -1050,15 +1053,7 @@ static bool intrinsic_multicol_child_info(DomNode* child, IntrinsicMulticolChild
     // and column-spanning children; keeping it here prevents the two tree walks diverging.
     info->skipped = storage && (layout_block_is_display_none(storage) ||
                                 layout_view_is_abs_or_fixed(storage));
-    info->spans_all = storage && storage->multicol_prop() &&
-        storage->multicol_prop()->span == COLUMN_SPAN_ALL;
-    if (!info->spans_all && info->element->specified_style) {
-        CssDeclaration* span_decl = style_tree_get_declaration(
-            info->element->specified_style, CSS_PROPERTY_COLUMN_SPAN);
-        info->spans_all = span_decl && span_decl->value &&
-            span_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
-            span_decl->value->data.keyword == CSS_VALUE_ALL;
-    }
+    info->spans_all = multicol_is_spanner_block(storage);
     return true;
 }
 
@@ -1466,6 +1461,12 @@ static float intrinsic_loaded_glyph_advance(LayoutContext* lycon,
                                             float kerning,
                                             bool emoji_presentation,
                                             bool* loaded) {
+    if (text_unicode_space_width_em(codepoint) > 0.0f || codepoint == 0x202F) {
+        *loaded = true;
+        float advance = layout_unicode_space_advance(lycon, codepoint);
+        if (small_caps_lower) advance *= font_get_small_caps_scale(font_box_handle(&lycon->font));
+        return advance + kerning + text_character_spacing(lycon->font.style, codepoint);
+    }
     FontStyleDesc style = font_style_desc_from_prop(lycon->font.style);
     // Intrinsic sizing must use the current FontStyleDesc because font_get_glyph()
     // can retain stale advances after a dynamic @font-face load.
@@ -1480,7 +1481,7 @@ static float intrinsic_loaded_glyph_advance(LayoutContext* lycon,
     if (small_caps_lower) {
         advance *= font_get_small_caps_scale(font_box_handle(&lycon->font));
     }
-    if (lycon->font.style) advance += lycon->font.style->letter_spacing;
+    advance += text_letter_spacing(lycon->font.style, codepoint, false);
     return advance;
 }
 
@@ -1511,8 +1512,7 @@ static bool intrinsic_measure_grapheme_cluster(
         uint32_t* first_codepoint, uint32_t* last_codepoint) {
     if (!lycon || !text || remaining == 0 || !cluster_bytes ||
         !cluster_width || !first_codepoint || !last_codepoint ||
-        !font_box_handle(&lycon->font) || !lycon->font.style ||
-        lycon->font.style->letter_spacing != 0.0f) {
+        !font_box_handle(&lycon->font) || !lycon->font.style) {
         return false;
     }
     if (!layout_measure_grapheme_cluster_advance(
@@ -1523,6 +1523,8 @@ static bool intrinsic_measure_grapheme_cluster(
     int bytes = str_utf8_decode((const char*)text, *cluster_bytes,
                                 first_codepoint);
     if (bytes <= 0) return false;
+    // intrinsic advances retain the same per-cluster tracking as line layout.
+    *cluster_width += text_character_spacing(lycon->font.style, *first_codepoint);
     const unsigned char* cursor = text;
     const unsigned char* cluster_end = text + *cluster_bytes;
     *last_codepoint = *first_codepoint;
@@ -1548,6 +1550,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     bool break_all = (word_break == CSS_VALUE_BREAK_ALL);
     bool cjk_breaks = (word_break != CSS_VALUE_KEEP_ALL);
     TextIntrinsicWidths result = {0, 0};
+    LayoutTextBreaks native_breaks(text, length, !break_anywhere && !break_all);
 
     if (!text || length == 0) {
         return result;
@@ -1667,32 +1670,36 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 
         {
             if (text_transform == CSS_VALUE_NONE &&
-                font_variant != CSS_VALUE_SMALL_CAPS &&
-                !break_anywhere && !break_word) {
-                size_t shaped_bidi_bytes = 0;
-                float shaped_bidi_width = 0.0f;
-                uint32_t shaped_bidi_first = 0;
-                uint32_t shaped_bidi_last = 0;
+                font_variant != CSS_VALUE_SMALL_CAPS) {
+                size_t shaped_script_bytes = 0;
+                float shaped_script_width = 0.0f;
+                uint32_t shaped_script_first = 0;
+                uint32_t shaped_script_last = 0;
                 if (!break_all && intrinsic_measure_shaped_run(
                         lycon, &str[i], length - i, text_transform,
                         font_variant, break_anywhere, break_word,
                         false, text_autospace,
-                        &shaped_bidi_bytes, &shaped_bidi_width,
-                        &shaped_bidi_first, &shaped_bidi_last)) {
+                        &shaped_script_bytes, &shaped_script_width,
+                        &shaped_script_first, &shaped_script_last, &native_breaks, i)) {
                     float kerning = 0.0f;
                     if (has_kerning && prev_codepoint) {
                         kerning = font_get_kerning(
                             font_box_handle(&lycon->font), prev_codepoint,
-                            shaped_bidi_first);
+                            shaped_script_first);
                     }
-                    float advance = shaped_bidi_width + kerning;
+                    float advance = shaped_script_width + kerning;
                     current_word += advance;
                     total_width += advance;
-                    prev_codepoint = shaped_bidi_last;
-                    prev_text_autospace_codepoint = shaped_bidi_last;
+                    prev_codepoint = shaped_script_last;
+                    prev_text_autospace_codepoint = shaped_script_last;
                     prev_is_zwj_base = false;
                     is_word_start = false;
-                    i += shaped_bidi_bytes;
+                    i += shaped_script_bytes;
+                    if (layout_text_native_break_allowed(native_breaks, i,
+                            shaped_script_last, &str[i], str + length, !cjk_breaks)) {
+                        longest_word = fmax(longest_word, current_word);
+                        current_word = 0.0f;
+                    }
                     continue;
                 }
                 size_t cluster_bytes = 0;
@@ -1722,7 +1729,12 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                     prev_is_zwj_base = false;
                     is_word_start = false;
                     i += cluster_bytes;
-                    if ((cjk_breaks && has_id_line_break_class(cluster_last)) ||
+                    // emergency wrapping adds boundaries between clusters,
+                    // so min-content must retain each whole shaped cluster.
+                    if (break_anywhere ||
+                        (cjk_breaks && has_id_line_break_class(cluster_last)) ||
+                        layout_text_native_break_allowed(native_breaks, i,
+                            cluster_last, &str[i], str + length, !cjk_breaks) ||
                         (break_all && intrinsic_break_all_opportunity(
                             cluster_first, cluster_last, &str[i], str + length))) {
                         longest_word = fmax(longest_word, current_word);
@@ -1759,6 +1771,13 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 prev_is_zwj_base = false;
                 is_word_start = false;
                 i += shaped_bytes;
+                if (layout_text_native_break_allowed(native_breaks, i,
+                        shaped_last_cp, &str[i], str + length, !cjk_breaks)) {
+                    // a shaped Latin run can end at a native CJK boundary;
+                    // its advance must not carry into the following word.
+                    longest_word = fmax(longest_word, current_word);
+                    current_word = 0.0f;
+                }
                 continue;
             }
         }
@@ -1859,6 +1878,12 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             current_word = 0.0f;
         }
         else if (cjk_breaks && has_id_line_break_class(codepoint)) {
+            longest_word = fmax(longest_word, current_word);
+            current_word = 0.0f;
+        }
+        else if (layout_text_native_break_allowed(native_breaks, i,
+                    codepoint, &str[i], str + length, !cjk_breaks)) {
+            // min-content uses the same resource boundaries as line layout.
             longest_word = fmax(longest_word, current_word);
             current_word = 0.0f;
         }
@@ -4726,6 +4751,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     // Track inline-level content separately
     float inline_min_sum = 0.0f;  // Sum of the current unbreakable inline run
+    float single_run_tail = 0.0f;
+    uint32_t single_run_last = 0;
     float inline_max_sum = 0.0f;  // Sum of max-content widths for inline children
     float vertical_block_axis_max = 0.0f;
     float vertical_text_block_axis_max = 0.0f;
@@ -5244,6 +5271,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
             bool is_collapsible_space_only = intrinsic_node_is_collapsible_space_only(child);
             if (is_collapsible_space_only) {
+                single_run_tail = 0.0f;
+                single_run_last = 0;
                 // Recursive inline measurement trims edge spaces inside each inline
                 // box, so the parent must own collapsed whitespace runs across boxes.
                 if (inline_max_sum > 0.0f && !inline_run_ends_with_collapsible_space &&
@@ -5268,6 +5297,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 child->as_element()->node_name() &&
                 strcmp(child->as_element()->node_name(), "br") == 0;
             if (is_br_element) {
+                single_run_tail = 0.0f;
+                single_run_last = 0;
                 // Finalize first-line indent and propagation state before flushing.
                 intrinsic_record_first_inline_break(
                     text_indent, first_inline_child_min, nonfirst_inline_min_max,
@@ -5378,6 +5409,28 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 inline_min_sum += child_sizes.min_content;
             } else {
                 inline_min_sum = max(inline_min_sum, child_sizes.min_content);
+                CssEnum child_overflow_wrap = CSS_VALUE_NORMAL;
+                CssEnum child_word_break = CSS_VALUE_NORMAL;
+                layout_resolve_inherited_text_wrap(child,
+                    &child_overflow_wrap, &child_word_break);
+                bool single_unbreakable_run = child_word_break == CSS_VALUE_BREAK_ALL &&
+                    !child_is_atomic_inline && !child_sizes.has_forced_break &&
+                    fabsf(child_sizes.max_content - child_sizes.min_content) <= 0.01f &&
+                    !intrinsic_node_has_collapsible_space_at_edge(child, false) &&
+                    !intrinsic_node_has_collapsible_space_at_edge(child, true);
+                uint32_t first = single_unbreakable_run
+                    ? layout_inline_text_edge_codepoint(child, false) : 0;
+                uint32_t last = single_unbreakable_run
+                    ? layout_inline_text_edge_codepoint(child, true) : 0;
+                bool joins_previous = first && single_run_last &&
+                    !layout_text_allows_letter_break(single_run_last, first,
+                        CSS_VALUE_AUTO, single_run_last == 0x200D, false);
+                // CSS Text §5.2: an inline boundary cannot create a break
+                // before punctuation; retain adjacent whole unbreakable runs.
+                single_run_tail = joins_previous
+                    ? single_run_tail + child_sizes.min_content : child_sizes.min_content;
+                single_run_last = last;
+                inline_min_sum = max(inline_min_sum, single_run_tail);
             }
             // Track first inline child's min-content for text-indent calculation
             if (first_inline_child_min < 0) {
@@ -5386,6 +5439,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 nonfirst_inline_min_max = max(nonfirst_inline_min_max, child_sizes.min_content);
             }
         } else {
+            single_run_tail = 0.0f;
+            single_run_last = 0;
             // Block-level child encountered
             if (!child_is_float) {
                 has_in_flow_block_child = true;

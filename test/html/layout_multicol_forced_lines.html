@@ -1,0 +1,16 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+.lines { width: 120px; columns: 3; column-gap: 0; line-height: 32.5px; orphans: 1; widows: 1; }
+.nested { columns: 2; width: 120px; line-height: 30px; orphans: 1; widows: 1; }
+#overflow { columns: 2; column-gap: 0; column-fill: auto; width: 100px; height: 100px; }
+</style>
+<div id="result">
+<div class="lines" id="empty"><br><br><br><br><br><br></div>
+<div class="nested" id="nested"><div id="nested-lines"><br><br><br><br></div></div>
+<div id="overflow"><div id="forced-wrapper">
+  <div style="height: 100px"></div>
+  <div style="break-before: column; height: 100px"></div>
+  <div id="third" style="break-before: column; height: 50px"></div>
+</div></div>
+</div>

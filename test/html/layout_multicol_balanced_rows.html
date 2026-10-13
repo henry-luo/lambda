@@ -1,0 +1,28 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+.set { width: 100px; columns: 2; column-wrap: wrap; gap: 10px 0; }
+#finite { height: 50px; }
+#fixed { column-height: 25px; gap: 0; }
+#spanners { column-height: 20px; }
+#fractional { width: 90px; columns: 3; column-height: 22.5px; gap: 7.5px 0; }
+</style>
+<div id="result">
+<div class="set" id="finite"><div id="finite-child" style="height: 180px"></div></div>
+<div class="set" id="fixed"><div id="fixed-child" style="height: 160px"></div></div>
+<div class="set" id="spanners">
+  <div id="before" style="height: 50px"></div>
+  <div id="spanner" style="column-span: all; height: 10px"></div>
+  <div id="after" style="height: 70px"></div>
+</div>
+<div class="set" id="fractional"><div id="fractional-child" style="height: 146.25px"></div></div>
+<div style="width: 100px; height: 150px; columns: 2; column-fill: auto; gap: 0">
+  <div style="columns: 2; column-fill: auto; column-height: 100px; column-wrap: wrap; gap: 10px 0"><div id="nested-fixed" style="height: 360px"></div></div>
+</div>
+<div style="width: 100px; height: 100px; columns: 2; column-fill: auto; gap: 0">
+  <div style="columns: 2; column-fill: auto; column-height: 20px; column-wrap: wrap; gap: 10px 0"><div id="nested-small" style="height: 240px"></div></div>
+</div>
+<div style="width: 90px; height: 20px; columns: 2; column-fill: auto; gap: 0">
+  <div style="columns: 2; column-fill: auto; column-height: 7.5px; column-wrap: wrap; gap: 2.5px 0"><div id="nested-fractional" style="height: 60px"></div></div>
+</div>
+</div>
