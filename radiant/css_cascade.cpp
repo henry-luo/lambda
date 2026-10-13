@@ -6,6 +6,8 @@
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
+#include "../lib/hashmap.h"
+#include <stdlib.h>
 #include <string.h>
 
 // CSS-only targets do not link StateStore; their matcher keeps default state.
@@ -409,22 +411,256 @@ static void active_rule_collect(CssRule* rule, CssEngine* engine,
     }
 }
 
+// ---- rule program index -------------------------------------------------
+// Matching the whole rule program against every element made each cascade
+// O(elements x rules). Most style rules name an id, class or tag in their
+// subject compound that an element lacks, so rules are bucketed by one such key
+// and an element tests only the buckets its own keys select plus the unkeyed
+// rules, in program order. Keys are ASCII-lowercased, which only widens a
+// bucket; selector matching still decides every candidate.
+
+enum CascadeRuleKeyKind : uint8_t { CASCADE_KEY_ID = 1, CASCADE_KEY_CLASS, CASCADE_KEY_TAG };
+
+struct CascadeRuleBucket {
+    uint32_t* rules;            // ascending program indices
+    uint32_t count;
+    uint32_t capacity;
+};
+
+struct CascadeRuleKey {         // hashmap item
+    const char* key;            // lowercased, arena-owned (or a lookup buffer)
+    uint32_t length;
+    uint8_t kind;
+    CascadeRuleBucket* bucket;
+};
+
+struct CascadeRuleIndex {
+    Arena* arena;
+    struct hashmap* buckets;
+    CascadeRuleBucket universal;
+    uint32_t* candidates;       // per-element scratch, one slot per rule
+    uint32_t* seen;             // per-rule stamp of the element that collected it
+    uint32_t stamp;
+    uint32_t rule_count;
+};
+
+static uint64_t cascade_rule_key_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const CascadeRuleKey* key = (const CascadeRuleKey*)item;
+    return hashmap_xxhash3(key->key, key->length, seed0, seed1) ^ key->kind;
+}
+
+static int cascade_rule_key_compare(const void* a, const void* b, void*) {
+    const CascadeRuleKey* left = (const CascadeRuleKey*)a;
+    const CascadeRuleKey* right = (const CascadeRuleKey*)b;
+    if (left->kind != right->kind || left->length != right->length) return 1;
+    return memcmp(left->key, right->key, left->length);
+}
+
+static bool cascade_bucket_append(Arena* arena, CascadeRuleBucket* bucket, uint32_t rule) {
+    // a selector list can key one rule twice under the same name
+    if (bucket->count && bucket->rules[bucket->count - 1] == rule) return true;
+    if (bucket->count == bucket->capacity) {
+        uint32_t capacity = bucket->capacity ? bucket->capacity * 2 : 8;
+        uint32_t* grown = (uint32_t*)arena_alloc(arena, capacity * sizeof(uint32_t));
+        if (!grown) return false;
+        if (bucket->count) memcpy(grown, bucket->rules, bucket->count * sizeof(uint32_t));
+        bucket->rules = grown;
+        bucket->capacity = capacity;
+    }
+    bucket->rules[bucket->count++] = rule;
+    return true;
+}
+
+// Lowercase `text` into `buffer` when it fits, else into the arena.
+static char* cascade_lower_key(Arena* arena, const char* text, size_t length,
+                               char* buffer, size_t buffer_size) {
+    char* out = length < buffer_size ? buffer : (char*)arena_alloc(arena, length + 1);
+    if (!out) return nullptr;
+    for (size_t i = 0; i < length; i++) {
+        char c = text[i];
+        out[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+    }
+    out[length] = '\0';
+    return out;
+}
+
+// The one id/class/tag the subject compound requires of the cascaded element.
+// Compounds that describe another element (::slotted's slot, :host, ::part via
+// the generic pseudo kinds) or a scope root are left unkeyed.
+static bool cascade_selector_subject_key(const CssSelector* selector, uint8_t* kind,
+                                         const char** value) {
+    if (!selector || selector->compound_selector_count == 0) return false;
+    const CssCompoundSelector* subject =
+        selector->compound_selectors[selector->compound_selector_count - 1];
+    if (!subject) return false;
+    const char* id = nullptr;
+    const char* class_name = nullptr;
+    const char* tag = nullptr;
+    for (size_t i = 0; i < subject->simple_selector_count; i++) {
+        const CssSimpleSelector* simple = subject->simple_selectors[i];
+        if (!simple) return false;
+        switch (simple->type) {
+        case CSS_SELECTOR_PSEUDO_SLOTTED:
+        case CSS_SELECTOR_PSEUDO_GENERIC:
+        case CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC:
+        case CSS_SELECTOR_PSEUDO_SCOPE:
+            return false;
+        case CSS_SELECTOR_TYPE_ID: if (!id && simple->value && *simple->value) id = simple->value; break;
+        case CSS_SELECTOR_TYPE_CLASS: if (!class_name && simple->value && *simple->value) class_name = simple->value; break;
+        case CSS_SELECTOR_TYPE_ELEMENT: if (!tag && simple->value && *simple->value) tag = simple->value; break;
+        default: break;
+        }
+    }
+    if (id) { *kind = CASCADE_KEY_ID; *value = id; return true; }
+    if (class_name) { *kind = CASCADE_KEY_CLASS; *value = class_name; return true; }
+    if (tag) { *kind = CASCADE_KEY_TAG; *value = tag; return true; }
+    return false;
+}
+
+static bool cascade_index_add_keyed(CascadeRuleIndex* index, uint8_t kind,
+                                    const char* value, uint32_t rule) {
+    size_t length = strlen(value);
+    char* key = cascade_lower_key(index->arena, value, length, nullptr, 0);
+    if (!key) return false;
+    CascadeRuleKey probe = {key, (uint32_t)length, kind, nullptr};  // INT_CAST_OK: selector key length
+    const CascadeRuleKey* found = (const CascadeRuleKey*)hashmap_get(index->buckets, &probe);
+    CascadeRuleBucket* bucket = found ? found->bucket : nullptr;
+    if (!bucket) {
+        bucket = (CascadeRuleBucket*)arena_calloc(index->arena, sizeof(CascadeRuleBucket));
+        if (!bucket) return false;
+        probe.bucket = bucket;
+        hashmap_set(index->buckets, &probe);
+        if (hashmap_oom(index->buckets)) return false;
+    }
+    return cascade_bucket_append(index->arena, bucket, rule);
+}
+
+static bool cascade_index_add_rule(CascadeRuleIndex* index, CssRule* rule, uint32_t position) {
+    // only selector rules carry a subject; scope, container and nested
+    // declaration rules keep their per-element evaluation unkeyed.
+    if (rule && rule->type == CSS_RULE_STYLE) {
+        CssSelectorGroup* group = rule->data.style_rule.selector_group;
+        size_t count = group && group->selector_count > 0 ? group->selector_count : 1;
+        uint8_t kinds[8];
+        const char* values[8];
+        bool keyed = count <= 8;
+        for (size_t i = 0; keyed && i < count; i++) {
+            CssSelector* selector = group && group->selector_count > 0
+                ? group->selectors[i] : rule->data.style_rule.selector;
+            keyed = cascade_selector_subject_key(selector, &kinds[i], &values[i]);
+        }
+        if (keyed) {
+            for (size_t i = 0; i < count; i++) {
+                if (!cascade_index_add_keyed(index, kinds[i], values[i], position)) return false;
+            }
+            return true;
+        }
+    }
+    return cascade_bucket_append(index->arena, &index->universal, position);
+}
+
+static CascadeRuleIndex* cascade_rule_index_build(Arena* arena, CssRule** rules,
+                                                  size_t rule_count) {
+    if (!arena || !rules || rule_count == 0 || rule_count > UINT32_MAX / 2) return nullptr;
+    CascadeRuleIndex* index = (CascadeRuleIndex*)arena_calloc(arena, sizeof(CascadeRuleIndex));
+    if (!index) return nullptr;
+    index->arena = arena;
+    index->rule_count = (uint32_t)rule_count;  // INT_CAST_OK: bounded above
+    index->candidates = (uint32_t*)arena_alloc(arena, rule_count * sizeof(uint32_t));
+    index->seen = (uint32_t*)arena_calloc(arena, rule_count * sizeof(uint32_t));
+    index->buckets = hashmap_new(sizeof(CascadeRuleKey), 64, 0, 0,
+        cascade_rule_key_hash, cascade_rule_key_compare, nullptr, nullptr);
+    if (!index->candidates || !index->seen || !index->buckets) {
+        if (index->buckets) hashmap_free(index->buckets);
+        return nullptr;
+    }
+    for (size_t i = 0; i < rule_count; i++) {
+        if (!cascade_index_add_rule(index, rules[i], (uint32_t)i)) {  // INT_CAST_OK: bounded above
+            hashmap_free(index->buckets);
+            return nullptr;
+        }
+    }
+    return index;
+}
+
+static void cascade_rule_index_free(CascadeRuleIndex* index) {
+    if (index && index->buckets) hashmap_free(index->buckets);
+}
+
+static void cascade_collect_bucket(CascadeRuleIndex* index, const CascadeRuleBucket* bucket,
+                                   uint32_t* count) {
+    for (uint32_t i = 0; bucket && i < bucket->count; i++) {
+        uint32_t rule = bucket->rules[i];
+        if (index->seen[rule] == index->stamp) continue;
+        index->seen[rule] = index->stamp;
+        index->candidates[(*count)++] = rule;
+    }
+}
+
+static void cascade_collect_key(CascadeRuleIndex* index, uint8_t kind, const char* value,
+                                uint32_t* count) {
+    if (!value || !*value) return;
+    char buffer[128];
+    size_t length = strlen(value);
+    char* key = cascade_lower_key(index->arena, value, length, buffer, sizeof(buffer));
+    if (!key) {
+        // without the key every bucket is a candidate; correctness first.
+        size_t iter = 0;
+        void* item;
+        while (hashmap_iter(index->buckets, &iter, &item))
+            cascade_collect_bucket(index, ((CascadeRuleKey*)item)->bucket, count);
+        return;
+    }
+    CascadeRuleKey probe = {key, (uint32_t)length, kind, nullptr};  // INT_CAST_OK: attribute length
+    const CascadeRuleKey* found = (const CascadeRuleKey*)hashmap_get(index->buckets, &probe);
+    if (found) cascade_collect_bucket(index, found->bucket, count);
+}
+
+static int cascade_compare_rule_position(const void* a, const void* b) {
+    uint32_t left = *(const uint32_t*)a, right = *(const uint32_t*)b;
+    return left < right ? -1 : left > right;
+}
+
+// Candidate rules for `element` in program order.
+static uint32_t cascade_rule_index_candidates(CascadeRuleIndex* index, DomElement* element) {
+    if (++index->stamp == 0) {
+        memset(index->seen, 0, index->rule_count * sizeof(uint32_t));
+        index->stamp = 1;
+    }
+    uint32_t count = 0;
+    cascade_collect_bucket(index, &index->universal, &count);
+    cascade_collect_key(index, CASCADE_KEY_ID, element->id, &count);
+    for (int i = 0; i < element->class_count; i++)
+        cascade_collect_key(index, CASCADE_KEY_CLASS, element->class_names[i], &count);
+    cascade_collect_key(index, CASCADE_KEY_TAG, element->local_name(), &count);
+    if (count > 1) qsort(index->candidates, count, sizeof(uint32_t), cascade_compare_rule_position);
+    return count;
+}
+
 static void apply_active_rules_to_tree(DomElement* root, CssRule** rules,
                                        size_t rule_count, SelectorMatcher* matcher,
-                                       Pool* pool, CssEngine* engine, int depth) {
+                                       Pool* pool, CssEngine* engine, int depth,
+                                       CascadeRuleIndex* index) {
     if (!root || !rules || !matcher || !pool || depth > MAX_RADIANT_CSS_TREE_DEPTH) return;
 
     // generated boxes read their host cascade rather than matching authored selectors.
     if (!root->is_synthetic()) {
-        for (size_t i = 0; i < rule_count; i++) {
-            apply_rule_to_element(root, rules[i], matcher, pool, engine);
+        if (index) {
+            uint32_t count = cascade_rule_index_candidates(index, root);
+            for (uint32_t i = 0; i < count; i++) {
+                apply_rule_to_element(root, rules[index->candidates[i]], matcher, pool, engine);
+            }
+        } else {
+            for (size_t i = 0; i < rule_count; i++) {
+                apply_rule_to_element(root, rules[i], matcher, pool, engine);
+            }
         }
     }
 
     for (DomNode* child = root->first_child; child; child = child->next_sibling) {
         if (child->is_element()) {
             apply_active_rules_to_tree(lam::dom_require_element(child), rules,
-                                       rule_count, matcher, pool, engine, depth + 1);
+                                       rule_count, matcher, pool, engine, depth + 1, index);
         }
     }
 }
@@ -497,8 +733,11 @@ static void apply_stylesheets_to_tree(DomElement* root, CssStylesheet** sheets, 
             active_rule_collect(stylesheet->rules[i], engine, rules, count, &written);
         }
     }
+    // an index allocation failure keeps the unindexed program walk.
+    CascadeRuleIndex* index = cascade_rule_index_build(scratch, rules, written);
     // finish every ancestor's cascade before a descendant reads its query font or variables.
-    apply_active_rules_to_tree(root, rules, written, matcher, pool, engine, depth);
+    apply_active_rules_to_tree(root, rules, written, matcher, pool, engine, depth, index);
+    cascade_rule_index_free(index);
     mem_arena_destroy(scratch);
 }
 
