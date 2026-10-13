@@ -64,6 +64,19 @@ Each fix keeps behaviour identical. All `assert_*` results are unchanged, and th
 
 Heavy fixtures (the 127 still present that ran over 1.5 s in the gate), run alone: **393 s → 276 s (−30%)** before the CSS-query fix. By family: timeline −61%, chart −43%, superlambda −43%, tetris −40%, doc −30%, lambda −17%, slide −14%, dtna −12%.
 
+### 4.1 Follow-up round (2026-10-13, commits a9e84b635, 97c8e2102)
+
+| Hot path | Root cause | Fix | Effect |
+|---|---|---|---|
+| Full-document recascade on `:hover`/`:active` (33% of dtna `rate_modes`) and every page load | `apply_active_rules_to_tree` matched the whole flat rule program against every element | Rule program index: rules bucketed by one id/class/tag their subject compound requires (lowercased, so buckets only widen); an element tests its own buckets plus unkeyed rules in program order. `::slotted`, generic pseudo-classes/elements (`:host`, `::part`), `:scope` and scope/container/nested-declaration rules stay unkeyed | `rate_modes` 6.5 → 5.1 s; recascade left the top of the profile |
+| `view_focus_is_hidden` (18% of `rate_modes`) | Each flat-tree ancestor called `dom_ensure_computed`, which recascades that node's whole style chain while anything is dirty, so the chain was recascaded once per level | Ancestors already on a refreshed chain are skipped; slot-assigned parents off the chain are still ensured | `button_modes` 5.7 → 4.6 s, `gallery_elements` 4.5 → 3.8 s |
+
+Tried and reverted: a thread-local last-range cache in front of the GC page index. Its hit rate was low, and macOS TLV access (`_tlv_get_addr`) cost about as much as it saved.
+
+After this round the 127 heavy fixtures run alone in 248 s (393 s at the start, −37%). By family: doc −39%, dtna −42%, timeline −61%, superlambda −41%, tetris −40%, chart −34%.
+
+Unit test for the font-key fix: `test_radiant_text_query_gtest` (commit ee56c3536). It fails with 24 context builds against the old key and passes with at most 1.
+
 ## 5. What remains heavy
 
 - `view/radiant_view_math_intensive_scroll` (~21 s):
