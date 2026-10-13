@@ -219,6 +219,9 @@ let EXTENDED_SYMBOLS = {
 
     // ---- gensymb / misc ----
     'perthousand':       "\u2030", 'textcopyright':     "\u00A9",
+    // gensymb's text forms
+    'degree':            "\u00B0", 'celsius':           "\u2103",
+    'ohm':               "\u2126", 'micro':             "\u00B5",
     'textcelsius':       "\u2103", 'textdegree':        "\u00B0",
     'textohm':           "\u2126", 'textmicro':         "\u00B5",
     'checkmark':         "\u2713", 'textreferencemark':  "\u203B",

@@ -209,6 +209,19 @@ Each item below is a `CATALOG` row with a defined effect. Most also need a small
 - **`pifont`**: `\ding{n}` maps ZapfDingbats codes to the Unicode Dingbats block. `dinglist` and `dingautolist` go to the list model.
 - **`marvosym`**: a bounded Unicode table (`\Email`, `\Letter`, `\Mobilefone`, `\EUR`, …). Other symbols are diagnosed.
 
+As built on 2026-10-13, every item above except `amsxtra` is in place:
+
+- **Catalogue rows.** `textcomp`, `gensymb`, `nameref`, `epstopdf`, `amscd`, `cancel`, `latexsym`, `stmaryrd`, `esint`, `upgreek`, `bbm` and `dsfont` are rows whose commands render. `placeins` (`\FloatBarrier`), `indentfirst` (package CSS), `bookmark`, `pifont` and `marvosym` own commands. Implications are now catalogue data (`implies`): `subcaption` loads `caption` and `bookmark` loads `hyperref`.
+- **Math symbol tables** in `lambda.doc.math`: latexsym, a stmaryrd subset (double brackets, short and `Mapsto` arrows, boxed operators, `\bigsqcap`, `\lightning`), esint's oriented and finite-part integrals, gensymb's math forms, and upgreek's upright letters. The parser's own symbol names that had no table entry also landed: `\square`, `\diamond`, `\triangleleft`, `\triangleright`, `\bigtriangleup` and `\bigtriangledown` were painted as words.
+  - The unmapped-command scan now covers `symbol_command` nodes too, which is how that gap was hidden.
+  - `\leqslant`, `\geqslant` and `\lozenge` were added for amssymb.
+  - A script diffs the parser's symbol names against the tables; no gaps remain.
+- **Alphabets.** `\mathbbm` and `\mathds` alias `\mathbb` (`font.alphabet_alias`). Double-struck letters render, but `\mathbb{1}` and so `\mathbbm{1}` show a plain 1: the bundled math fonts have no double-struck digits. That is an existing math-package limitation, so bbm and dsfont are Partial.
+- **`\cal`** joins the parser's math font switches (`\rm`, `\bf`, …). The typesetter reads the switch's variant from `font.ls`'s style table instead of a duplicated inline map. With this and `\Box`, the 31-sample corpus reports no unmapped math commands.
+- **bookmark.** `\bookmark[level=…]{title}` marks its own position, as `\pdfbookmark` does, through a shared outline anchor. An outline entry marks the element that carries it, so `dest=` and the other keys are reported.
+- **pifont.** `\ding{n}` follows the Unicode ZapfDingbats mapping. `dinglist` labels every item with one glyph and `dingautolist` counts up from it; the list model now takes a per-item label function. `\dingline` and `\dingfill` are owned but unsupported.
+- **Deferred: `amsxtra`.** Its `\sphat`-style superscript accents attach to the preceding atom and need parser work. The corpus sample that loads it uses none, so it stays an unknown package rather than an empty row.
+
 ## 7. M3: text, paragraph and box packages
 
 | Package | Profile | Mapping and limits |
@@ -407,3 +420,7 @@ This is `lambda.doc.math` work, after M0.3. Every addition updates Pkg_Math §7.
   - New test `test/lambda/latex/test_latex_phase5_kernel.ls` with its golden. The other 62 LaTeX scripts and the 32 math scripts match their goldens.
   - `test_latex_font_decl` passes declaration elements to `wrap_font_decl`; its expected output is unchanged. `test_latex_pdf_graphics` asserts the corrected rotation sign.
   - `render_document` and `render_body` share one article builder.
+- 2026-10-13: M1 committed (0ee19211f). M2 was built as recorded in §6, except `amsxtra`.
+  - New module `lmd/package/latex/packages/dingbats.ls`.
+  - New test `test/lambda/latex/test_latex_phase5_declarations.ls` with its golden. The other 63 LaTeX scripts and the 32 math scripts match their goldens.
+  - The parser change (`\cal` as a math font switch) is one name in `input-latex-c.cpp`.

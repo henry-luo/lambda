@@ -26,6 +26,7 @@ import language: .packages.language
 import listings: .packages.listings
 import tcolorbox: .packages.tcolorbox
 import caption: .packages.caption
+import dingbats: .packages.dingbats
 import floats: .floats
 import hyperref: .packages.hyperref
 import page_style: .packages.page_style
@@ -122,11 +123,32 @@ pub let PACKAGE_RENDER = {
     caption: {captionsetup: render_captionsetup},
     graphicx: {resizebox: render_graphicx_box, scalebox: render_graphicx_box,
         rotatebox: render_graphicx_box, reflectbox: render_graphicx_box},
+    placeins: {FloatBarrier: render_nothing},
+    bookmark: {bookmark: (el, info) => hyperref.bookmark_command(el, info.hyperref_settings)},
+    pifont: {ding: render_ding,
+        dinglist: (el, info) => render_generic_list(el, info, (groups, i) => ding_label(groups, 0)),
+        dingautolist: (el, info) => render_generic_list(el, info, (groups, i) => ding_label(groups, i))},
+    marvosym: map([for (k, v at dingbats.MARVOSYM, x in [string(k), render_marvosym]) x]),
     siunitx: {num: render_siunitx, si: render_siunitx, unit: render_siunitx,
         SI: render_siunitx, qty: render_siunitx}
 }
 
 fn render_nothing(el, info) => null
+
+fn render_ding(el, info) {
+    let glyph = dingbats.ding(util.raw_argument(el, "required", 0))
+    if (glyph == null) util.unsupported_element("pifont", "Unsupported ding code", el.source_offset)
+    else <span class: "latex-ding", glyph>
+}
+
+// a dinglist label, or dingautolist's label for item `step`: \ding{n + step}
+fn ding_label(groups, step) {
+    let start = if (len(groups) == 0) null else int(trim(util.text_of(groups[0]))) ^ { null }
+    let glyph = if (start == null) null else dingbats.ding(string(start + step))
+    if (glyph == null) null else <span class: "latex-item-label", glyph>
+}
+
+fn render_marvosym(el, info) => <span class: "latex-marvosym", dingbats.MARVOSYM[string(name(el))]>
 
 // graphicx box commands: the content is the last argument; a lone image is
 // sized through its own keys
@@ -345,8 +367,8 @@ fn render_element(el, info) {
         case 'enumerate': render_enumerate(el, info)
         case 'description': render_description(el, info)
         case 'item': null
-        case 'list': render_generic_list(el, info, false)
-        case 'trivlist': render_generic_list(el, info, true)
+        case 'list': render_generic_list(el, info, (groups, i) => list_label(groups, info))
+        case 'trivlist': render_generic_list(el, info, null)
         case 'tabbing': render_tabbing(el, info)
 
         // ---- environments ----
@@ -1355,7 +1377,8 @@ fn is_item_node(child) {
     } else { false }
 }
 
-// default_label marks items without their own \item[label] (the list environment)
+// default_label(i) labels item i when it has no \item[label] of its own (the
+// list environments); null leaves such items unlabelled
 fn split_list_items(flat, info, default_label = null) {
     split_items_rec(flat, 0, len(flat), [], false, [], info, default_label)
 }
@@ -1375,7 +1398,7 @@ fn split_items_rec(flat, i, n, current, custom, acc, info, default_label) {
     else if (is_item_node(flat[i])) {
         let flushed = flush_list_item(current, custom, acc)
         let own = get_item_custom_label(flat[i])
-        let label = if (own != null) own else default_label
+        let label = if (own != null) own else if (default_label != null) default_label(len(flushed)) else null
         split_items_rec(flat, i + 1, n, if (label != null) [label] else [],
             label != null, flushed, info, default_label)
     } else {
@@ -1408,18 +1431,23 @@ fn split_nodes(nodes, i, current, acc, is_separator) {
     else split_nodes(nodes, i + 1, current ++ [nodes[i]], acc, is_separator)
 }
 
-// \begin{list}{label}{declarations}: items show the label unless \item[x] gives
-// one; trivlist has none. Spacing declarations are not modelled.
-fn render_generic_list(el, info, trivial) {
+// Lists whose argument groups precede the first \item: list{label}{declarations},
+// pifont's dinglist{n} and dingautolist{n}. label_for(groups, i) labels item i
+// unless \item[x] gives one; trivlist passes null. Spacing declarations are not modelled.
+fn render_generic_list(el, info, label_for) {
     let flat = flatten_paragraphs(el)
     let item_positions = [for (i, node in flat where is_item_node(node)) i]
     let start = if (len(item_positions) == 0) len(flat) else item_positions[0]
     let groups = [for (node in slice(flat, 0, start)
-        where node is element and string(name(node)) == "curly_group") node]
-    let label = if (trivial or len(groups) == 0) null
-        else <span class: "latex-item-label", for c in render_children(groups[0], 0, info) { c }>;
-    <ul class: "latex-list", for li in split_list_items(slice(flat, start, len(flat)), info, label) { li }>
+        where node is element and string(name(node)) == "curly_group") node];
+    <ul class: "latex-list", for li in split_list_items(slice(flat, start, len(flat)), info,
+        if (label_for == null) null else (i) => label_for(groups, i)) { li }>
 }
+
+// the list environment's label: its first argument, rendered
+fn list_label(groups, info) =>
+    if (len(groups) == 0) null
+    else <span class: "latex-item-label", for c in render_children(groups[0], 0, info) { c }>
 
 // get custom label from \item[label] as a rendered span, or null
 fn get_item_custom_label(item_node) {

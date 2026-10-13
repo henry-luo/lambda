@@ -13,6 +13,7 @@ import language: .language
 import listings: .listings
 import tcolorbox: .tcolorbox
 import caption: .caption
+import dingbats: .dingbats
 
 // `commands` names the commands and environments a package owns: they dispatch
 // to its handlers and are attributed to it when unsupported, only while it is
@@ -27,7 +28,7 @@ pub let CATALOG = {
     IEEEtrantools: {options: ["retainorgcmds"]},
     graphicx: {options: [], commands: ["resizebox", "scalebox", "rotatebox", "reflectbox"]},
     hyperref: {options: ["colorlinks", "hidelinks", "linkcolor", "urlcolor", "citecolor", "pdfauthor", "pdftitle", "pdfsubject", "pdfkeywords", "pdfusetitle", "ocgcolorlinks", "bookmarks", "bookmarksnumbered"],
-        commands: ["pdfbookmark", "bookmark", "hypersetup", "hypertarget", "hyperlink",
+        commands: ["pdfbookmark", "hypersetup", "hypertarget", "hyperlink",
             "phantomsection", "texorpdfstring"]},
     cleveref: {options: [], commands: ["cref", "Cref"]},
     listings: {options: [], commands: ["lstset", "lstinline", "lstlisting"]},
@@ -42,7 +43,7 @@ pub let CATALOG = {
     makecell: {options: [], commands: ["makecell"]},
     cellspace: {options: []},
     caption: {options: caption.OPTIONS, commands: ["captionsetup", "captionof"]},
-    subcaption: {options: caption.OPTIONS, commands: ["subfigure", "subtable"]},
+    subcaption: {options: caption.OPTIONS, commands: ["subfigure", "subtable"], implies: ["caption"]},
     slashbox: {options: [], commands: ["slashbox", "backslashbox"]},
     diagbox: {options: [], commands: ["diagbox"]},
     longtable: {options: []},
@@ -89,6 +90,26 @@ pub let CATALOG = {
     upquote: {options: []},
     // \NewDocumentCommand is native to the engine's kernel, as in current LaTeX
     xparse: {options: []},
+    // declarations whose commands already render (textcomp symbols, \nameref,
+    // EPS stays diagnosed with epstopdf); math symbol and alphabet packages
+    textcomp: {options: []},
+    gensymb: {options: []},
+    nameref: {options: []},
+    epstopdf: {options: []},
+    amscd: {options: []},
+    cancel: {options: []},
+    latexsym: {options: []},
+    stmaryrd: {options: []},
+    esint: {options: []},
+    upgreek: {options: []},
+    bbm: {options: []},
+    dsfont: {options: []},
+    // continuous output never moves floats, so a barrier and its options change nothing
+    placeins: {options: ["section", "above", "below"], commands: ["FloatBarrier"]},
+    indentfirst: {options: []},
+    bookmark: {options: [], commands: ["bookmark"], implies: ["hyperref"]},
+    pifont: {options: [], commands: ["ding", "dinglist", "dingautolist", "dingline", "dingfill"]},
+    marvosym: {options: [], commands: [for (k, v at dingbats.MARVOSYM) string(k)]},
     todonotes: {options: ["colorinlistoftodos"]},
     biblatex: {options: ["style", "citestyle", "bibstyle", "sorting",
         "maxnames", "minnames", "maxcitenames", "mincitenames",
@@ -463,11 +484,11 @@ fn chicago_biblatex(st) {
 pub fn collect(ast) {
     let walked = walk(ast, {packages: [], diagnostics: []}, true)
     let declared = chicago_biblatex(walked)
-    // Subcaption loads caption upstream; preserve that dependency in the static registry.
-    let loaded = if (active(declared.packages, "subcaption") and
-        not active(declared.packages, "caption")) {*:declared,
-            packages: declared.packages ++ [{key: "caption", val: {},
-                offset: offset_for(declared.packages, "subcaption")}]} else declared
+    // packages that load others upstream (subcaption loads caption, bookmark loads
+    // hyperref); the implied package is active with its defaults
+    let implied = [for (entry in declared.packages, name in implies_of(CATALOG[entry.key])
+        where not active(declared.packages, name)) {key: name, val: {}, offset: entry.offset}]
+    let loaded = {*:declared, packages: declared.packages ++ implied}
     let has_body = ast is element and util.find_child(ast, "document") != null
     {*:loaded, diagnostics: loaded.diagnostics ++ scan(ast, loaded.packages, has_body) ++
         conflict_issues(loaded.packages)}
@@ -482,6 +503,8 @@ fn conflict_issues(packages) {
 }
 
 fn conflicts_of(desc) => if (desc == null or desc.conflicts == null) [] else desc.conflicts
+
+fn implies_of(desc) => if (desc == null or desc.implies == null) [] else desc.implies
 
 // HTML keeps a continuous table; the fixed-page PDF writer cannot repeat
 // longtable heads or split rows until the shared pagination path supports it.

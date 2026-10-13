@@ -49,7 +49,7 @@ pub fn variant(ch, style) {
 // Share command spellings between rendering and style-face acquisition.
 let styled_commands = [
     {cmd:"\\rm", style:"normal"}, {cmd:"\\it", style:"italic"}, {cmd:"\\bf", style:"bold"},
-    {cmd:"\\sf", style:"sans"}, {cmd:"\\tt", style:"mono"},
+    {cmd:"\\sf", style:"sans"}, {cmd:"\\tt", style:"mono"}, {cmd:"\\cal", style:"cal"},
     {cmd: "\\mathrm", style: "normal"},
     {cmd: "\\mathbf", style: "bold"},
     {cmd: "\\boldsymbol", style: "bolditalic"},
@@ -66,7 +66,16 @@ let styled_commands = [
     {cmd:"\\textsf",style:"sans"}, {cmd:"\\texttt",style:"mono"}
 ]
 
-pub fn command_variant(cmd) => [for (entry in styled_commands where entry.cmd == cmd) entry.style][0]
+// math alphabets other packages spell differently: bbm's \mathbbm, dsfont's \mathds
+let ALPHABET_ALIASES = {mathbbm: "\\mathbb", mathds: "\\mathbb"}
+
+pub fn alphabet_alias(name) => ALPHABET_ALIASES[name]
+
+pub fn command_variant(cmd) {
+    let direct = [for (entry in styled_commands where entry.cmd == cmd) entry.style][0]
+    let alias = ALPHABET_ALIASES[if (starts_with(cmd, "\\")) slice(cmd, 1, len(cmd)) else cmd]
+    if (direct != null) direct else if (alias != null) command_variant(alias) else null
+}
 
 fn source_items(node) {
     let attrs = ["value", "name", "cmd", "text", "base", "sub", "sup", "numer", "denom",

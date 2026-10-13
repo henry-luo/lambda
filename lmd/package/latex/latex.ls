@@ -243,7 +243,11 @@ fn package_stylesheet(info) {
         geometry.stylesheet({margin: "1in"}) else "") ++
     microtype.stylesheet(registry.options_for(info.packages, "microtype")) ++
     hyperref.stylesheet(info.hyperref_settings) ++ dispatcher.running_stylesheet(info) ++
-    info.cellspace_css
+    info.cellspace_css ++
+    // indentfirst indents the first paragraph after a heading, which LaTeX otherwise does not
+    (if (registry.active(info.packages, "indentfirst"))
+        ".latex-document h1 + p,.latex-document h2 + p,.latex-document h3 + p," ++
+        ".latex-document h4 + p{text-indent:1.5em;}\n" else "")
 }
 
 // The parser preserves both braced and control-sequence forms of \setlength.

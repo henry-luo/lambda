@@ -576,8 +576,9 @@ private:
             elem.attr("cmd", builder_.createStringItem(full));
             return elem.final();
         }
+        // LaTeX 2.09 math font switches; \cal still selects the calligraphic alphabet
         if (strcmp(name, "rm") == 0 || strcmp(name, "it") == 0 || strcmp(name, "bf") == 0 ||
-            strcmp(name, "sf") == 0 || strcmp(name, "tt") == 0) {
+            strcmp(name, "sf") == 0 || strcmp(name, "tt") == 0 || strcmp(name, "cal") == 0) {
             ElementBuilder elem = builder_.element("font_switch");
             elem.attr("cmd", builder_.createStringItem(full));
             return elem.final();

@@ -119,7 +119,7 @@ fn group_boxes(items, c, i) {
                 delimiter_target:c.delimiter_target,measuring_delimiters:c.measuring_delimiters};
             [middle_delimiter(item,restored)^,*group_boxes(items,restored,i + 1)^]
         } else if (item is element and name(item) == 'font_switch') {
-            let variant = {rm:"normal", it:"italic", bf:"bold", sf:"sans", tt:"mono"}[command_name(command)];
+            let variant = font.command_variant(command);
             group_boxes(items, {*:c, variant:variant, text_variant:variant}, i + 1)^
         } else if (style != null and item.arg == null)
             group_boxes(items, with_style(c, style), i + 1)^
@@ -215,14 +215,16 @@ let SPACE_COMMANDS = [",", ":", ";", "!", "quad", "qquad", "enspace", "thinspace
 pub fn maps_command(key) =>
     sym.lookup_symbol(key) != null or sym.get_operator_name(key) != null or
     contains(NAMED_COMMANDS, key) or contains(SPACE_COMMANDS, key) or
-    key == "rule" or key == "genfrac"
+    key == "rule" or key == "genfrac" or font.alphabet_alias(key) != null
 
 // the unmapped generic commands of a math AST, in source order
 pub fn unmapped_commands(n) {
     if (n is array or n is list) [for (item in n, key in unmapped_commands(item)) key]
     else if (not (n is element)) []
     else {
-        let key = if (name(n) == 'command') command_name(string(n.name or n.cmd or "")) else null
+        // both go through command_node; a symbol_command name can lack a table entry too
+        let key = if (name(n) == 'command' or name(n) == 'symbol_command')
+            command_name(string(n.name or n.cmd or "")) else null
         let own = if (key != null and not maps_command(key)) [key] else [];
         // element iteration yields attribute values as well as content
         own ++ [for (child in n, found in unmapped_commands(child)) found]
@@ -240,7 +242,8 @@ fn command(raw, c) {
         let is_large = atom == "mop"
         let result = if (is_large and c.style == "display")
             stretch.glyph(font.large_operator(c.profile, ord(unicode))^, metric(c, "display_operator_min_height"), true, scale(c), atom)^
-            else text(unicode, if (is_large) {*:c, variant: "normal"} else c)^
+            // upgreek letters keep their upright shape in math italic
+            else text(unicode, if (is_large or sym.is_upright(key)) {*:c, variant: "normal"} else c)^
         let centered = if (is_large) center_axis(result, c) else result;
         {*:centered, type: atom, limits: is_large and (key == "intop" or not contains(key, "int"))}
     } else if (key == "mathstrut") phantom(<phantom_command cmd:"\\vphantom", content:"(">,c)^
@@ -300,7 +303,11 @@ fn command_node(n, c) {
         fraction(<fraction cmd: "\\genfrac", numer: items[4], denom: items[5],
             left:util.text_of(items[0]), right:util.text_of(items[1]), thickness: util.text_of(items[2])>,
             if (style != null) with_style(c, style) else c)^
-    } else if (len(items) > 0) spaced([command(key, c)^, *[for (item in items) node(item, c)^]], c)
+    }
+    // another package's spelling of a math alphabet, such as bbm's \mathbbm
+    else if (font.alphabet_alias(key) != null and len(items) > 0)
+        styled(<style_command cmd: font.alphabet_alias(key), arg: items[0]>, c)^
+    else if (len(items) > 0) spaced([command(key, c)^, *[for (item in items) node(item, c)^]], c)
     else command(if (c.text_mode == true and not maps_command(key)) "\\" ++ key else key, c)^
 }
 
