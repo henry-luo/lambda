@@ -656,6 +656,8 @@ Implementation is in progress against the
 [timeline proposal](../vibe/Lambda_Pkg_Chart_Timeline.md); the
 [acceptance inventory](../test/timeline/reference_inventory.json) records open
 features and host coverage. Native Radiant is the current interactive host.
+The revised proposal excludes browser delivery, automatic resource lifecycle,
+export, and accessibility/localization gates; existing compatibility APIs remain.
 
 ```lambda
 import timeline: lambda.chart.timeline
@@ -674,6 +676,29 @@ partial dates, exact numeric deep time, explicit timezones, duration events,
 eras, nested groups, hidden intervals, curved coordinates, and quantitative
 chart overlays. Rendering consumes explicit state and resource results;
 procedural handlers own effects (**S12.1.1v2, S9.1.4/S9.3.1**).
+
+Retained models reuse source normalization and an exact interval index across
+window, selection, and playback changes. Query/filter/group changes rebuild
+visibility while retaining the source index. Layout clusters projected candidates
+before measuring rich cards; `plan.work` reports index use, examined records,
+candidates, and measured cards. Dense identical-date clusters still examine all
+their members (**S6.2.2v3/S6.2.3**).
+
+Set `animate: true` or `animate: {duration: 300, delay: 0, easing: 'linear',
+enter: true, update: true, exit: true, guides: true}` to animate keyed event
+replacement, geometry, windows, and guides. Interruption starts from the displayed
+geometry and opacity; outgoing cards retire at completion. `motion: 'reduced'`
+or `'none'`, or `model(spec, viewport, {reduced_motion: true})`, settles immediately.
+For a deterministic sample, `render_frame(spec, {time_ms: 100, previous: {plan,
+svg}}, viewport)` consumes an explicit previous snapshot
+(**S12.1.1v2/S12.1.3, S9.1.4/S9.3.1**).
+
+Open the native [animation sample](../test/ui/timeline/keyed_motion.ls) with
+`./lambda.exe view test/ui/timeline/keyed_motion.ls`. Additional pages show
+[rich cards and dtna styling](../test/ui/timeline/cards.ls),
+[clustering](../test/ui/timeline/cluster.ls), and
+[dark-theme presentation](../test/ui/timeline/presentation.ls), and a
+[10,000-event chronology](../test/ui/timeline/scalability.ls).
 
 `search.highlight: true` preserves rich inline elements and their attributes,
 including matches split across element boundaries. Case and diacritic options

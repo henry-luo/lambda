@@ -6,7 +6,7 @@ import pathlib
 import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-STATUSES = {"planned", "partial", "blocked", "complete"}
+STATUSES = {"planned", "partial", "blocked", "complete", "excluded"}
 
 
 def check(require_complete=False):
@@ -14,12 +14,16 @@ def check(require_complete=False):
     failures = []
     counts = {status: 0 for status in STATUSES}
 
-    def evidence(record, label):
+    def evidence(record, label, example=False):
         status = record.get("status")
         if status not in STATUSES:
             failures.append(label + ": invalid status")
             return
         counts[status] += 1
+        if status == "excluded":
+            if not example or record.get("exclusion") not in inventory.get("scope", {}).get("excluded_requirements", []):
+                failures.append(label + ": exclusion must name a removed example requirement")
+            return
         acceptance = record.get("acceptance", [])
         if status == "complete" and not acceptance:
             failures.append(label + ": complete requires acceptance evidence")
@@ -50,7 +54,7 @@ def check(require_complete=False):
             if len(set(source["declared_options"])) != len(source["declared_options"]):
                 failures.append(name + ": duplicate option names in " + source["path"])
         for example in reference.get("examples", []):
-            evidence(example, name + ":" + example["path"])
+            evidence(example, name + ":" + example["path"], example=True)
     families = inventory.get("features", [])
     if len(families) != 27 or len({row["family"] for row in families}) != 27:
         failures.append("expected the revised proposal's 27 distinct feature families")

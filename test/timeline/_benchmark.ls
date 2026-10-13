@@ -37,15 +37,19 @@ pub pn run(count: int, scenario: string) map | error {
     if (first is error) { return first }
     let laid_out=clock();
     var samples=[];
+    var work=[];
     var checksum=len(first.events);
     for (step in 1 to 8) {
         let before=clock();
         let next=prepared.source(raw,current,cache);
-        let window={from:first.window.from+step,to:first.window.to+step};
+        // keep dense identical dates in view throughout the repeated updates.
+        let shift=if (scenario=="identical") decimal(step)/10m else step;
+        let window={from:first.window.from+shift,to:first.window.to+shift};
         let frame=geometry.normalized(next.normalized,{width:1000,height:600},{*:current,window:window});
         if (frame is error) { return frame }
         checksum=checksum+len(frame.events);
         samples=[*samples,(clock()-before)*1000.0]
+        work=[*work,frame.work]
     }
     let before_cache=clock();
     for (step in 1 to 100) {
@@ -57,5 +61,5 @@ pub pn run(count: int, scenario: string) map | error {
         visible:len(first.visible_events),cards:len(first.events),work:first.work,checksum:checksum,
         generate_ms:(generated-start)*1000.0,normalize_ms:(normalized-generated)*1000.0,
         initialize_ms:(initialized-normalized)*1000.0,layout_ms:(laid_out-initialized)*1000.0,
-        viewport_updates_ms:samples,cached_source_100_ms:cache_ms}
+        viewport_updates_ms:samples,viewport_work:work,cached_source_100_ms:cache_ms}
 }
