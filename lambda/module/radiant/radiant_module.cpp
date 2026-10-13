@@ -4085,11 +4085,14 @@ static const ContextCapsuleOps radiant_query_font_cache_ops = {
 // compare complete resource bytes and normalized styles, never GC addresses or
 // family names alone. Oversized snapshots retain the uncached query path.
 static bool radiant_query_font_key(Item faces, ByteBuilder* key) {
-    if (!is_array_family_type_id(get_type_id(faces))) return false;
+    // a query without faces (system fonts only) is the common case and needs a
+    // key too: rebuilding its context per call rescanned every font directory.
+    // Accept exactly what radiant_build_query_fonts accepts.
+    if (!radiant_item_is_missing(faces) && !is_array_family_type_id(get_type_id(faces))) return false;
     RootFrame roots(1);
     Rooted<Item> owner(roots, faces);
-    int64_t count = fn_len(owner.get());
-    if (count <= 0) return false;
+    int64_t count = radiant_item_is_missing(faces) ? 0 : fn_len(owner.get());
+    if (count < 0) return false;
     const size_t limit = 8 * 1024 * 1024;
     if (!byte_builder_append_limited(key, &count, sizeof(count), limit)) return false;
     for (int64_t index = 0; index < count; index++) {

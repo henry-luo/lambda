@@ -461,6 +461,14 @@ static void ui_collect_json_files(const std::string& directory,
 #endif
 }
 
+// Fixture ids and every --test pattern share one spelling, so a pattern that
+// names a path ("js-loop-listener-*") matches the id ("js_loop_listener_*").
+static void ui_normalize_id_chars(char* text) {
+    for (char* c = text; *c; c++) {
+        if (*c == '/' || *c == '-' || *c == '.' || *c == ' ') *c = '_';
+    }
+}
+
 static std::string ui_fixture_id(const std::string& path) {
     std::string id = path;
     if (id.size() > 5) id.resize(id.size() - 5);
@@ -469,7 +477,7 @@ static std::string ui_fixture_id(const std::string& path) {
         size_t pos = id.find(root);
         if (pos == 0) { id.erase(0, strlen(root)); break; }
     }
-    for (char& c : id) if (c == '/' || c == '-' || c == '.' || c == ' ') c = '_';
+    ui_normalize_id_chars(&id[0]);
     return id;
 }
 
@@ -858,18 +866,37 @@ static bool ui_filter_list_matches(const std::string& patterns, const std::strin
             // Keep the directory-independent `--test smoke` form used by the
             // old DOM runner: it selects `dom_smoke` without reintroducing
             // path parsing in Make targets.
-            if (pattern.find('*') == std::string::npos && pattern.find('?') == std::string::npos) {
-                std::string normalized = pattern;
-                for (char& c : normalized) if (c == '-' || c == '/' || c == '.') c = '_';
-                if (value == normalized || (value.size() > normalized.size() &&
-                    value.compare(value.size() - normalized.size(), normalized.size(), normalized) == 0 &&
-                    value[value.size() - normalized.size() - 1] == '_')) return true;
-            }
+            if (pattern.find('*') == std::string::npos && pattern.find('?') == std::string::npos &&
+                value.size() > pattern.size() &&
+                value.compare(value.size() - pattern.size(), pattern.size(), pattern) == 0 &&
+                value[value.size() - pattern.size() - 1] == '_') return true;
         }
         if (end == patterns.size()) break;
         start = end + 1;
     }
     return false;
+}
+
+// Every comma-separated --test/--tag selector must name at least one fixture,
+// so a renamed fixture or a misspelled Make target fails instead of running
+// nothing. Returns the first selector that matches no fixture, or "".
+static std::string ui_unmatched_selector(const std::string& patterns, bool match_tags) {
+    size_t start = 0;
+    while (start < patterns.size()) {
+        size_t end = patterns.find(',', start);
+        if (end == std::string::npos) end = patterns.size();
+        std::string pattern = patterns.substr(start, end - start);
+        bool matched = pattern.empty();
+        for (size_t i = 0; !matched && i < g_ui_tests.size(); i++) {
+            if (!match_tags) { matched = ui_filter_list_matches(pattern, g_ui_tests[i].test_name); continue; }
+            for (const std::string& tag : g_ui_tests[i].tags) {
+                if (ui_filter_list_matches(pattern, tag)) { matched = true; break; }
+            }
+        }
+        if (!matched) return pattern;
+        start = end + 1;
+    }
+    return "";
 }
 
 static bool ui_suite_tag_matches(const UiTestInfo& info) {
@@ -1446,6 +1473,7 @@ int main(int argc, char** argv) {
         else if (strcmp(arg, "--preflight") == 0) preflight_only = true;
         else if (strcmp(arg, "--native-gui") == 0) g_ui_allow_native_gui = true;
     }
+    ui_normalize_id_chars(&g_ui_test_filter[0]);
     ::testing::InitGoogleTest(&argc, argv);
 
     std::vector<UiTestInfo> validated_ui_tests = discover_ui_tests();
@@ -1458,6 +1486,17 @@ int main(int argc, char** argv) {
         return 2;
     }
     g_ui_tests.swap(validated_ui_tests);
+    const struct { const std::string* patterns; bool tags; const char* flag; } selectors[] = {
+        {&g_ui_test_filter, false, "--test"}, {&g_ui_tag_filter, true, "--tag"},
+        {&g_ui_exclude_tag_filter, true, "--exclude-tag"},
+    };
+    for (const auto& selector : selectors) {
+        std::string unmatched = ui_unmatched_selector(*selector.patterns, selector.tags);
+        if (!unmatched.empty()) {
+            std::cerr << "UI " << selector.flag << " selector matches no fixture: " << unmatched << "\n";
+            return 2;
+        }
+    }
 
     // GTest listing is metadata-only and must never launch a UI child, but it
     // still uses the same strict manifest/fixture preflight as execution.

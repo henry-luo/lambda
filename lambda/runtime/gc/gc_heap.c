@@ -339,9 +339,9 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 
     // Register the block with the object zone's sorted range array so it joins
     // the zone's min/max fast-rejection bounds. The zone reports no ownership
-    // for these ranges (slab == NULL); gc_bump_block_owns_exact does the exact
-    // slot check for bump-allocated objects.
-    if (gc->object_zone && !gc_object_zone_register_range(gc->object_zone, memory, reserved)) {
+    // for these ranges (slab == NULL) but hands the block back as their owner,
+    // so the exact slot check for bump-allocated objects needs no list walk.
+    if (gc->object_zone && !gc_object_zone_register_range(gc->object_zone, memory, reserved, block)) {
         // An unregistered block would be invisible to the zone's ownership index.
         log_error("gc_alloc_bump_block: failed to register %zu byte bump block", reserved);
         mem_free(block->alloc_bits);
@@ -1531,23 +1531,30 @@ static int gc_bump_block_scan_exact(gc_heap_t* gc, gc_bump_block_t* block, uint8
     return 0;
 }
 
-// Exact-slot ownership test. Conservative data-word tracing feeds this
-// arbitrary words, so it must reject interior and misaligned addresses rather
-// than merely range-check them — hence the per-slot-start bitmap.
+// Exact-slot test of user pointer `p` within one bump block. Conservative
+// data-word tracing feeds this arbitrary words, so it must reject interior and
+// misaligned addresses rather than merely range-check them — hence the
+// per-slot-start bitmap. A user pointer sits one header past its slot start.
+static int gc_bump_block_slot_exact(gc_heap_t* gc, gc_bump_block_t* block, uint8_t* p) {
+    uint8_t* h = p - sizeof(gc_header_t);
+    if (h < block->base || h >= block->base + block->size) return 0;
+    if (!block->alloc_bits) return gc_bump_block_scan_exact(gc, block, p);
+    size_t off = (size_t)(h - block->base);
+    if (off % GC_BUMP_GRANULE) return 0;   // interior address, never a slot
+    size_t bit = off / GC_BUMP_GRANULE;
+    return (block->alloc_bits[bit >> 3] >> (bit & 7u)) & 1u;
+}
+
 static int gc_bump_block_owns_exact(gc_heap_t* gc, void* ptr) {
     if (!gc || !ptr) return 0;
     uint8_t* p = (uint8_t*)ptr;
     if (p < gc->bump_min_addr || p >= gc->bump_max_addr) return 0;
 
-    // A user pointer sits one header past its slot start, so search by header.
+    // search by header: the slot start, not the user pointer, lies in the block
     uint8_t* h = p - sizeof(gc_header_t);
     for (gc_bump_block_t* block = gc->bump_blocks; block; block = block->next) {
         if (h < block->base || h >= block->base + block->size) continue;
-        if (!block->alloc_bits) return gc_bump_block_scan_exact(gc, block, p);
-        size_t off = (size_t)(h - block->base);
-        if (off % GC_BUMP_GRANULE) return 0;   // interior address, never a slot
-        size_t bit = off / GC_BUMP_GRANULE;
-        return (block->alloc_bits[bit >> 3] >> (bit & 7u)) & 1u;
+        return gc_bump_block_slot_exact(gc, block, p);
     }
     return 0;
 }
@@ -1555,10 +1562,16 @@ static int gc_bump_block_owns_exact(gc_heap_t* gc, void* ptr) {
 // check if a pointer is to a GC-managed OBJECT (has GCHeader)
 static int is_gc_object(gc_heap_t* gc, void* ptr) {
     if (!gc || !ptr) return 0;
-    if (gc_object_zone_owns(gc->object_zone, ptr)) return 1;
+    // Marking asks this for every traced word; one range search answers both
+    // slab slots and bump blocks. Slots never straddle blocks and large objects
+    // never share a block's range, so a block hit is decided by that block alone.
+    void* bump_block = NULL;
+    if (gc_object_zone_owns_or_foreign(gc->object_zone, ptr, &bump_block)) return 1;
+    if (bump_block) return gc_bump_block_slot_exact(gc, (gc_bump_block_t*)bump_block, (uint8_t*)ptr);
     if (gc_large_object_contains(gc, ptr)) return 1;
-    if (gc_bump_block_owns_exact(gc, ptr)) return 1;
-    return 0;
+    // every bump block registers its range with the object zone and a slot's
+    // user pointer lies inside it, so only a zone-less heap walks the blocks.
+    return !gc->object_zone && gc_bump_block_owns_exact(gc, ptr);
 }
 
 void gc_mark_item(gc_heap_t* gc, uint64_t item) {

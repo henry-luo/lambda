@@ -1,5 +1,5 @@
 {
-  "name": "declarative dtna gallery applies nested views and retains native interactions",
+  "name": "declarative dtna gallery applies nested views, keeps controls and descriptions spaced, and retains native interactions",
   "html": "test/ui/dtna_gallery.ls",
   "viewport": {"width":1100,"height":2400},
   "events": [
@@ -26,6 +26,16 @@
     {"type":"assert_text","target":{"selector":"#gallery-pages [aria-current=page]"},"equals":"2"},
     {"type":"click","target":{"selector":"#gallery-alert .dtna-alert-close"}},
     {"type":"assert_count","target":{"selector":"#gallery-alert"},"count":0},
-    {"type":"assert_value","target":{"selector":"#gallery-name"},"equals":"Ada"}
+    {"type":"assert_value","target":{"selector":"#gallery-name"},"equals":"Ada"},
+    {"type":"log","message":"select and checkbox remain separated"},
+    {"type":"assert_position","element_a":{"selector":"#gallery-select"},"element_b":{"selector":".dtna-checkbox"},"relation":"left_of","gap":8,"tolerance":0.2},
+    {"type":"click","target":{"selector":"#gallery-check"}},
+    {"type":"assert_checked","target":{"selector":"#gallery-check"},"checked":true},
+    {"type":"log","message":"description values stay clear of the next label; the narrower viewport comes last"},
+    {"type":"assert_position","element_a":{"selector":".dtna-descriptions-grid .dtna-description:nth-child(1) dd"},"element_b":{"selector":".dtna-descriptions-grid .dtna-description:nth-child(2) dt"},"relation":"left_of","gap":16,"tolerance":0.75},
+    {"type":"assert_rect","target":{"selector":".dtna-descriptions-grid .dtna-description:nth-child(2) dd"},"height":22,"tolerance":0.2},
+    {"type":"resize","width":900,"height":1500},
+    {"type":"assert_position","element_a":{"selector":".dtna-descriptions-grid .dtna-description:nth-child(1) dd"},"element_b":{"selector":".dtna-descriptions-grid .dtna-description:nth-child(2) dt"},"relation":"left_of","gap":16,"tolerance":0.75},
+    {"type":"assert_rect","target":{"selector":".dtna-descriptions-grid .dtna-description:nth-child(2) dd"},"height":22,"tolerance":0.2}
   ]
 }
