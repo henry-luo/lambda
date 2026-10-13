@@ -4335,54 +4335,62 @@ extern "C" Item js_uri_decode_equals_from_char_code(Item str_item, Item first_it
     return js_strict_equal(decoded, expected);
 }
 
-static Item js_string_from_char_code_sequence(Item source, bool typed_array) {
-    int len = typed_array ? js_typed_array_length(source) : source.array->length;
-    if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
-    char* buf = (char*)mem_alloc(len * 4 + 1, MEM_CAT_JS_RUNTIME);
-    int pos = 0;
-    for (int i = 0; i < len; i++) {
-        Item index = (Item){.item = i2it(i)};
-        Item code_item = typed_array ? js_typed_array_get(source, index)
-            : source.array->items[i];
-        Item code_value = js_from_char_code_to_uint16(code_item);
-        if (item_is_error(code_value)) {
-            mem_free(buf);
-            return code_value;
+extern "C" Item js_string_from_codes_with_ops(void* source, int64_t count, bool code_points,
+        const JsStringCodeOps* ops) {
+    if (count < 0 || count > (INT_MAX - (int64_t)sizeof(String) - 1) / 4) return ops->range_error();
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> value(roots, ItemNull);
+    StrBuf* buffer = strbuf_new_cap((size_t)count * 4 + 1);
+    if (!buffer) return ItemError;
+    for (int64_t i = 0; i < count; i++) {
+        value.set(ops->read(source, i));
+        if (!item_is_error(value.get())) value.set(ops->to_number(value.get()));
+        if (item_is_error(value.get())) { strbuf_free(buffer); return value.get(); }
+        double number = it2d(value.get());
+        if (code_points && (!isfinite(number) || trunc(number) != number || number < 0 || number > 0x10ffff)) {
+            strbuf_free(buffer); return ops->range_error();
         }
-        int code = (int)it2i(code_value);
-        if (utf_is_high_surrogate((uint32_t)code) && i + 1 < len) {
-            Item next_index = (Item){.item = i2it(i + 1)};
-            Item lo_item = typed_array ? js_typed_array_get(source, next_index)
-                : source.array->items[i + 1];
-            Item lo_value = js_from_char_code_to_uint16(lo_item);
-            if (item_is_error(lo_value)) {
-                mem_free(buf);
-                return lo_value;
-            }
-            int lo = (int)it2i(lo_value);
-            uint32_t cp = utf16_decode_pair((uint16_t)code, (uint16_t)lo);
-            if (cp != 0) {
-                pos += (int)utf8_encode_wtf8(cp, buf + pos);
-                i++; // skip the low surrogate
-                continue;
-            }
-        }
-        pos += (int)utf8_encode_wtf8((uint32_t)code, buf + pos);
+        uint32_t code = code_points ? (uint32_t)number : (uint16_t)js_to_int32(number);
+        char bytes[4];
+        size_t length = utf8_encode_wtf8(code, bytes);
+        strbuf_append_str_n(buffer, bytes, length);
     }
-    buf[pos] = '\0';
-    Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
-    mem_free(buf);
-    return result;
+    // coerce once in source order; canonicalization joins adjacent surrogate arguments afterwards.
+    if (!utf8_key_is_canonical(buffer->str, buffer->length)) {
+        StrBuf* canonical = strbuf_new_cap(buffer->length + 1);
+        if (!canonical) { strbuf_free(buffer); return ItemError; }
+        canonical->length = utf8_canonical_key(buffer->str, buffer->length, canonical->str);
+        canonical->str[canonical->length] = 0;
+        strbuf_free(buffer); buffer = canonical;
+    }
+    return js_strbuf_take_item(buffer);
+}
+static Item js_string_from_code_sequence(Item source, bool typed_array, bool code_points = false) {
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, source);
+    int64_t count = typed_array ? js_typed_array_length(source) : source.array->length;
+    const JsStringCodeOps ops = {
+        [](void* source, int64_t index) {
+            Item owner = ((Rooted<Item>*)source)->get();
+            return get_type_id(owner) == LMD_TYPE_MAP ? js_typed_array_get(owner, Item{.item = i2it(index)}) :
+                owner.array->items[index];
+        },
+        code_points ? js_to_number : js_from_char_code_to_uint16,
+        []() { return js_throw_range_error("Invalid code point or string length"); }
+    };
+    return js_string_from_codes_with_ops(&owner, count, code_points, &ops);
 }
 
 // Multi-argument String.fromCharCode accepts both ordinary arrays and typed arrays.
 extern "C" Item js_string_fromCharCode_array(Item arr_item) {
     TypeId type = get_type_id(arr_item);
     if (type == LMD_TYPE_MAP && js_is_typed_array(arr_item)) {
-        return js_string_from_char_code_sequence(arr_item, true);
+        return js_string_from_code_sequence(arr_item, true);
     }
     if (!js_is_js_array(arr_item)) return js_string_fromCharCode(arr_item);
-    return js_string_from_char_code_sequence(arr_item, false);
+    return js_string_from_code_sequence(arr_item, false);
 }
 
 // String.fromCodePoint(cp) — single code point
@@ -4401,29 +4409,8 @@ extern "C" Item js_string_fromCodePoint(Item code_item) {
 
 // String.fromCodePoint(cp1, cp2, ...) — multiple code points via array
 extern "C" Item js_string_fromCodePoint_array(Item arr_item) {
-    if (!js_is_js_array(arr_item)) {
-        return js_string_fromCodePoint(arr_item);
-    }
-    Array* arr = arr_item.array;
-    int len = arr->length;
-    if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
-    char* buf = (char*)mem_alloc(len * 4 + 1, MEM_CAT_JS_RUNTIME);
-    int pos = 0;
-    for (int i = 0; i < len; i++) {
-        Item num_item = js_to_number(arr->items[i]);
-        if (item_is_error(num_item)) { mem_free(buf); return num_item; }
-        double code_num = js_get_number(num_item);
-        if (!isfinite(code_num) || floor(code_num) != code_num || code_num < 0 || code_num > 0x10FFFF) {
-            mem_free(buf);
-            return js_throw_range_error("Invalid code point");
-        }
-        int code = (int)code_num;
-        pos += (int)utf8_encode_wtf8((uint32_t)code, buf + pos);
-    }
-    buf[pos] = '\0';
-    Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
-    mem_free(buf);
-    return result;
+    if (!js_is_js_array(arr_item)) return js_string_fromCodePoint(arr_item);
+    return js_string_from_code_sequence(arr_item, false, true);
 }
 
 #if JS_TEST262_FAST_PATHS
@@ -4497,66 +4484,49 @@ extern "C" Item js_test262_build_string(Item args_item) {
 // String.raw(template, ...substitutions) — tagged template literal
 // Called with args[0]=template_object (has .raw property), args[1..]=substitutions
 extern "C" Item js_string_raw(Item* args, int argc) {
-    if (argc < 1) return (Item){.item = s2it(heap_strcpy("", 0))};
-
-    Item template_obj = args[0];
-    if (template_obj.item == ItemNull.item || get_type_id(template_obj) == LMD_TYPE_NULL ||
-        get_type_id(template_obj) == LMD_TYPE_UNDEFINED) {
-        return js_throw_type_error("Cannot convert undefined or null to object");
-    }
-    // Get template.raw
-    Item raw_key = js_name_item("raw", 3);
-    JS_ASSIGN_OR_RETURN(raw, js_get_reference(template_obj, raw_key));
-    if (raw.item == ITEM_NULL || raw.item == ITEM_JS_UNDEFINED ||
-        get_type_id(raw) == LMD_TYPE_NULL || get_type_id(raw) == LMD_TYPE_UNDEFINED) {
-        return js_throw_type_error("Cannot convert undefined or null to object");
-    }
-
-    // Get raw.length (may be a MAP with numeric keys + length property)
-    Item len_key = js_name_item("length", 6);
-    JS_ASSIGN_OR_RETURN(len_item, js_get_reference(raw, len_key));
-    if (js_key_is_symbol_c(len_item)) {
-        return js_throw_type_error("Cannot convert a Symbol value to a number");
-    }
-    JS_ASSIGN_OR_RETURN(len_num, js_to_number(len_item));
-    double len_d = js_get_number(len_num);
-    int raw_len = 0;
-    if (!isnan(len_d) && len_d > 0) {
-        if (isinf(len_d) || len_d > 2147483647.0) raw_len = 2147483647;
-        else raw_len = (int)floor(len_d);
-    }
-    if (raw_len <= 0) return (Item){.item = s2it(heap_strcpy("", 0))};
-
-    StrBuf* buf = strbuf_new();
-    for (int i = 0; i < raw_len; i++) {
-        // Get raw[i] through the shared numeric property lane.
-        Item idx = js_property_index_key(i);
-        Item part = js_get_reference(raw, idx);
-        if (item_is_error(part)) {
-            strbuf_free(buf);
-            return part;
-        }
-        Item part_str = js_to_string(part);
-        if (item_is_error(part_str)) {
-            strbuf_free(buf);
-            return part_str;
-        }
-        String* s = it2s(part_str);
-        if (s && s->len > 0) strbuf_append_str_n(buf, s->chars, s->len);
-
-        // Interleave substitution if present (i+1 in args because args[0] is template)
-        if (i < raw_len - 1 && i < argc - 1) {
-            Item sub_str = js_to_string(args[i + 1]);
-            if (item_is_error(sub_str)) {
-                strbuf_free(buf);
-                return sub_str;
-            }
-            String* sub_s = it2s(sub_str);
-            if (sub_s && sub_s->len > 0) strbuf_append_str_n(buf, sub_s->chars, sub_s->len);
-        }
-    }
-    return js_strbuf_take_item(buf);
+    static const JsStringRawOps ops = {
+        [](Item value) {
+            // legacy boxing accepts nullish values; String.raw requires the throwing ToObject operation.
+            JS_RETURN_IF_ERROR(js_require_object_coercible(value));
+            return js_to_object(value);
+        }, js_get_reference, js_to_number, js_to_string
+    };
+    return js_string_raw_with_ops(args, argc, &ops);
 }
+extern "C" Item js_string_raw_with_ops(Item* args, int argc, const JsStringRawOps* ops) {
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> object(roots, argc ? args[0] : Item{.item = ITEM_JS_UNDEFINED});
+    Rooted<Item> raw(roots, ItemNull), value(roots, ItemNull);
+    object.set(ops->to_object(object.get()));
+    if (item_is_error(object.get())) return object.get();
+    raw.set(ops->get(object.get(), js_name_item("raw", 3)));
+    if (item_is_error(raw.get())) return raw.get();
+    raw.set(ops->to_object(raw.get()));
+    if (item_is_error(raw.get())) return raw.get();
+    value.set(ops->get(raw.get(), js_name_item("length", 6)));
+    if (item_is_error(value.get())) return value.get();
+    value.set(ops->to_number(value.get()));
+    if (item_is_error(value.get())) return value.get();
+    double number = it2d(value.get());
+    int64_t length = isnan(number) || number <= 0 ? 0 : (int64_t)fmin(floor(number), 9007199254740991.0);
+    StrBuf* buffer = strbuf_new();
+    if (!buffer) return ItemError;
+    // each raw segment is read/coerced before the corresponding substitution.
+    for (int64_t i = 0; i < length; i++) {
+        value.set(ops->get(raw.get(), Item{.item = i2it(i)}));
+        if (!item_is_error(value.get())) value.set(ops->to_string(value.get()));
+        if (item_is_error(value.get())) { strbuf_free(buffer); return value.get(); }
+        strbuf_append_str_n(buffer, value.get().get_string()->chars, value.get().get_string()->len);
+        if (i + 1 < length && i + 1 < argc) {
+            value.set(ops->to_string(args[i + 1]));
+            if (item_is_error(value.get())) { strbuf_free(buffer); return value.get(); }
+            strbuf_append_str_n(buffer, value.get().get_string()->chars, value.get().get_string()->len);
+        }
+    }
+    return js_strbuf_take_item(buffer);
+}
+
 
 // =============================================================================
 // Console output helpers

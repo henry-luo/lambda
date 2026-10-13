@@ -686,6 +686,13 @@ Item js_string_fromCharCode(Item code_item);
 Item js_string_fromCharCode_array(Item arr_item);
 Item js_string_fromCodePoint(Item code_item);
 Item js_string_fromCodePoint_array(Item arr_item);
+struct JsStringCodeOps {
+    Item (*read)(void* source, int64_t index);
+    Item (*to_number)(Item value);
+    Item (*range_error)();
+};
+Item js_string_from_codes_with_ops(void* source, int64_t count, bool code_points,
+    const struct JsStringCodeOps* ops);
 
 // =============================================================================
 // v5: Console multi-argument log
@@ -800,7 +807,21 @@ Item js_object_is_sealed(Item obj);
 
 // Tagged template literals
 Item js_build_template_object(Item* cooked, Item* raw, int count);
+typedef struct JsTemplateObjectOps {
+    Item (*array_new)(int);
+    Item (*store)(Item, int, Item);
+    Item (*define_raw)(Item, Item);
+    Item (*freeze)(Item);
+} JsTemplateObjectOps;
+Item js_build_template_object_with_ops(Item* cooked, Item* raw, int count, const JsTemplateObjectOps* ops);
 Item js_build_template_object_cached(Item* cooked, Item* raw, int count, int64_t site_id);
+typedef struct JsStringRawOps {
+    Item (*to_object)(Item);
+    Item (*get)(Item, Item);
+    Item (*to_number)(Item);
+    Item (*to_string)(Item);
+} JsStringRawOps;
+Item js_string_raw_with_ops(Item* args, int argc, const JsStringRawOps* ops);
 void js_reset_template_registry(void);
 Item js_object_prevent_extensions(Item obj);
 Item js_object_is_extensible(Item obj);
@@ -1080,6 +1101,7 @@ Item js_private_home_class_leave_result(Item previous_class, Item result);
 Item js_private_brand_add(Item object, Item private_key, Item callee);
 void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
 void js_set_function_name_from_property_key(Item fn_item, Item key_item, int64_t prefix_kind);
+Item js_function_name_display(NameRef key, int64_t prefix_kind);
 void js_set_function_name_if_anonymous(Item fn_item, Item name_item);
 Item js_get_global_builtin_fn_by_id(Item global_id);
 void js_eval_env_push_frame(void);

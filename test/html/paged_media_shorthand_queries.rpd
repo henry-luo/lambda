@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<r:page-document xmlns:r="urn:lambda:radiant:page" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" r:line-stacking-strategy="max-height" r:linefeed-treatment="treat-as-space" r:white-space-treatment="ignore-if-surrounding-linefeed" r:white-space-collapse="true" r:wrap-option="wrap" style="margin:0;font-family:Arial;font-size:10px;line-height:12px;color:black;white-space:normal;orphans:1;widows:1;border-collapse:separate">
+  <r:master-set><r:page-master name="sheet" style="size:225pt 180pt;margin:7.5pt"><r:region role="body" name="xsl-region-body" style="overflow:hidden"/></r:page-master></r:master-set>
+  <r:page-sequence master-reference="sheet" force-page-count="no-force"><r:flow region-name="xsl-region-body">
+    <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="font-size:20px;color:purple;border:3px solid purple;padding:2px 4px 6px 8px">
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="font-size:10px;color:blue;border:3px solid purple;padding:2px 4px 6px 8px">Parent shorthand: owner lengths and ink.</div>
+    </div>
+    <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="break-before:page;font-size:20px;color:purple;border:2px solid purple;padding:2px">
+      <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="border-left:4px solid purple;padding-left:4px">
+        <div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="font-size:10px;color:blue;border-style:solid;border-width:2px 2px 2px 4px;border-color:purple purple blue purple;padding:4px 2px 2px 4px">Nearest shorthand: each side selects its owner.</div>
+      </div>
+    </div>
+    <table r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="break-before:page;table-layout:fixed;width:100%;border-collapse:separate;border-spacing:0">
+      <col style="width:70pt"/><col style="width:70pt"/><col style="width:70pt"/>
+      <tbody><tr>
+        <td colspan="2" r:cell-alignment="relative-before" style="padding:0;vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics" style="color:blue;border:2px solid green;padding:4px">Spanning column shorthand: green border, blue text.</div></td>
+        <td r:cell-alignment="relative-before" style="padding:0;vertical-align:top"><div r:block-inline-geometry="reference" r:text-altitude="use-font-metrics" r:text-depth="use-font-metrics">Initials</div></td>
+      </tr></tbody>
+    </table>
+  </r:flow></r:page-sequence>
+</r:page-document>

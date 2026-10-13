@@ -200,7 +200,8 @@ void js_syntax_error(JsTranspiler* tp, SourceSpan span, const char* message);
 // Transpiler lifecycle functions
 JsTranspiler* js_transpiler_create(Runtime* runtime);
 void js_transpiler_destroy(JsTranspiler* tp);
-JsFunctionNode* js_script_field_initializer_ensure(JsScript* script, JsFieldDefinitionNode* field);
+JsFunctionNode* js_script_field_initializer_ensure(JsScript* script, JsFieldDefinitionNode* field,
+    JsStaticBlockNode* block = nullptr);
 Pool* js_script_execution_pool(JsScript* script);
 NamePool* js_script_execution_name_pool(JsScript* script);
 int js_transpiler_parse_error_get(const JsTranspiler* tp, int64_t* out_row,

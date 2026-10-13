@@ -1557,3 +1557,55 @@ workloads retain historical evidence only. Results3–9 are unchanged.
 
 Dependencies, interpreter boundary, reuse inventory, helper disclosure and
 acceptance gates: [implementation plan](../impl/JS_MVP_Lmd_Test262_Parity.md).
+
+## 33. Core language and library completion: 5,000 audited Test262 passes
+
+**Features implemented; Test262 milestone achieved (2026-10-13).** Establish at least **5,000 distinct
+passing canonical IDs** from the frozen 40,261-test LJS target on one MVP build,
+with every required variant passing. Keep the harness-selected-mode count
+separate from the additional strict-variant audit. First capture a fresh whole-target MVP
+inventory: §32's 1,913 passes describe a selected family, while the older 8,888
+whole-target count predates stricter completion checks and is diagnostic.
+
+Complete the following existing facilities (**S1.11**, **D1.3v3**):
+
+1. Object descriptors/reflection and intrinsic metadata: descriptor conversion,
+   validation, own-key order, integrity operations, name/length and constructibility.
+2. Generic Array operations: array-like receivers, holes/inherited properties,
+   coercion, callback receivers, mutation and abrupt completion.
+3. Public classes: expressions/nesting, lexical class names, computed members,
+   static blocks, initialization order and constructor/super behavior.
+4. Strings/primitives: receiver conversion, UTF-16 observations, wrappers,
+   ordinary string methods and String.raw.
+5. Global lexical versus object bindings and tagged templates, including stable
+   template-site identity and frozen cooked/raw arrays.
+
+Reuse Lambda Maps/shapes, arrays, scalar homes, environments and precise roots;
+extend existing helpers before introducing an adapter. Disclose new helpers
+before coding. Class ancestry and JS mutable captures retain their Lambda
+contracts (**S2.1.3v2**, **D2.6.6v3**, **D2.6.10**, **D6.2.3v2**). Retained compiler proofs protect direct
+storage/call paths; no is_normal flag or blanket fallback (**D8.4.1v2**).
+Eval/Function remain assigned to the shared interpreter bridge (**D8.1.3v24**);
+that bridge, private classes, async/modules and advanced buffers follow this round.
+
+Report the audited total, gains/lost passes and residual failures on the same
+build. The numeric milestone does not silently complete unfinished feature work.
+Require focused/forced-GC and shared Lambda/LJS gates, plus pinned release MIR
+self-timing comparisons. Carry forward §32's unresolved performance differences;
+the four jq benchmarks retain historical evidence only. Results3–9 are unchanged.
+
+The phase-completion pin passes **21,747 audited distinct IDs** (19,221 positive,
+2,526 negative). Its selected-mode count is **21,748/40,261**, a gain of **3,977**
+with zero lost entry passes and no new crash IDs. Focused normal/forced-GC gates
+both pass **193/193**; full LJS passes **40,261/40,261**, and all **84 non-jq**
+benchmark contracts pass. The shared Lambda baseline passes **6,806/6,806**.
+The phase33 Navier–Stokes regression is fixed: 31-round pinned MIR self-times
+are **31.978 vs 32.435–32.450 ms**, **1.4–1.5% faster than the phase entry**.
+A compiler proof retains local numeric-key admission when distinct named `this`
+fields cannot expose global bindings (**D8.4.1v2**). Its normal/forced-GC gates
+pass **194/194**; shared follow-up gates pass **6,814/6,814 Lambda** and
+**40,261/40,261 LJS Test262**. The user deferred the small
+text-search difference. Older §32 performance gaps remain separate.
+
+Scope, reuse inventory, helper disclosures and evidence:
+[implementation plan](../impl/JS_MVP_Lmd_Test262_5000.md).

@@ -173,6 +173,8 @@ struct JsAstParameterFacts {
 void js_ast_visit_children(JsAstNode* node, JsAstChildVisit visit, void* ctx);
 // Short-circuiting variant: stops at the first child the predicate accepts.
 bool js_ast_any_child(JsAstNode* node, JsAstChildPredicate predicate, void* ctx);
+// noncomputed property names are syntax, except shorthand values that also read a binding.
+bool js_ast_fact_walk_skips_child(JsAstNode* parent, JsAstNode* child);
 // Visit only destructuring binding targets. Keys and default-value expressions
 // are semantic reads, so they deliberately remain outside this edge set.
 void js_ast_visit_binding_pattern_children(JsAstNode* node,

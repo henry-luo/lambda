@@ -553,9 +553,10 @@ typedef TypedHashMap<JsFieldInitializerEntry,
     JsFieldInitializerMap;
 
 JsFunctionNode* js_script_field_initializer_ensure(JsScript* script,
-        JsFieldDefinitionNode* field) {
-    if (!script || !script->pool || !field || !field->value) return NULL;
-    AstNodeId field_id = ast_index_find(&script->ast_index, (AstNode*)field);
+        JsFieldDefinitionNode* field, JsStaticBlockNode* block) {
+    if (!script || !script->pool || (!block && (!field || !field->value))) return NULL;
+    AstNode* member = block ? (AstNode*)block : (AstNode*)field;
+    AstNodeId field_id = ast_index_find(&script->ast_index, member);
     if (field_id == AST_NODE_ID_INVALID) return NULL;
     if (!script->field_initializers)
         script->field_initializers = JsFieldInitializerMap::create(8);
@@ -572,7 +573,7 @@ JsFunctionNode* js_script_field_initializer_ensure(JsScript* script,
     if (!function || !body || !result || !scope) return NULL;
     // one indexed definition per field; each class evaluation supplies its own environment.
     function->node_type = AST_NODE_FUNC_EXPR;
-    function->source_span = field->source_span;
+    function->source_span = member->source_span;
     function->body = (JsAstNode*)body;
     function->vars = scope;
     function->has_use_strict_directive = true;
@@ -582,13 +583,18 @@ JsFunctionNode* js_script_field_initializer_ensure(JsScript* script,
     // still has an immutable zero-binding activation plan (D8.2.4).
     if (!js_scope_plan_binding_slots(scope)) return NULL;
     body->node_type = AST_NODE_BLOCK;
-    body->source_span = field->source_span;
+    body->source_span = member->source_span;
     body->statements = (JsAstNode*)result;
     result->node_type = AST_NODE_RETURN_STAM;
-    result->source_span = field->source_span;
-    result->argument = field->value;
+    result->source_span = member->source_span;
+    if (block) {
+        // reuse the parser's separate static-block var environment without rewriting its AST body.
+        *body = *(JsBlockNode*)block->body;
+        function->vars = body->vars;
+        body->vars = NULL;
+    } else result->argument = field->value;
     if (!ast_index_append_profile(&script->ast_index, (AstNode*)function,
-            (AstNode*)field, script->profile)) return NULL;
+            member, script->profile)) return NULL;
     key.function = function;
     JsFieldInitializerMap::set(script->field_initializers, key);
     return JsFieldInitializerMap::oom(script->field_initializers) ? NULL : function;
