@@ -24,6 +24,8 @@ import codeblocks: .codeblocks
 import frames: .frames
 import footmisc: .footmisc
 import appendix: .appendix
+import adjustbox: .adjustbox
+import pdfpages: .pdfpages
 import boxes: ~~.elements.boxes
 
 // `commands` names the commands and environments a package owns: they dispatch
@@ -47,9 +49,10 @@ pub let CATALOG = {
     url: {options: []},
     geometry: {options: ["a4paper", "a5paper", "letterpaper", "legalpaper", "landscape", "portrait", "margin", "left", "right", "top", "bottom", "inner", "outer", "paperwidth", "paperheight"],
         commands: ["newgeometry", "restoregeometry"]},
-    xcolor: {options: ["table", "svgnames", "dvipsnames", "usenames"], commands: ["colorlet", "rowcolor"]},
+    xcolor: {options: ["table", "svgnames", "dvipsnames", "usenames"], commands: ["colorlet"],
+        option_implies: {table: ["colortbl"]}},
     booktabs: {options: []},
-    array: {options: []},
+    array: {options: [], commands: ["newcolumntype"], preamble: ["newcolumntype"]},
     multirow: {options: []},
     makecell: {options: [], commands: ["makecell"]},
     cellspace: {options: []},
@@ -58,7 +61,7 @@ pub let CATALOG = {
     slashbox: {options: [], commands: ["slashbox", "backslashbox"]},
     diagbox: {options: [], commands: ["diagbox"]},
     longtable: {options: []},
-    tabularx: {options: []},
+    tabularx: {options: [], implies: ["array"]},
     xltabular: {options: []},
     babel: {options: ["english", "german", "ngerman", "french", "spanish", "russian", "greek"],
         commands: ["selectlanguage", "foreignlanguage", "languageattribute", "spanishdecimal"]},
@@ -161,6 +164,20 @@ pub let CATALOG = {
         ["emph", "normalem", "ULforem"], preamble: ["normalem", "ULforem"]},
     // symbol marks, the footnote rule and \footref (footmisc.ls)
     footmisc: {options: footmisc.OPTIONS, commands: ["footref"]},
+    // table colors and rule colors in the table builder (array.ls, render.ls)
+    colortbl: {options: [], commands: ["rowcolor", "cellcolor", "columncolor", "arrayrulecolor",
+        "doublerulesepcolor"], implies: ["array"], preamble: ["arrayrulecolor", "doublerulesepcolor"]},
+    hhline: {options: [], commands: ["hhline"]},
+    // D columns on the siunitx decimal grid (array.ls)
+    dcolumn: {options: [], implies: ["array"]},
+    // a caption and notes held to the table's width (render.ls)
+    threeparttable: {options: ["para", "flushleft", "online", "normal"],
+        commands: ["threeparttable", "tablenotes", "tnote", "measuredfigure"]},
+    // keys on graphicx's sizing and the frame-box model (adjustbox.ls)
+    adjustbox: {options: ["export", "Export"], commands: ["adjustbox"], implies: ["graphicx"]},
+    // PDF pages through graphicx's PDF path (pdfpages.ls)
+    pdfpages: {options: ["final", "draft"], commands: ["includepdf", "includepdfset"],
+        implies: ["graphicx"], preamble: ["includepdfset"]},
     // lettered appendices on \appendix's counters (appendix.ls)
     appendix: {options: appendix.OPTIONS, commands: appendix.COMMANDS},
     // slanted fractions, in math or text
@@ -586,9 +603,7 @@ pub fn collect(ast) {
     let declared = chicago_biblatex(walked)
     // packages that load others upstream (subcaption loads caption, bookmark loads
     // hyperref); the implied package is active with its defaults
-    let implied = [for (entry in declared.packages, name in implies_of(CATALOG[entry.key])
-        where not active(declared.packages, name)) {key: name, val: {}, offset: entry.offset}]
-    let loaded = {*:declared, packages: declared.packages ++ implied}
+    let loaded = {*:declared, packages: with_implied(declared.packages, 0)}
     let has_body = ast is element and util.find_child(ast, "document") != null
     {*:loaded, diagnostics: loaded.diagnostics ++ scan(ast, loaded.packages, has_body) ++
         conflict_issues(loaded.packages)}
@@ -604,7 +619,22 @@ fn conflict_issues(packages) {
 
 fn conflicts_of(desc) => if (desc == null or desc.conflicts == null) [] else desc.conflicts
 
-fn implies_of(desc) => if (desc == null or desc.implies == null) [] else desc.implies
+fn implies_of(desc, opts) {
+    let always = if (desc == null or desc.implies == null) [] else desc.implies
+    let optional = if (desc == null or desc.option_implies == null or opts == null) []
+        else [for (key, names at desc.option_implies, implied in names where util.option_enabled(opts[key])) implied];
+    always ++ optional
+}
+
+// the declared packages and those they load, level by level (xcolor's table option
+// loads colortbl, which loads array); each implied package is added once
+fn with_implied(packages, depth) {
+    let added = [for (entry in packages, implied in implies_of(CATALOG[entry.key], entry.val)
+        where not active(packages, implied)) {key: implied, val: {}, offset: entry.offset}]
+    let unique = [for (i, entry in added
+        where not any([for (j, other in added where j < i) other.key == entry.key])) entry];
+    (if (len(unique) == 0 or depth > 3) packages else with_implied(packages ++ unique, depth + 1))
+}
 
 // the owned commands a package expects in the preamble (definitions, settings)
 fn preamble_of(desc) => if (desc == null or desc.preamble == null) [] else desc.preamble
@@ -653,26 +683,30 @@ pub fn target_diagnostics(node, target, paged = false) {
                 [diagnostic("transform-approximation", "rotating", tag,
                     "The box is transformed in CSS; the surrounding layout keeps its untransformed size", node)]
             else if ((tag == "resizebox" or tag == "scalebox" or tag == "rotatebox") and
-                not lone_image(node))
+                graphicx.lone_image(node) == null)
                 [diagnostic("transform-approximation", "graphicx", tag,
                     "The box is transformed in CSS; the surrounding layout keeps its untransformed size", node)]
+            else if (tag == "adjustbox" and adjustbox.transforms_content(node))
+                [diagnostic("transform-approximation", "adjustbox", tag,
+                    "The box is transformed in CSS; the surrounding layout keeps its untransformed size", node)]
+            else if (tag == "includepdf")
+                [for (key in pdfpages.LAYOUT_KEYS where util.parse_kv_options(util.optional_raw(node))[key] != null)
+                    diagnostic("pdfpages-layout-approximation", "pdfpages", key,
+                        "Each page is inserted alone and upright; " ++ key ++ " has no effect", node)]
+            else if (tag == "doublerulesepcolor")
+                [diagnostic("rule-separation-color-approximation", "colortbl", tag,
+                    "A double rule's gap shows the table background, not the separation color", node)]
             else []
         own ++ [for (child in node, issue in target_diagnostics(child, target, paged)) issue]
     }
-}
-
-// a graphicx box whose content is one \includegraphics, sized exactly through its keys
-fn lone_image(node) {
-    let args = util.command_args(node)
-    let body = slice(args, util.last_argument_start(node), len(args))
-    len(body) == 1 and body[0] is element and string(name(body[0])) == "includegraphics"
 }
 
 pub fn assets(node, base_uri) {
     if (not (node is element)) []
     else {
         let tag = string(name(node))
-        let own = if (tag == "includegraphics")
+        // \includepdf reads its PDF like \includegraphics
+        let own = if (tag == "includegraphics" or tag == "includepdf")
             [image_asset(graphicx.resolved_source(graphicx.source(node), base_uri), node.source_offset)]
         else []
         own ++ [for (child in node, asset in assets(child, base_uri)) asset]

@@ -135,6 +135,17 @@ table.latex-tabular tr.latex-bottomrule { border-bottom: 2px solid black; }
 table.latex-tabular tr.latex-cmidrule .latex-cmidrule-line { border-top: 1px solid black; height: 0; }
 table.latex-tabular tr.latex-cmidrule td { padding-top: 0; padding-bottom: 0; }
 table.latex-tabular tr.latex-addlinespace td { padding: 0; border: 0; }
+table.latex-tabular tr.latex-hhline td,
+table.latex-tabular tr.latex-colored-rule td { padding: 0; height: 0; line-height: 0; }
+.latex-threeparttable { display: table; margin: 0 auto; }
+.latex-threeparttable > .latex-caption,
+.latex-threeparttable > .latex-tablenotes { display: table-caption; caption-side: bottom; }
+.latex-threeparttable > .latex-caption:first-child { caption-side: top; }
+.latex-tablenotes { font-size: 0.8em; text-align: left; margin-top: 0.3em; }
+.latex-tablenote { padding-left: var(--latex-tnote-hang, 1em); text-indent: calc(0px - var(--latex-tnote-hang, 1em)); }
+.latex-tnote { font-style: italic; }
+.latex-adjustbox img { max-width: 100%; }
+.latex-pdfpage { margin: 1em 0; text-align: center; break-inside: avoid; }
 table.latex-tabular td.latex-si-column { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 table.latex-tabular .latex-si-whole { text-align: right; }
 table.latex-tabular .latex-si-point, table.latex-tabular .latex-si-fraction { text-align: left; }

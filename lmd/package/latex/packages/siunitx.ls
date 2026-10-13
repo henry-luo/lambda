@@ -100,6 +100,37 @@ fn unit_text(source) {
 // S columns use one measured grid width per table, keeping decimal points aligned.
 pub fn column_descriptor(raw, offset) => {kind: "si-decimal", raw: raw, offset: offset}
 
+// dcolumn's D{input}{output}{places} shares the grid. Cells split at the input
+// separator without number formatting, and the output separator is printed. places
+// n is the digits after the separator, a.b (or a,b) both widths, and a negative
+// value measures both.
+pub fn dcolumn_descriptor(input, output, places, offset) {
+    let widths = split(replace(trim(places), ",", "."), ".")
+    let whole = if (len(widths) == 2) int(trim(widths[0])) ^ { null } else 0
+    let fraction = int(trim(widths[len(widths) - 1])) ^ { null }
+    {kind: "si-decimal", raw: null, offset: offset, separator: trim(input),
+     marker: separator_text(trim(output)),
+     places: if (whole == null or fraction == null or fraction < 0) {whole: 0, fraction: 0}
+        else {whole: whole, fraction: fraction}}
+}
+
+// an output separator as text: \cdot is a centered dot, braces and $ are dropped
+fn separator_text(raw) {
+    if (raw == "\\cdot" or raw == "\\cdotp") "·"
+    else replace(replace(replace(raw, "{", ""), "}", ""), "$", "")
+}
+
+// a dcolumn cell around its separator; text without one is all whole part
+fn separated_parts(text, separator) {
+    let at = index_of(text, separator)
+    if (at == null) {whole: trim(text), fraction: "", point: false, suffix: ""}
+    else {whole: trim(slice(text, 0, at)), fraction: trim(slice(text, at + len(separator), len(text))),
+          point: true, suffix: ""}
+}
+
+fn cell_parts(text, desc) =>
+    if (desc.separator != null) separated_parts(text, desc.separator) else numeric_parts(text)
+
 fn numeric_parts(source) {
     let text = trim(source)
     let formatted = format_number(text)
@@ -130,8 +161,11 @@ fn table_cells(node, i, column, current, acc) {
         else if (boundary == "row_sep")
             table_cells(node, i + 1, 0, "",
                 acc ++ [{column: column, text: trim(current)}])
-        else table_cells(node, i + 1, column,
-            current ++ (if (child is symbol) "" else util.text_of(child)), acc)
+        // colortbl's color commands are not cell text, and a \multicolumn cell is
+        // outside the column's grid
+        else table_cells(node, i + 1, column, current ++ (if (child is symbol or (child is element and
+            (name(child) == 'cellcolor' or name(child) == 'rowcolor' or name(child) == 'multicolumn'))) ""
+            else util.text_of(child)), acc)
     }
 }
 
@@ -149,10 +183,10 @@ fn table_format(raw) {
 fn measured_profile(desc, cells, column) {
     let opts = util.parse_kv_options(desc.raw)
     let keys = [for (key, value at opts where string(key) != "table-format") string(key)]
-    let requested = table_format(opts["table-format"])
+    let requested = if (desc.places != null) desc.places else table_format(opts["table-format"])
     let shapes = [for (cell in cells
-        where cell.column == column and cell.text != "" and numeric_parts(cell.text) != null)
-        numeric_parts(cell.text)]
+        where cell.column == column and cell.text != "" and cell_parts(cell.text, desc) != null)
+        cell_parts(cell.text, desc)]
     let whole = max([0] ++ [for (shape in shapes) len(shape.whole)])
     let fraction = max([0] ++ [for (shape in shapes) len(shape.fraction)])
     let issue = if (len(keys) > 0) "Unsupported siunitx S option: " ++ join(keys, ", ")
@@ -169,19 +203,22 @@ pub fn measure_columns(content, columns) {
         else column]
 }
 
-pub fn render_table_cell(cell, profile) {
-    let parts = numeric_parts(util.text_of(cell))
+// a decimal-grid cell; `style` carries the column's rules and colors
+pub fn render_table_cell(cell, profile, style = null) {
+    let text = util.text_of(cell)
+    let parts = cell_parts(text, profile)
     if (profile.error != null) <td util.unsupported_element("siunitx", profile.error, profile.offset)>
     else if (parts == null)
         <td util.unsupported_element("siunitx", "S column requires a number", profile.offset)>
+    else if (profile.separator != null and trim(text) == "") <td style: style>
     else {
         let grid = "display:inline-grid;grid-template-columns:" ++
             string(max([1, profile.whole_width])) ++ "ch 1ch " ++
             string(max([1, profile.fraction_width])) ++ "ch;";
-        <td class: "latex-si-column",
+        <td class: "latex-si-column", style: style,
             <span class: "latex-si-number", style: grid,
                 <span class: "latex-si-whole", parts.whole>
-                <span class: "latex-si-point", if (parts.point) "." else " ">
+                <span class: "latex-si-point", if (parts.point) (profile.marker or ".") else " ">
                 <span class: "latex-si-fraction", parts.fraction>>
             if (parts.suffix != "") { <span class: "latex-si-suffix", parts.suffix> }
         >

@@ -40,6 +40,10 @@ import codeblocks: .packages.codeblocks
 import frames: .packages.frames
 import footmisc: .packages.footmisc
 import appendix: .packages.appendix
+import colspec: .packages.array
+import hhline: .packages.hhline
+import adjustbox: .packages.adjustbox
+import pdfpages: .packages.pdfpages
 
 // ============================================================
 // Main dispatcher — called recursively on every AST node
@@ -200,6 +204,13 @@ pub let PACKAGE_RENDER = {
         mint: (el, info) => listings.render_code(util.text_of(el), {}, null, el.language),
         setminted: render_nothing},
     footmisc: {footref: render_footref},
+    // colortbl acts in the table builder; \cellcolor marks its cell
+    colortbl: {cellcolor: render_cellcolor, arrayrulecolor: render_nothing, doublerulesepcolor: render_nothing},
+    array: {newcolumntype: render_nothing},
+    adjustbox: {adjustbox: render_adjustbox},
+    pdfpages: {includepdf: render_includepdf, includepdfset: render_nothing},
+    threeparttable: {threeparttable: render_threeparttable, measuredfigure: render_threeparttable,
+        tablenotes: render_tablenotes, tnote: (el, info) => tnote_label(trim(util.text_of(el)), info)},
     appendix: {appendices: render_appendices,
         subappendices: (el, info) => render_env_div(el, info, "latex-subappendices", null),
         appendixpage: (el, info) => render_appendix_page(), addappheadtotoc: render_contents_anchor},
@@ -209,6 +220,16 @@ pub let PACKAGE_RENDER = {
 }
 
 fn render_nothing(el, info) => null
+
+// \cellcolor[model]{color}: a marker the table builder turns into the cell's
+// background (cell_decoration)
+fn render_cellcolor(el, info) {
+    let css = color.command_color(el, 0, info.custom_colors)
+    if (info.table_cell != true)
+        util.unsupported_element("colortbl", "\\cellcolor belongs in a table cell", el.source_offset)
+    else if (css == null) color.invalid_color(el)
+    else {type: "cellcolor", color: css}
+}
 
 // ulem underlines \emph unless normalem is in effect
 fn render_ulem_emph(el, info) {
@@ -311,32 +332,13 @@ fn render_subfig(el, info) {
         caption.render(caption_text, kind, letter, info.caption_options, false, el.source_offset, info.float_kinds)>
 }
 
-// The header arguments of an environment the parser reads as body text: braced
-// groups, with [optional] text between them skipped. Returns the groups and the
-// body that follows the last one.
-fn environment_header(el, groups_wanted) {
-    let children = content(el)
-    let first = if (len(children) > 0 and children[0] is element and
-        string(name(children[0])) == "paragraph") content(children[0]) else []
-    let group_positions = [for (i, item in first
-        where item is element and string(name(item)) == "curly_group") i]
-    let taken = slice(group_positions, 0, min(groups_wanted, len(group_positions)))
-    let after = if (len(taken) == 0) 0 else taken[len(taken) - 1] + 1
-    {groups: [for (i in taken) first[i]],
-     body: [<paragraph for c in slice(first, after, len(first)) { c }>, *slice(children, 1, len(children))]}
-}
-
-// a braced length as TeX source: text plus control words such as \textwidth
-fn group_source(group) => join([for (item in content(group))
-    if (item is element) "\\" ++ string(name(item)) else string(item)], "")
-
 // \begin{wrapfigure}[lines]{placement}[overhang]{width}: a float the text wraps around
 fn render_wrapfloat(el, info) {
     let kind = if (string(name(el)) == "wraptable") "table" else "figure"
-    let header = environment_header(el, 2)
+    let header = util.environment_header(el, 2)
     let placement = if (len(header.groups) > 0) trim(util.text_of(header.groups[0])) else ""
     let side = if (contains("lLiI", placement) and placement != "") "left" else "right"
-    let width_source = if (len(header.groups) > 1) trim(group_source(header.groups[1])) else ""
+    let width_source = if (len(header.groups) > 1) trim(util.group_source(header.groups[1])) else ""
     let width = if (width_source == "" or width_source == "0pt") null else util.css_dimension(width_source)
     let items = collect_children(header.body, 0, len(header.body), [], {*:info, caption_type: kind,
         caption_number: string(get_float_num(el, info, kind))})
@@ -397,8 +399,8 @@ fn render_fancy_frame(el, info) {
 // \begin{boxedminipage}[position]{width}: the width is the header group
 fn render_boxed_minipage(el, info) {
     let lead = util.leading_option(el)
-    let header = environment_header(<boxedminipage for c in lead.children { c }>, 1)
-    let width = if (len(header.groups) > 0) util.css_dimension(trim(group_source(header.groups[0]))) else null
+    let header = util.environment_header(<boxedminipage for c in lead.children { c }>, 1)
+    let width = if (len(header.groups) > 0) util.css_dimension(trim(util.group_source(header.groups[0]))) else null
     if (width == null) util.unsupported_element("boxedminipage", "boxedminipage needs a width", el.source_offset)
     else <div class: "latex-boxedminipage", style: boxes.boxed_minipage_css(width),
         for c in collect_children(header.body, 0, len(header.body), [], info) { c }>
@@ -443,7 +445,7 @@ fn render_minted(el, info) {
 // setspace's environments; spacing{f} reads its stretch from the header group
 fn render_spacing_env(el, info) {
     let tag = string(name(el))
-    let header = environment_header(el, if (tag == "spacing") 1 else 0)
+    let header = util.environment_header(el, if (tag == "spacing") 1 else 0)
     let value = if (len(header.groups) > 0) trim(util.text_of(header.groups[0])) else null
     let stretch = paragraph.environment_stretch(tag, value, info.class_options)
     if (stretch == null) util.unsupported_element("setspace", "spacing needs a positive stretch", el.source_offset)
@@ -454,7 +456,7 @@ fn render_spacing_env(el, info) {
 // turn and rotate turn their content by an angle; sideways by a quarter turn
 fn render_turn(el, info) {
     let sideways = string(name(el)) == "sideways"
-    let header = environment_header(el, if (sideways) 0 else 1)
+    let header = util.environment_header(el, if (sideways) 0 else 1)
     let angle = if (sideways) "90" else if (len(header.groups) > 0) trim(util.text_of(header.groups[0])) else ""
     let items = collect_children(header.body, 0, len(header.body), [], info)
     if ((float(angle) ^ { null }) == null)
@@ -530,11 +532,39 @@ fn render_alg_label_macro(el, info) {
 // graphicx box commands: the content is the last argument; a lone image is
 // sized through its own keys
 fn render_graphicx_box(el, info) {
-    let start = util.last_argument_start(el)
-    let body = slice(util.command_args(el), start, len(util.command_args(el)))
-    let image = if (len(body) == 1 and body[0] is element and
-        string(name(body[0])) == "includegraphics") body[0] else null
-    graphicx.render_box(el, render_children(el, start, info), image, info.base_uri)
+    graphicx.render_box(el, render_children(el, util.last_argument_start(el), info),
+        graphicx.lone_image(el), info.base_uri)
+}
+
+// \adjustbox{keys}{content}, or the environment with its keys as the header group
+fn render_adjustbox(el, info) {
+    let box = adjustbox.parts(el)
+    let items = if (box.body == null) render_children(el, box.start, info)
+        else collect_children(box.body, 0, len(box.body), [], info)
+    adjustbox.render(adjustbox.keys(box.raw), items, box.image, info.base_uri, info.custom_colors, el.source_offset,
+        box.body != null)
+}
+
+// pdfpages' \includepdf: each selected page a block of its own, on \includepdfset's
+// defaults; {} in the page list is a blank page
+fn render_includepdf(el, info) {
+    let opts = {*:util.parse_kv_options(util.setting_at(info.settings, "includepdfset", el.source_offset)),
+        *:util.parse_kv_options(util.optional_raw(el))}
+    let unknown = pdfpages.unknown_keys(opts)
+    let src = graphicx.resolved_source(trim(util.text_of_skip_brack(el)), info.base_uri)
+    let parsed = if (len(unknown) > 0) null else graphicx.pdf_document(src)
+    if (len(unknown) > 0)
+        util.unsupported_element("pdfpages", "Unsupported includepdf key: " ++ join(unknown, ", "), el.source_offset)
+    else if (parsed == null) util.unsupported_element("pdfpages", "Cannot read PDF " ++ src, el.source_offset)
+    else {
+        let keys = pdfpages.page_keys(opts)
+        let framed = util.option_enabled(opts.frame);
+        <div class: "latex-includepdf",
+            for (k, page in pdfpages.page_list(opts.pages, graphicx.pdf_page_count(parsed)))
+                <div class: "latex-pdfpage", style: if (framed) "border:0.4pt solid" else null,
+                    if (page == null) null else graphicx.render_pdf_page(parsed, src, page, keys,
+                        "latex-pdfpage-" ++ string(el.source_offset) ++ "-" ++ string(k), el.source_offset)>>
+    }
 }
 
 // \hypertarget{name}{text} and \hyperlink{name}{text}; names slug like labels
@@ -2117,6 +2147,49 @@ fn check_theorem_match(theorems, text, env_type, i) {
 // Tables
 // ============================================================
 
+// threeparttable (and measuredfigure): the caption and the notes are held to the
+// table's width as table captions of the wrapper (css.ls)
+fn render_threeparttable(el, info) {
+    <div class: "latex-threeparttable", for c in render_children(el, 0, info) { c }>
+}
+
+// threeparttable's options, from the package and then the environment
+fn tpt_option(info, local, key) {
+    let package = registry.options_for(info.packages, "threeparttable")
+    util.option_enabled(local[key]) or (package != null and util.option_enabled(package[key]))
+}
+
+// a note label: italic, superscript unless the online option sets it on the line
+fn tnote_label(label, info, local = {}) {
+    if (tpt_option(info, local, "online")) <span class: "latex-tnote", label>
+    else <sup class: "latex-tnote", label>
+}
+
+// tablenotes: each \item[label] a note with a hanging label, or with para all in
+// one paragraph; flushleft drops the hang and normal the smaller type
+fn render_tablenotes(el, info) {
+    let lead = util.leading_option(el)
+    let local = util.parse_kv_options(lead.option)
+    let parts = split_desc_items(util.flatten_paragraphs(<tablenotes for c in lead.children { c }>), info)
+    let notes = [for (i, part in parts where name(part) == 'dt')
+        {label: util.text_of(part),
+         body: if (i + 1 < len(parts) and name(parts[i + 1]) == 'dd') trim_leading(content(parts[i + 1])) else []}]
+    let style = (if (tpt_option(info, local, "normal")) "font-size:1em;" else "") ++
+        (if (tpt_option(info, local, "flushleft")) "--latex-tnote-hang:0;" else "")
+    let rows = if (tpt_option(info, local, "para"))
+        [<p for c in [for (k, note in notes, item in [if (k > 0) "\u2003" else null,
+            tnote_label(note.label, info, local), " ", *note.body]) item] { c }>]
+        else [for (note in notes)
+            <div class: "latex-tablenote", tnote_label(note.label, info, local); " "; for c in note.body { c }>];
+    <div class: "latex-tablenotes", style: if (style == "") null else style, for row in rows { row }>
+}
+
+// items without the space before their first text
+fn trim_leading(items) {
+    if (len(items) == 0 or not (items[0] is string)) items
+    else [trim_start(items[0]), *slice(items, 1, len(items))]
+}
+
 fn render_table_env(el, info) {
     let tab_num = get_float_num(el, info, "table")
     let items = render_children(el, 0, {*:info, caption_type: "table",
@@ -2135,9 +2208,15 @@ fn float_style_class(info, kind) {
 
 fn render_tabular(el, info) {
     let content = table_content(el)
-    let raw_spec = parse_col_spec(el, registry.active(info.packages, "siunitx"))
-    let col_spec = siunitx.measure_columns(content, raw_spec)
-    let sections = table_sections(content, col_spec, info)
+    let colored = registry.active(info.packages, "colortbl")
+    let ctx = {si: registry.active(info.packages, "siunitx"), dcolumn: registry.active(info.packages, "dcolumn"),
+        colors: info.custom_colors, settings: info.settings, offset: el.source_offset}
+    let col_spec = siunitx.measure_columns(content, parse_col_spec(el, ctx))
+    // cells see the table: multicolumn preambles, \cellcolor, and colortbl's rule
+    // color, which for vertical rules is the one in effect where the table starts
+    let sections = table_sections(content, col_spec, {*:info, table_cell: true, table_columns: ctx,
+        colortbl: colored,
+        rule_color: if (colored) util.setting_at(info.settings, "arrayrulecolor", el.source_offset) else null})
     let caption = util.find_descendant(el, 'caption');
     <table class: "latex-tabular", style: table_width_style(el),
         if (caption != null) {
@@ -2216,12 +2295,12 @@ fn table_sections(content, col_spec, info) {
         else split_rows(slice(content, foot_begin, foot_end), col_spec, info)}
 }
 
-// parse column spec from first curly_group child: "|l|c|r|" → ["left","center","right"]
-fn parse_col_spec(el, si_active) {
+// the column preamble: the direct parser stores it in `columns`, other tables
+// keep it as the first group (array.ls reads it)
+fn parse_col_spec(el, ctx) {
     let cg = find_curly_group(el, 0)
-    // the direct parser stores the tabular preamble in `columns`.
-    if (el.columns != null) extract_alignments(trim(el.columns), 0, [], si_active, el.source_offset)
-    else if (cg != null) extract_alignments(trim(util.text_of(cg)), 0, [], si_active, el.source_offset)
+    if (el.columns != null) colspec.columns(el.columns, ctx)
+    else if (cg != null) colspec.columns(util.text_of(cg), ctx)
     else []
 }
 
@@ -2234,77 +2313,6 @@ fn check_curly(el, i) {
     let child = el[i]
     if ((child is element) and name(child) == 'curly_group') child
     else find_curly_group(el, i + 1)
-}
-
-fn extract_alignments(spec, i, acc, si_active, offset) {
-    if (i >= len(spec)) acc
-    else extract_one_align(spec, i, acc, si_active, offset)
-}
-
-fn extract_one_align(spec, i, acc, si_active, offset) {
-    let ch = slice(spec, i, i + 1)
-    if (ch == "l") extract_alignments(spec, i + 1, acc ++ ["left"], si_active, offset)
-    else if (ch == "c") extract_alignments(spec, i + 1, acc ++ ["center"], si_active, offset)
-    else if (ch == "r") extract_alignments(spec, i + 1, acc ++ ["right"], si_active, offset)
-    else if (ch == "L" or ch == "C" or ch == "R" or
-        ch == "p" or ch == "m" or ch == "b") {
-        let after = column_group_end(spec, i + 1, 0)
-        let width = if (after == null) null
-            else slice(spec, i + 2, after - 1)
-        let align = if (ch == "C") "center"
-            else if (ch == "R") "right" else "left"
-        extract_alignments(spec, if (after == null) i + 1 else after,
-            acc ++ [{kind: "fixed", align: align, width: width}], si_active, offset)
-    }
-    else if (ch == "X") extract_alignments(spec, i + 1,
-        acc ++ [{kind: "stretch", align: "left"}], si_active, offset)
-    else if (ch == "*" and slice(spec, i + 1, i + 2) == "{") {
-        let count_end = column_group_end(spec, i + 1, 0)
-        let pattern_end = if (count_end == null) null
-            else column_group_end(spec, count_end, 0)
-        if (count_end == null or pattern_end == null)
-            extract_alignments(spec, i + 1, acc, si_active, offset)
-        else {
-            let copies = int(slice(spec, i + 2, count_end - 1)) ^ { 0 }
-            let pattern = slice(spec, count_end + 1, pattern_end - 1)
-            let columns = extract_alignments(pattern, 0, [], si_active, offset)
-            extract_alignments(spec, pattern_end,
-                repeat_columns(columns, copies, acc), si_active, offset)
-        }
-    }
-    else if ((ch == "@" or ch == ">" or ch == "<" or ch == "!") and
-        slice(spec, i + 1, i + 2) == "{") {
-        let after = column_group_end(spec, i + 1, 0)
-        extract_alignments(spec, if (after == null) i + 1 else after,
-            acc, si_active, offset)
-    }
-    else if (ch == "S") {
-        let tail = slice(spec, i + 1, len(spec))
-        let optioned = starts_with(tail, "[")
-        let closing = if (optioned) index_of(tail, "]") else null
-        let raw = if (closing != null) slice(tail, 1, closing)
-            else if (optioned) "[unterminated" else null
-        let next = if (closing != null) i + closing + 2
-            else if (optioned) len(spec) else i + 1
-        let column = if (si_active) siunitx.column_descriptor(raw, offset) else "right"
-        extract_alignments(spec, next, acc ++ [column], si_active, offset)
-    } else extract_alignments(spec, i + 1, acc, si_active, offset)
-}
-
-fn column_group_end(spec, index, depth) {
-    if (index >= len(spec)) null
-    else {
-        let ch = slice(spec, index, index + 1)
-        if (ch == "{") column_group_end(spec, index + 1, depth + 1)
-        else if (ch == "}" and depth == 1) index + 1
-        else if (ch == "}") column_group_end(spec, index + 1, depth - 1)
-        else column_group_end(spec, index + 1, depth)
-    }
-}
-
-fn repeat_columns(columns, copies, acc) {
-    if (copies <= 0) acc
-    else repeat_columns(columns, copies - 1, acc ++ columns)
 }
 
 // The document parser may split one table into paragraphs. Keep all table
@@ -2322,12 +2330,12 @@ fn split_rows(content, col_spec, info) {
 }
 
 fn collect_rows(el, i, n, current_cells, acc_rows, col_spec, info) {
-    if (i >= n) finalize_rows(current_cells, acc_rows, col_spec)
+    if (i >= n) finalize_rows(current_cells, acc_rows, col_spec, info)
     else route_child(el, i, n, current_cells, acc_rows, col_spec, info)
 }
 
-fn finalize_rows(current_cells, acc_rows, col_spec) {
-    let final_row = make_row(current_cells, col_spec)
+fn finalize_rows(current_cells, acc_rows, col_spec, info) {
+    let final_row = make_row(current_cells, col_spec, info)
     if (final_row != null) {
         append_row(acc_rows, final_row)
     } else {
@@ -2370,18 +2378,19 @@ fn handle_element_child(el, i, n, current_cells, acc_rows, col_spec, info, child
     // The table owns its caption; it is not cell content.
     if (child_name == 'caption') collect_rows(el, i + 1, n, current_cells, acc_rows, col_spec, info)
     else if (child_name == 'linebreak_command') handle_row_break(el, i, n, current_cells, acc_rows, col_spec, info)
-    else if (child_name == 'hline') handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info, <tr class: "latex-hline">)
-    else if (child_name == 'toprule') handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info, <tr class: "latex-toprule">)
-    else if (child_name == 'midrule') handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info, <tr class: "latex-midrule">)
-    else if (child_name == 'bottomrule') handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info, <tr class: "latex-bottomrule">)
+    else if (child_name == 'hline' or child_name == 'toprule' or child_name == 'midrule' or child_name == 'bottomrule')
+        handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info,
+            rule_row(string(child_name), rule_color_at(info, child), len(col_spec)))
+    else if (child_name == 'hhline' and registry.active(info.packages, "hhline"))
+        handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info,
+            hhline.rule_row(util.raw_argument(child, "required", 0) or "", len(col_spec), rule_color_at(info, child)))
     else if (child_name == 'cmidrule' and registry.active(info.packages, "booktabs"))
         handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info,
             booktabs.cmidrule(child, len(col_spec)))
     else if (child_name == 'addlinespace' and registry.active(info.packages, "booktabs"))
         handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info,
             booktabs.addlinespace(child, len(col_spec)))
-    else if (child_name == 'rowcolor' and registry.active(info.packages, "xcolor") and
-        util.option_enabled(registry.options_for(info.packages, "xcolor").table))
+    else if (child_name == 'rowcolor' and info.colortbl)
         handle_row_color(el, i, n, current_cells, acc_rows, col_spec, info, child)
     else if (child_name == 'multicolumn') handle_multicol_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
     else if (child_name == 'multirow') handle_multirow_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
@@ -2391,9 +2400,7 @@ fn handle_element_child(el, i, n, current_cells, acc_rows, col_spec, info, child
 // Keep the color directive with its row so the shared table builder applies it
 // after column spans and rule rows have been resolved.
 fn handle_row_color(el, i, n, current_cells, acc_rows, col_spec, info, child) {
-    let args = util.command_args(child)
-    let raw = if (len(args) > 0) trim(util.text_of(args[0])) else ""
-    let css = color.resolve_color(raw, info.custom_colors)
+    let css = color.command_color(child, 0, info.custom_colors)
     let marker = if (css == null) color.invalid_color(child)
         else {type: "rowcolor", color: css}
     collect_rows(el, i + 1, n, [marker] ++
@@ -2401,7 +2408,7 @@ fn handle_row_color(el, i, n, current_cells, acc_rows, col_spec, info, child) {
 }
 
 fn handle_row_break(el, i, n, current_cells, acc_rows, col_spec, info) {
-    let row = make_row(current_cells, col_spec)
+    let row = make_row(current_cells, col_spec, info)
     if (row != null) {
         let new_rows = append_row(acc_rows, row)
         collect_rows(el, i + 1, n, [], new_rows, col_spec, info)
@@ -2415,16 +2422,29 @@ fn append_row(rows, row) {
     rows ++ wrapped
 }
 
+// a horizontal rule's row; a colortbl rule color draws it as a colored line across
+// the columns instead of the plain rule row's border on the next row
+fn rule_row(kind, rule_color, columns) {
+    if (rule_color == null) <tr class: "latex-" ++ kind>
+    else <tr class: "latex-colored-rule",
+        <td colspan: string(max([1, columns])), style: "border-top:" ++
+            (if (kind == "toprule" or kind == "bottomrule") "2px" else "1px") ++ " solid " ++ rule_color>>
+}
+
+// the \arrayrulecolor in effect at a rule, when colortbl is loaded
+fn rule_color_at(info, child) =>
+    if (info.colortbl) util.setting_at(info.settings, "arrayrulecolor", child.source_offset) else null
+
 // flush cells before each horizontal rule so partial rules retain their column span.
-fn handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info, rule_row) {
+fn handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info, rule) {
     // flush current cells if any, then add rule row
-    let row = make_row(current_cells, col_spec)
+    let row = make_row(current_cells, col_spec, info)
     if (row != null) {
         let flushed = append_row(acc_rows, row)
-        let new_rows = append_row(flushed, rule_row)
+        let new_rows = append_row(flushed, rule)
         collect_rows(el, i + 1, n, [], new_rows, col_spec, info)
     } else {
-        let new_rows = append_row(acc_rows, rule_row)
+        let new_rows = append_row(acc_rows, rule)
         collect_rows(el, i + 1, n, [], new_rows, col_spec, info)
     }
 }
@@ -2440,9 +2460,12 @@ fn handle_rendered_child(el, i, n, current_cells, acc_rows, col_spec, info, chil
 fn handle_multicol_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
     let args = util.command_args(child)
     let colspan = int(args[0])
-    let align = parse_multicol_align(args[1])
+    // the span's own preamble sets its alignment and its rules
+    let spanned = colspec.columns(util.text_of(args[1]), info.table_columns or {})
+    let column = if (len(spanned) > 0) spanned[0] else "left"
+    let align = if (column is map) column.align else column
     let content = render_span_content(args, 2, info)
-    let cell_desc = {type: "multicol", colspan: colspan, align: align, content: content}
+    let cell_desc = {type: "multicol", colspan: colspan, align: align, column: column, content: content}
     let new_cells = current_cells ++ [cell_desc]
     collect_rows(el, i + 1, n, new_cells, acc_rows, col_spec, info)
 }
@@ -2454,24 +2477,6 @@ fn handle_multirow_child(el, i, n, current_cells, acc_rows, col_spec, info, chil
     let cell_desc = {type: "multirow", rowspan: rowspan, content: content}
     let new_cells = current_cells ++ [cell_desc]
     collect_rows(el, i + 1, n, new_cells, acc_rows, col_spec, info)
-}
-
-fn parse_multicol_align(spec) {
-    if (spec == null) "left"
-    else find_align_in_spec(spec, 0, len(spec))
-}
-
-fn find_align_in_spec(spec, i, n) {
-    if (i >= n) "left"
-    else match_align_char(spec, i, n)
-}
-
-fn match_align_char(spec, i, n) {
-    let ch = slice(spec, i, i + 1)
-    if (ch == "l") "left"
-    else if (ch == "c") "center"
-    else if (ch == "r") "right"
-    else find_align_in_spec(spec, i + 1, n)
 }
 
 fn render_span_content(child, start, info) {
@@ -2501,11 +2506,30 @@ fn get_align(col_spec, idx) {
     else "left"
 }
 
-fn cell_to_td_aligned(c, align) {
-    if (align is map and align.kind == "si-decimal") siunitx.render_table_cell(c, align)
-    else if (align is map) cell_to_td_styled(c, table_align_style(align))
-    else if (align == "left") cell_to_td_plain(c)
-    else cell_to_td_styled(c, "text-align: " ++ align)
+// a cell under its column: alignment, then the column's rules and color and the
+// cell's own \cellcolor
+fn cell_to_td_aligned(c, align, info) {
+    let body = without_cell_colors(c)
+    let extra = cell_decoration(c, align, info)
+    if (align is map and align.kind == "si-decimal")
+        siunitx.render_table_cell(body, align, if (extra == "") null else extra)
+    else if (align is map) cell_to_td_styled(body, table_align_style(align) ++ joined_style(extra))
+    else if (align == "left" and extra == "") cell_to_td_plain(body)
+    else cell_to_td_styled(body, "text-align: " ++ align ++ joined_style(extra))
+}
+
+fn joined_style(extra) => if (extra == "") "" else ";" ++ extra
+
+// colortbl's order: a \cellcolor over the row's color over the column's
+fn cell_decoration(c, column, info) {
+    let own = [for (item in (if (c is array) c else [c]) where is_span_cell(item, "cellcolor")) item.color]
+    colspec.decoration_css(column, info.rule_color, info.row_colored or len(own) > 0) ++
+        (if (len(own) == 0) "" else "background-color:" ++ own[len(own) - 1] ++ ";")
+}
+
+fn without_cell_colors(c) {
+    if (c is array) [for (item in c where not is_span_cell(item, "cellcolor")) item]
+    else if (is_span_cell(c, "cellcolor")) null else c
 }
 
 fn table_align_style(align) {
@@ -2526,12 +2550,12 @@ fn cell_to_td_styled(c, style) {
     else { <td style: style> }
 }
 
-fn make_row(cells, col_spec) {
+fn make_row(cells, col_spec, info) {
     let marker = if (len(cells) > 0 and is_span_cell(cells[0], "rowcolor")) cells[0] else null
     let body = if (marker != null) slice(cells, 1, len(cells)) else cells
     if (len(body) == 0) null
     else if (all_cells_empty(body, 0)) null
-    else make_row_inner(body, col_spec, marker)
+    else make_row_inner(body, col_spec, marker, info)
 }
 
 fn all_cells_empty(cells, i) {
@@ -2540,55 +2564,57 @@ fn all_cells_empty(cells, i) {
     else all_cells_empty(cells, i + 1)
 }
 
-fn make_row_inner(cells, col_spec, marker) {
-    let tds = build_tds(cells, col_spec, 0, 0, []);
+fn make_row_inner(cells, col_spec, marker, info) {
+    let tds = build_tds(cells, col_spec, 0, 0, [], {*:info, row_colored: marker != null});
     <tr style: if (marker == null) null else "background-color:" ++ marker.color,
         for td in tds { td }>
 }
 
-fn build_tds(cells, col_spec, ci, col, acc) {
+fn build_tds(cells, col_spec, ci, col, acc, info) {
     if (ci >= len(cells)) acc
-    else dispatch_td(cells, col_spec, ci, col, acc)
+    else dispatch_td(cells, col_spec, ci, col, acc, info)
 }
 
-fn dispatch_td(cells, col_spec, ci, col, acc) {
+fn dispatch_td(cells, col_spec, ci, col, acc, info) {
     let cell = cells[ci]
-    if (is_span_cell(cell, "multicol")) emit_multicol_td(cells, col_spec, ci, col, acc, cell)
-    else if (is_span_cell(cell, "multirow")) emit_multirow_td(cells, col_spec, ci, col, acc, cell)
-    else emit_regular_td(cells, col_spec, ci, col, acc, cell)
+    if (is_span_cell(cell, "multicol")) emit_multicol_td(cells, col_spec, ci, col, acc, cell, info)
+    else if (is_span_cell(cell, "multirow")) emit_multirow_td(cells, col_spec, ci, col, acc, cell, info)
+    else emit_regular_td(cells, col_spec, ci, col, acc, cell, info)
 }
 
 fn is_span_cell(cell, t) {
     (cell is map) and (cell.type == t)
 }
 
-fn emit_multicol_td(cells, col_spec, ci, col, acc, cell) {
-    let td = multicol_td(cell)
-    build_tds(cells, col_spec, ci + 1, col + cell.colspan, acc ++ [td])
+fn emit_multicol_td(cells, col_spec, ci, col, acc, cell, info) {
+    let td = multicol_td(cell, info)
+    build_tds(cells, col_spec, ci + 1, col + cell.colspan, acc ++ [td], info)
 }
 
-fn multicol_td(cell) {
-    let c = cell.content;
-    <td colspan: string(cell.colspan), style: "text-align: " ++ cell.align, c>
+fn multicol_td(cell, info) {
+    let c = without_cell_colors(cell.content);
+    <td colspan: string(cell.colspan), style: "text-align: " ++ cell.align ++
+        joined_style(cell_decoration(cell.content, cell.column, info)), c>
 }
 
-fn emit_multirow_td(cells, col_spec, ci, col, acc, cell) {
+fn emit_multirow_td(cells, col_spec, ci, col, acc, cell, info) {
     let align = get_align(col_spec, col)
-    let td = multirow_td(cell, align)
-    build_tds(cells, col_spec, ci + 1, col + 1, acc ++ [td])
+    let td = multirow_td(cell, align, info)
+    build_tds(cells, col_spec, ci + 1, col + 1, acc ++ [td], info)
 }
 
-fn multirow_td(cell, align) {
-    let c = cell.content
+fn multirow_td(cell, align, info) {
+    let c = without_cell_colors(cell.content)
     let css_align = if (align is map and align.kind == "si-decimal") "right"
         else if (align is map) align.align else align
-    if (css_align == "left") { <td rowspan: string(cell.rowspan), c> }
-    else { <td rowspan: string(cell.rowspan), style: "text-align: " ++ css_align, c> }
+    let extra = cell_decoration(cell.content, align, info)
+    if (css_align == "left" and extra == "") { <td rowspan: string(cell.rowspan), c> }
+    else { <td rowspan: string(cell.rowspan), style: "text-align: " ++ css_align ++ joined_style(extra), c> }
 }
 
-fn emit_regular_td(cells, col_spec, ci, col, acc, cell) {
-    let td = cell_to_td_aligned(cell, get_align(col_spec, col))
-    build_tds(cells, col_spec, ci + 1, col + 1, acc ++ [td])
+fn emit_regular_td(cells, col_spec, ci, col, acc, cell, info) {
+    let td = cell_to_td_aligned(cell, get_align(col_spec, col), info)
+    build_tds(cells, col_spec, ci + 1, col + 1, acc ++ [td], info)
 }
 
 fn append_to_last_cell(cells, content) {

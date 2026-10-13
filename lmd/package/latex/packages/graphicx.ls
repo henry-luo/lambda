@@ -68,20 +68,28 @@ fn has_unportable_pdf_content(node) {
 }
 
 fn render_pdf(src, opts, id_prefix, offset) {
-    let parsed = input(src, "pdf") ^ { null }
+    let parsed = pdf_document(src)
     if (parsed == null) unsupported("Cannot read PDF graphic " ++ src, offset)
+    else render_pdf_page(parsed, src, if (opts.page != null) int(opts.page) ^ { null } else 1,
+        opts, id_prefix, offset)
+}
+
+// a PDF read once for its pages (pdfpages inserts several), or null
+pub fn pdf_document(src) => input(src, "pdf") ^ { null }
+
+pub fn pdf_page_count(parsed) => pdf.pdf_page_count(parsed)
+
+// page (from 1) of a read PDF as an inline SVG sized by the graphicx keys in opts
+pub fn render_pdf_page(parsed, src, page, opts, id_prefix, offset) {
+    if (page == null or page < 1 or page > pdf.pdf_page_count(parsed))
+        unsupported("Invalid PDF page for graphic " ++ src, offset)
     else {
-        let page = if (opts.page != null) int(opts.page) ^ { null } else 1
-        if (page == null or page < 1 or page > pdf.pdf_page_count(parsed))
-            unsupported("Invalid PDF page for graphic " ++ src, offset)
-        else {
-            let svg = pdf.pdf_to_svg(parsed, page - 1,
-                {show_label: false, id_prefix: id_prefix})
-            // A remaining img: handle needs the original PDF registry and cannot survive HTML serialization.
-            if (has_unportable_pdf_content(svg))
-                unsupported("PDF graphic contains an unresolved XObject or image handle: " ++ src, offset)
-            else <span class: pdf_class(opts), style: pdf_style(opts, svg), svg>
-        }
+        let svg = pdf.pdf_to_svg(parsed, page - 1,
+            {show_label: false, id_prefix: id_prefix})
+        // A remaining img: handle needs the original PDF registry and cannot survive HTML serialization.
+        if (has_unportable_pdf_content(svg))
+            unsupported("PDF graphic contains an unresolved XObject or image handle: " ++ src, offset)
+        else <span class: pdf_class(opts), style: pdf_style(opts, svg), svg>
     }
 }
 
@@ -118,6 +126,21 @@ pub fn render(el, base_uri, sizing = null) {
 // \resizebox, \scalebox, \rotatebox and \reflectbox. A lone image is sized through
 // its own keys; other content gets a CSS-transformed box whose layout size stays
 // untransformed, which registry.target_diagnostics reports.
+// the \includegraphics a box holds as its whole content, or null: a box command's
+// last argument, or an environment's body nodes; space and paragraph wrappers aside
+pub fn lone_image(el) {
+    let args = util.command_args(el)
+    sole_image(slice(args, util.last_argument_start(el), len(args)))
+}
+
+pub fn sole_image(nodes) {
+    let solid = [for (node in nodes where not (node is string and trim(node) == "")) node]
+    if (len(solid) != 1 or not (solid[0] is element)) null
+    else if (string(name(solid[0])) == "includegraphics") solid[0]
+    else if (string(name(solid[0])) == "paragraph") sole_image([for (c in content(solid[0])) c])
+    else null
+}
+
 pub fn render_box(el, items, image, base_uri) {
     let tag = string(name(el))
     if (tag == "resizebox") render_resizebox(el, items, image, base_uri)

@@ -21,6 +21,7 @@ import paragraph: .packages.paragraph
 import frames: .packages.frames
 import footmisc: .packages.footmisc
 import appendix: .packages.appendix
+import colspec: .packages.array
 
 // helper: append a {key, val} entry to an entry list
 fn add_entry(entries, k, v) {
@@ -201,8 +202,28 @@ pub let PACKAGE_WALK = {
             mdframed_key_issues(el, st, util.leading_option(el).option))},
     ulem: {normalem: (el, st) => record_setting(st, el, "ulem-emph", "normalem"),
         ULforem: (el, st) => record_setting(st, el, "ulem-emph", "ULforem")},
+    // colortbl's rule colors and array's column types hold from where they are given
+    colortbl: {arrayrulecolor: (el, st) => walk_rule_color(el, st, "arrayrulecolor"),
+        doublerulesepcolor: (el, st) => walk_rule_color(el, st, "doublerulesepcolor")},
+    array: {newcolumntype: walk_newcolumntype},
+    pdfpages: {includepdfset: (el, st) => record_setting(st, el, "includepdfset", util.raw_argument(el, "required", 0) or "")},
     appendix: {appendices: (el, st) => walk_appendices(el, st, false),
         subappendices: (el, st) => walk_appendices(el, st, true), addappheadtotoc: add_appendix_head}
+}
+
+fn walk_rule_color(el, st, key) {
+    let css = color.command_color(el, 0, st.custom_colors)
+    if (css != null) record_setting(st, el, key, css)
+    else {*:st, diagnostics: st.diagnostics ++ [util.diagnostic("invalid-color", "colortbl",
+        string(name(el)), "Invalid color in \\" ++ string(name(el)), el.source_offset)]}
+}
+
+// \newcolumntype{d}[n]{body}: a column letter the preambles after it expand
+fn walk_newcolumntype(el, st) {
+    let defined = colspec.column_type(el)
+    if (defined != null) record_setting(st, el, "column-type:" ++ defined.name, defined.value)
+    else {*:st, diagnostics: st.diagnostics ++ [util.diagnostic("invalid-column-type", "array",
+        null, "\\newcolumntype needs one letter and a definition", el.source_offset)]}
 }
 
 fn mdframed_definition(el, st, prefix, keys, name_index) {

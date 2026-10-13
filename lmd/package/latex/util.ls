@@ -393,6 +393,25 @@ pub fn setting_at(settings, key, offset) {
     (if (len(found) == 0) null else found[len(found) - 1])
 }
 
+// The header arguments of an environment the parser reads as body text: braced
+// groups, with [optional] text between them skipped. Returns the groups and the
+// body that follows the last one.
+pub fn environment_header(el, groups_wanted) {
+    let children = content(el)
+    let first = if (len(children) > 0 and children[0] is element and
+        string(name(children[0])) == "paragraph") content(children[0]) else []
+    let group_positions = [for (i, item in first
+        where item is element and string(name(item)) == "curly_group") i]
+    let taken = slice(group_positions, 0, min(groups_wanted, len(group_positions)))
+    let after = if (len(taken) == 0) 0 else taken[len(taken) - 1] + 1
+    {groups: [for (i in taken) first[i]],
+     body: [<paragraph for c in slice(first, after, len(first)) { c }>, *slice(children, 1, len(children))]}
+}
+
+// a braced length as TeX source: text plus control words such as \textwidth
+pub fn group_source(group) => join([for (item in content(group))
+    if (item is element) "\\" ++ string(name(item)) else string(item)], "")
+
 // a control sequence's name without its backslash
 pub fn strip_backslash(s) {
     if (len(s) > 0 and slice(s, 0, 1) == "\\") slice(s, 1, len(s))
