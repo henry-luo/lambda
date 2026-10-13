@@ -26,10 +26,11 @@ struct Scene3dVertex {
 };
 struct Scene3dGeometry {
     NativeGlResource vertices, indices;
-    unsigned vertex_count, index_count;
+    unsigned vertex_count, index_count, vertex_stride;
     Scene3dVec center;
     NativeGlResource unit_vertices;
     unsigned bone_index_count, morph_count;
+    bool has_colors;
 };
 struct Scene3dMaterial {
     DomNodeRef source;
@@ -349,7 +350,7 @@ static Scene3dGeometry* scene3d_geometry(Scene3dBuild* build, Scene3dDefinition*
             !scene3d_numbers(node,"indices",p->pool,&raw_indices,&ic,SCENE_VERTEX_LIMIT*6) ||
             !pc || pc%3 || (nc && nc!=pc) || (uc && uc!=pc/3*2) || (cc && cc!=pc) ||
             (ic ? ic%3 : (pc/3)%3)) { scene3d_fail(build->entry,"invalid geometry component counts"); return nullptr; }
-        geometry->vertex_count=pc/3; geometry->index_count=ic;
+        geometry->vertex_count=pc/3; geometry->index_count=ic;geometry->has_colors=cc!=0;
         vertices=(Scene3dVertex*)pool_calloc(p->pool,sizeof(Scene3dVertex)*geometry->vertex_count);
         indices=ic?(uint32_t*)pool_alloc(p->pool,sizeof(uint32_t)*ic):nullptr;
         if (!vertices || (ic && !indices)) return nullptr;
@@ -418,7 +419,11 @@ static Scene3dGeometry* scene3d_geometry(Scene3dBuild* build, Scene3dDefinition*
         hi={fmaxf(hi.x,v[0]),fmaxf(hi.y,v[1]),fmaxf(hi.z,v[2])};
     }
     geometry->center={lo.x*.5f+hi.x*.5f,lo.y*.5f+hi.y*.5f,lo.z*.5f+hi.z*.5f};
-    geometry->vertices=native_gl_buffer(build->entry->graphics,vertices,sizeof(Scene3dVertex)*geometry->vertex_count);
+    // static meshes omit deformation lanes and default-white colors; only indices need CPU validation copies.
+    geometry->vertex_stride=geometry->bone_index_count||geometry->morph_count?sizeof(Scene3dVertex):geometry->has_colors?offsetof(Scene3dVertex,skin_indices):offsetof(Scene3dVertex,color);
+    if(geometry->vertex_stride<sizeof(Scene3dVertex)) for(unsigned i=1;i<geometry->vertex_count;i++)
+        memmove((char*)vertices+i*geometry->vertex_stride,vertices+i,geometry->vertex_stride);
+    geometry->vertices=native_gl_buffer(build->entry->graphics,vertices,geometry->vertex_stride*geometry->vertex_count,false);
     if (!scene3d_resource(build,geometry->vertices)) return nullptr;
     if (geometry->index_count) {
         geometry->indices=native_gl_buffer(build->entry->graphics,indices,sizeof(uint32_t)*geometry->index_count);
@@ -448,6 +453,11 @@ static NativeGlResource scene3d_texture(Scene3dBuild* build, Scene3dDefinition* 
             scene3d_fail(build->entry,"invalid texture sampler");return {};
         }*fields[i]=(unsigned)value;
     }
+    float max_size;
+    if(!scene3d_number(definition->source,"max-size",4096,&max_size)||max_size<1||max_size>4096||floorf(max_size)!=max_size) {
+        scene3d_fail(build->entry,"texture max-size must be an integer in 1..4096");return {};
+    }
+    sampler.max_size=(unsigned)max_size;
     NativeGlResource texture=native_gl_texture(build->entry->graphics,image,sampler);
     if (!scene3d_resource(build,texture)) return {};
     for (unsigned y=0;y<(unsigned)image->height && !definition->texture_alpha;y++)
@@ -550,20 +560,23 @@ static bool scene3d_mesh_record(Scene3dBuild* build, Scene3dGeometry* geometry, 
     else {
         if (unit && !p->identity.id) {
             Scene3dMatrix identity=scene3d_identity();
-            p->identity=native_gl_buffer(build->entry->graphics,identity.v,sizeof(identity.v));
+            p->identity=native_gl_buffer(build->entry->graphics,identity.v,sizeof(identity.v),false);
             if (!scene3d_resource(build,p->identity)) return false;
         }
-        mesh->instances=unit?p->identity:native_gl_buffer(build->entry->graphics,matrices,count*16*sizeof(float));
+        mesh->instances=unit?p->identity:native_gl_buffer(build->entry->graphics,matrices,count*16*sizeof(float),false);
         if (!unit && !scene3d_resource(build,mesh->instances)) return false;
-        NativeGlAttribute attributes[14]={};
+        NativeGlAttribute attributes[14]={};unsigned attribute_count=0;
         const unsigned components[]={3,3,2,3},offsets[]={0,3*sizeof(float),6*sizeof(float),8*sizeof(float)};
-        for (unsigned i=0;i<4;i++) attributes[i]={geometry->vertices,i,components[i],sizeof(Scene3dVertex),offsets[i],0};
-        for (unsigned i=0;i<4;i++) attributes[i+4]={mesh->instances,i+4,4,16*sizeof(float),i*4*sizeof(float),1};
-        const unsigned deformation_offsets[]={offsetof(Scene3dVertex,skin_indices),offsetof(Scene3dVertex,skin_weights),
-            offsetof(Scene3dVertex,morph_positions),offsetof(Scene3dVertex,morph_positions)+3*sizeof(float),
-            offsetof(Scene3dVertex,morph_normals),offsetof(Scene3dVertex,morph_normals)+3*sizeof(float)};
-        for(unsigned i=0;i<6;i++) attributes[i+8]={geometry->vertices,i+8,i<2?4u:3u,sizeof(Scene3dVertex),deformation_offsets[i],0};
-        mesh->vertices=native_gl_vertices(build->entry->graphics,attributes,14,geometry->indices);
+        for(unsigned i=0;i<(geometry->has_colors?4u:3u);i++)
+            attributes[attribute_count++]={geometry->vertices,i,components[i],geometry->vertex_stride,offsets[i],0};
+        for(unsigned i=0;i<4;i++) attributes[attribute_count++]={mesh->instances,i+4,4,16*sizeof(float),i*4*sizeof(float),1};
+        if(geometry->bone_index_count||geometry->morph_count) {
+            const unsigned deformation_offsets[]={offsetof(Scene3dVertex,skin_indices),offsetof(Scene3dVertex,skin_weights),
+                offsetof(Scene3dVertex,morph_positions),offsetof(Scene3dVertex,morph_positions)+3*sizeof(float),
+                offsetof(Scene3dVertex,morph_normals),offsetof(Scene3dVertex,morph_normals)+3*sizeof(float)};
+            for(unsigned i=0;i<6;i++) attributes[attribute_count++]={geometry->vertices,i+8,i<2?4u:3u,sizeof(Scene3dVertex),deformation_offsets[i],0};
+        }
+        mesh->vertices=native_gl_vertices(build->entry->graphics,attributes,attribute_count,geometry->indices);
         if (!scene3d_resource(build,mesh->vertices)) return false;
         if (unit) geometry->unit_vertices=mesh->vertices;
     }
@@ -874,7 +887,7 @@ layout(location=13) in vec3 morph_normal1;
 uniform mat4 model, projection;
 uniform mat4 bones[16];
 uniform vec2 morph_weights;
-uniform float skinned;
+uniform float skinned, colored;
 out vec3 world_normal, vertex_color;
 out vec2 texture_uv;
 void main() {
@@ -887,7 +900,7 @@ void main() {
         vertex=(skin*vec4(vertex,1.0)).xyz;posed_normal=mat3(skin)*posed_normal;
     }
     world_normal = transpose(inverse(mat3(world))) * posed_normal;
-    vertex_color = color; texture_uv = uv;
+    vertex_color = colored>0.5?color:vec3(1); texture_uv = uv;
     gl_Position = projection * world * vec4(vertex,1.0);
 }
 )GLSL";
@@ -1013,8 +1026,9 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
         rendered=scene3d_uniform(entry,"model",mesh->world.v,16) && scene3d_uniform(entry,"material",material->color,4) &&
             scene3d_uniform(entry,"lambert",&lambert,1) && scene3d_uniform(entry,"textured",&textured,1) &&
             scene3d_uniform(entry,"opaque",&opaque,1);
-        float skinned=mesh->bone_count?1:0;
-        rendered=rendered&&scene3d_uniform(entry,"skinned",&skinned,1)&&scene3d_uniform(entry,"morph_weights",mesh->morph_weights,2);
+        float skinned=mesh->bone_count?1:0,colored=mesh->geometry->has_colors?1:0;
+        rendered=rendered&&scene3d_uniform(entry,"skinned",&skinned,1)&&scene3d_uniform(entry,"colored",&colored,1)&&
+            scene3d_uniform(entry,"morph_weights",mesh->morph_weights,2);
         if(mesh->bone_count) rendered=rendered&&scene3d_uniform(entry,"bones[0]",mesh->bone_matrices[0].v,16,mesh->bone_count);
         NativeGlDraw draw={entry->program,mesh->vertices,material->texture.id?material->texture:entry->white,
             mesh->geometry->index_count?mesh->geometry->index_count:mesh->geometry->vertex_count,mesh->instance_count,

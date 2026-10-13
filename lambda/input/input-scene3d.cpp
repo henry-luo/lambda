@@ -330,6 +330,7 @@ bool asset_import_a3d(SceneAsset& a,Item input) {
 void input_scene3d_asset(Input* input,const char* source,size_t length,const char* flavor) {
     using namespace lambda;
     SceneAsset asset(input);const char* type=flavor;
+    if((!type||!strcmp(type,"auto"))&&length>=4&&!memcmp(source,"glTF",4)) type="glb";
     if(!type||!strcmp(type,"auto")) {
         Url* url=(Url*)input->url;const char* path=url&&url->pathname?url->pathname->chars:"";
         MimeDetector* detector=mime_detector_init();const char* mime=detect_mime_type(detector,path,source,length);
@@ -337,7 +338,8 @@ void input_scene3d_asset(Input* input,const char* source,size_t length,const cha
             asset_is(mime,"model/gltf+json")?"gltf":asset_is(mime,"text/x-3d-model")?"a3d":"unknown";
         mime_detector_destroy(detector);
     }
-    if(!input_parse_model(input,source,length,type)) asset.fail("expected .obj, .mtl, .gltf or .a3d (or an explicit format)");
+    if(!strcmp(type,"glb")) asset_import_glb(asset,source,length);
+    else if(!input_parse_model(input,source,length,type)) asset.fail("expected .obj, .mtl, .gltf, .glb or .a3d (or an explicit format)");
     else if(!input->parse_failed) {
         Item raw=input->root;
         bool ok=!strcmp(type,"gltf")?asset_import_gltf(asset,raw):

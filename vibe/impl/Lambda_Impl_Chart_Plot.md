@@ -73,7 +73,7 @@ The aggregate Radiant gate is **not clean**. The first run had 5,423 passes,
 has a 6px inline-link y difference against its saved reference, reproduced
 individually without changing its baseline. The second run passed the native
 scene suite and the corrected live case, but retained the Markdown mismatch,
-timed out in WPT input events, and failed two concurrently edited Cellview
+timed out in WPT input events, and failed two concurrently edited CellScope
 layout fixtures. The disk filled during this run; chart-owned temporary
 runtime logs were removed afterward. These aggregate failures are not masked.
 The isolated WPT input-event rerun completes with **20 passes, 12 skips, zero

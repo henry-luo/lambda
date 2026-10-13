@@ -1,0 +1,146 @@
+{
+  "name": "CellScope published models (requires network)",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 60
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#choose-neuron"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#cell-scene #imported-specimen').getAttribute('data-model')==='neuron' && document.querySelector('#cell-scene #imported-specimen').getAttribute('data-error')==='' && document.querySelector('#cell-scene').getAttribute('data-model-source').startsWith('https://') && Array.from(document.querySelectorAll('#cell-scene #imported-specimen geometry')).every(g=>{const c=JSON.parse(g.getAttribute('colors'));const p=JSON.parse(g.getAttribute('positions'));return c.length===p.length&&c.some(v=>Math.abs(v-c[0])>0.01)})"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#cell-scene",
+      "width": 256,
+      "height": 192,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 300
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "scene3d",
+      "target": "#cell-scene",
+      "width": 512,
+      "height": 384,
+      "file": "temp/cellscope-remote-neuron.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#choose-bacteria"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#cell-scene #imported-specimen').getAttribute('data-model')==='bacteria' && document.querySelector('#cell-scene #imported-specimen').getAttribute('data-error')==='' && document.querySelector('#cell-scene').getAttribute('data-model-source').startsWith('https://') && Array.from(document.querySelectorAll('#cell-scene #imported-specimen geometry')).every(g=>{const c=JSON.parse(g.getAttribute('colors'));const p=JSON.parse(g.getAttribute('positions'));return c.length===p.length&&c.some(v=>Math.abs(v-c[0])>0.01)})"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#cell-scene",
+      "width": 256,
+      "height": 192,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 300
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "scene3d",
+      "target": "#cell-scene",
+      "width": 512,
+      "height": 384,
+      "file": "temp/cellscope-remote-bacteria.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#choose-animal"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#cell-scene #imported-specimen').getAttribute('data-model')==='animal' && document.querySelector('#cell-scene #imported-specimen').getAttribute('data-error')==='' && document.querySelector('#cell-scene').getAttribute('data-model-source').startsWith('https://') && Array.from(document.querySelectorAll('#cell-scene #imported-specimen geometry')).every(g=>{const c=JSON.parse(g.getAttribute('colors'));const p=JSON.parse(g.getAttribute('positions'));return c.length===p.length&&c.some(v=>Math.abs(v-c[0])>0.01)})"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#cell-scene",
+      "width": 256,
+      "height": 192,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 300
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "scene3d",
+      "target": "#cell-scene",
+      "width": 512,
+      "height": 384,
+      "file": "temp/cellscope-remote-animal.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#choose-whiteBlood"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#cell-scene #imported-specimen').getAttribute('data-model')==='whiteBlood' && document.querySelector('#cell-scene #imported-specimen').getAttribute('data-error')==='' && document.querySelector('#cell-scene').getAttribute('data-model-source').startsWith('https://')"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#cell-scene",
+      "width": 256,
+      "height": 192,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 300
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "scene3d",
+      "target": "#cell-scene",
+      "width": 512,
+      "height": 384,
+      "file": "temp/cellscope-remote-whiteBlood.png"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/cellscope-remote-page.png"
+    }
+  ]
+}

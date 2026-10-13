@@ -6,6 +6,7 @@
 #include <math.h>
 
 namespace lambda {
+static constexpr size_t SCENE_ASSET_BUFFER_LIMIT = 64 * 1024 * 1024;
 // D4.1.3: imported values belong to the destination Input, including decoded buffers.
 struct SceneAsset {
     InputContext ctx;
@@ -56,7 +57,8 @@ inline double asset_component(ItemReader item, size_t index, double fallback = N
 }
 Item asset_color(SceneAsset& asset, const double* color);
 bool asset_triangulate(SceneAsset& asset, const double* positions, size_t count, lam::ArrayList<unsigned>& triangles, double* normal = nullptr);
-bool asset_import_gltf(SceneAsset& asset, Item source);
+bool asset_import_gltf(SceneAsset& asset, Item source, const uint8_t* binary = nullptr, size_t binary_length = 0);
+bool asset_import_glb(SceneAsset& asset, const char* source, size_t length);
 bool asset_import_wavefront(SceneAsset& asset, Item source);
 bool asset_import_a3d(SceneAsset& asset, Item source);
 }

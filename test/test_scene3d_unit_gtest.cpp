@@ -484,6 +484,41 @@ TEST_F(Scene3dTest, ShaderReflectionUniformsFailuresAndForeignGenerations) {
     EXPECT_EQ(native_gl_buffer(graphics,color,129u*1024u*1024u).id,0u);
     native_gl_destroy(graphics);EXPECT_EQ(native_gl_create(false,diagnostic,sizeof(diagnostic)),nullptr);
 }
+TEST_F(Scene3dTest, TextureResolutionCapBoundsMipBytesAndPreservesSourceAndOrientation) {
+    char diagnostic[256];NativeGlContext* graphics=native_gl_create(true,diagnostic,sizeof(diagnostic));ASSERT_NE(graphics,nullptr)<<diagnostic;
+    uint32_t pixels[16];for(unsigned i=0;i<16;i++) pixels[i]=i<8?0xff0000ff:0xffff0000;
+    ImageSurface image={};image.width=4;image.height=4;image.pitch=16;image.pixels=pixels;image.alpha_mode=IMAGE_ALPHA_STRAIGHT;
+    NativeGlSampler sampler;sampler.max_size=2;sampler.min_filter=0x2703;
+    NativeGlResource texture=native_gl_texture(graphics,&image,sampler);ASSERT_NE(texture.id,0u)<<native_gl_diagnostic(graphics);
+    NativeGlStats stats;ASSERT_TRUE(native_gl_stats(graphics,&stats));EXPECT_EQ(stats.allocated_bytes,20u);
+    EXPECT_EQ(image.width,4);EXPECT_EQ(image.height,4);EXPECT_EQ(pixels[0],0xff0000ffu);EXPECT_EQ(pixels[15],0xffff0000u);
+    NativeGlResource program=native_gl_program(graphics,
+        "#version 330 core\nlayout(location=0) in vec2 p;out vec2 uv;void main(){uv=(p+1)*.5;gl_Position=vec4(p,0,1);}",
+        "#version 330 core\nin vec2 uv;uniform sampler2D tex;out vec4 result;void main(){result=texture(tex,uv);}");
+    float positions[]={-1,-1,1,-1,-1,1,-1,1,1,-1,1,1};
+    NativeGlResource buffer=native_gl_buffer(graphics,positions,sizeof(positions));
+    NativeGlAttribute attribute={buffer,0,2,2*sizeof(float),0,0};
+    NativeGlResource vertices=native_gl_vertices(graphics,&attribute,1,{}),target=native_gl_target(graphics,32,32);
+    const float clear[]={0,0,0,0};ASSERT_TRUE(native_gl_begin(graphics,target,clear));
+    NativeGlDraw draw={program,vertices,texture,6,1,false,false,0,false};ASSERT_TRUE(native_gl_draw(graphics,&draw));
+    ImageSurface* capture=native_gl_snapshot(graphics,target);ASSERT_NE(capture,nullptr);
+    pixel(capture,16,4,255,0,0);pixel(capture,16,27,0,0,255);image_surface_destroy(capture);
+    native_gl_release(graphics,texture);sampler.max_size=0;EXPECT_EQ(native_gl_texture(graphics,&image,sampler).id,0u);
+    native_gl_destroy(graphics);
+}
+
+TEST_F(Scene3dTest, VertexOnlyBuffersDoNotRetainIndexShadows) {
+    char diagnostic[256];NativeGlContext* graphics=native_gl_create(true,diagnostic,sizeof(diagnostic));ASSERT_NE(graphics,nullptr)<<diagnostic;
+    float positions[]={0,0,0,1,0,0,0,1,0};
+    NativeGlResource buffer=native_gl_buffer(graphics,positions,sizeof(positions),false);ASSERT_NE(buffer.id,0u);
+    NativeGlStats stats;ASSERT_TRUE(native_gl_stats(graphics,&stats));EXPECT_EQ(stats.allocated_bytes,sizeof(positions));
+    NativeGlAttribute attribute={buffer,0,3,3*sizeof(float),0,0};
+    EXPECT_NE(native_gl_vertices(graphics,&attribute,1,{}).id,0u);
+    EXPECT_EQ(native_gl_vertices(graphics,&attribute,1,buffer).id,0u);
+    EXPECT_NE(strstr(native_gl_diagnostic(graphics),"validation data"),nullptr);
+    native_gl_destroy(graphics);
+}
+
 TEST(Scene3dMath, ViewBoxRejectsNonfiniteNegativeAndTrailingComponents) {
     const char* invalid[]={"0 0 -1 1","0 0 1 -1","nan 0 1 1","0 0 inf 1","0 0 1 1 2","0 0 1 1junk"};
     for (const char* value:invalid) EXPECT_FALSE(svg_parse_viewbox(value).has_viewbox)<<value;

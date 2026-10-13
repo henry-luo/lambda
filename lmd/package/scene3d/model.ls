@@ -141,6 +141,8 @@ fn check_node(n, all_nodes) bool^ {
             raise fail("invalid light") else true
     } else if (kind == 'texture') {
         let checked_source = if (not (n.src is string) or len(n.src) == 0) raise fail("texture requires source")
+        let checked_size = if (n["max-size"] != null and ((not numeric(n["max-size"]) or floor(n["max-size"]) != n["max-size"]) or n["max-size"] < 1 or n["max-size"] > 4096))
+            raise fail("texture max-size must be an integer in 1..4096")
         let checked_sampler = [for (key in ["wrap-s", "wrap-t", "min-filter", "mag-filter"] where n[key] != null)
             if (not contains(if (key == "wrap-s" or key == "wrap-t") [10497, 33071, 33648]
                 else if (key == "min-filter") [9728, 9729, 9984, 9985, 9986, 9987] else [9728, 9729], n[key]))

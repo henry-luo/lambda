@@ -2388,6 +2388,7 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"superlambda", "test/demo/superlambda/superlambda.ls"},
     {"doom", "test/demo/doom/doom.ls"},
     {"photo", "test/demo/photo/photo.ls"},
+    {"cellscope", "test/demo/cellscope/cellscope.ls"},
     {"scene3d", "test/demo/scene3d/ringworld.ls"},
     {"ringworld", "test/demo/scene3d/ringworld.ls"},
     {"observatory", "test/demo/scene3d/observatory.html"},

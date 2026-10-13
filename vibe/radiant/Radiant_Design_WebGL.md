@@ -948,7 +948,8 @@ UTF-8 BOM. Filename-free OBJ/MTL input requires an explicit type: short words
 such as `v` and `newmtl` are too ambiguous for content sniffing. Filename-free
 glTF JSON follows ordinary JSON detection; use `gltf` explicitly for its
 minimal document checks. HTTP Content-Type lookup recognizes the four MIME
-types above. GLB, binary M3D, IQM, and VOX are outside this increment.
+types above. This raw mapping profile excludes GLB, binary M3D, IQM, and VOX.
+Native GLB scene conversion is covered separately in §15.
 
 ```lambda
 let geometry = input("model.obj")^
@@ -1279,14 +1280,19 @@ component boundaries under **S2.6.4**. No new runtime value type is required.
 |---|---|---|
 | OBJ | Polygon faces, signed relative indices at the statement position, independent position/normal/UV references, homogeneous positions, object/group/material boundaries, concave polygon triangulation, authored normals or generated flat normals. | Smoothing groups require authored normals. Lines, points, free-form curves/surfaces, legacy texture commands, `call` and `csh` are rejected. No commands execute. |
 | MTL | One-component gray or three-component RGB diffuse color, opacity (`d`/`Tr`), unlit `illum 0` or Lambert shading, diffuse images, repeat wrapping and `-clamp on/off`. | Spectral/XYZ colors, halo dissolve and unsupported texture options are errors. Out-of-range diffuse colors are clipped with a warning. Specular, ambient, emissive and PBR properties have no faithful Lambert equivalent and emit warnings. |
-| glTF 2.0 JSON | Selected scene, node hierarchy and TRS/matrices, multiple primitives, triangles/strips/fans, normals, UV0, RGB colors, base-color texture/factor, opaque/blended materials, skinning, inverse-bind matrices, relative position/normal morph targets, clips and channels. | Required extensions other than `KHR_materials_unlit` are rejected. Optional extensions use the core fallback with warnings. PBR metallic/roughness shading uses a documented Lambert base-color approximation; secondary PBR maps are warned and omitted. Alpha masking, vertex alpha, non-UV0/transformed textures, lines/points and compressed geometry are unsupported. Embedded glTF cameras are omitted with a warning; supply a native scene camera. GLB remains outside this textual profile. |
+| glTF 2.0 JSON / GLB v2 | Selected scene, node hierarchy and TRS/matrices, multiple primitives, triangles/strips/fans, normals, UV0, RGB colors, base-color texture/factor, opaque/blended materials, skinning, inverse-bind matrices, relative position/normal morph targets, clips and channels, `KHR_mesh_quantization` attribute storage. | Required extensions other than `KHR_materials_unlit` and `KHR_mesh_quantization` are rejected. Optional extensions use the core fallback with warnings. PBR metallic/roughness shading uses a documented Lambert base-color approximation; secondary PBR maps are warned and omitted. Alpha masking, vertex alpha, non-UV0/transformed textures, lines/points and compressed geometry codecs are unsupported. Embedded glTF cameras are omitted with a warning; supply a native scene camera. GLB validates its JSON/BIN chunks and reuses this same conversion profile. |
 | A3D | Polygon meshes/materials, zero-based references, vertex color/UV/normal data, model scale, parent-relative bone transforms and persistent partial action-frame overrides. Actions become position and quaternion tracks in seconds. | At most four influences per skinned vertex; vertices in skinned meshes need weights. Texture-name/embedded-asset resolution, maximum-vertex/parametric records, mathematical shapes, voxels and procedural/unknown chunks are rejected. Preview, labels, asset lists and extra application bytes remain available through raw parsing and are omitted from rendering. |
 
 The glTF decoder supports little-endian signed/unsigned byte/short, unsigned
 int and float components, normalized integer attributes, accessor/view offsets,
 interleaved strides, and sparse overrides. It validates reference indices,
 component encodings, declared buffer lengths, accessor bounds and increasing
-sparse indices. It is a supported-profile loader, not a complete glTF schema
+sparse indices. Required `KHR_mesh_quantization` enables integer positions,
+normalized signed byte/short normals, signed or unnormalized UVs, and signed
+position/normal morph displacements. Dequantization uses the existing node or
+skin transforms and copies decoded values into the destination Input (**D4.1.3**).
+UVs requiring `KHR_texture_transform` remain outside the supported profile.
+It is a supported-profile loader, not a complete glTF schema
 validator. Raster sampling honors glTF wrap and min/mag filters, generates
 mipmaps when requested, and accounts for their GPU storage. glTF's top-origin
 UVs convert to the native raster convention; OBJ UVs already use that convention.
@@ -1294,12 +1300,22 @@ Materials carry `alpha-mode: 'opaque'` or `'blend'`; glTF's default `OPAQUE`
 ignores factor and texture alpha, while `BLEND` uses the ordered transparent
 pass, per the [glTF alpha-coverage specification](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#alpha-coverage).
 Hand-authored native materials without this attribute retain automatic alpha detection.
+Static GPU vertices omit unused skin/morph lanes and default-white color lanes;
+vertex and instance buffers omit CPU copies, while index buffers retain their
+validation data. Native textures optionally
+accept `max-size` (integer 1..4096, default 4096); upload uses power-of-two box
+downsampling with alpha-weighted RGB, preserving the source image. Mip memory
+accounting uses the uploaded size. The graphics-context budget remains 128 MiB.
 
-Resource limits include 64 MiB per glTF buffer, 4,194,304 decoded components per
-accessor, 262,144 vertices per geometry, 4,096 corners per polygon, 4,096 glTF
-nodes and hierarchy depth 64. Native deformation retains 16 bones (including
+Resource limits include 64 MiB per glTF buffer or HTTP scene-asset response,
+8,388,608 decoded components per accessor, 1,048,576 source vertices and
+8,388,608 source indices. Static primitives split into draws of at most 262,144
+vertices and 1,572,864 indices, retaining every triangle and attribute seam.
+Missing static glTF normals produce flat per-face normals (glTF §3.7.2.1),
+with zero-area faces omitted. Polygon corners remain bounded at 4,096,
+glTF nodes at 4,096 and hierarchy depth at 64. Native deformation retains 16 bones (including
 joint ancestors), four normalized influences per vertex, and two relative morph
-targets. Larger models report a limit error. Singular matrices and zero-scale poses
+targets. Oversized animated primitives report a limit error. Singular matrices and zero-scale poses
 are unsupported by the native transform path. These limits are separate from
 whether their raw data maps naturally into Lambda.
 

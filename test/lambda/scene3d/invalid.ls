@@ -2,6 +2,8 @@ import s: lambda.scene3d
 fn message(scene) => s.normalize(scene) ^ { ^.message }
 let camera = s.camera({id: "main"});
 [
+ *[for (size in [0, -1, 1.5, 4097, "small"]) contains(message(s.scene([camera,
+    s.resources([s.texture("image.png", {id:"t", 'max-size':size})])])), "max-size")],
  contains(message(<div>), "expected scene3d"),
  contains(message(<scene3d>), "camera"),
  contains(message(<scene3d camera: "missing", camera>), "reference"),

@@ -38,12 +38,13 @@ const char* native_gl_diagnostic(NativeGlContext* context);
 bool native_gl_extension_supported(NativeGlContext* context, const char* name);
 bool native_gl_valid(NativeGlContext* context, NativeGlResource resource, NativeGlKind kind);
 void native_gl_release(NativeGlContext* context, NativeGlResource resource);
-NativeGlResource native_gl_buffer(NativeGlContext* context, const void* data, size_t bytes);
+NativeGlResource native_gl_buffer(NativeGlContext* context, const void* data, size_t bytes, bool retain_index_data=true);
 NativeGlResource native_gl_vertices(NativeGlContext* context, const NativeGlAttribute* attributes,
     unsigned count, NativeGlResource indices);
 struct NativeGlSampler {
     unsigned wrap_s=0x812f,wrap_t=0x812f; // CLAMP_TO_EDGE
     unsigned min_filter=0x2601,mag_filter=0x2601; // LINEAR
+    unsigned max_size=4096; // bound the uploaded resolution without changing the source image
 };
 NativeGlResource native_gl_texture(NativeGlContext* context, const ImageSurface* image,
     const NativeGlSampler& sampler = {});

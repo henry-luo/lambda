@@ -239,6 +239,7 @@ static NativeGlSlot* native_gl_slot(NativeGlContext* context, NativeGlResource r
 
 static NativeGlSlot* native_gl_allocate(NativeGlContext* context, NativeGlKind kind, size_t bytes) {
     if (!context || context->lost || bytes > GL_BYTE_LIMIT - context->stats.allocated_bytes) {
+        log_error("scene3d graphics budget: requested %zu bytes with %zu of %zu already allocated",bytes,context?context->stats.allocated_bytes:0,GL_BYTE_LIMIT);
         native_gl_error(context, "resource byte quota exceeded"); return nullptr;
     }
     for (NativeGlSlot& slot : context->slots) if (!slot.id) {
@@ -377,15 +378,15 @@ void native_gl_destroy(NativeGlContext* context) {
     mem_free(context);
 }
 
-NativeGlResource native_gl_buffer(NativeGlContext* context, const void* data, size_t bytes) {
+NativeGlResource native_gl_buffer(NativeGlContext* context, const void* data, size_t bytes, bool retain_index_data) {
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context); if (!scope.valid || !data || !bytes) return {};
-    if (bytes > GL_BYTE_LIMIT / 2) { native_gl_error(context, "buffer byte quota exceeded"); return {}; }
+    if (bytes > GL_BYTE_LIMIT / (retain_index_data?2:1)) { native_gl_error(context, "buffer byte quota exceeded"); return {}; }
     // retain bounded upload bytes so indexed draws can validate the exact referenced range.
-    NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_BUFFER, bytes * 2); if (!slot) return {};
-    slot->length = bytes; slot->data = mem_alloc(bytes, MEM_CAT_RENDER);
-    if (!slot->data) { native_gl_error(context,"buffer upload copy allocation failed");native_gl_release(context, {slot->id}); return {}; }
-    memcpy(slot->data, data, bytes);
+    NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_BUFFER, bytes * (retain_index_data?2:1)); if (!slot) return {};
+    slot->length = bytes; slot->data = retain_index_data?mem_alloc(bytes, MEM_CAT_RENDER):nullptr;
+    if (retain_index_data&&!slot->data) { native_gl_error(context,"buffer upload copy allocation failed");native_gl_release(context, {slot->id}); return {}; }
+    if(retain_index_data) memcpy(slot->data, data, bytes);
     NativeGlFunctions& gl = context->gl;
     gl.GenBuffers(1, &slot->name); gl.BindBuffer(GL_ARRAY_BUFFER, slot->name);
     gl.BufferData(GL_ARRAY_BUFFER, bytes, data, GL_STATIC_DRAW);
@@ -399,7 +400,7 @@ NativeGlResource native_gl_vertices(NativeGlContext* context, const NativeGlAttr
 #ifdef NATIVE_GL_ENABLED
     NativeGlScope scope(context); if (!scope.valid || !attributes || !count || count > 16) return {};
     NativeGlSlot* index = indices.id ? native_gl_slot(context, indices, NATIVE_GL_BUFFER) : nullptr;
-    if (indices.id && !index) return {};
+    if (indices.id && (!index||!index->data)) {native_gl_error(context,"index buffer requires retained validation data");return {};}
     unsigned locations = 0;
     for (unsigned i = 0; i < count; i++) {
         const NativeGlAttribute& a = attributes[i];
@@ -505,22 +506,38 @@ NativeGlResource native_gl_texture(NativeGlContext* context, const ImageSurface*
     if(!valid_wrap(sampler.wrap_s)||!valid_wrap(sampler.wrap_t)||
         (!mipmaps&&sampler.min_filter!=GL_NEAREST&&sampler.min_filter!=GL_LINEAR)||
         (sampler.mag_filter!=GL_NEAREST&&sampler.mag_filter!=GL_LINEAR)) {native_gl_error(context,"invalid texture sampler");return {};}
-    size_t bytes = (size_t)image->width * image->height * 4;
+    if(!sampler.max_size||sampler.max_size>GL_DIMENSION_LIMIT) {native_gl_error(context,"invalid texture max-size");return {};}
+    unsigned step=1;
+    while(((unsigned)image->width+step-1)/step>sampler.max_size||((unsigned)image->height+step-1)/step>sampler.max_size) step*=2;
+    unsigned upload_width=((unsigned)image->width+step-1)/step,upload_height=((unsigned)image->height+step-1)/step;
+    size_t bytes = (size_t)upload_width * upload_height * 4;
     size_t allocated=bytes;
-    if(mipmaps) for(unsigned width=image->width,height=image->height;width>1||height>1;) {
+    if(mipmaps) for(unsigned width=upload_width,height=upload_height;width>1||height>1;) {
         width=width>1?width/2:1;height=height>1?height/2:1;allocated+=(size_t)width*height*4;
     }
     NativeGlSlot* slot = native_gl_allocate(context, NATIVE_GL_TEXTURE, allocated); if (!slot) return {};
     // decoded images are top-down; native UV (0,0) is the lower-left corner.
     uint8_t* pixels = (uint8_t*)mem_alloc(bytes, MEM_CAT_RENDER);
     if (!pixels) { native_gl_error(context,"texture staging allocation failed");native_gl_release(context, {slot->id}); return {}; }
-    for (unsigned y = 0; y < (unsigned)image->height; y++)
-        memcpy(pixels + (size_t)y * image->width * 4,
-            (const uint8_t*)image->pixels + (size_t)(image->height - 1 - y) * image->pitch, (size_t)image->width * 4);
+    for(unsigned y=0;y<upload_height;y++) {
+        uint8_t* row=pixels+(size_t)(upload_height-1-y)*upload_width*4;
+        if(step==1) memcpy(row,(const uint8_t*)image->pixels+(size_t)y*image->pitch,(size_t)upload_width*4);
+        else for(unsigned x=0;x<upload_width;x++) {
+            // average each source footprint, weighting straight RGB by alpha to avoid edge halos.
+            uint64_t rgb[3]={},alpha=0,count=0;
+            for(unsigned sy=y*step;sy<(y+1)*step&&sy<(unsigned)image->height;sy++)
+                for(unsigned sx=x*step;sx<(x+1)*step&&sx<(unsigned)image->width;sx++) {
+                    const uint8_t* sample=(const uint8_t*)image->pixels+(size_t)sy*image->pitch+sx*4;
+                    for(unsigned c=0;c<3;c++) rgb[c]+=(unsigned)sample[c]*sample[3];alpha+=sample[3];count++;
+                }
+            for(unsigned c=0;c<3;c++) row[x*4+c]=alpha?(uint8_t)((rgb[c]+alpha/2)/alpha):0;
+            row[x*4+3]=(uint8_t)((alpha+count/2)/count);
+        }
+    }
     NativeGlFunctions& gl = context->gl;
     gl.GenTextures(1, &slot->name); gl.BindTexture(GL_TEXTURE_2D, slot->name);
     gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1); gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, image->width, image->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, upload_width, upload_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
     gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, sampler.min_filter); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, sampler.mag_filter);
     gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, sampler.wrap_s); gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, sampler.wrap_t);
     if(mipmaps) gl.GenerateMipmap(GL_TEXTURE_2D);
