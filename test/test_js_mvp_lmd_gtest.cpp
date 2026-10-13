@@ -450,6 +450,117 @@ TEST_F(JsMvpLmd, CoreClassFieldsAndStaticBlocks) {
     boolean("function Base(v){this.v=v}let C=class extends Base {};new C(7).v===7");
     error("let C=class extends null {};new C();", "TypeError");
 }
+TEST_F(JsMvpLmd, PrivateClassFieldsAndBrands) {
+    boolean(R"JS(
+        class C{#x;f(o){let {[#x in o]:v}={true:3,false:7};return v}}
+        let c=new C();c.f(c)===3&&c.f({})===7;
+    )JS");
+    boolean(R"JS(
+        class C{'constructor\0x'=3;static 'prototype\0x'(){return 7}}
+        new C()['constructor\0x']===3&&C['prototype\0x']()===7;
+    )JS");
+    boolean(R"JS(
+        function check(){let caught=false;try{class C{#f(){}[this.#f]=1}}catch(e){caught=e instanceof TypeError}return caught}
+        function keys(){return class{[this.key]=1;[arguments[0]](){return 2}}}
+        let C=keys.call({key:'x'},'read'),c=new C();
+        check()&&c.x===1&&c.read()===2&&(class{constructor(){}}).name==='';
+    )JS");
+    boolean(R"JS(
+        class C{f=function(){return arguments[0]};g=()=>this.f(3);static{this.s=function(){return arguments[0]}}}
+        new C().g()===3&&C.s(4)===4;
+    )JS");
+    boolean(R"JS(
+        class C {
+            #x=1; static #s=9;
+            get(){return this.#x} set(v){this.#x=v;return this.#x++}
+            has(o){return (#x in o)} static get(){return this.#s}
+        }
+        let c=new C(),other=new C();let failed=false;
+        try {C.get.call(class extends C {})}catch(e){failed=e instanceof TypeError}
+        c.set(4)===4&&c.get()===5&&other.get()===1&&c.has(c)&&!c.has({})&&
+            Object.getOwnPropertyNames(c).length===0&&Object.getOwnPropertySymbols(c).length===0&&
+            Object.getOwnPropertyNames(C).indexOf('#s')===-1&&C.get()===9&&failed;
+    )JS");
+    boolean(R"JS(
+        function make(v){return class {#x=v;read(o){return o.#x}has(o){return #x in o}}}
+        let A=make(1),B=make(2),a=new A(),b=new B();let failed=false;
+        try{a.read(b)}catch(e){failed=e instanceof TypeError}
+        a.read(a)===1&&b.read(b)===2&&!a.has(b)&&failed;
+    )JS");
+    boolean(R"JS(
+        class Outer {#x=3;make(){let self=this;return class {#x=7;get(){return this.#x}outer(){return self.#x}}}}
+        let O=new Outer(),C=O.make(),c=new C();let failed=false;
+        try{c.outer()}catch(e){failed=e instanceof TypeError}
+        c.get()===7&&failed;
+    )JS");
+    error("class C{#x;has(o){return #x in o}}new C().has(1)", "TypeError");
+    error("class C{#x;get(){return this.#x}}C.prototype.get()", "TypeError");
+    for (int private_fields = 0; private_fields < 2; private_fields++) {
+        for (int count = 126; count <= 127; count++) {
+            StrBuf* source = strbuf_new();
+            strbuf_append_str(source, "class C{");
+            for (int i = 0; i < count; i++) strbuf_append_format(source, "%sf%d;", private_fields ? "#" : "", i);
+            strbuf_append_str(source, "}typeof C==='function'");
+            if (count == 126) boolean(source->str);
+            else {
+                mvp_lmd_destroy(execution);
+                execution = mvp_lmd_execute(source->str, source->length);
+                MvpLmdFailurePhase phase;
+                const char* reason = mvp_lmd_diagnostic(execution, &phase);
+                EXPECT_EQ(phase, MVP_LMD_ADMISSION_FAILURE);
+                ASSERT_NE(reason, nullptr);
+                EXPECT_NE(strstr(reason, "class environment exceeds closure layout"), nullptr);
+            }
+            strbuf_free(source);
+        }
+    }
+}
+TEST_F(JsMvpLmd, PrivateClassMethodsAndAccessors) {
+    boolean(R"JS(
+        class C {
+            #x=this.#m(); #m(){return 4} get #a(){return this.#x}set #a(v){this.#x=v}
+            get(){return this.#a}set(v){this.#a=v}method(){return this.#m}
+            static #sm(){return 12}static v=this.#sm();static has(o){return #sm in o}
+        }
+        let c=new C(),d=new C();c.set(8);
+        c.get()===8&&d.get()===4&&c.method()===d.method()&&c.method().name==='#m'&&
+            C.v===12&&C.has(C)&&!C.has(c)&&Object.keys(c).length===0;
+    )JS");
+    error("class C{#m(){}set(){this.#m=1}}new C().set()", "TypeError");
+    error("class C{set #a(v){}get(){return this.#a}}new C().get()", "TypeError");
+    error("class C{get #a(){return 1}set(){this.#a=2}}new C().set()", "TypeError");
+    boolean(R"JS(
+        class Base{constructor(o){return o}}
+        class C extends Base {#x=1;#m(){return this.#x}read(){return this.#m()}static get(o){return o.#x}}
+        let o=Object.freeze({});new C(o);let duplicate=false;
+        try{new C(o)}catch(e){duplicate=e instanceof TypeError}
+        C.get(o)===1&&duplicate;
+    )JS");
+}
+TEST_F(JsMvpLmd, PrivateClassProxyAndEscapedClosures) {
+    boolean(R"JS(
+        let C;with({'#x':9}){C=class{#x=1;has(v){return #x in v}read(v){return v.#x}}}
+        let c=new C();c.has(c)&&!c.has({})&&c.read(c)===1;
+    )JS");
+    boolean(R"JS(
+        let called=0,p=Proxy.revocable({}, {get(){called++;throw 1},set(){called++;throw 2}});
+        class B{constructor(o){return o}}
+        class C extends B {#x=5;get #a(){return this.#x}static read(o){return o.#a}
+            static set(o,v){o.#x=v}static has(o){return #x in o}}
+        let o=new C(p.proxy);p.revoke();C.set(o,9);
+        C.read(o)===9&&C.has(o)&&!C.has({})&&called===0;
+    )JS");
+    boolean(R"JS(
+        function make(v){class C{#x=v;method(){return function(o){return o.#x}}};let c=new C();return [c,c.method()]}
+        let a=make(6),b=make(7);let failed=false;
+        try{a[1](b[0])}catch(e){failed=e instanceof TypeError}
+        a[1](a[0])===6&&b[1](b[0])===7&&failed;
+    )JS");
+    boolean(R"JS(
+        class B{constructor(o){return o}}class C extends B{#x=8;static read(o){return o.#x}}
+        let a=new C([]),f=new C(function(){});C.read(a)===8&&C.read(f)===8;
+    )JS");
+}
 TEST_F(JsMvpLmd, CoreLiteralReservationCodeSize) {
     StrBuf* source = strbuf_new();
     ASSERT_NE(source, nullptr);
@@ -760,6 +871,16 @@ TEST_F(JsMvpLmd, PatternEarlyErrors) {
         "()=>({})=1", "async()=>({})=1", "'use strict';()=>eval=1",
         "class C { x=this.#missing }", "class C { #x; x=delete(this.#x) }",
         "class C { #x; f(){return ()=>delete this.#x} }",
+        "class C{#x;static #x}", "class C{get #x(){}get #x(){}}",
+        "class C{#constructor}", "class C extends (o=>o.#x){#x}",
+        "class C{#x;f(){return #x}}", "class C{#x;f(){return (#x) in this}}",
+        "class C{#x;f(){return this in #x}}", "class C{#x;f(){return super.#x}}",
+        "class C{#x;f(){return {#x:1}}}", "class C{#x;f(){return {[#x]:1}}}",
+        "class C{#x;f(){let {#x:a}={}}}", "class C{#x;f(){let {[#x]:a}={}}}",
+        "class let{}", "class st\\u0061tic{}", "class C{constructor=1}",
+        "class C{'constructor'}", "class C{static prototype}", "class C{static 'prototype'(){}}",
+        "class C{x=arguments}", "class C{x=()=>arguments}", "class C{x=()=>super()}",
+        "class C{static{arguments}}", "class C{static{()=>arguments}}", "class C{static{super()}}",
         "import.meta=1", "(import.meta)+=1", "++import.meta", "import.meta++",
         "for(import.meta of []);", "for(import.meta in {});",
         "function f(){new.target=1}", "function f(){new.target+=1}",

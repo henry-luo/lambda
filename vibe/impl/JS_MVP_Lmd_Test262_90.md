@@ -1,6 +1,6 @@
 # JS MVP: 90% of LJS Test262 coverage
 
-**Date:** 2026-10-13. **Status:** in progress; initial P1/P2/P3 increments and their validation are captured. Selected required-mode gain: 464 IDs. All 84 non-jq output contracts pass; performance acceptance and the 90% target remain open.
+**Date:** 2026-10-14. **Status:** in progress; initial P1/P2/P3 increments and native private-class execution are implemented. The corrected pin passes **24,803/40,261 IDs (61.6%)** after every required variant, plus focused, forced-GC and shared baseline gates. Another **11,432** passes are needed for 90%; performance acceptance remains open. Earlier captures remain build-specific evidence.
 **Design:** [JS_MVP_Lmd §34](../jube/JS_MVP_Lmd.md#34-ninety-percent-of-ljs-test262-coverage).
 **Scope:** extend the implemented MVP toward 90% of the frozen LJS passing
 population, preserving ordinary benchmark performance. This plan stages the
@@ -49,7 +49,7 @@ root-cause triage determines the implementation order within each package.
 |---|---|
 | Reuse | **D1.3v3**: reuse applicable untyped Lambda/lib substrate; preserve guest semantics and existing Lambda/full-LJS defaults |
 | Representations | **D2.6.6v3**, **D2.6.9v3**, **D2.7.1**: retain shared container/nominal contracts and scalar ownership; no ordinary-object VMap conversion |
-| Keys and shapes | **D3.4.3v5**, **S8.2.2v5**, **D4.6.1v4**: shared shapes and canonical UTF-8/lossless WTF-8 key identity |
+| Keys and shapes | **D3.4.3v5**, **S8.2.2v6**, **D4.6.1v4**: shared shapes and canonical UTF-8/lossless WTF-8 key identity |
 | Class ancestry and captures | **S2.1.3v2**, **D6.2.3v2**: preserve Lambda ancestry and immutable Lambda captures; JS captures share mutable cells |
 | Dynamic source | **D8.1.3v24**: eval, Function-family constructors and applicable `$262.evalScript` use the existing retained AST interpreter, including subsequent dynamic-body calls |
 | Lifetime and completion | **D1.4v4**, **D5.2–D5.3**, **D8.4.3v2**: precise owners/roots and explicit completion through every frame |
@@ -144,6 +144,15 @@ constructor/prototype reflection, canonical numeric-index behavior, iteration,
 methods and species. Cover view aliasing, buffer detachment, resize and transfer
 where required by the frozen target; no stale data pointer survives a callback
 that can change the store. Preserve fixed-length numeric fast paths.
+
+The initial reuse audit found that `ByteBufferHandle`, `ArrayNum` buffer views
+and the typed trailing carriers already provide the required storage ownership.
+The exported LJS constructors also depend on LJS class/prototype metadata and
+coercion; they are not directly compatible with MVP's nominal packed shapes.
+Extract or parameterize those existing allocation/view operations before adding
+the MVP semantic adapter (**D1.3v3**, **D2.6.9v3**, **D5.3.3**). Keep the current
+numeric-array specialization where its compile-time proofs hold. This is a
+reuse audit; the general P4 adapter is not implemented yet.
 
 ### P5. Promises, async bodies and iteration
 
@@ -272,7 +281,44 @@ it. Default-created/escaped closures, strict versus sloppy writes, generator
 creation and abrupt defaults use the same precisely rooted Lambda capture cells
 (**D6.2.3v2**, **D5.2–D5.3**). No new helper, runtime field or allocation is added.
 
-### P2 native Error subclass helper inventory
+### P2 class helper inventory
+
+**Private-element increment (2026-10-13):** retain shared shape/key contracts
+(**D3.4.3v5**, **S8.2.2v6**), nominal ancestry (**S2.1.3v2**) and
+**D5.2–D5.3** precise ownership. New compiler
+`private_binding(program, site, name, declaring_function)` resolves lexical
+private names and creates hidden bindings using the existing capture cells.
+New `mvp_lmd_private_element(owner, key, value, operation)` reuses unique private
+NameRefs, own-shape lookup/store and accessor calls for brand checks, reads,
+writes and installation. Private methods/accessors use class-owned traced
+template Maps; extend `mvp_lmd_class_initialize_instance` with a static-method
+installation option. No extra dispatch is added to ordinary public reads.
+Reuse `js_proxy_private_slots` by promoting it with optional allocator/revoked
+access options, preserving full-LJS defaults; private elements belong to the
+proxy itself and survive revocation. Focused gates include repeated class
+evaluation, nested lexical identities, static/instance brands, initializer
+order, return-object stamping, reflection invisibility and forced GC.
+
+Follow-up uses the existing shared function-fact walker for class heritage and
+computed keys: these execute in the enclosing function and must retain its
+`this`, arguments and eval observations. Field initializers and method bodies
+remain separate activation scopes (**D6.2.3v2**, **D8.4.1v2**). Extend the shared
+early-error walker for reserved class names, forbidden noncomputed element names,
+private-name expression positions and initializer `arguments`/`super()` restrictions
+through arrows. Quoted keys compare their full length, preserving embedded NULs.
+New compiler-only `js_ast_class_element_key(element, computed, statics)` shares
+field/method key extraction across validation, function facts and MVP planning
+(**D1.3v3**). It replaces repeated extraction blocks and adds no runtime allocation.
+Anonymous class names use class metadata,
+including when an explicit constructor method is present.
+
+Class admission also checks the existing constructor closure capacity before
+lowering. Field keys and initializers that already exceed the eight-bit closure
+layout previously incurred large compilation work before the runtime rejected
+them. Such classes remain unsupported and unsuccessful in Test262; this check
+neither changes the runtime limit nor counts a timeout as a pass. Boundary cases
+cover public and private fields. No new helper or ordinary runtime check is added.
+
 
 `int mvp_lmd_error_kind(const TypeNominal*, const MvpLmdLibraryState*)` was
 disclosed before coding. It consolidates Error-family recognition for class
@@ -759,3 +805,108 @@ Final increment provenance checks cover all **1,845** entry source hashes
 frozen module files, the benchmark candidate hashes and the restored ordinary
 release executable. `map_equal1/increment-record.json` records these checks and
 the explicit incomplete phase/performance status. `git diff --check` passes.
+
+### 2026-10-14: private class elements
+
+Native private fields, methods, accessors and brand checks now use class-owned
+private NameRefs, shared shapes and mutable capture cells (**D3.4.3v5**,
+**S8.2.2v6**, **D6.2.3v2**). Each class evaluation gets fresh identities; methods
+precede field initialization. Private access validates the actual receiver,
+including constructor-returned arrays/functions and revoked proxies, without
+public prototype traversal or proxy traps. Public reflection excludes the slots.
+The initializer and private-element imports retain precise roots and scalar
+ownership (**D5.2–D5.3**).
+
+Follow-up fixes cover private-name scope and early errors, enclosing function
+observations in computed class keys, anonymous constructor names and embedded-NUL
+property names. A generated Unicode class exposed compilation work for metadata
+that cannot fit the existing closure layout. Admission now checks that known
+capacity before lowering; oversized classes remain unsupported, not passes.
+
+The corrected release pin is `private_exec6/lambda.exe`, SHA-256
+`40f4aaa327a8553db5b95881b57bd4763ca80798097c59cebf625f7370b39195`.
+Its manifest records source, runner and all 18 frozen module hashes. The matched
+entry for this increment is `private_entry/lambda.exe`, ordinary release at
+`dfaae60cd9c6c3e9d630e557e354abd4dc0b21a2`, SHA-256
+`14e80b9e4cd7836c742eedcdeb0e33d22ef7530b904f2c57cb8dc524d274c4fb`.
+The older phase-entry controls and unresolved performance differences remain
+separate; this fresh control does not close them.
+
+| Gate on the corrected pin | Result |
+|---|---|
+| Focused MVP suite | **206/206** |
+| Forced GC and freed-memory poisoning | **206/206** |
+| Lambda baseline | **6,841/6,841** |
+| Full-LJS Test262 baseline | **40,261/40,261**, zero regressions |
+| Quiet replay of 24 development timeouts | **10 pass, 8 fail, 6 timeout**; the remaining timeout IDs exactly match phase entry |
+| Complete MVP canonical capture, after isolated replay | **24,804 pass, 15,451 fail, 6 timeout**; no crashes or missing outcomes, zero lost entry canonical passes |
+| Additional required variants, after isolated replay | **23,028 pass, 1 fail** out of 23,029; no crashes, timeouts or missing outcomes |
+| Fully passing distinct IDs | **24,803/40,261 (61.6%)**: **21,708 positive, 3,095 negative** |
+| Matched-release benchmark screen | **84/84** output/backend contracts; seven measured rounds and one warmup per binary |
+| Timing follow-up | **31 measured rounds** for all eight screen suspects, plus Sieve against the original phase-entry control; performance acceptance remains open |
+
+The complete audit proves **3,056 gains over phase-entry canonical results**.
+Its sole additional-mode failure, `language_global_code_S10_1_7_A1_T1_js`
+(`delete this` in strict mode), also fails on the unchanged matched control.
+It remains unsuccessful in the count; this pre-existing variant gap is distinct
+from losing an entry canonical pass. There are **no new crash/timeout IDs**.
+All **949** previously audited initial-increment passes are retained, as are all
+**5,432** earlier private-class development passes; the latter comparison adds
+**169** class-family passes. These are separate regression comparisons, not
+inputs to the current pin's coverage count.
+The canonical capture retains its original 250 missing outcomes and ten timeouts;
+all 260 were replayed individually with the original timeout. The additional-mode
+capture similarly retains and replays all 99 interrupted outcomes. No original
+capture is rewritten or combined with another binary's passes.
+
+`whole-audit.json`, `audit-review.json` and `residual-inventory.json` under
+`private_exec6/` record the result, control confirmation and every unsuccessful
+ID with its modes, family and declared features. The largest remaining families
+are language statements (**3,396**), expressions (**3,148**), TypedArray (**1,437**),
+RegExp (**746**), TypedArrayConstructors (**714**), Promise (**627**), Date (**526**)
+and DataView (**504**). Metadata features overlap: **4,438** residual IDs declare
+async iteration. These are inventories, not additive gain predictions.
+
+The corrected pin passes **5,601/8,396** class-family IDs in every required mode:
+**4,464 positive, 1,137 negative**. Earlier `private_exec3` class evidence and
+`private_exec4` development census/timeout captures remain preserved separately.
+Evidence lives under `temp/mvp_test262_90/`; no pass counts are combined across pins.
+
+The matching-release repeats use script self-times (or the exact archived CLI
+entry-time contract), fresh processes and rotating candidate/control/identical-peer
+order. Warmup round zero is preserved but excluded from medians and intervals.
+No jq workload was executed. All eight suspect workloads retain correct output:
+
+| Workload | Candidate / increment control / identical peer ms | 95% paired interval vs control | 95% paired interval vs peer |
+|---|---:|---:|---:|
+| Pidigits | 0.341 / 0.339 / 0.337 | −0.29% to +2.38% | +0.30% to +2.72% |
+| Splay | 177.720 / 177.349 / 177.542 | −0.31% to +0.48% | −0.36% to +0.46% |
+| Dense array | 57.222 / 57.245 / 57.652 | −0.74% to +0.73% | −1.00% to +0.08% |
+| Map lookup | 6.507 / 6.435 / 6.429 | −0.05% to +2.24% | −0.03% to +2.76% |
+| Object delete | 0.846 / 0.852 / 0.855 | −3.12% to +1.42% | −3.64% to +0.59% |
+| JSON generation | 4.492 / 4.517 / 4.517 | −1.43% to +0.91% | −1.04% to +0.51% |
+| Hyphen | 43.482 / 43.391 / 43.335 | −0.35% to +0.96% | −0.15% to +0.83% |
+| Three-way Merge | 1,499.723 / 1,489.017 / 1,482.656 | −0.02% to +1.45% | +0.69% to +1.79% |
+
+Pidigits and Three-way Merge remain positive against one control and inconclusive
+against the other. Map lookup retains wide intervals crossing parity. Their
+control/peer intervals also cross parity; that does not establish stable parity
+for the candidate. The other initial suspect signals are not confirmed by these
+repeats. Keep both the screen and repeats; uncertainty is not a performance pass.
+
+The separate original-control Sieve repeat is **0.090 / 0.087 / 0.087 ms**, with
+**+2.27% to +3.45%** intervals against both identical controls. Its existing
+approximately **3 µs** slowdown remains confirmed. The normalized archived MIR
+instruction streams match after replacing wide immediates, but that comparison
+does not prove equal runtime values or native-helper behavior; the cause remains
+unresolved. Other older gaps retain their original controls and status.
+
+`increment-record.json` records the final audit, timing intervals and incomplete
+acceptance status. Final provenance checks cover **1,843** entry source hashes,
+exactly **10** changed production sources plus the focused-test source, all **18**
+frozen module files, the runner and restored ordinary release binary. Documentation
+alone changed after capture. `git diff --check` passes.
+
+Dynamic-source bridging, remaining builtin/realm construction, library and typed
+storage, async execution and modules remain open. The **36,235/40,261** milestone
+and complete performance acceptance have not been reached.
