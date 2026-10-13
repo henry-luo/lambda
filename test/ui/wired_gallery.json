@@ -1,0 +1,22 @@
+{
+  "name":"wired gallery shows sketch outlines, scoped tokens, and native fields",
+  "html":"test/ui/wired_gallery.ls",
+  "viewport":{"width":1100,"height":1900},
+  "events":[
+    {"type":"assert_count","target":{"selector":".wired-root"},"count":1},
+    {"type":"assert_count","target":{"selector":".wired-card"},"count":4},
+    {"type":"assert_count","target":{"selector":"#wired-start .wired-sketch"},"count":1},
+    {"type":"assert_style","target":{"selector":"#wired-start"},"property":"color","equals":"rgb(85, 70, 163)"},
+    {"type":"assert_style","target":{"selector":"#wired-green"},"property":"color","equals":"rgb(35, 110, 101)"},
+    {"type":"assert_style","target":{"selector":"#wired-heavy .wired-sketch"},"property":"color","equals":"rgb(35, 110, 101)"},
+    {"type":"assert_attribute","target":{"selector":"#wired-progress"},"attribute":"aria-valuenow","equals":"64"},
+    {"type":"assert_attribute","target":{"selector":"#wired-progress"},"attribute":"aria-label","equals":"Prototype progress"},
+    {"type":"render","file":"temp/ui_wired/gallery.png"},
+    {"type":"type","target":{"selector":"#wired-name"},"text":"Ada's notebook"},
+    {"type":"assert_value","target":{"selector":"#wired-name"},"equals":"Ada's notebook"},
+    {"type":"click","target":{"selector":"#wired-switch"}},
+    {"type":"assert_checked","target":{"selector":"#wired-switch"},"checked":true},
+    {"type":"click","target":{"selector":"#wired-check"}},
+    {"type":"assert_checked","target":{"selector":"#wired-check"},"checked":true}
+  ]
+}

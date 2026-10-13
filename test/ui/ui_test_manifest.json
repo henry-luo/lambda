@@ -43,6 +43,11 @@
       "tags": ["bold", "baseline"]
     },
     {
+      "name": "wired",
+      "globs": ["test/ui/wired/*.json"],
+      "tags": ["wired", "baseline"]
+    },
+    {
       "name": "dom",
       "globs": [
         "test/ui/dom/*.json",

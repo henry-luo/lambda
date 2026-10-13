@@ -36,6 +36,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 |---------|-------------|--------|--------------|-----------------|
 | `ui.dtna` | `lambda.ui.dtna` | Experimental, partial native catalog | Ant-inspired components, collections, scoped tokens and native interaction; see [Lambda UI](Lambda_UI.md) | `lambda view test/ui/dtna_gallery.ls` |
 | `ui.bold` | `lambda.ui.bold` | Experimental, initial native subset | Neobrutalist components with thick borders, hard shadows, scoped tokens and shared native controls; see [bold UI](Lambda_UI_Bold.md) | `lambda view test/ui/bold_gallery.ls` |
+| `ui.wired` | `lambda.ui.wired` | Experimental, initial native subset | Hand-drawn SVG pencil outlines, paper surfaces, hatched progress, scoped tokens and native controls; see [wired UI](Lambda_UI_Wired.md) | `lambda view test/ui/wired_gallery.ls` |
 | `chart` | `lambda.chart.chart`, `lambda.chart.vega`, `lambda.chart.wordcloud` | Library | Declarative charts and weighted word clouds, rendered as SVG elements | No command of its own; `lambda render` and `lambda view` display a script whose result is a chart |
 | `map` | `lambda.map` | Library, initial offline subset | Native `<geomap>` viewports with typed GeoJSON, camera interaction, feature queries and vector export | `lambda render` and `lambda view` display a script whose result is a map |
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
@@ -84,6 +85,7 @@ The `lambda.*` root is reserved for everything Lambda ships (D7.2.4). Shipped pa
 | `lambda.<package>.<module>` | `<LAMBDA_HOME>/package/<package>/<module>.ls` |
 | `lambda.ui.dtna` | `<LAMBDA_HOME>/package/ui/dtna.ls` (explicit public module) |
 | `lambda.ui.bold` | `<LAMBDA_HOME>/package/ui/bold.ls` (explicit public module) |
+| `lambda.ui.wired` | `<LAMBDA_HOME>/package/ui/wired.ls` (explicit public module) |
 | `lambda.slide` | `<LAMBDA_HOME>/package/slide.ls` (explicit public module) |
 | `lambda.map` | `<LAMBDA_HOME>/package/map.ls` (explicit public module) |
 | `lambda.<package>.<dir>.<module>` | `<LAMBDA_HOME>/package/<package>/<dir>/<module>.ls` |
@@ -1359,6 +1361,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 | `chart` | `test/lambda/chart/` |
 | `ui.dtna` | `test/lambda/ui_dtna/`; native UI fixtures in `test/ui/dtna/` (`make test-ui-dtna`) |
 | `ui.bold` | `test/lambda/ui_bold/`; native controls in `test/ui/bold/` and `test/ui/bold_gallery.json` (`make test-ui-bold`) |
+| `ui.wired` | `test/lambda/ui_wired/`; native controls/geometry in `test/ui/wired/` and `test/ui/wired_gallery.json` (`make test-ui-wired`) |
 | `map` | `test/lambda/map/`; native rendering and input in `test/test_map_gtest.cpp`; PNG/SVG/PDF fixtures in `test/map/` (`make test-map`, `make test-map-export`) |
 | `graph` | `test/lambda/graph/mermaid/`, `test/lambda/graph/graphviz/`, `test/lambda/graph/structurizr/`; `test/lambda/graph_layout*.ls` and `test/lambda/graph_transform_*.ls` |
 | `math` | `test/lambda/math/` |

@@ -29,6 +29,7 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda/scene3d",
     "test/lambda/ui_dtna",
     "test/lambda/ui_bold",
+    "test/lambda/ui_wired",
     "test/lambda/map",
     "test/lambda/grammar",
     "test/demo/doom/tests",

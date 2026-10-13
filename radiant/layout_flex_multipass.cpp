@@ -1822,6 +1822,16 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         }
     }
 
+    // flex stretch can replace a content-sized item's height after its abspos
+    // children were laid out; publish that final percentage-height basis.
+    flex_for_each_final_content_item(flex_container, flex,
+        [&](ViewElement* item) {
+            ViewBlock* block = lam::view_require_block(item);
+            if (!layout_view_is_abs_or_fixed(block)) {
+                re_resolve_abs_children_vertical(lycon, block);
+            }
+        });
+
     flex_normalize_break_item_boxes(lycon, flex_container);
 
     heights_scope.end();
