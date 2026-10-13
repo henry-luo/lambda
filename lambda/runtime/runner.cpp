@@ -1920,6 +1920,17 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
 // ============================================================================
 
+#ifndef LAMBDA_NO_JS
+static void register_lambda_script_namespace(Runtime* runtime, Script* script) {
+    if (!script || script->is_main || !script->jit_context || !context || !context->heap ||
+            !js_runtime_state_thread_matches(context) || !js_input) return;
+    ModuleDescriptor* existing = module_get_for_runtime(runtime, script->reference);
+    if (existing && existing->initialized) return;
+    Item ns = module_build_lambda_namespace(script);
+    module_register_for_runtime(runtime, script->reference, "lambda", ns, script->jit_context);
+}
+#endif
+
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import) {
     log_info("Loading script: %s (is_import=%d)", script_path, is_import);
 
@@ -2346,12 +2357,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     // A Lambda behavior package can compile inside an initialized evaluator
     // without a JS realm. Its exports need no JS callable wrappers, whose
     // allocation requires the active realm's Input owner.
-    if (!new_script->is_main && context && context->heap &&
-            js_runtime_state_thread_matches(context) && js_input) {
-        Item ns = module_build_lambda_namespace(new_script);
-        module_register_for_runtime(
-            runtime, new_script->reference, "lambda", ns, new_script->jit_context);
-    }
+    register_lambda_script_namespace(runtime, new_script);
 
 #endif
 
@@ -2380,6 +2386,10 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
     Script* script = load_script(runtime, script_path, source, is_import);
     lambda_tier_set(was_tier);
     runtime->use_mir_direct = was_mir_direct;
+#ifndef LAMBDA_NO_JS
+    // cached MIR shells also need fresh exports in the importing Runtime (D5.4.3 / D8.5.1v7).
+    register_lambda_script_namespace(runtime, script);
+#endif
     return script;
 }
 

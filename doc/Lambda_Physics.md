@@ -104,7 +104,18 @@ Contact/sensor notifications are queued after solver execution as
 body IDs and collider IDs. Trace events use `contact-start`, `contact-end`,
 `sensor-enter` and `sensor-exit` type strings.
 
-Run the demonstration with:
+Open the demonstration gallery with:
+
+```sh
+./lambda.exe view test/demo/physics/index.ls
+```
+
+The gallery contains a 32-tile domino cascade, a zero-gravity compound-body
+chamber, a kinematic marble sorter with sensor counters, and a restitution
+comparison with native trajectory charts. Each has playback controls and an
+orbit camera. See the [demo guide](../test/demo/physics/README.md).
+
+The original minimal example is also available:
 
 ```sh
 ./lambda.exe view test/demo/physics/rigid.ls

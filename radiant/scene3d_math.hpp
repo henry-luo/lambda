@@ -17,6 +17,13 @@ inline bool scene3d_normalize(Scene3dVec* v) {
 inline Scene3dMatrix scene3d_identity() {
     Scene3dMatrix m = {}; m.v[0] = m.v[5] = m.v[10] = m.v[15] = 1; return m;
 }
+inline Scene3dMatrix scene3d_rotation_matrix(const double rotation[16],Scene3dVec position,Scene3dVec scale={1,1,1}) {
+    // animation rotation matrices are row-major; scene matrices use GLSL's column-major convention.
+    Scene3dMatrix matrix=scene3d_identity();const float scales[]={scale.x,scale.y,scale.z};
+    for(unsigned column=0;column<3;column++)for(unsigned row=0;row<3;row++)
+        matrix.v[column*4+row]=(float)rotation[row*4+column]*scales[column];
+    matrix.v[12]=position.x;matrix.v[13]=position.y;matrix.v[14]=position.z;return matrix;
+}
 inline Scene3dMatrix scene3d_multiply(const Scene3dMatrix& a, const Scene3dMatrix& b) {
     Scene3dMatrix m = {};
     for (unsigned c = 0; c < 4; c++) for (unsigned r = 0; r < 4; r++)

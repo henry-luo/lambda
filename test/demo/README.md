@@ -32,6 +32,11 @@ Paths in the table are relative to `test/demo/`. Viewer options follow the name:
 The games and Ringworld include an **Auto Play** button. Direct `lambda view`
 commands and individual test/replay commands remain available in each guide.
 
+The [physics playground](physics/README.md) contains four interactive native
+Scene3D experiments: a domino cascade, compound bodies in zero gravity, a
+marble sorter and a bounce comparison with trajectory charts. Open its gallery
+with `./lambda.exe view test/demo/physics/index.ls`.
+
 ## Readability extraction
 
 This demo replicates the functionality of [Mozilla's Readability](https://github.com/mozilla/readability) library using Lambda Script's functional programming capabilities and multi-format I/O system.

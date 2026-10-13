@@ -139,9 +139,8 @@ bool scene3d_physics_pose(Scene3dPhysics* state,DomElement* node,Scene3dMatrix* 
     if(!state||!state->world)return false;
     for(size_t i=0;i<state->scene.bindings.size();i++)if(state->scene.bindings[i].node==node){
         const auto& pose=state->published.bodies[i].pose;double q[4]={pose.rotation.x,pose.rotation.y,pose.rotation.z,pose.rotation.w},matrix[16];
-        if(!animation_quaternion_matrix(q,matrix))return false;*world=scene3d_identity();
-        for(unsigned j=0;j<16;j++)world->v[j]=(float)matrix[j];
-        world->v[12]=(float)pose.position.x;world->v[13]=(float)pose.position.y;world->v[14]=(float)pose.position.z;return true;
+        if(!animation_quaternion_matrix(q,matrix))return false;
+        *world=scene3d_rotation_matrix(matrix,{(float)pose.position.x,(float)pose.position.y,(float)pose.position.z});return true;
     }
     return false;
 }

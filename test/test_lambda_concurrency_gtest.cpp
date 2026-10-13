@@ -987,6 +987,27 @@ TEST_F(LambdaConcurrencyRuntime, SchedulerRunsRunnableTasksInFifoOrder) {
     EXPECT_EQ(lambda_scheduler_live_count(scheduler), 0);
 }
 
+TEST_F(LambdaConcurrencyRuntime, SharedLoopWakeRetainsTasksUntilTheirOwnerIsCurrent) {
+    int order[1] = {}, count = 0;
+    RecordFrame frame = {1, order, &count, {.item = i2it(11)}, NULL, ItemNull};
+    LambdaTask* task = lambda_task_create(scheduler, record_and_complete, frame_arg(&frame));
+    ASSERT_NE(task, nullptr);
+    EvalContext foreign = {};
+    ASSERT_TRUE(eval_context_shutdown(&eval));
+    ASSERT_TRUE(eval_context_init(&foreign));
+    // retiring a different document polls the same libuv loop and consumes this wake notification.
+    uv_run(lambda_uv_loop(), UV_RUN_NOWAIT);
+    EXPECT_EQ(lambda_scheduler_run_ready(scheduler), 0);
+    EXPECT_EQ(lambda_scheduler_run_one(scheduler), 0);
+    EXPECT_EQ(count, 0);
+    EXPECT_EQ(lambda_task_state(task), LAMBDA_TASK_RUNNABLE);
+    EXPECT_TRUE(eval_context_shutdown(&foreign));
+    ASSERT_TRUE(eval_context_init(&eval));
+    EXPECT_EQ(lambda_scheduler_run_ready(scheduler), 1);
+    EXPECT_EQ(count, 1);
+    EXPECT_EQ(lambda_task_result(task).item, i2it(11));
+}
+
 TEST_F(LambdaConcurrencyRuntime, SharedMapRetypeKeepsSiblingShapeWithoutJsRealm) {
     ASSERT_FALSE(js_realm_runtime_is_active());
     eval.pool = pool;

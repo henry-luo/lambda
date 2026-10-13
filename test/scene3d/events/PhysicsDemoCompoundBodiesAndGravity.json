@@ -1,0 +1,98 @@
+{
+  "name": "PhysicsDemoCompoundBodiesAndGravity",
+  "viewport": {
+    "width": 1120,
+    "height": 1000
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "globalThis.physicsDemo && physicsDemo.ready"
+    },
+    {
+      "type": "script",
+      "js": "physicsDemo.restart()"
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsDemo.state.tick === 0 && physicsDemo.state.bodies.length === 10"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 1040,
+      "height": 500,
+      "name": "initial"
+    },
+    {
+      "type": "script",
+      "js": "physicsDemo.action('pulse',false)"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.hypot(...physicsDemo.state.bodies[1].angular_velocity) > 0.4"
+    },
+    {
+      "type": "script",
+      "js": "physicsDemo.request({operation:'step',ticks:360})"
+    },
+    {
+      "type": "assert_script",
+      "js": "Math.abs(physicsDemo.state.bodies[1].quaternion[3] - 1) > 0.0001"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 1040,
+      "height": 500,
+      "reference": "initial",
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "script",
+      "js": "physicsDemo.beforeGravity = physicsDemo.state.bodies[1].position[1]; physicsDemo.action('gravity-on',false)"
+    },
+    {
+      "type": "script",
+      "js": "physicsDemo.request({operation:'step',ticks:120})"
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsDemo.state.bodies[1].position[1] < physicsDemo.beforeGravity"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#gravity-off"
+      }
+    },
+    {
+      "type": "script",
+      "js": "physicsDemo.request({operation:'step',ticks:2})"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#camera-top"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsDemo.state.tick === 482"
+    },
+    {
+      "type": "script",
+      "js": "physicsDemo.restart()"
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsDemo.state.tick === 0"
+    }
+  ]
+}

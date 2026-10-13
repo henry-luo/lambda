@@ -230,10 +230,7 @@ static bool scene3d_local(DomElement* node, Scene3dMatrix* matrix, Scene3dAnimat
     if(quaternion||animated_quaternion) {
         if(!animated_quaternion) for(unsigned i=0;i<4;i++) value.numbers[i]=q[i];
         double rotation_matrix[16];if(!animation_quaternion_matrix(value.numbers,rotation_matrix)) return false;
-        *matrix=scene3d_identity();const float scales[]={scale.x,scale.y,scale.z};
-        for(unsigned column=0;column<3;column++) for(unsigned row=0;row<3;row++)
-            matrix->v[column*4+row]=(float)rotation_matrix[row*4+column]*scales[column];
-        matrix->v[12]=position.x;matrix->v[13]=position.y;matrix->v[14]=position.z;
+        *matrix=scene3d_rotation_matrix(rotation_matrix,position,scale);
     } else *matrix = scene3d_transform(position, rotation, scale);
     return true;
 }

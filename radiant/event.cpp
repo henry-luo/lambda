@@ -12237,7 +12237,7 @@ static void navigation_async_work(uv_work_t* request) {
                                 &job->host_config, nullptr, true);
     // The document and its retained evaluator may cross threads only after
     // the worker releases its quiescent TLS binding (D5.4.1).
-    if (context && !eval_context_shutdown(context)) {
+    if (!navigation_release_evaluator_for_document_load()) {
         log_error("navigation-async: worker could not release document evaluator");
     }
     input_context = nullptr;

@@ -1,0 +1,98 @@
+{
+  "name": "PhysicsDemoDominoCascadeAndControls",
+  "viewport": {
+    "width": 1120,
+    "height": 1000
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "globalThis.physicsDemo && physicsDemo.ready"
+    },
+    {
+      "type": "script",
+      "js": "physicsDemo.restart()"
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsDemo.state.tick === 0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#launch"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsDemo.playing === true"
+    },
+    {
+      "type": "script",
+      "js": "physicsDemo.restart()"
+    },
+    {
+      "type": "script",
+      "js": "physicsDemo.action('launch',false)"
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsDemo.state.tick === 0 && physicsDemo.state.bodies[1].velocity[0] > 0"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 1040,
+      "height": 500,
+      "name": "initial"
+    },
+    {
+      "type": "script",
+      "js": "physicsDemo.request({operation:'step',ticks:720})"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('metric-primary').textContent === '32 / 32'"
+    },
+    {
+      "type": "assert_script",
+      "js": "Number(document.getElementById('metric-secondary').textContent) > 31"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 1040,
+      "height": 500,
+      "reference": "initial",
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#camera-top"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsDemo.state.tick === 720"
+    },
+    {
+      "type": "collect_gc",
+      "count": 2
+    },
+    {
+      "type": "script",
+      "js": "physicsDemo.restart()"
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsDemo.state.tick === 0 && document.getElementById('metric-primary').textContent === '0 / 32'"
+    }
+  ]
+}

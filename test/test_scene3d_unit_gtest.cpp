@@ -4,6 +4,7 @@
 #include "../radiant/animation_mixer.hpp"
 #include "../radiant/scene3d_animation.hpp"
 #include "../radiant/scene3d_physics.hpp"
+#include "../lib/physics/physics_math.h"
 #include "../radiant/svg_animation.hpp"
 #include "../radiant/radiant.hpp"
 #include "../radiant/layout.hpp"
@@ -374,6 +375,25 @@ TEST_F(Scene3dTest, PhysicsBatchFaultPublishesOnlyCompletedTicks) {
     EXPECT_FALSE(scene3d_physics_advance(scene3d_physics(root),3,&result,&error));
     ASSERT_EQ(result.tick,2u);ASSERT_EQ(result.body_count,1u);
     EXPECT_DOUBLE_EQ(result.bodies[0].pose.position.x,1.5e308);
+}
+
+TEST_F(Scene3dTest, PhysicsRenderRotationMatchesColliderAxes) {
+    DomElement* config=element("physics",root);attr(config,"gravity","0 0 0");
+    DomElement* body=element("rigid-body",root);attr(body,"id","rotating");attr(body,"type","dynamic");
+    attr(body,"rotation","0 0 -0.12");attr(body,"position","0 1 0");attr(body,"angular-velocity","0 1 0");
+    DomElement* collider=element("collider",body);attr(collider,"id","shape");attr(collider,"shape","box");
+    mesh("box","#ff0000","basic",body);ASSERT_NE(snapshot(),nullptr);
+    auto* physics=scene3d_physics(root);PhysicsState state={};PhysicsError error={};
+    for(unsigned sample=0;sample<2;sample++) {
+        ASSERT_TRUE(scene3d_physics_advance(physics,sample?60:0,&state,&error));Scene3dMatrix rendered;
+        ASSERT_TRUE(scene3d_physics_pose(physics,body,&rendered));
+        // compare rendered axes to the independent vector rotation used by native collision detection.
+        for(unsigned axis=0;axis<3;axis++) {
+            PhysicsVec point=pbase(axis),expected=padd(state.bodies[0].pose.position,prot(state.bodies[0].pose.rotation,point));
+            Scene3dVec actual=scene3d_point(rendered,{(float)point.x,(float)point.y,(float)point.z});
+            EXPECT_NEAR(actual.x,expected.x,1e-6);EXPECT_NEAR(actual.y,expected.y,1e-6);EXPECT_NEAR(actual.z,expected.z,1e-6);
+        }
+    }
 }
 
 TEST_F(Scene3dTest, DepthOnlyOccluderPreservesBackgroundAndHidesRearGeometry) {

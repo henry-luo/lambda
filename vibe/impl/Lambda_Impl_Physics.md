@@ -69,6 +69,14 @@ objects and Promise carriers. Missing properties become `undefined` while
 present `null` values stay `null`. Promise reaction construction reserves all
 seven exact roots, including the asynchronous domain (**D5.3.3**).
 
+The expanded demo suite exposed a pose-conversion defect: animation quaternion
+matrices use row-major storage, while Scene3D uses column-major matrices. The
+physics adapter copied the former directly, reversing visible rotations while
+collision geometry retained the correct orientation. The adapter and authored
+quaternion path now share one conversion helper. A native test compares
+rendered axes to the independent vector rotation used by collision detection,
+both initially and after stepping (**S12.1.5v2**).
+
 ## Verification
 
 macOS ARM64, 2026-10-13. Debug and release builds completed; the native core also passes a strict C11 syntax check.
@@ -111,3 +119,88 @@ The final falling-box scene was also captured and visually inspected.
 
 Scratch logs, the release measurement and the preview are under
 `temp/physics/` (not committed).
+
+### Expanded playground
+
+Four additional experiments share native scene descriptions, controls and a
+responsive gallery in `test/demo/physics/`: a 32-tile domino circuit, nine
+compound bodies in a switchable-gravity chamber, an 18-marble sorter with a
+kinematic paddle and unique sensor arrivals, and a five-material bounce
+comparison with batch-generated height curves. Pure traces and live scenes
+use the same descriptions (**S12.1.1v2 / S12.1.5v2**). The sphere resource
+constructor is shared with Ringworld.
+
+Validation on macOS ARM64, 2026-10-13:
+
+- Six physics golden fixtures, including deterministic checks of all four
+  experiments, pass on `auto`, `interp` and `jit`; a JIT run with forced
+  collection and freed-memory poisoning also passes.
+- Four permanent viewer replays pass all 66 events. The existing rigid-body
+  replay and Ringworld's animation/camera replay also pass; the broader
+  Scene3D viewer suite passes 54/54.
+- Scene3D native tests pass 28/28, including the rendered/collider-axis
+  regression. Radiant integer-cast lint and whitespace checks pass.
+- Desktop and 375-pixel gallery captures pass and were visually inspected,
+  along with the experiment captures. The narrow grid uses zero-minimum
+  tracks so intrinsic scene widths cannot enlarge its column.
+- A stable executable rerun passes the 51-page snapshot and WPT input-event
+  checks (20 passed, 12 unsupported cases skipped). The layout baseline has
+  2946 passes, 347 accepted partial matches and one Markdown failure, so the
+  full Radiant gate remains not green. No baseline was changed.
+- The full native viewer run passes 183/185. Its two photo-editor failures
+  both pass a focused rerun against the newest shared executable; that build
+  changed while the earlier frozen executable was being tested.
+
+The initial broad run lost the shared `lambda.exe` during concurrent builds;
+reruns use a stable copy. A sandboxed page snapshot also failed resource
+loading; its normal-access rerun passes. Demo logs and captures are under
+`temp/physics-demos/`, with tier and focused viewer logs under `temp/physics/`.
+
+### Gallery navigation and controls
+
+The 2026-10-14 follow-up reproduces controls failing after opening an experiment
+from the gallery. Retiring the old document polls the shared libuv loop while
+its evaluator is current. A new document's wake callback previously dequeued
+its task before the activation rejected that foreign owner. Schedulers now
+retain runnable work until their owning `EvalContext` is current
+(**D5.4.1**). Navigation workers release the derived JS binding alongside the
+evaluator before returning to the worker pool.
+
+Host eval initialization also retains pending Promise and next-tick jobs when
+no timer exists yet (**D6.3.1**). Otherwise the assertion turn could discard
+the initial native read's completion before the demo started telemetry.
+Repeated navigation exposed a separate cache-hit path: a fresh runtime kept
+the Lambda import's loading namespace because export publication ran only
+after compilation. One shared publication helper now fills uninitialized
+namespaces after cross-language loads, including cached MIR shells
+(**D5.4.3 / D8.5.1v7**).
+
+The four experiment replays now use native mouse clicks for their buttons.
+A fifth replay visits every experiment from the gallery, verifying start,
+pause, reset, stepping, camera controls, gravity changes and native-clock
+playback in 52 events. It passes all 23 assertions on the rebuilt shared
+executable and in an isolated checkout. A native scheduler regression checks
+that a foreign-loop wake leaves the task queued and that its owner can then
+run it. The focused concurrency suite passes 15/15; the JavaScript baseline
+passes 504/504 and the AST harness passes 181/181.
+
+Final verification also passes a 48-event window replay with real elapsed time
+(20 assertions), all five permanent physics viewer cases (118 events), 28/28
+Scene3D native tests, 312/312 MIR forced-GC cases, 2112/2112 input-parser cases,
+141/141 structured cases, 921/921 math SVG cases and the Test262 preflight.
+The prior MIR music-layout timeout did not reproduce in this full sweep.
+Integer-cast lint and whitespace checks pass.
+
+The required full gates remain not green. Concurrent builds removed the shared
+executable during Lambda's first run; a stable-copy rerun passes 1469/1472
+cases, with `typed_array_blur_running`, `edit_view_only` and the newly added
+`eps_errors` still failing. The two DTNA cases excluded from that rerun had
+already passed in the full run. Radiant retains the Markdown layout failure.
+Its four document-viewer failures pass against the newest executable, and the
+eight initial photo failures also pass there; two newly added asynchronous
+photo export cases still fail. The unfiltered concurrency runner first fails
+`JubeDom4.OrdinalParityCoversDeclaredMembersAndHusks`, then reports owner-binding
+failures in later fixtures; the 15 focused scheduler cases pass separately.
+The blur fixture passes in the isolated checkout containing these fixes, and
+the older executable also reproduces the editor fixture's math-source failure.
+No golden or test was changed to conceal these failures.
