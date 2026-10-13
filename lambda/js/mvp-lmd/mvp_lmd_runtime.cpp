@@ -441,12 +441,13 @@ extern "C" Item mvp_lmd_array_resize(Item owner, int64_t length) {
     return held.get();
 }
 
-static Item flatten_into(Item output, Item source, double depth, int nesting, int64_t length = -1) {
+static Item flatten_into(Item output, Item source, double depth, int nesting, int64_t* destination, int64_t length = -1) {
     // nested arrays remain roots across destination growth; holes have no flattened element.
     if (nesting > 512) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     Rooted<Item> target(roots, output), input(roots, source), element(roots, ItemNull);
+    uint64_t home = 0;
     if (length < 0) {
         Item extent = mvp_lmd_sequence_length(input.get());
         if (item_is_error(extent)) return extent;
@@ -456,15 +457,15 @@ static Item flatten_into(Item output, Item source, double depth, int nesting, in
         Item value = mvp_lmd_array_index_property(input.get(), i, ItemNull, LMD_PROP_PRESENT);
         if (item_is_error(value)) return value;
         if (value.item == ITEM_JS_DELETED_SENTINEL) continue;
-        element.set(value);
+        element.set(lambda_item_adopt_scalar_home(value, &home));
         Item nested = depth > 0 ? mvp_lmd_array_is_array(element.get()) : Item{.item = ITEM_FALSE};
         if (item_is_error(nested)) return nested;
         Item result;
         if (nested.item == ITEM_TRUE)
-            result = flatten_into(target.get(), element.get(), depth - 1, nesting + 1);
+            result = flatten_into(target.get(), element.get(), depth - 1, nesting + 1, destination);
         else {
-            if (target.get().array->length >= UINT32_MAX) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
-            result = mvp_lmd_array_store(target.get(), target.get().array->length, value);
+            if (*destination >= 9007199254740991LL) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+            result = mvp_lmd_array_index_property(target.get(), (*destination)++, element.get(), LMD_PROP_CREATE_DATA);
         }
         if (item_is_error(result)) return result;
     }
@@ -481,7 +482,8 @@ extern "C" Item mvp_lmd_array_flatten(Item source, double depth, int64_t length)
     }
     Item output = mvp_lmd_array_species_create(input.get(), 0);
     if (item_is_error(output)) return output;
-    return flatten_into(output, input.get(), isnan(depth) ? 0 : fmax(0, trunc(depth)), 0, length);
+    int64_t destination = 0;
+    return flatten_into(output, input.get(), isnan(depth) ? 0 : fmax(0, trunc(depth)), 0, &destination, length);
 }
 
 extern "C" double mvp_lmd_number_pow(double base, double exponent) {

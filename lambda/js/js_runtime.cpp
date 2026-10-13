@@ -10412,21 +10412,40 @@ extern "C" void js_runtime_owned_cache_destroy_context(JsRuntimeState* state) {
 }
 
 extern "C" Item js_build_template_object(Item* cooked, Item* raw, int count) {
-    Item obj = js_array_new(count);
-    Item raw_arr = js_array_new(count);
+    static const JsTemplateObjectOps ops = {
+        js_array_new,
+        [](Item array, int index, Item value) { return js_elements_set(array, Item{.item = i2it(index)}, value); },
+        [](Item object, Item raw) {
+            JsPropertyDescriptor descriptor = {};
+            descriptor.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
+            descriptor.value = raw;
+            js_pd_set_configurable(&descriptor, false);
+            return js_define_own_property_from_descriptor(object, "raw", 3, &descriptor, true, false);
+        },
+        js_object_freeze
+    };
+    return js_build_template_object_with_ops(cooked, raw, count, &ops);
+}
+extern "C" Item js_build_template_object_with_ops(Item* cooked, Item* raw, int count, const JsTemplateObjectOps* ops) {
+    // both arrays must survive allocation, descriptor construction and freezing in either JS value model.
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> object(roots, ops->array_new(count)), raw_array(roots, ItemNull);
+    if (item_is_error(object.get())) return object.get();
+    raw_array.set(ops->array_new(count));
+    if (item_is_error(raw_array.get())) return raw_array.get();
     for (int i = 0; i < count; i++) {
-        Item key = (Item){.item = i2it(i)};
-        js_elements_set(obj, key, cooked[i]);
-        js_elements_set(raw_arr, key, raw[i]);
+        Item result = ops->store(object.get(), i, cooked[i]);
+        if (item_is_error(result)) return result;
+        result = ops->store(raw_array.get(), i, raw[i]);
+        if (item_is_error(result)) return result;
     }
-    Item raw_key = js_name_item("raw", 3);
-    js_set_key_default(obj, raw_key, raw_arr);
-    js_mark_non_enumerable(obj, raw_key);
-    js_mark_non_writable(obj, raw_key);
-    js_mark_non_configurable(obj, raw_key);
-    js_object_freeze(raw_arr);
-    js_object_freeze(obj);
-    return obj;
+    Item result = ops->define_raw(object.get(), raw_array.get());
+    if (item_is_error(result)) return result;
+    result = ops->freeze(raw_array.get());
+    if (item_is_error(result)) return result;
+    result = ops->freeze(object.get());
+    return item_is_error(result) ? result : object.get();
 }
 
 extern "C" Item js_build_template_object_cached(Item* cooked, Item* raw, int count, int64_t site_id) {

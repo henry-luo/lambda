@@ -389,8 +389,8 @@ static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node,
         return;
     }
 
-    if (ctx->in_async && strcmp(name, "await") == 0) {
-        ee_error(ctx, node, "'await' cannot be used as an identifier in async functions");
+    if ((ctx->in_async || ctx->tp->is_es_module) && strcmp(name, "await") == 0) {
+        ee_error(ctx, node, "'await' cannot be used as an identifier in async functions or modules");
         return;
     }
     if (ctx->in_generator && strcmp(name, "yield") == 0) {
@@ -431,9 +431,9 @@ static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node,
                 if (reserved_hit) {
                     ee_error(ctx, node, "'%s' (via unicode escape) is a reserved word", normalized);
                 }
-                // preserve binding validation; references reserve contextual keywords only in their active context.
-                else if (contextual_hit && (binding_position || ctx->in_async ||
-                        ctx->in_generator || ctx->in_strict)) {
+                // strictness reserves yield, but await references/labels require an async or module context.
+                else if (contextual_hit && (binding_position || (strcmp(normalized, "await") == 0
+                        ? ctx->in_async || ctx->tp->is_es_module : ctx->in_generator || ctx->in_strict))) {
                     ee_error(ctx, node, "'%s' may not contain escape sequences", normalized);
                 }
             }
@@ -718,8 +718,15 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             js_ast_visit_children(node, walk_expression_child, ctx);
             break;
 
+        case JS_AST_NODE_TAGGED_TEMPLATE: {
+            JsAstNode* tag = ((JsTaggedTemplateNode*)node)->tag;
+            // grouping ends an optional chain; the outer tagged span then starts before its tag node.
+            if (tag && node->source_span.start_byte == tag->source_span.start_byte && js_ast_has_optional_chain(tag))
+                ee_error(ctx, node, "An optional chain cannot be a template tag");
+            js_ast_visit_children(node, walk_expression_child, ctx);
+            break;
+        }
         case JS_AST_NODE_TEMPLATE_LITERAL:
-        case JS_AST_NODE_TAGGED_TEMPLATE:
             js_ast_visit_children(node, walk_expression_child, ctx);
             break;
 
@@ -947,6 +954,15 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
 
         case JS_AST_NODE_LABELED_STATEMENT: {
             JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
+            // labels have identifier restrictions even when the labelled statement is empty.
+            if (ls->label) {
+                JsIdentifierNode identifier = {};
+                identifier.node_type = AST_NODE_IDENT;
+                identifier.source_span = {node->source_span.start_byte, node->source_span.start_byte + (uint32_t)ls->label_len};
+                identifier.name = name_pool_create_len(ctx->tp->name_pool, ls->label, ls->label_len);
+                if (!identifier.name) ee_error(ctx, node, "Cannot retain statement label");
+                else check_identifier_reserved(ctx, (JsAstNode*)&identifier, false);
+            }
             // v17: labeled class/lexical declarations are SyntaxError
             if (ls->body) {
                 if (ls->body->node_type == AST_NODE_CLASS) {
@@ -962,11 +978,11 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                 // (for continue target validation per ContainsUndefinedContinueTarget)
                 // chained labels share the underlying iteration's continue target.
                 AstNode* target = ls->body;
-                while (target->node_type == JS_AST_NODE_LABELED_STATEMENT)
+                while (target && target->node_type == JS_AST_NODE_LABELED_STATEMENT)
                     target = ((JsLabeledStatementNode*)target)->body;
-                bool is_iteration = target->node_type == AST_NODE_LOOP ||
+                bool is_iteration = target && (target->node_type == AST_NODE_LOOP ||
                                     target->node_type == AST_NODE_FOR_IN_STAM ||
-                                    target->node_type == AST_NODE_FOR_OF_STAM;
+                                    target->node_type == AST_NODE_FOR_OF_STAM);
                 int label_mark = ee_name_ledger_mark(&ctx->names);
                 if (ls->label) {
                     uint8_t kind = EARLY_ERROR_NAME_LABEL;
