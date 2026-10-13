@@ -1,7 +1,7 @@
 # Lambda Proposal — DOM Reconciliation at the Presentation Boundary
 
-> **Status:** proposal for review, 2026-10-13. No ruling is changed by this document; §6 drafts the **D4.5.3v2** text that would be ratified if the proposal is accepted. **Decided 2026-10-13 (user):** a retained element whose attributes changed is patched in place (§8 Q3); the other questions remain open.
-> **Formal linkage:** **D4.5.3** (UI/view-mode DOM construction deep-copies ordinary Elements), **D4.5.1v4** / **D4.5.2** (presentation lifetime and the runtime boundary), **S12.1.3** (pure template bodies), **S9.1.4** (state lives in view state).
+> **Status:** proposal for review, 2026-10-13. **Decided 2026-10-13 (user):** retention is fully embraced and needs no ruling exception, because **D4.5.3v2** governs only how DOM is built from Lambda values (§6, §8 Q1); a retained element whose attributes changed is patched in place (§8 Q3). Q2 and Q4 remain open.
+> **Formal linkage:** **D4.5.3v2** (DOM construction from Lambda values deep-copies; retention downstream is embraced), **D4.5.1v4** / **D4.5.2** (presentation lifetime and the runtime boundary), **S12.1.3** (pure template bodies), **S9.1.4** (state lives in view state).
 > **Working-design linkage:** [Reactive UI](Lambda_Design_Reactive_UI.md) §5.3 (runtime identity), §9.4 (no-op elision), §9.5 (observer vs tree diff), §10.1–10.3 (incremental presentation), §18.3 (memoization, keyed lists).
 > **Scope:** how an incremental template re-render turns a regenerated result into DOM. Evaluation, render-map dependency tracking and template state are unchanged.
 
@@ -9,7 +9,7 @@
 
 ## 1. Problem
 
-Under **D4.5.3**, every incremental re-render deep-copies the regenerated result into fresh DOM. `rebuild_lambda_doc_incremental` (`radiant/cmd_layout.cpp`) then:
+Today every incremental re-render deep-copies the regenerated result into fresh DOM, building it the way **D4.5.3v2** builds DOM from Lambda values, even where the existing DOM could be kept. `rebuild_lambda_doc_incremental` (`radiant/cmd_layout.cpp`) then:
 - splices the new subtree in place of the old one;
 - migrates view state, frame requests, pointer capture, focus events, navigation requests and geomap ownership from old nodes to structurally corresponding new ones (`layout_preserve_rebuilt_owners`);
 - cascades the whole new subtree;
@@ -27,9 +27,9 @@ The doc viewer shows the cost. Its app template owns the file tree, so any chang
 
 A file open changes two rows' `selected` class and the pane, yet it pays for a fresh copy, cascade and layout of every row. Moving the selection highlight into row-local state would fix this one app. It would not help folder toggles, and every application would have to discover and apply the same remedy.
 
-## 2. What D4.5.3 protects
+## 2. What construction guarantees
 
-Any change must keep these properties, which motivated the ruling:
+Any change must keep these properties, which **D4.5.3v2** establishes for DOM built from Lambda values:
 
 1. **One occurrence, one native subtree.** Reusing one Lambda value in several slots must produce independent native nodes and child chains. A value never shares DOM between occurrences.
 2. **Lambda value semantics are untouched.** The copy happens at the DOM boundary; evaluation keeps ordinary sharing and ownership-based copy elision.
@@ -88,22 +88,18 @@ On retained-row and pane-only layouts measured this session, both should drop fr
 
 ## 6. Ruling impact
 
-D4.5.3 says construction deep-copies. Retaining an earlier copy is not a fresh copy, but it keeps every property in §2: the retained subtree is the same occurrence in the same slot, never shared with another. Proposed revision:
-
-> **D4.5.3v2** UI/view-mode DOM construction deep-copies ordinary Elements and their content through MarkBuilder, including values already owned by the document arena. A regeneration may instead retain an occurrence's existing native subtree when no imperative edit has touched it since it was built, patching in place any element whose tag is unchanged but whose attributes or children differ from the regenerated result; the retained subtree is rebound to the new result. Each presentation occurrence owns its native parent and sibling links. Normal Lambda evaluation retains ordinary value sharing and ownership-based copy elision; rooted callables and native handles keep their existing identity. DOM copies and retained occurrences preserve the evaluator's source/result mapping.
-
-The Reactive UI §9.4 text would gain the per-subtree case and the pristine condition.
+None needed. The user ruled on 2026-10-13 that D4.5.3 covers how DOM is constructed from Lambda script and nothing downstream (layout, rendering, retention), and that retaining an existing subtree should be fully embraced. **D4.5.3v2** now states that scope: *copy at construction, retain downstream*. Retention also keeps every property in §2, because a retained subtree is the same occurrence in the same slot, never shared with another. Reactive UI §5.3 and §10.1 carry the clarified wording; §9.4 would gain the per-subtree case and the pristine condition once Q2 is settled.
 
 ## 7. Alternatives considered
 
 - **Row-local state in each application.** This was applied to the doc pane on 2026-10-13. It needs no engine change, but each app must restructure, and structural changes such as folder toggles still re-render everything below the owner.
-- **Template memoization** (Reactive UI §18.3). Skipping evaluation of unchanged child templates is complementary. It saves evaluation, but its output is still copied under D4.5.3 whenever an ancestor re-renders.
+- **Template memoization** (Reactive UI §18.3). Skipping evaluation of unchanged child templates is complementary. It saves evaluation, but without retention its output is still copied afresh whenever an ancestor re-renders.
 - **Whole-result elision only.** Implemented 10-11 and replaced 10-12; it never helps a partial change.
 - **Whole-page virtual DOM diff.** Rejected by §9.5; reconciliation stays limited to regenerated results.
 
 ## 8. Questions for review
 
-1. Is retaining an existing occurrence consistent with the intent of D4.5.3, given the draft v2 wording in §6?
+1. ~~Is retaining an existing occurrence consistent with the intent of D4.5.3?~~ **Decided 2026-10-13 (user): yes, and fully embraced.** D4.5.3 governs DOM construction from Lambda values only; **D4.5.3v2** states that scope (§6).
 2. Is "no imperative edit since built" the right condition for reuse, or should any re-render of a subtree that has seen an imperative edit since build reset it, as today?
 3. ~~Should rule 2 also patch changed attributes in place on a pristine shell, such as a row's `class`?~~ **Decided 2026-10-13 (user): yes.** Rule 2 patches them; §4.3's mutation-path invalidation restyles the patched elements.
 4. What phasing do you want? Suggested:

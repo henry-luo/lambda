@@ -352,16 +352,9 @@ their observable retention policy.
 
 ### 5.3 Runtime identity and durable identity
 
-**Ordinary markup occurrences — ruled 2026-10-11 (D4.5.3).** Only UI/view-mode
-DOM construction deep-copies ordinary Elements and their content with
-MarkBuilder, even when already in the document arena. Reusing one SVG or HTML
-value in several slots therefore produces independent native nodes and child
-chains. Normal Lambda evaluation retains value sharing and the existing
-ownership-based copy optimization. Rooted callables and native handles retain
-their identity. Copying at the DOM boundary preserves template source/result
-keys for event dispatch and regeneration. This settles ordinary markup reuse;
-repeated stateful template applications and durable addressing remain the open
-questions below.
+**Ordinary markup occurrences — ruled 2026-10-11, scope clarified 2026-10-13 (D4.5.3v2).** Only UI/view-mode DOM construction deep-copies ordinary Elements and their content with MarkBuilder, even when already in the document arena. Reusing one SVG or HTML value in several slots therefore produces independent native nodes and child chains. Normal Lambda evaluation retains value sharing and the existing ownership-based copy optimization. Rooted callables and native handles retain their identity. Copying at the DOM boundary preserves template source/result keys for event dispatch and regeneration. This settles ordinary markup reuse; repeated stateful template applications and durable addressing remain the open questions below.
+
+The ruling covers how DOM is built from Lambda values and nothing downstream. It does not ask a regeneration to rebuild its whole result: an existing occurrence's subtree may be kept and patched in place to present the new result (§10.1), and style, layout and paint reuse every retained structure that is still valid. *Copy at construction, retain downstream.* Retention is the preferred path, not a tolerated exception ([DOM Reconciliation proposal](Lambda_Proposal_DOM_Reconciliation.md)).
 
 Live source identity supports state lookup and result ownership during a session.
 Stable source paths are the identity spine for persistence and reconstruction
@@ -742,11 +735,7 @@ entire event pipeline or for React's behavior.
 
 ### 10.1 Replacing only affected content
 
-Changed result subtrees replace corresponding DOM subtrees. Unchanged DOM,
-resolved styles, and layout results remain reusable. The replacement must preserve
-the containing order and parent relation and publish the new source/result
-association. Fragment ranges may need a broader correctness fallback than a
-single-element replacement.
+Changed result content updates the corresponding DOM: an existing occurrence is kept and patched in place where it can present the new result, and only content that cannot be patched is replaced by a fresh copy (**D4.5.3v2** governs that copy; it does not require replacing what can be kept). Unchanged DOM, resolved styles, and layout results remain reusable, and retained-layout paths (block shift reuse, retained flex items) depend on that. A replacement or patch must preserve the containing order and parent relation and publish the new source/result association. Fragment ranges may need a broader correctness fallback than a single-element replacement.
 
 Full rebuild remains the correctness path for initial presentation or when the
 change cannot safely be expressed as a local patch. Missing ownership/location
@@ -1273,6 +1262,7 @@ not lost. Struck wording is historical and is not a current ruling.
 | ~~Retaining a runtime makes arbitrary persistent pointers from presentation into its heap safe; copying is unnecessary.~~ | Borrow to read; document ownership or registered roots to keep (**D4.5.2**) |
 | ~~Source parenthood can be identified uniquely from allocation ownership.~~ | Shared source versions require document/version/path context (§6.4) |
 | ~~Every reactive event requires full DOM, CSS, layout, and paint reconstruction.~~ | Local replacement, invalidation, no-op elision, and safe escalation are separate stages (§10) |
+| ~~D4.5.3 requires every regeneration to deep-copy its whole result into fresh DOM, so retained DOM cannot carry style and layout across a re-render.~~ | **D4.5.3v2**: the copy governs construction only; a regeneration keeps and patches existing occurrences, and downstream stages reuse what stays valid (§5.3, §10.1) |
 | ~~Subtree layout must be implemented by detaching and recreating an isolated formatting context.~~ | Dirty-path layout can reuse valid context and unaffected siblings; arbitrary isolation remains conditional (§10.3) |
 | ~~A glyph cache must retain vector shape handles.~~ | Reuse the rendering data appropriate to the renderer and configuration (§10.5) |
 | ~~Selective clearing alone means only dirty content is rendered.~~ | Clearing, scene traversal, and paint culling are independent; overflow/effects require correct bounds (§10.4) |
