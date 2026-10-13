@@ -2,16 +2,11 @@ import dom
 import c: lambda.ui.core.component
 import catalog: .catalog
 import theme: .tokens
+import shared: lambda.ui.core.theme
 
-pub fn direction(props, owner) bool^ {
-    if (not c.enum_valid(props.direction,["ltr","rtl"])^) raise c.fail(owner,"invalid direction","clay")
-    else true
-}
+pub fn direction(props, owner) bool^ => shared.direction(props,owner,"clay")^
 pub fn provider(props, child) element^ {
-    let names = c.properties(props,[*c.common_props,"tokens","direction","disabled"],"config-provider",true,"clay")^
-    let flags = c.boolean_props(props,["disabled"],"config-provider","clay")^
-    let valid = direction(props,"config-provider")^
-    let tokens = theme.resolve(c.option(props,"tokens",{}))^;
+    let valid = shared.provider(props,"clay",theme.resolve)^;
     <clay.config_provider *:props,*c.children(child)>
 }
 

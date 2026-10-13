@@ -1,0 +1,78 @@
+{
+  "name": "blade component forge presents shared and fantasy widgets",
+  "html": "test/ui/blade_components.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 4400
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".blade-panel"
+      },
+      "count": 7
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#forge-table tbody tr"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_state",
+      "target": {
+        "selector": "#forge-cooldown"
+      },
+      "state": ":disabled",
+      "value": true
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#forge-health"
+      },
+      "attribute": "aria-valuenow",
+      "equals": "840"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#forge-frost"
+      },
+      "property": "border-color",
+      "equals": "rgb(120, 180, 212)"
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_blade/components.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#forge-tabs-item-1"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#forge-tree"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#forge-notice .dtna-alert-close"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#forge-notice"
+      },
+      "count": 0
+    }
+  ]
+}

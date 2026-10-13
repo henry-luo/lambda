@@ -1,0 +1,1 @@
+[["64 unique components", true], ["all 58 shared contracts rendered", true], ["RPG widgets available", true], ["18 original vector icons", true], ["vectors scale without sprites", true], ["icons expose accessible labels", true], ["shared UI icon set retained", true], ["password and search aliases", true]]

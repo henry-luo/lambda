@@ -1,5 +1,6 @@
 // ordinary shipped facade; presentation stays pure and handlers own effects (D7.2.4; S12.1.3).
 import c: lambda.ui.core.component
+import shell: lambda.ui.core.presentation
 import theme: .wired.tokens
 import styles: .wired.style
 import contract: .wired.contract
@@ -18,9 +19,7 @@ pub fn render(root) {
 pub fn page(root, options = {}) element^ {
     let valid = contract.validate('page',options)^
     let variables = theme.variables(c.option(options,"tokens",{}))^;
-    <html lang:c.option(options,"locale","en-US"),dir:c.text(c.option(options,"direction","ltr")),
-        <head <meta charset:"UTF-8"> <title c.option(options,"title","Lambda UI · wired")> <style styles.css>>
-        <body style:"margin:0;",<div class:"wired-root",style:variables,*c.children(render(root)^)>>>
+    shell.page(c.children(render(root)^),options,"wired",variables,styles.css,"wired-root")
 }
 view wired_page: <wired.page> { page(content(~),c.props(~))^ }
 

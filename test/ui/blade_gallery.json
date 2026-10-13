@@ -1,0 +1,105 @@
+{
+  "name": "blade_gallery high resolution fantasy equipment and abilities",
+  "html": "test/ui/blade_gallery.ls",
+  "viewport": {
+    "width": 1376,
+    "height": 1100
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".blade-root"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#blade-inventory .blade-item-slot"
+      },
+      "count": 16
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#blade-health"
+      },
+      "attribute": "aria-valuenow",
+      "equals": "840"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#blade-mana"
+      },
+      "attribute": "aria-valuemax",
+      "equals": "500"
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_blade/gallery.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blade-item-2"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#blade-item-2"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#blade-selection"
+      },
+      "equals": "Warden's helm"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blade-cast-fire"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#blade-last-action"
+      },
+      "equals": "Casting fire."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blade-cast-heal"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#blade-health"
+      },
+      "attribute": "aria-valuenow",
+      "equals": "920"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blade-journal"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#blade-last-action"
+      },
+      "equals": "Journal opened. The path to Ashenvale continues."
+    }
+  ]
+}

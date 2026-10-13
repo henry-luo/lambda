@@ -1,7 +1,9 @@
 // ordinary source theme facade; native ownership and view state stay in the shared engine (D7.2.4; D7.2.5).
 import c: lambda.ui.core.component
+import shell: lambda.ui.core.presentation
 import base: lambda.ui.dtna
 import catalog: .clay.catalog
+import shared: lambda.ui.core.catalog
 import theme: .clay.tokens
 import styles: .clay.style
 import presentation: .clay.presentation
@@ -11,21 +13,12 @@ pub fn stylesheet() string => styles.css
 pub fn component_names() array => [*catalog.kinds(),"config-provider"]
 pub fn icon_names() array => base.icon_names()
 pub fn palette(seed) array^ => base.palette(seed)^
-pub fn render(root) any^ {
-    if (root is array) [for (child in root) render(child)^] else (
-        let known = if (root is element and starts_with(c.text(name(root)),"clay.") and
-            not contains(["page","config-provider",*catalog.kinds()],c.text(c.kind(root))))
-            raise c.fail(c.kind(root),"unknown component","clay") else true,
-        c.render(root)^
-    )
-}
+pub fn render(root) any^ => shared.render(root,"clay",["page",*component_names()])^
 pub fn page(root, options = {}) element^ {
     let names = c.properties(options,["tokens","title","locale","direction"],"page",false,"clay")^
     let valid = presentation.direction(options,"page")^
     let variables = theme.variables(c.option(options,"tokens",{}))^;
-    <html lang:c.option(options,"locale","en-US"),dir:c.text(c.option(options,"direction","ltr")),
-        <head <meta charset:"UTF-8"> <title c.option(options,"title","Lambda UI · clay")> <style styles.css>>
-        <body style:"margin:0;",<div class:"dtna-root clay-root",style:variables,*c.children(render(root)^)>>>
+    shell.page(c.children(render(root)^),options,"clay",variables,styles.css,"dtna-root clay-root")
 }
 view clay_page: <clay.page> { page(content(~),c.props(~))^ }
 

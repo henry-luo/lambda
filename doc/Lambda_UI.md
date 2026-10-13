@@ -3,8 +3,10 @@
 Lambda ships experimental native UI families: `lambda.ui.dtna` for an
 Ant Design-inspired appearance, [`lambda.ui.bold`](Lambda_UI_Bold.md) for
 neobrutalist borders, [`lambda.ui.wired`](Lambda_UI_Wired.md) for pencil outlines,
-and [`lambda.ui.clay`](Lambda_UI_Clay.md) for soft claymorphism surfaces and the
-broader Ant-inspired component set. These are ordinary source packages
+[`lambda.ui.clay`](Lambda_UI_Clay.md) for soft claymorphism surfaces, and
+[`lambda.ui.blade`](Lambda_UI_Blade.md) for detailed fantasy materials,
+equipment slots and resource meters. Clay and Blade expose the broader
+Ant-inspired component set. These are ordinary source packages
 (**D7.2.4**) presented through logical elements (**S12.1.3**).
 This page documents the shared Ant-inspired behavior and `dtna` appearance;
 the linked theme guides cover their tokens, APIs and galleries.

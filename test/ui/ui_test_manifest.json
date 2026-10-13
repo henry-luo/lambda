@@ -53,6 +53,11 @@
       "tags": ["clay", "baseline"]
     },
     {
+      "name": "blade",
+      "globs": ["test/ui/blade/*.json"],
+      "tags": ["blade", "baseline"]
+    },
+    {
       "name": "dom",
       "globs": [
         "test/ui/dom/*.json",
