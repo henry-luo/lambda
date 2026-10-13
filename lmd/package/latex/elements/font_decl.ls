@@ -136,6 +136,12 @@ pub fn align_decl_style(tag_str) {
     ALIGN_DECL_STYLES[tag_str]
 }
 
+// wrap rendered items in a div with a paragraph declaration's style: an alignment
+// declaration's own, or one a package supplies (ragged2e, setspace)
+pub fn wrap_align_decl(tag_str, items, style = null) {
+    <div class: "latex-" ++ tag_str, style: style or ALIGN_DECL_STYLES[tag_str], for c in items { c }>
+}
+
 // wrap rendered items in a span with the declaration's style; a declaration
 // whose value is outside the tables is reported in place
 pub fn wrap_font_decl(decl, items) {
@@ -144,11 +150,4 @@ pub fn wrap_font_decl(decl, items) {
     if (style == null) [util.unsupported_element("latex",
         "Unsupported font declaration value: \\" ++ tag_str, decl.source_offset), *items]
     else <span class: "latex-" ++ tag_str, style: style, for c in items { c }>
-}
-
-// wrap rendered items in a div with alignment style
-// callers guarantee tag_str is a valid alignment declaration key
-pub fn wrap_align_decl(tag_str, items) {
-    let style = ALIGN_DECL_STYLES[tag_str];
-    <div class: "latex-" ++ tag_str, style: style, for c in items { c }>
 }

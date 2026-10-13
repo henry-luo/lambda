@@ -16,6 +16,15 @@ import caption: .caption
 import dingbats: .dingbats
 import algorithmic: .algorithmic
 import algorithm2e: .algorithm2e
+import decorations: .decorations
+import paragraph: .paragraph
+import filler: .filler
+import paralist: .paralist
+import codeblocks: .codeblocks
+import frames: .frames
+import footmisc: .footmisc
+import appendix: .appendix
+import boxes: ~~.elements.boxes
 
 // `commands` names the commands and environments a package owns: they dispatch
 // to its handlers and are attributed to it when unsupported, only while it is
@@ -117,6 +126,43 @@ pub let CATALOG = {
         commands: ["newtagform", "renewtagform", "usetagform", "mathtoolsset"],
         preamble: ["newtagform", "renewtagform", "usetagform"]},
     bm: {options: []},
+    // \xspace is the engine binding (binding/xspace.sty)
+    xspace: {options: []},
+    // text decorations (decorations.ls); soul's settings hold until changed
+    soul: {options: [], commands: decorations.SOUL_COMMANDS ++ decorations.SOUL_SETTINGS,
+        preamble: decorations.SOUL_SETTINGS},
+    // paragraph packages (paragraph.ls): declarations act like \centering
+    setspace: {options: paragraph.SETSPACE_OPTIONS,
+        commands: paragraph.SETSPACE_DECLARATIONS ++ paragraph.SETSPACE_ENVIRONMENTS,
+        preamble: paragraph.SETSPACE_DECLARATIONS},
+    parskip: {options: ["skip", "indent", "parfill"]},
+    // filler paragraphs from bundled public-domain text (filler.ls)
+    lipsum: {options: ["nopar"], commands: filler.COMMANDS.lipsum},
+    // code blocks through the listings renderer; \VerbatimInput and \inputminted read
+    // files and are reported, as is \VerbatimInput's highlighting cousin \inputminted
+    fancyvrb: {options: [], commands: codeblocks.FANCYVRB_ENVIRONMENTS ++ ["Verb", "fvset", "VerbatimInput"],
+        preamble: ["fvset"]},
+    minted: {options: ["newfloat", "outputdir", "cache", "finalizecache", "frozencache"],
+        commands: ["minted", "mint", "mintinline", "setminted", "inputminted", "listoflistings"],
+        preamble: ["setminted"]},
+    fancybox: {options: [], commands: boxes.FANCYBOX_COMMANDS},
+    boxedminipage: {options: [], commands: ["boxedminipage"]},
+    // framed blocks on the frame-box model (frames.ls)
+    framed: {options: [], commands: frames.FRAMED},
+    mdframed: {options: ["framemethod", "xcolor"], commands: ["mdframed", "newmdenv", "mdfdefinestyle",
+        "surroundwithmdframed", "mdfsetup"], preamble: ["newmdenv", "mdfdefinestyle"]},
+    // compact, run-in and inline lists, and enumerate's label templates
+    paralist: {options: ["newitem", "olditem", "newenum", "oldenum", "alwaysadjust", "neveradjust", "neverdecrease", "increaseonly", "defblank", "pointlessenum", "pointedenum", "flushleft"],
+        commands: paralist.ENVIRONMENT_NAMES},
+    blindtext: {options: ["english", "math"], commands: filler.COMMANDS.blindtext},
+    ragged2e: {options: [], commands: paragraph.RAGGED_DECLARATIONS ++ paragraph.RAGGED_ENVIRONMENT_NAMES},
+    // without normalem, ulem underlines \emph
+    ulem: {options: ["normalem", "normalbf", "UWforbf"], commands: decorations.ULEM_COMMANDS ++
+        ["emph", "normalem", "ULforem"], preamble: ["normalem", "ULforem"]},
+    // symbol marks, the footnote rule and \footref (footmisc.ls)
+    footmisc: {options: footmisc.OPTIONS, commands: ["footref"]},
+    // lettered appendices on \appendix's counters (appendix.ls)
+    appendix: {options: appendix.OPTIONS, commands: appendix.COMMANDS},
     // slanted fractions, in math or text
     nicefrac: {options: ["nice", "ugly"], commands: ["nicefrac"]},
     xfrac: {options: [], commands: ["sfrac"]},
@@ -442,6 +488,14 @@ fn scan(node, packages, outside_body) {
         else if ((tag == "lstlisting" or tag == "lstinline") and
             active(packages, "listings"))
             listings.issues(listings.options(node), node.source_offset)
+        else if ((contains(codeblocks.FANCYVRB_ENVIRONMENTS, tag) or false) and active(packages, "fancyvrb"))
+            (let parsed = codeblocks.head(node.source, false),
+             codeblocks.issues(codeblocks.keys_of(parsed.options, {}), false, null, node.source_offset))
+        else if (tag == "minted" and active(packages, "minted"))
+            (let parsed = codeblocks.head(node.source, true),
+             codeblocks.issues(codeblocks.keys_of(parsed.options, {}), true, parsed.language, node.source_offset))
+        else if ((tag == "mint" or tag == "mintinline") and active(packages, "minted"))
+            codeblocks.issues(codeblocks.keys_of(node.options_raw, {}), true, node.language, node.source_offset)
         else if (tag == "tcolorbox" and active(packages, "tcolorbox"))
             tcolorbox.issues(node)
         else if (tag == "captionsetup" and active(packages, "caption"))
@@ -461,10 +515,12 @@ fn scan(node, packages, outside_body) {
         }
         else if (owner == "fancyhdr" and outside_body and
             util.raw_argument(node, "required", 0) != null) []
-        else if (tag == "enumerate" and active(packages, "enumerate") and
-            util.optional_raw(node) != null)
-            [diagnostic("unsupported-enumerate-label", "enumerate", tag,
-                "Legacy enumerate label templates need a bounded adapter", node)]
+        // a label template needs a counter (1, a, A, i or I outside braces)
+        else if (tag == "enumerate" and (active(packages, "enumerate") or active(packages, "paralist")) and
+            not active(packages, "enumitem") and node.options_raw != null and
+            paralist.template(node.options_raw) == null)
+            [diagnostic("unsupported-enumerate-label", if (active(packages, "enumerate")) "enumerate" else "paralist",
+                tag, "The label template has no counter: " ++ node.options_raw, node)]
         else if (tag == "cite" and active(packages, "cite") and
             len(util.split_top_level(util.text_of_skip_brack(node), ",")) > 1)
             [diagnostic("unsupported-cite-compression", "cite", tag,
@@ -581,6 +637,12 @@ pub fn target_diagnostics(node, target, paged = false) {
             else if (tag == "thispagestyle")
                 [diagnostic("page-style-approximation", "fancyhdr", tag,
                     "Per-page style overrides are not represented by the document-wide margin profile", node)]
+            else if (tag == "lipsum" or tag == "lipsum*" or tag == "blindtext" or tag == "Blindtext")
+                [diagnostic("filler-text-approximation", if (starts_with(tag, "lipsum")) "lipsum" else "blindtext", tag,
+                    "Filler text is bundled public-domain Latin, not the package's own paragraphs", node)]
+            else if (tag == "xout")
+                [diagnostic("xout-approximation", "ulem", tag,
+                    "\\xout hatches its text; it renders struck through", node)]
             else if (tag == "sidewaysfigure" or tag == "sidewaystable")
                 [diagnostic("sideways-approximation", "rotating", tag,
                     "The float renders upright; a quarter turn on its own page needs page rotation", node)]
@@ -630,6 +692,7 @@ pub fn reference_diagnostics(node, labels, bibitems, packages, bibliography_acti
     else {
         let tag = string(name(node))
         let own = if (tag == "ref" or tag == "autoref" or tag == "nameref" or
+            (tag == "footref" and active(packages, "footmisc")) or
             ((tag == "cref" or tag == "Cref") and active(packages, "cleveref"))) {
             let keys = if (tag == "cref" or tag == "Cref")
                 util.split_top_level(trim(util.text_of(node)), ",")
@@ -639,6 +702,7 @@ pub fn reference_diagnostics(node, labels, bibitems, packages, bibliography_acti
                 diagnostic("unresolved-reference",
                     if (active(packages, "cleveref") and
                         (tag == "cref" or tag == "Cref")) "cleveref"
+                    else if (tag == "footref") "footmisc"
                     else if (active(packages, "hyperref")) "hyperref" else "latex",
                     trim(key), "Unresolved reference " ++ trim(key), node)]
         } else if (tag == "cite" and not active(packages, "biblatex") and

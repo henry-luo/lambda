@@ -2045,20 +2045,40 @@ private:
         if (name[0] == ' ' || name[0] == '\t' || name[0] == '\n') return builder_.createStringItem(" ");
         bool starred = position_ < length_ && source_[position_] == '*';
         if (starred) position_++;
-        if (strcmp(name, "verb") == 0 || strcmp(name, "lstinline") == 0) {
+        // inline code: \verb, listings' \lstinline, fancyvrb's \Verb and minted's \mint
+        // and \mintinline, which name a {language} first
+        bool minted_inline = strcmp(name, "mint") == 0 || strcmp(name, "mintinline") == 0;
+        if (strcmp(name, "verb") == 0 || strcmp(name, "lstinline") == 0 ||
+                strcmp(name, "Verb") == 0 || minted_inline) {
             ElementBuilder elem = builder_.element(name);
             elem.attr("source_offset", (int64_t)source_offset(source_ + command_start));
             if (starred) elem.attr("starred", true);
-            if (strcmp(name, "lstinline") == 0 && position_ < length_ &&
+            if (strcmp(name, "verb") != 0 && position_ < length_ &&
                     source_[position_] == '[') {
                 size_t options_begin = 0, options_end = 0;
                 if (consume_brack_group_span(&options_begin, &options_end))
                     elem.attr("options_raw", builder_.createStringItem(
                         source_ + options_begin, options_end - options_begin));
             }
+            if (minted_inline) {
+                size_t language_begin = 0, language_end = 0;
+                if (position_ < length_ && source_[position_] == '{' &&
+                        consume_group_span(&language_begin, &language_end))
+                    elem.attr("language", builder_.createStringItem(
+                        source_ + language_begin, language_end - language_begin));
+            }
             if (position_ >= length_ || source_[position_] == '\n' ||
                     source_[position_] == '\r') {
                 error("missing verbatim delimiter");
+                return elem.final();
+            }
+            if (strcmp(name, "verb") != 0 && source_[position_] == '{') {
+                // the braced form keeps balanced braces in the code
+                size_t code_begin = 0, code_end = 0;
+                if (consume_group_span(&code_begin, &code_end))
+                    elem.text(source_ + code_begin, code_end - code_begin);
+                elem.attr("raw_source", builder_.createStringItem(source_ + command_start,
+                    position_ - command_start));
                 return elem.final();
             }
             char delimiter = source_[position_++];
@@ -2132,6 +2152,9 @@ private:
             strcmp(name, "textrm") == 0 || strcmp(name, "textsf") == 0 || strcmp(name, "emph") == 0 ||
             strcmp(name, "underline") == 0) {
             ElementBuilder elem = builder_.element(name);
+            // located like every generic command, so a source-order setting before it
+            // (ulem's \normalem) can be found
+            elem.attr("source_offset", (int64_t)source_offset(source_ + command_start));
             size_t begin = 0, end = 0;
             skip_space_before_group('{', '{');
             if (consume_group_span(&begin, &end)) {

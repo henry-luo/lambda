@@ -1,7 +1,7 @@
 # LaTeX Phase V: package coverage implementation plan
 
 **Design:** [Lambda_Pkg_Latex.md](../Lambda_Pkg_Latex.md) (§6 package model, §9 compatibility matrix, §10 verification rules, §11 outstanding work); [TeX engine design](../latex/Lambda_Design_TeX_Engine.md) §5 and §10; [Lambda_Pkg_Math.md](../Lambda_Pkg_Math.md) §3, §7 and §10.2; [Lambda_Pkg_Slides.md](../Lambda_Pkg_Slides.md) for beamer.
-**Status:** In progress. Proposed 2026-10-12; the user approved the §17 recommendations on 2026-10-13. M0, M1, M2, M4 and M8 were implemented on 2026-10-13 in worktree `latex-phase5-m0`. §17.1 was ratified as **D7.2.7v2** when the first binding (physics) landed.
+**Status:** In progress. Proposed 2026-10-12; the user approved the §17 recommendations on 2026-10-13. M0, M1, M2, M4, M8 and M3 were implemented on 2026-10-13 in worktree `latex-phase5-m0`. §17.1 was ratified as **D7.2.7v2** when the first binding (physics) landed.
 **Formal linkage:** **D7.2.7v2** (expansion only, never typesetting; bundled packages are upstream programming packages or Lambda-owned bindings; resolution order bundled → adapter → beside-document file → located `unknown-package`), **D7.2.1–D7.2.4** (script adapters in a static registry), **S1.8** (no document text becomes Lambda code), **S12.1.1v2** (rendering stays pure and deterministic), **D7.1.2v2** and **D7.5.2** (resources through the one IO door, path-gated), **S7.4.1–S7.4.4** (located diagnostics).
 **Scope:** the commonly used LaTeX packages and classes that `lambda.latex` does not support, plus the kernel, `hyperref` and `graphicx` gaps those packages build on. Diagrams (`tikz-cd`, `circuitikz`, `forest`, `chemfig`, `xy`) belong to the TikZ design (§15).
 
@@ -240,6 +240,46 @@ As built on 2026-10-13, every item above except `amsxtra` is in place:
 | `fancybox`, `boxedminipage` | `\shadowbox`, `\doublebox`, `\ovalbox`, `\Ovalbox`; the `boxedminipage` environment | CSS boxes in `elements/boxes.ls` |
 | `footmisc` | Options `symbol`, `bottom`; `\footref` | Symbol marks (`*`, `†`, `‡`, …); `\footref` repeats a mark. `perpage` and `para` need pages and are diagnosed |
 | `appendix` | `appendices`, `subappendices`, `\appendixpage`, `\addappheadtotoc` | Appendix semantics from M0.2's corrected appendix counters |
+
+As built on 2026-10-13:
+
+- **Source-order settings.** Analysis state gained `settings`, a list of `{key, value, offset}` that analysis appends as it walks. `util.setting_at(settings, key, offset)` returns the value in effect at a source offset. soul's `\set…color`, ulem's `\normalem`/`\ULforem`, mdframed's `\newmdenv`/`\mdfdefinestyle` and `\fvset`/`\setminted` all use it, so a setting holds from where it is given until changed.
+- **xspace** is the first engine binding with no upstream package: `tex/binding/xspace.sty` defines `\xspace` as `\lambda@xspace`.
+  - That is a new expandable engine primitive. It reads the next token, puts it back, and puts a space before it unless the token is in xspace's exception list: `,.'/?;:!~-)`, a group delimiter, a space, `\/`, `\ `, `\footnote`, `\footnotemark`, `\bgroup` or `\egroup`.
+  - A `\futurelet` definition worked in body text but leaked inside `\section` and `\footnote`, because argument mode does not execute assignments (§12). A primitive needs none.
+- **soul and ulem** share `decorations.ls`. Each command maps to CSS text decoration, letter spacing or a background.
+  - soul's colors resolve through `color.ls` from the setting in effect where the command stands. `\so` and `\caps` use soul's default spacing.
+  - Without `normalem`, ulem's `\emph` underlines, until a later `\normalem`; `\ULforem` underlines again. The parser now gives text-style commands a `source_offset` for this.
+  - `\xout` strikes through and reports `xout-approximation`.
+- **setspace, parskip and ragged2e** share `paragraph.ls`.
+  - Line height is the 1.2 baselineskip ratio times setspace's per-size stretch (`font_decl.line_height_for`, as for `\linespread`). The package option or a preamble declaration sets the document's line height. The environments become `div.latex-<name>`.
+  - A body declaration spaces the rest of its group: `find_leading_decl` finds it for the paragraph, and `next_render_info` carries it to the paragraphs after it.
+  - parskip adds a stylesheet rule with no indent and half a baselineskip between paragraphs. `skip` and `indent` override either.
+  - ragged2e reuses the alignment wrapper, now `font_decl.wrap_align_decl`, adding `hyphens:auto`.
+- **lipsum and blindtext** do not bundle their text: `filler.ls` cycles three paragraphs of Cicero's de Finibus 1.10.32–33, the public-domain source of lorem ipsum. Each use reports `filler-text-approximation`. `\lipsum[a-b]` keeps its paragraph count and `\lipsum*` runs the paragraphs together inline.
+- **paralist**, in `paralist.ls`:
+  - Compact lists drop list spacing. Run-in lists (`asparaenum`, …) set each item as a paragraph led by its label. Inline lists (`inparaenum`, …) run their items into the paragraph: `render_children` rejoins the text the parser split around the environment.
+  - The label template argument (`[(a)]`, `[{Step} 1:]`) works on paralist's lists and on `enumerate`. The first `1`, `a`, `A`, `i` or `I` outside braces is the counter. The enumerate label diagnostic now fires only for a template with no counter.
+  - `util.roman` was promoted from `docclass/book.ls` for this.
+- **fancyvrb and minted** render through the listings code renderer, which gained a `language` class (`codeblocks.ls`).
+  - The parser keeps the environments' bodies raw and reads `\Verb`, `\mint` and `\mintinline` like `\verb`, with either braces or a delimiter. minted's `{language}` becomes a `language` attribute.
+  - Keys with a listings counterpart map onto it: `numbers`/`linenos`, `firstnumber`, `stepnumber`, `frame`, `fontsize`. Other keys report `unsupported-listing-option`. Frame styles other than `single` draw a box and report `frame-approximation`, and a minted language reports `listing-highlighting-omitted`.
+  - minted makes `listing` a float kind, with `\listoflistings`.
+- **Frames.** `boxes.frame_css` is the shared frame-box model (background, line, sides, padding, radius, shadow).
+  - tcolorbox now uses it, and so do framed's six environments and `leftbar` (`frames.ls`), mdframed and fancybox's four boxes. `boxedminipage` is a framed inline block.
+  - mdframed reads a bounded key profile and `frametitle`. Its defaults are a .4pt black line, a white background and mdframed's margins. `\mdfdefinestyle` styles and `\newmdenv` environments come from settings, and other keys report `unsupported-mdframed-key`.
+  - `util.leading_option` now spans braced groups, so `[frametitle={A, B}]` no longer leaks into the body.
+- **footmisc** (`footmisc.ls`):
+  - `symbol` and `symbol*` mark footnotes with `\fnsymbol`. `util.fnsymbol` was promoted from the `\thanks` marks, which now use it too. The notes list then prints the marks itself.
+  - `norule` drops the rule. `bottom` and `stable` already hold for end-of-document notes. `perpage`, `para` and the rest report `unsupported-option`.
+  - A `\label` inside a note now refers to it, because analysis walks the note body with the footnote as context (`\@currentlabel` is the mark). Before, labels inside notes were never recorded. `\footref{label}` repeats the mark, linking to the label's anchor in the note. An unknown label reports `unresolved-reference` under footmisc.
+- **appendix** (`appendix.ls`):
+  - `appendices` letters the class's top level. It continues an earlier environment's letters, and gives the counter its value back at the end, so numbering resumes after it (`\restoreapp` and `\@pprestoresec`).
+  - `subappendices` letters the level below: 1.A in book and report, and 1.A for article subsections.
+  - `\appendixpage` sets an "Appendices" title. `\addappheadtotoc` adds an unnumbered, anchored contents entry. The options `toc` and `page` do both at the start of `appendices`.
+  - `title` and `titletoc` name headings and contents entries "Appendix A". `header` names running heads and reports `unsupported-option`.
+  - The names are English, like the other fixed names.
+- **Interpreter defects found on the way** ([LR01-19](../Lambda_Issue_Ledger%20(fixed).md#lr01-19), [LR01-20](../Lambda_Issue_Ledger%20(fixed).md#lr01-20)): a closure created in a module-level comprehension read its captured loop variable from module storage, and a function literal bound in a `let` list was skipped as a declaration. Both are fixed in `interp.cpp` and pinned on every tier by `test/lambda/closure_capture_comprehension.ls`.
 
 ## 8. M4: floats and algorithms
 
@@ -481,3 +521,8 @@ As built on 2026-10-13, with route (a) chosen by the user and **D7.2.7v2** ratif
   - The parser changes are in `input-latex-c.cpp`: environment names, `ignored_begin` names, starred-cases text columns, `\cancelto`, slanted fractions and `chemistry` nodes. The engine change is the `binding/` search in `bundled_path`.
   - `strip_backslash` was promoted from `macros.ls` to `util.ls`.
   - The math test failed on the JIT tier alone, which exposed a transpiler defect, [LR07-47](../Lambda_Issue_Ledger%20(fixed).md#lr07-47). The new `chemistry` branch made `unmapped_commands` tail-recursive, and TCO then turned the self call inside its `for` comprehension into a jump. It is fixed in `emit_for_result` and pinned on every tier by `test/lambda/tail_call_in_comprehension.ls`.
+- 2026-10-13: the user asked for the cdot and bold-symbol fix (a2fb3c633), then for M3. M3 was built as recorded in §7.
+  - New modules in `lmd/package/latex/packages/`: `decorations.ls`, `paragraph.ls`, `filler.ls`, `paralist.ls`, `codeblocks.ls`, `frames.ls`, `footmisc.ls` and `appendix.ls`; the binding `tex/binding/xspace.sty` and the engine primitive `\lambda@xspace`.
+  - New test `test/lambda/latex/test_latex_phase5_text.ls` with its golden, identical on every tier. The other 66 LaTeX scripts and the math scripts match their goldens, except `test_latex_argument_arrays`: `\textbf` now carries `source_offset`, and `len` counts attributes (S8.3.1v2).
+  - `make test-lambda-baseline` passed 6790 of 6811 under `LAMBDA_LOG_LEVEL=error`, which kept `log.txt` small on a nearly full disk. The other 21 are the MIR ratchet and two lint tests, which read warnings that the error level suppresses; each passes when rerun without the override.
+  - The interpreter defects LR01-19 and LR01-20 were found by soul's settings table and fixed (§7).

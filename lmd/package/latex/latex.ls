@@ -33,6 +33,8 @@ import page_style: .packages.page_style
 import listings: .packages.listings
 import caption: .packages.caption
 import font_decl: .elements.font_decl
+import paragraph: .packages.paragraph
+import footmisc: .packages.footmisc
 
 // ============================================================
 // Public API — HTML string output
@@ -134,6 +136,11 @@ pub fn render_result(ast, options) {
                 language: language, text_language: language,
                 polyglossia: polyglossia,
                 listing_options: listings.preamble_options(ast),
+                // fancyvrb's \fvset and minted's \setminted defaults
+                code_defaults: {fancyvrb: if (registry.active(loaded.packages, "fancyvrb"))
+                    listings.preamble_settings(ast, "fvset") else {},
+                    minted: if (registry.active(loaded.packages, "minted"))
+                    listings.preamble_settings(ast, "setminted") else {}},
                 listing_nums: base_info.listing_nums,
                 caption_options: caption.initial(registry.options_for(loaded.packages, "caption"),
                     registry.options_for(loaded.packages, "subcaption")),
@@ -245,6 +252,8 @@ fn package_stylesheet(info) {
     microtype.stylesheet(registry.options_for(info.packages, "microtype")) ++
     hyperref.stylesheet(info.hyperref_settings) ++ dispatcher.running_stylesheet(info) ++
     info.cellspace_css ++
+    (if (registry.active(info.packages, "parskip"))
+        paragraph.parskip_stylesheet(registry.options_for(info.packages, "parskip")) else "") ++
     // indentfirst indents the first paragraph after a heading, which LaTeX otherwise does not
     (if (registry.active(info.packages, "indentfirst"))
         ".latex-document h1 + p,.latex-document h2 + p,.latex-document h3 + p," ++
@@ -347,19 +356,25 @@ fn wrap_with_footnotes(body, footnotes_el) {
 
 fn render_footnotes_section(info) {
     let footnotes = info.footnotes
+    let options = registry.options_for(info.packages, "footmisc")
+    // symbol marks replace the list's own numbers
+    let symbolic = footmisc.mark(options, 1) != "1"
+    let ruled = footmisc.ruled(options)
+    let rule = if (ruled) <hr> else null
     if (len(footnotes) == 0) null
     else (
-        <section class: "latex-footnotes",
-            <hr>
-            <ol
+        <section class: "latex-footnotes", style: if (ruled) null else "border-top:none",
+            rule;
+            <ol style: if (symbolic) "list-style:none" else null,
                 for (i, fn_entry in footnotes)
-                    render_footnote_item(fn_entry, i, info)
+                    render_footnote_item(fn_entry, i, info,
+                        if (symbolic) footmisc.mark(options, fn_entry.number) else null)
             >
         >
     )
 }
 
-fn render_footnote_item(fn_entry, i, info) {
+fn render_footnote_item(fn_entry, i, info, mark) {
     let fn_num = fn_entry.number
     let content = if (info.biblatex_context != null and
         (string(name(fn_entry.node)) == "footcite" or
@@ -368,7 +383,8 @@ fn render_footnote_item(fn_entry, i, info) {
         [biblatex.render_footcite_content(fn_entry.node, info.biblatex_context)]
         else dispatcher.render_note_body(fn_entry.node, info);
     // explicit or \footnotetext numbers can leave the list's own sequence
-    <li id: "fn-" ++ (fn_num), value: if (fn_num != i + 1) fn_num else null,
+    <li id: "fn-" ++ (fn_num), value: if (mark == null and fn_num != i + 1) fn_num else null,
+        if (mark != null) (<sup class: "latex-footnote-mark", mark>, " ") else null
         for c in content { c }
         " "
         <a class: "footnote-backref", href: "#fnref-" ++ (fn_num), "\u21A9">

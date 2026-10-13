@@ -16,3 +16,4 @@ Each bound package also has a row in `lmd/package/latex/packages/registry.ls`.
 |---|---|
 | `physics.sty` | physics 1.3: bracing, vectors, operators, quick-quad text, derivatives, Dirac notation, matrix macros; options `arrowdel`, `italicdiff`, `notrig` |
 | `mathtools.sty` | the mathtools 1.31 macro layer: paired delimiters, `\prescript`, `\splitfrac`, `\adjustlimits`, `\MoveEqLeft` |
+| `xspace.sty` | xspace 1.13: `\xspace`, through the engine's `\lambda@xspace` lookahead primitive (a `\futurelet` would be an assignment) |

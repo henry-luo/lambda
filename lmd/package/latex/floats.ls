@@ -30,13 +30,19 @@ fn style_option(opts, fallback) =>
     else if (opts.plain != null) "plain"
     else fallback
 
+// minted's listing float, listed by \listoflistings
+let LISTING_KIND = {counter: "listing", name: "Listing", list: "listoflistings",
+    list_title: "List of Listings", style: "plain"}
+
 // the float kinds of a document's active packages
 pub fn kinds_for(packages) {
     let algorithm = [for (pkg, style in ALGORITHM_STYLES,
         let opts = package_options(packages, string(pkg)) where opts != null)
         {*:ALGORITHM_KIND, style: style_option(opts, style),
          within: if (opts.section != null) "section" else if (opts.chapter != null) "chapter" else null}]
-    if (len(algorithm) == 0) KINDS else {*:KINDS, algorithm: algorithm[0]}
+    let with_algorithm = if (len(algorithm) == 0) KINDS else {*:KINDS, algorithm: algorithm[0]};
+    (if (package_options(packages, "minted") == null) with_algorithm
+     else {*:with_algorithm, listing: LISTING_KIND})
 }
 
 // \newfloat{type}{placement}{ext}: named after its type until \floatname renames it

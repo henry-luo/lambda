@@ -31,6 +31,8 @@ merging.
 
 **Additions (2026-10-13).** Inside a `tabbing` environment, `\=`, `\'` and `` \` `` are tabbing commands, not text accents: the parser keeps them as elements named `=`, `'` and `` ` ``, as it already did for `\>`, so the script sees the tab stops. Outside `tabbing` they remain accents. The flag lives on the nested body parser and does not reach braced groups inside the body (Phase V M1, [Lambda_Impl_Latex_Packages.md](../impl/Lambda_Impl_Latex_Packages.md)).
 
+**Additions (2026-10-13, Phase V M3).** fancyvrb's `\Verb` and minted's `\mint` and `\mintinline` are inline code like `\verb` and `\lstinline`. All but `\verb` take an `[options]` group, kept as `options_raw`. The minted commands then take a `{language}` group, kept as a `language` attribute. All but `\verb` accept the code either between a repeated delimiter or in braces, where balanced braces stay in the code. The engine passes the same commands through unexpanded (`P_RAW_GROUP_CMD`). The text-style commands (`\textbf`, `\textit`, `\texttt`, `\textrm`, `\textsf`, `\emph`, `\underline`) now carry `source_offset` like generic commands, so a source-order setting before them, such as ulem's `\normalem`, can be found.
+
 The unused Tree-sitter-era `latex/normalize.ls` phase, its import and the
 unused reconstruction helper `util.rebuild_with_children` are retired. The
 direct parser supplies normalized content; the package reads the current

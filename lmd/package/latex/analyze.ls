@@ -16,6 +16,11 @@ import listings: .packages.listings
 import floats: .floats
 import algorithmic: .packages.algorithmic
 import algorithm2e: .packages.algorithm2e
+import decorations: .packages.decorations
+import paragraph: .packages.paragraph
+import frames: .packages.frames
+import footmisc: .packages.footmisc
+import appendix: .packages.appendix
 
 // helper: append a {key, val} entry to an entry list
 fn add_entry(entries, k, v) {
@@ -63,6 +68,8 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         headings: [],
         heading_nums: [],
         heading_titles: [],
+        // appendix's title and titletoc names by heading slug
+        heading_names: [],
         labels: [],
         footnote_marks: [],
         footnotes: [],
@@ -80,12 +87,19 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         tag_form: null,
         // located diagnostics found while walking declarations
         diagnostics: [],
+        // package settings in source order ({key, value, offset}; util.setting_at)
+        settings: [],
         enumerate_starts: [],
         last_enumerate_by_depth: [],
         list_depth: 0,
         slug_counts: [],
         contents_anchors: [],
         in_appendix: false,
+        // inside appendix's subappendices; the names its title options give headings;
+        // the letters an earlier appendices environment reached (\restoreapp)
+        subappendix: false,
+        appendix_names: null,
+        appendix_count: 0,
         secnumdepth: 3,
         custom_colors: [],
         analysis_colors: [],
@@ -106,7 +120,9 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
     {
         docclass: result.docclass,
         class_options: result.class_options,
-        line_spread: result.line_spread,
+        // a preamble declaration or \linespread wins over the setspace option
+        line_spread: result.line_spread or paragraph.option_stretch(
+            registry.options_for(packages, "setspace"), result.class_options),
         title: result.title,
         title_el: result.title_el,
         author: result.author,
@@ -116,6 +132,7 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         headings: result.headings,
         heading_nums: result.heading_nums,
         heading_titles: result.heading_titles,
+        heading_names: result.heading_names,
         labels: result.labels,
         footnotes: result.footnotes,
         footnote_marks: result.footnote_marks,
@@ -136,7 +153,8 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         page_color: result.page_color,
         theorem_defs: result.theorem_defs,
         contents_anchors: result.contents_anchors,
-        diagnostics: result.diagnostics
+        diagnostics: result.diagnostics,
+        settings: result.settings
     }
 }
 
@@ -170,8 +188,38 @@ pub let PACKAGE_WALK = {
     // settings commands shape every algorithm (render alg2e_settings)
     algorithm2e: map([for (setting in algorithm2e.SETTINGS,
         x in [setting, (el, st) => ({*:st, alg2e_settings: st.alg2e_settings ++ [string(name(el))]})]) x]),
-    mathtools: {newtagform: walk_newtagform, renewtagform: walk_newtagform, usetagform: walk_usetagform}
+    mathtools: {newtagform: walk_newtagform, renewtagform: walk_newtagform, usetagform: walk_usetagform},
+    // soul's \set…color{color} and ulem's \normalem/\ULforem hold until changed
+    soul: map([for (key in decorations.SOUL_SETTINGS, x in [key, (el, st) => record_setting(st, el, key,
+        trim(util.text_of(el)))]) x]),
+    setspace: map([for (tag in paragraph.SETSPACE_DECLARATIONS, x in [tag, walk_setspace]) x]),
+    // \newmdenv and \mdfdefinestyle hold until redefined; keys outside the profile are reported
+    mdframed: {newmdenv: (el, st) => mdframed_definition(el, st, "mdf-env:", util.optional_raw(el), 0),
+        mdfdefinestyle: (el, st) => mdframed_definition(el, st, "mdf-style:",
+            util.raw_argument(el, "required", 1), 0),
+        mdframed: (el, st) => walk_default(el, "mdframed",
+            mdframed_key_issues(el, st, util.leading_option(el).option))},
+    ulem: {normalem: (el, st) => record_setting(st, el, "ulem-emph", "normalem"),
+        ULforem: (el, st) => record_setting(st, el, "ulem-emph", "ULforem")},
+    appendix: {appendices: (el, st) => walk_appendices(el, st, false),
+        subappendices: (el, st) => walk_appendices(el, st, true), addappheadtotoc: add_appendix_head}
 }
+
+fn mdframed_definition(el, st, prefix, keys, name_index) {
+    let defined = util.raw_argument(el, "required", name_index)
+    if (defined == null) st
+    else record_setting(mdframed_key_issues(el, st, keys), el, prefix ++ trim(defined), keys or "")
+}
+
+fn mdframed_key_issues(el, st, keys) {
+    let unknown = frames.unknown_keys(util.parse_kv_options(keys));
+    {*:st, diagnostics: st.diagnostics ++ [for (key in unknown)
+        util.diagnostic("unsupported-mdframed-key", "mdframed", key,
+            "Unsupported mdframed key " ++ key, el.source_offset)]}
+}
+
+fn record_setting(st, el, key, value) =>
+    {*:st, settings: st.settings ++ [{key: key, value: value, offset: el.source_offset}]}
 
 // \newtagform{name}[inner]{left}{right}: how \usetagform{name} frames later tags; a
 // number format that is not a mapped text command prints the number plain
@@ -394,6 +442,12 @@ fn walk_addcontentsline(el, st) {
     else anchored
 }
 
+// a preamble setspace declaration sets the document's stretch, as \linespread does
+fn walk_setspace(el, st) {
+    let stretch = paragraph.declared_stretch(el, st.class_options)
+    if (st.in_body or stretch == null) st else {*:st, line_spread: stretch}
+}
+
 // a preamble \linespread scales the document's line height
 fn walk_linespread(el, st) {
     let factor = float(trim(util.text_of(el))) ^ { null }
@@ -426,7 +480,7 @@ fn walk_heading(el, st, counter_name, html_level) {
     // determine numbering depth for this counter
     let counter_depth = counter_name_to_depth(counter_name)
     let sec_num = if (not starred and counter_depth <= st.secnumdepth)
-        compute_section_num(new_counters, counter_name, st.docclass, st.in_appendix)
+        compute_section_num(new_counters, counter_name, st)
     else null
 
     // extract title text
@@ -444,6 +498,9 @@ fn walk_heading(el, st, counter_name, html_level) {
     let new_heading_nums = add_entry(st.heading_nums, slug, sec_num)
     let new_headings = if (starred) st.headings else st.headings ++ [entry]
     let sec_num_str = sec_num_to_str(sec_num)
+    // appendices with title or titletoc name their top-level headings
+    let named = st.appendix_names != null and not starred and
+        counter_name == appendix.lettered_counter(appendix.chaptered(st.docclass), false)
 
     let new_state = {
         *:st,
@@ -451,6 +508,7 @@ fn walk_heading(el, st, counter_name, html_level) {
         headings: new_headings,
         heading_nums: new_heading_nums,
         heading_titles: add_entry(st.heading_titles, counter_name ++ ":" ++ sec_num_str, title_text),
+        heading_names: if (named) add_entry(st.heading_names, slug, st.appendix_names) else st.heading_names,
         slug_counts: new_slug_counts,
         env_context: counter_name,
         env_context_num: sec_num_str
@@ -478,10 +536,19 @@ fn counter_name_to_depth(counter_name) {
     }
 }
 
-fn compute_section_num(counters, counter_name, docclass, in_appendix) {
-    if (docclass == "book") dc_book.format_section_number(counters, counter_name, in_appendix)
-    else if (docclass == "report") dc_report.format_section_number(counters, counter_name, in_appendix)
-    else dc_article.format_section_number(counters, counter_name, in_appendix)
+fn compute_section_num(raw_counters, counter_name, st) {
+    let counters = subappendix_counters(raw_counters, st)
+    if (st.docclass == "book") dc_book.format_section_number(counters, counter_name, st.in_appendix)
+    else if (st.docclass == "report") dc_report.format_section_number(counters, counter_name, st.in_appendix)
+    else dc_article.format_section_number(counters, counter_name, st.in_appendix)
+}
+
+// subappendices letter the level below the class's top one, which the class's
+// format then joins like a number: 1.A, 1.A.1
+fn subappendix_counters(counters, st) {
+    let counter = appendix.lettered_counter(appendix.chaptered(st.docclass), true)
+    if (not st.subappendix or counters[counter] <= 0) counters
+    else {*:counters, [counter]: util.upper_alph(counters[counter])}
 }
 
 // ============================================================
@@ -706,10 +773,41 @@ fn make_bib_entry(k, n) {
 fn walk_appendix(el, st) {
     // \appendix restarts the top numbered level, lettered from here on: the
     // chapter in book and report, the section otherwise
-    let chaptered = st.docclass == "book" or st.docclass == "report"
+    let chaptered = appendix.chaptered(st.docclass)
     let new_counters = {*:st.counters, chapter: if (chaptered) 0 else st.counters.chapter,
         section: 0, subsection: 0, subsubsection: 0}
     {*:st, in_appendix: true, counters: new_counters}
+}
+
+// appendix's environments (\@resets@pp): the lettered level restarts, appendices
+// continuing an earlier environment's letters, and gets its value back at the end
+// (\@pprestoresec). The toc and page options add the head and the page title.
+fn walk_appendices(el, st, sub) {
+    let options = registry.options_for(st.packages, "appendix")
+    let chaptered = appendix.chaptered(st.docclass)
+    let counter = appendix.lettered_counter(chaptered, sub)
+    let start = if (sub) 0 else st.appendix_count
+    let headed = if (not sub and options != null and util.option_enabled(options.toc))
+        add_appendix_head(el, st) else st
+    let reset = if (sub) {*:st.counters, [counter]: 0}
+        else if (chaptered) {*:st.counters, chapter: start, section: 0}
+        else {*:st.counters, section: start, subsection: 0}
+    let walked = walk_children(el, 0, len(el), {*:headed, counters: reset,
+        in_appendix: st.in_appendix or not sub, subappendix: sub,
+        appendix_names: if (sub) null else appendix.names(options)})
+    {*:walked, counters: {*:walked.counters, [counter]: st.counters[counter]},
+        in_appendix: st.in_appendix, subappendix: st.subappendix, appendix_names: st.appendix_names,
+        appendix_count: if (sub) st.appendix_count else walked.counters[counter]}
+}
+
+// \addappheadtotoc: an unnumbered "Appendices" contents entry at the class's top
+// level, anchored where it is given
+fn add_appendix_head(el, st) {
+    let slug_info = make_unique_slug(util.slugify(appendix.HEAD), st.slug_counts)
+    {*:st, slug_counts: slug_info.counts,
+        contents_anchors: add_entry(st.contents_anchors, string(el.source_offset), slug_info.slug),
+        headings: st.headings ++ [{level: if (appendix.chaptered(st.docclass)) 1 else 2,
+            number: null, text: appendix.HEAD, id: slug_info.slug}]}
 }
 
 // the counter name and integer value of \setcounter or \addtocounter; null otherwise
@@ -902,7 +1000,7 @@ fn scoped_counter(st, counter_name, raw_number) {
         let prior = util.lookup(st.counter_positions, counter_name)
         let next = if (prior != null and prior.identity == identity)
             prior.sequence + 1 else 1
-        let prefix = compute_section_num(st.counters, parent, st.docclass, st.in_appendix)
+        let prefix = compute_section_num(st.counters, parent, st)
         {number: string(prefix) ++ "." ++ string(next),
          positions: add_entry(st.counter_positions, counter_name,
             {identity: identity, sequence: next})}
@@ -958,7 +1056,16 @@ fn walk_footnote(el, st) {
     let new_counters = if (explicit != null) st.counters else step_counter(st, "footnote")
     let fn_num = if (explicit != null) explicit else new_counters.footnote
     let entry = {number: fn_num, node: el, offset: el.source_offset}
-    {*:st, counters: new_counters, footnotes: st.footnotes ++ [entry]}
+    walk_note_body(el, {*:st, counters: new_counters, footnotes: st.footnotes ++ [entry]}, fn_num)
+}
+
+// A note's text sets \@currentlabel to its mark, so a \label inside refers to the
+// note. Citation footnotes hold keys, not text, and are not walked.
+fn walk_note_body(el, st, fn_num) {
+    let tag = string(name(el))
+    if (tag != "footnote" and tag != "footnotetext") st
+    else restore_context(walk_children(el, 0, len(el), {*:st, env_context: "footnote",
+        env_context_num: footmisc.mark(registry.options_for(st.packages, "footmisc"), fn_num)}), st)
 }
 
 // \footnotemark places a mark whose text a later \footnotetext supplies
@@ -974,7 +1081,8 @@ fn walk_footnotemark(el, st) {
 fn walk_footnotetext(el, st) {
     let explicit = explicit_footnote_number(el)
     let fn_num = if (explicit != null) explicit else counter_value(st.counters, "footnote")
-    {*:st, footnotes: st.footnotes ++ [{number: fn_num, node: el, offset: el.source_offset}]}
+    walk_note_body(el, {*:st, footnotes: st.footnotes ++ [{number: fn_num, node: el,
+        offset: el.source_offset}]}, fn_num)
 }
 
 // the [n] of \footnote, \footnotemark or \footnotetext; citation footnotes read

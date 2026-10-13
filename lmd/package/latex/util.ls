@@ -385,6 +385,14 @@ pub fn optional_raw(el) {
     }
 }
 
+// the value of the last setting with this key before an offset, from analysis's
+// source-order settings ({key, value, offset}); null when none precedes it
+pub fn setting_at(settings, key, offset) {
+    let found = [for (entry in settings or [] where entry.key == key and
+        (offset == null or entry.offset == null or entry.offset < offset)) entry.value];
+    (if (len(found) == 0) null else found[len(found) - 1])
+}
+
 // a control sequence's name without its backslash
 pub fn strip_backslash(s) {
     if (len(s) > 0 and slice(s, 0, 1) == "\\") slice(s, 1, len(s))
@@ -400,15 +408,26 @@ pub fn leading_option(el) {
     let items = if (first is element and string(name(first)) == "paragraph") content(first) else []
     let opening = if (len(items) > 0) items[0] else null
     let text = if (opening is string) trim_start(opening) else ""
-    let close = if (starts_with(text, "[")) index_of(text, "]") else null
-    if (close == null) {option: null, children: children}
+    // a braced value (frametitle={Title}) splits the option into several items
+    let found = if (starts_with(text, "[") or false) option_end(items, 0, "") else null
+    if (found == null) {option: null, children: children}
     else {
-        let rest = slice(text, close + 1, len(text))
-        let paragraph = [for (i, item in items where i > 0) item]
-        let kept = if (trim(rest) == "") paragraph else [rest, *paragraph];
-        {option: trim(slice(text, 1, close)),
+        let paragraph = [for (i, item in items where i > found.index) item]
+        let kept = if (trim(found.rest) == "") paragraph else [found.rest, *paragraph];
+        {option: trim(slice(found.text, len(found.text) - len(trim_start(found.text)) + 1, len(found.text))),
          children: [<paragraph for c in kept { c }>, *slice(children, 1, len(children))]}
     }
+}
+
+// the option's source up to its closing bracket: {text, index of the item holding
+// the bracket, rest of that item}; groups count as their braced source
+fn option_end(items, i, text) {
+    if (i >= len(items)) null
+    else if (items[i] is string) (let close = index_of(items[i], "]"),
+        if (close == null) option_end(items, i + 1, text ++ items[i])
+        else {text: text ++ slice(items[i], 0, close), index: i,
+              rest: slice(items[i], close + 1, len(items[i]))})
+    else option_end(items, i + 1, text ++ "{" ++ text_of(items[i]) ++ "}")
 }
 
 // the children of a node with paragraph wrappers opened, in order
@@ -609,4 +628,21 @@ let ALPH_TABLE = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P
 pub fn upper_alph(n) {
     if (n >= 1 and n <= 26) ALPH_TABLE[n - 1]
     else string(n)
+}
+
+// LaTeX's \fnsymbol sequence; past its nine marks a counter falls back to digits
+let FNSYMBOLS = ["*", "†", "‡", "§", "¶", "‖", "**", "††", "‡‡"]
+
+pub fn fnsymbol(n) => if (n >= 1 and n <= len(FNSYMBOLS)) FNSYMBOLS[n - 1] else string(n)
+
+// \roman: lowercase roman numerals; zero and below fall back to digits (\Roman is upper(roman(n)))
+pub fn roman(n) => if (n <= 0) string(n) else roman_parts(n, 0, "")
+
+let ROMAN_VALUES = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
+let ROMAN_LABELS = ["m", "cm", "d", "cd", "c", "xc", "l", "xl", "x", "ix", "v", "iv", "i"]
+
+fn roman_parts(value, index, acc) {
+    if (value <= 0 or index >= len(ROMAN_VALUES)) acc
+    else if (value >= ROMAN_VALUES[index]) roman_parts(value - ROMAN_VALUES[index], index, acc ++ ROMAN_LABELS[index])
+    else roman_parts(value, index + 1, acc)
 }

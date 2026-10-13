@@ -52,7 +52,8 @@ static const LatexPrim LATEX_PRIMS[] = {
     {"IfFileExists", P_IFFILEEXISTS, 0}, {"InputIfFileExists", P_INPUTIFFILEEXISTS, 0},
     {"AtBeginDocument", P_ATBEGINDOCUMENT, 0}, {"AtEndDocument", P_ATENDDOCUMENT, 0},
     {"AtEndOfPackage", P_ATENDOFPACKAGE, 0}, {"AtEndOfClass", P_ATENDOFPACKAGE, 1},
-    {"verb", P_VERB, 0}, {"lstinline", P_RAW_GROUP_CMD, 0},
+    {"verb", P_VERB, 0}, {"lstinline", P_RAW_GROUP_CMD, 0}, {"Verb", P_RAW_GROUP_CMD, 0},
+    {"mint", P_RAW_GROUP_CMD, 2}, {"mintinline", P_RAW_GROUP_CMD, 2},
     {"lambdaconstructor", P_LAMBDA_CONSTRUCTOR, 0},
     {"ProvidesPackage", P_PROVIDESPACKAGE, 0}, {"ProvidesClass", P_PROVIDESPACKAGE, 1},
     {"ProvidesFile", P_PROVIDESPACKAGE, 2}, {"NeedsTeXFormat", P_NEEDSTEXFORMAT, 0},
@@ -78,13 +79,15 @@ static const LatexPrim LATEX_PRIMS[] = {
     {"IfValueTF", P_IFNOVALUE, 3}, {"IfValueT", P_IFNOVALUE, 4}, {"IfValueF", P_IFNOVALUE, 5},
     {"IfBooleanTF", P_IFBOOLEAN, 0}, {"IfBooleanT", P_IFBOOLEAN, 1}, {"IfBooleanF", P_IFBOOLEAN, 2},
     {"AddToHook", P_ADDTOHOOK, 0}, {"IfFormatAtLeastTF", P_IFFORMATATLEAST, 0},
+    // the xspace binding's test (lmd/package/latex/tex/binding/xspace.sty)
+    {"lambda@xspace", P_XSPACE, 0},
 };
 
 bool latex_expandable(uint32_t code) {
     switch (code) {
     case P_IFPACKAGEWITH: case P_COUNTER_FMT: case P_VALUE:
     case P_ROMAN_UPPER: case P_PACKAGE_END: case P_PACKAGE_POP: case P_IFNOVALUE: case P_IFBOOLEAN:
-    case P_IFFORMATATLEAST:
+    case P_IFFORMATATLEAST: case P_XSPACE:
         return true;
     default:
         return false;
@@ -855,9 +858,18 @@ static void do_raw_group_cmd(Engine* e, const Token& t, uint8_t sub) {
     }
     uint32_t p = reader_resume(r);
     while (p < r->len && (r->buf[p] == ' ' || r->buf[p] == '\t')) p++;
-    if (sub == 0 && p < r->len && r->buf[p] == '[') {
+    // sub 0: \lstinline, \Verb[*]; sub 2: \mint, \mintinline, which name a {language}
+    // before the code; both take [options] and braced or delimited code
+    bool inline_code = sub == 0 || sub == 2;
+    if (inline_code && p < r->len && r->buf[p] == '*') p++;
+    if (inline_code && p < r->len && r->buf[p] == '[') {
         size_t cs = 0, ce = 0;
         size_t after = latex_scan_group_end(r->buf, r->len, p, '[', ']', &cs, &ce);
+        if (after) p = (uint32_t)after;
+    }
+    if (sub == 2 && p < r->len && r->buf[p] == '{') {
+        size_t cs = 0, ce = 0;
+        size_t after = latex_scan_group_end(r->buf, r->len, p, '{', '}', &cs, &ce);
         if (after) p = (uint32_t)after;
     }
     uint32_t after = p;
@@ -865,7 +877,7 @@ static void do_raw_group_cmd(Engine* e, const Token& t, uint8_t sub) {
         size_t cs = 0, ce = 0;
         size_t end = latex_scan_group_end(r->buf, r->len, p, '{', '}', &cs, &ce);
         after = end ? (uint32_t)end : r->len;
-    } else if (sub == 0 && p < r->len) {
+    } else if (inline_code && p < r->len) {
         char delim = r->buf[p];
         uint32_t q = p + 1;
         while (q < r->len && r->buf[q] != delim && r->buf[q] != '\n') q++;
@@ -1812,6 +1824,32 @@ static void do_ifnextchar(Engine* e) {
     back_list(e, match ? yes : no);
 }
 
+// xspace.sty's exception list (v1.13): punctuation and closing characters, group
+// delimiters, spaces, the italic correction and footnote marks
+static bool xspace_exception(Engine* e, const Token& t) {
+    if (t.kind == TK_CHAR) {
+        if (t.cat == CAT_BEGIN || t.cat == CAT_END || t.cat == CAT_SPACE) return true;
+        return t.value < 128 && strchr(",.'/?;:!~-)", (int)t.value) != nullptr;
+    }
+    if (t.kind != TK_CS) return false;
+    // an active ~ is a control sequence of its own
+    if (t.value == intern_active(e, '~')) return true;
+    static const char* names[] = {"/", " ", "space", "@sptoken", "@xobeysp", "footnote",
+        "footnotemark", "bgroup", "egroup"};
+    for (const char* name : names)
+        if (t.value == intern_cstr(e, name)) return true;
+    return false;
+}
+
+// \xspace without \futurelet: it peeks at the next token and needs no assignment, so
+// it also expands inside constructor arguments, where assignments are not executed
+static void do_xspace(Engine* e) {
+    Token next;
+    if (!get_token(e, &next)) return;
+    back_input(e, next);
+    if (!xspace_exception(e, next)) back_input(e, make_char(' ', CAT_SPACE));
+}
+
 static void do_ifstar(Engine* e) {
     TokSpan yes = halve_params(e, read_arg(e));
     TokSpan no = halve_params(e, read_arg(e));
@@ -2214,6 +2252,7 @@ bool latex_do(Engine* e, const Token& t, uint32_t code) {
         return true;
     }
     case P_IFNEXTCHAR: do_ifnextchar(e); return true;
+    case P_XSPACE: do_xspace(e); return true;
     case P_IFSTAR: do_ifstar(e); return true;
     case P_FOR: do_for(e, false); return true;
     case P_TFOR: do_for(e, true); return true;

@@ -202,6 +202,9 @@ table.latex-tabular tr.latex-cmidrule { height: 0; line-height: 0; }
 .latex-alg-comment { float: right; }
 .latex-alg-name, .latex-alg-call .latex-alg-name { font-variant: small-caps; }
 .latex-list { list-style-type: none; padding-left: 2em; }
+/* paralist's run-in items are indented paragraphs; inline items run into the text */
+.latex-runin .latex-runin-item { margin: 0; text-indent: 1.5em; }
+.latex-inpara-item .latex-item-label { margin-right: 0; }
 .latex-tabbing { border-collapse: collapse; margin: 0.5em 0; }
 .latex-tabbing td { padding: 0 1em 0 0; vertical-align: baseline; }
 .latex-and { display: inline-block; width: 2em; }

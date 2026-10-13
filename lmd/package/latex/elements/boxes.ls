@@ -11,6 +11,38 @@ import util: lambda.latex.util
 // inside an indented paragraph would otherwise indent its own first line
 let BOX_BASE = "display:inline-block;text-indent:0;white-space:nowrap"
 
+// The frame-box model shared by tcolorbox, framed, mdframed and fancybox: a
+// background, a line (width, style, color) on all or some sides, padding, a corner
+// radius and a shadow, each omitted when the spec leaves it null. A width of "0"
+// draws no line.
+pub fn frame_css(spec) {
+    let line = (spec.width or "1px") ++ " " ++ (spec.style or "solid") ++
+        (if (spec.line == null) "" else " " ++ spec.line)
+    let border = if (spec.width == "0") ""
+        else if (spec.sides == null) "border:" ++ line ++ ";"
+        else util.str_join([for (side in spec.sides) "border-" ++ side ++ ":" ++ line ++ ";"], "");
+    (if (spec.background == null) "" else "background-color:" ++ spec.background ++ ";") ++ border ++
+        (if (spec.padding == null) "" else "padding:" ++ spec.padding ++ ";") ++
+        (if (spec.radius == null) "" else "border-radius:" ++ spec.radius ++ ";") ++
+        (if (spec.shadow == null) "" else "box-shadow:" ++ spec.shadow ++ ";")
+}
+
+// fancybox's boxes, framed by \fboxrule (.4pt) at \fboxsep (3pt): \shadowbox casts
+// a \shadowsize (4pt) shadow to the lower right, \doublebox draws two lines, \ovalbox
+// rounds the corners and \Ovalbox does so with a thicker line
+let FANCYBOX = {shadowbox: {width: "0.4pt", padding: "3pt", shadow: "4pt 4pt 0 currentColor"},
+    doublebox: {width: "3px", style: "double", padding: "3pt"},
+    ovalbox: {width: "0.4pt", padding: "3pt", radius: "0.6em"},
+    Ovalbox: {width: "0.8pt", padding: "3pt", radius: "0.6em"}}
+pub let FANCYBOX_COMMANDS = [for (k, v at FANCYBOX) string(k)]
+
+// a fancybox command's CSS: an inline TeX box on the frame-box model
+pub fn fancybox_css(tag) => BOX_BASE ++ ";" ++ frame_css(FANCYBOX[tag])
+
+// boxedminipage: a minipage of the given width framed like \fbox
+pub fn boxed_minipage_css(width) => "display:inline-block;vertical-align:middle;" ++
+    (if (width == null) "" else "width:" ++ width ++ ";") ++ frame_css({width: "0.4pt", padding: "3pt"})
+
 // \mbox{text} — prevent line breaks within text
 pub fn render_mbox(items) {
     <span class: "latex-mbox", style: "white-space:nowrap", for c in items { c }>

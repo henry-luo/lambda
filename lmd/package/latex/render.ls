@@ -32,6 +32,14 @@ import algorithm2e: .packages.algorithm2e
 import floats: .floats
 import hyperref: .packages.hyperref
 import page_style: .packages.page_style
+import decorations: .packages.decorations
+import paragraph: .packages.paragraph
+import filler: .packages.filler
+import paralist: .packages.paralist
+import codeblocks: .packages.codeblocks
+import frames: .packages.frames
+import footmisc: .packages.footmisc
+import appendix: .packages.appendix
 
 // ============================================================
 // Main dispatcher — called recursively on every AST node
@@ -163,12 +171,53 @@ pub let PACKAGE_RENDER = {
         SI: render_siunitx, qty: render_siunitx},
     // tag forms act through the analysis pass (amsmath.tag_text)
     mathtools: {newtagform: render_nothing, renewtagform: render_nothing, usetagform: render_nothing},
+    soul: map([for (command in decorations.SOUL_COMMANDS, x in [command, (el, info) =>
+        decorations.render_soul(el, render_children(el, 0, info), info.settings, info.custom_colors)]) x] ++
+        [for (setting in decorations.SOUL_SETTINGS, x in [setting, render_nothing]) x]),
+    ulem: map([for (command in decorations.ULEM_COMMANDS, x in [command, (el, info) =>
+        decorations.render_ulem(el, render_children(el, 0, info))]) x] ++
+        ["emph", render_ulem_emph, "normalem", render_nothing, "ULforem", render_nothing]),
+    // paragraph declarations act through find_leading_decl and next_render_info
+    setspace: map([for (tag in paragraph.SETSPACE_DECLARATIONS, x in [tag, render_nothing]) x] ++
+        [for (tag in paragraph.SETSPACE_ENVIRONMENTS, x in [tag, render_spacing_env]) x]),
+    ragged2e: map([for (tag in paragraph.RAGGED_DECLARATIONS, x in [tag, render_nothing]) x] ++
+        [for (tag in paragraph.RAGGED_ENVIRONMENT_NAMES, x in [tag, (el, info) =>
+            render_env_div(el, info, "latex-" ++ string(name(el)), paragraph.ragged_css(string(name(el))))]) x]),
+    lipsum: map([for (tag in filler.COMMANDS.lipsum, x in [tag, (el, info) => filler.render(el)]) x]),
+    blindtext: map([for (tag in filler.COMMANDS.blindtext, x in [tag, (el, info) => filler.render(el)]) x]),
+    paralist: map([for (tag in paralist.ENVIRONMENT_NAMES, x in [tag, render_paralist]) x]),
+    fancybox: map([for (tag in boxes.FANCYBOX_COMMANDS, x in [tag, render_fancy_frame]) x]),
+    boxedminipage: {boxedminipage: render_boxed_minipage},
+    // framed blocks on the frame-box model (frames.ls)
+    framed: map([for (tag in frames.FRAMED, x in [tag, render_framed]) x]),
+    mdframed: {mdframed: (el, info) => render_mdframed(el, info, {}),
+        newmdenv: render_nothing, mdfdefinestyle: render_nothing},
+    // code blocks through the listings renderer (codeblocks.ls)
+    fancyvrb: map([for (tag in codeblocks.FANCYVRB_ENVIRONMENTS, x in [tag, render_fancyvrb]) x] ++
+        ["Verb", (el, info) => listings.render_inline(el), "fvset", render_nothing]),
+    minted: {minted: render_minted, mintinline: (el, info) => <code class: "latex-code language-" ++ (el.language or "text"),
+            style: "font-family:monospace;", util.text_of(el)>,
+        mint: (el, info) => listings.render_code(util.text_of(el), {}, null, el.language),
+        setminted: render_nothing},
+    footmisc: {footref: render_footref},
+    appendix: {appendices: render_appendices,
+        subappendices: (el, info) => render_env_div(el, info, "latex-subappendices", null),
+        appendixpage: (el, info) => render_appendix_page(), addappheadtotoc: render_contents_anchor},
     nicefrac: {nicefrac: render_math_command},
     xfrac: {sfrac: render_math_command},
     mhchem: {ce: render_math_command, pu: render_math_command}
 }
 
 fn render_nothing(el, info) => null
+
+// ulem underlines \emph unless normalem is in effect
+fn render_ulem_emph(el, info) {
+    let options = registry.options_for(info.packages, "ulem")
+    if (decorations.emph_underlined(info.settings, el.source_offset,
+        options != null and util.option_enabled(options.normalem)))
+        <span class: "latex-uline", style: "text-decoration:underline", for c in render_children(el, 0, info) { c }>
+    else render_styled(el, info, "em")
+}
 
 fn render_ding(el, info) {
     let glyph = dingbats.ding(util.raw_argument(el, "required", 0))
@@ -297,6 +346,109 @@ fn render_wrapfloat(el, info) {
         style: "float:" ++ side ++ ";" ++ (if (width == null) "" else "width:" ++ width ++ ";") ++
             (if (side == "left") "margin:0.3em 1em 0.5em 0;" else "margin:0.3em 0 0.5em 1em;"),
         for c in items { c }>
+}
+
+// paralist's lists: compact, run-in or inline forms of itemize, enumerate and
+// description; an enumerate form takes a label template such as [(a)]
+fn render_paralist(el, info) {
+    let spec = paralist.ENVIRONMENTS[string(name(el))]
+    let lead = util.leading_option(el)
+    let flat = util.flatten_paragraphs(<paralist for c in lead.children { c }>)
+    let tpl = if (spec.kind == "enumerate") paralist.template(lead.option) else null
+    if (spec.form == "compact" and tpl == null) compact_list(flat, info, spec.kind)
+    else (let items = labelled_items(flat, info, spec.kind, tpl),
+        if (spec.form == "inline")
+            <span class: "latex-inpara", for (i, item in items)
+                <span class: "latex-inpara-item", (if (i > 0) " " else null); item.label; for c in item.body { c }>>
+        else if (spec.form == "runin")
+            <div class: "latex-runin", for (item in items)
+                <p class: "latex-runin-item", item.label; for c in item.body { c }>>
+        else <ul class: "latex-list", style: enumitem.list_style({nosep: "true"}, "itemize"),
+            for (item in items) <li item.label; for c in item.body { c }>>)
+}
+
+// a compact list: the ordinary list with enumitem's nosep spacing
+fn compact_list(flat, info, kind) {
+    let style = enumitem.list_style({nosep: "true"}, kind)
+    match kind {
+        case "enumerate": <ol class: "latex-enumerate", style: style, for li in split_list_items(flat, info) { li }>
+        case "description": <dl class: "latex-description", style: style, for item in split_desc_items(flat, info) { item }>
+        default: <ul class: "latex-itemize", style: style, for li in split_list_items(flat, info) { li }>
+    }
+}
+
+// each item as {label, body}: a description item's term in bold, otherwise the
+// template's label or the default one
+fn labelled_items(flat, info, kind, tpl) {
+    if (kind == "description") (let parts = split_desc_items(flat, info),
+        [for (i, part in parts where name(part) == 'dt')
+            {label: <strong for c in content(part) { c }>,
+             body: if (i + 1 < len(parts) and name(parts[i + 1]) == 'dd') content(parts[i + 1]) else []}])
+    else [for (li in split_list_items(flat, info, (i) => <span class: "latex-item-label",
+            if (tpl != null) paralist.label(tpl, i + 1) else paralist.default_label(kind, i + 1)>))
+        (let children = content(li), {label: children[0], body: slice(children, 1, len(children))})]
+}
+
+fn render_fancy_frame(el, info) {
+    let tag = string(name(el));
+    <span class: "latex-" ++ tag, style: boxes.fancybox_css(tag), for c in render_children(el, 0, info) { c }>
+}
+
+// \begin{boxedminipage}[position]{width}: the width is the header group
+fn render_boxed_minipage(el, info) {
+    let lead = util.leading_option(el)
+    let header = environment_header(<boxedminipage for c in lead.children { c }>, 1)
+    let width = if (len(header.groups) > 0) util.css_dimension(trim(group_source(header.groups[0]))) else null
+    if (width == null) util.unsupported_element("boxedminipage", "boxedminipage needs a width", el.source_offset)
+    else <div class: "latex-boxedminipage", style: boxes.boxed_minipage_css(width),
+        for c in collect_children(header.body, 0, len(header.body), [], info) { c }>
+}
+
+// framed's framed, shaded and leftbar blocks
+fn render_framed(el, info) {
+    let tag = string(name(el))
+    let css = frames.framed_css(tag, info.custom_colors)
+    if (css == null) util.unsupported_element("framed", tag ++ " needs a defined shadecolor", el.source_offset)
+    else <div class: "latex-" ++ replace(tag, "*", ""), style: css, for c in render_children(el, 0, info) { c }>
+}
+
+// an mdframed block: a \newmdenv's keys, then a style= style's, then its own
+fn render_mdframed(el, info, defaults) {
+    let lead = util.leading_option(el)
+    let own = util.parse_kv_options(lead.option)
+    let style = own.style or defaults.style
+    let styled = if (style == null) {} else util.parse_kv_options(
+        util.setting_at(info.settings, "mdf-style:" ++ trim(string(style)), el.source_offset))
+    let frame = frames.mdframed_frame({*:defaults, *:styled, *:own}, info.custom_colors)
+    if (frame == null) util.unsupported_element("mdframed", "Unknown mdframed color", el.source_offset)
+    else <div class: "latex-mdframed", style: frame.css,
+        if (frame.title != null) <div class: "latex-mdframed-title", string(frame.title)>;
+        for c in collect_children(lead.children, 0, len(lead.children), [], info) { c }>
+}
+
+// fancyvrb's Verbatim family and minted's environment: the raw body's head holds the
+// options (and minted's language); the preamble's \fvset or \setminted sets defaults
+fn render_fancyvrb(el, info) {
+    let parsed = codeblocks.head(el.source, false)
+    listings.render_code(parsed.code, codeblocks.listing_options(
+        codeblocks.keys_of(parsed.options, info.code_defaults.fancyvrb), false), null)
+}
+
+fn render_minted(el, info) {
+    let parsed = codeblocks.head(el.source, true)
+    listings.render_code(parsed.code, codeblocks.listing_options(
+        codeblocks.keys_of(parsed.options, info.code_defaults.minted), true), null, parsed.language)
+}
+
+// setspace's environments; spacing{f} reads its stretch from the header group
+fn render_spacing_env(el, info) {
+    let tag = string(name(el))
+    let header = environment_header(el, if (tag == "spacing") 1 else 0)
+    let value = if (len(header.groups) > 0) trim(util.text_of(header.groups[0])) else null
+    let stretch = paragraph.environment_stretch(tag, value, info.class_options)
+    if (stretch == null) util.unsupported_element("setspace", "spacing needs a positive stretch", el.source_offset)
+    else <div class: "latex-" ++ tag, style: paragraph.stretch_css(stretch),
+        for c in collect_children(header.body, 0, len(header.body), [], info) { c }>
 }
 
 // turn and rotate turn their content by an angle; sideways by a quarter turn
@@ -838,6 +990,11 @@ fn render_extended_or_generic(el, info) {
     // a package's or \newfloat's float environment
     else if (floats.kind_of(info.float_kinds, tag_str) != null) {
         render_float(el, info, floats.kind_of(info.float_kinds, tag_str)) }
+    // an environment \newmdenv defined
+    else if (registry.active(info.packages, "mdframed") and
+        util.setting_at(info.settings, "mdf-env:" ++ tag_str, el.source_offset) != null) {
+        render_mdframed(el, info, util.parse_kv_options(
+            util.setting_at(info.settings, "mdf-env:" ++ tag_str, el.source_offset))) }
     else { resolve_extended_or_generic(tag_str, el, info) }
 }
 
@@ -856,10 +1013,37 @@ fn resolve_extended_or_generic(tag_str, el, info) {
 // ============================================================
 
 fn render_children(el, from_idx, info) {
-    let children = util.command_args(el)
+    let args = util.command_args(el)
+    let children = if (registry.active(info.packages, "paralist")) rejoin_inline_lists(args, 0, []) else args
     let n = len(children)
     if (from_idx >= n) { [] }
     else { collect_children(children, from_idx, n, [], info) }
+}
+
+// paralist's inline lists run into the text around them, but the parser closes the
+// paragraph at every environment: text, list and text with no blank line between
+// them become one paragraph again
+fn rejoin_inline_lists(children, i, acc) {
+    if (i >= len(children)) acc
+    else {
+        let child = children[i]
+        let previous = if (len(acc) > 0) acc[len(acc) - 1] else null
+        let inline = child is element and (contains(paralist.INLINE_NAMES, string(name(child))) or false)
+        if (inline and joins(previous, true)) (
+            let next = if (i + 1 < len(children)) children[i + 1] else null,
+            let tail = if (joins(next, false)) content(next) else [],
+            rejoin_inline_lists(children, i + (if (joins(next, false)) 2 else 1),
+                [*slice(acc, 0, len(acc) - 1), <paragraph for c in [*content(previous), child, *tail] { c }>]))
+        else rejoin_inline_lists(children, i + 1, acc ++ [child])
+    }
+}
+
+// a paragraph the list continues: the text before it does not end, or the text after
+// it does not start, with a blank line
+fn joins(node, before) {
+    if (not (node is element) or name(node) != 'paragraph' or len(node) == 0) false
+    else (let edge = if (before) node[len(node) - 1] else node[0],
+        not (edge is string) or index_of(if (before) trim_start(edge) else edge, "\n\n") == null)
 }
 
 // render children but skip brack_group elements (used by box commands)
@@ -967,6 +1151,9 @@ fn next_render_info(child, info) {
                             registry.active(info.packages, "listings")) {
         {*:info, listing_options: listings.merged(info.listing_options,
             listings.setting_options(child))}
+    } else if (child is element and registry.active(info.packages, "setspace") and
+        paragraph.declared_stretch(child, info.class_options) != null) {
+        {*:info, line_stretch: paragraph.declared_stretch(child, info.class_options)}
     } else if (child is element and string(name(child)) == "boldmath") {
         {*:info, math_bold: true}
     } else if (child is element and string(name(child)) == "unboldmath") {
@@ -1161,7 +1348,7 @@ fn render_maketitle(info) {
     let thanks = [for (el in [info.title_el, info.author_el, info.date_el],
         note in thanks_notes(el)) note]
     let title_info = {*:info, thanks_marks: [for (i, note in thanks)
-        {key: string(note.source_offset), val: thanks_symbol(i)}]}
+        {key: string(note.source_offset), val: util.fnsymbol(i + 1)}]}
     let title_div = render_maketitle_div("title", info.title_el, info.title, title_info)
     let author_div = render_maketitle_div("author", info.author_el, info.author, title_info)
     let date_div = render_maketitle_div("date", info.date_el, info.date, title_info)
@@ -1171,7 +1358,7 @@ fn render_maketitle(info) {
         if (len(thanks) > 0) {
             <div class: "latex-thanks",
                 for (i, note in thanks)
-                    <p <sup thanks_symbol(i)> " " for c in render_children(note, 0, info) { c }>>
+                    <p <sup util.fnsymbol(i + 1)> " " for c in render_children(note, 0, info) { c }>>
         }
     >
 }
@@ -1181,11 +1368,6 @@ fn thanks_notes(node) {
     else if (string(name(node)) == "thanks") [node]
     else [for (child in node, note in thanks_notes(child)) note]
 }
-
-// LaTeX's \fnsymbol sequence
-let THANKS_SYMBOLS = ["*", "†", "‡", "§", "¶", "‖", "**", "††", "‡‡"]
-
-fn thanks_symbol(i) => if (i < len(THANKS_SYMBOLS)) THANKS_SYMBOLS[i] else string(i + 1)
 
 fn render_thanks_ref(el, info) {
     let mark = if (info.thanks_marks == null) null
@@ -1207,6 +1389,24 @@ fn render_maketitle_div(css_class, el, fallback_text, info) {
     else { null }
 }
 
+// appendix's environment: the anchor of its toc option's contents head, the page
+// option's title, then the appendices
+fn render_appendices(el, info) {
+    let options = registry.options_for(info.packages, "appendix")
+    let page = if (options != null and util.option_enabled(options.page)) render_appendix_page() else null;
+    <div class: "latex-appendices", render_contents_anchor(el, info); page;
+        for c in render_children(el, 0, info) { c }>
+}
+
+// \appendixpage: the appendices' title, set like a part
+fn render_appendix_page() => <h1 class: "latex-appendix-page", appendix.HEAD>
+
+// "Appendix " before a heading's or contents entry's number when appendix's title
+// or titletoc option named it
+fn appendix_name(names, place) {
+    if (names != null and names[place]) appendix.NAME ++ " " else ""
+}
+
 // the anchor a ToC or list entry from \addcontentsline links to
 fn render_contents_anchor(el, info) {
     let id = util.lookup(info.contents_anchors, string(el.source_offset))
@@ -1220,6 +1420,7 @@ fn render_toc(info) {
             <li class: cls,
                 <a href: "#" ++ h.id,
                     if (h.number != null) { <span class: "sec-num",
+                        appendix_name(util.lookup(info.heading_names, h.id), "toc") ++
                         language.display_number(h.number, info.polyglossia)> }
                     h.text
                 >
@@ -1249,8 +1450,9 @@ fn render_heading(el, info, html_level) {
         else if (title_text != "") [title_text]
         else []
 
+    let names = util.lookup(info.heading_names, title_id)
     let num_span = if (sec_num != null) <span class: "sec-num",
-        language.display_number(sec_num, info.polyglossia) ++ " "> else null
+        appendix_name(names, "title") ++ language.display_number(sec_num, info.polyglossia) ++ " "> else null
     // \texorpdfstring gives outlines its PDF branch
     let outline_text = if (title_el != null and util.find_descendant(title_el, 'texorpdfstring') != null)
         util.pdf_text_of(title_el) else util.text_of(title_children)
@@ -1282,7 +1484,15 @@ fn build_heading_el(level, id, num_span, children, outline_title, running_marks)
 // Paragraphs
 // ============================================================
 
+// a setspace declaration earlier in the group spaces the paragraphs after it
 fn render_paragraph(el, info) {
+    let rendered = render_paragraph_content(el, info)
+    if (info.line_stretch == null or rendered == null) rendered
+    else <div class: "latex-spacing", style: paragraph.stretch_css(info.line_stretch),
+        for c in (if (rendered is array) rendered else [rendered]) { c }>
+}
+
+fn render_paragraph_content(el, info) {
     // check for parbreak symbols inside paragraph — split into multiple <p> tags
     if (has_parbreak(el, 0, len(el))) {
         let groups = split_at_parbreaks(el, info)
@@ -1292,7 +1502,7 @@ fn render_paragraph(el, info) {
     }
     else {
         // check for leading font/alignment declaration
-        let decl = find_leading_decl(el, 0, len(el))
+        let decl = find_leading_decl(el, 0, len(el), info)
         if (decl != null) { render_paragraph_with_decl(el, info, decl) }
         else {
             let items = render_children_with_color(el, info)
@@ -1389,10 +1599,7 @@ fn render_paragraph_with_decl(el, info, decl) {
     else if (color.is_color_decl(decl_tag)) {
         <p for c in items { c }>
     }
-    else {
-        let style = font_decl.align_decl_style(decl_tag);
-        <p style: style, for c in items { c }>
-    }
+    else <p style: paragraph_decl_css(decl, info), for c in items { c }>
 }
 
 fn split_around_blocks(items) {
@@ -1562,6 +1769,16 @@ fn render_itemize(el, info) {
 
 fn render_enumerate(el, info) {
     let flat = util.flatten_paragraphs(el)
+    // the enumerate and paralist packages read [(a)] as a label template
+    let tpl = if (el.options_raw == null or registry.active(info.packages, "enumitem") or
+        not (registry.active(info.packages, "enumerate") or registry.active(info.packages, "paralist"))) null
+        else paralist.template(el.options_raw)
+    if (tpl != null) <ul class: "latex-list latex-enumerate",
+        for (item in labelled_items(flat, info, "enumerate", tpl)) <li item.label; for c in item.body { c }>>
+    else render_plain_enumerate(el, flat, info)
+}
+
+fn render_plain_enumerate(el, flat, info) {
     let items = split_list_items(flat, info)
     let opts = if (registry.active(info.packages, "enumitem")) enumitem.options(el) else {};
     let first = if (registry.active(info.packages, "enumitem") and el.source_offset != null)
@@ -2727,22 +2944,31 @@ fn render_footnote(el, info) {
     let key = util.slugify(trim(util.text_of(el)))
     let by_text = [for (entry in info.footnotes
         where util.slugify(trim(util.text_of(entry.node))) == key) entry.number]
-    footnote_ref(if (len(exact) > 0) exact[0] else if (len(by_text) > 0) by_text[0] else 0)
+    footnote_ref(if (len(exact) > 0) exact[0] else if (len(by_text) > 0) by_text[0] else 0, info)
 }
 
 fn render_footnotemark(el, info) {
     let mark = util.lookup(info.footnote_marks, string(el.source_offset))
     if (mark == null) util.unsupported_element("latex", "Unnumbered footnote mark",
         el.source_offset)
-    else footnote_ref(mark)
+    else footnote_ref(mark, info)
 }
 
-fn footnote_ref(fn_num) {
+fn footnote_ref(fn_num, info) {
     <sup class: "latex-footnote-ref",
         <a href: "#fn-" ++ (fn_num), id: "fnref-" ++ (fn_num),
-            string(fn_num)
+            footmisc.mark(registry.options_for(info.packages, "footmisc"), fn_num)
         >
     >
+}
+
+// footmisc's \footref{label} repeats the mark of the note holding \label, linking
+// to the label's anchor inside that note
+fn render_footref(el, info) {
+    let entry = util.lookup(info.labels, trim(util.text_of(el)));
+    <sup class: if (entry == null) "latex-footnote-ref latex-unresolved" else "latex-footnote-ref",
+        <a href: "#" ++ (if (entry == null) util.slugify(trim(util.text_of(el))) else entry.id),
+            if (entry == null) "??" else entry.number>>
 }
 
 // ============================================================
@@ -2857,7 +3083,7 @@ fn render_control_symbol(el) {
 
 fn render_group(el, info) {
     // check for leading font/alignment declaration in this group
-    let decl = find_leading_decl(el, 0, len(el))
+    let decl = find_leading_decl(el, 0, len(el), info)
     if (decl != null) { render_group_with_decl(el, info, decl) }
     else {
         let items = render_children_with_color(el, info)
@@ -2867,21 +3093,35 @@ fn render_group(el, info) {
     }
 }
 
-// find the first font/alignment/color declaration among children (skipping whitespace)
-fn find_leading_decl(el, i, n) {
+// find the first font/paragraph/color declaration among children (skipping whitespace)
+fn find_leading_decl(el, i, n, info) {
     if (i >= n) { null }
     else {
         let child = el[i]
         if (child is string and len(trim(child)) == 0) {
-            find_leading_decl(el, i + 1, n)
+            find_leading_decl(el, i + 1, n, info)
         } else if (child is element) {
             let tag_str = string(name(child))
-            if (font_decl.is_font_decl(tag_str) or font_decl.is_align_decl(tag_str) or
+            if (font_decl.is_font_decl(tag_str) or paragraph_decl_css(child, info) != null or
                 color.is_color_decl(tag_str)) child
             else null
         }
         else { null }
     }
+}
+
+// The CSS of a paragraph declaration: LaTeX's alignment ones, and ragged2e's and
+// setspace's while their package is active; null for anything else
+fn paragraph_decl_css(el, info) {
+    let tag = string(name(el))
+    if (font_decl.is_align_decl(tag)) font_decl.align_decl_style(tag)
+    else if (registry.active(info.packages, "ragged2e") and
+        (contains(paragraph.RAGGED_DECLARATIONS, tag) or false)) paragraph.ragged_css(tag)
+    else if (registry.active(info.packages, "setspace") and
+        (contains(paragraph.SETSPACE_DECLARATIONS, tag) or false)) (
+        let stretch = paragraph.declared_stretch(el, info.class_options),
+        if (stretch == null) null else paragraph.stretch_css(stretch))
+    else null
 }
 
 // render a group whose first significant child is a font/alignment/color declaration
@@ -2893,8 +3133,7 @@ fn render_group_with_decl(el, info, decl) {
         font_decl.wrap_font_decl(decl, items)
     else if (color.is_color_decl(decl_tag))
         if (len(items) == 1) items[0] else <span for c in items { c }>
-    else
-        font_decl.wrap_align_decl(decl_tag, items)
+    else font_decl.wrap_align_decl(decl_tag, items, paragraph_decl_css(decl, info))
 }
 
 fn has_color_decl(el) {

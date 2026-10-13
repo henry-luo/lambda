@@ -1,0 +1,116 @@
+"xspace:"
+true
+"xspace in a note:"
+true
+"xspace issues:"
+[]
+"soul hl:"
+true
+"soul so and caps:"
+true
+"soul colors:"
+true
+"soul issues:"
+[]
+"ulem emph:"
+true
+"ulem lines:"
+true
+"ulem issues:"
+["xout-approximation xout"]
+"normalem option:"
+true
+"onehalfspacing:"
+true
+"doublespace:"
+true
+"spacing:"
+true
+"declaration holds:"
+true
+"setspace issues:"
+[]
+"parskip:"
+true
+"ragged2e:"
+true
+"ragged2e issues:"
+[]
+"filler blocks:"
+3
+"filler issues:"
+["filler-text-approximation lipsum", "filler-text-approximation lipsum", "filler-text-approximation blindtext"]
+"compactenum:"
+true
+"inparaenum:"
+true
+"asparaenum:"
+true
+"enumerate template:"
+true
+"paralist issues:"
+[]
+"Verbatim:"
+true
+"Verb:"
+true
+"fancyvrb issues:"
+["unsupported-listing-option commandchars"]
+"minted:"
+true
+"mintinline:"
+true
+"mint:"
+true
+"list of listings:"
+true
+"minted issues:"
+["frame-approximation lines", "listing-highlighting-omitted python", "listing-highlighting-omitted c", "listing-highlighting-omitted bash"]
+"framed:"
+true
+"mdframed style:"
+true
+"newmdenv:"
+true
+"fancybox:"
+true
+"boxedminipage:"
+true
+"frame issues:"
+["unsupported-mdframed-key foo"]
+"symbol marks:"
+true
+"footref:"
+true
+"symbol list:"
+true
+"norule:"
+true
+"footmisc issues:"
+["unsupported-option perpage", "unresolved-reference nope"]
+"label in a note:"
+true
+"subappendices:"
+true
+"appendices title:"
+true
+"appendix refs:"
+true
+"numbering resumes:"
+true
+"letters continue:"
+true
+"toc head:"
+true
+"appendix page:"
+true
+"appendix issues:"
+[]
+"article subappendices:"
+true
+"article appendices:"
+true
+"head anchor:"
+true
+"article issues:"
+[]
