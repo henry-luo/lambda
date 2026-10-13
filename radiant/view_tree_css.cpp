@@ -316,21 +316,26 @@ static bool view_css_property_column(ViewTree* tree, ViewCssStyle* style, size_t
     const ViewCssStyle* table = cell ? cell->parent.get() : nullptr;
     while (table && table->display.inner != CSS_VALUE_TABLE) table = table->parent;
     if (!table || !table->source) return view_css_binding_failure(style, "table-column binding requires a table cell context");
-    size_t next = 0; *selected = nullptr;
+    size_t next = 0, wanted_span = layout_table_cell_colspan(cell->source); *selected = nullptr;
+    const ViewCssStyle* fallback = nullptr;
     auto admit = [&](ViewCssStyle* column) -> bool {
         if (!column) return view_css_binding_failure(style, "column property style allocation failed", VIEW_MODEL_OUT_OF_MEMORY);
         if (column->binding_status != VIEW_MODEL_OK) return view_css_binding_failure(style, column->binding_reason, column->binding_status);
-        return !column->flow_traits || column->flow_traits->status == VIEW_MODEL_OK ||
-            view_css_binding_failure(style, column->flow_traits->reason, column->flow_traits->status);
+        if (column->flow_traits && column->flow_traits->status != VIEW_MODEL_OK)
+            return view_css_binding_failure(style, column->flow_traits->reason, column->flow_traits->status);
+        return column->display.inner != CSS_VALUE_TABLE_COLUMN_GROUP || !column->flow_traits || column->flow_traits->column_property_span <= 1 ||
+            view_css_binding_failure(style, "column property spans apply to leaf columns");
     };
     auto range = [&](ViewCssStyle* column) -> bool {
-        size_t start = column->flow_traits && column->flow_traits->column_number ? column->flow_traits->column_number - 1 : next;
-        size_t span = layout_table_column_span(column->source);
-        if (start > UINT32_MAX - span) return view_css_binding_failure(style, "table-column property range exceeds the counter domain");
-        next = start + span;
-        if (index - 1 >= start && index - 1 < next) {
-            if (*selected) return view_css_binding_failure(style, "overlapping table column property definitions");
-            *selected = column;
+        RadiantTableColumnRange declared = {};
+        if (!radiant_table_column_range(column, next, UINT32_MAX, &declared))
+            return view_css_binding_failure(style, "table-column property range exceeds the counter domain");
+        next = declared.next;
+        if (index - 1 >= declared.column && index - 1 < next && (index - 1 - declared.column) % declared.property_span == 0 &&
+            (declared.property_span == wanted_span || declared.property_span == 1)) {
+            const ViewCssStyle** match = declared.property_span == wanted_span ? selected : &fallback;
+            if (*match) return view_css_binding_failure(style, "overlapping table column property definitions");
+            *match = column;
         }
         return true;
     };
@@ -356,6 +361,7 @@ static bool view_css_property_column(ViewTree* tree, ViewCssStyle* style, size_t
             if (!children && !range(column)) return false;
         }
     }
+    if (!*selected) *selected = fallback;
     return true;
 }
 

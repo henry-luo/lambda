@@ -1,6 +1,7 @@
 #include "page_document.hpp"
 #include "view_tree_css.hpp"
 #include "layout.hpp"
+#include "layout_table.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lib/memtrack.h"
@@ -484,6 +485,17 @@ bool radiant_table_column_proportion(const CssValue* value, float* result) {
     return *result > 0.0f;
 }
 
+bool radiant_table_column_range(const ViewCssStyle* style, size_t next, size_t limit, RadiantTableColumnRange* range) {
+    const RadiantFlowTraits* traits = style->flow_traits.get();
+    range->column = traits && traits->column_number ? traits->column_number - 1 : next;
+    range->property_span = traits && traits->column_property_span ? traits->column_property_span : 1;
+    range->repeat = layout_table_column_span(style->source);
+    if (range->column >= limit || range->repeat - 1 > (limit - 1 - range->column) / range->property_span) return false;
+    // repeated property declarations advance by their qualifying span; auto follows the final start by one.
+    range->next = range->column + (range->repeat - 1) * range->property_span + 1;
+    return true;
+}
+
 bool radiant_decoration_retain(const ViewCssStyle* style, bool padding, bool after) {
     RadiantDecorationConditionality policy = style && style->flow_traits
         ? style->flow_traits->decoration[padding][after] : RADIANT_DECORATION_CSS;
@@ -495,6 +507,7 @@ bool radiant_flow_trait_name(const char* name) {
     return name && (!strcmp(name, "line-stacking-strategy") || !strcmp(name, "text-altitude") ||
         !strcmp(name, "text-depth") || !strcmp(name, "area-source") || !strcmp(name, "block-inline-geometry") ||
         !strcmp(name, "start-indent") || !strcmp(name, "end-indent") || !strcmp(name, "column-proportion") || !strcmp(name, "column-number") ||
+        !strcmp(name, "column-property-span") ||
         !strcmp(name, "style-transparent") ||
         !strcmp(name, flow_table_omit_names[0]) || !strcmp(name, flow_table_omit_names[1]) ||
         radiant_decoration_trait_key(name, &index, &component) || radiant_flow_trait_key(name, &space, &index, &component));
@@ -570,6 +583,7 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
     const char* cell_alignment = nullptr; const char* line_stacking = nullptr;
     const char* area_source = nullptr;
     const char* inline_geometry = nullptr; const char* column_proportion = nullptr; const char* column_number = nullptr;
+    const char* column_property_span = nullptr;
     const char* indents[2] = {}; const char* table_omit[2] = {};
     const char* nominal[2] = {};
     const char* style_transparent = nullptr;
@@ -582,6 +596,7 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
         if (!strcmp(local, "style-transparent")) { style_transparent = value; return true; }
         if (!strcmp(local, "column-proportion")) { column_proportion = value; return true; }
         if (!strcmp(local, "column-number")) { column_number = value; return true; }
+        if (!strcmp(local, "column-property-span")) { column_property_span = value; return true; }
         for (size_t i = 0; i < 2; i++) if (!strcmp(local, flow_table_omit_names[i])) { table_omit[i] = value; return true; }
         if (!strcmp(local, "area-source")) { area_source = value; return true; }
         if (!strcmp(local, "block-inline-geometry")) { inline_geometry = value; return true; }
@@ -621,6 +636,15 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
             if (!flow_integer(column_number, &number) || number < 1)
                 return fail("column number requires auto or a positive integer in the counter domain");
             traits->column_number = static_cast<uint32_t>(number);
+        }
+    }
+    if (column_property_span) {
+        if (!strcmp(column_property_span, "inherit")) traits->column_property_span = parent->column_property_span;
+        else {
+            int32_t span = 0;
+            if (!flow_integer(column_property_span, &span) || span < 1 || span > 1000)
+                return fail("column property span requires a positive integer through the HTML colspan limit");
+            traits->column_property_span = static_cast<uint32_t>(span);
         }
     }
     if (column_proportion && strcmp(column_proportion, "none")) {

@@ -28,6 +28,8 @@ enum PagedRelaxation : uint32_t { PAGED_RELAX_MINIMA = 1, PAGED_RELAX_AVOIDANCE 
 enum PagedRegionKind : uint8_t { PAGED_REGION_NOTE, PAGED_REGION_TOP, PAGED_REGION_BOTTOM, PAGED_REGION_COUNT };
 enum PagedCellAnchor : uint8_t { PAGED_CELL_BASELINE, PAGED_CELL_BEFORE, PAGED_CELL_UNALIGNED };
 struct PagedTableAlignment { float anchors[PAGED_CELL_UNALIGNED]; };
+struct PagedColumnPropertySlot { size_t column, span; };
+HASHMAP_DEFINE_FIELD2_KEY(paged_column_property_slots, PagedColumnPropertySlot, column, span)
 struct PagedRegionRecord;
 struct PagedImagePaint;
 struct PagedCellLeaf;
@@ -1866,20 +1868,24 @@ static TypesetStatus paged_table_source_register(ViewTree* tree, PagedCompositio
     return style->counters ? paged_mark_register(composition, style) : TYPESET_OUT_OF_MEMORY;
 }
 
+static bool paged_column_properties_only(const PagedFlowNode* column) {
+    return !column->column_span || (column->style->flow_traits && column->style->flow_traits->column_property_span > 1);
+}
+
 static TypesetStatus paged_table_column_collect(ViewTree* tree, PagedComposition* composition,
         PagedFlowNode* table, ViewCssStyle* style, size_t depth, PagedFlowNode* group = nullptr) {
     if (depth > composition->options.max_depth) return TYPESET_BUDGET_EXHAUSTED;
-    TypesetStatus status = paged_size_keywords_admit(composition, style);
+    const RadiantFlowTraits* traits = style->flow_traits.get();
+    bool property_only = traits && traits->column_property_span > 1;
+    if (property_only && style->display.inner == CSS_VALUE_TABLE_COLUMN_GROUP)
+        return paged_failure(composition, TYPESET_INVALID, style->source, 0, "column property spans apply to leaf columns");
+    TypesetStatus status = property_only ? TYPESET_OK : paged_size_keywords_admit(composition, style);
     if (status != TYPESET_OK) return status;
-    if (css_value_keyword_equals(view_css_property(tree, style, "visibility"), CSS_VALUE_COLLAPSE))
+    if (!property_only && css_value_keyword_equals(view_css_property(tree, style, "visibility"), CSS_VALUE_COLLAPSE))
         return paged_failure(composition, TYPESET_INVALID, style->source, 0,
             "collapsed columns require a table grid visibility policy");
     PagedFlowNode* column = paged_flow_new(composition, PAGED_FLOW_TABLE_COLUMN, style->source, style);
     if (!column) return composition->diagnostic.status == TYPESET_OK ? TYPESET_OUT_OF_MEMORY : composition->diagnostic.status;
-    const RadiantFlowTraits* traits = style->flow_traits.get();
-    column->column = traits && traits->column_number ? traits->column_number - 1 : table->next_declared_column;
-    if (column->column >= composition->options.max_items)
-        return paged_failure(composition, TYPESET_BUDGET_EXHAUSTED, style->source, 0, "table grid exceeds its track budget");
     if (traits && traits->column_number && style->display.inner == CSS_VALUE_TABLE_COLUMN_GROUP)
         return paged_failure(composition, TYPESET_INVALID, style->source, 0, "column numbers apply to leaf columns and cells");
     if (group) paged_flow_link(group, column);
@@ -1903,27 +1909,30 @@ static TypesetStatus paged_table_column_collect(ViewTree* tree, PagedComposition
             if (status != TYPESET_OK) return status;
         }
     }
-    if (style->flow_traits && style->flow_traits->column_proportion > 0.0f) {
+    if (column->first_child) {
+        // a group's provisional source cursor is not its geometry; numbered children may reset it within the budget.
+        size_t end = 0, begin = SIZE_MAX;
+        for (PagedFlowNode* child = column->first_child; child; child = child->next) {
+            if (paged_column_properties_only(child)) continue;
+            if (child->column < begin) begin = child->column;
+            if (child->column + child->column_span > end) end = child->column + child->column_span;
+        }
+        column->column = begin == SIZE_MAX ? 0 : begin;
+        column->column_span = end - column->column;
+    } else {
+        RadiantTableColumnRange declared = {};
+        if (!radiant_table_column_range(style, table->next_declared_column, composition->options.max_items, &declared))
+            return paged_failure(composition, TYPESET_BUDGET_EXHAUSTED, style->source, 0, "table grid exceeds its track budget");
+        column->column = declared.column; column->column_span = declared.next - declared.column;
+        // property-only declarations advance source numbering without allocating geometric tracks.
+        table->next_declared_column = declared.next;
+        if (!property_only && declared.next > table->declared_columns) table->declared_columns = declared.next;
+    }
+    if (!paged_column_properties_only(column) && traits && traits->column_proportion > 0.0f) {
         if (!table->table_fixed || paged_is_label_body_grid(table))
             return paged_failure(composition, TYPESET_INVALID, style->source, 0,
                 "proportional columns require a fixed table with a definite inline extent");
         if (!column->first_child) table->table_proportional = true;
-    }
-    if (column->first_child) {
-        size_t end = 0;
-        column->column = column->first_child->column;
-        for (PagedFlowNode* child = column->first_child; child; child = child->next) {
-            if (child->column < column->column) column->column = child->column;
-            if (child->column + child->column_span > end) end = child->column + child->column_span;
-        }
-        column->column_span = end - column->column;
-    } else {
-        column->column_span = layout_table_column_span(style->source);
-        if (column->column_span > composition->options.max_items - column->column)
-            return paged_failure(composition, TYPESET_BUDGET_EXHAUSTED, style->source, 0, "table grid exceeds its track budget");
-        // source order sets the next implicit position; the grid bound retains the greatest explicit endpoint.
-        table->next_declared_column = column->column + column->column_span;
-        if (table->next_declared_column > table->declared_columns) table->declared_columns = table->next_declared_column;
     }
     return TYPESET_OK;
 }
@@ -2035,12 +2044,12 @@ static TypesetStatus paged_table_collect(ViewTree* tree, PagedComposition* compo
 }
 
 template <typename Fn>
-static TypesetStatus paged_table_columns_visit(PagedFlowNode* table, Fn fn) {
+static TypesetStatus paged_table_columns_visit(PagedFlowNode* table, Fn fn, bool properties = false) {
     for (PagedFlowNode* source = table->column_sources; source; source = source->next) {
-        TypesetStatus status = fn(source);
+        TypesetStatus status = properties || !paged_column_properties_only(source) ? fn(source) : TYPESET_OK;
         if (status != TYPESET_OK) return status;
         for (PagedFlowNode* child = source->first_child; child; child = child->next) {
-            status = fn(child);
+            status = properties || !paged_column_properties_only(child) ? fn(child) : TYPESET_OK;
             if (status != TYPESET_OK) return status;
         }
     }
@@ -2065,16 +2074,36 @@ static TypesetStatus paged_table_grid(ViewTree* tree, PagedComposition* composit
     size_t* ends = (size_t*)pool_calloc(pool, capacity * sizeof(size_t));
     size_t* covered = (size_t*)pool_calloc(pool, table->row_count * sizeof(size_t));
     if (!table->table_rows || !ends || !covered) return TYPESET_OUT_OF_MEMORY;
-    // leaf declarations may arrive out of order, but their physical track ranges must be disjoint.
+    HashMap* properties = nullptr;
+    // geometric tracks are disjoint; qualified properties conflict only at an identical column/span key.
     TypesetStatus status = paged_table_columns_visit(table, [&](PagedFlowNode* column) {
         if (column->first_child) return TYPESET_OK;
+        if (paged_column_properties_only(column)) {
+            RadiantTableColumnRange declared = {};
+            if (!radiant_table_column_range(column->style, column->column, composition->options.max_items, &declared))
+                return paged_failure(composition, TYPESET_BUDGET_EXHAUSTED, column->source, 0, "table column property budget exhausted");
+            if (declared.repeat > composition->options.max_items - work)
+                return paged_failure(composition, TYPESET_BUDGET_EXHAUSTED, column->source, 0, "table column property budget exhausted");
+            work += declared.repeat;
+            if (!properties) properties = paged_column_property_slots_new(16);
+            if (!properties) return TYPESET_OUT_OF_MEMORY;
+            for (size_t i = 0; i < declared.repeat; i++) {
+                PagedColumnPropertySlot key = {declared.column + i * declared.property_span, declared.property_span};
+                if (hashmap_get(properties, &key)) return paged_failure(composition, TYPESET_INVALID, column->source, 0,
+                    "overlapping table column property definitions");
+                hashmap_set(properties, &key);
+                if (hashmap_oom(properties)) return TYPESET_OUT_OF_MEMORY;
+            }
+            return TYPESET_OK;
+        }
         for (size_t c = column->column; c < column->column + column->column_span; c++) {
             if (ends[c]) return paged_failure(composition, TYPESET_INVALID, column->source, 0,
                 "overlapping table column declarations require a column property conflict policy");
             ends[c] = 1;
         }
         return TYPESET_OK;
-    });
+    }, true);
+    if (properties) hashmap_free(properties);
     memset(ends, 0, capacity * sizeof(size_t));
     PagedFlowNode* group_end = nullptr;
     for (PagedFlowNode* row = table->first_child; status == TYPESET_OK && row; row = row->next) {
@@ -4831,6 +4860,7 @@ static float paged_table_column_x(const PagedFrame* frame, size_t column, PagedT
 
 static TypesetStatus paged_table_column_open(PagedComposer* composer, PagedFrame* frame,
         PagedTableTracks* tracks, PagedFlowNode* source, LayoutViewNode* parent) {
+    if (paged_column_properties_only(source)) return TYPESET_OK;
     float x = paged_table_column_x(frame, source->column, tracks);
     float width = layout_table_span_width(tracks->columns, frame->flow->columns,
         source->column, source->column_span, frame->flow->table_spacing_h);

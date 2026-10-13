@@ -9724,6 +9724,135 @@ TEST_F(SecondaryViewTest, FoTableColumnQueriesNormalizeDirectRowsAndKeepOriginal
     EXPECT_EQ(translated->diagnostic.status, TYPESET_INVALID); EXPECT_EQ(translated->root, nullptr);
 }
 
+TEST_F(SecondaryViewTest, SpanQualifiedColumnBindingsSelectExactThenSingleAndRetainOwnerValues) {
+    stylesheet("@page{size:300px 180px;margin:10px}td{padding:0}table{border-spacing:0}");
+    ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    DomElement* table = block(nullptr, "table-layout:fixed;width:240px;font:10px/24px Arial", "table"); ASSERT_NE(table, nullptr);
+    DomElement* ordinary = block(nullptr, "width:60px;color:red;font-size:12px;padding-top:.5em", "col", table); ASSERT_NE(ordinary, nullptr);
+    ASSERT_TRUE(ordinary->set_attribute("span", "4"));
+    DomElement* group = block(nullptr, "font-size:20px;color:blue", "colgroup", table); ASSERT_NE(group, nullptr);
+    DomElement* qualified = block(nullptr, "width:999px;background:lime;padding-top:.5em", "col", group); ASSERT_NE(qualified, nullptr);
+    ASSERT_TRUE(qualified->set_attribute("r:column-number", "1")); ASSERT_TRUE(qualified->set_attribute("span", "2"));
+    ASSERT_TRUE(qualified->set_attribute("r:column-property-span", "2"));
+    DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
+    DomElement* cell = block(nullptr, nullptr, "td", row); ASSERT_NE(cell, nullptr); ASSERT_TRUE(cell->set_attribute("colspan", "2"));
+    DomElement* exact = block("Exact", "font-size:var(--font);color:var(--color);padding-top:var(--pad)", "div", cell); ASSERT_NE(exact, nullptr);
+    ASSERT_TRUE(exact->set_attribute("r:property-bindings", "--font:table-column(1,font-size);--color:table-column(1,color);--pad:table-column(1,padding-top)"));
+    DomElement* repeated = block("Repeated", "color:var(--color)", "td", row); ASSERT_NE(repeated, nullptr);
+    ASSERT_TRUE(repeated->set_attribute("colspan", "2")); ASSERT_TRUE(repeated->set_attribute("r:property-bindings", "--color:table-column(3,color)"));
+    row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
+    DomElement* single = block("Single", "color:var(--color)", "td", row); ASSERT_NE(single, nullptr);
+    ASSERT_TRUE(single->set_attribute("r:property-bindings", "--color:table-column(1,color)"));
+    DomElement* fallback = block("Fallback", "color:var(--color)", "td", row); ASSERT_NE(fallback, nullptr);
+    ASSERT_TRUE(fallback->set_attribute("colspan", "3")); ASSERT_TRUE(fallback->set_attribute("r:property-bindings", "--color:table-column(2,color)"));
+    ViewTree* first = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(first, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    const ViewCssStyle* retained = view_css_resolve(first, exact); ASSERT_NE(retained, nullptr);
+    EXPECT_FLOAT_EQ(retained->font.font_size, 20); EXPECT_EQ(retained->color.b, 255); ASSERT_NE(retained->padding[0], nullptr);
+    EXPECT_DOUBLE_EQ(retained->padding[0]->data.length.value, 10);
+    EXPECT_EQ(view_css_resolve(first, repeated)->color.b, 255); EXPECT_EQ(view_css_resolve(first, single)->color.r, 255);
+    EXPECT_EQ(view_css_resolve(first, fallback)->color.r, 255);
+    EXPECT_EQ(source_fragment(first, qualified, VIEW_FRAGMENT_BODY, false), nullptr);
+    EXPECT_EQ(source_fragment(first, group, VIEW_FRAGMENT_BODY, false), nullptr);
+    LayoutViewNode* tracks = source_fragment(first, ordinary, VIEW_FRAGMENT_BODY, false); ASSERT_NE(tracks, nullptr); EXPECT_FLOAT_EQ(tracks->rect.width, 240);
+    ASSERT_TRUE(group->set_attribute("style", "font-size:30px;color:lime"));
+    const ViewCssStyle* changed = view_css_resolve(secondary(), exact); ASSERT_NE(changed, nullptr);
+    EXPECT_FLOAT_EQ(changed->font.font_size, 30); EXPECT_EQ(changed->color.g, 255); EXPECT_DOUBLE_EQ(changed->padding[0]->data.length.value, 15);
+    EXPECT_FLOAT_EQ(retained->font.font_size, 20); EXPECT_EQ(retained->color.b, 255); EXPECT_DOUBLE_EQ(retained->padding[0]->data.length.value, 10);
+}
+
+TEST_F(SecondaryViewTest, SpanQualifiedColumnDeclarationsKeepGridBoundsAndDiagnoseDuplicateKeysAndBudgets) {
+    stylesheet("@page{size:240px 160px;margin:10px}td{padding:0}table{border-spacing:0}");
+    ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    DomElement* table = block(nullptr, "table-layout:fixed;width:160px;font:10px/12px Arial", "table"); ASSERT_NE(table, nullptr);
+    DomElement* ordinary = block(nullptr, "width:40px", "col", table); ASSERT_NE(ordinary, nullptr); ASSERT_TRUE(ordinary->set_attribute("span", "3"));
+    DomElement* qualified = block(nullptr, "width:999px;background:lime", "col", table); ASSERT_NE(qualified, nullptr);
+    ASSERT_TRUE(qualified->set_attribute("r:column-number", "1")); ASSERT_TRUE(qualified->set_attribute("r:column-property-span", "2")); ASSERT_TRUE(qualified->set_attribute("span", "2"));
+    DomElement* last = block(nullptr, "width:40px", "col", table); ASSERT_NE(last, nullptr);
+    DomElement* interleaved = block(nullptr, "background:blue", "col", table); ASSERT_NE(interleaved, nullptr);
+    ASSERT_TRUE(interleaved->set_attribute("r:column-number", "2")); ASSERT_TRUE(interleaved->set_attribute("r:column-property-span", "2"));
+    DomElement* remote = block(nullptr, "background:red", "col", table); ASSERT_NE(remote, nullptr);
+    ASSERT_TRUE(remote->set_attribute("r:column-number", "12")); ASSERT_TRUE(remote->set_attribute("r:column-property-span", "3"));
+    DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
+    for (size_t i = 0; i < 4; i++) ASSERT_NE(block("X", nullptr, "td", row), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    LayoutViewNode* track = source_fragment(tree, last, VIEW_FRAGMENT_BODY, false); ASSERT_NE(track, nullptr); EXPECT_FLOAT_EQ(track->rect.width, 40);
+    ASSERT_NE(track->table_range, nullptr); EXPECT_EQ(track->table_range->column, 3u);
+    EXPECT_EQ(source_fragment(tree, qualified, VIEW_FRAGMENT_BODY, false), nullptr); EXPECT_EQ(source_fragment(tree, remote, VIEW_FRAGMENT_BODY, false), nullptr);
+    DomElement* duplicate = block(nullptr, nullptr, "col", table); ASSERT_NE(duplicate, nullptr);
+    ASSERT_TRUE(duplicate->set_attribute("r:column-number", "3")); ASSERT_TRUE(duplicate->set_attribute("r:column-property-span", "2"));
+    tree = secondary(); EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID);
+    EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(diagnostic.source.address, duplicate);
+    ASSERT_TRUE(duplicate->set_attribute("r:column-number", "4"));
+    ASSERT_TRUE(qualified->set_attribute("span", "1000")); options.max_items = 16;
+    tree = secondary(); EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_BUDGET_EXHAUSTED);
+    EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(diagnostic.source.address, qualified);
+    ASSERT_TRUE(qualified->set_attribute("span", "2")); options = paged_layout_options_default();
+    ASSERT_TRUE(qualified->set_attribute("r:column-property-span", "0"));
+    tree = secondary(); EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_INVALID); EXPECT_EQ(diagnostic.source.address, qualified);
+}
+
+TEST_F(SecondaryViewTest, SpanQualifiedGroupsResolveChildrenAtFullTrackBudgetAndExplicitSpanInheritance) {
+    stylesheet("@page{size:240px 160px;margin:10px}td{padding:0}table{border-spacing:0}");
+    ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    DomElement* table = block(nullptr, "table-layout:fixed;width:160px;font:10px/12px Arial", "table"); ASSERT_NE(table, nullptr);
+    ASSERT_TRUE(table->set_attribute("r:column-property-span", "2"));
+    DomElement* ordinary = block(nullptr, "width:10px", "col", table); ASSERT_NE(ordinary, nullptr); ASSERT_TRUE(ordinary->set_attribute("span", "16"));
+    DomElement* inherited = block(nullptr, "width:999px;background:lime", "col", table); ASSERT_NE(inherited, nullptr);
+    ASSERT_TRUE(inherited->set_attribute("r:column-number", "16")); ASSERT_TRUE(inherited->set_attribute("r:column-property-span", "inherit"));
+    DomElement* group = block(nullptr, "background:red", "colgroup", table); ASSERT_NE(group, nullptr);
+    DomElement* qualified = block(nullptr, "background:blue", "col", group); ASSERT_NE(qualified, nullptr);
+    ASSERT_TRUE(qualified->set_attribute("r:column-number", "1")); ASSERT_TRUE(qualified->set_attribute("r:column-property-span", "2"));
+    DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr); ASSERT_NE(block("X", nullptr, "td", row), nullptr);
+    // fill the track budget while leaving enough item work for the page planner itself.
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); options.max_items = 16;
+    PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_EQ(view_css_resolve(tree, inherited)->flow_traits->column_property_span, 2u);
+    RadiantTableColumnRange range = {};
+    ASSERT_TRUE(radiant_table_column_range(view_css_resolve(tree, ordinary), 0, 16, &range));
+    EXPECT_EQ(range.property_span, 1u); EXPECT_EQ(range.next, 16u);
+    EXPECT_EQ(source_fragment(tree, group, VIEW_FRAGMENT_BODY, false), nullptr);
+    EXPECT_EQ(source_fragment(tree, inherited, VIEW_FRAGMENT_BODY, false), nullptr);
+}
+
+TEST_F(SecondaryViewTest, FoSpanQualifiedColumnsRoundCountsIgnoreWidthsAndMatchCellSpans) {
+    DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='15pt' border-collapse='separate'>"
+        "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='225pt' page-height='225pt'><f:region-body/>"
+        "</f:simple-page-master></f:layout-master-set><f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
+        "<f:table table-layout='fixed' width='180pt'><f:table-column column-width='45pt' number-columns-repeated='3' font-size='9pt' color='red'/>"
+        "<f:table-column column-number='1' number-columns-spanned='3' font-size='12pt' column-width='proportional-column-width(0) div 0'/>"
+        "<f:table-column column-number='1' number-columns-spanned='1.5' number-columns-repeated='2' font-size='15pt' color='blue' "
+        "padding-before='.5em' padding-before.conditionality='retain' column-width='not-a-width'/>"
+        "<f:table-column column-width='45pt' color='#008000'/><f:table-body><f:table-row>"
+        "<f:table-cell number-columns-spanned='2'><f:block id='exact' font-size='from-table-column()' color='from-table-column()' padding-before='from-table-column()'>A</f:block></f:table-cell>"
+        "<f:table-cell number-columns-spanned='2'><f:block id='repeated' color='from-table-column()'>B</f:block></f:table-cell></f:table-row>"
+        "<f:table-row><f:table-cell column-number='2' number-columns-spanned='2'><f:block id='fallback' color='from-table-column()'>C</f:block></f:table-cell>"
+        "<f:table-cell><f:block id='last' color='from-table-column()'>D</f:block></f:table-cell></f:table-row>"
+        "<f:table-row><f:table-cell number-columns-spanned='3'><f:block id='three' font-size='from-table-column()' color='from-table-column()'>E</f:block></f:table-cell>"
+        "<f:table-cell><f:block id='single' color='from-table-column()'>F</f:block></f:table-cell></f:table-row>"
+        "</f:table-body></f:table></f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
+    RadiantFoOptions fo_options = radiant_fo_options_default(); RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &fo_options);
+    ASSERT_NE(translated, nullptr); ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+    DomElement* generated = install_fo_translation(translated); ASSERT_NE(generated, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    const ViewCssStyle* exact = view_css_resolve(tree, dom_find_element_by_id(generated, "exact")); ASSERT_NE(exact, nullptr);
+    EXPECT_FLOAT_EQ(exact->font.font_size, 20); EXPECT_EQ(exact->color.b, 255); ASSERT_NE(exact->padding[0], nullptr);
+    EXPECT_DOUBLE_EQ(exact->padding[0]->data.length.value, 10); EXPECT_TRUE(radiant_decoration_retain(exact, true, false));
+    EXPECT_EQ(view_css_resolve(tree, dom_find_element_by_id(generated, "repeated"))->color.b, 255);
+    EXPECT_EQ(view_css_resolve(tree, dom_find_element_by_id(generated, "fallback"))->color.r, 255);
+    EXPECT_EQ(view_css_resolve(tree, dom_find_element_by_id(generated, "last"))->color.g, 128);
+    const ViewCssStyle* three = view_css_resolve(tree, dom_find_element_by_id(generated, "three")); ASSERT_NE(three, nullptr);
+    EXPECT_FLOAT_EQ(three->font.font_size, 16); EXPECT_EQ(three->color.r, 0); EXPECT_EQ(three->color.b, 0);
+    DomElement* original = fo->last_child_element()->last_child_element()->first_child_element()->first_child_element()->next_sibling_element(); ASSERT_NE(original, nullptr);
+    ASSERT_TRUE(original->set_attribute("number-columns-spanned", "1001"));
+    translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+    EXPECT_EQ(translated->diagnostic.status, TYPESET_INVALID); EXPECT_EQ(translated->diagnostic.source.address, original);
+    EXPECT_STREQ(translated->diagnostic.property, "number-columns-spanned");
+}
+
 TEST_F(SecondaryViewTest, DecorationConditionalityBindingsRetainOwnerKeywordsAcrossEditions) {
     ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
     DomElement* parent = block(nullptr, "box-decoration-break:clone"); ASSERT_NE(parent, nullptr);

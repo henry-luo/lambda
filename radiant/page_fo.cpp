@@ -377,9 +377,10 @@ static bool fo_count_value(FoTranslationContext* context, DomElement* source, co
 }
 
 static const char* fo_count_text(FoTranslationContext* context, DomElement* source, const char* property,
-        const char* raw, uint32_t maximum, const char* reason) {
+        const char* raw, uint32_t maximum, const char* reason, uint32_t* computed = nullptr) {
     uint32_t value = 0;
     if (!fo_count_value(context, source, property, raw, maximum, reason, &value)) return nullptr;
+    if (computed) *computed = value;
     char number[16]; snprintf(number, sizeof(number), "%u", value);
     const char* text = pool_strdup(context->document->document_pool, number);
     if (!text) fo_failure(context, source, property, "FO count allocation failed", TYPESET_OUT_OF_MEMORY);
@@ -726,7 +727,7 @@ static bool fo_column_proportion(FoTranslationContext* context, DomElement* sour
     return true;
 }
 
-static bool fo_style(FoTranslationContext* context, DomElement* source, StrBuf* style, bool proportional_column) {
+static bool fo_style(FoTranslationContext* context, DomElement* source, StrBuf* style, bool proportional_column, bool property_column) {
     FoTableKind table = fo_table_kind(source);
     FoListKind list = fo_list_kind(source);
     bool graphic = fo_graphic(source);
@@ -757,7 +758,7 @@ static bool fo_style(FoTranslationContext* context, DomElement* source, StrBuf* 
                 return fo_failure(context, source, property, "FO table furniture omission requires true, false or inherit");
         }
     }
-    if (table == FO_TABLE_COLUMN && !proportional_column &&
+    if (table == FO_TABLE_COLUMN && !proportional_column && !property_column &&
         !fo_style_property(context, source, style, "width", source->get_attribute("column-width"), "column-width")) return false;
     if (list == FO_LIST_ITEM) strbuf_append_str(style, "table-layout:fixed;width:100%;border-collapse:separate;border-spacing:0;");
     if (table == FO_TABLE_CELL || list == FO_LIST_LABEL || list == FO_LIST_BODY) {
@@ -863,7 +864,7 @@ static bool fo_attribute_admitted(FoTranslationContext* context, DomElement* sou
             fo_failure(context, source, name, "complementary list indents require zero in the current reference-area profile");
     }
     if ((radiant_flow_trait_name(name) && strcmp(name, "column-proportion") && strcmp(name, "column-number") &&
-        strcmp(name, "style-transparent")) || radiant_whitespace_trait_name(name) || radiant_image_trait_name(name)) return true;
+        strcmp(name, "column-property-span") && strcmp(name, "style-transparent")) || radiant_whitespace_trait_name(name) || radiant_image_trait_name(name)) return true;
     static const char* metadata[] = {"id", "xml:base", "xml:lang", "break-before", "break-after"};
     if (fo_property_in(name, metadata, sizeof(metadata) / sizeof(metadata[0])) ||
         fo_property_in(name, fo_common_properties, sizeof(fo_common_properties) / sizeof(fo_common_properties[0]))) return true;
@@ -903,7 +904,8 @@ static bool fo_attribute_admitted(FoTranslationContext* context, DomElement* sou
     if ((table == FO_TABLE || table == FO_TABLE_ROW || table == FO_TABLE_CELL) && !strcmp(name, "height")) return true;
     if (table == FO_TABLE && (!strcmp(name, "table-layout") || !strcmp(name, "table-omit-header-at-break") ||
         !strcmp(name, "table-omit-footer-at-break"))) return true;
-    if (table == FO_TABLE_COLUMN && (!strcmp(name, "column-width") || !strcmp(name, "number-columns-repeated"))) return true;
+    if (table == FO_TABLE_COLUMN && (!strcmp(name, "column-width") || !strcmp(name, "number-columns-repeated") ||
+        !strcmp(name, "number-columns-spanned"))) return true;
     if (table == FO_TABLE_CELL && (!strcmp(name, "number-columns-spanned") ||
         !strcmp(name, "number-rows-spanned"))) return true;
     return fo_failure(context, source, pool_strdup(context->document->document_pool, name), "FO property requires an unimplemented common Radiant trait");
@@ -1032,9 +1034,19 @@ static Item fo_translate_element(FoTranslationContext* context, DomElement* sour
         hashmap_set(context->ids, &entry);
         if (hashmap_oom(context->ids)) { fo_failure(context, source, "id", "FO ID index allocation failed", TYPESET_OUT_OF_MEMORY); return ItemNull; }
     }
+    uint32_t column_span = 1; const char* column_property_span = nullptr;
+    if (table == FO_TABLE_COLUMN) if (const char* raw = source->get_attribute("number-columns-spanned")) {
+        column_property_span = fo_count_text(context, source, "number-columns-spanned", raw, 1000,
+            "FO column property span exceeds the admitted HTML colspan domain", &column_span);
+        if (!column_property_span) return ItemNull;
+    }
+    bool property_column = column_span > 1;
     bool proportional_column = false; float column_weight = 0.0f; const char* column_base = nullptr;
-    if (table == FO_TABLE_COLUMN && !fo_column_proportion(context, source, &proportional_column, &column_weight, &column_base)) return ItemNull;
+    // widths on span-qualified property declarations are ignored by XSL, including proportional expressions.
+    if (table == FO_TABLE_COLUMN && !property_column &&
+        !fo_column_proportion(context, source, &proportional_column, &column_weight, &column_base)) return ItemNull;
     ElementBuilder output = context->builder.element(target);
+    if (column_property_span) output.attr("r:column-property-span", column_property_span);
     if (proportional_column) {
         char number[32]; snprintf(number, sizeof(number), "%.9g", (double)column_weight);
         output.attr("r:column-proportion", number);
@@ -1102,7 +1114,7 @@ static Item fo_translate_element(FoTranslationContext* context, DomElement* sour
             .attr("r:white-space-collapse", "true").attr("r:wrap-option", "wrap");
         strbuf_append_str(style, "margin:0; font-family:serif; font-size:12pt; line-height:normal; color:black; white-space:normal;");
     }
-    if (!fo_style(context, source, style, proportional_column)) return ItemNull;
+    if (!fo_style(context, source, style, proportional_column, property_column)) return ItemNull;
     if (column_base) fo_style_append(style, "width", column_base);
     // common typed traits retain ranges/strengths instead of approximating them with CSS margins/avoid.
     FoStyleBuffer attribute_buffer;
