@@ -1,5 +1,6 @@
 // The document adapter reuses the script math renderer's bounded AST profile.
 import util: ~~.util
+import font_decl: ~~.elements.font_decl
 import math: lambda.doc.math.math
 import registry: .registry
 
@@ -147,7 +148,7 @@ fn alignment_row(source, gathered, cell_align, anchor, tag, operators, offset) {
 
 // the text commands a mathtools tag form may apply to the number
 pub let TAG_FORMATS = {textbf: "font-weight:bold", textit: "font-style:italic", emph: "font-style:italic",
-    textsl: "font-style:oblique", textsf: "font-family:sans-serif", texttt: "font-family:monospace",
+    textsl: "font-style:oblique", textsf: font_decl.SANS_CSS, texttt: font_decl.MONO_CSS,
     textrm: "", textup: "font-style:normal", textnormal: ""}
 
 pub fn tag_format(inner) =>

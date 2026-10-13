@@ -1,0 +1,38 @@
+% unicode-math.sty -- Lambda-owned binding of unicode-math (CTAN), written from its
+% manual rather than copied.
+%
+% Like every binding (vibe/latex/Lambda_Design_TeX_Engine.md §4) it expands user
+% commands into constructs the digester owns: the \sym… and \math…it-style alphabet
+% commands become the math alphabets lambda.doc.math has, with no assignment at use
+% time. Unicode math input needs nothing here, since the math parser reads it.
+% \setmathfont stays a constructor: the script adapter reports the face, because
+% math keeps the bundled Computer Modern faces (fontspec.ls).
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{unicode-math}[2026/10/13 Lambda binding]
+\DeclareOption*{}
+\ProcessOptions\relax
+
+\def\symup{\mathrm}
+\def\symit{\mathit}
+\def\symbf{\mathbf}
+\def\symsf{\mathsf}
+\def\symtt{\mathtt}
+\def\symbb{\mathbb}
+\def\symbbit{\mathbb}
+\def\symcal{\mathcal}
+\def\symscr{\mathscr}
+\def\symfrak{\mathfrak}
+\def\symbfup{\mathbf}
+\def\symbfit{\boldsymbol}
+\def\symbfsf{\mathsf}
+\def\symbfcal{\mathcal}
+\def\symbfscr{\mathscr}
+\def\symbffrak{\mathfrak}
+\def\symnormal{}
+\def\mathbfup{\mathbf}
+\def\mathbfit{\boldsymbol}
+\def\mathbfsf{\mathsf}
+\def\mathbfcal{\mathcal}
+\def\mathbfscr{\mathscr}
+\def\mathbffrak{\mathfrak}
+\def\mathbbit{\mathbb}

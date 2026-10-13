@@ -1,13 +1,14 @@
 // Caption layout and options share one profile for floats and subfloats.
 import util: ~~.util
+import font_decl: ~~.elements.font_decl
 import floats: ~~.floats
 
 pub let OPTIONS = ["font", "labelfont", "textfont", "labelsep", "justification", "skip", "labelformat"]
 let FONTS = {small: "font-size:90%;", footnotesize: "font-size:80%;",
     scriptsize: "font-size:70%;", normalsize: "font-size:100%;",
     large: "font-size:120%;", bf: "font-weight:bold;", it: "font-style:italic;",
-    sf: "font-family:sans-serif;", rm: "font-family:serif;",
-    tt: "font-family:monospace;", normalfont: "font-style:normal;font-weight:normal;"}
+    sf: font_decl.SANS_CSS ++ ";", rm: font_decl.SERIF_CSS ++ ";",
+    tt: font_decl.MONO_CSS ++ ";", normalfont: "font-style:normal;font-weight:normal;"}
 
 fn font_parts(value) {
     if (value == null) [] else util.split_top_level(util.unwrap_braces(value), ",")

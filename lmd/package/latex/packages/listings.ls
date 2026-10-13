@@ -1,5 +1,6 @@
 // Bounded listings profile: preserved source, captions, labels, and line numbers.
 import util: ~~.util
+import font_decl: ~~.elements.font_decl
 
 let OPTION_NAMES = ["numbers", "firstnumber", "stepnumber", "caption", "label",
     "frame", "basicstyle", "breaklines", "showstringspaces", "language"]
@@ -59,7 +60,7 @@ fn basic_style(options) {
         else if (contains(raw, "\\scriptsize")) "font-size:0.7em;"
         else if (contains(raw, "\\footnotesize")) "font-size:0.8em;"
         else if (contains(raw, "\\small")) "font-size:0.9em;" else ""
-    "font-family:monospace;" ++ size
+    font_decl.MONO_CSS ++ ";" ++ size
 }
 
 fn code_lines(source, options) {

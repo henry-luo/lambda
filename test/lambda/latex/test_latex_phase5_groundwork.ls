@@ -24,8 +24,10 @@ fn issues(src) => [for (issue in result_of(src).diagnostics)
     issue.code ++ " " ++ string(issue.package) ++ " " ++ string(issue.item)]
 
 // ---- M0.1 ownership, dispatch and conflicts ----
+// a "*" entry serves the commands a package's command_prefix names (fontawesome5)
 "handlers owned by their package:"; [for (pkg, table in render.PACKAGE_RENDER, cmd, h in table
-    where not contains(registry.CATALOG[string(pkg)].commands, string(cmd))) string(pkg) ++ "." ++ string(cmd)]
+    where string(cmd) != "*" and not contains(registry.CATALOG[string(pkg)].commands, string(cmd)))
+    string(pkg) ++ "." ++ string(cmd)]
 "walk handlers owned:"; [for (pkg, table in analyze.PACKAGE_WALK, cmd, h in table
     where not contains(registry.CATALOG[string(pkg)].commands, string(cmd))) string(pkg) ++ "." ++ string(cmd)]
 "owner while active:"; registry.owner([{key: "cleveref", val: {}}], "cref")

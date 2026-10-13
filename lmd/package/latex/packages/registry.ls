@@ -31,11 +31,30 @@ import contents: .contents
 import frontmatter: .frontmatter
 import varioref: .varioref
 import terms: .terms
+import fontspec: .fontspec
+import icons: .icons
 import boxes: ~~.elements.boxes
 
 // `commands` names the commands and environments a package owns: they dispatch
 // to its handlers and are attributed to it when unsupported, only while it is
 // active. `conflicts` names packages that cannot be loaded with it.
+// a face a font package requests: the family it replaces, the CSS stack of its
+// installed look-alikes and the substitution message
+fn face(name_str, role, css) => {face: name_str, role: role, css: css,
+    message: name_str ++ " is not bundled; the CSS names it with installed look-alikes"}
+
+// a math face: math keeps the bundled Computer Modern faces (Pkg_Math §3.2)
+fn math_face(name_str) => {face: name_str, role: "math",
+    message: name_str ++ " is not bundled; math keeps the bundled Computer Modern faces"}
+
+let TIMES = face("Times", "main", "'TeX Gyre Termes','Times New Roman',Times,serif")
+let TERMES = face("TeX Gyre Termes", "main", "'TeX Gyre Termes','Times New Roman',Times,serif")
+let HELVETICA = face("Helvetica", "sans", "'TeX Gyre Heros',Helvetica,Arial,sans-serif")
+let HEROS = face("TeX Gyre Heros", "sans", "'TeX Gyre Heros',Helvetica,Arial,sans-serif")
+let COURIER = face("Courier", "mono", "'TeX Gyre Cursor','Courier New',Courier,monospace")
+let PALATINO = face("Palatino", "main", "'TeX Gyre Pagella','Palatino Linotype',Palatino,'Book Antiqua',serif")
+let PAGELLA = face("TeX Gyre Pagella", "main", "'TeX Gyre Pagella','Palatino Linotype',Palatino,'Book Antiqua',serif")
+
 pub let CATALOG = {
     amsmath: {options: [], commands: ["DeclareMathOperator", "DeclareMathOperator*",
         "tag", "tag*", "numberwithin", "eqref"]},
@@ -70,7 +89,7 @@ pub let CATALOG = {
     xltabular: {options: []},
     babel: {options: ["english", "german", "ngerman", "french", "spanish", "russian", "greek"],
         commands: ["selectlanguage", "foreignlanguage", "languageattribute", "spanishdecimal"]},
-    polyglossia: {options: [], commands: ["setdefaultlanguage", "setotherlanguage", "newfontfamily",
+    polyglossia: {options: [], implies: ["fontspec"], commands: ["setdefaultlanguage", "setotherlanguage", "newfontfamily",
         "renewfontfamily", "XeTeXlinebreaklocale", "textenglish", "otherlanguage"]},
     vietnam: {options: ["utf8"]},
     multicol: {options: []},
@@ -94,6 +113,50 @@ pub let CATALOG = {
         message: "RSFS is not bundled; using the available math script font"}},
     cmap: {options: []},
     enumerate: {options: []},
+    // fonts by name (fontspec.ls); polyglossia loads fontspec
+    fontspec: {options: fontspec.OPTIONS, commands: fontspec.COMMANDS, preamble: fontspec.PREAMBLE},
+    // the alphabet commands are the binding tex/binding/unicode-math.sty; math keeps the
+    // bundled faces, so \setmathfont reports a substitution (fontspec.ls)
+    'unicode-math': {options: ["math-style", "bold-style", "sans-style", "warnings-off", "trace"],
+        commands: fontspec.MATH_COMMANDS, preamble: fontspec.MATH_PREAMBLE, implies: ["fontspec"]},
+    // icons as Unicode look-alikes or their names (icons.ls)
+    fontawesome5: {options: icons.OPTIONS, commands: icons.COMMANDS, command_prefix: icons.PREFIX,
+        font: {face: "Font Awesome 5 Free", role: "symbol",
+            message: "Font Awesome is not bundled; icons render as Unicode look-alikes or their names"}},
+    // the text font packages: each face is asked for by name with installed
+    // look-alikes, and reported as a substitution (§17.3: no faces are bundled)
+    times: {options: [], font: [TIMES, HELVETICA, COURIER]},
+    mathptmx: {options: [], font: [TIMES, math_face("Times math")]},
+    newtxtext: {options: ["scaled", "osf", "lining", "tabular", "proportional", "sups", "defaultsups"],
+        font: [TERMES, HEROS]},
+    newtxmath: {options: ["libertine", "varvw", "vvarbb", "upint", "cmintegrals", "uprightGreek", "slantedGreek"],
+        font: [math_face("New TX math")]},
+    txfonts: {options: [], font: [TIMES, HELVETICA, COURIER, math_face("TX math")]},
+    newpxtext: {options: ["scaled", "osf", "lining", "tabular", "proportional", "sups"], font: [PAGELLA]},
+    newpxmath: {options: ["varvw", "vvarbb", "upint", "uprightGreek", "slantedGreek"],
+        font: [math_face("New PX math")]},
+    mathpazo: {options: ["sc", "osf", "slantedGreek"], font: [PALATINO, math_face("Palatino math")]},
+    palatino: {options: [], font: [PALATINO, HELVETICA, COURIER]},
+    libertine: {options: ["osf", "lining", "tabular", "proportional", "sb", "semibold", "scale", "scaled"],
+        font: [face("Linux Libertine", "main", "'Linux Libertine O','Linux Libertine','Libertinus Serif',serif"),
+            face("Linux Biolinum", "sans", "'Linux Biolinum O','Linux Biolinum','Libertinus Sans',sans-serif"),
+            face("Linux Libertine Mono", "mono", "'Linux Libertine Mono O','Libertinus Mono',monospace")]},
+    libertinus: {options: ["osf", "lining", "tabular", "proportional", "scale", "scaled", "type1", "otf"],
+        font: [face("Libertinus Serif", "main", "'Libertinus Serif',serif"),
+            face("Libertinus Sans", "sans", "'Libertinus Sans',sans-serif"),
+            face("Libertinus Mono", "mono", "'Libertinus Mono',monospace"), math_face("Libertinus Math")]},
+    charter: {options: [], font: [face("Charter", "main", "'Bitstream Charter',Charter,'XCharter',serif")]},
+    kpfonts: {options: ["light", "oldstyle", "rmx", "sfmath", "veryoldstyle", "nomath"],
+        font: [face("Kp Roman", "main", "'KpRoman','Kp Roman',serif"), face("Kp Sans", "sans", "'KpSans','Kp Sans',sans-serif"),
+            face("Kp Mono", "mono", "'KpMono','Kp Mono',monospace"), math_face("Kp math")]},
+    fourier: {options: ["upright", "sloped", "widespace", "expert", "oldstyle", "fulloldstyle"],
+        font: [face("Utopia", "main", "Utopia,'Utopia Std','Erewhon',serif"), math_face("Fourier math")]},
+    sourcesanspro: {options: ["default", "light", "semibold", "black", "extralight", "regular", "scale", "scaled"],
+        font: [{*:face("Source Sans Pro", "sans", "'Source Sans Pro','Source Sans 3',sans-serif"), default_option: "default"}]},
+    inconsolata: {options: ["scaled", "varqu", "varl", "zerostyle", "mono", "var0", "narrowiints"],
+        font: [face("Inconsolata", "mono", "Inconsolata,monospace")]},
+    beramono: {options: ["scaled"], font: [face("Bera Mono", "mono", "'Bera Sans Mono','Bitstream Vera Sans Mono','DejaVu Sans Mono',monospace")]},
+    courier: {options: [], font: [COURIER]},
     psfrag: {options: [], commands: ["psfrag"]},
     ifthen: {options: [], commands: ["ifthenelse", "whiledo", "newboolean", "setboolean"]},
     cite: {options: []},
@@ -310,7 +373,7 @@ pub fn offset_for(packages, name) {
 
 // the active package that owns a command; a later-loaded package wins, as in LaTeX
 pub fn owner(packages, command) {
-    if (OWNED[command] == null) null
+    if (OWNED[command] == null) prefix_owner(packages, command)
     else {
         let owners = [for (entry in packages
             where contains(commands_of(CATALOG[entry.key]), command)) entry.key]
@@ -318,22 +381,41 @@ pub fn owner(packages, command) {
     }
 }
 
-// the handler an active package's table supplies for a command, if any
-pub fn handler(tables, packages, command) {
-    let pkg = owner(packages, command)
-    if (pkg == null) null else tables[pkg][command]
+// packages whose commands are named by a prefix and a capital (fontawesome5's \fa<Icon>)
+let PREFIXED = [for (k, v in CATALOG where v.command_prefix != null) {key: string(k), prefix: v.command_prefix}]
+
+fn prefix_owner(packages, command) {
+    let owners = [for (p in PREFIXED where starts_with(command, p.prefix) and len(command) > len(p.prefix) and
+        upper(slice(command, len(p.prefix), len(p.prefix) + 1)) == slice(command, len(p.prefix), len(p.prefix) + 1) and
+        lower(slice(command, len(p.prefix), len(p.prefix) + 1)) != slice(command, len(p.prefix), len(p.prefix) + 1) and
+        active(packages, p.key)) p.key]
+    if (len(owners) == 0) null else owners[0]
 }
 
-// one font-substitution diagnostic per active package that requests a face
+// the handler an active package's table supplies for a command, if any; a table's
+// "*" entry serves the commands a prefix names
+pub fn handler(tables, packages, command) {
+    let pkg = owner(packages, command)
+    let table = if (pkg == null) null else tables[pkg]
+    if (table == null) null else (table[command] or table["*"])
+}
+
+// a package's faces: its `font` row, or rows when it sets several families
+fn faces_of(desc) => if (desc == null or desc.font == null) [] else if (desc.font is array) desc.font else [desc.font]
+
+// one font-substitution diagnostic per face an active package requests
 pub fn font_issues(packages) {
-    [for (entry in packages, let font = CATALOG[entry.key].font where font != null)
+    [for (entry in packages, font in faces_of(CATALOG[entry.key]))
         util.diagnostic("font-substitution", entry.key, font.face, font.message, entry.offset)]
 }
 
-// the substitute CSS stack for a family role (main, sans, greek); the last-loaded package wins
+// the substitute CSS stack for a family role (main, sans, mono, greek); the
+// last-loaded package wins, and a sans face whose package's default option is
+// given replaces the main family too
 pub fn font_css(packages, role) {
-    let stacks = [for (entry in packages, let font = CATALOG[entry.key].font
-        where font != null and font.role == role) font.css]
+    let stacks = [for (entry in packages, font in faces_of(CATALOG[entry.key])
+        where font.css != null and (font.role == role or (role == "main" and font.default_option != null and
+            util.option_on(entry.val, font.default_option)))) font.css]
     if (len(stacks) == 0) null else stacks[len(stacks) - 1]
 }
 
@@ -374,6 +456,11 @@ fn add_package(st, raw_name, opts, node) {
             else if (package == "biblatex") bib_options_issues(opts, node)
             else if (package == "caption" or package == "subcaption")
                 caption.issues(opts, node.source_offset)
+            else if (package == "unicode-math")
+                [for (key in ["math-style", "bold-style", "sans-style"]
+                    where opts[key] != null and string(opts[key]) != "TeX" and string(opts[key]) != "upright")
+                    diagnostic("unsupported-option", "unicode-math", key ++ "=" ++ string(opts[key]),
+                        "Math keeps TeX's letter styles, not " ++ key ++ "=" ++ string(opts[key]), node)]
             else if (package == "glossaries" and terms.style_issue(opts.style) != null)
                 [diagnostic("glossary-style-approximation", "glossaries", terms.style_issue(opts.style),
                     "The glossary is drawn as a description list, not in the style " ++ terms.style_issue(opts.style), node)]

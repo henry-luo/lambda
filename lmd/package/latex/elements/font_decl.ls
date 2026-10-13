@@ -11,17 +11,24 @@ import color: lambda.latex.elements.color
 // Font declaration style map
 // ============================================================
 
+// The three text families read the document root's variables, which css.ls sets to
+// the bundled Computer Modern faces and font packages or fontspec replace
+// (render.ls document_style); the generic family is the fallback outside a document.
+pub let SERIF_CSS = "font-family:var(--latex-serif,serif)"
+pub let SANS_CSS = "font-family:var(--latex-sans,sans-serif)"
+pub let MONO_CSS = "font-family:var(--latex-mono,monospace)"
+
 // maps font declaration tag names to CSS style strings
 let FONT_DECL_STYLES = {
     'itshape':   "font-style:italic",
     'bfseries':  "font-weight:bold",
     'bf':        "font-weight:bold",
     'it':        "font-style:italic",
-    'rm':        "font-family:serif",
-    'tt':        "font-family:monospace",
-    'ttfamily':  "font-family:monospace",
-    'rmfamily':  "font-family:serif",
-    'sffamily':  "font-family:sans-serif",
+    'rm':        SERIF_CSS,
+    'tt':        MONO_CSS,
+    'ttfamily':  MONO_CSS,
+    'rmfamily':  SERIF_CSS,
+    'sffamily':  SANS_CSS,
     'scshape':   "font-variant:small-caps",
     'slshape':   "font-style:oblique",
     'upshape':   "font-style:normal",
@@ -289,8 +296,8 @@ fn declaration_command(raw, command, after, acc, colors) {
 // the CSS of a one-argument font macro's body: a text command applied to #1
 // (\textsc{#1}) or declarations before it ({\scshape #1}); null when it is neither
 let TEXT_COMMANDS = {textbf: "font-weight:bold", textit: "font-style:italic", emph: "font-style:italic",
-    textsl: "font-style:oblique", textsc: "font-variant:small-caps", texttt: "font-family:monospace",
-    textsf: "font-family:sans-serif", textrm: "font-family:serif", textup: "font-style:normal",
+    textsl: "font-style:oblique", textsc: "font-variant:small-caps", texttt: MONO_CSS,
+    textsf: SANS_CSS, textrm: SERIF_CSS, textup: "font-style:normal",
     textmd: "font-weight:normal"}
 pub fn argument_font_css(source) {
     let body = trim(source or "")

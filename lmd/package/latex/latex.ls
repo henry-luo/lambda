@@ -35,6 +35,7 @@ import caption: .packages.caption
 import font_decl: .elements.font_decl
 import paragraph: .packages.paragraph
 import footmisc: .packages.footmisc
+import fontspec: .packages.fontspec
 
 // ============================================================
 // Public API — HTML string output
@@ -135,6 +136,8 @@ pub fn render_result(ast, options) {
                 running_style: running_style,
                 language: language, text_language: language,
                 polyglossia: polyglossia,
+                // fontspec's and polyglossia's family declarations (fontspec.ls)
+                font_families: if (registry.active(loaded.packages, "fontspec")) fontspec.declarations(ast) else [],
                 listing_options: listings.preamble_options(ast),
                 // fancyvrb's \fvset and minted's \setminted defaults
                 code_defaults: {fancyvrb: if (registry.active(loaded.packages, "fancyvrb"))
@@ -168,6 +171,8 @@ pub fn render_result(ast, options) {
     let diagnostics = engine_diagnostics(ast) ++ package_issues ++ math_operators.diagnostics ++
         bibliography.diagnostics ++ language_issues ++ cleveref_issues ++
         registry.font_issues(loaded.packages) ++
+        (if (registry.active(loaded.packages, "fontspec"))
+            fontspec.issues(fontspec.declarations(ast), base_info.custom_colors) else []) ++
         math_bridge.issues(ast, math_operators.definitions, loaded.packages) ++
         hyperref.issues(link_settings, registry.offset_for(loaded.packages, "hyperref")) ++
         (if (registry.active(loaded.packages, "tikzpeople"))
@@ -243,7 +248,17 @@ fn output_diagnostics(node) {
     }
 }
 
+// fontspec's features for the sans and mono families, on the elements set in them
+fn family_features(info) {
+    let sans = dispatcher.role_features(info, "sans")
+    let mono = dispatcher.role_features(info, "mono");
+    (if (sans == "") "" else ".latex-document .latex-sf,.latex-document .latex-sffamily{" ++ sans ++ "}\n") ++
+    (if (mono == "") "" else ".latex-document code.latex-code,.latex-document pre.latex-verbatim," ++
+        ".latex-document .latex-ttfamily,.latex-document .latex-listing pre{" ++ mono ++ "}\n")
+}
+
 fn package_stylesheet(info) {
+    family_features(info) ++
     (if (info.biblatex_context.processor == "csl") csl.stylesheet() else "") ++
     geometry.stylesheet(registry.options_for(info.packages, "geometry")) ++
     (if (registry.active(info.packages, "fullpage") and

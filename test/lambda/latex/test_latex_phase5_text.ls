@@ -92,7 +92,7 @@ let minted = run(doc("\\usepackage{minted}",
     "\\begin{listing}\\begin{minted}[linenos,frame=lines]{python}\ndef f(x):\n    return x % 2\n\\end{minted}\\caption{Py}\\end{listing}\n" ++
     "Use \\mintinline{c}{int x = {0};} or \\mint{bash}|echo $HOME|\n\\listoflistings"))
 "minted:"; has(minted.html, "<code class=\"language-python\">") and has(minted.html, "Listing 1: ")
-"mintinline:"; has(minted.html, "<code class=\"latex-code language-c\" style=\"font-family:monospace;\">int x = {0};</code>")
+"mintinline:"; has(minted.html, "<code class=\"latex-code language-c\" style=\"font-family:var(--latex-mono,monospace);\">int x = {0};</code>")
 "mint:"; has(minted.html, "<code class=\"language-bash\">echo $HOME</code>")
 "list of listings:"; has(minted.html, "List of Listings")
 "minted issues:"; minted.issues

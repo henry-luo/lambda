@@ -23,7 +23,7 @@ let titled = run(doc("report", "\\usepackage[sf,compact]{titlesec}\\usepackage{x
 "display chapter:"; has(titled.html, "<span class=\"sec-num\" style=\"display:block;margin-bottom:19.9253pt;\">Chapter 1</span><span class=\"latex-title-text\" style=\"font-size:2.2em;text-transform:uppercase;\">Intro</span>")
 "chapter format:"; has(titled.html, "font-size:1.8em;font-weight:bold;text-align:center;border-bottom:0.4pt solid;")
 "hang section:"; has(titled.html, "<span class=\"sec-num\" style=\"margin-right:1em;\">1.1.</span>Sec</h2>")
-"section style:"; has(titled.html, "<h2 id=\"sec\" class=\"latex-indent-after\" style=\"font-family:sans-serif;margin-top:0.8em;margin-bottom:0.4em;font-size:1.3em;font-weight:bold;color:#1976d2;margin-left:0pt;margin-top:4ex;margin-bottom:1.5ex;\">")
+"section style:"; has(titled.html, "<h2 id=\"sec\" class=\"latex-indent-after\" style=\"font-family:var(--latex-sans,sans-serif);margin-top:0.8em;margin-bottom:0.4em;font-size:1.3em;font-weight:bold;color:#1976d2;margin-left:0pt;margin-top:4ex;margin-bottom:1.5ex;\">")
 "starred format keeps the label:"; has(titled.html, "font-size:1.1em;font-style:italic;\"><span class=\"sec-num\">1.1.1 </span>Sub</h3>")
 "appendix chapter name:"; has(titled.html, ">Appendix A</span>")
 "titlesec issues:"; titled.issues
@@ -31,7 +31,7 @@ let titled = run(doc("report", "\\usepackage[sf,compact]{titlesec}\\usepackage{x
 // ---- sectsty ----
 let fonts = run(doc("article", "\\usepackage{sectsty,xcolor}\\allsectionsfont{\\sffamily}\\sectionfont{\\color{red}}",
     "\\section{S}\\subsection{T}"))
-"sectsty:"; has(fonts.html, "<h2 id=\"s\" style=\"color:#d32f2f;\">") and has(fonts.html, "<h3 id=\"t\" style=\"font-family:sans-serif;\">")
+"sectsty:"; has(fonts.html, "<h2 id=\"s\" style=\"color:#d32f2f;\">") and has(fonts.html, "<h3 id=\"t\" style=\"font-family:var(--latex-sans,sans-serif);\">")
 "sectsty issues:"; fonts.issues
 
 // ---- tocloft and minitoc; \contentsname and \protect\numberline in the kernel ----
@@ -44,7 +44,7 @@ let toc = run(doc("report", "\\usepackage{tocloft,minitoc}" ++
     "\\refstepcounter{example}\\addcontentsline{exp}{example}{\\protect\\numberline{\\theexample}First example}" ++
     "\\addcontentsline{toc}{section}{\\protect\\numberline{9}Extra entry}\\chapter{Two}\\section{C}"))
 "toc title:"; has(toc.html, "<div class=\"toc-title\" style=\"font-size:2.2em;font-weight:bold;\">Table of Contents</div>")
-"entry font and skip:"; has(toc.html, "<li class=\"toc-l1\" style=\"font-weight:bold;font-family:sans-serif;margin-top:1em;\">")
+"entry font and skip:"; has(toc.html, "<li class=\"toc-l1\" style=\"font-weight:bold;font-family:var(--latex-sans,sans-serif);margin-top:1em;\">")
 "entry number:"; has(toc.html, "<li class=\"toc-l2\" style=\"padding-left:2em;\"><a href=\"#a\"><span class=\"sec-num\" style=\"display:inline-block;min-width:3em\">S1.1.</span>A</a></li>")
 "numberline after protect:"; has(toc.html, "<span class=\"sec-num\" style=\"display:inline-block;min-width:3em\">S9.</span>Extra entry")
 "newlistof:"; has(toc.html, "<nav class=\"latex-toc latex-list-of latex-listofexample\"><div class=\"toc-title\">List of Examples</div><ul><li class=\"toc-l2\"><a href=\"#first-example\"><span class=\"sec-num\">1</span>First example</a>")

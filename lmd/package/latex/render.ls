@@ -47,6 +47,8 @@ import contents: .packages.contents
 import frontmatter: .packages.frontmatter
 import varioref: .packages.varioref
 import terms: .packages.terms
+import fontspec: .packages.fontspec
+import icons: .packages.icons
 import adjustbox: .packages.adjustbox
 import pdfpages: .packages.pdfpages
 
@@ -205,7 +207,7 @@ pub let PACKAGE_RENDER = {
     fancyvrb: map([for (tag in codeblocks.FANCYVRB_ENVIRONMENTS, x in [tag, render_fancyvrb]) x] ++
         ["Verb", (el, info) => listings.render_inline(el), "fvset", render_nothing]),
     minted: {minted: render_minted, mintinline: (el, info) => <code class: "latex-code language-" ++ (el.language or "text"),
-            style: "font-family:monospace;", util.text_of(el)>,
+            style: font_decl.MONO_CSS ++ ";", util.text_of(el)>,
         mint: (el, info) => listings.render_code(util.text_of(el), {}, null, el.language),
         setminted: render_nothing},
     footmisc: {footref: render_footref},
@@ -228,6 +230,11 @@ pub let PACKAGE_RENDER = {
     acronym: map([for (command in terms.ACRONYM_COMMANDS, x in [command,
         if (terms.ac_form(command) != null) render_ac else if (command == "acronym") render_acronym_list
         else render_nothing]) x]),
+    // families act as declarations (font_switch_css) and through the root (document_style)
+    fontspec: map([for (command in fontspec.COMMANDS, x in [command, render_nothing]) x]),
+    'unicode-math': map([for (command in fontspec.MATH_COMMANDS, x in [command, render_nothing]) x]),
+    // "*" serves every \fa<Icon> command (registry.handler)
+    fontawesome5: {faIcon: render_icon, faIconFA: render_icon, '*': render_icon},
     nomencl: {makenomenclature: render_nothing, nomenclature: render_nothing, printnomenclature: render_nomenclature},
     makeidx: {makeindex: render_nothing, index: render_index_anchor, printindex: render_index},
     imakeidx: {makeindex: render_nothing, index: render_index_anchor, printindex: render_index,
@@ -245,6 +252,26 @@ pub let PACKAGE_RENDER = {
 }
 
 fn render_nothing(el, info) => null
+
+// a Font Awesome icon as its Unicode look-alike, or as its name in brackets
+fn render_icon(el, info) {
+    let icon = icons.icon_name(string(name(el)), util.raw_argument(el, "required", 0))
+    let glyph = icons.lookalike(icon);
+    <span class: "latex-icon", title: icon, if (glyph != null) glyph else "[" ++ icon ++ "]">
+}
+
+// the CSS of a fontspec font switch: a \newfontfamily command, \fontspec{Name} or
+// \addfontfeatures{…}; null for anything else
+fn font_switch_css(el, info) {
+    let tag = string(name(el))
+    let declared = if (info.font_families == null) null else fontspec.switch(info.font_families, tag)
+    if (declared != null) fontspec.switch_css(declared.font, declared.features, info.custom_colors)
+    else if (tag == "fontspec" and registry.active(info.packages, "fontspec"))
+        fontspec.switch_css(trim(util.raw_argument(el, "required", 0) or ""), util.optional_raw(el), info.custom_colors)
+    else if ((tag == "addfontfeatures" or tag == "addfontfeature") and registry.active(info.packages, "fontspec"))
+        fontspec.features(util.raw_argument(el, "required", 0), info.custom_colors).css
+    else null
+}
 
 // \cellcolor[model]{color}: a marker the table builder turns into the cell's
 // background (cell_decoration)
@@ -1045,6 +1072,9 @@ fn render_extended_or_generic(el, info) {
     // a package's or \newfloat's float environment
     else if (floats.kind_of(info.float_kinds, tag_str) != null) {
         render_float(el, info, floats.kind_of(info.float_kinds, tag_str)) }
+    // a fontspec switch outside a group's lead, which changes nothing like the other
+    // declarations there
+    else if (font_switch_css(el, info) != null) { null }
     // an environment \newmdenv defined
     else if (registry.active(info.packages, "mdframed") and
         util.setting_at(info.settings, "mdf-env:" ++ tag_str, el.source_offset) != null) {
@@ -1303,19 +1333,37 @@ fn document_style(info) {
     let selected_family = macros.find_macro(info.macros, "familydefault")
     let sans_default = selected_family != null and selected_family.source != null and
         trim(selected_family.source) == "\\sfdefault"
-    // a font package replaces the main family, or the sans family when it is the default
-    let main_css = registry.font_css(info.packages, "main")
-    let sans_css = if (sans_default) registry.font_css(info.packages, "sans") else null
+    // fontspec's setters or a font package choose the families; the main one is the
+    // root's, or the sans one when it is the default, and all three are the root's
+    // variables, which the family declarations read (font_decl.SERIF_CSS …)
+    let main_css = text_family(info, "main")
+    let sans_css = text_family(info, "sans")
+    let mono_css = text_family(info, "mono")
+    let main_features = role_features(info, "main")
     let font = if (info.polyglossia != null and info.language == "thai")
         language.font_style(info.polyglossia, "thaifont", "serif") ++
             "word-break:normal;overflow-wrap:break-word;"
-        else if (main_css != null) "font-family:" ++ main_css ++ ";"
-        else if (sans_css != null) "font-family:" ++ sans_css ++ ";"
+        else if (main_css != null) "font-family:" ++ main_css ++ ";--latex-serif:" ++ main_css ++ ";"
+        else if (sans_default and sans_css != null) "font-family:" ++ sans_css ++ ";"
         else ""
+    let families = (if (sans_css == null) "" else "--latex-sans:" ++ sans_css ++ ";") ++
+        (if (mono_css == null) "" else "--latex-mono:" ++ mono_css ++ ";") ++ main_features
     let spread = if (info.line_spread == null) ""
         else "line-height:" ++ string(font_decl.line_height_for(info.line_spread)) ++ ";"
-    let style = background ++ font ++ spread
+    let style = background ++ font ++ families ++ spread
     if (style == "") null else style
+}
+
+// a role's family: fontspec's setter for it, else a font package's face
+fn text_family(info, role) {
+    let declared = fontspec.role_declaration(info.font_families, role)
+    if (declared != null) fontspec.family_css(declared.font, role) else registry.font_css(info.packages, role)
+}
+
+// the CSS of the features fontspec's setter gives a role
+pub fn role_features(info, role) {
+    let declared = fontspec.role_declaration(info.font_families, role)
+    if (declared == null) "" else fontspec.features(declared.features, info.custom_colors).css
 }
 
 // the article's classes; the twocolumn class option sets the document in two columns
@@ -1751,7 +1799,7 @@ fn render_paragraph_with_decl(el, info, decl) {
     else if (color.is_color_decl(decl_tag)) {
         <p for c in items { c }>
     }
-    else <p style: paragraph_decl_css(decl, info), for c in items { c }>
+    else <p style: font_switch_css(decl, info) or paragraph_decl_css(decl, info), for c in items { c }>
 }
 
 fn split_around_blocks(items) {
@@ -3508,7 +3556,7 @@ fn find_leading_decl(el, i, n, info) {
         } else if (child is element) {
             let tag_str = string(name(child))
             if (font_decl.is_font_decl(tag_str) or paragraph_decl_css(child, info) != null or
-                color.is_color_decl(tag_str)) child
+                color.is_color_decl(tag_str) or font_switch_css(child, info) != null) child
             else null
         }
         else { null }
@@ -3534,10 +3582,12 @@ fn render_group_with_decl(el, info, decl) {
     let decl_tag = string(name(decl))
     // render children after the declaration (the decl itself returns null)
     let items = render_children_with_color(el, info)
+    let switched = font_switch_css(decl, info)
     if (font_decl.is_font_decl(decl_tag))
         font_decl.wrap_font_decl(decl, items)
     else if (color.is_color_decl(decl_tag))
         if (len(items) == 1) items[0] else <span for c in items { c }>
+    else if (switched != null) <span class: "latex-fontswitch", style: switched, for c in items { c }>
     else font_decl.wrap_align_decl(decl_tag, items, paragraph_decl_css(decl, info))
 }
 

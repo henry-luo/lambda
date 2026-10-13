@@ -1,7 +1,7 @@
 # LaTeX Phase V: package coverage implementation plan
 
 **Design:** [Lambda_Pkg_Latex.md](../Lambda_Pkg_Latex.md) (§6 package model, §9 compatibility matrix, §10 verification rules, §11 outstanding work); [TeX engine design](../latex/Lambda_Design_TeX_Engine.md) §5 and §10; [Lambda_Pkg_Math.md](../Lambda_Pkg_Math.md) §3, §7 and §10.2; [Lambda_Pkg_Slides.md](../Lambda_Pkg_Slides.md) for beamer.
-**Status:** In progress. Proposed 2026-10-12; the user approved the §17 recommendations on 2026-10-13. M0, M1, M2, M4, M8, M3, M5, M6 and M7 were implemented on 2026-10-13 in worktree `latex-phase5-m0`. §17.1 was ratified as **D7.2.7v2** when the first binding (physics) landed.
+**Status:** In progress. Proposed 2026-10-12; the user approved the §17 recommendations on 2026-10-13. M0, M1, M2, M4, M8, M3, M5, M6, M7 and M9 were implemented on 2026-10-13 in worktree `latex-phase5-m0`. §17.1 was ratified as **D7.2.7v2** when the first binding (physics) landed.
 **Formal linkage:** **D7.2.7v2** (expansion only, never typesetting; bundled packages are upstream programming packages or Lambda-owned bindings; resolution order bundled → adapter → beside-document file → located `unknown-package`), **D7.2.1–D7.2.4** (script adapters in a static registry), **S1.8** (no document text becomes Lambda code), **S12.1.1v2** (rendering stays pure and deterministic), **D7.1.2v2** and **D7.5.2** (resources through the one IO door, path-gated), **S7.4.1–S7.4.4** (located diagnostics).
 **Scope:** the commonly used LaTeX packages and classes that `lambda.latex` does not support, plus the kernel, `hyperref` and `graphicx` gaps those packages build on. Diagrams (`tikz-cd`, `circuitikz`, `forest`, `chemfig`, `xy`) belong to the TikZ design (§15).
 
@@ -520,6 +520,31 @@ As built on 2026-10-13, with route (a) chosen by the user and **D7.2.7v2** ratif
   - Unicode math input passes through.
 - **Symbol fonts.** `fontawesome5` depends on §17.3. `marvosym` was covered in M2.
 
+As built on 2026-10-13, with §17.3's "substitution only":
+
+- **Families through the root's variables.** The stylesheet sets `--latex-serif`, `--latex-sans` and `--latex-mono` on `.latex-document` to the bundled Computer Modern faces. The family declarations and classes read them, so a document's choice reaches every sans and mono span:
+  - `font_decl.SERIF_CSS`/`SANS_CSS`/`MONO_CSS`, one definition each in place of the copies in font_decl, caption, amsmath and listings;
+  - `.latex-sf`, `.latex-ttfamily`, `code.latex-code` and the rest.
+  - The `\ttfamily` declaration used to set a generic `monospace` inline, which no stylesheet could override.
+- **The text font packages** are catalogue rows. A row's `font` may now list several faces: times sets serif, sans and mono. The rows cover the 18 packages of the plan.
+  - Each face is a CSS stack of installed look-alikes (TeX Gyre, the system faces) and reports `font-substitution`.
+  - A math face reports that math keeps the bundled faces.
+  - `sourcesanspro[default]` also replaces the main family (`default_option`).
+  - `document_style` sets the root's variables from these rows.
+- **fontspec** (`fontspec.ls`).
+  - `\setmainfont`, `\setsansfont` and `\setmonofont` set the roles (fontspec wins over a font package). `\newfontfamily`/`\setfontfamily`/`\newfontface` make switches, which act as leading declarations of a group or paragraph like the NFSS ones (`font_switch_css`). `\fontspec{Name}` and `\addfontfeatures` work the same way.
+  - Features: `Ligatures`, `Numbers`, a numeric `Scale`, `Color` and `Letters=SmallCaps` map to CSS. `Script`, `Language`, `Mapping` and `Renderer` need none. Other features (`Path`, the font-file keys, `Scale=MatchLowercase`) report `unsupported-font-feature`.
+  - The main role's features go on the root, and the sans and mono roles' on their elements through the stylesheet.
+  - Every face that is not Computer or Latin Modern reports `font-substitution`.
+  - Polyglossia's `\newfontfamily` reading moved here from language.ls (polyglossia now implies fontspec), and so did its substitution reports.
+- **unicode-math.** The binding `tex/binding/unicode-math.sty` turns `\symup`, `\symit`, `\symbf`, `\symsf`, `\symtt`, `\symbb`, `\symcal`, `\symscr`, `\symfrak` and `\symbfit`, and the `\mathbfit`-style forms, into the math package's alphabets.
+  - Bold sans, calligraphic and Fraktur lose their bold.
+  - `\setmathfont` reports a substitution unless it names Latin Modern or New Computer Modern Math. Math keeps the bundled faces, because the math renderer measures with them.
+  - `math-style`, `bold-style` and `sans-style` other than TeX's report `unsupported-option`.
+  - Unicode math input passes through the math parser.
+- **fontawesome5** (`icons.ls`). `\faIcon{name}` and every `\fa<Name>` command render the icon's Unicode look-alike where there is a clear one (✉, ☎, ★, ✓, …), else `[name]`. The package reports one substitution.
+  - The `\fa<Name>` commands are owned through a new catalogue field, `command_prefix`. `registry.owner` checks it cheaply, and a handler table's `"*"` entry serves those commands.
+
 ## 14. M10: classes
 
 - **Class-profile model.** `CLASSES` entries gain a `base` (article, report or book numbering), an option schema, and a command table for class front matter in the M0.1 shape.
@@ -620,3 +645,7 @@ As built on 2026-10-13, with route (a) chosen by the user and **D7.2.7v2** ratif
   - New module `lmd/package/latex/packages/terms.ls`; the bindings `tex/binding/{glossaries,nomencl,acronym}.sty`; the kernel's class name constructors.
   - New test `test/lambda/latex/test_latex_phase5_terms.ls` with its golden and a glossary file, identical on every tier. The other LaTeX, math and TeX tests match their goldens.
   - `make test-lambda-baseline` passed 6792 of 6814 under `LAMBDA_LOG_LEVEL=error`: the 21 warning-reading tests pass without the override, and `test_latex_phase3_corpus` timed out under the baseline's parallel load. Alone it passes in about 37 s, and an interleaved A/B against M6's package tree shows no slowdown once the registry was nested (§11).
+- 2026-10-13: M7 committed (86cc5393e). M9 was built as recorded in §13.
+  - New modules in `lmd/package/latex/packages/`: `fontspec.ls` and `icons.ls`; the binding `tex/binding/unicode-math.sty`.
+  - New test `test/lambda/latex/test_latex_phase5_fonts.ls` with its golden, identical on every tier. `test_latex_font_decl`'s golden and four phase5 expectations now read the family variables, and the groundwork ownership check skips the `"*"` catch-all. The other LaTeX, math and TeX tests match their goldens.
+  - `make test-lambda-baseline` passed 6794 of 6815 under `LAMBDA_LOG_LEVEL=error`; the other 21 are the warning-reading tests, which pass without the override.

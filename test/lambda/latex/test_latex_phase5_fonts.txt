@@ -1,0 +1,34 @@
+"stylesheet variables:"
+true
+"declarations read them:"
+true
+"times families:"
+true
+"times issues:"
+["font-substitution Times", "font-substitution Helvetica", "font-substitution Courier"]
+"math packages:"
+["font-substitution Palatino", "font-substitution Palatino math"]
+"mono package:"
+true
+"sans as default:"
+true
+"setters:"
+true
+"family switch:"
+true
+"fontspec switch:"
+true
+"mono features:"
+true
+"fontspec issues:"
+["font-substitution EB Garamond", "font-substitution Fira Code", "font-substitution Inter", "font-substitution Odd", "unsupported-font-feature Path"]
+"unicode-math issues:"
+["unsupported-option math-style=ISO", "font-substitution XITS Math"]
+"bundled math face:"
+[]
+"icons:"
+true
+"icon issues:"
+["font-substitution Font Awesome 5 Free"]
+"no icons without the package:"
+["unsupported-output null"]
