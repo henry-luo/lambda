@@ -1544,6 +1544,11 @@ TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages)
         {"proportions", 3, "/MediaBox [0 0 225.00 120.00]"},
         {"proportions_columns", 3, "/MediaBox [0 0 225.00 120.00]"},
         {"numbered_columns", 3, "/MediaBox [0 0 225.00 120.00]"},
+        {"table_column_queries", 3, "/MediaBox [0 0 225.00 120.00]"},
+        {"span_column_queries", 3, "/MediaBox [0 0 225.00 120.00]"},
+        {"compound_queries", 3, "/MediaBox [0 0 225.00 120.00]"},
+        {"shorthand_queries", 3, "/MediaBox [0 0 225.00 180.00]"},
+        {"sheet_keeps", 3, "/MediaBox [0 0 180.00 75.00]"},
         {"table_furniture", 3, "/MediaBox [0 0 225.00 120.00]"},
         {"expressions", 3, "/MediaBox [0 0 225.00 120.00]"},
         {"parent_values", 3, "/MediaBox [0 0 150.00 120.00]"},
@@ -1560,7 +1565,8 @@ TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages)
         {"rgb_expressions", 3, "/MediaBox [0 0 150.00 120.00]"},
         {"rgb_percentages", 3, "/MediaBox [0 0 150.00 120.00]"},
         {"decoration_expressions", 3, "/MediaBox [0 0 150.00 120.00]"},
-        {"policy_bindings", 3, "/MediaBox [0 0 300.00 180.00]"}};
+        {"policy_bindings", 3, "/MediaBox [0 0 300.00 180.00]"},
+        {"compound_flow_queries", 3, "/MediaBox [0 0 300.00 180.00]"}};
     const char* extensions[] = {"fo", "rpd"};
     for (const Fixture& fixture : fixtures) {
         SCOPED_TRACE(fixture.name);

@@ -1,6 +1,7 @@
 #include "page_fo.hpp"
 #include "page_fo_expression.hpp"
 #include "view_tree_css.hpp"
+#include "layout_table.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/io/mark_builder.hpp"
@@ -16,6 +17,8 @@
 HASHMAP_DEFINE_PTRKEY(fo_source_spans, RadiantFoSourceSpan, source)
 struct FoSourceId { const char* name; DomNodeRef source; };
 HASHMAP_DEFINE_STRKEY(fo_source_ids, FoSourceId, name)
+struct FoPropertyCell { DomElement* source; size_t column; };
+HASHMAP_DEFINE_PTRKEY(fo_property_cells, FoPropertyCell, source)
 
 struct FoTranslationContext {
     DomDocument* document;
@@ -24,12 +27,18 @@ struct FoTranslationContext {
     MarkBuilder builder;
     HashMap* spans = nullptr;
     HashMap* ids = nullptr;
+    HashMap* property_cells = nullptr;
+    DomElement* property_group = nullptr;
     size_t expression_nodes = 0;
     StrBuf* property_bindings = nullptr;
     size_t binding_count = 0;
     FoTranslationContext(DomDocument* doc, RadiantFoTranslation* out, const RadiantFoOptions* opts)
         : document(doc), result(out), options(opts), builder(doc->input) {}
-    ~FoTranslationContext() { if (spans) hashmap_free(spans); if (ids) hashmap_free(ids); }
+    ~FoTranslationContext() {
+        if (spans) hashmap_free(spans);
+        if (ids) hashmap_free(ids);
+        if (property_cells) hashmap_free(property_cells);
+    }
 };
 
 RadiantFoOptions radiant_fo_options_default() { return {1000000, 256, nullptr}; }
@@ -99,12 +108,14 @@ static bool fo_failure(FoTranslationContext* context, DomElement* source, const 
 
 static const char* fo_parent_value(FoTranslationContext* context, DomElement* source, const char* property,
     const char* value, bool nominal_context = true);
-enum FoPropertyReference { FO_PROPERTY_PARENT, FO_PROPERTY_INHERITED, FO_PROPERTY_NEAREST };
+enum FoPropertyReference { FO_PROPERTY_PARENT, FO_PROPERTY_INHERITED, FO_PROPERTY_NEAREST, FO_PROPERTY_COLUMN, FO_PROPERTY_NONE };
 static const char* fo_reference_binding(FoTranslationContext* context, DomElement* source,
     const char* property, const char* query, FoPropertyReference reference);
 static bool fo_property_assigned(DomElement* source, const char* name);
-static const char* fo_computed_property_name(const char* name);
+static const char* fo_computed_property_name(const char* name, bool assignment = false);
 static bool fo_decoration_condition_name(const char* name);
+static bool fo_property_column(FoTranslationContext* context, DomElement* source,
+    const char* property, size_t* column);
 
 static const char* fo_column_initial(const char* name) {
     return !strcmp(name, "column-count") ? "1" : !strcmp(name, "column-gap") ? "12pt" : nullptr;
@@ -133,12 +144,18 @@ static bool fo_property_inherits(const char* name) {
     return radiant_whitespace_trait_name(name);
 }
 
-static const char* fo_parent_value(FoTranslationContext* context, DomElement* source,
-        const char* property, const char* value, bool nominal_context) {
-    if (!value) return nullptr;
+struct FoPropertyQuery {
+    FoPropertyReference reference = FO_PROPERTY_NONE;
+    const char* name = nullptr;
+    bool whole = false;
+};
+
+static bool fo_parse_property_query(FoTranslationContext* context, DomElement* source,
+        const char* property, const char* value, FoPropertyQuery* query) {
+    if (!value) return true;
     const char* first = value + strspn(value, " \t\r\n");
-    static const char* functions[] = {"from-parent", "inherited-property-value", "from-nearest-specified-value"};
-    for (size_t kind = 0; kind < 3; kind++) {
+    static const char* functions[] = {"from-parent", "inherited-property-value", "from-nearest-specified-value", "from-table-column"};
+    for (size_t kind = 0; kind < sizeof(functions) / sizeof(*functions); kind++) {
         size_t length = strlen(functions[kind]);
         if (strncmp(first, functions[kind], length)) continue;
         const char* cursor = first + length;
@@ -146,23 +163,42 @@ static const char* fo_parent_value(FoTranslationContext* context, DomElement* so
         if (*cursor != '(') continue;
         if (context->result->node_count > context->options->max_nodes ||
             context->expression_nodes >= context->options->max_nodes - context->result->node_count) {
-            fo_failure(context, source, property, "FO expression budget exhausted", TYPESET_BUDGET_EXHAUSTED); return nullptr;
+            return fo_failure(context, source, property, "FO expression budget exhausted", TYPESET_BUDGET_EXHAUSTED);
         }
         context->expression_nodes++;
         cursor++; cursor += strspn(cursor, " \t\r\n");
         size_t argument = strcspn(cursor, " \t\r\n),");
-        const char* query = argument ? pool_dup_n(context->document->document_pool, cursor, argument) : property;
-        if (!query) { fo_failure(context, source, property, "FO reference allocation failed", TYPESET_OUT_OF_MEMORY); return nullptr; }
+        query->name = argument ? pool_dup_n(context->document->document_pool, cursor, argument) : property;
+        if (!query->name) return fo_failure(context, source, property, "FO reference allocation failed", TYPESET_OUT_OF_MEMORY);
         cursor += argument; cursor += strspn(cursor, " \t\r\n");
         if (*cursor != ')') {
-            fo_failure(context, source, property, "parent reference requires one whole-property function with an optional matching property name"); return nullptr;
+            return fo_failure(context, source, property, "property reference requires one function with an optional property name");
         }
-        if (cursor[1 + strspn(cursor + 1, " \t\r\n")]) return value;
-        if (kind == FO_PROPERTY_INHERITED && !fo_property_inherits(query)) {
+        query->reference = static_cast<FoPropertyReference>(kind);
+        query->whole = !cursor[1 + strspn(cursor + 1, " \t\r\n")];
+        return true;
+    }
+    return true;
+}
+
+static bool fo_compound_query(FoTranslationContext* context, DomElement* source,
+        const char* property, const char* value, FoPropertyQuery* query) {
+    return fo_parse_property_query(context, source, property, value, query) &&
+        query->reference != FO_PROPERTY_NONE && query->whole && !strcmp(query->name, property);
+}
+
+static const char* fo_parent_value(FoTranslationContext* context, DomElement* source,
+        const char* property, const char* value, bool nominal_context) {
+    if (!value) return nullptr;
+    FoPropertyQuery parsed;
+    if (!fo_parse_property_query(context, source, property, value, &parsed)) return nullptr;
+    if (parsed.reference != FO_PROPERTY_NONE && parsed.whole) {
+        const char* query = parsed.name;
+        FoPropertyReference reference = parsed.reference;
+        if (reference == FO_PROPERTY_INHERITED && !fo_property_inherits(query)) {
             fo_failure(context, source, property, "inherited-property-value requires an inherited FO property"); return nullptr;
         }
-        FoPropertyReference reference = static_cast<FoPropertyReference>(kind);
-        if (kind == FO_PROPERTY_NEAREST || strcmp(query, property) || fo_column_initial(query))
+        if (reference == FO_PROPERTY_COLUMN || reference == FO_PROPERTY_NEAREST || strcmp(query, property) || fo_column_initial(query))
             return fo_reference_binding(context, source, property, query, reference);
         if (fo_element(source, "root") || !source->parent_element()) {
             if (fo_decoration_condition_name(property)) return "discard";
@@ -177,7 +213,6 @@ static const char* fo_parent_value(FoTranslationContext* context, DomElement* so
                 return fo_reference_binding(context, source, property, query, reference);
         }
         value = "inherit";
-        break;
     }
     if (nominal_context && !strcmp(value, "inherit") &&
         (!strcmp(property, "text-altitude") || !strcmp(property, "text-depth"))) {
@@ -197,7 +232,8 @@ static const char* fo_parent_value(FoTranslationContext* context, DomElement* so
 struct FoExpressionReferenceContext { FoTranslationContext* translation; DomElement* source; const char* property; };
 static CssValue* fo_expression_reference(void* owner, const char* function, const char* property) {
     FoExpressionReferenceContext* query = (FoExpressionReferenceContext*)owner;
-    FoPropertyReference reference = !strcmp(function, "from-nearest-specified-value") ? FO_PROPERTY_NEAREST :
+    FoPropertyReference reference = !strcmp(function, "from-table-column") ? FO_PROPERTY_COLUMN :
+        !strcmp(function, "from-nearest-specified-value") ? FO_PROPERTY_NEAREST :
         !strcmp(function, "inherited-property-value") ? FO_PROPERTY_INHERITED : FO_PROPERTY_PARENT;
     const char* text = fo_reference_binding(query->translation, query->source, query->property,
         property ? property : query->property, reference);
@@ -263,12 +299,38 @@ static Item fo_transparent_row(FoTranslationContext* context, DomElement* source
     return row.final();
 }
 
+static bool fo_decoration_shorthand(const CssProperty* property) {
+    if (!property || !property->shorthand || !property->longhand_count) return false;
+    const CssPropertyCode families[] = {CSS_PROPERTY_BORDER, CSS_PROPERTY_PADDING};
+    for (CssPropertyCode family : families) {
+        bool included = true;
+        for (size_t i = 0; i < (size_t)property->longhand_count; i++)
+            included &= css_property_shorthand_contains(family, property->longhand_props[i]);
+        if (included) return true;
+    }
+    return false;
+}
+
 static bool fo_style_property(FoTranslationContext* context, DomElement* source, StrBuf* style,
         const char* name, const char* value, const char* source_name = nullptr, bool emit = true,
-        bool length_component = false, bool computed_expression = false) {
+        bool length_component = false, bool computed_expression = false, const char* reference_component = nullptr) {
     if (!value) return true;
     const char* authored = value;
-    value = fo_parent_value(context, source, source_name ? source_name : name, value);
+    const CssProperty* property = css_property_get_by_name(name);
+    FoPropertyQuery query;
+    // FO text-align is scalar even though the CSS catalogue models it as a shorthand.
+    if (fo_decoration_shorthand(property) && fo_compound_query(context, source, name, value, &query)) {
+        // XSL whole shorthand queries select each longhand independently, including nearest assignments.
+        for (size_t i = 0; i < (size_t)property->longhand_count; i++) {
+            const CssProperty* member = css_property_get_by_code(property->longhand_props[i]);
+            const char* binding = fo_reference_binding(context, source, name, member->name, query.reference);
+            if (!binding || !fo_style_property(context, source, style, member->name, binding, name, emit, false, true)) return false;
+        }
+        return true;
+    }
+    if (reference_component && fo_compound_query(context, source, source_name, value, &query))
+        value = fo_reference_binding(context, source, source_name, reference_component, query.reference);
+    else value = fo_parent_value(context, source, source_name ? source_name : name, value);
     if (!value) return false;
     if (!strcmp(name, "border-collapse") && !strcmp(value, "inherit")) {
         // FO inherits this keyword with an initial collapse; HTML's separate-border initial cannot stand in for it.
@@ -276,7 +338,6 @@ static bool fo_style_property(FoTranslationContext* context, DomElement* source,
         if (!value) value = "collapse";
     }
     CssDeclaration* declaration = css_parse_property_value_declaration(name, strlen(name), value, strlen(value), context->document->document_pool);
-    const CssProperty* property = css_property_get_by_name(name);
     bool expression = property && (property->type == PROP_TYPE_LENGTH || property->type == PROP_TYPE_NUMBER ||
         property->type == PROP_TYPE_COLOR || property->code == CSS_PROPERTY_FONT_WEIGHT);
     bool shorthand = property && css_property_is_shorthand(property->code);
@@ -323,21 +384,129 @@ static bool fo_sheet_size(FoTranslationContext* context, DomElement* source, Str
     return true;
 }
 
-static const char* fo_count_text(FoTranslationContext* context, DomElement* source, const char* property,
-        const char* raw, uint32_t maximum, const char* reason) {
+static bool fo_count_value(FoTranslationContext* context, DomElement* source, const char* property,
+        const char* raw, uint32_t maximum, const char* reason, uint32_t* result) {
     CssValue* expression = fo_expression(context, source, property, raw);
-    if (!expression) return nullptr;
+    if (!expression) return false;
     CssMathEvaluationContext evaluation = {};
     CssMathResult computed = css_math_evaluate(expression, &evaluation);
     uint32_t value = 0;
     if (computed.type != CSS_MATH_NUMBER || !computed.resolved ||
         !radiant_page_rounded_count(computed.value, 1, &value) || value > maximum) {
-        fo_failure(context, source, property, reason); return nullptr;
+        return fo_failure(context, source, property, reason);
     }
+    *result = value; return true;
+}
+
+static const char* fo_count_text(FoTranslationContext* context, DomElement* source, const char* property,
+        const char* raw, uint32_t maximum, const char* reason, uint32_t* computed = nullptr) {
+    uint32_t value = 0;
+    if (!fo_count_value(context, source, property, raw, maximum, reason, &value)) return nullptr;
+    if (computed) *computed = value;
     char number[16]; snprintf(number, sizeof(number), "%u", value);
     const char* text = pool_strdup(context->document->document_pool, number);
     if (!text) fo_failure(context, source, property, "FO count allocation failed", TYPESET_OUT_OF_MEMORY);
     return text;
+}
+
+static bool fo_cell_row_boundaries(FoTranslationContext* context, DomElement* source, bool* starts, bool* ends) {
+    const char* names[] = {"starts-row", "ends-row"}; bool* results[] = {starts, ends};
+    for (size_t i = 0; i < 2; i++) if (const char* raw = source->get_attribute(names[i])) {
+        const char* value = fo_parent_value(context, source, names[i], raw);
+        if (!value) return false;
+        if (!radiant_page_boolean(value, false, results[i]))
+            return fo_failure(context, source, names[i], "FO row boundaries require true, false or inherited false");
+    }
+    return true;
+}
+
+static bool fo_property_column(FoTranslationContext* context, DomElement* source,
+        const char* property, size_t* column) {
+    DomElement* cell = source;
+    while (cell && !fo_element(cell, "table-cell")) cell = cell->parent_element();
+    if (!cell) return fo_failure(context, source, property, "from-table-column requires a table-cell or its descendant");
+    if (!context->property_cells) context->property_cells = fo_property_cells_new(16);
+    if (!context->property_cells) return fo_failure(context, source, property, "FO column query allocation failed", TYPESET_OUT_OF_MEMORY);
+    FoPropertyCell key = {cell, 0};
+    if (const FoPropertyCell* found = (const FoPropertyCell*)hashmap_get(context->property_cells, &key)) {
+        *column = found->column; return true;
+    }
+    DomElement* group = cell->parent_element();
+    if (fo_element(group, "table-row")) group = group->parent_element();
+    if (!group || !fo_table_group(fo_table_kind(group)))
+        return fo_failure(context, source, property, "column query requires an admitted table row group");
+    if (context->property_group == group)
+        return fo_failure(context, source, property, "column query cannot determine its own grid counts");
+    struct GroupScope {
+        FoTranslationContext* context; DomElement* previous;
+        GroupScope(FoTranslationContext* owner, DomElement* group) : context(owner), previous(owner->property_group) { owner->property_group = group; }
+        ~GroupScope() { context->property_group = previous; }
+    } scope(context, group);
+    struct Cell { DomElement* source; size_t row, column, columns, rows; };
+    lam::ArrayList<Cell> cells(MEM_CAT_CONTAINER, 0);
+    size_t rows = 0, capacity = 0; bool pending = false;
+    auto append = [&](DomElement* element) -> bool {
+        // refinement shares the translator's count domains and the common occupied-slot algorithm.
+        uint32_t values[] = {0, 1, 1};
+        const char* names[] = {"column-number", "number-columns-spanned", "number-rows-spanned"};
+        for (size_t i = 0; i < 3; i++) if (const char* raw = element->get_attribute(names[i]))
+            if (!fo_count_value(context, element, names[i], raw, i == 2 ? 65534 : 1000,
+                    "FO table count exceeds the admitted HTML grid domain", &values[i])) return false;
+        if (values[1] > context->options->max_nodes - capacity)
+            return fo_failure(context, element, property, "FO column query grid budget exhausted", TYPESET_BUDGET_EXHAUSTED);
+        capacity += values[1];
+        if (!fo_translation_charge(context))
+            return fo_failure(context, element, property, "FO column query grid budget exhausted", TYPESET_BUDGET_EXHAUSTED);
+        if (!cells.append({element, rows, values[0], values[1], values[2]}))
+            return fo_failure(context, element, property, "FO column query allocation failed", TYPESET_OUT_OF_MEMORY);
+        return true;
+    };
+    size_t maximum_start = 0;
+    for (DomElement* child = group->first_child_element(); child; child = child->next_sibling_element()) {
+        if (fo_element(child, "table-row")) {
+            for (DomElement* element = child->first_child_element(); element; element = element->next_sibling_element())
+                if (fo_element(element, "table-cell") && !append(element)) return false;
+            rows++;
+        } else if (fo_element(child, "table-cell")) {
+            bool starts = false, ends = false;
+            if (!fo_cell_row_boundaries(context, child, &starts, &ends)) return false;
+            if (starts && pending) { rows++; pending = false; }
+            if (!append(child)) return false;
+            pending = true;
+            if (ends) { rows++; pending = false; }
+        }
+    }
+    if (pending) rows++;
+    for (const Cell& entry : cells) if (entry.column > maximum_start) maximum_start = entry.column;
+    if (maximum_start > context->options->max_nodes - capacity)
+        return fo_failure(context, source, property, "FO column query grid budget exhausted", TYPESET_BUDGET_EXHAUSTED);
+    capacity += maximum_start;
+    lam::ArrayList<size_t> ends(MEM_CAT_CONTAINER, capacity);
+    for (size_t i = 0; i < capacity; i++) if (!ends.append(0))
+        return fo_failure(context, source, property, "FO column query allocation failed", TYPESET_OUT_OF_MEMORY);
+    size_t row = SIZE_MAX, next = 0, coverage = 0;
+    for (const Cell& entry : cells) {
+        if (row != entry.row) { row = entry.row; next = 0; }
+        size_t span = layout_table_used_rowspan(entry.rows, rows - row);
+        if (span > (context->options->max_nodes - coverage) / entry.columns)
+            return fo_failure(context, entry.source, property, "FO column query coverage budget exhausted", TYPESET_BUDGET_EXHAUSTED);
+        coverage += span * entry.columns;
+        if (entry.column) next = entry.column - 1;
+        bool overlap = false; size_t start = 0;
+        next = layout_table_place_span(rows, capacity, row, next, span, entry.columns,
+            [&](size_t r, size_t c) { return !entry.column && ends[c] > r; },
+            [&](size_t r, size_t c) {
+                if (r == row && ends[c] > r) overlap = true;
+                ends[c] = r + 1;
+            }, &start);
+        if (overlap) return fo_failure(context, entry.source, property, "overlapping table spans require a valid rectangular grid");
+        FoPropertyCell placed = {entry.source, start + 1}; hashmap_set(context->property_cells, &placed);
+        if (hashmap_oom(context->property_cells))
+            return fo_failure(context, entry.source, property, "FO column query allocation failed", TYPESET_OUT_OF_MEMORY);
+    }
+    const FoPropertyCell* found = (const FoPropertyCell*)hashmap_get(context->property_cells, &key);
+    if (!found) return fo_failure(context, source, property, "column query source is absent from its table grid");
+    *column = found->column; return true;
 }
 
 struct FoStyleBuffer {
@@ -385,6 +554,8 @@ static const char* fo_reference_binding(FoTranslationContext* context, DomElemen
         fo_failure(context, source, property, "FO property reference requires an admitted computed property and inheritance domain"); return nullptr;
     }
     size_t levels = 1;
+    size_t column = 0;
+    if (reference == FO_PROPERTY_COLUMN && !fo_property_column(context, source, property, &column)) return nullptr;
     if (reference == FO_PROPERTY_NEAREST) {
         DomElement* ancestor = source->parent_element();
         while (ancestor && !fo_property_assigned(ancestor, query)) {
@@ -398,7 +569,8 @@ static const char* fo_reference_binding(FoTranslationContext* context, DomElemen
     // these noninherited FO properties have different initials from CSS auto/normal.
     if (const char* initial = fo_column_initial(query))
         if (!levels || !selected || !fo_property_assigned(selected, query)) return initial;
-    if (!levels || fo_element(source, "root") || !source->parent_element()) {
+    if (reference != FO_PROPERTY_COLUMN && (!levels || fo_element(source, "root") || !source->parent_element())) {
+        if (fo_decoration_condition_name(query)) return "discard";
         if (!strcmp(native_query, "font-size")) return "12pt";
         if (radiant_image_trait_name(native_query))
             return fo_computed_text(context, source, property,
@@ -416,7 +588,10 @@ static const char* fo_reference_binding(FoTranslationContext* context, DomElemen
     if (!context->property_bindings) { fo_failure(context, source, property, "FO binding allocation failed", TYPESET_OUT_OF_MEMORY); return nullptr; }
     char variable[64]; snprintf(variable, sizeof(variable), "--rpd-property-%zu", ++context->binding_count);
     strbuf_append_str(context->property_bindings, variable);
-    if (levels == 1) strbuf_append_str(context->property_bindings, ":parent(");
+    if (reference == FO_PROPERTY_COLUMN) {
+        strbuf_append_str(context->property_bindings, ":table-column(");
+        strbuf_append_uint64(context->property_bindings, column); strbuf_append_char(context->property_bindings, ',');
+    } else if (levels == 1) strbuf_append_str(context->property_bindings, ":parent(");
     else { strbuf_append_str(context->property_bindings, ":ancestor("); strbuf_append_uint64(context->property_bindings, levels); strbuf_append_char(context->property_bindings, ','); }
     // native component names use CSS identifier escaping inside binding expressions.
     StringBuf* escaped = stringbuf_new(context->document->document_pool);
@@ -465,11 +640,11 @@ static bool fo_conditional_length(CssPropertyCode family) {
     return family == CSS_PROPERTY_BORDER_WIDTH || family == CSS_PROPERTY_PADDING;
 }
 
-static const char* fo_computed_property_name(const char* name) {
+static const char* fo_computed_property_name(const char* name, bool assignment) {
     for (const auto& property : fo_corresponding_properties) {
         size_t length = strlen(property.relative);
         bool length_component = fo_conditional_length(property.family) && !strncmp(name, property.relative, length) &&
-            !strcmp(name + length, ".length");
+            (!strcmp(name + length, ".length") || (assignment && !strcmp(name + length, ".conditionality")));
         if (length_component || (!fo_conditional_length(property.family) && !strcmp(name, property.relative)))
             return css_property_get_by_code(radiant_box_side_property(property.family, property.side))->name;
     }
@@ -481,7 +656,10 @@ static bool fo_property_assigned(DomElement* source, const char* name) {
     bool space = false; size_t index = 0, component = 0; const char* base = nullptr;
     if (radiant_flow_trait_key(name, &space, &index, &component, &base) && component)
         return source->get_attribute(base) != nullptr;
-    CssPropertyCode query = css_property_code_from_name(fo_computed_property_name(name));
+    const char* corresponding = fo_computed_property_name(name, true);
+    // an absolute assignment resets the corresponding compound, including its remaining initial components.
+    if (strcmp(corresponding, name) && source->get_attribute(corresponding)) return true;
+    CssPropertyCode query = css_property_code_from_name(corresponding);
     if (query == CSS_PROPERTY_UNKNOWN) return false;
     int count = 0; const char** names = source->attribute_names(&count);
     for (int i = 0; i < count; i++) if (css_property_shorthand_contains(css_property_code_from_name(names[i]), query)) return true;
@@ -571,7 +749,7 @@ static bool fo_column_proportion(FoTranslationContext* context, DomElement* sour
     return true;
 }
 
-static bool fo_style(FoTranslationContext* context, DomElement* source, StrBuf* style, bool proportional_column) {
+static bool fo_style(FoTranslationContext* context, DomElement* source, StrBuf* style, bool proportional_column, bool property_column) {
     FoTableKind table = fo_table_kind(source);
     FoListKind list = fo_list_kind(source);
     bool graphic = fo_graphic(source);
@@ -602,7 +780,7 @@ static bool fo_style(FoTranslationContext* context, DomElement* source, StrBuf* 
                 return fo_failure(context, source, property, "FO table furniture omission requires true, false or inherit");
         }
     }
-    if (table == FO_TABLE_COLUMN && !proportional_column &&
+    if (table == FO_TABLE_COLUMN && !proportional_column && !property_column &&
         !fo_style_property(context, source, style, "width", source->get_attribute("column-width"), "column-width")) return false;
     if (list == FO_LIST_ITEM) strbuf_append_str(style, "table-layout:fixed;width:100%;border-collapse:separate;border-spacing:0;");
     if (table == FO_TABLE_CELL || list == FO_LIST_LABEL || list == FO_LIST_BODY) {
@@ -627,8 +805,11 @@ static bool fo_style(FoTranslationContext* context, DomElement* source, StrBuf* 
     // explicit absolute longhands win; relative properties override only shorthand expansion (XSL §5.3.1).
     for (const auto& property : fo_corresponding_properties) {
         const CssProperty* absolute = css_property_get_by_code(radiant_box_side_property(property.family, property.side));
+        const char* reference_component = fo_conditional_length(property.family) &&
+            (property.side == CSS_BOX_SIDE_TOP || property.side == CSS_BOX_SIDE_BOTTOM)
+            ? fo_component_name(component_name.value, property.relative, "length") : nullptr;
         if (!absolute || !fo_style_property(context, source, style, absolute->name, source->get_attribute(property.relative),
-            property.relative, !source->get_attribute(absolute->name))) return false;
+            property.relative, !source->get_attribute(absolute->name), false, false, reference_component)) return false;
         if (fo_conditional_length(property.family)) {
             const char* name = fo_component_name(component_name.value, property.relative, "length");
             const char* length = source->get_attribute(name);
@@ -670,9 +851,11 @@ static bool fo_attribute_admitted(FoTranslationContext* context, DomElement* sou
     for (const auto& property : fo_corresponding_properties) if (!strcmp(name, property.relative)) return true;
     if (fo_length_component_name(name)) return true;
     if (fo_decoration_condition_name(name)) {
-        const char* value = fo_parent_value(context, source, name, source->get_attribute(name));
+        const char* raw = source->get_attribute(name);
+        const char* value = fo_parent_value(context, source, name, raw);
         if (!value) return false;
         return !strcmp(value, "discard") || !strcmp(value, "retain") || !strcmp(value, "inherit") ||
+            (value != raw && !strncmp(value, "var(", 4)) ||
             fo_failure(context, source, pool_strdup(context->document->document_pool, name), "FO decoration conditionality requires discard, retain or inherit");
     }
     if (!strcmp(name, "line-stacking-strategy")) {
@@ -703,7 +886,7 @@ static bool fo_attribute_admitted(FoTranslationContext* context, DomElement* sou
             fo_failure(context, source, name, "complementary list indents require zero in the current reference-area profile");
     }
     if ((radiant_flow_trait_name(name) && strcmp(name, "column-proportion") && strcmp(name, "column-number") &&
-        strcmp(name, "style-transparent")) || radiant_whitespace_trait_name(name) || radiant_image_trait_name(name)) return true;
+        strcmp(name, "column-property-span") && strcmp(name, "style-transparent")) || radiant_whitespace_trait_name(name) || radiant_image_trait_name(name)) return true;
     static const char* metadata[] = {"id", "xml:base", "xml:lang", "break-before", "break-after"};
     if (fo_property_in(name, metadata, sizeof(metadata) / sizeof(metadata[0])) ||
         fo_property_in(name, fo_common_properties, sizeof(fo_common_properties) / sizeof(fo_common_properties[0]))) return true;
@@ -743,7 +926,8 @@ static bool fo_attribute_admitted(FoTranslationContext* context, DomElement* sou
     if ((table == FO_TABLE || table == FO_TABLE_ROW || table == FO_TABLE_CELL) && !strcmp(name, "height")) return true;
     if (table == FO_TABLE && (!strcmp(name, "table-layout") || !strcmp(name, "table-omit-header-at-break") ||
         !strcmp(name, "table-omit-footer-at-break"))) return true;
-    if (table == FO_TABLE_COLUMN && (!strcmp(name, "column-width") || !strcmp(name, "number-columns-repeated"))) return true;
+    if (table == FO_TABLE_COLUMN && (!strcmp(name, "column-width") || !strcmp(name, "number-columns-repeated") ||
+        !strcmp(name, "number-columns-spanned"))) return true;
     if (table == FO_TABLE_CELL && (!strcmp(name, "number-columns-spanned") ||
         !strcmp(name, "number-rows-spanned"))) return true;
     return fo_failure(context, source, pool_strdup(context->document->document_pool, name), "FO property requires an unimplemented common Radiant trait");
@@ -872,9 +1056,19 @@ static Item fo_translate_element(FoTranslationContext* context, DomElement* sour
         hashmap_set(context->ids, &entry);
         if (hashmap_oom(context->ids)) { fo_failure(context, source, "id", "FO ID index allocation failed", TYPESET_OUT_OF_MEMORY); return ItemNull; }
     }
+    uint32_t column_span = 1; const char* column_property_span = nullptr;
+    if (table == FO_TABLE_COLUMN) if (const char* raw = source->get_attribute("number-columns-spanned")) {
+        column_property_span = fo_count_text(context, source, "number-columns-spanned", raw, 1000,
+            "FO column property span exceeds the admitted HTML colspan domain", &column_span);
+        if (!column_property_span) return ItemNull;
+    }
+    bool property_column = column_span > 1;
     bool proportional_column = false; float column_weight = 0.0f; const char* column_base = nullptr;
-    if (table == FO_TABLE_COLUMN && !fo_column_proportion(context, source, &proportional_column, &column_weight, &column_base)) return ItemNull;
+    // widths on span-qualified property declarations are ignored by XSL, including proportional expressions.
+    if (table == FO_TABLE_COLUMN && !property_column &&
+        !fo_column_proportion(context, source, &proportional_column, &column_weight, &column_base)) return ItemNull;
     ElementBuilder output = context->builder.element(target);
+    if (column_property_span) output.attr("r:column-property-span", column_property_span);
     if (proportional_column) {
         char number[32]; snprintf(number, sizeof(number), "%.9g", (double)column_weight);
         output.attr("r:column-proportion", number);
@@ -942,7 +1136,7 @@ static Item fo_translate_element(FoTranslationContext* context, DomElement* sour
             .attr("r:white-space-collapse", "true").attr("r:wrap-option", "wrap");
         strbuf_append_str(style, "margin:0; font-family:serif; font-size:12pt; line-height:normal; color:black; white-space:normal;");
     }
-    if (!fo_style(context, source, style, proportional_column)) return ItemNull;
+    if (!fo_style(context, source, style, proportional_column, property_column)) return ItemNull;
     if (column_base) fo_style_append(style, "width", column_base);
     // common typed traits retain ranges/strengths instead of approximating them with CSS margins/avoid.
     FoStyleBuffer attribute_buffer;
@@ -954,14 +1148,19 @@ static Item fo_translate_element(FoTranslationContext* context, DomElement* sour
         (property.side == CSS_BOX_SIDE_TOP || property.side == CSS_BOX_SIDE_BOTTOM)) {
         const CssProperty* absolute = css_property_get_by_code(radiant_box_side_property(property.family, property.side));
         const char* raw = source->get_attribute(property.relative);
-        const char* shorthand = fo_parent_value(context, source, property.relative, raw);
-        if (raw && !shorthand) return ItemNull;
+        FoPropertyQuery query;
+        bool compound = fo_compound_query(context, source, property.relative, raw, &query);
+        const char* shorthand = compound ? nullptr : fo_parent_value(context, source, property.relative, raw);
+        if (raw && !compound && !shorthand) return ItemNull;
         const char* condition_name = fo_component_name(attribute_buffer.value, property.relative, "conditionality");
         raw = source->get_attribute(condition_name);
         const char* owned_name = raw ? pool_strdup(context->document->document_pool, condition_name) : condition_name;
         if (!owned_name) { fo_failure(context, source, property.relative, "FO component allocation failed", TYPESET_OUT_OF_MEMORY); return ItemNull; }
         const char* conditionality = fo_parent_value(context, source, owned_name, raw);
         if (raw && !conditionality) return ItemNull;
+        if (!conditionality && compound)
+            conditionality = fo_reference_binding(context, source, property.relative, condition_name, query.reference);
+        if (compound && !conditionality) return ItemNull;
         if (source->get_attribute(absolute->name)) conditionality = "discard";
         else if (!conditionality) conditionality = shorthand && !strcmp(shorthand, "inherit") ? "inherit" : "discard";
         output.attr(fo_component_name(attribute_buffer.value, property.relative, "conditionality", true), conditionality);
@@ -974,8 +1173,22 @@ static Item fo_translate_element(FoTranslationContext* context, DomElement* sour
         // list-part functions have already become independent grid tracks, rather than inherited block lengths.
         if ((list == FO_LIST_LABEL || list == FO_LIST_BODY) &&
             (!strcmp(attributes[i], "start-indent") || !strcmp(attributes[i], "end-indent"))) continue;
-        strbuf_reset(attribute_buffer.value); strbuf_append_str(attribute_buffer.value, "r:"); strbuf_append_str(attribute_buffer.value, attributes[i]);
+        bool space = false; size_t index = 0, component = 0;
+        FoPropertyQuery query;
         const char* authored = source->get_attribute(attributes[i]);
+        if (radiant_flow_trait_key(attributes[i], &space, &index, &component) && !component &&
+            fo_compound_query(context, source, attributes[i], authored, &query)) {
+            // expand matching whole queries before explicit components, independently of XML attribute order.
+            for (size_t part = 1; const char* suffix = radiant_flow_trait_component_name(space, part); part++) {
+                const char* name = fo_component_name(attribute_buffer.value, attributes[i], suffix);
+                const char* value = fo_reference_binding(context, source, attributes[i], name, query.reference);
+                if (!value) return ItemNull;
+                if (!source->get_attribute(name))
+                    output.attr(fo_component_name(attribute_buffer.value, attributes[i], suffix, true), value);
+            }
+            continue;
+        }
+        strbuf_reset(attribute_buffer.value); strbuf_append_str(attribute_buffer.value, "r:"); strbuf_append_str(attribute_buffer.value, attributes[i]);
         const char* value = fo_parent_value(context, source, attributes[i], authored);
         if (!value) return ItemNull;
         // keyword traits remain keywords; numeric FO syntax enters the same typed native trait path.
@@ -1131,14 +1344,7 @@ static Item fo_translate_element(FoTranslationContext* context, DomElement* sour
         bool ends_row = false;
         if (group_children == FO_TABLE_CELL) {
             bool starts_row = false;
-            for (const auto& boundary : {"starts-row", "ends-row"}) if (const char* raw = element->get_attribute(boundary)) {
-                const char* value = fo_parent_value(context, element, boundary, raw);
-                if (!value) return ItemNull;
-                bool* selected = !strcmp(boundary, "starts-row") ? &starts_row : &ends_row;
-                if (!radiant_page_boolean(value, false, selected)) {
-                    fo_failure(context, element, boundary, "FO row boundaries require true, false or inherited false"); return ItemNull;
-                }
-            }
+            if (!fo_cell_row_boundaries(context, element, &starts_row, &ends_row)) return ItemNull;
             if (starts_row && !finish_row()) return ItemNull;
         }
         Item translated = fo_translate_element(context, element, depth + 1);

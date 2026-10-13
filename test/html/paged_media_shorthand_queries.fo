@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" font-family="Arial" font-size="7.5pt" line-height="9pt" orphans="1" widows="1" border-collapse="separate">
+  <fo:layout-master-set><fo:simple-page-master master-name="sheet" page-width="225pt" page-height="180pt" margin="7.5pt"><fo:region-body/></fo:simple-page-master></fo:layout-master-set>
+  <fo:page-sequence master-reference="sheet" force-page-count="no-force"><fo:flow flow-name="xsl-region-body">
+    <fo:block font-size="15pt" color="purple" border="2.25pt solid" padding="1.5pt 3pt 4.5pt 6pt">
+      <fo:block font-size="7.5pt" color="blue" border="from-parent()" padding="from-parent(padding)">Parent shorthand: owner lengths and ink.</fo:block>
+    </fo:block>
+    <fo:block break-before="page" font-size="15pt" color="purple" border="1.5pt solid" padding="1.5pt">
+      <fo:block border-left-width="3pt" border-left-style="solid" padding-left="3pt">
+        <fo:block font-size="7.5pt" color="blue" border-after-color="blue" padding-before.length="3pt" border="from-nearest-specified-value()" padding="from-nearest-specified-value()">Nearest shorthand: each side selects its owner.</fo:block>
+      </fo:block>
+    </fo:block>
+    <fo:table break-before="page" table-layout="fixed" width="100%">
+      <fo:table-column column-width="70pt"/>
+      <fo:table-column column-width="70pt"/>
+      <fo:table-column column-width="70pt"/>
+      <fo:table-column column-number="1" number-columns-spanned="2" font-size="12pt" color="green" padding=".25em" border=".125em solid"/>
+      <fo:table-body><fo:table-row>
+        <fo:table-cell number-columns-spanned="2"><fo:block color="blue" border="from-table-column()" padding="from-table-column()">Spanning column shorthand: green border, blue text.</fo:block></fo:table-cell>
+        <fo:table-cell><fo:block border="from-table-column()" padding="from-table-column()">Initials</fo:block></fo:table-cell>
+      </fo:table-row></fo:table-body>
+    </fo:table>
+  </fo:flow></fo:page-sequence>
+</fo:root>
