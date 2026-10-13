@@ -51,6 +51,11 @@ fn metric(c, key, fallback_value = 0.0) {
 }
 fn math_quad(c) => metric(c, "math_quad", font.UNITS)
 fn with_style(c, style) => {*:c, style: style, cramped: false}
+// Operators, relations, punctuation and digits stay upright. \boldsymbol's bold math
+// version sets them all bold; \mathbf, a math alphabet, reaches only the digits
+// (mathcode class 7), so \mathbf{+} keeps the regular plus.
+fn upright(c, digits) => {*:c, variant: if (c.variant == "bolditalic") "bolditalic"
+    else if (digits and c.variant == "bold") "bold" else "normal"}
 fn script(c) => {*:c, style: if (c.style == "display" or c.style == "text") "script" else "scriptscript"}
 fn fraction_child(c) => if (c.style == "display") {*:c, style: "text"} else script(c)
 fn command_name(text) => if (len(text) > 1 and slice(text, 0, 1) == "\\") slice(text, 1, len(text)) else text
@@ -68,8 +73,18 @@ fn atom_type(ch) {
 fn character(ch, c, atom, literal = false) {
     let actual = if (ch == "-" and not literal) "−" else ch
     if (not literal and contains(c.profile.closed_composites,actual)) closed_integral(actual,c)^
-    else bx.glyph(font.character(c.profile, actual, c.variant, literal)^, scale(c), atom)
+    else {
+        let base = bx.glyph(font.character(c.profile, actual, c.variant, literal)^, scale(c), atom)
+        // bm.sty falls back to poor man's bold for a symbol no bundled face has in bold
+        // and keeps the symbol's class, where \pmb makes an ordinary box
+        if (c.poor_bold == true and c.variant == "bolditalic" and not literal and font.lacks_bold(c.profile, actual))
+            poor_bold(base, c, atom) else base
+    }
 }
+
+// amsbsy's \pmb: the box overprinted at three horizontal offsets
+fn poor_bold(base, c, atom) =>
+    bx.compose([for (dx in [0.0, 25.0, 50.0]) {box:base, x:dx * scale(c), y:0.0}], base.width, atom)
 
 fn text(text_value, c, literal = false) {
     let chars = split(if (literal) replace(replace(replace(text_value, "\n", " "), "\r", " "), "\t", " ") else text_value, "")
@@ -159,13 +174,13 @@ fn node(n, c) {
         // parsed symbol commands store their spelling in name, like command nodes.
         case 'symbol_command': command_node(n, c)^
         case 'big_operator': command(value(n), c)^
-        case 'operator': text(value(n), {*:c, variant: "normal"})^
-        case 'relation': text(value(n), {*:c, variant: "normal"})^
-        case 'punctuation': text(value(n), {*:c, variant: "normal"})^
-        case 'escaped_symbol': text(value(n), {*:c, variant: "normal"})^
+        case 'operator': text(value(n), upright(c, false))^
+        case 'relation': text(value(n), upright(c, false))^
+        case 'punctuation': text(value(n), upright(c, false))^
+        case 'escaped_symbol': text(value(n), upright(c, false))^
         case 'symbol': text(value(n), c)^
-        case 'number': text(value(n), {*:c, variant: "normal"})^
-        case 'digit': text(value(n), {*:c, variant: "normal"})^
+        case 'number': text(value(n), upright(c, true))^
+        case 'digit': text(value(n), upright(c, true))^
         // Contiguous Unicode operators still need math-list atom spacing and script policy.
         case 'unicode_text': if (c.text_mode != true and len([for (ch in split(value(n),"")
             where contains(c.profile.closed_composites,ch)) ch]) > 0) text(value(n),c)^
@@ -219,6 +234,14 @@ pub fn maps_command(key) =>
     contains(NAMED_COMMANDS, key) or contains(SPACE_COMMANDS, key) or
     key == "rule" or key == "genfrac" or font.alphabet_alias(key) != null
 
+// the symbols a \boldsymbol in this formula leaves at regular weight because no
+// bundled face draws them in bold (Lambda_Pkg_Math §10.1)
+pub fn regular_bold_symbols(ast) array | error {
+    let requested = unique(font.bold_symbol_requests(ast))
+    if (len(requested) == 0) []
+    else (let profile = font.prepare(ast, {})^, [for (ch in requested where font.lacks_bold(profile, ch)) ch])
+}
+
 // the unmapped generic commands of a math AST, in source order
 pub fn unmapped_commands(n) {
     if (n is array or n is list) [for (item in n, key in unmapped_commands(item)) key]
@@ -249,6 +272,8 @@ fn command(raw, c) {
             stretch.glyph(font.large_operator(c.profile, ord(unicode))^, metric(c, "display_operator_min_height"), true, scale(c), atom)^
             // a composed relation (mathtools' :=) is one atom, with no glue between its pieces
             else if (len(unicode) > 1) bx.row([for (ch in split(unicode, "")) character(ch, c, atom)^])
+            // an amssymb shape whose code point the plain command's glyph also uses
+            else if (contains(sym.AMS_SHAPES, key)) bx.glyph(font.ams_shape(c.profile, ord(unicode))^, scale(c), atom)
             // upgreek letters keep their upright shape in math italic
             else text(unicode, if (is_large or sym.is_upright(key)) {*:c, variant: "normal"} else c)^
         let centered = if (is_large) center_axis(result, c) else result;
@@ -313,7 +338,8 @@ fn command_node(n, c) {
     }
     // another package's spelling of a math alphabet, such as bbm's \mathbbm
     else if (font.alphabet_alias(key) != null and len(items) > 0)
-        styled(<style_command cmd: font.alphabet_alias(key), arg: items[0]>, c)^
+        styled(<style_command cmd: font.alphabet_alias(key), arg: items[0]>,
+            if (font.poor_bold_alias(key)) {*:c, poor_bold: true} else c)^
     else if (len(items) > 0) spaced([command(key, c)^, *[for (item in items) node(item, c)^]], c)
     else command(if (c.text_mode == true and not maps_command(key)) "\\" ++ key else key, c)^
 }
@@ -831,7 +857,7 @@ fn transformed(n, c) {
         {*:result, height:if (n.height != null) dimension(n.height,c) else result.height,
             depth:if (n.depth != null) dimension(n.depth,c) else result.depth}
     } else if (key == "vcenter") center_axis(base, c)
-    else if (key == "pmb") bx.compose([for (dx in [0.0, 25.0, 50.0]) {box:base, x:dx * scale(c), y:0.0}], base.width)
+    else if (key == "pmb") poor_bold(base, c, "mord")
     else if (key == "angl") {
         let pad = 100.0 * scale(c)
         let width = base.width + pad

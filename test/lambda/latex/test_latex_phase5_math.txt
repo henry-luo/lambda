@@ -20,6 +20,8 @@ true
 []
 "physics and siunitx:"
 ["conflicting-packages siunitx"]
+"bold symbol issues:"
+["math-bold-symbol-approximation ∇⋅"]
 "paired delimiters:"
 ["$\\mathopen{\\lceil}x\\mathclose{\\rceil} \\left\\lceil x\\right\\rceil \\mathopen{\\big\\lceil}x\\mathclose{\\big\\rceil} \\mathopen{\\{}a \\;\\vert\\; b\\mathclose{\\}} \\left\\{a \\;\\middle\\vert\\; b\\right\\} \\mathopen{\\Bigg\\{}a \\;\\Bigg\\vert\\; b\\mathclose{\\Bigg\\}}$"]
 "macros:"

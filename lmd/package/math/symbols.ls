@@ -258,6 +258,11 @@ let delim_sizes = {
 // Lookup function: command → Unicode
 // ============================================================
 
+// amssymb commands whose glyph shares a code point with a plain TeX command's glyph
+// (\varnothing and \emptyset are both U+2205): they draw from the AMS face by name,
+// since code-point fallback prefers the plain cmsy shape
+pub let AMS_SHAPES = ["varnothing"]
+
 pub fn lookup_symbol(cmd) {
     // strip leading backslash if present
     let name = if (len(cmd) > 0 and slice(cmd, 0, 1) == "\\") slice(cmd, 1, len(cmd)) else cmd

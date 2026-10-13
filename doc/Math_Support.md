@@ -400,7 +400,7 @@ Custom operator names via `\operatorname{name}`.
 | `\mathtt{x}`   | Typewriter         | x              |
 | `\mathsf{x}`   | Sans-serif         | x              |
 | `\mathscr{F}`  | Script             | ℱ              |
-| `\boldsymbol{x}`, `\bm{x}`, `\hm{x}` | Bold italic letters | ***x*** (operator symbols keep their regular weight) |
+| `\boldsymbol{x}`, `\bm{x}`, `\hm{x}` | Bold italic letters; bold upright digits, operators and symbols | ***x*** — a symbol with no bundled bold glyph (∇, ⋅, ∞, …) stays regular under `\boldsymbol` and is overprinted (poor man's bold) under `\bm` |
 
 ### 5.2 Style Switching
 

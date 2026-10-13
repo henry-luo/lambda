@@ -1,8 +1,11 @@
 // Reuse distributed CMU/KaTeX faces; this is resource selection, not geometry.
 // Binary acquisition stays in Lambda IO (D7.1.2v2).
 pub let FAMILY = "Computer Modern Serif"
-// CM math symbols must resolve before platform fallback (plain.tex family 2).
-pub let SYMBOL_FAMILIES = "Computer Modern Serif,KaTeX_Size1,KaTeX_AMS,KaTeX_Main"
+// CM math symbols must resolve before platform fallback (plain.tex family 2). KaTeX_Main
+// carries those cmsy shapes and precedes KaTeX_AMS: where both faces have a code point,
+// AMS holds the amssymb variant (U+22C5 is \centerdot on the baseline, not \cdot on the
+// axis; U+2205 is \varnothing), which the plain command does not use.
+pub let SYMBOL_FAMILIES = "Computer Modern Serif,KaTeX_Size1,KaTeX_Main,KaTeX_AMS"
 pub let VARIANT_FAMILIES = {sans: "Computer Modern Sans", mono: "Computer Modern Typewriter",
     script: "KaTeX_Script", cal: "KaTeX_Caligraphic", fraktur: "KaTeX_Fraktur", double: "KaTeX_AMS"}
 

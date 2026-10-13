@@ -29,7 +29,11 @@ pub fn issues(node, operators, packages) {
         else [for (ast in asts, key in math.unmapped_commands(ast)
                 where key != "directlua" and util.lookup(operators, "\\" ++ key) == null)
             util.diagnostic("unsupported-math-command", "math", key,
-                "Unsupported math command \\" ++ key, node.source_offset)]
+                "Unsupported math command \\" ++ key, node.source_offset)] ++
+            [for (ast in asts, let regular = math.regular_bold_symbols(ast) or [] where len(regular) > 0)
+                util.diagnostic("math-bold-symbol-approximation", "amsmath", join(regular, ""),
+                    "\\boldsymbol draws " ++ join(regular, " ") ++
+                    " at regular weight: no bundled face has them in bold", node.source_offset)]
     }
 }
 

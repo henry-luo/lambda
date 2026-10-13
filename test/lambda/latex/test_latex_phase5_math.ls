@@ -37,6 +37,9 @@ let physics_doc = run(doc(p, "$\\qty(\\frac{a}{b}) \\dv{f}{x} \\bra{\\phi}\\ket{
 "physics renders:"; count(physics_doc.html, "<svg") == 1 and not has(physics_doc.html, "latex-unsupported")
 "physics issues:"; physics_doc.issues
 "physics and siunitx:"; run(doc("\\usepackage{physics,siunitx}", "x")).issues
+// \grad's bold nabla has no bundled bold glyph, so \boldsymbol keeps the regular one and
+// says so; bold letters and digits are not reported
+"bold symbol issues:"; run(doc(p, "$\\grad\\Psi \\vdot \\vb*{x}$ $\\boldsymbol{x+1}$")).issues
 
 // ---- mathtools: paired delimiters, macros, environments, tag forms ----
 let m = "\\usepackage{mathtools}\n\\DeclarePairedDelimiter\\ceil{\\lceil}{\\rceil}\n" ++

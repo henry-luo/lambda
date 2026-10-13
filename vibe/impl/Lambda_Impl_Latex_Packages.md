@@ -382,7 +382,7 @@ As built on 2026-10-13, with route (a) chosen by the user and **D7.2.7v2** ratif
   - `\ce` and `\pu` parse as `chemistry` nodes holding their raw text. `mhchem.ls` turns the bounded notation into TeX math, which the ordinary parser reads; the font pass, the typesetter and the unmapped scan all see that translated math.
   - In text, `\nicefrac`, `\sfrac`, `\ce` and `\pu` render through `math_bridge.command_ast`, which rebuilds the command from its argument groups. `\ensuremath` now shares its renderer.
 - **Analysis diagnostics.** Analysis state gained a `diagnostics` list, which `render_result` reports. Tag forms are its first user.
-- **Known gaps, recorded in Pkg_Math §10.1:** `\boldsymbol` does not bold operator symbols, so `\grad` and `\vdot` are not bold. `\cdot` paints low in native PNG output, because its glyph comes from the KaTeX_AMS fallback. Both predate M8.
+- **Follow-up the same day:** `\cdot` painted low because the fallback order put KaTeX_AMS, whose U+22C5 is `\centerdot` on the baseline, before KaTeX_Main; Main now comes first and `\varnothing` keeps the AMS shape by name. `\boldsymbol` now bolds every symbol the bundled bold face has. A symbol it lacks (∇, ⋅) keeps its regular glyph with `math-bold-symbol-approximation`, so `\grad` and `\vdot` stay regular, and `\bm` falls back to poor man's bold (Pkg_Math §5.1, §10.1).
 
 ## 13. M9: fonts and Unicode engines
 

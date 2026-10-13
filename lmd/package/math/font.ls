@@ -73,6 +73,9 @@ let ALPHABET_ALIASES = {mathbbm: "\\mathbb", mathds: "\\mathbb", bm: "\\boldsymb
 
 pub fn alphabet_alias(name) => ALPHABET_ALIASES[name]
 
+// bm.sty sets a symbol that has no bold version in poor man's bold; \boldsymbol does not
+pub fn poor_bold_alias(name) => name == "bm" or name == "hm"
+
 pub fn command_variant(cmd) {
     let direct = [for (entry in styled_commands where entry.cmd == cmd) entry.style][0]
     let alias = ALPHABET_ALIASES[if (starts_with(cmd, "\\")) slice(cmd, 1, len(cmd)) else cmd]
@@ -141,7 +144,9 @@ pub fn prepare(ast, options) map | error {
     let facts = {*:native, constants: if (native.has_math) native.constants else fallback.constants(native.font_metrics)}
     // Ordinary fonts put italic/bold letters in separate faces, not Unicode math alphabets.
     // Only request style faces used by this formula; each query owns its font resources.
-    let needed_styles = unique(["italic",*collect_styles(ast)])
+    // bold symbols come from the bold upright face (bold_symbol), so \boldsymbol needs it too
+    let requested = unique(["italic",*collect_styles(ast)])
+    let needed_styles = if (contains(requested, "bolditalic")) unique([*requested, "bold"]) else requested
     let style_faces = if (native.has_math) [] else [for (style in needed_styles where style != "normal")
         (let weight = if (style == "bold" or style == "bolditalic") 700 else 400,
          let slant = if (contains(["italic","bolditalic","sansitalic"],style)) "italic" else "normal",
@@ -158,6 +163,8 @@ pub fn prepare(ast, options) map | error {
             font_size: UNITS, fallback: true}, fallback_points, faces)
     // Keep paired harpoons in one bundled face instead of unrelated system fallbacks.
     let reaction_points = if (use_bundled) [ord("⇀"), ord("↽"), ord("↼"), ord("⇁")] else []
+    // amssymb shapes that share a code point with a plain command (symbols.AMS_SHAPES)
+    let ams_shape_points = if (use_bundled) [for (name in sym.AMS_SHAPES) ord(sym.lookup_symbol(name))] else []
     if (facts.constants.script_percent_scale_down <= 0 or facts.constants.script_script_percent_scale_down <= 0)
         error("math: selected font has invalid script scale constants")
     else {facts: facts, points: points, family: facts.font_family,
@@ -165,6 +172,8 @@ pub fn prepare(ast, options) map | error {
         fallback_points: fallback_points, fallback_facts: fallback_facts, faces: faces,
         reaction_points: reaction_points,
         reaction_facts: if (use_bundled) measure({font_family:"KaTeX_Main", font_size:UNITS}, reaction_points, faces, "KaTeX_Main") else null,
+        ams_shape_points: ams_shape_points,
+        ams_shape_facts: if (use_bundled) measure({font_family:"KaTeX_AMS", font_size:UNITS}, ams_shape_points, faces, "KaTeX_AMS") else null,
         closed_composites: closed_composites,
         delimiter_data:delimiter_data,
         delimiter_faces:[for (family in unique([for (p in delimiter_data.pieces) p.family]))
@@ -201,6 +210,14 @@ pub fn stylesheet(profile, body) {
 fn lookup(profile, facts, cp) {
     let index = index_of(profile.points, cp)
     if (index != null) facts.glyphs[index] else null
+}
+
+// an AMS_SHAPES command's glyph: the AMS face's, or the ordinary glyph without the
+// bundled faces
+pub fn ams_shape(profile, cp) map | error {
+    let shaped = if (profile.ams_shape_facts == null) null
+        else lookup({points: profile.ams_shape_points}, profile.ams_shape_facts, cp)
+    if (shaped != null) shaped else glyph(profile, cp)^
 }
 
 pub fn glyph(profile, cp) map | error {
@@ -268,11 +285,40 @@ pub fn character(profile, ch, style, literal = false) map | error {
     let actual = effective_style(ch, style)
     let styled = style_facts(profile,actual)
     let ordinary = lookup(profile, styled or profile.facts, ord(ch))
+    let bold = if (not literal and style == "bolditalic") bold_symbol(profile, ch) else null
     // Text punctuation must follow its text face, not the base math face's unchanged codepoint.
-    if (literal and ordinary != null) ordinary
+    if (bold != null) bold
+    else if (literal and ordinary != null) ordinary
     else if (preferred != null) preferred
     else if (ordinary != null) ordinary
     else glyph(profile, ord(ch))^
+}
+
+// \boldsymbol sets a symbol from TeX's bold math version, whose symbol fonts (cmbx,
+// cmbsy) are bold and upright: the bundled bold upright face's glyph, or null when
+// it has none. Letters map to a math alphabet first and are not symbols here.
+fn bold_symbol(profile, ch) {
+    let bold = style_facts(profile, "bold")
+    if (bold == null or variant(ch, "bolditalic") != ord(ch)) null else lookup(profile, bold, ord(ch))
+}
+
+// a character \boldsymbol cannot embolden: its resolved glyph is not from a bold face
+// (∇ maps to a bold italic alphabet member no bundled face has). It keeps the regular
+// glyph, as amsbsy does without a bold font.
+pub fn lacks_bold(profile, ch) {
+    let resolved = character(profile, ch, "bolditalic") or null;
+    (resolved == null or (resolved.text_weight or 400) < 700)
+}
+
+// the characters inside \boldsymbol, symbol commands by their glyphs. Text is a string;
+// a symbol is a tag name, which source_items yields for an element without a name.
+pub fn bold_symbol_requests(node, inside = false) {
+    if (node is symbol) []
+    else if (node is string) (if (not inside) [] else
+        (let glyphs = sym.lookup_symbol(node),
+         if (glyphs != null) split(glyphs, "") else if (slice(node, 0, 1) == "\\") [] else split(node, "")))
+    else [for (child in source_items(node), ch in bold_symbol_requests(child, inside or
+        (node is element and name(node) == 'style_command' and string(node.cmd) == "\\boldsymbol"))) ch]
 }
 
 pub fn large_operator(profile, cp) map | error {
