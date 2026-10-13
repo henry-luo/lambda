@@ -5,6 +5,7 @@
 > **Original design records:** 2026-03-27 through 2026-04-12, including later appendices.
 > **Consolidated and reviewed:** 2026-10-08, against tree `62f3c21d2` and the
 > working changes present at review time.
+> **Revised:** 2026-10-13 — **D4.5.3v2** scope (copy at construction, retain downstream), reconciliation within a regenerated result, and ownership of retained nodes (§5.3, §9.1, §9.4, §10.1, §17, §18.1).
 > **Scope:** the `view`/`edit` template model, state and model ownership,
 > pattern dispatch, events, observer-based regeneration, incremental presentation,
 > text interaction, drag-and-drop, prior art, alternatives, and unresolved design.
@@ -26,6 +27,7 @@ collected in the final section.
 | Event participants and cancellation | **S12.1.3**, **D7.2.5** | [DOM Dispatch](Lambda_Design_DOM_Dispatch.md), ES22–ES29 |
 | Script packages and one document's execution ownership | **D7.2.1–D7.2.4**, **D5.3.3** | [DOM State](Lambda_Design_DOM_State.md), ES11/ES12v2 |
 | Presentation lifetime and the runtime boundary | **D4.5.1v4**, **D4.5.2** | This document §12 |
+| DOM construction from a script and retention downstream | **D4.5.3v2** | This document §5.3, §9.4, §10.1; [DOM Reconciliation proposal](Lambda_Proposal_DOM_Reconciliation.md) |
 | Execution profiles | **D8.1.1v17**, **D7.1.4v2**, **D7.1.7v6** | This document §§2, 12 |
 | Bare `apply` and ordinary statement boundaries | **S16.2** | [Syntax](Lambda_Design_Syntax.md#77-apply-fused-token-retired-decided), §7.7 |
 | Persistence and stable identity | **S12.1.3**, **S9.1.4**, **S9.1.7** | [State Management](radiant/Radiant_Design_State_Management.md), RS1–RS24 |
@@ -673,6 +675,8 @@ Both directions must agree after regeneration. Event dispatch must always bind
 to the current source and template. Replacing an output element cannot silently
 disconnect its new presentation from state or handlers.
 
+A retained node needs the same ownership update as a rebuilt one. Regeneration publishes new result identities even when the output is equal, so a kept occurrence must be rebound from the old result element to the new one (the element map and the lifecycle backing source), and every template instance whose result lies inside it must receive its render events. Rebinding the map alone proved insufficient on 2026-10-12 (§9.4).
+
 ### 9.2 Marking dependencies dirty
 
 A local-state write affects its owning template instance. An editor write affects
@@ -701,7 +705,7 @@ one lookup. A body can itself recursively apply child templates, compute aggrega
 data, or produce substantial output. Dirty discovery, ownership maintenance, and
 layout may also require broader work.
 
-### 9.4 No-op elision
+### 9.4 No-op elision and reconciliation within a result
 
 Dirty means a presentation *may* have changed. After regeneration, equivalent
 output permits skipping DOM replacement, cascade, layout, and content paint.
@@ -711,6 +715,18 @@ and nested content, with identity equality as an early success where meaningful.
 This comparison is limited to regenerated results. It does not reintroduce a
 whole-page virtual DOM diff. Its cost depends on the compared output, and a
 semantically unchanged output is not necessarily pointer-identical.
+
+**Reconciliation within a regenerated result.** Retention is ruled (**D4.5.3v2**, user 2026-10-13): a partly changed result does not replace its presentation whole. The matching rules below are the design that realizes it; of them, patching attributes in place is also ruled (user, 2026-10-13). The old result, the new result and the live DOM are walked together in document order, and at each position the first applicable rule decides:
+
+1. **Equal subtree → keep.** The new node is equal to the old one (the equality above) and the DOM node is unedited (below). The DOM subtree stays in place and is rebound to the new result (§9.1).
+2. **Same tag → patch.** The tag is the same but attributes or children differ, and the DOM node is unedited. The element is kept, each changed attribute is patched in place (a row whose `class` changed keeps its node — ruled by the user), and its children are reconciled positionally by these rules. Each attribute change and each child insertion, removal or replacement is published as a DOM mutation, so the ordinary mutation path restyles exactly the affected nodes (§10.2).
+3. **Otherwise → fresh copy.** The node is built from the script as **D4.5.3v2** describes, and owner migration runs for it.
+
+Matching is positional. Keyed matching (§18.3) can extend rule 2 later without changing rules 1 or 3. Kept and patched nodes keep their resolved style, layout and view state; the retained-layout paths of §10.3 depend on that.
+
+*Unedited nodes.* Whole-result elision shipped on 2026-10-11 and was withdrawn on 2026-10-12: a handler or script may edit the DOM imperatively after it is built, so an equal result no longer proves the live DOM presents it. Only an exact same-value return keeps the DOM today; every other regeneration copies. Rules 1–2 therefore keep a node only while no imperative edit has touched it or its subtree since it was built or last kept. Whether an edited node should instead be patched back to the new result is open (§18.1); interaction state (value, checkedness, selection, focus, hover, scroll) is not an edit, because it lives in view state (**S9.1.4**) and survives on a kept node by construction.
+
+*Implementation status (2026-10-13):* identity-equal results are kept; rules 1–2 are designed in the [DOM Reconciliation proposal](Lambda_Proposal_DOM_Reconciliation.md) and not yet built.
 
 No-op content does not discard unrelated interaction effects. Focus, caret,
 selection, scrolling, or default actions may still require their own settling or
@@ -1263,6 +1279,8 @@ not lost. Struck wording is historical and is not a current ruling.
 | ~~Source parenthood can be identified uniquely from allocation ownership.~~ | Shared source versions require document/version/path context (§6.4) |
 | ~~Every reactive event requires full DOM, CSS, layout, and paint reconstruction.~~ | Local replacement, invalidation, no-op elision, and safe escalation are separate stages (§10) |
 | ~~D4.5.3 requires every regeneration to deep-copy its whole result into fresh DOM, so retained DOM cannot carry style and layout across a re-render.~~ | **D4.5.3v2**: the copy governs construction only; a regeneration keeps and patches existing occurrences, and downstream stages reuse what stays valid (§5.3, §10.1) |
+| ~~A regenerated result is compared whole: equal results skip replacement, any other result replaces its presentation.~~ | Reconcile within the result: keep equal subtrees, patch same-tag elements in place, copy the rest (§9.4) |
+| ~~Equality of the old and new result alone proves the retained DOM can be kept.~~ | An imperatively edited node may no longer present the old result; only an unedited node is kept, and the condition is still open (§9.4, §18.1) |
 | ~~Subtree layout must be implemented by detaching and recreating an isolated formatting context.~~ | Dirty-path layout can reuse valid context and unaffected siblings; arbitrary isolation remains conditional (§10.3) |
 | ~~A glyph cache must retain vector shape handles.~~ | Reuse the rendering data appropriate to the renderer and configuration (§10.5) |
 | ~~Selective clearing alone means only dirty content is rendered.~~ | Clearing, scene traversal, and paint culling are independent; overflow/effects require correct bounds (§10.4) |
@@ -1349,6 +1367,16 @@ ledger series is introduced. Concrete defect tracking remains in the central
     task-resume results use the same owner/invalidation path. Template-local `emit`
     and task/mailbox messages have different destinations and lifetimes; making a
     template instance a general addressable endpoint remains explicitly deferred.
+
+13. **Retention of edited nodes and reconciliation phasing.** §9.4 keeps a
+   node only while nothing has edited it imperatively since it was built. Decide
+   whether such a node should instead be patched back to the new result (rule 2
+   already patches attributes and children), how the unedited state is tracked
+   (a bit cleared by each mutation entry point up to the result root is
+   proposed), and the delivery order of unedited-tracking, equal-subtree
+   retention, same-tag patching and keyed matching. The
+   [DOM Reconciliation proposal](Lambda_Proposal_DOM_Reconciliation.md) §4.1
+   and §8 hold the options.
 
 ### 18.2 Original application/dispatch extensions retained for decision
 
