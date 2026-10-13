@@ -3,10 +3,49 @@
 #include <gtest/gtest.h>
 #include "../radiant/radiant.hpp"
 #include "../radiant/layout.hpp"
+#include "../radiant/render.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/dom/dom.h"
+#include "../lib/tagged.hpp"
 
 extern "C" uint64_t radiant_query_font_build_count(void);
+
+TEST(TextJustification, WhollyHangingFragmentsDoNotConsumeJustificationOpportunities) {
+    DomElement parent = {};
+    parent.node_type = DOM_NODE_ELEMENT;
+    BlockProp properties = BLOCK_PROP_DEFAULT;
+    parent.blk = lam::view_prop(&properties);
+    DomText text = {};
+    text.node_type = DOM_NODE_TEXT;
+    text.view_type = RDT_VIEW_TEXT;
+    text.parent = lam::up(&parent);
+    struct Case {
+        const char* text;
+        CssEnum white_space;
+        float hanging_width;
+        int expected;
+    } cases[] = {
+        {"   ", CSS_VALUE_PRE_WRAP, 60.0f, 0},
+        {" \t", CSS_VALUE_PRE_WRAP, 80.0f, 0},
+        {"   ", CSS_VALUE_PRE_WRAP, 0.0f, 3},
+        {"X X ", CSS_VALUE_PRE_WRAP, 0.0f, 2},
+        {"X X  ", CSS_VALUE_BREAK_SPACES, 0.0f, 3},
+    };
+    for (const Case& entry : cases) {
+        properties.white_space = entry.white_space;
+        text.text = lam::up(entry.text);
+        text.length = strlen(entry.text);
+        TextRect rect = {};
+        rect.width = entry.hanging_width;
+        rect.length = (int)text.length;
+        rect.hanging_trim = entry.hanging_width;
+        EXPECT_EQ(count_rendered_justify_opportunities(
+            lam::view_require_text(&text), &rect, true), entry.expected) << entry.text;
+        // painting uses the same opportunities without requesting collapsible trimming.
+        EXPECT_EQ(count_rendered_justify_opportunities(
+            lam::view_require_text(&text), &rect, false), entry.expected) << entry.text;
+    }
+}
 
 class RadiantTextQuery : public ::testing::Test {
 protected:
@@ -29,6 +68,30 @@ protected:
         return dom_find_element_by_id(document->root->as_element(), "result");
     }
 };
+
+TEST_F(RadiantTextQuery, PreservedWhitespaceUsesHangingAndCrossNodeBreakState) {
+    ASSERT_NE(load("test/html/layout_preserved_whitespace.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    struct Expected {
+        const char* id;
+        float width;
+        float height;
+    } cases[] = {
+        {"green", 80.0f, 20.0f},
+        {"tabs", 40.0f, 140.0f},
+        {"spaces", 40.0f, 80.0f},
+        {"unbroken", 40.0f, 120.0f},
+    };
+    for (const Expected& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr) << entry.id;
+        EXPECT_FLOAT_EQ(element->width, entry.width) << entry.id;
+        EXPECT_FLOAT_EQ(element->height, entry.height) << entry.id;
+    }
+}
 
 // A query without faces is the common chart case. Its cache key used to be
 // rejected, so every call built a new font context and rescanned every font

@@ -1647,6 +1647,8 @@ int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
     CssEnum white_space = get_white_space_value(static_cast<DomNode*>(text));
     bool collapse_spaces = ws_collapse_spaces(white_space);
     bool collapse_newlines = ws_collapse_newlines(white_space);
+    // CSS Text 3 §4.1.2: a wholly hanging fragment has no alignment opportunities.
+    if (rect->hanging_trim > 0.0f && rect->hanging_trim >= rect->width) return 0;
     return count_justify_opportunities_impl(
         text_data + rect->start_index, rect->length,
         collapse_spaces, collapse_newlines,
@@ -2338,10 +2340,8 @@ void line_break(LayoutContext* lycon) {
     if (lycon->line.hanging_space_width > 0) {
         float hang_trim = lycon->line.hanging_space_text_trim;
         if (hang_trim > 0 && lycon->line.last_text_rect) {
-            float remaining = lycon->line.last_text_rect->width - hang_trim;
-            if (remaining > 0.01f) {
-                lycon->line.last_text_rect->hanging_trim = hang_trim;
-            }
+            // whitespace-only fragments also need the hanging marker for justification.
+            lycon->line.last_text_rect->hanging_trim = hang_trim;
         }
         // CSS Text 3 §4.1.3: In RTL, trailing whitespace hangs past the inline-end
         if (lycon->block.direction == CSS_VALUE_RTL) {
@@ -3681,6 +3681,15 @@ static void discard_uncommitted_text_rect(ViewText* text, TextRect* rect) {
     if (prev) prev->next = nullptr;
 }
 
+static unsigned char* restart_text_on_next_line(LayoutContext* lycon,
+                                               ViewText* text, TextRect* rect,
+                                               unsigned char* text_start) {
+    unsigned char* cursor = text_start + rect->start_index;
+    discard_uncommitted_text_rect(text, rect);
+    line_break(lycon);
+    return cursor;
+}
+
 static void commit_text_overflow_break(LayoutContext* lycon, ViewText* text_view,
                                        TextRect* rect, unsigned char* str,
                                        unsigned char* text_start, float advance) {
@@ -4533,6 +4542,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                         float output_width = lycon->line.last_space_pos;
                         output_text(lycon, text_view, rect, str - text_start - rect->start_index, output_width);
                         line_break(lycon);  goto LAYOUT_TEXT;
+                    } else if (lycon->line.last_space && !lycon->line.is_line_start) {
+                        // CSS Text 3 §5: honor an earlier cross-node break before
+                        // overflowing preserved space; remeasure tabs on the new line.
+                        str = restart_text_on_next_line(lycon, text_view, rect, text_start);
+                        goto LAYOUT_TEXT;
                     } else if (break_word || break_all) {
                         rect->width -= wd;
                         output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
@@ -4594,9 +4608,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                                 lycon, text_view, rect, str, text_start, wd);
                             goto LAYOUT_TEXT;
                         }
-                        str = text_start + rect->start_index;  // rewind to text start
-                        discard_uncommitted_text_rect(text_view, rect);
-                        line_break(lycon);
+                        str = restart_text_on_next_line(lycon, text_view, rect, text_start);
                         goto LAYOUT_TEXT;
                     }
                     line_break(lycon);
@@ -4650,9 +4662,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                  && lycon->line.wrap_opportunity_before_nowrap
                  && !lycon->line.is_line_start
                  && text_transform != CSS_VALUE_CAPITALIZE) {
-            str = text_start + rect->start_index;
-            discard_uncommitted_text_rect(text_view, rect);
-            line_break(lycon);
+            str = restart_text_on_next_line(lycon, text_view, rect, text_start);
             goto LAYOUT_TEXT;
         }
         if (is_space(*str)) {

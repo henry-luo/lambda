@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Preserved whitespace justification and cross-node wrapping</title>
+<style>
+@font-face {
+  font-family: Ahem;
+  src: url("../layout/data/font/Ahem.ttf");
+}
+div { font: 20px/1 Ahem; }
+#justify { white-space: pre-wrap; text-align: justify; width: 4ch; }
+.break-spaces { white-space: break-spaces; width: 2ch; }
+</style>
+<body id="result">
+<div id="justify"><span id="green">X X</span> X</div>
+<div id="tabs" class="break-spaces">X<wbr>X&#9;&#9;&#9;&#9;&#9;XX</div>
+<div id="spaces" class="break-spaces">X<wbr>X   XX</div>
+<div id="unbroken" class="break-spaces">XX&#9;&#9;&#9;&#9;&#9;XX</div>
+</body>
