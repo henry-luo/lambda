@@ -2293,6 +2293,14 @@ bool state_get_pseudo_state(DocState* state, View* view, uint32_t pseudo_state) 
 
     switch (pseudo_state) {
         case PSEUDO_STATE_HOVER:
+            // popup rows share the select's canonical hover index, never a second hover flag.
+            if (state && state->open_dropdown && view->is_element() &&
+                lam::dom_require_element(view)->tag() == MARKUP_NAME_OPTION) {
+                DomElement* select = lam::dom_require_element(state->open_dropdown);
+                DomElement* hovered = dom_select_option_at_index(select,
+                    form_control_get_hover_index(state, state->open_dropdown));
+                if (hovered == lam::dom_require_element(view)) return true;
+            }
             return state_get_bool(state, view, STATE_HOVER);
         case PSEUDO_STATE_ACTIVE:
             return state_get_bool(state, view, STATE_ACTIVE);
@@ -5375,6 +5383,7 @@ void doc_state_open_dropdown(DocState* state, View* view) {
     state->version++;
     sm_guard.commit();
     state_assert_after_mutation(state, "doc_state_open_dropdown");
+    radiant_sync_pseudo_state(view, PSEUDO_STATE_HOVER, true);
 }
 
 void doc_state_close_dropdown(DocState* state, View* view) {
@@ -5400,6 +5409,7 @@ void doc_state_close_dropdown(DocState* state, View* view) {
     state->version++;
     sm_guard.commit();
     state_assert_after_mutation(state, "doc_state_close_dropdown");
+    radiant_sync_pseudo_state(target, PSEUDO_STATE_HOVER, false);
 }
 
 void doc_state_set_dropdown_geometry(DocState* state,
@@ -5552,6 +5562,7 @@ void form_control_set_hover_index(DocState* state, View* view, int index) {
     view_state_log_int_transition(state, view, "form.hover_index", old_index, index);
     sm_guard.commit();
     form_state_mark_dirty(state);
+    radiant_sync_pseudo_state(view, PSEUDO_STATE_HOVER, index >= 0);
 }
 
 int form_control_get_hover_index(DocState* state, View* view) {

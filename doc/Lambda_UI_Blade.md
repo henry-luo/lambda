@@ -59,6 +59,14 @@ aliases and `description_item` remain available. Shared components keep their
 `ui.icon_names()` lists the shared UI icons; `<blade.icon name:"setting">`
 continues to work. `ui.rpg_icon_names()` lists the separate fantasy artwork.
 
+Select popups use the surrounding wood or parchment palette, with gold
+selected/hovered rows and muted disabled options. These colors follow the
+same scoped tokens as the closed control.
+
+Empty states use an original gold-trimmed wooden chest for both `default` and
+`simple` images. Custom image elements/URLs, `image_height`, and explicit
+`image:false` or `image:null` retain the shared component behavior.
+
 ## RPG components
 
 Common props include `id`, `class`, `style`, `title`, `label`, `role`,

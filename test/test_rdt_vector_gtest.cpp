@@ -52,6 +52,7 @@ TEST(RdtVectorTest, RectangleClipBoundsRejectCurvesCompoundPathsAndRotation) {
 #include "../lib/font/font_tables.h"
 #include "../lib/endian.h"
 #include "../lib/str.h"
+
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -66,6 +67,49 @@ TEST(RdtVectorTest, RectangleClipBoundsRejectCurvesCompoundPathsAndRotation) {
 #include "../lib/file.h"
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
+
+TEST(RdtVectorTest, GaussianFlatRunsPreserveEdgesChannelsAndPitches) {
+    // independent Gaussian step-response samples (sigma=1.25, support=4).
+    const int points[] = {0,4,6,10,11,16,21,22,28,32};
+    const uint32_t expected[][10] = {
+        {0x542a150bu,0x80402010u,0x80402010u,0x6a351b0du,0x562b150bu,0x40201008u,0x2a150b05u,0x160b0503u,0,0},
+        {0x80402010u,0x80402010u,0x80402010u,0x6a351b0du,0x562b150bu,0x40201008u,0x2a150b05u,0x160b0503u,0,0},
+        {0x542a150bu,0x80402010u,0x80402010u,0x6a351b0du,0x562b150bu,0x40201008u,0x2a150b05u,0x160b0503u,0,0x2c160b05u},
+        {0x03010100u,0x72391d0eu,0x80402010u,0x6a351b0du,0x562b150bu,0x40201008u,0x2a150b05u,0x160b0503u,0,0},
+        {0x80402010u,0x80402010u,0x80402010u,0x6a351b0du,0x562b150bu,0x40201008u,0x2a150b05u,0x160b0503u,0,0},
+        {0x03010100u,0x72391d0eu,0x80402010u,0x6a351b0du,0x562b150bu,0x40201008u,0x2a150b05u,0x160b0503u,0x0e070302u,0x7d3f1f10u}
+    };
+    Arena* arena = arena_create_default();
+    ASSERT_NE(arena, nullptr);
+    ScratchArena scratch = {}; scratch_init(&scratch, arena);
+    uint32_t source_pixels[33 * 35], output_pixels[33 * 37];
+    ImageSurface source = {}, output = {};
+    source.width = output.width = source.height = output.height = 33;
+    source.pitch = 35 * 4; output.pitch = 37 * 4;
+    source.pixels = source_pixels; output.pixels = output_pixels;
+    for (unsigned mask = 0; mask < 2; mask++) for (unsigned axis = 0; axis < 2; axis++) {
+        for (int row = 0; row < 33; row++) for (int column = 0; column < 35; column++) {
+            int position = axis ? row : column;
+            source_pixels[row * 35 + column] = position < 11 ? 0x80402010u : position < 22 ? 0x40201008u : 0;
+            if (mask) source_pixels[row * 35 + column] = (source_pixels[row * 35 + column] >> 24) * 0x01010101u;
+        }
+        for (unsigned variant = 0; variant < 6; variant++) {
+            for (uint32_t& pixel : output_pixels) pixel = 0xdeadbeefu;
+            ASSERT_TRUE(render_gaussian_blur_axis(&scratch, &source, &output, 1.25f,
+                axis, variant < 3 ? 0 : 3, variant < 3 ? 33 : 30, variant % 3));
+            for (int line = 0; line < 33; line++) {
+                for (unsigned sample = 0; sample < sizeof(points) / sizeof(points[0]); sample++) {
+                    int index = axis ? points[sample] * 37 + line : line * 37 + points[sample];
+                    uint32_t want = expected[variant][sample];
+                    if (mask) want = (want >> 24) * 0x01010101u;
+                    EXPECT_EQ(output_pixels[index], want) << mask << ':' << axis << ':' << variant << ':' << sample;
+                }
+                EXPECT_EQ(output_pixels[line * 37 + 33], 0xdeadbeefu);
+            }
+        }
+    }
+    arena_destroy(arena);
+}
 
 TEST(ClipGeometry, EllipticalCornersRetainTheSamePaintAndHitRegion) {
     Corner radius = {};

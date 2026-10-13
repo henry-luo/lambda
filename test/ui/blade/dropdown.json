@@ -1,0 +1,244 @@
+{
+  "name": "blade native dropdown paints themed surfaces and option states",
+  "html": "test/ui/blade/dropdown.ls",
+  "viewport": {
+    "width": 700,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#dark option:nth-child(2)"
+      },
+      "property": "background-color",
+      "equals": "rgb(23, 19, 19)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#paper option:nth-child(2)"
+      },
+      "property": "color",
+      "equals": "rgb(56, 42, 32)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#dark"
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#dark"
+      },
+      "open_dropdown": true
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_blade/dropdown_dark.png"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#dark",
+        "offset_x": 225,
+        "offset_y": 85
+      },
+      "min_r": 23,
+      "max_r": 23,
+      "min_g": 19,
+      "max_g": 19,
+      "min_b": 19,
+      "max_b": 19,
+      "force_render": true
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#dark",
+        "offset_x": 225,
+        "offset_y": 85
+      }
+    },
+    {
+      "type": "assert_state",
+      "target": {
+        "selector": "#dark option:nth-child(2)"
+      },
+      "state": ":hover",
+      "value": true
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#dark",
+        "offset_x": 225,
+        "offset_y": 85
+      },
+      "min_r": 215,
+      "max_r": 215,
+      "min_g": 173,
+      "max_g": 173,
+      "min_b": 98,
+      "max_b": 98,
+      "force_render": true
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#paper"
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#paper"
+      },
+      "open_dropdown": true
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_blade/dropdown_parchment.png"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 225,
+        "offset_y": 85
+      },
+      "min_r": 232,
+      "max_r": 232,
+      "min_g": 210,
+      "max_g": 210,
+      "min_b": 166,
+      "max_b": 166,
+      "force_render": true
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 225,
+        "offset_y": 85
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 225,
+        "offset_y": 85
+      },
+      "min_r": 215,
+      "max_r": 215,
+      "min_g": 173,
+      "max_g": 173,
+      "min_b": 98,
+      "max_b": 98,
+      "force_render": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 225,
+        "offset_y": 85
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#paper"
+      },
+      "equals": "ranger"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#paper"
+      },
+      "open_dropdown": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#paper"
+      }
+    },
+    {
+      "type": "mouse_move",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 225,
+        "offset_y": 165
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 225,
+        "offset_y": 165
+      },
+      "min_r": 41,
+      "max_r": 41,
+      "min_g": 36,
+      "max_g": 36,
+      "min_b": 37,
+      "max_b": 37,
+      "force_render": true
+    },
+    {
+      "type": "assert_state",
+      "target": {
+        "selector": "#paper option:last-child"
+      },
+      "state": ":disabled",
+      "value": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#paper",
+        "offset_x": 225,
+        "offset_y": 165
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#paper"
+      },
+      "equals": "ranger"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#paper"
+      },
+      "open_dropdown": true
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#paper"
+      },
+      "equals": "ranger"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    }
+  ]
+}

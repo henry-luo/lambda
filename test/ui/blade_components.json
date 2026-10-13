@@ -9,6 +9,21 @@
     {
       "type": "assert_count",
       "target": {
+        "selector": ".dtna-empty .blade-empty-art"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".blade-empty-art"
+      },
+      "property": "color",
+      "equals": "rgb(205, 164, 100)"
+    },
+    {
+      "type": "assert_count",
+      "target": {
         "selector": ".blade-panel"
       },
       "count": 7

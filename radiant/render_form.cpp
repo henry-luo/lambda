@@ -1055,14 +1055,59 @@ static void render_file_input(RasterRenderContext* rdcon, ViewBlock* block,
  * Helper to get option text at index (same logic as event.cpp)
  */
 static const char* get_option_text_at_index(ViewBlock* select, int index) {
-    if (!select || index < 0) return nullptr;
+    return dom_option_text(dom_select_option_at_index(select, index));
+}
 
-    int current_idx = 0;
-    for (DomElement* option = dom_select_next_option(select, nullptr); option;
-         option = dom_select_next_option(select, option), current_idx++) {
-        if (current_idx == index) return dom_option_text(option);
+static bool form_has_background_declaration(DomElement* element) {
+    StyleTree* style = element ? element->specified_style : nullptr;
+    return style && (style_tree_get_declaration(style, CSS_PROPERTY_BACKGROUND) ||
+                     style_tree_get_declaration(style, CSS_PROPERTY_BACKGROUND_COLOR));
+}
+
+static Color form_background_color(ViewBlock* block) {
+    return block && block->bound && block->boundary()->background
+        ? block->boundary()->background->color : make_color(255, 255, 255);
+}
+
+struct SelectOptionPaint {
+    Color background;
+    Color text;
+    FontProp* font;
+    float padding;
+};
+
+static SelectOptionPaint select_option_paint(ViewBlock* select, DomElement* option,
+                                             bool selected, bool hovered,
+                                             bool disabled, bool listbox) {
+    SelectOptionPaint paint = {};
+    paint.font = option && option->font ? option->font.get() : select->font.get();
+    paint.text = form_text_color(select, select->form, false);
+    paint.padding = select->bound ? select->boundary()->padding.left : 6.0f;
+    // UA highlights remain fallbacks; an option's computed author colors win.
+    if (hovered && !disabled) {
+        paint.background = make_color(0, 120, 215);
+        paint.text = make_color(255, 255, 255);
+    } else if (selected) {
+        paint.background = listbox
+            ? (disabled ? make_color(212, 212, 212) : make_color(0, 120, 215))
+            : make_color(230, 230, 230);
+        if (listbox) paint.text = make_color(255, 255, 255);
     }
-    return nullptr;
+    if (disabled) paint.text = make_color(128, 128, 128);
+    if (!option) return paint;
+    if (form_has_background_declaration(option)) {
+        paint.background = form_background_color(lam::view_require_block(option));
+        paint.text = option->in_line && option->inl()->has_color
+            ? option->inl()->color : form_text_color(select, select->form, false);
+    } else if (option->specified_style &&
+               style_tree_get_declaration(option->specified_style, CSS_PROPERTY_COLOR) &&
+               option->in_line && option->inl()->has_color) {
+        paint.text = option->inl()->color;
+    }
+    if (option->bound && option->boundary()->padding.specificities[CSS_BOX_SIDE_LEFT] > 0) {
+        paint.padding = option->boundary()->padding.left;
+    }
+    return paint;
 }
 
 // A listbox is a `multiple` select, or one with `size` above 1: its options are
@@ -1096,12 +1141,6 @@ static void render_select_listbox_rows(RasterRenderContext* rdcon, ViewBlock* bl
     rdcon->block.clip = view_geometry_intersect_bound_rect(
         rdcon->block.clip, {fc->x, fc->y, fc->w, fc->h});
 
-    Color selected_bg = fc->disabled ? make_color(212, 212, 212) : make_color(0, 120, 215);
-    Color selected_fg = make_color(255, 255, 255);
-    Color text_color = fc->disabled ? make_color(128, 128, 128) : make_color(0, 0, 0);
-    float text_padding = FormDefaults::TEXT_PADDING_H * s;
-    float font_height = block->fontp() ? block->fontp()->font_height * s : 0.0f;
-
     for (DomElement* option = dom_select_next_option(block->as_element(), nullptr); option;
          option = dom_select_next_option(block->as_element(), option)) {
         if (option->height <= 0.0f || option->width <= 0.0f) continue;   // hidden row
@@ -1110,14 +1149,14 @@ static void render_select_listbox_rows(RasterRenderContext* rdcon, ViewBlock* bl
         float row_w = option->width * s;
         float row_h = option->height * s;
         bool selected = dom_option_is_selected(option);
-        if (selected) {
-            fill_rect(rdcon, row_x, row_y, row_w, row_h, selected_bg);
-        }
+        SelectOptionPaint paint = select_option_paint(block, option, selected, false,
+            fc->disabled || form_control_is_disabled(fc->state, option), true);
+        if (paint.background.a) fill_rect(rdcon, row_x, row_y, row_w, row_h, paint.background);
         const char* label = dom_option_text(option);
-        if (label && *label) {
-            render_simple_string(rdcon, label, row_x + text_padding,
-                                 row_y + (row_h - font_height) / 2, block->font,
-                                 selected ? selected_fg : text_color);
+        if (label && *label && paint.font) {
+            float font_height = paint.font->font_height * s;
+            render_simple_string(rdcon, label, row_x + paint.padding * s,
+                                 row_y + (row_h - font_height) / 2, paint.font, paint.text);
         }
     }
     rdcon->block.clip = saved_clip;
@@ -1176,11 +1215,12 @@ static void render_select(RasterRenderContext* rdcon, ViewBlock* block, FormCont
     // padding) controls the appearance.
     if (!form->appearance_none) {
         float arrow_width = FormDefaults::SELECT_ARROW_WIDTH * s;
-        Color arrow_bg = make_color(240, 240, 240);
+        Color arrow_bg = form_has_background_declaration(block->as_element())
+            ? form_background_color(block) : make_color(240, 240, 240);
         fill_rect(rdcon, x + w - arrow_width, y + bw, arrow_width - bw, h - 2 * bw, arrow_bg);
 
         // Arrow (simple triangle pointing down)
-        Color arrow_color = make_color(0, 0, 0);
+        Color arrow_color = form_control_text_color(block, form, disabled, 109);
         float arrow_x = x + w - arrow_width / 2;
         float arrow_y = y + h / 2;
         float arrow_size = 4 * s;
@@ -1278,52 +1318,51 @@ void render_select_dropdown(RasterRenderContext* rdcon, ViewBlock* select, DocSt
     rdcon->block.clip.right = rdcon->ui_context->surface->width;
     rdcon->block.clip.bottom = rdcon->ui_context->surface->height;
 
-    // Dropdown background (white)
-    Color bg = make_color(255, 255, 255);
+    // overlays bypass normal block painting, so consume the same computed surface and border.
+    Color bg = form_background_color(select);
     fill_rect(rdcon, x, y, w, h, bg);
 
     // Dropdown border
     Color border_color = make_color(118, 118, 118);
     float bw = 1 * s;
+    if (select->bound && form_border_has_author_override(select->boundary()->border)) {
+        BorderProp* border = select->boundary()->border;
+        border_color = border->colors[CSS_BOX_SIDE_LEFT];
+        bw = border->styles[CSS_BOX_SIDE_LEFT] == CSS_VALUE_NONE ||
+             border->styles[CSS_BOX_SIDE_LEFT] == CSS_VALUE_HIDDEN
+            ? 0.0f : border->width.left * s;
+    }
     fill_rect(rdcon, x, y, w, bw, border_color);
     fill_rect(rdcon, x, y + h - bw, w, bw, border_color);
     fill_rect(rdcon, x, y, bw, h, border_color);
     fill_rect(rdcon, x + w - bw, y, bw, h, border_color);
 
     // Render each visible option
-    for (int i = 0; i < visible_count; i++) {
+    DomElement* option = dom_select_next_option(select->as_element(), nullptr);
+    for (int i = 0; i < visible_count && option; i++,
+         option = dom_select_next_option(select->as_element(), option)) {
         float opt_y = y + i * option_height;
-
-        // Highlight hovered option
-        if (i == hover_index) {
-            Color hover_bg = make_color(0, 120, 215);  // Blue highlight
-            fill_rect(rdcon, x + bw, opt_y + bw, w - 2 * bw, option_height - bw, hover_bg);
-        }
-        // Indicate selected option with checkmark or different style
-        else if (i == selected_index) {
-            Color selected_bg = make_color(230, 230, 230);  // Light gray
-            fill_rect(rdcon, x + bw, opt_y + bw, w - 2 * bw, option_height - bw, selected_bg);
-        }
+        SelectOptionPaint paint = select_option_paint(select, option, i == selected_index,
+            i == hover_index, form_control_is_disabled(state, option), false);
+        if (paint.background.a) fill_rect(rdcon, x + bw, opt_y + bw,
+            w - 2 * bw, option_height - bw, paint.background);
 
         // Get option text
-        const char* opt_text = get_option_text_at_index(select, i);
-        if (opt_text && select->font) {
-            // Text color (white for hovered, black otherwise)
-            Color text_color = (i == hover_index) ? make_color(255, 255, 255) : make_color(0, 0, 0);
-
+        const char* opt_text = dom_option_text(option);
+        if (opt_text && paint.font) {
             // Calculate text position with padding
-            float text_padding = 6 * s;
+            float text_padding = paint.padding * s;
             float text_x = x + bw + text_padding;
 
             // Calculate text top position (vertically centered in option)
             // font_height is in CSS pixels, need to scale for physical pixels
-            float font_height_scaled = select->fontp()->font_height * s;
+            float font_height_scaled = paint.font->font_height * s;
             // Center text vertically: opt_y + (option_height - font_height) / 2
             float text_top = opt_y + (option_height - font_height_scaled) / 2;
 
 
             // Render the option text (y is top of text area, not baseline)
-            render_simple_string(rdcon, opt_text, text_x, text_top, select->font, text_color);
+            render_simple_string(rdcon, opt_text, text_x, text_top, paint.font, paint.text);
         }
     }
 

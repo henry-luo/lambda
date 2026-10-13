@@ -22,6 +22,9 @@ pub let css = base.css ++ "
 .blade-root .dtna-button:disabled,.blade-root .dtna-button-disabled{background:var(--dtna-disabled-background);color:var(--dtna-disabled-text);border-color:var(--dtna-border);box-shadow:none;text-shadow:none}
 .blade-root .dtna-button:active{box-shadow:inset 0 2px 7px #00000077}
 .blade-root .dtna-input,.blade-root .dtna-text-area,.blade-root .dtna-select{background:var(--dtna-background);border-color:var(--dtna-border);padding:8px 12px;box-shadow:inset 0 2px 5px #00000077;color:var(--dtna-text)}
+.blade-root .dtna-select option{font:inherit;background:var(--dtna-background);color:var(--dtna-text)}
+.blade-root .dtna-select option:checked,.blade-root .dtna-select option:hover{background:var(--dtna-primary);color:var(--blade-ink)}
+.blade-root .dtna-select option:disabled{background:var(--dtna-disabled-background);color:var(--dtna-disabled-text)}
 .blade-root .dtna-input:focus,.blade-root .dtna-text-area:focus,.blade-root .dtna-select:focus{outline:2px solid var(--dtna-primary);outline-offset:2px;border-color:var(--dtna-primary)}
 .blade-root .dtna-input.dtna-status-error,.blade-root .dtna-text-area.dtna-status-error,.blade-root .dtna-select.dtna-status-error{border-color:var(--dtna-error)}
 .blade-root .dtna-input.dtna-status-warning,.blade-root .dtna-text-area.dtna-status-warning,.blade-root .dtna-select.dtna-status-warning{border-color:var(--dtna-warning)}
@@ -65,6 +68,7 @@ pub let css = base.css ++ "
 .blade-root .blade-corner-tl{left:-4px;top:-4px}.blade-root .blade-corner-tr{right:-4px;top:-4px;transform:scaleX(-1)}
 .blade-root .blade-corner-bl{left:-4px;bottom:-4px;transform:scaleY(-1)}.blade-root .blade-corner-br{right:-4px;bottom:-4px;transform:rotate(180deg)}
 .blade-root .blade-rpg-art{display:block;flex-shrink:0;pointer-events:none}
+.blade-root .blade-empty-art{display:inline-block;vertical-align:middle;color:var(--blade-gold);pointer-events:none}
 .blade-root .blade-item-slot,.blade-root .blade-ability{position:relative;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;width:var(--blade-slot-size);height:var(--blade-slot-size);padding:5px;font:inherit;cursor:pointer;color:var(--blade-gold-light);border:3px solid var(--blade-iron);border-radius:8px;background:radial-gradient(ellipse at 40% 30%,#5c4b39,#151516 85%);box-shadow:inset 0 0 0 1px #c6c7ba,inset 0 0 10px #000,0 3px 5px #00000099;outline:none}
 .blade-root .blade-item-slot>.blade-rpg-art,.blade-root .blade-ability>.blade-rpg-art{width:100%;height:100%}
 .blade-root .blade-rarity-uncommon{border-color:var(--blade-stamina)}.blade-root .blade-rarity-rare{border-color:var(--blade-mana);background:radial-gradient(ellipse at 40% 30%,#31586e,#151516 85%)}

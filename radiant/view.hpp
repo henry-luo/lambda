@@ -158,6 +158,7 @@ bool dom_ensure_computed(DomElement* element, bool needs_used_value = false);
 struct DirtyTracker;
 
 DomElement* dom_select_next_option(DomElement* select, DomElement* previous);
+DomElement* dom_select_option_at_index(DomElement* select, int index);
 const char* dom_option_text(DomElement* option);
 
 typedef enum AnimationType {

@@ -62,6 +62,6 @@ let tags = {
     ["table"]:(p,k) => <blade.table *:p,*k>
 }
 pub fn kinds() array => shared.kinds()
-pub fn native(kind, props, children = []) element^ => shared.native(kind,props,children,"blade")^
+pub fn native(kind, props, children = []) element^ => widgets.native(kind,props,children)^
 pub fn descriptor(kind, props, child = null) element^ => shared.descriptor(tags,kind,props,child,"blade")^
 pub fn lower_slots(value) any^ => widgets.lower_slots(value)^

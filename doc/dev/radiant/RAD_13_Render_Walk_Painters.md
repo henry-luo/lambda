@@ -1,6 +1,7 @@
 # Radiant — Render Walk, Painters & Export
 
 > **Last verified against tree:** 2026-10-11 *(§11 text projection, selected-font SVG outlines and computed spacing; §12 selected background/marker/border images, retained marker fonts and export density; other sections retain their prior verification scope)*
+> **Software Gaussian blur verified:** 2026-10-13 (§6 amendment).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers how a laid-out view tree becomes output. One shared tree walk (`render_walk.cpp`) traverses the tree exactly once and dispatches every drawing decision through a `RenderBackend` vtable; each output target (raster window/PNG/JPEG, PDF, SVG) supplies its own callback set. It describes the walker (z-order, effect groups, transforms), the raster record→lower→replay pipeline, the per-feature painters (`render_bound` and its background/border/shadow/text/image/clip/effect/filter/composite kin), the PDF backend, capability gating, output targets, and the profiler. The *IR machinery itself* — PaintIR shape, the DisplayList, record/replay internals — is [RAD_12](RAD_12_Paint_IR_Display_List.md)'s job; this doc is the walk, the painters, and the export seams.
 >
@@ -114,7 +115,18 @@ Every raster painter draws indirectly. The `rc_*` wrappers (`render.hpp`, impl `
 
 `render_composite.cpp` implements the CSS `mix-blend-mode` math (`render_blend_multiply`/`screen`/`overlay`/… at `:12+`) and the compositors `render_composite_apply_blend` `:122`, `render_composite_source_over_premul` `:140`, and `render_composite_opacity` `:172`. These operate on captured backdrop pixels: an effect group saves the backdrop, paints its subtree, then composites.
 
-Blur is where platform acceleration appears. `render_filter.cpp` uses Apple's Accelerate framework on `__APPLE__`: it includes `<Accelerate/Accelerate.h>` (with a `Rect`→`MacOSRect` rename to dodge the name clash, `render_filter.cpp:1-5`) and blurs via `vImageBoxConvolve_ARGB8888` in three passes to approximate a Gaussian, gated on `caps->gaussian_blur` (`render_filter.cpp:285-313`). On non-Apple platforms (`#ifndef __APPLE__`, `render_filter.cpp:204`) it falls back to a software `box_blur_region` targeting σ = b/2 (`render_filter.cpp:480-492`); the same box blur backs `box-shadow` blur (`render_filter.cpp:549`).
+Blur is where platform acceleration appears. `render_filter.cpp` uses Apple's Accelerate framework on `__APPLE__`: it includes `<Accelerate/Accelerate.h>` (with a `Rect`→`MacOSRect` rename to dodge the name clash, `render_filter.cpp:1-5`) and blurs via `vImageBoxConvolve_ARGB8888` in three passes to approximate a Gaussian, gated on `caps->gaussian_blur` (`render_filter.cpp:285-313`). On non-Apple platforms (`#ifndef __APPLE__`, `render_filter.cpp:204`) it falls back to a software `box_blur_region` targeting σ = b/2 (`render_filter.cpp:480-492`); outer box shadows also use that approximation.
+
+**Software Gaussian amendment (2026-10-13).** Inset shadows and SVG filter
+graphs share `render_gaussian_blur_axis` in `render_svg_filter.cpp`. Each pass
+preserves its normalized finite Gaussian kernel, extension mode and packing.
+Flat scanline runs whose entire kernel lies inside the run and sample region
+reuse one computed result; edge/run boundaries still convolve normally.
+Coverage masks with identical RGBA channels accumulate once and replicate
+before packing. This removes redundant work when scrolling large beveled
+surfaces without changing their paint or introducing another state owner
+(**S12.1.5v2**). Color-channel, pitch and all three extension-mode checks live
+in `RdtVectorTest.GaussianFlatRunsPreserveEdgesChannelsAndPitches`.
 
 ---
 

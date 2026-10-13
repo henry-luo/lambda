@@ -32,7 +32,17 @@ pub fn descriptor(kind, props = {}, child = null) element^ {
     else tags[string(kind)](props,c.children(child))
 }
 fn checked(node) element^ => descriptor(c.text(c.kind(node)),c.props(node),content(node))^
-pub fn lower_slots(value) any^ => shared.lower_slots(value,"blade",["page","config-provider"],{kinds:kinds,build:descriptor})^
+pub fn native(kind, props, children = []) element^ {
+    let node = shared.native(kind,props,children,"blade")^
+    let preset = c.text(c.option(props,"image",'default'));
+    // replace built-in artwork only; custom images and explicit absence keep their contract.
+    if (kind != "empty" or not contains(["default","simple"],preset)) node else
+        <dtna.empty *:c.props(node),image:art.empty(preset),
+            image_height:c.option(props,"image_height",if (preset == "simple") 40 else 100),*content(node)>
+}
+fn lower_component(kind, props, children) element^ =>
+    if (kind == "empty") native(kind,props,children)^ else descriptor(kind,props,children)^
+pub fn lower_slots(value) any^ => shared.lower_slots(value,"blade",["page","config-provider"],{kinds:[*kinds,"empty"],build:lower_component})^
 fn corners() => [for (position in ["tl","tr","bl","br"]) art.corner(position)]
 
 // cache lowered children so nested uncontrolled collections retain their descriptor identity.

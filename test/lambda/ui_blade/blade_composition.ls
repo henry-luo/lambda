@@ -1,6 +1,7 @@
 import ui: lambda.ui.blade
 import c: lambda.ui.core.component
 
+fn empty_image(props) => content(content(ui.render(<blade.empty *:props>)^)[0])[0]
 let source = <blade.page direction:'rtl',title:"Armory",<blade.panel title:"Inventory",<blade.item_slot icon:'sword',label:"Sword",selected:true>>>
 let document = apply(source)
 let root = content(content(document)[1])[0]
@@ -25,5 +26,13 @@ let provider = ui.render(<blade.config_provider tokens:{radius:8},disabled:true,
     ["empty slots supported",ui.render(<blade.item_slot>)^["aria-label"] == "Empty equipment slot"],
     ["shared layout detects sider",ui.render(<blade.layout <blade.layout_sider "Side">>)^.class == "dtna-layout dtna-layout-has-sider"],
     ["ordinary native markup preserved",ui.render(<button "Native">)^ == <button "Native">],
-    ["foreign names stay distinct",ui.render(<other.button>)^ == <other.button>]
+    ["foreign names stay distinct",ui.render(<other.button>)^ == <other.button>],
+    ["fantasy empty presets",all([for (preset in ['default','simple'])
+        name(empty_image({image:preset})) == 'svg' and empty_image({image:preset}).class == "blade-empty-art"])],
+    ["empty artwork stays decorative",empty_image({})["aria-hidden"] == "true"],
+    ["simple empty height preserved",content(ui.render(<blade.empty image:'simple'>)^)[0].style == "height:40px;"],
+    ["empty height override preserved",content(ui.render(<blade.empty image:'simple',image_height:72>)^)[0].style == "height:72px;"],
+    ["hidden empty images preserved",all([for (value in [false,null]) len(content(ui.render(<blade.empty image:value,description:false>)^)) == 0])],
+    ["custom empty URL preserved",empty_image({image:"chest.svg"}).src == "chest.svg"],
+    ["custom empty element preserved",empty_image({image:<span "Custom">}) == <span "Custom">]
 ]

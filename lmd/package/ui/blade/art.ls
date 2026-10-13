@@ -124,6 +124,25 @@ pub fn icon(name, size = 64, label = null, attributes = {}) element =>
         ["aria-label"]:label,["aria-hidden"]:if (label == null) "true" else null,focusable:"false",
         ["stroke-linejoin"]:"round",["stroke-linecap"]:"round",*icons[string(name)]()>
 
+pub fn empty(preset) element => <svg class:"blade-empty-art",viewBox:"0 0 144 96",
+    style:"height:100%;width:auto;",["aria-hidden"]:"true",focusable:"false",
+    ["stroke-linejoin"]:"round",["stroke-linecap"]:"round",*[
+    if (preset == "simple") null else <g opacity:0.65,*[
+        path("M19 21 L111 13 L118 66 L28 74 Z","#d7bd84","#634326"),
+        path("M30 32 L96 26 M32 40 L86 35 M34 48 L66 44","none","#8b6840",2)]>,
+    <ellipse cx:72,cy:86,rx:56,ry:7,fill:"#09090955">,
+    path("M27 48 L34 20 Q72 8 110 20 L117 48 Z","#4b3123","currentColor",2.5),
+    path("M36 42 L41 25 Q72 16 103 25 L108 42 Z","#241b17","#8c683e",1.5),
+    path("M28 48 L116 48 L106 59 L38 59 Z","#151210","currentColor",2),
+    path("M27 49 L37 58 L107 58 L117 49 L111 80 Q72 91 33 80 Z","#60412b","currentColor",2.5),
+    path("M36 60 L41 77 Q72 85 103 77 L107 60","none","#ad7f47",2),
+    path("M45 55 L50 83 L58 84 L55 58 Z M89 58 L86 84 L94 83 L99 55 Z","currentColor","#634326",1.5),
+    path("M30 50 L38 58 L106 58 L114 50 M36 78 Q72 88 108 78","none","#f9e1a2",1.5),
+    path("M66 55 L78 55 L79 70 L72 76 L65 70 Z","currentColor","#634326",1.5),
+    circle(72,64,3,"#241b17","#f9e1a2",1),
+    *[for (p in [[49,64],[51,76],[95,64],[93,76],[37,73],[107,73]]) circle(p[0],p[1],1.5,"#f9e1a2","none")],
+    if (preset == "simple") null else path("M123 19 L123 31 M117 25 L129 25 M18 47 L18 55 M14 51 L22 51","none","currentColor",1.5)]>
+
 pub fn corner(position) element => <svg class:"blade-corner blade-corner-" ++ position,viewBox:"0 0 64 64",
     ["aria-hidden"]:"true",focusable:"false",*[
     path("M3 61 L3 10 Q3 3 10 3 L61 3 L50 11 L18 11 L11 18 L11 50 Z","currentColor","#32251b",2),
