@@ -459,9 +459,9 @@ static bool paged_has_next_column(const PagedComposer* composer) {
     return composer->page_style.column_count > 1 && composer->column_index + 1 < composer->page_style.column_count;
 }
 
-static bool paged_break_avoids(const PagedComposer* composer, ViewBreak value) {
+static bool paged_break_avoids(const PagedComposer* composer, ViewBreak value, bool physical = false) {
     return value == VIEW_BREAK_AVOID || value == VIEW_BREAK_AVOID_COLUMN ||
-        (value == VIEW_BREAK_AVOID_PAGE && !paged_has_next_column(composer));
+        (value == VIEW_BREAK_AVOID_PAGE && (physical || !paged_has_next_column(composer)));
 }
 
 static TypesetStatus paged_failure(PagedComposition* composition, TypesetStatus status,
@@ -3668,11 +3668,11 @@ static TypesetStatus paged_following_style(PagedComposer* composer, ViewPageStyl
     return paged_page_style(composer, spec, static_cast<uint32_t>(index + 1), paged_side(composer, index), false, style);
 }
 
-static TypesetStatus paged_next_constraints(PagedComposer* composer, float* width, float* height, float* containing_height) {
+static TypesetStatus paged_next_constraints(PagedComposer* composer, float* width, float* height, float* containing_height, bool physical = false) {
     PagedReferenceMeasurement references(composer->composition);
     PagedComposer trial = *composer;
     RdtLogicalRect column = {};
-    if (paged_has_next_column(composer)) {
+    if (!physical && paged_has_next_column(composer)) {
         if (!view_css_page_column(composer->page->style, composer->column_index + 1, &column)) return TYPESET_INVALID;
     } else {
         if (paged_following_style(composer, &trial.page_style) != TYPESET_OK ||
@@ -4326,7 +4326,8 @@ static TypesetStatus paged_regions_drain(PagedComposer* composer) {
         composer->terminal_page = 0;
         // a policy-selected physical eject leaves its remaining columns empty.
         bool custom = composer->composition->options.page_policy != nullptr;
-        bool column = !custom && paged_has_next_column(composer);
+        bool physical = custom || composer->page->style->column_count > 1;
+        bool column = !physical && paged_has_next_column(composer);
         status = column ? paged_next_column(composer) : paged_page_create(composer, false);
         if (status != TYPESET_OK) break;
         composer->auxiliary_page = true;
@@ -4337,7 +4338,7 @@ static TypesetStatus paged_regions_drain(PagedComposer* composer) {
             sequence->master_program && sequence->master_program->terminal;
         bool reinsert = false;
         auto layout = [&](bool* finished) {
-            return custom ? paged_policy_aux_sheet(composer, &assembly, finished, &reinsert) :
+            return custom || composer->page_style.column_count > 1 ? paged_policy_aux_sheet(composer, &assembly, finished, &reinsert) :
                 paged_sheet_tail_columns(composer, finished);
         };
         do {
@@ -5784,6 +5785,7 @@ static TypesetStatus paged_block_before(PagedComposer* composer, PagedFlowNode* 
 struct PagedFlowStep { PagedFlowStepKind kind; PagedFlowNode* flow; };
 struct PagedCandidateInfo {
     RadiantKeepStrength keep, page_keep;
+    uint32_t page_reason;
     float space_capacity;
     const RadiantPageSequence* sequence;
     bool pending_aux;
@@ -5808,6 +5810,7 @@ struct PagedPageProvider {
     PagedLayoutDiagnostic hard_failure = {};
     bool relax_minima = false, relax_avoidance = false;
     RadiantKeepStrength boundary_keep = {}, page_keep = {};
+    uint32_t page_reason = 0;
     float space_ratio = 0.0f;
     Pool* candidate_pool = nullptr;
     bool reject_terminal = false;
@@ -5941,6 +5944,9 @@ static TypesetPageCandidate paged_sheet_candidate(const TypesetPageCandidate* co
         result.float_height += columns[i].float_height;
         result.cost += columns[i].cost;
         if (columns[i].kind == TYPESET_PAGE_FLOW) result.kind = TYPESET_PAGE_FLOW;
+        // auxiliary-only columns extend the same forced body boundary without crossing into following body input.
+        if (columns[i].boundary.legality == TYPESET_BREAK_FORCED && columns[i].boundary.scope == TYPESET_BREAK_PAGE)
+            result.boundary = columns[i].boundary;
     }
     for (size_t i = 0; i < physical_columns; i++) result.available_height += regions[i].rect.height;
     // an interior forced column is a constraint on column filling, not a mandatory sheet eject.
@@ -6017,7 +6023,9 @@ static TypesetStatus paged_sheet_policy_collect(PagedComposer* composer, const T
         TypesetStatus status = paged_sheet_empty_regions(composer, regions, columns, candidates[i].end);
         if (status != TYPESET_OK) return status;
         trial->decisions[trial->count] = {values, columns};
-        trial->candidates[trial->count++] = paged_sheet_candidate(values, regions, columns, composer->page_style.column_count);
+        TypesetPageCandidate& sheet = trial->candidates[trial->count++];
+        sheet = paged_sheet_candidate(values, regions, columns, composer->page_style.column_count);
+        if (info) sheet.boundary.reason = info->page_reason;
         trial->region_count += physical_columns;
     }
     return TYPESET_OK;
@@ -6059,6 +6067,22 @@ static size_t paged_choose_default(const TypesetPageCandidate* candidates, size_
         if (candidates[i].boundary.legality == TYPESET_BREAK_FORCED) return i;
         RadiantKeepStrength keep = candidates[i].trial ? ((const PagedCandidateInfo*)candidates[i].trial)->keep : RadiantKeepStrength{};
         if (radiant_keep_compare(keep, weakest) <= 0) { selected = i; weakest = keep; }
+    }
+    return selected;
+}
+
+static size_t paged_choose_sheet_default(const TypesetPageCandidate* candidates, size_t count) {
+    size_t selected = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (candidates[i].boundary.legality == TYPESET_BREAK_FORCED) { selected = i; continue; }
+        if (candidates[selected].boundary.legality == TYPESET_BREAK_FORCED) continue;
+        uint32_t reason = candidates[i].boundary.reason & (PAGED_RELAX_MINIMA | PAGED_RELAX_AVOIDANCE);
+        uint32_t previous = candidates[selected].boundary.reason & (PAGED_RELAX_MINIMA | PAGED_RELAX_AVOIDANCE);
+        const auto* info = (const PagedCandidateInfo*)candidates[i].trial;
+        const auto* chosen = (const PagedCandidateInfo*)candidates[selected].trial;
+        // retain an unrelaxed earlier-column eject before weakening physical-page constraints.
+        if (reason < previous || (reason == previous && radiant_keep_compare(
+            info ? info->page_keep : RadiantKeepStrength{}, chosen ? chosen->page_keep : RadiantKeepStrength{}) <= 0)) selected = i;
     }
     return selected;
 }
@@ -6168,10 +6192,36 @@ static TypesetStatus paged_assembly_resolve(PagedComposer* composer, TypesetPage
     return status;
 }
 
-static bool paged_sibling_avoidance(PagedComposer* composer, PagedFlowNode* flow) {
+static bool paged_sibling_avoidance(PagedComposer* composer, PagedFlowNode* flow, bool physical = false) {
     PagedFlowNode* next = flow->kind == PAGED_FLOW_TABLE_ROW ? paged_table_next_body_row(flow) : flow->next;
-    return next && (paged_break_avoids(composer, paged_flow_break(flow, false)) ||
-        paged_break_avoids(composer, paged_flow_break(next, true)));
+    return next && (paged_break_avoids(composer, paged_flow_break(flow, false), physical) ||
+        paged_break_avoids(composer, paged_flow_break(next, true), physical));
+}
+
+static bool paged_boundary_avoidance(PagedComposer* composer, PagedFlowNode* flow, bool complete, bool physical) {
+    for (size_t i = 0; i < composer->depth; i++)
+        if (paged_break_avoids(composer, composer->frames[i].flow->style->break_inside, physical)) return true;
+    if (flow->kind == PAGED_FLOW_TABLE_ROW) {
+        PagedFlowNode* last = flow->span_last ? flow->span_last : flow;
+        if (flow->row_group && (!complete || !last->group_last) && paged_break_avoids(composer, flow->row_group->break_inside, physical)) return true;
+        if (complete && paged_break_avoids(composer, paged_flow_break(flow, false), physical)) return true;
+    }
+    for (PagedFlowNode* ending = complete ? flow : nullptr; ending; ending = ending->parent) {
+        if (paged_sibling_avoidance(composer, ending, physical)) return true;
+        if (ending->next) break;
+    }
+    return false;
+}
+
+static TypesetStatus paged_following_minima(PagedPageProvider* provider, PagedFlowNode* flow,
+        const TypesetResume& next, bool physical, bool* minima) {
+    float width = 0.0f, height = 0.0f, containing_height = NAN;
+    TypesetStatus status = paged_next_constraints(provider->composer, &width, &height, &containing_height, physical);
+    size_t count = 0; float extent = 0.0f;
+    if (status == TYPESET_OK) status = paged_measure_lines(provider->composer, flow, next.state[1], width, containing_height,
+        provider->scratch, nullptr, provider->line_capacity, &count, &extent, false, SIZE_MAX, flow->style->widows);
+    *minima = next.state[2] < flow->style->orphans || count < flow->style->widows;
+    return status;
 }
 
 static TypesetStatus paged_page_line(PagedPageProvider* provider, PagedFlowNode* flow,
@@ -6214,20 +6264,17 @@ static TypesetStatus paged_page_line(PagedPageProvider* provider, PagedFlowNode*
     next->state[1] = line.next; next->state[2]++;
     if (line.next == flow->paragraph.count) {
         next->state[0]++; next->state[1] = next->state[2] = 0;
-        for (PagedFlowNode* ending = flow; ending; ending = ending->parent) {
-            if (paged_sibling_avoidance(composer, ending)) contribution->boundary.reason |= PAGED_RELAX_AVOIDANCE;
-            if (ending->next) break;
-        }
     } else {
-        bool minima = next->state[2] < flow->style->orphans;
-        float next_width = 0.0f, next_height = 0.0f, next_containing_height = NAN;
-        status = paged_next_constraints(composer, &next_width, &next_height, &next_containing_height);
-        size_t tail_count = 0; float tail_height = 0.0f;
-        if (status == TYPESET_OK) status = paged_measure_lines(composer, flow, line.next, next_width, next_containing_height,
-            provider->scratch, nullptr, provider->line_capacity, &tail_count, &tail_height,
-            false, SIZE_MAX, flow->style->widows);
+        bool minima = false;
+        status = paged_following_minima(provider, flow, *next, false, &minima);
         if (status != TYPESET_OK) return status;
-        if (minima || tail_count < flow->style->widows) contribution->boundary.reason |= PAGED_RELAX_MINIMA;
+        if (minima) contribution->boundary.reason |= PAGED_RELAX_MINIMA;
+        if (composer->sheet_trial && paged_has_next_column(composer)) {
+            // an early physical eject resumes at column one of the next selected sheet, not the adjacent column.
+            status = paged_following_minima(provider, flow, *next, true, &minima);
+            if (status != TYPESET_OK) return status;
+            if (minima) provider->page_reason |= PAGED_RELAX_MINIMA;
+        }
     }
     return TYPESET_OK;
 }
@@ -6553,6 +6600,7 @@ static TypesetStatus paged_page_next(void* context, const TypesetResume* cursor,
     PagedFlowNode* flow = step.flow;
     composer->space_ratio = provider->space_ratio;
     provider->boundary_keep = provider->page_keep = {};
+    provider->page_reason = 0;
     *next = *cursor; next->serial++; next->state[0]++;
     *contribution = {}; contribution->kind = TYPESET_CONTRIBUTION_BOUNDARY;
     contribution->payload = &step;
@@ -6593,11 +6641,6 @@ static TypesetStatus paged_page_next(void* context, const TypesetResume* cursor,
             // a terminal row closes its table and footer before the group-after boundary advances.
             contribution->boundary.legality = composer->pending_break && paged_table_next_body_row(flow) ?
                 TYPESET_BREAK_FORCED : TYPESET_BREAK_ALLOWED;
-            PagedFlowNode* boundary_row = flow->span_last ? flow->span_last : flow;
-            if (flow->row_group && paged_break_avoids(composer, flow->row_group->break_inside) && (!complete || !boundary_row->group_last))
-                contribution->boundary.reason |= PAGED_RELAX_AVOIDANCE;
-            if (complete && (paged_sibling_avoidance(composer, flow) || paged_break_avoids(composer, paged_flow_break(flow, false))))
-                contribution->boundary.reason |= PAGED_RELAX_AVOIDANCE;
             next->state[1] = continuation; next->state[2] = 0;
             next->state[3] = complete ? 0 : region;
             if (!complete) next->state[0] = cursor->state[0];
@@ -6625,7 +6668,6 @@ static TypesetStatus paged_page_next(void* context, const TypesetResume* cursor,
             // trailing forced breaks do not defer the enclosing closures to an empty sheet.
             contribution->boundary.legality = composer->pending_break && following < provider->count ?
                 TYPESET_BREAK_FORCED : TYPESET_BREAK_ALLOWED;
-            if (paged_sibling_avoidance(composer, flow)) contribution->boundary.reason |= PAGED_RELAX_AVOIDANCE;
             break;
         }
     }
@@ -6665,9 +6707,9 @@ static TypesetStatus paged_page_next(void* context, const TypesetResume* cursor,
             }
         }
         if (provider->boundary_keep.kind == RADIANT_KEEP_ALWAYS) contribution->boundary.legality = TYPESET_BREAK_FORBIDDEN;
-        for (size_t i = 0; i < composer->depth; i++)
-            if (paged_break_avoids(composer, composer->frames[i].flow->style->break_inside))
-                contribution->boundary.reason |= PAGED_RELAX_AVOIDANCE;
+        if (paged_boundary_avoidance(composer, flow, complete, false)) contribution->boundary.reason |= PAGED_RELAX_AVOIDANCE;
+        provider->page_reason |= contribution->boundary.reason;
+        if (paged_boundary_avoidance(composer, flow, complete, true)) provider->page_reason |= PAGED_RELAX_AVOIDANCE;
         if (((contribution->boundary.reason & PAGED_RELAX_MINIMA) && !provider->relax_minima) ||
             ((contribution->boundary.reason & PAGED_RELAX_AVOIDANCE) && !provider->relax_avoidance))
             contribution->boundary.legality = TYPESET_BREAK_FORBIDDEN;
@@ -6728,11 +6770,11 @@ static TypesetStatus paged_page_probe(void* context, const TypesetContribution* 
         if (candidate->boundary.legality != TYPESET_BREAK_FORBIDDEN && composer->sheet_trial)
             status = paged_sheet_auxiliary_select(composer, &trial, &auxiliary, &auxiliary_count);
         if (status == TYPESET_OK && candidate->boundary.legality != TYPESET_BREAK_FORBIDDEN &&
-            (provider->boundary_keep.kind != RADIANT_KEEP_AUTO || provider->page_keep.kind != RADIANT_KEEP_AUTO ||
+            (provider->boundary_keep.kind != RADIANT_KEEP_AUTO || provider->page_keep.kind != RADIANT_KEEP_AUTO || provider->page_reason ||
                 auxiliary_count || capacity > 0.0f || provider->vertical_count || (sequence && sequence->master_program))) {
             PagedCandidateInfo* info = (PagedCandidateInfo*)pool_alloc(provider->candidate_pool, sizeof(PagedCandidateInfo));
             if (!info) status = TYPESET_OUT_OF_MEMORY;
-            else { *info = {provider->boundary_keep, provider->page_keep, capacity, sequence, pending, packing, glue_end,
+            else { *info = {provider->boundary_keep, provider->page_keep, provider->page_reason, capacity, sequence, pending, packing, glue_end,
                 auxiliary, auxiliary_count}; candidate->trial = info; }
         }
     }
@@ -6886,7 +6928,8 @@ static TypesetStatus paged_layout_sheet(PagedPageProvider* context, const Typese
         const TypesetPagePolicy* policy, TypesetPageAssembly* assembly, bool reject_terminal, PagedSheetResult* result) {
     PagedComposer* composer = context->composer;
     const TypesetPagePolicy* external = composer->composition->options.page_policy;
-    if (!external) return paged_layout_columns(context, provider, cursor, constraints, probe, policy, assembly, reject_terminal, result);
+    if (!external && composer->page_style.column_count < 2)
+        return paged_layout_columns(context, provider, cursor, constraints, probe, policy, assembly, reject_terminal, result);
     Pool* pool = mem_pool_create((MemContext*)composer->tree->model->document->services.mem_ctx,
         MEM_ROLE_LAYOUT, "typeset.html.sheet-policy");
     if (!pool) return TYPESET_OUT_OF_MEMORY;
@@ -6909,7 +6952,8 @@ static TypesetStatus paged_layout_sheet(PagedPageProvider* context, const Typese
     size_t selected = SIZE_MAX;
     TypesetPolicyCheckpoint chosen = {};
     if (status == TYPESET_OK) {
-        selected = trial.count ? external->choose(external->context, trial.candidates, trial.count) : SIZE_MAX;
+        selected = !trial.count ? SIZE_MAX : external ? external->choose(external->context, trial.candidates, trial.count) :
+            paged_choose_sheet_default(trial.candidates, trial.count);
         status = selected < trial.count ? typeset_policy_checkpoint(external, &chosen) : TYPESET_UNPLACEABLE;
     }
     if (status == TYPESET_OK) status = checkpoint.restore();
@@ -6927,7 +6971,13 @@ static TypesetStatus paged_layout_sheet(PagedPageProvider* context, const Typese
         if (restored != TYPESET_OK) status = restored;
     }
     bool reinsert = false;
-    if (status == TYPESET_OK && !provisional) {
+    if (status == TYPESET_OK && trial.prefix_count) {
+        // an early sheet eject can relax page avoidance without relaxing its interior column boundary.
+        uint32_t missing = trial.candidates[selected].boundary.reason & ~trial.prefix[trial.prefix_count - 1].boundary.reason;
+        if (missing & PAGED_RELAX_MINIMA) composer->composition->diagnostic.relaxed_line_minima++;
+        if (missing & PAGED_RELAX_AVOIDANCE) composer->composition->diagnostic.relaxed_avoidance++;
+    }
+    if (status == TYPESET_OK && !provisional && external) {
         TypesetPagePlan plan = {}; plan.scratch = pool; plan.provider = provider; plan.policy = external;
         plan.candidate = paged_sheet_candidate(trial.prefix, trial.regions, trial.prefix_count, composer->page_style.column_count);
         plan.contributions = trial.contributions; plan.count = trial.contribution_count; plan.complete = result->finished;

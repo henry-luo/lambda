@@ -12920,6 +12920,117 @@ TEST_F(SecondaryViewTest, ColumnTablesRepeatGroupsWithinOnePhysicalSheetAndKeepE
     }
 }
 
+TEST_F(SecondaryViewTest, DefaultSheetKeepsRewindEarlierColumnsAndPreserveRetainedSourceCoverage) {
+    stylesheet("p,div{margin:0;font:10px/20px Arial;white-space:pre;orphans:1;widows:1}");
+    DomElement* master = page_master("native", "size:240px 100px;margin:10px"); ASSERT_NE(master, nullptr);
+    ASSERT_NE(page_region(master, "body", "body", nullptr, "column-count:2;column-gap:20px"), nullptr);
+    DomElement* sequence = page_sequence("native"); ASSERT_NE(sequence, nullptr);
+    DomElement* lead = block("Lead", "height:40px", "div", sequence); ASSERT_NE(lead, nullptr);
+    DomElement* group = block(nullptr, nullptr, "div", sequence); ASSERT_NE(group, nullptr);
+    DomElement* text = block("A\nB\nC\nD\nE\nF\nG", nullptr, "p", group); ASSERT_NE(text, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    for (bool css : {false, true}) {
+        SCOPED_TRACE(css);
+        if (group->get_attribute("r:keep-together.within-page")) group->remove_attribute("r:keep-together.within-page");
+        ASSERT_TRUE(group->set_attribute("style", css ? "break-inside:avoid-page" : "break-inside:auto"));
+        if (!css) ASSERT_TRUE(group->set_attribute("r:keep-together.within-page", "always"));
+        ASSERT_TRUE(view_tree_model_reset(tree));
+        ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        ASSERT_EQ(tree->model->page_count, 2u); EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+        LayoutViewNode* first = source_glyph_text(tree, text->first_child, "A"); ASSERT_NE(first, nullptr);
+        LayoutViewNode* last = source_glyph_text(tree, text->first_child, "G"); ASSERT_NE(last, nullptr);
+        EXPECT_EQ(occurrence_page(first), 2u); EXPECT_EQ(occurrence_page(last), 2u);
+        EXPECT_FLOAT_EQ(first->rect.x, 10); EXPECT_FLOAT_EQ(first->rect.y, 10);
+        EXPECT_FLOAT_EQ(last->rect.x, 130); EXPECT_FLOAT_EQ(last->rect.y, 50);
+        expect_source_range_coverage(tree, text->first_child);
+        EXPECT_EQ(view_tree_node_state(tree, group, false)->occurrence_count, 2u);
+    }
+    ViewPreviewOptions preview = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+    ASSERT_TRUE(group->set_attribute("style", "break-inside:auto")); tree->reset_retained();
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_EQ(occurrence_page(source_glyph_text(tree, text->first_child, "A")), 1u);
+    EXPECT_EQ(occurrence_page(source_glyph_text(retained, text->first_child, "A")), 2u);
+    expect_source_range_coverage(retained, text->first_child);
+    ASSERT_TRUE(view_tree_secondary_release(&doc, retained));
+}
+
+TEST_F(SecondaryViewTest, DefaultSheetSiblingKeepsPreferEarlierWeakerBoundariesAndHonorForcedPages) {
+    stylesheet("p,div{margin:0;font:10px/20px Arial;white-space:pre;orphans:1;widows:1}");
+    DomElement* master = page_master("native", "size:240px 100px;margin:10px"); ASSERT_NE(master, nullptr);
+    ASSERT_NE(page_region(master, "body", "body", nullptr, "column-count:2;column-gap:20px"), nullptr);
+    DomElement* sequence = page_sequence("native"); ASSERT_NE(sequence, nullptr);
+    ASSERT_NE(block("Lead", "height:40px", "div", sequence), nullptr);
+    DomElement* a = block("A\nB\nC\nD", nullptr, "p", sequence); ASSERT_NE(a, nullptr);
+    DomElement* b = block("E\nF\nG", nullptr, "p", sequence); ASSERT_NE(b, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    const struct { const char* css; const char* keep; const char* strength; } cases[] = {
+        {"break-after:auto", "r:keep-with-next.within-page", "always"},
+        {"break-after:auto", "r:keep-with-next.within-page", "5"},
+        {"break-after:avoid-page", nullptr, nullptr}};
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.css); ASSERT_TRUE(a->set_attribute("style", item.css));
+        if (a->get_attribute("r:keep-with-next.within-page")) a->remove_attribute("r:keep-with-next.within-page");
+        if (item.keep) ASSERT_TRUE(a->set_attribute(item.keep, item.strength));
+        // page keeps also cover an unfinished paragraph; the whole chain fits on a fresh two-column sheet.
+        ASSERT_TRUE(a->set_attribute("r:keep-together.within-page", item.strength ? item.strength : "always"));
+        ASSERT_TRUE(b->set_attribute("r:keep-together.within-page", "always"));
+        ASSERT_TRUE(view_tree_model_reset(tree)); ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+        EXPECT_EQ(occurrence_page(source_glyph_text(tree, a->first_child, "A")), 2u);
+        EXPECT_EQ(occurrence_page(source_glyph_text(tree, b->first_child, "G")), 2u);
+        EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+        expect_source_range_coverage(tree, a->first_child); expect_source_range_coverage(tree, b->first_child);
+    }
+    ASSERT_TRUE(b->set_attribute("style", "break-before:page")); ASSERT_TRUE(view_tree_model_reset(tree));
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_EQ(occurrence_page(source_glyph_text(tree, a->first_child, "A")), 1u);
+    EXPECT_EQ(occurrence_page(source_glyph_text(tree, b->first_child, "E")), 2u);
+    EXPECT_EQ(diagnostic.relaxed_avoidance, 0u);
+}
+
+TEST_F(SecondaryViewTest, DefaultSheetOversizedKeepsRelaxOnlyOnFreshSheetsAndRollBackFailures) {
+    stylesheet("p,div{margin:0;font:10px/20px Arial;white-space:pre;orphans:1;widows:1}");
+    DomElement* sequence = body_column_sequence("size:240px 100px;margin:10px", "column-count:2;column-gap:20px"); ASSERT_NE(sequence, nullptr);
+    ASSERT_NE(block("Lead\nLead", nullptr, "p", sequence), nullptr);
+    DomElement* group = block(nullptr, "break-inside:avoid-page", "div", sequence); ASSERT_NE(group, nullptr);
+    DomElement* text = block("A\nB\nC\nD\nE\nF\nG\nH\nI", nullptr, "p", group); ASSERT_NE(text, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 3u); EXPECT_GT(diagnostic.relaxed_avoidance, 0u);
+    EXPECT_EQ(occurrence_page(source_glyph_text(tree, text->first_child, "A")), 2u);
+    EXPECT_EQ(occurrence_page(source_glyph_text(tree, text->first_child, "I")), 3u);
+    expect_source_range_coverage(tree, text->first_child);
+    ViewPreviewOptions preview = view_preview_options_default();
+    ViewTree* retained = view_tree_page_instances_create(tree, nullptr, &preview); ASSERT_NE(retained, nullptr);
+    for (bool budget : {false, true}) {
+        SCOPED_TRACE(budget); tree->reset_retained();
+        ASSERT_TRUE(group->set_attribute("style", "break-inside:auto"));
+        ASSERT_TRUE(group->set_attribute("r:keep-together.within-page", budget ? "auto" : "always"));
+        options.max_pages = budget ? 1 : 100;
+        EXPECT_EQ(layout_secondary_view(tree, &options, &diagnostic), budget ? TYPESET_BUDGET_EXHAUSTED : TYPESET_UNPLACEABLE) << diagnostic.reason;
+        EXPECT_EQ(tree->model->page_count, 0u); EXPECT_EQ(retained->model->page_count, 3u);
+        expect_source_range_coverage(retained, text->first_child);
+    }
+    ASSERT_TRUE(view_tree_secondary_release(&doc, retained));
+}
+
+TEST_F(SecondaryViewTest, DefaultSheetEarlyEjectMeasuresWidowsAtTheFollowingSheetsFirstColumn) {
+    stylesheet("p,div{margin:0;font:10px/20px monospace;orphans:1;widows:2}");
+    DomElement* region = nullptr;
+    DomElement* sequence = body_column_sequence("size:240px 100px;margin:10px", nullptr, &region); ASSERT_NE(sequence, nullptr);
+    ASSERT_NE(page_column(region, "120px", "80px"), nullptr);
+    ASSERT_NE(page_column(region, "24px", "20px", "160px"), nullptr);
+    ASSERT_NE(block("Lead", "height:60px", "div", sequence), nullptr);
+    DomElement* paragraph = block("A A A A A A A A A A A A A A A A", nullptr, "p", sequence); ASSERT_NE(paragraph, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u); EXPECT_EQ(diagnostic.relaxed_line_minima, 0u);
+    const ViewNodeState* state = view_tree_node_state(tree, paragraph->first_child, false); ASSERT_NE(state, nullptr);
+    ASSERT_NE(state->first_occurrence, nullptr);
+    for (LayoutViewNode* node = state->first_occurrence; node; node = node->next_occurrence) EXPECT_EQ(occurrence_page(node), 2u);
+    expect_source_range_coverage(tree, paragraph->first_child);
+}
+
 TEST_F(SecondaryViewTest, ColumnDisplayAlignmentMovesOnlyTheCurrentRootAfterItsFramesClose) {
     stylesheet("p,div{margin:0;font:10px/20px Arial;white-space:pre;orphans:1;widows:1}");
     DomElement* master = page_master("native", "size:200px 100px;margin:10px"); ASSERT_NE(master, nullptr);
