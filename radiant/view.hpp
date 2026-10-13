@@ -801,7 +801,7 @@ extern void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface*
                                 struct ClipShape** clip_shapes = nullptr, int clip_depth = 0);
 
 extern bool can_break(char c);
-extern bool is_space(char c);
+extern bool is_space(uint32_t codepoint);
 
 typedef struct ViewBlock ViewBlock;
 typedef struct TextShadow TextShadow;

@@ -3332,20 +3332,8 @@ static bool text_rect_is_collapsed_whitespace(ViewText* text, TextRect* rect) {
     // A zero-font whitespace run still has a layout rect; only positive-height
     // zero-width runs were collapsed away at an inline line edge (CSS Text 3
     // §4.1.3), so retain the former for DOM geometry reporting.
-    CssEnum white_space = get_white_space_value(static_cast<DomNode*>(text));
-    if (white_space != CSS_VALUE_NORMAL &&
-        white_space != CSS_VALUE_NOWRAP &&
-        white_space != CSS_VALUE_PRE_LINE) {
-        return false;
-    }
-    unsigned char* td = text->text_data();
-    if (!td) return false;
-    for (int i = 0; i < rect->length; i++) {
-        unsigned char ch = td[rect->start_index + i];
-        if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r') {
-            return false;
-        }
-    }
+    if (!layout_text_is_collapsible_whitespace(
+            text, rect->start_index, rect->length)) return false;
     if (rect->height <= 0.0f) {
         // cssom range extraction omits collapsed whitespace-only fragments in
         // a fragmented vertical inline, even when the line cursor gave
@@ -3376,20 +3364,6 @@ static int text_json_leading_whitespace_start(ViewText* text, TextRect* rect) {
         ? 0 : start;
 }
 
-static bool text_json_is_collapsible_whitespace_node(DomNode* node) {
-    if (!node || node->node_type != DOM_NODE_TEXT) return false;
-    CssEnum white_space = get_white_space_value(node);
-    if (white_space != CSS_VALUE_NORMAL &&
-        white_space != CSS_VALUE_NOWRAP &&
-        white_space != CSS_VALUE_PRE_LINE) {
-        return false;
-    }
-    DomText* text = node->as_text();
-    unsigned char* data = text ? text->text_data() : nullptr;
-    if (!text || !data || text->length == 0) return false;
-    return str_all((const char*)data, text->length, str_is_html_space);
-}
-
 static int text_json_preceding_whitespace(
     ViewText* text, char* buffer, int capacity) {
     bool in_vertical_context = text_in_fragmented_block(text, true);
@@ -3408,7 +3382,7 @@ static int text_json_preceding_whitespace(
             previous[previous_count++] = sibling;
         }
         for (int i = previous_count - 1; i >= 0 && run_count < 32; i--) {
-            if (!text_json_is_collapsible_whitespace_node(previous[i])) break;
+            if (!layout_text_is_collapsible_whitespace(previous[i])) break;
             runs[run_count++] = previous[i];
         }
     }

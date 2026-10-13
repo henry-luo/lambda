@@ -1876,6 +1876,51 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     return result;
 }
 
+IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
+        const char* text, size_t length, const LayoutTextIntrinsicLineOptions& options,
+        float* vertical_text_extent) {
+    IntrinsicSizes result = {};
+    if (!lycon || !text) return result;
+    bool preserve_spaces = white_space_preserves_space_advance(options.white_space);
+    bool preserve_newlines = preserve_spaces || options.white_space == CSS_VALUE_PRE_LINE;
+    const char* line_start = text;
+    const char* text_end = text + length;
+    bool first_line = true;
+    while (line_start <= text_end) {
+        const char* newline = preserve_newlines
+            ? (const char*)memchr(line_start, '\n', text_end - line_start) : nullptr;
+        size_t line_length = newline ? (size_t)(newline - line_start)
+            : (size_t)(text_end - line_start);
+        TextIntrinsicWidths widths = measure_text_intrinsic_widths(
+            lycon, line_start, line_length, options.text_transform, options.font_variant,
+            options.white_space, options.overflow_wrap, options.word_break);
+        if (preserve_spaces && text_line_has_tab(line_start, line_length)) {
+            widths.max_content = measure_preserved_line_width_with_tabs(
+                lycon, line_start, line_length, first_line ? options.start_offset : 0.0f,
+                options.text_transform, options.font_variant, options.tab_size,
+                options.tab_size_length);
+        }
+        // pre suppresses soft wrapping, but its preserved LF still separates intrinsic lines.
+        if (options.white_space == CSS_VALUE_PRE || options.white_space == CSS_VALUE_NOWRAP) {
+            widths.min_content = widths.max_content;
+        }
+        result.min_content = max(result.min_content, widths.min_content);
+        result.max_content = max(result.max_content, widths.max_content);
+        if (first_line) result.first_line_max = widths.max_content;
+        result.last_line_max = widths.max_content;
+        if (vertical_text_extent && line_length > 0) {
+            *vertical_text_extent = max(*vertical_text_extent, layout_vertical_text_block_extent(
+                line_start, line_length, options.vertical_line_advance,
+                options.vertical_inline_basis));
+        }
+        if (!newline) break;
+        result.has_forced_break = true;
+        first_line = false;
+        line_start = newline + 1;
+    }
+    return result;
+}
+
 float layout_vertical_text_block_extent(const char* text, size_t length,
                                          float line_advance,
                                          float available_inline_size) {
@@ -2276,7 +2321,7 @@ static bool intrinsic_display_is_atomic_inline(CssEnum display) {
         display == CSS_VALUE_INLINE_TABLE;
 }
 
-static bool intrinsic_element_is_atomic_inline(DomElement* element) {
+bool layout_intrinsic_element_is_atomic_inline(DomElement* element) {
     if (!element || !is_inline_level_element(element)) return false;
     if (layout_element_is_replaced(element)) return true;
 
@@ -2338,7 +2383,7 @@ static bool intrinsic_node_has_inline_boundary_content(DomNode* node) {
     if (node_is_table_cell_like(node) || element->display.inner == CSS_VALUE_TABLE) return true;
     // Atomic inline boxes are boundaries even when their resolved outer display
     // is not materialized yet during the intrinsic measurement pass.
-    if (intrinsic_element_is_atomic_inline(element)) return true;
+    if (layout_intrinsic_element_is_atomic_inline(element)) return true;
     if (!is_inline_level_element(element)) return false;
     // Replaced boxes are atomic inline content even though they have no DOM children.
     if (layout_element_is_replaced(element)) return true;
@@ -2378,7 +2423,7 @@ static bool intrinsic_has_inline_boundary_content_in_direction(DomNode* node, bo
         DomNode* parent = current->parent;
         if (!parent || !parent->is_element()) break;
         if (!is_inline_level_element(parent->as_element())) break;
-        if (intrinsic_element_is_atomic_inline(parent->as_element())) {
+        if (layout_intrinsic_element_is_atomic_inline(parent->as_element())) {
             // css display 3: an atomic inline owns its formatting context, so
             // edge whitespace cannot collapse with siblings outside that box.
             break;
@@ -2425,7 +2470,7 @@ static bool intrinsic_node_has_collapsible_space_at_edge(DomNode* node, bool end
     if (!is_inline_level_element(element)) return false;
     // An atomic inline establishes its own formatting context; collapsible
     // whitespace at its internal edge cannot collapse with its parent run.
-    if (intrinsic_element_is_atomic_inline(element)) return false;
+    if (layout_intrinsic_element_is_atomic_inline(element)) return false;
     for (DomNode* child = end ? element->last_child : element->first_child;
          child; child = end ? child->prev_sibling : child->next_sibling) {
         if (child->is_comment()) continue;
@@ -2928,8 +2973,8 @@ LayoutIntrinsicMarginPair layout_intrinsic_horizontal_margin_pair(
     return result;
 }
 
-static float intrinsic_inline_edge(LayoutContext* lycon, DomElement* element,
-                                   bool inline_start, bool include_margin = true) {
+float layout_intrinsic_inline_edge(LayoutContext* lycon, DomElement* element,
+                                   bool inline_start, bool include_margin) {
     if (!lycon || !element) return 0.0f;
     float margin_left = 0.0f, margin_right = 0.0f;
     layout_resolve_intrinsic_horizontal_margins(
@@ -2944,8 +2989,8 @@ static float intrinsic_inline_edge(LayoutContext* lycon, DomElement* element,
 }
 
 static float intrinsic_inline_start_margin(LayoutContext* lycon, DomElement* element) {
-    return intrinsic_inline_edge(lycon, element, true) -
-        intrinsic_inline_edge(lycon, element, true, false);
+    return layout_intrinsic_inline_edge(lycon, element, true) -
+        layout_intrinsic_inline_edge(lycon, element, true, false);
 }
 
 // Text indent belongs to the first formatted line, so every kind of forced
@@ -4981,7 +5026,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     // css 2.1 §9.7 blockifies floats, isolating their line-edge trimming.
                     bool propagates_inline_edge_space =
                         is_inline_level_element(element) &&
-                        !intrinsic_element_is_atomic_inline(element) &&
+                        !layout_intrinsic_element_is_atomic_inline(element) &&
                         !layout_element_is_floated(element) &&
                         !white_space_preserves_space_advance(ws);
                     bool has_preceding_boundary = propagates_inline_edge_space &&
@@ -5025,7 +5070,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                             // inline-table boxes, so preceding collapsed spaces still render.
                             has_inline_after = is_inline_level_element(next->as_element()) ||
                                 (is_inline_level_element(element) &&
-                                 !intrinsic_element_is_atomic_inline(element) &&
+                                 !layout_intrinsic_element_is_atomic_inline(element) &&
                                  node_is_table_cell_like(next));
                         }
                     }
@@ -5067,90 +5112,35 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 layout_resolve_inherited_text_wrap(
                     static_cast<DomNode*>(element), &ow, &wb);
 
-                TextIntrinsicWidths text_widths;
                 float vertical_text_extent = 0.0f;
-                float tab_size = (view_block->blk && view_block->block_mut()->tab_size >= 0)
-                    ? view_block->block()->tab_size : 8.0f;
-                float tab_size_length = view_block->blk
-                    ? view_block->block()->tab_size_length : -1.0f;
-                if (preserve_newlines) {
-                    // For pre/pre-wrap/break-spaces/pre-line: newlines create forced line breaks.
-                    // Measure each line separately; max-content = widest line.
-                    text_widths = {0, 0};
-                    const char* line_start = normalized_buffer;
-                    const char* buf_end = normalized_buffer + out_pos;
-                    int line_count = 0;
-                    float first_line_width = 0;
-                    float last_line_width = 0;
-                    while (line_start <= buf_end) {
-                        const char* nl = (const char*)memchr(line_start, '\n', buf_end - line_start);
-                        size_t line_len = nl ? (size_t)(nl - line_start) : (size_t)(buf_end - line_start);
-                        float line_width = 0;
-                        if (line_len > 0) {
-                            TextIntrinsicWidths lw = measure_text_intrinsic_widths(
-                                lycon, line_start, line_len, text_transform, font_variant, ws, ow, wb);
-                            if (preserve_spaces && text_line_has_tab(line_start, line_len)) {
-                                float start_offset = (line_count == 0) ? inline_max_sum : 0.0f;
-                                lw.max_content = measure_preserved_line_width_with_tabs(
-                                    lycon, line_start, line_len, start_offset,
-                                    text_transform, font_variant, tab_size,
-                                    tab_size_length);
-                            }
-                            if (lw.max_content > text_widths.max_content)
-                                text_widths.max_content = lw.max_content;
-                            if (lw.min_content > text_widths.min_content)
-                                text_widths.min_content = lw.min_content;
-                            line_width = lw.max_content;
-                            if (element_inline_axis_is_vertical) {
-                                vertical_text_extent = max(vertical_text_extent,
-                                    layout_vertical_text_block_extent(
-                                        line_start, line_len,
-                                        vertical_line_advance,
-                                        vertical_inline_basis));
-                            }
-                        }
-                        if (line_count == 0) first_line_width = line_width;
-                        last_line_width = line_width;
-                        line_count++;
-                        if (!nl) break;
-                        line_start = nl + 1;
+                LayoutTextIntrinsicLineOptions line_options;
+                line_options.text_transform = text_transform;
+                line_options.font_variant = font_variant;
+                line_options.white_space = preserve_newlines ? ws : CSS_VALUE_NORMAL;
+                line_options.overflow_wrap = ow;
+                line_options.word_break = wb;
+                line_options.start_offset = inline_max_sum;
+                if (view_block->blk) {
+                    if (view_block->block()->tab_size >= 0.0f) {
+                        line_options.tab_size = view_block->block()->tab_size;
                     }
-                    // CSS Text 3 §5.2: Track forced breaks for inline run accumulation.
-                    // When a preserved newline creates a forced break, the inline run
-                    // at the parent level must be split at that point.
-                    if (line_count > 1) {
-                        child_sizes.has_forced_break = true;
-                        child_sizes.first_line_max = first_line_width;
-                        child_sizes.last_line_max = last_line_width;
-                    }
-                } else {
-                    text_widths = measure_text_intrinsic_widths(
-                        lycon, normalized_buffer, out_pos, text_transform, font_variant,
-                        CSS_VALUE_NORMAL, ow, wb);
-                    if (preserve_space_after_table_cell &&
-                        (out_pos == 0 || normalized_buffer[0] != ' ')) {
-                        text_widths.max_content += layout_measure_space_advance(
-                            lycon, font_box_handle(&lycon->font), lycon->font.style);
-                    }
-                    if (preserve_spaces && text_line_has_tab(normalized_buffer, out_pos)) {
-                        text_widths.max_content = measure_preserved_line_width_with_tabs(
-                            lycon, normalized_buffer, out_pos, inline_max_sum,
-                            text_transform, font_variant, tab_size,
-                            tab_size_length);
-                    }
-                    if (element_inline_axis_is_vertical) {
-                        vertical_text_extent = layout_vertical_text_block_extent(
-                            normalized_buffer, out_pos, vertical_line_advance,
-                            vertical_inline_basis);
-                    }
+                    line_options.tab_size_length = view_block->block()->tab_size_length;
                 }
-                child_sizes.min_content = text_widths.min_content;
-                child_sizes.max_content = text_widths.max_content;
+                line_options.vertical_line_advance = vertical_line_advance;
+                line_options.vertical_inline_basis = vertical_inline_basis;
+                child_sizes = layout_measure_text_intrinsic_lines(
+                    lycon, normalized_buffer, out_pos, line_options,
+                    element_inline_axis_is_vertical ? &vertical_text_extent : nullptr);
+                if (preserve_space_after_table_cell && !preserve_newlines &&
+                    (out_pos == 0 || normalized_buffer[0] != ' ')) {
+                    child_sizes.max_content += layout_measure_space_advance(
+                        lycon, font_box_handle(&lycon->font), lycon->font.style);
+                }
 
                 if (element_inline_axis_is_vertical) {
                     vertical_text_block_axis_max = max(vertical_text_block_axis_max,
                         vertical_inline_basis > 0.0f
-                            ? vertical_text_extent : text_widths.max_content);
+                            ? vertical_text_extent : child_sizes.max_content);
                 }
 
                 // white-space: nowrap/pre prevents line breaks, so min-content = max-content
@@ -5218,7 +5208,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             child_is_float = layout_element_is_floated(child_elem);
             is_inline = !child_is_float && (is_inline_level_element(child_elem) ||
                 (is_inline_level_element(element) &&
-                 !intrinsic_element_is_atomic_inline(element) &&
+                 !layout_intrinsic_element_is_atomic_inline(element) &&
                  node_is_table_cell_like(child)));
 
             if (is_inline && element_inline_axis_is_vertical) {
@@ -5299,7 +5289,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // The first line of the child adds to the current inline run; the forced
             // break flushes the run; the last line starts a new run.
             bool child_is_atomic_inline = child->is_element() &&
-                intrinsic_element_is_atomic_inline(child->as_element());
+                layout_intrinsic_element_is_atomic_inline(child->as_element());
             if (child_sizes.has_forced_break && !child_is_atomic_inline) {
                 // An atomic inline-level box contains its own formatting context;
                 // descendant forced breaks cannot split the containing inline run.
@@ -5325,7 +5315,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     // CSS Break 3 repeats both inline edges on every clone fragment;
                     // the propagated first-line width already contains the start
                     // decoration, so add the end decoration and start margin here.
-                    inline_max_sum += intrinsic_inline_edge(
+                    inline_max_sum += layout_intrinsic_inline_edge(
                         lycon, child->as_element(), false, false);
                     inline_max_sum += intrinsic_inline_start_margin(
                         lycon, child->as_element());
@@ -5354,7 +5344,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         intrinsic_node_has_collapsible_space_at_edge(child, false) &&
                         child->prev_sibling && child->prev_sibling->is_text();
                     if (starts_after_text) {
-                        inline_min_sum += intrinsic_inline_edge(
+                        inline_min_sum += layout_intrinsic_inline_edge(
                             lycon, child->as_element(), true);
                         // CSS Break 3: clone repeats the inline-end decoration
                         // on the fragment containing a leading collapsed space;
@@ -5362,7 +5352,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         if (intrinsic_element_box_decoration_break(child->as_element()) ==
                                 CSS_VALUE_CLONE &&
                             !intrinsic_has_inline_boundary_content_in_direction(child, true)) {
-                            inline_min_sum += intrinsic_inline_edge(
+                            inline_min_sum += layout_intrinsic_inline_edge(
                                 lycon, child->as_element(), false);
                         }
                     }

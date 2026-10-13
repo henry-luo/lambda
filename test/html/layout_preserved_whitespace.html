@@ -9,10 +9,13 @@
 div { font: 20px/1 Ahem; }
 #justify { white-space: pre-wrap; text-align: justify; width: 4ch; }
 .break-spaces { white-space: break-spaces; width: 2ch; }
+.pre-line { white-space: pre-line; font-style: normal; }
 </style>
 <body id="result">
 <div id="justify"><span id="green">X X</span> X</div>
 <div id="tabs" class="break-spaces">X<wbr>X&#9;&#9;&#9;&#9;&#9;XX</div>
 <div id="spaces" class="break-spaces">X<wbr>X   XX</div>
 <div id="unbroken" class="break-spaces">XX&#9;&#9;&#9;&#9;&#9;XX</div>
+<div><span>XXXXXXXX<i id="newline" class="pre-line"> &#10;</i>XXXXXXXX</span></div>
+<div><span>XXXXXXXX<i class="pre-line"> </i><i id="separate-newline" class="pre-line">&#10;</i>XXXXXXXX</span></div>
 </body>

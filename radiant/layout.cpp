@@ -1168,12 +1168,13 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
 void adjust_text_bounds(ViewText* text);
 void apply_element_default_style(LayoutContext* lycon, DomNode* elmt);
 
-bool is_space(char c) {
+bool is_space(uint32_t c) {
+    // decoded codepoints must not narrow: U+200D would alias the ASCII carriage return.
     return c == ' ' || c == '\t' || c== '\r' || c == '\n';
 }
 
 bool is_only_whitespace(const char* str) {
-    return !str || str_all(str, strlen(str), is_space);
+    return !str || str_all(str, strlen(str), [](char c) { return is_space(c); });
 }
 
 static void layout_note_inline_atomic_wrap_opportunity(LayoutContext* lycon,

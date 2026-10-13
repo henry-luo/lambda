@@ -529,6 +529,9 @@ float               font_platform_get_pair_kerning(void* ct_font_ref,
 TextExtents         font_platform_measure_text(void* ct_font_ref,
                                                 const char* text, int byte_len,
                                                 float fallback_height);
+bool                font_platform_measure_text_range(void* ct_font_ref,
+                        const char* text, int byte_len, int range_start,
+                        int range_length, float fallback_height, TextExtents* extents);
 
 // font_rasterize_ct.c — CoreText rasterization (macOS)
 void*               font_rasterize_ct_create(const uint8_t* data, size_t len,

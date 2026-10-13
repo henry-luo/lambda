@@ -6878,9 +6878,10 @@ static void resolve_font_spacing_property(LayoutContext* lycon, ViewSpan* span,
                                           const CssValue* value) {
     bool letter = property == CSS_PROPERTY_LETTER_SPACING;
     span->ensure_font(lycon);
+    // calc() is a length-valued spacing expression for both letter- and word-spacing.
     bool length_value = value->type == CSS_VALUE_TYPE_LENGTH ||
-        (letter && (value->type == CSS_VALUE_TYPE_PERCENTAGE ||
-                    value->type == CSS_VALUE_TYPE_FUNCTION));
+        value->type == CSS_VALUE_TYPE_FUNCTION ||
+        (letter && value->type == CSS_VALUE_TYPE_PERCENTAGE);
     if (length_value) {
         float spacing = resolve_length_value(lycon, property, value);
         if (letter) {

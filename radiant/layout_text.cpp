@@ -1158,7 +1158,8 @@ bool layout_measure_simple_latin_run(LayoutContext* lycon,
                                      const unsigned char* text,
                                      size_t remaining,
                                      LayoutSimpleLatinRun* result) {
-    if (!lycon || !handle || !text || remaining < 2 || !result ||
+    // a one-character inline can own or share a ligature formed across its boundaries.
+    if (!lycon || !handle || !text || remaining == 0 || !result ||
         !is_simple_latin_shaping_byte(*text)) {
         return false;
     }
@@ -1168,7 +1169,6 @@ bool layout_measure_simple_latin_run(LayoutContext* lycon,
         if (glyph.id == 0) return false;
         bytes++;
     }
-    if (bytes < 2) return false;
 
     int byte_count = (int)bytes; // INT_CAST_OK: text byte count
     TextExtents ext = font_measure_text(handle, (const char*)text, byte_count);
@@ -1202,7 +1202,8 @@ static bool measure_shaped_simple_latin_run(LayoutContext* lycon, const unsigned
                                             int* out_bytes,
                                             float* out_width,
                                             uint32_t* out_first_codepoint,
-                                            uint32_t* out_last_codepoint) {
+                                            uint32_t* out_last_codepoint,
+                                            DomNode* text_node = nullptr) {
     if (!str || !text_end || str >= text_end || !out_bytes || !out_width ||
         !out_first_codepoint || !out_last_codepoint) {
         return false;
@@ -1219,6 +1220,10 @@ static bool measure_shaped_simple_latin_run(LayoutContext* lycon, const unsigned
     if (!layout_measure_simple_latin_run(
             lycon, handle, str, (size_t)(text_end - str), &result)) {
         return false;
+    }
+    if (text_node) {
+        layout_measure_inline_text_context(lycon, text_node, str, result.bytes, false,
+                                           &result.width);
     }
     *out_bytes = (int)result.bytes; // INT_CAST_OK: text byte count
     *out_width = result.width;
@@ -1246,8 +1251,6 @@ bool layout_measure_bidi_run(LayoutContext* lycon,
         return false;
     }
 
-    FontHandle* handle = font_box_handle(&lycon->font)
-        ? font_box_handle(&lycon->font) : lycon->font.style->font_handle;
     const unsigned char* text_end = str + remaining;
     const unsigned char* cursor = str;
     uint32_t first_codepoint = 0;
@@ -1265,11 +1268,17 @@ bool layout_measure_bidi_run(LayoutContext* lycon,
             break;
         }
         int strong_class = utf_bidi_strong_class(codepoint);
-        if (strong_class < 0 || (strong_class > 0 && strong_class != 1)) {
+        bool joining_control = codepoint == 0x200C || codepoint == 0x200D;
+        if (!joining_control &&
+            (strong_class < 0 || (strong_class > 0 && strong_class != 1))) {
+            cursor = codepoint_start;
             break;
         }
-        if (!first_codepoint) first_codepoint = codepoint;
-        last_codepoint = codepoint;
+        // joining controls select contextual forms without becoming kerning endpoints.
+        if (!joining_control) {
+            if (!first_codepoint) first_codepoint = codepoint;
+            last_codepoint = codepoint;
+        }
         has_rtl_codepoint = has_rtl_codepoint || strong_class == 1;
     }
     if (!has_rtl_codepoint || cursor == str) return false;
@@ -1278,11 +1287,11 @@ bool layout_measure_bidi_run(LayoutContext* lycon,
     // CoreText resolves missing glyphs across the full run; rejecting the
     // primary cmap here would fall back to per-codepoint advances and lose
     // Arabic joining substitutions.
-    TextExtents ext = font_measure_text(
-        handle, (const char*)str, (int)byte_count); // INT_CAST_OK: font byte count
-    if (ext.width <= 0.0f) return false;
+    float shaped_width = 0.0f;
+    if (!layout_measure_shaping_text(lycon, (const char*)str, byte_count,
+            0, byte_count, &shaped_width) || shaped_width <= 0.0f) return false;
     result->bytes = byte_count;
-    result->width = ext.width;
+    result->width = shaped_width;
     result->first_codepoint = first_codepoint;
     result->last_codepoint = last_codepoint;
     return true;
@@ -1297,29 +1306,7 @@ static bool measure_shaped_bidi_run(LayoutContext* lycon,
                                     int* out_bytes, float* out_width,
                                     uint32_t* out_first_codepoint,
                                     uint32_t* out_last_codepoint) {
-    if (!text_node || !text_node->parent || !text_node->parent->is_element() ||
-        !text_node->parent->is_block()) {
-        return false;
-    }
-    DomNode* previous_sibling = nullptr;
-    for (DomNode* sibling = text_node->parent->as_element()->first_child;
-         sibling && sibling != text_node; sibling = sibling->next_sibling) {
-        if (!sibling->is_comment()) previous_sibling = sibling;
-    }
-    if (previous_sibling &&
-        layout_find_last_strong_direction(previous_sibling, false) == 1) {
-        // a preceding RTL glyph would make this a cross-inline shaping run.
-        return false;
-    }
-    for (DomNode* sibling = text_node->next_sibling; sibling;
-         sibling = sibling->next_sibling) {
-        if (sibling->is_comment()) continue;
-        if (layout_find_first_strong_direction(sibling, false) == 1) {
-            // a following RTL glyph would make this a cross-inline shaping run.
-            return false;
-        }
-        break;
-    }
+    if (!text_node || !text_node->parent || !text_node->parent->is_element()) return false;
     if (!str || !text_end || str >= text_end || !out_bytes || !out_width ||
         !out_first_codepoint || !out_last_codepoint) {
         return false;
@@ -1332,6 +1319,9 @@ static bool measure_shaped_bidi_run(LayoutContext* lycon,
             layout_text_autospace_flags(lycon, text_node), &result)) {
         return false;
     }
+    // CSS Text 3 §7.3: an inline boundary does not discard joining context.
+    layout_measure_inline_text_context(lycon, text_node, str, result.bytes, true,
+                                       &result.width);
     *out_bytes = (int)result.bytes; // INT_CAST_OK: bounded text run length
     *out_width = result.width;
     *out_first_codepoint = result.first_codepoint;
@@ -1516,6 +1506,53 @@ static inline void normalize_c1_control_fallback_metrics(uint32_t cp, FontProp* 
     }
     if (normal_line_height) {
         *normal_line_height = target;
+    }
+}
+
+static void contribute_glyph_line_metrics(LayoutContext* lycon, LoadedGlyph* glyph,
+                                            uint32_t codepoint) {
+    if (glyph && glyph->font_ascender > 0 &&
+        lycon->block.line_height_is_normal &&
+        !control_fallback_keeps_primary_line_metrics(codepoint)) {
+        float fb_asc, fb_desc;
+        fb_asc = glyph->font_normal_ascender;
+        fb_desc = glyph->font_normal_descender;
+        float fb_normal_line_height = glyph->font_normal_line_height;
+        normalize_c1_control_fallback_metrics(codepoint, lycon->font.style, &fb_asc, &fb_desc,
+                                              &fb_normal_line_height);
+        // CSS 2.1 §10.8.1: vertical-align:top/bottom elements don't participate
+        if (lycon->line.vertical_align == CSS_VALUE_TOP) {
+            float fb_inline_box_height = fb_asc + fb_desc;
+            lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, fb_inline_box_height);
+            lycon->line.max_top_height = max(lycon->line.max_top_height, fb_inline_box_height);
+        } else if (lycon->line.vertical_align == CSS_VALUE_BOTTOM) {
+            float fb_inline_box_height = fb_asc + fb_desc;
+            lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, fb_inline_box_height);
+            lycon->line.max_bottom_height = max(lycon->line.max_bottom_height, fb_inline_box_height);
+        } else {
+            lycon->line.max_ascender = max(lycon->line.max_ascender, fb_asc);
+            lycon->line.max_descender = max(lycon->line.max_descender, fb_desc);
+        }
+        if (lycon->block.line_height_is_normal && fb_normal_line_height > 0) {
+            lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height,
+                                                      fb_normal_line_height);
+        }
+    }
+}
+
+static void contribute_shaped_run_line_metrics(LayoutContext* lycon,
+        const unsigned char* text, size_t length) {
+    if (!lycon->block.line_height_is_normal) return;
+    const unsigned char* cursor = text;
+    const unsigned char* end = text + length;
+    FontStyleDesc style = font_style_desc_from_prop(lycon->font.style);
+    while (cursor < end) {
+        uint32_t codepoint = 0;
+        if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) break;
+        if (text_codepoint_has_zero_advance(codepoint)) continue;
+        LoadedGlyph* glyph = font_load_glyph(font_box_handle(&lycon->font), &style,
+                                            codepoint, false);
+        contribute_glyph_line_metrics(lycon, glyph, codepoint);
     }
 }
 
@@ -4128,7 +4165,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 measure_shaped_simple_latin_run(
                     lycon, str, text_end, text_transform, trim_cjk_spacing,
                     break_all, break_word, auto_hyphenation, &shaped_bytes,
-                    &shaped_width, &shaped_first_cp, &shaped_last_cp)) {
+                    &shaped_width, &shaped_first_cp, &shaped_last_cp, text_node)) {
+                // a shaped advance still carries the selected fallback face's normal line metrics.
+                contribute_shaped_run_line_metrics(lycon, str, (size_t)shaped_bytes);
                 wd = shaped_width;
                 next_ch = str + shaped_bytes;
                 codepoint = shaped_last_cp;
@@ -4302,34 +4341,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 if (is_small_caps_lower) {
                     wd *= font_get_small_caps_scale(font_box_handle(&lycon->font));
                 }
-                // fallback glyph metrics affect advance/painting, but must not
-                if (glyph && glyph->font_ascender > 0 &&
-                    lycon->block.line_height_is_normal &&
-                    !control_fallback_keeps_primary_line_metrics(codepoint)) {
-                    float fb_asc, fb_desc;
-                    fb_asc = glyph->font_normal_ascender;
-                    fb_desc = glyph->font_normal_descender;
-                    float fb_normal_line_height = glyph->font_normal_line_height;
-                    normalize_c1_control_fallback_metrics(codepoint, lycon->font.style, &fb_asc, &fb_desc,
-                                                          &fb_normal_line_height);
-                    // CSS 2.1 §10.8.1: vertical-align:top/bottom elements don't participate
-                    if (lycon->line.vertical_align == CSS_VALUE_TOP) {
-                        float fb_inline_box_height = fb_asc + fb_desc;
-                        lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, fb_inline_box_height);
-                        lycon->line.max_top_height = max(lycon->line.max_top_height, fb_inline_box_height);
-                    } else if (lycon->line.vertical_align == CSS_VALUE_BOTTOM) {
-                        float fb_inline_box_height = fb_asc + fb_desc;
-                        lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, fb_inline_box_height);
-                        lycon->line.max_bottom_height = max(lycon->line.max_bottom_height, fb_inline_box_height);
-                    } else {
-                        lycon->line.max_ascender = max(lycon->line.max_ascender, fb_asc);
-                        lycon->line.max_descender = max(lycon->line.max_descender, fb_desc);
-                    }
-                    if (lycon->block.line_height_is_normal && fb_normal_line_height > 0) {
-                        lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height,
-                                                                  fb_normal_line_height);
-                    }
-                }
+                contribute_glyph_line_metrics(lycon, glyph, codepoint);
                 float c1_normal_line_height = c1_control_normal_line_height(codepoint, lycon->font.style);
                 if (lycon->block.line_height_is_normal && c1_normal_line_height > 0) {
                     lycon->line.has_c1_control_text = true;
