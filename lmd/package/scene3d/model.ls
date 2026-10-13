@@ -60,7 +60,7 @@ fn check_geometry(n) bool^ {
 fn check_node(n, all_nodes) bool^ {
     let checked_element = if (not (n is element)) raise fail("scene children must be elements")
     let kind = name(n)
-    let checked_kind = if (not contains(['scene3d', 'group', 'skeleton', 'bone', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'keyframe-track'], kind))
+    let checked_kind = if (not contains(['scene3d', 'group', 'skeleton', 'bone', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'keyframe-track', 'physics', 'rigid-body', 'collider', 'joint'], kind))
         raise fail("unknown scene element")
     let checked_refs = [for (key in (if (kind == 'scene3d') ["camera"] else if (kind == 'mesh') ["geometry", "material", "skeleton"]
         else if (kind == 'material') ["texture"] else []) where n[key] != null)
@@ -79,7 +79,7 @@ fn check_node(n, all_nodes) bool^ {
         not color(n[if (kind == 'scene3d') "background" else "color"])) raise fail("invalid color")
     let checked_visible = if (n.visible != null and not (n.visible is bool)) raise fail("invalid visibility")
     let children = content(n)
-    let allowed = if (kind == 'scene3d' or kind == 'group') ['group', 'skeleton', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip']
+    let allowed = if (kind == 'scene3d' or kind == 'group' or kind == 'rigid-body') ['group', 'skeleton', 'camera', 'light', 'mesh', 'resources', 'geometry', 'material', 'texture', 'animation-clip', 'rigid-body', 'collider', 'physics', 'joint']
         else if (kind == 'skeleton' or kind == 'bone') ['bone']
         else if (kind == 'resources') ['geometry', 'material', 'texture']
         else if (kind == 'animation-clip') ['keyframe-track']
@@ -175,7 +175,8 @@ fn check_node(n, all_nodes) bool^ {
 fn normalized(n) element {
     let attrs = fields(n)
     if (name(n) == 'scene3d') <scene3d *: attrs, *[for (c in content(n)) normalized(c)]>
-    else if (name(n) == 'group') <group *: (if (n.matrix == null) {position: [0.0, 0.0, 0.0], rotation: [0.0, 0.0, 0.0], scale: [1.0, 1.0, 1.0]} else {}), *: attrs,
+    else if (name(n) == 'group') <group *: (if (n.matrix == null) {position: [0.0, 0.0, 0.0], scale: [1.0, 1.0, 1.0],
+        *:(if (n.quaternion == null) {rotation: [0.0, 0.0, 0.0]} else {})} else {}), *: attrs,
         *[for (c in content(n)) normalized(c)]>
     else if (name(n) == 'camera') <camera fov: 50.0, near: 0.1, far: 1000.0, *: attrs>
     else if (name(n) == 'mesh') <mesh visible: true, *: attrs, *[for (c in content(n)) normalized(c)]>
@@ -190,6 +191,9 @@ pub fn normalize(scene) element^ {
     let checked_ids = if (any([for (id in ids) not text(id) or len(string(id)) >= 128 or
         len([for (other in ids where string(other) == string(id)) other]) > 1])) raise fail("invalid or duplicate scene ID")
     let checked_nodes = [for (n in all_nodes) check_node(n, all_nodes)^]
+    // physical descriptions share the native validator used by batch and live worlds.
+    let checked_physics = if (any([for (n in all_nodes) contains(['physics','rigid-body','collider','joint'],name(n)) or n.physics != null]))
+        lambda.sys.physics_validate(scene)^
     let cameras = [for (n in all_nodes where name(n) == 'camera') n]
     let checked_camera = if (scene.camera != null) definition(all_nodes, scene.camera, 'camera')^
         else if (len(cameras) == 0) raise fail("active camera is missing") else cameras[0]

@@ -27,7 +27,7 @@
 
 // External Type globals (defined in lambda-data.cpp)
 extern Type TYPE_NULL, TYPE_BOOL, TYPE_INT, TYPE_INT64, TYPE_FLOAT, TYPE_COMPLEX;
-extern Type TYPE_STRING, TYPE_SYMBOL, TYPE_DTIME, TYPE_ANY, TYPE_ERROR, TYPE_TYPE;
+extern Type TYPE_STRING, TYPE_SYMBOL, TYPE_DTIME, TYPE_ANY, TYPE_ERROR, TYPE_TYPE, TYPE_MAP;
 extern Type TYPE_NUMBER, TYPE_DECIMAL, TYPE_BINARY;
 // The registry is C while TypeArray is a C++ extension of Type. The exported
 // object's Type prefix is enough here; AST consumers see the full TypeArray.
@@ -342,6 +342,15 @@ static const SysFuncArgDesc sysfunc_int_lane_args_2[] = {
 #endif
 
 SysFuncInfo sys_func_defs[] = {
+    {SYSFUNC_PHYSICS_SIMULATE, "physics_simulate", 2, &TYPE_MAP, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_physics_simulate", FPTR(fn_physics_simulate), NULL, NULL, false, 0,
+     false, NULL, true},
+    {SYSFUNC_PHYSICS_VALIDATE, "physics_validate", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_physics_validate", FPTR(fn_physics_validate), NULL, NULL, false, 0,
+     false, NULL, true},
+    {SYSFUNC_PHYSICS_QUERY, "physics_query", 2, &TYPE_ARRAY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_physics_query", FPTR(fn_physics_query), NULL, NULL, false, 0,
+     false, NULL, true},
     // ========================================================================
     // Type/conversion functions — all method-eligible
     // ========================================================================
@@ -4136,7 +4145,11 @@ static const char* const output_option_names[] = {
     "max_entries", "max_name_bytes", "max_path_depth", "max_nesting_depth", NULL
 };
 const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
+    static const char* const physics_options[] = {"steps", "sample_every", "bodies", "commands", NULL};
     switch (fn) {
+    case SYSFUNC_PHYSICS_SIMULATE:
+        if (options_arg_index) *options_arg_index = 1;
+        return physics_options;
     case SYSFUNC_INPUT2:
         if (options_arg_index) *options_arg_index = 1;
         return input_option_names;

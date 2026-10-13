@@ -3,6 +3,7 @@
 #include "../radiant/scene3d_math.hpp"
 #include "../radiant/animation_mixer.hpp"
 #include "../radiant/scene3d_animation.hpp"
+#include "../radiant/scene3d_physics.hpp"
 #include "../radiant/svg_animation.hpp"
 #include "../radiant/radiant.hpp"
 #include "../radiant/layout.hpp"
@@ -337,6 +338,42 @@ TEST_F(Scene3dTest, OrthographicSizeIsDistanceIndependentAndDepthClipped) {
     pixel(snapshot(),40,64,0,0,0,0);
     attr(camera,"view_height","0");
     EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+}
+
+TEST_F(Scene3dTest, PhysicsPosesSurviveCameraResizeAndGraphicsRecovery) {
+    DomElement* config=element("physics",root);attr(config,"gravity","0 -1 0");attr(config,"state","paused");
+    DomElement* body=element("rigid-body",root);attr(body,"id","falling");attr(body,"type","dynamic");attr(body,"position","0 1 0");
+    DomElement* collider=element("collider",body);attr(collider,"id","falling-shape");attr(collider,"shape","box");attr(collider,"size","1 1 1");
+    mesh("box","#ff0000","basic",body);ASSERT_NE(snapshot(),nullptr);
+    Scene3dPhysics* physics=scene3d_physics(root);ASSERT_NE(physics,nullptr);PhysicsState result={};PhysicsError error={};
+    ASSERT_TRUE(scene3d_physics_advance(physics,120,&result,&error));ASSERT_EQ(result.body_count,1u);EXPECT_EQ(result.tick,120u);
+    EXPECT_NEAR(result.bodies[0].pose.position.y,1.0-121.0/240.0,1e-10);
+    Scene3dStats before={};ASSERT_TRUE(scene3d_stats(root,&before));ASSERT_NE(snapshot(192,160),nullptr);
+    Scene3dStats after={};ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.projection_generation,after.projection_generation);
+    attr(camera,"fov","70");ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_physics(root),physics);
+    scene3d_context_lost(root);ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_physics(root),physics);
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));EXPECT_EQ(result.tick,120u);
+}
+
+TEST_F(Scene3dTest, PhysicsRejectsUnimplementedCcdAndNonRigidBodyTransforms) {
+    element("physics",root);DomElement* body=element("rigid-body",root);attr(body,"id","body");attr(body,"type","dynamic");
+    DomElement* collider=element("collider",body);attr(collider,"id","shape");attr(collider,"shape","box");mesh("box","#ff0000","basic",body);
+    attr(body,"ccd","true");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"CCD"),nullptr);
+    attr(body,"ccd","false");attr(body,"scale","2 1 1");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"rigid"),nullptr);
+    attr(body,"scale","1 1 1");ASSERT_NE(snapshot(),nullptr);
+    DomElement* track=element("keyframe-track",root);attr(track,"path","body.position");
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"tick sampling"),nullptr);
+}
+
+TEST_F(Scene3dTest, PhysicsBatchFaultPublishesOnlyCompletedTicks) {
+    DomElement* config=element("physics",root);attr(config,"gravity","0 0 0");attr(config,"timestep","0.75");
+    DomElement* body=element("rigid-body",root);attr(body,"id","fast");attr(body,"type","dynamic");attr(body,"linear-velocity","1e308 0 0");
+    DomElement* collider=element("collider",body);attr(collider,"id","shape");attr(collider,"shape","sphere");
+    mesh("box","#ff0000","basic",body);ASSERT_NE(snapshot(),nullptr);
+    PhysicsState result={};PhysicsError error={};
+    EXPECT_FALSE(scene3d_physics_advance(scene3d_physics(root),3,&result,&error));
+    ASSERT_EQ(result.tick,2u);ASSERT_EQ(result.body_count,1u);
+    EXPECT_DOUBLE_EQ(result.bodies[0].pose.position.x,1.5e308);
 }
 
 TEST_F(Scene3dTest, DepthOnlyOccluderPreservesBackgroundAndHidesRearGeometry) {

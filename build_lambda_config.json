@@ -44,7 +44,8 @@
     "lambda/module/hostobj_demo",
     "lambda/ts",
     "lambda/network",
-    "radiant"
+    "radiant",
+    "lib/physics"
   ],
   "source_files": [
     "lib/sqlite/sqlite3.c",
@@ -455,7 +456,8 @@
         "lib/font/woff2/*.c",
         "lib/font/woff2/*.cpp",
         "lib/grep/*.cpp",
-        "lib/fts/*.cpp"
+        "lib/fts/*.cpp",
+        "lib/physics/*.c"
       ],
       "exclude_patterns": [
         "lib/clock_compat.c",
@@ -592,7 +594,8 @@
         "lambda/input/html5/html5_tokenizer.cpp",
         "lambda/input/html5/html5_parser.cpp",
         "lambda/input/html5/html5_token.cpp",
-        "lib/rdb_sqlite.c"
+        "lib/rdb_sqlite.c",
+        "lambda/core/physics_scene.cpp"
       ],
       "libraries": [
         "lambda-lib",
@@ -769,7 +772,8 @@
         "lambda/core/mem_factory_core.cpp",
         "lambda/core/collection_storage.cpp",
         "lambda/core/target_identity.cpp",
-        "lambda/core/path.c"
+        "lambda/core/path.c",
+        "lambda/core/physics_scene.cpp"
       ],
       "libraries": [
         "lambda-lib",
@@ -3359,6 +3363,19 @@
             ],
             "binary": "test_serve_phase2_gtest.exe",
             "icon": "\ud83c\udf10"
+          },
+          {
+            "source": "test/test_physics_gtest.cpp",
+            "name": "Native Physics Tests",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_physics_gtest.exe",
+            "icon": "\u2699\ufe0f"
           }
         ],
         "type": "library"

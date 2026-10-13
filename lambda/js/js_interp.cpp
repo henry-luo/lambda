@@ -21,6 +21,8 @@
 #include "../../lib/file.h"
 #include "../../lib/mempool.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/tagged.hpp"
+#include "../../lib/url.h"
 
 // Static imports execute nested module sources synchronously. Their queued
 // jobs belong to the importing module's host turn, not to the nested load.
@@ -6559,8 +6561,12 @@ static Item js_interp_load_es_module(Runtime* runtime, const char* filename) {
     if (!runtime || !filename) return ItemError;
     // Prebuild workers publish file-backed ASTs under canonical paths. Resolve
     // the runtime lookup the same way so one import spelling cannot bypass it.
-    char* canonical_filename = file_realpath(filename);
-    const char* module_filename = canonical_filename ? canonical_filename : filename;
+    // document imports resolve to file URLs; both Lambda and JS loaders need the decoded filesystem identity.
+    lam::Temp<char> local_path(url_file_to_local_path(filename));
+    if(!strncmp(filename,"file:",5)&&!local_path)return js_throw_reference_error(js_make_string("Invalid module file URL"));
+    const char* read_filename=local_path?local_path.get():filename;
+    char* canonical_filename = file_realpath(read_filename);
+    const char* module_filename = canonical_filename ? canonical_filename : read_filename;
     Item specifier = js_make_string(module_filename);
     Item existing = js_module_get(specifier);
     if (get_type_id(existing) != LMD_TYPE_NULL) {

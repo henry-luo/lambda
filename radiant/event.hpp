@@ -34,6 +34,9 @@ typedef struct RasterRenderContext RasterRenderContext;
 struct UiContext;
 struct DomDocument;
 struct DomElement;
+typedef Item (*RadiantJsEventBuilder)(void* userdata);
+bool radiant_queue_timing_event(UiContext* uicon,DomElement* target,
+    RadiantJsEventBuilder build,void* userdata,const char* observed_type=nullptr);
 
 typedef enum RadiantNavigationTargetKind {
     RADIANT_NAVIGATION_TARGET_EXISTING = 0,

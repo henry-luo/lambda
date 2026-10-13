@@ -2,6 +2,7 @@
 #include "scene3d_math.hpp"
 #include "scene3d_source.hpp"
 #include "scene3d_animation.hpp"
+#include "scene3d_physics.hpp"
 #include "render.hpp"
 #include "radiant.hpp"
 #include "layout.hpp"
@@ -84,6 +85,8 @@ struct Scene3dEntry {
     Scene3dProjection projection;
     Scene3dAnimationState* animation;
     uint64_t animated_generation;
+    Scene3dPhysics* physics;
+    uint64_t physical_generation;
     ImageSurface* snapshot;
     uint64_t mutation_epoch, projection_generation, snapshot_generation;
     float width, height, scale;
@@ -175,12 +178,10 @@ bool scene3d_numbers(DomElement* node, const char* key, Pool* pool,
     unsigned length = 0;
     if (text) {
         const char* cursor = text;
-        while (*cursor) {
-            cursor += strspn(cursor, " ,\t\r\n[]"); if (!*cursor) break;
-            char* end; float number = strtof(cursor, &end);
-            if (end == cursor || !isfinite(number) || ++length > limit) return false;
-            cursor = end;
-        }
+        double number;int status;
+        while((status=str_next_double(&cursor,&number))==1)
+            if(!isfinite((float)number)||++length>limit)return false;
+        if(status<0)return false;
     } else {
         int64_t n = value.asArray().length(); if (n < 0 || (uint64_t)n > limit) return false;
         length = (unsigned)n;
@@ -197,10 +198,10 @@ bool scene3d_components(DomElement* node,const char* key,float* data,unsigned co
     if(text) {
         const char* cursor=text;
         for(unsigned i=0;i<count;i++) {
-            cursor+=strspn(cursor," ,\t\r\n[");char* end;data[i]=strtof(cursor,&end);
-            if(end==cursor||!isfinite(data[i])) return false;cursor=end;
+            double number;if(str_next_double(&cursor,&number)!=1)return false;
+            data[i]=(float)number;if(!isfinite(data[i]))return false;
         }
-        return !*str_skip_ascii_space(cursor+strspn(cursor," ]\t\r\n"));
+        double extra;return str_next_double(&cursor,&extra)==0;
     }
     if(!value.isArray()||value.asArray().length()!=count) return false;
     for(unsigned i=0;i<count;i++) if(!scene3d_scalar(value.asArray().get(i),&data[i])) return false;
@@ -692,14 +693,16 @@ static bool scene3d_project_dynamic(Scene3dBuild* build, DomElement* node, const
 }
 
 static bool scene3d_project_node(Scene3dBuild* build, DomElement* node, const Scene3dMatrix& parent, bool inherited_visible) {
+    if(scene3d_tag(node,"physics")||scene3d_tag(node,"collider")) return true;
     if (node!=build->root && scene3d_tag(node,"scene3d")) return scene3d_fail(build->entry,"nested scene viewport is not a scene object");
     Scene3dMatrix local; bool visible;
     if (!scene3d_local(node,&local,build->entry->animation) || !scene3d_animated_flag(build->entry,node,&visible)) return scene3d_fail(build->entry,"invalid object transform or visibility");
     Scene3dMatrix world=scene3d_multiply(parent,local); visible=visible&&inherited_visible;
+    scene3d_physics_pose(build->entry->physics,node,&world);
     for (float component:world.v) if (!isfinite(component)) return scene3d_fail(build->entry,"world transform overflow");
     // resources and objects have distinct child vocabularies; ignored children must never look valid.
     bool rig=scene3d_tag(node,"skeleton")||scene3d_tag(node,"bone");
-    bool branch=scene3d_tag(node,"scene3d") || scene3d_tag(node,"group") || scene3d_tag(node,"resources")||rig;
+    bool branch=scene3d_tag(node,"scene3d") || scene3d_tag(node,"group") || scene3d_tag(node,"rigid-body") || scene3d_tag(node,"resources")||rig;
     if (!branch && !scene3d_tag(node,"mesh") && node->first_child)
         return scene3d_fail(build->entry,"invalid scene child");
     Scene3dProjection* p=&build->entry->projection;
@@ -744,6 +747,7 @@ static bool scene3d_world(Scene3dEntry* entry,DomElement* node,Scene3dMatrix* wo
         DomElement* ancestor=ancestors[--count];Scene3dMatrix local;bool shown;
         if(!scene3d_local(ancestor,&local,authored?nullptr:entry->animation)||!scene3d_animated_flag(entry,ancestor,&shown)) return false;
         *world=scene3d_multiply(*world,local);*visible=*visible&&shown;
+        if(!authored)scene3d_physics_pose(entry->physics,ancestor,world);
     }
     for(float component:world->v) if(!isfinite(component)) return false;
     return true;
@@ -794,6 +798,7 @@ static bool scene3d_refresh_pose(Scene3dEntry* entry,DomElement* root) {
     return p->camera_found;
 }
 static void scene3d_entry_destroy(Scene3dEntry* entry) {
+    scene3d_physics_destroy(entry->physics);
     scene3d_animation_destroy(entry->animation);
     scene3d_projection_destroy(entry); scene3d_retire_snapshot(entry);
     native_gl_destroy(entry->graphics); mem_free(entry);
@@ -857,6 +862,17 @@ const char* scene3d_diagnostic(DomElement* root) {
 }
 Scene3dAnimationState* scene3d_animations(DomElement* root) {
     Scene3dEntry* entry=scene3d_entry(root,false);return entry?entry->animation:nullptr;
+}
+Item scene3d_physics_control(DomElement* root,Item request) {
+    Scene3dEntry* entry=scene3d_entry(root,true);if(!entry)return ItemNull;
+    if(!scene3d_physics_matches(entry->physics,root)) {
+        scene3d_physics_destroy(entry->physics);
+        entry->physics=scene3d_physics_create(root,entry->diagnostic,sizeof(entry->diagnostic),true);
+    }
+    return scene3d_physics_operate(entry->physics,request);
+}
+Scene3dPhysics* scene3d_physics(DomElement* root) {
+    Scene3dEntry* entry=scene3d_entry(root,false);return entry?entry->physics:nullptr;
 }
 bool scene3d_stats(DomElement* root, Scene3dStats* stats) {
     Scene3dEntry* e=scene3d_entry(root,false); if (!e || !stats) return false;
@@ -928,6 +944,11 @@ void main() {
 
 static bool scene3d_compile(Scene3dEntry* entry, DomElement* root, UiContext* ui) {
     scene3d_projection_destroy(entry); entry->diagnostic[0]=0;
+    if(!scene3d_physics_matches(entry->physics,root)) {
+        scene3d_physics_destroy(entry->physics);
+        entry->physics=scene3d_physics_create(root,entry->diagnostic,sizeof(entry->diagnostic),!ui->export_native_graphics);
+        if(!entry->physics)return false;
+    }
     if(!scene3d_animation_matches(entry->animation,root)) {
         scene3d_animation_destroy(entry->animation);
         entry->animation=scene3d_animation_create(root,entry->diagnostic,sizeof(entry->diagnostic));
@@ -969,7 +990,8 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     if (!isfinite(pixel_width) || !isfinite(pixel_height) || pixel_width>4096 || pixel_height>4096)
         { scene3d_fail(entry,"scene raster dimensions exceed quota");scene3d_retire_snapshot(entry);return nullptr; }
     bool changed=entry->mutation_epoch!=root->doc->mutation_epoch || entry->width!=width || entry->height!=height || entry->scale!=raster_scale ||
-        entry->animated_generation!=scene3d_animation_generation(entry->animation);
+        entry->animated_generation!=scene3d_animation_generation(entry->animation) ||
+        entry->physical_generation!=scene3d_physics_generation(entry->physics);
     if (!changed && entry->snapshot) return entry->snapshot;
     if (!entry->graphics && ui->export_native_graphics && !ui_context_enable_native_graphics(ui)) {
         scene3d_fail(entry,"native graphics host unavailable for export");ui->render_failed=true;return nullptr;
@@ -1042,6 +1064,7 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     scene3d_retire_snapshot(entry);image_surface_snapshot_publish(snapshot);entry->snapshot=snapshot;entry->snapshot_generation++;
     entry->width=width;entry->height=height;entry->scale=raster_scale;entry->mutation_epoch=root->doc->mutation_epoch;
     entry->animated_generation=scene3d_animation_generation(entry->animation);
+    entry->physical_generation=scene3d_physics_generation(entry->physics);
     entry->stats.projection_generation=entry->projection_generation;entry->stats.snapshot_generation=entry->snapshot_generation;
     entry->stats.meshes=p->mesh_count;entry->stats.geometries=p->geometry_count;entry->stats.textures=p->texture_count;
     entry->stats.raster_width=(unsigned)pixel_width;entry->stats.raster_height=(unsigned)pixel_height;entry->stats.camera_aspect=aspect;
@@ -1056,7 +1079,8 @@ void scene3d_prepare_document(DomDocument* document, UiContext* ui, float raster
         if (node && node->is_element()) {
             BlockBlot origin={};
             Rect rect=render_geometry_block_content_rect(&origin,(ViewBlock*)node->as_element(),1);
-            if (entry->mutation_epoch!=document->mutation_epoch || entry->animated_generation!=scene3d_animation_generation(entry->animation) || entry->width!=rect.width ||
+            if (entry->mutation_epoch!=document->mutation_epoch || entry->animated_generation!=scene3d_animation_generation(entry->animation) ||
+                entry->physical_generation!=scene3d_physics_generation(entry->physics) || entry->width!=rect.width ||
                 entry->height!=rect.height || entry->scale!=raster_scale)
                 scene3d_snapshot(node->as_element(),ui,rect.width,rect.height,raster_scale);
         }

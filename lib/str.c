@@ -952,6 +952,22 @@ int64_t str_to_int64_default(const char* s, size_t len, int64_t default_val) {
     return str_to_int64(s, len, &v, NULL) ? v : default_val;
 }
 
+int str_next_double(const char** cursor, double* out) {
+    const char* start=*cursor;
+    start+=strspn(start," \t\r\n");
+    bool comma=*start==',';
+    start+=strspn(start," ,\t\r\n[");
+    if(*start==']') {
+        start+=strspn(start," ]\t\r\n");if(*start||comma)return -1;
+    }
+    if(comma&&!*start)return -1;
+    if(!*start){*cursor=start;return 0;}
+    char* end;
+    *out=strtod(start,&end);
+    if(end==start||!isfinite(*out))return -1;
+    *cursor=end;return 1;
+}
+
 double str_to_double_default(const char* s, size_t len, double default_val) {
     double v;
     return str_to_double(s, len, &v, NULL) ? v : default_val;

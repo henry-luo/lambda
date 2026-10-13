@@ -5483,6 +5483,15 @@ extern "C" Item js_get_key_core(Item object, Item key,
                 receiver_root.get(), ItemNull, ItemNull, false, &out)) {
             return out;
         }
+    } else if (type == LMD_TYPE_VMAP) {
+        // Lambda data maps also cross the Promise membrane; host-only dispatch
+        // made every field of an ordinary VMap appear absent in JavaScript.
+        JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key_root.get()));
+        key_root.set(key);
+        if (vmap_backing_has(object_root.get().vmap, key_root.get())) {
+            return vmap_get_by_item(object_root.get().vmap, key_root.get());
+        }
+        return make_js_undefined();
     } else if (type == LMD_TYPE_ELEMENT) {
         return elmt_get(object.element, key);
     } else if (type == LMD_TYPE_ARRAY || js_is_ordinary_numeric_array(object)) {
@@ -30792,7 +30801,8 @@ static Item js_promise_reaction_at(const JsPromise* promise, int index) {
 static bool js_promise_add_reaction(JsPromise* promise, Item on_fulfilled,
         Item on_rejected, Item next_promise, Item domain) {
     if (!promise) return false;
-    RootFrame roots(6);
+    // the async domain is the seventh live value retained while growing reactions.
+    RootFrame roots(7);
     Rooted<Item> promise_root(roots, js_promise_to_item(promise));
     Rooted<Item> reactions_root(roots, promise->reactions);
     // js_array_new(length) publishes that many logical elements; passing the

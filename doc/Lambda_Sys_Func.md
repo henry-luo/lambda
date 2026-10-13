@@ -16,6 +16,7 @@ This document provides comprehensive documentation for all built-in system funct
 10. [Error Handling](#error-handling)
 11. [Quick Reference Table](#quick-reference-table)
 12. [Return-Value Conventions](#return-value-conventions)
+13. [Physics Functions](#physics-functions)
 
 ## Return-Value Conventions
 
@@ -431,6 +432,24 @@ x                                // 0.7415648788 (float in [0.0, 1.0))
 let x2, seed2 = math.random(seed1)
 let dice = floor(x * 6) + 1     // random 1-6
 ```
+
+---
+
+## Physics Functions
+
+These pure functions evaluate `scene3d` physics descriptions under
+**S12.1.1v2**, returning boxed data or an error (**D6.4.1**).
+
+| Function | Result |
+|----------|--------|
+| `physics_validate(scene)` | `true` when the scene and mass properties are valid |
+| `physics_simulate(scene, options)` | `{engine, timestep, ticks, frames, events}` |
+| `physics_query(scene, requests)` | Initial-scene ray, point or AABB query results |
+
+The initial native engine supports 3D sphere/box bodies. See [Physics](Lambda_Physics.md)
+for scene tags, bounded simulation options, command records, queries and the
+`lambda.physics` wrappers. Live scene controls are procedures supplied by
+`lambda.physics.scene` through the Radiant host boundary (**D7.5.3**).
 
 ---
 

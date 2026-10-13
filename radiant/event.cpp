@@ -4789,7 +4789,6 @@ extern "C" bool radiant_dispatch_behavior_reset_activation(EventContext* evcon,
     return dispatch_behavior_handler(evcon, target, "resetactivation", nullptr, nullptr);
 }
 
-typedef Item (*RadiantJsEventBuilder)(void* userdata);
 
 static bool dispatch_lambda_handler(EventContext* evcon, View* target, const char* event_name,
                                     const InputIntent* intent = nullptr,
@@ -8761,8 +8760,8 @@ static Item radiant_deliver_timing_event(Item env_item) {
     return dom_dispatch_event(target_root.get(), event_root.get());
 }
 
-static bool radiant_queue_timing_event(UiContext* uicon, DomElement* target,
-    RadiantJsEventBuilder build, void* userdata, const char* css_event_type = nullptr) {
+bool radiant_queue_timing_event(UiContext* uicon, DomElement* target,
+    RadiantJsEventBuilder build, void* userdata, const char* css_event_type) {
     if (!uicon || !target || !target->doc) return false;
     EventContext evcon = {};
     evcon.ui_context = uicon; evcon.target_document = target->doc;

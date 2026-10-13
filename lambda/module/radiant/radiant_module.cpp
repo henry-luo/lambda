@@ -22,6 +22,7 @@
 #include "../../../radiant/event.hpp"
 #include "../../../radiant/radiant.hpp"
 #include "../../../radiant/audio.hpp"
+#include "../../../radiant/scene3d.hpp"
 #include "../../../radiant/rdt_video.h"
 #include "../../../lib/log.h"
 #include "../../../lib/mem.h"
@@ -5017,7 +5018,15 @@ RADIANT_C_API const void* radiant_dom_css_rule_list_host_type(void) {
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
+static Item fn_radiant_physics(Item node,Item request) {
+    RootFrame roots(2);Rooted<Item> receiver(roots,node),operation(roots,request);
+    auto* element=(DomElement*)radiant_dom_unwrap_node(receiver.get());
+    if(!element||!element->is_element())return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,"radiant.physics: requires a scene DOM node",nullptr));
+    return scene3d_physics_control(element,operation.get());
+}
 static const JubeFuncDef radiant_functions[] = {
+    {"physics", "pn(node: any, request: map) -> any", (fn_ptr)fn_radiant_physics, JUBE_FN_NONE,
+     "Item fn_radiant_physics(Item node, Item request)", (fn_ptr)fn_radiant_physics},
     {"with_content", "fn(source: element, children: array) -> element|error", (fn_ptr)fn_radiant_with_content, JUBE_FN_NONE,
      "Item fn_radiant_with_content(Item element, Item children)", (fn_ptr)fn_radiant_with_content},
     {"present_content", "fn(source: element, children: array) -> element|error", (fn_ptr)fn_radiant_present_content, JUBE_FN_NONE,

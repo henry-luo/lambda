@@ -48,3 +48,4 @@
 {"CellScopeMobileLayoutKeepsBothScenesVisible", "test/demo/cellscope/cellscope.ls", "test/demo/cellscope/tests/cellscope_mobile.json", 11},
 {"CellScopeLoadingPopupPaintsBeforeImportAndHandlesRetryAndCancellation", "test/demo/cellscope/cellscope.ls", "test/demo/cellscope/tests/cellscope_loading.json", 37},
 {"ScientificChartCamerasAndPickingStayIndependent", "test/scene3d/scientific_chart.ls", "test/scene3d/events/ScientificChartCamerasAndPickingStayIndependent.json", 13},
+{"PhysicsSceneUsesNativePosesAndRetainsWorldAcrossRepaint", "test/demo/physics/rigid.ls", "test/scene3d/events/PhysicsSceneUsesNativePosesAndRetainsWorldAcrossRepaint.json", 16},

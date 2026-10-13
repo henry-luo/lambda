@@ -707,6 +707,9 @@ typedef enum SysFunc {
     SYSFUNC_ORIENT2D,
     SYSFUNC_ORIENT3D,
     SYSFUNC_INCIRCLE,
+    SYSFUNC_PHYSICS_SIMULATE,
+    SYSFUNC_PHYSICS_VALIDATE,
+    SYSFUNC_PHYSICS_QUERY,
 } SysFunc;
 
 typedef struct Type {
@@ -3156,6 +3159,9 @@ extern "C" {
     Item fn_math_erf(Item a);
     Item fn_math_erfc(Item a);
     Item fn_math_fft(Item a);
+    Item fn_physics_simulate(Item scene, Item options);
+    Item fn_physics_validate(Item scene);
+    Item fn_physics_query(Item scene, Item queries);
     Item fn_math_ifft(Item a);
     Item fn_math_rfft(Item a);
     Item fn_math_irfft(Item a, Item length);

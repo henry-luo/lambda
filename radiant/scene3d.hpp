@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "gl_core.hpp"
+#include "../lambda/lambda-data.hpp"
 
 struct DomDocument;
 struct DomElement;
@@ -33,3 +34,6 @@ void scene3d_prepare_document(DomDocument* document, UiContext* ui, float raster
 struct Scene3dAnimationState;
 // document-owned playback is separate from authored scene values and disposable GPU projections.
 Scene3dAnimationState* scene3d_animations(DomElement* root);
+Item scene3d_physics_control(DomElement* root,Item request);
+struct Scene3dPhysics;
+Scene3dPhysics* scene3d_physics(DomElement* root);
