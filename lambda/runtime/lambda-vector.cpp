@@ -916,11 +916,16 @@ static inline bool elem_is_int(ArrayNumElemType e) {
 
 // Allocate an N-D ArrayNum with the given shape and elem_type, plus shape side-table.
 // Used to materialize broadcast op results.
-static ArrayNum* alloc_ndim_arraynum(ArrayNumElemType etype, int ndim, const int64_t* shape) {
+ArrayNum* alloc_ndim_arraynum(ArrayNumElemType etype, int ndim, const int64_t* shape) {
     if (ndim < 1 || ndim > LAMBDA_ARRAY_NUM_MAX_NDIM || !shape) return NULL;
-    int64_t total = 1;
-    for (int i = 0; i < ndim; i++) total *= shape[i];
-    ArrayNum* arr = array_num_new(etype, total);
+    size_t total = 1;
+    // Check every suffix product too: an earlier zero axis must not hide an
+    // overflowing row-major stride in a later pair of dimensions.
+    for (int i = ndim - 1; i >= 0; i--) {
+        if (shape[i] < 0 || !math_checked_mul(total, (size_t)shape[i], &total) ||
+                total > INT64_MAX) return NULL;
+    }
+    ArrayNum* arr = array_num_new(etype, (int64_t)total);
     if (!arr || ndim == 1) return arr;
     // The shape allocation is a second safepoint before this native helper can
     // return the new header to generated code, so root that construction gap.
@@ -930,7 +935,7 @@ static ArrayNum* alloc_ndim_arraynum(ArrayNumElemType etype, int ndim, const int
     size_t shape_bytes = sizeof(ArrayNumShape) + 2 * (size_t)ndim * sizeof(int64_t);
     ArrayNumShape* s = (ArrayNumShape*)heap_data_calloc(shape_bytes);
     arr = rooted_arr.get();
-    if (!s) return arr;  // best-effort: keep as 1-D
+    if (!s) return NULL;  // shape loss must not turn a matrix into a vector
     s->ndim = (uint8_t)ndim;
     s->is_c_contig = 1;
     s->is_f_contig = (ndim == 1) ? 1 : 0;
@@ -2371,6 +2376,8 @@ Item fn_pipe_call(Item collection, Item func_or_result) {
 #define DEFINE_MATH_UNARY(name, native, complex) \
     Item name(Item item) { return fn_math_unary(item, native, #name, complex); }
 DEFINE_MATH_UNARY(fn_math_sqrt, sqrt, fn_complex_sqrt)
+DEFINE_MATH_UNARY(fn_math_erf, erf, NULL)
+DEFINE_MATH_UNARY(fn_math_erfc, erfc, NULL)
 
 // log(vec) - element-wise natural logarithm
 DEFINE_MATH_UNARY(fn_math_log, log, fn_complex_log)

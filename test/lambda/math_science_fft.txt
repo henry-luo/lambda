@@ -1,0 +1,12 @@
+'=== forward and inverse conventions ==='
+[true, true, true]
+'=== prime composite and power-of-two lengths ==='
+[[true, true], [true, true], [true, true], [true, true], [true, true], [true, true], [true, true], [true, true], [true, true]]
+'=== real transforms and explicit odd length ==='
+[[true, true, true], [true, true, true], [true, true, true], [true, true, true]]
+'=== ranges views and qualified namespace ==='
+[true, true, true, true]
+'=== empty singleton and absence ==='
+[[], [], [], [], [0+2j], [7], null, null]
+'=== invalid spectra shapes and lengths ==='
+[true, true, true, true, true, true, true, true, true, true, true]

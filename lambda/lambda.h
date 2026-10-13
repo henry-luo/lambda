@@ -696,6 +696,17 @@ typedef enum SysFunc {
     SYSPROC_IO_GREP,         // io.grep(source, pattern, options?) - line-oriented file search (lib/grep, GRP26)
     SYSPROC_IO_TEXT_SEARCH,       // io.text_search(source, query, options?) - ranked full-text file search (lib/fts, FTX11)
     SYSFUNC_PARSE3,         // parse(str, grammar, 'rule') - run a grammar from a named rule (GM5.1)
+    SYSFUNC_ERF,
+    SYSFUNC_ERFC,
+    SYSFUNC_FFT,
+    SYSFUNC_IFFT,
+    SYSFUNC_RFFT,
+    SYSFUNC_IRFFT,
+    SYSFUNC_SOLVE,
+    SYSFUNC_LSTSQ,
+    SYSFUNC_ORIENT2D,
+    SYSFUNC_ORIENT3D,
+    SYSFUNC_INCIRCLE,
 } SysFunc;
 
 typedef struct Type {
@@ -3140,6 +3151,19 @@ extern "C" {
     Item fn_sign(Item a);
     // random number generation (pure functional, SplitMix64)
     Item fn_math_random(Item seed);
+
+    // scientific kernels (math module); boxed boundaries preserve error results
+    Item fn_math_erf(Item a);
+    Item fn_math_erfc(Item a);
+    Item fn_math_fft(Item a);
+    Item fn_math_ifft(Item a);
+    Item fn_math_rfft(Item a);
+    Item fn_math_irfft(Item a, Item length);
+    Item fn_math_solve(Item a, Item b);
+    Item fn_math_lstsq(Item a, Item b);
+    Item fn_math_orient2d(Item a, Item b, Item c);
+    Item fn_math_orient3d(Item a, Item b, Item c, Item d);
+    Item fn_math_incircle(Item a, Item b, Item c, Item d);
 
     // ============================================================================
     // UNBOXED SYSTEM FUNCTIONS (fn_*_u)

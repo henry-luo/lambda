@@ -277,6 +277,104 @@ x is nan         // NaN check — `nan == nan` is false, so `==` cannot test it
 | `math.cbrt(x)` | Cube root | `math.cbrt(27)` | `3` |
 | `math.hypot(x, y)` | Hypotenuse √(x²+y²) | `math.hypot(3, 4)` | `5` |
 
+#### Error Functions
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.erf(x)` | Gaussian error function | `math.erf(1)` | `0.8427007929497149` |
+| `math.erfc(x)` | Complementary error function, evaluated directly for accurate tails | `math.erfc(8)` | `1.1224297172982928e-29` |
+
+Both accept real scalars or numeric sequences and follow the existing
+element-wise math conventions, including typed empty float arrays and `null`
+propagation (S7.10.5v3). Complex arguments are unsupported.
+
+#### Fourier Transforms
+
+| Function | Input | Result |
+|----------|-------|--------|
+| `math.fft(x)` | One-dimensional real or complex sequence of length `n` | Complex array of length `n` |
+| `math.ifft(x)` | One-dimensional real or complex spectrum of length `n` | Complex array of length `n` |
+| `math.rfft(x)` | One-dimensional real sequence of length `n` | Nonnegative-frequency complex bins, length `floor(n/2)+1` for `n > 0` |
+| `math.irfft(x, n)` | Nonnegative-frequency bins and original sample count | Real float array of length `n` |
+
+The forward convention is `X[k] = sum(x[j] * exp(-2*pi*i*j*k/n))`;
+the inverse uses the positive sign and divides by `n`. Bins start with DC,
+then positive frequencies; the full complex transform ends with negative
+frequencies. No window, padding, frequency shift, or sample-rate scaling is
+applied. All lengths, including primes, are supported. Real scalar inputs
+are converted to binary64; complex values retain their binary64 components.
+
+`irfft` requires `n` explicitly because the half spectrum does not distinguish
+odd from even original lengths. It must contain exactly `floor(n/2)+1` bins
+for positive `n`; DC and the even-length Nyquist bin must be real. `rfft`
+sets those imaginary components to zero. An empty transform returns `[]`;
+`irfft([], 0)` returns an empty float array. Singletons remain arrays
+(S7.10.1v3).
+
+These functions accept arrays, one-dimensional views, and numeric ranges.
+Non-finite samples, null lanes, nested arrays, incompatible spectrum lengths,
+or a negative/non-integral `n` produce `error` (S7.10.2). A whole `null`
+argument propagates `null`; an error operand takes precedence. Floating-point
+overflow during the transform follows IEEE arithmetic.
+
+```lambda
+let signal = [1, 2, 3, 4, 5];
+let spectrum = math.rfft(signal);
+math.irfft(spectrum, len(signal))  // approximately [1, 2, 3, 4, 5]
+```
+
+#### Linear Systems and Least Squares
+
+| Function | Contract |
+|----------|----------|
+| `math.solve(a, b)` | Solve `a*x = b`, with square real matrix `a` |
+| `math.lstsq(a, b)` | Minimize `norm(a*x-b)` for a real matrix with rows ≥ columns and full column rank |
+
+`a` has shape `[m,n]`. `b` may be a vector `[m]` or a matrix `[m,k]`;
+the result is respectively a float vector `[n]` or float matrix `[n,k]`.
+Nested rectangular arrays and strided numeric views are supported; inputs
+are preserved. Values are converted to finite binary64 before solving.
+`solve` uses LU with partial row pivoting. `lstsq` uses Householder QR with
+column pivoting; it rejects a remaining column norm at or below
+`epsilon * m * largest_initial_column_norm`, where `epsilon` is binary64
+machine epsilon. It returns the solution only, without residual/rank metadata.
+
+Incompatible shapes, ragged/non-real/non-finite inputs, singular systems,
+numerically rank-deficient least-squares problems, and non-finite solutions
+return `error`. Underdetermined and rank-deficient minimum-norm solutions
+are not supported in this version. As with other floating-point solvers,
+ill-conditioned matrices can produce inaccurate results; inspect residuals
+when accuracy matters. A whole `null` argument propagates `null`.
+`solve([], [])` and `lstsq([], [])` represent an empty system and return an
+empty float vector. Arrays never collapse to scalars (S7.10.1v3, S7.10.2).
+
+```lambda
+math.solve([[0, 2], [1, 3]], [4, 7])  // [1, 2]
+math.lstsq([[1, 0], [1, 1], [1, 2], [1, 3]], [1, 2, 2, 4])
+// approximately [0.9, 0.9]: intercept and slope
+```
+
+#### Exact Geometric Predicate Signs
+
+| Function | Positive result means |
+|----------|-----------------------|
+| `math.orient2d(a, b, c)` | Points `a,b,c` are counterclockwise |
+| `math.orient3d(a, b, c, d)` | `det(a-d, b-d, c-d) > 0` |
+| `math.incircle(a, b, c, d)` | `d` lies inside the circle through counterclockwise `a,b,c` |
+
+The result is `-1`, `0`, or `1`, representing the exact determinant sign,
+not its magnitude. Zero means the determinant is exactly zero. Reversing
+the orientation of `a,b,c` reverses `incircle`'s sign; the inside/outside
+interpretation requires a non-collinear defining triangle.
+
+Points must contain exactly two or three finite real coordinates as required
+by the function. Coordinates are first converted to binary64, then the
+determinant is evaluated exactly for those converted values. Decimal and
+wide-integer precision lost during conversion is not recovered. Exact integer
+arithmetic prevents cancellation, overflow, or underflow in the determinant
+from changing its sign. Malformed points produce `error`; whole-point `null`
+propagates `null` (S7.10.2, S7.10.5v3).
+
 #### Statistical
 
 | Function                | Description         | Example                         | Result      |
@@ -1737,6 +1835,13 @@ The [Photo Studio demo](../test/demo/photo/README.md) uses this bridge.
 | `math.asinh` | 1 | Inverse hyp. sine |
 | `math.acosh` | 1 | Inverse hyp. cosine |
 | `math.atanh` | 1 | Inverse hyp. tangent |
+| `math.erf` / `math.erfc` | 1 | Gaussian error function / accurate complementary tail |
+| `math.fft` / `math.ifft` | 1 | Complex forward / normalized inverse Fourier transform |
+| `math.rfft` | 1 | Real-input Fourier half spectrum |
+| `math.irfft` | 2 | Real inverse transform with explicit original length |
+| `math.solve` / `math.lstsq` | 2 | Square solve / full-column-rank least squares |
+| `math.orient2d` | 3 | Exact 2D orientation sign after binary64 conversion |
+| `math.orient3d` / `math.incircle` | 4 | Exact 3D orientation / oriented incircle sign |
 | `math.pi` | - | Pi (π) constant |
 | `math.e` | - | Euler's number constant |
 | `math.max_int` | - | Maximum compact `int` constant |

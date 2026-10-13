@@ -873,6 +873,51 @@ SysFuncInfo sys_func_defs[] = {
     // ========================================================================
     // Element-wise math functions — math module (with native C math optimization)
     // ========================================================================
+    // pure scientific kernels; rank and domain failures remain boxed errors
+    {SYSFUNC_ERF, "math_erf", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_erf", FPTR(fn_math_erf), "erf", NPTR(erf), true, 1,
+     false, NULL, false, SYS_RESULT_REAL_TO_FLOAT},
+
+    {SYSFUNC_ERFC, "math_erfc", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_erfc", FPTR(fn_math_erfc), "erfc", NPTR(erfc), true, 1,
+     false, NULL, false, SYS_RESULT_REAL_TO_FLOAT},
+
+    {SYSFUNC_FFT, "math_fft", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_fft", FPTR(fn_math_fft), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_IFFT, "math_ifft", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_ifft", FPTR(fn_math_ifft), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_RFFT, "math_rfft", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_rfft", FPTR(fn_math_rfft), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_IRFFT, "math_irfft", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_irfft", FPTR(fn_math_irfft), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_SOLVE, "math_solve", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_solve", FPTR(fn_math_solve), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_LSTSQ, "math_lstsq", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_lstsq", FPTR(fn_math_lstsq), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_ORIENT2D, "math_orient2d", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_orient2d", FPTR(fn_math_orient2d), NULL, NULL, false, 0,
+     false, &TYPE_INT, true},
+
+    {SYSFUNC_ORIENT3D, "math_orient3d", 4, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_orient3d", FPTR(fn_math_orient3d), NULL, NULL, false, 0,
+     false, &TYPE_INT, true},
+
+    {SYSFUNC_INCIRCLE, "math_incircle", 4, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_incircle", FPTR(fn_math_incircle), NULL, NULL, false, 0,
+     false, &TYPE_INT, true},
+
     {SYSFUNC_SQRT, "math_sqrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_math_sqrt", FPTR(fn_math_sqrt), "sqrt", NPTR(sqrt), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
@@ -1428,7 +1473,7 @@ extern Item js_reflect_get_with_receiver(Item target, Item key, Item receiver);
 // One list feeds both the import rows and the NO_GC audit below.
 #define JIT_LIBM_LEAVES(X) \
     X(sqrt) X(cbrt) X(hypot) X(exp) X(exp2) X(expm1) \
-    X(log) X(log2) X(log10) X(log1p) \
+    X(log) X(log2) X(log10) X(log1p) X(erf) X(erfc) \
     X(sin) X(cos) X(tan) X(asin) X(acos) X(atan) X(atan2) \
     X(sinh) X(cosh) X(tanh) X(asinh) X(acosh) X(atanh) \
     X(floor) X(ceil) X(round) X(trunc)

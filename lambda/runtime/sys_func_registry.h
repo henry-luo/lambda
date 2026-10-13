@@ -465,6 +465,7 @@ static inline bool sysfunc_originates_defect(const SysFuncInfo* info) {
 static inline bool sysfunc_native_math_always_float(SysFunc fn) {
     switch (fn) {
     case SYSFUNC_SQRT: case SYSFUNC_CBRT: case SYSFUNC_HYPOT:
+    case SYSFUNC_ERF: case SYSFUNC_ERFC:
     case SYSFUNC_LOG: case SYSFUNC_LOG10: case SYSFUNC_LOG2: case SYSFUNC_LOG1P:
     case SYSFUNC_EXP: case SYSFUNC_EXP2: case SYSFUNC_EXPM1:
     case SYSFUNC_SIN: case SYSFUNC_COS: case SYSFUNC_TAN:

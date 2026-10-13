@@ -570,3 +570,74 @@ Before registering a collection-related sys func, answer:
 
 If those answers are explicit, `null`, `[]`, and `error` retain one meaning each
 throughout Lambda's system-function surface.
+
+## 9. Scientific math kernels
+
+The first scientific batch adds `math.erf`, `erfc`, `fft`, `ifft`, `rfft`,
+`irfft`, `solve`, `lstsq`, `orient2d`, `orient3d`, and `incircle`. The public
+contracts and examples are in [Lambda_Sys_Func.md](../doc/Lambda_Sys_Func.md#error-functions).
+These are pure native numerical primitives; chart assembly, spectral
+estimators, integration policies, physical constants, and units remain
+separate package concerns (S12.1.1v2, D6.4.1).
+
+### Contracts and representation
+
+- **S7.10.1v3, S7.10.5v3:** FFT results are ordinary arrays of boxed complex
+  values, including `[]` and singletons. `irfft`, `solve`, and `lstsq` produce
+  float ArrayNum values with stable vector/matrix rank, including empty arrays.
+  Error functions reuse the existing real scalar/vector math kernel.
+- **S7.10.2:** malformed shapes, non-finite scientific inputs, invalid inverse
+  lengths, and singular/rank-deficient solve domains produce errors. Whole
+  null operands propagate absence, with errors taking precedence. Fourier
+  arithmetic itself may overflow to IEEE infinities/NaNs.
+- **D6.4.1, D6.4.2:** each function uses a boxed `Item` boundary and registered
+  successful result shape. The new SysFunc IDs are appended. The two libm
+  scalar leaves also enter the shared native-call/GC-effect audit list.
+- **D5.3.3:** sequence readers root their source and current row across boxing;
+  output builders root the complex array across allocations. Algorithm
+  scratch buffers contain only native numbers, never unrooted Lambda values.
+- **S13.4.1:** QR inner products and norms use fixed balanced reduction trees.
+  No tier-dependent BLAS reductions or parallel reduction order is introduced.
+
+### Numerical choices
+
+FFT uses an iterative radix-two kernel and Bluestein convolution for other
+lengths. Forward transforms use the negative exponential sign; inverse
+transforms normalize by the original sample count. `irfft(half, n)` requires
+the original count so odd-length data round-trips without an implicit even
+assumption. Allocation products and convolution-length growth are checked.
+Windows, zero padding, PSD normalization, and frequency grids are explicit
+higher-level operations.
+
+`solve` uses partial-pivot LU. `lstsq` uses column-pivoted Householder QR,
+following the stable orthogonal-factorization approach described in the
+[LAPACK least-squares guide](https://www.netlib.org/lapack/lug/node40.html).
+The initial domain is real square systems and full-column-rank problems
+with `m >= n`; no normal-equation or silent pseudoinverse fallback is used.
+Both accept multiple right-hand sides. Rank-deficient/underdetermined
+minimum-norm solutions need a separate complete orthogonal/SVD design.
+
+The geometry API returns a sign. Each finite binary64 coordinate is scaled
+by `2^1074` to an exact integer. Existing libmpdec operations then evaluate
+the translated 2×2 or 3×3 determinant, with squared lifts for `incircle`.
+The degree-four determinant needs at most `4*2099+4` binary digits; a derived
+decimal precision covers every intermediate. A local context isolates this
+calculation from user decimal precision and traps. This follows the exact-sign
+requirement discussed in [Shewchuk's robust-predicates paper and overview](https://www.cs.cmu.edu/~quake/robust.html),
+using Lambda's existing arithmetic engine rather than an adaptive expansion
+implementation. Decimal and wide-integer input conversion is explicitly
+binary64 before this guarantee applies.
+
+The kernels live in `lambda/runtime/lambda-eval-science.cpp`; exact integer
+determinants remain behind `lambda/core/lambda-decimal.hpp`, preserving its
+libmpdec encapsulation. Both regular and headless runtime source lists include
+the scientific unit. Existing complex decoding and shaped-array allocation
+helpers are shared, not duplicated. The latter now rejects shape-product
+overflow and failed shape allocation instead of returning a flattened result.
+
+Regression fixtures `test/lambda/math_science_{fft,linear,geometry}.ls` and
+their goldens cover an independent direct DFT oracle, arbitrary transform
+lengths, real round trips, residuals, pivoting, views, multiple right-hand
+sides, empty/error/null distinctions, exact degeneracy, cancellation, extreme
+exponents, and libm native/boxed paths. Run them under both interpreter and
+JIT, including forced GC and freed-memory poisoning (D8.1.1, D5.3.3).
