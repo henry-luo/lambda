@@ -4032,6 +4032,14 @@ static bool radiant_query_face(Item faces, int64_t index, RadiantQueryFace* face
 }
 
 // font snapshots are supplied by lambda-io; these queries never acquire resources.
+// Query font contexts built so far. Each one scans the font directories, so a
+// repeated query must reuse its cached context (radiant_query_font_key).
+static uint64_t g_radiant_query_font_builds = 0;
+
+RADIANT_C_API uint64_t radiant_query_font_build_count(void) {
+    return __atomic_load_n(&g_radiant_query_font_builds, __ATOMIC_RELAXED);
+}
+
 static FontContext* radiant_build_query_fonts(Item faces) {
     if (!radiant_item_is_missing(faces) && !is_array_family_type_id(get_type_id(faces))) return nullptr;
     RootFrame owner_roots(1);
@@ -4040,6 +4048,7 @@ static FontContext* radiant_build_query_fonts(Item faces) {
     config.pixel_ratio = 1.0f;
     FontContext* fonts = font_context_create(&config);
     if (!fonts) return nullptr;
+    __atomic_add_fetch(&g_radiant_query_font_builds, 1, __ATOMIC_RELAXED);
     int64_t count = radiant_item_is_missing(faces) ? 0 : fn_len(faces);
     for (int64_t index = 0; index < count; index++) {
         RadiantQueryFace face = {};
