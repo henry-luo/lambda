@@ -1386,7 +1386,9 @@ static bool js_parser_parser_starts_let_declaration(JsParser* parser,
     if (parser->next.kind == JS_TOK_IN || parser->next.kind == JS_TOK_OF) {
         return false;
     }
-    if (!allow_line_terminator && parser->next.line_terminator_before) {
+    // ExpressionStatement excludes `let [` even across a line terminator.
+    if (!allow_line_terminator && parser->next.line_terminator_before &&
+            parser->next.kind != JS_TOK_LBRACKET) {
         return false;
     }
     return parser->next.kind == JS_TOK_IDENTIFIER ||

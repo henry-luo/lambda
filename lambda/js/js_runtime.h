@@ -1116,6 +1116,15 @@ int64_t js_eval_local_has_lexical_binding(Item key);
 void js_eval_local_note_immutable_binding(Item key);
 int64_t js_eval_local_has_immutable_binding(Item key);
 int64_t js_with_depth_active(void);
+extern const char* const js_array_unscopable_names[];
+typedef struct JsWithBindingOps {
+    Item (*has)(Item object, Item key);
+    Item (*get)(Item object, Item key);
+    bool (*is_object)(Item value);
+    int64_t (*truthy)(Item value);
+} JsWithBindingOps;
+Item js_with_binding_is_visible_with_ops(Item key, Item object, Item unscopables_symbol,
+    const JsWithBindingOps* ops);
 Item js_get_with_binding_or_fallback(Item key, Item fallback);
 Item js_get_with_binding_or_fallback_strict(Item key, Item fallback);
 Item js_get_last_with_binding_base_or_undefined(Item key);

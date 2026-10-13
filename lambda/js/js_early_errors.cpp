@@ -270,13 +270,16 @@ static bool normalize_unicode_escapes(const char* src, int src_len, char* out, i
 // Check whether an expression node is a valid simple assignment target.
 // Valid targets: identifiers (not reserved words), member expressions,
 // array/object patterns (destructuring).
-static bool is_valid_assignment_target(JsAstNode* node, bool strict) {
+static bool is_valid_assignment_target(JsAstNode* node, bool strict,
+        bool allow_pattern = true, bool allow_call = true) {
     if (!node) return false;
     switch (node->node_type) {
         case AST_NODE_IDENT: {
             JsIdentifierNode* id = (JsIdentifierNode*)node;
             if (id->name) {
                 const char* nm = id->name->chars;
+                // meta properties share the identifier carrier, but never denote writable bindings.
+                if (strcmp(nm, "new.target") == 0 || strcmp(nm, "import.meta") == 0) return false;
                 // "eval" and "arguments" are invalid in strict mode
                 if (strict && (strcmp(nm, "eval") == 0 || strcmp(nm, "arguments") == 0)) {
                     return false;
@@ -286,13 +289,29 @@ static bool is_valid_assignment_target(JsAstNode* node, bool strict) {
             }
             return true;
         }
-        case AST_NODE_MEMBER_EXPR:
+        case AST_NODE_MEMBER_EXPR: {
+            // pattern parsing retains the dotted form instead of the primary-expression identifier.
+            JsMemberNode* member = (JsMemberNode*)node;
+            if (!member->computed && member->object && member->object->node_type == AST_NODE_IDENT &&
+                    member->property && member->property->node_type == AST_NODE_IDENT) {
+                String* owner = ((JsIdentifierNode*)member->object)->name;
+                String* property = ((JsIdentifierNode*)member->property)->name;
+                if (owner && property && ((strcmp(owner->chars, "import") == 0 && strcmp(property->chars, "meta") == 0) ||
+                        (strcmp(owner->chars, "new") == 0 && strcmp(property->chars, "target") == 0))) return false;
+            }
             return true;
-        case AST_NODE_CALL_EXPR:
-            return !strict;
+        }
+        case AST_NODE_CALL_EXPR: {
+            JsAstNode* callee = ((JsCallNode*)node)->callee;
+            // import calls are outside Annex B's sloppy CallExpression assignment extension.
+            if (callee && callee->node_type == AST_NODE_IDENT &&
+                    ((JsIdentifierNode*)callee)->name &&
+                    strcmp(((JsIdentifierNode*)callee)->name->chars, "import") == 0) return false;
+            return !strict && allow_call;
+        }
         case AST_NODE_ARRAY_PATTERN:
         case AST_NODE_MAP_PATTERN:
-            return true;
+            return allow_pattern;
         default:
             return false;
     }
@@ -314,8 +333,14 @@ static void check_pattern_target(EarlyErrorCtx* ctx, JsAstNode* target) {
         ee_error(ctx, target, "Invalid optional chain in assignment target");
         return;
     }
+    if (target->node_type == AST_NODE_MEMBER_EXPR && !is_valid_assignment_target(target, ctx->in_strict)) {
+        ee_error(ctx, target, "Invalid member in assignment target");
+        return;
+    }
     if (target->node_type == AST_NODE_IDENT) {
-        check_identifier_reserved(ctx, target);
+        if (!is_valid_assignment_target(target, ctx->in_strict))
+            ee_error(ctx, target, "Invalid identifier in assignment target");
+        else check_identifier_reserved(ctx, target);
         return;
     }
     js_ast_visit_binding_pattern_children(target, check_pattern_target_child, ctx);
@@ -330,17 +355,12 @@ static void check_assignment_target(EarlyErrorCtx* ctx, JsAstNode* node) {
     // for simple assignment (=), the LHS can be a pattern or simple target
     // for compound assignments (+=, etc.), LHS must be a simple target (no patterns)
     bool is_compound = (asgn->op != OPERATOR_ASSIGN);
+    bool is_logical = asgn->op == OPERATOR_JS_AND_ASSIGN || asgn->op == OPERATOR_JS_OR_ASSIGN ||
+        asgn->op == OPERATOR_JS_NULLISH_ASSIGN;
 
-    if (is_compound) {
-        // compound: only identifier or member expression
-        if (lhs->node_type != AST_NODE_IDENT &&
-            lhs->node_type != AST_NODE_MEMBER_EXPR &&
-            (ctx->in_strict || lhs->node_type != AST_NODE_CALL_EXPR)) {
-            ee_error(ctx, node, "Invalid left-hand side in compound assignment");
-            return;
-        }
-    } else if (!is_valid_assignment_target(lhs, ctx->in_strict)) {
-        ee_error(ctx, node, "Invalid left-hand side in assignment");
+    if (!is_valid_assignment_target(lhs, ctx->in_strict, !is_compound, !is_logical)) {
+        ee_error(ctx, node, is_compound ? "Invalid left-hand side in compound assignment" :
+            "Invalid left-hand side in assignment");
         return;
     }
     check_pattern_target(ctx, lhs);
@@ -353,19 +373,9 @@ static void check_update_target(EarlyErrorCtx* ctx, JsAstNode* node) {
     JsAstNode* operand = un->operand;
     if (!operand) return;
 
-    if (operand->node_type != AST_NODE_IDENT &&
-        operand->node_type != AST_NODE_MEMBER_EXPR &&
-        (ctx->in_strict || operand->node_type != AST_NODE_CALL_EXPR)) {
+    if (!is_valid_assignment_target(operand, ctx->in_strict, false)) {
         ee_error(ctx, node, "Invalid left-hand side in prefix/postfix operation");
-    } else if (operand->node_type == AST_NODE_IDENT) {
-        JsIdentifierNode* id = (JsIdentifierNode*)operand;
-        if (id->name) {
-            const char* nm = id->name->chars;
-            if (ctx->in_strict && (strcmp(nm, "eval") == 0 || strcmp(nm, "arguments") == 0)) {
-                ee_error(ctx, node, "Invalid left-hand side in prefix/postfix operation");
-            }
-        }
-    }
+    } else check_pattern_target(ctx, operand);
 }
 
 // ---- Phase 2: reserved word as identifier ----------------------------------
@@ -587,7 +597,9 @@ static void walk_function_for_early_errors(EarlyErrorCtx* ctx, JsFunctionNode* f
         walk_expression(ctx, p);
     }
     ctx->in_formal_parameters = was_params;
-    walk_statement(ctx, fn->body);
+    // concise arrow bodies are expressions; statement traversal would skip their early errors.
+    if (fn->body && fn->body->node_type != AST_NODE_BLOCK) walk_expression(ctx, fn->body);
+    else walk_statement(ctx, fn->body);
 
     ctx->in_generator = was_gen;
     ctx->in_async = was_async;
@@ -616,6 +628,12 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             if (un->op == OPERATOR_JS_DELETE && ctx->in_strict && un->operand &&
                 un->operand->node_type == AST_NODE_IDENT) {
                 ee_error(ctx, node, "Deleting a variable is not allowed in strict mode");
+            }
+            if (un->op == OPERATOR_JS_DELETE && un->operand && un->operand->node_type == AST_NODE_MEMBER_EXPR) {
+                JsMemberNode* member = (JsMemberNode*)un->operand;
+                if (!member->computed && member->property && member->property->node_type == AST_NODE_IDENT &&
+                        is_private_name_string(((JsIdentifierNode*)member->property)->name))
+                    ee_error(ctx, node, "Deleting a private field is not allowed");
             }
             js_ast_visit_children(node, walk_expression_child, ctx);
             break;
@@ -945,10 +963,19 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
         }
 
         case JS_AST_NODE_WITH_STATEMENT: {
-            // v17: 'with' statements are forbidden in strict mode
+            JsWithStatementNode* statement = (JsWithStatementNode*)node;
             if (ctx->in_strict) {
                 ee_error(ctx, node, "Strict mode code may not include a with statement");
             }
+            // with accepts Statement, excluding declarations and Annex B labelled functions.
+            JsAstNode* body = statement->body;
+            while (body && body->node_type == JS_AST_NODE_LABELED_STATEMENT)
+                body = ((JsLabeledStatementNode*)body)->body;
+            if (body && (body->node_type == AST_NODE_CLASS || body->node_type == AST_NODE_FUNC ||
+                    (body->node_type == AST_NODE_VAR_STAM && ((JsVariableDeclarationNode*)body)->kind != JS_VAR_VAR)))
+                ee_error(ctx, body, "Declaration cannot be the body of a with statement");
+            walk_expression(ctx, statement->object);
+            walk_statement(ctx, statement->body);
             break;
         }
 
