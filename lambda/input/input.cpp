@@ -2212,6 +2212,14 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         }
         else if (strcmp(effective_type, "scene3d-asset") == 0)
             input_scene3d_asset(input, source, source_len, flavor ? flavor->chars : nullptr);
+        else if (strcmp(effective_type, "xml") == 0 && flavor && strcmp(flavor->chars, "strict") == 0) {
+            // document packages need the shared XML validator, without external entity resolution.
+            XmlParseOptions xml_options = {};
+            xml_options.require_well_formed = true;
+            xml_options.require_namespaces = true;
+            xml_options.allow_inert_doctype = true;
+            parse_xml_with_options(input, source, &xml_options);
+        }
         else if (input_parse_model(input, source, source_len, effective_type)) {}
         else if (dispatch_exact_input_parser(effective_type, input, source)) {}
 #ifndef LAMBDA_NO_PDF

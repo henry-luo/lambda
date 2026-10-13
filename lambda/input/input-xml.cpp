@@ -20,6 +20,8 @@ struct XmlInputContext : InputContext {
     const char* end;
     const char* document_start;
     XmlNamespaceFrame* namespaces = nullptr;
+    bool doctype_seen = false;
+    bool document_seen = false;
     XmlInputContext(Input* input, const char* source, const XmlParseOptions* opts)
         : InputContext(input, source), options(opts), begin(source), end(source + strlen(source)), document_start(source) {}
     bool preserving() const { return options && options->preserve_whitespace; }
@@ -616,6 +618,56 @@ static Item parse_doctype(XmlInputContext& ctx, const char **xml, int depth) {
     // Skip past the "!DOCTYPE" part (already consumed by caller)
     skip_whitespace(xml);
 
+    if (ctx.strict()) {
+        // external IDs in interchange documents are metadata, never executable DTDs.
+        const char* start = *xml;
+        if (depth || ctx.doctype_seen || ctx.document_seen || !ctx.options->allow_inert_doctype) {
+            xml_error(ctx, start, "XML_DOCTYPE_POSITION", "DOCTYPE must precede the document element exactly once");
+            return ItemError;
+        }
+        String* root_name = parse_tag_name(ctx, xml);
+        if (!root_name) return ItemError;
+        skip_whitespace(xml);
+        int literal_count = 0;
+        if (!strncmp(*xml, "SYSTEM", 6)) { literal_count = 1; *xml += 6; }
+        else if (!strncmp(*xml, "PUBLIC", 6)) { literal_count = 2; *xml += 6; }
+        for (int index = 0; index < literal_count; index++) {
+            const char* before_space = *xml;
+            skip_whitespace(xml);
+            char quote = **xml;
+            if (*xml == before_space || (quote != '\'' && quote != '"')) {
+                xml_error(ctx, *xml, "XML_DOCTYPE_LITERAL", "DOCTYPE requires a separated quoted identifier");
+                return ItemError;
+            }
+            const char* end = strchr(*xml + 1, quote);
+            if (!end) {
+                xml_error(ctx, *xml, "XML_DOCTYPE_LITERAL", "Unterminated DOCTYPE identifier");
+                return ItemError;
+            }
+            // public literals have a narrower alphabet than system identifiers (XML 1.0 PubidChar).
+            if (literal_count == 2 && index == 0) {
+                for (const char* p = *xml + 1; p < end; p++) {
+                    unsigned char ch = (unsigned char)*p;
+                    bool valid = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                        (ch >= '0' && ch <= '9') || strchr(" \r\n-'()+,./:=?;!*#@$_%", ch);
+                    if (!valid) {
+                        xml_error(ctx, p, "XML_DOCTYPE_PUBLIC_ID", "Invalid character in DOCTYPE public identifier");
+                        return ItemError;
+                    }
+                }
+            }
+            *xml = end + 1;
+        }
+        skip_whitespace(xml);
+        if (**xml != '>') {
+            xml_error(ctx, *xml, "XML_DECLARATION_PROFILE", "Internal DTD subsets and entity declarations are unsupported");
+            return ItemError;
+        }
+        (*xml)++;
+        ctx.doctype_seen = true;
+        return builder.element("!DOCTYPE").attr("name", {.item = s2it(root_name)}).final();
+    }
+
     // Skip DOCTYPE name and external ID
     while (**xml && **xml != '[' && **xml != '>') {
         (*xml)++;
@@ -778,6 +830,11 @@ static Item parse_element(XmlInputContext& ctx, const char **xml, int depth) {
         return parse_cdata(ctx, xml);
     }
 
+    if (ctx.strict() && ctx.options->allow_inert_doctype && !strncmp(*xml, "!DOCTYPE", 8) &&
+        ((*xml)[8] == ' ' || (*xml)[8] == '\t' || (*xml)[8] == '\r' || (*xml)[8] == '\n')) {
+        *xml += 8;
+        return parse_doctype(ctx, xml, depth);
+    }
     if (ctx.strict() && **xml == '!') {
         xml_error(ctx, element_start, "XML_DECLARATION_PROFILE", "DTD declarations require an explicit XML entity policy");
         return {.item = ITEM_ERROR};
@@ -1058,6 +1115,7 @@ void parse_xml_with_options(Input* input, const char* xml_string, const XmlParse
                         elmt_type->name.str[0] != '!' &&
                         !(elmt_type->name.length >= 3 && strncmp(elmt_type->name.str, "!--", 3) == 0)) {
                         document_elements++;
+                        ctx.document_seen = true;
                         if (ctx.strict() && document_elements > 1) {
                             xml_error(ctx, old_xml, "XML_DOCUMENT_ELEMENT", "XML requires exactly one document element"); break;
                         }

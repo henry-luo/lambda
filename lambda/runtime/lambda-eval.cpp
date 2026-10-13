@@ -6297,6 +6297,12 @@ Item fn_parse3(Item str_item, Item grammar_item, Item rule_item) {
 
 Item fn_parse2(Item str_item, Item type) {
     GUARD_ERROR2(str_item, type);
+    // symbol-to-string option conversions allocate; retain earlier conversions through parser dispatch.
+    RootFrame parse_roots(4);
+    Rooted<Item> parse_source_root(parse_roots, str_item);
+    Rooted<Item> parse_options_root(parse_roots, type);
+    Rooted<String*> parse_type_root(parse_roots, (String*)NULL);
+    Rooted<String*> parse_flavor_root(parse_roots, (String*)NULL);
     if (get_type_id(type) == LMD_TYPE_TYPE &&
             (lambda_type_grammar(type.type) || lambda_type_grammar_rule(type.type))) {
         return fn_parse_grammar(str_item, type.type, ItemNull);
@@ -6320,6 +6326,7 @@ Item fn_parse2(Item str_item, Item type) {
     }
     else if (is_text_type_id(type_id)) {
         type_str = fn_string(type);
+        parse_type_root.set(type_str);
     }
     else if (type_id == LMD_TYPE_MAP) {
         Map* options_map = type.map;
@@ -6331,6 +6338,7 @@ Item fn_parse2(Item str_item, Item type) {
             TypeId type_value_type = get_type_id(input_type);
             if (is_text_type_id(type_value_type)) {
                 type_str = fn_string(input_type);
+                parse_type_root.set(type_str);
             } else {
                 set_runtime_error(ERR_TYPE_MISMATCH,
                     "parse: type option must be a string or symbol, got type: %s",
@@ -6345,6 +6353,7 @@ Item fn_parse2(Item str_item, Item type) {
             TypeId flavor_value_type = get_type_id(input_flavor);
             if (is_text_type_id(flavor_value_type)) {
                 flavor_str = fn_string(input_flavor);
+                parse_flavor_root.set(flavor_str);
             } else {
                 set_runtime_error(ERR_TYPE_MISMATCH,
                     "parse: flavor option must be a string or symbol, got type: %s",

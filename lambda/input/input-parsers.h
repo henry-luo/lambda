@@ -34,6 +34,7 @@ struct XmlParseOptions {
     void* context;
     void (*element_span)(void* context, Element* element, size_t start, size_t end);
     bool require_namespaces = false;
+    bool allow_inert_doctype = false; // external identifier only: no subset, entity declarations, or fetching.
 };
 void parse_xml_with_options(Input* input, const char* xml_string, const XmlParseOptions* options);
 void parse_css(Input* input, const char* css_string);
