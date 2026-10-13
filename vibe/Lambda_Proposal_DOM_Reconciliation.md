@@ -1,6 +1,6 @@
 # Lambda Proposal — DOM Reconciliation at the Presentation Boundary
 
-> **Status:** design record, 2026-10-13, revised the same day to reflect the rulings. **Ruled (user, 2026-10-13):** retention is fully embraced and needs no ruling exception, because **D4.5.3v2** governs only how DOM is built from Lambda scripts (§6, §8 Q1); a kept element whose attributes changed is patched in place (§8 Q3). **Open:** the reuse condition for imperatively edited nodes (§4.1, §8 Q2) and phasing (§8 Q4). The current design text lives in [Reactive UI](Lambda_Design_Reactive_UI.md) §9.1, §9.4 and §10.1; this document keeps the problem, the history, the mechanics and the open options.
+> **Status:** design record, 2026-10-13, revised the same day to reflect the rulings. **Ruled (user, 2026-10-13):** retention is fully embraced and needs no ruling exception, because **D4.5.3v2** governs only how DOM is built from Lambda scripts (§6, §8 Q1); the template result is the presentation of record, so direct DOM edits inside a component's result are unsupported and need no tracking (§4.1, §8 Q2; Reactive UI §2.7); a kept element whose attributes changed is patched in place (§8 Q3). **Open:** phasing (§8 Q4). The current design text lives in [Reactive UI](Lambda_Design_Reactive_UI.md) §9.1, §9.4 and §10.1; this document keeps the problem, the history, the mechanics and the open options.
 > **Formal linkage:** **D4.5.3v2** (DOM construction from Lambda scripts deep-copies; retention downstream is embraced), **D4.5.1v4** / **D4.5.2** (presentation lifetime and the runtime boundary), **S12.1.3** (pure template bodies), **S9.1.4** (state lives in view state).
 > **Working-design linkage:** [Reactive UI](Lambda_Design_Reactive_UI.md) §5.3 (runtime identity), §9.4 (no-op elision), §9.5 (observer vs tree diff), §10.1–10.3 (incremental presentation), §18.3 (memoization, keyed lists).
 > **Scope:** how an incremental template re-render turns a regenerated result into DOM. Evaluation, render-map dependency tracking and template state are unchanged.
@@ -42,28 +42,24 @@ Any change must keep these properties, which **D4.5.3v2** establishes for DOM bu
 - **2026-10-12 (`f82b4a77b`).** Elision was replaced by an identity test. The record (`vibe/impl/Lambda_Impl_Chart_Timeline.md`): equal results with a new identity require a DOM ownership update, and only an exact same-value return keeps the existing DOM and its imperative edits. The change resolved 15 frame, slideshow and SVG fixtures and three viewer cases. `dom_rebind_equal_render_result` has had no caller since.
 
 Two lessons follow:
-- Comparing old and new *results* is not enough. Imperative DOM edits made after construction mean the live DOM may no longer present the old result.
+- Handlers were editing kept nodes directly, so an equal result no longer proved the live DOM presented it. The 2026-10-13 ruling answers this at the contract level rather than by tracking edits: the result rules, and direct edits inside a component's result are unsupported (§4.1).
 - Rebinding the element map and lifecycle backing source alone was not a complete ownership update. A reused subtree must still go through every owner hand-off and render-event step that a rebuilt one does.
 
 ## 4. Design
 
 Reactive UI §9.4 carries these rules; they are repeated here with their mechanics. When an incremental rebuild updates the presentation of old result `R0` (live DOM `D0`) to new result `R1`, walk `R0`, `R1` and `D0` together in document order. At each position, take the first rule that applies:
 
-1. **Equal pristine subtree → retain.** The `R1` node is deep-equal to the `R0` node (§9.4 equality: kind, tag, attribute names and values, ordered children, content), and the `D0` node is *pristine* (§4.1). Keep the `D0` subtree in place and rebind its source keys from `R0` to `R1` elements.
-2. **Same element → patch and reconcile.** The tag is equal and the `D0` element is pristine, but its attributes or children differ. Keep the `D0` element, which keeps its view state. Patch each changed attribute in place, so a row whose `class` changed keeps its node. Reconcile its children positionally by these same rules. Record each attribute change and each child insertion, removal or replacement as a DOM mutation, so the mutation path restyles exactly the affected nodes. *(Attribute patching decided by the user, 2026-10-13.)*
+1. **Equal subtree → retain.** The `R1` node is deep-equal to the `R0` node (§9.4 equality: kind, tag, attribute names and values, ordered children, content). Keep the `D0` subtree in place and rebind its source keys from `R0` to `R1` elements.
+2. **Same element → patch and reconcile.** The tag is equal, but the attributes or children differ. Keep the `D0` element, which keeps its view state. Patch each changed attribute in place, so a row whose `class` changed keeps its node. Reconcile its children positionally by these same rules. Record each attribute change and each child insertion, removal or replacement as a DOM mutation, so the mutation path restyles exactly the affected nodes. *(Attribute patching decided by the user, 2026-10-13.)*
 3. **Otherwise → fresh copy.** Build the node from the script as **D4.5.3v2** describes, exactly as today, and run the existing owner migration (`layout_preserve_rebuilt_owners`) for it.
 
 Rule 3 is today's behaviour, so the design changes nothing where nothing can be reused. Positional matching is deliberate. Keyed matching (Reactive UI §18.3) can extend rule 2 later without changing rules 1 or 3.
 
-### 4.1 Pristine nodes
+### 4.1 Direct edits are not tracked
 
-A DOM node is pristine when no imperative edit has touched it or its subtree since it was built or retained from a result. This answers the 2026-10-12 lesson directly: an imperatively edited node is never retained from an equal result, so a re-render still discards imperative edits exactly as it does today.
+**Ruled 2026-10-13 (user; Reactive UI §2.7).** Inside a component presented by an author template, the template result rules. A Lambda handler or a JS script editing that result subtree directly is unsupported: the two would fight, and the next regeneration that touches an edited node presents the result. So the walk compares `R0` with `R1` only, never inspects `D0`, and keeps no "pristine" bit; the mechanism drafted here earlier (a bit cleared by every mutation entry point) is withdrawn. Interaction state (value, checkedness, selection, focus, hover, scroll) is not an edit: it lives in the state store and view state (**S9.1.4**) and survives on a retained node by construction.
 
-**Open (Q2).** Two conditions are possible, and the user has not ruled:
-- *As drafted:* an edited node is rebuilt by rule 3. Simplest, and identical to today's behaviour for edited nodes.
-- *Patch instead:* an edited node is kept and patched back to the new result by rule 2, since rule 2 already patches attributes and children. This keeps more nodes and makes the pristine bit a hint rather than a gate, but a patch must then also undo edits the new result does not mention (an added child, a changed text node), which rule 2's positional walk covers only if it treats every difference between `D0` and `R1` as a mutation, not only differences between `R0` and `R1`.
-
-Proposed mechanism: each DOM mutation entry point (attribute, class, inline style, child list, text data) clears the pristine bit on the mutated node and its ancestors up to the nearest result root. That costs O(depth) per imperative mutation and nothing per re-render. Interaction state is not an imperative edit: values, checkedness, selection, focus, hover and scroll live in the state store and view state (**S9.1.4**). It survives on a retained node by construction, which is what owner migration approximates today.
+A page may mix directly scripted subtrees with template subtrees when they are separate. Behavior templates for form controls' UA default actions are the sanctioned case of Lambda and JS sharing one DOM state; they regenerate nothing (§2.7, §11).
 
 ### 4.2 Ownership on a retained node
 
@@ -104,12 +100,11 @@ None needed. The user ruled on 2026-10-13 that D4.5.3 covers how DOM is construc
 ## 8. Questions for review
 
 1. ~~Is retaining an existing occurrence consistent with the intent of D4.5.3?~~ **Decided 2026-10-13 (user): yes, and fully embraced.** D4.5.3 governs DOM construction from Lambda scripts only; **D4.5.3v2** states that scope (§6).
-2. **Open.** Is "no imperative edit since built" the right condition for reuse, or should an edited node be patched back to the new result instead of rebuilt? §4.1 lists both options.
+2. ~~Is "no imperative edit since built" the right condition for reuse?~~ **Decided 2026-10-13 (user): neither.** The template result rules; direct edits inside a component's result are unsupported and untracked (§4.1).
 3. ~~Should rule 2 also patch changed attributes in place on a pristine shell, such as a row's `class`?~~ **Decided 2026-10-13 (user): yes.** Rule 2 patches them; §4.3's mutation-path invalidation restyles the patched elements.
 4. **Open.** What phasing do you want? Suggested:
-   - R1: pristine tracking;
-   - R2: equal-subtree retention (rule 1) inside changed results;
-   - R3: element retention with attribute patching and positional child reconciliation (rule 2) through the mutation pipeline;
-   - R4 (optional): keyed matching.
+   - R1: equal-subtree retention (rule 1) inside changed results;
+   - R2: element retention with attribute patching and positional child reconciliation (rule 2) through the mutation pipeline;
+   - R3 (optional): keyed matching.
 
    Each phase would be gated by the differential A/B harness that validated retained flex items: every UI fixture rendered with the feature on and off, with SVG snapshots compared after each interaction.
