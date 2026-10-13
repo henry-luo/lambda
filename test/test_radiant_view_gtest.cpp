@@ -85,6 +85,7 @@ static const RadiantViewCase g_radiant_view_cases[] = {
      "foreign_document_registry", "test/html/js_foreign_document_registry.html", nullptr, true},
     {"RadiantViewTest.ReleasesFailedFontFallbackHandles",
      "failed_font_fallback_registry", "test/html/failed_font_fallback_registry.html", nullptr, true},
+    {"RadiantViewTest.LoadsEpsAsHeadlessView", "eps", "test/input/eps/vector.eps", nullptr, true},
 };
 
 static const size_t g_radiant_view_case_count =
@@ -899,6 +900,10 @@ TEST(RadiantViewTest, LoadsLambdaChartDashboardAsHeadlessView) {
 
 TEST(RadiantViewTest, LoadsPdfAsHeadlessView) {
     test_radiant_view_expect_case(14);
+}
+
+TEST(RadiantViewTest, LoadsEpsAsHeadlessView) {
+    test_radiant_view_expect_case(21);
 }
 
 TEST(RadiantViewTest, ReleasesDetachedScriptTextControl) {

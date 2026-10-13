@@ -26,6 +26,7 @@
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/network/network_downloader.h"
 #include "../lambda/input/input.hpp"
+#include "../lambda/input/input-postscript.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/dom/dom.h"
@@ -285,6 +286,7 @@ typedef enum {
     DOC_FORMAT_LAMBDA_SCRIPT,
     DOC_FORMAT_SLIDES,
     DOC_FORMAT_PDF,
+    DOC_FORMAT_EPS,
     DOC_FORMAT_SVG,
     DOC_FORMAT_IMAGE,  // PNG, JPG, JPEG, GIF
     DOC_FORMAT_TEXT    // JSON, YAML, TOML, TXT, etc.
@@ -293,6 +295,8 @@ typedef enum {
 // Detect document format from file extension
 static DocFormat detect_doc_format(const char* filename) {
     if (!filename) return DOC_FORMAT_UNKNOWN;
+    // use the input parser's suffix policy before the viewer's format admission gate.
+    if (eps_source_expected(filename, nullptr, 0)) return DOC_FORMAT_EPS;
 
     size_t ext_len = 0;
     const char* ext = file_path_ext_len(filename, strlen(filename), &ext_len);
@@ -361,7 +365,7 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
         // paged formats share the export loader's admission before reaching the common document router.
         if (format == DOC_FORMAT_UNKNOWN && !(print_media && render_paged_input_supported(filename))) {
             log_error("Unsupported document format for file: %s", filename);
-            log_error("Supported formats: .html, .htm, .md, .markdown, .tex, .latex, .pgf, .ls, .slides, .xml, .pdf, .svg, .png, .jpg, .jpeg, .gif, .json, .yaml, .yml, .toml, .txt, .csv, .ini, .conf, .cfg, .log");
+            log_error("Supported formats: .html, .htm, .md, .markdown, .tex, .latex, .pgf, .ls, .slides, .xml, .pdf, .eps, .epsi, .svg, .png, .jpg, .jpeg, .gif, .json, .yaml, .yml, .toml, .txt, .csv, .ini, .conf, .cfg, .log");
             return NULL;
         }
         // a source-text view takes no page host settings
@@ -386,6 +390,7 @@ static const char* get_format_name(const char* filename) {
         case DOC_FORMAT_LAMBDA_SCRIPT: return "Lambda Script";
         case DOC_FORMAT_SLIDES: return "Slides";
         case DOC_FORMAT_PDF: return "PDF";
+        case DOC_FORMAT_EPS: return "EPS";
         case DOC_FORMAT_SVG: return "SVG";
         case DOC_FORMAT_IMAGE: return "Image";
         case DOC_FORMAT_TEXT: return "Text";

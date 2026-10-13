@@ -135,3 +135,17 @@ not clean; their results do not establish full-repository regression safety.
 Current T0 activation rejects the package import graph with `AST_NODE_IMPORT`;
 auto/JIT are the supported execution tiers for this delivered package. No
 performance claims were made from the debug verification builds.
+
+### Viewer admission correction
+
+The first implementation registered EPS in the CLI and common document router,
+but missed the viewer's earlier format detector. Consequently, direct
+`view artwork.eps` rejected the file before invoking its transform. The viewer
+now reuses `eps_source_expected` for `.eps`/`.epsi` admission and identifies EPS
+in its window title and supported-format diagnostic.
+
+`RadiantViewTest.LoadsEpsAsHeadlessView` failed with exit 255 before the rebuild
+and passes afterward, including zero retained allocations. Adjacent PDF/SVG
+viewer tests pass; a mixed-case `.EPSI` copy also loads cleanly. The sample was
+checked through the actual GUI viewer with `LAMBDA_AUTO_CLOSE=1` and exited 0.
+`make build` and the Radiant dimension lint pass for this correction.
