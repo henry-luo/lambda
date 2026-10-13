@@ -75,10 +75,8 @@ pn main() {
     var round: int = 0
     let t0 = clock()
     while (round < 256) {
-        var index: int = 0
-        while (index < len(pairs)) {
+        for index of pairs {
             checksum = checksum + score_diff(pairs[index][0], pairs[index][1])
-            index = index + 1
         }
         round = round + 1
     }

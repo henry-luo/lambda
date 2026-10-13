@@ -1638,7 +1638,25 @@ private:
                                             &begin, &end);
         if (after == 0) return false;
         while (after < length_ && isspace((unsigned char)source_[after])) after++;
-        return after < length_ && (source_[after] == '{' || source_[after] == '[');
+        if (after < length_ && (source_[after] == '{' || source_[after] == '[')) return true;
+        // picture coordinates chain without a following group: \multiput(0,0)(5,0){6}
+        // and \qbezier(0,0)(5,5)(10,0); prose like \LaTeX (2e) is not a number pair
+        return is_coordinate_pair(source_ + begin, end - begin);
+    }
+
+    static bool is_coordinate_pair(const char* text, size_t length) {
+        int commas = 0;
+        bool digit_before = false, digit_after = false;
+        for (size_t i = 0; i < length; i++) {
+            char c = text[i];
+            if (c == ',') { commas++; continue; }
+            if (isdigit((unsigned char)c)) {
+                if (commas == 0) digit_before = true; else digit_after = true;
+                continue;
+            }
+            if (c != '.' && c != '-' && c != '+' && !isspace((unsigned char)c)) return false;
+        }
+        return commas == 1 && digit_before && digit_after;
     }
 
     bool append_group_contents(ArrayBuilder& arguments) {
@@ -1840,6 +1858,35 @@ private:
                 size_t begin = 0, end = 0;
                 if (consume_group_span(&begin, &end))
                     append_argument_group(groups, "required", group_start);
+            }
+            elem.attr("argument_groups", groups.final());
+        }
+        if (strcmp(name, "multicols") == 0 || strcmp(name, "multicols*") == 0) {
+            // \begin{multicols}{n}[preface][skip]: the column count and the preface
+            // that spans all columns are header, not the first column's text.
+            ArrayBuilder groups = builder_.array();
+            skip_space_before_group('{', '{');
+            size_t group_start = position_;
+            size_t begin = 0, end = 0;
+            if (consume_group_span(&begin, &end)) {
+                append_argument_group(groups, "required", group_start);
+                elem.attr("columns", builder_.createStringItem(source_ + begin, end - begin));
+            }
+            for (int optional = 0; optional < 2; optional++) {
+                skip_space_before_group('[', '[');
+                group_start = position_;
+                if (!consume_brack_group_span(&begin, &end)) break;
+                append_argument_group(groups, "optional", group_start);
+                if (optional == 0) {
+                    DirectLatexParser nested(ctx_, tex_result_);
+                    nested.source_ = source_ + begin;
+                    nested.length_ = end - begin;
+                    nested.position_ = 0;
+                    ElementBuilder preface = builder_.element("multicols_preface");
+                    nested.parse_children(preface, 0, true);
+                    // first child, so analysis numbers its headings in source order
+                    elem.child(preface.final());
+                }
             }
             elem.attr("argument_groups", groups.final());
         }

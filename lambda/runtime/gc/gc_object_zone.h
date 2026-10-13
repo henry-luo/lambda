@@ -58,12 +58,28 @@ typedef struct gc_object_slab {
 // Slab range entry for fast ownership lookup via binary search.
 // Deliberately kept to two words: this array is the binary search's working
 // set, and widening it measurably costs cache density on slab-rich heaps.
-// The owning slab lives in the parallel `range_slabs` array instead, read only
+// The owning slab lives in the parallel `range_owners` array instead, read only
 // once after the search hits.
 typedef struct gc_slab_range {
     uint8_t* base;          // slab memory start
     uint8_t* end;           // slab memory end (exclusive)
 } gc_slab_range_t;
+
+// Owner of one range, parallel to slab_ranges: the slab for object-zone slots,
+// or the heap's opaque foreign owner (a bump block) for a registered range.
+typedef struct gc_range_owner {
+    struct gc_object_slab* slab;
+    void* foreign;
+} gc_range_owner_t;
+
+// One VM page of a registered range in the ownership page index.
+typedef struct gc_range_page {
+    uintptr_t page;             // address >> page_shift; 0 marks an empty slot
+    uint8_t* base;              // the owning range
+    uint8_t* end;
+    gc_range_owner_t owner;
+    bool shared;                // more than one range touches this page
+} gc_range_page_t;
 
 // Maximum number of slab ranges (grows dynamically if needed)
 #define GC_INITIAL_RANGE_CAPACITY 64
@@ -93,15 +109,27 @@ typedef struct gc_object_zone {
 
     // Fast ownership lookup: sorted array of slab ranges + min/max bounds
     gc_slab_range_t* slab_ranges;   // sorted by base address
-    // Owning slab per range, parallel to slab_ranges. NULL entries are bump
-    // blocks registered by gc_heap.c, which the zone never claims. Holding the
-    // slab here turns the post-search slot-alignment check into O(1); it used
-    // to re-walk every size class's slab chain and dominated the mark phase.
-    gc_object_slab_t** range_slabs;
+    // Owner per range, parallel to slab_ranges. A NULL slab is a bump block
+    // registered by gc_heap.c, which the zone never claims; its foreign owner
+    // lets the heap check the block without re-walking its block list. Holding
+    // the slab here turns the post-search slot-alignment check into O(1); it
+    // used to re-walk every size class's slab chain and dominated the mark phase.
+    gc_range_owner_t* range_owners;
     size_t range_count;             // number of entries in slab_ranges
     size_t range_capacity;          // allocated capacity of slab_ranges
     uint8_t* min_addr;              // minimum slab base address (fast rejection)
     uint8_t* max_addr;              // maximum slab end address (fast rejection)
+
+    // Exact page index over the ranges (open addressing, 2^bits slots). Every
+    // slab and bump block is its own VM region, so a page belongs to at most
+    // one range; marking queries ownership for every traced word, and the
+    // binary search alone dominated the mark phase. A shared page falls back
+    // to the search; a non-NULL index is always complete.
+    gc_range_page_t* page_index;
+    size_t page_index_count;
+    unsigned page_index_bits;
+    unsigned page_shift;
+    bool page_index_disabled;       // an allocation failure retired the index
 } gc_object_zone_t;
 
 /**
@@ -158,12 +186,21 @@ void gc_object_zone_free(gc_object_zone_t* oz, gc_header_t* header);
 int gc_object_zone_owns(gc_object_zone_t* oz, void* ptr);
 
 /**
+ * gc_object_zone_owns with one range search: when the pointer instead falls in
+ * a registered non-slab range, *foreign_owner receives that range's owner
+ * (otherwise NULL), so the caller can check it without a second lookup.
+ */
+int gc_object_zone_owns_or_foreign(gc_object_zone_t* oz, void* ptr, void** foreign_owner);
+
+/**
  * Register a non-slab address range (a gc_heap bump block) so it participates
  * in the zone's min/max bounds and sorted range array. Such ranges never claim
- * ownership from gc_object_zone_owns — the heap performs their exact-slot check.
+ * ownership from gc_object_zone_owns — the heap performs their exact-slot check,
+ * starting from `owner`.
  * @return true when the range is published; false when allocation fails.
  */
-bool gc_object_zone_register_range(gc_object_zone_t* oz, uint8_t* base, size_t bytes);
+bool gc_object_zone_register_range(gc_object_zone_t* oz, uint8_t* base, size_t bytes,
+                                   void* owner);
 
 /**
  * Get the size class index for a given user data size.

@@ -2650,3 +2650,14 @@ uniformly (S8.2.1v4's own example).
 yields hash-strings (Type_Vmap, *Iteration*), so `for (i of vmap)` is empty while
 `i of vmap` answers correctly. The gap pre-dates `of` (`for (k, v in vmap)` shows
 the same hash-strings) and is recorded in Appendix A of the semantics spec.
+
+**Follow-up (2026-10-12): rewriting `while` loops to `of`.** The MIR tier binds an `of`
+position natively and records the bounds facts a `while` counter earns, so on the JIT tier
+`for i of a { a[i] }` matches `while (i < len(a))`. Two caveats came out of rewriting the
+benchmark loops. In a `pn` body the parenthesized `for (i of a) { … }` is the expression form
+and builds a result list on every entry; the statement spelling is `for i of a { … }`. And
+D8.1.1v14's loop-head handoff covers `while` only, so on the `auto` tier a long `for` loop in
+a function entered fewer times than the promotion threshold stays in T0 (a one-call 490k
+string walk: 98 ms as `for`, 58 ms as `while`). The `text_search` benchmarks kept their
+`while` loops for that reason; extending the handoff to `for` statements is a design
+question for D8.1.1, not decided here.

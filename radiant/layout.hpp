@@ -4325,6 +4325,9 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block);
 void layout_apply_sticky_positions(LayoutContext* lycon, View* root);
 // re-solve sticky boxes after a scroll moved (paint and hit-testing call it)
 void layout_resolve_scrolled_sticky(ViewTree* view_tree);
+// Resolve a queued scrollIntoView against committed, otherwise clean layout
+// without relaying out the document; false leaves the request queued.
+bool layout_scroll_into_view_without_relayout(UiContext* uicon, DomDocument* doc);
 void layout_store_last_remembered_size(LayoutContext* lycon, ViewBlock* block,
                                       bool final_pass = false);
 bool element_has_float(ViewBlock* block);

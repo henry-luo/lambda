@@ -211,10 +211,10 @@ fn text_leaves_at(node, path) {
   let txt = tree_text(node)
   if (txt != null) { [{path: path, text: txt}] }
   else if (type(node) == element or type(node) == array) {
-    [for (i in 0 to len(node) - 1) for (leaf in text_leaves_at(node[i], [*path, i])) leaf]
+    [for (i, child of node) for (leaf in text_leaves_at(child, [*path, i])) leaf]
   }
   else if (is_editor_node(node)) {
-    [for (i in 0 to len(node.content) - 1) for (leaf in text_leaves_at(node.content[i], [*path, i])) leaf]
+    [for (i, child of node.content) for (leaf in text_leaves_at(child, [*path, i])) leaf]
   }
   else { [] }
 }

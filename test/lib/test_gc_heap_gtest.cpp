@@ -840,7 +840,7 @@ TEST_F(GCHeapTest, ParallelSlabOwnersStayAlignedAcrossRangeGrowth) {
     ASSERT_NE(zone, nullptr);
     EXPECT_GT(zone->range_count, (size_t)GC_INITIAL_RANGE_CAPACITY);
     ASSERT_NE(zone->slab_ranges, nullptr);
-    ASSERT_NE(zone->range_slabs, nullptr);
+    ASSERT_NE(zone->range_owners, nullptr);
 
     size_t non_slab_ranges = 0;
     for (size_t i = 0; i < zone->range_count; i++) {
@@ -848,11 +848,17 @@ TEST_F(GCHeapTest, ParallelSlabOwnersStayAlignedAcrossRangeGrowth) {
         if (i > 0) EXPECT_LE(zone->slab_ranges[i - 1].base, range->base);
         EXPECT_LT(range->base, range->end);
 
-        gc_object_slab_t* slab = zone->range_slabs[i];
+        gc_object_slab_t* slab = zone->range_owners[i].slab;
         if (!slab) {
             non_slab_ranges++;
             EXPECT_FALSE(gc_object_zone_owns(zone,
                 range->base + sizeof(gc_header_t)));
+            // a heap bump block hands itself back from the same range search
+            void* foreign = nullptr;
+            EXPECT_FALSE(gc_object_zone_owns_or_foreign(zone,
+                range->base + sizeof(gc_header_t), &foreign));
+            EXPECT_EQ(foreign, zone->range_owners[i].foreign);
+            EXPECT_NE(foreign, nullptr);
             continue;
         }
         EXPECT_EQ(slab->base, range->base);
@@ -897,12 +903,12 @@ TEST_F(GCHeapTest, RangeGrowthFailureIsAtomicAndReleasesUnregisteredSlab) {
     uint8_t* filler = (uint8_t*)calloc(filler_count + 2, 2);
     ASSERT_NE(filler, nullptr);
     for (size_t i = 0; i < filler_count; i++) {
-        ASSERT_TRUE(gc_object_zone_register_range(zone, filler + i * 2, 1));
+        ASSERT_TRUE(gc_object_zone_register_range(zone, filler + i * 2, 1, nullptr));
     }
     ASSERT_EQ(zone->range_count, zone->range_capacity);
 
     gc_slab_range_t* ranges_before = zone->slab_ranges;
-    gc_object_slab_t** owners_before = zone->range_slabs;
+    gc_range_owner_t* owners_before = zone->range_owners;
     size_t count_before = zone->range_count;
     size_t capacity_before = zone->range_capacity;
     uint8_t* min_before = zone->min_addr;
@@ -911,20 +917,20 @@ TEST_F(GCHeapTest, RangeGrowthFailureIsAtomicAndReleasesUnregisteredSlab) {
     // Cover failure of each allocation in the paired resize. Neither attempt
     // may publish a new array, range, or bound.
     memtrack_fault_inject(0);
-    EXPECT_FALSE(gc_object_zone_register_range(zone, filler + filler_count * 2, 1));
+    EXPECT_FALSE(gc_object_zone_register_range(zone, filler + filler_count * 2, 1, nullptr));
     memtrack_fault_clear();
     EXPECT_EQ(zone->slab_ranges, ranges_before);
-    EXPECT_EQ(zone->range_slabs, owners_before);
+    EXPECT_EQ(zone->range_owners, owners_before);
     EXPECT_EQ(zone->range_count, count_before);
     EXPECT_EQ(zone->range_capacity, capacity_before);
     EXPECT_EQ(zone->min_addr, min_before);
     EXPECT_EQ(zone->max_addr, max_before);
 
     memtrack_fault_inject(1);
-    EXPECT_FALSE(gc_object_zone_register_range(zone, filler + (filler_count + 1) * 2, 1));
+    EXPECT_FALSE(gc_object_zone_register_range(zone, filler + (filler_count + 1) * 2, 1, nullptr));
     memtrack_fault_clear();
     EXPECT_EQ(zone->slab_ranges, ranges_before);
-    EXPECT_EQ(zone->range_slabs, owners_before);
+    EXPECT_EQ(zone->range_owners, owners_before);
     EXPECT_EQ(zone->range_count, count_before);
     EXPECT_EQ(zone->range_capacity, capacity_before);
     EXPECT_EQ(zone->min_addr, min_before);
@@ -951,7 +957,7 @@ TEST_F(GCHeapTest, RangeGrowthFailureIsAtomicAndReleasesUnregisteredSlab) {
     EXPECT_EQ(zone->fresh_slabs[cls], initial_slab);
     EXPECT_EQ(zone->slab_count, slab_count_before);
     EXPECT_EQ(zone->slab_ranges, ranges_before);
-    EXPECT_EQ(zone->range_slabs, owners_before);
+    EXPECT_EQ(zone->range_owners, owners_before);
     EXPECT_EQ(zone->range_count, count_before);
     EXPECT_EQ(zone->range_capacity, capacity_before);
 

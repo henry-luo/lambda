@@ -788,7 +788,8 @@ static bool interp_take_list_item_position(InterpFrame* f, AstNode* producer) {
 }
 static void interp_note_backedge(InterpFrame* frame);
 static void interp_note_backedges(InterpFrame* frame, uint64_t trips);
-static bool interp_try_loop_handoff(InterpFrame* f, FnPromotionCell* cell, Item* out);
+static bool interp_try_loop_handoff(InterpFrame* f, FnPromotionCell* cell, Item* out,
+    const Item* resume, int resume_count, uint32_t statement_scratch);
 static FnPromotionCell* interp_frame_cell(InterpFrame* frame);
 static bool interp_note_tail_call(InterpFrame* frame);
 static bool interp_tail_handoff_candidate(const InterpFrame* frame);
@@ -3381,10 +3382,19 @@ static Item interp_item_at(Item source, int64_t index) {
     return interp_preserve_array_u64(source, index, value);
 }
 
+// S8.1.1v2: on the IntKey axis the key at walk position `index` IS `index` --
+// a sequence, text or element content walks positions from 0 and a map holds
+// no IntKey entries -- so the key needs no runtime lookup.
+static Item interp_iter_key_at(Item source, SymbolKeyList* keys, int64_t index,
+        int key_filter) {
+    if (key_filter == LOOP_KEY_INT) return (Item){.item = i2it(index)};
+    return iter_key_at(source, keys, index, key_filter);
+}
+
 static Item interp_iter_val_at(Item source, SymbolKeyList* keys, int64_t index,
         int key_filter, bool key_only) {
     Item value = key_only
-        ? iter_key_at(source, keys, index, key_filter)
+        ? interp_iter_key_at(source, keys, index, key_filter)
         : iter_val_at(source, keys, index, key_filter);
     return key_only ? value : interp_preserve_array_u64(source, index, value);
 }
@@ -3538,9 +3548,14 @@ typedef struct ForCtx {
     AstForNode*  node;
     uint64_t*    output;    // rooted Array* accumulator slot, NULL when discarded
     uint64_t*    keys;      // rooted Array* sort-key stream for ordered expressions
+    // D8.1.1v18: this statement is the activation's handoff loop, entered with
+    // the frame's scratch at `statement_scratch` (its own slots sit above it)
+    bool         handoff;
+    uint32_t     statement_scratch;
 } ForCtx;
 
 static bool interp_for_level(ForCtx* fc, AstLoopNode* loop);
+static bool interp_for_handoff_walk(ForCtx* fc, AstLoopNode* loop);
 
 // The row clauses run before a group is materialized. Keeping them separate
 // from body emission protects the post-group scope: `into g` must not observe
@@ -3626,14 +3641,39 @@ static bool interp_for_level(ForCtx* fc, AstLoopNode* loop) {
     NameEntry* index_entry = loop->index_name
         ? interp_scope_lookup(fc->node->vars, loop->index_name) : NULL;
 
+    // D8.1.1v18: a continuation's copy resumes its walk at a given position
+    bool outermost = loop == (AstLoopNode*)fc->node->loop;
+    int64_t start = 0;
+    if (outermost && fc->node->resume_from) {
+        Item position = eval_expr(f, fc->node->resume_from);
+        if (interp_frame_pending(f)) { if (keys) symbol_key_list_free(keys); return false; }
+        int64_t value = 0;
+        if (lambda_item_to_int64_exact(position, &value) && value > 0) start = value;
+    }
     bool ok = true;
-    for (int64_t i = 0; i < length && ok; i++) {
+    for (int64_t i = start; i < length && ok; i++) {
+        if (fc->handoff && outermost) {
+            // D8.1.1v18: at this head test the walk's hidden state is its
+            // snapshot and position i, which the continuation takes after the
+            // frame's live-ins; T0 unwinds as for `return`
+            FnPromotionCell* cell = f->promotion_cell;
+            Item handed = ItemNull;
+            Item resume[2] = {coll_slot.get(), (Item){.item = i2it(i)}};
+            if (cell && cell->loop_state == FN_LOOP_HANDOFF_READY &&
+                    cell->loop_ordinal == fc->node->interp_handoff_ordinal &&
+                    interp_try_loop_handoff(f, cell, &handed, resume, 2,
+                        fc->statement_scratch)) {
+                if (keys) symbol_key_list_free(keys);
+                interp_signal(f, EvalSignal::RETURNED, handed);
+                return false;
+            }
+        }
         Item current = interp_iter_val_at(coll_slot.get(), keys, i, key_filter,
             loop->key_only);
         interp_write_binding(f, value_entry, current);
         if (index_entry) {
             interp_write_binding(f, index_entry,
-                iter_key_at(coll_slot.get(), keys, i, key_filter));
+                interp_iter_key_at(coll_slot.get(), keys, i, key_filter));
         }
         ok = interp_for_level(fc, (AstLoopNode*)((AstNode*)loop)->next);
         if (f->signal == EvalSignal::BROKE) { interp_clear_loop_signal(f); break; }
@@ -3710,7 +3750,7 @@ static Array* interp_for_collect_groups(ForCtx* fc, AstLoopNode* loop) {
         interp_write_binding(f, value_entry, row_slot.get());
         if (index_entry) {
             interp_write_binding(f, index_entry,
-                iter_key_at(collection_slot.get(), keys, i, key_filter));
+                interp_iter_key_at(collection_slot.get(), keys, i, key_filter));
         }
 
         bool keep = true;
@@ -3872,7 +3912,7 @@ static bool interp_join_collect_source(ForCtx* fc, AstLoopNode* loop,
         interp_write_binding(f, value_entry, row_slot.get());
         Scratch source_index(f);
         if (index_entry) {
-            source_index.set(iter_key_at(collection_slot.get(), keys, i, key_filter));
+            source_index.set(interp_iter_key_at(collection_slot.get(), keys, i, key_filter));
             interp_write_binding(f, index_entry, source_index.get());
         }
         Array* rows = (Array*)(uintptr_t)rows_slot.get().item;
@@ -4082,6 +4122,7 @@ static Item eval_for_stream(InterpFrame* f, AstForNode* for_node, bool result_de
     ForCtx fc = {};
     fc.f = f;
     fc.node = for_node;
+    fc.statement_scratch = f->scratch_top;
     // A procedural `for` statement still runs its body, but its comprehension
     // stream is dead when the enclosing block discards it.
     Scratch out_slot(f);
@@ -4106,7 +4147,9 @@ static Item eval_for_stream(InterpFrame* f, AstForNode* for_node, bool result_de
             out_slot, key_slot);
     }
 
-    interp_for_level(&fc, loop);
+    // D8.1.1v18: a numbered statement walks under its handoff scope
+    if (for_node->interp_handoff_ordinal) interp_for_handoff_walk(&fc, loop);
+    else interp_for_level(&fc, loop);
     if (!result_demanded) return ItemNull;
 
     return interp_for_finalize_output(f, for_node, out_slot.home(), key_slot.home());
@@ -5191,13 +5234,13 @@ static bool interp_loop_census_enabled(void) {
 // for the loop statement's extent; nested loops leave the frame's loop as is.
 class InterpHandoffLoopScope {
     InterpFrame* frame_;
-    const AstLoopControlNode* saved_;
+    const AstNode* saved_;
     bool active_;
 
 public:
-    InterpHandoffLoopScope(InterpFrame* frame, const AstLoopControlNode* loop)
+    InterpHandoffLoopScope(InterpFrame* frame, const AstNode* loop)
             : frame_(frame), saved_(frame->handoff_loop), active_(false) {
-        if (!loop->interp_handoff_ordinal || !frame->fn ||
+        if (!ast_handoff_ordinal(loop) || !frame->fn ||
                 lambda_tier_selected() != LAMBDA_TIER_AUTO) return;
         if (!interp_frame_cell(frame)) return;
         frame->handoff_loop = loop;
@@ -5208,12 +5251,12 @@ public:
             // Interp Tune2 Phase 1.1: cumulative back-edges of this loop site,
             // logged per loop exit; the census keeps each site's maximum
             const FnPromotionCell* cell = frame_->promotion_cell;
-            const AstLoopControlNode* loop = frame_->handoff_loop;
+            const AstNode* loop = frame_->handoff_loop;
             log_debug("loop-census fn=%s loop=%u at=%u backedges=%u state=%d",
                 frame_->fn->name ? frame_->fn->name->chars : "<anonymous>",
-                (unsigned)loop->interp_handoff_ordinal,
-                (unsigned)((AstNode*)loop)->source_span.start_byte,
-                cell ? cell->loop_backedges[loop->interp_handoff_ordinal - 1] : 0,
+                (unsigned)ast_handoff_ordinal(loop),
+                (unsigned)loop->source_span.start_byte,
+                cell ? cell->loop_backedges[ast_handoff_ordinal(loop) - 1] : 0,
                 cell ? (int)cell->loop_state : -1);
         }
         frame_->handoff_loop = saved_;
@@ -5224,6 +5267,14 @@ public:
     InterpHandoffLoopScope& operator=(const InterpHandoffLoopScope&) = delete;
 };
 
+// D8.1.1v18: a numbered `for` statement is the activation's handoff loop for
+// the extent of its walk, as a `while` is for its loop statement.
+static bool interp_for_handoff_walk(ForCtx* fc, AstLoopNode* loop) {
+    InterpHandoffLoopScope handoff_scope(fc->f, (AstNode*)fc->node);
+    fc->handoff = handoff_scope.active();
+    return interp_for_level(fc, loop);
+}
+
 // Credits a fast integer loop's iterations to the enclosing handoff loop. The
 // handoff loop itself is excluded: run whole by the fast path it never reaches
 // a head test, so a continuation compiled for it could not be entered.
@@ -5233,7 +5284,7 @@ class InterpBackedgeTally {
 
 public:
     uint64_t trips;
-    InterpBackedgeTally(InterpFrame* frame, const AstLoopControlNode* loop)
+    InterpBackedgeTally(InterpFrame* frame, const AstNode* loop)
             : frame_(frame), enabled_(frame->handoff_loop &&
                 frame->handoff_loop != loop), trips(0) {}
     ~InterpBackedgeTally() { if (enabled_) interp_note_backedges(frame_, trips); }
@@ -6137,7 +6188,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
                 Item handed = ItemNull;
                 if (cell && cell->loop_state == FN_LOOP_HANDOFF_READY &&
                         cell->loop_ordinal == loop->interp_handoff_ordinal &&
-                        interp_try_loop_handoff(f, cell, &handed)) {
+                        interp_try_loop_handoff(f, cell, &handed, NULL, 0, f->scratch_top)) {
                     interp_signal(f, EvalSignal::RETURNED, handed);
                     return handed;
                 }
@@ -6420,13 +6471,49 @@ static String* interp_pool_string(Pool* pool, const char* prefix, size_t prefix_
     return text;
 }
 
+// D8.1.1v18: the names of a `for` continuation's two trailing parameters.
+// Lookups go by binding entry, so they cannot capture a user binding; a
+// live-in spelled the same is still refused, to keep the names distinct.
+static const char INTERP_LOOP_WALK_NAME[] = "__loop_walk";
+static const char INTERP_LOOP_AT_NAME[] = "__loop_at";
+
+// A hidden continuation parameter and the identifier the resumed `for` reads
+// it through; both share one fresh binding entry.
+static AstNamedNode* interp_hidden_loop_param(Pool* pool, const char* spelling,
+        Type* type, const AstNode* at, AstIdentNode** ident_out) {
+    NameEntry* entry = (NameEntry*)pool_calloc(pool, sizeof(NameEntry));
+    AstNamedNode* param = (AstNamedNode*)pool_calloc(pool, sizeof(AstNamedNode));
+    AstIdentNode* ident = (AstIdentNode*)pool_calloc(pool, sizeof(AstIdentNode));
+    TypeParam* param_type = alloc_type_param(pool, type);
+    String* name = interp_pool_string(pool, spelling, strlen(spelling), "");
+    if (!entry || !param || !ident || !param_type || !name) return NULL;
+    apply_param_contract(param_type, type, true);
+    entry->name = name;
+    entry->node = (AstNode*)param;
+    entry->is_parameter = true;
+    entry->declared_type = type;
+    param->node_type = AST_NODE_PARAM;
+    param->name = name;
+    param->entry = entry;
+    param->source_span = at->source_span;
+    param->declared_type = type;
+    ((AstNode*)param)->type = param_type;
+    ident->node_type = AST_NODE_IDENT;
+    ident->name = name;
+    ident->entry = entry;
+    ident->source_span = at->source_span;
+    ((AstNode*)ident)->type = type;
+    *ident_out = ident;
+    return param;
+}
+
 // The synthesized procedure: `def`'s body from `loop` onward, over the
 // live-ins as parameters. Its nodes reference -- never modify -- the shared
 // AST; only the wrapper nodes, signature and analysis record are new. The
 // parameters reuse the live-ins' own binding entries, so every identifier in
 // the shared statements already names its parameter.
 static AstFuncNode* interp_build_loop_continuation(Pool* pool, AstFuncNode* def,
-        AstLoopControlNode* loop, NameEntry* const* live, int count) {
+        AstNode* loop, NameEntry* const* live, int count) {
     AstListNode* source_body = (AstListNode*)ast_unwrap_primary(def->body);
     AstListNode* body = (AstListNode*)pool_calloc(pool, sizeof(AstListNode));
     TypeFunc* signature = (TypeFunc*)alloc_type(pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
@@ -6434,7 +6521,7 @@ static AstFuncNode* interp_build_loop_continuation(Pool* pool, AstFuncNode* def,
     AstFuncNode* continuation = (AstFuncNode*)pool_calloc(pool, sizeof(AstFuncNode));
     if (!body || !signature || !analysis || !continuation) return NULL;
     *body = *source_body;
-    body->item = (AstNode*)loop;
+    body->item = loop;
     body->interp_proc_scanned = false;
 
     AstNamedNode* first_param = NULL;
@@ -6488,6 +6575,43 @@ static AstFuncNode* interp_build_loop_continuation(Pool* pool, AstFuncNode* def,
         last_type = type;
     }
 
+    if (loop->node_type == AST_NODE_FOR_EXPR) {
+        // D8.1.1v18: the continuation's first statement is a copy of the `for`
+        // that walks the T0 snapshot from the position T0 stopped at. Only the
+        // copy and its source clause are new; the body and clauses are shared.
+        AstForNode* source_for = (AstForNode*)loop;
+        AstIdentNode* walk = NULL;
+        AstIdentNode* at = NULL;
+        AstNamedNode* walk_param = interp_hidden_loop_param(pool, INTERP_LOOP_WALK_NAME,
+            &TYPE_ANY, loop, &walk);
+        AstNamedNode* at_param = interp_hidden_loop_param(pool, INTERP_LOOP_AT_NAME,
+            &TYPE_INT, loop, &at);
+        AstForNode* resumed = (AstForNode*)pool_calloc(pool, sizeof(AstForNode));
+        AstLoopNode* clause = (AstLoopNode*)pool_calloc(pool, sizeof(AstLoopNode));
+        if (!walk_param || !at_param || !resumed || !clause) return NULL;
+        *resumed = *source_for;
+        *clause = *(AstLoopNode*)source_for->loop;
+        clause->as = (AstNode*)walk;
+        clause->snapshot_collection = false;   // the walk is already the snapshot
+        resumed->loop = (AstNode*)clause;
+        resumed->resume_from = (AstNode*)at;
+        resumed->interp_handoff_ordinal = 0;
+        body->item = (AstNode*)resumed;
+        AstNamedNode* hidden[2] = {walk_param, at_param};
+        for (int h = 0; h < 2; h++) {
+            TypeParam* type = (TypeParam*)((AstNode*)hidden[h])->type;
+            if (last_param) {
+                ((AstNode*)last_param)->next = (AstNode*)hidden[h];
+                last_type->next = type;
+            } else {
+                first_param = hidden[h];
+            }
+            last_param = hidden[h];
+            last_type = type;
+        }
+        count += 2;
+    }
+
     // The definition's T0 epilogue still checks its declared return contract,
     // so the continuation returns a plain boxed Item.
     TypeFunc* source_signature = (TypeFunc*)((AstNode*)def)->type;
@@ -6528,8 +6652,12 @@ static AstFuncNode* interp_build_loop_continuation(Pool* pool, AstFuncNode* def,
     return continuation->name ? continuation : NULL;
 }
 
-static void interp_queue_loop_handoff(InterpFrame* frame, AstLoopControlNode* loop,
+static void interp_queue_loop_handoff(InterpFrame* frame, const AstNode* loop_node,
         FnPromotionCell* cell) {
+    // D8.1.1v18: a `while` or a plain `for` statement
+    AstNode* loop = (AstNode*)loop_node;
+    uint8_t ordinal = ast_handoff_ordinal(loop);
+    int resume_args = loop->node_type == AST_NODE_FOR_EXPR ? 2 : 0;
     AstFuncNode* def = (AstFuncNode*)frame->fn;
     InterpState* st = frame->st;
     TypeFunc* signature = (TypeFunc*)((AstNode*)def)->type;
@@ -6555,9 +6683,9 @@ static void interp_queue_loop_handoff(InterpFrame* frame, AstLoopControlNode* lo
         // block value, so then the value expression may sit anywhere.
         int values = 0, decls = 0, stams = 0;
         AstNode* last_value = interp_proc_block_last_value(body, &values, &decls, &stams);
-        AstNode* last_item = (AstNode*)loop;
+        AstNode* last_item = loop;
         bool value_after_loop = last_value == NULL;
-        for (AstNode* item = (AstNode*)loop; item; item = item->next) {
+        for (AstNode* item = loop; item; item = item->next) {
             value_after_loop = value_after_loop || item == last_value;
             last_item = item;
         }
@@ -6565,7 +6693,17 @@ static void interp_queue_loop_handoff(InterpFrame* frame, AstLoopControlNode* lo
             last_item->node_type == AST_NODE_RAISE_STAM;
         if (!value_after_loop && !ends_in_transfer) why = "block-value";
     }
-    if (!why) why = interp_loop_live_ins(frame, (AstNode*)loop, live, &live_count);
+    if (!why) why = interp_loop_live_ins(frame, loop, live, &live_count);
+    if (!why && live_count + resume_args > LAMBDA_MAX_FUNCTION_ARGS) why = "live-in-count";
+    for (int i = 0; !why && resume_args && i < live_count; i++) {
+        const String* name = live[i]->name;
+        if (name && ((name->len == sizeof(INTERP_LOOP_WALK_NAME) - 1 &&
+                memcmp(name->chars, INTERP_LOOP_WALK_NAME, name->len) == 0) ||
+                (name->len == sizeof(INTERP_LOOP_AT_NAME) - 1 &&
+                memcmp(name->chars, INTERP_LOOP_AT_NAME, name->len) == 0))) {
+            why = "hidden-name";
+        }
+    }
     if (!why) {
         pool = mem_pool_create(NULL, MEM_ROLE_CODE, "interp.loop.continuation");
         continuation = pool ? interp_build_loop_continuation(pool, def, loop, live,
@@ -6583,15 +6721,16 @@ static void interp_queue_loop_handoff(InterpFrame* frame, AstLoopControlNode* lo
     if (why) {
         log_debug("interp-tier: loop handoff pinned function='%s' loop=%u reason=%s",
             def->name ? def->name->chars : "<anonymous>",
-            (unsigned)loop->interp_handoff_ordinal, why);
+            (unsigned)ordinal, why);
         cell->loop_live_ins = NULL;
         if (pool) pool_destroy(pool);
         return;
     }
 
-    cell->loop_ordinal = loop->interp_handoff_ordinal;
+    cell->loop_ordinal = ordinal;
     cell->loop_continuation = continuation;
     cell->loop_live_in_count = (uint8_t)live_count;
+    cell->loop_resume_arg_count = (uint8_t)resume_args;
     cell->loop_state = FN_LOOP_HANDOFF_NONE;   // the enqueue claims it
     if (!interp_satellite_enqueue(st->runtime, frame->module, def, cell,
             continuation, pool)) {
@@ -6615,11 +6754,11 @@ static void interp_queue_loop_handoff(InterpFrame* frame, AstLoopControlNode* lo
 
 static void interp_note_backedges(InterpFrame* frame, uint64_t trips) {
     interp_poll_interrupt();   // every T0 back-edge is an interrupt point
-    AstLoopControlNode* loop = frame ? (AstLoopControlNode*)frame->handoff_loop : NULL;
+    const AstNode* loop = frame ? frame->handoff_loop : NULL;
     if (!loop || trips == 0) return;
     FnPromotionCell* cell = interp_frame_cell(frame);
     if (!cell) return;
-    uint32_t* count = &cell->loop_backedges[loop->interp_handoff_ordinal - 1];
+    uint32_t* count = &cell->loop_backedges[ast_handoff_ordinal(loop) - 1];
     uint64_t before = *count;
     uint64_t after = before + trips;
     *count = after > UINT32_MAX ? UINT32_MAX : (uint32_t)after;
@@ -6642,23 +6781,29 @@ static void interp_note_backedge(InterpFrame* frame) {
 // Enter the published continuation at this head test of its loop. Returns
 // false, leaving the activation in T0, unless the frame is at a statement
 // boundary with no implicit context or partially published `var` state.
-static bool interp_try_loop_handoff(InterpFrame* f, FnPromotionCell* cell, Item* out) {
-    if (f->scratch_top != f->scratch_base || interp_frame_pending(f) ||
+static bool interp_try_loop_handoff(InterpFrame* f, FnPromotionCell* cell, Item* out,
+        const Item* resume, int resume_count, uint32_t statement_scratch) {
+    // D8.1.1v18: a `for` walk holds its own scratch slots (its snapshot among
+    // them), so the boundary test applies to the statement's entry level
+    if (statement_scratch != f->scratch_base || interp_frame_pending(f) ||
             f->st->mode != EvalMode::RUNTIME || f->var_marked_mask || f->method ||
             f->binder_count || f->proc_handler || f->st->view_bindings ||
-            !cell->loop_entry || !cell->loop_continuation) {
+            !cell->loop_entry || !cell->loop_continuation ||
+            resume_count != cell->loop_resume_arg_count) {
         return false;
     }
     const AstFuncNode* continuation = cell->loop_continuation;
-    int argc = cell->loop_live_in_count;
+    int live_count = cell->loop_live_in_count;
+    int argc = live_count + resume_count;
     // the argument words and the Function are rooted across the allocation
     // and the call (D5.3.3)
     RootSpan roots((size_t)argc + 1);
     uint64_t* words = roots.words();
     if (!words) return false;
-    for (int i = 0; i < argc; i++) {
+    for (int i = 0; i < live_count; i++) {
         words[i] = f->slots[cell->loop_live_ins[i]->slot];
     }
+    for (int i = 0; i < resume_count; i++) words[live_count + i] = resume[i].item;
     Function* fn = to_closure_named(NULL, argc, NULL, continuation->name->chars);
     if (!fn) return false;
     words[argc] = (uint64_t)(uintptr_t)fn;
@@ -6674,7 +6819,7 @@ static bool interp_try_loop_handoff(InterpFrame* f, FnPromotionCell* cell, Item*
     // epilogue updates, so this activation's epilogue publishes it on.
     Context* transport = (Context*)f->st->ctx;
     bool borrowed = false;
-    for (int i = 0; i < argc; i++) {
+    for (int i = 0; i < live_count; i++) {
         NameEntry* entry = cell->loop_live_ins[i];
         if (!entry->is_var_param) continue;
         transport->mir_var_homes[i] = &f->slots[entry->slot];
@@ -6694,7 +6839,7 @@ static bool interp_try_loop_handoff(InterpFrame* f, FnPromotionCell* cell, Item*
         ? fn_call_borrowed_into(fn, argc ? &args : NULL, &result_home)
         : fn_call_into(fn, argc ? &args : NULL, &result_home);
     if (borrowed) {
-        for (int i = 0; i < argc; i++) transport->mir_var_homes[i] = NULL;
+        for (int i = 0; i < live_count; i++) transport->mir_var_homes[i] = NULL;
     }
     *out = result;
     return true;
@@ -6730,7 +6875,8 @@ static bool interp_note_tail_call(InterpFrame* frame) {
 INTERP_DISABLED_MIR_HOOK(static FnPromotionCell*, interp_frame_cell, (InterpFrame*), NULL)
 INTERP_DISABLED_MIR_HOOK(static void, interp_note_backedges, (InterpFrame*, uint64_t), )
 INTERP_DISABLED_MIR_HOOK(static void, interp_note_backedge, (InterpFrame*), )
-INTERP_DISABLED_MIR_HOOK(static bool, interp_try_loop_handoff, (InterpFrame*, FnPromotionCell*, Item*), false)
+INTERP_DISABLED_MIR_HOOK(static bool, interp_try_loop_handoff, (InterpFrame*, FnPromotionCell*, Item*,
+    const Item*, int, uint32_t), false)
 INTERP_DISABLED_MIR_HOOK(static bool, interp_tail_handoff_candidate, (const InterpFrame*), false)
 INTERP_DISABLED_MIR_HOOK(static bool, interp_note_tail_call, (InterpFrame*), false)
 #endif

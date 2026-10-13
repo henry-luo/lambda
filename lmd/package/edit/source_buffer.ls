@@ -31,7 +31,7 @@ fn chunks_of(lines) {
 }
 
 // First-line indexes of pieces from chunks_of: all but the last share one size.
-fn piece_starts(base, pieces) => [for (j in 0 to len(pieces) - 1) base + j * len(pieces[0])]
+fn piece_starts(base, pieces) => [for (j of pieces) base + j * len(pieces[0])]
 
 fn make(lines, eol, final_newline, version) {
   let chunks = chunks_of(lines)

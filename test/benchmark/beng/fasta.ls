@@ -58,11 +58,9 @@ let HS_PROBS = [0.3029549426680, 0.1979883004921, 0.1975473066391, 0.30150945020
 pn make_cumulative(probs) {
     var cum = fill(len(probs), 0.0)
     var total = 0.0
-    var i = 0
-    while (i < len(probs)) {
+    for i of probs {
         total = total + probs[i]
         cum[i] = total
-        i = i + 1
     }
     return cum
 }

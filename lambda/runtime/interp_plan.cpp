@@ -1746,9 +1746,21 @@ static void plan_scan_proc_block(AstListNode* list_node) {
     list_node->interp_proc_scanned = true;
 }
 
-// D8.1.1v14: a `while` that is a direct statement of a `pn` body can hand the
-// running activation to compiled code at its head test. There T0's whole live
-// state is the frame's named slots, and the statements from the loop to the
+// D8.1.1v18: a `for` statement hands off like a `while` when its walk is the
+// plain one -- a single source with no join and no stream clause -- so the
+// walk's whole hidden state is its snapshot and the next position, which the
+// continuation takes as two trailing parameters.
+static bool plan_for_statement_can_hand_off(AstForNode* for_node) {
+    AstLoopNode* loop = (AstLoopNode*)for_node->loop;
+    return for_node->discard_result && loop && !((AstNode*)loop)->next &&
+        !loop->on && !loop->join_keys && !loop->optional &&
+        !for_node->group && !for_node->order && !for_node->limit && !for_node->offset;
+}
+
+// D8.1.1v14/v18: a `while` or a plain `for` statement that is a direct statement
+// of a `pn` body can hand the running activation to compiled code at its head
+// test. There T0's live state is the frame's named slots (plus, for a `for`,
+// its walk's snapshot and position), and the statements from the loop to the
 // end of the body form a function of them (the continuation). Nested loops
 // are not numbered: their back-edges count toward the enclosing handoff loop.
 static void plan_mark_handoff_loops(AstFuncNode* fn) {
@@ -1758,11 +1770,14 @@ static void plan_mark_handoff_loops(AstFuncNode* fn) {
             body->node_type != AST_NODE_LIST)) return;
     uint8_t ordinal = 0;
     for (AstNode* item = ((AstListNode*)body)->item; item; item = item->next) {
-        if (item->node_type != AST_NODE_LOOP) continue;
-        AstLoopControlNode* loop = (AstLoopControlNode*)item;
-        if (loop->form != LOOP_FORM_WHILE) continue;
         if (ordinal >= INTERP_HANDOFF_LOOP_MAX) break;
-        loop->interp_handoff_ordinal = ++ordinal;
+        if (item->node_type == AST_NODE_LOOP &&
+                ((AstLoopControlNode*)item)->form == LOOP_FORM_WHILE) {
+            ((AstLoopControlNode*)item)->interp_handoff_ordinal = ++ordinal;
+        } else if (item->node_type == AST_NODE_FOR_EXPR &&
+                plan_for_statement_can_hand_off((AstForNode*)item)) {
+            ((AstForNode*)item)->interp_handoff_ordinal = ++ordinal;
+        }
     }
 }
 

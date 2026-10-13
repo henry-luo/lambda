@@ -24,7 +24,7 @@ pub fn page_count(pdf) {
 // Get the i-th page (0-based). Returns null if out of range.
 pub fn page_at(pdf, i: int) {
     let ps = pages(pdf);
-    if i >= 0 and i < len(ps) { ps[i] } else { null }
+    if i of ps { ps[i] } else { null }
 }
 
 // ============================================================

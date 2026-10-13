@@ -17,8 +17,7 @@ pn build_base() string[] {
 
 pn make_variant(base: string[], side: string) string[] {
     var lines: array = []
-    var index = 0
-    while (index < len(base)) {
+    for index of base {
         var line = base[index]
         if (index % 17 == 0) {
             line = line ++ " " ++ side ++ " edit " ++ string(index % 31) ++
@@ -29,7 +28,6 @@ pn make_variant(base: string[], side: string) string[] {
             line = line ++ " right-only annotation"
         }
         lines.push(line)
-        index = index + 1
     }
     lines
 }
@@ -72,8 +70,7 @@ pn merge_words(base_line: string, left_line: string, right_line: string) string 
 // S11.4.8v2/D8.3.4v2: direct typed document arrays select a task-free pn raw body.
 pn merge_lines(base_lines: string[] as B, left_lines: string[], right_lines: string[]) string {
     var merged: array = []
-    var index = 0
-    while (index < len(base_lines)) {
+    for index of base_lines {
         let base_line = base_lines[index]
         let left_line = left_lines[index]
         let right_line = right_lines[index]
@@ -81,7 +78,6 @@ pn merge_lines(base_lines: string[] as B, left_lines: string[], right_lines: str
         else if (left_line == base_line) merged.push(right_line)
         else if (right_line == base_line) merged.push(left_line)
         else merged.push(merge_words(base_line, left_line, right_line))
-        index = index + 1
     }
     join(merged, "\n")
 }

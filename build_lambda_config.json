@@ -3503,6 +3503,42 @@
             "parallel": false
           },
           {
+            "source": "test/test_radiant_text_query_gtest.cpp",
+            "name": "Radiant Text Query Tests",
+            "dependencies": [
+              "lambda-rt",
+              "node-core",
+              "radiant"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "Security",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
+            "binary": "test_radiant_text_query_gtest.exe",
+            "icon": "\ud83c\udfa8"
+          },
+          {
             "source": "test/test_rdt_vector_gtest.cpp",
             "name": "Vector Backend Tests",
             "dependencies": [
@@ -6095,7 +6131,7 @@
             "runner_name": "test_ui_automation_extended_gtest",
             "runner_args": [
               "--suite",
-              "all"
+              "bold,editor,edit,hit-test"
             ],
             "binary": "test_ui_automation_gtest.exe",
             "libraries": [

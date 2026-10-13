@@ -65,10 +65,8 @@ pn cumsum(n, both) {
 pn kv_object(n) {
     let singles = [for (x in jq_range(0, n, 1)) {[string(x)]: x}]
     var merged = {}
-    var i = 0
-    while (i < len(singles)) {
+    for i of singles {
         for (k, v at singles[i]) { merged[string(k)] = v }
-        i = i + 1
     }
     merged
 }
@@ -84,10 +82,8 @@ pn object_add_one(m) {
 pn entries_add_one(m) {
     let entries = [for (k, v at m) {key: string(k), value: v + 1}]
     var r = {}
-    var i = 0
-    while (i < len(entries)) {
+    for i of entries {
         r[entries[i].key] = entries[i].value
-        i = i + 1
     }
     r
 }
@@ -153,11 +149,9 @@ pn range_prop(n) {
 pn str_slice(n) {
     let s = repeat_string("a", n)
     var out = []
-    var x = 0
-    while (x < len(s)) {
+    for x of s {
         out.push(jq_slice(s, x, null))
         out.push(jq_slice(s, null, 0 - x))
-        x = x + 1
     }
     out
 }

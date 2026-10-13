@@ -713,9 +713,9 @@ int default_timeout;             // from JSON "default_timeout"
 |-------|------|------------|--------|-------------|
 | 5a | `test_phase5a_geometry.html` | `ui_phase5a_geometry.json` | ✅ Passing | `assert_rect` (3), `assert_style` (12 properties), `assert_position` (4 relations) |
 | 5b | `test_phase5b_page1.html` + `test_phase5b_page2.html` | `ui_phase5b_navigate.json` | ✅ Passing | Navigate page1→page2→page1, verify content + styles |
-| 5b | `test_phase5b_page1.html` + `page2` + `page3` | `ui_phase5b_navigate_back.json` | ✅ Passing | Navigate page1→page2→page3, `navigate_back`×2 to page1 |
+| 5b | `test_phase5b_page1.html` + `page2` + `page3` | `ui_phase5b_navigate_back.json` (merged into `ui_phase5b_navigate.json`, 2026-10-13) | ✅ Passing | Navigate page1→page2→page3, `navigate_back`×2 to page1 |
 | 5c (hit-test) | `test_phase5a_geometry.html` | `ui_phase5c_element_at.json` | ✅ Passing | `assert_element_at` hit-testing at coordinates |
-| 5c (auto-wait) | `test_phase5g_transform.html` | `ui_phase5c_auto_wait.json` | ✅ Passing | Assert with `default_timeout`, per-event `timeout`/`interval` |
+| 5c (auto-wait) | `test_phase5g_transform.html` | `ui_phase5c_auto_wait.json` (merged into `ui_phase5g_transform.json`, 2026-10-13) | ✅ Passing | Assert with `default_timeout`, per-event `timeout`/`interval` |
 | 5d | `test_phase5d_hover.html` | `ui_phase5d_hover.json` | ✅ Passing | Hover set/transfer between elements via `assert_state :hover` |
 | 5g | `test_phase5g_transform.html` | `ui_phase5g_transform.json` | ✅ Passing | Transform geometry: `assert_rect`, `assert_style`, `assert_position` |
 | 5e | `test_phase5e_focus.html` | `ui_phase5e_focus.json` | ✅ Passing | Click→focus, Tab×5, Shift+Tab×2, `assert_focus` + `assert_state :focus` |

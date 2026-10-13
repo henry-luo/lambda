@@ -245,8 +245,8 @@ fn render_element(el, info) {
 
         // ---- environments ----
         case 'quote': render_env_block(el, info, "blockquote", "latex-quote")
-        case 'quotation': render_env_block(el, info, "blockquote", "latex-quote")
-        case 'verse': render_env_block(el, info, "blockquote", "latex-quote")
+        case 'quotation': render_env_block(el, info, "blockquote", "latex-quote latex-quotation")
+        case 'verse': render_env_block(el, info, "blockquote", "latex-quote latex-verse")
         case 'center': render_env_div(el, info, "latex-center", "text-align:center")
         case 'flushleft': render_env_div(el, info, "latex-flushleft", "text-align:left")
         case 'flushright': render_env_div(el, info, "latex-flushright", "text-align:right")
@@ -358,6 +358,8 @@ fn render_element(el, info) {
         case 'quad': spacing.render_quad_el()
         case 'qquad': spacing.render_qquad_el()
         case 'enspace': spacing.render_enspace_el()
+        case '/': spacing.render_italcorr_el()
+        case 'slash': spacing.render_slash_el()
         case 'thinspace': spacing.render_thinspace_el()
         case 'negthinspace': spacing.render_negthinspace_el()
         case 'noindent': spacing.render_noindent_el()
@@ -911,9 +913,17 @@ fn render_paragraph(el, info) {
                 if (len(parts) == 1) parts[0]
                 else parts
             }
+            else if (starts_with_noindent(el)) { <p style: "text-indent:0", for c in items { c }> }
             else { <p for c in items { c }> }
         }
     }
+}
+
+// \noindent at the start of a paragraph removes its indentation
+fn starts_with_noindent(el) {
+    let leading = [for (item in util.command_args(el)
+        where not (item is string and trim(item) == "")) item]
+    len(leading) > 0 and leading[0] is element and string(name(leading[0])) == "noindent"
 }
 
 fn has_parbreak(el, i, n) {
@@ -1361,12 +1371,18 @@ fn check_figure_match(figures, text, i) {
     else find_figure_num(figures, text, i + 1)
 }
 
+// The parser keeps \begin{multicols}{n}[preface] as a `columns` attribute and a
+// leading multicols_preface child; the preface spans all columns.
 fn render_multicols(el, info) {
-    let col_group = util.find_child(el, 'curly_group')
-    let cols = if (col_group != null) util.text_of(col_group) else "2"
-    let items = render_children(el, 0, info);
-    <div class: "latex-multicols", style: "column-count:" ++ trim(cols),
-        for c in items { c }
+    let cols = if (el.columns != null) trim(el.columns) else "2"
+    let preface = util.find_child(el, 'multicols_preface')
+    let columns = <div class: "latex-multicols", style: "column-count:" ++ cols,
+        for c in render_children(el, if (preface == null) 0 else 1, info) { c }
+    >
+    if (preface == null) columns
+    else <div class: "latex-multicols-block",
+        <div class: "latex-multicols-preface", for c in render_children(preface, 0, info) { c }>
+        columns
     >
 }
 

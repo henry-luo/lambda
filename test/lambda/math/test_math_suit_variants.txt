@@ -1,0 +1,1 @@
+[["\\varheartsuit", true, "mord"], ["\\vardiamondsuit", true, "mord"], ["\\varspadesuit", true, "mord"], ["\\varclubsuit", true, "mord"], ["\\heartsuit", true, "mord"], ["\\spadesuit", true, "mord"]]

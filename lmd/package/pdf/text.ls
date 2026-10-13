@@ -615,7 +615,7 @@ fn _glyph_width_units(fi, code) {
     if (cid_width != null) { cid_width }
     else if (fi and fi.widths is array and code >= fi.first_char and code <= fi.last_char) {
         let idx = code - fi.first_char
-        if (idx >= 0 and idx < len(fi.widths)) { _num_width(fi.widths[idx]) }
+        if (idx of fi.widths) { _num_width(fi.widths[idx]) }
         else { 500.0 }
     }
     else { 500.0 }

@@ -1,5 +1,5 @@
 {
-  "name": "Shift+Down extends selection across lines",
+  "name": "Shift+Down extends selection across lines; Shift+Right extends selection from a fresh caret",
   "html": "test/layout/data/form/form_state.html",
   "events": [
     {"type": "mouse_down", "target": {"text": "navigate between focusable"}, "button": 0},
@@ -8,6 +8,17 @@
     {"type": "wait", "ms": 20},
     {"type": "key_press", "key": "Down", "mods_str": "shift"},
     {"type": "assert_selection", "is_collapsed": false, "check_dom": true},
-    {"type": "assert_caret", "view_type": 1}
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "Click to place caret (collapsed)"},
+    {"type": "mouse_down", "target": {"text": "navigate between focusable"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "mouse_up", "target": {"text": "navigate between focusable"}, "button": 0},
+    {"type": "wait", "ms": 20},
+    {"type": "log", "message": "Hold Shift+Right several times -> non-collapsed selection in BOTH stores"},
+    {"type": "key_press", "key": "Right", "mods_str": "shift"},
+    {"type": "key_press", "key": "Right", "mods_str": "shift"},
+    {"type": "key_press", "key": "Right", "mods_str": "shift"},
+    {"type": "assert_selection", "is_collapsed": false, "check_dom": true}
   ]
 }

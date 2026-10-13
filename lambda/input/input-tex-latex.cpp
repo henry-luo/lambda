@@ -1016,6 +1016,45 @@ static void counter_command(Engine* e, const Token& t, uint32_t code) {
     strbuf_free(sb);
 }
 
+// The length and counter commands keep their document meaning after a package
+// redefines them (calc does, to accept expressions). Script adapters read them
+// as data (the echo rule, Lambda_Design_TeX_Engine §2.2), so expanding the
+// package's macro must not erase the call or leak its assignment code.
+static int redefined_echo_args(Engine* e, uint32_t cs) {
+    static const struct { const char* name; int args; } family[] = {
+        {"setlength", 2}, {"addtolength", 2}, {"setcounter", 2},
+        {"addtocounter", 2}, {"stepcounter", 1}};
+    const NameRec& rec = name_of(e, cs);
+    for (const auto& f : family)
+        if (rec.len == strlen(f.name) && memcmp(rec.chars, f.name, rec.len) == 0) return f.args;
+    return 0;
+}
+
+bool latex_redefined_echo(Engine* e, const Token& t) {
+    if (t.kind != TK_CS || !(t.flags & TF_DIRECT) || t.file != e->main_file ||
+        e->opts.math_mode) return false;
+    if (meaning_of(e, t.value).type != MT_MACRO) return false;
+    return redefined_echo_args(e, t.value) > 0;
+}
+
+// echo the document call verbatim, then run the package's definition on the
+// same arguments; the re-read copies are not direct, so this happens once
+void latex_echo_redefined(Engine* e, const Token& t) {
+    int nargs = redefined_echo_args(e, t.value);
+    EchoMark em = echo_begin(e, t);
+    TokSpan args[2] = {};
+    for (int i = 0; i < nargs; i++) args[i] = read_arg(e);
+    echo_finish(e, em);
+    lam::ArrayList<Token> list(MEM_CAT_INPUT_OTHER, 16);
+    list.append(make_cs(t.value));
+    for (int i = 0; i < nargs; i++) {
+        list.append(make_char('{', CAT_BEGIN));
+        for (uint32_t k = 0; k < args[i].count; k++) list.append(args[i].data[k]);
+        list.append(make_char('}', CAT_END));
+    }
+    back_list_copy(e, list);
+}
+
 static void length_command(Engine* e, const Token& t, uint32_t code) {
     EchoMark em = echo_begin(e, t);
     uint32_t cs = cs_from_arg(e);

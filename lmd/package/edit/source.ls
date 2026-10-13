@@ -631,8 +631,8 @@ fn reindent_step(st, unit, indent) {
   let added = [for (t in old) if (indent and len(t) > 0) len(unit) else 0]
   if (sum(removed) + sum(added) == 0) null
   else {
-    let lines = [for (i in 0 to len(old) - 1)
-                   if (indent and added[i] > 0) unit ++ old[i] else slice(old[i], removed[i], len(old[i]))]
+    let lines = [for (i, line of old)
+                   if (indent and added[i] > 0) unit ++ line else slice(line, removed[i], len(line))]
     let step = edit_step(st, buf.delta(buf.loc(first, 0), buf.loc(final, len(old[len(old) - 1])), lines))
     let moved = (p) => if (p.line < first or p.line > final) p
                        else if (indent) buf.loc(p.line, if (p.col > 0) p.col + added[p.line - first] else 0)

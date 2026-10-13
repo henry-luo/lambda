@@ -17,8 +17,7 @@ pn build_base() {
 
 pn make_variant(base, side) {
     var lines = []
-    var index = 0
-    while (index < len(base)) {
+    for index of base {
         var line = base[index]
         if (index % 17 == 0) {
             line = line ++ " " ++ side ++ " edit " ++ string(index % 31) ++
@@ -29,7 +28,6 @@ pn make_variant(base, side) {
             line = line ++ " right-only annotation"
         }
         lines.push(line)
-        index = index + 1
     }
     lines
 }
@@ -69,8 +67,7 @@ pn merge_words(base_line, left_line, right_line) {
 
 pn merge_lines(base_lines, left_lines, right_lines) {
     var merged = []
-    var index = 0
-    while (index < len(base_lines)) {
+    for index of base_lines {
         let base_line = base_lines[index]
         let left_line = left_lines[index]
         let right_line = right_lines[index]
@@ -78,7 +75,6 @@ pn merge_lines(base_lines, left_lines, right_lines) {
         else if (left_line == base_line) merged.push(right_line)
         else if (right_line == base_line) merged.push(left_line)
         else merged.push(merge_words(base_line, left_line, right_line))
-        index = index + 1
     }
     join(merged, "\n")
 }

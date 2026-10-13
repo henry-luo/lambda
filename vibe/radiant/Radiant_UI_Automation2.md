@@ -471,16 +471,16 @@ python3 temp/al2.py test/layout/reference/baseline_809_text_align.json
 | Phase | HTML | Event JSON (test/ui/) | Key assertions |
 |-------|------|-----------------------|----------------|
 | 1b | `baseline_809_text_align.html` | `ui_phase1b_text_align.json` | `click` by text, `assert_caret` on block paragraphs |
-| 1c | `test_click_text.html` | `ui_phase1c_click_positions.json` | `click` by coordinates, `assert_caret` on specific positions |
+| 1c | `test_click_text.html` | `ui_phase1c_click_positions.json` (merged into `ui_phase1b_text_align.json`, 2026-10-13) | `click` by coordinates, `assert_caret` on specific positions |
 | 1d | `test_click_elements.html` | `ui_phase1d_interactive_elements.json` | `click` on `<a>`, `<button>` by selector |
-| 1e | `test_click_elements.html` | `ui_phase1e_structural_elements.json` | `assert_visible`, `assert_text` on structural elements |
+| 1e | `test_click_elements.html` | `ui_phase1e_structural_elements.json` (merged into `ui_phase1d_interactive_elements.json`, 2026-10-13) | `assert_visible`, `assert_text` on structural elements |
 | 1f | `test_click_elements.html` | `ui_phase1f_list_elements.json` | `click` on list items, `assert_text` |
 | 2a | `baseline_502_text_wrapping.html` | `ui_phase2a_text_wrapping.json` | `click` on wrapped text, `assert_caret` |
 | 2b | `baseline_503_styled_spans.html` | `ui_phase2b_styled_spans.json` | `assert_visible` on inline spans, `click` by selector and text |
 | 2c | `test_form_assertions.html` | `ui_phase2c_form_assertions.json` | `assert_value`, `assert_checked`, `assert_focus` on form fields |
 | 3 | `test_form_controls.html` | `ui_phase3_form_controls.json` | `check`, `select_option` on form elements |
-| 3 | (any) | `ui_phase3_viewport.json` | Viewport configuration via metadata |
-| 3a | `baseline_809_text_align.html` | `ui_phase3a_drag_select.json` | `mouse_drag`, `assert_selection is_collapsed: false` |
+| 3 | (any) | `ui_phase3_viewport.json` (its 800×600 viewport moved to `ui_phase3_form_controls.json`, 2026-10-13) | Viewport configuration via metadata |
+| 3a | `baseline_809_text_align.html` | `ui_phase3a_drag_select.json` (merged into `ui_phase1b_text_align.json`, 2026-10-13) | `mouse_drag`, `assert_selection is_collapsed: false` |
 | 4a | `test_scroll.html` | `ui_phase4a_scroll_interact.json` | `scroll`, `click` off-screen element, `assert_text`, `assert_visible` |
 | 4b | `test_keyboard.html` | `ui_phase4b_keyboard.json` | `key_combo` Cmd+A, `assert_selection is_collapsed: false` |
 | 4c | `test_drag_scroll.html` | `ui_phase4c_resize.json` | `resize`, `assert_visible`, `assert_text` after relayout |
@@ -684,7 +684,7 @@ selection or moves a draggable element.
 
 | File | Description |
 |------|-------------|
-| `test/ui/ui_phase3a_drag_select.json` | Drag across `.left` and `.center` paragraphs in `baseline_809_text_align.html`; assert non-collapsed selection. Coordinates from `test/layout/reference/baseline_809_text_align.json`. |
+| `test/ui/ui_phase3a_drag_select.json` (now the last steps of `ui_phase1b_text_align.json`) | Drag across `.left` and `.center` paragraphs in `baseline_809_text_align.html`; assert non-collapsed selection. Coordinates from `test/layout/reference/baseline_809_text_align.json`. |
 | `test/ui/test_drag_scroll.html` + `.json` | Drag scrollbar thumb; assert scroll position changes (pending layout verification) |
 
 **Event types to exercise**

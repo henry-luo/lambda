@@ -2062,10 +2062,26 @@ static float multicol_first_text_height(View* view) {
     return 0;
 }
 
+// An inline box belongs to the current line box while it overlaps the line's
+// band in the block direction: sup, sub and other shifted boxes sit inside their
+// line box (CSS 2.1 §10.8), so only a box wholly past the band starts a new line.
+// Comparing start positions alone split a raised superscript into its own line.
+// The band is the smaller of the two extents: an initial letter spans several
+// lines, and the lines beside it must not merge into its line.
+static bool multicol_in_line_band(float item_start, float line_start,
+                                  float line_extent, float item_extent) {
+    float extent = line_extent < item_extent ? line_extent : item_extent;
+    if (extent <= 1.0f) return fabsf(item_start - line_start) <= 1.0f;
+    return item_start < line_start + extent - 1.0f && item_start > line_start - extent + 1.0f;
+}
+
 static float multicol_line_advance_from_items(InlineFragmentItem* items, int item_count) {
+    // line boxes advance from one line start to the next, never between two
+    // shifted boxes of the same line
     float advance = -1;
     for (int i = 1; i < item_count; i++) {
-        float delta = fabsf(items[i].original_y - items[i - 1].original_y);
+        if (items[i].line_index == items[i - 1].line_index) continue;
+        float delta = fabsf(items[i].line_y - items[i - 1].line_y);
         if (delta > 1.0f && (advance < 0 || delta < advance)) {
             advance = delta;
         }
@@ -2153,7 +2169,7 @@ static bool multicol_inline_line_metrics(
     int item_count = 0;
     int line_count = 0;
     float current_line_y = 0.0f;
-    float previous_item_y = 0.0f;
+    float current_line_extent = 0.0f;
     float line_advance = -1.0f;
     float fallback_height = 0.0f;
     // CSS Writing Modes: vertical line boxes advance on physical x, not y.
@@ -2163,21 +2179,20 @@ static bool multicol_inline_line_metrics(
         if (fallback_height <= 0.0f && height > 0.0f) fallback_height = height;
         if (item_count == 0) {
             current_line_y = item_y;
+            current_line_extent = height;
             line_count = 1;
-        } else {
-            float adjacent_delta = fabsf(item_y - previous_item_y);
-            if (adjacent_delta > 1.0f &&
-                (line_advance < 0.0f || adjacent_delta < line_advance)) {
-                line_advance = adjacent_delta;
+        } else if (forced_break_pending ||
+                   !multicol_in_line_band(item_y, current_line_y, current_line_extent, height)) {
+            float line_delta = fabsf(item_y - current_line_y);
+            if (line_delta > 1.0f && (line_advance < 0.0f || line_delta < line_advance)) {
+                line_advance = line_delta;
             }
-            if (forced_break_pending || fabsf(item_y - current_line_y) > 1.0f) {
-                line_count++;
-                current_line_y = item_y;
-                forced_break_pending = false;
-            }
+            line_count++;
+            current_line_y = item_y;
+            current_line_extent = height;
+            forced_break_pending = false;
         }
         forced_break_pending = forces_break;
-        previous_item_y = item_y;
         item_count++;
     };
 
@@ -3648,14 +3663,18 @@ static bool multicol_project_fragmented_inline_descendants(
     }
     float first_line_y = items[0].original_y;
     float current_line_y = first_line_y;
+    float current_line_extent = items[0].height;
     int line_index = 0;
     int logical_line_count = 0;
     bool forced_break_pending = false;
     for (int i = 0; i < item_count; i++) {
         if (items[i].is_text && i > 0 &&
-            (forced_break_pending || fabsf(items[i].original_y - current_line_y) > 1.0f)) {
+            (forced_break_pending ||
+             !multicol_in_line_band(items[i].original_y, current_line_y, current_line_extent,
+                                    items[i].height))) {
             line_index++;
             current_line_y = items[i].original_y;
+            current_line_extent = items[i].height;
             forced_break_pending = false;
         }
         items[i].line_index = line_index;
@@ -9651,7 +9670,7 @@ static bool multicol_text_line_is_single_line(DomText* text, float* line_y,
         if (!*has_visible_text) {
             *has_visible_text = true;
             *line_y = rect->y;
-        } else if (fabsf(rect->y - *line_y) > 1.0f) {
+        } else if (!multicol_in_line_band(rect->y, *line_y, rect->height, rect->height)) {
             return false;
         }
     }

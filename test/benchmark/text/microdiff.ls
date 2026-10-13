@@ -139,17 +139,13 @@ pn main() {
     var round: int = 0
     let t0 = clock()
     while (round < 512) {
-        var index: int = 0
-        while (index < len(pairs)) {
+        for index of pairs {
             let result = diff_map(pairs[index][0], pairs[index][1], [])
             checksum = (checksum + len(result) * 19) % 1000000007
-            var change: int = 0
-            while (change < len(result)) {
+            for change of result {
                 checksum = (checksum + len(result[change].type) * 23 +
                     len(result[change].path)) % 1000000007
-                change = change + 1
             }
-            index = index + 1
         }
         round = round + 1
     }
