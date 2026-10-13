@@ -27,11 +27,20 @@ Try the supplied example from the repository root:
 ./lambda.exe render test/music/_view.ls -o temp/music.png
 ```
 
+The supplied viewer and player samples use `a4-study.musicxml`, a twenty-measure
+Morning Study arranged in five piano systems on one A4 portrait page
+(210 × 297 mm). Their shared page dimensions and engraving scale are in
+`test/music/_sample.ls`.
+
 `render` returns an HTML wrapper containing SVG pages. It uses the existing
 Radiant display/export path. Music symbols are paths, and the bundled CMU
 Serif text face is embedded in each SVG. No JavaScript or OSMD installation
 is required. OSMD informed the score → layout → rendering architecture;
 this package does not port its full engraving engine.
+
+Embedded pages fit the available container width and keep their page aspect
+ratio when the window narrows. Standalone `svg` output retains the requested
+physical page dimensions. The player uses the same responsive score display.
 
 ## API
 
@@ -137,7 +146,20 @@ music.player(score, {layout:{width:760.0}})^
 Run `./lambda.exe view test/music/_player.ls` and press **Play**. The player
 opens the audio device only on that action, following S12.1.1v2/D7.4.6.
 Pause/resume, stop, position, speed, master volume, and part mute/solo share
-the audio sample clock. Active notes turn blue. Removing the player or closing
+the audio sample clock. Speed choices apply before playback, while playing,
+and while paused; the status displays the synthesizer's current multiplier.
+Part mute/solo controls sit beside the transport buttons in the primary toolbar.
+The time display always includes tenths of a second and reserves its own space
+so the controls stay still during playback. The A4 sample fills the window,
+keeping the controls at the top while the sheet scrolls beneath them. Playback,
+seeking and resizing bring the sounding notes into view; visible notes do not
+trigger scrolling. In a pane too short for all sounding parts, the leading note
+takes priority. Embedded players use the height of their containing element.
+Active notes default to red. The **Highlight** swatches offer red, blue and
+yellow as squares with rounded corners and a border marking the selected color.
+They support mouse and keyboard selection, updating noteheads, stems, flags,
+accidentals/dots and shared beams.
+Color changes apply immediately while playing or paused. Removing the player or closing
 the document releases its native session; a disconnected device reports an
 error. A real device is required: silent null backends are rejected.
 

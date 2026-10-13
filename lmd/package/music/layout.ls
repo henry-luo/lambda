@@ -131,7 +131,8 @@ pub fn layout(score, options = {}) map^ {
     let paged=pages_for(placed,o,unit)
     let warnings=c.warnings([*score.diagnostics,
         *c.option_warnings(options,["width","scale","mode","page_height","parts","show_title","show_lyrics","respect_breaks","strict"])^,
-        *[for (s in placed where s.width>available) c.diagnostic("overflow","system exceeds requested width",s.measures[0].label)],
+        // compare natural widths; floating justification can round past the available width.
+        *[for (s in broken where s.width>available) c.diagnostic("overflow","system exceeds requested width",s.measures[0].label)],
         *[for (page in paged.pages where o.mode=='pages' and page.height>o.page_height/unit)
             c.diagnostic("overflow","system exceeds requested page height",string(page.index))]],o)^;
     {kind:"music-layout",version:1,score:score,options:o,profile:profile,unit:unit,parts:parts,

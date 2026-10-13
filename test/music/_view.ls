@@ -1,3 +1,3 @@
 import music: lambda.music
-let score=music.load("test/music/study.musicxml")^
-music.render(score,{width:760.0})^
+import sample: ._sample
+music.render(sample.score()^,sample.layout)^

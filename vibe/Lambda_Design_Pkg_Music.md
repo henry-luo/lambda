@@ -324,10 +324,13 @@ The proposed layout has six shared passes:
 6. **Emit SVG and indices:** page bounds, stable event groups, glyphs/text,
    staff lines, and an event hit/location index all derive from one layout.
 
-Notation constraints can exceed a narrow viewport. Preserve minimum spacing
-and report/allow horizontal overflow; do not shrink notes until they become
-unreadable. An oversized system in paged mode likewise receives an explicit
-overflow diagnostic. The document wrapper handles scrolling and page spacing.
+Notation constraints can exceed the requested engraving width. Preserve
+minimum spacing in `Layout` and diagnose oversized systems/pages. The embedded
+document wrapper fits each page to its container width while preserving its
+aspect ratio, per the user's 2026-10-13 viewport-fit request. This presentation
+scale leaves exact score timing and layout geometry unchanged; standalone SVG
+keeps its requested physical dimensions. The wrapper handles vertical scrolling
+and page spacing.
 
 ### 6.2 Fonts and output
 
@@ -498,6 +501,25 @@ restart, and repeated sustained strikes of one key restore the latest strike.
 No waveform checkpointing or constant-time seek claim is made. Full GM
 program coverage, sustain, transport and the sample clock have offline tests;
 the native hardware test rejects miniaudio's silent null backend.
+
+The player places part mute/solo controls beside the transport buttons, with
+position, speed and volume on a separate row. Highlighting defaults to red;
+red, blue and yellow swatch buttons have rounded corners matching the other controls,
+accessible names and pressed state. A border with a compact inset marks the current
+selection. The toolbar wraps on narrow screens.
+The status reserves text space and always renders seconds with one decimal,
+keeping the seek, speed and volume controls stationary as time advances.
+The player is a bounded column with a non-scrolling control panel and a separate
+sheet scrollport. Its container supplies the height; the standalone sample uses
+the viewport height. Following scales the engraving event bounds through the
+displayed page rectangles and scrolls only when the sounding group leaves the
+visible area. Seeking and resizing use the same path. If a short scrollport
+cannot show all simultaneous parts, the leading note takes priority. This is
+presentation state and does not change the audio clock (S12.1.1v2/D7.4.6).
+Highlighting sets glyph fill and inherited stroke color for the whole note,
+including stems/flags and shared chord stems/beams. Shared symbols remain
+highlighted while any connected note sounds. Changing the color updates the
+current highlight without changing transport state (S12.1.1v2/D7.4.6).
 
 ## 8. Platform and dependency boundaries
 

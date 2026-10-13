@@ -1,0 +1,31 @@
+{
+  "name":"Speed choices remain usable across playback frames",
+  "html":"test/music/_player.ls",
+  "viewport":{"width":800,"height":800},
+  "events":[
+    {"type":"click","target":{"selector":"select[data-control=speed]"}},
+    {"type":"assert_state_store","target":{"selector":"select[data-control=speed]"},"open_dropdown":true},
+    {"type":"key_press","key":"ArrowDown"},
+    {"type":"key_press","key":"Enter"},
+    {"type":"assert_value","target":{"selector":"select[data-control=speed]"},"equals":"1.25"},
+    {"type":"click","target":{"selector":"button[data-action=play]"}},
+    {"type":"wait","ms":300},
+    {"type":"assert_text","target":{"selector":".music-status"},"contains":"1.25×"},
+    {"type":"click","target":{"selector":"select[data-control=speed]"}},
+    {"type":"wait","ms":800},
+    {"type":"assert_state_store","target":{"selector":"select[data-control=speed]"},"open_dropdown":true},
+    {"type":"key_press","key":"ArrowDown"},
+    {"type":"key_press","key":"Enter"},
+    {"type":"assert_value","target":{"selector":"select[data-control=speed]"},"equals":"1.5"},
+    {"type":"assert_text","target":{"selector":".music-status"},"contains":"1.5×"},
+    {"type":"click","target":{"selector":"select[data-control=speed]"}},
+    {"type":"click","target":{"selector":"select[data-control=speed]","offset_x":20.25,"offset_y":60.25}},
+    {"type":"assert_value","target":{"selector":"select[data-control=speed]"},"equals":"0.75"},
+    {"type":"assert_text","target":{"selector":".music-status"},"contains":"0.75×"},
+    {"type":"click","target":{"selector":"button[data-action=pause]"}},
+    {"type":"select_option","target":{"selector":"select[data-control=speed]"},"value":"2"},
+    {"type":"assert_text","target":{"selector":".music-status"},"contains":"2×"},
+    {"type":"assert_attribute","target":{"selector":".lambda-music-player"},"attribute":"data-state","equals":"paused"},
+    {"type":"click","target":{"selector":"button[data-action=stop]"}}
+  ]
+}

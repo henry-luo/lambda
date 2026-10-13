@@ -1,9 +1,11 @@
 import music: lambda.music
 import spans: lambda.music.spans
 import n: lambda.music.notation
+import sample: ~~.~~.music._sample
 let score=music.load("test/music/features.musicxml")^
 let sheet=music.layout(score,{width:620.0,mode:'pages',page_height:850.0})^
 let continuous=music.layout(score,{width:1000.0,respect_breaks:false,parts:["F"]})^
+let a4=music.layout(sample.score()^,{*:sample.layout,strict:true})^
 let first=sheet.systems[0].events
 let xml=format(music.svg(sheet)^,'xml')^;
 [
@@ -31,5 +33,10 @@ let xml=format(music.svg(sheet)^,'xml')^;
  (music.svg(sheet,2) or "rejected")=="rejected",
  (music.layout(score,{width:0.0}) or "rejected")=="rejected",
  (music.layout(score,{parts:["missing"]}) or "rejected")=="rejected",
- (music.layout(score,{strict:true,unknown:1}) or "rejected")=="rejected"
+ (music.layout(score,{strict:true,unknown:1}) or "rejected")=="rejected",
+ len(a4.pages)==1 and len(a4.systems)==5,
+ abs(a4.pages[0].width*a4.unit*25.4/96.0-210.0)<0.000001 and
+    abs(a4.pages[0].height*a4.unit*25.4/96.0-297.0)<0.000001,
+ len(a4.diagnostics)==0,
+ len([for (d in music.layout(score,{width:100.0})^.diagnostics where d.category=="overflow") d])>0
 ]

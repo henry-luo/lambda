@@ -5,6 +5,8 @@
   "events": [
     {"type":"wait","ms":100},
     {"type":"assert_attribute","target":{"selector":".lambda-music-player"},"attribute":"data-state","equals":"ready"},
+    {"type":"assert_position","element_a":{"selector":".music-tracks"},"element_b":{"selector":".music-toolbar"},"relation":"inside"},
+    {"type":"assert_position","element_a":{"selector":".music-tracks"},"element_b":{"selector":".music-timeline"},"relation":"above"},
     {"type":"click","target":{"selector":"button[data-action=play]"}},
     {"type":"wait","ms":300},
     {"type":"assert_attribute","target":{"selector":".lambda-music-player"},"attribute":"data-state","equals":"playing"},

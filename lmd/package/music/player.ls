@@ -5,51 +5,143 @@ import perf: .performance
 import geometry: .layout
 import engrave: .engrave
 import svg: .svg
+import numbers: lambda.chart.numbers
 
 fn mask(channels) => sum([for (ch in channels) int(2**ch)])
-fn field(label,control) element => <label style:"display:inline-flex;align-items:center;gap:6px",label control>
+let highlight_colors={red:"Red",blue:"Blue",yellow:"Yellow"}
+let state_labels={ready:"Ready",playing:"Playing",paused:"Paused",ended:"Finished",error:"Unavailable"}
+fn field(label,control,extra = "") element => <label
+    style:"display:inline-flex;align-items:center;gap:8px;color:#64748b;font-size:12px;font-weight:500;white-space:nowrap;"++extra,
+    label control>
+fn button_style(primary) => "appearance:none;display:inline-flex;align-items:center;justify-content:center;"++
+    "height:34px;box-sizing:border-box;padding:7px 13px;border-radius:7px;font:600 13px sans-serif;cursor:pointer;"++
+    if (primary) "background:#24364b;border:1px solid #24364b;color:white" else "background:white;border:1px solid #d9e0e8;color:#475569"
+fn swatch_style(selected) => "appearance:none;display:inline-flex;align-items:center;justify-content:center;"++
+    "width:24px;height:24px;box-sizing:border-box;padding:2px;border-radius:6px;background:white;cursor:pointer;"++
+    "border:2px solid "++if (selected) "#334155" else "transparent"
+// reserve transport text space so fractional seconds and state labels cannot resize the seek field.
+fn status_style(mode) => "display:inline-block;flex:0 0 auto;min-width:240px;text-align:right;"++
+    "font:12px monospace;font-variant-numeric:tabular-nums;white-space:nowrap;color:"++
+    if (mode=="error") "#b42318" else "#64748b"
 fn tree(performance,sheet) element => <section class:"lambda-music-player",'data-state':"ready",
-    style:"font:15px sans-serif;color:#18202b;background:#f4f5f7;padding:16px",
-    <div class:"music-controls",style:"display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px",
-        for (action in [{id:"play",label:"Play"},{id:"pause",label:"Pause"},{id:"stop",label:"Stop"}])
-            <button type:"button",style:"padding:7px 12px",'data-action':action.id,action.label>;
-        field("Position",<input type:"range",class:"music-seek",'data-control':"seek",min:"0",max:string(performance.seconds),step:"0.01",value:"0",'aria-label':"Playback position">)
-        field("Speed",<select 'data-control':"speed",'aria-label':"Playback speed",
-            for (speed in [0.5,0.75,1.0,1.25,1.5,2.0]) <option value:string(speed),*:(if (speed==1.0) {selected:"selected"} else {}),string(speed)++"×">>)
-        field("Volume",<input type:"range",'data-control':"volume",min:"0",max:"1",step:"0.01",value:"0.8",'aria-label':"Volume">);
-        <span class:"music-status",role:"status","Ready">>
-    <div class:"music-tracks",style:"display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px",
-        for (track in performance.tracks) <div class:"music-track",style:"display:flex;gap:8px;align-items:center",
-        <span track.label>
-        for (control in [{id:"mute",label:"Mute"},{id:"solo",label:"Solo"}])
-            field(control.label,<input type:"checkbox",'data-control':control.id,'data-mask':string(mask(track.channels))>)>>
-    if (sheet!=null) svg.document(sheet)^>
+    style:"display:flex;flex-direction:column;height:100%;max-height:100vh;box-sizing:border-box;overflow:hidden;"++
+        "font:13px sans-serif;color:#243247;background:#f1f4f8;padding:16px",
+    <div class:"music-controls",style:"background:white;border:1px solid #dce3eb;border-radius:12px;"++
+        "flex:0 0 auto;box-shadow:0 2px 8px rgba(15,23,42,0.04);padding:14px 16px;margin-bottom:18px",
+        <div class:"music-toolbar",style:"display:flex;gap:16px;align-items:center;flex-wrap:wrap",
+            <div class:"music-transport",style:"display:flex;gap:6px;align-items:center",
+                for (action in [{id:"play",label:"Play"},{id:"pause",label:"Pause"},{id:"stop",label:"Stop"}])
+                    <button type:"button",style:button_style(action.id=="play"),'data-action':action.id,action.label>>
+            <div class:"music-tracks",style:"display:flex;gap:14px;align-items:center;flex-wrap:wrap",
+                for (track in performance.tracks) <div class:"music-track",style:"display:flex;gap:6px;align-items:center",
+                    <span style:"font-size:13px;font-weight:600;margin-right:2px",track.label>
+                    for (control in [{id:"mute",label:"Mute"},{id:"solo",label:"Solo"}])
+                        <label style:"display:inline-flex;gap:5px;align-items:center;padding:5px 7px;"++
+                            "border:1px solid #e2e8f0;border-radius:6px;color:#64748b;font-size:12px;cursor:pointer",
+                            <input type:"checkbox",style:"margin:0;width:13px;height:13px",'data-control':control.id,
+                                'data-mask':string(mask(track.channels))> control.label>>>
+            if (sheet!=null) <div class:"music-highlight",role:"group",'aria-label':"Note highlight color",'data-color':"red",
+                style:"display:flex;gap:5px;align-items:center;margin-left:auto",
+                <span style:"color:#64748b;font-size:12px;font-weight:500;margin-right:3px","Highlight">
+                for (color,label in highlight_colors) <button type:"button",class:"music-swatch",'data-action':"highlight",
+                    'data-color':string(color),'aria-label':label++" highlight",title:label,
+                    'aria-pressed':string(string(color)=="red"),style:swatch_style(string(color)=="red"),
+                    <span style:"display:block;width:16px;height:16px;border-radius:2px;"++
+                        "box-shadow:inset 0 0 0 1px rgba(15,23,42,0.12);background:"++string(color)>>>
+        >
+        <div class:"music-timeline",style:"display:flex;gap:14px;align-items:center;flex-wrap:wrap;"++
+            "margin-top:13px;padding-top:12px;border-top:1px solid #edf1f5",
+            field("Position",<input type:"range",class:"music-seek",style:"flex:1;min-width:0;width:100%;margin:0",
+                'data-control':"seek",min:"0",max:string(performance.seconds),step:"0.01",value:"0",'aria-label':"Playback position">,
+                "flex:1;min-width:160px")
+            field("Speed",<select 'data-control':"speed",'aria-label':"Playback speed",
+                style:"height:30px;box-sizing:border-box;padding:4px 7px;border:1px solid #d9e0e8;"++
+                    "border-radius:6px;background:white;color:#334155;font:13px sans-serif;cursor:pointer",
+                for (speed in [0.5,0.75,1.0,1.25,1.5,2.0]) <option value:string(speed),
+                    *:(if (speed==1.0) {selected:"selected"} else {}),string(speed)++"×">>)
+            field("Volume",<input type:"range",style:"width:88px;margin:0",'data-control':"volume",min:"0",max:"1",step:"0.01",
+                value:"0.8",'aria-label':"Volume">);
+            <span class:"music-status",role:"status",style:status_style("ready"),"Ready">>>
+    if (sheet!=null) <div class:"music-sheet-viewport",tabindex:"0",'aria-label':"Music sheet",
+        style:"flex:1;min-height:0;min-width:0;overflow:auto;border-radius:10px",svg.document(sheet)^>>
 
 pn status(owner,text,mode) {
-    dom.set_attribute(owner,"data-state",mode)
+    // unchanged attributes would recascade all controls and close an open native menu.
+    if (dom.get_attribute(owner,"data-state")!=mode) dom.set_attribute(owner,"data-state",mode)
     let label=dom.query_selector(owner,".music-status")
-    dom.set_text_content(label,text)
-    dom.set_attribute(label,"style",if (mode=="error") "color:#a21b28" else "color:#18202b")
+    if (dom.text_content(label)!=text) dom.set_text_content(label,text)
+    let style=status_style(mode)
+    if (dom.get_attribute(label,"style")!=style) dom.set_attribute(label,"style",style)
 }
 fn control_value(owner,control) => (if (control=="mute" or control=="solo")
     float(sum([for (input_node in dom.query_selector_all(owner,"input[data-control="++control++"]") where dom.get_state(input_node,"checked"))
         int(dom.get_attribute(input_node,"data-mask"))]) or 0) else
     float(dom.get_state(dom.query_selector(owner,"[data-control="++control++"]"),"value"))) or -1.0
-pn synchronize(owner,session_value,performance) {
+pn highlight(owner,session_value,active) {
+    let control=dom.query_selector(owner,".music-highlight")
+    let color=if (control==null) "red" else dom.get_attribute(control,"data-color") or "red"
+    for (id in session_value.active where not contains(active,id)) {
+        dom.remove_attribute(session_value.groups[id],"fill")
+        dom.remove_attribute(session_value.groups[id],"style")
+    }
+    for (id in active where session_value.color!=color or not contains(session_value.active,id)) {
+        // stems use stroke:currentColor; glyphs and beams use inherited fill.
+        dom.set_attribute(session_value.groups[id],"style","color:"++color)
+        dom.set_attribute(session_value.groups[id],"fill",color)
+    }
+    return {*:session_value,active:active,color:color}
+}
+pn choose_highlight(owner,color) {
+    if (highlight_colors[color]==null) { return false }
+    let picker=dom.query_selector(owner,".music-highlight")
+    if (picker==null) { return false }
+    if (dom.get_attribute(picker,"data-color")!=color) dom.set_attribute(picker,"data-color",color)
+    for (swatch in dom.query_selector_all(picker,".music-swatch")) {
+        let selected=dom.get_attribute(swatch,"data-color")==color
+        if (dom.get_attribute(swatch,"aria-pressed")!=string(selected)) {
+            dom.set_attribute(swatch,"aria-pressed",string(selected))
+            dom.set_attribute(swatch,"style",swatch_style(selected))
+        }
+    }
+    return true
+}
+pn follow_notes(owner,session_value,node,sounding) {
+    if (len(sounding)==0) { return null }
+    let pane=dom.query_selector(owner,".music-sheet-viewport")
+    if (pane==null) { return null }
+    let port=dom.bounding_box(pane)
+    // svg groups have no CSS layout box; scale the engraving index through each page.
+    let rects=[for (id in sounding,entry in [node.positions[id]] where entry!=null) (
+        let page=dom.bounding_box(session_value.pages[entry.page]),
+        let scale=page.width/node.page_widths[entry.page],
+        {top:page.top+entry.bounds.top*scale,bottom:page.top+entry.bounds.bottom*scale})]
+    if (len(rects)==0 or port.height<=0) { return null }
+    let top=min([for (r in rects) r.top])
+    let bottom=max([for (r in rects) r.bottom])
+    let margin=min(24.0,port.height*0.1)
+    if (top<port.top+margin or bottom>port.bottom-margin) {
+        // keep the complete sounding group visible, or its leading note in a short pane.
+        let y=if (bottom-top+2*margin>port.height) rects[0].top else top
+        let scroll=dom.scroll_state(pane)
+        dom.set_scroll_state(pane,scroll.x,max(0.0,scroll.y+y-port.top-margin))
+    }
+}
+pn synchronize(owner,session_value,node) {
     let info=dom.midi_info(owner,session_value.token)
     if (info==null or info.state=="error") {
         status(owner,"Playback unavailable or audio device stopped","error")
         if (session_value.token!=null) dom.audio_close(owner,session_value.token)
         return {*:session_value,token:null,frame:0}
     }
-    let active=unique([for (o in performance.occurrences where not o.rest and o.seconds<=info.position and o.end_seconds>info.position) o.id])
-    if (active!=session_value.active) {
-        for (id in session_value.active where not contains(active,id)) dom.remove_attribute(session_value.groups[id],"fill")
-        for (id in active where not contains(session_value.active,id)) dom.set_attribute(session_value.groups[id],"fill","#1565c0")
-    }
+    let sounding=if (info.state=="playing" or info.state=="paused") unique([for (o in node.performance.occurrences where
+        not o.rest and o.seconds<=info.position and o.end_seconds>info.position) o.id]) else []
+    let active=unique([for (id in sounding,key in (node.highlight_links[id] or [id])) key])
+    let highlighted=highlight(owner,session_value,active)
+    if (sounding!=session_value.sounding) follow_notes(owner,session_value,node,sounding)
     dom.set_state(dom.query_selector(owner,".music-seek"),"value",string(info.position))
-    status(owner,info.state++" · "++string(round(info.position*10)/10)++" / "++string(round(info.duration*10)/10)++" s",info.state)
-    return {*:session_value,active:active,frame:if (info.state=="playing") dom.request_frame(owner,"music_tick") else 0}
+    status(owner,state_labels[info.state]++" · "++numbers.format_number(info.position,".1f")++" / "++
+        numbers.format_number(info.duration,".1f")++" s · "++string(info.speed)++"×",info.state)
+    return {*:highlighted,sounding:sounding,frame:if (info.state=="playing") dom.request_frame(owner,"music_tick") else 0}
 }
 pn handle(node,session_value,evt) {
     let owner=dom.closest(evt.target,".lambda-music-player")
@@ -57,10 +149,19 @@ pn handle(node,session_value,evt) {
     var current=session_value
     if (evt.type=="render") {
         dom.watch_window(owner,"closerequest",true)
+        dom.watch_window(owner,"resize",true)
         if (current.token!=null and current.performance!=node.performance) {
             dom.audio_close(owner,current.token)
             return {token:null,frame:0,active:[],groups:{},performance:null}
         }
+        return current
+    }
+    if (evt.type=="resize") {
+        dom.request_frame(owner,"music_follow")
+        return current
+    }
+    if (evt.type=="music_follow") {
+        follow_notes(owner,current,node,current.sounding or [])
         return current
     }
     if (evt.type=="closerequest") {
@@ -70,11 +171,17 @@ pn handle(node,session_value,evt) {
     }
     if (evt.type=="music_tick") {
         if (current.token==null) { return current }
-        return synchronize(owner,{*:current,frame:0},node.performance)
+        return synchronize(owner,{*:current,frame:0},node)
     }
-    let action=dom.get_attribute(evt.target,"data-action")
+    let action_target=dom.closest(evt.target,"[data-action]")
+    let action=if (action_target==null) null else dom.get_attribute(action_target,"data-action")
     let control=dom.get_attribute(evt.target,"data-control")
-    if (action==null and control==null) { return current }
+    // native controls own clicks; apply their committed value only on change.
+    if (evt.type=="click" and action==null or evt.type=="change" and control==null) { return current }
+    if (action=="highlight") {
+        if (choose_highlight(owner,dom.get_attribute(action_target,"data-color"))) { return highlight(owner,current,current.active) }
+        return current
+    }
     if (current.token==null) {
         if (action!="play") { return current }
         var problem=""
@@ -86,7 +193,8 @@ pn handle(node,session_value,evt) {
             return current
         }
         current={token:token,frame:0,active:[],performance:node.performance,
-            groups:map([for (g in dom.query_selector_all(owner,"[data-event-id]")) (dom.get_attribute(g,"data-event-id"),g)])}
+            pages:dom.query_selector_all(owner,".lambda-music-page svg"),sounding:[],
+            groups:map([for (g in dom.query_selector_all(owner,"[data-highlight-id]")) (dom.get_attribute(g,"data-highlight-id"),g)])}
         // controls edited before opening the device still define the first audible state.
         for (control_name in ["speed","volume","mute","solo","seek"]) {
             if (not dom.midi_command(owner,token,control_name,control_value(owner,control_name))) {
@@ -104,7 +212,7 @@ pn handle(node,session_value,evt) {
         status(owner,"Playback command failed","error")
         return {*:current,token:null,frame:0}
     }
-    return synchronize(owner,{*:current,frame:0},node.performance)
+    return synchronize(owner,{*:current,frame:0},node)
 }
 
 view <music_player> state session:{token:null,frame:0,active:[],groups:{},performance:null} { ~.tree }
@@ -112,6 +220,8 @@ on render(evt) { session=handle(~,session,evt); return 'pass' }
 on click(evt) { session=handle(~,session,evt); return 'handled' }
 on change(evt) { session=handle(~,session,evt); return 'handled' }
 on music_tick(evt) { session=handle(~,session,evt); return 'handled' }
+on resize(evt) { session=handle(~,session,evt); return 'pass' }
+on music_follow(evt) { session=handle(~,session,evt); return 'handled' }
 on closerequest(evt) { session=handle(~,session,evt); return 'pass' }
 
 pub fn create(source,options = {}) element^ {
@@ -121,5 +231,8 @@ pub fn create(source,options = {}) element^ {
     let sheet=if (source.kind=="music-score") engrave.finish(geometry.layout(source,options.layout or {})^)^ else null
     let font=options.soundfont or (sys.lambda.home#++"/package/music/soundfonts/TimGM6mb.sf2")
     let warnings=c.warnings(issues,options)^;
-    apply(<music_player performance:performance,soundfont:font,tree:tree(performance,sheet)>)
+    apply(<music_player performance:performance,soundfont:font,
+        positions:if (sheet==null) {} else sheet.events,
+        page_widths:if (sheet==null) [] else [for (page in sheet.pages) page.width*sheet.unit],
+        highlight_links:if (sheet==null) {} else engrave.highlight_bindings(sheet),tree:tree(performance,sheet)>)
 }

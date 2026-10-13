@@ -4,6 +4,11 @@ import notes: .notes
 import decoration: .decorations
 import spans: .spans
 
+fn beam_id(system,index) => "beam/"++string(system.index)++"/"++string(index)
+// shared stems/beams follow any sounding member of their chord or beam group.
+pub fn highlight_bindings(layout) map => map([for (system in layout.systems,e in system.events)
+    (e.id,unique([e.id,e.anchor,*[for (i,ids in system.beams where contains(ids,e.anchor)) beam_id(system,i)]]))])
+
 fn system_scene(system,layout) map^ {
     let profile=layout.profile
     let beams=[for (ids in system.beams) notes.beam_geometry(ids,system.events,profile)^]
@@ -14,7 +19,8 @@ fn system_scene(system,layout) map^ {
          shapes:shapes,bounds:if (len(shapes)>0) d.union([for (s in shapes) s.bounds]) else d.bounds(e.x,e.y+system.y,e.x,e.y+system.y)})];
     {page:system.page,index:system.index,events:events,
      shapes:[*d.move_all(decoration.system(system,layout.parts,profile)^,0.0,system.y),
-        *d.move_all([for (b in beams) *notes.beams(b,profile)],0.0,system.y),*events]}
+        *[for (i,b in beams) {kind:"beam",id:beam_id(system,i),description:"Shared beam",
+            shapes:d.move_all(notes.beams(b,profile),0.0,system.y)}],*events]}
 }
 pub fn finish(layout) map^ {
     let scenes=[for (s in layout.systems) system_scene(s,layout)^]

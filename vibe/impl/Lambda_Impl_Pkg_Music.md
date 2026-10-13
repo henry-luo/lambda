@@ -212,3 +212,94 @@ under `verify/` and independent runner/output directories isolate concurrent
 replacement of the checkout's main executable. Linux/Windows builds and
 audio-device tests remain unverified; the miniaudio backend list alone is not
 evidence of platform parity.
+
+## A4 sample presentation (2026-10-13)
+
+The viewer and score-player examples now share a twenty-measure expansion of
+Morning Study and a 210 × 297 mm portrait layout, with five grand-staff systems.
+The original short study remains the archive/model regression fixture.
+
+A4 validation exposed false overflow diagnostics from rounding the sum of
+justified measure widths. The warning now compares the measured natural
+system width against available space, preserving real overflow detection and
+strict diagnostic behavior (S7.4.2). The layout golden checks one A4 page,
+five systems, clean strict layout and a genuinely oversized system.
+All nine music goldens pass in automatic and JIT modes; the native score-player
+fixture passes all five assertions. The full-page PNG was visually inspected.
+
+## Responsive display and speed selection (2026-10-13)
+
+Embedded SVG pages now use container-relative width and automatic height,
+with the engraved page width as a maximum. The standalone SVG API retains
+physical dimensions. The native resize fixture checks containment at 320,
+480 and 800 pixels and the A4 aspect ratio after returning to a wide window.
+
+The speed menu closed on the next playback frame because `status` rewrote
+unchanged `data-state` and style attributes, recascading all form controls.
+Status now writes only changed values. Native controls retain click handling;
+the player applies committed values on `change`, and displays native transport
+speed (S12.1.1v2/D7.4.6). A native fixture holds the dropdown open across note
+changes, commits with keyboard and mouse, and checks actual speed before
+playback, while playing and while paused. Existing score/MIDI UI tests and all
+nine music goldens in automatic/JIT modes pass. Narrow PNGs were inspected.
+
+## Whole-note highlight colors (2026-10-13)
+
+The score player defaults to red and offers red/blue/yellow in a Highlight
+selector. Each active group receives fill plus CSS color, so stems using
+`stroke:currentColor` follow the notehead's color. Color changes repaint the
+current notes while playing or paused; Stop restores the original engraving.
+
+Engraving emits shared beam groups with stable highlight IDs. A pure binding
+map connects each note to its own group, chord-stem owner and shared beams;
+the player caches their DOM handles and colors the union of active bindings.
+Written event IDs and score timing stay unchanged (D7.2.5/S12.1.1v2).
+Native tests check all three colors, whole-note strokes, shared beams, paused
+updates, pre-play selection and stop cleanup. Existing speed/resize/playback
+fixtures and all nine music goldens in automatic/JIT modes pass.
+
+## Player toolbar and swatches (2026-10-13)
+
+Part mute/solo controls now share the primary toolbar with Play/Pause/Stop.
+Position, speed, volume and status occupy a second row inside a white bordered
+panel. Consistent button sizing, muted labels, a navy Play button and a softer
+score background establish the control hierarchy; both rows wrap at narrow widths.
+
+Red/blue/yellow swatch buttons replace the highlight selector. Their 6px corner
+radius matches adjacent controls; a 2px inset separates the 16px color tile from
+the selection border. Accessible names and exclusive `aria-pressed` state identify
+the active color.
+Action lookup uses the closest button so clicks on its inner color square work;
+native Tab/Space activation uses the same handler. Selection immediately
+repaints active notes without issuing transport commands (S12.1.1v2/D7.4.6).
+
+The five native score/MIDI, speed, resize and highlight fixtures pass 48 assertions
+across 96 events. All nine music goldens pass in automatic and JIT modes.
+PNG previews at 800 and 320 pixels were visually inspected.
+
+## Stable transport and score following (2026-10-13)
+
+Swatches now occupy 24px buttons with 16px color tiles. The status reserves
+240px and uses monospaced digits; the shared chart number formatter keeps
+seconds at one decimal place. Status changes no longer alter the seek field's
+width or shift speed/volume controls.
+
+The player uses a bounded flex column with a fixed control panel and an
+independently scrolling sheet viewport. The sample supplies a full-height
+document and caps its content width at 800px. The pure presentation still opens
+no audio resources; effects remain in handlers (S12.1.1v2/D7.4.6).
+
+The player retains the engraving event index and displayed page handles. Each
+new sounding group scales its indexed bounds through the page's current CSS
+width, then scrolls the sheet only if needed, with a small context margin.
+This avoids treating SVG groups as CSS layout boxes. Seeking uses the same
+path; resize schedules a frame to follow after layout commits. Oversized
+simultaneous groups prioritize their leading note. Manual scrolling remains
+available between note changes.
+
+Six native UI fixtures pass 73 assertions across 142 events, covering fixed
+toolbar geometry, forward/backward seeks, visible highlighted pixels after
+resize, playback across systems in a short window, and no root scrolling.
+All nine music goldens pass in automatic and
+JIT modes. Native captures of the first and last systems and a 320px preview
+were visually inspected.
