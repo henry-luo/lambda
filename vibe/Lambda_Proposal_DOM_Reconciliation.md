@@ -1,7 +1,7 @@
 # Lambda Proposal — DOM Reconciliation at the Presentation Boundary
 
 > **Status:** design record, 2026-10-13, revised the same day to reflect the rulings. **Ruled (user, 2026-10-13):** retention is fully embraced and needs no ruling exception, because **D4.5.3v2** governs only how DOM is built from Lambda scripts (§6, §8 Q1); the template result is the presentation of record, so direct DOM edits inside a component's result are unsupported and need no tracking (§4.1, §8 Q2; Reactive UI §2.7); a kept element whose attributes changed is patched in place (§8 Q3). **Open:** phasing (§8 Q4). The current design text lives in [Reactive UI](Lambda_Design_Reactive_UI.md) §9.1, §9.4 and §10.1; this document keeps the problem, the history, the mechanics and the open options.
-> **Formal linkage:** **D4.5.3v2** (DOM construction from Lambda scripts deep-copies; retention downstream is embraced), **D4.5.1v4** / **D4.5.2** (presentation lifetime and the runtime boundary), **S12.1.3** (pure template bodies), **S9.1.4** (state lives in view state).
+> **Formal linkage:** **D4.5.3v2** (DOM construction from Lambda scripts deep-copies; retention downstream is embraced), **D4.5.1v4** / **D4.5.2** (presentation lifetime and the runtime boundary), **S12.1.3** (pure template bodies), **S12.1.5** (presentation authority: the template result rules its component), **S9.1.4** (state lives in view state).
 > **Working-design linkage:** [Reactive UI](Lambda_Design_Reactive_UI.md) §5.3 (runtime identity), §9.4 (no-op elision), §9.5 (observer vs tree diff), §10.1–10.3 (incremental presentation), §18.3 (memoization, keyed lists).
 > **Scope:** how an incremental template re-render turns a regenerated result into DOM. Evaluation, render-map dependency tracking and template state are unchanged.
 
@@ -57,7 +57,7 @@ Rule 3 is today's behaviour, so the design changes nothing where nothing can be 
 
 ### 4.1 Direct edits are not tracked
 
-**Ruled 2026-10-13 (user; Reactive UI §2.7).** Inside a component presented by an author template, the template result rules. A Lambda handler or a JS script editing that result subtree directly is unsupported: the two would fight, and the next regeneration that touches an edited node presents the result. So the walk compares `R0` with `R1` only, never inspects `D0`, and keeps no "pristine" bit; the mechanism drafted here earlier (a bit cleared by every mutation entry point) is withdrawn. Interaction state (value, checkedness, selection, focus, hover, scroll) is not an edit: it lives in the state store and view state (**S9.1.4**) and survives on a retained node by construction.
+**Ruled 2026-10-13 (user; S12.1.5, Reactive UI §2.7).** Inside a component presented by an author template, the template result rules. A Lambda handler or a JS script editing that result subtree directly is unsupported: the two would fight, and the next regeneration that touches an edited node presents the result. So the walk compares `R0` with `R1` only, never inspects `D0`, and keeps no "pristine" bit; the mechanism drafted here earlier (a bit cleared by every mutation entry point) is withdrawn. Interaction state (value, checkedness, selection, focus, hover, scroll) is not an edit: it lives in the state store and view state (**S9.1.4**) and survives on a retained node by construction.
 
 A page may mix directly scripted subtrees with template subtrees when they are separate. Behavior templates for form controls' UA default actions are the sanctioned case of Lambda and JS sharing one DOM state; they regenerate nothing (§2.7, §11).
 

@@ -28,6 +28,7 @@ collected in the final section.
 | Script packages and one document's execution ownership | **D7.2.1–D7.2.4**, **D5.3.3** | [DOM State](Lambda_Design_DOM_State.md), ES11/ES12v2 |
 | Presentation lifetime and the runtime boundary | **D4.5.1v4**, **D4.5.2** | This document §12 |
 | DOM construction from a script and retention downstream | **D4.5.3v2** | This document §5.3, §9.4, §10.1; [DOM Reconciliation proposal](Lambda_Proposal_DOM_Reconciliation.md) |
+| Presentation authority and composition with direct DOM scripting | **S12.1.5** | This document §2.7, §11 |
 | Execution profiles | **D8.1.1v17**, **D7.1.4v2**, **D7.1.7v6** | This document §§2, 12 |
 | Bare `apply` and ordinary statement boundaries | **S16.2** | [Syntax](Lambda_Design_Syntax.md#77-apply-fused-token-retired-decided), §7.7 |
 | Persistence and stable identity | **S12.1.3**, **S9.1.4**, **S9.1.7** | [State Management](radiant/Radiant_Design_State_Management.md), RS1–RS24 |
@@ -145,7 +146,7 @@ Likewise, static transformation does not require a window or an event loop.
 
 ### 2.7 Presentation authority and composition with direct DOM scripting
 
-**Ruled 2026-10-13 (user).** Inside a component presented by an author template, the template result is the presentation of record. Direct DOM changes to that result subtree — by a Lambda `on` or render handler calling `dom.*` procedures, or by a JS script — are not supported: the next regeneration that touches a node presents the result, not the edit, and the two would otherwise fight and override each other. A component is either regenerated from its template or scripted directly, not both.
+**Ruled 2026-10-13 (user; S12.1.5).** Inside a component presented by an author template, the template result is the presentation of record. Direct DOM changes to that result subtree — by a Lambda `on` or render handler calling `dom.*` procedures, or by a JS script — are not supported: the next regeneration that touches a node presents the result, not the edit, and the two would otherwise fight and override each other. A component is either regenerated from its template or scripted directly, not both.
 
 A page may still mix the two, component by component. JS-driven subtrees and Lambda-template subtrees coexist as long as they are separate, so that no template result contains a node another script owns.
 
@@ -875,7 +876,7 @@ eliminates the need for a separate handwritten checkbox, caret, paste, or editin
 policy for every Lambda app. Native presentation mechanisms remain shared across
 language realms.
 
-This tier is the sanctioned case of Lambda and JS working on one DOM state (§2.7, ruled 2026-10-13). A behavior template regenerates nothing; it reads and writes the canonical interaction state of the element it matched, which JS reads and writes through the DOM API, so a form control keeps one `checked`, one value and one validity whichever realm acts on it (ES11).
+This tier is the sanctioned case of Lambda and JS working on one DOM state (§2.7, **S12.1.5**). A behavior template regenerates nothing; it reads and writes the canonical interaction state of the element it matched, which JS reads and writes through the DOM API, so a form control keeps one `checked`, one value and one validity whichever realm acts on it (ES11).
 
 **D7.2.5** assigns full user-agent editing policy to the shipped Lambda DOM
 package: uncanceled contenteditable actions, structural normalization, history,
