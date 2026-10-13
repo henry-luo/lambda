@@ -1,0 +1,115 @@
+# Lambda Proposal — DOM Reconciliation at the Presentation Boundary
+
+> **Status:** proposal for review, 2026-10-13. No ruling is changed by this document; §6 drafts the **D4.5.3v2** text that would be ratified if the proposal is accepted.
+> **Formal linkage:** **D4.5.3** (UI/view-mode DOM construction deep-copies ordinary Elements), **D4.5.1v4** / **D4.5.2** (presentation lifetime and the runtime boundary), **S12.1.3** (pure template bodies), **S9.1.4** (state lives in view state).
+> **Working-design linkage:** [Reactive UI](Lambda_Design_Reactive_UI.md) §5.3 (runtime identity), §9.4 (no-op elision), §9.5 (observer vs tree diff), §10.1–10.3 (incremental presentation), §18.3 (memoization, keyed lists).
+> **Scope:** how an incremental template re-render turns a regenerated result into DOM. Evaluation, render-map dependency tracking and template state are unchanged.
+
+---
+
+## 1. Problem
+
+Under **D4.5.3**, every incremental re-render deep-copies the regenerated result into fresh DOM. `rebuild_lambda_doc_incremental` (`radiant/cmd_layout.cpp`) then:
+- splices the new subtree in place of the old one;
+- migrates view state, frame requests, pointer capture, focus events, navigation requests and geomap ownership from old nodes to structurally corresponding new ones (`layout_preserve_rebuilt_owners`);
+- cascades the whole new subtree;
+- marks it and its ancestors layout-dirty.
+
+Retained layout cannot help inside that subtree, because every node in it is new. Retained layout here means block shift reuse and the retained flex items of 2026-10-13 (RAD_01 §6).
+
+The doc viewer shows the cost. Its app template owns the file tree, so any change to app state re-renders the whole ~650-row tree. Measured on 2026-10-13 (debug build, `doc_viewer_toml`):
+
+| Interaction | What re-renders | dom_patch | layout |
+|---|---|---|---|
+| Pane click (tab, property toggle), after pane state moved to a stateful `document_pane` and with retained flex items | document pane only | ~1.5 ms | ~18 ms |
+| Folder toggle | whole tree | ~7 ms | ~176 ms |
+| File open (selection moves, pane changes) | tree + pane | ~33 ms | ~305 ms |
+
+A file open changes two rows' `selected` class and the pane, yet it pays for a fresh copy, cascade and layout of every row. Moving the selection highlight into row-local state would fix this one app. It would not help folder toggles, and every application would have to discover and apply the same remedy.
+
+## 2. What D4.5.3 protects
+
+Any change must keep these properties, which motivated the ruling:
+
+1. **One occurrence, one native subtree.** Reusing one Lambda value in several slots must produce independent native nodes and child chains. A value never shares DOM between occurrences.
+2. **Lambda value semantics are untouched.** The copy happens at the DOM boundary; evaluation keeps ordinary sharing and ownership-based copy elision.
+3. **The evaluator's source/result mapping holds.** Event dispatch and regeneration find the current template owner from any DOM node (`dom_element_render_source`, `element_dom_map`).
+4. **Rooted callables and native handles keep their identity.**
+
+## 3. History that constrains the design
+
+- **2026-10-11 (`8fbe9aab82`).** The D4.5.3 copy landed with whole-result no-op elision (Reactive UI §9.4). If a regenerated result was deep-equal to the previous one, the DOM was kept and `dom_rebind_equal_render_result` rebound its source keys to the new result elements.
+- **2026-10-12 (`f82b4a77b`).** Elision was replaced by an identity test. The record (`vibe/impl/Lambda_Impl_Chart_Timeline.md`): equal results with a new identity require a DOM ownership update, and only an exact same-value return keeps the existing DOM and its imperative edits. The change resolved 15 frame, slideshow and SVG fixtures and three viewer cases. `dom_rebind_equal_render_result` has had no caller since.
+
+Two lessons follow:
+- Comparing old and new *results* is not enough. Imperative DOM edits made after construction mean the live DOM may no longer present the old result.
+- Rebinding the element map and lifecycle backing source alone was not a complete ownership update. A reused subtree must still go through every owner hand-off and render-event step that a rebuilt one does.
+
+## 4. Proposal
+
+When an incremental rebuild replaces the presentation of old result `R0` (live DOM `D0`) with new result `R1`, walk `R0`, `R1` and `D0` together in document order. At each position, take the first rule that applies:
+
+1. **Equal pristine subtree → retain.** The `R1` node is deep-equal to the `R0` node (§9.4 equality: kind, tag, attribute names and values, ordered children, content), and the `D0` node is *pristine* (§4.1). Keep the `D0` subtree in place and rebind its source keys from `R0` to `R1` elements.
+2. **Same shell → reconcile children.** The tag and attributes are equal but the children differ, and the shell is pristine. Keep the `D0` element, which keeps its resolved style and view state. Reconcile its children positionally by these same rules, and record each child insertion, removal or replacement as a DOM mutation.
+3. **Otherwise → fresh copy.** Build a fresh deep copy exactly as today, and run the existing owner migration (`layout_preserve_rebuilt_owners`) for it.
+
+Rule 3 is today's behaviour, so the proposal changes nothing where nothing can be reused. Positional matching is deliberate. Keyed matching (Reactive UI §18.3) can extend rule 2 later without changing rules 1 or 3.
+
+### 4.1 Pristine nodes
+
+A DOM node is pristine when no imperative edit has touched it or its subtree since it was built or retained from a result. This answers the 2026-10-12 lesson directly: an imperatively edited node is never retained from an equal result, so a re-render still discards imperative edits exactly as it does today.
+
+Proposed mechanism: each DOM mutation entry point (attribute, class, inline style, child list, text data) clears the pristine bit on the mutated node and its ancestors up to the nearest result root. That costs O(depth) per imperative mutation and nothing per re-render. Interaction state is not an imperative edit: values, checkedness, selection, focus, hover and scroll live in the state store and view state (**S9.1.4**). It survives on a retained node by construction, which is what owner migration approximates today.
+
+### 4.2 Ownership on a retained node
+
+A retained node keeps every pointer-keyed owner as it is: view state, frame requests, pointer capture, focus events, navigation requests and geomap. Each node retained by rules 1–2 must also:
+- rebind `element_dom_map` and the lifecycle backing source from its `R0` element to its `R1` element (`dom_rebind_equal_render_result` does this today);
+- queue render events for every template instance whose result lies in the retained subtree (`radiant_queue_template_render_events`), so render handlers see the new result identity, as the 10-11 elision did for its retained root.
+
+Validation must include the 15 fixtures that the 10-12 change repaired.
+
+### 4.3 Cascade and layout
+
+The reconciliation is expressed as DOM mutations, which the JS mutation path already handles incrementally (`post_html_handler_incremental_rebuild`):
+- mutated subtrees are recascaded;
+- structural selectors (`+`, `~`, `:nth-*`, `:has`, `:empty`) get sibling and ancestor invalidation;
+- new nodes are marked dirty and their ancestors' styles reset.
+
+Retained nodes keep their resolved style and their layout. Block shift reuse and retained flex items then reuse their geometry, so a file open would re-lay out the two re-rendered rows, the pane and the containers on their paths.
+
+## 5. Expected effect
+
+For the doc viewer:
+- **File open:** two rows fail rule 1 and become copies; the other rows are retained.
+- **Folder toggle:** the toggled folder's child list is reconciled; rows above and below are retained.
+
+On retained-row and pane-only layouts measured this session, both should drop from 170–300 ms to the tens of milliseconds. The equality walk costs O(size of `R1`), which is already the cost of today's deep copy, and it replaces most of the copy, cascade and layout.
+
+## 6. Ruling impact
+
+D4.5.3 says construction deep-copies. Retaining an earlier copy is not a fresh copy, but it keeps every property in §2: the retained subtree is the same occurrence in the same slot, never shared with another. Proposed revision:
+
+> **D4.5.3v2** UI/view-mode DOM construction deep-copies ordinary Elements and their content through MarkBuilder, including values already owned by the document arena. A regeneration may instead retain an occurrence's existing native subtree when the regenerated result is equal to the result that subtree presents and no imperative edit has touched it since; the retained subtree is rebound to the new result. Each presentation occurrence owns its native parent and sibling links. Normal Lambda evaluation retains ordinary value sharing and ownership-based copy elision; rooted callables and native handles keep their existing identity. DOM copies and retained occurrences preserve the evaluator's source/result mapping.
+
+The Reactive UI §9.4 text would gain the per-subtree case and the pristine condition.
+
+## 7. Alternatives considered
+
+- **Row-local state in each application.** This was applied to the doc pane on 2026-10-13. It needs no engine change, but each app must restructure, and structural changes such as folder toggles still re-render everything below the owner.
+- **Template memoization** (Reactive UI §18.3). Skipping evaluation of unchanged child templates is complementary. It saves evaluation, but its output is still copied under D4.5.3 whenever an ancestor re-renders.
+- **Whole-result elision only.** Implemented 10-11 and replaced 10-12; it never helps a partial change.
+- **Whole-page virtual DOM diff.** Rejected by §9.5; reconciliation stays limited to regenerated results.
+
+## 8. Questions for review
+
+1. Is retaining an existing occurrence consistent with the intent of D4.5.3, given the draft v2 wording in §6?
+2. Is "no imperative edit since built" the right condition for reuse, or should any re-render of a subtree that has seen an imperative edit since build reset it, as today?
+3. Should rule 2 also patch changed attributes in place on a pristine shell, such as a row's `class`? That would retain more nodes and lean further on the mutation path's style invalidation. The draft leaves it out.
+4. What phasing do you want? Suggested:
+   - R1: pristine tracking;
+   - R2: equal-subtree retention (rule 1) inside changed results;
+   - R3: shell retention with positional child reconciliation (rule 2) through the mutation pipeline;
+   - R4 (optional): attribute patching and keyed matching.
+
+   Each phase would be gated by the differential A/B harness that validated retained flex items: every UI fixture rendered with the feature on and off, with SVG snapshots compared after each interaction.
