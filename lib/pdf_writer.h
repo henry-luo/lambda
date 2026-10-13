@@ -491,6 +491,14 @@ HPDF_STATUS HPDF_Page_GSave(HPDF_Page page);
  */
 HPDF_STATUS HPDF_Page_GRestore(HPDF_Page page);
 
+// isolate vector content, then composite its accumulated alpha once on the parent.
+// groups may nest; all streams remain document-owned until HPDF_Free.
+HPDF_STATUS HPDF_Page_BeginTransparencyGroup(HPDF_Page page, float opacity,
+    float left, float bottom, float right, float top);
+HPDF_STATUS HPDF_Page_EndTransparencyGroup(HPDF_Page page);
+// source geometry may overflow CSS boxes; enclose painted paths/images through nested groups.
+HPDF_STATUS HPDF_Page_TrackTransparencyGroupInk(HPDF_Page page, float density);
+
 #ifdef __cplusplus
 }
 #endif

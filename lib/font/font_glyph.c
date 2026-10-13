@@ -1054,6 +1054,26 @@ LoadedGlyph* font_load_glyph_emoji(FontHandle* handle, const FontStyleDesc* styl
 // Text measurement
 // ============================================================================
 
+#ifdef __APPLE__
+static void* font_measurement_ct_font(FontHandle* handle) {
+    if (should_use_ct_advance_override(handle)) return handle->ct_font_ref;
+    return handle->ct_raster_ref ? handle->ct_raster_ref : handle->ct_font_ref;
+}
+#endif
+
+bool font_measure_text_range(FontHandle* handle, const char* text, int byte_len,
+        int range_start, int range_length, TextExtents* extents) {
+    if (!handle || !text || !extents) return false;
+#ifdef __APPLE__
+    const FontMetrics* metrics = font_get_metrics(handle);
+    float height = metrics ? metrics->ascender - metrics->descender : 0.0f;
+    return font_platform_measure_text_range(font_measurement_ct_font(handle), text,
+        byte_len, range_start, range_length, height, extents);
+#else
+    return false;
+#endif
+}
+
 TextExtents font_measure_text(FontHandle* handle, const char* text, int byte_len) {
     TextExtents ext = {0};
     if (!handle || !text || byte_len <= 0) return ext;
@@ -1065,14 +1085,7 @@ TextExtents font_measure_text(FontHandle* handle, const char* text, int byte_len
     }
 
 #ifdef __APPLE__
-    void* ct_font_ref = NULL;
-    if (should_use_ct_advance_override(handle)) {
-        ct_font_ref = handle->ct_font_ref;
-    } else if (handle->ct_raster_ref) {
-        ct_font_ref = handle->ct_raster_ref;
-    } else {
-        ct_font_ref = handle->ct_font_ref;
-    }
+    void* ct_font_ref = font_measurement_ct_font(handle);
     if (ct_font_ref) {
         TextExtents shaped = font_platform_measure_text(ct_font_ref, text, byte_len, ext.height);
         if (shaped.glyph_count > 0 || shaped.width > 0.0f) {

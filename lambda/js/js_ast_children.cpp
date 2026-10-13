@@ -167,7 +167,7 @@ struct JsAstFunctionFactWalk {
 // as observations of `arguments`/`this`/`new.target` or as an `eval` mention;
 // treating them as such materialized an arguments object on every call of the
 // enclosing function (51 us/call on prettier_ast, which never uses `arguments`).
-static bool js_ast_fact_walk_skips_child(JsAstNode* parent, JsAstNode* child) {
+bool js_ast_fact_walk_skips_child(JsAstNode* parent, JsAstNode* child) {
     if (!parent || !child) return false;
     switch (parent->node_type) {
     case AST_NODE_MEMBER_EXPR: {

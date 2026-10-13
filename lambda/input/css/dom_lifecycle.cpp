@@ -46,6 +46,8 @@ typedef struct DomNodeRecord {
     struct DomNodeRecord* all_next;
     struct DomNodeRecord* all_prev;
     struct DomNodeRecord* retire_next;
+    struct DomNodeRecord* candidate_next;  // registry->candidates while `candidate`
+    struct DomNodeRecord* candidate_prev;
 } DomNodeRecord;
 
 typedef struct DomNodeRegistry {
@@ -53,6 +55,9 @@ typedef struct DomNodeRegistry {
     size_t bucket_count;
     size_t record_count;
     DomNodeRecord* all_records;
+    // Detached candidates only: scheduling a detach compares against these, and
+    // scanning every record per replaced node made reactive redraws quadratic.
+    DomNodeRecord* candidates;
     DomDocument* document;
     DomNodeRecord* pending_free;
     struct DomNodeRegistry* queue_prev;
@@ -134,8 +139,22 @@ static DomNodeRecord* dom_record_find(DomNodeRegistry* registry, DomNode* addres
     return nullptr;
 }
 
+static void dom_record_begin_candidacy(DomNodeRegistry* registry, DomNodeRecord* record) {
+    record->candidate = true;
+    record->candidate_prev = nullptr;
+    record->candidate_next = registry->candidates;
+    if (registry->candidates) registry->candidates->candidate_prev = record;
+    registry->candidates = record;
+}
+
 // Every way a detached candidate stops being one also ends its stranded charge.
 static void dom_record_end_candidacy(DomNodeRegistry* registry, DomNodeRecord* record) {
+    if (record->candidate && registry) {
+        if (record->candidate_prev) record->candidate_prev->candidate_next = record->candidate_next;
+        else registry->candidates = record->candidate_next;
+        if (record->candidate_next) record->candidate_next->candidate_prev = record->candidate_prev;
+        record->candidate_next = record->candidate_prev = nullptr;
+    }
     record->candidate = false;
     if (registry && record->stranded_bytes) {
         registry->stats.wrapper_stranded_bytes -= record->stranded_bytes;
@@ -271,7 +290,7 @@ static bool dom_node_registry_register_owned(DomDocument* doc, DomNode* node,
         record->type = type;
         record->state = DOM_NODE_LIVE;
         record->recyclable = recyclable;
-        record->candidate = false;
+        dom_record_end_candidacy(registry, record);
         record->current_owner = true;
         record->primary_size = primary_size;
         dom_record_set_backing_value(doc, record, backing_value, backing_gc);
@@ -344,7 +363,7 @@ bool dom_node_registry_transfer(DomDocument* source, DomDocument* destination,
         destination_record->type = source_record->type;
         destination_record->state = DOM_NODE_LIVE;
         destination_record->recyclable = source_record->recyclable;
-        destination_record->candidate = false;
+        dom_record_end_candidacy(dom_registry(destination), destination_record);
         destination_record->current_owner = true;
         destination_record->primary_size = source_record->primary_size;
         dom_record_set_backing_value(destination, destination_record,
@@ -509,16 +528,21 @@ void dom_node_schedule_detached(DomDocument* doc, DomNode* root) {
     DomNodeRecord* record = dom_record_find(registry, root);
     if (!record || !record->current_owner || record->id != root->id ||
         record->state == DOM_NODE_RETIRED) return;
-    for (DomNodeRecord* other = registry->all_records; other; other = other->all_next) {
-        if (!other->candidate || other == record) continue;
-        if (dom_node_is_within(root, other->address)) return;
-        if (dom_node_is_within(other->address, root)) {
+    // a root inside an already detached candidate is covered by that candidate;
+    // otherwise this root subsumes the candidates nested inside it.
+    for (DomNodeRecord* other = registry->candidates; other; other = other->candidate_next) {
+        if (other != record && dom_node_is_within(root, other->address)) return;
+    }
+    for (DomNodeRecord* other = registry->candidates; other;) {
+        DomNodeRecord* next = other->candidate_next;
+        if (other != record && dom_node_is_within(other->address, root)) {
             dom_record_end_candidacy(registry, other);
             other->state = DOM_NODE_LIVE;
         }
+        other = next;
     }
     if (!record->candidate) {
-        record->candidate = true;
+        dom_record_begin_candidacy(registry, record);
         record->state = DOM_NODE_DETACHED_CANDIDATE;
         registry->stats.scheduled_candidates++;
     }
@@ -749,6 +773,7 @@ static size_t dom_retire_collect(DomDocument* doc) {
 // Every lookup treats a missing record exactly like a retired one, so a
 // recycled slot's record only cost memory and lengthened each detach scan.
 static void dom_record_unlink_free(DomNodeRegistry* registry, DomNodeRecord* record) {
+    if (record->candidate) dom_record_end_candidacy(registry, record);
     DomNodeRecord** edge = &registry->buckets[dom_node_bucket(registry, record->address)];
     while (*edge && *edge != record) edge = &(*edge)->bucket_next;
     if (*edge) *edge = record->bucket_next;

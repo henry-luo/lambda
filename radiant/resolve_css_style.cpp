@@ -6563,6 +6563,27 @@ static void resolve_text_decoration_thickness(LayoutContext* lycon,
     }
 }
 
+static bool css_text_color_is_current(const CssValue* value) {
+    return !value ||
+        (value->type == CSS_VALUE_TYPE_COLOR &&
+         value->data.color.type == CSS_COLOR_CURRENTCOLOR) ||
+        (value->type == CSS_VALUE_TYPE_KEYWORD &&
+         value->data.keyword == CSS_VALUE_CURRENTCOLOR);
+}
+
+
+static void resolve_text_decoration_color(LayoutContext* lycon, FontProp* font,
+                                          const CssValue* value) {
+    CssEnum keyword = value && value->type == CSS_VALUE_TYPE_KEYWORD
+        ? value->data.keyword : CSS_VALUE__UNDEF;
+    // zero alpha is an authored color, never an unset/currentColor sentinel.
+    font->text_deco_color_current = css_text_color_is_current(value) ||
+        keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_UNSET ||
+        keyword == CSS_VALUE_REVERT || keyword == CSS_VALUE_REVERT_LAYER;
+    font->text_deco_color = font->text_deco_color_current ? Color{}
+        : resolve_color_value(lycon, value);
+}
+
 static void resolve_text_decoration_component(LayoutContext* lycon, FontProp* font,
                                                const CssValue* item) {
     if (!item) return;
@@ -6575,14 +6596,14 @@ static void resolve_text_decoration_component(LayoutContext* lycon, FontProp* fo
             font->text_deco_style = keyword;
         } else if (info && (info->group == CSS_VALUE_GROUP_COLOR ||
                             info->group == CSS_VALUE_GROUP_SYSTEM_COLOR)) {
-            font->text_deco_color = resolve_color_value(lycon, item);
+            resolve_text_decoration_color(lycon, font, item);
         } else if (keyword == CSS_VALUE_THIN || keyword == CSS_VALUE_MEDIUM ||
                    keyword == CSS_VALUE_THICK || keyword == CSS_VALUE_AUTO ||
                    keyword == CSS_VALUE_FROM_FONT) {
             resolve_text_decoration_thickness(lycon, font, item);
         }
     } else if (item->type == CSS_VALUE_TYPE_COLOR) {
-        font->text_deco_color = resolve_color_value(lycon, item);
+        resolve_text_decoration_color(lycon, font, item);
     } else if (item->type == CSS_VALUE_TYPE_LENGTH ||
                item->type == CSS_VALUE_TYPE_PERCENTAGE ||
                item->type == CSS_VALUE_TYPE_NUMBER ||
@@ -6597,7 +6618,7 @@ static void resolve_text_decoration_component(LayoutContext* lycon, FontProp* fo
             strcmp(name, "max") == 0 || strcmp(name, "clamp") == 0) {
             resolve_text_decoration_thickness(lycon, font, item);
         } else {
-            font->text_deco_color = resolve_color_value(lycon, item);
+            resolve_text_decoration_color(lycon, font, item);
         }
     }
 }
@@ -6645,6 +6666,7 @@ static void resolve_text_decoration_property(LayoutContext* lycon, ViewSpan* spa
                 font->text_deco_extra = parent->fontp()->text_deco_extra;
                 font->text_deco_style = parent->fontp()->text_deco_style;
                 font->text_deco_color = parent->fontp()->text_deco_color;
+                font->text_deco_color_current = parent->fontp()->text_deco_color_current;
                 font->text_deco_thickness = parent->fontp()->text_deco_thickness;
             }
             return;
@@ -6653,6 +6675,7 @@ static void resolve_text_decoration_property(LayoutContext* lycon, ViewSpan* spa
         font->text_deco_extra = 0;
         font->text_deco_style = CSS_VALUE_SOLID;
         font->text_deco_color = {};
+        font->text_deco_color_current = true;
         font->text_deco_thickness = 0.0f;
         if (value->type == CSS_VALUE_TYPE_LIST) {
             for (int i = 0; i < value->data.list.count; i++) {
@@ -6688,8 +6711,11 @@ static void resolve_text_decoration_property(LayoutContext* lycon, ViewSpan* spa
         return;
     }
     if (property == CSS_PROPERTY_TEXT_DECORATION_COLOR) {
-        Color color = resolve_color_value(lycon, value);
-        if (color.a > 0) font->text_deco_color = color;
+        if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INHERIT) {
+            DomElement* parent = dom_parent_element(lam::dom_require_element(lycon->view));
+            font->text_deco_color = parent && parent->font ? parent->fontp()->text_deco_color : Color{};
+            font->text_deco_color_current = !parent || !parent->font || parent->fontp()->text_deco_color_current;
+        } else resolve_text_decoration_color(lycon, font, value);
     } else if (property == CSS_PROPERTY_TEXT_DECORATION_THICKNESS) {
         if (value->type == CSS_VALUE_TYPE_KEYWORD &&
             value->data.keyword == CSS_VALUE_INHERIT) {
@@ -6707,13 +6733,6 @@ static void resolve_text_decoration_property(LayoutContext* lycon, ViewSpan* spa
     }
 }
 
-static bool css_text_emphasis_color_is_current(const CssValue* value) {
-    return !value ||
-        (value->type == CSS_VALUE_TYPE_COLOR &&
-         value->data.color.type == CSS_COLOR_CURRENTCOLOR) ||
-        (value->type == CSS_VALUE_TYPE_KEYWORD &&
-         value->data.keyword == CSS_VALUE_CURRENTCOLOR);
-}
 
 static const CssDeclaration* css_text_emphasis_winner(StyleTree* style,
         CssPropertyCode property, bool include_shorthand) {
@@ -6784,7 +6803,7 @@ static void resolve_text_emphasis_longhands(DomElement* element,
             font->text_emphasis_color_current = inherited->text_emphasis_color_current;
         } else if (!value || wide == CSS_VALUE_INITIAL ||
                    wide == CSS_VALUE_REVERT || wide == CSS_VALUE_REVERT_LAYER ||
-                   css_text_emphasis_color_is_current(value)) {
+                   css_text_color_is_current(value)) {
             font->text_emphasis_color_current = true;
         } else if (css_property_validate_value(CSS_PROPERTY_TEXT_EMPHASIS_COLOR, value)) {
             font->text_emphasis_color = resolve_color_value(lycon, value);
@@ -6859,9 +6878,10 @@ static void resolve_font_spacing_property(LayoutContext* lycon, ViewSpan* span,
                                           const CssValue* value) {
     bool letter = property == CSS_PROPERTY_LETTER_SPACING;
     span->ensure_font(lycon);
+    // calc() is a length-valued spacing expression for both letter- and word-spacing.
     bool length_value = value->type == CSS_VALUE_TYPE_LENGTH ||
-        (letter && (value->type == CSS_VALUE_TYPE_PERCENTAGE ||
-                    value->type == CSS_VALUE_TYPE_FUNCTION));
+        value->type == CSS_VALUE_TYPE_FUNCTION ||
+        (letter && value->type == CSS_VALUE_TYPE_PERCENTAGE);
     if (length_value) {
         float spacing = resolve_length_value(lycon, property, value);
         if (letter) {
@@ -8864,6 +8884,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_TEXT_DECORATION_STYLE:
         case CSS_PROPERTY_TEXT_DECORATION_COLOR:
         case CSS_PROPERTY_TEXT_DECORATION_THICKNESS:
+            // property-ID traversal must not resurrect a weaker longhand after its winning shorthand.
+            if (prop_id != CSS_PROPERTY_TEXT_DECORATION &&
+                shorthand_overrides_longhand(lycon, CSS_PROPERTY_TEXT_DECORATION, decl)) break;
             resolve_text_decoration_property(lycon, span, prop_id, value);
             break;
         case CSS_PROPERTY_TEXT_UNDERLINE_OFFSET:

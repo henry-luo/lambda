@@ -5,6 +5,7 @@
 #include "../../runtime/heap_api.h"
 #include "../js_well_known_names.h"
 #include "../js_props.h"
+#include "../js_runtime.h"
 #include "../../input/input.hpp"
 #include "../../../lib/mem.h"
 #include <math.h>
@@ -193,9 +194,18 @@ extern "C" Item mvp_lmd_arguments_new(Item function, Item* values, uint64_t coun
     status = mvp_lmd_define_own_property(object.get(), Item{.item = s2it(heap_create_name("callee", 6))}, &descriptor);
     return item_is_error(status) ? status : object.get();
 }
+extern "C" Item mvp_lmd_function_set_name(Item function, Item key, int64_t prefix) {
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, function), name(roots, key);
+    name.set(js_function_name_display(name.get().get_string(), prefix));
+    if (item_is_error(name.get())) return name.get();
+    return mvp_lmd_named_set(owner.get(), "name", name.get(), JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
+}
 Item mvp_lmd_function_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
     for (int i = LMD_LIBRARY_CALL; i <= LMD_LIBRARY_BIND; i++) {
-        state->values[i] = mvp_lmd_native_function(program, state, function_method, i == LMD_LIBRARY_APPLY ? 2 : 1);
+        state->values[i] = mvp_lmd_native_function(program, state, function_method, i == LMD_LIBRARY_APPLY ? 2 : 1,
+            i == LMD_LIBRARY_APPLY ? "apply" : i == LMD_LIBRARY_BIND ? "bind" : "call");
         if (item_is_error(state->values[i])) return state->values[i];
     }
     if (state->mutable_prototypes) {

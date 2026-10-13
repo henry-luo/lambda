@@ -22,7 +22,7 @@ MvpLmdClass* mvp_lmd_class_record(Item owner) {
     return nominal && nominal->extension == &mvp_lmd_class_extension
         ? (MvpLmdClass*)nominal->extension_data : NULL;
 }
-extern "C" Item mvp_lmd_get_prototype(Item object) {
+static Item get_prototype_with_library(Item object, MvpLmdLibraryState* library) {
     if (mvp_lmd_is_proxy(object)) return mvp_lmd_proxy_property(object, ItemNull, ItemNull, object, LMD_PROXY_PROTOTYPE);
     TypeId kind = get_type_id(object);
     if (kind == LMD_TYPE_FUNC && !mvp_lmd_class_record(object)) {
@@ -31,13 +31,29 @@ extern "C" Item mvp_lmd_get_prototype(Item object) {
         Rooted<Item> held(roots, object);
         Item ready = mvp_lmd_function_prepare(held.get());
         if (item_is_error(ready)) return ready;
-        return mvp_lmd_get_prototype(held.get());
+        return get_prototype_with_library(held.get(), library);
     }
     Map* map = mvp_lmd_property_map(object);
     if (!map) return mvp_lmd_fail(kind == LMD_TYPE_NULL || kind == LMD_TYPE_UNDEFINED ? LMD_MVP_TYPE : LMD_MVP_CAPABILITY, 0);
-    MvpLmdLibraryState* library = mvp_lmd_program_library();
     if (library && map->type) {
-        ShapeEntry* link = typemap_hash_lookup_key((TypeMap*)map->type, library->prototype_key);
+        TypeMap* shape = (TypeMap*)map->type;
+        ShapeEntry* link = NULL;
+        bool cached = false, shared = typemap_is_shared_shape(shape);
+        if (shared) for (const MvpLmdPropertyCacheEntry& entry : library->prototype_links.entries) {
+            if (entry.shape != shape) continue;
+            // reuse the MIR cache's proven packed object-pointer lane, including null.
+            if (entry.pointer_lane == 2 && map->data) {
+                uint64_t pointer;
+                memcpy(&pointer, (char*)map->data + entry.offset, sizeof(pointer));
+                return Item{.item = pointer ? pointer : ITEM_NULL};
+            }
+            link = entry.field; cached = true; break;
+        }
+        if (!cached) {
+            link = typemap_hash_lookup_key(shape, library->prototype_key);
+            if (shared) mvp_lmd_cache_property(&library->prototype_links, shape, link, ItemNull, false);
+        }
+        // immutable shapes also make cached absence safe; values are read from the current owner.
         if (link) return map_shape_field_to_item(map->data, link);
     }
     if (kind == LMD_TYPE_ARRAY) return library ? library->values[
@@ -58,6 +74,9 @@ extern "C" Item mvp_lmd_get_prototype(Item object) {
             get_type_id(library->values[LMD_LIBRARY_FUNCTION_PROTOTYPE]) == LMD_TYPE_FUNC)
         return library->values[LMD_LIBRARY_FUNCTION_PROTOTYPE];
     return library->values[LMD_LIBRARY_OBJECT_PROTOTYPE];
+}
+extern "C" Item mvp_lmd_get_prototype(Item object) {
+    return get_prototype_with_library(object, mvp_lmd_program_library());
 }
 extern "C" Item mvp_lmd_object_extensible(Item object, int64_t prevent) {
     if (mvp_lmd_is_proxy(object)) return mvp_lmd_proxy_property(object, ItemNull, ItemNull, object,
@@ -108,16 +127,31 @@ extern "C" Item mvp_lmd_set_prototype(Item object, Item prototype) {
     return map_shape_set(map, library->prototype_key, parent.get())
         ? Item{.item = ITEM_TRUE} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
-static Item mvp_lmd_inherited_member_flags(Item owner, const char* key, size_t length, bool* found, uint8_t* flags, NameRef identity = NULL, ShapeEntry** descriptor = NULL, Item actual_receiver = Item{.item = 0}, bool semantic = false) {
+static Item mvp_lmd_inherited_member_flags(Item owner, const char* key, size_t length, bool* found, uint8_t* flags,
+        NameRef identity = NULL, ShapeEntry** descriptor = NULL, Item actual_receiver = Item{.item = 0},
+        bool semantic = false, MvpLmdClass* cls = NULL, MvpLmdLibraryState* library = NULL,
+        MvpLmdPropertyCache* cache = NULL) {
     *found = false;
-    MvpLmdClass* cls = mvp_lmd_class_record(owner);
+    // property dispatch already resolved this metadata; live prototype links are still read below.
+    if (!cls) cls = mvp_lmd_class_record(owner);
     if (!cls) return Item{.item = ITEM_JS_UNDEFINED};
     Item receiver = actual_receiver.item ? actual_receiver : owner;
-    MvpLmdLibraryState* library = mvp_lmd_program_library(cls->program);
+    if (!library) library = mvp_lmd_program_library(cls->program);
     auto resolve = [&](Map* properties) -> Item {
-        ShapeEntry* field = properties->type ? (identity
-            ? typemap_hash_lookup_key((TypeMap*)properties->type, identity)
-            : typemap_hash_lookup((TypeMap*)properties->type, key, (int)length)) : NULL;
+        TypeMap* shape = (TypeMap*)properties->type;
+        ShapeEntry* field = NULL;
+        bool cacheable = cache && shape && typemap_is_shared_shape(shape) &&
+            (!library || !library->arguments_key);
+        if (cacheable) for (const MvpLmdPropertyCacheEntry& entry : cache->entries) {
+            if (entry.shape == shape) { field = entry.field; break; }
+        }
+        if (!field && shape) {
+            field = identity ? typemap_hash_lookup_key(shape, identity)
+                : typemap_hash_lookup(shape, key, (int)length);
+            // cache the visited shape's data slot, never a mutable chain's inherited value.
+            if (cacheable && field && !(field->flags & JSPD_IS_ACCESSOR))
+                mvp_lmd_cache_property(cache, shape, field, ItemNull, false);
+        }
         if (!field) return Item{.item = ITEM_JS_UNDEFINED};
         *found = true;
         if (descriptor) *descriptor = field;
@@ -145,7 +179,9 @@ static Item mvp_lmd_inherited_member_flags(Item owner, const char* key, size_t l
         }
         return Item{.item = ITEM_JS_UNDEFINED};
     }
-    Item cursor = mvp_lmd_get_prototype(owner);
+    // ordinary chain traversal cannot reenter; preserve the active library across its links.
+    MvpLmdLibraryState* traversal_library = mvp_lmd_program_library();
+    Item cursor = get_prototype_with_library(owner, traversal_library);
     while (cursor.item != ITEM_NULL) {
         if (item_is_error(cursor)) return cursor;
         if (semantic && (get_type_id(cursor) != LMD_TYPE_MAP || mvp_lmd_is_proxy(cursor))) {
@@ -167,7 +203,7 @@ static Item mvp_lmd_inherited_member_flags(Item owner, const char* key, size_t l
         // ordinary Map traversal cannot collect; an accessor roots its receiver/callable and returns immediately.
         Item result = resolve(properties);
         if (*found || item_is_error(result)) return result;
-        cursor = mvp_lmd_get_prototype(cursor);
+        cursor = get_prototype_with_library(cursor, traversal_library);
     }
     return Item{.item = ITEM_JS_UNDEFINED};
 }
@@ -233,15 +269,6 @@ static bool mvp_lmd_class_widen_allocation(MvpLmdClass* cls, String* key, TypeId
 template<bool fixed>
 static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64_t operation,
         MvpLmdPropertyCache* cache, Item receiver) {
-    if ((operation & ~LMD_PROP_STRICT) == LMD_PROP_CREATE_DATA) {
-        JsPropertyDescriptor descriptor = {};
-        descriptor.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_WRITABLE |
-            JS_PD_HAS_ENUMERABLE | JS_PD_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
-        js_pd_set_configurable(&descriptor, true);
-        descriptor.value = value;
-        Item status = mvp_lmd_define_own_property(owner, name, &descriptor);
-        return status.item == ITEM_FALSE ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : status;
-    }
     if (!fixed && (operation & ~LMD_PROP_STRICT) == LMD_PROP_SET &&
             mvp_lmd_program_library() && mvp_lmd_program_library()->mutable_prototypes) {
         RootFrame roots(1);
@@ -252,6 +279,16 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
         if (item_is_error(status)) return status;
         if (status.item == ITEM_FALSE && (operation & LMD_PROP_STRICT)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
         return lambda_item_uses_scalar_home(argument.get()) ? push_d(it2d(argument.get())) : argument.get();
+    }
+    // class-definition attributes stay behind ordinary Set dispatch on this hot path.
+    if ((operation & ~(LMD_PROP_STRICT | LMD_PROP_NON_ENUMERABLE)) == LMD_PROP_CREATE_DATA) {
+        JsPropertyDescriptor descriptor = {};
+        descriptor.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_WRITABLE |
+            JS_PD_HAS_ENUMERABLE | ((operation & LMD_PROP_NON_ENUMERABLE) ? 0 : JS_PD_ENUMERABLE) | JS_PD_HAS_CONFIGURABLE;
+        js_pd_set_configurable(&descriptor, true);
+        descriptor.value = value;
+        Item status = mvp_lmd_define_own_property(owner, name, &descriptor);
+        return status.item == ITEM_FALSE ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : status;
     }
     if (get_type_id(owner) == LMD_TYPE_ARRAY)
         return mvp_lmd_array_property(owner, name, value, operation, receiver);
@@ -311,7 +348,8 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
             Item result = found && !presence ? map_shape_field_to_item(map->data, field) : Item{.item = ITEM_JS_UNDEFINED};
             if (!found && operation != LMD_PROP_OWN) {
                 uint8_t flags;
-                result = mvp_lmd_inherited_member_flags(owner, key->chars, key->len, &found, presence ? &flags : NULL, key, NULL, receiver, true);
+                result = mvp_lmd_inherited_member_flags(owner, key->chars, key->len, &found,
+                    presence ? &flags : NULL, key, NULL, receiver, true, cls, library, presence ? NULL : cache);
             }
             if (!found && constructor && operation != LMD_PROP_OWN && (!library || !library->mutable_prototypes)) {
                 result = mvp_lmd_function_method(owner, key);
@@ -338,7 +376,7 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
             if (!field) {
                 bool found;
                 Item inherited = mvp_lmd_inherited_member_flags(owner, name.get_string()->chars,
-                    name.get_string()->len, &found, &flags, name.get_string(), &descriptor);
+                    name.get_string()->len, &found, &flags, name.get_string(), &descriptor, Item{.item = 0}, false, cls);
                 if (item_is_error(inherited)) return inherited;
             }
             if (flags & (JSPD_IS_ACCESSOR | JSPD_NON_WRITABLE))
@@ -444,16 +482,18 @@ extern "C" Item mvp_lmd_class_initialize_instance(Item constructor, Item receive
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     Rooted<Item> held(roots, constructor), object(roots, receiver), value(roots, ItemNull);
-    uint32_t index = 0;
+    uint32_t index = 0, key_index = 0;
     for (AstNode* node = ((AstBlockNode*)cls->ast->body)->statements; node; node = node->next) {
-        if (node->node_type != AST_NODE_FIELD || ((AstClassFieldNode*)node)->is_static) continue;
+        if (node->node_type != AST_NODE_FIELD) continue;
+        uint32_t key_slot = key_index++;
+        if (((AstClassFieldNode*)node)->is_static) continue;
         AstClassFieldNode* field = (AstClassFieldNode*)node;
         Item initializer = cls->initializers[index++];
+        Item key = cls->field_keys ? cls->field_keys[key_slot] : Item{.item = s2it(((AstIdentNode*)field->key)->name)};
         uint64_t home = 0;
         value.set(lambda_item_adopt_scalar_home(initializer.item == ITEM_JS_UNDEFINED ? initializer :
-            mvp_lmd_class_invoke(initializer, object.get(), NULL, 0, Item{.item = ITEM_JS_UNDEFINED}), &home));
+            mvp_lmd_class_invoke(initializer, object.get(), &key, 1, Item{.item = ITEM_JS_UNDEFINED}), &home));
         if (item_is_error(value.get())) return value.get();
-        Item key = {.item = s2it(((AstIdentNode*)field->key)->name)};
         MvpLmdLibraryState* library = mvp_lmd_program_library(cls->program);
         Item stored = library && library->mutable_prototypes ?
             mvp_lmd_property_with_receiver(object.get(), key, value.get(), LMD_PROP_CREATE_DATA, object.get()) :
@@ -478,7 +518,7 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
         if (new_target.item == ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
         MvpLmdClass* cls = fn->home;
         MvpLmdLibraryState* library = mvp_lmd_program_library(fn->program);
-        if (cls->constructor_id < 0 && cls->nominal.base && library && library->mutable_prototypes) {
+        if (cls->constructor_id < 0 && cls->ast->superclass && (cls->dynamic || (library && library->mutable_prototypes))) {
             // default derived constructors follow the live constructor link; nominal ancestry stays fixed.
             RootFrame observed(1);
             if (!observed.valid()) return ItemError;
@@ -502,7 +542,7 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
             if (!mvp_lmd_is_constructor(target.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
             actual = cls;
         }
-        if (cls->nominal.base) {
+        if (cls->ast->superclass) {
             self.set(Item{.item = ITEM_JS_TDZ});
         } else {
             if (actual == cls && cls->reusable_layout) reusable = cls;

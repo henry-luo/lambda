@@ -49,7 +49,7 @@ extern "C" int64_t mvp_lmd_string_search(Item value, Item needle, double start, 
     } else result = utf16_find(string->chars, string->len, pattern->chars, pattern->len, first);
     return prefix ? result == first : result;
 }
-extern "C" Item mvp_lmd_string_pad(Item string, double length, Item filler) {
+extern "C" Item mvp_lmd_string_pad(Item string, double length, Item filler, int64_t end) {
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     Rooted<Item> source(roots, string), fill(roots, filler), repeated(roots, ItemNull);
@@ -66,7 +66,8 @@ extern "C" Item mvp_lmd_string_pad(Item string, double length, Item filler) {
     if (!text) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     repeated.set(Item{.item = s2it(text)});
     repeated.set(mvp_lmd_string_range(repeated.get(), 0, missing, 1));
-    return item_is_error(repeated.get()) ? repeated.get() : mvp_lmd_string_concat(repeated.get(), source.get());
+    return item_is_error(repeated.get()) ? repeated.get() : end ? mvp_lmd_string_concat(source.get(), repeated.get()) :
+        mvp_lmd_string_concat(repeated.get(), source.get());
 }
 extern "C" Item mvp_lmd_string_split(Item value, Item separator, int64_t limit) {
     String* string = value.get_string();

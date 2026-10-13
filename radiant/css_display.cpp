@@ -138,17 +138,22 @@ bool css_display_element_is_replaced(DomElement* dom_elem) {
 bool css_is_mathml_element(const DomElement* element) {
     if (!element || !element->tag_name) return false;
     // MathML Core §4.1: the math inner display type applies only to MathML elements.
-    static const char* mathml_tags[] = {
+    const char* tag = element->tag_name;
+    // display resolution asks this for every element; all MathML names start with
+    // 'm' except these three, so the first byte rejects HTML tags without a scan.
+    if (tag[0] == 's') return strcmp(tag, "semantics") == 0;
+    if (tag[0] == 'a') return strcmp(tag, "annotation") == 0 || strcmp(tag, "annotation-xml") == 0;
+    if (tag[0] != 'm') return false;
+    static const char* mathml_m_tags[] = {
         "math", "maction", "maligngroup", "malignmark", "menclose",
         "merror", "mfenced", "mfrac", "mglyph", "mi", "mlabeledtr",
         "mlongdiv", "mmultiscripts", "mn", "mo", "mover", "mpadded",
         "mphantom", "mprescripts", "mroot", "mrow", "ms", "mscarries",
         "mscarry", "msgroup", "msline", "mspace", "msqrt", "mstack",
         "mstyle", "msub", "msup", "msubsup", "mtable", "mtd", "mtext",
-        "mtr", "munder", "munderover", "semantics", "annotation",
-        "annotation-xml"};
-    for (size_t i = 0; i < sizeof(mathml_tags) / sizeof(*mathml_tags); i++) {
-        if (strcmp(element->tag_name, mathml_tags[i]) == 0) return true;
+        "mtr", "munder", "munderover"};
+    for (size_t i = 0; i < sizeof(mathml_m_tags) / sizeof(*mathml_m_tags); i++) {
+        if (strcmp(tag, mathml_m_tags[i]) == 0) return true;
     }
     return false;
 }

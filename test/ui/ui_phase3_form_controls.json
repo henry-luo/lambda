@@ -1,6 +1,7 @@
 {
-  "name": "Phase 3: Form controls - check and select_option",
+  "name": "Phase 3: Form controls - check and select_option in an 800x600 viewport",
   "html": "test/ui/test_form_controls.html",
+  "viewport": {"width": 800, "height": 600},
   "events": [
     {"type": "log", "message": "=== Phase 3: Form Controls Test ==="},
 

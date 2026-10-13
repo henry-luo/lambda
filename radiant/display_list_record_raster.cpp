@@ -8,6 +8,7 @@ void dl_fill_surface_rect(DisplayList* dl, float x, float y, float w, float h,
                           uint32_t color, const Bound* clip,
                           ClipShape** clip_shapes, int clip_depth) {
     DisplayItem* item = dl_alloc_item(dl);
+    if (!item) return;
     item->op = DL_FILL_SURFACE_RECT;
     dl_set_clipped_rect_bounds(item, x, y, w, h, clip);
     item->fill_surface_rect.x = x;
@@ -25,6 +26,7 @@ void dl_blit_surface_scaled(DisplayList* dl, ImageSurface* src_surface,
                             ClipShape** clip_shapes, int clip_depth, uint8_t opacity,
                             uint64_t src_generation) {
     DisplayItem* item = dl_alloc_item(dl);
+    if (!item) return;
     item->op = DL_BLIT_SURFACE_SCALED;
     dl_set_clipped_rect_bounds(item, dst_x, dst_y, dst_w, dst_h, clip);
     // a registered source is resolved at replay; an unregistered one stays frame-local
@@ -47,6 +49,7 @@ void dl_video_placeholder(DisplayList* dl, struct RdtVideo* video,
                           int object_fit, const Bound* clip,
                           uint64_t video_generation) {
     DisplayItem* item = dl_alloc_item(dl);
+    if (!item) return;
     item->op = DL_VIDEO_PLACEHOLDER;
     dl_set_clipped_rect_bounds(item, dst_x, dst_y, dst_w, dst_h, clip);
     item->video_placeholder.video = video;
@@ -64,6 +67,7 @@ void dl_webview_layer_placeholder(DisplayList* dl, ImageSurface* surface,
                                   const Bound* clip,
                                   uint64_t surface_generation) {
     DisplayItem* item = dl_alloc_item(dl);
+    if (!item) return;
     item->op = DL_WEBVIEW_LAYER_PLACEHOLDER;
     dl_set_clipped_rect_bounds(item, dst_x, dst_y, dst_w, dst_h, clip);
     item->webview_layer_placeholder.surface = surface;

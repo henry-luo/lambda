@@ -16,6 +16,41 @@ const report = reportIndex >= 0 ? process.argv[reportIndex + 1] : null;
 const results = [];
 fs.mkdirSync(path.join(ROOT, 'temp'), { recursive: true });
 const fixture = fs.mkdtempSync(path.join(ROOT, 'temp/test-run-contracts-'));
+const logFault = path.join(fixture, 'log-fault.cjs');
+fs.writeFileSync(logFault, `
+if (process.argv[1] === ${JSON.stringify(runner)}) {
+    const fs = require('fs');
+    const { Writable } = require('stream');
+    const original = fs.createWriteStream;
+    const failure = () => Object.assign(new Error('ENOSPC: simulated full disk'), { code: 'ENOSPC' });
+    fs.createWriteStream = function(file, options) {
+        if (!String(file).endsWith(process.env.FAKE_LOG_FAULT_PATH)) return original.call(this, file, options);
+        if (process.env.FAKE_LOG_FAULT_MODE !== 'open') fs.writeFileSync(file, '');
+        const stream = new Writable({ write(data, encoding, callback) {
+            if (process.env.FAKE_LOG_FAULT_MODE === 'slow') {
+                setTimeout(() => { fs.appendFileSync(file, data); callback(); }, 2);
+            } else setTimeout(() => callback(failure()), Number(process.env.FAKE_LOG_FAULT_DELAY || 0));
+        } });
+        let peak = 0;
+        const write = stream.write;
+        stream.write = function(...args) {
+            const result = write.apply(this, args);
+            peak = Math.max(peak, this.writableLength);
+            return result;
+        };
+        stream.on('finish', () => {
+            if (process.env.FAKE_LOG_BUFFER_TRACE) fs.writeFileSync(process.env.FAKE_LOG_BUFFER_TRACE, String(peak));
+        });
+        if (process.env.FAKE_LOG_FAULT_MODE === 'open') process.nextTick(() => stream.destroy(failure()));
+        return stream;
+    };
+    const append = fs.appendFileSync;
+    fs.appendFileSync = function(file, ...args) {
+        if (process.env.FAKE_APPEND_FAULT && String(file).endsWith(process.env.FAKE_APPEND_FAULT)) throw failure();
+        return append.call(this, file, ...args);
+    };
+}
+`);
 
 function invoke(args, env = {}) {
     const child = spawnSync(process.execPath, [runner, ...args], {
@@ -78,8 +113,21 @@ if (scenario === 'launches') {
     ];
 }
 fs.writeFileSync(output, JSON.stringify(data));
-if (scenario === 'crash') process.kill(process.pid, 'SIGKILL');
-if (process.env.FAKE_SUITE_TRACE_DIR) setTimeout(() => process.exit(0), 200);
+if (scenario === 'log-flush') process.stdout.write('final log write\\n');
+if (process.env.FAKE_VIEW_ARTIFACTS && name === 'test_radiant_view_gtest') {
+    const directory = path.join(process.env.LAMBDA_TEST_OUTPUT_DIR, 'radiant_view', String(process.pid));
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(directory, 'view.log'), workerCase || 'suite');
+}
+if (scenario === 'log-io') {
+    process.stdout.write('log fault stdout\\n');
+    process.stderr.write('log fault stderr\\n');
+    setInterval(() => {}, 1000);
+} else if (scenario === 'flood') {
+    process.stdout.end(Buffer.alloc(1024 * 1024, 'o'));
+    process.stderr.end(Buffer.alloc(1024 * 1024, 'e'));
+} else if (scenario === 'crash') process.kill(process.pid, 'SIGKILL');
+else if (process.env.FAKE_SUITE_TRACE_DIR) setTimeout(() => process.exit(0), 200);
 else if (workerCase && requestedScenario === 'parallel') setTimeout(() => process.exit(0), 200);
 else if (scenario === 'timeout') setInterval(() => {}, 1000);
 else process.exit(scenario === 'exit' ? 7 : 0);
@@ -96,8 +144,8 @@ function check(name, fn) {
     }
 }
 
-function runSelected(names, scenario = 'pass', extra = [], env = {}, parallel = false, previousSummary = null) {
-    const output = path.join(fixture, 'results-' + results.length);
+function runSelected(names, scenario = 'pass', extra = [], env = {}, parallel = false, previousSummary = null,
+                     output = path.join(fixture, 'results-' + results.length)) {
     fs.mkdirSync(output, { recursive: true });
     // A stale passing artifact must never hide a child that fails to write JSON.
     fs.writeFileSync(path.join(output, names[0] + '_results.json'), JSON.stringify({ tests: 99, failures: 0,
@@ -139,6 +187,7 @@ try {
         const view = inventory.find(t => t.baseName === 'test_radiant_view_gtest');
         assert.ok(view.runnerArgs.includes('--gtest_filter=*-RadiantViewTest.Doom*'));
         assert.equal(view.caseWorkers, 3);
+        assert.deepEqual(view.artifactDirs, ['radiant_view']);
         assert.ok(view.caseWorkerArgs.includes('--radiant-case-worker'));
         for (const name of ['test_radiant_layout_baseline', 'test_radiant_page_snapshot', 'test_wpt_input_events_gtest']) {
             const check = inventory.find(t => t.baseName === name);
@@ -170,6 +219,60 @@ try {
             assert.ok(summary.failed_test_names.some(t => t.includes('test_view_reuse_gtest')));
         });
     }
+    for (const mode of ['open', 'write']) check(`A log ${mode} ENOSPC fails the suite and allows the next suite to run`, () => {
+        const { child, summary } = runSelected(['test_view_reuse_gtest', 'test_map_gtest'], 'log-io', [], {
+            NODE_OPTIONS: `--require=${logFault}`, FAKE_LOG_FAULT_MODE: mode,
+            FAKE_LOG_FAULT_PATH: 'test_view_reuse_gtest.log',
+        });
+        assert.equal(child.status, 1, child.stderr);
+        assert.ok(!child.stderr.includes("Unhandled 'error' event"));
+        assert.equal(summary.total_failed, 1);
+        assert.equal(summary.level2_c_tests.find(t => t.test === 'test_map_gtest').passed, 4);
+        assert.ok(summary.failed_test_names.some(t => t.includes('log write failed: ENOSPC')));
+    });
+    check('A log flush ENOSPC overrides passing JSON after the child exits', () => {
+        const { child, summary } = runSelected(['test_view_reuse_gtest'], 'log-flush', [], {
+            NODE_OPTIONS: `--require=${logFault}`, FAKE_LOG_FAULT_MODE: 'write', FAKE_LOG_FAULT_DELAY: '100',
+            FAKE_LOG_FAULT_PATH: 'test_view_reuse_gtest.log',
+        });
+        assert.equal(child.status, 1, child.stderr);
+        assert.equal(summary.total_failed, 1);
+        assert.ok(summary.failed_test_names.some(t => t.includes('log write failed: ENOSPC')));
+    });
+    check('A slow log sink bounds buffering and retains both output pipes', () => {
+        const trace = path.join(fixture, 'log-buffer-size');
+        const { child, output } = runSelected(['test_view_reuse_gtest'], 'flood', [], {
+            NODE_OPTIONS: `--require=${logFault}`, FAKE_LOG_FAULT_MODE: 'slow',
+            FAKE_LOG_FAULT_PATH: 'test_view_reuse_gtest.log', FAKE_LOG_BUFFER_TRACE: trace,
+        });
+        assert.equal(child.status, 0, child.stderr);
+        const log = fs.readFileSync(path.join(output, 'test_view_reuse_gtest.log'), 'utf8');
+        assert.equal(log.split('o').length - 1, 1024 * 1024);
+        assert.equal(log.split('e').length - 1, 1024 * 1024);
+        assert.ok(Number(fs.readFileSync(trace, 'utf8')) <= 256 * 1024);
+    });
+    check('View reruns replace only their declared artifacts before starting case workers', () => {
+        const output = path.join(fixture, 'artifact-retention');
+        fs.mkdirSync(path.join(output, 'radiant_view', 'stale'), { recursive: true });
+        fs.writeFileSync(path.join(output, 'radiant_view', 'stale', 'view.log'), 'old debug log');
+        const keep = path.join(output, 'unrelated.log');
+        fs.writeFileSync(keep, 'keep');
+        const first = runSelected(['test_radiant_view_gtest'], 'pass', [], { FAKE_VIEW_ARTIFACTS: '1' },
+            true, null, output);
+        assert.equal(first.child.status, 0, first.child.stderr);
+        const directory = path.join(output, 'radiant_view');
+        const oldRuns = fs.readdirSync(directory);
+        assert.equal(oldRuns.length, 4);
+        const second = runSelected(['test_radiant_view_gtest'], 'pass', [], { FAKE_VIEW_ARTIFACTS: '1' },
+            true, null, output);
+        assert.equal(second.child.status, 0, second.child.stderr);
+        assert.equal(fs.readdirSync(directory).length, 4);
+        assert.ok(oldRuns.every(run => !fs.existsSync(path.join(directory, run))));
+        assert.equal(fs.readFileSync(keep, 'utf8'), 'keep');
+        const third = runSelected(['test_map_gtest'], 'pass', [], {}, true, null, output);
+        assert.equal(third.child.status, 0, third.child.stderr);
+        assert.equal(fs.readdirSync(directory).length, 4);
+    });
     check('Skipped cases are excluded from passing counts', () => {
         const { child, summary } = runSelected(['test_view_reuse_gtest'], 'skip');
         assert.equal(child.status, 0);
@@ -237,6 +340,36 @@ try {
             assert.ok(summary.failed_test_names.some(name => name.includes('Fixture.Case1')));
         });
     }
+    for (const mode of ['open', 'write']) check(`A case log ${mode} ENOSPC fails its own case and preserves other cases`, () => {
+        const { child, output, summary } = runSelected(['test_radiant_view_gtest'], 'log-io', [], {
+            NODE_OPTIONS: `--require=${logFault}`, FAKE_LOG_FAULT_MODE: mode,
+            FAKE_LOG_FAULT_PATH: path.join('test_radiant_view_gtest_cases', '1.log'),
+        }, true);
+        assert.equal(child.status, 1, child.stderr);
+        assert.equal(summary.total_passed, 3);
+        assert.equal(summary.total_failed, 1);
+        assert.ok(summary.failed_test_names.some(t => t.includes('Fixture.Case1')));
+        const data = JSON.parse(fs.readFileSync(path.join(output, 'test_radiant_view_gtest_results.json'), 'utf8'));
+        assert.ok(data.testsuites[0].testsuite[1].failures.some(f => f.failure.includes('ENOSPC')));
+    });
+    check('Discovery log ENOSPC is a reported failure', () => {
+        const { child, summary } = runSelected(['test_radiant_view_gtest'], 'pass', [], {
+            NODE_OPTIONS: `--require=${logFault}`, FAKE_LOG_FAULT_MODE: 'open',
+            FAKE_LOG_FAULT_PATH: path.join('test_radiant_view_gtest_cases', 'list.log'),
+        }, true);
+        assert.equal(child.status, 1, child.stderr);
+        assert.equal(summary.total_failed, 1);
+        assert.ok(summary.failed_test_names.some(t => t.includes('ENOSPC')));
+    });
+    check('Merged case log ENOSPC waits for workers and allows the next suite to run', () => {
+        const { child, summary } = runSelected(['test_radiant_view_gtest', 'test_map_gtest'], 'parallel', [], {
+            NODE_OPTIONS: `--require=${logFault}`, FAKE_APPEND_FAULT: 'test_radiant_view_gtest.log',
+        }, true);
+        assert.equal(child.status, 1, child.stderr);
+        assert.equal(summary.total_failed, 1);
+        assert.equal(summary.level2_c_tests.find(t => t.test === 'test_map_gtest').passed, 4);
+        assert.ok(summary.failed_test_names.some(t => t.includes('runner error: ENOSPC')));
+    });
     check('Previous case durations start slow work early without reusing stale results', () => {
         const trace = path.join(fixture, 'trace-order');
         fs.mkdirSync(trace);

@@ -1871,3 +1871,268 @@ acquire inline storage through the existing ownership helper before computation.
 The corrected selection fixture places pixel bounds at event scope, activating
 the original checks. The native/scoped sanitizer and twenty live assertions pass;
 `gradient_selection38q_*` records the pending complete merged-build qualification.
+
+
+**CI-18 native decoration continuity increment (2026-10-13):**
+Horizontal native underlines/overlines use the same gap intervals for solid,
+dashed, dotted, double and wavy patterns. The complete pattern is clipped to
+those intervals so ink skipping does not restart dash/wave phase; line-through
+remains continuous. Source bytes bound one scoped gap per decoded codepoint,
+removing the former 64-gap loss without retaining font/cache storage
+(**D4.5.1v4 / D4.1.4v5**). CSS/font thickness converts once to destination pixels
+before snapping; gap clip bounds align vertically to the destination pixel grid
+without trimming the pattern's antialias coverage (**RSC7**).
+
+This follows [CSS Text Decoration 4 §2.10.4–2.10.5](https://drafts.csswg.org/css-text-decor-4/#text-decoration-skip-ink-property)
+for the bounded horizontal native consumer. Five native and five text-owner
+sanitizer groups and twenty-four causal live style/density assertions pass;
+complete `decoration39q_*` qualification is running. SVG/PDF probes establish
+that this native increment does not yet supply their decoration geometry. Shared
+vector producers, decorating-box uniformity, complex/vertical/shaped runs and
+broader color/shadow/fragment contexts remain open; serialized SVG CSS alone is
+not accepted as portable decoration paint.
+
+
+### 3.19 Shared decoration paint geometry (bounded implementation)
+
+The vector probes in `temp/css_support_p1/decoration39/vector_probe/` show no
+red decoration stroke for authored dashed/dotted/double/wavy cases. SVG delegates
+an incomplete decoration style to the receiving text viewer; PDF has no line
+producer. This is P2.2 consumer work, not missing CSS registration. The shape
+and continuity contract follows [CSS Text Decoration 4 §2](https://drafts.csswg.org/css-text-decor-4/#line-decoration)
+and its [painting order](https://drafts.csswg.org/css-text-decor-4/#painting-order).
+No formal ruling defines decoration geometry; payload lifetime remains governed
+by **D4.5.1v4 / D4.1.4v5**, and coordinate ownership by **RSC1 / RSC7**.
+
+- Extract the existing native metric, pattern and ink-interval calculations into
+  one recorder with explicit font, fragment origin/extent, source slice and
+  output-density inputs. Native and vector sinks share that calculation; do not
+  copy the private native functions into exporters or fabricate a raster surface.
+- Font metrics and layout extents stay logical. Bitmap ink measurements convert
+  through the selected handle's physical/requested-size ratio; output-grid
+  snapping is explicit for native raster recording. Vector geometry is recorded
+  in logical user units and inherits the existing transform/clip/effect scope.
+- Record solid fills and complete styled paths, with interval clips that preserve
+  their phase. Immediate native lowering keeps the existing display-list gateway;
+  deferred vector commands own paths/clips before local scratch or fonts retire.
+  Use the existing payload-transfer helpers and retained path lowering.
+- SVG decorated text consumes selected glyph geometry and preserves semantic
+  labels. Its exported appearance must not depend on a viewer implementing CSS
+  decoration color, thickness, skip behavior or matching the selected font.
+  PDF consumes the same line paths. Avoid duplicate CSS-plus-path decoration.
+- Underlines/overlines precede glyph ink; line-through follows it. Keep shadows,
+  foreground and the line's actual owner/fragment relationships explicit. A
+  bounded horizontal/unshaped delivery cannot claim complete decorating-box
+  uniformity, complex-script shaping or vertical/fragmented support.
+
+Acceptance requires actual colored strokes, ink interruptions, inter-glyph phase,
+continuous strikes, density/transform/effect consumers and replay after source
+font/arena retirement in native, independently rasterized SVG and PDF. Keep
+existing representation assertions only where serialization is itself the
+contract; replace appearance-only string checks with real pixel controls.
+
+
+The applied recorder follows the shared geometry/ownership contract for the
+bounded horizontal profile. Selected-font decoration pixels, offsets, placement,
+paint order, long-run gaps and retirement replay pass focused normal/ASan checks.
+SVG uses glyph outlines and semantic labels; PDF records the same lines. Empty
+interval sets emit no geometry, and failed compound recording rewinds owned
+payloads (**D4.5.1v4 / D4.1.4v5**). Twenty-three exact SVG/PDF pattern-edge
+comparisons remain failed: identical path attributes and a clip-removal control
+identify independent-reader clip antialiasing. Those raw failures remain visible;
+transformed/effect, transparent-color, complete owner/fragment and shaping/vertical
+consumers remain unqualified. The fresh repository qualification is protected
+under `decoration40q_*`: core 6,797, Radiant 5,410 full /353 partial /one skipped,
+1,111 scoped ASan cases, 678 live assertions per runtime and 126 SVG matrix formats
+/2,466 assertions. The complete exporter passes 252/257 groups; seventeen prior
+PDF comparisons and twenty-three new vector-edge comparisons remain failed.
+No full decoration/export claim follows from this slice.
+
+
+### 3.20 Decoration color state (bounded implementation)
+
+`decoration41/baseline_summary.json` reproduces transparent longhand, shorthand
+and zero-alpha RGB values painting an unintended text-colored line in PNG,
+independently rasterized SVG and PDF. Resolution drops zero-alpha longhands,
+and rendering/copying treats alpha zero as the default `currentColor` marker.
+[CSS Text Decoration §2.3](https://drafts.csswg.org/css-text-decor-4/#text-decoration-color-property)
+accepts a color and defaults to `currentColor`; [CSS Color §6.3](https://drafts.csswg.org/css-color-4/#transparent-color)
+defines transparent as a color with zero alpha. Alpha must remain paint data.
+This CSS ruling has no Lambda formal counterpart (**CI-18**); style ownership
+continues under **D4.5.1v4 / D4.1.4v5**.
+
+Represent current-color selection separately from RGBA and copy it through the
+existing font-value helpers. Reuse the emphasis current-color predicate rather
+than introducing a second parser. Shorthand omission/reset, explicit inheritance
+and live current-color changes must preserve their state. The shared decoration
+recorder consumes that state for all outputs. Qualify transparent/zero-alpha
+against an undecorated reference, and current-color/reset/inheritance against
+explicit-color references at both densities, including repeated live mutation.
+Complete ancestor decorating-box uniformity stays assigned to §3.19; this change
+must not claim that propagation model from single-owner color controls.
+
+
+The applied color-state implementation passes thirty exact reference pairs in
+three outputs at both densities, sixteen live assertions and four ownership
+groups in normal/scoped ASan. Partial UI/legacy font initialization now shares one
+initializer with explicit current-color state. Source lifetime remains governed
+by **D4.5.1v4 / D4.1.4v5**. Broad repository qualification is protected under
+`decoration_color41q_*`: core 6,797, Radiant 5,411 full /353 partial /one skipped,
+1,111 scoped ASan cases, 694 live assertions per runtime, exporter 255/260 and
+SVG matrix 126 formats /2,466 assertions. Forty comparisons in the five known
+export failure groups remain open. The separate `decoration42` reproducer keeps a later
+shorthand/earlier-longhand winner defect open under P0.2; it is not credited as
+fixed by the alpha-state delivery.
+
+
+### 3.21 Decoration shorthand component winners (bounded implementation)
+
+`decoration42/baseline_summary.json` reproduces a later shorthand failing to
+cancel an earlier line longhand. Property-ID traversal applies the shorthand
+first and then resurrects the weaker longhand. [CSS Text Decoration §2.6](https://drafts.csswg.org/css-text-decor-4/#text-decoration-property)
+sets all four components and resets omitted components to their initial values.
+Use the existing cascade comparison helper for line/style/color/thickness
+application, preserving stronger important/specific/layered longhands. This is
+CSS winner computation under **CI-18**; retained declaration ownership remains
+under **D4.5.1v4 / D4.1.4v5**.
+
+The isolated gate skips a component declaration when the selected shorthand
+outranks it. Fourteen controls at both densities pass eighty-four exact PNG/SVG/PDF
+image comparisons, covering source order, all four components, importance,
+specificity, normal/reversed-important layer order, invalid declarations and
+variable substitution. Before application, add live
+restyle and scoped-owner validation; keep complete CSSOM shorthand reflection,
+layer/scope breadth and decorating-box propagation explicitly unqualified.
+
+
+The applied component gate passes both exact reference groups and twelve live
+class-restyle assertions in normal/scoped ASan. The protected native-41 runtime
+fails forty-eight reference comparisons and six live assertions. Earlier text
+controls retain only the known vector-fringe group. Broad qualification is protected
+under `decoration_winner42q_*`: core 6,797, Radiant 5,412 full /353 partial /one
+skipped, 1,111 scoped ASan cases, 706 live assertions per runtime, complete exporter
+257/262, SVG matrix 126 formats /2,466 assertions, and unchanged boundary185/48.
+Forty comparisons in five known export groups remain failed. No complete
+CSSOM/owner/scope claim follows.
+
+
+### 3.22 Decoration shadows and complete text paint order (isolated delivery contract)
+
+`decoration43/baseline_summary.json` identifies two producers missing from the
+horizontal profile: native underlines are recorded before the shadow prepass,
+and native/SVG/PDF shadow layers include glyphs without line geometry. The
+native overlap control loses eighty opaque red-band pixels; an offset-shadow
+control has no green line pixels between glyphs in any output. [CSS Text
+Decoration §4–§5.1](https://drafts.csswg.org/css-text-decor-4/#painting-order)
+places outer shadows below lines/text and includes decorations in the shadowed
+text. This is **CI-18**; synchronous source/font borrows and retained geometry/
+images follow **D4.5.1v4 / D4.1.4v5**, and density follows **RSC1 / RSC7**.
+
+Reuse the shared decoration recorder for the native display-list capture and
+vector shadow layers. Translate complete geometry, including ink gaps, and
+compute capture extents from glyphs plus decorations before blur padding.
+Shadow color overrides foreground decoration color. Merge opaque glyph/line
+coverage before applying each shadow layer's alpha once; do not multiply alpha
+again at glyph/line overlap. Preserve authored shadow order and place all shadow
+layers below foreground underlines, overlines, glyphs, emphasis and strikes.
+
+Acceptance uses translated decorated-text references for styles, sharp/blurred
+layers, both densities and independent vector readers; overlap/alpha controls
+must reach actual pixels. Live style/color/blur/DPR changes and replay after
+font/source/arena retirement qualify lifetime. Preserve existing raw export
+failures. Owner/fragment uniformity, complete shaping/color-font and vertical
+contexts remain separate requirements; no full shadow/decoration claim follows
+from one horizontal fixture.
+
+### 3.23 PDF group opacity (bounded delivery contract)
+
+The isolated §3.22 alpha control exposes a separate PDF producer defect:
+opacity-only effects multiply the alpha of each primitive, so opaque glyph/line
+overlaps receive alpha repeatedly. Use an isolated transparency Form XObject
+to composite each complete group once, preserving vector geometry and nested
+groups. PDF group semantics follow ISO 32000 §11.6.6 and §11.4
+([PDF Association](https://pdf-issues.pdfa.org/32000-2-2020/clause11.html));
+this CSS consumer repair is **CI-18**, with document-owned streams and teardown
+under **D4.5.1v4 / D4.1.4v5**.
+
+Qualify exact overlapping interiors against a single union, nested opacity,
+primitive alpha, coloured backdrops, transforms, clipping and subsequent
+opaque paint at both densities in raster/SVG/PDF. Union perimeter AA is a
+separate reader control: blending coincident primitive fringes is not an
+interior-alpha oracle. Preserve those raw comparisons. Native writer coverage
+must balance groups, reject unbalanced serialization, retain nested resources,
+and destroy documents with open groups under ASan. This bounded delivery does
+not qualify the broader §3.22 shadow candidate.
+
+**Qualified (2026-10-13):**
+`temp/css_support_p1/pdf_opacity43/final_isolated_provenance.json` records
+thirty reference pairs in three outputs at both densities, 51 writer cases
+and 38 live assertions per normal/ASan mode. Protected runtime 42 fails the
+new interior/resource control with 380 assertions. Native PDF groups now own
+their streams, reference only direct child forms, restore parent font selection,
+and enclose fractional ink boundaries before the Form's clip. Primitive alpha
+remains independent of group alpha. The earlier full union control retains two
+2× PDF coincident-fringe differences under `decoration43/`; its raw comparisons
+remain separate from the interior contract. Protected `pdf_opacity43q_*` records 6,797 core passes, 5,416 full /353 partial
+/one skipped Radiant case, 1,162 scoped ASan cases, 744 live assertions per
+runtime, Canvas golden and 126 SVG formats /2,466 assertions. Export passes
+258/263 groups with the same forty comparisons. Boundary debt remains 185
+/48 unapproved with no delta (**D7.1.3 / D7.3.3–D7.3.4**). Normal/ASan snapshots
+contain 145/143 inputs with no drift/reports; 147 protected records and 46,600
+copied exports seal the delivery. Broader opacity/shadow contexts remain open.
+
+### 3.24 Recorded source ink and filter captures (isolated delivery contract)
+
+The §3.22 wavy blur reference clips a nonzero tail outside its border-derived
+capture, while the shadow capture retains the recorded stroke's complete bounds.
+Filters consume rendered source ink, including glyph bearings and decoration
+overhang, before applying their spatial support (**CI-18 / RSC1 / RSC7**).
+Bounds may expand during recording; the final display-list publication remains
+immutable under **D4.5.1v4 / D4.1.4v5**.
+
+Derive source bounds from the recorded command range. Reuse that range union
+for native and semantic effect groups; update saved-backdrop regions before
+replay and include the result in vector raster captures. Preserve explicit
+clips, backdrop isolation, effect ordering and density. Qualify overhanging ink,
+nested groups, coloured backdrops and both densities with independent references;
+retain reader resampling failures and verify replay after source retirement.
+
+The overflow reference also isolates native PDF opacity Forms: their initial
+border-derived BBox clips overflowing descendants. Enable writer ink tracking
+for these groups, accumulate painted path/stroke/image extents through nested
+groups, and round the final BBox outward at output density. Explicit clips remain
+separate operations; font outlines keep vector geometry. Writer coverage must
+include reset after clipping paths, nested propagation and pen-state restoration.
+
+**Qualified §3.22/§3.24 (2026-10-13):**
+Protected `decoration_shadow44t2q_*` qualifies the applied checkpoint 44t under
+**CI-18 / RSC1 / RSC7 / D4.5.1v4 / D4.1.4v5**. Complete horizontal glyph/line
+silhouettes preserve shadow layer alpha and background/shadow/foreground order.
+Translated solid/wavy decorations and sharp/blurred/translucent shadows pass
+independent native/SVG/PDF references at both densities. Completed display-list
+ink and actual blur support expand captures and saved backdrops; PDF opacity
+Forms track painted path/stroke/image bounds and restore font/pen state.
+Private zero-alpha margins are trimmed before publication, preserving alpha 1.
+Atomic recording preserves queued backgrounds and releases failed resources.
+
+The source/runtime guards cover 153 normal and 145 ASan
+inputs without drift. Core passes 6,797; Radiant passes
+5,424 full /353 partial /1 skipped. All
+1,169 scoped ASan cases, Canvas golden, and
+762 live assertions per runtime pass without ASan
+reports. SVG passes 126 format checks and
+2,466 assertions. The full exporter passes
+266/270 groups, preserving 38 raw
+assertions: ordered-background PDF edges (2), outside-stop PDF colors (11),
+styled SVG/PDF clip fringes (23), and coincident opacity-union PDF fringes (2).
+No tolerance or expected output changed. Earlier untrimmed failures remain
+preserved under `decoration_shadow44/raw44s/`.
+
+Boundary debt stays 185 deferred /48 unapproved
+with no additions or removals and allowance 165; all four strict
+DSOs build (**D7.1.3 / D7.5.3 / D7.3.3–D7.3.4**).
+`decoration_shadow44t2q_protected_artifacts.json` seals 151 records
+and 49,112 copied exports. Support inventory remains 410 names and
+twenty bounded partial families. Broader decorating-box/fragment, emphasis,
+shaping/vertical, effect-ordering and independent/paged contexts remain open.
+No P0–P2 tier is closed; the native state/layout provider is the next slice.

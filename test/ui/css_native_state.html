@@ -1,0 +1,23 @@
+<!doctype html><meta charset="utf-8">
+<style>body{background:white}button{position:absolute;left:10px;top:10px}input{position:absolute;left:10px;top:50px}#probe{position:absolute;left:90px;top:50px;width:20px;height:20px;background:red}input:indeterminate+#probe{background:green}</style>
+<button id="check">check state</button><input id="box" type="checkbox"><div id="probe"></div><div id="report"></div>
+<script>
+var box=document.getElementById('box'),report=document.getElementById('report');
+function record(name,fn){try{report.setAttribute('data-'+name,String(fn()));}catch(error){report.setAttribute('data-'+name,error.name);}}
+document.getElementById('check').addEventListener('click',function(){
+ record('initial',function(){return !box.indeterminate&&!box.matches(':indeterminate');});
+ box.indeterminate=true;
+ record('live',function(){return box.indeterminate&&box.matches(':indeterminate');});
+ box.remove();
+ record('detached',function(){return box.indeterminate;});
+ document.body.insertBefore(box,document.getElementById('probe'));
+ record('reinserted',function(){return box.indeterminate&&box.matches(':indeterminate');});
+ var other=document.implementation.createHTMLDocument('other'),foreign=other.createElement('input');foreign.type='checkbox';foreign.indeterminate=true;
+ record('other-owner',function(){return foreign.indeterminate&&box.indeterminate;});
+ foreign.indeterminate=false;
+ record('independent',function(){return !foreign.indeterminate&&box.indeterminate;});
+ for(var i=0;i<64;i++)box.indeterminate=(i%2===0);
+ record('repeated',function(){return !box.indeterminate&&!box.matches(':indeterminate');});
+ box.indeterminate=true;
+});
+</script>

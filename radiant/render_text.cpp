@@ -346,7 +346,8 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
                                               CssEnum text_transform, bool preserve_spaces,
                                               float space_width, float scaled_space_width,
                                               float cjk_spacing,
-                                              float x, float y, DomElement* parent_elem);
+                                              float x, float y, DomElement* parent_elem,
+                                              const RenderTextEmphasis* emphasis);
 static LoadedGlyph* render_text_load_glyph_for_paint(RasterRenderContext* rdcon,
                                                      uint32_t codepoint,
                                                      unsigned char* cursor,
@@ -355,7 +356,7 @@ static LoadedGlyph* render_text_load_glyph_for_paint(RasterRenderContext* rdcon,
 static float render_text_trailing_marks(RasterRenderContext* rdcon, TextRect* text_rect,
                                         float x, float y);
 static void render_text_decorations(RasterRenderContext* rdcon, unsigned char* str,
-                                    TextRect* text_rect);
+                                    TextRect* text_rect, bool before_text);
 
 CssEnum render_text_inherited_transform(ViewText* text_view) {
     if (!text_view) return CSS_VALUE_NONE;
@@ -429,13 +430,14 @@ char* render_text_create_export_segment(const unsigned char* text,
     return content;
 }
 
-static bool render_text_rect_misses_clip(RasterRenderContext* rdcon, float x, float y,
-                                         float width, float height) {
+static bool render_text_rect_misses_clip(RasterRenderContext* rdcon, unsigned char* text,
+    TextRect* rect, const RenderTextEmphasis* emphasis, TextShadow* shadows,
+    float x, float y, float width, float height);
+
+static bool render_text_bounds_miss_clip(RasterRenderContext* rdcon, Bound bounds) {
     if (!rdcon || rdcon->has_transform) return false;
-    return x + width < rdcon->block.clip.left ||
-           x > rdcon->block.clip.right ||
-           y + height < rdcon->block.clip.top ||
-           y > rdcon->block.clip.bottom;
+    return bounds.right < rdcon->block.clip.left || bounds.left > rdcon->block.clip.right ||
+        bounds.bottom < rdcon->block.clip.top || bounds.top > rdcon->block.clip.bottom;
 }
 
 void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
@@ -474,16 +476,9 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
         return;
     }
 
-    FontHandle* emphasis_handle = nullptr;
-    FontStyleDesc emphasis_style = {};
-    if (rdcon->font.style && rdcon->font.style->text_emphasis_enabled &&
-        rdcon->ui_context && rdcon->ui_context->font_ctx) {
-        emphasis_style = font_style_desc_from_prop(rdcon->font.style);
-        emphasis_style.size_px *= 0.5f;
-        if (!emphasis_style.family)
-            emphasis_style.family = font_handle_get_family_name(font_box_handle(&rdcon->font));
-        emphasis_handle = font_resolve(rdcon->ui_context->font_ctx, &emphasis_style);
-    }
+    RenderTextEmphasis emphasis = {};
+    if (!render_text_emphasis_resolve(rdcon->ui_context ? rdcon->ui_context->font_ctx.get() : nullptr,
+            &rdcon->font, rdcon->color, &emphasis)) rdcon->paint_failed = true;
 
     // Get the white-space property for this text node
     CssEnum white_space = get_white_space_value(text_view);
@@ -527,7 +522,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
         // Apply scale to convert CSS pixel positions to physical surface pixels
         float x = rdcon->block.x + text_rect->x * s, y = rdcon->block.y + text_rect->y * s;
 
-        if (render_text_rect_misses_clip(rdcon, x, y,
+        if (render_text_rect_misses_clip(rdcon, str, text_rect, &emphasis, text_shadow, x, y,
                 text_rect->width * s, text_rect->height * s)) {
             continue;
         }
@@ -611,9 +606,14 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
         bool shadow_prepass = text_shadow != nullptr;
         if (shadow_prepass && !render_text_paint_background_and_shadows(rdcon, str, text_rect,
                 text_shadow, text_transform, preserve_spaces, space_width,
-                scaled_space_width, text_justify == CSS_VALUE_INTER_WORD ? 0.0f : justification_per_gap, x, y, parent_elem))
+                scaled_space_width, text_justify == CSS_VALUE_INTER_WORD ? 0.0f : justification_per_gap,
+                x, y, parent_elem, &emphasis)) {
+            rdcon->paint_failed = true;
             log_error("[TEXT_SHADOW_CAPTURE] native glyph layer capture failed");
+        }
 
+        // background/shadows precede underline/overline, then glyph ink and line-through.
+        render_text_decorations(rdcon, str, text_rect, true);
         while (p < end) {
             // Check if current character is in selection range
             bool is_selected = has_selection && char_index >= sel_start && char_index < sel_end;
@@ -687,7 +687,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
                         float ascend;
                         {
                             uint64_t tfm1 = time_now_ns();
-                            ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * rdcon->raster_scale;
+                            ascend = render_text_baseline_y(&rdcon->font, 0.0f) * rdcon->raster_scale;
                             uint64_t tfm2 = time_now_ns();
                             render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_FONT_METRICS,
                                 time_elapsed_ms_f(tfm1, tfm2));
@@ -714,22 +714,17 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
                         draw_glyph(rdcon, &glyph->bitmap, lroundf(x + glyph->bitmap.bearing_x), lroundf(y + ascend - glyph->bitmap.bearing_y));
                         rdcon->color = glyph_saved_color;
                         float glyph_advance = glyph->advance_x;
-                        if (emphasis_handle && text_emphasis_marks_codepoint(render_cp)) {
-                            LoadedGlyph* mark = font_load_glyph(emphasis_handle,
-                                &emphasis_style, rdcon->font.style->text_emphasis_mark, true);
+                        if (emphasis.handle && text_emphasis_marks_codepoint(render_cp)) {
+                            float mark_x, mark_y;
+                            LoadedGlyph* mark = render_text_emphasis_bitmap_glyph(&emphasis,
+                                render_cp, x, y + ascend, glyph_advance, s, &mark_x, &mark_y);
                             if (mark) {
                                 Color text_color = rdcon->color;
                                 if (!rdcon->font.style->text_emphasis_color_current)
-                                    rdcon->color = rdcon->font.style->text_emphasis_color;
-                                float mark_baseline = y +
-                                    (rdcon->font.style->text_emphasis_under
-                                        ? rdcon->font.style->font_size * 1.35f * s : 0.0f);
-                                draw_glyph(rdcon, &mark->bitmap,
-                                    lroundf(x + (glyph_advance - mark->advance_x) * 0.5f +
-                                            mark->bitmap.bearing_x),
-                                    lroundf(mark_baseline - mark->bitmap.bearing_y));
+                                    rdcon->color = emphasis.color;
+                                draw_glyph(rdcon, &mark->bitmap, mark_x, mark_y);
                                 rdcon->color = text_color;
-                            }
+                            } else rdcon->paint_failed = true;
                         }
                         uint64_t t4 = time_now_ns();
                         render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_GLYPH_DRAW,
@@ -741,14 +736,14 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
             }
         }
         x = render_text_trailing_marks(rdcon, text_rect, x, y);
-        render_text_decorations(rdcon, str, text_rect);
+        render_text_decorations(rdcon, str, text_rect, false);
     }
     }
 
     // Restore color and font (in case they were changed for PDF text)
     rdcon->font = saved_font;
     rdcon->color = saved_color;
-    if (emphasis_handle) font_handle_release(emphasis_handle);
+    render_text_emphasis_release(&emphasis);
 }
 
 static void render_text_inline_background(RasterRenderContext* rdcon, ViewText* text_view,
@@ -843,6 +838,87 @@ static void render_text_inline_border(RasterRenderContext* rdcon, ViewText* text
     border->radius = saved_radius;
 }
 
+struct TextDecorationPaintContext {
+    RasterRenderContext* raster;
+    PaintList* paint;
+    DisplayList* display;
+    const FontBox* font;
+    ScratchArena* scratch;
+    float origin_x, origin_y, scale, glyph_scale;
+    uint8_t lines;
+    Color color;
+    bool failed;
+    bool force_color;
+};
+
+static void record_text_decoration_lines(TextDecorationPaintContext* context, unsigned char* text, TextRect* rect);
+
+static void decoration_fill_rect(TextDecorationPaintContext* context, Rect* rect, uint32_t color) {
+    if (context->failed) return;
+    if (context->raster) {
+        RasterRenderContext* raster = context->raster;
+        int count = raster->dl ? raster->dl->item_count() : 0;
+        const RdtMatrix* transform = render_state_current_transform(raster);
+        if (transform) {
+            RdtPath* path = rdt_path_new();
+            if (!path) { context->failed = true; return; }
+            rdt_path_add_rect(path, rect->x, rect->y, rect->width, rect->height, 0, 0);
+            rc_fill_path(raster, path, Color{color}, RDT_FILL_WINDING, transform);
+            rdt_path_free(path);
+        } else rc_fill_surface_rect(raster, raster->ui_context->surface, rect, color,
+            &raster->block.clip, raster->clip_shapes, raster->clip_shape_depth);
+        if (!raster->dl || raster->dl->item_count() != count + 1) context->failed = true;
+    } else if (context->display) {
+        int count = context->display->item_count();
+        dl_fill_rect(context->display, rect->x, rect->y, rect->width, rect->height, Color{color});
+        if (context->display->item_count() != count + 1) context->failed = true;
+    } else {
+        size_t count = context->paint->size();
+        paint_fill_rect(context->paint, rect->x, rect->y, rect->width, rect->height, Color{color});
+        if (context->paint->size() != count + 1) context->failed = true;
+    }
+}
+
+static bool decoration_record_path(TextDecorationPaintContext* context, RdtPath* path,
+        Color color, float stroke_width, bool clip) {
+    if (context->failed) return false;
+    if (context->raster) {
+        int count = context->raster->dl ? context->raster->dl->item_count() : 0;
+        const RdtMatrix* transform = render_state_current_transform(context->raster);
+        if (clip) rc_push_clip(context->raster, path, transform);
+        else if (stroke_width > 0) rc_stroke_path(context->raster, path, color, stroke_width,
+            RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, transform);
+        else rc_fill_path(context->raster, path, color, RDT_FILL_WINDING, transform);
+        if (!context->raster->dl || context->raster->dl->item_count() != count + 1) context->failed = true;
+        return false;
+    }
+    if (context->display) {
+        int count = context->display->item_count();
+        if (clip) dl_push_clip(context->display, path, nullptr);
+        else if (stroke_width > 0) dl_stroke_path(context->display, path, color, stroke_width,
+            RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0, nullptr);
+        else dl_fill_path(context->display, path, color, RDT_FILL_WINDING, nullptr);
+        if (context->display->item_count() != count + 1) context->failed = true;
+        return false;
+    }
+    int index = paint_list_count(context->paint);
+    PaintOp operation = clip ? PAINT_PUSH_CLIP : stroke_width > 0 ? PAINT_STROKE_PATH : PAINT_FILL_PATH;
+    if (clip) paint_push_clip(context->paint, path, nullptr);
+    else if (stroke_width > 0) paint_stroke_path(context->paint, path, color, stroke_width,
+        RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0, nullptr);
+    else paint_fill_path(context->paint, path, color, RDT_FILL_WINDING, nullptr);
+    // vector commands outlive the recorder; transfer each shape before its caller releases scratch.
+    // paint_push_clip already owns its clone; fill/stroke commands require transfer.
+    bool recorded = paint_list_count(context->paint) == index + 1;
+    bool owned = !clip && recorded &&
+        paint_list_take_path_payload(context->paint, index, operation);
+    if (!recorded || (!clip && !owned)) {
+        context->paint->rewind((size_t)index);
+        context->failed = true;
+    }
+    return owned;
+}
+
 typedef struct SkipInkGap {
     float x0;
     float x1;
@@ -853,17 +929,27 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
                                               CssEnum text_transform, bool preserve_spaces,
                                               float space_width, float scaled_space_width,
                                               float cjk_spacing,
-                                              float x, float y, DomElement* parent_elem) {
+                                              float x, float y, DomElement* parent_elem,
+                                              const RenderTextEmphasis* emphasis) {
     if (!rdcon || !str || !text_rect || !text_shadow ||
         !font_box_handle(&rdcon->font) || !rdcon->font.style) return false;
     float s = rdcon->raster_scale;
     bool background_painted = false, success = true;
     render_visit_text_shadows_reverse(text_shadow, [&](TextShadow* shadow) {
+        if (!success) return;
         OffscreenRenderArenas arenas;
         if (!arenas.init("render.text.shadow", "render.text.shadow.list", "render.text.shadow.scratch")) {
             success = false; return;
         }
         DisplayList shadow_list = {}; dl_init(&shadow_list, arenas.list_arena);
+        bool direct = shadow->blur_radius <= 0.0f && shadow->color.a == 255;
+        Color opaque_shadow = shadow->color; opaque_shadow.a = 255;
+        TextDecorationPaintContext decoration = {nullptr, nullptr, &shadow_list, &rdcon->font,
+            &rdcon->scratch, rdcon->block.x + roundf(shadow->offset_x * s),
+            rdcon->block.y + roundf(shadow->offset_y * s), s, 1.0f,
+            CSS_TEXT_DECO_UNDERLINE | CSS_TEXT_DECO_OVERLINE,
+            opaque_shadow, false, true};
+        if (!direct) record_text_decoration_lines(&decoration, str, text_rect);
         float left = INFINITY, top = INFINITY, right = -INFINITY, bottom = -INFINITY;
         unsigned char* sp = str + text_rect->start_index;
         unsigned char* s_end = sp + text_rect->length;
@@ -922,7 +1008,7 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
                 float s_ascend;
                 {
                     uint64_t tfm1 = time_now_ns();
-                    s_ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * rdcon->raster_scale;
+                    s_ascend = render_text_baseline_y(&rdcon->font, 0.0f) * rdcon->raster_scale;
                     uint64_t tfm2 = time_now_ns();
                     render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_FONT_METRICS,
                         time_elapsed_ms_f(tfm1, tfm2));
@@ -937,17 +1023,64 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
                 }
                 float sx = glyph_x + roundf(shadow->offset_x * s);
                 float sy = glyph_y + roundf(shadow->offset_y * s);
+                int count = shadow_list.item_count();
                 dl_draw_glyph(&shadow_list, &s_glyph->bitmap,
-                    (int)sx, (int)sy, shadow->color, false, nullptr, nullptr, 0); // INT_CAST_OK: rounded glyph bitmap destination pixels
+                    (int)sx, (int)sy, opaque_shadow, false, nullptr, nullptr, 0); // INT_CAST_OK: rounded glyph bitmap destination pixels
+                if (shadow_list.item_count() != count + 1) decoration.failed = true;
                 left = fminf(left, sx); top = fminf(top, sy);
                 right = fmaxf(right, sx + (float)s_glyph->bitmap.width);
                 bottom = fmaxf(bottom, sy + (float)s_glyph->bitmap.height);
-                sx_pos += s_glyph->advance_x + text_character_spacing(rdcon->font.style, s_tt_cp) * s;
+                // loading the mark reuses LoadedGlyph storage; retain the text advance first (D4.5.1v4).
+                float text_advance = s_glyph->advance_x;
+                if (emphasis && emphasis->handle && text_emphasis_marks_codepoint(s_tt_cp)) {
+                    float mark_x, mark_y;
+                    LoadedGlyph* mark = render_text_emphasis_bitmap_glyph(emphasis, s_tt_cp,
+                        sx_pos + roundf(shadow->offset_x * s),
+                        y + s_ascend + roundf(shadow->offset_y * s),
+                        text_advance, s, &mark_x, &mark_y);
+                    if (!mark) decoration.failed = true;
+                    else {
+                        int mark_count = shadow_list.item_count();
+                        dl_draw_glyph(&shadow_list, &mark->bitmap,
+                            (int)mark_x, (int)mark_y, opaque_shadow, false, nullptr, nullptr, 0); // INT_CAST_OK: rounded emphasis bitmap destination pixels
+                        if (shadow_list.item_count() != mark_count + 1) decoration.failed = true;
+                    }
+                }
+                sx_pos += text_advance + text_character_spacing(rdcon->font.style, s_tt_cp) * s;
             }
         }
 
+        if (direct) {
+            // opaque sharp shadows need no capture; recording directly avoids intermediate AA rounding.
+            // glyph gathering has already placed clipped text backgrounds below the complete shadow.
+            decoration.raster = rdcon;
+            decoration.display = nullptr;
+            record_text_decoration_lines(&decoration, str, text_rect);
+            for (int index = 0; index < shadow_list.item_count(); index++) {
+                DlDrawGlyph* glyph = &shadow_list.data()[index].draw_glyph;
+                Color saved_color = rdcon->color;
+                rdcon->color = glyph->color;
+                int count = rdcon->dl ? rdcon->dl->item_count() : 0;
+                draw_glyph(rdcon, &glyph->bitmap, glyph->x, glyph->y);
+                rdcon->color = saved_color;
+                if (glyph->bitmap.buffer && glyph->bitmap.width > 0 && glyph->bitmap.height > 0 &&
+                        (!rdcon->dl || rdcon->dl->item_count() != count + 1)) decoration.failed = true;
+            }
+            decoration.lines = CSS_TEXT_DECO_LINE_THROUGH;
+            record_text_decoration_lines(&decoration, str, text_rect);
+            success = success && !decoration.failed;
+            background_painted = true;
+            dl_destroy(&shadow_list); arenas.destroy();
+            return;
+        }
+        decoration.lines = CSS_TEXT_DECO_LINE_THROUGH;
+        record_text_decoration_lines(&decoration, str, text_rect);
+        if (decoration.failed) success = false;
+        Bound content = dl_content_bounds(&shadow_list);
+        left = fminf(left, content.left); top = fminf(top, content.top);
+        right = fmaxf(right, content.right); bottom = fmaxf(bottom, content.bottom);
         background_painted = true;
-        if (!(right > left && bottom > top) || !shadow->color.a) {
+        if (decoration.failed || !(right > left && bottom > top) || !shadow->color.a) {
             dl_destroy(&shadow_list); arenas.destroy(); return;
         }
         float sigma = shadow->blur_radius * s * 0.5f;
@@ -964,9 +1097,10 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
         if (!image) { success = false; return; }
         image_surface_snapshot_publish(image);
         Rect destination = {bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top};
-        render_painter_blit_surface_scaled(rdcon, image, nullptr,
+        bool complete = render_painter_blit_surface_scaled(rdcon, image, nullptr,
             rdcon->ui_context->surface, &destination, &rdcon->block.clip, SCALE_MODE_NEAREST,
-            rdcon->clip_shapes, rdcon->clip_shape_depth, 255);
+            rdcon->clip_shapes, rdcon->clip_shape_depth, shadow->color.a);
+        if (!complete) success = false;
         image_surface_snapshot_release(image);
     });
     return success;
@@ -1048,23 +1182,23 @@ static float render_text_trailing_marks(RasterRenderContext* rdcon, TextRect* te
     return x;
 }
 
-static int collect_skip_ink_gaps(RasterRenderContext* rdcon, unsigned char* str,
+static int collect_skip_ink_gaps(TextDecorationPaintContext* context, unsigned char* str,
                                  TextRect* text_rect, float deco_y_top, float deco_y_bot,
-                                 SkipInkGap* gaps, int max_gaps) {
-    float s = rdcon->raster_scale;
-    float x = rdcon->block.x + text_rect->x * s;
-    float y_base = rdcon->block.y + text_rect->y * s;
-    float ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * s;
+                                 float stroke_thickness, SkipInkGap* gaps) {
+    float s = context->scale, bitmap_scale = context->glyph_scale;
+    float x = context->origin_x + text_rect->x * s;
+    float y_base = context->origin_y + text_rect->y * s;
+    float ascend = font_get_rendering_ascender(font_box_handle(context->font)) * s;
     int gap_count = 0;
-    float pad = fmaxf(2.0f, (deco_y_bot - deco_y_top));
+    float pad = fmaxf(2.0f, stroke_thickness);
 
     const unsigned char* p = str + text_rect->start_index;
     const unsigned char* end = p + text_rect->length;
-    FontStyleDesc sd = font_style_desc_from_prop(rdcon->font.style);
+    FontStyleDesc sd = font_style_desc_from_prop(context->font->style);
 
-    while (p < end && gap_count < max_gaps) {
+    while (p < end) {
         if (is_space(*p)) {
-            x += rdcon->font.style->space_width * s;
+            x += context->font->style->space_width * s;
             p++;
             continue;
         }
@@ -1073,23 +1207,22 @@ static int collect_skip_ink_gaps(RasterRenderContext* rdcon, unsigned char* str,
         if (!layout_utf8_next_codepoint(&p, end, &codepoint)) continue;
         if (codepoint == 0x00AD || text_codepoint_has_zero_advance(codepoint)) continue;
 
-        LoadedGlyph* glyph = font_load_glyph(font_box_handle(&rdcon->font), &sd, codepoint, true);
+        LoadedGlyph* glyph = font_load_glyph(font_box_handle(context->font), &sd, codepoint, true);
         if (!glyph) {
-            x += rdcon->font.style->space_width * s;
+            x += context->font->style->space_width * s;
             continue;
         }
 
-        float glyph_top = y_base + ascend - glyph->bitmap.bearing_y;
-        float glyph_bot = glyph_top + glyph->bitmap.height;
-        float glyph_left = x + glyph->bitmap.bearing_x;
-        float glyph_right = glyph_left + glyph->bitmap.width;
+        float glyph_top = y_base + ascend - glyph->bitmap.bearing_y * bitmap_scale;
+        float glyph_bot = glyph_top + glyph->bitmap.height * bitmap_scale;
+        float glyph_left = x + glyph->bitmap.bearing_x * bitmap_scale;
+        float glyph_right = glyph_left + glyph->bitmap.width * bitmap_scale;
 
         float overlap = fminf(glyph_bot, deco_y_bot) - fmaxf(glyph_top, deco_y_top);
-        float deco_height = deco_y_bot - deco_y_top;
-        float min_overlap = fmaxf(deco_height * 0.5f, 2.0f);
+        float min_overlap = fmaxf(stroke_thickness * 0.5f, 2.0f);
         if (overlap >= min_overlap && glyph->bitmap.width > 0) {
-            int bm_row_start = (int)fmaxf(deco_y_top - glyph_top, 0.0f);
-            int bm_row_end = (int)fminf(deco_y_bot - glyph_top, (float)glyph->bitmap.height);
+            int bm_row_start = (int)fmaxf((deco_y_top - glyph_top) / bitmap_scale, 0.0f); // INT_CAST_OK: glyph bitmap row index
+            int bm_row_end = (int)fminf((deco_y_bot - glyph_top) / bitmap_scale, (float)glyph->bitmap.height); // INT_CAST_OK: glyph bitmap row index
             int ink_col_min = glyph->bitmap.width;
             int ink_col_max = -1;
             uint8_t* buf = glyph->bitmap.buffer;
@@ -1107,8 +1240,8 @@ static int collect_skip_ink_gaps(RasterRenderContext* rdcon, unsigned char* str,
                 }
             }
             if (ink_col_max >= ink_col_min) {
-                gaps[gap_count].x0 = glyph_left + ink_col_min - pad;
-                gaps[gap_count].x1 = glyph_left + ink_col_max + 1.0f + pad;
+                gaps[gap_count].x0 = glyph_left + ink_col_min * bitmap_scale - pad;
+                gaps[gap_count].x1 = glyph_left + (ink_col_max + 1.0f) * bitmap_scale + pad;
             } else {
                 gaps[gap_count].x0 = glyph_left - pad;
                 gaps[gap_count].x1 = glyph_right + pad;
@@ -1116,37 +1249,75 @@ static int collect_skip_ink_gaps(RasterRenderContext* rdcon, unsigned char* str,
             gap_count++;
         }
 
-        x += glyph->advance_x + rdcon->font.style->letter_spacing * s;
+        x += glyph->advance_x * bitmap_scale + context->font->style->letter_spacing * s;
     }
     return gap_count;
 }
 
-static void draw_deco_with_gaps(RasterRenderContext* rdcon, Rect rect, uint32_t color,
-                                SkipInkGap* gaps, int gap_count) {
-    float x_start = rect.x;
-    float x_end = rect.x + rect.width;
+static bool draw_deco_with_gaps(TextDecorationPaintContext* context, Rect rect, uint32_t color,
+        SkipInkGap* gaps, int gap_count, RdtPath* decoration = nullptr,
+        float stroke_width = 0.0f) {
+    RdtPath* clip = decoration && gap_count ? rdt_path_new() : nullptr;
+    if (decoration && gap_count && !clip) {
+        context->failed = true;
+        log_error("[TEXT_DECO_GAPS] cannot allocate decoration gap clip");
+        return false;
+    }
+    bool owns_decoration = false;
+    size_t segment_count = 0;
+    auto emit_segment = [&](float left, float right) {
+        Rect segment = {left, rect.y, right - left, rect.height};
+        segment_count++;
+        if (decoration) {
+            // the interval mask restricts x; its y edges must lie outside the pattern's antialias fringe.
+            if (clip) rdt_path_add_rect(clip, segment.x,
+                context->raster || context->display ? segment.y : segment.y - segment.height,
+                segment.width, context->raster || context->display ? segment.height : segment.height * 3.0f, 0, 0);
+        } else decoration_fill_rect(context, &segment, color);
+    };
+    float x_start = rect.x, x_end = rect.x + rect.width;
     for (int i = 0; i < gap_count; i++) {
-        if (gaps[i].x0 > x_start) {
-            float seg_end = fminf(gaps[i].x0, x_end);
-            if (seg_end > x_start) {
-                Rect seg = {x_start, rect.y, seg_end - x_start, rect.height};
-                rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &seg, color,
-                                     &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
-            }
-        }
+        float end = fminf(gaps[i].x0, x_end);
+        if (end > x_start) emit_segment(x_start, end);
         x_start = fmaxf(x_start, gaps[i].x1);
         if (x_start >= x_end) break;
     }
-    if (x_start < x_end) {
-        Rect seg = {x_start, rect.y, x_end - x_start, rect.height};
-        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &seg, color,
-                             &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+    if (x_start < x_end) emit_segment(x_start, x_end);
+    if (decoration && gap_count && segment_count == 0) {
+        // no interval survives: there is no decoration geometry to submit to any sink.
+        rdt_path_free(clip);
+        return false;
     }
+    if (decoration) {
+        // clip the complete pattern so skipping ink never restarts its dash or wave phase.
+        bool owns_clip = clip && decoration_record_path(context, clip, Color{}, 0, true);
+        if (!context->failed)
+            owns_decoration = decoration_record_path(context, decoration, Color{color}, stroke_width, false);
+        if (clip && !context->failed) {
+            if (context->raster) {
+                int count = context->raster->dl ? context->raster->dl->item_count() : 0;
+                rc_pop_clip(context->raster);
+                if (!context->raster->dl || context->raster->dl->item_count() != count + 1) context->failed = true;
+            } else if (context->display) {
+                int count = context->display->item_count();
+                dl_pop_clip(context->display);
+                if (context->display->item_count() != count + 1) context->failed = true;
+            }
+            else {
+                size_t count = context->paint->size();
+                paint_pop_clip(context->paint);
+                if (context->paint->size() != count + 1) context->failed = true;
+            }
+        }
+        if (owns_clip) clip = nullptr;
+    }
+    rdt_path_free(clip);
+    return owns_decoration;
 }
 
-static void render_single_text_decoration(RasterRenderContext* rdcon, unsigned char* str,
+static void render_single_text_decoration(TextDecorationPaintContext* context, unsigned char* str,
                                           TextRect* text_rect, CssEnum line) {
-    if (!rdcon || !rdcon->font.style || !text_rect) {
+    if (!context || !context->font->style || !text_rect) {
         return;
     }
     if (line == CSS_VALUE_NONE || line == CSS_VALUE__UNDEF ||
@@ -1154,46 +1325,47 @@ static void render_single_text_decoration(RasterRenderContext* rdcon, unsigned c
         return;
     }
 
-    float s = rdcon->raster_scale;
-    const FontMetrics* deco_m = font_get_metrics(font_box_handle(&rdcon->font));
-    float thickness = rdcon->font.style->text_deco_thickness > 0
-        ? rdcon->font.style->text_deco_thickness
+    float s = context->scale;
+    const FontMetrics* deco_m = font_get_metrics(font_box_handle(context->font));
+    float thickness = context->font->style->text_deco_thickness > 0
+        ? context->font->style->text_deco_thickness
         : fmaxf(deco_m ? deco_m->underline_thickness : 1.0f, 1.0f);
-    // fractional font underline thickness covers the next device pixel; rounding
-    // down makes auto decorations thinner than the browser's rasterized stroke.
-    thickness = fmaxf(ceilf(thickness), 1.0f);
+    // only raster destinations snap; vector commands retain logical CSS geometry (RSC7).
+    thickness *= s;
+    if (context->raster || context->display) thickness = fmaxf(ceilf(thickness), 1.0f);
 
-    Color deco_color = rdcon->font.style->text_deco_color.a > 0
-        ? rdcon->font.style->text_deco_color
-        : rdcon->color;
-    CssEnum deco_style = rdcon->font.style->text_deco_style;
+    Color deco_color = context->force_color || context->font->style->text_deco_color_current
+        ? context->color : context->font->style->text_deco_color;
+    CssEnum deco_style = context->font->style->text_deco_style;
     if (deco_style == CSS_VALUE__UNDEF || deco_style == 0) deco_style = CSS_VALUE_SOLID;
 
     Rect rect = {0, 0, 0, 0};
     bool draw_deco = true;
-    float deco_ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * s;
+    float deco_ascend = font_get_rendering_ascender(font_box_handle(context->font)) * s;
     if (line == CSS_VALUE_UNDERLINE) {
         float underline_pos = deco_m ? deco_m->underline_position : 0;
-        float offset = rdcon->font.style->text_underline_offset;
-        if (rdcon->font.style->text_underline_offset_mode == 2) {
-            offset *= rdcon->font.style->font_size / 100.0f;
+        float offset = context->font->style->text_underline_offset;
+        if (context->font->style->text_underline_offset_mode == 2) {
+            offset *= context->font->style->font_size / 100.0f;
         }
-        rect.x = rdcon->block.x + text_rect->x * s;
-        float baseline_y = rdcon->block.y + text_rect->y * s + deco_ascend;
+        rect.x = context->origin_x + text_rect->x * s;
+        float baseline_y = context->origin_y + text_rect->y * s + deco_ascend;
         float underline_depth = -underline_pos;
-        if (rdcon->font.style->text_underline_position == CSS_VALUE_UNDER && deco_m) {
+        if (context->font->style->text_underline_position == CSS_VALUE_UNDER && deco_m) {
             // under places the stroke below the font descent; auto/from-font use its underline metric.
             underline_depth = fmaxf(underline_depth, -deco_m->descender);
         }
-        rect.y = roundf(baseline_y + (underline_depth + offset) * s);
+        rect.y = baseline_y + (underline_depth + offset) * s;
+        if (context->raster || context->display) rect.y = roundf(rect.y);
     }
     else if (line == CSS_VALUE_OVERLINE) {
-        rect.x = rdcon->block.x + text_rect->x * s;
+        rect.x = context->origin_x + text_rect->x * s;
         // overline sits on the text-over edge; starting inside the fragment pushed it below browser output.
-        rect.y = floorf(rdcon->block.y + text_rect->y * s - thickness);
+        rect.y = context->origin_y + text_rect->y * s - thickness;
+        if (context->raster || context->display) rect.y = floorf(rect.y);
     }
     else if (line == CSS_VALUE_LINE_THROUGH) {
-        rect.x = rdcon->block.x + text_rect->x * s;
+        rect.x = context->origin_x + text_rect->x * s;
         float strike_y;
         if (deco_m && deco_m->strikeout_position > 0) {
             // browser line-through follows the font OS/2 strikeout metric; x-height fallback was too low.
@@ -1203,11 +1375,13 @@ static void render_single_text_decoration(RasterRenderContext* rdcon, unsigned c
         } else {
             strike_y = deco_ascend * 0.3f / s;
         }
-        if (rdcon->font.style->text_deco_thickness <= 0 &&
+        if (context->font->style->text_deco_thickness <= 0 &&
             deco_m && deco_m->strikeout_size > 0)
-            thickness = fmaxf(ceilf(deco_m->strikeout_size), 1.0f);
+            thickness = context->raster || context->display ? fmaxf(ceilf(deco_m->strikeout_size * s), 1.0f)
+                : deco_m->strikeout_size * s;
         // browser treats the strikeout metric as the stroke position; using it as the top edge paints too low.
-        rect.y = floorf(rdcon->block.y + text_rect->y * s + deco_ascend - strike_y * s - thickness);
+        rect.y = context->origin_y + text_rect->y * s + deco_ascend - strike_y * s - thickness;
+        if (context->raster || context->display) rect.y = floorf(rect.y);
     }
     else {
         draw_deco = false;
@@ -1219,99 +1393,424 @@ static void render_single_text_decoration(RasterRenderContext* rdcon, unsigned c
     rect.width = text_rect->width * s;
     rect.height = thickness;
 
-    if (deco_style == CSS_VALUE_DASHED || deco_style == CSS_VALUE_DOTTED ||
-        deco_style == CSS_VALUE_DOUBLE || deco_style == CSS_VALUE_WAVY) {
-        RdtPath* path = render_path_create_decoration(&rect, deco_style);
-        if (path) {
-            if (deco_style == CSS_VALUE_WAVY) rc_stroke_path(rdcon, path, deco_color,
-                fmaxf(1.0f, thickness * 0.5f), RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
-            else rc_fill_path(rdcon, path, deco_color, RDT_FILL_WINDING, NULL);
-            rdt_path_free(path);
-        }
-    } else {
-        bool apply_skip_ink = rdcon->font.style->text_deco_skip_ink == CSS_VALUE_ALL
-            ? line == CSS_VALUE_UNDERLINE || line == CSS_VALUE_OVERLINE
-            : rdcon->font.style->text_deco_skip_ink != CSS_VALUE_NONE &&
-              line == CSS_VALUE_UNDERLINE;
-        if (apply_skip_ink) {
-            SkipInkGap gaps[64];
-            int gap_count = collect_skip_ink_gaps(rdcon, str, text_rect,
-                                                  rect.y, rect.y + thickness, gaps, 64);
-            draw_deco_with_gaps(rdcon, rect, deco_color.c, gaps, gap_count);
-        } else {
-            rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, deco_color.c,
-                &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
+    bool styled = deco_style == CSS_VALUE_DASHED || deco_style == CSS_VALUE_DOTTED ||
+        deco_style == CSS_VALUE_DOUBLE || deco_style == CSS_VALUE_WAVY;
+    RdtPath* path = styled ? render_path_create_decoration(&rect, deco_style) : nullptr;
+    if (styled && !path) {
+        context->failed = true;
+        log_error("[TEXT_DECO_GAPS] cannot allocate decoration pattern");
+        return;
+    }
+    float stroke_width = deco_style == CSS_VALUE_WAVY ? fmaxf(1.0f, thickness * .5f) : 0.0f;
+    Rect ink_band = rect;
+    if (path) {
+        float left, top, right, bottom;
+        if (rdt_path_get_bounds(path, &left, &top, &right, &bottom)) {
+            // gap masks select horizontal intervals; integer vertical edges retain the stroke antialias coverage.
+            ink_band.y = top - stroke_width * .5f;
+            float bottom_edge = bottom + stroke_width * .5f;
+            if (context->raster || context->display) {
+                ink_band.y = floorf(ink_band.y);
+                bottom_edge = ceilf(bottom_edge);
+            }
+            ink_band.height = bottom_edge - ink_band.y;
         }
     }
+    bool skip = context->font->style->text_deco_skip_ink == CSS_VALUE_ALL
+        ? line == CSS_VALUE_UNDERLINE || line == CSS_VALUE_OVERLINE
+        : context->font->style->text_deco_skip_ink != CSS_VALUE_NONE && line == CSS_VALUE_UNDERLINE;
+    bool owns_path = false;
+    if (skip) {
+        ScratchScope scope(context->scratch);
+        // at most one gap per decoded codepoint; source bytes bound the scoped storage.
+        SkipInkGap* gaps = scope.array<SkipInkGap>((size_t)text_rect->length);
+        if (!gaps && text_rect->length > 0) {
+            context->failed = true;
+            log_error("[TEXT_DECO_GAPS] cannot retain complete glyph ink gaps");
+        } else {
+            int count = collect_skip_ink_gaps(context, str, text_rect,
+                ink_band.y, ink_band.y + ink_band.height, thickness, gaps);
+            owns_path = draw_deco_with_gaps(context, ink_band, deco_color.c, gaps, count, path, stroke_width);
+        }
+    } else owns_path = draw_deco_with_gaps(context, ink_band, deco_color.c, nullptr, 0, path, stroke_width);
+    if (!owns_path) rdt_path_free(path);
+
 }
 
-static void render_text_decorations(RasterRenderContext* rdcon, unsigned char* str,
+static void record_text_decoration_lines(TextDecorationPaintContext* context, unsigned char* str,
                                     TextRect* text_rect) {
-    if (!rdcon || !rdcon->font.style) return;
-    const FontProp* font = rdcon->font.style;
-    render_single_text_decoration(rdcon, str, text_rect, font->text_deco);
-    if (font->text_deco_extra & CSS_TEXT_DECO_UNDERLINE) {
-        render_single_text_decoration(rdcon, str, text_rect, CSS_VALUE_UNDERLINE);
-    }
-    if (font->text_deco_extra & CSS_TEXT_DECO_OVERLINE) {
-        render_single_text_decoration(rdcon, str, text_rect, CSS_VALUE_OVERLINE);
-    }
-    if (font->text_deco_extra & CSS_TEXT_DECO_LINE_THROUGH) {
-        render_single_text_decoration(rdcon, str, text_rect, CSS_VALUE_LINE_THROUGH);
-    }
+    if (!context || !context->font->style) return;
+    const FontProp* font = context->font->style;
+    static const struct { CssEnum line; uint8_t flag; } lines[] = {
+        {CSS_VALUE_UNDERLINE, CSS_TEXT_DECO_UNDERLINE},
+        {CSS_VALUE_OVERLINE, CSS_TEXT_DECO_OVERLINE},
+        {CSS_VALUE_LINE_THROUGH, CSS_TEXT_DECO_LINE_THROUGH}
+    };
+    for (const auto& line : lines)
+        if ((context->lines & line.flag) &&
+                (font->text_deco == line.line || (font->text_deco_extra & line.flag)))
+            render_single_text_decoration(context, str, text_rect, line.line);
+
 }
+
+
+static void render_text_decorations(RasterRenderContext* raster, unsigned char* text, TextRect* rect,
+                                    bool before_text) {
+    uint8_t lines = before_text ? CSS_TEXT_DECO_UNDERLINE | CSS_TEXT_DECO_OVERLINE
+        : CSS_TEXT_DECO_LINE_THROUGH;
+    TextDecorationPaintContext context = {raster, nullptr, nullptr, &raster->font, &raster->scratch,
+        raster->block.x, raster->block.y, raster->raster_scale, 1.0f,
+        lines, raster->color, false};
+    record_text_decoration_lines(&context, text, rect);
+    raster->paint_failed = raster->paint_failed || context.failed;
+}
+
+static bool render_text_rect_ink_bounds(RasterRenderContext* raster, unsigned char* text,
+    TextRect* rect, const RenderTextEmphasis* emphasis, TextShadow* shadows,
+    float x, float y, float width, float height, Bound* result) {
+    Bound ink = {x, y, x + width, y + height};
+    float scale = raster->raster_scale;
+    if (emphasis && emphasis->handle) {
+        LoadedGlyph* mark = font_load_glyph(emphasis->handle, &emphasis->style, emphasis->codepoint, true);
+        if (!mark) return false;
+        float baseline = render_text_baseline_y(&raster->font, 0.0f) * scale + y + emphasis->baseline_offset * scale;
+        ink.top = fminf(ink.top, roundf(baseline - mark->bitmap.bearing_y));
+        ink.bottom = fmaxf(ink.bottom, roundf(baseline - mark->bitmap.bearing_y) + mark->bitmap.height);
+        // marks are centered in the text advance and may overhang the first/last glyph.
+        float overhang = fmaxf(mark->advance_x, (float)mark->bitmap.width) * 0.5f + fabsf((float)mark->bitmap.bearing_x);
+        ink.left -= overhang; ink.right += overhang;
+    }
+    DisplayList decorations;
+    TextDecorationPaintContext context = {nullptr, nullptr, &decorations, &raster->font, &raster->scratch,
+        raster->block.x, raster->block.y, scale, 1.0f,
+        CSS_TEXT_DECO_UNDERLINE | CSS_TEXT_DECO_OVERLINE | CSS_TEXT_DECO_LINE_THROUGH,
+        Color{0xff000000}, false, true};
+    // use the actual shared line recorder so authored offsets and wavy/stroke extents stay in the culling bounds.
+    record_text_decoration_lines(&context, text, rect);
+    if (context.failed) { dl_destroy(&decorations); return false; }
+    if (decorations.item_count()) {
+        Bound lines = dl_content_bounds(&decorations);
+        ink.left = fminf(ink.left, lines.left); ink.top = fminf(ink.top, lines.top);
+        ink.right = fmaxf(ink.right, lines.right); ink.bottom = fmaxf(ink.bottom, lines.bottom);
+    }
+    dl_destroy(&decorations);
+    Bound source = ink;
+    for (TextShadow* shadow = shadows; shadow; shadow = shadow->next) {
+        if (!shadow->color.a) continue;
+        float pad = render_filter_blur_support(shadow->blur_radius * scale * 0.5f);
+        float dx = roundf(shadow->offset_x * scale), dy = roundf(shadow->offset_y * scale);
+        ink.left = fminf(ink.left, source.left + dx - pad); ink.top = fminf(ink.top, source.top + dy - pad);
+        ink.right = fmaxf(ink.right, source.right + dx + pad); ink.bottom = fmaxf(ink.bottom, source.bottom + dy + pad);
+    }
+    *result = ink;
+    return true;
+}
+
+static bool render_text_rect_misses_clip(RasterRenderContext* raster, unsigned char* text,
+    TextRect* rect, const RenderTextEmphasis* emphasis, TextShadow* shadows,
+    float x, float y, float width, float height) {
+    Bound ink = {x, y, x + width, y + height};
+    if (!render_text_bounds_miss_clip(raster, ink)) return false;
+    if (!render_text_rect_ink_bounds(raster, text, rect, emphasis, shadows,
+            x, y, width, height, &ink)) return false;
+    return render_text_bounds_miss_clip(raster, ink);
+}
+
+struct RenderTextOverflowContext {
+    RasterRenderContext* raster;
+    ViewBlock* owner;
+    RdtLogicalPoint origin;
+    Bound border;
+    bool overflow;
+};
+
+static bool render_text_overflow_visit(View* view, bool entering, void* pointer) {
+    if (!entering || view->view_type != RDT_VIEW_TEXT) return true;
+    RenderTextOverflowContext* context = (RenderTextOverflowContext*)pointer;
+    RasterRenderContext* raster = context->raster;
+    ViewText* text = lam::view_require_text(view);
+    if (view_visibility_is_hidden(text) || !text->rect || !text->font) return true;
+    FontProp* style = text->font;
+    if (!style->text_emphasis_enabled && !style->text_shadow &&
+        !style->text_deco_extra && style->text_deco == CSS_VALUE_NONE) return true;
+    // layout bounds cover an intervening clip; transformed scopes need a conservative paint walk.
+    for (DomNode* parent = text->parent; parent && parent != context->owner; parent = parent->parent) {
+        if (!parent->is_element()) continue;
+        DomElement* element = lam::dom_require_element(parent);
+        if (transform_has_functions(element->transform)) {
+            context->overflow = true;
+            return false;
+        }
+        if ((element->blk && element->block()->contain_paint) ||
+            (element->scroller && (element->scroll()->overflow_x != CSS_VALUE_VISIBLE ||
+                element->scroll()->overflow_y != CSS_VALUE_VISIBLE))) return true;
+    }
+    FontBox saved_font = raster->font;
+    BlockBlot saved_block = raster->block;
+    setup_font(raster->ui_context, &raster->font, text->font);
+    RenderTextEmphasis emphasis = {};
+    bool success = render_text_emphasis_resolve(raster->ui_context->font_ctx,
+        &raster->font, raster->color, &emphasis);
+    float scale = raster->raster_scale;
+    for (TextRect* rect = text->rect; success && rect; rect = rect->next) {
+        RdtLogicalPoint point = view_geometry_text_rect_document_origin(text, rect);
+        float x = context->border.left + (point.x - context->origin.x) * scale;
+        float y = context->border.top + (point.y - context->origin.y) * scale;
+        raster->block.x = x - rect->x * scale;
+        raster->block.y = y - rect->y * scale;
+        Bound ink;
+        success = render_text_rect_ink_bounds(raster, text->text_data(), rect, &emphasis,
+            raster->font.style->text_shadow, x, y, rect->width * scale, rect->height * scale, &ink);
+        if (!success || ink.left < context->border.left || ink.top < context->border.top ||
+            ink.right > context->border.right || ink.bottom > context->border.bottom) {
+            context->overflow = true;
+            break;
+        }
+    }
+    if (!success) context->overflow = true;
+    render_text_emphasis_release(&emphasis);
+    raster->font = saved_font;
+    raster->block = saved_block;
+    return !context->overflow;
+}
+
+bool render_text_subtree_overflows_block(RasterRenderContext* raster, ViewBlock* block) {
+    if (!raster || !raster->ui_context || !block) return false;
+    float scale = raster->raster_scale > 0.0f ? raster->raster_scale : 1.0f;
+    RenderTextOverflowContext context = {raster, block, view_geometry_node_document_origin(block),
+        view_geometry_rect_to_bound(render_geometry_block_border_rect(&raster->block, block, scale)), false};
+    // shared paint bounds include marks, authored decoration offsets and actual blur support (FT-17/RSC7).
+    view_geometry_walk_tree(block, render_text_overflow_visit, &context);
+    return context.overflow;
+}
+
+
+bool render_paint_text_decorations(PaintList* paint, const FontBox* font,
+        unsigned char* text, TextRect* rect, float origin_x, float origin_y,
+        Color color, bool before_text, const Color* override_color) {
+    if (!paint || !font || !font->style || !text || !rect) return false;
+    uint8_t lines = before_text ? CSS_TEXT_DECO_UNDERLINE | CSS_TEXT_DECO_OVERLINE
+        : CSS_TEXT_DECO_LINE_THROUGH;
+    if (!(font->style->text_deco_extra & lines) &&
+        !(before_text ? font->style->text_deco == CSS_VALUE_UNDERLINE ||
+            font->style->text_deco == CSS_VALUE_OVERLINE :
+            font->style->text_deco == CSS_VALUE_LINE_THROUGH)) return true;
+    FontHandle* handle = font_box_handle(font);
+    if (!handle) return false;
+    float requested = font_handle_get_size_px(handle);
+    float physical = font_handle_get_physical_size_px(handle);
+    if (!(requested > 0.0f) || !(physical > 0.0f)) return false;
+    Arena* arena = mem_arena_create(mem_context_process(MEM_ROLE_RENDER), MEM_ROLE_RENDER,
+        "render.decoration.scratch");
+    if (!arena) return false;
+    ScratchArena scratch = {}; scratch_init(&scratch, arena);
+    size_t checkpoint = paint->size();
+    TextDecorationPaintContext context = {nullptr, paint, nullptr, font, &scratch,
+        origin_x, origin_y, 1.0f, requested / physical, lines, override_color ? *override_color : color, false, override_color != nullptr};
+    record_text_decoration_lines(&context, text, rect);
+    scratch_release(&scratch); mem_arena_destroy(arena);
+    if (context.failed) paint->rewind(checkpoint);
+    return !context.failed;
+}
+
+
+struct RenderEmphasisCaptureContext {
+    PaintList* paint;
+    const RenderTextEmphasis* emphasis;
+    float density;
+    Color color;
+    bool has_ink;
+};
+
+LoadedGlyph* render_text_emphasis_bitmap_glyph(const RenderTextEmphasis* emphasis,
+    uint32_t codepoint, float x, float baseline_y, float advance, float density,
+    float* mark_x, float* mark_y) {
+    if (!emphasis || !emphasis->handle || !text_emphasis_marks_codepoint(codepoint) ||
+        !(density > 0.0f)) return nullptr;
+    LoadedGlyph* mark = font_load_glyph(emphasis->handle, &emphasis->style, emphasis->codepoint, true);
+    if (!mark) return nullptr;
+    float pen_x, pen_baseline;
+    render_text_emphasis_place(emphasis, x / density, baseline_y / density,
+        advance / density, mark->advance_x / density, &pen_x, &pen_baseline);
+    *mark_x = roundf(pen_x * density + mark->bitmap.bearing_x);
+    *mark_y = roundf(pen_baseline * density - mark->bitmap.bearing_y);
+    return mark;
+}
+
+static bool render_emphasis_capture_glyph(void* pointer, uint32_t codepoint,
+    FontHandle* face, float x, float baseline_y, float advance) {
+    if (!text_emphasis_marks_codepoint(codepoint)) return true;
+    RenderEmphasisCaptureContext* context = (RenderEmphasisCaptureContext*)pointer;
+    float density = context->density, mark_x, mark_y;
+    LoadedGlyph* mark = render_text_emphasis_bitmap_glyph(context->emphasis, codepoint,
+        x * density, baseline_y * density, advance * density, density, &mark_x, &mark_y);
+    if (!mark) return false;
+    if (!mark->bitmap.width || !mark->bitmap.height) return true;
+    RdtMatrix logical = rdt_matrix_scale(1.0f / density, 1.0f / density);
+    size_t count = context->paint->size();
+    // consume the selected hinted bitmap synchronously; the published image owns its pixels (FT-17 / D4.1.4v5).
+    paint_draw_glyph(context->paint, &mark->bitmap,
+        (int)mark_x, (int)mark_y, context->color, false, nullptr, &logical, 0); // INT_CAST_OK: rounded physical glyph bitmap positions
+    context->has_ink = true;
+    return context->paint->size() == count + 1;
+}
+
+bool render_paint_text_emphasis(PaintList* paint, FontContext* fonts,
+    const PaintGlyphRun* run, const Color* override_color) {
+    if (!paint || !run) return false;
+    RenderTextEmphasis emphasis = {};
+    if (!render_text_emphasis_resolve(fonts, paint_glyph_run_font(run), run->color, &emphasis)) return false;
+    if (!emphasis.handle) return true;
+    Color color = override_color ? *override_color : emphasis.color;
+    if (!color.a) { render_text_emphasis_release(&emphasis); return true; }
+    float density = font_handle_get_physical_size_px(emphasis.handle) / font_handle_get_size_px(emphasis.handle);
+    if (!isfinite(density) || density <= 0.0f) { render_text_emphasis_release(&emphasis); return false; }
+    PaintList coverage;
+    RenderEmphasisCaptureContext context = {&coverage, &emphasis, density, color, false};
+    bool ok = render_visit_text_run_glyphs(run, fonts, render_emphasis_capture_glyph, &context);
+    RenderEffectRasterImage image = {};
+    if (ok && context.has_ink) {
+        OffscreenRenderArenas arenas;
+        ok = arenas.init("render.emphasis.bounds", "render.emphasis.bounds.list", "render.emphasis.bounds.scratch");
+        if (ok) {
+            DisplayList display = {}; dl_init(&display, arenas.list_arena);
+            paint_ir_lower_raster(&coverage, &display);
+            Bound bounds = dl_content_bounds(&display);
+            ok = bounds.right > bounds.left && bounds.bottom > bounds.top &&
+                render_effect_rasterize_paint_list(&coverage, nullptr, &bounds,
+                    bounds.right - bounds.left, bounds.bottom - bounds.top,
+                    false, density, &image, "[TEXT_EMPHASIS_CAPTURE]") && image.surface;
+            dl_destroy(&display); arenas.destroy();
+        }
+    }
+    render_text_emphasis_release(&emphasis);
+    if (ok && !context.has_ink) return true;
+    size_t checkpoint = paint->size();
+    if (ok) {
+        // a static accessible label survives deferred lowering after source/font retirement (D4.1.4v5).
+        RenderSemanticGroup label = {}; label.title = lam::up("text emphasis marks");
+        paint_begin_semantic_group(paint, &label);
+        ok = paint->size() == checkpoint + 1;
+        if (ok) {
+            size_t count = paint->size();
+            paint_draw_image_resource(paint, image.surface, image.x, image.y, image.width, image.height,
+                255, run->has_transform ? &run->transform : nullptr, image_surface_destroy);
+            ok = paint->size() == count + 1;
+            if (ok) image.surface = nullptr;
+        }
+        if (ok) {
+            size_t count = paint->size(); paint_end_semantic_group(paint);
+            ok = paint->size() == count + 1;
+        }
+    }
+    if (image.surface) image_surface_destroy(image.surface);
+    if (!ok) paint->rewind(checkpoint);
+    return ok;
+}
+
 
 
 bool render_paint_text_shadows(PaintList* paint, UiContext* ui,
-        const PaintGlyphRun* run, TextShadow* shadows) {
+        const PaintGlyphRun* run, TextShadow* shadows, const RenderTextDecorationSource* decoration) {
     if (!paint || !run || !shadows) return false;
-    RdtPath* path = run->glyph_ids && run->count > 0 ? render_path_create_glyph_run(run)
-        : render_path_create_text_run(run, ui ? ui->font_ctx.get() : nullptr);
-    if (!path) return false;
-    bool recorded = false;
+    char decoration_names[48];
+    if (!decoration || !run->font || !run->font->style ||
+        !font_text_decoration_names(run->font->style, decoration_names, sizeof(decoration_names)) ||
+        strcmp(decoration_names, "none") == 0) decoration = nullptr;
+    size_t checkpoint = paint->size();
+    bool success = true;
     render_visit_text_shadows_reverse(shadows, [&](TextShadow* shadow) {
-        if (!shadow->color.a) return;
-        RdtMatrix offset = rdt_matrix_translate(shadow->offset_x, shadow->offset_y);
-        if (shadow->blur_radius <= 0.0f) {
-            recorded |= render_paint_solid_shape(paint, path, shadow->color, &offset);
-            return;
-        }
+        if (!shadow->color.a || !success) return;
         PaintGlyphRun colored = *run;
         colored.owned_text = nullptr; colored.color = shadow->color;
         colored.x += shadow->offset_x; colored.baseline_y += shadow->offset_y;
+        bool bitmap_glyphs = shadow->blur_radius > 0.0f;
+        const FontBox* source_font = paint_glyph_run_font(run);
+        bool has_emphasis = source_font && source_font->style && source_font->style->text_emphasis_enabled;
+        bool capture = bitmap_glyphs || ((decoration || has_emphasis) && shadow->color.a != 255);
+        if (capture) colored.color.a = 255;
+        RdtPath* path = bitmap_glyphs ? nullptr :
+            render_path_create_paint_glyph_run(&colored, ui ? ui->font_ctx.get() : nullptr);
+        if (!bitmap_glyphs && !path) { success = false; return; }
+        auto record_layer = [&]() {
+        auto geometry = [&](PaintList* list) {
+            auto lines = [&](bool before) {
+                return !decoration || render_paint_text_decorations(list, run->font,
+                    decoration->text, decoration->rect,
+                    decoration->origin_x + shadow->offset_x,
+                    decoration->origin_y + shadow->offset_y,
+                    colored.color, before, &colored.color);
+            };
+            if (!lines(true)) return false;
+            if (bitmap_glyphs) {
+                size_t count = list->size();
+                paint_glyph_run(list, &colored);
+                if (list->size() != count + 1) return false;
+            } else if (!render_paint_solid_shape(list, path, colored.color, nullptr)) return false;
+            if (!render_paint_text_emphasis(list, ui ? ui->font_ctx.get() : nullptr,
+                    &colored, &colored.color)) return false;
+            return lines(false);
+        };
+        if (!capture) {
+            size_t checkpoint = paint->size();
+            if (!geometry(paint)) { paint->rewind(checkpoint); success = false; return; }
+            return;
+        }
+        PaintList silhouette;
+        if (!geometry(&silhouette)) { success = false; return; }
         OffscreenRenderArenas bounds_arenas;
         if (!bounds_arenas.init("render.text.shadow.bounds", "render.text.shadow.bounds.list",
-                "render.text.shadow.bounds.scratch")) return;
-        DisplayList glyphs = {}; dl_init(&glyphs, bounds_arenas.list_arena);
-        render_glyph_run_raster_lower(&colored, &glyphs);
-        // hinted bitmap extents can exceed the selected outline's contour bounds.
-        Bound ink = dl_content_bounds(&glyphs);
-        dl_destroy(&glyphs); bounds_arenas.destroy();
+                "render.text.shadow.bounds.scratch")) { success = false; return; }
+        DisplayList shapes = {}; dl_init(&shapes, bounds_arenas.list_arena);
+        paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
+        paint_ir_lower_raster(&silhouette, &shapes);
+        // decoration extents and hinted bitmap extents both contribute to the isolated capture.
+        Bound ink = dl_content_bounds(&shapes);
+        dl_destroy(&shapes); bounds_arenas.destroy();
         if (!(ink.right > ink.left && ink.bottom > ink.top)) return;
         float sigma = shadow->blur_radius * 0.5f;
         float density = ui_context_raster_scale(ui);
-        // all three convolution passes contribute to the finite capture extent.
         float pad = render_filter_blur_support(sigma * density) / density;
         Bound bounds = {ink.left - pad, ink.top - pad, ink.right + pad, ink.bottom + pad};
         FilterFunction blur = {}; blur.type = FILTER_BLUR; blur.params.blur_radius = sigma;
         FilterProp filter = {}; filter.functions = lam::own(&blur); filter.functions_borrowed = true;
-        PaintEffectGroup group = {}; group.bounds = bounds; group.opacity = 1; group.filter = lam::up(&filter);
+        PaintEffectGroup group = {}; group.bounds = bounds;
+        // merge the glyph/decoration silhouette before applying layer alpha once.
+        group.opacity = shadow->color.a / 255.0f;
+        if (sigma > 0) group.filter = lam::up(&filter);
+        if (!bitmap_glyphs) {
+            // sharp shadows retain vector outlines and isolate the combined silhouette's alpha.
+            size_t checkpoint = paint->size();
+            paint_begin_effect_group(paint, &group);
+            if (paint->size() != checkpoint + 1) { success = false; return; }
+            if (!geometry(paint)) { paint->rewind(checkpoint); success = false; return; }
+            size_t count = paint->size();
+            paint_end_effect_group(paint);
+            if (paint->size() != count + 1) success = false;
+            return;
+        }
         PaintList shadow_paint;
         paint_begin_effect_group(&shadow_paint, &group);
-        // filtered text uses the captured selected-font raster lowerer, as ordinary filter text does.
-        paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
-        paint_glyph_run(&shadow_paint, &colored);
+        if (shadow_paint.size() != 1) { success = false; return; }
+        if (!geometry(&shadow_paint)) { success = false; return; }
+        size_t count = shadow_paint.size();
         paint_end_effect_group(&shadow_paint);
+        if (shadow_paint.size() != count + 1) { success = false; return; }
         RenderEffectRasterImage image = {};
-        // the temporary filter is borrowed only during synchronous isolated capture (D4.5.1v4).
+        // temporary descriptors and source/font borrows expire after this synchronous capture.
         if (!render_effect_rasterize_paint_list(&shadow_paint, nullptr, &bounds,
                 bounds.right - bounds.left, bounds.bottom - bounds.top, false,
-                ui_context_raster_scale(ui), &image, "[TEXT_SHADOW_CAPTURE]") || !image.surface) return;
+                density, &image, "[TEXT_SHADOW_CAPTURE]") || !image.surface) { success = false; return; }
         int before = paint_list_count(paint);
         paint_draw_image_resource(paint, image.surface, image.x, image.y, image.width, image.height,
             255, nullptr, image_surface_destroy);
-        recorded |= paint_list_count(paint) == before + 1;
+        if (paint_list_count(paint) != before + 1) { image_surface_destroy(image.surface); success = false; }
+        };
+        record_layer();
+        // recording clones the selected outline; every capture/error path releases its local source.
+        rdt_path_free(path);
     });
-    rdt_path_free(path);
-    return recorded;
+    // a later layer failure must release earlier owned paths/images from this compound shadow.
+    if (!success) paint->rewind(checkpoint);
+    return success;
 }

@@ -1119,29 +1119,57 @@ TEST_F(RetainedDisplayListTest, EvictionWhileReadersReplayIsSafe) {
         __atomic_store_n(&handles[i].gen, surfaces[i]->self.gen, __ATOMIC_RELEASE);
     }
     static int stop = 0;
-    static uint64_t reads = 0;
+    static uint64_t reads = 0, observed_checksum = 0;
+    struct ReaderStart {
+        pthread_mutex_t mutex;
+        pthread_cond_t condition;
+        int ready;
+        bool evicting;
+    } start = {};
+    ASSERT_EQ(pthread_mutex_init(&start.mutex, nullptr), 0);
+    ASSERT_EQ(pthread_cond_init(&start.condition, nullptr), 0);
     __atomic_store_n(&stop, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&reads, (uint64_t)0, __ATOMIC_RELEASE);
-    auto reader = [](void*) -> void* {
+    __atomic_store_n(&observed_checksum, (uint64_t)0, __ATOMIC_RELEASE);
+    auto reader = [](void* opaque) -> void* {
+        ReaderStart* start = (ReaderStart*)opaque;
         image_surface_mark_render_worker_thread();
         uint64_t local = 0, checksum = 0;
-        while (!__atomic_load_n(&stop, __ATOMIC_ACQUIRE)) {
+        bool first = true;
+        do {
             ImageSurfaceReadScope read_scope;
+            ImageSurface* pinned[32] = {};
             for (int i = 0; i < 32; i++) {
                 lam::Handle<ImageSurface> handle;
                 handle.gen = __atomic_load_n(&handles[i].gen, __ATOMIC_ACQUIRE);
                 handle.index = __atomic_load_n(&handles[i].index, __ATOMIC_RELAXED);
-                ImageSurface* surface = image_surface_lookup(handle);
+                pinned[i] = image_surface_lookup(handle);
+            }
+            if (first) {
+                // pin before eviction, then read after it starts; scheduler speed cannot remove the overlap.
+                pthread_mutex_lock(&start->mutex);
+                start->ready++;
+                pthread_cond_broadcast(&start->condition);
+                while (!start->evicting) pthread_cond_wait(&start->condition, &start->mutex);
+                pthread_mutex_unlock(&start->mutex);
+                first = false;
+            }
+            for (ImageSurface* surface : pinned) {
                 if (!surface || !surface->pixels) continue;
                 for (int p = 0; p < 4; p++) checksum += ((const uint32_t*)surface->pixels)[p];
                 local++;
             }
-        }
-        __atomic_add_fetch(&reads, local + (checksum & 0), __ATOMIC_RELAXED);
+        } while (!__atomic_load_n(&stop, __ATOMIC_ACQUIRE));
+        __atomic_add_fetch(&reads, local, __ATOMIC_RELAXED);
+        // preserve pixel reads through optimization so sanitizers exercise the retained storage.
+        __atomic_add_fetch(&observed_checksum, checksum, __ATOMIC_RELAXED);
         return nullptr;
     };
     pthread_t threads[4];
-    for (int t = 0; t < 4; t++) ASSERT_EQ(pthread_create(&threads[t], nullptr, reader, nullptr), 0);
+    for (int t = 0; t < 4; t++) ASSERT_EQ(pthread_create(&threads[t], nullptr, reader, &start), 0);
+    pthread_mutex_lock(&start.mutex);
+    while (start.ready != 4) pthread_cond_wait(&start.condition, &start.mutex);
+    pthread_mutex_unlock(&start.mutex);
     uint32_t seed = 777;
     for (int round = 0; round < 4000; round++) {
         seed = seed * 1103515245u + 12345u;
@@ -1153,6 +1181,12 @@ TEST_F(RetainedDisplayListTest, EvictionWhileReadersReplayIsSafe) {
         __atomic_store_n(&handles[i].index, replacement->self.index, __ATOMIC_RELAXED);
         __atomic_store_n(&handles[i].gen, replacement->self.gen, __ATOMIC_RELEASE);
         retire_test_surface(old);
+        if (round == 0) {
+            pthread_mutex_lock(&start.mutex);
+            start.evicting = true;
+            pthread_cond_broadcast(&start.condition);
+            pthread_mutex_unlock(&start.mutex);
+        }
         // the host releases the queue at its quiet points
         if (round % 64 == 0) {
             ImageSurfaceReadScope host_scope;
@@ -1164,4 +1198,7 @@ TEST_F(RetainedDisplayListTest, EvictionWhileReadersReplayIsSafe) {
     for (int i = 0; i < count; i++) retire_test_surface(surfaces[i]);
     image_surface_drain_retired();
     EXPECT_GT(__atomic_load_n(&reads, __ATOMIC_RELAXED), 0u);
+    EXPECT_GT(__atomic_load_n(&observed_checksum, __ATOMIC_RELAXED), 0u);
+    pthread_cond_destroy(&start.condition);
+    pthread_mutex_destroy(&start.mutex);
 }

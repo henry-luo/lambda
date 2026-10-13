@@ -6,6 +6,7 @@
 // Auto-scales parallelism to CPU count.
 
 const { spawn } = require('child_process');
+const { finished: streamFinished } = require('stream');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -372,6 +373,7 @@ function discoverTests(config) {
                     caseWorkers: t.case_workers || 1,
                     caseWorkersEnv: t.case_workers_env,
                     caseWorkerArgs: t.case_worker_args || [],
+                    artifactDirs: t.artifact_dirs || [],
                     workerSlots: t.worker_slots || t.case_workers || 1,
                     workerSlotsEnv: t.worker_slots_env || t.case_workers_env,
                     workerArgs: t.worker_args || [],
@@ -594,7 +596,20 @@ function runTest(testInfo) {
         }
 
         const log = fs.createWriteStream(logFile);
-        const finish = result => log.end(() => resolve(result));
+        let logError = null;
+        const finish = result => {
+            // end callbacks alone can be skipped when a write stream fails.
+            streamFinished(log, () => {
+                if (logError) {
+                    if (!result.failed) { result.failed = 1; result.total = (result.total || 0) + 1; }
+                    result.status = '❌ ERROR';
+                    result.failedTests = [...(result.failedTests || []),
+                        `[${baseName}] log write failed: ${logError.message} (${logFile})`];
+                }
+                resolve(result);
+            });
+            log.end();
+        };
 
         // Build argv based on test type
         let testArgs = [];
@@ -671,18 +686,44 @@ function runTest(testInfo) {
         let timedOut = false;
         let finished = false;
 
+        function killChild() {
+            // script adapters own child runners; reap their process group too.
+            if (IS_WINDOWS) child.kill('SIGKILL');
+            else {
+                try { process.kill(-child.pid, 'SIGKILL'); } catch (_) { child.kill('SIGKILL'); }
+            }
+        }
+
+        log.on('error', (err) => {
+            // a full disk must fail this test and reap it, rather than crash Node.
+            logError = err;
+            if (idleTimer) clearTimeout(idleTimer);
+            if (!finished) killChild();
+            child.stdout.resume();
+            child.stderr.resume();
+        });
+        log.on('drain', () => {
+            child.stdout.resume();
+            child.stderr.resume();
+        });
+
+        function writeLog(data) {
+            if (logError) return;
+            // both pipes share one sink; pause both until buffered writes drain.
+            if (!log.write(data)) {
+                child.stdout.pause();
+                child.stderr.pause();
+            }
+        }
+
         function resetIdleTimer() {
             if (idleTimer) clearTimeout(idleTimer);
-            if (finished) return;
+            if (finished || logError) return;
             idleTimer = setTimeout(() => {
                 if (finished) return;
                 timedOut = true;
                 console.error(`   ⏰ ${baseName} idle for ${idleTimeoutMs / 1000}s — killing (stuck?)`)
-                // Script adapters own child runners; reap their process group too.
-                if (IS_WINDOWS) child.kill('SIGKILL');
-                else {
-                    try { process.kill(-child.pid, 'SIGKILL'); } catch (_) { child.kill('SIGKILL'); }
-                }
+                killChild();
             }, idleTimeoutMs);
         }
 
@@ -691,16 +732,15 @@ function runTest(testInfo) {
 
         child.stdout.on('data', (data) => {
             resetIdleTimer();
-            log.write(data);
+            writeLog(data);
             if (testInfo.listCases) listing += data.toString();
-            const lines = data.toString().split('\n');
-            outputLines.push(...lines);
+            if (baseName === 'test_flex_standalone') outputLines.push(data.toString());
             if (rawOutput) process.stdout.write(data);
         });
 
         child.stderr.on('data', (data) => {
             resetIdleTimer();
-            log.write(data);
+            writeLog(data);
             if (rawOutput) process.stderr.write(data);
         });
 
@@ -737,7 +777,7 @@ function runTest(testInfo) {
 
             // For standalone flex test, parse output manually
             if (baseName === 'test_flex_standalone') {
-                const allOutput = outputLines.join('\n');
+                const allOutput = outputLines.join('');
                 const passCount = (allOutput.match(/PASS:/g) || []).length;
                 const failCount = (allOutput.match(/FAIL:/g) || []).length;
                 const total = passCount + failCount;
@@ -785,7 +825,9 @@ async function runGtestCases(testInfo, workers) {
     } catch (_) {}
     try { fs.unlinkSync(jsonFile); } catch (_) {}
     const discovery = await runTest({ ...testInfo, baseName: `${baseName}_cases/list`, listCases: true });
-    fs.copyFileSync(discovery.logFile, logFile);
+    const errors = [];
+    try { fs.copyFileSync(discovery.logFile, logFile); }
+    catch (error) { errors.push(`GTest discovery log unavailable: ${error.message}`); }
     const names = [];
     let suite = '';
     const runDisabled = (testInfo.runnerArgs || []).includes('--gtest_also_run_disabled_tests') ||
@@ -798,8 +840,7 @@ async function runGtestCases(testInfo, workers) {
             if (runDisabled || !/(^|[/.])DISABLED_/.test(name)) names.push(name);
         }
     }
-    const errors = [];
-    if (discovery.failed) errors.push('GTest case discovery failed');
+    if (discovery.failed) errors.push('GTest case discovery failed', ...(discovery.failedTests || []));
     if (!names.length) errors.push('GTest case discovery returned no tests');
     if (new Set(names).size !== names.length) errors.push('GTest case discovery returned duplicate tests');
     if (errors.length) {
@@ -851,11 +892,19 @@ async function runGtestCases(testInfo, workers) {
                 }
             }
             cases[index] = { suiteName, tc };
-            fs.appendFileSync(logFile, `\n[case ${index + 1}/${names.length}] ${name}\n` +
-                fs.readFileSync(result.logFile, 'utf8'));
+            let caseLog;
+            try { caseLog = fs.readFileSync(result.logFile, 'utf8'); }
+            catch (error) {
+                if (!result.failed) throw error;
+                caseLog = (result.failedTests || []).join('\n');
+            }
+            fs.appendFileSync(logFile, `\n[case ${index + 1}/${names.length}] ${name}\n${caseLog}`);
         }
     }
-    await Promise.all(Array.from({ length: Math.min(workers, names.length) }, worker));
+    // wait for every active child before reporting an artifact I/O failure.
+    const workersDone = await Promise.allSettled(Array.from({ length: Math.min(workers, names.length) }, worker));
+    const workerError = workersDone.find(result => result.status === 'rejected');
+    if (workerError) throw workerError.reason;
     const suites = new Map();
     for (const { suiteName, tc } of cases) {
         if (!suites.has(suiteName)) suites.set(suiteName, { name: suiteName, testsuite: [] });
@@ -1037,7 +1086,21 @@ function testWorkerSlots(testInfo) {
 
 async function runTimedTest(testInfo) {
     const startMs = Date.now();
-    const result = await runTest(testInfo);
+    let result;
+    try {
+        // replace suite-owned artifacts once, before any case workers start.
+        for (const dir of (testInfo.artifactDirs || [])) {
+            const directory = path.resolve(TEST_OUTPUT_DIR, dir);
+            if (!directory.startsWith(TEST_OUTPUT_DIR + path.sep)) {
+                throw new Error(`artifact directory must be inside ${TEST_OUTPUT_DIR}: ${dir}`);
+            }
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+        result = await runTest(testInfo);
+    } catch (error) {
+        result = { passed: 0, failed: 1, total: 1, status: '❌ ERROR', timedOut: false,
+            failedTests: [`[${testInfo.baseName}] runner error: ${error.message}`] };
+    }
     const endMs = Date.now();
     return { ...result, startMs, endMs, durationMs: endMs - startMs, testInfo };
 }
