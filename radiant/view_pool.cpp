@@ -1632,9 +1632,22 @@ bool view_focus_is_hidden(View* view) {
             visibility, sizeof(visibility)) && visibility[0]
             ? strcmp(visibility, "visible") != 0 : view_visibility_is_hidden(view)) return true;
     // none suppresses flat-tree contents; the parser stub above the owned root supplies no CSS box.
+    // Ensuring `element` refreshes its whole style-inheritance chain, so an
+    // ancestor on that chain is already current; re-ensuring each one recascaded
+    // the chain once per level. Slot-assigned flat-tree parents leave the chain
+    // and are still ensured themselves.
+    DomElement* refreshed_chain = element;
     for (DomElement* current = element; current;
          current = element->doc && current == element->doc->root ? nullptr : dom_flat_tree_parent(current)) {
-        dom_ensure_computed(current, false);
+        bool on_refreshed_chain = false;
+        for (DomElement* link = refreshed_chain; link && current != element; ) {
+            if (link == current) { on_refreshed_chain = true; break; }
+            link = element->doc && link == element->doc->root ? nullptr : dom_parent_element(link);
+        }
+        if (!on_refreshed_chain) {
+            dom_ensure_computed(current, false);
+            refreshed_chain = current;
+        }
         if (layout_display_is_none(resolve_display_value(current))) return true;
     }
     return false;
