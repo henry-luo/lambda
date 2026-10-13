@@ -855,7 +855,10 @@ on click(evt) {
   }
 }
 
-view <document_pane> {
+// Pane-local controls are state on a pane model the app rebuilds only for a
+// new file or a CSV change, so a property toggle, tab switch or property
+// filter edit re-renders this pane alone instead of the whole project tree.
+view <document_pane> state preview_mode: "view", property_filter: "", property_open_paths: ~.initial_open_paths, property_closed_paths: [], property_more_paths: [] {
   if (~.file == null) {
     <main class:"document-panel"
     , <div id:"empty-preview", class:"empty-preview"
@@ -872,10 +875,10 @@ view <document_pane> {
         , <div class:"document-path", ~.file["file_path"]>
           <h1 class:"document-name", ~.file["name"]>
         >
-        <span class:"preview-kind rendered", if (~.preview_mode == "view") "View" else "Source">
+        <span class:"preview-kind rendered", if (preview_mode == "view") "View" else "Source">
       >
       <div class:"document-content"
-      , if (~.preview_mode == "view") {
+      , if (preview_mode == "view") {
         if (property_format(~.file["extension"]) == "xml" and
             ~.file["xml_stylesheet"]) {
           // The file loader resolves the PI's href and applies its CSS in this frame.
@@ -883,8 +886,8 @@ view <document_pane> {
             src:absolute_file_path(~.file["file_path"])>
         } else if (property_format(~.file["extension"]) != null) {
           apply(<property_inspector file:~.file, parsed:~.property_data,
-            filter_text:~.property_filter, open_paths:~.property_open_paths,
-            closed_paths:~.property_closed_paths, more_paths:~.property_more_paths>)
+            filter_text:property_filter, open_paths:property_open_paths,
+            closed_paths:property_closed_paths, more_paths:property_more_paths>)
         } else if (is_eml_document(~.file["extension"])) {
           apply(<eml_preview message:~.eml_data>)
         } else if (is_table_document(~.file["extension"])) {
@@ -922,9 +925,9 @@ view <document_pane> {
       }
       >
       <nav class:"document-tabs"
-      , <button class:(if (~.preview_mode == "view") "document-tab tab-view active" else "document-tab tab-view"), "View">
+      , <button class:(if (preview_mode == "view") "document-tab tab-view active" else "document-tab tab-view"), "View">
         if (not is_raster_document(~.file["extension"])) {
-          <button class:(if (~.preview_mode == "source") "document-tab tab-source active" else "document-tab tab-source"), "Source">
+          <button class:(if (preview_mode == "source") "document-tab tab-source active" else "document-tab tab-source"), "Source">
         }
       >
     >
@@ -946,8 +949,51 @@ view <document_pane> {
 }
 on click(evt) {
   let target_class = evt["target_class"]
-  if (contains(target_class, "tab-view")) { emit("preview_tab", "view") }
-  else if (contains(target_class, "tab-source")) { emit("preview_tab", "source") }
+  if (contains(target_class, "tab-view")) { preview_mode = "view" }
+  else if (contains(target_class, "tab-source")) { preview_mode = "source" }
+  else if (target_class == "property-filter-clear") {
+    property_filter = ""
+    property_more_paths = []
+  }
+}
+on input(evt) {
+  let character = evt.char
+  if (evt.target_class == "property-filter" and
+      character != null and character != "") {
+    let caret_pos = evt.caret_pos
+    property_filter = slice(property_filter, 0, caret_pos) ++ character ++
+      slice(property_filter, caret_pos, len(property_filter))
+    property_closed_paths = []
+    property_more_paths = []
+  }
+}
+on keydown(evt) {
+  if (evt.target_class == "property-filter") {
+    let next = if (evt.key == "Backspace") { erase_backwards(property_filter, evt) }
+      else if (evt.key == "Delete") { erase_forwards(property_filter, evt) }
+      else if (evt.key == "Escape") { "" }
+      else { null }
+    if (next == null) { return }
+    property_filter = next
+    property_closed_paths = []
+    property_more_paths = []
+    // The model owns this edit; a second native edit would desynchronize it.
+    return 'prevent-default'
+  }
+}
+on property_toggle(entry) {
+  let path = entry["path"]
+  if (property_filter == "") {
+    if (entry["is_open"]) {
+      property_open_paths = [for (open_path in property_open_paths where open_path != path) open_path]
+    } else { property_open_paths = [*property_open_paths, path] }
+  } else {
+    if (entry["is_open"]) { property_closed_paths = [*property_closed_paths, path] }
+    else { property_closed_paths = [for (closed_path in property_closed_paths where closed_path != path) closed_path] }
+  }
+}
+on property_more(path) {
+  property_more_paths = [*property_more_paths, path]
 }
 
 // --------------------------------------------------------------------------
@@ -1045,95 +1091,63 @@ on file_select(entry) {
 // The stable model keeps the tree's state when document controls update.
 let PROJECT_TREE_MODEL = <project_tree root_path:PROJECT_ROOT, root_name:"project root", entries:PROJECT_ENTRIES>
 
-edit <doc_editor_app> state selected_file: null, preview_mode: "view", property_filter: "", property_data: null, property_open_paths: [], property_closed_paths: [], property_more_paths: [], eml_data: null, csv_data: null, csv_widths: [], csv_visible_rows: CSV_PAGE_SIZE, csv_resize: null {
+fn document_pane_model(file, property_data, open_paths, eml_data, csv_data, csv_widths, csv_visible_rows) =>
+  <document_pane file:file, property_data:property_data, initial_open_paths:open_paths,
+    eml_data:eml_data, csv_data:csv_data, csv_widths:csv_widths, csv_visible_rows:csv_visible_rows>
+
+edit <doc_editor_app> state selected_file: null, property_data: null, initial_open_paths: [], eml_data: null, csv_data: null, csv_widths: [], csv_visible_rows: CSV_PAGE_SIZE, csv_resize: null, pane: <document_pane file:null, initial_open_paths:[]> {
   <div class:"doc-editor"
   , apply(~.tree_model, {mode: "edit"})
-  apply(<document_pane file:selected_file, preview_mode:preview_mode,
-    property_filter:property_filter, property_data:property_data,
-    property_open_paths:property_open_paths, property_closed_paths:property_closed_paths,
-    property_more_paths:property_more_paths, eml_data:eml_data,
-    csv_data:csv_data, csv_widths:csv_widths, csv_visible_rows:csv_visible_rows>)
+  apply(pane)
   >
-}
-on click(evt) {
-  let target_class = evt["target_class"]
-  if (target_class == "property-filter-clear") {
-    property_filter = ""
-    property_more_paths = []
-  }
-}
-on input(evt) {
-  let character = evt.char
-  if (evt.target_class == "property-filter" and
-      character != null and character != "") {
-    let caret_pos = evt.caret_pos
-    property_filter = slice(property_filter, 0, caret_pos) ++ character ++
-      slice(property_filter, caret_pos, len(property_filter))
-    property_closed_paths = []
-    property_more_paths = []
-  }
-}
-on keydown(evt) {
-  if (evt.target_class == "property-filter") {
-    let next = if (evt.key == "Backspace") { erase_backwards(property_filter, evt) }
-      else if (evt.key == "Delete") { erase_forwards(property_filter, evt) }
-      else if (evt.key == "Escape") { "" }
-      else { null }
-    if (next == null) { return }
-    property_filter = next
-    property_closed_paths = []
-    property_more_paths = []
-    // The model owns this edit; a second native edit would desynchronize it.
-    return 'prevent-default'
-  }
 }
 on document_select(entry) {
   let format = property_format(entry["extension"])
   // Retain the parsed tree while the user edits the filter or expands nodes.
   let parsed = if (format == null) null else input(entry["source"], format) ^ { null }
-  selected_file = {file_path: entry["file_path"], source:entry["source"], name: entry["name"],
+  let file = {file_path: entry["file_path"], source:entry["source"], name: entry["name"],
     extension: entry["extension"], text_width_px: entry["text_width_px"],
     xml_stylesheet: (if (format == "xml" and type(entry.source) != element) xml_has_stylesheet(parsed) else false)}
-  property_data = if (format == "properties") properties_tree(parsed) else parsed
-  eml_data = if (is_eml_document(entry["extension"])) input(entry["source"], 'eml') ^ { null } else null
-  csv_data = if (is_table_document(entry["extension"]))
+  let properties = if (format == "properties") properties_tree(parsed) else parsed
+  let open_paths = property_initial_open_paths(properties, format)
+  let eml = if (is_eml_document(entry["extension"])) input(entry["source"], 'eml') ^ { null } else null
+  let table = if (is_table_document(entry["extension"]))
     input(entry["source"], lower(entry["extension"])) ^ { null } else null
-  csv_widths = [for (column in csv_columns(csv_data)) CSV_DEFAULT_WIDTH]
+  let widths = [for (column in csv_columns(table)) CSV_DEFAULT_WIDTH]
+  selected_file = file
+  property_data = properties
+  initial_open_paths = open_paths
+  eml_data = eml
+  csv_data = table
+  csv_widths = widths
   csv_visible_rows = CSV_PAGE_SIZE
   csv_resize = null
-  preview_mode = "view"
-  property_filter = ""
-  property_open_paths = property_initial_open_paths(property_data, format)
-  property_closed_paths = []
-  property_more_paths = []
+  // a new pane model starts the pane-local controls afresh for this file
+  pane = document_pane_model(file, properties, open_paths, eml, table, widths, CSV_PAGE_SIZE)
 }
-on preview_tab(tab) {
-  preview_mode = tab
-}
-on property_toggle(entry) {
-  let path = entry["path"]
-  if (property_filter == "") {
-    if (entry["is_open"]) {
-      property_open_paths = [for (open_path in property_open_paths where open_path != path) open_path]
-    } else { property_open_paths = [*property_open_paths, path] }
-  } else {
-    if (entry["is_open"]) { property_closed_paths = [*property_closed_paths, path] }
-    else { property_closed_paths = [for (closed_path in property_closed_paths where closed_path != path) closed_path] }
-  }
-}
-on property_more(path) {
-  property_more_paths = [*property_more_paths, path]
-}
+// CSV state stays here: a column release can land over the file panel, which
+// only this app sees. Its pane is rebuilt with the table; CSV previews have no
+// other pane-local state worth keeping (they render only in the View tab).
 on csv_resize_start(gesture) { csv_resize = gesture }
-on csv_more_rows(_) { csv_visible_rows = csv_visible_rows + CSV_PAGE_SIZE }
+on csv_more_rows(_) {
+  let rows = csv_visible_rows + CSV_PAGE_SIZE
+  csv_visible_rows = rows
+  pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, csv_data, csv_widths, rows)
+}
 on csv_resize_move(x) {
-  if (csv_resize != null) { csv_widths = csv_resized_widths(csv_widths, csv_resize, x) }
+  if (csv_resize != null) {
+    let widths = csv_resized_widths(csv_widths, csv_resize, x)
+    csv_widths = widths
+    pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, csv_data, widths, csv_visible_rows)
+  }
 }
 // A release can land over the file panel after shrinking a wide column.
 on mouseup(evt) {
   if (csv_resize == null) { return }
-  csv_widths = csv_resized_widths(csv_widths, csv_resize, evt.x)
+  let widths = csv_resized_widths(csv_widths, csv_resize, evt.x)
+  csv_widths = widths
   csv_resize = null
+  pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, csv_data, widths, csv_visible_rows)
 }
 
 // --------------------------------------------------------------------------
