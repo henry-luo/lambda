@@ -2,7 +2,7 @@ import obj: .objects
 import ops: .operators
 import gfx: .graphics
 
-let DEFAULTS = {max_steps: 100000, max_stack: 8192, max_execution_depth: 1024,
+let DEFAULTS = {max_steps: 250000, max_stack: 8192, max_execution_depth: 1024,
     max_dictionary_depth: 128, max_graphics_depth: 128, max_clip_depth: 128, max_objects: 16384,
     max_composite_length: 1048576, max_token_bytes: 1048576, max_procedure_depth: 128, max_scan_objects: 65536,
     max_path_segments: 100000, max_draws: 50000}

@@ -86,6 +86,8 @@ static const RadiantViewCase g_radiant_view_cases[] = {
     {"RadiantViewTest.ReleasesFailedFontFallbackHandles",
      "failed_font_fallback_registry", "test/html/failed_font_fallback_registry.html", nullptr, true},
     {"RadiantViewTest.LoadsEpsAsHeadlessView", "eps", "test/input/eps/vector.eps", nullptr, true},
+    {"RadiantViewTest.LoadsDictionaryPrologEpsAsHeadlessView", "eps_dictionary_prolog",
+     "test/input/eps/dictionary-prolog.eps", nullptr, true},
 };
 
 static const size_t g_radiant_view_case_count =
@@ -904,6 +906,10 @@ TEST(RadiantViewTest, LoadsPdfAsHeadlessView) {
 
 TEST(RadiantViewTest, LoadsEpsAsHeadlessView) {
     test_radiant_view_expect_case(21);
+}
+
+TEST(RadiantViewTest, LoadsDictionaryPrologEpsAsHeadlessView) {
+    test_radiant_view_expect_case(22);
 }
 
 TEST(RadiantViewTest, ReleasesDetachedScriptTextControl) {

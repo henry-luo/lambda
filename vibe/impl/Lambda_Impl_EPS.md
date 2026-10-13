@@ -74,7 +74,7 @@ through `options.limits`; defaults are policy ceilings, not performance claims:
 
 | Limit | Default |
 |---|---:|
-| `max_steps` | 100000 |
+| `max_steps` | 250000 |
 | `max_stack` | 8192 |
 | `max_execution_depth` | 1024 |
 | `max_dictionary_depth`, `max_graphics_depth`, `max_clip_depth` | 128 |
@@ -116,7 +116,7 @@ diagnostics, graphics transforms/clips, local VM restoration and portable SVG.
 |---|---|
 | EPS native parser/scanner/codec tests | 9/9 passed. |
 | PDF parser regressions | 26/26 passed. |
-| EPS script goldens | 6/6 passed under auto and JIT; 6/6 under JIT with forced collection and freed-memory poisoning. |
+| EPS script goldens | 7/7 passed under auto and under JIT with forced collection and freed-memory poisoning. |
 | Build and CLI | `make build` passed; fixture and unknown-extension input converted to standalone SVG; direct EPS layout and PNG rendering passed. Debug allocation tracking reported no leaks. |
 | Radiant dimension lint | `no-int-cast-radiant` passed. |
 
@@ -149,3 +149,29 @@ and passes afterward, including zero retained allocations. Adjacent PDF/SVG
 viewer tests pass; a mixed-case `.EPSI` copy also loads cleanly. The sample was
 checked through the actual GUI viewer with `LAMBDA_AUTO_CLOSE=1` and exited 0.
 `make build` and the Radiant dimension lint pass for this correction.
+
+### Producer dictionary correction
+
+The user-supplied `test/input/sample-1.eps` (553417 bytes, Cairo 1.15.12)
+exposed a guest `dict` allocation defect. Its empty-map branch was written
+`if (...) {}`, which is an empty procedural block and yields null under
+**S16.4.2v2**. Creating the empty map in initializer position restores the
+dictionary's backing value; `begin`, `def`, bound aliases and dictionary
+shadowing then use the ordinary object-store implementation.
+
+This vector artwork completes with 106452 execution steps, 51 guest objects
+and 188 draws. The default step budget is now 250000, with caller-specified
+lower ceilings still enforced. This policy change applies to every input;
+there is no producer or filename dispatch. Fonts/text remain unsupported.
+
+The independently authored `test/input/eps/dictionary-prolog.eps` fixture
+covers empty dictionaries, dictionary-stack shadowing and bound drawing
+aliases. Its script case has a `.txt` golden and its headless viewer case
+checks clean teardown. The user-provided artwork stays outside the authored
+regression corpus.
+
+Verification of this correction passed all seven EPS script cases under auto
+and JIT with forced GC, plus four EPS/PDF/SVG headless viewer cases. The full
+user artwork loads through both headless and GUI viewers and converts to SVG
+with all 188 draws and 10666 cubic curves. The package modules load from source,
+so this correction does not require rebuilding the native executable.

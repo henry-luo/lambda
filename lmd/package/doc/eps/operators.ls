@@ -141,7 +141,9 @@ pub pn dispatch(var m, op) int^ {
     if (op == "array" or op == "string" or op == "dict") {
         let n = args[0]
         let valid = obj.require(m, n >= 0 and n <= m.limits.max_composite_length, "rangecheck or limitcheck: allocation")^
-        let data = if (op == "dict") {} else fill(n, if (op == "string") 0 else null)
+        // S16.4.2v2: an empty pn control body yields null; build the map in value position.
+        let empty_dictionary = {}
+        let data = if (op == "dict") empty_dictionary else fill(n, if (op == "string") 0 else null)
         let value = obj.allocate(m, op, data)^
         push(m.stack, value)
         return 0
