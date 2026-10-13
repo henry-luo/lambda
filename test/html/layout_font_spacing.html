@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Word spacing expressions preserve their computed length</title>
+<style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+div { display: inline-block; font: 20px/1 Ahem; }
+</style>
+<body id="result">
+<div id="sum" style="word-spacing: calc(1ch + 1ch)">A B</div>
+<div id="product" style="word-spacing: calc(0.5 * 2ch)">A B</div>
+<div id="length" style="word-spacing: 40px">A B</div>
+</body>

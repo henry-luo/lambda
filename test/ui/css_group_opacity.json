@@ -1,0 +1,618 @@
+{
+  "name": "Group opacity overlap, nested scope, live restyle and density",
+  "html": "test/ui/css_group_opacity.html",
+  "viewport": {
+    "width": 300,
+    "height": 170
+  },
+  "events": [
+    {
+      "type": "set_device_scale",
+      "scale": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#half"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#group"
+      },
+      "property": "opacity",
+      "equals": "0.5"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 20,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 60,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 100,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#solid"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#group"
+      },
+      "property": "opacity",
+      "equals": "1"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 20,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 60,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 100,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#half"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#group"
+      },
+      "property": "opacity",
+      "equals": "0.5"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 20,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 60,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 100,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nested"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 20,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 189,
+      "max_g": 193,
+      "min_b": 189,
+      "max_b": 193
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 60,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 189,
+      "max_g": 193,
+      "min_b": 189,
+      "max_b": 193
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 100,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 189,
+      "max_g": 193,
+      "min_b": 189,
+      "max_b": 193
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 20,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 60,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 100,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#after",
+        "offset_x": 10,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#half"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#group"
+      },
+      "property": "opacity",
+      "equals": "0.5"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 20,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 60,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 100,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#solid"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#group"
+      },
+      "property": "opacity",
+      "equals": "1"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 20,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 60,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 100,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#half"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#group"
+      },
+      "property": "opacity",
+      "equals": "0.5"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 20,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 60,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 100,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nested"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 20,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 189,
+      "max_g": 193,
+      "min_b": 189,
+      "max_b": 193
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 60,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 189,
+      "max_g": 193,
+      "min_b": 189,
+      "max_b": 193
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 100,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 189,
+      "max_g": 193,
+      "min_b": 189,
+      "max_b": 193
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 20,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 60,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#group",
+        "offset_x": 100,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 126,
+      "max_b": 130
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#after",
+        "offset_x": 10,
+        "offset_y": 25
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    }
+  ]
+}

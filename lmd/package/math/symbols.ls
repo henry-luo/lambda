@@ -64,7 +64,14 @@ let bin_operators = {
     vee: "∨", wedge: "∧", setminus: "∖", wr: "≀",
     amalg: "⨿", land: "∧", lor: "∨",
     // AMS binary operators (boxed family)
-    boxplus: "⊞", boxtimes: "⊠", boxminus: "⊟", boxdot: "⊡"
+    boxplus: "⊞", boxtimes: "⊠", boxminus: "⊟", boxdot: "⊡",
+    // LaTeX's own triangles and diamond
+    triangleleft: "◃", triangleright: "▹", diamond: "⋄",
+    bigtriangleup: "△", bigtriangledown: "▽",
+    // latexsym
+    lhd: "⊲", rhd: "⊳", unlhd: "⊴", unrhd: "⊵",
+    // stmaryrd
+    boxast: "⧆", boxbar: "◫", boxslash: "⧄", boxbslash: "⧅", boxcircle: "⧇", sslash: "⫽"
 }
 
 // ============================================================
@@ -86,7 +93,14 @@ let relations = {
     // AMS relations
     preceq: "⪯", succeq: "⪰", nmid: "∤",
     nleq: "≰", ngeq: "≱", nleqslant: "\uE010", nshortparallel: "\uE007",
-    triangle: "△"
+    triangle: "△", leqslant: "⩽", geqslant: "⩾",
+    // latexsym
+    Join: "⋈", sqsubset: "⊏", sqsupset: "⊐",
+    // mathtools colon relations, composed from bundled glyphs: no bundled face has
+    // ≔, ≕, ⩴ or ∷, and mathtools itself builds them from a colon and a relation
+    vcentcolon: ":", dblcolon: "::", coloneqq: ":=", Coloneqq: "::=", coloneq: ":−", Coloneq: "::−",
+    eqqcolon: "=:", Eqqcolon: "=::", eqcolon: "−:", Eqcolon: "−::", colonapprox: ":≈",
+    Colonapprox: "::≈", colonsim: ":∼", Colonsim: "::∼"
 }
 
 // ============================================================
@@ -115,7 +129,12 @@ let arrows = {
     curvearrowleft: "↶", curvearrowright: "↷",
     leftharpoonup: "↼", rightharpoonup: "⇀",
     leftharpoondown: "↽", rightharpoondown: "⇁",
-    rightsquigarrow: "⇝", leftrightsquigarrow: "↭"
+    rightsquigarrow: "⇝", leftrightsquigarrow: "↭",
+    // latexsym
+    leadsto: "⇝",
+    // stmaryrd
+    shortrightarrow: "→", shortleftarrow: "←", shortuparrow: "↑", shortdownarrow: "↓",
+    Mapsto: "⤇", Mapsfrom: "⤆", Longmapsto: "⟾", Longmapsfrom: "⟽"
 }
 
 // ============================================================
@@ -153,7 +172,15 @@ let misc_symbols = {
     lbrace: "{", rbrace: "}",
     lparen:"(", rparen:")", lbrack:"[", rbrack:"]",
     lgroup:"⟮", rgroup:"⟯", lmoustache:"⎰", rmoustache:"⎱",
-    lvert: "∣", rvert: "∣", lVert: "∥", rVert: "∥"
+    lvert: "∣", rvert: "∣", lVert: "∥", rVert: "∥",
+    square: "□", lozenge: "◊",
+    // latexsym
+    Box: "□", Diamond: "◇", mho: "℧",
+    // stmaryrd
+    lightning: "↯", oblong: "▯", llbracket: "⟦", rrbracket: "⟧",
+    llparenthesis: "⦇", rrparenthesis: "⦈", Lbag: "⟅", Rbag: "⟆",
+    // gensymb's math forms
+    celsius: "℃", ohm: "Ω", micro: "µ", perthousand: "‰"
 }
 
 // ============================================================
@@ -166,8 +193,19 @@ let big_operators = {
     bigcup: "⋃", bigcap: "⋂", bigsqcup: "⊔",
     bigvee: "⋁", bigwedge: "⋀",
     bigoplus: "⨁", bigotimes: "⨂", bigodot: "⨀",
-    biguplus: "⨄"
+    biguplus: "⨄",
+    // stmaryrd
+    bigsqcap: "⨅",
+    // esint
+    ointclockwise: "∲", ointctrclockwise: "∳", varointclockwise: "∲",
+    varointctrclockwise: "∳", fint: "⨏", sqint: "⨖"
 }
+
+// upgreek: \upalpha … \upomega and \Upgamma … \Upomega are the upright letters
+let upright_greek = map([for (k, v at greek_lower, x in ["up" ++ string(k), v]) x] ++
+    [for (k, v at greek_upper, x in ["Up" ++ lower(string(k)), v]) x])
+
+pub fn is_upright(name) => upright_greek[name] != null
 
 // ============================================================
 // Accent commands → combining character or description
@@ -220,11 +258,16 @@ let delim_sizes = {
 // Lookup function: command → Unicode
 // ============================================================
 
+// amssymb commands whose glyph shares a code point with a plain TeX command's glyph
+// (\varnothing and \emptyset are both U+2205): they draw from the AMS face by name,
+// since code-point fallback prefers the plain cmsy shape
+pub let AMS_SHAPES = ["varnothing"]
+
 pub fn lookup_symbol(cmd) {
     // strip leading backslash if present
     let name = if (len(cmd) > 0 and slice(cmd, 0, 1) == "\\") slice(cmd, 1, len(cmd)) else cmd
 
-    greek_lower[name] or greek_upper[name] or
+    greek_lower[name] or greek_upper[name] or upright_greek[name] or
     bin_operators[name] or relations[name] or
     arrows[name] or misc_symbols[name] or
     big_operators[name] or null

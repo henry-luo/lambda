@@ -18099,8 +18099,21 @@ static MIR_reg_t mir_prepare_dense_for_guard(MirTranspiler* mt,
         AstForNode* for_node, NameEntry* counter, AstNode* range_src,
         MIR_reg_t range_start);
 
+// A loop's sources and body are never in tail position: the body runs per item
+// and its values are collected, so a self call there must not become the
+// enclosing function's TCO jump (it returned that call's value and dropped the
+// comprehension).
+struct MirTailPositionOff {
+    MirTranspiler* mt;
+    bool saved;
+    explicit MirTailPositionOff(MirTranspiler* owner)
+        : mt(owner), saved(owner->in_tail_position) { owner->in_tail_position = false; }
+    ~MirTailPositionOff() { mt->in_tail_position = saved; }
+};
+
 static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
         bool result_demanded) {
+    MirTailPositionOff not_tail(mt);
     MirFlowScope flow(mt);
     // Before push_scope: a binding this body widens is declared OUTSIDE the
     // loop, so it must be widened in the enclosing scope where its reads live.

@@ -40,7 +40,8 @@ DomNode* dom_source_parent(DomNode* node) {
 DomElement* dom_parent_element(DomElement* element) {
     DomNode* parent_node = dom_source_parent(element);
     DomElement* parent = parent_node ? parent_node->as_element() : nullptr;
-    if (parent && parent->tag_name &&
+    // style resolution asks for every element's parent; '#' rejects real tags first.
+    if (parent && parent->tag_name && parent->tag_name[0] == '#' &&
         strcmp(parent->tag_name, "#document-fragment") == 0 &&
         parent->shadow_host_element()) {
         // CSS Shadow DOM: a shadow fragment inherits the host's computed style;
@@ -119,6 +120,15 @@ NameId dom_element_html_tag(DomElement* element) {
     // HTML element types use the case-sensitive local name, independent of an XML prefix.
     const char* local = element->local_name();
     return well_known_name_id({local, strlen(local)});
+}
+
+bool dom_element_is_html_tag(DomElement* element, NameId tag) {
+    if (!element || !tag) return false;
+    // the local name rejects nearly every element before the namespace walks
+    // its ancestors; flat-tree and style predicates ask this per ancestor.
+    const char* local = element->local_name();
+    return well_known_name_id({local, strlen(local)}) == tag &&
+        !strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml");
 }
 
 DomNamespacedAttribute* dom_element_namespaced_attributes(DomElement* element) {
@@ -263,7 +273,7 @@ DomElement* dom_shadow_root(DomNode* node) {
 }
 
 static bool dom_is_html_slot(DomElement* element) {
-    return dom_element_html_tag(element) == MARKUP_NAME_SLOT;
+    return dom_element_is_html_tag(element, MARKUP_NAME_SLOT);
 }
 
 bool dom_slot_assignment_matches(DomElement* slot, DomNode* child) {
@@ -285,7 +295,7 @@ DomElement* dom_shadow_first_matching_slot(DomNode* root, const char* name) {
             if (strcmp(candidate ? candidate : "", name ? name : "") == 0) return element;
         }
         bool inert = element && (element->is_synthetic() ||
-            dom_element_html_tag(element) == MARKUP_NAME_TEMPLATE);
+            dom_element_is_html_tag(element, MARKUP_NAME_TEMPLATE));
         node = element && !inert && element->first_child ? element->first_child :
             dom_next_after_subtree(root, node);
     }
@@ -324,27 +334,29 @@ bool dom_node_is_inert(DomNode* node) {
     if (!element && node->parent) element = node->parent->as_element();
     // inert follows flat-tree ancestry, including assigned slots and shadow hosts.
     for (; element; element = dom_flat_tree_parent(element)) {
-        if (!strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml") &&
-            element->get_attribute("inert")) return true;
+        // the attribute is the cheap filter; the namespace walk runs only when it is present.
+        if (element->get_attribute("inert") &&
+            !strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml")) return true;
     }
     return false;
 }
 
 static CssEnum dom_html_direction_state(DomElement* element) {
-    if (!element || strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml"))
-        return CSS_VALUE__UNDEF;
+    if (!element) return CSS_VALUE__UNDEF;
+    // most elements carry no dir attribute; test it before the namespace walk.
     const char* value = dom_element_attribute_value_ns(element, "", "dir");
-    if (!value) return CSS_VALUE__UNDEF;
+    if (!value || strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml"))
+        return CSS_VALUE__UNDEF;
     if (str_ieq_cstr(value, "ltr")) return CSS_VALUE_LTR;
     if (str_ieq_cstr(value, "rtl")) return CSS_VALUE_RTL;
     return str_ieq_cstr(value, "auto") ? CSS_VALUE_AUTO : CSS_VALUE__UNDEF;
 }
 
 bool dom_element_has_directionality_hint(DomElement* element) {
-    if (!element || strcmp(dom_element_namespace_uri(element), "http://www.w3.org/1999/xhtml")) return false;
+    // each test below requires the HTML namespace itself, so none walks it for other elements.
     return dom_html_direction_state(element) != CSS_VALUE__UNDEF ||
-        dom_element_html_tag(element) == MARKUP_NAME_BDI ||
-        (dom_element_html_tag(element) == MARKUP_NAME_INPUT &&
+        dom_element_is_html_tag(element, MARKUP_NAME_BDI) ||
+        (dom_element_is_html_tag(element, MARKUP_NAME_INPUT) &&
          form_input_kind(dom_element_attribute_value_ns(element, "", "type")) == FORM_INPUT_KIND_TEL);
 }
 
@@ -685,7 +697,7 @@ bool dom_document_process_metadata_insertion(DomDocument* document, DomNode* sub
     StrView candidate = {nullptr, 0};
     for (DomNode* node = subtree; node;) {
         DomElement* element = node->as_element();
-        if (dom_element_html_tag(element) == MARKUP_NAME_META) {
+        if (dom_element_is_html_tag(element, MARKUP_NAME_META)) {
             const char* equiv = dom_element_attribute_value_ns(element, "", "http-equiv");
             const char* content = dom_element_attribute_value_ns(element, "", "content");
             if (equiv && str_ieq_cstr(equiv, "content-language") && content && !strchr(content, ',')) {
@@ -696,7 +708,7 @@ bool dom_document_process_metadata_insertion(DomDocument* document, DomNode* sub
             }
         }
         // parser-backed template contents are inert until their detached fragment is materialized.
-        bool inert_template = dom_element_html_tag(element) == MARKUP_NAME_TEMPLATE;
+        bool inert_template = dom_element_is_html_tag(element, MARKUP_NAME_TEMPLATE);
         node = element && !inert_template && element->first_child ? element->first_child :
             dom_next_after_subtree(subtree, node);
     }

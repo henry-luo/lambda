@@ -1,6 +1,7 @@
 #include "page_document.hpp"
 #include "view_tree_css.hpp"
 #include "layout.hpp"
+#include "layout_table.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lib/memtrack.h"
@@ -438,6 +439,11 @@ static const char* flow_space_components[] = {"minimum", "optimum", "maximum", "
 static const char* flow_keep_names[] = {"keep-together", "keep-with-next", "keep-with-previous"};
 static const char* flow_keep_components[] = {"within-line", "within-column", "within-page"};
 
+const char* radiant_flow_trait_component_name(bool space, size_t component) {
+    return component && component <= (space ? 5u : 3u)
+        ? (space ? flow_space_components : flow_keep_components)[component - 1] : nullptr;
+}
+
 bool radiant_flow_trait_key(const char* name, bool* space, size_t* index, size_t* component, const char** base) {
     if (!name) return false;
     for (size_t family = 0; family < 2; family++) {
@@ -465,7 +471,8 @@ static const char* flow_decoration_names[2][2] = {
     {"padding-before.conditionality", "padding-after.conditionality"}
 };
 
-static bool flow_decoration_key(const char* name, size_t* family, size_t* edge) {
+bool radiant_decoration_trait_key(const char* name, size_t* family, size_t* edge) {
+    if (!name) return false;
     for (size_t i = 0; i < 2; i++) for (size_t j = 0; j < 2; j++)
         if (!strcmp(name, flow_decoration_names[i][j])) { *family = i; *edge = j; return true; }
     return false;
@@ -476,6 +483,17 @@ bool radiant_table_column_proportion(const CssValue* value, float* result) {
         value->data.number.value <= 0.0 || value->data.number.value > FLT_MAX) return false;
     *result = (float)value->data.number.value;
     return *result > 0.0f;
+}
+
+bool radiant_table_column_range(const ViewCssStyle* style, size_t next, size_t limit, RadiantTableColumnRange* range) {
+    const RadiantFlowTraits* traits = style->flow_traits.get();
+    range->column = traits && traits->column_number ? traits->column_number - 1 : next;
+    range->property_span = traits && traits->column_property_span ? traits->column_property_span : 1;
+    range->repeat = layout_table_column_span(style->source);
+    if (range->column >= limit || range->repeat - 1 > (limit - 1 - range->column) / range->property_span) return false;
+    // repeated property declarations advance by their qualifying span; auto follows the final start by one.
+    range->next = range->column + (range->repeat - 1) * range->property_span + 1;
+    return true;
 }
 
 bool radiant_decoration_retain(const ViewCssStyle* style, bool padding, bool after) {
@@ -489,9 +507,10 @@ bool radiant_flow_trait_name(const char* name) {
     return name && (!strcmp(name, "line-stacking-strategy") || !strcmp(name, "text-altitude") ||
         !strcmp(name, "text-depth") || !strcmp(name, "area-source") || !strcmp(name, "block-inline-geometry") ||
         !strcmp(name, "start-indent") || !strcmp(name, "end-indent") || !strcmp(name, "column-proportion") || !strcmp(name, "column-number") ||
+        !strcmp(name, "column-property-span") ||
         !strcmp(name, "style-transparent") ||
         !strcmp(name, flow_table_omit_names[0]) || !strcmp(name, flow_table_omit_names[1]) ||
-        flow_decoration_key(name, &index, &component) || radiant_flow_trait_key(name, &space, &index, &component));
+        radiant_decoration_trait_key(name, &index, &component) || radiant_flow_trait_key(name, &space, &index, &component));
 }
 
 bool radiant_text_metrics(const ViewCssStyle* style, float* altitude, float* depth) {
@@ -564,6 +583,7 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
     const char* cell_alignment = nullptr; const char* line_stacking = nullptr;
     const char* area_source = nullptr;
     const char* inline_geometry = nullptr; const char* column_proportion = nullptr; const char* column_number = nullptr;
+    const char* column_property_span = nullptr;
     const char* indents[2] = {}; const char* table_omit[2] = {};
     const char* nominal[2] = {};
     const char* style_transparent = nullptr;
@@ -576,6 +596,7 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
         if (!strcmp(local, "style-transparent")) { style_transparent = value; return true; }
         if (!strcmp(local, "column-proportion")) { column_proportion = value; return true; }
         if (!strcmp(local, "column-number")) { column_number = value; return true; }
+        if (!strcmp(local, "column-property-span")) { column_property_span = value; return true; }
         for (size_t i = 0; i < 2; i++) if (!strcmp(local, flow_table_omit_names[i])) { table_omit[i] = value; return true; }
         if (!strcmp(local, "area-source")) { area_source = value; return true; }
         if (!strcmp(local, "block-inline-geometry")) { inline_geometry = value; return true; }
@@ -583,7 +604,7 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
         if (!strcmp(local, "end-indent")) { indents[1] = value; return true; }
         if (!strcmp(local, "text-altitude")) { nominal[0] = value; return true; }
         if (!strcmp(local, "text-depth")) { nominal[1] = value; return true; }
-        if (flow_decoration_key(local, &index, &component)) { decorations[index][component] = value; return true; }
+        if (radiant_decoration_trait_key(local, &index, &component)) { decorations[index][component] = value; return true; }
         if (!radiant_flow_trait_key(local, &space, &index, &component)) return false;
         (space ? spaces[index][component] : keeps[index][component]) = value; return true;
     });
@@ -617,6 +638,15 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
             traits->column_number = static_cast<uint32_t>(number);
         }
     }
+    if (column_property_span) {
+        if (!strcmp(column_property_span, "inherit")) traits->column_property_span = parent->column_property_span;
+        else {
+            int32_t span = 0;
+            if (!flow_integer(column_property_span, &span) || span < 1 || span > 1000)
+                return fail("column property span requires a positive integer through the HTML colspan limit");
+            traits->column_property_span = static_cast<uint32_t>(span);
+        }
+    }
     if (column_proportion && strcmp(column_proportion, "none")) {
         if (!strcmp(column_proportion, "inherit")) traits->column_proportion = parent->column_proportion;
         else {
@@ -628,10 +658,12 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
     }
     for (size_t i = 0; i < 2; i++) for (size_t j = 0; j < 2; j++) if (const char* value = decorations[i][j]) {
         RadiantDecorationConditionality& policy = traits->decoration[i][j];
-        if (!strcmp(value, "inherit")) policy = parent->decoration[i][j];
-        else if (!strcmp(value, "retain")) policy = RADIANT_DECORATION_RETAIN;
-        else if (!strcmp(value, "discard")) policy = RADIANT_DECORATION_DISCARD;
-        else if (strcmp(value, "css")) return fail("decoration conditionality requires css, discard or retain");
+        if (!strcmp(value, "inherit")) { policy = parent->decoration[i][j]; continue; }
+        // keyword bindings compute at their selected owner before the receiving trait's domain check.
+        const char* keyword = css_value_identifier_name(page_computed_value(tree, style, value));
+        if (keyword && !strcmp(keyword, "retain")) policy = RADIANT_DECORATION_RETAIN;
+        else if (keyword && !strcmp(keyword, "discard")) policy = RADIANT_DECORATION_DISCARD;
+        else if (!keyword || strcmp(keyword, "css")) return fail("decoration conditionality requires css, discard or retain");
     }
     for (size_t i = 0; i < 2; i++) if (const char* value = indents[i]) {
         if (!strcmp(value, "inherit")) continue;

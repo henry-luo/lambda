@@ -1,0 +1,54 @@
+"first and later forms:"
+true
+"plural and case:"
+true
+"glsreset:"
+true
+"loaded entries:"
+true
+"glossary list:"
+true
+"listed only:"
+true
+"locators:"
+true
+"acronym list and toc:"
+true
+"glossary issues:"
+["unsupported-output null"]
+"style issues:"
+["glossary-style-approximation long", "acronym-style-approximation short-long"]
+"acronym uses:"
+true
+"acronym forms:"
+true
+"printonlyused:"
+true
+"acronym issues:"
+[]
+"acronym page option:"
+["unsupported-option withpage"]
+"nomenclature:"
+true
+"nomenclature in toc:"
+true
+"nomencl issues:"
+[]
+"index anchor:"
+true
+"index entries:"
+true
+"one locator per section:"
+true
+"subentry and format:"
+true
+"range:"
+true
+"see:"
+true
+"display and quote:"
+true
+"index issues:"
+[]
+"imakeidx:"
+true

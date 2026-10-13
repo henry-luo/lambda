@@ -15,6 +15,8 @@ typedef struct InputParseOptions {
     int tex_adapter_count;
     const char* const* tex_raw_commands;  // adapter commands whose arguments stay unexpanded
     int tex_raw_command_count;
+    const char* const* tex_chaptered;  // class profiles whose kernel defines \chapter
+    int tex_chaptered_count;
 } InputParseOptions;
 
 #endif

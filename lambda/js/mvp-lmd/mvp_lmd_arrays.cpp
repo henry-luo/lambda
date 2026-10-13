@@ -57,8 +57,8 @@ Item mvp_lmd_sequence_length(Item source) {
     value.set(mvp_lmd_primitive_to_number(value.get()));
     if (item_is_error(value.get())) return value.get();
     double length = it2d(value.get());
-    if (length > UINT32_MAX) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
-    return Item{.item = i2it(isnan(length) || length < 0 ? 0 : (int64_t)trunc(length))};
+    // LengthOfArrayLike uses ToLength; only actual Array allocation is limited to uint32.
+    return Item{.item = i2it(isnan(length) || length < 0 ? 0 : (int64_t)fmin(trunc(length), 9007199254740991.0))};
 }
 Item mvp_lmd_array_species_create(Item source, int64_t length) {
     MvpLmdLibraryState* state = mvp_lmd_program_library();
@@ -95,42 +95,48 @@ Item mvp_lmd_array_species_create(Item source, int64_t length) {
             if (item_is_error(constructor.get())) return constructor.get();
             if (constructor.get().item == ITEM_NULL) constructor.set(Item{.item = ITEM_JS_UNDEFINED});
         }
-        if (constructor.get().item != ITEM_JS_UNDEFINED && constructor.get().item != state->values[LMD_LIBRARY_ARRAY].item)
-            return mvp_lmd_fail(mvp_lmd_is_constructor(constructor.get()) ? LMD_MVP_CAPABILITY : LMD_MVP_TYPE, 0);
+        if (constructor.get().item != ITEM_JS_UNDEFINED && constructor.get().item != state->values[LMD_LIBRARY_ARRAY].item) {
+            if (!mvp_lmd_is_constructor(constructor.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+            Item argument = {.item = i2it(length)};
+            return mvp_lmd_class_invoke(constructor.get(), Item{.item = ITEM_JS_UNDEFINED}, &argument, 1, constructor.get());
+        }
     }
     return mvp_lmd_array_new(length);
 }
 extern "C" Item mvp_lmd_array_visit(Item owner, Item* args, int64_t count, int64_t method) {
     if (owner.item == ITEM_NULL || owner.item == ITEM_JS_UNDEFINED)
         return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-    TypeId type = get_type_id(owner);
-    bool reduce = method == LMD_METHOD_REDUCE, map = method == LMD_METHOD_ARRAY_MAP, filter = method == LMD_METHOD_FILTER;
+    bool backwards = method == LMD_METHOD_REDUCE_RIGHT ||
+        method == LMD_METHOD_FIND_LAST || method == LMD_METHOD_FIND_LAST_INDEX;
+    bool reduce = method == LMD_METHOD_REDUCE || method == LMD_METHOD_REDUCE_RIGHT;
+    bool map = method == LMD_METHOD_ARRAY_MAP, filter = method == LMD_METHOD_FILTER;
+    bool find_index = method == LMD_METHOD_FIND_INDEX || method == LMD_METHOD_FIND_LAST_INDEX;
+    bool find = method == LMD_METHOD_FIND || method == LMD_METHOD_FIND_LAST || find_index;
     RootFrame roots(8);
     if (!roots.valid()) return ItemError;
     Rooted<Item> source(roots, owner), callback(roots, count ? args[0] : Item{.item = ITEM_JS_UNDEFINED}), self(roots, !reduce && count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}),
         output(roots, reduce && count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}), value(roots, ItemNull),
         key(roots, ItemNull), mapped(roots, ItemNull), length_value(roots, ItemNull);
+    if (!mvp_lmd_is_object(source.get())) source.set(mvp_lmd_box_primitive(source.get()));
+    if (item_is_error(source.get())) return source.get();
     length_value.set(mvp_lmd_sequence_length(source.get()));
     if (item_is_error(length_value.get())) return length_value.get();
     int64_t length = it2i(length_value.get());
     if (!mvp_lmd_is_callable(callback.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (method == LMD_METHOD_FLAT_MAP) {
+        // the visitor's roots retain this borrowed pair through species and mapper reentry.
+        Item mapping[] = {callback.get(), self.get()};
+        return mvp_lmd_array_flatten(source.get(), 1, length, mapping);
+    }
     if (map || filter) output.set(mvp_lmd_array_species_create(source.get(), map ? length : 0));
     if (item_is_error(output.get())) return output.get();
     bool initialized = count > 1;
     uint64_t value_home = 0, result_home = 0;
-    for (int64_t index = 0; index < length; index++) {
-        if (type == LMD_TYPE_ARRAY) {
-            value.set(mvp_lmd_array_index_property(source.get(), index, ItemNull, LMD_PROP_PRESENT));
-            if (value.get().item == ITEM_JS_DELETED_SENTINEL) continue;
-        } else if (type == LMD_TYPE_STRING) value.set(mvp_lmd_string_at(source.get(), index, LMD_STRING_CHAR));
-        else {
-            key.set(mvp_lmd_number_to_string(index));
-            if (item_is_error(key.get())) return key.get();
-            Item present = mvp_lmd_class_property(source.get(), key.get(), ItemNull, LMD_PROP_HAS, NULL);
-            if (item_is_error(present)) return present;
-            if (!mvp_lmd_truthy(present)) continue;
-            value.set(mvp_lmd_class_property(source.get(), key.get(), ItemNull, LMD_PROP_GET, NULL));
-        }
+    int64_t destination = 0;
+    for (int64_t visited = 0; visited < length; visited++) {
+        int64_t index = backwards ? length - visited - 1 : visited;
+        value.set(mvp_lmd_array_index_property(source.get(), index, ItemNull, find ? LMD_PROP_GET : LMD_PROP_PRESENT));
+        if (value.get().item == ITEM_JS_DELETED_SENTINEL) continue;
         value.set(lambda_item_adopt_scalar_home(value.get(), &value_home));
         if (item_is_error(value.get())) return value.get();
         if (reduce && !initialized) {
@@ -142,22 +148,29 @@ extern "C" Item mvp_lmd_array_visit(Item owner, Item* args, int64_t count, int64
         mapped.set(mvp_lmd_class_invoke(callback.get(), self.get(), arguments, argc, Item{.item = ITEM_JS_UNDEFINED}));
         if (item_is_error(mapped.get())) return mapped.get();
         if (method == LMD_METHOD_SOME && mvp_lmd_truthy(mapped.get())) return Item{.item = ITEM_TRUE};
+        if (method == LMD_METHOD_EVERY && !mvp_lmd_truthy(mapped.get())) return Item{.item = ITEM_FALSE};
+        if (find && mvp_lmd_truthy(mapped.get())) return find_index ? Item{.item = i2it(index)} :
+            lambda_item_uses_scalar_home(value.get()) ? push_d(it2d(value.get())) : value.get();
         if (reduce) output.set(lambda_item_adopt_scalar_home(mapped.get(), &result_home));
         if (map || (filter && mvp_lmd_truthy(mapped.get()))) {
-            Item stored = mvp_lmd_array_store(output.get(), map ? index : output.get().array->length, map ? mapped.get() : value.get());
+            // species may return an ordinary object or a proxy; create an own data property.
+            Item stored = mvp_lmd_array_index_property(output.get(), map ? index : destination++,
+                map ? mapped.get() : value.get(), LMD_PROP_CREATE_DATA);
             if (item_is_error(stored)) return stored;
         }
     }
     if (reduce && !initialized) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     return reduce ? lambda_item_uses_scalar_home(output.get()) ? push_d(it2d(output.get())) : output.get() :
-        method == LMD_METHOD_SOME ? Item{.item = ITEM_FALSE} : output.get();
+        method == LMD_METHOD_SOME ? Item{.item = ITEM_FALSE} : method == LMD_METHOD_EVERY ? Item{.item = ITEM_TRUE} :
+        find_index ? Item{.item = i2it(-1)} : output.get();
 }
 extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_t method) {
-    if (!mvp_lmd_is_object(owner)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     // methods allocate an output only when their result needs one.
     Rooted<Item> target(roots, owner), result(roots, ItemNull), current(roots, ItemNull);
+    if (!mvp_lmd_is_object(target.get())) target.set(mvp_lmd_box_primitive(target.get()));
+    if (item_is_error(target.get())) return target.get();
     if (method == LMD_METHOD_ARRAY_STRING) {
         if (!mvp_lmd_program_library()) return mvp_lmd_array_to_string(target.get(), Item{.item = ITEM_JS_UNDEFINED});
         Item key = {.item = s2it(heap_create_name("join", 4))};
@@ -198,10 +211,12 @@ extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_
         Item resized = index_property(-1, Item{.item = i2it(length ? length - 1 : 0)}, LMD_PROP_SET | LMD_PROP_STRICT);
         return item_is_error(resized) ? resized : lambda_item_uses_scalar_home(current.get()) ? push_d(it2d(current.get())) : current.get();
     }
-    if (method == LMD_METHOD_FILL || method == LMD_METHOD_SLICE || method == LMD_METHOD_ARRAY_INDEX_OF || method == LMD_METHOD_INCLUDES) {
-        if (!length && (method == LMD_METHOD_ARRAY_INDEX_OF || method == LMD_METHOD_INCLUDES))
+    if (method == LMD_METHOD_FILL || method == LMD_METHOD_SLICE || method == LMD_METHOD_ARRAY_INDEX_OF ||
+            method == LMD_METHOD_INCLUDES || method == LMD_METHOD_LAST_INDEX_OF) {
+        bool backwards = method == LMD_METHOD_LAST_INDEX_OF;
+        if (!length && (method == LMD_METHOD_ARRAY_INDEX_OF || method == LMD_METHOD_INCLUDES || backwards))
             return Item{.item = method == LMD_METHOD_INCLUDES ? ITEM_FALSE : i2it(-1)};
-        int64_t first = 0, last = length;
+        int64_t first = backwards ? length - 1 : 0, last = length;
         int start_arg = method == LMD_METHOD_SLICE ? 0 : 1, end_arg = method == LMD_METHOD_FILL ? 2 : 1;
         for (int i = 0; i < 2; i++) {
             if (i && method != LMD_METHOD_FILL && method != LMD_METHOD_SLICE) break;
@@ -210,7 +225,9 @@ extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_
             current.set(mvp_lmd_primitive_to_number(args[arg]));
             if (item_is_error(current.get())) return current.get();
             double position = it2d(current.get()); position = isnan(position) ? 0 : trunc(position);
-            int64_t relative = position < 0 ? (int64_t)fmax(length + position, 0) : (int64_t)fmin(position, length);
+            int64_t relative = backwards ? position < 0 ? (int64_t)fmax(length + position, -1) :
+                (int64_t)fmin(position, length - 1) :
+                position < 0 ? (int64_t)fmax(length + position, 0) : (int64_t)fmin(position, length);
             if (i) last = relative; else first = relative;
         }
         if (method == LMD_METHOD_SLICE) {
@@ -219,7 +236,7 @@ extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_
         }
         // only writes need a chain proof; reads use the existing present-element fast path.
         storage = method == LMD_METHOD_FILL && mvp_lmd_array_indices_use_own_storage(target.get()) ? LMD_PROP_OWN_STORAGE : 0;
-        for (int64_t i = first; i < last; i++) {
+        for (int64_t i = first; backwards ? i >= 0 : i < last; i += backwards ? -1 : 1) {
             if (method == LMD_METHOD_FILL) {
                 Item status = index_property(i, count ? args[0] : Item{.item = ITEM_JS_UNDEFINED}, LMD_PROP_SET | LMD_PROP_STRICT);
                 if (item_is_error(status)) return status;
@@ -230,15 +247,20 @@ extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_
             if (item_is_error(current.get())) return current.get();
             if (current.get().item == ITEM_JS_DELETED_SENTINEL) continue;
             if (method == LMD_METHOD_SLICE) {
-                Item stored = mvp_lmd_array_store(result.get(), i - first, current.get());
+                Item stored = mvp_lmd_array_index_property(result.get(), i - first, current.get(), LMD_PROP_CREATE_DATA);
                 if (item_is_error(stored)) return stored;
             } else {
                 Item sought = count ? args[0] : Item{.item = ITEM_JS_UNDEFINED};
                 bool equal = mvp_lmd_same_value_zero(current.get(), sought);
-                if (method == LMD_METHOD_ARRAY_INDEX_OF && get_type_id(current.get()) == LMD_TYPE_FLOAT)
+                if (method != LMD_METHOD_INCLUDES && get_type_id(current.get()) == LMD_TYPE_FLOAT)
                     equal &= !isnan(it2d(current.get()));
                 if (equal) return Item{.item = method == LMD_METHOD_INCLUDES ? ITEM_TRUE : i2it(i)};
             }
+        }
+        if (method == LMD_METHOD_SLICE) {
+            Item resized = mvp_lmd_array_index_property(result.get(), -1, Item{.item = i2it(last > first ? last - first : 0)},
+                LMD_PROP_SET | LMD_PROP_STRICT);
+            if (item_is_error(resized)) return resized;
         }
         return method == LMD_METHOD_FILL ? target.get() : method == LMD_METHOD_SLICE ? result.get() :
             Item{.item = method == LMD_METHOD_INCLUDES ? ITEM_FALSE : i2it(-1)};
@@ -283,9 +305,10 @@ extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_
             lambda_item_uses_scalar_home(value) ? push_d(it2d(value)) : value;
     }
     if (method == LMD_METHOD_CONCAT || method == LMD_METHOD_TO_REVERSED) {
-        result.set(method == LMD_METHOD_CONCAT ? mvp_lmd_array_species_create(target.get(), 0) : mvp_lmd_array_new(0));
+        result.set(method == LMD_METHOD_CONCAT ? mvp_lmd_array_species_create(target.get(), 0) : mvp_lmd_array_new(length));
         if (item_is_error(result.get())) return result.get();
         if (method == LMD_METHOD_TO_REVERSED) count = 0;
+        int64_t destination = 0;
         for (int64_t i = -1; i < count; i++) {
             current.set(i < 0 ? target.get() : args[i]);
             Item array = {.item = ITEM_JS_UNDEFINED};
@@ -302,7 +325,7 @@ extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_
                 spread ? mvp_lmd_sequence_length(current.get()) : Item{.item = i2it(1)};
             if (item_is_error(extent)) return extent;
             int64_t length = it2i(extent);
-            if (length > UINT32_MAX - result.get().array->length) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+            if (length > 9007199254740991LL - destination) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
             for (int64_t j = 0; j < length; j++) {
                 int64_t index = method == LMD_METHOD_TO_REVERSED ? length - j - 1 : j;
                 Item value = spread ? mvp_lmd_array_index_property(current.get(), index, ItemNull,
@@ -310,9 +333,15 @@ extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_
                 if (item_is_error(value)) return value;
                 if (method == LMD_METHOD_TO_REVERSED && value.item == ITEM_JS_DELETED_SENTINEL)
                     value.item = ITEM_JS_UNDEFINED;
-                Item stored = mvp_lmd_array_store(result.get(), result.get().array->length, value);
+                Item stored = value.item == ITEM_JS_DELETED_SENTINEL ? ItemNull :
+                    mvp_lmd_array_index_property(result.get(), destination, value, LMD_PROP_CREATE_DATA);
                 if (item_is_error(stored)) return stored;
+                destination++;
             }
+        }
+        if (method == LMD_METHOD_CONCAT) {
+            Item resized = mvp_lmd_array_index_property(result.get(), -1, Item{.item = i2it(destination)}, LMD_PROP_SET | LMD_PROP_STRICT);
+            if (item_is_error(resized)) return resized;
         }
         return result.get();
     }
@@ -332,7 +361,7 @@ extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_
             removed = isnan(amount) ? 0 : (int64_t)fmin(fmax(trunc(amount), 0), removed);
         }
     }
-    if (inserted > UINT32_MAX - (length - removed)) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
+    if (inserted > 9007199254740991LL - (length - removed)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     if (method == LMD_METHOD_SPLICE) {
         result.set(mvp_lmd_array_species_create(target.get(), removed));
         if (item_is_error(result.get())) return result.get();
@@ -346,8 +375,13 @@ extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_
         Item value = index_property(start + i, ItemNull,
             method == LMD_METHOD_SHIFT ? LMD_PROP_GET : LMD_PROP_PRESENT);
         if (item_is_error(value)) return value;
-        Item stored = mvp_lmd_array_store(result.get(), i, value);
+        Item stored = value.item == ITEM_JS_DELETED_SENTINEL ? ItemNull :
+            mvp_lmd_array_index_property(result.get(), i, value, LMD_PROP_CREATE_DATA);
         if (item_is_error(stored)) return stored;
+    }
+    if (method == LMD_METHOD_SPLICE) {
+        Item resized = mvp_lmd_array_index_property(result.get(), -1, Item{.item = i2it(removed)}, LMD_PROP_SET | LMD_PROP_STRICT);
+        if (item_is_error(resized)) return resized;
     }
     if (inserted > removed) {
         for (int64_t i = length; i > start + removed;) {

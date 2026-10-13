@@ -46,7 +46,7 @@ static uint64_t key_hash(Item key) {
     }
     return hashmap_sip(&key.item, sizeof(key.item), 2, 0);
 }
-bool mvp_lmd_same_value_zero(Item a, Item b) {
+extern "C" int64_t mvp_lmd_same_value_zero(Item a, Item b) {
     if (a.item == b.item) return true;
     // distinct packed integers need no double conversion for SameValueZero.
     if (get_type_id(a) == LMD_TYPE_INT && get_type_id(b) == LMD_TYPE_INT) return false;
@@ -145,31 +145,44 @@ static ShapeEntry* own_field(Map* map, String* key) {
     return typemap_hash_lookup_key((TypeMap*)map->type, key);
 }
 const MvpLmdBuiltinMethod mvp_lmd_builtin_methods[] = {
-        {"get", LMD_TYPE_MAP, 1}, {"set", LMD_TYPE_MAP, 2}, {"has", LMD_TYPE_MAP, 3},
-        {"delete", LMD_TYPE_MAP, 4}, {"clear", LMD_TYPE_MAP, 5}, {"entries", LMD_TYPE_MAP, 6},
-        {"keys", LMD_TYPE_MAP, 7}, {"values", LMD_TYPE_MAP, 8},
+        {"get", LMD_TYPE_MAP, 1}, {"set", LMD_TYPE_MAP, 2, 2}, {"has", LMD_TYPE_MAP, 3},
+        {"delete", LMD_TYPE_MAP, 4}, {"clear", LMD_TYPE_MAP, 5, 0}, {"entries", LMD_TYPE_MAP, 6, 0},
+        {"keys", LMD_TYPE_MAP, 7, 0}, {"values", LMD_TYPE_MAP, 8, 0},
         {"fill", LMD_TYPE_ARRAY, LMD_METHOD_FILL}, {"push", LMD_TYPE_ARRAY, LMD_METHOD_PUSH},
-        {"pop", LMD_TYPE_ARRAY, LMD_METHOD_POP}, {"join", LMD_TYPE_ARRAY, LMD_METHOD_JOIN},
-        {"slice", LMD_TYPE_ARRAY, LMD_METHOD_SLICE}, {"forEach", LMD_TYPE_ARRAY, LMD_METHOD_FOREACH},
+        {"pop", LMD_TYPE_ARRAY, LMD_METHOD_POP, 0}, {"join", LMD_TYPE_ARRAY, LMD_METHOD_JOIN},
+        {"slice", LMD_TYPE_ARRAY, LMD_METHOD_SLICE, 2}, {"forEach", LMD_TYPE_ARRAY, LMD_METHOD_FOREACH},
         {"map", LMD_TYPE_ARRAY, LMD_METHOD_ARRAY_MAP},
         {"filter", LMD_TYPE_ARRAY, LMD_METHOD_FILTER}, {"indexOf", LMD_TYPE_ARRAY, LMD_METHOD_ARRAY_INDEX_OF},
-        {"reverse", LMD_TYPE_ARRAY, LMD_METHOD_REVERSE}, {"sort", LMD_TYPE_ARRAY, LMD_METHOD_SORT},
-        {"flat", LMD_TYPE_ARRAY, LMD_METHOD_FLAT}, {"reduce", LMD_TYPE_ARRAY, LMD_METHOD_REDUCE},
+        {"reverse", LMD_TYPE_ARRAY, LMD_METHOD_REVERSE, 0}, {"sort", LMD_TYPE_ARRAY, LMD_METHOD_SORT},
+        {"flat", LMD_TYPE_ARRAY, LMD_METHOD_FLAT, 0}, {"reduce", LMD_TYPE_ARRAY, LMD_METHOD_REDUCE},
         {"some", LMD_TYPE_ARRAY, LMD_METHOD_SOME}, {"includes", LMD_TYPE_ARRAY, LMD_METHOD_INCLUDES},
-        {"toString", LMD_TYPE_ARRAY, LMD_METHOD_ARRAY_STRING},
-        {"concat", LMD_TYPE_ARRAY, LMD_METHOD_CONCAT}, {"splice", LMD_TYPE_ARRAY, LMD_METHOD_SPLICE},
+        {"toString", LMD_TYPE_ARRAY, LMD_METHOD_ARRAY_STRING, 0},
+        {"concat", LMD_TYPE_ARRAY, LMD_METHOD_CONCAT}, {"splice", LMD_TYPE_ARRAY, LMD_METHOD_SPLICE, 2},
         {"unshift", LMD_TYPE_ARRAY, LMD_METHOD_UNSHIFT},
-        {"shift", LMD_TYPE_ARRAY, LMD_METHOD_SHIFT},
-        {"toReversed", LMD_TYPE_ARRAY, LMD_METHOD_TO_REVERSED},
+        {"shift", LMD_TYPE_ARRAY, LMD_METHOD_SHIFT, 0},
+        {"toReversed", LMD_TYPE_ARRAY, LMD_METHOD_TO_REVERSED, 0},
         {"at", LMD_TYPE_ARRAY, LMD_METHOD_AT},
+        {"every", LMD_TYPE_ARRAY, LMD_METHOD_EVERY}, {"find", LMD_TYPE_ARRAY, LMD_METHOD_FIND},
+        {"findIndex", LMD_TYPE_ARRAY, LMD_METHOD_FIND_INDEX}, {"reduceRight", LMD_TYPE_ARRAY, LMD_METHOD_REDUCE_RIGHT},
+        {"lastIndexOf", LMD_TYPE_ARRAY, LMD_METHOD_LAST_INDEX_OF},
+        {"flatMap", LMD_TYPE_ARRAY, LMD_METHOD_FLAT_MAP},
+        {"findLast", LMD_TYPE_ARRAY, LMD_METHOD_FIND_LAST},
+        {"findLastIndex", LMD_TYPE_ARRAY, LMD_METHOD_FIND_LAST_INDEX},
         {"charAt", LMD_TYPE_STRING, LMD_METHOD_CHAR_AT}, {"charCodeAt", LMD_TYPE_STRING, LMD_METHOD_CODE_AT},
         {"repeat", LMD_TYPE_STRING, LMD_METHOD_REPEAT},
-        {"substring", LMD_TYPE_STRING, LMD_METHOD_SUBSTRING}, {"slice", LMD_TYPE_STRING, LMD_METHOD_STRING_SLICE},
-        {"split", LMD_TYPE_STRING, LMD_METHOD_SPLIT}, {"indexOf", LMD_TYPE_STRING, LMD_METHOD_INDEX_OF},
-        {"startsWith", LMD_TYPE_STRING, LMD_METHOD_STARTS_WITH}, {"toUpperCase", LMD_TYPE_STRING, LMD_METHOD_UPPER},
+        {"substring", LMD_TYPE_STRING, LMD_METHOD_SUBSTRING, 2}, {"slice", LMD_TYPE_STRING, LMD_METHOD_STRING_SLICE, 2},
+        {"split", LMD_TYPE_STRING, LMD_METHOD_SPLIT, 2}, {"indexOf", LMD_TYPE_STRING, LMD_METHOD_INDEX_OF},
+        {"startsWith", LMD_TYPE_STRING, LMD_METHOD_STARTS_WITH}, {"toUpperCase", LMD_TYPE_STRING, LMD_METHOD_UPPER, 0},
         {"endsWith", LMD_TYPE_STRING, LMD_METHOD_ENDS_WITH}, {"padStart", LMD_TYPE_STRING, LMD_METHOD_PAD_START},
-        {"match", LMD_TYPE_STRING, LMD_METHOD_MATCH}, {"replace", LMD_TYPE_STRING, LMD_METHOD_REPLACE},
-        {"toLowerCase", LMD_TYPE_STRING, LMD_METHOD_LOWER}, {"toLocaleLowerCase", LMD_TYPE_STRING, LMD_METHOD_LOWER},
+        {"match", LMD_TYPE_STRING, LMD_METHOD_MATCH}, {"replace", LMD_TYPE_STRING, LMD_METHOD_REPLACE, 2},
+        {"toLowerCase", LMD_TYPE_STRING, LMD_METHOD_LOWER, 0}, {"toLocaleLowerCase", LMD_TYPE_STRING, LMD_METHOD_LOWER, 0},
+        {"concat", LMD_TYPE_STRING, LMD_METHOD_STRING_CONCAT},
+        {"trim", LMD_TYPE_STRING, LMD_METHOD_TRIM, 0}, {"trimStart", LMD_TYPE_STRING, LMD_METHOD_TRIM_START, 0},
+        {"trimEnd", LMD_TYPE_STRING, LMD_METHOD_TRIM_END, 0},
+        {"trimLeft", LMD_TYPE_STRING, LMD_METHOD_TRIM_START, 0}, {"trimRight", LMD_TYPE_STRING, LMD_METHOD_TRIM_END, 0},
+        {"codePointAt", LMD_TYPE_STRING, LMD_METHOD_CODE_POINT_AT}, {"at", LMD_TYPE_STRING, LMD_METHOD_STRING_AT},
+        {"includes", LMD_TYPE_STRING, LMD_METHOD_STRING_INCLUDES}, {"padEnd", LMD_TYPE_STRING, LMD_METHOD_PAD_END},
+        {"lastIndexOf", LMD_TYPE_STRING, LMD_METHOD_STRING_LAST_INDEX_OF},
         {"toFixed", LMD_TYPE_FLOAT, LMD_METHOD_TO_FIXED},
         {"toString", LMD_TYPE_FLOAT, LMD_METHOD_NUMBER_STRING},
         {"toString", LMD_TYPE_DECIMAL, LMD_METHOD_BIGINT_STRING}};
@@ -280,7 +293,8 @@ extern "C" Item mvp_lmd_array_index_property(Item owner, int64_t index, Item val
     bool own_storage = operation & LMD_PROP_OWN_STORAGE;
     operation &= ~LMD_PROP_OWN_STORAGE;
     int64_t op = operation & ~LMD_PROP_STRICT;
-    if (get_type_id(owner) == LMD_TYPE_ARRAY) {
+    // 2^32-1 and larger integer keys are ordinary named properties, never array indices.
+    if (get_type_id(owner) == LMD_TYPE_ARRAY && index < UINT32_MAX) {
         if (op == LMD_PROP_GET || op == LMD_PROP_PRESENT || op == LMD_PROP_HAS || op == LMD_PROP_OWN) {
             if (index == -1) return op == LMD_PROP_HAS || op == LMD_PROP_OWN ? Item{.item = ITEM_TRUE} : Item{.item = i2it(owner.array->length)};
             Item element = mvp_lmd_array_own_item(owner.array, index);
@@ -332,6 +346,21 @@ extern "C" Item mvp_lmd_property_get(Item owner, Item name, int64_t callee) {
     TypeId tid = get_type_id(owner);
     if (tid == LMD_TYPE_ARRAY) return mvp_lmd_array_property(owner, name, ItemNull,
         callee ? LMD_PROP_CALLEE : LMD_PROP_GET, owner);
+    if (tid == LMD_TYPE_STRING || tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL ||
+            tid == LMD_TYPE_DECIMAL || tid == LMD_TYPE_SYMBOL) {
+        MvpLmdLibraryState* state = mvp_lmd_program_library();
+        if (state && state->primitives) {
+            if (tid == LMD_TYPE_STRING) {
+                int64_t index = mvp_lmd_string_key(name.get_string());
+                if (index == -1) return Item{.item = i2it(utf8_to_utf16_length(owner.get_string()->chars, owner.get_string()->len))};
+                if (index >= 0) return mvp_lmd_string_at(owner, index, LMD_STRING_INDEX);
+            }
+            int kind = tid == LMD_TYPE_STRING ? LMD_PRIMITIVE_STRING : tid == LMD_TYPE_BOOL ? LMD_PRIMITIVE_BOOLEAN :
+                tid == LMD_TYPE_DECIMAL ? LMD_PRIMITIVE_BIGINT : LMD_PRIMITIVE_NUMBER;
+            Item prototype = mvp_lmd_class_values(tid == LMD_TYPE_SYMBOL ? &state->symbol : &state->primitives[kind])[1];
+            return mvp_lmd_property_with_receiver(prototype, name, ItemNull, LMD_PROP_GET, owner);
+        }
+    }
     if (tid == LMD_TYPE_ARRAY || tid == LMD_TYPE_STRING || tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_DECIMAL) {
         int method = mvp_lmd_builtin_method(name.get_string(), tid == LMD_TYPE_INT ? LMD_TYPE_FLOAT : tid);
         if (method) return callee ? Item{.item = mvp_lmd_method_token(method)} : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
@@ -690,7 +719,14 @@ extern "C" Item mvp_lmd_define_properties(Item owner, Item descriptors) {
     if (!roots.valid()) return ItemError;
     Rooted<Item> object(roots, owner), input(roots, descriptors), keys(roots, ItemNull);
     Rooted<Item> pending(roots, ItemNull), descriptor(roots, ItemNull), key(roots, ItemNull);
-    if (!mvp_lmd_property_map(object.get()) && !mvp_lmd_is_proxy(object.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    // lazy callable metadata is independent of whether the target is an object.
+    if (!mvp_lmd_is_object(object.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    input.set(mvp_lmd_box_primitive(input.get()));
+    if (item_is_error(input.get())) return input.get();
+    if (get_type_id(input.get()) == LMD_TYPE_FUNC) {
+        Item status = mvp_lmd_function_prepare(input.get());
+        if (item_is_error(status)) return status;
+    }
     keys.set(mvp_lmd_object_project(input.get(), 5));
     if (item_is_error(keys.get())) return keys.get();
     pending.set(mvp_lmd_array_new(0));

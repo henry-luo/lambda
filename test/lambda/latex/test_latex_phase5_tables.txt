@@ -1,0 +1,72 @@
+"single rule:"
+true
+"double rule and new type:"
+true
+"new type with argument:"
+true
+"preamble issues:"
+[]
+"column color:"
+true
+"row over column:"
+true
+"cell over row:"
+true
+"multicolumn cell color:"
+true
+"rule colors:"
+true
+"colortbl issues:"
+["rule-separation-color-approximation doublerulesepcolor"]
+"xcolor table loads colortbl:"
+true
+"hhline segments:"
+true
+"hhline repeat:"
+true
+"dcolumn grid:"
+true
+"dcolumn comma:"
+true
+"dcolumn issues:"
+[]
+"tnote:"
+true
+"wrapper:"
+true
+"notes:"
+true
+"para notes:"
+true
+"threeparttable issues:"
+[]
+"adjustbox frame:"
+true
+"adjustbox environment:"
+true
+"adjustbox image:"
+true
+"adjustbox issues:"
+["transform-approximation adjustbox", "unsupported-output null"]
+"pages:"
+true
+"blank page:"
+true
+"scaled:"
+true
+"pdfpages issues:"
+["pdfpages-layout-approximation nup"]
+"autotabular:"
+true
+"reader rows:"
+true
+"rows only:"
+true
+"filter:"
+true
+"respect all:"
+true
+"autobooktabular:"
+true
+"csvsimple issues:"
+[]

@@ -222,7 +222,7 @@ static bool layout_grid_anonymous_text_content(
             layout_flow_node(lycon, child);
         }
     }
-    if (!lycon->line.is_line_start) line_break(lycon);
+    if (!lycon->line.is_line_start) line_break(lycon, true);
 
     float content_height = max(lycon->block.advance_y, 0.0f);
     if (layout_axis_has_given_size(grid_container, false)) {

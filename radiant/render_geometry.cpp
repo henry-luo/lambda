@@ -1,5 +1,23 @@
 #include "render.hpp"
 
+// shared capture geometry must not depend on the raster filter/background painters.
+float render_box_blur_half_width(float blur_radius) {
+    if (blur_radius < 1.0f) return 0.0f;
+    return fmaxf(1.0f, roundf(0.5f * (-1.0f + sqrtf(1.0f + blur_radius * blur_radius))));
+}
+
+float render_filter_blur_support(float physical_sigma) {
+#ifdef __APPLE__
+    float width = ceilf(physical_sigma * 2.0f);
+    if (width < 1.0f) width = 1.0f;
+    if (fmodf(width, 2.0f) == 0.0f) width += 1.0f;
+    return 3.0f * (width - 1.0f) * 0.5f;
+#else
+    return 3.0f * render_box_blur_half_width(physical_sigma * 2.0f);
+#endif
+}
+
+
 RadiantRadialGeometry radiant_radial_gradient_geometry(const RadialGradient* gradient, Rect rect) {
     RadiantGradientCenter center = radiant_gradient_center(gradient, rect);
     float x = center.x - rect.x, y = center.y - rect.y;
@@ -122,13 +140,15 @@ Rect render_geometry_outer_shadow_rect(Rect border_box, float offset_x,
             max(0.0f, border_box.height + 2.0f * spread)};
 }
 
-float render_geometry_filter_effect_expand(const FilterProp* filter) {
+float render_geometry_filter_effect_expand(const FilterProp* filter, float density) {
     if (!filter || !filter->functions) return 0.0f;
+    if (!(density > 0.0f) || !isfinite(density)) density = 1.0f;
     float expand = 0.0f;
     FilterFunction* ff = filter->functions;
     while (ff) {
         if (ff->type == FILTER_BLUR) {
-            float blur_expand = ff->params.blur_radius * 2.0f;
+            // three box passes reach beyond two sigma; use their actual destination-density support.
+            float blur_expand = render_filter_blur_support(ff->params.blur_radius * density) / density;
             if (blur_expand > expand) expand = blur_expand;
         } else if (ff->type == FILTER_DROP_SHADOW) {
             float shadow_expand =
@@ -142,12 +162,12 @@ float render_geometry_filter_effect_expand(const FilterProp* filter) {
     return expand;
 }
 
-float render_geometry_block_visual_overflow(const ViewBlock* block) {
+float render_geometry_block_visual_overflow(const ViewBlock* block, float density) {
     if (!block) return 0.0f;
 
     float overflow = 0.0f;
     if (block->filter_prop()) {
-        float filter_overflow = render_geometry_filter_effect_expand(block->filter_prop());
+        float filter_overflow = render_geometry_filter_effect_expand(block->filter_prop(), density);
         if (filter_overflow > overflow) overflow = filter_overflow;
     }
     if (block->bound && block->boundary()->box_shadow) {

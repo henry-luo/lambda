@@ -131,6 +131,78 @@ TEST(ClipGeometry, PaintContainmentClipsWithoutAllocatingAScrollPane) {
     block->blk = nullptr; block->bound = nullptr;
 }
 
+TEST(TextInkBounds, DirtyAndViewportCullingPreserveOffBoxInkAndRestoreState) {
+    for (float density : {1.0f, 2.0f}) {
+        FontContextConfig config = {}; config.pixel_ratio = density;
+        FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+        FontStyleDesc description = {"Arial", 40, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+        char family[] = "Arial";
+        FontProp style = FONT_PROP_DEFAULT; style.family = lam::up(family); style.font_size = 40;
+        style.font_handle = lam::counted(font_resolve(fonts, &description)); ASSERT_NE(style.font_handle, nullptr);
+        UiContext ui = {}; ui.font_ctx = lam::up(fonts); ui.device_scale = density;
+        DomElement parent = {}, owner = {};
+        parent.node_type = owner.node_type = DOM_NODE_ELEMENT;
+        parent.set_synthetic(true); owner.set_synthetic(true);
+        parent.view_type = owner.view_type = RDT_VIEW_BLOCK;
+        owner.parent = lam::up<DomNode>(&parent); owner.x = 20; owner.y = -50;
+        owner.width = 280; owner.height = 50;
+        BlockProp properties = BLOCK_PROP_DEFAULT;
+        owner.blk = lam::view_prop(&properties); owner.font = lam::view_prop(&style);
+        DomText text = {}; text.node_type = DOM_NODE_TEXT; text.view_type = RDT_VIEW_TEXT;
+        text.text = lam::up("ABC"); text.length = 3;
+        text.parent = lam::up<DomNode>(&owner); text.font = lam::view_ref(&style);
+        owner.first_child = lam::own<DomNode>(&text);
+        TextRect rect = {}; rect.width = 84; rect.height = 50; rect.length = 3;
+        text.rect = lam::view_prop(&rect);
+        RasterRenderContext raster = {}; raster.ui_context = lam::up(&ui);
+        raster.raster_scale = density; raster.block.clip = {0, 0, 320 * density, 100 * density};
+        raster.has_dirty_union = true; raster.dirty_union = {30, 1, 40, 8};
+        raster.font = {lam::up(&style), 40}; raster.color.c = 0xff0000ffu;
+        Arena* arena = arena_create_default(); ASSERT_NE(arena, nullptr); scratch_init(&raster.scratch, arena);
+        BlockBlot saved_block = raster.block; FontBox saved_font = raster.font;
+        TextShadow shadow = {}; shadow.color.c = 0xff0000ffu; shadow.offset_y = 40; shadow.blur_radius = 4;
+        for (unsigned variant = 0; variant < 3; variant++) {
+            SCOPED_TRACE(variant);
+            SCOPED_TRACE(density);
+            style.text_emphasis_enabled = variant == 0; style.text_emphasis_mark = 0x2022;
+            style.text_emphasis_under = true;
+            style.text_deco = variant == 1 ? CSS_VALUE_UNDERLINE : CSS_VALUE_NONE;
+            style.text_deco_extra = 0; style.text_deco_thickness = 3;
+            style.text_underline_offset = 20; style.text_underline_offset_mode = 1;
+            style.text_deco_skip_ink = CSS_VALUE_NONE;
+            style.text_shadow = variant == 2 ? lam::own(&shadow) : nullptr;
+            ViewBlock* block = lam::view_as_block(&owner);
+            // the foreground border misses both regions while its independently visible ink does not.
+            for (unsigned repeat = 0; repeat < 16; repeat++) {
+                EXPECT_FALSE(render_block_viewport_misses(&raster, block));
+                EXPECT_FALSE(render_block_dirty_misses(&raster, block));
+                EXPECT_EQ(raster.font.style, saved_font.style);
+                EXPECT_FLOAT_EQ(raster.block.x, saved_block.x); EXPECT_FLOAT_EQ(raster.block.y, saved_block.y);
+                EXPECT_FLOAT_EQ(raster.block.clip.top, saved_block.clip.top);
+            }
+            if (variant == 1) {
+                size_t soft, hard, critical; memtrack_get_limits(&soft, &hard, &critical);
+                size_t usage = memtrack_get_current_usage(); memtrack_set_limits(usage, usage, usage + 64);
+                bool viewport_misses = render_block_viewport_misses(&raster, block);
+                bool dirty_misses = render_block_dirty_misses(&raster, block);
+                memtrack_set_limits(soft, hard, critical);
+                // bounds allocation failure must retain the subtree for the later paint attempt.
+                EXPECT_FALSE(viewport_misses); EXPECT_FALSE(dirty_misses);
+                EXPECT_EQ(raster.font.style, saved_font.style);
+                EXPECT_FLOAT_EQ(raster.block.y, saved_block.y);
+            }
+            properties.contain_paint = true;
+            EXPECT_TRUE(render_block_viewport_misses(&raster, block));
+            EXPECT_TRUE(render_block_dirty_misses(&raster, block));
+            properties.contain_paint = false;
+        }
+        style.text_shadow = nullptr; text.font = nullptr; text.rect = nullptr; text.parent = nullptr;
+        owner.first_child = nullptr; owner.font = nullptr; owner.blk = nullptr; owner.parent = nullptr;
+        scratch_release(&raster.scratch); arena_destroy(arena);
+        font_handle_release(style.font_handle); style.font_handle = nullptr; font_context_destroy(fonts);
+    }
+}
+
 TEST(TextOverflowPaint, ScopedProjectionPreservesSourceAndRestoresNestedState) {
     FontContextConfig config = {}; config.pixel_ratio = 1;
     FontContext* fonts = font_context_create(&config);
@@ -2053,6 +2125,60 @@ TEST(ImagePaintTest, RasterBlitsRespectAlphaModesOpacityAndTransparentTargets) {
                         EXPECT_EQ(source_pixels[0], source_pixel);
                         EXPECT_EQ(source_pixels[1], source_pixel);
                     }
+}
+
+TEST(ImagePaintTest, ProjectedImagesPreserveSourceOverClipsTilesAndBatchOrder) {
+    rdt_engine_init(0);
+    uint32_t source[256], full[520 * 4], tile[257 * 2];
+    RdtPath* clip = rdt_path_new(); ASSERT_NE(clip, nullptr);
+    rdt_path_add_rect(clip, 4, 0, 508, 4, 0, 0);
+    for (float density : {1.0f, 2.0f})
+        for (bool straight : {false, true})
+            for (uint8_t opacity : {uint8_t(128), uint8_t(255)})
+                for (uint32_t background : {0u, 0x80402010u, 0xffcf7f21u}) {
+        SCOPED_TRACE(density);
+        SCOPED_TRACE(straight);
+        SCOPED_TRACE(unsigned(opacity));
+        SCOPED_TRACE(background);
+        for (unsigned coverage = 0; coverage < 256; coverage++) {
+            uint32_t pixel = render_pixel_pack_abgr(173, 31, 124, coverage);
+            source[coverage] = straight ? pixel : render_pixel_premultiply_abgr(pixel);
+        }
+        for (bool tiled : {false, true}) {
+            uint32_t* pixels = tiled ? tile : full;
+            for (size_t index = 0; index < (tiled ? 257u * 2u : 520u * 4u); index++) pixels[index] = 0;
+            RdtVector vector = {};
+            rdt_vector_init(&vector, pixels, tiled ? 257 : 520, tiled ? 2 : 4, tiled ? 257 : 520);
+            if (tiled) { rdt_vector_set_tile_offset_x(&vector, 7); rdt_vector_set_tile_offset_y(&vector, 1); }
+            rdt_vector_begin_batch(&vector);
+            // keep a pending vector command before the direct compositor and another after it.
+            rdt_fill_rect(&vector, 0, 0, 520, 4, Color{background});
+            rdt_push_clip(&vector, clip, nullptr);
+            RdtMatrix transform = rdt_matrix_scale(density, density);
+            transform.e13 = 2; transform.e23 = 1;
+            rdt_draw_image(&vector, source, 256, 1, 256, 0, 0, 256, 1, opacity,
+                &transform, 0, straight, 0, SCALE_MODE_NEAREST);
+            rdt_pop_clip(&vector);
+            rdt_fill_rect(&vector, 10, 1, 2, 1, Color{0xff00ffffu});
+            rdt_vector_end_batch(&vector);
+            rdt_vector_destroy(&vector);
+        }
+        for (size_t row = 0; row < 4; row++) for (size_t column = 0; column < 520; column++) {
+            uint32_t expected = render_pixel_premultiply_abgr(background);
+            if (row >= 1 && float(row) < 1 + density && column >= 4 && column < 512 &&
+                float(column) < 2 + 256 * density) {
+                size_t index = (size_t)(float(column - 2) / density);
+                uint32_t pixel = render_pixel_scale_premultiplied(
+                    straight ? render_pixel_premultiply_abgr(source[index]) : source[index], opacity);
+                expected = render_pixel_source_over_premultiplied_pair(expected, pixel);
+            }
+            if (row == 1 && column >= 10 && column < 12) expected = 0xff00ffffu;
+            EXPECT_EQ(full[row * 520 + column], expected) << row << ',' << column;
+        }
+        for (size_t row = 0; row < 2; row++) for (size_t column = 0; column < 257; column++)
+            EXPECT_EQ(tile[row * 257 + column], full[(row + 1) * 520 + column + 7]) << row << ',' << column;
+    }
+    rdt_path_free(clip); rdt_engine_term();
 }
 
 TEST(ImagePaintTest, RecycledPixelsFromDifferentSurfaceIdentitiesNeverReuseOldPaint) {
@@ -4067,6 +4193,35 @@ TEST(RasterPaintTest, GlyphCoverageAndImageSourceOverAgreeForEveryCoverageByte) 
     }
 }
 
+template<typename Retire>
+static void expect_paint_replay_after_retirement(PaintList* paint, float density,
+        Bound bounds, int replays, Retire retire) {
+    OffscreenRenderArenas arenas;
+    ASSERT_TRUE(arenas.init("test.paint.retirement", "test.paint.retirement.list", "test.paint.retirement.scratch"));
+    DisplayList list = {}; dl_init(&list, arenas.list_arena);
+    RdtMatrix scale = rdt_matrix_scale(density, density);
+    paint_ir_lower_raster_transformed(paint, &list, &scale);
+    ImageSurface* expected = render_display_list_snapshot(&list, mem_context_process(MEM_ROLE_RENDER), bounds, density);
+    ASSERT_NE(expected, nullptr);
+    size_t bytes = (size_t)expected->pitch * (size_t)expected->height;
+    bool has_ink = false;
+    for (size_t i = 0; i < (size_t)expected->width * (size_t)expected->height; i++)
+        has_ink |= ((const uint32_t*)expected->pixels)[i] >> 24;
+    ASSERT_TRUE(has_ink);
+    retire();
+    dl_clear(&list);
+    // both deferred recording and display replay must survive source/font retirement.
+    paint_ir_lower_raster_transformed(paint, &list, &scale);
+    paint_list_destroy(paint);
+    for (int replay = 0; replay < replays; replay++) {
+        ImageSurface* actual = render_display_list_snapshot(&list, mem_context_process(MEM_ROLE_RENDER), bounds, density);
+        ASSERT_NE(actual, nullptr);
+        EXPECT_EQ(memcmp(actual->pixels, expected->pixels, bytes), 0);
+        image_surface_destroy(actual);
+    }
+    image_surface_destroy(expected); dl_destroy(&list); arenas.destroy();
+}
+
 TEST(PaintOwnership, BlurredTextShadowPixelsSurviveFontAndSourceRetirement) {
     rdt_engine_init(0);
     for (float density : {1.0f, 2.0f}) {
@@ -4087,34 +4242,75 @@ TEST(PaintOwnership, BlurredTextShadowPixelsSurviveFontAndSourceRetirement) {
         ASSERT_TRUE(render_paint_text_shadows(&paint, &ui, &run, &shadow));
         EXPECT_EQ(paint_capture_scratch_bytes("render.effect.raster"), 0u);
         EXPECT_EQ(paint_capture_scratch_bytes("render.text.shadow.bounds"), 0u);
-        OffscreenRenderArenas arenas;
-        ASSERT_TRUE(arenas.init("test.text.shadow", "test.text.shadow.list", "test.text.shadow.scratch"));
-        DisplayList list = {}; dl_init(&list, arenas.list_arena);
-        RdtMatrix scale = rdt_matrix_scale(density, density);
-        paint_ir_lower_raster_transformed(&paint, &list, &scale);
-        Bound bounds = {0, 0, 80 * density, 80 * density};
-        ImageSurface* expected = render_display_list_snapshot(&list, mem_context_process(MEM_ROLE_RENDER), bounds, density);
-        ASSERT_NE(expected, nullptr);
-        size_t bytes = (size_t)expected->pitch * (size_t)expected->height;
-        bool has_ink = false;
-        for (size_t i = 0; i < (size_t)expected->width * (size_t)expected->height; i++)
-            has_ink |= ((const uint32_t*)expected->pixels)[i] >> 24;
-        ASSERT_TRUE(has_ink);
-        text[0] = 'W'; shadow.color.c = 0xffff0000u; shadow.blur_radius = 20;
-        font_handle_release(style.font_handle); style.font_handle = nullptr;
-        font_context_destroy(fonts); ui.font_ctx = nullptr;
-        paint_list_destroy(&paint);
-        // display replay owns its captured pixels after text, font cache and PaintIR retirement.
-        for (int replay = 0; replay < 32; replay++) {
-            ImageSurface* actual = render_display_list_snapshot(&list, mem_context_process(MEM_ROLE_RENDER), bounds, density);
-            ASSERT_NE(actual, nullptr);
-            EXPECT_EQ(memcmp(actual->pixels, expected->pixels, bytes), 0);
-            image_surface_destroy(actual);
-        }
-        image_surface_destroy(expected); dl_destroy(&list); arenas.destroy();
+        expect_paint_replay_after_retirement(&paint, density, {0, 0, 80 * density, 80 * density}, 32, [&]() {
+            text[0] = 'W'; shadow.color.c = 0xffff0000u; shadow.blur_radius = 20;
+            font_handle_release(style.font_handle); style.font_handle = nullptr;
+            font_context_destroy(fonts); ui.font_ctx = nullptr;
+        });
         EXPECT_EQ(paint_capture_scratch_bytes("render.effect.raster"), 0u);
         EXPECT_EQ(paint_capture_scratch_bytes("render.text.shadow.bounds"), 0u);
     }
+    rdt_engine_term();
+}
+
+TEST(PaintOwnership, EmphasisAndShadowGeometrySurviveFontSourceAndPaintListRetirement) {
+    rdt_engine_init(0);
+    const float densities[] = {1.0f, 2.0f};
+    for (float density : densities) for (bool shadowed : {false, true}) {
+        SCOPED_TRACE(density);
+        SCOPED_TRACE(shadowed);
+        FontContextConfig config = {}; config.pixel_ratio = density;
+        FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+        FontStyleDesc description = {"Arial", 40, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+        FontProp style = FONT_PROP_DEFAULT; style.font_size = 40;
+        style.font_handle = lam::counted(font_resolve(fonts, &description)); ASSERT_NE(style.font_handle, nullptr);
+        style.text_emphasis_enabled = true; style.text_emphasis_mark = 0x2022;
+        style.text_emphasis_under = true; style.text_emphasis_color_current = false;
+        style.text_emphasis_color.c = 0xff0000ffu;
+        FontBox box = {lam::up(&style), 40};
+        UiContext ui = {}; ui.font_ctx = lam::up(fonts); ui.device_scale = density;
+        char text[] = "A B";
+        PaintGlyphRun run = {}; run.font = lam::up(&box); run.text = lam::up(text);
+        run.text_len = 3; run.x = 10; run.baseline_y = 40; run.color.c = 0;
+        PaintList paint;
+        TextShadow shadow = {}; shadow.color.c = 0x8000ff00u; shadow.blur_radius = 4;
+        ASSERT_TRUE(shadowed ? render_paint_text_shadows(&paint, &ui, &run, &shadow)
+            : render_paint_text_emphasis(&paint, fonts, &run));
+        expect_paint_replay_after_retirement(&paint, density, {0, 0, 100 * density, 100 * density}, 16, [&]() {
+            memset(text, 0, sizeof(text)); style.text_emphasis_mark = 0x25CB;
+            font_handle_release(style.font_handle); style.font_handle = nullptr;
+            font_context_destroy(fonts); ui.font_ctx = nullptr;
+        });
+    }
+    rdt_engine_term();
+}
+
+TEST(PaintOwnership, EmphasisCapturePressurePreservesEarlierPaintAndRecovers) {
+    rdt_engine_init(0);
+    FontContext* fonts = font_context_create(nullptr); ASSERT_NE(fonts, nullptr);
+    FontStyleDesc description = {"Arial", 40, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+    FontProp style = FONT_PROP_DEFAULT; style.font_size = 40;
+    style.font_handle = lam::counted(font_resolve(fonts, &description)); ASSERT_NE(style.font_handle, nullptr);
+    style.text_emphasis_enabled = true; style.text_emphasis_mark = 0x2022;
+    style.text_emphasis_under = true;
+    FontBox box = {lam::up(&style), 40};
+    PaintGlyphRun run = {}; run.font = lam::up(&box); run.text = lam::up("ABC");
+    run.text_len = 3; run.x = 10; run.baseline_y = 40; run.color.c = 0xff0000ffu;
+    PaintList paint; paint_fill_rect(&paint, 0, 0, 4, 4, Color{0xff00ff00u});
+    size_t checkpoint = paint.size();
+    size_t soft, hard, critical; memtrack_get_limits(&soft, &hard, &critical);
+    size_t usage = memtrack_get_current_usage(); memtrack_set_limits(usage, usage, usage + 256);
+    bool recorded = render_paint_text_emphasis(&paint, fonts, &run);
+    memtrack_set_limits(soft, hard, critical);
+    EXPECT_FALSE(recorded); EXPECT_EQ(paint.size(), checkpoint);
+    PaintIrValidationResult validation = {};
+    EXPECT_TRUE(paint_ir_validate(&paint, &validation)) << validation.message;
+    EXPECT_EQ(paint_capture_scratch_bytes("render.effect.raster"), 0u);
+    EXPECT_EQ(paint_capture_scratch_bytes("render.emphasis.bounds"), 0u);
+    ASSERT_TRUE(render_paint_text_emphasis(&paint, fonts, &run));
+    expect_paint_replay_after_retirement(&paint, 1, {0, 0, 100, 100}, 16, [&]() {
+        font_handle_release(style.font_handle); style.font_handle = nullptr; font_context_destroy(fonts);
+    });
     rdt_engine_term();
 }
 
@@ -4214,4 +4410,249 @@ TEST(GradientStopSamplingTest, LargeHardStopListsRetainFollowingColorAndLengthSc
         EXPECT_EQ(render_sample_gradient_stops(stops, 1024, -scale, scale).c, 0xff0000ffu);
         EXPECT_EQ(render_sample_gradient_stops(stops, 1024, 2 * scale, scale).c, 0xffff0000u);
     }
+}
+
+
+TEST(PaintOwnership, DecorationPathsSurviveFontSourceAndPaintListRetirement) {
+    rdt_engine_init(0);
+    for (float density : {1.0f, 2.0f})
+        for (CssEnum pattern : {CSS_VALUE_DASHED, CSS_VALUE_DOTTED, CSS_VALUE_DOUBLE, CSS_VALUE_WAVY}) {
+        SCOPED_TRACE(density);
+        SCOPED_TRACE(pattern);
+        FontContextConfig config = {}; config.pixel_ratio = density;
+        FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+        FontStyleDesc description = {"Arial", 70, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+        FontProp style = FONT_PROP_DEFAULT; style.font_size = 70;
+        style.font_handle = lam::counted(font_resolve(fonts, &description));
+        ASSERT_NE(style.font_handle, nullptr);
+        FontBox box = {lam::up(&style), 70};
+        float bitmap_scale = font_handle_get_size_px(style.font_handle) /
+            font_handle_get_physical_size_px(style.font_handle);
+        LoadedGlyph* space = font_load_glyph(style.font_handle, &description, ' ', true);
+        LoadedGlyph* glyph = font_load_glyph(style.font_handle, &description, 'g', true);
+        ASSERT_NE(space, nullptr); ASSERT_NE(glyph, nullptr);
+        style.space_width = space->advance_x * bitmap_scale;
+        style.text_deco = CSS_VALUE_UNDERLINE;
+        style.text_deco_extra = CSS_TEXT_DECO_LINE_THROUGH;
+        style.text_deco_color.c = 0xff0000ffu;
+        style.text_deco_color_current = false;
+        style.text_deco_style = pattern;
+        style.text_deco_thickness = 5;
+        style.text_underline_offset = -10;
+        style.text_deco_skip_ink = CSS_VALUE_ALL;
+        unsigned char text[] = "g      g";
+        TextRect rect = {}; rect.length = sizeof(text) - 1;
+        rect.width = glyph->advance_x * bitmap_scale * 2 + style.space_width * 6;
+        PaintList paint;
+        ASSERT_TRUE(render_paint_text_decorations(&paint, &box, text, &rect, 10, 10, Color{0xff000000u}, true));
+        ASSERT_TRUE(render_paint_text_decorations(&paint, &box, text, &rect, 10, 10, Color{0xff000000u}, false));
+        PaintIrValidationResult valid = {}; ASSERT_TRUE(paint_ir_validate(&paint, &valid)) << valid.message;
+        EXPECT_EQ(paint_capture_scratch_bytes("render.decoration.scratch"), 0u);
+        ASSERT_GT(paint_list_count(&paint), 2);
+        expect_paint_replay_after_retirement(&paint, density, {0, 0, 240 * density, 130 * density}, 16, [&]() {
+            memset(text, 'W', sizeof(text)); style.text_deco_color.c = 0xffff0000u;
+            font_handle_release(style.font_handle); style.font_handle = nullptr;
+            font_context_destroy(fonts);
+        });
+        EXPECT_EQ(paint_capture_scratch_bytes("render.decoration.scratch"), 0u);
+    }
+    rdt_engine_term();
+}
+
+
+TEST(PaintOwnership, DecoratedShadowResourcesSurviveSourceAndFontRetirement) {
+    rdt_engine_init(0);
+    for (float density : {1.0f, 2.0f}) for (float blur : {0.0f, 4.0f})
+        for (uint8_t alpha : {uint8_t(128), uint8_t(255)})
+        for (CssEnum pattern : {CSS_VALUE_SOLID, CSS_VALUE_DASHED, CSS_VALUE_DOTTED, CSS_VALUE_DOUBLE, CSS_VALUE_WAVY}) {
+        SCOPED_TRACE(density);
+        SCOPED_TRACE(blur);
+        SCOPED_TRACE(alpha);
+        SCOPED_TRACE(pattern);
+        FontContextConfig config = {}; config.pixel_ratio = density;
+        FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);
+        FontStyleDesc description = {"Arial", 32, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+        FontProp style = FONT_PROP_DEFAULT; style.font_size = 32;
+        style.font_handle = lam::counted(font_resolve(fonts, &description));
+        ASSERT_NE(style.font_handle, nullptr);
+        style.text_deco = CSS_VALUE_UNDERLINE;
+        style.text_deco_extra = CSS_TEXT_DECO_OVERLINE | CSS_TEXT_DECO_LINE_THROUGH;
+        style.text_deco_style = pattern; style.text_deco_thickness = 3;
+        style.text_deco_skip_ink = CSS_VALUE_ALL;
+        FontBox box = {lam::up(&style), 32};
+        UiContext ui = {}; ui.font_ctx = lam::up(fonts); ui.device_scale = density;
+        unsigned char text[] = "g  g";
+        TextRect rect = {}; rect.length = sizeof(text) - 1; rect.width = 96; rect.height = 48;
+        PaintGlyphRun run = {}; run.font = lam::up(&box); run.text = lam::up((char*)text);
+        run.text_len = rect.length; run.x = 16;
+        run.baseline_y = 16 + font_get_rendering_ascender(font_box_handle(&box));
+        RenderTextDecorationSource decoration = {text, &rect, 16, 16};
+        TextShadow shadow = {}; shadow.color.c = 0xff008000u; shadow.color.a = alpha;
+        shadow.blur_radius = blur; shadow.offset_x = 4; shadow.offset_y = 6;
+        PaintList paint;
+        ASSERT_TRUE(render_paint_text_shadows(&paint, &ui, &run, &shadow, &decoration));
+        size_t checkpoint = paint.size();
+        TextShadow invisible = {}; invisible.color.a = 0;
+        EXPECT_TRUE(render_paint_text_shadows(&paint, &ui, &run, &invisible, &decoration));
+        EXPECT_EQ(paint.size(), checkpoint);
+        TextShadow back = {}; back.color.c = 0xff008000u;
+        TextShadow front = {}; front.color.c = 0xff008000u; front.blur_radius = 100;
+        front.next = lam::own(&back);
+        // the back layer records first; a failed front capture must restore the entire compound.
+        size_t soft, hard, critical; memtrack_get_limits(&soft, &hard, &critical);
+        size_t usage = memtrack_get_current_usage();
+        memtrack_set_limits(usage, usage, usage + 256);
+        bool recorded = render_paint_text_shadows(&paint, &ui, &run, &front, &decoration);
+        memtrack_set_limits(soft, hard, critical);
+        EXPECT_FALSE(recorded);
+        EXPECT_EQ(paint.size(), checkpoint);
+        PaintIrValidationResult validation = {};
+        EXPECT_TRUE(paint_ir_validate(&paint, &validation)) << validation.message;
+        EXPECT_EQ(paint_capture_scratch_bytes("render.decoration.scratch"), 0u);
+        EXPECT_EQ(paint_capture_scratch_bytes("render.effect.raster"), 0u);
+        expect_paint_replay_after_retirement(&paint, density, {0, 0, 160 * density, 96 * density}, 16, [&]() {
+            memset(text, 'W', sizeof(text) - 1);
+            style.text_deco = CSS_VALUE_NONE; style.text_deco_extra = 0;
+            rect.width = 1; shadow.color.c = 0xffff0000u;
+            font_handle_release(style.font_handle); style.font_handle = nullptr;
+            font_context_destroy(fonts); ui.font_ctx = nullptr;
+        });
+        EXPECT_EQ(paint_capture_scratch_bytes("render.decoration.scratch"), 0u);
+        EXPECT_EQ(paint_capture_scratch_bytes("render.effect.raster"), 0u);
+        EXPECT_EQ(paint_capture_scratch_bytes("render.text.shadow.bounds"), 0u);
+    }
+    rdt_engine_term();
+}
+
+
+TEST(PaintOwnership, FailedDisplayRecordingLeavesEarlierCommandsAndRecovers) {
+    DisplayList list;
+    memtrack_fault_inject(0);
+    dl_fill_rect(&list, 0, 0, 8, 8, Color{0xff0000ffu});
+    memtrack_fault_clear();
+    EXPECT_EQ(list.item_count(), 0);
+    dl_fill_rect(&list, 0, 0, 8, 8, Color{0xff0000ffu});
+    ASSERT_EQ(list.item_count(), 1);
+    RdtPath* path = rdt_path_new(); ASSERT_NE(path, nullptr);
+    rdt_path_add_rect(path, 0, 0, 4, 4, 0, 0);
+    for (DisplayOp op : {DL_FILL_PATH, DL_STROKE_PATH, DL_PUSH_CLIP}) for (size_t fail_at : {size_t(0), size_t(1)}) {
+        SCOPED_TRACE(op);
+        memtrack_fault_inject(fail_at);
+        if (op == DL_FILL_PATH) dl_fill_path(&list, path, Color{0xff0000ffu}, RDT_FILL_WINDING, nullptr);
+        else if (op == DL_STROKE_PATH) dl_stroke_path(&list, path, Color{0xff0000ffu}, 2,
+            RDT_CAP_BUTT, RDT_JOIN_MITER, nullptr, 0, 0, nullptr);
+        else dl_push_clip(&list, path, nullptr);
+        memtrack_fault_clear();
+        EXPECT_EQ(list.item_count(), 1);
+        EXPECT_TRUE(dl_validate(&list, nullptr));
+    }
+    dl_fill_path(&list, path, Color{0xff0000ffu}, RDT_FILL_WINDING, nullptr);
+    EXPECT_EQ(list.item_count(), 2);
+    EXPECT_TRUE(dl_validate(&list, nullptr));
+    rdt_path_free(path); dl_destroy(&list);
+}
+
+TEST(PaintOwnership, FailedClippedImageRecordingReleasesLeasesAndRestoresClipState) {
+    rdt_engine_init(0);
+    ImageSurface* image = image_surface_create(2, 2); ASSERT_NE(image, nullptr);
+    image_surface_snapshot_publish(image);
+    UiContext ui = {}; ui.surface = lam::up(image);
+    bool saw_failure = false, saw_success = false;
+    for (size_t fail_at = 0; fail_at < 12; fail_at++) {
+        SCOPED_TRACE(fail_at);
+        DisplayList list; PaintList paint;
+        dl_fill_rect(&list, 0, 0, 2, 2, Color{0xff0000ffu});
+        paint_fill_rect(&paint, 0, 0, 1, 1, Color{0xff00ff00u});
+        RasterRenderContext context = {}; context.dl = lam::up(&list); context.paint_list = lam::up(&paint); context.ui_context = lam::up(&ui);
+        context.block.clip = {0, 0, 2, 2};
+        Rect destination = {0, 0, 2, 2}; Bound clip = {0, 0, 2, 2};
+        uint32_t references = image->snapshot_refs;
+        memtrack_fault_inject(fail_at);
+        bool recorded = render_painter_draw_pixels_rect(&context, (uint32_t*)image->pixels, 2, 2,
+            image->pitch / 4, &destination, &clip, 128, image, SCALE_MODE_NEAREST);
+        memtrack_fault_clear();
+        saw_failure |= !recorded; saw_success |= recorded;
+        EXPECT_EQ(context.vector_clip_depth, 0);
+        EXPECT_EQ(context.paint_failed, !recorded);
+        EXPECT_EQ(list.item_count(), recorded ? 5 : 2);
+        ASSERT_GE(list.item_count(), 2);
+        EXPECT_EQ(list.data()[1].op, DL_FILL_RECT);
+        EXPECT_EQ(list.data()[1].fill_rect.color.c, 0xff00ff00u);
+        EXPECT_TRUE(dl_validate(&list, nullptr));
+        if (!recorded) EXPECT_EQ(image->snapshot_refs, references);
+        dl_destroy(&list);
+        EXPECT_EQ(image->snapshot_refs, references);
+    }
+    EXPECT_TRUE(saw_failure); EXPECT_TRUE(saw_success);
+    image_surface_snapshot_release(image); rdt_engine_term();
+}
+
+TEST(PaintOwnership, PendingPaintPrecedesImageTransactions) {
+    rdt_engine_init(0);
+    ImageSurface* image = image_surface_create(2, 2); ASSERT_NE(image, nullptr);
+    image_surface_snapshot_publish(image);
+    UiContext ui = {}; ui.surface = lam::up(image);
+    for (bool transformed : {false, true}) {
+        SCOPED_TRACE(transformed);
+        PaintList paint; DisplayList list;
+        dl_fill_rect(&list, 0, 0, 2, 2, Color{0xff0000ffu});
+        paint_fill_rect(&paint, 0, 0, 1, 1, Color{0xff00ff00u});
+        RasterRenderContext context = {}; context.dl = lam::up(&list); context.paint_list = lam::up(&paint);
+        context.ui_context = lam::up(&ui); context.block.clip = {0, 0, 2, 2};
+        context.has_transform = transformed; context.transform = rdt_matrix_translate(1, 0);
+        Rect destination = {0, 0, 2, 2}; Bound clip = {0, 0, 2, 2};
+        EXPECT_TRUE(render_painter_blit_surface_scaled(&context, image, nullptr, image, &destination,
+            &clip, SCALE_MODE_NEAREST, nullptr, 0, 128));
+        EXPECT_FALSE(context.paint_failed);
+        ASSERT_EQ(list.item_count(), transformed ? 5 : 3);
+        EXPECT_EQ(list.data()[0].op, DL_FILL_RECT);
+        EXPECT_EQ(list.data()[1].op, DL_FILL_RECT);
+        EXPECT_EQ(list.data()[1].fill_rect.color.c, 0xff00ff00u);
+        EXPECT_EQ(list.data()[transformed ? 3 : 2].op, transformed ? DL_DRAW_IMAGE : DL_BLIT_SURFACE_SCALED);
+        EXPECT_TRUE(dl_validate(&list, nullptr));
+        EXPECT_EQ(context.vector_clip_depth, 0);
+        EXPECT_EQ(paint.size(), 0u);
+        dl_destroy(&list);
+    }
+    EXPECT_EQ(image->snapshot_refs, 1u);
+    image_surface_snapshot_release(image); rdt_engine_term();
+}
+
+TEST(PaintOwnership, PrivateCaptureTrimmingRetainsEveryCoveredPixelAndPublishedBuffers) {
+    auto make_pattern = []() {
+        ImageSurface* surface = image_surface_create(8, 7);
+        if (!surface) return surface;
+        uint32_t* pixels = (uint32_t*)surface->pixels;
+        for (size_t row = 1; row < 6; row++) for (size_t column = 2; column < 6; column++)
+            pixels[row * 8 + column] = 0xff204080u + (uint32_t)row;
+        pixels[5 * 8 + 6] = 0x01000000u;
+        return surface;
+    };
+    ImageSurface* surface = make_pattern(); ASSERT_NE(surface, nullptr);
+    uint32_t expected[25];
+    const uint32_t* pixels = (const uint32_t*)surface->pixels;
+    for (size_t row = 0; row < 5; row++) for (size_t column = 0; column < 5; column++)
+        expected[row * 5 + column] = pixels[(row + 1) * 8 + column + 2];
+    float x, y;
+    uint64_t generation = surface->generation;
+    memtrack_fault_inject(0);
+    bool trimmed = image_surface_trim_transparent_margin(surface, &x, &y);
+    memtrack_fault_clear();
+    EXPECT_TRUE(trimmed); EXPECT_FLOAT_EQ(x, 2); EXPECT_FLOAT_EQ(y, 1);
+    EXPECT_EQ(surface->width, 5); EXPECT_EQ(surface->height, 5); EXPECT_EQ(surface->pitch, 20);
+    EXPECT_EQ(memcmp(surface->pixels, expected, sizeof(expected)), 0);
+    EXPECT_EQ(surface->generation, generation);
+    EXPECT_EQ(image_surface_lookup(surface->self), surface);
+    EXPECT_FALSE(image_surface_trim_transparent_margin(surface, &x, &y));
+    image_surface_destroy(surface);
+    surface = make_pattern(); ASSERT_NE(surface, nullptr);
+    image_surface_snapshot_publish(surface);
+    EXPECT_FALSE(image_surface_trim_transparent_margin(surface, &x, &y));
+    EXPECT_EQ(surface->width, 8); EXPECT_EQ(surface->height, 7);
+    EXPECT_FLOAT_EQ(x, 0); EXPECT_FLOAT_EQ(y, 0);
+    image_surface_snapshot_release(surface);
+    surface = image_surface_create(3, 2); ASSERT_NE(surface, nullptr);
+    EXPECT_FALSE(image_surface_trim_transparent_margin(surface, &x, &y));
+    EXPECT_EQ(surface->width, 3); EXPECT_EQ(surface->height, 2);
+    image_surface_destroy(surface);
 }

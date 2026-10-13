@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; }
+.row { font: 20px/1 Ahem; width: 200px; display: flow-root; position: relative; }
+.edge { border-right: 20px solid; }
+.abs { position: absolute; }
+.float { float: right; width: 20px; height: 20px; }
+.atomic { display: inline-block; width: 20px; height: 20px; }
+.hidden { display: none; }
+.pre { white-space: pre; }
+.grow { font-size: 40px; }
+</style>
+<div id="result">
+<div class="row">aa<span>&#x200b;</span>&#10;<span id="previous">bbb</span></div>
+<div class="row">aa<span class="edge">&#x200b;</span>&#10;<span id="decorated">bb</span></div>
+<div class="row">aa&#10;<span>&#x200b;</span><span id="following">bbb</span></div>
+<div class="row">aa&#x200b;<aside class="abs" id="static-block">foo</aside>&#10;<span id="positioned">bbb</span></div>
+<div class="row">aa&#x200b;<aside class="float">X</aside>&#10;<span id="floated">bbb</span></div>
+<div class="row">aa<span>&#x200b;</span><span class="hidden">foo</span>&#10;<span id="hidden">bbb</span></div>
+<div class="row">aa<span class="atomic"></span>&#10;<span id="atomic">bb</span></div>
+<div class="row">aa<span>bb</span>&#10;<span id="ordinary">bb</span></div>
+<div class="row pre">aa<span>&#x200b;</span>&#10;<span id="preserved">bb</span></div>
+<div class="row">一二&#10;<span id="cjk-unknown">三四</span></div>
+<div class="row" lang="zh">一二&#10;<span id="cjk-known">三四</span></div>
+<div class="row">一二<span>&#x200b;</span>&#10;<span id="cjk-zwsp">三四</span></div>
+<div class="row">aa<aside class="abs" id="static-grown">foo</aside><span class="grow">X</span></div>
+<div class="row"><aside class="abs" id="static-first">foo</aside>aa</div>
+<div class="row">aa<aside class="abs" id="explicit-top" style="top: 7px">foo</aside>bb</div>
+<div class="row">aa<span class="abs" id="static-inline">foo</span>bb</div>
+</div>

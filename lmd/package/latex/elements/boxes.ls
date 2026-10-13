@@ -11,6 +11,38 @@ import util: lambda.latex.util
 // inside an indented paragraph would otherwise indent its own first line
 let BOX_BASE = "display:inline-block;text-indent:0;white-space:nowrap"
 
+// The frame-box model shared by tcolorbox, framed, mdframed and fancybox: a
+// background, a line (width, style, color) on all or some sides, padding, a corner
+// radius and a shadow, each omitted when the spec leaves it null. A width of "0"
+// draws no line.
+pub fn frame_css(spec) {
+    let line = (spec.width or "1px") ++ " " ++ (spec.style or "solid") ++
+        (if (spec.line == null) "" else " " ++ spec.line)
+    let border = if (spec.width == "0") ""
+        else if (spec.sides == null) "border:" ++ line ++ ";"
+        else util.str_join([for (side in spec.sides) "border-" ++ side ++ ":" ++ line ++ ";"], "");
+    (if (spec.background == null) "" else "background-color:" ++ spec.background ++ ";") ++ border ++
+        (if (spec.padding == null) "" else "padding:" ++ spec.padding ++ ";") ++
+        (if (spec.radius == null) "" else "border-radius:" ++ spec.radius ++ ";") ++
+        (if (spec.shadow == null) "" else "box-shadow:" ++ spec.shadow ++ ";")
+}
+
+// fancybox's boxes, framed by \fboxrule (.4pt) at \fboxsep (3pt): \shadowbox casts
+// a \shadowsize (4pt) shadow to the lower right, \doublebox draws two lines, \ovalbox
+// rounds the corners and \Ovalbox does so with a thicker line
+let FANCYBOX = {shadowbox: {width: "0.4pt", padding: "3pt", shadow: "4pt 4pt 0 currentColor"},
+    doublebox: {width: "3px", style: "double", padding: "3pt"},
+    ovalbox: {width: "0.4pt", padding: "3pt", radius: "0.6em"},
+    Ovalbox: {width: "0.8pt", padding: "3pt", radius: "0.6em"}}
+pub let FANCYBOX_COMMANDS = [for (k, v at FANCYBOX) string(k)]
+
+// a fancybox command's CSS: an inline TeX box on the frame-box model
+pub fn fancybox_css(tag) => BOX_BASE ++ ";" ++ frame_css(FANCYBOX[tag])
+
+// boxedminipage: a minipage of the given width framed like \fbox
+pub fn boxed_minipage_css(width) => "display:inline-block;vertical-align:middle;" ++
+    (if (width == null) "" else "width:" ++ width ++ ";") ++ frame_css({width: "0.4pt", padding: "3pt"})
+
 // \mbox{text} — prevent line breaks within text
 pub fn render_mbox(items) {
     <span class: "latex-mbox", style: "white-space:nowrap", for c in items { c }>
@@ -85,6 +117,20 @@ pub fn render_raisebox(el, content_items) {
 // ============================================================
 
 // \llap{text} — left overlap (zero width, content extends left)
+// \rule[raise]{width}{height}: a solid box in the text color, raised from the baseline
+pub fn render_rule(el) {
+    let width = rule_dimension(util.raw_argument(el, "required", 0))
+    let height = rule_dimension(util.raw_argument(el, "required", 1))
+    let raw_lift = util.raw_argument(el, "optional", 0)
+    let lift = if (raw_lift == null) "0" else rule_dimension(raw_lift)
+    if (width == null or height == null or lift == null)
+        util.unsupported_element("latex", "Invalid rule dimensions", el.source_offset)
+    else <span class: "latex-rule", style: "display:inline-block;width:" ++ width ++
+        ";height:" ++ height ++ ";vertical-align:" ++ lift ++ ";background-color:currentColor">
+}
+
+fn rule_dimension(raw) => if (raw == null) null else util.css_dimension(raw)
+
 pub fn render_llap(items) {
     <span class: "latex-llap", style: "display:inline-block;width:0;text-align:right;overflow:visible", for c in items { c }>
 }

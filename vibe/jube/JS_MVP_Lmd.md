@@ -1,6 +1,6 @@
 # JS MVP Lmd — JavaScript MIR on the untyped Lambda substrate
 
-**Date:** 2026-10-12
+**Date:** 2026-10-13
 
 **Status:** scalar/dense-array/function MVP, integer tuning, and the map/plain-object
 phase implemented. Ordinary arrays and core strings are implemented (§18);
@@ -16,6 +16,8 @@ recorded there. Prototype, accessor, proxy and sparse-array expansion is impleme
 in source in §31; performance acceptance remains pending.
 Test262 parity with full LambdaJS is planned in §32, including interpreter-only
 dynamic source; it is not a current conformance claim.
+The §33 build establishes 21,747 audited Test262 passes; §34 plans the next
+milestone of 90% of the frozen LJS passing baseline, with a performance gate.
 
 **Performance history:** [MVP_Result3–9](../../test/benchmark/js_mvp_lmd/README.md)
 retains one representative comparison per major tuning phase.
@@ -39,8 +41,8 @@ The four governing goals remain fixed (USER, 2026-10-07):
    preserving its default Lambda behavior. Count internal utilities, adapters,
    and shared additions too; notify the user before adding any new helper.
 3. **Implement exactly the admitted scope.** Section 3 records the initial
-   subset; §§10–31 record subsequent extensions. Excluded capabilities receive
-   diagnostics, without reserved machinery for later features.
+   subset; §§10–34 record subsequent extensions and planned scope. Excluded
+   capabilities receive diagnostics, without reserved machinery for later features.
 4. **Keep the MVP as efficient as possible.** Preserve native computations and
    direct storage/calls where proven; measure release performance with fixed
    sources and correctness oracles.
@@ -1557,3 +1559,118 @@ workloads retain historical evidence only. Results3–9 are unchanged.
 
 Dependencies, interpreter boundary, reuse inventory, helper disclosure and
 acceptance gates: [implementation plan](../impl/JS_MVP_Lmd_Test262_Parity.md).
+
+## 33. Core language and library completion: 5,000 audited Test262 passes
+
+**Features implemented; Test262 milestone achieved (2026-10-13).** Establish at least **5,000 distinct
+passing canonical IDs** from the frozen 40,261-test LJS target on one MVP build,
+with every required variant passing. Keep the harness-selected-mode count
+separate from the additional strict-variant audit. First capture a fresh whole-target MVP
+inventory: §32's 1,913 passes describe a selected family, while the older 8,888
+whole-target count predates stricter completion checks and is diagnostic.
+
+Complete the following existing facilities (**S1.11**, **D1.3v3**):
+
+1. Object descriptors/reflection and intrinsic metadata: descriptor conversion,
+   validation, own-key order, integrity operations, name/length and constructibility.
+2. Generic Array operations: array-like receivers, holes/inherited properties,
+   coercion, callback receivers, mutation and abrupt completion.
+3. Public classes: expressions/nesting, lexical class names, computed members,
+   static blocks, initialization order and constructor/super behavior.
+4. Strings/primitives: receiver conversion, UTF-16 observations, wrappers,
+   ordinary string methods and String.raw.
+5. Global lexical versus object bindings and tagged templates, including stable
+   template-site identity and frozen cooked/raw arrays.
+
+Reuse Lambda Maps/shapes, arrays, scalar homes, environments and precise roots;
+extend existing helpers before introducing an adapter. Disclose new helpers
+before coding. Class ancestry and JS mutable captures retain their Lambda
+contracts (**S2.1.3v2**, **D2.6.6v3**, **D2.6.10**, **D6.2.3v2**). Retained compiler proofs protect direct
+storage/call paths; no is_normal flag or blanket fallback (**D8.4.1v2**).
+Eval/Function remain assigned to the shared interpreter bridge (**D8.1.3v24**);
+that bridge, private classes, async/modules and advanced buffers follow this round.
+
+Report the audited total, gains/lost passes and residual failures on the same
+build. The numeric milestone does not silently complete unfinished feature work.
+Require focused/forced-GC and shared Lambda/LJS gates, plus pinned release MIR
+self-timing comparisons. Carry forward §32's unresolved performance differences;
+the four jq benchmarks retain historical evidence only. Results3–9 are unchanged.
+
+The phase-completion pin passes **21,747 audited distinct IDs** (19,221 positive,
+2,526 negative). Its selected-mode count is **21,748/40,261**, a gain of **3,977**
+with zero lost entry passes and no new crash IDs. Focused normal/forced-GC gates
+both pass **193/193**; full LJS passes **40,261/40,261**, and all **84 non-jq**
+benchmark contracts pass. The shared Lambda baseline passes **6,806/6,806**.
+The phase33 Navier–Stokes regression is fixed: 31-round pinned MIR self-times
+are **31.978 vs 32.435–32.450 ms**, **1.4–1.5% faster than the phase entry**.
+A compiler proof retains local numeric-key admission when distinct named `this`
+fields cannot expose global bindings (**D8.4.1v2**). Its normal/forced-GC gates
+pass **194/194**; shared follow-up gates pass **6,814/6,814 Lambda** and
+**40,261/40,261 LJS Test262**. The user deferred the small
+text-search difference. Older §32 performance gaps remain separate.
+
+Scope, reuse inventory, helper disclosures and evidence:
+[implementation plan](../impl/JS_MVP_Lmd_Test262_5000.md).
+
+## 34. Ninety percent of LJS Test262 coverage
+
+**In progress (2026-10-13).** Reach **36,235 distinct fully passing cases** from
+the frozen **40,261-case LJS baseline**, with every required execution mode
+passing on one MVP build. This is 90% of LJS's supported population, not the
+entire upstream corpus. The §33 audit establishes 21,747 passes, so the target
+requires 14,488 additional passes and permits at most 4,026 unresolved cases.
+Capture a fresh entry audit after the Navier fix; the earlier count is evidence
+for its archived build. This milestone advances §32's full-parity roadmap.
+
+Implement in dependency order:
+
+1. Environment completion and the shared interpreter bridge for eval and
+   Function-family constructors, with live caller bindings and retained identity.
+2. Private class elements/brands and builtin subclass construction, preserving
+   initialization order, super and new.target behavior.
+3. Synchronous library completion, including Array/String/Object/Reflect,
+   numeric/Date/JSON/collection APIs and RegExp protocols.
+4. Typed arrays, buffer views, DataView and target-required detach/resize behavior.
+5. Promises/jobs, async functions/methods/generators and async iteration.
+6. ES-module linking, live bindings/cycles, dynamic import and top-level await.
+7. Measured residual closure, including weak collections and shared-memory
+   facilities where needed; publish the exact remaining unsupported cases.
+
+Reuse untyped Lambda/lib first, preserving existing defaults when a small
+semantic option suffices (**D1.3v3**). Reuse shared class/shape, environment,
+activation, module and precise-root ownership; preserve JS mutable captures
+and Lambda nominal contracts (**D2.6.6v3**, **D2.6.9v3**, **D6.2.3v2**,
+**D5.1.1v3**, **D5.2–D5.3**). Disclose concrete new helpers before coding.
+Dynamic source stays in the existing interpreter (**D8.1.3v24**); ordinary
+source uses MVP MIR. Keep operation-specific proofs and guarded shared
+semantics (**D8.4.1v2**), without is_normal, ordinary-object VMaps or blanket
+interpreter fallback. Feature use must not impose dormant eval/async machinery
+on unrelated ordinary calls.
+
+Completion requires zero lost entry passes, no new crash/timeout cases,
+required-mode and forced-GC audits, and shared Lambda/LJS gates. Compare all
+**84 non-jq benchmarks** using pinned release MIR, identical source/output
+contracts, script self-times and interleaved controls. Confirmed individual
+regressions block completion; aggregate improvements cannot hide them. Retain
+older unresolved performance differences against their original controls and
+the user's text-search deferral. The four jq workloads remain historical-only.
+Report coverage, feature completion and performance acceptance separately.
+
+Initial increments add `with` object environments/unscopables through existing
+capture cells and shared LJS lookup, native Error subclasses retaining Lambda
+nominal ancestry (**S11.3.1v2**), and Array `flatMap`, `findLast` and
+`findLastIndex` through the existing visitor/flattening operations. Follow-up
+fixes preserve native Error branding, implement Annex B call-target errors,
+validate concise arrow/meta-property/ImportCall targets, initialize named-function
+self captures before defaults, and reuse guarded Map entry stores. The
+affected-family required-mode audit gains **464 cases** (949/1,050); all 254
+recorded entry crashes pass. Focused checks pass **203/203**, forced-GC checks
+**16/16**, Lambda **6,823/6,823** and full LJS **40,261/40,261**. This is a
+selected-population result. Matched-release repeats show Map lookup **12.1%**
+and knucleotide **2.6% faster** than entry; Sieve's roughly **3 µs** cold-setup
+slowdown remains open. The
+interpreter bridge, private classes, remaining library/storage/async/module work,
+90% coverage target and complete performance acceptance remain open.
+
+Dependencies, reuse boundaries, acceptance cases and evidence requirements:
+[implementation plan](../impl/JS_MVP_Lmd_Test262_90.md).

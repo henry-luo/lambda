@@ -19,6 +19,8 @@ struct EngineOptions {
     int adapter_count;
     const char* const* raw_commands;  // adapter commands that read their arguments as tokens
     int raw_command_count;
+    const char* const* chaptered;  // class profiles whose kernel defines \chapter
+    int chaptered_count;
     uint64_t max_expansions;       // 0 selects the default budget
     bool expl3;                    // start from the format with expl3 preloaded (built on first use)
     bool math_mode;                // digest math arguments and omit executed definition declarations

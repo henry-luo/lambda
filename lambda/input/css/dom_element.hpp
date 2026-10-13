@@ -79,6 +79,8 @@ typedef struct Runtime Runtime;  // From lambda/lambda.h
 struct DomElement;
 const char* dom_element_namespace_uri(struct DomElement* element);
 NameId dom_element_html_tag(struct DomElement* element);
+// same as dom_element_html_tag(element) == tag, without the namespace walk for other tags
+bool dom_element_is_html_tag(struct DomElement* element, NameId tag);
 const char* dom_element_lookup_namespace_uri(struct DomElement* element, const char* prefix);
 const char* dom_element_attribute_namespace_uri(struct DomElement* element,
     const char* qualified_name, const char** local_name);

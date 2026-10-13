@@ -295,6 +295,10 @@ typedef struct TextExtents {
 // measure a UTF-8 text string (applies kerning, handles multi-byte)
 TextExtents font_measure_text(FontHandle* handle, const char* text, int byte_len);
 
+// measure source-owned glyph clusters without discarding neighboring shaping context.
+bool font_measure_text_range(FontHandle* handle, const char* text, int byte_len,
+    int range_start, int range_length, TextExtents* extents);
+
 // measure width of a single codepoint (convenience wrapper)
 float font_measure_char(FontHandle* handle, uint32_t codepoint);
 

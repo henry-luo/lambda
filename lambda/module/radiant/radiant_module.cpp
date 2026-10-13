@@ -4032,6 +4032,14 @@ static bool radiant_query_face(Item faces, int64_t index, RadiantQueryFace* face
 }
 
 // font snapshots are supplied by lambda-io; these queries never acquire resources.
+// Query font contexts built so far. Each one scans the font directories, so a
+// repeated query must reuse its cached context (radiant_query_font_key).
+static uint64_t g_radiant_query_font_builds = 0;
+
+RADIANT_C_API uint64_t radiant_query_font_build_count(void) {
+    return __atomic_load_n(&g_radiant_query_font_builds, __ATOMIC_RELAXED);
+}
+
 static FontContext* radiant_build_query_fonts(Item faces) {
     if (!radiant_item_is_missing(faces) && !is_array_family_type_id(get_type_id(faces))) return nullptr;
     RootFrame owner_roots(1);
@@ -4040,6 +4048,7 @@ static FontContext* radiant_build_query_fonts(Item faces) {
     config.pixel_ratio = 1.0f;
     FontContext* fonts = font_context_create(&config);
     if (!fonts) return nullptr;
+    __atomic_add_fetch(&g_radiant_query_font_builds, 1, __ATOMIC_RELAXED);
     int64_t count = radiant_item_is_missing(faces) ? 0 : fn_len(faces);
     for (int64_t index = 0; index < count; index++) {
         RadiantQueryFace face = {};
@@ -4085,11 +4094,14 @@ static const ContextCapsuleOps radiant_query_font_cache_ops = {
 // compare complete resource bytes and normalized styles, never GC addresses or
 // family names alone. Oversized snapshots retain the uncached query path.
 static bool radiant_query_font_key(Item faces, ByteBuilder* key) {
-    if (!is_array_family_type_id(get_type_id(faces))) return false;
+    // a query without faces (system fonts only) is the common case and needs a
+    // key too: rebuilding its context per call rescanned every font directory.
+    // Accept exactly what radiant_build_query_fonts accepts.
+    if (!radiant_item_is_missing(faces) && !is_array_family_type_id(get_type_id(faces))) return false;
     RootFrame roots(1);
     Rooted<Item> owner(roots, faces);
-    int64_t count = fn_len(owner.get());
-    if (count <= 0) return false;
+    int64_t count = radiant_item_is_missing(faces) ? 0 : fn_len(owner.get());
+    if (count < 0) return false;
     const size_t limit = 8 * 1024 * 1024;
     if (!byte_builder_append_limited(key, &count, sizeof(count), limit)) return false;
     for (int64_t index = 0; index < count; index++) {
@@ -5100,6 +5112,70 @@ static const DomStyleEngineOps radiant_style_operations = {
     radiant_style_focus_is_hidden
 };
 
+// the runtime borrows document/node identities; the renderer owns interaction state.
+static DocState* radiant_host_document_state(void* document) {
+    DomDocument* doc = (DomDocument*)document;
+    return doc ? doc->state : nullptr;
+}
+static bool radiant_host_state_bool(void* state_pointer, void* node, const char* name) {
+    DocState* state = (DocState*)state_pointer;
+    return state && node && name && state_get_bool(state, node, name);
+}
+static void radiant_host_document_request_repaint(void* document) {
+    doc_state_request_repaint(radiant_host_document_state(document));
+}
+static void radiant_host_document_clear_reflow(void* document) {
+    doc_state_clear_reflow(radiant_host_document_state(document));
+}
+
+static bool radiant_host_layout_document(void* ui_context, void* document, bool is_reflow) {
+    if (!ui_context || !document) return false;
+    layout_html_doc((UiContext*)ui_context, (DomDocument*)document, is_reflow);
+    return true;
+}
+static float radiant_host_element_effective_zoom(void* element) {
+    return layout_effective_zoom((DomNode*)element);
+}
+static bool radiant_host_element_has_vertical_rl_flow(void* element) {
+    return layout_element_writing_mode((DomElement*)element) == WM_VERTICAL_RL;
+}
+static CssEnum radiant_host_element_specified_keyword(void* element, CssPropertyCode property, CssEnum fallback) {
+    return layout_specified_keyword((DomElement*)element, property, fallback);
+}
+static void radiant_host_prepare_children_mutation(void* element) {
+    layout_unwrap_anonymous_table_fixups_for_dom_mutation((DomElement*)element);
+}
+
+// provider calls finish with the renderer's state/value owners before borrowed arguments expire (D4.5.1v4).
+static bool radiant_host_control_is_disabled(void* state, void* element) {
+    return form_control_is_disabled((DocState*)state, (View*)element);
+}
+static void radiant_host_control_focus_programmatic(void* state, void* element, bool from_keyboard) {
+    focus_set_programmatic((DocState*)state, (View*)element, from_keyboard);
+}
+static bool radiant_host_control_store_text(void* state, void* element, const char* value,
+    uint32_t bytes, uint32_t utf16_units) {
+    return form_control_store_text_value((DocState*)state, (View*)element, value, bytes, utf16_units);
+}
+static void radiant_host_control_invalidate_behavior(void* state, void* element) {
+    form_control_invalidate_behavior_init((DocState*)state, (View*)element);
+}
+static void radiant_host_control_open_dropdown(void* state, void* element) {
+    doc_state_open_dropdown((DocState*)state, (View*)element);
+}
+static bool radiant_host_scroll_begin_smooth(void* state, void* element, void* pane, float x, float y) {
+    return scroll_state_begin_smooth_for_view((DocState*)state, (View*)element, pane, x, y);
+}
+static void radiant_host_scroll_cancel_smooth(void* state, void* element) {
+    scroll_state_cancel_smooth_for_view((DocState*)state, (View*)element);
+}
+static bool radiant_host_document_tick_smooth_scroll(void* document, double now) {
+    return scroll_smooth_tick_document((DomDocument*)document, now);
+}
+static bool radiant_host_document_tick_animation(void* document, double now, void* dirty_tracker) {
+    return radiant_tick_document_animation_scheduler((DomDocument*)document, now, (DirtyTracker*)dirty_tracker);
+}
+
 static const DomHostEngineOps radiant_host_operations = {
     fn_radiant_request_frame,
     fn_radiant_cancel_frame,
@@ -5111,7 +5187,24 @@ static const DomHostEngineOps radiant_host_operations = {
     fn_radiant_clear_editing_focus,
     fn_radiant_dom_edit_target,
     radiant_dom_query_command,
-    radiant_dom_set_design_mode
+    radiant_dom_set_design_mode,
+    radiant_host_state_bool,
+    radiant_host_document_request_repaint,
+    radiant_host_document_clear_reflow,
+    radiant_host_layout_document,
+    radiant_host_element_effective_zoom,
+    radiant_host_element_has_vertical_rl_flow,
+    radiant_host_element_specified_keyword,
+    radiant_host_prepare_children_mutation,
+    radiant_host_control_is_disabled,
+    radiant_host_control_focus_programmatic,
+    radiant_host_control_store_text,
+    radiant_host_control_invalidate_behavior,
+    radiant_host_control_open_dropdown,
+    radiant_host_scroll_begin_smooth,
+    radiant_host_scroll_cancel_smooth,
+    radiant_host_document_tick_smooth_scroll,
+    radiant_host_document_tick_animation
 };
 
 static const DomCollectionHostTypes radiant_collection_types = {

@@ -152,14 +152,18 @@ pub fn render_slash_el() {
 // element-returning versions for two-pass rendering
 pub fn render_hspace_el(node) {
     let amount = get_length_arg(node)
-    if amount != null {
+    // \hspace{\stretch{n}} is rubber length: a fill like \hfill
+    if (util.find_descendant(node, 'stretch') != null) <span class: "latex-hfill">
+    else if amount != null {
         <span class: "latex-hspace", style: "margin-left:" ++ amount>
     } else { null }
 }
 
 pub fn render_vspace_el(node) {
     let amount = get_length_arg(node)
-    if amount != null {
+    // vertical rubber has no page to fill in continuous output
+    if (util.find_descendant(node, 'stretch') != null) null
+    else if amount != null {
         <div class: "latex-vspace", style: "margin-top:" ++ amount>
     } else { null }
 }

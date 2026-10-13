@@ -293,6 +293,10 @@ bool layout_measure_bidi_run(LayoutContext* lycon,
                              bool hyphenation,
                              uint8_t text_autospace,
                              LayoutBidiRun* result);
+bool layout_measure_inline_text_context(LayoutContext* lycon, DomNode* text_node,
+    const unsigned char* start, size_t length, bool cursive, float* width);
+bool layout_measure_shaping_text(LayoutContext* lycon, const char* text, size_t length,
+    size_t range_start, size_t range_length, float* width);
 // Intrinsic measurements may temporarily replace the active font and allocate
 // pooled font props. One scope owns both restorations so early exits cannot
 // leave speculative font state in the parent layout pass.
@@ -326,6 +330,8 @@ bool layout_inline_element_is_orthogonal(DomElement* element);
 // CSS 2.2 §9.2.1.1: block-in-inline fragments cannot collapse through a
 // parent when the inline box follows prior in-flow content.
 bool layout_inline_has_prior_in_flow_content(DomNode* inline_box);
+struct InlineOutOfFlowKind { bool floated; bool positioned; };
+InlineOutOfFlowKind inline_out_of_flow_kind(DomElement* element);
 CssDeclaration* layout_specified_physical_size_declaration(DomElement* element,
                                                             bool horizontal);
 CssDeclaration* layout_specified_physical_minmax_size_declaration(DomElement* element,
@@ -431,6 +437,8 @@ typedef struct LayoutIntrinsicMarginPair {
 LayoutIntrinsicMarginPair layout_intrinsic_horizontal_margin_pair(
         LayoutContext* lycon, DomElement* element,
         LayoutIntrinsicMarginOptions options = {false, true, true, false, false});
+float layout_intrinsic_inline_edge(LayoutContext* lycon, DomElement* element,
+    bool physical_left, bool include_margin = true);
 float layout_resolve_intrinsic_margin_side(LayoutContext* lycon,
                                             ViewElement* element,
                                             CssPropertyCode property,
@@ -570,6 +578,23 @@ TextIntrinsicWidths layout_measure_text_intrinsic_widths(LayoutContext* lycon,
     CssEnum white_space = CSS_VALUE_NORMAL,
     CssEnum overflow_wrap = CSS_VALUE_NORMAL,
     CssEnum word_break = CSS_VALUE_NORMAL);
+bool layout_intrinsic_element_is_atomic_inline(DomElement* element);
+struct LayoutTextIntrinsicLineOptions {
+    CssEnum text_transform = CSS_VALUE_NONE;
+    CssEnum font_variant = CSS_VALUE_NONE;
+    CssEnum white_space = CSS_VALUE_NORMAL;
+    CssEnum overflow_wrap = CSS_VALUE_NORMAL;
+    CssEnum word_break = CSS_VALUE_NORMAL;
+    float start_offset = 0.0f;
+    float tab_size = 8.0f;
+    float tab_size_length = -1.0f;
+    float vertical_line_advance = 0.0f;
+    float vertical_inline_basis = 0.0f;
+};
+// measure processed text per forced line, retaining edges for its parent's inline run.
+IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
+    const char* text, size_t length, const LayoutTextIntrinsicLineOptions& options,
+    float* vertical_text_extent = nullptr);
 // Normalize every accepted aspect-ratio representation before layout policy consumes it.
 float layout_aspect_ratio_value(const CssValue* value);
 bool layout_aspect_ratio_value_has_auto(const CssValue* value);
@@ -1634,6 +1659,9 @@ float compute_view_last_text_baseline(
 
 CssEnum get_white_space_value(DomNode* node);
 CssEnum get_text_wrap_mode_value(DomNode* node);
+bool layout_text_is_collapsible_whitespace(DomNode* node,
+                                           size_t start_index = 0,
+                                           size_t length = SIZE_MAX);
 bool layout_inline_is_collapsed_whitespace_only(ViewSpan* span);
 inline bool layout_white_space_collapses(CssEnum white_space) {
     return white_space == CSS_VALUE_NORMAL || white_space == CSS_VALUE_NOWRAP ||
@@ -2354,6 +2382,8 @@ typedef struct Linebox {
     float inline_start_edge_pending;  // CSS 2.1 §8.3: accumulated left margin+border+padding from
                                       // inline spans that haven't produced content yet; re-applied
                                       // after line break so the span's first content is indented
+    float text_indent_advance;        // applied LTR indent retained while float bounds change
+    bool initial_letter_exclusion_by_count; // selected once per line, retained across float refresh
     float text_indent_offset;         // CSS 2.1 §16.1: RTL first-line text-indent amount that
                                       // narrows the wrap boundary and alignment width from the right
     FontBox line_start_font;
@@ -4007,6 +4037,8 @@ float block_context_next_float_boundary(BlockContext* ctx, float y);
  * @param element_height Height of the element to place (queries full height range for floats)
  */
 float block_context_find_y_for_width(BlockContext* ctx, float required_width, float min_y, float element_height = 1.0f);
+float find_line_y_for_width_with_floats(BlockContext* bfc, BlockContext* block_ctx,
+    Linebox* line, float required_width, float min_local_y, float query_height);
 
 /**
  * Find Y position to clear floats
@@ -4215,7 +4247,7 @@ inline bool layout_parse_font_shorthand(const CssValue* value,
  * @return const char* font family name
  */
 
-void line_break(LayoutContext* lycon);
+void line_break(LayoutContext* lycon, bool forced_break = false);
 void layout_finalize_static_line_self_alignment(LayoutContext* lycon,
                                                 float used_line_height);
 void layout_finalize_static_inline_positions(LayoutContext* lycon);
@@ -4325,6 +4357,9 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block);
 void layout_apply_sticky_positions(LayoutContext* lycon, View* root);
 // re-solve sticky boxes after a scroll moved (paint and hit-testing call it)
 void layout_resolve_scrolled_sticky(ViewTree* view_tree);
+// Resolve a queued scrollIntoView against committed, otherwise clean layout
+// without relaying out the document; false leaves the request queued.
+bool layout_scroll_into_view_without_relayout(UiContext* uicon, DomDocument* doc);
 void layout_store_last_remembered_size(LayoutContext* lycon, ViewBlock* block,
                                       bool final_pass = false);
 bool element_has_float(ViewBlock* block);

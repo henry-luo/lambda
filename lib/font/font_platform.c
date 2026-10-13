@@ -1129,15 +1129,12 @@ float font_platform_get_pair_kerning(void* ct_font_ref, uint32_t left_cp, uint32
     return kerning;
 }
 
-TextExtents font_platform_measure_text(void* ct_font_ref, const char* text,
-                                       int byte_len, float fallback_height) {
-    TextExtents ext = {0};
-    if (!ct_font_ref || !text || byte_len <= 0) return ext;
-
+static CTLineRef font_platform_create_measure_line(void* ct_font_ref,
+                                                    const char* text, int byte_len) {
     CTFontRef font = (CTFontRef)ct_font_ref;
     CFStringRef str = CFStringCreateWithBytes(NULL, (const UInt8*)text, byte_len,
                                               kCFStringEncodingUTF8, false);
-    if (!str) return ext;
+    if (!str) return NULL;
 
     CFStringRef keys[] = { kCTFontAttributeName };
     CFTypeRef values[] = { font };
@@ -1146,50 +1143,90 @@ TextExtents font_platform_measure_text(void* ct_font_ref, const char* text,
         &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     if (!attrs) {
         CFRelease(str);
-        return ext;
+        return NULL;
     }
 
     CFAttributedStringRef astr = CFAttributedStringCreate(NULL, str, attrs);
     CFRelease(str);
     CFRelease(attrs);
-    if (!astr) return ext;
+    if (!astr) return NULL;
 
     CTLineRef line = CTLineCreateWithAttributedString(astr);
     CFRelease(astr);
-    if (!line) return ext;
+    return line;
 
+}
+
+static TextExtents font_platform_measure_line_range(CTLineRef line, CFRange range,
+                                                    float fallback_height) {
+    TextExtents ext = {0};
     CFArrayRef runs = CTLineGetGlyphRuns(line);
     CFIndex run_count = runs ? CFArrayGetCount(runs) : 0;
+    bool bounded = range.location != kCFNotFound;
     for (CFIndex ri = 0; ri < run_count; ri++) {
         CTRunRef run = (CTRunRef)CFArrayGetValueAtIndex(runs, ri);
-        if (!run) continue;
-        CFIndex glyph_count = CTRunGetGlyphCount(run);
-        if (glyph_count <= 0) continue;
-        ext.glyph_count += (int)glyph_count;
-
-        const CGSize* advances = CTRunGetAdvancesPtr(run);
-        if (advances) {
-            for (CFIndex gi = 0; gi < glyph_count; gi++) {
-                ext.width += (float)advances[gi].width;
+        CFIndex count = run ? CTRunGetGlyphCount(run) : 0;
+        const CGSize* advances = run ? CTRunGetAdvancesPtr(run) : NULL;
+        const CFIndex* indices = bounded && run ? CTRunGetStringIndicesPtr(run) : NULL;
+        for (CFIndex first = 0; first < count;) {
+            CGSize advance_buffer[64];
+            CFIndex index_buffer[64];
+            CFIndex chunk = count - first;
+            if (chunk > 64) chunk = 64;
+            if (!advances) CTRunGetAdvances(run, CFRangeMake(first, chunk), advance_buffer);
+            if (bounded && !indices) CTRunGetStringIndices(run, CFRangeMake(first, chunk), index_buffer);
+            for (CFIndex offset = 0; offset < chunk; offset++) {
+                CFIndex index = bounded ? (indices ? indices[first + offset] : index_buffer[offset]) : 0;
+                // an inline range owns a crossing ligature at the cluster's first source character.
+                if (bounded && (index < range.location || index >= range.location + range.length)) continue;
+                ext.width += (float)(advances ? advances[first + offset].width : advance_buffer[offset].width);
+                ext.glyph_count++;
             }
-        } else {
-            CFIndex gi = 0;
-            while (gi < glyph_count) {
-                CGSize buf[64];
-                CFIndex chunk = glyph_count - gi;
-                if (chunk > 64) chunk = 64;
-                CTRunGetAdvances(run, CFRangeMake(gi, chunk), buf);
-                for (CFIndex bi = 0; bi < chunk; bi++) {
-                    ext.width += (float)buf[bi].width;
-                }
-                gi += chunk;
-            }
+            first += chunk;
         }
     }
     ext.height = fallback_height;
+    return ext;
+}
+
+TextExtents font_platform_measure_text(void* ct_font_ref, const char* text,
+                                       int byte_len, float fallback_height) {
+    TextExtents ext = {0};
+    if (!ct_font_ref || !text || byte_len <= 0) return ext;
+    CTLineRef line = font_platform_create_measure_line(ct_font_ref, text, byte_len);
+    if (!line) return ext;
+
+    ext = font_platform_measure_line_range(line, CFRangeMake(kCFNotFound, 0), fallback_height);
 
     CFRelease(line);
     return ext;
+}
+
+bool font_platform_measure_text_range(void* ct_font_ref, const char* text,
+        int byte_len, int range_start, int range_length,
+        float fallback_height, TextExtents* extents) {
+    if (!ct_font_ref || !text || !extents || byte_len <= 0 || range_start < 0 ||
+        range_length < 0 || range_start > byte_len || range_length > byte_len - range_start) {
+        return false;
+    }
+    CFStringRef prefix = CFStringCreateWithBytes(NULL, (const UInt8*)text,
+        range_start, kCFStringEncodingUTF8, false);
+    CFStringRef range = CFStringCreateWithBytes(NULL, (const UInt8*)text + range_start,
+        range_length, kCFStringEncodingUTF8, false);
+    if (!prefix || !range) {
+        if (prefix) CFRelease(prefix);
+        if (range) CFRelease(range);
+        return false;
+    }
+    CFIndex first = CFStringGetLength(prefix);
+    CFIndex last = first + CFStringGetLength(range);
+    CFRelease(prefix);
+    CFRelease(range);
+    CTLineRef line = font_platform_create_measure_line(ct_font_ref, text, byte_len);
+    if (!line) return false;
+    *extents = font_platform_measure_line_range(line, CFRangeMake(first, last - first), fallback_height);
+    CFRelease(line);
+    return true;
 }
 
 #endif

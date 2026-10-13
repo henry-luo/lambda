@@ -10830,19 +10830,18 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
                        group_total_height >= row_height - 0.5f) {
                 group_extent = max(group_extent, row_height + group.row_gap);
             }
-            if (!group_adjacent_to_spanner && row_height > 0.0f &&
+            if (!group_adjacent_to_spanner &&
+                !multicol_has_escaping_spanner_in_flow(block) &&
+                row_height > 0.0f &&
                 group_extent > 0.0f) {
                 // css multicol-2 §4.2: fixed wrapped rows occupy complete
                 // row tracks even when balanced fragments end mid-row.
                 float row_pitch = row_height + group.row_gap;
-                float row_count = multicol_is_single_column_height_only(block) &&
-                        row_pitch > 0.0f
-                    ? ceilf((group_extent + group.row_gap) / row_pitch)
-                    : ceilf(group_extent / row_height);
-                float row_extent = row_count * row_height;
-                if (multicol_is_single_column_height_only(block)) {
-                    row_extent += (row_count - 1.0f) * group.row_gap;
-                }
+                // the physical extent already includes gutters; they consume
+                // row pitch, not an additional row of column content.
+                int row_count = (int)ceilf((group_extent + group.row_gap) / row_pitch); // INT_CAST_OK: count of positive fixed row tracks
+                float row_extent = multicol_fragment_grid_union_height(
+                    true, row_count, row_height, group.row_gap);
                 group_extent = max(group_extent, row_extent);
             }
         } else if (multicol_uses_fixed_wrapped_rows(block) &&

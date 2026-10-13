@@ -4664,7 +4664,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             for (; child; child = child->next_sibling) {
                 layout_flow_node(lycon, child);
             }
-            if (!lycon->line.is_line_start) { line_break(lycon); }
+            if (!lycon->line.is_line_start) { line_break(lycon, true); }
             layout_table_caption_content_finish(
                 lycon, caption, layout_box_metrics(caption).pad_border_v);
             caption->width = (float)caption_width;  // Preliminary width; final width set during positioning
@@ -6322,8 +6322,9 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
     bool collapse_ws = should_collapse_whitespace(cell);
     // CSS Text 3 §5.2: word-break: break-word behaves as overflow-wrap: anywhere
     CssEnum cell_overflow_wrap = CSS_VALUE_NORMAL;
+    CssEnum cell_word_break = CSS_VALUE_NORMAL;
     layout_resolve_inherited_text_wrap(static_cast<DomNode*>(cell),
-                                       &cell_overflow_wrap);
+                                       &cell_overflow_wrap, &cell_word_break);
     // CSS 2.1: For inline content, consecutive text nodes flow on the same line.
     float inline_run_max = 0.0f;  // Running sum for current inline sequence
     float float_run_max = 0.0f;   // Sum of side-by-side floats in the current run
@@ -6339,6 +6340,29 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
     if (cell->blk && cell->block_mut()->text_indent != 0.0f && isnan(cell->block_mut()->text_indent_percent)) {
         cell_text_indent = cell->block()->text_indent;
     }
+    bool first_line = true;
+    auto append_inline_widths = [&](const IntrinsicSizes& widths) {
+        if (widths.min_content > min_width) min_width = widths.min_content;
+        if (widths.has_forced_break) {
+            // forced lines remain separate at max-content, including across inline siblings.
+            inline_run_max += widths.first_line_max;
+            if (first_line && cell_text_indent > 0.0f) {
+                inline_run_max += cell_text_indent;
+                // an unwrapped later line must not acquire the first line's indent.
+                min_width = should_prevent_wrapping(cell)
+                    ? max(min_width, inline_run_max) : min_width + cell_text_indent;
+            }
+            table_intrinsic_flush_inline_run(
+                &inline_run_max, &float_run_max, &float_run_min, &max_width, &min_width,
+                &has_inline_content, &prev_ended_with_space);
+            max_width = max(max_width, widths.max_content);
+            inline_run_max = widths.last_line_max;
+            first_line = false;
+        } else {
+            inline_run_max += widths.max_content;
+        }
+        has_inline_content = true;
+    };
     for (DomNode* child = cell_elem->first_child; child; child = child->next_sibling) {
         if (child->is_text()) {
             const unsigned char* text = child->text_data();
@@ -6368,11 +6392,21 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                     measure_text = normalized_buffer;
                     measure_len = normalized_len;
                 }
-                TextIntrinsicWidths widths = layout_measure_text_intrinsic_widths(
-                    lycon, measure_text, measure_len, cell_text_transform, cell_font_variant,
-                    CSS_VALUE_NORMAL, cell_overflow_wrap, CSS_VALUE_NORMAL);
-                float text_max = (float)widths.max_content;  // PCW (max-content)
-                float text_min = (float)widths.min_content;  // MCW (min-content)
+                LayoutTextIntrinsicLineOptions line_options;
+                line_options.text_transform = cell_text_transform;
+                line_options.font_variant = cell_font_variant;
+                line_options.white_space = table_cell_white_space(cell);
+                line_options.overflow_wrap = cell_overflow_wrap;
+                line_options.word_break = cell_word_break;
+                line_options.start_offset = inline_run_max;
+                if (cell->blk) {
+                    if (cell->block()->tab_size >= 0.0f) {
+                        line_options.tab_size = cell->block()->tab_size;
+                    }
+                    line_options.tab_size_length = cell->block()->tab_size_length;
+                }
+                IntrinsicSizes widths = layout_measure_text_intrinsic_lines(
+                    lycon, measure_text, measure_len, line_options);
                 // Text normalization trims its edge spaces, while an inline
                 // child's intrinsic width already includes its trailing space.
                 if (collapse_ws && has_inline_content && !prev_end_space_measured &&
@@ -6380,9 +6414,7 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                      original_has_leading_ws) && lycon->font.style) {
                     inline_run_max += lycon->font.style->space_width;
                 }
-                inline_run_max += text_max;
-                has_inline_content = true;
-                if (text_min > min_width) min_width = text_min;
+                append_inline_widths(widths);
                 prev_ended_with_space = original_has_trailing_ws;
                 prev_end_space_measured = false;
                 pending_whitespace_only = false;
@@ -6467,10 +6499,21 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                         }
                     }
                 }
-                inline_run_max += child_max + inline_margin_h;
                 child_min += inline_margin_h;
                 if (child_min < 0) child_min = 0;
-                has_inline_content = true;
+                IntrinsicSizes inline_widths = child_sizes;
+                inline_widths.min_content = child_min;
+                inline_widths.max_content = child_max + inline_margin_h;
+                // atomic inline boxes retain their own formatting context's forced breaks.
+                if (layout_intrinsic_element_is_atomic_inline(child_elem)) {
+                    inline_widths.has_forced_break = false;
+                } else if (inline_widths.has_forced_break) {
+                    LayoutIntrinsicMarginPair margins =
+                        layout_intrinsic_horizontal_margin_pair(lycon, child_elem);
+                    inline_widths.first_line_max += margins.left;
+                    inline_widths.last_line_max += margins.right;
+                }
+                append_inline_widths(inline_widths);
                 prev_ended_with_space = layout_element_edge_has_whitespace(child, true);
                 prev_end_space_measured = prev_ended_with_space;
                 pending_whitespace_only = false;
@@ -6503,7 +6546,7 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
         }
     }
     // CSS 2.1 §16.1: text-indent adds to the first line of inline content.
-    if (cell_text_indent > 0 && has_inline_content) {
+    if (first_line && cell_text_indent > 0 && has_inline_content) {
         inline_run_max += cell_text_indent;
         min_width += cell_text_indent;
     }

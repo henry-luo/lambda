@@ -1,0 +1,331 @@
+% csvsimple.sty -- Lambda-owned binding of csvsimple (CTAN), its csvsimple-l3
+% interface, written from its manual rather than copied.
+%
+% Like every binding (vibe/latex/Lambda_Design_TeX_Engine.md §4) it expands user
+% commands into constructs the digester owns: \csvreader reads a CSV file beside the
+% document through the engine's path-gated \openin and puts back, for each line, the
+% line's assignments and the user's command list, framed by the table keys. The
+% tabular and its rows are then the ordinary kernel constructs. Reading a file and
+% setting keys are assignments, so \csvreader belongs in body text, not inside the
+% arguments of \section, \caption or \footnote.
+%
+% Profile: the keys below; \csvreader, \csvautotabular, \csvautobooktabular,
+% \csvautolongtable, \csvautobooklongtable, \csvset, \csvstyle, \csvnames;
+% \csvcoli…, \csvlinetotablerow, \thecsvrow. Fields are not unquoted, as in
+% csvsimple. Other keys raise the usual key error.
+\NeedsTeXFormat{LaTeX2e}
+% the version is csvsimple's first with the l3 interface
+\ProvidesExplPackage{csvsimple}{2026/10/13}{2.0.0}{Lambda binding of csvsimple}
+% l3 and legacy select csvsimple's two implementations; this binding is both
+\DeclareOption*{}
+\ProcessOptions\relax
+
+\cs_generate_variant:Nn \seq_set_split:Nnn { NVV }
+\cs_generate_variant:Nn \tl_replace_all:Nnn { NV }
+\cs_generate_variant:Nn \tl_if_blank:nF { V }
+
+\ior_new:N \g__csvsim_ior
+% \thecsvrow and \thecsvinputline; set as registers, so no counter command is echoed
+\newcounter{csvrow}
+\newcounter{csvinputline}
+
+\tl_new:N \l__csvsim_out_tl
+\tl_new:N \l__csvsim_line_tl
+\seq_new:N \l__csvsim_fields_seq
+\seq_new:N \l__csvsim_head_seq
+\seq_new:N \l__csvsim_names_seq
+\tl_new:N \l__csvsim_separator_tl
+\bool_new:N \l__csvsim_head_bool
+\bool_new:N \l__csvsim_head_names_bool
+\bool_new:N \l__csvsim_respect_bool
+\bool_new:N \l__csvsim_first_bool
+\bool_new:N \l__csvsim_late_first_set_bool
+\tl_new:N \l__csvsim_filter_tl
+\tl_new:N \l__csvsim_command_tl
+\tl_new:N \l__csvsim_before_reading_tl
+\tl_new:N \l__csvsim_after_reading_tl
+\tl_new:N \l__csvsim_before_table_tl
+\tl_new:N \l__csvsim_after_table_tl
+\tl_new:N \l__csvsim_table_head_tl
+\tl_new:N \l__csvsim_table_foot_tl
+\tl_new:N \l__csvsim_before_line_tl
+\tl_new:N \l__csvsim_before_first_line_tl
+\tl_new:N \l__csvsim_after_line_tl
+\tl_new:N \l__csvsim_after_first_line_tl
+\tl_new:N \l__csvsim_late_after_line_tl
+\tl_new:N \l__csvsim_late_after_first_line_tl
+\tl_new:N \l__csvsim_late_after_last_line_tl
+\tl_new:N \l__csvsim_auto_tl
+\tl_new:N \l__csvsim_prefix_tl
+\tl_new:N \l__csvsim_rule_tl
+\int_new:N \l__csvsim_count_int
+\int_new:N \l__csvsim_column_int
+
+% ---- keys ---------------------------------------------------------------------
+\cs_new_protected:Npn \__csvsim_table:nnn #1#2#3
+  {
+    \tl_set:Nn \l__csvsim_before_table_tl { #1 \begin{#2}{#3} }
+    \tl_set:Nn \l__csvsim_after_table_tl { \end{#2} }
+    \tl_set:Nn \l__csvsim_late_after_line_tl { \\ }
+  }
+\keys_define:nn { csvsim }
+  {
+    separator .choices:nn = { comma, semicolon, pipe, tab, space }
+      { \tl_set:Nx \l__csvsim_separator_tl
+          { \str_case:nn {#1} { {comma}{,} {semicolon}{;} {pipe}{|} {space}{~}
+              {tab}{\char_generate:nn {9} {12}} } }
+        % a tab is read as a character of its own, not as a space
+        \str_if_eq:nnT {#1} {tab} { \char_set_catcode_other:n {9} } },
+    separator .initial:n = comma,
+    head .bool_set:N = \l__csvsim_head_bool,
+    head .initial:n = true,
+    head .default:n = true,
+    no~head .code:n = \bool_set_false:N \l__csvsim_head_bool,
+    head~to~column~names .bool_set:N = \l__csvsim_head_names_bool,
+    head~to~column~names .default:n = true,
+    head~to~column~names~prefix .tl_set:N = \l__csvsim_prefix_tl,
+    column~names .code:n = \clist_map_inline:nn {#1} { \seq_put_right:Nn \l__csvsim_names_seq {##1} },
+    column~names~reset .code:n = \seq_clear:N \l__csvsim_names_seq,
+    column~count .code:n = { },
+    command .tl_set:N = \l__csvsim_command_tl,
+    before~reading .tl_set:N = \l__csvsim_before_reading_tl,
+    after~reading .tl_set:N = \l__csvsim_after_reading_tl,
+    before~table .tl_set:N = \l__csvsim_before_table_tl,
+    after~table .tl_set:N = \l__csvsim_after_table_tl,
+    table~head .tl_set:N = \l__csvsim_table_head_tl,
+    table~foot .tl_set:N = \l__csvsim_table_foot_tl,
+    before~line .tl_set:N = \l__csvsim_before_line_tl,
+    before~first~line .tl_set:N = \l__csvsim_before_first_line_tl,
+    after~line .tl_set:N = \l__csvsim_after_line_tl,
+    after~first~line .tl_set:N = \l__csvsim_after_first_line_tl,
+    late~after~line .tl_set:N = \l__csvsim_late_after_line_tl,
+    late~after~first~line .code:n =
+      { \tl_set:Nn \l__csvsim_late_after_first_line_tl {#1}
+        \bool_set_true:N \l__csvsim_late_first_set_bool },
+    late~after~last~line .tl_set:N = \l__csvsim_late_after_last_line_tl,
+    tabular .code:n = \__csvsim_table:nnn { } { tabular } {#1},
+    centered~tabular .code:n =
+      { \__csvsim_table:nnn { \begin{center} } { tabular } {#1}
+        \tl_put_right:Nn \l__csvsim_after_table_tl { \end{center} } },
+    longtable .code:n = \__csvsim_table:nnn { } { longtable } {#1},
+    no~table .code:n =
+      { \tl_clear:N \l__csvsim_before_table_tl \tl_clear:N \l__csvsim_after_table_tl
+        \tl_clear:N \l__csvsim_late_after_line_tl },
+    % filters compare the expansions of two texts once a line's macros are set
+    filter~equal .code:n = \tl_set:Nn \l__csvsim_filter_tl { \__csvsim_compare:nnn {T} #1 },
+    filter~not~equal .code:n = \tl_set:Nn \l__csvsim_filter_tl { \__csvsim_compare:nnn {F} #1 },
+    filter~strcmp .code:n = \tl_set:Nn \l__csvsim_filter_tl { \__csvsim_compare:nnn {T} #1 },
+    filter~not~strcmp .code:n = \tl_set:Nn \l__csvsim_filter_tl { \__csvsim_compare:nnn {F} #1 },
+    filter~accept~all .code:n = \tl_clear:N \l__csvsim_filter_tl,
+    % respect: the special characters of the data print as themselves
+    respect~all .code:n = \bool_set_true:N \l__csvsim_respect_bool,
+    respect~none .code:n = \bool_set_false:N \l__csvsim_respect_bool,
+    respect~percent .code:n = \bool_set_true:N \l__csvsim_respect_bool,
+    respect~sharp .code:n = \bool_set_true:N \l__csvsim_respect_bool,
+    respect~dollar .code:n = \bool_set_true:N \l__csvsim_respect_bool,
+    respect~and .code:n = \bool_set_true:N \l__csvsim_respect_bool,
+    respect~backslash .code:n = \bool_set_true:N \l__csvsim_respect_bool,
+    respect~underscore .code:n = \bool_set_true:N \l__csvsim_respect_bool,
+    respect~tilde .code:n = \bool_set_true:N \l__csvsim_respect_bool,
+    respect~circumflex .code:n = \bool_set_true:N \l__csvsim_respect_bool,
+    respect~leftbrace .code:n = \bool_set_true:N \l__csvsim_respect_bool,
+    respect~rightbrace .code:n = \bool_set_true:N \l__csvsim_respect_bool,
+    % the auto tables print the head line as the table's head row
+    autotabular .code:n = \tl_set:Nn \l__csvsim_auto_tl { {tabular}{|}{\hline}{\\\hline}{\hline}{\\\hline} },
+    autobooktabular .code:n = \tl_set:Nn \l__csvsim_auto_tl
+      { {tabular}{}{\toprule}{\\\midrule}{}{\\\bottomrule} },
+    autolongtable .code:n = \tl_set:Nn \l__csvsim_auto_tl
+      { {longtable}{|}{\hline}{\\\hline\endhead\hline\endfoot}{}{\\} },
+    autobooklongtable .code:n = \tl_set:Nn \l__csvsim_auto_tl
+      { {longtable}{}{\toprule}{\\\midrule\endhead\bottomrule\endfoot}{}{\\} },
+  }
+
+\NewDocumentCommand \csvset { m } { \keys_set:nn { csvsim } {#1} }
+\NewDocumentCommand \csvstyle { m m } { \keys_define:nn { csvsim } { #1 .meta:n = {#2} } }
+\NewDocumentCommand \csvnames { m m }
+  { \keys_define:nn { csvsim } { #1 .meta:n = { column~names = {#2} } } }
+
+% ---- reading ------------------------------------------------------------------
+% \csvreader[keys]{file}{assignments}{command list}: the keys hold for this call, and
+% the table it builds runs inside the same group
+\NewDocumentCommand \csvreader { O{} m m +m }
+  {
+    \group_begin:
+      \keys_set:nn { csvsim } { #1, command = {#4}, column~names = {#3} }
+      \__csvsim_read:n {#2}
+      \tl_use:N \l__csvsim_out_tl
+    \group_end:
+  }
+\cs_new_protected:Npn \__csvsim_auto:nnn #1#2#3
+  { \csvreader [ #1, #2 ] {#3} { } { \csvlinetotablerow } }
+\NewDocumentCommand \csvautotabular { O{} m } { \__csvsim_auto:nnn { autotabular } {#1} {#2} }
+\NewDocumentCommand \csvautobooktabular { O{} m } { \__csvsim_auto:nnn { autobooktabular } {#1} {#2} }
+\NewDocumentCommand \csvautolongtable { O{} m } { \__csvsim_auto:nnn { autolongtable } {#1} {#2} }
+\NewDocumentCommand \csvautobooklongtable { O{} m } { \__csvsim_auto:nnn { autobooklongtable } {#1} {#2} }
+
+% the next non-empty line as fields, or false at the end of the file
+\cs_new_protected:Npn \__csvsim_next:
+  {
+    \bool_set_false:N \l_tmpa_bool
+    \bool_until_do:nn { \l_tmpa_bool || \ior_if_eof_p:N \g__csvsim_ior }
+      {
+        \bool_if:NTF \l__csvsim_respect_bool
+          { \ior_str_get:NN \g__csvsim_ior \l__csvsim_line_tl \__csvsim_escape: }
+          {
+            \ior_get:NN \g__csvsim_ior \l__csvsim_line_tl
+            % TeX reads an empty line as \par
+            \tl_remove_all:Nn \l__csvsim_line_tl { \par }
+          }
+        \int_gincr:c { c@csvinputline }
+        \tl_if_blank:VF \l__csvsim_line_tl { \bool_set_true:N \l_tmpa_bool }
+      }
+    \bool_if:NT \l_tmpa_bool
+      { \seq_set_split:NVV \l__csvsim_fields_seq \l__csvsim_separator_tl \l__csvsim_line_tl }
+  }
+
+% data read as text: TeX's special characters become the commands that print them
+\cs_new_protected:Npn \__csvsim_escape:
+  {
+    \tl_replace_all:NVn \l__csvsim_line_tl \c_backslash_str { \textbackslash{} }
+    \tl_replace_all:NVn \l__csvsim_line_tl \c_left_brace_str { \{ }
+    \tl_replace_all:NVn \l__csvsim_line_tl \c_right_brace_str { \} }
+    \tl_replace_all:NVn \l__csvsim_line_tl \c_percent_str { \% }
+    \tl_replace_all:NVn \l__csvsim_line_tl \c_hash_str { \# }
+    \tl_replace_all:NVn \l__csvsim_line_tl \c_dollar_str { \$ }
+    \tl_replace_all:NVn \l__csvsim_line_tl \c_ampersand_str { \& }
+    \tl_replace_all:NVn \l__csvsim_line_tl \c_underscore_str { \_ }
+    \tl_replace_all:NVn \l__csvsim_line_tl \c_tilde_str { \textasciitilde{} }
+    \tl_replace_all:NVn \l__csvsim_line_tl \c_circumflex_str { \textasciicircum{} }
+  }
+
+% \__csvsim_set:nn {row} {{field}...}: a line's macros. \csvcoli… and \csvlinetotablerow
+% always; a name=\macro assignment by column name (from the head line) or number;
+% head to column names defines \<prefix><name>.
+\cs_new_protected:Npn \__csvsim_set:nn #1#2
+  {
+    \seq_clear:N \l__csvsim_fields_seq
+    \tl_map_inline:nn {#2} { \seq_put_right:Nn \l__csvsim_fields_seq {##1} }
+    \__csvsim_define:n {#1}
+  }
+% the macros of row #1 from the fields just read
+\cs_new_protected:Npn \__csvsim_define:n #1
+  {
+    \int_gset:cn { c@csvrow } {#1}
+    \seq_map_indexed_inline:Nn \l__csvsim_fields_seq
+      { \tl_set:cn { csvcol \int_to_roman:n {##1} } {##2} }
+    \tl_set:Nx \csvlinetotablerow { \seq_use:Nn \l__csvsim_fields_seq { & } }
+    \seq_map_inline:Nn \l__csvsim_names_seq { \__csvsim_assign:w ##1 \q_stop }
+    \bool_if:NT \l__csvsim_head_names_bool
+      {
+        \seq_map_indexed_inline:Nn \l__csvsim_head_seq
+          { \tl_set:cx { \l__csvsim_prefix_tl ##2 } { \seq_item:Nn \l__csvsim_fields_seq {##1} } }
+      }
+  }
+\cs_new_protected:Npn \__csvsim_assign:w #1 = #2 \q_stop
+  {
+    \tl_set:Nx \l_tmpa_tl { \tl_trim_spaces:n {#1} }
+    \int_zero:N \l__csvsim_column_int
+    \exp_args:NnV \regex_match:nnTF { \A\d+\Z } \l_tmpa_tl
+      { \int_set:Nn \l__csvsim_column_int { \l_tmpa_tl } }
+      {
+        \seq_map_indexed_inline:Nn \l__csvsim_head_seq
+          { \str_if_eq:VnT \l_tmpa_tl {##2} { \int_set:Nn \l__csvsim_column_int {##1} } }
+      }
+    \int_compare:nNnT \l__csvsim_column_int > 0
+      { \tl_set:Nx #2 { \seq_item:Nn \l__csvsim_fields_seq { \l__csvsim_column_int } } }
+  }
+
+% a filter: #1 keeps the line when the texts are (T) or are not (F) equal
+\cs_new_protected:Npn \__csvsim_compare:nnn #1#2#3
+  {
+    \str_if_eq:eeTF {#2} {#3}
+      { \bool_set:Nn \l_tmpb_bool { \str_if_eq_p:nn {#1} {T} } }
+      { \bool_set:Nn \l_tmpb_bool { \str_if_eq_p:nn {#1} {F} } }
+  }
+
+% the fields of the current line as one {{field}...} argument
+\cs_new:Npn \__csvsim_braced: { \seq_map_function:NN \l__csvsim_fields_seq \__csvsim_brace:n }
+\cs_new:Npn \__csvsim_brace:n #1 { { \exp_not:n {#1} } }
+
+\cs_new_protected:Npn \__csvsim_read:n #1
+  {
+    \tl_clear:N \l__csvsim_out_tl
+    \int_gzero:c { c@csvinputline }
+    \tl_if_empty:NF \l__csvsim_auto_tl { \exp_after:wN \__csvsim_auto_table:nnnnnn \l__csvsim_auto_tl }
+    \bool_if:NF \l__csvsim_late_first_set_bool
+      { \tl_set_eq:NN \l__csvsim_late_after_first_line_tl \l__csvsim_late_after_line_tl }
+    \tl_put_right:NV \l__csvsim_out_tl \l__csvsim_before_reading_tl
+    \ior_open:Nn \g__csvsim_ior {#1}
+    \seq_clear:N \l__csvsim_head_seq
+    \bool_if:NT \l__csvsim_head_bool
+      {
+        \__csvsim_next:
+        \seq_set_eq:NN \l__csvsim_head_seq \l__csvsim_fields_seq
+      }
+    \tl_if_empty:NF \l__csvsim_auto_tl { \__csvsim_auto_spec: }
+    \tl_put_right:NV \l__csvsim_out_tl \l__csvsim_before_table_tl
+    % the head line's macros are current in the table head (the auto tables print it)
+    \tl_put_right:Nx \l__csvsim_out_tl
+      { \exp_not:N \__csvsim_set:nn {0} { \__csvsim_braced: } \exp_not:V \l__csvsim_table_head_tl }
+    \int_zero:N \l__csvsim_count_int
+    \bool_set_true:N \l__csvsim_first_bool
+    \bool_do_until:nn { \ior_if_eof_p:N \g__csvsim_ior }
+      {
+        \__csvsim_next:
+        \bool_if:NT \l_tmpa_bool { \__csvsim_line: }
+      }
+    \ior_close:N \g__csvsim_ior
+    \bool_if:NF \l__csvsim_first_bool
+      { \tl_put_right:NV \l__csvsim_out_tl \l__csvsim_late_after_last_line_tl }
+    \tl_put_right:NV \l__csvsim_out_tl \l__csvsim_table_foot_tl
+    \tl_put_right:NV \l__csvsim_out_tl \l__csvsim_after_table_tl
+    \tl_put_right:NV \l__csvsim_out_tl \l__csvsim_after_reading_tl
+  }
+
+% one data line: its macros are set now for the filter and again where its command
+% list runs
+\cs_new_protected:Npn \__csvsim_line:
+  {
+    \__csvsim_define:n { \int_eval:n { \l__csvsim_count_int + 1 } }
+    \bool_set_true:N \l_tmpb_bool
+    \l__csvsim_filter_tl
+    \bool_if:NT \l_tmpb_bool
+      {
+        \int_incr:N \l__csvsim_count_int
+        \tl_put_right:Nx \l__csvsim_out_tl
+          {
+            \exp_not:N \__csvsim_set:nn { \int_use:N \l__csvsim_count_int } { \__csvsim_braced: }
+            \int_compare:nNnT \l__csvsim_count_int = 2 { \exp_not:V \l__csvsim_late_after_first_line_tl }
+            \int_compare:nNnT \l__csvsim_count_int > 2 { \exp_not:V \l__csvsim_late_after_line_tl }
+            \bool_if:NT \l__csvsim_first_bool { \exp_not:V \l__csvsim_before_first_line_tl }
+            \exp_not:V \l__csvsim_before_line_tl
+            \exp_not:V \l__csvsim_command_tl
+            \bool_if:NTF \l__csvsim_first_bool
+              { \exp_not:V \l__csvsim_after_first_line_tl } { \exp_not:V \l__csvsim_after_line_tl }
+          }
+        \bool_set_false:N \l__csvsim_first_bool
+      }
+  }
+
+% {environment}{rule}{top}{head end}{foot rule}{foot}: an auto table, l columns with
+% the rule between them
+\cs_new_protected:Npn \__csvsim_auto_table:nnnnnn #1#2#3#4#5#6
+  {
+    \tl_set:Nn \l__csvsim_before_table_tl { \begin{#1} }
+    \tl_set:Nn \l__csvsim_rule_tl {#2}
+    \tl_set:Nn \l__csvsim_table_head_tl { #3 \csvlinetotablerow #4 }
+    \tl_set:Nn \l__csvsim_table_foot_tl { #6 }
+    \tl_set:Nn \l__csvsim_after_table_tl { \end{#1} }
+    \tl_set:Nn \l__csvsim_late_after_line_tl { \\ }
+    \tl_set_eq:NN \l__csvsim_late_after_first_line_tl \l__csvsim_late_after_line_tl
+    \bool_set_true:N \l__csvsim_head_bool
+  }
+% the auto table's column preamble, one l column per head field
+\cs_new_protected:Npn \__csvsim_auto_spec:
+  {
+    \tl_put_right:Nx \l__csvsim_before_table_tl
+      {
+        { \exp_not:V \l__csvsim_rule_tl
+          \prg_replicate:nn { \seq_count:N \l__csvsim_head_seq } { l \exp_not:V \l__csvsim_rule_tl } }
+      }
+  }

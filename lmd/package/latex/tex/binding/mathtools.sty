@@ -1,0 +1,68 @@
+% mathtools.sty -- Lambda-owned binding of the mathtools macro layer (CTAN
+% mathtools 1.31), written from its manual rather than copied.
+%
+% Like every binding (vibe/latex/Lambda_Design_TeX_Engine.md §4) it expands user
+% commands into math the digester owns, and stays expandable at use time.
+% Elsewhere mathtools is not a macro layer: its colon relations are math symbols,
+% its environments are parsed math environments (lambda.doc.math), and tag forms
+% (\newtagform, \usetagform) are equation numbering owned by the script adapter,
+% so this file leaves those commands to pass through.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{mathtools}[2026/10/13 v1.31 Lambda binding]
+% the options adjust TeX spacing and amsmath fixes, which a laid-out formula has no use for
+\DeclareOption*{}
+\ProcessOptions\relax
+
+% ---- paired delimiters ------------------------------------------------------
+% \DeclarePairedDelimiterXPP\cmd[n]{pre}{left}{right}{post}{body}: \cmd{a}...
+% keeps natural size, \cmd*{a}... sizes to the content, \cmd[\big]{a}... takes the
+% given size. \delimsize in the body becomes that size (\middle when starred).
+% Each size gets its own body macro, made once in the preamble, so a call needs no
+% assignment and also works inside \section or \caption arguments.
+\def\delimsize{}
+\long\def\DeclarePairedDelimiterXPP#1[#2]#3#4#5#6#7{%
+  \mathtools@variant{#1}{plain}{}{#2}{#7}%
+  \mathtools@variant{#1}{star}{\middle}{#2}{#7}%
+  \mathtools@variant{#1}{big}{\big}{#2}{#7}%
+  \mathtools@variant{#1}{Big}{\Big}{#2}{#7}%
+  \mathtools@variant{#1}{bigg}{\bigg}{#2}{#7}%
+  \mathtools@variant{#1}{Bigg}{\Bigg}{#2}{#7}%
+  \DeclareDocumentCommand#1{ s o }%
+    {\mathtools@grab{#2}{}{\mathtools@emit{##1}{##2}{#3}{#4}{#5}{#6}{\string#1}}}}
+\long\def\DeclarePairedDelimiterX#1[#2]#3#4#5{\DeclarePairedDelimiterXPP#1[#2]{}{#3}{#4}{}{#5}}
+\def\DeclarePairedDelimiter#1#2#3{\DeclarePairedDelimiterX#1[1]{#2}{#3}{##1}}
+% \mathtools@variant\cmd{suffix}{size}{n}{body}: \mathtools@\cmd@suffix takes the n
+% arguments and holds the body with every top-level \delimsize replaced by size
+\long\def\mathtools@variant#1#2#3#4#5{%
+  \toks@{}\mathtools@subst{#3}#5\delimsize\mathtools@end
+  \expandafter\mathtools@define\csname mathtools@\string#1@#2\endcsname{#4}}
+\long\def\mathtools@subst#1#2\delimsize#3\mathtools@end{%
+  \toks@\expandafter{\the\toks@#2}%
+  \ifx\relax#3\relax\else\toks@\expandafter{\the\toks@#1}\mathtools@subst{#1}#3\mathtools@end\fi}
+\def\mathtools@define#1#2{\expandafter\newcommand\expandafter#1\expandafter
+  [\expandafter#2\expandafter]\expandafter{\the\toks@}}
+% \mathtools@grab{n}{collected}{continuation}: reads n braced arguments, then
+% hands them to the continuation as one group
+\def\mathtools@grab#1#2#3{\ifnum#1=0 \expandafter\@firstoftwo\else\expandafter\@secondoftwo\fi
+  {#3{#2}}{\mathtools@grabone{#1}{#2}{#3}}}
+\long\def\mathtools@grabone#1#2#3#4{\expandafter\mathtools@grab\expandafter{\the\numexpr#1-1}{#2{#4}}{#3}}
+% \mathtools@emit{star}{size}{pre}{left}{right}{post}{\cmd}{arguments}
+\long\def\mathtools@emit#1#2#3#4#5#6#7#8{#3%
+  \IfBooleanTF{#1}{\left#4\csname mathtools@#7@star\endcsname#8\right#5}%
+    {\IfNoValueTF{#2}{\mathopen{#4}\csname mathtools@#7@plain\endcsname#8\mathclose{#5}}%
+      {\mathopen{#2#4}\csname mathtools@#7@\expandafter\@gobble\string#2\endcsname#8\mathclose{#2#5}}}%
+  #6}
+
+% ---- other math macros ------------------------------------------------------
+\newcommand\prescript[3]{{}^{#1}_{#2}#3}
+\newcommand\splitfrac[2]{\genfrac{}{}{0pt}{1}{#1\quad}{\quad#2}}
+\newcommand\splitdfrac[2]{\genfrac{}{}{0pt}{0}{#1\quad}{\quad#2}}
+% cramping, smashed limits and adjusted limit baselines only move a script
+% slightly; the formula keeps its content
+\DeclareDocumentCommand\cramped{ o m }{\IfNoValueTF{#1}{#2}{{#1#2}}}
+\DeclareDocumentCommand\smashoperator{ o m }{#2}
+\def\adjustlimits#1_#2#3_#4{#1_{#2}#3_{#4}}
+\newcommand\mathmbox[1]{{#1}}
+% \MoveEqLeft[n] starts a line n em left of the alignment point
+\DeclareDocumentCommand\MoveEqLeft{ O{2} }{\hspace{#1em}&\hspace{-#1em}}
+\newcommand\shortintertext[1]{\intertext{#1}}

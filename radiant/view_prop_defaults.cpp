@@ -61,6 +61,7 @@ static FontProp make_font_prop_default() {
     value.font_weight_numeric = 400;
     value.font_variant = CSS_VALUE_NORMAL;
     value.font_size_from_medium = true;
+    value.text_deco_color_current = true;
     value.text_emphasis_color_current = true;
     value.text_deco_skip_ink = CSS_VALUE_AUTO;
     value.text_underline_position = CSS_VALUE_AUTO;

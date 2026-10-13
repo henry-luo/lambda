@@ -1,0 +1,20 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; }
+.row { font-family: Ahem; font-size: 0; white-space: pre; width: 200px; }
+span { font-size: 20px; }
+#length { tab-size: 100px; }
+#number { tab-size: 8; }
+.empty { display: inline-block; width: 50px; }
+</style>
+<div id="result">
+<div class="row" id="forced"><span>XX</span>&#10;<span id="after-lf">XX</span></div>
+<div class="row" id="length"><span>XX</span>&#9;<span id="after-length-tab">XX</span></div>
+<div class="row" id="number"><span>XX</span>&#9;<span id="after-number-tab">XX</span></div>
+<div class="row" id="ordinary"><span>XX</span>abc<span id="after-zero-glyphs">XX</span></div>
+<div style="font-size: 0;">
+  <div class="empty" id="empty-first"></div>
+  <div class="empty" id="empty-second"></div>
+</div>
+</div>

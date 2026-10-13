@@ -1,12 +1,14 @@
 // Caption layout and options share one profile for floats and subfloats.
 import util: ~~.util
+import font_decl: ~~.elements.font_decl
+import floats: ~~.floats
 
 pub let OPTIONS = ["font", "labelfont", "textfont", "labelsep", "justification", "skip", "labelformat"]
 let FONTS = {small: "font-size:90%;", footnotesize: "font-size:80%;",
     scriptsize: "font-size:70%;", normalsize: "font-size:100%;",
     large: "font-size:120%;", bf: "font-weight:bold;", it: "font-style:italic;",
-    sf: "font-family:sans-serif;", rm: "font-family:serif;",
-    tt: "font-family:monospace;", normalfont: "font-style:normal;font-weight:normal;"}
+    sf: font_decl.SANS_CSS ++ ";", rm: font_decl.SERIF_CSS ++ ";",
+    tt: font_decl.MONO_CSS ++ ";", normalfont: "font-style:normal;font-weight:normal;"}
 
 fn font_parts(value) {
     if (value == null) [] else util.split_top_level(util.unwrap_braces(value), ",")
@@ -64,16 +66,19 @@ fn separator(value, sub) {
     }
 }
 
-pub fn render(content, kind, ordinal_text, config, starred, offset) {
+// kinds: the document's float kinds, for the caption name of package and \newfloat floats
+pub fn render(content, kind, ordinal_text, config, starred, offset, kinds = null) {
     let sub = starts_with(kind, "sub")
     let parent = if (kind == "subfigure") "figure" else if (kind == "subtable") "table" else kind
-    let opts = {*:config.global, *:config[parent], *:config[kind]}
+    // package and \newfloat kinds have no kind-specific caption options
+    let opts = {*:config.global, *:(if (config[parent] == null) {} else config[parent]),
+        *:(if (config[kind] == null) {} else config[kind])}
     if (len(invalid_options(opts)) > 0)
         util.unsupported_element("caption", "Unsupported caption options", offset)
     else {
         let label = if (starred or opts.labelformat == "empty") ""
             else if (sub) if (opts.labelformat == "simple") ordinal_text else "(" ++ ordinal_text ++ ")"
-            else (if (kind == "table") "Table " else "Figure ") ++ ordinal_text
+            else floats.kind_name(if (kinds == null) floats.KINDS else kinds, parent) ++ " " ++ ordinal_text
         let align = match opts.justification {
             case "raggedright": "left"
             case "raggedleft": "right"

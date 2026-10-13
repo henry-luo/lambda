@@ -1345,17 +1345,17 @@ void rdt_path_free(RdtPath* p) {
 }
 
 RdtPath* rdt_path_clone(const RdtPath* src) {
-    if (!src) return nullptr;
-    RdtPath* dst = (RdtPath*)mem_alloc(sizeof(RdtPath), MEM_CAT_RENDER);
-    dst->count = src->count;
-    dst->capacity = src->count;  // tight allocation
+    if (!src || src->count < 0 || (src->count > 0 && !src->entries)) return nullptr;
+    RdtPath* dst = rdt_path_new();
+    if (!dst) return nullptr;
     if (src->count > 0) {
-        size_t sz = src->count * sizeof(RdtPath::Entry);
-        dst->entries = (RdtPath::Entry*)mem_alloc(sz, MEM_CAT_RENDER);
-        memcpy(dst->entries, src->entries, sz);
-    } else {
-        dst->entries = nullptr;
+        size_t size = (size_t)src->count * sizeof(RdtPath::Entry);
+        dst->entries = (RdtPath::Entry*)mem_alloc(size, MEM_CAT_RENDER);
+        // an incomplete clone cannot publish a path or dereference a failed payload allocation.
+        if (!dst->entries) { rdt_path_free(dst); return nullptr; }
+        memcpy(dst->entries, src->entries, size);
     }
+    dst->count = dst->capacity = src->count;
     return dst;
 }
 
@@ -2094,8 +2094,7 @@ bool rdt_path_get_rect_bound(const RdtPath* path, const RdtMatrix* transform, Bo
     return true;
 }
 
-static bool vector_raster_fill_rect(RdtVectorImpl* impl, float x, float y, float w, float h, Color color) {
-    if (color.a == 255 || w <= 0.0f || h <= 0.0f) return false;
+static bool vector_raster_clip_rect(RdtVectorImpl* impl, float x, float y, float w, float h, Bound* bounds) {
     float left = x, top = y, right = x + w, bottom = y + h;
     if (!isfinite(left) || !isfinite(top) || !isfinite(right) || !isfinite(bottom)) return false;
     for (int index = 0; index < s_clip_depth; index++) {
@@ -2109,11 +2108,20 @@ static bool vector_raster_fill_rect(RdtVectorImpl* impl, float x, float y, float
     top = fmaxf(top - impl->tile_offset_y, 0.0f);
     right = fminf(right - impl->tile_offset_x, (float)impl->width);
     bottom = fminf(bottom - impl->tile_offset_y, (float)impl->height);
-    if (right <= left || bottom <= top) return true;
+    if (right <= left || bottom <= top) { *bounds = {}; return true; }
     if (floorf(left) != left || floorf(top) != top || floorf(right) != right || floorf(bottom) != bottom) return false;
+    *bounds = {left, top, right, bottom};
+    return true;
+}
+
+static bool vector_raster_fill_rect(RdtVectorImpl* impl, float x, float y, float w, float h, Color color) {
+    if (color.a == 255 || w <= 0.0f || h <= 0.0f) return false;
+    Bound bounds;
+    if (!vector_raster_clip_rect(impl, x, y, w, h, &bounds)) return false;
+    if (bounds.right <= bounds.left || bounds.bottom <= bounds.top) return true;
     // an integral rectangle intersection needs no coverage rasterization; flush before exact source-over on the borrowed target.
     tvg_flush_batch_scene(impl);
-    Rect rect = {left, top, right - left, bottom - top};
+    Rect rect = {bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top};
     ImageSurface target = {};
     target.pixels = impl->pixels; target.width = impl->width; target.height = impl->height;
     target.pitch = impl->stride * 4; target.alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
@@ -2157,6 +2165,22 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
         }
         lam::Temp<uint32_t> owned_projection(projected);
         if (!projected) return;
+        Bound clip;
+        if (vector_raster_clip_rect(impl, rect.x, rect.y, rect.width, rect.height, &clip)) {
+            // projected samples already own pixel coverage; use the common rounded source-over compositor.
+            tvg_flush_batch_scene(impl);
+            ImageSurface source = {}, target = {};
+            source.pixels = projected;
+            source.width = (int)rect.width; // INT_CAST_OK: projected buffer pixel columns.
+            source.height = (int)rect.height; // INT_CAST_OK: projected buffer pixel rows.
+            source.pitch = source.width * 4; source.alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
+            target.pixels = impl->pixels; target.width = impl->width; target.height = impl->height;
+            target.pitch = impl->stride * 4; target.alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
+            Rect destination = {rect.x - impl->tile_offset_x, rect.y - impl->tile_offset_y, rect.width, rect.height};
+            RasterPaintContext raster = raster_paint_context(&target, &clip, nullptr, 0);
+            raster_blit_surface_scaled(&raster, &source, nullptr, &destination, SCALE_MODE_NEAREST, opacity);
+            return;
+        }
         Tvg_Paint picture = tvg_picture_new();
         int width = (int)rect.width, height = (int)rect.height; // INT_CAST_OK: projected buffer pixel dimensions
         if (!picture || tvg_picture_load_raw(picture, projected, width, height,

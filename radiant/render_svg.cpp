@@ -165,51 +165,6 @@ static void svg_color_to_string(Color color, char* result) {
     paint_svg_color_to_string(color, result, 32);
 }
 
-static void svg_render_text_emphasis_marks(SvgRenderContext* ctx,
-                                           const char* content, float x, float y,
-                                           float font_size, float word_spacing,
-                                           float cjk_spacing) {
-    if (!ctx || !content || !ctx->font.style ||
-        !ctx->font.style->text_emphasis_enabled ||
-        !font_box_handle(&ctx->font)) return;
-    const FontProp* font = ctx->font.style;
-    Color mark_color = font->text_emphasis_color_current
-        ? ctx->color : font->text_emphasis_color;
-    char color_string[32];
-    svg_color_to_string(mark_color, color_string);
-    FontStyleDesc style = font_style_desc_from_prop(font);
-    const char* cursor = content;
-    const char* end = content + strlen(content);
-    uint32_t previous = 0;
-    while (cursor < end) {
-        uint32_t codepoint = 0;
-        int bytes = str_utf8_decode(cursor, (size_t)(end - cursor), &codepoint);
-        if (bytes <= 0) { cursor++; continue; }
-        cursor += bytes;
-        if (text_codepoint_has_zero_advance(codepoint)) continue;
-        if (text_justify_cjk_gap(previous, codepoint)) x += cjk_spacing;
-        previous = codepoint;
-        float advance = font->space_width;
-        if (codepoint == ' ') advance += word_spacing;
-        else {
-            LoadedGlyph* glyph = font_load_glyph(
-                font_box_handle(&ctx->font), &style, codepoint, false);
-            if (glyph) advance = glyph->advance_x * render_font_pixel_to_css(font_box_handle(&ctx->font));
-        }
-        if (text_emphasis_marks_codepoint(codepoint)) {
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<text x=\"%.2f\" y=\"%.2f\" text-anchor=\"middle\" "
-                "font-family=\"%s\" font-size=\"%.2f\" fill=\"%s\">&#x%X;</text>\n",
-                x + advance * 0.5f,
-                y + (font->text_emphasis_under ? font_size * 1.35f : 0.0f),
-                font_handle_get_family_name(font_box_handle(&ctx->font)),
-                font_size * 0.5f, color_string, font->text_emphasis_mark);
-        }
-        x += advance + text_character_spacing(font, codepoint);
-    }
-}
-
 static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     if (!text || !text->text_data()) return;
     unsigned char* str = text->text_data();
@@ -292,7 +247,7 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     // Use CSS font-size from style, fallback to 16 if not available
     float font_size = ctx->font.style->font_size > 0 ? ctx->font.style->font_size : 16;
     // Use font ascender from FontProp (already in pixels), or fallback to 80% of font_size
-    float baseline_y = y + (ctx->font.style->ascender > 0 ? ctx->font.style->ascender : font_size * 0.8f);
+    float baseline_y = render_text_baseline_y(&ctx->font, y);
 
     int font_weight = 0;
     if (ctx->font.style->font_weight_numeric > 0) {
@@ -331,138 +286,59 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
             parent_elem, &run, {ctx->block.x, ctx->block.y, parent_elem->width, parent_elem->height})) {
         svg_lower_paint_list(ctx);
     }
-    if (has_text_shadow && render_paint_text_shadows(svg_active_paint_list(ctx), ctx->ui_context,
-            &run, parent_elem->fontp()->text_shadow)) svg_lower_paint_list(ctx);
+    RenderTextDecorationSource decoration = {str, text_rect, ctx->block.x, ctx->block.y};
+    if (has_text_shadow) {
+        if (!render_paint_text_shadows(svg_active_paint_list(ctx), ctx->ui_context,
+                &run, parent_elem->fontp()->text_shadow, &decoration)) {
+            ctx->paint_svg_stats.unsupported_count++;
+            log_error("[SVG_TEXT_SHADOW] cannot record complete shadow geometry");
+        }
+        svg_lower_paint_list(ctx);
+    }
     // background glyph geometry is shared by ordinary, decorated and shadowed text.
-    if (!has_text_deco) {
-        // effect fallback retains commands until rasterization, so its paint list
-        // must own text that immediate SVG lowering would otherwise consume.
-        if (ctx->effect_fallback.active) run.owned_text = lam::own((const char*)text_content.release());
-        // a receiving SVG viewer may substitute this face and change fitted glyph bounds (FT-15).
-        RdtPath* outline = !ctx->effect_fallback.active
-            ? render_path_create_text_run(&run, ctx->ui_context ? ctx->ui_context->font_ctx.get() : nullptr)
-            : nullptr;
-        if (outline) {
-            // outlines retain accessible text without asking the viewer to paint a replacement font.
-            RenderSemanticGroup label = {}; label.title = run.text;
-            paint_begin_semantic_group(svg_active_paint_list(ctx), &label);
-            int index = paint_list_count(svg_active_paint_list(ctx));
-            paint_fill_path(svg_active_paint_list(ctx), outline, run.color, RDT_FILL_WINDING, nullptr);
-            paint_end_semantic_group(svg_active_paint_list(ctx));
-            svg_lower_owned_path(ctx, index, PAINT_FILL_PATH, outline);
-        } else {
-            paint_glyph_run(svg_active_paint_list(ctx), &run);
-            svg_lower_paint_list(ctx);
+    if (has_text_deco) {
+        if (!render_paint_text_decorations(svg_active_paint_list(ctx), &ctx->font, str, text_rect,
+            ctx->block.x, ctx->block.y, ctx->color, true)) {
+            ctx->paint_svg_stats.unsupported_count++;
+            log_error("[SVG_TEXT_DECORATION] cannot record complete decoration geometry");
         }
-
-        // run.text stays valid here: text_content, or the command's owned copy
-        svg_render_text_emphasis_marks(ctx, run.text, x, y,
-                                       font_size, word_spacing, cjk_spacing);
-        continue;
+        svg_lower_paint_list(ctx);
+    }
+    // effect fallback retains commands until rasterization, so its paint list
+    // must own text that immediate SVG lowering would otherwise consume.
+    if (ctx->effect_fallback.active) run.owned_text = lam::own((const char*)text_content.release());
+    // a receiving SVG viewer may substitute this face and change fitted glyph bounds (FT-15).
+    RdtPath* outline = !ctx->effect_fallback.active
+        ? render_path_create_text_run(&run, ctx->ui_context ? ctx->ui_context->font_ctx.get() : nullptr)
+        : nullptr;
+    if (outline) {
+        // outlines retain accessible text without asking the viewer to paint a replacement font.
+        RenderSemanticGroup label = {}; label.title = run.text;
+        paint_begin_semantic_group(svg_active_paint_list(ctx), &label);
+        int index = paint_list_count(svg_active_paint_list(ctx));
+        paint_fill_path(svg_active_paint_list(ctx), outline, run.color, RDT_FILL_WINDING, nullptr);
+        paint_end_semantic_group(svg_active_paint_list(ctx));
+        svg_lower_owned_path(ctx, index, PAINT_FILL_PATH, outline);
+    } else {
+        paint_glyph_run(svg_active_paint_list(ctx), &run);
+        svg_lower_paint_list(ctx);
     }
 
-    size_t transformed_len = strlen(text_content.get());
-    StrBuf* escaped_text = strbuf_new_cap(transformed_len * 2);
-    escape_append(escaped_text, text_content.get(), transformed_len, ESCAPE_RULES_HTML_TEXT,
-                  ESCAPE_RULES_HTML_TEXT_COUNT, ESCAPE_CTRL_NONE);
-
-    svg_indent(ctx);
-
-    char color_str[32];
-    svg_color_to_string(ctx->color, color_str);
-
-    strbuf_append_format(ctx->svg_content,
-        "<text x=\"%.2f\" y=\"%.2f\" font-family=\"%s\" font-size=\"%.0f\" fill=\"%s\"",
-        x, baseline_y,
-        font_box_handle(&ctx->font) ? font_handle_get_family_name(font_box_handle(&ctx->font)) : "Arial",
-        font_size,
-        color_str);
-
-    // Add font style attributes
-    // Use font_weight_numeric (100-900) when available, otherwise map CssEnum keyword
-    if (font_weight > 0 && font_weight != 400) {
-        strbuf_append_format(ctx->svg_content, " font-weight=\"%d\"", font_weight);
+    if (!render_paint_text_emphasis(svg_active_paint_list(ctx),
+            ctx->ui_context ? ctx->ui_context->font_ctx.get() : nullptr, &run)) {
+        ctx->paint_svg_stats.unsupported_count++;
+        log_error("[SVG_TEXT_EMPHASIS] cannot record selected mark geometry");
     }
-
-    if (italic) {
-        strbuf_append_str(ctx->svg_content, " font-style=\"italic\"");
-    }
-
-    float used_word_spacing = ctx->font.style->word_spacing + word_spacing;
-    if (fabsf(used_word_spacing) > 0.01f) {
-        strbuf_append_format(ctx->svg_content, " word-spacing=\"%.2f\"", used_word_spacing);
-    }
-    if (fabsf(ctx->font.style->letter_spacing) > 0.01f) {
-        strbuf_append_format(ctx->svg_content, " letter-spacing=\"%.2f\"", ctx->font.style->letter_spacing);
-    }
-    paint_svg_append_cjk_dx(ctx->svg_content, text_content.get(),
-                            (int)strlen(text_content.get()), cjk_spacing); // INT_CAST_OK: export segment byte length is bounded by TextRect input.
-
-    // Keep decoration and shadow in one style attribute so both survive SVG parsing.
-    if (has_text_deco || has_text_shadow) {
-        strbuf_append_str(ctx->svg_content, " style=\"");
-        if (has_text_deco) {
-            strbuf_append_format(ctx->svg_content,
-                "text-decoration: %s;", deco_line);
-            if (ctx->font.style->text_deco_color.a > 0) {
-                Color c = ctx->font.style->text_deco_color;
-                strbuf_append_format(ctx->svg_content,
-                    " text-decoration-color: rgb(%d,%d,%d);", c.r, c.g, c.b);
-            }
-            if (ctx->font.style->text_underline_offset_mode == 1) {
-                strbuf_append_format(ctx->svg_content,
-                    " text-underline-offset: %.2fpx;",
-                    ctx->font.style->text_underline_offset);
-            } else if (ctx->font.style->text_underline_offset_mode == 2) {
-                strbuf_append_format(ctx->svg_content,
-                    " text-underline-offset: %.2f%%;",
-                    ctx->font.style->text_underline_offset);
-            }
-            CssEnum underline_position = ctx->font.style->text_underline_position;
-            CssEnum underline_side = ctx->font.style->text_underline_side;
-            if (underline_position != CSS_VALUE_AUTO ||
-                underline_side != CSS_VALUE__UNDEF) {
-                const CssEnumInfo* position_info = css_enum_info(underline_position);
-                const CssEnumInfo* side_info = css_enum_info(underline_side);
-                strbuf_append_str(ctx->svg_content, " text-underline-position:");
-                if (position_info && underline_position != CSS_VALUE_AUTO)
-                    strbuf_append_format(ctx->svg_content, " %s", position_info->name);
-                if (side_info && underline_side != CSS_VALUE__UNDEF)
-                    strbuf_append_format(ctx->svg_content, " %s", side_info->name);
-                strbuf_append_char(ctx->svg_content, ';');
-            }
-            if (ctx->font.style->text_deco_skip_ink == CSS_VALUE_NONE ||
-                ctx->font.style->text_deco_skip_ink == CSS_VALUE_ALL) {
-                strbuf_append_format(ctx->svg_content,
-                    " text-decoration-skip-ink: %s;",
-                    ctx->font.style->text_deco_skip_ink == CSS_VALUE_NONE
-                        ? "none" : "all");
-            }
+    svg_lower_paint_list(ctx);
+    if (has_text_deco) {
+        if (!render_paint_text_decorations(svg_active_paint_list(ctx), &ctx->font, str, text_rect,
+            ctx->block.x, ctx->block.y, ctx->color, false)) {
+            ctx->paint_svg_stats.unsupported_count++;
+            log_error("[SVG_TEXT_DECORATION] cannot record complete decoration geometry");
         }
-        if (has_text_shadow) {
-            strbuf_append_str(ctx->svg_content, " text-shadow:");
-            TextShadow* ts = parent_elem->fontp()->text_shadow;
-            bool first = true;
-            while (ts) {
-                if (!first) strbuf_append_char(ctx->svg_content, ',');
-                char ts_color[32];
-                svg_color_to_string(ts->color, ts_color);
-                strbuf_append_format(ctx->svg_content, " %.1fpx %.1fpx %.1fpx %s",
-                    ts->offset_x, ts->offset_y, ts->blur_radius, ts_color);
-                first = false;
-                ts = ts->next;
-            }
-            strbuf_append_char(ctx->svg_content, ';');
-        }
-        strbuf_append_char(ctx->svg_content, '"');
+        svg_lower_paint_list(ctx);
     }
 
-    strbuf_append_format(ctx->svg_content, ">%s</text>\n", escaped_text->str);
-
-    svg_render_text_emphasis_marks(ctx, text_content.get(), x, y,
-                                   font_size, word_spacing, cjk_spacing);
-
-    text_content.reset();  strbuf_free(escaped_text);
     }
 }
 
@@ -1151,7 +1027,7 @@ static void svg_cb_render_marker(RenderContext* vctx, ViewSpan* marker, float ab
         default: {
             // text markers (decimal, roman, alpha, etc.)
             if (marker_prop->text_content && *marker_prop->text_content) {
-                float baseline_y = y + (font->style && font->style->ascender > 0 ? font->style->ascender : font_size * 0.8f);
+                float baseline_y = render_text_baseline_y(font, y);
                 const char* src = marker_prop->text_content;
                 StrBuf* escaped = strbuf_new_cap(strlen(src) * 2);
                 escape_append(escaped, src, strlen(src), ESCAPE_RULES_HTML_TEXT,

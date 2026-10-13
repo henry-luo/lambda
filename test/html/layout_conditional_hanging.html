@@ -1,0 +1,20 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; }
+.row { font: 20px/1 Ahem; width: 100px; white-space: pre-wrap; text-align: right; }
+#soft { width: 60px; }
+#normal { white-space: normal; }
+#break-spaces { white-space: break-spaces; }
+section { height: 0; }
+</style>
+<div id="result">
+<div class="row" id="fitting">X </div>
+<div class="row" id="overflowing">X      </div>
+<div class="row" id="lf">X &#10;X</div>
+<div class="row" id="br">X <br>X</div>
+<div class="row" id="soft">X X X </div>
+<div class="row" id="normal">X </div>
+<div class="row" id="break-spaces">X </div>
+<div class="row" id="block">X <section></section></div>
+</div>

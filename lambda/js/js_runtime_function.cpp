@@ -1717,19 +1717,17 @@ static bool js_class_name_is_default_metadata(Item class_item) {
         writable_key_root.get()));
 }
 
-static int js_function_name_from_symbol_key(NameRef key, char* out, int out_size) {
-    if (!key || !property_key_requires_identity(key) ||
-            property_key_kind(key) != NAME_KEY_SYMBOL) return -1;
-    // SetFunctionName uses an empty name for Symbol(), not the diagnostic
-    // bracket form that is required only when the Symbol has a description.
-    if (key->len == 0) {
-        if (out_size > 0) out[0] = '\0';
-        return 0;
-    }
-    int len = snprintf(out, out_size, "[%.*s]", (int)key->len, key->chars);
-    if (len < 0) return -1;
-    if (len >= out_size) len = out_size - 1;
-    return len;
+extern "C" Item js_function_name_display(NameRef key, int64_t prefix_kind) {
+    if (!key) return ItemError;
+    StrBuf* display = strbuf_new();
+    if (!display) return ItemError;
+    if (prefix_kind) strbuf_append_str(display, prefix_kind == 1 ? "get " : "set ");
+    bool symbol = property_key_requires_identity(key) && property_key_kind(key) == NAME_KEY_SYMBOL;
+    // names have no fixed-size truncation; symbols with a description use bracket spelling.
+    if (symbol && key->len) strbuf_append_char(display, '[');
+    strbuf_append_str_n(display, key->chars, key->len);
+    if (symbol && key->len) strbuf_append_char(display, ']');
+    return js_strbuf_take_item(display);
 }
 
 static void js_set_function_name_from_property_key_impl(Item fn_item, Item key_item,
@@ -1743,27 +1741,15 @@ static void js_set_function_name_from_property_key_impl(Item fn_item, Item key_i
     String* key = it2s(prop_key);
     if (!key) return;
 
-    char base[256];
-    int base_len = js_function_name_from_symbol_key(key, base, (int)sizeof(base));
-    if (base_len < 0) {
-        base_len = key->len < (int)sizeof(base) - 1 ? (int)key->len : (int)sizeof(base) - 1;
-        memcpy(base, key->chars, base_len);
-        base[base_len] = '\0';
-    }
-
-    char display[320];
-    if (prefix_kind == 1) {
-        snprintf(display, sizeof(display), "get %.*s", base_len, base);
-    } else if (prefix_kind == 2) {
-        snprintf(display, sizeof(display), "set %.*s", base_len, base);
-    } else {
-        snprintf(display, sizeof(display), "%.*s", base_len, base);
-    }
-    Item display_item = js_name_item(display, strlen(display));
+    RootFrame roots(2);
+    if (!roots.valid()) return;
+    Rooted<Item> function(roots, fn_item), display(roots, js_function_name_display(key, prefix_kind));
+    if (item_is_error(display.get())) return;
+    Item display_item = display.get();
     if (!only_if_anonymous || prefix_kind == 1 || prefix_kind == 2) {
-        js_set_function_name(fn_item, display_item);
+        js_set_function_name(function.get(), display_item);
     } else {
-        js_set_function_name_if_anonymous(fn_item, display_item);
+        js_set_function_name_if_anonymous(function.get(), display_item);
     }
 }
 

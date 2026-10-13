@@ -16,7 +16,7 @@ true
 true
 "9. itshape is not align_decl:"
 false
-"10. itshape style:font-style:italic11. bfseries style:font-weight:bold12. ttfamily style:font-family:monospace13. rmfamily style:font-family:serif14. sffamily style:font-family:sans-serif15. scshape style:font-variant:small-caps16. slshape style:font-style:oblique17. upshape style:font-style:normal18. mdseries style:font-weight:normal19. centering style:text-align:center20. raggedright style:text-align:left21. raggedleft style:text-align:right22. wrap itshape tag:"
+"10. itshape style:font-style:italic11. bfseries style:font-weight:bold12. ttfamily style:font-family:var(--latex-mono,monospace)13. rmfamily style:font-family:var(--latex-serif,serif)14. sffamily style:font-family:var(--latex-sans,sans-serif)15. scshape style:font-variant:small-caps16. slshape style:font-style:oblique17. upshape style:font-style:normal18. mdseries style:font-weight:normal19. centering style:text-align:center20. raggedright style:text-align:left21. raggedleft style:text-align:right22. wrap itshape tag:"
 'span'
 "23. wrap itshape class:latex-itshape24. wrap itshape style:font-style:italic25. wrap bfseries class:latex-bfseries26. wrap bfseries style:font-weight:bold27. wrap ttfamily class:latex-ttfamily28. wrap centering tag:"
 'div'

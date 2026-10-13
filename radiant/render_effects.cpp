@@ -160,6 +160,7 @@ RenderEffectGroup render_effect_group_begin(RasterRenderContext* rdcon,
     group.has_filter = block->filter_prop() && block->filterp()->functions;
     group.has_backdrop_filter = block->backdrop_filter_prop() && block->backdrop_filter_prop()->functions;
 
+    group.recording_start = rdcon->dl ? rdcon->dl->item_count() : 0;
     float scale = rdcon->raster_scale;
     float x0 = parent_block->x + block->x * scale;
     float y0 = parent_block->y + block->y * scale;
@@ -173,7 +174,7 @@ RenderEffectGroup render_effect_group_begin(RasterRenderContext* rdcon,
         frame = rdt_matrix_multiply(&frame, &density);
         group.mask.invertible = rdt_matrix_inverse(&frame, &group.mask.inverse);
     }
-    float visual_overflow = render_geometry_block_visual_overflow(block) * scale;
+    float visual_overflow = render_geometry_block_visual_overflow(block, scale) * scale;
     float effect_x0 = x0 - visual_overflow;
     float effect_y0 = y0 - visual_overflow;
     float effect_x1 = x1 + visual_overflow;
@@ -182,7 +183,7 @@ RenderEffectGroup render_effect_group_begin(RasterRenderContext* rdcon,
         {effect_x0, effect_y0, effect_x1 - effect_x0, effect_y1 - effect_y0});
     if (group.has_filter) {
         render_filter_prepare_urls(rdcon, block->filter_prop());
-        float expand = render_geometry_filter_effect_expand(block->filter_prop()) * scale;
+        float expand = render_geometry_filter_effect_expand(block->filter_prop(), scale) * scale;
         Rect border = render_geometry_block_border_rect(parent_block, block, scale);
         expand = fmaxf(expand, render_filter_reference_box(block->filter_prop(), border,
             render_state_current_transform(rdcon)));
@@ -208,6 +209,7 @@ RenderEffectGroup render_effect_group_begin(RasterRenderContext* rdcon,
     effect_x0 = effect_rect.x; effect_y0 = effect_rect.y;
     effect_x1 = effect_rect.x + effect_rect.width; effect_y1 = effect_rect.y + effect_rect.height;
 
+    group.capture_bounds = {effect_x0, effect_y0, effect_x1, effect_y1};
     if (group.mix_blend_mode) {
         group.mix_blend_backdrop = render_effect_backdrop_begin(rdcon,
             effect_x0, effect_y0, effect_x1, effect_y1);
@@ -242,6 +244,7 @@ RenderEffectGroup render_effect_group_begin(RasterRenderContext* rdcon,
                         &rdcon->block.clip);
     }
 
+    group.source_start = rdcon->dl ? rdcon->dl->item_count() : 0;
     return group;
 }
 
@@ -312,6 +315,26 @@ bool render_effect_group_finish(RenderEffectGroup* group,
 
     RasterRenderContext* rdcon = group->context;
     bool finished = false;
+
+    if ((group->has_filter || group->has_opacity_group || group->mix_blend_mode) && rdcon->dl) {
+        Bound bounds = group->capture_bounds;
+        float padding = group->has_filter
+            ? render_geometry_filter_effect_expand(block->filter_prop(), rdcon->raster_scale) * rdcon->raster_scale : 0.0f;
+        bounds = dl_effect_capture_bounds(rdcon->dl, group->source_start, rdcon->dl->item_count(), bounds, padding);
+        bounds = view_geometry_intersect_bound_rect(bounds,
+            {clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top});
+        IRect region = {};
+        if (dl_effect_bounds_to_region(&bounds, &region) &&
+                dl_resize_saved_backdrops(rdcon->dl, group->recording_start, group->source_start, &bounds)) {
+            // saved sources and final compositing must cover the same completed ink extent.
+            RenderEffectBackdrop* levels[] = {&group->filter_backdrop, &group->opacity_backdrop, &group->mix_blend_backdrop};
+            for (RenderEffectBackdrop* level : levels) if (level->active) {
+                level->x = region.x; level->y = region.y;
+                level->width = region.w; level->height = region.h;
+            }
+            group->filter_rect = {bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top};
+        }
+    }
 
     if (render_effect_group_has_filter_rect(group)) {
         double start_ms = render_profiler_now_ms();

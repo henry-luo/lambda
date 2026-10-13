@@ -299,25 +299,46 @@ void render_painter_draw_picture_rect(RasterRenderContext* rdcon, RdtPicture* pi
     if (clip) rc_pop_clip(rdcon);
 }
 
-void render_painter_draw_pixels_rect(RasterRenderContext* rdcon, const uint32_t* pixels,
+bool render_painter_draw_pixels_rect(RasterRenderContext* rdcon, const uint32_t* pixels,
                                      int src_w, int src_h, int src_stride,
                                      Rect* dst_rect, Bound* clip,
                                      uint8_t opacity,
                                      ImageSurface* resource_owner, ScaleMode scale_mode) {
-    if (!pixels || !dst_rect) return;
+    if (!rdcon || !rdcon->dl || !rdcon->paint_list || !pixels || !dst_rect) return false;
+    // queued background layers precede this transaction and must survive its rollback.
+    PaintRecordTarget target = rc_record_target(rdcon);
+    paint_record_lower_pending(&target);
+    int checkpoint = rdcon->dl->item_count();
+    int clip_depth = rdcon->vector_clip_depth;
+    auto fail = [&]() {
+        // paired clips/images are one recording transaction, including snapshot leases.
+        dl_truncate(rdcon->dl, checkpoint);
+        rdcon->vector_clip_depth = clip_depth;
+        rdcon->paint_failed = true;
+        return false;
+    };
+    auto appended = [&](int count) { return rdcon->dl->item_count() == count + 1; };
     if (clip) {
         RdtPath* clip_path = rdt_path_new();
+        if (!clip_path) return fail();
         rdt_path_add_rect(clip_path, clip->left, clip->top,
                           clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+        int count = rdcon->dl->item_count();
         rc_push_clip(rdcon, clip_path, nullptr);
         rdt_path_free(clip_path);
+        if (!appended(count)) return fail();
     }
-
+    int count = rdcon->dl->item_count();
     rc_draw_image(rdcon, pixels, src_w, src_h, src_stride,
                   dst_rect->x, dst_rect->y, dst_rect->width, dst_rect->height,
                   opacity, render_state_current_transform(rdcon), resource_owner, scale_mode);
-
-    if (clip) rc_pop_clip(rdcon);
+    if (!appended(count)) return fail();
+    if (clip) {
+        count = rdcon->dl->item_count();
+        rc_pop_clip(rdcon);
+        if (!appended(count)) return fail();
+    }
+    return true;
 }
 
 void render_painter_fill_surface_rect(RasterRenderContext* rdcon, ImageSurface* surface,
@@ -334,7 +355,7 @@ bool render_painter_can_blit_surface(const RasterRenderContext* context) {
     return context && !context->has_transform && !context->css3d_context && context->vector_clip_depth == 0;
 }
 
-void render_painter_blit_surface_scaled(RasterRenderContext* rdcon,
+bool render_painter_blit_surface_scaled(RasterRenderContext* rdcon,
                                         ImageSurface* src, Rect* src_rect,
                                         ImageSurface* dst, Rect* dst_rect, Bound* clip,
                                         ScaleMode scale_mode,
@@ -342,23 +363,27 @@ void render_painter_blit_surface_scaled(RasterRenderContext* rdcon,
                                         uint8_t opacity) {
     (void)src_rect;
     (void)dst;
-    if (!src || !dst_rect) return;
+    if (!rdcon || !rdcon->dl || !rdcon->paint_list || !src || !dst_rect) return false;
+    PaintRecordTarget target = rc_record_target(rdcon);
+    paint_record_lower_pending(&target);
     if (!render_painter_can_blit_surface(rdcon)) {
         // CPU blits have no homography or vector clip stack. Record images
         // through the same transformed, resource-owned path as replaced media.
         ImageSurfaceReadScope read_scope;
         int width = src->decoded_width > 0 ? src->decoded_width : src->width;
         int height = src->decoded_height > 0 ? src->decoded_height : src->height;
-        render_painter_draw_pixels_rect(rdcon, (const uint32_t*)src->pixels,
+        return render_painter_draw_pixels_rect(rdcon, (const uint32_t*)src->pixels,
             width, height, src->pitch / 4, dst_rect, clip, opacity, src, scale_mode);
-        return;
     }
-    PaintRecordTarget target = rc_record_target(rdcon);
+    int count = rdcon->dl->item_count();
     paint_record_blit_surface_scaled(&target, "render_painter_blit_surface_scaled",
                                      src, dst_rect->x, dst_rect->y,
                                      dst_rect->width, dst_rect->height,
-                                     (int)scale_mode, clip, clip_shapes,
+                                     (int)scale_mode, clip, clip_shapes, // INT_CAST_OK: ScaleMode is serialized as a display-list enum.
                                      clip_depth, opacity);
+    bool complete = rdcon->dl->item_count() == count + 1;
+    if (!complete) rdcon->paint_failed = true;
+    return complete;
 }
 
 void rc_fill_surface_rect(RasterRenderContext* rdcon, ImageSurface* surface,

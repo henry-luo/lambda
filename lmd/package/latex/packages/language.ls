@@ -1,5 +1,6 @@
 // Bounded Babel language names and HTML language tags.
 import util: ~~.util
+import fontspec: .fontspec
 
 // LGR's Latin alphabet mapping follows babel-greek's documented transliteration.
 let LGR_LOWER = {
@@ -130,39 +131,6 @@ pub fn babel_default(options) {
     }
 }
 
-// Polyglossia's font declarations occur in both braced and control-sequence forms.
-fn font_declaration(node, following) {
-    if (not (node is element)) null
-    else {
-        let tag = string(name(node))
-        if (tag != "newfontfamily" and tag != "renewfontfamily") null
-        else {
-            let braced_font = util.raw_argument(node, "required", 1)
-            let braced_name = util.raw_argument(node, "required", 0)
-            let target = if (braced_font != null) braced_name
-                else if (following is element) "\\" ++ string(name(following)) else null
-            let font = if (braced_font != null) braced_font
-                else if (following is element) util.raw_argument(following, "required", 0)
-                else null
-            if (target == null or font == null or not starts_with(target, "\\")) null
-            else {key: slice(target, 1, len(target)), val: trim(font),
-                  offset: node.source_offset}
-        }
-    }
-}
-
-fn fonts_in_children(node, at) {
-    if (at >= len(node)) []
-    else {
-        let child = node[at]
-        let following = if (at + 1 < len(node)) node[at + 1] else null
-        let declaration = font_declaration(child, following);
-        (if (declaration == null) [] else [declaration]) ++
-        (if (child is element) fonts_in_children(child, 0) else []) ++
-        fonts_in_children(node, at + 1)
-    }
-}
-
 fn find_default(node) {
     if (not (node is element)) null
     else if (string(name(node)) == "setdefaultlanguage") node
@@ -184,7 +152,9 @@ pub fn polyglossia_profile(ast) {
     let opts = if (declaration == null) {}
         else util.parse_kv_options(util.optional_raw(declaration))
     {default: selected, numerals: opts.numerals,
-     fonts: fonts_in_children(ast, 0), declaration: declaration}
+     // the script fonts \newfontfamily declares (fontspec.ls reads them)
+     fonts: [for (f in fontspec.declarations(ast) where f.command != null) {key: f.command, val: f.font, offset: f.offset}],
+     declaration: declaration}
 }
 
 pub fn font_for(profile, command) =>
@@ -216,11 +186,8 @@ pub fn polyglossia_issues(profile, package_offset) {
     (if (profile.numerals != null and
          not (profile.default == "thai" and profile.numerals == "thai"))
         [util.diagnostic("unsupported-language-numerals", "polyglossia", profile.numerals,
-            "Unsupported polyglossia numeral system " ++ profile.numerals, source_offset)] else []) ++
-    [for (entry in profile.fonts)
-        util.diagnostic("font-substitution", "polyglossia", entry.val,
-            "Requested font is not bundled; using system font or fallback: " ++ entry.val,
-            entry.offset)]
+            "Unsupported polyglossia numeral system " ++ profile.numerals, source_offset)] else [])
+    // the script fonts' substitutions are fontspec's, which polyglossia loads (fontspec.issues)
 }
 
 pub fn target_issues(profile, target, offset) {
