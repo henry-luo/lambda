@@ -584,7 +584,26 @@ typedef struct AstForNode : AstNode {
     AstNode *then;       // body expression
     NameScope *vars;     // scope for the variables in the loop
     bool discard_result; // statement form executes its stream for effects only
+    // D8.1.1v18: 1-based handoff ordinal of a `for` statement that is a direct
+    // statement of a `pn` body (frame-plan pass); 0 = never a handoff loop
+    uint8_t interp_handoff_ordinal;
+    // D8.1.1v18: set only on a loop continuation's copy of its `for` -- the
+    // walk position to resume at; the copy's source is the walk's snapshot
+    AstNode *resume_from;
 } AstForNode;
+
+// D8.1.1v18: the handoff ordinal of either loop kind a `pn` body may hand off
+// at -- a `while`, or a `for` statement; 0 for any other node.
+static inline uint8_t ast_handoff_ordinal(const AstNode* node) {
+    if (!node) return 0;
+    if (node->node_type == AST_NODE_LOOP) {
+        return ((const AstLoopControlNode*)node)->interp_handoff_ordinal;
+    }
+    if (node->node_type == AST_NODE_FOR_EXPR) {
+        return ((const AstForNode*)node)->interp_handoff_ordinal;
+    }
+    return 0;
+}
 
 // --- CW30/S9.2.3: loop-head snapshot gate (shared by both tiers) -----------
 // Lambda is functional, so by default a loop emits NO snapshot work: only a

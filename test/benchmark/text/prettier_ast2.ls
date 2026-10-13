@@ -425,10 +425,8 @@ pn main() {
     }
     let t1 = clock()
     var checksum: int = 0
-    var index: int = 0
-    while (index < len(formatted)) {
+    for index of formatted {
         checksum = (checksum * 31 + ord(formatted[index])) % 1000000007
-        index = index + 1
     }
     print(formatted)
     if (checksum == 56483873) {

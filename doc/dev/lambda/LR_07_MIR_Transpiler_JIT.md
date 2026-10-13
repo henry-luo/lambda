@@ -1,6 +1,6 @@
 # Lambda Runtime — The MIR Direct Transpiler & JIT
 
-> **Last verified against tree:** 2026-08-24 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-10-12 *(§3 loop sources)*
 
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the supported code-generation backend: how the typed AST is lowered **directly to MIR IR** (no intermediate C text), how values are kept native or boxed under MIR's immutable-register constraint, the function calling convention and parameter-type inference, the root/number execution side frames, and the `mir.c` JIT integration that links and generates native code. The removed C-text backend is documented historically in [LR_06 — The C Transpiler](LR_06_C_Transpiler.md).
 >
@@ -26,6 +26,8 @@ Per-variable state is a `MirVarEntry` (`:105`): `{ reg, root_slot, mir_type, typ
 ## 3. Lowering: dispatch and representative nodes
 
 The central dispatch is `transpile_expr` (`:8450`), a switch on `node->node_type`. The principal node lowerings are `transpile_primary` (`:1643`), `transpile_ident` (`:1758`), `transpile_binary` (`:2332`), `transpile_unary` (`:2889`), `transpile_spread` (`:2961`), `transpile_match` (`:3205`), the loop forms `transpile_for`/`transpile_while`, the collection builders `transpile_array`/`list`/`content`/`map`/`element` (`:4046`/`:4298`/`:4457`/`:4647`/`:5004`), `transpile_member`/`index` (`:5375`/`:5467`), `transpile_call` (`:6441`), `transpile_pipe` (`:7484`), `transpile_raise` (`:7805`), and the statement forms `transpile_assign_stam` (`:7926`) and `transpile_let_stam` (`:3670`).
+
+**Loop sources.** A `to` range with int bounds lowers to a native counted loop. Every other `for` source — the first, the nested ones, and those of `group by` and joins — goes through one protocol: `mir_open_loop_source` snapshots the collection and reads its name keys and its walk length on the loop's axis once, and `mir_bind_loop_member` binds the names at each walk position (S8.1.3v2). A first source whose carrier is a sequence or text has no name keys, so it skips `item_keys` and the key-list free; a nested source always opens its list, because its slot is decided before the outer names are bound. On the `of` axis the key at a walk position is the position itself, so the binding is the machine counter in `int`'s native lane, with no runtime call. The loop frame also records the bounds facts `while (i < len(a))` earns, so `for i of a { a[i] }` skips the per-access bounds check on a stable typed array.
 
 A recurring subtlety: **statements have no value**, but every `transpile_expr` call must yield a valid MIR register. `let`/`var`/assignment/index-assignment/`break`/`continue` therefore synthesize a boxed-null register via `emit_null_item_reg` (`:348`) — the `MIR_T_I64` null moves at `:8504` — rather than returning the invalid sentinel register 0, which would crash the MIR generator with "undeclared reg 0".
 

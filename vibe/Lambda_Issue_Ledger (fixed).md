@@ -945,6 +945,19 @@ Regression: `proc_nullable_float_lane_read.ls` and
 `proc_nullable_lane_comparisons.ls` pass under eager JIT, alongside the
 general OOB-read coverage in `oob_read_null.ls`.
 
+<a id="lr07-r13"></a>**LR07-R13 · Nested `for` sources ignored their axis on the JIT tier · RESOLVED 2026-10-12**
+The nested-source emitter in `transpile-mir.cpp` walked every second and later
+source with `item_at` and a machine length, whatever axis it was written with.
+`[for (z in [0], k at m) k]` gave `[null, null]`, `in` over a map or element
+missed its names and attributes, and `of` bound values instead of positions;
+the T0 interpreter was right throughout, so goldens on the `auto` tier never saw
+it (**S8.1.1v2–S8.1.3v2**, **D8.1.1** tier agreement). Every MIR loop emitter
+now opens its sources through one protocol, `mir_open_loop_source`, and binds
+through `mir_bind_loop_member`. A nested source's key list lives in a slot zeroed
+before the outer loop and released at both its own end and the outer end, so a
+`break` cannot leak its exact GC roots (**D5.4.2**). Verified by the nested-axis
+cases on both tiers and the Lambda baseline.
+
 <a id="lr07-r7"></a>**LR07-R7 · Precise-root classification trusted dishonest static types · RESOLVED 2026-09-13**
 The producer and consumer halves now share the value-side TypeId
 classification: `mir_value_type_id` handles the overloaded `LMD_TYPE_TYPE`,

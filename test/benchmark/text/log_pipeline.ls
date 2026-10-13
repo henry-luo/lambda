@@ -123,8 +123,7 @@ pn process_logs(lines) {
     var groups = {api: empty_group(), worker: empty_group(), db: empty_group(), cache: empty_group()}
     var accepted = 0
     var rejected = 0
-    var index = 0
-    while (index < len(lines)) {
+    for index of lines {
         let record = parse_log_line(lines[index])
         if (record.status >= 500 or record.level == "ERROR") {
             rejected = rejected + 1
@@ -135,7 +134,6 @@ pn process_logs(lines) {
             else { add_to_group(groups.cache, record) }
             accepted = accepted + 1
         }
-        index = index + 1
     }
     {groups: groups, accepted: accepted, rejected: rejected}
 }

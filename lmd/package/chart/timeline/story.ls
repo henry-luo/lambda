@@ -70,7 +70,7 @@ pub fn sample(plan, elapsed) {
         let previous_index=index+(if (position.reversed) 1 else -1);
         let previous_reverse=contains(["reverse","reverse_alternate"],plan.direction)!=
             (contains(["alternate","reverse_alternate"],plan.direction) and (position.cycle-1)%2==1);
-        let outgoing=if (previous_index>=0 and previous_index<len(plan.slides)) plan.slides[previous_index].id
+        let outgoing=if (previous_index of plan.slides) plan.slides[previous_index].id
             else if (position.cycle>0) plan.slides[if (previous_reverse) 0 else len(plan.slides)-1].id else null;
         if (eased is error) eased else if (not util.finite_number(eased) or eased<0 or eased>1) c.fail("slideshow.easing","expected finite progress from zero to one") else
         {active_id:slide.id,index:index,progress:progress,waiting:waiting,

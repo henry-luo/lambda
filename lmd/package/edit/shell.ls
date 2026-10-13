@@ -320,7 +320,7 @@ on edit_cmd(req) {
       let copies = dr.duplicate_tx(editor.doc, picked)
       editor = apply_edit(editor, copies.tx)
       let boxes = [for (q in ds.picked) shifted(q.box, 10.0, 10.0)]
-      ds = {*: ds, picked: [for (j in 0 to len(copies.picked) - 1) {index: copies.picked[j], box: boxes[j]}]}
+      ds = {*: ds, picked: [for (j, pick of copies.picked) {index: pick, box: boxes[j]}]}
     }
     else if ((cmd == "front" or cmd == "back") and len(picked) == 1) {
       let moved = dr.order_tx(editor.doc, picked[0], cmd == "front")
@@ -470,7 +470,7 @@ on keydown(evt) {
   else if (primary_key(evt) and key_is(evt, "d") and len(picked) > 0) {
     let copies = dr.duplicate_tx(editor.doc, picked)
     editor = apply_edit(editor, copies.tx)
-    ds = {*: ds, picked: [for (j in 0 to len(copies.picked) - 1) {index: copies.picked[j], box: shifted(ds.picked[j].box, 10.0, 10.0)}]}
+    ds = {*: ds, picked: [for (j, pick of copies.picked) {index: pick, box: shifted(ds.picked[j].box, 10.0, 10.0)}]}
   }
   else if ((dx != 0.0 or dy != 0.0) and len(picked) > 0) {
     editor = apply_edit(editor, dr.move_tx(editor.doc, picked, dx, dy))

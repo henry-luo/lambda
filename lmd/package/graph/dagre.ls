@@ -393,7 +393,7 @@ fn score_group_key(entry, depth) =>
   if (depth < len(entry.group_keys)) entry.group_keys[depth]
   else "node:" ++ entry.node.id
 
-fn grouped_children(group) => [for (child_index:int, child in group) child]
+fn grouped_children(group) => [for (child_index, child of group) child]
 
 fn scored_group(members) {
   let children = grouped_children(members);

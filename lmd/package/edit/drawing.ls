@@ -284,7 +284,7 @@ pub fn duplicate_tx(doc, indices) {
   let ordered = sort(indices) or []
   if (len(ordered) == 0) null
   else {tx: duplicate_at(tx_begin(doc, null), ordered, 0, 0),
-        picked: [for (j in 0 to len(ordered) - 1) ordered[j] + j + 1]}
+        picked: [for (j, pick of ordered) pick + j + 1]}
 }
 
 // Paint order: to the front is the root's last child; to the back is before
@@ -402,7 +402,7 @@ fn overlay_xml(doc, ds) {
 }
 
 pub fn projection_xml(doc, ds) {
-  let kids = [for (i in 0 to len(doc.content) - 1) {child: doc.content[i], path: [i]}]
+  let kids = [for (i, child of doc.content) {child: child, path: [i]}]
   "<svg" ++ sv.attrs_xml(canvas_attrs(doc, view_box(doc), ds.zoom)) ++ ">" ++
     join([for (k in kids where projected(k.child)) sv.node_xml(k.child, k.path, 1, projected_attrs, projected)], "") ++
     overlay_xml(doc, ds) ++ "</svg>"

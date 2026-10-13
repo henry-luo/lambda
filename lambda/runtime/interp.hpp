@@ -140,7 +140,8 @@ struct InterpFrame {
     // D8.1.1v14: the top-level handoff loop now executing in this activation
     // (back-edges of its nested loops count toward it), and the definition's
     // promotion cell, looked up once rather than at every back-edge.
-    const struct AstLoopControlNode* handoff_loop;
+    // D8.1.1v18: a `while` or `for` statement (AstLoopControlNode / AstForNode)
+    const struct AstNode* handoff_loop;
     struct FnPromotionCell* promotion_cell;
 };
 

@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 29.3.0 (2026-10-12)
+**Spec version:** 29.4.0 (2026-10-12)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1639,7 +1639,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.1 Structure
 
-- **D8.1.1v17*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
+- **D8.1.1v18*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
   parser → the shared typed AST → **tiered execution**. The parser reduces
   directly into the retained `AstNode` graph; no Lambda CST or replacement
   syntax tree is retained. The default file/module path is the C parser, while
@@ -1673,7 +1673,11 @@ loosely across the corpus — context disambiguates, and we live with it.
   `return`. Handoff is one-way: compiled code never returns control to the
   interpreter mid-activation. A loop is eligible only where every T0 value
   live at its head is a named frame slot; every other loop, and every guard
-  miss, stays T0. Owning a loop does not promote a definition at entry: the
+  miss, stays T0. *(v18, 2026-10-12, USER)* A plain `for` statement -- one
+  source, no join, `group`, `order`, `limit` or `offset` -- is eligible too:
+  beside the named slots its only live state is the walk's entry snapshot and
+  next position, which its loop entry takes as two trailing parameters and
+  resumes the walk from (S8.1.3v2, S9.2.3). [Ast_Interpreter AI25] Owning a loop does not promote a definition at entry: the
   call threshold, the self-tail threshold and the loop threshold are the only
   triggers. [Ast_Interpreter AI23] *(v6, 2026-09-06)*
   A satellite is always entered through its boxed `_b` wrapper, so a definition
@@ -2497,6 +2501,7 @@ slice; no formal semantic ruling or document semver changes.
 | D8.1.1v15 | **Implemented 2026-10-03.** Explicit interp rejects unsupported scripts/imports before execution, including task-backed MIR satellites and cached AST activation. AUTO retains fallback; explicit jit retains eager MIR. Lambda baseline: 6,180/6,180; strict-pin regression cases: 6/6. Evidence and existing differential failures: `vibe/impl/Lambda_Impl_Typed_Performance_Audit.md` §6–§7. |
 | D8.1.1v16 | **Implemented 2026-10-05** (Runtime_Async P1, P4): T0 evaluates `start`, `select` and scoped tasks, and the strict-`interp` rejection of task-backed bodies is gone; JS promotion admits async and generator definitions and loop handoff refuses only a loop whose tail can suspend. Forced-promotion sweep over every `test/js` golden identical to the base. |
 | D8.1.1v17 | **Implemented 2026-10-06** (branch `worktree-repl-interp`). `run_repl` owns one `InterpReplSession`; whole-history `run_script_mir` replay and the init-failure fallback are deleted, and a `jit` selection becomes `auto` with a first-call promotion threshold. The entry transaction (`ReplEntryTxn`, `runner.cpp`) returns OK, INCOMPLETE (the C parser's status, no pre-check), REJECTED or FAILED and prints each diagnostic once; an unsupported construct or import is rejected by name. Imported cones initialize before the entry runs. SIGINT is armed per entry; T0 polls it at call entry and back-edges (`LAMBDA_FAULT_INTERRUPTED`), and promoted satellite code is not polled. No Tree-sitter symbol is reachable from the REPL path. Session services: `.env`, `.type`, `.time`, `.load`, `.save`, Tab completion and a history file. Gates: `LambdaReplSessionTests` and `LambdaReplTests`. [Repl_Interp §3, §6](../vibe/Lambda_Design_Repl_Interp.md) |
+| D8.1.1v18 | **Implemented 2026-10-12** (USER ruling the same day). The frame plan numbers a plain `for` statement of a `pn` body as a handoff loop; at its head test T0 passes the walk's snapshot and next position after the live-ins, and the synthesized continuation's first statement is a copy of the `for` over the snapshot parameter starting at the position parameter (`AstForNode::resume_from`). The boundary test compares the statement's entry scratch level, since a `for` walk holds its own scratch slots. Fixture `test/lambda/proc/for_loop_handoff.ls` (12 shapes: `of`/`at`/`in`, pairs, `where`, `break`, `continue`, early `return`, a `var` parameter, a rebound source) hands off at forced thresholds 2 and 5 and matches T0. A one-call 490k-character walk ran 98 ms as `for` against 58 ms as `while` on `auto` before this. Record: [Ast_Interpreter AI25](../vibe/Lambda_Design_Ast_Interpreter.md). |
 | D8.1.2v3 | Revised 2026-09-14 (v3, USER): the obsolete `grammar-lambda.js` and complete-oracle claim are retired. `lambda/tree-sitter-lambda/grammar.js` is the best structural reference and first-cut fuzz verifier, but known corner cases require reviewed fixtures. The first-party C parser remains the final production implementation, not an unquestioned oracle; every C/Tree-sitter acceptance disagreement is adjudicated against the formal syntax rulings and current vibe records, then pinned by a fixture and fixed on the incorrect side. Generated `parser.c` remains reference-only and is never hand-edited. Working record: `vibe/Lambda_Test_Fuzzy.md` §3 and `vibe/Lambda_Grammar_Parser.md` CGP5v2. |
 | D8.1.3v19 | Revised 2026-09-23: the unset `JS_EXEC_BACKEND` now selects AUTO. Interpreter-supported units execute through the retained AST path and may promote admitted hot definitions to P2; unsupported units retain whole-module MIR. `ast` remains explicit and fail-closed, `mir` remains an explicit whole-module selector. MIR link-interface and O1 decisions are selected through shared `mir_select_link_interface`, so large modules/documents can install the MIR interpreter without changing generated MIR. The v18 parser, AST-interpreter, module-registry, and P2 admission record remains otherwise unchanged. Working record: `vibe/Lambda_Design_Compiling_Pipeline_JS.md` LC4.1–LC4.12. |
 | D8.1.3v20 | Revised 2026-09-24 (USER): dynamic source — direct/indirect `eval`, the `Function`-family constructors, string timers, and `$262.evalScript` — parses into a retained `JsScript` and executes only in the AST interpreter, whatever the caller's tier or the unit selector. The MIR dynamic-code service (expression-wrapper and whole-script eval tiers, the dynamic-Function MIR cache, eval preambles, the `is_eval_direct` lowering mode) is deleted; a MIR caller keeps only the direct-eval bridge projection and write-back. Script top-level lexical realm records link their module slots on both tiers, so interpreted readers see live values and TDZ, and a projected caller binding outranks a global lexical of the same name. Dynamic source shares the AST template cache (a direct eval naming private members is parsed per call); whitespace/comment-only and lone-RegExp sources create no script. Verified: test262 baseline 40261/40261 with 0 regressions; `make test-lambda-baseline` 3754/3754 (incl. `test_js_gtest` 479/479, `test_js_script_gtest` 191/191); `test_js_gtest --baseline --full-mir` 477/477. Residue: eval-created closures lose projected caller locals after the eval returns, `eval("arguments")` in functions and `new.target` in direct eval remain unsupported (pre-existing). Working record: `vibe/Lambda_Design_JS_Interpreter.md` §5.6/JSI35; `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
@@ -2783,6 +2788,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D7.3–D7.5 | JA1–JA16 (D7.3.6: JA5.1); Native_Module §6–§10; Lang_Hosting P/C + §5–§13; ES48 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_DOM_Host_API.md` |
 | D8.1–D8.2 | U1–U36; AI1–AI23, AIO1–AIO13; JSI1–JSI13, JSI16v2, JSI35–JSI36; CGP1–CGP21 | `Lambda_Design_Unified_AST.md`, `Lambda_Grammar_Parser.md`, `Lambda_Test_Fuzzy.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md`, `vibe/jube/JS_Tune13.md` |
 | D8.1.1v17 | RI1–RI6 | `Lambda_Design_Repl_Interp.md` |
+| D8.1.1v18 | AI25 | `Lambda_Design_Ast_Interpreter.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
 | D8.4 | LC1v2 + call-ABI notes; IR1–IR8; T10-0–T10-5; REH-D2–REH-D14 | `Lambda_Design_Compiling.md`, `Lambda_Design_JS_IC_Retire.md`, `jube/JS_Tune10_Fast_Paths.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md`, `Lambda_Design_Script_Cache.md` |
