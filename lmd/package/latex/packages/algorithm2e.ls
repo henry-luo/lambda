@@ -72,11 +72,7 @@ fn fold_rec(nodes, i, depth, settings, current, acc, blocks) {
 }
 
 // a block command's argument i as nodes, read back from its raw source
-pub fn argument(el, i) {
-    let raw = util.raw_argument(el, "required", i)
-    let parsed = if (raw == null) null else parse(raw, {type: "latex"}) ^ { null }
-    if (parsed == null) [] else util.flatten_paragraphs(content(parsed))
-}
+pub fn argument(el, i) => util.parse_fragment(util.raw_argument(el, "required", i))
 
 fn block_lines(el, desc, depth, settings) {
     let condition = if (desc.condition) argument(el, 0) else []

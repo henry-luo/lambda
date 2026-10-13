@@ -286,6 +286,21 @@ fn declaration_command(raw, command, after, acc, colors) {
     else read_declarations(raw, after, {*:acc, unknown: acc.unknown ++ [command]}, colors)
 }
 
+// the CSS of a one-argument font macro's body: a text command applied to #1
+// (\textsc{#1}) or declarations before it ({\scshape #1}); null when it is neither
+let TEXT_COMMANDS = {textbf: "font-weight:bold", textit: "font-style:italic", emph: "font-style:italic",
+    textsl: "font-style:oblique", textsc: "font-variant:small-caps", texttt: "font-family:monospace",
+    textsf: "font-family:sans-serif", textrm: "font-family:serif", textup: "font-style:normal",
+    textmd: "font-weight:normal"}
+pub fn argument_font_css(source) {
+    let body = trim(source or "")
+    let command = if (starts_with(body, "\\") and ends_with(body, "{#1}")) slice(body, 1, len(body) - 4) else null
+    if (body == "" or body == "#1") null
+    else if (command != null and TEXT_COMMANDS[command] != null) TEXT_COMMANDS[command]
+    else (let decls = declarations(replace(body, "#1", ""), null),
+        if (decls.css == "" or len(decls.unknown) > 0 or trim(decls.text) != "") null else decls.css)
+}
+
 // wrap rendered items in a span with the declaration's style; a declaration
 // whose value is outside the tables is reported in place
 pub fn wrap_font_decl(decl, items) {

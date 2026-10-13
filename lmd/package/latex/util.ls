@@ -450,6 +450,25 @@ fn option_end(items, i, text) {
 }
 
 // the children of a node with paragraph wrappers opened, in order
+// TeX source a package keeps as data (algorithm2e block bodies, glossary fields,
+// index displays) as nodes, parsed on its own: the fragment never passes through
+// the document's expansion, so document macros in it are not expanded. Plain text
+// skips the parse, which runs the engine.
+pub fn parse_fragment(raw) {
+    if (raw == null or trim(raw) == "") []
+    else if (not any([for (ch in ["\\", "$", "{", "~", "%", "&", "#", "^", "_"]) contains(raw, ch)])) [raw]
+    else {
+        let parsed = parse(raw, {type: "latex"}) ^ { null }
+        let nodes = if (parsed == null) [] else flatten_paragraphs(content(parsed))
+        // the parse ends the fragment's paragraph with its line break
+        let n = len(nodes);
+        [for (i, node in nodes, let text = if (not (node is string)) node
+                else if (i == 0 and i == n - 1) trim(node) else if (i == 0) trim_start(node)
+                else if (i == n - 1) trim_end(node) else node
+            where not (text is string and text == "")) text]
+    }
+}
+
 pub fn flatten_paragraphs(node) {
     let n = len(node)
     flatten_para_rec(node, 0, n, [])
@@ -512,6 +531,9 @@ pub fn raw_argument(el, kind, ordinal) {
 pub fn option_enabled(value) {
     value != null and value != "false" and value != "0"
 }
+
+// whether a package's options (null when it is not loaded) enable `key`
+pub fn option_on(options, key) => (options != null and option_enabled(options[key])) or false
 
 pub fn unsupported_element(package, message, offset) {
     <span class: "latex-unsupported", 'data-latex-error': message,

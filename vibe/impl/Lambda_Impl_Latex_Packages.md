@@ -1,7 +1,7 @@
 # LaTeX Phase V: package coverage implementation plan
 
 **Design:** [Lambda_Pkg_Latex.md](../Lambda_Pkg_Latex.md) (§6 package model, §9 compatibility matrix, §10 verification rules, §11 outstanding work); [TeX engine design](../latex/Lambda_Design_TeX_Engine.md) §5 and §10; [Lambda_Pkg_Math.md](../Lambda_Pkg_Math.md) §3, §7 and §10.2; [Lambda_Pkg_Slides.md](../Lambda_Pkg_Slides.md) for beamer.
-**Status:** In progress. Proposed 2026-10-12; the user approved the §17 recommendations on 2026-10-13. M0, M1, M2, M4, M8, M3, M5 and M6 were implemented on 2026-10-13 in worktree `latex-phase5-m0`. §17.1 was ratified as **D7.2.7v2** when the first binding (physics) landed.
+**Status:** In progress. Proposed 2026-10-12; the user approved the §17 recommendations on 2026-10-13. M0, M1, M2, M4, M8, M3, M5, M6 and M7 were implemented on 2026-10-13 in worktree `latex-phase5-m0`. §17.1 was ratified as **D7.2.7v2** when the first binding (physics) landed.
 **Formal linkage:** **D7.2.7v2** (expansion only, never typesetting; bundled packages are upstream programming packages or Lambda-owned bindings; resolution order bundled → adapter → beside-document file → located `unknown-package`), **D7.2.1–D7.2.4** (script adapters in a static registry), **S1.8** (no document text becomes Lambda code), **S12.1.1v2** (rendering stays pure and deterministic), **D7.1.2v2** and **D7.5.2** (resources through the one IO door, path-gated), **S7.4.1–S7.4.4** (located diagnostics).
 **Scope:** the commonly used LaTeX packages and classes that `lambda.latex` does not support, plus the kernel, `hyperref` and `graphicx` gaps those packages build on. Diagrams (`tikz-cd`, `circuitikz`, `forest`, `chemfig`, `xy`) belong to the TikZ design (§15).
 
@@ -422,6 +422,36 @@ As built on 2026-10-13:
   - Locators are links back to the `\index` anchors rather than page numbers, the convention the biblatex backrefs already use (Pkg_Latex §9).
   - Sorting is by case-folded code points, a stated limit: locale collation is the host capability of Pkg_Latex §11.3.
 
+As built on 2026-10-13:
+
+- **The registry** (`terms.ls`). Analysis keeps the definitions (`gls_entries`, `ac_entries`, `nomencl`, `index_entries`) and, for every use, its first-use flag by source offset (`gls_uses`, `ac_uses`).
+  - These live in one nested `terms` field of the analysis state (`terms.EMPTY`, `with_terms`).
+  - The walk copies the state map at every node. As eleven top-level fields, the registry slowed the 31-sample corpus by about a quarter: the `algebra` sample went from 35 s to 44 s, and the corpus test exceeded its 60 s limit. Nested, it costs one field. The labels whose first use is over (`gls_firsts`, `ac_firsts`) thread through the walk, so `\glsreset`, `\glsunset`, `\glsresetall`, `\glsunsetall`, `\acused` and `\acresetall` take effect in source order. Render prints each use and each list from that state.
+- **Fields are TeX source.** Entry names, descriptions, acronym forms, nomenclature symbols and index displays are kept as raw text and rendered through `util.parse_fragment`, which parses a fragment on its own (plain text skips the parse). algorithm2e's block bodies, which did the same by hand, now use it.
+  - **Limitation:** a fragment does not pass through the document's expansion, so document macros inside these fields are not expanded.
+- **glossaries.**
+  - `\newglossaryentry` (and `\longnewglossaryentry`) take glossaries' defaults: text and first from the name, the plural from the text. `\newacronym` goes to the acronym glossary under the `acronym` option; its first use is "long (short)".
+  - The `\gls` family covers plural, `\Gls` and `\GLS` forms; `\glstext`, `\glsfirst`, `\glsplural`, `\glsname`, `\glsdesc` and `\glssymbol` with their capitals; the `\glsentry…` forms; the `\acr…` forms with plurals and capitals; and `\glsdisp`, `\glslink`, `\glsadd` and `\glsaddall`.
+  - Only the `\gls` family and `\glsdisp` end a first use, as in glossaries.
+  - `\printglossary[type, title]`, `\printacronyms` and `\printglossaries` print the listed entries of each type, sorted by their sort keys, as a description list. Each entry has its description, the post-description dot (`nopostdot`, or a redefined `\glspostdescription`) and section locators linking back to its uses (`nonumberlist` drops them).
+  - A use links to its entry when that entry's glossary is printed. `\newglossary` adds types. The `toc` option adds a contents entry per printed glossary, and it follows a renamed `\glossaryname` or `\acronymname`.
+  - `\loadglsentries` reads a file beside the document through the binding's `\input`.
+  - Styles other than the list styles report `glossary-style-approximation`, and acronym styles other than long-short report `acronym-style-approximation`.
+- **acronym.**
+  - `\acro`/`\acrodef` (the short form defaults to the label) and `\acroplural`.
+  - The `\ac` family: `\ac`, `\acp`, `\acf`, `\acfp`, `\acs`, `\acsp`, `\acsu`, `\acl`, `\aclp`, `\aclu`, with capitals. A redefined `\acsfont`, `\acffont` or `\acfsfont` styles its part (`font_decl.argument_font_css` reads `\textsc{#1}`-style bodies).
+  - The environment prints its entries as a description list. The options `printonlyused`, `nolist`, `dua` and `nohyperlinks` work. `withpage`, `footnote` and `smaller` are reported as unsupported options.
+- **nomencl.** `\nomenclature[prefix]{symbol}{description}` entries print sorted by prefix and symbol under `\nomname`. `intoc` adds the contents entry.
+- **makeidx and imakeidx.**
+  - `\index` leaves an anchor.
+  - `\printindex` prints every entry path in case-folded sort order, with letter groups apart. Subentries come from `!`, with their parents printed even if they have no locators of their own.
+  - Locators are the section of each use, one per section, linking back to the anchor.
+  - The index also handles `|textbf`/`|textit` formats, `|(`…`|)` ranges, `|see`/`|seealso`, `key@display` and the `"` quote. It goes in two CSS columns.
+  - imakeidx's `\makeindex[name, title, intoc, columns]` and `\index[name]`/`\printindex[name]` give named indexes.
+- **Lists.** A list's heading is a chapter-level heading in book and report and a section-level one otherwise. Its contents entry, from the generalized `add_unnumbered_head` (once appendix's), carries the name macro so that the contents follow a renamed title.
+- **Bindings and the kernel.** `tex/binding/{glossaries,nomencl,acronym}.sty` declare the macros documents rename. The kernel now declares `\indexname`, `\listfigurename`, `\listtablename`, `\bibname`, `\chaptername`, `\partname` and `\appendixname` like `\contentsname`, so renaming them is legal.
+- `util.option_on(options, key)` replaces two copies of the same option test.
+
 ## 12. M8: math packages
 
 This is `lambda.doc.math` work, after M0.3. Every addition updates Pkg_Math §7.
@@ -586,3 +616,7 @@ As built on 2026-10-13, with route (a) chosen by the user and **D7.2.7v2** ratif
   - New modules in `lmd/package/latex/packages/`: `titles.ls`, `contents.ls`, `frontmatter.ls` and `varioref.ls`; the bindings `tex/binding/{tocloft,authblk,titling,minitoc}.sty`.
   - New test `test/lambda/latex/test_latex_phase5_front.ls` with its golden, identical on every tier. The other LaTeX, math and TeX tests match their goldens.
   - `make test-lambda-baseline` passed 6792 of 6813 under `LAMBDA_LOG_LEVEL=error`; the other 21 are the MIR ratchet and the two lint tests, which pass without the override.
+- 2026-10-13: M6 committed (d7fdba0fe). M7 was built as recorded in §11.
+  - New module `lmd/package/latex/packages/terms.ls`; the bindings `tex/binding/{glossaries,nomencl,acronym}.sty`; the kernel's class name constructors.
+  - New test `test/lambda/latex/test_latex_phase5_terms.ls` with its golden and a glossary file, identical on every tier. The other LaTeX, math and TeX tests match their goldens.
+  - `make test-lambda-baseline` passed 6792 of 6814 under `LAMBDA_LOG_LEVEL=error`: the 21 warning-reading tests pass without the override, and `test_latex_phase3_corpus` timed out under the baseline's parallel load. Alone it passes in about 37 s, and an interleaved A/B against M6's package tree shows no slowdown once the registry was nested (§11).

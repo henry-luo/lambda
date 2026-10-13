@@ -25,6 +25,7 @@ import colspec: .packages.array
 import titles: .packages.titles
 import contents: .packages.contents
 import frontmatter: .packages.frontmatter
+import terms: .packages.terms
 
 // helper: append a {key, val} entry to an entry list
 fn add_entry(entries, k, v) {
@@ -62,6 +63,9 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         date_el: null,
         // authblk's \author and \affil commands, in source order
         authblk: [],
+        // the term registry (terms.ls), one field so that the state every node
+        // copies stays small
+        terms: terms.EMPTY,
         // every counter, built-in or declared, lives in one map keyed by name
         counters: {
             part: 0, chapter: 0, section: 0, subsection: 0, subsubsection: 0,
@@ -138,6 +142,7 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         date: result.date,
         date_el: result.date_el,
         authblk: result.authblk,
+        terms: result.terms,
         headings: result.headings,
         heading_nums: result.heading_nums,
         heading_titles: result.heading_titles,
@@ -221,6 +226,29 @@ pub let PACKAGE_WALK = {
     sectsty: map([for (command in titles.SECTSTY_COMMANDS, x in [command, walk_sectsty]) x]),
     tocloft: {cftsetindents: (el, st) => record_pair(st, el, contents.indents(el)), newlistof: walk_newlistof},
     minitoc: {mtcsettitle: walk_mtcsettitle},
+    // the term registry: glossaries, acronym, nomencl and the index (terms.ls)
+    glossaries: map([for (command in terms.GLS_USE_COMMANDS, x in [command, walk_gls_use]) x] ++
+        ["newglossaryentry", walk_glossary_entry, "longnewglossaryentry", walk_glossary_entry,
+         "newacronym", walk_newacronym, "newglossary", walk_newglossary,
+         "glsadd", (el, st) => gls_list(st, [gls_label(el)]),
+         "glsaddall", (el, st) => gls_list(st, [for (e in st.terms.gls_entries) e.label]),
+         "glsreset", (el, st) => with_terms(st, {gls_firsts: [for (l in st.terms.gls_firsts where l != gls_label(el)) l]}),
+         "glsunset", (el, st) => with_terms(st, {gls_firsts: st.terms.gls_firsts ++ [gls_label(el)]}),
+         "glsresetall", (el, st) => with_terms(st, {gls_firsts: []}),
+         "glsunsetall", (el, st) => with_terms(st, {gls_firsts: [for (e in st.terms.gls_entries) e.label]}),
+         "printglossary", walk_print_glossary, "printglossaries", walk_print_glossary,
+         "printacronyms", walk_print_glossary]),
+    acronym: map([for (command in terms.AC_USE_COMMANDS, x in [command, walk_ac_use]) x] ++
+        ["acro", walk_acro, "acrodef", walk_acro, "acroplural", walk_acroplural, "acrodefplural", walk_acroplural,
+         "acused", (el, st) => with_terms(st, {ac_firsts: st.terms.ac_firsts ++ [gls_label(el)]}),
+         "acresetall", (el, st) => with_terms(st, {ac_firsts: []})]),
+    nomencl: {nomenclature: walk_nomenclature, printnomenclature: (el, st) =>
+        if (util.option_enabled(registry.options_for(st.packages, "nomencl").intoc))
+            add_unnumbered_head(el, st, "Nomenclature", null, "nomname") else st},
+    makeidx: {index: walk_index, printindex: walk_printindex},
+    imakeidx: {index: walk_index, printindex: walk_printindex,
+        makeindex: (el, st) => record_setting(st, el, "index:" ++ index_name(util.parse_kv_options(util.optional_raw(el)).name),
+            util.parse_kv_options(util.optional_raw(el)))},
     // titling's \pre… and \post… code; authblk's authors and affiliations
     titling: map([for (part in frontmatter.TITLING_PARTS, side in ["pre", "post"],
         x in [side ++ part, walk_titling]) x]),
@@ -228,7 +256,7 @@ pub let PACKAGE_WALK = {
         affil: (el, st) => {*:st, authblk: st.authblk ++ [{kind: "affil", el: el}]}},
     pdfpages: {includepdfset: (el, st) => record_setting(st, el, "includepdfset", util.raw_argument(el, "required", 0) or "")},
     appendix: {appendices: (el, st) => walk_appendices(el, st, false),
-        subappendices: (el, st) => walk_appendices(el, st, true), addappheadtotoc: add_appendix_head}
+        subappendices: (el, st) => walk_appendices(el, st, true), addappheadtotoc: (el, st) => add_unnumbered_head(el, st, appendix.HEAD)}
 }
 
 // a {key, value} setting, or nothing when the command named no heading
@@ -863,7 +891,7 @@ fn walk_appendices(el, st, sub) {
     let counter = appendix.lettered_counter(chaptered, sub)
     let start = if (sub) 0 else st.appendix_count
     let headed = if (not sub and options != null and util.option_enabled(options.toc))
-        add_appendix_head(el, st) else st
+        add_unnumbered_head(el, st, appendix.HEAD) else st
     let reset = if (sub) {*:st.counters, [counter]: 0}
         else if (chaptered) {*:st.counters, chapter: start, section: 0}
         else {*:st.counters, section: start, subsection: 0}
@@ -875,14 +903,17 @@ fn walk_appendices(el, st, sub) {
         appendix_count: if (sub) st.appendix_count else walked.counters[counter]}
 }
 
-// \addappheadtotoc: an unnumbered "Appendices" contents entry at the class's top
-// level, anchored where it is given
-fn add_appendix_head(el, st) {
-    let slug_info = make_unique_slug(util.slugify(appendix.HEAD), st.slug_counts)
+// an unnumbered contents entry at the class's top level, anchored where it is given:
+// appendix's \addappheadtotoc, and the toc options of the glossary, the index and
+// the nomenclature
+// `key` names the anchor when one command prints several lists (\printglossaries),
+// and `name_macro` the macro a document renames the entry's text with
+fn add_unnumbered_head(el, st, text, key = null, name_macro = null) {
+    let slug_info = make_unique_slug(util.slugify(text), st.slug_counts)
     {*:st, slug_counts: slug_info.counts,
-        contents_anchors: add_entry(st.contents_anchors, string(el.source_offset), slug_info.slug),
+        contents_anchors: add_entry(st.contents_anchors, key or string(el.source_offset), slug_info.slug),
         headings: st.headings ++ [{level: if (appendix.chaptered(st.docclass)) 1 else 2,
-            number: null, text: appendix.HEAD, id: slug_info.slug}]}
+            number: null, text: text, id: slug_info.slug, offset: el.source_offset, name_macro: name_macro}]}
 }
 
 // the counter name and integer value of \setcounter or \addtocounter; null otherwise
@@ -931,6 +962,116 @@ fn walk_titling(el, st) {
     {*:recorded, diagnostics: st.diagnostics ++ [for (command in font_decl_unknown(raw, st.custom_colors))
         util.diagnostic("unsupported-title-format", "titling", command,
             "Unsupported command in title code: \\" ++ command, el.source_offset)]}
+}
+
+// ---- the term registry (terms.ls) ----
+
+fn gls_label(el) => trim(util.raw_argument(el, "required", 0) or "")
+
+fn gls_list(st, labels) => with_terms(st, {gls_listed: st.terms.gls_listed ++ labels})
+
+fn with_terms(st, changes) => {*:st, terms: {*:st.terms, *:changes}}
+
+fn walk_glossary_entry(el, st) {
+    let entry = terms.glossary_entry(gls_label(el), util.raw_argument(el, "required", 1) or "")
+    // \longnewglossaryentry takes the description as a third argument
+    let described = if (string(name(el)) == "longnewglossaryentry")
+        {*:entry, description: util.raw_argument(el, "required", 2) or ""} else entry;
+    with_terms(st, {gls_entries: st.terms.gls_entries ++ [described]})
+}
+
+fn walk_newacronym(el, st) {
+    let options = registry.options_for(st.packages, "glossaries")
+    let separate = options != null and (util.option_enabled(options.acronym) or util.option_enabled(options.acronyms))
+    let entry = terms.acronym_entry(gls_label(el), trim(util.raw_argument(el, "required", 1) or ""),
+        trim(util.raw_argument(el, "required", 2) or ""), util.optional_raw(el), separate);
+    with_terms(st, {gls_entries: st.terms.gls_entries ++ [entry]})
+}
+
+// \newglossary[log]{name}{in}{out}{title}, or \newglossary*{name}{title}
+fn walk_newglossary(el, st) {
+    let type_name = trim(util.raw_argument(el, "required", 0) or "")
+    let title = util.raw_argument(el, "required", if (el.starred == true) 1 else 3)
+    if (type_name == "" or title == null) st else with_terms(st, {gls_titles: add_entry(st.terms.gls_titles, type_name, title)})
+}
+
+// a \gls-like use: its first-use flag by offset, and whether it ends the first use
+// and lists the entry
+fn walk_gls_use(el, st) {
+    let form = terms.gls_form(string(name(el)))
+    let label = gls_label(el)
+    let first = not (contains(st.terms.gls_firsts, label) or false);
+    with_terms(st, {gls_uses: add_entry(st.terms.gls_uses, string(el.source_offset), {label: label, first: first, lists: form.lists}),
+        gls_firsts: if (form.ends_first and first) st.terms.gls_firsts ++ [label] else st.terms.gls_firsts,
+        gls_listed: if (form.lists) st.terms.gls_listed ++ [label] else st.terms.gls_listed})
+}
+
+// the glossary's toc option puts each printed glossary in the contents, anchored by
+// the command's offset and the glossary's type
+fn walk_print_glossary(el, st) {
+    let options = registry.options_for(st.packages, "glossaries")
+    let types = terms.printed_types(string(name(el)), util.optional_raw(el), options, st.terms.gls_titles)
+    // uses link to the glossaries that are printed
+    let printed = with_terms(st, {gls_printed: st.terms.gls_printed ++ [for (t in types) t.type]})
+    if (not util.option_on(options, "toc")) printed else gls_heads(el, printed, types, 0)
+}
+
+fn gls_heads(el, st, types, i) {
+    if (i >= len(types)) st
+    else gls_heads(el, add_unnumbered_head(el, st, terms.type_title(types[i].type, st.terms.gls_titles, types[i].title),
+        string(el.source_offset) ++ ":" ++ types[i].type, terms.name_macro(types[i].type, types[i].title)), types, i + 1)
+}
+
+fn walk_acro(el, st) {
+    let entry = terms.acro_entry(gls_label(el), util.optional_raw(el), util.raw_argument(el, "required", 1) or "");
+    with_terms(st, {ac_entries: st.terms.ac_entries ++ [entry]})
+}
+
+// \acroplural{label}[short plural]{long plural}
+fn walk_acroplural(el, st) {
+    let label = gls_label(el)
+    let short = util.optional_raw(el)
+    let long = util.raw_argument(el, "required", 1);
+    with_terms(st, {ac_entries: [for (e in st.terms.ac_entries) if (e.label != label) e
+        else {*:e, shortplural: short or e.shortplural, longplural: long or e.longplural}]})
+}
+
+fn walk_ac_use(el, st) {
+    let form = terms.ac_form(string(name(el)))
+    let label = gls_label(el)
+    let first = not (contains(st.terms.ac_firsts, label) or false);
+    with_terms(st, {ac_uses: add_entry(st.terms.ac_uses, string(el.source_offset), {label: label, first: first}),
+        ac_firsts: if (form.ends_first and first) st.terms.ac_firsts ++ [label] else st.terms.ac_firsts})
+}
+
+// \nomenclature[prefix]{symbol}{description}
+fn walk_nomenclature(el, st) {
+    with_terms(st, {nomencl: st.terms.nomencl ++ [{prefix: trim(util.optional_raw(el) or ""),
+        symbol: trim(util.raw_argument(el, "required", 0) or ""),
+        description: util.raw_argument(el, "required", 1) or "", offset: el.source_offset}]})
+}
+
+// imakeidx names its indexes; makeidx has one
+fn index_name(raw) => if (raw == null or trim(string(raw)) == "") "idx" else trim(string(raw))
+
+// \index[name]{entry}
+fn walk_index(el, st) {
+    let raw = util.raw_argument(el, "required", 0)
+    if (raw == null) st
+    else with_terms(st, {index_entries: st.terms.index_entries ++ [{name: index_name(util.optional_raw(el)),
+        entry: terms.index_entry(raw), offset: el.source_offset}]})
+}
+
+// \printindex[name]: in the contents under imakeidx's intoc
+fn walk_printindex(el, st) {
+    let name_key = index_name(util.optional_raw(el))
+    let setup = util.setting_at(st.settings, "index:" ++ name_key, el.source_offset)
+    let package = registry.options_for(st.packages, "imakeidx")
+    let wanted = (setup != null and util.option_enabled(setup.intoc)) or
+        (package != null and util.option_enabled(package.intoc));
+    if (not wanted) st
+    else if (setup != null and setup.title != null) add_unnumbered_head(el, st, string(setup.title))
+    else add_unnumbered_head(el, st, "Index", null, "indexname")
 }
 
 // \mtcsettitle{minitoc}{title}

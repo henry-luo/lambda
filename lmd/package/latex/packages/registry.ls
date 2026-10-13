@@ -30,6 +30,7 @@ import titles: .titles
 import contents: .contents
 import frontmatter: .frontmatter
 import varioref: .varioref
+import terms: .terms
 import boxes: ~~.elements.boxes
 
 // `commands` names the commands and environments a package owns: they dispatch
@@ -192,6 +193,14 @@ pub let CATALOG = {
         preamble: slice(frontmatter.TITLING_COMMANDS, 0, 6)},
     authblk: {options: frontmatter.AUTHBLK_OPTIONS, commands: frontmatter.AUTHBLK_COMMANDS,
         preamble: frontmatter.AUTHBLK_COMMANDS},
+    // the term registry (terms.ls); tex/binding/{glossaries,nomencl,acronym}.sty declare
+    // the macros documents rename, and \loadglsentries reads through \input
+    glossaries: {options: terms.GLOSSARIES_OPTIONS, commands: terms.GLOSSARIES_COMMANDS,
+        preamble: terms.GLOSSARIES_PREAMBLE},
+    acronym: {options: terms.ACRONYM_OPTIONS, commands: terms.ACRONYM_COMMANDS, preamble: ["acrodef", "acrodefplural"]},
+    nomencl: {options: terms.NOMENCL_OPTIONS, commands: terms.NOMENCL_COMMANDS, preamble: ["makenomenclature"]},
+    makeidx: {options: [], commands: ["makeindex", "printindex", "index"], preamble: ["makeindex"]},
+    imakeidx: {options: terms.IMAKEIDX_OPTIONS, commands: terms.INDEX_COMMANDS, preamble: ["makeindex", "indexsetup"]},
     // references with English page phrases (varioref.ls)
     varioref: {options: varioref.OPTIONS, commands: varioref.COMMANDS},
     // per-chapter contents; tex/binding/minitoc.sty declares the title macros
@@ -365,6 +374,9 @@ fn add_package(st, raw_name, opts, node) {
             else if (package == "biblatex") bib_options_issues(opts, node)
             else if (package == "caption" or package == "subcaption")
                 caption.issues(opts, node.source_offset)
+            else if (package == "glossaries" and terms.style_issue(opts.style) != null)
+                [diagnostic("glossary-style-approximation", "glossaries", terms.style_issue(opts.style),
+                    "The glossary is drawn as a description list, not in the style " ++ terms.style_issue(opts.style), node)]
             else []
         {*:st, packages: st.packages ++ [{key: package, val: opts,
             offset: if (node is element) node.source_offset else null}],
@@ -718,6 +730,13 @@ pub fn target_diagnostics(node, target, paged = false) {
                 [for (key in pdfpages.LAYOUT_KEYS where util.parse_kv_options(util.optional_raw(node))[key] != null)
                     diagnostic("pdfpages-layout-approximation", "pdfpages", key,
                         "Each page is inserted alone and upright; " ++ key ++ " has no effect", node)]
+            else if ((tag == "setglossarystyle" or tag == "glossarystyle") and
+                terms.style_issue(util.raw_argument(node, "required", 0)) != null)
+                [diagnostic("glossary-style-approximation", "glossaries", trim(util.raw_argument(node, "required", 0)),
+                    "The glossary is drawn as a description list", node)]
+            else if (tag == "setacronymstyle" and trim(util.raw_argument(node, "required", 0) or "") != "long-short")
+                [diagnostic("acronym-style-approximation", "glossaries", trim(util.raw_argument(node, "required", 0) or ""),
+                    "Acronyms are shown in the long-short style", node)]
             else if (tag == "doublerulesepcolor")
                 [diagnostic("rule-separation-color-approximation", "colortbl", tag,
                     "A double rule's gap shows the table background, not the separation color", node)]

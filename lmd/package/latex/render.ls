@@ -46,6 +46,7 @@ import titles: .packages.titles
 import contents: .packages.contents
 import frontmatter: .packages.frontmatter
 import varioref: .packages.varioref
+import terms: .packages.terms
 import adjustbox: .packages.adjustbox
 import pdfpages: .packages.pdfpages
 
@@ -218,6 +219,19 @@ pub let PACKAGE_RENDER = {
         if (starts_with(command, "the")) render_title_part else render_nothing]) x]),
     authblk: {affil: render_nothing},
     varioref: map([for (command in varioref.COMMANDS, x in [command, render_vref]) x]),
+    // the term registry (terms.ls): uses, then the printed lists
+    glossaries: map([for (command in terms.GLOSSARIES_COMMANDS, x in [command,
+        if (terms.gls_form(command) != null) render_gls
+        else if (command == "printglossary" or command == "printglossaries" or command == "printacronyms")
+            render_print_glossary
+        else render_nothing]) x]),
+    acronym: map([for (command in terms.ACRONYM_COMMANDS, x in [command,
+        if (terms.ac_form(command) != null) render_ac else if (command == "acronym") render_acronym_list
+        else render_nothing]) x]),
+    nomencl: {makenomenclature: render_nothing, nomenclature: render_nothing, printnomenclature: render_nomenclature},
+    makeidx: {makeindex: render_nothing, index: render_index_anchor, printindex: render_index},
+    imakeidx: {makeindex: render_nothing, index: render_index_anchor, printindex: render_index,
+        indexsetup: render_nothing, indexprologue: render_nothing},
     minitoc: map([for (command in contents.MINITOC_COMMANDS, x in [command,
         if (contents.mini_kind(command) != null) render_minitoc else render_nothing]) x]),
     threeparttable: {threeparttable: render_threeparttable, measuredfigure: render_threeparttable,
@@ -1519,8 +1533,11 @@ fn render_toc(info) {
     }
 }
 
-// a contents entry; tocloft's macros for its level style it
+// a contents entry; tocloft's macros for its level style it, and a list's entry
+// follows its renamed title (\indexname, \glossaryname, …)
 fn toc_item(h, info) {
+    let renamed = if (h.name_macro == null) null else macros.last_macro(info.macros, h.name_macro)
+    let text = if (renamed == null) h.text else font_decl.declarations(renamed.source, null).text
     let style = if (registry.active(info.packages, "tocloft"))
         contents.entry_style(info, contents.entry_name(h.level)) else null
     let shown = if (h.number == null) null
@@ -1532,7 +1549,7 @@ fn toc_item(h, info) {
             else if (style == null) <span class: "sec-num", shown>
             else (<span class: "sec-num", style: style.number_css, style.before ++ shown ++ style.after>,
                 if (style.after_box == "") null else style.after_box);
-            h.text
+            text
         >
     >
 }
@@ -2891,6 +2908,217 @@ fn cref_keys(keys, info, capital) {
             }
         >
     }
+}
+
+// ============================================================
+// The term registry: glossaries, acronym, nomencl and the index (terms.ls)
+// ============================================================
+
+// TeX source a package keeps as data, rendered (util.parse_fragment)
+fn render_fragment(raw, info) {
+    let nodes = util.parse_fragment(raw)
+    collect_children(nodes, 0, len(nodes), [], info)
+}
+
+// the number of the last numbered heading before an offset: a list's locator, in
+// place of a page number; null before the first
+fn section_at(info, offset) {
+    let found = [for (h in info.headings where h.offset != null and h.offset < offset and h.number != null) h];
+    (if (len(found) == 0) null else language.display_number(found[len(found) - 1].number, info.polyglossia))
+}
+
+// locators: links back to the uses, labelled by section, one per section and in
+// source order; an ordinal stands in before the first numbered heading
+fn locator_links(offsets, info, prefix) {
+    let labelled = [for (i, offset in offsets) {offset: offset, text: section_at(info, offset) or string(i + 1)}]
+    let distinct = [for (i, l in labelled where not any([for (j, m in labelled where j < i) m.text == l.text])) l];
+    [for (i, l in distinct, item in [if (i == 0) null else ", ", <a href: "#" ++ prefix ++ string(l.offset), l.text>]) item]
+}
+
+// a list's heading: a chapter's level in book and report, a section's otherwise,
+// with the anchor of its contents entry
+fn list_heading(info, title_items, anchor_key) {
+    let id = util.lookup(info.contents_anchors, anchor_key)
+    let level = if (info.docclass == "book" or info.docclass == "report") 1 else 2;
+    if (level == 1) <h1 class: "latex-list-heading", id: id, for c in title_items { c }>
+    else <h2 class: "latex-list-heading", id: id, for c in title_items { c }>
+}
+
+// a list title: the renamed name macro, or the default
+fn renamed_title(info, macro_name, fallback) {
+    let found = if (macro_name == null) null else macros.last_macro(info.macros, macro_name)
+    if (found != null and found.body != null) render_children(found.body, 0, info) else [fallback]
+}
+
+fn last_term(entries, label) {
+    let found = [for (e in entries where e.label == label) e];
+    (if (len(found) == 0) null else found[len(found) - 1])
+}
+
+// a \gls-like use: the entry's first or later form, linked to its printed glossary
+fn render_gls(el, info) {
+    let form = terms.gls_form(string(name(el)))
+    let label = trim(util.raw_argument(el, "required", 0) or "")
+    let entry = last_term(info.terms.gls_entries, label)
+    let use = util.lookup(info.terms.gls_uses, string(el.source_offset))
+    if (entry == null) util.unsupported_element("glossaries", "Undefined glossary entry " ++ label, el.source_offset)
+    else {
+        let source = if (form.field == "given") util.raw_argument(el, "required", 1) or ""
+            else terms.use_source(entry, form, use != null and use.first)
+        let items = render_fragment(source, info)
+        let style = if (form.cap == "all") "text-transform:uppercase" else null
+        if (form.lists and (contains(info.terms.gls_printed or [], entry.type) or false))
+            <a class: "latex-gls", id: "glsuse-" ++ string(el.source_offset), href: "#gls-" ++ util.slugify(label),
+                style: style, for c in items { c }>
+        else <span class: "latex-gls", id: if (form.lists) "glsuse-" ++ string(el.source_offset) else null,
+            style: style, for c in items { c }>
+    }
+}
+
+// \printglossary, \printglossaries and \printacronyms: the listed entries of each
+// type, sorted by their sort keys, as a description list
+fn render_print_glossary(el, info) {
+    let options = registry.options_for(info.packages, "glossaries")
+    let types = terms.printed_types(string(name(el)), util.optional_raw(el), options, info.terms.gls_titles)
+    let lists = [for (t in types, let printed = glossary_list(el, info, t, options) where printed != null) printed]
+    if (len(lists) == 1) lists[0] else <div class: "latex-glossaries", for c in lists { c }>
+}
+
+fn glossary_list(el, info, t, options) {
+    let entries = sort([for (e in info.terms.gls_entries where e.type == t.type and (contains(info.terms.gls_listed, e.label) or false)) e],
+        (e) => lower(e.sort))
+    let postdot = renamed_title(info, "glspostdescription", if (util.option_on(options, "nopostdot")) "" else ".")
+    let title = if (t.title != null) [t.title]
+        else renamed_title(info, terms.name_macro(t.type, null), terms.type_title(t.type, info.terms.gls_titles))
+    if (len(entries) == 0) null
+    else <section class: "latex-glossary",
+        list_heading(info, title, string(el.source_offset) ++ ":" ++ t.type);
+        <dl class: "latex-glossary-list",
+            for (e in entries, item in [
+                <dt id: "gls-" ++ util.slugify(e.label), <strong for c in render_fragment(e.name, info) { c }>>,
+                <dd for c in [*render_fragment(e.description, info), *postdot,
+                    *(if (util.option_on(options, "nonumberlist")) [] else glossary_locators(e, info))] { c }>]) item>>
+}
+
+fn glossary_locators(e, info) {
+    let offsets = [for (u in info.terms.gls_uses where u.val.label == e.label and u.val.lists) int(u.key)]
+    let links = locator_links(offsets, info, "glsuse-");
+    (if (len(links) == 0) [] else [" ", <span class: "latex-locators", for c in links { c }>])
+}
+
+// an \ac-family use (the acronym package): the long form with the short one on first
+// use, linked to the acronym list unless nohyperlinks
+fn render_ac(el, info) {
+    let form = terms.ac_form(string(name(el)))
+    let label = trim(util.raw_argument(el, "required", 0) or "")
+    let entry = last_term(info.terms.ac_entries, label)
+    let use = util.lookup(info.terms.ac_uses, string(el.source_offset))
+    let options = registry.options_for(info.packages, "acronym")
+    if (entry == null) util.unsupported_element("acronym", "Undefined acronym " ++ label, el.source_offset)
+    else {
+        let items = [for (part in terms.ac_parts(entry, form, use != null and use.first, util.option_on(options, "dua")),
+            item in ac_part(part, info)) item]
+        if (util.option_on(options, "nohyperlinks") or util.option_on(options, "nolist"))
+            <span class: "latex-acronym", for c in items { c }>
+        else <a class: "latex-acronym", href: "#acro-" ++ util.slugify(label), for c in items { c }>
+    }
+}
+
+// a part of an \ac use, in the font its macro (\acsfont, …) gives when redefined
+fn ac_part(part, info) {
+    let font = if (part.font == null) null else macros.last_macro(info.macros, part.font)
+    let css = if (font == null) null else font_decl.argument_font_css(font.source)
+    let items = render_fragment(part.source, info);
+    (if (css == null) items else [<span style: css, for c in items { c }>])
+}
+
+// the acronym environment: its \acro entries as a description list, the used ones
+// only under printonlyused; nolist prints nothing
+fn render_acronym_list(el, info) {
+    let options = registry.options_for(info.packages, "acronym")
+    let used = [for (u in info.terms.ac_uses) u.val.label]
+    let defined = [for (node in util.flatten_paragraphs(util.leading_option(el).children)
+        where node is element and string(name(node)) == "acro") node]
+    let labels = [for (node in defined) trim(util.raw_argument(node, "required", 0) or "")]
+    let shown = [for (label in labels where not util.option_on(options, "printonlyused") or
+        (contains(used, label) or false)) last_term(info.terms.ac_entries, label)]
+    if (util.option_on(options, "nolist") or len(shown) == 0) null
+    else <dl class: "latex-acronyms",
+        for (entry in shown, item in [
+            <dt id: "acro-" ++ util.slugify(entry.label), <strong for c in render_fragment(entry.short, info) { c }>>,
+            <dd for c in render_fragment(entry.long, info) { c }>]) item>
+}
+
+// \printnomenclature: the entries sorted by prefix and symbol under \nomname
+fn render_nomenclature(el, info) {
+    let entries = sort(info.terms.nomencl, (e) => terms.nomencl_key(e))
+    if (len(entries) == 0) null
+    else <section class: "latex-nomenclature",
+        list_heading(info, renamed_title(info, "nomname", "Nomenclature"), string(el.source_offset));
+        <dl class: "latex-nomenclature-list",
+            for (e in entries, item in [<dt for c in render_fragment(e.symbol, info) { c }>,
+                <dd for c in render_fragment(e.description, info) { c }>]) item>>
+}
+
+// \index: an anchor the index's locators link back to
+fn render_index_anchor(el, info) => <a class: "latex-index-anchor", id: "idx-" ++ string(el.source_offset)>
+
+// \printindex[name]: every entry path in sort order, with its locators (ranges
+// joined, see and see also references), letter groups apart
+fn render_index(el, info) {
+    let index_key = trim(util.optional_raw(el) or "")
+    let wanted = if (index_key == "") "idx" else index_key
+    let occurrences = [for (o in info.terms.index_entries where o.name == wanted and len(o.entry.levels) > 0) o]
+    let paths = unique_paths(occurrences)
+    let setup = util.setting_at(info.settings, "index:" ++ wanted, el.source_offset)
+    let title = if (setup != null and setup.title != null) [string(setup.title)] else renamed_title(info, "indexname", "Index")
+    let columns = if (setup != null and setup.columns != null) string(setup.columns) else "2"
+    if (len(paths) == 0) null
+    else <section class: "latex-index",
+        list_heading(info, title, string(el.source_offset));
+        <div class: "latex-index-body", style: "column-count:" ++ columns,
+            for (i, p in paths, item in [
+                if (i > 0 and terms.index_group(paths[i - 1].levels) != terms.index_group(p.levels))
+                    <div class: "latex-index-gap"> else null,
+                index_item(p, occurrences, info)]) item>>
+}
+
+// each entry path and every path above it, sorted, with the displays of its first use
+fn unique_paths(occurrences) {
+    let all = [for (o in occurrences, depth in 1 to len(o.entry.levels))
+        {key: terms.index_key(slice(o.entry.levels, 0, depth)), levels: slice(o.entry.levels, 0, depth)}]
+    let distinct = [for (i, p in all where not any([for (j, q in all where j < i) q.key == p.key])) p];
+    sort(distinct, (p) => p.key)
+}
+
+fn index_item(p, occurrences, info) {
+    let own = [for (o in occurrences where terms.index_key(o.entry.levels) == p.key) o]
+    let located = [for (o in own where o.entry.refer == null and o.entry.range != "close") o]
+    // makeindex prints a page once; a section is printed once likewise
+    let pages = [for (i, o in located where o.entry.range == "open" or not any([for (j, q in located
+        where j < i and q.entry.range != "open") section_at(info, q.offset) == section_at(info, o.offset)])) o]
+    let refs = [for (o in own where o.entry.refer != null) o]
+    let display = p.levels[len(p.levels) - 1].display
+    let locators = [for (i, o in pages, item in [if (i == 0) null else ", ", index_locator(o, own, info)]) item];
+    <div class: "latex-index-item latex-index-level-" ++ string(len(p.levels)),
+        for c in render_fragment(display, info) { c }
+        if (len(locators) == 0) null else ", "
+        for c in locators { c }
+        for (o in refs, item in [", ", <em if (o.entry.refer == "see") "see" else "see also">, " ",
+            *render_fragment(o.entry.target, info)]) item>
+}
+
+// a locator: its section linked back to the \index, through the matching close of a
+// range, in the format its encapsulator names
+fn index_locator(o, own, info) {
+    let close = if (o.entry.range != "open") null
+        else (let later = [for (c in own where c.entry.range == "close" and c.offset > o.offset) c],
+            if (len(later) == 0) null else later[0])
+    let start = section_at(info, o.offset) or "1"
+    let text = if (close == null) start else start ++ "\u2013" ++ (section_at(info, close.offset) or start)
+    let link = <a href: "#idx-" ++ string(o.offset), text>
+    let format = o.entry.format;
+    (if (format == "textbf") <strong link> else if (format == "textit" or format == "emph") <em link> else link)
 }
 
 // varioref: a reference with its page phrase, or the phrase alone. The phrase

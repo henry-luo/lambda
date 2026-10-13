@@ -60,13 +60,12 @@ pub fn separators(info) => {sep: font_decl.declarations(source(info, "Authsep", 
 pub fn fonts(info, options) {
     let author = font_decl.declarations(source(info, "Authfont", ""), info.custom_colors)
     let affil = font_decl.declarations(source(info, "Affilfont", ""), info.custom_colors)
-    {author: (if (on(options, "auth-sc") or on(options, "auth-sc-lg")) "font-variant:small-caps;" else "") ++
-            (if (on(options, "auth-lg") or on(options, "auth-sc-lg")) "font-size:1.1em;" else "") ++ author.css,
-     affil: (if (on(options, "affil-sl")) "font-style:oblique;"
-            else if (on(options, "affil-it")) "font-style:italic;" else "") ++ affil.css}
+    {author: (if (util.option_on(options, "auth-sc") or util.option_on(options, "auth-sc-lg")) "font-variant:small-caps;" else "") ++
+            (if (util.option_on(options, "auth-lg") or util.option_on(options, "auth-sc-lg")) "font-size:1.1em;" else "") ++ author.css,
+     affil: (if (util.option_on(options, "affil-sl")) "font-style:oblique;"
+            else if (util.option_on(options, "affil-it")) "font-style:italic;" else "") ++ affil.css}
 }
 
-fn on(options, key) => (options != null and util.option_enabled(options[key])) or false
 
 // the marks of an \author or \affil: [1,2] → ["1", "2"]; none for a plain one
 pub fn marks(el) {
