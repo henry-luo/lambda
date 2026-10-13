@@ -1,8 +1,9 @@
 {
   valid: true,
   local_models: 1,
-  remote_models: 4,
+  remote_models: 2,
   pinned_https: true,
+  deployed_muscle: true,
   vertices: 11382,
   triangles: 9152,
   buffer_budget: true,
@@ -10,8 +11,5 @@
   compact_uvs: true,
   textured: true,
   uv_complete: true,
-  normals_complete: true,
-  upstream_colors: true,
-  local_bounds: true,
-  chunk_seams: true
+  normals_complete: true
 }

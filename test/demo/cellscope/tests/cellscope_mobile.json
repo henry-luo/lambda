@@ -20,16 +20,16 @@
     {
       "type": "click",
       "target": {
-        "selector": "#choose-muscle"
+        "selector": "#favorite"
       }
     },
     {
       "type": "assert_attribute",
       "target": {
-        "selector": "#cellscope"
+        "selector": "#favorite"
       },
-      "attribute": "data-cell",
-      "equals": "muscle"
+      "attribute": "aria-pressed",
+      "equals": "true"
     },
     {
       "type": "assert_surface",

@@ -2,7 +2,8 @@
 
 A native Lambda Scene3D port of the gallery in
 [cclank/cell-architecture-studio](https://github.com/cclank/cell-architecture-studio),
-pinned to commit `1cab982e7a0f96af854a696430c0724707764358`.
+based on commit `1cab982e7a0f96af854a696430c0724707764358`, with the
+Muscle model from the [deployed gallery](https://cell-architecture-studio.lanshuagent.com/).
 
 ```sh
 ./lambda.exe demo cellscope
@@ -24,41 +25,41 @@ model's texture at 1024px to leave room for geometry and render
 targets within Scene3D's existing GPU budget.
 
 Only the plant model is stored in this repository. Other published models load
-on selection from the pinned upstream GitHub revision, using Lambda's HTTP
-input cache under `temp/cache/`:
+on selection from the web, using Lambda's HTTP input cache under `temp/cache/`.
+The gallery contains Plant, White Blood Cell, and Muscle. White Blood Cell uses
+the pinned GitHub revision; Muscle uses the deployed site's asset CDN:
 
 | Specimen | Model source | Approximate download |
 |---|---|---:|
 | Plant | Local reduced glTF, binary buffer, and JPEG | None |
 | White blood cell | `white-blood-cell-user.glb` | 56.6 MB |
-| Neuron | `neuron-nih.glb` | 2.9 MB |
-| Bacterial cell wall | `bacteria-wall-nih.glb` | 0.5 MB |
-| Animal cell | `animal-cell-nih.glb` | 1.5 MB |
-| Muscle | Full upstream procedural geometry, expressed in Lambda | None |
+| Muscle | `muscle-cell-tripo-skeletal-fiber-textured-pbr.glb.bin` from the gallery CDN | 65.3 MB |
 
 The first remote selection can take time to download, decode, and mount.
+A centered **Loading 3D specimen** popup shows the specimen name before work
+starts, for the main and comparison views. Its bar is indeterminate: the
+synchronous loader does not expose byte progress. Separate document frames
+paint the popup before HTTP/decode/mount work (**D7.5.3**); it closes when loading
+finishes or an error is displayed. Changing the selection cancels a queued load.
 Failures display an error with **Retry model**. Remote specimens and their
 thumbnails need a network connection on first use. Camera changes reuse the
 selected model; switching between imported specimens replaces the viewport's model.
-The three NIH meshes have no source textures or vertex colors. The demo applies
-upstream's `applyAssetVertexColors` palette and spatial color variation, with
-the same linear-light color mixing. They retain the published geometry. The
-bacterial asset depicts a Gram-positive wall cross-section, not a whole bacterium;
-its broad, plain surfaces are part of that source model.
 
-Muscle preserves upstream's seven myofibril bundles, twelve sarcomeres per
-bundle, and all three differently colored bands per sarcomere (252 band meshes).
-It also retains the capsule membrane, three nuclei with nucleoli, four
-mitochondria, and four curved reticulum tubes. Radii, lengths, positions,
-tessellation, and the 80-by-12 centripetal Catmull–Rom tubes follow the Three.js
-builder, including arc-length spacing. Epithelial is omitted from this gallery.
+Muscle uses the same textured Tripo GLB as the deployed browser gallery:
+**1,047,437 source vertices and 1,978,833 triangles**, without mesh simplification.
+Scene3D partitions it into draw batches while preserving all triangles, authored
+normals, UVs, and the base-color texture (uploaded at 2048px). Its initial pose
+faces the cutaway toward the camera and fits the shared viewport. The deployed
+browser's automatic rotation can show a different side. The GitHub snapshot's
+procedural Muscle fallback is not the model used by the deployed website;
+that fallback has been removed from CellScope. The CDN URL, source hash, and
+observed browser bundle are recorded in [assets/muscle-source.json](assets/muscle-source.json).
 
 Select an organelle to read its description, properties, and a short fact.
-**Focus** dims unselected muscle structures; **Cutaway** reduces the muscle
-membrane opacity, as in upstream. Both controls apply only to Muscle;
-the imported models have no organelle segmentation. **Compare specimens**
-opens a second viewport with a synchronized camera. Search filters the gallery;
-the star saves specimens for the current session.
+The imported models have no organelle segmentation, so the procedural
+Focus/Cutaway controls are omitted. **Compare specimens**
+opens a second viewport with a synchronized camera. The star saves specimens
+for the current session; **Saved specimens** shows those favorites.
 
 Drag to orbit, Shift-drag to pan, and scroll to zoom. When a scene is focused,
 use arrow keys to orbit, `+` / `-` to zoom, `R` to reset, or Space to toggle
@@ -77,18 +78,18 @@ no React, Three.js, JavaScript application, or npm installation.
 Models are illustrative and not to scale; imported organelles cannot be picked individually.
 The upstream quiz, tutor, notebook, progression, and export features are outside
 this demo. Scene3D uses Lambert lighting, so upstream's PBR highlights,
-environment lighting, and contact shadows are not reproduced.
+environment lighting, normal/roughness maps, and contact shadows are not reproduced.
+Matching the source mesh does not make the shading pixel-identical to the browser.
 
-`mod_assets.ls` owns sources and lazy mounting; `mod_colors.ls` ports upstream's
-NIH vertex coloring; `mod_data.ls` contains specimen
-information; `mod_model.ls` handles state; `mod_geometry.ls` / `mod_scene.ls`
-build procedural geometry and scene frames; `mod_ui.ls` / `mod_present.ls`
+`mod_assets.ls` owns sources and lazy mounting; `mod_data.ls` contains specimen
+information; `mod_model.ls` handles state; `mod_scene.ls`
+builds scene frames; `mod_ui.ls` / `mod_present.ls`
 build and update the page; `cellscope.ls` handles events.
 
 The upstream code's MIT notice is in [LICENSE.upstream](LICENSE.upstream).
-The adapted Three.js curve algorithms retain their [MIT notice](LICENSE.three).
 Model provenance and the reproducible plant preparation command are in
-[assets/plant/README.md](assets/plant/README.md). The upstream asset ledger
+[assets/plant/README.md](assets/plant/README.md) and
+[assets/muscle-source.json](assets/muscle-source.json). The upstream asset ledger
 identifies plant and white-blood-cell files as user-provided and does not give
 them a separate asset license; the code license is not asserted to cover them.
 
@@ -102,12 +103,16 @@ From the repository root:
 ./test/test_radiant_view_gtest.exe --gtest_filter='Scene3dTest.CellScope*'
 ```
 
-Golden checks verify exactly one local model, four pinned web sources, the
+Golden checks verify exactly one local model, the pinned White Blood Cell source and the
+deployed Muscle URL, the
 plant's actual mesh/texture data, quantized attributes and strict 250 KB buffer
-budget, the complete muscle structure, procedural
-normals and winding, and numeric references from Three.js for tubes and colors. Native
+budget, the three remaining specimens, saved filtering, and expanded zoom. Native
 UI fixtures cover desktop, 1024px, and 390px layouts without downloading remote
-3D models. To verify all four published GLBs, including actual rendered pixels:
+3D models, plus loading-popup painting before import, cancellation, Retry,
+comparison loads, and mobile popup sizing. The online fixture verifies Muscle's
+full triangle count, normals,
+UVs, texture, retained model on zoom, comparison, and actual rendered pixels,
+then the White Blood Cell GLB:
 
 ```sh
 LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/cellscope/cellscope.ls \
@@ -115,7 +120,8 @@ LAMBDA_HEADLESS_GLFW_WINDOW=1 ./lambda.exe view test/demo/cellscope/cellscope.ls
   --event-result temp/cellscope-remote-result.json
 ```
 
-To refresh local thumbnails and the desktop preview, replay
-`tests/cellscope_smoke.json` with the same flags, then copy
-`temp/cellscope-{plant,muscle}.png` to `assets/` and
-`temp/cellscope-desktop.png` to `preview.png`. Remote-model previews remain web URLs.
+To refresh the Plant thumbnail, replay `tests/cellscope_smoke.json` with the
+same flags and copy `temp/cellscope-plant.png` to `assets/plant.png`.
+The online fixture captures `temp/cellscope-remote-muscle.png` and
+`temp/cellscope-muscle-page.png` for `assets/muscle.png` and `preview.png`.
+The other remote-model previews remain web URLs.

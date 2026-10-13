@@ -1,0 +1,16 @@
+{
+  "name": "Tripo Skeletal Muscle Fiber GLB PBR",
+  "url": "https://assets.lanshuagent.com/models/muscle-cell-tripo-skeletal-fiber-textured-pbr.glb.bin",
+  "observedAt": "2026-10-13",
+  "gallery": "https://cell-architecture-studio.lanshuagent.com/",
+  "galleryBundle": "https://cell-architecture-studio.lanshuagent.com/assets/index-4zGGyJs4.js",
+  "sha256": "05a4737d47c8eeba0e85048418a4abbb56fd8cfac0bd48590d1211ff66e3c13a",
+  "bytes": 65260652,
+  "vertices": 1047437,
+  "triangles": 1978833,
+  "generator": "Tripo",
+  "publishedScale": 4.12,
+  "publishedRotation": [0.12, -0.34, -0.03],
+  "license": "No separate asset license is identified by the deployed gallery.",
+  "note": "Downloaded at runtime; no local model copy is bundled. Geometry, normals, UVs and base-color texture are imported unchanged. Scene3D approximates PBR shading with Lambert and does not render the normal or metallic/roughness maps."
+}

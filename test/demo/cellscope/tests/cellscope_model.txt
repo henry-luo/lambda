@@ -1,13 +1,12 @@
 {
-  specimens: 6,
+  specimens: 3,
   defaults: true,
   comparisons: true,
   selected: true,
+  removed: true,
   invalid_selection: true,
   save: true,
   unsave: true,
-  search: true,
-  reject_search: true,
   saved_filter: true,
   camera_limits: true,
   near_limit: true,
@@ -15,7 +14,5 @@
   camera_clearance: true,
   projection_scale: true,
   zoom_reversible: true,
-  reset: true,
-  focus: true,
-  cutaway: true
+  reset: true
 }

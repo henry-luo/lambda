@@ -27,38 +27,39 @@ pub pn camera(owner,st) {
         attr(camera,"fov",model.fov(st))
     }
 }
-pn scene(owner,id,selected,st,base) {
-    let viewport = node(owner,id)
-    attr(viewport,"aria-label",data.cell(selected).name ++ " interactive 3D model")
-    let problem = assets.ensure(viewport,base,selected)
-    attr(node(viewport,"procedural-specimen"),"visible",model.procedural(selected))
-    // material edits preserve shared geometry; the peer has its own resource namespace.
-    for (material in dom.query_selector_all(viewport,"material")) {
-        let part = dom.get_attribute(material,"data-part")
-        let base_opacity = dom.get_attribute(material,"data-opacity")
-        let cut_opacity = dom.get_attribute(material,"data-cut-opacity")
-        if (part != null) attr(material,"opacity",model.opacity(part,st,float(base_opacity),
-            if (cut_opacity == null or cut_opacity == "null") null else float(cut_opacity)))
-    }
-    return problem
+pub fn pending(owner,st) => [for (job in [
+    {viewport:"cell-scene",cell:st.cell},
+    * (if (st.compare) [{viewport:"peer-scene",cell:st.peer}] else [])
+] where assets.needs_load(node(owner,job.viewport),job.cell)) job]
+
+pub pn loading(owner,id) {
+    attr(owner,"data-loading",id != null)
+    attr(node(owner,"scene-pair"),"aria-busy",id != null)
+    if (id != null) text(owner,"loading-specimen",data.cell(id).name)
+    show(owner,"model-loading",id != null,"flex")
 }
 
-pub pn sync(owner,st,base) {
+pn scene(owner,id,selected) {
+    let viewport = node(owner,id)
+    attr(viewport,"aria-label",data.cell(selected).name ++ " interactive 3D model")
+    let slot = node(viewport,"imported-specimen")
+    let ready = not assets.needs_load(viewport,selected)
+    attr(slot,"visible",ready)
+    return if (ready) dom.get_attribute(slot,"data-error") else ""
+}
+
+pub pn sync(owner,st) {
     let cell = data.cell(st.cell)
-    for (key,value in {cell:st.cell,part:st.part,focus:st.focus,compare:st.compare}) attr(owner,"data-" ++ string(key),value)
+    for (key,value in {cell:st.cell,part:st.part,compare:st.compare}) attr(owner,"data-" ++ string(key),value)
     text(owner,"cell-title",cell.name)
     text(owner,"cell-kind",cell.type)
-    text(owner,"scene-label",(if (st.cell == "bacteria") "BACTERIAL WALL CROSS-SECTION" else upper(cell.name)) ++
-        (if (model.procedural(st.cell)) " / PROCEDURAL 3D MODEL"
-        else if (assets.model(st.cell).textured == true) " / TEXTURED 3D MODEL" else " / NIH 3D MODEL"))
-    show(owner,"stage-modes",model.procedural(st.cell),"flex")
-    show(owner,"cut",model.procedural(st.cell))
+    text(owner,"scene-label",upper(cell.name) ++ " / TEXTURED 3D MODEL")
     text(owner,"occurrence-title",cell.occurrence.title)
     text(owner,"occurrence-body",cell.occurrence.body)
     text(owner,"favorite",if (contains(st.favorites,st.cell)) "★" else "☆")
     attr(node(owner,"favorite"),"aria-label","Save " ++ cell.name)
     text(owner,"rotate",if (st.rotating) "Stop rotation" else "Auto rotate")
-    for (id,pressed in {mesh:not st.focus,focus:st.focus,cut:st.cut,rotate:st.rotating,
+    for (id,pressed in {rotate:st.rotating,
         compare:st.compare,favorite:contains(st.favorites,st.cell),library:st.library,gallery:not st.library})
         attr(node(owner,string(id)),"aria-pressed",pressed)
     for (c in data.cells) {
@@ -76,11 +77,10 @@ pub pn sync(owner,st,base) {
     text(owner,"peer-label",upper(data.cell(st.peer).name))
     let peer_index = ([for (i,c in data.cells where c.id == st.peer) i])[0]
     if (dom.selected_index(node(owner,"peer")) != peer_index) dom.set_selected_index(node(owner,"peer"),peer_index)
-    let problem = scene(owner,"cell-scene",st.cell,st,base)
-    let peer_problem = if (st.compare) scene(owner,"peer-scene",st.peer,{*:st,focus:false,part:data.cell(st.peer).defaultOrganelle},base) else ""
+    let problem = scene(owner,"cell-scene",st.cell)
+    let peer_problem = if (st.compare) scene(owner,"peer-scene",st.peer) else ""
     text(owner,"model-error-text",if (problem != "") problem else peer_problem)
     show(owner,"model-error",problem != "" or peer_problem != "")
     camera(owner,st)
-    text(owner,"status",cell.name ++ " · " ++ data.organelle(st.cell,st.part).name ++
-        (if (st.focus) " isolated" else " selected"))
+    text(owner,"status",cell.name ++ " · " ++ data.organelle(st.cell,st.part).name ++ " selected")
 }
