@@ -1,6 +1,61 @@
 # Lambda Photo Editor Implementation Plan
 
-**Status:** core demo implemented (2026-10-10); release performance targets remain unmeasured.
+**Status:** core demo implemented (2026-10-10); creative tools added (2026-10-13).
+Release performance targets remain unmeasured.
+
+The creative extension adds editable text, five shapes, six original vector
+stickers, layer selection/movement/resizing/rotation, color/opacity, stacking,
+duplication and deletion. The recipe holds up to 24 immutable layer records
+(**S1.4**); session selection and gesture drafts stay transient. Coordinates
+are normalized to the final composition (**S1.6**): crop/orientation operates
+on the photo beneath the artwork. Crop and comparison hide the overlay.
+Native font measurement fits single-line captions without glyph distortion.
+
+The retained canvas and editor tree remain stable (**S12.1.3**). Only the small
+SVG overlay and layer options are replaced when their content changes. Preview
+and export call the same SVG scene builder; PNG composition reuses
+`radiant.export_document` through the existing host seam (**D7.5.3**). The
+adjusted background and completed export use neighboring temporary files,
+which are removed before publishing or returning a write error. The existing
+document exporter adds an explicit PNG `transparent:true` option so the photo
+composition preserves alpha instead of using the document's white canvas
+fallback. No vendor changes are required. New version 2 recipes persist the artwork and
+levels/effects; version 1 loads supply defaults for those fields.
+
+PNG encoding now converts premultiplied paint to straight channels at the
+shared encoder boundary, including data-URI and strip exports; a single private
+row preserves retained-source ownership (**D4.5.2**). Flex-item scrollers also
+convert content height back to a border-box extent before calculating their
+range, keeping the inspector's final controls reachable with padding. The
+creative replay exercises those controls, and native pixel tests cover padded
+rows and preservation of source pixels.
+
+Levels add black/white points with a strictly positive interval, shadow and
+highlight adjustments, and a preview luminance histogram. Vignette, soft focus
+and sharpening share preview/export evaluation; neighborhood filtering uses
+premultiplied color to avoid hidden-RGB contamination while preserving alpha.
+Portrait 4:5 and story 9:16 join the crop presets. Script goldens cover these
+operations and actual exported text/shape pixels; the creative native replay
+is registered for automatic and forced-JIT execution alongside the original
+smoke, crop and narrow-drawer replays. Current usage and limitations are in
+[README](README.md).
+
+Verification on 2026-10-13:
+
+- Debug build, Radiant dimension lint, eight photo script cases in both automatic
+  and forced-JIT modes, all ten photo UI cases, and all 143 vector/rendering
+  unit cases pass. The creative replay now includes numeric-field clearing and
+  placement, font/alignment, and opacity changes (139 events, 36 assertions).
+- The Lambda/input baseline reports 6,546/6,548 passing: `edit_view_only` still
+  mismatches its math-source golden, and GC stress times out at
+  `regression_music_layout`. The full gate is not green.
+- The broader Radiant run records a Markdown layout failure, a page-snapshot
+  average regression, four document-editor UI failures, and unrelated Scene3D
+  worker timeouts. Remaining broad-run workers were stopped after those
+  failures; this gate is not claimed complete or green. Photo cases pass.
+- All 51 page snapshot records are identical with and without the flex-scroller
+  correction. The comparison and detailed verification logs are under
+  `temp/photo/`; the final executable is rebuilt with the correction enabled.
 
 Implementation includes the retained RGBA canvas bridge, bounded binary decode
 with all eight EXIF orientations, recipe/history modules, alpha-aware image

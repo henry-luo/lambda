@@ -1160,15 +1160,15 @@ TEST(RasterPaintTest, TranslucentFillPreservesAnIsolatedSourceAlpha) {
     }
 }
 
-TEST(SvgExportTest, EncodingCopyRespectsMemoryBudgetAndRecovers) {
+TEST(SvgExportTest, EncodingRowRespectsMemoryBudgetAndRecovers) {
     uint32_t pixels[64 * 64] = {};
     ImageSurface surface = {};
     surface.width = surface.height = 64; surface.pitch = 64 * sizeof(uint32_t);
     surface.pixels = pixels; surface.alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
     size_t soft, hard, critical;
     memtrack_get_limits(&soft, &hard, &critical);
-    // the 16KB straight-alpha copy cannot fit the temporary 256-byte critical budget.
-    memtrack_set_limits(0, 0, 256);
+    // encoding needs one 256-byte row, which cannot fit this critical budget.
+    memtrack_set_limits(0, 0, 128);
     StrBuf* rejected = render_encode_surface_data_uri(&surface);
     memtrack_set_limits(soft, hard, critical);
     EXPECT_EQ(rejected, nullptr);
@@ -1176,6 +1176,31 @@ TEST(SvgExportTest, EncodingCopyRespectsMemoryBudgetAndRecovers) {
     StrBuf* recovered = render_encode_surface_data_uri(&surface);
     EXPECT_NE(recovered, nullptr);
     if (recovered) strbuf_free(recovered);
+}
+
+TEST(SvgExportTest, PngEncodingPreservesAlphaAndDoesNotMutatePaddedRows) {
+    for (ImageAlphaMode mode : {IMAGE_ALPHA_STRAIGHT, IMAGE_ALPHA_PREMULTIPLIED}) {
+        uint32_t pixels[] = {0x80000080u, 0xff00ff00u, 0xdeadbeefu,
+                             0x40004000u, 0x00ffffffu, 0xdeadbeefu};
+        const uint32_t original[] = {0x80000080u, 0xff00ff00u, 0xdeadbeefu,
+                                     0x40004000u, 0x00ffffffu, 0xdeadbeefu};
+        ImageSurface surface = {};
+        surface.width = surface.height = 2; surface.pitch = 3 * sizeof(uint32_t);
+        surface.pixels = pixels; surface.alpha_mode = mode;
+        StrBuf* encoded = render_encode_surface_png(&surface);
+        ASSERT_NE(encoded, nullptr);
+        int width = 0, height = 0, channels = 0;
+        uint8_t* decoded = image_load_from_memory((const unsigned char*)encoded->str,
+            encoded->length, &width, &height, &channels);
+        ASSERT_NE(decoded, nullptr);
+        EXPECT_EQ(width, 2); EXPECT_EQ(height, 2);
+        EXPECT_EQ(decoded[0], mode == IMAGE_ALPHA_STRAIGHT ? 128 : 255);
+        EXPECT_EQ(decoded[3], 128);
+        EXPECT_EQ(decoded[9], mode == IMAGE_ALPHA_STRAIGHT ? 64 : 255);
+        EXPECT_EQ(decoded[11], 64); EXPECT_EQ(decoded[15], 0);
+        EXPECT_EQ(memcmp(pixels, original, sizeof(pixels)), 0);
+        image_free(decoded); strbuf_free(encoded);
+    }
 }
 
 TEST(SvgTextTest, PlainGlyphsKeepNativeCoverageAndOwnPixelsAfterFontContextDies) {

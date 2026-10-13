@@ -2830,6 +2830,8 @@ static const struct {
     {"PhotoCropDraftAndKeyboardCompare_jit_gestures", "jit", "photo_gestures", "test/demo/photo/tests/rgba.png"},
     {"PhotoCropDraftAndKeyboardCompare_auto_responsive", "auto", "photo_responsive", "test/demo/photo/tests/rgba.png"},
     {"PhotoCropDraftAndKeyboardCompare_jit_responsive", "jit", "photo_responsive", "test/demo/photo/tests/rgba.png"},
+    {"PhotoCreativeLayersAndExport_auto", "auto", "photo_creative", "test/demo/photo/tests/rgba.png"},
+    {"PhotoCreativeLayersAndExport_jit", "jit", "photo_creative", "test/demo/photo/tests/rgba.png"},
 };
 
 static void test_radiant_view_photo_replay(size_t selected) {

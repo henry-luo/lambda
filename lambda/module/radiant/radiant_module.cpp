@@ -3915,6 +3915,11 @@ RADIANT_C_API Item fn_radiant_export_document(Item html_item, Item path_item, It
     bool paged = get_type_id(pagination) == LMD_TYPE_BOOL && it2b(pagination);
     if (pagination.item != ItemNull.item && get_type_id(pagination) != LMD_TYPE_BOOL)
         return radiant_string_item("render export: pagination must be boolean");
+    Item transparent = radiant_obj_get(options.get(), "transparent");
+    if (transparent.item != ItemNull.item && get_type_id(transparent) != LMD_TYPE_BOOL)
+        return radiant_string_item("render export: transparent must be boolean");
+    if (get_type_id(transparent) == LMD_TYPE_BOOL && it2b(transparent) && (output_kind != RENDER_OUTPUT_PNG || paged))
+        return radiant_string_item("render export: transparent requires continuous PNG output");
     Item local = radiant_obj_get(options.get(), "local_resources");
     if (local.item != ItemNull.item && get_type_id(local) != LMD_TYPE_BOOL)
         return radiant_string_item("render export: local_resources must be boolean");
@@ -3935,6 +3940,7 @@ RADIANT_C_API Item fn_radiant_export_document(Item html_item, Item path_item, It
     target.device_scale = (float)device_scale;
     target.jpeg_quality = (int)quality; // INT_CAST_OK: validated JPEG encoder quality.
     target.paged = paged;
+    target.transparent_background = get_type_id(transparent) == LMD_TYPE_BOOL && it2b(transparent);
     int status = render_html_source_to_output_target(source.get(), &target, base_url.get(),
         get_type_id(local) == LMD_TYPE_BOOL && it2b(local));
     return status == 0 ? radiant_bool_item(true) : radiant_string_item("render export: layout, resource, encoding, or destination write failed");

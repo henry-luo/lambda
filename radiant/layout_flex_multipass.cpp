@@ -1276,8 +1276,10 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
     FlexContainerLayout* parent_flex = saved_context.flex_container;
     flex_apply_content_height_after_layout(lycon, flex_item, parent_flex);
     if (flex_item->scroller) {
-        // the overflow viewport uses the final flex-refined height, including a clamped flow item.
-        update_scroller(flex_item, flex_item->content_width, flex_item->content_height);
+        // content_height excludes the content origin; scrollers compare against the border box.
+        float scroll_height = layout_border_size_from_content_box(
+            flex_item, flex_item->content_height, false);
+        update_scroller(flex_item, flex_item->content_width, scroll_height);
     }
     // flex items bypass block finalization; center native labels after their used height settles.
     layout_center_button_text(flex_item);

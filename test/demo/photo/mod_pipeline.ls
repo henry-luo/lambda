@@ -27,10 +27,13 @@ pub fn plane(image, recipe) {
 pub fn adjustments(image, recipe) {
     if (recipe.exposure == 0 and recipe.brightness == 0 and recipe.contrast == 1 and
         recipe.saturation == 1 and recipe.temperature == 0 and recipe.gamma == 1 and
+        recipe.black == 0 and recipe.white == 1 and recipe.shadows == 0 and recipe.highlights == 0 and
         (recipe.preset == "original" or recipe.intensity == 0)) image
     else (
         let channels = transpose(as_float(image)),
-        let rgb = (channels*math.pow(2.0,recipe.exposure)+recipe.brightness-0.5)*recipe.contrast+0.5,
+        let levels = clipped((channels-recipe.black)/(recipe.white-recipe.black)),
+        let tones = levels+recipe.shadows*(1-levels)*(1-levels)*0.3+recipe.highlights*levels*levels*0.3,
+        let rgb = (tones*math.pow(2.0,recipe.exposure)+recipe.brightness-0.5)*recipe.contrast+0.5,
         let luma = rgb[0]*0.299+rgb[1]*0.587+rgb[2]*0.114,
         let red = finish(luma+(rgb[0]-luma)*recipe.saturation+recipe.temperature*0.1,recipe.gamma),
         let green = finish(luma+(rgb[1]-luma)*recipe.saturation,recipe.gamma),
@@ -41,13 +44,32 @@ pub fn adjustments(image, recipe) {
             clipped(blue*(1-amount)+preset.b*amount),channels[3])
     )
 }
+pub fn effects(image, recipe) {
+    if (recipe.vignette == 0 and recipe.softness == 0 and recipe.sharpen == 0) image else (
+        let dims = shape(image),
+        let planes = transpose(as_float(image)),
+        // filter premultiplied color so hidden RGB cannot bleed into visible edges.
+        let kernel = 1+2*int(round(max(1.0,recipe.softness)*max(dims[0],dims[1])/960)),
+        let filtered = recipe.softness > 0 or recipe.sharpen > 0,
+        let alpha = if (filtered) blur(planes[3],max(3,kernel)) else planes[3],
+        let denominator = alpha+threshold(invert(alpha),1.0),
+        let smooth = [for (i in 0 to 2) if (filtered) blur(planes[i]*planes[3],max(3,kernel))/denominator else planes[i]],
+        // transpose reverses H,W,4 into 4,W,H, including nonsquare channel planes.
+        let x = reshape([for (i in 0 to (dims[1]-1)) math.pow((i+0.5)/dims[1]*2-1,2)],[dims[1],1]),
+        let y = reshape([for (i in 0 to (dims[0]-1)) math.pow((i+0.5)/dims[0]*2-1,2)],[1,dims[0]]),
+        let shade = if (recipe.vignette == 0) 1 else 1-clipped((x+y)*0.65)*recipe.vignette,
+        let rgb = [for (i in 0 to 2) clipped(((if (recipe.softness > 0) smooth[i] else planes[i])+
+            (planes[i]-smooth[i])*recipe.sharpen)*shade)],
+        pack(rgb[0],rgb[1],rgb[2],planes[3])
+    )
+}
 pub fn evaluate(image, recipe, compare = false, uncropped = false) {
     let prepared = plane(image,recipe)
     let dimensions = shape(prepared)
     let rectangle = geometry.bounds(recipe.crop,dimensions[1],dimensions[0])
     let selected = if (uncropped) prepared else crop(prepared,
         rectangle.top to (rectangle.bottom-1),rectangle.left to (rectangle.right-1))
-    let adjusted = if (compare) selected else adjustments(selected,recipe)
+    let adjusted = if (compare) selected else effects(adjustments(selected,recipe),recipe)
     let result = if (recipe.output_width > 0 and not uncropped) interpolated(adjusted,0,
         recipe.output_height,recipe.output_width) else adjusted;
     as_ubyte(result)

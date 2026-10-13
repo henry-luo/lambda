@@ -22,35 +22,55 @@ another working directory. Default export and recipe paths are relative to the
 launch directory; create `temp/` there or choose an existing destination folder.
 
 - **Adjust:** exposure, brightness, contrast, saturation, temperature, gamma,
-  and per-control/panel resets. A completed slider gesture creates one edit.
+  black/white input levels, shadows, highlights, a luminance histogram, and
+  per-control/panel resets. A completed slider gesture creates one edit.
 - **Filters:** Original, Mono, Warm, Cool, Vintage, Vivid, real image thumbnails,
   and adjustable intensity.
 - **Crop:** freeform, original, square, 4:3, 3:2, 16:9; eight draggable handles,
-  frame movement, percent fields, quarter turns, flips, and straighten.
+  portrait 4:5 and story 9:16, frame movement, percent fields, quarter turns,
+  flips, and straighten.
   Apply commits the draft; Cancel or Escape restores the previous recipe.
+- **Effects:** vignette, soft focus, sharpening, and a panel reset. Color
+  filtering accounts for alpha and preserves the source transparency.
+- **Text:** add a caption, edit its content, choose sans/serif/monospace and
+  left/center/right alignment. Native font measurements fit the text into its
+  box without stretching glyphs. Text is single line, up to 160 characters.
+- **Shapes & stickers:** rectangles, circles, triangles, arrows and lines;
+  original vector hearts, stars, sunshine, lightning, map pins and smileys.
+- **Layers:** click artwork to select it, drag to move, or drag its corner to
+  resize. The inspector provides position/size percentages, rotation, opacity,
+  color swatches and a custom hex color. Choose any layer from the layer list,
+  duplicate, delete or move it backward/forward. Arrow keys nudge the selected
+  layer; Shift makes larger steps. Delete/Backspace removes it. Input fields
+  retain their normal keyboard editing. Up to 24 layers share undo/redo.
 - **Workspace:** Fit, 100%, zoom buttons/wheel, drag to pan, transparent pixels,
   source dimensions, and press-and-hold comparison of original colors using
   the current crop/orientation. The Compare button also accepts Space/Enter.
 - **History:** undo/redo, up to 100 recipe snapshots, and undoable reset.
   Ctrl/Cmd+Z undoes; Ctrl/Cmd+Shift+Z redoes.
 - **Save edits:** versioned JSON recipes with source dimensions and two encoded
-  content checksums. Restore requires the matching source to be open; a moved
+  content checksums, including text and vector layers. Version 1 recipes are
+  upgraded when loaded; new saves use version 2. Restore requires the matching source to be open; a moved
   file can be opened at its new path. Checksums detect accidental changes and
   provide no authentication guarantee.
 - **Export PNG:** evaluates from original pixels, optionally resizes with aspect
-  lock, then publishes a completed PNG through a neighboring temporary file.
+  lock, paints the same vector artwork used in the preview, then publishes a
+  completed PNG through a neighboring temporary file.
   Width and height zero preserve the cropped source size. The source path is
   protected from overwrite. Failed exports keep the active edits.
 
 The preview's longest edge is 960 pixels; export uses the original resolution.
 Below 900 CSS pixels, the inspector becomes a drawer; use **Tools** or a tool
-rail button to open or close it. Crop Apply/Cancel returns to the workspace.
+rail button to open or close it. Adding artwork and Crop Apply/Cancel return to
+the workspace. Layers use normalized coordinates in the final composition;
+cropping/orienting changes the photo underneath them. Crop mode hides artwork
+while framing; comparison temporarily hides artwork and color adjustments.
 Encoded inputs are limited to 32 MB and decoded/output images to 16 megapixels.
 The current pipeline uses float64 intermediate arrays and synchronous CPU
 kernels. Large adjusted exports can use substantial memory and pause the UI;
 release performance targets from the plan remain to be measured. The demo
-exports PNG only. Native file pickers, drag-and-drop files, layers, text,
-stickers, and AI tools are outside this version.
+exports PNG only. Native file pickers, drag-and-drop files, custom sticker
+uploads, multiline typography, and AI tools are outside this version.
 Radiant currently paints the CSS checkerboard as broad gradient regions rather
 than 20-pixel tiles; transparent pixels retain correct alpha in uploads/exports.
 
@@ -66,6 +86,7 @@ use precise roots (**D5.3.3**).
 | `mod_scene.ls`, `photo.css` | DTNA buttons and native editor layout |
 | `mod_model.ls` | Recipe validation and transactional history |
 | `mod_geometry.ls` | Normalized crop coordinates and drag geometry |
+| `mod_layers.ls` | Layer validation, selection/transforms, vector assets, shared SVG composition |
 | `mod_pipeline.ls`, `mod_presets.ls` | Shared preview/export math and alpha handling |
 | `mod_present.ls` | Coalesced frames, canvas uploads, control synchronization |
 | `mod_io.ls` | Bounded snapshot decode, recipes, PNG publication |
@@ -78,7 +99,7 @@ mkdir -p temp/photo
   --event-file test/demo/photo/tests/photo_smoke.json \
   --event-result temp/photo/photo_smoke_result.json
 ./test/test_lambda_gtest.exe \
-  --gtest_filter='*tests_model_test:*tests_geometry_test:*tests_pipeline_test:*tests_image_io_test:*proc_export_test'
+  --gtest_filter='*tests_model_test:*tests_geometry_test:*tests_pipeline_test:*tests_image_io_test:*proc_export_test:*tests_photo_layers_test:*tests_photo_effects_test:*proc_layer_export_test'
 ./test/test_radiant_view_gtest.exe --gtest_filter='RadiantViewTest.Photo*'
 ```
 
@@ -87,8 +108,13 @@ register the 60-event editor replay and a pixel-level RGBA upload fixture with
 forced collection, poisoned frees, promotion, and clean document teardown.
 An additional 23-event replay covers crop dragging/cancellation, keyboard
 comparison, and closing with a pending frame in automatic and forced-JIT modes.
-The 24-event narrow-window replay checks drawer controls and export dialog size.
+The 39-event narrow-window replay checks drawer controls, adding/dragging
+artwork, and export dialog size.
 Its small RGBA fixture is generated from numeric pixels in Lambda.
+The creative replay covers text editing, layer gestures/history, shapes and
+stickers, levels, portrait crop, recipe restoration and composition export in
+automatic and forced-JIT modes (139 events, 36 assertions). Golden tests verify layer validation, alpha
+preservation, effects, legacy migration and exported text/shape pixels.
 A glyph-geometry probe checks that native button text retains authored flex/grid
 alignment instead of overlapping neighboring labels.
 IO tests check all eight EXIF orientations, malformed/oversized headers,

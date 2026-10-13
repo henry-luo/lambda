@@ -47,6 +47,12 @@ uint32_t render_pixel_scale_premultiplied(uint32_t pixel, uint8_t opacity) {
         render_pixel_premultiply_channel(pixel >> 24, opacity));
 }
 
+void render_pixel_unpremultiply_row(uint32_t* destination, const uint32_t* source, size_t count) {
+    for (size_t index = 0; index < count; index++) {
+        destination[index] = render_pixel_unpremultiply_abgr(source[index]);
+    }
+}
+
 float render_color_srgb_to_linear(float channel) {
     channel = clamp_unit(channel);
     return channel <= .04045f ? channel / 12.92f : powf((channel + .055f) / 1.055f, 2.4f);

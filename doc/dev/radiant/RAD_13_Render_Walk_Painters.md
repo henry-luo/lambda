@@ -168,6 +168,11 @@ module operation (D7.5.3/S12.1.1v2). Its required `format` selects `png`, `jpeg`
 `device_scale`, JPEG `quality`, `pagination`, `base_url`, and `local_resources`
 configure the same export sessions as the CLI. It returns `true` or a diagnostic
 string; package facades convert diagnostics to raised errors (S7.4.2).
+Continuous PNG also accepts `transparent:true` to preserve canvas alpha for image
+compositions; authored backgrounds still paint normally. The default canvas
+remains opaque. Other output formats and paged output reject transparency.
+PNG and data-URI encoding convert premultiplied paint into straight channels
+through one shared row conversion; retained source pixels remain unchanged.
 
 `load_html_source_doc` transfers the source URL/parser-pool owner to the transient
 document; it disables embedded scripts. `render_html_source_to_output_target`
