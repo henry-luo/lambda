@@ -1,0 +1,21 @@
+{
+  "name": "Native MIDI score player controls",
+  "html": "test/music/_player.ls",
+  "viewport": {"width": 1000, "height": 800},
+  "events": [
+    {"type":"wait","ms":100},
+    {"type":"assert_attribute","target":{"selector":".lambda-music-player"},"attribute":"data-state","equals":"ready"},
+    {"type":"click","target":{"selector":"button[data-action=play]"}},
+    {"type":"wait","ms":300},
+    {"type":"assert_attribute","target":{"selector":".lambda-music-player"},"attribute":"data-state","equals":"playing"},
+    {"type":"assert_count","target":{"selector":"g[data-event-id][fill]"},"count":2},
+    {"type":"click","target":{"selector":"button[data-action=pause]"}},
+    {"type":"wait","ms":100},
+    {"type":"assert_attribute","target":{"selector":".lambda-music-player"},"attribute":"data-state","equals":"paused"},
+    {"type":"click","target":{"selector":"button[data-action=play]"}},
+    {"type":"wait","ms":100},
+    {"type":"click","target":{"selector":"button[data-action=stop]"}},
+    {"type":"wait","ms":100},
+    {"type":"assert_attribute","target":{"selector":".lambda-music-player"},"attribute":"data-state","equals":"ready"}
+  ]
+}

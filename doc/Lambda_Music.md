@@ -1,9 +1,9 @@
-# MusicXML Sheet Music
+# MusicXML Sheet Music and MIDI Playback
 
 `lambda.music` reads MusicXML and lays out sheet music as SVG, using native
 Lambda modules and bundled Bravura glyph outlines. This is an experimental
-Phase 1 notation package. MIDI playback is planned for Phase 2 and has no
-public implementation yet.
+notation and playback package. It also converts scores to MIDI, reads Standard
+MIDI Files, and plays them through a bundled SoundFont synthesizer.
 
 The explicit entry module follows D7.2.4/D7.2.6. Scores and layouts are
 ordinary immutable values. All public operations raise errors (`T^`,
@@ -43,6 +43,10 @@ this package does not port its full engraving engine.
 | `layout(score, options = {})` | Produce pages, systems, staff geometry, drawing records, event bounds, diagnostics |
 | `svg(layout, page = 0)` | Produce one standalone SVG element; page index is zero based |
 | `render(score, options = {})` | Produce a wrapper for all pages |
+| `performance(score, options = {})` | Expand a score into an exact MIDI performance timeline |
+| `read_midi(bytes, options = {})` | Read Type 0/1 PPQN Standard MIDI File bytes into a performance |
+| `midi(performance, options = {})` | Encode a Type 1 MIDI file as immutable binary |
+| `player(score_or_performance, options = {})` | Construct a player with transport, track controls, and optional score |
 
 For example, write the first SVG using ordinary procedural output:
 
@@ -96,7 +100,7 @@ are not reproduced.
 | Chords | Shared stems, alternating seconds, accidental columns | Dense multivoice unisons and complex chords may require further collision refinement |
 | Spanners | Ties, numbered slurs, single-level tuplets, hairpins, system continuations | Nested tuplets fail; unmatched endpoints fail; complex curve collisions need further refinement |
 | Marks | Words/rehearsal/tempo text, ppp–fff, mp/mf, sfz/sffz/fp, common articulations, fermatas, segno/coda | Other decorations produce warnings |
-| Navigation | Repeat barlines, numbered ending brackets | Display only; repeats and jumps are not executed |
+| Navigation | Repeat barlines, numbered ending brackets | Playback executes ordinary nonnested repeats/endings; jumps are unsupported |
 | Lyrics | Text, verse rows, syllabic hyphens, measured spacing | Extender lines produce warnings and are not drawn |
 | Output | SVG, HTML wrapper, part filtering, width/scale, scroll/pages, event bounds | Experimental engraving; no complete collision solver or editorial-layout reproduction |
 
@@ -121,6 +125,84 @@ gives `page`, `system`, `part`, `staff`, `voice`, and a CSS-pixel `bounds` map
 with `left`, `top`, `right`, `bottom`, relative to that page. Bounds include
 the event's symbols, stems, and lyrics; connecting spanners have separate
 drawing records. SVG event groups carry `data-event-id` and accessible labels.
+
+## Play and export music
+
+```lambda
+import music: lambda.music
+let score = music.load("test/music/study.musicxml")^
+music.player(score, {layout:{width:760.0}})^
+```
+
+Run `./lambda.exe view test/music/_player.ls` and press **Play**. The player
+opens the audio device only on that action, following S12.1.1v2/D7.4.6.
+Pause/resume, stop, position, speed, master volume, and part mute/solo share
+the audio sample clock. Active notes turn blue. Removing the player or closing
+the document releases its native session; a disconnected device reports an
+error. A real device is required: silent null backends are rejected.
+
+Standalone MIDI uses the same transport, with channel controls and no invented
+notation. Try `./lambda.exe view test/music/_midi_player.ls`, or:
+
+```lambda
+import music: lambda.music
+music.player(music.read_midi(input("test/music/pulse.mid", 'binary')^)^)^
+```
+
+Export is separate from playback and uses ordinary procedural file output:
+
+```lambda
+import music: lambda.music
+pn main() {
+    let score = music.load("test/music/playback.musicxml")^
+    output(music.midi(music.performance(score)^)^, "temp/performance.mid")^
+}
+```
+
+| Operation/options | Behavior |
+|---|---|
+| `performance`: `tempo`, `strict` | Optional positive quarter-note BPM overrides source tempo instructions; default 120 BPM emits a diagnostic when no tempo exists |
+| `read_midi`: `strict` | Promote unsupported-message and option diagnostics to errors |
+| `midi`: `ppqn`, `quantize`, `strict` | Automatic exact resolution starts at 480 ticks/quarter; explicit integer resolution is 1–32767; rounding requires `quantize:true` |
+| `player`: `layout`, `performance`, `soundfont`, `strict` | Nested maps configure score layout/performance; `soundfont` overrides the bundled local SF2 path; strict checks player option names |
+
+Source timing remains exact `{num,den}` quarter notes. `Performance.events`
+contains MIDI `status/a/b`, exact `at`, and derived `seconds`; `tempos` contains
+microseconds per quarter and segment times. `tracks` groups channels for UI
+controls; `occurrences` maps written event IDs and repeat passes to performed
+positions. `duration` and `seconds` describe the same endpoint. Rounded export
+positions are within half a tick; a collapsed sounding note fails. Source
+tempos are rounded to MIDI's integer microseconds per quarter.
+
+| Playback area | Supported profile and boundaries |
+|---|---|
+| Score timing | Chords, voices, rests, tuplets using their existing duration, contiguous ties, chromatic/octave transposition, simple repeats and comma-separated numbered endings |
+| Score instruments | Per-note instrument IDs; up to 15 independent pitched channels, GM programs 1–128, part volume/pan; conflicting channels, nondefault banks, percussion and same-key overlaps fail |
+| Tempo/expression | Numeric sound tempo, metronome beat units/dots, ppp–fff and mp/mf, numeric dynamics, sound damper-pedal; grace/fermata timing, jumps and nested sound instructions fail |
+| Expressive notation | Articulations, slurs, hairpins, ornaments and free text do not infer expressive timing or velocity; unsupported playback expression emits diagnostics |
+| MIDI import | Type 0/1 metrical timing, running status, note/program/control/pitch-bend messages; metadata retained; SysEx/pressure and unsupported controls diagnosed; Type 2/SMPTE rejected |
+| MIDI export | Type 1 conductor plus channel tracks; retained metadata moves to the conductor track; source track order/encoding is not byte-preserved |
+| Transport | Speed 0.25–4 via host API (UI offers 0.5–2), volume 0–1; seek/resume reconstruct controllers and held keys, restarting note envelopes; repeated sustained strikes of one key reconstruct the latest strike |
+| Synthesis | TinySoundFont, 256 voices, stereo 48 kHz, bundled TimGM6mb GM bank; no hardware MIDI routing, recording, effects editor, or audio-file export |
+
+Limits are 16 MB MIDI input, 128 source tracks, 200,000 events, 24 hours of
+performance, 8,192 performed measures and 16 repeat passes. Seek replays the
+bounded event prefix on the control thread. Up to four live MIDI sessions
+belong to one document. SoundFont loading and device startup are synchronous
+control-thread work; the audio callback performs no file IO, GC, or DOM work
+(D4.5.2/D5.3.3).
+
+Live output is verified on macOS/Core Audio. miniaudio includes Linux and
+Windows backends, but those platforms have not been built or device-tested
+for this package yet. Headless performance/MIDI conversion needs no device.
+The full facade imports Radiant; reduced hosts can import the data-only
+`lambda.music.performance` (`build`) and `lambda.music.midi` (`read`/`write`)
+modules directly.
+
+TinySoundFont and miniaudio are unmodified pinned dependencies. TimGM6mb is a
+separate GPL-2.0 sound-bank asset, with provenance, copyright and license under
+[`music/soundfonts/`](../lmd/package/music/soundfonts/SOURCES.md). Applications
+can supply another compatible SF2 through `soundfont`.
 
 Font provenance and license are in
 [`music/fonts/SOURCES.md`](../lmd/package/music/fonts/SOURCES.md).

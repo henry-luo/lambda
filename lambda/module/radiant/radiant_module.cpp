@@ -2427,6 +2427,57 @@ RADIANT_C_API Item fn_radiant_audio_pause(Item node, Item token) { return radian
 RADIANT_C_API Item fn_radiant_audio_close(Item node, Item token) { return radiant_audio_operation(node, token, AUDIO_CLOSE); }
 RADIANT_C_API Item fn_radiant_audio_state(Item node, Item token) { return radiant_audio_operation(node, token, AUDIO_STATE); }
 
+RADIANT_C_API Item fn_radiant_midi_open(Item node, Item performance, Item font) {
+    DomElement* owner = radiant_dom_element_from_item(node, "MIDI_OPEN");
+    ItemReader data(performance.to_const());
+    if (!owner || !data.isMap() || get_type_id(font) != LMD_TYPE_BINARY) return ItemNull;
+    MapReader model = data.asMap();
+    ItemReader rows = model.get("events"), duration = model.get("seconds");
+    if (!rows.isArray() || !duration.isNumber()) return ItemNull;
+    ArrayReader array = rows.asArray();
+    int64_t count = array.length();
+    if (count < 1 || count > 200000) return ItemNull;
+    auto* events = (MidiEvent*)mem_alloc((size_t)count * sizeof(MidiEvent), MEM_CAT_RENDER);
+    if (!events) return ItemNull;
+    bool valid = true;
+    for (int64_t i = 0; i < count && valid; i++) {
+        ItemReader entry = array.get(i);
+        if (!entry.isMap()) { valid = false; break; }
+        MapReader e = entry.asMap();
+        ItemReader time = e.get("seconds"), status = e.get("status"), a = e.get("a"), b = e.get("b");
+        double values[] = {it2d(status.item()), it2d(a.item()), it2d(b.item())};
+        valid = time.isNumber() && status.isNumber() && a.isNumber() && b.isNumber();
+        for (double value : values) valid = valid && isfinite(value) && value == floor(value) && value >= 0 && value <= 255;
+        if (valid) events[i] = {it2d(time.item()), (uint8_t)values[0], (uint8_t)values[1], (uint8_t)values[2]};
+    }
+    uint64_t token = valid ? radiant_midi_open(owner, events, (size_t)count, it2d(duration.item()),
+        binary_data(font.get_binary()), font.get_binary()->len) : 0;
+    mem_free(events);
+    return token ? radiant_int_item((int64_t)token) : ItemNull;
+}
+RADIANT_C_API Item fn_radiant_midi_command(Item node, Item token, Item command, Item value) {
+    DomDocument* doc = radiant_window_document_from_item(node, "MIDI_COMMAND");
+    ItemReader id(token.to_const()), number(value.to_const());
+    if (!doc || !id.isInt() || id.asInt() <= 0 || get_type_id(command) != LMD_TYPE_STRING || !number.isNumber()) return radiant_bool_item(false);
+    return radiant_bool_item(radiant_midi_command(doc, (uint64_t)id.asInt(), command.get_chars(), it2d(number.item())));
+}
+RADIANT_C_API Item fn_radiant_midi_info(Item node, Item token) {
+    DomDocument* doc = radiant_window_document_from_item(node, "MIDI_INFO");
+    ItemReader id(token.to_const()); MidiSnapshot snapshot;
+    if (!doc || !id.isInt() || id.asInt() <= 0 || !radiant_midi_info(doc, (uint64_t)id.asInt(), &snapshot)) return ItemNull;
+    static const char* names[] = {"ready", "playing", "paused", "ended", "error"};
+    RootFrame roots(1);
+    Rooted<Item> result(roots, radiant_obj_new());
+    radiant_rooted_obj_set(result, "state", radiant_string_item(names[snapshot.state]));
+    radiant_rooted_obj_set(result, "position", radiant_float_item(snapshot.position));
+    radiant_rooted_obj_set(result, "duration", radiant_float_item(snapshot.duration));
+    radiant_rooted_obj_set(result, "speed", radiant_float_item(snapshot.speed));
+    radiant_rooted_obj_set(result, "volume", radiant_float_item(snapshot.volume));
+    radiant_rooted_obj_set(result, "mute", radiant_int_item(snapshot.mute));
+    radiant_rooted_obj_set(result, "solo", radiant_int_item(snapshot.solo));
+    return result.get();
+}
+
 RADIANT_C_API Item fn_radiant_media_info(Item node) {
     DomElement* elem = radiant_dom_element_from_item(node, "MEDIA_INFO");
     MediaViewState* media = elem && elem->doc
@@ -5289,6 +5340,9 @@ RADIANT_PROVIDE_ENGINE_1(capture_pointer, fn_radiant_capture_pointer)
 RADIANT_PROVIDE_ENGINE_2(set_canvas_pixels, fn_radiant_set_canvas_pixels)
 RADIANT_PROVIDE_ENGINE_2(audio_open, fn_radiant_audio_open)
 RADIANT_PROVIDE_ENGINE_3(audio_play, fn_radiant_audio_play)
+RADIANT_PROVIDE_ENGINE_3(midi_open, fn_radiant_midi_open)
+RADIANT_PROVIDE_ENGINE_4(midi_command, fn_radiant_midi_command)
+RADIANT_PROVIDE_ENGINE_2(midi_info, fn_radiant_midi_info)
 RADIANT_PROVIDE_ENGINE_2(audio_pause, fn_radiant_audio_pause)
 RADIANT_PROVIDE_ENGINE_2(audio_close, fn_radiant_audio_close)
 RADIANT_PROVIDE_ENGINE_2(audio_state, fn_radiant_audio_state)

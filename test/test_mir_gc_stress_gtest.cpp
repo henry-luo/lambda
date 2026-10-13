@@ -56,6 +56,9 @@ static const char* kExtraLambdaScripts[] = {
     // parse converts independent symbol options into allocating string homes.
     "test/lambda/parse_option_roots.ls",
     "test/lambda/music/music_layout.ls",
+    "test/lambda/music/music_performance.ls",
+    "test/lambda/music/music_midi.ls",
+    "test/lambda/cartesian_scratch_roots.ls",
     // typed fill/store/record plans retain owners through checked cold arms
     "test/lambda/proc/typed_tuning_boundary_guards.ls",
     "test/lambda/proc/typed_call_argument_layout.ls",

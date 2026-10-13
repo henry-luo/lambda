@@ -3818,6 +3818,22 @@
             "icon": "\ud83c\udfac"
           },
           {
+            "source": "test_midi_player_gtest.cpp",
+            "name": "MIDI Playback Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/midi_player.cpp"
+            ],
+            "binary": "test_midi_player_gtest.exe",
+            "icon": "\ud83c\udfb5"
+          },
+          {
             "source": "test_lottie_player_gtest.cpp",
             "name": "Lottie Animation Tests",
             "dependencies": [

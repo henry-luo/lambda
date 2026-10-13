@@ -6,6 +6,11 @@
   },
   "suites": [
     {
+      "name": "music",
+      "globs": ["test/music/*.json"],
+      "tags": ["music", "native-gui"]
+    },
+    {
       "name": "baseline",
       "worker_mb": 1024,
       "globs": ["test/ui/*.json"],

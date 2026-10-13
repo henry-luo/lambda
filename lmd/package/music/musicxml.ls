@@ -127,7 +127,7 @@ fn note(node, st, part, bar, index) map^ {
     let e = {id: id, source_id: node.id, part: part, measure: bar, index: index, staff: int(staff), voice: voice,
         onset: onset, duration: dur, rest: rest, grace: grace, grace_slash:c.child(node,"grace").slash=="yes", chord: chord,
         anchor: if (chord) st.anchor.id else id, pitch: p, note_type: type_name, dots: dots,
-        context: st.context.staffs[int(staff) - 1], transpose: st.context.transpose,
+        context: st.context.staffs[int(staff) - 1], transpose: st.context.transpose, instrument: c.child(node,"instrument").id,
         stem: stem, beams: beams, accidental: alter, notation: marks,
         time_modification: {actual:actual,normal:normal},
         lyrics: [for (x in c.named(node, "lyric")) {text: c.field(x, "text", ""),
@@ -141,6 +141,9 @@ fn note(node, st, part, bar, index) map^ {
             *c.names(c.child(node, "notations"), ["tied", "slur", "tuplet", "articulations", "fermata"], id)]}
 }
 
+fn sound_record(node) => if (node==null) {} else
+    {*:map([for (k,v in node where k is symbol or k is string) (string(k),v)]),
+     children:[for (x in c.children(node)) string(name(x))]}
 fn direction(node, st) map^ {
     let supported=c.require(all([for (group in c.named(node,"direction-type")) not c.present(group,"octave-shift")]),
         "octave-shift directions are not supported")^
@@ -155,7 +158,7 @@ fn direction(node, st) map^ {
          number: x.number or "1", metronome: if (name(x) == 'metronome')
              {unit: c.field(x, "beat-unit"), dots: len(c.named(x, "beat-unit-dot")), bpm: c.field_number(x, "per-minute")} else null}]
     {*:st, directions: [*st.directions, {onset: at, staff: int(staff), placement: node.placement or "above",
-        entries: entries, sound: if (sound == null) {} else map([for (k,v in sound where k is symbol or k is string) (string(k),v)])}]}
+        entries: entries, sound: sound_record(sound)}]}
 }
 fn measure_child(st, row, part, bar) map^ {
     let node = row.node
@@ -175,7 +178,7 @@ fn measure_child(st, row, part, bar) map^ {
         times: c.child(node, "repeat").times, ending: c.child(node, "ending")} ]}
     else if (tag == "print") {*:st, new_system: node['new-system'] == "yes", new_page: node['new-page'] == "yes"}
     else if (tag == "sound") {*:st, directions: [*st.directions, {onset: st.cursor, staff: 1,
-        placement: "above", entries: [], sound: map([for (k,v in node where k is symbol or k is string) (string(k),v)])}]}
+        placement: "above", entries: [], sound: sound_record(node)}]}
     else {*:st, warnings: [*st.warnings, c.diagnostic("unsupported-decoration", "unsupported " ++ tag, location(part, bar))]}
 }
 fn read_measure(previous, row, part) map^ {
@@ -207,6 +210,10 @@ fn read_part(node, declaration) map^ {
     let midi = c.child(declaration, "midi-instrument")
     {id: id, label: c.field(declaration, "part-name", id), abbreviation: c.field(declaration, "part-abbreviation"),
         instruments: c.named(declaration, "score-instrument"),
+        midi_instruments: [for (x in c.named(declaration,"midi-instrument"))
+            {id:x.id,channel:c.field_number(x,"midi-channel"),program:c.field_number(x,"midi-program"),
+             bank:c.field_number(x,"midi-bank"),unpitched:c.field_number(x,"midi-unpitched"),
+             volume:c.field_number(x,"volume"),pan:c.field_number(x,"pan")}],
         midi: {channel: c.field_number(midi, "midi-channel"), program: c.field_number(midi, "midi-program"),
             volume: c.field_number(midi, "volume"), pan: c.field_number(midi, "pan")},
         measures: result.measures, duration: result.end, diagnostics: result.warnings}

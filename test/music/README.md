@@ -14,7 +14,18 @@ It contains no copied commercial engraving or score source.
   selection rather than first-file selection.
 - `ambiguous.mxl`: two declared MusicXML roots, requiring explicit selection.
 - `_view.ls`: manual viewer/export entry point, not a golden unit test.
+- `playback.musicxml`: original two-instrument repeat/ending study, with
+  transposition, ties, numeric dynamics and tempo changes.
+- `pulse.mid`: original hand-encoded Type 0 file with running status, one
+  piano note and two tempo segments (1.5 seconds total).
+- `_player.ls`, `_midi_player.ls`: manual score and standalone MIDI players.
+- `_lifecycle.ls`: native-session lifecycle probe, including a retained
+  wrapper after its owner is removed from the document.
+- `player.json`, `midi_player.json`, `lifecycle.json`: Radiant UI event tests,
+  registered in the separate `music` UI suite; they require window/audio
+  device access. Playback is deliberately started only by a test action.
 
 Package goldens live in `test/lambda/music/` and are registered with
-`test_lambda_gtest`. The layout test is also in the forced-GC corpus.
+`test_lambda_gtest`. Layout, performance and MIDI tests are also in the
+forced-GC corpus.
 Bravura's independent license/provenance is under `lmd/package/music/fonts/`.

@@ -24,3 +24,6 @@ lambda/tree-sitter-javascript/** text eol=lf
 test/input/grep_tree/crlf.txt -text
 test/input/grep_tree/eol.txt -text
 test/input/fts_tree/crlf.txt -text
+
+# preserve the pinned upstream SoundFont header and its recorded checksum
+lib/tinysoundfont/tsf.h -text

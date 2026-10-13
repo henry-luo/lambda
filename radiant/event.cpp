@@ -1,5 +1,6 @@
 #include "scene3d.hpp"
 #include "event.hpp"
+#include "audio.hpp"
 #include "../lib/queue.h"
 #include "layout.hpp"
 #include "render.hpp"
@@ -11120,6 +11121,7 @@ void radiant_queue_template_render_events(DomDocument* doc, DomNode* root) {
 // owner without one stays behind and is dropped as detached.
 void radiant_frame_requests_follow_rebuild(DomDocument* doc, DomNode* old_root,
                                            DomNode* new_root) {
+    radiant_audio_follow_rebuild(doc, old_root, new_root);
     RadiantFrameQueue* queue = frame_queue_for_document(doc, false);
     if (!queue || !old_root || !new_root || old_root == new_root) return;
     for (RadiantFrameRequest* request = queue->requests; request; request = request->next) {
@@ -11129,6 +11131,7 @@ void radiant_frame_requests_follow_rebuild(DomDocument* doc, DomNode* old_root,
 }
 
 bool radiant_document_has_pending_frames(DomDocument* doc) {
+    radiant_audio_prune(doc);
     RadiantFrameQueue* queue = frame_queue_for_document(doc, false);
     if (!queue) return false;
     for (RadiantFrameRequest* request = queue->requests; request; request = request->next) {

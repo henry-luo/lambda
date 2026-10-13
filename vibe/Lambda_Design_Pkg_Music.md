@@ -2,18 +2,21 @@
 
 **Status:** Native Lambda implementation selected by the user on 2026-10-13.
 The user-defined scope is **Phase 1: display MusicXML sheet music** and
-**Phase 2: MIDI playback**. The API, notation coverage, and backend choices
-below are proposed design details, not claims of implemented support.
+**Phase 2: MIDI playback**. The detailed support manifest, rather than this
+broader target, defines the implemented notation and playback profile.
 
 **Implementation update (2026-10-13):** The native Phase 1 pipeline now exists,
 including XML/MXL loading, exact timing, Bravura engraving, SVG pages, and
 the public entry module. The current bounded profile is documented in
 [Lambda_Music.md](../doc/Lambda_Music.md); validation and remaining engraving
 work are tracked in [the implementation record](impl/Lambda_Impl_Pkg_Music.md).
-Phase 2 playback remains planned. The broader design below remains the target.
+Phase 2 now adds the shared performance model, SMF import/export, a native
+TinySoundFont/miniaudio transport and the player view. Live output has been
+verified on macOS; Linux/Windows device verification remains outstanding.
+The broader design below remains the target where the manifest marks limits.
 
 **Scope:** `lambda.music`, a shipped source package for reading, engraving,
-displaying, and eventually playing musical scores. OpenSheetMusicDisplay
+displaying, and playing musical scores. OpenSheetMusicDisplay
 (OSMD) is the architectural and engraving reference; Lambda owns the native
 implementation. Editing, optical music recognition, and a digital audio
 workstation are outside these phases.
@@ -137,7 +140,7 @@ audio engine. [OSMD README](https://github.com/opensheetmusicdisplay/opensheetmu
 D7.2.4/D7.2.6 and the [package import conventions](../doc/Lambda_Packages.md#21-how-paths-resolve).
 The package introduces neither a language keyword nor a new core `TypeId`.
 
-All signatures here are proposed. `Score`, `Layout`, and `Performance` are
+The listed public APIs exist for the bounded profile. `Score`, `Layout`, and `Performance` are
 validated ordinary Lambda data, not opaque native pointers. Errors use the
 existing raised-error contract (`T^`, S7.4.2); examples engage them with `^`.
 Successful values carry diagnostics for recoverable omissions.
@@ -161,13 +164,12 @@ starting playback, and writing exported bytes are procedural effects
 (S12.1.1v2). Player construction does not start sound. Its template handlers
 issue transport commands through the host boundary (S12.1.3/D7.4.6).
 
-Proposed display example:
+Display example:
 
-```lambda no-run
-// no-run: lambda.music and the example score are proposed package assets.
+```lambda
 import music: lambda.music
 
-let score = music.load("scores/prelude.musicxml")^
+let score = music.load("test/music/study.musicxml")^
 music.render(score, {width: 900.0, mode: 'scroll', scale: 1.0})^
 ```
 
@@ -414,11 +416,10 @@ aligned with an independently loaded score.
 The same player accepts a standalone performance, showing transport and track
 controls without inventing a notation view:
 
-```lambda no-run
-// no-run: Phase 2 lambda.music APIs and the example MIDI file are proposed.
+```lambda
 import music: lambda.music
 
-let performance = music.read_midi(input("scores/prelude.mid", 'binary')^)^
+let performance = music.read_midi(input("test/music/pulse.mid", 'binary')^)^
 music.player(performance)^
 ```
 
@@ -446,12 +447,14 @@ export, and cursor timing.
 ### 7.3 Transport, synthesis, and lifecycle
 
 MIDI events require a synthesizer and audio output to become audible. The
-proposed default is an in-process SoundFont synthesizer behind a small native
-interface, fed by an immutable performance buffer. **TinySoundFont is a
-candidate**, not an adopted dependency; validate its controller, sustain,
-program, polyphony, and sample-rate behavior against the chosen profile.
-SoundFont asset selection and redistribution terms are separate from the
-synthesizer library. [TinySoundFont](https://github.com/schellingb/TinySoundFont)
+selected default is **TinySoundFont** behind a small native interface, fed by
+an immutable performance buffer, with **miniaudio 0.11.23** supplying streaming
+PCM/device timing. Both are pinned, unmodified dependencies. The bundled
+**TimGM6mb** sound bank is separately licensed GPL-2.0; callers may supply a
+compatible SF2. Provenance and checksums are recorded beside each asset.
+[TinySoundFont](https://github.com/schellingb/TinySoundFont),
+[miniaudio](https://github.com/mackron/miniaudio),
+[SoundFont provenance](../lmd/package/music/soundfonts/SOURCES.md)
 
 Use the existing document-owned audio service as the lifecycle integration
 point, extending its native platform layer for streaming PCM, a sample clock,
@@ -468,7 +471,7 @@ the current decoder accepts MIDI. See [Appendix A](#appendix-a-existing-code-and
 | Seek | Cancel old events; restore program/controllers/sustain at the target and reconstruct notes spanning it |
 | Tempo multiplier | Rebase the sample/time mapping at the current position; no discontinuous musical jump |
 | Mute/solo | Update audible tracks and terminate affected active voices |
-| End/error/close | Silence and release device/session resources exactly once |
+| End/error/close | End silences while retaining a restartable session; error/close releases it through the view/document owner |
 
 Use audio sample position as the transport clock. The audio callback consumes
 preallocated buffers and native events; it performs no Lambda evaluation, GC,
@@ -487,6 +490,14 @@ threads and no module-global player. Exposed host command signatures are `pn`
 The cursor reads performed position and the occurrence map, then uses the
 current layout index. Pauses, repeats, seeking, and tempo changes therefore
 share the audible clock. UI refresh rate never schedules note onsets.
+
+The bounded implementation highlights stable SVG event groups and caches
+those group handles in the view. Seeking/resuming replays the controller
+prefix on the control thread and reconstructs held keys; note envelopes
+restart, and repeated sustained strikes of one key restore the latest strike.
+No waveform checkpointing or constant-time seek claim is made. Full GM
+program coverage, sustain, transport and the sample clock have offline tests;
+the native hardware test rejects miniaudio's silent null backend.
 
 ## 8. Platform and dependency boundaries
 
@@ -545,15 +556,13 @@ first profile honest rather than extending a “mostly works” claim to all
 MusicXML. Phase 2 adds separate real-time, asset, and platform risks; preserve
 timing/identity in Phase 1 without making its release depend on audio.
 
-Resolve these details during the first implementation spike:
+Remaining verification and profile expansion:
 
 - Exact OSMD/VexFlow reference revision and attributable comparison corpus.
-- Final initial notation manifest, especially grace notes, tuplets, and
-  cross-staff rejection boundaries.
-- Bundled music/text font versions and the shared glyph-outline API needed
-  for portable SVG; no unmeasured per-glyph approximations.
-- Synthesizer/SoundFont choice and actual audio-backend coverage across macOS,
-  Linux, and Windows; current encoded-audio support is not evidence of parity.
+- Broader notation and expressive playback beyond the published manifest,
+  particularly grace/ornament realization and cross-staff engraving.
+- Linux and Windows builds/device verification, and manual device hot-unplug
+  checks; macOS output and offline synthesis do not establish platform parity.
 - Explicit budgets and performance targets measured on named release-build
   hardware, with parsing, engraving, SVG size, and audio latency reported
   separately. No performance claim is made by this proposal.
@@ -562,10 +571,9 @@ These choices refine the package proposal. A future change to an existing
 language/host ruling requires the paired formal-spec and working-design
 revision prescribed by [Documentation Convention](../doc/Doc_Convention.md).
 
-## Appendix A. Existing code and proposed module boundaries
+## Appendix A. Integration and module boundaries
 
-The following are verified integration points in the 2026-10-13 checkout,
-not evidence that a music package already exists:
+The following are integration points in the 2026-10-13 implementation:
 
 | Existing source | Reuse / extension |
 |---|---|
@@ -574,16 +582,16 @@ not evidence that a music package already exists:
 | [`chart/text.ls`](../lmd/package/chart/text.ls), `radiant.measure_text` | Batched shaping/measurement precedent; share generic primitives |
 | [`math/font.ls`](../lmd/package/math/font.ls), `radiant.math_metrics` | Font snapshot/geometry precedent; avoid copying math-specific policy |
 | [`RAD_14_SVG_Vector_Graph.md`](../doc/dev/radiant/RAD_14_SVG_Vector_Graph.md) | Existing SVG/vector rendering pipeline |
-| [`audio.cpp`](../radiant/audio.cpp), [`rdt_audio.h`](../radiant/rdt_audio.h) | Document-owned sessions and encoded-audio platform API; streaming/MIDI work remains new |
-| [`dom_api.def`](../lambda/dom/dom_api.def), `audio_*` operations | Existing procedural audio host surface and effect declarations |
+| [`audio.cpp`](../radiant/audio.cpp), [`midi_player.cpp`](../radiant/midi_player.cpp) | Shared document-owned slots; encoded-audio service plus copied MIDI buffers and streaming PCM |
+| [`dom_api.def`](../lambda/dom/dom_api.def), `audio_*` / `midi_*` operations | Shared host surface and effect declarations |
 | [`timeline/native_media.ls`](../lmd/package/chart/timeline/native_media.ls) | Existing generation-checked media lifecycle; share mechanisms without importing chart policy |
 
-Proposed source organization:
+Core source organization (engraving helpers are omitted here):
 
 ```text
 lmd/package/music.ls              public full-host facade
 lmd/package/music/
-    model.ls                      score validation, IDs, shared data contracts
+    common.ls                     shared XML axes, diagnostics and validation
     musicxml.ls                   load/parse/normalize adapter, including MXL
     time.ls                       exact time arithmetic shared by both phases
     fonts.ls                      bundled face/profile and glyph requests
@@ -591,6 +599,7 @@ lmd/package/music/
     layout.ls                     shared engraving passes and bounds index
     svg.ls                        page emission and document composition
     performance.ls                repeat expansion, tempo and event model (P2)
+    timeline.ls                   exact positions, tempo segments, note checks
     midi.ls                       SMF reader/writer over that event model (P2)
     player.ls                     reactive controls and host transport (P2)
 ```
@@ -612,8 +621,8 @@ float layout dimensions. Build changes go through `build_lambda_config.json`.
 | P2 audio | Selected synth, streaming output, transport controls, lifecycle and device failures |
 | P2 integration gate | Audible platform fixtures, cursor synchronization, repeats/seek/mute, cleanup |
 
-Keep the detailed task plan and measured progress in a future
-`vibe/impl/Lambda_Impl_Pkg_Music.md`. Proposed test locations are
+The detailed task plan and measured progress are in
+`vibe/impl/Lambda_Impl_Pkg_Music.md`. Test locations are
 `test/lambda/music/` for data/API cases, `test/music/` for licensed score/MIDI
 fixtures and references, and dedicated native audio tests where necessary.
 Every golden-driven `.ls` test receives its corresponding `.txt` result and

@@ -1,0 +1,28 @@
+{
+  "name":"MIDI controls and removal invalidate retained session handles",
+  "html":"test/music/_lifecycle.ls",
+  "viewport":{"width":1000,"height":500},
+  "events":[
+    {"type":"click","target":{"selector":"#open"}},
+    {"type":"assert_text","target":{"selector":"#report"},"equals":"opened"},
+    {"type":"click","target":{"selector":"#seek"}},
+    {"type":"assert_text","target":{"selector":"#report"},"equals":"seek:2"},
+    {"type":"click","target":{"selector":"#speed"}},
+    {"type":"assert_text","target":{"selector":"#report"},"equals":"speed:1.5"},
+    {"type":"click","target":{"selector":"#mute"}},
+    {"type":"assert_text","target":{"selector":"#report"},"equals":"mute:1"},
+    {"type":"click","target":{"selector":"#solo"}},
+    {"type":"assert_text","target":{"selector":"#report"},"equals":"solo:1"},
+    {"type":"click","target":{"selector":"#play"}},
+    {"type":"assert_text","target":{"selector":"#report"},"equals":"play:playing"},
+    {"type":"click","target":{"selector":"#stop"}},
+    {"type":"assert_text","target":{"selector":"#report"},"equals":"stop:ready"},
+    {"type":"click","target":{"selector":"#play"}},
+    {"type":"click","target":{"selector":"#remove"}},
+    {"type":"wait","ms":100},
+    {"type":"click","target":{"selector":"#read"}},
+    {"type":"assert_text","target":{"selector":"#report"},"equals":"closed"},
+    {"type":"click","target":{"selector":"#stale"}},
+    {"type":"assert_text","target":{"selector":"#report"},"equals":"false"}
+  ]
+}
