@@ -1,18 +1,60 @@
 // latex/floats.ls — float kinds: one table for numbering, caption labels and lists
-// Each kind names its counter, the caption label, and the \listof… command and
-// title that list its captions. Packages that add floats extend this table.
+// Each kind names its counter, the caption label, the \listof… command and title
+// that list its captions, and its float style (plain, plaintop, ruled, boxed).
+// Packages add kinds here; \newfloat adds them during analysis.
 
 import util: .util
 
 pub let KINDS = {
-    figure: {counter: "figure", name: "Figure", list: "listoffigures", list_title: "List of Figures"},
-    table: {counter: "table", name: "Table", list: "listoftables", list_title: "List of Tables"}
+    figure: {counter: "figure", name: "Figure", list: "listoffigures", list_title: "List of Figures",
+        style: "plain"},
+    table: {counter: "table", name: "Table", list: "listoftables", list_title: "List of Tables",
+        style: "plain"}
 }
 
+let ALGORITHM_KIND = {counter: "algorithm", name: "Algorithm", list: "listofalgorithms",
+    list_title: "List of Algorithms"}
+
+// packages that define the algorithm float, with the style their options choose
+let ALGORITHM_STYLES = {algorithm: "ruled", algorithm2e: "plain"}
+
+fn package_options(packages, name) {
+    let found = [for (entry in packages where entry.key == name) entry.val]
+    if (len(found) == 0) null else found[0]
+}
+
+fn style_option(opts, fallback) =>
+    if (opts == null) fallback
+    else if (opts.boxed != null or opts.boxruled != null) "boxed"
+    else if (opts.ruled != null) "ruled"
+    else if (opts.plain != null) "plain"
+    else fallback
+
+// the float kinds of a document's active packages
+pub fn kinds_for(packages) {
+    let algorithm = [for (pkg, style in ALGORITHM_STYLES,
+        let opts = package_options(packages, string(pkg)) where opts != null)
+        {*:ALGORITHM_KIND, style: style_option(opts, style),
+         within: if (opts.section != null) "section" else if (opts.chapter != null) "chapter" else null}]
+    if (len(algorithm) == 0) KINDS else {*:KINDS, algorithm: algorithm[0]}
+}
+
+// \newfloat{type}{placement}{ext}: named after its type until \floatname renames it
+pub fn new_kind(float_type, style) =>
+    {counter: float_type, name: float_type, list: null, list_title: null, style: style}
+
+// a float environment's kind: its own name, or the unstarred name of a spanning variant
+pub fn kind_of(kinds, tag) {
+    let base = if (ends_with(tag, "*")) slice(tag, 0, len(tag) - 1) else tag
+    if (kinds[base] != null) base else null
+}
+
+pub fn kind_name(kinds, kind) => if (kinds != null and kinds[kind] != null) kinds[kind].name else kind
+
 // the float kind a \listof… command lists, or null
-pub fn kind_for_list(command) {
-    let kinds = [for (k, v in KINDS where v.list == command) string(k)]
-    if (len(kinds) == 0) null else kinds[0]
+pub fn kind_for_list(kinds, command) {
+    let found = [for (k, v in kinds where v.list == command) string(k)]
+    if (len(found) == 0) null else found[0]
 }
 
 // The float's own caption and label: subfloats keep theirs, so the search stops there.

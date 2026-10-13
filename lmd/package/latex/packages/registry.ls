@@ -14,6 +14,8 @@ import listings: .listings
 import tcolorbox: .tcolorbox
 import caption: .caption
 import dingbats: .dingbats
+import algorithmic: .algorithmic
+import algorithm2e: .algorithm2e
 
 // `commands` names the commands and environments a package owns: they dispatch
 // to its handlers and are attributed to it when unsupported, only while it is
@@ -104,6 +106,32 @@ pub let CATALOG = {
     upgreek: {options: []},
     bbm: {options: []},
     dsfont: {options: []},
+    // `preamble` lists owned commands that belong in the preamble, so they are not
+    // reported there as unsupported
+    float: {options: [], commands: ["newfloat", "floatname", "floatstyle", "restylefloat",
+        "listof", "floatplacement"],
+        preamble: ["newfloat", "floatname", "floatstyle", "restylefloat", "floatplacement"]},
+    // the algorithm float (floats.kinds_for); its style and numbering follow these options
+    algorithm: {options: ["plain", "ruled", "boxed", "section", "chapter", "H"],
+        commands: ["listofalgorithms"], implies: ["float"],
+        conflicts: [{package: "algorithm2e", message: "algorithm and algorithm2e both define the algorithm float"}]},
+    algorithm2e: {options: ["ruled", "boxed", "boxruled", "plain", "linesnumbered", "lined", "vlined",
+        "noline", "noend", "longend", "shortend", "english"],
+        commands: ["listofalgorithms"] ++ algorithm2e.COMMANDS,
+        preamble: algorithm2e.SETTINGS ++ ["SetKwFunction", "SetKwProg", "SetKw", "SetKwData", "ResetInOut"]},
+    // subfig's \subfloat[caption]{body} and subfigure's \subfigure[caption]{body}
+    subfig: {options: [], commands: ["subfloat"],
+        conflicts: [{package: "subcaption", message: "subfig and subcaption define the same subfloats"},
+                    {package: "subfigure", message: "subfig replaces the obsolete subfigure package"}]},
+    subfigure: {options: [], commands: ["subfigure"],
+        conflicts: [{package: "subcaption", message: "subfigure and subcaption both define subfigure"}]},
+    wrapfig: {options: [], commands: ["wrapfigure", "wraptable"]},
+    rotating: {options: [], commands: ["sidewaysfigure", "sidewaystable", "turn", "rotate", "sideways"]},
+    pdflscape: {options: [], commands: ["landscape"]},
+    lscape: {options: [], commands: ["landscape"]},
+    algpseudocode: {options: ["noend"], commands: ["algorithmic"] ++ algorithmic.PSEUDOCODE_COMMANDS,
+        preamble: ["algrenewcommand", "algnewcommand"] ++ algorithmic.LABEL_MACROS},
+    algorithmic: {options: [], commands: ["algorithmic"] ++ algorithmic.ALGORITHMIC_COMMANDS},
     // continuous output never moves floats, so a barrier and its options change nothing
     placeins: {options: ["section", "above", "below"], commands: ["FloatBarrier"]},
     indentfirst: {options: []},
@@ -426,7 +454,7 @@ fn scan(node, packages, outside_body) {
             [diagnostic("unsupported-cite-compression", "cite", tag,
                 "cite package sorting and compression are not active", node)]
         else if (outside_body and owner != "latex" and tag != "DeclareMathOperator" and
-            tag != "addbibresource")
+            tag != "addbibresource" and not (contains(preamble_of(CATALOG[owner]), tag) or false))
             [diagnostic("unsupported-command", owner, tag,
                 "Unsupported " ++ owner ++ " command: " ++ tag, node)]
         else if (tag == "includegraphics" and active(packages, "graphicx"))
@@ -506,6 +534,9 @@ fn conflicts_of(desc) => if (desc == null or desc.conflicts == null) [] else des
 
 fn implies_of(desc) => if (desc == null or desc.implies == null) [] else desc.implies
 
+// the owned commands a package expects in the preamble (definitions, settings)
+fn preamble_of(desc) => if (desc == null or desc.preamble == null) [] else desc.preamble
+
 // HTML keeps a continuous table; the fixed-page PDF writer cannot repeat
 // longtable heads or split rows until the shared pagination path supports it.
 pub fn target_diagnostics(node, target, paged = false) {
@@ -534,6 +565,15 @@ pub fn target_diagnostics(node, target, paged = false) {
             else if (tag == "thispagestyle")
                 [diagnostic("page-style-approximation", "fancyhdr", tag,
                     "Per-page style overrides are not represented by the document-wide margin profile", node)]
+            else if (tag == "sidewaysfigure" or tag == "sidewaystable")
+                [diagnostic("sideways-approximation", "rotating", tag,
+                    "The float renders upright; a quarter turn on its own page needs page rotation", node)]
+            else if (tag == "landscape" and target == "pdf")
+                [diagnostic("landscape-approximation", "pdflscape", tag,
+                    "PDF pages keep their orientation; landscape content is not turned onto its own page", node)]
+            else if (tag == "turn" or tag == "rotate" or tag == "sideways")
+                [diagnostic("transform-approximation", "rotating", tag,
+                    "The box is transformed in CSS; the surrounding layout keeps its untransformed size", node)]
             else if ((tag == "resizebox" or tag == "scalebox" or tag == "rotatebox") and
                 not lone_image(node))
                 [diagnostic("transform-approximation", "graphicx", tag,

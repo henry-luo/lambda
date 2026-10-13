@@ -262,6 +262,28 @@ As built on 2026-10-13, every item above except `amsxtra` is in place:
 - **`rotating`.** `sidewaysfigure` and `sidewaystable` are float kinds with rotated content. `turn` and `rotate` share M1's transforms. Layout effects are diagnosed as approximations.
 - **`pdflscape` and `lscape`.** `landscape` renders its content. Rotating a paged PDF page needs a per-page orientation host capability and is diagnosed.
 
+As built on 2026-10-13:
+
+- **Float kinds are dynamic.** Analysis starts from `floats.kinds_for(packages)`: the base figure and table, plus the `algorithm` kind when `algorithm` or `algorithm2e` is active.
+  - That kind's style follows the `plain`/`ruled`/`boxed` options; the defaults are ruled for algorithm and plain for algorithm2e.
+  - `section` or `chapter` numbers it within that heading.
+  - `\newfloat`, `\floatname`, `\floatstyle` and `\restylefloat` change the kinds as analysis walks.
+  - `render_float` serves figure, package and `\newfloat` floats. Captions take their name from the document's kinds, and a non-plain style adds a class; tables take it too. `\listof{type}{title}` and `\listofalgorithms` reuse the list-of rendering.
+- **Placement leak fixed.** The parser kept an environment's `[option]` out of the body only for `table`, so `\begin{figure}[htbp]` printed "[htbp]". `util.leading_option` now strips it for every float and reads `algorithmic`'s `[n]`. The parser cannot know package or `\newfloat` environments, so the fix is in script.
+- **Preamble commands as data.** A `preamble` field on `CATALOG` entries lists owned commands that belong in the preamble, so they are not reported there as unsupported.
+- **algorithmic.** [algorithmic.ls](../../lmd/package/latex/packages/algorithmic.ls) folds the keyword commands of algpseudocode and the older capitalised algorithmic into lines with depth, numbers and labels. Analysis binds `\label` to line numbers, and render draws the lines. `util.flatten_paragraphs` was promoted from render.ls for this.
+  - Keyword labels come from the document's `\algorithmic<word>` definitions. `\algrenewcommand` leaves the new label as the macro's argument, and `\renewcommand` is collected as a macro.
+  - **Limitation:** with `\renewcommand`, the engine still reports the label macro as undefined, because no algorithmic.sty runs. Defining the label macros needs the §17.1 binding.
+- **algorithm2e.** [algorithm2e.ls](../../lmd/package/latex/packages/algorithm2e.ls) folds the float body:
+  - `\;` ends a statement.
+  - Block commands (`\If`, `\uIf`, `\eIf`, `\ElseIf`, `\Else`, `\For`, `\ForEach`, `\ForAll`, `\While`, `\Repeat`) re-parse each brace argument from its raw source, because the parser flattens argument groups. User macros defined in the document are therefore not expanded inside those bodies.
+  - `\KwIn`/`\KwOut`/`\KwData`/`\KwResult` lines, `\KwRet`, `\KwTo`, `\tcp` and `\tcc` render. Numbering, semicolons and end lines follow the options and the settings commands, which apply to every algorithm rather than one.
+  - `\SetKwFunction` and the other keyword definitions are reported.
+- **subfig and subfigure.** `\subfloat` and `\subfigure` letter their subfloats within the enclosing float and caption them from the last optional argument. `\subref` works with them. A label belongs inside the caption argument, as subfig documents.
+- **wrapfig.** `environment_header` reads the header groups that the parser leaves as body text.
+- **rotating.** Sideways floats render upright with `sideways-approximation`. `turn`, `rotate` and `sideways` reuse graphicx's transform helpers (promoted to `pub`).
+- **landscape.** The content renders on the continuous page, with `landscape-approximation` for PDF.
+
 ## 9. M5: tables and page inserts
 
 - **`threeparttable`.** The `threeparttable` and `tablenotes` environments and `\tnote`, on the shared table model (Pkg_Latex §8.4).
@@ -424,3 +446,6 @@ This is `lambda.doc.math` work, after M0.3. Every addition updates Pkg_Math §7.
   - New module `lmd/package/latex/packages/dingbats.ls`.
   - New test `test/lambda/latex/test_latex_phase5_declarations.ls` with its golden. The other 63 LaTeX scripts and the 32 math scripts match their goldens.
   - The parser change (`\cal` as a math font switch) is one name in `input-latex-c.cpp`.
+- 2026-10-13: M2 committed (1ec9a2aa8). M4 was built as recorded in §8.
+  - New modules: `packages/algorithmic.ls` and `packages/algorithm2e.ls`.
+  - New test `test/lambda/latex/test_latex_phase5_floats.ls` with its golden. The other 64 LaTeX scripts and the 32 math scripts match their goldens.

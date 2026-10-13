@@ -385,6 +385,50 @@ pub fn optional_raw(el) {
     }
 }
 
+// The parser keeps an environment's leading [option] as body text unless it knows
+// the environment (table): \begin{figure}[htbp], \begin{algorithmic}[1]. This
+// returns the option, or null, and the body children without it.
+pub fn leading_option(el) {
+    let children = if (el is element) content(el) else []
+    let first = if (len(children) > 0) children[0] else null
+    let items = if (first is element and string(name(first)) == "paragraph") content(first) else []
+    let opening = if (len(items) > 0) items[0] else null
+    let text = if (opening is string) trim_start(opening) else ""
+    let close = if (starts_with(text, "[")) index_of(text, "]") else null
+    if (close == null) {option: null, children: children}
+    else {
+        let rest = slice(text, close + 1, len(text))
+        let paragraph = [for (i, item in items where i > 0) item]
+        let kept = if (trim(rest) == "") paragraph else [rest, *paragraph];
+        {option: trim(slice(text, 1, close)),
+         children: [<paragraph for c in kept { c }>, *slice(children, 1, len(children))]}
+    }
+}
+
+// the children of a node with paragraph wrappers opened, in order
+pub fn flatten_paragraphs(node) {
+    let n = len(node)
+    flatten_para_rec(node, 0, n, [])
+}
+
+fn flatten_para_rec(node, i, n, acc) {
+    if (i >= n) { acc }
+    else {
+        let child = node[i]
+        if (child is element) {
+            if (string(name(child)) == "paragraph") {
+                let inner = flatten_inner(child, 0, len(child), [])
+                flatten_para_rec(node, i + 1, n, acc ++ inner)
+            } else { flatten_para_rec(node, i + 1, n, acc ++ [child]) }
+        } else { flatten_para_rec(node, i + 1, n, acc ++ [child]) }
+    }
+}
+
+fn flatten_inner(el, i, n, acc) {
+    if (i >= n) acc
+    else flatten_inner(el, i + 1, n, acc ++ [el[i]])
+}
+
 // Index, among command_args(el), of the first node of the command's last
 // required argument. Each earlier optional group is one brack_group node; each
 // earlier required group is simple (a length or a number), one node per text

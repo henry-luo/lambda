@@ -27,6 +27,8 @@ import listings: .packages.listings
 import tcolorbox: .packages.tcolorbox
 import caption: .packages.caption
 import dingbats: .packages.dingbats
+import algorithmic: .packages.algorithmic
+import algorithm2e: .packages.algorithm2e
 import floats: .floats
 import hyperref: .packages.hyperref
 import page_style: .packages.page_style
@@ -124,11 +126,39 @@ pub let PACKAGE_RENDER = {
     graphicx: {resizebox: render_graphicx_box, scalebox: render_graphicx_box,
         rotatebox: render_graphicx_box, reflectbox: render_graphicx_box},
     placeins: {FloatBarrier: render_nothing},
+    // the float package's definitions act through analysis (float kinds)
+    float: {newfloat: render_nothing, floatname: render_nothing, floatstyle: render_nothing,
+        restylefloat: render_nothing, floatplacement: render_nothing, listof: render_listof},
     bookmark: {bookmark: (el, info) => hyperref.bookmark_command(el, info.hyperref_settings)},
     pifont: {ding: render_ding,
         dinglist: (el, info) => render_generic_list(el, info, (groups, i) => ding_label(groups, 0)),
         dingautolist: (el, info) => render_generic_list(el, info, (groups, i) => ding_label(groups, i))},
     marvosym: map([for (k, v at dingbats.MARVOSYM, x in [string(k), render_marvosym]) x]),
+    // label macros are definitions (analysis) when they carry an argument
+    algpseudocode: map(["algorithmic", render_algorithmic, "Comment", render_alg_comment,
+        "Call", render_alg_call, "Return", render_alg_inline,
+        "algrenewcommand", render_nothing, "algnewcommand", render_nothing] ++
+        [for (macro in algorithmic.LABEL_MACROS, x in [macro, render_alg_label_macro]) x]),
+    // statements and blocks fold inside the algorithm float (render_alg2e_body); these
+    // appear inside statements, and settings act through analysis
+    subfig: {subfloat: render_subfig},
+    subfigure: {subfigure: render_subfig},
+    wrapfig: {wrapfigure: render_wrapfloat, wraptable: render_wrapfloat},
+    // sideways floats render upright (registry target diagnostics)
+    rotating: {sidewaysfigure: (el, info) => render_float(el, info, "figure"),
+        sidewaystable: render_table_env, turn: render_turn, rotate: render_turn,
+        sideways: render_turn},
+    pdflscape: {landscape: render_landscape},
+    lscape: {landscape: render_landscape},
+    algorithm2e: map(["KwTo", (el, info) => alg_word("to", info),
+        "KwRet", (el, info) => <span class: "latex-alg-return", alg_word("return", info) " "
+            for c in render_children(el, 0, info) { c }>,
+        "tcp", render_alg2e_comment, "tcc", render_alg2e_comment,
+        "tcp*", render_alg2e_comment, "tcc*", render_alg2e_comment] ++
+        [for (setting in algorithm2e.SETTINGS, x in [setting, render_nothing]) x]),
+    algorithmic: map(["algorithmic", render_algorithmic, "COMMENT", render_alg_comment] ++
+        [for (k, v at algorithmic.INLINE_WORDS,
+            x in (if (string(k) != "Return") [string(k), render_alg_inline] else [])) x]),
     siunitx: {num: render_siunitx, si: render_siunitx, unit: render_siunitx,
         SI: render_siunitx, qty: render_siunitx}
 }
@@ -149,6 +179,196 @@ fn ding_label(groups, step) {
 }
 
 fn render_marvosym(el, info) => <span class: "latex-marvosym", dingbats.MARVOSYM[string(name(el))]>
+
+// ============================================================
+// Pseudocode (algpseudocode, algorithmic): one line per statement
+// ============================================================
+
+fn render_algorithmic(el, info) {
+    <div class: "latex-algorithmic", for (line in algorithmic.lines(el)) render_alg_line(line, info)>
+}
+
+fn render_alg_line(line, info) {
+    let desc = line.desc
+    let args = util.command_args(line.node)
+    let words = if (desc.words == null) [] else
+        [for (i, word in desc.words, item in (if (i > 0) [" ", alg_word(word, info)] else [alg_word(word, info)])) item]
+    let condition = if (desc.call == true and len(args) > 0)
+        [<span class: "latex-alg-name", render_node(args[0], info)>, "(",
+            *[for (arg in slice(args, 1, len(args))) render_node(arg, info)], ")"]
+        else [for (arg in args, let r = render_node(arg, info) where r != null) r]
+    let after = if (desc.after == null) [] else [alg_word(desc.after, info)]
+    let groups = [for (group in [words, condition, after] where len(group) > 0) group]
+    let parts = [for (i, group in groups, item in (if (i > 0) [" ", *group] else group)) item]
+    let body = [for (node in line.items, let r = render_node(node, info) where r != null) r];
+    <div class: "latex-alg-line", id: if (line.label != null) util.slugify(line.label) else null,
+        style: "padding-left:" ++ string(line.depth * 1.5) ++ "em",
+        <span class: "latex-alg-number", if (line.shown != null) string(line.shown) ++ ":" else "">
+        for c in parts { c }
+        for c in body { c }>
+}
+
+// a keyword's label: the document's \algorithmic<word> definition, else its default
+fn alg_word(word, info) {
+    let defined = util.lookup(info.alg_labels, word)
+    let macro = macros.find_macro(info.macros, "algorithmic" ++ word)
+    if (defined != null) <span class: "latex-alg-keyword", for c in render_children(defined, 0, info) { c }>
+    else if (macro != null and macro.body != null)
+        <span class: "latex-alg-keyword", for c in render_children(macro.body, 0, info) { c }>
+    else <strong class: "latex-alg-keyword", algorithmic.word_text(word)>
+}
+
+fn render_alg_inline(el, info) {
+    let tag = string(name(el))
+    alg_word(if (tag == "Return") "return" else lower(algorithmic.INLINE_WORDS[tag]), info)
+}
+
+fn render_alg_comment(el, info) =>
+    <span class: "latex-alg-comment", "▷ " for c in render_children(el, 0, info) { c }>
+
+// \Call{name}{arguments}
+fn render_alg_call(el, info) {
+    let args = util.command_args(el);
+    <span class: "latex-alg-call",
+        <span class: "latex-alg-name", if (len(args) > 0) render_node(args[0], info) else null>
+        "(" for (arg in slice(args, 1, len(args))) render_node(arg, info) ")">
+}
+
+// ============================================================
+// subfig, wrapfig, rotating, landscape
+// ============================================================
+
+// \subfloat[list][caption]{body} (subfig) and \subfigure[caption]{body}: a lettered
+// subfloat of the enclosing float, captioned from its last optional argument
+fn render_subfig(el, info) {
+    let kind = if (info.caption_type == "table") "subtable" else "subfigure"
+    let letter = util.lookup(info.subfloat_nums, string(el.source_offset))
+    let args = util.command_args(el)
+    let start = util.last_argument_start(el)
+    let body = slice(args, start, len(args))
+    let options = [for (node in slice(args, 0, start)
+        where node is element and string(name(node)) == "brack_group") node]
+    let caption_text = if (len(options) == 0) [] else render_children(options[len(options) - 1], 0, info)
+    let items = collect_children(body, 0, len(body), [], {*:info, caption_type: kind, caption_number: letter})
+    if (info.caption_type == null or letter == null)
+        util.unsupported_element(string(name(el)), "A subfloat needs a parent figure or table", el.source_offset)
+    else <div class: "latex-subfloat", style: "display:inline-block;vertical-align:top;margin:0 0.5em;",
+        for item in items { item }
+        caption.render(caption_text, kind, letter, info.caption_options, false, el.source_offset, info.float_kinds)>
+}
+
+// The header arguments of an environment the parser reads as body text: braced
+// groups, with [optional] text between them skipped. Returns the groups and the
+// body that follows the last one.
+fn environment_header(el, groups_wanted) {
+    let children = content(el)
+    let first = if (len(children) > 0 and children[0] is element and
+        string(name(children[0])) == "paragraph") content(children[0]) else []
+    let group_positions = [for (i, item in first
+        where item is element and string(name(item)) == "curly_group") i]
+    let taken = slice(group_positions, 0, min(groups_wanted, len(group_positions)))
+    let after = if (len(taken) == 0) 0 else taken[len(taken) - 1] + 1
+    {groups: [for (i in taken) first[i]],
+     body: [<paragraph for c in slice(first, after, len(first)) { c }>, *slice(children, 1, len(children))]}
+}
+
+// a braced length as TeX source: text plus control words such as \textwidth
+fn group_source(group) => join([for (item in content(group))
+    if (item is element) "\\" ++ string(name(item)) else string(item)], "")
+
+// \begin{wrapfigure}[lines]{placement}[overhang]{width}: a float the text wraps around
+fn render_wrapfloat(el, info) {
+    let kind = if (string(name(el)) == "wraptable") "table" else "figure"
+    let header = environment_header(el, 2)
+    let placement = if (len(header.groups) > 0) trim(util.text_of(header.groups[0])) else ""
+    let side = if (contains("lLiI", placement) and placement != "") "left" else "right"
+    let width_source = if (len(header.groups) > 1) trim(group_source(header.groups[1])) else ""
+    let width = if (width_source == "" or width_source == "0pt") null else util.css_dimension(width_source)
+    let items = collect_children(header.body, 0, len(header.body), [], {*:info, caption_type: kind,
+        caption_number: string(get_float_num(el, info, kind))})
+    if (len(header.groups) < 2 or (width_source != "0pt" and width == null))
+        util.unsupported_element("wrapfig", "wrapfigure needs a placement and a width", el.source_offset)
+    else <figure class: "latex-wrapfloat latex-wrap" ++ kind,
+        style: "float:" ++ side ++ ";" ++ (if (width == null) "" else "width:" ++ width ++ ";") ++
+            (if (side == "left") "margin:0.3em 1em 0.5em 0;" else "margin:0.3em 0 0.5em 1em;"),
+        for c in items { c }>
+}
+
+// turn and rotate turn their content by an angle; sideways by a quarter turn
+fn render_turn(el, info) {
+    let sideways = string(name(el)) == "sideways"
+    let header = environment_header(el, if (sideways) 0 else 1)
+    let angle = if (sideways) "90" else if (len(header.groups) > 0) trim(util.text_of(header.groups[0])) else ""
+    let items = collect_children(header.body, 0, len(header.body), [], info)
+    if ((float(angle) ^ { null }) == null)
+        util.unsupported_element("rotating", "turn and rotate need a numeric angle", el.source_offset)
+    else graphicx.transformed_box("latex-turn", "transform:" ++ graphicx.css_rotation(angle) ++
+        ";transform-origin:center center", items)
+}
+
+// landscape content stays on the continuous page (registry target diagnostics for PDF)
+fn render_landscape(el, info) => <div class: "latex-landscape", for c in render_children(el, 0, info) { c }>
+
+// ============================================================
+// algorithm2e: the algorithm body itself is the pseudocode
+// ============================================================
+
+// numbering, semicolons and end lines, from the package options and the
+// document's settings commands (the last of a pair wins)
+fn alg2e_settings(info) {
+    let opts = registry.options_for(info.packages, "algorithm2e")
+    let given = if (info.alg2e_settings == null) [] else info.alg2e_settings
+    let numbering = last_setting(given, "LinesNumbered", "LinesNotNumbered")
+    let semicolons = last_setting(given, "PrintSemicolon", "DontPrintSemicolon");
+    {numbered: if (numbering != null) numbering == "LinesNumbered" else opts != null and opts.linesnumbered != null,
+     semicolons: semicolons != "DontPrintSemicolon",
+     noend: (opts != null and opts.noend != null) or (contains(given, "SetAlgoNoEnd") or false)}
+}
+
+// whichever of two opposing settings the document gave last, or null
+fn last_setting(given, a, b) {
+    let hits = [for (s in given where s == a or s == b) s]
+    if (len(hits) == 0) null else hits[len(hits) - 1]
+}
+
+// the lines, then the captions as direct children of the float so its style can place them
+fn render_alg2e_body(body, info) {
+    let settings = alg2e_settings(info)
+    let folded = algorithm2e.fold(util.flatten_paragraphs(body), 0, settings)
+    let lines = algorithm2e.numbered(folded.lines, settings.numbered);
+    [<div class: "latex-algorithmic latex-algorithm2e",
+        for (line in lines) render_alg2e_line(line, info, settings)>,
+     *[for (block in folded.blocks) render_node(block, info)]]
+}
+
+fn render_alg2e_line(line, info, settings) {
+    let words = if (line.words == null) [] else
+        [for (i, word in line.words, item in (if (i > 0) [" ", alg_word(word, info)] else [alg_word(word, info)])) item]
+    let rendered = [for (node in (if (line.nodes != null) line.nodes else line.condition),
+        let r = render_node(node, info) where r != null) r]
+    let parts = if (line.kind == "io") [<strong class: "latex-alg-keyword", line.label>, " ", *rendered]
+        else if (line.kind == "statement")
+            rendered ++ (if (line.semicolon and settings.semicolons) [";"] else [])
+        else if (line.kind == "blank") [" "]
+        else words ++ (if (len(rendered) > 0) [" ", *rendered] else []) ++
+            (if (line.after != null) [" ", alg_word(line.after, info)] else []);
+    <div class: "latex-alg-line", style: "padding-left:" ++ string(line.depth * 1.5) ++ "em",
+        <span class: "latex-alg-number", if (line.number != null) string(line.number) else "">
+        for c in parts { c }>
+}
+
+// algorithm2e's comments: \tcp{…} as //, \tcc{…} as /* … */
+fn render_alg2e_comment(el, info) {
+    let block = starts_with(string(name(el)), "tcc")
+    let parts = [if (block) "/* " else "// ", *render_children(el, 0, info), if (block) " */" else ""];
+    <span class: "latex-alg-comment", for c in parts { c }>
+}
+
+// a label macro with an argument is a definition; without one it shows the label
+fn render_alg_label_macro(el, info) {
+    let macro = string(name(el))
+    if (len(content(el)) > 0) null else alg_word(slice(macro, 11, len(macro)), info)
+}
 
 // graphicx box commands: the content is the last argument; a lone image is
 // sized through its own keys
@@ -603,7 +823,11 @@ fn render_extended_or_generic(el, info) {
             util.lookup(info.amsmath_numbers, string(el.source_offset)), info.math_operators),
             info, true) }
     else if (tag_str == "marginpar") { render_marginpar(el, info) }
-    else if (floats.kind_for_list(tag_str) != null) { render_float_list(info, floats.kind_for_list(tag_str)) }
+    else if (floats.kind_for_list(info.float_kinds, tag_str) != null) {
+        render_float_list(info, floats.kind_for_list(info.float_kinds, tag_str)) }
+    // a package's or \newfloat's float environment
+    else if (floats.kind_of(info.float_kinds, tag_str) != null) {
+        render_float(el, info, floats.kind_of(info.float_kinds, tag_str)) }
     else { resolve_extended_or_generic(tag_str, el, info) }
 }
 
@@ -1318,7 +1542,7 @@ fn bold_math(rendered, info, block) {
 // ============================================================
 
 fn render_itemize(el, info) {
-    let flat = flatten_paragraphs(el)
+    let flat = util.flatten_paragraphs(el)
     let items = split_list_items(flat, info)
     let opts = if (registry.active(info.packages, "enumitem")) enumitem.options(el) else {};
     let list_style = enumitem.list_style(opts, "itemize");
@@ -1327,7 +1551,7 @@ fn render_itemize(el, info) {
 }
 
 fn render_enumerate(el, info) {
-    let flat = flatten_paragraphs(el)
+    let flat = util.flatten_paragraphs(el)
     let items = split_list_items(flat, info)
     let opts = if (registry.active(info.packages, "enumitem")) enumitem.options(el) else {};
     let first = if (registry.active(info.packages, "enumitem") and el.source_offset != null)
@@ -1340,7 +1564,7 @@ fn render_enumerate(el, info) {
 }
 
 fn render_description(el, info) {
-    let flat = flatten_paragraphs(el)
+    let flat = util.flatten_paragraphs(el)
     let items = split_desc_items(flat, info)
     let opts = if (registry.active(info.packages, "enumitem")) enumitem.options(el) else {};
     let list_style = enumitem.list_style(opts, "description");
@@ -1348,28 +1572,6 @@ fn render_description(el, info) {
         for item in items { item }>
 }
 
-fn flatten_paragraphs(node) {
-    let n = len(node)
-    flatten_para_rec(node, 0, n, [])
-}
-
-fn flatten_para_rec(node, i, n, acc) {
-    if (i >= n) { acc }
-    else {
-        let child = node[i]
-        if (child is element) {
-            if (string(name(child)) == "paragraph") {
-                let inner = flatten_inner(child, 0, len(child), [])
-                flatten_para_rec(node, i + 1, n, acc ++ inner)
-            } else { flatten_para_rec(node, i + 1, n, acc ++ [child]) }
-        } else { flatten_para_rec(node, i + 1, n, acc ++ [child]) }
-    }
-}
-
-fn flatten_inner(el, i, n, acc) {
-    if (i >= n) acc
-    else flatten_inner(el, i + 1, n, acc ++ [el[i]])
-}
 
 fn is_item_node(child) {
     if (child is element) {
@@ -1412,7 +1614,7 @@ fn split_items_rec(flat, i, n, current, custom, acc, info, default_label) {
 // set in the first row become columns. A \kill row sets stops without printing.
 // The other tab commands (\+ \- \< \' \`) reach the fallback and are reported.
 fn render_tabbing(el, info) {
-    let rows = split_nodes(flatten_paragraphs(el), 0, [], [],
+    let rows = split_nodes(util.flatten_paragraphs(el), 0, [], [],
         (node) => node is symbol and string(node) == "row_sep");
     <table class: "latex-tabbing",
         <tbody for (row in rows where not is_blank_row(row) and
@@ -1435,7 +1637,7 @@ fn split_nodes(nodes, i, current, acc, is_separator) {
 // pifont's dinglist{n} and dingautolist{n}. label_for(groups, i) labels item i
 // unless \item[x] gives one; trivlist passes null. Spacing declarations are not modelled.
 fn render_generic_list(el, info, label_for) {
-    let flat = flatten_paragraphs(el)
+    let flat = util.flatten_paragraphs(el)
     let item_positions = [for (i, node in flat where is_item_node(node)) i]
     let start = if (len(item_positions) == 0) len(flat) else item_positions[0]
     let groups = [for (node in slice(flat, 0, start)
@@ -1525,13 +1727,27 @@ fn render_abstract(el, info) {
     >
 }
 
-fn render_figure(el, info) {
-    let fig_num = get_float_num(el, info, "figure")
-    let items = render_children(el, 0, {*:info, caption_type: "figure",
-        caption_number: string(fig_num)});
-    <figure class: "latex-figure" ++ spanning_class(el),
-        for c in items { c }
-    >
+fn render_figure(el, info) => render_float(el, info, "figure")
+
+// A float environment: its leading [placement] is dropped, its caption is
+// numbered and named from the kind, and a non-plain float style shapes the frame.
+fn render_float(el, info, kind) {
+    let body = util.leading_option(el).children
+    let classes = (if (kind == "figure") "latex-figure" else "latex-float latex-float-" ++ kind) ++
+        float_style_class(info, kind) ++ spanning_class(el)
+    let float_info = {*:info, caption_type: kind, caption_number: string(get_float_num(el, info, kind))}
+    let items = if (kind == "algorithm" and registry.active(info.packages, "algorithm2e"))
+        render_alg2e_body(body, float_info)
+        else collect_children(body, 0, len(body), [], float_info);
+    <figure class: classes, for c in items { c }>
+}
+
+// \listof{type}{title}
+fn render_listof(el, info) {
+    let args = [for (arg in util.command_args(el)) trim(util.text_of(arg))]
+    if (len(args) < 2 or info.float_kinds[args[0]] == null)
+        util.unsupported_element("float", "listof needs a float type and a title", el.source_offset)
+    else render_float_list(info, args[0], args[1])
 }
 
 // figure* and table* span both columns of a twocolumn document
@@ -1541,7 +1757,8 @@ fn render_caption(el, info) {
     if (info.caption_type == null) util.unsupported_element("caption",
         "Caption needs a figure or table; use captionof outside a float", el.source_offset)
     else caption.render(render_children_skip_brack(el, info), info.caption_type,
-        info.caption_number, info.caption_options, el.starred == true, el.source_offset)
+        info.caption_number, info.caption_options, el.starred == true, el.source_offset,
+        info.float_kinds)
 }
 
 fn render_captionof(el, info) {
@@ -1573,8 +1790,9 @@ fn render_subfloat(el, info, kind) {
 
 fn render_subref(el, info) {
     let entry = util.lookup(info.labels, trim(util.text_of(el)))
-    if (not registry.active(info.packages, "subcaption") or entry == null or
-        not starts_with(entry.type, "sub"))
+    let subfloats = registry.active(info.packages, "subcaption") or
+        registry.active(info.packages, "subfig") or registry.active(info.packages, "subfigure")
+    if (not subfloats or entry == null or not starts_with(entry.type, "sub"))
         util.unsupported_element("subcaption", "Unresolved subfloat reference", el.source_offset)
     else <a href: "#" ++ entry.id, entry.subnumber>
 }
@@ -1590,7 +1808,8 @@ fn get_float_num(el, info, kind) {
 }
 
 // \listoffigures, \listoftables: the captions of one float kind, linked when labelled
-fn render_float_list(info, kind) {
+fn render_float_list(info, kind, title = null) {
+    let desc = info.float_kinds[kind]
     let entries = [for (entry in info.floats where entry.kind == kind and entry.caption != null,
         let parts = [if (entry.number == null) null else <span class: "sec-num", string(entry.number)>,
             entry.caption])
@@ -1598,8 +1817,8 @@ fn render_float_list(info, kind) {
             if (entry.id != null) <a href: "#" ++ entry.id, for c in parts { c }>
             else parts
         >];
-    <nav class: "latex-toc latex-list-of latex-" ++ floats.KINDS[kind].list,
-        <div class: "toc-title", floats.KINDS[kind].list_title>
+    <nav class: "latex-toc latex-list-of latex-" ++ (if (desc.list != null) desc.list else "listof-" ++ kind),
+        <div class: "toc-title", if (title != null) title else desc.list_title>
         <ul for item in entries { item }>
     >
 }
@@ -1675,9 +1894,15 @@ fn render_table_env(el, info) {
     let tab_num = get_float_num(el, info, "table")
     let items = render_children(el, 0, {*:info, caption_type: "table",
         caption_number: string(tab_num)});
-    <div class: "latex-table-wrapper" ++ spanning_class(el),
+    <div class: "latex-table-wrapper" ++ float_style_class(info, "table") ++ spanning_class(el),
         for c in items { c }
     >
+}
+
+// a non-plain float style (\floatstyle with \restylefloat or \newfloat) as a class
+fn float_style_class(info, kind) {
+    let style = info.float_kinds[kind].style
+    if (style == null or style == "plain") "" else " latex-float-style-" ++ style
 }
 
 

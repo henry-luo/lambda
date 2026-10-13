@@ -41,7 +41,7 @@ fn style(opts) {
 }
 
 // graphicx angles turn counterclockwise; CSS rotate() turns clockwise
-fn css_rotation(angle) => "rotate(" ++ string(0.0 - float(trim(angle))) ++ "deg)"
+pub fn css_rotation(angle) => "rotate(" ++ string(0.0 - float(trim(angle))) ++ "deg)"
 
 fn pdf_style(opts, svg) {
     let physical = if (opts.width == null and opts.height == null)
@@ -126,7 +126,7 @@ pub fn render_box(el, items, image, base_uri) {
     else transformed_box("latex-reflectbox", "transform:scaleX(-1)", items)
 }
 
-fn transformed_box(css_class, style, items) {
+pub fn transformed_box(css_class, style, items) {
     <span class: css_class, style: "display:inline-block;" ++ style, for c in items { c }>
 }
 

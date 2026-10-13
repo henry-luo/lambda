@@ -189,6 +189,18 @@ table.latex-tabular tr.latex-cmidrule { height: 0; line-height: 0; }
 .latex-sl { font-style: oblique; }
 .latex-rm { font-family: 'Computer Modern Serif', 'Latin Modern Roman', serif; }
 .latex-resizebox > table { width: 100%; }
+.latex-float { margin: 1em 0; }
+.latex-float, .latex-float-style-ruled, .latex-float-style-plaintop, .latex-float-style-boxed {
+  display: flex; flex-direction: column; }
+.latex-float-style-ruled { border-top: 0.8pt solid; border-bottom: 0.8pt solid; padding: 0.2em 0; }
+.latex-float-style-ruled > .latex-caption { order: -1; text-align: left; border-bottom: 0.4pt solid; margin: 0 0 0.3em; }
+.latex-float-style-plaintop > .latex-caption { order: -1; }
+.latex-float-style-boxed { border: 0.4pt solid; padding: 0.4em; }
+.latex-algorithmic { padding-left: 2.5em; text-align: left; }
+.latex-alg-line { position: relative; line-height: 1.4; }
+.latex-alg-number { position: absolute; left: -2.5em; width: 2em; text-align: right; font-size: 0.8em; }
+.latex-alg-comment { float: right; }
+.latex-alg-name, .latex-alg-call .latex-alg-name { font-variant: small-caps; }
 .latex-list { list-style-type: none; padding-left: 2em; }
 .latex-tabbing { border-collapse: collapse; margin: 0.5em 0; }
 .latex-tabbing td { padding: 0 1em 0 0; vertical-align: baseline; }

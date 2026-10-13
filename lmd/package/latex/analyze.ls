@@ -14,6 +14,8 @@ import registry: .packages.registry
 import bib_style: .packages.bib_style
 import listings: .packages.listings
 import floats: .floats
+import algorithmic: .packages.algorithmic
+import algorithm2e: .packages.algorithm2e
 
 // helper: append a {key, val} entry to an entry list
 fn add_entry(entries, k, v) {
@@ -65,6 +67,10 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         footnote_marks: [],
         footnotes: [],
         floats: [],
+        float_kinds: floats.kinds_for(packages),
+        float_style: "plain",
+        alg_labels: [],
+        alg2e_settings: [],
         theorems: [],
         bibitems: [],
         equation_nums: [],
@@ -81,7 +87,9 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         page_color: null,
         theorem_defs: [],
         theorem_style: "plain",
-        counter_within: [],
+        // a package float numbered within a heading (algorithm's section option)
+        counter_within: [for (k, v at floats.kinds_for(packages) where v.within != null)
+            {key: string(k), val: v.within}],
         counter_positions: [],
         in_body: false,
         env_context: "section",
@@ -107,6 +115,9 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         footnotes: result.footnotes,
         footnote_marks: result.footnote_marks,
         floats: result.floats,
+        float_kinds: result.float_kinds,
+        alg_labels: result.alg_labels,
+        alg2e_settings: result.alg2e_settings,
         theorems: result.theorems,
         bibitems: result.bibitems,
         listing_nums: result.listing_nums,
@@ -139,7 +150,76 @@ pub let PACKAGE_WALK = {
     subcaption: {subfigure: (el, st) => walk_subfloat(el, st, "figure"),
         subtable: (el, st) => walk_subfloat(el, st, "table")},
     caption: {captionof: walk_captionof},
-    listings: {lstlisting: walk_listing}
+    listings: {lstlisting: walk_listing},
+    float: {newfloat: walk_newfloat, floatname: walk_floatname, floatstyle: walk_floatstyle,
+        restylefloat: walk_restylefloat},
+    algpseudocode: map(["algorithmic", walk_algorithmic] ++ alg_label_walkers()),
+    algorithmic: {algorithmic: walk_algorithmic},
+    subfig: {subfloat: walk_subfig},
+    subfigure: {subfigure: walk_subfig},
+    wrapfig: {wrapfigure: (el, st) => walk_float(el, st, "figure"),
+        wraptable: (el, st) => walk_float(el, st, "table")},
+    rotating: {sidewaysfigure: (el, st) => walk_float(el, st, "figure"),
+        sidewaystable: (el, st) => walk_float(el, st, "table")},
+    // settings commands shape every algorithm (render alg2e_settings)
+    algorithm2e: map([for (setting in algorithm2e.SETTINGS,
+        x in [setting, (el, st) => ({*:st, alg2e_settings: st.alg2e_settings ++ [string(name(el))]})]) x])
+}
+
+// subfig's \subfloat and subfigure's \subfigure: a lettered subfloat of the enclosing float
+fn walk_subfig(el, st) => walk_subfloat(el, st, if (st.env_context == "table") "table" else "figure")
+
+// ============================================================
+// Pseudocode: numbered lines carry the labels placed on them
+// ============================================================
+
+fn walk_algorithmic(el, st) {
+    let lines = algorithmic.lines(el)
+    {*:st, labels: st.labels ++ [for (line in lines where line.label != null)
+        {key: line.label, val: {type: "line", number: string(line.number), id: util.slugify(line.label),
+            title: null}}]}
+}
+
+// \algrenewcommand\algorithmicrequire{…} leaves the new label as the macro's
+// argument: name/handler pairs for the label macros
+fn alg_label_walkers() => [for (macro in algorithmic.LABEL_MACROS,
+    x in [macro, (el, st) => if (len(content(el)) == 0) st
+        else {*:st, alg_labels: add_entry(st.alg_labels, slice(macro, 11, len(macro)), el)}]) x]
+
+// ============================================================
+// The float package: \newfloat, \floatname, \floatstyle, \restylefloat
+// ============================================================
+
+fn arg_texts(el) => [for (arg in util.command_args(el)) trim(util.text_of(arg))]
+
+// \newfloat{type}{placement}{ext}[within]: a float kind in the current float style
+fn walk_newfloat(el, st) {
+    let args = [for (text in arg_texts(el) where text != "") text]
+    let within = util.optional_raw(el)
+    if (len(args) == 0) st
+    else {*:st,
+        float_kinds: {*:st.float_kinds, [args[0]]: floats.new_kind(args[0], st.float_style)},
+        counters: {*:st.counters, [args[0]]: 0},
+        counter_within: if (within == null) st.counter_within
+            else add_entry(st.counter_within, args[0], trim(within))}
+}
+
+fn walk_floatname(el, st) {
+    let args = arg_texts(el)
+    if (len(args) < 2 or st.float_kinds[args[0]] == null) st
+    else {*:st, float_kinds: {*:st.float_kinds, [args[0]]: {*:st.float_kinds[args[0]], name: args[1]}}}
+}
+
+fn walk_floatstyle(el, st) {
+    let style = trim(util.text_of(el))
+    if (contains(["plain", "plaintop", "ruled", "boxed"], style) or false) {*:st, float_style: style} else st
+}
+
+// \restylefloat{type} gives an existing kind the current float style
+fn walk_restylefloat(el, st) {
+    let kind = trim(util.text_of(el))
+    if (st.float_kinds[kind] == null) st
+    else {*:st, float_kinds: {*:st.float_kinds, [kind]: {*:st.float_kinds[kind], style: st.float_style}}}
 }
 
 fn walk_element(el, st) {
@@ -398,7 +478,7 @@ fn walk_listing(el, st) {
 // A float environment numbers its kind's counter. Its caption feeds the
 // \listof… list, and its number scopes only its own labels.
 fn walk_float(el, st, kind) {
-    let desc = floats.KINDS[kind]
+    let desc = st.float_kinds[kind]
     let counters = step_counter(st, desc.counter)
     let scoped = scoped_counter({*:st, counters: counters}, desc.counter, counters[desc.counter])
     let label = floats.own_child(el, "label")
@@ -751,7 +831,10 @@ fn get_newthm_child_text(el, idx) {
 fn walk_default(el, tag, st) {
     let tag_str = string(tag)
     let thm_def = util.lookup(st.theorem_defs, tag_str)
+    let float_kind = floats.kind_of(st.float_kinds, tag_str)
     if (amsmath.handles(tag_str, st.packages)) walk_amsmath(el, st)
+    // a package's or \newfloat's float environment
+    else if (float_kind != null) walk_float(el, st, float_kind)
     else if (thm_def != null) { walk_custom_theorem(el, st, thm_def) }
     else { walk_children(el, 0, len(el), st) }
 }

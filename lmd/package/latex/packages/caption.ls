@@ -65,16 +65,19 @@ fn separator(value, sub) {
     }
 }
 
-pub fn render(content, kind, ordinal_text, config, starred, offset) {
+// kinds: the document's float kinds, for the caption name of package and \newfloat floats
+pub fn render(content, kind, ordinal_text, config, starred, offset, kinds = null) {
     let sub = starts_with(kind, "sub")
     let parent = if (kind == "subfigure") "figure" else if (kind == "subtable") "table" else kind
-    let opts = {*:config.global, *:config[parent], *:config[kind]}
+    // package and \newfloat kinds have no kind-specific caption options
+    let opts = {*:config.global, *:(if (config[parent] == null) {} else config[parent]),
+        *:(if (config[kind] == null) {} else config[kind])}
     if (len(invalid_options(opts)) > 0)
         util.unsupported_element("caption", "Unsupported caption options", offset)
     else {
         let label = if (starred or opts.labelformat == "empty") ""
             else if (sub) if (opts.labelformat == "simple") ordinal_text else "(" ++ ordinal_text ++ ")"
-            else floats.KINDS[parent].name ++ " " ++ ordinal_text
+            else floats.kind_name(if (kinds == null) floats.KINDS else kinds, parent) ++ " " ++ ordinal_text
         let align = match opts.justification {
             case "raggedright": "left"
             case "raggedleft": "right"
