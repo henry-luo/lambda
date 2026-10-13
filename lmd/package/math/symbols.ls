@@ -136,6 +136,10 @@ let misc_symbols = {
     flat: "♭", natural: "♮", sharp: "♯",
     clubsuit: "♣", diamondsuit: "♢",
     heartsuit: "♡", spadesuit: "♠",
+    // stix's opposite-fill suits; no bundled face has them, so the glyphs resolve
+    // through platform fallback (Lambda_Pkg_Math §5.1)
+    varclubsuit: "♧", vardiamondsuit: "♦",
+    varheartsuit: "♥", varspadesuit: "♤",
     blacktriangle: "▲", blacksquare: "■", blacklozenge: "⧫", Finv: "Ⅎ",
     gothicCapitalC: "C", gothicCapitalH: "H", scriptCapitalE: "E",
     doubleStruckCapitalQ: "Q", Bbbk: "k",

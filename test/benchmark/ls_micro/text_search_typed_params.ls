@@ -23,10 +23,8 @@ let patterns = [
 
 pn to_codes(text) {
     var codes = []
-    var index = 0
-    while (index < len(text)) {
+    for index of text {
         codes.push(ord(text[index]))
-        index = index + 1
     }
     codes
 }
@@ -108,10 +106,8 @@ pn main() {
     let corpus = build_corpus()
     let corpus_codes = to_codes(corpus)
     var pattern_codes = []
-    var pattern_index = 0
-    while (pattern_index < len(patterns)) {
+    for pattern_index of patterns {
         pattern_codes.push(to_codes(patterns[pattern_index]))
-        pattern_index = pattern_index + 1
     }
     var checksum: int = 0
     let t0 = clock()

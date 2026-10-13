@@ -324,6 +324,7 @@ typedef struct FilterPixelRegion {
     int bottom;
 } FilterPixelRegion;
 
+
 static bool render_filter_pixel_region(ImageSurface* surface, Rect* rect, Bound* clip,
                                        FilterPixelRegion* region) {
     if (!surface || !rect || !clip || !region) return false;

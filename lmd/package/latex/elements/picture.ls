@@ -1,15 +1,19 @@
 // latex/elements/picture.ls — Picture environment → SVG rendering
 // Converts \begin{picture}(w,h) ... \end{picture} to inline SVG
 //
-// AST structure: <picture <paragraph "(w,h)" ...commands... >>
-// Commands are flat siblings: <put> "(x,y)" <curly_group body>
-// LaTeX picture Y-axis is bottom-up; SVG is top-down — we flip Y coords.
+// AST structure (direct parser): <picture <paragraph "(w,h)(x,y)" ...commands...>>.
+// The picture's own size stays in the body text; every picture command keeps its
+// arguments on itself, with argument_groups recording each group's raw text
+// (S2.6.3–S2.6.5): <put> carries "(x,y)" as a parenthesized group and its body as
+// children. LaTeX picture Y-axis is bottom-up; SVG is top-down — we flip Y coords.
 //
 // State is passed as 3 individual floats: sw (stroke-width), sc (scale), ht (height)
 // to avoid map type inference issues in the transpiler.
 //
 // Coordinates are returned as ["x_str", "y_str"] string arrays to avoid
 // the transpiler inferring [float, float] as a map type.
+
+import util: lambda.latex.util
 
 // ============================================================
 // Coordinate parsing — returns ["x", "y"] string arrays
@@ -44,10 +48,6 @@ fn pic_dim(wh, idx, def) {
 fn safe_int(v) {
     if (v == null) { 0 }
     else { v }
-}
-fn next_curly_or(para, idx, n, def) {
-    if (idx < n) { find_next_curly(para, idx, n) }
-    else { def }
 }
 fn strip_unit(t) {
     if (ends_with(t, "mm")) { slice(t, 0, len(t) - 2) }
@@ -191,45 +191,36 @@ fn process_commands(para, i, n, sw, sc, ht, ox, oy, acc) {
         if (child is element) {
             let tag = string(name(child))
             if (tag == "put") {
-                let coord_text = get_next_text(para, i + 1, n)
-                let coord = parse_coord(coord_text)
-                let body_idx = find_next_curly(para, i + 1, n)
-                if (coord != null and body_idx < n) {
-                    let body = para[body_idx]
-                    let px = coord_x(coord) - ox
-                    let py = coord_y(coord) - oy
-                    let svg_els = render_put_body(body, 0, len(body), px, py, sw, sc, ht, [])
-                    process_commands(para, body_idx + 1, n, sw, sc, ht, ox, oy, acc ++ svg_els)
+                let coord = paren_coord(child, 0)
+                if (coord != null) {
+                    let body = command_body(child)
+                    let svg_els = render_put_body(body, 0, len(body), coord_x(coord) - ox,
+                        coord_y(coord) - oy, sw, sc, ht, [])
+                    process_commands(para, i + 1, n, sw, sc, ht, ox, oy, acc ++ svg_els)
                 } else { process_commands(para, i + 1, n, sw, sc, ht, ox, oy, acc) }
             }
             else if (tag == "multiput") {
-                let coord_text = get_next_text(para, i + 1, n)
-                let coords = parse_two_coords(coord_text)
-                let first_curly = find_next_curly(para, i + 1, n)
-                let second_curly = next_curly_or(para, first_curly + 1, n, n)
-                if (len(coords) >= 2 and second_curly < n) {
-                    let sx0 = coord_x(coords[0]) - ox
-                    let sy0 = coord_y(coords[0]) - oy
-                    let dx = coord_x(coords[1])
-                    let dy = coord_y(coords[1])
-                    let count_text = trim(text_of_curly(para[first_curly]))
-                    let count_val = int(count_text)
-                    let count = safe_int(count_val)
-                    let body = para[second_curly]
-                    let svg_els = build_multiput(sx0, sy0, dx, dy, count, body, sw, sc, ht, 0, [])
-                    process_commands(para, second_curly + 1, n, sw, sc, ht, ox, oy, acc ++ svg_els)
+                let start = paren_coord(child, 0)
+                let step = paren_coord(child, 1)
+                let count = safe_int(int(required_text(child, 0)) ^ { null })
+                if (start != null and step != null) {
+                    let body = parsed_body(required_text(child, 1))
+                    let svg_els = build_multiput(coord_x(start) - ox, coord_y(start) - oy,
+                        coord_x(step), coord_y(step), count, body, sw, sc, ht, 0, [])
+                    process_commands(para, i + 1, n, sw, sc, ht, ox, oy, acc ++ svg_els)
                 } else { process_commands(para, i + 1, n, sw, sc, ht, ox, oy, acc) }
             }
             else if (tag == "qbezier") {
-                let coord_text = get_next_text(para, i + 1, n)
-                let coords = parse_three_coords(coord_text)
-                if (len(coords) >= 3) {
+                let p0 = paren_coord(child, 0)
+                let p1 = paren_coord(child, 1)
+                let p2 = paren_coord(child, 2)
+                if (p0 != null and p1 != null and p2 != null) {
                     let svg_el = make_qbezier(
-                        coord_x(coords[0]) - ox, coord_y(coords[0]) - oy,
-                        coord_x(coords[1]) - ox, coord_y(coords[1]) - oy,
-                        coord_x(coords[2]) - ox, coord_y(coords[2]) - oy,
+                        coord_x(p0) - ox, coord_y(p0) - oy,
+                        coord_x(p1) - ox, coord_y(p1) - oy,
+                        coord_x(p2) - ox, coord_y(p2) - oy,
                         sw, sc, ht)
-                    process_commands(para, i + 2, n, sw, sc, ht, ox, oy, acc ++ [svg_el])
+                    process_commands(para, i + 1, n, sw, sc, ht, ox, oy, acc ++ [svg_el])
                 } else { process_commands(para, i + 1, n, sw, sc, ht, ox, oy, acc) }
             }
             else if (tag == "thicklines") {
@@ -239,7 +230,7 @@ fn process_commands(para, i, n, sw, sc, ht, ox, oy, acc) {
                 process_commands(para, i + 1, n, 0.4, sc, ht, ox, oy, acc)
             }
             else if (tag == "linethickness") {
-                let thick = parse_length(trim(text_of_curly(child)))
+                let thick = parse_length(required_text(child, 0))
                 process_commands(para, i + 1, n, thick, sc, ht, ox, oy, acc)
             }
             else { process_commands(para, i + 1, n, sw, sc, ht, ox, oy, acc) }
@@ -248,59 +239,45 @@ fn process_commands(para, i, n, sw, sc, ht, ox, oy, acc) {
 }
 
 // ============================================================
-// Helpers for text/curly_group sibling traversal
+// Command arguments — the direct parser's argument_groups
 // ============================================================
 
-fn get_next_text(para, i, n) {
-    if (i >= n) { "" }
-    else {
-        let child = para[i]
-        if (child is string) {
-            let t = trim(child)
-            if (contains(t, "(")) { t }
-            else { get_next_text(para, i + 1, n) }
-        } else { "" }
-    }
+fn group_texts(el, kind) {
+    let groups = el.argument_groups
+    if (groups == null) [] else [for (group in groups where group.kind == kind) group.raw]
 }
 
-fn find_next_curly(para, i, n) {
-    if (i >= n) { n }
-    else {
-        let child = para[i]
-        if (child is element and string(name(child)) == "curly_group") { i }
-        else { find_next_curly(para, i + 1, n) }
-    }
+// the index-th "(x,y)" argument of a picture command
+fn paren_coord(el, index) {
+    let raws = group_texts(el, "parenthesized")
+    if (index < len(raws)) parse_coord("(" ++ raws[index] ++ ")") else null
 }
 
-fn text_of_curly(el) {
-    if (el is string) { el }
-    else if (el is element) { join_text(el, 0, len(el), "") }
-    else { "" }
+fn required_text(el, index) {
+    let raws = group_texts(el, "required")
+    if (index < len(raws)) trim(raws[index]) else ""
 }
 
-fn join_text(el, i, n, acc) {
-    if (i >= n) { acc }
-    else {
-        let child = el[i]
-        if (child is string) { join_text(el, i + 1, n, acc ++ child) }
-        else if (child is element) { join_text(el, i + 1, n, acc ++ text_of_curly(child)) }
-        else { join_text(el, i + 1, n, acc) }
-    }
+fn optional_text(el, index) {
+    let raws = group_texts(el, "optional")
+    if (index < len(raws)) trim(raws[index]) else null
 }
 
-fn find_brack_text(body, i, n) {
-    if (i >= n) { null }
+// \put's body: its parsed children after the coordinate group
+fn command_body(el) {
+    [for (item in util.command_args(el) where not (item is element and
+        (string(name(item)) == "paren_group" or string(name(item)) == "brack_group"))) item]
+}
+
+// \multiput's body sits after its count among the children, so parse its raw text
+fn parsed_body(raw) {
+    if (raw == "") []
     else {
-        let child = body[i]
-        if (child is string) {
-            let t = trim(child)
-            let bp = index_of(t, "[")
-            if (bp != null) {
-                let ep = index_of(t, "]")
-                if (ep != null and ep > bp) { trim(slice(t, bp + 1, ep)) }
-                else { null }
-            } else { null }
-        } else { null }
+        let ast = parse(raw, "latex") ^ { null }
+        if (ast == null) []
+        else [for (top in util.command_args(ast), item in
+            (if (top is element and string(name(top)) == "paragraph") util.command_args(top)
+             else [top])) item]
     }
 }
 
@@ -315,48 +292,31 @@ fn render_put_body(body, i, n, px, py, sw, sc, ht, acc) {
         let child = body[i]
         if (child is element) {
             let tag = string(name(child))
-            if (tag == "line") {
-                let dir_text = get_next_text(body, i + 1, n)
-                let dir = parse_coord(dir_text)
-                let len_idx = find_next_curly(body, i + 1, n)
-                if (dir != null and len_idx < n) {
-                    let length = parse_num(trim(text_of_curly(body[len_idx])))
-                    let svg_el = make_line(px, py, coord_x(dir), coord_y(dir), length, sw, sc, ht)
-                    render_put_body(body, len_idx + 1, n, px, py, sw, sc, ht, acc ++ [svg_el])
-                } else { render_put_body(body, i + 1, n, px, py, sw, sc, ht, acc) }
-            }
-            else if (tag == "vector") {
-                let dir_text = get_next_text(body, i + 1, n)
-                let dir = parse_coord(dir_text)
-                let len_idx = find_next_curly(body, i + 1, n)
-                if (dir != null and len_idx < n) {
-                    let length = parse_num(trim(text_of_curly(body[len_idx])))
-                    let svg_els = make_vector(px, py, coord_x(dir), coord_y(dir), length, sw, sc, ht)
-                    render_put_body(body, len_idx + 1, n, px, py, sw, sc, ht, acc ++ svg_els)
+            if (tag == "line" or tag == "vector") {
+                let dir = paren_coord(child, 0)
+                if (dir != null) {
+                    let length = parse_num(required_text(child, 0))
+                    let svg_els = if (tag == "line")
+                        [make_line(px, py, coord_x(dir), coord_y(dir), length, sw, sc, ht)]
+                        else make_vector(px, py, coord_x(dir), coord_y(dir), length, sw, sc, ht)
+                    render_put_body(body, i + 1, n, px, py, sw, sc, ht, acc ++ svg_els)
                 } else { render_put_body(body, i + 1, n, px, py, sw, sc, ht, acc) }
             }
             else if (tag == "circle") {
-                let diam = parse_num(trim(text_of_curly(child)))
-                let svg_el = make_circle(px, py, diam, false, sw, sc, ht)
-                render_put_body(body, i + 1, n, px, py, sw, sc, ht, acc ++ [svg_el])
-            }
-            else if (tag == "circle*") {
-                let diam = parse_num(trim(text_of_curly(child)))
-                let svg_el = make_circle(px, py, diam, true, sw, sc, ht)
+                let diam = parse_num(required_text(child, 0))
+                let svg_el = make_circle(px, py, diam, child.starred == true, sw, sc, ht)
                 render_put_body(body, i + 1, n, px, py, sw, sc, ht, acc ++ [svg_el])
             }
             else if (tag == "oval") {
-                let size_text = get_next_text(body, i + 1, n)
-                let size = parse_coord(size_text)
-                let part = find_brack_text(body, i + 1, n)
+                let size = paren_coord(child, 0)
                 if (size != null) {
-                    let svg_el = make_oval(px, py, coord_x(size), coord_y(size), part, sw, sc, ht)
-                    render_put_body(body, i + 2, n, px, py, sw, sc, ht, acc ++ [svg_el])
+                    let svg_el = make_oval(px, py, coord_x(size), coord_y(size),
+                        optional_text(child, 0), sw, sc, ht)
+                    render_put_body(body, i + 1, n, px, py, sw, sc, ht, acc ++ [svg_el])
                 } else { render_put_body(body, i + 1, n, px, py, sw, sc, ht, acc) }
             }
             else if (tag == "inline_math" or tag == "display_math") {
-                let math_text = if (child.source is string) child.source
-                                else text_of_curly(child)
+                let math_text = if (child.source is string) child.source else util.text_of(child)
                 let svg_el = make_text(px, py, math_text, sc, ht)
                 render_put_body(body, i + 1, n, px, py, sw, sc, ht, acc ++ [svg_el])
             }
@@ -364,7 +324,7 @@ fn render_put_body(body, i, n, px, py, sw, sc, ht, acc) {
         }
         else if (child is string) {
             let t = trim(child)
-            if (t != "" and not contains(t, "(") and not contains(t, "[")) {
+            if (t != "") {
                 let svg_el = make_text(px, py, t, sc, ht)
                 render_put_body(body, i + 1, n, px, py, sw, sc, ht, acc ++ [svg_el])
             } else { render_put_body(body, i + 1, n, px, py, sw, sc, ht, acc) }

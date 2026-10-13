@@ -7952,7 +7952,7 @@ static bool post_html_handler_detached_only_commit(DomDocument* doc, int mutatio
     return true;
 }
 
-static void post_html_handler_rebuild(EventContext* evcon,
+static void post_html_handler_rebuild_impl(EventContext* evcon,
                                        uint64_t t_start, uint64_t t_handler) {
     DomDocument* doc = event_context_target_document(evcon);
     if (!doc) return;
@@ -8066,6 +8066,16 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     // Reset mutation count for next event
     dom_js_mutation_reset_records(doc);
+}
+
+static void post_html_handler_rebuild(EventContext* evcon,
+                                       uint64_t t_start, uint64_t t_handler) {
+    post_html_handler_rebuild_impl(evcon, t_start, t_handler);
+    DocState* state = event_context_target_state(evcon);
+    View* focused = focus_get(state);
+    // committed style changes can remove the focus area without detaching its DOM anchor.
+    if (focused && !is_view_programmatically_focusable(focused))
+        update_focus_state(evcon, nullptr, false);
 }
 
 void radiant_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc) {
@@ -11437,7 +11447,7 @@ static bool dropdown_click_is_outside(EventContext* evcon, float mouse_x, float 
  * Check if an element is focusable
  */
 bool is_view_focusable(View* view) {
-    if (!view || dom_node_is_inert(view)) return false;
+    if (!view || dom_node_is_inert(view) || view_focus_is_hidden(view)) return false;
     if (view->is_element() &&
         view_content_visibility_hides(view->as_element(), CONTENT_VISIBILITY_USER_AGENT)) return false;
 
@@ -11504,7 +11514,7 @@ bool is_view_focusable(View* view) {
 }
 
 bool is_view_programmatically_focusable(View* view) {
-    if (view && dom_node_is_inert(view)) return false;
+    if (view && (dom_node_is_inert(view) || view_focus_is_hidden(view))) return false;
     if (view && view->is_element() &&
         view_content_visibility_hides(view->as_element(), CONTENT_VISIBILITY_USER_AGENT)) return false;
     if (is_view_focusable(view)) return true;
@@ -13001,31 +13011,7 @@ void update_caret_visual_position(UiContext* uicon, DocState* state) {
 // This is not the replace-and-restore that `runtime-state.h` forbids: there is
 // no restore, the new owner simply holds the thread until the next boundary.
 extern "C" bool radiant_eval_context_switch(EvalContext* target) {
-    if (!target) return false;
-    if (context == target) return true;
-    if (context) {
-        EvalContext* prev = context;
-        if (prev->execution_depth != 0) {
-            // D5.4.1: releasing a live guest owner invalidates its open frames.
-            log_error("eval-switch: outgoing context is executing");
-            return false;
-        }
-        // EO2: the JS cache is released with the binding it derives from
-        if (js_runtime_state_thread_matches(prev)) js_runtime_state_shutdown(prev);
-        if (!eval_context_shutdown(prev)) {
-            log_error("eval-switch: outgoing context refused release");
-            return false;
-        }
-    }
-    if (!eval_context_init(target)) {
-        log_error("eval-switch: incoming context refused binding");
-        return false;
-    }
-    // A document preloaded on a worker carries that worker's native stack
-    // limit until its evaluator is bound to this thread (D5.4.1).
-    lambda_stack_init();
-    target->stack_limit = lambda_stack_recoverable_limit();
-    return true;
+    return eval_context_transfer_thread(target);
 }
 
 struct EventDocumentScope {

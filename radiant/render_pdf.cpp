@@ -201,11 +201,11 @@ static void pdf_push_rect_clip(PdfPaintLoweringState* state, const RdtPath* path
     state->rect_clip = lam::own(clip);
 }
 
-static bool pdf_intersect_rect_clips(const PdfPaintLoweringState* state, const PaintFillRect* rect,
+static bool pdf_intersect_rect_clips(const PdfPaintLoweringState* state, const Rect& rect,
         const RdtMatrix* transform, Rect* result) {
     if (!state->rect_clip || state->untracked_rect_clip_depth > 0 ||
             (transform && !rdt_matrix_is_scale_translation(transform))) return false;
-    Bound bound = {rect->x, rect->y, rect->x + rect->w, rect->y + rect->h};
+    Bound bound = {rect.x, rect.y, rect.x + rect.width, rect.y + rect.height};
     if (transform && !rdt_matrix_project_rect_bounds(transform, bound.left, bound.top, bound.right, bound.bottom,
             &bound.left, &bound.top, &bound.right, &bound.bottom)) return false;
     for (const PdfPaintRectClip* clip = state->rect_clip; clip; clip = clip->previous) {
@@ -640,13 +640,13 @@ static bool pdf_draw_abgr_image_impl(PdfRenderContext* ctx,
     float e = x0;
     float f = pdf_coord_y(ctx, y0);
 
+    // the image owns its destination transform; another box clip changes overlapping edge coverage.
     if (opaque) {
         return HPDF_Page_DrawABGRImage(ctx->current_page, pixels, src_w, src_h,
-                                       stride_pixels, a, b, c, d, e, f) == HPDF_OK;
+            stride_pixels, a, b, c, d, e, f) == HPDF_OK;
     }
-    return HPDF_Page_DrawABGRImageWithAlpha(ctx->current_page, pixels,
-                                            src_w, src_h, stride_pixels,
-                                            a, b, c, d, e, f) == HPDF_OK;
+    return HPDF_Page_DrawABGRImageWithAlpha(ctx->current_page, pixels, src_w, src_h,
+        stride_pixels, a, b, c, d, e, f) == HPDF_OK;
 }
 
 static bool pdf_draw_abgr_image(PdfRenderContext* ctx, const uint32_t* pixels,
@@ -747,9 +747,7 @@ static bool pdf_push_clip_path(PdfRenderContext* ctx, RdtPath* path,
 static void pdf_render_glyph_run(PdfRenderContext* ctx, const PaintGlyphRun* run,
                                  const RdtMatrix* stack_transform) {
     if (!ctx || !run) return;
-    RdtPath* path = run->count > 0 && run->glyph_ids
-        ? render_path_create_glyph_run(run)
-        : render_path_create_text_run(run, ctx->ui_context ? ctx->ui_context->font_ctx.get() : nullptr);
+    RdtPath* path = render_path_create_paint_glyph_run(run, ctx->ui_context ? ctx->ui_context->font_ctx.get() : nullptr);
     RdtMatrix composed;
     const RdtMatrix* transform = pdf_compose_transform(stack_transform,
         pdf_optional_transform(run->has_transform, &run->transform), &composed);
@@ -796,6 +794,24 @@ static bool pdf_raster_fallback_gradient(PdfRenderContext* ctx,
     float height = 0.0f;
     if (!pdf_gradient_path_bounds(path, &left, &top, &width, &height)) return false;
 
+    Rect intersection;
+    if (pdf_intersect_rect_clips(&ctx->paint_state, {left, top, width, height}, transform, &intersection)) {
+        if (intersection.width <= 0.0f || intersection.height <= 0.0f) return true;
+        Bound visible = {intersection.x, intersection.y,
+            intersection.x + intersection.width, intersection.y + intersection.height};
+        RdtMatrix inverse;
+        if (transform && (!rdt_matrix_inverse(transform, &inverse) ||
+                !rdt_matrix_project_rect_bounds(&inverse, visible.left, visible.top,
+                    visible.right, visible.bottom, &visible.left, &visible.top,
+                    &visible.right, &visible.bottom))) return false;
+        // use the visible owner coordinates so clipping cannot change gradient sampling phase.
+        float right = left + width, bottom = top + height;
+        left = fmaxf(left, visible.left); top = fmaxf(top, visible.top);
+        width = fminf(right, visible.right) - left;
+        height = fminf(bottom, visible.bottom) - top;
+        if (width <= 0.0f || height <= 0.0f) return true;
+    }
+
     float density = ctx->ui_context ? ui_context_raster_scale(ctx->ui_context) : 1.0f;
     PaintList paint;
     RdtMatrix scale = rdt_matrix_scale(density, density);
@@ -823,7 +839,7 @@ static bool pdf_raster_fallback_gradient(PdfRenderContext* ctx,
     dl_destroy(&dl);
     arenas.destroy();
     if (!surface) return false;
-    // the snapshot already clips the path; clipping again adds a second antialiased edge.
+    // the snapshot already clips the path; another mask changes edge coverage.
     bool ok = pdf_draw_abgr_image_preserve_alpha(ctx, (const uint32_t*)surface->pixels,
         surface->width, surface->height, surface->pitch / 4, left, top,
         (float)surface->width / density, (float)surface->height / density, 255, transform);
@@ -951,6 +967,11 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
         if (!paint_op_has_flags(cmd->op, PAINT_OP_FLAG_EFFECT_STACK)) return false;
         if (paint_op_has_flags(cmd->op, PAINT_OP_FLAG_STACK_PUSH)) {
             PaintEffectGroup* p = &cmd->effect_group;
+            if (state->passthrough_effect_depth > 0) {
+                state->passthrough_effect_depth++;
+                state->emitted_count++;
+                return true;
+            }
             if (!pdf_effect_group_is_opacity_only(caps, p)) {
                 state->passthrough_effect_depth++;
                 if (!state->logged_unsupported_effect) {
@@ -966,24 +987,32 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
                 log_error("[PDF_PAINT_IR] opacity effect stack overflow; rendering group without opacity");
                 return true;
             }
+            // PDF alpha belongs to the isolated group invocation, not each overlapping primitive.
+            Bound bounds = p->bounds;
+            if (state->active_transform_depth > 0 &&
+                    !rdt_matrix_project_rect_bounds(&state->current_transform,
+                        bounds.left, bounds.top, bounds.right, bounds.bottom,
+                        &bounds.left, &bounds.top, &bounds.right, &bounds.bottom))
+                bounds = {};
+            if (!(bounds.right > bounds.left && bounds.bottom > bounds.top))
+                bounds = {0.0f, 0.0f, ctx->page_width, ctx->page_height};
+            // a Form BBox clips its contents; enclose fractional ink edges instead of clipping AA twice.
+            float density = ui_context_raster_scale(ctx->ui_context);
+            bounds = {floorf(bounds.left * density) / density,
+                floorf(bounds.top * density) / density,
+                ceilf(bounds.right * density) / density,
+                ceilf(bounds.bottom * density) / density};
+            if (HPDF_Page_BeginTransparencyGroup(ctx->current_page, p->opacity,
+                    bounds.left, ctx->page_height - bounds.bottom,
+                    bounds.right, ctx->page_height - bounds.top) != HPDF_OK) {
+                state->passthrough_effect_depth++;
+                state->fallback_count++;
+                log_error("[PDF_PAINT_IR] failed to begin isolated opacity group");
+                return true;
+            }
+            HPDF_Page_TrackTransparencyGroupInk(ctx->current_page, density);
             state->opacity_stack[state->active_effect_depth++] = state->current_opacity;
-            state->current_opacity *= p->opacity;
-            state->current_opacity = clamp_unit(state->current_opacity);
-            if (HPDF_Page_GSave(ctx->current_page) != HPDF_OK) {
-                log_error("[PDF_PAINT_IR] failed to save PDF graphics state for opacity group");
-                return true;
-            }
-            HPDF_ExtGState ext_gstate = HPDF_CreateExtGState(ctx->pdf_doc);
-            if (!ext_gstate) {
-                log_error("[PDF_PAINT_IR] failed to create PDF opacity ExtGState");
-                return true;
-            }
-            HPDF_ExtGState_SetAlphaFill(ext_gstate, state->current_opacity);
-            HPDF_ExtGState_SetAlphaStroke(ext_gstate, state->current_opacity);
-            if (HPDF_Page_SetExtGState(ctx->current_page, ext_gstate) != HPDF_OK) {
-                log_error("[PDF_PAINT_IR] failed to apply PDF opacity ExtGState");
-                return true;
-            }
+            state->current_opacity = 1.0f;
             state->emitted_count++;
             return true;
         }
@@ -998,7 +1027,10 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
                 return true;
             }
             state->current_opacity = state->opacity_stack[--state->active_effect_depth];
-            HPDF_Page_GRestore(ctx->current_page);
+            if (HPDF_Page_EndTransparencyGroup(ctx->current_page) != HPDF_OK) {
+                state->unsupported_count++;
+                log_error("[PDF_PAINT_IR] failed to close isolated opacity group");
+            }
             state->emitted_count++;
             return true;
         }
@@ -1069,7 +1101,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
             if (!caps || !caps->rects) break;
             PaintFillRect* p = &cmd->fill_rect;
             Rect intersection;
-            if (pdf_intersect_rect_clips(state, p, stack_transform, &intersection)) {
+            if (pdf_intersect_rect_clips(state, {p->x, p->y, p->w, p->h}, stack_transform, &intersection)) {
                 if (intersection.width > 0.0f && intersection.height > 0.0f)
                     pdf_render_rect(ctx, intersection.x, intersection.y, intersection.width, intersection.height, p->color, true);
                 state->emitted_count++;
@@ -1295,9 +1327,7 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
         adjusted_space_width = space_width + (extra_space / space_count);
     }
 
-    float baseline_offset = ctx->font.style && ctx->font.style->ascender > 0.0f
-        ? ctx->font.style->ascender : font_size * 0.8f;
-    float baseline_y = y + baseline_offset;
+    float baseline_y = render_text_baseline_y(&ctx->font, y);
     PaintGlyphRun run = {};
     run.font = lam::up(&ctx->font);
     run.color = ctx->color;
@@ -1310,7 +1340,39 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     run.x = base_x;
     run.baseline_y = baseline_y;
     run.word_spacing = adjusted_space_width - space_width;
+    DomElement* parent = text->parent ? text->parent->as_element() : nullptr;
+    if (parent && render_paint_text_background(pdf_active_paint_list(ctx), ctx->ui_context,
+            parent, &run, {ctx->block.x, ctx->block.y, parent->width, parent->height})) {
+        pdf_lower_paint_list(ctx);
+    }
+    RenderTextDecorationSource decoration = {str, text_rect, ctx->block.x, ctx->block.y};
+    if (parent && parent->font && parent->fontp()->text_shadow) {
+        if (!render_paint_text_shadows(pdf_active_paint_list(ctx), ctx->ui_context,
+                &run, parent->fontp()->text_shadow, &decoration)) {
+            ctx->paint_state.unsupported_count++;
+            log_error("[PDF_TEXT_SHADOW] cannot record complete shadow geometry");
+        }
+        pdf_lower_paint_list(ctx);
+    }
+    if (!render_paint_text_decorations(pdf_active_paint_list(ctx), &ctx->font, str, text_rect,
+        ctx->block.x, ctx->block.y, ctx->color, true)) {
+        ctx->paint_state.unsupported_count++;
+        log_error("[PDF_TEXT_DECORATION] cannot record complete decoration geometry");
+    }
+    pdf_lower_paint_list(ctx);
     paint_glyph_run(pdf_active_paint_list(ctx), &run);
+    pdf_lower_paint_list(ctx);
+    if (!render_paint_text_emphasis(pdf_active_paint_list(ctx),
+            ctx->ui_context ? ctx->ui_context->font_ctx.get() : nullptr, &run)) {
+        ctx->paint_state.unsupported_count++;
+        log_error("[PDF_TEXT_EMPHASIS] cannot record selected mark geometry");
+    }
+    pdf_lower_paint_list(ctx);
+    if (!render_paint_text_decorations(pdf_active_paint_list(ctx), &ctx->font, str, text_rect,
+        ctx->block.x, ctx->block.y, ctx->color, false)) {
+        ctx->paint_state.unsupported_count++;
+        log_error("[PDF_TEXT_DECORATION] cannot record complete decoration geometry");
+    }
     pdf_lower_paint_list(ctx);
 
     pdf_record_link_rect(ctx, pdf_nearest_link(text), base_x, y,
@@ -1398,7 +1460,9 @@ static void pdf_cb_visit_element(RenderContext* vctx, ViewElement* view,
     DomElement* element = lam::dom_require_element(lam::view_dom_node(view));
     if (!ctx || !element) return;
     if (element->id) pdf_record_destination(ctx, element->id, abs_x, abs_y);
-    if (view->is_block() && element->tag_id == MARKUP_NAME_A) {
+    // semantic visitation includes hidden boxes so visible descendants keep their destinations.
+    if (view->is_block() && element->tag_id == MARKUP_NAME_A &&
+        !view_visibility_is_hidden(view)) {
         pdf_record_link_rect(ctx, element->get_attribute("href"), abs_x, abs_y,
             view->width, view->height);
     }

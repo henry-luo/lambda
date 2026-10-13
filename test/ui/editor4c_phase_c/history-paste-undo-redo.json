@@ -1,6 +1,6 @@
 {
   "name": "editor4c-phase-c2: paste participates in undo and redo history",
-  "_note": "Phase C C2 - history nuance. A multi-step paste should push one undoable history entry; toolbar undo removes it and redo restores it.",
+  "_note": "Phase C C2 - history nuance. A multi-step paste should push one undoable history entry; toolbar undo removes it and redo restores it. Its paste prefix is also the C1 paste block matrix smoke (both paragraphs' text reaches the editor through ClipboardEvent data).",
   "html": "test/html/editor-dom.html",
   "viewport": {"width": 900, "height": 700},
   "events": [

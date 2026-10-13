@@ -135,14 +135,17 @@ static void paint_cmd_free_owned_payload(PaintCmd* cmd) {
     }
 }
 
-void PaintList::clear() {
-    for (size_t i = 0; i < size(); i++) {
-        if (paint_op_has_flags(data()[i].op, PAINT_OP_FLAG_OWNED_PAYLOAD)) {
+bool PaintList::rewind(size_t count) {
+    if (count > size()) return false;
+    // a failed compound recording releases every payload allocated after its checkpoint.
+    for (size_t i = count; i < size(); i++) {
+        if (paint_op_has_flags(data()[i].op, PAINT_OP_FLAG_OWNED_PAYLOAD))
             paint_cmd_free_owned_payload(&data()[i]);
-        }
     }
-    lam::ArrayList<PaintCmd>::clear();
+    return remove_range(count, size() - count);
 }
+
+void PaintList::clear() { rewind(0); }
 
 void PaintList::destroy() {
     clear();
@@ -1096,6 +1099,8 @@ void paint_end_semantic_group(PaintList* pl) {
 
 typedef struct PaintIrRasterEffectFrame {
     PaintEffectGroup group;
+    int recording_start;
+    int source_start;
 } PaintIrRasterEffectFrame;
 
 #define PAINT_IR_RASTER_EFFECT_STACK_MAX 64
@@ -1109,27 +1114,11 @@ static const Bound* paint_optional_clip(bool has_clip, const Bound* clip) {
     return has_clip ? clip : nullptr;
 }
 
-static bool paint_ir_effect_bounds_to_region(const Bound* bounds,
-                                             int* x0, int* y0,
-                                             int* w, int* h) {
-    if (!bounds || !x0 || !y0 || !w || !h) return false;
-    float left = floorf(bounds->left);
-    float top = floorf(bounds->top);
-    float right = ceilf(bounds->right);
-    float bottom = ceilf(bounds->bottom);
-    if (right <= left || bottom <= top) return false;
-    *x0 = (int)left; // INT_CAST_OK: effect bounds lower to integer display-list pixel regions.
-    *y0 = (int)top; // INT_CAST_OK: effect bounds lower to integer display-list pixel regions.
-    *w = (int)(right - left); // INT_CAST_OK: effect bounds lower to integer display-list pixel regions.
-    *h = (int)(bottom - top); // INT_CAST_OK: effect bounds lower to integer display-list pixel regions.
-    return *w > 0 && *h > 0;
-}
-
 static void paint_ir_lower_raster_effect_begin(const PaintEffectGroup* group,
                                                DisplayList* dl) {
     if (!group || !dl) return;
-    int x0 = 0, y0 = 0, w = 0, h = 0;
-    if (!paint_ir_effect_bounds_to_region(&group->bounds, &x0, &y0, &w, &h)) {
+    IRect region = {};
+    if (!dl_effect_bounds_to_region(&group->bounds, &region)) {
         return;
     }
     if (group->backdrop_filter) {
@@ -1144,16 +1133,16 @@ static void paint_ir_lower_raster_effect_begin(const PaintEffectGroup* group,
     }
     if (group->isolation && !group->blend_mode && group->opacity >= 0.9995f && !group->backdrop && !group->mask.gradient) {
         // a pure isolated group also clears the parent backdrop before its children paint.
-        dl_save_backdrop(dl, x0, y0, w, h);
+        dl_save_backdrop(dl, region.x, region.y, region.w, region.h);
     }
     if (group->blend_mode) {
-        dl_save_backdrop(dl, x0, y0, w, h);
+        dl_save_backdrop(dl, region.x, region.y, region.w, region.h);
     }
     if (group->opacity < 0.9995f || group->mask.gradient) {
-        dl_save_backdrop(dl, x0, y0, w, h);
+        dl_save_backdrop(dl, region.x, region.y, region.w, region.h);
     }
     if (group->backdrop) {
-        dl_save_backdrop(dl, x0, y0, w, h);
+        dl_save_backdrop(dl, region.x, region.y, region.w, region.h);
     }
 }
 
@@ -1172,22 +1161,22 @@ static void paint_ir_lower_raster_effect_finish(const PaintEffectGroup* group,
                         paint_optional_clip(group->has_clip, &clip));
     }
 
-    int x0 = 0, y0 = 0, w = 0, h = 0;
-    if (!paint_ir_effect_bounds_to_region(&group->bounds, &x0, &y0, &w, &h)) {
+    IRect region = {};
+    if (!dl_effect_bounds_to_region(&group->bounds, &region)) {
         return;
     }
     if (group->backdrop) {
         // vector replay stores premultiplied foreground pixels in its isolated region.
-        dl_composite_opacity(dl, x0, y0, w, h, 1.0f, true);
+        dl_composite_opacity(dl, region.x, region.y, region.w, region.h, 1.0f, true);
     }
     if (group->opacity < 0.9995f || group->mask.gradient) {
-        dl_composite_opacity(dl, x0, y0, w, h, group->opacity, true, group->mask.gradient ? &group->mask : nullptr);
+        dl_composite_opacity(dl, region.x, region.y, region.w, region.h, group->opacity, true, group->mask.gradient ? &group->mask : nullptr);
     }
     if (group->blend_mode) {
-        dl_apply_blend_mode(dl, x0, y0, w, h, group->blend_mode);
+        dl_apply_blend_mode(dl, region.x, region.y, region.w, region.h, group->blend_mode);
     }
     if (group->isolation && !group->blend_mode && group->opacity >= 0.9995f && !group->backdrop && !group->mask.gradient) {
-        dl_composite_opacity(dl, x0, y0, w, h, 1.0f, true);
+        dl_composite_opacity(dl, region.x, region.y, region.w, region.h, 1.0f, true);
     }
 }
 
@@ -1199,8 +1188,21 @@ static bool paint_ir_lower_raster_effect_stack_command(const PaintCmd* cmd, Disp
             log_error("[PAINT_IR_EFFECT] raster effect stack overflow at command %d", command_index);
             return true;
         }
-        effect_stack[(*effect_depth)++].group = *p;
-        paint_ir_lower_raster_effect_begin(p, dl);
+        PaintEffectGroup group = *p;
+        if (p->has_transform) {
+            // uniform export density converts CSS filter lengths once, alongside its region.
+            float scale = hypotf(p->transform.e11, p->transform.e21);
+            group.filter = lam::up(dl_capture_filter_lengths(dl, p->filter, scale));
+            group.backdrop_filter = lam::up(dl_capture_filter_lengths(dl, p->backdrop_filter, scale));
+            if ((p->filter && !group.filter) || (p->backdrop_filter && !group.backdrop_filter)) {
+                log_error("[FILTER_DENSITY] export filter length capture failed"); return true;
+            }
+        }
+        PaintIrRasterEffectFrame* frame = &effect_stack[(*effect_depth)++];
+        frame->group = group;
+        frame->recording_start = dl->item_count();
+        paint_ir_lower_raster_effect_begin(&group, dl);
+        frame->source_start = dl->item_count();
         return true;
     }
     if (*effect_depth <= 0) {
@@ -1208,6 +1210,13 @@ static bool paint_ir_lower_raster_effect_stack_command(const PaintCmd* cmd, Disp
         return true;
     }
     PaintIrRasterEffectFrame* frame = &effect_stack[--(*effect_depth)];
+    if (!frame->group.has_clip) {
+        // the filter consumes source ink, including bearings and strokes outside the border box.
+        float padding = render_geometry_filter_effect_expand(frame->group.filter, 1.0f);
+        frame->group.bounds = dl_effect_capture_bounds(dl, frame->source_start, dl->item_count(),
+            frame->group.bounds, padding);
+        dl_resize_saved_backdrops(dl, frame->recording_start, frame->source_start, &frame->group.bounds);
+    }
     paint_ir_lower_raster_effect_finish(&frame->group, dl);
     return true;
 }
@@ -1609,42 +1618,6 @@ static const char* paint_svg_stroke_join_name(RdtStrokeJoin join) {
     }
 }
 
-static void paint_svg_append_rounded_rect_path(StrBuf* out,
-                                               float x, float y, float w, float h,
-                                               float rx, float ry) {
-    if (rx < 0.0f) rx = 0.0f;
-    if (ry < 0.0f) ry = 0.0f;
-    float half_w = w * 0.5f;
-    float half_h = h * 0.5f;
-    if (rx > half_w) rx = half_w;
-    if (ry > half_h) ry = half_h;
-
-    if (rx <= 0.0f && ry <= 0.0f) {
-        strbuf_append_format(out,
-            "M%.2f,%.2f L%.2f,%.2f L%.2f,%.2f L%.2f,%.2f Z",
-            x, y, x + w, y, x + w, y + h, x, y + h);
-        return;
-    }
-
-    strbuf_append_format(out,
-        "M%.2f,%.2f L%.2f,%.2f "
-        "A%.2f,%.2f 0 0 1 %.2f,%.2f "
-        "L%.2f,%.2f "
-        "A%.2f,%.2f 0 0 1 %.2f,%.2f "
-        "L%.2f,%.2f "
-        "A%.2f,%.2f 0 0 1 %.2f,%.2f "
-        "L%.2f,%.2f "
-        "A%.2f,%.2f 0 0 1 %.2f,%.2f Z",
-        x + rx, y, x + w - rx, y,
-        rx, ry, x + w, y + ry,
-        x + w, y + h - ry,
-        rx, ry, x + w - rx, y + h,
-        x + rx, y + h,
-        rx, ry, x, y + h - ry,
-        x, y + ry,
-        rx, ry, x + rx, y);
-}
-
 static void paint_svg_append_filled_rect(StrBuf* out, int indent_level,
                                          float x, float y, float w, float h,
                                          float rx, float ry, bool rounded,
@@ -1663,65 +1636,10 @@ static void paint_svg_append_filled_rect(StrBuf* out, int indent_level,
     strbuf_append_str(out, "\" />\n");
 }
 
-typedef struct PaintSvgPathContext {
-    StrBuf* out;
-    bool has_command;
-} PaintSvgPathContext;
-
-static bool paint_svg_path_visit(void* context, RdtPathCommand command,
-                                 const float* args, int arg_count) {
-    PaintSvgPathContext* ctx = (PaintSvgPathContext*)context;
-    if (!ctx || !ctx->out) return false;
-    ctx->has_command = true;
-
-    switch (command) {
-    case RDT_PATH_MOVE:
-        if (arg_count < 2) return false;
-        strbuf_append_format(ctx->out, "M%.2f,%.2f ", args[0], args[1]);
-        break;
-    case RDT_PATH_LINE:
-        if (arg_count < 2) return false;
-        strbuf_append_format(ctx->out, "L%.2f,%.2f ", args[0], args[1]);
-        break;
-    case RDT_PATH_QUAD:
-        if (arg_count < 4) return false;
-        strbuf_append_format(ctx->out, "Q%.2f,%.2f %.2f,%.2f ",
-                             args[0], args[1], args[2], args[3]);
-        break;
-    case RDT_PATH_CUBIC:
-        if (arg_count < 6) return false;
-        strbuf_append_format(ctx->out, "C%.2f,%.2f %.2f,%.2f %.2f,%.2f ",
-                             args[0], args[1], args[2], args[3], args[4], args[5]);
-        break;
-    case RDT_PATH_CLOSE:
-        strbuf_append_str(ctx->out, "Z ");
-        break;
-    case RDT_PATH_RECT:
-        if (arg_count < 6) return false;
-        paint_svg_append_rounded_rect_path(ctx->out,
-                                           args[0], args[1], args[2], args[3],
-                                           args[4], args[5]);
-        strbuf_append_char(ctx->out, ' ');
-        break;
-    case RDT_PATH_CIRCLE:
-        if (arg_count < 4) return false;
-        strbuf_append_format(ctx->out,
-            "M%.2f,%.2f A%.2f,%.2f 0 1 0 %.2f,%.2f "
-            "A%.2f,%.2f 0 1 0 %.2f,%.2f Z ",
-            args[0] - args[2], args[1], args[2], args[3],
-            args[0] + args[2], args[1],
-            args[2], args[3], args[0] - args[2], args[1]);
-        break;
-    }
-    return true;
-}
-
 static bool paint_svg_path_to_string(RdtPath* path, StrBuf* out) {
-    if (!path || !out) return false;
-    PaintSvgPathContext ctx = {};
-    ctx.out = out;
-    if (!rdt_path_visit(path, paint_svg_path_visit, &ctx)) return false;
-    return ctx.has_command;
+    if (!render_path_append_svg_roundtrip(out, path)) return false;
+    strbuf_append_char(out, ' ');
+    return true;
 }
 
 static void paint_svg_note_unsupported(StrBuf* out, int indent_level, PaintOp op,

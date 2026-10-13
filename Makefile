@@ -2032,9 +2032,7 @@ LAYOUT_BASELINE_SUITES ?= form wpt-css-box wpt-css-text wpt-css-inline wpt-css-s
 # Keep one shared layout context per 100-file batch; the runner resets
 # document-scoped caches between files and reaps timed-out workers.
 LAYOUT_BASELINE_CONCURRENCY ?= 4
-LAYOUT_BASELINE_RUNNER = $(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --baseline-only --batch-size 100 --concurrency $(LAYOUT_BASELINE_CONCURRENCY)
-# Layout categories clear temp/ before each batch; keep aggregate records outside
-# that workspace so a later suite cannot erase an earlier suite's result.
+# Keep aggregate records separate from the layout harness's scratch artifacts.
 LAYOUT_BASELINE_RESULTS = test_output/_layout_baseline_results.txt
 
 # Keep the layout-only and full Radiant reports on the same aggregation and
@@ -2100,38 +2098,8 @@ endef
 # Run the shared layout baseline inventory without building. Suites with a
 # recorded baseline run only those entries; suites without one run in full.
 run-layout-baseline-suites:
-	@mkdir -p test_output; \
-	> $(LAYOUT_BASELINE_RESULTS); \
-	any_failed=0; \
-	echo ""; \
-	echo "📦 Layout Baseline Tests:"; \
-	for suite in $(LAYOUT_BASELINE_SUITES); do \
-		echo ""; \
-		echo "  ▸ $$suite:"; \
-		layout_log="test_output/_layout_baseline_$${suite}.log"; \
-		rm -f "$$layout_log"; \
-		layout_exit=0; \
-		s_start=$$(date +%s); \
-		$(LAYOUT_BASELINE_RUNNER) -c "$$suite" > "$$layout_log" 2>&1 || layout_exit=$$?; \
-		s_elapsed=$$(($$(date +%s) - s_start)); \
-		grep -E "Baseline-only:|No recorded baseline" "$$layout_log" | head -1 || true; \
-		grep -A5 "Summary:" "$$layout_log" | tail -6 || true; \
-		grep "Baseline Regressions" "$$layout_log" | head -1 || true; \
-		s_passed=$$(grep "   ✅ Successful:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_passed=$${s_passed:-0}; \
-		s_partial=$$(grep "   ⚠️  Partially Passing:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_partial=$${s_partial:-0}; \
-		s_skipped=$$(grep "Skipped:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_skipped=$${s_skipped:-0}; \
-		s_failed=$$(grep "   ❌ Failed:" "$$layout_log" | grep -oE "[0-9]+" | head -1); s_failed=$${s_failed:-0}; \
-		s_status="✅ PASS"; \
-		if grep -q "Baseline Regressions" "$$layout_log"; then \
-			s_status="❌ FAIL"; any_failed=1; \
-		elif [ $$layout_exit -ne 0 ] || ! grep -q "   ✅ Successful:" "$$layout_log"; then \
-			if [ $$s_failed -eq 0 ]; then s_failed=1; fi; \
-			s_status="❌ FAIL"; any_failed=1; \
-		fi; \
-		echo "$$suite|$$s_status|$$s_passed|$$s_partial|$$s_failed|$$s_skipped|$$s_elapsed" >> $(LAYOUT_BASELINE_RESULTS); \
-		rm -f "$$layout_log"; \
-	done; \
-	if [ $$any_failed -gt 0 ]; then exit 1; fi
+	@$(LAYOUT_TEST_ENV) node test/run_layout_baseline.js --suites "$(LAYOUT_BASELINE_SUITES)" \
+		--jobs $(LAYOUT_BASELINE_CONCURRENCY) --results "$(LAYOUT_BASELINE_RESULTS)"
 
 test-radiant-baseline: build-radiant-baseline
 	@$(MAKE) --no-print-directory run-radiant-baseline
@@ -2189,7 +2157,7 @@ test-svg-smil: build
 	@node test/svg/test_svg_smil.cjs $(ARGS)
 
 # All Radiant checks use the shared runner's JSON artifacts and final report.
-# Independent native suites share a worker budget; artifact-sharing checks remain exclusive.
+# Native and script pools share a worker budget; artifact-sharing checks remain exclusive.
 run-radiant-baseline:
 	@RADIANT_RENDER_JOBS=$(RADIANT_RENDER_JOBS) node test/test_run.js --target=radiant --category=baseline $(ARGS)
 
@@ -2300,10 +2268,25 @@ test-reactive-ui: build-test
 	@echo "=============================================================="
 	@./test/test_ui_automation_gtest.exe --suite baseline --test "todo_toggle,todo_delete,todo_add_item,todo_text_input" $(ARGS)
 
+# Editable fixture selections. Composite targets pass the union of their
+# selections to one runner call, so a fixture shared by two selections runs once.
+UI_TEST_RUNNER := ./test/test_ui_automation_gtest.exe
+EDITABLE_UNIT_TESTS := test_editing_contenteditable_dom_action,test_editing_contenteditable_unsupported_transfer,test_editing_physical_keydown_cancellation,editable_template_gate
+EDITABLE_UI_TESTS := test_editing_contenteditable_dom_action,test_editing_contenteditable_composition,test_editing_contenteditable_unsupported_transfer,test_editing_physical_keydown_cancellation,rte_typing_at_caret,editable_mixed_routes
+EDITABLE_EDITOR_TESTS := editable_editors_*
+# D7.2.5 requires package failure to leave rich-edit defaults unavailable,
+# while author beforeinput listeners still observe the platform request; the
+# fixture sets RADIANT_DOM_PKG=0 for its own child.
+EDITABLE_PACKAGE_DISABLED_TESTS := test_editing_contenteditable_package_disabled
+# Focused UA coverage runs only promoted no-emulation corpus cases plus direct
+# package behavior fixtures.
+EDITABLE_UA_TESTS := test_editing_contenteditable_blocks,test_editing_contenteditable_clipboard,test_editing_contenteditable_designmode,test_editing_contenteditable_format_values,test_editing_contenteditable_history,test_editing_contenteditable_structural_history,test_editing_contenteditable_structural_history_direction,test_editing_contenteditable_indent,test_editing_contenteditable_inline_formats,test_editing_contenteditable_justify,test_editing_contenteditable_lists,test_editing_contenteditable_objects,test_editing_contenteditable_plaintext,test_editing_contenteditable_queries,test_editing_contenteditable_remove_format,test_editing_contenteditable_rich_clipboard,test_editing_contenteditable_select_all,test_editing_contenteditable_settings,test_editing_contenteditable_typing_state,test_editing_contenteditable_ua,test_editing_editor_ua
+EDITABLE_FORM_TESTS := test_form_input_typing,test_form_input_undo_redo,test_form_ime_compose,test_editing_paired_history_textarea
+
 # The upstream packages are checked-in offline artifacts. These targets never
 # run npm and exercise the same public event route as platform input.
 editable-unit: build-test
-	@./test/test_ui_automation_gtest.exe --suite editor --test "test_editing_contenteditable_dom_action,test_editing_contenteditable_unsupported_transfer,test_editing_physical_keydown_cancellation,editable_template_gate" $(ARGS)
+	@$(UI_TEST_RUNNER) --suite editor --test "$(EDITABLE_UNIT_TESTS)" $(ARGS)
 
 # The WPT manifest verifies the complete pinned contenteditable directory before
 # the runner executes its explicitly automated DOM/crash subset.
@@ -2319,29 +2302,26 @@ test-chromium-contenteditable: build-test
 audit-editable-ownership:
 	@node test/editing/audit_contenteditable_ownership.mjs
 
-# D7.2.5 requires package failure to leave rich-edit defaults unavailable,
-# while author beforeinput listeners still observe the platform request.
 editable-package-disabled: build-test
-	@env RADIANT_DOM_PKG=0 ./lambda.exe view test/ui/ce/editable-dom-package-disabled.html --event-file test/ui/test_editing_contenteditable_package_disabled.json --event-result temp/editable-package-disabled-result.json --headless --no-log --font-dir test/layout/data/font
+	@$(UI_TEST_RUNNER) --suite editor --test "$(EDITABLE_PACKAGE_DISABLED_TESTS)" $(ARGS)
 
-# Focused UA coverage is intentionally separate from the existing editor
-# regressions: it runs only promoted no-emulation corpus cases plus direct
-# package behavior fixtures.
-test-editable-ua-focused: audit-editable-ownership editable-package-disabled editable-unit editable-ui test-wpt-contenteditable test-chromium-contenteditable
-	@./test/test_ui_automation_gtest.exe --suite editor --test "test_editing_contenteditable_blocks,test_editing_contenteditable_clipboard,test_editing_contenteditable_designmode,test_editing_contenteditable_format_values,test_editing_contenteditable_history,test_editing_contenteditable_structural_history,test_editing_contenteditable_structural_history_direction,test_editing_contenteditable_indent,test_editing_contenteditable_inline_formats,test_editing_contenteditable_justify,test_editing_contenteditable_lists,test_editing_contenteditable_objects,test_editing_contenteditable_plaintext,test_editing_contenteditable_queries,test_editing_contenteditable_remove_format,test_editing_contenteditable_rich_clipboard,test_editing_contenteditable_select_all,test_editing_contenteditable_settings,test_editing_contenteditable_typing_state,test_editing_contenteditable_ua,test_editing_editor_ua" $(ARGS)
+test-editable-ua-focused: audit-editable-ownership test-wpt-contenteditable test-chromium-contenteditable
+	@$(UI_TEST_RUNNER) --suite editor --test "$(EDITABLE_PACKAGE_DISABLED_TESTS),$(EDITABLE_UNIT_TESTS),$(EDITABLE_UI_TESTS),$(EDITABLE_UA_TESTS)" $(ARGS)
 
 editable-form-regressions: build-test
-	@./test/test_ui_automation_gtest.exe --suite editor --test "test_form_input_typing,test_form_input_undo_redo,test_form_ime_compose,test_editing_paired_history_textarea" $(ARGS)
+	@$(UI_TEST_RUNNER) --suite editor --test "$(EDITABLE_FORM_TESTS)" $(ARGS)
 
-test-editable-ua: test-editable-ua-focused test-editable editable-form-regressions
+test-editable-ua: audit-editable-ownership test-wpt-contenteditable test-chromium-contenteditable
+	@$(UI_TEST_RUNNER) --suite editor --test "$(EDITABLE_PACKAGE_DISABLED_TESTS),$(EDITABLE_UNIT_TESTS),$(EDITABLE_UI_TESTS),$(EDITABLE_UA_TESTS),$(EDITABLE_EDITOR_TESTS),$(EDITABLE_FORM_TESTS)" $(ARGS)
 
 editable-ui: build-test
-	@./test/test_ui_automation_gtest.exe --suite editor --test "test_editing_contenteditable_dom_action,test_editing_contenteditable_composition,test_editing_contenteditable_unsupported_transfer,test_editing_physical_keydown_cancellation,rte_typing_at_caret,editable_mixed_routes" $(ARGS)
+	@$(UI_TEST_RUNNER) --suite editor --test "$(EDITABLE_UI_TESTS)" $(ARGS)
 
 editable-editor-e2e: build-test
-	@./test/test_ui_automation_gtest.exe --suite editor --test "editable_editors_*" $(ARGS)
+	@$(UI_TEST_RUNNER) --suite editor --test "$(EDITABLE_EDITOR_TESTS)" $(ARGS)
 
-test-editable: editable-unit editable-ui editable-editor-e2e
+test-editable: build-test
+	@$(UI_TEST_RUNNER) --suite editor --test "$(EDITABLE_UNIT_TESTS),$(EDITABLE_UI_TESTS),$(EDITABLE_EDITOR_TESTS)" $(ARGS)
 
 # Pinned drawing packages are built locally by test/drawing-editors; this target
 # never installs packages and exercises ordinary DOM/SVG/event lifetime paths.

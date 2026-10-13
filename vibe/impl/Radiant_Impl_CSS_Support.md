@@ -1,6 +1,6 @@
 # Radiant CSS Support — Remaining Implementation Plan
 
-**Status:** Work stopped at the user's wrap-up request (2026-10-12). Visibility is the last fully qualified checkpoint: both required baselines and focused sanitizer/live controls pass, with 242/243 export groups and two old 2× PDF ordered-background edge failures. The subsequent gradient-range repair is applied with focused checks only; 20/114 export comparisons still fail, and its required baselines and sanitizer qualification remain pending. The boundary stays at 226 deferred /89 unapproved imports. P0 ownership/API debt, hidden-control focus, clipped gradient text and the remaining P0–P2 acceptance criteria stay open. See the final §9 entry for the current handoff.
+**Status:** Active P0–P2 implementation continues from merged `a600e59bc` (2026-10-13). Protected `native_control47q_*` qualifies nine lower-owned form/scroll/document-tick calls after shared emphasis/CSSOM delivery: core 6,797; Radiant 5,428 full /353 partial /one skipped; 1,171 scoped ASan cases; 895 live assertions per runtime. Full export passes 267/272 groups with 39 raw failed assertions; SVG passes 126 formats /2,466 assertions. The inventory records 410 names and twenty-one bounded partial families. Boundary debt is 168 deferred /31 unapproved imports, with nine removed and no additions or allowance changes. Broader P0–P2 criteria remain open. See §9 for evidence and limits.
 
 **Predecessor:** [CSS selector/property implementation record](<Radiant_Impl_CSS_Selector_Property_Support (retired).md>), closed and retired with unfinished scope transferred here.
 
@@ -2454,7 +2454,7 @@ Frozen visibility candidate `ordered_22.exe` has SHA-256
 `014f13f760232055dc4768963c01101fff97550b1fa415cc1fc14aa859bf11c2`
 and 58 anchored inputs. Fresh gates pass **6,647 Lambda/input** and
 **4,305 full /349 partial Radiant (4,654 required)**. Full exports pass
-**242/243 groups**; the remaining group preserves the same two ordered2x PDF
+**242/243 groups**; the remaining group preserves the same two ordered 2x PDF
 edge assertions. Matching 132-input ASan runtime SHA-256
 `2d540b2f9c2dafee507407cc98289cc1b43648f4964d241bb2188422116f4a8b`
 passes **1,098 native cases**, **342 live assertions per runtime**, the Canvas
@@ -2508,3 +2508,1522 @@ evidence is under `temp/css_support_p1/background_layers/range23_*`, especially
 and `range23_wrap_vector_results.json`. Resume from the current source; the
 earlier `range23_stage` draft is stale. Complete the remaining range failures
 and full qualification before acceptance, then continue the open P0–P2 work.
+
+### 2026-10-12 — P0/P1.5/P2.2 resumed clip, export and focus consumers
+
+Fresh reproduction on merged `9e0d913f6` retains all 20 range export failures
+and both ordered-background PDF edges. Raster overflow now retains the owning
+box's clip geometry and original forward transform before scrolling; its
+coarse rejection bound uses projected destination coordinates. Rounded and
+transformed boxes receive exact scoped clips. Plain untransformed rectangles
+retain their existing block-bound constraint, avoiding redundant image masks.
+The shared SVG path
+writer preserves native float control points and exact short numeric spellings;
+paint attributes retain their command separator. The duplicated paint path
+writer is removed. PDF gradient snapshots intersect rectangular ancestor clips
+in owner coordinates, and image output constrains its destination extent.
+
+Computed-self visibility also gates native sequential/programmatic focus and
+DOM `focus()` through the existing immutable style-provider table. An explicitly
+visible descendant of a hidden box remains eligible. Provider absence,
+mandatory entries and concurrent publication retain **D7.1.3 / D7.5.3**;
+borrowed state and paint payloads retain **D4.5.1v4 / D4.1.4v5**. This extends
+bounded **CI-18** consumers without changing a formal ruling.
+
+The new overflow fixture passes **40/40 live assertions** in Chromium and
+Radiant, including transform, reflection, radius, scroll, width and density
+changes. Its three independent output cases pass **18 PNG/SVG/PDF comparisons**.
+The focus fixture passes **32/32 Chromium and native assertions**, improving
+from 14/32. Native vector tests pass 132/132 and lower provider tests pass 2/2.
+Gradient exports improve to **106/114**; eight one-byte marker/border PNG/PDF
+differences remain. Both old PDF edge assertions remain, with reduced error.
+No comparator, tolerance, golden or boundary allowance was changed.
+
+Candidate24's first required Radiant gate exposed six SVG separator assertions
+and an SVG image visual regression. Both are repaired: the display-list suite
+passes 83/83, and image coverage returns to the protected predecessor's 133
+differing pixels. The failed 74-input source/binary checkpoint and raw results
+remain protected. Candidate25 exposed recursive compact-rectangle expansion
+in map SVG export. A shared explicit-contour expander repairs the runtime path;
+a native affine regression retains the compact primitive as its input. The
+zero-radius compact optimization was removed after candidate26 exposed changed
+fractional-edge alpha. All 15 map scripts and 132 native vector tests now pass.
+Failed/interrupted candidate25/26 artifacts remain recorded. Candidate27's fresh
+combined gate passed 6,764/6,765. Its import-cache scheduling assertion passes
+in three separate isolated processes; the full fresh rerun passes 6,765/6,765.
+The failed source/binary checkpoint is preserved, with no cache source/test
+change. Matching required Radiant/native/live/export sanitizer qualification
+continues (`consumer27r_*`). No new support promotion or family closure is
+claimed until that work finishes.
+
+The next rendered-focus probe is staged separately: Chromium passes all 48
+script/Tab/Shift+Tab assertions at 1×/2×, while the current native runtime passes
+22/48. It reproduces `display:none` targets/ancestors, CSS overrides of HTML
+`hidden`, and visibility mutations before the next frame. The staged shared
+predicate reads live computed visibility and display along flat-tree ancestry,
+retaining the existing provider's immutable-table contract (**D7.1.3 / D7.5.3**).
+The [HTML focus-area model](https://html.spec.whatwg.org/multipage/interaction.html#focusable-area)
+also admits rendering delegated to children, so `display:contents` is retained
+in a native control despite the recorded Chromium difference. CSS overrides
+of `hidden` follow the [HTML hidden-attribute model](https://html.spec.whatwg.org/multipage/interaction.html#the-hidden-attribute).
+This is a bounded **CI-18** contract; no staged implementation is accepted yet.
+
+### 2026-10-12 — Resumed-consumer checkpoint and newly reproduced export residue
+
+The completed `consumer27r_*` run protects 74 normal /131 instrumented inputs,
+89 result artifacts and separate required-gate/failing-image manifests. Normal
+runtime `e43bb50efed53ad3c3a6acae7fe95c87009d595698aa103f804adab02d597020`
+and ASan runtime
+`1968c9d3345711b5a23bb443b545458cd50280b1332c882e3eacd28d58b2f5c8`
+match their snapshots. Fresh Lambda/input passes 6,765; required Radiant passes
+with 5,366 full /353 partial /one skipped case. All 1,103 native sanitizer tests,
+434 live assertions per runtime and the Canvas JS golden pass without a
+sanitizer report. Instrumentation covers the named CSS/DOM/lifecycle/paint owner
+units; other host objects/archives retain `debug_native`, with leak detection
+disabled. The no-int-cast lint and 410-name inventory freshness check pass.
+
+Full exports pass 241/245 groups. In addition to two ordered PDF edges and eight
+range differences, the sweep retains 20 constant-alpha marker comparisons and
+one inherited selected-image PDF edge. The applied range optimization replaced
+constant gradients with solid-path commands, changing alpha lowering. The new
+PDF destination mask also changes overlapping image-edge coverage. Both repairs
+are staged separately; no tolerance, golden, allowlist or support promotion is
+changed (**CI-18**, **D4.5.1v4 /D4.1.4v5**).
+
+The fresh strict module audit fails with 230 deferred /93 unapproved imports
+against the unchanged 165 baseline. Four imports are new relative to the older
+visibility checkpoint: history traversal, media command/info and window watch.
+This is current **D7.1.3 /D7.5.3 /D7.3.3–D7.3.4** ownership/API debt, not closure.
+The full P0–P2 goal remains active.
+
+### 2026-10-12 — Applied rendered-focus and constant-gradient alpha repair
+
+The shared focus predicate now reads live computed visibility and resolves
+display along flat-tree ancestry. DOM script focus trusts the immutable native
+provider's rendering result; provider absence retains its hidden-attribute
+fallback (**D7.1.3 /D7.5.3**). The new fixture passes all 48 native and Chromium
+script/Tab/Shift+Tab assertions at 1×/2×, improving from 22/48. A native 16-case
+control, including variable display, hidden overrides and delegated contents,
+passes 4,096 repeated reads without retained pool-byte growth
+(**D4.5.1v4 /D4.1.4v5**). The existing 132-case vector suite also passes.
+
+Constant image intervals retain gradient commands and alpha lowering; a shared
+two-stop constructor replaces three variants. Removing the redundant global
+PDF image mask restores all 600 gradient-marker and 60 selected-image export
+comparisons, including the inherited-image edge. Transformed overflow retains
+all 18 comparisons. Gradient ranges still fail 19/114: eight one-byte
+marker/border differences and eleven 2× PDF boundary comparisons. The trial
+opaque-gradient mask restored range boundaries but changed 14 marker edges;
+a common image-object experiment did not improve the boundary results. Both
+trials and the earlier failed test compile remain recorded. Those trials are
+removed; no comparator, golden or allowance changes are made (**CI-18**).
+
+Fresh aggregate and matching sanitizer qualification of the combined applied
+source is next. No new support promotion or whole P0–P2 closure is claimed.
+
+### 2026-10-12 — Focus lifecycle settlement and lower-owned host catalog calls
+
+Candidate28's required Lambda/input gate passes 6,765; its required Radiant gate
+exposes seven integration failures, with the 76-input source/binary snapshot
+and raw gate results preserved. Six failing controls retain focus after a
+handler hides its connected anchor. Post-handler mutation commits now clear
+ineligible focus through the existing focus transition/event path. Native
+document focus remains authoritative for `activeElement`, rather than a stale
+script mirror restoring the cleared target. The invariant check is unchanged.
+A new fixture passes 24 Chromium/native assertions at 1×/2×, including ordered
+blur/focusout delivery, body fallback and explicitly visible descendant retention
+(**CI-18**, **D4.5.1v4 /D4.1.4v5**).
+
+The remaining offcanvas fixture requests focus during `showing`, while its
+simplified stylesheet makes that state `display:none`. Chromium reproduces the
+failed focus acquisition. The fixture now supplies the missing `showing`/`hiding`
+display states; the original input and browser/native failures remain recorded.
+All five failed DOM controls and both photo-editor integration cases now pass.
+Neither expected assertions nor vendor Bootstrap code is changed.
+
+Seven timing, viewport, window-watch, history and media catalog wrappers now
+belong to the lower runtime and dispatch through a complete immutable native
+host table. Radiant publishes the existing implementations at registration;
+provider absence returns `ItemNull`. Shared publication helpers retain atomic
+validation and conflicting-publication rejection (**D7.1.3 /D7.5.3**). Lower
+tests verify absence, each missing field, operation identity, argument order,
+8,000 concurrent publication rounds and 56,000 real catalog calls. The third
+worker-test variant shares the existing spawn/join shape rather than copying it.
+
+The fresh focused boundary measure improves from 230 deferred /93 unapproved
+to **223 deferred /86 unapproved**, with exactly these seven imports removed
+and no additions. The 165 allowance is unchanged; strict boundary closure
+remains open under **D7.3.3–D7.3.4**. The combined source is undergoing fresh
+required/native/live/export sanitizer qualification (`consumer29q_*`). Gradient
+range/ordered PDF residue and all other unfinished P0–P2 criteria remain active.
+
+### 2026-10-12 — Owned-root focus qualification and collection metadata registry
+
+Candidate29 passes the fresh required gates (6,765 Lambda/input; 5,368 full /
+353 partial /one skipped Radiant) and 243/245 full export groups. Its required
+sanitizer view runner fails the existing owned-root focus regression; the other
+five runners pass and no address-sanitizer error is reported. Qualification
+stops before live/export sanitizer and boundary checks. The failed source,
+binaries, raw assertions and 150 required-gate artifacts remain protected in
+`consumer29q_failed_checkpoint.json`; this is an incomplete checkpoint.
+
+The focus helper now stops at the document-owned root. A native debugger probe
+also identifies a successful but empty pre-render visibility projection: that
+absence was being treated as hidden. Empty reads now preserve the existing
+native default. The unchanged ownership regression and all 636 native view
+cases pass, including 4,096 live-style eligibility reads without retained pool
+growth (**D4.5.1v4 /D4.1.4v5**, **CI-18**). The first insufficient owned-root
+repair and its failed native result are preserved separately.
+
+Ten collection metadata getters now use a lower-owned immutable type registry.
+The existing Radiant Jube identities and public module getters stay with their
+owner; DOM and CSSOM consumers borrow the same addresses through the lower
+registry (**D7.1.3 /D7.5.3**). Four provider tests verify absence, every mandatory
+field, distinct metadata identities, concurrent publication and conflicting
+registration rejection. All 503 fresh JS cases pass with the applied registry.
+The 165-symbol boundary allowance is unchanged; a fresh boundary count is
+pending, so no reduction is claimed yet (**D7.3.3–D7.3.4**).
+
+Candidate30 has 81 primary normal inputs plus a separately captured DOM CSSOM
+consumer source, all unchanged during its fresh gates. Required Lambda/input
+and Radiant results remain 6,765 and 5,368 full /353 partial /one skipped.
+Full exports and matching sanitizer/native/live/boundary qualification are
+running in `consumer30q_*`. The normal binary is
+`dd1aa516df263c4eebec5f8453c970f5e56bf7df101b67c16a0e37d78e094ca6`.
+The property inventory still contains 410 names; no support promotion is made
+before the complete checkpoint. P0–P2 and the long-running goal remain active.
+
+### 2026-10-12 — Qualified clip/focus consumers and seventeen removed imports
+
+Candidate30 completes qualification with unchanged source and binaries:
+6,765 fresh Lambda/input cases; 5,368 full /353 partial /one skipped required
+Radiant cases; 1,106 matching sanitizer cases; the Canvas JS golden; and
+506 live assertions on each of the normal and sanitizer runtimes. The repaired
+owned-root focus regression passes. Normal exports pass 243/245 groups;
+sanitizer focused exports pass 22/23, retaining the same range group, and the
+separate ordered control retains its two PDF failures. The 19 range comparisons
+remain eight marker/border channel differences and eleven 2× PDF boundaries.
+No sanitizer report, golden/tolerance change or boundary allowance change occurs.
+
+The boundary measures **213 deferred /76 unapproved**, removing exactly the
+ten collection-type imports from the 223/86 host-call checkpoint, with no new
+imports. Together the applied provider slices remove seventeen imports from
+230/93 (**D7.1.3 /D7.5.3 /D7.3.3–D7.3.4**). The strict boundary gate still fails;
+P0 ownership closure is not claimed. Four strict DSOs build successfully.
+
+The normal primary snapshot contains 81 inputs; the additional DOM CSSOM
+consumer was captured during the gate and matches the 133-input sanitizer
+snapshot, giving 82 distinct normal source inputs. Normal runtime:
+`dd1aa516df263c4eebec5f8453c970f5e56bf7df101b67c16a0e37d78e094ca6`;
+sanitizer runtime:
+`d7a20549e862f0679326c97e3b81d12549e003b6ee1a8e382238315b5c02e56b`.
+`consumer30q_protected_artifacts.json` protects 96 records, with separate
+150-file required-gate and 1,344-file export-namespace copies; those namespace
+copies also retain historical controls. `consumer30q_supplemental_protection.json`
+checks the additional source against both current and sanitizer snapshots.
+
+The inventory and support matrix now record bounded transformed-overflow and
+rendered/settled-focus evidence (**CI-18**, **D4.5.1v4 /D4.1.4v5**). Properties
+remain partial where the documented broader consumers are unfinished. A staged
+PDF link fix suppresses hidden/collapsed own annotations while preserving
+existing visible-descendant links; its durable test fails before and passes
+after at both densities. Chromium likewise omits hidden links, while its print
+output omits the visible descendant's link even though browsing activates it.
+Two remaining unapproved Item host wrappers are staged through the existing
+host provider and pass all four provider tests. Neither staged change is part
+of this accepted source. A separate clipped-gradient single-glyph probe shows
+1,537 red native pixels and zero blue, versus Chromium's 864 red /673 blue;
+SVG emits a transparent outline. These are the next concrete P0/P2 slices.
+P0–P2 and the long-running goal remain active.
+
+### 2026-10-12 — Applied PDF annotation and remaining Item host ownership fixes
+
+The accepted candidate30 source is protected before applying this slice.
+Hidden/collapsed own anchor boxes now omit PDF link annotations through the
+existing shared visibility predicate; semantic traversal and explicitly visible
+descendant links remain intact (**CI-18**). The new two-density native test fails
+six assertions on frozen30 and passes all ten URI-presence checks after the fix.
+The isolated candidate and applied main build both pass. Chromium browsing
+activates the visible descendant's link, although its print output drops that
+annotation; the browser difference is retained as evidence, not a conformance
+claim for all PDF semantics.
+
+The two remaining unapproved Item host wrappers, editing-focus clearing and
+edit-target selection, now use the established lower-owned host provider. Their
+implementations, arguments and return values are unchanged (**D7.1.3 /D7.5.3**).
+All four provider tests pass, including nine-operation argument/identity checks
+and 8,000 publication rounds. Required Lambda/input passes 6,765 on candidate31;
+fresh Radiant and matching sanitizer/live/export/boundary qualification are
+running in `consumer31q_*`. Its 82-input normal snapshot includes DOM CSSOM
+without a supplemental source record, and normal runtime is
+`60ce766fa627d6badc7056f9180ef94716807ca73cabf5d8a87006ef60db1c74`.
+No further boundary reduction or link-family promotion is claimed yet.
+
+### 2026-10-12 — Qualified PDF visibility annotations and nineteen removed imports
+
+Candidate31 completes the same fresh required gates: 6,765 Lambda/input and
+5,368 full /353 partial /one skipped Radiant. All 1,106 matching sanitizer
+cases, the Canvas golden and 506 live assertions per runtime pass, with no
+sanitizer report. Full exports improve to 244/246 groups because the new PDF
+annotation group passes; the existing 19 range comparisons and two ordered PDF
+edges remain. Focused sanitizer exports pass 23/24, including the annotation
+group, and the separate ordered control retains its previous failures.
+
+The first boundary attempt links stale Radiant/RT objects containing the moved
+host wrappers. Source/header timestamps predate those objects because staged
+copies retained their mtimes. The raw linker failure and both object files are
+preserved. Rebuilding those exact objects, without changing source or allowance,
+builds the four strict DSOs and measures 211 deferred /74 unapproved imports,
+removing exactly editing-focus clearing and edit-target selection from 213/76
+with no additions (**D7.1.3 /D7.5.3 /D7.3.3–D7.3.4**). The strict gate still
+fails on the remaining debt. Developer Guide §7.3 documents this source-swap
+hazard; subsequent staged application must give changed files fresh mtimes.
+
+The 82-input normal runtime is
+`60ce766fa627d6badc7056f9180ef94716807ca73cabf5d8a87006ef60db1c74`;
+the 133-input sanitizer runtime is
+`e589ed51f37f911643d727b9cfd4d856b43519326bb661bf572bf9ddaa133ae3`.
+`consumer31q_final_protected_artifacts.json` protects 98 final records and the
+preserved stale-object provenance, plus separate 150 required-gate and 1,352
+export-namespace files. The original failed boundary attempt remains intact;
+`consumer31q_boundary_retry_gate.log` is the current measurement.
+
+The visibility inventory now records ten flat PDF annotation controls at 1x/2x:
+hidden, inherited-hidden and ordinary collapsed own anchors are omitted, while
+visible and explicitly visible descendant links stay present (**CI-18**,
+**D4.5.1v4 /D4.1.4v5**). Broader fragment/effect/backface link semantics and the
+Chromium print difference remain explicit limits. Nineteen unapproved imports
+are removed from the resumed 230/93 checkpoint. An eighteen-operation event
+provider is staged separately; five lower tests, all 503 JS cases and 43 live
+focus/visibility-event assertions pass. Its source/header overlay preserves
+public module spellings as aliases for the lower-owned key schema. A missing
+logging-config symlink caused one initial fixture-environment failure, retained
+before the 503-pass retry. Full staged ownership/sanitizer qualification is next.
+P0–P2 and the long-running goal remain active.
+
+### 2026-10-12 — Applied lower-owned event provider under qualification
+
+Eighteen DOM event host calls now dispatch through a lower-owned immutable
+provider rather than importing Radiant directly. Five DOM/JS consumers use the
+owned API; the public Radiant event functions remain available to their module
+clients. The event target-key schema belongs to the lower interface, with the
+existing module names retained as aliases (**D7.1.3 /D7.5.3**). Native event
+payload, prototype, path and dispatch implementations are unchanged; their
+existing traced backing/pin ownership remains **D4.5.1v4 /D4.5.2**.
+
+Five provider tests cover absence, all eighteen mandatory fields, argument and
+operation routing, all eight creation-flag combinations, 8,000 publication
+rounds and 200,000 event calls, including conflicting registration rejection.
+The existing provider variants now share one round/worker loop. Staged native
+integration passes all 503 JS cases and 43 live focus/visibility-event assertions.
+One logging test initially lacks its isolated working directory's config; its
+raw failure remains, and a read-only link to the unchanged repository config
+makes the full 503-case retry pass. Main builds and all five provider tests pass.
+
+Changed files receive fresh mtimes during application, preventing the source
+swap hazard observed in the predecessor boundary check. Candidate32 freezes 90
+normal inputs and passes fresh required Lambda/input and Radiant gates; full
+export, matching sanitizer/native/live and boundary checks are running in
+`events32q_*`. The normal runtime is
+`f350e4c3d9245bbc83132a1c63bcea1e82d1dc2d44fa3ee3405621edbc9a4ac4`.
+The sanitizer recipe also instruments the new DOM core/clipboard consumers.
+No further import reduction is claimed before the current audit.
+
+A separate unapplied clipped-text draft paints per-pixel glyph coverage in
+native output and uses the shared background positioning box instead of
+measured text extent. Its single-glyph split-color counts match Chromium's
+864 red /673 blue pixels; the original native output had 1,537 red /zero blue.
+Selected-font vector masks reach actual SVG/PDF pixels, but the first independent
+split-color references retain eight vector edge differences while all four
+native references pass. Direct glyph-contour gradient filling is being tested
+through the existing image/gradient machinery (**CI-18**). These drafts remain
+unqualified and separate from candidate32. No tolerance or golden changes occur.
+P0–P2 and the long-running goal remain active.
+
+### 2026-10-12 — Qualified event provider and thirty-seven removed imports
+
+Candidate32 passes 6,765 fresh Lambda/input and 5,368 full /353 partial /one
+skipped required Radiant cases. All 1,107 matching sanitizer cases pass, including
+78 DOM/provider and 636 native view cases. The Canvas golden and 525 live
+assertions on each runtime pass across 17 fixtures. There are no sanitizer
+reports. Full exports remain 244/246; focused sanitizer exports pass 23/24 and
+the ordered control retains its previous two PDF assertions. All 19 range
+comparisons remain recorded rather than masked.
+
+The four strict DSOs build on freshly applied source. The raw boundary gate
+measures 193 deferred /56 unapproved imports, removing exactly 18 event host
+imports from 211/74 with no additions. Together the accepted slices remove 37
+imports from the resumed 230/93 checkpoint. The 165 allowance stays unchanged;
+strict closure remains open (**D7.1.3 /D7.5.3 /D7.3.3–D7.3.4**).
+
+Normal 90-input runtime:
+`f350e4c3d9245bbc83132a1c63bcea1e82d1dc2d44fa3ee3405621edbc9a4ac4`;
+sanitizer 136-input runtime:
+`9336359b88bdc8feb7c34e936ab8f6b5fd6d2553cfb63ef0b565363cb7d69b8a`.
+
+`events32q_protected_artifacts.json` protects 99 records; separate 150 required-gate
+and 1,352 export-namespace copies preserve controls and failures. Instrumentation
+covers the owned CSS/DOM/lifecycle/paint subset and native regression translation
+units, including the new DOM core/clipboard consumers; remaining host objects
+use debug_native and execution disables leak detection. Publication, traced
+payloads and dispatch identity preserve **D4.5.1v4 /D4.5.2**.
+
+The clipped-text draft remains unapplied. Direct-contour fills did not remove
+SVG channel differences and worsened PDF edges; physical-grid snapshot alignment
+reduces the severe PDF displacement but retains vector differences. Exact draft
+sources, failed link/paint trials and independent references are preserved in
+`temp/css_support_p1/background_layers/text_clip32/`. Native glyph coverage and
+owner-positioning fixes pass four PNG references, while eight vector comparisons
+remain failures (**CI-18**). No golden/tolerance or allowance changes occur.
+P0–P2 and the long-running goal remain active.
+
+### 2026-10-12 — Applied event workflow provider continuation
+
+Four remaining synthetic/author-template dispatch imports now use the existing
+lower-owned event provider. Native implementation and public owner entry points
+stay in Radiant, with declarations promoted to its existing event header rather
+than copied into a new seam (**D7.1.3 /D7.5.3**). The record-operation list remains
+shared with the module, while workflow callbacks retain their distinct owner
+names. Existing dispatch/pin/traced ownership remains **D4.5.1v4 /D4.5.2**.
+The provider has 22 operations and the shared worker test verifies 29 calls per
+publication round, including all creation flags, for 232,000 event calls. Main
+builds and all five native provider checks pass in `workflow33_*`; no import
+reduction or new acceptance is claimed before aggregate qualification. The clipped-text draft is unapplied.
+P0–P2 and the long-running goal remain active.
+
+### 2026-10-12 — Qualified event workflow and forty-one removed imports
+
+Candidate33 passes fresh required gates (6,765 Lambda/input; 5,368 full /
+353 partial /one skipped Radiant), all 1,107 matching sanitizer cases, the
+Canvas golden and 525 live assertions per runtime. Full exports remain 244/246;
+focused sanitizer exports remain 23/24 and the ordered control retains its two
+PDF failures. No sanitizer report, tolerance/golden or allowance change occurs.
+The four strict DSOs build and the raw audit removes exactly four synthetic/
+author-template imports: 193/56 becomes 189 deferred /52 unapproved, with no
+additions (**D7.1.3 /D7.5.3**). Forty-one imports are removed from 230/93; the
+165 allowance is unchanged and closure stays open (**D7.3.3–D7.3.4**).
+Normal 91-input runtime:
+`e71876606f48aca48ebc9de3f66d8612a711e040d30c35df27c5ef639a91aee8`;
+sanitizer 136-input runtime:
+`22c492e75074771606d3ac51e25494fa97db1d4e0c2acf586007c966220ce8b5`.
+`workflow33q_protected_artifacts.json` protects 99 records with separate 150
+required-gate and 1,352 export-namespace copies. The exact sources are protected
+before the next ownership application.
+
+### 2026-10-12 — Applied editing, fragment-factory and evaluator ownership fixes
+
+Command-query and designMode transports now use the established lower host
+provider; the package retains all editing policy under **D7.2.5**. Mixed result
+and absence fields preserve nine existing Item operations and add the unchanged
+Item-query and Boolean-designMode mechanisms (**D7.1.3 /D7.5.3**). Staged native
+integration passes all 503 JS cases and nine editing command assertions.
+
+The unbacked document-fragment allocator moves from the renderer's Range file
+to the existing lower document-node factory. Three duplicated creation sites
+reuse it; the existing Range test now verifies null rejection, document identity
+and detachment. Backed fragment construction retains its existing input owner
+(**D4.5.1v4 /D7.1.3**). All 78 lower range/provider cases pass.
+
+Evaluator-thread transfer moves unchanged into runtime-state.cpp. The runner
+calls that owned API; Radiant's public entry remains a thin delegate. A new
+regression verifies null/no-op behavior, active-owner rejection, quiescent
+transfer, stack-limit refresh and JS rebind under **D5.4.1**. All 37 runtime and
+503 JS staged cases pass. No execution/GC ownership ruling changes.
+
+After protecting 33, sixteen verified files are applied with fresh mtimes.
+Main debug/native builds and 78 range/provider plus 37 runtime cases pass.
+Candidate 34 will add the runtime test runner to matching ASan execution and
+summary, instrument its new owning runtime/runner sources, and run the editing
+fixture on both binaries. Source/header snapshots and raw failures remain
+required before acceptance; no further import reduction is claimed yet.
+Clipped-text and the broader P0–P2 criteria remain open.
+
+### 2026-10-12 — Qualified editing, fragment and evaluator ownership
+
+Protected `ownership34q_*` qualifies the applied editing host operations, shared
+lower fragment factory and runtime context-transfer owner. The existing editing
+policy and public C APIs stay unchanged (**D7.2.5 / D7.1.3 / D7.5.3**); quiescent
+thread transfer preserves side-stack and JS TLS ownership (**D5.4.1**).
+Fresh gates pass 6,766 Lambda/input and 5,368 full /353 partial /one skipped
+Radiant cases. Seven source-matched sanitizer runners pass 1,144 cases, eighteen
+live fixtures pass 534 assertions per runtime, and the Canvas golden passes.
+The instrumented owner set includes runtime-state and runner; nine regression
+translation units are instrumented, with remaining host objects/archives from
+`debug_native` and leak detection disabled. This is bounded ASan qualification.
+
+Full exports remain 244/246; focused exports remain 23/24, and ordered exports
+retain the two PDF boundaries. Nineteen range comparisons remain unchanged.
+The fresh boundary measures 185 deferred /48 unapproved imports, removing the
+two editing calls, fragment factory and evaluator switch, with no additions or
+change to the 165 allowance (**D7.3.3–D7.3.4**). Forty-five imports are removed
+since 230/93. All four strict DSOs build; the strict gate still fails.
+Ninety-nine normal and 140 sanitizer inputs match protected runtimes. The record
+protects 105 evidence artifacts, 150 required-result copies and 1,352 export
+namespace copies. `ownership34q_asan_summary.json`, `ownership34q_boundary_summary.json`
+and `ownership34q_protected_artifacts.json` are the measured evidence. No formal
+ruling or CSS-family qualification changes.
+
+### 2026-10-12 — Applied linear-gradient text consumer for qualification
+
+The native glyph consumer now samples shared gradient stops at each covered
+pixel center in the background owner's positioning box, preserving the original
+foreground and selected text paint. Generated images transfer to deferred paint
+ownership at submission, including allocation failure (**D4.5.1v4 / CI-18**).
+SVG/PDF record selected-font contours against the same shared image consumer.
+Opaque constant intervals use solid contour paint with explicit owner/stripe
+clips. Exact cardinal angles preserve axis alignment; owner coordinate paint
+order keeps shared PDF clip edges stable under reversed gradient directions.
+The existing five-argument gradient-image API remains intact.
+
+The final isolated source passes 42 exact PNG/SVG/PDF comparisons at both
+densities: owner-sized/indented glyphs, both axes, reversed directions, repeats
+and two-glyph runs. All 134 vector cases pass, including payload rewind cleanup
+and exact cardinal owner boundaries. Ten verified files are applied with fresh
+mtimes. `text_clip35_staged_proof.json` and `text_clip35_verified_stage/` preserve
+source, runtime and pre-application hashes. Full matching-source qualification
+is next; no whole `background-clip:text` support claim is made.
+
+Earlier text trials preserve raw failed output comparisons and binaries. The
+native axial PDF writer experiment remains isolated and unapplied; it first
+exposed exponent number encoding, then retained edge differences. The unrelated
+PDF snapshot alignment trial is excluded from the applied increment. Broader
+background layers/tile geometry, continuous/transparent vector edge parity,
+fragment/shaping/ancestor ownership and color-font coverage remain open.
+
+The applied runtime passes all 40 live pixel assertions in
+`test/ui/css_gradient_text.{html,json}` at both densities. Width/height,
+direction, indentation, clip mode, foreground and text-content changes cause
+real repaint checks. The protected preceding runtime fails 16/40 against the
+same fixture (`text_clip35_preceding_live_*`), preserving the original defect.
+Main build, inventory check and no-int lint pass. Fresh qualification is active
+in `text_clip35q_*` with the live fixture on both matching binaries, the two new
+export groups and both payload/cardinal tests. No matching aggregate acceptance
+is claimed until it finishes.
+
+### 2026-10-12 — Qualified bounded linear text and corrected export provenance
+
+Candidate35 passes 6,766 fresh Lambda/input cases and the host-enabled Radiant
+gate (5,369 full /353 partial /one skipped). Seven matching ASan runners pass
+1,146 cases, nineteen live fixtures pass 574 assertions per runtime, and the
+Canvas golden passes. The two new text groups pass all 42 exact PNG/SVG/PDF
+comparisons on both matching runtimes. The recorded snapshots
+contain **103 normal and 141 sanitizer inputs**; the counts are measured in
+`text_clip35rq_final_asan_summary.json`. No sanitizer report is present.
+
+The first sandboxed Radiant run preserved local-server failures and macOS
+host-service stalls; a local bind probe returned EPERM. The unchanged source
+and binary passed with the required host access. The initial export runner was
+stale and omitted the two new groups. Its raw results remain preserved. An
+explicit rebuild and registration check ran the fresh executable: full exports
+**246/248**, focused ASan exports **25/26**, ordered controls one failing group.
+The same nineteen range comparisons and two ordered PDF edges remain. Future
+qualification rebuilds the export runner and checks every requested group.
+
+The strict boundary remains 185/48 with no additions and unchanged allowance165;
+all four strict DSOs build, while strict closure remains open
+(**D7.3.3–D7.3.4**). The final record protects 121 artifacts plus 150 required-result
+copies and 3,376 native/ASan export files. The accepted evidence is
+`text_clip35rq_final_asan_summary.json`, `text_clip35v_runner_provenance.json`
+and `text_clip35rq_final_protected_artifacts.json`; the first `text_clip35rq_*`
+export summary is superseded. Shared deferred payload ownership remains
+**D4.5.1v4**. The inventory records bounded text coverage and explicit limits,
+with no whole background/text-family promotion or formal ruling change.
+
+### 2026-10-12 — Isolated text tile/layer investigation
+
+The same tile-size/position/repetition/color fixture fails eight of sixteen
+checks on the accepted runtime and passes all sixteen in Chromium and the
+isolated shared tile-producer draft. The single clipped-color fast boundary
+incorrectly filled the whole box in SVG/PDF; its predicate must reject other
+clip destinations. Per-layer text coverage precedes composition: the
+[CSS Backgrounds 4 clipping model](https://drafts.csswg.org/css-backgrounds-4/#background-clip)
+and independent Chromium captures expose mixed-color antialias edges under
+stacked clipped images (**CI-18**). A draft that combined all layers before
+coverage was rejected and preserved, despite passing its original simplified
+references. Transparent gaps and opaque same-color seams required reference
+correction; the corrected multilayer reference paints each clipped layer.
+
+The latest `text_tiles36/stage/` stays unapplied. It shares the existing authored
+background/tile walk and applies bitmap coverage to each layer, with direct
+retention in the display list. Glyph and image source-over use different
+opaque rounding; an isolated shared-blend trial passes 136 vector cases,
+including all coverage-byte combinations and thirty-two replays after glyph
+cache/style changes, but four native multilayer edge comparisons still differ
+by one byte. Other staged tile/vector comparisons pass. The raw Chromium and
+native results remain separate; no layer-family qualification is claimed.
+
+### 2026-10-12 — Applied text tiles/layers and native coverage replay
+
+The shared authored background walk now has an explicit text destination.
+Color and each image layer receive glyph coverage before composition, using the
+same tile-size/position/repeat and clip geometry as ordinary backgrounds.
+Native generated layers use the existing CPU blit eligibility and captured
+clip data; transform/3D/vector-clip contexts retain their image lowering.
+Glyph/image opaque source-over share rounding in the pixel module. SVG/PDF use
+selected-font contours per layer. The simple boundary shortcut rejects other
+clip boxes, preventing clipped color from filling the whole border box.
+
+Immutable image publication is shared by Canvas, Scene3D and generated glyph
+layers rather than copying a third protocol variant (**D4.5.1v4**). Temporary
+owners release publication references after display-list leases are acquired.
+A trial that forcibly destroyed a leased source is preserved as a failed
+snapshot-lifetime experiment; it is fixed at the owner release. Layer count and
+selection use shared helpers. No vendored source or formal ruling changes.
+
+Twelve verified code/header/test files and four live fixture files are applied
+with fresh mtimes. All 84 staged PNG/SVG/PDF comparisons pass at both densities,
+covering size/position/repeat/no-repeat, gaps, clipped color and two opaque
+layers, alongside earlier glyph controls. All 136 native vector cases pass:
+image/glyph source-over agrees for all 256 coverage values over fifteen color
+pairs, and a leased snapshot survives thirty-two replays after bitmap/style
+changes. Sixteen tile/color and eight rounded ancestor-clip live checks pass.
+`text_tiles36_staged_proof.json` and `text_tiles36_verified_stage/` preserve the
+source/runtime and prior main hashes. Full qualification is next; broader
+owner/fragment/shaping, transformed layer AA, URL/radial/conic contexts and
+browser matte-profile differences remain open (**CI-18**).
+
+### 2026-10-12 — Qualified text tile/layer and immutable publication checkpoint
+
+Protected `text_tiles36q_*` passes fresh core 6,766 and Radiant 5,371 full /
+353 partial /one skipped cases. Seven matching sanitizer runners pass 1,148
+cases; twenty-one live fixtures pass 598 assertions per runtime, and the Canvas
+golden passes. The exporter is explicitly rebuilt and all requested groups are
+registered. Full exports pass 247/249 groups, focused exports 26/27; the same
+nineteen gradient-range comparisons and two ordered PDF boundaries remain.
+The new text-tile group and earlier text controls pass all 84 comparisons on
+both native and sanitizer runtimes. No tolerance, golden or allowance changes.
+
+111 normal and 141 sanitizer inputs match protected runtimes. The artifact
+record protects 120 records, 150 required-result copies, 1,352 preceding export
+namespace files and 1,344 text export files. The measured boundary remains
+185 deferred /48 unapproved with no additions; all four strict DSOs build,
+while closure remains open (**D7.3.3–D7.3.4**). Shared Canvas/Scene3D/glyph image
+publication and owner release follow **D4.5.1v4**. The scoped inventory now
+records tile/color/layer consumers and their remaining limits (**CI-18**).
+The main source is available for the next verified increment; no whole-family
+or P0–P2 closure is claimed.
+
+### 2026-10-12 — Isolated text-shadow routing and visible paint order
+
+`text_effects37/` reproduces six SVG failures: fully transparent shadow styling
+selected a branch that omitted background paint. Moving existing run setup and
+background recording before the branch preserves text lifetime and passes
+18 exact comparisons. Visible sharp shadows were absent from SVG/PDF; native
+background images overlaid sharp shadows and source-order traversal put the
+last shadow on top. Selected-font contour consumers, a shared reverse-shadow
+visitor and native background/shadow/foreground order pass eighteen additional
+comparisons, including independent overlapping glyph references for shadow
+lists. The helper reuses the module's owned solid-shape recorder (**CI-18 /
+D4.5.1v4**). The [CSS Text Decoration paint order](https://drafts.csswg.org/css-text-decor-3/#text-shadow-property)
+places the shadow between background and text; no formal ruling changes.
+
+Blurred shadows remain under investigation. An isolated borrowed filter is
+consumed synchronously before its output image is deferred. Selected-font
+raster lowering fixes the outline-versus-filter coverage discrepancy, and a
+convolution-support helper accounts for all three passes. Raw trials still
+preserve native and one export byte-edge failure; none is applied or promoted
+as full blur support. Sharp verified sources are frozen separately.
+
+### 2026-10-12 — Applied text shadows and filter device-length capture
+
+The applied `text_effects37` increment keeps clipped backgrounds before shadows
+and foreground text, visits each authored shadow in reverse order, and captures
+each native shadow into a separate immutable glyph image. Unrelated backdrop
+pixels are never blurred; different offsets/radii retain their own layers. SVG
+and PDF consume selected-font contours for sharp shadows and selected-font
+raster captures for blur. Capture bounds follow emitted hinted glyph bitmaps,
+which can exceed outline bounds; this repairs a clipped SVG blur edge (**CI-18 /
+D4.5.1v4**).
+
+The new references exposed a shared density defect: ordinary native and export
+CSS filter lengths were still interpreted as device pixels at 2×. Display-list
+arena copies now convert blur/drop-shadow lengths without mutating computed
+CSS. The capture helper belongs to display-list recording, preserving paint-only
+test linkage. Full evaluator transfer belongs to the runner, keeping its JS and
+native-stack dependencies out of standalone core fixtures while preserving the
+existing handoff behavior (**D5.4.1 / D7.1.3**). The full test build and directory
+fixture pass; no test stubs or assertions are weakened.
+
+Focused main references pass 56/60 comparisons: all twenty PNG and twenty SVG
+checks, with four exact 2× PDF byte edges retained as failures. Aligned extracted
+PDF alpha masks for the basic blur case are identical; its reader comparison
+still fails. Thirty-six live mutation/DPR assertions and 137 native vector cases
+pass. The new ownership test replays after font/context, source text and PaintIR
+retirement at both densities and checks temporary capture arenas are released.
+No tolerance, golden or boundary allowance changes. Broader shaping, decoration,
+color-font, fragment/ancestor geometry and transformed blur semantics remain open.
+
+`ordered_37_anchor.json` protects 116 inputs and runtime
+`e21b4ed26a27a16bc42fdc4a4650b427006924aa73ee9c72ae98dbef6d60ea7a`.
+Fresh required gates and matching sanitizers are running as `text_effects37q_*`;
+this is an applied increment awaiting qualification, not a new accepted aggregate
+or P0–P2 closure. The protected `text_tiles36q_*` remains the accepted aggregate.
+
+### 2026-10-12 — Qualified bounded shadows, density and stronger SVG checks
+
+Protected `text_effects37q_*` passes fresh core 6,766 and Radiant 5,377 full /
+353 partial /one skipped cases. Seven matching sanitizer runners pass 1,149
+cases; twenty-two live fixtures pass 634 assertions per runtime and the Canvas
+golden passes. The raw full sweep also exposed two representation-specific SVG
+assertions: serialized shadow CSS and a CJK `dx` string. They are superseded by
+independent default-font shadow references at both densities and actual CJK
+foreground/shadow region checks in PNG and rasterized SVG. Existing native CJK
+assertions are preserved through a shared helper; neither test weakens its
+behavioral contract (**CI-18**).
+
+The rebuilt `text_effects37r_*` full sweep passes 249/253 groups. The same
+nineteen gradient-range comparisons and two ordered PDF edges remain, together
+with four exact 2× blurred-shadow PDF comparisons. The stronger default-font/CJK
+checks also pass against the sanitizer runtime. `make test-svg-export` passes
+all 126 format checks and 2,466 pixel assertions, including relocated resources.
+No tolerance, golden, skip or boundary allowance changes.
+
+An additional Cairo probe passes 17/21 failed PDF pairs exactly, including all
+four new blur pairs and both ordered-background pairs. Four marker/border range
+pairs still differ by one byte. The original Splash failures are preserved;
+the probe narrows the diagnosis without replacing their required comparisons.
+All twenty native and twenty SVG shadow references pass at both densities;
+selected-font default-font references and CJK pixel checks add real consumers
+rather than crediting serialized CSS (**CI-18 / D4.5.1v4**).
+
+116 reviewed normal inputs and 144 sanitizer inputs match protected binaries.
+The reviewed change touches only the exporter test source; production code,
+all sanitizer inputs, native tests and live fixtures are unchanged from the
+fresh required gates. `text_effects37r_reused_runtime_gates.json` records this
+reuse explicitly. The earlier checkpoint protects 123 records, 150 required
+result copies, 1,352 preceding namespace exports and 724 shadow files; the
+reviewed record additionally protects fourteen records and 1,260 export/probe
+files. The 410-name inventory and no-int-cast lint pass. Boundary closure remains
+185/48, with no additions or removals relative to checkpoint 36
+(**D7.1.3 / D7.3.3–D7.3.4**). This qualifies a bounded consumer, not a text-family
+or P0–P2 closeout; broader text/paint models and the remaining API debt stay open.
+
+### 2026-10-12 — Gradient precision investigation and requested wrap-up
+
+The accepted `text_effects37r_*` source/runtime checkpoint remains unchanged.
+`range_color38/` is isolated and unapplied. Read-only inspection identifies
+native lookup-table interpolation as the marker/border range byte discrepancy.
+An exact-endpoint canonicalization trial repairs those aliases but introduces
+cropped-background differences; it is rejected. An analytical native fill trial
+removes the marker/border byte differences but retains the eleven range PDF
+reader failures and introduces text coverage regressions. Its full-surface
+capture also needs bounded allocation and performance work before promotion
+(**CI-18 / D4.5.1v4**).
+
+Both trials preserve source/runtime hashes, raw failures and logs. The analytical
+trial ends with two passing /three failing groups; no tolerance, reference reader,
+vendor source or main implementation is changed. `range_color38/unqualified_handoff.json`
+and frozen sources record the remaining batch/clip/coverage investigation.
+The user requested wrap-up; implementation work stops with the complete P0–P2
+scope outstanding, not marked achieved. Resume from the accepted checkpoint
+and this root-cause evidence rather than applying either draft.
+
+
+### 2026-10-12 — Applied gradient precision and scoped selection fixes; qualification running
+
+The resumed source is merged `7ada2791e`. Affine native linear fills now use the
+shared premultiplied-color sampler at pixel centers rather than the backend's
+quantized lookup table. Coverage remains owned by the vector path/clip rasterizer,
+with buffers bounded to the visible path and the caller's tile lattice preserved.
+The shared stop sampler uses upper-bound lookup for long fixed-up lists, retaining
+the following color at coincident stops. Scanline color reuse keeps horizontal
+long-stop gradients from repeating identical work. Stroke, projective and
+degenerate paths retain their existing backend behavior (**CI-18 / D4.5.1v4**).
+
+The tile-origin fix eliminates the rejected trial's text regressions and all
+eight marker/border byte discrepancies. The six-group isolated exporter has
+five passing groups and eleven unchanged range PDF-reader assertions in its
+remaining failing group. Native vector and matching scoped ASan builds each
+pass 141 cases, including fractional tiles, transforms, curved coverage, batch
+order, range aliases and 1,024-stop hard boundaries. Matched release CLI probes
+show similar small-path and horizontal 256-stop page times; the 1024×768 diagonal
+two-stop page adds about six milliseconds. Those interleaved measurements ran
+alongside exporter work and are indicative, not a general performance claim.
+
+A fresh sweep exposed malformed selection-fixture JSON and color bounds nested
+under `target`, where the event reader did not check them. Correct syntax and
+bound placement activate four failing assertions. Traces identify two consumer
+causes: subtree replacement cleared every document highlight cascade, and text
+controls could lack inline storage before highlight computation. Replacement
+now clears the affected builder subtree; highlight computation uses the existing
+owned inline-property helper. The corrected original four assertions and a
+new twenty-assertion focus/restyle/density fixture pass. Native view and matching
+scoped ASan builds each pass 637 cases, including 64 repeated local replacements
+that preserve a sibling's highlight declaration (**D4.5.1v4 / D4.1.4v5**).
+
+`range_color38/applied_proof.json` protects the nine applied source/test files,
+frozen sources, isolated results and release commands. The restricted full sweep
+completed 252 ordinary groups, retaining the four existing PDF failure groups
+and malformed selection-fixture failure, then stalled in native WebGL setup.
+Its process tree was stopped after the identical WebGL group passed with native
+GPU services in 98.5 seconds; raw logs and termination evidence remain. Fresh
+merged-checkout core, Radiant, full GPU-enabled exporter, sanitizer, live and
+boundary gates are running as `gradient_selection38q_*`. This is an applied
+increment awaiting complete qualification; no P0–P2 tier is closed.
+
+
+The first fresh core run (`gradient_selection38q_lambda_gate.log`) passes
+6,794/6,795 cases and fails only
+`InputScriptCacheTest.PrebuildQueuesNestedImportsWithoutDepthBarrier`. Three
+isolated runs pass. Its fixed 200 ms discovery sleep races worker scheduling;
+a bounded condition-variable handshake now coordinates the required overlap,
+retaining the same shared-dependency, build-order and overlap assertions. The
+sixteen-case cache suite and one hundred fresh-process/four-concurrent stress
+runs pass. No production prebuild behavior or ruling changes (**D8.5.1v7**).
+The failed run, original source digest and test-fix proof are retained in
+`range_color38/core_prebuild_failure/`. Fresh complete qualification restarts as
+`gradient_selection38r_*` with this test source added to provenance; the first
+run is not credited as an all-green gate.
+
+
+The restarted core gate passes all 6,795 cases. Its Radiant gate fails only
+`RetainedDisplayListTest.EvictionWhileReadersReplayIsSafe`: the writer finishes
+before any reader runs. Three isolated runs pass. The test now pins each reader's
+surfaces before the first eviction and reads them after eviction starts; a live
+checksum preserves the pixel loads through optimization. The original read-count
+assertion remains, and the checksum adds a stronger consumer. All thirty retained
+cases, thirty scoped ASan cases and one hundred fresh-process/four-concurrent
+stress runs pass. The production surface registry is unchanged
+(**D4.5.1v4 / D4.1.4v5**); raw failure and proof remain in
+`range_color38/retained_reader_failure/`.
+
+The CSS changes were externally committed as `dbe8284f5`; the checkout then merged
+`a600e59bc`, updating test scheduling and LaTeX package/corpus files. Required
+qualification restarts as `gradient_selection38s_*` on that merged source with
+the stronger reader test and changed harness/corpus inputs included in provenance.
+Previous partial/failing aggregates are retained, not counted as a current pass.
+
+
+`gradient_selection38s_*` passes the merged 6,797-case core gate. Its Radiant
+invocation still used the earlier reader-test executable: the temporary driver
+called `run-radiant-baseline`, which does not build changed tests. The failing
+line number matches the old executable, so that attempt does not qualify the
+new handshake. The driver now uses the required `make test-radiant-baseline`;
+`gradient_selection38t_*` rebuilds and reruns Radiant, exporter, sanitizer and live
+checks. The core pass is reused with exact 134-source and runtime verification,
+recorded explicitly in the qualification plan; no production source changed
+between those runs. Both raw Radiant failures remain visible.
+
+
+The rebuilt `gradient_selection38t_*` reader test passes all thirty cases.
+Its only Radiant failure is Ringworld's native graphics-context creation;
+eight scene assertions consequently fail. Three graphics-enabled isolated
+reruns pass unchanged. The raw scene log and results remain in
+`range_color38/ringworld_failure/`; `gradient_selection38u_*` refreshes the
+aggregate with the same source/runtime, expectations and concurrency. No scene
+failure is hidden by a skip, tolerance or replacement test.
+
+A subsequent P1.3 draft under `temp/css_support_p1/decoration39/` remains isolated
+and unapplied while this checkpoint qualifies. It reproduces a 64-gap cap in
+long solid underlines and unscaled decoration thickness at 2×. Scoped source-byte
+storage removes the cap, and thickness converts once to output pixels
+(**D4.5.1v4**, **RSC7**). Four native and four text-owner ASan groups pass;
+the new long-run test fails on the current main runtime. Non-solid ink skipping
+is also reproduced; its candidate clips the full pattern without restarting
+its phase and requires further geometry/export/lifetime qualification.
+
+
+### 2026-10-13 — Qualified bounded gradient precision and selection scope
+
+`gradient_selection38u_*` protects the merged normal runtime
+`a5dfe048ae66c738a803928d00a57227b49d16b5ee184cfaea2e1638024820b2`,
+134 normal inputs and 140 sanitizer inputs. The exact matching core pass is
+6,797; rebuilt Radiant passes 5,408 full /353 partial /one skipped. Seven owner
+sanitizer runners pass 1,110 cases; the separate surface-owner/retained-test
+sanitizer passes thirty cases. Twenty-three live fixtures pass 654 assertions
+per runtime, including twenty selection assertions, and the Canvas golden passes.
+Sanitizer coverage is scoped; remaining host/vendor objects are ordinary debug
+and leak detection is disabled (**D4.5.1v4 / D4.1.4v5**).
+
+The fresh full exporter passes 249/253 groups. Eight native/PDF marker and border
+byte discrepancies are removed. Seventeen comparisons remain: eleven range
+PDF-reader assertions, two ordered PDF edges and four blurred-shadow PDF bytes.
+Focused sanitizer exports preserve the same three range/shadow failure groups,
+and ordered exports preserve their two failures. `make test-svg-export` passes
+126 format checks /2,466 assertions, including relocated resources (**CI-18**).
+The fresh strict boundary remains 185 deferred /48 unapproved imports against
+an unchanged allowance of 165; all four strict DSOs build, with no symbol
+additions/removals (**D7.1.3 / D7.3.3–D7.3.4**).
+
+The two concurrency-test failures, stale-test invocation and transient Ringworld
+graphics-context failure remain in their raw records. The accepted aggregate
+uses the rebuilt required gate and unchanged graphics test after three isolated
+passes; no failure is skipped or counted as a passing case. Source snapshots,
+binary hashes, commands, result manifests and copied export resources are
+protected by `gradient_selection38u_protected_artifacts.json`. This accepts the
+bounded consumers; the full P0–P2 goal and broader CSS/text/paint/API debt remain
+active.
+
+
+### 2026-10-13 — Qualified native decoration continuity and density
+
+The long-run reproducer paints 1,000 red pixels in each sampled band with
+`skip-ink:none`. Before the fix, `all` leaves only 75 red pixels in an early
+band but all 1,000 beyond the former 64-gap cap. Scoped byte-bounded storage
+retains every decoded glyph gap. A separate 2× control identifies unscaled
+CSS/font decoration thickness; it now converts once before device-grid
+snapping (**D4.5.1v4 / RSC7**).
+
+Dashed/dotted/double/wavy paths previously bypassed ink skipping. Their full
+patterns now share the interval clip, preserving dash/wave phase; line-through
+stays continuous. Tight fractional clip bounds trimmed two wavy antialias rows;
+aligned vertical mask edges preserve both rows exactly. Five native and five
+text-owner sanitizer groups pass, including an eighty-glyph run at both densities,
+inter-glyph phase comparisons and full-image continuous-strike controls. The
+native baseline fails the new long-run and styled tests.
+
+Twenty-four live `none`→`all`→`none` pixel assertions pass at 1×/2×. The initial
+fixture sampled a 1× boundary pixel outside the 2× stroke; retained failed results
+are superseded by fixed interior witnesses independently verified in both native
+raster controls. No pixel tolerance or search radius is widened (**CI-18**).
+
+`decoration39/applied_proof.json` protects the four applied source/test files and
+isolated evidence. Fresh `decoration39q_*` qualifies 6,797 core cases; 5,409 full /353 partial /one
+skipped Radiant case; 1,110 owner sanitizer cases; and 678 live assertions per
+runtime, including the twenty-four new decoration assertions. The full exporter
+passes 251/255 groups and preserves the same seventeen PDF comparisons. SVG
+export passes 126 format checks /2,466 assertions. The strict boundary remains
+185 deferred /48 unapproved imports with no additions/removals and all four DSOs
+built (**D7.1.3 / D7.3.3–D7.3.4**). Normal/ASan source snapshots contain 136/140
+inputs; copied exporter resources and results are protected by
+`decoration39q_protected_artifacts.json`. Vector probes retain zero red
+stroke pixels for the tested SVG/PDF cases: SVG's CSS delegation lacks portable
+style/thickness paint, and PDF records no decoration producer. Those outputs
+remain explicit P2.2 work; the native slice does not qualify them. Larger text,
+shaping, decorating-box uniformity, transparent colors and fragment/ancestor
+contexts remain open under the [working contract](../radiant/Radiant_CSS_Cascade.md).
+
+
+### 2026-10-13 — Qualified shared decoration geometry, order and ownership
+
+Native and vector recording share font metrics, complete pattern paths and
+byte-bounded glyph ink intervals under [§3.19](../radiant/Radiant_CSS_Cascade.md#319-shared-decoration-paint-geometry-bounded-implementation).
+Raster recording retains device snapping; SVG/PDF retain fractional logical
+geometry (**RSC1 / RSC7**). SVG decorated text uses the selected glyph outlines
+and accessible labels. PDF now receives the same decoration producer. Underlines
+and overlines precede glyphs; line-through follows them (**CI-18**).
+
+Empty visible-interval sets now submit no pattern. Clip recording uses the
+existing owned clone; fill/stroke payloads transfer before scratch retirement.
+Compound failures rewind owned commands and report incomplete export geometry
+(**D4.5.1v4 / D4.1.4v5**). Seven focused decoration groups pass actual PNG,
+independently rasterized SVG and PDF checks. Five replacement pixel groups fail
+on the protected native-39 runtime. Four ownership groups pass normal and scoped
+ASan, including eight pattern/density combinations replayed after font, source
+and PaintIR retirement. Scoped sanitizer inputs include 141 sources; unchanged
+ASan-39 owners are reused, remaining objects are ordinary debug and leak
+detection is disabled.
+
+The gap fixture now uses transparent glyph paint, so native `none`/`all` changes
+remain visible after correcting paint order; both normal and ASan pass twenty-four
+live assertions. A separate opaque-mask reference verifies actual glyph/stroke
+overlap at both densities in all three outputs. Initial masks included partially
+covered glyph pixels and incorrectly assumed opaque composition; their raw
+failed results remain preserved. The vector long-run control measures normalized
+stroke area because fractional edges divide coverage between rows and the 1×
+PDF reader color-manages RGB; native pixel-count thresholds are unchanged.
+
+Twenty-three exact vector pattern-edge comparisons remain failed in a separate
+export group. All eight SVG pattern paths retain identical attributes; removing
+only the interval clip makes their complete rasterized output byte-identical to
+the continuous control. The independent readers change antialiased edge bytes
+when a clip is present. Raw comparisons remain required and failed; this slice
+qualifies colored strokes, placement, gaps, order and ownership, not complete
+vector edge parity. Transparent decoration colors, transformed/effect producers,
+decorating-box uniformity, shaping, vertical and fragmented contexts remain open.
+
+The isolated full run completed all 256 ordinary export groups with the original
+four range/shadow/ordered groups and the new vector-fringe group failed. Its GPU
+subprocess stalled in sandboxed context creation; the run was terminated and its
+raw log retained. A separate native-host GPU group passes. `decoration40/applied_proof.json`
+protects the eight applied files and isolated results. Fresh `decoration40q_*`
+passes 6,797 core tests; 5,410 full /353 partial /one skipped Radiant case;
+1,111 matching owner ASan cases; 678 live assertions per runtime and the Canvas
+golden. The complete native-host exporter passes 252/257 groups, preserving
+seventeen prior PDF comparisons plus twenty-three vector pattern-edge comparisons.
+Scoped exports reproduce the same range/shadow/fringe failures and ordered edges.
+The SVG matrix passes 126 format checks /2,466 assertions. Strict DSOs build;
+boundary debt remains 185 deferred /48 unapproved with no additions/removals
+(**D7.1.3 / D7.3.3–D7.3.4**). Normal/ASan snapshots contain 136/140 inputs, with
+no drift or sanitizer reports. Results and copied exporter resources are protected
+by `decoration40q_protected_artifacts.json`. No P0–P2 tier is closed.
+
+The next `decoration41` reproducer paints unintended text-colored lines for
+transparent longhand/shorthand/zero-alpha values in all three outputs, and fails
+eight of sixteen live color-state assertions on the protected runtime. Its draft
+separates current-color selection from RGBA, shares the existing emphasis predicate
+and keeps reset/inheritance state through font-value copies. It remains isolated
+under [§3.20](../radiant/Radiant_CSS_Cascade.md#320-decoration-color-state-bounded-implementation)
+until its references, mutation and owner checks pass.
+
+
+### 2026-10-13 — Qualified decoration color state and defaults
+
+The [§3.20 contract](../radiant/Radiant_CSS_Cascade.md#320-decoration-color-state-bounded-implementation)
+now separates `currentColor` from RGBA. Resolution retains authored zero alpha,
+shorthand resets and explicit inheritance; font-value helpers copy the mode and
+all three painters consume it. The existing emphasis current-color predicate is
+shared rather than duplicated (**CI-18 / D4.5.1v4 / D4.1.4v5**).
+
+Default-color checks exposed partial UI/legacy font initializers leaving the new
+mode unset. Their common initializer now sets the mode once and retains the
+existing UA values. The final isolated normal and scoped ASan runtimes pass
+three color groups: thirty reference pairs /ninety exact PNG, independent-SVG
+and PDF image comparisons at both densities, including omitted color without a
+shorthand reset, transparent/zero-alpha/variable values, current-color/reset and
+explicit inheritance. Both runtimes pass sixteen live mutation assertions and
+four retirement/ownership groups. Seven prior decoration groups still pass;
+the same vector-fringe group retains twenty-three failed comparisons. All three
+new color groups fail on the protected native-40 runtime; its live color fixture
+fails eight of sixteen assertions.
+
+`decoration41/applied_proof.json` protects ten applied files and isolated evidence.
+Fresh `decoration_color41q_*` passes 6,797 core tests; 5,411 full /353 partial
+/one skipped Radiant case; 1,111 scoped ASan cases; 694 live assertions per runtime
+and the Canvas golden. The complete exporter passes 255/260 groups and retains
+the same forty comparisons in five groups. SVG export passes 126 format checks
+/2,466 assertions. All strict DSOs build; the boundary remains 185 deferred /48
+unapproved imports with no additions/removals (**D7.1.3 / D7.3.3–D7.3.4**).
+Normal/ASan snapshots contain 138/140 inputs, with no drift or sanitizer reports;
+results and copied resources are protected by
+`decoration_color41q_protected_artifacts.json`. Complete decorating-box
+propagation, color grammar/computed reflection, transformed/effect and vertical/
+shaping contexts remain open; no P0–P2 tier is closed.
+
+An independent `decoration42` control preserves the pre-existing shorthand winner
+failure found in the first reference: later `text-decoration:none` does not cancel
+an earlier `text-decoration-line:underline`. It differs from explicit undecorated
+text by 690 native pixels and 714 SVG/PDF pixels at 1×. Color references use an
+explicit `text-decoration-line:none` destination so this separate cascade defect
+cannot redefine their expected alpha result. The winner fix is the next P0.2
+slice; raw failures and its protected-runtime provenance remain retained.
+
+
+### 2026-10-13 — Qualified decoration shorthand component winners
+
+Property-ID traversal previously applied a shorthand before its weaker longhands,
+which then resurrected canceled lines or restored obsolete colors/styles/thickness.
+The existing cascade comparison helper now gates those component applications
+under [§3.21](../radiant/Radiant_CSS_Cascade.md#321-decoration-shorthand-component-winners-bounded-implementation)
+(**CI-18 / D4.5.1v4 / D4.1.4v5**). Stronger longhands remain selected.
+
+Fourteen controls at both densities pass eighty-four exact PNG/SVG/PDF reference
+comparisons in normal/scoped ASan. They cover all four components, source order,
+importance, specificity, normal/reversed-important layer order, invalid declarations
+and variable substitution. The protected native-41 runtime fails both new groups
+with forty-eight comparisons. Normal/ASan class restyles pass twelve live assertions;
+the baseline fails six of twelve. Earlier decoration/color controls retain only
+the same twenty-three vector-fringe comparisons. The common reference builder
+is shared with the color tests rather than copied.
+
+`decoration42/applied_proof.json` protects four applied files and the isolated
+source/runtime evidence. Fresh `decoration_winner42q_*` passes 6,797 core tests; 5,412 full /353 partial
+/one skipped Radiant case; 1,111 scoped ASan cases; 706 live assertions per runtime
+and the Canvas golden. The complete exporter passes 257/262 groups, preserving
+the same forty comparisons in five groups. SVG export passes 126 format checks
+/2,466 assertions. Strict DSOs build; the boundary remains 185 deferred /48
+unapproved imports with no additions/removals (**D7.1.3 / D7.3.3–D7.3.4**).
+Normal/ASan snapshots each contain 140 inputs, with no source drift or sanitizer
+reports. Results and copied resources are protected by
+`decoration_winner42q_protected_artifacts.json`.
+Complete CSSOM shorthand reflection, scope/layer breadth, decorating-box ownership,
+transformed/effect and shaping/vertical consumers remain open. No P0–P2 tier is closed.
+
+
+The next isolated `decoration43` probes show native underlines losing eighty red
+pixels to overlapping shadow ink, and all outputs omitting line shadows between
+glyphs. The draft reuses decoration geometry for shadow capture, applies layer
+alpha once, restores background/shadow/line/glyph order and computes complete
+filter support at destination density. A translated-text reference also exposes
+SVG shadow-transform versus direct-path rounding; shifted glyph-run creation now
+shares the foreground coordinate calculation. Direct recording through the real
+painter gateway removes the two sharp native-wavy capture-rounding differences;
+six translated blurred-shadow comparisons remain failed. Isolated native PDF transparency groups remove the
+sharp partial-alpha failures; one blurred-alpha PDF comparison and two PDF
+coincident-union fringe comparisons remain. Cropped RGB/soft-mask byte audits
+match for the solid and partial-alpha blur references, so their reader fringes
+are preserved separately from source-pixel correctness. Shadow lifetime/live
+qualification remains pending.
+This draft remains unpromoted under [§3.22](../radiant/Radiant_CSS_Cascade.md#322-decoration-shadows-and-complete-text-paint-order-isolated-delivery-contract).
+
+### 2026-10-13 — Qualified native PDF group opacity
+
+The shadow alpha control also reproduced a separate PDF effect defect:
+opacity multiplied each primitive, making overlapping opaque children show
+through one another. Lambda's PDF writer now records an isolated transparency
+Form and applies opacity to its invocation. Nested forms retain vector content,
+share document-owned resources without parent/self cycles, restore parent font
+selection and reject unbalanced serialization. Fractional Form boundaries
+enclose ink before PDF clipping. This implements the bounded
+[§3.23](../radiant/Radiant_CSS_Cascade.md#323-pdf-group-opacity-bounded-delivery-contract)
+consumer contract (**CI-18 / D4.5.1v4 / D4.1.4v5**).
+
+`pdf_opacity43/final_isolated_provenance.json` protects thirty reference pairs
+across PNG/SVG/PDF and both densities, covering overlap interiors, nested alpha,
+primitive alpha, coloured backdrops, translation/overflow and subsequent opaque
+paint. Normal and ASan both pass 51 writer cases and 38 live assertions. Protected
+runtime 42 fails the new interior/resource control with 380 assertions. Writer
+fixtures now stay under `./temp/`. Complete union-perimeter reader controls are
+retained separately; this delivery does not redefine their expected pixels.
+
+Seven source/fixture files are applied under `pdf_opacity43/applied_proof.json`.
+Fresh `pdf_opacity43q_*` passes 6,797 core tests; 5,416 full /353 partial /one
+skipped Radiant case; 1,162 scoped ASan cases; 744 live assertions per runtime
+and the Canvas golden. The full exporter passes 258/263 groups with the same
+forty comparisons in five groups. SVG export passes 126 formats /2,466
+assertions. The boundary remains 185 deferred /48 unapproved imports with no
+additions/removals; all strict DSOs build (**D7.1.3 / D7.3.3–D7.3.4**).
+Normal/ASan snapshots contain 145/143 inputs with no drift or reports. The
+protected manifest contains 147 records and references 46,600 copied exports.
+`pdf_opacity43q_protected_artifacts.json` seals the accepted aggregate. The
+support inventory now records twenty bounded partial families among 410 names.
+
+The broader `decoration43` draft stays isolated. Its source-ink bound repair
+under [§3.24](../radiant/Radiant_CSS_Cascade.md#324-recorded-source-ink-and-filter-captures-isolated-delivery-contract)
+removes the native clipped blur tail; remaining translated/alpha comparisons
+are PDF reader fringes, with two additional coincident-union controls preserved.
+Complete ink bounds, arbitrary effect ordering, deep group nesting and
+independent/paged consumers remain open. No P0–P2 tier is closed.
+
+
+### 2026-10-13 — Applied decoration shadows, transformed paint and complete effect ink
+
+Checkpoint 44 applies the bounded contracts in cascade §3.22/§3.24 under
+**CI-18 / RSC1 / RSC7**, with source/font borrows and retained paths/images under
+**D4.5.1v4 / D4.1.4v5**. Shadow layers now include the shared decoration geometry;
+native foreground lines follow the complete background/shadow prepass. Each
+partial-alpha layer composites its combined glyph/line silhouette once. Sharp
+native shadows use the existing glyph gateway, and native line paths/rectangles
+retain the current transform. Projected images use the common premultiplied
+source-over compositor for integral rectangular clips; curved clips retain the
+existing coverage renderer.
+
+Effect captures derive bounds from completed display-list source ink and the
+actual three-pass blur support at output density. Saved backdrop regions resize
+before publication. Native PDF opacity Forms also accumulate painted path,
+stroke and image bounds through nested groups; clipping paths are excluded and
+cached pen/font state restores through graphics saves and group boundaries.
+
+The allocation audit repairs null dereferences in display-list recorders and
+owned path cloning. Compound semantic shadows rewind every earlier layer on
+failure. Clipped image recording rolls back partial clip/image commands,
+releases snapshot leases and restores clip depth; failed paint propagates to
+the frame. Existing descriptor metadata supplies the common path ownership
+shape instead of five copied recorders.
+
+`temp/css_support_p1/decoration_shadow44/isolated_provenance.json` seals the
+26 applied files and normal/ASan evidence: 146 vector cases, 52 writer cases,
+18 live shadow assertions per runtime, and eight reference groups. All native
+and SVG comparisons pass. Five PDF groups retain twelve failed assertions:
+five translated blur references, one partial-alpha blur reference, two
+coincident union fringes, two source-overflow filter references, and two
+multilayer/transformed blur references. Their raw failures remain preserved;
+no tolerance or expected result was weakened. Source/font/PaintIR retirement,
+forty style/density/blur/alpha combinations, pressure rollback, all coverage
+bytes, clipped tiled targets and vector batch order have explicit controls.
+
+The first full run passed 6,797 core cases, then the display-list-only runner
+failed to link the blur-support geometry helper. The pure blur extent helpers
+now live in the shared geometry module; no renderer stub or copied formula was
+added. That raw build failure is preserved as `decoration_shadow44q_*`.
+The repaired run again passed 6,797 core cases. Its Radiant gate exposed a
+native background-attachment regression: image transaction checks included
+previously queued semantic paint, reporting failure and sometimes discarding
+that earlier paint during rollback. The gateway now flushes that prefix before
+its image checkpoint. A causal unit reproduces both direct and transformed
+paths; fault injection verifies queued paint and snapshot leases survive failed
+images. The real attachment fixture passes 26 assertions in three repeated
+native runs and ASan; all 147 vector cases pass. These failures remain preserved
+as `decoration_shadow44rq_*` and the attachment recheck records.
+Fresh full qualification is now running as `decoration_shadow44sq_*`. The protected
+`pdf_opacity43q_*` remains the accepted aggregate until those gates and artifact
+protection finish. Broader decorating-box/fragment, emphasis, shaping/vertical,
+effect ordering, independent/paged consumers and all unfinished P0–P2 criteria
+remain open. Boundary debt is still the previous 185 deferred /48 unapproved
+imports (**D7.1.3 / D7.3.3–D7.3.4**); this delivery does not claim its closure.
+
+
+### 2026-10-13 — Applied private capture trimming after complete shadow gates
+
+The untrimmed checkpoint `decoration_shadow44sq_*` passes 6,797 core cases,
+5,423 full /353 partial /one skipped Radiant case, 1,168 scoped ASan cases,
+762 live assertions per runtime and the Canvas golden. Its full exporter passes
+260/270 groups with 53 raw assertions. Boundary debt remains 185 deferred /48
+unapproved, with no delta (**D7.1.3 / D7.3.3–D7.3.4**). Source snapshots contain
+152 normal /145 ASan inputs without drift or reports. The additional PDF failure
+is retained alongside 1,586 copied raw records/artifacts under
+`decoration_shadow44/raw44s/protected_records.json`; this checkpoint is not
+accepted as the new aggregate.
+
+The nonconstant background capture grows from 96×64 to 98×66 because recorded
+bounds conservatively include antialias margins. An audit proves the inner RGB
+bytes match the predecessor exactly, the inner alpha is 255 and the added border
+alpha is zero. That border introduces a PDF soft mask and changes reader edge
+sampling. The capture now trims only fully transparent margins before immutable
+publication, preserving every nonzero-alpha sample, including alpha 1. In-place
+row compaction needs no additional allocation; encoded dimensions and physical
+placement update together (**CI-18 / RSC1 / RSC7 / D4.5.1v4 / D4.1.4v5**).
+Borrowed, decoded and published buffers are excluded from mutation.
+
+`decoration_shadow44/trim_isolated_provenance.json` seals 148 vector cases,
+52 writer cases and 44 live shadow/attachment assertions per normal/ASan mode.
+Eleven selected reference groups retain only four PDF assertions: two older
+ordered-background edges and two coincident opacity-union fringes. The new
+background regression, ten new blur/source-overflow assertions and the four
+predecessor shadow-blur assertions now pass without changing their expectations.
+Publication/release, generation/handle identity, exact cropped bytes, alpha 1,
+clear no-op and injected allocation failure have ownership controls.
+
+Four corrected files are applied. Full qualification runs as
+`decoration_shadow44tq_*`; the protected opacity checkpoint 43 remains the
+accepted aggregate until the complete gates, SVG matrix and artifact protection
+finish. All broader P0–P2 criteria remain active. The eight-import native
+state/layout provider draft remains isolated with its separate evidence.
+
+
+### 2026-10-13 — Isolated native state/layout provider continuation
+
+The remaining P0 module audit identifies eight direct renderer imports in the
+DOM runtime: state booleans, repaint/reflow flags, layout flushes, effective
+zoom, vertical-rl flow, specified flex keywords and anonymous table fixup
+preparation. The draft in `temp/css_support_p1/native_state45/` extends the
+existing lower-owned host provider table under **D7.1.3 / D7.5.3**. Native
+callbacks keep the renderer implementations with their owners; the DOM runtime
+calls lower-runtime entries with synchronous borrowed identities
+(**D4.5.1v4 / D4.1.4v5**). The context-local interaction-state fallback is
+preserved, and an absent layout provider cannot clear pending reflow.
+
+The staged DOM object references the eight provider entries and none of the
+eight earlier renderer symbols. Provider absence, incomplete/conflicting
+publication and eight concurrent registration/dispatch workers have controls.
+Seven real fixtures cover form state, language invalidation, layout flushes,
+negative scrolling, table mutation and detached/fresh geometry; 115 assertions
+pass per runtime on the earlier prototype. Its eight scoped ASan runners pass
+1,168 cases and the Canvas golden without reports. That evidence predates the
+capture trimming correction, so native/ASan rebuilds and consumer checks are
+being refreshed before promotion. The draft remains unapplied; strict-module
+results and full integration qualification are still required. No boundary
+allowance or P0 closure changes are claimed.
+
+
+The trimmed checkpoint's fresh core gate passes all 6,797 cases with 153 guarded
+inputs and runtime `0486f12c…`. Its Radiant run then encounters `ENOSPC` while
+writing machine results; those incomplete artifacts are preserved under
+`decoration_shadow44/enospc44t/`. Reclaiming only older temporary `.o`/`.d`
+products frees approximately 6 GB; binaries, source snapshots, test reports and
+exports are retained. The unchanged-source core result is reused explicitly,
+and a fresh Radiant/export/ASan/live/boundary run proceeds under
+`decoration_shadow44t2q_*`. No incomplete gate is credited as passing.
+
+### 2026-10-13 — Qualified decoration shadows, source ink and private captures
+
+Protected `decoration_shadow44t2q_*` qualifies the applied checkpoint 44t under
+**CI-18 / RSC1 / RSC7 / D4.5.1v4 / D4.1.4v5**. Complete horizontal glyph/line
+silhouettes preserve shadow layer alpha and background/shadow/foreground order.
+Translated solid/wavy decorations and sharp/blurred/translucent shadows pass
+independent native/SVG/PDF references at both densities. Completed display-list
+ink and actual blur support expand captures and saved backdrops; PDF opacity
+Forms track painted path/stroke/image bounds and restore font/pen state.
+Private zero-alpha margins are trimmed before publication, preserving alpha 1.
+Atomic recording preserves queued backgrounds and releases failed resources.
+
+The source/runtime guards cover 153 normal and 145 ASan
+inputs without drift. Core passes 6,797; Radiant passes
+5,424 full /353 partial /1 skipped. All
+1,169 scoped ASan cases, Canvas golden, and
+762 live assertions per runtime pass without ASan
+reports. SVG passes 126 format checks and
+2,466 assertions. The full exporter passes
+266/270 groups, preserving 38 raw
+assertions: ordered-background PDF edges (2), outside-stop PDF colors (11),
+styled SVG/PDF clip fringes (23), and coincident opacity-union PDF fringes (2).
+No tolerance or expected output changed. Earlier untrimmed failures remain
+preserved under `decoration_shadow44/raw44s/`.
+
+Boundary debt stays 185 deferred /48 unapproved
+with no additions or removals and allowance 165; all four strict
+DSOs build (**D7.1.3 / D7.5.3 / D7.3.3–D7.3.4**).
+`decoration_shadow44t2q_protected_artifacts.json` seals 151 records
+and 49,112 copied exports. Support inventory remains 410 names and
+twenty bounded partial families. Broader decorating-box/fragment, emphasis,
+shaping/vertical, effect-ordering and independent/paged contexts remain open.
+No P0–P2 tier is closed; the native state/layout provider is the next slice.
+
+### 2026-10-13 — Applied native state/layout ownership fix
+
+Six guarded files from `native_state45/trimbase_isolated_provenance.json` are
+applied after protecting checkpoint 44t. The lower-owned host table routes
+eight state/layout operations to their native owner under **D7.1.3 / D7.5.3**;
+source identities remain synchronous borrows under **D4.5.1v4 / D4.1.4v5**.
+The refreshed isolated evidence passes 1,169 scoped ASan cases, Canvas golden
+and 115 live assertions per runtime. Full combined qualification is running as
+`native_state45q_*`; the protected rendering checkpoint remains the accepted
+aggregate until its gates, SVG matrix and boundary audit finish. The expected
+eight-import reduction is not yet a measured boundary result.
+
+### 2026-10-13 — Qualified native state/layout provider and eight removed imports
+
+Protected `native_state45q_*` qualifies the existing lower-owned host table's nineteen
+native operations under **D7.1.3 / D7.5.3 / D7.3.3–D7.3.4**. State booleans,
+repaint/reflow flags, layout flushes, effective zoom, vertical-rl flow, specified
+keywords and table mutation preparation now retain their implementations with
+the renderer owner. Synchronous source borrows follow **D4.5.1v4 / D4.1.4v5**;
+an absent provider preserves pending reflow and context-local state fallback.
+
+Core passes 6,797; Radiant passes 5,425 full /353 partial /one skipped. All
+1,169 scoped ASan cases, Canvas golden and 837 live assertions per runtime
+pass without reports. The normal/ASan guards contain 155/146
+inputs without drift. Full export remains 266/270 with the same 38 raw failed
+assertions; SVG passes 126 formats /2,466 assertions. All four strict DSOs build.
+The boundary audit measures 177 deferred /40 unapproved imports: eight removed,
+no additions, and the 165 allowance unchanged. Remaining ownership debt stays
+open. 176 protected records and 49,112 copied exports seal this
+checkpoint; no CSS family or P0–P2 tier is closed.
+
+The checkpoint finalizer initially selected the input subgate's 2,112 count
+from the combined core log. Immutable `decoration_shadow44t2q_reviewed_summary.json`
+and `native_state45q_reviewed_summary.json` correct the aggregate to the final
+6,797/6,797 result, preserving the original protected summaries and raw logs.
+The public support row now uses that combined count; no runtime or test result
+changed.
+
+### 2026-10-13 — Isolated shared emphasis producer and causal CSSOM repair
+
+The draft under `temp/css_support_p1/emphasis46/` implements **FT-17 / CI-18**
+without applying its sources to the main checkpoint. Native/SVG/PDF share mark
+resolution, normalized em placement and selected geometry. SVG marks join the
+paint list; PDF now paints them. The existing selected-glyph traversal is
+extracted before adding another mark loop. A shared baseline helper avoids
+adding leading already included in `TextRect` placement (**FT-15 / FT-16**).
+Marks participate in complete shadow silhouettes and retain owned geometry
+after font/source retirement (**D4.5.1v4 / D4.1.4v5**).
+
+All 149 isolated vector cases pass, including the new retirement control.
+The mark/style reference passes its native checks and retains two new 1×
+SVG/PDF open-circle coverage failures. Their raw results and separate density
+artifacts remain recorded; no color threshold changed. Broader reader, font,
+fragment, shaping, ruby and vertical qualification remains open.
+
+A sixteen-assertion live fixture initially fails six checks: assigning the
+same emphasis shorthand after disabling its style leaves marks disabled.
+The protected main runtime reproduces the CSSOM defect, while Chromium 152
+replaces the overriding longhand. Changing the renderer's cascade lookup does
+not fix it; that ineffective trial is preserved and its source is restored.
+The shared CSSOM declaration store now replaces registered longhand components
+on every shorthand assignment. The same live fixture passes all sixteen
+assertions. Longhand getter projection still returns an empty string where the
+browser returns `filled dot`, so reflective CSSOM breadth stays open in P2.5.
+The full isolated exporter sweep is running against eleven frozen draft files;
+main checkpoint 45 and its support claims remain unchanged.
+
+The next isolated revision shares CSSOM emphasis component projection with the
+existing declaration expansion/serialization path. Twelve browser-verified
+cases now pass, including pending substitutions, priorities, omitted-color
+`initial`, removal and CSS-wide values. Repeated reads/writes survive 128 forced
+collections, detached ownership and reinsertion (**D5.3.3 / D5.4.1 / D4.5.1v4**).
+Hinted coverage now reaches owned SVG/PDF image resources at output density;
+the portable SVG and Poppler readers pass the original strong-color check.
+One 1× sips reader failure remains recorded. The selected glyph loader's shared
+descriptor also required preserving text advance before loading each shadow
+mark; the translated shadow/foreground reference now passes all outputs at
+both densities. Pressure rollback preserves earlier paint and later recovery.
+Matching scoped ASan passes 1,171 cases, Canvas golden, twelve CSSOM cases and
+fifty live emphasis/decoration/native-state assertions. All 150 normal vector
+cases pass. The complete final isolated exporter and SVG matrices remain
+pending; these results do not promote main support or close a tier.
+
+### 2026-10-13 — Applied shared emphasis and CSSOM projection for qualification
+
+The guarded emphasis draft is applied after preserving checkpoint 45. Its
+isolated final evidence is `emphasis46/final_isolated_provenance.json`: 150 normal
+vector cases, 1,171 matching scoped ASan cases over 146 inputs, Canvas golden,
+twelve browser-verified CSSOM cases, sixteen live emphasis assertions and the
+forced-GC detached/reinserted read controls. Translated emphasis and sharp shadow
+references pass native/SVG/PDF at both densities. The complete isolated exporter
+passes 267/272 groups with 39 preserved assertions: the prior 38 plus one
+1× sips open-circle coverage comparison. Direct Poppler and SVG readers pass that
+strong-color check without changing its threshold. The official isolated SVG
+matrix passes 126 formats /2,466 assertions (**FT-15 / FT-16 / FT-17 / CI-18**).
+Initial unhinted, canvas-size and paint-order investigation failures remain
+recorded separately; source/font/resource ownership follows
+**D4.5.1v4 / D4.1.4v5 / D5.3.3 / D5.4.1**.
+
+Fresh combined qualification is running as `emphasis46q_*`. The protected
+`native_state45q_*` remains the accepted aggregate until the required gates,
+SVG matrix, boundary audit and artifact protection finish. Support inventory
+remains twenty bounded partial families; no emphasis support promotion or
+P0–P2 tier closure is claimed before those results. Broader shaping/grapheme,
+vertical/ruby, fragment/ancestor, computed/API and arbitrary-resolution vector
+contexts remain open.
+
+### 2026-10-13 — Emphasis module-placement repair and continuing ownership audit
+
+The first combined emphasis run passes all 6,797 core cases, then fails to link
+the lightweight display-list runner: shared glyph geometry pulled in emphasis
+capture and renderer-only image functions. The producer and bitmap-mark recorder
+now live in `render_text.cpp`; shared font selection/placement and glyph paths
+remain independent. No capture formula or renderer stub was copied. All 83
+display-list, 30 retained-display-list and 21 state-store cases pass after the
+move. The failed run stays preserved as `emphasis46q_*`; fresh combined
+qualification is running as `emphasis46mq_*`, with another 6,797/6,797 core pass
+and Radiant qualification in progress (**FT-17 / D7.1.3 / D4.1.4v5**).
+
+The isolated `native_control47/` draft extends the same lower-owned provider
+for nine form-focus/value, smooth-scroll and document-tick operations under
+**D7.1.3 / D7.5.3 / D4.5.1v4**. Its DOM object imports the nine provider entries
+and none of the previous nine native symbols. Complete/absent/conflicting and
+concurrent publication controls pass; ten existing live fixtures pass 133
+assertions, and direct JS checks pass programmatic focus, Unicode values,
+UTF-16 selection, disabled fieldsets, validity, clones and retained values after
+GC. Matching ASan, full boundary measurement and main integration remain pending;
+this draft is unapplied.
+
+A separate viewport reproducer records 51 red emphasis pixels in SVG and zero
+in native output when the foreground text rectangle lies above the viewport.
+The first local text-bound extension remains ineffective because block culling
+rejects the owner before the text callback. `text_ink48/repro_proof.json` preserves
+both outcomes. Shared block/text paint-ink bounds must include marks, decorations
+and shadows under **FT-17 / CI-18 / RSC1 / RSC7**; the incomplete trial remains
+isolated, with no main source change or support claim.
+
+
+### 2026-10-13 — Qualified shared emphasis and causal shorthand projection
+
+The module-placement repair is qualified as protected `emphasis46mq_*`, with
+157 normal source inputs and 146 scoped ASan inputs. Both required gates pass:
+6,797 core cases; 5,428 full Radiant results, 353 partial results and one skip.
+All 1,171 ASan cases, Canvas golden and 853 live assertions in each runtime pass.
+The complete native exporter passes 267/272 groups and preserves 39 assertions
+in five groups: the predecessor's 38 and one 1× sips open-circle comparison.
+SVG and direct Poppler retain strong mark coverage without changing the original
+threshold. The official SVG matrix passes 126 formats /2,466 assertions.
+The first combined link failure remains separately preserved as `emphasis46q_*`.
+
+The support inventory still has 410 registered names and now records twenty-one
+bounded partial families. Selected horizontal marks, baseline/metric placement,
+transformed/shadow/effect destinations, causal shorthand replacement and member
+projection, pressure rollback and source/font retirement have actual consumers
+(**FT-15 / FT-16 / FT-17 / CI-18 / D4.5.1v4 / D4.1.4v5**). Vertical/ruby,
+shaping/grapheme, fragmented/ancestor/selection, broader computed/API and
+arbitrary-resolution vector contexts remain open. Independent forced-GC read
+controls survive detached/reinserted nodes under **D5.3.3 / D5.4.1**.
+
+The boundary audit remains 177 deferred /forty unapproved imports, with no
+new or removed symbols and the unchanged 165 allowance. All strict lib/core/io/
+radiant DSOs build (**D7.1.3 / D7.3.3–D7.3.4 / D7.5.3**). The isolated
+nine-operation native-control provider and shared text-ink culling repair remain
+separate unpromoted continuations. The P0–P2 goal remains active.
+
+
+### 2026-10-13 — Applied native control ownership and isolated paint-bound repair
+
+The nine-operation native-control continuation is applied after guarded
+checkpoint 46m protection. Its matching isolated ASan passes 1,171 cases over
+146 inputs, Canvas golden, nine direct JS controls and 133 live assertions;
+both runtimes preserve sixty-four repeated Unicode/focus/selection controls,
+detached/reinserted nodes and retained values through forced GC. The initial
+result checker rejected unrelated import lint diagnostics; all nine named JS
+results were true, and its original failure remains preserved. Exact named
+results now qualify separately from those diagnostics. Fresh main qualification
+is running as `native_control47q_*`; no boundary reduction is credited before
+the full audit (**D7.1.3 / D7.5.3 / D4.5.1v4 / D5.3.3 / D5.4.1**).
+
+The isolated shared text-ink repair now passes four native/SVG/PDF reference
+groups and eighteen causal mutation pixels at both densities. Its new viewport
+control fails eight visible-ink assertions on checkpoint 46m and passes after
+both block and local text culling include selected marks, shared decoration
+geometry and actual shadow blur support. Clipped owner controls stay empty.
+`text_ink48/final_normal_provenance.json` preserves current sources and results;
+matching ASan, dirty/retained controls and main integration remain pending
+(**FT-17 / CI-18 / RSC1 / RSC7 / D4.1.4v5**). The P0–P2 goal remains active.
+
+
+### 2026-10-13 — Paint-bound pressure controls and SVG host continuation
+
+The isolated `text_ink48/` draft adds dirty/viewport culling, state-restoration,
+paint-containment and allocation-pressure controls at both densities. All 151
+normal vector cases, 1,172 matching scoped ASan cases, Canvas golden, 68 live
+assertions per runtime and six focused export groups pass. The complete current
+isolated exporter is frozen and running; this remains unpromoted evidence
+(**FT-17 / CI-18 / RSC1 / RSC7 / D4.1.4v5**).
+
+The isolated `svg_host49/` draft routes thirteen existing SVG timing/presentation
+operations through the same lower-owned provider, retaining their native
+implementations and synchronous borrows (**D7.1.3 / D7.5.3 / D4.5.1v4**).
+Publication/absence/conflict/concurrent controls pass, and its DOM object imports
+the thirteen lower wrappers without the previous native symbols. Twelve real
+SMIL/CSSOM fixtures pass. The thirteenth SVG DOM contract fixture retains three
+failures; the frozen main binary has the same six passing /three failing result.
+Those current geometry/hit/identity failures stay preserved and open. Matching
+ASan, aggregate boundary measurement and main integration remain pending.
+
+Native-control main qualification preserves its fresh required gates and 895
+passing live assertions in each runtime after correcting the driver to follow
+fixture-declared HTML paths. The failed aliased filename attempt remains raw
+evidence. Export and boundary qualification continue under the same source and
+binary guards; no boundary reduction is credited before the audit completes.
+
+
+### 2026-10-13 — Qualified native control provider and nine removed imports
+
+Protected `native_control47q_*` qualifies twenty-eight native host operations.
+The additional nine retain form disabled/focus/value/behavior/dropdown ownership,
+smooth-scroll lifecycle and document animation/smooth-scroll ticks with their
+native implementations. UTF-16 units, keyboard origin, nullable state and dirty
+tracker inputs remain observable (**D7.1.3 / D7.5.3 / D4.5.1v4 / D4.1.4v5**).
+
+The required core passes 6,797 cases; Radiant has 5,428 full results, 353 partial
+results and one skip. All 1,171 scoped ASan cases over 146 inputs, Canvas golden
+and 895 live assertions in each runtime pass. The full exporter passes 267/272
+groups with the same 39 raw assertions in five groups. The official SVG matrix
+passes 126 formats /2,466 assertions. The 157 normal input guards have no drift.
+
+The full boundary audit measures 168 deferred /31 unapproved imports, removes
+exactly nine native symbols, adds none and retains the 165 allowance. All four
+strict DSOs build (**D7.3.3–D7.3.4**). The fresh passing core result remains
+separate from two corrected qualification input mistakes: the initial plan path
+and an aliased HTML fixture filename. Their errors and the failed filename
+attempt remain preserved; resume reuses only matching frozen successful gates
+and retains optional exporter failures. The support inventory remains at
+twenty-one partial families; no tier is closed. Text paint-bound and SVG host
+continuations retain separate isolated evidence pending main qualification.
+
+
+### 2026-10-13 — SVG provider fallback and namespace-name diagnosis
+
+The isolated SVG provider/name continuation now passes all 1,172 matching
+scoped ASan cases, including its original static-geometry regression. Without
+an animation provider, the new lower seam had discarded authored attributes;
+it now reads the existing lower DOM attribute owner. The original three failed
+geometry assertions and pre-fix sources remain preserved (**D7.1.3 / D7.5.3 /
+D4.5.1v4**). Thirteen live fixtures pass 449 assertions, Canvas golden passes,
+and explicit forced-GC adoption/detachment/retained-name controls pass.
+
+The old SVG contract's stroke samples are outside their authored strokes,
+matching Chromium and [SVG2 pointer-event geometry](https://www.w3.org/TR/SVG2/interact.html#PointerEventsProperty).
+Corrected samples keep every original assertion and negative gap check; both
+native and Chromium now pass the contract. Independently, `nodeName` and the
+native record-driven `tagName` getter incorrectly uppercased foreign/XML names.
+Their shared core now preserves qualified case outside HTML elements in HTML
+documents, following [DOM element names](https://dom.spec.whatwg.org/#dom-element-tagname).
+Eight native/browser cases match; XML-to-HTML adoption updates case while
+retained old strings survive GC (**D7.4.4 / D5.3.3 / D5.4.1 / D4.5.1v4**).
+All original captures/failures remain available. The complete isolated exporter
+is frozen and running; the draft remains unapplied pending full qualification.
+
+Main text paint bounds retain passing required gates: 6,797 core cases;
+5,430 full Radiant results, 353 partial results and one skip. All 1,172 ASan
+cases and 913 live assertions per runtime pass. Interrupted export output is
+preserved, and remaining qualification resumes against verified unchanged
+sources/binary. Support and boundary totals are not promoted until protection
+and the current audits finish (**FT-17 / CI-18 / D7.1.3**).
+
+
+Wrap-up at user request: implementation is paused. Active main48 and isolated
+SVG49 export runs were stopped; partial logs, source hashes and existing failures
+are preserved in `temp/css_support_p1/wrap_up_checkpoint_48_49.json`.
+Checkpoint47 remains the accepted support checkpoint. Main48 is applied with
+passing required core/Radiant gates, 1,172 ASan cases and 913 live assertions per
+runtime, but export/boundary qualification and evidence sealing remain incomplete.
+SVG49 remains an unapplied draft. P0–P2 completion and support/boundary promotion
+are not claimed (**CI-18 / FT-17 / D7.1.3**).

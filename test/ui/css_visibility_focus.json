@@ -1,0 +1,598 @@
+{
+  "name": "Computed self visibility controls programmatic focus through owner/child mutations and negative tabindex at both densities",
+  "html": "test/ui/css_visibility_focus.html",
+  "viewport": {
+    "width": 960,
+    "height": 224
+  },
+  "events": [
+    {
+      "type": "set_device_scale",
+      "scale": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hidden_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#hidden_run"
+      },
+      "attribute": "data-active",
+      "equals": "hidden_run"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#collapsed_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#collapsed_run"
+      },
+      "attribute": "data-active",
+      "equals": "collapsed_run"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#visible_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#visible_run"
+      },
+      "attribute": "data-active",
+      "equals": "visible"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inherited_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inherited_run"
+      },
+      "attribute": "data-active",
+      "equals": "inherited_run"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show_hidden"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hidden_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#hidden_run"
+      },
+      "attribute": "data-active",
+      "equals": "hidden"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hide_hidden"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hidden_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#hidden_run"
+      },
+      "attribute": "data-active",
+      "equals": "hidden_run"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show_host"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inherited_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inherited_run"
+      },
+      "attribute": "data-active",
+      "equals": "inherited"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hide_host"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inherited_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inherited_run"
+      },
+      "attribute": "data-active",
+      "equals": "inherited_run"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#visible_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#visible_run"
+      },
+      "attribute": "data-active",
+      "equals": "visible"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hide_child"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#visible_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#visible_run"
+      },
+      "attribute": "data-active",
+      "equals": "visible_run"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show_child"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#visible_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#visible_run"
+      },
+      "attribute": "data-active",
+      "equals": "visible"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show_collapsed"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#collapsed_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#collapsed_run"
+      },
+      "attribute": "data-active",
+      "equals": "collapsed"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#collapse"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#collapsed_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#collapsed_run"
+      },
+      "attribute": "data-active",
+      "equals": "collapsed_run"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#negative_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#negative_run"
+      },
+      "attribute": "data-active",
+      "equals": "negative_run"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show_negative"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#negative_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#negative_run"
+      },
+      "attribute": "data-active",
+      "equals": "negative"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hide_negative"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#negative_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#negative_run"
+      },
+      "attribute": "data-active",
+      "equals": "negative_run"
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hidden_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#hidden_run"
+      },
+      "attribute": "data-active",
+      "equals": "hidden_run"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#collapsed_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#collapsed_run"
+      },
+      "attribute": "data-active",
+      "equals": "collapsed_run"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#visible_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#visible_run"
+      },
+      "attribute": "data-active",
+      "equals": "visible"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inherited_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inherited_run"
+      },
+      "attribute": "data-active",
+      "equals": "inherited_run"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show_hidden"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hidden_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#hidden_run"
+      },
+      "attribute": "data-active",
+      "equals": "hidden"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hide_hidden"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hidden_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#hidden_run"
+      },
+      "attribute": "data-active",
+      "equals": "hidden_run"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show_host"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inherited_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inherited_run"
+      },
+      "attribute": "data-active",
+      "equals": "inherited"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hide_host"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inherited_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#inherited_run"
+      },
+      "attribute": "data-active",
+      "equals": "inherited_run"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#visible_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#visible_run"
+      },
+      "attribute": "data-active",
+      "equals": "visible"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hide_child"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#visible_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#visible_run"
+      },
+      "attribute": "data-active",
+      "equals": "visible_run"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show_child"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#visible_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#visible_run"
+      },
+      "attribute": "data-active",
+      "equals": "visible"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show_collapsed"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#collapsed_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#collapsed_run"
+      },
+      "attribute": "data-active",
+      "equals": "collapsed"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#collapse"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#collapsed_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#collapsed_run"
+      },
+      "attribute": "data-active",
+      "equals": "collapsed_run"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#negative_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#negative_run"
+      },
+      "attribute": "data-active",
+      "equals": "negative_run"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show_negative"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#negative_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#negative_run"
+      },
+      "attribute": "data-active",
+      "equals": "negative"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#hide_negative"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#negative_run"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#negative_run"
+      },
+      "attribute": "data-active",
+      "equals": "negative_run"
+    }
+  ]
+}

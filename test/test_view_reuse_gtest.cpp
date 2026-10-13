@@ -10,6 +10,7 @@
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/css_engine.hpp"
+#include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
@@ -2416,6 +2417,36 @@ TEST_F(StyleEpochTest, ReplaceModeRebuildsWithoutPriorRecipeBase) {
     EXPECT_NE(dom_element_get_specified_value(child, CSS_PROPERTY_HEIGHT), nullptr);
 }
 
+TEST_F(StyleEpochTest, SubtreeReplacementPreservesUnrelatedSelectionCascades) {
+    DomElement* left = append("left"); DomElement* right = append("right");
+    DomElement* leaf = authored_element("leaf");
+    ASSERT_TRUE(left->append_child(leaf));
+    install_stylesheet("left::selection{color:red}right::selection{color:blue}leaf::selection{color:green}");
+    CssRule** rules = doc.stylesheets[0]->rules;
+    ASSERT_TRUE(style_epoch_cascade_begin_replace(&doc, document_root, &engine));
+    for (size_t index = 0; index < 3; index++) {
+        DomElement* hosts[] = {left, right, leaf};
+        ASSERT_EQ(dom_element_apply_pseudo_element_rule(hosts[index], rules[index], {}, PSEUDO_ELEMENT_SELECTION), 1);
+    }
+    style_epoch_cascade_end(&doc);
+    CssDeclaration* sibling_color = dom_element_get_pseudo_element_value(right, CSS_PROPERTY_COLOR, PSEUDO_ELEMENT_SELECTION);
+    ASSERT_NE(sibling_color, nullptr);
+    for (size_t iteration = 0; iteration < 64; iteration++) {
+        dom_element_clear_cascaded_styles(left); dom_element_clear_cascaded_styles(leaf);
+        ASSERT_TRUE(style_epoch_cascade_begin_replace(&doc, left, &engine));
+        EXPECT_EQ(dom_element_get_pseudo_element_value(left, CSS_PROPERTY_COLOR, PSEUDO_ELEMENT_SELECTION), nullptr);
+        EXPECT_EQ(dom_element_get_pseudo_element_value(leaf, CSS_PROPERTY_COLOR, PSEUDO_ELEMENT_SELECTION), nullptr);
+        EXPECT_EQ(dom_element_get_pseudo_element_value(right, CSS_PROPERTY_COLOR, PSEUDO_ELEMENT_SELECTION), sibling_color);
+        ASSERT_EQ(dom_element_apply_pseudo_element_rule(left, rules[0], {}, PSEUDO_ELEMENT_SELECTION), 1);
+        ASSERT_EQ(dom_element_apply_pseudo_element_rule(leaf, rules[2], {}, PSEUDO_ELEMENT_SELECTION), 1);
+        style_epoch_cascade_end(&doc);
+        EXPECT_EQ(dom_element_get_pseudo_element_value(right, CSS_PROPERTY_COLOR, PSEUDO_ELEMENT_SELECTION), sibling_color);
+    }
+    ASSERT_TRUE(style_epoch_cascade_begin_replace(&doc, document_root, &engine));
+    EXPECT_EQ(dom_element_get_pseudo_element_value(right, CSS_PROPERTY_COLOR, PSEUDO_ELEMENT_SELECTION), nullptr);
+    style_epoch_cascade_end(&doc);
+}
+
 TEST_F(StyleEpochTest, InvalidLaterDeclarationPreservesLastValidValue) {
     DomElement* child = append("child");
     CssRule* valid_height = rule(CSS_PROPERTY_HEIGHT,
@@ -2943,6 +2974,55 @@ TEST_F(StyleEpochTest, GridComputedReadsDoNotRetainProjectionScratch) {
         read();
         PoolStats warm = {}; pool_get_detailed_stats(doc.document_pool, &warm);
         for (size_t i = 0; i < 256; i++) read();
+        PoolStats repeated = {}; pool_get_detailed_stats(doc.document_pool, &repeated);
+        EXPECT_EQ(repeated.live_bytes, warm.live_bytes);
+    }
+}
+
+TEST_F(StyleEpochTest, FocusRenderingUsesLiveDisplayAncestryAndReleasesScratch) {
+    ASSERT_TRUE(css_property_system_init(doc.document_pool));
+    DomElement* parent = append("div");
+    DomElement* child = authored_element("button");
+    ASSERT_NE(child, nullptr); ASSERT_TRUE(parent->append_child(child));
+    const struct Case {
+        const char* parent_style;
+        const char* child_style;
+        bool parent_hidden;
+        bool child_hidden;
+        bool excluded;
+    } cases[] = {
+        {"", "", false, false, false},
+        {"", "display:none", false, false, true},
+        {"display:none", "display:block", false, false, true},
+        {"display:block", "display:block", false, false, false},
+        {"", "visibility:hidden", false, false, true},
+        {"", "visibility:collapse", false, false, true},
+        {"visibility:hidden", "", false, false, true},
+        {"visibility:hidden", "visibility:visible", false, false, false},
+        {"", "", false, true, true},
+        {"", "display:block", false, true, false},
+        {"", "", true, false, true},
+        {"display:block", "", true, false, false},
+        {"display:contents", "display:contents", false, false, false},
+        {"", "opacity:0;width:0;height:0", false, false, false},
+        {"", "--box:none;display:var(--box)", false, false, true},
+        {"", "--box:block;display:var(--box)", false, true, false},
+    };
+    for (const Case& item : cases) {
+        SCOPED_TRACE(item.parent_style);
+        SCOPED_TRACE(item.child_style);
+        ASSERT_TRUE(parent->set_attribute("style", item.parent_style));
+        ASSERT_TRUE(child->set_attribute("style", item.child_style));
+        if (item.parent_hidden) ASSERT_TRUE(parent->set_attribute("hidden", ""));
+        else parent->remove_attribute("hidden");
+        if (item.child_hidden) ASSERT_TRUE(child->set_attribute("hidden", ""));
+        else child->remove_attribute("hidden");
+        auto read = [&]() {
+            EXPECT_EQ(view_focus_is_hidden(static_cast<View*>(child)), item.excluded);
+        };
+        read();
+        PoolStats warm = {}; pool_get_detailed_stats(doc.document_pool, &warm);
+        for (size_t index = 0; index < 256; index++) read();
         PoolStats repeated = {}; pool_get_detailed_stats(doc.document_pool, &repeated);
         EXPECT_EQ(repeated.live_bytes, warm.live_bytes);
     }

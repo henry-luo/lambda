@@ -4073,7 +4073,7 @@ DomNode* layout_rendered_first_child_node(DomElement* element) {
 }
 
 bool layout_is_shadow_slot(DomNode* node) {
-    return node && node->is_element() && dom_element_html_tag(node->as_element()) == MARKUP_NAME_SLOT &&
+    return node && node->is_element() && dom_element_is_html_tag(node->as_element(), MARKUP_NAME_SLOT) &&
         layout_shadow_tree_host(node) != nullptr;
 }
 
@@ -5655,6 +5655,26 @@ static LayoutContainerMeasurements layout_container_measurements(DomNode* root) 
     return result;
 }
 
+// Apply the queued viewport scroll (from scrollIntoView or a script) to the root pane.
+static void layout_apply_pending_viewport_scroll(DomDocument* doc, ViewBlock* root_block,
+                                                 bool smooth_viewport_scroll,
+                                                 bool has_scroll_into_view_target) {
+    if (!root_block->scroller || !root_block->scroll_mut()->pane) return;
+    ScrollPane* pane = root_block->scroll()->pane;
+    float target_x = doc->pending_viewport_scroll_x;
+    float target_y = doc->pending_viewport_scroll_y;
+    DocState* state = (DocState*)doc->state;
+    if (!smooth_viewport_scroll) {
+        scroll_snap_adjust_position(root_block, &target_x, &target_y,
+                                    has_scroll_into_view_target);
+    }
+    scroll_state_set_position_for_view(state, static_cast<View*>(root_block), pane, target_x, target_y, true);
+    scroll_state_get_position_for_view(state, (View*)root_block, pane,
+                                       &target_x, &target_y, NULL, NULL);
+    log_info("layout_html_doc: applied viewport scroll (%.1f, %.1f)",
+             target_x, target_y);
+}
+
 static void layout_finish_scroll_positions(LayoutContext* lycon, DomDocument* doc) {
     if (doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
         ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
@@ -5668,23 +5688,35 @@ static void layout_finish_scroll_positions(LayoutContext* lycon, DomDocument* do
         }
         bool smooth_viewport_scroll = layout_resolve_pending_scroll_into_view(
             lycon, doc, root_block);
-        if (root_block->scroller && root_block->scroll_mut()->pane) {
-            ScrollPane* pane = root_block->scroll()->pane;
-            float target_x = doc->pending_viewport_scroll_x;
-            float target_y = doc->pending_viewport_scroll_y;
-            DocState* state = (DocState*)doc->state;
-            if (!smooth_viewport_scroll) {
-                scroll_snap_adjust_position(root_block, &target_x, &target_y,
-                                            has_scroll_into_view_target);
-            }
-            scroll_state_set_position_for_view(state, static_cast<View*>(root_block), pane, target_x, target_y, true);
-            scroll_state_get_position_for_view(state, (View*)root_block, pane,
-                                               &target_x, &target_y, NULL, NULL);
-            log_info("layout_html_doc: applied viewport scroll (%.1f, %.1f)",
-                     target_x, target_y);
-        }
+        layout_apply_pending_viewport_scroll(doc, root_block, smooth_viewport_scroll,
+                                             has_scroll_into_view_target);
         layout_apply_sticky_positions(lycon, static_cast<View*>(root_block));
     }
+}
+
+bool layout_scroll_into_view_without_relayout(UiContext* uicon, DomDocument* doc) {
+    DocState* state = doc ? (DocState*)doc->state : nullptr;
+    if (!uicon || !state || !doc->pending_scroll_into_view_target.address ||
+        !doc->view_tree || !doc->view_tree->root || !doc->view_tree->prop_pool ||
+        doc->view_tree->root->view_type != RDT_VIEW_BLOCK) return false;
+    // the caller guarantees a committed, otherwise clean layout: layout
+    // coordinates exclude scroll offsets, so moving scrollports needs no
+    // relayout. Sticky boxes must sit at the current scroll before the target
+    // box is read; the scroll writes below mark them stale again for paint.
+    layout_resolve_scrolled_sticky(doc->view_tree);
+    LayoutContext lycon = {};
+    lycon.doc = lam::up(doc);
+    lycon.ui_context = lam::up(uicon);
+    lycon.pool = lam::up(doc->view_tree->prop_pool);
+    lycon.width = uicon->viewport_width;
+    lycon.height = uicon->viewport_height;
+    lycon.run_mode = radiant::RunMode::PerformLayout;
+    lycon.sizing_mode = radiant::SizingMode::InherentSize;
+    setup_font(uicon, &lycon.font, &uicon->default_font);
+    ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
+    bool smooth_viewport_scroll = layout_resolve_pending_scroll_into_view(&lycon, doc, root_block);
+    layout_apply_pending_viewport_scroll(doc, root_block, smooth_viewport_scroll, true);
+    return true;
 }
 
 static bool layout_clear_dirty_visitor(DomNode* node, void*) {

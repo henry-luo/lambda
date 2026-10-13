@@ -1,6 +1,7 @@
 {
-  "name": "Phase 1b: Click text - three aligned paragraphs (baseline_809)",
-  "html": "test/ui/baseline_809_text_align.html",
+  "name": "Phase 1b/1c/3a: aligned paragraph text, click hit-test positions, and drag selection (baseline_809)",
+  "html": "test/layout/data/baseline/baseline_809_text_align.html",
+  "description": "Phase 1c hit-testing: Tests hit-testing accuracy for the <p> inside .center container. Geometry: p x=32 y=104 w=300 h=18; body y=10 h=206 (bottom=216). Group A clicks inside the text element (border positions) and verifies the caret is set on text (view_type=1). Group B clicks outside the body (y=230 > body bottom 216) AFTER the caret is already set, and verifies that clicking outside correctly clears the caret (matching browser behavior).",
   "events": [
     {"type": "log", "message": "=== Phase 1b: assert_visible + assert_text on baseline_809_text_align ==="},
 
@@ -21,6 +22,75 @@
     {"type": "click", "target": {"text": "center-aligned"}},
     {"type": "assert_caret", "view_type": 1},
 
-    {"type": "render", "file": "./temp/phase1b_text_align.png"}
+    {"type": "render", "file": "./temp/phase1b_text_align.png"},
+
+    {"type": "log", "message": "=== Phase 1c: pixel-position click tests ==="},
+    {"type": "log", "message": "Target: <p> inside .center  x=32 y=104 w=300 h=18"},
+    {"type": "log", "message": "  x range [32,331]  y range [104,121]"},
+
+    {"type": "log", "message": "--- Group A: Inside clicks on text element borders - caret must be text (view_type=1) ---"},
+
+    {"type": "log", "message": "--- A1. Center (182, 113) ---"},
+    {"type": "click", "x": 182, "y": 113},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- A2. Left border (32, 113) ---"},
+    {"type": "click", "x": 32, "y": 113},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- A3. Right border (331, 113) ---"},
+    {"type": "click", "x": 331, "y": 113},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- A4. Top border (182, 104) ---"},
+    {"type": "click", "x": 182, "y": 104},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- A5. Bottom border (182, 121) ---"},
+    {"type": "click", "x": 182, "y": 121},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- Group B: Outside clicks (y=230, below body bottom=216) - must clear caret ---"},
+
+    {"type": "log", "message": "--- B1. Outside at left-edge x (32, 230) ---"},
+    {"type": "click", "x": 32, "y": 230},
+    {"type": "assert_selection", "is_collapsed": true},
+    {"type": "assert_caret", "view_type_not": 1},
+
+    {"type": "log", "message": "--- B2. Outside at center x (182, 230) ---"},
+    {"type": "click", "x": 182, "y": 230},
+    {"type": "assert_selection", "is_collapsed": true},
+    {"type": "assert_caret", "view_type_not": 1},
+
+    {"type": "log", "message": "--- B3. Outside at right-edge x (331, 230) ---"},
+    {"type": "click", "x": 331, "y": 230},
+    {"type": "assert_selection", "is_collapsed": true},
+    {"type": "assert_caret", "view_type_not": 1},
+
+    {"type": "render", "file": "./temp/phase1c_click_positions.png"},
+
+    {"type": "log", "message": "=== Phase 3a: drag text selection on baseline_809_text_align ==="},
+    {"type": "log", "message": "Coord note: .left container (10,10) 344x62; inner <p> at (32,32) 300x18"},
+    {"type": "log", "message": "Drag from ~x=40,y=41 (start of 'This text') to ~x=230,y=41 (past 'is left')"},
+
+    {"type": "assert_visible", "target": {"selector": ".left"}, "visible": true},
+
+    {"type": "log", "message": "Dragging across left-aligned text..."},
+    {"type": "mouse_drag",
+     "from_x": 40,  "from_y": 41,
+     "to_x":   230, "to_y":   41,
+     "button": 0},
+    {"type": "assert_selection", "is_collapsed": false},
+
+    {"type": "render", "file": "./temp/phase3a_drag_left.png"},
+
+    {"type": "log", "message": "Dragging across center-aligned text (p at (32,104) 300x18, y_center=113)..."},
+    {"type": "mouse_drag",
+     "from_x": 95,  "from_y": 113,
+     "to_x":   310, "to_y":   113,
+     "button": 0},
+    {"type": "assert_selection", "is_collapsed": false},
+
+    {"type": "render", "file": "./temp/phase3a_drag_center.png"}
   ]
 }

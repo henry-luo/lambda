@@ -17199,6 +17199,134 @@ static MIR_reg_t mir_snapshot_loop_collection(MirTranspiler* mt, AstLoopNode* lo
     return collection;
 }
 
+// The iteration protocol of one `for` source: the collection snapshot, its
+// name keys, and the walk length on the loop's axis (S8.1.3v2). Every loop
+// emitter opens its sources here so the axis holds everywhere: the nested-source
+// emitter used to walk item_at over every source, so a second source written
+// with `at` or `of`, or `in` over a map or element, bound the wrong members.
+struct MirLoopSource {
+    MIR_reg_t coll;
+    MIR_reg_t keys;
+    MIR_reg_t len;
+};
+
+// item_keys yields a list only for a map, virtual map, element or path. A
+// source whose carrier is a sequence or text has no name keys, so it skips the
+// list and its free -- a per-entry cost a short inner loop pays every time.
+static bool mir_loop_source_may_have_keys(MirTranspiler* mt, AstLoopNode* loop) {
+    switch (mir_expr_carrier_type(mt, loop->as)) {
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_VARRAY:
+    case LMD_TYPE_RANGE: case LMD_TYPE_STRING:
+    case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
+        return false;
+    default:
+        return true;
+    }
+}
+
+// the keys operand of the iter_* protocol: NULL when the source has none
+static MIR_op_t mir_loop_keys_op(MirTranspiler* mt, const MirLoopSource& src) {
+    return src.keys ? MIR_new_reg_op(mt->ctx, src.keys) : MIR_new_int_op(mt->ctx, 0);
+}
+
+static void mir_free_loop_keys(MirTranspiler* mt, const MirLoopSource& src) {
+    if (src.keys) {
+        emit_call_void_1(mt, "symbol_key_list_free", MIR_T_P, MIR_new_reg_op(mt->ctx, src.keys));
+    }
+}
+
+// `allow_key_skip` trusts the carrier type at open time; a nested source's
+// key slot is decided before the outer loop binds its names, when the same
+// expression could still be typed against a shadowed outer binding.
+static MirLoopSource mir_open_loop_source(MirTranspiler* mt, AstLoopNode* loop,
+        const char* snap_name, bool check_content, bool allow_key_skip = true) {
+    MirLoopSource src;
+    src.coll = transpile_box_item(mt, loop->as);
+    src.coll = mir_snapshot_loop_collection(mt, loop, src.coll, snap_name);
+    // name keys of a map, element or object; none for a sequence or text
+    src.keys = !allow_key_skip || mir_loop_source_may_have_keys(mt, loop)
+        ? emit_call_1(mt, "item_keys", MIR_T_P, MIR_T_I64, MIR_new_reg_op(mt->ctx, src.coll))
+        : 0;
+    if (check_content) {
+        TypeId collection_type = mir_expr_carrier_type(mt, loop->as);
+        if (collection_type == LMD_TYPE_ANY || collection_type == LMD_TYPE_PATH ||
+                is_element_family_type_id(collection_type)) {
+            MIR_reg_t content_error = emit_call_1(mt, "fn_virtual_content_check", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, src.coll));
+            emit_return_if_item_error(mt, content_error);
+        }
+    }
+    src.len = emit_call_3(mt, "iter_len", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, src.coll),
+        MIR_T_P, mir_loop_keys_op(mt, src),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int)loop->key_filter));
+    return src;
+}
+
+// S8.1.1v2: on the IntKey axis the key at walk position `idx` IS `idx` -- a
+// sequence, text, or element content walks its positions from 0, and a map
+// holds no IntKey entries (iter_len is 0) -- so no iter_key_at call is needed.
+static bool mir_loop_keys_are_positions(AstLoopNode* loop) {
+    return loop->key_filter == LOOP_KEY_INT;
+}
+
+static MIR_reg_t mir_loop_key_item(MirTranspiler* mt, AstLoopNode* loop,
+        const MirLoopSource& src, MIR_reg_t idx) {
+    if (mir_loop_keys_are_positions(loop)) return emit_box_int_lane(mt, LaneReg(idx)).r;
+    return emit_call_4(mt, "iter_key_at", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, src.coll),
+        MIR_T_P, mir_loop_keys_op(mt, src),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int)loop->key_filter));
+}
+
+// The member a one-name binding sees: its key on `at`/`of`, its value on `in`.
+static MIR_reg_t mir_loop_member_item(MirTranspiler* mt, AstLoopNode* loop,
+        const MirLoopSource& src, MIR_reg_t idx) {
+    if (loop->key_only) return mir_loop_key_item(mt, loop, src, idx);
+    return emit_call_4(mt, "iter_val_at", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, src.coll),
+        MIR_T_P, mir_loop_keys_op(mt, src),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int)loop->key_filter));
+}
+
+// A position is a Lambda `int` in its native lane; the loop variable is
+// immutable, so it shares the machine counter as a counted range's does.
+static void mir_bind_position_var(MirTranspiler* mt, String* name,
+        NameEntry* binding, MIR_reg_t idx) {
+    char var_name[128];
+    snprintf(var_name, sizeof(var_name), "%.*s", (int)name->len, name->chars);
+    set_var(mt, var_name, idx, MIR_T_I64, LMD_TYPE_INT);
+    publish_var_binding(mt, var_name, binding);
+}
+
+// Bind both names of a loop at walk position `idx`. On the IntKey axis every
+// key is the position itself, bound natively, so `for i of a { a[i] }` keeps
+// `i` in the int lane instead of unboxing an iter_key_at result per iteration.
+static void mir_bind_loop_member(MirTranspiler* mt, AstLoopNode* loop,
+        const MirLoopSource& src, MIR_reg_t idx) {
+    bool positions = mir_loop_keys_are_positions(loop);
+    if (loop->key_only && positions) {
+        mir_bind_position_var(mt, loop->name, loop->entry, idx);
+    } else {
+        mir_bind_item_var(mt, loop->name, loop->entry, loop->type,
+            mir_loop_member_item(mt, loop, src, idx));
+    }
+    if (!loop->index_name) return;
+    if (positions) {
+        mir_bind_position_var(mt, loop->index_name, loop->index_entry, idx);
+        return;
+    }
+    char idx_name[128];
+    snprintf(idx_name, sizeof(idx_name), "%.*s", (int)loop->index_name->len, loop->index_name->chars);
+    set_var(mt, idx_name, mir_loop_key_item(mt, loop, src, idx), MIR_T_I64, LMD_TYPE_ANY);
+    publish_var_binding(mt, idx_name, loop->index_entry);
+}
+
+static void mir_of_loop_record_bounds(MirTranspiler* mt, AstLoopNode* loop,
+    LoopLabels* frame);
+
 static void mir_join_bind_tuple_vars(MirTranspiler* mt, AstLoopNode* first, AstLoopNode* stop_before,
         MIR_reg_t tuple_item) {
     for (AstLoopNode* cur = first; cur && cur != stop_before; cur = (AstLoopNode*)cur->next) {
@@ -17237,15 +17365,8 @@ static MIR_reg_t mir_join_key_item(MirTranspiler* mt, AstLoopNode* loop, bool us
 
 static void mir_join_collect_source(MirTranspiler* mt, AstLoopNode* loop, MIR_reg_t rows,
         MIR_reg_t row_keys, bool collect_keys, MIR_reg_t idx_vals) {
-    int key_filter = (int)loop->key_filter;
-    MIR_reg_t boxed_coll = transpile_box_item(mt, loop->as);
-    boxed_coll = mir_snapshot_loop_collection(mt, loop, boxed_coll, "loop_snap");
-    MIR_reg_t keys_al = emit_call_1(mt, "item_keys", MIR_T_P,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
-    MIR_reg_t len = emit_call_3(mt, "iter_len", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
-        MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
+    MirLoopSource src = mir_open_loop_source(mt, loop, "loop_snap", false);
+    MIR_reg_t len = src.len;
 
     MIR_reg_t idx = new_reg(mt, "jidx", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, idx),
@@ -17260,18 +17381,10 @@ static void mir_join_collect_source(MirTranspiler* mt, AstLoopNode* loop, MIR_re
         MIR_new_reg_op(mt->ctx, cmp)));
 
     // key-only sources (`k at map`) bind the key as the value; others bind the value.
-    MIR_reg_t row = emit_call_4(mt, loop->key_only ? "iter_key_at" : "iter_val_at", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
-        MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
+    MIR_reg_t row = mir_loop_member_item(mt, loop, src, idx);
     mir_bind_item_var(mt, loop->name, loop->entry, loop->type, row);
     if (loop->index_name) {
-        MIR_reg_t idx_item = emit_call_4(mt, "iter_key_at", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
-            MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
+        MIR_reg_t idx_item = mir_loop_key_item(mt, loop, src, idx);
         mir_bind_item_var(mt, loop->index_name, loop->index_entry,
             mir_join_index_type(loop), idx_item);
         if (idx_vals) {
@@ -17291,7 +17404,7 @@ static void mir_join_collect_source(MirTranspiler* mt, AstLoopNode* loop, MIR_re
         MIR_new_reg_op(mt->ctx, idx), MIR_new_int_op(mt->ctx, 1)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_loop)));
     emit_label(mt, l_end);
-    emit_call_void_1(mt, "symbol_key_list_free", MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al));
+    mir_free_loop_keys(mt, src);
 }
 
 static MIR_reg_t mir_finalize_for_output(MirTranspiler* mt, AstForNode* for_node,
@@ -18013,16 +18126,8 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
             return r;
         }
 
-        int key_filter = (int)loop->key_filter;
-        bool key_only = loop->key_only;
-        MIR_reg_t boxed_coll = transpile_box_item(mt, loop->as);
-        boxed_coll = mir_snapshot_loop_collection(mt, loop, boxed_coll, "loop_snap");
-        MIR_reg_t keys_al = emit_call_1(mt, "item_keys", MIR_T_P,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
-        MIR_reg_t len = emit_call_3(mt, "iter_len", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
-            MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
+        MirLoopSource src = mir_open_loop_source(mt, loop, "loop_snap", false);
+        MIR_reg_t len = src.len;
 
         MIR_reg_t output = result_demanded
             ? emit_call_0(mt, "array_spreadable", MIR_T_P) : 0;
@@ -18046,23 +18151,14 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
             MIR_new_reg_op(mt->ctx, cmp)));
 
-        MIR_reg_t current_item = emit_call_4(mt, key_only ? "iter_key_at" : "iter_val_at", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
-            MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
-
+        // the group row is the member as an item, so it is fetched boxed even
+        // when the binding itself is a native position
+        MIR_reg_t current_item = mir_loop_member_item(mt, loop, src, idx);
         mir_bind_item_var(mt, loop->name, loop->entry, loop->type, current_item);
-
         if (loop->index_name) {
             char idx_name[128];
             snprintf(idx_name, sizeof(idx_name), "%.*s", (int)loop->index_name->len, loop->index_name->chars);
-            MIR_reg_t key_item = emit_call_4(mt, "iter_key_at", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
-                MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
-            set_var(mt, idx_name, key_item, MIR_T_I64, LMD_TYPE_ANY);
+            set_var(mt, idx_name, mir_loop_key_item(mt, loop, src, idx), MIR_T_I64, LMD_TYPE_ANY);
             publish_var_binding(mt, idx_name, loop->index_entry);
         }
 
@@ -18096,7 +18192,7 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
             MIR_new_reg_op(mt->ctx, idx), MIR_new_int_op(mt->ctx, 1)));
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_loop)));
         emit_label(mt, l_end);
-        emit_call_void_1(mt, "symbol_key_list_free", MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al));
+        mir_free_loop_keys(mt, src);
 
         MIR_reg_t aliases_arr = emit_call_0(mt, "array_plain", MIR_T_P);
         for (AstGroupKey* gk = for_node->group->keys; gk; gk = (AstGroupKey*)gk->next) {
@@ -18199,8 +18295,7 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
         mir_range_bound_native_int(mt, ((AstBinaryNode*)range_src)->right);
 
     MIR_reg_t range_start = 0;
-    MIR_reg_t boxed_coll = 0;
-    MIR_reg_t keys_al = 0;
+    MirLoopSource main_src = {};
     MIR_reg_t len;
     if (counted_range) {
         AstBinaryNode* range = (AstBinaryNode*)range_src;
@@ -18272,26 +18367,8 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
             emit_label(mt, l_len_done);
         }
     } else {
-        boxed_coll = transpile_box_item(mt, loop->as);
-        boxed_coll = mir_snapshot_loop_collection(mt, loop, boxed_coll, "loop_snap");
-
-        // Get keys (for maps/elements/objects - returns ArrayList* or NULL for arrays)
-        keys_al = emit_call_1(mt, "item_keys", MIR_T_P,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
-
-        TypeId collection_type = mir_expr_carrier_type(mt, loop->as);
-        if (collection_type == LMD_TYPE_ANY || collection_type == LMD_TYPE_PATH ||
-                is_element_family_type_id(collection_type)) {
-            MIR_reg_t content_error = emit_call_1(mt, "fn_virtual_content_check", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
-            emit_return_if_item_error(mt, content_error);
-        }
-
-        // Get unified iteration length via iter_len(data, keys, key_filter)
-        len = emit_call_3(mt, "iter_len", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
-            MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
+        main_src = mir_open_loop_source(mt, loop, "loop_snap", true);
+        len = main_src.len;
     }
 
     // Create spreadable output array
@@ -18330,10 +18407,35 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
             range_start);
     }
 
+    // A nested source opens its key list once per outer iteration and closes it
+    // at its own end, but `break` jumps straight to the outer end. Each list
+    // therefore lives in a slot zeroed here and released there as well: the
+    // lists hold exact GC root slots, so none may outlive the loop.
+    MIR_reg_t nested_keys[8];
+    int nested_key_count = 0;
+    for (AstNode* n = loop->next; n && nested_key_count < 8; n = n->next) {
+        nested_keys[nested_key_count] = new_reg(mt, "nl_keys", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, nested_keys[nested_key_count]), MIR_new_int_op(mt->ctx, 0)));
+        nested_key_count++;
+    }
+
     // Index counter and break/continue labels
     ArrayList* loop_scalars = mir_loop_entry_scalars(mt);
+    int depth_before_frame = mt->loop_depth;
     MirIndexedLoopFrame loop_frame = mir_begin_indexed_loop(mt, "idx");
+    if (!counted_range && mt->loop_depth == depth_before_frame + 1) {
+        mir_of_loop_record_bounds(mt, loop, &mt->loop_stack[mt->loop_depth - 1]);
+    }
     MIR_reg_t idx = loop_frame.index;
+    if (for_node->resume_from) {
+        // D8.1.1v18: a loop continuation resumes the T0 walk at the position
+        // T0 stopped at; T0 passes it as a small non-negative int
+        MIR_reg_t start = emit_unbox(mt, transpile_box_item(mt, for_node->resume_from),
+            LMD_TYPE_INT);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, idx),
+            MIR_new_reg_op(mt->ctx, start)));
+    }
     MIR_label_t l_loop = loop_frame.loop;
     MIR_label_t l_continue = loop_frame.continue_label;
     MIR_label_t l_end = loop_frame.end;
@@ -18366,13 +18468,9 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
         set_var(mt, var_name, range_i, type_to_mir(LMD_TYPE_INT), LMD_TYPE_INT);
         publish_var_binding(mt, var_name, loop->entry);
     } else {
-        // Get current loop item; `for k at item` binds keys, while `in` binds values.
-        MIR_reg_t current_item = emit_call_4(mt, key_only ? "iter_key_at" : "iter_val_at", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
-            MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
-        mir_bind_item_var(mt, loop->name, loop->entry, loop->type, current_item);
+        // `for k at c` binds keys, `for i of c` native positions, `in` values;
+        // the paired form's key is bound with the member
+        mir_bind_loop_member(mt, loop, main_src, idx);
     }
 
     // T30-4: `for i in a to b` gives its variable the interval its own bounds
@@ -18392,31 +18490,19 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
         }
     }
 
-    // Bind index/key variable if present
-    if (loop->index_name) {
+    // Bind a counted range's index; every other source bound it with the member
+    if (counted_range && loop->index_name) {
         char idx_name[128];
         snprintf(idx_name, sizeof(idx_name), "%.*s", (int)loop->index_name->len, loop->index_name->chars);
-
-        if (counted_range) {
-            // A range's key is its ordinal, which the counter already holds --
-            // but the counter is machine bookkeeping (G0 exception 1) while
-            // this BINDING is a user-visible Lambda `int`, so it is declared in
-            // int's one native lane. Binding the raw i64 made every read of the
-            // variable return the wrong register class for its declared type.
-            // v5: the machine counter IS the user-visible `int` binding -- the
-            // shadow-binding split dissolves with the i64 lane.
-            set_var(mt, idx_name, idx, MIR_T_I64, LMD_TYPE_INT);
-            publish_var_binding(mt, idx_name, loop->index_entry);
-        } else {
-            // Get key via iter_key_at(data, keys, idx, key_filter)
-            MIR_reg_t key_item = emit_call_4(mt, "iter_key_at", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll),
-                MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, key_filter));
-            set_var(mt, idx_name, key_item, MIR_T_I64, LMD_TYPE_ANY);
-            publish_var_binding(mt, idx_name, loop->index_entry);
-        }
+        // A range's key is its ordinal, which the counter already holds --
+        // but the counter is machine bookkeeping (G0 exception 1) while
+        // this BINDING is a user-visible Lambda `int`, so it is declared in
+        // int's one native lane. Binding the raw i64 made every read of the
+        // variable return the wrong register class for its declared type.
+        // v5: the machine counter IS the user-visible `int` binding -- the
+        // shadow-binding split dissolves with the i64 lane.
+        set_var(mt, idx_name, idx, MIR_T_I64, LMD_TYPE_INT);
+        publish_var_binding(mt, idx_name, loop->index_entry);
     }
 
     // Handle nested loops (multi-variable for: for (a in X, b in Y, ...))
@@ -18429,12 +18515,14 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
     while (next_loop && nested_count < 8) {
         AstLoopNode* nl = (AstLoopNode*)next_loop;
 
-        // Evaluate and box the nested collection
-        MIR_reg_t nl_boxed = transpile_box_item(mt, nl->as);
-        nl_boxed = mir_snapshot_loop_collection(mt, nl, nl_boxed, "loop_snap_n");
-
-        // Get length
-        MIR_reg_t nl_len = emit_machine_len(mt, nl_boxed);
+        // a nested source walks its own axis exactly as the first one does
+        // a nested source always opens its key list: see mir_open_loop_source
+        MirLoopSource nl_src = mir_open_loop_source(mt, nl, "loop_snap_n", true, false);
+        MIR_reg_t nl_len = nl_src.len;
+        {
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, nested_keys[nested_count]), MIR_new_reg_op(mt->ctx, nl_src.keys)));
+        }
 
         // Inner index counter
         MIR_reg_t nidx = new_reg(mt, "nidx", MIR_T_I64);
@@ -18453,27 +18541,7 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, nl_end),
             MIR_new_reg_op(mt->ctx, nl_cmp)));
 
-        // Get current item: item_at(nl_src, nidx)
-        MIR_reg_t nl_item = emit_call_2(mt, "item_at", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, nl_boxed),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, nidx));
-
-        // Bind nested loop variable
-        char nl_name[128];
-        snprintf(nl_name, sizeof(nl_name), "%.*s", (int)nl->name->len, nl->name->chars);
-        set_var(mt, nl_name, nl_item, MIR_T_I64, LMD_TYPE_ANY);
-        publish_var_binding(mt, nl_name, nl->entry);
-
-        // Bind index variable if present
-        if (nl->index_name) {
-            char nl_idx_name[128];
-            snprintf(nl_idx_name, sizeof(nl_idx_name), "%.*s", (int)nl->index_name->len, nl->index_name->chars);
-            // Same split as the outer loop: `nidx` stays the machine counter,
-            // the binding the user names lives in int's native lane.
-            // Same as the outer loop: one register, no conversion.
-            set_var(mt, nl_idx_name, nidx, MIR_T_I64, LMD_TYPE_INT);
-            publish_var_binding(mt, nl_idx_name, nl->index_entry);
-        }
+        mir_bind_loop_member(mt, nl, nl_src, nidx);
 
         nested_loops[nested_count++] = {nidx, nl_len, nl_loop, nl_cont, nl_end};
         next_loop = next_loop->next;
@@ -18494,6 +18562,12 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
             MIR_new_reg_op(mt->ctx, nested_loops[ni].nidx), MIR_new_int_op(mt->ctx, 1)));
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, nested_loops[ni].nloop)));
         emit_label(mt, nested_loops[ni].nend);
+        {
+            emit_call_void_1(mt, "symbol_key_list_free", MIR_T_P,
+                MIR_new_reg_op(mt->ctx, nested_keys[ni]));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, nested_keys[ni]), MIR_new_int_op(mt->ctx, 0)));
+        }
     }
 
     // Continue: increment outer index
@@ -18518,10 +18592,12 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
     mt->typed_array_inbounds_index_count = saved_for_inbounds_index_count;
     em_hoist_loop_scalar_calls(&mt->em, l_loop, l_end, loop_scalars);
     arraylist_free(loop_scalars);
-    if (keys_al) {
+    // innermost first: a `break` from a nested body leaves its lists open
+    for (int ni = nested_key_count - 1; ni >= 0; ni--) {
         emit_call_void_1(mt, "symbol_key_list_free",
-            MIR_T_P, MIR_new_reg_op(mt->ctx, keys_al));
+            MIR_T_P, MIR_new_reg_op(mt->ctx, nested_keys[ni]));
     }
+    mir_free_loop_keys(mt, main_src);
 
     if (!result_demanded) {
         if (mt->loop_depth > 0) mt->loop_depth--;
@@ -18879,6 +18955,21 @@ static bool mir_length_bound_rhs_read_only(AstNode* node, int depth) {
     }
 }
 
+// The receiver half of a length-bound loop proof, shared by `while (i <
+// len(a))` and `for i of a`: a stable, rank-one typed array owned by this
+// frame, so the length read at loop entry bounds every `a[i]` in the body.
+static bool mir_length_bound_receiver(MirTranspiler* mt, NameEntry* array) {
+    MirVarEntry* receiver = mir_var_for_binding(mt, array);
+    Type* contract = mir_var_array_contract(receiver);
+    LambdaArrayContractInfo info = {};
+    return receiver && !receiver->is_state_var && !receiver->is_var_param &&
+        receiver->typed_array_cache_valid &&
+        receiver->env_offset < 0 && !receiver->from_env && !receiver->in_scope_env &&
+        mir_typed_array_contract_is_proven(receiver, contract) &&
+        lambda_array_contract_info(contract, &info) &&
+        info.rank == 1 && mir_binding_length_stable(mt, receiver);
+}
+
 // The left arm of a short-circuit condition dominates its read-only right
 // arm. With one tail +1 update and a stable rank-one array length, the same
 // bound also dominates the loop body (S7.1.1v3, D2.5.3).
@@ -18914,18 +19005,10 @@ static bool mir_length_bound_loop_plan(MirTranspiler* mt,
     if (short_circuit && item != tail) return false;
     if (!short_circuit && mt->inline_frame) return false;
     MirVarEntry* index = mir_var_for_binding(mt, counter);
-    MirVarEntry* receiver = mir_var_for_binding(mt, array);
-    Type* contract = mir_var_array_contract(receiver);
-    LambdaArrayContractInfo info = {};
     if (!mt->in_user_func || !mir_finite_loop_native_int_binding(mt, counter) ||
             index->is_state_var ||
             !index->compact_int_known_zero ||
-            !receiver || receiver->is_state_var || receiver->is_var_param ||
-            !receiver->typed_array_cache_valid ||
-            receiver->env_offset >= 0 || receiver->from_env || receiver->in_scope_env ||
-            !mir_typed_array_contract_is_proven(receiver, contract) ||
-            !lambda_array_contract_info(contract, &info) ||
-            info.rank != 1 || !mir_binding_length_stable(mt, receiver)) return false;
+            !mir_length_bound_receiver(mt, array)) return false;
     if (!short_circuit) {
         // Earlier body statements may read the index but cannot rebind or
         // borrow it for writing before the tail increment. Check this only
@@ -18939,6 +19022,28 @@ static bool mir_length_bound_loop_plan(MirTranspiler* mt,
     *out_counter = counter;
     *out_array = array;
     return true;
+}
+
+// S8.1.1v2: `for i of a` walks exactly a's positions, so its loop frame
+// carries the facts `while (i < len(a))` earns -- i is never negative, and on
+// a qualifying receiver it is below a's length -- with no tail update to
+// verify, because a loop variable is immutable. Without them every `a[i]` in
+// the body kept its bounds check, and the loop lost to the `while` it replaces.
+static void mir_of_loop_record_bounds(MirTranspiler* mt, AstLoopNode* loop,
+        LoopLabels* frame) {
+    if (!frame || !mir_loop_keys_are_positions(loop)) return;
+    NameEntry* counter = loop->index_name ? loop->index_entry
+        : loop->key_only ? loop->entry : NULL;
+    if (!counter) return;
+    frame->nonnegative_counter = counter;
+    NameEntry* array = mir_ident_binding(loop->as);
+    if (!array || array == counter || !mt->in_user_func || mt->inline_frame) return;
+    // as the `while` form: a nested function could rebind the receiver
+    bool nested = false;
+    walk_lambda_ast(mt->func_body, mir_flow_nested_function, &nested, false);
+    if (nested || !mir_length_bound_receiver(mt, array)) return;
+    frame->length_bound_counter = counter;
+    frame->length_bound_array = array;
 }
 
 static bool mir_finite_int_fact_nonnegative(MirTranspiler* mt, NameEntry* binding);
@@ -48779,7 +48884,8 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
 // Document loaders select this fixed native contract instead of generated code.
 static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
     {"pdf", "lambda.pdf.pdf", "pdf_to_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
-    {"latex", "lambda.latex.latex", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
+    // the package parses its own source so the engine sees the adapter registry (D7.2.7)
+    {"latex", "lambda.latex.latex", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
     {"tikz", "lambda.doc.tikz.tikz", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     {"graph", "lambda.graph.document", "to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     {"math", "lambda.doc.math.math", "render_math", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},

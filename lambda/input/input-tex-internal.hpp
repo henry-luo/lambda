@@ -745,6 +745,9 @@ uint32_t get_r_token(Engine* e);
 void emit_canonical_cs(Engine* e, const char* name);
 void pass_constructor_args(Engine* e, bool raw);
 bool latex_arg_mode_env(Engine* e, const Token& t, bool begin);
+// a document call of a length/counter command that a package (calc) redefined
+bool latex_redefined_echo(Engine* e, const Token& t);
+void latex_echo_redefined(Engine* e, const Token& t);
 void load_kernel(Engine* e);
 void run_preload(Engine* e, const char* name, const char* source, size_t length);
 // 1: loaded; 0: no image, the engine is untouched; -1: the image failed midway

@@ -25,7 +25,7 @@ fn is_unreserved(code) {
 pub fn form_encode(value) {
     let text = string(value);
     let codes = [for (i in 0 to len(text) - 1) ord(slice(text, i, i + 1))];
-    join([for (i in 0 to len(text) - 1) encode_char(slice(text, i, i + 1), codes[i])], "")
+    join([for (i, ch of text) encode_char(ch, codes[i])], "")
 }
 
 fn pct(byte) { "%" ++ hex_high(byte) ++ hex_low(byte) }

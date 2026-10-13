@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "glyph_sampling.hpp"
 #include "view.hpp"
 #include "render_effect_raster_fallback.hpp"
 #include "../lib/log.h"
@@ -16,8 +17,30 @@
 static RdtPath* background_image_clip_path(RasterRenderContext* rdcon, ViewBlock* view);
 static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view,
                                     BackgroundLayer* bg, Rect position_rect, Rect paint_rect);
+static int background_layer_count(const BackgroundProp* background) {
+    return background->layer_count > 0 ? background->layer_count : 1;
+}
+
+static const BackgroundLayer* background_layer_at(const BackgroundProp* background, int index) {
+    return background->layer_count > 0 ? &background->layers[index] : background;
+}
+
+static BackgroundLayer* background_layer_at(BackgroundProp* background, int index) {
+    return const_cast<BackgroundLayer*>(background_layer_at(static_cast<const BackgroundProp*>(background), index));
+}
+
+struct BackgroundGlyphMask {
+    const GlyphBitmap* bitmap;
+    float x, y;
+    RasterRenderContext* context;
+    mutable lam::ArrayList<ImageSurface*> leases{MEM_CAT_RENDER, 0};
+    ~BackgroundGlyphMask() { for (ImageSurface* surface : leases) image_surface_snapshot_release(surface); }
+};
+static bool background_record_masked_layer(PaintList* destination, const PaintList& layer,
+    const BackgroundGlyphMask& mask, float density);
 static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
-                              float pixel_ratio, const RdtMatrix* transform, RasterRenderContext* raster);
+                              float pixel_ratio, const RdtMatrix* transform, RasterRenderContext* raster,
+                              bool text_only = false, RdtPath* text_shape = nullptr, const BackgroundGlyphMask* glyph_mask = nullptr);
 static lam::Temp<RdtGradientStop> background_repeat_linear_stops(
     const RdtGradientStop* stops, int count, float physical_length, int* expanded_count);
 
@@ -52,7 +75,7 @@ static Corner background_corner_inset_box(const Corner* radius, CssEnum box,
     return radiant_corner_inset_edges(&out, insets[0], insets[1], insets[2], insets[3]);
 }
 
-static void background_layer_rects(UiContext* ui, ViewBlock* view, BackgroundGeometry* bg,
+void render_background_layer_rects(UiContext* ui, ViewBlock* view, BackgroundGeometry* bg,
         Rect rect, float s, Rect* position_rect, Rect* paint_rect) {
     BorderProp* border = view->boundary()->border;
     const Spacing* padding = &view->boundary()->padding;
@@ -137,8 +160,7 @@ static lam::Temp<RdtGradientStop> background_repeat_linear_stops(
         lam::Temp<RdtGradientStop> solid = lam::temp_array<RdtGradientStop>(2, MEM_CAT_RENDER);
         if (!solid) return {};
         Color average = gradient_image_average_color(stops, count);
-        solid[0] = solid[1] = {0.0f, average.r, average.g, average.b, average.a};
-        solid[0].offset = 0.0f; solid[1].offset = 1.0f;
+        render_set_uniform_gradient_stops(solid.get(), average);
         *expanded_count = 2;
         return solid;
     }
@@ -270,8 +292,86 @@ static bool gradient_interval_is_uniform(const RdtGradientStop* stops, int count
     return true;
 }
 
-bool render_paint_gradient_image(PaintList* paint, const ListStyleImage* image, Rect rect,
-                                float pixel_ratio, const RdtMatrix* transform) {
+bool render_paint_solid_shape(PaintList* paint, RdtPath* shape, Color color,
+        const RdtMatrix* transform) {
+    RdtPath* path = rdt_path_clone(shape);
+    if (!path) return false;
+    int index = paint_list_count(paint);
+    paint_fill_path(paint, path, color, RDT_FILL_WINDING, transform);
+    if (paint_list_take_path_payload(paint, index, PAINT_FILL_PATH)) return true;
+    rdt_path_free(path);
+    return false;
+}
+
+// constant opaque intervals use the solid contour consumer, avoiding gradient color rounding at glyph edges.
+static bool gradient_shape_has_constant_intervals(const RdtGradientStop* stops, int count) {
+    for (int i = 0; i < count; i++) {
+        if (stops[i].a != 255) return false;
+        if (i && stops[i].offset > stops[i - 1].offset &&
+            render_gradient_stop_color(stops[i]).c != render_gradient_stop_color(stops[i - 1]).c) return false;
+    }
+    return true;
+}
+
+static bool gradient_shape_record_constant_intervals(PaintList* paint, RdtPath* shape,
+        Rect rect, const RadiantGradientLine& line, const RdtGradientStop* stops, int count,
+        const RdtMatrix* transform) {
+    float length = hypotf(line.x2 - line.x1, line.y2 - line.y1);
+    if (!(length > 0.0f)) return false;
+    float ux = (line.x2 - line.x1) / length, uy = (line.y2 - line.y1) / length;
+    float vx = -uy, vy = ux;
+    float min_u = INFINITY, max_u = -INFINITY, min_v = INFINITY, max_v = -INFINITY;
+    for (int corner = 0; corner < 4; corner++) {
+        float x = rect.x + ((corner & 1) ? rect.width : 0.0f) - line.x1;
+        float y = rect.y + ((corner & 2) ? rect.height : 0.0f) - line.y1;
+        float u = x * ux + y * uy, v = x * vx + y * vy;
+        min_u = fminf(min_u, u); max_u = fmaxf(max_u, u);
+        min_v = fminf(min_v, v); max_v = fmaxf(max_v, v);
+    }
+    RdtMatrix basis = {ux, vx, line.x1, uy, vy, line.y1, 0, 0, 1};
+    RdtMatrix mapped = transform ? rdt_matrix_multiply(transform, &basis) : basis;
+    size_t checkpoint = paint->size();
+    RdtPath* box = background_rect_path(rect);
+    if (!box) return false;
+    paint_push_clip(paint, box, transform); rdt_path_free(box);
+    if (paint->size() != checkpoint + 1) return false;
+    // shared clip edges paint in owner coordinate order even when the gradient axis is reversed.
+    bool reverse = ux < 0.0f || (ux == 0.0f && uy < 0.0f);
+    for (int step = 0; step < count; step++) {
+        int i = reverse ? count - 1 - step : step;
+        float begin = i == 0 ? min_u : fmaxf(min_u, stops[i].offset * length);
+        float end = i + 1 == count ? max_u : fminf(max_u, stops[i + 1].offset * length);
+        if (end <= begin) continue;
+        Rect band = {begin, min_v, end - begin, max_v - min_v};
+        const RdtMatrix* band_transform = &mapped;
+        if (ux == 0.0f || uy == 0.0f) {
+            float left, top, right, bottom;
+            if (!rdt_matrix_project_rect_bounds(&basis, band.x, band.y, band.x + band.width,
+                    band.y + band.height, &left, &top, &right, &bottom)) {
+                paint->rewind(checkpoint); return false;
+            }
+            // preserve compact rectangles when the stripe is axis aligned, including reversed directions.
+            band = {left, top, right - left, bottom - top}; band_transform = transform;
+        }
+        RdtPath* stripe = background_rect_path(band);
+        if (!stripe) { paint->rewind(checkpoint); return false; }
+        int index = paint_list_count(paint);
+        paint_push_clip(paint, stripe, band_transform); rdt_path_free(stripe);
+        if (paint_list_count(paint) != index + 1) { paint->rewind(checkpoint); return false; }
+        index = paint_list_count(paint);
+        if (!render_paint_solid_shape(paint, shape, render_gradient_stop_color(stops[i]), transform)) {
+            paint->rewind(checkpoint); return false;
+        }
+        paint_pop_clip(paint);
+        if (paint_list_count(paint) != index + 2) { paint->rewind(checkpoint); return false; }
+    }
+    size_t end = paint->size(); paint_pop_clip(paint);
+    if (paint->size() != end + 1) { paint->rewind(checkpoint); return false; }
+    return true;
+}
+
+static bool gradient_image_record_shape(PaintList* paint, const ListStyleImage* image, Rect rect,
+    float pixel_ratio, const RdtMatrix* transform, RdtPath* shape) {
     if (!paint || !image || !isfinite(rect.x) || !isfinite(rect.y) ||
         !isfinite(rect.width) || !isfinite(rect.height) || rect.width <= 0.0f || rect.height <= 0.0f ||
         !isfinite(pixel_ratio) || pixel_ratio <= 0.0f) return false;
@@ -289,8 +389,16 @@ bool render_paint_gradient_image(PaintList* paint, const ListStyleImage* image, 
     float length = linear ? hypotf(line.x2 - line.x1, line.y2 - line.y1) : radial ? geometry.rx : 1.0f;
     lam::Temp<RdtGradientStop> stops = lam::temp_array<RdtGradientStop>((size_t)count, MEM_CAT_RENDER);
     if (!stops || !render_copy_gradient_stops(source, count, length, stops.get(), count, nullptr)) return false;
-    if (conic || (radial && radial->is_repeating))
-        return gradient_image_record_pixels(paint, image, rect, pixel_ratio, stops.get(), count, transform);
+    if (conic || (radial && radial->is_repeating)) {
+        int start = paint_list_count(paint);
+        if (shape) {
+            paint_push_clip(paint, shape, transform);
+            if (paint_list_count(paint) != start + 1) return false;
+        }
+        bool recorded = gradient_image_record_pixels(paint, image, rect, pixel_ratio, stops.get(), count, transform);
+        if (shape) paint_pop_clip(paint);
+        return recorded;
+    }
     Color uniform_color = {};
     bool uniform_image = false;
     if ((linear && !linear->is_repeating) || (radial && geometry.rx > 0.0f && geometry.ry > 0.0f)) {
@@ -300,14 +408,19 @@ bool render_paint_gradient_image(PaintList* paint, const ListStyleImage* image, 
         // stops outside the painted interval can make a multicolor source a solid image.
         uniform_image = gradient_interval_is_uniform(stops.get(), count, 0.0f, last, &uniform_color);
     }
-    RdtPath* path = background_rect_path(rect);
+    if (uniform_image) {
+        // retain gradient alpha lowering; a solid path uses different edge/blend quantization.
+        render_set_uniform_gradient_stops(stops.get(), uniform_color);
+        count = 2;
+    }
+    RdtPath* path = shape ? rdt_path_clone(shape) : background_rect_path(rect);
     if (!path) return false;
     int index = paint_list_count(paint);
     PaintOp op = linear ? PAINT_FILL_LINEAR_GRADIENT : PAINT_FILL_RADIAL_GRADIENT;
-    if (uniform_image || (radial && (geometry.rx <= 0.0f || geometry.ry <= 0.0f))) {
-        // constant intervals and degenerate radial images need no gradient sampling.
+    if (radial && (geometry.rx <= 0.0f || geometry.ry <= 0.0f)) {
+        // a degenerate radial image has no invertible ellipse.
         op = PAINT_FILL_PATH;
-        paint_fill_path(paint, path, uniform_image ? uniform_color : render_gradient_stop_color(stops[count - 1]),
+        paint_fill_path(paint, path, render_gradient_stop_color(stops[count - 1]),
             RDT_FILL_WINDING, transform);
     } else if (linear) {
         if (linear->is_repeating) {
@@ -323,6 +436,10 @@ bool render_paint_gradient_image(PaintList* paint, const ListStyleImage* image, 
             stops.reset(repeated.release());
         }
         if (!render_normalize_linear_gradient_range(&line, stops.get(), count)) { rdt_path_free(path); return false; }
+        if (shape && gradient_shape_has_constant_intervals(stops.get(), count)) {
+            rdt_path_free(path);
+            return gradient_shape_record_constant_intervals(paint, shape, rect, line, stops.get(), count, transform);
+        }
         paint_fill_linear_gradient(paint, path, line.x1, line.y1, line.x2, line.y2,
             stops.get(), count, RDT_FILL_WINDING, transform, nullptr);
     } else {
@@ -338,6 +455,16 @@ bool render_paint_gradient_image(PaintList* paint, const ListStyleImage* image, 
     }
     rdt_path_free(path);
     return false;
+}
+
+bool render_paint_gradient_image(PaintList* paint, const ListStyleImage* image, Rect rect,
+    float pixel_ratio, const RdtMatrix* transform) {
+    return gradient_image_record_shape(paint, image, rect, pixel_ratio, transform, nullptr);
+}
+
+bool render_paint_gradient_shape(PaintList* paint, const ListStyleImage* image, Rect rect,
+    float pixel_ratio, const RdtMatrix* transform, RdtPath* shape) {
+    return shape && gradient_image_record_shape(paint, image, rect, pixel_ratio, transform, shape);
 }
 
 static uint32_t* background_gradient_pixel_buffer(RasterRenderContext* rdcon, Rect rect,
@@ -365,6 +492,8 @@ static uint32_t* background_gradient_pixel_buffer(RasterRenderContext* rdcon, Re
  * The blur_radius is the CSS blur radius (σ); box size = ceil(σ * 2 / 3) * 2 + 1.
  * Operates on pre-multiplied RGBA pixels in-place.
  */
+
+
 void box_blur_region(ScratchArena* sa, ImageSurface* surface, int rx, int ry, int rw, int rh, float blur_radius) {
     if (blur_radius <= 0 || rw <= 0 || rh <= 0 || !surface || !surface->pixels) return;
 
@@ -389,8 +518,7 @@ void box_blur_region(ScratchArena* sa, ImageSurface* surface, int rx, int ry, in
     // The previous formula `ceilf(b/2)` produced a kernel ~2× wider than the
     // browser for small blur radii (e.g. b=3 → r=2 giving σ≈2.45 vs target 1.5),
     // creating visible halos around shadows that should be tight to the element.
-    int box_r = (int)roundf(0.5f * (-1.0f + sqrtf(1.0f + blur_radius * blur_radius)));
-    if (box_r < 1) box_r = 1;
+    int box_r = (int)render_box_blur_half_width(blur_radius); // INT_CAST_OK: discrete convolution kernel half-width
 
     uint32_t* pixels = (uint32_t*)surface->pixels;
     int stride = surface->pitch / 4;  // pitch is in bytes, pixels are 4 bytes
@@ -1337,6 +1465,7 @@ struct BackgroundPaintContext {
     Color solid_color;
     bool solid_tiles;
     bool rectangular_tiles;
+    RdtPath* text_shape;
 };
 
 static bool background_record_solid_rect(PaintList* paint, Rect rect, Color color, const RdtMatrix* transform) {
@@ -1361,15 +1490,19 @@ static void paint_background_tile(const Rect* tile, void* data) {
         return;
     }
     if (context->gradient.gradient_type != GRADIENT_NONE) {
-        render_paint_gradient_image(context->paint, &context->gradient, *tile,
+        if (context->text_shape) render_paint_gradient_shape(context->paint, &context->gradient,
+            *tile, context->pixel_ratio, context->transform, context->text_shape);
+        else render_paint_gradient_image(context->paint, &context->gradient, *tile,
             context->pixel_ratio, context->transform);
         return;
     }
+    if (context->text_shape) paint_push_clip(context->paint, context->text_shape, context->transform);
     if (!render_media_paint_svg_image(context->paint, context->image, *tile, &context->clip,
             ui_context_raster_scale(context->ui), context->ui->font_ctx, context->ui)) {
         paint_draw_image_resource(context->paint, context->image, tile->x, tile->y,
             tile->width, tile->height, 255, context->transform);
     }
+    if (context->text_shape) paint_pop_clip(context->paint);
 }
 
 static RdtPath* background_layer_clip(ViewBlock* view, const BackgroundGeometry* layer, Rect clip) {
@@ -1409,21 +1542,23 @@ static IRect background_blend_bounds(BackgroundPaintContext* context, Rect clip)
 }
 
 static bool background_has_blend(const BackgroundProp* background) {
-    int count = background->layer_count > 0 ? background->layer_count : 1;
+    int count = background_layer_count(background);
     for (int index = 0; index < count; index++) {
-        const BackgroundLayer* layer = background->layer_count > 0 ? &background->layers[index] : background;
+        const BackgroundLayer* layer = background_layer_at(background, index);
         if (layer->blend_mode && layer->blend_mode != CSS_VALUE_NORMAL) return true;
     }
     return false;
 }
 
 static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
-                              float pixel_ratio, const RdtMatrix* transform, RasterRenderContext* raster) {
+                              float pixel_ratio, const RdtMatrix* transform, RasterRenderContext* raster,
+                              bool text_only, RdtPath* text_shape, const BackgroundGlyphMask* glyph_mask) {
     if (!paint || !ui || !view || !view->bound || !view->boundary()->background) return false;
     BackgroundProp* background = view->boundary()->background;
     BackgroundPaintContext context = {paint, ui, view, raster, pixel_ratio, transform, nullptr, {}, {}};
-    int count = background->layer_count > 0 ? background->layer_count : 1;
-    BackgroundLayer* bottom = background->layer_count > 0 ? &background->layers[count - 1] : background;
+    context.text_shape = text_shape;
+    int count = background_layer_count(background);
+    BackgroundLayer* bottom = background_layer_at(background, count - 1);
     bool recorded = false;
     bool isolated = background_has_blend(background);
     if (isolated) {
@@ -1435,26 +1570,38 @@ static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, 
         paint_begin_effect_group(paint, &group);
     }
     Rect position = {}, clip = {};
-    if (background->color.a && bottom->bg_clip != CSS_VALUE_TEXT) {
-        background_layer_rects(ui, view, bottom, rect, 1.0f, &position, &clip);
+    if (background->color.a && (bottom->bg_clip == CSS_VALUE_TEXT) == text_only) {
+        PaintList color_layer;
+        PaintList* color_target = glyph_mask ? &color_layer : paint;
+        context.paint = color_target;
+        render_background_layer_rects(ui, view, bottom, rect, 1.0f, &position, &clip);
         const BorderProp* border = view->boundary()->border;
-        if (!border || !corner_has_radius(&border->radius)) {
-            recorded = background_record_solid_rect(paint, clip, background->color, transform);
+        if (text_shape) {
+            if (background_push_layer_clip(&context, bottom, clip)) {
+                recorded = render_paint_solid_shape(color_target, text_shape, background->color, transform);
+                background_pop_layer_clip(&context);
+            }
+        } else if (!border || !corner_has_radius(&border->radius)) {
+            recorded = background_record_solid_rect(color_target, clip, background->color, transform);
         } else {
             RdtPath* path = background_layer_clip(view, bottom, clip);
             if (path) {
-                int index = paint_list_count(paint);
-                paint_fill_path(paint, path, background->color, RDT_FILL_WINDING, transform);
-                if (!paint_list_take_path_payload(paint, index, PAINT_FILL_PATH)) rdt_path_free(path);
+                int index = paint_list_count(color_target);
+                paint_fill_path(color_target, path, background->color, RDT_FILL_WINDING, transform);
+                if (!paint_list_take_path_payload(color_target, index, PAINT_FILL_PATH)) rdt_path_free(path);
                 recorded = true;
             }
         }
+        if (glyph_mask && recorded) recorded = background_record_masked_layer(paint, color_layer, *glyph_mask, pixel_ratio);
     }
     // one authored-order walk feeds native raster and both vector backends (CI-18).
     for (int index = count - 1; index >= 0; index--) {
-        BackgroundLayer* layer = background->layer_count > 0 ? &background->layers[index] : background;
-        if (layer->bg_clip == CSS_VALUE_TEXT || (!layer->image && layer->gradient_type == GRADIENT_NONE)) continue;
-        background_layer_rects(ui, view, layer, rect, 1.0f, &position, &clip);
+        BackgroundLayer* layer = background_layer_at(background, index);
+        if ((layer->bg_clip == CSS_VALUE_TEXT) != text_only ||
+            (!layer->image && layer->gradient_type == GRADIENT_NONE)) continue;
+        PaintList image_layer;
+        context.paint = glyph_mask ? &image_layer : paint;
+        render_background_layer_rects(ui, view, layer, rect, 1.0f, &position, &clip);
         context.image = layer->image ? load_document_image(ui->document, ui, layer->image) : nullptr;
         if (layer->image && !context.image) continue;
         context.gradient = {};
@@ -1470,7 +1617,7 @@ static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, 
                 context.image ? (float)context.image->height / density : position.height, &plan, 1.0f,
                 context.image != nullptr)) continue;
         GradientImageParts parts = gradient_image_parts(&context.gradient);
-        context.solid_tiles = gradient_stops_uniform_color(parts.stops, parts.count, &context.solid_color);
+        context.solid_tiles = !text_shape && gradient_stops_uniform_color(parts.stops, parts.count, &context.solid_color);
         const BorderProp* border = view->boundary()->border;
         bool rounded = border && corner_has_radius(&border->radius);
         context.rectangular_tiles = context.solid_tiles && !rounded;
@@ -1478,8 +1625,8 @@ static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, 
         Rect single_tile = {};
         bool one_tile = plan.start_col == plan.end_col && plan.start_row == plan.end_row;
         if (one_tile) background_tile_rect(&plan, position, plan.start_row, plan.start_col, &single_tile);
-        bool needs_clip = !context.rectangular_tiles && (!one_tile || rounded ||
-            !view_geometry_rect_contains_rect(clip, single_tile, 0.0f));
+        bool needs_clip = text_shape || (!context.rectangular_tiles && (!one_tile || rounded ||
+            !view_geometry_rect_contains_rect(clip, single_tile, 0.0f)));
         // a coincident rectangular clip compounds PDF coverage already supplied by the tile.
         if (needs_clip && !background_push_layer_clip(&context, layer, clip)) continue;
         bool blend = layer->blend_mode && layer->blend_mode != CSS_VALUE_NORMAL;
@@ -1498,8 +1645,9 @@ static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, 
             Rect physical_clip = {clip.x * scale, clip.y * scale, clip.width * scale, clip.height * scale};
             render_background_image(raster, view, layer, physical_position, physical_clip);
         } else background_for_each_tile(&plan, position, clip, paint_background_tile, &context);
-        if (blend && !render_geometry_pixel_bounds_empty(blend_bounds)) paint_end_effect_group(paint);
         if (needs_clip) background_pop_layer_clip(&context);
+        if (glyph_mask) background_record_masked_layer(paint, image_layer, *glyph_mask, pixel_ratio);
+        if (blend && !render_geometry_pixel_bounds_empty(blend_bounds)) paint_end_effect_group(paint);
         recorded = true;
     }
     if (isolated) paint_end_effect_group(paint);
@@ -1721,4 +1869,87 @@ static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view,
     };
     background_for_each_tile(&plan, rect, paint_rect, render_background_image_tile_cb, &tile_ctx);
 
+}
+
+
+static bool background_has_text_clip(const DomElement* parent) {
+    if (!parent || !parent->bound || !parent->boundary()->background) return false;
+    const BackgroundProp* background = parent->boundary()->background;
+    int count = background_layer_count(background);
+    for (int i = 0; i < count; i++) {
+        const BackgroundLayer* layer = background_layer_at(background, i);
+        if (layer->bg_clip == CSS_VALUE_TEXT) return true;
+    }
+    return false;
+}
+
+bool render_paint_text_background(PaintList* paint, UiContext* ui, DomElement* parent,
+        const PaintGlyphRun* run, Rect border) {
+    if (!paint || !run || !background_has_text_clip(parent)) return false;
+    RdtPath* mask = render_path_create_paint_glyph_run(run, ui ? ui->font_ctx.get() : nullptr);
+    if (!mask) return false;
+    bool painted = record_background(paint, ui, static_cast<ViewBlock*>(parent), border,
+        ui_context_raster_scale(ui), nullptr, nullptr, true, mask);
+    rdt_path_free(mask);
+    return painted;
+}
+
+static bool background_record_masked_layer(PaintList* destination, const PaintList& layer,
+        const BackgroundGlyphMask& mask, float density) {
+    OffscreenRenderArenas arenas;
+    if (!arenas.init("render.text.background", "render.text.background.list", "render.text.background.scratch")) return false;
+    DisplayList list = {}; dl_init(&list, arenas.list_arena);
+    paint_ir_lower_raster(&layer, &list);
+    const GlyphBitmap* bitmap = mask.bitmap;
+    Bound bounds = {mask.x, mask.y, mask.x + (float)bitmap->width, mask.y + (float)bitmap->height};
+    ImageSurface* surface = render_display_list_snapshot(&list,
+        mem_context_process(MEM_ROLE_RENDER), bounds, density);
+    dl_destroy(&list); arenas.destroy();
+    if (!surface) return false;
+    for (int row = 0; row < bitmap->height; row++) {
+        uint32_t* pixels = (uint32_t*)((uint8_t*)surface->pixels + row * surface->pitch);
+        for (int column = 0; column < bitmap->width; column++) {
+            Color color = {.c = pixels[column]};
+            color.a = render_pixel_premultiply_channel(color.a,
+                (uint8_t)glyph_sample_coverage_pixel(bitmap, row, column));
+            pixels[column] = render_pixel_premultiply_abgr(color.c);
+        }
+    }
+    surface->alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
+    size_t before = destination->size();
+    if (render_painter_can_blit_surface(mask.context)) {
+        if (!mask.leases.append(surface)) { image_surface_destroy(surface); return false; }
+        image_surface_snapshot_publish(surface);
+        // native glyph pixels share CPU source-over and captured clips with foreground glyphs.
+        paint_blit_surface_scaled(destination, surface, mask.x, mask.y,
+            (float)bitmap->width, (float)bitmap->height, SCALE_MODE_NEAREST,
+            &mask.context->block.clip, mask.context->clip_shapes, mask.context->clip_shape_depth,
+            255, surface->generation);
+    } else {
+        paint_draw_image_resource(destination, surface, mask.x, mask.y,
+            (float)bitmap->width, (float)bitmap->height, 255, nullptr, image_surface_destroy);
+    }
+    return destination->size() == before + 1;
+}
+
+bool render_paint_text_background_glyph(RasterRenderContext* context, DomElement* parent,
+        Rect physical_border, const GlyphBitmap* bitmap, float x, float y) {
+    if (!context || !background_has_text_clip(parent) || !bitmap || !bitmap->buffer ||
+        bitmap->width <= 0 || bitmap->height <= 0 || context->raster_scale <= 0.0f) return false;
+    PaintRecordTarget target = rc_record_target(context);
+    if (!paint_record_ready(&target)) return false;
+    float scale = context->raster_scale;
+    Rect border = {physical_border.x / scale, physical_border.y / scale,
+        physical_border.width / scale, physical_border.height / scale};
+    RdtMatrix density = rdt_matrix_scale(scale, scale);
+    PaintList paint;
+    // each background layer gets text coverage before the existing compositor combines the layers.
+    BackgroundGlyphMask mask = {bitmap, x, y, context};
+    if (!record_background(&paint, context->ui_context, static_cast<ViewBlock*>(parent),
+            border, scale, &density, nullptr, true, nullptr, &mask)) return false;
+    // retain masked layers directly; a composite snapshot would quantize alpha before the foreground paint.
+    paint_record_lower_pending(&target);
+    paint_ir_lower_raster_transformed(&paint, target.display_list,
+        context->has_transform ? &context->transform : nullptr);
+    return true;
 }

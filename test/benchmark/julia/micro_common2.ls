@@ -90,15 +90,12 @@ pn trace_fourth(matrix: float[], rows: int, columns: int) float {
 }
 pn variation(values: float[]) float {
     var total: float = 0.0
-    var i: int = 0
-    while (i < len(values)) { total = total + values[i]; i = i + 1 }
+    for i of values { total = total + values[i] }
     let mean: float = total / float(len(values))
     total = 0.0
-    i = 0
-    while (i < len(values)) {
+    for i of values {
         let delta: float = values[i] - mean
         total = total + delta * delta
-        i = i + 1
     }
     return math.sqrt(total / float(len(values) - 1)) / mean
 }
@@ -168,10 +165,8 @@ pn formatted_output() int[] {
     var i: int = 1
     while (i <= 100000) {
         let line: string = decimal_text(i) ++ " " ++ decimal_text(i + 1) ++ "\n"
-        var j: int = 0
-        while (j < len(line)) {
+        for j of line {
             digest = (digest * 31 + ord(line[j])) % 1000000007
-            j = j + 1
         }
         size = size + len(line)
         buffer = buffer ++ line

@@ -73,6 +73,8 @@ pub let CATALOG = {
         "maxnames", "minnames", "maxcitenames", "mincitenames",
         "maxbibnames", "minbibnames", "giveninits", "uniquename",
         "doi", "url", "isbn", "natbib", "backref", "backend"]},
+    // loads biblatex with its Chicago styles; formatted through CSL (Lambda_Design_BibTeX_CSL §7.4)
+    'biblatex-chicago': {options: ["authordate", "notes", "backend"]},
     natbib: {options: ["numbers", "authoryear", "round", "square", "sort&compress"]},
     enumitem: {options: []},
     microtype: {options: ["kerning", "tracking", "spacing", "protrusion", "expansion"]},
@@ -405,8 +407,24 @@ fn scan(node, packages, outside_body) {
     }
 }
 
+// biblatex-chicago loads biblatex with a Chicago style named by its own option;
+// notes is the package default.
+fn chicago_biblatex(st) {
+    let opts = options_for(st.packages, "biblatex-chicago")
+    let offset = offset_for(st.packages, "biblatex-chicago")
+    if (opts == null) st
+    else if (active(st.packages, "biblatex"))
+        {*:st, diagnostics: st.diagnostics ++ [util.diagnostic("conflicting-bibliography-packages",
+            "biblatex-chicago", "biblatex",
+            "biblatex-chicago loads biblatex itself; do not load both", offset)]}
+    else {*:st, packages: st.packages ++ [{key: "biblatex", offset: offset,
+        val: {*:(if (opts.backend == null) {} else {backend: opts.backend}),
+              style: if (opts.authordate != null) "chicago-authordate" else "chicago-notes"}}]}
+}
+
 pub fn collect(ast) {
-    let declared = walk(ast, {packages: [], diagnostics: []}, true)
+    let walked = walk(ast, {packages: [], diagnostics: []}, true)
+    let declared = chicago_biblatex(walked)
     // Subcaption loads caption upstream; preserve that dependency in the static registry.
     let loaded = if (active(declared.packages, "subcaption") and
         not active(declared.packages, "caption")) {*:declared,

@@ -11,6 +11,8 @@
 #include "dom.h"
 #include "dom_graphics.h"
 #include "dom_style.h"
+#include "dom_collection_types.h"
+#include "dom_host_engine.h"
 #include "../../radiant/svg_animation.hpp"
 #include "dom_core.h"
 #include "realm/dom_realm.h"
@@ -547,7 +549,7 @@ static DomElement* dom_prepare_children_for_mutation(DomElement* parent,
         child_is_nested_in_table_fixup) {
         // A source child may sit below a retained table wrapper. Unwrap before
         // mutating so DOM removal addresses the authored parent, not the box.
-        layout_unwrap_anonymous_table_fixups_for_dom_mutation(source_element);
+        dom_engine_prepare_children_mutation(source_element);
     }
     return source_element;
 }
@@ -895,8 +897,8 @@ static bool dom_flush_pending_document_layout(UiContext* uicon, DomDocument* doc
     bool pending_reflow = doc->state && doc->state->needs_reflow;
     if (!pending_scroll && !pending_reflow) return false;
     // animation seeks and scroll requests change layout without changing the DOM.
-    layout_html_doc(uicon, doc, true);
-    doc_state_clear_reflow(doc->state);
+    if (!dom_engine_layout_document(uicon, doc, true)) return false;
+    dom_engine_document_clear_reflow(doc);
     return true;
 }
 
@@ -945,7 +947,7 @@ extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
         // First-layout geometry is renderer work required for the initial
         // paint; a page's CSSOM read must not consume its JS CPU budget.
         script_runner_suspend_js_watchdog();
-        layout_html_doc(uicon, doc, false);
+        dom_engine_layout_document(uicon, doc, false);
         script_runner_resume_js_watchdog();
     }
 
@@ -973,14 +975,14 @@ static bool dom_tick_headless_animation_frame_by(double delta_seconds) {
     if (scheduler && scheduler->has_active_animations) {
         double now = scheduler->current_time +
             (delta_seconds >= 0.0 ? delta_seconds : 1.0 / 60.0);
-        active = radiant_tick_document_animation_scheduler(
+        active = dom_engine_document_tick_animation(
             doc, now, &state->dirty_tracker);
     }
     if (state->has_active_smooth_scroll) {
         double now = js_event_loop_virtual_clock_enabled()
             ? js_event_loop_virtual_clock_now_ms() / 1000.0
             : js_performance_monotonic_now_ms() / 1000.0;
-        active = scroll_smooth_tick_document(doc, now) || active;
+        active = dom_engine_document_tick_smooth_scroll(doc, now) || active;
     }
     return active || frame_delivered;
 }
@@ -1906,7 +1908,7 @@ static void _set_checkedness(DomElement* elem, bool v) {
 
 static bool dom_get_indeterminate(DomElement* element) {
     DocState* state = _state_for_element(element);
-    if (state) return state_get_bool(state, element, STATE_INDETERMINATE);
+    if (state) return dom_engine_state_bool(state, element, STATE_INDETERMINATE);
     if (!js_active_runtime_state) return false;
     return dom_expando_flag_is(element, "__indeterminate");
 }
@@ -2317,7 +2319,7 @@ static void dom_document_configuration_changed(DomDocument* doc) {
     // document configuration changes selector matches without changing an observable DOM attribute.
     if (doc->root) dom_mutation_notify(DOM_JS_MUTATION_UNKNOWN, doc->root);
     else { doc->mutation_epoch++; doc->style_content_epoch++; }
-    if (doc->state) doc_state_request_repaint(doc->state);
+    if (doc->state) dom_engine_document_request_repaint(doc);
 }
 
 extern "C" void dom_css_document_language_changed(void* document) {
@@ -2455,14 +2457,6 @@ JS_FORWARD_ITEM(dom_wrap_element, (void* dom_elem), radiant_dom_wrap_node, (dom_
 
 extern "C" void* radiant_dom_unwrap_node(Item item);
 extern "C" bool radiant_dom_is_node(Item item);
-extern "C" const void* radiant_dom_node_list_host_type(void);
-extern "C" const void* radiant_dom_html_collection_host_type(void);
-extern "C" const void* radiant_dom_html_options_collection_host_type(void);
-extern "C" const void* radiant_dom_html_form_controls_collection_host_type(void);
-extern "C" const void* radiant_dom_named_node_map_host_type(void);
-extern "C" const void* radiant_dom_token_list_host_type(void);
-extern "C" const void* radiant_dom_radio_node_list_host_type(void);
-extern "C" const void* radiant_dom_rect_list_host_type(void);
 
 // Jube POC: unwrap/type policy is exposed through the radiant module so DOM
 // nodes no longer depend on the retired DOM map wrapper shell.
@@ -2939,17 +2933,17 @@ extern "C" Item dom_static_collection_from_array(
 
 extern "C" Item dom_static_node_list_from_array(Item items) {
     return dom_static_collection_from_array(
-        items, radiant_dom_node_list_host_type());
+        items, dom_node_list_host_type());
 }
 
 extern "C" Item dom_static_radio_node_list_from_array(Item items) {
     return dom_static_collection_from_array(
-        items, radiant_dom_radio_node_list_host_type());
+        items, dom_radio_node_list_host_type());
 }
 
 extern "C" Item dom_static_rect_list_from_array(Item items) {
     return dom_static_collection_from_array(
-        items, radiant_dom_rect_list_host_type());
+        items, dom_rect_list_host_type());
 }
 
 static Item dom_collection_varray_new(Item owner,
@@ -2993,7 +2987,7 @@ extern "C" int dom_child_collection_named_get(Item receiver, Item key, Item* out
         key_root.set(js_name_item(name));
         *out = dom_collection_varray_new(collection->owner,
             DOM_VARRAY_FORM_ELEMENTS, key_root.get(), false,
-            radiant_dom_radio_node_list_host_type());
+            dom_radio_node_list_host_type());
         return 1;
     }
     if (first_root.get().item == ITEM_NULL) return 0;
@@ -3036,7 +3030,7 @@ static Item dom_live_table_collection(DomElement* elem,
     if (!elem) return ItemNull;
     Item owner = dom_wrap_element((void*)elem);
     return dom_collection_varray_new(owner, kind, ItemNull, false,
-        radiant_dom_html_collection_host_type());
+        dom_html_collection_host_type());
 }
 
 static Item dom_live_direct_tag_collection(DomElement* elem, const char* tag) {
@@ -3045,7 +3039,7 @@ static Item dom_live_direct_tag_collection(DomElement* elem, const char* tag) {
     Rooted<Item> owner(roots, dom_wrap_element((void*)elem));
     Rooted<Item> query(roots, js_name_item(tag));
     return dom_collection_varray_new(owner.get(), DOM_VARRAY_DIRECT_TAG,
-        query.get(), false, radiant_dom_html_collection_host_type());
+        query.get(), false, dom_html_collection_host_type());
 }
 
 static Item dom_table_first_section(DomElement* table, const char* tag) {
@@ -3080,8 +3074,8 @@ extern "C" Item dom_live_child_collection_bridge(void* elem_ptr, bool elements_o
     Item owner = dom_wrap_element((void*)elem);
     if (get_type_id(owner) != LMD_TYPE_VELMT) return ItemNull;
     const void* host_type = elements_only
-        ? radiant_dom_html_collection_host_type()
-        : radiant_dom_node_list_host_type();
+        ? dom_html_collection_host_type()
+        : dom_node_list_host_type();
     return dom_collection_varray_new(owner,
         elements_only ? DOM_VARRAY_ELEMENT_CHILDREN : DOM_VARRAY_CHILD_NODES,
         ItemNull, false, host_type);
@@ -3092,7 +3086,7 @@ extern "C" Item dom_attribute_collection_bridge(void* elem_ptr) {
     if (!elem) return ItemNull;
     Item owner = dom_wrap_element(elem);
     return dom_collection_varray_new(owner, DOM_VARRAY_ATTRIBUTES,
-        ItemNull, false, radiant_dom_named_node_map_host_type());
+        ItemNull, false, dom_named_node_map_host_type());
 }
 
 static Item dom_token_list_collection_bridge(DomElement* elem,
@@ -3100,27 +3094,27 @@ static Item dom_token_list_collection_bridge(DomElement* elem,
     if (!elem) return ItemNull;
     Item owner = dom_wrap_element(elem);
     return dom_collection_varray_new(owner, kind,
-        ItemNull, false, radiant_dom_token_list_host_type());
+        ItemNull, false, dom_token_list_host_type());
 }
 
 extern "C" Item dom_live_document_forms_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
     Item owner = doc && doc->root ? dom_wrap_element(doc->root) : ItemNull;
     return dom_collection_varray_new(owner, DOM_VARRAY_DOCUMENT_FORMS,
-        ItemNull, true, radiant_dom_html_collection_host_type());
+        ItemNull, true, dom_html_collection_host_type());
 }
 
 static Item dom_live_document_links_bridge(DomDocument* doc) {
     Item owner = doc && doc->root ? dom_wrap_element(doc->root) : ItemNull;
     return dom_collection_varray_new(owner, DOM_VARRAY_DOCUMENT_LINKS,
-        ItemNull, true, radiant_dom_html_collection_host_type());
+        ItemNull, true, dom_html_collection_host_type());
 }
 
 extern "C" Item dom_live_form_elements_bridge(void* elem_ptr) {
     DomElement* form = (DomElement*)elem_ptr;
     Item owner = form ? dom_wrap_element(form) : ItemNull;
     return dom_collection_varray_new(owner, DOM_VARRAY_FORM_ELEMENTS,
-        ItemNull, false, radiant_dom_html_form_controls_collection_host_type());
+        ItemNull, false, dom_html_form_controls_collection_host_type());
 }
 
 static Item dom_live_select_collection_bridge(DomElement* select,
@@ -3130,8 +3124,8 @@ static Item dom_live_select_collection_bridge(DomElement* select,
         selected_only ? DOM_VARRAY_SELECT_SELECTED_OPTIONS
                       : DOM_VARRAY_SELECT_OPTIONS,
         ItemNull, false,
-        selected_only ? radiant_dom_html_collection_host_type()
-                      : radiant_dom_html_options_collection_host_type());
+        selected_only ? dom_html_collection_host_type()
+                      : dom_html_options_collection_host_type());
 }
 
 #define JS_DOM_DOCUMENT_LOOKUP_BRIDGE(name, kind, host_type_fn) \
@@ -3149,14 +3143,14 @@ extern "C" Item name(void* elem_ptr, Item query) { \
     Rooted<Item> owner(roots, elem ? dom_wrap_element(elem) : ItemNull); \
     Rooted<Item> text(roots, js_to_string(query)); \
     return dom_collection_varray_new(owner.get(), kind, text.get(), false, \
-        radiant_dom_html_collection_host_type()); \
+        dom_html_collection_host_type()); \
 }
 JS_DOM_DOCUMENT_LOOKUP_BRIDGE(dom_live_document_get_elements_by_tag_name_bridge,
-    DOM_VARRAY_LOOKUP_TAG, radiant_dom_html_collection_host_type)
+    DOM_VARRAY_LOOKUP_TAG, dom_html_collection_host_type)
 JS_DOM_DOCUMENT_LOOKUP_BRIDGE(dom_live_document_get_elements_by_class_name_bridge,
-    DOM_VARRAY_LOOKUP_CLASS, radiant_dom_html_collection_host_type)
+    DOM_VARRAY_LOOKUP_CLASS, dom_html_collection_host_type)
 JS_DOM_DOCUMENT_LOOKUP_BRIDGE(dom_live_document_get_elements_by_name_bridge,
-    DOM_VARRAY_LOOKUP_NAME, radiant_dom_node_list_host_type)
+    DOM_VARRAY_LOOKUP_NAME, dom_node_list_host_type)
 JS_DOM_ELEMENT_LOOKUP_BRIDGE(dom_live_element_get_elements_by_tag_name_bridge,
     DOM_VARRAY_LOOKUP_TAG)
 JS_DOM_ELEMENT_LOOKUP_BRIDGE(dom_live_element_get_elements_by_class_name_bridge,
@@ -3327,7 +3321,7 @@ extern "C" Item dom_document_proxy_set_property(Item prop_name, Item value) {
             // This binding only performs IDL coercion. The behavior package
             // canonicalizes the string and chooses the host transition; an
             // unavailable package deliberately leaves native editing disabled.
-            if (document && mode) radiant_dom_set_design_mode(document, mode);
+            if (document && mode) dom_engine_set_design_mode(document, mode);
             return value;
         }
     }
@@ -5029,7 +5023,7 @@ static bool dom_is_first_summary_child(DomElement* elem) {
 
 static bool dom_is_disabled_for_focus(DomElement* elem) {
     if (!elem) return true;
-    return form_control_is_disabled(elem->doc ? elem->doc->state : dom_current_state(),
+    return dom_engine_control_is_disabled(elem->doc ? elem->doc->state : dom_current_state(),
                                     static_cast<View*>(elem));
 }
 
@@ -5055,7 +5049,11 @@ static int dom_default_tab_index(DomElement* elem) {
 static bool dom_is_script_focusable(DomElement* elem) {
     if (!elem || !dom_node_is_connected((DomNode*)elem)) return false;
     if (dom_engine_content_hidden_for_user_agent(elem)) return false;
-    if (elem->has_attribute("hidden")) return false;
+    // the rendering provider accounts for CSS overrides of the hidden attribute.
+    const DomStyleEngineOps* style = dom_style_engine_ops();
+    if (style) {
+        if (dom_provider_call(style, &DomStyleEngineOps::focus_is_hidden, elem)) return false;
+    } else if (elem->has_attribute("hidden")) return false;
     if (dom_is_disabled_for_focus(elem)) return false;
 
     long tabindex = 0;
@@ -5246,7 +5244,7 @@ extern "C" void dom_focus_if_editing_host_for_selection(void* dom_node) {
     DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     View* old_focus = state ? focus_get(state) : nullptr;
     js_document_active_element = elem;
-    focus_set_programmatic(state, (View*)elem);
+    dom_engine_control_focus_programmatic(state, (View*)elem, false);
     if (old_focus != (View*)elem) dom_dispatch_focus_events(elem);
 }
 
@@ -6023,7 +6021,7 @@ extern "C" Item dom_core_parse_fragment(Item context, Item markup) {
     DomNode* ctx = (DomNode*)dom_unwrap_element(context);
     DomDocument* doc = ctx && ctx->is_element() ? ((DomElement*)ctx)->doc : nullptr;
     if (!doc || get_type_id(markup) != LMD_TYPE_STRING) return ItemNull;
-    DomElement* fragment = dom_element_create(doc, "#document-fragment", nullptr);
+    DomElement* fragment = dom_document_fragment_create(doc);
     if (!fragment) return ItemNull;
     if (!dom_parse_markup_into(fragment, fn_to_cstr(markup), false, ctx->as_element())) return ItemNull;
     return dom_wrap_element(fragment);
@@ -6136,8 +6134,6 @@ extern "C" bool dom_exec_insert_html(DomDocument* doc, const char* html_str) {
 
 extern "C" bool dom_engine_exec_command(void* document, const char* command,
                                         const char* value);
-extern Item radiant_dom_query_command(void* document, const char* query_kind,
-                                      const char* command);
 
 // F14.1/ES20: `document.execCommand` is now a thin dispatch into the dom
 // package's command set. It used to implement exactly one command here —
@@ -6184,7 +6180,7 @@ extern "C" Item dom_document_query_command_bridge(Item command_item,
     char* stable_kind = mem_strdup(kind, MEM_CAT_JS_RUNTIME);
     Item result = ItemNull;
     if (stable_command && stable_kind) {
-        result = radiant_dom_query_command(dom_get_document(), stable_kind,
+        result = dom_engine_query_command(dom_get_document(), stable_kind,
                                            stable_command);
     }
     mem_free(stable_kind);
@@ -6280,7 +6276,7 @@ static Item dom_create_document_fragment(DomDocument* doc) {
 
     // A fragment owns no Mark tree: its children are moved into the destination
     // element, which is the sole owner of their persistent backing entries.
-    DomElement* fragment = dom_element_create(doc, "#document-fragment", nullptr);
+    DomElement* fragment = dom_document_fragment_create(doc);
     return fragment ? dom_wrap_element(fragment) : ItemNull;
 }
 
@@ -6521,7 +6517,7 @@ JS_FORWARD_EXPRESSION(Item, dom_document_design_mode_bridge, (void),
 extern "C" Item dom_document_active_element_bridge(void* doc_ptr) {
     DomDocument* doc = (DomDocument*)doc_ptr;
     DomElement* root = doc ? doc->root : nullptr;
-    DocState* state = dom_current_state();
+    DocState* state = doc ? doc->state : dom_current_state();
     View* focused = focus_get(state);
     if (focused && focused->is_element()) {
         return dom_wrap_element(((DomNode*)focused)->as_element());
@@ -6530,7 +6526,8 @@ extern "C" Item dom_document_active_element_bridge(void* doc_ptr) {
     if (active_element && active_element->doc == doc) {
         return dom_wrap_element(active_element);
     }
-    if (js_document_active_element &&
+    // native focus owns the committed area; a script mirror cannot restore a cleared target.
+    if (!state && js_document_active_element &&
         js_document_active_element->doc == doc &&
         dom_node_is_connected((DomNode*)js_document_active_element)) {
         return dom_wrap_element(js_document_active_element);
@@ -7244,7 +7241,7 @@ extern "C" Item dom_text_control_select_bridge(void* dom_elem) {
     FormControlProp* f = elem->form;
     DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     if (dom_is_script_focusable(elem)) {
-        focus_set_programmatic(state, (View*)elem);
+        dom_engine_control_focus_programmatic(state, (View*)elem, false);
     }
     form_control_set_selection(state, (View*)elem, 0, f->current_value_u16_len, 0);
     return make_js_undefined();
@@ -7262,7 +7259,7 @@ static bool js_text_control_set_raw_value(DomElement* elem, const char* new_val,
         state = dom_engine_document_ensure_state(elem->doc, "js_text_control_set_raw_value");
     }
     uint32_t new_u16_len = tc_utf8_to_utf16_length(new_val ? new_val : "", new_len);
-    if (!form_control_store_text_value(state, (View*)elem, new_val,
+    if (!dom_engine_control_store_text(state, (View*)elem, new_val,
                                        new_len, new_u16_len)) {
         return false;
     }
@@ -7430,7 +7427,7 @@ static Item dom_focus_method(DomElement* elem, bool focus,
         if (dom_is_script_focusable(elem)) {
             View* old_focus = state ? focus_get(state) : nullptr;
             js_document_active_element = elem;
-            focus_set_programmatic(state, (View*)elem);
+            dom_engine_control_focus_programmatic(state, (View*)elem, false);
             // focus() on an already-focused editing host must preserve the
             // live selection; reinitialising it here moves scripted caret
             // placement back to the host start before the next key event.
@@ -7466,7 +7463,7 @@ extern "C" bool dom_focus_editing_host_for_automation(void* dom_elem) {
     // authoritative focus owner until a JavaScript realm is bound.
     if (js_active_runtime_state) js_document_active_element = elem;
     View* old_focus = focus_get(state);
-    focus_set_programmatic(state, (View*)elem);
+    dom_engine_control_focus_programmatic(state, (View*)elem, false);
     // automation focus follows the same idempotent focus contract as JS:
     // preserve an explicitly placed selection when the host already owns focus.
     if (old_focus != (View*)elem) {
@@ -7683,7 +7680,7 @@ static bool _elem_is_barred(DomElement* elem) {
     // Constraint validation, selector matching, and focusability share the
     // StateStore disabled-fieldset rule so a dynamically inserted control
     // cannot disagree about whether the first-legend exemption applies.
-    if (form_control_is_disabled(_state_for_element(elem),
+    if (dom_engine_control_is_disabled(_state_for_element(elem),
                                  static_cast<View*>(elem))) return true;
     // barred if readonly
     if (elem->has_attribute("readonly")) return true;
@@ -8239,7 +8236,7 @@ static void dom_reinit_behavior_if_constraint_attr(DomElement* elem,
     };
     for (size_t i = 0; i < sizeof(kConstraintAttrs)/sizeof(kConstraintAttrs[0]); i++) {
         if (str_icmp_cstr(attr_name, kConstraintAttrs[i]) == 0) {
-            form_control_invalidate_behavior_init((DocState*)elem->doc->state,
+            dom_engine_control_invalidate_behavior((DocState*)elem->doc->state,
                                                   (View*)elem);
             return;
         }
@@ -10429,7 +10426,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         if (elem->bound && elem->boundary()->border) {
             bw = elem->boundary()->border->width.left + elem->boundary()->border->width.right;
         }
-        float zoom = layout_effective_zoom(static_cast<View*>(elem));
+        float zoom = dom_engine_element_effective_zoom(elem);
         return (Item){.item = i2it((int64_t)llroundf(
             (elem->width - bw) / (zoom > 0.0f ? zoom : 1.0f)))};
     }
@@ -10444,7 +10441,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         if (elem->bound && elem->boundary()->border) {
             bh = elem->boundary()->border->width.top + elem->boundary()->border->width.bottom;
         }
-        float zoom = layout_effective_zoom(static_cast<View*>(elem));
+        float zoom = dom_engine_element_effective_zoom(elem);
         return (Item){.item = i2it((int64_t)llroundf(
             (elem->height - bh) / (zoom > 0.0f ? zoom : 1.0f)))};
     }
@@ -11365,10 +11362,10 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
                 scroll_snap_adjust_position(lam::view_as_block(static_cast<View*>(elem)),
                     &next_x, &next_y);
                 bool smooth = dom_scroll_should_animate(elem) &&
-                    scroll_state_begin_smooth_for_view(state, static_cast<View*>(elem),
+                    dom_engine_scroll_begin_smooth(state, static_cast<View*>(elem),
                         pane, next_x, next_y);
                 if (!smooth) {
-                    scroll_state_cancel_smooth_for_view(state, static_cast<View*>(elem));
+                    dom_engine_scroll_cancel_smooth(state, static_cast<View*>(elem));
                     scroll_state_set_position_for_view(state, static_cast<View*>(elem),
                         pane, next_x, next_y, true);
                 }
@@ -11401,11 +11398,11 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         bool layout_pending = elem->doc && (!elem->doc->state ||
             ((DocState*)elem->doc->state)->lifecycle != DOC_LIFECYCLE_COMMITTED);
         bool vertical_rl_signed_scroll = !is_vertical && scroll_value < 0.0f &&
-            layout_element_writing_mode(elem) == WM_VERTICAL_RL;
+            dom_engine_element_has_vertical_rl_flow(elem);
         const FlexProp* flex = elem->embedp()->flex;
         CssEnum flex_direction = flex
             ? (CssEnum)flex->direction
-            : layout_specified_keyword(elem, CSS_PROPERTY_FLEX_DIRECTION, CSS_VALUE_ROW);
+            : dom_engine_element_specified_keyword(elem, CSS_PROPERTY_FLEX_DIRECTION, CSS_VALUE_ROW);
         bool column_reverse_signed_scroll = is_vertical && scroll_value < 0.0f &&
             flex_direction == CSS_VALUE_COLUMN_REVERSE;
         bool signed_scroll = vertical_rl_signed_scroll || column_reverse_signed_scroll;
@@ -11439,10 +11436,10 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             scroll_snap_adjust_position(lam::view_as_block(static_cast<View*>(elem)),
                 &next_x, &next_y);
             bool smooth = dom_scroll_should_animate(elem) &&
-                scroll_state_begin_smooth_for_view(state, static_cast<View*>(elem),
+                dom_engine_scroll_begin_smooth(state, static_cast<View*>(elem),
                     elem->scroll()->pane, next_x, next_y);
             if (!smooth) {
-                scroll_state_cancel_smooth_for_view(state, static_cast<View*>(elem));
+                dom_engine_scroll_cancel_smooth(state, static_cast<View*>(elem));
                 scroll_state_set_position_for_view(state, static_cast<View*>(elem),
                     elem->scroll()->pane, next_x, next_y, false);
             }
@@ -11463,7 +11460,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
                 // A combined call bypasses the scalar setter's provisional
                 // range check; apply it to both axes before retaining them.
                 if (pending_x < 0.0f &&
-                    layout_element_writing_mode(elem) != WM_VERTICAL_RL) {
+                    !dom_engine_element_has_vertical_rl_flow(elem)) {
                     pending_x = 0.0f;
                 }
                 if (pending_y < 0.0f && flex_direction != CSS_VALUE_COLUMN_REVERSE) {
@@ -16909,7 +16906,7 @@ extern "C" Item dom_core_select_show_picker(Item n) {
     DomElement* elem = dom_op_element(n);
     if (!elem || !_is_tag(elem, "select")) return ItemNull;
     DocState* state = elem->doc ? elem->doc->state : dom_current_state();
-    if (form_control_is_disabled(state, static_cast<View*>(elem))) {
+    if (dom_engine_control_is_disabled(state, static_cast<View*>(elem))) {
         return dom_raise(js_name_item("InvalidStateError"),
             js_name_item("showPicker: select is disabled"));
     }
@@ -16924,7 +16921,7 @@ extern "C" Item dom_core_select_show_picker(Item n) {
     if (state && dom_is_connected(elem)) {
         tc_ensure_init(elem);
         if (elem->form) {
-            doc_state_open_dropdown(state, static_cast<View*>(elem));
+            dom_engine_control_open_dropdown(state, static_cast<View*>(elem));
         }
     }
     return make_js_undefined();

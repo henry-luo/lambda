@@ -1,0 +1,15 @@
+<!doctype html><meta charset=utf-8>
+<style>html,body{margin:0;background:white}button{font:12px Arial;height:24px}#box{position:absolute;left:0;top:64px;width:80px;height:100px;font:80px/1 Arial;color:transparent;background-image:linear-gradient(to right,red 50%,blue 50%);background-clip:text}</style>
+<button id=reset>Reset</button><button id=wide>Wide</button><button id=reverse>Reverse</button><button id=down>Down</button><button id=tall>Tall</button><button id=indent>Indent</button><button id=full>Box clip</button><button id=ink>Ink</button><button id=two>Two runs</button><div id=box>M</div>
+<script>(function(){var box=document.getElementById('box');
+function reset(){box.style.width='80px';box.style.height='100px';box.style.textIndent='0px';box.style.color='transparent';box.style.backgroundClip='text';box.style.backgroundImage='linear-gradient(to right,red 50%,blue 50%)';box.textContent='M'}
+document.getElementById('reset').onclick=reset;
+document.getElementById('wide').onclick=function(){box.style.width='160px'};
+document.getElementById('reverse').onclick=function(){box.style.backgroundImage='linear-gradient(to left,red 50%,blue 50%)'};
+document.getElementById('down').onclick=function(){box.style.backgroundImage='linear-gradient(to bottom,red 50%,blue 50%)'};
+document.getElementById('tall').onclick=function(){box.style.height='160px'};
+document.getElementById('indent').onclick=function(){box.style.textIndent='16px'};
+document.getElementById('full').onclick=function(){box.style.backgroundClip='border-box'};
+document.getElementById('ink').onclick=function(){box.style.color='black'};
+document.getElementById('two').onclick=function(){box.style.width='160px';box.textContent='MM'};
+})();</script>

@@ -16,10 +16,8 @@ pn transform_order(o: map) map {
     // def total: reduce .items[] as $it (0; . + $it.qty * $it.price)
     // jq numbers are doubles, so the float sums start from 0.0
     var total: float = 0.0
-    var i: int = 0
-    while (i < len(o.items)) {
+    for i of o.items {
         total = total + o.items[i].qty * o.items[i].price
-        i = i + 1
     }
     let skus: string[] = jq_unique_strings([for (it in o.items) string(it.sku)])
     // .total and .skus land after the input keys; then note and nulls go
@@ -47,25 +45,19 @@ fn region_digest(region: string, grp) int {
 // | map(.value + (.key | explode | add)) | add
 pn top_skus_digest(orders: array) int {
     var counts: map = {}
-    var i: int = 0
-    while (i < len(orders)) {
+    for i of orders {
         let items = orders[i].items
-        var j: int = 0
-        while (j < len(items)) {
+        for j of items {
             let sku: string = items[j].sku
             counts[sku] = jq_alt(counts[sku], 0) + items[j].qty
-            j = j + 1
         }
-        i = i + 1
     }
     let entries = [for (k, v at counts) {key: string(k), value: v}]
     let ranked: array = sort(entries, (e) => [0 - e.value, e.key]) ^ { [] }
     let top5: array = jq_slice_array(ranked, null, 5)
     var top_map: map = {}
-    var t: int = 0
-    while (t < len(top5)) {
+    for t of top5 {
         top_map[top5[t].key] = top5[t].value
-        t = t + 1
     }
     sum([for (k, v at top_map) v + jq_codepoint_sum(string(k))])
 }
@@ -74,11 +66,9 @@ pn top_skus_digest(orders: array) int {
 pn running_last(orders: array) int {
     var acc: int = 0
     var outs: int[] = []
-    var i: int = 0
-    while (i < len(orders)) {
+    for i of orders {
         acc = acc + orders[i].total
         outs.push(acc % 1000003)
-        i = i + 1
     }
     outs[len(outs) - 1]
 }
@@ -87,21 +77,17 @@ pn running_last(orders: array) int {
 pn double_qty(v) {
     if (v is array) {
         var out: array = []
-        var i: int = 0
-        while (i < len(v)) {
+        for i of v {
             out.push(double_qty(v[i]))
-            i = i + 1
         }
         return out
     }
     if (v is map) {
         var r: map = {}
         let keys: string[] = [for (k at v) string(k)]
-        var j: int = 0
-        while (j < len(keys)) {
+        for j of keys {
             let child = double_qty(v[keys[j]])
             r[keys[j]] = if (keys[j] == "qty") child * 2 else child
-            j = j + 1
         }
         return r
     }
@@ -115,19 +101,15 @@ pn collect_numbers(v, var out: array) {
         return null
     }
     if (v is array) {
-        var i: int = 0
-        while (i < len(v)) {
+        for i of v {
             collect_numbers(v[i], out)
-            i = i + 1
         }
         return null
     }
     if (v is map) {
         let keys: string[] = [for (k at v) string(k)]
-        var j: int = 0
-        while (j < len(keys)) {
+        for j of keys {
             collect_numbers(v[keys[j]], out)
-            j = j + 1
         }
     }
     return null
@@ -136,10 +118,8 @@ pn collect_numbers(v, var out: array) {
 // add over numbers: left to right, as jq sums the array
 pn sum_in_order(numbers: array) float {
     var total: float = 0.0
-    var i: int = 0
-    while (i < len(numbers)) {
+    for i of numbers {
         total = total + numbers[i]
-        i = i + 1
     }
     total
 }

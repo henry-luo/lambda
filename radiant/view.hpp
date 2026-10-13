@@ -386,6 +386,7 @@ bool view_get_transform_matrix(View* view, RdtMatrix* out_matrix);
 enum BackfaceCheck { BACKFACE_SELF, BACKFACE_SUBTREE, BACKFACE_HIT_TEST };
 bool view_backface_is_hidden(View* view, BackfaceCheck check = BACKFACE_SELF);
 bool view_visibility_is_hidden(const View* view);
+bool view_focus_is_hidden(View* view);
 bool view_size_containment_applies(DisplayValue display);
 bool view_contents_are_skipped(const View* view);
 enum ContentVisibilityCheck { CONTENT_VISIBILITY_PAINT, CONTENT_VISIBILITY_USER_AGENT };
@@ -754,6 +755,7 @@ extern ImageSurface* image_surface_alloc(void);
 // point, when no read scope is open anywhere.
 extern ImageSurface* image_surface_lookup(lam::Handle<ImageSurface> handle);
 // immutable snapshot leases retain storage across replacement/removal (D4.5.1v4).
+extern void image_surface_snapshot_publish(ImageSurface* surface);
 extern ImageSurface* image_surface_snapshot_retain(ImageSurface* surface);
 extern void image_surface_snapshot_release(ImageSurface* surface);
 // Invalidates every handle to `surface` and returns its slot at once (only for
@@ -791,6 +793,8 @@ extern void image_surface_detach_pixels(ImageSurface* img_surface);
 // The surface takes a memtracked pixel buffer: it replaces (and frees) the
 // buffer the surface owned and becomes the pixels it paints.
 extern void image_surface_adopt_pixels(ImageSurface* img_surface, void* pixels);
+// trim private owned pixels before publication; offsets count physical pixels.
+extern bool image_surface_trim_transparent_margin(ImageSurface* surface, float* offset_x, float* offset_y);
 extern void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip,
                               struct ClipShape** clip_shapes = nullptr, int clip_depth = 0);
 extern void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode,
@@ -816,6 +820,7 @@ struct FontProp {
     CssEnum font_kerning;  // CSS font-kerning (auto/normal/none, 0 = auto)
     CssEnum text_deco; // first CSS text-decoration line, or none
     uint8_t text_deco_extra; // additional decoration lines (CSS_TEXT_DECO_*)
+    bool text_deco_color_current; // currentColor is distinct from explicit zero-alpha RGBA
     int16_t font_weight_numeric;  // CSS numeric weight 100-900 (0 = not set, use font_weight keyword)
     float letter_spacing;  // letter spacing in pixels (default 0)
     float word_spacing;  // word spacing in pixels (default 0)
@@ -834,7 +839,7 @@ struct FontProp {
     lam::Counted<struct FontHandle> font_handle; // cache-owned handle pinned while this prop aliases it
     lam::Own<TextShadow> text_shadow;  // CSS text-shadow (linked list for multiple shadows)
     CssEnum text_deco_style;          // CSS text-decoration-style: solid, dashed, dotted, wavy, double
-    Color text_deco_color;            // CSS text-decoration-color (default: {0} = use currentColor)
+    Color text_deco_color;            // CSS text-decoration-color when not currentColor
     float text_deco_thickness;        // CSS text-decoration-thickness in px (0 = auto from font metrics)
     float text_underline_offset;      // px, or percent of used font size by mode
     uint8_t text_underline_offset_mode; // 0=auto, 1=length, 2=percent

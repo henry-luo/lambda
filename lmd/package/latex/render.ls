@@ -245,8 +245,8 @@ fn render_element(el, info) {
 
         // ---- environments ----
         case 'quote': render_env_block(el, info, "blockquote", "latex-quote")
-        case 'quotation': render_env_block(el, info, "blockquote", "latex-quote")
-        case 'verse': render_env_block(el, info, "blockquote", "latex-quote")
+        case 'quotation': render_env_block(el, info, "blockquote", "latex-quote latex-quotation")
+        case 'verse': render_env_block(el, info, "blockquote", "latex-quote latex-verse")
         case 'center': render_env_div(el, info, "latex-center", "text-align:center")
         case 'flushleft': render_env_div(el, info, "latex-flushleft", "text-align:left")
         case 'flushright': render_env_div(el, info, "latex-flushright", "text-align:right")
@@ -358,6 +358,8 @@ fn render_element(el, info) {
         case 'quad': spacing.render_quad_el()
         case 'qquad': spacing.render_qquad_el()
         case 'enspace': spacing.render_enspace_el()
+        case '/': spacing.render_italcorr_el()
+        case 'slash': spacing.render_slash_el()
         case 'thinspace': spacing.render_thinspace_el()
         case 'negthinspace': spacing.render_negthinspace_el()
         case 'noindent': spacing.render_noindent_el()
@@ -556,9 +558,34 @@ fn collect_children(el, i, n, acc, info) {
         // track \setlength{\unitlength}{value} updates for picture rendering
         let next_info = next_render_info(child, info)
         let rendered = render_node(child, next_info)
-        let new_acc = if (rendered != null) acc ++ [rendered] else acc
+        let punct = if (i + 1 < n) autopunct_mark(child, el[i + 1], next_info) else null
         let later_info = after_render_info(child, next_info)
-        collect_children(el, i + 1, n, new_acc, later_info)
+        if (punct != null) {
+            // the punctuation moves in front of the note mark; the rest of the text follows it
+            let rest = render_node(slice(el[i + 1], 1, len(el[i + 1])), later_info)
+            let moved = acc ++ [punct] ++ (if (rendered != null) [rendered] else []) ++
+                (if (rest != null) [rest] else [])
+            collect_children(el, i + 2, n, moved, later_info)
+        } else {
+            let new_acc = if (rendered != null) acc ++ [rendered] else acc
+            collect_children(el, i + 1, n, new_acc, later_info)
+        }
+    }
+}
+
+// biblatex's autopunct, on by default: in a note style, \autocite moves the
+// punctuation that follows it in front of the note mark ("First.¹"), as the
+// pinned biblatex references show (Lambda_Design_BibTeX_CSL §7.4)
+fn autopunct_mark(child, next, info) {
+    if (not (child is element) or not (next is string) or len(next) == 0) null
+    else {
+        let tag = string(name(child))
+        let context = info.biblatex_context
+        let note_style = context != null and context.processor == "csl" and
+            context.compiled != null and context.compiled.style.class == "note"
+        let mark = slice(next, 0, 1)
+        if ((tag == "autocite" or tag == "autocites") and note_style and
+            contains(".,;:!?", mark)) mark else null
     }
 }
 
@@ -886,9 +913,17 @@ fn render_paragraph(el, info) {
                 if (len(parts) == 1) parts[0]
                 else parts
             }
+            else if (starts_with_noindent(el)) { <p style: "text-indent:0", for c in items { c }> }
             else { <p for c in items { c }> }
         }
     }
+}
+
+// \noindent at the start of a paragraph removes its indentation
+fn starts_with_noindent(el) {
+    let leading = [for (item in util.command_args(el)
+        where not (item is string and trim(item) == "")) item]
+    len(leading) > 0 and leading[0] is element and string(name(leading[0])) == "noindent"
 }
 
 fn has_parbreak(el, i, n) {
@@ -1336,12 +1371,18 @@ fn check_figure_match(figures, text, i) {
     else find_figure_num(figures, text, i + 1)
 }
 
+// The parser keeps \begin{multicols}{n}[preface] as a `columns` attribute and a
+// leading multicols_preface child; the preface spans all columns.
 fn render_multicols(el, info) {
-    let col_group = util.find_child(el, 'curly_group')
-    let cols = if (col_group != null) util.text_of(col_group) else "2"
-    let items = render_children(el, 0, info);
-    <div class: "latex-multicols", style: "column-count:" ++ trim(cols),
-        for c in items { c }
+    let cols = if (el.columns != null) trim(el.columns) else "2"
+    let preface = util.find_child(el, 'multicols_preface')
+    let columns = <div class: "latex-multicols", style: "column-count:" ++ cols,
+        for c in render_children(el, if (preface == null) 0 else 1, info) { c }
+    >
+    if (preface == null) columns
+    else <div class: "latex-multicols-block",
+        <div class: "latex-multicols-preface", for c in render_children(preface, 0, info) { c }>
+        columns
     >
 }
 
@@ -2502,17 +2543,13 @@ fn render_marginpar(el, info) {
     <span class: "latex-cmd-marginpar", for c in items { c }>
 }
 
+// D7.2.7: the TeX engine has already expanded every user macro, so an element
+// reaching here is a command it passed through on purpose: a custom theorem
+// environment, or an unsupported command that the fallback reports.
 fn render_generic(el, info) {
-    // check if this element is a macro invocation
-    let tag_str = string(name(el))
-    let macro_def = if (info.macros != null) macros.find_macro(info.macros, tag_str) else null
-    if (macro_def != null) { render_macro_invocation(el, info, macro_def) }
-    else {
-        // check if this is a custom theorem environment
-        let thm_def = util.lookup(info.theorem_defs, tag_str)
-        if (thm_def != null) { render_custom_theorem(el, info, thm_def) }
-        else { render_generic_default(el, info) }
-    }
+    let thm_def = util.lookup(info.theorem_defs, string(name(el)))
+    if (thm_def != null) { render_custom_theorem(el, info, thm_def) }
+    else { render_generic_default(el, info) }
 }
 
 fn render_custom_theorem(el, info, thm_def) {
@@ -2528,34 +2565,6 @@ fn render_custom_theorem(el, info, thm_def) {
         " "
         for c in items { c }
     >
-}
-
-fn render_macro_invocation(el, info, macro_def) {
-    if (info.macro_depth >= 32)
-        util.unsupported_element("latex", "Macro expansion depth exceeded",
-            el.source_offset)
-    else if (macro_def.source == null)
-        util.unsupported_element("latex", "Macro source was not preserved",
-            el.source_offset)
-    else {
-        let source = macros.substitute_source(macro_def.source, el, macro_def)
-        let parsed = parse(source, {type: "latex"}) ^ { null }
-        if (parsed == null)
-            util.unsupported_element("latex", "Macro expansion could not be parsed",
-                el.source_offset)
-        else {
-            let top = util.command_args(parsed)
-            // Fragment paragraphs are transparent at an inline macro call site.
-            let items = [for (node in top,
-                item in if (node is element and string(name(node)) == "paragraph")
-                    util.command_args(node) else [node]) item]
-            let rendered = render_items(items, 0, len(items),
-                {*:info, macro_depth: info.macro_depth + 1}, [])
-            if (len(rendered) == 0) null
-            else if (len(rendered) == 1) rendered[0]
-            else <span for c in rendered { c }>
-        }
-    }
 }
 
 fn render_items(items, i, n, info, acc) {

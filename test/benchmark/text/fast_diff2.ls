@@ -4,10 +4,8 @@
 
 pn text_codes(text: string) int[] {
     var codes: int[] = fill(len(text), 0)
-    var index: int = 0
-    while (index < len(text)) {
+    for index of text {
         codes[index] = ord(text[index])
-        index = index + 1
     }
     codes
 }
@@ -89,20 +87,16 @@ pn main() {
     ]
     var left_codes: int[][] = []
     var right_codes: int[][] = []
-    var pair: int = 0
-    while (pair < len(left_text)) {
+    for pair of left_text {
         push(left_codes, text_codes(left_text[pair]))
         push(right_codes, text_codes(right_text[pair]))
-        pair = pair + 1
     }
     var checksum: int = 0
     var round: int = 0
     let t0 = clock()
     while (round < 256) {
-        var index: int = 0
-        while (index < len(left_codes)) {
+        for index of left_codes {
             checksum = checksum + score_diff(left_codes[index], right_codes[index])
-            index = index + 1
         }
         round = round + 1
     }

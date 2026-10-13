@@ -260,7 +260,7 @@ pn set_option_selected(select, option, want) {
 // The comprehension is built before `any` folds it, so every option is written
 // and the answer still reports whether one of them moved.
 pn select_only(select, options, index) {
-    any([for (i in 0 to len(options) - 1) set_option_selected(select, options[i], i == index)])
+    any([for (i, opt of options) set_option_selected(select, opt, i == index)])
 }
 
 // The inclusive range between two indices, in either order: Shift+click and
@@ -268,8 +268,8 @@ pn select_only(select, options, index) {
 pn select_range(select, options, from, to) {
     let lo = min(from, to);
     let hi = max(from, to);
-    any([for (i in 0 to len(options) - 1)
-         set_option_selected(select, options[i], i >= lo and i <= hi)])
+    any([for (i, opt of options)
+         set_option_selected(select, opt, i >= lo and i <= hi)])
 }
 
 pn toggle_option(select, option) {
@@ -285,7 +285,7 @@ pn toggle_option(select, option) {
 // rather than wrapping, because a listbox stops at its ends where a radio group
 // wraps (ESO59).
 pn listbox_move(select, options, key, active) {
-    let enabled = [for (i in 0 to len(options) - 1 where option_enabled(select, options[i])) i];
+    let enabled = [for (i, opt of options where option_enabled(select, opt)) i];
     let n = len(enabled);
     if (n == 0) { null }
     else {

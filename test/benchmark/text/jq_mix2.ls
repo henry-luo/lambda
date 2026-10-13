@@ -65,10 +65,8 @@ pn cumsum(n: int, both: bool) int[] {
 pn kv_object(n: int) map {
     let singles: array = [for (x in jq_range(0, n, 1)) {[string(x)]: x}]
     var merged: map = {}
-    var i: int = 0
-    while (i < len(singles)) {
+    for i of singles {
         for (k, v at singles[i]) { merged[string(k)] = v }
-        i = i + 1
     }
     merged
 }
@@ -84,10 +82,8 @@ pn object_add_one(m: map) map {
 pn entries_add_one(m: map) map {
     let entries: array = [for (k, v at m) {key: string(k), value: v + 1}]
     var r: map = {}
-    var i: int = 0
-    while (i < len(entries)) {
+    for i of entries {
         r[entries[i].key] = entries[i].value
-        i = i + 1
     }
     r
 }
@@ -153,11 +149,9 @@ pn range_prop(n: int) int {
 pn str_slice(n: int) string[] {
     let s: string = repeat_string("a", n)
     var out: string[] = []
-    var x: int = 0
-    while (x < len(s)) {
+    for x of s {
         out.push(jq_slice_string(s, x, null))
         out.push(jq_slice_string(s, null, 0 - x))
-        x = x + 1
     }
     out
 }

@@ -59,7 +59,7 @@ pub fn details_group(node) {
 // so comparing them directly finds nothing and every group walk that used it
 // would silently start from the beginning.
 pub fn index_in(nodes, node) {
-    let hits = [for (i in 0 to len(nodes) - 1 where dom.same_node(nodes[i], node)) i];
+    let hits = [for (i, candidate of nodes where dom.same_node(candidate, node)) i];
     if (len(hits) == 0) null else hits[0]
 }
 

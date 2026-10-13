@@ -125,6 +125,7 @@ struct CssElementDeclarationQuery {
     SelectorMatcher* matcher;
     DomElement* element;
     const char* property;
+    CssPropertyCode requested;  // css_property_code_from_name(property), resolved once
     uint8_t pseudo_element;
     CssDeclaration best;
     const CssDeclaration* ceiling;
@@ -134,10 +135,19 @@ struct CssElementDeclarationQuery {
     bool found;
 };
 
-static void css_query_consider_declaration(CssElementDeclarationQuery* query,
-    const CssDeclaration* declaration, CssSpecificity specificity, CssOrigin origin,
-    const char* source_url = nullptr) {
-    if (!declaration || !declaration->valid || !declaration->property_name) return;
+// Whether a declaration can set the queried property: itself, a shorthand or
+// alias of it, or the `all` reset. Rules with no such declaration cannot win.
+static bool css_query_declaration_relevant(const CssElementDeclarationQuery* query,
+                                           const CssDeclaration* declaration) {
+    if (!declaration || !declaration->valid || !declaration->property_name) return false;
+    // Property codes come from the names, so a known code that is neither the
+    // query's, a shorthand of it, `font`, `all`, nor a page-break-* alias cannot
+    // pass the exact name checks below; most declarations stop here.
+    CssPropertyCode code = declaration->property_code;
+    if (query->requested > 0 && code > 0 && code != query->requested &&
+        code != CSS_PROPERTY_FONT && code != CSS_PROPERTY_ALL &&
+        strncmp(declaration->property_name, "page-break-", 11) != 0 &&
+        !css_property_shorthand_contains(code, query->requested)) return false;
     bool font_shorthand = str_icmp_cstr(declaration->property_name, "font") == 0 &&
         css_font_shorthand_contains_property(query->property);
     bool custom_property = strncmp(declaration->property_name, "--", 2) == 0;
@@ -145,15 +155,21 @@ static void css_query_consider_declaration(CssElementDeclarationQuery* query,
     bool same_property = custom_property
         ? strview_equal(&declaration_name, query->property)
         : str_icmp_cstr(declaration->property_name, query->property) == 0;
-    CssPropertyCode requested = css_property_code_from_name(query->property);
-    bool shorthand = requested > 0 && css_property_shorthand_contains(declaration->property_code, requested);
+    bool shorthand = query->requested > 0 &&
+        css_property_shorthand_contains(declaration->property_code, query->requested);
     bool break_alias = strncmp(query->property, "break-", 6) == 0 &&
         strncmp(declaration->property_name, "page-break-", 11) == 0 &&
         strcmp(query->property + 6, declaration->property_name + 11) == 0;
     bool all_reset = strcmp(declaration->property_name, "all") == 0 &&
         strncmp(query->property, "--", 2) != 0 && strcmp(query->property, "direction") != 0 &&
         strcmp(query->property, "unicode-bidi") != 0;
-    if (!font_shorthand && !shorthand && !break_alias && !all_reset && !same_property) return;
+    return font_shorthand || shorthand || break_alias || all_reset || same_property;
+}
+
+static void css_query_consider_declaration(CssElementDeclarationQuery* query,
+    const CssDeclaration* declaration, CssSpecificity specificity, CssOrigin origin,
+    const char* source_url = nullptr) {
+    if (!css_query_declaration_relevant(query, declaration)) return;
     CssDeclaration candidate = *declaration;
     // computed URLs use the winning sheet's base, including imported and nested rules.
     if (source_url) candidate.source_file = source_url;
@@ -207,8 +223,13 @@ static void css_query_element_rule(CssElementDeclarationQuery* query, CssRule* r
     if (rule->type != CSS_RULE_STYLE && rule->type != CSS_RULE_NESTED_DECLARATIONS) return;
     CssSpecificity specificity = {};
     bool matched = false;
+    // a single-property query skips selector matching for the many rules that
+    // cannot set it; nested child rules below are still visited.
+    bool relevant = false;
+    for (size_t i = 0; !relevant && i < rule->data.style_rule.declaration_count; i++)
+        relevant = css_query_declaration_relevant(query, rule->data.style_rule.declarations[i]);
     CssSelectorGroup* group = rule->data.style_rule.selector_group;
-    size_t count = group ? group->selector_count : 1;
+    size_t count = !relevant ? 0 : group ? group->selector_count : 1;
     for (size_t i = 0; i < count; i++) {
         CssSelector* selector = group ? group->selectors[i] : rule->data.style_rule.selector;
         MatchResult match = {};
@@ -257,6 +278,7 @@ static bool css_select_element_declaration_inner(CssEngine* engine, SelectorMatc
     query.matcher = matcher;
     query.element = element;
     query.property = property_name;
+    query.requested = css_property_code_from_name(property_name);
     query.ceiling = ceiling;
     query.filters = filters;
     query.pseudo_element = pseudo_element;

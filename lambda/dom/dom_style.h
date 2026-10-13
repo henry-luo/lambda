@@ -17,7 +17,8 @@ typedef bool (*DomStyleUsedValueSync)(DomDocument* document);
     OP(String*, serialize_custom_property, (Pool* pool, DomElement* element, const char* name, size_t name_length)) \
     OP(const CssValue*, compute_custom_property, (Pool* pool, DomElement* element, const char* name, size_t name_length, bool preserve_tokens)) \
     OP(void, capture_transition, (DomElement* element, CssPropertyCode property)) \
-    OP(void, set_used_value_sync, (DomStyleUsedValueSync sync))
+    OP(void, set_used_value_sync, (DomStyleUsedValueSync sync)) \
+    OP(bool, focus_is_hidden, (DomElement* element))
 
 struct DomStyleEngineOps {
 #define DOM_STYLE_FIELD(result, name, parameters) result (*name) parameters;

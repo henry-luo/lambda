@@ -171,4 +171,17 @@ static inline float math_wrap_positive_f(float value, float period) {
     return wrapped < 0.0f ? wrapped + period : wrapped;
 }
 
+// exact quadrant directions keep axis-aligned geometry from acquiring trigonometric drift.
+static inline void math_sincos_degrees_f(float angle, float* sine, float* cosine) {
+    float normalized = math_wrap_positive_f(angle, 360.0f);
+    if (normalized == 0.0f) { *sine = 0.0f; *cosine = 1.0f; }
+    else if (normalized == 90.0f) { *sine = 1.0f; *cosine = 0.0f; }
+    else if (normalized == 180.0f) { *sine = 0.0f; *cosine = -1.0f; }
+    else if (normalized == 270.0f) { *sine = -1.0f; *cosine = 0.0f; }
+    else {
+        float radians = math_degrees_to_radians(normalized);
+        *sine = sinf(radians); *cosine = cosf(radians);
+    }
+}
+
 #endif

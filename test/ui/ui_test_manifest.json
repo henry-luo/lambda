@@ -11,7 +11,6 @@
       "globs": ["test/ui/*.json"],
       "exclude": [
         "test/ui/dom_*.json",
-        "test/ui/dom_pkg_*.json",
         "test/ui/svg-dom-contract.json",
         "test/ui/js-loop-listener-*.json",
         "test/ui/editable-*.json",
@@ -47,8 +46,7 @@
       "name": "dom",
       "globs": [
         "test/ui/dom/*.json",
-        "test/ui/dom_*.json",
-        "test/ui/dom_pkg_*.json"
+        "test/ui/dom_*.json"
       ],
       "tags": ["dom"]
     },

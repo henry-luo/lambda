@@ -16,6 +16,41 @@ const report = reportIndex >= 0 ? process.argv[reportIndex + 1] : null;
 const results = [];
 fs.mkdirSync(path.join(ROOT, 'temp'), { recursive: true });
 const fixture = fs.mkdtempSync(path.join(ROOT, 'temp/test-run-contracts-'));
+const logFault = path.join(fixture, 'log-fault.cjs');
+fs.writeFileSync(logFault, `
+if (process.argv[1] === ${JSON.stringify(runner)}) {
+    const fs = require('fs');
+    const { Writable } = require('stream');
+    const original = fs.createWriteStream;
+    const failure = () => Object.assign(new Error('ENOSPC: simulated full disk'), { code: 'ENOSPC' });
+    fs.createWriteStream = function(file, options) {
+        if (!String(file).endsWith(process.env.FAKE_LOG_FAULT_PATH)) return original.call(this, file, options);
+        if (process.env.FAKE_LOG_FAULT_MODE !== 'open') fs.writeFileSync(file, '');
+        const stream = new Writable({ write(data, encoding, callback) {
+            if (process.env.FAKE_LOG_FAULT_MODE === 'slow') {
+                setTimeout(() => { fs.appendFileSync(file, data); callback(); }, 2);
+            } else setTimeout(() => callback(failure()), Number(process.env.FAKE_LOG_FAULT_DELAY || 0));
+        } });
+        let peak = 0;
+        const write = stream.write;
+        stream.write = function(...args) {
+            const result = write.apply(this, args);
+            peak = Math.max(peak, this.writableLength);
+            return result;
+        };
+        stream.on('finish', () => {
+            if (process.env.FAKE_LOG_BUFFER_TRACE) fs.writeFileSync(process.env.FAKE_LOG_BUFFER_TRACE, String(peak));
+        });
+        if (process.env.FAKE_LOG_FAULT_MODE === 'open') process.nextTick(() => stream.destroy(failure()));
+        return stream;
+    };
+    const append = fs.appendFileSync;
+    fs.appendFileSync = function(file, ...args) {
+        if (process.env.FAKE_APPEND_FAULT && String(file).endsWith(process.env.FAKE_APPEND_FAULT)) throw failure();
+        return append.call(this, file, ...args);
+    };
+}
+`);
 
 function invoke(args, env = {}) {
     const child = spawnSync(process.execPath, [runner, ...args], {
@@ -33,7 +68,11 @@ const path = require('path');
 const name = path.basename(process.argv[1], '.exe');
 const requestedScenario = name === process.env.FAKE_TEST ? process.env.FAKE_SCENARIO : 'pass';
 if (process.argv.includes('--gtest_list_tests')) {
-    if (requestedScenario !== 'list-empty') process.stdout.write('Fixture.\\n  Case0\\n  Case1\\n  Case2\\n  Case3\\n  DISABLED_Off\\n');
+    if (requestedScenario !== 'list-empty') {
+        const names = process.env.FAKE_CASE_NAMES ? JSON.parse(process.env.FAKE_CASE_NAMES) :
+            ['Case0', 'Case1', 'Case2', 'Case3', 'DISABLED_Off'];
+        process.stdout.write('Fixture.\\n' + names.map(name => '  ' + name + '\\n').join(''));
+    }
     if (requestedScenario === 'list-duplicate') process.stdout.write('  Case0\\n');
     if (requestedScenario === 'list-crash') process.kill(process.pid, 'SIGKILL');
     else process.exit(0);
@@ -74,8 +113,21 @@ if (scenario === 'launches') {
     ];
 }
 fs.writeFileSync(output, JSON.stringify(data));
-if (scenario === 'crash') process.kill(process.pid, 'SIGKILL');
-if (process.env.FAKE_SUITE_TRACE_DIR) setTimeout(() => process.exit(0), 200);
+if (scenario === 'log-flush') process.stdout.write('final log write\\n');
+if (process.env.FAKE_VIEW_ARTIFACTS && name === 'test_radiant_view_gtest') {
+    const directory = path.join(process.env.LAMBDA_TEST_OUTPUT_DIR, 'radiant_view', String(process.pid));
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(directory, 'view.log'), workerCase || 'suite');
+}
+if (scenario === 'log-io') {
+    process.stdout.write('log fault stdout\\n');
+    process.stderr.write('log fault stderr\\n');
+    setInterval(() => {}, 1000);
+} else if (scenario === 'flood') {
+    process.stdout.end(Buffer.alloc(1024 * 1024, 'o'));
+    process.stderr.end(Buffer.alloc(1024 * 1024, 'e'));
+} else if (scenario === 'crash') process.kill(process.pid, 'SIGKILL');
+else if (process.env.FAKE_SUITE_TRACE_DIR) setTimeout(() => process.exit(0), 200);
 else if (workerCase && requestedScenario === 'parallel') setTimeout(() => process.exit(0), 200);
 else if (scenario === 'timeout') setInterval(() => {}, 1000);
 else process.exit(scenario === 'exit' ? 7 : 0);
@@ -92,8 +144,8 @@ function check(name, fn) {
     }
 }
 
-function runSelected(names, scenario = 'pass', extra = [], env = {}, parallel = false, previousSummary = null) {
-    const output = path.join(fixture, 'results-' + results.length);
+function runSelected(names, scenario = 'pass', extra = [], env = {}, parallel = false, previousSummary = null,
+                     output = path.join(fixture, 'results-' + results.length)) {
     fs.mkdirSync(output, { recursive: true });
     // A stale passing artifact must never hide a child that fails to write JSON.
     fs.writeFileSync(path.join(output, names[0] + '_results.json'), JSON.stringify({ tests: 99, failures: 0,
@@ -135,7 +187,13 @@ try {
         const view = inventory.find(t => t.baseName === 'test_radiant_view_gtest');
         assert.ok(view.runnerArgs.includes('--gtest_filter=*-RadiantViewTest.Doom*'));
         assert.equal(view.caseWorkers, 3);
+        assert.deepEqual(view.artifactDirs, ['radiant_view']);
         assert.ok(view.caseWorkerArgs.includes('--radiant-case-worker'));
+        for (const name of ['test_radiant_layout_baseline', 'test_radiant_page_snapshot', 'test_wpt_input_events_gtest']) {
+            const check = inventory.find(t => t.baseName === name);
+            assert.equal(check.exclusive, false);
+            assert.equal(check.workerSlots, name === 'test_radiant_layout_baseline' ? 3 : 2);
+        }
     });
     check('Native build targets deduplicate runner aliases', () => {
         const actual = invoke(['--target=radiant', '--category=baseline', '--list-build-targets']).stdout.trim().split(/\s+/);
@@ -161,6 +219,60 @@ try {
             assert.ok(summary.failed_test_names.some(t => t.includes('test_view_reuse_gtest')));
         });
     }
+    for (const mode of ['open', 'write']) check(`A log ${mode} ENOSPC fails the suite and allows the next suite to run`, () => {
+        const { child, summary } = runSelected(['test_view_reuse_gtest', 'test_map_gtest'], 'log-io', [], {
+            NODE_OPTIONS: `--require=${logFault}`, FAKE_LOG_FAULT_MODE: mode,
+            FAKE_LOG_FAULT_PATH: 'test_view_reuse_gtest.log',
+        });
+        assert.equal(child.status, 1, child.stderr);
+        assert.ok(!child.stderr.includes("Unhandled 'error' event"));
+        assert.equal(summary.total_failed, 1);
+        assert.equal(summary.level2_c_tests.find(t => t.test === 'test_map_gtest').passed, 4);
+        assert.ok(summary.failed_test_names.some(t => t.includes('log write failed: ENOSPC')));
+    });
+    check('A log flush ENOSPC overrides passing JSON after the child exits', () => {
+        const { child, summary } = runSelected(['test_view_reuse_gtest'], 'log-flush', [], {
+            NODE_OPTIONS: `--require=${logFault}`, FAKE_LOG_FAULT_MODE: 'write', FAKE_LOG_FAULT_DELAY: '100',
+            FAKE_LOG_FAULT_PATH: 'test_view_reuse_gtest.log',
+        });
+        assert.equal(child.status, 1, child.stderr);
+        assert.equal(summary.total_failed, 1);
+        assert.ok(summary.failed_test_names.some(t => t.includes('log write failed: ENOSPC')));
+    });
+    check('A slow log sink bounds buffering and retains both output pipes', () => {
+        const trace = path.join(fixture, 'log-buffer-size');
+        const { child, output } = runSelected(['test_view_reuse_gtest'], 'flood', [], {
+            NODE_OPTIONS: `--require=${logFault}`, FAKE_LOG_FAULT_MODE: 'slow',
+            FAKE_LOG_FAULT_PATH: 'test_view_reuse_gtest.log', FAKE_LOG_BUFFER_TRACE: trace,
+        });
+        assert.equal(child.status, 0, child.stderr);
+        const log = fs.readFileSync(path.join(output, 'test_view_reuse_gtest.log'), 'utf8');
+        assert.equal(log.split('o').length - 1, 1024 * 1024);
+        assert.equal(log.split('e').length - 1, 1024 * 1024);
+        assert.ok(Number(fs.readFileSync(trace, 'utf8')) <= 256 * 1024);
+    });
+    check('View reruns replace only their declared artifacts before starting case workers', () => {
+        const output = path.join(fixture, 'artifact-retention');
+        fs.mkdirSync(path.join(output, 'radiant_view', 'stale'), { recursive: true });
+        fs.writeFileSync(path.join(output, 'radiant_view', 'stale', 'view.log'), 'old debug log');
+        const keep = path.join(output, 'unrelated.log');
+        fs.writeFileSync(keep, 'keep');
+        const first = runSelected(['test_radiant_view_gtest'], 'pass', [], { FAKE_VIEW_ARTIFACTS: '1' },
+            true, null, output);
+        assert.equal(first.child.status, 0, first.child.stderr);
+        const directory = path.join(output, 'radiant_view');
+        const oldRuns = fs.readdirSync(directory);
+        assert.equal(oldRuns.length, 4);
+        const second = runSelected(['test_radiant_view_gtest'], 'pass', [], { FAKE_VIEW_ARTIFACTS: '1' },
+            true, null, output);
+        assert.equal(second.child.status, 0, second.child.stderr);
+        assert.equal(fs.readdirSync(directory).length, 4);
+        assert.ok(oldRuns.every(run => !fs.existsSync(path.join(directory, run))));
+        assert.equal(fs.readFileSync(keep, 'utf8'), 'keep');
+        const third = runSelected(['test_map_gtest'], 'pass', [], {}, true, null, output);
+        assert.equal(third.child.status, 0, third.child.stderr);
+        assert.equal(fs.readdirSync(directory).length, 4);
+    });
     check('Skipped cases are excluded from passing counts', () => {
         const { child, summary } = runSelected(['test_view_reuse_gtest'], 'skip');
         assert.equal(child.status, 0);
@@ -177,6 +289,22 @@ try {
         assert.equal(result.launch_timings[0].duration_ms, 125.5);
         assert.deepEqual(result.launch_timings[0].phases, { load: 75.5, cleanup: 4.5 });
         assert.equal(result.launch_timings[0].log_file, 'view.log');
+    });
+    check('Split case variants inherit their retired bundle timing on the first run', () => {
+        const trace = path.join(fixture, 'trace-split-cases');
+        fs.mkdirSync(trace);
+        const { child, output, summary } = runSelected(['test_radiant_view_gtest'], 'parallel', [], {
+            LAMBDA_TEST_MAX_CONCURRENT: '2', LAMBDA_RADIANT_VIEW_TEST_JOBS: '2',
+            FAKE_CASE_TRACE_DIR: trace, FAKE_SLOW_CASE: 'Case',
+            FAKE_CASE_NAMES: JSON.stringify(['Unknown', 'Case_auto', 'Case_jit']),
+        }, true);
+        assert.equal(child.status, 0, child.stderr);
+        assert.equal(summary.total_passed, 3);
+        const starts = Object.fromEntries(fs.readdirSync(trace).map(file =>
+            [path.basename(file, '.json'), JSON.parse(fs.readFileSync(path.join(trace, file), 'utf8')).start]));
+        assert.ok(starts.Case_auto < starts.Unknown && starts.Case_jit < starts.Unknown);
+        const data = JSON.parse(fs.readFileSync(path.join(output, 'test_radiant_view_gtest_results.json'), 'utf8'));
+        assert.deepEqual(data.testsuites[0].testsuite.map(tc => tc.name), ['Unknown', 'Case_auto', 'Case_jit']);
     });
     for (const [runner, jobsEnv, workerArg] of [
         ['test_radiant_view_gtest', 'LAMBDA_RADIANT_VIEW_TEST_JOBS', '--radiant-case-worker'],
@@ -212,6 +340,36 @@ try {
             assert.ok(summary.failed_test_names.some(name => name.includes('Fixture.Case1')));
         });
     }
+    for (const mode of ['open', 'write']) check(`A case log ${mode} ENOSPC fails its own case and preserves other cases`, () => {
+        const { child, output, summary } = runSelected(['test_radiant_view_gtest'], 'log-io', [], {
+            NODE_OPTIONS: `--require=${logFault}`, FAKE_LOG_FAULT_MODE: mode,
+            FAKE_LOG_FAULT_PATH: path.join('test_radiant_view_gtest_cases', '1.log'),
+        }, true);
+        assert.equal(child.status, 1, child.stderr);
+        assert.equal(summary.total_passed, 3);
+        assert.equal(summary.total_failed, 1);
+        assert.ok(summary.failed_test_names.some(t => t.includes('Fixture.Case1')));
+        const data = JSON.parse(fs.readFileSync(path.join(output, 'test_radiant_view_gtest_results.json'), 'utf8'));
+        assert.ok(data.testsuites[0].testsuite[1].failures.some(f => f.failure.includes('ENOSPC')));
+    });
+    check('Discovery log ENOSPC is a reported failure', () => {
+        const { child, summary } = runSelected(['test_radiant_view_gtest'], 'pass', [], {
+            NODE_OPTIONS: `--require=${logFault}`, FAKE_LOG_FAULT_MODE: 'open',
+            FAKE_LOG_FAULT_PATH: path.join('test_radiant_view_gtest_cases', 'list.log'),
+        }, true);
+        assert.equal(child.status, 1, child.stderr);
+        assert.equal(summary.total_failed, 1);
+        assert.ok(summary.failed_test_names.some(t => t.includes('ENOSPC')));
+    });
+    check('Merged case log ENOSPC waits for workers and allows the next suite to run', () => {
+        const { child, summary } = runSelected(['test_radiant_view_gtest', 'test_map_gtest'], 'parallel', [], {
+            NODE_OPTIONS: `--require=${logFault}`, FAKE_APPEND_FAULT: 'test_radiant_view_gtest.log',
+        }, true);
+        assert.equal(child.status, 1, child.stderr);
+        assert.equal(summary.total_failed, 1);
+        assert.equal(summary.level2_c_tests.find(t => t.test === 'test_map_gtest').passed, 4);
+        assert.ok(summary.failed_test_names.some(t => t.includes('runner error: ENOSPC')));
+    });
     check('Previous case durations start slow work early without reusing stale results', () => {
         const trace = path.join(fixture, 'trace-order');
         fs.mkdirSync(trace);
@@ -325,6 +483,9 @@ try {
     fs.writeFileSync(path.join(fixture, 'make'), `#!/usr/bin/env node
 const fs = require('fs');
 if (process.env.FAKE_LAYOUT_ARGS) fs.writeFileSync(process.env.FAKE_LAYOUT_ARGS, JSON.stringify(process.argv.slice(2)));
+if (process.env.FAKE_LAYOUT_WORKSPACE) fs.writeFileSync(process.env.FAKE_LAYOUT_WORKSPACE, JSON.stringify({
+    cwd: process.cwd(), host: fs.realpathSync('lambda.exe'), home: process.env.LAMBDA_HOME,
+    cap: Number(process.env.LAMBDA_TEST_MAX_CONCURRENT), start: Date.now() }));
 const output = process.argv.find(arg => arg.startsWith('LAYOUT_BASELINE_RESULTS=')).slice('LAYOUT_BASELINE_RESULTS='.length);
 if (process.env.FAKE_LAYOUT === 'missing') process.exit(0);
 fs.writeFileSync(output, 'form|✅ PASS|3|2|0|1|2\\n');
@@ -358,6 +519,93 @@ process.exit(process.env.FAKE_LAYOUT === 'exit' ? 7 : 0);
         });
         assert.equal(child.status, 0, child.stderr);
         assert.ok(JSON.parse(fs.readFileSync(trace, 'utf8')).includes('LAYOUT_BASELINE_CONCURRENCY=1'));
+    });
+    check('Layout checks use independent scratch directories and the selected host', () => {
+        const directories = [];
+        for (let i = 0; i < 2; i++) {
+            const trace = path.join(fixture, `layout-workspace-${i}.json`);
+            const child = spawnSync(process.execPath, ['test/run_radiant_checks.js', 'layout', '--report',
+                path.join(fixture, `layout-isolated-${i}.json`)], {
+                cwd: ROOT, encoding: 'utf8', timeout: 15000,
+                env: { ...process.env, PATH: fixture + path.delimiter + process.env.PATH,
+                    FAKE_LAYOUT: 'pass', FAKE_LAYOUT_WORKSPACE: trace,
+                    RADIANT_TEST_EXECUTABLE: path.join(fixture, 'test_map_gtest.exe') },
+            });
+            assert.equal(child.status, 0, child.stderr);
+            const data = JSON.parse(fs.readFileSync(trace, 'utf8'));
+            if (process.platform !== 'win32') assert.equal(data.host, path.join(fixture, 'test_map_gtest.exe'));
+            assert.deepEqual(fs.readFileSync(data.host), fs.readFileSync(path.join(fixture, 'test_map_gtest.exe')));
+            assert.equal(data.home, path.resolve(ROOT, process.env.LAMBDA_HOME || 'lmd'));
+            assert.equal(path.dirname(data.cwd), path.join(ROOT, 'temp'));
+            assert.ok(fs.statSync(path.join(data.cwd, 'temp')).isDirectory());
+            directories.push(data.cwd);
+        }
+        assert.notEqual(directories[0], directories[1]);
+    });
+    check('Parallel script pools reserve slots alongside native pools', () => {
+        const trace = path.join(fixture, 'layout-native-pool-trace');
+        fs.mkdirSync(trace);
+        const workspaceTrace = path.join(fixture, 'layout-native-workspace.json');
+        const { child, summary } = runSelected(['test_ui_automation_gtest', 'test_radiant_layout_baseline'],
+            'pass', [], { PATH: fixture + path.delimiter + process.env.PATH, FAKE_LAYOUT: 'pass',
+                FAKE_LAYOUT_WORKSPACE: workspaceTrace, FAKE_SUITE_TRACE_DIR: trace,
+                LAMBDA_TEST_MAX_CONCURRENT: '12' }, true);
+        assert.equal(child.status, 0, child.stderr);
+        const layout = summary.level2_c_tests.find(t => t.test === 'test_radiant_layout_baseline');
+        assert.equal(layout.worker_slots, 3);
+        assert.equal(layout.total, 6);
+        const row = JSON.parse(fs.readFileSync(workspaceTrace, 'utf8'));
+        assert.equal(row.cap, 3);
+        const native = JSON.parse(fs.readFileSync(path.join(trace, fs.readdirSync(trace)[0]), 'utf8'));
+        // the adapter starts while the native pool still owns its granted slots.
+        assert.ok(row.start < native.end && native.start < row.start);
+    });
+    function pooledLayout(data) {
+        const child = spawnSync(process.execPath, ['-e', `
+const { runCategories } = require('./test/run_layout_baseline.js');
+const data = JSON.parse(process.argv[1]);
+const tester = {
+    _categorySummaries: data.summaries,
+    testCategories: async () => data.rows,
+    loadBaseline: async category => data.baselines[category],
+    classifyBaselineResults: (baseline, rows) => {
+        if (JSON.stringify(rows.map(row => row.marker)) !== JSON.stringify(baseline.markers))
+            throw new Error('categories with repeated names mixed their results');
+        return baseline.classified;
+    },
+};
+runCategories(tester, data.categories).then(records => process.stdout.write(JSON.stringify(records)))
+    .catch(error => { console.error(error.message); process.exitCode = 1; });
+`, JSON.stringify(data)], { cwd: ROOT, encoding: 'utf8', timeout: 15000 });
+        return { child, records: child.status === 0 ? JSON.parse(child.stdout) : null };
+    }
+    check('Pooled layout keeps partial baselines, regressions and repeated names in their categories', () => {
+        const { child, records } = pooledLayout({ categories: ['partial', 'regression'],
+            summaries: { partial: { total: 1, skipped: 0 }, regression: { total: 1, skipped: 0 } },
+            rows: [{ testName: 'same', marker: 1 }, { testName: 'same', marker: 2 }],
+            baselines: {
+                partial: { size: 1, markers: [1], classified: { successful: 0, partial: 1, failures: [] } },
+                regression: { size: 1, markers: [2], classified: { successful: 0, partial: 0, failures: [{}] } },
+            } });
+        assert.equal(child.status, 0, child.stderr);
+        assert.equal(records[0].partial, 1);
+        assert.equal(records[0].failed, 0);
+        assert.equal(records[1].failed, 1);
+    });
+    check('Pooled layout fails missing categories and unrecorded failures', () => {
+        const { child, records } = pooledLayout({ categories: ['full', 'missing'],
+            summaries: { full: { total: 2, successful: 1, failed: 1, skipped: 3 } },
+            rows: [{}, {}], baselines: {} });
+        assert.equal(child.status, 0, child.stderr);
+        assert.deepEqual(records.map(r => [r.passed, r.partial, r.failed, r.skipped]),
+            [[1, 0, 1, 3], [0, 0, 1, 0]]);
+    });
+    check('Pooled layout rejects unaccounted results', () => {
+        const { child } = pooledLayout({ categories: ['one'],
+            summaries: { one: { total: 0, successful: 0, failed: 0, skipped: 0 } },
+            rows: [{}], baselines: {} });
+        assert.equal(child.status, 1);
+        assert.match(child.stderr, /inventory does not match/);
     });
     check('Snapshot comparator owns the aggregate regression verdict', () => {
         const result = snapshot_result({ code: 1, signal: null },

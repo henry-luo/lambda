@@ -51,15 +51,15 @@ static bool render_block_has_visible_child_overflow(RasterRenderContext* rdcon, 
                                          &min_y, &max_y);
     // Relative zero-height vlist rows paint their struts outside the border box.
     return min_x < 0.0f || max_x > block->width ||
-           min_y < 0.0f || max_y > block->height;
+           min_y < 0.0f || max_y > block->height ||
+           render_text_subtree_overflows_block(rdcon, block);
 }
 
 bool render_block_dirty_misses(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block || !rdcon->has_dirty_union) return false;
-    if (render_block_has_visible_child_overflow(rdcon, block)) return false;
 
     float s = rdcon->raster_scale > 0 ? rdcon->raster_scale : 1.0f;
-    float visual_overflow = render_geometry_block_visual_overflow(block) * s;
+    float visual_overflow = render_geometry_block_visual_overflow(block, s) * s;
     Rect marker_rect = view_geometry_expand_rect(
         render_geometry_block_border_rect(&rdcon->block, block, s),
         visual_overflow);
@@ -72,7 +72,8 @@ bool render_block_dirty_misses(RasterRenderContext* rdcon, ViewBlock* block) {
     bool has_transform = rdcon->has_transform ||
         transform_has_functions(block->transform);
     return !has_transform &&
-        !view_geometry_bounds_intersect(view_geometry_rect_to_bound(marker_rect), dirty);
+        !view_geometry_bounds_intersect(view_geometry_rect_to_bound(marker_rect), dirty) &&
+        !render_block_has_visible_child_overflow(rdcon, block);
 }
 
 bool render_block_viewport_misses(RasterRenderContext* rdcon, ViewBlock* block) {
@@ -89,15 +90,14 @@ bool render_block_viewport_misses(RasterRenderContext* rdcon, ViewBlock* block) 
     if (block->position && block->positionp()->first_abs_child) {
         return false;
     }
-    if (render_block_has_visible_child_overflow(rdcon, block)) return false;
-
     float s = rdcon->raster_scale > 0 ? rdcon->raster_scale : 1.0f;
-    float visual_overflow = render_geometry_block_visual_overflow(block) * s;
+    float visual_overflow = render_geometry_block_visual_overflow(block, s) * s;
     Rect marker_rect = view_geometry_expand_rect(
         render_geometry_block_border_rect(&rdcon->block, block, s),
         visual_overflow);
     Bound marker_bound = view_geometry_rect_to_bound(marker_rect);
-    return !view_geometry_bounds_intersect(marker_bound, rdcon->block.clip);
+    return !view_geometry_bounds_intersect(marker_bound, rdcon->block.clip) &&
+        !render_block_has_visible_child_overflow(rdcon, block);
 }
 
 static bool render_view_subtree_contains_id(View* view, uint32_t id) {
@@ -150,7 +150,7 @@ bool render_block_try_retained_fragment(RasterRenderContext* rdcon, ViewBlock* b
     }
 
     float s = rdcon->raster_scale > 0 ? rdcon->raster_scale : 1.0f;
-    float visual_overflow = render_geometry_block_visual_overflow(block) * s;
+    float visual_overflow = render_geometry_block_visual_overflow(block, s) * s;
     Rect marker_rect = view_geometry_expand_rect(
         render_geometry_block_border_rect(&rdcon->block, block, s),
         visual_overflow);
@@ -177,7 +177,7 @@ RenderElementMarkerScope render_element_marker_begin(RasterRenderContext* rdcon,
     }
 
     float s = rdcon->raster_scale > 0 ? rdcon->raster_scale : 1.0f;
-    float visual_overflow = render_geometry_block_visual_overflow(block) * s;
+    float visual_overflow = render_geometry_block_visual_overflow(block, s) * s;
     Rect marker_rect = view_geometry_expand_rect(
         render_geometry_block_border_rect(&rdcon->block, block, s),
         visual_overflow);
@@ -513,11 +513,12 @@ static RenderBlockChildrenPhase render_block_begin_children_phase(RasterRenderCo
         return phase;
     }
 
+    float origin_x = rdcon->block.x, origin_y = rdcon->block.y;
     if (block->scroller || (block->blk && block->block()->contain_paint)) {
         setup_scroller(rdcon, block);
     }
 
-    phase.overflow_clip_scope = render_clip_push_overflow_scope(rdcon);
+    phase.overflow_clip_scope = render_clip_push_overflow_scope(rdcon, block, origin_x, origin_y);
     return phase;
 }
 

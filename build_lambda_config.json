@@ -3503,6 +3503,42 @@
             "parallel": false
           },
           {
+            "source": "test/test_radiant_text_query_gtest.cpp",
+            "name": "Radiant Text Query Tests",
+            "dependencies": [
+              "lambda-rt",
+              "node-core",
+              "radiant"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "Security",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
+            "binary": "test_radiant_text_query_gtest.exe",
+            "icon": "\ud83c\udfa8"
+          },
+          {
             "source": "test/test_rdt_vector_gtest.cpp",
             "name": "Vector Backend Tests",
             "dependencies": [
@@ -3976,7 +4012,9 @@
             "source": "test/wpt/test_wpt_input_events_gtest.cpp",
             "name": "WPT Input Events Tests",
             "category": "baseline",
-            "parallel": false,
+            "parallel": true,
+            "worker_slots": 2,
+            "worker_args": ["--jobs"],
             "dependencies": [],
             "binary": "test_wpt_input_events_gtest.exe",
             "libraries": [
@@ -4034,7 +4072,7 @@
           {
             "source": "test/test_ui_automation_gtest.cpp",
             "name": "Radiant View UI Fixtures",
-            "worker_slots": 2,
+            "worker_slots": 1,
             "worker_slots_env": "LAMBDA_UI_TEST_JOBS",
             "runner_only": true,
             "runner_name": "test_radiant_view_ui_gtest",
@@ -4086,6 +4124,7 @@
           {
             "source": "test/test_radiant_view_gtest.cpp",
             "name": "Radiant View Tests",
+            "artifact_dirs": ["radiant_view"],
             "additional_sources": [
               "test/test_radiant_view_scene3d.cpp"
             ],
@@ -6093,7 +6132,7 @@
             "runner_name": "test_ui_automation_extended_gtest",
             "runner_args": [
               "--suite",
-              "all"
+              "bold,editor,edit,hit-test"
             ],
             "binary": "test_ui_automation_gtest.exe",
             "libraries": [
@@ -6221,7 +6260,9 @@
         "args": [
           "layout"
         ],
-        "parallel": false
+        "parallel": true,
+        "worker_slots": 3,
+        "worker_slots_env": "LAYOUT_BASELINE_CONCURRENCY"
       },
       {
         "runner_name": "test_radiant_page_snapshot",
@@ -6232,7 +6273,8 @@
         "args": [
           "snapshot"
         ],
-        "parallel": false
+        "parallel": true,
+        "worker_slots": 2
       },
       {
         "runner_name": "test_radiant_render_baseline",

@@ -10,6 +10,8 @@ button { margin: 4px; padding: 5px; }
 .dropdown-menu { position: absolute; top: 32px; left: 0; }
 .modal { position: fixed; top: 20px; left: 20px; width: 220px; height: 90px; background: white; }
 .offcanvas { position: fixed; top: 0; left: 0; width: 170px; height: 120px; background: white; }
+/* offcanvas activates its focus trap before replacing showing with show. */
+.offcanvas.showing, .offcanvas.hiding { display: block; }
 .carousel-item { width: 180px; height: 40px; }
 </style>
 </head>

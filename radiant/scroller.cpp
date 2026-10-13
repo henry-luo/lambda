@@ -152,11 +152,19 @@ void setup_scroller(RasterRenderContext* rdcon, ViewBlock* block) {
     if (render_clip_overflow_geometry(block, &padding_clip, &radius)) {
         log_debug("setup scroller clip: left:%f, top:%f, right:%f, bottom:%f",
             padding_clip.left, padding_clip.top, padding_clip.right, padding_clip.bottom);
-        rdcon->block.clip.left = max(rdcon->block.clip.left, rdcon->block.x + padding_clip.left * s);
-        rdcon->block.clip.top = max(rdcon->block.clip.top, rdcon->block.y + padding_clip.top * s);
-        rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + padding_clip.right * s);
-        rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, rdcon->block.y + padding_clip.bottom * s);
-        if (radiant_corner_has_radius(&radius)) {
+        Bound projected = {rdcon->block.x + padding_clip.left * s, rdcon->block.y + padding_clip.top * s,
+            rdcon->block.x + padding_clip.right * s, rdcon->block.y + padding_clip.bottom * s};
+        const RdtMatrix* transform = render_state_current_transform(rdcon);
+        // coarse rejection uses destination bounds; the scoped clip retains the exact owner shape.
+        if (!transform || rdt_matrix_project_rect_bounds(transform, projected.left, projected.top,
+                projected.right, projected.bottom, &projected.left, &projected.top,
+                &projected.right, &projected.bottom)) {
+            rdcon->block.clip.left = max(rdcon->block.clip.left, projected.left);
+            rdcon->block.clip.top = max(rdcon->block.clip.top, projected.top);
+            rdcon->block.clip.right = min(rdcon->block.clip.right, projected.right);
+            rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, projected.bottom);
+        }
+        if (!transform && radiant_corner_has_radius(&radius)) {
             rdcon->block.has_clip_radius = true;
             rdcon->block.clip_radius = radiant_corner_scaled(&radius, s);
             constrain_corner_radii(&rdcon->block.clip_radius,

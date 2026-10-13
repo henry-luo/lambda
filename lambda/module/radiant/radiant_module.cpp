@@ -9,6 +9,9 @@
 #include "radiant_dom_bridge.hpp"
 #include "radiant_webgl_bridge.hpp"
 #include "../../dom/dom_style.h"
+#include "../../dom/dom_host_engine.h"
+#include "../../dom/dom_collection_types.h"
+#include "../../dom/dom_event_host.h"
 #include "radiant_input_value.hpp"
 #include "../../../lib/tagged.hpp"
 #include "../../../radiant/layout.hpp"
@@ -4029,6 +4032,14 @@ static bool radiant_query_face(Item faces, int64_t index, RadiantQueryFace* face
 }
 
 // font snapshots are supplied by lambda-io; these queries never acquire resources.
+// Query font contexts built so far. Each one scans the font directories, so a
+// repeated query must reuse its cached context (radiant_query_font_key).
+static uint64_t g_radiant_query_font_builds = 0;
+
+RADIANT_C_API uint64_t radiant_query_font_build_count(void) {
+    return __atomic_load_n(&g_radiant_query_font_builds, __ATOMIC_RELAXED);
+}
+
 static FontContext* radiant_build_query_fonts(Item faces) {
     if (!radiant_item_is_missing(faces) && !is_array_family_type_id(get_type_id(faces))) return nullptr;
     RootFrame owner_roots(1);
@@ -4037,6 +4048,7 @@ static FontContext* radiant_build_query_fonts(Item faces) {
     config.pixel_ratio = 1.0f;
     FontContext* fonts = font_context_create(&config);
     if (!fonts) return nullptr;
+    __atomic_add_fetch(&g_radiant_query_font_builds, 1, __ATOMIC_RELAXED);
     int64_t count = radiant_item_is_missing(faces) ? 0 : fn_len(faces);
     for (int64_t index = 0; index < count; index++) {
         RadiantQueryFace face = {};
@@ -4082,11 +4094,14 @@ static const ContextCapsuleOps radiant_query_font_cache_ops = {
 // compare complete resource bytes and normalized styles, never GC addresses or
 // family names alone. Oversized snapshots retain the uncached query path.
 static bool radiant_query_font_key(Item faces, ByteBuilder* key) {
-    if (!is_array_family_type_id(get_type_id(faces))) return false;
+    // a query without faces (system fonts only) is the common case and needs a
+    // key too: rebuilding its context per call rescanned every font directory.
+    // Accept exactly what radiant_build_query_fonts accepts.
+    if (!radiant_item_is_missing(faces) && !is_array_family_type_id(get_type_id(faces))) return false;
     RootFrame roots(1);
     Rooted<Item> owner(roots, faces);
-    int64_t count = fn_len(owner.get());
-    if (count <= 0) return false;
+    int64_t count = radiant_item_is_missing(faces) ? 0 : fn_len(owner.get());
+    if (count < 0) return false;
     const size_t limit = 8 * 1024 * 1024;
     if (!byte_builder_append_limited(key, &count, sizeof(count), limit)) return false;
     for (int64_t index = 0; index < count; index++) {
@@ -5083,19 +5098,138 @@ static const DomWebGlEngineOps radiant_webgl_operations = {
     DOM_WEBGL_ENGINE_OPERATIONS(RADIANT_WEBGL_ENTRY)
 #undef RADIANT_WEBGL_ENTRY
 };
+static bool radiant_style_focus_is_hidden(DomElement* element) {
+    return view_focus_is_hidden(static_cast<View*>(element));
+}
+
 static const DomStyleEngineOps radiant_style_operations = {
     dom_ensure_computed,
     css_prop_serialize_computed_value,
     css_prop_serialize_custom_property,
     css_compute_element_custom_property,
     css_transition_capture_before_change,
-    radiant_set_cssom_used_value_sync
+    radiant_set_cssom_used_value_sync,
+    radiant_style_focus_is_hidden
+};
+
+// the runtime borrows document/node identities; the renderer owns interaction state.
+static DocState* radiant_host_document_state(void* document) {
+    DomDocument* doc = (DomDocument*)document;
+    return doc ? doc->state : nullptr;
+}
+static bool radiant_host_state_bool(void* state_pointer, void* node, const char* name) {
+    DocState* state = (DocState*)state_pointer;
+    return state && node && name && state_get_bool(state, node, name);
+}
+static void radiant_host_document_request_repaint(void* document) {
+    doc_state_request_repaint(radiant_host_document_state(document));
+}
+static void radiant_host_document_clear_reflow(void* document) {
+    doc_state_clear_reflow(radiant_host_document_state(document));
+}
+
+static bool radiant_host_layout_document(void* ui_context, void* document, bool is_reflow) {
+    if (!ui_context || !document) return false;
+    layout_html_doc((UiContext*)ui_context, (DomDocument*)document, is_reflow);
+    return true;
+}
+static float radiant_host_element_effective_zoom(void* element) {
+    return layout_effective_zoom((DomNode*)element);
+}
+static bool radiant_host_element_has_vertical_rl_flow(void* element) {
+    return layout_element_writing_mode((DomElement*)element) == WM_VERTICAL_RL;
+}
+static CssEnum radiant_host_element_specified_keyword(void* element, CssPropertyCode property, CssEnum fallback) {
+    return layout_specified_keyword((DomElement*)element, property, fallback);
+}
+static void radiant_host_prepare_children_mutation(void* element) {
+    layout_unwrap_anonymous_table_fixups_for_dom_mutation((DomElement*)element);
+}
+
+// provider calls finish with the renderer's state/value owners before borrowed arguments expire (D4.5.1v4).
+static bool radiant_host_control_is_disabled(void* state, void* element) {
+    return form_control_is_disabled((DocState*)state, (View*)element);
+}
+static void radiant_host_control_focus_programmatic(void* state, void* element, bool from_keyboard) {
+    focus_set_programmatic((DocState*)state, (View*)element, from_keyboard);
+}
+static bool radiant_host_control_store_text(void* state, void* element, const char* value,
+    uint32_t bytes, uint32_t utf16_units) {
+    return form_control_store_text_value((DocState*)state, (View*)element, value, bytes, utf16_units);
+}
+static void radiant_host_control_invalidate_behavior(void* state, void* element) {
+    form_control_invalidate_behavior_init((DocState*)state, (View*)element);
+}
+static void radiant_host_control_open_dropdown(void* state, void* element) {
+    doc_state_open_dropdown((DocState*)state, (View*)element);
+}
+static bool radiant_host_scroll_begin_smooth(void* state, void* element, void* pane, float x, float y) {
+    return scroll_state_begin_smooth_for_view((DocState*)state, (View*)element, pane, x, y);
+}
+static void radiant_host_scroll_cancel_smooth(void* state, void* element) {
+    scroll_state_cancel_smooth_for_view((DocState*)state, (View*)element);
+}
+static bool radiant_host_document_tick_smooth_scroll(void* document, double now) {
+    return scroll_smooth_tick_document((DomDocument*)document, now);
+}
+static bool radiant_host_document_tick_animation(void* document, double now, void* dirty_tracker) {
+    return radiant_tick_document_animation_scheduler((DomDocument*)document, now, (DirtyTracker*)dirty_tracker);
+}
+
+static const DomHostEngineOps radiant_host_operations = {
+    fn_radiant_request_frame,
+    fn_radiant_cancel_frame,
+    fn_radiant_viewport_size,
+    fn_radiant_watch_window,
+    fn_radiant_history_traverse,
+    fn_radiant_media_info,
+    fn_radiant_media_command,
+    fn_radiant_clear_editing_focus,
+    fn_radiant_dom_edit_target,
+    radiant_dom_query_command,
+    radiant_dom_set_design_mode,
+    radiant_host_state_bool,
+    radiant_host_document_request_repaint,
+    radiant_host_document_clear_reflow,
+    radiant_host_layout_document,
+    radiant_host_element_effective_zoom,
+    radiant_host_element_has_vertical_rl_flow,
+    radiant_host_element_specified_keyword,
+    radiant_host_prepare_children_mutation,
+    radiant_host_control_is_disabled,
+    radiant_host_control_focus_programmatic,
+    radiant_host_control_store_text,
+    radiant_host_control_invalidate_behavior,
+    radiant_host_control_open_dropdown,
+    radiant_host_scroll_begin_smooth,
+    radiant_host_scroll_cancel_smooth,
+    radiant_host_document_tick_smooth_scroll,
+    radiant_host_document_tick_animation
+};
+
+static const DomCollectionHostTypes radiant_collection_types = {
+#define RADIANT_COLLECTION_TYPE(name) radiant_dom_##name##_host_type(),
+    DOM_COLLECTION_HOST_TYPES(RADIANT_COLLECTION_TYPE)
+#undef RADIANT_COLLECTION_TYPE
+};
+
+static const DomEventHostOps radiant_event_host_operations = {
+#define RADIANT_EVENT_HOST_ENTRY(result, name, parameters, arguments, absence) radiant_dom_event_##name,
+    DOM_EVENT_RECORD_HOST_OPERATIONS(RADIANT_EVENT_HOST_ENTRY)
+#undef RADIANT_EVENT_HOST_ENTRY
+    radiant_dispatch_synthetic_dom_event,
+    radiant_synthetic_dom_dispatch_is_reentry,
+    radiant_author_template_dispatch_begin,
+    radiant_author_template_dispatch_end
 };
 
 RADIANT_C_API void radiant_jube_register_static(void) {
     if (!dom_canvas_register_engine(&radiant_canvas_operations) ||
         !dom_webgl_register_engine(&radiant_webgl_operations) ||
-        !dom_style_register_engine(&radiant_style_operations)) {
+        !dom_style_register_engine(&radiant_style_operations) ||
+        !dom_host_register_engine(&radiant_host_operations) ||
+        !dom_collection_register_types(&radiant_collection_types) ||
+        !dom_event_register_host(&radiant_event_host_operations)) {
         log_error("DOM provider registration rejected a conflicting native provider");
         return;
     }
@@ -5129,14 +5263,8 @@ RADIANT_C_API void radiant_jube_register_static(void) {
 RADIANT_PROVIDE_ENGINE_2(get_state, fn_radiant_get_state)
 RADIANT_PROVIDE_ENGINE_3(set_state, fn_radiant_set_state)
 RADIANT_PROVIDE_ENGINE_1(request_change, fn_radiant_request_change)
-RADIANT_PROVIDE_ENGINE_2(request_frame, fn_radiant_request_frame)
-RADIANT_PROVIDE_ENGINE_1(viewport_size, fn_radiant_viewport_size)
-RADIANT_PROVIDE_ENGINE_2(cancel_frame, fn_radiant_cancel_frame)
-RADIANT_PROVIDE_ENGINE_3(watch_window, fn_radiant_watch_window)
-RADIANT_PROVIDE_ENGINE_2(history_traverse, fn_radiant_history_traverse)
 RADIANT_PROVIDE_ENGINE_1(focused, fn_radiant_focused)
 RADIANT_PROVIDE_ENGINE_2(focus_set, fn_radiant_focus_set)
-RADIANT_PROVIDE_ENGINE_1(clear_editing_focus, fn_radiant_clear_editing_focus)
 RADIANT_PROVIDE_ENGINE_1(mouse_focus, fn_radiant_mouse_focus)
 RADIANT_PROVIDE_ENGINE_1(activate_popover, fn_radiant_activate_popover)
 RADIANT_PROVIDE_ENGINE_1(keyboard_click, fn_radiant_keyboard_click)
@@ -5166,7 +5294,6 @@ RADIANT_PROVIDE_ENGINE_1(ime_preedit, fn_radiant_ime_preedit)
 RADIANT_PROVIDE_ENGINE_1(tc_selection_start, fn_radiant_selection_start)
 RADIANT_PROVIDE_ENGINE_1(tc_selection_end, fn_radiant_selection_end)
 RADIANT_PROVIDE_ENGINE_2(edit_node, fn_radiant_dom_edit_node)
-RADIANT_PROVIDE_ENGINE_2(edit_target, fn_radiant_dom_edit_target)
 RADIANT_PROVIDE_ENGINE_2(edit_start, fn_radiant_dom_edit_start)
 RADIANT_PROVIDE_ENGINE_2(edit_end, fn_radiant_dom_edit_end)
 RADIANT_PROVIDE_ENGINE_2(edit_start_container, fn_radiant_dom_edit_start_container)
@@ -5246,8 +5373,6 @@ RADIANT_PROVIDE_ENGINE_3(audio_play, fn_radiant_audio_play)
 RADIANT_PROVIDE_ENGINE_2(audio_pause, fn_radiant_audio_pause)
 RADIANT_PROVIDE_ENGINE_2(audio_close, fn_radiant_audio_close)
 RADIANT_PROVIDE_ENGINE_2(audio_state, fn_radiant_audio_state)
-RADIANT_PROVIDE_ENGINE_1(media_info, fn_radiant_media_info)
-RADIANT_PROVIDE_ENGINE_3(media_command, fn_radiant_media_command)
 RADIANT_PROVIDE_ENGINE_2(set_relative_mouse, fn_radiant_set_relative_mouse)
 RADIANT_PROVIDE_ENGINE_1(relative_mouse_active, fn_radiant_relative_mouse_active)
 RADIANT_PROVIDE_ENGINE_2(input_operation, fn_radiant_input_operation)

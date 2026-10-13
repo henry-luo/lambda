@@ -1,5 +1,31 @@
 #include "render.hpp"
+#include "view.hpp"
+#include <math.h>
 #include <string.h>
+
+FilterProp* dl_capture_filter_lengths(DisplayList* list, FilterProp* filter, float scale) {
+    if (!filter || !filter->functions || scale == 1.0f) return filter;
+    if (!list || !isfinite(scale) || scale <= 0.0f) return nullptr;
+    // display-list arena copies freeze device lengths without mutating computed CSS.
+    auto* result = (FilterProp*)scratch_alloc(&list->arena, sizeof(FilterProp));
+    if (!result) return nullptr;
+    *result = {}; result->functions_borrowed = true;
+    FilterFunction* tail = nullptr;
+    for (FilterFunction* source = filter->functions; source; source = source->next) {
+        auto* copy = (FilterFunction*)scratch_alloc(&list->arena, sizeof(FilterFunction));
+        if (!copy) return nullptr;
+        *copy = *source; copy->next = nullptr;
+        if (copy->type == FILTER_BLUR) copy->params.blur_radius *= scale;
+        else if (copy->type == FILTER_DROP_SHADOW) {
+            copy->params.drop_shadow.offset_x *= scale;
+            copy->params.drop_shadow.offset_y *= scale;
+            copy->params.drop_shadow.blur_radius *= scale;
+        }
+        if (tail) tail->next = lam::own(copy); else result->functions = lam::own(copy);
+        tail = copy;
+    }
+    return result;
+}
 
 static void dl_copy_effect_params(float* dst, int type, const float* params) {
     if (type && params) {
@@ -12,6 +38,7 @@ static void dl_copy_effect_params(float* dst, int type, const float* params) {
 static DisplayItem* dl_alloc_int_rect_effect_item(DisplayList* dl, DisplayOp op,
                                                   int x, int y, int w, int h) {
     DisplayItem* item = dl_alloc_item(dl);
+    if (!item) return nullptr;
     item->op = op;
     item->bounds[0] = (float)x; item->bounds[1] = (float)y;
     item->bounds[2] = (float)w; item->bounds[3] = (float)h;
@@ -26,6 +53,7 @@ void dl_composite_opacity(DisplayList* dl, int x0, int y0, int w, int h,
                           float opacity, bool premultiplied_source, const RadialMaskPaint* mask) {
     DisplayItem* item = dl_alloc_int_rect_effect_item(dl, DL_COMPOSITE_OPACITY,
                                                       x0, y0, w, h);
+    if (!item) return;
     item->composite_opacity.x0 = x0;
     item->composite_opacity.y0 = y0;
     item->composite_opacity.w = w;
@@ -38,6 +66,7 @@ void dl_composite_opacity(DisplayList* dl, int x0, int y0, int w, int h,
 void dl_save_backdrop(DisplayList* dl, int x0, int y0, int w, int h) {
     DisplayItem* item = dl_alloc_int_rect_effect_item(dl, DL_SAVE_BACKDROP,
                                                       x0, y0, w, h);
+    if (!item) return;
     item->save_backdrop.x0 = x0;
     item->save_backdrop.y0 = y0;
     item->save_backdrop.w = w;
@@ -48,6 +77,7 @@ void dl_apply_blend_mode(DisplayList* dl, int x0, int y0, int w, int h,
                          int blend_mode) {
     DisplayItem* item = dl_alloc_int_rect_effect_item(dl, DL_APPLY_BLEND_MODE,
                                                       x0, y0, w, h);
+    if (!item) return;
     item->apply_blend_mode.x0 = x0;
     item->apply_blend_mode.y0 = y0;
     item->apply_blend_mode.w = w;
@@ -58,6 +88,7 @@ void dl_apply_blend_mode(DisplayList* dl, int x0, int y0, int w, int h,
 void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
                      FilterProp* filter, const Bound* clip) {
     DisplayItem* item = dl_alloc_item(dl);
+    if (!item) return;
     item->op = DL_APPLY_FILTER;
     dl_set_clipped_rect_bounds(item, x, y, w, h, clip);
     item->apply_filter.x = x;
@@ -74,6 +105,7 @@ void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float b
                         bool premultiply_source,
                         bool tint_source, Color tint_color) {
     DisplayItem* item = dl_alloc_item(dl);
+    if (!item) return;
     item->op = DL_BOX_BLUR_REGION;
     item->bounds[0] = (float)rx; item->bounds[1] = (float)ry;
     item->bounds[2] = (float)rw; item->bounds[3] = (float)rh;
@@ -94,6 +126,7 @@ void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float b
 void dl_box_blur_inset(DisplayList* dl, int rx, int ry, int rw, int rh, int pad,
                        float blur_radius, uint32_t bg_color) {
     DisplayItem* item = dl_alloc_item(dl);
+    if (!item) return;
     item->op = DL_BOX_BLUR_INSET;
     // bounds cover the expanded region for tile culling
     item->bounds[0] = (float)(rx - pad); item->bounds[1] = (float)(ry - pad);
@@ -109,6 +142,7 @@ void dl_box_blur_inset(DisplayList* dl, int rx, int ry, int rw, int rh, int pad,
 
 void dl_shadow_clip_save(DisplayList* dl, int rx, int ry, int rw, int rh) {
     DisplayItem* item = dl_alloc_item(dl);
+    if (!item) return;
     item->op = DL_SHADOW_CLIP_SAVE;
     item->bounds[0] = (float)rx; item->bounds[1] = (float)ry;
     item->bounds[2] = (float)rw; item->bounds[3] = (float)rh;
@@ -122,6 +156,7 @@ void dl_shadow_clip_restore(DisplayList* dl, int exclude_type, const float* excl
                             int save_rx, int save_ry, int save_rw, int save_rh,
                             int restore_inside) {
     DisplayItem* item = dl_alloc_item(dl);
+    if (!item) return;
     item->op = DL_SHADOW_CLIP_RESTORE;
     item->bounds[0] = (float)save_rx; item->bounds[1] = (float)save_ry;
     item->bounds[2] = (float)save_rw; item->bounds[3] = (float)save_rh;
@@ -142,6 +177,7 @@ void dl_outer_shadow(DisplayList* dl,
                      int exclude_type, const float* exclude_params,
                      int clip_type, const float* clip_params) {
     DisplayItem* item = dl_alloc_item(dl);
+    if (!item) return;
     item->op = DL_OUTER_SHADOW;
     // bounds = blur region, used for tile culling
     float pad = blur_radius < 0 ? 0 : blur_radius;

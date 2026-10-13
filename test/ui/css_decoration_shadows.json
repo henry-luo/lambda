@@ -1,0 +1,370 @@
+{
+  "name": "Decoration shadow paint, alpha, nested overflow, live restyle and density",
+  "html": "test/ui/css_decoration_shadows.html",
+  "viewport": {
+    "width": 360,
+    "height": 190
+  },
+  "events": [
+    {
+      "type": "set_device_scale",
+      "scale": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#sharp"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#txt",
+        "offset_x": 100,
+        "offset_y": 63
+      },
+      "search_radius": 0,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#txt",
+        "offset_x": 100,
+        "offset_y": 103
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 2,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#alpha"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#txt",
+        "offset_x": 100,
+        "offset_y": 103
+      },
+      "search_radius": 0,
+      "min_r": 125,
+      "max_r": 129,
+      "min_g": 189,
+      "max_g": 193,
+      "min_b": 125,
+      "max_b": 129
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nested"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#txt",
+        "offset_x": 100,
+        "offset_y": 103
+      },
+      "search_radius": 0,
+      "min_r": 189,
+      "max_r": 193,
+      "min_g": 221,
+      "max_g": 225,
+      "min_b": 189,
+      "max_b": 193
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#outer"
+      },
+      "property": "opacity",
+      "equals": "0.5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blur"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#txt",
+        "offset_x": 100,
+        "offset_y": 103
+      },
+      "search_radius": 0,
+      "min_r": 16,
+      "max_r": 220,
+      "min_g": 100,
+      "max_g": 245,
+      "min_b": 16,
+      "max_b": 220
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#off"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#txt",
+        "offset_x": 100,
+        "offset_y": 103
+      },
+      "search_radius": 0,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 253,
+      "max_g": 255,
+      "min_b": 253,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#txt",
+        "offset_x": 100,
+        "offset_y": 63
+      },
+      "search_radius": 0,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#sharp"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#txt",
+        "offset_x": 100,
+        "offset_y": 103
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 2,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "set_device_scale",
+      "scale": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#sharp"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#txt",
+        "offset_x": 100,
+        "offset_y": 63
+      },
+      "search_radius": 0,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#txt",
+        "offset_x": 100,
+        "offset_y": 103
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 2,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#alpha"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#txt",
+        "offset_x": 100,
+        "offset_y": 103
+      },
+      "search_radius": 0,
+      "min_r": 125,
+      "max_r": 129,
+      "min_g": 189,
+      "max_g": 193,
+      "min_b": 125,
+      "max_b": 129
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nested"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#txt",
+        "offset_x": 100,
+        "offset_y": 103
+      },
+      "search_radius": 0,
+      "min_r": 189,
+      "max_r": 193,
+      "min_g": 221,
+      "max_g": 225,
+      "min_b": 189,
+      "max_b": 193
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#outer"
+      },
+      "property": "opacity",
+      "equals": "0.5"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#blur"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#txt",
+        "offset_x": 100,
+        "offset_y": 103
+      },
+      "search_radius": 0,
+      "min_r": 16,
+      "max_r": 220,
+      "min_g": 100,
+      "max_g": 245,
+      "min_b": 16,
+      "max_b": 220
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#off"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#txt",
+        "offset_x": 100,
+        "offset_y": 103
+      },
+      "search_radius": 0,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 253,
+      "max_g": 255,
+      "min_b": 253,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#txt",
+        "offset_x": 100,
+        "offset_y": 63
+      },
+      "search_radius": 0,
+      "min_r": 253,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 2,
+      "min_b": 0,
+      "max_b": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#sharp"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#txt",
+        "offset_x": 100,
+        "offset_y": 103
+      },
+      "search_radius": 0,
+      "min_r": 0,
+      "max_r": 2,
+      "min_g": 126,
+      "max_g": 130,
+      "min_b": 0,
+      "max_b": 2
+    }
+  ]
+}

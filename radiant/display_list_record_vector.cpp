@@ -102,8 +102,23 @@ static void dl_record_intersect_bounds_with_clip(DisplayItem* item, const Bound*
 // Recording: rdt_* mirrors
 // ---------------------------------------------------------------------------
 
+static DisplayItem* dl_record_path_item(DisplayList* list, DisplayOp op,
+        RdtPath* path, const RdtMatrix* transform, float padding) {
+    // acquire the owned clone before publishing a command; failures leave the list untouched.
+    RdtPath* owned = rdt_path_clone(path);
+    if (!owned) return nullptr;
+    DisplayItem* item = dl_alloc_item(list);
+    if (!item) { rdt_path_free(owned); return nullptr; }
+    item->op = op;
+    dl_record_set_path_bounds(item, path, transform, padding);
+    const DisplayOpDescriptor* descriptor = dl_op_descriptor(op);
+    *(lam::Own<RdtPath>*)((char*)item + descriptor->owned_payload_offset) = lam::own(owned);
+    return item;
+}
+
 void dl_fill_rect(DisplayList* dl, float x, float y, float w, float h, Color color) {
     DisplayItem* item = dl_alloc_item(dl);
+    if (!item) return;
     item->op = DL_FILL_RECT;
     item->bounds[0] = x; item->bounds[1] = y; item->bounds[2] = w; item->bounds[3] = h;
     item->fill_rect = {x, y, w, h, color};
@@ -112,6 +127,7 @@ void dl_fill_rect(DisplayList* dl, float x, float y, float w, float h, Color col
 void dl_fill_rounded_rect(DisplayList* dl, float x, float y, float w, float h,
                           float rx, float ry, Color color) {
     DisplayItem* item = dl_alloc_item(dl);
+    if (!item) return;
     item->op = DL_FILL_ROUNDED_RECT;
     item->bounds[0] = x; item->bounds[1] = y; item->bounds[2] = w; item->bounds[3] = h;
     item->fill_rounded_rect = {x, y, w, h, rx, ry, color};
@@ -119,10 +135,8 @@ void dl_fill_rounded_rect(DisplayList* dl, float x, float y, float w, float h,
 
 void dl_fill_path(DisplayList* dl, RdtPath* path, Color color,
                   RdtFillRule rule, const RdtMatrix* transform) {
-    DisplayItem* item = dl_alloc_item(dl);
-    item->op = DL_FILL_PATH;
-    dl_record_set_path_bounds(item, path, transform, 1.0f);
-    item->fill_path.path = lam::own(rdt_path_clone(path));
+    DisplayItem* item = dl_record_path_item(dl, DL_FILL_PATH, path, transform, 1.0f);
+    if (!item) return;
     item->fill_path.color = color;
     item->fill_path.rule = rule;
     item->fill_path.has_transform = (transform != nullptr);
@@ -133,11 +147,9 @@ void dl_stroke_path(DisplayList* dl, RdtPath* path, Color color, float width,
                     RdtStrokeCap cap, RdtStrokeJoin join,
                     const float* dash_array, int dash_count, float dash_phase,
                     const RdtMatrix* transform, float miter_limit) {
-    DisplayItem* item = dl_alloc_item(dl);
-    item->op = DL_STROKE_PATH;
     float stroke_pad = width > 0.0f ? width * fmaxf(4.0f, miter_limit) + 2.0f : 2.0f;
-    dl_record_set_path_bounds(item, path, transform, stroke_pad);
-    item->stroke_path.path = lam::own(rdt_path_clone(path));
+    DisplayItem* item = dl_record_path_item(dl, DL_STROKE_PATH, path, transform, stroke_pad);
+    if (!item) return;
     item->stroke_path.color = color;
     item->stroke_path.width = width;
     item->stroke_path.cap = cap;
@@ -156,12 +168,10 @@ void dl_fill_linear_gradient(DisplayList* dl, RdtPath* path,
                              RdtFillRule rule, const RdtMatrix* transform,
                              const RdtMatrix* gradient_transform,
                              const RdtGradientOptions* options) {
-    DisplayItem* item = dl_alloc_item(dl);
-    item->op = DL_FILL_LINEAR_GRADIENT;
     float pad = options && options->stroke_width > 0.0f
         ? options->stroke_width * fmaxf(4.0f, options->miter_limit) + 2.0f : 1.0f;
-    dl_record_set_path_bounds(item, path, transform, pad);
-    item->fill_linear_gradient.path = lam::own(rdt_path_clone(path));
+    DisplayItem* item = dl_record_path_item(dl, DL_FILL_LINEAR_GRADIENT, path, transform, pad);
+    if (!item) return;
     item->fill_linear_gradient.x1 = x1;
     item->fill_linear_gradient.y1 = y1;
     item->fill_linear_gradient.x2 = x2;
@@ -184,12 +194,10 @@ void dl_fill_radial_gradient(DisplayList* dl, RdtPath* path,
                              RdtFillRule rule, const RdtMatrix* transform,
                              const RdtMatrix* gradient_transform,
                              const RdtGradientOptions* options) {
-    DisplayItem* item = dl_alloc_item(dl);
-    item->op = DL_FILL_RADIAL_GRADIENT;
     float pad = options && options->stroke_width > 0.0f
         ? options->stroke_width * fmaxf(4.0f, options->miter_limit) + 2.0f : 1.0f;
-    dl_record_set_path_bounds(item, path, transform, pad);
-    item->fill_radial_gradient.path = lam::own(rdt_path_clone(path));
+    DisplayItem* item = dl_record_path_item(dl, DL_FILL_RADIAL_GRADIENT, path, transform, pad);
+    if (!item) return;
     item->fill_radial_gradient.cx = cx;
     item->fill_radial_gradient.cy = cy;
     item->fill_radial_gradient.r = r;
@@ -220,6 +228,7 @@ void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
         pixels = copy;
     }
     DisplayItem* item = dl_alloc_item(dl);
+    if (!item) return;
     item->op = DL_DRAW_IMAGE;
     dl_record_set_rect_bounds(item, dst_x, dst_y, dst_w, dst_h, transform, 1.0f);
     // an owned item records where its region sits in the owner's pixels, which
@@ -263,6 +272,7 @@ void dl_draw_glyph(DisplayList* dl, GlyphBitmap* bitmap, int x, int y,
                    Color color, bool is_color_emoji, const Bound* clip,
                    const RdtMatrix* transform, uint64_t resource_generation) {
     DisplayItem* item = dl_alloc_item(dl);
+    if (!item) return;
     item->op = DL_DRAW_GLYPH;
     dl_record_set_rect_bounds(item, (float)x, (float)y,
                               (float)bitmap->width, (float)bitmap->height,
@@ -292,6 +302,7 @@ void dl_draw_picture(DisplayList* dl, RdtPicture* picture,
         return;
     }
     DisplayItem* item = dl_alloc_item(dl);
+    if (!item) { rdt_picture_free(picture); return; }
     item->op = DL_DRAW_PICTURE;
     float picture_w = 0.0f;
     float picture_h = 0.0f;
@@ -311,10 +322,8 @@ void dl_draw_picture(DisplayList* dl, RdtPicture* picture,
 }
 
 void dl_push_clip(DisplayList* dl, RdtPath* clip_path, const RdtMatrix* transform, RdtFillRule rule) {
-    DisplayItem* item = dl_alloc_item(dl);
-    item->op = DL_PUSH_CLIP;
-    dl_record_set_path_bounds(item, clip_path, transform, 1.0f);
-    item->push_clip.path = lam::own(rdt_path_clone(clip_path));
+    DisplayItem* item = dl_record_path_item(dl, DL_PUSH_CLIP, clip_path, transform, 1.0f);
+    if (!item) return;
     item->push_clip.rule = rule;
     item->push_clip.has_transform = (transform != nullptr);
     if (transform) item->push_clip.transform = *transform;
@@ -322,5 +331,6 @@ void dl_push_clip(DisplayList* dl, RdtPath* clip_path, const RdtMatrix* transfor
 
 void dl_pop_clip(DisplayList* dl) {
     DisplayItem* item = dl_alloc_item(dl);
+    if (!item) return;
     item->op = DL_POP_CLIP;
 }

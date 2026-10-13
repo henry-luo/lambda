@@ -1193,11 +1193,6 @@ void dom_mutation_transaction_resync(DocState* state);
 // "HierarchyRequestError", "InvalidNodeTypeError", etc.).
 // ============================================================================
 
-// Build a new DocumentFragment — a `DomElement` whose tag_name is
-// "#document-fragment". Belongs to `doc`'s arena. Returns nullptr if doc
-// is null. Used as the return value of clone/extractContents.
-struct DomElement* dom_document_fragment_create(struct DomDocument* doc);
-
 // Clone a node. `deep`==true clones descendants too. Cloned subtree is
 // detached (no parent) and lives in `node`'s document arena.
 struct DomNode* dom_node_clone(struct DomNode* node, bool deep);
@@ -4694,3 +4689,10 @@ float text_glyph_x_for_byte_offset(UiContext* uicon, ViewText* text,
 void update_caret_visual_position(UiContext* uicon, DocState* state);
 
 #endif // RADIANT_EVENT_CORE_ONLY
+
+
+// engine-owned dispatch entry points published through the DOM provider (D7.1.3).
+extern "C" Item radiant_dispatch_synthetic_dom_event(Item target, Item event);
+extern "C" bool radiant_synthetic_dom_dispatch_is_reentry(Item event);
+extern "C" bool radiant_author_template_dispatch_begin(Item event);
+extern "C" void radiant_author_template_dispatch_end(Item event);

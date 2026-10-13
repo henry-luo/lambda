@@ -932,8 +932,22 @@ static bool resolve_click_target(SimEvent* ev, UiContext* uicon,
                     *out_x >= x + width || *out_y >= y + height;
             }
             if (clipped || ev->scroll_into_view) {
+                DocState* state = (DocState*)doc->state;
+                // the selector lookup above flushed pending layout; when nothing
+                // else is pending, bringing the target into view only moves
+                // scrollports, as a user's wheel would, without a full relayout.
+                bool layout_clean = state && !state->needs_reflow &&
+                    !state->reflow_scheduler.pending && !state->dirty_tracker.full_reflow &&
+                    doc->js.mutation_count == 0;
                 dom_scroll_into_view_if_needed_bridge((void*)elem->as_element());
-                sim_reflow_if_pending(doc, (DocState*)doc->state);
+                if (layout_clean && doc->pending_scroll_into_view_target.address) {
+                    // clear the bridge's reflow request before scrolling, so a
+                    // reflow the scroll itself requests (content-visibility) stays.
+                    doc_state_clear_reflow(state);
+                    if (!layout_scroll_into_view_without_relayout(uicon, doc))
+                        doc_state_request_reflow(state);
+                }
+                sim_reflow_if_pending(doc, state);
                 return resolve_target(ev, doc, out_x, out_y);
             }
         }
