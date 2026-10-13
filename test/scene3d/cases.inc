@@ -43,3 +43,4 @@
 {"RichThreeSceneRecoversDuringCrossfadeWithBoundedResources", "test/demo/scene3d/observatory.html", "test/scene3d/events/RichThreeSceneRecoversDuringCrossfadeWithBoundedResources.json", 21},
 {"DeclaredNativeAnimationBridgeMatchesPinnedMixerAndReleasesActions", "test/webgl/native-animation.html", "test/scene3d/events/DeclaredNativeAnimationBridgeMatchesPinnedMixerAndReleasesActions.json", 10},
 {"ImportedAssetGalleryRendersTexturedObjAndPlaysGltfAndA3dClips", "test/demo/scene3d/asset-gallery.ls", "test/scene3d/events/ImportedAssetGalleryRendersTexturedObjAndPlaysGltfAndA3dClips.json", 47},
+{"ScientificChartCamerasAndPickingStayIndependent", "test/scene3d/scientific_chart.ls", "test/scene3d/events/ScientificChartCamerasAndPickingStayIndependent.json", 13},

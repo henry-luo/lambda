@@ -26,6 +26,7 @@ struct NativeGlDraw {
     bool indexed, transparent;
     int side; // 0 front, 1 back, 2 double
     bool clockwise;
+    bool depth_only = false;
 };
 struct NativeGlUniform { NativeGlResource program; int location; uint64_t generation; };
 

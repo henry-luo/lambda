@@ -12,6 +12,7 @@ import coordinate: .coordinate
 import behavior: .behavior
 import animation: .animation
 import dataflow:.dataflow
+import mesh:.mesh
 
 let channels = ["x", "y", "color", "stroke", "size", "shape", "opacity", "theta", "radius"]
 
@@ -96,7 +97,8 @@ pub fn prepare(raw_spec, prepare_mark, path = "chart", parent = null, bindings =
                 prepare({*:sizing.inherit_requests(spec, if (spec._factory_catalogue!=null) spec._factory_catalogue[ri*len(columns)+ci]
                         else parse.substitute(template, row_field, column_field)),_partition:{key:[row_field,column_field]}},prepare_mark,
                     path++"-r"++util.binding_key([row_field,column_field]),spec,children)]}
-        } else if (form == "facet") {
+        } else if (form == "facet" and mesh.supports(spec.data)) {*:spec,_preparation_error:error("chart: facet requires records; subset mesh topology explicitly")}
+        else if (form == "facet") {
             let plan = dataflow.facet_plan(spec);
             if (not util.finite_number(plan.columns) or plan.columns < 1 or floor(plan.columns) != plan.columns or
                 (spec.facet.spacing != null and (not util.finite_number(spec.facet.spacing) or spec.facet.spacing < 0)))
@@ -124,8 +126,9 @@ pub fn prepare(raw_spec, prepare_mark, path = "chart", parent = null, bindings =
                 else {*:spec.encoding, size: {*:spec.encoding.size, scale: {*:parse.attributes(spec.encoding.size.scale), range: [1, 10]}}};
             let encoding = if (width_mark and defaults.size != null)
                 {*:defaults, size: {*:defaults.size, _size_unit: "width"}} else defaults;
-            let encoded = transform.prepare_encoding(spec.data, encoding);
-            let filtered = if (encoded.data is error) encoded.data else behavior.filter_data(spec, encoded.data);
+            let topology=mesh.supports(spec.data);
+            let encoded = if (topology) {data:spec.data,encoding:encoding} else transform.prepare_encoding(spec.data, encoding);
+            let filtered = if (encoded.data is error or topology) encoded.data else behavior.filter_data(spec, encoded.data);
             let prepared = if (filtered is error) {*:spec, data: filtered} else prepare_mark({*:spec, *:encoded, data: filtered});
             {*:prepared, _domain_data: if (behavior.retain_domains(spec)) encoded.data else prepared._domain_data, _groups: leaf_groups(bindings, path), _mark_prepared: true,
                 _preparation_error: if (prepared.data is error) prepared.data else animation.validate(prepared)}

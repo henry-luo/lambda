@@ -9,6 +9,7 @@ struct UiContext;
 struct ImageSurface;
 struct ViewBlock;
 struct RasterRenderContext;
+struct PaintList;
 
 struct Scene3dStats {
     NativeGlStats graphics;
@@ -26,6 +27,7 @@ void scene3d_collect(DomDocument* document);
 void scene3d_release_subtree(struct DomNode* root);
 void scene3d_context_lost(DomElement* root);
 void render_scene3d_content(RasterRenderContext* context, ViewBlock* view);
+bool scene3d_paint_content(PaintList* paint, UiContext* ui, ViewBlock* view, float x, float y);
 
 void scene3d_prepare_document(DomDocument* document, UiContext* ui, float raster_scale);
 struct Scene3dAnimationState;

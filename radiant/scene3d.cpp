@@ -3,6 +3,7 @@
 #include "scene3d_source.hpp"
 #include "scene3d_animation.hpp"
 #include "render.hpp"
+#include "radiant.hpp"
 #include "layout.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -34,7 +35,7 @@ struct Scene3dMaterial {
     DomNodeRef source;
     float color[4];
     bool source_transparent;
-    bool lambert, transparent, force_opaque;
+    bool lambert, transparent, force_opaque, depth_only;
     int side;
     NativeGlResource texture;
 };
@@ -67,7 +68,8 @@ struct Scene3dProjection {
     Scene3dMatrix camera_world;
     Scene3dVec camera_target, camera_up;
     bool camera_has_target, camera_found;
-    float fov, near_plane, far_plane, aspect;
+    float fov, near_plane, far_plane, aspect, view_height;
+    bool orthographic;
     float background[4], ambient[3], directions[8][3], lights[8][3];
     unsigned light_count, geometry_count, texture_count;
     DomNodeRef* dynamic_objects;
@@ -464,7 +466,8 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
     material->source=dom_node_ref(node);
     if (!scene3d_animated_color(build->entry,node,material->color) ||
         !scene3d_animated_number(build->entry,node,"opacity",1,&opacity) || opacity<0 || opacity>1 ||
-        !scene3d_flag(node,"transparent",false,&material->transparent)) {
+        !scene3d_flag(node,"transparent",false,&material->transparent) ||
+        !scene3d_flag(node,"depth_only",false,&material->depth_only)) {
         scene3d_fail(build->entry,"invalid material color or opacity"); return nullptr;
     }
     const char* alpha_mode=scene3d_text(node,"alpha-mode");
@@ -494,6 +497,9 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
     }
     // glTF OPAQUE ignores alpha from both factors and textures and writes opaque depth.
     if(material->force_opaque) material->transparent=false;
+    if (material->depth_only && material->transparent) {
+        scene3d_fail(build->entry,"depth-only material must be opaque");return nullptr;
+    }
     definition->material=material; return material;
 }
 
@@ -637,11 +643,14 @@ static bool scene3d_project_dynamic(Scene3dBuild* build, DomElement* node, const
         const Scene3dMatrix& world, bool visible) {
     Scene3dProjection* p=&build->entry->projection;
     if (scene3d_tag(node,"camera")) {
-        const char* type=scene3d_text(node,"type"); float fov,near_plane,far_plane,aspect;
-        if (!type || strcmp(type,"perspective") || !scene3d_animated_number(build->entry,node,"fov",50,&fov) ||
+        const char* type=scene3d_text(node,"type"); float fov,near_plane,far_plane,aspect,view_height;
+        bool orthographic=type && !strcmp(type,"orthographic");
+        if (!type || (!orthographic && strcmp(type,"perspective")) || !scene3d_animated_number(build->entry,node,"fov",50,&fov) ||
             !scene3d_animated_number(build->entry,node,"near",.1f,&near_plane) || !scene3d_animated_number(build->entry,node,"far",1000,&far_plane) ||
-            !scene3d_animated_number(build->entry,node,"aspect",0,&aspect) || fov<=0 || fov>=180 || near_plane<=0 || far_plane<=near_plane || aspect<0)
-            return scene3d_fail(build->entry,"invalid perspective camera");
+            !scene3d_animated_number(build->entry,node,"aspect",0,&aspect) ||
+            !scene3d_animated_number(build->entry,node,"view_height",4,&view_height) ||
+            fov<=0 || fov>=180 || view_height<=0 || near_plane<=0 || far_plane<=near_plane || aspect<0)
+            return scene3d_fail(build->entry,"invalid scene camera");
         Scene3dVec target,up;
         if (!scene3d_vector(node,"target",{},&target) || !scene3d_vector(node,"up",{0,1,0},&up)) return scene3d_fail(build->entry,"invalid camera orientation");
         const char* id=scene3d_text(node,"id");
@@ -649,6 +658,7 @@ static bool scene3d_project_dynamic(Scene3dBuild* build, DomElement* node, const
             p->camera_found=true; p->camera_world=world; p->camera_target=scene3d_point(parent,target);
             p->camera_up=scene3d_point(parent,up,0);
             p->camera_has_target=node->has_attribute("target"); p->fov=fov;p->near_plane=near_plane;p->far_plane=far_plane;p->aspect=aspect;
+            p->orthographic=orthographic;p->view_height=view_height;
         }
     } else if (scene3d_tag(node,"light")) {
         const char* type=scene3d_text(node,"type"); float color[4],intensity;
@@ -925,6 +935,7 @@ static bool scene3d_compile(Scene3dEntry* entry, DomElement* root, UiContext* ui
 }
 static int scene3d_draw_compare(const void* a, const void* b) {
     const Scene3dMesh* left=*(Scene3dMesh* const*)a;const Scene3dMesh* right=*(Scene3dMesh* const*)b;
+    if (left->material->depth_only!=right->material->depth_only) return left->material->depth_only?-1:1;
     if (left->material->transparent!=right->material->transparent) return left->material->transparent?1:-1;
     if (left->material->transparent && left->depth!=right->depth) return left->depth<right->depth?-1:1;
     return left->order<right->order?-1:left->order>right->order?1:0;
@@ -947,6 +958,9 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     bool changed=entry->mutation_epoch!=root->doc->mutation_epoch || entry->width!=width || entry->height!=height || entry->scale!=raster_scale ||
         entry->animated_generation!=scene3d_animation_generation(entry->animation);
     if (!changed && entry->snapshot) return entry->snapshot;
+    if (!entry->graphics && ui->export_native_graphics && !ui_context_enable_native_graphics(ui)) {
+        scene3d_fail(entry,"native graphics host unavailable for export");ui->render_failed=true;return nullptr;
+    }
     if (!entry->graphics) entry->graphics=native_gl_create(ui->window!=nullptr,entry->diagnostic,sizeof(entry->diagnostic));
     if (!entry->graphics) return nullptr;
     if (!entry->program.id) entry->program=native_gl_program(entry->graphics,scene3d_vertex_shader,scene3d_fragment_shader);
@@ -974,7 +988,9 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     Scene3dVec up=p->camera_has_target?p->camera_up:scene3d_point(p->camera_world,{0,1,0},0);
     Scene3dMatrix view;
     if (!scene3d_camera(eye,target,up,&view)) { scene3d_fail(entry,"camera orientation is degenerate");scene3d_retire_snapshot(entry);return nullptr; }
-    Scene3dMatrix projection=scene3d_multiply(scene3d_perspective(p->fov,aspect,p->near_plane,p->far_plane),view);
+    Scene3dMatrix projection=scene3d_multiply(p->orthographic?
+        scene3d_orthographic(p->view_height,aspect,p->near_plane,p->far_plane):
+        scene3d_perspective(p->fov,aspect,p->near_plane,p->far_plane),view);
     if (vb.has_viewbox) {
         RdtMatrix fit=svg_viewbox_transform(&vb,width,height,scene3d_text(root,"preserveAspectRatio"));
         if (!scene3d_text(root,"preserveAspectRatio")) fit=svg_viewbox_transform(&vb,width,height,scene3d_text(root,"preserveaspectratio"));
@@ -1003,6 +1019,7 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
         NativeGlDraw draw={entry->program,mesh->vertices,material->texture.id?material->texture:entry->white,
             mesh->geometry->index_count?mesh->geometry->index_count:mesh->geometry->vertex_count,mesh->instance_count,
             mesh->geometry->index_count!=0,material->transparent,material->side,mesh->clockwise};
+        draw.depth_only=material->depth_only;
         rendered=rendered&&native_gl_draw(entry->graphics,&draw);
     }
     ImageSurface* snapshot=rendered?native_gl_snapshot(entry->graphics,entry->target):nullptr;
@@ -1038,4 +1055,18 @@ void render_scene3d_content(RasterRenderContext* context, ViewBlock* view) {
     ImageSurface* image=scene3d_snapshot(view->as_element(),context->ui_context,
         rect.width/context->raster_scale,rect.height/context->raster_scale,context->raster_scale);
     if (image) render_surface_content(context,view,image);
+    // an invalid scene aborts file export; live documents must remain usable for repair and diagnostics.
+    else if (rect.width>0 && rect.height>0 && context->ui_context->export_native_graphics) context->ui_context->render_failed=true;
+}
+
+// Vector exports embed the same generation-owned snapshot used by live raster presentation.
+bool scene3d_paint_content(PaintList* paint, UiContext* ui, ViewBlock* view, float x, float y) {
+    if (!paint || !ui || !view) return false;
+    BlockBlot parent={};parent.x=x-view->x;parent.y=y-view->y;
+    Rect rect=render_geometry_block_content_rect(&parent,view,1);
+    if (rect.width<=0 || rect.height<=0) return true;
+    ImageSurface* image=scene3d_snapshot(view->as_element(),ui,rect.width,rect.height,ui_context_raster_scale(ui));
+    if (!image) { ui->render_failed=true;return false; }
+    paint_draw_image_resource(paint,image,rect.x,rect.y,rect.width,rect.height,255,nullptr);
+    return true;
 }

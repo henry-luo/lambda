@@ -327,6 +327,45 @@ protected:
 };
 
 
+TEST_F(Scene3dTest, OrthographicSizeIsDistanceIndependentAndDepthClipped) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","4");
+    DomElement* plane=mesh();
+    pixel(snapshot(),40,64,255,0,0);
+    attr(plane,"position","0 0 -10");
+    pixel(snapshot(),40,64,255,0,0);
+    attr(camera,"far","8");
+    pixel(snapshot(),40,64,0,0,0,0);
+    attr(camera,"view_height","0");
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+}
+
+TEST_F(Scene3dTest, DepthOnlyOccluderPreservesBackgroundAndHidesRearGeometry) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","4");
+    attr(root,"background","#ffffff");
+    DomElement* occluder=mesh();
+    DomElement* material=occluder->last_child->as_element();
+    attr(material,"depth_only","true");
+    DomElement* rear=mesh("plane","#0000ff");attr(rear,"position","0 0 -1");
+    pixel(snapshot(),64,64,255,255,255);
+    attr(rear,"position","0 0 1");
+    pixel(snapshot(),64,64,0,0,255);
+    attr(material,"transparent","true");
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+}
+
+TEST_F(Scene3dTest, SvgExportEmbedsScenePixelsAndRejectsInvalidScene) {
+    ASSERT_NE(load_page("test/scene3d/mixed.html"),nullptr);
+    lam::Temp<char> svg(render_view_tree_to_svg(&ui,page->view_tree->root,320,240,nullptr,1));
+    ASSERT_NE(svg.get(),nullptr);
+    EXPECT_NE(strstr(svg.get(),"data:image/png;base64,"),nullptr);
+    ASSERT_FALSE(ui.render_failed);
+    DomElement* scene=dom_find_element_by_id(page->root->as_element(),"viewport");
+    ASSERT_NE(scene,nullptr);
+    ASSERT_TRUE(scene->set_attribute("camera","absent-camera"));page->mutation_epoch++;
+    lam::Temp<char> invalid(render_view_tree_to_svg(&ui,page->view_tree->root,320,240,nullptr,1));
+    EXPECT_EQ(invalid.get(),nullptr);EXPECT_TRUE(ui.render_failed);
+}
+
 struct ScriptResourceRetirementProbe : DomDocumentResourceData {
     RootVector roots;
     bool* released;

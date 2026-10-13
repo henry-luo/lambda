@@ -126,6 +126,7 @@ static bool scene3d_animation_initial(DomElement* node,const char* property,Anim
     if(!strcmp(tag,"material")&&!strcmp(property,"opacity")) fallback=1;
     else if(!strcmp(tag,"light")&&!strcmp(property,"intensity")) fallback=1;
     else if(!strcmp(tag,"camera")&&!strcmp(property,"fov")) fallback=50;
+    else if(!strcmp(tag,"camera")&&!strcmp(property,"view_height")) fallback=4;
     else if(!strcmp(tag,"camera")&&!strcmp(property,"near")) fallback=.1f;
     else if(!strcmp(tag,"camera")&&!strcmp(property,"far")) fallback=1000;
     else if(strcmp(tag,"camera")||strcmp(property,"aspect")) return false;

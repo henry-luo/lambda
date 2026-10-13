@@ -67,3 +67,10 @@ inline Scene3dMatrix scene3d_perspective(float fov, float aspect, float near_pla
     m.v[0]=f/aspect; m.v[5]=f; m.v[10]=(far_plane+near_plane)/(near_plane-far_plane);
     m.v[11]=-1; m.v[14]=2*far_plane*near_plane/(near_plane-far_plane); return m;
 }
+// view_height is the full vertical span, independent of distance from the camera.
+inline Scene3dMatrix scene3d_orthographic(float view_height, float aspect, float near_plane, float far_plane) {
+    Scene3dMatrix m = scene3d_identity();
+    m.v[0]=2/(view_height*aspect);m.v[5]=2/view_height;
+    m.v[10]=2/(near_plane-far_plane);m.v[14]=(far_plane+near_plane)/(near_plane-far_plane);
+    return m;
+}

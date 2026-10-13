@@ -1,18 +1,20 @@
 # Lambda Chart Scientific Plotting — Proposal
 
-**Status:** draft proposal, 2026-10-13. The requested feature scope is 3D
-plotting, scientific meshes, streamlines, and signal-analysis plots. The APIs,
-defaults, algorithms, and delivery boundaries below are proposed, not claims
-of implemented support or ratified changes to the language.
+**Status:** package design selected for implementation by the user on
+2026-10-13. The requested feature scope is 3D plotting, scientific meshes,
+streamlines, and signal-analysis plots. Implementation is partial; the
+[implementation record](impl/Lambda_Impl_Chart_Plot.md) distinguishes delivered
+capabilities from the remaining requirements below. This is not a change to
+the language's formal rulings.
 
 **Scope:** extend `lambda.chart` with scientific data models and analysis,
 retaining the existing chart grammar, composition, guides, selections, and
 explicit-time animation. Reuse `lambda.scene3d` and Radiant for 3D rendering.
 
 **Relationship:** extends [Lambda Chart Package](Lambda_Pkg_Chart.md), especially
-its marks, transforms, coordinates, and scope boundaries. Adoption would revise
-that document's §13 exclusion of 3D charts. The existing scope remains current
-until adoption; this proposal does not silently supersede it. Native graphics
+its marks, transforms, coordinates, and scope boundaries. This extension
+supersedes that document's §13 exclusion of scientific 3D charts, while
+preserving the SVG-only contract of `chart.render`. Native graphics
 continue to follow [Radiant 3D and WebGL Design](radiant/Radiant_Design_WebGL.md).
 
 ## 1. Formal linkage and design direction
@@ -30,7 +32,7 @@ continue to follow [Radiant 3D and WebGL Design](radiant/Radiant_Design_WebGL.md
 These formal specifications remain authoritative. The proposal adds package
 contracts within them. Any implementation that needs a changed formal ruling
 must first revise both the formal spec and the relevant working design under
-[Doc_Convention](../doc/Doc_Convention.md); the present draft changes neither.
+[Doc_Convention](../doc/Doc_Convention.md); this package extension changes neither.
 
 The design has three parts: numerical analysis produces inspectable values;
 marks turn those values into geometry; the existing SVG or scene renderer
@@ -143,8 +145,8 @@ return type. `render_frame` keeps the corresponding SVG-only contract.
 
 Native element and map specifications share one normalization path. Native
 `<mark type: "surface">` corresponds to `mark: {kind: "surface"}`. The examples
-below are proposed JSON map inputs, deliberately not executable Lambda tests
-for APIs that do not exist yet.
+below are JSON map inputs. Runnable Lambda examples and the implemented subset
+are documented in [Scientific Charts](../doc/Lambda_Chart_Plot.md).
 
 ### 3.3 Diagnostics, identity, and numerical policy
 

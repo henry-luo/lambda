@@ -5,6 +5,7 @@ import transform:.transform
 import parameter:.parameter
 import geometry:.geometry
 import util:.util
+import mesh:.mesh
 pub fn resolve(spec,parent,values) {
     let datasets={*:parse.attributes(parent.datasets),*:parse.attributes(spec.datasets)};
     let own=spec.data!=null or spec.data_source.values!=null or spec.data_source.name!=null or spec.data_source.url!=null;
@@ -12,8 +13,10 @@ pub fn resolve(spec,parent,values) {
     let graph=if (resolved.nodes!=null) resolved else if (spec._graph!=null) spec._graph else parent._graph;
     let raw=if (resolved is error) resolved else if (resolved.nodes!=null) resolved.nodes else
         if (contains(["geoshape","geo"],spec.mark.kind) or contains(["FeatureCollection","Feature"],resolved.type)) geometry.records(resolved) else resolved;
-    {datasets:datasets,_graph:graph,data:if (raw is error) raw else if (not (raw is array)) error("chart: data must be an array")
-        else transform.apply_transforms(raw,parameter.transforms(spec.transform,values),datasets)}
+    let transformed=if (raw is error) {data:raw} else if (not (raw is array) and not mesh.supports(raw) and not contains(["signal","voxels"],raw.kind))
+        {data:error("chart: data must be records or a scientific descriptor")}
+        else transform.resolve_transforms(raw,parameter.transforms(spec.transform,values),datasets);
+    {datasets:datasets,_graph:graph,*:transformed,_analysis:if (transformed._analysis!=null) transformed._analysis else parent._analysis}
 }
 
 pub fn facet_plan(spec) {

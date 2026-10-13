@@ -568,6 +568,7 @@ bool native_gl_begin(NativeGlContext* context, NativeGlResource target, const fl
     NativeGlFunctions& gl = context->gl;
     gl.BindFramebuffer(GL_FRAMEBUFFER, slot->name); gl.Viewport(0, 0, slot->width, slot->height);
     gl.Enable(GL_FRAMEBUFFER_SRGB); gl.Enable(GL_DEPTH_TEST); gl.Disable(GL_SCISSOR_TEST); gl.DepthMask(GL_TRUE);
+    gl.ColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
     gl.ClearColor(background[0] * background[3], background[1] * background[3], background[2] * background[3], background[3]);
     gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
     slot->initialized=native_gl_check(context, "drawing buffer clear");return slot->initialized;
@@ -610,11 +611,16 @@ bool native_gl_draw(NativeGlContext* context, const NativeGlDraw* draw) {
     if (draw->transparent) { gl.Enable(GL_BLEND); gl.BlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA); }
     else gl.Disable(GL_BLEND);
     gl.DepthMask(draw->transparent ? GL_FALSE : GL_TRUE);
+    // A biased depth prepass hides rear wireframe edges without painting an artificial surface color.
+    gl.ColorMask(!draw->depth_only,!draw->depth_only,!draw->depth_only,!draw->depth_only);
+    if (draw->depth_only) { gl.Enable(GL_POLYGON_OFFSET_FILL);gl.PolygonOffset(1,1); }
+    else gl.Disable(GL_POLYGON_OFFSET_FILL);
     if (draw->side == 2) gl.Disable(GL_CULL_FACE);
     else { gl.Enable(GL_CULL_FACE); gl.CullFace(draw->side == 1 ? GL_FRONT : GL_BACK); }
     gl.FrontFace(draw->clockwise ? GL_CW : GL_CCW);
     if (draw->indexed) gl.DrawElementsInstanced(GL_TRIANGLES, draw->count, GL_UNSIGNED_INT, nullptr, draw->instances);
     else gl.DrawArraysInstanced(GL_TRIANGLES, 0, draw->count, draw->instances);
+    gl.ColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);gl.Disable(GL_POLYGON_OFFSET_FILL);
     context->stats.draws++; return native_gl_check(context, "draw submission");
 #else
     return false;

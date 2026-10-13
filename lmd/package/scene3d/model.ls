@@ -108,7 +108,7 @@ fn check_node(n, all_nodes) bool^ {
                     else if (property == "name") 'string' else if (property == "color" and contains(['material', 'light'], kind)) 'color'
                     else if (property == "morph-weights" and kind == 'mesh') 'vector'
                     else if ((property == "opacity" and kind == 'material') or (property == "intensity" and kind == 'light') or
-                        (contains(["fov", "near", "far", "aspect"], property) and kind == 'camera')) 'number' else null
+                        (contains(["fov", "near", "far", "aspect", "view_height"], property) and kind == 'camera')) 'number' else null
                 let components = len(n.values) / len(n.times)
                 if (expected == null or n.type != expected or
                     (contains(["position", "scale"], property) and components != 3) or
@@ -118,14 +118,17 @@ fn check_node(n, all_nodes) bool^ {
         }
     } else if (kind == 'camera') {
         let fov = value(n.fov, 50.0), near = value(n.near, 0.1), far = value(n.far, 1000.0)
-        if (n.type != 'perspective' or not numeric(fov) or fov <= 0 or fov >= 180 or not numeric(near) or near <= 0 or
+        if (not contains(['perspective','orthographic'],n.type) or not numeric(fov) or fov <= 0 or fov >= 180 or not numeric(near) or near <= 0 or
+            (n.view_height!=null and (not numeric(n.view_height) or n.view_height<=0)) or
             not numeric(far) or far <= near or (n.aspect != null and (not numeric(n.aspect) or n.aspect <= 0)))
-            raise fail("invalid perspective camera") else true
+            raise fail("invalid scene camera") else true
     } else if (kind == 'geometry') check_geometry(n)^
     else if (kind == 'material') {
         let checked_type = if (not contains(['basic', 'lambert'], n.type)) raise fail("unknown material type")
         let checked_opacity = if (n.opacity != null and (not numeric(n.opacity) or n.opacity < 0 or n.opacity > 1)) raise fail("invalid material opacity")
         let checked_transparent = if (n.transparent != null and not (n.transparent is bool)) raise fail("invalid transparency")
+        let checked_depth = if (n.depth_only!=null and (not (n.depth_only is bool) or n.depth_only and (n.transparent==true or n.opacity!=null and n.opacity!=1)))
+            raise fail("depth-only materials must be opaque")
         let checked_alpha = if (n["alpha-mode"] != null and not contains(['opaque', 'blend'], n["alpha-mode"])) raise fail("invalid material alpha mode")
         let checked_side = if (n.side != null and not contains(['front', 'back', 'double'], n.side)) raise fail("invalid material side")
         let checked_texture = if (n.texture != null) {

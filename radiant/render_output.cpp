@@ -412,6 +412,8 @@ static bool render_export_session_begin_internal(
         lam::free_owned(session->ui_context);
         return false;
     }
+    // Only documents that actually request scene pixels acquire a graphics host.
+    session->ui_context->export_native_graphics=true;
     int surface_width = raster_surface
         ? (int)(layout_width * session->raster_scale)
         : layout_width;

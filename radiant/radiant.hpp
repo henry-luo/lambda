@@ -352,6 +352,7 @@ void radiant_window_focus_changed(UiContext* uicon, bool focused);
 bool radiant_window_platform_close(UiContext* uicon);
 int view_doc_in_window(const char* doc_file);
 int ui_context_init(UiContext* uicon, bool headless, float requested_device_scale);
+bool ui_context_enable_native_graphics(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void ui_context_cleanup(UiContext* uicon);
 void free_document(DomDocument* doc);

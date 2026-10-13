@@ -39,7 +39,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `ui.wired` | `lambda.ui.wired` | Experimental, initial native subset | Hand-drawn SVG pencil outlines, paper surfaces, hatched progress, scoped tokens and native controls; see [wired UI](Lambda_UI_Wired.md) | `lambda view test/ui/wired_gallery.ls` |
 | `ui.clay` | `lambda.ui.clay` | Experimental, broad native theme | Claymorphism surfaces and 59 components/subcomponents sharing the Ant-inspired behavior layer; see [clay UI](Lambda_UI_Clay.md) | `lambda view test/ui/clay_gallery.ls` |
 | `ui.blade` | `lambda.ui.blade` | Experimental, broad native theme | High-resolution fantasy materials, 64 components/subcomponents, inventory slots, abilities and 18 original vector icons; see [blade UI](Lambda_UI_Blade.md) | `lambda view test/ui/blade_gallery.ls` |
-| `chart` | `lambda.chart.chart`, `lambda.chart.vega`, `lambda.chart.wordcloud` | Library | Declarative charts and weighted word clouds, rendered as SVG elements | No command of its own; `lambda render` and `lambda view` display a script whose result is a chart |
+| `chart` | `lambda.chart.chart`, `lambda.chart.vega`, `lambda.chart.wordcloud` | Library | Declarative SVG charts, scientific analysis and native 3D figures | No command of its own; `lambda render` and `lambda view` display a script whose result is a chart |
 | `map` | `lambda.map` | Library, initial offline subset | Native `<geomap>` viewports with typed GeoJSON, camera interaction, feature queries and vector export | `lambda render` and `lambda view` display a script whose result is a map |
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
@@ -152,6 +152,12 @@ Keep your packages next to the scripts that use them. The `lambda.*` namespace i
 
 The chart package turns a declarative chart specification into an SVG element tree. It follows the Vega-Lite grammar: rows of data, a mark type, and encoding channels that map data fields to position, colour and size. A specification is either a `<chart>` element or a Vega-Lite document converted with `lambda.chart.vega`.
 
+Scientific grids/meshes, streamlines, spectral analysis, and native 3D figures
+are described in [Scientific Charts](Lambda_Chart_Plot.md). `chart.figure`
+returns SVG for 2D or a native scene with SVG guides for 3D; `chart.render`
+retains its SVG-only contract. The pure numerical modules are
+`lambda.chart.mesh`, `lambda.chart.stream`, and `lambda.chart.signal`.
+
 ```lambda
 import chart: lambda.chart.chart
 
@@ -230,6 +236,8 @@ svg.width                // 400, the default width
 | `chart.model(spec, viewport = null, options = {})` | Creates a chart source element; retain and `apply` it to preserve chart state across parent rerenders |
 | `chart.interactive(spec, viewport = null, options = {})` | Applies a Lambda view template with independent interaction state, SVG, and bound input controls |
 | `chart.render_frame(spec, frame, viewport = null, st = null)` | Samples SVG at an explicit `time_ms`; a `previous` specification or SVG supplies the source of an update transition (S12.1.1v2) |
+| `chart.figure(spec, viewport = null)` | Constructs a 2D SVG or native 3D scientific figure; see [supported marks and limits](Lambda_Chart_Plot.md) |
+| `chart.figure_frame(spec, frame, viewport = null)` | Existing 2D sampling; static figures and exact timeline endpoints for 3D |
 | `vega.convert(vl)` | Converts a parsed Vega-Lite document (a map) into a specification map for `render_spec` |
 
 ### 4.3 Specification elements

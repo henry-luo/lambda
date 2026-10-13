@@ -10,25 +10,32 @@ import statistics: .statistics
 import calendar: .calendar
 import expr: .expression
 import reshape: .reshape
+import mesh: .mesh
+import signal: .signal
 
 // ============================================================
 // Public API: Apply a sequence of transforms to data
 // ============================================================
 
-pub fn apply_transforms(data, transform_el, datasets = null) {
-    if (not transform_el) data
+pub fn apply_transforms(data, transform_el, datasets = null) => resolve_transforms(data,transform_el,datasets).data
+
+pub fn resolve_transforms(data, transform_el, datasets = null) {
+    if (not transform_el) {data:data}
     else (let steps = if (transform_el is element) content(transform_el) else transform_el,
           let n = len(steps),
-          if (n == 0) data
+          if (n == 0) {data:data}
           else apply_transform_list(data, steps, 0, n, datasets))
 }
 
 // recursive helper: apply transforms one at a time
-fn apply_transform_list(data, transforms, index: int, count: int, datasets) {
-    if (data is error or index >= count) data
+fn apply_transform_list(data, transforms, index: int, count: int, datasets, analysis=null) {
+    if (data is error or index >= count) {data:data,_analysis:analysis}
     else (let t = transforms[index],
           let tag = if (t is element) string(name(t)) else t.type,
+          let analyzed=if (tag=="signal") signal.analyze(data,parse.attributes(t)) else null,
           let result = if (t is error) t
+              else if (tag=="signal") if (analyzed is error) analyzed else analyzed.data
+              else if (mesh.supports(data) or contains(["signal","voxels"],data.kind)) error("chart: record transforms cannot change scientific topology; use an explicit scientific adapter")
               else if (tag == "filter") apply_filter(data, t)
               else if (tag == "sort") apply_sort(data, t)
               else if (tag == "aggregate") apply_aggregate(data, t)
@@ -51,7 +58,7 @@ fn apply_transform_list(data, transforms, index: int, count: int, datasets) {
               else if (tag == "loess") statistics.loess(data, t)
               else if (tag == "timeunit") apply_timeunit(data, t)
               else error("chart: unsupported transform " ++ string(tag)),
-          apply_transform_list(result, transforms, index + 1, count, datasets))
+          apply_transform_list(result, transforms, index + 1, count, datasets,if (analyzed!=null) analyzed else analysis))
 }
 
 fn apply_timeunit(data, step) {

@@ -4349,6 +4349,7 @@ typedef struct UiContext {
     lam::Up<ImageSurface> surface;  // the current render target: window_surface, or one an export pass swaps in
     lam::Own<ImageSurface> window_surface;  // the surface create_surface made; destroy releases it
     bool render_failed;             // sticky host failure; never present an invalid paint stream
+    bool export_native_graphics;    // file export may lazily create a hidden graphics host for scene snapshots
 
     // font handling
     lam::Up<struct FontContext> font_ctx; // the font context in use: owned_font_ctx, or the host's for an isolated UI

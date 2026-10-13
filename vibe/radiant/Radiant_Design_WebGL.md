@@ -230,11 +230,11 @@ class and option.
 |---|---|
 | `<scene3d>` | Scene plus embedded viewport; SVG-style width/height, `viewBox`/`preserveAspectRatio`, background, active camera ID, and a 3D subtree. |
 | `<group>` | Hierarchy and inherited transforms, corresponding to Group/Object3D. |
-| `<camera type:'perspective'>` | Perspective camera; position/target or orientation, FOV, near/far planes. Orthographic cameras can extend the same shape. |
+| `<camera type:'perspective'/'orthographic'>` | Position/target or orientation, near/far planes; perspective uses FOV, orthographic uses positive `view_height` (full vertical scene span). |
 | `<light type:'ambient'/'directional'>` | Initial light types, color/intensity, and direction/target where applicable. |
 | `<mesh>` | Renderable object: transform, visibility, geometry, material, and optional instance data. |
 | `<geometry>` | Box/plane primitives and indexed buffer geometry with positions, normals, UVs, and indices. |
-| `<material>` / texture descriptions | Initial basic/unlit and Lambert shading, color, opacity, culling, and local image textures. |
+| `<material>` / texture descriptions | Initial basic/unlit and Lambert shading, color, opacity, culling, and local image textures. Opaque `depth_only:true` writes biased depth before visible geometry for hidden-line plots. |
 | Scene-local resource definitions/references | Optional shared geometry/material/texture IDs; native caches own derived GPU resources. |
 
 Common object attributes include `id`, position, rotation, scale, and visibility.
@@ -247,6 +247,17 @@ with a valid `viewBox`, CSS resizing fits that frame without reframing the
 camera. Resolve the named active camera; missing/duplicate IDs, invalid near/far
 ranges, malformed arrays, or unknown geometry/material types produce diagnostics
 instead of silent output.
+
+The scientific chart extension reuses this native boundary (**D7.5.3**):
+`lambda.scene3d.camera` provides pure projection, clipping, rays, billboards,
+and orbit/pan/zoom calculations under **S12.1.1v2**. SVG/PDF export embeds the
+same document-owned scene snapshot (**D4.5.1v4**), with labels remaining vector
+content. Full Radiant exports lazily acquire a hidden graphics host when scene
+pixels are requested; numerical analysis itself never acquires one. Export
+fails on an unavailable/invalid scene, while live documents remain usable for
+diagnostics and repair. See the
+[chart implementation record](../impl/Lambda_Impl_Chart_Plot.md) for verification
+and the remaining scientific presentation work.
 
 The root's CSS properties affect its page box. 3D transforms/materials come
 from the scene schema; CSS layout does not position individual meshes.
