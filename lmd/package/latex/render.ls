@@ -51,6 +51,8 @@ import fontspec: .packages.fontspec
 import icons: .packages.icons
 import adjustbox: .packages.adjustbox
 import pdfpages: .packages.pdfpages
+import profiles: .docclass.profiles
+import dc_ieee: .docclass.ieee
 
 // ============================================================
 // Main dispatcher — called recursively on every AST node
@@ -248,7 +250,52 @@ pub let PACKAGE_RENDER = {
         appendixpage: (el, info) => render_appendix_page(), addappheadtotoc: render_contents_anchor},
     nicefrac: {nicefrac: render_math_command},
     xfrac: {sfrac: render_math_command},
-    mhchem: {ce: render_math_command, pu: render_math_command}
+    mhchem: {ce: render_math_command, pu: render_math_command},
+    // class families (registry.CLASSES): fields print through \maketitle (render_front_field)
+    koma: map([for (field in profiles.KOMA_FIELDS, x in [field, render_nothing]) x] ++
+        [for (setting in profiles.KOMA_SETTINGS, x in [setting, render_nothing]) x] ++
+        ["addchap", render_addhead, "addsec", render_addhead, "addpart", render_addhead, "minisec", render_minisec,
+         "captionabove", render_caption, "captionbelow", render_caption]),
+    ams: map([for (command in ["author"] ++ profiles.AMS_ADDRESSES, x in [command, render_nothing]) x] ++
+        [for (field in ["dedicatory", "subjclass", "keywords", "translator"], x in [field, render_front_field]) x]),
+    memoir: map(["epigraph", render_epigraph] ++ [for (setting in profiles.MEMOIR_SETTINGS, x in [setting, render_nothing]) x]),
+    IEEEtran: {IEEEauthorblockN: (el, info) => <div class: "latex-author-name", for c in render_children(el, 0, info) { c }>,
+        IEEEauthorblockA: (el, info) => <div class: "latex-affil", for c in render_children(el, 0, info) { c }>,
+        IEEEPARstart: render_parstart, IEEEkeywords: field_block, IEEEproof: render_proof_env,
+        IEEEmembership: (el, info) => <span class: "latex-membership", for c in render_children(el, 0, info) { c }>,
+        IEEEspecialpapernotice: (el, info) => <div class: "latex-paper-notice", for c in render_children(el, 0, info) { c }>,
+        IEEEoverridecommandlockouts: render_nothing, IEEEpeerreviewmaketitle: render_nothing},
+    llncs: {institute: render_front_field, keywords: render_front_field, subtitle: render_nothing,
+        titlerunning: render_nothing, authorrunning: render_nothing,
+        inst: (el, info) => <sup class: "latex-affil-mark", trim(util.text_of(el))>,
+        email: (el, info) => <span class: "latex-email", for c in render_children(el, 0, info) { c }>,
+        orcidID: (el, info) => <sup class: "latex-orcid", <a href: "https://orcid.org/" ++ trim(util.text_of(el)),
+            "[" ++ trim(util.text_of(el)) ++ "]">>},
+    elsarticle: map([for (command in ["author", "address", "affiliation", "ead", "cortext", "fntext", "tnotetext", "journal"],
+            x in [command, render_nothing]) x] ++
+        [for (field in ["keyword", "highlights", "graphicalabstract"], x in [field, render_front_field]) x] ++
+        ["frontmatter", render_frontmatter, "corref", render_note_ref, "fnref", render_note_ref, "tnoteref", render_note_ref,
+         "sep", (el, info) => ", ", "MSC", render_classification, "PACS", render_classification]),
+    revtex: map([for (command in ["author", "affiliation", "altaffiliation", "email", "homepage", "collaboration", "noaffiliation"],
+            x in [command, render_nothing]) x] ++
+        [for (field in ["keywords", "pacs", "preprint"], x in [field, render_front_field]) x]),
+    // the rights and metadata commands have no handler and are reported
+    acmart: map([for (command in ["author", "affiliation", "additionalaffiliation", "email", "orcid", "CCSXML",
+            "shortauthors", "subtitle"], x in [command, render_nothing]) x] ++
+        [for (field in ["keywords", "ccsdesc", "teaserfigure"], x in [field, render_front_field]) x] ++
+        [for (place in profiles.ACMART_PLACES, x in [place, render_place]) x]),
+    letter: map([for (field in profiles.LETTER_FIELDS, x in [field, render_nothing]) x] ++
+        ["letter", render_letter, "makelabels", render_nothing,
+         "opening", (el, info) => <div class: "latex-letter-opening", for c in render_children(el, 0, info) { c }>,
+         "closing", render_closing,
+         "ps", (el, info) => <div class: "latex-letter-ps", for c in render_children(el, 0, info) { c }>,
+         "encl", render_letter_list, "cc", render_letter_list]),
+    // the item commands are split out by their lists; elsewhere they are reported
+    exam: map([for (k, v at profiles.EXAM_LISTS, x in [string(k), render_exam_list]) x] ++
+        [for (setting in profiles.EXAM_SETTINGS, x in [setting, render_nothing]) x] ++
+        ["solution", render_solution, "part", render_exam_part, "numpoints", render_numpoints,
+         "numquestions", (el, info) => string(len([for (s in info.settings where s.key == "exam:question") s])),
+         "points", (el, info) => trim(util.setting_at(info.settings, "exam:pointname", el.source_offset) or "points")])
 }
 
 fn render_nothing(el, info) => null
@@ -672,7 +719,7 @@ fn render_captionsetup(el, info) {
 
 fn render_element(el, info) {
     let tag = name(el)
-    let owned = registry.handler(PACKAGE_RENDER, info.packages, string(tag))
+    let owned = registry.handler(PACKAGE_RENDER, info.packages, string(tag), info.docclass)
     if (info.biblatex_context != null and
         biblatex.is_citation_command(string(tag)))
         biblatex.render_citation(el, info.biblatex_context, info.footnotes)
@@ -1367,8 +1414,12 @@ pub fn role_features(info, role) {
 }
 
 // the article's classes; the twocolumn class option sets the document in two columns
+// and a class profile's base and family, whose styles it shares (.latex-book, .latex-koma)
 fn document_class(info) {
+    let family = registry.class_family(info.docclass)
     "latex-document latex-" ++ info.docclass ++
+        (if (info.docbase != "article" and info.docbase != info.docclass) " latex-" ++ info.docbase else "") ++
+        (if (family != null and family != info.docclass) " latex-" ++ family else "") ++
         (if (two_column(info)) " latex-twocolumn" else "")
 }
 
@@ -1452,27 +1503,37 @@ fn render_maketitle(info) {
         note in thanks_notes(el)) note]
     let title_info = {*:info, thanks_marks: [for (i, note in thanks)
         {key: string(note.source_offset), val: util.fnsymbol(i + 1)}]}
-    // titling styles each part from its \pre…/\post… code and fills the hook slots
+    // titling styles each part from its \pre…/\post… code and fills the hook slots;
+    // KOMA-Script's \setkomafont styles them too
     let titling = registry.active(info.packages, "titling")
     let styles = [for (part in frontmatter.TITLING_PARTS)
-        if (titling) frontmatter.part_style(info.settings, part, info.custom_colors) else null]
+        if (titling) frontmatter.part_style(info.settings, part, info.custom_colors) else koma_style(info, part)]
     let title_div = render_maketitle_div("title", info.title_el, info.title, title_info, styles[0])
-    let author_div = if (registry.active(info.packages, "authblk") and len(info.authblk or []) > 0)
-        render_authblk(title_info)
+    // authblk's or a class's author entries; IEEEtran's author blocks
+    let author_div = if (len(info.authblk or []) > 0) render_authblk(title_info)
+        else if (ieee_blocks(info.author_el)) render_ieee_authors(info.author_el, title_info)
         else render_maketitle_div("author", info.author_el, info.author, title_info, styles[1])
     let date_div = render_maketitle_div("date", info.date_el, info.date, title_info, styles[2])
     let hooks = [for (slot in ["a", "b", "c", "d"])
         if (titling) title_hook(frontmatter.hook(info, slot), info) else null]
-    let parts = [hooks[0], title_div, hooks[1], author_div, hooks[2], date_div, hooks[3]] |: (~ != null)
-    let drop = if (titling) util.setting_at(info.settings, "length:droptitle", null) else null;
-    <header class: "latex-title", style: if (drop == null) null else "margin-top:" ++ drop,
+    // a class's fields given before \maketitle, in their slots (profiles.FIELD_SLOTS)
+    let fields = front_fields(info)
+    let parts = [hooks[0], *fields_in(fields, "top", title_info), title_div, *fields_in(fields, "below_title", title_info),
+        hooks[1], author_div, *fields_in(fields, "below_author", title_info), hooks[2], date_div,
+        *fields_in(fields, "below_date", title_info), hooks[3]] |: (~ != null)
+    let notes = note_lines(fields, info)
+    let drop = if (titling) util.setting_at(info.settings, "length:droptitle", null) else null
+    let header = <header class: "latex-title", style: if (drop == null) null else "margin-top:" ++ drop,
         for c in parts { c }
-        if (len(thanks) > 0) {
+        if (len(thanks) > 0 or len(notes) > 0) {
             <div class: "latex-thanks",
                 for (i, note in thanks)
-                    <p <sup util.fnsymbol(i + 1)> " " for c in render_children(note, 0, info) { c }>>
+                    <p <sup util.fnsymbol(i + 1)> " " for c in render_children(note, 0, info) { c }>
+                for n in notes { n }>
         }
     >
+    let after = after_title(fields, title_info)
+    if (len(after) == 0) header else [header, *after]
 }
 
 fn thanks_notes(node) {
@@ -1512,19 +1573,19 @@ fn title_hook(body, info) {
 // joins them and each affiliation follows on its own line with its mark; without
 // them, the authors before each run of affiliations form a block with them.
 fn render_authblk(info) {
-    let entries = info.authblk
+    let entries = author_entries(info)
     let fonts = frontmatter.fonts(info, registry.options_for(info.packages, "authblk"))
     let seps = frontmatter.separators(info)
-    let marked = any([for (e in entries) len(frontmatter.marks(e.el)) > 0])
+    let marked = any([for (e in entries) len(e.marks) > 0])
     if (marked) {
         let names = [for (e in entries where e.kind == "author")
-            [*render_children_skip_brack(e.el, info), mark_sup(frontmatter.marks(e.el))]];
+            [*render_children_skip_brack(e.el, info), mark_sup(e.marks)]];
         <div class: "author latex-authblk",
             <div class: "latex-authors", style: if (fonts.author == "") null else fonts.author,
                 for c in frontmatter.joined(names, seps) { c }>
             <div class: "latex-affiliations", style: if (fonts.affil == "") null else fonts.affil,
                 for (e in entries where e.kind == "affil")
-                    <div class: "latex-affil", mark_sup(frontmatter.marks(e.el)); " ";
+                    <div class: affil_class(e), mark_sup(e.marks); if (len(e.marks) == 0) null else " ";
                         for c in render_children_skip_brack(e.el, info) { c }>>>
     }
     else <div class: "author latex-authblk",
@@ -1533,11 +1594,22 @@ fn render_authblk(info) {
                 <div class: "latex-authors", style: if (fonts.author == "") null else fonts.author,
                     for c in frontmatter.joined([for (e in block.authors) render_children_skip_brack(e.el, info)], seps) { c }>
                 for (e in block.affils)
-                    <div class: "latex-affil", style: if (fonts.affil == "") null else fonts.affil,
+                    <div class: affil_class(e), style: if (fonts.affil == "") null else fonts.affil,
                         for c in render_children_skip_brack(e.el, info) { c }>>>
 }
 
 fn mark_sup(marks) => if (len(marks) == 0) null else <sup class: "latex-affil-mark", join(marks, ",")>
+
+// the author entries with their marks: authblk's and elsarticle's optional marks, or
+// revtex's superscriptaddress numbers; an email has none
+fn author_entries(info) {
+    let entries = [for (e in info.authblk) {*:e, marks: if (e.email == true) [] else frontmatter.marks(e.el)}]
+    if (registry.class_family(info.docclass) == "revtex" and (contains(info.class_options or [], "superscriptaddress") or false))
+        profiles.superscript_marks(entries)
+    else entries
+}
+
+fn affil_class(entry) => if (entry.email == true) "latex-affil latex-email" else "latex-affil"
 
 // titling's \thetitle, \theauthor and \thedate print what \title, \author and \date gave
 fn render_title_part(el, info) {
@@ -1630,8 +1702,12 @@ fn render_heading(el, info, html_level) {
         else []
 
     let names = util.lookup(info.heading_names, title_id)
-    let num_span = if (sec_num != null) <span class: "sec-num",
-        appendix_name(names, "title") ++ language.display_number(sec_num, info.polyglossia) ++ " "> else null
+    let level_name = titles.level_of(string(name(el)))
+    // IEEEtran's headings print their own part of the number (II-A as "A.")
+    let shown = if (sec_num == null) null
+        else if (registry.class_numbering(info.docclass) == "ieee") dc_ieee.heading_label(level_name, string(sec_num))
+        else language.display_number(sec_num, info.polyglossia)
+    let num_span = if (sec_num != null) <span class: "sec-num", appendix_name(names, "title") ++ shown ++ " "> else null
     // \texorpdfstring gives outlines its PDF branch
     let outline_text = if (title_el != null and util.find_descendant(title_el, 'texorpdfstring') != null)
         util.pdf_text_of(title_el) else util.text_of(title_children)
@@ -1639,11 +1715,13 @@ fn render_heading(el, info, html_level) {
         else (if (info.hyperref_settings.bookmarksnumbered == "true" and sec_num != null)
             string(sec_num) ++ " " else "") ++ outline_text
     let running = info.running_style.header != null or info.running_style.footer != null
-    // titlesec and sectsty restyle the heading, its label and its title
-    let titlesec = registry.options_for(info.packages, "titlesec")
-    let sectsty = registry.active(info.packages, "sectsty")
+    // titlesec and sectsty restyle the heading, its label and its title; memoir's chapter
+    // styles are titlesec formats, KOMA-Script's fonts sectsty's
+    let family = registry.class_family(info.docclass)
+    let titlesec = registry.options_for(info.packages, "titlesec") or (if (family == "memoir") {} else null)
+    let sectsty = registry.active(info.packages, "sectsty") or family == "koma"
     let style = if (titlesec == null and not sectsty) null
-        else titles.heading_style(info, titlesec, sectsty, titles.level_of(string(name(el))),
+        else titles.heading_style(info, titlesec, sectsty, level_name,
             if (sec_num == null) null else language.display_number(sec_num, info.polyglossia),
             contains(info.appendix_headings or [], title_id) or false, el.source_offset)
     if (style == null) build_heading_el(html_level, title_id, num_span, title_children, outline_title, running)
@@ -2146,7 +2224,10 @@ fn render_verbatim_env(el, info) {
     <pre class: "latex-verbatim", style: font_size_style(info), <code t>>
 }
 
-fn render_abstract(el, info) {
+// an abstract a class's \maketitle prints is not printed again where it stands
+fn render_abstract(el, info) => if (is_front(el, info)) null else abstract_block(el, info)
+
+fn abstract_block(el, info) {
     let items = render_children(el, 0, info);
     <div class: "latex-abstract",
         <div class: "abstract-title", "Abstract">
@@ -2987,7 +3068,7 @@ fn locator_links(offsets, info, prefix) {
 // with the anchor of its contents entry
 fn list_heading(info, title_items, anchor_key) {
     let id = util.lookup(info.contents_anchors, anchor_key)
-    let level = if (info.docclass == "book" or info.docclass == "report") 1 else 2;
+    let level = if (info.docbase == "book" or info.docbase == "report") 1 else 2;
     if (level == 1) <h1 class: "latex-list-heading", id: id, for c in title_items { c }>
     else <h2 class: "latex-list-heading", id: id, for c in title_items { c }>
 }
@@ -3728,6 +3809,290 @@ fn render_items(items, i, n, info, acc) {
 fn render_generic_default(el, info) {
     let command = string(name(el))
     let message = "Unsupported LaTeX command or environment: " ++ command
-    util.unsupported_element(registry.package_for_command(command, info.packages),
+    util.unsupported_element(registry.package_for_command(command, info.packages, info.docclass),
         message, el.source_offset)
+}
+
+// ============================================================
+// Class profiles (docclass/profiles.ls, Lambda_Impl_Latex_Packages §14)
+// ============================================================
+
+// whether analysis recorded a field for the title block (record_front)
+fn is_front(el, info) {
+    let key = "front:" ++ string(name(el))
+    any([for (s in info.settings where s.key == key) s.value.source_offset == el.source_offset])
+}
+
+// a field \maketitle prints when it was given before it; after it, where it stands
+fn render_front_field(el, info) => if (is_front(el, info)) null else field_block(el, info)
+
+fn front_fields(info) => [for (s in info.settings where starts_with(s.key, "front:") and s.key != "front:maketitle") s.value]
+
+fn slot_of(el) => profiles.FIELD_SLOTS[string(name(el))] or "after"
+
+fn fields_in(fields, slot, info) => [for (f in fields where slot_of(f) == slot) field_block(f, info)]
+
+// the fields after the title block: the teaser, the abstract, then the others in
+// source order, every CCS concept where the first is given, and the journal last
+fn after_title(fields, info) {
+    let ccs = [for (f in fields where string(name(f)) == "ccsdesc") f];
+    [for (f in fields where slot_of(f) == "teaser") field_block(f, info)] ++
+    [for (f in fields where string(name(f)) == "abstract") field_block(f, info)] ++
+    [for (f in fields where slot_of(f) == "after" and string(name(f)) != "abstract" and
+        (string(name(f)) != "ccsdesc" or f.source_offset == ccs[0].source_offset))
+        if (string(name(f)) == "ccsdesc") ccs_block(ccs, info) else field_block(f, info)] ++
+    [for (f in fields where slot_of(f) == "end") field_block(f, info)]
+}
+
+// a class's field as a block, with the head its class prints before it
+fn field_block(el, info) {
+    let tag = string(name(el))
+    let head = profiles.field_head(tag, registry.class_family(info.docclass))
+    let css_class = if (tag == "keyword" or tag == "IEEEkeywords") "latex-keywords" else "latex-" ++ tag
+    if (tag == "abstract") abstract_block(el, info)
+    else if (tag == "teaserfigure") render_float(el, info, "figure")
+    else if (tag == "ccsdesc") ccs_block([el], info)
+    else if (tag == "institute") institutes_block(el, info)
+    else if (tag == "highlights" or tag == "graphicalabstract")
+        <div class: css_class, <div class: "latex-field-head", head> for c in render_children(el, 0, info) { c }>
+    else if (tag == "subjclass") subjclass_block(el, info, head)
+    else if (head != null)
+        <div class: css_class, <span class: "latex-field-head", head> " " for c in field_items(el, info) { c }>
+    else <div class: css_class, style: field_css(info, tag), for c in field_items(el, info) { c }>
+}
+
+// the AMS classes' \subjclass[year]{codes}
+fn subjclass_block(el, info, head) {
+    let year = util.optional_raw(el) or "2020";
+    <div class: "latex-subjclass", <em year ++ " " ++ head> " " for c in field_items(el, info) { c }>
+}
+
+// a field's content: its paragraphs run together, llncs's \and a centred dot and
+// elsarticle's \sep a comma, each taking the space around it
+fn field_items(el, info) {
+    let nodes = [for (node in util.flatten_paragraphs(util.command_args(el))
+        where not (node is element and string(name(node)) == "brack_group")) node]
+    let n = len(nodes);
+    [for (i, node in nodes, let item = field_item(node, info, i > 0 and is_separator(nodes[i - 1]),
+        i + 1 < n and is_separator(nodes[i + 1])) where item != null) item]
+}
+
+fn is_separator(node) {
+    if (not (node is element)) false else string(name(node)) == "and" or string(name(node)) == "sep"
+}
+
+fn field_item(node, info, after_separator, before_separator) {
+    if (node is string) {
+        let text = if (after_separator) trim_start(node) else node
+        render_node(if (before_separator) trim_end(text) else text, info)
+    }
+    else if (node is element and string(name(node)) == "and") " \u00B7 "
+    else render_node(node, info)
+}
+
+// KOMA-Script's font for a title-block part (\setkomafont)
+fn field_css(info, part) {
+    let code = util.setting_at(info.settings, "koma-font:" ++ part, null)
+    if (code == null) null else font_decl.declarations(code, info.custom_colors).css
+}
+
+fn koma_style(info, part) {
+    let css = field_css(info, part)
+    if (css == null) null else {css: css, before: "", after: ""}
+}
+
+// acmart's CCS concepts: each \ccsdesc path joined by arrows, the heavier ones bold
+fn ccs_block(els, info) {
+    <div class: "latex-ccsdesc", <span class: "latex-field-head", "CCS Concepts:"> " ";
+        for (i, el in els, let concept = profiles.ccs_concept(el))
+            <span class: "latex-ccs-concept", style: if (concept.weight >= 500) "font-weight:bold" else null,
+                "\u2022 " ++ join(concept.path, " \u2192 ") ++ (if (i + 1 < len(els)) "; " else ".")>>
+}
+
+// llncs's \institute{A \and B}: one affiliation per part, numbered when there are several
+fn institutes_block(el, info) {
+    let parts = [for (part in profiles.split_at_and(util.command_args(el)) where len(part) > 0) part]
+    let marked = len(parts) > 1;
+    <div class: "latex-institutes", for (i, part in parts)
+        <div class: "latex-affil", mark_sup(if (marked) [string(i + 1)] else []); " ";
+            for (node in profiles.trim_edges(part), let item = render_node(node, info) where item != null) item>>
+}
+
+// elsarticle's notes: \cortext, \fntext and \tnotetext with the marks their references print
+fn note_lines(fields, info) {
+    [for (f in fields where slot_of(f) == "notes")
+        <p <sup note_mark(info, string(name(f)), trim(util.optional_raw(f) or ""))> " "
+            for c in render_children_skip_brack(f, info) { c }>]
+}
+
+fn note_mark(info, kind, label) {
+    let labels = [for (s in info.settings where s.key == "front:" ++ kind) trim(util.optional_raw(s.value) or "")]
+    let at = [for (i, given in labels where given == label) i]
+    if (len(at) == 0) "?" else profiles.note_mark(kind, at[0])
+}
+
+// \corref, \fnref and \tnoteref: the mark of the note they name
+fn render_note_ref(el, info) =>
+    <sup class: "latex-note-ref", note_mark(info, profiles.NOTE_REFS[string(name(el))], trim(util.text_of(el)))>
+
+// elsarticle's \MSC and \PACS heads inside the keyword environment
+fn render_classification(el, info) => <span class: "latex-field-head", string(name(el)) ++ ": ">
+
+// elsarticle's frontmatter environment: the title block made from the fields it holds
+fn render_frontmatter(el, info) {
+    let made = render_maketitle(info);
+    (if (made is array) made else [made]) ++ render_children(el, 0, info)
+}
+
+// acmart's affiliation parts: the institution and department on lines of their own,
+// the place after them
+fn render_place(el, info) {
+    let tag = string(name(el))
+    let items = render_children(el, 0, info)
+    if (tag == "institution" or tag == "department" or tag == "position")
+        <div class: "latex-" ++ tag, for c in items { c }>
+    else <span class: "latex-place", for c in items { c }>
+}
+
+// IEEEtran's \author: the author blocks between \and, side by side
+fn ieee_blocks(el) {
+    if (not (el is element)) false else util.find_descendant(el, 'IEEEauthorblockN') != null
+}
+
+fn render_ieee_authors(el, info) {
+    <div class: "author latex-authblocks",
+        for (group in profiles.split_at_and(util.command_args(el)) where len(group) > 0)
+            <div class: "latex-authblock", for (node in group, let item = render_node(node, info) where item != null) item>>
+}
+
+// \IEEEPARstart{T}{his}: a drop cap and the rest of the word in capitals
+fn render_parstart(el, info) {
+    <span class: "latex-parstart",
+        <span class: "latex-dropcap", for c in render_fragment(util.raw_argument(el, "required", 0) or "", info) { c }>
+        <span class: "latex-parstart-rest", for c in render_fragment(util.raw_argument(el, "required", 1) or "", info) { c }>>
+}
+
+// KOMA-Script's \addchap, \addsec and \addpart: unnumbered headings, anchored for their
+// contents entries, in the heading font
+fn render_addhead(el, info) {
+    let level = if (string(name(el)) == "addsec") 2 else 1
+    let id = util.lookup(info.contents_anchors, string(el.source_offset)) or util.slugify(util.text_of_skip_brack(el))
+    build_heading_el(level, id, null, render_children_skip_brack(el, info), null, false,
+        koma_font(info, if (level == 2) "section" else "chapter", el.source_offset))
+}
+
+// \minisec{title}: a run of bold text on its own line, outside the contents
+fn render_minisec(el, info) =>
+    <div class: "latex-minisec", style: koma_font(info, "minisec", el.source_offset), for c in render_children(el, 0, info) { c }>
+
+fn koma_font(info, level, offset) {
+    let code = util.setting_at(info.settings, "sectsty:" ++ level, offset)
+    if (code == null) null else font_decl.declarations(code, info.custom_colors).css
+}
+
+// memoir's \epigraph{text}{source}
+fn render_epigraph(el, info) {
+    <div class: "latex-epigraph",
+        <div class: "latex-epigraph-text", for c in render_fragment(util.raw_argument(el, "required", 0) or "", info) { c }>
+        <div class: "latex-epigraph-source", for c in render_fragment(util.raw_argument(el, "required", 1) or "", info) { c }>>
+}
+
+// the letter environment: the sender's address and the date, the recipient (the
+// environment's argument), then the letter
+fn render_letter(el, info) {
+    let recipient = letter_recipient(el)
+    // the first paragraph keeps what follows the recipient
+    let opening = if (recipient == null) [] else [<paragraph for c in slice(util.children_array(el[0]), 1, len(el[0])) { c }>]
+    let body = opening ++ slice(util.children_array(el), if (recipient == null) 0 else 1, len(el))
+    let sender = letter_field(info, "address", el)
+    let place = [for (field in ["location", "telephone"], let given = letter_field(info, field, el) where given != null) given]
+    let date_items = if (info.date_el == null) [] else render_children(info.date_el, 0, info);
+    <div class: "latex-letter",
+        if (sender != null or len(place) > 0) {
+            <div class: "latex-letter-from", for c in (if (sender == null) [] else render_children(sender, 0, info)) { c }
+                for (given in place) <div for c in render_children(given, 0, info) { c }>>
+        }
+        if (len(date_items) > 0) { <div class: "latex-letter-date", for c in date_items { c }> }
+        if (recipient != null) { <div class: "latex-letter-to", for c in render_children(recipient, 0, info) { c }> }
+        for c in collect_children(body, 0, len(body), [], info) { c }
+    >
+}
+
+fn letter_recipient(el) {
+    let first = if (len(el) > 0) el[0] else null
+    if (not (first is element) or len(first) == 0) null
+    else if (string(name(first)) != "paragraph" or not (first[0] is element)) null
+    else if (string(name(first[0])) == "curly_group") first[0]
+    else null
+}
+
+fn letter_field(info, field, el) => util.setting_at(info.settings, "letter:" ++ field, el.source_offset)
+
+// \closing{text}: the closing and the signature, \signature or else \name, under it
+fn render_closing(el, info) {
+    let signed = letter_field(info, "signature", el) or letter_field(info, "name", el);
+    <div class: "latex-letter-closing", <div for c in render_children(el, 0, info) { c }>
+        if (signed != null) { <div class: "latex-signature", for c in render_children(signed, 0, info) { c }> }>
+}
+
+// \cc{names} and \encl{items}: a labelled list
+fn render_letter_list(el, info) {
+    let tag = string(name(el));
+    <div class: "latex-letter-" ++ tag, <span class: "latex-letter-label", tag ++ ": ">
+        for c in render_children(el, 0, info) { c }>
+}
+
+// exam's lists split at their item commands; points print after the label, and a
+// correct choice is marked when answers print
+fn render_exam_list(el, info) {
+    let env = string(name(el))
+    let groups = exam_groups(util.flatten_paragraphs(el), profiles.EXAM_LISTS[env])
+    let answers = exam_answers(info, el)
+    let bracketed = util.setting_at(info.settings, "exam:bracketed", el.source_offset) == true
+    let point_name = util.setting_at(info.settings, "exam:pointname", el.source_offset);
+    <ol class: "latex-exam-list latex-" ++ env, for (g in groups)
+        <li class: if (answers and string(name(g.head)) == "CorrectChoice") "latex-correct" else null,
+            exam_points(g.head, bracketed, point_name);
+            for (node in g.body, let item = render_node(node, info) where item != null) item>>
+}
+
+fn exam_groups(nodes, item_tag) {
+    let heads = [for (i, node in nodes where is_exam_item(node, item_tag)) i];
+    [for (k, start in heads, let stop = if (k + 1 < len(heads)) heads[k + 1] else len(nodes))
+        {head: nodes[start], body: slice(nodes, start + 1, stop)}]
+}
+
+fn is_exam_item(node, item_tag) {
+    if (not (node is element)) false
+    else string(name(node)) == item_tag or (item_tag == "choice" and string(name(node)) == "CorrectChoice")
+}
+
+fn exam_points(head, bracketed, point_name) {
+    let points = profiles.points_of(head)
+    if (points == null) null
+    else <span class: "latex-points", profiles.points_label(points, bracketed, point_name)>
+}
+
+// answers print after \printanswers, or with the answers class option
+fn exam_answers(info, el) {
+    let set = util.setting_at(info.settings, "exam:answers", el.source_offset)
+    if (set != null) set else (contains(info.class_options or [], "answers") or false)
+}
+
+// \part outside a parts environment
+fn render_exam_part(el, info) {
+    let message = "\\part belongs in a parts environment"
+    util.unsupported_element("exam", message, el.source_offset)
+}
+
+// \numpoints: the points of every question and part
+fn render_numpoints(el, info) {
+    let points = [for (s in info.settings where s.key == "exam:points") s.value]
+    profiles.whole(sum(points))
+}
+
+// a solution prints only when answers do
+fn render_solution(el, info) {
+    if (not exam_answers(info, el)) null
+    else <div class: "latex-solution", <strong "Solution:"> " " for c in render_children(el, 0, info) { c }>
 }

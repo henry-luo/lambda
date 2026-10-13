@@ -1,7 +1,7 @@
 # LaTeX Phase V: package coverage implementation plan
 
 **Design:** [Lambda_Pkg_Latex.md](../Lambda_Pkg_Latex.md) (§6 package model, §9 compatibility matrix, §10 verification rules, §11 outstanding work); [TeX engine design](../latex/Lambda_Design_TeX_Engine.md) §5 and §10; [Lambda_Pkg_Math.md](../Lambda_Pkg_Math.md) §3, §7 and §10.2; [Lambda_Pkg_Slides.md](../Lambda_Pkg_Slides.md) for beamer.
-**Status:** In progress. Proposed 2026-10-12; the user approved the §17 recommendations on 2026-10-13. M0, M1, M2, M4, M8, M3, M5, M6, M7 and M9 were implemented on 2026-10-13 in worktree `latex-phase5-m0`. §17.1 was ratified as **D7.2.7v2** when the first binding (physics) landed.
+**Status:** In progress. Proposed 2026-10-12; the user approved the §17 recommendations on 2026-10-13. All eleven milestones (M0, M1, M2, M4, M8, M3, M5, M6, M7, M9 and M10) were implemented on 2026-10-13 in worktree `latex-phase5-m0`. §17.1 was ratified as **D7.2.7v2** when the first binding (physics) landed.
 **Formal linkage:** **D7.2.7v2** (expansion only, never typesetting; bundled packages are upstream programming packages or Lambda-owned bindings; resolution order bundled → adapter → beside-document file → located `unknown-package`), **D7.2.1–D7.2.4** (script adapters in a static registry), **S1.8** (no document text becomes Lambda code), **S12.1.1v2** (rendering stays pure and deterministic), **D7.1.2v2** and **D7.5.2** (resources through the one IO door, path-gated), **S7.4.1–S7.4.4** (located diagnostics).
 **Scope:** the commonly used LaTeX packages and classes that `lambda.latex` does not support, plus the kernel, `hyperref` and `graphicx` gaps those packages build on. Diagrams (`tikz-cd`, `circuitikz`, `forest`, `chemfig`, `xy`) belong to the TikZ design (§15).
 
@@ -566,6 +566,37 @@ As built on 2026-10-13, with §17.3's "substitution only":
 - **Beside-document classes.** Exposing kernel internals as constructors (`\@startsection`, `\@maketitle`, `\@float`, `\@makecaption`, …) is the general lever (engine design §10). It is engine work; its timing is §17.4.
 - **beamer.** §17.5.
 
+As built on 2026-10-13, profiles first (§17.4):
+
+- **The class-profile model.** `registry.CLASSES` is a map of profiles in the catalogue's shape (`docclass/profiles.ls` holds their data):
+  - `base` numbers headings as article, report or book does, and `numbering` names another scheme (IEEEtran's, `docclass/ieee.ls`);
+  - `options`, `commands` and `preamble` as in `CATALOG`; `implies` and `option_implies` load packages before the document's own (amsart loads amsmath and amsthm, acmart natbib, hyperref and the rest, KOMA's `parskip=` option the parskip profile);
+  - `theorems` are environments the class defines, as `\newtheorem` would (llncs, acmart);
+  - classes of one `family` (koma, ams, revtex) share their entry in `PACKAGE_RENDER` and `PACKAGE_WALK`.
+- **Ownership.** `registry.owner` and `handler` take the document class: a command no active package owns is the class's when its profile lists it, so later-loaded packages still win, as in LaTeX. Unsupported class commands are attributed to the class; one in the preamble outside the profile's `preamble` list reports `unsupported-command` (memoir's layout commands, acmart's rights and metadata, exam's page and format commands).
+- **Options.** A class option that neither the class nor a loaded package takes reports `unsupported-option`; the rest are global options, as in LaTeX. Size options from 8pt to 20pt are accepted, and the stylesheet keeps one screen size for all of them, as it does for the standard classes' three.
+- **Root and numbering.** The root carries the class, its base and its family (`latex-scrreprt latex-report latex-koma`), so book and report styles apply to their profiles. Analysis keeps `docbase` beside `docclass`; appendix lettering, list headings and section numbers read it. The engine's `\chapter` declaration comes from `registry.chaptered_classes()`, passed with the adapter names, in place of five names in C++.
+- **The title block.** A class's front-matter fields given before `\maketitle`, or inside elsarticle's `frontmatter`, are recorded as `front:` settings and placed in slots (`profiles.FIELD_SLOTS`): above the title (`\titlehead`, `\subject`, revtex's `\preprint`), under it (`\subtitle`), under the authors (llncs's `\institute`, `\dedicatory`), under the date (`\publishers`), or after the block (the teaser, the abstract, then the others in source order, `\journal` last). Given after `\maketitle`, a field renders where it stands (llncs's `\keywords` inside its abstract).
+  - Authors and their affiliations, addresses and emails are authblk's entries: AMS, revtex and acmart group them in blocks, and elsarticle's `\author[a]`/`\address[a]` marks are authblk's marked form. revtex's `superscriptaddress` numbers affiliations by first use and lists each once.
+  - elsarticle's `\cortext`, `\fntext` and `\tnotetext` print as notes under the block with ∗, 1 and ☆ marks, which `\corref`, `\fnref` and `\tnoteref` print.
+- **Tier A.**
+  - `extarticle`, `extreport`, `extbook`: aliases with the extsizes options.
+  - KOMA-Script: the title fields above; `\addchap`, `\addsec` and `\addpart` as unnumbered contents headings; `\minisec`; `\captionabove`/`\captionbelow`. Headings and the title are sans-serif bold. `\setkomafont` and `\addtokomafont` style the disposition, the heading levels (as sectsty's settings) and the title parts; other elements report `unsupported-font-element`. `\KOMAoptions` keys outside the class options are reported.
+  - `amsart`, `amsproc`, `amsbook`: `\address`, `\curraddr`, `\email` and `\urladdr` under each author, `\dedicatory`, `\subjclass[year]`, `\keywords`, `\translator`, and the abstract in the title block.
+  - memoir: `\chapterstyle` with the named subset default, section, hangnum, article, komalike and dash as titlesec formats (others render as the default and report `title-shape-approximation`); `\epigraph`; `\newfloat[within]{type}{ext}{name}` through M0.2's float kinds; `\setsecnumdepth`. memoir's `\newlistof` lists and its titling and tocloft emulations are not modelled.
+- **Tier B.**
+  - IEEEtran: Roman section numbers (references print II-A and II-A1, headings A. and 1)), side-by-side `\IEEEauthorblockN`/`\IEEEauthorblockA` blocks, `IEEEkeywords` as Index Terms, `\IEEEPARstart` as a drop cap, `IEEEproof`, `\IEEEmembership`.
+  - llncs: `\institute` numbered by `\and`, `\inst`, `\email`, `\orcidID` as a link, `\keywords` joined with centred dots, the `\spnewtheorem` environments; `\titlerunning` and `\authorrunning` have no page to run on.
+  - elsarticle: `frontmatter`, the marks and notes above, the `keyword` environment with `\sep`, `highlights`, `graphicalabstract`, `\journal` as the preprint line.
+  - revtex4-2 and revtex4-1: `\affiliation`, `\altaffiliation`, `\email`, `\homepage`, `\keywords`, `\pacs`, `\preprint`, and the grouped or superscript addresses.
+  - acmart: `\affiliation{\institution…}` with the institution on its own line and the place after it, `\email`, `\ccsdesc` joined into one CCS Concepts line (weights of 500 and more bold), `\keywords`, the teaser as the first figure after the authors; `CCSXML` prints nothing; the rights and metadata commands are reported.
+- **Tier C.**
+  - letter: the `letter` environment with the sender's `\address`, the date when `\date` gives one (`\today` is not printed, which keeps output reproducible), the recipient, `\opening`, `\closing` with `\signature` or `\name`, `\ps`, `\encl`, `\cc`; `\location` and `\telephone` join the sender block.
+  - exam: `questions`, `parts`, `subparts`, `subsubparts`, `choices`, `oneparchoices`, `checkboxes` and `oneparcheckboxes` split at their item commands; points after the label, bracketed with `\bracketedpoints`, named by `\pointname`; `\numpoints` and `\numquestions`; `solution` and the correct choice shown with `\printanswers` or the `answers` option. exam redefines `\part`, so outside `parts` it is reported.
+  - moderncv stays an unknown class (low priority).
+- **Shared fixes.** natbib no longer reports `bibtex-style-approximation` when a document has neither a bibliography nor a style, which every class that loads natbib would otherwise show.
+- **Not done.** The kernel-internals route for beside-document classes (§17.4) stays engine work. Class macros that documents redefine (acmart's `\renewcommand\shortauthors`) are undefined on the engine; a class binding would need a bundled-`.cls` hook in `\documentclass`. Report and book number figures and tables per document, not per chapter, for their profiles as for the standard classes. beamer has its sub-design, [Lambda_Design_Beamer.md](../latex/Lambda_Design_Beamer.md), and still reports `unknown-package`.
+
 ## 15. Out of this plan
 
 - **Diagrams** belong to [Lambda_Pkg_Tikz.md](../Lambda_Pkg_Tikz.md): `tikz-cd`, `circuitikz`, `forest`, `chemfig`, `pgfplotstable`, `xy`/`xymatrix` and `tkz-tab`. Simple `tikz-cd` grids could lower onto the math CD model.
@@ -649,3 +680,8 @@ As built on 2026-10-13, with §17.3's "substitution only":
   - New modules in `lmd/package/latex/packages/`: `fontspec.ls` and `icons.ls`; the binding `tex/binding/unicode-math.sty`.
   - New test `test/lambda/latex/test_latex_phase5_fonts.ls` with its golden, identical on every tier. `test_latex_font_decl`'s golden and four phase5 expectations now read the family variables, and the groundwork ownership check skips the `"*"` catch-all. The other LaTeX, math and TeX tests match their goldens.
   - `make test-lambda-baseline` passed 6794 of 6815 under `LAMBDA_LOG_LEVEL=error`; the other 21 are the warning-reading tests, which pass without the override.
+- 2026-10-13: M9 committed (bab9188b1). M10 was built as recorded in §14, and the beamer sub-design was written (§17.5).
+  - New modules: `lmd/package/latex/docclass/profiles.ls` and `docclass/ieee.ls`; the design `vibe/latex/Lambda_Design_Beamer.md`.
+  - The engine change is the `chaptered` parse option (`registry.chaptered_classes()`), which replaced five class names in `input-tex-latex.cpp`.
+  - New test `test/lambda/latex/test_latex_phase5_classes.ls` with its golden, identical on every tier. The groundwork test now resolves class-family handler owners, and its unknown class is moderncv, since scrartcl has a profile. The other LaTeX, math and TeX tests match their goldens.
+  - `make test-lambda-baseline` passed 6791 of 6816 under `LAMBDA_LOG_LEVEL=error`. The 21 warning-reading tests pass without the override, the three REPL tests with `LANG=en_US.UTF-8`, and `test_latex_phase3_corpus`, which reached the 60-second limit under a load average above 20, passes alone in 53 s. Interleaved runs against M9's package tree showed no consistent difference.

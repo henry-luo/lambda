@@ -7,6 +7,8 @@ import util: .util
 import dc_article: .docclass.article
 import dc_book: .docclass.book
 import dc_report: .docclass.report
+import dc_ieee: .docclass.ieee
+import profiles: .docclass.profiles
 import color: .elements.color
 import enumitem: .packages.enumitem
 import amsmath: .packages.amsmath
@@ -53,6 +55,8 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         subfloat_nums: [], subfigure_count: 0, subtable_count: 0,
         captionof_nums: [],
         docclass: "article",
+        // the numbering base of the class profile: article, report or book
+        docbase: "article",
         class_options: [],
         line_spread: null,
         title: null,
@@ -131,6 +135,7 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
     // keep entry arrays — render pass will use lookup functions
     {
         docclass: result.docclass,
+        docbase: result.docbase,
         class_options: result.class_options,
         // a preamble declaration or \linespread wins over the setspace option
         line_spread: result.line_spread or paragraph.option_stretch(
@@ -256,7 +261,113 @@ pub let PACKAGE_WALK = {
         affil: (el, st) => {*:st, authblk: st.authblk ++ [{kind: "affil", el: el}]}},
     pdfpages: {includepdfset: (el, st) => record_setting(st, el, "includepdfset", util.raw_argument(el, "required", 0) or "")},
     appendix: {appendices: (el, st) => walk_appendices(el, st, false),
-        subappendices: (el, st) => walk_appendices(el, st, true), addappheadtotoc: (el, st) => add_unnumbered_head(el, st, appendix.HEAD)}
+        subappendices: (el, st) => walk_appendices(el, st, true), addappheadtotoc: (el, st) => add_unnumbered_head(el, st, appendix.HEAD)},
+    // class families (registry.CLASSES): title-block fields and author entries
+    koma: map([for (field in profiles.KOMA_FIELDS, x in [field, record_front]) x] ++
+        ["addchap", walk_addhead, "addsec", walk_addhead, "addpart", walk_addhead,
+         "setkomafont", walk_komafont, "addtokomafont", walk_komafont,
+         "KOMAoptions", walk_komaoptions, "KOMAoption", walk_komaoptions]),
+    ams: map(["author", author_entry] ++ [for (command in profiles.AMS_ADDRESSES, x in [command, affil_entry]) x] ++
+        [for (field in profiles.AMS_FIELDS, x in [field, record_front]) x]),
+    memoir: {chapterstyle: walk_chapterstyle, newfloat: walk_memoir_newfloat,
+        setsecnumdepth: walk_secnumdepth, maxsecnumdepth: walk_secnumdepth},
+    llncs: {institute: record_front, subtitle: record_front, keywords: record_front},
+    // the frontmatter environment makes the title from what it holds
+    elsarticle: map(["frontmatter", (el, st) => record_setting(walk_children(el, 0, len(el), st), el, "front:maketitle", true),
+        "author", author_entry, "address", affil_entry, "affiliation", affil_entry, "ead", affil_entry,
+        "cortext", record_front, "fntext", record_front, "tnotetext", record_front, "journal", record_front] ++
+        [for (field in profiles.ELSARTICLE_FIELDS, x in [field, record_front]) x]),
+    revtex: map(["author", author_entry, "collaboration", author_entry, "affiliation", affil_entry,
+        "altaffiliation", affil_entry, "email", affil_entry, "homepage", affil_entry] ++
+        [for (field in profiles.REVTEX_FIELDS, x in [field, record_front]) x]),
+    // the teaser is the first figure
+    acmart: map(["author", author_entry, "affiliation", affil_entry, "additionalaffiliation", affil_entry,
+        "email", affil_entry, "teaserfigure", (el, st) => front_field(el, walk_float(el, st, "figure"))] ++
+        [for (field in ["abstract", "keywords", "ccsdesc", "subtitle"], x in [field, record_front]) x]),
+    letter: map([for (field in profiles.LETTER_FIELDS, x in [field, (el, st) => record_setting(st, el, "letter:" ++ string(name(el)), el)]) x]),
+    exam: {question: walk_exam_item, part: walk_exam_item, subpart: walk_exam_item, subsubpart: walk_exam_item,
+        printanswers: (el, st) => record_setting(st, el, "exam:answers", true),
+        noprintanswers: (el, st) => record_setting(st, el, "exam:answers", false),
+        bracketedpoints: (el, st) => record_setting(st, el, "exam:bracketed", true),
+        pointname: (el, st) => record_setting(st, el, "exam:pointname", util.text_of(el))}
+}
+
+// ---- class profiles (docclass/profiles.ls) ----
+
+// a title-block field given before \maketitle (or inside elsarticle's frontmatter)
+// joins the title block; after it, the command renders where it stands
+fn record_front(el, st) => front_field(el, walk_children(el, 0, len(el), st))
+
+fn front_field(el, st) {
+    if (util.setting_at(st.settings, "front:maketitle", null) != null) st
+    else record_setting(st, el, "front:" ++ string(name(el)), el)
+}
+
+// authors and the affiliations, addresses and emails after them, as authblk's
+// entries (frontmatter.blocks groups them)
+fn author_entry(el, st) => {*:walk_author(el, st), authblk: st.authblk ++ [{kind: "author", el: el}]}
+
+fn affil_entry(el, st) => {*:st, authblk: st.authblk ++ [{kind: "affil", el: el,
+    email: contains(["email", "ead", "homepage"], string(name(el))) or false}]}
+
+// KOMA-Script's \addchap, \addsec and \addpart: unnumbered headings in the contents,
+// under their optional short title; starred, outside it
+fn walk_addhead(el, st) {
+    let short = util.optional_raw(el)
+    let text = if (short != null) trim(short) else trim(util.text_of_skip_brack(el))
+    if (el.starred == true) st
+    else add_unnumbered_head(el, st, text, null, null, if (string(name(el)) == "addsec") 2 else 1)
+}
+
+// \setkomafont and \addtokomafont: the fonts of headings, as sectsty's settings, and of
+// title-block parts; \setkomafont replaces the class's sans-serif bold
+fn walk_komafont(el, st) {
+    let target = trim(util.raw_argument(el, "required", 0) or "")
+    let raw = util.raw_argument(el, "required", 1) or ""
+    let keys = profiles.font_keys(target)
+    if (keys == null) {*:st, diagnostics: st.diagnostics ++ [util.diagnostic("unsupported-font-element",
+        st.docclass, target, "Unsupported KOMA-Script font element " ++ target, el.source_offset)]}
+    else {
+        let replace = string(name(el)) == "setkomafont"
+        let recorded = {*:st, settings: st.settings ++ [for (key in keys) {key: key, offset: el.source_offset,
+            value: if (replace) profiles.KOMA_FONT_RESET ++ raw else (util.setting_at(st.settings, key, null) or "") ++ raw}]};
+        {*:recorded, diagnostics: st.diagnostics ++ [for (command in font_decl_unknown(raw, st.custom_colors))
+            util.diagnostic("unsupported-title-format", st.docclass, command,
+                "Unsupported command in a KOMA-Script font: \\" ++ command, el.source_offset)]}
+    }
+}
+
+// \KOMAoptions{key=value, …}: keys outside the class's options are reported
+fn walk_komaoptions(el, st) {
+    let opts = util.parse_kv_options(util.raw_argument(el, "required", 0) or "");
+    {*:st, diagnostics: st.diagnostics ++ [for (key, value at opts
+        where not (contains(profiles.KOMA_OPTIONS, string(key)) or false))
+        util.diagnostic("unsupported-option", st.docclass, string(key),
+            "Unsupported " ++ st.docclass ++ " option: " ++ string(key), el.source_offset)]}
+}
+
+// memoir's \chapterstyle{name}: a named style as a titlesec chapter format; others
+// render as the default and are reported
+fn walk_chapterstyle(el, st) {
+    let style = trim(util.text_of(el))
+    let format = profiles.CHAPTER_STYLES[style]
+    let recorded = record_setting(st, el, "titleformat:chapter", format or profiles.CHAPTER_STYLES.default)
+    if (format != null) recorded
+    else {*:recorded, diagnostics: st.diagnostics ++ [util.diagnostic("title-shape-approximation", "memoir",
+        style, "The chapter style " ++ style ++ " renders as the default style", el.source_offset)]}
+}
+
+// memoir's \setsecnumdepth{level}
+fn walk_secnumdepth(el, st) {
+    let depth = profiles.SECNUM_DEPTHS[trim(util.text_of(el))]
+    if (depth == null) st else {*:st, secnumdepth: depth}
+}
+
+// exam's \question, \part, \subpart and \subsubpart: their points, for \numpoints
+fn walk_exam_item(el, st) {
+    let points = profiles.points_of(el)
+    let counted = if (string(name(el)) == "question") record_setting(st, el, "exam:question", true) else st
+    if (points == null) counted else record_setting(counted, el, "exam:points", points)
 }
 
 // a {key, value} setting, or nothing when the command named no heading
@@ -367,14 +478,23 @@ fn arg_texts(el) => [for (arg in util.command_args(el)) trim(util.text_of(arg))]
 // \newfloat{type}{placement}{ext}[within]: a float kind in the current float style
 fn walk_newfloat(el, st) {
     let args = [for (text in arg_texts(el) where text != "") text]
-    let within = util.optional_raw(el)
     if (len(args) == 0) st
-    else {*:st,
-        float_kinds: {*:st.float_kinds, [args[0]]: floats.new_kind(args[0], st.float_style,
-            if (len(args) > 2) args[2] else null)},
-        counters: {*:st.counters, [args[0]]: 0},
-        counter_within: if (within == null) st.counter_within
-            else add_entry(st.counter_within, args[0], trim(within))}
+    else define_float(st, args[0], if (len(args) > 2) args[2] else null, null, util.optional_raw(el))
+}
+
+// memoir's \newfloat[within]{type}{ext}{caption name}
+fn walk_memoir_newfloat(el, st) {
+    let args = [for (i in 0 to 2) trim(util.raw_argument(el, "required", i) or "")]
+    if (args[0] == "") st
+    else define_float(st, args[0], if (args[1] == "") null else args[1], if (args[2] == "") null else args[2],
+        util.optional_raw(el))
+}
+
+fn define_float(st, kind, ext, caption_name, within) {
+    let defined = floats.new_kind(kind, st.float_style, ext);
+    {*:st, float_kinds: {*:st.float_kinds, [kind]: if (caption_name == null) defined else {*:defined, name: caption_name}},
+        counters: {*:st.counters, [kind]: 0},
+        counter_within: if (within == null) st.counter_within else add_entry(st.counter_within, kind, trim(within))}
 }
 
 fn walk_floatname(el, st) {
@@ -397,7 +517,7 @@ fn walk_restylefloat(el, st) {
 
 fn walk_element(el, st) {
     let tag = name(el)
-    let owned = registry.handler(PACKAGE_WALK, st.packages, string(tag))
+    let owned = registry.handler(PACKAGE_WALK, st.packages, string(tag), st.docclass)
     if (owned != null) owned(el, st)
     else match tag {
         // ---- preamble ----
@@ -406,6 +526,8 @@ fn walk_element(el, st) {
         case 'title': walk_title(el, st)
         case 'author': walk_author(el, st)
         case 'date': walk_date(el, st)
+        // fields given before it join the title block (record_front)
+        case 'maketitle': record_setting(st, el, "front:maketitle", true)
         case 'document': walk_children(el, 0, len(el), {*:st, in_body: true})
 
         // ---- sections ----
@@ -510,7 +632,13 @@ fn walk_documentclass(el, st) {
     let raw_options = util.optional_raw(el)
     let options = if (raw_options == null) []
         else [for (option in util.split_top_level(raw_options, ",") where trim(option) != "") trim(option)]
-    if cls != "" { {*:st, docclass: cls, class_options: options} }
+    let profile = registry.class_profile(cls)
+    // a class's built-in theorem environments, as \newtheorem defines them
+    let defined = [for (thm in profile.theorems or []) {key: thm.name, val: {env_name: thm.name,
+        label: thm.label, shared_counter: null, style: thm.style, numbered: true}}]
+    if cls != "" { {*:st, docclass: cls, docbase: profile.base, class_options: options,
+        theorem_defs: st.theorem_defs ++ defined,
+        counters: {*:st.counters, *:map([for (thm in profile.theorems or [], x in [thm.name, 0]) x])}} }
     else { st }
 }
 
@@ -602,7 +730,7 @@ fn walk_heading(el, st, counter_name, html_level) {
     let sec_num_str = sec_num_to_str(sec_num)
     // appendices with title or titletoc name their top-level headings
     let named = st.appendix_names != null and not starred and
-        counter_name == appendix.lettered_counter(appendix.chaptered(st.docclass), false)
+        counter_name == appendix.lettered_counter(appendix.chaptered(st.docbase), false)
 
     let new_state = {
         *:st,
@@ -641,15 +769,17 @@ fn counter_name_to_depth(counter_name) {
 
 fn compute_section_num(raw_counters, counter_name, st) {
     let counters = subappendix_counters(raw_counters, st)
-    if (st.docclass == "book") dc_book.format_section_number(counters, counter_name, st.in_appendix)
-    else if (st.docclass == "report") dc_report.format_section_number(counters, counter_name, st.in_appendix)
+    let scheme = registry.class_numbering(st.docclass)
+    if (scheme == "book") dc_book.format_section_number(counters, counter_name, st.in_appendix)
+    else if (scheme == "report") dc_report.format_section_number(counters, counter_name, st.in_appendix)
+    else if (scheme == "ieee") dc_ieee.format_section_number(counters, counter_name, st.in_appendix)
     else dc_article.format_section_number(counters, counter_name, st.in_appendix)
 }
 
 // subappendices letter the level below the class's top one, which the class's
 // format then joins like a number: 1.A, 1.A.1
 fn subappendix_counters(counters, st) {
-    let counter = appendix.lettered_counter(appendix.chaptered(st.docclass), true)
+    let counter = appendix.lettered_counter(appendix.chaptered(st.docbase), true)
     if (not st.subappendix or counters[counter] <= 0) counters
     else {*:counters, [counter]: util.upper_alph(counters[counter])}
 }
@@ -876,7 +1006,7 @@ fn make_bib_entry(k, n) {
 fn walk_appendix(el, st) {
     // \appendix restarts the top numbered level, lettered from here on: the
     // chapter in book and report, the section otherwise
-    let chaptered = appendix.chaptered(st.docclass)
+    let chaptered = appendix.chaptered(st.docbase)
     let new_counters = {*:st.counters, chapter: if (chaptered) 0 else st.counters.chapter,
         section: 0, subsection: 0, subsubsection: 0}
     {*:st, in_appendix: true, counters: new_counters}
@@ -887,7 +1017,7 @@ fn walk_appendix(el, st) {
 // (\@pprestoresec). The toc and page options add the head and the page title.
 fn walk_appendices(el, st, sub) {
     let options = registry.options_for(st.packages, "appendix")
-    let chaptered = appendix.chaptered(st.docclass)
+    let chaptered = appendix.chaptered(st.docbase)
     let counter = appendix.lettered_counter(chaptered, sub)
     let start = if (sub) 0 else st.appendix_count
     let headed = if (not sub and options != null and util.option_enabled(options.toc))
@@ -908,11 +1038,12 @@ fn walk_appendices(el, st, sub) {
 // the nomenclature
 // `key` names the anchor when one command prints several lists (\printglossaries),
 // and `name_macro` the macro a document renames the entry's text with
-fn add_unnumbered_head(el, st, text, key = null, name_macro = null) {
+// and KOMA-Script's \addsec at `level`
+fn add_unnumbered_head(el, st, text, key = null, name_macro = null, level = null) {
     let slug_info = make_unique_slug(util.slugify(text), st.slug_counts)
     {*:st, slug_counts: slug_info.counts,
         contents_anchors: add_entry(st.contents_anchors, key or string(el.source_offset), slug_info.slug),
-        headings: st.headings ++ [{level: if (appendix.chaptered(st.docclass)) 1 else 2,
+        headings: st.headings ++ [{level: level or (if (appendix.chaptered(st.docbase)) 1 else 2),
             number: null, text: text, id: slug_info.slug, offset: el.source_offset, name_macro: name_macro}]}
 }
 

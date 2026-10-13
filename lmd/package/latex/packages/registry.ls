@@ -34,6 +34,7 @@ import terms: .terms
 import fontspec: .fontspec
 import icons: .icons
 import boxes: ~~.elements.boxes
+import profiles: ~~.docclass.profiles
 
 // `commands` names the commands and environments a package owns: they dispatch
 // to its handlers and are attributed to it when unsupported, only while it is
@@ -339,11 +340,78 @@ fn commands_of(desc) => if (desc == null or desc.commands == null) [] else desc.
 // commands owned by any package; the owner among active packages is resolved per call
 let OWNED = map([for (k, v in CATALOG, cmd in commands_of(v), x in [cmd, true]) x])
 
-// classes with a script profile; a beside-document .cls of another name runs on the engine
-pub let CLASSES = ["article", "report", "book", "amsart", "standalone"]
+// Class profiles (Lambda_Impl_Latex_Packages §14); a beside-document .cls of another
+// name runs on the engine. `base` numbers headings as article, report or book does,
+// unless `numbering` names another scheme; `options`, `commands` and `preamble` follow
+// the CATALOG shape, and the classes of a `family` share its handler-table entry.
+// `implies` names the packages a class loads; `theorems` the environments it defines.
+let KOMA = {family: "koma", options: profiles.KOMA_OPTIONS, commands: profiles.KOMA_COMMANDS,
+    preamble: profiles.KOMA_FIELDS ++ profiles.KOMA_SETTINGS, option_implies: {parskip: ["parskip"]}}
+let AMS = {family: "ams", options: profiles.AMS_OPTIONS, commands: profiles.AMS_COMMANDS,
+    preamble: profiles.AMS_COMMANDS, implies: ["amsmath", "amsthm"]}
+let REVTEX = {base: "article", family: "revtex", options: profiles.REVTEX_OPTIONS,
+    commands: profiles.REVTEX_COMMANDS, preamble: profiles.REVTEX_COMMANDS, implies: ["natbib"]}
+
+pub let CLASSES = {
+    article: {base: "article", options: profiles.STANDARD_OPTIONS},
+    report: {base: "report", options: profiles.CHAPTER_OPTIONS},
+    book: {base: "book", options: profiles.CHAPTER_OPTIONS},
+    standalone: {base: "article", options: profiles.STANDALONE_OPTIONS},
+    // tier A: aliases with small command sets
+    extarticle: {base: "article", options: profiles.EXT_OPTIONS},
+    extreport: {base: "report", options: profiles.EXT_OPTIONS ++ ["openright", "openany"]},
+    extbook: {base: "book", options: profiles.EXT_OPTIONS ++ ["openright", "openany"]},
+    scrartcl: {base: "article", *:KOMA},
+    scrreprt: {base: "report", *:KOMA},
+    scrbook: {base: "book", *:KOMA},
+    amsart: {base: "article", *:AMS},
+    amsproc: {base: "article", *:AMS},
+    amsbook: {base: "book", *:AMS},
+    memoir: {base: "book", options: profiles.MEMOIR_OPTIONS, commands: profiles.MEMOIR_COMMANDS,
+        preamble: profiles.MEMOIR_SETTINGS},
+    // tier B: journal classes
+    IEEEtran: {base: "article", numbering: "ieee", options: profiles.IEEE_OPTIONS,
+        commands: profiles.IEEE_COMMANDS, preamble: profiles.IEEE_PREAMBLE},
+    llncs: {base: "article", options: profiles.LLNCS_OPTIONS, commands: profiles.LLNCS_COMMANDS,
+        preamble: profiles.LLNCS_COMMANDS, theorems: profiles.LLNCS_THEOREMS},
+    elsarticle: {base: "article", options: profiles.ELSARTICLE_OPTIONS, commands: profiles.ELSARTICLE_COMMANDS,
+        preamble: profiles.ELSARTICLE_PREAMBLE, implies: ["natbib", "graphicx"]},
+    'revtex4-2': REVTEX,
+    'revtex4-1': REVTEX,
+    acmart: {base: "article", options: profiles.ACMART_OPTIONS, commands: profiles.ACMART_COMMANDS,
+        preamble: profiles.ACMART_PREAMBLE,
+        implies: ["amsmath", "natbib", "hyperref", "graphicx", "xcolor", "booktabs"], theorems: profiles.ACMART_THEOREMS},
+    // tier C: classes with their own document model
+    letter: {base: "article", options: profiles.LETTER_OPTIONS, commands: profiles.LETTER_COMMANDS,
+        preamble: profiles.LETTER_FIELDS ++ ["makelabels"]},
+    exam: {base: "article", options: profiles.EXAM_OPTIONS, commands: profiles.EXAM_COMMANDS,
+        preamble: profiles.EXAM_SETTINGS}
+}
+
+// the commands each class owns, by class
+let CLASS_OWNED = map([for (k, v in CLASSES,
+    x in (if (v.commands == null) [] else [string(k), map([for (command in v.commands, y in [command, true]) y])])) x])
 
 // names the TeX engine leaves to the script adapters (Lambda_Design_TeX_Engine §5)
-pub fn adapter_names() => [for (k, v in CATALOG) string(k)] ++ CLASSES ++ ["pgf", "amsfonts", "color"]
+pub fn adapter_names() => [for (k, v in CATALOG) string(k)] ++ [for (k, v in CLASSES) string(k)] ++
+    ["pgf", "amsfonts", "color"]
+
+// the classes whose kernel defines \chapter (the engine declares it for them)
+pub fn chaptered_classes() => [for (k, v in CLASSES where v.base != "article") string(k)]
+
+// a class's profile; an unknown class renders with the article profile (D7.2.7)
+pub fn class_profile(cls) => CLASSES[cls] or CLASSES.article
+
+// the family whose handler-table entry serves a class: its family or its own name;
+// null for a class without a profile
+pub fn class_family(cls) => if (CLASSES[cls] == null) null else (CLASSES[cls].family or cls)
+
+// the commands of the classes a handler-table family entry serves
+pub fn family_commands(family) => [for (k, v in CLASSES,
+    command in (if (class_family(string(k)) == family) v.commands or [] else [])) command]
+
+// the numbering scheme of a class (docclass/<scheme>.ls)
+pub fn class_numbering(cls) => class_profile(cls).numbering or class_profile(cls).base
 
 // adapter commands that read their arguments as tokens, as the CTAN packages
 // do: bussproofs splits sequents at \fCenter, semantic parses its rule syntax
@@ -371,8 +439,16 @@ pub fn offset_for(packages, name) {
     if (len(matching) == 0) null else matching[0]
 }
 
-// the active package that owns a command; a later-loaded package wins, as in LaTeX
-pub fn owner(packages, command) {
+// the active package that owns a command, else the document class when it does; a
+// later-loaded package wins, as in LaTeX, and packages load after the class
+pub fn owner(packages, command, cls = null) {
+    let pkg = package_owner(packages, command)
+    if (pkg != null) pkg
+    else if (cls != null and CLASS_OWNED[cls] != null and CLASS_OWNED[cls][command] == true) cls
+    else null
+}
+
+fn package_owner(packages, command) {
     if (OWNED[command] == null) prefix_owner(packages, command)
     else {
         let owners = [for (entry in packages
@@ -392,11 +468,11 @@ fn prefix_owner(packages, command) {
     if (len(owners) == 0) null else owners[0]
 }
 
-// the handler an active package's table supplies for a command, if any; a table's
-// "*" entry serves the commands a prefix names
-pub fn handler(tables, packages, command) {
-    let pkg = owner(packages, command)
-    let table = if (pkg == null) null else tables[pkg]
+// the handler an active package's table, or the class's, supplies for a command, if
+// any; a table's "*" entry serves the commands a prefix names
+pub fn handler(tables, packages, command, cls = null) {
+    let pkg = owner(packages, command, cls)
+    let table = if (pkg == null) null else (tables[pkg] or tables[family_of(pkg)])
     if (table == null) null else (table[command] or table["*"])
 }
 
@@ -419,8 +495,13 @@ pub fn font_css(packages, role) {
     if (len(stacks) == 0) null else stacks[len(stacks) - 1]
 }
 
-pub fn package_for_command(command, packages) {
-    let pkg = owner(packages, command)
+fn family_of(key) => if (CLASSES[key] == null) null else CLASSES[key].family
+
+// a package's or class's catalogue entry
+fn profile_of(key) => CATALOG[key] or CLASSES[key]
+
+pub fn package_for_command(command, packages, cls = null) {
+    let pkg = owner(packages, command, cls)
     if (pkg != null) pkg else "latex"
 }
 
@@ -536,7 +617,9 @@ fn walk(node, st, before_body) {
         // D7.2.7: a class without a profile or a beside-document .cls is unknown;
         // the document still renders with the article profile
         let cls = trim(util.text_of_skip_brack(node))
-        if (cls == "" or contains(CLASSES, cls)) st
+        if (cls == "") st
+        else if (CLASSES[cls] != null) {*:st, doc_class: {key: cls,
+            val: util.parse_kv_options(util.optional_raw(node)), offset: node.source_offset}}
         else {*:st, diagnostics: st.diagnostics ++ [diagnostic("unknown-package", cls, null,
             "Unknown LaTeX class: " ++ cls, node)]}
     } else if (string(name(node)) == "usepackage") {
@@ -581,11 +664,11 @@ fn tikz_library_issues(node) {
             "Unsupported TikZ library: " ++ trim(raw), node)]
 }
 
-fn scan(node, packages, outside_body) {
+fn scan(node, packages, outside_body, cls) {
     if (not (node is element)) []
     else {
         let tag = string(name(node))
-        let owner = package_for_command(tag, packages)
+        let owner = package_for_command(tag, packages, cls)
         let lua_at = if ((tag == "inline_math" or tag == "display_math") and
             node.source != null) index_of(node.source, "\\directlua") else null
         let own = if (tag == "directlua" or tag == "luacode" or tag == "luacode*")
@@ -667,7 +750,7 @@ fn scan(node, packages, outside_body) {
             [diagnostic("unsupported-cite-compression", "cite", tag,
                 "cite package sorting and compression are not active", node)]
         else if (outside_body and owner != "latex" and tag != "DeclareMathOperator" and
-            tag != "addbibresource" and not (contains(preamble_of(CATALOG[owner]), tag) or false))
+            tag != "addbibresource" and not (contains(preamble_of(profile_of(owner)), tag) or false))
             [diagnostic("unsupported-command", owner, tag,
                 "Unsupported " ++ owner ++ " command: " ++ tag, node)]
         else if (tag == "includegraphics" and active(packages, "graphicx"))
@@ -703,7 +786,7 @@ fn scan(node, packages, outside_body) {
             check_options("hyperref", util.parse_kv_options(raw), node)
         } else []
         let next_outside = outside_body and tag != "document"
-        own ++ [for (child in node, issue in scan(child, packages, next_outside)) issue]
+        own ++ [for (child in node, issue in scan(child, packages, next_outside, cls)) issue]
     }
 }
 
@@ -723,15 +806,39 @@ fn chicago_biblatex(st) {
 }
 
 pub fn collect(ast) {
-    let walked = walk(ast, {packages: [], diagnostics: []}, true)
+    let walked = walk(ast, {packages: [], diagnostics: [], doc_class: null}, true)
     let declared = chicago_biblatex(walked)
     // packages that load others upstream (subcaption loads caption, bookmark loads
-    // hyperref); the implied package is active with its defaults
-    let loaded = {*:declared, packages: with_implied(declared.packages, 0)}
+    // hyperref, a class its own); the implied package is active with its defaults,
+    // and the class's load before the document's
+    let classed = class_packages(declared.doc_class, declared.packages) ++ declared.packages
+    let loaded = {*:declared, packages: with_implied(classed, 0)}
     let has_body = ast is element and util.find_child(ast, "document") != null
-    {*:loaded, diagnostics: loaded.diagnostics ++ scan(ast, loaded.packages, has_body) ++
-        conflict_issues(loaded.packages)}
+    let cls = if (declared.doc_class == null) null else declared.doc_class.key
+    {packages: loaded.packages, diagnostics: loaded.diagnostics ++ scan(ast, loaded.packages, has_body, cls) ++
+        conflict_issues(loaded.packages) ++ class_option_issues(declared.doc_class, loaded.packages)}
 }
+
+fn class_packages(doc_class, packages) {
+    if (doc_class == null) []
+    else [for (pkg in implies_of(CLASSES[doc_class.key], doc_class.val) where not active(packages, pkg))
+        {key: pkg, val: {}, offset: doc_class.offset}]
+}
+
+// a class option neither the class nor a loaded package takes; the others are
+// global options the packages read, as in LaTeX
+fn class_option_issues(doc_class, packages) {
+    if (doc_class == null) []
+    else {
+        let known = CLASSES[doc_class.key].options ++
+            [for (entry in packages, option in options_of(CATALOG[entry.key])) option];
+        [for (key, value at doc_class.val where not (contains(known, string(key)) or false))
+            util.diagnostic("unsupported-option", doc_class.key, string(key),
+                "Unsupported " ++ doc_class.key ++ " option: " ++ string(key), doc_class.offset)]
+    }
+}
+
+fn options_of(desc) => if (desc == null or desc.options == null) [] else desc.options
 
 // packages that cannot be loaded together, as declared by each catalogue entry
 fn conflict_issues(packages) {

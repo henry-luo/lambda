@@ -1145,11 +1145,15 @@ static void do_settobox(Engine* e, const Token& t, uint8_t sub) {
 // packages and classes
 // ======================================================================
 
-static bool is_adapter(Engine* e, const char* name) {
-    for (int i = 0; i < e->opts.adapter_count; i++) {
-        if (strcmp(e->opts.adapters[i], name) == 0) return true;
+static bool is_listed(const char* const* names, int count, const char* name) {
+    for (int i = 0; i < count; i++) {
+        if (strcmp(names[i], name) == 0) return true;
     }
     return false;
+}
+
+static bool is_adapter(Engine* e, const char* name) {
+    return is_listed(e->opts.adapters, e->opts.adapter_count, name);
 }
 
 static PackageRecord* find_package(Engine* e, const char* name, bool is_class) {
@@ -1406,8 +1410,8 @@ static void do_documentclass(Engine* e, const Token& t, uint32_t code) {
     record_package(e, name, options, true, is_adapter(e, name) ? PK_ADAPTER : PK_UNKNOWN);
     // a class's \LoadClass names the document's base class for the adapters
     if (!echo_finish(e, em)) emit_declaration(e, "documentclass", options, name);
-    if (strcmp(name, "book") == 0 || strcmp(name, "report") == 0 || strcmp(name, "memoir") == 0 ||
-        strcmp(name, "scrbook") == 0 || strcmp(name, "scrreprt") == 0) {
+    // the class profiles name the classes with chapters (registry.chaptered_classes)
+    if (is_listed(e->opts.chaptered, e->opts.chaptered_count, name)) {
         Meaning m = {};
         m.type = MT_CONSTRUCTOR;
         uint32_t chapter = intern_cstr(e, "chapter");

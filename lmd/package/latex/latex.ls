@@ -36,6 +36,7 @@ import font_decl: .elements.font_decl
 import paragraph: .packages.paragraph
 import footmisc: .packages.footmisc
 import fontspec: .packages.fontspec
+import profiles: .docclass.profiles
 
 // ============================================================
 // Public API — HTML string output
@@ -46,7 +47,8 @@ import fontspec: .packages.fontspec
 // shadow an adapter and adapter commands keep raw arguments
 pub fn parse_source(latex_source, base) =>
     parse(latex_source, {type: "latex", base: base,
-        packages: registry.adapter_names(), raw: registry.RAW_ARGUMENT_COMMANDS}) ^ { null }
+        packages: registry.adapter_names(), raw: registry.RAW_ARGUMENT_COMMANDS,
+        chaptered: registry.chaptered_classes()}) ^ { null }
 
 pub fn parse_file(file_path) {
     let source = input(file_path, "text") ^ { null }
@@ -258,7 +260,7 @@ fn family_features(info) {
 }
 
 fn package_stylesheet(info) {
-    family_features(info) ++
+    family_features(info) ++ profiles.stylesheet(registry.class_family(info.docclass)) ++
     (if (info.biblatex_context.processor == "csl") csl.stylesheet() else "") ++
     geometry.stylesheet(registry.options_for(info.packages, "geometry")) ++
     (if (registry.active(info.packages, "fullpage") and

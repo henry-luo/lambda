@@ -2489,6 +2489,8 @@ static tex::Engine* run_tex_engine(const InputParseOptions* options, const char*
     eo.adapter_count = options->tex_adapter_count;
     eo.raw_commands = options->tex_raw_commands;
     eo.raw_command_count = options->tex_raw_command_count;
+    eo.chaptered = options->tex_chaptered;
+    eo.chaptered_count = options->tex_chaptered_count;
     tex::Engine* engine = tex::engine_create(&eo);
     if (!engine) return nullptr;
     tex::engine_run(engine, source, length, result);

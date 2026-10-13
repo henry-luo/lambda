@@ -13,7 +13,7 @@ true
 "main family css:"
 true
 "unknown class:"
-["unknown-package scrartcl null"]
+["unknown-package moderncv null"]
 "profile class:"
 []
 "xparse:"

@@ -24,12 +24,14 @@ fn issues(src) => [for (issue in result_of(src).diagnostics)
     issue.code ++ " " ++ string(issue.package) ++ " " ++ string(issue.item)]
 
 // ---- M0.1 ownership, dispatch and conflicts ----
-// a "*" entry serves the commands a package's command_prefix names (fontawesome5)
+// a "*" entry serves the commands a package's command_prefix names (fontawesome5); a
+// class family's entry serves its classes' commands (M10)
+fn owned(key) => if (registry.CATALOG[key] != null) registry.CATALOG[key].commands else registry.family_commands(key)
 "handlers owned by their package:"; [for (pkg, table in render.PACKAGE_RENDER, cmd, h in table
-    where string(cmd) != "*" and not contains(registry.CATALOG[string(pkg)].commands, string(cmd)))
+    where string(cmd) != "*" and not contains(owned(string(pkg)), string(cmd)))
     string(pkg) ++ "." ++ string(cmd)]
 "walk handlers owned:"; [for (pkg, table in analyze.PACKAGE_WALK, cmd, h in table
-    where not contains(registry.CATALOG[string(pkg)].commands, string(cmd))) string(pkg) ++ "." ++ string(cmd)]
+    where not contains(owned(string(pkg)), string(cmd))) string(pkg) ++ "." ++ string(cmd)]
 "owner while active:"; registry.owner([{key: "cleveref", val: {}}], "cref")
 "no owner while inactive:"; registry.owner([], "cref")
 "inactive command attribution:"; issues(doc("", "\\enquote{a} \\cref{x}"))
@@ -41,7 +43,7 @@ fn issues(src) => [for (issue in result_of(src).diagnostics)
 "main family css:"; index_of(html_of(doc("\\usepackage{cmbright}", "Hi.")), "Computer Modern Sans") != null
 
 // ---- M0.5 and M0.6 classes and xparse ----
-"unknown class:"; issues("\\documentclass{scrartcl}\n\\begin{document}\nHi.\n\\end{document}\n")
+"unknown class:"; issues("\\documentclass{moderncv}\n\\begin{document}\nHi.\n\\end{document}\n")
 "profile class:"; issues("\\documentclass{book}\n\\begin{document}\nHi.\n\\end{document}\n")
 "xparse:"; issues(doc("\\usepackage{xparse}\n\\NewDocumentCommand{\\pair}{m}{[#1]}", "\\pair{a}"))
 

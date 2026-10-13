@@ -1,0 +1,74 @@
+"extbook root and numbering:"
+true
+"class options:"
+["unsupported-option extbook bogus"]
+"global option:"
+[]
+"implied packages:"
+["amsmath", "amsthm"]
+"unknown class:"
+["unknown-package moderncv null"]
+"chapters in amsbook:"
+["<article class=\"latex-document latex-amsbook latex-book latex-ams\" lang=\"en\"><h1 id=\"one\"><span class=\"sec-num\">1 </span>One</h1></article>"]
+"KOMA title:"
+true
+"KOMA headings:"
+true
+"KOMA contents:"
+true
+"KOMA caption:"
+true
+"KOMA sans and parskip:"
+true
+"KOMA issues:"
+["unsupported-font-element scrreprt pagehead", "unsupported-option scrreprt bogus"]
+"AMS:"
+["<article class=\"latex-document latex-amsart latex-ams\" lang=\"en\"><header class=\"latex-title\"><div class=\"title\">T</div><div class=\"author latex-authblk\"><div class=\"latex-authblock\"><div class=\"latex-authors\">A</div><div class=\"latex-affil\">Dept, Univ</div><div class=\"latex-affil latex-email\">a@u.edu</div></div><div class=\"latex-authblock\"><div class=\"latex-authors\">B</div><div class=\"latex-affil\">Lab</div></div></div><div class=\"latex-dedicatory\">To C</div></header><div class=\"latex-abstract\"><div class=\"abstract-title\">Abstract</div><p>Abs</p></div><div class=\"latex-subjclass\"><em>2010 Mathematics Subject Classification.</em> 11A41</div><div class=\"latex-keywords\"><span class=\"latex-field-head\">Key words and phrases.</span> primes</div><h2 id=\"s\"><span class=\"sec-num\">1 </span>S</h2><p>x\n</p></article>"]
+"AMS issues:"
+[]
+"memoir:"
+["<article class=\"latex-document latex-memoir latex-book\" lang=\"en\"><h1 id=\"c\" style=\"font-size:2.2em;font-weight:bold;\"><span class=\"sec-num\" style=\"margin-right:1em;\">1</span>C</h1><div class=\"latex-epigraph\"><div class=\"latex-epigraph-text\">Words</div><div class=\"latex-epigraph-source\">Someone</div></div><figure class=\"latex-float latex-float-program\"><div class=\"latex-caption latex-program-caption\" style=\"text-align:center;white-space:pre-line;\"><span class=\"latex-caption-label\" style=\"\">Program 1.1: </span><span class=\"latex-caption-text\" style=\"\">P</span></div></figure></article>"]
+"memoir issues:"
+["unsupported-command memoir setlrmarginsandblock"]
+"unknown chapter style:"
+["title-shape-approximation memoir bianchi"]
+"IEEEtran:"
+["<article class=\"latex-document latex-IEEEtran\" lang=\"en\"><header class=\"latex-title\"><div class=\"title\">T</div><div class=\"author latex-authblocks\"><div class=\"latex-authblock\"><div class=\"latex-author-name\">A B</div><div class=\"latex-affil\">Univ<br>City</div> </div><div class=\"latex-authblock\"> <div class=\"latex-author-name\">C D</div><div class=\"latex-affil\">Lab</div></div></div></header><div class=\"latex-abstract\"><div class=\"abstract-title\">Abstract</div><p>Abs</p></div><div class=\"latex-keywords\"><span class=\"latex-field-head\">Index Terms—</span> a, b</div><h2 id=\"intro\"><span class=\"sec-num\">I. </span>Intro</h2><p><a id=\"s:i\"></a><span class=\"latex-parstart\"><span class=\"latex-dropcap\">T</span><span class=\"latex-parstart-rest\">his</span></span> is.</p><h3 id=\"sub\"><span class=\"sec-num\">A. </span>Sub</h3><p><a id=\"s:s\"></a></p><h4 id=\"deep\"><span class=\"sec-num\">1) </span>Deep</h4><p><a id=\"s:d\"></a>See <a class=\"latex-ref\" href=\"#s:i\">I</a>, <a class=\"latex-ref\" href=\"#s:s\">I-A</a>, <a class=\"latex-ref\" href=\"#s:d\">I-A1</a>.</p><div class=\"latex-proof\"><em class=\"latex-proof-head\">Proof.</em> <p>Done.</p><span class=\"latex-qed\">□</span></div></article>"]
+"IEEEtran issues:"
+[]
+"llncs:"
+["<article class=\"latex-document latex-llncs\" lang=\"en\"><header class=\"latex-title\"><div class=\"title\">T</div><div class=\"author\">A<sup class=\"latex-affil-mark\">1</sup><sup class=\"latex-orcid\"><a href=\"https://orcid.org/0000-0001\">[0000-0001]</a></sup> <span class=\"latex-and\"></span> B<sup class=\"latex-affil-mark\">2</sup></div><div class=\"latex-institutes\"><div class=\"latex-affil\"><sup class=\"latex-affil-mark\">1</sup> U1 <span class=\"latex-email\">a@u</span></div><div class=\"latex-affil\"><sup class=\"latex-affil-mark\">2</sup> U2</div></div></header><div class=\"latex-abstract\"><div class=\"abstract-title\">Abstract</div><p>Abs</p><div class=\"latex-keywords\"><span class=\"latex-field-head\">Keywords:</span> one · two</div></div><div class=\"latex-theorem latex-theorem latex-theorem-style-plain\"><strong class=\"latex-theorem-head\">Theorem 1.</strong> <p>P</p></div><div class=\"latex-theorem latex-note latex-theorem-style-remark\"><strong class=\"latex-theorem-head\">Note 1.</strong> <p>N</p></div></article>"]
+"llncs issues:"
+[]
+"elsarticle:"
+["<article class=\"latex-document latex-elsarticle\" lang=\"en\"><header class=\"latex-title\"><div class=\"title\">T<sup class=\"latex-note-ref\">☆</sup></div><div class=\"author latex-authblk\"><div class=\"latex-authors\">A<sup class=\"latex-note-ref\">∗</sup><sup class=\"latex-affil-mark\">a</sup> and B<sup class=\"latex-note-ref\">1</sup><sup class=\"latex-affil-mark\">a,b</sup></div><div class=\"latex-affiliations\"><div class=\"latex-affil latex-email\">a@x</div><div class=\"latex-affil\"><sup class=\"latex-affil-mark\">a</sup> U</div><div class=\"latex-affil\"><sup class=\"latex-affil-mark\">b</sup> L</div></div></div><div class=\"latex-thanks\"><p><sup>☆</sup> Funded</p><p><sup>∗</sup> Corresponding</p><p><sup>1</sup> Note</p></div></header><div class=\"latex-abstract\"><div class=\"abstract-title\">Abstract</div><p>Abs</p></div><div class=\"latex-keywords\"><span class=\"latex-field-head\">Keywords:</span> k1, k2</div><div class=\"latex-journal\"><span class=\"latex-field-head\">Preprint submitted to</span> J Phys</div><h2 id=\"s\"><span class=\"sec-num\">1 </span>S</h2><p>x\n</p></article>"]
+"elsarticle issues:"
+[]
+"revtex superscript addresses:"
+["<article class=\"latex-document latex-revtex4-2 latex-revtex\" lang=\"en\"><header class=\"latex-title\"><div class=\"title\">T</div><div class=\"author latex-authblk\"><div class=\"latex-authors\">A<sup class=\"latex-affil-mark\">1</sup> and B<sup class=\"latex-affil-mark\">2,1</sup></div><div class=\"latex-affiliations\"><div class=\"latex-affil\"><sup class=\"latex-affil-mark\">1</sup> U</div><div class=\"latex-affil latex-email\">a@u</div><div class=\"latex-affil\"><sup class=\"latex-affil-mark\">2</sup> L</div></div></div></header><div class=\"latex-abstract\"><div class=\"abstract-title\">Abstract</div><p>Abs</p></div><div class=\"latex-keywords\"><span class=\"latex-field-head\">Keywords:</span> k</div><h2 id=\"s\"><span class=\"sec-num\">1 </span>S</h2><p>x\n</p></article>"]
+"revtex grouped addresses:"
+true
+"acmart title:"
+true
+"acmart teaser first:"
+true
+"acmart concepts and keywords:"
+true
+"acmart figures after the teaser:"
+true
+"acmart issues:"
+["unsupported-command acmart setcopyright", "unsupported-command acmart acmDOI"]
+"letter:"
+["<article class=\"latex-document latex-letter\" lang=\"en\"><div class=\"latex-letter\"><div class=\"latex-letter-from\">1 Road<br>Town</div><div class=\"latex-letter-date\">1 May</div><div class=\"latex-letter-to\">Them<br>There</div><div class=\"latex-letter-opening\">Dear X,</div><p>Body.</p><div class=\"latex-letter-closing\"><div>Yours,</div><div class=\"latex-signature\">Me</div></div><div class=\"latex-letter-ps\">PS: more</div><div class=\"latex-letter-encl\"><span class=\"latex-letter-label\">encl: </span>CV</div><div class=\"latex-letter-cc\"><span class=\"latex-letter-label\">cc: </span>Y</div></div></article>"]
+"letter issues:"
+[]
+"exam:"
+["<article class=\"latex-document latex-exam\" lang=\"en\"><p>\nTotal: 6 points in 2 questions.</p><ol class=\"latex-exam-list latex-questions\"><li><span class=\"latex-points\">(2 points)</span> What?<ol class=\"latex-exam-list latex-parts\"><li><span class=\"latex-points\">(1 point)</span> A</li><li><span class=\"latex-points\">(3 points)</span> B</li></ol></li><li> Why?<ol class=\"latex-exam-list latex-choices\"><li> X</li><li> Y</li></ol><ol class=\"latex-exam-list latex-checkboxes\"><li> P</li><li> Q</li></ol></li></ol></article>"]
+"exam with answers:"
+true
+"printanswers:"
+true
+"exam issues:"
+["unsupported-command exam firstpageheader", "unsupported-command exam qformat", "unsupported-output exam null"]
+"natbib alone:"
+[]

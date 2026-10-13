@@ -88,7 +88,7 @@ The engine runs at the input boundary inside `parse(...)` and yields an eager va
 
 ## 5. Package and class resolution
 
-`\documentclass`, `\LoadClass`, `\usepackage` and `\RequirePackage` resolve each name once, in source order. A duplicate load with the same options is idempotent. The engine receives the adapter names from the script registry (`registry.adapter_names()`), so the static registry stays the single list of script adapters (**D7.2.4**).
+`\documentclass`, `\LoadClass`, `\usepackage` and `\RequirePackage` resolve each name once, in source order. A duplicate load with the same options is idempotent. The engine receives the adapter names from the script registry (`registry.adapter_names()`), so the static registry stays the single list of script adapters (**D7.2.4**). With them it receives the class profiles whose base has chapters (`registry.chaptered_classes()`), and `\documentclass` of one of those declares `\chapter` as a constructor, so a document may redefine it.
 
 The order for packages, ruled in **D7.2.7v2** (`do_usepackage` in `input-tex-latex.cpp`):
 
@@ -174,6 +174,7 @@ Raw islands (`tikzpicture` and the raw-text environments) are copied as source s
 | 2026-10-13 | Declaration-only bindings for tocloft, authblk, titling and minitoc (Phase V M6). |
 | 2026-10-13 | Declaration-only bindings for glossaries, nomencl and acronym, and the class name macros in the kernel (Phase V M7). |
 | 2026-10-13 | The unicode-math binding for the `\sym…` alphabets (Phase V M9). |
+| 2026-10-13 | The chaptered classes come from the registry's class profiles (`chaptered` parse option), not a list in the engine (Phase V M10). |
 
 ## Appendix B. Superseded rulings
 

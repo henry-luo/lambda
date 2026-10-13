@@ -57,8 +57,10 @@ pub fn prepare(ast, base_uri, opts, language) {
             {*:issue, package: "natbib"}] ++
             (if (valid) [] else [util.diagnostic("unsupported-natbib-profile", "natbib",
                 chosen, "Unsupported or conflicting BibTeX/natbib style or options", offset)]) ++
+            // without a bibliography or a named style there is no BST to approximate
+            (if (bibliography == null and len(declarations) == 0) [] else
             [util.diagnostic("bibtex-style-approximation", "natbib", chosen,
                 "Built-in bibliography punctuation differs from the named BST; sorting and citation mode are preserved",
-                offset)]}
+                offset)])}
     }
 }

@@ -13,11 +13,12 @@
 | Math typesetting (`lambda.doc.math`) | [Lambda_Pkg_Math.md](Lambda_Pkg_Math.md) |
 | TeX expansion engine, kernel, bundled packages, local `.sty`/`.cls` | [latex/Lambda_Design_TeX_Engine.md](latex/Lambda_Design_TeX_Engine.md) |
 | Bibliographies: biblatex/natbib profile and CSL citeproc | [latex/Lambda_Design_BibTeX_CSL.md](latex/Lambda_Design_BibTeX_CSL.md) |
+| beamer frames as `lambda.slide` decks (proposal) | [latex/Lambda_Design_Beamer.md](latex/Lambda_Design_Beamer.md) |
 | TikZ, PGF and PGFPlots drawing (`lambda.doc.tikz`) | [Lambda_Pkg_Tikz.md](Lambda_Pkg_Tikz.md) |
 | PDF reading for `\includegraphics` | [Lambda_Pkg_PDF.md](Lambda_Pkg_PDF.md) |
 | LaTeX parser and AST contract | [input/Input_Latex.md](input/Input_Latex.md) |
 
-Implementation records: [Lambda_Impl_Latex_Phase4.md](impl/Lambda_Impl_Latex_Phase4.md), [Lambda_Impl_BibTeX_CSL.md](impl/Lambda_Impl_BibTeX_CSL.md), [Lambda_Impl_Tikz_Phase4.md](impl/Lambda_Impl_Tikz_Phase4.md).
+Implementation records: [Lambda_Impl_Latex_Packages.md](impl/Lambda_Impl_Latex_Packages.md) (Phase V), [Lambda_Impl_Latex_Phase4.md](impl/Lambda_Impl_Latex_Phase4.md), [Lambda_Impl_BibTeX_CSL.md](impl/Lambda_Impl_BibTeX_CSL.md), [Lambda_Impl_Tikz_Phase4.md](impl/Lambda_Impl_Tikz_Phase4.md).
 
 ## 1. Purpose and scope
 
@@ -76,7 +77,7 @@ The package source lives under `lmd/package/latex/` and is imported as `lambda.l
 - `macros.ls`: user-macro substitution, to be retired (§5.4).
 - `to_html.ls`: escaping serializer.
 - `util.ls`, `symbols.ls`, `css.ls`, `math_bridge.ls`, `tikz_bridge.ls`: shared helpers, symbol tables, the core stylesheet and the two bridges.
-- `docclass/`: per-class numbering.
+- `docclass/`: the class profiles' data (`profiles.ls`) and the numbering schemes (article, report, book, IEEEtran).
 - `elements/`: boxes, color, font declarations, picture, spacing.
 - `packages/`: the registry and the adapters.
 - `citeproc/`: the CSL processor.
@@ -151,7 +152,7 @@ The unmapped-math scan exists because the math typesetter paints a command it ca
 
 ### 6.1 The registry
 
-`packages/registry.ls` holds the static `CATALOG` of script adapters, the built-in class profiles (`article`, `report`, `book`, `amsart`, `standalone`) and three aliases (`pgf` to `tikz`, `amsfonts` to `amssymb`, `color` to `xcolor`). The registry also tells the engine which names are adapters (`adapter_names`), so it remains the single list (**D7.2.4**).
+`packages/registry.ls` holds the static `CATALOG` of script adapters, the class profiles (`CLASSES`, §6.4) and three aliases (`pgf` to `tikz`, `amsfonts` to `amssymb`, `color` to `xcolor`). The registry also tells the engine which names are adapters (`adapter_names`), so it remains the single list (**D7.2.4**).
 
 Each entry records:
 
@@ -183,6 +184,17 @@ The right mechanism depends on what a package does.
 - **Native and script subsystems** cover what Lambda owns outright: math rendering (`lambda.doc.math`), PGF/TikZ drawing (`lambda.doc.tikz`), document-class semantics (sectioning, title blocks, floats and numbering in script), and everything that touches fonts, microtype or page layout (Radiant). Their upstream TeX implementations (`amsmath`, `pgf`, `microtype`, the standard classes and so on) are never run: those names are script adapters or built-in class profiles, so a bundled or local file with the same name is skipped, and their commands reach the owning subsystem as constructors. Running them would make the engine a second typesetter (§2) and give drawing or math two owners.
 
 Real-world classes also redefine document commands through LaTeX kernel internals such as `\@startsection`, `\@maketitle`, `\@float` and `\@makecaption`. Exposing those internals as constructors in the engine's kernel lets such classes still produce semantic headings and floats (engine design §10).
+
+### 6.4 Class profiles
+
+A class profile has the catalogue's shape plus what a class decides for the whole document (plan §14):
+
+- **`base`** numbers headings as article, report or book does; **`numbering`** names another scheme (IEEEtran's Roman sections). The root element carries the class, its base and its family, so a profile shares its base's styles.
+- **`options`** are validated together with the loaded packages' options: an option that neither takes reports `unsupported-option`, and the others are global options, as in LaTeX.
+- **`commands`** a class owns dispatch through the same handler tables as packages' (§5.3), after every active package, so a later-loaded package still wins. Classes of one **`family`** (KOMA-Script, the AMS classes, revtex) share an entry.
+- **`implies`** loads packages before the document's own (amsart loads amsmath and amsthm, acmart natbib and hyperref), and **`theorems`** are the environments a class defines (llncs, acmart).
+
+Front-matter fields given before `\maketitle` join the title block in fixed slots, and authors with their affiliations reuse authblk's entries. The engine declares `\chapter` for the profiles whose base has chapters (`registry.chaptered_classes`).
 
 ## 7. Output model
 
@@ -255,7 +267,7 @@ One shared table model serves `tabular`, the `array` column types and `\newcolum
 
 ## 9. Compatibility matrix
 
-The matrix was checked on 2026-10-07; the engine, bibliography, natbib and corpus tests were rerun and pass on 2026-10-12, and the Phase V rows were added through 2026-10-13. The adapter catalogue has 155 entries. The rows below cover the packages with active behavior. The remaining catalogue entries are declarations with defined effects, each accepted under the contract of its row or listed in the last row.
+The matrix was checked on 2026-10-07; the engine, bibliography, natbib and corpus tests were rerun and pass on 2026-10-12, and the Phase V rows were added through 2026-10-13. The adapter catalogue has 155 entries, and the registry has 22 class profiles. The rows below cover the packages with active behavior. The remaining catalogue entries are declarations with defined effects, each accepted under the contract of its row or listed in the last row.
 
 | Package | Supported in HTML | PDF/SVG | Explicitly unsupported |
 |---|---|---|---|
@@ -271,7 +283,8 @@ The matrix was checked on 2026-10-07; the engine, bibliography, natbib and corpu
 | `siunitx` | `\num`, `\si`/`\unit`, `\SI`/`\qty`, common units and prefixes, uncertainty, scientific notation, measured decimal `S[table-format=n.m]` | Partial: decimal grid in CSS | Other options, advanced `S` models, malformed numbers |
 | `tikz`, `pgf`, `pgfplots` | The bounded profile of [Lambda_Pkg_Tikz.md](Lambda_Pkg_Tikz.md); allowed libraries `patterns`, `decorations.pathmorphing`, `lindenmayersystems`, `backgrounds`, `positioning`, `calc`, `shapes.geometric`, `arrows.meta`, `math` | Vector geometry in SVG/PDF; labels through the math bridge | Full PGF/PGFPlots, other libraries, unbounded programs |
 | `tikzpeople` | 29 named shapes, pins, colors, accessories, mirroring, demo commands | Simplified silhouettes, diagnosed as approximations | Exact artwork, unknown shapes |
-| `amsthm`, `bussproofs`, `semantic`, `IEEEtrantools`; `amsart`, `standalone` | Theorem styles, shared and section counters, proofs and QED; proof trees; inference diagrams; used `IEEEeqnarray*` forms; bounded class profiles | CSS and math approximation | TeX alignment, arbitrary theorem macros; `mathabx` and `amsxtra` are unknown packages |
+| `amsthm`, `bussproofs`, `semantic`, `IEEEtrantools` | Theorem styles, shared and section counters, proofs and QED; proof trees; inference diagrams; used `IEEEeqnarray*` forms | CSS and math approximation | TeX alignment, arbitrary theorem macros; `mathabx` and `amsxtra` are unknown packages |
+| Classes: `article`, `report`, `book`, `standalone`, `extarticle`, `extreport`, `extbook`, `scrartcl`, `scrreprt`, `scrbook`, `amsart`, `amsproc`, `amsbook`, `memoir`, `IEEEtran`, `llncs`, `elsarticle`, `revtex4-1`, `revtex4-2`, `acmart`, `letter`, `exam` | Numbering bases and IEEEtran's Roman sections; title-block fields, authors with affiliations, addresses and emails, abstracts, keywords and classifications; KOMA-Script's unnumbered headings, `\minisec`, caption commands and fonts; memoir's named chapter styles, `\epigraph` and `\newfloat`; llncs's and acmart's theorems; letters; exam questions, points, choices and solutions | CSS | `moderncv` and `beamer` are unknown classes; memoir's layout commands, acmart's rights and metadata, exam's page and format commands, unnamed chapter styles and KOMA font elements outside the subset are reported; class macros documents redefine (`\shortauthors`) are undefined on the engine; kernel internals of beside-document classes |
 | `amscd`, `cancel`, `latexsym`, `stmaryrd` (subset), `esint` (subset), `upgreek`, `bbm`, `dsfont`, `gensymb`, `bm` | CD diagrams; `\cancel` family and `\cancelto`; package symbols and upright Greek in `lambda.doc.math`; `\mathbbm`/`\mathds` as double-struck; gensymb symbols in text and math; `\bm`/`\hm` as `\boldsymbol` | Math SVG | CD dimensions uncertified; double-struck digits render plain (no bundled glyphs); `\boldsymbol` keeps the regular glyph for a symbol no bundled face has in bold (`math-bold-symbol-approximation`), while `\bm` uses poor man's bold; symbols outside the tables are reported as `unsupported-math-command` |
 | `physics` | Every command group of physics 1.3 (bracing, vectors, operators with trig auto-bracing, quick-quad text, derivatives, Dirac notation, matrix macros) and the `arrowdel`, `italicdiff` and `notrig` options, through the engine binding (§6.3); also inside section titles, captions and footnotes | Math SVG | Sizing follows `\left…\right` rather than physics' exact `\big` choices; loading `siunitx` too is a `conflicting-packages` error (both define `\qty`) |
 | `mathtools` | `\DeclarePairedDelimiter`/`X`/`XPP` with `\delimsize`, `\prescript`, `\splitfrac`/`\splitdfrac`, `\adjustlimits`, `\MoveEqLeft`, `\shortintertext` (as `\intertext`), colon relations, the small fenced matrices, `drcases`, starred cases with a text column, `multlined`, `lgathered`/`rgathered`, tag forms (`\newtagform`, `\usetagform`) on tags and `\eqref` | Math SVG | `\mathtoolsset`; tag number formats other than the text font commands (`unsupported-tag-format`); `\cramped`, `\smashoperator` and `\adjustlimits` keep their content without the script adjustment |
@@ -328,7 +341,8 @@ These were reproduced on 2026-10-12.
 - **Duplicate heading titles.** They share one `id` and the first heading's number. Analysis deduplicates slugs, but rendering looks them up by the raw title slug.
 - **Length commands.** `\newlength` and `\setlength` change nothing in the script except `\unitlength`. The float-label leak, book and report appendix lettering, and the counter commands were fixed on 2026-10-13 ([Phase V M0.2](impl/Lambda_Impl_Latex_Packages.md#m02-float-kinds-counters-and-list-of)), and identical footnote texts in Phase V M1.
 - **Declarations outside groups.** Font and alignment declarations, NFSS ones included, take effect only as the leading declaration of a group or paragraph. A declaration in the middle of running text changes nothing.
-- **Fixed English strings.** Theorem names, appendix's "Appendix" and "Appendices", varioref's page phrases and the default titles of the contents, lists, glossaries, nomenclature and index (unless the document renames their name macros) are fixed English strings, and chapters have no "Chapter N" label unless a titlesec format asks for one.
+- **Fixed English strings.** Theorem names, appendix's "Appendix" and "Appendices", varioref's page phrases and the default titles of the contents, lists, glossaries, nomenclature and index (unless the document renames their name macros) are fixed English strings, as are the class heads (Index Terms, Keywords, CCS Concepts, Mathematics Subject Classification), and chapters have no "Chapter N" label unless a titlesec format or memoir chapter style asks for one.
+- **Chapter-scoped floats.** Report and book number figures and tables through the document, not within chapters.
 - **Doc viewer.** It renders without the package stylesheet, and the CLI's `font_option` is passed but never read.
 
 ### 11.3 Host capabilities
@@ -371,6 +385,7 @@ These were reproduced on 2026-10-12.
 | 2026-10-13 (Phase V M6) | Front matter, headings and contents (§10 of the plan).<br>**Packages:** titlesec, sectsty, tocloft, minitoc, titling, authblk, varioref; tocloft, authblk, titling and minitoc bindings that declare the macros documents redefine.<br>**Script:** one reader for TeX declaration lists (`font_decl.declarations`); `\setlength` and `\setcounter` as source-order settings; renamed contents and list titles; `\protect\numberline` in `\addcontentsline`.<br>**Parser:** titling's pre/post arguments stay raw text. |
 | 2026-10-13 (Phase V M7) | Glossaries, acronyms, nomenclature and index (§11 of the plan).<br>**Model:** one term registry (`terms.ls`): definitions and first uses in source order, fields rendered from source (`util.parse_fragment`), section locators linking back to uses.<br>**Packages:** glossaries, acronym, nomencl, makeidx, imakeidx; glossaries, nomencl and acronym bindings declare the renamed macros, and `\loadglsentries` reads through `\input`.<br>**Kernel:** `\indexname` and the other class names are declared, so renaming them is legal. |
 | 2026-10-13 (Phase V M9) | Fonts and Unicode engines (§13 of the plan), substitution only (§17.3).<br>**Families:** the serif, sans and mono families are root variables that every family declaration reads; font packages and fontspec set them.<br>**Packages:** 18 text font packages, fontspec (with polyglossia's `\newfontfamily` folded in), unicode-math (a binding for the `\sym…` alphabets), fontawesome5.<br>**Registry:** a package's `font` may list several faces; `command_prefix` owns families of commands. |
+| 2026-10-13 (Phase V M10) | Classes (§14 of the plan), profiles first (§17.4).<br>**Model:** `CLASSES` profiles with a numbering base, an option schema validated with the packages' global options, owned commands dispatched after the packages', implied packages and built-in theorems; the engine's `\chapter` classes come from the registry.<br>**Classes:** the extsizes classes, KOMA-Script, the AMS classes, memoir, IEEEtran, llncs, elsarticle, revtex, acmart, letter and exam.<br>**Title block:** front-matter fields in slots, and authors with affiliations as authblk's entries. |
 
 The retired documents are:
 
