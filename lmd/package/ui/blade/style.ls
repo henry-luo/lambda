@@ -56,12 +56,12 @@ pub let css = base.css ++ "
 .blade-root .dtna-skeleton-shape{background:var(--dtna-border)}.blade-root .dtna-step-number{background:var(--dtna-surface);border:1px solid var(--dtna-border)}
 .blade-root .dtna-step-current .dtna-step-number{background:var(--dtna-primary);color:var(--blade-ink)}
 .blade-root .dtna-compact>*{box-shadow:none}
-.blade-root .blade-panel{position:relative;border:var(--blade-frame-width) solid var(--blade-gold-dark);border-radius:var(--dtna-radius);box-shadow:inset 0 0 0 1px var(--blade-gold),inset 0 0 28px #00000066,0 12px 25px #00000088;background:linear-gradient(110deg,#ffffff08,#00000022),var(--blade-wood);padding:8px}
+.blade-root .blade-panel{position:relative;border:var(--blade-frame-width) solid var(--blade-gold-dark);border-radius:var(--dtna-radius);box-shadow:inset 0 0 0 1px var(--blade-gold),inset 0 0 6px #00000066,0 5px 8px #00000088;background:linear-gradient(110deg,#ffffff08,#00000022),var(--blade-wood);padding:8px}
 .blade-root .blade-panel-header{position:relative;display:flex;align-items:center;justify-content:center;gap:12px;min-height:60px;border-bottom:1px solid #b68b4c66;padding:4px 20px 12px}
 .blade-root .blade-panel-title{font:600 25px/1.2 var(--dtna-font-family);letter-spacing:0.035em;margin:0;padding:10px 28px;color:var(--blade-gold-light);text-align:center;text-shadow:0 2px 2px #000;background:linear-gradient(180deg,#574031,#281e19);border:1px solid var(--blade-gold);border-radius:5px;box-shadow:inset 0 0 0 2px var(--blade-gold-dark),0 3px 8px #00000077}
 .blade-root .blade-panel-extra{font-size:12px;color:var(--dtna-text-secondary)}
 .blade-root .blade-panel-body{padding:18px;position:relative}
-.blade-root .blade-material-iron{background:linear-gradient(135deg,#424749,#222426);border-color:var(--blade-iron);box-shadow:inset 0 0 0 1px #b1bdbe,inset 0 0 24px #00000077,0 12px 25px #00000088}
+.blade-root .blade-material-iron{background:linear-gradient(135deg,#424749,#222426);border-color:var(--blade-iron);box-shadow:inset 0 0 0 1px #b1bdbe,inset 0 0 6px #00000077,0 5px 8px #00000088}
 .blade-root .blade-material-parchment{background:radial-gradient(ellipse at center,var(--blade-parchment),#b79664);color:var(--blade-ink);--dtna-text:var(--blade-ink);--dtna-text-secondary:#725a3d;--dtna-background:var(--blade-parchment);--dtna-surface:#ddc392}
 .blade-root .blade-material-parchment .dtna-title{text-shadow:none}
 .blade-root .blade-corner{position:absolute;width:42px;height:42px;pointer-events:none;z-index:2;color:var(--blade-gold)}

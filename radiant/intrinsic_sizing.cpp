@@ -6733,7 +6733,16 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             // Get child's intrinsic width
             DomElement* child_elem = child->as_element();
             IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
-            float child_width = child_sizes.max_content;  // Use max-content width for flex items
+            float child_width = child_sizes.max_content;
+            ViewBlock* child_view = lam::view_as_block(child_elem);
+            if (child_view && child_view->fi && child_view->fi->flex_basis >= 0.0f) {
+                // Flex line breaks use the hypothetical main size, not a prior
+                // stretched width left on an item with an explicit flex basis.
+                float basis = child_view->fi->flex_basis_is_percent
+                    ? child_view->fi->flex_basis * width / 100.0f
+                    : child_view->fi->flex_basis;
+                child_width = layout_apply_min_max_border_box_axis(child_view, basis, true);
+            }
             LayoutContainingBlockScope child_cb_scope(lycon, LAYOUT_AXIS_X, width);
             float child_height = calculate_max_content_height(lycon, child, width);
 
