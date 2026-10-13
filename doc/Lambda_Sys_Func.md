@@ -1244,6 +1244,11 @@ Parse a string into Lambda data structures. Like `input()` but operates on strin
 
 **Supported Formats**: Same as `input()` — `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `css`, `ini`, `math`, `obj`, `mtl`, `gltf`, `a3d`
 
+For XML, `{type:'xml', flavor:'strict', preserve_whitespace:true}` retains
+leading/trailing spaces and whitespace-only text nodes. The default remains
+`false`, which trims text-only elements and omits whitespace-only children.
+The option must be a boolean; strict validation still applies (S7.4.2).
+
 ```lambda
 // Parse JSON string
 let data = parse("{\"name\": \"Alice\", \"age\": 30}", 'json')^

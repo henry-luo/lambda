@@ -3,6 +3,7 @@ import c: .common
 import f: .fonts
 import s: lambda.chart.svg
 import embedded: lambda.doc.font
+let group_attributes={event:"data-event-id",beam:"data-beam-id",lyric:"data-lyric-id"}
 
 fn primitive(item) element {
     if (item.kind=="glyph") <path d:item.path,
@@ -20,7 +21,8 @@ fn primitive(item) element {
     else if (item.kind=="text") <text x:item.x,y:item.y,'font-family':f.TEXT_FAMILY,'font-size':item.size,
         'font-weight':400,'font-style':"normal",item.text>
     else <g id:item.id,'data-highlight-id':item.id,
-        *:(if (item.kind=="event") {'data-event-id':item.id} else {'data-beam-id':item.id}),
+        [group_attributes[item.kind]]:item.lyric_id or item.id,
+        *:(if (item.kind=="lyric") {'data-verse':item.verse,'data-lyric-kind':item.lyric_kind} else {}),
         role:"img",'aria-label':item.description,
         <title item.description> for (child in item.shapes) shape(child)>
 }

@@ -59,8 +59,7 @@ pub fn draw(event,events,beam_list,profile) array^ {
     let accidental=if (e.accidental_glyph==null) null else f.glyph(profile,e.accidental_glyph)^
     let flags=n.flag_count(e)
     let below=e.stem_direction=="up"
-    let articulation_y=if (below) max(4.8,e.local_y+1.0) else min(-0.8,e.local_y-1.0)
-    let lyric_y=max(7.5,e.local_y+3.0);
+    let articulation_y=if (below) max(4.8,e.local_y+1.0) else min(-0.8,e.local_y-1.0);
     if (not e.visible) [] else [
         *[for (y in ledgers) d.line(e.x-profile.rules.legerLineExtension,e.staff_y+y,
             e.x+e.glyph.advance*scale+profile.rules.legerLineExtension,e.staff_y+y,profile.rules.legerLineThickness)],
@@ -75,8 +74,5 @@ pub fn draw(event,events,beam_list,profile) array^ {
         *[for (i,a in e.notation.articulations where articulations[a]!=null)
             d.glyph(profile,"artic"++articulations[a]++(if (below) "Below" else "Above"),e.x+e.glyph.advance/2,
                 e.staff_y+articulation_y+(if (below) 1.0 else -1.0)*float(i))^],
-        *if (e.notation.fermata) [d.glyph(profile,"fermataAbove",e.x+e.glyph.advance/2,e.staff_y+min(-2.0,e.local_y-2.0))^] else [],
-        *[for (i,l in e.lyrics) d.text(profile,l.text,e.x+e.glyph.advance/2,e.staff_y+lyric_y+float(i)*1.7,1.4,"middle")^],
-        *[for (i,l in e.lyrics where contains(["begin","middle"],l.syllabic))
-            d.text(profile,"-",e.x+e.glyph.advance/2+e.lyric_metrics[i].width/2+0.8,e.staff_y+lyric_y+float(i)*1.7,1.4,"middle")^]]
+        *if (e.notation.fermata) [d.glyph(profile,"fermataAbove",e.x+e.glyph.advance/2,e.staff_y+min(-2.0,e.local_y-2.0))^] else []]
 }

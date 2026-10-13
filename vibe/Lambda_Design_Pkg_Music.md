@@ -13,6 +13,8 @@ work are tracked in [the implementation record](impl/Lambda_Impl_Pkg_Music.md).
 Phase 2 now adds the shared performance model, SMF import/export, a native
 TinySoundFont/miniaudio transport and the player view. Live output has been
 verified on macOS; Linux/Windows device verification remains outstanding.
+Phase 3 extends MusicXML import and adds verse-aware lyric engraving and playback
+highlighting, as detailed in §2.3.
 The broader design below remains the target where the manifest marks limits.
 
 **Scope:** `lambda.music`, a shipped source package for reading, engraving,
@@ -131,6 +133,43 @@ OSMD's public README currently lists its audio player as an early-access
 sponsor feature. The native plan must therefore budget for its own MIDI
 conversion, transport, synthesis, and audio output; an OSMD cursor is not an
 audio engine. [OSMD README](https://github.com/opensheetmusicdisplay/opensheetmusicdisplay#readme)
+
+### 2.3 Phase 3 — MusicXML and lyric underlay (2026-10-13)
+
+Phase 3 adds `score-timewise` through the same part/measure reader, composite
+meters with different denominators, and inference of omitted graphical note
+types using exact duration, dots and tuplet ratios. Existing strict XML and
+namespace rules remain in force. These are package policies (D7.2.5), with
+ordinary immutable score values (D7.2.4) and raised validation errors (S7.4.2).
+
+Lyrics preserve ordered text/elision fragments, verse identity, placement,
+visibility and extension endpoints. Verse lanes stay consistent across notes;
+hyphens and melisma lines continue across systems and pages. Stable lyric
+groups join the written-event highlight bindings. During playback, the audio
+clock selects the active syllable, including melismas and tied continuations;
+repeat-specific `time-only` verses use the performed pass. Color selection,
+pause, seeking, stop and score following share the existing player handlers
+(S12.1.1v2/D7.4.6). Text is visual underlay, without synthesized singing.
+
+MusicXML requests the shared XML parser's `preserve_whitespace:true` option.
+Otherwise, trimming each text-only fragment independently would concatenate
+adjacent words. This generic parse option exposes the parser's existing
+whitespace mechanism; its default remains unchanged. `from_xml` consumes the
+supplied tree without reconstructing text that its caller already discarded
+(D7.2.4/S8.1.2v2).
+
+Lyric groups retain stable written IDs and member note IDs, while layout
+assigns verse lanes per staff/placement and measures text with the existing
+font service. Text, hyphens and extension segments have separate SVG groups
+and shared highlight bindings. The event bounds index includes local lyric
+geometry so score following also keeps underlay visible. Graphical text/font
+styling and exact source placement remain outside the bounded layout profile.
+
+Reference semantics: W3C MusicXML 4.0
+[timewise scores](https://www.w3.org/2021/06/musicxml40/musicxml-reference/elements/score-timewise/),
+[time signatures](https://www.w3.org/2021/06/musicxml40/musicxml-reference/elements/time/),
+[lyrics](https://www.w3.org/2021/06/musicxml40/musicxml-reference/elements/lyric/),
+and [extensions](https://www.w3.org/2021/06/musicxml40/musicxml-reference/elements/extend/).
 
 ## 3. Package boundary and public API
 

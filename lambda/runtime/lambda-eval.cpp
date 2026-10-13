@@ -6381,6 +6381,16 @@ Item fn_parse2(Item str_item, Item type) {
                 source_positions = it2b(input_sourcepos);
             }
         }
+        Item whitespace = _map_get((TypeMap*)options_map->type, options_map->data, "preserve_whitespace", &is_found);
+        if (is_found && get_type_id(whitespace) != LMD_TYPE_NULL) {
+            if (get_type_id(whitespace) != LMD_TYPE_BOOL) {
+                arraylist_free(adapter_names);
+                arraylist_free(raw_names);
+                set_runtime_error(ERR_TYPE_MISMATCH, "parse: preserve_whitespace option must be a bool");
+                return ItemError;
+            }
+            parse_options.xml_preserve_whitespace = it2b(whitespace);
+        }
         has_tex_options = parse_tex_options(options_map, &parse_options, adapter_names, raw_names);
     }
     else {
@@ -6424,7 +6434,7 @@ Item fn_parse2(Item str_item, Item type) {
     log_debug("fn_parse2: type=%s, flavor=%s", type_str ? type_str->chars : "auto", flavor_str ? flavor_str->chars : "null");
 
     parse_options.source_positions = source_positions;
-    Input* input = (source_positions || has_tex_options)
+    Input* input = (source_positions || has_tex_options || parse_options.xml_preserve_whitespace)
         ? input_from_source_with_options(str->chars, dummy_url, type_str, flavor_str, &parse_options)
         : input_from_source(str->chars, dummy_url, type_str, flavor_str);
     arraylist_free(adapter_names);

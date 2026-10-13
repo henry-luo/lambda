@@ -15,6 +15,7 @@ typedef struct InputParseOptions {
     int tex_adapter_count;
     const char* const* tex_raw_commands;  // adapter commands whose arguments stay unexpanded
     int tex_raw_command_count;
+    bool xml_preserve_whitespace; // xml text fragments can carry meaningful leading/trailing spaces.
 } InputParseOptions;
 
 #endif

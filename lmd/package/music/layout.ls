@@ -5,6 +5,7 @@ import f: .fonts
 import n: .notation
 import h: .header
 import d: .draw
+import lyrics: .lyrics
 
 fn options_for(options) map^ {
     let valid=c.option_warnings(options,["width","scale","mode","page_height","parts","show_title","show_lyrics","respect_breaks","strict"])^
@@ -22,9 +23,10 @@ fn measure_headers(parts,i,profile,repeated) => [for (p in parts, j,st in p.meas
     let header=h.prepare(profile,st,prior_context(p,i,j+1),repeated)^,
     {*:header,part:p.id,staff:j+1})]
 fn at_onset(items,onset) => [for (x in items where x.onset==onset) x]
-fn measure_plan(parts,i,profile,options) map^ {
+fn measure_plan(parts,i,profile,options,lanes,score) map^ {
     let raw=[for (p in parts) {*:p.measures[i],part:p.id}]
-    let events=n.prepare([for (m in raw,e in m.events) if (options.show_lyrics) e else {*:e,lyrics:[]}],profile)^
+    let events=n.prepare([for (m in raw,e in m.events) {*:e,lyrics:if (options.show_lyrics)
+        [for (l in lyrics.underlays(score,e) where l.visible) {*:l,lane:lanes[lyrics.line_key(e,l)]}] else []}],profile)^
     let beams=n.beam_groups(events)^
     let headers=measure_headers(parts,i,profile,false)
     let repeated=measure_headers(parts,i,profile,true)
@@ -64,11 +66,15 @@ fn staff_plan(parts,system) => c.fold([for (p in parts,i in 1 to len(p.measures[
         let events=[for (m in system.measures,e in m.events where e.part==key.part and e.staff==key.staff) e],
         let top=min([-3.0,*[for (e in events) min(e.y+e.glyph.ink.top,
             if (not e.rest and e.stem_direction=="up") e.y-4.0 else e.y-1.0)]]),
-        let bottom=max([7.0,*[for (e in events) max([e.y+e.glyph.ink.bottom,
-            if (not e.rest and e.stem_direction=="down") e.y+4.0 else e.y+1.0,
-            if (len(e.lyrics)>0) max(7.5,e.y+3.0)+float(len(e.lyrics)-1)*1.7 else 0.0])]]),
-        let y=acc.bottom-top,
-        {bottom:y+bottom+2.0,staffs:[*acc.staffs,{*:key,y:y,top:top,bottom:bottom}]}))
+        let below=max([7.5,*[for (e in events) e.y+3.0]]),
+        let above=top-1.5,
+        let lyric_top=min([top,*[for (e in events,l in e.lyrics where l.placement=="above") above-float(l.lane)*1.7-1.4]]),
+        let bottom=max([7.0,*[for (e in events) max(e.y+e.glyph.ink.bottom,
+            if (not e.rest and e.stem_direction=="down") e.y+4.0 else e.y+1.0)],
+            *[for (e in events,l in e.lyrics where l.placement=="below") below+float(l.lane)*1.7+0.5]]),
+        let y=acc.bottom-lyric_top,
+        {bottom:y+bottom+2.0,staffs:[*acc.staffs,{*:key,y:y,top:lyric_top,bottom:bottom,
+            lyric_below:below,lyric_above:above}]}))
 pub fn staff_y(staffs,part,staff) => [for (s in staffs where s.part==part and s.staff==staff) s.y][0]
 fn place_system(system,parts,available,left,profile,is_last) map^ {
     let vertical=staff_plan(parts,system)
@@ -118,6 +124,7 @@ pub fn layout(score, options = {}) map^ {
     let valid_parts=c.require(o.parts==null or len(o.parts)>0 and len(unique(o.parts))==len(o.parts) and
         all([for (p in o.parts) contains(ids,p)]),"invalid part selection")^
     let parts=[for (p in score.parts where o.parts==null or contains(o.parts,p.id)) p]
+    let lanes=lyrics.lanes(parts)
     let stable_staffs=c.require(all([for (p in parts,m in p.measures) len(m.context.staffs)==len(p.measures[0].context.staffs)]),
         "changing staff counts are not supported")^
     let profile=f.prepare()^
@@ -125,7 +132,7 @@ pub fn layout(score, options = {}) map^ {
     let unit=10.0*o.scale
     let left=3.0+label_width
     let available=max(1.0,o.width/unit-left-3.0)
-    let measures=[for (i,m in score.measures) measure_plan(parts,i,profile,o)^]
+    let measures=[for (i,m in score.measures) measure_plan(parts,i,profile,o,lanes,score)^]
     let broken=systems(measures,available,o)
     let placed=[for (i,s in broken) place_system(s,parts,available,left,profile,i==len(broken)-1)^]
     let paged=pages_for(placed,o,unit)

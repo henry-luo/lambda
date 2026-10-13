@@ -36,7 +36,7 @@ pub fn resolve(score) array^ {
     let closed=c.require(all([for (k,v in result.open) v==null]),"unclosed tie, slur, tuplet, or hairpin")^
     result.spans
 }
-fn positioned(layout,id) => [for (system in layout.systems,e in [*system.events,*system.directions] where e.id==id)
+pub fn positioned(layout,id) => [for (system in layout.systems,e in [*system.events,*system.directions] where e.id==id)
     {*:e,system:system.index}][0]
 pub fn draw(span,layout) array^ {
     let a=positioned(layout,span.start)

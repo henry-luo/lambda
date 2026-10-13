@@ -63,5 +63,4 @@ pub fn warnings(score) array => [
         c.diagnostic("unsupported-decoration","unsupported direction "++e.kind,p.id++"/"++m.label)],
     *[for (p in score.parts,m in p.measures,b in m.barlines where b.location=="middle" or
         not contains(["regular","none","light-light","light-heavy","heavy-light","heavy-heavy","heavy"],b.style))
-        c.diagnostic("unsupported-decoration","unsupported barline style or middle placement",p.id++"/"++m.label)],
-    *[for (e in score.events,l in e.lyrics where l.extend) c.diagnostic("unsupported-decoration","lyric extender is not yet engraved",e.id)]]
+        c.diagnostic("unsupported-decoration","unsupported barline style or middle placement",p.id++"/"++m.label)]]

@@ -1,6 +1,7 @@
 // D7.2.4/S12.4.1v2: normalize immutable XML/ZIP snapshots into ordinary score values.
 import c: .common
 import t: .time
+import lyrics: .lyrics
 
 let note_types = ["long", "breve", "whole", "half", "quarter", "eighth", "16th", "32nd", "64th"]
 let note_lengths = [16.0, 8.0, 4.0, 2.0, 1.0, 0.5, 0.25, 0.125, 0.0625]
@@ -25,13 +26,18 @@ fn clef(node, previous) map^ {
 }
 fn meter(node, previous) map^ {
     if (node == null) previous else {
-        let beats = c.field(node, "beats", "")
-        let values = [for (x in split(beats, "+")) float(x)]
-        let unit = c.field_number(node, "beat-type")
-        let checked = c.require(len(c.named(node, "beats")) == 1 and len(values) > 0 and
-            all([for (x in values) c.is_integer(x) and x > 0 and x <= 32]) and
-            contains([1, 2, 4, 8, 16, 32, 64], unit), "unsupported meter")^;
-        {beats: beats, unit: int(unit), symbol: node.symbol, span: t.ratio(int(sum(values)) * 4, int(unit))^}
+        let nodes=c.children(node)
+        let checked=c.require(len(nodes)>0 and len(nodes)%2==0 and len(nodes)<=32 and
+            all([for (i,x in nodes) name(x)==(if (i%2==0) 'beats' else 'beat-type')]),"unsupported meter")^
+        let groups=[for (i in 0 to (len(nodes) div 2-1)) (
+            let beats=trim(c.text(nodes[i*2])),
+            let values=[for (x in split(beats,"+")) float(x)],
+            let unit=float(trim(c.text(nodes[i*2+1]))),
+            let valid=c.require(len(values)>0 and all([for (x in values) c.is_integer(x) and x>0 and x<=32]) and
+                contains([1,2,4,8,16,32,64],unit),"unsupported meter")^,
+            {beats:beats,unit:int(unit),span:t.ratio(int(sum(values))*4,int(unit))^})];
+        {beats:groups[0].beats,unit:groups[0].unit,groups:groups,symbol:node.symbol,
+         visible:node['print-object']!="no",span:c.fold([for (g in groups) g.span],t.ZERO,(a,b)=>t.add(a,b)^)}
     }
 }
 fn staff_attribute(node, tag, staff) => [for (x in c.named(node, tag)
@@ -99,10 +105,19 @@ fn note(node, st, part, bar, index) map^ {
     let checked_duration = c.require(not chord or t.compare(dur, st.anchor.duration) <= 0, id ++ ": chord duration exceeds anchor")^
     let nonoverlap=c.require(chord or grace or all([for (e in st.events where not e.chord and not e.grace and e.staff==staff and e.voice==voice)
         t.compare(onset,t.add(e.onset,e.duration)^)>=0 or t.compare(t.add(onset,dur)^,e.onset)<=0]),id++": overlapping events in one voice")^
-    let type_name = c.field(node, "type", if (rest and c.child(node, "rest").measure == "yes") "whole"
-        else note_types[index_of(note_lengths, t.value(dur))])
-    let checked_type = c.require(contains(note_types, type_name), id ++ ": unsupported note type")^
     let dots = len(c.named(node, "dot"))
+    let modification=c.child(node,"time-modification")
+    let actual=c.field_number(modification,"actual-notes")
+    let normal=c.field_number(modification,"normal-notes")
+    let ratio_valid=c.require(dots<=3 and (modification==null or c.is_integer(actual) and actual>0 and actual<=64 and
+        c.is_integer(normal) and normal>0 and normal<=64),id++": invalid dots or tuplet ratio")^
+    // infer the written value exactly before choosing a graphical note type.
+    let written=t.divide(t.mul(dur,t.ratio(int(actual or 1),int(normal or 1))^)^,
+        t.ratio(int(2**(dots+1)-1),int(2**dots))^)^
+    let inferred=t.value(written)
+    let type_name = c.field(node, "type", if (rest and c.child(node, "rest").measure == "yes") "whole"
+        else note_types[index_of(note_lengths,inferred)])
+    let checked_type = c.require(contains(note_types, type_name), id ++ ": unsupported note type")^
     let checked_dots = c.require(dots <= 3, id ++ ": too many augmentation dots")^
     let p = if (rest) null else pitch(c.child(node, "pitch"))^
     let beams = [for (x in c.named(node, "beam")) {level: int(x.number or "1"), kind: trim(c.text(x))}]
@@ -118,9 +133,6 @@ fn note(node, st, part, bar, index) map^ {
     let valid_alter = c.require(alter == null or contains(["sharp", "flat", "natural", "double-sharp", "sharp-sharp", "flat-flat"], alter),
         id ++ ": unsupported accidental")^
     let marks = notation(node)^
-    let modification=c.child(node,"time-modification")
-    let actual=c.field_number(modification,"actual-notes")
-    let normal=c.field_number(modification,"normal-notes")
     let valid_tuplet=c.require(modification==null and len(marks.tuplets)==0 or
         c.is_integer(actual) and actual>0 and actual<=64 and c.is_integer(normal) and normal>0 and normal<=64,
         id++": invalid tuplet ratio")^
@@ -130,15 +142,15 @@ fn note(node, st, part, bar, index) map^ {
         context: st.context.staffs[int(staff) - 1], transpose: st.context.transpose, instrument: c.child(node,"instrument").id,
         stem: stem, beams: beams, accidental: alter, notation: marks,
         time_modification: {actual:actual,normal:normal},
-        lyrics: [for (x in c.named(node, "lyric")) {text: c.field(x, "text", ""),
-            number: x.number or "1", syllabic: c.field(x, "syllabic"), extend: c.present(x, "extend")}],
+        lyrics: lyrics.parse(node,id)^,
         visible: node['print-object'] != "no"}
     {*:st, cursor: if (chord or grace) st.cursor else t.add(onset, dur)^,
         extent: t.later(st.extent, t.add(onset, dur)^), anchor: if (chord) st.anchor else e,
         events: [*st.events, e], warnings: [*st.warnings,
             *c.names(node, ["pitch", "rest", "duration", "voice", "type", "dot", "accidental", "time-modification",
                 "stem", "staff", "beam", "notations", "lyric", "tie", "chord", "grace", "notehead", "instrument"], id),
-            *c.names(c.child(node, "notations"), ["tied", "slur", "tuplet", "articulations", "fermata"], id)]}
+            *c.names(c.child(node, "notations"), ["tied", "slur", "tuplet", "articulations", "fermata"], id),
+            *lyrics.warnings(node,id)]}
 }
 
 fn sound_record(node) => if (node==null) {} else
@@ -219,12 +231,34 @@ fn read_part(node, declaration) map^ {
         measures: result.measures, duration: result.end, diagnostics: result.warnings}
 }
 
+fn partwise(root) element^ {
+    if (name(root)=='score-partwise') root else {
+        let declarations=c.named(c.child(root,"part-list"),"score-part")
+        let ids=[for (d in declarations) d.id]
+        let measures=c.named(root,"measure")
+        let valid=c.require(len(measures)>0 and len(measures)<=2048 and all([for (m in measures) (
+            let parts=c.named(m,"part"),
+            let present=[for (p in parts) p.id],
+            len(parts)==len(c.children(m)) and len(parts)==len(ids) and len(unique(present))==len(present) and
+                all([for (id in present) contains(ids,id)]))]),
+            "timewise measures must contain each declared part exactly once")^;
+        // transpose only the XML axes; one reader owns measure timing and stable event IDs.
+        <'score-partwise' *:map([for (k,v in root where k is symbol or k is string) (k,v)]),
+            for (child in c.children(root) where name(child)!='measure') child
+            for (id in ids) <part id:id,for (m in measures) <measure
+                *:map([for (k,v in m where k is symbol or k is string) (k,v)]),
+                for (p in c.named(m,"part") where p.id==id) *c.children(p)>>>
+    }
+}
+
 pub fn from_xml(document, options = {}) map^ {
     let option_issues=c.option_warnings(options,["strict","format","rootfile"])^
     let roots = if (name(document) == 'document') c.children(document) else [document]
-    let root = roots[0]
-    let checked = c.require(len(roots) == 1 and name(root) == 'score-partwise', "expected one score-partwise MusicXML root")^
-    let valid_namespace = c.namespace_check(root)^
+    let source_root = roots[0]
+    let checked = c.require(len(roots) == 1 and contains(['score-partwise','score-timewise'],name(source_root)),
+        "expected one partwise or timewise MusicXML root")^
+    let valid_namespace = c.namespace_check(source_root)^
+    let root=partwise(source_root)^
     let valid_version = c.require(root.version == null or contains(["1.0", "1.1", "2.0", "3.0", "3.1", "4.0"], root.version), "unsupported MusicXML version")^
     let declarations = c.named(c.child(root, "part-list"), "score-part")
     let raw_parts = c.named(root, "part")
@@ -239,16 +273,18 @@ pub fn from_xml(document, options = {}) map^ {
         all([for (i,m in p.measures) m.span == first.measures[i].span])]), "parts have inconsistent measure spans")^
     let events = [for (p in parts, m in p.measures, e in m.events) e]
     let valid_events = c.require(len(events) <= 50000, "score event budget exceeded")^
+    let lyric_groups=lyrics.resolve({events:events})^
     let warnings = c.warnings([*option_issues,*[for (p in parts, w in p.diagnostics) w],
         *c.names(root, ["work", "movement-number", "movement-title", "identification", "defaults", "credit", "part-list", "part"], "score")], options)^;
     {kind: "music-score", version: 1, title: c.field(root, "movement-title", c.field(c.child(root, "work"), "work-title", "Untitled score")),
         composer: join([for (x in c.named(c.child(root, "identification"), "creator") where x.type == "composer") c.text(x)], ", "),
-        parts: parts, measures: first.measures, events: events, duration: first.duration, diagnostics: warnings}
+        parts: parts, measures: first.measures, events: events, duration: first.duration,
+        lyric_groups:lyric_groups,diagnostics: warnings}
 }
 
 pub fn parse(source, options = {}) map^ {
     let checked = c.require(source is string and len(source) <= 16000000, "expected XML text within the 16 MB profile")^
-    from_xml(lambda.sys.parse(source, {type: 'xml', flavor: 'strict'})^, options)^
+    from_xml(lambda.sys.parse(source, {type: 'xml', flavor: 'strict',preserve_whitespace:true})^, options)^
 }
 fn files(node) => [for (x in content(node)^) if (x.is_dir) *files(x) else x]
 fn member(entries, path) element^ {

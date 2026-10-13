@@ -3,6 +3,12 @@
 All score content here is original, created for Lambda's regression suite.
 It contains no copied commercial engraving or score source.
 
+UI event fixtures listed below live in `test/ui/music/`, under the automation
+harness's discovery root. Run them with
+`./test/test_ui_automation_gtest.exe --suite music --native-gui --jobs 1`.
+The suite requires visible windows and audio-device access: its playback waits
+must use wall time rather than headless replay's virtual clock.
+
 - `study.musicxml`: two-measure piano study; chords, backup, two clefs, beam,
   slur, dynamics, articulation, final barline.
 - `a4-study.musicxml`: original twenty-measure expansion of Morning Study,
@@ -17,6 +23,11 @@ It contains no copied commercial engraving or score source.
 - `ambiguous.mxl`: two declared MusicXML roots, requiring explicit selection.
 - `_view.ls`: manual A4 sheet viewer/export entry point, not a golden unit test.
 - `_sample.ls`: shared A4 layout and score source for the viewer/player samples.
+- `lyrics.musicxml`, `lyrics-timewise.musicxml`, `lyrics-timewise.mxl`: equivalent
+  original Morning Song in partwise, timewise and compressed timewise form;
+  two verses, repeat-specific text, cross-system melismas, a tied syllable,
+  text elision, above-staff text and a composite time signature.
+- `_lyrics_player.ls`: full-height lyric-player demo using the shared A4 shell.
 - `playback.musicxml`: original two-instrument repeat/ending study, with
   transposition, ties, numeric dynamics and tempo changes.
 - `pulse.mid`: original hand-encoded Type 0 file with running status, one
@@ -40,6 +51,8 @@ It contains no copied commercial engraving or score source.
   independent sheet scrolling, note visibility after seeking forward/backward
   and resizing, and following during playback across systems in a short window,
   with no page scroll or toolbar movement.
+- `player_lyrics.json`: audio-clock lyric highlighting, repeat-specific verses,
+  melisma continuation, paused color changes, resizing and Stop/restart cleanup.
 
 Package goldens live in `test/lambda/music/` and are registered with
 `test_lambda_gtest`. Layout, performance and MIDI tests are also in the

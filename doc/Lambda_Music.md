@@ -75,10 +75,12 @@ container's `META-INF/container.xml` selects the score; unrelated XML and
 PDF renditions are not selected. Multiple MusicXML roots require `rootfile`.
 Input snapshots and archive limits follow S12.4.1v2/S14.3.1v2.
 
-XML parsing uses `{type:'xml', flavor:'strict'}`. External DOCTYPE identifiers
+XML parsing uses `{type:'xml', flavor:'strict', preserve_whitespace:true}` to
+retain meaningful spaces between lyric fragments. External DOCTYPE identifiers
 are inert: no DTD is fetched. Internal subsets, unknown entities, malformed
 XML, and foreign default namespaces fail. `from_xml` trusts the supplied
-tree's XML syntax but performs the same music-model checks.
+tree's XML syntax but performs the same music-model checks. When preparing a
+tree yourself, use the same whitespace option for faithful lyric text.
 
 | Layout option | Default | Meaning |
 |---|---|---|
@@ -88,7 +90,7 @@ tree's XML syntax but performs the same music-model checks.
 | `page_height` | `1120.0` | Requested height in pixels for paged layout, 100–30,000 |
 | `parts` | all parts | Array of MusicXML part IDs in source order |
 | `show_title` | `true` | Show score title and composer |
-| `show_lyrics` | `true` | Include lyric text and its spacing |
+| `show_lyrics` | `true` | Include lyric text, connectors and verse spacing |
 | `respect_breaks` | `true` | Honor source system/page breaks |
 | `strict` | `false` | Promote diagnostics to errors |
 
@@ -102,15 +104,15 @@ are not reproduced.
 
 | Area | Implemented | Limitations |
 |---|---|---|
-| Documents | Unnamespaced `score-partwise`, MusicXML versions 1.0–4.0, XML and MXL | No `score-timewise`, opus, or namespace-prefixed core elements |
+| Documents | Unnamespaced `score-partwise` and `score-timewise`, MusicXML versions 1.0–4.0, XML and MXL | No opus or namespace-prefixed core elements; each timewise measure must contain every declared part exactly once |
 | Timing | Exact reduced fractions, decimal divisions, pickups, chords, backup/forward, multiple voices/parts/staves | Independent polymeters, changing staff counts, overlapping events in one voice fail |
-| Pitch/context | Pitched notes, G/F/C clefs, conventional keys and cancellation, simple/additive meters, context changes | No percussion, tablature, microtones, alternate staff tuning, cue notes, or octave-shift directions |
-| Rhythm | Long through 64th notes/rests, up to three dots, grace notes and slash, explicit beams and hooks | No automatic beaming; cross-staff, mixed-stem, or cross-measure beams fail |
+| Pitch/context | Pitched notes, G/F/C clefs, conventional keys and cancellation, simple/additive/composite meters, hidden time signatures, context changes | No percussion, tablature, microtones, alternate staff tuning, cue notes, or octave-shift directions |
+| Rhythm | Long through 64th notes/rests, up to three dots, omitted types inferred from exact duration/dots/tuplet ratio, grace notes and slash, explicit beams and hooks | Grace notes still need explicit types; no automatic beaming; cross-staff, mixed-stem, or cross-measure beams fail |
 | Chords | Shared stems, alternating seconds, accidental columns | Dense multivoice unisons and complex chords may require further collision refinement |
 | Spanners | Ties, numbered slurs, single-level tuplets, hairpins, system continuations | Nested tuplets fail; unmatched endpoints fail; complex curve collisions need further refinement |
 | Marks | Words/rehearsal/tempo text, ppp–fff, mp/mf, sfz/sffz/fp, common articulations, fermatas, segno/coda | Other decorations produce warnings |
 | Navigation | Repeat barlines, numbered ending brackets | Playback executes ordinary nonnested repeats/endings; jumps are unsupported |
-| Lyrics | Text, verse rows, syllabic hyphens, measured spacing | Extender lines produce warnings and are not drawn |
+| Lyrics | Multiple text/elision fragments, numbered/named verse rows above/below, print visibility, syllabic hyphens, melisma extensions across systems/pages, tied syllables, repeat-specific highlighting | Plain underlay typography; source font styling and exact authored positions are normalized; no synthesized singing |
 | Output | SVG, HTML wrapper, part filtering, width/scale, scroll/pages, event bounds | Experimental engraving; no complete collision solver or editorial-layout reproduction |
 
 Recognized structural features outside the profile fail rather than changing
@@ -132,8 +134,10 @@ event IDs. Source IDs are retained as metadata, never used as unchecked keys.
 `Layout.systems` and drawing records use staff spaces. `Layout.events[id]`
 gives `page`, `system`, `part`, `staff`, `voice`, and a CSS-pixel `bounds` map
 with `left`, `top`, `right`, `bottom`, relative to that page. Bounds include
-the event's symbols, stems, and lyrics; connecting spanners have separate
-drawing records. SVG event groups carry `data-event-id` and accessible labels.
+the event's symbols, stems, and local lyric underlay; connecting spanners have
+separate drawing records. SVG note groups carry `data-event-id`; lyric groups
+carry `data-lyric-id`, `data-verse` and `data-lyric-kind` (`text`, `hyphen`,
+`extend`). Both have stable highlight IDs and accessible labels.
 
 ## Play and export music
 
@@ -159,6 +163,11 @@ Active notes default to red. The **Highlight** swatches offer red, blue and
 yellow as squares with rounded corners and a border marking the selected color.
 They support mouse and keyboard selection, updating noteheads, stems, flags,
 accidentals/dots and shared beams.
+Lyrics use the same highlight color. Syllables remain highlighted over melismas
+and tied continuations; `time-only` selects the verse for the current repeat
+pass. Hyphens and extension lines highlight with their syllable. Pause keeps
+the current lyric, seeking updates it, and Stop clears it. Try the original
+two-verse example with `./lambda.exe view test/music/_lyrics_player.ls`.
 Color changes apply immediately while playing or paused. Removing the player or closing
 the document releases its native session; a disconnected device reports an
 error. A real device is required: silent null backends are rejected.

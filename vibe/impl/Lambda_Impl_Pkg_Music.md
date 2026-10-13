@@ -303,3 +303,59 @@ resize, playback across systems in a short window, and no root scrolling.
 All nine music goldens pass in automatic and
 JIT modes. Native captures of the first and last systems and a 320px preview
 were visually inspected.
+
+## Phase 3: MusicXML and lyric underlay (2026-10-13)
+
+`score-timewise` is transposed into the existing part/measure reader, preserving
+written event IDs and all timing checks. Measures require every declared part
+exactly once. Composite meters sum exact quarter-note fractions and engrave
+each numerator/denominator pair; hidden time signatures retain their timing.
+Omitted graphical note types are inferred from exact duration, dots and tuplet
+ratios. These remain package policies over immutable score data (D7.2.4/D7.2.5).
+
+`lyrics.ls` preserves ordered text/elision fragments, verse identity, visibility,
+placement, repeat passes and extension endpoints. It resolves melismas and tied
+syllables to written-note membership. Layout assigns stable verse lanes per
+staff/placement, including continuation-only notes. `lyric_draw.ls` emits text,
+hyphens and extension segments across systems/pages. The shared positioned-event
+lookup is exported from `spans.ls`; no parallel geometry lookup was introduced.
+
+SVG lyric groups expose stable highlight IDs, verse and connector metadata.
+Highlight bindings connect all member notes to their syllable and connectors;
+the player filters repeat-specific verses against the current occurrence pass.
+Pausing, seeking, color selection and Stop use the existing audio-clock path
+(S12.1.1v2/D7.4.6). Local lyric bounds join the event index for score following.
+The new Morning Song fixtures exercise partwise, timewise and compressed input.
+`_lyrics_player.ls` uses the same A4 document shell as the original player.
+
+Adjacent lyric text fragments exposed the shared XML parser's default trimming
+of text-only elements. `parse(..., {preserve_whitespace:true})` now exposes its
+existing preservation mechanism; MusicXML opts in. Default parsing and strict
+XML validation remain unchanged (S8.1.2v2/S7.4.2). A separate ten-assertion golden
+checks preserved/default text, whitespace-only children, CDATA and invalid options.
+
+Visible-window regression runs exposed real GLFW cursor motion resetting a
+replayed dropdown's hover row between ArrowDown and Enter. Scripted replay now
+supplies pointer/keyboard input exclusively; a replay that leaves its window
+open restores ordinary input callbacks on completion. Audio tests retain real
+wall-clock execution: headless replay advances virtual time, so it cannot stand
+in for audible-clock transport verification. The JSON fixtures now live under
+the harness's existing `test/ui/music/` discovery root; the manifest marks the
+suite `headless:false`. Previously its `test/music/` glob selected no fixtures
+because discovery only scanned `test/ui/` and `test/view/`.
+
+Validation: all twelve focused goldens pass in automatic and JIT modes,
+including twenty-one lyric assertions and fifteen MusicXML expansion assertions.
+All eight registered visible native UI fixtures pass 100 assertions across 198 events. Blue
+syllables and yellow melisma continuations were visually inspected. The Lambda
+baseline reports 6,858 passes and one editor math-source roundtrip golden failure;
+the same failure reproduces with the saved executable from before Phase 3.
+Input baseline suites and all 312 forced-GC stress cases pass.
+
+The broader Radiant gate remains unclean: layout reports 2,946/3,294 passes,
+page snapshots 51/52, and baseline UI 565/569. Its four UI failures concern
+document-editor image/PDF, EML and TSV fixtures. DOM (156), view reuse (514),
+page (109), WPT input (32), fuzzy (24), and Radiant view UI (15) suites pass.
+The run was stopped when sandbox-blocked desktop/network cases could not
+complete. These results do not establish a clean full Radiant baseline;
+the focused native music suite was run separately with desktop access.

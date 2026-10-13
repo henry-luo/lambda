@@ -878,6 +878,15 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
     log_leave();
 }
 
+static void window_register_input_callbacks(GLFWwindow* window) {
+    glfwSetKeyCallback(window, key_callback);
+    glfwSetCharCallback(window, character_callback);
+    glfwSetCursorPosCallback(window, cursor_position_callback);
+    glfwSetMouseButtonCallback(window, mouse_button_callback);
+    log_info("Mouse button callback registered: %p", mouse_button_callback);
+    glfwSetScrollCallback(window, scroll_callback);
+}
+
 // Callback function to handle window resize
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     log_debug("Window resized to: %d x %d", width, height);
@@ -1385,12 +1394,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // disable byte-alignment restriction
 
         glfwSetInputMode(window, GLFW_LOCK_KEY_MODS, GLFW_TRUE);  // receive the state of the Caps Lock and Num Lock keys
-        glfwSetKeyCallback(window, key_callback);  // receive raw keyboard input
-        glfwSetCharCallback(window, character_callback);  // receive character input
-        glfwSetCursorPosCallback(window, cursor_position_callback);  // receive cursor/mouse position
-        glfwSetMouseButtonCallback(window, mouse_button_callback);  // receive mouse button input
-        log_info("Mouse button callback registered: %p", mouse_button_callback);
-        glfwSetScrollCallback(window, scroll_callback);  // receive mouse/touchpad scroll input
+        // replay supplies input; real cursor events can reset popup hover between replayed keys.
+        if (!sim_ctx) window_register_input_callbacks(window);
         glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
         glfwSetWindowContentScaleCallback(window, window_content_scale_callback);
         glfwSetWindowRefreshCallback(window, window_refresh_callback);
@@ -1860,6 +1865,9 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                 // Simulation complete, auto-close window
                 log_info("Simulation complete, auto-closing window");
                 window_request_close(window);
+            } else if (!sim_running) {
+                // a bootstrap replay can leave the window open for ordinary user input.
+                window_register_input_callbacks(window);
             }
             do_redraw = 1;  // redraw after each simulated event
         }

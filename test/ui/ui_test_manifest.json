@@ -7,7 +7,8 @@
   "suites": [
     {
       "name": "music",
-      "globs": ["test/music/*.json"],
+      "globs": ["test/ui/music/*.json"],
+      "headless": false,
       "tags": ["music", "native-gui"]
     },
     {

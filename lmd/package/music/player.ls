@@ -133,9 +133,11 @@ pn synchronize(owner,session_value,node) {
         if (session_value.token!=null) dom.audio_close(owner,session_value.token)
         return {*:session_value,token:null,frame:0}
     }
-    let sounding=if (info.state=="playing" or info.state=="paused") unique([for (o in node.performance.occurrences where
-        not o.rest and o.seconds<=info.position and o.end_seconds>info.position) o.id]) else []
-    let active=unique([for (id in sounding,key in (node.highlight_links[id] or [id])) key])
+    let occurrences=if (info.state=="playing" or info.state=="paused") [for (o in node.performance.occurrences where
+        not o.rest and o.seconds<=info.position and o.end_seconds>info.position) o] else []
+    let sounding=unique([for (o in occurrences) o.id])
+    let active=unique([for (o in occurrences,key in (node.highlight_links[o.id] or [o.id]) where
+        len(node.lyric_passes[key] or [])==0 or contains(node.lyric_passes[key],o.pass)) key])
     let highlighted=highlight(owner,session_value,active)
     if (sounding!=session_value.sounding) follow_notes(owner,session_value,node,sounding)
     dom.set_state(dom.query_selector(owner,".music-seek"),"value",string(info.position))
@@ -234,5 +236,6 @@ pub fn create(source,options = {}) element^ {
     apply(<music_player performance:performance,soundfont:font,
         positions:if (sheet==null) {} else sheet.events,
         page_widths:if (sheet==null) [] else [for (page in sheet.pages) page.width*sheet.unit],
+        lyric_passes:if (sheet==null) {} else sheet.lyric_passes,
         highlight_links:if (sheet==null) {} else engrave.highlight_bindings(sheet),tree:tree(performance,sheet)>)
 }
