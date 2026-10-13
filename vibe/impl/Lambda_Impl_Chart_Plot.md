@@ -80,6 +80,52 @@ The isolated WPT input-event rerun completes with **20 passes, 12 skips, zero
 failures**; skips are the harness's existing capability/assertion admissions.
 The Radiant integer-cast lint rule and `git diff --check` pass.
 
+### Gallery startup optimization, 2026-10-13
+
+The initial `mesh.prepare` ran exact triangle-overlap predicates against every
+active face pair and repeatedly rebuilt the same triangle coordinates. The
+gallery's spectrogram has 442 faces: 97,461 pairs were checked, including
+spatially disjoint cells. Isolating the six panels identified this preparation
+step as the startup bottleneck; edge construction and spatial indexing were
+comparatively small.
+
+Preparation now builds its existing spatial index before overlap validation,
+caches triangle coordinates/bounds, and reuses `collision.overlaps` to reject
+disjoint bounding boxes. Candidate pairs are visited once in their first
+common bin, then passed to the unchanged exact predicates. For wide faces
+whose bin occupancy would multiply the work, one bounding-box pair scan is
+cheaper and bounds the candidate search. Sorted source indices preserve the
+original diagnostic order (**S6.2.3**). Masks, topology, IDs and prepared output
+remain unchanged; this is a pure implementation optimization (**S12.1.1v2**).
+
+Measurements used the same macOS ARM64 release executable, built with
+`make build-release-compile`, and the default `auto` execution tier. The table
+compares one completed original run with the median of three optimized runs;
+these are fresh CLI processes evaluating the scripts, not debug timings.
+Compiler/profile reporting and `--no-log` were identical on both sides.
+
+| Evaluation | Original | Optimized median |
+|---|---:|---:|
+| Spectrogram panel | 34.70 s | 0.62 s |
+| Equivalent 252-vertex/442-face grid preparation | 82.36 s | 0.45 s |
+| Complete scientific gallery | 100.99 s | 1.10 s |
+
+The complete generated gallery, spectrogram and grid outputs match the
+original byte for byte, excluding the requested timing report. Actual GUI
+`view` runs with an automated native-scene capture and close took 3.34, 2.78
+and 2.84 seconds. A separately attempted timed original GUI run was terminated
+by signal 15 and is excluded from the comparison; the earlier original GUI
+capture completed successfully. Timing probes/results remain in
+`temp/chart-opt/` and are not required runtime assets.
+
+The new `test_scientific_mesh_index.ls`/`.txt` regression covers a
+spectrogram-sized grid, sampling/IDs/adjacency, nested and crossing triangles
+across bins, reversed winding, boundary-only contact, bounding-box false
+positives, masks, wide faces and curvilinear cells. The final chart suite
+passes **127/127** on both `auto` and `interp`; all six scientific fixtures
+pass forced JIT. The existing independent-camera/picking test passes all 13
+events. No runtime/native renderer code changed for this optimization.
+
 ## Remaining proposal requirements
 
 | Delivery stage | Remaining work |
@@ -89,7 +135,7 @@ The Radiant integer-cast lint rule and `git diff --check` pass.
 | 3: signals | Grouped spectrogram envelope/composition, derived dimensional unit labels, configurable timestamp tolerances and exhaustive numerical-overflow diagnostics. |
 | 4: streams | Spatial occupancy and adjacency-driven traversal for large fields; broader boundary/separatrix/offset stress coverage. Current edge scans and point-list occupancy are bounded but not release-benchmarked. |
 | 5: figures | Camera-aware exterior ticks/axis titles/grid planes, fully resolved shared layer/figure guides and selection state, fixed-topology 3D frame interpolation/live playback, linked cameras and complete accessibility controls. |
-| 6: production evidence | Unavailable-host visible overlay, explicit export-time camera/frame controls beyond static/endpoints, headless-profile build verification, release timing/memory/large-mesh measurements and wider cross-platform pixel coverage. |
+| 6: production evidence | Unavailable-host visible overlay, explicit export-time camera/frame controls beyond static/endpoints, headless-profile build verification, broader release timing/memory/large-mesh measurements and wider cross-platform pixel coverage. |
 
 Smooth shading and intermediate 3D timeline frames explicitly return errors;
 they do not silently approximate the unimplemented contract. Grouped

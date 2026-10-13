@@ -2,6 +2,7 @@
 import util: .util
 import geometry: .geometry
 import records: .records
+import collision: .collision
 
 pub fn supports(data) any | error => contains(["grid", "curvilinear", "mesh", "prepared_mesh"], data.kind)
 pub fn finite(value) any | error => not (value is complex) and util.finite_number(value) and util.finite_number(float(value))
@@ -97,6 +98,24 @@ fn spatial(vertices,faces) {
             j>=bin(b[1][0],extent[1],count) and j<=bin(b[1][1],extent[1],count)) fi]]}
 }
 
+fn overlap_candidate(faces,boxes,a,b) => not faces[a].masked and not faces[b].masked and collision.overlaps(boxes[a],boxes[b])
+fn overlapping_faces(vertices,faces,index) {
+    let triangles=[for (face in faces) face_points(vertices,face)];
+    let boxes=[for (points in triangles,let extent=bounds(points))
+        {left:extent[0][0],right:extent[0][1],top:extent[1][0],bottom:extent[1][1]}];
+    // wide faces can fill many bins; cap broad-phase work at a single all-pairs box scan.
+    let candidates=if (sum(index.bins |> len(~)**2)>len(faces)**2)
+        [for (a,face in faces) for (b,other in faces where a<b and overlap_candidate(faces,boxes,a,b)) [a,b]]
+        // positive-area intersections share a bin; test each pair only in its first common bin.
+        else [for (bucket,entries in index.bins) for (i,a in entries)
+            for (j,b in entries where i<j and overlap_candidate(faces,boxes,a,b) and
+                bucket==bin(max(boxes[a].top,boxes[b].top),index.extent[1],index.count)*index.count+
+                    bin(max(boxes[a].left,boxes[b].left),index.extent[0],index.count)) [a,b]];
+    // source order keeps overlap diagnostics deterministic, regardless of bin traversal.
+    [for (pair in sort(candidates) where overlaps(triangles[pair[0]],triangles[pair[1]]))
+        [faces[pair[0]].id,faces[pair[1]].id]]
+}
+
 pub fn prepare(data, options = {}) {
     let maximum=if (options.max_vertices!=null) options.max_vertices else 4096;
     let face_max=if (options.max_faces!=null) options.max_faces else 8192;
@@ -136,8 +155,8 @@ pub fn prepare(data, options = {}) {
                 else orientation(converted,f)==0) f.id];
             let duplicate_faces=len(util.unique_vals([for (f in faces) sort(f.vertices)]))!=len(faces);
             let links=edges(normalized);
-            let crossing=if (options.dimension==3) [] else [for (i,a in active) for (j,b in active where i<j and
-                overlaps(face_points(converted,a),face_points(converted,b))) [a.id,b.id]];
+            let index=spatial(converted,normalized);
+            let crossing=if (options.dimension==3) [] else overlapping_faces(converted,normalized,index);
             if (duplicate_positions) error("mesh.prepare: duplicate binary64 vertex position")
             else if (len(degenerate)>0) error("mesh.prepare: degenerate face "++string(degenerate[0]))
             else if (duplicate_faces) error("mesh.prepare: duplicate face connectivity")
@@ -146,7 +165,7 @@ pub fn prepare(data, options = {}) {
             else {*:raw,kind:"prepared_mesh",vertices:converted,faces:normalized,edges:links,
                 cells:if (raw.cells!=null) [for (cell in raw.cells) {*:cell,masked:cell.masked==true or any([for (i in cell.vertices) vertices[i].masked==true])}] else null,
                 adjacency:[for (fi,f in normalized) [for (edge in links where contains(edge.uses |> ~.face,fi))
-                    for (use in edge.uses where use.face!=fi) use.face]], index:spatial(converted,normalized),dimension:if (options.dimension==3) 3 else 2}
+                    for (use in edge.uses where use.face!=fi) use.face]], index:index,dimension:if (options.dimension==3) 3 else 2}
         }
     }
 }
