@@ -4,6 +4,7 @@
 // layout coordinates and dimensions are float; justified integer casts use INT_CAST_OK.
 
 #include "view.hpp"
+#include "text_breaks.hpp"
 #include "grid_track.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_parser.hpp"
@@ -261,6 +262,7 @@ struct TextIntrinsicWidths {
     float min_content;
     float max_content;
 };
+
 // The fast text paths share the same glyph-run probe; only their CSS
 // eligibility rules differ. Keeping the byte scan and font measurement here
 // prevents intrinsic sizing from maintaining a second shaping implementation.
@@ -271,7 +273,7 @@ struct LayoutSimpleLatinRun {
     uint32_t last_codepoint;
 };
 
-struct LayoutBidiRun {
+struct LayoutScriptRun {
     size_t bytes;
     float width;
     uint32_t first_codepoint;
@@ -283,7 +285,7 @@ bool layout_measure_simple_latin_run(LayoutContext* lycon,
                                      const unsigned char* text,
                                      size_t remaining,
                                      LayoutSimpleLatinRun* result);
-bool layout_measure_bidi_run(LayoutContext* lycon,
+bool layout_measure_script_run(LayoutContext* lycon,
                              const unsigned char* text,
                              size_t remaining,
                              CssEnum text_transform,
@@ -292,7 +294,9 @@ bool layout_measure_bidi_run(LayoutContext* lycon,
                              bool break_word,
                              bool hyphenation,
                              uint8_t text_autospace,
-                             LayoutBidiRun* result);
+                             LayoutScriptRun* result,
+                             const LayoutTextBreaks* breaks = nullptr,
+                             size_t source_offset = 0);
 bool layout_measure_inline_text_context(LayoutContext* lycon, DomNode* text_node,
     const unsigned char* start, size_t length, bool cursive, float* width);
 bool layout_measure_shaping_text(LayoutContext* lycon, const char* text, size_t length,
@@ -369,17 +373,20 @@ float layout_broken_image_fallback_width(LayoutContext* lycon, ViewBlock* block,
                                           const char* fallback_text);
 uint8_t layout_text_autospace_flags(LayoutContext* lycon, DomNode* text_node = nullptr);
 bool layout_text_contains_rtl_codepoint(const char* text, size_t length);
-bool layout_utf8_next_codepoint(const char** cursor, const char* end,
-                                uint32_t* codepoint);
-bool layout_utf8_next_codepoint(const unsigned char** cursor,
-                                const unsigned char* end,
-                                uint32_t* codepoint);
 void layout_resolve_inherited_text_wrap(DomNode* node, CssEnum* overflow_wrap,
                                          CssEnum* word_break = nullptr);
-bool is_typographic_letter_unit(uint32_t codepoint);
+// CSS Text §5.2: layout and standalone paint clients share Unicode letter units.
+inline bool is_typographic_letter_unit(uint32_t cp) {
+    utf8proc_category_t cat = utf8proc_category(cp);
+    return (cat >= UTF8PROC_CATEGORY_LU && cat <= UTF8PROC_CATEGORY_LO) ||
+           (cat >= UTF8PROC_CATEGORY_ND && cat <= UTF8PROC_CATEGORY_NO);
+}
 bool layout_text_allows_letter_break(uint32_t current, uint32_t next,
                                       CssEnum line_break, bool zwj_preceded,
                                       bool cj_non_starter);
+bool layout_text_native_break_allowed(const LayoutTextBreaks& breaks, size_t offset,
+    uint32_t current, const unsigned char* next, const unsigned char* end,
+    bool keep_all);
 bool layout_text_autospace_pair(uint8_t flags, uint32_t previous, uint32_t current);
 float layout_text_autospace_advance(LayoutContext* lycon);
 bool layout_get_grapheme_cluster_bytes(const unsigned char* cluster_start,
@@ -1699,11 +1706,14 @@ inline float text_space_advance(const FontProp* font, float extra_spacing = 0.0f
 }
 
 CssEnum layout_inherited_text_transform(DomNode* node);
+uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards);
 bool layout_text_combine_upright_applies(DomNode* text_node);
 float layout_inline_end_edge(ViewSpan* span);
 bool text_codepoint_has_zero_advance(uint32_t codepoint);
 bool text_emphasis_marks_codepoint(uint32_t codepoint);
+bool text_codepoint_is_extended_pictographic(uint32_t codepoint);
 float text_unicode_space_width_em(uint32_t codepoint);
+float layout_unicode_space_advance(LayoutContext* lycon, uint32_t codepoint);
 // tier-3: layout-transient, valid within pass
 struct TableMetadata {
     int column_count;
@@ -2057,6 +2067,12 @@ typedef struct ColumnGroup {
     float row_gap;
     float target_height;
     float group_used_height;
+    // fixed row tracks can contain a shorter balanced final column set.
+    float row_height;
+    float first_row_height;
+    float last_row_height;
+    float initial_row_offset;
+    int last_balanced_row;
     bool wraps_rows;
     bool vertical_writing;
 } ColumnGroup;
@@ -2084,6 +2100,7 @@ typedef struct MulticolFragmentPlacement {
 } MulticolFragmentPlacement;
 
 bool is_multicol_container(ViewBlock* block);
+bool multicol_is_spanner_block(ViewBlock* block);
 bool multicol_find_spanner_containing_block(ViewBlock* block,
                                             ViewBlock** out_containing_block);
 float multicol_used_block_axis_extent(ViewBlock* block);
@@ -5066,9 +5083,26 @@ static inline bool layout_atomic_wrap_neighbor_allows(uint32_t cp) {
     return true;
 }
 
-static inline bool text_justify_cjk_gap(uint32_t previous, uint32_t current) {
-    return has_id_line_break_class(previous) &&
-           has_id_line_break_class(current);
+struct TextJustifyContext {
+    uint32_t previous;
+    uint32_t unit_base;
+    utf8proc_int32_t grapheme_state;
+};
+
+static inline bool text_justify_character_gap(TextJustifyContext* context,
+                                               uint32_t current) {
+    bool boundary = context->previous == 0 || utf8proc_grapheme_break_stateful(
+        (utf8proc_int32_t)context->previous, (utf8proc_int32_t)current,
+        &context->grapheme_state);
+    uint32_t previous_unit = context->unit_base;
+    context->previous = current;
+    if (!boundary) return false;
+    context->unit_base = current;
+    // CSS Text §6.4.5: clustered scripts admit gaps between typographic
+    // units; combining marks and conjuncts stay inside their grapheme.
+    return (has_id_line_break_class(previous_unit) && has_id_line_break_class(current)) ||
+        ((utf_is_clustered_script(previous_unit) || utf_is_clustered_script(current)) &&
+         is_typographic_letter_unit(previous_unit) && is_typographic_letter_unit(current));
 }
 
 /**

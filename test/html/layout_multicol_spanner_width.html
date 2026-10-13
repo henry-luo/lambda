@@ -1,0 +1,18 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+.columns { width: 100px; columns: 2; gap: 0; }
+.spanner { column-span: all; height: 10px; padding: 5px; border: 5px solid; }
+#content { width: 75px; }
+#border { width: 75px; box-sizing: border-box; }
+#percentage { width: 50%; }
+#maximum { max-width: 60px; }
+#minimum { width: 50px; min-width: 70px; }
+</style>
+<div class="columns" id="result">
+<div class="spanner" id="content"></div>
+<div class="spanner" id="border"></div>
+<div class="spanner" id="percentage"></div>
+<div class="spanner" id="maximum"></div>
+<div class="spanner" id="minimum"></div>
+</div>

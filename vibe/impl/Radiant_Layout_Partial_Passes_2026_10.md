@@ -307,6 +307,12 @@ character. The range API uses CoreText run string indices and glyph advances,
 so a later one-character node can have zero advance without losing its source
 or font box. This allocation is permitted by
 [CSS Text 3 §1.4](https://www.w3.org/TR/css-text-3/#characters).
+
+For vertical multicol breaks, a zero inline coordinate in an RTL paragraph
+already denotes the line's inline-end edge. Adding the parent column pitch
+again displaces that break. Use paragraph direction for this correction,
+independent of the nested inline's bidi direction. Opposing-direction browser
+controls expose edges at 0px for the RTL paragraph and 80px for the LTR one.
 Caret subdivision was unsuitable for these source-owned inline fragments.
 
 Only the separating physical edge can stop shaping. One-sided padding leaves
@@ -646,3 +652,299 @@ painting limitations remain outside these geometry fixes. Cases with an
 unproven root, unsupported browser features or a stale reference grouping
 remain partial. Automatic language resources use CoreFoundation on macOS
 and retain the bundled English fallback on other platforms.
+
+## Round 6: fifty additional full matches
+
+Starting gate after the merge: **3,007 full passes, 287 partial passes, zero
+failures**, across 3,294 cases. Preserve references, tolerances and scored
+baselines. Earlier rounds do not count toward these fifty fixes.
+
+### Dictionary-backed line boundaries
+
+`word-break-normal-th-000` leaves its entire unspaced sentence on one line;
+Chromium wraps before the final Thai word. CoreFoundation resource probes
+also find the expected Lao, Khmer and Myanmar boundaries. Existing character
+classification only creates opportunities for spaces, CJK and authored
+controls. A pass-local UTF-8 boundary map supplies native Unicode line-break
+opportunities; convert the UTF-16 offsets once while scanning source bytes.
+Reuse it in final line layout and intrinsic measurement. CSS tailoring keeps
+`nowrap`/`break-all` independent and `keep-all` suppresses CJK opportunities
+without suppressing other scripts' customary breaks. Terminal text-node
+boundaries are not automatically soft breaks. Without a native resource,
+retain the existing explicit-break behavior.
+
+The first inventory exposes two integration roots: native boundaries involving
+Hangul jamo or mixed Latin/CJK must receive `keep-all` tailoring on both sides,
+and shaped Latin runs must flush their min-content tail at a boundary before
+following CJK text. Share that predicate across final and intrinsic paths.
+Also keep an earlier fitting candidate when a later resource boundary
+overflows. Unicode decoding moves into the shared text-metrics module; the small
+Unicode letter predicate is inline in the common header. Independent DOM
+geometry and paint runners retain their existing small link dependencies.
+
+The full gate finds a Markdown regression: a Unicode character elsewhere in
+a long node activates the native tokenizer's ASCII slash/punctuation
+tailoring. Restrict this supplemental resource to boundaries involving
+Unicode; keep the existing ASCII CSS rules independent of unrelated node
+content. A mixed Unicode/URL control covers that integration boundary.
+
+Authority: [CSS Text 3 §5](https://www.w3.org/TR/css-text-3/#line-breaking)
+and [Apple's line-break tokenizer](https://developer.apple.com/documentation/corefoundation/1588024-tokenization_modifiers/kcfstringtokenizerunitlinebreak).
+No Lambda formal S/D ruling changes.
+
+The empty-line collector exposes another root: inline-only multicol layout
+collects text rectangles and treats four BR-only lines as an unbreakable
+200px block. Reuse the existing line-fragment projector for those forced
+lines and let consecutive BRs advance its logical line index. A fresh
+Chromium capture produces the expected two 100px columns. Independent
+fractional/three-column and nested controls also check line-box advances.
+Authority: [CSS 2.2 §9.4.2](https://www.w3.org/TR/CSS22/visuren.html#inline-formatting).
+
+Cluster substitution currently overwrites the advance after authored spacing
+has been added. Retain that spacing once per cluster and use the same cluster
+measurement in intrinsic sizing even when tracking is nonzero. Khmer's two
+clusters then retain their 40px total tracking increment.
+
+An absolute parallel flow must also fragment when its containing block fits
+in one column. Pass the known column-group height into the existing absolute
+fragmenter, retain static continuation offsets and unequal first-fragment
+capacity, and normalize the resulting union. Scrolling contexts keep their
+monolithic contents. Authority: [CSS Break §2.1](https://www.w3.org/TR/css-break-3/#parallel-flows)
+and [§4.1](https://www.w3.org/TR/css-break-3/#possible-breaks).
+
+Japanese `word-space-transform` fixtures were also examined. Their stored
+references use different primary-font metrics from both the current browser
+and Radiant: for `word-space-transform-024`, the saved width is 636.72px,
+while a new Times capture and Radiant both report 486px. The current browser
+also rejects the experimental property. Do not change correct geometry to
+match that font-policy discrepancy; leave these cases partial.
+
+### Shaping and row-size integration
+
+The glyph spacing helper already suppresses cursive tracking, but the run
+shaper rejects any nonzero authored `letter-spacing`. Gate it on the effective
+spacing of each character instead, and reuse the same helper for intrinsic
+glyph advances. This preserves mandatory Arabic joining under suppressed
+tracking (CSS Text 3 §7.2.1).
+
+Khmer needs substitutions across grapheme boundaries: per-grapheme advances
+measure one word at about 168px, while Chromium's Khmer Sangam MN shapes it
+at 129.75px. Extend the existing script-run shaper to CSS's clustered writing
+systems and stop at the shared dictionary boundaries. Both intrinsic and
+final layout then retain the same word widths and wrap points. Rename the
+shared run API to reflect its support for both RTL and clustered scripts.
+
+The multicol row track is distinct from the balanced column content extent.
+Cap the balanced extent at the fixed row limit, allow a shorter single set,
+and retain fixed tracks for forced breaks. An explicit `column-wrap:wrap`
+with a definite `height` also has a fixed row limit (CSS Multicol 2 §§4.2,
+4.4, 8.1). Flex-assigned definite sizes must use the existing percentage-basis
+definiteness helper rather than inferring height solely from the authored
+property (CSS Flexbox §9.8).
+
+For a continuous block, a uniform fragment capacity also leaves the final row
+unbalanced: `column-height-014` stores seven fragments ending at 100px, while
+Chromium produces eight fragments with a 5px final pair ending at 80px.
+Represent the first-row capacity, fixed row track, and balanced final-row
+capacity in the transient `ColumnGroup`. Share those capacities and row
+origins between the flow cursor, stored fragment boxes, and union geometry.
+A spanner may use the remaining space in that row; subsequent flow starts
+with the remaining first-row capacity. Track reservation owns the final row
+height, so finalization must not add its gutter again. The initial scope is
+one continuous, undecorated-by-cloning block without discrete child/line
+constraints; other groups keep their existing constraint-aware balance path.
+
+Browser captures verify the independent three-column fractional control
+(22.5px tracks, 7.5px gutters, 146.25px flow): the container is 82.5px tall,
+the fragment union is 63.75px, and all three final pieces are 3.75px tall.
+Native coverage checks that fragment metadata agrees with the union and
+also checks finite-height wrapping and flow on both sides of a spanner.
+
+For ordinary definite heights, balance search must retain the used height
+limit after min/max constraints (CSS 2.1 §10.7). After a spanner, the next
+column set is further bounded by the remaining fragmentainer space;
+overflow creates columns rather than increasing that set's height.
+
+`letter-spacing-211` exposes an emphasis root: the existing mark extent is
+conditional on clipping, and explicit line-height finalization discards it.
+Apply the existing extent regardless of overflow and reuse ruby's annotation
+minimum in line finalization (CSS Text Decoration 3 §3.4). Browser controls
+show that preserved spaces and punctuation retain that line reservation even
+when their marks are not painted; keep layout reservation separate from the
+paint-time character filter.
+
+The existing emphasis UI paint test sampled over-marks 10px above the block.
+The corrected annotation reservation moves those marks inside the block;
+a fresh browser capture confirms that placement. Move its two over-mark
+sample points into the reserved line area, retaining every color/state/density
+assertion. Scored layout references, tolerances and baseline files are unchanged.
+
+Emoji sequences expose two linked roots: the stateless grapheme test cannot
+retain GB11's preceding pictograph context, and the old composition-base
+list omits juggling and basketball sequences. Use the existing Unicode
+property resource with stateful extended-grapheme segmentation, then measure
+the entire cluster through the selected emoji font. Actual shaping keeps
+supported ligatures at one glyph advance and unsupported compositions at
+their multiple-glyph advances. Intrinsic sizing uses the same cluster helper;
+no sequence-specific width or membership list is added.
+
+Authority: [UAX #29 GB11](https://www.unicode.org/reports/tr29/#GB11) and
+[CSS Text 3 §1.4](https://www.w3.org/TR/css-text-3/#characters).
+
+Authority: [CSS Text 3 §7](https://www.w3.org/TR/css-text-3/#spacing),
+[CSS Multicol 2](https://drafts.csswg.org/css-multicol-2/), and
+[CSS Flexbox §9.8](https://www.w3.org/TR/css-flexbox-1/#definite-sizes).
+No Lambda formal S/D ruling changes.
+
+
+### Final boundary and nested-context roots
+
+Clustered-script justification uses a shared stateful grapheme cursor in layout
+and all paint paths. Count gaps between typographic units rather than inside
+combining sequences; retain the same Unicode resource used for text clusters.
+Authority: [CSS Text 3 §6.4.5](https://www.w3.org/TR/css-text-3/#justify-minimum).
+
+Emergency wrapping disables word-run shaping, but must not disable whole
+cluster measurement. Retain that measurement and flush min-content only at
+cluster boundaries for `overflow-wrap:anywhere` and legacy
+`word-break:break-word`; ordinary `overflow-wrap:break-word` retains its
+unbroken min-content word. Tamil controls compare the two emergency modes
+with a whole-cluster reference and ordinary overflow wrapping.
+
+Narrow no-break space is absent from the Ahem cmap. Chromium synthesizes it
+as half the selected face's regular-space advance; Radiant instead selects a
+system fallback's 0.2em advance. Resolve available space glyph metrics first,
+then synthesize a missing narrow space from the primary face. Reuse the same
+advance in line layout, word lookahead and intrinsic sizing. This is a font
+fallback policy, not a font-name exception.
+Authority: [CSS Fonts character handling](https://www.w3.org/TR/css-fonts-4/#char-handling)
+and the [HarfBuzz space synthesizer](https://github.com/harfbuzz/harfbuzz/blob/main/src/hb-ot-shape-fallback.cc).
+
+Column spanning applies only to in-flow block-level boxes. Promote the
+existing classifier and share it with intrinsic sizing and formatting-context
+selection. An isolated atomic inline must retain its own unfragmented flow;
+mixed line/block flows keep their existing collector. A common single-block
+collector replaces the repeated traversal shape.
+Authority: [CSS Multicol §6.1](https://www.w3.org/TR/css-multicol-1/#column-span)
+and [CSS Break §4.1](https://www.w3.org/TR/css-break-3/#possible-breaks).
+
+For `break-all`, adjacent whole unbreakable inline runs retain the existing
+punctuation constraints across their DOM boundary. Share the existing inline
+edge lookup rather than inventing an independent traversal. Broader partial
+word-tail propagation remains outside this bounded change.
+Authority: [CSS Text §5.2](https://www.w3.org/TR/css-text-3/#word-break-property).
+
+The RTL inline containing-block end is already resolved relative to its
+fragment. Re-adding the first-fragment origin moves a nested auto-blockified
+inline by one glyph. Apply that origin only to the padding-box fallback.
+Authority: [CSS Position §2.1](https://www.w3.org/TR/css-position-3/#def-cb).
+
+Nested fixed rows expose two roots: the size helper discards column-height
+when there is no block-style record inside a definite ancestor, and descendant
+projection replaces inner piece heights with the outer capacity. Retain the
+own row size independently of the ancestor. For a continuous leaf beginning
+at the parent fragment edge, map its stored row tracks into complete parent
+slots and preserve each piece's measured height. Independent fractional
+controls use 7.5px inner tracks, 2.5px gutters and 20px parent columns; the
+leaf union is 17.5px tall and all eight pieces remain 7.5px tall. Discrete
+contents and nonzero leading fragment offsets keep their existing paths.
+Authority: [CSS Multicol 2 §4.2](https://drafts.csswg.org/css-multicol-2/#ch)
+and [CSS Break §2.2](https://www.w3.org/TR/css-break-3/#nested-flows).
+No Lambda formal S/D ruling changes.
+
+
+### Verified full-match manifest
+
+These fifty cases were partial in the fresh Round 6 starting inventory and
+now match all compared elements, spans and text at 100%. Earlier rounds and
+new native controls are excluded.
+
+**wpt-css-text — 28 cases**
+
+- `letter-spacing-211`
+- `letter-spacing-cursive-001`
+- `letter-spacing-ligatures-003`
+- `letter-spacing-ligatures-004`
+- `line-break-anywhere-overrides-uax-behavior-008`
+- `line-breaking-013`
+- `line-breaking-014`
+- `line-breaking-024`
+- `line-breaking-025`
+- `line-breaking-026`
+- `line-breaking-027`
+- `line-breaking-atomic-003`
+- `line-breaking-atomic-004`
+- `overflow-wrap-min-content-size-002`
+- `text-autospace-break-001`
+- `text-transform-fullwidth-009`
+- `word-break-keep-all-003`
+- `word-break-keep-all-011`
+- `word-break-manual-001`
+- `word-break-min-content-003`
+- `word-break-min-content-006`
+- `word-break-normal-002`
+- `word-break-normal-003`
+- `word-break-normal-km-000`
+- `word-break-normal-lo-000`
+- `word-break-normal-my-000`
+- `word-break-normal-th-000`
+- `word-break-normal-th-001`
+
+**wpt-css-multicol — 18 cases**
+
+- `column-balancing-with-span-and-oof-001`
+- `column-balancing-with-span-and-oof-002`
+- `column-count-used-001`
+- `column-height-003`
+- `column-height-007`
+- `column-height-013`
+- `column-height-014`
+- `column-height-017`
+- `column-height-018`
+- `column-height-020`
+- `column-height-028`
+- `inline-block-and-column-span-all`
+- `multicol-fill-balance-029`
+- `multicol-fill-balance-041`
+- `multicol-span-all-012`
+- `multicol-span-all-children-height-002`
+- `multicol-span-all-children-height-002-ref`
+- `multicol-span-all-children-height-003-ref`
+
+**wpt-css-position — 4 cases**
+
+- `vlr-rtl-ltr-in-multicols.tentative`
+- `vlr-rtl-rtl-in-multicols`
+- `vrl-rtl-ltr-in-multicols.tentative`
+- `vrl-rtl-rtl-in-multicols`
+
+
+### Validation
+
+The exact final `make test-layout-baseline` gate passes: **3,057 full matches,
+237 partial matches, zero failures**, across 3,294 tests. This is exactly
+50 additional full matches over the fresh starting run's 3,007. Browser
+references, thresholds, scored baselines and skip lists are unchanged.
+
+All **33 native text/layout controls pass**, including independently captured
+fractional row tracks, dictionary boundaries, whole clusters, native tracking,
+parallel flows, scrolling, punctuation and opposite-direction paragraphs.
+`make lint ARGS='--rule ^no-int-cast-radiant$'` and `git diff --check` pass.
+The final nested-row Radiant PNG and Chromium screenshot both show the filled
+100px green square with no red.
+
+The full test build exposed a standalone paint-link dependency on the shared
+Unicode letter predicate. Inline that small pure predicate in the common
+header; this keeps paint clients independent of the full layout object and
+restores the exact gate's build without changing its test selection.
+
+The supplemental dictionary resource is currently CoreFoundation on macOS;
+other platforms retain their previous explicit/CJK line-break fallback.
+Unproven roots, unsupported browser features and stale-font references remain
+partial; they are not changed to meet the fifty-case count.
+
+
+The final `make test-radiant-baseline` gate also passes: **5,582 passed,
+241 partial matches, one existing skip, zero failures**, across 5,824 tests.
+Its native text/layout runner passes all 33 controls, and the corrected
+emphasis UI sampling retains all sixteen color/state/density assertions.

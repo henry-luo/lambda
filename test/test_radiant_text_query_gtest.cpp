@@ -21,6 +21,48 @@ TEST(TextWhitespace, UnicodeCodepointsDoNotAliasAsciiWhitespace) {
     EXPECT_FALSE(is_space(0x300A));
 }
 
+TEST(TextWhitespace, NativeLineBoundariesUseSourceBytesAndKeepTerminalEdgesClosed) {
+#ifdef __APPLE__
+    const char* thai = "ภาษาไทยภาษาไทย";
+    LayoutTextBreaks boundaries(thai, strlen(thai), true);
+    EXPECT_TRUE(boundaries.allows_after(strlen("ภาษา")));
+    EXPECT_TRUE(boundaries.allows_after(strlen("ภาษาไทย")));
+    EXPECT_FALSE(boundaries.allows_after(strlen("ภา")));
+    EXPECT_FALSE(boundaries.allows_after(strlen(thai)));
+    const char* supplementary = "😀ภาษาไทย";
+    LayoutTextBreaks shifted(supplementary, strlen(supplementary), true);
+    EXPECT_TRUE(shifted.allows_after(strlen("😀ภาษา")));
+    LayoutTextBreaks disabled(thai, strlen(thai), false);
+    EXPECT_FALSE(disabled.allows_after(strlen("ภาษา")));
+    const char* khmer = "ភាសាខ្មែរភាសាខ្មែរ";
+    LayoutTextBreaks complex(khmer, strlen(khmer), true);
+    EXPECT_TRUE(complex.allows_after(strlen("ភាសាខ្មែរ")));
+    const char* mixed = "中文english中文";
+    LayoutTextBreaks cjk(mixed, strlen(mixed), true);
+    const unsigned char* mixed_start = (const unsigned char*)mixed;
+    const unsigned char* mixed_end = mixed_start + strlen(mixed);
+    size_t latin_edge = strlen("中文english");
+    EXPECT_TRUE(layout_text_native_break_allowed(cjk, latin_edge, 'h',
+        mixed_start + latin_edge, mixed_end, false));
+    EXPECT_FALSE(layout_text_native_break_allowed(cjk, latin_edge, 'h',
+        mixed_start + latin_edge, mixed_end, true));
+    const char* url = "前 URL/path";
+    LayoutTextBreaks punctuation(url, strlen(url), true);
+    const unsigned char* url_start = (const unsigned char*)url;
+    size_t slash = strlen("前 URL/");
+    EXPECT_FALSE(layout_text_native_break_allowed(punctuation, slash, '/',
+        url_start + slash, url_start + strlen(url), false));
+    const char* jamo = "애기판다";
+    LayoutTextBreaks korean(jamo, strlen(jamo), true);
+    const unsigned char* jamo_start = (const unsigned char*)jamo;
+    size_t syllable = strlen("애");
+    EXPECT_FALSE(layout_text_native_break_allowed(korean, syllable, 0x1162,
+        jamo_start + syllable, jamo_start + strlen(jamo), true));
+#else
+    GTEST_SKIP() << "native Unicode line-break resource is unavailable";
+#endif
+}
+
 TEST(TextWhitespace, PreservedBreaksAndControlsAreNotCollapsibleSpaces) {
     DomElement parent = {};
     parent.node_type = DOM_NODE_ELEMENT;
@@ -54,6 +96,19 @@ TEST(TextWhitespace, PreservedBreaksAndControlsAreNotCollapsibleSpaces) {
     EXPECT_TRUE(layout_text_is_collapsible_whitespace(&text, 0, 1));
     EXPECT_FALSE(layout_text_is_collapsible_whitespace(&text, 1, 1));
     EXPECT_FALSE(layout_text_is_collapsible_whitespace(&text, 0, 3));
+}
+
+TEST(TextWhitespace, ExtendedEmojiClustersRetainTheirSourceBoundaries) {
+    const char* cases[] = {"🤹‍♀️", "⛹🏿‍♀️", "🏳️‍🌈", "😀‍😀"};
+    for (const char* source : cases) {
+        size_t length = 0;
+        const unsigned char* start = (const unsigned char*)source;
+        ASSERT_TRUE(layout_get_grapheme_cluster_bytes(start, start + strlen(source), &length));
+        EXPECT_EQ(length, strlen(source));
+    }
+    EXPECT_TRUE(text_codepoint_is_extended_pictographic(0x1F939));
+    EXPECT_TRUE(text_codepoint_is_extended_pictographic(0x26F9));
+    EXPECT_FALSE(text_codepoint_is_extended_pictographic('A'));
 }
 
 TEST(TextJustification, WhollyHangingFragmentsDoNotConsumeJustificationOpportunities) {
@@ -91,6 +146,18 @@ TEST(TextJustification, WhollyHangingFragmentsDoNotConsumeJustificationOpportuni
         EXPECT_EQ(count_rendered_justify_opportunities(
             lam::view_require_text(&text), &rect, false), entry.expected) << entry.text;
     }
+}
+
+TEST(TextJustification, ClusteredScriptGapsRespectGraphemeBoundaries) {
+    const char* text = u8"សាហា";
+    EXPECT_EQ(count_justify_opportunities(text, (int)strlen(text)), 1);
+    TextJustifyContext context = {};
+    EXPECT_FALSE(text_justify_character_gap(&context, 0x179F));
+    EXPECT_FALSE(text_justify_character_gap(&context, 0x17B6));
+    EXPECT_TRUE(text_justify_character_gap(&context, 0x17A0));
+    EXPECT_FALSE(text_justify_character_gap(&context, 0x17B6));
+    EXPECT_FALSE(text_justify_character_gap(&context, ' '));
+    EXPECT_FALSE(text_justify_character_gap(&context, 0x179F));
 }
 
 class RadiantTextQuery : public ::testing::Test {
@@ -141,6 +208,32 @@ TEST_F(RadiantTextQuery, PreservedWhitespaceUsesHangingAndCrossNodeBreakState) {
     }
 }
 
+TEST_F(RadiantTextQuery, NativeWordBoundariesAlsoSizeIntrinsicRuns) {
+#ifdef __APPLE__
+    ASSERT_NE(load("test/html/layout_native_line_boundaries.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    layout_html_doc(&ui, document, false);
+    struct Case { const char* id; float height; } cases[] = {
+        {"wrapped", 72.0f}, {"nowrap", 36.0f}, {"keep", 72.0f},
+        {"minimum", 144.0f}, {"manual", 144.0f},
+        {"khmer", 72.0f}, {"khmer-manual", 72.0f},
+    };
+    for (const Case& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        EXPECT_FLOAT_EQ(element->height, entry.height) << entry.id;
+    }
+    DomElement* automatic = dom_find_element_by_id(document->root->as_element(), "minimum");
+    DomElement* manual = dom_find_element_by_id(document->root->as_element(), "manual");
+    ASSERT_NE(automatic, nullptr);
+    ASSERT_NE(manual, nullptr);
+    EXPECT_FLOAT_EQ(automatic->width, manual->width);
+#else
+    GTEST_SKIP() << "native Unicode line-break resource is unavailable";
+#endif
+}
+
 TEST_F(RadiantTextQuery, FixedColumnRowsCountGuttersInTheirPhysicalPitch) {
     ASSERT_NE(load("test/html/layout_multicol_rows.html"), nullptr);
     ui.viewport_width = ui.window_width = 320;
@@ -155,6 +248,257 @@ TEST_F(RadiantTextQuery, FixedColumnRowsCountGuttersInTheirPhysicalPitch) {
         ASSERT_NE(element, nullptr) << entry.id;
         EXPECT_FLOAT_EQ(element->height, entry.height) << entry.id;
     }
+}
+
+TEST_F(RadiantTextQuery, BalancedColumnSetsKeepRowTracksAndPartialContinuations) {
+    ASSERT_NE(load("test/html/layout_multicol_balanced_rows.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 400;
+    layout_html_doc(&ui, document, false);
+    struct Case { const char* id; float height; } cases[] = {
+        {"finite", 50.0f}, {"finite-child", 100.0f},
+        {"fixed", 100.0f}, {"fixed-child", 80.0f},
+        {"spanners", 110.0f}, {"before", 35.0f}, {"after", 55.0f},
+        {"fractional", 82.5f}, {"fractional-child", 63.75f},
+        {"nested-fixed", 100.0f}, {"nested-small", 80.0f}, {"nested-fractional", 17.5f},
+    };
+    for (const Case& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        EXPECT_FLOAT_EQ(element->height, entry.height) << entry.id;
+    }
+    DomElement* child = dom_find_element_by_id(document->root->as_element(), "fractional-child");
+    ASSERT_NE(child, nullptr);
+    EXPECT_EQ(child->layout_fragments_count(), 9);
+    LayoutFragmentBox* last = child->layout_fragment_list();
+    ASSERT_NE(last, nullptr);
+    while (last->next) last = last->next;
+    EXPECT_FLOAT_EQ(last->y, 60.0f);
+    EXPECT_FLOAT_EQ(last->height, 3.75f);
+    DomElement* nested = dom_find_element_by_id(document->root->as_element(), "nested-fractional");
+    ASSERT_NE(nested, nullptr);
+    EXPECT_FLOAT_EQ(nested->width, 90.0f);
+    EXPECT_EQ(nested->layout_fragments_count(), 8);
+    for (LayoutFragmentBox* fragment = nested->layout_fragment_list(); fragment; fragment = fragment->next) {
+        EXPECT_FLOAT_EQ(fragment->height, 7.5f);
+    }
+}
+
+TEST_F(RadiantTextQuery, VerticalBreakEdgesFollowTheParagraphDirection) {
+    ASSERT_NE(load("test/html/layout_multicol_rtl_break_edge.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    DomElement* rtl = dom_find_element_by_id(document->root->as_element(), "rtl-break");
+    DomElement* ltr = dom_find_element_by_id(document->root->as_element(), "ltr-break");
+    ASSERT_NE(rtl, nullptr);
+    ASSERT_NE(ltr, nullptr);
+    EXPECT_FLOAT_EQ(view_geometry_node_viewport_origin_resolved(rtl, nullptr, nullptr).y, 0.0f);
+    EXPECT_FLOAT_EQ(view_geometry_node_viewport_origin_resolved(ltr, nullptr, nullptr).y, 80.0f);
+    DomElement* nested_end = dom_find_element_by_id(document->root->as_element(), "nested-end");
+    ASSERT_NE(nested_end, nullptr);
+    EXPECT_FLOAT_EQ(view_geometry_node_viewport_origin_resolved(nested_end, nullptr, nullptr).y, 40.0f);
+}
+
+TEST_F(RadiantTextQuery, SpannersResolveAuthoredWidthsAgainstTheFullContainer) {
+    ASSERT_NE(load("test/html/layout_multicol_spanner_width.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    layout_html_doc(&ui, document, false);
+    struct Case { const char* id; float width; } cases[] = {
+        {"content", 95.0f}, {"border", 75.0f}, {"percentage", 70.0f},
+        {"maximum", 80.0f}, {"minimum", 90.0f},
+    };
+    for (const Case& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        EXPECT_FLOAT_EQ(element->width, entry.width) << entry.id;
+    }
+}
+
+TEST_F(RadiantTextQuery, ForcedEmptyLinesAndOverflowColumnsRetainTheirFlow) {
+    ASSERT_NE(load("test/html/layout_multicol_forced_lines.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 400;
+    layout_html_doc(&ui, document, false);
+    DomElement* empty = dom_find_element_by_id(document->root->as_element(), "empty");
+    DomElement* nested = dom_find_element_by_id(document->root->as_element(), "nested");
+    DomElement* third = dom_find_element_by_id(document->root->as_element(), "third");
+    ASSERT_NE(empty, nullptr);
+    ASSERT_NE(nested, nullptr);
+    ASSERT_NE(third, nullptr);
+    EXPECT_FLOAT_EQ(empty->height, 65.0f);
+    EXPECT_FLOAT_EQ(nested->height, 60.0f);
+    EXPECT_FLOAT_EQ(third->x, 100.0f);
+    EXPECT_FLOAT_EQ(third->y, 0.0f);
+}
+
+TEST_F(RadiantTextQuery, EmphasisLineExtentDoesNotDependOnClipping) {
+    ASSERT_NE(load("test/html/layout_emphasis_line_extent.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    struct Case { const char* id; float height; } cases[] = {
+        {"plain", 20.0f}, {"over", 30.0f}, {"under", 30.0f},
+        {"clipped", 30.0f}, {"spaces", 30.0f}, {"punctuation", 30.0f},
+    };
+    for (const Case& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        EXPECT_FLOAT_EQ(element->height, entry.height) << entry.id;
+    }
+}
+
+TEST_F(RadiantTextQuery, AbsoluteParallelFlowsUseColumnsWithoutFragmentingTheirContainingBlock) {
+    ASSERT_NE(load("test/html/layout_multicol_parallel_flows.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 500;
+    layout_html_doc(&ui, document, false);
+    struct Case { const char* id; float x; float y; float width; float height; } cases[] = {
+        {"long", 0.0f, 0.0f, 100.0f, 100.0f},
+        {"long-child", 0.0f, 0.0f, 100.0f, 100.0f},
+        {"static", 50.0f, 0.0f, 50.0f, 100.0f},
+        {"offset", 0.0f, 0.0f, 100.0f, 100.0f},
+        {"scroll", 0.0f, 0.0f, 20.0f, 200.0f},
+    };
+    for (const Case& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        EXPECT_FLOAT_EQ(element->x, entry.x) << entry.id;
+        EXPECT_FLOAT_EQ(element->y, entry.y) << entry.id;
+        EXPECT_FLOAT_EQ(element->width, entry.width) << entry.id;
+        EXPECT_FLOAT_EQ(element->height, entry.height) << entry.id;
+    }
+}
+
+TEST_F(RadiantTextQuery, ClusterShapingRetainsTrackingInLayoutAndIntrinsicSizing) {
+#ifdef __APPLE__
+    ASSERT_NE(load("test/html/layout_cluster_tracking.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 400;
+    layout_html_doc(&ui, document, false);
+    DomElement* plain = dom_find_element_by_id(document->root->as_element(), "plain");
+    DomElement* tracked = dom_find_element_by_id(document->root->as_element(), "tracked");
+    DomElement* intrinsic_plain = dom_find_element_by_id(document->root->as_element(), "intrinsic-plain");
+    DomElement* intrinsic_tracked = dom_find_element_by_id(document->root->as_element(), "intrinsic-tracked");
+    ASSERT_NE(plain, nullptr);
+    ASSERT_NE(tracked, nullptr);
+    ASSERT_NE(intrinsic_plain, nullptr);
+    ASSERT_NE(intrinsic_tracked, nullptr);
+    ASSERT_NE(plain->first_child->as_text()->rect, nullptr);
+    ASSERT_NE(tracked->first_child->as_text()->rect, nullptr);
+    EXPECT_NEAR(tracked->first_child->as_text()->rect->width -
+        plain->first_child->as_text()->rect->width, 40.0f, 0.01f);
+    EXPECT_NEAR(intrinsic_tracked->width - intrinsic_plain->width, 40.0f, 0.01f);
+#else
+    GTEST_SKIP() << "native Khmer shaping is unavailable";
+#endif
+}
+
+TEST_F(RadiantTextQuery, EmergencyMinContentRetainsWholeShapedClusters) {
+#ifdef __APPLE__
+    ASSERT_NE(load("test/html/layout_cluster_min_content.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 400;
+    layout_html_doc(&ui, document, false);
+    DomElement* reference = dom_find_element_by_id(document->root->as_element(), "reference");
+    DomElement* anywhere = dom_find_element_by_id(document->root->as_element(), "anywhere");
+    DomElement* legacy = dom_find_element_by_id(document->root->as_element(), "legacy");
+    DomElement* ordinary = dom_find_element_by_id(document->root->as_element(), "ordinary");
+    ASSERT_NE(reference, nullptr);
+    ASSERT_NE(anywhere, nullptr);
+    ASSERT_NE(legacy, nullptr);
+    ASSERT_NE(ordinary, nullptr);
+    EXPECT_FLOAT_EQ(anywhere->width, reference->width);
+    EXPECT_FLOAT_EQ(legacy->width, reference->width);
+    EXPECT_FLOAT_EQ(ordinary->width, 2.0f * reference->width - 4.0f);
+#else
+    GTEST_SKIP() << "native Tamil shaping is unavailable";
+#endif
+}
+
+TEST_F(RadiantTextQuery, NarrowSpaceSynthesisUsesTheSelectedFacesSpaceMetric) {
+    ASSERT_NE(load("test/html/layout_narrow_space_metrics.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    DomElement* regular = dom_find_element_by_id(document->root->as_element(), "regular");
+    DomElement* narrow = dom_find_element_by_id(document->root->as_element(), "narrow");
+    DomElement* pair = dom_find_element_by_id(document->root->as_element(), "pair");
+    ASSERT_NE(regular, nullptr);
+    ASSERT_NE(narrow, nullptr);
+    ASSERT_NE(pair, nullptr);
+    EXPECT_FLOAT_EQ(regular->width, 20.0f);
+    EXPECT_FLOAT_EQ(narrow->width, 10.0f);
+    EXPECT_FLOAT_EQ(pair->width, 50.0f);
+}
+
+TEST_F(RadiantTextQuery, ColumnSpanningRequiresAnInFlowBlockLevelBox) {
+    ASSERT_NE(load("test/html/layout_multicol_spanner_eligibility.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    layout_html_doc(&ui, document, false);
+    DomElement* inline_box = dom_find_element_by_id(document->root->as_element(), "inline");
+    DomElement* block = dom_find_element_by_id(document->root->as_element(), "block");
+    ASSERT_NE(inline_box, nullptr);
+    ASSERT_NE(block, nullptr);
+    EXPECT_FALSE(multicol_is_spanner_block(lam::view_require_block(inline_box)));
+    EXPECT_TRUE(multicol_is_spanner_block(lam::view_require_block(block)));
+    EXPECT_FLOAT_EQ(inline_box->width, 50.0f);
+    EXPECT_FLOAT_EQ(inline_box->height, 50.0f);
+    EXPECT_FLOAT_EQ(block->width, 100.0f);
+    EXPECT_FLOAT_EQ(block->height, 25.0f);
+}
+
+TEST_F(RadiantTextQuery, InlineBoundariesDoNotCreateMinContentBreaksBeforePunctuation) {
+    ASSERT_NE(load("test/html/layout_inline_min_content_boundaries.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    struct Case { const char* id; float width; } cases[] = {
+        {"punctuation", 40.0f}, {"letters", 20.0f},
+        {"separator", 20.0f}, {"nested", 40.0f},
+    };
+    for (const Case& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        EXPECT_FLOAT_EQ(element->width, entry.width) << entry.id;
+    }
+}
+
+TEST_F(RadiantTextQuery, EmojiCompositionUsesFontAdvancesWithoutSplittingClusters) {
+#ifdef __APPLE__
+    ASSERT_NE(load("test/html/layout_emoji_cluster_advances.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    layout_html_doc(&ui, document, false);
+    const char* ids[] = {"juggle", "basket"};
+    for (const char* id : ids) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), id);
+        ASSERT_NE(element, nullptr);
+        EXPECT_FLOAT_EQ(element->height, 30.0f) << id;
+        DomText* text = element->first_child->as_text();
+        ASSERT_NE(text, nullptr);
+        ASSERT_NE(text->rect, nullptr);
+        EXPECT_FLOAT_EQ(text->rect->width, 30.0f);
+        EXPECT_EQ(text->rect->next, nullptr);
+    }
+    DomElement* rainbow = dom_find_element_by_id(document->root->as_element(), "rainbow");
+    DomElement* unsupported = dom_find_element_by_id(document->root->as_element(), "unsupported");
+    DomElement* separate = dom_find_element_by_id(document->root->as_element(), "separate");
+    ASSERT_NE(rainbow, nullptr);
+    ASSERT_NE(unsupported, nullptr);
+    ASSERT_NE(separate, nullptr);
+    EXPECT_FLOAT_EQ(rainbow->width, 30.0f);
+    EXPECT_FLOAT_EQ(unsupported->width, separate->width);
+    EXPECT_FLOAT_EQ(unsupported->width, 60.0f);
+#else
+    GTEST_SKIP() << "native emoji shaping is unavailable";
+#endif
 }
 
 TEST_F(RadiantTextQuery, FloatClearanceRetainsTheFirstFormattedLine) {

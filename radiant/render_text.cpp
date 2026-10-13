@@ -601,7 +601,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
         uint32_t codepoint;
         bool is_word_start = render_text_source_word_start(str, text_rect->start_index);
         int char_index = text_rect->start_index;  // Track character offset for selection
-        uint32_t previous_codepoint = 0;
+        TextJustifyContext justify_context = {};
 
         bool shadow_prepass = text_shadow != nullptr;
         if (shadow_prepass && !render_text_paint_background_and_shadows(rdcon, str, text_rect,
@@ -630,7 +630,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
                 }
                 // else  // skip consecutive spaces
                 is_word_start = true;  // Next non-space is word start
-                previous_codepoint = 0;
+                justify_context = {};
                 p++;
                 char_index++;
             }
@@ -642,7 +642,10 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
 
                 // Variation selectors are consumed by the preceding glyph; asking
                 // CoreText to paint them standalone triggers hidden UI-font lookup.
-                if (codepoint == 0x00AD || text_codepoint_has_zero_advance(codepoint)) continue;
+                if (codepoint == 0x00AD || text_codepoint_has_zero_advance(codepoint)) {
+                    text_justify_character_gap(&justify_context, codepoint);
+                    continue;
+                }
 
                 // Apply text-transform before loading glyph
                 uint32_t tt_out[3];
@@ -653,13 +656,13 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
                 for (int tti = 0; tti < tt_count; tti++) {
                     uint32_t render_cp = render_text_resolve_mathlive_fallback_glyph(tt_out[tti]);
                     if (render_cp == 0) continue;
+                    bool character_gap = text_justify_character_gap(&justify_context, render_cp);
                     if (text_codepoint_has_zero_advance(render_cp)) continue;
                     if (justification_per_gap > 0.0f &&
                         text_justify != CSS_VALUE_INTER_WORD &&
-                        text_justify_cjk_gap(previous_codepoint, render_cp)) {
+                        character_gap) {
                         x += justification_per_gap;
                     }
-                    previous_codepoint = render_cp;
 
                     static int glyph_debug_count = 0;
                     if (render_text_trace_enabled() && glyph_debug_count < 500) {
@@ -957,7 +960,7 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
         bool s_has_space = render_text_source_has_space(str, text_rect->start_index, preserve_spaces);
         FontStyleDesc sd = font_style_desc_from_prop(rdcon->font.style);
         bool s_word_start = render_text_source_word_start(str, text_rect->start_index);
-        uint32_t previous_codepoint = 0;
+        TextJustifyContext justify_context = {};
 
         while (sp < s_end) {
             if (is_space(*sp)) {
@@ -966,7 +969,7 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
                     sx_pos += space_width;
                 }
                 s_word_start = true;
-                previous_codepoint = 0;
+                justify_context = {};
                 sp++;
                 continue;
             }
@@ -993,11 +996,10 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
                 if (s_tt_cp == 0) {
                     continue;
                 }
+                bool character_gap = text_justify_character_gap(&justify_context, s_tt_cp);
                 if (text_codepoint_has_zero_advance(s_tt_cp)) continue;
-                if (cjk_spacing > 0.0f &&
-                    text_justify_cjk_gap(previous_codepoint, s_tt_cp))
+                if (cjk_spacing > 0.0f && character_gap)
                     sx_pos += cjk_spacing;
-                previous_codepoint = s_tt_cp;
 
                 LoadedGlyph* s_glyph = font_load_glyph(font_box_handle(&rdcon->font), &sd, s_tt_cp, true);
                 if (!s_glyph) {

@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+body { margin: 0; font: 16px/2 "Tamil Sangam MN"; }
+.wrapper { width: 0; }
+.box { border: 2px solid blue; }
+.float { float: left; }
+.reference { display: inline-block; white-space: nowrap; }
+</style>
+<div id="result">
+<div class="reference box" id="reference">நிிிி</div>
+<div class="wrapper" style="overflow-wrap: anywhere"><div class="float box" id="anywhere">நிிிிநிிிி</div></div>
+<div style="clear: both"></div>
+<div class="wrapper" style="word-break: break-word"><div class="float box" id="legacy">நிிிிநிிிி</div></div>
+<div style="clear: both"></div>
+<div class="wrapper" style="overflow-wrap: break-word"><div class="float box" id="ordinary">நிிிிநிிிி</div></div>
+</div>

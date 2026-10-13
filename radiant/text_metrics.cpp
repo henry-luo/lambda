@@ -2,6 +2,45 @@
 
 #include <utf8proc.h>
 
+bool layout_utf8_next_codepoint(const char** cursor, const char* end,
+                                uint32_t* codepoint) {
+    if (!cursor || !*cursor || !end || *cursor >= end || !codepoint) return false;
+    int bytes = str_utf8_decode(*cursor, (size_t)(end - *cursor), codepoint);
+    if (bytes <= 0 || bytes > end - *cursor) {
+        (*cursor)++;
+        return false;
+    }
+    *cursor += bytes;
+    return true;
+}
+
+bool layout_utf8_next_codepoint(const unsigned char** cursor,
+                                const unsigned char* end,
+                                uint32_t* codepoint) {
+    const char* text_cursor = cursor ? (const char*)*cursor : nullptr;
+    bool decoded = layout_utf8_next_codepoint(
+        &text_cursor, (const char*)end, codepoint);
+    if (cursor) *cursor = (const unsigned char*)text_cursor;
+    return decoded;
+}
+
+bool layout_text_native_break_allowed(const LayoutTextBreaks& breaks, size_t offset,
+    uint32_t current, const unsigned char* next, const unsigned char* end,
+    bool keep_all) {
+    if (!breaks.allows_after(offset)) return false;
+    uint32_t following = 0;
+    layout_utf8_next_codepoint(&next, end, &following);
+    // the resource supplements Unicode boundaries; its ASCII punctuation
+    // tailoring must not depend on unrelated Unicode elsewhere in the node.
+    if (current < 0x80 && following < 0x80) return false;
+    // keep-all suppresses letter boundaries involving CJK, including Hangul
+    // jamo and mixed Latin/CJK runs; other scripts retain dictionary breaks.
+    bool cjk_edge = has_id_line_break_class(current) || utf_is_hangul(current) ||
+        has_id_line_break_class(following) || utf_is_hangul(following);
+    return !keep_all || !cjk_edge || !is_typographic_letter_unit(current) ||
+        !is_typographic_letter_unit(following);
+}
+
 
 bool text_codepoint_has_zero_advance(uint32_t codepoint) {
     if (codepoint >= 0x1F3FB && codepoint <= 0x1F3FF) return true;  // emoji modifiers
@@ -21,6 +60,11 @@ bool text_codepoint_has_zero_advance(uint32_t codepoint) {
 
     utf8proc_category_t cat = utf8proc_category((utf8proc_int32_t)codepoint);
     return cat == UTF8PROC_CATEGORY_MN || cat == UTF8PROC_CATEGORY_ME;
+}
+
+bool text_codepoint_is_extended_pictographic(uint32_t codepoint) {
+    return utf8proc_get_property((utf8proc_int32_t)codepoint)->boundclass ==
+        UTF8PROC_BOUNDCLASS_EXTENDED_PICTOGRAPHIC;
 }
 
 bool text_emphasis_marks_codepoint(uint32_t codepoint) {
