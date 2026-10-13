@@ -336,7 +336,7 @@ Css3dPaintPlane Css3dPaintContext::enter(ViewBlock* block) {
             true, rdcon->content_bounds_cache, &low, &high);
         min_y = fminf(min_y, low); max_y = fmaxf(max_y, high);
     }
-    float overflow = render_geometry_block_visual_overflow(block);
+    float overflow = render_geometry_block_visual_overflow(block, rdcon->raster_scale);
     current.rect = {x + min_x - overflow, y + min_y - overflow,
         max_x - min_x + 2.0f * overflow, max_y - min_y + 2.0f * overflow};
     return previous;

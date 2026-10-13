@@ -225,16 +225,87 @@ static bool host_test_design_mode(void* document, const char* value) {
     return document == &host_test_document && value && strcmp(value, "on") == 0;
 }
 
+static unsigned host_test_node, host_repaint_calls, host_clear_reflow_calls;
+static bool host_test_state_bool(void* document, void* node, const char* name) {
+    return document == &host_test_document && node == &host_test_node &&
+        name && strcmp(name, "indeterminate") == 0;
+}
+static void host_test_document_request_repaint(void* document) {
+    if (document == &host_test_document) __atomic_add_fetch(&host_repaint_calls, 1u, __ATOMIC_RELAXED);
+}
+static void host_test_document_clear_reflow(void* document) {
+    if (document == &host_test_document) __atomic_add_fetch(&host_clear_reflow_calls, 1u, __ATOMIC_RELAXED);
+}
+
+static unsigned host_layout_calls[2], host_prepare_mutation_calls;
+static bool host_test_layout_document(void* ui, void* document, bool is_reflow) {
+    if (ui != &host_test_node || document != &host_test_document) return false;
+    __atomic_add_fetch(&host_layout_calls[is_reflow ? 1 : 0], 1u, __ATOMIC_RELAXED);
+    return true;
+}
+static float host_test_element_effective_zoom(void* element) {
+    return element == &host_test_node ? 1.25f : 1.0f;
+}
+static bool host_test_element_has_vertical_rl_flow(void* element) { return element == &host_test_node; }
+static CssEnum host_test_element_specified_keyword(void* element, CssPropertyCode property, CssEnum fallback) {
+    return element == &host_test_node && property == CSS_PROPERTY_FLEX_DIRECTION ? CSS_VALUE_COLUMN_REVERSE : fallback;
+}
+static void host_test_prepare_children_mutation(void* element) {
+    if (element == &host_test_node) __atomic_add_fetch(&host_prepare_mutation_calls, 1u, __ATOMIC_RELAXED);
+}
+
+static unsigned host_control_calls[4];
+static bool host_test_control_disabled(void* state, void* node) {
+    return state == &host_test_document && node == &host_test_node;
+}
+static void host_test_control_record(void* state, void* node, unsigned operation) {
+    if (state == &host_test_document && node == &host_test_node)
+        __atomic_add_fetch(&host_control_calls[operation], 1u, __ATOMIC_RELAXED);
+}
+static void host_test_control_focus(void* state, void* node, bool keyboard) {
+    if (keyboard) host_test_control_record(state, node, 0);
+}
+template<unsigned operation> static void host_test_control_action(void* state, void* node) {
+    host_test_control_record(state, node, operation);
+}
+static bool host_test_control_text(void* state, void* node, const char* value, uint32_t bytes, uint32_t units) {
+    return state == &host_test_document && node == &host_test_node && value &&
+        bytes == 4 && units == 2 && memcmp(value, "\xf0\x9f\x98\x80", 4) == 0;
+}
+static bool host_test_scroll_begin(void* state, void* node, void* pane, float x, float y) {
+    return state == &host_test_document && node == &host_test_node && pane == &host_test_node &&
+        x == -12.5f && y == 30.25f;
+}
+static bool host_test_document_tick(void* document, double now) {
+    return document == &host_test_document && now == 1.25;
+}
+static bool host_test_document_animation(void* document, double now, void* dirty) {
+    return host_test_document_tick(document, now) && dirty == &host_test_node;
+}
+
 static const DomHostEngineOps host_test_operations = {
     host_test_operation<1, Item, Item>, host_test_operation<2, Item, Item>,
     host_test_operation<3, Item>, host_test_operation<4, Item, Item, Item>,
     host_test_operation<5, Item, Item>, host_test_operation<6, Item>,
     host_test_operation<7, Item, Item, Item>,
     host_test_operation<8, Item>, host_test_operation<9, Item, Item>,
-    host_test_query_command, host_test_design_mode
+    host_test_query_command, host_test_design_mode,
+    host_test_state_bool, host_test_document_request_repaint, host_test_document_clear_reflow,
+    host_test_layout_document, host_test_element_effective_zoom, host_test_element_has_vertical_rl_flow,
+    host_test_element_specified_keyword, host_test_prepare_children_mutation,
+    host_test_control_disabled, host_test_control_focus, host_test_control_text,
+    host_test_control_action<1>, host_test_control_action<2>, host_test_scroll_begin,
+    host_test_control_action<3>, host_test_document_tick, host_test_document_animation
 };
 
 static bool host_test_dispatch(bool present) {
+    dom_engine_document_request_repaint(&host_test_document);
+    dom_engine_document_clear_reflow(&host_test_document);
+    dom_engine_prepare_children_mutation(&host_test_node);
+    dom_engine_control_focus_programmatic(&host_test_document, &host_test_node, true);
+    dom_engine_control_invalidate_behavior(&host_test_document, &host_test_node);
+    dom_engine_control_open_dropdown(&host_test_document, &host_test_node);
+    dom_engine_scroll_cancel_smooth(&host_test_document, &host_test_node);
     Item owner = host_test_item(1), second = host_test_item(2), third = host_test_item(3);
     return dom_engine_request_frame(owner, second).item == (present ? host_test_item(112) : ItemNull).item &&
         dom_engine_cancel_frame(owner, second).item == (present ? host_test_item(212) : ItemNull).item &&
@@ -246,7 +317,27 @@ static bool host_test_dispatch(bool present) {
         dom_engine_clear_editing_focus(owner).item == (present ? host_test_item(81) : ItemNull).item &&
         dom_engine_edit_target(owner, second).item == (present ? host_test_item(912) : ItemNull).item &&
         dom_engine_query_command(&host_test_document, "state", "bold").item == (present ? host_test_item(10) : ItemNull).item &&
-        dom_engine_set_design_mode(&host_test_document, "on") == present;
+        dom_engine_set_design_mode(&host_test_document, "on") == present &&
+        dom_engine_state_bool(&host_test_document, &host_test_node, "indeterminate") == present &&
+        !dom_engine_state_bool(nullptr, &host_test_node, "indeterminate") &&
+        !dom_engine_state_bool(&host_test_document, nullptr, "indeterminate") &&
+        !dom_engine_state_bool(&host_test_document, &host_test_node, "checked") &&
+        dom_engine_layout_document(&host_test_node, &host_test_document, false) == present &&
+        dom_engine_layout_document(&host_test_node, &host_test_document, true) == present &&
+        !dom_engine_layout_document(nullptr, &host_test_document, true) &&
+        dom_engine_element_effective_zoom(&host_test_node) == (present ? 1.25f : 1.0f) &&
+        dom_engine_element_has_vertical_rl_flow(&host_test_node) == present &&
+        dom_engine_element_specified_keyword(&host_test_node, CSS_PROPERTY_FLEX_DIRECTION, CSS_VALUE_ROW) ==
+            (present ? CSS_VALUE_COLUMN_REVERSE : CSS_VALUE_ROW) &&
+        dom_engine_element_specified_keyword(nullptr, CSS_PROPERTY_FLEX_DIRECTION, CSS_VALUE_COLUMN) == CSS_VALUE_COLUMN &&
+        dom_engine_control_is_disabled(&host_test_document, &host_test_node) == present &&
+        !dom_engine_control_is_disabled(nullptr, &host_test_node) &&
+        dom_engine_control_store_text(&host_test_document, &host_test_node, "\xf0\x9f\x98\x80", 4, 2) == present &&
+        !dom_engine_control_store_text(&host_test_document, &host_test_node, "\xf0\x9f\x98\x80", 4, 4) &&
+        dom_engine_scroll_begin_smooth(&host_test_document, &host_test_node, &host_test_node, -12.5f, 30.25f) == present &&
+        dom_engine_document_tick_smooth_scroll(&host_test_document, 1.25) == present &&
+        dom_engine_document_tick_animation(&host_test_document, 1.25, &host_test_node) == present &&
+        !dom_engine_document_tick_animation(&host_test_document, 1.25, nullptr);
 }
 
 static bool host_registration_round() {
@@ -257,6 +348,10 @@ static bool host_registration_round() {
 TEST(DomHostProviderTest, AbsenceValidationDispatchAndConcurrentPublication) {
     ASSERT_EQ(dom_host_engine_ops(), nullptr);
     EXPECT_TRUE(host_test_dispatch(false));
+    EXPECT_EQ(host_repaint_calls, 0u); EXPECT_EQ(host_clear_reflow_calls, 0u);
+    EXPECT_EQ(host_layout_calls[0], 0u); EXPECT_EQ(host_layout_calls[1], 0u);
+    EXPECT_EQ(host_prepare_mutation_calls, 0u);
+    for (unsigned calls : host_control_calls) EXPECT_EQ(calls, 0u);
     EXPECT_FALSE(dom_host_register_engine(nullptr));
 #define DOM_HOST_REJECT_MISSING(result, name, parameters, arguments, absence) { \
     DomHostEngineOps incomplete = host_test_operations; incomplete.name = nullptr; \
@@ -271,6 +366,10 @@ TEST(DomHostProviderTest, AbsenceValidationDispatchAndConcurrentPublication) {
     EXPECT_FALSE(dom_host_register_engine(&conflict));
     EXPECT_EQ(dom_host_engine_ops(), &host_test_operations);
     EXPECT_TRUE(host_test_dispatch(true));
+    EXPECT_EQ(host_repaint_calls, 8001u); EXPECT_EQ(host_clear_reflow_calls, 8001u);
+    EXPECT_EQ(host_layout_calls[0], 8001u); EXPECT_EQ(host_layout_calls[1], 8001u);
+    EXPECT_EQ(host_prepare_mutation_calls, 8001u);
+    for (unsigned calls : host_control_calls) EXPECT_EQ(calls, 8001u);
 }
 
 static unsigned collection_type_identities[] = {

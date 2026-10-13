@@ -102,13 +102,6 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
         capture = Bound{0.0f, 0.0f, viewport_width, viewport_height};
     capture = Bound{floorf(capture.left * density), floorf(capture.top * density),
         ceilf(capture.right * density), ceilf(capture.bottom * density)};
-    size_t bytes = 0;
-    if (!isfinite(capture.left) || !isfinite(capture.top) ||
-        !render_surface_allocation_size(capture.right - capture.left, capture.bottom - capture.top, &bytes)) {
-        log_error("%s invalid raster fallback bounds", log_prefix ? log_prefix : "[EFFECT_RASTER]");
-        return false;
-    }
-
     OffscreenRenderArenas arenas;
     if (!arenas.init("render.effect.raster", "render.effect.list_arena",
                      "render.effect.scratch_arena")) {
@@ -120,6 +113,17 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
     RdtMatrix scale = rdt_matrix_scale(density, density);
     // export PaintIR is logical; replay and filter regions use the page's physical density once.
     paint_ir_lower_raster_transformed(paint_list, &dl, &scale);
+    Bound ink = dl_content_bounds(&dl);
+    if (ink.right > ink.left && ink.bottom > ink.top)
+        capture = {floorf(min(capture.left, ink.left)), floorf(min(capture.top, ink.top)),
+            ceilf(max(capture.right, ink.right)), ceilf(max(capture.bottom, ink.bottom))};
+    size_t bytes = 0;
+    if (!isfinite(capture.left) || !isfinite(capture.top) ||
+        !render_surface_allocation_size(capture.right - capture.left, capture.bottom - capture.top, &bytes)) {
+        log_error("%s invalid raster fallback bounds", log_prefix ? log_prefix : "[EFFECT_RASTER]");
+        dl_destroy(&dl); arenas.destroy(); return false;
+    }
+
     ImageSurface* surface = render_display_list_snapshot_with_backdrop(&dl,
         mem_context_process(MEM_ROLE_RENDER), capture, density,
         Color{opaque_background ? 0xffffffffu : 0u}, backdrop_display_list);
@@ -130,6 +134,10 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
     arenas.destroy();
 
     if (!surface) return false;
+    float offset_x = 0.0f, offset_y = 0.0f;
+    // conservative recording bounds must not add transparent reader-sampled image borders.
+    image_surface_trim_transparent_margin(surface, &offset_x, &offset_y);
+    capture.left += offset_x; capture.top += offset_y;
     out->surface = surface;
     out->x = capture.left / density;
     out->y = capture.top / density;

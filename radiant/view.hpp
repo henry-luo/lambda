@@ -793,6 +793,8 @@ extern void image_surface_detach_pixels(ImageSurface* img_surface);
 // The surface takes a memtracked pixel buffer: it replaces (and frees) the
 // buffer the surface owned and becomes the pixels it paints.
 extern void image_surface_adopt_pixels(ImageSurface* img_surface, void* pixels);
+// trim private owned pixels before publication; offsets count physical pixels.
+extern bool image_surface_trim_transparent_margin(ImageSurface* surface, float* offset_x, float* offset_y);
 extern void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip,
                               struct ClipShape** clip_shapes = nullptr, int clip_depth = 0);
 extern void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode,
@@ -818,6 +820,7 @@ struct FontProp {
     CssEnum font_kerning;  // CSS font-kerning (auto/normal/none, 0 = auto)
     CssEnum text_deco; // first CSS text-decoration line, or none
     uint8_t text_deco_extra; // additional decoration lines (CSS_TEXT_DECO_*)
+    bool text_deco_color_current; // currentColor is distinct from explicit zero-alpha RGBA
     int16_t font_weight_numeric;  // CSS numeric weight 100-900 (0 = not set, use font_weight keyword)
     float letter_spacing;  // letter spacing in pixels (default 0)
     float word_spacing;  // word spacing in pixels (default 0)
@@ -836,7 +839,7 @@ struct FontProp {
     lam::Counted<struct FontHandle> font_handle; // cache-owned handle pinned while this prop aliases it
     lam::Own<TextShadow> text_shadow;  // CSS text-shadow (linked list for multiple shadows)
     CssEnum text_deco_style;          // CSS text-decoration-style: solid, dashed, dotted, wavy, double
-    Color text_deco_color;            // CSS text-decoration-color (default: {0} = use currentColor)
+    Color text_deco_color;            // CSS text-decoration-color when not currentColor
     float text_deco_thickness;        // CSS text-decoration-thickness in px (0 = auto from font metrics)
     float text_underline_offset;      // px, or percent of used font size by mode
     uint8_t text_underline_offset_mode; // 0=auto, 1=length, 2=percent

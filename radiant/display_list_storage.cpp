@@ -9,6 +9,7 @@
 #include "../lib/math_checked.hpp"
 #include <string.h>
 #include <limits.h>
+#include <math.h>
 #include "../lib/generation.h"
 
 #define DL_INITIAL_CAPACITY 2048
@@ -45,6 +46,7 @@ RdtGradientStop* dl_copy_stops(DisplayList* dl, const RdtGradientStop* stops, in
     if (!dl || !stops || count <= 0) return nullptr;
     size_t sz = count * sizeof(RdtGradientStop);
     RdtGradientStop* copy = (RdtGradientStop*)scratch_alloc(&dl->arena, sz);
+    if (!copy) return nullptr;
     memcpy(copy, stops, sz);
     return copy;
 }
@@ -53,6 +55,7 @@ float* dl_copy_dashes(DisplayList* dl, const float* dashes, int count) {
     if (!dl || !dashes || count <= 0) return nullptr;
     size_t sz = count * sizeof(float);
     float* copy = (float*)scratch_alloc(&dl->arena, sz);
+    if (!copy) return nullptr;
     memcpy(copy, dashes, sz);
     return copy;
 }
@@ -634,15 +637,60 @@ static bool dl_union_item_bounds(float* left, float* top,
     return true;
 }
 
-Bound dl_content_bounds(const DisplayList* dl) {
+Bound dl_content_bounds_range(const DisplayList* dl, int start, int end) {
     Bound bounds = {};
     bool valid = false;
-    if (dl) for (int index = 0; index < dl->item_count(); index++) {
+    if (dl) for (int index = max(0, start); index < min(end, dl->item_count()); index++) {
         const DisplayItem* item = &dl->data()[index];
         if (dl_op_has_flags(item->op, DL_OP_FLAG_PRESERVES_REPLAY_STATE)) continue;
         valid = dl_union_item_bounds(&bounds.left, &bounds.top, &bounds.right, &bounds.bottom, item, valid);
     }
     return bounds;
+}
+
+Bound dl_content_bounds(const DisplayList* dl) {
+    return dl_content_bounds_range(dl, 0, dl ? dl->item_count() : 0);
+}
+
+Bound dl_effect_capture_bounds(const DisplayList* dl, int start, int end, Bound bounds, float padding) {
+    Bound source = dl_content_bounds_range(dl, start, end);
+    if (source.right > source.left && source.bottom > source.top) {
+        if (!(bounds.right > bounds.left && bounds.bottom > bounds.top))
+            return {source.left - padding, source.top - padding, source.right + padding, source.bottom + padding};
+        bounds.left = min(bounds.left, source.left - padding);
+        bounds.top = min(bounds.top, source.top - padding);
+        bounds.right = max(bounds.right, source.right + padding);
+        bounds.bottom = max(bounds.bottom, source.bottom + padding);
+    }
+    return bounds;
+}
+
+bool dl_effect_bounds_to_region(const Bound* bounds, IRect* region) {
+    if (!bounds || !region) return false;
+    float left = floorf(bounds->left), top = floorf(bounds->top);
+    float right = ceilf(bounds->right), bottom = ceilf(bounds->bottom);
+    if (!isfinite(left) || !isfinite(top) || !isfinite(right) || !isfinite(bottom) ||
+            left < (float)INT_MIN || top < (float)INT_MIN || right >= (float)INT_MAX || bottom >= (float)INT_MAX ||
+            !(right > left && bottom > top) || right - left >= (float)INT_MAX || bottom - top >= (float)INT_MAX) return false;
+    region->x = (int)left; // INT_CAST_OK: effect bounds cover integer display-list pixel regions.
+    region->y = (int)top; // INT_CAST_OK: effect bounds cover integer display-list pixel regions.
+    region->w = (int)(right - left); // INT_CAST_OK: effect bounds cover integer display-list pixel regions.
+    region->h = (int)(bottom - top); // INT_CAST_OK: effect bounds cover integer display-list pixel regions.
+    return true;
+}
+
+bool dl_resize_saved_backdrops(DisplayList* dl, int start, int end, const Bound* bounds) {
+    IRect region = {};
+    if (!dl || !dl_effect_bounds_to_region(bounds, &region)) return false;
+    // source recording is complete; resize the saved region before any replay/publication.
+    for (int index = max(0, start); index < min(end, dl->item_count()); index++) {
+        DisplayItem* item = &dl->data()[index];
+        if (item->op != DL_SAVE_BACKDROP) continue;
+        item->bounds[0] = (float)region.x; item->bounds[1] = (float)region.y;
+        item->bounds[2] = (float)region.w; item->bounds[3] = (float)region.h;
+        item->save_backdrop = {region.x, region.y, region.w, region.h};
+    }
+    return true;
 }
 
 int dl_begin_element(DisplayList* dl, uint32_t view_id,

@@ -1509,6 +1509,30 @@ bool css_text_emphasis_parse_style(const CssValue* value, bool vertical,
     return true;
 }
 
+const CssValue* css_text_emphasis_shorthand_longhand(const CssValue* value,
+    CssPropertyCode property, Pool* pool) {
+    if (!value || !pool || (property != CSS_PROPERTY_TEXT_EMPHASIS_STYLE &&
+            property != CSS_PROPERTY_TEXT_EMPHASIS_COLOR)) return nullptr;
+    if (css_value_is_global_keyword(value)) return value;
+    uint32_t mark = 0;
+    const CssValue* color = nullptr;
+    if (!css_text_emphasis_parse_style(value, false, &mark, &color)) return nullptr;
+    if (property == CSS_PROPERTY_TEXT_EMPHASIS_COLOR)
+        return color ? color : css_value_create_keyword(pool, "initial");
+    CssValue* parts[2] = {};
+    size_t length = 0;
+    int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+    for (int i = 0; i < count; i++) {
+        const CssValue* part = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.values[i] : value;
+        if (part == color) continue;
+        if (length == sizeof(parts) / sizeof(*parts)) return nullptr;
+        parts[length++] = (CssValue*)part;
+    }
+    // component wrappers belong to the receiving rule/read pool; source tokens stay borrowed (D4.5.1v4).
+    return length == 0 ? css_value_create_keyword(pool, "none")
+        : length == 1 ? parts[0] : css_value_create_list(pool, parts, length);
+}
+
 static bool css_text_emphasis_position_valid(const CssValue* value) {
     if (!value) return false;
     int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
@@ -4062,6 +4086,7 @@ CssPropertyCode css_property_cascade_shorthand(CssPropertyCode property) {
         {CSS_PROPERTY_BORDER_IMAGE, border_image_longhands, sizeof(border_image_longhands) / sizeof(*border_image_longhands)},
         {CSS_PROPERTY_MARKER, marker_longhands, sizeof(marker_longhands) / sizeof(*marker_longhands)},
         {CSS_PROPERTY_CONTAINER, container_longhands, sizeof(container_longhands) / sizeof(*container_longhands)},
+        {CSS_PROPERTY_TEXT_EMPHASIS, text_emphasis_longhands, sizeof(text_emphasis_longhands) / sizeof(*text_emphasis_longhands)},
     };
     for (const Group& group : groups)
         for (size_t i = 0; i < group.count; i++) if (group.members[i] == property) return group.shorthand;

@@ -549,7 +549,7 @@ static DomElement* dom_prepare_children_for_mutation(DomElement* parent,
         child_is_nested_in_table_fixup) {
         // A source child may sit below a retained table wrapper. Unwrap before
         // mutating so DOM removal addresses the authored parent, not the box.
-        layout_unwrap_anonymous_table_fixups_for_dom_mutation(source_element);
+        dom_engine_prepare_children_mutation(source_element);
     }
     return source_element;
 }
@@ -897,8 +897,8 @@ static bool dom_flush_pending_document_layout(UiContext* uicon, DomDocument* doc
     bool pending_reflow = doc->state && doc->state->needs_reflow;
     if (!pending_scroll && !pending_reflow) return false;
     // animation seeks and scroll requests change layout without changing the DOM.
-    layout_html_doc(uicon, doc, true);
-    doc_state_clear_reflow(doc->state);
+    if (!dom_engine_layout_document(uicon, doc, true)) return false;
+    dom_engine_document_clear_reflow(doc);
     return true;
 }
 
@@ -947,7 +947,7 @@ extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
         // First-layout geometry is renderer work required for the initial
         // paint; a page's CSSOM read must not consume its JS CPU budget.
         script_runner_suspend_js_watchdog();
-        layout_html_doc(uicon, doc, false);
+        dom_engine_layout_document(uicon, doc, false);
         script_runner_resume_js_watchdog();
     }
 
@@ -975,14 +975,14 @@ static bool dom_tick_headless_animation_frame_by(double delta_seconds) {
     if (scheduler && scheduler->has_active_animations) {
         double now = scheduler->current_time +
             (delta_seconds >= 0.0 ? delta_seconds : 1.0 / 60.0);
-        active = radiant_tick_document_animation_scheduler(
+        active = dom_engine_document_tick_animation(
             doc, now, &state->dirty_tracker);
     }
     if (state->has_active_smooth_scroll) {
         double now = js_event_loop_virtual_clock_enabled()
             ? js_event_loop_virtual_clock_now_ms() / 1000.0
             : js_performance_monotonic_now_ms() / 1000.0;
-        active = scroll_smooth_tick_document(doc, now) || active;
+        active = dom_engine_document_tick_smooth_scroll(doc, now) || active;
     }
     return active || frame_delivered;
 }
@@ -1908,7 +1908,7 @@ static void _set_checkedness(DomElement* elem, bool v) {
 
 static bool dom_get_indeterminate(DomElement* element) {
     DocState* state = _state_for_element(element);
-    if (state) return state_get_bool(state, element, STATE_INDETERMINATE);
+    if (state) return dom_engine_state_bool(state, element, STATE_INDETERMINATE);
     if (!js_active_runtime_state) return false;
     return dom_expando_flag_is(element, "__indeterminate");
 }
@@ -2319,7 +2319,7 @@ static void dom_document_configuration_changed(DomDocument* doc) {
     // document configuration changes selector matches without changing an observable DOM attribute.
     if (doc->root) dom_mutation_notify(DOM_JS_MUTATION_UNKNOWN, doc->root);
     else { doc->mutation_epoch++; doc->style_content_epoch++; }
-    if (doc->state) doc_state_request_repaint(doc->state);
+    if (doc->state) dom_engine_document_request_repaint(doc);
 }
 
 extern "C" void dom_css_document_language_changed(void* document) {
@@ -5023,7 +5023,7 @@ static bool dom_is_first_summary_child(DomElement* elem) {
 
 static bool dom_is_disabled_for_focus(DomElement* elem) {
     if (!elem) return true;
-    return form_control_is_disabled(elem->doc ? elem->doc->state : dom_current_state(),
+    return dom_engine_control_is_disabled(elem->doc ? elem->doc->state : dom_current_state(),
                                     static_cast<View*>(elem));
 }
 
@@ -5244,7 +5244,7 @@ extern "C" void dom_focus_if_editing_host_for_selection(void* dom_node) {
     DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     View* old_focus = state ? focus_get(state) : nullptr;
     js_document_active_element = elem;
-    focus_set_programmatic(state, (View*)elem);
+    dom_engine_control_focus_programmatic(state, (View*)elem, false);
     if (old_focus != (View*)elem) dom_dispatch_focus_events(elem);
 }
 
@@ -7241,7 +7241,7 @@ extern "C" Item dom_text_control_select_bridge(void* dom_elem) {
     FormControlProp* f = elem->form;
     DocState* state = elem->doc ? elem->doc->state : dom_current_state();
     if (dom_is_script_focusable(elem)) {
-        focus_set_programmatic(state, (View*)elem);
+        dom_engine_control_focus_programmatic(state, (View*)elem, false);
     }
     form_control_set_selection(state, (View*)elem, 0, f->current_value_u16_len, 0);
     return make_js_undefined();
@@ -7259,7 +7259,7 @@ static bool js_text_control_set_raw_value(DomElement* elem, const char* new_val,
         state = dom_engine_document_ensure_state(elem->doc, "js_text_control_set_raw_value");
     }
     uint32_t new_u16_len = tc_utf8_to_utf16_length(new_val ? new_val : "", new_len);
-    if (!form_control_store_text_value(state, (View*)elem, new_val,
+    if (!dom_engine_control_store_text(state, (View*)elem, new_val,
                                        new_len, new_u16_len)) {
         return false;
     }
@@ -7427,7 +7427,7 @@ static Item dom_focus_method(DomElement* elem, bool focus,
         if (dom_is_script_focusable(elem)) {
             View* old_focus = state ? focus_get(state) : nullptr;
             js_document_active_element = elem;
-            focus_set_programmatic(state, (View*)elem);
+            dom_engine_control_focus_programmatic(state, (View*)elem, false);
             // focus() on an already-focused editing host must preserve the
             // live selection; reinitialising it here moves scripted caret
             // placement back to the host start before the next key event.
@@ -7463,7 +7463,7 @@ extern "C" bool dom_focus_editing_host_for_automation(void* dom_elem) {
     // authoritative focus owner until a JavaScript realm is bound.
     if (js_active_runtime_state) js_document_active_element = elem;
     View* old_focus = focus_get(state);
-    focus_set_programmatic(state, (View*)elem);
+    dom_engine_control_focus_programmatic(state, (View*)elem, false);
     // automation focus follows the same idempotent focus contract as JS:
     // preserve an explicitly placed selection when the host already owns focus.
     if (old_focus != (View*)elem) {
@@ -7680,7 +7680,7 @@ static bool _elem_is_barred(DomElement* elem) {
     // Constraint validation, selector matching, and focusability share the
     // StateStore disabled-fieldset rule so a dynamically inserted control
     // cannot disagree about whether the first-legend exemption applies.
-    if (form_control_is_disabled(_state_for_element(elem),
+    if (dom_engine_control_is_disabled(_state_for_element(elem),
                                  static_cast<View*>(elem))) return true;
     // barred if readonly
     if (elem->has_attribute("readonly")) return true;
@@ -8236,7 +8236,7 @@ static void dom_reinit_behavior_if_constraint_attr(DomElement* elem,
     };
     for (size_t i = 0; i < sizeof(kConstraintAttrs)/sizeof(kConstraintAttrs[0]); i++) {
         if (str_icmp_cstr(attr_name, kConstraintAttrs[i]) == 0) {
-            form_control_invalidate_behavior_init((DocState*)elem->doc->state,
+            dom_engine_control_invalidate_behavior((DocState*)elem->doc->state,
                                                   (View*)elem);
             return;
         }
@@ -10426,7 +10426,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         if (elem->bound && elem->boundary()->border) {
             bw = elem->boundary()->border->width.left + elem->boundary()->border->width.right;
         }
-        float zoom = layout_effective_zoom(static_cast<View*>(elem));
+        float zoom = dom_engine_element_effective_zoom(elem);
         return (Item){.item = i2it((int64_t)llroundf(
             (elem->width - bw) / (zoom > 0.0f ? zoom : 1.0f)))};
     }
@@ -10441,7 +10441,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         if (elem->bound && elem->boundary()->border) {
             bh = elem->boundary()->border->width.top + elem->boundary()->border->width.bottom;
         }
-        float zoom = layout_effective_zoom(static_cast<View*>(elem));
+        float zoom = dom_engine_element_effective_zoom(elem);
         return (Item){.item = i2it((int64_t)llroundf(
             (elem->height - bh) / (zoom > 0.0f ? zoom : 1.0f)))};
     }
@@ -11362,10 +11362,10 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
                 scroll_snap_adjust_position(lam::view_as_block(static_cast<View*>(elem)),
                     &next_x, &next_y);
                 bool smooth = dom_scroll_should_animate(elem) &&
-                    scroll_state_begin_smooth_for_view(state, static_cast<View*>(elem),
+                    dom_engine_scroll_begin_smooth(state, static_cast<View*>(elem),
                         pane, next_x, next_y);
                 if (!smooth) {
-                    scroll_state_cancel_smooth_for_view(state, static_cast<View*>(elem));
+                    dom_engine_scroll_cancel_smooth(state, static_cast<View*>(elem));
                     scroll_state_set_position_for_view(state, static_cast<View*>(elem),
                         pane, next_x, next_y, true);
                 }
@@ -11398,11 +11398,11 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         bool layout_pending = elem->doc && (!elem->doc->state ||
             ((DocState*)elem->doc->state)->lifecycle != DOC_LIFECYCLE_COMMITTED);
         bool vertical_rl_signed_scroll = !is_vertical && scroll_value < 0.0f &&
-            layout_element_writing_mode(elem) == WM_VERTICAL_RL;
+            dom_engine_element_has_vertical_rl_flow(elem);
         const FlexProp* flex = elem->embedp()->flex;
         CssEnum flex_direction = flex
             ? (CssEnum)flex->direction
-            : layout_specified_keyword(elem, CSS_PROPERTY_FLEX_DIRECTION, CSS_VALUE_ROW);
+            : dom_engine_element_specified_keyword(elem, CSS_PROPERTY_FLEX_DIRECTION, CSS_VALUE_ROW);
         bool column_reverse_signed_scroll = is_vertical && scroll_value < 0.0f &&
             flex_direction == CSS_VALUE_COLUMN_REVERSE;
         bool signed_scroll = vertical_rl_signed_scroll || column_reverse_signed_scroll;
@@ -11436,10 +11436,10 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             scroll_snap_adjust_position(lam::view_as_block(static_cast<View*>(elem)),
                 &next_x, &next_y);
             bool smooth = dom_scroll_should_animate(elem) &&
-                scroll_state_begin_smooth_for_view(state, static_cast<View*>(elem),
+                dom_engine_scroll_begin_smooth(state, static_cast<View*>(elem),
                     elem->scroll()->pane, next_x, next_y);
             if (!smooth) {
-                scroll_state_cancel_smooth_for_view(state, static_cast<View*>(elem));
+                dom_engine_scroll_cancel_smooth(state, static_cast<View*>(elem));
                 scroll_state_set_position_for_view(state, static_cast<View*>(elem),
                     elem->scroll()->pane, next_x, next_y, false);
             }
@@ -11460,7 +11460,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
                 // A combined call bypasses the scalar setter's provisional
                 // range check; apply it to both axes before retaining them.
                 if (pending_x < 0.0f &&
-                    layout_element_writing_mode(elem) != WM_VERTICAL_RL) {
+                    !dom_engine_element_has_vertical_rl_flow(elem)) {
                     pending_x = 0.0f;
                 }
                 if (pending_y < 0.0f && flex_direction != CSS_VALUE_COLUMN_REVERSE) {
@@ -16906,7 +16906,7 @@ extern "C" Item dom_core_select_show_picker(Item n) {
     DomElement* elem = dom_op_element(n);
     if (!elem || !_is_tag(elem, "select")) return ItemNull;
     DocState* state = elem->doc ? elem->doc->state : dom_current_state();
-    if (form_control_is_disabled(state, static_cast<View*>(elem))) {
+    if (dom_engine_control_is_disabled(state, static_cast<View*>(elem))) {
         return dom_raise(js_name_item("InvalidStateError"),
             js_name_item("showPicker: select is disabled"));
     }
@@ -16921,7 +16921,7 @@ extern "C" Item dom_core_select_show_picker(Item n) {
     if (state && dom_is_connected(elem)) {
         tc_ensure_init(elem);
         if (elem->form) {
-            doc_state_open_dropdown(state, static_cast<View*>(elem));
+            dom_engine_control_open_dropdown(state, static_cast<View*>(elem));
         }
     }
     return make_js_undefined();

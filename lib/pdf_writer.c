@@ -38,7 +38,8 @@ typedef enum {
     PDF_OBJ_RESOURCES,
     PDF_OBJ_INFO,
     PDF_OBJ_ANNOTATION,
-    PDF_OBJ_OUTLINE
+    PDF_OBJ_OUTLINE,
+    PDF_OBJ_FORM
 } PdfObjType;
 
 // Base14 fonts mapping
@@ -135,6 +136,32 @@ typedef struct PdfOutline {
     struct PdfOutline* next_record;
 } PdfOutline;
 
+typedef struct PdfGraphicsState {
+    HPDF_Font current_font;
+    float font_size;
+    float line_width;
+    float miter_limit;
+    int line_join;
+} PdfGraphicsState;
+
+typedef struct PdfGraphicsSave {
+    PdfGraphicsState state;
+    struct PdfGraphicsSave* next;
+} PdfGraphicsSave;
+
+typedef struct PdfTransparencyGroup {
+    int obj_id;
+    float bounds[4];
+    StrBuf* content;
+    StrBuf* parent_content;
+    HPDF_ExtGState alpha;
+    PdfGraphicsState saved_state;
+    PdfGraphicsSave* saved_stack;
+    float ink_density;
+    struct PdfTransparencyGroup* parent;
+    struct PdfTransparencyGroup* next;
+} PdfTransparencyGroup;
+
 // Page structure
 struct HPDF_Page_Rec {
     struct HPDF_Doc_Rec* doc;
@@ -153,15 +180,20 @@ struct HPDF_Page_Rec {
     
     // Content stream buffer
     StrBuf* content;
+    StrBuf* root_content;
+    PdfTransparencyGroup* groups;
+    PdfTransparencyGroup* active_group;
     
     // Graphics state
     float fill_r, fill_g, fill_b;
     float stroke_r, stroke_g, stroke_b;
-    float line_width;
-    
+    PdfGraphicsState graphics;
+    PdfGraphicsSave* graphics_stack;
+    PdfGraphicsSave* graphics_free;
+    float path_bounds[4];
+    bool path_bounds_valid;
+
     // Text state
-    struct HPDF_Font_Rec* current_font;
-    float font_size;
     bool in_text_object;
     
     // Fonts used on this page
@@ -436,8 +468,12 @@ void HPDF_Free(HPDF_Doc doc) {
     // free strbuf content buffers (they use malloc internally)
     for (int i = 0; i < doc->pages->length; i++) {
         HPDF_Page page = (HPDF_Page)doc->pages->data[i];
-        if (page && page->content) {
-            strbuf_free(page->content);
+        if (page && page->root_content) {
+            strbuf_free(page->root_content);
+        }
+        for (PdfTransparencyGroup* group = page ? page->groups : NULL;
+                group; group = group->next) {
+            strbuf_free(group->content);
         }
         // used_fonts arraylist needs to be freed
         if (page && page->used_fonts) {
@@ -519,6 +555,7 @@ HPDF_Page HPDF_AddPage(HPDF_Doc doc) {
     
     // initialize content stream (uses malloc internally)
     page->content = strbuf_new_cap(4096);
+    page->root_content = page->content;
     if (!page->content) {
         return NULL;
     }
@@ -546,8 +583,9 @@ HPDF_Page HPDF_AddPage(HPDF_Doc doc) {
     // default graphics state
     page->fill_r = page->fill_g = page->fill_b = 0.0f;    // black fill
     page->stroke_r = page->stroke_g = page->stroke_b = 0.0f; // black stroke
-    page->line_width = 1.0f;
-    page->font_size = 12.0f;
+    page->graphics.line_width = 1.0f;
+    page->graphics.miter_limit = 10.0f; // PDF graphics-state initial miter limit (ISO 32000 §8.4.3.5).
+    page->graphics.font_size = 12.0f;
     page->in_text_object = false;
     
     arraylist_append(doc->pages, page);
@@ -707,8 +745,8 @@ HPDF_Font HPDF_GetFont(HPDF_Doc doc, const char* font_name, const char* encoding
 HPDF_STATUS HPDF_Page_SetFontAndSize(HPDF_Page page, HPDF_Font font, float size) {
     if (!page || !font) return HPDF_ERROR_INVALID_PARAM;
     
-    page->current_font = font;
-    page->font_size = size;
+    page->graphics.current_font = font;
+    page->graphics.font_size = size;
     
     // add font to page's used fonts if not already there
     if (!page_has_font(page, font)) {
@@ -775,17 +813,23 @@ static HPDF_STATUS pdf_page_scalar_operator(HPDF_Page page, float value, const c
 }
 HPDF_STATUS HPDF_Page_SetLineWidth(HPDF_Page page, float width) {
     if (width < 0 || pdf_page_scalar_operator(page, width, " w\n") != HPDF_OK) return HPDF_ERROR_INVALID_PARAM;
-    page->line_width = width;
+    page->graphics.line_width = width;
     return HPDF_OK;
 }
 HPDF_STATUS HPDF_Page_SetLineCap(HPDF_Page page, int cap) {
     return cap < 0 || cap > 2 ? HPDF_ERROR_INVALID_PARAM : pdf_page_scalar_operator(page, (float)cap, " J\n");
 }
 HPDF_STATUS HPDF_Page_SetLineJoin(HPDF_Page page, int join) {
-    return join < 0 || join > 2 ? HPDF_ERROR_INVALID_PARAM : pdf_page_scalar_operator(page, (float)join, " j\n");
+    if (join < 0 || join > 2 || pdf_page_scalar_operator(page, (float)join, " j\n") != HPDF_OK)
+        return HPDF_ERROR_INVALID_PARAM;
+    page->graphics.line_join = join;
+    return HPDF_OK;
 }
 HPDF_STATUS HPDF_Page_SetMiterLimit(HPDF_Page page, float limit) {
-    return limit < 1 ? HPDF_ERROR_INVALID_PARAM : pdf_page_scalar_operator(page, limit, " M\n");
+    if (limit < 1 || pdf_page_scalar_operator(page, limit, " M\n") != HPDF_OK)
+        return HPDF_ERROR_INVALID_PARAM;
+    page->graphics.miter_limit = limit;
+    return HPDF_OK;
 }
 
 
@@ -828,7 +872,7 @@ HPDF_ExtGState HPDF_CreateExtGState(HPDF_Doc doc) {
     snprintf(ext_gstate->resource_name, sizeof(ext_gstate->resource_name),
              "GS%d", ext_gstate->resource_index);
 
-    arraylist_append(doc->ext_gstates, ext_gstate);
+    if (!arraylist_append(doc->ext_gstates, ext_gstate)) return NULL;
     log_debug("hpdf: created ExtGState %s (obj %d)",
               ext_gstate->resource_name, ext_gstate->obj_id);
     return ext_gstate;
@@ -867,8 +911,41 @@ HPDF_STATUS HPDF_Page_SetExtGState(HPDF_Page page, HPDF_ExtGState ext_gstate) {
 /*  Path Construction Functions                                              */
 /*---------------------------------------------------------------------------*/
 
+static void pdf_include_point(float bounds[4], bool* valid, float x, float y) {
+    if (!isfinite(x) || !isfinite(y)) return;
+    if (!*valid) {
+        bounds[0] = bounds[2] = x; bounds[1] = bounds[3] = y; *valid = true;
+    } else {
+        bounds[0] = fminf(bounds[0], x); bounds[1] = fminf(bounds[1], y);
+        bounds[2] = fmaxf(bounds[2], x); bounds[3] = fmaxf(bounds[3], y);
+    }
+}
+
+static void pdf_track_group_ink(HPDF_Page page, const float bounds[4], bool stroke) {
+    for (PdfTransparencyGroup* group = page->active_group; group; group = group->parent) {
+        if (!(group->ink_density > 0.0f)) continue;
+        float pad = stroke ? fmaxf(1.0f / group->ink_density,
+            page->graphics.line_width * .5f * (page->graphics.line_join == 0
+                ? page->graphics.miter_limit : 1.0f)) : 0.0f;
+        bool valid = true;
+        pdf_include_point(group->bounds, &valid, bounds[0] - pad, bounds[1] - pad);
+        pdf_include_point(group->bounds, &valid, bounds[2] + pad, bounds[3] + pad);
+    }
+}
+
+static void pdf_track_image_ink(HPDF_Page page, float a, float b, float c, float d, float e, float f) {
+    float bounds[4] = {}; bool valid = false;
+    pdf_include_point(bounds, &valid, e, f);
+    pdf_include_point(bounds, &valid, e + a, f + b);
+    pdf_include_point(bounds, &valid, e + c, f + d);
+    pdf_include_point(bounds, &valid, e + a + c, f + b + d);
+    if (valid) pdf_track_group_ink(page, bounds, false);
+}
+
 HPDF_STATUS HPDF_Page_Rectangle(HPDF_Page page, float x, float y, float width, float height) {
     if (!page) return HPDF_ERROR_INVALID_PARAM;
+    pdf_include_point(page->path_bounds, &page->path_bounds_valid, x, y);
+    pdf_include_point(page->path_bounds, &page->path_bounds_valid, x + width, y + height);
     
     pdf_format_float(page->content, x);
     strbuf_append_char(page->content, ' ');
@@ -884,6 +961,7 @@ HPDF_STATUS HPDF_Page_Rectangle(HPDF_Page page, float x, float y, float width, f
 
 HPDF_STATUS HPDF_Page_MoveTo(HPDF_Page page, float x, float y) {
     if (!page) return HPDF_ERROR_INVALID_PARAM;
+    pdf_include_point(page->path_bounds, &page->path_bounds_valid, x, y);
     
     pdf_format_float(page->content, x);
     strbuf_append_char(page->content, ' ');
@@ -895,6 +973,7 @@ HPDF_STATUS HPDF_Page_MoveTo(HPDF_Page page, float x, float y) {
 
 HPDF_STATUS HPDF_Page_LineTo(HPDF_Page page, float x, float y) {
     if (!page) return HPDF_ERROR_INVALID_PARAM;
+    pdf_include_point(page->path_bounds, &page->path_bounds_valid, x, y);
     
     pdf_format_float(page->content, x);
     strbuf_append_char(page->content, ' ');
@@ -907,6 +986,9 @@ HPDF_STATUS HPDF_Page_LineTo(HPDF_Page page, float x, float y) {
 HPDF_STATUS HPDF_Page_CurveTo(HPDF_Page page, float x1, float y1,
                               float x2, float y2, float x3, float y3) {
     if (!page) return HPDF_ERROR_INVALID_PARAM;
+    pdf_include_point(page->path_bounds, &page->path_bounds_valid, x1, y1);
+    pdf_include_point(page->path_bounds, &page->path_bounds_valid, x2, y2);
+    pdf_include_point(page->path_bounds, &page->path_bounds_valid, x3, y3);
 
     pdf_format_float(page->content, x1);
     strbuf_append_char(page->content, ' ');
@@ -936,33 +1018,35 @@ HPDF_STATUS HPDF_Page_ClosePath(HPDF_Page page) {
 /*  Path Painting Functions                                                  */
 /*---------------------------------------------------------------------------*/
 
-static HPDF_STATUS pdf_page_paint_operator(HPDF_Page page, const char* operation) {
+static HPDF_STATUS pdf_page_paint_operator(HPDF_Page page, const char* operation, bool paint, bool stroke) {
     if (!page) return HPDF_ERROR_INVALID_PARAM;
+    if (paint && page->path_bounds_valid) pdf_track_group_ink(page, page->path_bounds, stroke);
+    page->path_bounds_valid = false;
     strbuf_append_str(page->content, operation);
     return HPDF_OK;
 }
 
 HPDF_STATUS HPDF_Page_Fill(HPDF_Page page) {
-    return pdf_page_paint_operator(page, "f\n");
+    return pdf_page_paint_operator(page, "f\n", true, false);
 }
 HPDF_STATUS HPDF_Page_Eofill(HPDF_Page page) {
-    return pdf_page_paint_operator(page, "f*\n");
+    return pdf_page_paint_operator(page, "f*\n", true, false);
 }
 
 HPDF_STATUS HPDF_Page_Stroke(HPDF_Page page) {
-    return pdf_page_paint_operator(page, "S\n");
+    return pdf_page_paint_operator(page, "S\n", true, true);
 }
 
 HPDF_STATUS HPDF_Page_ClosePathFillStroke(HPDF_Page page) {
-    return pdf_page_paint_operator(page, "b\n");
+    return pdf_page_paint_operator(page, "b\n", true, true);
 }
 
 HPDF_STATUS HPDF_Page_Clip(HPDF_Page page) {
-    return pdf_page_paint_operator(page, "W\nn\n");
+    return pdf_page_paint_operator(page, "W\nn\n", false, false);
 }
 
 HPDF_STATUS HPDF_Page_Eoclip(HPDF_Page page) {
-    return pdf_page_paint_operator(page, "W*\nn\n");
+    return pdf_page_paint_operator(page, "W*\nn\n", false, false);
 }
 
 HPDF_STATUS HPDF_Page_DrawABGRImage(HPDF_Page page, const uint32_t* pixels,
@@ -1001,6 +1085,7 @@ HPDF_STATUS HPDF_Page_DrawABGRImage(HPDF_Page page, const uint32_t* pixels,
     }
     strbuf_append_str(page->content, ">\nEI\nQ\n");
 
+    pdf_track_image_ink(page, a, b, c, d, e, f);
     return HPDF_OK;
 }
 
@@ -1065,6 +1150,7 @@ HPDF_STATUS HPDF_Page_DrawABGRImageWithAlpha(HPDF_Page page, const uint32_t* pix
     strbuf_append_str(page->content, image->resource_name);
     strbuf_append_str(page->content, " Do\nQ\n");
 
+    pdf_track_image_ink(page, a, b, c, d, e, f);
     return HPDF_OK;
 }
 
@@ -1080,11 +1166,11 @@ HPDF_STATUS HPDF_Page_BeginText(HPDF_Page page) {
     page->in_text_object = true;
     
     // set font if one is selected
-    if (page->current_font) {
+    if (page->graphics.current_font) {
         strbuf_append_str(page->content, "/");
-        strbuf_append_str(page->content, page->current_font->resource_name);
+        strbuf_append_str(page->content, page->graphics.current_font->resource_name);
         strbuf_append_str(page->content, " ");
-        pdf_format_float(page->content, page->font_size);
+        pdf_format_float(page->content, page->graphics.font_size);
         strbuf_append_str(page->content, " Tf\n");
     }
     
@@ -1167,17 +1253,90 @@ HPDF_STATUS HPDF_Page_ShowText(HPDF_Page page, const char* text) {
 
 HPDF_STATUS HPDF_Page_GSave(HPDF_Page page) {
     if (!page) return HPDF_ERROR_INVALID_PARAM;
-    
+    PdfGraphicsSave* saved = page->graphics_free;
+    if (saved) page->graphics_free = saved->next;
+    else saved = (PdfGraphicsSave*)arena_alloc(page->doc->arena, sizeof(PdfGraphicsSave));
+    if (!saved) return HPDF_ERROR_OUT_OF_MEMORY;
+    saved->state = page->graphics;
+    saved->next = page->graphics_stack;
+    page->graphics_stack = saved;
     strbuf_append_str(page->content, "q\n");
-    
     return HPDF_OK;
 }
 
 HPDF_STATUS HPDF_Page_GRestore(HPDF_Page page) {
     if (!page) return HPDF_ERROR_INVALID_PARAM;
-    
+    PdfGraphicsSave* saved = page->graphics_stack;
+    if (!saved || (page->active_group && saved == page->active_group->saved_stack))
+        return HPDF_ERROR_INVALID_STATE;
+    page->graphics = saved->state;
+    page->graphics_stack = saved->next;
+    saved->next = page->graphics_free;
+    page->graphics_free = saved;
     strbuf_append_str(page->content, "Q\n");
-    
+    return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Page_TrackTransparencyGroupInk(HPDF_Page page, float density) {
+    if (!page || !page->active_group || !isfinite(density) || density <= 0.0f)
+        return HPDF_ERROR_INVALID_PARAM;
+    page->active_group->ink_density = density;
+    return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Page_BeginTransparencyGroup(HPDF_Page page, float opacity,
+        float left, float bottom, float right, float top) {
+    if (!page || !isfinite(opacity) || !isfinite(left) || !isfinite(bottom) ||
+            !isfinite(right) || !isfinite(top) || !(right > left && top > bottom))
+        return HPDF_ERROR_INVALID_PARAM;
+    if (page->in_text_object || page->path_bounds_valid) return HPDF_ERROR_INVALID_STATE;
+    PdfTransparencyGroup* group = (PdfTransparencyGroup*)arena_calloc(
+        page->doc->arena, sizeof(PdfTransparencyGroup));
+    if (!group) return HPDF_ERROR_OUT_OF_MEMORY;
+    group->content = strbuf_new();
+    if (!group->content) return HPDF_ERROR_OUT_OF_MEMORY;
+    group->alpha = HPDF_CreateExtGState(page->doc);
+    if (!group->alpha || !arraylist_append(page->used_ext_gstates, group->alpha)) {
+        strbuf_free(group->content);
+        return HPDF_ERROR_OUT_OF_MEMORY;
+    }
+    // reserve the invocation before changing streams, so allocation failure cannot strand a group.
+    if (!strbuf_ensure_cap(page->content, page->content->length + 128)) {
+        strbuf_free(group->content);
+        return HPDF_ERROR_OUT_OF_MEMORY;
+    }
+    HPDF_ExtGState_SetAlphaFill(group->alpha, opacity);
+    HPDF_ExtGState_SetAlphaStroke(group->alpha, opacity);
+    group->obj_id = alloc_obj_id(page->doc);
+    group->bounds[0] = left; group->bounds[1] = bottom;
+    group->bounds[2] = right; group->bounds[3] = top;
+    group->parent = page->active_group;
+    group->saved_state = page->graphics;
+    group->saved_stack = page->graphics_stack;
+    group->parent_content = page->content;
+    group->next = page->groups;
+    page->groups = group;
+    page->active_group = group;
+    page->content = group->content;
+    return HPDF_OK;
+}
+
+HPDF_STATUS HPDF_Page_EndTransparencyGroup(HPDF_Page page) {
+    if (!page || !page->active_group || page->in_text_object || page->path_bounds_valid ||
+            page->graphics_stack != page->active_group->saved_stack)
+        return HPDF_ERROR_INVALID_STATE;
+    PdfTransparencyGroup* group = page->active_group;
+    if (group->ink_density > 0.0f) {
+        group->bounds[0] = floorf(group->bounds[0] * group->ink_density) / group->ink_density;
+        group->bounds[1] = floorf(group->bounds[1] * group->ink_density) / group->ink_density;
+        group->bounds[2] = ceilf(group->bounds[2] * group->ink_density) / group->ink_density;
+        group->bounds[3] = ceilf(group->bounds[3] * group->ink_density) / group->ink_density;
+    }
+    page->content = group->parent_content;
+    page->active_group = group->parent;
+    page->graphics = group->saved_state;
+    strbuf_append_format(page->content, "q\n/%s gs\n/TG%d Do\nQ\n",
+        group->alpha->resource_name, group->obj_id);
     return HPDF_OK;
 }
 
@@ -1202,6 +1361,29 @@ static bool pdf_write_info_entry(FILE* file, const char* key, const char* value)
     return ok;
 }
 
+static void pdf_write_resources(FILE* file, HPDF_Page page, PdfTransparencyGroup* parent) {
+    fprintf(file, "/Resources <<\n/Font <<\n");
+    for (int i = 0; i < page->used_fonts->length; i++) {
+        HPDF_Font font = (HPDF_Font)page->used_fonts->data[i];
+        fprintf(file, "/%s %d 0 R\n", font->resource_name, font->obj_id);
+    }
+    fprintf(file, ">>\n/ExtGState <<\n");
+    for (int i = 0; i < page->used_ext_gstates->length; i++) {
+        HPDF_ExtGState state = (HPDF_ExtGState)page->used_ext_gstates->data[i];
+        fprintf(file, "/%s %d 0 R\n", state->resource_name, state->obj_id);
+    }
+    fprintf(file, ">>\n/XObject <<\n");
+    for (int i = 0; i < page->used_images->length; i++) {
+        HPDF_Image image = (HPDF_Image)page->used_images->data[i];
+        fprintf(file, "/%s %d 0 R\n", image->resource_name, image->obj_id);
+    }
+    // reference only direct children; parent/self resource cycles are unnecessary.
+    for (PdfTransparencyGroup* group = page->groups; group; group = group->next)
+        if (group->parent == parent)
+            fprintf(file, "/TG%d %d 0 R\n", group->obj_id, group->obj_id);
+    fprintf(file, ">>\n>>\n");
+}
+
 static PdfNamedDestination* pdf_link_destination(HPDF_Doc doc,
                                                  const PdfLinkAnnotation* link) {
     return link->target[0] == '#' ? pdf_find_destination(doc, link->target + 1) : NULL;
@@ -1222,6 +1404,10 @@ HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
         }
     }
     
+    for (int i = 0; i < doc->pages->length; i++)
+        if (((HPDF_Page)doc->pages->data[i])->active_group)
+            return HPDF_ERROR_INVALID_STATE;
+
     FILE* file = fopen(filename, "wb");
     if (!file) {
         if (doc->error_fn) {
@@ -1322,6 +1508,22 @@ HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
         fprintf(file, "\nendstream\nendobj\n\n");
     }
     
+    // isolated Form XObjects preserve vector primitives while applying group alpha once.
+    for (int i = 0; i < doc->pages->length; i++) {
+        HPDF_Page page = (HPDF_Page)doc->pages->data[i];
+        for (PdfTransparencyGroup* group = page->groups; group; group = group->next) {
+            record_obj_offset(doc, group->obj_id, ftell(file), PDF_OBJ_FORM);
+            fprintf(file, "%d 0 obj\n<<\n/Type /XObject\n/Subtype /Form\n", group->obj_id);
+            fprintf(file, "/BBox [%.9g %.9g %.9g %.9g]\n", group->bounds[0],
+                group->bounds[1], group->bounds[2], group->bounds[3]);
+            fprintf(file, "/Group << /S /Transparency /I true /K false >>\n");
+            pdf_write_resources(file, page, group);
+            fprintf(file, "/Length %zu\n>>\nstream\n", group->content->length);
+            fwrite(group->content->str, 1, group->content->length, file);
+            fprintf(file, "\nendstream\nendobj\n\n");
+        }
+    }
+
     // --- Page Content Streams ---
     for (int i = 0; i < doc->pages->length; i++) {
         HPDF_Page page = (HPDF_Page)doc->pages->data[i];
@@ -1390,40 +1592,8 @@ HPDF_STATUS HPDF_SaveToFile(HPDF_Doc doc, const char* filename) {
         }
         if (has_annotations) fprintf(file, "]\n");
         
-        if (page->used_fonts->length > 0 ||
-            page->used_ext_gstates->length > 0 ||
-            page->used_images->length > 0) {
-            fprintf(file, "/Resources <<\n");
-            if (page->used_fonts->length > 0) {
-                fprintf(file, "/Font <<\n");
-                for (int j = 0; j < page->used_fonts->length; j++) {
-                    HPDF_Font font = (HPDF_Font)page->used_fonts->data[j];
-                    fprintf(file, "/%s %d 0 R\n", font->resource_name, font->obj_id);
-                }
-                fprintf(file, ">>\n");
-            }
-            if (page->used_ext_gstates->length > 0) {
-                fprintf(file, "/ExtGState <<\n");
-                for (int j = 0; j < page->used_ext_gstates->length; j++) {
-                    HPDF_ExtGState ext_gstate =
-                        (HPDF_ExtGState)page->used_ext_gstates->data[j];
-                    fprintf(file, "/%s %d 0 R\n",
-                            ext_gstate->resource_name, ext_gstate->obj_id);
-                }
-                fprintf(file, ">>\n");
-            }
-            if (page->used_images->length > 0) {
-                fprintf(file, "/XObject <<\n");
-                for (int j = 0; j < page->used_images->length; j++) {
-                    HPDF_Image image = (HPDF_Image)page->used_images->data[j];
-                    fprintf(file, "/%s %d 0 R\n",
-                            image->resource_name, image->obj_id);
-                }
-                fprintf(file, ">>\n");
-            }
-            fprintf(file, ">>\n");
-        }
-        
+        pdf_write_resources(file, page, NULL);
+
         fprintf(file, ">>\nendobj\n\n");
     }
     

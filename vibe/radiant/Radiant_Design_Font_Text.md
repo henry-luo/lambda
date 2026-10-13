@@ -1084,3 +1084,107 @@ before a font snapshot. Live tests read style during mutation and geometry
 after its frame commit, preserving the [DOM geometry contract](Radiant_Design_DOM_API.md#34-cssom-layout-and-geometry). Tabs,
 complete Unicode separator/word segmentation, cross-node whitespace/shaping,
 vertical/bidi spacing and decorated text need their own controls.
+
+## 17. Shared emphasis paint contract (2026-10-13)
+
+**FT-17 — Emphasis belongs to the shared text paint destination.** The current
+`emphasis46/marks.html` control paints 114/504 red mark pixels at 1×/2× in native
+raster output and emits SVG marks, while independent PDF rasterization has zero
+red pixels at both densities. PDF has no emphasis producer; SVG emits live
+viewer-font text outside the shared paint list. These paths cannot establish
+selected-font, effect or shadow parity.
+
+Use shared mark selection and placement for native and semantic paint. Resolve
+the mark from the element's font settings at half size, center it over each
+eligible typographic character unit, and consume the same authored/justified
+advances as the foreground run. Color resolves currentColor after inheritance;
+the mark is independent of a transparent foreground glyph. The CSS requirements
+come from [CSS Text Decoration 3 §3](https://www.w3.org/TR/css-text-decor-3/#emphasis-marks)
+and [the Level 4 emphasis controls](https://drafts.csswg.org/css-text-decor-4/#emphasis-marks)
+under **CI-18**, with selected outlines under **FT-15**. The current native
+position approximations are evidence to audit against ruby/line metrics, not
+the standard's definition of placement.
+
+The independent Chromium 152 reference in
+`emphasis46/browser_reference.json` places the under-dot ink at y=73–77 at 1×
+and y=147–156 at 2× for the 40px Arial control. The pre-repair native ink is
+y=67–71 and y=135–144, respectively. Both use the same horizontal centers;
+the native `font-size * 1.35` baseline loses six CSS pixels of clearance.
+Derive the mark baseline from the selected text/mark metrics and actual line
+placement; do not use that approximation as the shared placement contract.
+
+For the horizontal profile, use the selected text's content-area ascent/descent
+and normalize the half-size mark's OS/2 typo ascent/descent to its em height,
+falling back to the selected font's ascent/descent if typo metrics are unusable.
+Place an under mark after the text descent plus mark ascent; place an over mark
+before the text ascent plus mark descent. Round the outward offset in CSS pixels
+before density conversion. This follows the ruby placement model in the CSS
+specification; the independent reference is explained by Chromium's
+[mark offset computation](https://chromium.googlesource.com/chromium/src/+/main/third_party/blink/renderer/core/paint/text_painter.cc)
+and [normalized typo metrics](https://chromium.googlesource.com/chromium/src/+/HEAD/third_party/blink/renderer/platform/fonts/simple_font_data.cc).
+The selected Arial mark's normalized ascent is about 15.52px, rather than its
+18.11px hhea ascent. This metric choice remains subject to independent controls
+for other fonts, marks and line heights; ruby collisions need separate layout
+integration.
+
+Native bitmap paint and SVG/PDF paths must use the same mark positions and
+selected face. SVG must retain accessible marker names through semantic paint
+commands, with no receiving-viewer font dependency. Route marks through their
+actual effect/transform destination and include them in text-shadow silhouettes
+before per-layer alpha. Complete all source borrows synchronously; deferred
+paths/images own their geometry under **D4.5.1v4 / D4.1.4v5**. Reuse the existing
+outline and text-spacing helpers, and extract the common native/SVG shape before
+adding a third exporter-local implementation.
+
+Acceptance requires real pixels in all three outputs at both densities, matching
+font/color/position and shorthand winners, transparent/current colors, spaces
+and eligible punctuation, multiple runs, translated/filtered/group-opacity and
+shadow cases, causal live changes, failure rollback and replay after font/source
+retirement. Add independent placement references rather than defining correctness
+by agreement between two renderer paths. Grapheme/ligature unit transport,
+complex scripts, ruby interaction and vertical orientation stay explicit P2.1
+requirements; this producer repair cannot close that wider text contract.
+
+**Draft evidence (2026-10-13):** `emphasis46/full_draft_provenance.json` freezes
+the shared producer and its causal CSSOM setter repair. The draft passes 149
+vector cases and sixteen live pixel assertions. Native under-dot positions
+match the independent browser at both densities; selected PDF marks now reach
+actual pixels. Two newly added 1× SVG/PDF open-circle coverage checks remain
+failed, with raw density-specific artifacts preserved. CSSOM shorthand writes
+must replace their registered components even when the authored shorthand value
+is unchanged; retaining an overriding `none` longhand suppresses the producer.
+Getter projection and broader font/reader/text contexts remain unqualified.
+
+The independent `emphasis46/circle_reference.json` confirms that Chromium paints
+thirty strongly green pixels for the 15px open-circle mark at 1×. The native
+selected-font bitmap also has thirty; the unhinted SVG/PDF contour has none,
+although its antialiased ring remains visible. Selected face identity alone
+does not preserve the small mark's hinted coverage. Record the same hinted glyph
+coverage at the destination density and retain it in an owned paint resource
+for export, using the existing glyph recorder and capture pipeline. Apply this
+policy to the emphasis producer consistently, without circle-specific size or
+stroke adjustments. Density-qualified embedded resources remain separate from
+arbitrary-resolution vector text; qualification must preserve this limit.
+
+The hinted-resource draft passes SVG and direct Poppler open-circle coverage at
+both densities without changing the strong-color assertion. Its 1× macOS
+`sips` rasterization still fails that assertion: the embedded PDF mask retains
+coverage up to 213, while Poppler paints eleven strongly green samples and sips
+paints none. Preserve this reader-specific result alongside the portable-reader
+checks. CSSOM component projection now passes twelve independent browser cases,
+including longhand edits, pending values, priorities, removals and CSS-wide
+keywords. Omitted shorthand color serializes as `initial`; currentColor remains
+the computed default. These are draft results pending complete matching-source
+qualification.
+
+
+**Main qualification (2026-10-13, FT-17):** protected `emphasis46mq_*` verifies
+the shared selected-font producer after moving renderer-only capture into
+`render_text.cpp`. The required core and Radiant gates pass, all 1,171 scoped
+ASan cases pass, and 853 live assertions pass in each runtime. The full exporter
+passes 267/272 groups with the original 38 assertions plus one 1× sips circle
+comparison retained. SVG and direct Poppler pass that unchanged strong-color
+control; the official SVG matrix passes 126 formats /2,466 assertions. These
+results qualify the horizontal/output-density profile, not broader FT-17
+shaping, fragmentation, ruby or vertical contexts. Deferred resources retain
+owned payloads under **D4.5.1v4 / D4.1.4v5**.
