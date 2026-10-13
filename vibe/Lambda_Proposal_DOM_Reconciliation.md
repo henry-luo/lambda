@@ -1,7 +1,7 @@
 # Lambda Proposal — DOM Reconciliation at the Presentation Boundary
 
-> **Status:** proposal for review, 2026-10-13. **Decided 2026-10-13 (user):** retention is fully embraced and needs no ruling exception, because **D4.5.3v2** governs only how DOM is built from Lambda values (§6, §8 Q1); a retained element whose attributes changed is patched in place (§8 Q3). Q2 and Q4 remain open.
-> **Formal linkage:** **D4.5.3v2** (DOM construction from Lambda values deep-copies; retention downstream is embraced), **D4.5.1v4** / **D4.5.2** (presentation lifetime and the runtime boundary), **S12.1.3** (pure template bodies), **S9.1.4** (state lives in view state).
+> **Status:** proposal for review, 2026-10-13. **Decided 2026-10-13 (user):** retention is fully embraced and needs no ruling exception, because **D4.5.3v2** governs only how DOM is built from Lambda scripts (§6, §8 Q1); a retained element whose attributes changed is patched in place (§8 Q3). Q2 and Q4 remain open.
+> **Formal linkage:** **D4.5.3v2** (DOM construction from Lambda scripts deep-copies; retention downstream is embraced), **D4.5.1v4** / **D4.5.2** (presentation lifetime and the runtime boundary), **S12.1.3** (pure template bodies), **S9.1.4** (state lives in view state).
 > **Working-design linkage:** [Reactive UI](Lambda_Design_Reactive_UI.md) §5.3 (runtime identity), §9.4 (no-op elision), §9.5 (observer vs tree diff), §10.1–10.3 (incremental presentation), §18.3 (memoization, keyed lists).
 > **Scope:** how an incremental template re-render turns a regenerated result into DOM. Evaluation, render-map dependency tracking and template state are unchanged.
 
@@ -9,7 +9,7 @@
 
 ## 1. Problem
 
-Today every incremental re-render deep-copies the regenerated result into fresh DOM, building it the way **D4.5.3v2** builds DOM from Lambda values, even where the existing DOM could be kept. `rebuild_lambda_doc_incremental` (`radiant/cmd_layout.cpp`) then:
+Today every incremental re-render deep-copies the regenerated result into fresh DOM, building it the way **D4.5.3v2** builds DOM from Lambda scripts, even where the existing DOM could be kept. `rebuild_lambda_doc_incremental` (`radiant/cmd_layout.cpp`) then:
 - splices the new subtree in place of the old one;
 - migrates view state, frame requests, pointer capture, focus events, navigation requests and geomap ownership from old nodes to structurally corresponding new ones (`layout_preserve_rebuilt_owners`);
 - cascades the whole new subtree;
@@ -29,7 +29,7 @@ A file open changes two rows' `selected` class and the pane, yet it pays for a f
 
 ## 2. What construction guarantees
 
-Any change must keep these properties, which **D4.5.3v2** establishes for DOM built from Lambda values:
+Any change must keep these properties, which **D4.5.3v2** establishes for DOM built from Lambda scripts:
 
 1. **One occurrence, one native subtree.** Reusing one Lambda value in several slots must produce independent native nodes and child chains. A value never shares DOM between occurrences.
 2. **Lambda value semantics are untouched.** The copy happens at the DOM boundary; evaluation keeps ordinary sharing and ownership-based copy elision.
@@ -99,7 +99,7 @@ None needed. The user ruled on 2026-10-13 that D4.5.3 covers how DOM is construc
 
 ## 8. Questions for review
 
-1. ~~Is retaining an existing occurrence consistent with the intent of D4.5.3?~~ **Decided 2026-10-13 (user): yes, and fully embraced.** D4.5.3 governs DOM construction from Lambda values only; **D4.5.3v2** states that scope (§6).
+1. ~~Is retaining an existing occurrence consistent with the intent of D4.5.3?~~ **Decided 2026-10-13 (user): yes, and fully embraced.** D4.5.3 governs DOM construction from Lambda scripts only; **D4.5.3v2** states that scope (§6).
 2. Is "no imperative edit since built" the right condition for reuse, or should any re-render of a subtree that has seen an imperative edit since build reset it, as today?
 3. ~~Should rule 2 also patch changed attributes in place on a pristine shell, such as a row's `class`?~~ **Decided 2026-10-13 (user): yes.** Rule 2 patches them; §4.3's mutation-path invalidation restyles the patched elements.
 4. What phasing do you want? Suggested:

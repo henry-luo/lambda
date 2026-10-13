@@ -125,7 +125,7 @@ Verification: a differential run of every UI fixture with replay on and off, wit
   - Further gains need an old generation with write barriers.
 - Doc fixtures:
   - Pane clicks replay the file panel (§4.2). A file selection still re-renders the whole tree, because the selection highlight is app state; moving it into the rows would let a selection re-render only the two affected rows.
-  - The incremental rebuild still deep-copies every re-render into fresh DOM, so a re-rendered subtree is always fully restyled and relaid. That copy is an implementation choice, not a ruling: **D4.5.3v2** governs only DOM construction from Lambda values and embraces retention downstream. [Lambda_Proposal_DOM_Reconciliation](../Lambda_Proposal_DOM_Reconciliation.md) designs keeping and patching existing occurrences; its condition for reuse (Q2) and phasing (Q4) await review.
+  - The incremental rebuild still deep-copies every re-render into fresh DOM, so a re-rendered subtree is always fully restyled and relaid. That copy is an implementation choice, not a ruling: **D4.5.3v2** governs only DOM construction from Lambda scripts and embraces retention downstream. [Lambda_Proposal_DOM_Reconciliation](../Lambda_Proposal_DOM_Reconciliation.md) designs keeping and patching existing occurrences; its condition for reuse (Q2) and phasing (Q4) await review.
   - `test/ui/doc_editor.ls` is an 86% fork of the shipped `lmd/package/doc/doc_viewer.ls`. Retiring it is the owner's decision.
 - dtna `rate_modes` and `button_modes` (6–7 s): not profiled yet.
 

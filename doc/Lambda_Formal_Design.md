@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 29.5.0 (2026-10-13)
+**Spec version:** 29.5.1 (2026-10-13)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1055,7 +1055,7 @@ that carries them.
   sibling links. Normal Lambda evaluation retains ordinary value sharing and
   ownership-based copy elision; rooted callables and native handles keep their
   existing identity. DOM copies preserve the evaluator's source/result mapping.
-  The ruling governs only how DOM is built from Lambda values; it does not
+  The ruling governs only how DOM is built from Lambda scripts; it does not
   constrain style, layout or rendering. Incremental presentation fully embraces
   retention: a regeneration may keep an existing occurrence's subtree, patched
   in place to present the new result, and restyle, reflow and repaint reuse
