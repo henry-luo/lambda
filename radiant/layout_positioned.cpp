@@ -1269,12 +1269,16 @@ static float static_position_line_y(BlockContext* pa_block, Linebox* pa_line,
         !layout_axis_is_inline_for_block(static_containing_block, LAYOUT_AXIS_Y) &&
         positioned_axis_uses_static_self_alignment(
             block, static_containing_block, LAYOUT_AXIS_Y);
-    if (!was_inline && parent && parent->view_type == RDT_VIEW_INLINE &&
+    bool follows_line = !was_inline && parent &&
         pa_line && !pa_line->is_line_start &&
         layout_block_writing_mode(layout_nearest_block_ancestor(parent)) == WM_HORIZONTAL_TB &&
-        (get_static_position_direction(parent) == TD_LTR || !rtl_static_self_alignment)) {
+        (get_static_position_direction(parent) == TD_LTR || !rtl_static_self_alignment);
+    block->position->static_block_after_line = follows_line &&
+        !block->positionp()->has_top && !block->positionp()->has_bottom;
+    if (follows_line) {
         // CSS 2.1 §10.3.7: a block-level abspos child of an inline sequence
-        // uses the following line's static block position. CSS Align's RTL
+        // uses the following line's static block position even in a block
+        // parent; its final line extent is deferred. CSS Align's RTL
         // self-alignment instead resolves from the inline fragment's start.
         line_y += pa_block->line_height > 0.0f ? pa_block->line_height : 0.0f;
     }
@@ -1456,7 +1460,8 @@ static void positioned_register_static_line_self_alignment(
         ViewBlock* block, ViewBlock* static_containing_block,
         BlockContext* static_block_context, Linebox* line) {
     if (!block || !block->position || !line ||
-        !positioned_needs_static_line_self_alignment(block, static_containing_block)) {
+        (!block->positionp()->static_block_after_line &&
+         !positioned_needs_static_line_self_alignment(block, static_containing_block))) {
         return;
     }
     block->position->next_static_line_alignment = nullptr;
@@ -1509,7 +1514,12 @@ void layout_finalize_static_line_self_alignment(LayoutContext* lycon,
         if (block->position) block->position->next_static_line_alignment = nullptr;
         ViewBlock* static_containing_block = layout_nearest_block_ancestor(
             block->parent_view());
-        if (static_containing_block) {
+        if (block->position && block->positionp()->static_block_after_line) {
+            // following siblings can enlarge the line after the static block
+            // position was captured, without consuming that in-flow line.
+            block->y += used_line_height - block->positionp()->static_line_initial_extent;
+            block->position->static_block_after_line = false;
+        } else if (static_containing_block) {
             for (LayoutAxis axis : layout_axes()) {
                 if (layout_axis_is_inline_for_block(static_containing_block, axis)) continue;
                 PositionedSelfAlignment alignment = positioned_static_axis_self_alignment(
@@ -2727,7 +2737,7 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
         block, static_containing_block, static_position_is_inline_layout);
     positioned_realign_static_self_axes(
         block, static_containing_block, pa_block, static_position_is_inline_layout);
-    if (static_position_is_inline_layout) {
+    if (static_position_is_inline_layout || block->positionp()->static_block_after_line) {
         positioned_register_static_line_self_alignment(
             block, static_containing_block, pa_block, pa_line);
     }
@@ -2996,6 +3006,11 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
         FloatAvailableSpace space = block_context_space_at_y(
             bfc, final_y_bfc, float_total_height, false, true);
         bool left_float = float_is_left(block);
+        // rule 7 permits an oversized float to protrude only when no
+        // earlier same-side float moves it away from its containing edge.
+        bool same_side_intrudes = left_float
+            ? space.has_left_float && space.left > containing_block_left_bfc + 0.5f
+            : space.has_right_float && space.right < containing_block_right_bfc - 0.5f;
         // CSS 2.1 §9.5.1: Compute effective available width
         // is the only constraint — not the BFC element's content width, which
         float effective_left, effective_right;
@@ -3003,7 +3018,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
             effective_left = space.has_left_float
                 ? max(space.left, containing_block_left_bfc)
                 : containing_block_left_bfc;
-            if (float_wider_than_cb) {
+            if (float_wider_than_cb && !same_side_intrudes) {
                 effective_right = space.right;
             } else {
                 effective_right = space.has_right_float
@@ -3014,7 +3029,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
             effective_right = space.has_right_float
                 ? min(space.right, containing_block_right_bfc)
                 : containing_block_right_bfc;
-            if (float_wider_than_cb) {
+            if (float_wider_than_cb && !same_side_intrudes) {
                 effective_left = space.left;
             } else {
                 effective_left = space.has_left_float

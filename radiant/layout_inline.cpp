@@ -41,12 +41,7 @@ static bool quirks_br_after_nested_inline_text(LayoutContext* lycon,
     return nested_inline_text;
 }
 
-typedef struct InlineOutOfFlowKind {
-    bool floated;
-    bool positioned;
-} InlineOutOfFlowKind;
-
-static InlineOutOfFlowKind inline_out_of_flow_kind(DomElement* elem) {
+InlineOutOfFlowKind inline_out_of_flow_kind(DomElement* elem) {
     InlineOutOfFlowKind kind = {};
     if (!elem) return kind;
     kind.floated = layout_position_is_floated(elem->position);
@@ -1967,7 +1962,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
                 if (!lycon->line.is_line_start &&
                     (visible_inline_in_sequence || sequence_has_start_edge)) {
                     span_record_current_split_line_fragment(lycon, span, span_line_height);
-                    line_break(lycon);
+                    line_break(lycon, true);
                 }
                 in_inline_sequence = false;
                 visible_inline_in_sequence = false;

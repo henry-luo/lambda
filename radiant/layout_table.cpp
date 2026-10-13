@@ -4664,7 +4664,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             for (; child; child = child->next_sibling) {
                 layout_flow_node(lycon, child);
             }
-            if (!lycon->line.is_line_start) { line_break(lycon); }
+            if (!lycon->line.is_line_start) { line_break(lycon, true); }
             layout_table_caption_content_finish(
                 lycon, caption, layout_box_metrics(caption).pad_border_v);
             caption->width = (float)caption_width;  // Preliminary width; final width set during positioning

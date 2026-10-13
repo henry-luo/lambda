@@ -1480,7 +1480,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     }
 
                     if (!lycon->line.is_line_start) {
-                        line_break(lycon);
+                        line_break(lycon, true);
                     }
                 }
             }

@@ -10,4 +10,9 @@ bool layout_hyphenation_en_us_language(const char* lang);
 size_t layout_hyphenation_en_us_next_break(const char* word, size_t length,
                                            size_t after);
 
+// selects a native language resource when available, then the bundled fallback.
+bool layout_hyphenation_language_supported(const char* lang);
+size_t layout_hyphenation_next_break(const char* word, size_t length,
+                                    size_t after, const char* lang);
+
 #endif

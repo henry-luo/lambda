@@ -1,0 +1,21 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+.rows { width: 100px; column-height: 40px; row-gap: 20px; column-gap: 0; }
+.rows > div { height: 80px; background: green; }
+#explicit, #two { column-count: 1; }
+#styled { line-height: 20px; }
+#two { column-count: 2; }
+#auto { column-fill: auto; }
+#short > div { height: 60px; }
+#zero { row-gap: 0; }
+</style>
+<div id="result">
+  <div class="rows" id="default"><div></div></div>
+  <div class="rows" id="explicit"><div></div></div>
+  <div class="rows" id="styled"><div></div></div>
+  <div class="rows" id="two"><div></div></div>
+  <div class="rows" id="auto"><div></div></div>
+  <div class="rows" id="short"><div></div></div>
+  <div class="rows" id="zero"><div></div></div>
+</div>

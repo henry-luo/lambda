@@ -3381,8 +3381,9 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                         span_asc, span_desc, baseline_pos, bt, pt);
                     span->height = expected_height;
                 }
-            } else if (!span_is_multi_line && span->height > expected_height) {
-                // CSS 2.1 §10.6.1: normalize a non-replaced inline's font box.
+            } else if (!span_is_multi_line && span->height >= expected_height) {
+                // CSS 2.1 §10.6.1: an equal-height shifted descendant still
+                // cannot replace its ancestor's own font-box baseline.
                 // Direct text keeps an anonymous table wrapper on its original line.
                 if (!preserve_anonymous_table_line_origin &&
                     !preserve_inline_atomic_line_origin &&
@@ -4745,7 +4746,7 @@ void layout_flow_children(LayoutContext* lycon, DomNode* first_child,
     for (DomNode* child = first_child; child; child = child->next_sibling) {
         layout_flow_node(lycon, child);
     }
-    if (finalize_line && !lycon->line.is_line_start) line_break(lycon);
+    if (finalize_line && !lycon->line.is_line_start) line_break(lycon, true);
 }
 
 static void layout_set_root_available_width(LayoutContext* lycon, ViewBlock* root,

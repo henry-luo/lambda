@@ -5948,7 +5948,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     }
                     prescan_and_layout_floats(lycon, child, block);
                     // CSS 2.1 §16.1: text-indent is "with respect to the left (or right)
-                    if (!lycon->block.is_first_line && lycon->block.text_indent != 0 &&
+                    if (lycon->block.is_first_line && lycon->block.text_indent != 0 &&
                         lycon->block.direction != CSS_VALUE_RTL) {
                         BlockContext* bfc = block_context_find_bfc(&lycon->block);
                         if (bfc && (bfc->left_float_count > 0 || bfc->right_float_count > 0)) {
@@ -6551,6 +6551,10 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
                                         &lycon->block.init_ascender,
                                         &lycon->block.init_descender);
         }
+    } else if (lycon->font.style && lycon->font.current_font_size == 0.0f) {
+        // a zero-size font has no face; inherited parent strut metrics must
+        // not move zero-height atomic children below their own baseline.
+        lycon->block.init_ascender = lycon->block.init_descender = 0.0f;
     }
     if (block->is_element() && lycon->font.style) {
         DomElement* block_element = lam::dom_require<DOM_NODE_ELEMENT>(block);
@@ -7252,7 +7256,7 @@ static bool same_line_float_needs_next_line(BlockContext* pa_block, Linebox* pa_
     return needs_next_line;
 }
 
-static float find_line_y_for_width_with_floats(BlockContext* bfc, BlockContext* block_ctx,
+float find_line_y_for_width_with_floats(BlockContext* bfc, BlockContext* block_ctx,
                                                Linebox* line, float required_width,
                                                float min_local_y, float query_height) {
     if (!bfc || !block_ctx || !line) return min_local_y;
@@ -7263,7 +7267,10 @@ static float find_line_y_for_width_with_floats(BlockContext* bfc, BlockContext* 
         FloatAvailableSpace space = block_context_space_at_y(bfc, y_bfc, query_height);
         float local_left = max(space.left - block_ctx->bfc_offset_x, line->left);
         float local_right = min(space.right - block_ctx->bfc_offset_x, line->right);
-        float available_width = max(local_right - local_left, 0.0f);
+        // text-indent occupies the shortened line after the float edge.
+        float indent = block_ctx->direction == CSS_VALUE_RTL
+            ? line->text_indent_offset : line->text_indent_advance;
+        float available_width = max(local_right - local_left - indent, 0.0f);
         if (available_width >= required_width) {
             return y_bfc - block_ctx->bfc_offset_y;
         }
@@ -9538,31 +9545,20 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             is_float = value == CSS_VALUE_LEFT || value == CSS_VALUE_RIGHT;
         }
     }
-    // CSS 2.1 §10.3.7: For absolutely positioned elements whose specified display
-    bool is_blockified_inline_abspos = false;
     bool is_out_of_flow_positioned = false;
-    bool out_of_flow_parent_is_inline = false;
     if (elmt->is_element()) {
         DomElement* elem = elmt->as_element();
-        bool was_inline_level = layout_element_was_inline(elem);
-        bool is_abspos = layout_element_is_abs_or_fixed(elem);
-        is_out_of_flow_positioned = is_abspos;
-        out_of_flow_parent_is_inline = is_abspos && elem->parent &&
-            elem->parent->view_type == RDT_VIEW_INLINE;
-        if (was_inline_level && is_abspos) {
-            is_blockified_inline_abspos = true;
-        }
+        is_out_of_flow_positioned = layout_element_is_abs_or_fixed(elem);
     }
     bool is_inline_table = display.outer == CSS_VALUE_INLINE &&
         display.inner == CSS_VALUE_TABLE;
     bool is_inline_atomic = display.outer == CSS_VALUE_INLINE_BLOCK ||
         is_inline_table;
-    if (!is_inline_atomic && !is_float && !is_blockified_inline_abspos &&
-        (!is_out_of_flow_positioned || !out_of_flow_parent_is_inline)) {
+    if (!is_inline_atomic && !is_float && !is_out_of_flow_positioned) {
         // CSS 2.1 §9.6.1: an out-of-flow child in an inline sequence keeps
         // that line for static-position resolution without a phantom break.
         if (!lycon->line.is_line_start) {
-            line_break(lycon);
+            line_break(lycon, true);
         } else if (lycon->line.start_view) {
             align_and_discard_phantom_inline_line(lycon);
         }

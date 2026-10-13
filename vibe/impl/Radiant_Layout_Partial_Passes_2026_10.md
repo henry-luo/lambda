@@ -1,6 +1,6 @@
 # Radiant layout partial passes — October 2026
 
-Status: layout fixes through round 4 implemented and verified, 2026-10-13.
+Status: layout fixes through round 5 implemented and verified, 2026-10-13.
 
 ## Scope and initial gate
 
@@ -361,3 +361,288 @@ Radiant PNGs are under `temp/layout-analysis/round4/`; browser captures are in
 its parent directory. Raster substitution of joined/ligature glyphs remains
 unfixed: the layout geometry now matches, but the existing per-codepoint painter
 still needs a shaped-glyph path. No pixel-perfect shaping claim is made.
+
+## Round 5: thirty additional full matches
+
+Starting gate: **2,977 full passes, 317 partial passes, zero failures** across
+3,294 cases. These thirty improvements exclude all earlier rounds.
+
+### Fixed row sizing
+
+`column-height-012` has an 80px child split into two 40px rows with a 20px
+gutter. Its stored fragments and painted union correctly end at 100px, but
+the container reports 120px. Fixed balanced-row finalization divides the
+already-gapped physical extent by the row height, counting the gutter as
+content for a third row. A different formula is selected only when no
+`BlockProp` exists; adding an unrelated block property changes row geometry.
+
+Use the row pitch (height plus gap) for all fixed balanced rows, counting no
+gutter after the final row. Reuse `multicol_fragment_grid_union_height` to
+compute the resulting extent. Verify both default and authored column counts,
+balance and auto-fill, and unrelated block properties with native fixtures.
+Authority: [CSS Multicol 2 §4.2](https://drafts.csswg.org/css-multicol-2/#ch)
+and [§5.2](https://drafts.csswg.org/css-multicol-2/#row-gap). This CSS
+implementation repair changes no Lambda formal S/D ruling.
+
+### First formatted line below floats
+
+`below-float2` places its first glyph below a full-width float but loses the
+50px indent. `line_reset` consumes `is_first_line` before any line is
+formatted; moving the still-empty line below a float resets it again without
+the indent. Consume first-line eligibility only when `line_break` publishes
+a formatted line. Update the prescan's first-line check to retain the same
+indent origin after newly placed floats. Test a plain text node, an inline
+wrapper and a `::first-line` font, with a later line as a control.
+Authority: [CSS Text 3 §8.1](https://www.w3.org/TR/css-text-3/#text-indent-property)
+and [CSS 2.2 §9.5](https://www.w3.org/TR/CSS22/visuren.html#floats).
+
+Tracing also proves the text path searches the full ancestor BFC width:
+it finds space beside the float outside the 100px line container and then
+publishes an empty line. Promote and reuse the existing atomic-inline search,
+which intersects BFC float space with the actual line bounds. Moving this
+unformatted line must retain both indentation and `::first-line` styling.
+Fixed-row rounding excludes escaping-spanner flows: those groups include
+separate spanner fragments and do not form homogeneous row tracks.
+
+The inline-wrapper variant encounters its float after the wrapper's initial
+line setup. Refresh float bounds before text on an empty line, retaining the
+already-selected LTR indent in the line state (RTL already stores its indent).
+The shared width search includes that indent when intersecting the shortened
+line; a half-width float can still exclude an indented glyph that would fit
+an unindented line. No synthetic line may consume first-line styles.
+
+Float refresh also needs the line's existing initial-letter exclusion. Its
+calculation is shared with line setup; the count-selected eligibility is
+retained on the line, and refresh does not decrement the exclusion count.
+The first-line font control uses an explicit 50px line height, as the WPT
+case does. Re-resolving a unitless line-height for `::first-line` is a
+separate existing issue.
+
+### Disabled conditional hyphens
+
+The soft-hyphen branch unconditionally records a break, while the predictive
+word scans also stop at U+00AD regardless of `hyphens`. Resolve one shared
+hyphenation mode for these paths: `none` retains U+00AD as zero-advance source
+text without introducing a break. Literal hyphens retain their ordinary
+Unicode break behavior. Cover explicit and inherited `none`, a second-line
+word, and a manual-hyphenation control.
+Authority: [CSS Text 3 §5.3](https://www.w3.org/TR/css-text-3/#hyphens-property).
+
+### Choosing a fitting conditional break
+
+`hyphenate-character-003` records the later soft hyphen after `imple`, even
+though that prefix plus the authored bullet exceeds the 5.5ch line. It
+overwrites the fitting break after `im`. Retain an earlier conditional break
+when a later candidate cannot fit its generated mark; preserve the existing
+fallback for the first conditional point when the prefix itself overflows.
+Automatic candidates must advance their iterator even when a candidate does
+not fit, so a continuation can reach later valid points. Verify authored
+hyphen strings of different widths and multiple breaks in a single word.
+
+When wrapping rewinds to an earlier automatic point, restart the iterator
+after that chosen point. A rejected point can fit on the continuation, and
+must not disappear merely because measurement already scanned beyond it.
+
+### Language resources for automatic hyphenation
+
+The layout gate recognizes only the bundled English resource. Consequently
+German `hyphens: auto` cannot produce any automatic break, including the
+mixed-case `De-dE` language test. English browser captures also use different
+dictionary points from the bundled Liang data. Use the native language
+resource when available, with the bundled English resource as the fallback.
+On Apple platforms, query Core Foundation availability for the declared
+locale and convert its UTF-16 break indices back to source UTF-8 byte offsets.
+Unknown languages remain unhyphenated. The default minimum word/prefix/suffix
+lengths remain 5/2/2, as suggested by CSS Text 4; source words and references
+remain unchanged.
+
+The inherited-`none` regression also finds a style-boundary defect: an inline's
+block record, allocated for another property, supplies the default `manual`
+value and stops the ancestor walk. The shared inherited text-keyword helper
+now distinguishes a default field from an authored declaration, including
+`initial` and explicit inheritance. Authority:
+[CSS Cascade 5 §7.2](https://www.w3.org/TR/css-cascade-5/#inheritance).
+
+Authority: [CSS Text 3 §5.3](https://www.w3.org/TR/css-text-3/#hyphens-property),
+[CSS Text 4 hyphenate-limit-chars](https://drafts.csswg.org/css-text-4/#hyphenate-limit-chars),
+and [Apple's hyphenation API](https://developer.apple.com/documentation/corefoundation/cfstringgethyphenationlocationbeforeindex(_:_:_:_:_:_:)).
+The browser's [native implementation](https://raw.githubusercontent.com/chromium/chromium/main/third_party/blink/renderer/platform/text/apple/hyphenation_apple.cc)
+confirms use of that platform resource; no browser or vendor code is copied.
+
+The German subset face includes U+2010 but omits hyphen-minus. Selecting an
+uncovered default mark can use a missing-glyph advance and reject otherwise
+valid points. Prefer the selected font's U+2010 when covered, retaining
+hyphen-minus when it is not; authored strings, including the empty string,
+take precedence. Authority:
+[CSS Text 4 hyphenate-character](https://drafts.csswg.org/css-text-4/#hyphenate-character).
+
+The continuation query evaluates the remaining source word, including the
+first glyph whose advance is carried into that line. Native resource probes
+show that a suffix may have different available points from the complete
+word; keeping the old word origin creates extra lines for an empty mark.
+If its first syllable itself exceeds an unobstructed line, keep that first
+point as an overflow fallback. The browser's German subset-font fixture
+exposes a 46px `dampf` prefix in a 40px box: the prefix can overflow, but
+the following syllables must still break. Float-obstructed lines retain
+their clearance search instead of overlapping the float.
+
+### Oversized floats beside earlier floats
+
+The five `white-space-intrinsic-size` partials have correct glyph sizes and
+intrinsic widths. Their second oversized float is incorrectly placed beside
+the first within a zero-width parent. The float solver substitutes the whole
+BFC width whenever the incoming float is wider than its containing block,
+even when an earlier same-side float prevents placement at that block's edge.
+Apply the oversized-box exception only at the same-side containing-block
+edge; otherwise retain the containing-block bound and advance past the
+earlier float. Cover left/right floats, zero/narrow parents, and ordinary
+side-by-side floats. Authority:
+[CSS 2.2 §9.5.1 rule 7](https://www.w3.org/TR/CSS22/visuren.html#float-position).
+
+A separate zero-width right-float probe overlaps both boxes in Chromium and
+Radiant, even with an RTL ancestor. Its rule-2/rule-7 behavior needs a separate
+investigation; it is not part of this fix or its native regression fixture.
+The fixture covers the proven zero-width left case, both sides in a narrow
+parent, and ordinary placements. The probe capture remains in `temp/`.
+
+### Preserved controls at zero font size
+
+Both `white-space-zero-fontsize` cases return from `layout_text` before
+processing source when the text node's font size is zero. Glyphs have zero
+advance, but preserved LF still separates lines containing nonzero-font
+spans, and a length-valued tab stop remains independent of font size.
+Process whitespace normally while retaining zero glyph/cell metrics; do not
+substitute the default 16px cell for a zero-size font. Cover LF, a length tab,
+a numeric tab and zero-advance ordinary characters between visible spans.
+Authority: [CSS Text 3 §3](https://www.w3.org/TR/css-text-3/#white-space-property)
+and [§4.2](https://www.w3.org/TR/css-text-3/#tab-size-property).
+
+The ordinary-character and numeric-tab controls expose the companion font
+root: native font APIs interpret size zero as their default size. Font setup
+now releases any prior face and retains zero derived metrics without asking
+the platform to create that default face. Length tabs still process normally.
+
+The full gate's five zero-font sizing controls expose stale parent strut
+metrics: `setup_inline` updates the strut only when a face exists. Clearing
+the zero-size face therefore leaves the parent's 14.5px ascent in its block
+context. Reset that zero-size strut to zero as well; a zero-height atomic
+child must keep the zero baseline even when an intervening whitespace node
+now runs through text processing. Add adjacent zero-height atomic controls.
+
+### Segment-break context across inline boundaries
+
+`seg-break-transformation-018.tentative` inserts a full space after a ZWSP
+owned by an inline span. The local preceding-character state starts at zero
+for each text node, although whitespace transformation uses adjacent source
+text across ordinary inline boundaries. Generalize the existing lookahead
+traversal to both directions and reuse the inline module's out-of-flow
+classifier. Ignore decorations, hidden boxes and out-of-flow descendants;
+atomic boxes and forced breaks stop the context. The same traversal supplies
+following context when a whitespace sequence ends at a text-node boundary.
+Cover both directions, decorations, positioned/floated/hidden boxes, and
+ordinary/atomic/preserved-newline controls. Authority:
+[CSS Text 3 §4.1](https://www.w3.org/TR/css-text-3/#white-space-rules)
+and [§4.1.3](https://www.w3.org/TR/css-text-3/#line-break-transform).
+
+The August 2026 CSS Text 3 wording makes transformation UA-defined and
+recommends conservative heuristics. Radiant's East Asian width-only deletion
+implements a retired draft rule, discarding separators without a writing
+system policy. Preserve non-ZWSP breaks as spaces consistently, including
+across inline boundaries; retain ZWSP's explicit zero-width separation. The
+four `segment-break-transformation-removable` fixtures still assert the old
+rule, so their current browser-reference matches demonstrate this policy,
+not conformance to that obsolete assertion. Both tagged and untagged CJK
+controls preserve spaces. This also avoids the cross-node traversal causing
+new kana-spacing regressions.
+
+The out-of-flow control reveals a second root in `layout_block`: a block
+flushes an unfinished parent line unless its positioned parent is itself
+inline. Absolute/fixed boxes are outside normal flow regardless of the
+parent's display. Exclude all such boxes from the line flush; retaining the
+parent line also retains their static-position context. Authority:
+[CSS 2.2 §9.6.1](https://www.w3.org/TR/CSS22/visuren.html#absolute-positioning).
+
+Its block-level hypothetical static position follows the unfinished line,
+even when its parent is a block. Extend the existing static-line deferred
+list to retain that position until the line's final extent is known; following
+larger-font text can enlarge it. Cover a block abspos between text nodes,
+later line growth, first-child placement, explicit top, and inline abspos.
+Authority: [CSS 2.2 §10.6.4](https://www.w3.org/TR/CSS22/visudet.html#abs-non-replaced-height)
+and [CSS Position 3 §3.5.2](https://drafts.csswg.org/css-position-3/#staticpos-rect).
+
+### Conditional hanging before forced breaks
+
+`pre-wrap-019` and `white-space-pre-wrap-trailing-spaces-001` align fitting
+trailing spaces as if they were absent. `line_break` subtracts the entire
+hanging sequence for both soft and forced breaks. For a forced break in
+`pre-wrap`, hang only the overflowing portion; retain fitting spaces when
+aligning the line. A long trailing sequence fills the available line before
+its excess hangs, so centering does not shift the fitting prefix. Last-line
+and explicit LF/BR state already identify forced breaks; pass that distinction
+also at block boundaries and shared content-finalization entry points.
+Cover fitting and excessive spaces, soft wrapping, LF/BR/block boundaries,
+normal collapsing and `break-spaces` as controls. Authority:
+[CSS Text 3 §4.1.2](https://www.w3.org/TR/css-text-3/#white-space-phase-2).
+
+### Equal-height descendants with shifted baselines
+
+`boundary-shaping-006` has correctly shaped and positioned text, but its two
+outer ordinary spans follow a descendant superscript 13px above their own
+baseline. Vertical alignment restores an inline's own font box only when
+its child union is shorter or taller. Equal-height shifted descendants skip
+both branches and overwrite the ancestor's y-origin. Include equal heights
+in the existing normalization branch, retaining its fragmentation, table
+and atomic-fragment exclusions. Cover nested superscript/subscript and an
+ordinary same-font chain. Authority:
+[CSS 2.2 §10.6.1](https://www.w3.org/TR/CSS22/visudet.html#inline-non-replaced)
+and [§10.8.1](https://www.w3.org/TR/CSS22/visudet.html#leading).
+
+`text-align-last-015` was also inspected with both renderers. Its individual
+fragments already match Chromium; the remaining mismatch is the old stored
+reference's grouping of disconnected columns with equal y coordinates.
+The current capture code keeps those fragments separate. Leave the case
+partial and preserve its reference rather than altering correct layout.
+
+### Full matches and validation
+
+All thirty cases have 100% elements, spans and text against unchanged stored
+browser references:
+
+| Proven root | Newly full fixtures |
+|---|---|
+| Fixed multicol row pitch | `column-height-012` |
+| Float clearance and first-line state | `below-float`, `below-float2`, `below-float3` |
+| Hyphenation inheritance and `none` | `hyphens-none-011`, `hyphens-none-shy-on-2nd-line-001` |
+| Hyphen marks, native resources, fitting points and continuations | `hyphens-auto-005`, `hyphens-auto-inline-010`, `hyphens-character`, `hyphens-span-002`, `lang-tag-case-insensitive`, `hyphenate-character-002`, `hyphenate-character-003`, `hyphenate-character-004` |
+| Oversized floats inside their containing block | `white-space-intrinsic-size-001`, `white-space-intrinsic-size-003`, `white-space-intrinsic-size-014`, `white-space-intrinsic-size-016`, `white-space-intrinsic-size-020` |
+| Zero-size glyphs retain whitespace controls | `white-space-zero-fontsize-001`, `white-space-zero-fontsize-002` |
+| Source context and out-of-flow static placement | `seg-break-transformation-018.tentative`, `seg-break-transformation-019.tentative` |
+| Conservative segment-break policy under the current spec | `segment-break-transformation-removable-1`, `segment-break-transformation-removable-2`, `segment-break-transformation-removable-3`, `segment-break-transformation-removable-4` |
+| Conditional hanging before forced breaks | `pre-wrap-019`, `white-space-pre-wrap-trailing-spaces-001` |
+| Equal-height descendant baseline boxes | `boundary-shaping-006` |
+
+The exact `make test-layout-baseline` gate passes: **3,007 full passes, 287
+partial passes, zero failures**, across the same 3,294 tests. The independent
+native text-query runner passes all **17 tests**, including nine added root
+regressions. Radiant integer-cast lint and `git diff --check` pass. No fixture
+references, baseline scores, tolerances or skip lists were changed.
+
+`LAMBDA_TEST_MAX_CONCURRENT=4 make test-radiant-baseline` passes: **5,516 full
+passes, 291 partial passes, one skip and zero regressions**, across 5,808
+tests. The native inventory adds nine tests, from eight to seventeen; the
+layout inventory is unchanged. The full gate also passes UI/DOM, page
+snapshot, rendering and CSS cascade checks. Logs are `baseline-final.log`
+and `radiant-final.log` in the round-five artifact directory.
+
+Captured browser/Radiant PNGs, initial/final geometry inventories, the explicit
+thirty-case before/after manifest and gate logs are in
+`temp/layout-analysis/round5/`; browser PNGs also use the shared
+`temp/layout-analysis/` capture directory. Native superscript/subscript
+captures agree visually; their explicit box assertions verify ancestor
+baselines, which transparent wrappers do not reveal in screenshots.
+
+Existing glyph-substitution painting and negative-z reference-overlay
+painting limitations remain outside these geometry fixes. Cases with an
+unproven root, unsupported browser features or a stale reference grouping
+remain partial. Automatic language resources use CoreFoundation on macOS
+and retain the bundled English fallback on other platforms.

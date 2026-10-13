@@ -330,6 +330,8 @@ bool layout_inline_element_is_orthogonal(DomElement* element);
 // CSS 2.2 §9.2.1.1: block-in-inline fragments cannot collapse through a
 // parent when the inline box follows prior in-flow content.
 bool layout_inline_has_prior_in_flow_content(DomNode* inline_box);
+struct InlineOutOfFlowKind { bool floated; bool positioned; };
+InlineOutOfFlowKind inline_out_of_flow_kind(DomElement* element);
 CssDeclaration* layout_specified_physical_size_declaration(DomElement* element,
                                                             bool horizontal);
 CssDeclaration* layout_specified_physical_minmax_size_declaration(DomElement* element,
@@ -2380,6 +2382,8 @@ typedef struct Linebox {
     float inline_start_edge_pending;  // CSS 2.1 §8.3: accumulated left margin+border+padding from
                                       // inline spans that haven't produced content yet; re-applied
                                       // after line break so the span's first content is indented
+    float text_indent_advance;        // applied LTR indent retained while float bounds change
+    bool initial_letter_exclusion_by_count; // selected once per line, retained across float refresh
     float text_indent_offset;         // CSS 2.1 §16.1: RTL first-line text-indent amount that
                                       // narrows the wrap boundary and alignment width from the right
     FontBox line_start_font;
@@ -4033,6 +4037,8 @@ float block_context_next_float_boundary(BlockContext* ctx, float y);
  * @param element_height Height of the element to place (queries full height range for floats)
  */
 float block_context_find_y_for_width(BlockContext* ctx, float required_width, float min_y, float element_height = 1.0f);
+float find_line_y_for_width_with_floats(BlockContext* bfc, BlockContext* block_ctx,
+    Linebox* line, float required_width, float min_local_y, float query_height);
 
 /**
  * Find Y position to clear floats
@@ -4241,7 +4247,7 @@ inline bool layout_parse_font_shorthand(const CssValue* value,
  * @return const char* font family name
  */
 
-void line_break(LayoutContext* lycon);
+void line_break(LayoutContext* lycon, bool forced_break = false);
 void layout_finalize_static_line_self_alignment(LayoutContext* lycon,
                                                 float used_line_height);
 void layout_finalize_static_inline_positions(LayoutContext* lycon);
