@@ -108,11 +108,11 @@ static bool fo_failure(FoTranslationContext* context, DomElement* source, const 
 
 static const char* fo_parent_value(FoTranslationContext* context, DomElement* source, const char* property,
     const char* value, bool nominal_context = true);
-enum FoPropertyReference { FO_PROPERTY_PARENT, FO_PROPERTY_INHERITED, FO_PROPERTY_NEAREST, FO_PROPERTY_COLUMN };
+enum FoPropertyReference { FO_PROPERTY_PARENT, FO_PROPERTY_INHERITED, FO_PROPERTY_NEAREST, FO_PROPERTY_COLUMN, FO_PROPERTY_NONE };
 static const char* fo_reference_binding(FoTranslationContext* context, DomElement* source,
     const char* property, const char* query, FoPropertyReference reference);
 static bool fo_property_assigned(DomElement* source, const char* name);
-static const char* fo_computed_property_name(const char* name);
+static const char* fo_computed_property_name(const char* name, bool assignment = false);
 static bool fo_decoration_condition_name(const char* name);
 static bool fo_property_column(FoTranslationContext* context, DomElement* source,
     const char* property, size_t* column);
@@ -144,9 +144,15 @@ static bool fo_property_inherits(const char* name) {
     return radiant_whitespace_trait_name(name);
 }
 
-static const char* fo_parent_value(FoTranslationContext* context, DomElement* source,
-        const char* property, const char* value, bool nominal_context) {
-    if (!value) return nullptr;
+struct FoPropertyQuery {
+    FoPropertyReference reference = FO_PROPERTY_NONE;
+    const char* name = nullptr;
+    bool whole = false;
+};
+
+static bool fo_parse_property_query(FoTranslationContext* context, DomElement* source,
+        const char* property, const char* value, FoPropertyQuery* query) {
+    if (!value) return true;
     const char* first = value + strspn(value, " \t\r\n");
     static const char* functions[] = {"from-parent", "inherited-property-value", "from-nearest-specified-value", "from-table-column"};
     for (size_t kind = 0; kind < sizeof(functions) / sizeof(*functions); kind++) {
@@ -157,23 +163,42 @@ static const char* fo_parent_value(FoTranslationContext* context, DomElement* so
         if (*cursor != '(') continue;
         if (context->result->node_count > context->options->max_nodes ||
             context->expression_nodes >= context->options->max_nodes - context->result->node_count) {
-            fo_failure(context, source, property, "FO expression budget exhausted", TYPESET_BUDGET_EXHAUSTED); return nullptr;
+            return fo_failure(context, source, property, "FO expression budget exhausted", TYPESET_BUDGET_EXHAUSTED);
         }
         context->expression_nodes++;
         cursor++; cursor += strspn(cursor, " \t\r\n");
         size_t argument = strcspn(cursor, " \t\r\n),");
-        const char* query = argument ? pool_dup_n(context->document->document_pool, cursor, argument) : property;
-        if (!query) { fo_failure(context, source, property, "FO reference allocation failed", TYPESET_OUT_OF_MEMORY); return nullptr; }
+        query->name = argument ? pool_dup_n(context->document->document_pool, cursor, argument) : property;
+        if (!query->name) return fo_failure(context, source, property, "FO reference allocation failed", TYPESET_OUT_OF_MEMORY);
         cursor += argument; cursor += strspn(cursor, " \t\r\n");
         if (*cursor != ')') {
-            fo_failure(context, source, property, "parent reference requires one whole-property function with an optional matching property name"); return nullptr;
+            return fo_failure(context, source, property, "property reference requires one function with an optional property name");
         }
-        if (cursor[1 + strspn(cursor + 1, " \t\r\n")]) return value;
-        if (kind == FO_PROPERTY_INHERITED && !fo_property_inherits(query)) {
+        query->reference = static_cast<FoPropertyReference>(kind);
+        query->whole = !cursor[1 + strspn(cursor + 1, " \t\r\n")];
+        return true;
+    }
+    return true;
+}
+
+static bool fo_compound_query(FoTranslationContext* context, DomElement* source,
+        const char* property, const char* value, FoPropertyQuery* query) {
+    return fo_parse_property_query(context, source, property, value, query) &&
+        query->reference != FO_PROPERTY_NONE && query->whole && !strcmp(query->name, property);
+}
+
+static const char* fo_parent_value(FoTranslationContext* context, DomElement* source,
+        const char* property, const char* value, bool nominal_context) {
+    if (!value) return nullptr;
+    FoPropertyQuery parsed;
+    if (!fo_parse_property_query(context, source, property, value, &parsed)) return nullptr;
+    if (parsed.reference != FO_PROPERTY_NONE && parsed.whole) {
+        const char* query = parsed.name;
+        FoPropertyReference reference = parsed.reference;
+        if (reference == FO_PROPERTY_INHERITED && !fo_property_inherits(query)) {
             fo_failure(context, source, property, "inherited-property-value requires an inherited FO property"); return nullptr;
         }
-        FoPropertyReference reference = static_cast<FoPropertyReference>(kind);
-        if (kind == FO_PROPERTY_COLUMN || kind == FO_PROPERTY_NEAREST || strcmp(query, property) || fo_column_initial(query))
+        if (reference == FO_PROPERTY_COLUMN || reference == FO_PROPERTY_NEAREST || strcmp(query, property) || fo_column_initial(query))
             return fo_reference_binding(context, source, property, query, reference);
         if (fo_element(source, "root") || !source->parent_element()) {
             if (fo_decoration_condition_name(property)) return "discard";
@@ -188,7 +213,6 @@ static const char* fo_parent_value(FoTranslationContext* context, DomElement* so
                 return fo_reference_binding(context, source, property, query, reference);
         }
         value = "inherit";
-        break;
     }
     if (nominal_context && !strcmp(value, "inherit") &&
         (!strcmp(property, "text-altitude") || !strcmp(property, "text-depth"))) {
@@ -277,10 +301,13 @@ static Item fo_transparent_row(FoTranslationContext* context, DomElement* source
 
 static bool fo_style_property(FoTranslationContext* context, DomElement* source, StrBuf* style,
         const char* name, const char* value, const char* source_name = nullptr, bool emit = true,
-        bool length_component = false, bool computed_expression = false) {
+        bool length_component = false, bool computed_expression = false, const char* reference_component = nullptr) {
     if (!value) return true;
     const char* authored = value;
-    value = fo_parent_value(context, source, source_name ? source_name : name, value);
+    FoPropertyQuery query;
+    if (reference_component && fo_compound_query(context, source, source_name, value, &query))
+        value = fo_reference_binding(context, source, source_name, reference_component, query.reference);
+    else value = fo_parent_value(context, source, source_name ? source_name : name, value);
     if (!value) return false;
     if (!strcmp(name, "border-collapse") && !strcmp(value, "inherit")) {
         // FO inherits this keyword with an initial collapse; HTML's separate-border initial cannot stand in for it.
@@ -520,6 +547,7 @@ static const char* fo_reference_binding(FoTranslationContext* context, DomElemen
     if (const char* initial = fo_column_initial(query))
         if (!levels || !selected || !fo_property_assigned(selected, query)) return initial;
     if (reference != FO_PROPERTY_COLUMN && (!levels || fo_element(source, "root") || !source->parent_element())) {
+        if (fo_decoration_condition_name(query)) return "discard";
         if (!strcmp(native_query, "font-size")) return "12pt";
         if (radiant_image_trait_name(native_query))
             return fo_computed_text(context, source, property,
@@ -589,11 +617,11 @@ static bool fo_conditional_length(CssPropertyCode family) {
     return family == CSS_PROPERTY_BORDER_WIDTH || family == CSS_PROPERTY_PADDING;
 }
 
-static const char* fo_computed_property_name(const char* name) {
+static const char* fo_computed_property_name(const char* name, bool assignment) {
     for (const auto& property : fo_corresponding_properties) {
         size_t length = strlen(property.relative);
         bool length_component = fo_conditional_length(property.family) && !strncmp(name, property.relative, length) &&
-            !strcmp(name + length, ".length");
+            (!strcmp(name + length, ".length") || (assignment && !strcmp(name + length, ".conditionality")));
         if (length_component || (!fo_conditional_length(property.family) && !strcmp(name, property.relative)))
             return css_property_get_by_code(radiant_box_side_property(property.family, property.side))->name;
     }
@@ -605,7 +633,10 @@ static bool fo_property_assigned(DomElement* source, const char* name) {
     bool space = false; size_t index = 0, component = 0; const char* base = nullptr;
     if (radiant_flow_trait_key(name, &space, &index, &component, &base) && component)
         return source->get_attribute(base) != nullptr;
-    CssPropertyCode query = css_property_code_from_name(fo_computed_property_name(name));
+    const char* corresponding = fo_computed_property_name(name, true);
+    // an absolute assignment resets the corresponding compound, including its remaining initial components.
+    if (strcmp(corresponding, name) && source->get_attribute(corresponding)) return true;
+    CssPropertyCode query = css_property_code_from_name(corresponding);
     if (query == CSS_PROPERTY_UNKNOWN) return false;
     int count = 0; const char** names = source->attribute_names(&count);
     for (int i = 0; i < count; i++) if (css_property_shorthand_contains(css_property_code_from_name(names[i]), query)) return true;
@@ -751,8 +782,11 @@ static bool fo_style(FoTranslationContext* context, DomElement* source, StrBuf* 
     // explicit absolute longhands win; relative properties override only shorthand expansion (XSL §5.3.1).
     for (const auto& property : fo_corresponding_properties) {
         const CssProperty* absolute = css_property_get_by_code(radiant_box_side_property(property.family, property.side));
+        const char* reference_component = fo_conditional_length(property.family) &&
+            (property.side == CSS_BOX_SIDE_TOP || property.side == CSS_BOX_SIDE_BOTTOM)
+            ? fo_component_name(component_name.value, property.relative, "length") : nullptr;
         if (!absolute || !fo_style_property(context, source, style, absolute->name, source->get_attribute(property.relative),
-            property.relative, !source->get_attribute(absolute->name))) return false;
+            property.relative, !source->get_attribute(absolute->name), false, false, reference_component)) return false;
         if (fo_conditional_length(property.family)) {
             const char* name = fo_component_name(component_name.value, property.relative, "length");
             const char* length = source->get_attribute(name);
@@ -794,9 +828,11 @@ static bool fo_attribute_admitted(FoTranslationContext* context, DomElement* sou
     for (const auto& property : fo_corresponding_properties) if (!strcmp(name, property.relative)) return true;
     if (fo_length_component_name(name)) return true;
     if (fo_decoration_condition_name(name)) {
-        const char* value = fo_parent_value(context, source, name, source->get_attribute(name));
+        const char* raw = source->get_attribute(name);
+        const char* value = fo_parent_value(context, source, name, raw);
         if (!value) return false;
         return !strcmp(value, "discard") || !strcmp(value, "retain") || !strcmp(value, "inherit") ||
+            (value != raw && !strncmp(value, "var(", 4)) ||
             fo_failure(context, source, pool_strdup(context->document->document_pool, name), "FO decoration conditionality requires discard, retain or inherit");
     }
     if (!strcmp(name, "line-stacking-strategy")) {
@@ -1078,14 +1114,19 @@ static Item fo_translate_element(FoTranslationContext* context, DomElement* sour
         (property.side == CSS_BOX_SIDE_TOP || property.side == CSS_BOX_SIDE_BOTTOM)) {
         const CssProperty* absolute = css_property_get_by_code(radiant_box_side_property(property.family, property.side));
         const char* raw = source->get_attribute(property.relative);
-        const char* shorthand = fo_parent_value(context, source, property.relative, raw);
-        if (raw && !shorthand) return ItemNull;
+        FoPropertyQuery query;
+        bool compound = fo_compound_query(context, source, property.relative, raw, &query);
+        const char* shorthand = compound ? nullptr : fo_parent_value(context, source, property.relative, raw);
+        if (raw && !compound && !shorthand) return ItemNull;
         const char* condition_name = fo_component_name(attribute_buffer.value, property.relative, "conditionality");
         raw = source->get_attribute(condition_name);
         const char* owned_name = raw ? pool_strdup(context->document->document_pool, condition_name) : condition_name;
         if (!owned_name) { fo_failure(context, source, property.relative, "FO component allocation failed", TYPESET_OUT_OF_MEMORY); return ItemNull; }
         const char* conditionality = fo_parent_value(context, source, owned_name, raw);
         if (raw && !conditionality) return ItemNull;
+        if (!conditionality && compound)
+            conditionality = fo_reference_binding(context, source, property.relative, condition_name, query.reference);
+        if (compound && !conditionality) return ItemNull;
         if (source->get_attribute(absolute->name)) conditionality = "discard";
         else if (!conditionality) conditionality = shorthand && !strcmp(shorthand, "inherit") ? "inherit" : "discard";
         output.attr(fo_component_name(attribute_buffer.value, property.relative, "conditionality", true), conditionality);
@@ -1098,8 +1139,22 @@ static Item fo_translate_element(FoTranslationContext* context, DomElement* sour
         // list-part functions have already become independent grid tracks, rather than inherited block lengths.
         if ((list == FO_LIST_LABEL || list == FO_LIST_BODY) &&
             (!strcmp(attributes[i], "start-indent") || !strcmp(attributes[i], "end-indent"))) continue;
-        strbuf_reset(attribute_buffer.value); strbuf_append_str(attribute_buffer.value, "r:"); strbuf_append_str(attribute_buffer.value, attributes[i]);
+        bool space = false; size_t index = 0, component = 0;
+        FoPropertyQuery query;
         const char* authored = source->get_attribute(attributes[i]);
+        if (radiant_flow_trait_key(attributes[i], &space, &index, &component) && !component &&
+            fo_compound_query(context, source, attributes[i], authored, &query)) {
+            // expand matching whole queries before explicit components, independently of XML attribute order.
+            for (size_t part = 1; const char* suffix = radiant_flow_trait_component_name(space, part); part++) {
+                const char* name = fo_component_name(attribute_buffer.value, attributes[i], suffix);
+                const char* value = fo_reference_binding(context, source, attributes[i], name, query.reference);
+                if (!value) return ItemNull;
+                if (!source->get_attribute(name))
+                    output.attr(fo_component_name(attribute_buffer.value, attributes[i], suffix, true), value);
+            }
+            continue;
+        }
+        strbuf_reset(attribute_buffer.value); strbuf_append_str(attribute_buffer.value, "r:"); strbuf_append_str(attribute_buffer.value, attributes[i]);
         const char* value = fo_parent_value(context, source, attributes[i], authored);
         if (!value) return ItemNull;
         // keyword traits remain keywords; numeric FO syntax enters the same typed native trait path.

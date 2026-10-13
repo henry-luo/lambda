@@ -9724,6 +9724,115 @@ TEST_F(SecondaryViewTest, FoTableColumnQueriesNormalizeDirectRowsAndKeepOriginal
     EXPECT_EQ(translated->diagnostic.status, TYPESET_INVALID); EXPECT_EQ(translated->root, nullptr);
 }
 
+TEST_F(SecondaryViewTest, DecorationConditionalityBindingsRetainOwnerKeywordsAcrossEditions) {
+    ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    DomElement* parent = block(nullptr, "box-decoration-break:clone"); ASSERT_NE(parent, nullptr);
+    ASSERT_TRUE(parent->set_attribute("r:padding-before.conditionality", "retain"));
+    DomElement* child = block("Child", nullptr, "div", parent); ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(child->set_attribute("r:property-bindings", "--pad:parent(padding-before\\.conditionality);--border:parent(border-after-width\\.conditionality)"));
+    ASSERT_TRUE(child->set_attribute("r:padding-after.conditionality", "var(--pad)"));
+    ASSERT_TRUE(child->set_attribute("r:border-before-width.conditionality", "var(--border)"));
+    ViewTree* first = secondary(); const ViewCssStyle* retained = view_css_resolve(first, child); ASSERT_NE(retained, nullptr);
+    ASSERT_EQ(retained->binding_status, VIEW_MODEL_OK) << retained->binding_reason;
+    ASSERT_NE(retained->flow_traits, nullptr); ASSERT_EQ(retained->flow_traits->status, VIEW_MODEL_OK) << retained->flow_traits->reason;
+    EXPECT_EQ(retained->flow_traits->decoration[1][1], RADIANT_DECORATION_RETAIN);
+    EXPECT_EQ(retained->flow_traits->decoration[0][0], RADIANT_DECORATION_RETAIN);
+    ASSERT_TRUE(parent->set_attribute("r:padding-before.conditionality", "discard"));
+    const ViewCssStyle* changed = view_css_resolve(secondary(), child); ASSERT_NE(changed, nullptr);
+    ASSERT_NE(changed->flow_traits, nullptr); EXPECT_EQ(changed->flow_traits->decoration[1][1], RADIANT_DECORATION_DISCARD);
+    EXPECT_EQ(retained->flow_traits->decoration[1][1], RADIANT_DECORATION_RETAIN);
+    ASSERT_TRUE(child->set_attribute("r:property-bindings", "--pad:ancestor(100,padding-before\\.conditionality);--border:parent(border-after-width\\.conditionality)"));
+    EXPECT_EQ(view_css_resolve(secondary(), child)->flow_traits->decoration[1][1], RADIANT_DECORATION_DISCARD);
+    ASSERT_TRUE(child->set_attribute("r:property-bindings", "--pad:parent(font-size);--border:parent(border-after-width\\.conditionality)"));
+    ViewTree* invalid = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    EXPECT_EQ(layout_secondary_view(invalid, &options, &diagnostic), TYPESET_INVALID);
+    EXPECT_EQ(invalid->model->page_count, 0u); EXPECT_EQ(diagnostic.source.address, child);
+}
+
+TEST_F(SecondaryViewTest, FoWholeCompoundQueriesExpandComputedComponentsAndHonorOverrides) {
+    DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt' border-collapse='separate'>"
+        "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='225pt' page-height='225pt'><f:region-body/>"
+        "</f:simple-page-master></f:layout-master-set><f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
+        "<f:block space-after='3pt' space-after.minimum='1.5pt' space-after.maximum='6pt' space-after.precedence='force' space-after.conditionality='retain' "
+        "keep-together.within-line='-2' keep-together.within-column='3' keep-together.within-page='4'>"
+        "<f:block><f:block id='nearest' space-after.maximum='9pt' space-after='from-nearest-specified-value()' keep-together='inherited-property-value()'>N</f:block></f:block>"
+        "<f:block id='parent' space-after='from-parent(space-after)' keep-together='from-parent()'>P</f:block></f:block>"
+        "<f:table table-layout='fixed' width='180pt'><f:table-column column-width='90pt' font-size='15pt' "
+        "space-before='.2em' space-before.minimum='.1em' space-before.maximum='.3em' space-before.precedence='-7' space-before.conditionality='retain' "
+        "keep-with-next.within-line='-5' keep-with-next.within-column='6' keep-with-next.within-page='7' "
+        "padding-before='.25em' padding-before.conditionality='retain' border-after-width='1.5pt' border-after-style='solid' border-after-width.conditionality='retain'/>"
+        "<f:table-column column-width='90pt'/><f:table-body><f:table-row><f:table-cell>"
+        "<f:block id='column' space-before='from-table-column()' keep-with-next='from-table-column(keep-with-next)' "
+        "padding-before.length='.75pt' padding-before='from-table-column(padding-before)' "
+        "border-after-width='from-table-column()' border-after-style='solid'>C</f:block>"
+        "</f:table-cell><f:table-cell><f:block id='initial' space-before='from-table-column()' keep-with-next='from-table-column()' "
+        "padding-before='from-table-column()'>I</f:block></f:table-cell></f:table-row></f:table-body></f:table>"
+        "</f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
+    RadiantFoOptions fo_options = radiant_fo_options_default(); RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &fo_options);
+    ASSERT_NE(translated, nullptr); ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+    DomElement* generated = install_fo_translation(translated); ASSERT_NE(generated, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    for (const char* id : {"nearest", "parent"}) {
+        const ViewCssStyle* style = view_css_resolve(tree, dom_find_element_by_id(generated, id)); ASSERT_NE(style, nullptr); ASSERT_NE(style->flow_traits, nullptr);
+        EXPECT_FLOAT_EQ(style->flow_traits->after.minimum, 2); EXPECT_FLOAT_EQ(style->flow_traits->after.optimum, 4);
+        EXPECT_FLOAT_EQ(style->flow_traits->after.maximum, !strcmp(id, "nearest") ? 12 : 8);
+        EXPECT_TRUE(style->flow_traits->after.force); EXPECT_TRUE(style->flow_traits->after.retain);
+        const int32_t strengths[] = {-2, 3, 4};
+        for (size_t scope = 0; scope < 3; scope++) {
+            EXPECT_EQ(style->flow_traits->together.scope[scope].kind, RADIANT_KEEP_NUMBER);
+            EXPECT_EQ(style->flow_traits->together.scope[scope].value, strengths[scope]);
+        }
+    }
+    const ViewCssStyle* column = view_css_resolve(tree, dom_find_element_by_id(generated, "column")); ASSERT_NE(column, nullptr); ASSERT_NE(column->flow_traits, nullptr);
+    EXPECT_FLOAT_EQ(column->flow_traits->before.minimum, 2); EXPECT_FLOAT_EQ(column->flow_traits->before.optimum, 4);
+    EXPECT_FLOAT_EQ(column->flow_traits->before.maximum, 6); EXPECT_EQ(column->flow_traits->before.precedence, -7); EXPECT_TRUE(column->flow_traits->before.retain);
+    const int32_t strengths[] = {-5, 6, 7};
+    for (size_t scope = 0; scope < 3; scope++) EXPECT_EQ(column->flow_traits->next.scope[scope].value, strengths[scope]);
+    ASSERT_NE(column->padding[0], nullptr); EXPECT_DOUBLE_EQ(column->padding[0]->data.length.value, 1);
+    ASSERT_NE(column->border_width[2], nullptr); EXPECT_DOUBLE_EQ(column->border_width[2]->data.length.value, 2);
+    EXPECT_TRUE(radiant_decoration_retain(column, true, false)); EXPECT_TRUE(radiant_decoration_retain(column, false, true));
+    const ViewCssStyle* initial = view_css_resolve(tree, dom_find_element_by_id(generated, "initial")); ASSERT_NE(initial, nullptr); ASSERT_NE(initial->flow_traits, nullptr);
+    EXPECT_FLOAT_EQ(initial->flow_traits->before.optimum, 0); EXPECT_FALSE(initial->flow_traits->before.retain);
+    EXPECT_EQ(initial->flow_traits->next.scope[2].kind, RADIANT_KEEP_AUTO); EXPECT_FALSE(radiant_decoration_retain(initial, true, false));
+}
+
+TEST_F(SecondaryViewTest, FoConditionalityQueriesFindCompoundAssignmentsAndKeepOriginalDiagnostics) {
+    DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt'>"
+        "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='225pt' page-height='225pt'><f:region-body/>"
+        "</f:simple-page-master></f:layout-master-set><f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
+        "<f:block padding-before='3pt' padding-before.conditionality='retain'><f:block>"
+        "<f:block id='nearest' padding-after.conditionality='from-nearest-specified-value(padding-before.conditionality)'>N</f:block>"
+        "</f:block><f:block padding-top='1.5pt'><f:block id='absolute' padding-before.conditionality='from-nearest-specified-value()'>A</f:block></f:block>"
+        "<f:block id='replaced' padding-before='from-parent(padding-before)' padding-top='6pt'>P</f:block>"
+        "</f:block><f:block id='initial' padding-before.conditionality='from-nearest-specified-value()'>I</f:block>"
+        "</f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
+    RadiantFoOptions fo_options = radiant_fo_options_default(); RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &fo_options);
+    ASSERT_NE(translated, nullptr); ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+    DomElement* generated = install_fo_translation(translated); ASSERT_NE(generated, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_TRUE(radiant_decoration_retain(view_css_resolve(tree, dom_find_element_by_id(generated, "nearest")), true, true));
+    for (const char* id : {"absolute", "replaced", "initial"}) {
+        SCOPED_TRACE(id);
+        EXPECT_FALSE(radiant_decoration_retain(view_css_resolve(tree, dom_find_element_by_id(generated, id)), true, false));
+    }
+    DomElement* original = dom_find_element_by_id(fo, "nearest"); ASSERT_NE(original, nullptr);
+    for (const char* invalid : {"inherited-property-value()", "from-parent(padding-before)", "from-parent(padding-before.conditionality) + 1", "from-parent(padding-before.conditionality,padding-before.conditionality)"}) {
+        SCOPED_TRACE(invalid); ASSERT_TRUE(original->set_attribute("padding-after.conditionality", invalid));
+        translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+        EXPECT_EQ(translated->diagnostic.status, TYPESET_INVALID); EXPECT_EQ(translated->root, nullptr);
+        EXPECT_EQ(translated->diagnostic.source.address, original); EXPECT_STREQ(translated->diagnostic.property, "padding-after.conditionality");
+    }
+    ASSERT_TRUE(original->set_attribute("padding-after.conditionality", "discard"));
+    for (const char* invalid : {"from-nearest-specified-value(space-after)", "from-parent(space-before) + 1pt", "inherited-property-value()"}) {
+        SCOPED_TRACE(invalid); ASSERT_TRUE(original->set_attribute("space-before", invalid));
+        translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+        EXPECT_EQ(translated->diagnostic.status, TYPESET_INVALID); EXPECT_EQ(translated->diagnostic.source.address, original);
+        EXPECT_STREQ(translated->diagnostic.property, "space-before");
+    }
+}
+
 TEST_F(SecondaryViewTest, FoNumericAndCrossPropertyReferencesLowerToCommonComputedBindings) {
     DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt'>"
         "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='150pt' page-height='120pt'><f:region-body/>"

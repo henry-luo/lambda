@@ -222,6 +222,7 @@ bool view_css_computed_property_supported(const char* name) {
     if (!name) return false;
     if (radiant_image_trait_name(name)) return true;
     bool space = false; size_t index = 0, component = 0;
+    if (radiant_decoration_trait_key(name, &index, &component)) return true;
     if (radiant_flow_trait_key(name, &space, &index, &component) && component) return true;
     for (const auto& property : view_computed_properties) if (!strcmp(name, property.name)) return true;
     return false;
@@ -232,6 +233,9 @@ const CssValue* view_css_computed_property(ViewTree* tree, const ViewCssStyle* s
     Pool* pool = tree->model->css->pool;
     if (radiant_image_trait_name(name)) return radiant_image_computed_trait(pool, style ? style->image_spec.get() : nullptr, name);
     bool space = false; size_t index = 0, component = 0;
+    if (radiant_decoration_trait_key(name, &index, &component))
+        // CSS's automatic policy belongs to the queried owner's box-decoration-break, not the receiver's.
+        return css_value_create_keyword(pool, radiant_decoration_retain(style, index != 0, component != 0) ? "retain" : "discard");
     if (radiant_flow_trait_key(name, &space, &index, &component) && component) {
         RadiantFlowTraits initial = {};
         const RadiantFlowTraits* traits = style && style->flow_traits ? style->flow_traits.get() : &initial;

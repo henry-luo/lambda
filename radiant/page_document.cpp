@@ -438,6 +438,11 @@ static const char* flow_space_components[] = {"minimum", "optimum", "maximum", "
 static const char* flow_keep_names[] = {"keep-together", "keep-with-next", "keep-with-previous"};
 static const char* flow_keep_components[] = {"within-line", "within-column", "within-page"};
 
+const char* radiant_flow_trait_component_name(bool space, size_t component) {
+    return component && component <= (space ? 5u : 3u)
+        ? (space ? flow_space_components : flow_keep_components)[component - 1] : nullptr;
+}
+
 bool radiant_flow_trait_key(const char* name, bool* space, size_t* index, size_t* component, const char** base) {
     if (!name) return false;
     for (size_t family = 0; family < 2; family++) {
@@ -465,7 +470,8 @@ static const char* flow_decoration_names[2][2] = {
     {"padding-before.conditionality", "padding-after.conditionality"}
 };
 
-static bool flow_decoration_key(const char* name, size_t* family, size_t* edge) {
+bool radiant_decoration_trait_key(const char* name, size_t* family, size_t* edge) {
+    if (!name) return false;
     for (size_t i = 0; i < 2; i++) for (size_t j = 0; j < 2; j++)
         if (!strcmp(name, flow_decoration_names[i][j])) { *family = i; *edge = j; return true; }
     return false;
@@ -491,7 +497,7 @@ bool radiant_flow_trait_name(const char* name) {
         !strcmp(name, "start-indent") || !strcmp(name, "end-indent") || !strcmp(name, "column-proportion") || !strcmp(name, "column-number") ||
         !strcmp(name, "style-transparent") ||
         !strcmp(name, flow_table_omit_names[0]) || !strcmp(name, flow_table_omit_names[1]) ||
-        flow_decoration_key(name, &index, &component) || radiant_flow_trait_key(name, &space, &index, &component));
+        radiant_decoration_trait_key(name, &index, &component) || radiant_flow_trait_key(name, &space, &index, &component));
 }
 
 bool radiant_text_metrics(const ViewCssStyle* style, float* altitude, float* depth) {
@@ -583,7 +589,7 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
         if (!strcmp(local, "end-indent")) { indents[1] = value; return true; }
         if (!strcmp(local, "text-altitude")) { nominal[0] = value; return true; }
         if (!strcmp(local, "text-depth")) { nominal[1] = value; return true; }
-        if (flow_decoration_key(local, &index, &component)) { decorations[index][component] = value; return true; }
+        if (radiant_decoration_trait_key(local, &index, &component)) { decorations[index][component] = value; return true; }
         if (!radiant_flow_trait_key(local, &space, &index, &component)) return false;
         (space ? spaces[index][component] : keeps[index][component]) = value; return true;
     });
@@ -628,10 +634,12 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
     }
     for (size_t i = 0; i < 2; i++) for (size_t j = 0; j < 2; j++) if (const char* value = decorations[i][j]) {
         RadiantDecorationConditionality& policy = traits->decoration[i][j];
-        if (!strcmp(value, "inherit")) policy = parent->decoration[i][j];
-        else if (!strcmp(value, "retain")) policy = RADIANT_DECORATION_RETAIN;
-        else if (!strcmp(value, "discard")) policy = RADIANT_DECORATION_DISCARD;
-        else if (strcmp(value, "css")) return fail("decoration conditionality requires css, discard or retain");
+        if (!strcmp(value, "inherit")) { policy = parent->decoration[i][j]; continue; }
+        // keyword bindings compute at their selected owner before the receiving trait's domain check.
+        const char* keyword = css_value_identifier_name(page_computed_value(tree, style, value));
+        if (keyword && !strcmp(keyword, "retain")) policy = RADIANT_DECORATION_RETAIN;
+        else if (keyword && !strcmp(keyword, "discard")) policy = RADIANT_DECORATION_DISCARD;
+        else if (!keyword || strcmp(keyword, "css")) return fail("decoration conditionality requires css, discard or retain");
     }
     for (size_t i = 0; i < 2; i++) if (const char* value = indents[i]) {
         if (!strcmp(value, "inherit")) continue;

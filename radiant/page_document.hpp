@@ -30,6 +30,8 @@ struct RadiantSpaceSpec {
 };
 // component zero selects the compound short form; positive components follow the shared native grammar.
 bool radiant_flow_trait_key(const char* name, bool* space, size_t* index, size_t* component, const char** base = nullptr);
+const char* radiant_flow_trait_component_name(bool space, size_t component);
+bool radiant_decoration_trait_key(const char* name, size_t* family, size_t* edge);
 enum RadiantKeepKind : uint8_t { RADIANT_KEEP_AUTO, RADIANT_KEEP_NUMBER, RADIANT_KEEP_ALWAYS };
 struct RadiantKeepStrength { int32_t value; RadiantKeepKind kind; };
 struct RadiantKeepSpec { RadiantKeepStrength scope[3]; }; // line, column, page
