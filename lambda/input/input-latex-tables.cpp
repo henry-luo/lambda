@@ -92,6 +92,14 @@ const char* raw_text_environments[] = {
     "filecontents", "filecontents*", "luacode", "luacode*", NULL
 };
 
+// Commands whose braced arguments are TeX code a package stores for later, such as
+// titling's \pretitle{\begin{center}\LARGE} and \posttitle{\par\end{center}},
+// which open an environment in one argument and close it in another. Their groups
+// stay raw text, as a \newenvironment body does.
+const char* code_fragment_commands[] = {
+    "pretitle", "posttitle", "preauthor", "postauthor", "predate", "postdate", NULL
+};
+
 // ── Binary search infrastructure ───────────────────────────────────
 // Uses lib/sort.h's sort_cmp_cstr_asc (pointer-to-cstr comparator).
 
@@ -119,6 +127,7 @@ static size_t n_latex_commands;
 static size_t n_latex_environments;
 static size_t n_math_environments;
 static size_t n_raw_text_environments;
+static size_t n_code_fragment_commands;
 static bool tables_initialized = false;
 
 static void init_common_tables() {
@@ -131,6 +140,7 @@ static void init_common_tables() {
     sort_str_array(latex_environments,  &n_latex_environments);
     sort_str_array(math_environments,   &n_math_environments);
     sort_str_array(raw_text_environments, &n_raw_text_environments);
+    sort_str_array(code_fragment_commands, &n_code_fragment_commands);
     tables_initialized = true;
 }
 
@@ -173,6 +183,11 @@ bool is_math_environment(const char* env_name) {
 
 bool is_raw_group_command(const char* cmd_name) {
     return strcmp(cmd_name, "directlua") == 0 || strcmp(cmd_name, "luaexec") == 0;
+}
+
+bool is_code_fragment_command(const char* cmd_name) {
+    init_common_tables();
+    return str_in_sorted_array(cmd_name, code_fragment_commands, n_code_fragment_commands);
 }
 
 bool is_raw_text_environment(const char* env_name) {

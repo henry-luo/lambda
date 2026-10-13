@@ -4,6 +4,8 @@
 // NFSS: \fontfamily, \fontseries, \fontshape, \usefont, \linespread
 
 import util: lambda.latex.util
+import sym: lambda.latex.symbols
+import color: lambda.latex.elements.color
 
 // ============================================================
 // Font declaration style map
@@ -140,6 +142,148 @@ pub fn align_decl_style(tag_str) {
 // declaration's own, or one a package supplies (ragged2e, setspace)
 pub fn wrap_align_decl(tag_str, items, style = null) {
     <div class: "latex-" ++ tag_str, style: style or ALIGN_DECL_STYLES[tag_str], for c in items { c }>
+}
+
+// ============================================================
+// Declaration lists given as TeX source
+// ============================================================
+
+// titlesec formats, sectsty fonts, tocloft hooks, authblk fonts and titling's
+// pre/post code are declaration lists in raw TeX. Each reads as:
+//   css        font switches and sizes, \color, \fontsize, NFSS commands
+//   align      \centering, \raggedright, \raggedleft, titlesec's \fil… and the
+//              center/flushleft/flushright environments
+//   transform  \MakeUppercase or \MakeLowercase, applied to the text that follows
+//   rule       a \titlerule or \hrule
+//   space      a \vspace or \vskip length
+//   text       printed text, \\ and the environment commands aside
+//   unknown    other commands
+pub fn declarations(raw, custom_colors) =>
+    read_declarations(raw or "", 0, {css: "", align: null, transform: null, rule: false,
+        space: null, text: "", unknown: []}, custom_colors)
+
+let ALIGN_COMMANDS = {centering: "center", raggedright: "left", raggedleft: "right",
+    filcenter: "center", filright: "left", filleft: "right", filinner: "left", filouter: "right",
+    Centering: "center", RaggedRight: "left", RaggedLeft: "right"}
+let ALIGN_ENVIRONMENTS = {center: "center", flushleft: "left", flushright: "right"}
+// spacing and structure commands with no effect on a declaration list's style
+let NEUTRAL_COMMANDS = ["selectfont", "par", "noindent", "relax", "normalsize", "quad", "qquad",
+    "hfill", "hfil", "null", "strut", "nobreak"]
+
+fn read_declarations(raw, i, acc, colors) {
+    if (i >= len(raw)) acc
+    else {
+        let ch = slice(raw, i, i + 1)
+        if (ch == "\\") {
+            let name_end = letters_end(raw, i + 1)
+            if (name_end == i + 1)
+                // a control symbol: \\ breaks a line, \  is a space, \% and the like print
+                read_declarations(raw, i + 2, {*:acc, text: acc.text ++
+                    (if (slice(raw, i + 1, i + 2) == "\\") "" else if (slice(raw, i + 1, i + 2) == " ") " "
+                     else slice(raw, i + 1, i + 2))}, colors)
+            // TeX skips the spaces after a control word
+            else declaration_command(raw, slice(raw, i + 1, name_end), skip_spaces(raw, name_end), acc, colors)
+        }
+        else if (ch == "{" or ch == "}" or ch == "%") read_declarations(raw, i + 1, acc, colors)
+        else read_declarations(raw, i + 1, {*:acc, text: acc.text ++ (if (ch == "~") "\u00A0" else ch)}, colors)
+    }
+}
+
+fn letters_end(raw, i) {
+    if (i >= len(raw)) i
+    else {
+        let ch = slice(raw, i, i + 1)
+        if ((ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z") or ch == "@") letters_end(raw, i + 1) else i
+    }
+}
+
+// the braced or bracketed group at i (after spaces): {value, next}, or null
+fn group_at(raw, i, opener, closer) {
+    let at = skip_spaces(raw, i)
+    if (at >= len(raw) or slice(raw, at, at + 1) != opener) null
+    else {
+        let stop = group_close(raw, at + 1, 1, opener, closer)
+        {value: slice(raw, at + 1, stop), next: min(stop + 1, len(raw))}
+    }
+}
+
+fn group_close(raw, i, depth, opener, closer) {
+    if (i >= len(raw)) i
+    else {
+        let ch = slice(raw, i, i + 1)
+        if (ch == opener) group_close(raw, i + 1, depth + 1, opener, closer)
+        else if (ch == closer and depth == 1) i
+        else if (ch == closer) group_close(raw, i + 1, depth - 1, opener, closer)
+        else group_close(raw, i + 1, depth, opener, closer)
+    }
+}
+
+fn skip_spaces(raw, i) => if (i < len(raw) and slice(raw, i, i + 1) == " ") skip_spaces(raw, i + 1) else i
+
+// the length after \vskip: everything up to the next command or the end
+fn bare_length(raw, i) {
+    let at = skip_spaces(raw, i)
+    let rest = slice(raw, at, len(raw))
+    let stop = index_of(rest, "\\")
+    {value: trim(if (stop == null) rest else slice(rest, 0, stop)), next: if (stop == null) len(raw) else at + stop}
+}
+
+fn add_css(acc, css) => if (css == null) acc else {*:acc, css: acc.css ++ css ++ ";"}
+
+fn declaration_command(raw, command, after, acc, colors) {
+    let size = sym.get_font_size(command)
+    let group = group_at(raw, after, "{", "}")
+    let option = group_at(raw, after, "[", "]")
+    if (FONT_DECL_STYLES[command] != null) read_declarations(raw, after, add_css(acc, FONT_DECL_STYLES[command]), colors)
+    else if (size != null) read_declarations(raw, after, add_css(acc, "font-size:" ++ size), colors)
+    else if (ALIGN_COMMANDS[command] != null)
+        read_declarations(raw, after, {*:acc, align: ALIGN_COMMANDS[command]}, colors)
+    else if (command == "color") {
+        let spec = group_at(raw, if (option == null) after else option.next, "{", "}")
+        let css = if (spec == null) null else color.spec_color(if (option == null) null else option.value,
+            spec.value, colors)
+        if (css == null) read_declarations(raw, after, {*:acc, unknown: acc.unknown ++ ["color"]}, colors)
+        else read_declarations(raw, spec.next, add_css(acc, "color:" ++ css), colors)
+    }
+    else if (command == "fontsize" and group != null) {
+        let second = group_at(raw, group.next, "{", "}")
+        let css = util.css_dimension(group.value)
+        read_declarations(raw, if (second == null) group.next else second.next,
+            add_css(acc, if (css == null) null else "font-size:" ++ css), colors)
+    }
+    else if ((command == "fontfamily" or command == "fontseries" or command == "fontshape") and group != null) {
+        let css = if (command == "fontfamily") (let family = NFSS_FAMILIES[trim(group.value)],
+                if (family == null) null else "font-family:" ++ family)
+            else if (command == "fontseries") NFSS_SERIES[trim(group.value)]
+            else NFSS_SHAPES[trim(group.value)]
+        read_declarations(raw, group.next, if (css == null) {*:acc, unknown: acc.unknown ++ [command]}
+            else add_css(acc, css), colors)
+    }
+    else if ((command == "begin" or command == "end") and group != null)
+        read_declarations(raw, group.next, if (ALIGN_ENVIRONMENTS[trim(group.value)] != null and command == "begin")
+            {*:acc, align: ALIGN_ENVIRONMENTS[trim(group.value)]} else acc, colors)
+    else if (command == "MakeUppercase" or command == "uppercase")
+        read_declarations(raw, after, {*:acc, transform: "uppercase"}, colors)
+    else if (command == "MakeLowercase" or command == "lowercase")
+        read_declarations(raw, after, {*:acc, transform: "lowercase"}, colors)
+    else if (command == "titlerule" or command == "hrule")
+        read_declarations(raw, if (option == null) after else option.next, {*:acc, rule: true}, colors)
+    else if (command == "vspace" or command == "vspace*") {
+        let star = slice(raw, after, after + 1) == "*"
+        let length = group_at(raw, if (star) after + 1 else after, "{", "}")
+        read_declarations(raw, if (length == null) after else length.next,
+            {*:acc, space: if (length == null) acc.space else util.css_dimension(length.value)}, colors)
+    }
+    else if (command == "vskip" or command == "bigskip" or command == "medskip" or command == "smallskip") {
+        let length = if (command == "vskip") bare_length(raw, after) else null
+        let css = if (command == "bigskip") "12pt" else if (command == "medskip") "6pt"
+            else if (command == "smallskip") "3pt" else util.css_dimension(split(length.value, " plus")[0])
+        read_declarations(raw, if (length == null) after else length.next, {*:acc, space: css}, colors)
+    }
+    else if (contains(NEUTRAL_COMMANDS, command) or false)
+        read_declarations(raw, after, {*:acc, text: acc.text ++ (if (command == "quad") " "
+            else if (command == "qquad") "  " else "")}, colors)
+    else read_declarations(raw, after, {*:acc, unknown: acc.unknown ++ [command]}, colors)
 }
 
 // wrap rendered items in a span with the declaration's style; a declaration

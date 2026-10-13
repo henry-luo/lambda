@@ -33,6 +33,8 @@ merging.
 
 **Additions (2026-10-13, Phase V M3).** fancyvrb's `\Verb` and minted's `\mint` and `\mintinline` are inline code like `\verb` and `\lstinline`. All but `\verb` take an `[options]` group, kept as `options_raw`. The minted commands then take a `{language}` group, kept as a `language` attribute. All but `\verb` accept the code either between a repeated delimiter or in braces, where balanced braces stay in the code. The engine passes the same commands through unexpanded (`P_RAW_GROUP_CMD`). The text-style commands (`\textbf`, `\textit`, `\texttt`, `\textrm`, `\textsf`, `\emph`, `\underline`) now carry `source_offset` like generic commands, so a source-order setting before them, such as ulem's `\normalem`, can be found.
 
+**Additions (2026-10-13, Phase V M6).** titling's `\pretitle`, `\posttitle`, `\preauthor`, `\postauthor`, `\predate` and `\postdate` store TeX code in which an environment opens in one argument and closes in another (`\pretitle{\begin{center}\LARGE}`). Their braced arguments stay raw text, as a `\newenvironment` body does (`is_code_fragment_command` in `input-latex-tables.cpp`); the parser rejected them before as unclosed environments.
+
 The unused Tree-sitter-era `latex/normalize.ls` phase, its import and the
 unused reconstruction helper `util.rebuild_with_children` are retired. The
 direct parser supplies normalized content; the package reads the current

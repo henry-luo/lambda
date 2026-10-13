@@ -42,6 +42,10 @@ import footmisc: .packages.footmisc
 import appendix: .packages.appendix
 import colspec: .packages.array
 import hhline: .packages.hhline
+import titles: .packages.titles
+import contents: .packages.contents
+import frontmatter: .packages.frontmatter
+import varioref: .packages.varioref
 import adjustbox: .packages.adjustbox
 import pdfpages: .packages.pdfpages
 
@@ -209,6 +213,13 @@ pub let PACKAGE_RENDER = {
     array: {newcolumntype: render_nothing},
     adjustbox: {adjustbox: render_adjustbox},
     pdfpages: {includepdf: render_includepdf, includepdfset: render_nothing},
+    tocloft: map([for (command in contents.TOCLOFT_COMMANDS, x in [command, render_nothing]) x]),
+    titling: map([for (command in frontmatter.TITLING_COMMANDS, x in [command,
+        if (starts_with(command, "the")) render_title_part else render_nothing]) x]),
+    authblk: {affil: render_nothing},
+    varioref: map([for (command in varioref.COMMANDS, x in [command, render_vref]) x]),
+    minitoc: map([for (command in contents.MINITOC_COMMANDS, x in [command,
+        if (contents.mini_kind(command) != null) render_minitoc else render_nothing]) x]),
     threeparttable: {threeparttable: render_threeparttable, measuredfigure: render_threeparttable,
         tablenotes: render_tablenotes, tnote: (el, info) => tnote_label(trim(util.text_of(el)), info)},
     appendix: {appendices: render_appendices,
@@ -1379,11 +1390,20 @@ fn render_maketitle(info) {
         note in thanks_notes(el)) note]
     let title_info = {*:info, thanks_marks: [for (i, note in thanks)
         {key: string(note.source_offset), val: util.fnsymbol(i + 1)}]}
-    let title_div = render_maketitle_div("title", info.title_el, info.title, title_info)
-    let author_div = render_maketitle_div("author", info.author_el, info.author, title_info)
-    let date_div = render_maketitle_div("date", info.date_el, info.date, title_info)
-    let parts = [title_div, author_div, date_div] |: (~ != null);
-    <header class: "latex-title",
+    // titling styles each part from its \pre…/\post… code and fills the hook slots
+    let titling = registry.active(info.packages, "titling")
+    let styles = [for (part in frontmatter.TITLING_PARTS)
+        if (titling) frontmatter.part_style(info.settings, part, info.custom_colors) else null]
+    let title_div = render_maketitle_div("title", info.title_el, info.title, title_info, styles[0])
+    let author_div = if (registry.active(info.packages, "authblk") and len(info.authblk or []) > 0)
+        render_authblk(title_info)
+        else render_maketitle_div("author", info.author_el, info.author, title_info, styles[1])
+    let date_div = render_maketitle_div("date", info.date_el, info.date, title_info, styles[2])
+    let hooks = [for (slot in ["a", "b", "c", "d"])
+        if (titling) title_hook(frontmatter.hook(info, slot), info) else null]
+    let parts = [hooks[0], title_div, hooks[1], author_div, hooks[2], date_div, hooks[3]] |: (~ != null)
+    let drop = if (titling) util.setting_at(info.settings, "length:droptitle", null) else null;
+    <header class: "latex-title", style: if (drop == null) null else "margin-top:" ++ drop,
         for c in parts { c }
         if (len(thanks) > 0) {
             <div class: "latex-thanks",
@@ -1408,15 +1428,60 @@ fn render_thanks_ref(el, info) {
 }
 
 // render a preamble field div (title/author/date) using element children if available
-fn render_maketitle_div(css_class, el, fallback_text, info) {
-    if (el != null and el is element) {
-        let items = render_children(el, 0, info)
-        if (len(items) > 0) { <div class: css_class, for c in items { c }> }
-        else if (fallback_text != null) { <div class: css_class, fallback_text> }
-        else { null }
+// `style` is titling's {css, before, after} for the part, or null
+fn render_maketitle_div(css_class, el, fallback_text, info, style = null) {
+    let rendered = if (el != null and el is element) render_children(el, 0, info) else []
+    let items = if (len(rendered) > 0) rendered else if (fallback_text != null) [fallback_text] else []
+    if (len(items) == 0) null
+    else if (style == null) <div class: css_class, for c in items { c }>
+    else <div class: css_class, style: if (style.css == "") null else style.css,
+        if (style.before == "") null else style.before; for c in items { c }
+        if (style.after == "") null else style.after>
+}
+
+// a \maketitlehook… slot the document filled
+fn title_hook(body, info) {
+    if (body == null or len(body) == 0) null
+    // a group, so a leading declaration (\centering) applies to the hook's text
+    else <div class: "latex-title-hook", render_node(body, info)>
+}
+
+// authblk's authors and affiliations. With marks, the names are joined as authblk
+// joins them and each affiliation follows on its own line with its mark; without
+// them, the authors before each run of affiliations form a block with them.
+fn render_authblk(info) {
+    let entries = info.authblk
+    let fonts = frontmatter.fonts(info, registry.options_for(info.packages, "authblk"))
+    let seps = frontmatter.separators(info)
+    let marked = any([for (e in entries) len(frontmatter.marks(e.el)) > 0])
+    if (marked) {
+        let names = [for (e in entries where e.kind == "author")
+            [*render_children_skip_brack(e.el, info), mark_sup(frontmatter.marks(e.el))]];
+        <div class: "author latex-authblk",
+            <div class: "latex-authors", style: if (fonts.author == "") null else fonts.author,
+                for c in frontmatter.joined(names, seps) { c }>
+            <div class: "latex-affiliations", style: if (fonts.affil == "") null else fonts.affil,
+                for (e in entries where e.kind == "affil")
+                    <div class: "latex-affil", mark_sup(frontmatter.marks(e.el)); " ";
+                        for c in render_children_skip_brack(e.el, info) { c }>>>
     }
-    else if (fallback_text != null) { <div class: css_class, fallback_text> }
-    else { null }
+    else <div class: "author latex-authblk",
+        for (block in frontmatter.blocks(entries))
+            <div class: "latex-authblock",
+                <div class: "latex-authors", style: if (fonts.author == "") null else fonts.author,
+                    for c in frontmatter.joined([for (e in block.authors) render_children_skip_brack(e.el, info)], seps) { c }>
+                for (e in block.affils)
+                    <div class: "latex-affil", style: if (fonts.affil == "") null else fonts.affil,
+                        for c in render_children_skip_brack(e.el, info) { c }>>>
+}
+
+fn mark_sup(marks) => if (len(marks) == 0) null else <sup class: "latex-affil-mark", join(marks, ",")>
+
+// titling's \thetitle, \theauthor and \thedate print what \title, \author and \date gave
+fn render_title_part(el, info) {
+    let part = slice(string(name(el)), 3, len(string(name(el))))
+    let source = if (part == "title") info.title_el else if (part == "author") info.author_el else info.date_el;
+    <span class: "latex-the" ++ part, for c in (if (source == null) [] else render_children(source, 0, info)) { c }>
 }
 
 // appendix's environment: the anchor of its toc option's contents head, the page
@@ -1446,20 +1511,39 @@ fn render_contents_anchor(el, info) {
 fn render_toc(info) {
     if (len(info.headings) == 0) { null }
     else {
-        let items = [for (h in info.headings, let cls = "toc-l" ++ (h.level))
-            <li class: cls,
-                <a href: "#" ++ h.id,
-                    if (h.number != null) { <span class: "sec-num",
-                        appendix_name(util.lookup(info.heading_names, h.id), "toc") ++
-                        language.display_number(h.number, info.polyglossia)> }
-                    h.text
-                >
-            >];
+        let items = [for (h in info.headings) toc_item(h, info)];
         <nav class: "latex-toc",
-            <div class: "toc-title", "Contents">
+            list_title(contents.title(info, "contentsname", "Contents", "toc"), info, null);
             <ul for item in items { item }>
         >
     }
+}
+
+// a contents entry; tocloft's macros for its level style it
+fn toc_item(h, info) {
+    let style = if (registry.active(info.packages, "tocloft"))
+        contents.entry_style(info, contents.entry_name(h.level)) else null
+    let shown = if (h.number == null) null
+        else appendix_name(util.lookup(info.heading_names, h.id), "toc") ++
+            language.display_number(h.number, info.polyglossia);
+    <li class: "toc-l" ++ (h.level), style: if (style == null or style.css == "") null else style.css,
+        <a href: "#" ++ h.id,
+            if (shown == null) null
+            else if (style == null) <span class: "sec-num", shown>
+            else (<span class: "sec-num", style: style.number_css, style.before ++ shown ++ style.after>,
+                if (style.after_box == "") null else style.after_box);
+            h.text
+        >
+    >
+}
+
+// a list's title: a renamed \contentsname or \list…name, a \listof{type}{title}
+// title, tocloft's title font and after-title text
+fn list_title(named, info, given) {
+    let text = if (given != null) [given] else if (named.body != null) render_children(named.body, 0, info)
+        else [named.text];
+    <div class: "toc-title", style: named.css, for c in text { c }
+        if (named.after == "") null else named.after>
 }
 
 // ============================================================
@@ -1489,16 +1573,37 @@ fn render_heading(el, info, html_level) {
     let outline_title = if (not hyperref.outlines_enabled(info.hyperref_settings)) null
         else (if (info.hyperref_settings.bookmarksnumbered == "true" and sec_num != null)
             string(sec_num) ++ " " else "") ++ outline_text
-    build_heading_el(html_level, title_id, num_span, title_children, outline_title,
-        info.running_style.header != null or info.running_style.footer != null)
+    let running = info.running_style.header != null or info.running_style.footer != null
+    // titlesec and sectsty restyle the heading, its label and its title
+    let titlesec = registry.options_for(info.packages, "titlesec")
+    let sectsty = registry.active(info.packages, "sectsty")
+    let style = if (titlesec == null and not sectsty) null
+        else titles.heading_style(info, titlesec, sectsty, titles.level_of(string(name(el))),
+            if (sec_num == null) null else language.display_number(sec_num, info.polyglossia),
+            contains(info.appendix_headings or [], title_id) or false, el.source_offset)
+    if (style == null) build_heading_el(html_level, title_id, num_span, title_children, outline_title, running)
+    else {
+        let label_span = if (style.label == null) num_span
+            else <span class: "sec-num", style: style.label.css ++ (if (style.label.block) "display:block;" else "") ++
+                (if (style.label.sep == null) "" else (if (style.label.block) "margin-bottom:" else "margin-right:") ++
+                    style.label.sep ++ ";"), style.label.text>
+        let titled = if (style.title_css == "") title_children
+            else [<span class: "latex-title-text", style: style.title_css, for c in title_children { c }>]
+        build_heading_el(html_level, title_id, label_span, titled, outline_title, running,
+            if (style.css == "") null else style.css, style.indent_after)
+    }
 }
 
-fn build_heading_el(level, id, num_span, children, outline_title, running_marks) {
+// `css` is a titlesec or sectsty style; `indent_after` marks a heading whose next
+// paragraph is indented
+fn build_heading_el(level, id, num_span, children, outline_title, running_marks, css = null, indent_after = false) {
+    let marks = if (not running_marks) null
+        else if (level == 1) "string-set:latex-chapter content(text);"
+        else if (level == 2) "string-set:latex-section content(text);" else null
     let attributes = {id: id, 'data-pdf-outline-title': outline_title,
         'data-pdf-outline-level': if (outline_title != null) level - 1 else null,
-        style: if (not running_marks) null
-            else if (level == 1) "string-set:latex-chapter content(text);"
-            else if (level == 2) "string-set:latex-section content(text);" else null}
+        class: if (indent_after) "latex-indent-after" else null,
+        style: if (marks == null) css else if (css == null) marks else marks ++ css}
     let items = [if (num_span != null) num_span, for (child in children) child]
     match level {
         case 1: <h1 *:attributes, for (item in items) item>
@@ -2067,17 +2172,37 @@ fn get_float_num(el, info, kind) {
 // \listoffigures, \listoftables: the captions of one float kind, linked when labelled
 fn render_float_list(info, kind, title = null) {
     let desc = info.float_kinds[kind]
+    let style = if (registry.active(info.packages, "tocloft")) contents.entry_style(info, desc.entry or kind) else null
     let entries = [for (entry in info.floats where entry.kind == kind and entry.caption != null,
-        let parts = [if (entry.number == null) null else <span class: "sec-num", string(entry.number)>,
+        let parts = [if (entry.number == null) null
+            else if (style == null) <span class: "sec-num", string(entry.number)>
+            else <span class: "sec-num", style: style.number_css, style.before ++ string(entry.number) ++ style.after>,
             entry.caption])
-        <li class: "toc-l2",
+        <li class: "toc-l2", style: if (style == null or style.css == "") null else style.css,
             if (entry.id != null) <a href: "#" ++ entry.id, for c in parts { c }>
             else parts
         >];
     <nav class: "latex-toc latex-list-of latex-" ++ (if (desc.list != null) desc.list else "listof-" ++ kind),
-        <div class: "toc-title", if (title != null) title else desc.list_title>
+        list_title(contents.title(info, desc.name_macro, desc.list_title, desc.ext), info, title);
         <ul for item in entries { item }>
     >
+}
+
+// minitoc's \minitoc, \secttoc and \parttoc: the headings under the enclosing
+// chapter, section or part, titled by \mtcsettitle or the title macro
+fn render_minitoc(el, info) {
+    let kind = contents.mini_kind(string(name(el)))
+    let depth = util.setting_at(info.settings, "counter:" ++ kind.depth, el.source_offset)
+    let entries = contents.mini_entries(info.headings, kind, if (depth == null) 2 else depth, el.source_offset)
+    let set_title = util.setting_at(info.settings, "mtctitle:" ++ kind.key, el.source_offset)
+    let renamed = macros.last_macro(info.macros, kind.title)
+    let heading = if (set_title != null) [set_title]
+        else if (renamed != null and renamed.body != null) render_children(renamed.body, 0, info)
+        else [if (kind.key == "parttoc") "Table of Contents" else "Contents"]
+    if (len(entries) == 0) null
+    else <nav class: "latex-toc latex-minitoc",
+        <div class: "toc-title", for c in heading { c }>
+        <ul for (h in entries) toc_item(h, info)>>
 }
 
 // The parser keeps \begin{multicols}{n}[preface] as a `columns` attribute and a
@@ -2659,17 +2784,20 @@ fn render_ref(el, info) {
     else render_number_ref(el, info)
 }
 
-fn render_pageref(el, info) {
-    let key = trim(util.text_of(el))
+fn render_pageref(el, info) => page_ref(trim(util.text_of(el)), info, el.source_offset)
+
+// the page of a label; paged output fills the anchor with the page number
+fn page_ref(key, info, offset) {
     let entry = util.lookup(info.labels, key)
     if (key == "LastPage" and registry.active(info.packages, "lastpage"))
         <span class: "latex-page-count">
-    else if (entry == null) util.unsupported_element("latex", "Unresolved page reference " ++ key, el.source_offset)
+    else if (entry == null) util.unsupported_element("latex", "Unresolved page reference " ++ key, offset)
     else <a class: "latex-target-page", href: "#" ++ entry.id>
 }
 
-fn render_number_ref(el, info, parenthesized = false) {
-    let ref_name = trim(util.text_of(el))
+fn render_number_ref(el, info, parenthesized = false) => number_ref(trim(util.text_of(el)), info, parenthesized)
+
+fn number_ref(ref_name, info, parenthesized = false) {
     let label_info = util.lookup(info.labels, ref_name)
     let value = if (label_info != null) label_info.number else "??";
     // eqref shares reference resolution, framing the number as its equation's tag
@@ -2746,8 +2874,10 @@ fn cref_group(entries, label_type, capital) {
     >
 }
 
-fn render_cref(el, info, capital) {
-    let keys = [for (key in util.split_top_level(trim(util.text_of(el)), ",")) trim(key)]
+fn render_cref(el, info, capital) =>
+    cref_keys([for (key in util.split_top_level(trim(util.text_of(el)), ",")) trim(key)], info, capital)
+
+fn cref_keys(keys, info, capital) {
     let entries = [for (key in keys) util.lookup(info.labels, key)]
     if (len(entries) == 0 or any([for (entry in entries where entry == null) true]))
         <span class: "latex-ref latex-unresolved", "??">
@@ -2761,6 +2891,27 @@ fn render_cref(el, info, capital) {
             }
         >
     }
+}
+
+// varioref: a reference with its page phrase, or the phrase alone. The phrase
+// carries \pageref's page anchor, which paged output fills; cleveref, when loaded,
+// names the reference's type as it does for \vref.
+fn render_vref(el, info) {
+    let tag = string(name(el))
+    let first = trim(util.raw_argument(el, "required", 0) or "")
+    let second = trim(util.raw_argument(el, "required", 1) or "")
+    let capital = starts_with(tag, "V")
+    let reference = (key) => if (registry.active(info.packages, "cleveref")) cref_keys([key], info, capital)
+        else number_ref(key, info)
+    let parts = if (tag == "vpageref" or tag == "Vpageref")
+            [if (capital) "On page " else "on page ", page_ref(first, info, el.source_offset)]
+        else if (tag == "vpagerefrange")
+            ["on pages ", page_ref(first, info, el.source_offset), "\u2013", page_ref(second, info, el.source_offset)]
+        else if (tag == "vrefrange")
+            [reference(first), " to ", reference(second), " on pages ", page_ref(first, info, el.source_offset),
+             "\u2013", page_ref(second, info, el.source_offset)]
+        else [reference(first), " on page ", page_ref(first, info, el.source_offset)];
+    <span class: "latex-vref", for c in parts { c }>
 }
 
 fn render_nameref(el, info) {

@@ -22,6 +22,9 @@ import frames: .packages.frames
 import footmisc: .packages.footmisc
 import appendix: .packages.appendix
 import colspec: .packages.array
+import titles: .packages.titles
+import contents: .packages.contents
+import frontmatter: .packages.frontmatter
 
 // helper: append a {key, val} entry to an entry list
 fn add_entry(entries, k, v) {
@@ -57,6 +60,8 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         author_el: null,
         date: null,
         date_el: null,
+        // authblk's \author and \affil commands, in source order
+        authblk: [],
         // every counter, built-in or declared, lives in one map keyed by name
         counters: {
             part: 0, chapter: 0, section: 0, subsection: 0, subsubsection: 0,
@@ -71,6 +76,8 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         heading_titles: [],
         // appendix's title and titletoc names by heading slug
         heading_names: [],
+        // the slugs of headings in an appendix (titlesec's \chaptertitlename)
+        appendix_headings: [],
         labels: [],
         footnote_marks: [],
         footnotes: [],
@@ -130,10 +137,12 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         author_el: result.author_el,
         date: result.date,
         date_el: result.date_el,
+        authblk: result.authblk,
         headings: result.headings,
         heading_nums: result.heading_nums,
         heading_titles: result.heading_titles,
         heading_names: result.heading_names,
+        appendix_headings: result.appendix_headings,
         labels: result.labels,
         footnotes: result.footnotes,
         footnote_marks: result.footnote_marks,
@@ -206,10 +215,50 @@ pub let PACKAGE_WALK = {
     colortbl: {arrayrulecolor: (el, st) => walk_rule_color(el, st, "arrayrulecolor"),
         doublerulesepcolor: (el, st) => walk_rule_color(el, st, "doublerulesepcolor")},
     array: {newcolumntype: walk_newcolumntype},
+    // titlesec's formats and spacing and sectsty's fonts hold from where they are given
+    titlesec: {titleformat: walk_titleformat, titlespacing: (el, st) => record_pair(st, el, titles.titlespacing(el)),
+        titlelabel: (el, st) => record_setting(st, el, "titlelabel", util.raw_argument(el, "required", 0) or "")},
+    sectsty: map([for (command in titles.SECTSTY_COMMANDS, x in [command, walk_sectsty]) x]),
+    tocloft: {cftsetindents: (el, st) => record_pair(st, el, contents.indents(el)), newlistof: walk_newlistof},
+    minitoc: {mtcsettitle: walk_mtcsettitle},
+    // titling's \pre… and \post… code; authblk's authors and affiliations
+    titling: map([for (part in frontmatter.TITLING_PARTS, side in ["pre", "post"],
+        x in [side ++ part, walk_titling]) x]),
+    authblk: {author: (el, st) => {*:walk_author(el, st), authblk: st.authblk ++ [{kind: "author", el: el}]},
+        affil: (el, st) => {*:st, authblk: st.authblk ++ [{kind: "affil", el: el}]}},
     pdfpages: {includepdfset: (el, st) => record_setting(st, el, "includepdfset", util.raw_argument(el, "required", 0) or "")},
     appendix: {appendices: (el, st) => walk_appendices(el, st, false),
         subappendices: (el, st) => walk_appendices(el, st, true), addappheadtotoc: add_appendix_head}
 }
+
+// a {key, value} setting, or nothing when the command named no heading
+fn record_pair(st, el, pair) => if (pair == null) st else record_setting(st, el, pair.key, pair.value)
+
+// \titleformat: what the format cannot express is reported where it is given
+fn walk_titleformat(el, st) {
+    let level = titles.level_of(util.raw_argument(el, "required", 0))
+    let pair = titles.titleformat(el, util.setting_at(st.settings, "titleformat:" ++ level, el.source_offset))
+    if (pair == null) st
+    else {*:record_pair(st, el, pair), diagnostics: st.diagnostics ++
+        [for (issue in titles.format_issues(pair.value, st.custom_colors))
+            util.diagnostic(issue.code, "titlesec", issue.item,
+                if (issue.code == "title-shape-approximation") "The " ++ issue.item ++ " title shape renders as hang"
+                else "Unsupported command in a title format: \\" ++ issue.item, el.source_offset)]}
+}
+
+// a sectsty font command sets the font of the levels it names
+fn walk_sectsty(el, st) {
+    let raw = util.raw_argument(el, "required", 0) or ""
+    let unknown = font_decl_unknown(raw, st.custom_colors)
+    let levels = titles.SECTSTY_FONTS[string(name(el))]
+    let recorded = {*:st, settings: st.settings ++ [for (level in levels)
+        {key: "sectsty:" ++ level, value: raw, offset: el.source_offset}]};
+    {*:recorded, diagnostics: st.diagnostics ++ [for (command in unknown)
+        util.diagnostic("unsupported-title-format", "sectsty", command,
+            "Unsupported command in a heading font: \\" ++ command, el.source_offset)]}
+}
+
+fn font_decl_unknown(raw, colors) => [for (issue in titles.format_issues({format: raw}, colors)) issue.item]
 
 fn walk_rule_color(el, st, key) {
     let css = color.command_color(el, 0, st.custom_colors)
@@ -293,7 +342,8 @@ fn walk_newfloat(el, st) {
     let within = util.optional_raw(el)
     if (len(args) == 0) st
     else {*:st,
-        float_kinds: {*:st.float_kinds, [args[0]]: floats.new_kind(args[0], st.float_style)},
+        float_kinds: {*:st.float_kinds, [args[0]]: floats.new_kind(args[0], st.float_style,
+            if (len(args) > 2) args[2] else null)},
         counters: {*:st.counters, [args[0]]: 0},
         counter_within: if (within == null) st.counter_within
             else add_entry(st.counter_within, args[0], trim(within))}
@@ -393,6 +443,7 @@ fn walk_element(el, st) {
         case 'appendix': walk_appendix(el, st)
         case 'addcontentsline': walk_addcontentsline(el, st)
         case 'setcounter': walk_setcounter(el, st)
+        case 'setlength': walk_setlength(el, st)
         case 'addtocounter': walk_addtocounter(el, st)
         case 'stepcounter': walk_stepcounter(el, st, false)
         case 'refstepcounter': walk_stepcounter(el, st, true)
@@ -445,7 +496,9 @@ fn walk_addcontentsline(el, st) {
     let args = util.command_args(el)
     let file = if (len(args) > 0) trim(util.text_of(args[0])) else ""
     let level = if (len(args) > 1) trim(util.text_of(args[1])) else ""
-    let entry_args = if (len(args) > 2) slice(args, 2, len(args)) else []
+    // \protect only guards the entry while TeX writes it to the file
+    let entry_args = [for (arg in (if (len(args) > 2) slice(args, 2, len(args)) else [])
+        where not (arg is element and string(name(arg)) == "protect")) arg]
     let numbered = len(entry_args) > 0 and entry_args[0] is element and
         string(name(entry_args[0])) == "numberline"
     let entry_number = if (numbered) trim(util.text_of(entry_args[0])) else null
@@ -453,7 +506,7 @@ fn walk_addcontentsline(el, st) {
     let slug_info = make_unique_slug(util.slugify(text), st.slug_counts)
     let anchored = {*:st, slug_counts: slug_info.counts,
         contents_anchors: add_entry(st.contents_anchors, string(el.source_offset), slug_info.slug)}
-    let list_kind = if (file == "lof") "figure" else if (file == "lot") "table" else null
+    let list_kind = floats.kind_of_file(st.float_kinds, file)
     if (file == "toc" and CONTENTS_LEVELS[level] != null)
         {*:anchored, headings: st.headings ++
             [{level: CONTENTS_LEVELS[level], number: entry_number, text: text, id: slug_info.slug}]}
@@ -515,7 +568,7 @@ fn walk_heading(el, st, counter_name, html_level) {
     let new_slug_counts = slug_info.counts
 
     // record heading
-    let entry = {level: html_level, number: sec_num, text: title_text, id: slug}
+    let entry = {level: html_level, number: sec_num, text: title_text, id: slug, offset: el.source_offset}
     let new_heading_nums = add_entry(st.heading_nums, slug, sec_num)
     let new_headings = if (starred) st.headings else st.headings ++ [entry]
     let sec_num_str = sec_num_to_str(sec_num)
@@ -530,6 +583,7 @@ fn walk_heading(el, st, counter_name, html_level) {
         heading_nums: new_heading_nums,
         heading_titles: add_entry(st.heading_titles, counter_name ++ ":" ++ sec_num_str, title_text),
         heading_names: if (named) add_entry(st.heading_names, slug, st.appendix_names) else st.heading_names,
+        appendix_headings: if (st.in_appendix) st.appendix_headings ++ [slug] else st.appendix_headings,
         slug_counts: new_slug_counts,
         env_context: counter_name,
         env_context_num: sec_num_str
@@ -841,11 +895,48 @@ fn counter_assignment(el) {
     }
 }
 
+// a \setcounter is also a source-order setting, for packages that read a depth
+// where they print (minitoc's minitocdepth)
 fn walk_setcounter(el, st) {
     let assignment = counter_assignment(el)
     if (assignment == null) st
     else if (assignment.name == "secnumdepth") {*:st, secnumdepth: assignment.value}
-    else {*:st, counters: {*:st.counters, [assignment.name]: assignment.value}}
+    else {*:record_setting(st, el, "counter:" ++ assignment.name, assignment.value),
+        counters: {*:st.counters, [assignment.name]: assignment.value}}
+}
+
+// \setlength as a source-order setting, for package lengths (tocloft's skips)
+fn walk_setlength(el, st) {
+    let css = if (el.length_name == null or el.length_value == null) null else util.css_dimension(el.length_value)
+    if (css == null) st else record_setting(st, el, "length:" ++ el.length_name, css)
+}
+
+// tocloft's \newlistof[within]{entry}{ext}{title}: a list of entries that
+// \addcontentsline{ext}{entry}{…} adds to and \listof<entry> prints
+fn walk_newlistof(el, st) {
+    let entry = trim(util.raw_argument(el, "required", 0) or "")
+    let ext = trim(util.raw_argument(el, "required", 1) or "")
+    let within = trim(util.optional_raw(el) or "")
+    if (entry == "" or ext == "") st
+    else {*:st, float_kinds: {*:st.float_kinds, [entry]: floats.listed_kind(entry, ext,
+            util.raw_argument(el, "required", 2) or entry)},
+        counters: {*:st.counters, [entry]: 0},
+        counter_within: if (within == "") st.counter_within else add_entry(st.counter_within, entry, within)}
+}
+
+// titling's \pretitle{code} and the like: what the code cannot express is reported
+fn walk_titling(el, st) {
+    let raw = util.raw_argument(el, "required", 0) or ""
+    let recorded = record_setting(st, el, "titling:" ++ string(name(el)), raw);
+    {*:recorded, diagnostics: st.diagnostics ++ [for (command in font_decl_unknown(raw, st.custom_colors))
+        util.diagnostic("unsupported-title-format", "titling", command,
+            "Unsupported command in title code: \\" ++ command, el.source_offset)]}
+}
+
+// \mtcsettitle{minitoc}{title}
+fn walk_mtcsettitle(el, st) {
+    let mini = trim(util.raw_argument(el, "required", 0) or "")
+    if (mini == "") st else record_setting(st, el, "mtctitle:" ++ mini, util.raw_argument(el, "required", 1) or "")
 }
 
 fn walk_addtocounter(el, st) {

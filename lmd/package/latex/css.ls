@@ -144,6 +144,7 @@ table.latex-tabular tr.latex-colored-rule td { padding: 0; height: 0; line-heigh
 .latex-tablenotes { font-size: 0.8em; text-align: left; margin-top: 0.3em; }
 .latex-tablenote { padding-left: var(--latex-tnote-hang, 1em); text-indent: calc(0px - var(--latex-tnote-hang, 1em)); }
 .latex-tnote { font-style: italic; }
+.latex-document .latex-indent-after + p { text-indent: 1.5em; }
 .latex-adjustbox img { max-width: 100%; }
 .latex-pdfpage { margin: 1em 0; text-align: center; break-inside: avoid; }
 table.latex-tabular td.latex-si-column { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }

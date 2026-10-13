@@ -26,6 +26,10 @@ import footmisc: .footmisc
 import appendix: .appendix
 import adjustbox: .adjustbox
 import pdfpages: .pdfpages
+import titles: .titles
+import contents: .contents
+import frontmatter: .frontmatter
+import varioref: .varioref
 import boxes: ~~.elements.boxes
 
 // `commands` names the commands and environments a package owns: they dispatch
@@ -175,6 +179,27 @@ pub let CATALOG = {
         commands: ["threeparttable", "tablenotes", "tnote", "measuredfigure"]},
     // keys on graphicx's sizing and the frame-box model (adjustbox.ls)
     adjustbox: {options: ["export", "Export"], commands: ["adjustbox"], implies: ["graphicx"]},
+    // heading formats, spacing and fonts (titles.ls)
+    titlesec: {options: titles.TITLESEC_OPTIONS, commands: titles.TITLESEC_COMMANDS,
+        preamble: titles.TITLESEC_COMMANDS},
+    sectsty: {options: [], commands: titles.SECTSTY_COMMANDS, preamble: titles.SECTSTY_COMMANDS},
+    // contents styling through the engine binding tex/binding/tocloft.sty (contents.ls)
+    tocloft: {options: contents.TOCLOFT_OPTIONS, commands: contents.TOCLOFT_COMMANDS,
+        preamble: contents.TOCLOFT_COMMANDS},
+    // the title block: titling's code and hooks, authblk's authors (frontmatter.ls);
+    // tex/binding/{titling,authblk}.sty declare the macros documents redefine
+    titling: {options: frontmatter.TITLING_OPTIONS, commands: frontmatter.TITLING_COMMANDS,
+        preamble: slice(frontmatter.TITLING_COMMANDS, 0, 6)},
+    authblk: {options: frontmatter.AUTHBLK_OPTIONS, commands: frontmatter.AUTHBLK_COMMANDS,
+        preamble: frontmatter.AUTHBLK_COMMANDS},
+    // references with English page phrases (varioref.ls)
+    varioref: {options: varioref.OPTIONS, commands: varioref.COMMANDS},
+    // per-chapter contents; tex/binding/minitoc.sty declares the title macros
+    minitoc: {options: contents.MINITOC_OPTIONS, commands: contents.MINITOC_COMMANDS,
+        preamble: ["dominitoc", "dosecttoc", "doparttoc", "mtcsettitle"]},
+    // CSV tables through the engine binding tex/binding/csvsimple.sty; l3 and legacy
+    // choose csvsimple's implementation, and the binding is both
+    csvsimple: {options: ["l3", "legacy"]},
     // PDF pages through graphicx's PDF path (pdfpages.ls)
     pdfpages: {options: ["final", "draft"], commands: ["includepdf", "includepdfset"],
         implies: ["graphicx"], preamble: ["includepdfset"]},
@@ -660,7 +685,7 @@ pub fn target_diagnostics(node, target, paged = false) {
                 contains(util.text_of_skip_brack(node), "cmap"))
                 [diagnostic("unsupported-text-extraction", "cmap", "ToUnicode",
                     "PDF text extraction needs an embedded ToUnicode map", node)]
-            else if ((tag == "pageref" or tag == "thepage" or
+            else if ((tag == "pageref" or tag == "thepage" or (contains(varioref.COMMANDS, tag) or false) or
                 (tag == "ref" and trim(util.text_of(node)) == "LastPage")) and not paged)
                 [diagnostic("unresolved-page-counter", "latex", tag,
                     "Page references require paged output; continuous output displays a question mark", node)]
@@ -725,11 +750,14 @@ pub fn reference_diagnostics(node, labels, bibitems, packages, bibliography_acti
     if (not (node is element)) []
     else {
         let tag = string(name(node))
-        let own = if (tag == "ref" or tag == "autoref" or tag == "nameref" or
+        let vref = active(packages, "varioref") and (contains(varioref.COMMANDS, tag) or false)
+        let own = if (tag == "ref" or tag == "autoref" or tag == "nameref" or vref or
             (tag == "footref" and active(packages, "footmisc")) or
             ((tag == "cref" or tag == "Cref") and active(packages, "cleveref"))) {
             let keys = if (tag == "cref" or tag == "Cref")
                 util.split_top_level(trim(util.text_of(node)), ",")
+                // the range commands name two labels
+                else if (vref) [for (i in 0 to 1, let raw = util.raw_argument(node, "required", i) where raw != null) raw]
                 else [trim(util.text_of(node))];
             [for (key in keys where util.lookup(labels, trim(key)) == null and
                 not (trim(key) == "LastPage" and active(packages, "lastpage")))
@@ -737,6 +765,7 @@ pub fn reference_diagnostics(node, labels, bibitems, packages, bibliography_acti
                     if (active(packages, "cleveref") and
                         (tag == "cref" or tag == "Cref")) "cleveref"
                     else if (tag == "footref") "footmisc"
+                    else if (vref) "varioref"
                     else if (active(packages, "hyperref")) "hyperref" else "latex",
                     trim(key), "Unresolved reference " ++ trim(key), node)]
         } else if (tag == "cite" and not active(packages, "biblatex") and

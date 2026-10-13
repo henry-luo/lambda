@@ -2206,6 +2206,8 @@ private:
             strcmp(name, "edef") == 0 || strcmp(name, "xdef") == 0;
         bool environment_definition = strcmp(name, "newenvironment") == 0 ||
             strcmp(name, "renewenvironment") == 0;
+        // stored TeX code may hold an unmatched \begin or \end (input-latex-tables.cpp)
+        bool code_fragment = is_code_fragment_command(name);
         int curly_index = 0;
         if (macro_definition) {
             while (position_ < length_ && isspace((unsigned char)source_[position_])) position_++;
@@ -2241,7 +2243,7 @@ private:
                     size_t begin = 0, end = 0;
                     if (!consume_group_span(&begin, &end)) break;
                     arguments.append(builder_.createStringItem(source_ + begin, end - begin));
-                } else if (environment_definition) {
+                } else if (environment_definition || code_fragment) {
                     Item group = parse_raw_group();
                     if (item_present(group)) arguments.append(group);
                 } else if (macro_definition) {

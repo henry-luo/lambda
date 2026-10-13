@@ -19,4 +19,5 @@ Each bound package also has a row in `lmd/package/latex/packages/registry.ls`.
 | `physics.sty` | physics 1.3: bracing, vectors, operators, quick-quad text, derivatives, Dirac notation, matrix macros; options `arrowdel`, `italicdiff`, `notrig` |
 | `mathtools.sty` | the mathtools 1.31 macro layer: paired delimiters, `\prescript`, `\splitfrac`, `\adjustlimits`, `\MoveEqLeft` |
 | `xspace.sty` | xspace 1.13: `\xspace`, through the engine's `\lambda@xspace` lookahead primitive (a `\futurelet` would be an assignment) |
+| `tocloft.sty`, `authblk.sty`, `titling.sty`, `minitoc.sty` | only the macros those packages are configured by, with their defaults, so a document's `\renewcommand` is legal and reaches the adapter; tocloft's `\newlistof` also makes its counter and passes itself on |
 | `csvsimple.sty` | the csvsimple-l3 interface, in expl3: `\csvreader`, the auto tables, `\csvset`, `\csvstyle`, `\csvnames`, and the table, line, filter and respect keys |

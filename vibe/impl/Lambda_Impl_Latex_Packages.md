@@ -1,7 +1,7 @@
 # LaTeX Phase V: package coverage implementation plan
 
 **Design:** [Lambda_Pkg_Latex.md](../Lambda_Pkg_Latex.md) (§6 package model, §9 compatibility matrix, §10 verification rules, §11 outstanding work); [TeX engine design](../latex/Lambda_Design_TeX_Engine.md) §5 and §10; [Lambda_Pkg_Math.md](../Lambda_Pkg_Math.md) §3, §7 and §10.2; [Lambda_Pkg_Slides.md](../Lambda_Pkg_Slides.md) for beamer.
-**Status:** In progress. Proposed 2026-10-12; the user approved the §17 recommendations on 2026-10-13. M0, M1, M2, M4, M8, M3 and M5 were implemented on 2026-10-13 in worktree `latex-phase5-m0`. §17.1 was ratified as **D7.2.7v2** when the first binding (physics) landed.
+**Status:** In progress. Proposed 2026-10-12; the user approved the §17 recommendations on 2026-10-13. M0, M1, M2, M4, M8, M3, M5 and M6 were implemented on 2026-10-13 in worktree `latex-phase5-m0`. §17.1 was ratified as **D7.2.7v2** when the first binding (physics) landed.
 **Formal linkage:** **D7.2.7v2** (expansion only, never typesetting; bundled packages are upstream programming packages or Lambda-owned bindings; resolution order bundled → adapter → beside-document file → located `unknown-package`), **D7.2.1–D7.2.4** (script adapters in a static registry), **S1.8** (no document text becomes Lambda code), **S12.1.1v2** (rendering stays pure and deterministic), **D7.1.2v2** and **D7.5.2** (resources through the one IO door, path-gated), **S7.4.1–S7.4.4** (located diagnostics).
 **Scope:** the commonly used LaTeX packages and classes that `lambda.latex` does not support, plus the kernel, `hyperref` and `graphicx` gaps those packages build on. Diagrams (`tikz-cd`, `circuitikz`, `forest`, `chemfig`, `xy`) belong to the TikZ design (§15).
 
@@ -371,6 +371,38 @@ As built on 2026-10-13:
 - **`minitoc`.** `\dominitoc`, `\minitoc` and `\mtcaddchapter` render per-chapter contents from the analysis headings.
 - **`varioref`.** `\vref`, `\Vref`, `\vpageref` and `\vrefrange` render the reference plus a page phrase. Continuous output diagnoses the page phrase, as it does for `\pageref`.
 
+As built on 2026-10-13:
+
+- **Declaration lists.** titlesec formats, sectsty fonts, tocloft hooks, authblk fonts and titling's pre/post code are all raw TeX declaration lists. One reader, `font_decl.declarations(raw, colors)`, turns such a list into CSS: font switches and sizes, `\color`, `\fontsize`, the NFSS commands, alignment (`\centering`, ragged2e's and titlesec's `\fil…` commands, the center and flush environments), `\MakeUppercase`/`\MakeLowercase`, `\titlerule`, `\vspace`/`\vskip`, and printed text. It lists every other command, and each package reports those where they are given.
+- **Bindings that declare macros.** tocloft, authblk, titling and minitoc are configured by redefining their macros (`\renewcommand{\cftsecfont}{…}`), which the engine rejects as undefined unless something defines them. Four bindings (`tex/binding/{tocloft,authblk,titling,minitoc}.sty`) define those macros with the packages' defaults and nothing else. The document's `\renewcommand` is then legal and echoed, and the adapters read it through `macros.last_macro`, the definition in effect after the preamble.
+  - The packages' commands (`\cftsetindents`, `\affil`, `\pretitle`, `\minitoc`) stay undefined, so they reach the adapters as constructors.
+  - tocloft's `\newlistof` makes its entry's macros and counter in the binding, then passes itself to the adapter with `\noexpand`.
+- **titlesec and sectsty** (`titles.ls`). Analysis records `\titleformat` (with `\titleformat*` keeping the rest of the earlier format), `\titlespacing`, `\titlelabel` and the sectsty commands as source-order settings. The heading renderer asks `titles.heading_style` for the style in effect at the heading.
+  - The format styles the heading. The label template gets the displayed number for `\the…` and `\thetitle`, and "Chapter" or, in an appendix, "Appendix" for `\chaptertitlename`. `sep` spaces the label, and `display` sets the label on its own line. The before-code styles the title text (`\MakeUppercase` as `text-transform`), and a `\titlerule` draws the heading's bottom border.
+  - `\titlespacing` margins read `*n` as n ex. Without the star, the next paragraph is indented (a `latex-indent-after` class).
+  - The size, font, alignment and `compact` options style every level. `runin`, `leftmargin`, `rightmargin`, `drop` and `wrap` render as `hang` and report `title-shape-approximation`; `frame` draws a border.
+  - Headings with neither package render as before.
+- **tocloft** (`contents.ls`).
+  - Each entry level's `\cft…font`, `\cft…presnum`, `\cft…aftersnum` and `\cft…aftersnumb`, `\cftsetindents` and the `\cftbefore…skip` lengths style the contents and the float lists. Analysis now records every `\setlength` and `\setcounter` as a setting for such reads.
+  - The title takes `\cft…titlefont` and `\cftafter…title`.
+  - Page numbers, leaders and dot separations are accepted without effect, since the continuous contents have no page numbers.
+  - `\newlistof` adds a list-only kind to the float kinds: `floats.listed_kind`, which `kind_of` never treats as an environment. It is fed by `\addcontentsline` through the kinds' new `ext` field (`floats.kind_of_file`, replacing the lof/lot test) and printed by `\listof<entry>`.
+  - In the kernel, the contents and list titles now follow a renamed `\contentsname`, `\listfigurename` or `\listtablename`.
+- **Fix: `\protect\numberline`.** `\addcontentsline` ignored `\numberline` behind `\protect`, the usual form, so the number ran into the entry text. Analysis now skips `\protect`.
+- **minitoc.** `\minitoc`, `\secttoc` and `\parttoc` list the headings under the enclosing chapter, section or part, down to `minitocdepth`/`secttocdepth`/`parttocdepth`. The title comes from `\mtcsettitle` or the redefined `\mtctitle`. Heading entries gained their source offset for this. `\dominitoc` and the other setup commands render nothing.
+- **titling** (`frontmatter.ls`).
+  - `\pretitle`/`\posttitle` and the author and date pairs are read as one declaration list per part, since an environment opened in one closes in the other. They give the part CSS, alignment, the space after it and their own printed text.
+  - `\droptitle` moves the title block, the four `\maketitlehook…` slots render, and `\thetitle`, `\theauthor` and `\thedate` print the given parts.
+  - **Parser change:** those six commands' arguments stay raw text, like a `\newenvironment` body (`is_code_fragment_command` in `input-latex-tables.cpp`), because the parser rejected `\pretitle{\begin{center}…}` as an unclosed environment.
+- **authblk.** Analysis collects `\author[marks]` and `\affil[marks]` in order.
+  - With marks, the names are joined with `\Authsep`, `\Authand` and `\Authands` and carry their marks, and each affiliation follows on its own line with its mark. Without marks, the authors before each run of affiliations form a block with them.
+  - `\Authfont`, `\Affilfont` and the `auth-*`/`affil-*` options style both.
+- **varioref** (`varioref.ls`). `\vref`, `\Vref`, `\vpageref`, `\Vpageref`, `\vrefrange`, `\vpagerefrange` and `\fullref` print the reference (cleveref's typed form when cleveref is loaded) with an English page phrase. The phrase carries `\pageref`'s page anchor, which paged output fills.
+  - Continuous output reports `unresolved-page-counter`, and unknown labels report `unresolved-reference`.
+  - The "next page" and "facing page" forms need both pages, so they are not produced.
+  - `page_ref`, `number_ref` and `cref_keys` were factored out of the `\pageref`, `\ref` and `\cref` renderers for reuse.
+- **Also fixed:** M5's csvsimple catalog row had not been written (an edit was refused, and bundled bindings resolve without a row). It is added, so the `l3` and `legacy` options are validated.
+
 ## 11. M7: glossaries, acronyms, nomenclature and index
 
 **One term-registry model.** Analysis collects every definition and computes first use per label in source order. This needs no mutation and fits the existing two-pass design (**S12.1.1v2**). Definitions come from `\newglossaryentry`, `\newacronym`, `\acro`, `\nomenclature` and `\index`.
@@ -550,3 +582,7 @@ As built on 2026-10-13, with route (a) chosen by the user and **D7.2.7v2** ratif
   - New modules in `lmd/package/latex/packages/`: `array.ls`, `hhline.ls`, `adjustbox.ls` and `pdfpages.ls`; the binding `tex/binding/csvsimple.sty`.
   - New test `test/lambda/latex/test_latex_phase5_tables.ls` with its golden and two CSV fixtures, identical on every tier. The other LaTeX and math scripts match their goldens, except two expectations that follow from vertical rules: `test_latex_tables` checks the cells of a `|l|c|r|` table, now bordered, and `test_latex_css` finds `latex-table` in the stylesheet, now true through `.latex-tablenotes`.
   - `make test-lambda-baseline` passed 6790 of 6812 under `LAMBDA_LOG_LEVEL=error` (1.1 GB of disk left). The MIR ratchet and the two lint tests pass without the override, as in M3, and `UiDtnaTests.PackageContractsAgreeAcrossTiers`, whose JIT run of `dtna_contracts` printed nothing in the loaded run, passes alone; M5 does not touch that package.
+- 2026-10-13: M5 committed (f19242ca8). M6 was built as recorded in §10.
+  - New modules in `lmd/package/latex/packages/`: `titles.ls`, `contents.ls`, `frontmatter.ls` and `varioref.ls`; the bindings `tex/binding/{tocloft,authblk,titling,minitoc}.sty`.
+  - New test `test/lambda/latex/test_latex_phase5_front.ls` with its golden, identical on every tier. The other LaTeX, math and TeX tests match their goldens.
+  - `make test-lambda-baseline` passed 6792 of 6813 under `LAMBDA_LOG_LEVEL=error`; the other 21 are the MIR ratchet and the two lint tests, which pass without the override.

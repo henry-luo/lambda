@@ -5,11 +5,13 @@
 
 import util: .util
 
+// `ext` is the contents file \addcontentsline names, `entry` tocloft's entry name and
+// `name_macro` the macro a document renames the list's title with
 pub let KINDS = {
     figure: {counter: "figure", name: "Figure", list: "listoffigures", list_title: "List of Figures",
-        style: "plain"},
+        style: "plain", ext: "lof", entry: "fig", name_macro: "listfigurename"},
     table: {counter: "table", name: "Table", list: "listoftables", list_title: "List of Tables",
-        style: "plain"}
+        style: "plain", ext: "lot", entry: "tab", name_macro: "listtablename"}
 }
 
 let ALGORITHM_KIND = {counter: "algorithm", name: "Algorithm", list: "listofalgorithms",
@@ -46,13 +48,24 @@ pub fn kinds_for(packages) {
 }
 
 // \newfloat{type}{placement}{ext}: named after its type until \floatname renames it
-pub fn new_kind(float_type, style) =>
-    {counter: float_type, name: float_type, list: null, list_title: null, style: style}
+pub fn new_kind(float_type, style, ext = null) =>
+    {counter: float_type, name: float_type, list: null, list_title: null, style: style, ext: ext}
+
+// tocloft's \newlistof{entry}{ext}{title}: a list only, never a float environment
+pub fn listed_kind(entry, ext, title) =>
+    {counter: entry, name: entry, list: "listof" ++ entry, list_title: title, style: "plain",
+     ext: ext, entry: entry, listed_only: true}
+
+// the kind whose list a contents file feeds (\addcontentsline{lof}…), or null
+pub fn kind_of_file(kinds, file) {
+    let found = [for (k, v at kinds where v.ext != null and v.ext == file) string(k)];
+    (if (len(found) == 0) null else found[0])
+}
 
 // a float environment's kind: its own name, or the unstarred name of a spanning variant
 pub fn kind_of(kinds, tag) {
     let base = if (ends_with(tag, "*")) slice(tag, 0, len(tag) - 1) else tag
-    if (kinds[base] != null) base else null
+    if (kinds[base] != null and kinds[base].listed_only != true) base else null
 }
 
 pub fn kind_name(kinds, kind) => if (kinds != null and kinds[kind] != null) kinds[kind].name else kind

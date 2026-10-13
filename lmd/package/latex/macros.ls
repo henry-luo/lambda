@@ -157,6 +157,13 @@ pub fn find_macro(defs, cmd_name) {
     find_macro_rec(defs, cmd_name, 0)
 }
 
+// the definition in effect after the preamble: the last \newcommand or
+// \renewcommand of a name, as for a package hook a document redefines
+pub fn last_macro(defs, cmd_name) {
+    let found = [for (d in defs or [] where d.name == cmd_name) d];
+    (if (len(found) == 0) null else found[len(found) - 1])
+}
+
 fn find_macro_rec(defs, cmd_name, i) {
     if (i >= len(defs)) null
     else check_macro(defs, cmd_name, i)
