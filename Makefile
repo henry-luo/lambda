@@ -653,6 +653,7 @@ help:
 	@echo "  test-ui-dtna        - Run dtna catalog, tier contracts and native interaction tests"
 	@echo "  test-ui-bold        - Run bold package contracts and native interaction tests across tiers"
 	@echo "  test-ui-wired       - Run wired package contracts and native interaction tests across tiers"
+	@echo "  test-ui-clay        - Run clay catalog contracts and native interaction tests across tiers"
 	@echo "  test-map            - Run native geomap rendering/input and Lambda package tests"
 	@echo "  test-map-export     - Verify native map PNG/SVG/PDF geometry and vector output"
 	@echo "  test-map-reference  - Compare native expressions with pinned MapLibre style-spec"
@@ -2143,6 +2144,15 @@ test-ui-wired: build
 	@status=0; for tier in interp auto jit; do \
 		LAMBDA_EXEC_BACKEND=$$tier ./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*ui_wired*' || status=1; \
 		LAMBDA_EXEC_BACKEND=$$tier ./test/test_ui_automation_gtest.exe --suite baseline,wired --test 'wired_*' $(ARGS) || status=1; \
+	done; exit $$status
+
+# Clay catalog contracts, scoped tokens, and shared native component behavior.
+.PHONY: test-ui-clay
+test-ui-clay: build
+	@$(MAKE) -C build/premake config=debug_native test_lambda_gtest test_ui_automation_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+	@status=0; for tier in interp auto jit; do \
+		LAMBDA_EXEC_BACKEND=$$tier ./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*ui_clay*' || status=1; \
+		LAMBDA_EXEC_BACKEND=$$tier ./test/test_ui_automation_gtest.exe --suite baseline,clay --test 'clay_*' $(ARGS) || status=1; \
 	done; exit $$status
 
 # Requires test/render Node dependencies, librsvg and Poppler.

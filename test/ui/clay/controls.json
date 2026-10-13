@@ -1,0 +1,260 @@
+{
+  "name": "clay controls preserves shared behavior and scoped appearance",
+  "html": "test/ui/clay/controls.ls",
+  "viewport": {
+    "width": 1000,
+    "height": 1500
+  },
+  "events": [
+    {
+      "type": "type",
+      "target": {
+        "selector": "#draft"
+      },
+      "text": "Idea"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#notes"
+      },
+      "text": "Notes"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#count-up"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#count"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#draft"
+      },
+      "equals": "Idea"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#notes"
+      },
+      "equals": "Notes"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#accepted"
+      },
+      "text": "Accepted"
+    },
+    {
+      "type": "wait",
+      "ms": 80
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#accepted"
+      },
+      "equals": "Accepted"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#fixed"
+      },
+      "text": "X"
+    },
+    {
+      "type": "wait",
+      "ms": 80
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#fixed"
+      },
+      "equals": "Original"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#typed"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "down"
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "wait",
+      "ms": 80
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#typed"
+      },
+      "equals": "10"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#request"
+      },
+      "equals": "typed:int:20"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#choice"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 80
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#choice"
+      },
+      "checked": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#controlled"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 80
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#controlled"
+      },
+      "checked": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#toggle"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 80
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#toggle"
+      },
+      "checked": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#b"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 80
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#b"
+      },
+      "checked": true
+    },
+    {
+      "type": "assert_checked",
+      "target": {
+        "selector": "#a"
+      },
+      "checked": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#disabled"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#loading"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#count"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#submit"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#request"
+      },
+      "equals": "project=Clay"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#action"
+      },
+      "equals": "form:submit"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#project"
+      },
+      "text": "X"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#project"
+      },
+      "equals": "Clay"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#action"
+      },
+      "equals": "form:reset"
+    }
+  ]
+}

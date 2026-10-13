@@ -867,6 +867,13 @@ Item MarkBuilder::deep_copy_for_view(Item item) {
     return copied;
 }
 
+Item MarkBuilder::copy_ui_content(Item item) {
+    preserving_owned_content_ = true;
+    Item copied = deep_copy(item);
+    preserving_owned_content_ = false;
+    return copied;
+}
+
 template<TypeId Tag>
 Item MarkBuilder::deep_copy_typed(lam::ItemOf<Tag> typed) {
     Item item = typed.raw();
@@ -1087,6 +1094,8 @@ Item MarkBuilder::deep_copy_unknown(Item item) {
 }
 
 Item MarkBuilder::deep_copy_internal(Item item) {
+    // an external fragment can contain owned template results whose identity carries handlers.
+    if (preserving_owned_content_ && is_in_arena(item)) return item;
     DeepCopyVisitor visitor = {this};
     return lam::visit(item, visitor);
 }

@@ -562,6 +562,28 @@ TEST_F(MarkBuilderDeepCopyTest, CopyNestedElements) {
     EXPECT_EQ(copied_div->length, 1);
 }
 
+TEST_F(MarkBuilderDeepCopyTest, UiContentAdoptsExternalFragmentsWithoutCloningOwnedRenderResults) {
+    input1->ui_mode = true;
+    MarkBuilder owner(input1);
+    MarkBuilder external(input2);
+    Item button = owner.element("button").text("Retained action").final();
+    Item foreign = external.element("span").text("External label").final();
+    Item fragment = external.array().append(button).append(foreign).final();
+
+    Item copied = ui_copy_content_to_input(input1, fragment);
+    ASSERT_EQ(get_type_id(copied), LMD_TYPE_ARRAY);
+    EXPECT_NE(copied.array, fragment.array);
+    ASSERT_EQ(copied.array->length, 2);
+    // the render map addresses this owned child; changing it loses the button handler.
+    EXPECT_EQ(copied.array->items[0].element, button.element);
+    EXPECT_NE(copied.array->items[1].element, foreign.element);
+    EXPECT_TRUE(owner.is_in_arena(copied));
+
+    Item occurrence = owner.deep_copy_for_view(copied);
+    EXPECT_NE(occurrence.array->items[0].element, button.element);
+    EXPECT_EQ(fragment.array->items[1].element, foreign.element);
+}
+
 TEST_F(MarkBuilderDeepCopyTest, ViewCopyDuplicatesOwnedElementsAndContentOnlyInUiMode) {
     MarkBuilder ordinary(input1);
     Item label = ordinary.element("span").text("shared").final();

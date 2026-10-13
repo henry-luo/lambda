@@ -48,6 +48,41 @@ TEST_F(RadiantTextQuery, FacelessQueriesReuseOneCachedFontContext) {
 
 class RadiantTextLayout : public RadiantTextQuery {};
 
+TEST_F(RadiantTextLayout, ShadowMathKeepsLengthsDistinctFromColors) {
+    ASSERT_NE(load("test/html/shadow_math.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    DomElement* result = dom_find_element_by_id(document->root->as_element(), "result");
+    ViewElement* box = lam::view_require_element(result);
+    ASSERT_NE(box->bound, nullptr);
+    BoxShadow* outer = box->boundary()->box_shadow;
+    ASSERT_NE(outer, nullptr);
+    EXPECT_FLOAT_EQ(outer->offset_x, 10.0f);
+    EXPECT_FLOAT_EQ(outer->offset_y, -5.0f);
+    EXPECT_FLOAT_EQ(outer->blur_radius, 20.0f);
+    EXPECT_FLOAT_EQ(outer->spread_radius, 2.0f);
+    EXPECT_EQ(outer->color.r, 20);
+    EXPECT_EQ(outer->color.g, 40);
+    EXPECT_EQ(outer->color.b, 60);
+    BoxShadow* inner = outer->next;
+    ASSERT_NE(inner, nullptr);
+    EXPECT_TRUE(inner->inset);
+    EXPECT_FLOAT_EQ(inner->offset_x, 2.0f);
+    EXPECT_FLOAT_EQ(inner->offset_y, 3.0f);
+    EXPECT_FLOAT_EQ(inner->blur_radius, 4.0f);
+    EXPECT_FLOAT_EQ(inner->spread_radius, 1.0f);
+    EXPECT_EQ(inner->color.r, 0xab);
+
+    DomElement* text = dom_find_element_by_id(document->root->as_element(), "text");
+    ViewElement* span = lam::view_require_element(text);
+    ASSERT_NE(span->font, nullptr);
+    TextShadow* shadow = span->font->text_shadow;
+    ASSERT_NE(shadow, nullptr);
+    EXPECT_FLOAT_EQ(shadow->offset_x, 2.0f);
+    EXPECT_FLOAT_EQ(shadow->offset_y, 3.0f);
+    EXPECT_FLOAT_EQ(shadow->blur_radius, 4.0f);
+    EXPECT_EQ(shadow->color.r, 70);
+}
+
 TEST_F(RadiantTextLayout, AnonymousFlexTextRetainsInheritedLineHeightAndLeading) {
     ui.viewport_width = 640;
     ui.viewport_height = 600;

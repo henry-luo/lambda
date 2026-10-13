@@ -48,6 +48,11 @@
       "tags": ["wired", "baseline"]
     },
     {
+      "name": "clay",
+      "globs": ["test/ui/clay/*.json"],
+      "tags": ["clay", "baseline"]
+    },
+    {
       "name": "dom",
       "globs": [
         "test/ui/dom/*.json",

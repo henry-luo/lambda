@@ -4066,7 +4066,7 @@
             "icon": "\ud83d\uddb1\ufe0f",
             "runner_args": [
               "--suite",
-              "baseline,dtna,timeline,wired"
+              "baseline,dtna,timeline,wired,clay"
             ]
           },
           {

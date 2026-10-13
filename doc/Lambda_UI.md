@@ -1,11 +1,13 @@
 # Lambda UI
 
-Lambda ships two experimental native UI families: `lambda.ui.dtna` for an
-Ant Design-inspired appearance, and [`lambda.ui.bold`](Lambda_UI_Bold.md) for
-neobrutalist borders, flat colors and hard shadows. Both are ordinary source
-packages (**D7.2.4**) presented through logical elements (**S12.1.3**).
-This page documents `dtna`; the [bold guide](Lambda_UI_Bold.md) covers its API
-and gallery.
+Lambda ships experimental native UI families: `lambda.ui.dtna` for an
+Ant Design-inspired appearance, [`lambda.ui.bold`](Lambda_UI_Bold.md) for
+neobrutalist borders, [`lambda.ui.wired`](Lambda_UI_Wired.md) for pencil outlines,
+and [`lambda.ui.clay`](Lambda_UI_Clay.md) for soft claymorphism surfaces and the
+broader Ant-inspired component set. These are ordinary source packages
+(**D7.2.4**) presented through logical elements (**S12.1.3**).
+This page documents the shared Ant-inspired behavior and `dtna` appearance;
+the linked theme guides cover their tokens, APIs and galleries.
 
 `lambda.ui.dtna` is an experimental Ant Design-inspired package for native
 Radiant documents. Its ordinary shipped module is

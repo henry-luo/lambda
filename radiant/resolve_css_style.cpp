@@ -8175,11 +8175,12 @@ static LayoutShadowValue resolve_shadow_value(LayoutContext* lycon,
             }
             return;
         }
+        // shadow math occupies a length slot; color functions must not consume it.
         if (component->type == CSS_VALUE_TYPE_LENGTH ||
-            component->type == CSS_VALUE_TYPE_NUMBER) {
-            float resolved = component->type == CSS_VALUE_TYPE_LENGTH
-                ? resolve_length_value(lycon, property, component)
-                : (float)component->data.number.value;
+            component->type == CSS_VALUE_TYPE_NUMBER ||
+            (component->type == CSS_VALUE_TYPE_FUNCTION &&
+             css_math_value_type(component) == CSS_MATH_LENGTH)) {
+            float resolved = resolve_length_value(lycon, property, component);
             if (length_count == 0) shadow.offset_x = resolved;
             else if (length_count == 1) shadow.offset_y = resolved;
             else if (length_count == 2) shadow.blur_radius = resolved;
