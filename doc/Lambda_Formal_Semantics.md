@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 60.2.0 (2026-10-13)
+**Spec version:** 61.0.0 (2026-10-13)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1839,14 +1839,19 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   built-in instance with one polymorphic parameter. *Colour what changes the
   caller's contract* — the keyword makes the dependence visible in the
   declaration. [C20-2–C20-6, C20.6, Features §3.6]
-- **S12.1.5** **Presentation authority.** A component presented by an
-  author template has its template result as its presentation of record:
-  direct DOM edits inside that result, from any realm, are unsupported and
-  yield to regeneration. Scripted and templated subtrees compose on one
-  page only when disjoint. Behavior templates (UA default actions) attach
-  to live elements and share canonical interaction state with JS; they
-  regenerate nothing. *One owner per subtree.* [Reactive_UI §2.7; user,
-  2026-10-13]
+- **S12.1.5v2** **Presentation authority by state tier.** Presentation
+  state has tiers, and each piece of state has one owner. An author template
+  owns the high-level state it regenerates its result from; a lower tier of
+  transient, implementation-level state (an in-slide animation) may live
+  directly in DOM/CSS inside that result, written by handlers or scripts.
+  The tiers never manage the same state, and precedence is fixed: a
+  higher-tier action regenerates and discards or overrides whatever
+  lower-tier state it touches, which the lower tier is written to expect.
+  Scripted and templated subtrees compose on one page the same way, by
+  owning different state. Behavior templates (UA default actions) attach to
+  live elements and share canonical interaction state with JS; they
+  regenerate nothing. *One owner per state; the higher tier wins.*
+  [Reactive_UI §2.7; user, 2026-10-13]
 
 ### S12.2 Assignment
 
