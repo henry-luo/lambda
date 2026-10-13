@@ -144,7 +144,7 @@ CssValue* FoExpressionParser::atom(size_t depth) {
         // fractional units are adapter-only symbols, removed before common CSS admission.
         return allocated(css_value_create_length(pool, weight.value, CSS_UNIT_FR));
     }
-    static const char* references[] = {"from-parent", "inherited-property-value", "from-nearest-specified-value"};
+    static const char* references[] = {"from-parent", "inherited-property-value", "from-nearest-specified-value", "from-table-column"};
     for (const char* name : references) if (named(token, name, true)) {
         const char* property = nullptr;
         token = peek();

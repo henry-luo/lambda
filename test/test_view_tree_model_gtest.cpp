@@ -9637,6 +9637,93 @@ TEST_F(SecondaryViewTest, FoWholeParentReferencesReuseComputedInheritanceAndComp
     EXPECT_FLOAT_EQ(view_css_resolve(tree, generated)->font.font_size, 16.0f);
 }
 
+TEST_F(SecondaryViewTest, TableColumnBindingsRetainComputedOwnerValuesAcrossEditions) {
+    ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
+    DomElement* table = block(nullptr, "table-layout:fixed;width:180px;border-spacing:0", "table"); ASSERT_NE(table, nullptr);
+    DomElement* columns = block(nullptr, "color:red", "colgroup", table); ASSERT_NE(columns, nullptr);
+    DomElement* column = block(nullptr, "font-size:14px;padding-left:.5em;color:#008000", "col", columns); ASSERT_NE(column, nullptr);
+    ASSERT_TRUE(column->set_attribute("span", "2"));
+    DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
+    DomElement* cell = block("Bound", "font-size:var(--size);padding-left:var(--pad);color:var(--color)", "td", row); ASSERT_NE(cell, nullptr);
+    ASSERT_TRUE(cell->set_attribute("r:property-bindings", "--size:table-column(2,font-size);--pad:table-column(2,padding-left);--color:table-column(2,color)"));
+    ViewTree* first = secondary(); const ViewCssStyle* retained = view_css_resolve(first, cell); ASSERT_NE(retained, nullptr);
+    ASSERT_EQ(retained->binding_status, VIEW_MODEL_OK) << retained->binding_reason;
+    EXPECT_FLOAT_EQ(retained->font.font_size, 14); ASSERT_NE(retained->padding[3], nullptr);
+    EXPECT_DOUBLE_EQ(retained->padding[3]->data.length.value, 7); EXPECT_EQ(retained->color.g, 128);
+    ASSERT_TRUE(column->set_attribute("style", "font-size:20px;padding-left:.5em;color:blue"));
+    ViewTree* second = secondary(); const ViewCssStyle* changed = view_css_resolve(second, cell); ASSERT_NE(changed, nullptr);
+    ASSERT_EQ(changed->binding_status, VIEW_MODEL_OK) << changed->binding_reason;
+    EXPECT_FLOAT_EQ(changed->font.font_size, 20); ASSERT_NE(changed->padding[3], nullptr);
+    EXPECT_DOUBLE_EQ(changed->padding[3]->data.length.value, 10); EXPECT_EQ(changed->color.b, 255);
+    EXPECT_FLOAT_EQ(retained->font.font_size, 14); EXPECT_DOUBLE_EQ(retained->padding[3]->data.length.value, 7);
+    ASSERT_TRUE(cell->set_attribute("r:property-bindings", "--size:table-column(3,font-size);--pad:table-column(3,padding-left);--color:table-column(3,color)"));
+    const ViewCssStyle* initial = view_css_resolve(secondary(), cell); ASSERT_NE(initial, nullptr);
+    ASSERT_EQ(initial->binding_status, VIEW_MODEL_OK) << initial->binding_reason;
+    EXPECT_FLOAT_EQ(initial->font.font_size, 16); EXPECT_EQ(initial->color.r, 0); EXPECT_EQ(initial->color.g, 0);
+    ASSERT_TRUE(cell->set_attribute("r:property-bindings", "--size:table-column(0,font-size)"));
+    EXPECT_EQ(view_css_resolve(secondary(), cell)->binding_status, VIEW_MODEL_INVALID_ARGUMENT);
+}
+
+TEST_F(SecondaryViewTest, FoTableColumnQueriesUseOccupiedSlotsAndComputedOwnerValues) {
+    DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='15pt' border-collapse='separate'>"
+        "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='225pt' page-height='180pt'><f:region-body/>"
+        "</f:simple-page-master></f:layout-master-set><f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
+        "<f:table table-layout='fixed' width='180pt'><f:table-column column-number='3' column-width='45pt' color='blue'/>"
+        "<f:table-column column-number='1' column-width='45pt' color='red'/><f:table-column column-width='45pt' font-size='10.5pt' color='#008000' padding-start='.5em' space-before='3pt'/>"
+        "<f:table-body><f:table-row><f:table-cell number-rows-spanned='2'><f:block>A</f:block></f:table-cell>"
+        "<f:table-cell number-columns-spanned='2'><f:block id='wide' font-size='from-table-column(font-size) + 1.5pt' color='from-table-column()' "
+        "padding-start='from-table-column(padding-start.length)' padding-before='from-table-column(space-before.minimum)'>B</f:block></f:table-cell></f:table-row>"
+        "<f:table-row><f:table-cell id='implicit' color='from-table-column()'><f:block>C</f:block></f:table-cell></f:table-row>"
+        "<f:table-row><f:table-cell column-number='3'><f:block id='reordered' color='from-table-column()'>D</f:block></f:table-cell>"
+        "<f:table-cell column-number='1'><f:block id='first' color='from-table-column()'>E</f:block></f:table-cell></f:table-row>"
+        "<f:table-row><f:table-cell column-number='4'><f:block id='initial' font-size='from-table-column()'>F</f:block></f:table-cell></f:table-row>"
+        "</f:table-body></f:table></f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
+    RadiantFoOptions fo_options = radiant_fo_options_default();
+    RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+    ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+    DomElement* generated = install_fo_translation(translated); ASSERT_NE(generated, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    const ViewCssStyle* wide = view_css_resolve(tree, dom_find_element_by_id(generated, "wide")); ASSERT_NE(wide, nullptr);
+    EXPECT_FLOAT_EQ(wide->font.font_size, 16); EXPECT_EQ(wide->color.g, 128); ASSERT_NE(wide->padding[3], nullptr);
+    EXPECT_DOUBLE_EQ(wide->padding[3]->data.length.value, 7); ASSERT_NE(wide->padding[0], nullptr);
+    EXPECT_DOUBLE_EQ(wide->padding[0]->data.length.value, 4);
+    EXPECT_EQ(view_css_resolve(tree, dom_find_element_by_id(generated, "implicit"))->color.g, 128);
+    EXPECT_EQ(view_css_resolve(tree, dom_find_element_by_id(generated, "reordered"))->color.b, 255);
+    EXPECT_EQ(view_css_resolve(tree, dom_find_element_by_id(generated, "first"))->color.r, 255);
+    EXPECT_FLOAT_EQ(view_css_resolve(tree, dom_find_element_by_id(generated, "initial"))->font.font_size, 16);
+}
+
+TEST_F(SecondaryViewTest, FoTableColumnQueriesNormalizeDirectRowsAndKeepOriginalDiagnostics) {
+    DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='15pt' border-collapse='separate'>"
+        "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='225pt' page-height='180pt'><f:region-body/>"
+        "</f:simple-page-master></f:layout-master-set><f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
+        "<f:table table-layout='fixed' width='180pt'><f:table-column column-width='45pt' color='red'/>"
+        "<f:table-column column-width='45pt' number-columns-repeated='2' color='blue'/><f:table-body>"
+        "<f:table-cell number-rows-spanned='2'><f:block>A</f:block></f:table-cell><f:table-cell ends-row='true'><f:block>B</f:block></f:table-cell>"
+        "<f:table-cell starts-row='true' ends-row='true'><f:block id='query' color='from-table-column()'>C</f:block></f:table-cell>"
+        "</f:table-body></f:table></f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
+    RadiantFoOptions fo_options = radiant_fo_options_default();
+    RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+    ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+    DomElement* generated = install_fo_translation(translated); ASSERT_NE(generated, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    EXPECT_EQ(view_css_resolve(tree, dom_find_element_by_id(generated, "query"))->color.b, 255);
+    DomElement* original = dom_find_element_by_id(fo, "query"); ASSERT_NE(original, nullptr);
+    for (const char* value : {"from-table-column(width)", "from-table-column(padding)", "from-table-column(color,color)", "from-table-column(space-before)"}) {
+        SCOPED_TRACE(value); ASSERT_TRUE(original->set_attribute("color", value));
+        translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+        EXPECT_EQ(translated->diagnostic.status, TYPESET_INVALID); EXPECT_EQ(translated->root, nullptr);
+        EXPECT_EQ(translated->diagnostic.source.address, original); EXPECT_STREQ(translated->diagnostic.property, "color");
+    }
+    ASSERT_TRUE(original->set_attribute("color", "from-table-column()"));
+    DomElement* cell = original->parent_element(); ASSERT_NE(cell, nullptr);
+    ASSERT_TRUE(cell->set_attribute("number-columns-spanned", "from-table-column(font-weight)"));
+    translated = radiant_fo_translate(&doc, fo, &fo_options); ASSERT_NE(translated, nullptr);
+    EXPECT_EQ(translated->diagnostic.status, TYPESET_INVALID); EXPECT_EQ(translated->root, nullptr);
+}
+
 TEST_F(SecondaryViewTest, FoNumericAndCrossPropertyReferencesLowerToCommonComputedBindings) {
     DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt'>"
         "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='150pt' page-height='120pt'><f:region-body/>"
