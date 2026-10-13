@@ -190,6 +190,7 @@ struct MvpLmdProgram {
     uint64_t random_state;
     bool global_receiver;
     bool global_reflection;
+    bool global_bindings_exposed;
     MvpLmdHostState host;
     MvpLmdLibraryState* library;
     bool library_active;
@@ -8888,6 +8889,36 @@ static bool native_property_matches(MvpLmdProgram* p, Matches matches) {
     for (const char* name : names) if (matches(name, strlen(name))) return true;
     return false;
 }
+static bool global_bindings_are_exposed(MvpLmdProgram* p) {
+    if (!p->global_reflection) return false;
+    const AstIndex* tree = &p->frontend->ast_index;
+    for (AstNodeId i = 0; i < tree->count; i++) {
+        AstNode* node = tree->nodes[i];
+        if (node->node_type != AST_NODE_IDENT) continue;
+        AstNode* parent = ast_index_parent(tree, node);
+        if (js_ast_fact_walk_skips_child(parent, node)) continue;
+        String* name = ((AstIdentNode*)node)->name;
+        if (named(name, "globalThis")) return true;
+        if (!named(name, "this")) {
+            // implicit global names are absent from the declared binding inventory.
+            if (!identifier_binding(p, (AstIdentNode*)node)) return true;
+            continue;
+        }
+        if (!parent || (parent->node_type != AST_NODE_MEMBER_EXPR && parent->node_type != AST_NODE_INDEX_EXPR) ||
+                ((AstFieldNode*)parent)->object != node) return true;
+        String* key = member_spelling((AstFieldNode*)parent);
+        if (!key || native_property_matches(p, [&](const char* bytes, size_t length) {
+                return key->len == length && !memcmp(key->chars, bytes, length);
+            })) return true;
+        for (const char* intrinsic : intrinsic_names) if (named(key, intrinsic)) return true;
+        for (int j = 0; j < p->bindings->length; j++) {
+            LmdBinding* binding = (LmdBinding*)p->bindings->data[j];
+            if (binding->reflected_global && named(key, binding->entry->name->chars)) return true;
+        }
+    }
+    // distinct named fields cannot alias global bindings; returned, computed and native receivers can.
+    return false;
+}
 // Constructor provenance narrows same-spelled method calls without changing their runtime ABI.
 static MvpLmdClass* property_receiver_class(MvpLmdProgram* p, AstNode* node, int depth = 0) {
     if (!node || depth == 16) return NULL;
@@ -9168,7 +9199,7 @@ static bool primitive_property_key(MvpLmdProgram* p, AstNode* node, AstNode** pa
     // still require a closed global binding environment.
     bool global_scalar = local && local->reflected_global && !indexed_local && local->initializer &&
         kind(p, local->initializer) && !(kind(p, local->initializer) & ~primitive);
-    if (p->global_reflection && (!local || incoming || (local->reflected_global && !global_scalar))) return false;
+    if (p->global_bindings_exposed && (!local || incoming || (local->reflected_global && !global_scalar))) return false;
     const AstIndex* tree = &p->frontend->ast_index;
     LmdFunction* receiver_method = incoming;
     if (field && !named(field, "length")) {
@@ -9667,6 +9698,7 @@ static bool fixed_prototype_setup(MvpLmdProgram* p) {
 }
 static int lower_pass(void* opaque) {
     MvpLmdProgram* p = (MvpLmdProgram*)opaque;
+    p->global_bindings_exposed = global_bindings_are_exposed(p);
     for (AstNodeId i = 0; i < p->frontend->ast_index.count; i++) {
         AstNode* node = p->frontend->ast_index.nodes[i];
         bool primitives = false;

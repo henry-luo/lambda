@@ -1594,13 +1594,18 @@ Require focused/forced-GC and shared Lambda/LJS gates, plus pinned release MIR
 self-timing comparisons. Carry forward §32's unresolved performance differences;
 the four jq benchmarks retain historical evidence only. Results3–9 are unchanged.
 
-The final pinned build passes **21,747 audited distinct IDs** (19,221 positive,
+The phase-completion pin passes **21,747 audited distinct IDs** (19,221 positive,
 2,526 negative). Its selected-mode count is **21,748/40,261**, a gain of **3,977**
 with zero lost entry passes and no new crash IDs. Focused normal/forced-GC gates
 both pass **193/193**; full LJS passes **40,261/40,261**, and all **84 non-jq**
 benchmark contracts pass. The shared Lambda baseline passes **6,806/6,806**.
-Performance acceptance remains open: the final timing intervals do not clear earlier
-Navier–Stokes **+3.0–3.2%** and text-search **+0.22–0.28%** differences.
+The phase33 Navier–Stokes regression is fixed: 31-round pinned MIR self-times
+are **31.978 vs 32.435–32.450 ms**, **1.4–1.5% faster than the phase entry**.
+A compiler proof retains local numeric-key admission when distinct named `this`
+fields cannot expose global bindings (**D8.4.1v2**). Its normal/forced-GC gates
+pass **194/194**; shared follow-up gates pass **6,814/6,814 Lambda** and
+**40,261/40,261 LJS Test262**. The user deferred the small
+text-search difference. Older §32 performance gaps remain separate.
 
 Scope, reuse inventory, helper disclosures and evidence:
 [implementation plan](../impl/JS_MVP_Lmd_Test262_5000.md).

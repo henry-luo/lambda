@@ -87,6 +87,7 @@ No Result-series publication or commit is part of this task.
 | Globals | `plan_global_bindings` and `mvp_lmd_global_initialize` connect observable object bindings to the global Map while keeping lexical TDZ bindings separate. Existing primitive dispatch supplies coercing global numeric operations. |
 | Grouped calls/tags | `capture_member_callee` shares reference capture for ordinary/spread calls and template tags, retaining successful receivers and ending grouped optional chains before argument/substitution evaluation. |
 | Prototype lookup | `get_prototype_with_library` extracts the existing getter. Existing inherited-member and property-cache helpers accept/reuse resolved metadata and immutable shape slots; every lookup still reads the current chain and values. |
+| Global exposure proof | `global_bindings_are_exposed` is a disclosed compiler helper; it reuses the promoted `js_ast_fact_walk_skips_child` classifier and native shape inventory to retain local key proofs when global receiver uses cannot reach bindings. |
 
 These production helpers were disclosed before coding. Shared algorithms use
 precise roots and existing Lambda/lib storage; ordinary proven calls, literals
@@ -211,19 +212,58 @@ are script-reported milliseconds on pinned release MIR, excluding compilation.
 | Navier–Stokes | 34.105 | 33.428 | 33.429 | **+2.0%** medians; both 31-round intervals cross parity |
 | Text search | 5085.898 | 5074.678 | 5144.064 | Mixed screen; both intervals cross parity |
 
-No final row has both paired 95% intervals wholly above 1. This does **not** clear
-candidate21's reproduced Navier–Stokes **+3.0–3.2%** and text-search **+0.22–0.28%**
-differences (`final21/performance-summary.json`): the latest repeats have wider
-intervals, and text search was not selected for a new 31-round repeat. Those
-performance gaps remain open; this is not a blanket no-regression claim. Navier's sloppy receiver
-requires the global-object semantics introduced here; generated MIR gains generic
-guards, and samples place nearly all execution in numeric JIT code. The remaining
-instruction-level cause is not fully isolated. A further tuning pass should reuse
-the existing guarded numeric/array-loop machinery with explicit local proofs;
-do not remove global-reflection guards without those proofs.
+The candidate23 phase-completion capture was inconclusive: no row had both
+paired 95% intervals wholly above 1, but its wider intervals did not clear
+candidate21's reproduced Navier–Stokes **+3.0–3.2%** and text-search
+**+0.22–0.28%** differences (`final21/performance-summary.json`). The follow-up
+below resolves the phase33 Navier difference; the user deferred the small
+text-search difference. Older phase gaps remain separate. Samples placed nearly
+all Navier execution in numeric JIT code; the follow-up identifies conservative
+admission as the cause and restores local proofs while retaining global reflection.
 
 Root-cause evidence and rejected experiments are recorded in
 `final23/tuning-analysis.json`. No fresh jq execution or Node comparison was run.
+
+### Navier–Stokes regression follow-up (2026-10-13)
+
+A fresh 31-round paired capture confirms the candidate23 regression:
+**33.305 ms vs 32.236 / 32.360 ms**, or **+3.32% / +2.92%**. Both paired 95%
+intervals exclude parity; the duplicate entry controls agree within uncertainty.
+Evidence: `temp/mvp_navier_regression_20261013/recheck/comparison.json`.
+
+The checksum's sloppy `this` correctly activates reflected global bindings.
+Treating every such receiver as an escaped global object also rejects local
+computed-key proofs, admitting callbacks throughout unrelated numeric kernels.
+The compiler now separately proves whether receiver uses can expose bindings:
+`globalThis`, unresolved names, escaped/computed receivers, native keys and
+same-spelled global properties retain conservative admission. Distinct static
+user fields reuse the existing local parameter/store inventory. This is a
+compile-time proof under **D8.4.1v2**, with the original runtime property kernels
+and global bindings retained. Focused cases cover each rejected exposure route.
+The patched release SHA-256 is
+`f2b5e7c51c057836000bb6860b1bbd3c70be1b042ca72b039eab8896176a8a5e`.
+The final 31-round capture gives **31.978 ms vs 32.435 / 32.450 ms**:
+**1.41–1.45% faster than the phase entry**, with paired 95% ratio intervals
+**[0.98040, 0.99044] / [0.97914, 0.98783]**. Both intervals exclude parity;
+the duplicate controls' interval includes parity. Frozen script and density
+oracle are identical to the reproduction. Evidence: `fixed-final/comparison.json`
+and `performance-summary.json` under the follow-up directory.
+
+Both normal and forced-GC/freed-memory-poisoning gates pass **194/194**.
+The hot `lin_solve` body drops from 11,865 to 11,558 MIR lines; the semantic
+array-index adapter is absent again. This line count is structural evidence,
+while the script times establish the performance result. All **84/84** benchmark
+output/backend contracts and **6,814/6,814** shared Lambda checks pass. The full
+LJS Test262 baseline passes **40,261/40,261**, with zero regressions, using the
+same pinned executable. Ordinary release restoration also succeeded; gate commands,
+exits and hashes are in `gates.json`. The 21,747-ID audit above remains
+attributed to candidate23; this targeted follow-up does not relabel that audit.
+Preserved diagnostic failures include an early replay during linking, a copied
+gtest executable missing its module search path, and an off-by-one test fixture;
+none is counted as a passing gate.
+
+The user deferred the tiny text-search difference; this follow-up does not repeat
+or tune its timing comparison. The four jq workloads remain excluded.
 
 ### Preserved failed/intermediate evidence
 

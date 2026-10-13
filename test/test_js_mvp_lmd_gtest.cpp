@@ -382,6 +382,42 @@ TEST_F(JsMvpLmd, CoreGlobalBindings) {
     error("'use strict';globalThis.x=1;missing=2;", "ReferenceError");
     error("let Object=Object;", "ReferenceError");
 }
+TEST_F(JsMvpLmd, GlobalReceiverAndLocalComputedKeys) {
+    auto check = [&](const char* change, int expected, bool exposed) {
+        StrBuf* source = strbuf_new();
+        ASSERT_NE(source, nullptr);
+        strbuf_append_str(source, R"JS(
+            var extent=2;
+            function note(){this.unrelatedChecksum=1}
+            function Grid(){
+                var width=0;
+                this.resize=function(v){width=v};
+                this.atIndex=function(a){return a[width+1]};
+            }
+            note();
+        )JS");
+        strbuf_append_str(source, change);
+        strbuf_append_format(source, R"JS(
+            let grid=new Grid();grid.resize(extent);
+            let a=[3,5,6,7];a.target1=13;
+            grid.atIndex(a)===%d;
+        )JS", expected);
+        boolean(source->str); strbuf_free(source);
+        char* mir = dump("temp/mvp_lmd_global_receiver_local_keys.mir");
+        ASSERT_NE(mir, nullptr);
+        bool semantic_arrays = strstr(mir, "\timport\tmvp_lmd_array_index_property\n") != nullptr;
+        EXPECT_EQ(semantic_arrays, exposed) << change;
+        mem_free(mir);
+    };
+    check("", 7, false);
+    check("function change(){this.extent='target'}change();", 13, true);
+    check("function expose(){return this}expose().extent='target';", 13, true);
+    check("function change(){this['ex'+'tent']='target'}change();", 13, true);
+    check("function change(){Object.assign(this,{extent:'target'})}change();", 13, true);
+    check("function change(){this.valueOf().extent='target'}change();", 13, true);
+    check("globalThis.extent='target';", 13, true);
+    check("function change(){this.runtimeIndex='target'}change();extent=runtimeIndex;", 13, true);
+}
 TEST_F(JsMvpLmd, NestedBindingPatterns) {
     boolean(R"JS(
         let [a,,{b:[c=3,...tail]},...rest]=[1,2,{b:[undefined,4,5]},6,7];
