@@ -37,12 +37,12 @@ import dc_article: lambda.latex.docclass.article
 "21. raggedleft style:"; font_decl.align_decl_style("raggedleft")
 
 // ---- wrap_font_decl ----
-"22. wrap itshape tag:"; name(font_decl.wrap_font_decl("itshape", ["hello"]))
-"23. wrap itshape class:"; font_decl.wrap_font_decl("itshape", ["hello"]).class
-"24. wrap itshape style:"; font_decl.wrap_font_decl("itshape", ["hello"]).style
-"25. wrap bfseries class:"; font_decl.wrap_font_decl("bfseries", ["bold"]).class
-"26. wrap bfseries style:"; font_decl.wrap_font_decl("bfseries", ["bold"]).style
-"27. wrap ttfamily class:"; font_decl.wrap_font_decl("ttfamily", ["mono"]).class
+"22. wrap itshape tag:"; name(font_decl.wrap_font_decl(<itshape>, ["hello"]))
+"23. wrap itshape class:"; font_decl.wrap_font_decl(<itshape>, ["hello"]).class
+"24. wrap itshape style:"; font_decl.wrap_font_decl(<itshape>, ["hello"]).style
+"25. wrap bfseries class:"; font_decl.wrap_font_decl(<bfseries>, ["bold"]).class
+"26. wrap bfseries style:"; font_decl.wrap_font_decl(<bfseries>, ["bold"]).style
+"27. wrap ttfamily class:"; font_decl.wrap_font_decl(<ttfamily>, ["mono"]).class
 
 // ---- wrap_align_decl ----
 "28. wrap centering tag:"; name(font_decl.wrap_align_decl("centering", ["centered"]))

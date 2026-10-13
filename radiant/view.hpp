@@ -801,7 +801,7 @@ extern void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface*
                                 struct ClipShape** clip_shapes = nullptr, int clip_depth = 0);
 
 extern bool can_break(char c);
-extern bool is_space(char c);
+extern bool is_space(uint32_t codepoint);
 
 typedef struct ViewBlock ViewBlock;
 typedef struct TextShadow TextShadow;
@@ -1898,6 +1898,7 @@ typedef struct PositionProp {
     lam::Up<ViewBlock> next_static_line_alignment; // current line's deferred static self-alignment link
     lam::Up<ViewBlock> next_static_inline_position; // current line's deferred inline static-position link
     float static_line_initial_extent; // provisional line-box extent used for static self-alignment
+    bool static_block_after_line; // hypothetical block follows the unfinished inline line
     bool static_x_needs_parent_offset;  // flex static x was computed in parent-local coords
     bool static_x_needs_inline_cb_extent; // inline CB width is finalized after abs layout
     bool static_x_uses_inline_start;    // blockified abs child uses inline CB start edge

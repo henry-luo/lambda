@@ -1,0 +1,10 @@
+"module-level comprehension:"
+["a1", "b1", "c1"]
+"function-level comprehension:"
+["a1", "b1"]
+"map of closures:"
+["p?", "q?"]
+"let-list function:"
+[2]
+"let-list closures in a comprehension:"
+["aa!", "bb!"]

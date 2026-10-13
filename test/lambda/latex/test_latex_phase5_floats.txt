@@ -1,0 +1,72 @@
+"placement dropped:"
+true
+"newfloat caption:"
+true
+"newfloat style:"
+true
+"listof:"
+true
+"restylefloat:"
+true
+"float issues:"
+[]
+"algorithm float:"
+true
+"list of algorithms:"
+true
+"numbered lines:"
+true
+"nesting:"
+true
+"keywords:"
+true
+"require override:"
+true
+"comment and call:"
+true
+"line reference:"
+true
+"pseudocode issues:"
+[]
+"algorithmic keywords:"
+true
+"algorithmic issues:"
+[]
+"algorithm2e lines:"
+true
+"algorithm2e io:"
+true
+"algorithm2e blocks:"
+true
+"algorithm2e statements:"
+true
+"algorithm2e reference:"
+true
+"algorithm2e issues:"
+[]
+"no semicolon, no end:"
+true
+"algorithm conflict:"
+["conflicting-packages algorithm2e"]
+"subfloat captions:"
+true
+"subfloat reference:"
+true
+"subfig issues:"
+[]
+"subfigure command:"
+true
+"subfig conflict:"
+["conflicting-packages subcaption"]
+"wrapfigure:"
+true
+"wraptable:"
+true
+"wrap issues:"
+[]
+"sideways float:"
+true
+"turn:"
+true
+"rotating issues:"
+["sideways-approximation sidewaysfigure", "transform-approximation turn", "landscape-approximation landscape"]

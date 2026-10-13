@@ -581,6 +581,14 @@ static const TierParityFixture kTune27TierParity[] = {
     // give that type; the JIT gave a `pub type` a module slot and unboxed a
     // type-valued call as the value its type names (`0` for `int`)
     {"test/lambda/import_type_values.ls", "test/lambda/import_type_values.txt"},
+    // a self call inside a for comprehension is not a tail call: in a function
+    // with a real tail call elsewhere, the JIT's TCO turned it into a jump back
+    // to the start and returned one item's value instead of the comprehension
+    {"test/lambda/tail_call_in_comprehension.ls", "test/lambda/tail_call_in_comprehension.txt"},
+    // closures snapshot captures (D6.2.3): T0 read a module-level comprehension
+    // variable's module slot (LR01-19), and set a let-list's function literal
+    // apart as a declaration (LR01-20)
+    {"test/lambda/closure_capture_comprehension.ls", "test/lambda/closure_capture_comprehension.txt"},
 };
 
 // explicit exclusions used to pass this test by silently executing MIR

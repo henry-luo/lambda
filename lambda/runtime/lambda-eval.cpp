@@ -6202,7 +6202,8 @@ static void collect_names(Map* options_map, const char* key, ArrayList* names) {
 }
 
 static bool parse_tex_options(Map* options_map, InputParseOptions* options,
-                              ArrayList* adapter_names, ArrayList* raw_names) {
+                              ArrayList* adapter_names, ArrayList* raw_names,
+                              ArrayList* chaptered_names) {
     bool is_found = false;
     Item ini = _map_get((TypeMap*)options_map->type, options_map->data, "ini", &is_found);
     if (is_found && get_type_id(ini) == LMD_TYPE_BOOL) options->tex_ini = it2b(ini);
@@ -6214,6 +6215,9 @@ static bool parse_tex_options(Map* options_map, InputParseOptions* options,
     collect_names(options_map, "raw", raw_names);
     options->tex_raw_commands = (const char* const*)raw_names->data;
     options->tex_raw_command_count = raw_names->length;
+    collect_names(options_map, "chaptered", chaptered_names);
+    options->tex_chaptered = (const char* const*)chaptered_names->data;
+    options->tex_chaptered_count = chaptered_names->length;
     return options->tex_ini || options->tex_base || options->tex_adapter_count ||
         options->tex_raw_command_count;
 }
@@ -6309,6 +6313,7 @@ Item fn_parse2(Item str_item, Item type) {
     InputParseOptions parse_options = {};
     ArrayList* adapter_names = arraylist_new(8);
     ArrayList* raw_names = arraylist_new(8);
+    ArrayList* chaptered_names = arraylist_new(8);
     bool has_tex_options = false;
     bool highlight_spans = false;   // sourcepos: 'spans'
     Item window_item = ItemNull;
@@ -6372,7 +6377,8 @@ Item fn_parse2(Item str_item, Item type) {
                 source_positions = it2b(input_sourcepos);
             }
         }
-        has_tex_options = parse_tex_options(options_map, &parse_options, adapter_names, raw_names);
+        has_tex_options = parse_tex_options(options_map, &parse_options, adapter_names, raw_names,
+            chaptered_names);
     }
     else {
         set_runtime_error(ERR_TYPE_MISMATCH,
@@ -6420,6 +6426,7 @@ Item fn_parse2(Item str_item, Item type) {
         : input_from_source(str->chars, dummy_url, type_str, flavor_str);
     arraylist_free(adapter_names);
     arraylist_free(raw_names);
+    arraylist_free(chaptered_names);
     if (!input) {
         set_runtime_error(ERR_OUT_OF_MEMORY,
             "parse: failed to initialize parser for format '%s'",

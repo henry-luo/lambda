@@ -1,0 +1,8 @@
+"scan, empty first:"
+["a"]
+"scan, all:"
+["a", "b"]
+"scan, element:"
+["a", "b"]
+"mapped:"
+[10, 20, [30, 40]]

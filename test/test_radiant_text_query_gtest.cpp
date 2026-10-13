@@ -3,12 +3,58 @@
 #include <gtest/gtest.h>
 #include "../radiant/radiant.hpp"
 #include "../radiant/layout.hpp"
+#include "../radiant/hyphenation.hpp"
 #include "../radiant/render.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lib/tagged.hpp"
 
 extern "C" uint64_t radiant_query_font_build_count(void);
+
+TEST(TextWhitespace, UnicodeCodepointsDoNotAliasAsciiWhitespace) {
+    EXPECT_TRUE(is_space(0x000A));
+    EXPECT_TRUE(is_space(0x000D));
+    EXPECT_TRUE(is_space(0x0020));
+    EXPECT_FALSE(is_space(0x200A));
+    EXPECT_FALSE(is_space(0x200D));
+    EXPECT_FALSE(is_space(0x2020));
+    EXPECT_FALSE(is_space(0x300A));
+}
+
+TEST(TextWhitespace, PreservedBreaksAndControlsAreNotCollapsibleSpaces) {
+    DomElement parent = {};
+    parent.node_type = DOM_NODE_ELEMENT;
+    BlockProp properties = BLOCK_PROP_DEFAULT;
+    parent.blk = lam::view_prop(&properties);
+    DomText text = {};
+    text.node_type = DOM_NODE_TEXT;
+    text.parent = lam::up(&parent);
+    struct Case {
+        const char* content;
+        CssEnum white_space;
+        bool collapsible;
+    } cases[] = {
+        {" \n", CSS_VALUE_NORMAL, true},
+        {" \n", CSS_VALUE_PRE_LINE, false},
+        {" \t", CSS_VALUE_PRE_LINE, true},
+        {"\r", CSS_VALUE_PRE_LINE, true},
+        {"\f", CSS_VALUE_NORMAL, false},
+        {" ", CSS_VALUE_PRE_WRAP, false},
+    };
+    for (const Case& entry : cases) {
+        properties.white_space = entry.white_space;
+        text.text = lam::up(entry.content);
+        text.length = strlen(entry.content);
+        EXPECT_EQ(layout_text_is_collapsible_whitespace(&text), entry.collapsible)
+            << entry.content;
+    }
+    properties.white_space = CSS_VALUE_PRE_LINE;
+    text.text = lam::up(" \n");
+    text.length = 2;
+    EXPECT_TRUE(layout_text_is_collapsible_whitespace(&text, 0, 1));
+    EXPECT_FALSE(layout_text_is_collapsible_whitespace(&text, 1, 1));
+    EXPECT_FALSE(layout_text_is_collapsible_whitespace(&text, 0, 3));
+}
 
 TEST(TextJustification, WhollyHangingFragmentsDoNotConsumeJustificationOpportunities) {
     DomElement parent = {};
@@ -84,12 +130,352 @@ TEST_F(RadiantTextQuery, PreservedWhitespaceUsesHangingAndCrossNodeBreakState) {
         {"tabs", 40.0f, 140.0f},
         {"spaces", 40.0f, 80.0f},
         {"unbroken", 40.0f, 120.0f},
+        {"newline", 0.0f, 20.0f},
+        {"separate-newline", 0.0f, 20.0f},
     };
     for (const Expected& entry : cases) {
         DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
         ASSERT_NE(element, nullptr) << entry.id;
         EXPECT_FLOAT_EQ(element->width, entry.width) << entry.id;
         EXPECT_FLOAT_EQ(element->height, entry.height) << entry.id;
+    }
+}
+
+TEST_F(RadiantTextQuery, FixedColumnRowsCountGuttersInTheirPhysicalPitch) {
+    ASSERT_NE(load("test/html/layout_multicol_rows.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    layout_html_doc(&ui, document, false);
+    struct Expected { const char* id; float height; } cases[] = {
+        {"default", 100.0f}, {"explicit", 100.0f}, {"styled", 100.0f},
+        {"two", 40.0f}, {"auto", 100.0f}, {"short", 100.0f}, {"zero", 80.0f},
+    };
+    for (const Expected& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr) << entry.id;
+        EXPECT_FLOAT_EQ(element->height, entry.height) << entry.id;
+    }
+}
+
+TEST_F(RadiantTextQuery, FloatClearanceRetainsTheFirstFormattedLine) {
+    ASSERT_NE(load("test/html/layout_float_first_line.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    const char* ids[] = {"direct", "inline", "pseudo", "partial", "later"};
+    for (const char* id : ids) {
+        DomElement* container = dom_find_element_by_id(document->root->as_element(), id);
+        ASSERT_NE(container, nullptr);
+        DomElement* owner = container;
+        if (strcmp(id, "inline") == 0) owner = container->first_child->as_element();
+        DomText* text = nullptr;
+        for (DomNode* child = owner->first_child; child; child = child->next_sibling) {
+            if (child->is_text() && child->as_text()->rect) { text = child->as_text(); break; }
+        }
+        ASSERT_NE(text, nullptr) << id;
+        EXPECT_FLOAT_EQ(text->rect->x, 50.0f) << id;
+        EXPECT_FLOAT_EQ(text->rect->y, 50.0f) << id;
+        EXPECT_FLOAT_EQ(text->rect->width, 50.0f) << id;
+        EXPECT_FLOAT_EQ(text->rect->height, 50.0f) << id;
+        if (strcmp(id, "later") == 0) {
+            DomText* later = container->last_child->as_text();
+            ASSERT_NE(later, nullptr);
+            ASSERT_NE(later->rect, nullptr);
+            EXPECT_FLOAT_EQ(later->rect->x, 0.0f);
+            EXPECT_FLOAT_EQ(later->rect->y, 100.0f);
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, SegmentBreakContextCrossesOnlyNonAtomicInlineBoundaries) {
+    ASSERT_NE(load("test/html/layout_segment_break_context.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    struct Case { const char* id; float x; float y; } cases[] = {
+        {"previous", 40.0f, 0.0f}, {"decorated", 60.0f, 0.0f},
+        {"following", 40.0f, 0.0f}, {"positioned", 40.0f, 0.0f},
+        {"floated", 40.0f, 0.0f}, {"hidden", 40.0f, 0.0f},
+        {"atomic", 80.0f, 4.0f}, {"ordinary", 100.0f, 0.0f},
+        {"preserved", 0.0f, 20.0f},
+        {"cjk-unknown", 60.0f, 0.0f}, {"cjk-known", 60.0f, 0.0f},
+        {"cjk-zwsp", 40.0f, 0.0f},
+    };
+    for (const Case& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        EXPECT_FLOAT_EQ(element->x, entry.x) << entry.id;
+        EXPECT_FLOAT_EQ(element->y, entry.y) << entry.id;
+    }
+    struct StaticCase { const char* id; float x; float y; } static_cases[] = {
+        {"static-block", 0.0f, 20.0f}, {"static-grown", 0.0f, 40.0f},
+        {"static-first", 0.0f, 0.0f}, {"explicit-top", 0.0f, 7.0f},
+        {"static-inline", 40.0f, 0.0f},
+    };
+    for (const StaticCase& entry : static_cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        EXPECT_FLOAT_EQ(element->x, entry.x) << entry.id;
+        EXPECT_FLOAT_EQ(element->y, entry.y) << entry.id;
+    }
+}
+
+TEST_F(RadiantTextQuery, PreservedSpacesHangConditionallyBeforeForcedBreaks) {
+    ASSERT_NE(load("test/html/layout_conditional_hanging.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    struct Case { const char* id; float x; float width; } cases[] = {
+        {"fitting", 60.0f, 40.0f}, {"overflowing", 0.0f, 140.0f},
+        {"lf", 60.0f, 40.0f}, {"br", 60.0f, 40.0f},
+        {"soft", 0.0f, 80.0f}, {"normal", 80.0f, 20.0f},
+        {"break-spaces", 60.0f, 40.0f}, {"block", 60.0f, 40.0f},
+    };
+    for (const Case& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        DomText* text = element->first_child->as_text();
+        ASSERT_NE(text, nullptr);
+        ASSERT_NE(text->rect, nullptr);
+        EXPECT_FLOAT_EQ(text->rect->x, entry.x) << entry.id;
+        EXPECT_FLOAT_EQ(text->rect->width, entry.width) << entry.id;
+        if (strcmp(entry.id, "soft") == 0) {
+            TextRect* last = text->rect;
+            while (last->next) last = last->next;
+            EXPECT_FLOAT_EQ(last->x, 20.0f);
+            EXPECT_FLOAT_EQ(last->width, 40.0f);
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, EqualHeightShiftedDescendantsRetainTheirAncestorsBaseline) {
+    ASSERT_NE(load("test/html/layout_nested_baseline_boxes.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    struct Case { const char* row; const char* outer; const char* middle; } cases[] = {
+        {"super-row", "super-outer", "super-middle"},
+        {"sub-row", "sub-outer", "sub-middle"},
+        {"baseline-row", "baseline-outer", nullptr},
+    };
+    for (const Case& entry : cases) {
+        DomElement* row = dom_find_element_by_id(document->root->as_element(), entry.row);
+        DomElement* outer = dom_find_element_by_id(document->root->as_element(), entry.outer);
+        ASSERT_NE(row, nullptr);
+        ASSERT_NE(outer, nullptr);
+        DomText* unshifted = row->first_child->as_text();
+        ASSERT_NE(unshifted, nullptr);
+        ASSERT_NE(unshifted->rect, nullptr);
+        EXPECT_FLOAT_EQ(outer->y, unshifted->rect->y) << entry.outer;
+        EXPECT_FLOAT_EQ(outer->height, unshifted->rect->height) << entry.outer;
+        if (entry.middle) {
+            DomElement* middle = dom_find_element_by_id(document->root->as_element(), entry.middle);
+            ASSERT_NE(middle, nullptr);
+            EXPECT_FLOAT_EQ(middle->y, outer->y) << entry.middle;
+        }
+    }
+}
+
+TEST_F(RadiantTextQuery, HyphensNoneKeepsConditionalCharactersUnbreakable) {
+    ASSERT_NE(load("test/html/layout_hyphens_none.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    struct Case { const char* id; float height; float first_width; } cases[] = {
+        {"none", 20.0f, 120.0f}, {"inherited", 20.0f, 120.0f},
+        {"later-none", 40.0f, 20.0f}, {"literal", 40.0f, 80.0f}, {"manual", 40.0f, 80.0f},
+    };
+    for (const Case& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        EXPECT_FLOAT_EQ(element->height, entry.height) << entry.id;
+        DomElement* owner = strcmp(entry.id, "inherited") == 0
+            ? element->first_child->as_element() : element;
+        ASSERT_NE(owner, nullptr);
+        DomText* text = owner->first_child->as_text();
+        ASSERT_NE(text, nullptr);
+        ASSERT_NE(text->rect, nullptr);
+        EXPECT_FLOAT_EQ(text->rect->width, entry.first_width) << entry.id;
+    }
+}
+
+TEST_F(RadiantTextQuery, ConditionalBreaksRetainFittingMarksAndContinuationPoints) {
+    ASSERT_NE(load("test/html/layout_hyphens_none.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    struct Case { const char* id; float height; } cases[] = {
+        {"manual-double", 100.0f}, {"automatic", 60.0f}, {"empty-mark", 40.0f},
+    };
+    for (const Case& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        EXPECT_FLOAT_EQ(element->height, entry.height) << entry.id;
+    }
+    EXPECT_FALSE(layout_hyphenation_language_supported(""));
+    EXPECT_EQ(layout_hyphenation_next_break("example", 7, 0, "und"), SIZE_MAX);
+    if (layout_hyphenation_language_supported("de-DE")) {
+        EXPECT_EQ(layout_hyphenation_next_break("Donaudampfschifffahrt", 20, 0, "de-DE"),
+                  layout_hyphenation_next_break("Donaudampfschifffahrt", 20, 0, "De-dE"));
+        DomElement* german = dom_find_element_by_id(document->root->as_element(), "german");
+        ASSERT_NE(german, nullptr);
+        EXPECT_FLOAT_EQ(german->height, 80.0f);
+    }
+}
+
+TEST_F(RadiantTextQuery, OversizedFloatsCannotUseSpaceOutsideTheirContainingBlock) {
+    ASSERT_NE(load("test/html/layout_oversized_floats.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    layout_html_doc(&ui, document, false);
+    struct Case { const char* id; float x; float y; } cases[] = {
+        {"zero-left-first", 0.0f, 0.0f}, {"zero-left-second", 0.0f, 20.0f},
+        {"narrow-left-first", 0.0f, 0.0f}, {"narrow-left-second", 0.0f, 20.0f},
+        {"narrow-right-first", -10.0f, 0.0f}, {"narrow-right-second", -10.0f, 20.0f},
+        {"wide-left-first", 0.0f, 0.0f}, {"wide-left-second", 60.0f, 0.0f},
+        {"wide-right-first", 80.0f, 0.0f}, {"wide-right-second", 20.0f, 0.0f},
+    };
+    for (const Case& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        EXPECT_FLOAT_EQ(element->x, entry.x) << entry.id;
+        EXPECT_FLOAT_EQ(element->y, entry.y) << entry.id;
+    }
+}
+
+TEST_F(RadiantTextQuery, ZeroFontSizePreservesBreaksAndLengthTabStops) {
+    ASSERT_NE(load("test/html/layout_zero_font_controls.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    struct Case { const char* id; float x; float y; } cases[] = {
+        {"after-lf", 0.0f, 20.0f}, {"after-length-tab", 100.0f, 0.0f},
+        {"after-number-tab", 40.0f, 0.0f}, {"after-zero-glyphs", 40.0f, 0.0f},
+        {"empty-first", 0.0f, 0.0f}, {"empty-second", 50.0f, 0.0f},
+    };
+    for (const Case& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        EXPECT_FLOAT_EQ(element->x, entry.x) << entry.id;
+        EXPECT_FLOAT_EQ(element->y, entry.y) << entry.id;
+    }
+}
+
+TEST_F(RadiantTextQuery, TablesMeasurePreservedLinesAndInlineContinuations) {
+    ASSERT_NE(load("test/html/layout_table_preserved_lines.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    struct Expected {
+        const char* id;
+        float width;
+        float height;
+    } cases[] = {
+        {"direct", 80.0f, 40.0f},
+        {"split", 60.0f, 40.0f},
+        {"siblings", 60.0f, 40.0f},
+        {"tabs", 100.0f, 40.0f},
+        {"soft-wrap", 60.0f, 60.0f},
+        {"spaces", 80.0f, 40.0f},
+        {"atomic", 100.0f, 40.0f},
+        {"indent", 80.0f, 40.0f},
+        {"later-line", 80.0f, 40.0f},
+    };
+    for (const Expected& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr) << entry.id;
+        EXPECT_FLOAT_EQ(element->width, entry.width) << entry.id;
+        EXPECT_FLOAT_EQ(element->height, entry.height) << entry.id;
+    }
+}
+
+TEST_F(RadiantTextQuery, InlineShapingPreservesJoiningAndRequiredBoundaries) {
+    ASSERT_NE(load("test/html/layout_inline_shaping.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    DomElement* plain = dom_find_element_by_id(document->root->as_element(), "plain");
+    ASSERT_NE(plain, nullptr);
+    FontHandle* handle = plain->fontp()->font_handle;
+    ASSERT_NE(handle, nullptr);
+    TextExtents probe = {};
+    if (!font_measure_text_range(handle, "ععع", 6, 2, 2, &probe)) {
+        GTEST_SKIP() << "the font backend does not support contextual ranges";
+    }
+    struct Case { const char* id; const char* form; float padding; } cases[] = {
+        {"plain-middle", "ﻌ", 0.0f}, {"color-middle", "ﻌ", 0.0f},
+        {"joined-middle", "ﻌ", 0.0f}, {"zero-middle", "ﻌ", 0.0f},
+        {"padding-middle", "ﻋ", 20.0f}, {"isolate-middle", "ع", 0.0f},
+        {"auto-middle", "ع", 0.0f}, {"raised-middle", "ع", 0.0f},
+        {"size-middle", "ﻌ", 0.0f},
+    };
+    for (const Case& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr) << entry.id;
+        ASSERT_NE(element->fontp()->font_handle, nullptr);
+        // explicit presentation forms provide an independent glyph-advance reference.
+        float expected = font_measure_text(element->fontp()->font_handle,
+            entry.form, (int)strlen(entry.form)).width;
+        EXPECT_NEAR(element->width, expected + entry.padding, 0.1f) << entry.id;
+    }
+    float total = 0.0f;
+    const char* forms[] = {"ﻋ", "ﻌ", "ﻊ"};
+    for (size_t index = 0; index < 3; index++) {
+        TextExtents range = {};
+        ASSERT_TRUE(font_measure_text_range(handle, "ععع", 6, (int)(index * 2), 2, &range));
+        EXPECT_NEAR(range.width, font_measure_text(handle, forms[index], 3).width, 0.02f);
+        total += range.width;
+    }
+    EXPECT_NEAR(total, font_measure_text(handle, "ععع", 6).width, 0.02f);
+    EXPECT_FALSE(font_measure_text_range(handle, "ععع", 6, 1, 2, &probe));
+    EXPECT_FALSE(font_measure_text_range(handle, "ععع", 6, 4, 3, &probe));
+    struct LigatureCase { const char* id; const char* text; float decoration; } ligatures[] = {
+        {"ligature-middle", "", 0.0f}, {"ligature-padding", "fi", 10.0f},
+        {"ligature-border", "", 10.0f},
+    };
+    for (const LigatureCase& entry : ligatures) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        float expected = font_measure_text(element->fontp()->font_handle,
+            entry.text, (int)strlen(entry.text)).width + entry.decoration;
+        EXPECT_NEAR(element->width, expected, 0.1f) << entry.id;
+    }
+    DomElement* empty_boundary = dom_find_element_by_id(document->root->as_element(), "empty-boundary");
+    ASSERT_NE(empty_boundary, nullptr);
+    DomText* first = empty_boundary->first_child->as_text();
+    DomText* last = empty_boundary->last_child->as_text();
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(last, nullptr);
+    ASSERT_NE(first->rect, nullptr);
+    ASSERT_NE(last->rect, nullptr);
+    EXPECT_NEAR(first->rect->width,
+        font_measure_text(first->font->font_handle, "f", 1).width, 0.02f);
+    EXPECT_NEAR(last->rect->width,
+        font_measure_text(last->font->font_handle, "i", 1).width, 0.02f);
+}
+
+TEST_F(RadiantTextQuery, WordSpacingExpressionsRetainLengthAdvances) {
+    ASSERT_NE(load("test/html/layout_font_spacing.html"), nullptr);
+    ui.viewport_width = ui.window_width = 320;
+    ui.viewport_height = ui.window_height = 200;
+    process_document_font_faces(&ui, document);
+    layout_html_doc(&ui, document, false);
+    struct Case { const char* id; float width; } cases[] = {
+        {"sum", 100.0f}, {"product", 80.0f}, {"length", 100.0f},
+    };
+    for (const Case& entry : cases) {
+        DomElement* element = dom_find_element_by_id(document->root->as_element(), entry.id);
+        ASSERT_NE(element, nullptr);
+        EXPECT_FLOAT_EQ(element->width, entry.width) << entry.id;
     }
 }
 

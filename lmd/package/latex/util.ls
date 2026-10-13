@@ -37,7 +37,33 @@ pub fn text_of(node) {
 }
 
 fn text_of_element(el) {
-    join_children_text(el)
+    let special = special_text(el, false)
+    if (special != null) special else join_children_text(el)
+}
+
+// Commands whose text is not their content joined: a \thanks note is a footnote,
+// never part of the text it marks; \and separates authors; \texorpdfstring's
+// text is its TeX branch. Null for every other element.
+fn special_text(el, rich) {
+    let tag = string(name(el))
+    if (tag == "thanks") ""
+    else if (tag == "and") ", "
+    else if (tag == "texorpdfstring") {
+        let first = command_args(el)[0]
+        if (rich) rich_text_of(first) else text_of(first)
+    }
+    else null
+}
+
+// plain text for PDF metadata and outlines: \texorpdfstring yields its PDF branch
+pub fn pdf_text_of(node) {
+    if (node is element and string(name(node)) == "texorpdfstring") {
+        let args = command_args(node)
+        text_of(if (len(args) > 1) args[1] else null)
+    }
+    else if (node is element or node is array or node is list)
+        str_join([for (child in (if (node is element) content(node) else node)) pdf_text_of(child)], "")
+    else text_of(node)
 }
 
 fn join_children_text(el, rich = false, skip_brack = false) {
@@ -62,7 +88,9 @@ pub fn rich_text_of(node) {
 
 fn rich_text_of_element(el) {
     let resolved = resolve_symbol_cmd(el)
+    let special = special_text(el, true)
     if (resolved != null) { resolved }
+    else if (special != null) { special }
     else {
         join_children_text(el, true)
     }
@@ -357,6 +385,144 @@ pub fn optional_raw(el) {
     }
 }
 
+// the value of the last setting with this key before an offset, from analysis's
+// source-order settings ({key, value, offset}); null when none precedes it
+pub fn setting_at(settings, key, offset) {
+    let found = [for (entry in settings or [] where entry.key == key and
+        (offset == null or entry.offset == null or entry.offset < offset)) entry.value];
+    (if (len(found) == 0) null else found[len(found) - 1])
+}
+
+// The header arguments of an environment the parser reads as body text: braced
+// groups, with [optional] text between them skipped. Returns the groups and the
+// body that follows the last one.
+pub fn environment_header(el, groups_wanted) {
+    let children = content(el)
+    let first = if (len(children) > 0 and children[0] is element and
+        string(name(children[0])) == "paragraph") content(children[0]) else []
+    let group_positions = [for (i, item in first
+        where item is element and string(name(item)) == "curly_group") i]
+    let taken = slice(group_positions, 0, min(groups_wanted, len(group_positions)))
+    let after = if (len(taken) == 0) 0 else taken[len(taken) - 1] + 1
+    {groups: [for (i in taken) first[i]],
+     body: [<paragraph for c in slice(first, after, len(first)) { c }>, *slice(children, 1, len(children))]}
+}
+
+// a braced length as TeX source: text plus control words such as \textwidth
+pub fn group_source(group) => join([for (item in content(group))
+    if (item is element) "\\" ++ string(name(item)) else string(item)], "")
+
+// a control sequence's name without its backslash
+pub fn strip_backslash(s) {
+    if (len(s) > 0 and slice(s, 0, 1) == "\\") slice(s, 1, len(s))
+    else s
+}
+
+// The parser keeps an environment's leading [option] as body text unless it knows
+// the environment (table): \begin{figure}[htbp], \begin{algorithmic}[1]. This
+// returns the option, or null, and the body children without it.
+pub fn leading_option(el) {
+    let children = if (el is element) content(el) else []
+    let first = if (len(children) > 0) children[0] else null
+    let items = if (first is element and string(name(first)) == "paragraph") content(first) else []
+    let opening = if (len(items) > 0) items[0] else null
+    let text = if (opening is string) trim_start(opening) else ""
+    // a braced value (frametitle={Title}) splits the option into several items
+    let found = if (starts_with(text, "[") or false) option_end(items, 0, "") else null
+    if (found == null) {option: null, children: children}
+    else {
+        let paragraph = [for (i, item in items where i > found.index) item]
+        let kept = if (trim(found.rest) == "") paragraph else [found.rest, *paragraph];
+        {option: trim(slice(found.text, len(found.text) - len(trim_start(found.text)) + 1, len(found.text))),
+         children: [<paragraph for c in kept { c }>, *slice(children, 1, len(children))]}
+    }
+}
+
+// the option's source up to its closing bracket: {text, index of the item holding
+// the bracket, rest of that item}; groups count as their braced source
+fn option_end(items, i, text) {
+    if (i >= len(items)) null
+    else if (items[i] is string) (let close = index_of(items[i], "]"),
+        if (close == null) option_end(items, i + 1, text ++ items[i])
+        else {text: text ++ slice(items[i], 0, close), index: i,
+              rest: slice(items[i], close + 1, len(items[i]))})
+    else option_end(items, i + 1, text ++ "{" ++ text_of(items[i]) ++ "}")
+}
+
+// the children of a node with paragraph wrappers opened, in order
+// TeX source a package keeps as data (algorithm2e block bodies, glossary fields,
+// index displays) as nodes, parsed on its own: the fragment never passes through
+// the document's expansion, so document macros in it are not expanded. Plain text
+// skips the parse, which runs the engine.
+pub fn parse_fragment(raw) {
+    if (raw == null or trim(raw) == "") []
+    else if (not any([for (ch in ["\\", "$", "{", "~", "%", "&", "#", "^", "_"]) contains(raw, ch)])) [raw]
+    else {
+        let parsed = parse(raw, {type: "latex"}) ^ { null }
+        let nodes = if (parsed == null) [] else flatten_paragraphs(content(parsed))
+        // the parse ends the fragment's paragraph with its line break
+        let n = len(nodes);
+        [for (i, node in nodes, let text = if (not (node is string)) node
+                else if (i == 0 and i == n - 1) trim(node) else if (i == 0) trim_start(node)
+                else if (i == n - 1) trim_end(node) else node
+            where not (text is string and text == "")) text]
+    }
+}
+
+pub fn flatten_paragraphs(node) {
+    let n = len(node)
+    flatten_para_rec(node, 0, n, [])
+}
+
+fn flatten_para_rec(node, i, n, acc) {
+    if (i >= n) { acc }
+    else {
+        let child = node[i]
+        if (child is element) {
+            if (string(name(child)) == "paragraph") {
+                let inner = flatten_inner(child, 0, len(child), [])
+                flatten_para_rec(node, i + 1, n, acc ++ inner)
+            } else { flatten_para_rec(node, i + 1, n, acc ++ [child]) }
+        } else { flatten_para_rec(node, i + 1, n, acc ++ [child]) }
+    }
+}
+
+fn flatten_inner(el, i, n, acc) {
+    if (i >= n) acc
+    else flatten_inner(el, i + 1, n, acc ++ [el[i]])
+}
+
+// Index, among command_args(el), of the first node of the command's last
+// required argument. Each earlier optional group is one brack_group node; each
+// earlier required group is simple (a length or a number), one node per text
+// run and per control word.
+pub fn last_argument_start(el) {
+    let groups = if (el.argument_groups == null) [] else el.argument_groups
+    let last_required = [for (i, group in groups where group.kind == "required") i]
+    let stop = if (len(last_required) == 0) 0 else last_required[len(last_required) - 1]
+    sum([for (i, group in groups where i < stop)
+        if (group.kind == "required") simple_argument_nodes(group.raw) else 1])
+}
+
+fn simple_argument_nodes(raw) {
+    let pieces = split(raw, "\\")
+    let leading = if (len(trim(pieces[0])) > 0) 1 else 0
+    // each control word is a node, and text after it is another
+    leading + sum([for (i, piece in pieces where i > 0)
+        1 + (if (len(trim(trim_control_word(piece))) > 0) 1 else 0)])
+}
+
+// the text after a control word, or after a control symbol's single character
+fn trim_control_word(piece) {
+    let word_end = letters_end(piece, 0)
+    slice(piece, if (word_end == 0) min(1, len(piece)) else word_end, len(piece))
+}
+
+fn letters_end(text, i) =>
+    if (i < len(text) and is_letter(slice(text, i, i + 1))) letters_end(text, i + 1) else i
+
+fn is_letter(ch) => (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z")
+
 pub fn raw_argument(el, kind, ordinal) {
     let groups = el.argument_groups
     if (groups == null) null else raw_argument_at(groups, kind, ordinal, 0)
@@ -365,6 +531,9 @@ pub fn raw_argument(el, kind, ordinal) {
 pub fn option_enabled(value) {
     value != null and value != "false" and value != "0"
 }
+
+// whether a package's options (null when it is not loaded) enable `key`
+pub fn option_on(options, key) => (options != null and option_enabled(options[key])) or false
 
 pub fn unsupported_element(package, message, offset) {
     <span class: "latex-unsupported", 'data-latex-error': message,
@@ -500,4 +669,21 @@ let ALPH_TABLE = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P
 pub fn upper_alph(n) {
     if (n >= 1 and n <= 26) ALPH_TABLE[n - 1]
     else string(n)
+}
+
+// LaTeX's \fnsymbol sequence; past its nine marks a counter falls back to digits
+let FNSYMBOLS = ["*", "†", "‡", "§", "¶", "‖", "**", "††", "‡‡"]
+
+pub fn fnsymbol(n) => if (n >= 1 and n <= len(FNSYMBOLS)) FNSYMBOLS[n - 1] else string(n)
+
+// \roman: lowercase roman numerals; zero and below fall back to digits (\Roman is upper(roman(n)))
+pub fn roman(n) => if (n <= 0) string(n) else roman_parts(n, 0, "")
+
+let ROMAN_VALUES = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
+let ROMAN_LABELS = ["m", "cm", "d", "cd", "c", "xc", "l", "xl", "x", "ix", "v", "iv", "i"]
+
+fn roman_parts(value, index, acc) {
+    if (value <= 0 or index >= len(ROMAN_VALUES)) acc
+    else if (value >= ROMAN_VALUES[index]) roman_parts(value - ROMAN_VALUES[index], index, acc ++ ROMAN_LABELS[index])
+    else roman_parts(value, index + 1, acc)
 }

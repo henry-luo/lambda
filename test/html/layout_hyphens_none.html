@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; }
+.case { font: 20px/1 Ahem; width: 80px; }
+.none { hyphens: none; }
+#manual { hyphens: manual; }
+#manual-double { width: 110px; hyphenate-character: "xx"; }
+#automatic, #empty-mark, #german { hyphens: auto; }
+#empty-mark { width: 90px; hyphenate-character: ""; }
+#german { width: 140px; }
+</style>
+<div id="result">
+<div class="case none" id="none">xxx&shy;xxx</div>
+<div class="case none" id="inherited"><span>xxx&shy;xxx</span></div>
+<div class="case none" id="later-none">x xxx&shy;xxx</div>
+<div class="case none" id="literal">xxx-xxx</div>
+<div class="case" id="manual">xxx&shy;xxx</div>
+<div class="case" id="manual-double">im&shy;ple&shy;men&shy;ta&shy;tion</div>
+<div class="case" id="automatic" lang="en">regulation</div>
+<div class="case" id="empty-mark" lang="en">example</div>
+<div class="case" id="german" lang="De-dE">Donaudampfschifffahrt</div>
+</div>

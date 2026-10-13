@@ -11,6 +11,7 @@ import macros: .macros
 import dispatcher: .render
 import css: .css
 import math: lambda.doc.math.math
+import math_bridge: .math_bridge
 import html_ser: .to_html
 import registry: .packages.registry
 import geometry: .packages.geometry
@@ -31,6 +32,11 @@ import tikz: .packages.tikz
 import page_style: .packages.page_style
 import listings: .packages.listings
 import caption: .packages.caption
+import font_decl: .elements.font_decl
+import paragraph: .packages.paragraph
+import footmisc: .packages.footmisc
+import fontspec: .packages.fontspec
+import profiles: .docclass.profiles
 
 // ============================================================
 // Public API — HTML string output
@@ -41,7 +47,8 @@ import caption: .packages.caption
 // shadow an adapter and adapter commands keep raw arguments
 pub fn parse_source(latex_source, base) =>
     parse(latex_source, {type: "latex", base: base,
-        packages: registry.adapter_names(), raw: registry.RAW_ARGUMENT_COMMANDS}) ^ { null }
+        packages: registry.adapter_names(), raw: registry.RAW_ARGUMENT_COMMANDS,
+        chaptered: registry.chaptered_classes()}) ^ { null }
 
 pub fn parse_file(file_path) {
     let source = input(file_path, "text") ^ { null }
@@ -121,26 +128,6 @@ pub fn render_result(ast, options) {
         [util.diagnostic("unsupported-cref-language", "cleveref", language,
             "Cleveref names currently support English", registry.offset_for(
                 loaded.packages, "cleveref"))] else []
-    let font_issues = if (registry.active(loaded.packages, "cmbright"))
-        [util.diagnostic("font-substitution", "cmbright", "Computer Modern Bright",
-            "CM Bright is not bundled; using bundled Computer Modern Sans",
-            registry.offset_for(loaded.packages, "cmbright"))] else []
-    let math_font_issues = if (registry.active(loaded.packages, "eucal"))
-        [util.diagnostic("font-substitution", "eucal", "Euler calligraphic",
-            "Euler calligraphic is not bundled; using the math calligraphic font",
-            registry.offset_for(loaded.packages, "eucal"))] else []
-    let script_font_issues = if (registry.active(loaded.packages, "mathrsfs"))
-        [util.diagnostic("font-substitution", "mathrsfs", "Ralph Smith Formal Script",
-            "RSFS is not bundled; using the available math script font",
-            registry.offset_for(loaded.packages, "mathrsfs"))] else []
-    let greek_font_issues = if (registry.active(loaded.packages, "gfsporson"))
-        [util.diagnostic("font-substitution", "gfsporson", "GFS Porson",
-            "GFS Porson is not bundled; using a Greek-capable serif fallback",
-            registry.offset_for(loaded.packages, "gfsporson"))] else []
-    let helvet_issues = if (registry.active(loaded.packages, "helvet"))
-        [util.diagnostic("font-substitution", "helvet", "Helvetica",
-            "Helvetica is not bundled; using a system sans-serif fallback",
-            registry.offset_for(loaded.packages, "helvet"))] else []
     let link_settings = hyperref.settings(ast, registry.options_for(loaded.packages, "hyperref"))
     let running_style = page_style.prepare(ast,
         registry.active(loaded.packages, "fancyhdr"))
@@ -151,7 +138,14 @@ pub fn render_result(ast, options) {
                 running_style: running_style,
                 language: language, text_language: language,
                 polyglossia: polyglossia,
+                // fontspec's and polyglossia's family declarations (fontspec.ls)
+                font_families: if (registry.active(loaded.packages, "fontspec")) fontspec.declarations(ast) else [],
                 listing_options: listings.preamble_options(ast),
+                // fancyvrb's \fvset and minted's \setminted defaults
+                code_defaults: {fancyvrb: if (registry.active(loaded.packages, "fancyvrb"))
+                    listings.preamble_settings(ast, "fvset") else {},
+                    minted: if (registry.active(loaded.packages, "minted"))
+                    listings.preamble_settings(ast, "setminted") else {}},
                 listing_nums: base_info.listing_nums,
                 caption_options: caption.initial(registry.options_for(loaded.packages, "caption"),
                     registry.options_for(loaded.packages, "subcaption")),
@@ -177,17 +171,21 @@ pub fn render_result(ast, options) {
         else [for (issue in loaded.diagnostics where not (issue.code == "unsupported-bib-style" and
             issue.item == style_alias.biblatex_style)) issue] ++ style_alias.diagnostics
     let diagnostics = engine_diagnostics(ast) ++ package_issues ++ math_operators.diagnostics ++
-        bibliography.diagnostics ++ language_issues ++ cleveref_issues ++ font_issues ++
-        math_font_issues ++ script_font_issues ++ greek_font_issues ++ helvet_issues ++
+        bibliography.diagnostics ++ language_issues ++ cleveref_issues ++
+        registry.font_issues(loaded.packages) ++
+        (if (registry.active(loaded.packages, "fontspec"))
+            fontspec.issues(fontspec.declarations(ast), base_info.custom_colors) else []) ++
+        math_bridge.issues(ast, math_operators.definitions, loaded.packages) ++
         hyperref.issues(link_settings, registry.offset_for(loaded.packages, "hyperref")) ++
         (if (registry.active(loaded.packages, "tikzpeople"))
             [util.diagnostic("tikzpeople-shape-approximation", "tikzpeople", null,
                 "Named people use reusable vector silhouettes; CTAN artwork detail differs",
                 registry.offset_for(loaded.packages, "tikzpeople"))] else []) ++
-        (if (util.find_descendant(ast, "boldmath") == null) [] else
-            [util.diagnostic("math-bold-approximation", "latex", "boldmath",
+        (if (bold_math_request(ast) == null) [] else
+            [util.diagnostic("math-bold-approximation", "latex", string(name(bold_math_request(ast))),
                 "Bold math uses CSS font weight until bold math fonts are available",
-                util.find_descendant(ast, "boldmath").source_offset)]) ++
+                bold_math_request(ast).source_offset)]) ++
+        font_decl.substitution_issues(ast) ++
         (if (polyglossia == null) [] else language_profile.polyglossia_issues(
             polyglossia, registry.offset_for(loaded.packages, "polyglossia"))) ++
         language_profile.target_issues(polyglossia, if (options == null) null else options.target,
@@ -206,6 +204,7 @@ pub fn render_result(ast, options) {
             bibliography.context != null) ++
         registry.target_diagnostics(ast, if (options == null) null else options.target,
             options != null and options.paged == true) ++
+        info.diagnostics ++
         output_diagnostics(elements)
     {body: html, elements: elements,
      stylesheet: css.get_stylesheet() ++ math.stylesheet(options) ++ package_stylesheet(info),
@@ -251,7 +250,17 @@ fn output_diagnostics(node) {
     }
 }
 
+// fontspec's features for the sans and mono families, on the elements set in them
+fn family_features(info) {
+    let sans = dispatcher.role_features(info, "sans")
+    let mono = dispatcher.role_features(info, "mono");
+    (if (sans == "") "" else ".latex-document .latex-sf,.latex-document .latex-sffamily{" ++ sans ++ "}\n") ++
+    (if (mono == "") "" else ".latex-document code.latex-code,.latex-document pre.latex-verbatim," ++
+        ".latex-document .latex-ttfamily,.latex-document .latex-listing pre{" ++ mono ++ "}\n")
+}
+
 fn package_stylesheet(info) {
+    family_features(info) ++ profiles.stylesheet(registry.class_family(info.docclass)) ++
     (if (info.biblatex_context.processor == "csl") csl.stylesheet() else "") ++
     geometry.stylesheet(registry.options_for(info.packages, "geometry")) ++
     (if (registry.active(info.packages, "fullpage") and
@@ -259,7 +268,13 @@ fn package_stylesheet(info) {
         geometry.stylesheet({margin: "1in"}) else "") ++
     microtype.stylesheet(registry.options_for(info.packages, "microtype")) ++
     hyperref.stylesheet(info.hyperref_settings) ++ dispatcher.running_stylesheet(info) ++
-    info.cellspace_css
+    info.cellspace_css ++
+    (if (registry.active(info.packages, "parskip"))
+        paragraph.parskip_stylesheet(registry.options_for(info.packages, "parskip")) else "") ++
+    // indentfirst indents the first paragraph after a heading, which LaTeX otherwise does not
+    (if (registry.active(info.packages, "indentfirst"))
+        ".latex-document h1 + p,.latex-document h2 + p,.latex-document h3 + p," ++
+        ".latex-document h4 + p{text-indent:1.5em;}\n" else "")
 }
 
 // The parser preserves both braced and control-sequence forms of \setlength.
@@ -340,6 +355,15 @@ fn postprocess(html, info) {
     if (fn_section != null) wrap_with_footnotes(html, fn_section) else html
 }
 
+// the first \boldmath or \mathversion{bold}
+fn bold_math_request(ast) {
+    let boldmath = util.find_descendant(ast, "boldmath")
+    let version = util.find_descendant(ast, "mathversion")
+    if (boldmath != null) boldmath
+    else if (version != null and trim(util.text_of(version)) == "bold") version
+    else null
+}
+
 fn wrap_with_footnotes(body, footnotes_el) {
     <div class: "latex-output",
         body
@@ -349,27 +373,35 @@ fn wrap_with_footnotes(body, footnotes_el) {
 
 fn render_footnotes_section(info) {
     let footnotes = info.footnotes
+    let options = registry.options_for(info.packages, "footmisc")
+    // symbol marks replace the list's own numbers
+    let symbolic = footmisc.mark(options, 1) != "1"
+    let ruled = footmisc.ruled(options)
+    let rule = if (ruled) <hr> else null
     if (len(footnotes) == 0) null
     else (
-        <section class: "latex-footnotes",
-            <hr>
-            <ol
-                for (fn_entry in footnotes)
-                    render_footnote_item(fn_entry, info)
+        <section class: "latex-footnotes", style: if (ruled) null else "border-top:none",
+            rule;
+            <ol style: if (symbolic) "list-style:none" else null,
+                for (i, fn_entry in footnotes)
+                    render_footnote_item(fn_entry, i, info,
+                        if (symbolic) footmisc.mark(options, fn_entry.number) else null)
             >
         >
     )
 }
 
-fn render_footnote_item(fn_entry, info) {
+fn render_footnote_item(fn_entry, i, info, mark) {
     let fn_num = fn_entry.number
     let content = if (info.biblatex_context != null and
         (string(name(fn_entry.node)) == "footcite" or
         (info.biblatex_context.processor == "csl" and
          (string(name(fn_entry.node)) == "autocite" or string(name(fn_entry.node)) == "autocites"))))
         [biblatex.render_footcite_content(fn_entry.node, info.biblatex_context)]
-        else dispatcher.render_children_of(fn_entry.node, info);
-    <li id: "fn-" ++ (fn_num),
+        else dispatcher.render_note_body(fn_entry.node, info);
+    // explicit or \footnotetext numbers can leave the list's own sequence
+    <li id: "fn-" ++ (fn_num), value: if (mark == null and fn_num != i + 1) fn_num else null,
+        if (mark != null) (<sup class: "latex-footnote-mark", mark>, " ") else null
         for c in content { c }
         " "
         <a class: "footnote-backref", href: "#fnref-" ++ (fn_num), "\u21A9">

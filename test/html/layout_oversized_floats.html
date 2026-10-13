@@ -1,0 +1,17 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+.row { display: flow-root; width: 200px; }
+.container { width: 0; }
+.item { float: left; width: 60px; height: 20px; background: green; }
+.right .item { float: right; }
+.narrow { width: 50px; }
+.wide { width: 140px; }
+</style>
+<div id="result">
+<div class="row"><div class="container"><div id="zero-left-first" class="item"></div><div id="zero-left-second" class="item"></div></div></div>
+<div class="row"><div class="container narrow"><div id="narrow-left-first" class="item"></div><div id="narrow-left-second" class="item"></div></div></div>
+<div class="row"><div class="container narrow right"><div id="narrow-right-first" class="item"></div><div id="narrow-right-second" class="item"></div></div></div>
+<div class="row"><div class="container wide"><div id="wide-left-first" class="item"></div><div id="wide-left-second" class="item"></div></div></div>
+<div class="row"><div class="container wide right"><div id="wide-right-first" class="item"></div><div id="wide-right-second" class="item"></div></div></div>
+</div>

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Table intrinsic widths retain preserved line breaks</title>
+<style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+table { font: 20px/1 Ahem; border-spacing: 0; }
+td { padding: 0; }
+.pre { white-space: pre; }
+.pre-wrap { white-space: pre-wrap; }
+.break-spaces { white-space: break-spaces; }
+.atomic { display: inline-block; }
+</style>
+<body id="result">
+<table id="direct" class="pre" style="width: 80px"><tr><td>123
+   8</td></tr></table>
+<table id="split" class="pre"><tr><td>X<span>XX
+X</span>XX</td></tr></table>
+<table id="siblings" class="pre"><tr><td>X<span>XX</span>
+X<span>XX</span></td></tr></table>
+<table id="tabs" class="pre" style="tab-size: 4"><tr><td>X&#9;X
+X</td></tr></table>
+<table id="soft-wrap" class="pre-wrap" style="width: 60px"><tr><td>123
+   8</td></tr></table>
+<table id="spaces" class="break-spaces" style="width: 80px"><tr><td>123    8</td></tr></table>
+<table id="atomic" class="pre"><tr><td>X<span class="atomic">XX
+X</span>XX</td></tr></table>
+<table id="indent" class="pre"><tr><td style="text-indent: 20px">XXX
+X</td></tr></table>
+<table id="later-line" class="pre"><tr><td style="text-indent: 20px">X
+XXXX</td></tr></table>
+</body>

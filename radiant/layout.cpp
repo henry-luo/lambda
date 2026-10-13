@@ -1168,12 +1168,13 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
 void adjust_text_bounds(ViewText* text);
 void apply_element_default_style(LayoutContext* lycon, DomNode* elmt);
 
-bool is_space(char c) {
+bool is_space(uint32_t c) {
+    // decoded codepoints must not narrow: U+200D would alias the ASCII carriage return.
     return c == ' ' || c == '\t' || c== '\r' || c == '\n';
 }
 
 bool is_only_whitespace(const char* str) {
-    return !str || str_all(str, strlen(str), is_space);
+    return !str || str_all(str, strlen(str), [](char c) { return is_space(c); });
 }
 
 static void layout_note_inline_atomic_wrap_opportunity(LayoutContext* lycon,
@@ -3380,8 +3381,9 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                         span_asc, span_desc, baseline_pos, bt, pt);
                     span->height = expected_height;
                 }
-            } else if (!span_is_multi_line && span->height > expected_height) {
-                // CSS 2.1 §10.6.1: normalize a non-replaced inline's font box.
+            } else if (!span_is_multi_line && span->height >= expected_height) {
+                // CSS 2.1 §10.6.1: an equal-height shifted descendant still
+                // cannot replace its ancestor's own font-box baseline.
                 // Direct text keeps an anonymous table wrapper on its original line.
                 if (!preserve_anonymous_table_line_origin &&
                     !preserve_inline_atomic_line_origin &&
@@ -4744,7 +4746,7 @@ void layout_flow_children(LayoutContext* lycon, DomNode* first_child,
     for (DomNode* child = first_child; child; child = child->next_sibling) {
         layout_flow_node(lycon, child);
     }
-    if (finalize_line && !lycon->line.is_line_start) line_break(lycon);
+    if (finalize_line && !lycon->line.is_line_start) line_break(lycon, true);
 }
 
 static void layout_set_root_available_width(LayoutContext* lycon, ViewBlock* root,
