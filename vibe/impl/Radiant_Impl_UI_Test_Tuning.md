@@ -77,6 +77,44 @@ After this round the 127 heavy fixtures run alone in 248 s (393 s at the start, 
 
 Unit test for the font-key fix: `test_radiant_text_query_gtest` (commit ee56c3536). It fails with 24 context builds against the old key and passes with at most 1.
 
+### 4.2 Doc tree round (2026-10-13)
+
+The doc fixtures spend most of their time in pane clicks: a property toggle, tab switch or filter edit in the document pane. A profile of `doc_viewer_toml` showed where one such click went (about 160 ms of layout):
+- The whole app template re-rendered, because all pane state lived on `doc_editor_app`.
+- `.doc-editor`, a row flex, re-measured its clean `.file-panel` three times: item measurement, hypothetical cross size, and the panel's nested column measuring `.project-tree`.
+- 37% went to re-resolving styles during those measurements.
+
+| Change | Where | Effect |
+|---|---|---|
+| Pane-local state: the preview tab, property filter and property open/closed/more paths are state on a stateful `document_pane` model. The app rebuilds the model only for a new file or a CSV change; CSV state stays on the app because a column release can land over the file panel | `lmd/package/doc/doc_viewer.ls`, ported to the `test/ui/doc_editor.ls` fork | Pane click dom_patch 10 → ~1.5 ms |
+| Retained flex items (`FlexRetainedPass`): a clean item of an incremental pass replays its last measurement, hypothetical cross size and content pass under the same keys | `layout_flex_measurement.cpp`, hooks in `layout_flex.cpp` and `layout_flex_multipass.cpp`; see RAD_01 §6 | Intrinsic requests per pane click 2,353 → 15 |
+
+Pane-click layout, `doc_viewer_toml`: **~160 ms → ~18 ms**. This is the debug-build `rebuild_incr` layout time of a pane click, measured at low machine load; without replay the same click takes ~65 ms.
+
+Three pre-existing incremental-layout bugs turned up while checking replay against a full recompute. All three are fixed:
+- **Measurement leak.** An intrinsic measurement re-resolves the styles of the elements it walks against the measured width, and the committed pass early-returned and kept those values. The doc file filter's `width: 100%` became 299 or 272 px instead of 271 after any relayout.
+  - Now every walked descendant is flagged `ELMT_FLAG_MEASURE_RESTYLED`, and the committed pass that next lays it out resolves it again. Shift reuse and replay keep a flagged node's committed geometry, so the flag simply persists until that layout. (A first version made the stability walk reject flagged nodes; that disabled block shift reuse for every tree a measurement had walked, and `ReusesCleanRowsAfterDirectoryClose` caught it.)
+  - The query's root is exempt (`LayoutMeasurementRootScope`): it resolves in its caller's own context, which grid items rely on to resolve `height: 100%` against their grid area.
+  - Flow children also recurse with their parent's content box as the percentage basis.
+  - Tried and reverted: skipping re-resolution of styles-current elements in `calculate_max_content_height` regressed 8 `wpt-css-sizing` tests for exactly that grid reason.
+- **Double margin collapse.** Normal-flow collapse consumes `BoundaryProp` margins in place. A relayout of a clean block kept its style and collapsed the consumed margin again: a LaTeX `p`→`h3` gap of 21.12 px became 13.12 px. The committed pass now re-resolves an element whose used boundary was consumed (`layout_boundary_consumed_by_flow`).
+- **Unmarked rebuilt nodes.** `set_layout_dirty_subtree` used a 256-entry stack and silently skipped the tail of a wide rebuilt subtree. It now uses `view_geometry_walk_dom_tree`.
+
+A replay bug found by the same check, before landing: a committed style pass resets an item's `PositionProp`, including its abspos list. If that happened before a replay (an outer measurement had flagged the item), the absolutely positioned source pane was dropped from paint. A committed style pass now drops the item's content memo (`flex_retained_forget_content`).
+
+Regression tests:
+- `test/ui/dom_mutation_margin_relayout`: a JS mutation re-lays out clean `p`/`h3` blocks. Without the consumed-boundary fix the heading moves from y = 47.1 to 31.1.
+- `doc_viewer_tree_selection` now asserts the file filter stays 271 px after a folder collapse. Without the restyle flag it is 272.
+- `test/ui/dom_mutation_flex_retained` with `RadiantViewTest.ReplaysCleanFlexSiblingOfMutatedPane`: a pane mutation replays the clean side panel (`flex_retained` > 0) and keeps its row geometry. The profile parser in `test_radiant_view_gtest.cpp` now takes the field name.
+
+Verification: a differential run of every UI fixture with replay on and off, with an SVG snapshot after each interaction (`temp/ui-consolidation/abx.py`). Results:
+- All 1,000 fixtures give identical snapshots and exit codes, except:
+  - fixtures whose output is nondeterministic: `editorjs` random block ids and timestamps, and save/close editor fixtures that leave file state behind;
+  - exits that flip between identical runs;
+  - float noise under 0.0001 px in two `dtna` fixtures.
+- UI gate: 720/720. Extended suites: 69 of 302 fail, the same count as 2026-10-12 master.
+- Layout baseline: every suite passes except `markdown` `md_nuxt-readme` (100% → 99.3% elements). That regression reproduces with all of this round's full-layout changes disabled, so it comes from code outside this round.
+
 ## 5. What remains heavy
 
 - `view/radiant_view_math_intensive_scroll` (~21 s):
@@ -86,8 +124,8 @@ Unit test for the font-key fix: `test_radiant_text_query_gtest` (commit ee56c353
   - Each forced collection re-marks the whole live runtime (loaded `lmd/package/dom` modules).
   - Further gains need an old generation with write barriers.
 - Doc fixtures:
-  - Each click still runs one full relayout of the ~650-row repo tree. Styles are re-resolved every layout by design, and the intrinsic-size cache keys on exact containing dimensions (5 hits per 2,348 requests).
-  - Loosening that key is a layout-correctness change and needs the full layout suites.
+  - Pane clicks replay the file panel (§4.2). A file selection still re-renders the whole tree, because the selection highlight is app state; moving it into the rows would let a selection re-render only the two affected rows.
+  - D4.5.3 deep-copies every re-render into fresh DOM, so a re-rendered subtree is always fully restyled and relaid. [Lambda_Proposal_DOM_Reconciliation](../Lambda_Proposal_DOM_Reconciliation.md) proposes retaining equal, unedited occurrences; it awaits review.
   - `test/ui/doc_editor.ls` is an 86% fork of the shipped `lmd/package/doc/doc_viewer.ls`. Retiring it is the owner's decision.
 - dtna `rate_modes` and `button_modes` (6–7 s): not profiled yet.
 

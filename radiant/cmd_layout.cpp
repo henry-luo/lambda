@@ -4555,20 +4555,15 @@ static bool capture_lambda_focus_restore(DocState* state,
     return true;
 }
 
+static bool set_layout_dirty_visitor(DomNode* node, void* context) {
+    node->layout_dirty = *(bool*)context;
+    return true;
+}
+
 static void set_layout_dirty_subtree(DomNode* root, bool dirty) {
-    if (!root) return;
-    DomNode* stack[256];
-    int top = 0;
-    stack[top++] = root;
-    while (top > 0) {
-        DomNode* node = stack[--top];
-        node->layout_dirty = dirty;
-        if (!node->is_element()) continue;
-        for (DomNode* child = lam::dom_require_element(node)->first_child;
-             child && top < 255; child = child->next_sibling) {
-            stack[top++] = child;
-        }
-    }
+    // retained-geometry reuse trusts these marks; a fixed 256-entry stack left
+    // the tail of a wide rebuilt subtree looking clean.
+    view_geometry_walk_dom_tree(root, set_layout_dirty_visitor, &dirty);
 }
 
 static View* resolve_lambda_focus_restore(DomDocument* doc,

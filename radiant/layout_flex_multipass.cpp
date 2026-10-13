@@ -998,9 +998,21 @@ static void flex_apply_content_height_after_layout(
     }
 }
 
+static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_item);
+
 void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     if (!flex_item) return;
+    // every content pass of an item comes through here, so a replay always
+    // finds the subtree as the recorded pass left it.
+    FlexContainerLayout* parent_flex = lycon->flex_container;
+    if (flex_retained_replay_content(lycon, flex_item, parent_flex)) return;
+    float final_width = flex_item->width;
+    float final_height = flex_item->height;
+    layout_flex_item_content_pass(lycon, flex_item);
+    flex_retained_record_content(lycon, flex_item, parent_flex, final_width, final_height);
+}
 
+static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_item) {
     log_enter();
 
     LayoutContext saved_context = *lycon;

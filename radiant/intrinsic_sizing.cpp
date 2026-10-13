@@ -3080,6 +3080,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         return {0, 0};
     }
     radiant::layout_profiler_note_intrinsic_request(&lycon->profiler, false, false);
+    LayoutMeasurementRootScope root_scope(lycon, element);
     IntrinsicMeasureScope measure_scope(lycon, element);
     IntrinsicProfileScope profile_scope(lycon, element);
     IntrinsicWidthCacheScope cache_scope = {
@@ -6201,6 +6202,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 	    DomElement* element = node->as_element();
 	    if (!element) return 0;
 
+    LayoutMeasurementRootScope root_scope(lycon, element);
     {
         IntrinsicFontScope style_font_scope(lycon, lycon->font);
         LayoutViewScope style_view_scope(lycon);
@@ -6732,6 +6734,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             DomElement* child_elem = child->as_element();
             IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
             float child_width = child_sizes.max_content;  // Use max-content width for flex items
+            LayoutContainingBlockScope child_cb_scope(lycon, LAYOUT_AXIS_X, width);
             float child_height = calculate_max_content_height(lycon, child, width);
 
             // Check if we need to wrap to a new line
@@ -6830,7 +6833,14 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     if (child_content_w < 0.0f) child_content_w = 0.0f;
                 }
             }
-            float child_height = calculate_max_content_height(lycon, child, child_content_w);
+            float child_height = 0.0f;
+            {
+                // the child re-resolves its style here; its percentages refer to
+                // this element's content box, not an outer measurement scope.
+                LayoutContainingBlockScope child_cb_scope(
+                    lycon, LAYOUT_AXIS_X, content_w, content_w > 0.0f);
+                child_height = calculate_max_content_height(lycon, child, child_content_w);
+            }
             bool cyclic_percentage_ratio_child = false;
             if (child->is_element() &&
                 !intrinsic_declared_css_height_is_definite(lycon, element)) {

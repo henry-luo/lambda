@@ -1125,6 +1125,7 @@ int64_t g_layout_cache_hits = 0;
 int64_t g_layout_cache_misses = 0;
 int64_t g_layout_cache_stores = 0;
 int64_t g_layout_shifted_reuse_count = 0;
+int64_t g_layout_flex_retained_count = 0;
 
 void reset_layout_timing() {
     g_style_resolve_time = 0;
@@ -1144,6 +1145,7 @@ void reset_layout_timing() {
     g_layout_cache_misses = 0;
     g_layout_cache_stores = 0;
     g_layout_shifted_reuse_count = 0;
+    g_layout_flex_retained_count = 0;
 }
 
 void log_layout_timing_summary() {
@@ -2205,6 +2207,19 @@ void layout_setup_block_font_metrics(LayoutContext* lycon) {
 
 }
 
+// Normal-flow margin collapsing consumes the used boundary in place (see
+// reset_non_inherited_style_cache). A relayout that kept the style would
+// collapse the consumed margins again, so it must resolve the style afresh.
+bool layout_boundary_consumed_by_flow(DomElement* element) {
+    if (!element->bound || !element->boundary()->has_flow_margin) return false;
+    const BoundaryProp* boundary = element->boundary();
+    return boundary->margin.top != boundary->flow_margin.top ||
+        boundary->margin.bottom != boundary->flow_margin.bottom ||
+        boundary->collapsed_through_mb != 0.0f || boundary->has_clearance ||
+        boundary->clearance_in_margin_chain ||
+        boundary->margin_chain_positive != 0.0f || boundary->margin_chain_negative != 0.0f;
+}
+
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     uint64_t t_start = time_now_ns();
 
@@ -2213,8 +2228,12 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
         if (dom_elem && dom_elem->specified_style) {
             bool styles_current = dom_elem->styles_resolved() &&
                                   !dom_elem->needs_style_recompute();
-            // IMPORTANT: Skip this check during measurement mode (run_mode==ComputeSize)
-            if (styles_current && !layout_context_is_measuring(lycon)) {
+            bool measuring = layout_context_is_measuring(lycon);
+            // IMPORTANT: Skip this check during measurement mode (run_mode==ComputeSize),
+            // after a measurement re-resolved this element as a walked descendant,
+            // and after normal-flow collapse consumed its used boundary.
+            if (styles_current && !measuring && !dom_elem->measure_restyled() &&
+                !layout_boundary_consumed_by_flow(dom_elem)) {
                 // calling us. When we skip resolution, these must be restored from
                 ViewBlock* block = lam::unsafe_view_block_api_span(lam::view_require_element(static_cast<View*>(dom_elem)));
                 if (block->blk) {
@@ -2312,7 +2331,15 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 css_transition_resolve(dom_elem, lycon);
             }
 
-            if (!layout_context_is_measuring(lycon)) {
+            if (measuring) {
+                // a walked descendant's percentages resolved against the measured
+                // width; the committed pass must not keep them as its own.
+                if (dom_elem != lycon->measurement_root) dom_elem->set_measure_restyled(true);
+            } else {
+                // a committed style pass resets the position (abspos list) and
+                // scroll state that only the item's next content pass rebuilds.
+                flex_retained_forget_content(dom_elem);
+                dom_elem->set_measure_restyled(false);
                 dom_elem->set_styles_resolved(true);
                 dom_elem->set_needs_style_recompute(false);
             }

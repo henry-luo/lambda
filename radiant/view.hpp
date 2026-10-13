@@ -1007,6 +1007,32 @@ typedef struct FlexAnonymousTextRun {
     lam::Own<struct FlexAnonymousTextRun> next;
 } FlexAnonymousTextRun;
 
+// tier-2: view-pool, retained across incremental relayouts. Memos of a flex
+// item's last committed measurement, hypothetical cross size and content pass;
+// incremental layout replays them while the item's subtree is clean and its
+// container inputs are unchanged, so a sibling of a re-rendered subtree is not
+// re-measured or re-laid out. A style reset clears them with the rest of fi.
+typedef struct FlexRetainedPass {
+    uint32_t eligible_generation;   // layout pass in which the item qualified for replay
+    float container_width;          // flex container content box the memos were taken in
+    float container_height;         // -1 when indefinite
+    // measure_flex_child_content
+    float measured_width, measured_height, content_width, content_height;
+    float measure_context_width;
+    // hypothetical cross size query: the max-content height at cross_query_width
+    float cross_query_width, cross_height;
+    // content pass: the flex-sized box it ran in and the box it committed
+    float final_width, final_height;
+    float laid_width, laid_height, laid_content_width, laid_content_height;
+    float first_line_baseline, last_line_baseline;
+    uint8_t has_measure : 1;
+    uint8_t has_cross : 1;
+    uint8_t has_content : 1;
+    uint8_t content_row_parent : 1;       // parent direction the content pass saw
+    uint8_t content_definite_cross : 1;   // parent definite cross size the content pass saw
+    uint8_t content_main_from_flex : 1;
+} FlexRetainedPass;
+
 // FlexItemProp definition (needed by flex.hpp)
 // tier-2: view-pool, rebuilt each relayout
 typedef struct FlexItemProp {
@@ -1062,6 +1088,7 @@ typedef struct FlexItemProp {
     bool anonymous_text_preserve_leading_space;
     bool anonymous_text_preserve_trailing_space;
     bool anonymous_text_is_whitespace;
+    FlexRetainedPass retained;
 } FlexItemProp;
 
 // tier-2: view-pool, rebuilt each relayout

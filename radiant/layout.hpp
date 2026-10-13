@@ -625,6 +625,17 @@ extern int64_t g_layout_cache_hits;
 extern int64_t g_layout_cache_misses;
 extern int64_t g_layout_cache_stores;
 extern int64_t g_layout_shifted_reuse_count;
+extern int64_t g_layout_flex_retained_count;
+// A clean subtree whose committed geometry nothing outside it can change.
+// formatting_root also admits relative boxes and absolute boxes positioned
+// inside the subtree, which an independent formatting context (a flex item) contains.
+bool layout_retained_subtree_is_stable(DomNode* root, bool formatting_root);
+// Only the committed pass of an incremental layout without running animations
+// may keep retained geometry.
+bool layout_can_retain_geometry(LayoutContext* lycon);
+// Normal-flow collapse consumed this element's used boundary, so its next
+// committed style pass resolves it afresh (dom_node_resolve_style).
+bool layout_boundary_consumed_by_flow(DomElement* element);
 
 namespace radiant {
 
@@ -3163,6 +3174,20 @@ typedef struct MeasurementCacheEntry {
 } MeasurementCacheEntry;
 
 void measure_flex_child_content(LayoutContext* lycon, DomNode* child);
+// FlexRetainedPass: qualify a clean item for replay in this pass, then replay
+// or record its hypothetical cross size and content pass memos.
+bool flex_retained_item_begin(LayoutContext* lycon, ViewElement* item,
+                              float container_width, float container_height);
+bool flex_retained_replay_cross(LayoutContext* lycon, ViewElement* item, float width,
+                                float* height);
+void flex_retained_forget_content(DomElement* element);
+void flex_retained_record_cross(LayoutContext* lycon, ViewElement* item, float width,
+                                float height);
+bool flex_retained_replay_content(LayoutContext* lycon, ViewBlock* item,
+                                  FlexContainerLayout* parent_flex);
+void flex_retained_record_content(LayoutContext* lycon, ViewBlock* item,
+                                  FlexContainerLayout* parent_flex,
+                                  float final_width, float final_height);
 float flex_resolve_inherited_line_height(LayoutContext* lycon, DomElement* target);
 void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout);
 void store_in_measurement_cache(DomNode* node, float width, float height, float content_width, float content_height, float context_width = -1);
@@ -3513,6 +3538,8 @@ typedef struct LayoutContext {
     lam::Up<ViewTree> selected_view_tree; // explicit secondary environment for shared value resolution
     lam::Up<struct ViewCssStyle> selected_style;
     bool css_query_probe; // resolve geometry without committing new motion timelines/snapshots
+    // the root of the outermost intrinsic query (LayoutMeasurementRootScope)
+    lam::Up<DomElement> measurement_root;
 
     BlockContext block;  // unified block context (layout state + floats + BFC)
     Linebox line;  // current linebox
@@ -5173,6 +5200,25 @@ struct IntrinsicMeasureScope {
     }
     IntrinsicMeasureScope(const IntrinsicMeasureScope&) = delete;
     IntrinsicMeasureScope& operator=(const IntrinsicMeasureScope&) = delete;
+};
+// The outermost intrinsic query re-resolves its root in the caller's own
+// context (a flex container's, a grid area's), which the committed pass keeps;
+// dom_node_resolve_style flags only the descendants the query walks with the
+// measured width as their percentage basis.
+// tier-3: layout-transient, valid within pass
+struct LayoutMeasurementRootScope {
+    lam::Up<LayoutContext> lycon;
+    bool claimed;
+
+    LayoutMeasurementRootScope(LayoutContext* l, DomElement* root)
+        : lycon(l), claimed(l && root && !l->measurement_root) {
+        if (claimed) lycon->measurement_root = lam::Up<DomElement>(root);
+    }
+    ~LayoutMeasurementRootScope() {
+        if (claimed) lycon->measurement_root = nullptr;
+    }
+    LayoutMeasurementRootScope(const LayoutMeasurementRootScope&) = delete;
+    LayoutMeasurementRootScope& operator=(const LayoutMeasurementRootScope&) = delete;
 };
 // Nested DOM/view work must restore both handles together; restoring only the
 // view leaves style resolution attached to the previous element on early exit.

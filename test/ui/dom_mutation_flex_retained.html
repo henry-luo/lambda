@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Clean flex item replays its retained pass</title>
+<style>
+  body { margin: 0; font: 14px sans-serif; }
+  #app { display: flex; height: 400px; }
+  /* the clean sibling a pane mutation must not re-measure or re-lay out */
+  #side { width: 220px; display: flex; flex-direction: column; border-right: 1px solid #999; }
+  #side .head { padding: 8px 10px; position: relative; }
+  #side .rows { flex: 1; overflow: auto; }
+  #side .row { display: flex; align-items: center; min-height: 24px; padding: 0 8px; }
+  #side .icon { width: 18px; flex-shrink: 0; }
+  #main { flex: 1; padding: 12px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <div class="head">Files</div>
+    <div class="rows">
+      <div class="row"><span class="icon">▸</span><span>alpha</span></div>
+      <div class="row"><span class="icon">▸</span><span>beta</span></div>
+      <div class="row" id="third"><span class="icon">▸</span><span>gamma</span></div>
+      <div class="row"><span class="icon">▸</span><span>delta</span></div>
+    </div>
+  </aside>
+  <main id="main"><p id="detail">none</p><button id="next">next</button></main>
+</div>
+<script>
+var count = 0;
+document.getElementById('next').addEventListener('click', function () {
+  count++;
+  document.getElementById('detail').textContent = 'selected ' + count;
+});
+</script>
+</body>
+</html>

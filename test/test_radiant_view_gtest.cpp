@@ -293,13 +293,13 @@ static bool test_radiant_view_profile_has_intrinsic_measurement(const char* path
     return found;
 }
 
-static bool test_radiant_view_profile_shifted_reuse_at(const char* path,
-                                                       size_t layout_index,
-                                                       unsigned long long* reuse_count) {
+// One field of the per-layout "[LAYOUT_PROFILE] shifted_reuse: N flex_retained: M" line.
+static bool test_radiant_view_profile_reuse_at(const char* path, const char* prefix,
+                                               size_t layout_index,
+                                               unsigned long long* reuse_count) {
     if (!reuse_count) return false;
     char* buffer = test_radiant_view_read_file(path);
     if (!buffer) return false;
-    const char* prefix = "[LAYOUT_PROFILE] shifted_reuse: ";
     const char* cursor = buffer;
     bool found = false;
     for (size_t index = 0; index <= layout_index; index++) {
@@ -1943,9 +1943,9 @@ TEST(RadiantViewTest, ReusesCleanRowsAfterDirectoryClose) {
 
     unsigned long long initial_reuse = 0;
     unsigned long long close_reuse = 0;
-    ASSERT_TRUE(test_radiant_view_profile_shifted_reuse_at(view_log, 0, &initial_reuse));
+    ASSERT_TRUE(test_radiant_view_profile_reuse_at(view_log, "shifted_reuse: ", 0, &initial_reuse));
     // Two setup layouts and two opens precede the close relayout in this fixture.
-    ASSERT_TRUE(test_radiant_view_profile_shifted_reuse_at(view_log, 4, &close_reuse));
+    ASSERT_TRUE(test_radiant_view_profile_reuse_at(view_log, "shifted_reuse: ", 4, &close_reuse));
     EXPECT_EQ(0ULL, initial_reuse);
     EXPECT_GT(close_reuse, 0ULL);
     remove(view_log);
@@ -1967,8 +1967,33 @@ TEST(RadiantViewTest, ReusesCleanBlocksAroundCollapsedWhitespaceAndHiddenSibling
     ASSERT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
     shell_result_free(&result);
     unsigned long long reuse_count = 0;
-    ASSERT_TRUE(test_radiant_view_profile_shifted_reuse_at(view_log, 1, &reuse_count));
+    ASSERT_TRUE(test_radiant_view_profile_reuse_at(view_log, "shifted_reuse: ", 1, &reuse_count));
     EXPECT_GT(reuse_count, 0ULL);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, ReplaysCleanFlexSiblingOfMutatedPane) {
+    const char* view_log = "./temp/test_radiant_view_flex_retained.log";
+    test_radiant_view_ensure_temp_dir();
+    remove(view_log);
+    const ShellEnvEntry env[] = {
+        {"LAYOUT_PROFILE", "1"},
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult result = test_radiant_view_run_logged_headless(
+        "test/ui/dom_mutation_flex_retained.html",
+        "test/ui/dom_mutation_flex_retained.json", env);
+    ASSERT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+    shell_result_free(&result);
+    unsigned long long initial = 0;
+    unsigned long long replayed = 0;
+    // the load layout records the side panel; each pane mutation replays it.
+    ASSERT_TRUE(test_radiant_view_profile_reuse_at(view_log, "flex_retained: ", 0, &initial));
+    ASSERT_TRUE(test_radiant_view_profile_reuse_at(view_log, "flex_retained: ", 2, &replayed));
+    EXPECT_EQ(0ULL, initial);
+    EXPECT_GT(replayed, 0ULL);
     remove(view_log);
 }
 

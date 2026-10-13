@@ -1891,6 +1891,8 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
                                && isnan(item_block->block()->given_width_percent));
         bool has_definite_h = (item_block && item_block->blk && item_block->block_mut()->given_height >= 0
                                && isnan(item_block->block()->given_height_percent));
+        // a clean item of an incremental pass replays its last measurement and content pass.
+        flex_retained_item_begin(lycon, item, container_content_width, container_content_height);
         if (!(has_definite_w && has_definite_h)) {
             measure_flex_child_content(lycon, child);
         }
@@ -4181,10 +4183,13 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
                     item_block, item->width, true);
                 // Intrinsic height is width-dependent; use the shared query so flex,
                 // block-flow, and anonymous text all follow one sizing contract.
-                float measured_height = item_content_width > 0.0f
-                    ? flex_measure_intrinsic_max_height(
-                        lycon, static_cast<DomNode*>(item), item_content_width)
-                    : 0.0f;
+                float measured_height = 0.0f;
+                if (item_content_width > 0.0f &&
+                    !flex_retained_replay_cross(lycon, item, item_content_width, &measured_height)) {
+                    measured_height = flex_measure_intrinsic_max_height(
+                        lycon, static_cast<DomNode*>(item), item_content_width);
+                    flex_retained_record_cross(lycon, item, item_content_width, measured_height);
+                }
                 if (flex_item_is_anonymous_text(item) && item->fi->anonymous_text &&
                     item_content_width > 0.0f && lycon &&
                     item->blk->writing_mode != WM_VERTICAL_LR &&

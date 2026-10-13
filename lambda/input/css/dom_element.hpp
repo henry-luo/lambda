@@ -736,6 +736,9 @@ enum DomElementFlag : uint32_t {
     // A pass-local element in layout scratch (an anonymous flex text item): its
     // props live in that scratch too, so it never reaches the view-tree pool.
     ELMT_FLAG_SCRATCH_LIVED = 1u << 30,
+    // An intrinsic measurement walked this element and re-resolved its style
+    // against the measured width; the next committed pass resolves it again.
+    ELMT_FLAG_MEASURE_RESTYLED = 1u << 31,
 };
 
 static_assert((ELMT_FLAG_INLINE_PROP_SHARED & ((1u << 17) - 1u)) == 0,
@@ -1089,6 +1092,8 @@ struct DomElement : DomNode {
         // A reset discards the cascade that produced any cached contribution.
         if (!value) set_has_cached_intrinsic_widths(false);
     }
+    bool measure_restyled() const { return flag(ELMT_FLAG_MEASURE_RESTYLED); }
+    void set_measure_restyled(bool value) { set_flag(ELMT_FLAG_MEASURE_RESTYLED, value); }
     bool float_prelaid() const { return flag(ELMT_FLAG_FLOAT_PRELAID); }
     void set_float_prelaid(bool value) { set_flag(ELMT_FLAG_FLOAT_PRELAID, value); }
     bool has_cached_intrinsic_widths() const { return flag(ELMT_FLAG_HAS_CACHED_INTRINSIC_WIDTHS); }

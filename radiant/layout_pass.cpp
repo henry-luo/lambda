@@ -164,6 +164,11 @@ LayoutMeasureScope::LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_el
     saved_views = lam::up(arraylist_new(8));
     snapshot_scope = scratch_scope_begin(&lycon->scratch);
     layout_measure_snapshot_append(lycon, &snapshot_scope, saved_views, measure_elmt);
+    // a trial layout rewrites line and text geometry the snapshot does not
+    // restore, so no enclosing flex item may replay its recorded content pass.
+    for (::DomNode* node = measure_elmt; node; node = node->parent) {
+        if (node->is_element()) flex_retained_forget_content(node->as_element());
+    }
 
     lycon->run_mode = RunMode::ComputeSize;
     lycon->elmt = lam::up(measure_elmt);

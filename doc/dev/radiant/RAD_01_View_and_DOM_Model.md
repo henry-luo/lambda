@@ -1,6 +1,6 @@
 # Radiant — View & DOM Model
 
-> **Last verified against tree:** 2026-10-09 (§6 retained flow classification); 2026-07-14 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-10-13 (§6 retained flex items, measurement restyle, consumed boundary); 2026-10-09 (§6 retained flow classification); 2026-07-14 *(initial stamp from git history)*
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the single most load-bearing decision in Radiant: there is no separate layout "view tree" — a parsed DOM node *is* its own view. It describes the unified `DomNode`/`View` representation, the method-only view-wrapper hierarchy, how layout "builds" the view tree by tagging nodes in place, the two-tier arena+pool memory model, incremental relayout, and the source-position bridge that anchors the rich-text editor.
 >
@@ -90,6 +90,25 @@ Radiant supports DOM mutation without rebuilding node identity — the backbone 
 `view_pool_reset_retained` is the mutation-safe reset: it releases and clears view-owned pointers on the existing tree, destroys the arena+pool, and re-inits them — but **keeps the DOM/view nodes themselves**. This is what lets `DocState`/`ViewState` weak references, which bind by the node's monotonic `id` (`dom_node.hpp:76`) rather than by pointer, survive a relayout. `view_pool_release_detached_subtree` handles a subtree that a mutation detached, so the final `view_pool_destroy` walk does not lose reachability to it.
 
 Dirty tracking is coarse-grained. A mutation marks the affected subtree `layout_dirty = true` and walks ancestors marking them dirty (the marking logic lives in `cmd_layout.cpp` around the incremental-layout entry; JS mutation clears it via `dom_js_clear_layout_dirty_recursive` in `event.cpp`). During an incremental block-flow layout, a clean child can reuse its recorded `layout_height_contribution` and shift its retained Y only when its width, margins, float context, inline context, positioning, and subtree style state are compatible with the current parent. Hidden elements, comments and collapsed whitespace do not introduce inline context; the eligibility check reuses `should_collapse_inter_element_whitespace`, the same helper as actual flow layout (**D1.3v3**). `test/ui/dom_mutation_collapsed_flow_reuse` and its native profile assertion verify retained reuse and the resulting sibling shift. Otherwise `layout_flow_node` recalculates the child. A freshly laid child records its contribution for the next pass. Measurement passes that must not perturb the retained layout (intrinsic-width measurement — [RAD_05](RAD_05_Intrinsic_Sizing.md), form intrinsic sizing) snapshot and restore per-node view state through the `layout_pass.cpp` snapshot type.
+
+Flex items have their own retained path, `FlexRetainedPass` on `FlexItemProp` (`view.hpp`, helpers in `layout_flex_measurement.cpp`). Each committed pass records three memos for an item:
+- its `measure_flex_child_content` result;
+- its hypothetical cross size at the width it was queried with;
+- the box its content pass ran in, and the box and baselines that pass committed.
+
+In an incremental pass, `flex_retained_item_begin` (called from `collect_and_prepare_flex_items`) qualifies an item when:
+- its container's content box is unchanged;
+- it is not a form control, replaced box or anonymous text item;
+- `layout_retained_subtree_is_stable(item, true)` holds.
+
+A qualified item replays each memo whose key still matches. `layout_flex_item_content` replays the content pass when the flex-sized box is unchanged, so the item's whole subtree is neither re-measured nor re-laid out. Every content pass goes through that function, so a replay always finds the subtree as the recorded pass left it. Three events drop the content memo, because each leaves state the memo does not describe:
+- a measuring content pass;
+- a `LayoutMeasureScope` trial layout inside the item;
+- a committed style pass of the item, which resets its `PositionProp` (including the abspos list) and scroll state (`flex_retained_forget_content`). The stability walk is shared with block shift reuse. In formatting-root mode it also admits relative boxes and absolute boxes whose containing block lies inside the subtree. Clean siblings of a re-rendered Lambda component are the main case: the doc viewer's file panel after a document-pane click.
+
+Two rules keep a retained element's used style trustworthy:
+- **Measurement restyle.** An intrinsic measurement resolves styles in its own context. The outermost query's root resolves in its caller's context (a flex container's or grid area's), which the committed pass keeps. Each descendant the query walks takes the measured width as its percentage basis and is flagged `ELMT_FLAG_MEASURE_RESTYLED`. The committed pass that next lays out a flagged element resolves it again. Retained reuse (shift or replay) keeps the element's committed geometry without laying it out, so the flag simply persists until that layout.
+- **Consumed boundary.** Normal-flow margin collapsing consumes `BoundaryProp` margins in place. A committed relayout that keeps the style re-resolves an element whose used boundary differs from its `flow_margin` snapshot or carries collapse-chain or clearance state (`layout_boundary_consumed_by_flow`). Otherwise it would collapse the already-collapsed margins a second time.
 
 ---
 
