@@ -190,6 +190,7 @@ pub fn render_result(ast, options) {
             bibliography.context != null) ++
         registry.target_diagnostics(ast, if (options == null) null else options.target,
             options != null and options.paged == true) ++
+        info.diagnostics ++
         output_diagnostics(elements)
     {body: html, elements: elements,
      stylesheet: css.get_stylesheet() ++ math.stylesheet(options) ++ package_stylesheet(info),

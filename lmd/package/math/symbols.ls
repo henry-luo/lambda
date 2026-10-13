@@ -95,7 +95,12 @@ let relations = {
     nleq: "≰", ngeq: "≱", nleqslant: "\uE010", nshortparallel: "\uE007",
     triangle: "△", leqslant: "⩽", geqslant: "⩾",
     // latexsym
-    Join: "⋈", sqsubset: "⊏", sqsupset: "⊐"
+    Join: "⋈", sqsubset: "⊏", sqsupset: "⊐",
+    // mathtools colon relations, composed from bundled glyphs: no bundled face has
+    // ≔, ≕, ⩴ or ∷, and mathtools itself builds them from a colon and a relation
+    vcentcolon: ":", dblcolon: "::", coloneqq: ":=", Coloneqq: "::=", coloneq: ":−", Coloneq: "::−",
+    eqqcolon: "=:", Eqqcolon: "=::", eqcolon: "−:", Eqcolon: "−::", colonapprox: ":≈",
+    Colonapprox: "::≈", colonsim: ":∼", Colonsim: "::∼"
 }
 
 // ============================================================

@@ -1,10 +1,10 @@
 # TeX expansion engine for `lambda.latex`
 
-**Status:** Implemented on master since 2026-10-07 (commit `6cdcd8f1f`; math-mode entry added 2026-10-10 in `16060078e`). Consolidated on 2026-10-12 and checked against HEAD `1df04d4e4`. The engine boundary, the **S1.8** reading in §2.4, the file gate in §8, the resolution order in §5 and the single front end in §6 were ratified as **D7.2.7** on 2026-10-12; this document keeps the argument. Items the code does not yet meet are marked *not built* and collected in §10.
+**Status:** Implemented on master since 2026-10-07 (commit `6cdcd8f1f`; math-mode entry added 2026-10-10 in `16060078e`). Consolidated on 2026-10-12 and checked against HEAD `1df04d4e4`. The engine boundary, the **S1.8** reading in §2.4, the file gate in §8, the resolution order in §5 and the single front end in §6 were ratified as **D7.2.7** on 2026-10-12, and **D7.2.7v2** admitted Lambda-owned bindings among the bundled packages on 2026-10-13; this document keeps the argument. Items the code does not yet meet are marked *not built* and collected in §10.
 
-**Scope:** The TeX tokenizer, expansion and state machine that runs in front of the LaTeX digester, the Lambda-owned LaTeX2e programming kernel, the bundled programming packages, and package/class resolution for files beside the document. The overall LaTeX package design is [Lambda_Pkg_Latex.md](../Lambda_Pkg_Latex.md). Bibliography processing is [Lambda_Design_BibTeX_CSL.md](Lambda_Design_BibTeX_CSL.md). PGF/PGFPlots drawing is [Lambda_Pkg_Tikz.md](../Lambda_Pkg_Tikz.md). The digester's AST contract is [Input_Latex.md](../input/Input_Latex.md).
+**Scope:** The TeX tokenizer, expansion and state machine that runs in front of the LaTeX digester, the Lambda-owned LaTeX2e programming kernel, the bundled packages (upstream programming packages and Lambda-owned bindings), and package/class resolution for files beside the document. The overall LaTeX package design is [Lambda_Pkg_Latex.md](../Lambda_Pkg_Latex.md). Bibliography processing is [Lambda_Design_BibTeX_CSL.md](Lambda_Design_BibTeX_CSL.md). PGF/PGFPlots drawing is [Lambda_Pkg_Tikz.md](../Lambda_Pkg_Tikz.md). The digester's AST contract is [Input_Latex.md](../input/Input_Latex.md).
 
-**Formal linkage:** **D7.2.7** (this design's ruling), **S1.8** (no runtime string becomes Lambda code), **S12.1.1v2 / S12.4.1** (pure transform, eager input value), **S7.4.1–S7.4.4** (located diagnostics), **S2.6.3–S2.6.5, D2.6.5v4** (command-argument content contract), **D7.1.1** (lower layer owns hooks with null-safe defaults), **D7.1.2v2 / D7.5.2** (resource acquisition, path gate), **D7.2.1–D7.2.4** (script packages and the static adapter registry), CLAUDE.md rule 16 (vendored files are unmodified).
+**Formal linkage:** **D7.2.7v2** (this design's ruling), **S1.8** (no runtime string becomes Lambda code), **S12.1.1v2 / S12.4.1** (pure transform, eager input value), **S7.4.1–S7.4.4** (located diagnostics), **S2.6.3–S2.6.5, D2.6.5v4** (command-argument content contract), **D7.1.1** (lower layer owns hooks with null-safe defaults), **D7.1.2v2 / D7.5.2** (resource acquisition, path gate), **D7.2.1–D7.2.4** (script packages and the static adapter registry), CLAUDE.md rule 16 (vendored files are unmodified).
 
 **Implementation record:** [Lambda_Impl_Latex_Phase4.md](../impl/Lambda_Impl_Latex_Phase4.md).
 
@@ -79,15 +79,19 @@ The engine runs at the input boundary inside `parse(...)` and yields an eager va
 
 **Bundled packages.** `lmd/package/latex/tex/` ships unmodified LPPL files from TeX Live 2025, with version and hash recorded in its `VENDOR.md`: `keyval`, `kvoptions`, `kvsetkeys`, `kvdefinekeys`, `xkeyval`, `etoolbox`, `ifthen`, `calc`, `etex`, `etexcmds`, `iftex`, `infwarerr`, `ltxcmds`, `pdftexcmds` and the expl3 generic loader (l3kernel 2025-01-18), plus the Unicode 16.0.0 data files expl3 reads. They are engine resources shipped in the package tree, not lookups in a TeX installation, and they fall under the vendor rule (CLAUDE.md rule 16). The criterion for adding one is that it is a programming package: it emits no typeset output of its own.
 
+**Bindings.** `lmd/package/latex/tex/binding/` holds Lambda-owned `.sty` files, which the engine finds after the upstream files (`bundled_path` in `input-tex-latex.cpp`). A binding expands a package's user commands into constructs the digester and the script adapters already own, such as `\left…\right`, `\frac`, `\boldsymbol` and the matrix environments; it never typesets and carries no semantics of its own (**D7.2.7v2**). It is written from the package's manual, not copied, so the vendor rule does not apply. Each binding is also a registry row, so the declaration still reaches the script, which validates options and owns whatever is not macro expansion.
+- **Expandable at use time.** A constructor's arguments are expanded without executing assignments (§2.3), so a binding's commands must expand with no `\def` or register assignment, or they would break inside `\section`, `\caption` and `\footnote`. Assignments are fine at declaration time, in the preamble.
+- **Built:** `physics.sty` (physics 1.3: bracing, vectors, operators, quick-quad text, derivatives, Dirac notation and matrix macros, with its three options) and `mathtools.sty` (the macro layer of mathtools 1.31: paired delimiters with `\delimsize`, `\prescript`, `\splitfrac`, `\adjustlimits`, `\MoveEqLeft`). A command whose name math already has, such as `\sin` under physics, reaches the plain meaning through `\noexpand`, because the engine passes an undefined math command through unchanged.
+
 **Format.** Loading expl3 is expensive, so the engine builds an expl3 format image once per process and restarts a run from it when a document requests expl3. The image is held in memory; an on-disk cache keyed by the engine and kernel versions (**D7.2.3**) is *not built*.
 
 ## 5. Package and class resolution
 
 `\documentclass`, `\LoadClass`, `\usepackage` and `\RequirePackage` resolve each name once, in source order. A duplicate load with the same options is idempotent. The engine receives the adapter names from the script registry (`registry.adapter_names()`), so the static registry stays the single list of script adapters (**D7.2.4**).
 
-The order for packages, ruled in **D7.2.7** (`do_usepackage` in `input-tex-latex.cpp`):
+The order for packages, ruled in **D7.2.7v2** (`do_usepackage` in `input-tex-latex.cpp`):
 
-1. **Bundled programming package.** Its `.sty` runs on the engine. If the name is also a script adapter (`ifthen`), the declaration additionally passes through, so the adapter still sees it.
+1. **Bundled package.** Its `.sty` runs on the engine, whether it is an upstream programming package or a Lambda-owned binding (§4). If the name is also a script adapter (`ifthen`), the declaration additionally passes through, so the adapter still sees it.
 2. **Script adapter.** The declaration passes through to the script registry, which validates options and activates the adapter.
 3. **A `name.sty` beside the document**, run by the engine, considered only when the name is not an adapter.
 4. **Otherwise** the declaration passes through as unknown, and the script registry reports the located `unknown-package` diagnostic.
@@ -100,7 +104,7 @@ Classes follow the same rule without the bundled step: a `name.cls` beside the d
 
 ## 6. Entry points and front-end selection
 
-Expansion is the only front end (**D7.2.7**): `parse_latex_direct` always runs the engine, and there is no unexpanded parse to fall back to. Only an allocation failure stops the engine, and that yields an error rather than a raw parse.
+Expansion is the only front end (**D7.2.7v2**): `parse_latex_direct` always runs the engine, and there is no unexpanded parse to fall back to. Only an allocation failure stops the engine, and that yields an error rather than a raw parse.
 
 | Entry | Behavior |
 |---|---|
@@ -150,7 +154,7 @@ Raw islands (`tikzpicture` and the raw-text environments) are copied as source s
 
 - **Widen the bundled set** with further programming packages that emit no output, such as `xstring`, `environ`, `trimspaces`, `letltxmacro`, `xpatch`, `refcount`, `xfp` and `lastpage`'s programming layer. This is vendor and test work.
 - **Expose kernel internals as constructors.** Journal classes redefine `\section`, `\maketitle`, floats and captions through `\@startsection`, `\@maketitle`, `\@float`, `\@makecaption`, `\list`/`\@item` and the tabular and bibliography internals. If the kernel exposes those internals as constructors that map to semantic elements, a class that redefines through them still yields headings and figures. This is the LaTeXML binding model and the largest lever for real-world classes.
-- **Thin TeX bindings.** Where a package's user macros are option handling and argument parsing over a few output points, write the binding as a small `.sty` on the engine, the pattern the dropped M4 design proposed for biblatex, instead of reimplementing the macros in script. The script adapter keeps the HTML semantics, and user `\renewcommand` of package commands works unchanged. `siunitx`, whose number parser is expl3, is a good first case.
+- **More thin TeX bindings.** Where a package's user macros are option handling and argument parsing over a few output points, write the binding as a small `.sty` on the engine (§4) instead of reimplementing the macros in script. The script adapter keeps the HTML semantics, and user `\renewcommand` of package commands works unchanged. physics and mathtools were the first; `xspace`, `siunitx` (whose number parser is expl3) and `csvsimple-l3` are next candidates.
 - **Corpus.** Build a corpus of real classes and packages kept beside their documents, with provenance and licenses: journal and thesis templates and macro packages that use delimited parameters, option processing, `etoolbox` hooks and expl3. Compare semantic HTML and selected visible text with pinned TeX output.
 
 ## Appendix A. Brief history
@@ -163,9 +167,11 @@ Raw islands (`tikzpicture` and the raw-text environments) are copied as source s
 | 2026-10-12 | This design was extracted from `Lambda_Pkg_Latex3.md` §9 and checked against the code. |
 | 2026-10-12 | The user dropped M4 (biblatex style files on the engine) in favor of mapping guide-level biblatex styles to CSL. |
 | 2026-10-12 | Expansion became the only front end: the raw parse branch, the `expand` option, the `LAMBDA_TEX_EXPAND` knob and the script macro substitution were removed, and the native document transform parses through `lambda.latex`. The boundary, the S1.8 reading, the file gate, the resolution order and the single front end were ratified as **D7.2.7**, confirming the implemented resolution order. |
+| 2026-10-13 | **D7.2.7v2**: the user approved Lambda-owned bindings as bundled packages (Phase V plan §17.1). The engine searches `binding/` after the upstream files; physics and the mathtools macro layer are the first bindings. |
 
 ## Appendix B. Superseded rulings
 
+- ~~Only programming packages, which emit no document material, are bundled.~~ Replaced 2026-10-13 by **D7.2.7v2**: Lambda-owned bindings that only expand user commands into constructs the digester and adapters own are bundled too (§4).
 - ~~Package resolution consults a script adapter first, then a bundled programming package, then a file beside the document.~~ Replaced 2026-10-12 by the implemented order ratified in **D7.2.7**: a bundled programming package runs first, and an adapter of the same name still receives the declaration (§5).
 - ~~An unexpanded parse remains for callers that do not request expansion, and `LAMBDA_TEX_EXPAND=1` forces expansion for parity runs.~~ Replaced 2026-10-12 by **D7.2.7**: expansion is the only front end (§6).
 - ~~`\usepackage` text never becomes a native `.sty` loader; package selection is a static script registry only.~~ Replaced 2026-10-07: `.sty`/`.cls` files beside the document and the bundled programming packages run on this engine. The static adapter registry and the rule that no package text becomes a Lambda import remain (§2.4, §5).

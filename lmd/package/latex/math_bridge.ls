@@ -39,6 +39,17 @@ pub fn ensuremath_ast(node) {
     if (raw == null) null else parse(raw, {type: "math", flavor: "latex"}) ^ { null }
 }
 
+// a math command written in text (\nicefrac, \ce): the command rebuilt from its raw
+// argument groups and parsed as inline math
+pub fn command_ast(node) {
+    let groups = if (node.argument_groups == null) [] else node.argument_groups
+    let source = "\\" ++ string(name(node)) ++ join([for (group in groups)
+        if (group.kind == "optional") "[" ++ group.raw ++ "]"
+        else if (group.kind == "required") "{" ++ group.raw ++ "}"
+        else "(" ++ group.raw ++ ")"], "")
+    parse(source, {type: "math", flavor: "latex"}) ^ { null }
+}
+
 // math an adapter typesets itself: bussproofs sequents and semantic inference rules
 fn adapter_math(node, tag, packages) =>
     (tag == "prooftree" and registry.active(packages, "bussproofs")) or

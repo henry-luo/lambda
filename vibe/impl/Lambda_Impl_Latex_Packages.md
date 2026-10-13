@@ -1,8 +1,8 @@
 # LaTeX Phase V: package coverage implementation plan
 
 **Design:** [Lambda_Pkg_Latex.md](../Lambda_Pkg_Latex.md) (§6 package model, §9 compatibility matrix, §10 verification rules, §11 outstanding work); [TeX engine design](../latex/Lambda_Design_TeX_Engine.md) §5 and §10; [Lambda_Pkg_Math.md](../Lambda_Pkg_Math.md) §3, §7 and §10.2; [Lambda_Pkg_Slides.md](../Lambda_Pkg_Slides.md) for beamer.
-**Status:** In progress. Proposed 2026-10-12; the user approved the §17 recommendations on 2026-10-13. M0 was implemented on 2026-10-13 in worktree `latex-phase5-m0`. No formal ruling is changed yet: §17.1 needs a D7.2.7 revision, which will be proposed verbatim when the first such binding lands.
-**Formal linkage:** **D7.2.7** (expansion only, never typesetting; resolution order bundled → adapter → beside-document file → located `unknown-package`), **D7.2.1–D7.2.4** (script adapters in a static registry), **S1.8** (no document text becomes Lambda code), **S12.1.1v2** (rendering stays pure and deterministic), **D7.1.2v2** and **D7.5.2** (resources through the one IO door, path-gated), **S7.4.1–S7.4.4** (located diagnostics).
+**Status:** In progress. Proposed 2026-10-12; the user approved the §17 recommendations on 2026-10-13. M0, M1, M2, M4 and M8 were implemented on 2026-10-13 in worktree `latex-phase5-m0`. §17.1 was ratified as **D7.2.7v2** when the first binding (physics) landed.
+**Formal linkage:** **D7.2.7v2** (expansion only, never typesetting; bundled packages are upstream programming packages or Lambda-owned bindings; resolution order bundled → adapter → beside-document file → located `unknown-package`), **D7.2.1–D7.2.4** (script adapters in a static registry), **S1.8** (no document text becomes Lambda code), **S12.1.1v2** (rendering stays pure and deterministic), **D7.1.2v2** and **D7.5.2** (resources through the one IO door, path-gated), **S7.4.1–S7.4.4** (located diagnostics).
 **Scope:** the commonly used LaTeX packages and classes that `lambda.latex` does not support, plus the kernel, `hyperref` and `graphicx` gaps those packages build on. Diagrams (`tikz-cd`, `circuitikz`, `forest`, `chemfig`, `xy`) belong to the TikZ design (§15).
 
 ## 1. Baseline
@@ -359,6 +359,31 @@ This is `lambda.doc.math` work, after M0.3. Every addition updates Pkg_Math §7.
 - **`mhchem`**: §17.2.
 - **`unicode-math`**: M9.
 
+As built on 2026-10-13, with route (a) chosen by the user and **D7.2.7v2** ratified the same day:
+
+- **Bindings.** The engine searches `lmd/package/latex/tex/binding/` after the upstream files. Bindings are written from the package manuals, so the vendor rule does not apply; each is also a `CATALOG` row, so options are validated and the declaration reaches the script.
+  - Upstream `physics.sty` is not installed locally and leans on xparse embellishments the kernel diagnoses, so `physics.sty` is a Lambda-owned binding of the physics 1.3 manual. It covers every group above plus `\dd`, `\var`, the quick-quad words, `\Pmqty`/`\smqty` forms and `\zmat`/`\pmat`/`\admat`, and the `arrowdel`, `italicdiff` and `notrig` options.
+  - Every binding command expands with no assignment at use time. The engine expands constructor arguments without executing assignments, so this keeps the commands working inside `\section`, `\caption` and `\footnote`.
+  - Names math already has (`\sin`, `\div`, `\Re`) reach their plain meaning through `\noexpand`, since the engine passes an undefined math command through.
+  - physics and siunitx both define `\qty`; loading both is `conflicting-packages`.
+- **mathtools** is split by owner:
+  - The macro layer is the `mathtools.sty` binding: `\DeclarePairedDelimiter`, `X` and `XPP`; `\prescript`; `\splitfrac`/`\splitdfrac`; `\cramped`, `\smashoperator` and `\adjustlimits`, which keep their content; `\MoveEqLeft`; and `\shortintertext` as `\intertext`.
+  - `\DeclarePairedDelimiterX` builds one body macro per size (plain, starred, `\big` to `\Bigg`) at declaration time, replacing `\delimsize`. A call then needs no assignment.
+  - Colon relations are math symbols, composed from bundled glyphs into one relation atom. Environments are math (below).
+  - Tag forms are equation numbering: analysis records `\newtagform` and the current `\usetagform`. One `amsmath.tag_text` frames every tag (`equation`, alignment rows, the legacy path and `\eqref`), replacing three hand-written copies. A number format outside the text font commands reports `unsupported-tag-format`.
+  - `\mathtoolsset` is reported as unsupported.
+- **Math package (`lambda.doc.math`).**
+  - `\bm`/`\hm` are `\boldsymbol` aliases.
+  - `\cancelto` is a box transform with the value at the arrow's tip.
+  - `\nicefrac`/`\sfrac` are slanted fractions with nicefrac.sty's raise and kerns.
+  - The parser knows the mathtools environments. Starred cases parse their second column as text through the `\text` span builder, and `multlined`/`lgathered`/`rgathered` options are read and ignored.
+  - An environment the parser does not know now keeps its name, and `unmapped_commands` reports it as `begin{name}`. Before, `\begin{psmallmatrix}a\end{psmallmatrix}` silently rendered "a psmallmatrix".
+- **mhchem.**
+  - `\ce` and `\pu` parse as `chemistry` nodes holding their raw text. `mhchem.ls` turns the bounded notation into TeX math, which the ordinary parser reads; the font pass, the typesetter and the unmapped scan all see that translated math.
+  - In text, `\nicefrac`, `\sfrac`, `\ce` and `\pu` render through `math_bridge.command_ast`, which rebuilds the command from its argument groups. `\ensuremath` now shares its renderer.
+- **Analysis diagnostics.** Analysis state gained a `diagnostics` list, which `render_result` reports. Tag forms are its first user.
+- **Known gaps, recorded in Pkg_Math §10.1:** `\boldsymbol` does not bold operator symbols, so `\grad` and `\vdot` are not bold. `\cdot` paints low in native PNG output, because its glyph comes from the KaTeX_AMS fallback. Both predate M8.
+
 ## 13. M9: fonts and Unicode engines
 
 - **Text font packages as M0.4 rows.** `times`, `mathptmx`, `newtxtext`, `newtxmath`, `txfonts`, `newpxtext`, `newpxmath`, `mathpazo`, `palatino`, `libertine`, `libertinus`, `charter`, `kpfonts`, `fourier`, `sourcesanspro`, `inconsolata`, `beramono` and `courier`. Each becomes a CSS family stack. A face Lambda does not bundle reports `font-substitution` (Pkg_Latex §7.2). Bundling is §17.3.
@@ -420,6 +445,7 @@ This is `lambda.doc.math` work, after M0.3. Every addition updates Pkg_Math §7.
    - *Recommendation:* allow pure macro layers, meaning expansion only, with no font, box or page primitives. User `\renewcommand` keeps working, and no macro language is reimplemented in script.
    - This may need D7.2.7's wording revised. That ruling is yours to make.
    - *Approved 2026-10-13.* The D7.2.7 revision will be proposed verbatim, with its companion edits, when the first such binding lands (M3 `xspace` or M8 `physics`), and applied only after the user confirms it.
+   - *Ratified 2026-10-13 as **D7.2.7v2*** (spec 30.0.0) when the physics binding landed: bundled packages are upstream programming packages or Lambda-owned bindings that only expand user commands into constructs the digester and adapters own.
 2. **`mhchem`.** Should `\ce` and `\pu` get a bounded script parser (formulas, charges, states, arrows), or stay unsupported? Pkg_Math §7 and §10.3 currently exclude general chemistry.
    - *Recommendation:* a bounded profile owned by `lambda.doc.math`. *Approved 2026-10-13*; Pkg_Math §7 and §10.3 are revised when the profile is built.
 3. **Fonts.** Should Lambda bundle OFL faces (TeX Gyre Termes, Pagella and Heros; Libertinus; Font Awesome Free), or only report substitution?
@@ -449,3 +475,9 @@ This is `lambda.doc.math` work, after M0.3. Every addition updates Pkg_Math §7.
 - 2026-10-13: M2 committed (1ec9a2aa8). M4 was built as recorded in §8.
   - New modules: `packages/algorithmic.ls` and `packages/algorithm2e.ls`.
   - New test `test/lambda/latex/test_latex_phase5_floats.ls` with its golden. The other 64 LaTeX scripts and the 32 math scripts match their goldens.
+- 2026-10-13: M4 committed (1e7ca8a77). The user chose route (a) for physics. M8 was built as recorded in §12, and **D7.2.7v2** was ratified.
+  - New files: the bindings `lmd/package/latex/tex/binding/physics.sty` and `mathtools.sty`, and `lmd/package/math/mhchem.ls`.
+  - New tests: `test/lambda/latex/test_latex_phase5_math.ls` and `test/lambda/math/test_math_phase5_packages.ls`, with goldens. The other 65 LaTeX scripts and 32 math scripts match their goldens, and `make test-lambda-baseline` passes 6807/6807.
+  - The parser changes are in `input-latex-c.cpp`: environment names, `ignored_begin` names, starred-cases text columns, `\cancelto`, slanted fractions and `chemistry` nodes. The engine change is the `binding/` search in `bundled_path`.
+  - `strip_backslash` was promoted from `macros.ls` to `util.ls`.
+  - The math test failed on the JIT tier alone, which exposed a transpiler defect, [LR07-47](../Lambda_Issue_Ledger%20(fixed).md#lr07-47). The new `chemistry` branch made `unmapped_commands` tail-recursive, and TCO then turned the self call inside its `for` comprehension into a jump. It is fixed in `emit_for_result` and pinned on every tier by `test/lambda/tail_call_in_comprehension.ls`.

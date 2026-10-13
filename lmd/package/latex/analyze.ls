@@ -75,6 +75,11 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         bibitems: [],
         equation_nums: [],
         amsmath_numbers: [],
+        // mathtools tag forms by name, and the one \usetagform made current
+        tag_forms: {},
+        tag_form: null,
+        // located diagnostics found while walking declarations
+        diagnostics: [],
         enumerate_starts: [],
         last_enumerate_by_depth: [],
         list_depth: 0,
@@ -130,7 +135,8 @@ pub fn analyze_with_language(ast, packages, language, options = {}) {
         custom_colors: result.custom_colors,
         page_color: result.page_color,
         theorem_defs: result.theorem_defs,
-        contents_anchors: result.contents_anchors
+        contents_anchors: result.contents_anchors,
+        diagnostics: result.diagnostics
     }
 }
 
@@ -163,7 +169,27 @@ pub let PACKAGE_WALK = {
         sidewaystable: (el, st) => walk_float(el, st, "table")},
     // settings commands shape every algorithm (render alg2e_settings)
     algorithm2e: map([for (setting in algorithm2e.SETTINGS,
-        x in [setting, (el, st) => ({*:st, alg2e_settings: st.alg2e_settings ++ [string(name(el))]})]) x])
+        x in [setting, (el, st) => ({*:st, alg2e_settings: st.alg2e_settings ++ [string(name(el))]})]) x]),
+    mathtools: {newtagform: walk_newtagform, renewtagform: walk_newtagform, usetagform: walk_usetagform}
+}
+
+// \newtagform{name}[inner]{left}{right}: how \usetagform{name} frames later tags; a
+// number format that is not a mapped text command prints the number plain
+fn walk_newtagform(el, st) {
+    // the brackets are raw text: "[" and "]" are not argument content
+    let args = [for (i in 0 to 2, let raw = util.raw_argument(el, "required", i) where raw != null) trim(raw)]
+    let inner = util.optional_raw(el)
+    let issues = if (inner == null or amsmath.tag_format(inner) != null) [] else
+        [util.diagnostic("unsupported-tag-format", "mathtools", trim(inner),
+            "Tag number format " ++ trim(inner) ++ " is not supported", el.source_offset)]
+    if (len(args) < 3) st
+    else {*:st, diagnostics: st.diagnostics ++ issues,
+        tag_forms: {*:st.tag_forms, [args[0]]: {left: args[1], right: args[2], inner: inner}}}
+}
+
+fn walk_usetagform(el, st) {
+    let form = trim(util.text_of(el))
+    {*:st, tag_form: if (form == "default") null else st.tag_forms[form]}
 }
 
 // subfig's \subfloat and subfigure's \subfigure: a lettered subfloat of the enclosing float
@@ -559,12 +585,12 @@ fn walk_amsmath_rows(rows, i, st, numbered, entries) {
         let labels = if (row.label != null)
             add_entry(st.labels, row.label,
                 {type: "equation", number: if (display != null) display else "",
-                 id: util.slugify(row.label), title: null})
+                 id: util.slugify(row.label), title: null, tag_form: st.tag_form})
             else st.labels
         let next = {*:st, counters: counters, labels: labels,
             counter_positions: scoped.positions}
         walk_amsmath_rows(rows, i + 1, next, numbered,
-            entries ++ [{display: display, bare_tag: row.bare_tag}])
+            entries ++ [{display: display, bare_tag: row.bare_tag, form: st.tag_form}])
     }
 }
 

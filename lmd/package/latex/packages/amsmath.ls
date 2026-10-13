@@ -133,18 +133,35 @@ pub fn cell_asts(el, operators) {
         where ast != null) ast]
 }
 
-// cell_align(i) is the CSS alignment of the row's i-th cell
-fn alignment_row(source, gathered, cell_align, anchor, display, bare_tag, operators, offset) {
+// cell_align(i) is the CSS alignment of the row's i-th cell; tag is the row's
+// framed tag (tag_text) or null
+fn alignment_row(source, gathered, cell_align, anchor, tag, operators, offset) {
     let cells = row_cells(source, gathered);
     <div class: "latex-align-row", id: anchor,
         for (i, cell in cells)
             <span class: "latex-align-cell", style: "text-align:" ++ cell_align(i),
                 math_cell(cell, false, operators, offset)>
-        if (display != null) {
-            <span class: "latex-align-number",
-                if (bare_tag) display else "(" ++ display ++ ")">
-        }
+        if (tag != null) <span class: "latex-align-number", tag>
     >
+}
+
+// the text commands a mathtools tag form may apply to the number
+pub let TAG_FORMATS = {textbf: "font-weight:bold", textit: "font-style:italic", emph: "font-style:italic",
+    textsl: "font-style:oblique", textsf: "font-family:sans-serif", texttt: "font-family:monospace",
+    textrm: "", textup: "font-style:normal", textnormal: ""}
+
+pub fn tag_format(inner) =>
+    if (inner == null) null else TAG_FORMATS[util.strip_backslash(trim(inner))]
+
+// a tag as printed: in parentheses, framed by the current mathtools tag form, or
+// bare for \tag*; null when the row is unnumbered
+pub fn tag_text(display, bare, form) {
+    let style = if (form == null) null else tag_format(form.inner);
+    if (display == null) null
+    else if (bare) display
+    else if (form == null) "(" ++ display ++ ")"
+    else if (style == null or style == "") form.left ++ display ++ form.right
+    else <span form.left; <span style: style, display>; form.right>
 }
 
 let ANNOTATIONS = [
@@ -282,9 +299,15 @@ fn render_alignment(el, tag, rows, numbers, operators) {
                     else if (gathered) (c) => "center"
                     else (c) => columns[c % len(columns)],
                     if (row.label != null) util.slugify(row.label) else null,
-                    if (numbers != null and i < len(numbers)) numbers[i].display else row.tag,
-                    row.bare_tag, operators, el.source_offset)>
+                    row_tag(row, numbers, i), operators, el.source_offset)>
     }
+}
+
+// row i's framed tag: its number (or \tag) in the tag form current where it stands
+fn row_tag(row, numbers, i) {
+    let entry = if (numbers != null and i < len(numbers)) numbers[i] else null
+    tag_text(if (entry != null) entry.display else row.tag, row.bare_tag,
+        if (entry != null) entry.form else null)
 }
 
 pub fn render_environment(el, numbers, operators) {
@@ -294,14 +317,11 @@ pub fn render_environment(el, numbers, operators) {
         where entry.offset == null or el.source_offset == null or entry.offset < el.source_offset) entry]
     if (starts_with(tag, "equation")) {
         let row = rows[0]
-        let display = if (numbers != null and len(numbers) > 0) numbers[0].display else row.tag
+        let number_tag = row_tag(row, numbers, 0)
         if (row.error != null) util.unsupported_element("amsmath", row.error, el.source_offset)
         else <div class: "latex-equation",
             id: if (row.label != null) util.slugify(row.label) else null,
             math_cell(row.math, true, active_operators, el.source_offset);
-            if (display != null) {
-                <span class: "latex-eq-number",
-                    if (row.bare_tag) display else "(" ++ display ++ ")">
-            }>
+            if (number_tag != null) <span class: "latex-eq-number", number_tag>>
     } else render_alignment(el, tag, rows, numbers, active_operators)
 }

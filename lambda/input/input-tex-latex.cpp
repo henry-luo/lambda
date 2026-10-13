@@ -422,15 +422,21 @@ void set_resource_dir(const char* dir) {
     if (canonical) mem_free(canonical);
 }
 
-// a bundled resource: Lambda's own copy, never a TeX installation (Lambda_Design_TeX_Engine §4)
+// a bundled resource: Lambda's own copy, never a TeX installation (Lambda_Design_TeX_Engine §4).
+// Unmodified upstream files sit at the top; Lambda-owned bindings, which expand a
+// package's user commands into constructs the digester already owns, sit in binding/
 static bool bundled_path(const char* name, const char* ext, StrBuf* out) {
     if (!g_resource_dir[0] || !name || !*name || name[0] == '/' || strstr(name, "..")) return false;
-    strbuf_reset(out);
-    strbuf_append_str(out, g_resource_dir);
-    strbuf_append_char(out, '/');
-    strbuf_append_str(out, name);
-    strbuf_append_str(out, ext);
-    return file_exists(out->str) && !file_is_dir(out->str);
+    static const char* subdirs[] = {"/", "/binding/"};
+    for (const char* sub : subdirs) {
+        strbuf_reset(out);
+        strbuf_append_str(out, g_resource_dir);
+        strbuf_append_str(out, sub);
+        strbuf_append_str(out, name);
+        strbuf_append_str(out, ext);
+        if (file_exists(out->str) && !file_is_dir(out->str)) return true;
+    }
+    return false;
 }
 
 static bool bundled_exists(const char* name, const char* ext) {

@@ -1,0 +1,297 @@
+% physics.sty -- Lambda-owned binding of the physics package (CTAN physics 1.3,
+% Sergio C. de la Barrera), written from its manual rather than copied.
+%
+% A binding expands each user command into math the digester already owns:
+% \left...\right, \frac, \mathrm, \boldsymbol and the matrix environments
+% (vibe/latex/Lambda_Design_TeX_Engine.md §4). Every macro here is expandable at
+% use time -- no assignments -- so the commands also work inside the arguments of
+% \section, \caption and \footnote, which the engine expands without executing
+% assignments. Commands whose names math already has (\sin, \div, \Re, ...) reach
+% their original meaning through \noexpand, because the engine passes a math
+% command it does not define through to the digester unchanged.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{physics}[2026/10/13 v1.3 Lambda binding]
+\newif\ifphysics@arrowdel
+\newif\ifphysics@italicdiff
+\newif\ifphysics@trig \physics@trigtrue
+\DeclareOption{arrowdel}{\physics@arrowdeltrue}
+\DeclareOption{italicdiff}{\physics@italicdifftrue}
+\DeclareOption{notrig}{\physics@trigfalse}
+\ProcessOptions\relax
+
+% ---- delimiter sizing ------------------------------------------------------
+% \physics@size{star}{\big}{\Big}{\bigg}{\Bigg}{left}{right}{body}: a star keeps
+% the delimiters at their natural size, a size token fixes it, otherwise
+% \left...\right sizes them to the body
+\def\physics@size#1#2#3#4#5{%
+  \IfBooleanTF{#1}{\physics@fixed}{%
+  \IfBooleanTF{#2}{\physics@manual\bigl\bigr}{%
+  \IfBooleanTF{#3}{\physics@manual\Bigl\Bigr}{%
+  \IfBooleanTF{#4}{\physics@manual\biggl\biggr}{%
+  \IfBooleanTF{#5}{\physics@manual\Biggl\Biggr}{\physics@auto}}}}}}
+\def\physics@auto#1#2#3{\left#1#3\right#2}
+\def\physics@fixed#1#2#3{#1#3#2}
+\def\physics@manual#1#2#3#4#5{#1#3#5#2#4}
+% the argument forms an operator accepts: {x} as written, (x) and [x] sized
+\def\physics@oparg#1#2#3#4#5#6#7#8{%
+  \IfNoValueF{#6}{#6}%
+  \IfNoValueF{#7}{\physics@size{#1}{#2}{#3}{#4}{#5}{(}{)}{#7}}%
+  \IfNoValueF{#8}{\physics@size{#1}{#2}{#3}{#4}{#5}{[}{]}{#8}}}
+
+% ---- automatic bracing (manual §2.1) ----------------------------------------
+\DeclareDocumentCommand\quantity{ s t\big t\Big t\bigg t\Bigg g d() d[] d|| }{%
+  \IfNoValueF{#6}{\physics@size{#1}{#2}{#3}{#4}{#5}{\{}{\}}{#6}}%
+  \IfNoValueF{#7}{\physics@size{#1}{#2}{#3}{#4}{#5}{(}{)}{#7}}%
+  \IfNoValueF{#8}{\physics@size{#1}{#2}{#3}{#4}{#5}{[}{]}{#8}}%
+  \IfNoValueF{#9}{\physics@size{#1}{#2}{#3}{#4}{#5}{\vert}{\vert}{#9}}}
+\let\qty\quantity
+% one bracket pair around a braced argument
+\def\physics@pair#1#2#3{\DeclareDocumentCommand#1{ s t\big t\Big t\bigg t\Bigg m }%
+  {\physics@size{##1}{##2}{##3}{##4}{##5}{#2}{#3}{##6}}}
+\physics@pair\pqty()
+\physics@pair\bqty[]
+\physics@pair\Bqty\{\}
+\physics@pair\vqty\vert\vert
+\physics@pair\absolutevalue\lvert\rvert
+\physics@pair\norm\lVert\rVert
+\let\abs\absolutevalue
+\DeclareDocumentCommand\evaluated{ s t\big t\Big t\bigg t\Bigg g d(| d[| }{%
+  \IfNoValueF{#6}{\IfBooleanTF{#1}{#6\vert}{\physics@size{#1}{#2}{#3}{#4}{#5}{.}{\vert}{#6}}}%
+  \IfNoValueF{#7}{\physics@size{#1}{#2}{#3}{#4}{#5}{(}{\vert}{#7}}%
+  \IfNoValueF{#8}{\physics@size{#1}{#2}{#3}{#4}{#5}{[}{\vert}{#8}}}
+\let\eval\evaluated
+\DeclareDocumentCommand\order{ s t\big t\Big t\bigg t\Bigg m }{%
+  \mathcal{O}\physics@size{#1}{#2}{#3}{#4}{#5}{(}{)}{#6}}
+\def\physics@bracket#1#2#3{\DeclareDocumentCommand#1{ s t\big t\Big t\bigg t\Bigg m m }%
+  {\physics@size{##1}{##2}{##3}{##4}{##5}{#2}{#3}{##6,##7}}}
+\physics@bracket\commutator[]
+\physics@bracket\anticommutator\{\}
+\physics@bracket\poissonbracket\{\}
+\let\comm\commutator
+\let\acomm\anticommutator
+\let\pb\poissonbracket
+
+% ---- vector notation (manual §2.2) ------------------------------------------
+\DeclareDocumentCommand\vectorbold{ s m }{\IfBooleanTF{#1}{\boldsymbol{#2}}{\mathbf{#2}}}
+\DeclareDocumentCommand\vectorarrow{ s m }{\vec{\IfBooleanTF{#1}{\boldsymbol{#2}}{\mathbf{#2}}}}
+\DeclareDocumentCommand\vectorunit{ s m }{\hat{\IfBooleanTF{#1}{\boldsymbol{#2}}{\mathbf{#2}}}}
+\let\vb\vectorbold
+\let\va\vectorarrow
+\let\vu\vectorunit
+\def\dotproduct{\boldsymbol{\cdot}}
+\def\crossproduct{\boldsymbol{\times}}
+\let\vdot\dotproduct
+\let\cross\crossproduct
+\let\cp\crossproduct
+\def\physics@del{\ifphysics@arrowdel\vec{\boldsymbol{\nabla}}\else\boldsymbol{\nabla}\fi}
+% \grad{x} as written, \grad(x) and \grad[x] braced like \qty
+\def\physics@vecop#1#2{\DeclareDocumentCommand#1{ s t\big t\Big t\bigg t\Bigg g d() d[] }%
+  {#2\physics@oparg{##1}{##2}{##3}{##4}{##5}{##6}{##7}{##8}}}
+\physics@vecop\gradient{\physics@del}
+\physics@vecop\divergence{\physics@del\boldsymbol{\cdot}}
+\physics@vecop\curl{\physics@del\boldsymbol{\times}}
+\physics@vecop\laplacian{\nabla^2}
+\let\grad\gradient
+\def\divisionsymbol{\noexpand\div}
+\let\div\divergence
+
+% ---- operators (manual §2.3) ------------------------------------------------
+% a function with an optional power and automatic parentheses: \sin[2](x)
+\def\physics@fn#1#2{\DeclareDocumentCommand#1{ s o d() }%
+  {#2\IfNoValueF{##2}{^{##2}}\IfNoValueF{##3}{\IfBooleanTF{##1}{(##3)}{\left(##3\right)}}}}
+% the long names keep the plain operators
+\def\sine{\noexpand\sin}             \def\cosine{\noexpand\cos}
+\def\tangent{\noexpand\tan}          \def\cosecant{\noexpand\csc}
+\def\secant{\noexpand\sec}           \def\cotangent{\noexpand\cot}
+\def\hypsine{\noexpand\sinh}         \def\hypcosine{\noexpand\cosh}
+\def\hyptangent{\noexpand\tanh}      \def\hypcosecant{\operatorname{csch}}
+\def\hypsecant{\operatorname{sech}}  \def\hypcotangent{\noexpand\coth}
+\def\arcsine{\noexpand\arcsin}       \def\arccosine{\noexpand\arccos}
+\def\arctangent{\noexpand\arctan}    \def\arccosecant{\operatorname{arccsc}}
+\def\arcsecant{\operatorname{arcsec}} \def\arccotangent{\operatorname{arccot}}
+\def\asine{\operatorname{asin}}      \def\acosine{\operatorname{acos}}
+\def\atangent{\operatorname{atan}}   \def\acosecant{\operatorname{acsc}}
+\def\asecant{\operatorname{asec}}    \def\acotangent{\operatorname{acot}}
+\def\exponential{\noexpand\exp}      \def\logarithm{\noexpand\log}
+\def\naturallogarithm{\noexpand\ln}  \def\determinant{\noexpand\det}
+\def\Probability{\noexpand\Pr}
+\ifphysics@trig
+  \physics@fn\sin\sine \physics@fn\cos\cosine \physics@fn\tan\tangent
+  \physics@fn\csc\cosecant \physics@fn\sec\secant \physics@fn\cot\cotangent
+  \physics@fn\sinh\hypsine \physics@fn\cosh\hypcosine \physics@fn\tanh\hyptangent
+  \physics@fn\csch\hypcosecant \physics@fn\sech\hypsecant \physics@fn\coth\hypcotangent
+  \physics@fn\arcsin\arcsine \physics@fn\arccos\arccosine \physics@fn\arctan\arctangent
+  \physics@fn\arccsc\arccosecant \physics@fn\arcsec\arcsecant \physics@fn\arccot\arccotangent
+  \physics@fn\asin\asine \physics@fn\acos\acosine \physics@fn\atan\atangent
+  \physics@fn\acsc\acosecant \physics@fn\asec\asecant \physics@fn\acot\acotangent
+\fi
+\physics@fn\exp\exponential \physics@fn\log\logarithm \physics@fn\ln\naturallogarithm
+\physics@fn\det\determinant \physics@fn\Pr\Probability
+% named operators followed by \qty's bracing: \tr(x), \Res[f(z)], \Re{z}
+\def\trace{\operatorname{tr}\qty}   \let\tr\trace
+\def\Trace{\operatorname{Tr}\qty}   \let\Tr\Trace
+\def\rank{\operatorname{rank}\qty}
+\def\erf{\operatorname{erf}\qty}
+\def\Res{\operatorname{Res}\qty}
+\def\real{\noexpand\Re}
+\def\imaginary{\noexpand\Im}
+\def\Re{\operatorname{Re}\qty}
+\def\Im{\operatorname{Im}\qty}
+\newcommand\principalvalue[1]{\mathcal{P}#1}
+\newcommand\PV[1]{\mathrm{P.V.}#1}
+\let\pv\principalvalue
+
+% ---- quick quad text (manual §2.4); a star drops the leading \quad -----------
+\DeclareDocumentCommand\qqtext{ s m }{\IfBooleanF{#1}{\quad}\text{#2}\quad}
+\let\qq\qqtext
+\def\qcomma{,\quad}
+\let\qc\qcomma
+\def\physics@qword#1#2{\DeclareDocumentCommand#1{ s }{\IfBooleanF{##1}{\quad}\text{#2}\quad}}
+\physics@qword\qcc{c.c.}
+\physics@qword\qif{if}             \physics@qword\qthen{then}
+\physics@qword\qelse{else}         \physics@qword\qotherwise{otherwise}
+\physics@qword\qunless{unless}     \physics@qword\qgiven{given}
+\physics@qword\qusing{using}       \physics@qword\qassume{assume}
+\physics@qword\qsince{since}       \physics@qword\qlet{let}
+\physics@qword\qfor{for}           \physics@qword\qall{all}
+\physics@qword\qeven{even}         \physics@qword\qodd{odd}
+\physics@qword\qinteger{integer}   \physics@qword\qand{and}
+\physics@qword\qor{or}             \physics@qword\qas{as}
+\physics@qword\qin{in}
+
+% ---- derivatives (manual §2.5) ----------------------------------------------
+\def\physics@d{\ifphysics@italicdiff d\else\mathrm{d}\fi}
+\def\physics@power#1{\IfNoValueF{#1}{^{#1}}}
+% \dd, \dd[n]{x}, \dd(x): the differential takes inner spacing when it has an argument
+\def\physics@differential#1#2#3#4{%
+  \IfNoValueTF{#3}%
+    {\IfNoValueTF{#4}{#1\physics@power{#2}}{\mathinner{#1\physics@power{#2}\left(#4\right)}}}%
+    {\mathinner{#1\physics@power{#2}#3}}}
+\DeclareDocumentCommand\differential{ o g d() }{\physics@differential{\physics@d}{#1}{#2}{#3}}
+\DeclareDocumentCommand\variation{ o g d() }{\physics@differential{\delta}{#1}{#2}{#3}}
+\let\dd\differential
+\let\var\variation
+\def\physics@frac#1#2#3{\IfBooleanTF{#1}{#2/#3}{\frac{#2}{#3}}}
+% \physics@derivative{d}{star}{power}{f or x}{x}{(argument)}
+\def\physics@derivative#1#2#3#4#5#6{%
+  \IfNoValueTF{#5}%
+    {\physics@frac{#2}{#1\physics@power{#3}}{#1#4\physics@power{#3}}%
+      \IfNoValueF{#6}{\left(#6\right)}}%
+    {\physics@frac{#2}{#1\physics@power{#3}#4}{#1#5\physics@power{#3}}}}
+\DeclareDocumentCommand\derivative{ s o m g d() }{\physics@derivative{\physics@d}{#1}{#2}{#3}{#4}{#5}}
+\DeclareDocumentCommand\functionalderivative{ s o m g d() }{\physics@derivative{\delta}{#1}{#2}{#3}{#4}{#5}}
+% a third argument makes a mixed partial
+\DeclareDocumentCommand\partialderivative{ s o m g g d() }{%
+  \IfNoValueTF{#5}{\physics@derivative{\partial}{#1}{#2}{#3}{#4}{#6}}%
+    {\physics@frac{#1}{\partial^{\IfNoValueTF{#2}{2}{#2}}#3}{\partial #4\partial #5}}}
+\let\dv\derivative
+\let\pdv\partialderivative
+\let\fdv\functionalderivative
+
+% ---- Dirac notation (manual §2.6) -------------------------------------------
+\DeclareDocumentCommand\ket{ s m }{\IfBooleanTF{#1}{\vert#2\rangle}{\left\vert#2\right\rangle}}
+% a bra directly followed by a ket contracts into one bracket
+\DeclareDocumentCommand\bra{ s m t\ket s g }{%
+  \IfBooleanTF{#3}%
+    {\IfBooleanTF{#1}{\langle#2\vert#5\rangle}%
+      {\IfBooleanTF{#4}{\langle#2\vert#5\rangle}{\left\langle#2\middle\vert#5\right\rangle}}}%
+    {\IfBooleanTF{#1}{\langle#2\vert}{\left\langle#2\right\vert}}}
+\DeclareDocumentCommand\innerproduct{ s m g }{%
+  \IfBooleanTF{#1}{\langle#2\vert\IfNoValueTF{#3}{#2}{#3}\rangle}%
+    {\left\langle#2\middle\vert\IfNoValueTF{#3}{#2}{#3}\right\rangle}}
+\DeclareDocumentCommand\outerproduct{ s m g }{%
+  \IfBooleanTF{#1}{\vert#2\rangle\langle\IfNoValueTF{#3}{#2}{#3}\vert}%
+    {\left\vert#2\middle\rangle\middle\langle\IfNoValueTF{#3}{#2}{#3}\right\vert}}
+\let\braket\innerproduct
+\let\ip\innerproduct
+\let\dyad\outerproduct
+\let\ketbra\outerproduct
+\let\op\outerproduct
+% \expval{A} or \expval{A}{\Psi}; one star fixes every delimiter, two size them together
+\def\physics@sandwich#1#2#3#4#5{%
+  \IfBooleanTF{#2}{\left\langle#3\middle\vert#4\middle\vert#5\right\rangle}%
+    {\IfBooleanTF{#1}{\langle#3\vert#4\vert#5\rangle}%
+      {\left\langle#3\right\vert#4\left\vert#5\right\rangle}}}
+\DeclareDocumentCommand\expectationvalue{ s s m g }{%
+  \IfNoValueTF{#4}{\IfBooleanTF{#1}{\langle#3\rangle}{\left\langle#3\right\rangle}}%
+    {\physics@sandwich{#1}{#2}{#4}{#3}{#4}}}
+\DeclareDocumentCommand\matrixelement{ s s m m m }{\physics@sandwich{#1}{#2}{#3}{#4}{#5}}
+\let\expval\expectationvalue
+\let\ev\expectationvalue
+\let\mel\matrixelement
+
+% ---- matrices (manual §2.7) -------------------------------------------------
+\def\physics@matrix#1#2{\begin{#1}#2\end{#1}}
+\DeclareDocumentCommand\matrixquantity{ s g d() d[] d|| }{%
+  \IfNoValueF{#2}{\physics@matrix{matrix}{#2}}%
+  \IfNoValueF{#3}{\IfBooleanTF{#1}{\left(\physics@matrix{matrix}{#3}\right)}{\physics@matrix{pmatrix}{#3}}}%
+  \IfNoValueF{#4}{\physics@matrix{bmatrix}{#4}}%
+  \IfNoValueF{#5}{\physics@matrix{vmatrix}{#5}}}
+\DeclareDocumentCommand\smallmatrixquantity{ s g d() d[] d|| }{%
+  \IfNoValueF{#2}{\physics@matrix{smallmatrix}{#2}}%
+  \IfNoValueF{#3}{\left(\physics@matrix{smallmatrix}{#3}\right)}%
+  \IfNoValueF{#4}{\left[\physics@matrix{smallmatrix}{#4}\right]}%
+  \IfNoValueF{#5}{\left\vert\physics@matrix{smallmatrix}{#5}\right\vert}}
+\let\mqty\matrixquantity
+\let\smqty\smallmatrixquantity
+\newcommand\pmqty[1]{\physics@matrix{pmatrix}{#1}}
+\newcommand\Pmqty[1]{\left(\physics@matrix{matrix}{#1}\right)}
+\newcommand\bmqty[1]{\physics@matrix{bmatrix}{#1}}
+\newcommand\vmqty[1]{\physics@matrix{vmatrix}{#1}}
+\newcommand\spmqty[1]{\left(\physics@matrix{smallmatrix}{#1}\right)}
+\newcommand\sPmqty[1]{\left(\physics@matrix{smallmatrix}{#1}\right)}
+\newcommand\sbmqty[1]{\left[\physics@matrix{smallmatrix}{#1}\right]}
+\newcommand\svmqty[1]{\left\vert\physics@matrix{smallmatrix}{#1}\right\vert}
+\newcommand\matrixdeterminant[1]{\physics@matrix{vmatrix}{#1}}
+\newcommand\smallmatrixdeterminant[1]{\left\vert\physics@matrix{smallmatrix}{#1}\right\vert}
+\let\mdet\matrixdeterminant
+\let\smdet\smallmatrixdeterminant
+% \physics@cells{row}{column}{rows}{columns}{cell macro}: cells row by row; the cell
+% macro receives its row and column numbers
+\def\physics@cells#1#2#3#4#5{%
+  #5{#1}{#2}%
+  \ifnum#2<#4 &\physics@step{\physics@cells{#1}}{#2}{#3}{#4}{#5}%
+  \else\ifnum#1<#3 \\\physics@step\physics@rowstart{#1}{#3}{#4}{#5}\fi\fi}
+% \physics@step{continuation}{n}: the continuation applied to n+1 as digits
+\def\physics@step#1#2{\expandafter\physics@@step\expandafter{\the\numexpr#2+1}{#1}}
+\def\physics@@step#1#2{#2{#1}}
+\def\physics@rowstart#1{\physics@cells{#1}{1}}
+\def\physics@identity#1#2{\ifnum#1=#2 1\else 0\fi}
+\newcommand\identitymatrix[1]{\physics@cells{1}{1}{#1}{#1}\physics@identity}
+\let\imat\identitymatrix
+% \xmat*{a}{n}{m} indexes its elements; a row or column vector takes one index
+\DeclareDocumentCommand\xmatrix{ s m m m }{%
+  \IfBooleanTF{#1}{\ifnum#3=1 \physics@cells{1}{1}{#3}{#4}{\physics@xone{#2}}%
+      \else\ifnum#4=1 \physics@cells{1}{1}{#3}{#4}{\physics@xrow{#2}}%
+      \else\physics@cells{1}{1}{#3}{#4}{\physics@xboth{#2}}\fi\fi}%
+    {\physics@cells{1}{1}{#3}{#4}{\physics@xplain{#2}}}}
+\def\physics@xplain#1#2#3{#1}
+\def\physics@xone#1#2#3{#1_{#3}}
+\def\physics@xrow#1#2#3{#1_{#2}}
+\def\physics@xboth#1#2#3{#1_{#2#3}}
+\newcommand\zeromatrix[2]{\xmatrix{0}{#1}{#2}}
+\let\xmat\xmatrix
+\let\zmat\zeromatrix
+\newcommand\paulimatrix[1]{\physics@pauli#1\relax}
+\def\physics@pauli#1#2\relax{%
+  \if x#1 0&1\\1&0\else\if y#1 0&-i\\i&0\else\if z#1 1&0\\0&-1\else
+  \ifcase#1 1&0\\0&1\or 0&1\\1&0\or 0&-i\\i&0\or 1&0\\0&-1\fi\fi\fi\fi}
+\let\pmat\paulimatrix
+% \dmat[fill]{a,b,...}: the list's elements on the diagonal, the fill elsewhere; an
+% element holding & or \\ is a block and stays one cell as its own matrix
+\def\physics@count#1,#2\@nil{\ifx\relax#2\relax 1\else\the\numexpr1+\physics@count#2\@nil\relax\fi}
+\def\physics@nth#1#2,#3\@nil{\ifnum#1=1 \physics@block{#2}\else
+  \expandafter\physics@nth\expandafter{\the\numexpr#1-1\relax}#3\@nil\fi}
+\def\physics@block#1{\physics@ifamp#1&\@nil{\physics@matrix{matrix}{#1}}{#1}}
+\def\physics@ifamp#1&#2\@nil{\ifx\relax#2\relax\expandafter\@secondoftwo\else\expandafter\@firstoftwo\fi}
+\def\physics@diag#1#2#3#4{\ifnum#3=#4 \physics@nth{#3}#2,\@nil\else#1\fi}
+% \physics@antidiag{fill}{list}{size}{row}{column}
+\def\physics@antidiag#1#2#3#4#5{\ifnum\numexpr#4+#5\relax=\numexpr#3+1\relax
+  \physics@nth{#4}#2,\@nil\else#1\fi}
+\DeclareDocumentCommand\diagonalmatrix{ O{} m }{%
+  \physics@cells{1}{1}{\physics@count#2,\@nil}{\physics@count#2,\@nil}{\physics@diag{#1}{#2}}}
+\DeclareDocumentCommand\antidiagonalmatrix{ O{} m }{%
+  \physics@cells{1}{1}{\physics@count#2,\@nil}{\physics@count#2,\@nil}%
+    {\physics@antidiag{#1}{#2}{\physics@count#2,\@nil}}}
+\let\dmat\diagonalmatrix
+\let\admat\antidiagonalmatrix

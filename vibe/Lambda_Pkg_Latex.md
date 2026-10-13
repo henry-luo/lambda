@@ -4,7 +4,7 @@
 
 **Scope:** The `lambda.latex` package: turning a LaTeX document into semantic HTML elements, package support, and the HTML, SVG and PDF outputs reached through Radiant. Math typesetting is out of scope here and has its own design.
 
-**Formal linkage:** **D7.2.7** rules the TeX expansion front end: expansion without typesetting, the S1.8 reading, the file gate, package resolution and the single front end. **D7.2.1–D7.2.4** place shipped packages in source modules with immutable bindings under the `lambda.*` namespace and make package selection a static registry. **S16.9.8** governs imports. **S1.8** forbids executing a runtime string as Lambda code. **S12.1.1v2** and **S12.4.1** make rendering a pure transform over eagerly acquired input. **D7.1.2v2** and **D7.5.2** govern resource acquisition. **S7.4.1–S7.4.4** govern diagnostics. **S2.6.3–S2.6.5** and **D2.6.5v4** govern the command-argument content contract recorded in [Input_Latex.md](input/Input_Latex.md).
+**Formal linkage:** **D7.2.7v2** rules the TeX expansion front end: expansion without typesetting, the S1.8 reading, the file gate, package resolution and the single front end. **D7.2.1–D7.2.4** place shipped packages in source modules with immutable bindings under the `lambda.*` namespace and make package selection a static registry. **S16.9.8** governs imports. **S1.8** forbids executing a runtime string as Lambda code. **S12.1.1v2** and **S12.4.1** make rendering a pure transform over eagerly acquired input. **D7.1.2v2** and **D7.5.2** govern resource acquisition. **S7.4.1–S7.4.4** govern diagnostics. **S2.6.3–S2.6.5** and **D2.6.5v4** govern the command-argument content contract recorded in [Input_Latex.md](input/Input_Latex.md).
 
 **Detailed designs:**
 
@@ -93,7 +93,7 @@ The parser grows only where a source distinction is otherwise unrecoverable, and
 
 ### 4.2 Expansion before digestion
 
-The engine always runs first (**D7.2.7**). Definitions, local packages and bundled programming packages execute as TeX. Document constructs pass through as constructors, arguments of passed-through commands expand in argument mode, and registry-declared raw commands (bussproofs, `semantic`) keep their arguments token for token. Definition commands are executed and also echoed, so adapters that read definitions as data still see them. Engine diagnostics reach the script on the AST root and are reported under the `tex` package. See the [engine design](latex/Lambda_Design_TeX_Engine.md) §2.
+The engine always runs first (**D7.2.7v2**). Definitions, local packages and bundled packages, upstream programming packages and Lambda-owned bindings alike, execute as TeX. Document constructs pass through as constructors, arguments of passed-through commands expand in argument mode, and registry-declared raw commands (bussproofs, `semantic`) keep their arguments token for token. Definition commands are executed and also echoed, so adapters that read definitions as data still see them. Engine diagnostics reach the script on the AST root and are reported under the `tex` package. See the [engine design](latex/Lambda_Design_TeX_Engine.md) §2.
 
 ### 4.3 Entry points
 
@@ -166,12 +166,12 @@ Each entry records:
 
 A declared name resolves to one of four things:
 
-- **A bundled programming package.** It runs on the engine. If it is also an adapter, its declaration passes through to the adapter as well.
+- **A bundled package.** It runs on the engine, whether an upstream programming package or a Lambda-owned binding. If it is also an adapter, its declaration passes through to the adapter as well.
 - **A script adapter.** The registry activates it and validates its options.
 - **A `.sty` or `.cls` beside the document.** It runs on the engine, but only when the name is not an adapter.
 - **Nothing.** The registry reports `unknown-package` at the declaration.
 
-This order is ruled in **D7.2.7**; the engine design §5 gives the details. A local file never replaces an adapter, because the adapter owns HTML semantics that TeX typesetting code cannot supply.
+This order is ruled in **D7.2.7v2**; the engine design §5 gives the details. A local file never replaces an adapter, because the adapter owns HTML semantics that TeX typesetting code cannot supply.
 
 ### 6.3 Four kinds of package support
 
@@ -179,7 +179,7 @@ The right mechanism depends on what a package does.
 
 - **Programming packages** emit no typeset output: `etoolbox`, `xkeyval`, `kvoptions`, `calc`, `ifthen`, expl3 and the like. The original, unmodified source runs on the engine. Widening this set is vendor and test work, not design work.
 - **Semantic packages** define what document constructs mean: theorems, tables, citations, graphics, references, languages. They get script adapters, because their meaning must become HTML elements. Most of the catalogue is of this kind.
-- **Thin bindings** suit packages whose user commands are mostly option handling and argument parsing over a few output points. Such a package can be bound by a small Lambda-owned `.sty` on the engine, with the script adapter keeping the semantics, rather than by reimplementing its macro layer in script. This is the direction for growth and has not been applied to a package yet.
+- **Thin bindings** suit packages whose user commands are mostly option handling and argument parsing over a few output points. Such a package is bound by a small Lambda-owned `.sty` in `lmd/package/latex/tex/binding/`, which runs on the engine and expands the commands into constructs the digester and adapters already own, while a registry row keeps options and any semantics in script (**D7.2.7v2**, engine design §4). physics and the mathtools macro layer are bound this way; this is the direction for growth.
 - **Native and script subsystems** cover what Lambda owns outright: math rendering (`lambda.doc.math`), PGF/TikZ drawing (`lambda.doc.tikz`), document-class semantics (sectioning, title blocks, floats and numbering in script), and everything that touches fonts, microtype or page layout (Radiant). Their upstream TeX implementations (`amsmath`, `pgf`, `microtype`, the standard classes and so on) are never run: those names are script adapters or built-in class profiles, so a bundled or local file with the same name is skipped, and their commands reach the owning subsystem as constructors. Running them would make the engine a second typesetter (§2) and give drawing or math two owners.
 
 Real-world classes also redefine document commands through LaTeX kernel internals such as `\@startsection`, `\@maketitle`, `\@float` and `\@makecaption`. Exposing those internals as constructors in the engine's kernel lets such classes still produce semantic headings and floats (engine design §10).
@@ -255,7 +255,7 @@ One shared table model serves `tabular`, the `array` column types, `multirow`, `
 
 ## 9. Compatibility matrix
 
-The matrix was checked on 2026-10-07; the engine, bibliography, natbib and corpus tests were rerun and pass on 2026-10-12. The adapter catalogue has 63 entries. The rows below cover the packages with active behavior. The remaining catalogue entries are declarations with defined effects, each accepted under the contract of its row or listed in the last row.
+The matrix was checked on 2026-10-07; the engine, bibliography, natbib and corpus tests were rerun and pass on 2026-10-12, and the Phase V rows were added through 2026-10-13. The adapter catalogue has 98 entries. The rows below cover the packages with active behavior. The remaining catalogue entries are declarations with defined effects, each accepted under the contract of its row or listed in the last row.
 
 | Package | Supported in HTML | PDF/SVG | Explicitly unsupported |
 |---|---|---|---|
@@ -272,7 +272,10 @@ The matrix was checked on 2026-10-07; the engine, bibliography, natbib and corpu
 | `tikz`, `pgf`, `pgfplots` | The bounded profile of [Lambda_Pkg_Tikz.md](Lambda_Pkg_Tikz.md); allowed libraries `patterns`, `decorations.pathmorphing`, `lindenmayersystems`, `backgrounds`, `positioning`, `calc`, `shapes.geometric`, `arrows.meta`, `math` | Vector geometry in SVG/PDF; labels through the math bridge | Full PGF/PGFPlots, other libraries, unbounded programs |
 | `tikzpeople` | 29 named shapes, pins, colors, accessories, mirroring, demo commands | Simplified silhouettes, diagnosed as approximations | Exact artwork, unknown shapes |
 | `amsthm`, `bussproofs`, `semantic`, `IEEEtrantools`; `amsart`, `standalone` | Theorem styles, shared and section counters, proofs and QED; proof trees; inference diagrams; used `IEEEeqnarray*` forms; bounded class profiles | CSS and math approximation | TeX alignment, arbitrary theorem macros; `mathabx` and `amsxtra` are unknown packages |
-| `amscd`, `cancel`, `latexsym`, `stmaryrd` (subset), `esint` (subset), `upgreek`, `bbm`, `dsfont`, `gensymb` | CD diagrams; `\cancel` family; package symbols and upright Greek in `lambda.doc.math`; `\mathbbm`/`\mathds` as double-struck; gensymb symbols in text and math | Math SVG | CD dimensions uncertified; `\cancelto` (M8); double-struck digits render plain (no bundled glyphs); symbols outside the tables are reported as `unsupported-math-command` |
+| `amscd`, `cancel`, `latexsym`, `stmaryrd` (subset), `esint` (subset), `upgreek`, `bbm`, `dsfont`, `gensymb`, `bm` | CD diagrams; `\cancel` family and `\cancelto`; package symbols and upright Greek in `lambda.doc.math`; `\mathbbm`/`\mathds` as double-struck; gensymb symbols in text and math; `\bm`/`\hm` as `\boldsymbol` | Math SVG | CD dimensions uncertified; double-struck digits render plain (no bundled glyphs); `\boldsymbol` does not bold operator symbols; symbols outside the tables are reported as `unsupported-math-command` |
+| `physics` | Every command group of physics 1.3 (bracing, vectors, operators with trig auto-bracing, quick-quad text, derivatives, Dirac notation, matrix macros) and the `arrowdel`, `italicdiff` and `notrig` options, through the engine binding (§6.3); also inside section titles, captions and footnotes | Math SVG | Sizing follows `\left…\right` rather than physics' exact `\big` choices; loading `siunitx` too is a `conflicting-packages` error (both define `\qty`) |
+| `mathtools` | `\DeclarePairedDelimiter`/`X`/`XPP` with `\delimsize`, `\prescript`, `\splitfrac`/`\splitdfrac`, `\adjustlimits`, `\MoveEqLeft`, `\shortintertext` (as `\intertext`), colon relations, the small fenced matrices, `drcases`, starred cases with a text column, `multlined`, `lgathered`/`rgathered`, tag forms (`\newtagform`, `\usetagform`) on tags and `\eqref` | Math SVG | `\mathtoolsset`; tag number formats other than the text font commands (`unsupported-tag-format`); `\cramped`, `\smashoperator` and `\adjustlimits` keep their content without the script adjustment |
+| `nicefrac`, `xfrac`, `mhchem` | `\nicefrac` and `\sfrac` as slanted fractions in math or text; `\ce` and `\pu` through the bounded mhchem profile of [Lambda_Pkg_Math.md](Lambda_Pkg_Math.md) §7, in math or text | Math SVG | xfrac instances and the nicefrac font option; mhchem notation outside the profile passes through unchanged |
 | `pifont`, `marvosym` | `\ding{n}` by the Unicode ZapfDingbats mapping, `dinglist`, `dingautolist`; a bounded marvosym table | Unicode glyphs through font fallback | `\dingline`, `\dingfill`, codes and names outside the tables |
 | `placeins`, `indentfirst`, `bookmark` | `\FloatBarrier` (floats never move); indented first paragraphs; `\bookmark[level=…]{title}` at its own position (loads `hyperref`) | PDF outlines | `\bookmark` `dest` and other keys |
 | `array`, `multirow`, `makecell`, `slashbox`, `diagbox`, `tabularx`, `cellspace` | Shared table model (§8.4) | Continuous tables | Arbitrary column programs, TeX cell geometry |
@@ -346,6 +349,7 @@ These were reproduced on 2026-10-12.
 | 2026-10-13 (Phase V M1) | Kernel, hyperref and graphicx completion ([Lambda_Impl_Latex_Packages.md](impl/Lambda_Impl_Latex_Packages.md) §5).<br>**Kernel commands:** `\textup`/`\textmd`/`\textnormal`, super- and subscripts, `\ensuremath`, NFSS declarations and `\linespread`, `\mathversion`, `\rule` and working fills, page hints, `\pagenumbering`, marks, two-column documents, `\thanks` and `\and`, `titlepage`, footnote marks and texts, `\addcontentsline`.<br>**Environments:** `tabbing` (with a neutral parser change), `eqnarray`, `list`/`trivlist`.<br>**hyperref:** `\hypertarget`, `\hyperlink`, `\texorpdfstring`.<br>**graphicx:** the box transforms, and the `angle` key now turns counterclockwise.<br>`alltt` is deferred. |
 | 2026-10-13 (Phase V M2) | Declarations and symbol tables (§6 of the plan).<br>**Rows:** textcomp, gensymb, nameref, epstopdf, amscd, cancel and the math symbol and alphabet packages (latexsym, stmaryrd, esint, upgreek, bbm, dsfont).<br>**Small adapters:** placeins, indentfirst, bookmark, pifont, marvosym.<br>**Math:** six core symbols that were painted as words, `\cal` as a math font switch, and an unmapped scan that also covers parser symbol names.<br>**Registry:** package implications became data.<br>`amsxtra` is deferred. |
 | 2026-10-13 (Phase V M4) | Floats and algorithms (§8 of the plan).<br>**Float kinds:** dynamic, from packages and `\newfloat`, with float styles.<br>**Packages:** float, algorithm with algpseudocode or algorithmic, algorithm2e, subfig, subfigure, wrapfig, rotating, pdflscape, lscape.<br>**Fix:** a float's `[placement]` no longer prints in the output.<br>**Registry:** preamble commands became data. |
+| 2026-10-13 (Phase V M8) | Math packages (§12 of the plan).<br>**Ruling:** **D7.2.7v2** admits Lambda-owned bindings as bundled packages; physics and the mathtools macro layer are the first.<br>**Math:** colon relations, `\bm`, `\cancelto`, slanted fractions, the mathtools environments and the bounded mhchem profile in `lambda.doc.math`; an unknown math environment is now reported instead of silently mangled.<br>**Script:** mathtools tag forms on equation tags and `\eqref`; one `amsmath.tag_text` frames every tag; `\nicefrac`, `\sfrac`, `\ce` and `\pu` render in text; analysis gained a diagnostics list. |
 
 The retired documents are:
 

@@ -64,7 +64,7 @@ fn parse_newcommand(nc_el) {
 fn extract_newcommand(nc_el, nc_n) {
     // first child is the command name string (e.g. "\\greeting")
     let raw_name = get_cmd_name(nc_el[0])
-    let cmd_name = strip_backslash(raw_name)
+    let cmd_name = util.strip_backslash(raw_name)
     // find param count, optional default, and body
     let pb = find_param_and_body(nc_el, 1, nc_n)
     let raw_body = util.raw_argument(nc_el, "required", 1)
@@ -90,11 +90,6 @@ fn get_cmd_name(node) {
     if (node is string) node
     else if (node is element) util.text_of(node)
     else string(node)
-}
-
-fn strip_backslash(s) {
-    if (len(s) > 0 and slice(s, 0, 1) == "\\") slice(s, 1, len(s))
-    else s
 }
 
 // find brack_group (param count) and curly_group (body) from children starting at j

@@ -7,6 +7,7 @@ import sym: .symbols
 import spaces: .spacing_table
 import util: .util
 import graphics: .graphics
+import mhchem: .mhchem
 
 pub fn render(ast, options) map | error {
     if (ast.error != null) error("math: " ++ string(ast.error))
@@ -144,7 +145,8 @@ fn node(n, c) {
     else if (not (n is element)) bx.empty()
     else match name(n) {
         case 'subsup': scripts(n, c)^
-        case 'fraction': fraction(n, c)^
+        case 'fraction': (if (slanted(n)) slanted_fraction(n, c) else fraction(n, c))^
+        case 'chemistry': group(mhchem.items(n), c)^
         case 'binomial': fraction(n, c)^
         case 'genfrac': fraction(n, c)^
         case 'infix_frac': fraction(n, c)^
@@ -221,11 +223,14 @@ pub fn maps_command(key) =>
 pub fn unmapped_commands(n) {
     if (n is array or n is list) [for (item in n, key in unmapped_commands(item)) key]
     else if (not (n is element)) []
+    else if (name(n) == 'chemistry') unmapped_commands(mhchem.items(n))
     else {
         // both go through command_node; a symbol_command name can lack a table entry too
         let key = if (name(n) == 'command' or name(n) == 'symbol_command')
             command_name(string(n.name or n.cmd or "")) else null
-        let own = if (key != null and not maps_command(key)) [key] else [];
+        // the parser skips an environment it does not know, keeping only its name
+        let own = if (name(n) == 'ignored_begin' and n.name != null) ["begin{" ++ string(n.name) ++ "}"]
+            else if (key != null and not maps_command(key)) [key] else [];
         // element iteration yields attribute values as well as content
         own ++ [for (child in n, found in unmapped_commands(child)) found]
     }
@@ -242,6 +247,8 @@ fn command(raw, c) {
         let is_large = atom == "mop"
         let result = if (is_large and c.style == "display")
             stretch.glyph(font.large_operator(c.profile, ord(unicode))^, metric(c, "display_operator_min_height"), true, scale(c), atom)^
+            // a composed relation (mathtools' :=) is one atom, with no glue between its pieces
+            else if (len(unicode) > 1) bx.row([for (ch in split(unicode, "")) character(ch, c, atom)^])
             // upgreek letters keep their upright shape in math italic
             else text(unicode, if (is_large or sym.is_upright(key)) {*:c, variant: "normal"} else c)^
         let centered = if (is_large) center_axis(result, c) else result;
@@ -402,6 +409,24 @@ fn text_baseline(c) number | error {
     // sixptsize is a math extension, not a size10.clo text-baseline definition.
     if (amount == null) error("math: no text-strut baseline defined for \\sixptsize")
     else amount * font.UNITS * c.size
+}
+
+fn slanted(n) => contains(["nicefrac", "sfrac"], command_name(string(n.cmd or ""))) or false
+
+// nicefrac.sty's slanted fraction: a script-size numerator raised half an x-height,
+// a slash kerned in by 0.1em and 0.15em, and a script-size denominator lowered a
+// quarter x-height. xfrac's \sfrac takes the same shape and an optional separator.
+fn slanted_fraction(n, c) {
+    let numer = node(n.numer, script(c))^
+    let denom = node(n.denom, {*:script(c), cramped: true})^
+    let slash = if (n.separator != null) node(n.separator, c)^ else character("/", c, "mord")^
+    let em = font.UNITS * scale(c)
+    let ex = metric(c, "accent_base_height")
+    let slash_x = numer.width - 0.1 * em
+    let denom_x = slash_x + slash.width - 0.15 * em
+    let composed = bx.compose([{box: numer, x: 0.0, y: -0.5 * ex}, {box: slash, x: slash_x, y: 0.0},
+        {box: denom, x: denom_x, y: 0.25 * ex}], denom_x + denom.width, "mord");
+    {*:composed, body: <g 'data-math-kind': "slanted-fraction", composed.body>}
 }
 
 fn fraction(n, c) {
@@ -821,7 +846,8 @@ fn transformed(n, c) {
         let path = "M0 " ++ string(base.depth) ++ " L" ++ string(pad) ++ " " ++ string(0.0 - base.height) ++
             " M0 " ++ string(base.depth) ++ " H" ++ string(raised.width);
         {*:raised, body:<g <path d:path, fill:"none", stroke:"currentColor", 'stroke-width':metric(c,"fraction_rule_thickness")> raised.body>}
-    } else {
+    } else if (key == "cancelto") cancel_to(n, base, c)^
+    else {
         let x = base.width
         let top = 0.0 - base.height
         let bottom = base.depth
@@ -831,6 +857,31 @@ fn transformed(n, c) {
         {*:base, character:false, body:<g 'data-math-kind':key, base.body;
             <path d:d, fill:"none", stroke:"currentColor", 'stroke-width':metric(c,"fraction_rule_thickness")>>}
     }
+}
+
+// cancel.sty's \cancelto: an arrow from the lower left corner past the upper right
+// one, with the value set as a superscript at its tip
+fn cancel_to(n, base, c) {
+    let value = node(n.value, script(c))^
+    let rule = metric(c, "fraction_rule_thickness")
+    let pad = 200.0 * scale(c)
+    let tip_x = base.width + pad
+    let tip_y = 0.0 - base.height - pad
+    let dy = tip_y - base.depth
+    let length = math.sqrt(tip_x * tip_x + dy * dy)
+    let ux = tip_x / length
+    let uy = dy / length
+    let head = 150.0 * scale(c)
+    // the head's two strokes run back from the tip, 30 degrees either side of the shaft
+    let wing = (side) => string(tip_x - head * (0.866 * ux + 0.5 * side * uy)) ++ " " ++
+        string(tip_y - head * (0.866 * uy - 0.5 * side * ux))
+    let d = "M0 " ++ string(base.depth) ++ " L" ++ string(tip_x) ++ " " ++ string(tip_y) ++
+        " M" ++ wing(1.0) ++ " L" ++ string(tip_x) ++ " " ++ string(tip_y) ++ " L" ++ wing(-1.0)
+    let arrow = bx.make(<path d: d, fill: "none", stroke: "currentColor", 'stroke-width': rule>,
+        0.0, 0.0 - tip_y, base.depth)
+    let composed = bx.compose([{box: base, x: 0.0, y: 0.0}, {box: arrow, x: 0.0, y: 0.0},
+        {box: value, x: tip_x, y: tip_y - value.depth}], tip_x + value.width, base.type);
+    {*:composed, character: false, body: <g 'data-math-kind': "cancelto", composed.body>}
 }
 
 fn equation_tag(n, c) {
@@ -896,9 +947,12 @@ fn paired_arrow(recipe, width, c) {
 fn matrix(n, c) {
     let raw_key = command_name(string(n.name or n.cmd or "matrix"))
     let key = if (ends_with(raw_key, "*")) slice(raw_key, 0, len(raw_key) - 1) else raw_key
+    // mathtools' small matrices and display rcases take their plain counterpart's fences
+    let shape = replace(replace(key, "smallmatrix", "matrix"), "drcases", "rcases")
     let aligned = contains(["aligned", "alignedat", "align", "alignat", "split"], key)
-    let display = aligned or contains(["gathered", "gather", "equation", "dcases"], key)
-    let small = key == "smallmatrix" or key == "subarray"
+    let gathered = contains(["gathered", "lgathered", "rgathered", "multlined", "gather"], key)
+    let display = aligned or gathered or contains(["equation", "dcases", "drcases"], key)
+    let small = ends_with(key, "smallmatrix") or key == "subarray"
     let child = with_style(c, if (small) "script" else if (display) "display" else "text")
     let items = util.content_items(n.body)
     let rows = util.parse_rows(items, 0, len(items), [], [], [])
@@ -917,15 +971,21 @@ fn matrix(n, c) {
         else if (aligned) (if (col % 2 == 1 or key == "alignedat" or key == "alignat") 0.0 else 2.0 * gap_x) else gap_x]
     let declared = [for (ch in split(string(n.columns or ""), "") where contains("lcr", ch)) ch]
     let aligns = [for (col in 0 to (count - 1)) declared[col] or n.alignment or
-        (if (aligned) (if (col % 2 == 0) "r" else "l") else if (key == "cases" or key == "rcases") "l" else "c")]
-    let gap_y = if (aligned or contains(["gathered", "gather"], key)) 0.3 * font.UNITS * text_scale(c) else 0.0
+        (if (aligned) (if (col % 2 == 0) "r" else "l")
+         else if (contains(["cases", "rcases", "dcases", "lgathered"], shape)) "l"
+         else if (key == "rgathered") "r" else "c")]
+    // multlined sets its first line left and its last line right
+    let row_aligns = [for (r in 0 to (len(cells) - 1))
+        if (key == "multlined" and len(cells) > 1 and r == 0) "l"
+        else if (key == "multlined" and len(cells) > 1 and r == len(cells) - 1) "r" else null]
+    let gap_y = if (aligned or gathered) 0.3 * font.UNITS * text_scale(c) else 0.0
     let extra_gaps = [for (row in rows) dimension(row.gap or "0em", child)]
     let total = sum(heights) + sum(depths) + gap_y * max(0, len(rows) - 1) + sum(extra_gaps)
     let top = 0.0 - total / 2.0 - metric(c, "axis_height")
-    let entries = [for (r, row in cells, col, cell in row) {
-        box: {*:cell, body: <g 'data-column-align': aligns[col], cell.body>},
+    let entries = [for (r, row in cells, col, cell in row, let align = row_aligns[r] or aligns[col]) {
+        box: {*:cell, body: <g 'data-column-align': align, cell.body>},
         x: sum(slice(widths, 0, col)) + sum(slice(gaps, 0, col + 1)) +
-            (if (aligns[col] == "r") widths[col] - cell.width else if (aligns[col] == "l") 0.0 else (widths[col] - cell.width) / 2.0),
+            (if (align == "r") widths[col] - cell.width else if (align == "l") 0.0 else (widths[col] - cell.width) / 2.0),
         y: top + sum(slice(heights, 0, r)) + sum(slice(depths, 0, r)) + float(r) * gap_y +
             sum(slice(extra_gaps, 0, r)) + heights[r]}]
     let width = sum(widths) + sum(gaps)
@@ -948,7 +1008,7 @@ fn matrix(n, c) {
     let table = if (len(verticals) + len(horizontals) == 0) table0 else
         {*:table0, body:<g table0.body; for (line in verticals) line; for (line in horizontals) line>}
     let result = {*:table, body: <g 'data-math-kind': "matrix", table.body>}
-    let fences = match key {
+    let fences = match shape {
         case "pmatrix": ["(", ")"]
         case "bmatrix": ["[", "]"]
         case "Bmatrix": ["{", "}"]

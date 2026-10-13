@@ -5,6 +5,7 @@ import util: .util
 import fallback: .fallback
 import bundled: .bundled
 import tex_metrics: .tex_metrics
+import mhchem: .mhchem
 
 pub let UNITS = 1000.0
 
@@ -66,8 +67,9 @@ let styled_commands = [
     {cmd:"\\textsf",style:"sans"}, {cmd:"\\texttt",style:"mono"}
 ]
 
-// math alphabets other packages spell differently: bbm's \mathbbm, dsfont's \mathds
-let ALPHABET_ALIASES = {mathbbm: "\\mathbb", mathds: "\\mathbb"}
+// math alphabets other packages spell differently: bbm's \mathbbm, dsfont's \mathds,
+// and bm's \bm and heavy \hm, which bold symbols as \boldsymbol does
+let ALPHABET_ALIASES = {mathbbm: "\\mathbb", mathds: "\\mathbb", bm: "\\boldsymbol", hm: "\\boldsymbol"}
 
 pub fn alphabet_alias(name) => ALPHABET_ALIASES[name]
 
@@ -80,8 +82,11 @@ pub fn command_variant(cmd) {
 fn source_items(node) {
     let attrs = ["value", "name", "cmd", "text", "base", "sub", "sup", "numer", "denom",
         "radicand", "index", "arg", "content", "body", "left", "right", "above", "below",
-        "label", "over", "under", "delim", "annotation", "upper", "lower", "target", "display", "script", "scriptscript"];
+        "label", "over", "under", "delim", "annotation", "upper", "lower", "target", "display", "script", "scriptscript",
+        "separator"];
     if (node is array) node
+    // chemistry is measured as the math its notation becomes
+    else if (node is element and name(node) == 'chemistry') mhchem.items(node)
     else if (node is element) [*[for (attr in attrs) node[attr]], *content(node)] else []
 }
 

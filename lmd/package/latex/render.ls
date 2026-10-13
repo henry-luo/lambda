@@ -160,7 +160,12 @@ pub let PACKAGE_RENDER = {
         [for (k, v at algorithmic.INLINE_WORDS,
             x in (if (string(k) != "Return") [string(k), render_alg_inline] else [])) x]),
     siunitx: {num: render_siunitx, si: render_siunitx, unit: render_siunitx,
-        SI: render_siunitx, qty: render_siunitx}
+        SI: render_siunitx, qty: render_siunitx},
+    // tag forms act through the analysis pass (amsmath.tag_text)
+    mathtools: {newtagform: render_nothing, renewtagform: render_nothing, usetagform: render_nothing},
+    nicefrac: {nicefrac: render_math_command},
+    xfrac: {sfrac: render_math_command},
+    mhchem: {ce: render_math_command, pu: render_math_command}
 }
 
 fn render_nothing(el, info) => null
@@ -393,10 +398,15 @@ fn render_hyperlink(el, info) {
         for (arg in slice(args, 1, len(args))) render_node(arg, info)>
 }
 
-fn render_ensuremath(el, info) {
-    let ast = math_bridge.ensuremath_ast(el)
-    if (ast == null) util.unsupported_element("latex", "Cannot parse the ensuremath argument",
-        el.source_offset)
+fn render_ensuremath(el, info) =>
+    render_inline_ast(math_bridge.ensuremath_ast(el), el, info, "Cannot parse the ensuremath argument")
+
+// \nicefrac, \sfrac, \ce and \pu set math in any mode
+fn render_math_command(el, info) =>
+    render_inline_ast(math_bridge.command_ast(el), el, info, "Cannot parse \\" ++ string(name(el)))
+
+fn render_inline_ast(ast, el, info, message) {
+    if (ast == null) util.unsupported_element("latex", message, el.source_offset)
     else bold_math(math_bridge.render_inline_el({ast: ast}), info, false)
 }
 
@@ -1526,7 +1536,7 @@ fn render_numbered_equation(el, info) {
     else if (equation_number == null) math_bridge.render_equation_el(el)
     else <div class: "latex-equation",
         math_bridge.render_equation_math(el);
-        <span class: "latex-eq-number", "(" ++ equation_number ++ ")">
+        <span class: "latex-eq-number", amsmath.tag_text(string(equation_number), false, null)>
     >;
     bold_math(rendered, info, true)
 }
@@ -2419,10 +2429,11 @@ fn render_number_ref(el, info, parenthesized = false) {
     let ref_name = trim(util.text_of(el))
     let label_info = util.lookup(info.labels, ref_name)
     let value = if (label_info != null) label_info.number else "??";
-    // eqref shares reference resolution, adding parentheses around the displayed tag.
+    // eqref shares reference resolution, framing the number as its equation's tag
     <a class: if (label_info != null) "latex-ref" else "latex-ref latex-unresolved",
         href: "#" ++ (if (label_info != null) label_info.id else util.slugify(ref_name)),
-        if (parenthesized) "(" ++ string(value) ++ ")" else value>
+        if (parenthesized) amsmath.tag_text(string(value), false,
+            if (label_info != null) label_info.tag_form else null) else value>
 }
 
 fn render_autoref(el, info) {

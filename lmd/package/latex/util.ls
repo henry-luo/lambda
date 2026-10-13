@@ -385,6 +385,12 @@ pub fn optional_raw(el) {
     }
 }
 
+// a control sequence's name without its backslash
+pub fn strip_backslash(s) {
+    if (len(s) > 0 and slice(s, 0, 1) == "\\") slice(s, 1, len(s))
+    else s
+}
+
 // The parser keeps an environment's leading [option] as body text unless it knows
 // the environment (table): \begin{figure}[htbp], \begin{algorithmic}[1]. This
 // returns the option, or null, and the body children without it.

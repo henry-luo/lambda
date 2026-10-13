@@ -1,0 +1,52 @@
+"braces:"
+["$\\left(a\\right)\\bigl[b\\bigr]\\left\\lvert c\\right\\rvert \\lvert d\\rvert \\left\\lVert v\\right\\rVert \\left.x\\right\\vert_0^1 \\mathcal{O}\\left(x^2\\right) \\left[A,B\\right]$"]
+"vectors:"
+["$\\mathbf{a} \\boldsymbol{\\theta} \\vec{\\mathbf{a}} \\hat{\\mathbf{a}} \\boldsymbol{\\nabla}\\Psi\\boldsymbol{\\nabla}\\boldsymbol{\\cdot}\\mathbf{a}\\boldsymbol{\\nabla}\\boldsymbol{\\times}\\left(\\mathbf{a}\\right)\\nabla^2\\Psi\\div$"]
+"operators:"
+["$\\sin x \\sin^{2}\\left(x\\right) \\exp\\left(y\\right) \\operatorname{tr}\\rho\\operatorname{Res}\\left[f\\right]\\operatorname{Re}\\left\\{z\\right\\}\\Re\\mathcal{P}f \\quad\\text{if}\\quad ,\\quad$"]
+"derivatives:"
+["$\\mathrm{d}x \\mathinner{\\mathrm{d}x}\\mathinner{\\mathrm{d}^{3}x}\\frac{\\mathrm{d}}{\\mathrm{d}x}\\frac{\\mathrm{d}^{n}f}{\\mathrm{d}x^{n}}\\mathrm{d}f/\\mathrm{d}x\\frac{\\partial^{2}f}{\\partial x\\partial y}\\frac{\\delta F}{\\delta g}\\mathinner{\\delta\\left(E\\right)}$"]
+"dirac:"
+["$\\left\\vert\\psi\\right\\rangle \\left\\langle\\phi\\middle\\vert\\psi\\right\\rangle \\left\\langle a\\middle\\vert b\\right\\rangle \\left\\vert a\\middle\\rangle\\middle\\langle b\\right\\vert \\left\\langle A\\right\\rangle\\left\\langle\\Psi\\right\\vert A\\left\\vert\\Psi\\right\\rangle \\left\\langle\\Psi\\middle\\vert A\\middle\\vert\\Psi\\right\\rangle \\langle n\\vert H\\vert m\\rangle$"]
+"matrices:"
+["$\\begin{pmatrix}a & b\\end{pmatrix}\\left(\\begin{matrix}a\\end{matrix}\\right)\\left[\\begin{smallmatrix}a\\end{smallmatrix}\\right]\\begin{vmatrix}a\\end{vmatrix} 1&0\\\\0&1 a_{11}&a_{12}\\\\a_{21}&a_{22} a_{1}\\\\a_{2} 0&0  0&-i\\\\i&0 1&0\\\\0&2 &1\\\\2& 1&\\\\&\\begin{matrix}a&b\\\\c&d\\end{matrix}$"]
+"options:"
+["$\\sin(x) \\frac{df}{dx}\\vec{\\boldsymbol{\\nabla}}$"]
+"in arguments:"
+["\\section{On $\\left\\lvert x\\right\\rvert$}\\begin{figure}\\caption{$\\left\\vert0\\right\\rangle$}\\end{figure}\\footnote{$\\begin{pmatrix}1&0\\\\0&1\\end{pmatrix}$}"]
+"physics renders:"
+true
+"physics issues:"
+[]
+"physics and siunitx:"
+["conflicting-packages siunitx"]
+"paired delimiters:"
+["$\\mathopen{\\lceil}x\\mathclose{\\rceil} \\left\\lceil x\\right\\rceil \\mathopen{\\big\\lceil}x\\mathclose{\\big\\rceil} \\mathopen{\\{}a \\;\\vert\\; b\\mathclose{\\}} \\left\\{a \\;\\middle\\vert\\; b\\right\\} \\mathopen{\\Bigg\\{}a \\;\\Bigg\\vert\\; b\\mathclose{\\Bigg\\}}$"]
+"macros:"
+["${}^{14}_{6}C \\genfrac{}{}{0pt}{1}{a\\quad}{\\quad b} \\lim_{n}\\sup_{m} \\sum_i x$"]
+"move left:"
+["\\begin{align}\\hspace{3em}&\\hspace{-3em} a \\\\ &= b\\end{align}"]
+"default tag:"
+true
+"tag form:"
+true
+"align tag form:"
+true
+"form ends:"
+true
+"eqref forms:"
+true
+"tag issues:"
+[]
+"mathtools renders:"
+true
+"mathtools issues:"
+["unsupported-command mathtoolsset", "unsupported-math-command begin{unknownenv}", "unsupported-tag-format \\scshape"]
+"shapes render:"
+true
+"shapes issues:"
+[]
+"chemistry renders:"
+true
+"chemistry issues:"
+[]

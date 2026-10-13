@@ -181,6 +181,8 @@ been removed. Use `lambda.doc.math.math` for all rendering.
 | `n \atop d`        | Fraction without bar   |                                 |
 | `n \brace d`       | Braced infix           |                                 |
 | `n \brack d`       | Bracketed infix        |                                 |
+| `\nicefrac{n}{d}`  | Slanted fraction       | nicefrac; raised numerator, slash, lowered denominator |
+| `\sfrac{n}{d}`     | Slanted fraction       | xfrac; `\sfrac{n}[sep]{d}` sets the separator |
 
 ### 3.2 Radicals
 
@@ -283,8 +285,13 @@ Use `\begin{env}...\end{env}` syntax. Separate columns with `&` and rows with `\
 | `align`       | none             | Full align environment        |
 | `array`       | none             | General array with col spec   |
 | `equation`    | none             | Single equation (no numbering)|
+| `psmallmatrix`, `bsmallmatrix`, `Bsmallmatrix`, `vsmallmatrix`, `Vsmallmatrix` | as their full-size forms | mathtools; script size |
+| `drcases`     | right `\}` only, display size | mathtools |
+| `cases*`, `dcases*`, `rcases*`, `drcases*` | as unstarred | mathtools; the second column is text |
+| `multlined`   | none             | mathtools; first line left, last line right |
+| `lgathered`, `rgathered` | none  | mathtools; left- or right-aligned lines |
 
-Other environments (`gathered`, `align*`, `split`, `subarray`, `equation*`, `gather`, `multline`, …) are not parsed: their content is kept, but the environment itself is ignored.
+`gathered`, `gather`, `alignedat`, `alignat`, `split`, `subarray`, `CD`, starred matrix and alignment forms and `equation*` are parsed too. Other environments (`multline`, …) are not parsed: the environment is skipped, its content is kept, and the formula's unmapped-command list names it as `begin{name}`, which LaTeX documents report as `unsupported-math-command`.
 
 Plain TeX alternatives: `\matrix{...}`, `\pmatrix{...}`, `\bordermatrix{...}`.
 
@@ -303,6 +310,22 @@ f(x) = \begin{cases}
   0   & \text{otherwise}
 \end{cases}
 ```
+
+### 3.7 Chemistry (mhchem)
+
+`\ce{...}` and `\pu{...}` cover a bounded profile of mhchem notation:
+
+| Input | Rendered as |
+|-------|-------------|
+| `\ce{H2O}`, `\ce{[Cu(NH3)4]^2+}` | Upright element symbols, subscripted counts, charges |
+| `\ce{Na+(aq) + Cl-(aq)}` | Trailing-sign charges and states |
+| `\ce{2H2 + O2 -> 2H2O}` | Coefficients and reaction arrows (`->`, `<-`, `<->`, `<-->`, `<=>`, `<=>>`, `<<=>`) |
+| `\ce{A ->[H2O][heat] B}` | Arrow labels above and below |
+| `\ce{^{227}_{90}Th}`, `\ce{CuSO4*5H2O}`, `\ce{HC#CH}` | Isotopes, adduct dots, bonds |
+| `\ce{CaCO3 v}`, `\ce{CO2 ^}` | Precipitate and gas arrows |
+| `\pu{1.2e3 kJ mol-1}` | 1.2·10³ kJ mol⁻¹ |
+
+Other mhchem notation passes through unchanged.
 
 ---
 
@@ -337,6 +360,8 @@ Uppercase Greek: `\Gamma Δ`, `\Delta Δ`, `\Theta Θ`, `\Lambda Λ`, `\Xi Ξ`, 
 ### 4.3 Relations
 
 `\leq ≤`, `\le ≤`, `\geq ≥`, `\ge ≥`, `\neq ≠`, `\ne ≠`, `\equiv ≡`, `\prec ≺`, `\succ ≻`, `\sim ∼`, `\simeq ≃`, `\approx ≈`, `\cong ≅`, `\subset ⊂`, `\supset ⊃`, `\subseteq ⊆`, `\supseteq ⊇`, `\sqsubseteq ⊑`, `\sqsupseteq ⊒`, `\in ∈`, `\ni ∋`, `\notin ∉`, `\vdash ⊢`, `\dashv ⊣`, `\models ⊨`, `\mid ∣`, `\parallel ∥`, `\perp ⊥`, `\propto ∝`, `\asymp ≍`, `\bowtie ⋈`, `\ll ≪`, `\gg ≫`, `\doteq ≐`, `\trianglelefteq ⊴`, `\trianglerighteq ⊵`.
+
+mathtools colon relations, each one relation: `\coloneqq :=`, `\Coloneqq ::=`, `\coloneq :−`, `\Coloneq ::−`, `\eqqcolon =:`, `\Eqqcolon =::`, `\eqcolon −:`, `\Eqcolon −::`, `\colonapprox :≈`, `\Colonapprox ::≈`, `\colonsim :∼`, `\Colonsim ::∼`, `\dblcolon ::`, `\vcentcolon :`.
 
 ### 4.4 Arrows
 
@@ -375,6 +400,7 @@ Custom operator names via `\operatorname{name}`.
 | `\mathtt{x}`   | Typewriter         | x              |
 | `\mathsf{x}`   | Sans-serif         | x              |
 | `\mathscr{F}`  | Script             | ℱ              |
+| `\boldsymbol{x}`, `\bm{x}`, `\hm{x}` | Bold italic letters | ***x*** (operator symbols keep their regular weight) |
 
 ### 5.2 Style Switching
 
@@ -468,8 +494,10 @@ Supported named colors: CSS color keywords (e.g., `red`, `blue`, `green`, `black
 | `\llap{x}`      | Right-overlap (zero-width, right-aligned)   |
 | `\rlap{x}`      | Left-overlap (zero-width, left-aligned)     |
 | `\clap{x}`      | Centre-overlap (zero-width, centred)        |
-
-> **Note:** `\cancel`, `\bcancel` and `\xcancel` are not supported; they are passed through as unknown commands.
+| `\cancel{x}`    | Diagonal strike, lower left to upper right  |
+| `\bcancel{x}`   | Diagonal strike, upper left to lower right  |
+| `\xcancel{x}`   | Both diagonals                              |
+| `\cancelto{v}{x}` | Arrow strike with `v` at its tip          |
 
 ---
 
@@ -525,7 +553,6 @@ The following constructs are not currently supported. Unknown commands are passe
 | `\substack{...}`           | Sub/superscript multi-line — not in grammar                 |
 | `\sideset{l}{r}{\op}`      | Side limits on operators — not supported                    |
 | `\underbrace{x}_{text}`    | Subscript on underbrace (the brace itself works, its label as literal subscript does not auto-render) |
-| `\cancel`, `\bcancel`, `\xcancel` | Strike-through — unknown commands                     |
 | `\tag{n}`                  | Equation tags/numbering — not supported                     |
 | `\label{key}` / `\ref{key}`| Cross-referencing — not supported                          |
 | `\intertext{...}`          | Text between aligned rows — not supported                   |
@@ -540,7 +567,7 @@ The following constructs are not currently supported. Unknown commands are passe
 | `\DeclareMathOperator`     | Custom operator names — use `\operatorname{name}` directly |
 | `\def`, `\let`             | Low-level TeX macro definitions — not supported         |
 | `\usepackage`              | LaTeX packages — not supported                          |
-| Chemistry (`\ce{...}`)     | mhchem notation — out of scope                          |
+| Chemistry beyond the profile | `\ce`/`\pu` cover formulas, charges, states, coefficients, isotopes, adducts, bonds, reaction arrows with labels and units; other mhchem notation passes through unchanged |
 | TikZ / PGF                 | Drawing commands — out of scope                         |
 
 ### 11.4 Output Limitations

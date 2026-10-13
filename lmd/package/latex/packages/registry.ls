@@ -106,6 +106,22 @@ pub let CATALOG = {
     upgreek: {options: []},
     bbm: {options: []},
     dsfont: {options: []},
+    // bound on the engine (lmd/package/latex/tex/binding/physics.sty): its commands
+    // expand into math before the digester runs
+    physics: {options: ["arrowdel", "italicdiff", "notrig"], implies: ["amsmath"],
+        conflicts: [{package: "siunitx", message: "physics and siunitx both define \\qty"}]},
+    // a binding for the macro layer (\DeclarePairedDelimiter, \prescript, ...); colon
+    // relations and environments are math, tag forms are owned here
+    mathtools: {options: ["fixamsmath", "donotfixamsmathbugs", "allowspaces", "disallowspaces",
+        "legacycolonsymbols", "centercolon"], implies: ["amsmath"],
+        commands: ["newtagform", "renewtagform", "usetagform", "mathtoolsset"],
+        preamble: ["newtagform", "renewtagform", "usetagform"]},
+    bm: {options: []},
+    // slanted fractions, in math or text
+    nicefrac: {options: ["nice", "ugly"], commands: ["nicefrac"]},
+    xfrac: {options: [], commands: ["sfrac"]},
+    // \ce and \pu through lambda.doc.math's bounded mhchem profile, in math or text
+    mhchem: {options: ["version"], commands: ["ce", "pu"]},
     // `preamble` lists owned commands that belong in the preamble, so they are not
     // reported there as unsupported
     float: {options: [], commands: ["newfloat", "floatname", "floatstyle", "restylefloat",
