@@ -13,6 +13,7 @@
 #include "../../dom/dom_collection_types.h"
 #include "../../dom/dom_event_host.h"
 #include "radiant_input_value.hpp"
+#include "radiant_image_job.hpp"
 #include "../../../lib/tagged.hpp"
 #include "../../../radiant/layout.hpp"
 #include "../../../radiant/render.hpp"
@@ -164,7 +165,7 @@ static Item radiant_key_item(const char* key) {
     return radiant_string_item(key);
 }
 
-static Item radiant_obj_new(void) {
+Item radiant_obj_new(void) {
     return vmap_new();
 }
 
@@ -183,7 +184,7 @@ static void radiant_obj_set(Item obj, const char* key, Item value) {
     radiant_host_api->value->property_set(owner.get(), key_item, stored.get());
 }
 
-static void radiant_rooted_obj_set(Rooted<Item>& rooted_obj, const char* key, Item value) {
+void radiant_rooted_obj_set(Rooted<Item>& rooted_obj, const char* key, Item value) {
     radiant_obj_set(rooted_obj.get(), key, value);
 }
 
@@ -5031,6 +5032,8 @@ static Item fn_radiant_physics(Item node,Item request) {
     return scene3d_physics_control(element,operation.get());
 }
 static const JubeFuncDef radiant_functions[] = {
+    {"image_job", "pn(owner: any, request: map) -> any^", (fn_ptr)fn_radiant_image_job, JUBE_FN_NONE,
+     "Item fn_radiant_image_job(Item owner, Item request)", (fn_ptr)fn_radiant_image_job},
     {"physics", "pn(node: any, request: map) -> any", (fn_ptr)fn_radiant_physics, JUBE_FN_NONE,
      "Item fn_radiant_physics(Item node, Item request)", (fn_ptr)fn_radiant_physics},
     {"with_content", "fn(source: element, children: array) -> element|error", (fn_ptr)fn_radiant_with_content, JUBE_FN_NONE,

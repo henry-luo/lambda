@@ -11,6 +11,8 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/sort.h"
 #include "../../lib/image.h"
+#include "../../lib/image_process.h"
+#include <float.h>
 #include "../core/mark_reader.hpp"
 #include <cmath>
 #include <cstring>
@@ -912,46 +914,6 @@ static inline bool elem_is_int(ArrayNumElemType e) {
             return false;
         default: return true;
     }
-}
-
-// Allocate an N-D ArrayNum with the given shape and elem_type, plus shape side-table.
-// Used to materialize broadcast op results.
-ArrayNum* alloc_ndim_arraynum(ArrayNumElemType etype, int ndim, const int64_t* shape) {
-    if (ndim < 1 || ndim > LAMBDA_ARRAY_NUM_MAX_NDIM || !shape) return NULL;
-    size_t total = 1;
-    // Check every suffix product too: an earlier zero axis must not hide an
-    // overflowing row-major stride in a later pair of dimensions.
-    for (int i = ndim - 1; i >= 0; i--) {
-        if (shape[i] < 0 || !math_checked_mul(total, (size_t)shape[i], &total) ||
-                total > INT64_MAX) return NULL;
-    }
-    ArrayNum* arr = array_num_new(etype, (int64_t)total);
-    if (!arr || ndim == 1) return arr;
-    // The shape allocation is a second safepoint before this native helper can
-    // return the new header to generated code, so root that construction gap.
-    RootFrame roots(1);
-    Rooted<ArrayNum*> rooted_arr(roots, arr);
-    // attach shape side-table
-    size_t shape_bytes = sizeof(ArrayNumShape) + 2 * (size_t)ndim * sizeof(int64_t);
-    ArrayNumShape* s = (ArrayNumShape*)heap_data_calloc(shape_bytes);
-    arr = rooted_arr.get();
-    if (!s) return NULL;  // shape loss must not turn a matrix into a vector
-    s->ndim = (uint8_t)ndim;
-    s->is_c_contig = 1;
-    s->is_f_contig = (ndim == 1) ? 1 : 0;
-    s->offset = 0;
-    s->base = NULL;  // owned, no base
-    int64_t* sd = array_num_shape_dims(s);
-    int64_t* ss = array_num_shape_strides(s);
-    int64_t stride = 1;
-    for (int i = ndim - 1; i >= 0; i--) {
-        sd[i] = shape[i];
-        ss[i] = stride;
-        stride *= shape[i];
-    }
-    arr->is_ndim = 1;
-    arr->extra = (int64_t)(uintptr_t)s;
-    return arr;
 }
 
 // Broadcast binary op: walk output shape with strided iterator, fetch from each
@@ -4557,7 +4519,7 @@ static inline int64_t stencil_border_index(int64_t i, int64_t n, int border) {
     if (n <= 0) return -1;
     if (i >= 0 && i < n) return i;
     switch (border) {
-        case BORDER_EDGE:    return (i < 0) ? 0 : n - 1;
+        case BORDER_EDGE:    return image_edge_index(i,n);
         case BORDER_REFLECT: {                          // reflect w/o repeating the edge
             if (n == 1) return 0;
             int64_t p = 2 * (n - 1);
@@ -4694,7 +4656,41 @@ static Item stencil_box_op(Item img, Item ksize_item, int op, int64_t stride, in
     return array_num_stencil(rooted_img.get(), Item{ .array_num = ker },
         op, BORDER_EDGE, 0.0, stride, stride, pad, pad);
 }
-Item fn_blur(Item img, Item ksize)          { return stencil_box_op(img, ksize, STENCIL_MEAN,   1, -1); }
+Item fn_blur(Item img, Item ksize) {
+    GUARD_ERROR2(img, ksize);
+    if (get_type_id(img)!=LMD_TYPE_ARRAY_NUM) return ItemError;
+    ArrayNum* in=img.array_num;
+    int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
+    int ndim=array_num_get_shape_strides(in,shape,strides);
+    if (ndim!=2 && ndim!=3) return ItemError;
+    int64_t kernel=stencil_ksize_arg(ksize);
+    if (kernel<1) kernel=1;
+    int64_t height=shape[0], width=shape[1], channels=ndim==3 ? shape[2] : 1;
+    // a sliding sum cannot recover from non-finite values leaving its window.
+    // retain the generic local stencil for these uncommon numeric inputs.
+    double bound=DBL_MAX/(double)kernel/(double)kernel;
+    for (int64_t y=0;y<height;y++) for (int64_t x=0;x<width;x++) for (int64_t c=0;c<channels;c++) {
+        double value=array_num_read_double(in,y*strides[0]+x*strides[1]+(ndim==3 ? c*strides[2] : 0));
+        if (!isfinite(value) || fabs(value)>bound) return stencil_box_op(img,ksize,STENCIL_MEAN,1,-1);
+    }
+    RootFrame roots(1); Rooted<ArrayNum*> rooted(roots,in);
+    ArrayNum* out=alloc_ndim_arraynum(ELEM_FLOAT64,ndim,shape);
+    if (!out || (height>0 && width>0 && channels>0 && !out->data)) return ItemError;
+    struct BlurRows { ArrayNum* input; double* output; int64_t width, channels, strides[3]; };
+    BlurRows rows={rooted.get(),out->float_items,width,channels,{strides[0],strides[1],ndim==3 ? strides[2] : 0}};
+    auto read=[](void* opaque,int64_t y,double* values) -> bool {
+        auto& r=*(BlurRows*)opaque;
+        for (int64_t x=0;x<r.width;x++) for (int64_t c=0;c<r.channels;c++)
+            values[x*r.channels+c]=array_num_read_double(r.input,y*r.strides[0]+x*r.strides[1]+c*r.strides[2]);
+        return true;
+    };
+    auto write=[](void* opaque,int64_t y,const double* values) -> bool {
+        auto& r=*(BlurRows*)opaque;
+        memcpy(r.output+y*r.width*r.channels,values,(size_t)(r.width*r.channels)*sizeof(double)); return true;
+    };
+    if (height>0 && width>0 && channels>0 && !image_box_filter(width,height,channels,kernel,read,write,&rows)) return ItemError;
+    return {.array_num=out};
+}
 Item fn_erode(Item img, Item ksize)         { return stencil_box_op(img, ksize, STENCIL_MIN,    1, -1); }
 Item fn_dilate(Item img, Item ksize)        { return stencil_box_op(img, ksize, STENCIL_MAX,    1, -1); }
 Item fn_median_filter(Item img, Item ksize) { return stencil_box_op(img, ksize, STENCIL_MEDIAN, 1, -1); }
@@ -5178,14 +5174,14 @@ static inline double bilinear_sample(ArrayNum* in, double y, double x, int64_t c
         return 0.0;
     int64_t y0 = (int64_t)floor(y), x0 = (int64_t)floor(x);
     double fy = y - (double)y0, fx = x - (double)x0;
-    auto cl = [](int64_t v, int64_t n) { return v < 0 ? (int64_t)0 : v >= n ? n - 1 : v; };
-    int64_t cy0 = cl(y0, H), cy1 = cl(y0 + 1, H), cx0 = cl(x0, W), cx1 = cl(x0 + 1, W);
+    int64_t cy0 = image_edge_index(y0, H), cy1 = image_edge_index(y0 + 1, H);
+    int64_t cx0 = image_edge_index(x0, W), cx1 = image_edge_index(x0 + 1, W);
     int64_t cc = (ndim == 3) ? c * str[2] : 0;
     double p00 = array_num_read_double(in, cy0 * str[0] + cx0 * str[1] + cc);
     double p01 = array_num_read_double(in, cy0 * str[0] + cx1 * str[1] + cc);
     double p10 = array_num_read_double(in, cy1 * str[0] + cx0 * str[1] + cc);
     double p11 = array_num_read_double(in, cy1 * str[0] + cx1 * str[1] + cc);
-    return (p00 * (1 - fx) + p01 * fx) * (1 - fy) + (p10 * (1 - fx) + p11 * fx) * fy;
+    return image_bilinear_mix(p00,p01,p10,p11,fx,fy);
 }
 
 // Gather an output image by mapping each (oi, oj) to a fractional source (sy, sx)

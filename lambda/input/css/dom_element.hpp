@@ -584,12 +584,16 @@ typedef struct DomDocumentResource {
     lam::Up<Context> runtime_owner; // release before this evaluator's context retires (D5.3.3).
     DomDocumentResourceDestroyFn retire_runtime; // optional: preserve native state after unrooting.
     lam::Own<DomDocumentResource> next;
+    bool (*pending_work)(DomDocumentResourceData* data); // native jobs awaiting execution/publication.
 } DomDocumentResource;
 
 bool dom_document_add_resource(DomDocument* document, struct DomDocumentResourceData* data,
                                DomDocumentResourceDestroyFn destroy, Context* runtime_owner = nullptr,
                                DomDocumentResourceDestroyFn retire_runtime = nullptr);
 bool dom_document_release_resource(DomDocument* document, DomDocumentResourceData* data);
+bool dom_document_set_resource_pending_work(DomDocument* document, DomDocumentResourceData* data,
+    bool (*pending)(DomDocumentResourceData*));
+bool dom_document_has_pending_work(DomDocument* document);
 bool dom_document_bind_resource_runtime(DomDocument* document, DomDocumentResourceData* data,
     Context* runtime_owner, DomDocumentResourceDestroyFn retire_runtime = nullptr);
 void dom_document_release_runtime_resources(DomDocument* document, Context* runtime_owner);

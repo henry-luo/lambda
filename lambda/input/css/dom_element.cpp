@@ -830,6 +830,22 @@ bool dom_document_add_resource(DomDocument* document, DomDocumentResourceData* d
     return true;
 }
 
+bool dom_document_set_resource_pending_work(DomDocument* document, DomDocumentResourceData* data,
+    bool (*pending)(DomDocumentResourceData*)) {
+    if (!document) return false;
+    for (DomDocumentResource* resource=document->resources;resource;resource=resource->next) {
+        if (resource->data==data) { resource->pending_work=pending; return true; }
+    }
+    return false;
+}
+
+bool dom_document_has_pending_work(DomDocument* document) {
+    if (!document) return false;
+    for (DomDocumentResource* resource=document->resources;resource;resource=resource->next)
+        if (resource->pending_work && resource->pending_work(resource->data)) return true;
+    return false;
+}
+
 bool dom_document_release_resource(DomDocument* document, DomDocumentResourceData* data) {
     if (!document || !data) return false;
     lam::Own<DomDocumentResource>* link = &document->resources;

@@ -1,6 +1,7 @@
 // Native retained UI: the tree stays stable while procedures update its controls
 // and canvas (S12.1.3, D4.5.1v4); history contains immutable recipes (S1.4).
 import dom
+import radiant
 import ui: lambda.ui.dtna
 import resources: ~~.mod_resources
 import files: .mod_io
@@ -64,11 +65,17 @@ pn command(owner,session_value,action) any^ {
     if (action == "open-confirm") { return change_source(owner,session_value,field(owner,"open-path"))^ }
     if (starts_with(action,"sample-")) { return change_source(owner,session_value,url_resolve(BASE,"assets/" ++ slice(action,7) ++ ".jpg"))^ }
     if (action == "export-confirm") {
-        let requested = {*:recipe,output_width:int(field(owner,"export-width")),output_height:int(field(owner,"export-height"))}
-        let dimensions = files.export_png(field(owner,"export-path"),session_value.source,requested)^
-        present.message(owner,"Saved PNG · " ++ string(dimensions[1]) ++ " × " ++ string(dimensions[0]) ++ " · " ++ field(owner,"export-path"))
+        // repeated activation shares the running export instead of launching another snapshot.
+        if (session_value.export_job>0) { return session_value }
+        let requested={*:recipe,output_width:int(field(owner,"export-width")),output_height:int(field(owner,"export-height"))}
+        let request=files.prepare_export(field(owner,"export-path"),session_value.source,requested)^
+        let token=radiant.image_job(owner,{action:"start",channel:"export",source:string(session_value.source.identity),
+            pixels:session_value.source.pixels,options:pipeline.options(requested),destination:request.raster})^
+        present.message(owner,"Exporting PNG…")
         present.dialog(owner,"")
-        return replace_recipe(session_value,requested)
+        dom.set_attribute(owner,"data-exporting","true")
+        present.attribute(owner,"export-confirm","disabled","")
+        return {*:session_value,export_job:token,export_request:{*:request,before:recipe}}
     }
     if (action == "recipe-save") {
         files.write_recipe(field(owner,"recipe-path"),session_value.source,recipe)^
@@ -106,7 +113,8 @@ pn command(owner,session_value,action) any^ {
 }
 
 view <photo_session> state session:{source:~.source,hist:model.history(),tool:"adjust",zoom:0,pan:{x:0,y:0},
-    token:0,dirty:true,painted:null,painted_layers:null,revision:0,compare:false,drag:null,ratio:0,gesture:null,inspector_open:false,selected:0} { ~.rendered }
+    token:0,dirty:true,painted:null,painted_layers:null,painted_source:null,painted_key:null,job:0,job_key:null,
+    pixel_revision:0,histogram_revision:-1,controls_dirty:true,requested_at:0.0,export_job:0,export_request:null,revision:0,compare:false,drag:null,ratio:0,gesture:null,inspector_open:false,selected:0} { ~.rendered }
 on photo_activate(evt) {
     if (evt.event_phase != 2) { return 'pass' }
     present.thumbnails(evt.target,session.source)^
@@ -116,9 +124,39 @@ on photo_activate(evt) {
 }
 on photo_frame(evt) {
     if (evt.event_phase != 2 or evt.detail != session.token) { return 'pass' }
-    var problem = null
-    present.paint(evt.target,session) ^ { problem = ^.message } ~ { session = ~ }
-    if (problem != null) { present.message(evt.target,problem,true); session = {*:session,token:0} }
+    var problem=null
+    if (session.export_job>0) {
+        let done=radiant.image_job(evt.target,{action:"poll",channel:"export",token:session.export_job})^
+        if (done!=null) {
+            let request=session.export_request
+            if (done.success) {
+                let began=clock()
+                files.finish_export(request,[done.height,done.width,4]) ^ { problem=^.message }
+                dom.set_attribute(evt.target,"data-export-process_us",string(done.elapsed_us))
+                dom.set_attribute(evt.target,"data-export-encode_us",string(done.encode_us))
+                dom.set_attribute(evt.target,"data-export-compose_us",string(int((clock()-began)*1000000)))
+                if (problem==null) {
+                    present.message(evt.target,"Saved PNG · " ++ string(done.width) ++ " × " ++ string(done.height) ++ " · " ++ request.target)
+                    if (session.source.identity==request.source.identity and model.current(session.hist)==request.before) {
+                        session=replace_recipe(session,request.recipe)
+                    }
+                }
+            } else {
+                // the native job removes its own partial files; a failed exclusive open owns none.
+                problem="Photo: image processing, encoding, or destination write failed"
+            }
+            dom.set_attribute(evt.target,"data-exporting","false")
+            present.attribute(evt.target,"export-confirm","disabled",null)
+            session={*:session,export_job:0,export_request:null}
+        }
+    }
+    present.paint(evt.target,session) ^ { problem=^.message } ~ { session=~ }
+    if (problem!=null) {
+        present.message(evt.target,problem,true)
+        radiant.image_job(evt.target,{action:"cancel",channel:"preview"})
+        session={*:session,job:0,token:0}
+        if (session.export_job>0) { session=present.schedule(evt.target,session) }
+    }
     return 'handled'
 }
 on click(evt) {
@@ -189,7 +227,7 @@ on change(evt) {
             else {*:session,dirty:true,hist:model.commit_edit(session.hist,changed)}
     } else if (id == "crop-ratio") {
         let requested = field(owner,"crop-ratio")
-        let dimensions = shape(pipeline.oriented(session.source.proxy,recipe))
+        let dimensions = pipeline.dimensions(session.source.proxy,recipe)
         let ratio = if (requested == "original") dimensions[1]/dimensions[0] else float(requested)
         session = {*:session,dirty:true,ratio:ratio,hist:model.draft(session.hist,{*:recipe,crop:if (ratio == 0) geometry.full() else geometry.aspect(dimensions[1],dimensions[0],ratio)})}
     } else if (edge != null) {
@@ -257,7 +295,7 @@ on pointermove(evt) {
     } else if (drag.handle == "pan") {
         session = {*:session,pan:{x:drag.pan.x+evt.clientX-drag.x,y:drag.pan.y+evt.clientY-drag.y}}
     } else {
-        let dims = shape(pipeline.oriented(session.source.proxy,model.current(session.hist)))
+        let dims = pipeline.dimensions(session.source.proxy,model.current(session.hist))
         let rect = geometry.drag(drag.rect,drag.handle,(evt.clientX-drag.x)/drag.width,(evt.clientY-drag.y)/drag.height,session.ratio,dims[1],dims[0])
         session = {*:session,hist:model.draft(session.hist,{*:model.current(session.hist),crop:rect})}
     }
@@ -329,7 +367,9 @@ on blur(evt) {
 }
 on closerequest(evt) {
     if (session.token > 0) dom.cancel_frame(owner_of(evt),session.token)
-    session = {*:session,token:0,drag:null,compare:false}
+    radiant.image_job(owner_of(evt),{action:"cancel",channel:"preview"})
+    radiant.image_job(owner_of(evt),{action:"cancel",channel:"export"})
+    session = {*:session,token:0,job:0,export_job:0,drag:null,compare:false}
     return 'pass'
 }
 view <photo_document> { ~.rendered }

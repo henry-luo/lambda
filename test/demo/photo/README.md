@@ -66,10 +66,15 @@ the workspace. Layers use normalized coordinates in the final composition;
 cropping/orienting changes the photo underneath them. Crop mode hides artwork
 while framing; comparison temporarily hides artwork and color adjustments.
 Encoded inputs are limited to 32 MB and decoded/output images to 16 megapixels.
-The current pipeline uses float64 intermediate arrays and synchronous CPU
-kernels. Large adjusted exports can use substantial memory and pause the UI;
-release performance targets from the plan remain to be measured. The demo
-exports PNG only. Native file pickers, drag-and-drop files, custom sticker
+The pipeline uses a fused native CPU evaluator and rolling-sum box filtering.
+Double-precision calculations use bounded row/ring storage instead of full-image
+floating-point intermediates. Preview jobs cache geometry, color and blurred
+color within a 64 MiB budget; vignette/sharpen changes reuse the blurred result.
+Separate native workers process previews and exports. New preview requests
+supersede old ones, and results are published only for the current source and
+recipe. PNG encoding also runs in the export worker. Text/vector export
+composition still runs synchronously through Radiant's document renderer.
+The demo exports PNG only. Native file pickers, drag-and-drop files, custom sticker
 uploads, multiline typography, and AI tools are outside this version.
 Radiant currently paints the CSS checkerboard as broad gradient regions rather
 than 20-pixel tiles; transparent pixels retain correct alpha in uploads/exports.
@@ -79,6 +84,11 @@ new pixels (**S12.1.3**). History stores immutable recipes (**S1.4**); it does n
 retain a separate image per edit. The host copies borrowed pixels into
 Radiant's document-owned surface (**D4.5.1v4 / D4.5.2**), and native allocations
 use precise roots (**D5.3.3**).
+Workers retain native copies of input pixels and coefficients, with no borrowed
+GC pointers, evaluator context or DOM access (**D4.5.2 / D5.3.3 / D7.5.3**).
+Document resources cancel and join their workers at teardown. Their pending-work
+hook lets headless assertions wait for real background work before advancing
+the virtual clock. Cooperative Lambda tasks are unchanged (**S13.1.3v2**).
 
 | File | Responsibility |
 | --- | --- |
@@ -87,9 +97,10 @@ use precise roots (**D5.3.3**).
 | `mod_model.ls` | Recipe validation and transactional history |
 | `mod_geometry.ls` | Normalized crop coordinates and drag geometry |
 | `mod_layers.ls` | Layer validation, selection/transforms, vector assets, shared SVG composition |
-| `mod_pipeline.ls`, `mod_presets.ls` | Shared preview/export math and alpha handling |
+| `mod_pipeline.ls`, `mod_presets.ls` | Native processing options and shared preset coefficients |
 | `mod_present.ls` | Coalesced frames, canvas uploads, control synchronization |
 | `mod_io.ls` | Bounded snapshot decode, recipes, PNG publication |
+| `benchmark.py` | Release timing, peak RSS, and reproducible baseline comparisons |
 
 Run the native replay and registered tests:
 
@@ -99,7 +110,7 @@ mkdir -p temp/photo
   --event-file test/demo/photo/tests/photo_smoke.json \
   --event-result temp/photo/photo_smoke_result.json
 ./test/test_lambda_gtest.exe \
-  --gtest_filter='*tests_model_test:*tests_geometry_test:*tests_pipeline_test:*tests_image_io_test:*proc_export_test:*tests_photo_layers_test:*tests_photo_effects_test:*proc_layer_export_test'
+  --gtest_filter='*tests_model_test:*tests_geometry_test:*tests_pipeline_test:*tests_image_io_test:*proc_export_test:*tests_photo_layers_test:*tests_photo_effects_test:*proc_layer_export_test:*tests_photo_performance_test:*typed_array_blur_running'
 ./test/test_radiant_view_gtest.exe --gtest_filter='RadiantViewTest.Photo*'
 ```
 
@@ -115,11 +126,39 @@ The creative replay covers text editing, layer gestures/history, shapes and
 stickers, levels, portrait crop, recipe restoration and composition export in
 automatic and forced-JIT modes (139 events, 36 assertions). Golden tests verify layer validation, alpha
 preservation, effects, legacy migration and exported text/shape pixels.
+The performance replay checks color/blur cache reuse, changing filters during
+a large export, and closing with pending work. A separate forced-GC replay
+checks superseded jobs, owned input pixels, painted colors and zero tracked
+allocations at teardown. Reference pixels captured before optimization cover
+20 recipes; non-neutral RGB comparisons allow one 8-bit value of rounding
+difference. Neutral output and untransformed alpha remain exact.
 A glyph-geometry probe checks that native button text retains authored flex/grid
 alignment instead of overlapping neighboring labels.
 IO tests check all eight EXIF orientations, malformed/oversized headers,
 exported pixels, recipe matching, and write errors. Engine regressions also
 cover shape-preserving numeric unary operations and `last` on call receivers.
+
+Measure a release host from the main checkout:
+
+```sh
+make release
+python3 test/demo/photo/benchmark.py --output temp/photo/performance/results.json
+# Measure encoding, histogram and text composition separately:
+python3 test/demo/photo/benchmark.py --cases encode histogram composition --iterations 3
+```
+
+The report records the binary hash, machine, image sizes, cold/warm timings and
+process peak RSS. Each sample has a separate procedure activation so its output
+does not remain in the benchmark loop's local bindings; printing happens after
+the timed procedure returns. Peak RSS includes the
+runtime, decoder/source setup and GC storage; it is distinct from the evaluator's
+reported live scratch/cache bytes. Capture a release binary before changing
+the evaluator to compare against its scripts with
+`--binary path/to/old-release --reference-revision REV`.
+Native replay attributes expose processing, upload, histogram, export encoding
+and composition times. `data-image-preview_upload_ms` includes scheduling and
+upload; it does not measure display presentation latency.
+Recorded measurements are in [performance-results.json](performance-results.json).
 
 See [the implementation plan](Lambda_Impl_Photo_Editor.md) for the architecture
 and remaining performance work, and [asset attribution](assets/ATTRIBUTION.md).

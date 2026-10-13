@@ -486,6 +486,7 @@ typedef enum SysFunc {
     SYSFUNC_RESIZE,           // resize(img, h, w) - bilinear resample
     SYSFUNC_ROTATE,           // rotate(img, deg) - bilinear rotation
     SYSFUNC_AFFINE_WARP,      // affine_warp(img, M) - 2x3 affine gather
+    SYSFUNC_IMAGE_PROCESS,    // image_process(img, options) - bounded RGBA pipeline
     SYSFUNC_ALL,
     SYSFUNC_ANY,
     SYSFUNC_MIN1,
@@ -3260,6 +3261,7 @@ extern "C" {
                            int64_t stride_h, int64_t stride_w, int64_t pad_h, int64_t pad_w);
     Item fn_convolve(Item img, Item kernel);       // weighted-sum correlation (DOT)
     Item fn_blur(Item img, Item ksize);            // box (mean) blur
+    Item fn_image_process(Item img, Item options); // fused, bounded RGBA8 processing
     Item fn_erode(Item img, Item ksize);           // morphological min
     Item fn_dilate(Item img, Item ksize);          // morphological max
     Item fn_median_filter(Item img, Item ksize);   // rank (median) filter

@@ -1,4 +1,5 @@
 import dom
+import radiant
 import model: .mod_model
 import geometry: .mod_geometry
 import pipeline: .mod_pipeline
@@ -10,12 +11,12 @@ pub pn text(owner,id,value) {
     let target = node(owner,id)
     if (dom.text_content(target) != string(value)) dom.set_text_content(target,string(value))
 }
-pub pn attribute(owner,id,key,requested) {
-    let target = node(owner,id)
+pub pn node_attribute(target,key,requested) {
     if (dom.get_attribute(target,key) != requested) {
         if (requested == null) dom.remove_attribute(target,key) else dom.set_attribute(target,key,requested)
     }
 }
+pub pn attribute(owner,id,key,requested) { node_attribute(node(owner,id),key,requested) }
 pub pn visible(owner,id,shown) {
     let target = node(owner,id)
     let requested = if (shown) "block" else "none"
@@ -126,27 +127,71 @@ pub pn frame_geometry(owner,session_value,dimensions) {
     }
 }
 pub pn paint(owner,session_value) any^ {
-    synchronize(owner,session_value)
-    let pixels = if (session_value.dirty or session_value.painted == null)
-        pipeline.evaluate(session_value.source.proxy,{*:model.current(session_value.hist),output_width:0,output_height:0},session_value.compare,session_value.tool == "crop")
-        else session_value.painted
-    if (session_value.dirty or session_value.painted == null) dom.set_canvas_pixels(node(owner,"preview"),pixels)^
-    let recipe = model.current(session_value.hist)
-    let dimensions = shape(pixels)
-    if (recipe.layers != session_value.painted_layers or dimensions != shape(session_value.painted)) {
+    let controls_dirty=session_value.controls_dirty or session_value.dirty or session_value.painted==null
+    if (controls_dirty) { synchronize(owner,session_value) }
+    let recipe=model.current(session_value.hist)
+    let source_key=string(session_value.source.identity)
+    let key={*:pipeline.options(recipe,session_value.compare,session_value.tool=="crop"),
+        layers:[],output_width:0,output_height:0}
+    var updated={*:session_value,token:0,dirty:false,controls_dirty:false}
+    var pixels=session_value.painted
+    var changed=false
+    if (pixels==null or session_value.painted_source!=source_key) {
+        radiant.image_job(owner,{action:"cancel",channel:"preview"})^
+        pixels=image_process(session_value.source.proxy,key)^
+        updated={*:updated,job:0,painted_key:key,painted_source:source_key}
+        changed=true
+    } else if (key!=session_value.painted_key) {
+        if (session_value.job==0 or key!=session_value.job_key) {
+            let token=radiant.image_job(owner,{action:"start",channel:"preview",source:source_key,
+                pixels:session_value.source.proxy,options:key})^
+            updated={*:updated,job:token,job_key:key}
+        } else {
+            let done=radiant.image_job(owner,{action:"poll",channel:"preview",token:session_value.job})^
+            if (done!=null) {
+                pixels=done.pixels^
+                updated={*:updated,job:0,painted_key:key}
+                changed=true
+                for (metric in ["elapsed_us","scratch_bytes","cache_bytes","geometry_hits","color_hits","blur_hits"])
+                    dom.set_attribute(owner,"data-image-" ++ metric,string(done[metric]))
+            }
+        }
+    } else if (session_value.job>0) {
+        radiant.image_job(owner,{action:"cancel",channel:"preview"})^
+        updated={*:updated,job:0}
+    }
+    if (changed) {
+        let began=clock()
+        dom.set_canvas_pixels(node(owner,"preview"),pixels)^
+        dom.set_attribute(owner,"data-image-upload_us",string(int((clock()-began)*1000000)))
+        if (session_value.requested_at>0)
+            dom.set_attribute(owner,"data-image-preview_upload_ms",string((clock()-session_value.requested_at)*1000))
+    }
+    let dimensions=shape(pixels)
+    if (recipe.layers!=session_value.painted_layers or dimensions!=shape(session_value.painted)) {
         dom.set_inner_html(node(owner,"artwork"),format(layers.svg(recipe,dimensions[1],dimensions[0]),'xml'))
     }
-    if (session_value.dirty or session_value.painted == null) {
-        let counts = histogram(as_float(grayscale(pixels)),32)
-        let peak = max(1,max(counts))
+    let pixel_revision=session_value.pixel_revision+(if (changed) 1 else 0)
+    if (session_value.tool=="adjust" and dom.bounding_box(node(owner,"histogram")).width>0 and
+        session_value.histogram_revision!=pixel_revision) {
+        let began=clock()
+        let counts=histogram(as_float(grayscale(pixels)),32)
+        let peak=max(1,max(counts))
         dom.set_inner_html(node(owner,"histogram"),format(<svg viewBox:"0 0 224 56",width:224,height:56, *[
             for (i,count in counts) <rect x:(i*7),y:(56-count/peak*52),width:5,height:(count/peak*52),fill:"#80d6b3">]>,'xml'))
+        updated={*:updated,histogram_revision:pixel_revision}
+        dom.set_attribute(owner,"data-image-histogram_us",string(int((clock()-began)*1000000)))
     }
-    frame_geometry(owner,session_value,shape(pixels))
-    let revision = session_value.revision+1
-    dom.set_attribute(owner,"data-revision",string(revision))
-    return {*:session_value,dirty:false,painted:pixels,painted_layers:recipe.layers,token:0,revision:revision}
+    if (controls_dirty or changed) { frame_geometry(owner,updated,dimensions) }
+    let revision=session_value.revision+(if (controls_dirty or changed) 1 else 0)
+    node_attribute(owner,"data-revision",string(revision))
+    node_attribute(owner,"data-processing",string(updated.job>0))
+    updated={*:updated,painted:pixels,painted_layers:recipe.layers,pixel_revision:pixel_revision,revision:revision}
+    return if (updated.job>0 or updated.export_job>0) schedule(owner,updated,true) else updated
 }
-pub pn schedule(owner,session_value) {
-    return if (session_value.token > 0) session_value else {*:session_value,token:dom.request_frame(owner,"photo_frame")}
+pub pn schedule(owner,session_value,poll=false) {
+    // polling keeps the retained UI untouched until a result or another input arrives.
+    let updated=if (poll) session_value else {*:session_value,controls_dirty:true,
+        requested_at:if (session_value.dirty) clock() else session_value.requested_at}
+    return if (updated.token>0) updated else {*:updated,token:dom.request_frame(owner,"photo_frame")}
 }

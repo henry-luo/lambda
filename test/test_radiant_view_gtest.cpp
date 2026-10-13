@@ -2826,6 +2826,16 @@ TEST(RadiantViewTest, PhotoCanvasCopiesRgbaAndReleasesItAcrossGc) {
         "test/demo/photo/tests/_canvas_bridge.ls", "test/demo/photo/tests/canvas_bridge.json", env, true);
 }
 
+TEST(RadiantViewTest, PhotoImageJobsOwnPixelsAcrossGcAndClose) {
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"},
+        {"LAMBDA_FUNC_JIT_THRESHOLD", "1"}, {"LAMBDA_SATELLITE_SYNC", "1"},
+        {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {nullptr, nullptr},
+    };
+    test_radiant_view_expect_replay("test/demo/photo/tests/_image_jobs.ls",
+        "test/demo/photo/tests/image_jobs.json",env,true);
+}
+
 static const struct {
     const char* name; const char* tier; const char* replay; const char* source;
 } g_radiant_view_photo_cases[] = {
@@ -2837,6 +2847,8 @@ static const struct {
     {"PhotoCropDraftAndKeyboardCompare_jit_responsive", "jit", "photo_responsive", "test/demo/photo/tests/rgba.png"},
     {"PhotoCreativeLayersAndExport_auto", "auto", "photo_creative", "test/demo/photo/tests/rgba.png"},
     {"PhotoCreativeLayersAndExport_jit", "jit", "photo_creative", "test/demo/photo/tests/rgba.png"},
+    {"PhotoAsynchronousProcessingAndCacheReuse_auto", "auto", "photo_performance", nullptr},
+    {"PhotoAsynchronousProcessingAndCacheReuse_jit", "jit", "photo_performance", nullptr},
 };
 
 static void test_radiant_view_photo_replay(size_t selected) {

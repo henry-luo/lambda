@@ -1773,7 +1773,7 @@ yet; their signatures come from the system-function registry
 | Complex numbers | `complex(re, im)`, `real(z)`, `imag(z)`, `conj(z)` — `complex(1, 2) + 1` is `2+2j` |
 | Array shape | `shape(a)`, `reshape(a, shape)`, `transpose(a)`, `flatten(a)`, `ravel(a)`, `matmul(a, b)`, `concat(a, b)`, `stack(a, b)`, `subview(a, start, end)`, `is_view(a)`, `ndim(a)` |
 | In-place mutation (`pn`) | `push(arr, value)`, `splice(arr, start, count)` |
-| Image processing | `load(path_or_bytes)`, `save(img, path)`, `as_float`, `as_ubyte`, `invert`, `gamma`, `threshold`, `grayscale`, `flip`, `rot90`, `crop(img, rows, columns)`, `resize(img, height, width)`, `rotate`, `affine_warp`, `convolve`, `blur`, `erode`, `dilate`, `median_filter`, `maxpool`, `avgpool`, `histogram`, `otsu`, `label` |
+| Image processing | `load(path_or_bytes)`, `save(img, path)`, `image_process(img, options)`, `as_float`, `as_ubyte`, `invert`, `gamma`, `threshold`, `grayscale`, `flip`, `rot90`, `crop(img, rows, columns)`, `resize(img, height, width)`, `rotate`, `affine_warp`, `convolve`, `blur`, `erode`, `dilate`, `median_filter`, `maxpool`, `avgpool`, `histogram`, `otsu`, `label` |
 | Reactive UI | `apply(target, options?)`, `emit(event, payload)` — see [Reactive_UI.md](Reactive_UI.md) |
 | Editor bridge | `undo()`, `redo()`, `edit_commit(description?)` |
 | HTTP server (`pn`, untested) | `io.http_create_server(config)`, `io.http_listen(server, port)`, `io.http_route(server, method, path, handler)`, `io.http_use(server, middleware)`, `io.http_static(server, url_path, dir)`, `io.http_stop(server)` |
@@ -1781,6 +1781,32 @@ yet; their signatures come from the system-function registry
 ---
 
 ### Image snapshots and native canvas upload
+
+`image_process(image, options)^` is a pure, fused evaluator for `(H,W,4)` ubyte
+RGBA images, returning a fresh array without modifying the source (**S1.4**).
+It applies quarter turns/flips, straightening, normalized crop, RGB adjustments,
+a color matrix, vignette/soft focus/sharpening, and optional bilinear resizing.
+Resampling and neighborhood filtering use premultiplied color; the returned
+array uses straight alpha. Quantization happens at the final RGBA8 boundary.
+
+Options default to neutral processing. Supported fields are `turns` (0–3),
+`flip_x`, `flip_y`, `angle` (−15–15 degrees), `crop` (`left,top,right,bottom`
+fractions), `exposure`, `brightness`, `contrast`, `saturation`, `temperature`,
+`gamma`, `black`, `white`, `shadows`, `highlights`, `intensity`, `vignette`,
+`softness`, `sharpen`, and `output_width`/`output_height`. Both output dimensions
+are zero or both positive. `matrix` is a flat array of 12 finite coefficients:
+three `[R,G,B,offset]` rows, blended with adjusted RGB by `intensity`.
+`compare:true` skips color/effects, and `uncropped:true` skips crop/output resize.
+The Photo demo supplies preset matrices from one shared coefficient catalog.
+
+Inputs and outputs are limited to 16 megapixels; requested dimensions are at
+most 16384 each, and evaluator row storage has a 16 MiB per-row admission bound.
+Invalid types, bounds, non-finite parameters or allocations return an error.
+The existing `as_float()` conversion still produces float64.
+
+`blur(image, kernel_size)` preserves its float64 output and edge replication.
+Finite, safely summable inputs use running sums; non-finite/overflow-risk inputs
+retain the local stencil evaluation so values do not contaminate distant windows.
 
 `load(string_path)` retains its existing raw-orientation behavior.
 `load(binary_bytes)` decodes an immutable encoded snapshot into an `(H,W,4)`

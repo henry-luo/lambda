@@ -45,6 +45,9 @@ void image_free(unsigned char* data);
 // channels: 1=grayscale, 3=RGB, 4=RGBA. Returns 1 on success, 0 on failure.
 int image_save_png(const char* filename, const unsigned char* data,
                    int width, int height, int channels);
+// cancellation is checked between encoder rows; a cancelled write returns zero.
+int image_save_png_cancelable(const char* filename, const unsigned char* data,
+    int width, int height, int channels, int (*cancelled)(void*), void* user, int* created);
 
 // Get image dimensions without decoding pixel data (header-only read)
 // Returns 1 on success, 0 on failure

@@ -43,34 +43,39 @@ pub pn write_recipe(path, source, recipe) any^ {
     let target = destination(path,source,".json")^
     return output(document(source,recipe),target,{format:'json',atomic:true})^
 }
-pub pn export_png(path, source, recipe) any^ {
-    let target = destination(path,source,".png")^
-    if (not model.valid(recipe) or recipe.output_width*recipe.output_height > 16000000) {
+pub pn prepare_export(path,source,recipe) any^ {
+    let target=destination(path,source,".png")^
+    if (not model.valid(recipe) or recipe.output_width*recipe.output_height>16000000)
         raise error("Photo: output must be at most 16 megapixels")
+    let pending=target ++ ".photo-" ++ string(int(clock()*1000000)) ++ ".png"
+    let background=pending ++ ".base.png";
+    {target:target,pending:pending,background:background,
+        raster:if (len(recipe.layers)==0) pending else background,source:source,recipe:recipe}
+}
+pub pn abort_export(request) {
+    io.delete(request.pending) ^ { null }
+    io.delete(request.background) ^ { null }
+}
+pub pn finish_export(request,dimensions) any^ {
+    var problem=null
+    if (len(request.recipe.layers)>0) {
+        let svg=layers.svg(request.recipe,dimensions[1],dimensions[0],
+            url_resolve("file://" ++ sys.proc.self.cwd# ++ "/",request.background))
+        let html=<html <head <style "html,body{margin:0;padding:0;background:transparent}svg{display:block}">> <body svg>>
+        let done=radiant.export_document(format(html,'html'),request.pending,
+            {format:"png",width:dimensions[1],height:dimensions[0],local_resources:true,transparent:true})
+        if (done!=true) { problem=error("Photo: " ++ string(done)) }
+        io.delete(request.background) ^ { null }
     }
-    let pixels = pipeline.evaluate(source.pixels,recipe)
-    // Encode beside the destination; publish only a completed PNG.
-    let pending = target ++ ".photo-" ++ string(int(clock()*1000000)) ++ ".png"
-    let background = pending ++ ".base.png"
-    var problem = null
-    if (len(recipe.layers) == 0) { save(pixels,pending) ^ { problem = ^ } }
-    if (len(recipe.layers) > 0) {
-        // the existing document exporter paints the same SVG as the preview at output resolution.
-        save(pixels,background) ^ { problem = ^ };
-        if (problem == null) {
-            let dims = shape(pixels)
-            let svg = layers.svg(recipe,dims[1],dims[0],url_resolve("file://" ++ sys.proc.self.cwd# ++ "/",background))
-            let html = <html <head <style "html,body{margin:0;padding:0;background:transparent}svg{display:block}">> <body svg>>
-            let done = radiant.export_document(format(html,'html'),pending,
-                {format:"png",width:dims[1],height:dims[0],local_resources:true,transparent:true})
-            if (done != true) { problem = error("Photo: " ++ string(done)) }
-        }
-        io.delete(background) ^ { null }
-    }
-    if (problem == null) { io.rename(pending,target) ^ { problem = ^ } }
-    if (problem != null) {
-        io.delete(pending) ^ { null };
-        raise problem
-    }
-    return shape(pixels)
+    if (problem==null) { io.rename(request.pending,request.target) ^ { problem=^ } }
+    if (problem!=null) { abort_export(request); raise problem }
+    return dimensions
+}
+pub pn export_png(path,source,recipe) any^ {
+    let request=prepare_export(path,source,recipe)^
+    let pixels=pipeline.evaluate(source.pixels,recipe)^
+    var problem=null
+    save(pixels,request.raster) ^ { problem=^ }
+    if (problem!=null) { abort_export(request); raise problem }
+    return finish_export(request,shape(pixels))^
 }

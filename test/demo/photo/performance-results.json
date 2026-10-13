@@ -1,0 +1,682 @@
+{
+  "schema_version": 1,
+  "notes": [
+    "Release hosts; synthetic RGBA fixture. Warm samples exclude the first call.",
+    "Baseline has 4 samples per case; optimized 7; extra stages 3. Sample p95 is descriptive, not a statistical confidence bound.",
+    "Timings measure pipeline calls, not input-to-display presentation. Peak RSS includes runtime, GC storage and source setup.",
+    "Composition measures the synchronous complete export path, including color processing, PNG writes and text rendering. Histogram is measured at full input resolution; editor histograms use the proxy.",
+    "The baseline host was saved before native changes; reference scripts are from d3c1ec4be. Workspace revisions describe the working checkout and do not include uncommitted modifications."
+  ],
+  "baseline": {
+    "machine": "macOS-26.3-arm64-arm-64bit",
+    "processor": "arm",
+    "cpus": 10,
+    "binary": "lambda-baseline.exe",
+    "sha256": "516d56c9d24bea951c4e05c1740c9ac8b007d8ddb1a572fa0f6f2b97aada5481",
+    "reference_revision": "d3c1ec4be",
+    "date": "2026-10-14T07:13:58+0800",
+    "results": [
+      {
+        "size": "960x640",
+        "case": "neutral",
+        "exit_code": 0,
+        "samples_ms": [
+          14.468,
+          14.309,
+          13.862,
+          14.171
+        ],
+        "cold_ms": 14.468,
+        "p50_ms": 14.171,
+        "p95_ms": 14.309,
+        "peak_rss_bytes": 60506112
+      },
+      {
+        "size": "960x640",
+        "case": "color",
+        "exit_code": 0,
+        "samples_ms": [
+          622.174,
+          637.078,
+          585.965,
+          617.6
+        ],
+        "cold_ms": 622.174,
+        "p50_ms": 617.6,
+        "p95_ms": 637.078,
+        "peak_rss_bytes": 1283883008
+      },
+      {
+        "size": "960x640",
+        "case": "effects",
+        "exit_code": 0,
+        "samples_ms": [
+          2221.83,
+          2201.59,
+          2207.06,
+          2226.8
+        ],
+        "cold_ms": 2221.83,
+        "p50_ms": 2207.06,
+        "p95_ms": 2226.8,
+        "peak_rss_bytes": 1456734208
+      },
+      {
+        "size": "960x640",
+        "case": "geometry",
+        "exit_code": 0,
+        "samples_ms": [
+          107.115,
+          116.195,
+          88.462,
+          114.77
+        ],
+        "cold_ms": 107.115,
+        "p50_ms": 114.77,
+        "p95_ms": 116.195,
+        "peak_rss_bytes": 1094778880
+      },
+      {
+        "size": "960x640",
+        "case": "blur",
+        "exit_code": 0,
+        "samples_ms": [
+          2525.4,
+          2544.16,
+          2549.44,
+          2542.78
+        ],
+        "cold_ms": 2525.4,
+        "p50_ms": 2544.16,
+        "p95_ms": 2549.44,
+        "peak_rss_bytes": 116441088
+      },
+      {
+        "size": "1280x853",
+        "case": "neutral",
+        "exit_code": 0,
+        "samples_ms": [
+          24.617,
+          24.88,
+          23.377,
+          24.683
+        ],
+        "cold_ms": 24.617,
+        "p50_ms": 24.683,
+        "p95_ms": 24.88,
+        "peak_rss_bytes": 91127808
+      },
+      {
+        "size": "1280x853",
+        "case": "color",
+        "exit_code": 0,
+        "samples_ms": [
+          1182.37,
+          1192.24,
+          1197.45,
+          1173.17
+        ],
+        "cold_ms": 1182.37,
+        "p50_ms": 1192.24,
+        "p95_ms": 1197.45,
+        "peak_rss_bytes": 1600749568
+      },
+      {
+        "size": "1280x853",
+        "case": "effects",
+        "exit_code": 0,
+        "samples_ms": [
+          6203.61,
+          6244.48,
+          6243.13,
+          6256.32
+        ],
+        "cold_ms": 6203.61,
+        "p50_ms": 6244.48,
+        "p95_ms": 6256.32,
+        "peak_rss_bytes": 1777647616
+      },
+      {
+        "size": "1280x853",
+        "case": "geometry",
+        "exit_code": 0,
+        "samples_ms": [
+          253.704,
+          234.474,
+          228.838,
+          218.845
+        ],
+        "cold_ms": 253.704,
+        "p50_ms": 228.838,
+        "p95_ms": 234.474,
+        "peak_rss_bytes": 1569619968
+      },
+      {
+        "size": "1280x853",
+        "case": "blur",
+        "exit_code": 0,
+        "samples_ms": [
+          4530.25,
+          4533.87,
+          4573.29,
+          4530.74
+        ],
+        "cold_ms": 4530.25,
+        "p50_ms": 4533.87,
+        "p95_ms": 4573.29,
+        "peak_rss_bytes": 266108928
+      }
+    ],
+    "workspace_revision": "201ac9b45e1d2f904907a07edffc20b487d46d69"
+  },
+  "optimized": {
+    "machine": "macOS-26.3-arm64-arm-64bit",
+    "processor": "arm",
+    "cpus": 10,
+    "binary": "lambda-optimized.exe",
+    "sha256": "bbc7fd1de1d7823e3dd8370b5334bd87b379cf5e808e493f1a7c31b092393dfb",
+    "reference_revision": null,
+    "date": "2026-10-14T07:13:28+0800",
+    "results": [
+      {
+        "size": "960x640",
+        "case": "neutral",
+        "exit_code": 0,
+        "samples_ms": [
+          4.39,
+          4.592,
+          4.46,
+          4.402,
+          3.799,
+          3.858,
+          3.781
+        ],
+        "cold_ms": 4.39,
+        "p50_ms": 4.13,
+        "p95_ms": 4.592,
+        "peak_rss_bytes": 45350912
+      },
+      {
+        "size": "960x640",
+        "case": "color",
+        "exit_code": 0,
+        "samples_ms": [
+          25.668,
+          26.192,
+          26.324,
+          26.242,
+          26.327,
+          25.617,
+          25.906
+        ],
+        "cold_ms": 25.668,
+        "p50_ms": 26.217,
+        "p95_ms": 26.327,
+        "peak_rss_bytes": 45350912
+      },
+      {
+        "size": "960x640",
+        "case": "effects",
+        "exit_code": 0,
+        "samples_ms": [
+          15.056,
+          14.823,
+          14.561,
+          14.535,
+          15.551,
+          14.667,
+          13.773
+        ],
+        "cold_ms": 15.056,
+        "p50_ms": 14.614,
+        "p95_ms": 15.551,
+        "peak_rss_bytes": 45760512
+      },
+      {
+        "size": "960x640",
+        "case": "geometry",
+        "exit_code": 0,
+        "samples_ms": [
+          4.525,
+          4.762,
+          4.492,
+          4.708,
+          4.586,
+          4.701,
+          4.473
+        ],
+        "cold_ms": 4.525,
+        "p50_ms": 4.6434999999999995,
+        "p95_ms": 4.762,
+        "peak_rss_bytes": 45236224
+      },
+      {
+        "size": "960x640",
+        "case": "blur",
+        "exit_code": 0,
+        "samples_ms": [
+          17.58,
+          16.758,
+          16.554,
+          16.701,
+          16.635,
+          16.668,
+          16.818
+        ],
+        "cold_ms": 17.58,
+        "p50_ms": 16.6845,
+        "p95_ms": 16.818,
+        "peak_rss_bytes": 54214656
+      },
+      {
+        "size": "1280x853",
+        "case": "neutral",
+        "exit_code": 0,
+        "samples_ms": [
+          6.396,
+          6.284,
+          6.274,
+          5.823,
+          5.944,
+          5.957,
+          5.902
+        ],
+        "cold_ms": 6.396,
+        "p50_ms": 5.9505,
+        "p95_ms": 6.284,
+        "peak_rss_bytes": 66846720
+      },
+      {
+        "size": "1280x853",
+        "case": "color",
+        "exit_code": 0,
+        "samples_ms": [
+          39.56,
+          39.898,
+          40.772,
+          42.958,
+          44.915,
+          41.912,
+          41.983
+        ],
+        "cold_ms": 39.56,
+        "p50_ms": 41.9475,
+        "p95_ms": 44.915,
+        "peak_rss_bytes": 66879488
+      },
+      {
+        "size": "1280x853",
+        "case": "effects",
+        "exit_code": 0,
+        "samples_ms": [
+          24.196,
+          24.433,
+          24.614,
+          25.423,
+          24.961,
+          24.393,
+          25.017
+        ],
+        "cold_ms": 24.196,
+        "p50_ms": 24.7875,
+        "p95_ms": 25.423,
+        "peak_rss_bytes": 67960832
+      },
+      {
+        "size": "1280x853",
+        "case": "geometry",
+        "exit_code": 0,
+        "samples_ms": [
+          10.917,
+          9.132,
+          9.595,
+          9.258,
+          9.59,
+          9.332,
+          9.274
+        ],
+        "cold_ms": 10.917,
+        "p50_ms": 9.303,
+        "p95_ms": 9.595,
+        "peak_rss_bytes": 62324736
+      },
+      {
+        "size": "1280x853",
+        "case": "blur",
+        "exit_code": 0,
+        "samples_ms": [
+          37.737,
+          34.277,
+          34.402,
+          34.59,
+          35.444,
+          34.084,
+          34.975
+        ],
+        "cold_ms": 37.737,
+        "p50_ms": 34.496,
+        "p95_ms": 35.444,
+        "peak_rss_bytes": 82706432
+      },
+      {
+        "size": "4000x3000",
+        "case": "neutral",
+        "exit_code": 0,
+        "samples_ms": [
+          68.939,
+          73.58,
+          73.619,
+          72.925,
+          73.248,
+          73.267,
+          74.416
+        ],
+        "cold_ms": 68.939,
+        "p50_ms": 73.42349999999999,
+        "p95_ms": 74.416,
+        "peak_rss_bytes": 272760832
+      },
+      {
+        "size": "4000x3000",
+        "case": "color",
+        "exit_code": 0,
+        "samples_ms": [
+          503.286,
+          496.779,
+          444.155,
+          482.271,
+          512.7,
+          501.298,
+          444.228
+        ],
+        "cold_ms": 503.286,
+        "p50_ms": 489.525,
+        "p95_ms": 512.7,
+        "peak_rss_bytes": 272531456
+      },
+      {
+        "size": "4000x3000",
+        "case": "effects",
+        "exit_code": 0,
+        "samples_ms": [
+          285.249,
+          299.774,
+          300.789,
+          260.98,
+          259.453,
+          280.202,
+          283.168
+        ],
+        "cold_ms": 285.249,
+        "p50_ms": 281.685,
+        "p95_ms": 300.789,
+        "peak_rss_bytes": 279625728
+      },
+      {
+        "size": "4000x3000",
+        "case": "geometry",
+        "exit_code": 0,
+        "samples_ms": [
+          125.887,
+          130.729,
+          120.788,
+          115.302,
+          115.063,
+          114.142,
+          114.349
+        ],
+        "cold_ms": 125.887,
+        "p50_ms": 115.1825,
+        "p95_ms": 130.729,
+        "peak_rss_bytes": 238026752
+      },
+      {
+        "size": "4000x3000",
+        "case": "blur",
+        "exit_code": 0,
+        "samples_ms": [
+          448.244,
+          472.634,
+          391.381,
+          378.893,
+          407.562,
+          416.949,
+          409.858
+        ],
+        "cold_ms": 448.244,
+        "p50_ms": 408.71000000000004,
+        "p95_ms": 472.634,
+        "peak_rss_bytes": 1328349184
+      },
+      {
+        "size": "4000x4000",
+        "case": "neutral",
+        "exit_code": 0,
+        "samples_ms": [
+          95.433,
+          100.039,
+          100.801,
+          105.821,
+          107.131,
+          112.079,
+          109.695
+        ],
+        "cold_ms": 95.433,
+        "p50_ms": 106.476,
+        "p95_ms": 112.079,
+        "peak_rss_bytes": 352583680
+      },
+      {
+        "size": "4000x4000",
+        "case": "color",
+        "exit_code": 0,
+        "samples_ms": [
+          598.984,
+          661.187,
+          685.084,
+          621.422,
+          670.794,
+          676.674,
+          614.4
+        ],
+        "cold_ms": 598.984,
+        "p50_ms": 665.9905,
+        "p95_ms": 685.084,
+        "peak_rss_bytes": 352436224
+      },
+      {
+        "size": "4000x4000",
+        "case": "effects",
+        "exit_code": 0,
+        "samples_ms": [
+          378.039,
+          345.467,
+          348.583,
+          368.6,
+          386.799,
+          388.926,
+          347.3
+        ],
+        "cold_ms": 378.039,
+        "p50_ms": 358.5915,
+        "p95_ms": 388.926,
+        "peak_rss_bytes": 359727104
+      },
+      {
+        "size": "4000x4000",
+        "case": "geometry",
+        "exit_code": 0,
+        "samples_ms": [
+          158.675,
+          170.109,
+          170.183,
+          171.046,
+          171.684,
+          171.062,
+          153.74
+        ],
+        "cold_ms": 158.675,
+        "p50_ms": 170.6145,
+        "p95_ms": 171.684,
+        "peak_rss_bytes": 306495488
+      },
+      {
+        "size": "4000x4000",
+        "case": "blur",
+        "exit_code": 0,
+        "samples_ms": [
+          528.434,
+          534.082,
+          578.379,
+          501.119,
+          546.187,
+          538.958,
+          484.996
+        ],
+        "cold_ms": 528.434,
+        "p50_ms": 536.52,
+        "p95_ms": 578.379,
+        "peak_rss_bytes": 1760165888
+      }
+    ],
+    "workspace_revision": "201ac9b45e1d2f904907a07edffc20b487d46d69"
+  },
+  "stages": {
+    "machine": "macOS-26.3-arm64-arm-64bit",
+    "processor": "arm",
+    "cpus": 10,
+    "binary": "lambda-optimized.exe",
+    "sha256": "bbc7fd1de1d7823e3dd8370b5334bd87b379cf5e808e493f1a7c31b092393dfb",
+    "reference_revision": null,
+    "date": "2026-10-14T07:15:09+0800",
+    "results": [
+      {
+        "size": "960x640",
+        "case": "encode",
+        "exit_code": 0,
+        "samples_ms": [
+          41.711,
+          41.123,
+          42.194
+        ],
+        "cold_ms": 41.711,
+        "p50_ms": 41.658500000000004,
+        "p95_ms": 42.194,
+        "peak_rss_bytes": 35258368
+      },
+      {
+        "size": "960x640",
+        "case": "histogram",
+        "exit_code": 0,
+        "samples_ms": [
+          20.554,
+          21.5,
+          19.4
+        ],
+        "cold_ms": 20.554,
+        "p50_ms": 20.45,
+        "p95_ms": 21.5,
+        "peak_rss_bytes": 58015744
+      },
+      {
+        "size": "960x640",
+        "case": "composition",
+        "exit_code": 0,
+        "samples_ms": [
+          144.315,
+          134.666,
+          146.814
+        ],
+        "cold_ms": 144.315,
+        "p50_ms": 140.74,
+        "p95_ms": 146.814,
+        "peak_rss_bytes": 75546624
+      },
+      {
+        "size": "4000x3000",
+        "case": "encode",
+        "exit_code": 0,
+        "samples_ms": [
+          482.677,
+          492.654,
+          541.135
+        ],
+        "cold_ms": 482.677,
+        "p50_ms": 516.8945,
+        "p95_ms": 541.135,
+        "peak_rss_bytes": 266698752
+      },
+      {
+        "size": "4000x3000",
+        "case": "histogram",
+        "exit_code": 0,
+        "samples_ms": [
+          370.02,
+          385.373,
+          384.653
+        ],
+        "cold_ms": 370.02,
+        "p50_ms": 385.01300000000003,
+        "p95_ms": 385.373,
+        "peak_rss_bytes": 578174976
+      },
+      {
+        "size": "4000x3000",
+        "case": "composition",
+        "exit_code": 0,
+        "samples_ms": [
+          1571.11,
+          1546.3,
+          1570.07
+        ],
+        "cold_ms": 1571.11,
+        "p50_ms": 1558.185,
+        "p95_ms": 1570.07,
+        "peak_rss_bytes": 775815168
+      },
+      {
+        "size": "4000x4000",
+        "case": "encode",
+        "exit_code": 0,
+        "samples_ms": [
+          666.075,
+          614.267,
+          658.897
+        ],
+        "cold_ms": 666.075,
+        "p50_ms": 636.5820000000001,
+        "p95_ms": 658.897,
+        "peak_rss_bytes": 346718208
+      },
+      {
+        "size": "4000x4000",
+        "case": "histogram",
+        "exit_code": 0,
+        "samples_ms": [
+          501.955,
+          484.192,
+          537.325
+        ],
+        "cold_ms": 501.955,
+        "p50_ms": 510.7585,
+        "p95_ms": 537.325,
+        "peak_rss_bytes": 1058586624
+      },
+      {
+        "size": "4000x4000",
+        "case": "composition",
+        "exit_code": 0,
+        "samples_ms": [
+          2055.62,
+          2058.58,
+          2000.93
+        ],
+        "cold_ms": 2055.62,
+        "p50_ms": 2029.755,
+        "p95_ms": 2058.58,
+        "peak_rss_bytes": 683589632
+      }
+    ],
+    "workspace_revision": "201ac9b45e1d2f904907a07edffc20b487d46d69"
+  }
+}

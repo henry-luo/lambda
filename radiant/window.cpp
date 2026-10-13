@@ -1773,6 +1773,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                     int retry_wait_ms = event_sim_assertion_retry_wait_ms(sim_ctx);
                     // native document/media work needs wall time before virtual assertion retries advance.
                     if (radiant_async_document_loads_pending(&ui_context) ||
+                        dom_document_has_pending_work(ui_context.document) ||
                         radiant_video_events_pending(ui_context.document ? ui_context.document->state : nullptr)) {
                         if (retry_wait_ms > 50) retry_wait_ms = 50;
                         uv_sleep((unsigned int)retry_wait_ms);

@@ -1,7 +1,8 @@
 # Lambda Photo Editor Implementation Plan
 
 **Status:** core demo implemented (2026-10-10); creative tools added (2026-10-13).
-Release performance targets remain unmeasured.
+Phase 7 performance work follows below (2026-10-14); release measurements now
+cover the evaluator. Display presentation latency remains unmeasured.
 
 The creative extension adds editable text, five shapes, six original vector
 stickers, layer selection/movement/resizing/rotation, color/opacity, stacking,
@@ -436,6 +437,7 @@ through Phase 5; Phase 6 is additional scope.
 | 4 — Persistence and robust export | Add source identity checks, versioned JSON recipe save/load, output size controls, failure handling, and destination replacement rules | Recipe round trip reproduces output; stale/mismatched sources are rejected; preview resolution never limits export; failed writes retain edits |
 | 5 — Demo acceptance | Finish styling, narrow-window behavior, keyboard/focus, licensed samples, replay registration, lifecycle stress, release measurements, and README | Full user journey passes; required engine gates pass; repeat open/edit/export/close has bounded memory and no stale callbacks |
 | 6 — Extensions | JPEG output, blur/sharpen/vignette, histogram, split comparison, native picker/drop integration; then optional text/sticker/frame composition | Each visible tool changes real exported pixels, has undo coverage, and meets preview/export and lifetime tests |
+| 7 — Processing performance | Release benchmarks, linear box blur, fused native evaluation, bounded stage caches, row/ring export processing, asynchronous preview/export and cancellable PNG encoding | Reference pixels, cache invalidation, cancellation, forced-GC ownership, bounded scratch storage and native UI replays pass; release results are recorded separately from presentation targets |
 
 The critical path is pixel upload and scheduling → editable image slice →
 shared evaluator/history → crop mapping → persistence/export → acceptance.
@@ -530,3 +532,131 @@ Completion means a user can edit and export their own local photo in the
 native Radiant window, recover from errors, and repeat the workflow without
 unbounded retained buffers. All visible core controls must affect the actual
 recipe or image, and a saved recipe must reproduce the exported result.
+
+## 9. Phase 7 — Processing performance (2026-10-14)
+
+The implementation retains recipes/history as immutable values (**S1.4**) and
+the stable canvas/DOM contract (**S12.1.3**). It adds no image value type or
+language-level worker semantics; cooperative tasks remain as specified by
+**S13.1.3v2**.
+
+1. **Release measurement.** `benchmark.py` records machine/build identity,
+   image size, cold latency, warm p50/p95 and process peak RSS. It covers neutral,
+   color, spatial effects, geometry, generic blur, PNG encoding, histogram and
+   text composition. A reference revision loads the pre-optimization Lambda
+   evaluator for comparisons with a saved release host. Each timed call has its
+   own procedure activation, matching editor callback lifetimes.
+2. **Linear blur.** One rolling horizontal/vertical implementation serves both
+   `blur` and premultiplied image effects. It preserves edge replication and
+   even-kernel anchoring. A bounded ring retains horizontal rows; large supports
+   fall back to recomputing departing rows instead of growing scratch without
+   limit. Non-finite/overflow-risk numeric inputs retain the local stencil.
+3. **Fused evaluation.** `image_process` evaluates geometry and color using
+   native scalar registers, applies effects through row/ring buffers, and
+   resizes from adjacent rows. Presets are shared coefficient records, with no
+   per-preset native implementations. Neutral RGB/alpha stay exact. Non-neutral
+   comparisons with the 20 pre-optimization reference recipes admit one RGBA8
+   value of floating-point rounding. Existing `as_float()` remains float64;
+   bounded double scratch makes a global dtype change unnecessary.
+   N-D array construction also attaches its rooted shape before allocating the
+   payload (**D5.3.3 / D4.3.1**). Previously, allocating a tiny shape after a large
+   pixel buffer could collect and promote that unwritten buffer. The shared
+   ArrayNum factory now performs the payload allocation last. A native regression
+   checks nursery ownership at return and dimensions/bytes after later collection.
+4. **Bounded caches.** Preview geometry, adjusted color and blurred color use a
+   64 MiB LRU budget keyed by source revision and relevant parameters. Downstream
+   hits skip predecessor admission so an unchanged blur is not evicted merely
+   to rebuild geometry. Cache data keeps its full precision. Zoom, pan, artwork
+   edits and pending-job polls do not recompute the image; hidden histograms
+   are skipped and refreshed when shown.
+5. **Native jobs and export.** `radiant.image_job(owner,request)` uses separate
+   preview/export lanes over the existing thread pool. Each lane has one active
+   and one replaceable pending request. Workers retain native pixel copies and
+   coefficients, never a GC pointer, evaluator context or DOM node
+   (**D4.5.2 / D5.3.3 / D7.5.3**). UI frame callbacks poll completion and publish
+   only a matching current recipe/source. Cancellation is checked per scanline
+   and between PNG rows. Document teardown cancels, joins and frees jobs/caches.
+   Encoded exports avoid copying full-resolution pixels back into the GC heap.
+   Temporary PNG creation is exclusive, and cleanup removes only files the job
+   created. Publication still uses the shared recipe snapshot and neighboring
+   temporary-file rename path.
+
+Document resources expose an optional pending-work callback. Headless assertion
+retries use it to pace virtual time against real native work, just as they do
+for navigation/video. This fixes an exposed scheduler mismatch: faster polling
+could consume a virtual assertion deadline before background encoding completed.
+Normal window input remains non-blocking.
+
+Text/vector composition still runs synchronously through the existing Radiant
+document renderer after background image processing/encoding. This phase does
+not claim a fully asynchronous layout/paint exporter. GPU processing, a general
+expression-fusion compiler and color-management changes remain separate work.
+
+The native result reports scratch/cache bytes and stage-cache hits. Replay
+attributes report processing, upload, histogram, export PNG encoding and final
+composition times; preview-to-upload latency excludes display presentation.
+Peak process RSS includes GC storage and setup, and must not be confused with
+live evaluator scratch. A 4000×3000 effect pass uses less than 8 MiB of scratch
+in addition to its RGBA8 source/destination; history never contains those buffers.
+
+### Recorded release measurements
+
+Measured on macOS 26.3, ARM64, 10 logical CPUs. The baseline host was saved
+before these changes and used evaluator scripts from `d3c1ec4be`. The optimized
+host includes the shared ArrayNum construction fix. Full samples, binary hashes
+and machine metadata are in [performance-results.json](performance-results.json).
+Warm samples exclude the first call: four calls per baseline case, seven per
+optimized case. These small-sample p95 values describe this run only.
+
+| 960×640 operation | Baseline p50 | Optimized p50 | Optimized p95 | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| Neutral | 14.17 ms | 4.13 ms | 4.59 ms | 3.4× |
+| Color adjustments + preset | 617.60 ms | 26.22 ms | 26.33 ms | 23.6× |
+| Softness + sharpen + vignette | 2207.06 ms | 14.61 ms | 15.55 ms | 151.0× |
+| Straighten + crop | 114.77 ms | 4.64 ms | 4.76 ms | 24.7× |
+| Generic 15×15 blur | 2544.16 ms | 16.68 ms | 16.82 ms | 152.5× |
+
+At 1280×853, color processing measured 41.95 ms p50 / 44.91 ms p95;
+effects measured 24.79 / 25.42 ms. These are evaluator timings without a
+preview cache, scheduling, upload or display presentation. The original
+adjustment-to-paint target remains unverified.
+
+| Full-resolution operation, warm p50 | 4000×3000 | 4000×4000 |
+| --- | ---: | ---: |
+| Color adjustments + preset | 489.53 ms | 665.99 ms |
+| Softness + sharpen + vignette | 281.69 ms | 358.59 ms |
+| PNG encoding alone | 516.89 ms | 636.58 ms |
+| Complete export with text | 1558.19 ms | 2029.76 ms |
+
+Encoding/composition used three calls each. Complete text export includes
+processing and PNG writes, so its time is not a standalone composition-stage
+time. It still blocks the UI during the final document render. Repeated
+12-megapixel color/effect processing peaked at 259.9 / 266.7 MiB process RSS;
+16-megapixel processing peaked at 336.1 / 343.1 MiB. This includes source and
+runtime memory. Generic float64 blur, full-resolution histogram and document
+composition retain larger allocations; those measurements do not establish a
+whole-application memory bound.
+
+### Verification and remaining failures
+
+- All 148 vector/render tests and 38 item-representation tests passed, including
+  independent running-filter comparisons, cache invalidation, cancellation,
+  scratch bounds and the ArrayNum construction regression.
+- Twelve selected script cases passed in automatic and forced-JIT modes.
+  Forced-GC/poisoned-free runs also passed for reference pixels and generic blur.
+- All 13 photo UI tests passed with the pinned release host and in a separate
+  sequential debug run. The forced-GC job test passed again after extending it
+  to verify that a failed exclusive PNG write preserves an existing file.
+  Document teardown reported zero tracked live allocations.
+- Radiant's no-int-cast lint and `git diff --check` for this change's files passed.
+- `make test-lambda-baseline` completed with 6555/6557 passing. Remaining
+  failures were the `edit_view_only` golden mismatch and a GC-stress runner
+  idle timeout. Both were also observed before the ArrayNum construction fix.
+- `make test-radiant-baseline` completed with 5355 passing, 108 failing, 351
+  partial and one skipped result. The parallel debug run included 120-second
+  idle timeouts for photo smoke/creative tests in automatic and JIT modes,
+  despite the isolated photo runs passing. Other failures included layout,
+  document-editor and Scene3D tests, plus sandboxed HTTP-server startup failures.
+  Neither broad gate is green; no harness failures were suppressed.
+
+Detailed local verification logs are under `temp/photo/performance/`.
