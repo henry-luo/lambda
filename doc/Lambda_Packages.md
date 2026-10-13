@@ -27,6 +27,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 11. [map — Geographic Maps](#11-map--geographic-maps)
 12. [grammar — Language Grammars](#12-grammar--language-grammars)
 13. [Tests](#13-tests)
+14. [eps — EPS Rendering](#14-eps--eps-rendering)
 
 ---
 
@@ -47,6 +48,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
 | `latex` | `lambda.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
 | `pdf` | `lambda.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
+| `eps` | `lambda.doc.eps.eps` | Library, initial vector profile | Interprets EPS PostScript and produces standalone SVG | `convert -t svg`, `view`, `layout` and `render` on `.eps`/`.epsi` |
 | `grammar` | `lambda.grammar.xpath`, `lambda.grammar.xquery`, `lambda.grammar.jq`, `lambda.grammar.rnc` | Library, experimental | Grammars for other languages, written as Lambda `grammar` declarations: XPath 3.1, XQuery 3.1, jq 1.7.1 and RELAX NG compact parse to Lambda element trees | None |
 | `openapi` | `lambda.openapi.openapi`, `lambda.openapi.server` | Experimental | Route listing, Lambda type generation, validation and Swagger UI pages for OpenAPI specs | None |
 | `slide` | `lambda.slide` | Library, experimental | Slide elements, cues/effects, presenter console/navigation tools, themes/layouts/masters, snapshots and handouts; see [Slide Presentations](Lambda_Slide.md) | `lambda view deck.slides` |
@@ -1387,8 +1389,56 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 | `latex` | `test/lambda/latex/` |
 | `grammar` | `test/lambda/grammar/xpath.ls` (the grammar module itself: `test/lambda/grammar/`) |
 | `pdf` | `test/lambda/pdf/` |
+| `eps` | `test/lambda/eps/`; native parsing/scanning in `test/test_input_eps_gtest.cpp` |
 | `openapi` | None yet |
 | `edit` | `test/lambda/edit/`, `test/lambda/proc/edit_session_save.ls`; UI scripts `test/ui/edit_*.json` |
 | `editor` | `test/lambda/editor/`, `test/lambda/editing/` |
 | `dom` | `test/lambda/dom_*.ls`; UI scripts `test/ui/dom_pkg_*.json` |
 | The `lambda.*` namespace | `test/lambda/lambda_namespace.ls` |
+
+---
+
+## 14. `eps` — EPS Rendering
+
+The EPS package lives under the document namespace (**D7.2.4**). A C+ parser
+reads the EPS envelope and scans source objects; Lambda Script executes the
+PostScript machine and emits portable SVG. The initial profile supports vector
+paths, colors, strokes, transforms, clipping, procedures, common stack/control
+operators and local VM saves. Text, images, external resources and full
+PostScript LanguageLevel conformance remain outside this profile; an executed
+unsupported operator raises an error.
+
+```lambda no-run
+import eps: lambda.doc.eps.eps
+
+pn main() {
+    let doc = input("artwork.eps", 'eps')^
+    let picture = eps.eps_to_svg(doc, {id_prefix: "artwork"})^
+    output(format(picture, 'xml')^, "artwork.svg")^
+}
+```
+
+`eps_metadata(doc)` reads declared metadata without executing the artwork.
+`interpret(doc, options)` returns drawing records, definitions, geometry,
+diagnostics and statistics; `display_to_svg(display, options)` converts that
+result to an element. `eps_to_svg` composes the two. Execution is procedural
+(**S12.1.2**); handle failures with a procedure statement handler
+(**S7.6.7v4**) or propagate with `^`.
+
+Options include `id_prefix`, `scale`, `background` and a `limits` map. Use
+separate ID prefixes when combining SVG fragments. Output is transparent by
+default, with dimensions in points. The exact supported operator names are
+available as `eps.supported_operators`; the initial dictionary-key profile
+accepts names and its logical operators accept booleans. Auto/JIT are the
+supported package execution tiers.
+
+```bash
+./lambda.exe convert artwork.eps -t svg -o artwork.svg
+./lambda.exe render artwork.eps -o artwork.png
+./lambda.exe layout artwork.eps
+./lambda.exe view artwork.eps
+```
+
+See the [EPS design](../vibe/Lambda_Pkg_EPS.md) and
+[implementation record](../vibe/impl/Lambda_Impl_EPS.md) for source contracts,
+budgets, tests and remaining resource/font/image work.

@@ -2,6 +2,7 @@
 #include "input.hpp"
 #include "../io/fs_node.hpp"
 #include "input-parsers.h"
+#include "input-postscript.hpp"
 #include "../core/lambda-decimal.hpp"
 #include "../io/mark_builder.hpp"
 #include "../../lib/url.h"
@@ -2124,7 +2125,8 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
     // Determine the effective type to use
     if (!type || strcmp(type->chars, "auto") == 0) {
         // in-memory auto inputs may omit a URL, so content detection must stay null-safe.
-        if (zip_source_expected(pathname, source, source_len)) effective_type = "zip";
+        if (eps_source_expected(pathname, source, source_len)) effective_type = "eps";
+        else if (zip_source_expected(pathname, source, source_len)) effective_type = "zip";
         else if (detected_graph_flavor) effective_type = "graph";
         // Auto-detect MIME type
         MimeDetector* detector = effective_type ? NULL : mime_detector_init();
@@ -2222,6 +2224,9 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
             xml_options.require_namespaces = strict_xml;
             xml_options.allow_inert_doctype = strict_xml;
             parse_xml_with_options(input, source, &xml_options);
+        }
+        else if (strcmp(effective_type, "eps") == 0 || strcmp(effective_type, "epsi") == 0) {
+            parse_eps(input, source, source_len);
         }
         else if (input_parse_model(input, source, source_len, effective_type)) {}
         else if (dispatch_exact_input_parser(effective_type, input, source)) {}

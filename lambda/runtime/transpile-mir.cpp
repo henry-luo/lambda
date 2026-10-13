@@ -48884,6 +48884,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
 // Document loaders select this fixed native contract instead of generated code.
 static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
     {"pdf", "lambda.pdf.pdf", "pdf_to_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
+    {"eps", "lambda.doc.eps.eps", "eps_to_svg", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     // the package parses its own source so the engine sees the adapter registry (D7.2.7)
     {"latex", "lambda.latex.latex", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
     {"tikz", "lambda.doc.tikz.tikz", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},

@@ -429,7 +429,8 @@ fn _line_join_name(n) {
     else { "miter" }
 }
 
-fn _emit_path(st, fill, stroke, fill_rule) {
+// shared paint primitive; callers own PDF/PostScript path and graphics-state semantics.
+pub fn paint(st, fill, stroke, fill_rule) {
     if (len(st.segments) == 0) { { state: _clear(st), emit: [] } }
     else {
         let d = _segments_to_d(st.segments)
@@ -546,21 +547,21 @@ fn _emit_path(st, fill, stroke, fill_rule) {
 }
 
 // S: stroke (no close)
-fn _op_S(st)  { _emit_path(st, "none", st.stroke_color, "nonzero") }
+fn _op_S(st)  { paint(st, "none", st.stroke_color, "nonzero") }
 // s: close + stroke
-fn _op_s(st)  { _emit_path(_close_last(st), "none", st.stroke_color, "nonzero") }
+fn _op_s(st)  { paint(_close_last(st), "none", st.stroke_color, "nonzero") }
 // f / F: fill nonzero
-fn _op_f(st)  { _emit_path(st, st.fill_color, "none", "nonzero") }
+fn _op_f(st)  { paint(st, st.fill_color, "none", "nonzero") }
 // f*: fill evenodd
-fn _op_fstar(st) { _emit_path(st, st.fill_color, "none", "evenodd") }
+fn _op_fstar(st) { paint(st, st.fill_color, "none", "evenodd") }
 // B: fill nonzero + stroke
-fn _op_B(st)  { _emit_path(st, st.fill_color, st.stroke_color, "nonzero") }
+fn _op_B(st)  { paint(st, st.fill_color, st.stroke_color, "nonzero") }
 // B*: fill evenodd + stroke
-fn _op_Bstar(st) { _emit_path(st, st.fill_color, st.stroke_color, "evenodd") }
+fn _op_Bstar(st) { paint(st, st.fill_color, st.stroke_color, "evenodd") }
 // b: close + fill nonzero + stroke
-fn _op_b(st)  { _emit_path(_close_last(st), st.fill_color, st.stroke_color, "nonzero") }
+fn _op_b(st)  { paint(_close_last(st), st.fill_color, st.stroke_color, "nonzero") }
 // b*: close + fill evenodd + stroke
-fn _op_bstar(st) { _emit_path(_close_last(st), st.fill_color, st.stroke_color, "evenodd") }
+fn _op_bstar(st) { paint(_close_last(st), st.fill_color, st.stroke_color, "evenodd") }
 // n: end path with no paint, just clear
 fn _op_n(st)  { { state: _clear(st), emit: [] } }
 

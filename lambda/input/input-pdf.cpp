@@ -1,6 +1,8 @@
 // pdf parser implementation
 #include "input.hpp"
 #include "input-parsers.h"
+#include "input-postscript.hpp"
+#include "pdf_decompress.h"
 #include "../io/mark_builder.hpp"
 #include "input-context.hpp"
 #include "source_tracker.hpp"
@@ -58,16 +60,12 @@ static inline bool pdf_cs_is_num_start(char c) {
     return str_char_is_digit(c) || c == '+' || c == '-' || c == '.';
 }
 
-static inline bool pdf_cs_is_octal(char c) {
-    return c >= '0' && c <= '7';
-}
-
 static const char* pdf_cs_skip_ws(const char* p, const char* end) {
     return strn_skip_chars(p, end, " \t\n\r\f");
 }
 
 static const char* pdf_cs_skip_comment(const char* p, const char* end) {
-    return strn_scan_to_line_end(p, end);
+    return ps_skip_comment(p, end);
 }
 
 static Item pdf_cs_string_item(MarkBuilder& builder, const char* start, size_t len) {
@@ -151,52 +149,14 @@ static PdfCsReadResult pdf_cs_read_hex_string(MarkBuilder& builder, const char* 
     return {value, q < end ? q + 1 : q, true};
 }
 
-static char pdf_cs_octal_char(const char** pp, const char* end, char first) {
-    int val = first - '0';
-    int count = 1;
-    const char* p = *pp;
-    while (count < 3 && p < end && pdf_cs_is_octal(*p)) {
-        val = (val * 8) + (*p - '0');
-        p++;
-        count++;
-    }
-    *pp = p;
-    return (char)val;
-}
-
 static PdfCsReadResult pdf_cs_read_lit_string(MarkBuilder& builder, const char* p, const char* end) {
     StrBuf* buf = strbuf_new();
     if (!buf) return {pdf_cs_kind_value(builder, "string", "", 0), p + 1, true};
-    const char* q = p + 1;
-    int depth = 1;
-    while (q < end && depth > 0) {
-        char c = *q++;
-        if (c == '\\') {
-            if (q >= end) break;
-            char esc = *q++;
-            if (pdf_cs_is_octal(esc)) strbuf_append_char(buf, pdf_cs_octal_char(&q, end, esc));
-            else if (esc == 'n') strbuf_append_char(buf, '\n');
-            else if (esc == 'r') strbuf_append_char(buf, '\r');
-            else if (esc == 't') strbuf_append_char(buf, '\t');
-            else if (esc == 'b') strbuf_append_char(buf, '\b');
-            else if (esc == 'f') strbuf_append_char(buf, '\f');
-            else if (esc == '\r') { if (q < end && *q == '\n') q++; }
-            else if (esc == '\n') { /* escaped physical line ends contribute no byte */ }
-            else strbuf_append_char(buf, esc);
-        }
-        else if (c == '(') {
-            depth++;
-            strbuf_append_char(buf, c);
-        }
-        else if (c == ')') {
-            depth--;
-            if (depth > 0) strbuf_append_char(buf, c);
-        }
-        else strbuf_append_char(buf, c);
-    }
+    // retain the PDF adapter's representation and recovery policy around shared byte syntax.
+    PsStringResult scanned = ps_read_literal(p, end, buf, SIZE_MAX, false);
     Item value = pdf_cs_kind_value(builder, "string", buf->str ? buf->str : "", buf->length);
     strbuf_free(buf);
-    return {value, q, true};
+    return {value, scanned.next, true};
 }
 
 static PdfCsReadResult pdf_cs_read_array(MarkBuilder& builder, const char* p, const char* end) {
@@ -520,86 +480,22 @@ static String* parse_pdf_string(InputContext& ctx, const char **pdf) {
     stringbuf_reset(sb);
 
     if (**pdf == '(') {
-        // literal string
-        (*pdf)++; // skip (
-        int paren_count = 1;
-        int char_count = 0;
-        int max_chars = 100000; // Safety limit - increased for real PDFs
-
-        while (**pdf && paren_count > 0 && char_count < max_chars) {
-            if (**pdf == '\\') {
-                (*pdf)++; // skip backslash
-                if (**pdf) {
-                    switch (**pdf) {
-                        case 'n': stringbuf_append_char(sb, '\n'); break;
-                        case 'r': stringbuf_append_char(sb, '\r'); break;
-                        case 't': stringbuf_append_char(sb, '\t'); break;
-                        case 'b': stringbuf_append_char(sb, '\b'); break;
-                        case 'f': stringbuf_append_char(sb, '\f'); break;
-                        case '(': stringbuf_append_char(sb, '('); break;
-                        case ')': stringbuf_append_char(sb, ')'); break;
-                        case '\\': stringbuf_append_char(sb, '\\'); break;
-                        case '\n': /* ignore escaped newline */ break;
-                        case '\r': if (*pdf + 1 < ctx.source_end() && (*pdf)[1] == '\n') (*pdf)++; break;
-                        default:
-                            if (pdf_cs_is_octal(**pdf)) {
-                                // Dictionary and content strings share the bounded octal escape reader.
-                                char first = *(*pdf)++;
-                                stringbuf_append_char(sb, pdf_cs_octal_char(pdf, ctx.source_end(), first));
-                                (*pdf)--;
-                            } else stringbuf_append_char(sb, **pdf);
-                            break;
-                    }
-                    (*pdf)++;
-                    char_count++;
-                }
-            } else if (**pdf == '(') {
-                paren_count++;
-                stringbuf_append_char(sb, **pdf);
-                (*pdf)++;
-                char_count++;
-            } else if (**pdf == ')') {
-                paren_count--;
-                if (paren_count > 0) {
-                    stringbuf_append_char(sb, **pdf);
-                    char_count++;
-                }
-                (*pdf)++;
-            } else {
-                stringbuf_append_char(sb, **pdf);
-                (*pdf)++;
-                char_count++;
-            }
-        }
+        StrBuf* bytes = strbuf_new();
+        if (!bytes) return nullptr;
+        PsStringResult scanned = ps_read_literal(*pdf, ctx.source_end(), bytes, 100000, false);
+        stringbuf_append_str_n(sb, bytes->str, bytes->length);
+        *pdf = scanned.next;
+        strbuf_free(bytes);
     } else if (**pdf == '<') {
-        // hexadecimal string
-        (*pdf)++; // skip <
-        int char_count = 0;
-        int max_chars = 100000; // Safety limit - increased for real PDFs
-
-        while (**pdf && **pdf != '>' && char_count < max_chars) {
-            if (str_is_hex(**pdf)) {
-                char hex_char = **pdf;
-                (*pdf)++;
-                if (str_is_hex(**pdf)) {
-                    char hex_string[3] = {hex_char, **pdf, '\0'};
-                    int char_value = (int)strtol(hex_string, NULL, 16);
-                    stringbuf_append_char(sb, (char)char_value);
-                    (*pdf)++;
-                } else {
-                    // single hex digit, treat as 0X
-                    char hex_string[3] = {hex_char, '0', '\0'};
-                    int char_value = (int)strtol(hex_string, NULL, 16);
-                    stringbuf_append_char(sb, (char)char_value);
-                }
-                char_count++;
-            } else {
-                (*pdf)++; // skip non-hex chars
-            }
-        }
-        if (**pdf == '>') {
-            (*pdf)++; // skip >
-        }
+        StrBuf* bytes = strbuf_new();
+        if (!bytes) return nullptr;
+        size_t consumed = 0;
+        // hex pairs may span whitespace; the shared decoder also pads one final nibble.
+        bool decoded = asciihex_decode_bounded(*pdf + 1, ctx.source_end() - *pdf - 1,
+            bytes, 100000, false, false, &consumed);
+        if (decoded) stringbuf_append_str_n(sb, bytes->str, bytes->length);
+        *pdf += consumed + 1;
+        strbuf_free(bytes);
     }
 
     return ctx.builder.createStringFromBuf(sb);

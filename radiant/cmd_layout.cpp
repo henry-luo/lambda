@@ -55,6 +55,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/input-parsers.h"
+#include "../lambda/input/input-postscript.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "page_fo.hpp"
 #include "layout_paged.hpp"
@@ -2802,6 +2803,7 @@ static const LayoutFormatRoute* layout_find_format_route(const char* extension) 
 static bool layout_path_has_known_extension(const char* path) {
     if (!path) return false;
     if (graph_path_is_graph(path)) return true;
+    if (eps_source_expected(path, nullptr, 0)) return true;
     const char* extension = file_path_ext(path);
     return extension && (strcmp(extension, ".pdf") == 0 ||
                          layout_find_format_route(extension));
@@ -2810,6 +2812,7 @@ static bool layout_path_has_known_extension(const char* path) {
 bool layout_path_uses_loader_runtime(const char* path) {
     if (!path) return false;
     if (graph_path_is_graph(path)) return true;
+    if (eps_source_expected(path, nullptr, 0)) return true;
     const char* extension = file_path_ext(path);
     if (!extension) return false;
     if (strcmp(extension, ".pdf") == 0) return true;
@@ -2847,6 +2850,11 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
     if (graph_path_is_graph(path)) {
         if (handled) *handled = true;
         return load_graph_transform_doc(url, width, height, pool);
+    }
+
+    if (eps_source_expected(path, nullptr, 0)) {
+        if (handled) *handled = true;
+        return load_input_type_transform_doc("eps", url, nullptr, 0, width, height, pool);
     }
 
     const char* ext = file_path_ext(path);
@@ -4177,9 +4185,10 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
             svg_content);
         release_runtime();
         pool_destroy(result_pool);
-        // The serialized result gets its own base URL; the caller still owns script_url.
+        // successful loaders consume their source URL; retain it for SVG assets and teardown.
         log_info("[Lambda Script] Loading SVG-in-HTML from string (%zu bytes)", html_buf->length);
-        DomDocument* doc = load_html_string_doc(html_buf->str, viewport_width, viewport_height);
+        DomDocument* doc = load_lambda_html_doc(script_url, nullptr, viewport_width, viewport_height,
+            pool, html_buf->str, false, false, nullptr, print_media);
         strbuf_free(html_buf);
         return doc;
     };

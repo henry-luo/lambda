@@ -4494,6 +4494,13 @@
             "icon": "\ud83d\uddc4\ufe0f"
           },
           {
+            "source": "test_input_eps_gtest.cpp",
+            "name": "Input EPS Parser Tests",
+            "dependencies": ["lambda-data"],
+            "libraries": ["gtest", "gtest_main"],
+            "binary": "test_input_eps_gtest.exe"
+          },
+          {
             "source": "test_input_pdf_gtest.cpp",
             "name": "Input PDF Parser Tests",
             "dependencies": [

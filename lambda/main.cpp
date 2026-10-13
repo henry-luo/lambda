@@ -1,4 +1,6 @@
 #include "input/input.hpp"
+#include "input/input-postscript.hpp"
+#include "core/mark_reader.hpp"
 #include "io/zip_archive.hpp"
 #include "format/format.h"
 #include "format/format-markup.h"
@@ -1479,10 +1481,10 @@ void run_assertions() {
     assert(-1.0/0.0 == -INFINITY);
 }
 
-// Invoke configured package transforms directly and preserve their HTML output.
-static StrBuf* run_document_transform_html(const char* input_file,
+// serialize the transform before its runtime owner is released.
+static StrBuf* run_document_transform_markup(const char* input_file,
         const LambdaDocumentTransformConfig* transform,
-        const LambdaDocumentTransformOption* options, int option_count) {
+        const LambdaDocumentTransformOption* options, int option_count, bool as_xml = false) {
     if (!input_file || !transform) return nullptr;
     Runtime runtime;
     runtime_init(&runtime);
@@ -1493,7 +1495,8 @@ static StrBuf* run_document_transform_html(const char* input_file,
         get_type_id(result->root) != LMD_TYPE_ERROR) {
         output = strbuf_new_cap(8192);
         if (get_type_id(result->root) == LMD_TYPE_ELEMENT) {
-            String* html = format_html(result->pool, result->root);
+            String* html = as_xml ? format_xml(result->pool, result->root)
+                                  : format_html(result->pool, result->root);
             if (html) strbuf_append_str(output, html->chars);
             else {
                 strbuf_free(output);
@@ -1751,6 +1754,8 @@ int exec_convert(int argc, char* argv[]) {
         bool is_graph_input = graph_path_is_graph(input_file) ||
             (from_format && (strcmp(from_format, "graph") == 0 ||
                 strncmp(from_format, "graph:", 6) == 0));
+        const char* parsed_format = MapReader(input->root.get_safe_map()).get("format").cstring();
+        bool is_eps_input = parsed_format && strcmp(parsed_format, "eps") == 0;
 
         // Step 2: Format the parsed data to the target format
         printf("Converting to format: %s\n", to_format);
@@ -1760,7 +1765,10 @@ int exec_convert(int argc, char* argv[]) {
 
         // Use the existing format functions based on target format
         bool is_yaml_input = from_format && (strcmp(from_format, "yaml") == 0 || strcmp(from_format, "yml") == 0);
-        if (strcmp(to_format, "json") == 0) {
+        if (strcmp(to_format, "svg") == 0 && is_eps_input) {
+            full_doc_output = run_document_transform_markup(input_file,
+                lambda_document_transform_for_input_type("eps"), nullptr, 0, true);
+        } else if (strcmp(to_format, "json") == 0) {
             // empty YAML document (comments-only, whitespace-only, etc.)
             if (is_yaml_input && input->doc_count == 0 && get_type_id(input->root) == LMD_TYPE_NULL) {
                 full_doc_output = strbuf_new_cap(1);
@@ -1793,7 +1801,7 @@ int exec_convert(int argc, char* argv[]) {
                     options[option_count++] = {"view_key",
                         LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, graph_view_key, false};
                 }
-                full_doc_output = run_document_transform_html(input_file, transform,
+                full_doc_output = run_document_transform_markup(input_file, transform,
                     options, option_count);
                 if (!full_doc_output) {
                     printf("Error: Lambda graph package - HTML conversion failed\n");
@@ -1811,7 +1819,7 @@ int exec_convert(int argc, char* argv[]) {
                     options[option_count++] = {"font_option",
                         LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, font_option, false};
                 }
-                full_doc_output = run_document_transform_html(input_file, transform,
+                full_doc_output = run_document_transform_markup(input_file, transform,
                     options, option_count);
                 if (!full_doc_output) {
                     printf("Error: Lambda LaTeX package - HTML rendering failed\n");
@@ -3817,6 +3825,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, graph_view_key, false};
             }
             log_info("GRAPH_RENDER_TRANSFORM: rendering '%s' through Lambda graph transform", html_file);
+        } else if (eps_source_expected(html_file, nullptr, 0)) {
+            render_transform = lambda_document_transform_for_input_type("eps");
         } else if (input_ext && strcmp(input_ext, ".pgf") == 0) {
             render_transform = lambda_document_transform_for_input_type("tikz");
             if (!render_transform) {
@@ -4235,7 +4245,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
             lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);
-        } else if (is_graph_file || (ext && (strcmp(ext, ".pdf") == 0 ||
+        } else if (is_graph_file || eps_source_expected(filename, nullptr, 0) || (ext && (strcmp(ext, ".pdf") == 0 ||
                     strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 ||
                     strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
