@@ -1,6 +1,6 @@
 # Lambda Proposal — DOM Reconciliation at the Presentation Boundary
 
-> **Status:** proposal for review, 2026-10-13. No ruling is changed by this document; §6 drafts the **D4.5.3v2** text that would be ratified if the proposal is accepted.
+> **Status:** proposal for review, 2026-10-13. No ruling is changed by this document; §6 drafts the **D4.5.3v2** text that would be ratified if the proposal is accepted. **Decided 2026-10-13 (user):** a retained element whose attributes changed is patched in place (§8 Q3); the other questions remain open.
 > **Formal linkage:** **D4.5.3** (UI/view-mode DOM construction deep-copies ordinary Elements), **D4.5.1v4** / **D4.5.2** (presentation lifetime and the runtime boundary), **S12.1.3** (pure template bodies), **S9.1.4** (state lives in view state).
 > **Working-design linkage:** [Reactive UI](Lambda_Design_Reactive_UI.md) §5.3 (runtime identity), §9.4 (no-op elision), §9.5 (observer vs tree diff), §10.1–10.3 (incremental presentation), §18.3 (memoization, keyed lists).
 > **Scope:** how an incremental template re-render turns a regenerated result into DOM. Evaluation, render-map dependency tracking and template state are unchanged.
@@ -50,7 +50,7 @@ Two lessons follow:
 When an incremental rebuild replaces the presentation of old result `R0` (live DOM `D0`) with new result `R1`, walk `R0`, `R1` and `D0` together in document order. At each position, take the first rule that applies:
 
 1. **Equal pristine subtree → retain.** The `R1` node is deep-equal to the `R0` node (§9.4 equality: kind, tag, attribute names and values, ordered children, content), and the `D0` node is *pristine* (§4.1). Keep the `D0` subtree in place and rebind its source keys from `R0` to `R1` elements.
-2. **Same shell → reconcile children.** The tag and attributes are equal but the children differ, and the shell is pristine. Keep the `D0` element, which keeps its resolved style and view state. Reconcile its children positionally by these same rules, and record each child insertion, removal or replacement as a DOM mutation.
+2. **Same element → patch and reconcile.** The tag is equal and the `D0` element is pristine, but its attributes or children differ. Keep the `D0` element, which keeps its view state. Patch each changed attribute in place, so a row whose `class` changed keeps its node. Reconcile its children positionally by these same rules. Record each attribute change and each child insertion, removal or replacement as a DOM mutation, so the mutation path restyles exactly the affected nodes. *(Attribute patching decided by the user, 2026-10-13.)*
 3. **Otherwise → fresh copy.** Build a fresh deep copy exactly as today, and run the existing owner migration (`layout_preserve_rebuilt_owners`) for it.
 
 Rule 3 is today's behaviour, so the proposal changes nothing where nothing can be reused. Positional matching is deliberate. Keyed matching (Reactive UI §18.3) can extend rule 2 later without changing rules 1 or 3.
@@ -81,7 +81,7 @@ Retained nodes keep their resolved style and their layout. Block shift reuse and
 ## 5. Expected effect
 
 For the doc viewer:
-- **File open:** two rows fail rule 1 and become copies; the other rows are retained.
+- **File open:** the two rows whose `selected` class changed are patched in place by rule 2 and restyled; the other rows are retained.
 - **Folder toggle:** the toggled folder's child list is reconciled; rows above and below are retained.
 
 On retained-row and pane-only layouts measured this session, both should drop from 170–300 ms to the tens of milliseconds. The equality walk costs O(size of `R1`), which is already the cost of today's deep copy, and it replaces most of the copy, cascade and layout.
@@ -90,7 +90,7 @@ On retained-row and pane-only layouts measured this session, both should drop fr
 
 D4.5.3 says construction deep-copies. Retaining an earlier copy is not a fresh copy, but it keeps every property in §2: the retained subtree is the same occurrence in the same slot, never shared with another. Proposed revision:
 
-> **D4.5.3v2** UI/view-mode DOM construction deep-copies ordinary Elements and their content through MarkBuilder, including values already owned by the document arena. A regeneration may instead retain an occurrence's existing native subtree when the regenerated result is equal to the result that subtree presents and no imperative edit has touched it since; the retained subtree is rebound to the new result. Each presentation occurrence owns its native parent and sibling links. Normal Lambda evaluation retains ordinary value sharing and ownership-based copy elision; rooted callables and native handles keep their existing identity. DOM copies and retained occurrences preserve the evaluator's source/result mapping.
+> **D4.5.3v2** UI/view-mode DOM construction deep-copies ordinary Elements and their content through MarkBuilder, including values already owned by the document arena. A regeneration may instead retain an occurrence's existing native subtree when no imperative edit has touched it since it was built, patching in place any element whose tag is unchanged but whose attributes or children differ from the regenerated result; the retained subtree is rebound to the new result. Each presentation occurrence owns its native parent and sibling links. Normal Lambda evaluation retains ordinary value sharing and ownership-based copy elision; rooted callables and native handles keep their existing identity. DOM copies and retained occurrences preserve the evaluator's source/result mapping.
 
 The Reactive UI §9.4 text would gain the per-subtree case and the pristine condition.
 
@@ -105,11 +105,11 @@ The Reactive UI §9.4 text would gain the per-subtree case and the pristine cond
 
 1. Is retaining an existing occurrence consistent with the intent of D4.5.3, given the draft v2 wording in §6?
 2. Is "no imperative edit since built" the right condition for reuse, or should any re-render of a subtree that has seen an imperative edit since build reset it, as today?
-3. Should rule 2 also patch changed attributes in place on a pristine shell, such as a row's `class`? That would retain more nodes and lean further on the mutation path's style invalidation. The draft leaves it out.
+3. ~~Should rule 2 also patch changed attributes in place on a pristine shell, such as a row's `class`?~~ **Decided 2026-10-13 (user): yes.** Rule 2 patches them; §4.3's mutation-path invalidation restyles the patched elements.
 4. What phasing do you want? Suggested:
    - R1: pristine tracking;
    - R2: equal-subtree retention (rule 1) inside changed results;
-   - R3: shell retention with positional child reconciliation (rule 2) through the mutation pipeline;
-   - R4 (optional): attribute patching and keyed matching.
+   - R3: element retention with attribute patching and positional child reconciliation (rule 2) through the mutation pipeline;
+   - R4 (optional): keyed matching.
 
    Each phase would be gated by the differential A/B harness that validated retained flex items: every UI fixture rendered with the feature on and off, with SVG snapshots compared after each interaction.
