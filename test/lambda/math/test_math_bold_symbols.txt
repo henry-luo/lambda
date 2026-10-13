@@ -1,0 +1,20 @@
+"cdot:"
+["Computer Modern Serif 400 italic a", "KaTeX_Main 400 normal ⋅", "Computer Modern Serif 400 italic b"]
+"plain symbols:"
+["KaTeX_Main 400 normal ∖", "KaTeX_Main 400 normal ⊨", "KaTeX_Main 400 normal ∝", "KaTeX_Main 400 normal △"]
+"empty sets:"
+["KaTeX_Main 400 normal ∅", "KaTeX_AMS 400 normal ∅"]
+"boldsymbol:"
+["Computer Modern Serif 700 italic x", "Computer Modern Serif 700 normal +", "Computer Modern Serif 700 normal 1", "Computer Modern Serif 700 normal =", "Computer Modern Serif 700 normal ×", "Computer Modern Serif 700 normal ±"]
+"mathbf:"
+["Computer Modern Serif 700 normal x", "Computer Modern Serif 400 normal +", "Computer Modern Serif 700 normal 1"]
+"boldsymbol without a bold glyph:"
+["KaTeX_Main 400 normal ∇", "KaTeX_Main 400 normal ⋅"]
+"bm poor bold:"
+["KaTeX_Main 400 normal ∇", "KaTeX_Main 400 normal ∇", "KaTeX_Main 400 normal ∇"]
+"bm with a bold glyph:"
+["Computer Modern Serif 700 normal +"]
+"regular bold symbols:"
+[["∇", "∞"]]
+"none without boldsymbol:"
+[[]]

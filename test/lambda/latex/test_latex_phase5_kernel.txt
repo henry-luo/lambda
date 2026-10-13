@@ -1,0 +1,72 @@
+"text commands:"
+true
+"nfss family:"
+true
+"nfss usefont:"
+true
+"preamble linespread:"
+true
+"text issues:"
+["math-bold-approximation mathversion", "font-substitution ptm", "font-substitution phv", "unsupported-output null"]
+"fill lines:"
+2
+"rule:"
+true
+"marks:"
+true
+"fill issues:"
+["page-numbering-approximation arabic"]
+"twocolumn:"
+true
+"one-column switch:"
+["unsupported-output null"]
+"thanks marks:"
+true
+"author separator:"
+true
+"titlepage:"
+true
+"stray thanks:"
+["unsupported-output null"]
+"footnote refs:"
+[true, true, true, true]
+"explicit list values:"
+true
+"note text:"
+true
+"contents entry:"
+true
+"list entry:"
+true
+"outline title:"
+true
+"hyperlinks:"
+true
+"link issues:"
+[]
+"tabbing rows:"
+2
+"tabbing cells:"
+true
+"eqnarray columns:"
+true
+"eqnarray numbering:"
+1
+"eqnarray ref:"
+true
+"list labels:"
+true
+"environment issues:"
+[]
+"resizebox:"
+true
+"rotatebox:"
+true
+"rotated image:"
+true
+"scalebox:"
+true
+"reflectbox:"
+true
+"box issues:"
+["transform-approximation resizebox", "transform-approximation rotatebox", "transform-approximation scalebox"]

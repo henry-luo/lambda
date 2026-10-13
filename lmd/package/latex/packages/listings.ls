@@ -1,5 +1,6 @@
 // Bounded listings profile: preserved source, captions, labels, and line numbers.
 import util: ~~.util
+import font_decl: ~~.elements.font_decl
 
 let OPTION_NAMES = ["numbers", "firstnumber", "stepnumber", "caption", "label",
     "frame", "basicstyle", "breaklines", "showstringspaces", "language"]
@@ -11,18 +12,22 @@ pub fn setting_options(node) => util.parse_kv_options(util.raw_argument(
 
 pub fn merged(defaults, local) => {*:defaults, *:local}
 
-fn preamble_options_at(node, at, current) {
+fn preamble_options_at(node, at, command, current) {
     if (at >= len(node)) current
-    else preamble_options_at(node, at + 1, preamble_options_of(node[at], current))
+    else preamble_options_at(node, at + 1, command, preamble_options_of(node[at], command, current))
 }
 
-fn preamble_options_of(node, current) {
+fn preamble_options_of(node, command, current) {
     if (not (node is element) or string(name(node)) == "document") current
-    else if (string(name(node)) == "lstset") merged(current, setting_options(node))
-    else preamble_options_at(node, 0, current)
+    else if (string(name(node)) == command) merged(current, setting_options(node))
+    else preamble_options_at(node, 0, command, current)
 }
 
-pub fn preamble_options(ast) => preamble_options_of(ast, {})
+// the key settings of a preamble command (\lstset, fancyvrb's \fvset, minted's
+// \setminted), merged in source order
+pub fn preamble_settings(ast, command) => preamble_options_of(ast, command, {})
+
+pub fn preamble_options(ast) => preamble_settings(ast, "lstset")
 
 pub fn issues(options, offset) {
     let unknown = [for (key, value at options
@@ -55,7 +60,7 @@ fn basic_style(options) {
         else if (contains(raw, "\\scriptsize")) "font-size:0.7em;"
         else if (contains(raw, "\\footnotesize")) "font-size:0.8em;"
         else if (contains(raw, "\\small")) "font-size:0.9em;" else ""
-    "font-family:monospace;" ++ size
+    font_decl.MONO_CSS ++ ";" ++ size
 }
 
 fn code_lines(source, options) {
@@ -71,13 +76,17 @@ fn code_lines(source, options) {
         >]
 }
 
-pub fn render_environment(node, defaults, ordinal) {
-    let selected = merged(defaults, options(node))
+pub fn render_environment(node, defaults, ordinal) =>
+    render_code(if (node.source == null) util.text_of(node) else node.source,
+        merged(defaults, options(node)), ordinal)
+
+// a code block: listings' environment, and fancyvrb's and minted's in listings' terms
+// (codeblocks.ls); a language names the code's class
+pub fn render_code(body, selected, ordinal, language = null) {
     let numbered = selected.numbers == "left" or selected.numbers == "right"
     let framed = selected.frame == "single"
     let caption = selected.caption
     let label = selected.label
-    let body = if (node.source == null) util.text_of(node) else node.source
     let css = basic_style(selected) ++
         (if (framed) "border:1px solid currentColor;padding:0.5em;" else "") ++
         (if (selected.breaklines == "true") "white-space:pre-wrap;" else "");
@@ -88,7 +97,7 @@ pub fn render_environment(node, defaults, ordinal) {
         <pre class: if (selected.numbers == "right") "latex-listing-numbered latex-listing-right"
             else if (numbered) "latex-listing-numbered" else "latex-listing-plain",
             style: css,
-            <code
+            <code class: if (language == null) null else "language-" ++ language,
                 if (numbered) for (line in code_lines(body, selected)) line
                 else body
             >

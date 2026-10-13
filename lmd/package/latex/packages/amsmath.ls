@@ -1,12 +1,24 @@
 // The document adapter reuses the script math renderer's bounded AST profile.
 import util: ~~.util
+import font_decl: ~~.elements.font_decl
 import math: lambda.doc.math.math
+import registry: .registry
 
 let ENVIRONMENTS = ["equation*", "align", "align*", "alignat", "alignat*",
     "aligned", "gather", "gather*", "multline", "multline*", "split",
     "IEEEeqnarray", "IEEEeqnarray*"]
 
 pub fn is_environment(tag) => any([for (name in ENVIRONMENTS) tag == name])
+
+// LaTeX's own eqnarray shares the row model whether or not amsmath is loaded
+let KERNEL_ENVIRONMENTS = ["eqnarray", "eqnarray*"]
+
+// whether this adapter renders an environment from its row sources: amsmath's
+// (equation included), IEEEtrantools' IEEEeqnarray, or the kernel's eqnarray
+pub fn handles(tag, packages) =>
+    (contains(KERNEL_ENVIRONMENTS, tag) or false) or
+    (is_environment(tag) or tag == "equation") and (registry.active(packages, "amsmath") or
+        ((starts_with(tag, "IEEEeqnarray") or false) and registry.active(packages, "IEEEtrantools")))
 
 fn collect_operators(node, scoped) {
     if (not (node is element)) []
@@ -92,9 +104,14 @@ fn split_tex(source, rows, i, depth, escaped, start, acc) {
     }
 }
 
+fn cell_expression(source, operators) => expand_operators(trim(source), operators, 0, "")
+
+fn parse_cell(expression) =>
+    if (expression == "") null else parse(expression, {type: "math", flavor: "latex"}) ^ { null }
+
 fn math_cell(source, display, operators, offset) {
-    let expression = expand_operators(trim(source), operators, 0, "")
-    let ast = if (expression == "") null else parse(expression, {type: "math", flavor: "latex"}) ^ { null }
+    let expression = cell_expression(source, operators)
+    let ast = parse_cell(expression)
     if (expression == "") ""
     else if (ast == null) util.unsupported_element("amsmath",
         "Cannot parse aligned math cell: " ++ expression, offset)
@@ -102,20 +119,50 @@ fn math_cell(source, display, operators, offset) {
     else math.render_inline(ast)
 }
 
-fn alignment_row(source, gathered, multline_align, anchor, display, bare_tag, operators, offset) {
-    let cells = if (gathered) [source] else split_tex(source, false, 0, 0, false, 0, []);
+// gather, multline and equation rows are one cell; alignments split at top-level &
+fn row_cells(source, gathered) =>
+    if (gathered) [source] else split_tex(source, false, 0, 0, false, 0, [])
+
+// the parsed math of every cell, expanded as for rendering, for the unmapped-command scan
+pub fn cell_asts(el, operators) {
+    let tag = string(name(el))
+    let gathered = starts_with(tag, "gather") or starts_with(tag, "multline") or
+        starts_with(tag, "equation")
+    let cells = [for (row in rows_for(el), cell in (if (row.error == null)
+        row_cells(row.math, gathered) else [])) cell];
+    [for (cell in cells, let ast = parse_cell(cell_expression(cell, operators))
+        where ast != null) ast]
+}
+
+// cell_align(i) is the CSS alignment of the row's i-th cell; tag is the row's
+// framed tag (tag_text) or null
+fn alignment_row(source, gathered, cell_align, anchor, tag, operators, offset) {
+    let cells = row_cells(source, gathered);
     <div class: "latex-align-row", id: anchor,
         for (i, cell in cells)
-            <span class: "latex-align-cell",
-                style: if (multline_align != null) "text-align:" ++ multline_align
-                    else if (gathered) "text-align:center" else if (i % 2 == 0)
-                    "text-align:right" else "text-align:left",
+            <span class: "latex-align-cell", style: "text-align:" ++ cell_align(i),
                 math_cell(cell, false, operators, offset)>
-        if (display != null) {
-            <span class: "latex-align-number",
-                if (bare_tag) display else "(" ++ display ++ ")">
-        }
+        if (tag != null) <span class: "latex-align-number", tag>
     >
+}
+
+// the text commands a mathtools tag form may apply to the number
+pub let TAG_FORMATS = {textbf: "font-weight:bold", textit: "font-style:italic", emph: "font-style:italic",
+    textsl: "font-style:oblique", textsf: font_decl.SANS_CSS, texttt: font_decl.MONO_CSS,
+    textrm: "", textup: "font-style:normal", textnormal: ""}
+
+pub fn tag_format(inner) =>
+    if (inner == null) null else TAG_FORMATS[util.strip_backslash(trim(inner))]
+
+// a tag as printed: in parentheses, framed by the current mathtools tag form, or
+// bare for \tag*; null when the row is unnumbered
+pub fn tag_text(display, bare, form) {
+    let style = if (form == null) null else tag_format(form.inner);
+    if (display == null) null
+    else if (bare) display
+    else if (form == null) "(" ++ display ++ ")"
+    else if (style == null or style == "") form.left ++ display ++ form.right
+    else <span form.left; <span style: style, display>; form.right>
 }
 
 let ANNOTATIONS = [
@@ -240,19 +287,28 @@ fn render_alignment(el, tag, rows, numbers, operators) {
         util.unsupported_element("amsmath", "Alignment intertext is not supported", el.source_offset)
     else {
         let gathered = starts_with(tag, "gather") or starts_with(tag, "multline")
-        let multline = starts_with(tag, "multline");
+        let multline = starts_with(tag, "multline")
+        // eqnarray's columns are rcl; amsmath alignments alternate rl
+        let columns = if (starts_with(tag, "eqnarray")) ["right", "center", "left"] else ["right", "left"];
         <div class: if (multline) "latex-align latex-align-multline" else "latex-align",
             for (i, row in rows)
                 if (row.error != null)
                     util.unsupported_element("amsmath", row.error, el.source_offset)
                 else alignment_row(row.math, gathered,
-                    if (multline and i == 0) "left"
-                    else if (multline and i == len(rows) - 1) "right"
-                    else null,
+                    if (multline and i == 0) (c) => "left"
+                    else if (multline and i == len(rows) - 1) (c) => "right"
+                    else if (gathered) (c) => "center"
+                    else (c) => columns[c % len(columns)],
                     if (row.label != null) util.slugify(row.label) else null,
-                    if (numbers != null and i < len(numbers)) numbers[i].display else row.tag,
-                    row.bare_tag, operators, el.source_offset)>
+                    row_tag(row, numbers, i), operators, el.source_offset)>
     }
+}
+
+// row i's framed tag: its number (or \tag) in the tag form current where it stands
+fn row_tag(row, numbers, i) {
+    let entry = if (numbers != null and i < len(numbers)) numbers[i] else null
+    tag_text(if (entry != null) entry.display else row.tag, row.bare_tag,
+        if (entry != null) entry.form else null)
 }
 
 pub fn render_environment(el, numbers, operators) {
@@ -262,14 +318,11 @@ pub fn render_environment(el, numbers, operators) {
         where entry.offset == null or el.source_offset == null or entry.offset < el.source_offset) entry]
     if (starts_with(tag, "equation")) {
         let row = rows[0]
-        let display = if (numbers != null and len(numbers) > 0) numbers[0].display else row.tag
+        let number_tag = row_tag(row, numbers, 0)
         if (row.error != null) util.unsupported_element("amsmath", row.error, el.source_offset)
         else <div class: "latex-equation",
             id: if (row.label != null) util.slugify(row.label) else null,
             math_cell(row.math, true, active_operators, el.source_offset);
-            if (display != null) {
-                <span class: "latex-eq-number",
-                    if (row.bare_tag) display else "(" ++ display ++ ")">
-            }>
+            if (number_tag != null) <span class: "latex-eq-number", number_tag>>
     } else render_alignment(el, tag, rows, numbers, active_operators)
 }

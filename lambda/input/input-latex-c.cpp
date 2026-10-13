@@ -138,7 +138,11 @@ static bool is_supported_math_environment(const char* name) {
     static const char* environments[] = {"array", "matrix", "matrix*", "pmatrix", "pmatrix*",
         "bmatrix", "bmatrix*", "Bmatrix", "Bmatrix*", "vmatrix", "vmatrix*", "Vmatrix", "Vmatrix*",
         "cases", "rcases", "dcases", "aligned", "alignedat", "align", "align*", "alignat", "alignat*",
-        "gathered", "gather", "gather*", "split", "equation", "equation*", "smallmatrix", "subarray", "CD", "IEEEeqnarray"};
+        "gathered", "gather", "gather*", "split", "equation", "equation*", "smallmatrix", "subarray", "CD", "IEEEeqnarray",
+        // mathtools
+        "psmallmatrix", "psmallmatrix*", "bsmallmatrix", "bsmallmatrix*", "Bsmallmatrix", "Bsmallmatrix*",
+        "vsmallmatrix", "vsmallmatrix*", "Vsmallmatrix", "Vsmallmatrix*", "drcases", "cases*", "dcases*",
+        "rcases*", "drcases*", "multlined", "lgathered", "rgathered"};
     for (const char* environment : environments) if (strcmp(name, environment) == 0) return true;
     return false;
 }
@@ -197,6 +201,7 @@ private:
     bool ascii_;
     bool allow_infix_;
     bool text_mode_;
+    bool text_columns_ = false;  // cells after a row's first & are text (starred cases)
 
     void error(const char* message) {
         ctx_.tracker.seek(offset_ + position_);
@@ -520,7 +525,7 @@ private:
         if (strcmp(name, "raisebox") == 0 || strcmp(name, "reflectbox") == 0 ||
             strcmp(name, "mathreflectbox") == 0 || strcmp(name, "vcenter") == 0 ||
             strcmp(name, "cancel") == 0 || strcmp(name, "bcancel") == 0 ||
-            strcmp(name, "xcancel") == 0 || strcmp(name, "sout") == 0 ||
+            strcmp(name, "xcancel") == 0 || strcmp(name, "cancelto") == 0 || strcmp(name, "sout") == 0 ||
             strcmp(name, "pmb") == 0 || strcmp(name, "phase") == 0 || strcmp(name, "angl") == 0 ||
             strcmp(name, "angln") == 0 || strcmp(name, "anglr") == 0 || strcmp(name, "anglk") == 0) {
             ElementBuilder elem = builder_.element("box_transform");
@@ -537,6 +542,8 @@ private:
                 }
             }
             bool text_box = strcmp(name, "raisebox") == 0 || strcmp(name, "reflectbox") == 0;
+            // \cancelto{value}{expression}: the value labels the arrow's tip
+            if (strcmp(name, "cancelto") == 0) elem.attr("value", parse_script_arg());
             if (strlen(name) == 5 && strncmp(name, "angl", 4) == 0) {
                 elem.attr("cmd", builder_.createStringItem("\\angl"));
                 elem.attr("body", builder_.createStringItem(name + 4, 1));
@@ -555,6 +562,17 @@ private:
                 nested.parse_into(body, true);
                 elem.attr("body", body.final());
             }
+            return elem.final();
+        }
+        if (strcmp(name, "ce") == 0 || strcmp(name, "pu") == 0) {
+            // mhchem's argument is chemistry notation, not math: keep it raw for
+            // lambda.doc.math's mhchem profile
+            skip_space();
+            size_t begin = 0, end = 0;
+            ElementBuilder elem = builder_.element("chemistry");
+            elem.attr("cmd", builder_.createStringItem(full));
+            if (consume_group_span('{', '}', &begin, &end))
+                elem.attr("source", builder_.createStringItem(source_ + begin, end - begin));
             return elem.final();
         }
         if (strcmp(name, "tag") == 0) {
@@ -576,8 +594,9 @@ private:
             elem.attr("cmd", builder_.createStringItem(full));
             return elem.final();
         }
+        // LaTeX 2.09 math font switches; \cal still selects the calligraphic alphabet
         if (strcmp(name, "rm") == 0 || strcmp(name, "it") == 0 || strcmp(name, "bf") == 0 ||
-            strcmp(name, "sf") == 0 || strcmp(name, "tt") == 0) {
+            strcmp(name, "sf") == 0 || strcmp(name, "tt") == 0 || strcmp(name, "cal") == 0) {
             ElementBuilder elem = builder_.element("font_switch");
             elem.attr("cmd", builder_.createStringItem(full));
             return elem.final();
@@ -642,6 +661,23 @@ private:
             if (item_present(alignment)) elem.attr("options", alignment);
             if (item_present(numer)) elem.attr("numer", numer);
             if (item_present(denom)) elem.attr("denom", denom);
+            return elem.final();
+        }
+        if (strcmp(name, "nicefrac") == 0 || strcmp(name, "sfrac") == 0) {
+            // nicefrac's \nicefrac[font]{a}{b} and xfrac's \sfrac[instance]{a}[separator]{b}
+            // are slanted fractions; the font and instance select faces Lambda does not ship
+            skip_space();
+            if (position_ < length_ && source_[position_] == '[') parse_brack_group();
+            Item numer = parse_script_arg();
+            skip_space();
+            Item separator = ItemNull;
+            if (position_ < length_ && source_[position_] == '[') separator = parse_brack_group();
+            Item denom = parse_script_arg();
+            ElementBuilder elem = builder_.element("fraction");
+            elem.attr("cmd", builder_.createStringItem(full));
+            if (item_present(numer)) elem.attr("numer", numer);
+            if (item_present(denom)) elem.attr("denom", denom);
+            if (item_present(separator)) elem.attr("separator", separator);
             return elem.final();
         }
         if (strcmp(name, "binom") == 0 || strcmp(name, "dbinom") == 0 || strcmp(name, "tbinom") == 0) {
@@ -1007,9 +1043,15 @@ private:
     Item parse_text_command(const char* full) {
         skip_space();
         size_t begin = 0, end = 0;
+        bool has_content = consume_group_span('{', '}', &begin, &end);
+        return text_command_span(full, has_content, begin, end);
+    }
+
+    // a text_command over source_[begin, end): a \text argument, or a text column
+    Item text_command_span(const char* full, bool has_content, size_t begin, size_t end) {
         ElementBuilder elem = builder_.element("text_command");
         elem.attr("cmd", builder_.createStringItem(full));
-        if (consume_group_span('{', '}', &begin, &end)) {
+        if (has_content) {
             if (memchr(source_ + begin, '\\', end - begin) ||
                 memchr(source_ + begin, '$', end - begin) || memchr(source_ + begin, '{', end - begin) ||
                 memchr(source_ + begin, '~', end - begin)) {
@@ -1369,8 +1411,11 @@ private:
         str_copy(env_name, sizeof(env_name), source_ + name_begin, env_len);
         if (!is_supported_math_environment(env_name)) {
             // MathLive ignores an unknown opening environment, then lets the
-            // following `\end{...}` take its ordinary error-recovery path.
-            return builder_.element("ignored_begin").final();
+            // following `\end{...}` take its ordinary error-recovery path; the
+            // name stays so the renderer can report the environment unsupported
+            ElementBuilder ignored = builder_.element("ignored_begin");
+            ignored.attr("name", builder_.createStringItem(env_name));
+            return ignored.final();
         }
         ElementBuilder elem = builder_.element("environment");
         elem.attr("name", builder_.createStringItem(env_name));
@@ -1384,6 +1429,17 @@ private:
             size_t begin = 0, end = 0;
             if (consume_group_span('[', ']', &begin, &end))
                 elem.attr("alignment", builder_.createStringItem(source_ + begin, end - begin));
+        }
+        if (strcmp(env_name, "multlined") == 0 || strcmp(env_name, "lgathered") == 0 ||
+            strcmp(env_name, "rgathered") == 0) {
+            // mathtools' [position] and [width] options place the block in the
+            // surrounding line; a laid-out formula has no line to place it in
+            size_t begin = 0, end = 0;
+            for (int option = 0; option < 2; option++) {
+                skip_space();
+                if (position_ >= length_ || source_[position_] != '[' ||
+                    !consume_group_span('[', ']', &begin, &end)) break;
+            }
         }
         if ((strcmp(env_name, "array") == 0 || strcmp(env_name, "subarray") == 0) &&
             position_ < length_ && source_[position_] == '{') {
@@ -1407,6 +1463,9 @@ private:
         size_t body_len = body_end >= position_ ? body_end - position_ : 0;
         ElementBuilder body = builder_.element("env_body");
         DirectMathParser nested(ctx_, body_source, body_len, offset_ + position_, ascii_);
+        // mathtools' starred cases set the column after the first & as text
+        size_t name_len = strlen(env_name);
+        nested.text_columns_ = name_len > 6 && strcmp(env_name + name_len - 6, "cases*") == 0;
         if (strcmp(env_name, "CD") == 0) nested.parse_cd_into(body);
         else nested.parse_into(body, true);
         elem.attr("body", body.final());
@@ -1417,17 +1476,20 @@ private:
     void parse_children(ElementBuilder& parent, bool matrix_mode) {
         if (!matrix_mode && parse_infix_fraction(parent)) return;
         ArrayBuilder children = builder_.array();
+        int column = 0;
         while (position_ < length_) {
             skip_space();
             if (position_ >= length_) break;
             if (matrix_mode && source_[position_] == '&') {
                 position_++;
+                column++;
                 children.append(builder_.createSymbolItem("col_sep"));
                 continue;
             }
             if (matrix_mode && (starts_with(source_, length_, position_, "\\\\") ||
                 (starts_with(source_, length_, position_, "\\cr") &&
                  (position_ + 3 == length_ || !isalpha((unsigned char)source_[position_ + 3]))))) {
+                column = 0;
                 position_ += source_[position_ + 1] == '\\' ? 2 : 3;
                 skip_space();
                 size_t begin = 0, end = 0;
@@ -1450,6 +1512,13 @@ private:
                     }
                 }
                 size_t end = cell_boundary(position_);
+                if (text_columns_ && column > 0) {
+                    size_t text_end = end;
+                    while (text_end > position_ && isspace((unsigned char)source_[text_end - 1])) text_end--;
+                    children.append(text_command_span("\\text", true, position_, text_end));
+                    position_ = end;
+                    continue;
+                }
                 DirectMathParser cell(ctx_, source_ + position_, end - position_, offset_ + position_, ascii_);
                 ElementBuilder contents = builder_.element("group");
                 cell.parse_into(contents, false);
@@ -1498,7 +1567,7 @@ public:
     DirectLatexParser(InputContext& context, const tex::Result* tex_result = nullptr)
         : ctx_(context), builder_(context.builder), source_(context.source()),
           length_(context.source_length()), position_(0), tabular_mode_(false),
-          tex_result_(tex_result) {}
+          tabbing_mode_(false), tex_result_(tex_result) {}
 
     Item parse() {
         ElementBuilder root = builder_.element("latex_document");
@@ -1514,6 +1583,8 @@ private:
     size_t length_;
     size_t position_;
     bool tabular_mode_;
+    // inside tabbing, \= \' \` are tab commands, not accents
+    bool tabbing_mode_;
     const tex::Result* tex_result_;
 
     void error(const char* message) {
@@ -1935,6 +2006,7 @@ private:
             nested.length_ = body_len;
             nested.position_ = 0;
             nested.tabular_mode_ = table_columns;
+            nested.tabbing_mode_ = strcmp(name, "tabbing") == 0;
             nested.parse_children(elem, 0, true);
         }
         position_ = after_end;
@@ -1973,20 +2045,40 @@ private:
         if (name[0] == ' ' || name[0] == '\t' || name[0] == '\n') return builder_.createStringItem(" ");
         bool starred = position_ < length_ && source_[position_] == '*';
         if (starred) position_++;
-        if (strcmp(name, "verb") == 0 || strcmp(name, "lstinline") == 0) {
+        // inline code: \verb, listings' \lstinline, fancyvrb's \Verb and minted's \mint
+        // and \mintinline, which name a {language} first
+        bool minted_inline = strcmp(name, "mint") == 0 || strcmp(name, "mintinline") == 0;
+        if (strcmp(name, "verb") == 0 || strcmp(name, "lstinline") == 0 ||
+                strcmp(name, "Verb") == 0 || minted_inline) {
             ElementBuilder elem = builder_.element(name);
             elem.attr("source_offset", (int64_t)source_offset(source_ + command_start));
             if (starred) elem.attr("starred", true);
-            if (strcmp(name, "lstinline") == 0 && position_ < length_ &&
+            if (strcmp(name, "verb") != 0 && position_ < length_ &&
                     source_[position_] == '[') {
                 size_t options_begin = 0, options_end = 0;
                 if (consume_brack_group_span(&options_begin, &options_end))
                     elem.attr("options_raw", builder_.createStringItem(
                         source_ + options_begin, options_end - options_begin));
             }
+            if (minted_inline) {
+                size_t language_begin = 0, language_end = 0;
+                if (position_ < length_ && source_[position_] == '{' &&
+                        consume_group_span(&language_begin, &language_end))
+                    elem.attr("language", builder_.createStringItem(
+                        source_ + language_begin, language_end - language_begin));
+            }
             if (position_ >= length_ || source_[position_] == '\n' ||
                     source_[position_] == '\r') {
                 error("missing verbatim delimiter");
+                return elem.final();
+            }
+            if (strcmp(name, "verb") != 0 && source_[position_] == '{') {
+                // the braced form keeps balanced braces in the code
+                size_t code_begin = 0, code_end = 0;
+                if (consume_group_span(&code_begin, &code_end))
+                    elem.text(source_ + code_begin, code_end - code_begin);
+                elem.attr("raw_source", builder_.createStringItem(source_ + command_start,
+                    position_ - command_start));
                 return elem.final();
             }
             char delimiter = source_[position_++];
@@ -2060,6 +2152,9 @@ private:
             strcmp(name, "textrm") == 0 || strcmp(name, "textsf") == 0 || strcmp(name, "emph") == 0 ||
             strcmp(name, "underline") == 0) {
             ElementBuilder elem = builder_.element(name);
+            // located like every generic command, so a source-order setting before it
+            // (ulem's \normalem) can be found
+            elem.attr("source_offset", (int64_t)source_offset(source_ + command_start));
             size_t begin = 0, end = 0;
             skip_space_before_group('{', '{');
             if (consume_group_span(&begin, &end)) {
@@ -2073,7 +2168,9 @@ private:
         }
         if (strcmp(name, "\\") == 0) return builder_.createSymbolItem("row_sep");
         if (is_literal_text_escape(name)) return builder_.createStringItem(name, 1);
-        if (strlen(name) == 1 && strchr("'`^\"~=.uvHcdbtk", name[0])) {
+        // tabbing redefines \= \' \`; they stay commands like \> so the script sees the tab stops
+        if (strlen(name) == 1 && strchr("'`^\"~=.uvHcdbtk", name[0]) &&
+                !(tabbing_mode_ && strchr("='`", name[0]))) {
             // A text accent takes one token or one balanced group, never the following word.
             ElementBuilder accent = builder_.element("accent");
             accent.attr("command", name);
@@ -2109,6 +2206,8 @@ private:
             strcmp(name, "edef") == 0 || strcmp(name, "xdef") == 0;
         bool environment_definition = strcmp(name, "newenvironment") == 0 ||
             strcmp(name, "renewenvironment") == 0;
+        // stored TeX code may hold an unmatched \begin or \end (input-latex-tables.cpp)
+        bool code_fragment = is_code_fragment_command(name);
         int curly_index = 0;
         if (macro_definition) {
             while (position_ < length_ && isspace((unsigned char)source_[position_])) position_++;
@@ -2144,7 +2243,7 @@ private:
                     size_t begin = 0, end = 0;
                     if (!consume_group_span(&begin, &end)) break;
                     arguments.append(builder_.createStringItem(source_ + begin, end - begin));
-                } else if (environment_definition) {
+                } else if (environment_definition || code_fragment) {
                     Item group = parse_raw_group();
                     if (item_present(group)) arguments.append(group);
                 } else if (macro_definition) {
@@ -2390,6 +2489,8 @@ static tex::Engine* run_tex_engine(const InputParseOptions* options, const char*
     eo.adapter_count = options->tex_adapter_count;
     eo.raw_commands = options->tex_raw_commands;
     eo.raw_command_count = options->tex_raw_command_count;
+    eo.chaptered = options->tex_chaptered;
+    eo.chaptered_count = options->tex_chaptered_count;
     tex::Engine* engine = tex::engine_create(&eo);
     if (!engine) return nullptr;
     tex::engine_run(engine, source, length, result);

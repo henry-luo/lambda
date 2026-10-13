@@ -1,0 +1,36 @@
+"declared packages:"
+[]
+"gensymb text:"
+true
+"gensymb issues:"
+[]
+"math issues:"
+[]
+"upright greek:"
+true
+"calligraphic switch:"
+true
+"float barrier:"
+[]
+"barrier needs placeins:"
+["unsupported-output null"]
+"indentfirst css:"
+true
+"no indentfirst css:"
+false
+"bookmark outline:"
+true
+"bookmark issues:"
+["unsupported-output null"]
+"ding glyphs:"
+true
+"dinglist labels:"
+true
+"dingautolist labels:"
+true
+"ding issues:"
+["unsupported-output null"]
+"marvosym glyphs:"
+true
+"marvosym issues:"
+[]

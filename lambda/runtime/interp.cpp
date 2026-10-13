@@ -982,6 +982,17 @@ static Item interp_read_binding_at_capture_slot(InterpFrame* f, NameEntry* entry
         }
         return item_attr((Item){.item = *f->method_self}, entry->name->chars);
     }
+    // A capture reads the closure's snapshot before any storage the binding has
+    // outside it: a comprehension variable at module level has a module slot, which
+    // holds the loop's last value once the closure runs. Captures never name a true
+    // module global (is_global_entry excludes them).
+    int cap = capture_slot >= 0 ? capture_slot : interp_capture_index(f->fn, entry);
+    if (cap >= 0) {
+        if (!f->env || (uint32_t)cap >= f->env_count) return ItemNull;
+        // Capture storage is owned by the closure and outlives every frame that
+        // reads it, so the Item is taken as-is (immortal) rather than re-homed.
+        return owned_item_slot_read(f->env, f->env_count, cap, true);
+    }
     if (!entry->storage_assigned) {
         log_error("interp: identifier '%.*s' has no frame-plan storage",
             entry->name ? (int)entry->name->len : 0,
@@ -999,13 +1010,6 @@ static Item interp_read_binding_at_capture_slot(InterpFrame* f, NameEntry* entry
             : entry->import_owner;
         if (!owner) owner = entry->import_owner ? entry->import_owner : f->module;
         return interp_read_module_slot(owner, entry->slot);
-    }
-    int cap = capture_slot >= 0 ? capture_slot : interp_capture_index(f->fn, entry);
-    if (cap >= 0) {
-        if (!f->env || (uint32_t)cap >= f->env_count) return ItemNull;
-        // Capture storage is owned by the closure and outlives every frame that
-        // reads it, so the Item is taken as-is (immortal) rather than re-homed.
-        return owned_item_slot_read(f->env, f->env_count, cap, true);
     }
     if ((uint32_t)entry->slot >= f->scratch_base) {
         log_error("interp: binding slot %d out of window (%u) for '%.*s'",
@@ -4470,10 +4474,14 @@ static Item eval_list(InterpFrame* f, AstListNode* list_node) {
             if (interp_frame_pending(f)) return ItemNull;
         }
     }
+    // A let-list's declarations live in declare, so each of its items is a value,
+    // a function literal included: (let a = 1, (x) => x + a) is that function, as
+    // emit_list_value makes it. Only a plain list sets declaration items apart.
+    bool skip_declarations = list_node->declare == NULL;
     int val_count = 0;
     AstNode* last_value = NULL;
     for (AstNode* item = list_node->item; item; item = item->next) {
-        if (is_declaration_node(item->node_type)) continue;
+        if (skip_declarations && is_declaration_node(item->node_type)) continue;
         val_count++;
         last_value = item;
     }
@@ -4491,7 +4499,10 @@ static Item eval_list(InterpFrame* f, AstListNode* list_node) {
     Scratch acc(f);
     acc.set(interp_ptr_item(list()));
     for (AstNode* item = list_node->item; item; item = item->next) {
-        if (is_declaration_node(item->node_type)) { exec_declaration(f, item); continue; }
+        if (skip_declarations && is_declaration_node(item->node_type)) {
+            exec_declaration(f, item);
+            continue;
+        }
         Item value = interp_eval_sequence_item(f, item);
         if (interp_frame_pending(f)) return acc.get();
         List* ls = (List*)(uintptr_t)acc.get().item;   // re-read: push may collect

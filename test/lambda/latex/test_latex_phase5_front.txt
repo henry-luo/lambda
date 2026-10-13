@@ -1,0 +1,58 @@
+"display chapter:"
+true
+"chapter format:"
+true
+"hang section:"
+true
+"section style:"
+true
+"starred format keeps the label:"
+true
+"appendix chapter name:"
+true
+"titlesec issues:"
+["unsupported-title-format foo", "title-shape-approximation runin"]
+"sectsty:"
+true
+"sectsty issues:"
+[]
+"toc title:"
+true
+"entry font and skip:"
+true
+"entry number:"
+true
+"numberline after protect:"
+true
+"newlistof:"
+true
+"minitoc:"
+true
+"contents issues:"
+[]
+"droptitle:"
+true
+"pre and post code:"
+true
+"hook:"
+true
+"authors:"
+true
+"affiliations:"
+true
+"thetitle:"
+true
+"front issues:"
+[]
+"author blocks:"
+true
+"vref:"
+true
+"vrefrange:"
+true
+"continuous issues:"
+["unresolved-reference nope", "unresolved-page-counter vref", "unresolved-page-counter Vpageref", "unresolved-page-counter vrefrange", "unresolved-page-counter vref", "unsupported-output null"]
+"paged issues:"
+["unresolved-reference nope", "unsupported-output null"]
+"with cleveref:"
+true

@@ -214,7 +214,11 @@ recognizes, in order:
   delimiters, styles, accents, spacing, over/under, color/box, and generic
   commands);
 - matrix/alignment environments, splitting rows and cells only while in that
-  environment;
+  environment; mathtools' starred cases build their second column with the
+  `\text` span builder, and an environment the parser does not know becomes
+  `<ignored_begin name>` so the renderer can report it;
+- mhchem's `\ce`/`\pu`, kept as `<chemistry cmd source>` raw text for the math
+  package's mhchem profile (since 2026-10-13);
 - ASCII words, quoted text, and ASCII operators when `MathFlavor` is ASCII.
 
 Both `latex` and `ascii` flavors therefore use this one parser, but the flavor

@@ -20,6 +20,7 @@ bool is_math_environment(const char* env_name);
 bool is_raw_text_environment(const char* env_name);
 // commands whose braced argument is foreign source kept verbatim (\directlua)
 bool is_raw_group_command(const char* cmd_name);
+bool is_code_fragment_command(const char* cmd_name);
 
 void skip_latex_comment(const char** latex);
 

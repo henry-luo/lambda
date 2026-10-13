@@ -5,10 +5,13 @@
 // ============================================================
 
 pub let STYLESHEET = ".latex-document {
+  --latex-serif: 'Computer Modern Serif', 'Latin Modern Roman', Georgia, serif;
+  --latex-sans: 'Computer Modern Sans', 'Latin Modern Sans', sans-serif;
+  --latex-mono: 'Computer Modern Typewriter', 'Latin Modern Mono', monospace;
   max-width: 800px;
   margin: 0 auto;
   padding: 2em;
-  font-family: 'Computer Modern Serif', 'Latin Modern Roman', Georgia, serif;
+  font-family: var(--latex-serif);
   font-size: 12pt;
   line-height: 1.6;
   color: #333;
@@ -68,7 +71,7 @@ pub let STYLESHEET = ".latex-document {
 .latex-flushleft { text-align: left; }
 .latex-flushright { text-align: right; }
 pre.latex-verbatim {
-  font-family: 'Computer Modern Typewriter', 'Latin Modern Mono', monospace;
+  font-family: var(--latex-mono, monospace);
   white-space: pre;
   background: #f8f8f8;
   border: 1px solid #e0e0e0;
@@ -88,7 +91,7 @@ pre.latex-verbatim {
 .latex-tcolorbox { margin: 0.6em 0; border-radius: 2px; }
 .latex-boldmath { font-weight: 700; }
 code.latex-code {
-  font-family: 'Computer Modern Typewriter', 'Latin Modern Mono', monospace;
+  font-family: var(--latex-mono, monospace);
 }
 .latex-footnote-ref {
   vertical-align: super;
@@ -135,6 +138,18 @@ table.latex-tabular tr.latex-bottomrule { border-bottom: 2px solid black; }
 table.latex-tabular tr.latex-cmidrule .latex-cmidrule-line { border-top: 1px solid black; height: 0; }
 table.latex-tabular tr.latex-cmidrule td { padding-top: 0; padding-bottom: 0; }
 table.latex-tabular tr.latex-addlinespace td { padding: 0; border: 0; }
+table.latex-tabular tr.latex-hhline td,
+table.latex-tabular tr.latex-colored-rule td { padding: 0; height: 0; line-height: 0; }
+.latex-threeparttable { display: table; margin: 0 auto; }
+.latex-threeparttable > .latex-caption,
+.latex-threeparttable > .latex-tablenotes { display: table-caption; caption-side: bottom; }
+.latex-threeparttable > .latex-caption:first-child { caption-side: top; }
+.latex-tablenotes { font-size: 0.8em; text-align: left; margin-top: 0.3em; }
+.latex-tablenote { padding-left: var(--latex-tnote-hang, 1em); text-indent: calc(0px - var(--latex-tnote-hang, 1em)); }
+.latex-tnote { font-style: italic; }
+.latex-document .latex-indent-after + p { text-indent: 1.5em; }
+.latex-adjustbox img { max-width: 100%; }
+.latex-pdfpage { margin: 1em 0; text-align: center; break-inside: avoid; }
 table.latex-tabular td.latex-si-column { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 table.latex-tabular .latex-si-whole { text-align: right; }
 table.latex-tabular .latex-si-point, table.latex-tabular .latex-si-fraction { text-align: left; }
@@ -184,15 +199,49 @@ table.latex-tabular tr.latex-cmidrule { height: 0; line-height: 0; }
 .latex-toc .toc-l4 { padding-left: 4.5em; }
 .latex-toc a { text-decoration: none; color: inherit; }
 .latex-toc a:hover { text-decoration: underline; }
-.latex-sf { font-family: 'Computer Modern Sans', 'Latin Modern Sans', sans-serif; }
+.latex-sf { font-family: var(--latex-sans, sans-serif); }
 .latex-sc { font-variant: small-caps; }
 .latex-sl { font-style: oblique; }
-.latex-rm { font-family: 'Computer Modern Serif', 'Latin Modern Roman', serif; }
+.latex-rm { font-family: var(--latex-serif, serif); }
+.latex-resizebox > table { width: 100%; }
+.latex-float { margin: 1em 0; }
+.latex-float, .latex-float-style-ruled, .latex-float-style-plaintop, .latex-float-style-boxed {
+  display: flex; flex-direction: column; }
+.latex-float-style-ruled { border-top: 0.8pt solid; border-bottom: 0.8pt solid; padding: 0.2em 0; }
+.latex-float-style-ruled > .latex-caption { order: -1; text-align: left; border-bottom: 0.4pt solid; margin: 0 0 0.3em; }
+.latex-float-style-plaintop > .latex-caption { order: -1; }
+.latex-float-style-boxed { border: 0.4pt solid; padding: 0.4em; }
+.latex-algorithmic { padding-left: 2.5em; text-align: left; }
+.latex-alg-line { position: relative; line-height: 1.4; }
+.latex-alg-number { position: absolute; left: -2.5em; width: 2em; text-align: right; font-size: 0.8em; }
+.latex-alg-comment { float: right; }
+.latex-alg-name, .latex-alg-call .latex-alg-name { font-variant: small-caps; }
+.latex-list { list-style-type: none; padding-left: 2em; }
+/* paralist's run-in items are indented paragraphs; inline items run into the text */
+.latex-runin .latex-runin-item { margin: 0; text-indent: 1.5em; }
+.latex-inpara-item .latex-item-label { margin-right: 0; }
+.latex-tabbing { border-collapse: collapse; margin: 0.5em 0; }
+.latex-tabbing td { padding: 0 1em 0 0; vertical-align: baseline; }
+.latex-and { display: inline-block; width: 2em; }
+.latex-thanks { text-align: left; font-size: 0.85em; margin-top: 1em; }
+.latex-thanks p { margin: 0.2em 0; text-indent: 0; }
+.latex-titlepage { break-after: page; }
+.latex-fill-line { display: flex; flex-wrap: wrap; align-items: baseline; }
+.latex-hfill { flex: 1 1 0; }
+.latex-dotfill { flex: 1 1 0; min-width: 1em; margin: 0 0.25em; border-bottom: 1px dotted currentColor; }
+.latex-hrulefill { flex: 1 1 0; min-width: 1em; border-bottom: 0.4pt solid currentColor; }
+.latex-indent { display: inline-block; width: 1.5em; }
+.latex-centerline { text-align: center; }
+.latex-twocolumn { column-count: 2; column-gap: 2em; }
+.latex-twocolumn .latex-title, .latex-twocolumn .latex-span-all { column-span: all; }
+.latex-up { font-style: normal; }
+.latex-md { font-weight: normal; }
+.latex-normal { font-style: normal; font-weight: normal; font-variant: normal; }
 .latex-itshape { font-style: italic; }
 .latex-bfseries { font-weight: bold; }
-.latex-ttfamily { font-family: 'Computer Modern Typewriter', 'Latin Modern Mono', monospace; }
-.latex-rmfamily { font-family: 'Computer Modern Serif', 'Latin Modern Roman', serif; }
-.latex-sffamily { font-family: 'Computer Modern Sans', 'Latin Modern Sans', sans-serif; }
+.latex-ttfamily { font-family: var(--latex-mono, monospace); }
+.latex-rmfamily { font-family: var(--latex-serif, serif); }
+.latex-sffamily { font-family: var(--latex-sans, sans-serif); }
 .latex-scshape { font-variant: small-caps; }
 .latex-slshape { font-style: oblique; }
 .latex-upshape { font-style: normal; }

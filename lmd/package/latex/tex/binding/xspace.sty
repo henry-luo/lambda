@@ -1,0 +1,12 @@
+% xspace.sty -- Lambda-owned binding of xspace 1.13 (David Carlisle and Morten
+% Hoegholm), written from its manual rather than copied.
+%
+% Upstream \xspace looks ahead with \futurelet, an assignment, which the engine does
+% not execute inside the arguments of \section, \caption or \footnote. The kernel's
+% \lambda@xspace makes the same test by peeking at the next token: it inserts a space
+% unless that token is punctuation, a closing character, a group delimiter, a space,
+% the italic correction or a footnote mark (xspace's default exceptions).
+% \xspaceaddexceptions and \xspaceremoveexception are not bound and are reported.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{xspace}[2026/10/13 v1.13 Lambda binding]
+\def\xspace{\lambda@xspace}
