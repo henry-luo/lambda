@@ -106,10 +106,12 @@ Item mvp_lmd_array_species_create(Item source, int64_t length) {
 extern "C" Item mvp_lmd_array_visit(Item owner, Item* args, int64_t count, int64_t method) {
     if (owner.item == ITEM_NULL || owner.item == ITEM_JS_UNDEFINED)
         return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-    bool backwards = method == LMD_METHOD_REDUCE_RIGHT;
-    bool reduce = method == LMD_METHOD_REDUCE || backwards;
+    bool backwards = method == LMD_METHOD_REDUCE_RIGHT ||
+        method == LMD_METHOD_FIND_LAST || method == LMD_METHOD_FIND_LAST_INDEX;
+    bool reduce = method == LMD_METHOD_REDUCE || method == LMD_METHOD_REDUCE_RIGHT;
     bool map = method == LMD_METHOD_ARRAY_MAP, filter = method == LMD_METHOD_FILTER;
-    bool find = method == LMD_METHOD_FIND || method == LMD_METHOD_FIND_INDEX;
+    bool find_index = method == LMD_METHOD_FIND_INDEX || method == LMD_METHOD_FIND_LAST_INDEX;
+    bool find = method == LMD_METHOD_FIND || method == LMD_METHOD_FIND_LAST || find_index;
     RootFrame roots(8);
     if (!roots.valid()) return ItemError;
     Rooted<Item> source(roots, owner), callback(roots, count ? args[0] : Item{.item = ITEM_JS_UNDEFINED}), self(roots, !reduce && count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}),
@@ -121,6 +123,11 @@ extern "C" Item mvp_lmd_array_visit(Item owner, Item* args, int64_t count, int64
     if (item_is_error(length_value.get())) return length_value.get();
     int64_t length = it2i(length_value.get());
     if (!mvp_lmd_is_callable(callback.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (method == LMD_METHOD_FLAT_MAP) {
+        // the visitor's roots retain this borrowed pair through species and mapper reentry.
+        Item mapping[] = {callback.get(), self.get()};
+        return mvp_lmd_array_flatten(source.get(), 1, length, mapping);
+    }
     if (map || filter) output.set(mvp_lmd_array_species_create(source.get(), map ? length : 0));
     if (item_is_error(output.get())) return output.get();
     bool initialized = count > 1;
@@ -142,7 +149,7 @@ extern "C" Item mvp_lmd_array_visit(Item owner, Item* args, int64_t count, int64
         if (item_is_error(mapped.get())) return mapped.get();
         if (method == LMD_METHOD_SOME && mvp_lmd_truthy(mapped.get())) return Item{.item = ITEM_TRUE};
         if (method == LMD_METHOD_EVERY && !mvp_lmd_truthy(mapped.get())) return Item{.item = ITEM_FALSE};
-        if (find && mvp_lmd_truthy(mapped.get())) return method == LMD_METHOD_FIND_INDEX ? Item{.item = i2it(index)} :
+        if (find && mvp_lmd_truthy(mapped.get())) return find_index ? Item{.item = i2it(index)} :
             lambda_item_uses_scalar_home(value.get()) ? push_d(it2d(value.get())) : value.get();
         if (reduce) output.set(lambda_item_adopt_scalar_home(mapped.get(), &result_home));
         if (map || (filter && mvp_lmd_truthy(mapped.get()))) {
@@ -155,7 +162,7 @@ extern "C" Item mvp_lmd_array_visit(Item owner, Item* args, int64_t count, int64
     if (reduce && !initialized) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     return reduce ? lambda_item_uses_scalar_home(output.get()) ? push_d(it2d(output.get())) : output.get() :
         method == LMD_METHOD_SOME ? Item{.item = ITEM_FALSE} : method == LMD_METHOD_EVERY ? Item{.item = ITEM_TRUE} :
-        method == LMD_METHOD_FIND_INDEX ? Item{.item = i2it(-1)} : output.get();
+        find_index ? Item{.item = i2it(-1)} : output.get();
 }
 extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_t method) {
     RootFrame roots(3);

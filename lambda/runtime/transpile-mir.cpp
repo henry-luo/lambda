@@ -17057,12 +17057,22 @@ static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
     MIR_reg_t result = new_reg(mt, "match", MIR_T_I64);
     MIR_label_t l_end = new_label(mt);
 
+    // Each arm runs only on its own path, as a handler's arms do, so a `raise`
+    // or `return` in one arm does not end the match: the join is reachable
+    // unless every arm exits and a default arm closes the no-match path.
+    // Without this, a raising arm leaked block_returned to an enclosing `if`,
+    // whose join then discarded the match value as a returned branch.
+    bool entry_returned = mt->block_returned;
+    bool every_arm_exits = true;
+    bool has_default_arm = false;
+
     // every arm starts from the facts after the scrutinee (S9.1.2)
     MirCowJoin cow_join(mt);
     AstNode* arm = (AstNode*)match_node->first_arm;
     while (arm) {
         AstMatchArm* match_arm = (AstMatchArm*)arm;
         cow_join.arm_begin();
+        mt->block_returned = false;
         if (match_arm->pattern) {
             MirFlowScope arm_flow(mt);
             MIR_label_t l_next = new_label(mt);
@@ -17088,10 +17098,13 @@ static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, body)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+            has_default_arm = true;
         }
+        every_arm_exits = every_arm_exits && mt->block_returned;
         cow_join.arm_end();
         arm = arm->next;
     }
+    mt->block_returned = entry_returned || (has_default_arm && every_arm_exits);
 
     // No match - return ITEM_NULL
     cow_join.arm_begin();
@@ -23689,6 +23702,10 @@ static void mir_lower_list_item(void* owner, AstNode* item, bool is_last) {
 static MirValue emit_list_value(MirTranspiler* mt, AstListNode* list_node) {
     bool item_position = mir_take_list_item_position(mt, (AstNode*)list_node);
     const char* list_finish = item_position ? "list_end_item" : "list_end";
+    // Only a let-list's lone value stands in the list's tail position; the
+    // items of a built list all return to it (S2.5.1v2), as in a content block.
+    bool tail_position = mt->in_tail_position;
+    mt->in_tail_position = false;
     // Check for block expression optimization: 1 value item + declarations
     // In this case, emit declarations then return the single value directly
     AstNode* declare = list_node->declare;
@@ -23715,6 +23732,7 @@ static MirValue emit_list_value(MirTranspiler* mt, AstListNode* list_node) {
             if (item_position && mir_is_list_producer(last_value)) {
                 mt->list_item_producer = ast_unwrap_primary(last_value);
             }
+            mt->in_tail_position = tail_position;
             MirValue result = transpile_expr_value(mt, last_value);
             mt->list_item_producer = NULL;
             pop_scope(mt);
@@ -39319,7 +39337,28 @@ static MirValue transpile_compound_assignment_value(MirTranspiler* mt,
 // Canonical expression result boundary. Each producer publishes its semantic
 // contract and planned carrier here without consulting MIR_reg_type
 // (D2.4.1–D2.4.3, D8.2.6).
+// Tail position (TCO and RV6 pair forwarding) passes only through forms whose
+// value IS one child's value: parentheses, the call that consumes it, the arms
+// of `if`/`match`, a block's or a let-list's lone value, and a `return`, which
+// re-asserts it itself. T0's plan_mark_tail_calls marks the same positions.
+// Every other producer wraps or inspects its operands -- a map spread, an
+// element attribute, an index, a negation, a handler's operand -- so a
+// recursive call inside it must come back to it. Leaving the caller's flag set
+// let `{*:f(x), type: t}` jump into `f` and return its map without `type`.
+static bool mir_node_passes_tail_position(AstNode* node) {
+    switch (node->node_type) {
+    case AST_NODE_PRIMARY: case AST_NODE_CALL_EXPR:
+    case AST_NODE_IF_EXPR: case AST_NODE_MATCH_EXPR:
+    case AST_NODE_LIST: case AST_NODE_CONTENT:
+    case AST_NODE_RETURN_STAM:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static MirValue transpile_expr_value_core(MirTranspiler* mt, AstNode* node) {
+    if (node && !mir_node_passes_tail_position(node)) mt->in_tail_position = false;
     if (node && node->node_type == AST_NODE_PRIMARY) {
         return transpile_primary_value(mt, (AstPrimaryNode*)node);
     }

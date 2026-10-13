@@ -10,6 +10,31 @@
 #include "../../../lib/mem.h"
 #include <math.h>
 
+extern "C" Item mvp_lmd_with_binding(Item owner, Item key, Item value, int64_t operation) {
+    static const JsWithBindingOps ops = {
+        [](Item object, Item name) { return mvp_lmd_property_with_receiver(object, name, ItemNull, LMD_PROP_HAS, object); },
+        [](Item object, Item name) { return mvp_lmd_property_with_receiver(object, name, ItemNull, LMD_PROP_GET, object); },
+        mvp_lmd_is_object, mvp_lmd_truthy
+    };
+    if (operation == LMD_PROP_HAS)
+        return js_with_binding_is_visible_with_ops(key, owner,
+            Item{.item = s2it(well_known_name_ref(JS_SYMBOL_UNSCOPABLES))}, &ops);
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> object(roots, owner), name(roots, key), input(roots, value);
+    int64_t mode = operation & ~LMD_PROP_STRICT;
+    // resolution precedes RHS/arguments; Get/SetBindingValue rechecks this saved base.
+    if (mode == LMD_PROP_GET || mode == LMD_PROP_SET) {
+        Item present = ops.has(object.get(), name.get());
+        if (item_is_error(present)) return present;
+        if (present.item == ITEM_FALSE) {
+            if (operation & LMD_PROP_STRICT) return mvp_lmd_fail(LMD_MVP_REFERENCE, 0);
+            if (mode == LMD_PROP_GET) return Item{.item = ITEM_JS_UNDEFINED};
+        }
+    }
+    return mvp_lmd_property_with_receiver(object.get(), name.get(), input.get(), operation, object.get());
+}
+
 Item mvp_lmd_function_forward(Item function, Item receiver, Item prefix, Item* arguments, uint64_t count, int skip, MvpLmdNativeEntry entry, Item target) {
     RootFrame roots(4);
     if (!roots.valid()) return ItemError;

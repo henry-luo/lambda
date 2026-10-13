@@ -22,14 +22,22 @@
 // values ride in the `v` attribute (attributes hold any value without the
 // splicing hazards content position has); first hit wins, so shadowing is
 // correct by construction rather than by a rule.
+// An attribute stores a list as the array it is (S2.5.6), but a native binding
+// passes a list through unchanged, so a bound list must still splice where it
+// lands. `l` records list-ness and `lookup` rebuilds the list from the array.
+// `[for …]`, not a bare `for`: a computed one-item list IS its item and an
+// empty one is null (S2.5.5v2), so `len` of a bare comprehension over one hit
+// would read the hit's own content rather than 1.
 pub fn lookup(env, n) => {
-    let hits = for (b in env where b.n == n) b.v
-    if (len(hits) > 0) hits[0] else raise error("unbound variable")
+    let hits = [for (b in env where b.n == n) b]
+    if (len(hits) == 0) raise error("unbound variable")
+    else if (hits[0].l) (for (x in hits[0].v) x)
+    else hits[0].v
 }
 
 pub fn bind(env, n, v) => {
     let rest = for (b in env) b;
-    <env <b n: n, v: v> rest>
+    <env <b n: n, v: v, l: type(v) == list> rest>
 }
 
 // bind a parameter list to already-evaluated arguments, left to right. Takes no
@@ -46,7 +54,7 @@ pub fn closure_of(f, kinds) any^ =>
     else raise error("apply non-function")
 
 // ===== the judgment =====
-// `ev` is what the parent proposal's §5.4 says a moded judgment compiles to: a
+// `ev` is what the DSL design's §12.3.4 says a moded judgment compiles to: a
 // recursive fn returning `T ^ StuckErr`. The `match` is the rule set, one arm
 // per node kind; `^` on each recursive call is stuckness propagation. Nothing
 // unmodelled can silently produce a value — the default arm raises.
@@ -59,9 +67,13 @@ pub fn closure_of(f, kinds) any^ =>
 // result and reported a bare stack overflow instead (finding F5). Exhausting
 // fuel is ordinary stuckness, so divergence now localizes to its own check.
 // There is no tail-call escape: every arm decrements, tail positions included.
-pub fn ev(t, env, fuel) any^ => {
+// The guard is an `if … else`, never a statement before the `match`: a block is
+// the list of ALL its statements' results (S2.5.3) and an else-less `if` yields
+// null in value position (S16.6.3), so a guard statement would make every
+// result `(null, v)`.
+pub fn ev(t, env, fuel) any^ =>
     if (fuel <= 0) raise error("out of fuel")
-    match name(t) {
+    else match name(t) {
     case 'lit': t.v
     case 'vr':  lookup(env, t.n)^
     // arithmetic — model scalars ARE host scalars (P5), so `/` is Lambda's
@@ -122,30 +134,25 @@ pub fn ev(t, env, fuel) any^ => {
         let f = closure_of(ev(t[0], env, fuel - 1)^, ['clon'])^
         // `appn` carries no attributes, so len(t) is its child count: the
         // callee followed by the arguments.
-        let args = for (i in 1 to len(t) - 1) ev(t[i], env, fuel - 1)^
+        let args = [for (i in 1 to len(t) - 1) ev(t[i], env, fuel - 1)^]
         let ps = f.ps
-        // arity is part of the semantics, not a host detail: a mismatch has no
-        // rule, so it is stuck rather than binding null or dropping arguments
-        if (len(ps) != len(args)) raise error("arity mismatch")
         let body = f[0]
         let cenv = f[1]
-        ev(body, bind_params(cenv, ps, args, 0), fuel - 1)^
+        // arity is part of the semantics, not a host detail: a mismatch has no
+        // rule, so it is stuck rather than binding null or dropping arguments.
+        // `else` keeps the guard from adding a null item to the arm (S2.5.3).
+        if (len(ps) != len(args)) raise error("arity mismatch")
+        else ev(body, bind_params(cenv, ps, args, 0), fuel - 1)^
     }
     case 'lett': ev(t[1], bind(env, t.n, ev(t[0], env, fuel - 1)^), fuel - 1)^
 
     // ===== M2: collections =====
     // array literal — attribute-free, so len(t) is the element count. The
     // result is a REAL host array, so checks compare it with `==` directly.
-    // `[*items]` is load-bearing, not decoration: a bare comprehension result
-    // stays SPREADABLE, and that flag survives being returned and re-bound, so
-    // a nested array would splice into the enclosing comprehension (flattening
-    // it) and an empty one would vanish where a block expects a value. Every
-    // array the model creates is de-spread here so downstream rules see a plain
-    // value (finding F8).
-    case 'arr': {
-        let items = for (i in 0 to len(t) - 1) ev(t[i], env, fuel - 1)^;
-        [*items]
-    }
+    // `[for …]` is the host's own array construction: it never collapses and
+    // is `[]` when empty (S2.5.5v2), an array item stays one item, and a list
+    // item splices exactly as it does in a native array literal (S2.5.1v2).
+    case 'arr': [for (i in 0 to len(t) - 1) ev(t[i], env, fuel - 1)^]
     // indexing inherits the host's total read: out of bounds and negative
     // indices are null rather than errors (S7.1.1v2, C15), not a rule of ours
     case 'idx': {
@@ -160,11 +167,13 @@ pub fn ev(t, env, fuel) any^ => {
         a[i to j]
     }
     // comprehension: `<forr n:'x', src body>` binds each element in turn. The
-    // binder is an attribute, so children stay [source, body].
+    // binder is an attribute, so children stay [source, body]. The result is the
+    // host's for-expression LIST, not an array: a native `for` produces a list
+    // (S2.5.2v2) that collapses to its item or to null as a value (S2.5.5v2) and
+    // splices where it lands (S2.5.1v2), and the model must answer the same.
     case 'forr': {
-        let src = ev(t[0], env, fuel - 1)^
-        let items = for (x in src) ev(t[1], bind(env, t.n, x), fuel - 1)^;
-        [*items]     // de-spread for the same reason as `arr` above (F8)
+        let src = ev(t[0], env, fuel - 1)^;
+        for (x in src) ev(t[1], bind(env, t.n, x), fuel - 1)^
     }
     // a modelled map is an assoc-list element, NOT a host map: map literals
     // reject a computed key, so the model cannot build `{k: v}` from an
@@ -179,17 +188,16 @@ pub fn ev(t, env, fuel) any^ => {
     }
     case 'fld': {
         let m = ev(t[0], env, fuel - 1)^
-        let hits = for (e in m where e.k == t.k) e.v
+        let hits = [for (e in m where e.k == t.k) e.v]     // S2.5.5v2, as in lookup
         // a missing key reads null, matching the host's `m.absent`
         if (len(hits) > 0) hits[0] else null
     }
-    // the trusted-primitive boundary (parent §5.6): `len` is not derived from
+    // the trusted-primitive boundary (DSL design §12.3.6): `len` is not derived from
     // rules, it is delegated to the host and declared as such here
     case 'lenn': len(ev(t[0], env, fuel - 1)^)
 
     default: raise error("stuck: no rule for term")
     }
-}
 
 
 // one entry point for every check: fixed initial fuel, empty environment, and

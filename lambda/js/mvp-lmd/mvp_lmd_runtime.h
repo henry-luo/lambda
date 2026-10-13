@@ -81,6 +81,8 @@ enum MvpLmdErrorKind { LMD_ERROR_BASE, LMD_ERROR_EVAL, LMD_ERROR_RANGE,
     LMD_ERROR_REFERENCE, LMD_ERROR_SYNTAX, LMD_ERROR_TYPE, LMD_ERROR_URI,
     LMD_ERROR_AGGREGATE, LMD_ERROR_COUNT };
 extern const char* const mvp_lmd_error_names[LMD_ERROR_COUNT];
+struct MvpLmdLibraryState;
+int mvp_lmd_error_kind(const TypeNominal* nominal, const MvpLmdLibraryState* library);
 enum MvpLmdPrimitiveKind { LMD_PRIMITIVE_STRING, LMD_PRIMITIVE_NUMBER,
     LMD_PRIMITIVE_BOOLEAN, LMD_PRIMITIVE_BIGINT, LMD_PRIMITIVE_COUNT };
 extern const char* const mvp_lmd_primitive_names[LMD_PRIMITIVE_COUNT];
@@ -119,6 +121,7 @@ struct MvpLmdLibraryState {
     MvpLmdClass set;
     MvpLmdClass* errors;        // optional nominal families; values live in registered program slots
     Item* error_values;
+    NameRef error_data_key;     // native Error allocation brand, independent of nominal ancestry
     MvpLmdClass* primitives;
     Item* primitive_values;
     NameRef primitive_key;      // boxed primitive payload, traced by the shared Map layout
@@ -147,7 +150,8 @@ MvpLmdLibraryState* mvp_lmd_program_library(MvpLmdProgram* program = NULL);
 struct MvpLmdBuiltinMethod { const char* name; TypeId owner; int id; uint8_t arity = 1; };
 extern const MvpLmdBuiltinMethod mvp_lmd_builtin_methods[];
 extern const int mvp_lmd_builtin_method_count;
-bool mvp_lmd_same_value_zero(Item left, Item right);
+// full-width Boolean results share one native/MIR ABI.
+extern "C" int64_t mvp_lmd_same_value_zero(Item left, Item right);
 // Ordered collection methods require the actual storage carrier, including through aliases.
 static inline bool mvp_lmd_is_ordered_map(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP || value.map->map_kind != MAP_KIND_ORDERED) return false;
@@ -221,11 +225,13 @@ enum MvpLmdMethod { LMD_METHOD_FILL = 9, LMD_METHOD_PUSH, LMD_METHOD_POP,
     LMD_METHOD_EVERY, LMD_METHOD_FIND, LMD_METHOD_FIND_INDEX, LMD_METHOD_REDUCE_RIGHT,
     LMD_METHOD_LAST_INDEX_OF, LMD_METHOD_STRING_CONCAT, LMD_METHOD_TRIM, LMD_METHOD_TRIM_START,
     LMD_METHOD_TRIM_END, LMD_METHOD_CODE_POINT_AT, LMD_METHOD_STRING_AT, LMD_METHOD_STRING_INCLUDES,
-    LMD_METHOD_PAD_END, LMD_METHOD_STRING_LAST_INDEX_OF, LMD_METHOD_COUNT };
+    LMD_METHOD_PAD_END, LMD_METHOD_STRING_LAST_INDEX_OF,
+    LMD_METHOD_FLAT_MAP, LMD_METHOD_FIND_LAST, LMD_METHOD_FIND_LAST_INDEX, LMD_METHOD_COUNT };
 static inline bool mvp_lmd_array_visit_method(int method) {
     return method == LMD_METHOD_FOREACH || method == LMD_METHOD_ARRAY_MAP || method == LMD_METHOD_FILTER ||
         method == LMD_METHOD_REDUCE || method == LMD_METHOD_SOME || method == LMD_METHOD_EVERY ||
-        method == LMD_METHOD_FIND || method == LMD_METHOD_FIND_INDEX || method == LMD_METHOD_REDUCE_RIGHT;
+        method == LMD_METHOD_FIND || method == LMD_METHOD_FIND_INDEX || method == LMD_METHOD_REDUCE_RIGHT ||
+        method == LMD_METHOD_FLAT_MAP || method == LMD_METHOD_FIND_LAST || method == LMD_METHOD_FIND_LAST_INDEX;
 }
 enum MvpLmdStringRead { LMD_STRING_INDEX, LMD_STRING_CHAR, LMD_STRING_CODE, LMD_STRING_FROM_CODE, LMD_STRING_FROM_POINT };
 enum MvpLmdProperty { LMD_PROP_GET, LMD_PROP_CALLEE, LMD_PROP_SET, LMD_PROP_DELETE,
@@ -237,6 +243,7 @@ int mvp_lmd_builtin_method(String* key, TypeId owner = LMD_TYPE_MAP);
 TypeId mvp_lmd_method_owner(int method);
 
 extern "C" {
+Item mvp_lmd_with_binding(Item owner, Item key, Item value, int64_t operation);
 Item mvp_lmd_template_object(MvpLmdProgram* program, JsTemplateLiteralNode* literal, int64_t slot);
 Item mvp_lmd_function_set_name(Item function, Item key, int64_t prefix);
 Item mvp_lmd_fail(int64_t kind, int64_t site);
@@ -274,7 +281,7 @@ int64_t mvp_lmd_string_key(String* string, int64_t typed = 0);
 Item mvp_lmd_array_store(Item array, uint32_t index, Item value);
 int64_t mvp_lmd_array_indices_use_own_storage(Item array);
 Item mvp_lmd_array_new(int64_t length);
-Item mvp_lmd_array_flatten(Item source, double depth, int64_t length = -1);
+Item mvp_lmd_array_flatten(Item source, double depth, int64_t length = -1, Item* mapping = nullptr);
 Item mvp_lmd_array_to_string(Item source, Item separator, int64_t library_objects = 1);
 Item mvp_lmd_regexp_new(MvpLmdLibraryState* state, Item pattern, Item flags);
 Item mvp_lmd_regexp_string_method(MvpLmdLibraryState* state, Item source, Item pattern,

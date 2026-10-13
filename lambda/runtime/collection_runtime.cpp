@@ -479,8 +479,13 @@ void list_push(List* list, Item item) {
 
         // S2.6.4: adjacent strings merge wherever content is built; the
         // allocation follows the owner (UI arena, input pool, or runtime heap).
-        bool runtime_owned = input_context ? input_context->consts != NULL
-            : (!input_allocation_context && context != NULL);
+        // An active input parse owns the list it is building, whatever runtime
+        // context called it: `parse()` from a script leaves input_context set
+        // to the eval context, and taking that as the owner put the Markdown
+        // parser's merged text runs on the heap inside an arena-owned element
+        // nothing traces, so they were swept at the next collection.
+        bool runtime_owned = !input_allocation_context &&
+            (input_context ? input_context->consts != NULL : context != NULL);
         if (list->length > 0 && list->items) {
             Item previous_item = list->items[list->length - 1];
             if (get_type_id(previous_item) == LMD_TYPE_STRING) {

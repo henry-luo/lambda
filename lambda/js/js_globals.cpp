@@ -14312,35 +14312,43 @@ static Item js_with_unscopables_symbol(void) {
     return js_symbol_well_known(js_name_item("unscopables", 11));
 }
 
+extern "C" Item js_with_binding_is_visible_with_ops(Item key, Item object,
+        Item unscopables_symbol, const JsWithBindingOps* ops) {
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, object), name(roots, key), symbol(roots, unscopables_symbol), excluded(roots, ItemNull);
+    Item present = ops->has(owner.get(), name.get());
+    if (item_is_error(present) || !ops->truthy(present)) return present;
+    excluded.set(ops->get(owner.get(), symbol.get()));
+    if (item_is_error(excluded.get())) return excluded.get();
+    if (ops->is_object(excluded.get())) {
+        Item blocked = ops->get(excluded.get(), name.get());
+        if (item_is_error(blocked)) return blocked;
+        if (ops->truthy(blocked)) return Item{.item = ITEM_FALSE};
+    }
+    return Item{.item = ITEM_TRUE};
+}
+static Item js_with_binding_is_visible(Item key, Item scope_obj) {
+    static const JsWithBindingOps ops = {
+        [](Item object, Item key) { return js_in(key, object); },
+        js_get_key_default, js_with_scope_is_object,
+        [](Item value) -> int64_t { return js_is_truthy(value); }
+    };
+    return js_with_binding_is_visible_with_ops(key, scope_obj, js_with_unscopables_symbol(), &ops);
+}
+
 // Check with-scope stack for a property (most recent scope first)
 static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
     *found = false;
     for (int i = js_with_stack_depth - 1; i >= 0; i--) {
         Item scope_obj = js_with_stack_at(i);
         if (js_with_scope_is_object(scope_obj)) {
-            Item in_result = js_in(key, scope_obj);
+            Item in_result = js_with_binding_is_visible(key, scope_obj);
             if (item_is_error(in_result)) {
                 *found = true;
                 return in_result;
             }
             if (it2b(in_result)) {
-                // ES2023 9.1.1.2.1 step 6-9: check @@unscopables
-                Item unscopables_sym = js_with_unscopables_symbol();
-                Item unscopables = js_get_key_default(scope_obj, unscopables_sym);
-                if (item_is_error(unscopables)) {
-                    *found = true;
-                    return unscopables; // getter threw — propagate
-                }
-                if (get_type_id(unscopables) == LMD_TYPE_MAP) {
-                    Item blocked = js_get_key_default(unscopables, key);
-                    if (item_is_error(blocked)) {
-                        *found = true;
-                        return blocked;
-                    }
-                    if (js_is_truthy(blocked)) {
-                        continue; // binding is blocked by @@unscopables
-                    }
-                }
                 *found = true;
                 // HasBinding and GetBindingValue are separate Object Environment
                 // Record operations. Re-run HasProperty after @@unscopables:
@@ -14387,18 +14395,6 @@ extern "C" Item js_get_last_with_binding_base_or_undefined(Item key) {
     Item scope_obj = js_last_with_binding_scope;
     if (!js_with_scope_is_object(scope_obj)) return make_js_undefined();
     return scope_obj;
-}
-
-static Item js_with_binding_is_visible(Item key, Item scope_obj) {
-    JS_ASSIGN_OR_RETURN(in_result, js_in(key, scope_obj));
-    if (!it2b(in_result)) return (Item){.item = b2it(false)};
-    Item unscopables_sym = js_with_unscopables_symbol();
-    JS_ASSIGN_OR_RETURN(unscopables, js_get_key_default(scope_obj, unscopables_sym));
-    if (get_type_id(unscopables) == LMD_TYPE_MAP) {
-        JS_ASSIGN_OR_RETURN(blocked, js_get_key_default(unscopables, key));
-        if (js_is_truthy(blocked)) return (Item){.item = b2it(false)};
-    }
-    return (Item){.item = b2it(true)};
 }
 
 // Innermost scope whose binding for `key` is visible, or ItemNull when the
@@ -14744,16 +14740,8 @@ static Item js_set_global_property_impl(Item key, Item value, bool strict) {
                     }
                     return js_set_global_target_property(scope_obj, key, value, strict);
                 }
-                JS_ASSIGN_OR_RETURN(in_result, js_in(key, scope_obj));
+                JS_ASSIGN_OR_RETURN(in_result, js_with_binding_is_visible(key, scope_obj));
                 if (it2b(in_result)) {
-                    Item unscopables_sym = js_with_unscopables_symbol();
-                    JS_ASSIGN_OR_RETURN(unscopables, js_get_key_default(scope_obj, unscopables_sym));
-                    if (get_type_id(unscopables) == LMD_TYPE_MAP) {
-                        JS_ASSIGN_OR_RETURN(blocked, js_get_key_default(unscopables, key));
-                        if (js_is_truthy(blocked)) {
-                            continue;
-                        }
-                    }
                     JS_ASSIGN_OR_RETURN(second_in, js_in(key, scope_obj));
                     if (!it2b(second_in)) {
                         continue;
@@ -15297,6 +15285,8 @@ extern "C" Item js_eval_private_frame_pairs(void) {
 }
 
 extern "C" Item js_eval_private_resolve(Item unscoped_key) {
+    // static validation can run before an LJS realm exists; only eval has ambient private bindings.
+    if (!js_active_runtime_state) return ItemNull;
     if (js_eval_private_frame_depth <= 0 || get_type_id(unscoped_key) != LMD_TYPE_STRING) return ItemNull;
     JsEvalBridgeFrame* frame = js_eval_private_current_frame();
     if (!frame) return ItemNull;

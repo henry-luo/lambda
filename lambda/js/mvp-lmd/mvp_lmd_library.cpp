@@ -21,6 +21,14 @@ const char* const mvp_lmd_error_names[LMD_ERROR_COUNT] = {"Error", "EvalError", 
     "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError"};
 const char* const mvp_lmd_primitive_names[LMD_PRIMITIVE_COUNT] = {"String", "Number", "Boolean", "BigInt"};
 
+int mvp_lmd_error_kind(const TypeNominal* nominal, const MvpLmdLibraryState* library) {
+    if (!library || !library->errors) return -1;
+    // native error families derive directly from Error; prefer the specific family over its base.
+    for (int i = LMD_ERROR_COUNT - 1; i >= 0; i--)
+        if (lambda_nominal_derives_from(nominal, &library->errors[i].nominal)) return i;
+    return -1;
+}
+
 static Item primitive_payload(Item object) {
     MvpLmdLibraryState* state = mvp_lmd_program_library();
     if (!state || !state->primitive_key || get_type_id(object) != LMD_TYPE_MAP || mvp_lmd_is_proxy(object))
@@ -311,7 +319,7 @@ static Item error_construct(Context*, MvpLmdProgram* program, Item* args, uint64
     if (!roots.valid()) return ItemError;
     Rooted<Item> object(roots, ItemNull), prototype(roots, ItemNull), text(roots, ItemNull), list(roots, ItemNull);
     // GetPrototypeFromConstructor precedes message conversion and preserves the
-    // native Error brand while keeping the live JS prototype independent (D2.6.10).
+    // native Error brand while keeping the live JS prototype independent (D2.6.9v3).
     prototype.set(mvp_lmd_class_values(cls)[1]);
     if (target.item != ITEM_JS_UNDEFINED) {
         Item key = {.item = s2it(heap_create_name("prototype", 9))};
@@ -319,8 +327,17 @@ static Item error_construct(Context*, MvpLmdProgram* program, Item* args, uint64
         if (item_is_error(prototype.get())) return prototype.get();
         if (!mvp_lmd_is_object(prototype.get())) prototype.set(mvp_lmd_class_values(cls)[1]);
     }
-    object.set(mvp_lmd_object_new(&cls->shape, 0));
+    MvpLmdClass* actual = target.item == ITEM_JS_UNDEFINED ? NULL : mvp_lmd_class_record(target);
+    // preserve the declared Lambda subtype when native Error construction supplies its instance storage.
+    TypeMap* shape = actual && actual->ast && lambda_nominal_derives_from(&actual->nominal, &cls->nominal)
+        ? &actual->shape : &cls->shape;
+    object.set(mvp_lmd_object_new(shape, 0));
     if (item_is_error(object.get())) return object.get();
+    // a newTarget supplies ancestry, but only native Error allocation supplies [[ErrorData]].
+    if (!state->error_data_key)
+        state->error_data_key = name_pool_create_unique_private(context->name_pool, {"MVP [[ErrorData]]", 17});
+    if (!state->error_data_key || !map_shape_set(object.get().map, state->error_data_key, Item{.item = ITEM_TRUE}))
+        return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     if (prototype.get().item != mvp_lmd_class_values(cls)[1].item) {
         Item linked = mvp_lmd_set_prototype(object.get(), prototype.get());
         if (item_is_error(linked)) return linked;
@@ -652,8 +669,8 @@ static Item object_string(Context*, MvpLmdProgram*, Item*, uint64_t, Item self, 
         TypeNominal* nominal = ((TypeMap*)receiver.map->type)->nominal;
         if (nominal == &state->date.nominal) tag = "[object Date]";
         else if (nominal == &state->regexp.nominal) tag = "[object RegExp]";
-        else if (state->errors) for (int i = 0; i < LMD_ERROR_COUNT; i++)
-            if (nominal == &state->errors[i].nominal) { tag = "[object Error]"; break; }
+        else if (state->error_data_key && typemap_hash_lookup_key((TypeMap*)receiver.map->type, state->error_data_key))
+            tag = "[object Error]";
         if (state->arguments_key && typemap_hash_lookup_key((TypeMap*)receiver.map->type, state->arguments_key))
             tag = "[object Arguments]";
         TypeId primitive = get_type_id(primitive_payload(receiver));
@@ -1035,6 +1052,24 @@ Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
         Item key = {.item = s2it(well_known_name_ref(JS_SYMBOL_SPECIES))};
         result = mvp_lmd_define_accessor(state->values[LMD_LIBRARY_ARRAY], key,
             mvp_lmd_native_function(program, NULL, mvp_lmd_object_value, 0, "get [Symbol.species]"), JSPD_NON_ENUMERABLE << 8);
+        if (item_is_error(result)) return result;
+        RootFrame roots(1);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> excluded(roots, mvp_lmd_object_new(state->object_shape, 0));
+        if (item_is_error(excluded.get())) return excluded.get();
+        result = mvp_lmd_set_prototype(excluded.get(), ItemNull);
+        if (item_is_error(result)) return result;
+        for (int i = 0; js_array_unscopable_names[i]; i++) {
+            result = mvp_lmd_named_set(excluded.get(), js_array_unscopable_names[i], Item{.item = ITEM_TRUE}, 0);
+            if (item_is_error(result)) return result;
+        }
+        JsPropertyDescriptor descriptor = {};
+        descriptor.flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_HAS_ENUMERABLE |
+            JS_PD_HAS_CONFIGURABLE;
+        js_pd_set_configurable(&descriptor, true);
+        descriptor.value = excluded.get();
+        result = mvp_lmd_define_own_property(state->values[LMD_LIBRARY_ARRAY_PROTOTYPE],
+            Item{.item = s2it(well_known_name_ref(JS_SYMBOL_UNSCOPABLES))}, &descriptor);
         if (item_is_error(result)) return result;
     }
     for (int i = 0; i < mvp_lmd_builtin_method_count; i++) {

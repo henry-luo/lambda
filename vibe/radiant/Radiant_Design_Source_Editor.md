@@ -1,11 +1,11 @@
 # Radiant Source Editor — Virtualized Source Editing with Parser-Driven Highlighting
 
 **Date:** 2026-10-06
-**Status:** Implemented through P4 (record: [Radiant_Impl_Source_Editor](../impl/Radiant_Impl_Source_Editor.md)). P4 (2026-10-07) finished the outstanding items: pass 2 on the next frame (OQ16), reference links resolved across the window (CED16v4), blocks nested in containers, the §5.3 long-line guard, the §10 status line, row-wise caret motion and re-measuring under soft wrap, horizontal scrolling (§6.2), gutter clicks (§6.3), undo groups by pause and caret move (§5.2), and the §11 GTest ring; CED19 was revised to v2 to match the host as built. OQ17 was decided by the user the same day: soft wrap stays character wrap. OQ18 (files with NUL bytes) is open (§14.3). OQ6–OQ13 were decided by the user on 2026-10-06 (§14); CED14 and CED16 were revised to v2 the same day (user; old text in Appendix C). OQ14, raised during P0, was decided by the user the same day (§14.1). OQ15 and OQ16, raised during P1, were decided by the user on 2026-10-07 (§14.2): CED15v2 and CED16v3. CED18 follows OQ15 as CED18v2 (P2, same day). P3 (2026-10-07) built soft wrap (§6.4), find, indent and dedent, model clipboard, the Source↔Rich switch (§10) and the column maps of CED17; the impl record §7 lists what changed in this design.
-**Scope:** a source-code editing surface for Lambda/Radiant that (1) edits large text files, a few MB and beyond, through a virtualized viewport that only materializes the visible lines; (2) highlights syntax for the formats Lambda already parses, by having the Lambda parser emit a trimmed node tree that spans the viewport; (3) renders plain text first and highlighted second, and keeps edited text highlighted by mapping the color spans through each edit until the exact highlighting is swapped in. Phase-1 POC highlights Markdown and HTML only. Out of scope: LSP/diagnostics, multi-cursor, folding, minimap, extensions, rich-preview sync (kept as the later plan in [Radiant_Code_Editor.md](Radiant_Code_Editor.md) §7).
+**Status:** Implemented through P4 (record: [Radiant_Impl_Source_Editor](../impl/Radiant_Impl_Source_Editor.md)). P4 (2026-10-07) finished the outstanding items: pass 2 on the next frame (OQ16), reference links resolved across the window (CED16v4), blocks nested in containers, the §5.3 long-line guard, the §10 status line, row-wise caret motion and re-measuring under soft wrap, horizontal scrolling (§6.2), gutter clicks (§6.3), undo groups by pause and caret move (§5.2), and the §11 GTest ring; CED19 was revised to v2 to match the host as built. OQ17 was decided by the user the same day: soft wrap stays character wrap. OQ18 (files with NUL bytes) is open (§14.3). OQ6–OQ13 were decided by the user on 2026-10-06 (§14); CED14 and CED16 were revised to v2 the same day (user; old text in Appendix C). OQ14, raised during P0, was decided by the user the same day (§14.1). OQ15 and OQ16, raised during P1, were decided by the user on 2026-10-07 (§14.2): CED15v2 and CED16v3. CED18 follows OQ15 as CED18v2 (P2, same day). P3 (2026-10-07) built soft wrap (§6.4), find, indent and dedent, model clipboard, the Source↔Rich switch (§10) and the column maps of CED17; the impl record §7 lists what changed in this design. On 2026-10-13 the user had the CodePad proposal folded into this document and its file (`Radiant_Code_Editor.md`) deleted: its forward work is §15, its ledger CED1–CED10 is Appendix B.
+**Scope:** a source-code editing surface for Lambda/Radiant that (1) edits large text files, a few MB and beyond, through a virtualized viewport that only materializes the visible lines; (2) highlights syntax for the formats Lambda already parses, by having the Lambda parser emit a trimmed node tree that spans the viewport; (3) renders plain text first and highlighted second, and keeps edited text highlighted by mapping the color spans through each edit until the exact highlighting is swapped in. Phase-1 POC highlights Markdown and HTML only. Out of scope: LSP/diagnostics, multi-cursor, folding, minimap, extensions, rich-preview sync (the later plan in §15).
 **Builds on:**
 
-- [Radiant_Code_Editor.md](Radiant_Code_Editor.md) — the CodePad proposal (2026-08-24): ledger CED1–CED10, the virtualization argument, the preview/sync plan. This document continues its ledger (CED11+) and **supersedes CED1, CED5, CED9 and CED10** (§3, Appendix B).
+- The CodePad proposal (`Radiant_Code_Editor.md`, 2026-08-24; folded in and deleted 2026-10-13): ledger CED1–CED10 (Appendix B), the virtualization argument, the preview/sync plan (§15). This document continues its ledger (CED11+) and **supersedes CED1, CED5, CED9 and CED10** (§3, Appendix B).
 - [Radiant_Design_Edit_Mode.md](Radiant_Design_Edit_Mode.md) and [Radiant_Impl_Edit_Mode.md](../impl/Radiant_Impl_Edit_Mode.md) — `lambda edit` and the `lambda.edit` package (Phases 1–3 implemented): the format registry, session, shell, toolbar and save pipeline the source surface plugs into.
 - [Lambda_Design_DOM_API.md](../Lambda_Design_DOM_API.md), [Lambda_Design_DOM_State.md](../Lambda_Design_DOM_State.md), [Lambda_Design_DOM_Editable.md](../Lambda_Design_DOM_Editable.md) — the `import dom` surface, reactive view state, and the Lambda-side editing seam.
 - [Radiant_Editor_Stage4B.md](../editing/Radiant_Editor_Stage4B.md) — the three-layer model: native substrate (caret, selection, IME, clipboard, event routing) under script-owned editing logic.
@@ -13,7 +13,7 @@
 
 **Formal anchors:** S12.1.1v2 and S12.1.3 (effectful loading/saving in procedures; rendering is pure, mutation only in handlers); S9.1.4 (state lives in view state); S9.2.2 (read views are snapshots); S5.1.4 (no reference identity — the buffer is a value, versions are values); D7.2.1–D7.2.5 (package loading, state, the editing-policy boundary); D7.5.2 (persistence through the shared IO boundary); D7.5.3 (native mechanism vs script policy). No formal ruling is revised by this proposal.
 
-**Ledger:** extends the editor area's `CED#` series (`doc/Doc_Convention.md` §4 — no new series). Decisions **CED11–CED22**, with CED14v2 revised 2026-10-06, CED15v2, CED18v2 and CED16v3 revised 2026-10-07, and CED16v4 and CED19v2 revised in P4 (2026-10-07); open questions **OQ6–OQ17** resolved, **OQ18** open (OQ1–OQ5 belong to the CodePad doc).
+**Ledger:** extends the editor area's `CED#` series (`doc/Doc_Convention.md` §4 — no new series). Decisions **CED11–CED22**, with CED14v2 revised 2026-10-06, CED15v2, CED18v2 and CED16v3 revised 2026-10-07, and CED16v4 and CED19v2 revised in P4 (2026-10-07); open questions **OQ6–OQ17** resolved, **OQ18** open; OQ1–OQ5 came from the CodePad proposal (§15.5, OQ2–OQ4 open).
 
 ---
 
@@ -46,7 +46,7 @@ Milestones: P0 plain virtualized editor inside `lambda edit` → P1 Markdown hig
 
 - Soft wrap in P0–P2 (horizontal scroll first; §6.4 explains why editor-owned scrolling makes wrap a local change later). Decided 2026-10-06 (OQ11): P3.
 - Multi-cursor; an own-drawn selection layer (native single-range selection is used, clamped to the window, as CED4 already decided).
-- Live rich preview and source↔rendered sync — the CodePad plan (§7 there) still stands; it will consume the same `sourcepos` spans this design produces.
+- Live rich preview and source↔rendered sync — the CodePad plan, carried forward in §15. The highlight spans this design produces cannot serve it as they are: they are a flat list with no tree to attach to rendered elements (§15.2).
 - Highlighting inside fenced code bodies by the fence's language (delegation); the fence is one `code` span in the POC. Decided 2026-10-06 (OQ12).
 - Any format beyond Markdown and HTML; any change to parsers other than the markup engine and the HTML5 tokenizer.
 
@@ -79,7 +79,9 @@ Milestones: P0 plain virtualized editor inside `lambda edit` → P1 Markdown hig
 
 ### 2.4 The JS CodePad plan
 
-`Radiant_Code_Editor.md` proposed a TS/JS CodePad with script stream tokenizers (CED5), a `lambda.exe edit` surface of its own (CED9) and a Lambda twin later (CED10). Since then `lambda edit` landed as a Lambda application and the editor family's center of gravity moved to `lmd/package/edit`. The highlighting approach also changes by user direction: parser-driven, not tokenizer-driven. Appendix B maps every CED ruling to its fate.
+The CodePad proposal (2026-08-24, folded into this document on 2026-10-13) proposed a TS/JS CodePad with script stream tokenizers (CED5), a `lambda.exe edit` surface of its own (CED9) and a Lambda twin later (CED10). Since then `lambda edit` landed as a Lambda application and the editor family's center of gravity moved to `lmd/package/edit`. The highlighting approach also changes by user direction: parser-driven, not tokenizer-driven. Appendix B keeps every CED1–CED10 ruling and its fate.
+
+CodePad's evidence for "no regex" was that highlight.js v11.9 loaded under LambdaJS but emitted no token spans, because the regex engine degraded lookaheads and backreferences. That no longer holds: `test/js/hljs_highlight.txt` now records `<span` output for JavaScript, Python, CSS and JSON (golden last changed 2026-09-12, `d3f6a7b5a`). CED15v2 does not rest on it; it rests on reusing the production parser.
 
 ### 2.5 Prior art — CodeMirror 6 and VS Code / Monaco
 
@@ -339,7 +341,7 @@ No change to JSON, YAML, TOML, CSS, LaTeX, Lambda or any other parser; no increm
 - **Selection**: `sel = {anchor: {line, col}, head: {line, col}}` in state. Projection after every render: both ends inside the window → set the DOM range on the slot text nodes; an end outside → clamp to the window edge row. (P3: the clamped DOM range already paints every rendered row between the ends, so no `tok-selected` runs are needed. A Shift+press extends the model selection from its own anchor, which may lie outside the window, instead of the clamped DOM anchor.) `selectionchange` with native-originated positions (mouse, shift-click, double/triple click) updates `sel` through the same mapping; a `selectionchange` caused by the surface's own projection is recognized by comparing against the last projected value and ignored. (P4: Radiant dispatched the Lambda `selectionchange` on mouse-up only for a non-collapsed range, so a click that just placed the caret reached the model on the next key; it now fires for a caret too, and the surface projects the selection again after adopting it, since the status redraw replaces the rows.)
 - **IME**: `compositionstart` marks the composing row; the row is excluded from reconciliation (its vnode is reused unchanged) until `compositionend` delivers the committed text as an ordinary insert. Pass 2 skips the composing row.
 - **Clipboard**: copy/cut build text from `sel` over the buffer (join with `eol`); paste arrives as plain text from the gate. Column/rectangular selection is out of scope. (P3: the surface returns the text in its edit result's `clipboard_text`, and Radiant writes it, because the DOM shows only the window's part of the selection; Lambda_Design_DOM_Editable §4.5.)
-- **Keyboard** (`keydown`): arrows/word/line/page/document movement with shift extension; Tab inserts `tab_size` spaces or a tab per descriptor option; Shift-Tab dedents the selected lines; Cmd/Ctrl-A select-all (model); Cmd/Ctrl-Z/Shift-Z; Cmd/Ctrl-S falls through to the shell's existing save binding; Cmd/Ctrl-F find is P3. (P3: Tab over lines and Shift+Tab re-indent whole lines as one undo step. Cmd/Ctrl+F opens a find bar over the text's top right: matches ignore case, render as runs laid over the tokens, and show "n of m"; Enter, Shift+Enter and Cmd/Ctrl+G step and wrap; Escape returns to the selected match.)
+- **Keyboard** (`keydown`): arrows/word/line/page/document movement with shift extension; Tab inserts `tab_size` spaces or a tab per descriptor option; Shift-Tab dedents the selected lines; Cmd/Ctrl-A select-all (model); Cmd/Ctrl-Z/Shift-Z; Cmd/Ctrl-S falls through to the shell's existing save binding; Cmd/Ctrl-F find is P3. (P3: Tab over lines and Shift+Tab re-indent whole lines as one undo step. Cmd/Ctrl+F opens a find bar over the text's top right: matches ignore case, render as runs laid over the tokens, and show "n of m"; Enter, Shift+Enter and Cmd/Ctrl+G step and wrap; Escape returns to the selected match. Replace is not designed or built: CodePad's goal G1 asked for find/replace, P3 delivered find only; it is listed under Later in §12.)
 
 ---
 
@@ -371,7 +373,7 @@ No change to JSON, YAML, TOML, CSS, LaTeX, Lambda or any other parser; no increm
 | **P2 — HTML highlighting** | HTML lexical mode with window over the shared restart cache; HTML walker; entities, raw-text bodies | Lexical/tree agreement test; walker goldens; mixed `.html` with scripts and comments highlighted in the headless fixture |
 | **P3 — parity and polish** | IME and clipboard fixtures, selection runs for off-window rows, find, indent/dedent, soft wrap (`{top_line, top_row}`), Source↔Rich toggle per OQ7 | Fixture suite green; wrap fixture; no regression in P0 stress budget. Built 2026-10-07; container column maps (CED17, OQ10) were added here too. |
 | **P4 — outstanding items** | Pass 2 on the next frame (OQ16); reference links resolved across the window (CED16v4); blocks nested in containers; the long-line guard (§5.3); the status line (§10); row-wise caret motion and re-measuring on resize (§6.4); horizontal scrolling (§6.2); gutter clicks (§6.3); undo groups by pause and caret move (§5.2); `source_units.ls` (CED21); the GTest ring (§11) | Built 2026-10-07: the §11 GTest green with 0 of 1,577 corpus windows differing from the full parse; edit fixtures 42/44, the two failures fail identically before P4; pass 2 about 6.4 ms with the cache in a release build. OQ17 decided (character wrap stays); OQ18 open |
-| **Later** | Walkers for `json`/`css`/`lambda`/`yaml` (parser spans as needed); fence and raw-HTML delegation; `load_text_doc` reuse; preview/sync per the CodePad plan over the same spans | separate decisions |
+| **Later** | Walkers for `json`/`css`/`lambda`/`yaml` (parser spans as needed); fence and raw-HTML delegation; replace in the find bar (§9); `load_text_doc` reuse; live preview and source↔rendered sync (§15.1–§15.3); fence highlighting in rendered documents (§15.4); a run pane for `.ls` files (OQ4) | separate decisions |
 
 ---
 
@@ -401,7 +403,7 @@ All eight questions were put to the user, who took the recommendation on each. T
 | **OQ10** | Accept the block-level fallback inside containers whose inline spans are not yet column-mapped? | **Accepted for P1** with the fallback rate reported by the fidelity test; per-container fixes in P3 (CED17). |
 | **OQ11** | Soft wrap in P1 or P3? | **P3**, on the `{top_line, top_row}` scroll model (§6.4). |
 | **OQ12** | Fence bodies as one `tok-code` run in the POC? | **Yes**; per-language delegation is later work (§7.2). |
-| **OQ13** | Continue the `CED#` series here, or fold both documents? | **Keep both**: this document is the design of record for the editor surface, `Radiant_Code_Editor.md` for preview/sync, Appendix B is the bridge. |
+| **OQ13** | Continue the `CED#` series here, or fold both documents? | **Keep both**: this document is the design of record for the editor surface, `Radiant_Code_Editor.md` for preview/sync, Appendix B is the bridge. *Revised 2026-10-13 (user): folded.* The preview/sync plan is §15, the CodePad ledger Appendix B, and `Radiant_Code_Editor.md` is deleted. |
 
 OQ6–OQ13 left no decision blocking P0 (§12). Items to verify during P0 rather than decide now: which unit the `editaction` target range reports (CED21 conversion), and the exact geometry waist call for viewport height and character advance (§6.1).
 
@@ -419,6 +421,57 @@ OQ6–OQ13 left no decision blocking P0 (§12). Items to verify during P0 rather
 
 - **OQ17 — word-boundary soft wrap.** P3 wraps at any character, so a line's rows are its display width over `cols` and the view's row arithmetic is exact. Radiant breaks `pre-wrap` text by the full UAX #14 rules (spaces, hyphens, BA characters, CJK, automatic hyphenation), which the script cannot reproduce. Options: (a) keep character wrap; (b) word wrap with measured rows: after each render read the rendered rows' heights (and, for caret motion, each row's break offsets) and use them for the lines in the window, estimating the rest, as CodeMirror does for unmeasured regions; (c) word wrap with a script line breaker that matches the engine for ASCII spaces only, accepting row errors elsewhere. Recommendation: (b), behind the current Alt+Z toggle, if word wrap is wanted at all. **Decision (user, 2026-10-07): (a), keep character wrap.**
 - **OQ18 — files with NUL bytes (§5.3).** `input(path, 'text')` stops at the first NUL byte (`input_from_local_path` reads with `strlen`), so the surface sees a truncated text and a save would write it back truncated. Options: (a) `input(path, 'text')` raises an error for a file with a NUL byte, and `lambda edit` reports it at open; (b) text input keeps every byte, NUL included, and the source descriptor refuses a text containing one; (c) leave `input` alone and add a separate probe. (a) and (b) change `input()` for every caller and need a ruling (no `S#` covers NUL bytes in text input). Recommendation: (a). **Open: the user left it for later (2026-10-07).**
+
+---
+
+## 15. Later — preview, sync and rendered fence highlighting (from CodePad)
+
+Folded in from the CodePad proposal (its §6.3, §7, §12 and §13) on 2026-10-13. None of this is built. The plan is restated as CodePad proposed it, under its rulings CED6–CED8 (Appendix B). Where a premise has changed since, that is noted, and the choices it opens are left as questions (§15.5).
+
+### 15.1 Live preview (CED6)
+
+**As proposed.** A split pane for formats with a rendered form (Markdown, HTML, wiki, rst, org, textile; XML through its stylesheet path). On idle, about 200 ms after the last edit and coalesced, the buffer text is parsed by the format's existing input parser and rendered into a read-only preview with its own scroll context. Re-parsing the whole document is accepted for v1. Latency is measured on the `test/markdown` corpus with the loaders' `[TIMING]` log lines before anything is optimized; if large documents breach the budget, the debounce widens before any incremental parse is considered (§15.3).
+
+**Changed since.**
+
+- The convert bridge (CodePad's native item 2, OQ1) is not needed: the surface is Lambda (CED11), which calls `parse()` and `format()` directly. The rich Markdown and HTML surfaces already render a parsed document as DOM, so the preview's render path is a choice (OQ3).
+- Every `parse()` keeps its `Input` until the runtime resets (OQ15: 4,000 parses of a 3 KB document reached 1 GB). A preview that re-parses on every pause accumulates in the same way, so that retention (filed as a side task in P4) has to be fixed before a live preview ships.
+- The layout cap that would have truncated large code fences in the preview is gone (§2.3).
+- The Source↔Rich switch (§10) already shows the rendered form of the same text, in place of the source; the preview is its side-by-side form.
+
+### 15.2 Source positions for the preview (CED7)
+
+**As proposed.** Opt-in source positions on the parsed tree's block elements (and selected inline elements), carried into the preview DOM as ordinary attributes, with per-format golden tests that each position's substring is the construct as written. Off by default, so data-processing output stays byte-identical.
+
+**As built for this editor.** `parse()` accepts `sourcepos: true`, which puts `sourcepos: "L:C-L:C"` on top-level blocks only, and `sourcepos: 'spans'`, which returns flat records with no tree (§8.3; the `sourcepos` option in `lambda-eval.cpp`). CED17's `sourcepos: 'inline'`, positions on the tree at every depth, was designed but not built; P1 took flat spans instead (OQ15). HTML trees have only the line-only `__source_line` of §2.2. So block-level sync can start from `sourcepos: true`, interpolating blocks nested in lists and quotes inside their top-level block; finer sync needs a tree mode at every depth (OQ2). Positions are lines and columns, so they map straight onto the line buffer; CodePad's byte offsets needed line-start offsets kept beside the buffer.
+
+### 15.3 Sync behaviors (CodePad stage 3, all script)
+
+- **Editor → preview scroll:** the top visible line → the smallest positioned element enclosing it → align the preview's scroll, interpolating in proportion inside the block.
+- **Preview → editor:** a click resolves the nearest positioned ancestor → its start → the editor caret, scrolled to the center.
+- **Caret → preview:** when the caret's line changes, outline the corresponding preview block (a class toggle).
+- **Tolerant mapping:** regions without a position interpolate between neighboring positioned elements. A stale preview (mid-debounce) suspends sync until a render for the current `buf.version` (CED12) lands.
+- **Later, not scheduled:** block-incremental re-parse. Diff the top-level block ranges through their positions, re-parse only the changed blocks and splice them into the preview. Only once whole-document parsing is shown too slow on real corpora.
+- **Out:** two-way editing of the preview (CED8). The composition, when wanted: the preview hosts the rich surface on the parsed document, which serializes through the formatter, and a position-preserving diff patches the source buffer. The Source↔Rich switch (§10) already hands the whole text across; the diff is its incremental form.
+
+### 15.4 Fence highlighting in rendered documents (CodePad §6.3)
+
+The Markdown parser puts a `language` attribute on `<code type="block">` (`block_code.cpp`), and nothing consumes it. The walker registry (§7.4) could color fence bodies in rendered Markdown, in `lambda view`, in the rich surface and in a preview pane, as it colors source in the source surface. This is separate from fence delegation inside the source editor (OQ12), but both need the same thing: a walker, and parser spans, for the fence's language. Walkers exist for Markdown and HTML only, and fences are mostly other languages, so this follows the walkers listed under Later in §12. CodePad's version used its stream tokenizers (CED5, superseded).
+
+### 15.5 Open questions from CodePad
+
+| ID | Question | State |
+|----|----------|-------|
+| **OQ1** | Convert-bridge exposure: a `window.lambda.convert(...)` native on the document interface, or a Jube module import? | **Moot** since CED11 (2026-10-06): a Lambda surface calls `parse()` and `format()` directly. |
+| **OQ2** | Position granularity for sync: block-level only, or block and inline runs? CodePad leaned block-level first, inline only if the caret highlight proves too coarse. | **Open.** Top-level blocks are available today (`sourcepos: true`); nested blocks or inline runs need a tree mode at every depth (§15.2). |
+| **OQ3** | Preview render path: CodePad weighed formatting to HTML text and setting it as a fragment against building the DOM subtree from the parsed tree, with the math pass included. | **Open.** In the Lambda surface the candidates are the rich surfaces' own templates over the parsed document, read-only, or the formatter's HTML; decide on measurements and math fidelity. |
+| **OQ4** | For `.ls` files, is the "preview" a run or REPL output pane, or nothing? | **Open.** More pressing now that `.ls` files open in the source surface (CED20). |
+| **OQ5** | Where the CodePad source lives (`test/codepad/` like the rich editor, or promoted toward `lambda/`). | **Moot** since CED11: the surface lives in `lmd/package/edit`. |
+
+### 15.6 Risks (from CodePad)
+
+- **Preview latency on large documents.** *Mitigation:* measure first, widen the debounce adaptively, and hold block-incremental re-parse in reserve (§15.3).
+- **Position fidelity against parser normalization** (positions drifting past escapes and expansions). *Mitigation:* capture positions before normalization, and test position→substring fidelity per format, as the §11 GTest (a) already does for highlight spans.
 
 ---
 
@@ -440,18 +493,22 @@ The proposal's touchpoints changed during P1 (OQ15: flat spans, no trimmed tree)
 | `lmd/package/edit/source.ls`, `source_buffer.ls`, `source_highlight.ls`, `source_units.ls` | the surface (window math lives in `source.ls`; no separate `source_view.ls`), the buffer, the walker and cache, the column units |
 | `test/lambda/edit/source_*.ls` + `.txt`, `test/test_input_sourcepos_gtest.cpp`, `test/ui/edit/edit_src_*.json` | unit, GTest and UI rings (§11) |
 
-## Appendix B — Relation to the CodePad ledger (CED1–CED10)
+## Appendix B — The CodePad ledger (CED1–CED10)
 
-| CodePad ruling | Fate here |
-|---|---|
-| CED1 (JS plain-DOM editor; no CM6) | **Superseded by CED11** (Lambda surface). "No CM6, no native editor" stands. |
-| CED2 (script-owned buffer; DOM is a render target) | Kept; refined by CED12 (chunked persistent list, immutable values). |
-| CED3 (virtualized viewport, mandatory) | Kept; refined by CED13 (editor-owned scrolling, no spacer). The 500-wrap-cap premise is stale (§2.3) but the conclusion holds. |
-| CED4 (model selection is truth; native single range as projection) | Kept unchanged (CED19v2). |
-| CED5 (stream tokenizers, no regex) | **Superseded by CED15** (parser-driven). "No regex, no Tree-sitter vendoring" stands. |
-| CED6–CED8 (preview, parser source spans, no two-way editing) | Kept as the later plan; CED16v4–CED18v2 deliver the span mechanism CED7 asked for, at finer grain. |
-| CED9 (`lambda.exe edit` as a separate bundled app) | **Superseded by CED20** (a surface of the existing `lambda edit`). |
-| CED10 (portable TS, Lambda twin later) | **Superseded by CED11**; no twin. |
+These rulings come from the CodePad proposal (2026-08-24), folded into this document on 2026-10-13 when its file was deleted. This appendix is now their home. Rulings in force keep their text; superseded ones are struck through, per `doc/Doc_Convention.md` §4.
+
+| ID | Ruling (2026-08-24) | Rationale | Fate |
+|----|---------------------|-----------|------|
+| **CED1** | ~~CodePad is a script-driven plain-DOM editor on the Stage 4B seam: a third member of the editor family beside the rich-text JS editor and its Lambda twin.~~ | A native C++ editor would reverse Stage 4B's retirement of native editing behavior. CodeMirror 6 as the product was rejected: its virtualization, decoration and highlighting surface was untested under Radiant, it is 610 KB of third-party JS run interpreter-only, and it cannot be twinned to Lambda. It stays a compat probe and behavioral oracle. | **Superseded by CED11** (Lambda surface). "No CM6 as the product, no native editor" stands. |
+| **CED2** | Script-owned line buffer is the source of truth; the DOM is a render target. Edits are `{from: {line, col}, to: {line, col}, insert: [lines]}` deltas; undo is inverse deltas with time and word grouping plus selection snapshots; the document version is monotonic. | The rich editor's model-first discipline. A DOM-as-truth contenteditable model breaks under virtualization. | In force; refined by CED12 (a chunked persistent list of immutable values). |
+| **CED3** | Virtualized viewport, mandatory: one scroll container, a height spacer sized `lineCount × lineHeight`, a rendered window of one `<div>` per visible line plus overscan, the gutter as a parallel virtualized column. Fixed line height, monospace, no wrap in v1. | Forced then by the 500-wrap cap in text layout, the 50,000 layout-node cap and whole-text-node relayout; it also makes keystroke cost independent of file size. | In force; refined by CED13 (editor-owned scrolling, no spacer). The 500-wrap cap is gone (§2.3); the conclusion holds. |
+| **CED4** | Model selection is truth; the native single DOM range is its projection, clamped to the rendered window. Native caret painting and IME anchoring are kept. Multi-cursor and an own-drawn selection layer are deferred. | `DOM_SELECTION_MAX_RANGES == 1` (RAD_18) rules out native multi-cursor; native caret and IME geometry come free. CodeMirror 6 uses the same clamped projection. | In force, unchanged (CED19v2). |
+| **CED5** | ~~Highlighting = per-language line-state stream tokenizers in script: `mode(lineText, startState) → {tokens, endState}`; hand-scanned, no regex; tokenize only the viewport and dirty lines, chaining cached line end states. Tree-sitter is not a normal-host path; no new grammar vendoring without a separate decision.~~ | Regex tokenizers appeared broken under LambdaJS (no longer true, §2.4); vendoring seven or more multi-MB grammars contradicts the vendor policy; stream modes are 100–300 LOC each and error-tolerant. | **Superseded by CED15** (now CED15v2, parser-driven). "No regex, no Tree-sitter vendoring" stands. |
+| **CED6** | Preview = the existing batch C++ parsers through a new script-callable convert bridge (`input_from_source_n` + `format_data`); v1 renders via `preview.innerHTML` on a debounce of about 200 ms. Full-document re-parse is accepted for v1; incremental block re-parse is a later optimization, not a prerequisite. | Reuses the tested input and format pipeline instead of duplicating renderers in script. | In force as the later plan (§15.1). The convert bridge is moot under CED11. |
+| **CED7** | Position sync via opt-in source spans attached by the parsers, as `source-start`/`source-end` attributes following the `graph_set_source_span` precedent, emitted behind a parse option by `MarkupParser`'s `SourceTracker` and the HTML5 tokenizer; they reach the preview DOM as `data-source-*` through the normal attribute path. The dormant `__source_line` chain is subsumed. | The one capability that was missing. Attributes ride the Mark → DOM pipeline unchanged; opt-in keeps data-processing output byte-identical. The tree-path `source_pos_bridge` is the wrong coordinate space. | In force as the later plan (§15.2). CED16v4–CED18v2 built flat highlight spans, not tree attributes; `sourcepos: true` covers top-level blocks only. |
+| **CED8** | Two-way editing of the preview is out of scope. The composition when wanted: the preview hosts the rich editor; its document serializes through the formatter; a span-preserving diff patches the source buffer. | Round-trip lossiness and the diff design are a separate project; sync does not need them. | In force (§15.3). |
+| **CED9** | ~~Product surface is `lambda.exe edit <file>`: it loads a bundled single-file classic-IIFE editor app, injects the file content and exposes a gated save binding. Language from the extension; formats without a rendered form get no preview pane. This also supersedes `load_text_doc`'s truncating viewer.~~ | Matched the shell's single-window model and the bundle pipeline of the time. | **Superseded by CED20** (a surface of the existing `lambda edit`). |
+| **CED10** | ~~CodePad is written in the portable TS subset of the rich editor, so a Lambda `.ls` twin can be produced later by the oracle-bridge method; the twin is an M4 deliverable, not v1.~~ | Kept the co-equal-runtimes goal without paying for two implementations up front. | **Superseded by CED11**; no twin. |
 
 ## Appendix C — Superseded rulings
 

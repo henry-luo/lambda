@@ -1,0 +1,3 @@
+["Inline ", 'em', " and ", 'strong', " then ", 'code', "."]
+["Inline ", 'math', " and ", 'math', "."]
+[["Inline ", 'em', " and ", 'strong', " then ", 'code', "."], ["Inline ", 'math', " and ", 'math', "."]]

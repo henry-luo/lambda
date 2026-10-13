@@ -441,7 +441,9 @@ extern "C" Item mvp_lmd_array_resize(Item owner, int64_t length) {
     return held.get();
 }
 
-static Item flatten_into(Item output, Item source, double depth, int nesting, int64_t* destination, int64_t length = -1) {
+template<bool Mapping = false>
+static Item flatten_into(Item output, Item source, double depth, int nesting, int64_t* destination,
+        int64_t length = -1, Item* mapping = nullptr) {
     // nested arrays remain roots across destination growth; holes have no flattened element.
     if (nesting > 512) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
     RootFrame roots(3);
@@ -458,6 +460,12 @@ static Item flatten_into(Item output, Item source, double depth, int nesting, in
         if (item_is_error(value)) return value;
         if (value.item == ITEM_JS_DELETED_SENTINEL) continue;
         element.set(lambda_item_adopt_scalar_home(value, &home));
+        if constexpr (Mapping) {
+            Item args[] = {element.get(), Item{.item = i2it(i)}, input.get()};
+            Item mapped = mvp_lmd_class_invoke(mapping[0], mapping[1], args, 3, Item{.item = ITEM_JS_UNDEFINED});
+            if (item_is_error(mapped)) return mapped;
+            element.set(lambda_item_adopt_scalar_home(mapped, &home));
+        }
         Item nested = depth > 0 ? mvp_lmd_array_is_array(element.get()) : Item{.item = ITEM_FALSE};
         if (item_is_error(nested)) return nested;
         Item result;
@@ -471,7 +479,7 @@ static Item flatten_into(Item output, Item source, double depth, int nesting, in
     }
     return target.get();
 }
-extern "C" Item mvp_lmd_array_flatten(Item source, double depth, int64_t length) {
+extern "C" Item mvp_lmd_array_flatten(Item source, double depth, int64_t length, Item* mapping) {
     RootFrame roots(1);
     if (!roots.valid()) return ItemError;
     Rooted<Item> input(roots, source);
@@ -483,6 +491,7 @@ extern "C" Item mvp_lmd_array_flatten(Item source, double depth, int64_t length)
     Item output = mvp_lmd_array_species_create(input.get(), 0);
     if (item_is_error(output)) return output;
     int64_t destination = 0;
+    if (mapping) return flatten_into<true>(output, input.get(), depth, 0, &destination, length, mapping);
     return flatten_into(output, input.get(), isnan(depth) ? 0 : fmax(0, trunc(depth)), 0, &destination, length);
 }
 

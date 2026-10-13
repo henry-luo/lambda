@@ -46,7 +46,7 @@ static uint64_t key_hash(Item key) {
     }
     return hashmap_sip(&key.item, sizeof(key.item), 2, 0);
 }
-bool mvp_lmd_same_value_zero(Item a, Item b) {
+extern "C" int64_t mvp_lmd_same_value_zero(Item a, Item b) {
     if (a.item == b.item) return true;
     // distinct packed integers need no double conversion for SameValueZero.
     if (get_type_id(a) == LMD_TYPE_INT && get_type_id(b) == LMD_TYPE_INT) return false;
@@ -165,6 +165,9 @@ const MvpLmdBuiltinMethod mvp_lmd_builtin_methods[] = {
         {"every", LMD_TYPE_ARRAY, LMD_METHOD_EVERY}, {"find", LMD_TYPE_ARRAY, LMD_METHOD_FIND},
         {"findIndex", LMD_TYPE_ARRAY, LMD_METHOD_FIND_INDEX}, {"reduceRight", LMD_TYPE_ARRAY, LMD_METHOD_REDUCE_RIGHT},
         {"lastIndexOf", LMD_TYPE_ARRAY, LMD_METHOD_LAST_INDEX_OF},
+        {"flatMap", LMD_TYPE_ARRAY, LMD_METHOD_FLAT_MAP},
+        {"findLast", LMD_TYPE_ARRAY, LMD_METHOD_FIND_LAST},
+        {"findLastIndex", LMD_TYPE_ARRAY, LMD_METHOD_FIND_LAST_INDEX},
         {"charAt", LMD_TYPE_STRING, LMD_METHOD_CHAR_AT}, {"charCodeAt", LMD_TYPE_STRING, LMD_METHOD_CODE_AT},
         {"repeat", LMD_TYPE_STRING, LMD_METHOD_REPEAT},
         {"substring", LMD_TYPE_STRING, LMD_METHOD_SUBSTRING, 2}, {"slice", LMD_TYPE_STRING, LMD_METHOD_STRING_SLICE, 2},

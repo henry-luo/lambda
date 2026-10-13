@@ -49,6 +49,10 @@ extern "C" Item js_interp_module_async_body(Activation* self, Item unused);
 extern "C" Item js_mir_module_async_body(Activation* self, Item unused);
 
 static thread_local JsExecutionInterruptCheck js_execution_interrupt_check = NULL;
+const char* const js_array_unscopable_names[] = {
+    "at", "copyWithin", "entries", "fill", "find", "findIndex", "findLast", "findLastIndex",
+    "flat", "flatMap", "includes", "keys", "toReversed", "toSorted", "toSpliced", "values", NULL
+};
 
 extern "C" void js_set_execution_interrupt_check(JsExecutionInterruptCheck check) {
     js_execution_interrupt_check = check;
@@ -5864,13 +5868,9 @@ extern "C" Item js_get_key_core(Item object, Item key,
                             RootFrame unscopables_roots(1);
                             Rooted<Item> unscopal_root(unscopables_roots, js_new_object());
                             js_set_prototype(unscopal_root.get(), ItemNull);
-                            static const char* unscopal_keys[] = {
-                                "at", "copyWithin", "entries", "fill", "find", "findIndex",
-                                "findLast", "findLastIndex", "flat", "flatMap", "includes",
-                                "keys", "toReversed", "toSorted", "toSpliced", "values", NULL
-                            };
-                            for (int ui = 0; unscopal_keys[ui]; ui++) {
-                                Item uk = (Item){.item = s2it(heap_create_name(unscopal_keys[ui], strlen(unscopal_keys[ui])))};
+                            for (int ui = 0; js_array_unscopable_names[ui]; ui++) {
+                                const char* name = js_array_unscopable_names[ui];
+                                Item uk = (Item){.item = s2it(heap_create_name(name, strlen(name)))};
                                 js_set_key_default(unscopal_root.get(), uk, (Item){.item = b2it(true)});
                             }
                             js_define_data_prop_key(fn->prototype, js_well_known_symbol_key(11),

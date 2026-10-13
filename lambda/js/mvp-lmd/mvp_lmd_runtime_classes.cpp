@@ -536,6 +536,9 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
             }
             cls = (MvpLmdClass*)cls->nominal.base->extension_data;
             held.set(mvp_lmd_class_values(cls)[0]); fn = (MvpLmdCallable*)held.get().function;
+            // builtin bases own their allocation and new.target protocol, with no source constructor body.
+            if (fn->native_constructor)
+                return mvp_lmd_class_invoke(held.get(), self.get(), arguments, argc, target.get());
         }
         MvpLmdClass* actual = mvp_lmd_class_record(new_target);
         if (!actual || get_type_id(new_target) != LMD_TYPE_FUNC) {
