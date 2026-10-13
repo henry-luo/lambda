@@ -70,7 +70,7 @@ pub let css = base.css ++ "
 .blade-root .blade-rpg-art{display:block;flex-shrink:0;pointer-events:none}
 .blade-root .blade-empty-art{display:inline-block;vertical-align:middle;color:var(--blade-gold);pointer-events:none}
 .blade-root .blade-item-slot,.blade-root .blade-ability{position:relative;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;width:var(--blade-slot-size);height:var(--blade-slot-size);padding:5px;font:inherit;cursor:pointer;color:var(--blade-gold-light);border:3px solid var(--blade-iron);border-radius:8px;background:radial-gradient(ellipse at 40% 30%,#5c4b39,#151516 85%);box-shadow:inset 0 0 0 1px #c6c7ba,inset 0 0 10px #000,0 3px 5px #00000099;outline:none}
-.blade-root .blade-item-slot>.blade-rpg-art,.blade-root .blade-ability>.blade-rpg-art{width:100%;height:100%}
+.blade-root .blade-item-slot>.blade-rpg-art,.blade-root .blade-ability-face>.blade-rpg-art{width:100%;height:100%}
 .blade-root .blade-rarity-uncommon{border-color:var(--blade-stamina)}.blade-root .blade-rarity-rare{border-color:var(--blade-mana);background:radial-gradient(ellipse at 40% 30%,#31586e,#151516 85%)}
 .blade-root .blade-rarity-epic{border-color:var(--blade-epic);background:radial-gradient(ellipse at 40% 30%,#573567,#151516 85%)}
 .blade-root .blade-rarity-legendary{border-color:var(--blade-gold);background:radial-gradient(ellipse at 40% 30%,#78532d,#1e1410 85%)}
@@ -81,8 +81,9 @@ pub let css = base.css ++ "
 .blade-root .blade-empty-slot{font-size:40px;color:#a1927755;pointer-events:none}
 .blade-root .blade-slot-quantity{position:absolute;right:4px;bottom:1px;font-size:14px;color:#fff4cc;text-shadow:0 1px 2px #000;pointer-events:none}
 .blade-root .blade-ability{border-radius:50%;border-color:var(--blade-gold);background:radial-gradient(ellipse at 40% 30%,#65563b,#171919 85%);overflow:visible}
+.blade-root .blade-ability-face{position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:100%;border-radius:50%;overflow:hidden;pointer-events:none}
 .blade-root .blade-hotkey{position:absolute;right:-5px;bottom:-3px;min-width:24px;height:24px;padding:1px 5px;font:13px/20px Georgia,serif;text-align:center;background:#2d2118;border:1px solid var(--blade-gold);border-radius:50%;box-shadow:0 2px 3px #000;color:var(--blade-gold-light);pointer-events:none;z-index:2}
-.blade-root .blade-cooldown{position:absolute;left:0;right:0;bottom:0;background:#06090acc;border-radius:0 0 50% 50%;pointer-events:none}
+.blade-root .blade-cooldown{position:absolute;inset:0;background:#06090a66;pointer-events:none}
 .blade-root .blade-meter{width:100%;min-width:180px}.blade-root .blade-meter-heading{text-align:center;font-size:15px;letter-spacing:0.08em;color:var(--dtna-text-secondary)}
 .blade-root .blade-meter-shell{position:relative;height:76px}.blade-root .blade-meter-frame{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;color:var(--blade-gold)}
 .blade-root .blade-meter-rail{position:absolute;left:10.5%;right:10.5%;top:28px;height:20px;background:#100f13;border-radius:3px;box-shadow:inset 0 2px 7px #000,0 1px 0 #ffe0a866;overflow:hidden}

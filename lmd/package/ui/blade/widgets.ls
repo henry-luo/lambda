@@ -79,18 +79,23 @@ view blade_rpg_icon: <blade.rpg_icon> {
 fn button(node) {
     let p = c.props(node)
     let ability = c.kind(node) == 'ability'
-    let disabled = p.disabled == true or (ability and c.option(p,"cooldown",0) > 0)
+    let cooling = ability and c.option(p,"cooldown",0) > 0
+    let disabled = p.disabled == true or cooling
     let label = c.option(p,"label",if (p.icon != null) replace(c.text(p.icon),"-"," ") else "Empty equipment slot")
     let size = if (c.has(p,"size")) "width:" ++ c.px(p.size) ++ ";height:" ++ c.px(p.size) ++ ";" else ""
-    let rarity = c.text(p.rarity or "common");
+    let rarity = c.text(p.rarity or "common")
+    let artwork = if (p.icon == null) <span class:"blade-empty-slot",["aria-hidden"]:"true","◇"> else art.icon(p.icon,64);
     <button *:c.styled(node,if (ability) "" else "blade-rarity-" ++ rarity,"blade"),type:"button",
         style:size ++ c.text(p.style),*:c.boolean_attr("disabled",disabled),
         ["aria-label"]:label,["aria-pressed"]:if (ability) null else c.aria(p.selected),
         ["aria-disabled"]:c.aria(disabled),["data-rarity"]:if (ability) null else rarity,
         ["data-cooldown"]:if (ability) string(c.option(p,"cooldown",0)) else null,*[
-        if (p.icon == null) <span class:"blade-empty-slot",["aria-hidden"]:"true","◇"> else art.icon(p.icon,64),
+        // clip the full cooldown shade to the icon face; keep the hotkey outside.
+        if (ability) <span class:"blade-ability-face",["aria-hidden"]:"true",*[
+            artwork,
+            if (cooling) <span class:"blade-cooldown"> else null]>
+        else artwork,
         if (not ability and p.quantity != null) <span class:"blade-slot-quantity",string(p.quantity)> else null,
-        if (ability and c.option(p,"cooldown",0) > 0) <span class:"blade-cooldown",["aria-hidden"]:"true",style:"height:" ++ string(p.cooldown) ++ "%;"> else null,
         if (ability and p.hotkey != null) <kbd class:"blade-hotkey",p.hotkey> else null]>
 }
 // native buttons supply Enter/Space activation; descriptors own effects only in handlers (S12.1.3).

@@ -47,6 +47,10 @@ state; slots emit `activate` requests without changing that selection.
 Abilities use the same action channel, with native disabled semantics for
 positive cooldown percentages. Hotkey labels and cooldown values are supplied
 by the application; no game timer or global key dispatcher is installed.
+Any positive cooldown shades the full circular clipped face, while the hotkey
+is its sibling outside that clip. A lighter shade keeps the disabled spell icon
+readable alongside the disabled skull; activation remains guarded by the
+existing native disabled state (**D7.2.4**, **S12.1.3**).
 
 ## Validation
 
