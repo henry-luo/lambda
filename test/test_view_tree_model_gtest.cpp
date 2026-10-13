@@ -9926,6 +9926,91 @@ TEST_F(SecondaryViewTest, FoWholeCompoundQueriesExpandComputedComponentsAndHonor
     EXPECT_EQ(initial->flow_traits->next.scope[2].kind, RADIANT_KEEP_AUTO); EXPECT_FALSE(radiant_decoration_retain(initial, true, false));
 }
 
+TEST_F(SecondaryViewTest, FoWholeBoxShorthandQueriesSelectEachComputedOwnerAndHonorRefinement) {
+    DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt'>"
+        "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='450pt' page-height='900pt'><f:region-body/>"
+        "</f:simple-page-master></f:layout-master-set><f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
+        "<f:block font-size='15pt' color='purple' border='.15em solid' border-width='2.25pt 3pt 3.75pt 4.5pt' padding='.1em .2em .3em .4em'>"
+        "<f:block id='parent' font-size='7.5pt' color='blue' border='from-parent(border)' padding='from-parent()'>P</f:block>"
+        "<f:block border-left-width='9pt' border-left-style='solid' padding-start.length='7.5pt'><f:block id='nearest' font-size='7.5pt' color='blue' "
+        "border='from-nearest-specified-value()' padding='from-nearest-specified-value(padding)'>N</f:block></f:block>"
+        "<f:block id='override' border-right-width='3.75pt' border-after-width.length='1.5pt' border-left='3pt solid blue' "
+        "border-width='.75pt' border='from-parent()' padding-left='6.75pt' padding-start.length='6pt' padding-before='3pt' padding='from-parent()'>O</f:block>"
+        "<f:block id='families' border-width='from-parent()' border-style='from-parent()' border-color='from-parent()' "
+        "border-top='from-parent()' border-right='from-parent()' border-bottom='from-parent()' border-left='from-parent()'>F</f:block>"
+        "</f:block><f:block id='initial' border='from-nearest-specified-value()' padding='from-nearest-specified-value()'>I</f:block>"
+        "</f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
+    RadiantFoOptions fo_options = radiant_fo_options_default(); RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &fo_options);
+    ASSERT_NE(translated, nullptr); ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+    DomElement* generated = install_fo_translation(translated); ASSERT_NE(generated, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    for (const char* id : {"parent", "nearest", "override", "families", "initial"}) {
+        SCOPED_TRACE(id); const ViewCssStyle* style = view_css_resolve(tree, dom_find_element_by_id(generated, id)); ASSERT_NE(style, nullptr);
+        const float widths[] = {3, 4, 5, 6}, padding[] = {2, 4, 6, 8};
+        const float overrides[] = {1, 5, 2, 4}, padding_overrides[] = {4, 4, 6, 9};
+        for (size_t side = 0; side < 4; side++) {
+            const CssValue* width = view_css_computed_property(tree, style, css_property_get_by_code(radiant_box_side_property(CSS_PROPERTY_BORDER_WIDTH, static_cast<CssBoxSide>(side)))->name);
+            ASSERT_NE(width, nullptr);
+            EXPECT_DOUBLE_EQ(width->data.length.value, !strcmp(id, "initial") ? 0 : !strcmp(id, "override") ? overrides[side] :
+                !strcmp(id, "nearest") && side == 3 ? 12 : widths[side]);
+            EXPECT_EQ(style->border_style[side], !strcmp(id, "initial") ? CSS_VALUE_NONE : CSS_VALUE_SOLID);
+            EXPECT_EQ(style->border_color[side].r, !strcmp(id, "initial") || (!strcmp(id, "override") && side == 3) ? 0 : 128);
+            EXPECT_EQ(style->border_color[side].b, !strcmp(id, "initial") ? 0 : !strcmp(id, "override") && side == 3 ? 255 : 128);
+            const CssValue* value = view_css_computed_property(tree, style, css_property_get_by_code(radiant_box_side_property(CSS_PROPERTY_PADDING, static_cast<CssBoxSide>(side)))->name);
+            ASSERT_NE(value, nullptr);
+            EXPECT_DOUBLE_EQ(value->data.length.value, !strcmp(id, "initial") || !strcmp(id, "families") ? 0 :
+                !strcmp(id, "override") ? padding_overrides[side] : !strcmp(id, "nearest") && side == 3 ? 10 : padding[side]);
+        }
+        EXPECT_FALSE(radiant_decoration_retain(style, true, false)); EXPECT_FALSE(radiant_decoration_retain(style, false, true));
+    }
+}
+
+TEST_F(SecondaryViewTest, FoWholeBoxShorthandColumnQueriesRespectSpanOwnersAndInitialValues) {
+    DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt' border-collapse='separate'>"
+        "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='300pt' page-height='225pt'><f:region-body/>"
+        "</f:simple-page-master></f:layout-master-set><f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
+        "<f:table table-layout='fixed' width='225pt'><f:table-column column-number='1' column-width='75pt' font-size='15pt' color='purple' "
+        "padding='.1em .2em .3em .4em' border='.15em solid' padding-before.length='.1em' padding-before.conditionality='retain'/>"
+        "<f:table-column column-number='1' number-columns-spanned='2' color='green' font-size='12pt' padding='.25em' border='.125em solid'/>"
+        "<f:table-body><f:table-row><f:table-cell number-columns-spanned='2'><f:block id='exact' color='red' padding='from-table-column()' border='from-table-column()'>E</f:block>"
+        "</f:table-cell><f:table-cell><f:block id='missing' padding='from-table-column()' border='from-table-column()'>M</f:block></f:table-cell></f:table-row>"
+        "<f:table-row><f:table-cell><f:block id='single' color='blue' padding='from-table-column(padding)' border='from-table-column(border)'>S</f:block></f:table-cell>"
+        "</f:table-row></f:table-body></f:table></f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
+    RadiantFoOptions fo_options = radiant_fo_options_default(); RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &fo_options);
+    ASSERT_NE(translated, nullptr); ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
+    DomElement* generated = install_fo_translation(translated); ASSERT_NE(generated, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    for (const char* id : {"exact", "single", "missing"}) {
+        SCOPED_TRACE(id); const ViewCssStyle* style = view_css_resolve(tree, dom_find_element_by_id(generated, id)); ASSERT_NE(style, nullptr);
+        for (size_t side = 0; side < 4; side++) {
+            ASSERT_NE(style->padding[side], nullptr); ASSERT_NE(style->border_width[side], nullptr);
+            EXPECT_DOUBLE_EQ(style->padding[side]->data.length.value, !strcmp(id, "exact") ? 4 : !strcmp(id, "single") ? 2 * (side + 1) : 0);
+            EXPECT_DOUBLE_EQ(style->border_width[side]->data.length.value, !strcmp(id, "exact") ? 2 : !strcmp(id, "single") ? 3 : 0);
+            EXPECT_EQ(style->border_color[side].r, !strcmp(id, "single") ? 128 : 0);
+            EXPECT_EQ(style->border_color[side].g, !strcmp(id, "exact") ? 128 : 0);
+        }
+        // physical shorthand expansion copies lengths, not the relative compound's conditionality.
+        EXPECT_FALSE(radiant_decoration_retain(style, true, false));
+    }
+}
+
+TEST_F(SecondaryViewTest, FoWholeBoxShorthandQueriesRejectCrossPropertiesArithmeticAndWrongInheritanceDomains) {
+    DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format'>"
+        "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='150pt' page-height='120pt'><f:region-body/>"
+        "</f:simple-page-master></f:layout-master-set><f:page-sequence master-reference='sheet'><f:flow flow-name='xsl-region-body'>"
+        "<f:block id='invalid'/></f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
+    DomElement* original = dom_find_element_by_id(fo, "invalid"); ASSERT_NE(original, nullptr);
+    RadiantFoOptions options = radiant_fo_options_default();
+    for (const char* value : {"from-parent(border-width)", "from-parent(padding) + 1pt", "inherited-property-value()", "from-parent(padding,padding)"}) {
+        SCOPED_TRACE(value); ASSERT_TRUE(original->set_attribute("padding", value));
+        RadiantFoTranslation* translated = radiant_fo_translate(&doc, fo, &options); ASSERT_NE(translated, nullptr);
+        EXPECT_EQ(translated->diagnostic.status, TYPESET_INVALID); EXPECT_EQ(translated->root, nullptr);
+        EXPECT_EQ(translated->diagnostic.source.address, original); EXPECT_STREQ(translated->diagnostic.property, "padding");
+    }
+}
+
 TEST_F(SecondaryViewTest, FoConditionalityQueriesFindCompoundAssignmentsAndKeepOriginalDiagnostics) {
     DomElement* fo = formatting_root("<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt'>"
         "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='225pt' page-height='225pt'><f:region-body/>"

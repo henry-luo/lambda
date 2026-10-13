@@ -299,12 +299,35 @@ static Item fo_transparent_row(FoTranslationContext* context, DomElement* source
     return row.final();
 }
 
+static bool fo_decoration_shorthand(const CssProperty* property) {
+    if (!property || !property->shorthand || !property->longhand_count) return false;
+    const CssPropertyCode families[] = {CSS_PROPERTY_BORDER, CSS_PROPERTY_PADDING};
+    for (CssPropertyCode family : families) {
+        bool included = true;
+        for (size_t i = 0; i < (size_t)property->longhand_count; i++)
+            included &= css_property_shorthand_contains(family, property->longhand_props[i]);
+        if (included) return true;
+    }
+    return false;
+}
+
 static bool fo_style_property(FoTranslationContext* context, DomElement* source, StrBuf* style,
         const char* name, const char* value, const char* source_name = nullptr, bool emit = true,
         bool length_component = false, bool computed_expression = false, const char* reference_component = nullptr) {
     if (!value) return true;
     const char* authored = value;
+    const CssProperty* property = css_property_get_by_name(name);
     FoPropertyQuery query;
+    // FO text-align is scalar even though the CSS catalogue models it as a shorthand.
+    if (fo_decoration_shorthand(property) && fo_compound_query(context, source, name, value, &query)) {
+        // XSL whole shorthand queries select each longhand independently, including nearest assignments.
+        for (size_t i = 0; i < (size_t)property->longhand_count; i++) {
+            const CssProperty* member = css_property_get_by_code(property->longhand_props[i]);
+            const char* binding = fo_reference_binding(context, source, name, member->name, query.reference);
+            if (!binding || !fo_style_property(context, source, style, member->name, binding, name, emit, false, true)) return false;
+        }
+        return true;
+    }
     if (reference_component && fo_compound_query(context, source, source_name, value, &query))
         value = fo_reference_binding(context, source, source_name, reference_component, query.reference);
     else value = fo_parent_value(context, source, source_name ? source_name : name, value);
@@ -315,7 +338,6 @@ static bool fo_style_property(FoTranslationContext* context, DomElement* source,
         if (!value) value = "collapse";
     }
     CssDeclaration* declaration = css_parse_property_value_declaration(name, strlen(name), value, strlen(value), context->document->document_pool);
-    const CssProperty* property = css_property_get_by_name(name);
     bool expression = property && (property->type == PROP_TYPE_LENGTH || property->type == PROP_TYPE_NUMBER ||
         property->type == PROP_TYPE_COLOR || property->code == CSS_PROPERTY_FONT_WEIGHT);
     bool shorthand = property && css_property_is_shorthand(property->code);

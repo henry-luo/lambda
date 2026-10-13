@@ -1547,6 +1547,7 @@ TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages)
         {"table_column_queries", 3, "/MediaBox [0 0 225.00 120.00]"},
         {"span_column_queries", 3, "/MediaBox [0 0 225.00 120.00]"},
         {"compound_queries", 3, "/MediaBox [0 0 225.00 120.00]"},
+        {"shorthand_queries", 3, "/MediaBox [0 0 225.00 180.00]"},
         {"table_furniture", 3, "/MediaBox [0 0 225.00 120.00]"},
         {"expressions", 3, "/MediaBox [0 0 225.00 120.00]"},
         {"parent_values", 3, "/MediaBox [0 0 150.00 120.00]"},
