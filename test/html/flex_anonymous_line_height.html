@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><style>
+body { margin: 0; font: 16px/1.5 Arial; }
+.row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.badge { display: inline-flex; align-items: center; padding: 2px 10px;
+    border: 2px solid black; font-size: 12px; font-weight: 800; }
+.large { font-size: 20px; }
+.length { line-height: 30px; }
+.normal { line-height: normal; }
+.fixed { height: 40px; }
+.column { flex-direction: column; }
+.with-icon { font-size: 14px; gap: 6px; }
+.with-icon svg { width: 16px; height: 16px; }
+</style></head><body id="result">
+<div class="row"><span class="badge" id="unitless-direct">NEW</span><span class="badge" id="unitless-wrapped"><span>NEW</span></span></div>
+<div class="row"><span class="badge large" id="large-direct">NEW</span><span class="badge large" id="large-wrapped"><span>NEW</span></span></div>
+<div class="row"><span class="badge length" id="length-direct">NEW</span><span class="badge length" id="length-wrapped"><span>NEW</span></span></div>
+<div class="row"><span class="badge normal" id="normal-direct">NEW</span><span class="badge normal" id="normal-wrapped"><span>NEW</span></span></div>
+<div class="row"><span class="badge fixed" id="fixed-direct">NEW</span><span class="badge fixed" id="fixed-wrapped"><span>NEW</span></span></div>
+<div class="row"><span class="badge column" id="column-direct">NEW</span><span class="badge column" id="column-wrapped"><span>NEW</span></span></div>
+<div class="row"><span class="badge with-icon" id="icon-direct"><svg viewBox="0 0 16 16"><rect width="16" height="16"/></svg>NEW</span><span class="badge with-icon" id="icon-wrapped"><svg viewBox="0 0 16 16"><rect width="16" height="16"/></svg><span>NEW</span></span></div>
+</body></html>

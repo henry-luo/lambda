@@ -1319,12 +1319,15 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         if (flex_container->font) {
             setup_font(lycon->ui_context, &lycon->font, flex_container->font);
         }
+        // direct text uses the container's inherited line box, including its
+        // strut; stale parent metrics can otherwise enlarge an auto-sized flex.
+        setup_line_height(lycon, flex_container);
+        layout_setup_block_font_metrics(lycon);
 
         bool handled_direct_text_br_run = false;
         bool only_direct_text_and_br = flex_container_has_only_direct_text_and_br(flex_container);
         if (only_direct_text_and_br) {
             // CSS Flexbox section 4: direct text runs in a flex container are wrapped in
-            setup_line_height(lycon, flex_container);
             if (flex_container->blk) {
                 lycon->block.text_align = flex_container->block()->text_align;
             }
@@ -1391,13 +1394,13 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                         layout_inherited_text_transform(flex_container), CSS_VALUE_NONE,
                         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL);
                     float text_width = widths.max_content;
-                    float text_height = lycon->font.style ? lycon->font.style->font_size : 16.0f;
+                    float text_height = lycon->block.line_height;
 
                     bool is_vertical_wm = flex_prop &&
                         (flex_prop->writing_mode == WM_VERTICAL_LR || flex_prop->writing_mode == WM_VERTICAL_RL);
                     if (is_vertical_wm) {
                         float tmp = text_width;
-                        text_width = text_height;  // font_size
+                        text_width = text_height; // line box block extent
                         text_height = tmp;         // text max_content becomes height
                     }
                     // CSS Flexbox: anonymous text items shrink (flex-shrink: 1 default).

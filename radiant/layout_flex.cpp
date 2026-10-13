@@ -193,7 +193,10 @@ static bool measure_anonymous_flex_text_run(LayoutContext* lycon,
     if (!text_view) return false;
 
     LayoutFontScope font_scope(lycon);
+    BlockContextScope block_scope(lycon);
     if (item->font) setup_font(lycon->ui_context, &lycon->font, item->font);
+    setup_line_height(lycon, lam::view_as_block(item));
+    layout_setup_block_font_metrics(lycon);
     const char* text_data = (const char*)text->text_data();
     // CSS Flexbox intrinsic sizing uses the collapsed anonymous text run;
     // raw indentation whitespace must not freeze the item wider than its content.
@@ -220,10 +223,13 @@ static bool measure_anonymous_flex_text_run(LayoutContext* lycon,
             lycon, font_box_handle(&lycon->font), lycon->font.style);
     }
 
-    float text_height = text_view->height;
-    if (text_height <= 0.0f) {
-        text_height = lycon->font.style ? lycon->font.style->font_height : 0.0f;
-    }
+    // the anonymous block contains a line box (Flexbox §4), not just the glyph
+    // cell; inherited leading contributes to its size and exported baseline.
+    float text_height = lycon->block.line_height;
+    float ascender = lycon->block.init_ascender;
+    float descender = lycon->block.init_descender;
+    layout_apply_line_height_leading(text_height, &ascender, &descender);
+    item->fi->baseline_offset = ascender;
     float min_width = widths.min_content;
     float max_width = widths.max_content;
     float height = text_height;
@@ -328,16 +334,6 @@ static ViewElement* create_anonymous_flex_text_item(LayoutContext* lycon,
     item->fi->has_intrinsic_height = true;
     item->width = item->content_width = item_width_max;
     item->height = item->content_height = item_height;
-    FontHandle* baseline_font = text_view->font && text_view->font->font_handle
-        ? text_view->font->font_handle : font_box_handle(&lycon->font);
-    float baseline_offset = baseline_font
-        ? font_get_rendering_ascender(baseline_font) : 0.0f;
-    if (baseline_offset <= 0.0f && lycon->font.style) {
-        baseline_offset = lycon->font.style->ascender;
-    }
-    // Flexbox §8.5 needs this before anonymous text receives final geometry.
-    item->fi->baseline_offset = baseline_offset > 0.0f
-        ? baseline_offset : item_height * 0.8f;
     return item;
 }
 
@@ -437,6 +433,7 @@ static void layout_anonymous_flex_text(ViewElement* item, LayoutContext* lycon,
     lycon->block.text_align = CSS_VALUE_LEFT;
     if (item->font) setup_font(lycon->ui_context, &lycon->font, item->font);
     setup_line_height(lycon, lam::view_as_block(item));
+    layout_setup_block_font_metrics(lycon);
     line_init(lycon, item->x, item->x + item->width);
 
     for (FlexAnonymousTextRun* run = runs; run; run = run->next) {
@@ -523,7 +520,15 @@ void apply_anonymous_flex_text_geometry(FlexContainerLayout* flex_layout) {
                 (text_align == CSS_VALUE_CENTER || text_align == CSS_VALUE_RIGHT);
         }
         float dx = preserve_text_align ? 0.0f : item->x - first_text->x;
-        float dy = preserve_text_align ? 0.0f : item->y - first_text->y;
+        float text_top = item->y;
+        if (item->blk->writing_mode == WM_HORIZONTAL_TB && first_text->font &&
+            first_text->font->font_handle) {
+            // retain the line box's leading instead of snapping the glyph cell
+            // to the flex item's top edge.
+            text_top += item->fi->baseline_offset -
+                font_get_rendering_ascender(first_text->font->font_handle);
+        }
+        float dy = preserve_text_align ? 0.0f : text_top - first_text->y;
         for (FlexAnonymousTextRun* run = item->fi->anonymous_text_runs;
              run; run = run->next) {
             ViewText* text = run->text
