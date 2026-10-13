@@ -3,7 +3,7 @@
 **Status:** working document for discussion
 **Date:** 2026-07-03 (probed against master `lambda.exe`, MIR-Direct path, REPL + script mode)
 **Companions:**
-- [Lambda_Semantics_DSL_Proposal.md](Lambda_Semantics_DSL_Proposal.md) — the proposed native semantics sub-DSL; its §13 assesses base-language readiness against these findings.
+- [Lambda_Semantics_DSL_POC.md](Lambda_Semantics_DSL_POC.md) — the semantics POC and the native semantics sub-DSL it seeds (Part II, absorbed from the former `Lambda_Semantics_DSL_Proposal.md`); its §11 assesses base-language readiness against these findings.
 - [Lambda_Semantics.md](Lambda_Semantics.md) — the existing PLT Redex model of Lambda and its fixture-verification bridge; the A-findings below are candidates for that project's designer-ruling workflow (§4.7 there), and several corroborate disagreements the Redex bridge already surfaced (`list` vs `array` in `is`, `type(error_value)`, typed-array coercion).
 
 This document records a close review of Lambda's type system and semantics with two

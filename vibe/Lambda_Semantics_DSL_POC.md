@@ -1,55 +1,104 @@
 # Lambda Semantics POC — Executable Semantics in Today's Lambda
 
-**Status:** draft POC proposal
-**Parent:** [Lambda_Semantics_DSL_Proposal.md](Lambda_Semantics_DSL_Proposal.md) — same end goal, radically reduced means
-**Scope:** the **functional core of Lambda only** — no guest languages, no procedural (`pn`) subset, no new syntax, no new runtime machinery
+**Status:** POC milestones M0–M3 landed 2026-08-29 (126 checks under `test/lambda/sem/`, not yet in the baseline — §5). The fixtures regressed silently under the S2.5 list rulings and a JIT defect, and were repaired 2026-10-13 (F11, F12): 127 checks, all `true` on the interp, jit and auto tiers. M4 and the DSL of Part II not started. On 2026-10-13 this doc absorbed the former `Lambda_Semantics_DSL_Proposal.md` (draft, 2026-07-03) as Part II, and that file was deleted.
+**Scope:** Part I — the **functional core of Lambda only**: no procedural (`pn`) subset, no new syntax, no new runtime machinery. Part II — the native semantics DSL the POC seeds, for Lambda and LambdaJS.
+**End goal:** an executable, independent semantic model that *verifies* the Lambda test fixtures under `test/lambda/`, breaking the circularity of goldens captured from the very runtime they test (§1.1).
+**Spec linkage:** no `S#`/`D#` ruling covers meta-circular modeling, so the P-ledger (§1.5) holds working-doc decisions. By construction the model checks SI1 (boxing invisibility) and SI3v2 (inference evaluation-invariance); it relies on S4.1/SI7 (int arithmetic), SI4 (equality laws) and SI13 (no aliasing) in its host (§11.2).
 **Thesis:** a big-step definitional interpreter for Lambda's functional core can be written **in plain, already-shipping Lambda** — elements as terms, `match` on tags as rule dispatch, the `T^E` channel as stuckness — and verified differentially against the runtime with **zero host-side code**. Every construct this document relies on was executed on the current `lambda.exe` before being written down (§3, §4).
 
 ---
 
-## 1. Relation to the DSL proposal
+# Part I — The POC
 
-The parent proposal designs a K/Ott-class semantics sub-language: destructuring
+## 1. Motivation and approach
+
+### 1.1 The oracle problem
+
+The fixture pairs under `test/lambda/` (`*.ls` script + `*.txt` golden) are the
+backbone of `make test-lambda-baseline`. But the `.txt` goldens are **captured from the
+Lambda runtime's own output**. If the implementation has a semantic bug, the golden
+captures the bug, the test passes, and the bug becomes load-bearing. The suite detects
+*regressions*, not *incorrectness*. The per-test `// expect:` comments in the `.ls`
+files are hand-written and closer to a specification, but they are informal, unchecked
+prose.
+
+What is missing is an **independent oracle**: a definition of what Lambda programs
+*should* evaluate to, derived from stated rules rather than from the implementation.
+The stated rules now exist as prose in `doc/Lambda_Formal_Semantics.md`; the model is
+meant to be their executable form. LambdaJS has the same problem — its Node-compat
+baseline is measured against Node's observed behavior, with no account of *why* an
+output is right — which is why Part II keeps one rule language for both.
+
+### 1.2 Prior art
+
+- **K Framework** (Roșu et al.) — configurations as nested cells, semantics as rewrite
+  rules over configurations, `strict` annotations that auto-generate evaluation-order
+  rules. Proven at full scale: KJS passed the ECMAScript 5.1 conformance core
+  (PLDI 2015).
+- **Ott** (Sewell et al.) — grammar declarations with *binding specifications*,
+  inductive judgments as inference rules, generation of LaTeX and proof-assistant
+  definitions.
+- **PLT Redex** — lightweight executable semantics embedded in a host language, with
+  randomized testing against real implementations.
+- **In-house: the Lambda Redex model (removed).** A PLT Redex big-step model of
+  Lambda's functional core, procedural extension and object types (~8k lines of
+  Racket under `lambda/semantics/`), with an `--emit-sexpr` bridge from the production
+  parser, a `make test-redex-baseline` harness that reached 87/194 fixture agreement,
+  and a designer-ruling protocol for disagreements. Its disagreement log (`list` vs
+  `array` under `is`, `fill()` coercion into typed arrays, `type(error_value)`) was
+  exactly the "suspect golden / underspecified semantics" bucket of §13.1. It
+  established three things this doc builds on: the verification loop works
+  end-to-end; big-step is sufficient for the functional core (§1.4); and the
+  `--emit-sexpr` mapping is the precedent for AST ingestion (§6.3). Its doc was
+  renamed legacy in `04f740440d` and the model removed in `8a1ca96825`; both remain in
+  git history. With it went the only cross-host oracle (§13.3).
+
+The design is closest in spirit to Redex ("embedded, executable, test-focused"); Part II
+grafts on K's configuration/strictness machinery and Ott's binder specs.
+
+### 1.3 Drive the terrain before building the vehicle
+
+Part II designs a K/Ott-class semantics sub-language: destructuring
 patterns, `syntax`/`config`/`rule`/`judgment` declaration forms, strictness
-expansion, the k-cell discipline — three tiers of additions before the first
-Lambda model can be written (its §4–§6), and a C++ matcher/rewriter engine
+expansion, the k-cell discipline — three tiers of additions (§12.2–§12.4) before
+the first Lambda model can be written, and a C++ matcher/rewriter engine
 underneath.
 
-This POC inverts the order. Before building the vehicle, drive the terrain:
+The POC inverts the order. Before building the vehicle, drive the terrain:
 write the Lambda model **now**, in the language as it exists, and let the
-experience produce (a) an early version of the §7 fixture-verification payoff,
+experience produce (a) an early version of the §13 fixture-verification payoff,
 (b) a live inventory of exactly which missing features hurt and how much — data
-the Tier 1/2/3 designs currently lack, and (c) hard evidence for (or against)
-the parent's §13 claim that Lambda is ready to be its own meta-language.
+the Tier 1/2/3 designs otherwise lack, and (c) hard evidence for (or against)
+the §11 claim that Lambda is ready to be its own meta-language.
 
-The POC is not a rival design. It is Stage 4 of the parent's plan (the Lambda
-model, functional core) pulled forward to Stage 0, at the cost of verbosity that
-the DSL would later remove. Every hand-written `fn` arm in the POC model
-corresponds 1:1 to a future `rule`/`judgment` declaration, so the model is a
-migration **seed**, not throwaway code (§9).
+The POC is not a rival design. It is Stage 4 of the DSL plan (the Lambda
+model, functional core; §15.2) pulled forward to Stage 0, at the cost of
+verbosity that the DSL would later remove. Every hand-written `fn` arm in the
+POC model corresponds 1:1 to a future `rule`/`judgment` declaration, so the
+model is a migration **seed**, not throwaway code (§9).
 
-### 1.1 The one big simplification: big-step, environment-based
+### 1.4 The one big simplification: big-step, environment-based
 
-Two structural choices eliminate the parent's entire Tier 2 and Tier 3, and most
+Two structural choices eliminate the DSL's entire Tier 2 and Tier 3, and most
 of Tier 1, for this scope:
 
 - **Big-step instead of small-step.** Evaluation order is encoded by the
   meta-language's own recursion (`ev(t[0]) + ev(t[1])` *is* left-to-right
   strictness). No `strict` annotations, no heating/cooling, no k-cell, no
   configuration cells, no `config` form. This is exactly the shape of the
-  existing Redex model (parent §13.4), which reached 87/194 fixture agreement in
+  former Redex model (§1.2), which reached 87/194 fixture agreement in
   precisely this style — big-step is *proven sufficient* for the functional
   core.
 - **Environments instead of substitution.** Closures capture their defining
   environment as data; variables are looked up, never substituted. No
   capture-avoiding `subst`, no `alpha_eq`, no `binds` specs, no `fresh()` —
-  the parent's §4.3 and the binder half of §5.1 are simply not needed.
+  §12.2.3 and the binder half of §12.3.1 are simply not needed.
   Recursion needs no mutation or cycles either: a named function value re-binds
   *itself* into the environment at each application (§4.4 — verified with
   factorial).
 
 What big-step gives up — modeling divergence distinctly from stuckness, and the
-per-step traces the parent's §7.1 mismatch reports want — is an acceptable POC
+per-step traces the §13.1 mismatch reports want — is an acceptable POC
 trade: fixtures terminate, and mismatch localization falls back to per-check
 granularity (§6) — once divergence is handled. It initially was not: a wrong
 rule that made a modelled program *diverge* printed nothing at all, erasing
@@ -58,7 +107,7 @@ every other result in the file (finding **F5**, §7). M2 closed this with a
 stuckness and restores per-check localization. The model is therefore **total**:
 every term either yields a value or is stuck, and omega is just another check.
 
-### 1.2 Decision ledger
+### 1.5 Decision ledger
 
 For citability (per `doc/Doc_Convention.md` conventions; no `S#`/`D#` ruling
 covers meta-circular modeling, so these are working-doc decisions):
@@ -69,34 +118,34 @@ covers meta-circular modeling, so these are working-doc decisions):
 | P2 | Big-step, environment-based, closures-as-data. No small-step, no substitution, no fresh names. |
 | P3 | Terms are elements: tag = node kind, attributes = atomic metadata (names, literal values), children = sub-terms. Environments and closures are elements too (§4.2). |
 | P4 | Stuckness = raised error on the `T^` channel; rule dispatch = `match` on `name(t)`; where fall-through choice is needed, errors-are-falsy `or` chaining (verified §3). |
-| P5 | Model scalar arithmetic **uses Lambda's own numerics** — the parent's §11 open question 5 resolved pragmatically for the POC, with the A1 caveat recorded in §10. |
+| P5 | Model scalar arithmetic **uses Lambda's own numerics** — §16 Q5 resolved pragmatically for the POC, with the numeric-boundary caveat recorded in §10. |
 | P6 | Verification is **self-differential in-script**: each check compares `ev(term)` against the runtime evaluating the same expression natively, in the same fixture; goldens are arrays of `true` (§6.1). |
 | P7 | POC fixtures are ordinary `.ls`+`.txt` pairs under `test/lambda/sem/`, needing no new harness — but that directory is **deliberately not yet in the baseline's discovery list** (§5), so a model still being shaped cannot dictate what the runtime must do. |
 | P8 | Scope ceiling: functional core (literals, arithmetic/comparison/logical, `let`, `if`, closures/application, recursion, arrays/maps/for basics). Errors-as-modeled-values, `pn`, modules, system functions beyond a tiny builtin list: out (§8, §9). |
-| P9 | The POC model is the migration seed for the parent's Stage 4; arm ↔ rule correspondence is maintained deliberately (§9.2). |
-| P10 | Meta-fragment findings made while building the POC are recorded in §7 and fed to the `Lambda_Semantics_Formal.md` worklist — this is the parent's §13.3 hardening loop, started early. |
+| P9 | The POC model is the migration seed for the DSL's Stage 4 (§15.2); arm ↔ rule correspondence is maintained deliberately (§9.2). |
+| P10 | Meta-fragment findings made while building the POC are recorded in §7 and fed to the `Lambda_Semantics_Formal.md` worklist — the §11.3 hardening loop, started early. |
 
 ---
 
 ## 2. Construct-by-construct substitution map
 
-What the parent proposal adds vs. what the POC uses instead — all right-column
+What the DSL (Part II) adds vs. what the POC uses instead — all right-column
 items exist and were executed today:
 
-| Parent construct | POC substitute (shipping Lambda) |
+| DSL construct | POC substitute (shipping Lambda) |
 |---|---|
-| §4.1 destructuring `match` | `match name(t) { case 'add': ... }` + manual extraction `t[0]`, `t.n` |
-| §4.2 rest/frame patterns | `for (c in el)` child iteration; list-variable splicing into element content |
-| §4.3 `fresh()` | not needed (environment-based, P2) |
-| §4.4 `input(f, 'lambda')` | hand-encoded terms (Phases 1–2); optional Mark AST dump (Phase 3, §6.3) |
-| §5.1 `syntax` sorts + binders | naming convention (§4.1) now; ordinary `type` decls later if wanted; no binders needed |
-| §5.2 `config` cells | none — big-step needs no configuration |
-| §5.3 `rule` + `-->` | one `match` arm per node kind inside a judgment `fn` |
-| §5.4 `judgment` | plain recursive `fn ev(t, env) any^` — exactly what §5.4 says judgments compile to anyway |
-| §5.5 strategy library | `or` over error-returning `fn`s where needed (verified); mostly unnecessary in big-step |
-| §5.6 `builtin` | a named `fn` per trusted primitive, listed in one place in the model file |
-| §6.1–6.3 strictness/k-cell/store | none — out of scope with big-step + functional-only |
-| §7.1 verification pipeline | in-script self-differential checks; four-bucket logic at fixture granularity (§6) |
+| §12.2.1 destructuring `match` | `match name(t) { case 'add': ... }` + manual extraction `t[0]`, `t.n` |
+| §12.2.2 rest/frame patterns | `for (c in el)` child iteration; list-variable splicing into element content |
+| §12.2.3 `fresh()` | not needed (environment-based, P2) |
+| §12.2.4 source ingestion | hand-encoded terms (Phases 1–2); optional Mark AST dump (Phase 3, §6.3) |
+| §12.3.1 `syntax` sorts + binders | naming convention (§4.1) now; ordinary `type` decls later if wanted; no binders needed |
+| §12.3.2 `config` cells | none — big-step needs no configuration |
+| §12.3.3 `rule` + `-->` | one `match` arm per node kind inside a judgment `fn` |
+| §12.3.4 `judgment` | plain recursive `fn ev(t, env) any^` — exactly what §12.3.4 says judgments compile to anyway |
+| §12.3.5 strategy library | `or` over error-returning `fn`s where needed (verified); mostly unnecessary in big-step |
+| §12.3.6 `builtin` | a named `fn` per trusted primitive, listed in one place in the model file |
+| §12.4 strictness/k-cell/store | none — out of scope with big-step + functional-only |
+| §13.1 verification pipeline | in-script self-differential checks; four-bucket logic at fixture granularity (§6) |
 
 The cost of the substitutions is **verbosity and weaker static assurance**
 (no sort-checking of terms, manual extraction instead of patterns). The POC
@@ -180,10 +229,10 @@ MVP node-kind inventory (grows per the §8 ladder):
 ### 4.2 Values, environments, closures
 
 - **Scalar model values are host values** (P5): the model's `3` is Lambda's
-  `3`. This is the parent's §11-Q5 circularity, accepted deliberately: the
-  independence argument (parent §7.3) rests on *different failure modes* —
+  `3`. This is the §16 Q5 circularity, accepted deliberately: the
+  independence argument (§13.3) rests on *different failure modes* —
   a rule that walks `<add a b>` and a JIT lane-inference bug have no shared
-  mechanism — not on disjoint arithmetic. The A1 numeric-boundary caveat is
+  mechanism — not on disjoint arithmetic. The numeric-boundary caveat is
   carried in §10.
 - **Environment** = element assoc-list: `<env <b n:'x', v: V> ...>`, newest
   binding first. `bind` prepends; `lookup` takes the first hit — which makes
@@ -215,7 +264,7 @@ stuckness:
 
 // env: <env <b n:'x', v: <any value>> ...>; lookup walks children left-to-right
 fn lookup(env, n) => {
-    let hits = for (b in env where b.n == n) b.v
+    let hits = [for (b in env where b.n == n) b.v]
     if (len(hits) > 0) hits[0] else raise error("unbound variable")
 }
 
@@ -263,13 +312,13 @@ let c5 = (ev(<vr n:'q'>, env0) ^ { 'stuck' }) == 'stuck';
 
 Design points visible in the kernel:
 
-- **`ev` is the judgment** — `fn ev(t, env) any^` is literally what the
-  parent's §5.4 says moded judgments compile to. The `^` on every recursive
+- **`ev` is the judgment** — `fn ev(t, env) any^` is literally what
+  §12.3.4 says moded judgments compile to. The `^` on every recursive
   call is stuckness propagation; the arm-per-kind `match` is the rule set.
 - **Stuckness is total and typed.** Anything the model does not cover raises;
   raises reach the check as the `'stuck'` sentinel via the `^ { }` handler.
   There is no way for an unmodeled construct to silently produce a value —
-  the property the parent's §7.1 four-bucket triage depends on.
+  the property the §13.1 four-bucket triage depends on.
 - **Left-to-right strictness for free**: Lambda's own argument-evaluation
   order in `ev(t[0], env)^ + ev(t[1], env)^` is the model's evaluation order.
   (This *is* meta-circular trust — flagged in §10.)
@@ -308,7 +357,7 @@ generalizes by binding a *group* of `rclo`s, at the cost of a group attribute.
 Per P8, the model trusts a short list of primitives (`len`, string concat,
 numeric coercion as needed by covered fixtures), each an ordinary named `fn` in
 one clearly-marked section of the model file — the POC's version of the
-parent's §5.6 auditability ("what does this model trust?" = read that
+§12.3.6 auditability ("what does this model trust?" = read that
 section). No declaration form needed at this scale.
 
 ---
@@ -317,7 +366,7 @@ section). No declaration form needed at this scale.
 
 ```
 test/lambda/sem/sem_poc_kernel.ls    // the interpreter, `pub fn`s — NO .txt, so not discovered
-test/lambda/sem/sem_poc_core.ls      // positive differential checks, M0-M2      (57)  [LANDED]
+test/lambda/sem/sem_poc_core.ls      // positive differential checks, M0-M2      (58)  [LANDED]
 test/lambda/sem/sem_poc_stuck.ls     // negative suite: STUCK / TOTAL / ADOPTED  (36)  [LANDED]
 test/lambda/sem/sem_poc_fixtures.ls  // real test/lambda programs, translated    (33)  [LANDED]
 ```
@@ -327,7 +376,7 @@ module is skipped automatically and the three fixtures share one copy of the
 interpreter — no duplication, and no harness change to arrange it.
 
 Per P7 these are ordinary `.ls`+`.txt` fixtures under `test/lambda/sem/`, so
-CLAUDE.md rule 8 supplies the golden discipline and no harness, Makefile
+AGENTS.md rule 8 supplies the golden discipline and no harness, Makefile
 target, or manifest is added for Phases 1–2. The kernel is duplicated per
 fixture file at first (fixtures are self-contained); if that grates, module
 import of a shared `sem_poc_kernel.ls` is an ordinary Lambda `import` —
@@ -358,28 +407,28 @@ Each check pairs a term with the same program in native syntax, in one script:
 let cN = (ev(TERM, env0) ^ { 'stuck' }) == NATIVE_EXPR
 ```
 
-This is the parent's §7.1 three-way comparison collapsed to two ways at
+This is the §13.1 three-way comparison collapsed to two ways at
 per-expression granularity, with the golden fixed at `true`:
 
-- `cN == true` — model and runtime agree (parent bucket ✓✓, **verified**);
+- `cN == true` — model and runtime agree (§13.1 bucket ✓✓, **verified**);
 - `cN == false` — they disagree: either a model bug or a **runtime bug**
   (bucket ✓✗ — the motivating case, now visible per-expression);
 - `cN == 'stuck'`-shaped mismatches localize under-coverage instantly.
 
-The independence argument is the parent's §7.3 unchanged: the native side runs
+The independence argument is §13.3's unchanged: the native side runs
 through parser → AST → MIR JIT → tagged values; the model side walks elements
 and applies rules. A truncation bug in lane inference and a wrong side
 condition in an arm have no mechanism for coinciding — and the historical bug
 inventory (pn-param float-div inference, JS→MIR numeric inference, boxing
 observability leaks) is exactly the class the native side would get wrong and
 the model side would not. Both sides sharing one process and one parse is the
-known, accepted weakness (§10; the maintained Redex fragment remains the
-cross-host escape hatch, parent §13.4).
+known, accepted weakness (§10). A cross-host oracle is the escape hatch
+(§13.3); none is maintained since the Redex model was removed (§1.2).
 
 ### 6.2 Phase 2 — hand-translated real fixtures
 
 Pick a slice of the real suite whose semantics the model covers — candidates
-from the parent's §7.2 tier 1–2 ordering: `arith*.ls`, `chained_comparisons.ls`,
+from the §13.2 tier 1–2 ordering: `numeric_expr.ls`, `chained_comparisons.ls`,
 `closure*.ls` (simplest members first) — and hand-translate each script into a
 term, asserting model result == native result of the *actual fixture
 expressions*. Hand-translation is honest POC labor: it is bounded (a dozen
@@ -404,17 +453,17 @@ let v    = ev(term, env0)^
 
 `normalize` is itself a Lambda function over elements — the first real test of
 the model style on a *big* vocabulary, and the direct descendant of the Redex
-bridge's `--emit-sexpr` mapping (parent §13.4). Phase 3 is severable: if it is
+bridge's `--emit-sexpr` mapping (§1.2). Phase 3 is severable: if it is
 never built, Phases 1–2 still deliver the POC's evidence. If it is built, the
-parent's §7.2 manifest/`make semantics-verify` machinery becomes worth adding —
-*that* is the natural graduation point from POC to the real Stage 5.
+§13.1–§13.2 manifest/`make semantics-verify` machinery becomes worth adding —
+*that* is the natural graduation point from POC to the real Stage 5 (§15.2).
 
 ---
 
 ## 7. Findings already produced (the loop is already paying)
 
 Probing for this document — before any model existed — surfaced four
-meta-fragment findings in under an hour, confirming the parent's §13.3 premise
+meta-fragment findings in under an hour, confirming the §11.3 premise
 that building the model is itself the hardening instrument:
 
 - **F1 — `len` and iteration skipped spread-built map fields. FIXED
@@ -446,15 +495,15 @@ that building the model is itself the hardening instrument:
   attributes, contradicting its own `required_attr_missing`); with both fixed
   the baseline is 3982/3982.
 
-  This is the parent's §7.1 four-bucket triage playing out for real, and the
+  This is the §13.1 four-bucket triage playing out for real, and the
   outcome is the one the bucket table predicts as most valuable: goldens in the
   ✓✗ cell that had silently enshrined *two* stacked defects, one of which had
   disabled a whole validator.
 - **F2 — doc drift on the element attribute/content separator. FIXED.**
   `doc/Lambda_Data.md` showed `<div class: "main"; "content">`; the parser
   rejects `;` with *"expected ',' between element attributes and content"*.
-  The docs predated the separator change; they now show `,`. (Same class as the parent's §13.2
-  `'a' == "a"` finding: user-guide-grade docs diverging from the
+  The docs predated the separator change; they now show `,`. (Same class as the
+  §11.2 `'a' == "a"` finding: user-guide-grade docs diverging from the
   implementation.)
 - **F3 — element content expressions are restricted.** `<clo p: x, t[0]>` and
   `<clo p: x, (t[0])>` both fail to parse; only simple primaries (identifiers,
@@ -475,7 +524,7 @@ that building the model is itself the hardening instrument:
   (S16.7), one diverging check erases the other 34 results. The golden still
   catches it (empty ≠ 35 lines), so the suite has teeth, but §6.1's claim of
   *per-expression* localization does not hold for divergence: big-step cannot
-  distinguish it from stuckness (§1.1), and the crash is whole-file. The
+  distinguish it from stuckness (§1.4), and the crash is whole-file. The
   standard remedy is a **fuel parameter** — `ev(t, env, fuel)` decrementing
   per step and raising `out of fuel` at zero — which converts divergence into
   ordinary stuckness, makes the judgment total, and restores per-check
@@ -529,6 +578,13 @@ that building the model is itself the hardening instrument:
   ruling: either spreadability ends at the construction site as S8.3.3 reads,
   or it is a real property of values and `==` should not equate values that
   splice differently.
+  **RULED since** (the second option): a list is a specialized array whose
+  spread bit is a property of the value — it splices wherever it sits as an
+  item (S2.5.1v2) and passes through a binding, argument or return unchanged
+  (S2.5.6) — while `==` compares the sequence family by content (S5.3.1). A
+  one-item list *is* its item and an empty one is `null` (S2.5.5v2), so
+  `mk_comp()` above is now just `1`. The laundering is retired: `arr` builds
+  with `[for …]` and `forr` returns the host's list (F11).
 
 - **F9 — the model collapses Lambda's two error channels into one.** Lambda has
   a returned error *value* that flows as ordinary data and a raised error that
@@ -551,6 +607,68 @@ that building the model is itself the hardening instrument:
   to get around this. Same family as F3/F4: content position has parsing rules
   that surprise, and this one bites hardest exactly where terms are assembled
   from reusable pieces — the normal way to write a model.
+
+- **F11 — the fixtures went silently red, for three reasons (repaired
+  2026-10-13).** Run on 2026-10-13, 46 of 57 core checks, 12 of 36 negative
+  checks and all 33 real-fixture checks had turned `false`. `test/lambda/sem`
+  is outside the baseline (§5), so nothing reported it. Two causes were
+  ratified language changes, and the kernel was updated to them:
+  - **A guard statement leaks a `null` into its block's value.** A block is the
+    list of *all* its statements' results (S2.5.3), and an else-less `if`
+    yields `null` in value position (S16.6.3); a list keeps its nulls
+    (S2.5.1v2). So `ev`'s body `{ if (fuel <= 0) raise …  match … }` returned
+    `(null, v)`, and nested calls piled the nulls up until `+` broadcast over
+    lists of different lengths. The guards (fuel, and the `appn` arity check)
+    are now `if … else`. Every pure-function guard written in this style has
+    the same trap.
+  - **A one-item comprehension is its item.** `let hits = for (…) b.v` then
+    `len(hits)` read `len(3)` = 0 for a single hit (S2.5.5v2, S8.3.1v3), so
+    every variable looked unbound. `lookup`, `fld` and `appn` now wrap with
+    `[for …]`, the remedy S2.5.5v2 names. `forr` drops its array laundering and
+    answers the host's list, so the one core check that expected `[]` from an
+    empty comprehension now compares with the native `for` instead (both are
+    `null` as values).
+  - **A runtime defect: the JIT dropped a `match` value beside a raising arm.**
+    With the kernel fixed, the interp tier went green but the jit tier still
+    failed 42 core checks. `transpile_match` (`transpile-mir.cpp`) never reset
+    the transpiler's "branch exited" flag per arm, so a `raise` in the default
+    arm leaked out of the `match`, and the enclosing `if`'s join treated the
+    whole `else` branch as exited and stored `0` (null) as its value.
+    Minimal repro: `fn p(n) any^ => if (n <= 0) 0 else match n { case 1: 10
+    default: raise error("s") }` gave `p(1)` = `null` on jit, `10` on interp.
+    Fixed with the join rule the `^` handler already used (the join is
+    reachable unless every arm exits and a default arm closes the no-match
+    path). Pinned on all three tiers by `test/lambda/match_raise_arm_join.ls`
+    in the tier-parity table. It hid in the baseline because the auto tier
+    interprets a once-called body. This is the §13.1 ✓✗ payoff again: an
+    executable model caught a tier divergence no golden had.
+  - **Two more runtime defects fell out of the follow-up sweep** (every
+    golden on the jit tier, same day). (a) The transpiler's tail-position
+    flag leaked into constructors: `{*:f(x), type: t}` in tail position
+    jumped into `f` and returned *its* map, dropping `type` — the math
+    typesetter's `\mathrel{=}` came back as `mord` on the JIT. Tail position
+    now passes only through forms whose value *is* one child's value
+    (`transpile_expr_value_core`); pinned by
+    `test/lambda/tail_position_constructors.ls` in the tier-parity table. (b) `list_push`'s S2.6.4 merge of
+    adjacent content strings took the script's eval context for the owner
+    whenever `parse()` ran from a script, so the Markdown parser's merged text
+    runs were heap strings inside an arena-owned element nothing traces, swept
+    at the next collection (`" and "` read back as `"binary"`, or as a
+    neighbouring `" and "`). An active input parse now owns its merged text
+    (D4.2.6 Input ownership); pinned by `test/mir/lambda/gc_parse_merged_text.ls`
+    under the forced-collection stress sweep. Debugging note: a probe that
+    *reads* the parsed text before the churn stores the pointers in a traced
+    array and keeps the strings alive — several early "the tree survives"
+    experiments were masked exactly this way.
+
+- **F12 — a bound list became an array in the model.** An attribute stores a
+  list as the array it is (S2.5.6), so a list bound by `lett` or a parameter
+  and held in the environment's `v:` attribute came back as an array. It then
+  nested where the native binding splices:
+  `(let y = for (x in [1, 2]) x, [y, 3])` is `[1, 2, 3]`, but the model gave
+  `[[1, 2], 3]`. This only became visible once `forr` returned lists (F11). A
+  binding now records list-ness (`l:`) and `lookup` rebuilds the list. A new
+  core check pins it.
 
 Disposition: F1 is a runtime defect to fix; F2 a doc fix; F3/F4 are
 grammar-ruling questions to raise per `doc/Doc_Convention.md` (ask, don't
@@ -596,7 +714,7 @@ Each milestone is a committed fixture set, green under
   than the planned `sem_poc_collect.ls`: a shared kernel module would itself be
   discovered as a test and need its own golden once `sem/` enters the list).
   Added `arr`/`idx`/`slice`/`forr`, `lenn` as a declared host builtin (the
-  parent's §5.6 boundary), and `mp`/`fld` for maps.
+  §12.3.6 boundary), and `mp`/`fld` for maps.
   **Totality (closes F5):** `ev` now takes a `fuel` argument bounding recursion
   DEPTH, decremented on every arm including tail positions. Omega —
   `(\x. x x)(\x. x x)` — and a base-case-free recursive function are now
@@ -607,7 +725,7 @@ Each milestone is a committed fixture set, green under
   parse error and there is no runtime map constructor, so a modelled map is an
   assoc-list element and the checks compare *field reads* (S8.4) rather than
   whole values. This is the sharpest Tier-1 requirement the POC has produced:
-  a DSL over this data model needs dynamic map construction.
+  a DSL over this data model needs dynamic map construction (§12.2.5).
   Deliberately not covered: `mp` key collisions, and slicing beyond one
   inclusive-range case.
 - **M3 — negative suite + real-fixture slice. LANDED** (2026-08-29).
@@ -643,26 +761,26 @@ Each milestone is a committed fixture set, green under
   rebinding a name in one scope is a duplicate-definition error — only the
   *term* can spell the shadowing that makes it discriminating.
 - **M4 (optional) — Mark ingestion.** §6.3's `--emit-ast-mark` + `normalize`
-  + first mechanically-ingested fixture. Graduation gate to the parent's
-  Stage 5 machinery.
+  + first mechanically-ingested fixture. Graduation gate to the DSL's
+  Stage 5 machinery (§15.2).
 
 Estimated model size at M3, extrapolating from the kernel: 300–500 lines of
 Lambda including checks — small enough to review as a whole.
 
-## 9. Deliverables back to the DSL proposal
+## 9. Deliverables to the DSL design (Part II)
 
 ### 9.1 A costed Tier-1 requirements list
 
 After M3, write up, with line-count and defect evidence from the model:
 
-- how much of the model is manual extraction that §4.1 destructuring would
+- how much of the model is manual extraction that §12.2.1 destructuring would
   delete (expected: the dominant verbosity);
 - whether any bug in the model was caused by wrong manual extraction
   (the safety argument for patterns, made empirical);
-- whether `for`-based child iteration ever needed real frame patterns (§4.2);
-- what the element-content restrictions (F3/F4) should become as grammar
-  rulings;
-- whether sort-checking terms (the validator, per parent §5.1) was missed in
+- whether `for`-based child iteration ever needed real frame patterns (§12.2.2);
+- what the element-content restrictions (F3/F4/F10) should become as grammar
+  rulings (§12.2.6);
+- whether sort-checking terms (the validator, per §12.3.1) was missed in
   practice — i.e. how often a malformed hand-written term cost debugging time.
 
 ### 9.2 The migration seed
@@ -673,22 +791,24 @@ future `builtin` block. When Tier 1/2 land, migrating the POC model is a
 mechanical rewrite that *diffs against a green fixture suite* — the DSL's first
 user arrives with its own regression tests.
 
-### 9.3 The §13 verdict, evidenced
+### 9.3 The §11.2 verdict, evidenced
 
-The POC directly tests the parent's "ready in structure, not yet in rigor"
+The POC directly tests §11.2's "ready in structure, not yet in rigor"
 verdict: structure is confirmed if M0–M3 land without new runtime features
 (P1); rigor gaps are enumerated as they are hit (§7 already started). Either
-outcome sharpens the parent proposal; a failure outcome (some wall that plain
+outcome sharpens the DSL design; a failure outcome (some wall that plain
 Lambda cannot express) would be the cheapest possible time to learn it.
 
 ## 10. Risks and open questions
 
-1. **Meta-circular trust surface** (parent §7.3, sharpened): the model
-   inherits from the host — argument evaluation order, scalar arithmetic (P5,
-   A1 numeric boundaries), `==` as the check primitive (A5), element identity
-   under the C4/COW aliasing rules (A7). Mitigations: targeted unit checks at
-   the numeric boundaries the model relies on; keep checks first-order where
-   possible; the Redex fragment as cross-host oracle for the arithmetic core.
+1. **Meta-circular trust surface** (§13.3, sharpened): the model
+   inherits from the host — argument evaluation order, scalar arithmetic (P5;
+   the numeric boundaries, now ruled by S4.1/SI7 and S4.1.5), `==` as the check
+   primitive (SI4), element identity under the no-aliasing/COW rules (SI13,
+   SI2). Mitigations: targeted unit checks at the numeric boundaries the model
+   relies on; keep checks first-order where possible; a cross-host oracle for
+   the arithmetic core (§13.3) — none is maintained since the Redex model was
+   removed (§1.2).
 2. **`match`-arm scaling**: one `match` over ~25 node kinds in one `fn` is
    fine; if arms need to be independently composable (Phase-3 `normalize`
    may want per-shape rules), the verified `or`-chain over error-returning
@@ -698,27 +818,663 @@ Lambda cannot express) would be the cheapest possible time to learn it.
    re-captures — the standing suite-hygiene risk, unchanged but worth naming:
    POC goldens must never be re-captured without triage.
 4. **Where does the shared kernel live** once fixtures stop duplicating it —
-   `test/lambda/` module vs. a new `semantics/` root (parent §11-Q3). Defer
-   until duplication actually hurts (M2).
+   `test/lambda/` module vs. a new `semantics/` root (§16 Q3). Defer
+   until duplication actually hurts (M2). Interim answer since M3: the
+   golden-less `test/lambda/sem/sem_poc_kernel.ls` (§5).
 5. **n-ary functions and multi-binding `lett`** encoding: parameter lists as
    attribute-held arrays vs. header children — pick by probing which reads
    better under F3's content restrictions (M1).
 
-## 11. Summary
+---
 
-The parent proposal's end goal — an executable, independent semantic model
-that verifies the Lambda test fixtures — does not have to wait for the DSL.
-Big-step + environments eliminates the machinery tiers for the functional
-core; elements, `match`, closures, and the `T^E` channel are enough for the
-rest, and a working kernel with differential checks — closures, capture,
-recursion, stuckness — **already runs, verbatim, on today's runtime**. The POC
-turns the DSL proposal's largest open risks (is Lambda meta-ready? what must
-Tier 1 contain? does the four-bucket loop pay?) into a few hundred lines of
-committed, CI-green Lambda.
+# Part II — The Native Semantics DSL
+
+Part II is the long-range design the POC seeds, condensed from the 2026-07-03
+proposal. **Nothing in it is implemented.** Where the POC has since produced
+evidence, it is noted inline.
+
+## 11. Why Lambda can be its own meta-language
+
+### 11.1 The data model already provides most of a framework
+
+A semantics framework needs: (1) a term language, (2) an abstract-grammar language,
+(3) rules, (4) an execution engine. Lambda's existing data model covers (1), (2), and
+much of the machinery for (4):
+
+| Semantics concept | K / Ott construct | Already in Lambda |
+|---|---|---|
+| Terms / AST nodes | KItems, Ott terms | **Elements**: `<add <lit value: 1> <lit value: 2>>` — code-as-data, no quotation mechanism needed |
+| Labels, names, metavariables | KLabels, metavars | **Symbols** — interned, O(1) equality |
+| Abstract grammar (BNF) | `syntax Exp ::= ...` | **Recursive union types + occurrence modifiers**; the validator schema DSL *is* an abstract-grammar language |
+| Terminals / lexemes | token sorts | **String patterns**: `string Ident = \a \w*` |
+| Configurations (cells) | `<k> <env> <store>` | Elements with attributes + children: `<cfg <k; ...> <env; {...}>>` |
+| Environments, stores | Map sort | **Maps**, with spread merge `{*:base, x: v}` (computed keys missing — §12.2.5) |
+| Rule failure / stuckness | rule does not apply | **`T^E` error returns**, compile-enforced; errors are falsy, so `r1(t) or r2(t)` is deterministic rule choice for free (verified, §3) |
+| Sort / well-formedness checking | kompile sort checks | The **validator** checks terms against grammar types |
+| Rule registry + recursive dispatch | the rewrite engine | Precedent: the **`view`/`edit`** template system (`view_stam`) already implements pattern → template rules with a registry and recursive `apply;` |
+
+The `view`/`edit` construct is the implementation blueprint: `syntax` / `rule` /
+`judgment` declarations would follow the same pipeline — declaration forms in the
+parser → `build_ast.cpp` lowering → data structures + generated functions — with a
+structural matcher grown out of the validator's existing type-vs-value walker.
+
+### 11.2 Readiness: ready in structure; rigor now ruled
+
+The 2026-07-03 verdict was **ready in structure, not yet in rigor**. The data model —
+elements, symbols distinct from strings, structural equality, occurrence types,
+errors-as-values with compile-enforced handling — was sound. The docs were
+user-guide-grade, and probing the implementation found doc-vs-implementation
+divergences on core operators within minutes (findings A1–A10 in
+`vibe/Lambda_Semantics_Formal.md`: three integer-overflow regimes, three aliasing
+regimes, non-reflexive `==`, `'a' == "a"` raising where docs said `false`, OOB
+indexing yielding unchecked error values).
+
+Since then `doc/Lambda_Formal_Semantics.md` has become the normative spec, and the
+findings the meta-fragment depends on are ruled:
+
+| What the meta-fragment needs | Finding | Ruling now |
+|---|---|---|
+| Model arithmetic runs on host numerics (P5) | A1 overflow regimes | S4.1 (`int` is int53, closed and total), SI7, S4.1.5 (machine ints wrap, Go-aligned) |
+| `==` is the check primitive (P6) | A5 non-reflexive / representation-sensitive `==` | SI4 (`==` total; an equivalence modulo `nan`/`error`); the ArrayNum `==` fix is tracked in the findings doc |
+| The engine passes terms around | A7 aliasing | SI13 no aliasing, SI2 COW unobservability |
+| The model has no inference | B7 gradual guarantee | SI3v2 inference evaluation-invariance |
+| The model has no boxes | — | SI1 boxing invisibility, S1.6 |
+
+The POC confirmed "ready in structure" empirically: M0–M3 landed with zero new syntax
+and zero new runtime features (P1). It also kept finding rigor gaps — F1–F12 in §7 —
+so hardening is not finished; building the model is how it advances.
+
+### 11.3 The hardening gate, and what the model checks by construction
+
+Before the model becomes a CI gate (§5) or Stage 4 of the DSL (§15.2), every finding
+the meta-fragment touches must be resolved — fixed, or formally documented as-is. The
+§11.2 table is that gate's checklist.
+
+Two invariants are not prerequisites but **outputs**. The model has no boxes and no
+inference, so any model-vs-runtime divergence on a boxing- or inference-sensitive
+program is an SI1 or SI3v2 violation by construction. The `box_unbox*.ls` fixtures
+therefore verify the strongest property available: that boxing is unobservable.
+Several historical engine bugs — numeric-inference truncation, reg-0 sentinels, the
+pn-param float-div truncation — were observability leaks of exactly this kind.
+
+## 12. The DSL design
+
+### 12.1 Overview
+
+A semantics model is an ordinary Lambda module (`.ls` file) using new top-level
+declaration kinds. A toy lambda-calculus, end to end:
+
+```lambda
+// ---- abstract grammar (reuses the type DSL, adds binder metadata) ----
+syntax Expr = <lit value: int>
+            | <var name: symbol>
+            | <add; Expr, Expr> strict
+            | <lam param: symbol; Expr> binds param in 1
+            | <app; Expr, Expr> strict
+
+syntax Value = <lit value: int> | <lam param: symbol; Expr>
+
+// ---- small-step rules: pattern --> template, with side conditions ----
+rule add-vals:  <add <lit value: a> <lit value: b>>  -->  <lit value: a + b>
+
+rule beta:      <app <lam param: x; body> (v: Value)>  -->  subst(body, x, v)
+
+// ---- Ott-style moded judgment: typing ----
+judgment types(env: map, e: Expr) Type^
+
+rule t-lit:  |- types(g, <lit value: _>) = int
+
+rule t-var:  x in g
+             |- types(g, <var name: x>) = g[x]
+
+rule t-add:  types(g, e1) == int, types(g, e2) == int
+             |- types(g, <add e1 e2>) = int
+
+// ---- strategies are a plain library over first-class rules ----
+let step  = choice(add_vals, beta)      // errors are falsy: deterministic choice
+let run   = fixpoint(innermost(step))
+let final = run(<app <lam param: 'x', <add <var name: 'x'> <lit value: 1>>> <lit value: 41>>)
+```
+
+Compilation model — no engine magic:
+
+- a `rule` compiles to a function `fn(Term) Term ^ NoMatchErr`;
+- a moded `judgment` compiles to a recursive function returning `T ^ StuckErr` — the
+  shape the POC's `ev` already has (§4.3);
+- `strict` annotations expand into generated heating/cooling rules (§12.4.1);
+- strategy combinators are ordinary higher-order functions;
+- the existing compile-time error enforcement guarantees stuckness is handled.
+
+### 12.2 Tier 1 — core-language additions
+
+General-purpose language features, useful far beyond the DSL; the DSL cannot exist
+without them. Ordered by importance.
+
+#### 12.2.1 Destructuring patterns in `match`
+
+The single biggest gap. `match` arms are type/literal/constraint patterns only; the
+arm body sees the whole scrutinee as `~` and must extract sub-values manually
+(`doc/Lambda_Expr_Stam.md` § Match Expressions). Semantics rules are mostly "match a
+shape, bind the pieces", so this must become:
+
+```lambda
+match t {
+    case <add (a: Expr) (b: Expr)>: eval(a) + eval(b)
+    case <lit value: v>:            v
+    case [x, rest...]:              ...
+    case {name: n, *others}:        ...
+}
+```
+
+- **One pattern language.** Extend the existing type-pattern grammar: an identifier in
+  child/field position becomes a *binder* (optionally annotated `(x: T)`), instead of
+  inventing a parallel pattern syntax. `is`, queries (`?`, `[T]`), `match`, and rule
+  left-hand sides all share it.
+- **Linear first.** Repeated variables (non-linear patterns implying equality) are
+  rejected in v1; they can be added later as sugar for a `when` equality condition.
+- Literal children still match literally; `_` is the wildcard binder.
+
+POC evidence: manual extraction (`t[0]`, `t.p`, and the `let` hoists F3 forces) is
+expected to be the kernel's dominant verbosity; §9.1 asks for the measurement.
+
+#### 12.2.2 Rest / frame patterns
+
+K's "ellipsis frames," needed both for sequence matching and for configuration rules
+that mention only the cells they touch:
+
+- **Sequence rest:** `<k pat rest...>` — match the first child, bind the remaining
+  children as a list. Also at array level: `[x, rest...]`.
+- **Map rest:** `{x: v, *rest}` — match one entry, bind the map minus that entry.
+  **Restriction:** the matched key must be *determined* — a literal or an
+  already-bound variable — never an unconstrained fresh variable. This deliberately
+  avoids general associative-commutative matching (the expensive part of K); §12.4.3
+  argues the restriction is sufficient for real language models.
+
+#### 12.2.3 Fresh symbol generation
+
+Capture-avoiding substitution and heap allocation both need fresh names.
+`fresh('x')` returns a symbol guaranteed distinct from any symbol currently interned
+with that stem (`'x_1'`, `'x_2'`, ...). To preserve `fn` purity it follows the
+`math.random(seed)` precedent — deterministic given a threaded counter — or is
+provided implicitly inside `rule` bodies via a `fresh y` clause (§12.3.3), where the
+engine threads the counter. The POC needs none of this (P2); small-step
+substitution and store allocation do.
+
+#### 12.2.4 Source-as-data ingestion
+
+To model real programs, source text must become element terms. This is an
+input-side addition, not a language construct. The 2026-07 draft planned
+`input(f, 'lambda')` over a tree-sitter CST; the production parser is now the
+first-party C parser (D8.1.1v18), so the concrete route is §6.3: a Mark-flavored
+sibling of `--emit-ast-dump`, read back with `input(f, 'mark')`. The mapping is
+mechanical: node kind → element tag (symbol), named fields → attributes, children →
+children, tokens → strings/symbols/numbers. A thin `normalize` pass, written in Lambda
+as rules, lowers the raw dump to the abstract grammar of §12.3.1. LambdaJS takes the
+same shape over its own front end's AST.
+
+#### 12.2.5 Computed-key map construction (POC-derived)
+
+`{(k): v}` is a parse error (re-checked 2026-10-13) and there is no runtime map
+constructor, so a model cannot build a map whose keys are data at model-run time. The
+POC worked around it with assoc-list elements (§4.2, M2); a DSL whose environments and
+stores are maps (§12.3.2, §12.4.3) needs the real thing. A `{(k): v}` spelling would
+also mirror the determined-key marker in patterns (§16 Q2).
+
+#### 12.2.6 Element-content parse rules (POC-derived)
+
+F3, F4 and F10 (§7): content position restricts children to simple primaries, glues
+a following parenthesized expression onto the preceding child as a call, and parses
+`name <...` as less-than. Rule right-hand sides are element templates assembled from
+bound pieces — exactly the shape these rules break. They need grammar rulings (ask,
+per `doc/Doc_Convention.md`) before Tier 2.
+
+### 12.3 Tier 2 — DSL declaration forms
+
+New top-level statements, implemented exactly like `view_stam`: parser declaration
+forms → `build_ast.cpp` → data + generated functions.
+
+#### 12.3.1 `syntax` — abstract grammar with binders and strictness
+
+`syntax` is `type` plus two metadata annotations:
+
+```lambda
+syntax Expr = <lit value: int>
+            | <var name: symbol>
+            | <add; Expr, Expr> strict                 // evaluate all children, in order
+            | <cond; Expr, Expr, Expr> strict(1)       // only the guard is strict
+            | <and; Expr, Expr> strict(1)              // short-circuit: left only
+            | <lam param: symbol; Expr> binds param in 1
+            | <letex name: symbol; Expr, Expr> binds name in 2, strict(1)
+```
+
+- **`binds x in i, j, ...`** — Ott-style binding spec: attribute `x` binds in the
+  listed child positions. From these specs the engine *derives* generic
+  `free_vars(t)`, `subst(t, x, s)` (capture-avoiding, using §12.2.3), and
+  `alpha_eq(t1, t2)` for every syntax sort — users never hand-write them per language.
+- **`strict` / `strict(i, ...)`** — evaluation-order spec; expansion in §12.4.1.
+- Terminals reuse **string patterns** (`string Ident = \a \w*`); sorts reuse union,
+  occurrence (`Stmt*`), and optionality — the whole validator type language carries
+  over, and the validator itself checks term well-formedness against `syntax` sorts.
+
+#### 12.3.2 `config` — the configuration cell tree
+
+```lambda
+config Cfg = <cfg
+    <k; KItem*>                 // computation: a sequence of KItems (§12.4.2)
+    <env; {symbol: Addr}>       // lexical environment: name → address
+    <store; {Addr: Value}>      // heap: address → value (§12.4.3)
+    <out; string*>              // output channel (print effects)
+>
+```
+
+`config` is a `syntax` declaration with a distinguished role: `load(prog)` produces
+the initial configuration; rules that omit cells are implicitly framed (§12.4.2); a
+user-declared `final` predicate classifies terminal configurations.
+
+#### 12.3.3 `rule` — rewrite rules
+
+```lambda
+rule name?:  LHS-pattern  -->  RHS-template
+             when  <side-condition expr over bound vars>
+             fresh y1, y2                // engine-supplied fresh symbols
+```
+
+- `-->` is the rewrite arrow (§16 Q1).
+- LHS is a §12.2.1 pattern (with §12.2.2 frames); RHS is an ordinary element
+  template — Lambda element literals already interpolate expressions and spread, so no
+  quasiquotation machinery is needed.
+- `when` sees all LHS bindings; it is the general guard (the existing `that`
+  constraint syntax remains usable inside patterns for per-binder conditions).
+- Each rule reifies as `fn(Term) Term ^ NoMatchErr` and is registered under its
+  module's rule set; anonymous rules get generated names.
+
+#### 12.3.4 `judgment` — moded inference rules
+
+For static semantics (typing, scoping, elaboration) and big-step evaluation:
+
+```lambda
+judgment types(env: TypeEnv, e: Expr) Type^     // inputs left of ')', output after
+
+rule t-app:
+    types(g, f) == <arrow t1 t2>, types(g, a) == t1
+    |- types(g, <app f a>) = t2
+```
+
+- **Moded only, in v1.** Inputs and one output; premises are evaluated left-to-right;
+  a premise that fails (error) makes the rule fail; the first rule whose conclusion
+  pattern matches and whose premises hold produces the output. Compilation target: a
+  recursive `fn` returning `Type ^ StuckErr` — which the existing `^` propagation and
+  `let v^err` destructuring handle idiomatically. The POC's `ev` is this shape,
+  written by hand.
+- Full relational/backtracking (Prolog-mode) judgments are **deferred**: moded
+  judgments cover typing, big-step eval, and elaboration.
+- Derivation-tree recording (for proof output, and for debugging why a program is
+  stuck) is a runtime flag: when on, each judgment call returns its derivation as an
+  element tree, renderable via `format()`.
+
+#### 12.3.5 Strategies — a library, not syntax
+
+Because rules are first-class functions with error-typed failure, the strategy layer
+is ordinary Lambda code, shipped as a library module:
+
+```lambda
+pub fn choice(r1, r2)  => (t) => r1(t) or r2(t)        // errors are falsy
+pub fn seq(r1, r2)     => (t) => r2(r1(t)^)^
+pub fn try(r)          => (t) => r(t) or t
+pub fn fixpoint(r)     => ...                            // apply until NoMatch
+pub fn innermost(r)    => ...                            // leftmost-innermost congruence walk
+pub fn outermost(r)    => ...
+```
+
+The congruence walkers (`innermost`, `all_children`, ...) are generic tree traversals
+over elements — implementable today, and worth adding to the standard library
+regardless.
+
+#### 12.3.6 `builtin` — the trusted-primitive boundary
+
+No one models a host library's sort or string internals as rules. A model declares its
+primitive boundary explicitly:
+
+```lambda
+builtin js_string_concat(a: string, b: string) string = (a, b) => a ++ b
+builtin math_sqrt(x: float) float = math.sqrt
+```
+
+Rules invoke builtins like judgments. The declaration form (rather than plain `fn`)
+matters for **auditability**: `lambda semantics --list-builtins model.ls` would
+enumerate exactly what a model trusts rather than derives — the "trusted computing
+base" of each language model. The POC's version is one marked section of the kernel
+(§4.5).
+
+### 12.4 Tier 3 — machinery for stateful, small-step models
+
+The functional core needs none of this (§1.4). `pn`, LambdaJS, and any small-step
+model need all three.
+
+#### 12.4.1 Strictness expansion (heating / cooling)
+
+Environment/store-based small-step semantics evaluate `<add e1 e2>` by first reducing
+`e1` inside its context. Without automation that is two hand-written rules per
+operator per argument position — hundreds of pure boilerplate rules at JS scale. The
+`strict` annotation generates them. For `<add; Expr, Expr> strict`, the engine emits
+(conceptually):
+
+```lambda
+// heat: schedule child 1, leave a hole
+rule <k <add e1 e2> rest...> --> <k e1 <add <hole> e2> rest...>
+     when not (e1 is Value)
+// cool: plug the result back
+rule <k (v: Value) <add <hole> e2> rest...> --> <k <add v e2> rest...>
+// ... same pair for position 2, guarded on position 1 already a Value ...
+```
+
+with a distinguished `<hole>` term per sort. `strict(1)` limits which positions heat —
+which is exactly how short-circuit `and`/`or`, `if`, and assignment targets are
+expressed. `seqstrict` (left to right, each position waiting on the previous) is the
+default reading of bare `strict`. This is the single highest-leverage generated
+construct: in KJS-class semantics, heating/cooling is roughly a third of all rules,
+all mechanical.
+
+#### 12.4.2 The k-cell discipline: continuations as data
+
+The `<k; ...>` cell holds a *sequence* of computation items; rules match on its
+**prefix** (via §12.2.2 sequence-rest patterns). This one representation gives every
+non-local control feature:
+
+```lambda
+// exceptions: unwind pops frames until a handler frame
+rule throw:   <k <throw v> rest...>                        --> <k <unwinding v> rest...>
+rule unwind:  <k <unwinding v> f rest...>                  --> <k <unwinding v> rest...>
+              when not (f is TryFrame)
+rule catch:   <k <unwinding v> <try-frame h env> rest...>  --> <k <apply h v> rest...>
+
+// generators / await: the k-suffix IS the continuation — capture it into the store
+rule yield:   <cfg <k <yield v> rest...> <store s> c...>
+              --> <cfg <k <yielded v>> <store {*s, (gaddr): <gen-state [rest]>}> c...>
+```
+
+Discarded suffix = exceptions, `return` (the same unwind, stopping at a call frame),
+`break`/`continue`. Captured suffix = JS generators, `async`/`await` (plus a
+microtask-queue cell). No first-class continuations are added to Lambda itself —
+continuations exist only as *data* (lists of KItems) inside the model.
+
+#### 12.4.3 Store cells and determined-key matching
+
+Mutation needs `<store; {Addr: Object}>` with fresh addresses (§12.2.3) for
+allocation. For Lambda the store holds `var` bindings only — `let` is final and
+values never alias (SI13) — so `let`-finality and COW unobservability (SI2) become
+checkable model properties (`vibe/Lambda_Design_Runtime_COW.md` §9.6 defers them
+here). JS needs the full object store. Lookup and update use map rest-patterns:
+
+```lambda
+rule var-lookup:
+    <cfg <k <var name: x> rest...> <env {(x): a, *_}> <store {(a): v, *_}> c...>
+    --> <cfg <k v rest...> <env {(x): a, *_}> <store {(a): v, *_}> c...>
+```
+
+The parenthesized `(x)` key marks "key determined by the already-bound variable `x`" —
+distinguishing it from a literal key (§16 Q2). Because every store/env access in
+KJS-style semantics looks up a determined key, this restriction keeps matching
+linear-time while avoiding general AC matching. If a model genuinely needs "find
+*some* entry such that ...", that is an explicit `for`/`that` query in a `when`
+clause — visible cost, not silent engine magic.
+
+### 12.5 Per-language notes
+
+**Lambda** (the first and load-bearing model):
+- The pure `fn` subset is a textbook environment-based functional language: closures,
+  `let`, arithmetic over the numeric tower, structural `==`, elements/maps/arrays,
+  pipes (`|`, `that` desugar to higher-order rules), `for` comprehensions with
+  spread-flattening, `match`, string patterns.
+- The delicate parts to model precisely are where implementation bugs have
+  historically hidden: numeric promotion and truncation boundaries, boxing (not
+  modeled — §11.3), error propagation `^`/`let v^err` and the two error channels the
+  POC collapses (F9), `pn` mutable-capture copy semantics, spread/flattening in array
+  literals (F8).
+- Effects (`print`, `|>`, `input`) target the `<out>` cell and a virtual file map —
+  which is exactly what fixture verification needs (§13).
+
+**LambdaJS (JavaScript / TypeScript):**
+- Prototype chains = store-walking rules; `this`-binding, hoisting (a pre-pass
+  judgment), and the coercion tower (`ToPrimitive`/`ToNumber`/abstract equality) are
+  ordinary rules — voluminous but shallow. Event loop + microtasks = two queue cells
+  and a scheduling rule. KJS calibrates the size: ~1,250 rules for the ES5 core.
+- TypeScript is *not* separately modeled at run time: model erasure (a judgment from
+  TS AST to JS AST), optionally the type system later as a `judgment`.
+
+The 2026-07 draft also sketched Python, Bash and Ruby models. Those front ends have
+since been removed from the engine (hosted languages, 2026-10-07), so they are out of
+scope.
+
+## 13. Verification at full scale
+
+### 13.1 The pipeline and the four buckets
+
+For each fixture pair `test/lambda/foo.ls` + `foo.txt`:
+
+```
+foo.ls ──AST dump (§12.2.4)──▶ element AST ──normalize──▶ abstract term
+        ──load()──▶ initial Cfg ──fixpoint(step)──▶ final Cfg      (big-step: ev(term))
+        ──extract module value + <out> cell──▶ model value
+        ──format(v, 'mark')──▶ model output  ⟷ diff ⟷  foo.txt (golden)
+```
+
+Three-way comparison per fixture:
+
+1. **model output vs. golden `.txt`** — the headline check;
+2. **model output vs. `// expect:` comments** — the `.ls` files carry per-test-point
+   expectations (`let t1 = add10(5)  // expect: 15`); a harness pass maps each
+   annotated binding to its position in the module result and checks it individually,
+   giving *finer-grained* localization than the whole-file golden (§16 Q4);
+3. **runtime output vs. model output** — differential testing on generated/edge-case
+   programs beyond the fixture set (§14.1).
+
+Every fixture then lands in one of four buckets:
+
+| runtime == golden | model == golden | verdict |
+|---|---|---|
+| ✓ | ✓ | **verified** — implementation and spec agree |
+| ✓ | ✗ | **suspect golden** — either a captured implementation bug (the motivating case!) or a model bug; triage required, and either way something written down is wrong |
+| ✗ | ✓ | runtime regression with an independent confirmation the golden is right |
+| ✗ | ✗ | both moved — usually an intended semantics change; update spec and golden together |
+
+The ✓/✗ bucket is the payoff: today those cases are *invisible*. Each triage either
+fixes a runtime bug, fixes a model rule, or surfaces under-specified semantics that
+gets ruled in the formal spec — all three outcomes are wins. F1 (§7) is this bucket,
+found by hand.
+
+Harness integration (proposed; neither target exists):
+
+```bash
+make semantics-verify suite=lambda          # all fixtures, bucket report
+make semantics-verify test=closure          # one fixture, with rule trace on mismatch
+```
+
+On mismatch the harness reports the first diverging step: the configuration, the rule
+that fired (or `stuck: no rule matches`), and the sub-value diff — this is where
+derivation recording (§12.3.4) earns its keep.
+
+### 13.2 Coverage strategy: grow the verified subset
+
+Do **not** attempt the whole suite at once. Order by semantic dependency, roughly:
+
+1. literals, arithmetic + numeric promotion, `let`, comparison (`numeric_expr.ls`,
+   `mixed_numeric_ops.ls`, `box_unbox*.ls`, `chained_comparisons.ls`, ...)
+2. closures, higher-order functions (`closure*.ls`)
+3. arrays/maps/elements, spread/flattening, indexing/slicing (`comp_expr*.ls`, ...)
+4. pipes, `that`, queries (`child_query.ls`, ...)
+5. `match`, string patterns
+6. error handling (`raise`, `^`, `let v^err`)
+7. `pn` procedural subset: `var`, `while`, mutable captures, assignment targets
+8. modules/imports; then long-tail system functions (each an audited `builtin` until
+   promoted to rules)
+
+The POC covers tiers 1–2 and part of 3 (§8). The full harness tracks a
+`semantics-manifest.json`: which fixtures are in the verified set, which are pending,
+which are excluded-with-reason (e.g. depend on real I/O). The CI gate is "verified set
+stays verified" — the set only grows.
+
+### 13.3 Independence and bootstrapping
+
+The Lambda model is written in Lambda and executes on the Lambda runtime — the runtime
+under test. Is the oracle independent? Honestly stated:
+
+- **The trusted core** is the DSL engine (matcher, rewriter, strictness expansion —
+  mostly C++ following the validator/view code paths, plus generated glue) and the
+  small Lambda subset the strategy library uses; for the POC, the host features the
+  kernel leans on (§10, risk 1). This core is *small*, exercised by every rule application
+  (so bugs in it fail loudly and broadly, not silently on one fixture), and testable
+  in isolation with its own unit fixtures.
+- **The independence argument** is not "different codebase" but **different failure
+  modes**: the runtime implements `+` via JIT-compiled tagged-value machine code; the
+  model implements it via a rule that fires on abstract values. A truncation bug in
+  MIR codegen and a wrong side-condition in a rule have essentially no mechanism for
+  coinciding. This is the same argument by which a compiler's test oracle may be an
+  interpreter for the same language, sharing the parser.
+- **Shared-frontend caveat:** both sides consume the same parse (the C parser, via the
+  AST dump). Parser bugs are out of scope of this oracle; grammar-level tests cover
+  them.
+- **Escape hatch for full independence:** because `syntax`/`rule`/`judgment`
+  declarations are *data* after `build_ast`, an exporter to K (or LaTeX for human
+  review, Ott's headline feature) is a formatter, not a redesign. Cross-running even
+  the arithmetic fragment on another host would spot-check the trusted core itself.
+  The Redex model played this role until its removal (§1.2); nothing does today.
+
+Bootstrapping compounds: once the Lambda model is trustworthy, the LambdaJS model runs
+on a verified substrate, and its verification targets already exist — `test/js/` and
+the Node-compat baseline — giving the JS runtime the same four-bucket triage against
+*its* captured goldens.
+
+## 14. Further directions
+
+Fixture verification is one consumer of a more general asset — an executable,
+queryable definition of "what should happen." None of these are v1 scope; all are
+reachable without redesign.
+
+- **14.1 Fuzzing the JIT with a real oracle.** Once `syntax` sorts exist, Redex-style
+  random program generation is nearly free, and the model says what each generated
+  program *should* produce. This targets the bug class historically found by accident:
+  the JS→MIR numeric-inference bugs, the pn param-inference mis-typing, the reg-0
+  index-assign sentinel, the GC-rooting use-after-free. A generator biased toward the
+  delicate corners (numeric promotion boundaries, closures over `var`,
+  spread-flattening, error propagation through pipes) finds these systematically.
+- **14.2 Arbitrating between execution tiers.** The T0 interpreter and the MIR JIT
+  (D8.1.1v18 tiered execution) are de-facto differential tests of each other, but when
+  they disagree, deciding which is right is reasoning from intent. The model is the
+  tie-breaker, and a disagreement between one tier and the model localizes the fault
+  to that tier.
+- **14.3 Spec-first language evolution.** With rules, a feature ships as rules: edge
+  cases (how does `^` interact with pipes? what does spread do inside a `for` inside
+  an array literal?) surface when the rule is *written*, not when a benchmark breaks.
+  The formal spec now states rulings in prose; rules would be their executable,
+  regression-checked form across transpiler refactors.
+- **14.4 Testing metatheory, not just programs.** Property-test the design over
+  random programs: **type soundness** (well-typed terms don't get stuck),
+  **determinism** (no two rules fire on the same configuration), **equivalence laws**
+  (`xs | f | g` ≡ `xs | g(f(~))`, purity of `fn`, confluence of the functional
+  subset). Every optimization implicitly claims an equivalence; the model can check
+  the claim on random inputs before the optimization lands.
+- **14.5 Generated, always-correct documentation.** Declarations are data after
+  `build_ast`, so rendering them to LaTeX/HTML/Markdown is a formatter. The docs can
+  carry generated rule boxes that *cannot* drift from the checked model, and Lambda's
+  own math/LaTeX pipeline suits inference rules.
+- **14.6 Tooling built on the judgments.** The typing judgment is a type checker for
+  free — LSP hover types, REPL diagnostics, a `lambda check script.ls` mode.
+  Derivation recording gives "explain": *why* is this `int`? *why* is this stuck?
+- **14.7 Conformance grading for LambdaJS.** Run a corpus through model and runtime;
+  the diff *is* the compat report — which constructs the runtime mis-executes versus
+  simply doesn't reach. Sharper than a bare pass rate, which counts outcomes without
+  attributing causes. The same mechanism validates the TS→JS erasure judgment.
+- **14.8 Long-term options.** K's ecosystem shows where this road goes: symbolic
+  execution, deductive program verification, correct-by-construction interpreter
+  generation. Out of scope, but they are why rules stay declarative data rather than
+  being compiled away irreversibly.
+
+## 15. Non-goals and staged plan
+
+### 15.1 Non-goals (v1)
+
+- **Concrete-syntax rules** (K's rules written in the object language's own
+  notation). Element notation is a readable term syntax; AST ingestion covers real
+  programs. Cuts the largest single implementation cost in K.
+- **General AC matching** on maps/sets/bags — §12.4.3's determined-key restriction.
+- **Backtracking judgment search** — moded judgments only (§12.3.4).
+- **Symbolic execution / deductive verification** (§14.8).
+- **Performance as a runtime.** The model is an oracle, not an interpreter users run.
+  Fixture-suite wall-clock should stay in CI-tolerable minutes; if rule dispatch
+  becomes the bottleneck, compiling rules through MIR (they are already functions) is
+  the natural lever — but only when measured.
+- **Modeling the GC, boxing, arenas** — implementation strata are invisible by design
+  (SI1, S1.6); that invisibility is itself the property being verified.
+- **Low-level languages** (C/C++, including the C+ subset the runtime is written in) —
+  not pursued here.
+
+### 15.2 Staged implementation plan
+
+Staged so each stage lands with its own tests and is useful standalone.
+
+| Stage | Content | Status |
+|---|---|---|
+| 0 | Structural matcher + destructuring `match` (§12.2.1–§12.2.2): binders, rest patterns, determined-key map patterns in the type-pattern grammar; the validator's walker grown into a binding matcher (C++). Ships to the whole language. | not started |
+| 1 | `syntax` + term ingestion (§12.3.1, §12.2.3–§12.2.4): binder metadata, derived `free_vars`/`subst`/`alpha_eq`, `fresh()`, AST-dump ingestion, validator sort checking. | not started; ingestion = POC M4 |
+| 2 | `rule`, strategies, `config` (§12.3.2–§12.3.5). Milestone: the §12.1 toy calculus runs. | not started |
+| 3 | `judgment` + strictness expansion (§12.3.4, §12.4.1), derivation recording. Milestone: typed calculus with auto-generated evaluation order. | not started |
+| 4 | Lambda model, functional core (§13.2 tiers 1–5); `builtin` declarations. Milestone: `closure.ls` and `numeric_expr.ls` verified. | **pulled forward as the POC** — M0–M3 in plain Lambda (§8) |
+| 5 | Verification harness: `make semantics-verify`, `// expect:` extraction, four-bucket report, `semantics-manifest.json`, CI gate on the verified set — the first end-goal payoff. | POC graduation point (§6.3, M4) |
+| 6 | Lambda model completion (§13.2 tiers 6–8) + first triage sweep: every ✓/✗ entry resolved to a runtime fix, a model fix, or a ruling. | — |
+| 7 | LambdaJS model (KJS as the map; validated against `test/js/` and the Node-compat baseline), starting with the AST-normalization judgment and §12.4 already in place. | — |
+
+Risk notes: Stage 0 touches the shared pattern grammar — the one stage with regression
+surface on the existing language; it gates on `make test-lambda-baseline` staying
+100%. Stages 1–3 are additive (new statement kinds, `view_stam`-style). The long tail
+is Stage 6 builtin coverage — bounded by making every builtin an explicit, listable
+declaration (§12.3.6).
+
+## 16. Open questions (DSL)
+
+1. **Rewrite arrow spelling** — **resolved: `-->`** (the classic PL reduction arrow).
+   The 2026-07 draft used `~>`; the C6 pipe-syntax discussion
+   (`vibe/Lambda_Semantics_Formal2.md` §C6.2) killed it: rule templates and `when`
+   clauses contain expressions, where `~ > 3`-style comparisons are common, so `~>`
+   would differ from `~ >` by one space with silently different meanings.
+2. **Determined-key marker** — `(x)` in map-pattern key position (§12.4.3) vs. an
+   explicit `key(x):`. The former is terser; the latter survives skimming better. If
+   computed-key map literals land as `{(k): v}` (§12.2.5), `(x)` in patterns mirrors
+   construction — an argument for it.
+3. **Where models live** — `semantics/` at repo root vs. `lambda/semantics/` (the
+   former Redex home) vs. shipping as loadable `.ls` packages. Interim answer for the
+   POC: `test/lambda/sem/` with a golden-less kernel module (§5).
+4. **`// expect:` formalization** — keep as comments parsed by the harness, or promote
+   to a checked `expect` statement in test scripts? Comments preserve fixture
+   compatibility; a statement is harder to let rot.
+5. **Numeric-tower fidelity** — model arithmetic on Lambda's own numerics vs. explicit
+   bit-level rules at the boundaries. Resolved for the POC as P5 (host numerics). The
+   boundaries themselves are now ruled (S4.1, S4.1.5, SI7), so host arithmetic is
+   checked against a written spec rather than trusted blind; targeted boundary checks
+   remain the mitigation (§10, risk 1).
+
+## 17. Summary
+
+The end goal — an executable, independent semantic model that verifies the Lambda
+test fixtures — does not have to wait for the DSL. Big-step + environments eliminates
+the machinery tiers for the functional core; elements, `match`, closures, and the
+`T^E` channel are enough for the rest, and a working kernel with differential checks —
+closures, capture, recursion, stuckness — **already runs, verbatim, on today's
+runtime**. The POC turns the DSL design's largest open risks (is Lambda meta-ready?
+what must Tier 1 contain? does the four-bucket loop pay?) into a few hundred lines of
+committed Lambda.
 
 The "does it pay?" risk is already retired. Merely *probing* for this document
 — before a single line of the model was committed — surfaced a doc divergence,
 two grammar sharp edges, and a `len`/iteration defect whose repair revealed
 that the graph schema validator had been type-checking zero attributes on every
 canonical graph, with fourteen goldens capturing the vacuous pass (§7 F1).
-That is the parent's §7.1 ✓✗ bucket, found by hand, on the first afternoon.
+That is §13.1's ✓✗ bucket, found by hand, on the first afternoon.
+
+Part II keeps the destination in view: destructuring and frame patterns, fresh
+symbols, source ingestion and computed-key maps (Tier 1);
+`syntax`/`config`/`rule`/`judgment`/`builtin` declaration forms with a strategy
+library (Tier 2); strictness expansion, the k-cell continuation discipline, and
+determined-key store matching (Tier 3) — the machinery that lifts the approach from
+the functional core to `pn` and LambdaJS, proven feasible at scale by KJS. The POC is
+its Stage 4, done first, arriving with its own regression suite.

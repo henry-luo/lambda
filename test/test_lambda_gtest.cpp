@@ -581,6 +581,13 @@ static const TierParityFixture kTune27TierParity[] = {
     // give that type; the JIT gave a `pub type` a module slot and unboxed a
     // type-valued call as the value its type names (`0` for `int`)
     {"test/lambda/import_type_values.ls", "test/lambda/import_type_values.txt"},
+    // a `raise` in one match arm ends only that arm; the JIT leaked its exit
+    // to an enclosing `if`, whose join then read the match value as null
+    {"test/lambda/match_raise_arm_join.ls", "test/lambda/match_raise_arm_join.txt"},
+    // tail position passes only through forms whose value is one child's
+    // value; the JIT let it leak into constructors and operators around a
+    // self-call, which then returned the callee's value without the wrapper
+    {"test/lambda/tail_position_constructors.ls", "test/lambda/tail_position_constructors.txt"},
 };
 
 // explicit exclusions used to pass this test by silently executing MIR
