@@ -325,8 +325,15 @@ static void pdf_builder_destroy(MarkOutputBuilder* base) {
     mem_free(builder);
 }
 
+static Item pdf_builder_error(const MarkOutputBuilder* base) {
+    const PDFBuilder* builder = static_cast<const PDFBuilder*>(base);
+    return builder->failure ? err2it_or_error(err_create_heap(builder->failure,
+        builder->failure_message, nullptr)) : ItemNull;
+}
+
 static const MarkOutputBuilderOps pdf_builder_ops = {
-    pdf_builder_append, pdf_builder_finish, pdf_builder_bytes, pdf_builder_destroy
+    pdf_builder_append, pdf_builder_finish, pdf_builder_bytes, pdf_builder_destroy,
+    pdf_builder_error
 };
 
 MarkOutputBuilder* pdf_builder_create() {

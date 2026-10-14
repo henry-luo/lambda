@@ -1,6 +1,6 @@
 # Radiant — Form Controls & Text-Control Editing
 
-> **Last verified against tree:** 2026-09-05
+> **Last verified against tree:** 2026-10-14 *(retained select lifecycle amendment; other sections retain their prior verification scope)*
 > **Select popup styling verified:** 2026-10-13 (§6 amendment).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's HTML form controls (`<input>`, `<textarea>`, `<select>`, `<button>`) as replaced elements with UA-chrome layout and rendering, and — critically — the **native** text-control editing engine that still applies value mutations in C++. [RAD_18 — Editing, Selection & DOM Ranges](RAD_18_Editing_Selection_Ranges.md) documents the registered contenteditable action gate; form controls remain a distinct value-store action between their cancelable `beforeinput` and non-cancelable post-mutation `input` notifications.
@@ -129,6 +129,16 @@ transitions invalidate matching CSS rules. No second hover owner is added
 (**S12.1.5v2**). The source `dom/form.ls` commit procedure rejects disabled
 options and options in disabled groups before changing selectedness; direct
 programmatic setters retain their own contract (**S12.1.3**, **D7.2.4**).
+
+**Retained select lifecycle amendment (2026-10-14).** A retained style reset
+releases only a form control's cached font handles. It preserves the live
+`FormControlProp`, its canonical StateStore bindings and open-popup ownership
+(**S12.1.5v2**, **D4.5.1v4**). The previous reset called full form teardown,
+which immediately closed a newly opened select when hover/style invalidation
+refreshed its layout. Detached or retired controls still use full teardown and
+dismiss their popups. `RadiantFormControls` covers both lifetimes; the photo
+replays open the layer, typeface, alignment and crop menus by click and exercise
+option commits and Escape dismissal.
 
 ---
 

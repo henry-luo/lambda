@@ -512,6 +512,20 @@
           }
         ]
       },
+      "layout": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "empty_braces",
+            "named": true
+          },
+          {
+            "type": "map",
+            "named": true
+          }
+        ]
+      },
       "name": {
         "multiple": false,
         "required": true,
@@ -4177,11 +4191,29 @@
         "required": false,
         "types": [
           {
+            "type": "binary",
+            "named": false
+          },
+          {
             "type": "identifier",
             "named": true
           },
           {
             "type": "symbol",
+            "named": true
+          }
+        ]
+      },
+      "layout": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "empty_braces",
+            "named": true
+          },
+          {
+            "type": "map",
             "named": true
           }
         ]
@@ -6193,6 +6225,10 @@
   {
     "type": "binary",
     "named": true
+  },
+  {
+    "type": "binary",
+    "named": false
   },
   {
     "type": "break",

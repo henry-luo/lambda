@@ -365,6 +365,8 @@ module.exports = grammar({
   ],
 
   conflicts: $ => [
+    // S11.5.1v2: a binary field's `& {…}` is metadata; other `&` operands intersect.
+    [$.binary_type, $._annotation_type],
     // After an attribute, a `,` either separates another attribute or is the
     // required attr-list -> content boundary (§7.11v2). Which one takes two
     // tokens to see, so GLR forks and the losing branch dies immediately.
@@ -1507,17 +1509,33 @@ module.exports = grammar({
     object_type: $ => seq(
       optional(field('pub', 'pub')),
       'type', field('name', choice($.identifier, $.symbol)),
-      optional(seq(':', field('base', choice($.identifier, $.symbol)))),
-      '{',
-      optional(comma_sep1(choice(
-        alias($.attr_type, $.attr),
-        $.that_constraint,
-        alias($._method_stam, $.fn_stam),
-        alias($._method_expr_stam, $.fn_expr_stam),
-        $._type_pattern,
-      ))),
-      '}',
+      choice(
+        seq(':', field('base', 'binary'), optional($._binary_layout),
+          '{', optional(comma_sep1(choice(
+            alias($.binary_attr_type, $.attr), $.that_constraint,
+            alias($._method_stam, $.fn_stam),
+            alias($._method_expr_stam, $.fn_expr_stam), $._type_pattern,
+          ))), '}'),
+        seq(optional(seq(':', field('base', choice($.identifier, $.symbol)))),
+          '{', optional(comma_sep1(choice(
+            alias($.attr_type, $.attr), $.that_constraint,
+            alias($._method_stam, $.fn_stam),
+            alias($._method_expr_stam, $.fn_expr_stam), $._type_pattern,
+          ))), '}'),
+      ),
     ),
+
+    // S11.5.1v2: prefer a trailing metadata map over an intersection in this slot.
+    _binary_layout: $ => prec.dynamic(4, seq(
+      choice('&', alias($._bin_amp, '&')),
+      field('layout', choice($.map, $.empty_braces)),
+    )),
+    binary_attr_type: $ => prec.dynamic(3, prec(2, seq(
+      field('name', $._field_name), optional(field('optional', '?')),
+      ':', field('as', $._annotation_type),
+      optional($._binary_layout),
+      optional(seq('=', field('default', $._element_expr))),
+    ))),
 
     // ==================== String / symbol pattern islands =================
 

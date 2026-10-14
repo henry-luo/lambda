@@ -318,6 +318,34 @@ TEST(LambdaRdParserPoc, ParsesTypeAliasAndObjectDeclarationShells) {
         NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
 }
 
+TEST(LambdaRdParserPoc, BinaryLayoutHasSeparateChildrenAndPreservesOrdinaryFieldShapes) {
+    const char* source =
+        "type Wire : binary & {endian: 'big'} { value: u32 & {offset: 4} }\n"
+        "type Plain { value: int, defaulted: int = 1 }\n";
+    struct Recorder { uint32_t roots; uint32_t fields; uint32_t counts[3]; } recorder = {};
+    LambdaParseSink sink = {[](void* context, const LambdaParseReduction* reduction) -> LambdaParseValue {
+        Recorder* recorded = (Recorder*)context;
+        if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_LAYOUT) recorded->roots++;
+        if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_FIELD && recorded->fields < 3) {
+            recorded->counts[recorded->fields++] = reduction->child_count;
+            if (reduction->child_count == 3) {
+                EXPECT_EQ(reduction->children[1], 0u);
+                EXPECT_NE(reduction->children[2], 0u);
+            }
+        }
+        return 0;
+    }};
+    LambdaParseError error = {};
+    ASSERT_EQ(lambda_rd_parse_source(source, strlen(source), &sink, &recorder,
+        NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
+    EXPECT_EQ(recorder.roots, 1u);
+    ASSERT_EQ(recorder.fields, 3u);
+    EXPECT_EQ(recorder.counts[0], 3u);
+    // the Jube interface sink identifies a default by the optional second child.
+    EXPECT_EQ(recorder.counts[1], 1u);
+    EXPECT_EQ(recorder.counts[2], 2u);
+}
+
 TEST(LambdaRdParserPoc, ParsesTypedAnonymousArrowHead) {
     const char* source = "let add = (left: int, right: int) => left + right\n";
     LambdaParseError error = {};

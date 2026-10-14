@@ -9,6 +9,7 @@
 #include "lambda-error.h"
 #include "recovery_frame.h"
 #include "type_contract.hpp"
+#include "binary_schema.hpp"
 #include "concurrency.h"
 #include "hosted-call-dispatch.hpp"
 #include "interp.hpp"
@@ -2854,6 +2855,8 @@ Bool fn_is(Item a, Item b) {
     }
 
     Type* b_type = b.type;
+    if (const BinarySchema* schema = binary_schema_from_type(b_type))
+        return binary_schema_matches(a, schema) ? BOOL_TRUE : BOOL_FALSE;
     if (b_type->kind == TYPE_KIND_PATTERN) {
         TypeId a_type_id = get_type_id(a);
         TypePattern* pattern = (TypePattern*)b_type;

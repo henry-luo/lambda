@@ -33,6 +33,7 @@ enum TypeKind {
     // extend TypeType (runtime/grammar/grammar.hpp). `kind` is 4 bits wide.
     TYPE_KIND_GRAMMAR,
     TYPE_KIND_GRAMMAR_RULE,
+    TYPE_KIND_BINARY_SCHEMA,
 };
 
 // Name - a qualified name with optional namespace

@@ -61,6 +61,7 @@ Functions for type conversion and inspection.
 | `string(x)` | Convert to string | `string(42)` | `"42"` |
 | `symbol(x)` | Convert to symbol | `symbol("text")` | `'text'` |
 | `binary(x)` | Convert to immutable bytes | `binary("hello")` | `b'\x68656C6C6F'` |
+| `binary_decode(bytes, schema)` | Read a fixed binary layout lazily as a read-only element; truncation and native-bound schemas return errors | `binary_decode(b'\x1234', Header)^` | Schema-backed element |
 
 There is no `number(x)` conversion yet (the registry row is a stub): convert
 with `int`, `float` or `decimal`. `symbol(name, url)` builds a namespaced
@@ -1849,6 +1850,7 @@ The [Photo Studio demo](../test/demo/photo/README.md) uses this bridge.
 | `string` | 1 | Convert to string |
 | `symbol` | 1-2 | Convert to symbol; `symbol(name, url)` is namespaced |
 | `binary` | 1 | Convert to binary |
+| `binary_decode` | 2 | Read immutable bytes using a physical binary schema (S11.5) |
 | `count` | 1 | Size of the run a query answered with |
 | `name` | 1 | Name of an element, function or type |
 

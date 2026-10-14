@@ -1599,6 +1599,7 @@ typedef struct AstObjectTypeNode : AstNamedNode {
     AstNode* methods;
     AstNode* constraints;
     bool is_public;
+    bool is_binary_schema;
     int local_type_index;
 } AstObjectTypeNode;
 

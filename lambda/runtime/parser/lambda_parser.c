@@ -161,6 +161,7 @@ static const char* const error_grammar_body_open = "expected '{' after the gramm
 static const char* const error_grammar_body_close = "expected '}' closing the grammar body";
 static const char* const error_object_type_separator = "object-type members are separated by ',', not ';'";
 static const char* const error_object_field_colon = "expected ':' after object-type field name";
+static const char* const error_binary_layout_map = "binary layout '&' requires a literal metadata map";
 static const char* const error_expected_object_type_member = "expected an object type field, content type, or method";
 static const char* const error_block_body_open = "expected '{' after block";
 static const char* const error_block_body_close = "expected '}' after block";
@@ -746,7 +747,7 @@ static bool parser_at_counted_run(const LambdaRdParser* parser) {
 }
 
 static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
-        bool allow_binder, uint32_t reduction_flags) {
+        bool allow_binder, uint32_t reduction_flags, bool binary_field) {
     LambdaToken first = parser->current;
     if (!token_starts_type(first.kind)) {
         return parser_fail(parser, error_expected_type_pattern, LAMBDA_TOK_BASE_TYPE);
@@ -857,6 +858,9 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
             continue;
         }
         if (kind == LAMBDA_TOK_PIPE || kind == LAMBDA_TOK_AMPERSAND || kind == LAMBDA_TOK_BANG) {
+            // S11.5.1v2: a trailing map is layout metadata only in binary fields.
+            if (binary_field && kind == LAMBDA_TOK_AMPERSAND &&
+                    parser->next.kind == LAMBDA_TOK_LBRACE) break;
             parser_advance(parser);
             need_atom = true;
             continue;
@@ -873,12 +877,12 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
 }
 
 static LambdaParseValue parse_type_slot(LambdaRdParser* parser) {
-    return parse_type_slot_mode(parser, false, 0);
+    return parse_type_slot_mode(parser, false, 0, false);
 }
 
 static bool parse_annotation_type_slot_value_mode(LambdaRdParser* parser,
         LambdaParseValue* value_out, bool allow_binder,
-        bool allow_leading_binder) {
+        bool allow_leading_binder, bool binary_field) {
     LambdaToken first = parser->current;
     if (parser_accept(parser, LAMBDA_TOK_AS)) {
         if (!allow_binder) {
@@ -904,7 +908,7 @@ static bool parse_annotation_type_slot_value_mode(LambdaRdParser* parser,
         if (value_out) *value_out = value;
         return true;
     }
-    LambdaParseValue value = parse_type_slot_mode(parser, allow_binder, 0);
+    LambdaParseValue value = parse_type_slot_mode(parser, allow_binder, 0, binary_field);
     if (!value) return false;
     if (parser_accept(parser, LAMBDA_TOK_TO)) {
         LambdaParseValue range_end = parse_expression(parser, 0);
@@ -946,7 +950,7 @@ static bool parse_annotation_type_slot_value_mode(LambdaRdParser* parser,
 
 static bool parse_annotation_type_slot_value(LambdaRdParser* parser,
         LambdaParseValue* value_out) {
-    return parse_annotation_type_slot_value_mode(parser, value_out, false, false);
+    return parse_annotation_type_slot_value_mode(parser, value_out, false, false, false);
 }
 
 static LambdaParseValue parse_primary_type_slot(LambdaRdParser* parser) {
@@ -1201,14 +1205,14 @@ static bool parser_parse_return_types(LambdaRdParser* parser, LambdaParseValue* 
         // Keep the complete return source intact so the type-pattern parser
         // can issue its binder-specific semantic diagnostic (S4.2.2).
         LambdaParseValue returned = parse_type_slot_mode(parser, true,
-            LAMBDA_REDUCTION_FLAG_RETURN_TYPE);
+            LAMBDA_REDUCTION_FLAG_RETURN_TYPE, false);
         if (!returned) return false;
         if (values && count) values[(*count)++] = returned;
         if (parser_accept(parser, LAMBDA_TOK_CARET)) {
             raised = true;
             if (token_starts_return_type(parser->current.kind)) {
                 LambdaParseValue error_type = parse_type_slot_mode(parser, true,
-                    LAMBDA_REDUCTION_FLAG_RETURN_TYPE);
+                    LAMBDA_REDUCTION_FLAG_RETURN_TYPE, false);
                 if (!error_type) return false;
                 if (values && count) values[(*count)++] = error_type;
             }
@@ -1243,7 +1247,7 @@ static bool parse_parameter_items(LambdaRdParser* parser, bool allow_variadic, c
         LambdaParseValue type_value = 0;
         if (parser_accept(parser, LAMBDA_TOK_COLON) &&
                 !parse_annotation_type_slot_value_mode(parser, &type_value, true,
-                    !optional)) {
+                    !optional, false)) {
             return false;
         }
         LambdaParseValue default_value = 0;
@@ -2285,25 +2289,37 @@ static bool parser_parse_object_type_constraint(LambdaRdParser* parser) {
     return true;
 }
 
-static bool parser_parse_object_type_field(LambdaRdParser* parser) {
+static bool parser_parse_binary_layout(LambdaRdParser* parser, LambdaParseValue* layout) {
+    parser_advance(parser);
+    if (parser->current.kind != LAMBDA_TOK_LBRACE)
+        return parser_fail(parser, error_binary_layout_map, LAMBDA_TOK_LBRACE);
+    *layout = parse_map(parser);
+    return *layout != 0;
+}
+
+static bool parser_parse_object_type_field(LambdaRdParser* parser, bool binary_schema) {
     LambdaToken field = parser->current;
     parser_advance(parser);
     uint32_t field_flags = parser_accept(parser, LAMBDA_TOK_QUESTION)
         ? LAMBDA_REDUCTION_FLAG_OPTIONAL : 0u;
     if (!parser_expect_message(parser, LAMBDA_TOK_COLON, error_object_field_colon)) return false;
     LambdaParseValue type_value = 0;
-    if (!parse_annotation_type_slot_value(parser, &type_value)) return false;
-    LambdaParseValue children[2] = {type_value, 0};
-    uint32_t child_count = 1;
+    if (!parse_annotation_type_slot_value_mode(parser, &type_value, false, false,
+            binary_schema)) return false;
+    // layout metadata has its own reduction child, separate from the logical type.
+    LambdaParseValue children[3] = {type_value, 0, 0};
+    if (binary_schema && parser->current.kind == LAMBDA_TOK_AMPERSAND &&
+            !parser_parse_binary_layout(parser, &children[2])) return false;
     if (parser_accept(parser, LAMBDA_TOK_EQ)) {
-        if (!parser_parse_expression_value(parser, 0, &children[child_count])) return false;
-        child_count++;
+        if (!parser_parse_expression_value(parser, 0, &children[1])) return false;
     }
+    // preserve the optional default-child shape used by the Jube interface sink.
+    uint32_t child_count = children[2] ? 3u : children[1] ? 2u : 1u;
     parser_reduce_tokens(parser, LAMBDA_REDUCE_STATEMENT, LAMBDA_REDUCTION_FORM_TYPE_OBJECT_FIELD, (SourceSpan){field.span.start_byte, parser->current.span.start_byte}, field, (LambdaToken){0}, field_flags, children, child_count);
     return true;
 }
 
-static bool parser_parse_object_type_member(LambdaRdParser* parser) {
+static bool parser_parse_object_type_member(LambdaRdParser* parser, bool binary_schema) {
     if (parser->current.kind == LAMBDA_TOK_FN || parser->current.kind == LAMBDA_TOK_PN) {
         return parse_function_declaration(parser, false) != 0;
     }
@@ -2311,7 +2327,7 @@ static bool parser_parse_object_type_member(LambdaRdParser* parser) {
         return parser_parse_object_type_constraint(parser);
     }
     if (parser_object_type_field_starts(parser)) {
-        return parser_parse_object_type_field(parser);
+        return parser_parse_object_type_field(parser, binary_schema);
     }
     if (token_starts_type(parser->current.kind)) {
         LambdaToken content = parser->current;
@@ -2325,7 +2341,7 @@ static bool parser_parse_object_type_member(LambdaRdParser* parser) {
 }
 
 // object members are one strict comma list: field, constraint, method, or content type.
-static bool parser_parse_object_type_members(LambdaRdParser* parser) {
+static bool parser_parse_object_type_members(LambdaRdParser* parser, bool binary_schema) {
     if (!parser_expect(parser, LAMBDA_TOK_LBRACE)) return false;
     while (parser->status == LAMBDA_PARSE_OK && parser->current.kind != LAMBDA_TOK_RBRACE) {
         while (parser_accept(parser, LAMBDA_TOK_COMMA)) {}
@@ -2334,7 +2350,7 @@ static bool parser_parse_object_type_members(LambdaRdParser* parser) {
             parser_fail(parser, error_object_type_separator, LAMBDA_TOK_COMMA);
             return false;
         }
-        if (!parser_parse_object_type_member(parser)) return false;
+        if (!parser_parse_object_type_member(parser, binary_schema)) return false;
     }
     return parser_expect(parser, LAMBDA_TOK_RBRACE);
 }
@@ -2353,7 +2369,18 @@ static LambdaParseValue parse_type_declaration(LambdaRdParser* parser, bool is_p
                     error_expected_inherited_type_name, &base)) return 0;
         }
         parser_context_ex(parser, LAMBDA_REDUCTION_FORM_TYPE_OBJECT_BEGIN, first.span, base, name, is_public ? LAMBDA_REDUCTION_FLAG_PUBLIC : 0u, NULL, 0);
-        if (!parser_parse_object_type_members(parser)) return 0;
+        bool binary_schema = base.span.end_byte - base.span.start_byte == 6 &&
+            memcmp(parser->lexer.source + base.span.start_byte, "binary", 6) == 0;
+        if (binary_schema && parser->current.kind == LAMBDA_TOK_AMPERSAND) {
+            LambdaToken layout_start = parser->current;
+            LambdaParseValue layout;
+            if (!parser_parse_binary_layout(parser, &layout)) return 0;
+            parser_reduce_one(parser, LAMBDA_REDUCE_STATEMENT,
+                LAMBDA_REDUCTION_FORM_TYPE_OBJECT_LAYOUT,
+                (SourceSpan){layout_start.span.start_byte, parser->current.span.start_byte},
+                layout_start, layout);
+        }
+        if (!parser_parse_object_type_members(parser, binary_schema)) return 0;
     }
     SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
     if (first.kind == LAMBDA_TOK_TYPE && parser->current.kind != LAMBDA_TOK_EQ) {

@@ -478,7 +478,7 @@ static void free_scroll_payload(DomElement* elem, ViewTree* tree) {
     view_pool_free(tree, elem->scroller->pane);
 }
 
-static void release_form_prop(DomElement* elem, ViewTree*) {
+static void release_form_prop_fonts(DomElement* elem, ViewTree*) {
     if (!elem || !elem->form) {
         return;
     }
@@ -492,6 +492,12 @@ static void release_form_prop(DomElement* elem, ViewTree*) {
         font_prop_release_handle(form->file_button_font);
         form->file_button_font = nullptr;
     }
+}
+
+static void release_form_prop(DomElement* elem, ViewTree* tree) {
+    release_form_prop_fonts(elem, tree);
+    if (!elem || !elem->form) return;
+    FormControlProp* form = elem->form;
     form_control_prop_release(elem, form);
     // a heap form prop (heap_allocated) is the one view slot whose storage is
     // not the view tree's pool; the release hands it over here
@@ -627,7 +633,8 @@ static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
     { "filter", release_filter_external, free_filter_payload, view_prop_get_filter, view_prop_clear_filter, view_prop_free_filter, nullptr, nullptr, &FILTER_PROP_DEFAULT, sizeof(FilterProp), nullptr },
     { "backdrop-filter", release_backdrop_filter_external, free_backdrop_filter_payload, view_prop_get_backdrop_filter, view_prop_clear_backdrop_filter, view_prop_free_backdrop_filter, nullptr, nullptr, &FILTER_PROP_DEFAULT, sizeof(FilterProp), nullptr },
     { "multicol", nullptr, nullptr, view_prop_get_multicol, view_prop_clear_multicol, view_prop_free_multicol, nullptr, nullptr, &MULTICOL_PROP_DEFAULT, sizeof(MultiColumnProp), nullptr },
-    { "form", release_form_prop, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 0, nullptr },
+    // retained restyles rebuild font caches without ending the control's live session.
+    { "form", release_form_prop, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 0, nullptr, release_form_prop_fonts },
     { "item", nullptr, nullptr, nullptr, nullptr, nullptr, clear_item_prop, free_item_prop, nullptr, 0, free_item_prop },
     { "pseudo", nullptr, nullptr, view_prop_get_pseudo, view_prop_clear_pseudo, view_prop_free_pseudo, nullptr, nullptr, &PSEUDO_CONTENT_PROP_DEFAULT, sizeof(PseudoContentProp), reset_pseudo_content_prop },
     { "vector-path", nullptr, free_vector_path_payload, view_prop_get_vpath, view_prop_clear_vpath, view_prop_free_vpath, nullptr, nullptr, &VECTOR_PATH_PROP_DEFAULT, sizeof(VectorPathProp), nullptr },

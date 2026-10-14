@@ -1,6 +1,11 @@
 # Lambda Binary Schema — Enhancement Proposal
 
-> **Status:** Proposal
+> **Status:** fixed-record/native-binding implementation started 2026-10-15;
+> syntax ratified 2026-10-15: trailing `& {…}` metadata is confined to binary
+> declaration slots. Broader array/serializer phases below remain proposals.
+> **Formal linkage:** S11.5.1v2, S11.5.2, S11.5.3v2, D3.1.1v5, D3.5.1–D3.5.2,
+> D7.4.5v2. The current contract is recorded in §10; older implementation
+> sketches below precede the common Velmt carrier and MIR-only runtime.
 > **Scope:** Schema-driven binary (de)serialization for Lambda Script — a typed binary layout language expressed in Lambda's `type` system, a lazy zero-copy virtual element (`Velmt`) backed by a byte buffer + schema, and a schema-driven serializer for the round trip.
 > **Builds on:** [Lambda_Type_Binary.md](Lambda_Type_Binary.md) — the `Binary` runtime representation (Tier 1) and sub-binary zero-copy slicing (Tier 3) are prerequisites for the lazy/zero-copy Velmt described here.
 > **Prior art:** [Kaitai Struct](https://doc.kaitai.io/) (declarative binary parsing), Erlang bit syntax, Python `construct`, Rust `binread`/`deku`, Protobuf/FlatBuffers (zero-copy access), ASN.1.
@@ -34,7 +39,7 @@ This proposal adds three capabilities:
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| **Schema syntax** | **Explicit binary type `type A : binary { … }`; physical layout via a trailing `that {…}` annotation map per field** (`a: int32 that {offset:…, magic:…, align:…, endian:…}`). A new general Lambda feature: any type field may carry a `that {…}` annotation map; the `that` keyword removes the `a: int {…}` grammar ambiguity. | Zero new top-level grammar; the annotation map is itself ordinary Lambda map syntax; schemas are first-class values, composable, importable, validator-usable. |
+| **Schema syntax** | **Explicit binary type `type A : binary & {…} { … }`; optional trailing `& {…}` maps carry root and field layout metadata.** This exception is confined to binary declaration slots (S11.5.1v2); elsewhere `&` remains intersection and `that` remains a predicate (S10.1.1v4). | No new keyword; the map is ordinary Lambda map syntax, compiled separately from the logical type and constraints. |
 | **Endianness** | **Declared once at the schema root (type-level annotation map), inherited by all nested fields, overridable per field.** Mirrors Kaitai's `meta/endian`. | Matches real formats (almost always single-endian); avoids per-field verbosity while staying explicit where it matters. |
 | **Element shape** | Fields → **element attributes** for scalars, nested structs, and **any array with a given/encoded count** (homogeneous or heterogeneous). Fields → **child nodes** only for **sentinel-/EOS-terminated repeating content** (no on-wire count). | Counted data is a value; only open-ended chunked streams are document "body". Preserves declared order and `rec.field` access. |
 | **Velmt decoding** | **Lazy + zero-copy.** `Velmt` holds `{ buffer, schema, base_offset }`; scalar/array fields decode on access; sub-structs and `binary`/array slices are zero-copy sub-views into the parent buffer. | Handles multi-GB / mmap'd inputs; depends on sub-binary slicing from [Lambda_Type_Binary.md §6.1]. |
@@ -63,26 +68,26 @@ This proposal adds three capabilities:
 ### 4.1 The user's example, annotated
 
 ```lambda
-type AnimalRecord : binary that {endian: big} {  // ': binary' = explicit binary type;
-                                                 // 'that {…}' = type-level annotation map
+type AnimalRecord : binary & {endian: big} {  // ': binary' = explicit binary type;
+                                                 // '& {…}' = type-level annotation map
     uuid:       uint8[16]                         // 128-bit UUID, 16 raw bytes
     name:       uint8[24]                          // fixed 24-byte field (NUL-padded)
     birth_year: uint16                             // inherits big-endian
     weight:     float64                            // IEEE-754, big-endian
     rating:     int32                              // signed, big-endian
-    crc:        uint32 that {endian: little}       // per-field override via annotation map
+    crc:        uint32 & {endian: little}       // per-field override via annotation map
 }
 ```
 
 - **`type A : binary { … }`** marks an explicit binary (physical-layout) type, so tools/validator distinguish it from a logical type. It is still structurally "a Lambda `type`."
-- **Field annotations are a trailing `that {…}` Lambda map** after the field's type — a new, *general* Lambda capability (any type field may carry a `that { key: value, … }` annotation map). The `that` keyword disambiguates the annotation map from the schema body / a map-typed field — without it `a: int {…}` is grammatically ambiguous. Recognized keys: `endian`, `offset`, `magic`, `align`, `until`, `until_eos`, `if` (Phase 2). Array/blob length is **not** an annotation key — it is the bracket expression `T[len]` in type position. No new `@`/`/be` micro-syntax.
-- The **type-level annotation map** (`that {endian: big}` right after `: binary`) sets schema-wide defaults — chiefly `endian` — inherited by all fields and by nested binary types unless they declare their own.
+- **Field annotations are a trailing `& {…}` Lambda map** directly after a binary field's logical type. This is scoped to `: binary` declarations, not a general type intersection with a map pattern (S11.5.1v2, S10.1.1v4). `that` retains its predicate meaning; it never carries physical metadata. Planned keys include `endian`, `offset`, `magic`, `align`, `until`, `until_eos`, `if`; the implemented subset is listed in §10. Array/blob length remains the bracket expression `T[len]` in the broader proposal.
+- The **type-level annotation map** (`& {endian: big}` right after `: binary`) sets schema-wide defaults — chiefly `endian` — inherited by all fields and by nested binary types unless they declare their own.
 - Field types are Lambda's existing fixed-width numerics (`uint8`, `int32`, `float64`, …) — already needed by [Lambda_Type_Binary.md §5.3].
 - `T[N]` = fixed-length array of `N` `T`. `uint8[16]` decodes to a zero-copy `binary` sub-view (raw bytes); other element types decode to a typed array view.
 
 ### 4.2 Annotation vocabulary (Phase 1)
 
-Array/blob **length lives in the type position** as a bracket expression `T[expr]` where `expr` is a literal, a const, **or the name of a previously-decoded field** (`int8[len]`). The trailing `that {…}` map carries everything else: type-level keys after `: binary`, field-level keys after the field's type.
+Array/blob **length lives in the type position** as a bracket expression `T[expr]` where `expr` is a literal, a const, **or the name of a previously-decoded field** (`int8[len]`). The trailing `& {…}` map carries everything else: type-level keys after `: binary`, field-level keys after the field's type.
 
 | Form | Level | Meaning | Kaitai analogue |
 |---|---|---|---|
@@ -102,25 +107,25 @@ Array/blob **length lives in the type position** as a bracket expression `T[expr
 Enums are an ordinary Lambda type declaration — `type Name { label: value, … }` — used directly as a field type over its backing integer width.
 
 ```lambda
-type Chunk : binary that {endian: big} {
+type Chunk : binary & {endian: big} {
     length: uint32                              // real wire field
     ctype:  uint8[4]
     data:   binary[length]                       // blob length = the 'length' field above
     crc:    uint32
 }
 
-type Png : binary that {endian: big, magic: b'\x89504E470D0A1A0A'} {
-    chunks: Chunk that {until_eos: true}        // sentinel/EOS-terminated → child nodes
+type Png : binary & {endian: big, magic: b'\x89504E470D0A1A0A'} {
+    chunks: Chunk & {until_eos: true}        // sentinel/EOS-terminated → child nodes
 }
 
 type Compression { none: 0, zlib: 1, lz4: 2 }   // plain Lambda enum type
 
-type Header : binary that {endian: little} {
+type Header : binary & {endian: little} {
     version: uint16
     codec:   Compression                         // decode uint → enum label; encode → int
 }
 
-type B : binary that {endian: big} {
+type B : binary & {endian: big} {
     len:    int16
     fieldA: int8[len]                            // counted array → attribute (see §5.1)
 }
@@ -199,7 +204,7 @@ struct VElmt : Container {                        // LMD_TYPE_ELEMENT, IS_VIRTUA
 **Field → element mapping rule (resolved):** the axis is *counted vs. open-ended*, not homogeneous vs. heterogeneous.
 
 - Scalars, nested structs, and **any array whose length is known/encoded** — fixed `T[N]`, or `T[prev_field]` — → an **attribute** (element tagged with the schema name; attribute order = declared order). True whether items are homogeneous (`uint8[16]`) or heterogeneous. `rec.weight`, `rec.uuid`, `b.fieldA` work; `rec.name` is a zero-copy `binary`.
-- Only **sentinel-/EOS-terminated repeating content** with no on-wire count (`that {until: …}` / `that {until_eos: true}`, e.g. `Png.chunks`, a TLV stream) → **child nodes**, iterated via `for ch in elmt` / `elmt[i]`.
+- Only **sentinel-/EOS-terminated repeating content** with no on-wire count (`& {until: …}` / `& {until_eos: true}`, e.g. `Png.chunks`, a TLV stream) → **child nodes**, iterated via `for ch in elmt` / `elmt[i]`.
 
 ### 5.2 The decode entry point
 
@@ -242,7 +247,7 @@ binary.encode(binary.decode(b, S), S) == b               // for canonical inputs
 - **Fast path — unmodified `Velmt`:** if the node is a `Velmt` over schema `S` and no field cache slot was written through a mutation API, `encode` is a single `memcpy` of the underlying view (it is already the exact bytes).
 - **General path:** walk `S.fields` in declared order; for each field pull the value (`get_attr` for attribute-mapped fields, child traversal for sentinel/EOS-mapped fields), encode with the field's resolved endianness/width, honoring `align`/`magic` (emit the constant), and emit sentinel/EOS terminators per `repeat_mode`. Output is assembled via `binary.builder()` from [Lambda_Type_Binary.md §5.1].
 - **Source flexibility:** the input need not be a `Velmt` — any Lambda `Element`/`Map`/`Object` whose fields satisfy `S` (a plain constructed map of the right shape) serializes. This is what makes the type *useful for producing* binary, not just parsing it.
-- **Consistency checks:** when a real wire field is used as another field's length (`len` → `int8[len]`), `encode` verifies the supplied `len` equals the actual array length and returns `error` on mismatch rather than emitting a corrupt buffer. (Phase 2 adds an opt-in `that {derive: true}` to *auto-compute* such a length field from the array on encode, so callers need not set it by hand.)
+- **Consistency checks:** when a real wire field is used as another field's length (`len` → `int8[len]`), `encode` verifies the supplied `len` equals the actual array length and returns `error` on mismatch rather than emitting a corrupt buffer. (Phase 2 adds an opt-in `& {derive: true}` to *auto-compute* such a length field from the array on encode, so callers need not set it by hand.)
 
 ### 6.2 Mutation & re-encode
 
@@ -254,7 +259,7 @@ Phase 1 treats `Velmt` as read-only; producing modified binary = build a new con
 
 | File | Change |
 |---|---|
-| `lambda/tree-sitter-lambda/grammar.js` | (a) `type … : binary` supertype form; (b) **general feature: optional `that {…}` annotation map after a type field and after the type-level `: binary`** (new `that` keyword + ordinary map syntax; resolves the `a: int {…}` ambiguity); array-type `T[N]`/`T[field]`. Then `make generate-grammar`. |
+| `lambda/tree-sitter-lambda/grammar.js` | (a) `type … : binary` supertype form; (b) **binary-only trailing `& {…}` metadata at a field or after `: binary`**; preserve ordinary intersections and predicate constraints (S10.1.1v4, S11.5.1v2); array-type `T[N]`/`T[field]`. Then `make generate-grammar`. |
 | `lambda/lambda-data.hpp` | Add `BinarySchema`, `BinFieldDesc`, `LMD_TYPE_BINARY_SCHEMA`. |
 | `lambda/lambda.hpp` / `lambda.h` | Add `VElmt`, `VElmtVtable`; reuse `LMD_TYPE_ELEMENT` with an `IS_VIRTUAL` container flag (parallel to `VMap`). |
 | `lambda/build_ast.cpp` | Lower `type … : binary` decls + annotation maps to `BinarySchema`; resolve inherited endianness; precompute fixed-stride offset tables; classify each field as attribute- vs child-mapped. |
@@ -274,7 +279,7 @@ Phase 1 treats `Velmt` as read-only; producing modified binary = build a new con
 |---|---|---|
 | **0 (prereq)** | Bytes | [Lambda_Type_Binary.md] Tier 1 (`Binary` repr) + Tier 3.1 (sub-binary slicing). |
 | **1** | Schema + Velmt + round trip | `type … : binary` + annotation maps; fixed & field-referenced arrays (`T[N]`, `T[prev_field]`), `until`/`until_eos`, enum types, `magic`/`endian`/`align`; counted-vs-sentinel mapping rule; `BinarySchema`; lazy zero-copy `VElmt`; `binary.decode`/`binary.encode`; validator hook; full test suite. |
-| **2** | Kaitai depth | `if` conditionals; computed/derived instances; substreams; `that {derive: true}` auto-length on encode; mutable/write-through `VElmt`. |
+| **2** | Kaitai depth | `if` conditionals; computed/derived instances; substreams; `& {derive: true}` auto-length on encode; mutable/write-through `VElmt`. |
 | **3** | Full parity | Bit-sized fields; the expression sublanguage; schema `import`; Erlang-style bit-pattern `match` integration; cross-runtime buffer bridge (share `Velmt` buffer with JS `Uint8Array`). |
 
 ---
@@ -283,15 +288,77 @@ Phase 1 treats `Velmt` as read-only; producing modified binary = build a new con
 
 **All folded into the proposal:**
 
-1. **Syntax.** Explicit `type A : binary { … }`; per-field non-length layout via a trailing `that {…}` annotation map (`that {offset:…, magic:…, align:…, endian:…}`); schema-wide defaults via the type-level `that {…}` after `: binary`. Introduces one general Lambda feature — an optional `that {…}` annotation map on type fields, the `that` keyword resolving the `a: int {…}` parse ambiguity.
+1. **Syntax (USER, revised 2026-10-15).** Explicit `type A : binary & {…} { … }`; per-field non-length layout via trailing `& {…}` metadata. This exception applies directly at binary root and field slots (S11.5.1v2). `&` elsewhere remains intersection and `that` remains a predicate (S10.1.1v4). The initial proposal to overload `that` is superseded in Appendix S.
 2. **Array length.** Lives in type position as `T[expr]`; `expr` may be a literal, a const, or the **name of a previously-decoded field** (`int8[len]`). No annotation key, no synthetic counter — a length field exists only if the wire format has one.
 3. **Element shape.** Counted/sized content (scalars, nested structs, `T[N]`, `T[prev_field]`) → **attributes**. Only sentinel-/EOS-terminated content with no on-wire count (`until` / `until_eos`) → **child nodes**.
 4. **Enums.** Ordinary Lambda type declaration `type Name { label: value, … }`, used directly as a field type — decode int → label, encode label → int.
 5. **Nested endianness.** A nested `: binary` type inherits the enclosing schema's `endian` unless it declares its own (Kaitai-style).
 6. **Failure model.** Cheap file-level checks (root `magic`, declared/fixed-stride span vs. buffer length) error at `decode`; everything else errors on the offending field access. No fabricated count/size fields.
 
-**No open questions remain — Phase 1 design is locked.** Items deferred *by phase* (not open): the general expression sublanguage for `T[expr]`/`if` (Phase 3 — Phase 1 accepts only literal/const/bare-field-name), `that {derive: true}` auto-length on encode (Phase 2), conditionals/computed instances/substreams (Phase 2), bit-sized fields and schema `import` (Phase 3).
+**No open questions remain — Phase 1 design is locked.** Items deferred *by phase* (not open): the general expression sublanguage for `T[expr]`/`if` (Phase 3 — Phase 1 accepts only literal/const/bare-field-name), `& {derive: true}` auto-length on encode (Phase 2), conditionals/computed instances/substreams (Phase 2), bit-sized fields and schema `import` (Phase 3).
 
 ---
 
-*End of proposal.*
+## 10. Native schemas and the PDF callback implementation (2026-10-15)
+
+The [PDF phase 2 implementation](impl/Lambda_Impl_PDF_Output_Phase2.md) uses
+the shared native walker and schema-backed callback records. Tree and text
+fragment links remain native. Property references use the same lazy field
+accessor as bounded byte layouts, under **S11.5.1v2, S11.5.2, S11.5.3v2 / D3.5.1–D3.5.2**.
+
+The implemented declaration form uses trailing `& {…}` metadata directly at
+the root and field slots of `: binary` declarations (S11.5.1v2). Metadata is
+parsed as an ordinary map into a separate AST slot, never as an intersection
+operand or a constrained-type predicate. `&` inside a nested/parenthesized
+type expression retains its ordinary intersection meaning. `that` remains a
+predicate; binary field and record predicates are explicitly rejected by the
+current physical-layout profile rather than silently treated as metadata.
+`binary_decode(bytes, Schema)` is the current buffer entry point. Root metadata
+selects endianness, or `layout: 'native'` with a registered `binding` name.
+An unspecified nested byte order inherits its parent; an unspecified root
+uses native order (S11.5.1v2).
+`T? & {pointer: 'native'}` selects a nullable native property reference.
+Native bindings supply compiler-derived locators and typed wrapper access;
+schema declaration order does not define a C/C++ ABI. Native helpers may also
+declare boxed Item fields, whose exact edges are traced while the record owner
+is valid. Their declared logical type and nullability are checked at binding
+and access. Such fields cannot be reconstructed from arbitrary bytes.
+
+Schemas remain first-class Type values using **D3.1.1v5**'s internal binary
+schema kind. The current declaration descriptor reuses TypeObject's
+declaration/index prefix, without creating a nominal map constructor. The
+backend uses the existing Velmt vtable and GC hooks (**D7.4.5v2**), rather than
+the earlier VElmt/header sketches. A record retains its schema declaration;
+`record is Schema` recognizes that descriptor and aliases preserve it.
+
+`BinarySchemaOwner` is a refcounted invalidation control over the existing
+native storage lifetime, not a new allocator. A session invalidates it before
+releasing document/view storage. Callback-local context and text projections
+have shorter controls, invalidated before scratch reuse. A surviving wrapper
+cannot read a closed owner. Byte views trace their Binary source; native views
+precisely trace their selected Item fields, including nested property records.
+The same field visitor temporarily roots these Items during carrier allocation,
+before the new wrapper can publish its own trace edge (D5.3.3–D5.3.4).
+
+Fixed-width fields, nested records, explicit field offsets and typed native
+property references are the initial subset. Counted arrays, full schema
+serialization, general relative references and cyclic graphs remain unfinished.
+The native export bindings currently use shared C++ binding macros; generation
+from one schema manifest remains follow-up work. The complete phase 1 scope
+in §8 is therefore not marked finished. Formal implementation marks remain
+until those gates close.
+
+
+## Appendix S. Superseded syntax decisions
+
+~~The initial proposal allowed any type field to carry a trailing `that {…}`
+annotation map and used `: binary that {…}` for root metadata. The first native
+PDF increment limited that reinterpretation to binary declarations.~~
+Superseded by the user's 2026-10-15 selection of `& {…}` at binary declaration
+slots (S11.5.1v2, S11.5.3v2). `that` keeps its predicate role.
+
+~~S10.1.1v3 described `|`, `&` and `!` as type operators, and only that,
+everywhere.~~ S10.1.1v4 preserves that algebra outside the explicit binary
+metadata slots and records the scoped exception. The exception avoids making
+a scalar layout such as `u32 & {offset: 4}` an impossible scalar/map
+intersection. No new metadata keyword or script-visible pointer type is added.

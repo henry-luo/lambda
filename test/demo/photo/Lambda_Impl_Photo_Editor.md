@@ -717,3 +717,37 @@ hosts produced the same 42 passing, 15 partial and one failing Markdown results.
 This is a failing layout gate, with no new failure attributable to this fix.
 Local verification logs and before/after captures are under
 `temp/photo/button-alignment/`.
+
+### Select popup lifecycle correction (2026-10-14)
+
+Clicking a photo select reached the DOM package and opened its popup, but the
+following retained style reset invoked full form-control teardown. That release
+closed the popup before it could be painted. The shared teardown table now uses
+its existing reset-specific release hook to rebuild only cached font handles;
+the live control and canonical interaction state survive restyling
+(**S12.1.5v2**, **D4.5.1v4**). Detached and retired controls continue to close
+their popup through full release.
+
+The photo Escape handler also intercepted the select's own dismissal key.
+An open select now receives Escape through the DOM package before editor-level
+actions run (**D7.2.4**), so dismissing the crop menu preserves the crop draft.
+
+An in-process regression fails before the lifecycle fix and passes afterward:
+the control identity, selected option, hover and open popup survive retained
+restyling, while releasing the control still clears popup ownership. The photo
+creative and crop replays now open all four menus by click, assert persistence,
+and exercise keyboard/pointer commits and Escape dismissal. Logs and native
+captures are under `temp/photo/dropdowns/`.
+
+Verification passed all 113 native text/layout/UI checks, 535 view/layout checks,
+22 StateStore checks, 156 DOM UI checks, and the four expanded creative/crop
+replays in automatic and forced-JIT modes. The native popup capture shows the
+Typeface options above the other inspector controls. Radiant's no-int-cast lint
+and the scoped whitespace check also passed; the rebuilt host matches the
+binary used for the isolated photo replays.
+
+The full Radiant baseline remains incomplete and failing. Its completed layout
+inventory reports 3,143 passing, 150 partial and one failing result; the page
+snapshot gate and four document-editor fixtures also fail. Remaining graphics
+workers were stopped after stalled macOS GUI service connections. No failures
+were suppressed or converted to passes.

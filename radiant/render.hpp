@@ -2256,6 +2256,8 @@ struct RenderBackend {
     // Called when a view node specifies a font. Backend can update its
     // font state (e.g. PDF needs to call HPDF_Page_SetFontAndSize).
     void (*on_font_change)(RenderContext* ctx, FontProp* font_prop);
+    // fallible script backends stop new visits while native scope cleanup unwinds.
+    bool (*should_abort)(RenderContext* ctx) = nullptr;
 };
 
 // Shared tree-walk state (managed by render_walk.cpp, passed to callbacks via ctx).
