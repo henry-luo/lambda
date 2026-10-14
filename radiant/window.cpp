@@ -555,6 +555,126 @@ static void window_release_relative_mouse(UiContext* uicon) {
     }
 }
 
+
+static bool window_fullscreen_read(void* context, RadiantWindowPlacement* placement) {
+    UiContext* uicon = static_cast<UiContext*>(context);
+    if (!uicon || uicon->headless || !uicon->window) return false;
+    int count = 0;
+    glfwGetMonitors(&count);
+    if (!count) return false;
+    int x, y, width, height;
+    glfwGetWindowPos(uicon->window, &x, &y);
+    glfwGetWindowSize(uicon->window, &width, &height);
+    placement->bounds = {(float)x, (float)y, (float)width, (float)height};
+    placement->maximized = glfwGetWindowAttrib(uicon->window, GLFW_MAXIMIZED) != 0;
+    placement->fullscreen = glfwGetWindowMonitor(uicon->window) != nullptr;
+    return true;
+}
+
+static GLFWmonitor* window_fullscreen_monitor(RadiantWindowBounds bounds, float* overlap) {
+    int count = 0;
+    GLFWmonitor** monitors = glfwGetMonitors(&count);
+    GLFWmonitor* selected = glfwGetPrimaryMonitor();
+    *overlap = 0;
+    for (int i = 0; i < count; i++) {
+        const GLFWvidmode* mode = glfwGetVideoMode(monitors[i]);
+        if (!mode) continue;
+        int x, y;
+        glfwGetMonitorPos(monitors[i], &x, &y);
+        float area = radiant_fullscreen_overlap(bounds,
+            {(float)x, (float)y, (float)mode->width, (float)mode->height});
+        if (area > *overlap) { *overlap = area; selected = monitors[i]; }
+    }
+    return selected;
+}
+
+static bool window_fullscreen_apply(void* context, bool enabled,
+                                    const RadiantWindowPlacement* restore) {
+    UiContext* uicon = static_cast<UiContext*>(context);
+    RadiantWindowPlacement current = {};
+    if (!window_fullscreen_read(context, &current)) return false;
+    float overlap;
+    GLFWmonitor* monitor = window_fullscreen_monitor(
+        enabled ? current.bounds : restore->bounds, &overlap);
+    if (!monitor) return false;
+    glfwGetError(nullptr);
+    if (enabled) {
+        const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+        if (!mode) return false;
+        glfwSetWindowMonitor(uicon->window, monitor, 0, 0,
+                             mode->width, mode->height, mode->refreshRate);
+    } else {
+        RadiantWindowBounds bounds = restore->bounds;
+        // a disconnected display must not leave the restored window unreachable.
+        if (overlap <= 0) {
+            int x, y, width, height;
+            glfwGetMonitorWorkarea(monitor, &x, &y, &width, &height);
+            bounds = radiant_fullscreen_fit(bounds,
+                {(float)x, (float)y, (float)width, (float)height});
+        }
+        int x = (int)lroundf(bounds.x); // INT_CAST_OK: GLFW screen-coordinate boundary
+        int y = (int)lroundf(bounds.y); // INT_CAST_OK: GLFW screen-coordinate boundary
+        int width = (int)lroundf(bounds.width); // INT_CAST_OK: GLFW window-size boundary
+        int height = (int)lroundf(bounds.height); // INT_CAST_OK: GLFW window-size boundary
+        glfwSetWindowMonitor(uicon->window, nullptr, x, y, width, height, GLFW_DONT_CARE);
+        if (restore->maximized) glfwMaximizeWindow(uicon->window);
+    }
+    const char* message = nullptr;
+    if (glfwGetError(&message) != GLFW_NO_ERROR) {
+        log_error("fullscreen: platform transition failed: %s", message ? message : "unknown error");
+        return false;
+    }
+    log_info("fullscreen: platform requested %s", enabled ? "fullscreen" : "windowed");
+    return true;
+}
+
+static const RadiantFullscreenBackend window_fullscreen_backend = {
+    window_fullscreen_read, window_fullscreen_apply
+};
+
+static void window_fullscreen_update(UiContext* uicon, bool commit) {
+    if (radiant_fullscreen_update(&uicon->fullscreen, &window_fullscreen_backend, uicon, commit))
+        do_redraw = true;
+}
+
+static void window_bounds_callback(GLFWwindow*, int, int) {
+    // capture a normal move/resize before a later maximize event in the same poll.
+    window_fullscreen_update(&ui_context, false);
+    do_redraw = true;
+}
+static void window_maximized_callback(GLFWwindow*, int) { do_redraw = true; }
+static void window_monitor_callback(GLFWmonitor*, int) { do_redraw = true; }
+
+bool radiant_window_fullscreen_key(UiContext* uicon, const RdtEvent* event) {
+    if (!uicon || !event ||
+        (event->type != RDT_EVENT_KEY_DOWN && event->type != RDT_EVENT_KEY_UP)) return false;
+    RadiantFullscreenState* state = &uicon->fullscreen;
+    bool down = event->type == RDT_EVENT_KEY_DOWN;
+    if (event->key.key == GLFW_KEY_F11) {
+        bool consumed = state->toggle_key_down;
+        if (!down) { state->toggle_key_down = false; return consumed; }
+        if (!state->available || event->key.mods) return false;
+        if (!state->toggle_key_down) radiant_fullscreen_request(state, !state->requested);
+        state->toggle_key_down = true;
+        return true;
+    }
+    if (event->key.key == GLFW_KEY_ESCAPE) {
+        if (!down) {
+            bool consumed = state->escape_key_down;
+            state->escape_key_down = false;
+            return consumed;
+        }
+        if (state->escape_key_down) return true;
+        if (state->actual || state->requested) {
+            radiant_fullscreen_request(state, false);
+            window_release_relative_mouse(uicon);
+            state->escape_key_down = true;
+            return true;
+        }
+    }
+    return false;
+}
+
 struct RelativeMouseResource : DomDocumentResourceData { DomDocument* document; };
 static void window_destroy_relative_mouse(DomDocumentResourceData* resource) {
     auto* owned = (RelativeMouseResource*)resource;
@@ -612,7 +732,11 @@ bool radiant_window_relative_mouse_active(DomElement* owner) {
 
 void radiant_window_focus_changed(UiContext* uicon, bool focused) {
     if (!uicon) return;
-    if (!focused) window_release_relative_mouse(uicon);
+    if (!focused) {
+        window_release_relative_mouse(uicon);
+        uicon->fullscreen.toggle_key_down = false;
+        uicon->fullscreen.escape_key_down = false;
+    }
     radiant_dispatch_window_event(uicon, uicon->document, focused ? "focus" : "blur");
     do_redraw = 1;
 }
@@ -652,6 +776,28 @@ bool radiant_window_set_title(DomDocument* doc, const char* title) {
     if (!window_hosts_document(doc) || !title) return false;
     update_window_title(title);
     return true;
+}
+
+static bool window_hosts_fullscreen_node(DomNode* node) {
+    DomNode* owner = node && node->is_element() ? node : (node ? node->parent : nullptr);
+    DomElement* element = owner && owner->is_element() ? owner->as_element() : nullptr;
+    return element && window_hosts_document(element->doc) && dom_element_is_connected(element);
+}
+
+bool radiant_window_set_fullscreen(DomNode* node, bool enabled) {
+    if (!window_hosts_fullscreen_node(node) ||
+        !radiant_fullscreen_request(&ui_context.fullscreen, enabled)) return false;
+    do_redraw = true;
+    if (ui_context.window) glfwPostEmptyEvent();
+    return true;
+}
+
+bool radiant_window_fullscreen(DomNode* node) {
+    return window_hosts_fullscreen_node(node) && ui_context.fullscreen.actual;
+}
+
+bool radiant_window_fullscreen_enabled(DomNode* node) {
+    return window_hosts_fullscreen_node(node) && ui_context.fullscreen.available;
 }
 
 bool radiant_window_platform_close(UiContext* uicon) {
@@ -694,7 +840,9 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     // The viewer closes on Escape; the edit application gives Escape to the
     // active dialog, composition, or gesture instead (Radiant_Design_Edit_Mode §7).
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS &&
-            ui_context.app_mode != UI_APP_MODE_EDIT && !radiant_relative_mouse_target(&ui_context)) {
+            ui_context.app_mode != UI_APP_MODE_EDIT && !radiant_relative_mouse_target(&ui_context) &&
+            !ui_context.fullscreen.actual && !ui_context.fullscreen.requested &&
+            !ui_context.fullscreen.escape_key_down) {
         window_request_close(window);
         return;
     }
@@ -961,12 +1109,17 @@ void repaint_window() {
 }
 
 void render(GLFWwindow* window) {
+    // a GLFW transition may synchronously request a refresh in the middle of a mode switch.
+    if (ui_context.fullscreen.applying) return;
+    window_fullscreen_update(&ui_context, false);
     // Query both domains in one turn so independently delivered platform
     // notifications cannot expose half-updated metrics to layout or paint.
     int width, height;
     int logical_width, logical_height;
     glfwGetFramebufferSize(window, &width, &height);
     glfwGetWindowSize(window, &logical_width, &logical_height);
+
+    if (width <= 0 || height <= 0 || logical_width <= 0 || logical_height <= 0) return;
 
     // set up OpenGL viewport and projection for 2D rendering
     glViewport(0, 0, width, height);
@@ -1080,6 +1233,15 @@ void render(GLFWwindow* window) {
     } else if (scale_changed) {
         log_debug("render: device scale changed; repainting without reflow");
     }
+
+    // fullscreen listeners observe the committed viewport, just like resize listeners.
+    bool fullscreen_changed = ui_context.fullscreen.changed;
+    bool fullscreen_failed = ui_context.fullscreen.failed;
+    ui_context.fullscreen.changed = ui_context.fullscreen.failed = false;
+    if (fullscreen_changed)
+        radiant_dispatch_window_event(&ui_context, ui_context.document, "windowfullscreenchange");
+    if (fullscreen_failed)
+        radiant_dispatch_window_event(&ui_context, ui_context.document, "windowfullscreenerror");
 
     // Check for incremental reflow due to state changes (pseudo-classes, etc.)
     DocState* state = ui_context.document ? ui_context.document->state : nullptr;
@@ -1339,7 +1501,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                                                    bool enable_event_log,
                                                    bool enable_state_dump,
                                                    UiAppMode app_mode,
-                                                   const RenderPagedOptions* paged_options = nullptr) {
+                                                   const RenderPagedOptions* paged_options = nullptr,
+                                                   bool fullscreen = false) {
     struct DeferredRetirement {
         bool previous = dom_retire_set_deferred(true);
         ~DeferredRetirement() { dom_retire_set_deferred(previous); }
@@ -1373,6 +1536,19 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     ui_context.state_dump_enabled = enable_state_dump;
     ui_context.app_mode = app_mode;
     ui_context.paged_options = lam::up(paged_options);
+    window_fullscreen_update(&ui_context, false);
+    if (fullscreen && (!radiant_fullscreen_request(&ui_context.fullscreen, true))) {
+        log_error("fullscreen: startup fullscreen is unavailable");
+        if (sim_ctx) event_sim_free(sim_ctx);
+        ui_context_cleanup(&ui_context);
+        return -1;
+    }
+    window_fullscreen_update(&ui_context, true);
+    if (fullscreen && !ui_context.fullscreen.actual) {
+        if (sim_ctx) event_sim_free(sim_ctx);
+        ui_context_cleanup(&ui_context);
+        return -1;
+    }
 
     // Add custom font scan directories (must be done before any font resolution)
     for (int i = 0; i < font_dir_count; i++) {
@@ -1406,6 +1582,10 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         glfwSetWindowRefreshCallback(window, window_refresh_callback);
         glfwSetWindowCloseCallback(window, window_close_callback);
         glfwSetWindowFocusCallback(window, window_focus_callback);
+        glfwSetWindowPosCallback(window, window_bounds_callback);
+        glfwSetWindowSizeCallback(window, window_bounds_callback);
+        glfwSetWindowMaximizeCallback(window, window_maximized_callback);
+        glfwSetMonitorCallback(window_monitor_callback);
 
         glClearColor(0.8f, 0.8f, 0.8f, 1.0f); // Light grey color
 
@@ -1936,6 +2116,9 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             }
         }
 
+        // commit queued commands after scripts/input return, before publishing new metrics.
+        window_fullscreen_update(&ui_context, true);
+
         // only redraw if we need to
         if (do_redraw) {
             window_refresh_callback(window);
@@ -1977,26 +2160,26 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
 int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
                                     const char** font_dirs, int font_dir_count,
                                     bool enable_event_log, bool enable_state_dump,
-                                    const RenderPagedOptions* paged_options) {
+                                    const RenderPagedOptions* paged_options, bool fullscreen) {
     return view_doc_in_window_with_events_internal(doc_file, nullptr, nullptr, 0,
                                                    event_file, headless,
                                                    font_dirs, font_dir_count, enable_event_log,
-                                                   enable_state_dump, UI_APP_MODE_VIEW, paged_options);
+                                                   enable_state_dump, UI_APP_MODE_VIEW, paged_options, fullscreen);
 }
 
 int view_lambda_document_transform_with_events(const char* document_file,
         const LambdaDocumentTransformConfig* transform,
         const LambdaDocumentTransformOption* options, int option_count,
         const char* event_file, bool headless, const char** font_dirs,
-        int font_dir_count, bool enable_event_log, bool enable_state_dump) {
+        int font_dir_count, bool enable_event_log, bool enable_state_dump, bool fullscreen) {
     return view_doc_in_window_with_events_internal(document_file, transform, options,
         option_count, event_file, headless, font_dirs, font_dir_count,
-        enable_event_log, enable_state_dump, UI_APP_MODE_VIEW);
+        enable_event_log, enable_state_dump, UI_APP_MODE_VIEW, nullptr, fullscreen);
 }
 
 int edit_doc_in_window_with_events(const char* document_file, bool source_surface,
         const char* event_file, bool headless, const char** font_dirs,
-        int font_dir_count, bool enable_event_log, bool enable_state_dump) {
+        int font_dir_count, bool enable_event_log, bool enable_state_dump, bool fullscreen) {
     const LambdaDocumentTransformConfig* transform =
         lambda_document_transform_for_input_type("edit");
     if (!transform) {
@@ -2009,10 +2192,10 @@ int edit_doc_in_window_with_events(const char* document_file, bool source_surfac
     return view_doc_in_window_with_events_internal(document_file, transform,
         source_surface ? options : nullptr, source_surface ? 1 : 0,
         event_file, headless, font_dirs, font_dir_count,
-        enable_event_log, enable_state_dump, UI_APP_MODE_EDIT);
+        enable_event_log, enable_state_dump, UI_APP_MODE_EDIT, nullptr, fullscreen);
 }
 
 // Wrapper for backward compatibility
 int view_doc_in_window(const char* doc_file) {
-    return view_doc_in_window_with_events(doc_file, NULL, false, NULL, 0, false, false, nullptr);
+    return view_doc_in_window_with_events(doc_file, NULL, false, NULL, 0, false, false, nullptr, false);
 }

@@ -13150,6 +13150,11 @@ void rdt_event_set_text_input(RdtEvent* event, uint32_t codepoint,
 }
 
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
+    // host presentation keys use the same gate for native input and event replay.
+    if (radiant_window_fullscreen_key(uicon, event)) {
+        event_log_raw_input(uicon->event_log, 0, event);
+        return;
+    }
     EventContext evcon;
     log_debug("HANDLE_EVENT: type=%d", event->type);
     log_debug("Handling event %d", event->type);

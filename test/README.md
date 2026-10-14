@@ -68,6 +68,25 @@ For performance measurements, select a release host with `make build-release-com
 
 ## 3. Aggregate make targets
 
+Window fullscreen controller/key tests and the windowless Lambda API probe run
+in `test_radiant_text_query_gtest.exe`:
+
+```sh
+./test/test_radiant_text_query_gtest.exe --gtest_filter='WindowFullscreen*.*:RadiantFrameDelivery.Fullscreen*'
+```
+
+Physical-window replays require a desktop session and deliberately live outside
+the headless UI fixture manifest:
+
+```sh
+./lambda.exe view test/native/fullscreen/window.ls --event-file test/native/fullscreen/window.json
+./lambda.exe view test/native/fullscreen/window.ls --fullscreen --event-file test/native/fullscreen/startup.json
+```
+
+They cover DOM requests, idempotence, F11, Escape, startup, and native change
+notifications. Multi-monitor/DPI, display removal, and platform focus behavior
+still require native checks. Design: [Radiant Fullscreen](../vibe/radiant/Radiant_Design_Fullscreen.md).
+
 | Target | Runs |
 |---|---|
 | `make test` | every suite except `jube`, and minus `test_radiant_online_view_gtest`. This is not `test-all`, despite what `make help` says |

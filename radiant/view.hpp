@@ -4341,8 +4341,11 @@ typedef enum UiAppMode {
 } UiAppMode;
 
 // tier-2: view-pool, rebuilt each relayout
+#include "window_fullscreen.hpp"
+
 typedef struct UiContext {
     GLFWwindow *window;    // current window
+    RadiantFullscreenState fullscreen; // window-owned; survives document navigation
     float window_width;    // window pixel width (actual framebuffer size, physical pixels)
     float window_height;   // window pixel height (actual framebuffer size, physical pixels)
     float viewport_width;  // intended viewport width (CSS logical pixels, for vh/vw units)

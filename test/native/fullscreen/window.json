@@ -1,0 +1,29 @@
+{
+  "name": "Native window fullscreen APIs, F11, and Escape",
+  "html": "test/native/fullscreen/window.ls",
+  "events": [
+    {"type":"wait","ms":100},
+    {"type":"assert_attribute","target":{"selector":"#result"},"attribute":"data-available","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#result"},"attribute":"data-mode","equals":"false"},
+    {"type":"click","target":{"selector":"#enter"}},
+    {"type":"wait","ms":200},
+    {"type":"assert_attribute","target":{"selector":"#result"},"attribute":"data-accepted","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#result"},"attribute":"data-mode","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#result"},"attribute":"data-metrics","equals":"true"},
+    {"type":"click","target":{"selector":"#enter"}},
+    {"type":"wait","ms":100},
+    {"type":"assert_attribute","target":{"selector":"#result"},"attribute":"data-changes","equals":"1"},
+    {"type":"key_press","key":"F11"},
+    {"type":"wait","ms":200},
+    {"type":"assert_attribute","target":{"selector":"#result"},"attribute":"data-mode","equals":"false"},
+    {"type":"assert_attribute","target":{"selector":"#result"},"attribute":"data-restored","equals":"true"},
+    {"type":"key_press","key":"F11"},
+    {"type":"wait","ms":200},
+    {"type":"assert_attribute","target":{"selector":"#result"},"attribute":"data-mode","equals":"true"},
+    {"type":"key_press","key":"Escape"},
+    {"type":"wait","ms":200},
+    {"type":"assert_attribute","target":{"selector":"#result"},"attribute":"data-mode","equals":"false"},
+    {"type":"assert_attribute","target":{"selector":"#result"},"attribute":"data-changes","equals":"4"},
+    {"type":"assert_attribute","target":{"selector":"#result"},"attribute":"data-error","equals":"false"}
+  ]
+}

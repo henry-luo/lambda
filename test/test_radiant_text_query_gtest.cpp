@@ -100,6 +100,19 @@ TEST_F(RadiantTextLayout, PhotoDtnaButtonHasThemeLeadingAndCenteredText) {
 
 class RadiantFrameDelivery : public RadiantTextQuery {};
 
+TEST_F(RadiantFrameDelivery, FullscreenCatalogRefusesWindowlessTransitions) {
+    DomElement* owner = load("test/lambda/ui/_window_fullscreen.ls");
+    ASSERT_NE(owner, nullptr);
+    layout_html_doc(&ui, document, false);
+    ASSERT_NE(dom_engine_document_ensure_state(document, "fullscreen_test"), nullptr);
+    ASSERT_NE(dom_engine_frame_request(owner, "probe"), 0u);
+    ASSERT_TRUE(dom_engine_frame_tick(document, 1.0));
+    EXPECT_STREQ(owner->get_attribute("data-available"), "false");
+    EXPECT_STREQ(owner->get_attribute("data-actual"), "false");
+    EXPECT_STREQ(owner->get_attribute("data-enter"), "false");
+    EXPECT_STREQ(owner->get_attribute("data-exit"), "false");
+}
+
 TEST_F(RadiantFrameDelivery, HidingFocusedPanelSettlesBeforeValidationWithoutHostBatch) {
     DomElement* owner = load("test/lambda/ui/_frame_focus.ls");
     ASSERT_NE(owner, nullptr);

@@ -54,6 +54,25 @@ void glfwGetWindowContentScale(GLFWwindow* window, float* xscale, float* yscale)
     if (xscale) *xscale = 0.0f;
     if (yscale) *yscale = 0.0f;
 }
+GLFWmonitor** glfwGetMonitors(int* count) { if (count) *count = 0; return NULL; }
+GLFWmonitor* glfwGetPrimaryMonitor(void) { return NULL; }
+GLFWmonitor* glfwGetWindowMonitor(GLFWwindow*) { return NULL; }
+const GLFWvidmode* glfwGetVideoMode(GLFWmonitor*) { return NULL; }
+void glfwGetMonitorPos(GLFWmonitor*, int* x, int* y) {
+    if (x) *x = 0;
+    if (y) *y = 0;
+}
+void glfwGetMonitorWorkarea(GLFWmonitor*, int* x, int* y, int* width, int* height) {
+    if (x) *x = 0;
+    if (y) *y = 0;
+    if (width) *width = 0;
+    if (height) *height = 0;
+}
+int glfwGetWindowAttrib(GLFWwindow*, int) { return 0; }
+int glfwGetError(const char** description) { if (description) *description = NULL; return GLFW_NO_ERROR; }
+void glfwSetWindowMonitor(GLFWwindow*, GLFWmonitor*, int, int, int, int, int) {}
+void glfwMaximizeWindow(GLFWwindow*) {}
+GLFWmonitorfun glfwSetMonitorCallback(GLFWmonitorfun) { return NULL; }
 
 // --- GLFW: context ---
 
@@ -89,6 +108,9 @@ NULL_GLFW_CALLBACK_SETTER(glfwSetFramebufferSizeCallback, GLFWframebuffersizefun
 NULL_GLFW_CALLBACK_SETTER(glfwSetWindowRefreshCallback, GLFWwindowrefreshfun)
 NULL_GLFW_CALLBACK_SETTER(glfwSetWindowCloseCallback, GLFWwindowclosefun)
 NULL_GLFW_CALLBACK_SETTER(glfwSetWindowContentScaleCallback, GLFWwindowcontentscalefun)
+NULL_GLFW_CALLBACK_SETTER(glfwSetWindowPosCallback, GLFWwindowposfun)
+NULL_GLFW_CALLBACK_SETTER(glfwSetWindowSizeCallback, GLFWwindowsizefun)
+NULL_GLFW_CALLBACK_SETTER(glfwSetWindowMaximizeCallback, GLFWwindowmaximizefun)
 #undef NULL_GLFW_CALLBACK_SETTER
 
 // --- OpenGL: the window surface blit in window.cpp ---

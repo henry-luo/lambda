@@ -2551,6 +2551,22 @@ RADIANT_C_API Item fn_radiant_request_window_close(Item node_item) {
     return radiant_bool_item(doc && radiant_window_approve_close(doc));
 }
 
+RADIANT_C_API Item fn_radiant_set_window_fullscreen(Item node, Item enabled) {
+    DomNode* owner = radiant_dom_node_from_item(node, "SET_WINDOW_FULLSCREEN");
+    return radiant_bool_item(owner && get_type_id(enabled) == LMD_TYPE_BOOL &&
+        radiant_window_set_fullscreen(owner, it2b(enabled)));
+}
+
+RADIANT_C_API Item fn_radiant_window_fullscreen(Item node) {
+    return radiant_bool_item(radiant_window_fullscreen(
+        radiant_dom_node_from_item(node, "WINDOW_FULLSCREEN")));
+}
+
+RADIANT_C_API Item fn_radiant_window_fullscreen_enabled(Item node) {
+    return radiant_bool_item(radiant_window_fullscreen_enabled(
+        radiant_dom_node_from_item(node, "WINDOW_FULLSCREEN_ENABLED")));
+}
+
 RADIANT_C_API Item fn_radiant_set_window_title(Item node_item, Item title_item) {
     DomDocument* doc = radiant_window_document_from_item(node_item, "SET_WINDOW_TITLE");
     const char* title = fn_to_cstr(title_item);
@@ -5366,6 +5382,9 @@ RADIANT_PROVIDE_ENGINE_2(audio_close, fn_radiant_audio_close)
 RADIANT_PROVIDE_ENGINE_2(audio_state, fn_radiant_audio_state)
 RADIANT_PROVIDE_ENGINE_2(set_relative_mouse, fn_radiant_set_relative_mouse)
 RADIANT_PROVIDE_ENGINE_1(relative_mouse_active, fn_radiant_relative_mouse_active)
+RADIANT_PROVIDE_ENGINE_2(set_window_fullscreen, fn_radiant_set_window_fullscreen)
+RADIANT_PROVIDE_ENGINE_1(window_fullscreen, fn_radiant_window_fullscreen)
+RADIANT_PROVIDE_ENGINE_1(window_fullscreen_enabled, fn_radiant_window_fullscreen_enabled)
 RADIANT_PROVIDE_ENGINE_2(input_operation, fn_radiant_input_operation)
 RADIANT_PROVIDE_ENGINE_3(set_range_from_point, fn_radiant_set_range_from_point)
 RADIANT_PROVIDE_ENGINE_1(range_max, fn_radiant_range_max)

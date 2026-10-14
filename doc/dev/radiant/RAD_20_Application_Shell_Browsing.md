@@ -65,6 +65,31 @@ The GUI branch (`ui_context.cpp:114-151`) forces the X11 platform on Linux (Wayl
 
 ---
 
+### 3.1 Window fullscreen
+
+Window fullscreen is owned by `UiContext::fullscreen`, independently of the
+document. `view` and `edit` accept `--fullscreen`; F11 toggles the latest
+requested mode and Escape exits fullscreen before viewer close or document
+dispatch. The common key gate in `handle_event` also serves replay input.
+
+`dom.set_window_fullscreen(node, enabled)` queues a native request;
+`dom.window_fullscreen(node)` and `dom.window_fullscreen_enabled(node)` read
+published state. Connected nodes of the presented top-level document identify
+the window. The shared DOM catalog/provider path preserves **D7.5.3** and
+**D7.3.3**. Windowless execution reports unavailable (**D7.1.4v2**).
+
+The controller in `window_fullscreen.cpp` coalesces requests, preserves normal
+bounds and maximization, and reconciles actual state after platform calls.
+`window.cpp` supplies GLFW operations, selects the overlapping monitor, and
+commits requests after input/script callbacks return. Rendering publishes
+logical and physical metrics through the ordinary resize path before sending
+`windowfullscreenchange` or `windowfullscreenerror` notifications. Native
+callbacks that occur during a switch cannot recursively paint half-updated
+metrics or discard a newer request.
+
+Element fullscreen, `:fullscreen`, and the JS Fullscreen API are a separate
+follow-on stage in [Radiant Fullscreen](../../../vibe/radiant/Radiant_Design_Fullscreen.md).
+
 ## 4. The main loop: one thread pumping three event sources
 
 `view_doc_in_window_with_events_internal` is the driver. Setup order: `ui_context_init` → optional `event_sim_load` → `js_dom_set_ui_context(&ui_context)` → `js_dom_set_host_driven_loop(host_driven_loop)` where `host_driven_loop = (!headless || sim_ctx != nullptr)` → load the document (`load_doc_by_format`, or a configured native transform for optioned graph views) → conditionally initialize network support for HTTP documents (`network_downloader_init_shared` + `enhanced_cache_create`) → `session_create` → pre-layout resource discovery. It then splits into a headless synchronous path (running `event_sim_update` in a loop and pumping `js_event_loop_pump_nowait` between events) and the GUI frame loop.

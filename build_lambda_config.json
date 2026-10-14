@@ -3524,6 +3524,9 @@
           },
           {
             "source": "test/test_radiant_text_query_gtest.cpp",
+            "additional_sources": [
+              "test/test_window_fullscreen_gtest.cpp"
+            ],
             "name": "Radiant Text Query Tests",
             "dependencies": [
               "lambda-rt",

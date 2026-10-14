@@ -778,6 +778,11 @@ DOM_OP(CORE, midi_open, media, 3, "pn(n: any, performance: map, font: binary) ->
 DOM_OP(CORE, midi_command, media, 4, "pn(n: any, token: int, command: string, value: float) -> bool", dom_engine_midi_command, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, midi_info, media, 2, "fn(n: any, token: int) -> map|null", dom_engine_midi_info, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 
+// window presentation is distinct from the document's element fullscreen state.
+DOM_OP(CORE, set_window_fullscreen, window, 2, "pn(n: any, enabled: bool) -> bool", dom_engine_set_window_fullscreen, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, window_fullscreen, window, 1, "fn(n: any) -> bool", dom_engine_window_fullscreen, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, window_fullscreen_enabled, window, 1, "fn(n: any) -> bool", dom_engine_window_fullscreen_enabled, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP
 #undef DOM_API_DEF_CLEAR_OP
