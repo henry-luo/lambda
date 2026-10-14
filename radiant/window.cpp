@@ -285,6 +285,7 @@ typedef enum {
     DOC_FORMAT_LAMBDA_SCRIPT,
     DOC_FORMAT_SLIDES,
     DOC_FORMAT_PDF,
+    DOC_FORMAT_DOCX,
     DOC_FORMAT_SVG,
     DOC_FORMAT_IMAGE,  // PNG, JPG, JPEG, GIF
     DOC_FORMAT_TEXT    // JSON, YAML, TOML, TXT, etc.
@@ -320,6 +321,8 @@ static DocFormat detect_doc_format(const char* filename) {
         return DOC_FORMAT_SLIDES;
     } else if (str_ieq_const(ext, ext_len, "pdf")) {
         return DOC_FORMAT_PDF;
+    } else if (str_ieq_const(ext, ext_len, "docx")) {
+        return DOC_FORMAT_DOCX;
     } else if (str_ieq_const(ext, ext_len, "svg")) {
         return DOC_FORMAT_SVG;
     } else if (str_ieq_const(ext, ext_len, "png") || str_ieq_const(ext, ext_len, "jpg") ||
@@ -386,6 +389,7 @@ static const char* get_format_name(const char* filename) {
         case DOC_FORMAT_LAMBDA_SCRIPT: return "Lambda Script";
         case DOC_FORMAT_SLIDES: return "Slides";
         case DOC_FORMAT_PDF: return "PDF";
+        case DOC_FORMAT_DOCX: return "Word";
         case DOC_FORMAT_SVG: return "SVG";
         case DOC_FORMAT_IMAGE: return "Image";
         case DOC_FORMAT_TEXT: return "Text";

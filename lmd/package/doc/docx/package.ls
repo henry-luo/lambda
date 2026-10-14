@@ -80,6 +80,21 @@ fn metadata(parts, rels) map^ {
             (node.tag,c.text(node))])
     }
 }
+fn story_diagnostics(pkg) array^ => [for (rel in pkg.relationships,
+    let kind = c.first(reverse(split(rel.type,"/")))
+    where contains(["header","footer","footnotes","endnotes","comments"],kind))
+    *{
+        // Word writes note separator definitions even when the document has no actual notes.
+        let notes = contains(["footnotes","endnotes"],kind) and not rel.external
+        let root = if (notes) xml(pkg.parts,rel.target,true)^ else null
+        let note_tag = if (kind == "footnotes") "footnote" else "endnote";
+        if (notes and (root.uri != c.W or root.tag != kind))
+            raise c.fail("invalid-package","Invalid " ++ kind ++ " root",rel.target)
+        else if (notes and all([for (node in c.children(root,null,null))
+            node.uri == c.W and node.tag == note_tag and
+            contains(["separator","continuationSeparator"],c.attr(node,"type"))])) []
+        else [c.issue("unsupported-story",pkg.main,"Separate document story is outside the v1 profile")]
+    }]
 pub fn open_package(source) map^ {
     let archive = if (source is string) {
         if (contains(source,":") or starts_with(source,"//")) raise c.fail("invalid-source","A local DOCX path is required")
@@ -100,8 +115,6 @@ pub fn open_package(source) map^ {
             document.uri != c.W or document.tag != "document" or c.child(document,"body") == null)
             raise c.fail("invalid-package","Expected a DOCX WordprocessingML document",main.target)
         else {*:pkg,body:c.child(document,"body"),metadata:metadata(parts,root_rels)^,
-            diagnostics:[for (rel in pkg.relationships where contains(["header","footer","footnotes","endnotes","comments"],
-                split(rel.type,"/")[len(split(rel.type,"/"))-1]))
-                c.issue("unsupported-story",main.target,"Separate document story is outside the v1 profile")]}
+            diagnostics:story_diagnostics(pkg)^}
     }
 }

@@ -1376,14 +1376,33 @@ the corresponding field. Use `convert` when the caller needs diagnostics.
 Supported content includes paragraphs; headings derived from styles/outline
 levels; inherited and direct bold, italic, underline, strike, superscript and
 subscript; tabs and breaks; simple lists with numbering starts, continuation
-and nesting; tables with grid spans and vertical merges; hyperlinks and simple
-bookmarks; and embedded raster images. Both Transitional and Strict Word
+and nesting, including lists with hidden markers; tables with grid spans and
+vertical merges; hyperlinks and simple bookmarks; embedded raster images;
+and clustered column charts rendered from their cached category/series values.
+Charts reuse `lambda.chart.chart` for SVG layout (D7.2.4), retain explicit RGB
+series colors and titles, and contribute a data table to extracted text.
+Paragraph-relative column anchors support left/right square wrapping,
+centered largest-side wrapping, and top/bottom wrapping at paragraph top.
+The viewer also reads the document theme, inherited and direct run properties
+(font family, size, color, tracking and capitalization), paragraph spacing,
+table grid widths, cell shading and borders, row heights, and page size/margins.
+Values are converted from OOXML units into CSS; the named font must be
+available to the host font resolver for a matching face. CSS remains a flow
+preview and does not reproduce Word's full layout engine.
+Both Transitional and Strict Word
 namespace families are recognized. HTML is flow content, with semantic break
 markers and no Word pagination guarantee.
+
+Content controls display their saved `sdtContent` at inline, block, row and
+cell boundaries, preserving surrounding formatting and reading order. Control
+properties are editing metadata; bindings and placeholder definitions are not
+evaluated. Footnote/endnote parts containing only separator definitions do not
+represent omitted notes; actual note content remains diagnosed.
 
 | Option | Default | Meaning |
 |--------|---------|---------|
 | `style_map` | `{}` | Style ID/name to `p`, `h1`–`h6`, `blockquote`, `pre`, or `{tag, class}`. |
+| `presentation` | `"semantic"` | `"source"` adds validated Word theme, run, table, and page CSS; the viewer selects it. |
 | `include_empty_paragraphs` | `false` | Preserve empty paragraph elements and text boundaries. |
 | `images` | `"data-uri"` | Embed supported internal images; `"omit"` reports their omission. |
 | `id_prefix` | `""` | Prefix bookmark IDs and internal anchor links. |
@@ -1391,7 +1410,8 @@ markers and no Word pagination guarantee.
 
 Diagnostics have `{severity, code, part, message}`. Unsupported visible
 constructs are reported. Headers/footers, notes, comments, revision semantics,
-field execution, charts, shapes, equations, floating placement, DOCX writing,
+field execution, other chart types, shapes, equations, page-relative floating
+placement, DOCX writing,
 encrypted documents, and `.docm` are outside this profile. External resources
 are never fetched; emitted hyperlink schemes are validated. XML parts use
 strict UTF-8 XML with significant whitespace and reject DTDs and embedded NULs.
@@ -1406,3 +1426,9 @@ shared ZIP reader for its `0x0314` version-needed declaration; it is recorded
 as an unsupported input, not a successful import.
 
 Design and phased scope: [DOCX package](../vibe/Lambda_Pkg_Docx.md).
+
+`lambda view report.docx` presents the imported Word document with the shared
+`lambda.doc.docx.view` presentation module (D7.2.4). The bundled file browser
+also previews DOCX and exposes its converted HTML on the Source tab. Use
+`lambda view report.docx --archive` for the underlying ZIP tree. Unsupported
+content is listed above the preview; Word pagination is outside this profile.

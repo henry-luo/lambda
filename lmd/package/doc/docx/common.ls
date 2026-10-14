@@ -6,6 +6,7 @@ pub let CT = "http://schemas.openxmlformats.org/package/2006/content-types"
 pub let A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 pub let WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
 pub let MC = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+pub let CH = "http://schemas.openxmlformats.org/drawingml/2006/chart"
 let codes = ["invalid-source", "invalid-options", "invalid-package", "missing-part",
     "invalid-xml", "invalid-target", "unsupported", "style-cycle"]
 
@@ -23,6 +24,7 @@ pub fn uri(value) => if (value == "http://purl.oclc.org/ooxml/wordprocessingml/m
         replace(value,"http://purl.oclc.org/ooxml/officeDocument/relationships",R)
     else if (value == "http://purl.oclc.org/ooxml/drawingml/main") A
     else if (value == "http://purl.oclc.org/ooxml/drawingml/wordprocessingDrawing") WP
+    else if (value == "http://purl.oclc.org/ooxml/drawingml/chart") CH
     else value
 
 fn expanded(qname, bindings, attribute = false) {
@@ -58,6 +60,7 @@ pub fn descendants(node, tag, ns) => [for (child in children(node,null,null),
 pub fn collect(results, field) => [for (result in results, value in result[field]) value]
 pub fn on(node) => node != null and not contains(["0","false","off","none"],attr(node,"val"))
 pub fn as_int(value, fallback = 0) => if (value == null) fallback else int(value) ^ { fallback }
+pub fn pixels(value, units = 9525.0) => as_int(value,0)/units
 
 fn hex_byte(value, index) int^ {
     let hi = index_of("0123456789abcdef",lower(slice(value,index+1,index+2)))

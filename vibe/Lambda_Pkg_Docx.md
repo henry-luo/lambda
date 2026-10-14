@@ -1,7 +1,7 @@
 # Lambda DOCX Package Proposal
 
-> **Status:** Initial semantic import implemented (2026-10-14), Phases 0–3;
-> the optional viewer route in Phase 4 remains deferred. No formal ruling changes.
+> **Status:** Semantic import and the Phase 4 viewer route implemented
+> (2026-10-14). No formal ruling changes.
 > **Package:** `lambda.doc.docx`, implemented as Lambda Script under
 > `lmd/package/doc/docx.ls` with helpers under `lmd/package/doc/docx/`.
 > **Scope:** Read `.docx` files and convert their supported WordprocessingML
@@ -58,20 +58,22 @@ library.
 ### 2.2 Non-goals for the first release
 
 - Faithful reproduction of Word's page layout, pagination, typography, or
-  print output.
+  print output. The flow viewer projects common source dimensions and colors
+  but does not claim exact Word line or page breaking.
 - Writing or editing `.docx`, round-tripping source XML, or preserving unknown
   parts for re-emission.
 - The legacy binary `.doc` format, macro-enabled `.docm`, templates, or
   encrypted documents.
 - Executing fields, macros, embedded scripts, external relationships, or
   external resources.
-- Full coverage of OOXML, drawing canvas, charts, SmartArt, embedded OLE,
-  equations, tracked changes, comments, content controls, or floating text
+- Full coverage of OOXML, drawing canvas, chart types beyond cached clustered
+  columns, SmartArt, embedded OLE,
+  equations, tracked changes, comments, content-control editing/binding semantics, or floating text
   boxes in v1.
 - Silently claiming support for an item that is merely skipped. Unsupported
   material that affects visible content must produce a diagnostic.
-- Changing generic `input()` format dispatch or making `lambda view file.docx`
-  render a Word document as part of the package's first milestone.
+- Changing generic `input()` format dispatch. The separate Phase 4 viewer
+  route uses the converter through the existing document-transform boundary.
 
 ## 3. Design basis
 
@@ -143,6 +145,9 @@ Keep the initial option surface small and data-oriented:
   style-map language in v1.
 - `include_empty_paragraphs`: preserve empty source paragraphs when true;
   default false.
+- `presentation`: `"semantic"` (default) keeps the established semantic HTML;
+  `"source"` includes supported source theme/run/table/page CSS. The direct
+  and file-browser viewers select `"source"` and preserve empty paragraphs.
 - `images`: `"data-uri"` or `"omit"`; default `"data-uri"` for supported,
   package-internal image parts.
 - `id_prefix`: prefix main-story bookmark identifiers and anchor links; note
@@ -200,15 +205,25 @@ void-element implementations.
 | Tabs and line breaks | Text plus `<br>` where needed, preserving visible order |
 | Hyperlink relationship | `<a href="…">`; external targets remain inert until the caller activates a link |
 | Simple ordered/unordered lists | `<ol>` / `<ul>` and nested `<li>`, derived from numbering definitions and paragraph level |
+| Lists with `numFmt="none"` | Nested lists with hidden markers and numbering-level indentation/hanging indent |
 | Tables | `<table>`, row and cell elements; preserve text, nested paragraphs, and supported row/column spans |
+| Content controls (`w:sdt`) | Display saved `sdtContent` in its inline/block/row/cell context; retain source order and inherited formatting, without executing bindings or editing behavior |
 | Package-internal raster images | `<img>` with a data URI by default, or omit with a diagnostic |
+| Cached clustered column charts | SVG through `lambda.chart.chart`, preserving indexed cached values, series order, labels and RGB colors; a data table in plain text |
+| Paragraph-relative anchored drawings | CSS alignment/wrapping for supported column-relative left/right/center anchors at paragraph top |
+| Source presentation | Resolve theme fonts/colors, inherited run size and tracking, paragraph spacing, table grid widths, cell shading/borders, row heights, and page dimensions into validated CSS |
 | Page/section break | Stable semantic break marker; no claim of Word pagination |
 
 Preserve Unicode text and run order. Apply document defaults, named styles,
 paragraph/run properties, and direct formatting in a defined precedence order
 before lowering. Full visual properties such as font metrics, exact spacing,
-columns, borders, and floating placement are not part of the semantic v1
-contract.
+columns, borders, and page-relative floating placement are not part of the
+semantic v1 contract. The supported paragraph-anchor subset uses CSS floats
+and distance/effect extents; unsupported anchors retain diagnostics.
+Footnote/endnote parts are inspected before diagnosing separate stories:
+parts containing only separator and continuation-separator definitions have
+no actual notes to omit. Normal notes and other separate stories remain
+outside the supported profile.
 
 ### 5.4 Diagnostics and errors
 
@@ -351,7 +366,8 @@ relevant Radiant baseline only for this viewer integration.
 - Comments, tracked-change policy, bookmarks beyond simple main-story anchors,
   and additional field types.
 - More complete table borders/styles, column layout, and shape-to-SVG subset.
-- Equations, charts, SmartArt, embedded OLE, and drawing canvas.
+- Equations, chart types beyond cached clustered columns, SmartArt, embedded
+  OLE, drawing canvas, and page-relative anchored placement.
 - Faithful page layout or PDF rendering from DOCX.
 - A DOCX writer, editing, and round-trip preservation.
 - `docm`, encrypted documents, legacy `.doc`, and remote resource resolution.
@@ -391,7 +407,11 @@ namespace/path handling (`common.ls`), source/part capture (`package.ls`), style
 and numbering resolution (`styles.ls`), the private document model (`model.ls`)
 and static HTML element lowering (`render.ls`). HTML serialization reuses
 `lambda.latex.to_html`; data-URI construction is shared with archive preview
-through `lambda.doc.media`. This does not add the Phase 4 DOCX viewer route.
+through `lambda.doc.media`. Phase 4 adds the shared `docx.view`/`docx.css`
+presentation modules: direct `view file.docx` uses the existing native document
+transform registry; file-tree selection retains the converted result and shows
+semantic content or generated HTML. `view file.docx --archive` preserves
+explicit ZIP-part inspection. Unsupported content is listed above the preview.
 
 Native changes expose the existing strict XML parser as
 `{type:"xml", flavor:"document"}` and retain the source byte count through
