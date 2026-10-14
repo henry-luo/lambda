@@ -64,6 +64,11 @@
       "tags": ["blade", "baseline"]
     },
     {
+      "name": "draw",
+      "globs": ["test/ui/draw/*.json"],
+      "tags": ["draw", "baseline"]
+    },
+    {
       "name": "dom",
       "globs": [
         "test/ui/dom/*.json",
