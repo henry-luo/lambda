@@ -825,7 +825,8 @@ static bool apply_html_inline_text_default(LayoutContext* lycon, ViewSpan* span,
     switch (tag) {
         case MARKUP_NAME_B: case MARKUP_NAME_STRONG: weight = CSS_VALUE_BOLD; break;
         case MARKUP_NAME_I: case MARKUP_NAME_EM: case MARKUP_NAME_CITE:
-        case MARKUP_NAME_DFN: case MARKUP_NAME_VAR: case MARKUP_NAME_Q:
+        // HTML §15.3.4: q inherits font-style; its UA additions are quote marks.
+        case MARKUP_NAME_DFN: case MARKUP_NAME_VAR:
             style = CSS_VALUE_ITALIC; break;
         case MARKUP_NAME_U: case MARKUP_NAME_INS: case MARKUP_NAME_ABBR:
         case MARKUP_NAME_ACRONYM: decoration = CSS_VALUE_UNDERLINE; break;

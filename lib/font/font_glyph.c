@@ -1168,3 +1168,11 @@ float font_measure_char(FontHandle* handle, uint32_t codepoint) {
     GlyphInfo glyph = font_get_glyph(handle, codepoint);
     return glyph.advance_x;
 }
+
+bool font_get_synthesized_space_advance(FontHandle* handle, uint32_t codepoint, float* advance) {
+    if (!handle || !advance || codepoint != 0x2008 ||
+        font_has_codepoint(handle, codepoint) || !font_has_codepoint(handle, '.')) return false;
+    // Unicode §6.2.3 synthesizes a missing punctuation space from this face's period.
+    *advance = font_measure_char(handle, '.');
+    return true;
+}

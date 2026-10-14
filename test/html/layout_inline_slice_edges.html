@@ -1,0 +1,20 @@
+<!doctype html><meta charset="utf-8">
+<style>
+@font-face {font-family:Ahem;src:url(../layout/data/support/fonts/Ahem.ttf)}
+body {margin:0;font:16px/16px Ahem}
+.case {width:80px;margin-bottom:24px;background:lightgreen}
+.right {border-right:16px solid blue}
+.both {border-left:16px solid blue;border-right:16px solid blue}
+</style>
+<div id="result">
+<div class="case"><span id="right" class="right">12 34,</span> 2345</div>
+<div class="case"><span id="both" class="both">12 34,</span> 2345</div>
+<div class="case"><span id="first-wide" class="right">XXXX X</span></div>
+<div class="case"><span id="last-wide" class="right">XX XXXX</span></div>
+<div class="case"><span id="nested" class="right">12 <span style="border-right:8px solid orange">34,</span></span></div>
+<div class="case"><span id="forced" class="right">XXXX<br>X</span></div>
+<div class="case" style="direction:rtl"><span id="rtl" class="both" style="unicode-bidi:bidi-override">XX XX</span></div>
+<div class="case"><span id="lookahead">12 34</span><span style="border-left:16px solid blue">,</span> 2345</div>
+<div class="case"><span id="clone" class="both" style="box-decoration-break:clone">X XXXX X</span></div>
+<div class="case"><span id="relative" class="right">12 <span style="position:relative;left:20px;border-right:8px solid orange">34,</span></span></div>
+</div>

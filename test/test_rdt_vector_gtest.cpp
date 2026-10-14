@@ -403,6 +403,47 @@ TEST(TextOverflowPaint, EffectGlyphBitmapsAndAdvancesUseLogicalPaintCoordinates)
     }
 }
 
+TEST(TextOverflowPaint, SynthesizedPunctuationSpaceKeepsLogicalWidthAcrossDensities) {
+    for (float density : {1.0f, 2.0f}) {
+        SCOPED_TRACE(density);
+        FontContextConfig config = {}; config.pixel_ratio = density;
+        FontContext* fonts = font_context_create(&config);
+        ASSERT_NE(fonts, nullptr);
+        FontStyleDesc description = {"Ahem", 10.0f, FONT_WEIGHT_NORMAL, FONT_SLANT_NORMAL, nullptr};
+        FontHandle* handle = font_load_from_file(fonts, "test/layout/support/fonts/Ahem.ttf", &description);
+        ASSERT_NE(handle, nullptr);
+        float advance = 0.0f;
+        ASSERT_TRUE(font_get_synthesized_space_advance(handle, 0x2008, &advance));
+        EXPECT_FLOAT_EQ(advance, 10.0f);
+        EXPECT_FALSE(font_get_synthesized_space_advance(handle, '.', &advance));
+        FontProp style = FONT_PROP_DEFAULT;
+        style.font_handle = lam::counted(handle);
+        style.font_size = 10.0f;
+        style.letter_spacing = 1.0f;
+        FontBox font = {lam::up(&style), 10.0f};
+        PaintGlyphRun run = {};
+        run.font = lam::up(&font);
+        run.text = lam::up("x\xE2\x80\x88y");
+        run.text_len = 5;
+        run.x = 5.0f;
+        run.baseline_y = 20.0f;
+        Arena* arena = arena_create_default();
+        ASSERT_NE(arena, nullptr);
+        DisplayList list = {}; dl_init(&list, arena);
+        render_glyph_run_raster_lower(&run, &list);
+        ASSERT_EQ(list.item_count(), 2);
+        const DlDrawGlyph& first = list.data()[0].draw_glyph;
+        const DlDrawGlyph& second = list.data()[1].draw_glyph;
+        float first_x = first.has_transform ? first.transform.e13 : (float)first.x;
+        float second_x = second.has_transform ? second.transform.e13 : (float)second.x;
+        EXPECT_FLOAT_EQ(second_x - first_x, 22.0f);
+        dl_destroy(&list);
+        arena_destroy(arena);
+        font_handle_release(handle);
+        font_context_destroy(fonts);
+    }
+}
+
 TEST(TextOverflowPaint, RecordedGlyphRunsRetainFontSelectionAfterPaintContextChanges) {
     FontContextConfig config = {}; config.pixel_ratio = 1;
     FontContext* fonts = font_context_create(&config); ASSERT_NE(fonts, nullptr);

@@ -1464,7 +1464,7 @@ static float intrinsic_loaded_glyph_advance(LayoutContext* lycon,
                                             float kerning,
                                             bool emoji_presentation,
                                             bool* loaded) {
-    if (text_unicode_space_width_em(codepoint) > 0.0f || codepoint == 0x202F) {
+    if (text_unicode_space_has_explicit_advance(codepoint)) {
         *loaded = true;
         float advance = layout_unicode_space_advance(lycon, codepoint);
         if (small_caps_lower) advance *= font_get_small_caps_scale(font_box_handle(&lycon->font));
@@ -4884,8 +4884,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     }
 
     // Track floated block-level children for intrinsic sizing
-    // CSS Sizing 3 §5: At max-content, floats arrange side-by-side (infinite width),
-    // so their max-content widths are summed. At min-content, each float wraps to its
+    // CSS Sizing 3 §5: uncleared floats arrange side-by-side at max-content,
+    // so each run sums their widths. At min-content, each float wraps to its
     // own line, so min-content is the max of individual float min-content widths.
     float float_max_sum = 0.0f;   // Sum of floated children's max-content widths
     float float_min_max = 0.0f;   // Max of individual floated children's min-content widths
@@ -4895,6 +4895,15 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // Track accumulated float widths that are adjacent to inline content so we
     // can add them to inline_max_sum at the end.
     float float_width_alongside_inline = 0.0f;
+    bool has_left_float = false;
+    bool has_right_float = false;
+    auto flush_float_run = [&]() {
+        sizes.min_content = max(sizes.min_content, float_min_max);
+        sizes.max_content = max(sizes.max_content, float_max_sum);
+        float_max_sum = 0.0f;
+        float_min_max = 0.0f;
+        has_left_float = has_right_float = false;
+    };
 
     // Check if this element is a flex container (text content doesn't contribute to intrinsic size)
     // Also check if it's a ROW flex container (children laid out horizontally -> SUM widths)
@@ -5554,6 +5563,18 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // margin can make min-content exceed max-content and force an oversized clamp.
             child_min_width += margin_left + margin_right;
             if (child_is_float) {
+                DomElement* float_element = child->as_element();
+                CssEnum clearance = layout_specified_keyword(float_element, CSS_PROPERTY_CLEAR,
+                    float_element->position ? float_element->positionp()->clear : CSS_VALUE_NONE);
+                bool clears_left = clearance == CSS_VALUE_LEFT || clearance == CSS_VALUE_BOTH;
+                bool clears_right = clearance == CSS_VALUE_RIGHT || clearance == CSS_VALUE_BOTH;
+                // fully cleared floats occupy separate rows even under an infinite inline constraint.
+                if ((!has_left_float || clears_left) && (!has_right_float || clears_right))
+                    flush_float_run();
+                CssEnum float_side = layout_specified_keyword(float_element, CSS_PROPERTY_FLOAT,
+                    float_element->position ? float_element->positionp()->float_prop : CSS_VALUE_NONE);
+                has_left_float |= float_side == CSS_VALUE_LEFT;
+                has_right_float |= float_side == CSS_VALUE_RIGHT;
                 // Floated block child: accumulate for side-by-side arrangement
                 // At max-content (infinite width), all floats fit on one line → sum widths
                 // At min-content, each float wraps to its own line → max of widths
@@ -5561,16 +5582,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // pre-rounding each child can make a measured-fitting float run
                 // wrap once the shrink-wrapped parent is laid out.
                 float_max_sum += child_width;
-                float_width_alongside_inline += child_width;
+                float_width_alongside_inline = max(float_width_alongside_inline, float_max_sum);
                 float_min_max = max(float_min_max, child_min_width);
             } else {
                 // Non-floated block child: flush any accumulated float run first
-                if (float_max_sum > 0) {
-                    sizes.min_content = max(sizes.min_content, float_min_max);
-                    sizes.max_content = max(sizes.max_content, float_max_sum);
-                    float_max_sum = 0;
-                    float_min_max = 0;
-                }
+                flush_float_run();
                 // A non-float block child creates a full-width line, separating
                 // preceding floats from subsequent inline content.
                 float_width_alongside_inline = 0;
@@ -5584,10 +5600,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     }
 
     // Flush any remaining float run after the child loop
-    if (float_max_sum > 0) {
-        sizes.min_content = max(sizes.min_content, float_min_max);
-        sizes.max_content = max(sizes.max_content, float_max_sum);
-    }
+    flush_float_run();
 
     // Add gaps for row flex containers
     if (is_row_flex && flex_child_count > 1 && flex_gap > 0) {

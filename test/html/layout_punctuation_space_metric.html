@@ -1,0 +1,17 @@
+<!doctype html>
+<style>
+@font-face { font-family: MetricAhem; src: url("../layout/support/fonts/Ahem.ttf"); }
+body { margin: 0; font: 10px/1 MetricAhem; }
+.case { white-space: break-spaces; width: 20px; margin-bottom: 10px; }
+.intrinsic { width: min-content; }
+</style>
+<section id="result">
+<div id="wrapped" class="case">x&#x2008;y</div>
+<div id="unbreakable-prefix" class="case">xx&#x2008;y</div>
+<div id="intrinsic" class="case intrinsic">x&#x2008;y</div>
+<div id="inline" class="case">x<span>&#x2008;</span>y</div>
+<div id="rtl" class="case" dir="rtl">x&#x2008;y</div>
+<div id="wide" class="case" style="width: 50px">x&#x2008;y</div>
+<div id="decorated" class="case" style="width: 50px; text-decoration: underline; text-shadow: 0 1px black">x&#x2008;y</div>
+<div id="clipped" class="case" style="width: 25px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">x&#x2008;y</div>
+</section>
