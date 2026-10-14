@@ -3502,7 +3502,8 @@ static void sim_focus_typing_target(UiContext* uicon, SimEvent* ev) {
     }
 
     float x, y;
-    if (resolve_target(ev, uicon->document, &x, &y)) {
+    // typing must reveal clipped fields before its pointer focus step, just like selector clicks.
+    if (resolve_click_target(ev, uicon, &x, &y)) {
         sim_mouse_button(uicon, x, y, 0, 0, true);
         sim_mouse_button(uicon, x, y, 0, 0, false);
     }

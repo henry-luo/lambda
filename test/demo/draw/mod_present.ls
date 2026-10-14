@@ -9,6 +9,11 @@ pub fn fit(owner,st) {
     let b = viewport(owner);
     {*:st,zoom:model.clamp(min((b.width-48)/model.width,(b.height-48)/model.height),0.1,2),pan:{x:0.0,y:0.0}}
 }
+pub fn camera(owner,st) {
+    let stage = viewport(owner)
+    let page = dom.bounding_box(dom.get_element_by_id(owner,"paper"));
+    {*:st,camera_dirty:false,pan:{x:page.x-stage.x-(stage.width-page.width)/2,y:page.y-stage.y-(stage.height-page.height)/2}}
+}
 pub fn point(owner,st,x,y) {
     let b = dom.bounding_box(dom.get_element_by_id(owner,"paper"));
     {x:(x-b.x)/st.zoom,y:(y-b.y)/st.zoom}
@@ -57,9 +62,19 @@ pub pn sync(owner,st) {
     let chosen = if (len(ids)>1 and len(selected_shapes)>0) selected_shapes[last] else primary
     let shape_selected = chosen.tag == 'shape'
     let shape_count = len([for (node in model.objects(st.doc) where node.tag == 'shape') node]);
-    for (key,value in {width:model.width*st.zoom,height:model.height*st.zoom,
-        left:(stage.width-model.width*st.zoom)/2+st.pan.x,top:(stage.height-model.height*st.zoom)/2+st.pan.y})
+    let page_width = model.width*st.zoom
+    let page_height = model.height*st.zoom
+    let surface = dom.get_element_by_id(owner,"canvas-space");
+    // a half-viewport margin lets every page corner be centered without negative scroll offsets.
+    for (key,value in {width:stage.width+page_width,height:stage.height+page_height})
+        dom.style_set_property(surface,string(key),string(value) ++ "px")
+    for (key,value in {width:page_width,height:page_height,left:stage.width/2,top:stage.height/2})
         dom.style_set_property(paper,string(key),string(value) ++ "px")
+    // flush the new surface dimensions before native scrollTo clamps against its scroll range.
+    let laid_out = dom.bounding_box(surface)
+    dom.set_scroll_state(dom.get_element_by_id(owner,"stage"),
+        model.clamp(page_width/2-st.pan.x,0,max(laid_out.width-stage.width,0)),
+        model.clamp(page_height/2-st.pan.y,0,max(laid_out.height-stage.height,0)))
     dom.style_set_property(dom.get_element_by_id(owner,"stage"),"cursor",if (st.tool == "pan") "grab"
         else if (contains(["connect","marquee"],st.tool) or contains(model.kinds,st.tool)) "crosshair" else "default")
     dom.set_inner_html(paper,format(scene.svg(st.doc,st.selected,if (st.hover != "") st.hover else st.source,st.grid,false,ids,st.zoom,
@@ -73,7 +88,7 @@ pub pn sync(owner,st) {
         'history-label':string(len(st.hist.undo)) ++ " edits",'save-state':if (st.doc == st.saved) "No unsaved edits" else "Unsaved changes",
         'tool-hint':if (contains(model.kinds,st.tool)) "Click on the page to place your shape"
             else if (st.tool == "connect") (if (st.source == "") "Click the source shape" else "Click the destination shape")
-            else if (st.tool == "pan") "Drag the canvas to pan · Scroll to zoom"
+            else if (st.tool == "pan") "Drag or scroll to pan · Ctrl/Cmd + scroll to zoom"
             else if (st.tool == "marquee") "Drag a rectangle to select · Shift adds to selection"
             else if (chosen.tag == 'connector') "Blue endpoints move freely · Gold handle edits route" else "Drag to move · Empty canvas selects a group · Shift-click adds",
         'dialog-title':if (st.dialog == "open") "Open diagram" else if (st.dialog == "export") "Export SVG" else "Save diagram",

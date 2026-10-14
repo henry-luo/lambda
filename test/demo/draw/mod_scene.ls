@@ -1,8 +1,16 @@
+import dom
 import model: .mod_model
 import geom: lambda.editor.mod_geom
 import router: lambda.editor.mod_router
 import shapes: .mod_shapes
 import paint: .mod_paint
+
+// scroll does not bubble; synchronize the camera after native scrolling settles.
+view <canvas_scrollport> { ~.rendered }
+on scroll(evt) {
+    dom.request_frame(dom.closest(evt.target,"#draw"),"canvas_scrolled")
+    return 'handled'
+}
 
 fn rotation(node) {
     let c = geom.rect_center(model.box(node));
@@ -155,9 +163,9 @@ pub fn tree() => <main id:"draw",'data-error':"",
         >
         <section class:"canvas-column",
             <div class:"canvas-caption",<span "DIAGRAM 01"><span "1120 × 760">>
-            <div id:"stage",tabindex:"0",role:"region",'aria-label':"Diagram canvas. Arrow keys move the selected shape.",
-                <div id:"paper">>
-            <div class:"canvas-help",<span id:"tool-hint","Drag shapes to move · Drag the bottom-right handle to resize"><span "Esc cancels · Delete removes">>
+            ; (apply(<canvas_scrollport rendered:<div id:"stage",tabindex:"0",role:"region",'aria-label':"Diagram canvas. Arrow keys move the selection; scrollbars navigate the page.",
+                <div id:"canvas-space",<div id:"paper">>>>))
+            ; <div class:"canvas-help",<span id:"tool-hint","Drag shapes to move · Drag the bottom-right handle to resize"><span "Esc cancels · Delete removes">>
         >
         <aside class:"inspector",
             <p class:"eyebrow","INSPECTOR"><h2 id:"selection-title","The big picture">

@@ -4614,7 +4614,7 @@ static void layout_resolve_auto_margins_after_width_change(
     block->x += block->boundary()->margin.left - old_margin_left;
 }
 
-static void update_multipass_advance_y(LayoutContext* lycon, ViewBlock* block) {
+void update_multipass_advance_y(LayoutContext* lycon, ViewBlock* block) {
     lycon->block.advance_y = block->height;
     lycon->block.advance_y -= layout_axis_decoration_end(block->bound, LAYOUT_AXIS_Y);
     if (block->display.inner == CSS_VALUE_FLEX && block->is_element() && block->scroller) {

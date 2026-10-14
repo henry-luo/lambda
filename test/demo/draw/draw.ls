@@ -118,7 +118,7 @@ pn drag_to(owner,st,x,y,shift=false) {
     return {*:st,doc:model.move_selection(drag.before,drag.ids,dx/st.zoom,dy/st.zoom,st.grid)}
 }
 
-view <draw_session> state session:{*:model.initial(),arrow_menu:""} { ~.rendered }
+view <draw_session> state session:{*:model.initial(),arrow_menu:"",camera_dirty:false} { ~.rendered }
 on draw_activate(evt) {
     if (evt.event_phase != 2) { return 'pass' }
     session = publish(evt.target,present.fit(evt.target,session))
@@ -171,8 +171,15 @@ on focusout(evt) {
 }
 on pointerdown(evt) {
     let owner = owner_of(evt)
+    // native navigation can precede its queued scroll notification in the same frame.
+    if (session.camera_dirty == true) { session = present.camera(owner,session) }
     if (session.arrow_menu != "" and dom.closest(evt.target,"[data-arrow-key]") == null) { session = publish(owner,{*:session,arrow_menu:""}) }
     let stage = dom.get_element_by_id(owner,"stage")
+    // the scroll surface fills the viewport; a direct stage hit belongs to native scrollbar chrome.
+    if (evt.target == stage) {
+        session = {*:session,camera_dirty:true}
+        return 'pass'
+    }
     if (session.dialog != "" or evt.button != 0 or dom.closest(evt.target,"#stage") == null or session.drag != null) { return 'pass' }
     let viewport = present.viewport(owner)
     if (not geom.rect_contains(viewport,{x:evt.clientX,y:evt.clientY})) { return 'pass' }
@@ -214,7 +221,7 @@ on pointerdown(evt) {
     return 'prevent-default'
 }
 on mousedown(evt) {
-    if (session.dialog != "" or dom.closest(evt.target,"#stage") == null) { return 'pass' }
+    if (dom.get_attribute(evt.target,"id") == "stage" or session.dialog != "" or dom.closest(evt.target,"#stage") == null) { return 'pass' }
     // the diagram owns mouse focus; document text-selection defaults would clear it.
     dom.focus_set(dom.get_element_by_id(owner_of(evt),"stage"),false)
     return 'prevent-default'
@@ -239,9 +246,19 @@ on pointercancel(evt) {
     session = publish(owner_of(evt),cancel(session))
     return 'prevent-default'
 }
+on canvas_scrolled(evt) {
+    if (session.drag != null or session.camera_dirty != true) { return 'handled' }
+    session = present.camera(owner_of(evt),session)
+    return 'handled'
+}
 on wheel(evt) {
     if (session.dialog != "" or session.drag != null or dom.closest(evt.target,"#stage") == null) { return 'pass' }
     let owner = owner_of(evt)
+    if (not evt.ctrlKey and not evt.metaKey) {
+        session = {*:session,camera_dirty:true}
+        return 'pass'
+    }
+    if (session.camera_dirty == true) { session = present.camera(owner,session) }
     let b = present.viewport(owner)
     let zoom = model.clamp(session.zoom*(if (evt.deltaY<0) 1.1 else 1/1.1),0.1,3)
     let factor = zoom/session.zoom;
@@ -252,6 +269,7 @@ on wheel(evt) {
 }
 on keydown(evt) {
     let owner = owner_of(evt)
+    if (session.camera_dirty == true) { session = present.camera(owner,session) }
     let picker = dom.closest(evt.target,"[data-arrow-key]")
     if (picker != null and session.dialog == "" and contains(["ArrowUp","ArrowDown","Home","End","Enter"," ","Escape","Tab"],evt.key)) {
         let property = dom.get_attribute(picker,"data-arrow-key")

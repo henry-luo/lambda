@@ -59,6 +59,11 @@ Duplicate offsets the selection or adds a bend to a lone copied connector. New b
 diagram, Load example and Style showcase are undoable. The showcase presents
 all twelve shapes with patterns, outline styles and arrowheads.
 
+The shape library and inspector scroll independently in short windows, with
+visible scrollbars when their contents overflow. The canvas has horizontal
+and vertical scrollbars for navigating the page, including at high zoom.
+Fit page recenters the diagram; scrolling and panning do not add undo items.
+
 | Shortcut | Action |
 | --- | --- |
 | V / M / C / H | Select / Rectangle select / Connect / Pan |
@@ -70,8 +75,8 @@ all twelve shapes with patterns, outline styles and arrowheads.
 | Ctrl/Cmd + Shift + Z, Ctrl/Cmd + Y | Redo |
 | Ctrl/Cmd + S | Save dialog |
 | Ctrl/Cmd + Shift + C / V | Copy / paste style |
-| + / −, mouse wheel | Zoom; the wheel keeps the pointer's diagram point fixed |
-| Pan tool | Pan the page |
+| + / −, Ctrl/Cmd + mouse wheel | Zoom; the wheel keeps the pointer's diagram point fixed |
+| Mouse wheel / trackpad, scrollbars, Pan tool | Pan the page |
 | Escape | Cancel a drag, placement, connection or file dialog |
 
 Shortcuts leave native text controls alone. File dialogs keep Tab navigation
@@ -125,5 +130,6 @@ They cover moving/resizing, connectors and deletion, inspector edits, undo,
 touch, cancellation, keyboard focus, file round trips, SVG export, custom
 styles, patterns, arrowheads, free endpoints, attachment/bend editing,
 marquee selection, group alignment/duplication, transformed geometry, live
-inspector updates and a compact window.
+inspector updates, independent panel scrolling, canvas scrollbar dragging,
+selection immediately after scrolling, and page overflow at high zoom.
 Replay screenshots and generated files go under `temp/draw/`.
