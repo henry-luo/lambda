@@ -18,3 +18,12 @@ extern "C" Item fn_ps_scan(Item source, Item offset, Item options) {
                                end.isInt() && end.asInt() >= 0 ? (size_t)end.asInt() : SIZE_MAX,
                                (size_t)max_objects);
 }
+
+extern "C" Item fn_ps_read(Item source, Item offset, Item options) {
+    if (get_type_id(offset) != LMD_TYPE_INT || offset.int_val < 0) return ItemNull;
+    return postscript_read_io(runtime_shape_tree(), source, (size_t)offset.int_val, options);
+}
+
+extern "C" Item fn_ps_png(Item planes, Item geometry, Item limits) {
+    return postscript_png_io(runtime_shape_tree(), planes, geometry, limits);
+}

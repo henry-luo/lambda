@@ -373,59 +373,35 @@ char* asciihex_decode(const char* encoded_data, size_t encoded_len, size_t* out_
  *         n (129-255) = repeat next byte (257-n) times
  *         n (128) = end of data
  */
-char* runlength_decode(const char* encoded_data, size_t encoded_len, size_t* out_len) {
-    if (!encoded_data || encoded_len == 0 || !out_len) {
-        return NULL;
-    }
-
-    // estimate output size (could be larger or smaller)
-    if (encoded_len > SIZE_MAX / 2u) return NULL;
-    ByteBuilder output = {};
-    if (!byte_builder_init(&output, encoded_len * 2u, MEM_CAT_INPUT_PDF, true)) return NULL;
-
-    const uint8_t* in = (const uint8_t*)encoded_data;
-    const uint8_t* in_end = in + encoded_len;
-
-    while (in < in_end) {
-        uint8_t n = *in++;
-        
-        if (n == 128) {
-            // end of data
-            break;
+bool runlength_decode_bounded(const char* data, size_t length, StrBuf* out,
+                              size_t max_bytes, bool strict, bool require_eod, size_t* consumed) {
+    strbuf_reset(out); *consumed = 0;
+    while (*consumed < length) {
+        unsigned n = (unsigned char)data[(*consumed)++];
+        if (n == 128) return true;
+        size_t amount = n < 128 ? n + 1 : 257 - n;
+        size_t input = n < 128 ? amount : 1;
+        if (input > length - *consumed) {
+            if (strict) return false;
+            if (n >= 128) break;
+            amount = input = length - *consumed;
         }
-
-        if (n < 128) {
-            // copy next n+1 bytes
-            size_t copy_count = (size_t)n + 1u;
-            size_t available = (size_t)(in_end - in);
-            if (copy_count > available) copy_count = available;
-            if (!byte_builder_append(&output, in, copy_count)) {
-                byte_builder_destroy(&output);
-                return NULL;
-            }
-            in += copy_count;
-        } else {
-            // repeat next byte (257-n) times
-            size_t repeat_count = 257u - (size_t)n;
-            
-            if (in >= in_end) break;
-            uint8_t repeat_byte = *in++;
-            
-            // fill with repeated byte
-            if (!byte_builder_reserve(&output, repeat_count)) {
-                byte_builder_destroy(&output);
-                return NULL;
-            }
-            memset(byte_builder_writable_tail(&output, NULL), repeat_byte, repeat_count);
-            if (!byte_builder_commit(&output, repeat_count)) {
-                byte_builder_destroy(&output);
-                return NULL;
-            }
-        }
+        if (amount > max_bytes - out->length || !strbuf_ensure_cap(out, out->length + amount + 1)) return false;
+        if (n < 128) strbuf_append_str_n(out, data + *consumed, amount);
+        else for (size_t i = 0; i < amount; i++) strbuf_append_char(out, data[*consumed]);
+        *consumed += input;
     }
+    return !require_eod;
+}
 
-    *out_len = output.length;
-    return (char*)byte_builder_take(&output, NULL);
+char* runlength_decode(const char* data, size_t length, size_t* out_len) {
+    if (!data || !length || !out_len) return nullptr;
+    StrBuf* out = strbuf_new(); size_t consumed = 0;
+    if (!out) return nullptr;
+    if (!runlength_decode_bounded(data, length, out, SIZE_MAX - 1, false, false, &consumed)) {
+        strbuf_free(out); return nullptr;
+    }
+    return copy_decoded_buffer(out, out_len);
 }
 
 /**

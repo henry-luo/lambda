@@ -155,6 +155,8 @@ extern Item edit_array_append(Item array, Item value);
 extern Item pdf_parse_content_stream(Item bytes);
 extern Item fn_pdf_parse_content_stream(Item bytes);
 extern Item fn_ps_scan(Item source, Item offset, Item limits);
+extern Item fn_ps_read(Item source, Item offset, Item options);
+extern Item fn_ps_png(Item planes, Item geometry, Item limits);
 extern Item fn_pdf_register_svg_image_resolver(Item svg_item, Item pdf_item);
 extern int edit_commit(const char* description);
 extern bool edit_undo(void);
@@ -1395,6 +1397,10 @@ SysFuncInfo sys_func_defs[] = {
 
     {SYSFUNC_PS_SCAN, "ps_scan", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_ps_scan", FPTR(fn_ps_scan), NULL, NULL, false, 0},
+    {SYSFUNC_PS_READ, "ps_read", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_ps_read", FPTR(fn_ps_read), NULL, NULL, false, 0},
+    {SYSFUNC_PS_PNG, "ps_png", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_ps_png", FPTR(fn_ps_png), NULL, NULL, false, 0},
 
     // PDF package: bind page SVG roots to their parsed PDF object tree for image handle resolution
     {SYSFUNC_PDF_REGISTER_SVG_IMAGE_RESOLVER, "pdf_register_svg_image_resolver", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
@@ -1601,6 +1607,8 @@ JitImport jit_runtime_imports[] = {
     {"pdf_parse_content_stream", FPTR(pdf_parse_content_stream)},
     {"fn_pdf_parse_content_stream", FPTR(fn_pdf_parse_content_stream)},
     {"fn_ps_scan", FPTR(fn_ps_scan)},
+    {"fn_ps_read", FPTR(fn_ps_read)},
+    {"fn_ps_png", FPTR(fn_ps_png)},
     {"fn_pdf_register_svg_image_resolver", FPTR(fn_pdf_register_svg_image_resolver)},
     // typed array constructors
     {"array_float_new", FPTR(array_float_new)},

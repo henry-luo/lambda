@@ -90,6 +90,12 @@ static const RadiantViewCase g_radiant_view_cases[] = {
      "test/input/eps/dictionary-prolog.eps", nullptr, true},
     {"RadiantViewTest.LoadsFontSelectionEpsAsHeadlessView", "eps_font_selection",
      "test/input/eps/font-selection.eps", nullptr, true},
+    {"RadiantViewTest.LoadsTextGraphicsEpsAsHeadlessView", "eps_text_graphics",
+     "test/input/eps/text-graphics.eps", nullptr, true},
+    {"RadiantViewTest.LoadsHexRasterEpsAsHeadlessView", "eps_raster_hex",
+     "test/input/eps/raster-hex.eps", nullptr, true},
+    {"RadiantViewTest.LoadsPlanarRasterEpsAsHeadlessView", "eps_raster_planar",
+     "test/input/eps/raster-planar.eps", nullptr, true},
 };
 
 static const size_t g_radiant_view_case_count =
@@ -916,6 +922,18 @@ TEST(RadiantViewTest, LoadsDictionaryPrologEpsAsHeadlessView) {
 
 TEST(RadiantViewTest, LoadsFontSelectionEpsAsHeadlessView) {
     test_radiant_view_expect_case(23);
+}
+
+TEST(RadiantViewTest, LoadsTextGraphicsEpsAsHeadlessView) {
+    test_radiant_view_expect_case(24);
+}
+
+TEST(RadiantViewTest, LoadsHexRasterEpsAsHeadlessView) {
+    test_radiant_view_expect_case(25);
+}
+
+TEST(RadiantViewTest, LoadsPlanarRasterEpsAsHeadlessView) {
+    test_radiant_view_expect_case(26);
 }
 
 TEST(RadiantViewTest, ReleasesDetachedScriptTextControl) {

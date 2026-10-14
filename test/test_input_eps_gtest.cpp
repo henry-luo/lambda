@@ -5,6 +5,8 @@
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/input/pdf_decompress.h"
 #include "../lib/strbuf.h"
+#include "../lib/base64.h"
+#include <png.h>
 
 static Input* eps_parse(const char* bytes, size_t length) {
     Input* input = InputManager::create_input(nullptr);
@@ -114,4 +116,80 @@ TEST(EpsScanner, ProcedureObjectCountIsBoundedBeforeMaterialization) {
     Item source = builder.createStringItem("{1 2 3}");
     MapReader token(postscript_scan_io(input, source, 0, 100, 10, SIZE_MAX, 2).get_safe_map());
     EXPECT_STREQ(token.get("kind").cstring(), "error");
+}
+
+TEST(EpsScanner, ConsumesOneBareTokenSeparatorBeforeByteReads) {
+    EXPECT_EQ(eps_scan("image\r\n\xff", 8).get("next").asInt(), 7);
+    EXPECT_EQ(eps_scan("1  xyz", 6).get("next").asInt(), 2);
+    EXPECT_EQ(eps_scan("(x) xyz", 7).get("next").asInt(), 3);
+}
+
+static MapReader eps_read(const char* bytes, size_t length, const char* kind, int count, int limit = 100) {
+    Input* owner = InputManager::create_input(nullptr);
+    MarkBuilder builder(owner);
+    Item source = builder.createStringItem(bytes, length);
+    Item options = builder.map().put("kind", kind).put("count", count).put("limit", limit).final();
+    return MapReader(postscript_read_io(owner, source, 0, options).get_safe_map());
+}
+
+TEST(EpsBytes, ReadsExactByteBoundariesAndLineCapacity) {
+    MapReader hex = eps_read("ff 00 true", 10, "hex", 2);
+    ASSERT_TRUE(hex.get("complete").asBool());
+    EXPECT_EQ(hex.get("next").asInt(), 5);
+    EXPECT_EQ(hex.get("bytes").asArray().get(0).asInt(), 255);
+    MapReader line = eps_read("ab\r\ntrue", 8, "line", 2);
+    EXPECT_TRUE(line.get("complete").asBool());
+    EXPECT_EQ(line.get("next").asInt(), 4);
+    EXPECT_TRUE(eps_read("abc\n", 4, "line", 2).get("error").isString());
+    MapReader eof = eps_read("a", 1, "raw", 2);
+    EXPECT_FALSE(eof.get("complete").asBool());
+    EXPECT_EQ(eof.get("bytes").asArray().length(), 1);
+    EXPECT_TRUE(eps_read("", 0, "raw", 0).get("complete").asBool());
+}
+
+TEST(EpsBytes, FiltersStopAtEndMarkersAndRejectTruncationOrExpansion) {
+    MapReader hex = eps_read("ff0>tail", 8, "ASCIIHexDecode", 0);
+    EXPECT_EQ(hex.get("next").asInt(), 4);
+    EXPECT_EQ(hex.get("bytes").asArray().get(1).asInt(), 0);
+    MapReader a85 = eps_read("z~>tail", 7, "ASCII85Decode", 0);
+    EXPECT_EQ(a85.get("next").asInt(), 3);
+    EXPECT_EQ(a85.get("bytes").asArray().length(), 4);
+    const char rle[] = {1, 'a', 'b', (char)128, 't'};
+    MapReader decoded = eps_read(rle, sizeof(rle), "RunLengthDecode", 0);
+    EXPECT_EQ(decoded.get("next").asInt(), 4);
+    EXPECT_EQ(decoded.get("bytes").asArray().get(1).asInt(), 'b');
+    EXPECT_TRUE(eps_read(rle, 2, "RunLengthDecode", 0).get("error").isString());
+    EXPECT_TRUE(eps_read(rle, 3, "RunLengthDecode", 0).get("error").isString());
+    EXPECT_TRUE(eps_read("z~>", 3, "ASCII85Decode", 0, 3).get("error").isString());
+    EXPECT_TRUE(eps_read("fg>", 3, "ASCIIHexDecode", 0).get("error").isString());
+}
+
+TEST(EpsBytes, PngPackingPreservesPlanarColorAndRowPadding) {
+    Input* owner = InputManager::create_input(nullptr);
+    MarkBuilder builder(owner);
+    const char red[] = {(char)0x80, (char)0x40};
+    const char green[] = {0, 0};
+    const char blue[] = {(char)0x40, (char)0x80};
+    Item planes = builder.array().append(builder.createStringItem(red, 2))
+        .append(builder.createStringItem(green, 2)).append(builder.createStringItem(blue, 2)).final();
+    Item geometry = builder.map().put("width", 2).put("height", 2).put("bits", 1).put("components", 3).final();
+    Item limits = builder.map().put("max_image_pixels", 4).final();
+    String* uri = postscript_png_io(owner, planes, geometry, limits).get_safe_string();
+    ASSERT_NE(uri, nullptr);
+    const char* encoded = strchr(uri->chars, ',');
+    ASSERT_NE(encoded, nullptr);
+    size_t png_length = 0;
+    uint8_t* png_bytes = base64_decode(encoded + 1, uri->len - (encoded + 1 - uri->chars), &png_length);
+    ASSERT_NE(png_bytes, nullptr);
+    png_image image = {}; image.version = PNG_IMAGE_VERSION;
+    ASSERT_TRUE(png_image_begin_read_from_memory(&image, png_bytes, png_length));
+    image.format = PNG_FORMAT_RGBA;
+    uint8_t pixels[16] = {};
+    ASSERT_TRUE(png_image_finish_read(&image, nullptr, pixels, 0, nullptr));
+    const uint8_t expected[] = {255,0,0,255, 0,0,255,255, 0,0,255,255, 255,0,0,255};
+    EXPECT_EQ(image.width, 2u); EXPECT_EQ(image.height, 2u);
+    EXPECT_EQ(memcmp(pixels, expected, sizeof(expected)), 0);
+    png_image_free(&image); mem_free(png_bytes);
+    EXPECT_EQ(postscript_png_io(owner, planes, geometry,
+        builder.map().put("max_image_pixels", 3).final()).item, ITEM_NULL);
 }

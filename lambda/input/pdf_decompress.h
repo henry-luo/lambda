@@ -75,6 +75,8 @@ bool asciihex_decode_bounded(const char* data, size_t length, StrBuf* output,
 // Decode RunLength encoded data
 // Returns: decoded data (caller must free), or NULL on error
 char* runlength_decode(const char* encoded_data, size_t encoded_len, size_t* out_len);
+bool runlength_decode_bounded(const char* data, size_t length, StrBuf* output,
+                              size_t max_bytes, bool strict, bool require_eod, size_t* consumed);
 
 // Apply predictor to already decompressed data (for PNG/TIFF predictors)
 // Returns: unpredicted data (caller must free), or NULL on error

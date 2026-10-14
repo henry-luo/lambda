@@ -1,0 +1,1 @@
+{ draws: 4, text: true, width_and_point: true, currentpoint: true, encoding: true}

@@ -672,6 +672,8 @@ typedef enum SysFunc {
     SYSPROC_EMIT,            // emit(event_name, data) - dispatch event to parent template handler
     SYSFUNC_PDF_PARSE_CONTENT_STREAM,  // pdf_parse_content_stream(bytes) - fast PDF content tokenizer
     SYSFUNC_PS_SCAN,         // ps_scan(bytes, offset, limits) - one bounded PostScript source object
+    SYSFUNC_PS_READ,         // ps_read(bytes, offset, request) - bounded byte/codec read
+    SYSFUNC_PS_PNG,          // ps_png(planes, geometry, limits) - portable image transport
     SYSFUNC_PDF_REGISTER_SVG_IMAGE_RESOLVER,  // pdf_register_svg_image_resolver(svg, pdf) - bind PDF image handles to SVG root
     SYSFUNC_CONTENT,          // content(e) - read-only array view over an element's content (LR09-9)
     SYSPROC_PUSH,            // push(arr, val) - append val to a growable array in place (procedural)

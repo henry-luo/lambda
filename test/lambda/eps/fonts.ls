@@ -27,10 +27,10 @@ pn main() {
     let readonly = helpers.diagnose("/Times-Roman findfont /FontType 42 put")^
     let discarded = helpers.diagnose("save /Times-Roman findfont /FID get exch restore")^
     let overflow = helpers.diagnose("/Times-Roman findfont 1e308 scalefont 1e308 scalefont")^
-    let text = helpers.diagnose("/Times-Roman findfont 12 scalefont setfont 0 0 moveto (x) show")^
+    let text = eps.interpret(helpers.doc("/Times-Roman findfont 12 scalefont setfont 0 0 moveto (x) show currentpoint pop 0 gt")^)^
     print({checks: len(display.stack), passed: all(display.stack), draws: len(drawing.draws),
         missing: contains(missing, "invalidfont"), invalid: contains(invalid, "invalidfont"),
         matrix: contains(matrix, "typecheck"), readonly: contains(readonly, "invalidaccess"),
         discarded: contains(discarded, "invalidrestore"), overflow: contains(overflow, "invalidfont"),
-        text_profile: contains(text, "unsupported: show")})
+        text_profile: len(text.draws) == 1 and all(text.stack)})
 }

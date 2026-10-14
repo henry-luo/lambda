@@ -587,16 +587,31 @@ These are implementation/profile questions, not silently adopted language
 rulings. Any required change to a formal ruling must be proposed and recorded
 in both formal and working design documents before implementation.
 
-## Appendix C. Initial delivered profile (2026-10-14)
+## Appendix C. Delivered profile (2026-10-14)
 
-The native parser and demand scanner live under `lambda/input/`; `ps_scan` is
-a thin runtime bridge using an Input owner (**D4.1.3**). Literal-string parsing,
-bounded ASCIIHex/ASCII85 decoding and SVG path painting are shared with PDF.
+The native parser and demand scanner live under `lambda/input/`; `ps_scan`,
+`ps_read` and `ps_png` are thin runtime bridges using an Input owner
+(**D4.1.3**). Literal-string parsing, bounded ASCIIHex/ASCII85/RunLength decoding,
+PNG/data-URI encoding and SVG path/text painting are shared with PDF.
 The script package implements explicit object IDs, procedure/control-flow
 frames, local `save`/`restore`, and ordered vector draws, including clips,
 paint-time transforms and bounding-box normalization. Standard 14 font lookup,
 matrix derivation and graphics-state selection are also implemented, reusing
-the PDF font-name mapping; text painting and metrics remain a later gate.
+the PDF font-name mapping. Printable ASCII StandardEncoding text now supports
+`show`, `stringwidth`, `ashow`, `widthshow` and `awidthshow`; four Palatino
+variants supplement Standard 14 lookup. Radiant measures installed-font glyph
+advances, which SVG preserves through explicit glyph origins. Reencoding,
+embedded font programs and non-ASCII encodings remain open.
+
+Legacy `image`/`colorimage` accept 1/2/4/8-bit gray, RGB and CMYK samples from
+strings, in-memory files or procedures. Callback execution remains on the
+ordinary VM stack (**S12.1.2**); native helpers only read/decode bytes and encode
+pixels. Interleaved and planar sources preserve row padding. `currentfile`,
+byte/line/hex reads, `token` and the three filters update one cursor before the
+scanner resumes. The default execution ceiling is 10 million steps; decoded
+bytes and pixels have separate 64 MiB / 16777216 limits. Explicit integer/real
+guest records preserve PostScript types across host numeric array widening
+(**S1.6**), independently of Lambda's own numeric representation.
 
 `lambda convert artwork.eps -t svg -o artwork.svg`, `render`, `layout` and
 `view` route through the package. The conversion API is procedural
@@ -614,7 +629,7 @@ represent empty guest strings without introducing an empty Lambda binary
 retained as binary. Names use escaped byte keys.
 
 The initial profile supports name dictionary keys and boolean logical
-operators. It rejects unsupported executed text/image/resource/file operators,
+operators. It rejects unsupported executed font/resource/filter forms, image dictionaries,
 global VM, executable strings, and binary object encodings. It does not claim
 LanguageLevel conformance. The current T0 module loader cannot activate this
 import graph; execution is verified on auto/JIT, including forced GC. Broader

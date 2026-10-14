@@ -1404,8 +1404,7 @@ The EPS package lives under the document namespace (**D7.2.4**). A C+ parser
 reads the EPS envelope and scans source objects; Lambda Script executes the
 PostScript machine and emits portable SVG. The initial profile supports vector
 paths, colors, strokes, transforms, clipping, procedures, common stack/control
-operators, local VM saves and Standard 14 font selection. Text painting,
-images, external resources and full
+operators, local VM saves, base-font text and raster images. External resources and full
 PostScript LanguageLevel conformance remain outside this profile; an executed
 unsupported operator raises an error.
 
@@ -1434,10 +1433,20 @@ accepts names and its logical operators accept booleans. Auto/JIT are the
 supported package execution tiers.
 
 Font setup supports `findfont`, `scalefont`, `makefont`, `setfont`, `currentfont`
-and `selectfont` for the Standard 14 names already recognized by the PDF
-package. Font selection follows graphics and VM saves; unknown names raise
-`invalidfont`. This permits vector files with font setup to render. Glyph
-painting, text metrics, reencoding and embedded/custom fonts remain open.
+and `selectfont` for the Standard 14 names and four Palatino variants, sharing
+the PDF font mappings. `show`, `stringwidth`, `ashow`, `widthshow` and
+`awidthshow` support printable ASCII StandardEncoding text. Glyph advances
+come from Radiant's installed font metrics; explicit SVG glyph origins preserve
+those advances. Font selection follows graphics and VM saves. Unknown names
+raise `invalidfont`; reencoding and embedded/custom font programs remain open.
+
+Legacy `image`/`colorimage` support 1/2/4/8-bit gray, RGB and CMYK samples,
+interleaved or planar, with strings, in-memory files and procedure callbacks.
+`currentfile`, byte/hex/line reads, `token` and ASCIIHex/ASCII85/RunLength filters
+share one source cursor, so inline pixels are consumed before lexical scanning
+resumes. PNG encoding and filter codecs reuse native PDF helpers. The default
+ceilings include 10 million VM steps, 16 million pixels and 64 MiB of cumulative
+decoded bytes; lower caller limits remain enforced.
 
 ```bash
 ./lambda.exe convert artwork.eps -t svg -o artwork.svg

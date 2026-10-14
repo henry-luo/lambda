@@ -72,6 +72,16 @@ pub fn standard14(name: string) {
 // share exact base-font recognition without exposing the fallback record.
 pub fn is_standard14(name: string) => standard14(name) != _UNKNOWN
 
+// PostScript also commonly uses the installed Palatino family; retain one family/style mapping.
+pub fn postscript_basefont(name: string) {
+    if (is_standard14(name)) standard14(name)
+    else if (name in ["Palatino-Roman", "Palatino-Bold", "Palatino-Italic", "Palatino-BoldItalic"])
+        {family: "Palatino, 'Palatino Linotype', 'Book Antiqua', serif",
+         weight: if (contains(name, "Bold")) "bold" else "normal",
+         style: if (contains(name, "Italic")) "italic" else "normal"}
+    else null
+}
+
 // ============================================================
 // BaseFont heuristics
 // ============================================================

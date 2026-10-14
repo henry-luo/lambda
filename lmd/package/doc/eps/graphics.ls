@@ -133,7 +133,7 @@ pub pn dispatch(var m, op, args) int^ {
     if (op == "initmatrix") { m.graphics.ctm = util.IDENTITY; return 0 }
     if (op == "currentpoint") {
         let p = current_point(m)^
-        push(m.stack, p[0]); push(m.stack, p[1])
+        obj.push_operand(m, p[0]); obj.push_operand(m, p[1])
         return 0
     }
     if (op == "stroke" or op == "fill" or op == "eofill") { let painted = paint(m, op)^; return 0 }
@@ -167,19 +167,19 @@ pub pn dispatch(var m, op, args) int^ {
         return 0
     }
     if (op == "setdash") {
-        let dash = obj.values(m, args[0])^
+        let dash = [for (v in obj.values(m, args[0])^) obj.number_value(v)]
         let checked = obj.require(m, all([for (n in dash) obj.is_number(n) and n >= 0]) and
             (len(dash) == 0 or sum(dash) > 0), "rangecheck: dash array")^
         m.graphics.path = path.set_dash(m.graphics.path, dash, args[1])
         return 0
     }
-    if (op == "currentlinewidth") { push(m.stack, m.graphics.path.line_width); return 0 }
-    if (op == "currentlinecap") { push(m.stack, m.graphics.path.line_cap); return 0 }
-    if (op == "currentlinejoin") { push(m.stack, m.graphics.path.line_join); return 0 }
-    if (op == "currentmiterlimit") { push(m.stack, m.graphics.path.miter_limit); return 0 }
+    if (op == "currentlinewidth") { obj.push_operand(m, m.graphics.path.line_width); return 0 }
+    if (op == "currentlinecap") { obj.push_operand(m, m.graphics.path.line_cap); return 0 }
+    if (op == "currentlinejoin") { obj.push_operand(m, m.graphics.path.line_join); return 0 }
+    if (op == "currentmiterlimit") { obj.push_operand(m, m.graphics.path.miter_limit); return 0 }
     if (op == "currentdash") {
-        push(m.stack, obj.allocate(m, "array", m.graphics.path.dash_array)^)
-        push(m.stack, m.graphics.path.dash_phase)
+        obj.push_operand(m, obj.allocate(m, "array", m.graphics.path.dash_array)^)
+        obj.push_operand(m, m.graphics.path.dash_phase)
         return 0
     }
     if (op == "rectfill" or op == "rectstroke" or op == "rectclip") {

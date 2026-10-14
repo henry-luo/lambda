@@ -1,6 +1,11 @@
 // guest identities are explicit IDs; Lambda values retain S1.4 value semantics.
 pub fn failure(m, reason) error => error("EPS " ++ reason ++ " at byte " ++ string(m.offset))
-pub fn is_number(v) => v is int or v is float
+// S1.6: guest tags must survive host numeric array widening without changing PostScript types.
+pub fn is_number(v) => v is int or v is float or (v is map and v.kind in ["integer", "real"])
+pub fn is_integer(v) => v is int or (v is map and v.kind == "integer")
+pub fn number_value(v) => if (v is map and v.kind == "integer") v.int_value else if (v is map and v.kind == "real") v.real_value else v
+pub fn box(v) => if (v is int) {kind: "integer", int_value: v} else if (v is float) {kind: "real", real_value: v} else v
+pub pn push_operand(var m, value) int { push(m.stack, box(value)); return 0 }
 pub fn is_ref(v) => v is map and v.kind == "ref"
 pub fn literal_name(value, executable = false) => {kind: "name", value: value, executable: executable}
 pub fn reference(id, executable = false) => {kind: "ref", id: id, executable: executable, start: 0, count: -1, access: "unlimited"}
@@ -33,7 +38,7 @@ pub fn object_length(m, value) int^ {
 pub pn allocate(var m, kind, value, executable = false) map^ {
     let checked = require(m, len(m.heap) < m.limits.max_objects and len(value) <= m.limits.max_composite_length, "limitcheck: composite allocation")^
     let id = len(m.heap)
-    push(m.heap, {kind: kind, value: value, access: "unlimited"})
+    push(m.heap, {kind: kind, value: if (kind == "array") [for (v in value) box(v)] else value, access: "unlimited"})
     return reference(id, executable)
 }
 
@@ -44,12 +49,26 @@ pub pn put_value(var m, composite, key, value) int^ {
         let k = key_name(m, key)^
         m.heap[composite.id].value[k] = value
     } else {
-        let valid = require(m, key is int and key >= 0 and key < object_length(m, composite)^, "rangecheck: composite index")^
+        let index = number_value(key)
+        let valid = require(m, is_integer(key) and index >= 0 and index < object_length(m, composite)^, "rangecheck: composite index")^
+        let stored = if (e.kind == "string") number_value(value) else box(value)
         if (e.kind == "string") {
-            let byte = require(m, value is int and value >= 0 and value <= 255, "rangecheck: string byte")^
+            let byte = require(m, is_integer(value) and stored >= 0 and stored <= 255, "rangecheck: string byte")^
         }
-        m.heap[composite.id].value[composite.start + key] = value
+        m.heap[composite.id].value[composite.start + index] = stored
     }
+    return 0
+}
+
+pub pn put_sequence(var m, composite, start, data) int^ {
+    let e = entry(m, composite)^
+    let valid = require(m, e.kind in ["array", "string"] and e.access == "unlimited" and
+        start >= 0 and start + len(data) <= object_length(m, composite)^, "invalidaccess or rangecheck: sequence write")^
+    if (e.kind == "string") {
+        let bytes = require(m, all([for (v in data) is_integer(v) and number_value(v) >= 0 and number_value(v) <= 255]), "rangecheck: string byte")^
+    }
+    // keep one entry-time source snapshot for overlapping intervals and detach the destination once.
+    for (i in 0 to (len(data) - 1)) { m.heap[composite.id].value[composite.start + start + i] = if (e.kind == "string") number_value(data[i]) else box(data[i]) }
     return 0
 }
 
@@ -64,8 +83,8 @@ pub fn get_value(m, composite, key) any^ {
     if (e.kind == "dict") {
         let k = key_name(m, key)^
         if (k at data) data[k] else raise failure(m, "undefined: " ++ k)
-    } else if (not (key is int) or key < 0 or key >= len(data)) raise failure(m, "rangecheck: composite index")
-    else data[key]
+    } else if (not is_integer(key) or number_value(key) < 0 or number_value(key) >= len(data)) raise failure(m, "rangecheck: composite index")
+    else data[number_value(key)]
 }
 
 pub pn find_name(m, key) map^ {
@@ -99,12 +118,12 @@ pub pn schedule(var m, value) int^ {
         push(m.exec, {kind: "procedure", value: value, index: 0})
     } else if (value is map and ((value.kind == "operator" and value.executable != false) or (value.kind == "name" and value.executable))) {
         push(m.exec, {kind: "composite", value: value})
-    } else { push(m.stack, value) }
+    } else { push_operand(m, value) }
     return 0
 }
 
 pub pn materialize(var m, token) any^ {
-    if (token.kind == "number") { return token.value }
+    if (token.kind == "number") { return box(token.value) }
     if (token.kind == "string") { return allocate(m, "string", token.value)^ }
     if (token.kind == "immediate") { return lookup(m, token.value)^ }
     if (token.kind == "procedure") {

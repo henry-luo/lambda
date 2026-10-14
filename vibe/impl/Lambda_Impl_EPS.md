@@ -1,7 +1,7 @@
 # Lambda EPS implementation record
 
-**Date:** 2026-10-14. **Status:** initial vector profile and Standard 14 font
-selection implemented; text/image/font-program profiles remain open.
+**Date:** 2026-10-14. **Status:** vector, base-font text and legacy raster-image
+profiles implemented; embedded font programs and full LanguageLevel remain open.
 
 Design: [Lambda_Pkg_EPS.md](../Lambda_Pkg_EPS.md). This implementation follows
 **D7.2.4** (shipped document packages), **D4.1.3** (Input-owned parsing),
@@ -28,7 +28,13 @@ handlers). No formal language ruling changes.
   hairlines, clipping, saved paths, matrix operations and explicit transforms.
   Path points remain fixed in EPS space while strokes use the paint-time CTM.
 - Standard 14 font dictionaries support lookup, scaling/matrix derivation and
-  selection. Graphics and local VM saves preserve the selected font and cache.
+  selection, supplemented by four Palatino variants. Graphics and local VM
+  saves preserve the selected font and cache. Printable ASCII StandardEncoding
+  supports `show`, `stringwidth`, `ashow`, `widthshow` and `awidthshow`.
+- In-memory files, byte/hex/line reads, `token` and ASCIIHex/ASCII85/RunLength
+  filters share the demand scanner's source cursor. Legacy `image`/`colorimage`
+  accept strings, files or procedure callbacks with packed/interleaved or planar
+  gray/RGB/CMYK samples at 1/2/4/8 bits, and emit embedded PNG images.
 - Standalone SVG preserves draw order, normalizes the bounding-box origin,
   flips y, clips the viewport and retains point dimensions. Optional scale,
   background and resource ID prefixes are explicit.
@@ -42,12 +48,15 @@ handlers). No formal language ruling changes.
 |---|---|
 | `lambda/input/input-eps.cpp` | EPS envelope, DSC metadata, source ownership and detection. |
 | `lambda/input/input-postscript.hpp/.cpp` | Demand scanner and shared PDF/PostScript literal-string reader. |
-| `lambda/input/pdf_decompress.h/.cpp` | Shared bounded ASCIIHex/ASCII85 codecs, with explicit consumed lengths and strictness. |
-| `lambda/runtime/postscript_runtime.cpp` | `ps_scan` Item bridge into the context-owned Input; no native evaluator. |
+| `lambda/input/input-postscript-data.cpp` | Bounded byte reads, filter adapters and packed/planar pixel transport. |
+| `lambda/input/pdf_decompress.h/.cpp` | Shared bounded ASCIIHex/ASCII85/RunLength codecs, with explicit consumed lengths and strictness. |
+| `lambda/input/input-pdf-image.hpp` | Shared PDF PNG/data-URI encoding primitive. |
+| `lambda/runtime/postscript_runtime.cpp` | `ps_scan`/`ps_read`/`ps_png` Item bridges into the context-owned Input; no native evaluator. |
 | `lmd/package/doc/eps/objects.ls` | Explicit object store, permissions, references and operand helpers. |
 | `lmd/package/doc/eps/interp.ls`, `operators.ls` | Execution frames, budgets, operator signatures and dispatch. |
 | `lmd/package/doc/eps/graphics.ls`, `matrices.ls`, `vm.ls` | Guest graphics, transforms and local VM saves. |
 | `lmd/package/doc/eps/fonts.ls` | Standard 14 font identities, dictionaries, transformed matrices and selection. |
+| `lmd/package/doc/eps/text.ls`, `files.ls`, `images.ls` | Glyph advances, guest file cursors, filter dispatch and resumable image callbacks. |
 | `lmd/package/doc/eps/svg.ls`, `eps.ls` | SVG output and public exports. |
 
 PDF retains its public token schema. Its content and dictionary literal-string
@@ -77,7 +86,7 @@ through `options.limits`; defaults are policy ceilings, not performance claims:
 
 | Limit | Default |
 |---|---:|
-| `max_steps` | 250000 |
+| `max_steps` | 10000000 |
 | `max_stack` | 8192 |
 | `max_execution_depth` | 1024 |
 | `max_dictionary_depth`, `max_graphics_depth`, `max_clip_depth` | 128 |
@@ -87,10 +96,13 @@ through `options.limits`; defaults are policy ceilings, not performance claims:
 | `max_scan_objects` | 65536 per scan request |
 | `max_path_segments` | 100000 |
 | `max_draws` | 50000 |
+| `max_image_pixels` | 16777216 |
+| `max_decoded_bytes` | 67108864 cumulative reads/filter outputs |
 
 Dictionary keys are names in this profile; boolean logical forms are supported.
-`rect*` operators support the four-number form. Text painting/metrics,
-embedded/custom fonts, reencoding, images, file/filter operators, `stopped`,
+`rect*` operators support the four-number form. Non-ASCII StandardEncoding,
+embedded/custom font programs, reencoding, image dictionaries, filters other
+than the three listed above, external file access, `stopped`,
 global VM, arbitrary executable strings, PostScript
 binary object encodings, printer/device control and vendor extensions fail if
 executed. There is no producer-specific substitution or external renderer
@@ -103,8 +115,9 @@ numeric syntax rather than accepting Lambda's boolean/null coercions.
 
 Provide a distinct `id_prefix` when combining independent EPS fragments in one
 HTML document. Transparent SVG is the default; document/raster backgrounds
-follow the existing renderer. Base-font painting/metrics and image support remain separate
-delivery gates, requiring metrics/codec and visual-reference fixtures.
+follow the existing renderer. Base-font advances use Radiant's installed font
+metrics and can vary by platform; this profile does not ship canonical
+PostScript AFM metrics or embedded font outlines.
 
 ## Verification
 
@@ -211,3 +224,59 @@ with forced GC and freed-memory poisoning, and five EPS/PDF/SVG viewer cases
 with clean teardown for the EPS fixtures. The supplied artwork also passed the
 headless and actual GUI viewers with automatic close enabled.
 SVG conversion preserves the supplied artwork's 401 painted paths.
+
+### Complete local EPS directory
+
+The broader local corpus exposed four missing paths: Palatino text in
+`circle.eps`, palette/RGB callbacks in the two ImageMagick logos, and planar
+ASCII85/RunLength callbacks in the GIMP logo. All execution stays in Lambda
+Script; the native additions only expose existing bounded codecs, byte reads
+and the shared PDF PNG encoder (**D4.1.3**, **D7.4.6**).
+
+Three defects required general fixes. A bare token must consume its single
+whitespace terminator (CRLF counts once) before a callback reads inline data.
+The interpreter and `currentfile` now share one explicit guest file cursor;
+`restore` preserves that cursor alongside string bytes. Finally, operand and
+array storage use tagged integer/real guest records with separate payload
+fields, so host numeric widening cannot change a PostScript integer into a
+real (**S1.6**). This fixes palette-size multiplication and integer loop values
+without changing Lambda numerics.
+
+Image frames retain IDs and counters, with growing buffers stored once in the
+activation. Planar callbacks advance the least-filled channel, preserving the
+row/channel ordering of inline streams. Filter adapters stop at their exact
+EOD markers and enforce cumulative decoded-byte limits. PNG packing validates
+dimensions, row padding, component counts and available source bytes before
+encoding. The 10-million-step default covers the image callbacks; one RGB
+logo executes about 4.53 million VM steps. This is a policy ceiling, not a
+debug-build performance claim.
+
+Text measures each glyph with Radiant at 1000 units using the same family,
+weight and style as SVG. Explicit per-glyph origins prevent kerning or
+ligatures from changing PostScript advances. FontMatrix and currentpoint
+determine placement; `stringwidth` preserves currentpoint. The shared PDF
+`text_run` accepts optional attributes without changing existing callers.
+
+Authored fixtures `text-graphics.eps`, `raster-hex.eps` and `raster-planar.eps`
+cover text with vector paint, cursor resumption after hex pixels, and planar
+filtered RGB. Their script goldens also cover malformed/empty sources, limits,
+numeric tags and text errors. The seven supplied third-party artworks are
+tested locally and remain outside the authored fixture commit.
+
+Verification on 2026-10-14:
+
+| Check | Result |
+|---|---|
+| Local directory | 13/13 EPS files passed headless view and 13/13 passed actual GUI view with automatic close. |
+| EPS native tests | 13/13, including source separators, exact reads/EOD, filter failures, planar pixel colors and padded rows. |
+| PDF native tests | 26/26. |
+| EPS/PDF selected scripts and controls | 105/105; all 11 EPS goldens also passed JIT with forced GC and freed-memory poisoning. |
+| Viewer regression cases | 8/8 EPS/PDF/SVG cases passed; all six authored EPS fixtures check allocation-free teardown. |
+| Visual inspection | Three decoded logo PNGs preserve colors/orientation; the authored text/vector PNG shows upright text, circles and a line. |
+| Build | `make build` passed and rebuilt the checkout executable. |
+| Full Lambda baseline | 6567/6569 passed, including all 2112 input-parser checks. The same `edit_view_only` failure and `regression_music_layout` GC-stress timeout remain; the gate is not clean. |
+
+`python3 utils/test_eps_corpus.py` discovers every `.eps`/`.epsi` below
+`test/input/eps`, loads each via the viewer and fails on errors or timeouts.
+Use `--gui` for native windows; `--executable` selects a stable host during
+concurrent builds. Reports and isolated logs stay under `temp/eps-corpus-*`.
