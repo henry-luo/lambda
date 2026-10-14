@@ -4264,6 +4264,20 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             }
             block->width = flow_width;
         }
+        if (!defer_vertical_geometry && !vertical_multicol &&
+            !has_normal_block_child && lycon->block.given_height < 0.0f) {
+            // an auto vertical inline size is known only after measuring the line;
+            // align against that used extent before mapping surrogate coordinates.
+            CssEnum text_align = lycon->block.text_align;
+            bool rtl = lycon->block.direction == CSS_VALUE_RTL;
+            if (text_align == CSS_VALUE_START) {
+                text_align = rtl ? CSS_VALUE_RIGHT : CSS_VALUE_LEFT;
+            } else if (text_align == CSS_VALUE_END) {
+                text_align = rtl ? CSS_VALUE_LEFT : CSS_VALUE_RIGHT;
+            }
+            layout_align_deferred_inline_line_runs(lam::view_require_element(block),
+                max(logical_inline_flow - block_box.pad_border_v, 0.0f), text_align);
+        }
         if (!defer_vertical_geometry) {
             layout_publish_vertical_flow_geometry(lycon, block, flow_height);
         }
@@ -5475,7 +5489,7 @@ static DomNode* fieldset_next_flow_child(ViewBlock* fieldset, DomNode* current,
     }
 }
 
-static bool prescan_node_has_in_flow_inline_content(DomNode* node) {
+bool layout_node_has_in_flow_inline_content(DomNode* node) {
     if (!node) return false;
     if (node->is_text()) {
         return layout_dom_text_has_non_whitespace(node->as_text());
@@ -5484,14 +5498,11 @@ static bool prescan_node_has_in_flow_inline_content(DomNode* node) {
     DomElement* elem = node->as_element();
     DisplayValue display = resolve_display_value(node);
     if (layout_display_is_none(display)) return false;
-    if (elem->position &&
-        (layout_position_is_abs_fixed(elem->position) ||
-         layout_position_is_floated(elem->position))) {
-        return false;
-    }
+    if (layout_element_is_out_of_flow(elem)) return false;
     if (display.outer != CSS_VALUE_INLINE) return false;
+    if (layout_intrinsic_element_is_atomic_inline(elem)) return true;
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        if (prescan_node_has_in_flow_inline_content(child)) return true;
+        if (layout_node_has_in_flow_inline_content(child)) return true;
     }
     return false;
 }
@@ -5537,7 +5548,7 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
                 // css 2.1 §9.5: an empty inline box does not consume line
                 // space before a later float and must not suppress float prescan.
                 if (display.outer == CSS_VALUE_INLINE
-                    ? prescan_node_has_in_flow_inline_content(child) : true) {
+                    ? layout_node_has_in_flow_inline_content(child) : true) {
                     has_inline_content = true;
                 }
                 for (DomNode* text_node = elem->first_child; text_node; text_node = text_node->next_sibling) {
@@ -5585,7 +5596,7 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
     // appear at or below that block's top edge - they cannot be pre-scanned to y=0.
     for (DomNode* child = first_child; child; child = child->next_sibling) {
         if (!child->is_element()) {
-            if (prescan_node_has_in_flow_inline_content(child)) break;
+            if (layout_node_has_in_flow_inline_content(child)) break;
             continue;
         }
         DomElement* elem = child->as_element();
@@ -5598,7 +5609,7 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
             if (display.outer == CSS_VALUE_BLOCK) {
                 break;  // Stop pre-scanning - remaining floats go through normal flow
             }
-            if (prescan_node_has_in_flow_inline_content(child)) {
+            if (layout_node_has_in_flow_inline_content(child)) {
                 break;
             }
             // CSS 2.1 §9.5.2: <br> with clear property forces subsequent floats to
@@ -5971,7 +5982,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     }
                     prescan_and_layout_floats(lycon, child, block);
                     // CSS 2.1 §16.1: text-indent is "with respect to the left (or right)
-                    if (!lycon->block.is_first_line && lycon->block.text_indent != 0 &&
+                    if (lycon->block.is_first_line && lycon->block.text_indent != 0 &&
                         lycon->block.direction != CSS_VALUE_RTL) {
                         BlockContext* bfc = block_context_find_bfc(&lycon->block);
                         if (bfc && (bfc->left_float_count > 0 || bfc->right_float_count > 0)) {
@@ -6374,6 +6385,36 @@ void layout_setup_line_clamp(LayoutContext* lycon, ViewBlock* block,
     layout_propagate_line_clamp(lycon, block, parent);
 }
 
+void layout_setup_text_indent(LayoutContext* lycon, ViewBlock* block, float content_width) {
+    if (!lycon || !block) return;
+    // each block formatting context owns its first-line indent state.
+    lycon->block.is_first_line = true;
+    float resolved_text_indent = 0.0f;
+    if (block->blk) {
+        if (block->block()->text_indent_calc) {
+            // CSS Text 3: text-indent percentage resolves against the block's own content width
+            float saved_parent_width = 0;
+            bool has_parent = lycon->block.parent != nullptr;
+            if (has_parent) {
+                saved_parent_width = lycon->block.parent->content_width;
+                lycon->block.parent->content_width = content_width;
+            }
+            resolved_text_indent = resolve_length_value(lycon, CSS_PROPERTY_TEXT_INDENT, block->block()->text_indent_calc);
+            if (has_parent) {
+                lycon->block.parent->content_width = saved_parent_width;
+            }
+        } else if (!isnan(block->block()->text_indent_percent)) {
+            resolved_text_indent = content_width * block->block()->text_indent_percent / 100.0f;
+        } else if (block->block()->text_indent != 0.0f) {
+            resolved_text_indent = block->block()->text_indent;
+        }
+    }
+    lycon->block.text_indent = resolved_text_indent;
+    lycon->block.text_indent_hanging = block->blk && block->block()->text_indent_hanging;
+    lycon->block.text_indent_each_line = block->blk && block->block()->text_indent_each_line;
+    lycon->block.is_line_after_forced_break = false;
+}
+
 void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     float content_width = lycon->block.content_width;
     float line_content_width = content_width;
@@ -6451,30 +6492,7 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         block->block()->text_wrap_style : inherited_text_wrap_style;
     lycon->block.balance_wrap_active = false;
     lycon->block.balance_wrap_width = 0.0f;
-    float resolved_text_indent = 0.0f;
-    if (block->blk) {
-        if (block->block()->text_indent_calc) {
-            // CSS Text 3: text-indent percentage resolves against the block's own content width
-            float saved_parent_width = 0;
-            bool has_parent = lycon->block.parent != nullptr;
-            if (has_parent) {
-                saved_parent_width = lycon->block.parent->content_width;
-                lycon->block.parent->content_width = content_width;
-            }
-            resolved_text_indent = resolve_length_value(lycon, CSS_PROPERTY_TEXT_INDENT, block->block()->text_indent_calc);
-            if (has_parent) {
-                lycon->block.parent->content_width = saved_parent_width;
-            }
-        } else if (!isnan(block->block()->text_indent_percent)) {
-            resolved_text_indent = content_width * block->block()->text_indent_percent / 100.0f;
-        } else if (block->block()->text_indent != 0.0f) {
-            resolved_text_indent = block->block()->text_indent;
-        }
-    }
-    lycon->block.text_indent = resolved_text_indent;
-    lycon->block.text_indent_hanging = block->blk && block->block()->text_indent_hanging;
-    lycon->block.text_indent_each_line = block->blk && block->block()->text_indent_each_line;
-    lycon->block.is_line_after_forced_break = false;
+    layout_setup_text_indent(lycon, block, content_width);
     BlockContext* bfc = block_context_find_bfc(&lycon->block);
     if (bfc) {
         BlockContextOffset bfc_offset = block_context_offset_to_bfc(
@@ -6574,6 +6592,10 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
                                         &lycon->block.init_ascender,
                                         &lycon->block.init_descender);
         }
+    } else if (lycon->font.style && lycon->font.current_font_size == 0.0f) {
+        // a zero-size font has no face; inherited parent strut metrics must
+        // not move zero-height atomic children below their own baseline.
+        lycon->block.init_ascender = lycon->block.init_descender = 0.0f;
     }
     if (block->is_element() && lycon->font.style) {
         DomElement* block_element = lam::dom_require<DOM_NODE_ELEMENT>(block);
@@ -7275,7 +7297,7 @@ static bool same_line_float_needs_next_line(BlockContext* pa_block, Linebox* pa_
     return needs_next_line;
 }
 
-static float find_line_y_for_width_with_floats(BlockContext* bfc, BlockContext* block_ctx,
+float find_line_y_for_width_with_floats(BlockContext* bfc, BlockContext* block_ctx,
                                                Linebox* line, float required_width,
                                                float min_local_y, float query_height) {
     if (!bfc || !block_ctx || !line) return min_local_y;
@@ -7286,7 +7308,10 @@ static float find_line_y_for_width_with_floats(BlockContext* bfc, BlockContext* 
         FloatAvailableSpace space = block_context_space_at_y(bfc, y_bfc, query_height);
         float local_left = max(space.left - block_ctx->bfc_offset_x, line->left);
         float local_right = min(space.right - block_ctx->bfc_offset_x, line->right);
-        float available_width = max(local_right - local_left, 0.0f);
+        // text-indent occupies the shortened line after the float edge.
+        float indent = block_ctx->direction == CSS_VALUE_RTL
+            ? line->text_indent_offset : line->text_indent_advance;
+        float available_width = max(local_right - local_left - indent, 0.0f);
         if (available_width >= required_width) {
             return y_bfc - block_ctx->bfc_offset_y;
         }
@@ -7385,13 +7410,6 @@ static float layout_ratio_transfer_block_to_inline(ViewBlock* block, float block
         layout_uses_border_box(block));
     transferred_width = layout_content_size_if_border_box(block, transferred_width, true);
     return transferred_width;
-}
-
-static bool layout_percentage_width_basis_is_cyclic(BlockContext* containing_context) {
-    if (!containing_context) return false;
-    // css 2.1 §10.3.5/§10.3.9: shrink-to-fit width cannot resolve a child
-    // percentage before that child's intrinsic contribution is known.
-    return layout_is_shrink_to_fit_width(containing_context->establishing_element);
 }
 
 static bool layout_block_justify_self_applies(ViewBlock* block,
@@ -8008,10 +8026,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     lycon, block->as_element(), &w, &h);
             }
             if (block->blk && pa_block) {
-                bool percentage_width_cyclic = layout_percentage_width_basis_is_cyclic(pa_block);
+                // an auto-width block already supplies its used content width;
+                // the specified-width sentinel does not make that basis indefinite.
                 if (!isnan(block->block()->given_width_percent) &&
                     (pa_block->given_width >= 0.0f ||
-                     (percentage_width_cyclic && pa_block->content_width > 0.0f))) {
+                     pa_block->content_width > 0.0f)) {
                     lycon->block.given_width = pa_block->content_width *
                         block->block()->given_width_percent / 100.0f;
                 }
@@ -8173,6 +8192,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         }
         else { // failed to load image
             const char* alt_text = block->get_attribute("alt");
+            // HTML images representing nothing have zero natural dimensions;
+            // an absent alternative may still expose the broken-image icon.
+            float failed_image_natural_size = alt_text && alt_text[0] == '\0'
+                ? 0.0f : FormDefaults::IMAGE_INPUT_HEIGHT;
             CssDeclaration* css_width_decl = block->specified_style ?
                 style_tree_get_declaration(block->specified_style, CSS_PROPERTY_WIDTH) : nullptr;
             CssDeclaration* css_height_decl = block->specified_style ?
@@ -8236,7 +8259,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                      block->block()->given_width_type == CSS_VALUE__UNDEF) &&
                     !has_width_percent;
                 if (lycon->block.given_width < 0.0f && !block_auto_width) {
-                    layout_store_given_axis(lycon, block, 16.0f, true, false);
+                    layout_store_given_axis(lycon, block, failed_image_natural_size, true, false);
                 }
                 if (lycon->block.given_height < 0.0f) {
                     ViewBlock* percentage_parent = layout_nearest_block_ancestor(
@@ -8250,7 +8273,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     // CSS Sizing 3: a percentage against a definite zero-height
                     // containing block is 0, not the broken-image fallback size.
                     layout_store_given_axis(lycon, block,
-                        definite_zero_percentage_height ? 0.0f : 16.0f,
+                        definite_zero_percentage_height ? 0.0f : failed_image_natural_size,
                         false, false);
                 }
             }
@@ -9036,7 +9059,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
     bool has_in_flow_inline_content = false;
     for (DomNode* child = block->first_child; child; child = child->next_sibling) {
-        if (prescan_node_has_in_flow_inline_content(child)) {
+        if (layout_node_has_in_flow_inline_content(child)) {
             has_in_flow_inline_content = true;
             break;
         }
@@ -9561,31 +9584,20 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             is_float = value == CSS_VALUE_LEFT || value == CSS_VALUE_RIGHT;
         }
     }
-    // CSS 2.1 §10.3.7: For absolutely positioned elements whose specified display
-    bool is_blockified_inline_abspos = false;
     bool is_out_of_flow_positioned = false;
-    bool out_of_flow_parent_is_inline = false;
     if (elmt->is_element()) {
         DomElement* elem = elmt->as_element();
-        bool was_inline_level = layout_element_was_inline(elem);
-        bool is_abspos = layout_element_is_abs_or_fixed(elem);
-        is_out_of_flow_positioned = is_abspos;
-        out_of_flow_parent_is_inline = is_abspos && elem->parent &&
-            elem->parent->view_type == RDT_VIEW_INLINE;
-        if (was_inline_level && is_abspos) {
-            is_blockified_inline_abspos = true;
-        }
+        is_out_of_flow_positioned = layout_element_is_abs_or_fixed(elem);
     }
     bool is_inline_table = display.outer == CSS_VALUE_INLINE &&
         display.inner == CSS_VALUE_TABLE;
     bool is_inline_atomic = display.outer == CSS_VALUE_INLINE_BLOCK ||
         is_inline_table;
-    if (!is_inline_atomic && !is_float && !is_blockified_inline_abspos &&
-        (!is_out_of_flow_positioned || !out_of_flow_parent_is_inline)) {
+    if (!is_inline_atomic && !is_float && !is_out_of_flow_positioned) {
         // CSS 2.1 §9.6.1: an out-of-flow child in an inline sequence keeps
         // that line for static-position resolution without a phantom break.
         if (!lycon->line.is_line_start) {
-            line_break(lycon);
+            line_break(lycon, true);
         } else if (lycon->line.start_view) {
             align_and_discard_phantom_inline_line(lycon);
         }

@@ -259,6 +259,9 @@ static const char KERNEL[] = R"TEX(\catcode`\@=11
 \lambdaconstructor\url \lambdaconstructor\href \lambdaconstructor\appendix
 \lambdaconstructor\abstractname \lambdaconstructor\contentsname
 \lambdaconstructor\refname \lambdaconstructor\figurename \lambdaconstructor\tablename
+\lambdaconstructor\indexname \lambdaconstructor\listfigurename \lambdaconstructor\listtablename
+\lambdaconstructor\bibname \lambdaconstructor\chaptername \lambdaconstructor\partname
+\lambdaconstructor\appendixname
 \lambdaconstructor\thepage \lambdaconstructor\thesection \lambdaconstructor\theequation
 \lambdaconstructor\thefigure \lambdaconstructor\thetable \lambdaconstructor\marginpar
 \lambdaconstructor\index \lambdaconstructor\glossary \lambdaconstructor\addcontentsline

@@ -1,7 +1,12 @@
 // emit_ast_dump.cpp — Emit canonical Lambda AST dumps
 //
 // Parses a Lambda .ls source file, builds the AST with the production C parser,
-// and emits a structural dump for parser/type-inference verification.
+// and emits a structural dump for parser/type-inference verification. The dump
+// is Mark (Lambda's data notation), so `input(path, 'mark')` reads it back as
+// elements: a node is `<KIND attr… field…>`, an attribute `<label value>`, a
+// field `<label child…>`. Every scalar is a string, a number or a bare
+// boolean, and no two strings sit side by side in one element, since content
+// merges adjacent strings (S2.6.4).
 #include "../../lib/memtrack.h"
 #include "../../lib/mem_factory.h"
 #include "emit_ast_dump.h"
@@ -239,42 +244,47 @@ static const char* ast_dump_kind_name(AstNodeType type) {
 
 void emit_dump_string_field(const char* label, String* str) {
     if (!str) return;
-    printf(" (%s ", label);
+    printf(" <%s ", label);
     emit_dump_escaped_string(str->chars, (int)str->len);
-    printf(")");
+    printf(">");
+}
+
+// a boolean attribute: a bare `true`/`false`, which Mark content keeps (S2.6.2)
+void emit_dump_bool_field(const char* label, bool value) {
+    printf(" <%s %s>", label, value ? "true" : "false");
 }
 
 static void emit_dump_strview_field(const char* label, StrView view) {
     if (!view.str) return;
-    printf(" (%s ", label);
+    printf(" <%s ", label);
     emit_dump_escaped_string(view.str, (int)view.length);
-    printf(")");
+    printf(">");
 }
 
 static void emit_dump_type_field(const char* label, const Type* type) {
     if (!type) return;
-    printf(" (%s ", label);
+    printf(" <%s ", label);
     if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINDER) {
         const TypeBinder* binder = (const TypeBinder*)type;
         const char* name = binder->name && binder->name->name
             ? binder->name->name->chars : "";
-        printf("(TypeBinder (name ");
+        printf("<TypeBinder <name ");
         emit_dump_escaped_string(name, (int)strlen(name));
-        printf(") (slot %u) (bound ", (unsigned)binder->slot);
+        printf("> <slot %u> <bound ", (unsigned)binder->slot);
         const char* bound_name = type_contract_display_name(binder->bound);
         emit_dump_escaped_string(bound_name, (int)strlen(bound_name));
-        printf("))");
+        printf(">>");
     } else if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BOUND_REF) {
         const TypeBoundRef* ref = (const TypeBoundRef*)type;
-        printf("(TypeBoundRef (slot %u) (bound ", (unsigned)ref->slot);
+        printf("<TypeBoundRef <slot %u> <bound ", (unsigned)ref->slot);
         const char* bound_name = type_contract_display_name(ref->bound);
         emit_dump_escaped_string(bound_name, (int)strlen(bound_name));
-        printf("))");
+        printf(">>");
     } else {
         const char* name = type_contract_display_name(type);
         emit_dump_escaped_string(name, (int)strlen(name));
     }
-    printf(")");
+    printf(">");
 }
 
 static void emit_dump_type_element_field(const char* label, const Type* type) {
@@ -284,61 +294,63 @@ static void emit_dump_type_element_field(const char* label, const Type* type) {
         return;
     }
     const char* name = type_contract_display_name(info.immediate_element);
-    printf(" (%s_element_type ", label);
+    printf(" <%s_element_type ", label);
     emit_dump_escaped_string(name, (int)strlen(name));
-    printf(")");
+    printf(">");
 }
 
 static void emit_dump_value_effect_field(const Type* type) {
     if (!type) return;
-    printf(" (value_may_error %s)", lambda_type_accepts_error((Type*)type)
-        ? "true" : "false");
+    emit_dump_bool_field("value_may_error", lambda_type_accepts_error((Type*)type));
 }
 
 static void emit_dump_contract_field(const char* label, const Type* type,
         bool is_explicit) {
     emit_dump_type_field(label, type);
-    if (type) printf(" (%s_explicit %s)", label, is_explicit ? "true" : "false");
+    if (!type) return;
+    char explicit_label[64];
+    snprintf(explicit_label, sizeof(explicit_label), "%s_explicit", label);
+    emit_dump_bool_field(explicit_label, is_explicit);
 }
 
 void emit_dump_source_field(const char* source, SourceSpan span) {
     int len = 0;
     const char* src = emit_dump_node_src(source, span, &len);
     if (len <= 0) return;
-    printf(" (source ");
+    printf(" <source ");
     emit_dump_escaped_string(src, len);
-    printf(")");
+    printf(">");
 }
 
 static void emit_lambda_dump_node(const char* source, AstNode* node, int indent);
 static void emit_lambda_dump_list(const char* source, const char* label, AstNode* node, int indent) {
     printf("\n");
     emit_dump_indent(indent);
-    printf("(%s", label);
+    printf("<%s", label);
     while (node) {
         printf("\n");
         emit_lambda_dump_node(source, node, indent + 1);
         node = node->next;
     }
-    printf(")");
+    printf(">");
 }
 
 static void emit_lambda_dump_field(const char* source, const char* label, AstNode* node, int indent) {
     if (!node) return;
     printf("\n");
     emit_dump_indent(indent);
-    printf("(%s\n", label);
+    printf("<%s\n", label);
     emit_lambda_dump_node(source, node, indent + 1);
-    printf(")");
+    printf(">");
 }
 
 static void emit_lambda_dump_node(const char* source, AstNode* node, int indent) {
     emit_dump_indent(indent);
     if (!node) {
-        printf("(null)");
+        printf("<none>");
         return;
     }
-    printf("(%s", ast_dump_kind_name(node->node_type));
+    printf("<%s", ast_dump_kind_name(node->node_type));
 
     switch (node->node_type) {
         case AST_SCRIPT:
@@ -420,6 +432,8 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         case AST_NODE_VARIABLE_DECLARATOR: {
             AstDeclaratorNode* declarator = (AstDeclaratorNode*)node;
             emit_dump_string_field("name", declarator->name);
+            // the destination contract a `let x: T = e` declares (S7.8.1)
+            if (declarator->declared_type) emit_dump_type_field("declared_type", declarator->declared_type);
             emit_lambda_dump_field(source, "init", declarator->init, indent + 1);
             break;
         }
@@ -440,6 +454,10 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
                 emit_dump_contract_field("contract", parameter->contract_type,
                     parameter->has_explicit_contract);
             }
+            // a parameter that may be omitted (`a?`, or one with a default):
+            // without this a reader cannot tell `fn f(a?, b?)` from `fn f(a, b)`
+            if (parameter && parameter->is_optional) emit_dump_bool_field("optional", true);
+            // a parameter's `as` is its default value (build_param_syntax)
             emit_lambda_dump_field(source, "as", named->as, indent + 1);
             break;
         }
@@ -450,12 +468,14 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         }
         case AST_NODE_DECOMPOSE: {
             AstDecomposeNode* dec = (AstDecomposeNode*)node;
-            printf(" (names");
+            // one element per name: adjacent strings in content would merge
+            printf(" <names");
             for (int i = 0; i < dec->name_count; i++) {
-                printf(" ");
+                printf(" <name ");
                 emit_dump_escaped_string(dec->names[i]->chars, (int)dec->names[i]->len);
+                printf(">");
             }
-            printf(")");
+            printf(">");
             emit_lambda_dump_field(source, "as", dec->as, indent + 1);
             break;
         }
@@ -463,6 +483,12 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             AstLoopNode* loop = (AstLoopNode*)node;
             emit_dump_string_field("name", loop->name);
             emit_dump_string_field("index", loop->index_name);
+            // the axis and key class (S8.1.1v2, S8.1.3v2): `at` and `k: symbol`
+            // walk the name-keyed members, `of` and `k: int` the positional ones;
+            // the one-name `at`/`of` form binds the key itself
+            if (loop->key_filter == LOOP_KEY_SYMBOL) printf(" <key_filter \"symbol\">");
+            else if (loop->key_filter == LOOP_KEY_INT) printf(" <key_filter \"int\">");
+            if (loop->key_only) emit_dump_bool_field("key_only", true);
             emit_lambda_dump_field(source, "as", loop->as, indent + 1);
             emit_lambda_dump_field(source, "on", loop->on, indent + 1);
             emit_lambda_dump_list(source, "join_keys", (AstNode*)loop->join_keys, indent + 1);
@@ -476,6 +502,7 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         }
         case AST_NODE_FOR_EXPR: {
             AstForNode* for_node = (AstForNode*)node;
+            if (for_node->limit_from_end) emit_dump_bool_field("limit_last", true);
             emit_lambda_dump_list(source, "loop", for_node->loop, indent + 1);
             emit_lambda_dump_list(source, "let", for_node->let_clause, indent + 1);
             emit_lambda_dump_field(source, "where", for_node->where, indent + 1);
@@ -499,6 +526,7 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             break;
         }
         case AST_NODE_ORDER_SPEC:
+            if (((AstOrderSpec*)node)->descending) emit_dump_bool_field("descending", true);
             emit_lambda_dump_field(source, "expr", ((AstOrderSpec*)node)->expr, indent + 1);
             break;
         case AST_NODE_LOOP: {
@@ -551,6 +579,10 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         case AST_NODE_ELEMENT:
         case AST_NODE_ELMT_TYPE: {
             AstElementNode* elmt = (AstElementNode*)node;
+            // the tag lives on the element's type, not on the node
+            if (node->type && node->type->type_id == LMD_TYPE_ELEMENT) {
+                emit_dump_strview_field("name", ((TypeElmt*)node->type)->name);
+            }
             emit_lambda_dump_list(source, "item", elmt->item, indent + 1);
             emit_lambda_dump_field(source, "content", elmt->content, indent + 1);
             break;
@@ -600,12 +632,11 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         case AST_NODE_SYS_FUNC: {
             AstSysFuncNode* sys = (AstSysFuncNode*)node;
             if (sys->fn_info) {
-                printf(" (name ");
+                printf(" <name ");
                 emit_dump_escaped_string(sys->fn_info->name, (int)strlen(sys->fn_info->name));
-                printf(")");
+                printf(">");
                 emit_dump_type_field("success_type", sys->fn_info->success_type);
-                printf(" (may_return_error %s)",
-                    sys->fn_info->may_return_error ? "true" : "false");
+                emit_dump_bool_field("may_return_error", sys->fn_info->may_return_error);
             }
             break;
         }
@@ -617,6 +648,9 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             TypeFunc* signature = fn->type && fn->type->type_id == LMD_TYPE_FUNC
                 ? (TypeFunc*)fn->type : NULL;
             emit_dump_string_field("name", fn->name);
+            // the trailing `...` has no parameter node of its own; it lives on
+            // the signature (extra arguments are reached through `varg()`)
+            if (signature && signature->is_variadic) emit_dump_bool_field("variadic", true);
             if (signature && signature->return_contract) {
                 emit_dump_contract_field("return_contract", signature->return_contract,
                     signature->has_explicit_return_contract);
@@ -715,7 +749,7 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             break;
     }
 
-    printf(")");
+    printf(">");
 }
 
 int emit_ast_dump_file(const char* script_path) {
@@ -774,21 +808,22 @@ int emit_ast_dump_file(const char* script_path) {
         return 1;
     }
 
-    printf("(ast-dump lambda\n");
+    // the language is a string child (a bare word would read back as a symbol)
+    printf("<ast-dump \"lambda\"\n");
     emit_lambda_dump_node(source, tp.ast_root, 1);
     // ANY-census block [Type_Infer TI3]: the machine-readable form of the
     // compile-time report, so census fixtures can assert per-reason counts.
     {
         int any_total = 0;
         for (int r = 0; r < ANY_REASON_COUNT; r++) any_total += tp.any_census[r];
-        printf("\n  (any_census (total %d)", any_total);
+        printf("\n  <any_census <total %d>", any_total);
         for (int r = 0; r < ANY_REASON_COUNT; r++) {
             if (!tp.any_census[r]) continue;
-            printf(" (%s %d)", any_reason_name((AnyReason)r), tp.any_census[r]);
+            printf(" <%s %d>", any_reason_name((AnyReason)r), tp.any_census[r]);
         }
-        printf(")\n");
+        printf(">\n");
     }
-    printf(")\n");
+    printf(">\n");
 
     arraylist_free(tp.const_list);
     mem_free(import_directory);

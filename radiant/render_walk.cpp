@@ -51,7 +51,7 @@ static bool render_walk_filter_effective(const FilterProp* filter) {
 }
 
 static bool render_walk_block_effect_group(ViewBlock* block, float abs_x, float abs_y,
-                                           PaintEffectGroup* group) {
+                                           PaintEffectGroup* group, float density) {
     if (!block || !group) return false;
     *group = {};
     float opacity = render_walk_css_opacity(block->in_line);
@@ -67,7 +67,7 @@ static bool render_walk_block_effect_group(ViewBlock* block, float abs_x, float 
         return false;
     }
 
-    float visual_overflow = render_geometry_block_visual_overflow(block);
+    float visual_overflow = render_geometry_block_visual_overflow(block, density);
     group->bounds.left = abs_x - visual_overflow;
     group->bounds.top = abs_y - visual_overflow;
     group->bounds.right = abs_x + block->width + visual_overflow;
@@ -146,7 +146,8 @@ static bool render_walk_block_begin(RenderPaintBlockDriver* ctx, ViewBlock* bloc
         backend->begin_clip(backend->ctx, block, state->x, state->y, RENDER_CLIP_SHAPE);
 
     PaintEffectGroup group = {};
-    bool has_effect_group = render_walk_block_effect_group(block, state->x, state->y, &group);
+    bool has_effect_group = render_walk_block_effect_group(block, state->x, state->y, &group,
+        ui_context_raster_scale(state->ui_context));
     p->opened_effect_group = has_effect_group &&
                              backend->begin_effect_group && backend->end_effect_group;
     if (p->opened_effect_group) {

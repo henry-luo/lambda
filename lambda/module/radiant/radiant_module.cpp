@@ -5224,6 +5224,70 @@ static const DomStyleEngineOps radiant_style_operations = {
     radiant_style_focus_is_hidden
 };
 
+// the runtime borrows document/node identities; the renderer owns interaction state.
+static DocState* radiant_host_document_state(void* document) {
+    DomDocument* doc = (DomDocument*)document;
+    return doc ? doc->state : nullptr;
+}
+static bool radiant_host_state_bool(void* state_pointer, void* node, const char* name) {
+    DocState* state = (DocState*)state_pointer;
+    return state && node && name && state_get_bool(state, node, name);
+}
+static void radiant_host_document_request_repaint(void* document) {
+    doc_state_request_repaint(radiant_host_document_state(document));
+}
+static void radiant_host_document_clear_reflow(void* document) {
+    doc_state_clear_reflow(radiant_host_document_state(document));
+}
+
+static bool radiant_host_layout_document(void* ui_context, void* document, bool is_reflow) {
+    if (!ui_context || !document) return false;
+    layout_html_doc((UiContext*)ui_context, (DomDocument*)document, is_reflow);
+    return true;
+}
+static float radiant_host_element_effective_zoom(void* element) {
+    return layout_effective_zoom((DomNode*)element);
+}
+static bool radiant_host_element_has_vertical_rl_flow(void* element) {
+    return layout_element_writing_mode((DomElement*)element) == WM_VERTICAL_RL;
+}
+static CssEnum radiant_host_element_specified_keyword(void* element, CssPropertyCode property, CssEnum fallback) {
+    return layout_specified_keyword((DomElement*)element, property, fallback);
+}
+static void radiant_host_prepare_children_mutation(void* element) {
+    layout_unwrap_anonymous_table_fixups_for_dom_mutation((DomElement*)element);
+}
+
+// provider calls finish with the renderer's state/value owners before borrowed arguments expire (D4.5.1v4).
+static bool radiant_host_control_is_disabled(void* state, void* element) {
+    return form_control_is_disabled((DocState*)state, (View*)element);
+}
+static void radiant_host_control_focus_programmatic(void* state, void* element, bool from_keyboard) {
+    focus_set_programmatic((DocState*)state, (View*)element, from_keyboard);
+}
+static bool radiant_host_control_store_text(void* state, void* element, const char* value,
+    uint32_t bytes, uint32_t utf16_units) {
+    return form_control_store_text_value((DocState*)state, (View*)element, value, bytes, utf16_units);
+}
+static void radiant_host_control_invalidate_behavior(void* state, void* element) {
+    form_control_invalidate_behavior_init((DocState*)state, (View*)element);
+}
+static void radiant_host_control_open_dropdown(void* state, void* element) {
+    doc_state_open_dropdown((DocState*)state, (View*)element);
+}
+static bool radiant_host_scroll_begin_smooth(void* state, void* element, void* pane, float x, float y) {
+    return scroll_state_begin_smooth_for_view((DocState*)state, (View*)element, pane, x, y);
+}
+static void radiant_host_scroll_cancel_smooth(void* state, void* element) {
+    scroll_state_cancel_smooth_for_view((DocState*)state, (View*)element);
+}
+static bool radiant_host_document_tick_smooth_scroll(void* document, double now) {
+    return scroll_smooth_tick_document((DomDocument*)document, now);
+}
+static bool radiant_host_document_tick_animation(void* document, double now, void* dirty_tracker) {
+    return radiant_tick_document_animation_scheduler((DomDocument*)document, now, (DirtyTracker*)dirty_tracker);
+}
+
 static const DomHostEngineOps radiant_host_operations = {
     fn_radiant_request_frame,
     fn_radiant_cancel_frame,
@@ -5235,7 +5299,24 @@ static const DomHostEngineOps radiant_host_operations = {
     fn_radiant_clear_editing_focus,
     fn_radiant_dom_edit_target,
     radiant_dom_query_command,
-    radiant_dom_set_design_mode
+    radiant_dom_set_design_mode,
+    radiant_host_state_bool,
+    radiant_host_document_request_repaint,
+    radiant_host_document_clear_reflow,
+    radiant_host_layout_document,
+    radiant_host_element_effective_zoom,
+    radiant_host_element_has_vertical_rl_flow,
+    radiant_host_element_specified_keyword,
+    radiant_host_prepare_children_mutation,
+    radiant_host_control_is_disabled,
+    radiant_host_control_focus_programmatic,
+    radiant_host_control_store_text,
+    radiant_host_control_invalidate_behavior,
+    radiant_host_control_open_dropdown,
+    radiant_host_scroll_begin_smooth,
+    radiant_host_scroll_cancel_smooth,
+    radiant_host_document_tick_smooth_scroll,
+    radiant_host_document_tick_animation
 };
 
 static const DomCollectionHostTypes radiant_collection_types = {

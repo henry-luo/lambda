@@ -1,0 +1,14 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+body { margin: 0; font: 20px/1 Ahem; }
+.list { list-style-type: none; }
+.flow-root { display: inline flow-root list-item; }
+.inline { display: inline list-item; }
+</style>
+<div id="result">
+<span class="list flow-root" id="cell">X<div style="display: table-cell">Y</div>Z</span>
+<span class="list flow-root" id="row">X<div style="display: table-row">Y</div>Z</span>
+<span class="list inline" id="inline">X<div style="display: table-cell">Y</div>Z</span>
+<span class="list flow-root" id="wrapper">X<x style="display: block"><div style="display: inline-table">Y</div></x>Z</span>
+</div>

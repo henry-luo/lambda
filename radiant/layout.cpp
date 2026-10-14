@@ -1170,12 +1170,13 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
 void adjust_text_bounds(ViewText* text);
 void apply_element_default_style(LayoutContext* lycon, DomNode* elmt);
 
-bool is_space(char c) {
+bool is_space(uint32_t c) {
+    // decoded codepoints must not narrow: U+200D would alias the ASCII carriage return.
     return c == ' ' || c == '\t' || c== '\r' || c == '\n';
 }
 
 bool is_only_whitespace(const char* str) {
-    return !str || str_all(str, strlen(str), is_space);
+    return !str || str_all(str, strlen(str), [](char c) { return is_space(c); });
 }
 
 static void layout_note_inline_atomic_wrap_opportunity(LayoutContext* lycon,
@@ -1569,6 +1570,7 @@ bool layout_display_contents_has_block_child(DomElement* element) {
 
 bool layout_element_was_inline(DomElement* element, bool include_replaced) {
     if (!element) return false;
+    if (element->is_table_fixup()) return layout_display_is_inline_level(element->display.outer);
     CssEnum display = layout_specified_keyword(
         element, CSS_PROPERTY_DISPLAY, CSS_VALUE__UNDEF);
     if (display != CSS_VALUE__UNDEF) return layout_display_is_inline_level(display);
@@ -1884,28 +1886,6 @@ float layout_document_missing_glyph_advance(FontHandle* handle, uint32_t codepoi
         (raster_scale > 0.0f ? raster_scale : 1.0f);
 }
 
-bool layout_utf8_next_codepoint(const char** cursor, const char* end,
-                                uint32_t* codepoint) {
-    if (!cursor || !*cursor || !end || *cursor >= end || !codepoint) return false;
-    int bytes = str_utf8_decode(*cursor, (size_t)(end - *cursor), codepoint);
-    if (bytes <= 0 || bytes > end - *cursor) {
-        (*cursor)++;
-        return false;
-    }
-    *cursor += bytes;
-    return true;
-}
-
-bool layout_utf8_next_codepoint(const unsigned char** cursor,
-                                const unsigned char* end,
-                                uint32_t* codepoint) {
-    const char* text_cursor = cursor ? (const char*)*cursor : nullptr;
-    bool decoded = layout_utf8_next_codepoint(
-        &text_cursor, (const char*)end, codepoint);
-    if (cursor) *cursor = (const unsigned char*)text_cursor;
-    return decoded;
-}
-
 void layout_resolve_inherited_text_wrap(DomNode* node, CssEnum* overflow_wrap,
                                         CssEnum* word_break) {
     if (overflow_wrap) *overflow_wrap = CSS_VALUE_NORMAL;
@@ -1953,6 +1933,22 @@ float layout_measure_space_advance(LayoutContext* lycon, FontHandle* handle,
     float advance = layout_measure_glyph_advance(lycon, handle, style, (uint32_t)' ');
     if (advance > 0.0f) return advance;
     return style->space_width;
+}
+
+float layout_unicode_space_advance(LayoutContext* lycon, uint32_t codepoint) {
+    if (!lycon || !lycon->font.style) return 0.0f;
+    FontHandle* handle = font_box_handle(&lycon->font);
+    if (handle && font_has_codepoint(handle, codepoint)) {
+        return layout_measure_glyph_advance(lycon, handle, lycon->font.style, codepoint);
+    }
+    // use the face's actual metric first; a missing narrow no-break space
+    // uses half its regular space, matching the shaper's space synthesis.
+    if (codepoint == 0x202F) {
+        return 0.5f * layout_measure_space_advance(lycon, handle, lycon->font.style);
+    }
+    float em = lycon->font.current_font_size > 0.0f
+        ? lycon->font.current_font_size : lycon->font.style->font_size;
+    return max(text_unicode_space_width_em(codepoint), 0.0f) * em;
 }
 
 size_t layout_normalize_collapsible_whitespace(const char* text, size_t length,
@@ -3268,8 +3264,9 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             (inline_span_has_multiple_line_fragments(span) ||
              has_block_fragment_child);
         bool recompute_split_inline_bounds =
-            preserve_inline_list_marker_fragment && has_block_fragment_child &&
-            span_is_multi_line && layout_inline_span_has_direct_visible_text_child(span);
+            has_block_fragment_child &&
+            (span->has_split_inline_fragment_union() || span_is_multi_line) &&
+            layout_inline_span_has_direct_visible_text_child(span);
         bool is_ruby_container = span->tag() == MARKUP_NAME_RUBY &&
             span->display.inner == CSS_VALUE_RUBY;
         if (!has_block_fragment_child || recompute_split_inline_bounds) {
@@ -3277,7 +3274,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             // later line; refresh the split inline union after that line moves.
             float finalized_inline_x = span->x;
             float finalized_inline_width = span->width;
-            compute_span_bounding_box(span, span_is_multi_line, span_fh);
+            compute_span_bounding_box(span,
+                span_is_multi_line || recompute_split_inline_bounds, span_fh);
             if (recompute_split_inline_bounds) {
                 // preserve the line-wide fragment extent while refreshing the vertical union.
                 span->x = finalized_inline_x;
@@ -3407,8 +3405,9 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                         span_asc, span_desc, baseline_pos, bt, pt);
                     span->height = expected_height;
                 }
-            } else if (!span_is_multi_line && span->height > expected_height) {
-                // CSS 2.1 §10.6.1: normalize a non-replaced inline's font box.
+            } else if (!span_is_multi_line && span->height >= expected_height) {
+                // CSS 2.1 §10.6.1: an equal-height shifted descendant still
+                // cannot replace its ancestor's own font-box baseline.
                 // Direct text keeps an anonymous table wrapper on its original line.
                 if (!preserve_anonymous_table_line_origin &&
                     !preserve_inline_atomic_line_origin &&
@@ -3695,6 +3694,9 @@ void place_rtl_initial_letter_line(LayoutContext* lycon) {
 
 void view_line_align(LayoutContext* lycon, float offset, View* view) {
     auto align_view = [&](View* view) -> bool {
+        // a block split out of an inline participates as an anonymous block sibling,
+        // so aligning the current text line cannot translate that block.
+        if (layout_inline_child_is_block_split(static_cast<DomNode*>(view))) return false;
         view->x += offset;
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
@@ -3704,11 +3706,18 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
             ViewSpan* sp = lam::view_require<RDT_VIEW_INLINE>(view);
             shift_span_line_fragment_unions(sp, offset);
         }
-        return false;
+        return true;
     };
-    auto no_finish = [](View*) {};
+    auto finish_span = [](View* view) {
+        if (view->view_type != RDT_VIEW_INLINE) return;
+        ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+        if (!span->has_split_inline_fragment_union()) return;
+        FontHandle* handle = span->font ? span->fontp()->font_handle : nullptr;
+        // the block fragment remains fixed while only its inline continuations move.
+        recompute_span_bounding_box_after_line_layout(span, true, handle);
+    };
     (void)lycon;
-    layout_walk_inline_views(view, align_view, no_finish);
+    layout_walk_inline_views(view, align_view, finish_span);
 }
 
 // CSS Text 3 §7.3: counts word spaces AND CJK inter-character gaps.
@@ -4444,6 +4453,11 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         return;
     }
 
+    if (lycon->line.pending_hyphenation_break &&
+        layout_node_has_in_flow_inline_content(node)) {
+        line_break(lycon);
+    }
+
     if (node->is_element()) {
         DomElement* elem = node->as_element();
 
@@ -4779,7 +4793,7 @@ void layout_flow_children(LayoutContext* lycon, DomNode* first_child,
     for (DomNode* child = first_child; child; child = child->next_sibling) {
         layout_flow_node(lycon, child);
     }
-    if (finalize_line && !lycon->line.is_line_start) line_break(lycon);
+    if (finalize_line && !lycon->line.is_line_start) line_break(lycon, true);
 }
 
 static void layout_set_root_available_width(LayoutContext* lycon, ViewBlock* root,

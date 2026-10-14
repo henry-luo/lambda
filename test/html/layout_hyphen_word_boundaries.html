@@ -1,0 +1,18 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; font: 20px/1 Ahem; }
+div { hyphens: auto; width: 80px; }
+.narrow { width: 20px; }
+</style>
+<body lang="en-US">
+<section id="result">
+<div id="bare">example</div>
+<div id="opening">(example</div>
+<div id="closing">example.</div>
+<div id="both">(example.</div>
+<div id="narrow" class="narrow">example</div>
+<div id="manual" class="narrow" style="hyphens:manual">ex&#xad;am&#xad;ple</div>
+<div id="none" class="narrow" style="hyphens:none">example</div>
+<div id="word-replay" style="width: 120px">new engines now</div>
+</section>

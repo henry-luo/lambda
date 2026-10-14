@@ -17066,6 +17066,7 @@ static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
     while (arm) {
         AstMatchArm* match_arm = (AstMatchArm*)arm;
         cow_join.arm_begin();
+        mt->block_returned = false;
         if (match_arm->pattern) {
             MirFlowScope arm_flow(mt);
             MIR_label_t l_next = new_label(mt);
@@ -18096,8 +18097,19 @@ static MIR_reg_t mir_prepare_dense_for_guard(MirTranspiler* mt,
         AstForNode* for_node, NameEntry* counter, AstNode* range_src,
         MIR_reg_t range_start);
 
+// collected child values return to their loop/constructor, so recursive calls
+// cannot replace the enclosing producer; share the save/restore scope (D8.2.6).
+struct MirNonTailScope {
+    MirTranspiler* mt;
+    bool saved;
+    explicit MirNonTailScope(MirTranspiler* owner)
+        : mt(owner), saved(owner->in_tail_position) { owner->in_tail_position = false; }
+    ~MirNonTailScope() { mt->in_tail_position = saved; }
+};
+
 static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
         bool result_demanded) {
+    MirNonTailScope not_tail(mt);
     MirFlowScope flow(mt);
     // Before push_scope: a binding this body widens is declared OUTSIDE the
     // loop, so it must be widened in the enclosing scope where its reads live.
@@ -23174,14 +23186,6 @@ static void mir_emit_ndim_leaves(MirTranspiler* mt, AstNode* node, MIR_reg_t arr
     }
 }
 
-struct MirNonTailScope {
-    MirTranspiler* mt;
-    bool previous;
-    explicit MirNonTailScope(MirTranspiler* owner)
-        : mt(owner), previous(owner->in_tail_position) { mt->in_tail_position = false; }
-    ~MirNonTailScope() { mt->in_tail_position = previous; }
-};
-
 static MIR_reg_t emit_array_storage(MirTranspiler* mt, AstArrayNode* arr_node) {
     // Construction consumes its children; their recursive calls cannot replace it.
     MirNonTailScope non_tail(mt);
@@ -23696,6 +23700,10 @@ static void mir_lower_list_item(void* owner, AstNode* item, bool is_last) {
 static MirValue emit_list_value(MirTranspiler* mt, AstListNode* list_node) {
     bool item_position = mir_take_list_item_position(mt, (AstNode*)list_node);
     const char* list_finish = item_position ? "list_end_item" : "list_end";
+    // Only a let-list's lone value stands in the list's tail position; the
+    // items of a built list all return to it (S2.5.1v2), as in a content block.
+    bool tail_position = mt->in_tail_position;
+    mt->in_tail_position = false;
     // Check for block expression optimization: 1 value item + declarations
     // In this case, emit declarations then return the single value directly
     AstNode* declare = list_node->declare;
@@ -23722,6 +23730,7 @@ static MirValue emit_list_value(MirTranspiler* mt, AstListNode* list_node) {
             if (item_position && mir_is_list_producer(last_value)) {
                 mt->list_item_producer = ast_unwrap_primary(last_value);
             }
+            mt->in_tail_position = tail_position;
             MirValue result = transpile_expr_value(mt, last_value);
             mt->list_item_producer = NULL;
             pop_scope(mt);
@@ -39328,7 +39337,28 @@ static MirValue transpile_compound_assignment_value(MirTranspiler* mt,
 // Canonical expression result boundary. Each producer publishes its semantic
 // contract and planned carrier here without consulting MIR_reg_type
 // (D2.4.1–D2.4.3, D8.2.6).
+// Tail position (TCO and RV6 pair forwarding) passes only through forms whose
+// value IS one child's value: parentheses, the call that consumes it, the arms
+// of `if`/`match`, a block's or a let-list's lone value, and a `return`, which
+// re-asserts it itself. T0's plan_mark_tail_calls marks the same positions.
+// Every other producer wraps or inspects its operands -- a map spread, an
+// element attribute, an index, a negation, a handler's operand -- so a
+// recursive call inside it must come back to it. Leaving the caller's flag set
+// let `{*:f(x), type: t}` jump into `f` and return its map without `type`.
+static bool mir_node_passes_tail_position(AstNode* node) {
+    switch (node->node_type) {
+    case AST_NODE_PRIMARY: case AST_NODE_CALL_EXPR:
+    case AST_NODE_IF_EXPR: case AST_NODE_MATCH_EXPR:
+    case AST_NODE_LIST: case AST_NODE_CONTENT:
+    case AST_NODE_RETURN_STAM:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static MirValue transpile_expr_value_core(MirTranspiler* mt, AstNode* node) {
+    if (node && !mir_node_passes_tail_position(node)) mt->in_tail_position = false;
     if (node && node->node_type == AST_NODE_PRIMARY) {
         return transpile_primary_value(mt, (AstPrimaryNode*)node);
     }
@@ -48911,6 +48941,7 @@ static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
     {"eps", "lambda.doc.eps.eps", "eps_to_svg", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     // the package parses its own source so the engine sees the adapter registry (D7.2.7)
     {"latex", "lambda.latex.latex", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
+    {"docx", "lambda.doc.docx.view", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
     {"tikz", "lambda.doc.tikz.tikz", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     {"graph", "lambda.graph.document", "to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     {"math", "lambda.doc.math.math", "render_math", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},

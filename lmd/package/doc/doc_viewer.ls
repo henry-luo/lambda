@@ -15,15 +15,21 @@ import latex_css: lambda.latex.css
 import math_renderer: lambda.doc.math.math
 import graph_doc: lambda.graph.document
 import tikz: lambda.doc.tikz.tikz
+import media: .media
+import docx: .docx
+import docx_view: .docx.view
+import docx_css: .docx.css
 
 let PROJECT_ROOT = "."
+// Transformed browsers retain the source directory as their URL, so bundle the icon font.
+let ICON_FONT = media.data_uri(input(sys.lambda.home# ++ "/package/doc/icons/seti.woff", 'binary')^, "font/woff")^
 
 // --------------------------------------------------------------------------
 // Filesystem and selection helpers
 // --------------------------------------------------------------------------
 
 fn archive_extension(extension) => contains(
-  ["zip", "docx", "xlsx", "pptx", "epub", "jar", "war", "odt", "ods", "odp"], lower(extension)) or false
+  ["zip", "xlsx", "pptx", "epub", "jar", "war", "odt", "ods", "odp"], lower(extension)) or false
 fn entry_is_container(entry) => entry.is_dir == true or (archive_extension(entry.extension) or false)
 fn directory_entries(source) {
   let loaded = if (type(source) == element) {
@@ -155,6 +161,7 @@ fn is_latex_document(extension) {
 }
 
 fn is_pdf_document(extension) => lower(extension) == "pdf"
+fn is_docx_document(extension) => lower(extension) == "docx"
 fn is_eml_document(extension) => lower(extension) == "eml"
 fn is_pgf_document(extension) => lower(extension) == "pgf"
 fn is_image_document(extension) => contains(["png", "jpg", "jpeg", "gif", "svg"], lower(extension)) or false
@@ -208,7 +215,7 @@ fn properties_tree(flat) {
 
 fn is_renderable_document(extension) =>
   document_format(extension) != null or is_latex_document(extension) or
-    is_pdf_document(extension) or is_eml_document(extension) or
+    is_pdf_document(extension) or is_docx_document(extension) or is_eml_document(extension) or
     is_pgf_document(extension) or is_image_document(extension) or
     graph_flavor(extension) != null or property_format(extension) != null or is_table_document(extension)
 
@@ -247,7 +254,7 @@ fn file_icon(extension) {
                      "mark", "typ", "typst"], ext) or
            ext == "man" or contains(["1", "2", "3", "4", "5", "6", "7", "8", "9", "1m", "3p"], ext)) { SETI_MARKDOWN }
   else if (contains(["htm", "html"], ext)) { SETI_HTML }
-  else if (ext == "rtf") { SETI_WORD }
+  else if (ext == "rtf" or is_docx_document(ext)) { SETI_WORD }
   else if (is_latex_document(ext)) { SETI_TEX }
   else if (is_pdf_document(ext)) { SETI_PDF }
   else if (is_pgf_document(ext)) { SETI_SVG }
@@ -290,10 +297,16 @@ fn selected_image_source(file) {
     let mime = if (extension == "svg") "image/svg+xml"
       else if (contains(["jpg", "jpeg"], extension)) "image/jpeg"
       else "image/" ++ extension
-    // JSON's binary representation reuses the shared base64 encoder.
-    let encoded = format(input(file["source"], 'binary')^, 'json')^;
-    "data:" ++ mime ++ ";base64," ++ slice(encoded, 1, len(encoded) - 1)
+    media.data_uri(input(file["source"], 'binary')^, mime)^
   }
+}
+
+fn selected_docx(file) map^ {
+  let source = file["source"]
+  // A DOCX member needs its own ZIP root; local filesystem entries use their path.
+  let document = if (type(source) != element) file["file_path"]
+    else if (source.entry_path == "") source else input(source, 'zip')^;
+  docx.convert(document,{include_empty_paragraphs:true,presentation:"source"})^
 }
 
 fn xml_has_stylesheet(parsed) {
@@ -865,7 +878,7 @@ view <document_pane> state preview_mode: "view", property_filter: "", property_o
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "CSV and TSV open as resizable tables. JSON, YAML, TOML, INI, ICS, and VCF open as property trees. XML opens as a node tree or with its declared stylesheet. Email shows its headers and body. Markdown, HTML, RTF, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
+        <p class:"empty-preview-note", "CSV and TSV open as resizable tables. JSON, YAML, TOML, INI, ICS, and VCF open as property trees. XML opens as a node tree or with its declared stylesheet. Email shows its headers and body. Word DOCX, Markdown, HTML, RTF, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
@@ -896,6 +909,9 @@ view <document_pane> state preview_mode: "view", property_filter: "", property_o
         } else if (is_image_document(~.file["extension"])) {
           let preview = selected_preview(~.file);
           <section id:"image-preview", class:"rendered-preview image-preview", apply(preview)>
+        } else if (is_docx_document(~.file["extension"])) {
+          <section id:"docx-preview", class:"rendered-preview docx-preview",
+            apply(docx_view.preview(~.docx_data))>
         } else if (is_pdf_document(~.file["extension"])) {
           let preview = selected_preview(~.file);
           <section id:"pdf-preview", class:"rendered-preview pdf-preview",
@@ -918,7 +934,10 @@ view <document_pane> state preview_mode: "view", property_filter: "", property_o
             apply(preview)>
         }
       } else {
-        let source = selected_source(~.file);
+        // ZIP bytes are not document source; expose the converter's escaped HTML instead.
+        let source = if (is_docx_document(~.file["extension"])) {
+          if (~.docx_data.error != null) ~.docx_data.error else ~.docx_data.html
+        } else selected_source(~.file);
         <section class:"source-tab-panel"
         , <pre id:"source-preview", class:"source-preview", source>
         >
@@ -1091,11 +1110,11 @@ on file_select(entry) {
 // The stable model keeps the tree's state when document controls update.
 let PROJECT_TREE_MODEL = <project_tree root_path:PROJECT_ROOT, root_name:"project root", entries:PROJECT_ENTRIES>
 
-fn document_pane_model(file, property_data, open_paths, eml_data, csv_data, csv_widths, csv_visible_rows) =>
+fn document_pane_model(file, property_data, open_paths, eml_data, docx_data, csv_data, csv_widths, csv_visible_rows) =>
   <document_pane file:file, property_data:property_data, initial_open_paths:open_paths,
-    eml_data:eml_data, csv_data:csv_data, csv_widths:csv_widths, csv_visible_rows:csv_visible_rows>
+    eml_data:eml_data, docx_data:docx_data, csv_data:csv_data, csv_widths:csv_widths, csv_visible_rows:csv_visible_rows>
 
-edit <doc_editor_app> state selected_file: null, property_data: null, initial_open_paths: [], eml_data: null, csv_data: null, csv_widths: [], csv_visible_rows: CSV_PAGE_SIZE, csv_resize: null, pane: <document_pane file:null, initial_open_paths:[]> {
+edit <doc_editor_app> state selected_file: null, property_data: null, initial_open_paths: [], eml_data: null, docx_data: null, csv_data: null, csv_widths: [], csv_visible_rows: CSV_PAGE_SIZE, csv_resize: null, pane: <document_pane file:null, initial_open_paths:[]> {
   <div class:"doc-editor"
   , apply(~.tree_model, {mode: "edit"})
   apply(pane)
@@ -1111,6 +1130,9 @@ on document_select(entry) {
   let properties = if (format == "properties") properties_tree(parsed) else parsed
   let open_paths = property_initial_open_paths(properties, format)
   let eml = if (is_eml_document(entry["extension"])) input(entry["source"], 'eml') ^ { null } else null
+  // retain DOCX conversion in the pane model across tab changes and tree redraws.
+  let converted_docx = if (is_docx_document(entry["extension"]))
+    selected_docx(entry) ^ { {error:^.message} } else null
   let table = if (is_table_document(entry["extension"]))
     input(entry["source"], lower(entry["extension"])) ^ { null } else null
   let widths = [for (column in csv_columns(table)) CSV_DEFAULT_WIDTH]
@@ -1118,12 +1140,13 @@ on document_select(entry) {
   property_data = properties
   initial_open_paths = open_paths
   eml_data = eml
+  docx_data = converted_docx
   csv_data = table
   csv_widths = widths
   csv_visible_rows = CSV_PAGE_SIZE
   csv_resize = null
   // a new pane model starts the pane-local controls afresh for this file
-  pane = document_pane_model(file, properties, open_paths, eml, table, widths, CSV_PAGE_SIZE)
+  pane = document_pane_model(file, properties, open_paths, eml, converted_docx, table, widths, CSV_PAGE_SIZE)
 }
 // CSV state stays here: a column release can land over the file panel, which
 // only this app sees. Its pane is rebuilt with the table; CSV previews have no
@@ -1132,13 +1155,13 @@ on csv_resize_start(gesture) { csv_resize = gesture }
 on csv_more_rows(_) {
   let rows = csv_visible_rows + CSV_PAGE_SIZE
   csv_visible_rows = rows
-  pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, csv_data, csv_widths, rows)
+  pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, docx_data, csv_data, csv_widths, rows)
 }
 on csv_resize_move(x) {
   if (csv_resize != null) {
     let widths = csv_resized_widths(csv_widths, csv_resize, x)
     csv_widths = widths
-    pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, csv_data, widths, csv_visible_rows)
+    pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, docx_data, csv_data, widths, csv_visible_rows)
   }
 }
 // A release can land over the file panel after shrinking a wide column.
@@ -1147,7 +1170,7 @@ on mouseup(evt) {
   let widths = csv_resized_widths(csv_widths, csv_resize, evt.x)
   csv_widths = widths
   csv_resize = null
-  pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, csv_data, widths, csv_visible_rows)
+  pane = document_pane_model(selected_file, property_data, initial_open_paths, eml_data, docx_data, csv_data, widths, csv_visible_rows)
 }
 
 // --------------------------------------------------------------------------
@@ -1162,6 +1185,8 @@ fn viewer_document(tree_model) {
     latex.font_stylesheet();
     <style pdf_html.DEFAULT_CSS>
     <style latex_css.STYLESHEET>
+    <style docx_css.STYLESHEET>
+    <style ("@font-face { font-family: 'Seti Icons'; src: url('" ++ ICON_FONT ++ "') format('woff'); }")>
     <style "
       * { box-sizing: border-box; }
       body { margin: 0; height: 100vh; overflow: hidden; background: #eef1f5; color: #20242c;
@@ -1201,7 +1226,6 @@ fn viewer_document(tree_model) {
       /* Keep the indentation and icon fixed when a file name overflows. */
       .tree-toggle, .root-toggle, .tree-spacer, .tree-icon { flex-shrink: 0; }
       .folder-icon { color: #e5bb62; }
-      @font-face { font-family: 'Seti Icons'; src: url('icons/seti.woff') format('woff'); }
       .file-icon { height: 20px; line-height: 20px; color: #9bbdfc; }
       .default-icon { font-size: 13px; }
       .lambda-icon { font-size: 19px; }

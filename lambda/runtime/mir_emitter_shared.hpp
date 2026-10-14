@@ -2803,40 +2803,23 @@ static inline void em_root_collect_block_successors(int block_index,
 static inline bool em_root_call_may_collect(MIR_insn_t insn,
         const MirGcCallSite* call_sites, int call_site_count);
 
-// A frame needs publication only on the first MAY_GC boundary reachable along
-// a path.  A runtime guard is still needed where paths merge, but placing it
-// at every call made the E6 precision change dominate the MIR ratchet.  This
-// forward dataflow marks blocks whose every incoming path has already crossed
-// a safepoint, so straight-line calls pay no repeated publication code, and
-// keeps a guard wherever some incoming path already published.
-static inline void em_compute_root_publication_frontier(
-        MIR_insn_t* instructions, MirRootLivenessBlock* blocks,
-        int block_count, uint64_t* successors, int successor_word_count,
-        const MirGcCallSite* call_sites, int call_site_count,
-        uint8_t* frontier) {
-    if (!instructions || !blocks || block_count <= 0 || !successors ||
-            successor_word_count <= 0 || !frontier) return;
-    uint8_t* has_may_gc = (uint8_t*)mem_alloc((size_t)block_count,
-        MEM_CAT_TEMP);
-    uint8_t* published_in = (uint8_t*)mem_alloc((size_t)block_count,
-        MEM_CAT_TEMP);
-    uint8_t* published_out = (uint8_t*)mem_alloc((size_t)block_count,
-        MEM_CAT_TEMP);
-    if (!has_may_gc || !published_in || !published_out) {
-        log_error("mir-root-publication-frontier: dataflow allocation failed");
-        abort();
-    }
-    memset(has_may_gc, 0, (size_t)block_count);
-    memset(published_in, 0, (size_t)block_count);
-    memset(published_out, 0, (size_t)block_count);
+struct MirRootPredecessors {
+    int* offsets;
+    int* edges;
+};
+
+// share the same ascending predecessor order between root dataflows (D5.3.1).
+static inline MirRootPredecessors em_root_build_predecessors(
+        const uint64_t* successors, int block_count, int successor_word_count) {
+    MirRootPredecessors result = {};
     int* predecessor_counts = (int*)mem_calloc((size_t)block_count,
         sizeof(int), MEM_CAT_TEMP);
-    int* predecessor_offsets = (int*)mem_alloc(
+    result.offsets = (int*)mem_alloc(
         (size_t)(block_count + 1) * sizeof(int), MEM_CAT_TEMP);
     int* predecessor_cursor = (int*)mem_alloc((size_t)block_count *
         sizeof(int), MEM_CAT_TEMP);
-    if (!predecessor_counts || !predecessor_offsets || !predecessor_cursor) {
-        log_error("mir-root-publication-frontier: predecessor allocation failed");
+    if (!predecessor_counts || !result.offsets || !predecessor_cursor) {
+        log_error("mir-root-predecessors: predecessor allocation failed");
         abort();
     }
     // The successor matrix is bit-packed, but repeatedly scanning every row
@@ -2856,18 +2839,18 @@ static inline void em_compute_root_publication_frontier(
             }
         }
     }
-    predecessor_offsets[0] = 0;
+    result.offsets[0] = 0;
     for (int bi = 0; bi < block_count; bi++) {
-        predecessor_offsets[bi + 1] = predecessor_offsets[bi] +
+        result.offsets[bi + 1] = result.offsets[bi] +
             predecessor_counts[bi];
-        predecessor_cursor[bi] = predecessor_offsets[bi];
+        predecessor_cursor[bi] = result.offsets[bi];
     }
-    int predecessor_edge_count = predecessor_offsets[block_count];
-    int* predecessors = predecessor_edge_count > 0
+    int predecessor_edge_count = result.offsets[block_count];
+    result.edges = predecessor_edge_count > 0
         ? (int*)mem_alloc((size_t)predecessor_edge_count * sizeof(int),
             MEM_CAT_TEMP) : NULL;
-    if (predecessor_edge_count > 0 && !predecessors) {
-        log_error("mir-root-publication-frontier: predecessor edge allocation failed");
+    if (predecessor_edge_count > 0 && !result.edges) {
+        log_error("mir-root-predecessors: predecessor edge allocation failed");
         abort();
     }
     for (int pred = 0; pred < block_count; pred++) {
@@ -2877,11 +2860,49 @@ static inline void em_compute_root_publication_frontier(
             uint64_t bits = row[word];
             while (bits != 0) {
                 int succ = word * 64 + __builtin_ctzll(bits);
-                if (succ < block_count) predecessors[predecessor_cursor[succ]++] = pred;
+                if (succ < block_count) result.edges[predecessor_cursor[succ]++] = pred;
                 bits &= bits - 1;
             }
         }
     }
+    mem_free(predecessor_counts);
+    mem_free(predecessor_cursor);
+    return result;
+}
+static inline void em_root_free_predecessors(MirRootPredecessors* predecessors) {
+    mem_free(predecessors->offsets);
+    mem_free(predecessors->edges);
+    *predecessors = {};
+}
+
+// A frame needs publication only on the first MAY_GC boundary reachable along
+// a path.  A runtime guard is still needed where paths merge, but placing it
+// at every call made the E6 precision change dominate the MIR ratchet.  This
+// forward dataflow marks blocks whose every incoming path has already crossed
+// a safepoint, so straight-line calls pay no repeated publication code, and
+// keeps a guard wherever some incoming path already published.
+static inline void em_compute_root_publication_frontier(
+        MIR_insn_t* instructions, MirRootLivenessBlock* blocks,
+        int block_count, uint64_t* successors, int successor_word_count,
+        const MirGcCallSite* call_sites, int call_site_count,
+        uint8_t* frontier, const MirRootPredecessors* predecessors) {
+    if (!instructions || !blocks || block_count <= 0 || !successors ||
+            successor_word_count <= 0 || !frontier) return;
+    uint8_t* has_may_gc = (uint8_t*)mem_alloc((size_t)block_count,
+        MEM_CAT_TEMP);
+    uint8_t* published_in = (uint8_t*)mem_alloc((size_t)block_count,
+        MEM_CAT_TEMP);
+    uint8_t* published_out = (uint8_t*)mem_alloc((size_t)block_count,
+        MEM_CAT_TEMP);
+    if (!has_may_gc || !published_in || !published_out) {
+        log_error("mir-root-publication-frontier: dataflow allocation failed");
+        abort();
+    }
+    memset(has_may_gc, 0, (size_t)block_count);
+    memset(published_in, 0, (size_t)block_count);
+    memset(published_out, 0, (size_t)block_count);
+    const int* predecessor_offsets = predecessors->offsets;
+    const int* predecessor_edges = predecessors->edges;
     for (int bi = 0; bi < block_count; bi++) {
         for (int i = blocks[bi].start; i < blocks[bi].end; i++) {
             if (MIR_call_code_p(instructions[i]->code) &&
@@ -2944,7 +2965,7 @@ static inline void em_compute_root_publication_frontier(
             bool all_predecessors_published = true;
             for (int pi = predecessor_offsets[bi];
                     pi < predecessor_offsets[bi + 1]; pi++) {
-                int pred = predecessors[pi];
+                int pred = predecessor_edges[pi];
                 if (reachable[pred] && !published_out[pred]) {
                     all_predecessors_published = false;
                     break;
@@ -2972,7 +2993,7 @@ static inline void em_compute_root_publication_frontier(
             bool maybe_in = false;
             for (int pi = predecessor_offsets[bi];
                     pi < predecessor_offsets[bi + 1]; pi++) {
-                if (maybe_published_out[predecessors[pi]]) {
+                if (maybe_published_out[predecessor_edges[pi]]) {
                     maybe_in = true;
                     break;
                 }
@@ -2990,7 +3011,7 @@ static inline void em_compute_root_publication_frontier(
         bool maybe_published_in = !reachable[bi];
         for (int pi = predecessor_offsets[bi];
                 !maybe_published_in && pi < predecessor_offsets[bi + 1]; pi++) {
-            if (maybe_published_out[predecessors[pi]]) {
+            if (maybe_published_out[predecessor_edges[pi]]) {
                 maybe_published_in = true;
             }
         }
@@ -3004,10 +3025,6 @@ static inline void em_compute_root_publication_frontier(
     mem_free(has_may_gc);
     mem_free(published_in);
     mem_free(published_out);
-    mem_free(predecessor_counts);
-    mem_free(predecessor_offsets);
-    mem_free(predecessor_cursor);
-    if (predecessors) mem_free(predecessors);
 }
 
 static inline bool em_root_call_may_collect(MIR_insn_t insn,
@@ -3318,6 +3335,8 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         liveness_worklist[liveness_count++] = bi;
         liveness_queued[bi] = 1;
     }
+    MirRootPredecessors predecessors = em_root_build_predecessors(
+        liveness_successors, block_count, liveness_successor_word_count);
     while (liveness_count > 0) {
         int bi = liveness_worklist[--liveness_count];
         liveness_queued[bi] = 0;
@@ -3340,11 +3359,10 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
             old_in[word] = scratch_in[word];
         }
         if (!changed) continue;
-        for (int predecessor = 0; predecessor < block_count; predecessor++) {
-            const uint64_t* row = liveness_successors +
-                (size_t)predecessor * (size_t)liveness_successor_word_count;
-            if ((row[bi >> 6] & (UINT64_C(1) << (bi & 63))) == 0 ||
-                    liveness_queued[predecessor]) continue;
+        // only actual incoming edges can observe this block's new live-in set.
+        for (int pi = predecessors.offsets[bi]; pi < predecessors.offsets[bi + 1]; pi++) {
+            int predecessor = predecessors.edges[pi];
+            if (liveness_queued[predecessor]) continue;
             liveness_worklist[liveness_count++] = predecessor;
             liveness_queued[predecessor] = 1;
         }
@@ -3617,8 +3635,6 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
     int successor_word_count = (block_count + 63) / 64;
     size_t dirty_block_words =
         (size_t)block_count * (size_t)dirty_word_count;
-    size_t successor_block_words =
-        (size_t)block_count * (size_t)successor_word_count;
     uint64_t* dirty_in = (uint64_t*)mem_alloc(
         dirty_block_words * sizeof(uint64_t), MEM_CAT_TEMP);
     uint64_t* dirty_out = (uint64_t*)mem_alloc(
@@ -3629,8 +3645,8 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
         dirty_block_words * sizeof(uint64_t), MEM_CAT_TEMP);
     uint64_t* dirty_generate = (uint64_t*)mem_alloc(
         dirty_block_words * sizeof(uint64_t), MEM_CAT_TEMP);
-    uint64_t* successors = (uint64_t*)mem_alloc(
-        successor_block_words * sizeof(uint64_t), MEM_CAT_TEMP);
+    // the instruction snapshot and its CFG are unchanged between dataflows.
+    uint64_t* successors = liveness_successors;
     uint8_t* publication_frontier = (uint8_t*)mem_alloc(
         (size_t)block_count, MEM_CAT_TEMP);
     if (!dirty_in || !dirty_out || !dirty_state || !dirty_preserve ||
@@ -3642,15 +3658,9 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
     memset(dirty_out, 0, dirty_block_words * sizeof(uint64_t));
     memset(dirty_preserve, 0xff, dirty_block_words * sizeof(uint64_t));
     memset(dirty_generate, 0, dirty_block_words * sizeof(uint64_t));
-    memset(successors, 0, successor_block_words * sizeof(uint64_t));
-    for (int bi = 0; bi < block_count; bi++) {
-        em_root_collect_block_successors(bi, blocks, block_count, instructions,
-            label_map, label_map_capacity, successors,
-            successor_word_count);
-    }
     em_compute_root_publication_frontier(instructions, blocks, block_count,
         successors, successor_word_count, call_sites, call_site_count,
-        publication_frontier);
+        publication_frontier, &predecessors);
     // Dirty-state flow is a per-block transfer function:
     //     out = (in & preserve) | generate
     // Precomputing it avoids rescanning every instruction and every candidate
@@ -3890,7 +3900,7 @@ static inline bool em_finalize_semantic_root_write_back(MirEmitter* em,
     mem_free(candidate_obligated);
     mem_free(dirty_in); mem_free(dirty_out); mem_free(dirty_state);
     mem_free(dirty_preserve); mem_free(dirty_generate);
-    mem_free(successors);
+    em_root_free_predecessors(&predecessors);
     mem_free(publication_frontier);
     if (pinned_to_dense) mem_free(pinned_to_dense);
     return true;

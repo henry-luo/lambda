@@ -1685,6 +1685,31 @@ inline const FontBox* paint_glyph_run_font(const PaintGlyphRun* run) {
 // caller owns the outline; all targets share the selected glyph IDs and offsets.
 RdtPath* render_path_create_glyph_run(const PaintGlyphRun* run);
 RdtPath* render_path_create_text_run(const PaintGlyphRun* run, FontContext* font_context);
+RdtPath* render_path_create_paint_glyph_run(const PaintGlyphRun* run, FontContext* font_context);
+
+// selected faces are borrowed only during each synchronous visitor call (D4.5.1v4).
+typedef bool (*RenderTextRunGlyphFn)(void* context, uint32_t codepoint,
+    FontHandle* face, float x, float baseline_y, float advance);
+bool render_visit_text_run_glyphs(const PaintGlyphRun* run, FontContext* fonts,
+    RenderTextRunGlyphFn visitor, void* context);
+float render_text_baseline_y(const FontBox* font, float text_top);
+
+struct RenderTextEmphasis {
+    FontHandle* handle;
+    FontStyleDesc style;
+    uint32_t codepoint;
+    float baseline_offset;
+    Color color;
+};
+bool render_text_emphasis_resolve(FontContext* fonts, const FontBox* owner,
+    Color foreground, RenderTextEmphasis* emphasis);
+void render_text_emphasis_release(RenderTextEmphasis* emphasis);
+void render_text_emphasis_place(const RenderTextEmphasis* emphasis,
+    float x, float baseline_y, float advance, float mark_advance,
+    float* mark_x, float* mark_baseline);
+LoadedGlyph* render_text_emphasis_bitmap_glyph(const RenderTextEmphasis* emphasis,
+    uint32_t codepoint, float x, float baseline_y, float advance, float density,
+    float* mark_x, float* mark_y);
 
 void paint_svg_append_cjk_dx(StrBuf* out, const char* text, int text_len,
                              float cjk_spacing);
@@ -2264,8 +2289,8 @@ Rect render_geometry_block_border_rect(const BlockBlot* parent_block,
 Rect render_geometry_block_content_rect(const BlockBlot* parent_block,
                                         const ViewBlock* block,
                                         float scale);
-float render_geometry_filter_effect_expand(const FilterProp* filter);
-float render_geometry_block_visual_overflow(const ViewBlock* block);
+float render_geometry_filter_effect_expand(const FilterProp* filter, float density = 1.0f);
+float render_geometry_block_visual_overflow(const ViewBlock* block, float density = 1.0f);
 Rect render_geometry_outer_shadow_rect(Rect border_box, float offset_x,
                                        float offset_y, float spread);
 bool render_geometry_transform_matrix(const TransformProp* transform,
@@ -2323,6 +2348,10 @@ bool dl_item_intersects_rect(const DisplayItem* item,
 // ===== display_list_storage.hpp =====
 DisplayItem* dl_alloc_item(DisplayList* dl);
 Bound dl_content_bounds(const DisplayList* dl);
+Bound dl_content_bounds_range(const DisplayList* dl, int start, int end);
+bool dl_effect_bounds_to_region(const Bound* bounds, IRect* region);
+Bound dl_effect_capture_bounds(const DisplayList* dl, int start, int end, Bound bounds, float padding);
+bool dl_resize_saved_backdrops(DisplayList* dl, int start, int end, const Bound* bounds);
 RdtGradientStop* dl_copy_stops(DisplayList* dl, const RdtGradientStop* stops, int count);
 float* dl_copy_dashes(DisplayList* dl, const float* dashes, int count);
 bool dl_copy_semantic_group(DisplayList* dl, RenderSemanticGroup* out,
@@ -2747,15 +2776,18 @@ inline void radiant_copy_font_values(FontProp* target, const FontProp* source) {
     target->text_deco = source->text_deco;
     target->text_deco_extra = source->text_deco_extra;
     target->text_deco_color = source->text_deco_color;
+    target->text_deco_color_current = source->text_deco_color_current;
     target->text_deco_style = source->text_deco_style;
     target->text_deco_thickness = source->text_deco_thickness;
     target->text_underline_offset = source->text_underline_offset;
     target->letter_spacing = source->letter_spacing;
     target->letter_spacing_percent = source->letter_spacing_percent;
     target->letter_spacing_is_percent = source->letter_spacing_is_percent;
+    target->letter_spacing_is_set = source->letter_spacing_is_set;
     target->word_spacing = source->word_spacing;
     target->word_spacing_percent = source->word_spacing_percent;
     target->word_spacing_is_percent = source->word_spacing_is_percent;
+    target->word_spacing_is_set = source->word_spacing_is_set;
     target->platform_fallback_family = source->platform_fallback_family;
 }
 
@@ -2782,8 +2814,9 @@ inline void radiant_fill_missing_font_values(FontProp* target, const FontProp* s
         target->text_deco = source->text_deco;
         target->text_deco_extra = source->text_deco_extra;
     }
-    if (target->text_deco_color.a == 0 && source->text_deco_color.a > 0) {
+    if (target->text_deco_color_current && !source->text_deco_color_current) {
         target->text_deco_color = source->text_deco_color;
+        target->text_deco_color_current = false;
     }
     if (target->text_deco_style == 0 && source->text_deco_style != 0) {
         target->text_deco_style = source->text_deco_style;
@@ -2794,15 +2827,17 @@ inline void radiant_fill_missing_font_values(FontProp* target, const FontProp* s
     if (target->text_underline_offset == 0.0f && source->text_underline_offset != 0.0f) {
         target->text_underline_offset = source->text_underline_offset;
     }
-    if (target->letter_spacing == 0.0f) {
+    if (!target->letter_spacing_is_set && target->letter_spacing == 0.0f) {
         target->letter_spacing = source->letter_spacing;
         target->letter_spacing_percent = source->letter_spacing_percent;
         target->letter_spacing_is_percent = source->letter_spacing_is_percent;
+        target->letter_spacing_is_set = source->letter_spacing_is_set;
     }
-    if (target->word_spacing == 0.0f) {
+    if (!target->word_spacing_is_set && target->word_spacing == 0.0f) {
         target->word_spacing = source->word_spacing;
         target->word_spacing_percent = source->word_spacing_percent;
         target->word_spacing_is_percent = source->word_spacing_is_percent;
+        target->word_spacing_is_set = source->word_spacing_is_set;
     }
 }
 
@@ -3019,6 +3054,7 @@ RenderPaintBlockResult render_paint_block_run(RenderPaintBlockOps* ops,
 // Returns false when the boundary needs a richer backend-specific fallback.
 bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
                                        float x, float y);
+bool render_paint_boundary_emit_fragmented_simple(PaintList* paint_list, ViewBlock* view, Rect rect);
 bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* boundary, Rect rect);
 bool render_border_is_uniform_solid(const BorderProp* border);
 bool render_paint_boundary_emit_solid_border(PaintList* paint_list, BorderProp* border, Rect rect);
@@ -3436,7 +3472,20 @@ template<typename Visitor> inline void render_visit_text_shadows_reverse(TextSha
 }
 
 bool render_paint_solid_shape(PaintList* paint, RdtPath* shape, Color color, const RdtMatrix* transform);
-bool render_paint_text_shadows(PaintList* paint, UiContext* ui, const PaintGlyphRun* run, TextShadow* shadows);
+// record owned line/clip geometry; bitmap ink is normalized to logical coordinates.
+bool render_paint_text_decorations(PaintList* paint, const FontBox* font,
+    unsigned char* text, TextRect* rect, float origin_x, float origin_y,
+    Color color, bool before_text, const Color* override_color = nullptr);
+
+struct RenderTextDecorationSource {
+    unsigned char* text; // borrowed only during synchronous shadow recording (D4.5.1v4)
+    TextRect* rect;
+    float origin_x, origin_y;
+};
+bool render_paint_text_emphasis(PaintList* paint, FontContext* fonts,
+    const PaintGlyphRun* run, const Color* override_color = nullptr);
+bool render_paint_text_shadows(PaintList* paint, UiContext* ui, const PaintGlyphRun* run,
+    TextShadow* shadows, const RenderTextDecorationSource* decoration = nullptr);
 float render_filter_blur_support(float physical_sigma);
 FilterProp* dl_capture_filter_lengths(DisplayList* list, FilterProp* filter, float scale);
 float render_box_blur_half_width(float blur_radius);
@@ -3524,7 +3573,7 @@ void rc_fill_surface_rect(RasterRenderContext* rdcon, ImageSurface* surface,
 void render_painter_draw_picture_rect(RasterRenderContext* rdcon, RdtPicture* picture,
                                       Rect* dst_rect, Bound* clip,
                                       uint8_t opacity);
-void render_painter_draw_pixels_rect(RasterRenderContext* rdcon, const uint32_t* pixels,
+bool render_painter_draw_pixels_rect(RasterRenderContext* rdcon, const uint32_t* pixels,
                                      int src_w, int src_h, int src_stride,
                                      Rect* dst_rect, Bound* clip,
                                      uint8_t opacity,
@@ -3532,7 +3581,7 @@ void render_painter_draw_pixels_rect(RasterRenderContext* rdcon, const uint32_t*
 void render_painter_fill_surface_rect(RasterRenderContext* rdcon, ImageSurface* surface,
                                       Rect* rect, uint32_t color, Bound* clip,
                                       ClipShape** clip_shapes, int clip_depth);
-void render_painter_blit_surface_scaled(RasterRenderContext* rdcon,
+bool render_painter_blit_surface_scaled(RasterRenderContext* rdcon,
                                         ImageSurface* src, Rect* src_rect,
                                         ImageSurface* dst, Rect* dst_rect, Bound* clip,
                                         ScaleMode scale_mode,
@@ -4003,6 +4052,17 @@ void render_outline(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
 // ===== render_columns.hpp =====
 struct RasterRenderContext;
 
+struct RenderColumnRuleIterator {
+    ViewBlock* block;
+    LayoutFragmentBox* fragment;
+    int remaining_columns;
+    int rule_index;
+    int fragment_columns;
+    float column_width;
+    float gap;
+};
+bool render_column_rules_begin(ViewBlock* block, RenderColumnRuleIterator* iterator);
+bool render_column_rule_next(RenderColumnRuleIterator* iterator, float* x, float* y, float* height);
 void render_column_rules(struct RasterRenderContext* rdcon, ViewBlock* block);
 
 // ===== render_effects.hpp =====
@@ -4029,6 +4089,9 @@ typedef struct RenderEffectGroup {
     bool has_filter;
     bool has_backdrop_filter;
     RadialMaskPaint mask;
+    Bound capture_bounds;
+    int recording_start;
+    int source_start;
 } RenderEffectGroup;
 
 RenderEffectGroup render_effect_group_begin(RasterRenderContext* rdcon,
@@ -4626,6 +4689,7 @@ public:
 };
 
 void render_text_view(RasterRenderContext* rdcon, ViewText* text_view);
+bool render_text_subtree_overflows_block(RasterRenderContext* rdcon, ViewBlock* block);
 CssEnum render_text_inherited_transform(ViewText* text_view);
 char* render_text_create_export_segment(const unsigned char* text,
                                         const TextRect* text_rect,

@@ -162,12 +162,31 @@ struct JsAstFunctionFactWalk {
     JsAstNode* parent;
 };
 
+JsAstNode* js_ast_class_element_key(JsAstNode* element, bool* computed, bool* statics) {
+    *computed = false;
+    if (statics) *statics = false;
+    if (!element) return NULL;
+    if (element->node_type == AST_NODE_METHOD) {
+        JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)element;
+        *computed = method->computed;
+        if (statics) *statics = method->static_method;
+        return method->key;
+    }
+    if (element->node_type == AST_NODE_FIELD) {
+        JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)element;
+        *computed = field->computed;
+        if (statics) *statics = field->is_static;
+        return field->key;
+    }
+    return NULL;
+}
+
 // T10-0/D-D: a key position is a name, not a reference. `node.arguments`,
 // `{arguments: v}`, `class { arguments() {} }` and `obj.eval` must not be read
 // as observations of `arguments`/`this`/`new.target` or as an `eval` mention;
 // treating them as such materialized an arguments object on every call of the
 // enclosing function (51 us/call on prettier_ast, which never uses `arguments`).
-static bool js_ast_fact_walk_skips_child(JsAstNode* parent, JsAstNode* child) {
+bool js_ast_fact_walk_skips_child(JsAstNode* parent, JsAstNode* child) {
     if (!parent || !child) return false;
     switch (parent->node_type) {
     case AST_NODE_MEMBER_EXPR: {
@@ -180,13 +199,10 @@ static bool js_ast_fact_walk_skips_child(JsAstNode* parent, JsAstNode* child) {
         return !prop->computed && !prop->shorthand &&
             (JsAstNode*)prop->key == child;
     }
-    case AST_NODE_METHOD: {
-        JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)parent;
-        return !method->computed && (JsAstNode*)method->key == child;
-    }
-    case AST_NODE_FIELD: {
-        JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)parent;
-        return !field->computed && (JsAstNode*)field->key == child;
+    case AST_NODE_METHOD: case AST_NODE_FIELD: {
+        bool computed;
+        JsAstNode* key = js_ast_class_element_key(parent, &computed);
+        return !computed && key == child;
     }
     default:
         return false;
@@ -205,6 +221,19 @@ static void js_ast_collect_function_facts_child(JsAstNode* child, void* opaque) 
 static void js_ast_collect_function_facts_node(JsAstNode* node,
         JsAstFunctionFactWalk walk) {
     if (!node || !walk.facts) return;
+    if (node->node_type == AST_NODE_CLASS || node->node_type == AST_NODE_CLASS_EXPR) {
+        // heritage and computed keys execute in the enclosing function; initializers and methods do not.
+        JsClassNode* cls = (JsClassNode*)node;
+        js_ast_collect_function_facts_node(cls->superclass, walk);
+        JsAstNode* members = cls->body;
+        if (members && members->node_type == AST_NODE_BLOCK) members = ((JsBlockNode*)members)->statements;
+        for (JsAstNode* member = members; member; member = member->next) {
+            bool computed;
+            JsAstNode* key = js_ast_class_element_key(member, &computed);
+            if (computed) js_ast_collect_function_facts_node(key, walk);
+        }
+        return;
+    }
     if (js_ast_function_boundary(node, NULL)) {
         walk.direct_eval_active = false;
         walk.with_active = false;

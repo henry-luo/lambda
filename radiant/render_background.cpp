@@ -492,10 +492,7 @@ static uint32_t* background_gradient_pixel_buffer(RasterRenderContext* rdcon, Re
  * The blur_radius is the CSS blur radius (σ); box size = ceil(σ * 2 / 3) * 2 + 1.
  * Operates on pre-multiplied RGBA pixels in-place.
  */
-float render_box_blur_half_width(float blur_radius) {
-    if (blur_radius < 1.0f) return 0.0f;
-    return fmaxf(1.0f, roundf(0.5f * (-1.0f + sqrtf(1.0f + blur_radius * blur_radius))));
-}
+
 
 void box_blur_region(ScratchArena* sa, ImageSurface* surface, int rx, int ry, int rw, int rh, float blur_radius) {
     if (blur_radius <= 0 || rw <= 0 || rh <= 0 || !surface || !surface->pixels) return;
@@ -1889,8 +1886,7 @@ static bool background_has_text_clip(const DomElement* parent) {
 bool render_paint_text_background(PaintList* paint, UiContext* ui, DomElement* parent,
         const PaintGlyphRun* run, Rect border) {
     if (!paint || !run || !background_has_text_clip(parent)) return false;
-    RdtPath* mask = run->glyph_ids && run->count > 0 ? render_path_create_glyph_run(run)
-        : render_path_create_text_run(run, ui ? ui->font_ctx.get() : nullptr);
+    RdtPath* mask = render_path_create_paint_glyph_run(run, ui ? ui->font_ctx.get() : nullptr);
     if (!mask) return false;
     bool painted = record_background(paint, ui, static_cast<ViewBlock*>(parent), border,
         ui_context_raster_scale(ui), nullptr, nullptr, true, mask);

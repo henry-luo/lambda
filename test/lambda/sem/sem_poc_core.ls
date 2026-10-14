@@ -1,5 +1,5 @@
 // Semantics POC — positive differential checks (M0 kernel, M1 breadth,
-// M2 collections). The interpreter itself lives in sem_poc_kernel.ls; this file
+// M2 collections). The interpreter itself lives in mod_sem_poc_kernel.ls; this file
 // is only the checks. Design: vibe/Lambda_Semantics_DSL_POC.md.
 //
 // Every check is DIFFERENTIAL (P6): it evaluates a term through the model and
@@ -10,7 +10,7 @@
 // to coincide. Goldens here are `true`, i.e. a specification rather than
 // captured output.
 
-import .sem_poc_kernel
+import .mod_sem_poc_kernel
 
 // ===== M0: core differential checks — model result == native result =====
 
@@ -171,9 +171,16 @@ run(<forr n:'x', <arr <lit v:1> <lit v:2> <lit v:3>> <mul <vr n:'x'> <lit v:2>>>
 run(<lett n:'k', <lit v:10>
      <forr n:'x', <arr <lit v:1> <lit v:2>> <add <vr n:'x'> <vr n:'k'>>>>)
     == (let k = 10, for (x in [1, 2]) x + k);
-// an empty source yields an empty result, and the binder does not escape
-run(<forr n:'x', <arr> <vr n:'x'>>) == [];
+// an empty source yields an empty result — as a value, the null an empty list
+// collapses to (S2.5.5v2), on both sides — and the binder does not escape
+run(<forr n:'x', <arr> <vr n:'x'>>) == (for (x in []) x);
 run(<lett n:'y', <forr n:'x', <arr <lit v:1>> <vr n:'x'>> <vr n:'x'>>) == 'stuck';
+// a bound comprehension result is still a LIST, so it splices where it lands
+// (S2.5.1v2, S2.5.6) — the model must not let its environment turn it into
+// an array that nests
+run(<lett n:'y', <forr n:'x', <arr <lit v:1> <lit v:2>> <vr n:'x'>>
+     <arr <vr n:'y'> <lit v:3>>>)
+    == (let y = for (x in [1, 2]) x, [y, 3]);
 
 // ===== M2: maps — modelled as assoc-lists, compared by field read =====
 // The model cannot build a host map: `{(k): v}` is a parse error, so there is

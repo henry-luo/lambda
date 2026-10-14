@@ -128,7 +128,12 @@ expansion facility. This is bounded input support, not a promise to run every
 TeX primitive or arbitrary LaTeX package. Recovery parsing and unknown
 commands also require care: current fallback paths can paint a command name or
 its children. Successful SVG emission alone cannot identify an unsupported
-command; explicit unsupported-feature reporting remains outstanding.
+command. Since 2026-10-13, `maps_command(key)` says whether a generic command
+has a rendering, and `unmapped_commands(ast)` lists the ones that do not. The
+painter and the predicate share the same name lists, and `lambda.latex`
+reports each unmapped command as `unsupported-math-command`. An environment
+the parser does not know is reported too, as `begin{name}`. Recovery-parse
+fallbacks and other unavailable constructions are not yet reported.
 
 Plain string input can be rendered as characters; the rendering API does not
 implicitly parse such a string as LaTeX. Applications that accept LaTeX must
@@ -235,7 +240,18 @@ unless their command specifies otherwise. Font and atom class are separate
 choices.
 
 Missing symbols first try the authored bundled symbol families, then the
-available platform fallback. Each resolved glyph retains its actual font,
+available platform fallback. The family order is CMU Serif, KaTeX_Size1,
+KaTeX_Main, KaTeX_AMS: Main carries the plain TeX (cmsy) shapes and AMS the
+amssymb variants, and where both have a code point the plain command's shape
+wins (`\cdot` is Main's axis-centred dot, not AMS's `\centerdot` on the
+baseline). An amssymb command that shares such a code point draws from the AMS
+face by name (`symbols.AMS_SHAPES`: `\varnothing`, which shares U+2205 with
+`\emptyset`).
+
+Bold follows TeX's bold math version. `\boldsymbol` sets letters in bold italic
+and symbols, digits, operators, relations and punctuation from the bold upright
+face when it has the glyph; `\mathbf` is a math alphabet and reaches only letters
+and digits, so `\mathbf{+}` keeps the regular plus. Each resolved glyph retains its actual font,
 style, advance, bounds and optional MATH facts. Never attach another face's
 dimensions to a replacement outline merely to improve a comparison. Platform
 fallback can affect portability; see §10.
@@ -579,25 +595,27 @@ remaining obligations.
 
 | Area | Supported behavior and boundary |
 |---|---|
-| Symbols and alphabets | Greek, binary/relation/arrow/AMS symbols, operator names, ordinary and specialist alphabets, and explicit atom classes. Coverage depends on command mapping and available glyphs. |
+| Symbols and alphabets | Greek, binary/relation/arrow/AMS symbols, operator names, ordinary and specialist alphabets, and explicit atom classes. Since 2026-10-13 also latexsym, a stmaryrd subset, esint's oriented and finite-part integrals, gensymb's symbols, upgreek's upright letters, `\mathbbm`/`\mathds` as double-struck aliases, and the LaTeX 2.09 `\cal` switch. Also mathtools' colon relations (`\coloneqq`, `\Coloneqq`, `\eqqcolon`, `\dblcolon`, `\vcentcolon` and the rest), composed from bundled glyphs into one relation atom because no bundled face has ≔ or ∷, and bm's `\bm`/`\hm`, which bold as `\boldsymbol` does but fall back to poor man's bold for a symbol no bundled face has in bold. Every parser symbol name has a table entry. Coverage depends on command mapping and available glyphs: no bundled face has double-struck digits, so `\mathbb{1}` renders a plain digit. |
 | Text and mode changes | Scoped text styles, nested text commands, escaped specials, and embedded `$...$` math. Bundled verbatim uses the existing typewriter face and retains delimited source and starred visible spaces. Font requests follow structured commands rather than literal command text. Quote encoding and supplied-MATH-font text selection remain incomplete. |
 | Dimensions | Supported `em`, `ex`, `mu`, `pt`, `bp`, `pc`, `in`, `cm`, `mm`, `px`; TeX points and big points remain distinct. Kern dimensions end at their unit and preserve following tokens. Physical units resolve through the CSS reference of 96px per inch: `pt` is 96/72.27px, `bp` is 96/72px, `pc` is 12pt, and `in`/`cm`/`mm` follow from the inch. The result is divided by the caller's `font_size` (default 16px per em), so physical lengths do not scale with math style. `em` and `ex` use the current text size and the profile x-height; `mu` is the current math quad divided by 18. |
-| Arrays and AMS environments | Matrix families, cases/rcases/dcases, array, smallmatrix, subarray/substack, aligned/alignedat, gathered and related parsed environments; per-column alignment, starred matrix alignment, row gaps and solid/dashed rules. Cells scope infix fractions. This is bounded layout, not arbitrary TeX alignment/register execution. |
+| Arrays and AMS environments | Matrix families, cases/rcases/dcases, array, smallmatrix, subarray/substack, aligned/alignedat, gathered and related parsed environments; per-column alignment, starred matrix alignment, row gaps and solid/dashed rules. Cells scope infix fractions. mathtools adds the fenced small matrices (`psmallmatrix`, `bsmallmatrix`, `Bsmallmatrix`, `vsmallmatrix`, `Vsmallmatrix`), `drcases`, starred cases whose second column is text, `multlined` (first line left, last line right) and `lgathered`/`rgathered`; their position and width options are read and ignored. This is bounded layout, not arbitrary TeX alignment/register execution. |
+| Slanted fractions | nicefrac's `\nicefrac` and xfrac's `\sfrac`, with an optional `\sfrac` separator: a script-size numerator raised half an x-height, a slash kerned in by 0.1em and 0.15em, and a script-size denominator lowered a quarter x-height, following nicefrac.sty. The font and instance options are ignored. |
+| Chemistry | A bounded mhchem profile (`mhchem.ls`) turns `\ce` and `\pu` notation into TeX math for the ordinary parser. `\ce`: element symbols, subscripts and groups, charges (`^2-` or a trailing sign), states such as `(aq)`, coefficients including `1/2`, isotopes (`^{227}_{90}Th`), adduct dots, bonds (`-`, `=`, `#`), the seven reaction arrows with `[above][below]` labels read as `\ce`, precipitate `v` and gas `^`, `$…$` math and commands. `\pu`: a number with an optional `e` exponent, then upright units with powers (`mol-1`, `m^2`) and `.`/`*` products. Other notation passes through unchanged; mhchem's spacing and arrow lengths are not reproduced. |
 | Array style | Small matrices/subarrays use script style; matrices use text style; supported AMS alignment/gathered environments and dcases use display style. Row placement accounts for cell heights/depths and centers the table on the axis. Complete strut/glue/rule derivation remains outstanding. |
 | Equation material | Parsed tags and nonprinting controls are retained. Numbering, references and outer display placement belong to the document layer; standalone math has no general line-breaking engine. |
 | Row separators | `\\` and `\cr` are structural controls, never painted backslashes. They delimit rows in an alignment; accepting them elsewhere does not promise paragraph line breaking. `\backslash` remains a literal symbol. |
 | Annotation arrows | Six labelled single/double arrows and six AMS over/under single-arrow marks follow §6.7. Paired reaction arrows retain upper/lower content. Other hook/head recipes and package-derived reaction spacing remain incomplete. |
 | CD diagrams | Rows, arrow direction, labels and equalities are represented. Their current dimensions are not certified against amscd. |
-| Boxes and transforms | Phantom variants, smash, overlaps, authored raise/lower dimensions, reflection and axis centering; framed/color boxes and cancel/strike/phase/actuarial forms render. Package-specific padding, stroke and decoration rules still need conformance work. |
+| Boxes and transforms | Phantom variants, smash, overlaps, authored raise/lower dimensions, reflection and axis centering; framed/color boxes and cancel/strike/phase/actuarial forms render. `\cancelto{value}{expr}` draws an arrow from the lower left corner past the upper right one, with the value as a superscript at its tip. Package-specific padding, stroke and decoration rules still need conformance work. |
 | Color | Scoped foreground paint, background and framed-color boxes are represented. Full xcolor expression evaluation and package-register semantics are not established by these paths. |
 | Images | Raster `\includegraphics` with width, height, totalheight and alt; intrinsic aspect ratio when width is absent; relative sources use `base_uri`. Bytes are embedded. Invalid sources/options/dimensions return errors. The current `.9em` default and unitless `bp` contract are KaTeX conventions, not full graphicx natural-size semantics. |
 | Logos | `\KaTeX` follows its reference macro: uppercase KATEX, reduced A aligned by text metrics, lowered E and authored kerns. Math alphabet/script declarations do not change its text-font policy. Standalone `\TeX` / `\LaTeX` fallbacks are incomplete. |
 
 HTML wrappers/links/data attributes, arbitrary menclose forms, tooltips,
-chemistry `\ce` / `\pu`, accessibility representations and editor atom
-metadata are not a complete supported feature set. Parsing or retaining a
-generic command does not supply its semantics. Reaction-arrow support alone
-does not implement mhchem.
+accessibility representations and editor atom metadata are not a complete
+supported feature set. Parsing or retaining a generic command does not supply
+its semantics. Chemistry is the bounded mhchem profile in the table above,
+not mhchem's full notation.
 
 ## 8. Output and document integration
 
@@ -828,6 +846,8 @@ current code, not permission to adopt their present behavior as a new rule.
 | Text and quotes | Complete literal paired-quote/font-encoding behavior and text/typewriter selection with supplied MATH fonts. Preserve text/math scoping and escapes while adding typography coverage. Bundled verbatim typewriter selection is independently covered by content/font and native-paint checks. |
 | Negation | `\not` currently centres an upright `/` over the following relation's advance and keeps that relation's width and class (`negated` in `typeset.ls`). Plain TeX defines `\not` as a zero-width relation glyph from the symbol font (`\mathchar"3236`) that overstrikes the next relation at its natural position. The centring is fitted geometry under Rule 1; replace it with the TeX definition and verify it independently. Existing negated-relation tests check content, advance and roundtrip, not geometry. |
 | Logos, color and images | Complete standalone `\TeX` / `\LaTeX`; audit xcolor expressions/scoping and graphicx natural-size semantics. Keep the current bounded image convention explicit. |
+| Bold symbols without a bundled bold glyph | Under Rule 2 no bundled face draws ∇, ⋅, ∞, ∂, the relations or most other symbols in bold (CMU bold carries Latin, Greek, digits and a few operators: + − × ÷ ± = √ ∗ ⋆ and six arrows). `\boldsymbol` keeps their regular glyph, as amsbsy does without a bold font, and `lambda.latex` reports `math-bold-symbol-approximation`; so physics' `\grad` and `\vdot` are not bold. `\bm` uses poor man's bold for them, which is bm.sty's own fallback. |
+| Phase V package constructs | `\cancelto`, slanted fractions and the mathtools environments follow their package definitions in shape, but arrow overshoot, slash kerns and the mhchem profile's spacing have no independent TeX evidence yet. |
 
 For each family, establish its command definition and available font data,
 then verify the resulting box/glue/assembly behavior with independent TeX and
@@ -837,9 +857,10 @@ shape, reduced raster diff, or green smoke count cannot close these items.
 
 ### 10.2 Coverage and verification gaps
 
-- Make unsupported commands, generic AST fallthrough and unavailable
-  constructions explicit; prevent fallback command text from being counted
-  as implemented math. Separate expected parse failures from render success.
+- Make generic AST fallthrough and unavailable constructions explicit; prevent
+  fallback command text from being counted as implemented math. Separate
+  expected parse failures from render success. Unmapped generic commands are
+  reported since 2026-10-13 (§3.1).
 - Extend corpus checks beyond forced display style and structural validity:
   expected glyph content, inline baselines, all math styles, profile changes,
   actual font-resource availability and painted geometry need coverage.
@@ -869,7 +890,8 @@ shape, reduced raster diff, or green smoke count cannot close these items.
 ### 10.3 Deferred product scope
 
 Full MathML layout/speech output, stable atom/source mappings, placeholders and math
-editing, arbitrary HTML integration commands, general chemistry, complete
+editing, arbitrary HTML integration commands, chemistry beyond the bounded
+mhchem profile of §7, complete
 AsciiMath/LaTeX serialization parity and equation line breaking remain
 separate design work. None follows automatically from static SVG coverage.
 Any expansion must preserve the existing resource boundary and the two
@@ -1101,3 +1123,4 @@ On 2026-10-12 the older math notes under `vibe/latex/` were retired into this do
 | 2026-10-10 delimiter continuation | Replaced bundled delimiter scaling with original TeX variant/assembly selection, completed middle-boundary demand and atom behavior, and restored parenthesis aliases. Added independent DVI geometry and native assembly checks. Corrected the comparison harness's logical point scale; existing Size3/Size4 fonts were reused without adding resources. |
 | 2026-10-10 radical continuation | Replaced bundled whole-surd stretching with TeX's variant/extension and rule construction, restored default indexed-root kern/raise behavior, and selected finite CMEX hats/tildes. Preserved signed optional rule raises. Added shared independent DVI/rule geometry and native radical/accent checks, reusing the existing fonts and metric files. |
 | 2026-10-10 arrow continuation | Replaced six labelled-arrow and six over/under-arrow approximations with AMS/mathtools glyph-leader, style, label and alignment definitions. Preserved TeX's optional-argument and following-script behavior. Added independent leader-boundary geometry and native shaft-continuity checks without adding fonts or metrics. |
+| 2026-10-13 (LaTeX Phase V) | `maps_command`/`unmapped_commands` made unmapped commands reportable (M0). Package symbol tables, upright Greek, double-struck aliases and `\cal` (M2). M8: mathtools colon relations as single relation atoms, `\bm`/`\hm`, `\cancelto`, slanted fractions, the mathtools environments with starred-cases text columns, reported unknown environments, and the bounded mhchem profile (`mhchem.ls`). Then: the symbol fallback order puts KaTeX_Main before KaTeX_AMS, so `\cdot`, `\emptyset`, `\setminus`, `\models`, `\propto` and `\triangle` take their cmsy shapes (`\varnothing` keeps AMS by name); `\boldsymbol` bolds symbols, digits and operators from the bold upright face, `\mathbf` bolds digits, and `\bm` falls back to poor man's bold (§5.1). |

@@ -67,22 +67,24 @@ char *fallback_fonts[] = {
     NULL
 };
 
+static FontProp ui_context_default_font(char* family) {
+    FontProp font = {lam::up(family), 16.0f,
+        1.0f, 0.0f, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
+    font.font_size_from_medium = true;
+    // partial UA font initializers must preserve currentColor independently of RGBA.
+    font.text_deco_color_current = true;
+    font.text_deco_skip_ink = CSS_VALUE_AUTO;
+    font.text_underline_position = CSS_VALUE_AUTO;
+    font.text_underline_side = CSS_VALUE__UNDEF;
+    return font;
+}
+
 void ui_context_init_default_fonts(UiContext* uicon) {
     if (!uicon) return;
     // isolated SVG HTML uses the same UA defaults without inheriting page font styles.
-    uicon->default_font = (FontProp){lam::up(default_font_times_new_roman), 16.0f,
-        1.0f, 0.0f, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
-    uicon->default_font.font_size_from_medium = true;
-    uicon->default_font.text_deco_skip_ink = CSS_VALUE_AUTO;
-    uicon->default_font.text_underline_position = CSS_VALUE_AUTO;
-    uicon->default_font.text_underline_side = CSS_VALUE__UNDEF;
+    uicon->default_font = ui_context_default_font(default_font_times_new_roman);
     uicon->default_font.platform_fallback_family = lam::up(default_font_times);
-    uicon->legacy_default_font = (FontProp){lam::up(default_font_times), 16.0f,
-        1.0f, 0.0f, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
-    uicon->legacy_default_font.font_size_from_medium = true;
-    uicon->legacy_default_font.text_deco_skip_ink = CSS_VALUE_AUTO;
-    uicon->legacy_default_font.text_underline_position = CSS_VALUE_AUTO;
-    uicon->legacy_default_font.text_underline_side = CSS_VALUE__UNDEF;
+    uicon->legacy_default_font = ui_context_default_font(default_font_times);
     uicon->minimum_logical_font_size = 6.0f;
     uicon->fallback_fonts = lam::up(::fallback_fonts);
 }

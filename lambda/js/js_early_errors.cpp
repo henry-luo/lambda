@@ -34,6 +34,7 @@ struct EarlyErrorNameFact {
     const char* chars = NULL;
     int length = 0;
     uint8_t kind = 0;
+    uint8_t private_kind = 0; // data/get/set bits plus static; getter/setter pairs share one identity
     int function_scope = 0;
 };
 
@@ -52,6 +53,7 @@ struct EarlyErrorCtx {
     bool in_constructor;
     bool in_method;          // class method (non-constructor)
     bool in_static_init;     // class static block
+    bool in_field_initializer;
     bool in_formal_parameters;
     int  error_count;
     EarlyErrorNameLedger names;
@@ -180,12 +182,22 @@ static bool ctx_private_name_is_declared(EarlyErrorCtx* ctx, String* name) {
     return false;
 }
 
-static bool ctx_add_private_name(EarlyErrorCtx* ctx, String* name) {
+static bool ctx_add_private_name(EarlyErrorCtx* ctx, String* name, int class_mark, uint8_t kind) {
     if (!is_private_name_string(name)) return true;
-    if (ee_name_ledger_contains(&ctx->names, EARLY_ERROR_NAME_PRIVATE,
-            name->chars, name->len, false)) return true;
-    return ee_name_ledger_append(&ctx->names, name->chars, name->len,
-        EARLY_ERROR_NAME_PRIVATE);
+    if (name->len == 12 && !memcmp(name->chars, "#constructor", 12)) return false;
+    for (int i = class_mark; ctx->names.facts && i < ctx->names.facts->length; i++) {
+        EarlyErrorNameFact* prior = (EarlyErrorNameFact*)ctx->names.facts->data[i];
+        if (prior->kind != EARLY_ERROR_NAME_PRIVATE || prior->length != name->len ||
+                memcmp(prior->chars, name->chars, name->len)) continue;
+        // only one complementary accessor pair with the same staticness may redeclare a name.
+        bool complementary = ((prior->private_kind & 7) == 2 && (kind & 7) == 4) ||
+            ((prior->private_kind & 7) == 4 && (kind & 7) == 2);
+        if (((prior->private_kind ^ kind) & 8) || !complementary) return false;
+        prior->private_kind |= kind; return true;
+    }
+    if (!ee_name_ledger_append(&ctx->names, name->chars, name->len, EARLY_ERROR_NAME_PRIVATE)) return false;
+    ((EarlyErrorNameFact*)ctx->names.facts->data[ctx->names.facts->length - 1])->private_kind = kind;
+    return true;
 }
 
 static void collect_class_private_names(EarlyErrorCtx* ctx, JsClassNode* cls) {
@@ -194,22 +206,19 @@ static void collect_class_private_names(EarlyErrorCtx* ctx, JsClassNode* cls) {
     if (members && members->node_type == AST_NODE_BLOCK) {
         members = ((JsBlockNode*)members)->statements;
     }
+    int class_mark = ee_name_ledger_mark(&ctx->names);
     for (JsAstNode* m = members; m; m = m->next) {
+        bool computed, statics;
+        AstNode* key = js_ast_class_element_key(m, &computed, &statics);
+        uint8_t kind = (statics ? 8 : 0) | 1;
         if (m->node_type == AST_NODE_METHOD) {
             JsMethodDefinitionNode* md = (JsMethodDefinitionNode*)m;
-            if (!md->computed && md->key && md->key->node_type == AST_NODE_IDENT) {
-                if (!ctx_add_private_name(ctx, ((JsIdentifierNode*)md->key)->name)) {
-                    ee_error(ctx, m, "Cannot retain class private name");
-                }
-            }
-        } else if (m->node_type == AST_NODE_FIELD) {
-            JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)m;
-            if (!fd->computed && fd->key && fd->key->node_type == AST_NODE_IDENT) {
-                if (!ctx_add_private_name(ctx, ((JsIdentifierNode*)fd->key)->name)) {
-                    ee_error(ctx, m, "Cannot retain class private name");
-                }
-            }
+            kind = (statics ? 8 : 0) | (md->kind == AstMethodNode::JS_METHOD_GET ? 2 :
+                md->kind == AstMethodNode::JS_METHOD_SET ? 4 : 1);
         }
+        if (!computed && key && key->node_type == AST_NODE_IDENT &&
+                !ctx_add_private_name(ctx, ((JsIdentifierNode*)key)->name, class_mark, kind))
+            ee_error(ctx, m, "Invalid or duplicate class private name");
     }
 }
 
@@ -270,13 +279,16 @@ static bool normalize_unicode_escapes(const char* src, int src_len, char* out, i
 // Check whether an expression node is a valid simple assignment target.
 // Valid targets: identifiers (not reserved words), member expressions,
 // array/object patterns (destructuring).
-static bool is_valid_assignment_target(JsAstNode* node, bool strict) {
+static bool is_valid_assignment_target(JsAstNode* node, bool strict,
+        bool allow_pattern = true, bool allow_call = true) {
     if (!node) return false;
     switch (node->node_type) {
         case AST_NODE_IDENT: {
             JsIdentifierNode* id = (JsIdentifierNode*)node;
             if (id->name) {
                 const char* nm = id->name->chars;
+                // meta properties share the identifier carrier, but never denote writable bindings.
+                if (strcmp(nm, "new.target") == 0 || strcmp(nm, "import.meta") == 0) return false;
                 // "eval" and "arguments" are invalid in strict mode
                 if (strict && (strcmp(nm, "eval") == 0 || strcmp(nm, "arguments") == 0)) {
                     return false;
@@ -286,13 +298,29 @@ static bool is_valid_assignment_target(JsAstNode* node, bool strict) {
             }
             return true;
         }
-        case AST_NODE_MEMBER_EXPR:
+        case AST_NODE_MEMBER_EXPR: {
+            // pattern parsing retains the dotted form instead of the primary-expression identifier.
+            JsMemberNode* member = (JsMemberNode*)node;
+            if (!member->computed && member->object && member->object->node_type == AST_NODE_IDENT &&
+                    member->property && member->property->node_type == AST_NODE_IDENT) {
+                String* owner = ((JsIdentifierNode*)member->object)->name;
+                String* property = ((JsIdentifierNode*)member->property)->name;
+                if (owner && property && ((strcmp(owner->chars, "import") == 0 && strcmp(property->chars, "meta") == 0) ||
+                        (strcmp(owner->chars, "new") == 0 && strcmp(property->chars, "target") == 0))) return false;
+            }
             return true;
-        case AST_NODE_CALL_EXPR:
-            return !strict;
+        }
+        case AST_NODE_CALL_EXPR: {
+            JsAstNode* callee = ((JsCallNode*)node)->callee;
+            // import calls are outside Annex B's sloppy CallExpression assignment extension.
+            if (callee && callee->node_type == AST_NODE_IDENT &&
+                    ((JsIdentifierNode*)callee)->name &&
+                    strcmp(((JsIdentifierNode*)callee)->name->chars, "import") == 0) return false;
+            return !strict && allow_call;
+        }
         case AST_NODE_ARRAY_PATTERN:
         case AST_NODE_MAP_PATTERN:
-            return true;
+            return allow_pattern;
         default:
             return false;
     }
@@ -314,8 +342,14 @@ static void check_pattern_target(EarlyErrorCtx* ctx, JsAstNode* target) {
         ee_error(ctx, target, "Invalid optional chain in assignment target");
         return;
     }
+    if (target->node_type == AST_NODE_MEMBER_EXPR && !is_valid_assignment_target(target, ctx->in_strict)) {
+        ee_error(ctx, target, "Invalid member in assignment target");
+        return;
+    }
     if (target->node_type == AST_NODE_IDENT) {
-        check_identifier_reserved(ctx, target);
+        if (!is_valid_assignment_target(target, ctx->in_strict))
+            ee_error(ctx, target, "Invalid identifier in assignment target");
+        else check_identifier_reserved(ctx, target);
         return;
     }
     js_ast_visit_binding_pattern_children(target, check_pattern_target_child, ctx);
@@ -330,17 +364,12 @@ static void check_assignment_target(EarlyErrorCtx* ctx, JsAstNode* node) {
     // for simple assignment (=), the LHS can be a pattern or simple target
     // for compound assignments (+=, etc.), LHS must be a simple target (no patterns)
     bool is_compound = (asgn->op != OPERATOR_ASSIGN);
+    bool is_logical = asgn->op == OPERATOR_JS_AND_ASSIGN || asgn->op == OPERATOR_JS_OR_ASSIGN ||
+        asgn->op == OPERATOR_JS_NULLISH_ASSIGN;
 
-    if (is_compound) {
-        // compound: only identifier or member expression
-        if (lhs->node_type != AST_NODE_IDENT &&
-            lhs->node_type != AST_NODE_MEMBER_EXPR &&
-            (ctx->in_strict || lhs->node_type != AST_NODE_CALL_EXPR)) {
-            ee_error(ctx, node, "Invalid left-hand side in compound assignment");
-            return;
-        }
-    } else if (!is_valid_assignment_target(lhs, ctx->in_strict)) {
-        ee_error(ctx, node, "Invalid left-hand side in assignment");
+    if (!is_valid_assignment_target(lhs, ctx->in_strict, !is_compound, !is_logical)) {
+        ee_error(ctx, node, is_compound ? "Invalid left-hand side in compound assignment" :
+            "Invalid left-hand side in assignment");
         return;
     }
     check_pattern_target(ctx, lhs);
@@ -353,19 +382,9 @@ static void check_update_target(EarlyErrorCtx* ctx, JsAstNode* node) {
     JsAstNode* operand = un->operand;
     if (!operand) return;
 
-    if (operand->node_type != AST_NODE_IDENT &&
-        operand->node_type != AST_NODE_MEMBER_EXPR &&
-        (ctx->in_strict || operand->node_type != AST_NODE_CALL_EXPR)) {
+    if (!is_valid_assignment_target(operand, ctx->in_strict, false)) {
         ee_error(ctx, node, "Invalid left-hand side in prefix/postfix operation");
-    } else if (operand->node_type == AST_NODE_IDENT) {
-        JsIdentifierNode* id = (JsIdentifierNode*)operand;
-        if (id->name) {
-            const char* nm = id->name->chars;
-            if (ctx->in_strict && (strcmp(nm, "eval") == 0 || strcmp(nm, "arguments") == 0)) {
-                ee_error(ctx, node, "Invalid left-hand side in prefix/postfix operation");
-            }
-        }
-    }
+    } else check_pattern_target(ctx, operand);
 }
 
 // ---- Phase 2: reserved word as identifier ----------------------------------
@@ -389,8 +408,8 @@ static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node,
         return;
     }
 
-    if (ctx->in_async && strcmp(name, "await") == 0) {
-        ee_error(ctx, node, "'await' cannot be used as an identifier in async functions");
+    if ((ctx->in_async || ctx->tp->is_es_module) && strcmp(name, "await") == 0) {
+        ee_error(ctx, node, "'await' cannot be used as an identifier in async functions or modules");
         return;
     }
     if (ctx->in_generator && strcmp(name, "yield") == 0) {
@@ -431,9 +450,9 @@ static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node,
                 if (reserved_hit) {
                     ee_error(ctx, node, "'%s' (via unicode escape) is a reserved word", normalized);
                 }
-                // preserve binding validation; references reserve contextual keywords only in their active context.
-                else if (contextual_hit && (binding_position || ctx->in_async ||
-                        ctx->in_generator || ctx->in_strict)) {
+                // strictness reserves yield, but await references/labels require an async or module context.
+                else if (contextual_hit && (binding_position || (strcmp(normalized, "await") == 0
+                        ? ctx->in_async || ctx->tp->is_es_module : ctx->in_generator || ctx->in_strict))) {
                     ee_error(ctx, node, "'%s' may not contain escape sequences", normalized);
                 }
             }
@@ -551,9 +570,26 @@ static void walk_class_for_early_errors(EarlyErrorCtx* ctx, JsClassNode* cls) {
     bool was_strict = ctx->in_strict;
     int private_name_mark = ee_name_ledger_mark(&ctx->names);
     ctx->in_strict = true; // class bodies are always strict
-    collect_class_private_names(ctx, cls);
+    if (cls->name && (is_reserved_word(cls->name->chars, true) ||
+            strcmp(cls->name->chars, "eval") == 0 || strcmp(cls->name->chars, "arguments") == 0))
+        ee_error(ctx, (JsAstNode*)cls, "Invalid class binding name");
+    // the new private environment starts after heritage evaluation.
     walk_expression(ctx, cls->superclass);
-    for (JsAstNode* m = cls->body; m; m = m->next) {
+    collect_class_private_names(ctx, cls);
+    JsAstNode* members = cls->body;
+    if (members && members->node_type == AST_NODE_BLOCK) members = ((JsBlockNode*)members)->statements;
+    for (JsAstNode* m = members; m; m = m->next) {
+        bool computed, statics;
+        JsAstNode* key = js_ast_class_element_key(m, &computed, &statics);
+        if (key && !computed) {
+            String* name = key->node_type == AST_NODE_IDENT ? ((JsIdentifierNode*)key)->name :
+                key->node_type == AST_NODE_LITERAL &&
+                ((JsLiteralNode*)key)->literal_type == AST_LITERAL_STRING ? ((JsLiteralNode*)key)->value.string_value : NULL;
+            // string-literal keys can contain NUL; forbidden names require the complete spelling.
+            if (name && ((m->node_type == AST_NODE_FIELD && name->len == 11 && !memcmp(name->chars, "constructor", 11)) ||
+                    (statics && name->len == 9 && !memcmp(name->chars, "prototype", 9))))
+                ee_error(ctx, m, "Invalid class element name");
+        }
         walk_statement(ctx, m);
     }
     ee_name_ledger_truncate(&ctx->names, private_name_mark);
@@ -567,6 +603,8 @@ static void walk_function_for_early_errors(EarlyErrorCtx* ctx, JsFunctionNode* f
     bool was_iteration = ctx->in_iteration;
     bool was_switch = ctx->in_switch;
     bool was_params = ctx->in_formal_parameters;
+    bool was_field = ctx->in_field_initializer;
+    bool was_static = ctx->in_static_init;
     int was_function_scope = ctx->names.function_scope;
 
     ctx->in_generator = fn->is_generator;
@@ -574,6 +612,10 @@ static void walk_function_for_early_errors(EarlyErrorCtx* ctx, JsFunctionNode* f
     ctx->in_iteration = false;
     ctx->in_switch = false;
     ctx->names.function_scope++;
+    if (fn->node_type != AST_NODE_ARROW_FUNC) {
+        ctx->in_field_initializer = false;
+        ctx->in_static_init = false;
+    }
 
     // v17: "use strict" with non-simple params is SyntaxError
     check_strict_non_simple(ctx, fn);
@@ -587,7 +629,9 @@ static void walk_function_for_early_errors(EarlyErrorCtx* ctx, JsFunctionNode* f
         walk_expression(ctx, p);
     }
     ctx->in_formal_parameters = was_params;
-    walk_statement(ctx, fn->body);
+    // concise arrow bodies are expressions; statement traversal would skip their early errors.
+    if (fn->body && fn->body->node_type != AST_NODE_BLOCK) walk_expression(ctx, fn->body);
+    else walk_statement(ctx, fn->body);
 
     ctx->in_generator = was_gen;
     ctx->in_async = was_async;
@@ -595,6 +639,8 @@ static void walk_function_for_early_errors(EarlyErrorCtx* ctx, JsFunctionNode* f
     ctx->in_iteration = was_iteration;
     ctx->in_switch = was_switch;
     ctx->in_formal_parameters = was_params;
+    ctx->in_field_initializer = was_field;
+    ctx->in_static_init = was_static;
     ctx->names.function_scope = was_function_scope;
 }
 
@@ -617,6 +663,12 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
                 un->operand->node_type == AST_NODE_IDENT) {
                 ee_error(ctx, node, "Deleting a variable is not allowed in strict mode");
             }
+            if (un->op == OPERATOR_JS_DELETE && un->operand && un->operand->node_type == AST_NODE_MEMBER_EXPR) {
+                JsMemberNode* member = (JsMemberNode*)un->operand;
+                if (!member->computed && member->property && member->property->node_type == AST_NODE_IDENT &&
+                        is_private_name_string(((JsIdentifierNode*)member->property)->name))
+                    ee_error(ctx, node, "Deleting a private field is not allowed");
+            }
             js_ast_visit_children(node, walk_expression_child, ctx);
             break;
         }
@@ -625,6 +677,11 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             // defaults and computed targets still contain IdentifierReferences subject to strict syntax.
             check_identifier_reserved(ctx, node, false);
             check_private_identifier_valid(ctx, node, ((JsIdentifierNode*)node)->name);
+            if (is_private_name_string(((JsIdentifierNode*)node)->name))
+                ee_error(ctx, node, "Private identifiers require member access or an in expression");
+            if ((ctx->in_field_initializer || ctx->in_static_init) &&
+                    strcmp(((JsIdentifierNode*)node)->name->chars, "arguments") == 0)
+                ee_error(ctx, node, "Class initializers cannot reference arguments");
             break;
 
         case AST_NODE_LITERAL: {
@@ -679,10 +736,29 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             break;
         }
 
-        case AST_NODE_BINARY:
-        case AST_NODE_CALL_EXPR:
+        case AST_NODE_BINARY: {
+            JsBinaryNode* binary = (JsBinaryNode*)node;
+            if (binary->op == OPERATOR_IN && binary->left && binary->left->node_type == AST_NODE_IDENT &&
+                    is_private_name_string(((JsIdentifierNode*)binary->left)->name)) {
+                // PrivateIdentifier in ShiftExpression is the sole bare private-name production.
+                check_private_identifier_valid(ctx, binary->left, ((JsIdentifierNode*)binary->left)->name);
+                if (binary->left->source_span.start_byte != node->source_span.start_byte)
+                    ee_error(ctx, binary->left, "A private identifier cannot be parenthesized");
+                walk_expression(ctx, binary->right);
+                break;
+            }
             js_ast_visit_children(node, walk_expression_child, ctx);
             break;
+        }
+
+        case AST_NODE_CALL_EXPR: {
+            JsAstNode* callee = ((JsCallNode*)node)->callee;
+            if ((ctx->in_field_initializer || ctx->in_static_init) && callee && callee->node_type == AST_NODE_IDENT &&
+                    strcmp(((JsIdentifierNode*)callee)->name->chars, "super") == 0)
+                ee_error(ctx, node, "Class initializers cannot call super");
+            js_ast_visit_children(node, walk_expression_child, ctx);
+            break;
+        }
 
         case AST_NODE_MEMBER_EXPR: {
             JsMemberNode* mn = (JsMemberNode*)node;
@@ -692,6 +768,10 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             } else if (mn->property && mn->property->node_type == AST_NODE_IDENT) {
                 check_private_identifier_valid(ctx, mn->property,
                     ((JsIdentifierNode*)mn->property)->name);
+                if (is_private_name_string(((JsIdentifierNode*)mn->property)->name) && mn->object &&
+                        mn->object->node_type == AST_NODE_IDENT &&
+                        strcmp(((JsIdentifierNode*)mn->object)->name->chars, "super") == 0)
+                    ee_error(ctx, node, "Super cannot access a private element");
             }
             break;
         }
@@ -700,12 +780,20 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             js_ast_visit_children(node, walk_expression_child, ctx);
             break;
 
-        case AST_NODE_MAP: {
-            JsObjectNode* on = (JsObjectNode*)node;
-            for (JsAstNode* p = on->properties; p; p = p->next) {
+        case AST_NODE_MAP: case AST_NODE_MAP_PATTERN: {
+            bool pattern = node->node_type == AST_NODE_MAP_PATTERN;
+            JsAstNode* properties = pattern ? ((JsObjectPatternNode*)node)->properties : ((JsObjectNode*)node)->properties;
+            if (pattern) check_pattern_rest(ctx, properties, false);
+            for (JsAstNode* p = properties; p; p = p->next) {
                 if (p->node_type == AST_NODE_PROPERTY) {
                     JsPropertyNode* prop = (JsPropertyNode*)p;
+                    if (prop->computed) walk_expression(ctx, prop->key);
+                    else if (prop->key && prop->key->node_type == AST_NODE_IDENT &&
+                            is_private_name_string(((JsIdentifierNode*)prop->key)->name))
+                        ee_error(ctx, prop->key, "Private names cannot be object property keys");
                     walk_expression(ctx, prop->value);
+                } else if (pattern) {
+                    walk_expression(ctx, p);
                 } else if (p->node_type == AST_NODE_SPREAD) {
                     walk_expression(ctx, ((JsSpreadElementNode*)p)->argument);
                 }
@@ -718,8 +806,15 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             js_ast_visit_children(node, walk_expression_child, ctx);
             break;
 
+        case JS_AST_NODE_TAGGED_TEMPLATE: {
+            JsAstNode* tag = ((JsTaggedTemplateNode*)node)->tag;
+            // grouping ends an optional chain; the outer tagged span then starts before its tag node.
+            if (tag && node->source_span.start_byte == tag->source_span.start_byte && js_ast_has_optional_chain(tag))
+                ee_error(ctx, node, "An optional chain cannot be a template tag");
+            js_ast_visit_children(node, walk_expression_child, ctx);
+            break;
+        }
         case JS_AST_NODE_TEMPLATE_LITERAL:
-        case JS_AST_NODE_TAGGED_TEMPLATE:
             js_ast_visit_children(node, walk_expression_child, ctx);
             break;
 
@@ -745,6 +840,8 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
         case AST_NODE_FUNC_EXPR:
         case AST_NODE_FUNC:
         case AST_NODE_METHOD: {
+            if (node->node_type == AST_NODE_METHOD && ((JsMethodDefinitionNode*)node)->computed)
+                walk_expression(ctx, ((JsMethodDefinitionNode*)node)->key);
             walk_function_for_early_errors(ctx, (JsFunctionNode*)node);
             break;
         }
@@ -763,18 +860,6 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
         case AST_NODE_ARRAY_PATTERN:
             check_pattern_rest(ctx, ((JsArrayPatternNode*)node)->elements, true);
             js_ast_visit_children(node, walk_expression_child, ctx);
-            break;
-
-        case AST_NODE_MAP_PATTERN:
-            check_pattern_rest(ctx, ((JsObjectPatternNode*)node)->properties,
-                false);
-            for (JsAstNode* p = ((JsObjectPatternNode*)node)->properties; p; p = p->next) {
-                if (p->node_type == AST_NODE_PROPERTY) {
-                    walk_expression(ctx, ((JsPropertyNode*)p)->value);
-                } else {
-                    walk_expression(ctx, p);
-                }
-            }
             break;
 
         case AST_NODE_REST_ELEMENT:
@@ -933,20 +1018,50 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
 
         case AST_NODE_FIELD: {
             JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)node;
+            if (fd->computed) walk_expression(ctx, fd->key);
+            bool was_field = ctx->in_field_initializer;
+            ctx->in_field_initializer = true;
             walk_expression(ctx, fd->value);
+            ctx->in_field_initializer = was_field;
+            break;
+        }
+
+        case JS_AST_NODE_STATIC_BLOCK: {
+            bool was_static = ctx->in_static_init;
+            ctx->in_static_init = true;
+            walk_statement(ctx, ((JsStaticBlockNode*)node)->body);
+            ctx->in_static_init = was_static;
             break;
         }
 
         case JS_AST_NODE_WITH_STATEMENT: {
-            // v17: 'with' statements are forbidden in strict mode
+            JsWithStatementNode* statement = (JsWithStatementNode*)node;
             if (ctx->in_strict) {
                 ee_error(ctx, node, "Strict mode code may not include a with statement");
             }
+            // with accepts Statement, excluding declarations and Annex B labelled functions.
+            JsAstNode* body = statement->body;
+            while (body && body->node_type == JS_AST_NODE_LABELED_STATEMENT)
+                body = ((JsLabeledStatementNode*)body)->body;
+            if (body && (body->node_type == AST_NODE_CLASS || body->node_type == AST_NODE_FUNC ||
+                    (body->node_type == AST_NODE_VAR_STAM && ((JsVariableDeclarationNode*)body)->kind != JS_VAR_VAR)))
+                ee_error(ctx, body, "Declaration cannot be the body of a with statement");
+            walk_expression(ctx, statement->object);
+            walk_statement(ctx, statement->body);
             break;
         }
 
         case JS_AST_NODE_LABELED_STATEMENT: {
             JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
+            // labels have identifier restrictions even when the labelled statement is empty.
+            if (ls->label) {
+                JsIdentifierNode identifier = {};
+                identifier.node_type = AST_NODE_IDENT;
+                identifier.source_span = {node->source_span.start_byte, node->source_span.start_byte + (uint32_t)ls->label_len};
+                identifier.name = name_pool_create_len(ctx->tp->name_pool, ls->label, ls->label_len);
+                if (!identifier.name) ee_error(ctx, node, "Cannot retain statement label");
+                else check_identifier_reserved(ctx, (JsAstNode*)&identifier, false);
+            }
             // v17: labeled class/lexical declarations are SyntaxError
             if (ls->body) {
                 if (ls->body->node_type == AST_NODE_CLASS) {
@@ -962,11 +1077,11 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                 // (for continue target validation per ContainsUndefinedContinueTarget)
                 // chained labels share the underlying iteration's continue target.
                 AstNode* target = ls->body;
-                while (target->node_type == JS_AST_NODE_LABELED_STATEMENT)
+                while (target && target->node_type == JS_AST_NODE_LABELED_STATEMENT)
                     target = ((JsLabeledStatementNode*)target)->body;
-                bool is_iteration = target->node_type == AST_NODE_LOOP ||
+                bool is_iteration = target && (target->node_type == AST_NODE_LOOP ||
                                     target->node_type == AST_NODE_FOR_IN_STAM ||
-                                    target->node_type == AST_NODE_FOR_OF_STAM;
+                                    target->node_type == AST_NODE_FOR_OF_STAM);
                 int label_mark = ee_name_ledger_mark(&ctx->names);
                 if (ls->label) {
                     uint8_t kind = EARLY_ERROR_NAME_LABEL;

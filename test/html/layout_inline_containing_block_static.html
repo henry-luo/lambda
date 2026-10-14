@@ -1,0 +1,10 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+body { margin: 0; font: 20px/1 Ahem; }
+.outer { width: 200px; margin-top: 40px; padding-left: 30px; }
+.cb { position: relative; }
+.atomic { display: inline-block; }
+custom-abs, .known { position: absolute; width: 20px; height: 10px; background: green; }
+</style>
+<div id="result" class="outer">Z <span class="cb">X<br><i class="atomic">X<custom-abs id="custom"></custom-abs><span class="known" id="known"></span><custom-abs id="block" style="display: block"></custom-abs></i></span></div>

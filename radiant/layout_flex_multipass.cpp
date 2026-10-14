@@ -1482,12 +1482,18 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     float text_x = text_position.x;
                     float text_y = text_position.y;
 
-                    lycon->line.left = text_x;
-                    lycon->line.right = text_x + effective_text_width;
-                    lycon->line.advance_x = text_x;
                     lycon->block.advance_y = text_y;
                     lycon->block.max_width = effective_text_width;
-                    lycon->line.is_line_start = true;
+                    // each anonymous item starts a new block context, even
+                    // when an earlier element item consumed the parent's line.
+                    layout_setup_text_indent(lycon, flex_container, effective_text_width);
+                    line_init(lycon, text_x, text_x + effective_text_width);
+                    ViewElement* text_item = flex_find_anonymous_text_item(flex, text_child->as_text());
+                    if (text_item) {
+                        text_item->fi->anonymous_text_origin_x = text_x;
+                        text_item->fi->anonymous_text_origin_y = text_y;
+                        text_item->fi->has_anonymous_text_origin = true;
+                    }
 
                     layout_flow_node(lycon, text_child);
 
@@ -1510,7 +1516,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     }
 
                     if (!lycon->line.is_line_start) {
-                        line_break(lycon);
+                        line_break(lycon, true);
                     }
                 }
             }
@@ -1528,14 +1534,8 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     LayoutTextRun run = layout_prepare_text_run(
                         text, strlen(text), LAYOUT_TEXT_RUN_TRIM);
                     if (run.length > 0) {
-                        bool text_is_anonymous_flex_item = false;
-                        for (int i = 0; i < flex->item_count; i++) {
-                            ViewElement* item = lam::view_as_element(flex->flex_items[i]);
-                            if (flex_item_contains_anonymous_text(item, child->as_text())) {
-                                text_is_anonymous_flex_item = true;
-                                break;
-                            }
-                        }
+                        bool text_is_anonymous_flex_item =
+                            flex_find_anonymous_text_item(flex, child->as_text()) != nullptr;
                         if (!text_is_anonymous_flex_item) {
                             TextIntrinsicWidths widths = layout_measure_text_intrinsic_widths(
                                 lycon, run.text, run.length,

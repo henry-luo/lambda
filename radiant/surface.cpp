@@ -888,6 +888,37 @@ void image_surface_adopt_pixels(ImageSurface* img_surface, void* pixels) {
     img_surface->pixels = pixels;
 }
 
+bool image_surface_trim_transparent_margin(ImageSurface* surface, float* offset_x, float* offset_y) {
+    if (offset_x) *offset_x = 0.0f;
+    if (offset_y) *offset_y = 0.0f;
+    if (!surface || !surface->pixels || !surface->owned_pixels || surface->pixels != surface->owned_pixels ||
+        surface->snapshot_refs || surface->decoded_width || surface->decoded_height ||
+        surface->width <= 0 || surface->height <= 0 || surface->width > INT_MAX / 4 ||
+        surface->pitch < surface->width * 4) return false;
+    size_t left = (size_t)surface->width, top = (size_t)surface->height, right = 0, bottom = 0;
+    for (size_t row = 0; row < (size_t)surface->height; row++) {
+        const uint32_t* pixels = (const uint32_t*)((const uint8_t*)surface->pixels + row * surface->pitch);
+        for (size_t column = 0; column < (size_t)surface->width; column++) if (pixels[column] >> 24) {
+            left = min(left, column); top = min(top, row);
+            right = max(right, column + 1); bottom = max(bottom, row + 1);
+        }
+    }
+    if (!right || (left == 0 && top == 0 && right == (size_t)surface->width && bottom == (size_t)surface->height))
+        return false;
+    size_t columns = right - left, rows = bottom - top, stride = columns * sizeof(uint32_t);
+    // row-wise compaction preserves every covered sample without another budgeted allocation.
+    for (size_t row = 0; row < rows; row++)
+        memmove((uint8_t*)surface->pixels + row * stride,
+            (const uint8_t*)surface->pixels + (row + top) * surface->pitch + left * sizeof(uint32_t), stride);
+    surface->width = (int)columns; // INT_CAST_OK: cropped physical pixel column count.
+    surface->height = (int)rows; // INT_CAST_OK: cropped physical pixel row count.
+    surface->pitch = (int)stride; // INT_CAST_OK: cropped buffer byte stride.
+    surface->encoded_width = surface->width; surface->encoded_height = surface->height;
+    if (offset_x) *offset_x = (float)left;
+    if (offset_y) *offset_y = (float)top;
+    return true;
+}
+
 static bool image_surface_can_promote_decode(ImageSurface* img, int target_w, int target_h) {
     if (!img || !img->pixels) return true;
     if (img->format != IMAGE_FORMAT_PNG && img->format != IMAGE_FORMAT_JPEG) return false;

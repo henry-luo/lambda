@@ -8,6 +8,11 @@ static bool validator_is_map_kind(ConstItem item) {
     return item.type_id() == LMD_TYPE_MAP || item.type_id() == LMD_TYPE_VMAP;
 }
 
+static bool validator_is_element_kind(ConstItem item) {
+    // D7.4.5v2: archive-backed elements have the element contract despite their virtual storage tag.
+    return item.type_id() == LMD_TYPE_ELEMENT || item.type_id() == LMD_TYPE_VELMT;
+}
+
 // Note: Helper functions (should_stop_for_timeout, should_stop_for_max_errors,
 // init_validation_session) are now in validate_helpers.cpp
 
@@ -420,7 +425,7 @@ static ValidationResult* validate_against_base_payload(SchemaValidator* validato
     if (base_type->type_id == LMD_TYPE_ELEMENT) {
         if (base_type == &TYPE_ELMT) {
             // Generic element type - just check if item is an element
-            if (item.type_id() == LMD_TYPE_ELEMENT) {
+            if (validator_is_element_kind(item)) {
                 result->valid = true;
             } else {
                 add_type_mismatch_error(result, validator, "element", item.type_id());
@@ -531,7 +536,7 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
             return validation_verdict(validator_is_map_kind(item));
         }
         if (fast_base == &TYPE_ELMT) {
-            return validation_verdict(item.type_id() == LMD_TYPE_ELEMENT);
+            return validation_verdict(validator_is_element_kind(item));
         }
         if (fast_base->type_id == LMD_TYPE_MAP) {
             return validate_against_map_type(validator, item, (TypeMap*)fast_base);
@@ -1038,7 +1043,7 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
             if (type == &TYPE_ELMT) {
                 // Generic element type - just check if item is an element
                 result = create_validation_result(validator->get_pool());
-                if (item.type_id() == LMD_TYPE_ELEMENT) {
+                if (validator_is_element_kind(item)) {
                     result->valid = true;
                 } else {
                     add_type_mismatch_error(result, validator, "element", item.type_id());

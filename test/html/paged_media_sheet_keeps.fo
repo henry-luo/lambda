@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" font-family="Arial" font-size="7.5pt" line-height="15pt" orphans="1" widows="1" linefeed-treatment="preserve" white-space-treatment="preserve">
+  <fo:layout-master-set><fo:simple-page-master master-name="sheet" page-width="180pt" page-height="75pt" margin="7.5pt"><fo:region-body column-count="2" column-gap="15pt"/></fo:simple-page-master></fo:layout-master-set>
+  <fo:page-sequence master-reference="sheet" force-page-count="no-force"><fo:flow flow-name="xsl-region-body">
+    <fo:block background-color="#eeeeff">Lead
+Lead</fo:block>
+    <fo:block keep-together.within-page="always" background-color="#ddffdd"><fo:block>A
+B
+C
+D
+E
+F
+G</fo:block></fo:block>
+    <fo:block break-before="page" background-color="#ffe0cc">Tail
+Tail</fo:block>
+  </fo:flow></fo:page-sequence>
+</fo:root>

@@ -326,6 +326,7 @@ Vector Arithmetic:
 | `[1, 2] + [3, 4]` | `[4, 6]` | element-wise |
 | `[1, 2, 3] eq 2` | `[false, true, false]` | element-wise comparison: `eq ne lt le gt ge` |
 | `[10, 20, 30][[1, 2, 3] gt 1]` | `[20, 30]` | mask indexing; `sum(mask)` counts |
+
 Use `++` for list/array concat: `[1,2] ++ [3,4] = [1,2,3,4]`.
 
 ## Pipe Expressions

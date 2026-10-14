@@ -167,6 +167,15 @@ bool flex_item_contains_anonymous_text(ViewElement* item, DomText* text) {
     return item->fi->anonymous_text == text;
 }
 
+ViewElement* flex_find_anonymous_text_item(FlexContainerLayout* flex, DomText* text) {
+    if (!flex || !text) return nullptr;
+    for (int index = 0; index < flex->item_count; index++) {
+        ViewElement* item = lam::view_as_element(flex->flex_items[index]);
+        if (flex_item_contains_anonymous_text(item, text)) return item;
+    }
+    return nullptr;
+}
+
 static bool flex_text_has_collapsible_edge(DomText* text, bool trailing) {
     if (!text || white_space_preserves_space_advance(get_white_space_value(
             static_cast<DomNode*>(text)))) {
@@ -210,6 +219,19 @@ static bool measure_anonymous_flex_text_run(LayoutContext* lycon,
               lycon, run.text, run.length, text_transform, CSS_VALUE_NONE,
               item->blk->white_space, item->blk->overflow_wrap,
               item->blk->word_break);
+    if (!is_whitespace && item->fi && item->fi->anonymous_text == text) {
+        ViewBlock* container = layout_nearest_block_ancestor(item->parent_view());
+        if (container) {
+            BlockContext saved_block = lycon->block;
+            // percentage indentation has a zero intrinsic basis; fixed terms
+            // still belong to the anonymous block's first unbreakable segment.
+            layout_setup_text_indent(lycon, container, 0.0f);
+            layout_intrinsic_apply_first_line_indent(lycon->block.text_indent,
+                widths.first_segment_min, widths.remaining_min_content,
+                &widths.max_content, &widths.min_content);
+            lycon->block = saved_block;
+        }
+    }
     if (preserve_trailing_space && run.length > 0 &&
         flex_text_has_collapsible_edge(text, true) &&
         !white_space_preserves_space_advance(item->blk->white_space)) {
@@ -423,6 +445,11 @@ static void layout_anonymous_flex_text(ViewElement* item, LayoutContext* lycon,
     if (!runs) return;
 
     LayoutContext saved_context = *lycon;
+    if (!item->fi->has_anonymous_text_origin) {
+        item->fi->anonymous_text_origin_x = item->x;
+        item->fi->anonymous_text_origin_y = item->y;
+        item->fi->has_anonymous_text_origin = true;
+    }
     lycon->view = lam::up(static_cast<View*>(item));
     lycon->block.content_width = item->width;
     lycon->block.content_height = item->height;
@@ -519,16 +546,9 @@ void apply_anonymous_flex_text_geometry(FlexContainerLayout* flex_layout) {
             preserve_text_align = only_text_and_breaks && has_forced_break &&
                 (text_align == CSS_VALUE_CENTER || text_align == CSS_VALUE_RIGHT);
         }
-        float dx = preserve_text_align ? 0.0f : item->x - first_text->x;
-        float text_top = item->y;
-        if (item->blk->writing_mode == WM_HORIZONTAL_TB && first_text->font &&
-            first_text->font->font_handle) {
-            // retain the line box's leading instead of snapping the glyph cell
-            // to the flex item's top edge.
-            text_top += item->fi->baseline_offset -
-                font_get_rendering_ascender(first_text->font->font_handle);
-        }
-        float dy = preserve_text_align ? 0.0f : text_top - first_text->y;
+        // translate from the line origin, retaining both leading and authored indentation.
+        float dx = preserve_text_align ? 0.0f : item->x - item->fi->anonymous_text_origin_x;
+        float dy = preserve_text_align ? 0.0f : item->y - item->fi->anonymous_text_origin_y;
         for (FlexAnonymousTextRun* run = item->fi->anonymous_text_runs;
              run; run = run->next) {
             ViewText* text = run->text
@@ -538,6 +558,10 @@ void apply_anonymous_flex_text_geometry(FlexContainerLayout* flex_layout) {
             text->y += dy;
             layout_shift_text_rects(text, dx, dy);
         }
+        // later baseline passes translate from the already published origin,
+        // so the same item movement cannot be applied twice.
+        item->fi->anonymous_text_origin_x = item->x;
+        item->fi->anonymous_text_origin_y = item->y;
     }
 }
 

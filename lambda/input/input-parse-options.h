@@ -16,6 +16,8 @@ typedef struct InputParseOptions {
     const char* const* tex_raw_commands;  // adapter commands whose arguments stay unexpanded
     int tex_raw_command_count;
     bool xml_preserve_whitespace; // xml text fragments can carry meaningful leading/trailing spaces.
+    const char* const* tex_chaptered;  // class profiles whose kernel defines \chapter
+    int tex_chaptered_count;
 } InputParseOptions;
 
 #endif

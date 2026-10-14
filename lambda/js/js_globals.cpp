@@ -1496,7 +1496,7 @@ extern "C" Item js_performance_observer_new(Item callback) {
     return observer;
 }
 
-static double js_date_time_clip(double value) {
+extern "C" double js_date_time_clip(double value) {
     if (isnan(value) || isinf(value) || fabs(value) > 8.64e15) return NAN;
     double clipped = value < 0 ? -floor(-value) : floor(value);
     return clipped + 0.0;
@@ -1510,13 +1510,13 @@ static double js_date_number_to_double(Item value) {
     return NAN;
 }
 
-static Item js_date_to_number_status(Item value, double* out) {
+static Item js_date_to_number_status(Item value, double* out, Item (*number)(Item) = js_to_number) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_UNDEFINED || value.item == ITEM_JS_UNDEFINED) {
         *out = NAN;
         return ItemNull;
     }
-    JS_ASSIGN_OR_RETURN(num, js_to_number(value));
+    JS_ASSIGN_OR_RETURN(num, number(value));
     *out = js_date_number_to_double(num);
     return ItemNull;
 }
@@ -1802,6 +1802,22 @@ static Item js_date_get_time_value(Item date_obj, bool* found) {
     return js_map_shape_lookup_ext(date_obj.map, "__time__", 8, found);
 }
 
+static const JsDateOps js_date_default_ops = {
+    js_to_number, js_date_get_time_value,
+    [](Item owner, double ms) {
+        RootFrame roots(1);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> object(roots, owner);
+        Item key = js_name_item("__time__");
+        Item value = push_d(ms);
+        Item result = js_set_key_default(object.get(), key, value);
+        return item_is_error(result) ? result : push_d(ms);
+    },
+    [](bool range, const char* message) {
+        return range ? js_throw_range_error(message) : js_throw_type_error(message);
+    }
+};
+
 extern "C" Item js_date_new(void) {
     RootFrame roots(2);
     Rooted<Item> object_root(roots, js_new_object_with_class(JS_CLASS_DATE));
@@ -1945,24 +1961,30 @@ extern "C" Item js_date_utc(Item args_array) {
         parts[i] = js_date_number_to_double(num);
     }
 
-    double ms = NAN;
-    bool finite_parts = true;
+    return push_d(js_date_components_time(parts, false, true));
+}
+
+static double js_date_make_local_setter_ms(struct tm* tm, int old_millis);
+
+extern "C" double js_date_components_time(double* parts, bool local, bool relative_year) {
     for (int i = 0; i < 7; i++) {
-        if (isnan(parts[i]) || isinf(parts[i])) {
-            finite_parts = false;
-            break;
-        }
+        if (!isfinite(parts[i])) return NAN;
         parts[i] = js_date_to_integer(parts[i]);
     }
-    if (finite_parts) {
-        double year = parts[0];
-        if (year >= 0.0 && year <= 99.0) year += 1900.0;
-        double day = js_date_make_day_double(year, parts[1], parts[2]);
-        double time = js_date_make_time_double(parts[3], parts[4], parts[5], parts[6]);
-        ms = js_date_make_date_double(day, time);
+    double year = parts[0];
+    if (relative_year && year >= 0.0 && year <= 99.0) year += 1900.0;
+    double day = js_date_make_day_double(year, parts[1], parts[2]);
+    double time = js_date_make_time_double(parts[3], parts[4], parts[5], parts[6]);
+    double ms = js_date_make_date_double(day, time);
+    if (local && isfinite(ms)) {
+        // normalize in double before narrowing to tm; huge input components must not overflow int.
+        if (fabs(ms) > 8.64e15 + 86400000.0) return NAN;
+        time_t seconds = js_date_seconds_from_ms(ms);
+        struct tm civil;
+        gmtime_r(&seconds, &civil);
+        ms = js_date_make_local_setter_ms(&civil, js_date_millis_from_ms(ms, seconds));
     }
-    ms = js_date_time_clip(ms);
-    return push_d(ms);
+    return js_date_time_clip(ms);
 }
 
 // v11: Date instance method dispatch
@@ -1970,37 +1992,37 @@ extern "C" Item js_date_utc(Item args_array) {
 //   4=getHours, 5=getMinutes, 6=getSeconds, 7=getMilliseconds,
 //   8=toISOString, 9=toLocaleDateString
 extern "C" Item js_date_method(Item date_obj, int method_id) {
+    return js_date_method_with_ops(date_obj, method_id, &js_date_default_ops);
+}
+
+extern "C" Item js_date_method_with_ops(Item date_obj, int method_id, const JsDateOps* ops) {
     // extract epoch-ms from the _time property
     bool has_time = false;
-    Item time_val = js_date_get_time_value(date_obj, &has_time);
+    Item time_val = ops->read(date_obj, &has_time);
 
     // guard: if no _time property, receiver is not a Date object — TypeError per ES spec
     TypeId tv_type = get_type_id(time_val);
     if (!has_time || (tv_type != LMD_TYPE_FLOAT && tv_type != LMD_TYPE_INT && tv_type != LMD_TYPE_INT64)) {
         // The transpiler routes .toISOString() here unconditionally;
         // non-Date objects may have their own methods via prototype chain.
-        if (method_id == 8) { // toISOString
+        if (ops == &js_date_default_ops && method_id == 8) { // toISOString
             Item mk = js_name_item("toISOString", 11);
             Item fn = js_get_reference(date_obj, mk);
             if (js_is_callable(fn)) {
                 return js_call_function(fn, date_obj, nullptr, 0);
             }
         }
-        return js_throw_type_error("this is not a Date object");
+        return ops->error(false, "this is not a Date object");
     }
 
     double ms = js_date_number_to_double(time_val);
     if (method_id == 0) { // getTime
-        static double gt_buf[16];
-        static int gt_idx = 0;
-        double* fp = &gt_buf[gt_idx++ % 16];
-        *fp = ms;
-        return lambda_float_ptr_to_item(fp);
+        return push_d(ms);
     }
     // NaN (Invalid Date) handling
     if (isnan(ms)) {
         if (method_id == 8) // toISOString: throw RangeError for Invalid Date
-            return js_throw_range_error("Invalid time value");
+            return ops->error(true, "Invalid time value");
         if (method_id == 17 || method_id == 9) // toString, toLocaleDateString
             return js_name_item("Invalid Date", 12);
         return push_d(NAN);
@@ -2134,44 +2156,16 @@ JS_FORWARD_STATIC_EXPRESSION(bool, js_process_cache_is_empty, (Item value),
 //   33=setUTCHours, 34=setUTCMinutes, 35=setUTCSeconds, 36=setUTCMilliseconds
 // 40=getDay, 41=getUTCDay, 42=getTimezoneOffset, 43=valueOf, 44=toJSON,
 // 45=toUTCString, 46=toDateString, 47=toTimeString
-static void js_date_apply_setter_components(struct tm* tm, int method_id,
+static void js_date_apply_setter_components(double* parts, int method_id,
         double v0, double v1, double v2, double v3,
-        Item arg1, Item arg2, Item arg3, int* old_millis) {
-    // local and UTC Date setters use one field mapping; only the time-zone
-    // conversion around this mapping differs.
-    int setter_id = method_id >= 30 ? method_id - 9 : method_id;
-    switch (setter_id) {
-        case 21:
-            tm->tm_year = (int)v0 - 1900;
-            if (arg1.item != ItemError.item) tm->tm_mon = (int)v1;
-            if (arg2.item != ItemError.item) tm->tm_mday = (int)v2;
-            break;
-        case 22:
-            tm->tm_mon = (int)v0;
-            if (arg1.item != ItemError.item) tm->tm_mday = (int)v1;
-            break;
-        case 23:
-            tm->tm_mday = (int)v0;
-            break;
-        case 24:
-            tm->tm_hour = (int)v0;
-            if (arg1.item != ItemError.item) tm->tm_min = (int)v1;
-            if (arg2.item != ItemError.item) tm->tm_sec = (int)v2;
-            if (arg3.item != ItemError.item) *old_millis = (int)v3;
-            break;
-        case 25:
-            tm->tm_min = (int)v0;
-            if (arg1.item != ItemError.item) tm->tm_sec = (int)v1;
-            if (arg2.item != ItemError.item) *old_millis = (int)v2;
-            break;
-        case 26:
-            tm->tm_sec = (int)v0;
-            if (arg1.item != ItemError.item) *old_millis = (int)v1;
-            break;
-        case 27:
-            *old_millis = (int)v0;
-            break;
-    }
+        Item arg1, Item arg2, Item arg3) {
+    // setter groups replace contiguous calendar fields; retain doubles until normalization.
+    int first = method_id >= 30 ? method_id - 30 : method_id - 21;
+    const int widths[] = {3, 2, 1, 4, 3, 2, 1};
+    const double values[] = {v0, v1, v2, v3};
+    const Item arguments[] = {ItemNull, arg1, arg2, arg3};
+    for (int i = 0; i < widths[first]; i++)
+        if (arguments[i].item != ItemError.item) parts[first + i] = values[i];
 }
 
 static double js_date_make_local_setter_ms(struct tm* tm, int old_millis) {
@@ -2195,10 +2189,23 @@ static double js_date_make_local_setter_ms(struct tm* tm, int old_millis) {
 }
 
 extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg1, Item arg2, Item arg3) {
-    if (method_id == 43 && get_type_id(date_obj) == LMD_TYPE_STRING) {
+    return js_date_setter_with_ops(date_obj, method_id, arg0, arg1, arg2, arg3, &js_date_default_ops);
+}
+
+extern "C" Item js_date_setter_with_ops(Item date_obj, int method_id,
+        Item arg0, Item arg1, Item arg2, Item arg3, const JsDateOps* ops) {
+    RootFrame roots(5);
+    if (!roots.valid()) return ItemError;
+    uint64_t homes[4] = {};
+    Rooted<Item> owner(roots, date_obj),
+        a0(roots, lambda_item_adopt_scalar_home(arg0, &homes[0])),
+        a1(roots, lambda_item_adopt_scalar_home(arg1, &homes[1])),
+        a2(roots, lambda_item_adopt_scalar_home(arg2, &homes[2])),
+        a3(roots, lambda_item_adopt_scalar_home(arg3, &homes[3]));
+    if (ops == &js_date_default_ops && method_id == 43 && get_type_id(date_obj) == LMD_TYPE_STRING) {
         return date_obj;
     }
-    if (method_id == 43 && get_type_id(date_obj) == LMD_TYPE_MAP) {
+    if (ops == &js_date_default_ops && method_id == 43 && get_type_id(date_obj) == LMD_TYPE_MAP) {
         bool own_value_of = false;
         Item fn = js_map_shape_lookup_ext(date_obj.map, "valueOf", 7, &own_value_of);
         if (own_value_of && js_is_callable(fn)) {
@@ -2206,16 +2213,15 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
         }
     }
 
-    Item key = js_name_item("__time__");
     bool has_time = false;
     // Date's internal slot is intentionally hidden from ordinary property lookup;
     // setters must read the same own storage used by Date getters and constructors.
-    Item time_val = js_date_get_time_value(date_obj, &has_time);
+    Item time_val = ops->read(owner.get(), &has_time);
 
     // guard: if no _time property, receiver is not a Date object — TypeError per ES spec
     TypeId tv_type = get_type_id(time_val);
     if (!has_time || (tv_type != LMD_TYPE_FLOAT && tv_type != LMD_TYPE_INT && tv_type != LMD_TYPE_INT64)) {
-        if (method_id == 43) { // valueOf — non-Date: check own/prototype valueOf first
+        if (ops == &js_date_default_ops && method_id == 43) { // valueOf — non-Date: check own/prototype valueOf first
             // The transpiler unconditionally routes *.valueOf() here, so we must
             // handle non-Date objects by looking up their own valueOf function.
             Item vo_key = js_name_item("valueOf", 7);
@@ -2225,10 +2231,10 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
             }
             return date_obj;
         }
-        if (method_id == 44) { // toJSON — non-Date: check own/prototype toJSON first
+        if (ops == &js_date_default_ops && method_id == 44) { // toJSON — non-Date: check own/prototype toJSON first
             return js_date_to_json(date_obj);
         }
-        return js_throw_type_error("this is not a Date object");
+        return ops->error(false, "this is not a Date object");
     }
 
     double ms = js_date_number_to_double(time_val);
@@ -2239,9 +2245,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
 
     auto store_ms = [&](double new_ms) -> Item {
         new_ms = js_date_time_clip(new_ms);
-        Item new_time = push_d(new_ms);
-        js_set_key_default(date_obj, key, new_time);
-        return new_time;
+        return ops->store(owner.get(), new_ms);
     };
 
     // getDay / getUTCDay / getTimezoneOffset / valueOf / toJSON / toUTCString / toDateString / toTimeString
@@ -2249,25 +2253,23 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
         if (method_id == 51) { // setYear — Annex B
             // ES spec: ToNumber(symbol) throws TypeError
             if (js_is_symbol(arg0)) {
-                return js_throw_type_error("Cannot convert a Symbol value to a number");
+                return ops->error(false, "Cannot convert a Symbol value to a number");
             }
             double y = NAN;
-            JS_ASSIGN_OR_RETURN(y_status, js_date_to_number_status(arg0, &y));
-            if (isnan(y)) return store_ms(NAN);
-            int iy = (int)y;
-            // ES Annex B §B.2.4.1: if 0 ≤ y ≤ 99, year = y + 1900
-            if (iy >= 0 && iy <= 99) iy += 1900;
-            // ES Annex B §B.2.4.2 step 2: if t is NaN, let t be +0
+            JS_ASSIGN_OR_RETURN(y_status, js_date_to_number_status(a0.get(), &y, ops->number));
+            if (!isfinite(y)) return store_ms(NAN);
+            y = js_date_to_integer(y);
+            if (y >= 0 && y <= 99) y += 1900;
             bool base_was_nan = isnan(ms);
             double base_ms = base_was_nan ? 0.0 : ms;
             time_t base_secs = js_date_seconds_from_ms(base_ms);
-            int old_millis = js_date_millis_from_ms(base_ms, base_secs);
             struct tm tm;
             if (base_was_nan) gmtime_r(&base_secs, &tm);
             else js_date_localtime_minute(base_ms, &tm);
-            tm.tm_year = iy - 1900;
-            double new_ms = js_date_make_local_setter_ms(&tm, old_millis);
-            return store_ms(new_ms);
+            double parts[] = {y, (double)tm.tm_mon, (double)tm.tm_mday,
+                (double)tm.tm_hour, (double)tm.tm_min, (double)tm.tm_sec,
+                (double)js_date_millis_from_ms(base_ms, base_secs)};
+            return store_ms(js_date_components_time(parts, true, false));
         }
         // NaN (Invalid Date) handling
         if (isnan(ms)) {
@@ -2341,7 +2343,7 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
 
     if (method_id == 20) { // setTime
         double new_ms = NAN;
-        JS_ASSIGN_OR_RETURN(new_ms_status, js_date_to_number_status(arg0, &new_ms));
+        JS_ASSIGN_OR_RETURN(new_ms_status, js_date_to_number_status(a0.get(), &new_ms, ops->number));
         return store_ms(new_ms);
     }
 
@@ -2351,74 +2353,36 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
     // and Symbol TypeError throws happen in the correct order.
     if (method_id >= 21 && method_id <= 36) {
         double v0 = NAN;
-        JS_ASSIGN_OR_RETURN(v0_status, js_date_to_number_status(arg0, &v0));
+        JS_ASSIGN_OR_RETURN(v0_status, js_date_to_number_status(a0.get(), &v0, ops->number));
 
         double v1 = NAN;
         if (is_present(arg1)) {
-            JS_ASSIGN_OR_RETURN(v1_status, js_date_to_number_status(arg1, &v1));
+            JS_ASSIGN_OR_RETURN(v1_status, js_date_to_number_status(a1.get(), &v1, ops->number));
         }
         double v2 = NAN;
         if (is_present(arg2)) {
-            JS_ASSIGN_OR_RETURN(v2_status, js_date_to_number_status(arg2, &v2));
+            JS_ASSIGN_OR_RETURN(v2_status, js_date_to_number_status(a2.get(), &v2, ops->number));
         }
         double v3 = NAN;
         if (is_present(arg3)) {
-            JS_ASSIGN_OR_RETURN(v3_status, js_date_to_number_status(arg3, &v3));
+            JS_ASSIGN_OR_RETURN(v3_status, js_date_to_number_status(a3.get(), &v3, ops->number));
         }
 
-        // ES spec: if any required arg is NaN, result is NaN
-        if (isnan(v0)) return store_ms(NAN);
-        if (is_present(arg1) && isnan(v1)) return store_ms(NAN);
-        if (is_present(arg2) && isnan(v2)) return store_ms(NAN);
-        if (is_present(arg3) && isnan(v3)) return store_ms(NAN);
-
-        // ES spec: setFullYear/setUTCFullYear — if date is NaN, use +0
+        // invalid receivers preserve callback writes except the full-year setters, which recover from +0.
         bool date_was_nan = isnan(ms);
-        if ((method_id == 21 || method_id == 30) && date_was_nan) ms = 0.0;
-        // all other setters: if t (original [[DateValue]]) is NaN, return NaN without writing
-        // (ToNumber args may have side effects that change the date, per spec step 8 check uses t)
-        if (isnan(ms)) {
-            return push_d(NAN);
-        }
-
-        // local setters (21-27)
-        if (method_id >= 21 && method_id <= 27) {
-            time_t secs = js_date_seconds_from_ms(ms);
-            int old_millis = js_date_millis_from_ms(ms, secs);
-            struct tm tm;
-            if (date_was_nan && method_id == 21) gmtime_r(&secs, &tm);
-            else {
-                struct tm offset_tm;
-                localtime_r(&secs, &offset_tm);
-                int offset_min = -(int)(get_tm_gmtoff(&offset_tm) / 60);
-                double local_civil_ms = ms - (double)offset_min * 60000.0;
-                time_t local_secs = js_date_seconds_from_ms(local_civil_ms);
-                old_millis = js_date_millis_from_ms(local_civil_ms, local_secs);
-                gmtime_r(&local_secs, &tm);
-            }
-
-            js_date_apply_setter_components(&tm, method_id, v0, v1, v2, v3,
-                arg1, arg2, arg3, &old_millis);
-            double new_ms = js_date_make_local_setter_ms(&tm, old_millis);
-            return store_ms(new_ms);
-        }
-
-        // UTC setters (30-36)
-        if (method_id >= 30 && method_id <= 36) {
-            time_t secs = js_date_seconds_from_ms(ms);
-            int old_millis = js_date_millis_from_ms(ms, secs);
-            struct tm utc;
-            gmtime_r(&secs, &utc);
-
-            js_date_apply_setter_components(&utc, method_id, v0, v1, v2, v3,
-                arg1, arg2, arg3, &old_millis);
-            time_t new_secs = timegm(&utc);
-            double new_ms = new_secs == (time_t)-1
-                ? js_date_make_utc_ms_from_parts(utc.tm_year + 1900, utc.tm_mon, utc.tm_mday,
-                    utc.tm_hour, utc.tm_min, utc.tm_sec, old_millis, false)
-                : (double)new_secs * 1000.0 + (double)old_millis;
-            return store_ms(new_ms);
-        }
+        bool recover = method_id == 21 || method_id == 30;
+        if (date_was_nan && !recover) return push_d(NAN);
+        if (date_was_nan) ms = 0;
+        bool local = method_id < 30;
+        time_t seconds = js_date_seconds_from_ms(ms);
+        struct tm tm;
+        if (local && !date_was_nan) js_date_localtime_minute(ms, &tm);
+        else gmtime_r(&seconds, &tm);
+        double parts[] = {(double)tm.tm_year + 1900, (double)tm.tm_mon, (double)tm.tm_mday,
+            (double)tm.tm_hour, (double)tm.tm_min, (double)tm.tm_sec,
+            (double)js_date_millis_from_ms(ms, seconds)};
+        js_date_apply_setter_components(parts, method_id, v0, v1, v2, v3, arg1, arg2, arg3);
+        return store_ms(js_date_components_time(parts, local, false));
     }
 
     return ItemNull;
@@ -2429,85 +2393,28 @@ extern "C" Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg
 // (for side effects), THEN check NaN, THEN compute final time. Exceptions from any
 // ToNumber must propagate immediately and halt remaining coercions.
 extern "C" Item js_date_new_multi(Item args_array) {
-    int len = (int)js_array_length(args_array);
-
-    auto coerce = [&](int idx, bool* present_out, double* out) -> Item {
-        if (idx >= len) { *present_out = false; *out = 0.0; return ItemNull; }
-        Item val = js_elements_get_int(args_array, idx);
-        // ES treats only "missing" as not-present. Explicit `undefined` is present (and ToNumber→NaN).
-        // js_elements_get_int returns ItemNull (== {item=0}) for out-of-bounds; here idx<len so it's
-        // a real element. But Lambda's array storage may give back undefined for holes — accept that.
-        *present_out = true;
-        JS_ASSIGN_OR_RETURN(num, js_to_number(val));
-        TypeId t = get_type_id(num);
-        if (t == LMD_TYPE_FLOAT) *out = it2d(num);
-        else if (t == LMD_TYPE_INT) *out = (double)it2i(num);
-        else if (t == LMD_TYPE_INT64) *out = (double)it2l(num);
-        else *out = NAN;
-        return ItemNull;
-    };
-
-    bool p_year=false, p_month=false, p_day=false, p_hour=false, p_min=false, p_sec=false, p_ms=false;
-    double y = NAN, m = NAN, d = NAN, h = NAN, mi = NAN, s = NAN, ms = NAN;
-    Item status = coerce(0, &p_year, &y);  if (item_is_error(status)) return status;
-    status = coerce(1, &p_month, &m);      if (item_is_error(status)) return status;
-    status = coerce(2, &p_day, &d);        if (item_is_error(status)) return status;
-    status = coerce(3, &p_hour, &h);       if (item_is_error(status)) return status;
-    status = coerce(4, &p_min, &mi);       if (item_is_error(status)) return status;
-    status = coerce(5, &p_sec, &s);        if (item_is_error(status)) return status;
-    status = coerce(6, &p_ms, &ms);        if (item_is_error(status)) return status;
-
-    // ES spec: defaults for unsupplied args
-    if (!p_day) d = 1;
-    if (!p_hour) h = 0;
-    if (!p_min) mi = 0;
-    if (!p_sec) s = 0;
-    if (!p_ms) ms = 0;
-
-    // Build the Date object now (so we always return a Date even when time value is NaN)
-    Item obj = js_new_object_with_class(JS_CLASS_DATE);
-    Item time_key = js_name_item("__time__");
-
-    // ES spec: if any of y, m, d, h, mi, s, ms is NaN → final time value is NaN
-    double ms_val;
-    if (isnan(y) || isnan(m) || isnan(d) || isnan(h) || isnan(mi) || isnan(s) || isnan(ms)) {
-        ms_val = NAN;
-    } else {
-        // ES spec: if 0 <= ToInteger(y) <= 99, year = 1900 + ToInteger(y)
-        int iy = (int)y;
-        if (iy >= 0 && iy <= 99) iy += 1900;
-
-        double day_value = js_date_make_day_double((double)iy, js_date_to_integer(m), js_date_to_integer(d));
-        double time_value = js_date_make_time_double(js_date_to_integer(h), js_date_to_integer(mi),
-            js_date_to_integer(s), js_date_to_integer(ms));
-        double civil_ms = js_date_make_date_double(day_value, time_value);
-
-        struct tm tm = {};
-        tm.tm_year = iy - 1900;
-        tm.tm_mon = (int)js_date_to_integer(m);
-        tm.tm_mday = (int)js_date_to_integer(d);
-        tm.tm_hour = (int)js_date_to_integer(h);
-        tm.tm_min = (int)js_date_to_integer(mi);
-        tm.tm_sec = (int)js_date_to_integer(s);
-        tm.tm_isdst = -1;
-        double local_ms = js_date_mktime_ms_or_fallback(&tm, (int)js_date_to_integer(ms),
-            iy, tm.tm_mon, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
-        time_t local_secs = js_date_seconds_from_ms(local_ms);
-        struct tm local_tm;
-        localtime_r(&local_secs, &local_tm);
-        int offset_min = -(int)(get_tm_gmtoff(&local_tm) / 60);
-        ms_val = civil_ms + (double)offset_min * 60000.0;
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> arguments(roots, args_array), object(roots, ItemNull);
+    int len = (int)js_array_length(arguments.get());
+    double parts[7] = {NAN, NAN, 1, 0, 0, 0, 0};
+    for (int i = 0; i < len && i < 7; i++) {
+        JS_ASSIGN_OR_RETURN(status, js_date_to_number_status(js_elements_get_int(arguments.get(), i), &parts[i]));
     }
-    ms_val = js_date_time_clip(ms_val);
-    js_set_key_default(obj, time_key, push_d(ms_val));
-    js_date_set_instance_prototype(obj);
-    return obj;
+    double ms = js_date_components_time(parts, true, true);
+    object.set(js_new_object_with_class(JS_CLASS_DATE));
+    JS_ASSIGN_OR_RETURN(stored, js_date_default_ops.store(object.get(), ms));
+    js_date_set_instance_prototype(object.get());
+    return object.get();
 }
 
 // v20: Date.parse(string) — parse a date string, return ms since epoch
 extern "C" Item js_date_parse(Item str_item) {
-    Item str_val = js_to_string(str_item);
-    String* s = it2s(str_val);
+    JS_ASSIGN_OR_RETURN(str_val, js_to_string(str_item));
+    return js_date_parse_text(it2s(str_val));
+}
+
+extern "C" Item js_date_parse_text(String* s) {
     if (!s || s->len == 0) {
         return push_d(NAN);
     }
@@ -4335,54 +4242,62 @@ extern "C" Item js_uri_decode_equals_from_char_code(Item str_item, Item first_it
     return js_strict_equal(decoded, expected);
 }
 
-static Item js_string_from_char_code_sequence(Item source, bool typed_array) {
-    int len = typed_array ? js_typed_array_length(source) : source.array->length;
-    if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
-    char* buf = (char*)mem_alloc(len * 4 + 1, MEM_CAT_JS_RUNTIME);
-    int pos = 0;
-    for (int i = 0; i < len; i++) {
-        Item index = (Item){.item = i2it(i)};
-        Item code_item = typed_array ? js_typed_array_get(source, index)
-            : source.array->items[i];
-        Item code_value = js_from_char_code_to_uint16(code_item);
-        if (item_is_error(code_value)) {
-            mem_free(buf);
-            return code_value;
+extern "C" Item js_string_from_codes_with_ops(void* source, int64_t count, bool code_points,
+        const JsStringCodeOps* ops) {
+    if (count < 0 || count > (INT_MAX - (int64_t)sizeof(String) - 1) / 4) return ops->range_error();
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> value(roots, ItemNull);
+    StrBuf* buffer = strbuf_new_cap((size_t)count * 4 + 1);
+    if (!buffer) return ItemError;
+    for (int64_t i = 0; i < count; i++) {
+        value.set(ops->read(source, i));
+        if (!item_is_error(value.get())) value.set(ops->to_number(value.get()));
+        if (item_is_error(value.get())) { strbuf_free(buffer); return value.get(); }
+        double number = it2d(value.get());
+        if (code_points && (!isfinite(number) || trunc(number) != number || number < 0 || number > 0x10ffff)) {
+            strbuf_free(buffer); return ops->range_error();
         }
-        int code = (int)it2i(code_value);
-        if (utf_is_high_surrogate((uint32_t)code) && i + 1 < len) {
-            Item next_index = (Item){.item = i2it(i + 1)};
-            Item lo_item = typed_array ? js_typed_array_get(source, next_index)
-                : source.array->items[i + 1];
-            Item lo_value = js_from_char_code_to_uint16(lo_item);
-            if (item_is_error(lo_value)) {
-                mem_free(buf);
-                return lo_value;
-            }
-            int lo = (int)it2i(lo_value);
-            uint32_t cp = utf16_decode_pair((uint16_t)code, (uint16_t)lo);
-            if (cp != 0) {
-                pos += (int)utf8_encode_wtf8(cp, buf + pos);
-                i++; // skip the low surrogate
-                continue;
-            }
-        }
-        pos += (int)utf8_encode_wtf8((uint32_t)code, buf + pos);
+        uint32_t code = code_points ? (uint32_t)number : (uint16_t)js_to_int32(number);
+        char bytes[4];
+        size_t length = utf8_encode_wtf8(code, bytes);
+        strbuf_append_str_n(buffer, bytes, length);
     }
-    buf[pos] = '\0';
-    Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
-    mem_free(buf);
-    return result;
+    // coerce once in source order; canonicalization joins adjacent surrogate arguments afterwards.
+    if (!utf8_key_is_canonical(buffer->str, buffer->length)) {
+        StrBuf* canonical = strbuf_new_cap(buffer->length + 1);
+        if (!canonical) { strbuf_free(buffer); return ItemError; }
+        canonical->length = utf8_canonical_key(buffer->str, buffer->length, canonical->str);
+        canonical->str[canonical->length] = 0;
+        strbuf_free(buffer); buffer = canonical;
+    }
+    return js_strbuf_take_item(buffer);
+}
+static Item js_string_from_code_sequence(Item source, bool typed_array, bool code_points = false) {
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, source);
+    int64_t count = typed_array ? js_typed_array_length(source) : source.array->length;
+    const JsStringCodeOps ops = {
+        [](void* source, int64_t index) {
+            Item owner = ((Rooted<Item>*)source)->get();
+            return get_type_id(owner) == LMD_TYPE_MAP ? js_typed_array_get(owner, Item{.item = i2it(index)}) :
+                owner.array->items[index];
+        },
+        code_points ? js_to_number : js_from_char_code_to_uint16,
+        []() { return js_throw_range_error("Invalid code point or string length"); }
+    };
+    return js_string_from_codes_with_ops(&owner, count, code_points, &ops);
 }
 
 // Multi-argument String.fromCharCode accepts both ordinary arrays and typed arrays.
 extern "C" Item js_string_fromCharCode_array(Item arr_item) {
     TypeId type = get_type_id(arr_item);
     if (type == LMD_TYPE_MAP && js_is_typed_array(arr_item)) {
-        return js_string_from_char_code_sequence(arr_item, true);
+        return js_string_from_code_sequence(arr_item, true);
     }
     if (!js_is_js_array(arr_item)) return js_string_fromCharCode(arr_item);
-    return js_string_from_char_code_sequence(arr_item, false);
+    return js_string_from_code_sequence(arr_item, false);
 }
 
 // String.fromCodePoint(cp) — single code point
@@ -4401,29 +4316,8 @@ extern "C" Item js_string_fromCodePoint(Item code_item) {
 
 // String.fromCodePoint(cp1, cp2, ...) — multiple code points via array
 extern "C" Item js_string_fromCodePoint_array(Item arr_item) {
-    if (!js_is_js_array(arr_item)) {
-        return js_string_fromCodePoint(arr_item);
-    }
-    Array* arr = arr_item.array;
-    int len = arr->length;
-    if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
-    char* buf = (char*)mem_alloc(len * 4 + 1, MEM_CAT_JS_RUNTIME);
-    int pos = 0;
-    for (int i = 0; i < len; i++) {
-        Item num_item = js_to_number(arr->items[i]);
-        if (item_is_error(num_item)) { mem_free(buf); return num_item; }
-        double code_num = js_get_number(num_item);
-        if (!isfinite(code_num) || floor(code_num) != code_num || code_num < 0 || code_num > 0x10FFFF) {
-            mem_free(buf);
-            return js_throw_range_error("Invalid code point");
-        }
-        int code = (int)code_num;
-        pos += (int)utf8_encode_wtf8((uint32_t)code, buf + pos);
-    }
-    buf[pos] = '\0';
-    Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
-    mem_free(buf);
-    return result;
+    if (!js_is_js_array(arr_item)) return js_string_fromCodePoint(arr_item);
+    return js_string_from_code_sequence(arr_item, false, true);
 }
 
 #if JS_TEST262_FAST_PATHS
@@ -4497,66 +4391,49 @@ extern "C" Item js_test262_build_string(Item args_item) {
 // String.raw(template, ...substitutions) — tagged template literal
 // Called with args[0]=template_object (has .raw property), args[1..]=substitutions
 extern "C" Item js_string_raw(Item* args, int argc) {
-    if (argc < 1) return (Item){.item = s2it(heap_strcpy("", 0))};
-
-    Item template_obj = args[0];
-    if (template_obj.item == ItemNull.item || get_type_id(template_obj) == LMD_TYPE_NULL ||
-        get_type_id(template_obj) == LMD_TYPE_UNDEFINED) {
-        return js_throw_type_error("Cannot convert undefined or null to object");
-    }
-    // Get template.raw
-    Item raw_key = js_name_item("raw", 3);
-    JS_ASSIGN_OR_RETURN(raw, js_get_reference(template_obj, raw_key));
-    if (raw.item == ITEM_NULL || raw.item == ITEM_JS_UNDEFINED ||
-        get_type_id(raw) == LMD_TYPE_NULL || get_type_id(raw) == LMD_TYPE_UNDEFINED) {
-        return js_throw_type_error("Cannot convert undefined or null to object");
-    }
-
-    // Get raw.length (may be a MAP with numeric keys + length property)
-    Item len_key = js_name_item("length", 6);
-    JS_ASSIGN_OR_RETURN(len_item, js_get_reference(raw, len_key));
-    if (js_key_is_symbol_c(len_item)) {
-        return js_throw_type_error("Cannot convert a Symbol value to a number");
-    }
-    JS_ASSIGN_OR_RETURN(len_num, js_to_number(len_item));
-    double len_d = js_get_number(len_num);
-    int raw_len = 0;
-    if (!isnan(len_d) && len_d > 0) {
-        if (isinf(len_d) || len_d > 2147483647.0) raw_len = 2147483647;
-        else raw_len = (int)floor(len_d);
-    }
-    if (raw_len <= 0) return (Item){.item = s2it(heap_strcpy("", 0))};
-
-    StrBuf* buf = strbuf_new();
-    for (int i = 0; i < raw_len; i++) {
-        // Get raw[i] through the shared numeric property lane.
-        Item idx = js_property_index_key(i);
-        Item part = js_get_reference(raw, idx);
-        if (item_is_error(part)) {
-            strbuf_free(buf);
-            return part;
-        }
-        Item part_str = js_to_string(part);
-        if (item_is_error(part_str)) {
-            strbuf_free(buf);
-            return part_str;
-        }
-        String* s = it2s(part_str);
-        if (s && s->len > 0) strbuf_append_str_n(buf, s->chars, s->len);
-
-        // Interleave substitution if present (i+1 in args because args[0] is template)
-        if (i < raw_len - 1 && i < argc - 1) {
-            Item sub_str = js_to_string(args[i + 1]);
-            if (item_is_error(sub_str)) {
-                strbuf_free(buf);
-                return sub_str;
-            }
-            String* sub_s = it2s(sub_str);
-            if (sub_s && sub_s->len > 0) strbuf_append_str_n(buf, sub_s->chars, sub_s->len);
-        }
-    }
-    return js_strbuf_take_item(buf);
+    static const JsStringRawOps ops = {
+        [](Item value) {
+            // legacy boxing accepts nullish values; String.raw requires the throwing ToObject operation.
+            JS_RETURN_IF_ERROR(js_require_object_coercible(value));
+            return js_to_object(value);
+        }, js_get_reference, js_to_number, js_to_string
+    };
+    return js_string_raw_with_ops(args, argc, &ops);
 }
+extern "C" Item js_string_raw_with_ops(Item* args, int argc, const JsStringRawOps* ops) {
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> object(roots, argc ? args[0] : Item{.item = ITEM_JS_UNDEFINED});
+    Rooted<Item> raw(roots, ItemNull), value(roots, ItemNull);
+    object.set(ops->to_object(object.get()));
+    if (item_is_error(object.get())) return object.get();
+    raw.set(ops->get(object.get(), js_name_item("raw", 3)));
+    if (item_is_error(raw.get())) return raw.get();
+    raw.set(ops->to_object(raw.get()));
+    if (item_is_error(raw.get())) return raw.get();
+    value.set(ops->get(raw.get(), js_name_item("length", 6)));
+    if (item_is_error(value.get())) return value.get();
+    value.set(ops->to_number(value.get()));
+    if (item_is_error(value.get())) return value.get();
+    double number = it2d(value.get());
+    int64_t length = isnan(number) || number <= 0 ? 0 : (int64_t)fmin(floor(number), 9007199254740991.0);
+    StrBuf* buffer = strbuf_new();
+    if (!buffer) return ItemError;
+    // each raw segment is read/coerced before the corresponding substitution.
+    for (int64_t i = 0; i < length; i++) {
+        value.set(ops->get(raw.get(), Item{.item = i2it(i)}));
+        if (!item_is_error(value.get())) value.set(ops->to_string(value.get()));
+        if (item_is_error(value.get())) { strbuf_free(buffer); return value.get(); }
+        strbuf_append_str_n(buffer, value.get().get_string()->chars, value.get().get_string()->len);
+        if (i + 1 < length && i + 1 < argc) {
+            value.set(ops->to_string(args[i + 1]));
+            if (item_is_error(value.get())) { strbuf_free(buffer); return value.get(); }
+            strbuf_append_str_n(buffer, value.get().get_string()->chars, value.get().get_string()->len);
+        }
+    }
+    return js_strbuf_take_item(buffer);
+}
+
 
 // =============================================================================
 // Console output helpers
@@ -14342,35 +14219,43 @@ static Item js_with_unscopables_symbol(void) {
     return js_symbol_well_known(js_name_item("unscopables", 11));
 }
 
+extern "C" Item js_with_binding_is_visible_with_ops(Item key, Item object,
+        Item unscopables_symbol, const JsWithBindingOps* ops) {
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, object), name(roots, key), symbol(roots, unscopables_symbol), excluded(roots, ItemNull);
+    Item present = ops->has(owner.get(), name.get());
+    if (item_is_error(present) || !ops->truthy(present)) return present;
+    excluded.set(ops->get(owner.get(), symbol.get()));
+    if (item_is_error(excluded.get())) return excluded.get();
+    if (ops->is_object(excluded.get())) {
+        Item blocked = ops->get(excluded.get(), name.get());
+        if (item_is_error(blocked)) return blocked;
+        if (ops->truthy(blocked)) return Item{.item = ITEM_FALSE};
+    }
+    return Item{.item = ITEM_TRUE};
+}
+static Item js_with_binding_is_visible(Item key, Item scope_obj) {
+    static const JsWithBindingOps ops = {
+        [](Item object, Item key) { return js_in(key, object); },
+        js_get_key_default, js_with_scope_is_object,
+        [](Item value) -> int64_t { return js_is_truthy(value); }
+    };
+    return js_with_binding_is_visible_with_ops(key, scope_obj, js_with_unscopables_symbol(), &ops);
+}
+
 // Check with-scope stack for a property (most recent scope first)
 static Item js_with_scope_lookup(Item key, bool* found, bool strict_get) {
     *found = false;
     for (int i = js_with_stack_depth - 1; i >= 0; i--) {
         Item scope_obj = js_with_stack_at(i);
         if (js_with_scope_is_object(scope_obj)) {
-            Item in_result = js_in(key, scope_obj);
+            Item in_result = js_with_binding_is_visible(key, scope_obj);
             if (item_is_error(in_result)) {
                 *found = true;
                 return in_result;
             }
             if (it2b(in_result)) {
-                // ES2023 9.1.1.2.1 step 6-9: check @@unscopables
-                Item unscopables_sym = js_with_unscopables_symbol();
-                Item unscopables = js_get_key_default(scope_obj, unscopables_sym);
-                if (item_is_error(unscopables)) {
-                    *found = true;
-                    return unscopables; // getter threw — propagate
-                }
-                if (get_type_id(unscopables) == LMD_TYPE_MAP) {
-                    Item blocked = js_get_key_default(unscopables, key);
-                    if (item_is_error(blocked)) {
-                        *found = true;
-                        return blocked;
-                    }
-                    if (js_is_truthy(blocked)) {
-                        continue; // binding is blocked by @@unscopables
-                    }
-                }
                 *found = true;
                 // HasBinding and GetBindingValue are separate Object Environment
                 // Record operations. Re-run HasProperty after @@unscopables:
@@ -14417,18 +14302,6 @@ extern "C" Item js_get_last_with_binding_base_or_undefined(Item key) {
     Item scope_obj = js_last_with_binding_scope;
     if (!js_with_scope_is_object(scope_obj)) return make_js_undefined();
     return scope_obj;
-}
-
-static Item js_with_binding_is_visible(Item key, Item scope_obj) {
-    JS_ASSIGN_OR_RETURN(in_result, js_in(key, scope_obj));
-    if (!it2b(in_result)) return (Item){.item = b2it(false)};
-    Item unscopables_sym = js_with_unscopables_symbol();
-    JS_ASSIGN_OR_RETURN(unscopables, js_get_key_default(scope_obj, unscopables_sym));
-    if (get_type_id(unscopables) == LMD_TYPE_MAP) {
-        JS_ASSIGN_OR_RETURN(blocked, js_get_key_default(unscopables, key));
-        if (js_is_truthy(blocked)) return (Item){.item = b2it(false)};
-    }
-    return (Item){.item = b2it(true)};
 }
 
 // Innermost scope whose binding for `key` is visible, or ItemNull when the
@@ -14774,16 +14647,8 @@ static Item js_set_global_property_impl(Item key, Item value, bool strict) {
                     }
                     return js_set_global_target_property(scope_obj, key, value, strict);
                 }
-                JS_ASSIGN_OR_RETURN(in_result, js_in(key, scope_obj));
+                JS_ASSIGN_OR_RETURN(in_result, js_with_binding_is_visible(key, scope_obj));
                 if (it2b(in_result)) {
-                    Item unscopables_sym = js_with_unscopables_symbol();
-                    JS_ASSIGN_OR_RETURN(unscopables, js_get_key_default(scope_obj, unscopables_sym));
-                    if (get_type_id(unscopables) == LMD_TYPE_MAP) {
-                        JS_ASSIGN_OR_RETURN(blocked, js_get_key_default(unscopables, key));
-                        if (js_is_truthy(blocked)) {
-                            continue;
-                        }
-                    }
                     JS_ASSIGN_OR_RETURN(second_in, js_in(key, scope_obj));
                     if (!it2b(second_in)) {
                         continue;
@@ -15327,6 +15192,8 @@ extern "C" Item js_eval_private_frame_pairs(void) {
 }
 
 extern "C" Item js_eval_private_resolve(Item unscoped_key) {
+    // static validation can run before an LJS realm exists; only eval has ambient private bindings.
+    if (!js_active_runtime_state) return ItemNull;
     if (js_eval_private_frame_depth <= 0 || get_type_id(unscoped_key) != LMD_TYPE_STRING) return ItemNull;
     JsEvalBridgeFrame* frame = js_eval_private_current_frame();
     if (!frame) return ItemNull;

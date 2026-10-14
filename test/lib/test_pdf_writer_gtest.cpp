@@ -445,7 +445,7 @@ TEST_F(PdfWriterTest, DrawABGRImage) {
                                                  20.0f, 10.0f, 10.0f);
     EXPECT_EQ(status, HPDF_OK);
 
-    const char* filename = "test_output/test_image.pdf";
+    const char* filename = "./temp/test_image.pdf";
     status = HPDF_SaveToFile(doc, filename);
     EXPECT_EQ(status, HPDF_OK);
     EXPECT_TRUE(file_contains(filename, "BI"));
@@ -470,7 +470,7 @@ TEST_F(PdfWriterTest, DrawABGRImageWithAlphaSoftMask) {
                                                           20.0f, 10.0f, 10.0f);
     EXPECT_EQ(status, HPDF_OK);
 
-    const char* filename = "test_output/test_image_alpha.pdf";
+    const char* filename = "./temp/test_image_alpha.pdf";
     status = HPDF_SaveToFile(doc, filename);
     EXPECT_EQ(status, HPDF_OK);
     EXPECT_TRUE(file_contains(filename, "/Subtype /Image"));
@@ -637,7 +637,7 @@ TEST_F(PdfWriterTest, SaveEmptyDocument) {
     HPDF_Doc doc = HPDF_New(NULL, NULL);
     HPDF_AddPage(doc);  // need at least one page
     
-    const char* filename = "test_output/test_empty.pdf";
+    const char* filename = "./temp/test_empty.pdf";
     HPDF_STATUS status = HPDF_SaveToFile(doc, filename);
     EXPECT_EQ(status, HPDF_OK);
     
@@ -653,7 +653,7 @@ TEST_F(PdfWriterTest, SaveWithMetadata) {
     HPDF_SetInfoAttr(doc, HPDF_INFO_TITLE, "Test Document");
     HPDF_AddPage(doc);
     
-    const char* filename = "test_output/test_metadata.pdf";
+    const char* filename = "./temp/test_metadata.pdf";
     HPDF_STATUS status = HPDF_SaveToFile(doc, filename);
     EXPECT_EQ(status, HPDF_OK);
     
@@ -675,7 +675,7 @@ TEST_F(PdfWriterTest, SaveWithText) {
     HPDF_Page_SetFontAndSize(page, font, 24.0f);
     HPDF_Page_TextOut(page, 100.0f, 700.0f, "Hello PDF!");
     
-    const char* filename = "test_output/test_text.pdf";
+    const char* filename = "./temp/test_text.pdf";
     HPDF_STATUS status = HPDF_SaveToFile(doc, filename);
     EXPECT_EQ(status, HPDF_OK);
     
@@ -704,7 +704,7 @@ TEST_F(PdfWriterTest, SaveWithGraphics) {
     HPDF_Page_Rectangle(page, 100.0f, 400.0f, 200.0f, 100.0f);
     HPDF_Page_Stroke(page);
     
-    const char* filename = "test_output/test_graphics.pdf";
+    const char* filename = "./temp/test_graphics.pdf";
     HPDF_STATUS status = HPDF_SaveToFile(doc, filename);
     EXPECT_EQ(status, HPDF_OK);
     
@@ -734,7 +734,7 @@ TEST_F(PdfWriterTest, SaveMultiplePages) {
         HPDF_Page_TextOut(page, 100.0f, 700.0f, text);
     }
     
-    const char* filename = "test_output/test_multipage.pdf";
+    const char* filename = "./temp/test_multipage.pdf";
     HPDF_STATUS status = HPDF_SaveToFile(doc, filename);
     EXPECT_EQ(status, HPDF_OK);
     
@@ -821,7 +821,7 @@ TEST_F(PdfWriterTest, ComplexDocument) {
     HPDF_Page_TextOut(page, 120.0f, 540.0f, "- Rectangle and path operations");
     HPDF_Page_TextOut(page, 120.0f, 520.0f, "- Graphics state save/restore");
     
-    const char* filename = "test_output/test_complex.pdf";
+    const char* filename = "./temp/test_complex.pdf";
     HPDF_STATUS status = HPDF_SaveToFile(doc, filename);
     EXPECT_EQ(status, HPDF_OK);
     
@@ -874,5 +874,93 @@ TEST_F(PdfWriterTest, PageLabelsOwnUnicodeEmptyAndDefaultLabelsInSelectedOrder) 
     EXPECT_TRUE(file_contains(path, "0 << /P <FEFF00460072006F006E0074002803B10029>"));
     EXPECT_TRUE(file_contains(path, "1 << /S /D /St 2"));
     EXPECT_TRUE(file_contains(path, "2 << /P ()"));
+    HPDF_Free(doc);
+}
+
+// open groups must be balanced before serialization, including nested document-owned streams.
+TEST_F(PdfWriterTest, TransparencyGroupsBalanceAndRetainNestedVectorResources) {
+    HPDF_Doc doc = HPDF_New(NULL, NULL);
+    ASSERT_NE(doc, nullptr);
+    HPDF_Page page = HPDF_AddPage(doc);
+    ASSERT_NE(page, nullptr);
+    EXPECT_EQ(HPDF_Page_EndTransparencyGroup(page), HPDF_ERROR_INVALID_STATE);
+    EXPECT_EQ(HPDF_Page_BeginTransparencyGroup(page, NAN, 0, 0, 100, 100), HPDF_ERROR_INVALID_PARAM);
+    EXPECT_EQ(HPDF_Page_BeginTransparencyGroup(page, .5f, 0, 0, 100, 100), HPDF_OK);
+    EXPECT_EQ(HPDF_SaveToFile(doc, "temp/pdf_unbalanced_group.pdf"), HPDF_ERROR_INVALID_STATE);
+    EXPECT_EQ(HPDF_Page_BeginTransparencyGroup(page, .25f, 10, 10, 90, 90), HPDF_OK);
+    HPDF_Font font = HPDF_GetFont(doc, "Helvetica", NULL);
+    ASSERT_NE(font, nullptr);
+    EXPECT_EQ(HPDF_Page_SetFontAndSize(page, font, 14), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_TextOut(page, 20, 20, "nested"), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_EndTransparencyGroup(page), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_EndTransparencyGroup(page), HPDF_OK);
+    EXPECT_EQ(HPDF_SaveToFile(doc, "temp/pdf_nested_groups.pdf"), HPDF_OK);
+    EXPECT_TRUE(file_contains("temp/pdf_nested_groups.pdf", "/Subtype /Form"));
+    EXPECT_TRUE(file_contains("temp/pdf_nested_groups.pdf", "/S /Transparency /I true /K false"));
+    EXPECT_TRUE(file_contains("temp/pdf_nested_groups.pdf", "/ca 0.5"));
+    EXPECT_TRUE(file_contains("temp/pdf_nested_groups.pdf", "/ca 0.25"));
+    EXPECT_TRUE(file_contains("temp/pdf_nested_groups.pdf", "(nested) Tj"));
+    HPDF_Free(doc);
+}
+
+TEST_F(PdfWriterTest, DestroyDocumentWithOpenNestedTransparencyGroups) {
+    HPDF_Doc doc = HPDF_New(NULL, NULL);
+    ASSERT_NE(doc, nullptr);
+    HPDF_Page page = HPDF_AddPage(doc);
+    ASSERT_NE(page, nullptr);
+    ASSERT_EQ(HPDF_Page_BeginTransparencyGroup(page, .5f, 0, 0, 100, 100), HPDF_OK);
+    ASSERT_EQ(HPDF_Page_BeginTransparencyGroup(page, .5f, 0, 0, 100, 100), HPDF_OK);
+    HPDF_Free(doc);
+}
+
+TEST_F(PdfWriterTest, TransparencyGroupRestoresParentFontSelection) {
+    HPDF_Doc doc = HPDF_New(NULL, NULL);
+    ASSERT_NE(doc, nullptr);
+    HPDF_Page page = HPDF_AddPage(doc);
+    ASSERT_NE(page, nullptr);
+    HPDF_Font parent_font = HPDF_GetFont(doc, "Helvetica", NULL);
+    HPDF_Font child_font = HPDF_GetFont(doc, "Courier", NULL);
+    ASSERT_NE(parent_font, nullptr); ASSERT_NE(child_font, nullptr);
+    EXPECT_EQ(HPDF_Page_SetFontAndSize(page, parent_font, 12), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_BeginTransparencyGroup(page, .5f, 0, 0, 100, 100), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_SetFontAndSize(page, child_font, 24), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_EndTransparencyGroup(page), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_TextOut(page, 20, 20, "parent"), HPDF_OK);
+    EXPECT_EQ(HPDF_SaveToFile(doc, "temp/pdf_group_parent_font.pdf"), HPDF_OK);
+    EXPECT_TRUE(file_contains("temp/pdf_group_parent_font.pdf", "BT\n/F1 12 Tf\n"));
+    HPDF_Free(doc);
+}
+
+TEST_F(PdfWriterTest, TrackedGroupInkIncludesPaintedOverflowAndRestoredStrokeState) {
+    HPDF_Doc doc = HPDF_New(NULL, NULL);
+    ASSERT_NE(doc, nullptr);
+    HPDF_Page page = HPDF_AddPage(doc);
+    ASSERT_NE(page, nullptr);
+    EXPECT_EQ(HPDF_Page_TrackTransparencyGroupInk(page, 2), HPDF_ERROR_INVALID_PARAM);
+    ASSERT_EQ(HPDF_Page_BeginTransparencyGroup(page, .5f, 0, 0, 10, 10), HPDF_OK);
+    ASSERT_EQ(HPDF_Page_TrackTransparencyGroupInk(page, 2), HPDF_OK);
+    // a clipping path is not source ink and cannot enlarge the group's Form.
+    ASSERT_EQ(HPDF_Page_Rectangle(page, 0, 0, 100, 100), HPDF_OK);
+    ASSERT_EQ(HPDF_Page_Clip(page), HPDF_OK);
+    ASSERT_EQ(HPDF_Page_BeginTransparencyGroup(page, .5f, 0, 0, 5, 5), HPDF_OK);
+    ASSERT_EQ(HPDF_Page_TrackTransparencyGroupInk(page, 2), HPDF_OK);
+    ASSERT_EQ(HPDF_Page_Rectangle(page, 20.25f, 20.25f, 10, 10), HPDF_OK);
+    ASSERT_EQ(HPDF_Page_Fill(page), HPDF_OK);
+    ASSERT_EQ(HPDF_Page_SetLineWidth(page, 2), HPDF_OK);
+    ASSERT_EQ(HPDF_Page_SetLineJoin(page, 2), HPDF_OK);
+    ASSERT_EQ(HPDF_Page_GSave(page), HPDF_OK);
+    ASSERT_EQ(HPDF_Page_SetLineWidth(page, 12), HPDF_OK);
+    ASSERT_EQ(HPDF_Page_GRestore(page), HPDF_OK);
+    ASSERT_EQ(HPDF_Page_MoveTo(page, 40, 20), HPDF_OK);
+    ASSERT_EQ(HPDF_Page_LineTo(page, 45, 20), HPDF_OK);
+    ASSERT_EQ(HPDF_Page_Stroke(page), HPDF_OK);
+    uint32_t pixel = 0x800000ffu;
+    ASSERT_EQ(HPDF_Page_DrawABGRImageWithAlpha(page, &pixel, 1, 1, 1,
+        10, 0, 0, 10, 50, 20), HPDF_OK);
+    ASSERT_EQ(HPDF_Page_EndTransparencyGroup(page), HPDF_OK);
+    ASSERT_EQ(HPDF_Page_EndTransparencyGroup(page), HPDF_OK);
+    ASSERT_EQ(HPDF_SaveToFile(doc, "temp/pdf_group_source_ink.pdf"), HPDF_OK);
+    EXPECT_TRUE(file_contains("temp/pdf_group_source_ink.pdf", "/BBox [0 0 60 30.5]"));
+    EXPECT_FALSE(file_contains("temp/pdf_group_source_ink.pdf", "/BBox [0 0 100 100]"));
     HPDF_Free(doc);
 }

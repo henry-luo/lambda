@@ -321,6 +321,9 @@ Item js_class_heritage_prototype_parent(Item superclass);
 void js_set_class_constructor_parent(Item class_function, Item superclass);
 Item js_get_class_superclass(Item class_function);
 bool js_is_class_constructor_value(Item value);
+// canonical typed-array index parsing is shared across frontend property authorities.
+bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negative_zero);
+bool js_ta_numeric_index_valid(Item object, double numeric_index, bool negative_zero, int* index);
 // Shared numeric property-key materialization for JS element/descriptor code.
 Item js_property_index_key(int64_t index);
 String* js_property_index_name(int64_t index);
@@ -686,6 +689,13 @@ Item js_string_fromCharCode(Item code_item);
 Item js_string_fromCharCode_array(Item arr_item);
 Item js_string_fromCodePoint(Item code_item);
 Item js_string_fromCodePoint_array(Item arr_item);
+struct JsStringCodeOps {
+    Item (*read)(void* source, int64_t index);
+    Item (*to_number)(Item value);
+    Item (*range_error)();
+};
+Item js_string_from_codes_with_ops(void* source, int64_t count, bool code_points,
+    const struct JsStringCodeOps* ops);
 
 // =============================================================================
 // v5: Console multi-argument log
@@ -743,6 +753,20 @@ Item js_date_method(Item date_obj, int method_id);
 Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg1, Item arg2, Item arg3);
 Item js_date_new_multi(Item args_array);
 Item js_date_parse(Item str_item);
+
+// front ends share calendar kernels while retaining their own internal slots and completions.
+typedef struct JsDateOps {
+    Item (*number)(Item);
+    Item (*read)(Item, bool*);
+    Item (*store)(Item, double);
+    Item (*error)(bool, const char*);
+} JsDateOps;
+double js_date_time_clip(double value);
+double js_date_components_time(double* parts, bool local, bool relative_year);
+Item js_date_parse_text(String* text);
+Item js_date_method_with_ops(Item receiver, int method, const JsDateOps* ops);
+Item js_date_setter_with_ops(Item receiver, int method, Item arg0, Item arg1, Item arg2, Item arg3,
+    const JsDateOps* ops);
 Item js_map_collection_new(void);
 Item js_map_collection_new_from(Item iterable);
 Item js_set_collection_new(void);
@@ -800,7 +824,21 @@ Item js_object_is_sealed(Item obj);
 
 // Tagged template literals
 Item js_build_template_object(Item* cooked, Item* raw, int count);
+typedef struct JsTemplateObjectOps {
+    Item (*array_new)(int);
+    Item (*store)(Item, int, Item);
+    Item (*define_raw)(Item, Item);
+    Item (*freeze)(Item);
+} JsTemplateObjectOps;
+Item js_build_template_object_with_ops(Item* cooked, Item* raw, int count, const JsTemplateObjectOps* ops);
 Item js_build_template_object_cached(Item* cooked, Item* raw, int count, int64_t site_id);
+typedef struct JsStringRawOps {
+    Item (*to_object)(Item);
+    Item (*get)(Item, Item);
+    Item (*to_number)(Item);
+    Item (*to_string)(Item);
+} JsStringRawOps;
+Item js_string_raw_with_ops(Item* args, int argc, const JsStringRawOps* ops);
 void js_reset_template_registry(void);
 Item js_object_prevent_extensions(Item obj);
 Item js_object_is_extensible(Item obj);
@@ -1080,6 +1118,7 @@ Item js_private_home_class_leave_result(Item previous_class, Item result);
 Item js_private_brand_add(Item object, Item private_key, Item callee);
 void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
 void js_set_function_name_from_property_key(Item fn_item, Item key_item, int64_t prefix_kind);
+Item js_function_name_display(NameRef key, int64_t prefix_kind);
 void js_set_function_name_if_anonymous(Item fn_item, Item name_item);
 Item js_get_global_builtin_fn_by_id(Item global_id);
 void js_eval_env_push_frame(void);
@@ -1094,6 +1133,15 @@ int64_t js_eval_local_has_lexical_binding(Item key);
 void js_eval_local_note_immutable_binding(Item key);
 int64_t js_eval_local_has_immutable_binding(Item key);
 int64_t js_with_depth_active(void);
+extern const char* const js_array_unscopable_names[];
+typedef struct JsWithBindingOps {
+    Item (*has)(Item object, Item key);
+    Item (*get)(Item object, Item key);
+    bool (*is_object)(Item value);
+    int64_t (*truthy)(Item value);
+} JsWithBindingOps;
+Item js_with_binding_is_visible_with_ops(Item key, Item object, Item unscopables_symbol,
+    const JsWithBindingOps* ops);
 Item js_get_with_binding_or_fallback(Item key, Item fallback);
 Item js_get_with_binding_or_fallback_strict(Item key, Item fallback);
 Item js_get_last_with_binding_base_or_undefined(Item key);
@@ -1297,6 +1345,10 @@ Item js_proxy_revocable(Item target, Item handler);
 bool js_is_proxy(Item obj);
 // Get proxy data (returns NULL if not a proxy)
 JsProxyData* js_get_proxy_data(Item obj);
+#ifdef __cplusplus
+Item js_proxy_private_slots(Item proxy, bool create, Item (*allocate)() = nullptr,
+    bool allow_revoked = false);
+#endif
 // Get the ultimate non-proxy target (unwrap nested proxies)
 Item js_proxy_get_target(Item obj);
 Item js_set_private_proxy_property(Item proxy, Item key, Item value);

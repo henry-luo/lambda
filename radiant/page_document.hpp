@@ -30,6 +30,8 @@ struct RadiantSpaceSpec {
 };
 // component zero selects the compound short form; positive components follow the shared native grammar.
 bool radiant_flow_trait_key(const char* name, bool* space, size_t* index, size_t* component, const char** base = nullptr);
+const char* radiant_flow_trait_component_name(bool space, size_t component);
+bool radiant_decoration_trait_key(const char* name, size_t* family, size_t* edge);
 enum RadiantKeepKind : uint8_t { RADIANT_KEEP_AUTO, RADIANT_KEEP_NUMBER, RADIANT_KEEP_ALWAYS };
 struct RadiantKeepStrength { int32_t value; RadiantKeepKind kind; };
 struct RadiantKeepSpec { RadiantKeepStrength scope[3]; }; // line, column, page
@@ -45,6 +47,7 @@ struct RadiantFlowTraits {
     RadiantDecorationConditionality decoration[2][2]; // border/padding, before/after
     float column_proportion; // zero selects ordinary CSS sizing; positive values share the fixed-track remainder
     uint32_t column_number; // zero follows the preceding placed column/cell; authored numbers are one-based
+    uint32_t column_property_span; // zero selects one; larger spans provide properties without geometric tracks
     float indents[2]; // inherited computed absolute start/end lengths
     lam::Up<const CssValue> indent_expressions[2]; // percentages retain their declaring reference area
     lam::Up<const ViewCssStyle> indent_owners[2];
@@ -96,6 +99,8 @@ const char* radiant_page_resource_url(DomElement* source, const char* resource, 
 bool radiant_flow_trait_name(const char* name);
 bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style);
 bool radiant_table_column_proportion(const CssValue* value, float* result);
+struct RadiantTableColumnRange { size_t column, next, repeat, property_span; };
+bool radiant_table_column_range(const ViewCssStyle* style, size_t next, size_t limit, RadiantTableColumnRange* range);
 bool radiant_decoration_retain(const ViewCssStyle* style, bool padding, bool after);
 bool radiant_text_metrics(const ViewCssStyle* style, float* altitude, float* depth);
 RadiantSpaceSpec radiant_spaces_resolve(const RadiantSpaceSpec* spaces, size_t count, bool start, bool end);

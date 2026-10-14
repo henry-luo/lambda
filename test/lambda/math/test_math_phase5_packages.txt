@@ -1,0 +1,83 @@
+"colon symbols:"
+[":=", "::=", "=:", "::", ":", ":≈"]
+"colon class:"
+["mrel"]
+"colon atom:"
+true
+"bm:"
+{
+  unmapped: [],
+  renders: true
+}
+"bm bold:"
+true
+"cancelto:"
+{
+  unmapped: [],
+  renders: true
+}
+"cancelto kind:"
+true
+"slanted:"
+[{
+    unmapped: [],
+    renders: true
+  }, {
+    unmapped: [],
+    renders: true
+  }, {
+    unmapped: [],
+    renders: true
+  }]
+"slanted kind:"
+true
+"environments:"
+[{
+    unmapped: [],
+    renders: true
+  }, {
+    unmapped: [],
+    renders: true
+  }, {
+    unmapped: [],
+    renders: true
+  }, {
+    unmapped: [],
+    renders: true
+  }, {
+    unmapped: [],
+    renders: true
+  }, {
+    unmapped: [],
+    renders: true
+  }, {
+    unmapped: [],
+    renders: true
+  }, {
+    unmapped: [],
+    renders: true
+  }, {
+    unmapped: [],
+    renders: true
+  }]
+"starred cases text column:"
+['text_command', 'text_command']
+"unknown environment:"
+["begin{weird}"]
+"ce:"
+["\\mathrm{H}_{2}\\mathrm{O}", "2\\mathrm{H}_{2} + \\mathrm{O}_{2} \\xrightarrow{} 2\\mathrm{H}_{2}\\mathrm{O}", "\\mathrm{Na}^{+}\\mathrm{(aq)} + \\mathrm{Cl}^{-}\\mathrm{(aq)}", "\\mathrm{Cr}\\mathrm{O}_{4}^{2-}", "[\\mathrm{Cu}(\\mathrm{N}\\mathrm{H}_{3})_{4}]^{2+}", "{}^{227}_{90}\\mathrm{Th}", "\\mathrm{Cu}\\mathrm{S}\\mathrm{O}_{4}\\cdot 5\\mathrm{H}_{2}\\mathrm{O}", "\\mathrm{C}\\mathrm{H}_{2}{=}\\mathrm{C}\\mathrm{H}_{2}", "\\mathrm{H}\\mathrm{C}{\\equiv}\\mathrm{C}\\mathrm{H}", "\\mathrm{A} \\xrightarrow[\\mathrm{heat}]{\\mathrm{H}_{2}\\mathrm{O}} \\mathrm{B}", "\\mathrm{N}_{2} + 3\\mathrm{H}_{2} \\xrightleftharpoons{} 2\\mathrm{N}\\mathrm{H}_{3}", "\\mathrm{A} \\xrightequilibrium{} \\mathrm{B}", "\\mathrm{A} \\xleftequilibrium{} \\mathrm{B}", "\\mathrm{A} \\xrightleftarrows{} \\mathrm{B}", "\\mathrm{Ca}\\mathrm{C}\\mathrm{O}_{3} \\downarrow", "\\mathrm{C}\\mathrm{O}_{2} \\uparrow", "\\mathrm{e}^{-}", "\\mathrm{C}_{n}\\mathrm{H}_{2n+2}", "\\tfrac{1}{2}\\mathrm{O}_{2}", "\\mathrm{Fe}^{\\mathrm{II}}", "{n} \\mathrm{H}_{2}\\mathrm{O}", "\\mathrm{H}_{2}\\mathrm{O}\\mathrm{(l)}", "\\alpha {-}\\mathrm{Al}_{2}\\mathrm{O}_{3}"]
+"pu:"
+["123\\,\\mathrm{kJ}/\\mathrm{mol}", "1.2\\cdot 10^{3}\\,\\mathrm{kJ}", "\\mathrm{J}\\,\\mathrm{mol}^{-1}", "6.02\\cdot 10^{-23}\\,\\mathrm{mol}^{-1}", "25\\,\\mathrm{m}^{2}", "5\\,\\mathrm{m}\\cdot \\mathrm{s}^{-2}"]
+"chemistry renders:"
+[{
+    unmapped: [],
+    renders: true
+  }, {
+    unmapped: [],
+    renders: true
+  }, {
+    unmapped: [],
+    renders: true
+  }]
+"chemistry unmapped:"
+["bond"]

@@ -23,6 +23,8 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block);
 void setup_inline(LayoutContext* lycon, ViewBlock* block);
 
 static TextDirection get_static_position_direction(ViewElement* parent);
+static TextDirection get_static_position_block_context_direction(ViewElement* parent);
+static bool static_position_parent_uses_right_block_start(ViewElement* parent);
 static void layout_view_absolute_origin(ViewBlock* view, float* out_x, float* out_y);
 
 static float relative_inset_offset(bool has_start, float start, float start_percent,
@@ -646,15 +648,36 @@ void layout_parent_to_containing_block_offset(ViewBlock* block,
             }
 
             ViewElement* gp = p->parent_view();
-            while (gp && !gp->is_block()) {
+            while (gp && !gp->is_block() && gp != containing_element) {
                 gp = gp->parent_view();
             }
+            // an inline containing block terminates this walk before outer
+            // block origins are added to its descendants' local static positions.
+            if (gp == containing_element) break;
             if (gp && gp->is_block()) {
                 p = lam::view_require_block(gp);
             } else {
                 break;
             }
         }
+    }
+
+    if (containing_block && containing_block->view_type == RDT_VIEW_INLINE) {
+        // inline descendants share their ancestor block's coordinates. Keep
+        // the current union origin in the cached offset so finalizing a split
+        // inline updates its static children when that origin changes.
+        ViewElement* parent = block->parent_view();
+        bool inline_parent = parent && parent->view_type == RDT_VIEW_INLINE;
+        bool vertical_line = layout_block_inline_axis_is_vertical(block);
+        // vertical inline edges and RTL inline-extent alignment already
+        // produce coordinates in this inline frame; do not convert them twice.
+        bool vertical_inline_frame = vertical_line && inline_parent;
+        bool inline_extent_frame = get_static_position_block_context_direction(parent) == TD_RTL ||
+            static_position_parent_uses_right_block_start(parent);
+        if (!vertical_inline_frame && !inline_extent_frame) {
+            parent_to_cb_offset.x -= containing_block->x;
+        }
+        if (!vertical_inline_frame) parent_to_cb_offset.y -= containing_block->y;
     }
 
     if (containing_block && containing_block->parent_view() == nullptr &&
@@ -1150,7 +1173,8 @@ static float calculate_static_line_x(BlockContext* pa_block, Linebox* pa_line,
         }
     }
 
-    if (was_inline && line_x <= pa_line->left + 0.01f) {
+    // a negative indent is a real cursor position, not an empty-line sentinel.
+    if (was_inline && fabsf(line_x - pa_line->left) <= 0.01f) {
         float avail_left = 0.0f;
         float avail_right = 0.0f;
         if (positioned_static_line_bounds(pa_block, pa_line, &avail_left, &avail_right)) {
@@ -1240,7 +1264,6 @@ static bool positioned_defers_static_inline_x(ViewBlock* block, BlockContext* pa
 
 static float static_position_line_x(BlockContext* pa_block, Linebox* pa_line,
                                     TextDirection static_direction, bool was_inline,
-                                    ViewBlock* containing_block,
                                     bool defer_inline_alignment) {
     float line_x = (pa_block && pa_line)
         ? calculate_static_line_x(pa_block, pa_line, static_direction, was_inline)
@@ -1249,13 +1272,6 @@ static float static_position_line_x(BlockContext* pa_block, Linebox* pa_line,
         // The hypothetical inline box shares the line's final text alignment,
         // which is known only after following in-flow siblings are placed.
         line_x = pa_line->advance_x;
-    }
-    if (was_inline && containing_block && containing_block->view_type == RDT_VIEW_INLINE) {
-        float inline_cb_origin = inline_containing_block_origin(
-            containing_block, LAYOUT_AXIS_X);
-        // CSS Position 3 §4.1: static inline coordinates are local to the
-        // positioned inline containing block, not its block ancestor.
-        line_x -= inline_cb_origin;
     }
     return line_x;
 }
@@ -1269,12 +1285,16 @@ static float static_position_line_y(BlockContext* pa_block, Linebox* pa_line,
         !layout_axis_is_inline_for_block(static_containing_block, LAYOUT_AXIS_Y) &&
         positioned_axis_uses_static_self_alignment(
             block, static_containing_block, LAYOUT_AXIS_Y);
-    if (!was_inline && parent && parent->view_type == RDT_VIEW_INLINE &&
+    bool follows_line = !was_inline && parent &&
         pa_line && !pa_line->is_line_start &&
         layout_block_writing_mode(layout_nearest_block_ancestor(parent)) == WM_HORIZONTAL_TB &&
-        (get_static_position_direction(parent) == TD_LTR || !rtl_static_self_alignment)) {
+        (get_static_position_direction(parent) == TD_LTR || !rtl_static_self_alignment);
+    block->position->static_block_after_line = follows_line &&
+        !block->positionp()->has_top && !block->positionp()->has_bottom;
+    if (follows_line) {
         // CSS 2.1 §10.3.7: a block-level abspos child of an inline sequence
-        // uses the following line's static block position. CSS Align's RTL
+        // uses the following line's static block position even in a block
+        // parent; its final line extent is deferred. CSS Align's RTL
         // self-alignment instead resolves from the inline fragment's start.
         line_y += pa_block->line_height > 0.0f ? pa_block->line_height : 0.0f;
     }
@@ -1456,7 +1476,8 @@ static void positioned_register_static_line_self_alignment(
         ViewBlock* block, ViewBlock* static_containing_block,
         BlockContext* static_block_context, Linebox* line) {
     if (!block || !block->position || !line ||
-        !positioned_needs_static_line_self_alignment(block, static_containing_block)) {
+        (!block->positionp()->static_block_after_line &&
+         !positioned_needs_static_line_self_alignment(block, static_containing_block))) {
         return;
     }
     block->position->next_static_line_alignment = nullptr;
@@ -1490,13 +1511,27 @@ void layout_finalize_static_inline_positions(LayoutContext* lycon) {
             ? block->positionp()->next_static_inline_position : nullptr;
         if (block->position) {
             block->position->next_static_inline_position = nullptr;
-            block->x += offset;
+            if (!block->positionp()->static_inline_bidi_candidate ||
+                block->positionp()->static_inline_bidi_placed) {
+                block->x += offset;
+            }
         }
         block = next;
     }
     lycon->line.first_static_inline_position = nullptr;
     lycon->line.last_static_inline_position = nullptr;
     lycon->line.static_inline_alignment_offset_x = 0.0f;
+}
+
+void layout_place_bidi_static_inline(ViewBlock* block, float line_x, int level) {
+    if (!block || !block->position) return;
+    float edge = block->positionp()->static_parent_offset_x + line_x;
+    float margin = block->bound ? ((level & 1)
+        ? block->boundary()->margin.right : block->boundary()->margin.left) : 0.0f;
+    // the neutral anchor's resolved run selects its physical margin edge;
+    // the containing paragraph direction alone cannot locate mixed runs.
+    block->x = (level & 1) ? edge - block->width - margin : edge + margin;
+    block->position->static_inline_bidi_placed = true;
 }
 
 void layout_finalize_static_line_self_alignment(LayoutContext* lycon,
@@ -1509,7 +1544,12 @@ void layout_finalize_static_line_self_alignment(LayoutContext* lycon,
         if (block->position) block->position->next_static_line_alignment = nullptr;
         ViewBlock* static_containing_block = layout_nearest_block_ancestor(
             block->parent_view());
-        if (static_containing_block) {
+        if (block->position && block->positionp()->static_block_after_line) {
+            // following siblings can enlarge the line after the static block
+            // position was captured, without consuming that in-flow line.
+            block->y += used_line_height - block->positionp()->static_line_initial_extent;
+            block->position->static_block_after_line = false;
+        } else if (static_containing_block) {
             for (LayoutAxis axis : layout_axes()) {
                 if (layout_axis_is_inline_for_block(static_containing_block, axis)) continue;
                 PositionedSelfAlignment alignment = positioned_static_axis_self_alignment(
@@ -1635,7 +1675,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     layout_parent_to_containing_block_offset(block, containing_block,
                                              &parent_to_cb_offset_x, &parent_to_cb_offset_y);
     float static_line_x = static_position_line_x(
-        pa_block, pa_line, static_direction, was_inline, containing_block,
+        pa_block, pa_line, static_direction, was_inline,
         defer_static_inline_x);
     float static_left = parent_to_cb_offset_x + static_line_x;
     bool can_inset_stretch_width = !ratio_transfers_max_height &&
@@ -2113,6 +2153,8 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
                                       Linebox *pa_line,
                                       bool register_with_containing_block) {
     log_enter();
+    // a new positioned layout replaces the source origin retained by fragmentation.
+    block->position->has_multicol_flow_origin = false;
     // guard against deeply nested positioned elements (e.g., 200 nested position:fixed flex divs)
     lycon->depth++;
     if (lycon->depth >= MAX_LAYOUT_DEPTH) {
@@ -2317,7 +2359,7 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
         // For originally-inline elements (blockified by §9.7), the static X is
         // the inline cursor (advance_x), adjusted for float avoidance and text-align.
         float line_x = static_position_line_x(
-            pa_block, pa_line, static_direction, was_inline, cb,
+            pa_block, pa_line, static_direction, was_inline,
             defer_static_inline_x);
 
         float static_x = parent_to_cb_offset_x + line_x;
@@ -2557,6 +2599,7 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
         // This preserves vertical-rl's right-to-left block progression when
         // CSS Positioned resolves both physical horizontal insets as auto.
         float line_right = pa_line->right;
+        bool static_starts_at_available_right = true;
         // CSS 2.1 §10.3.7: static placement uses the available line edge,
         // including when an originally block-level box is inside an inline CB.
         {
@@ -2566,8 +2609,10 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
                 CssEnum ta = pa_block->text_align;
                 if (ta == CSS_VALUE_CENTER) {
                     line_right = (avail_left + avail_right) / 2.0f;
+                    static_starts_at_available_right = false;
                 } else if ((ta == CSS_VALUE_LEFT) || (ta == CSS_VALUE_END)) {
                     line_right = avail_left;
+                    static_starts_at_available_right = false;
                 } else {
                     line_right = avail_right;
                 }
@@ -2580,6 +2625,16 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
             // its own fragment edge, not the ancestor line's right edge.
             line_right = inline_containing_block_width(cb);
             block->position->static_x_needs_inline_cb_extent = true;
+        } else if (was_inline && static_direction == TD_RTL &&
+                   !vertical_writing_abs &&
+                   !layout_block_inline_axis_is_vertical(layout_nearest_block_ancestor(parent)) &&
+                   static_starts_at_available_right) {
+            // the RTL static margin edge follows the logical text cursor,
+            // including signed indentation and already-consumed inline content.
+            float inline_origin = pa_line->has_float_intrusion
+                ? pa_line->effective_left : pa_line->left;
+            line_right -= pa_line->text_indent_offset +
+                (pa_line->advance_x - inline_origin);
         } else if (was_inline && parent && parent->view_type == RDT_VIEW_INLINE &&
                    pa_line && static_direction == TD_RTL &&
                    pa_line->text_indent_offset != 0.0f) {
@@ -2727,11 +2782,19 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
         block, static_containing_block, static_position_is_inline_layout);
     positioned_realign_static_self_axes(
         block, static_containing_block, pa_block, static_position_is_inline_layout);
-    if (static_position_is_inline_layout) {
+    if (static_position_is_inline_layout || block->positionp()->static_block_after_line) {
         positioned_register_static_line_self_alignment(
             block, static_containing_block, pa_block, pa_line);
     }
-    if (defer_static_inline_x) {
+    bool bidi_static_inline = pa_block && pa_line && was_inline && static_direction == TD_RTL &&
+        !block->positionp()->has_left && !block->positionp()->has_right &&
+        cb->view_type != RDT_VIEW_INLINE && static_containing_block &&
+        !layout_block_inline_axis_is_vertical(static_containing_block) &&
+        !positioned_axis_uses_static_self_alignment(block, static_containing_block, LAYOUT_AXIS_X);
+    block->position->static_inline_bidi_candidate = bidi_static_inline;
+    block->position->static_inline_bidi_placed = false;
+    if (bidi_static_inline) block->inline_line_number = pa_block->line_number;
+    if (defer_static_inline_x || bidi_static_inline) {
         positioned_register_static_inline_position(block, pa_line);
     }
     lycon->depth--;
@@ -2996,6 +3059,11 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
         FloatAvailableSpace space = block_context_space_at_y(
             bfc, final_y_bfc, float_total_height, false, true);
         bool left_float = float_is_left(block);
+        // rule 7 permits an oversized float to protrude only when no
+        // earlier same-side float moves it away from its containing edge.
+        bool same_side_intrudes = left_float
+            ? space.has_left_float && space.left > containing_block_left_bfc + 0.5f
+            : space.has_right_float && space.right < containing_block_right_bfc - 0.5f;
         // CSS 2.1 §9.5.1: Compute effective available width
         // is the only constraint — not the BFC element's content width, which
         float effective_left, effective_right;
@@ -3003,7 +3071,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
             effective_left = space.has_left_float
                 ? max(space.left, containing_block_left_bfc)
                 : containing_block_left_bfc;
-            if (float_wider_than_cb) {
+            if (float_wider_than_cb && !same_side_intrudes) {
                 effective_right = space.right;
             } else {
                 effective_right = space.has_right_float
@@ -3014,7 +3082,7 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
             effective_right = space.has_right_float
                 ? min(space.right, containing_block_right_bfc)
                 : containing_block_right_bfc;
-            if (float_wider_than_cb) {
+            if (float_wider_than_cb && !same_side_intrudes) {
                 effective_left = space.left;
             } else {
                 effective_left = space.has_left_float

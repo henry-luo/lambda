@@ -1,0 +1,40 @@
+"handlers owned by their package:"
+[]
+"walk handlers owned:"
+[]
+"owner while active:cleverefno owner while inactive:inactive command attribution:"
+["unsupported-output latex null", "unsupported-output latex null"]
+"active package dispatch:"
+true
+"conflict from catalogue:"
+["conflicting-bibliography-packages natbib biblatex"]
+"font substitutions:"
+["font-substitution helvet Helvetica", "font-substitution cmbright Computer Modern Bright"]
+"main family css:"
+true
+"unknown class:"
+["unknown-package moderncv null"]
+"profile class:"
+[]
+"xparse:"
+[]
+"setcounter and addtocounter:"
+true
+"newcounter reset by parent:"
+true
+"labels after environments:"
+true
+"book appendix:"
+true
+"list of figures:"
+true
+"unlabelled entry:"
+true
+"list of tables:"
+true
+"list issues:"
+[]
+"unmapped math:"
+["unsupported-math-command math abs", "unsupported-math-command math norm"]
+"unmapped math located:"
+true

@@ -1925,7 +1925,7 @@ TEST(RadiantViewTest, ReportsNestedFlexIntrinsicMeasurements) {
 TEST(RadiantViewTest, ArchivesAndDirectoriesOpenAsFileTrees) {
     const char* paths[] = {"test/input/zip", "test/input/zip/wide.zip",
         "test/input/zip/viewer.zip", "test/input/zip/empty.zip", "test/input/zip/renamed.dat", "test/input/zip/extensionless",
-        "test/input/zip/office.docx", "test/input/zip/sample.jar"};
+        "test/input/zip/sample.zip", "test/input/zip/sample.jar"};
     const char* view_log = "./temp/test_radiant_view_archive_tree.log";
     const ShellEnvEntry env[] = {
         {"LAMBDA_LOG_FILE", view_log}, {"LAMBDA_LOG_LEVEL", "INFO"}, {NULL, NULL},
@@ -1946,6 +1946,16 @@ TEST(RadiantViewTest, ArchivesAndDirectoriesOpenAsFileTrees) {
     }
     remove(view_log);
     remove(events);
+}
+
+TEST(RadiantViewTest, WordDocumentsOpenAsDocumentPreviews) {
+    // D7.2.4: the DOCX package supplies the preview through ordinary view dispatch.
+    ShellResult result = test_radiant_view_run_logged_headless(
+        "test/input/zip/office.docx", "test/ui/doc_viewer_docx_archive.json", nullptr);
+    EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+    EXPECT_NE(strstr(result.stdout_buf ? result.stdout_buf : "",
+        "Assertions: 3 passed, 0 failed"), nullptr);
+    shell_result_free(&result);
 }
 
 TEST(RadiantViewTest, RejectsUnsafeArchiveBeforeOpeningTree) {

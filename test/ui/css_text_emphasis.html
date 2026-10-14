@@ -1,0 +1,15 @@
+<!doctype html><meta charset="utf-8">
+<style>
+body{margin:0;background:white}
+#owner{position:absolute;left:20px;top:20px;width:280px;height:100px}
+#text{font:40px/50px Arial;color:transparent;text-emphasis:filled dot red;text-emphasis-position:under left}
+button{position:absolute;top:150px;width:48px;height:24px}
+</style>
+<div id=owner><div id=text>ABC DEF</div></div>
+<button id=under style="left:0" onclick="text.style.cssText='font:40px/50px Arial;color:transparent;text-emphasis:filled dot red;text-emphasis-position:under left';owner.style.opacity='1'">under</button>
+<button id=blue style="left:50px" onclick="text.style.textEmphasisColor='blue'">blue</button>
+<button id=off style="left:100px" onclick="text.style.textEmphasisStyle='none'">off</button>
+<button id=over style="left:150px" onclick="text.style.textEmphasis='filled dot red';text.style.textEmphasisPosition='over right'">over</button>
+<button id=shadow style="left:200px" onclick="text.style.textEmphasisPosition='under left';text.style.textShadow='0 40px 0 rgb(0,128,0)'">shadow</button>
+<button id=alpha style="left:250px" onclick="owner.style.opacity='.5'">alpha</button>
+<button id=current style="left:300px" onclick="text.style.color='blue';text.style.textEmphasis='filled dot currentColor'">current</button>

@@ -28,6 +28,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 12. [grammar — Language Grammars](#12-grammar--language-grammars)
 13. [Tests](#13-tests)
 14. [eps — EPS Rendering](#14-eps--eps-rendering)
+15. [docx — Word DOCX Import](#15-docx--word-docx-import)
 
 ---
 
@@ -47,6 +48,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
 | `latex` | `lambda.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
+| `docx` | `lambda.doc.docx` | Library, initial semantic import profile | Reads Word DOCX into elements, HTML fragments, text, metadata and diagnostics (§14) | Import from a Lambda script; direct DOCX viewing remains archive browsing |
 | `pdf` | `lambda.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
 | `eps` | `lambda.doc.eps.eps` | Library, initial vector profile | Interprets EPS PostScript and produces standalone SVG | `convert -t svg`, `view`, `layout` and `render` on `.eps`/`.epsi` |
 | `grammar` | `lambda.grammar.xpath`, `lambda.grammar.xquery`, `lambda.grammar.jq`, `lambda.grammar.rnc` | Library, experimental | Grammars for other languages, written as Lambda `grammar` declarations: XPath 3.1, XQuery 3.1, jq 1.7.1 and RELAX NG compact parse to Lambda element trees | None |
@@ -977,9 +979,9 @@ have been removed; use `lambda.doc.math.math`.
 
 ## 7. `latex` — LaTeX to HTML
 
-The latex package renders a parsed LaTeX document as HTML. Parse with `latex.parse_file(path)` or `latex.parse_source(text, base)`. Every LaTeX parse first runs Lambda's TeX expansion engine (**D7.2.7**): document macros, `.sty`/`.cls` files beside the document, and bundled programming packages such as `etoolbox`, `xkeyval` and expl3 run as TeX, while Radiant keeps layout. A bare `input(path, 'latex')` also expands, but without the package's adapter registry, so parse through the package when you render. The package covers the `article`, `book` and `report` document classes, sectioning with numbering, lists, tables, footnotes, boxes, colour, spacing, the `picture` environment, `\newcommand` macros, and math through the `math` package.
+The latex package renders a parsed LaTeX document as HTML. Parse with `latex.parse_file(path)` or `latex.parse_source(text, base)`. Every LaTeX parse first runs Lambda's TeX expansion engine (**D7.2.7v2**): document macros, `.sty`/`.cls` files beside the document, bundled programming packages such as `etoolbox`, `xkeyval` and expl3, and Lambda's own bindings for `physics`, the `mathtools` macros, `xspace`, `csvsimple`, `unicode-math`'s alphabets and the configuration macros of `tocloft`, `authblk`, `titling`, `minitoc`, `glossaries`, `nomencl` and `acronym` run as TeX, while Radiant keeps layout. A bare `input(path, 'latex')` also expands, but without the package's adapter registry, so parse through the package when you render. The package covers the `article`, `book` and `report` document classes and profiles of the common others (KOMA-Script, memoir, the AMS classes, IEEEtran, llncs, elsarticle, revtex, acmart, `letter` and `exam`), sectioning with numbering, lists, tables, footnotes, boxes, colour, spacing, the `picture` environment, `\newcommand` macros, and math through the `math` package.
 
-Common `\usepackage` declarations select the shipped script adapters for `amsmath`, `amssymb`, `graphicx`, `hyperref`, `geometry`, `xcolor`, `booktabs`, `biblatex`, `babel`, `enumitem`, `microtype`, `siunitx`, and TikZ. Package names select static source modules under **D7.2.1–D7.2.4**; TeX source runs only as TeX inside the engine's sandbox and never becomes Lambda code (**S1.8, D7.2.7**). The [package compatibility matrix](../vibe/Lambda_Pkg_Latex.md#9-compatibility-matrix) lists supported commands and output limits.
+Common `\usepackage` declarations select the shipped script adapters for `amsmath`, `amssymb`, `graphicx`, `hyperref`, `geometry`, `xcolor`, `booktabs`, `biblatex`, `babel`, `enumitem`, `microtype`, `siunitx`, and TikZ. Package names select static source modules under **D7.2.1–D7.2.4**; TeX source runs only as TeX inside the engine's sandbox and never becomes Lambda code (**S1.8, D7.2.7v2**). The [package compatibility matrix](../vibe/Lambda_Pkg_Latex.md#9-compatibility-matrix) lists supported commands and output limits.
 
 The bounded `biblatex` profile reads multiple local `.bib` resources, supports ten common entry types, six built-in citation/bibliography styles, source-order citation commands, `\nocite`, filtered and scoped `\printbibliography`, and English/German/French strings. It handles common BibTeX strings and inheritance, creates internal citation links, and reports missing or unsupported requests with source locations (**D7.1.2v2, S12.4.1, S7.4.1–S7.4.4**). `backend=biber` selects this local profile; no Biber process or arbitrary style file is run. See [Phase 2 behavior and boundaries](../vibe/latex/Lambda_Design_BibTeX_CSL.md#21-the-built-in-biblatex-and-natbib-profile).
 
@@ -1399,6 +1401,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 | `math` | `test/lambda/math/` |
 | `music` | `test/lambda/music/`; score fixtures and viewer example in `test/music/` |
 | `latex` | `test/lambda/latex/` |
+| `docx` | `test/lambda/docx/`; synthetic and pinned reference documents in `test/input/docx/` |
 | `grammar` | `test/lambda/grammar/xpath.ls` (the grammar module itself: `test/lambda/grammar/`) |
 | `pdf` | `test/lambda/pdf/` |
 | `eps` | `test/lambda/eps/`; native parsing/scanning in `test/test_input_eps_gtest.cpp` |
@@ -1470,3 +1473,91 @@ decoded bytes; lower caller limits remain enforced.
 See the [EPS design](../vibe/Lambda_Pkg_EPS.md) and
 [implementation record](../vibe/impl/Lambda_Impl_EPS.md) for source contracts,
 budgets, tests and remaining resource/font/image work.
+
+---
+
+## 15. `docx` — Word DOCX Import
+
+`lambda.doc.docx` is a shipped script module under D7.2.1/D7.2.4. It reads a
+local `.docx` path or a captured ZIP file tree and converts the document's main
+story to semantic HTML elements. The source package is read through Lambda's
+bounded ZIP input (S12.4.1v2/S14.3.1v2); conversion follows relationships and
+namespace URIs rather than fixed member paths or namespace prefixes.
+
+```lambda
+import docx: lambda.doc.docx
+let result = docx.convert("test/input/docx/minimal.docx")^;
+result.document
+```
+
+`convert(source, options = null)` returns
+`{document, html, text, metadata, diagnostics}`. `document` is an `<article
+class="docx-document">` element, `html` its escaped HTML fragment, and `text`
+the reading-order text. Paragraphs end with two newlines; table rows use tabs
+between cells and newlines between rows. Images do not contribute prose text.
+Available core properties such as title and creator appear in `metadata`.
+
+`to_elements`, `to_html`, and `extract_text` take the same arguments and return
+the corresponding field. Use `convert` when the caller needs diagnostics.
+
+Supported content includes paragraphs; headings derived from styles/outline
+levels; inherited and direct bold, italic, underline, strike, superscript and
+subscript; tabs and breaks; simple lists with numbering starts, continuation
+and nesting, including lists with hidden markers; tables with grid spans and
+vertical merges; hyperlinks and simple bookmarks; embedded raster images;
+and clustered column charts rendered from their cached category/series values.
+Charts reuse `lambda.chart.chart` for SVG layout (D7.2.4), retain explicit RGB
+series colors and titles, and contribute a data table to extracted text.
+Paragraph-relative column anchors support left/right square wrapping,
+centered largest-side wrapping, and top/bottom wrapping at paragraph top.
+Signed column-start and paragraph offsets with square wrapping on both sides
+use CSS float margins (D7.2.4); this remains a flowing approximation of Word.
+The viewer also reads the document theme, inherited and direct run properties
+(font family, size, color, tracking and capitalization), paragraph spacing,
+table grid widths, cell shading and borders, row heights, and page size/margins.
+Values are converted from OOXML units into CSS; the named font must be
+available to the host font resolver for a matching face. CSS remains a flow
+preview and does not reproduce Word's full layout engine.
+Both Transitional and Strict Word
+namespace families are recognized. HTML is flow content, with semantic break
+markers and no Word pagination guarantee.
+
+Content controls display their saved `sdtContent` at inline, block, row and
+cell boundaries, preserving surrounding formatting and reading order. Control
+properties are editing metadata; bindings and placeholder definitions are not
+evaluated. Footnote/endnote parts containing only separator definitions do not
+represent omitted notes; actual note content remains diagnosed.
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `style_map` | `{}` | Style ID/name to `p`, `h1`–`h6`, `blockquote`, `pre`, or `{tag, class}`. |
+| `presentation` | `"semantic"` | `"source"` adds validated Word theme, run, table, and page CSS; the viewer selects it. |
+| `include_empty_paragraphs` | `false` | Preserve empty paragraph elements and text boundaries. |
+| `images` | `"data-uri"` | Embed supported internal images; `"omit"` reports their omission. |
+| `id_prefix` | `""` | Prefix bookmark IDs and internal anchor links. |
+| `unsupported` | `"warn"` | Return diagnostics; `"error"` rejects a conversion with diagnostics. |
+
+Diagnostics have `{severity, code, part, message}`. Unsupported visible
+constructs are reported. Headers/footers, notes, comments, revision semantics,
+field execution, other chart types, shapes, equations, page-relative floating
+placement, DOCX writing,
+encrypted documents, and `.docm` are outside this profile. External resources
+are never fetched; emitted hyperlink schemes are validated. XML parts use
+strict UTF-8 XML with significant whitespace and reject DTDs and embedded NULs.
+Unknown options, unsafe mappings, invalid package targets, required malformed
+XML, and style cycles raise ordinary Lambda errors.
+
+Package errors use codes 7600–7607: invalid source, options, package, missing
+part, XML, target, unsupported content in strict mode, and style cycle.
+Underlying source/ZIP errors keep their existing codes. In particular, the
+pinned `tiny-picture-target-base-relative.docx` reference is rejected by the
+shared ZIP reader for its `0x0314` version-needed declaration; it is recorded
+as an unsupported input, not a successful import.
+
+Design and phased scope: [DOCX package](../vibe/Lambda_Pkg_Docx.md).
+
+`lambda view report.docx` presents the imported Word document with the shared
+`lambda.doc.docx.view` presentation module (D7.2.4). The bundled file browser
+also previews DOCX and exposes its converted HTML on the Source tab. Use
+`lambda view report.docx --archive` for the underlying ZIP tree. Unsupported
+content is listed above the preview; Word pagination is outside this profile.

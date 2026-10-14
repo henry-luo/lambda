@@ -876,6 +876,7 @@ struct DocWindowLaunchOptions {
     bool fullscreen;
     const char* graph_view_key;
     bool source_surface;
+    bool browse_archive;
     bool paged;
     RenderPagedOptions paged_options;
     const char* font_dirs[16];
@@ -933,6 +934,8 @@ static bool parse_doc_window_launch_options(int argc, char** argv, bool is_view,
             out->state_dump = true;
         } else if (!is_view && strcmp(argv[i], "--source") == 0) {
             out->source_surface = true;
+        } else if (is_view && strcmp(argv[i], "--archive") == 0) {
+            out->browse_archive = true;
         } else if (is_view && strcmp(argv[i], "--view-key") == 0) {
             if (i + 1 < argc) {
                 out->graph_view_key = argv[++i];
@@ -956,6 +959,10 @@ static bool parse_doc_window_launch_options(int argc, char** argv, bool is_view,
     }
     if (has_paged_options && !out->paged) {
         fputs("Error: page preview options require --paged\n", stderr);
+        return false;
+    }
+    if (out->browse_archive && (!out->filename || out->paged)) {
+        fputs("Error: view --archive requires a source and cannot be combined with --paged\n", stderr);
         return false;
     }
     if (out->paged && (!out->filename || out->graph_view_key)) {
@@ -3629,6 +3636,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  calculates layout, and generates output in the specified format based on file extension.\n");
             printf("\nSupported Input Formats:\n");
             printf("  .html, .htm    HTML documents\n");
+            printf("  .md, .markdown Markdown documents (GitHub-style stylesheet)\n");
             printf("  .pdf           PDF documents (converted through Lambda PDF package)\n");
             printf("  .tex, .latex   LaTeX documents (converted to HTML for rendering)\n");
             printf("  .pgf           TikZ/PGF picture fragments\n");
@@ -3649,7 +3657,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  -vh, --viewport-height   Viewport height in CSS pixels (default: auto-size to content)\n");
             printf("  -s, --scale              Raster export density (default: 1.0; does not change layout)\n");
             printf("  --pixel-ratio            Device scale for HiDPI/Retina (default: 1.0; legacy option spelling)\n");
-            fputs("  --paged                  Paginate HTML/FO/native input or preserve fixed PDF pages\n", stdout);
+            fputs("  --paged                  Paginate HTML/Markdown/FO/native input or preserve fixed PDF pages\n", stdout);
             fputs("  --import-pages <sel>     Import source PDF pages: all or 1,3-5 (default: all)\n"
                   "  --import-page-limit <N> Fail if the PDF import exceeds N pages\n", stdout);
             fputs("  --block-remote-resources  Use local document dependencies for paged export\n", stdout);
@@ -3862,8 +3870,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             return lambda_main_finish(1);
         }
         if (paged && !render_paged_input_supported(html_file)) {
-            log_error("[EXPORT_PAGED] --paged requires HTML, Lambda, FO, Radiant page or PDF input");
-            fputs("Error: --paged requires HTML, Lambda, FO, Radiant page or PDF input\n", stderr);
+            log_error("[EXPORT_PAGED] --paged requires HTML, Markdown, Lambda, FO, Radiant page or PDF input");
+            fputs("Error: --paged requires HTML, Markdown, Lambda, FO, Radiant page or PDF input\n", stderr);
             return lambda_main_finish(1);
         }
         if (input_ext && strcmp(input_ext, ".pdf") == 0) {
@@ -4060,6 +4068,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  Directories and ZIP archives open as browsable file trees.\n"); // PRINTF_OK: user-facing CLI help.
             printf("\nSupported Formats:\n");
             printf("  .pdf       Portable Document Format\n");
+            fputs("  .docx      Word document (semantic content)\n", stdout);
             printf("  .html      HyperText Markup Language\n");
             printf("  .htm       HyperText Markup Language (alternative extension)\n");
             printf("  .md        Markdown (with GitHub-like styling)\n");
@@ -4083,8 +4092,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  .toml      TOML (source view)\n");
             printf("  .txt       Plain text\n");
             printf("  .csv       Comma-separated values (source view)\n");
-            printf("  .zip/.docx/.jar  ZIP-backed archives (file tree)\n"); // PRINTF_OK: user-facing CLI help.
+            printf("  .zip/.jar  ZIP-backed archives (file tree)\n"); // PRINTF_OK: user-facing CLI help.
             printf("\nOptions:\n");
+            fputs("  --archive                 Browse the underlying ZIP parts, including DOCX\n", stdout);
             printf("  --event-file <file.json>   Load simulated events from JSON file for testing\n");
             printf("  --event-result <file.json> Write a machine-readable event result\n");
             fputs("  --paged                   Preview paginated documents or fixed PDF pages\n"
@@ -4107,6 +4117,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("\nExamples:\n");
             printf("  %s view                          # Open the bundled lambda.doc document viewer\n", argv[0]);
             printf("  %s view document.pdf             # View PDF in window\n", argv[0]);
+            fprintf(stdout, "  %s view report.docx              # View Word document\n", argv[0]); // PRINTF_OK: CLI help.
             printf("  %s view page.html                # View HTML document\n", argv[0]);
             fprintf(stdout, "  %s view test/html/paged_media_demo.html --paged  # Print preview\n", argv[0]); // PRINTF_OK: CLI help.
             printf("  %s view README.md                # View markdown with GitHub styling\n", argv[0]);
@@ -4160,7 +4171,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
         if (launch.paged) {
             if (!is_http_url && !render_paged_input_supported(filename)) {
-                fputs("Error: view --paged supports HTML, Lambda, FO, Radiant page and PDF documents\n", stderr);
+                fputs("Error: view --paged supports HTML, Markdown, Lambda, FO, Radiant page and PDF documents\n", stderr);
                 return lambda_main_finish(1);
             }
             int result = view_doc_in_window_with_events(filename, event_file, headless,
@@ -4241,7 +4252,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
         // Check if this is a graph file that needs conversion
         bool is_graph_file = graph_path_is_graph(filename);
 
-        bool browse_tree = file_is_dir(filename) || lambda_view_path_is_archive(filename);
+        // A document format takes precedence over its ZIP storage; --archive exposes the parts.
+        bool is_docx_file = ext && str_ieq_cstr(ext, ".docx");
+        bool browse_tree = file_is_dir(filename) || launch.browse_archive ||
+            (!is_docx_file && lambda_view_path_is_archive(filename));
         if (browse_tree) {
             static const LambdaDocumentTransformConfig browser_transform = {
                 "browse", "lambda.doc.doc_viewer", "open_browser",
@@ -4267,7 +4281,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
             lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);
-        } else if (is_graph_file || eps_source_expected(filename, nullptr, 0) || (ext && (strcmp(ext, ".pdf") == 0 ||
+        } else if (is_docx_file || is_graph_file || eps_source_expected(filename, nullptr, 0) || (ext && (strcmp(ext, ".pdf") == 0 ||
                     strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 ||
                     strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
@@ -4289,7 +4303,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                                                        state_dump, nullptr, launch.fullscreen);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
-            printf("Supported formats: .pdf, .html, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
+            printf("Supported formats: .docx, .pdf, .html, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
             if (temp_file_path) {
                 if (temp_file_path_is_local) file_delete(temp_file_path);
                 mem_free(temp_file_path);

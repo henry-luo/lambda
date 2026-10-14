@@ -349,6 +349,7 @@ lambda view [document_file] [options]
 | | `--event-log <file>` / `--state-dump <file>` | Record events / dump interaction state (testing) | |
 | | `--headless` | Run without creating a window | |
 | | `--view-key <key>` | Select a named view when the source defines several | |
+| | `--archive` | Browse ZIP package parts, including those inside DOCX | |
 | | `--font-dir <dir>` | Additional font directory (repeatable, up to 16) | |
 | `-h` | `--help` | Show help | |
 
@@ -361,17 +362,25 @@ Unknown options are silently ignored.
 
 **Directory and archive browsing:** `lambda view directory/` and
 `lambda view archive.zip` open the bundled file tree rooted at that source.
-ZIP32/ZIP64 files, including ZIP-backed DOCX and JAR packages, are detected by
-their content even when renamed or extensionless. Expand directories and
+ZIP32/ZIP64 files and JAR packages are detected by their content even when
+renamed or extensionless. DOCX opens as a Word document by default; use
+`lambda view report.docx --archive` to inspect its ZIP parts. Expand directories and
 archive rows, then select members to read source, inspect structured data or
 preview documents/images. Archive capture is eager; member decompression stays
 lazy (**S12.4.1v2/S14.3.1v2**). Members are read directly from the retained
 archive without extraction. Invalid archives and deferred member failures use
 the existing input errors.
 
+**Word documents:** `lambda view report.docx` renders the supported paragraphs,
+headings, text formatting, lists, tables, links, and embedded images through
+`lambda.doc.docx` (D7.2.4). The file browser also previews DOCX when selected;
+its Source tab shows the converted HTML. Unsupported content is reported above
+the document. The preview uses flowing pages rather than reproducing Word's
+pagination, headers, or footers.
+
 **Supported formats:**
 
-`.pdf`, `.html`/`.htm`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
+`.docx`, `.pdf`, `.html`/`.htm`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
 
 Also accepts **HTTP/HTTPS URLs**: an HTML page is loaded directly by the browsing shell (with its scripts and stylesheets); any other content is fetched to a temporary file, its type detected from the `Content-Type` header, and opened from there.
 
@@ -392,6 +401,7 @@ lambda view diagram.mmd
 lambda view documents/
 lambda view assets.zip
 lambda view report.docx
+lambda view report.docx --archive
 lambda view application.jar
 ```
 
@@ -550,7 +560,7 @@ Runs a TypeScript file on LambdaJS. Type annotations are stripped; there is no t
 - `math` — retired. It prints a message pointing at Lambda script math rendering and exits with status 1.
 - `serve` — parses its options but is not implemented; exits with status 1.
 - `replay --event-log <file.jsonl> [document] [--assert-state|--record|--headless|--window|--font-dir DIR]` — replays a recorded interaction against a document (testing).
-- `render-batch`, `test-batch`, `js-test-batch`, `--test*`, `--emit-ast-dump <path>`, `--emit-js-ast-dump <path>` — internal harness and development commands.
+- `render-batch`, `test-batch`, `js-test-batch`, `--test*`, `--emit-ast-dump <path>`, `--emit-js-ast-dump <path>` (the resolved AST as Mark, readable with `input(file, 'mark')`) — internal harness and development commands.
 
 ---
 

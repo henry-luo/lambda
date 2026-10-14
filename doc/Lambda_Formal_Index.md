@@ -469,7 +469,7 @@ in full — including lines too long for a viewer — run
 | SO46 | 2892 | How an element pattern spells *content must be empty* |
 | SO48 | 2893 | PDF file content: remaining object kinds, decimal encoding, virtual source containers, direct array/scalar … |
 
-## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v29.6.0 (2026-10-14)
+## Design — [`Lambda_Formal_Design.md`](Lambda_Formal_Design.md) v30.1.0 (2026-10-14)
 
 | ID | Line | Title |
 |---|---|---|
@@ -674,7 +674,7 @@ in full — including lines too long for a viewer — run
 | D7.2.4 | 1466 | `lambda.*` is the one root for everything Lambda ships |
 | D7.2.5* | 1481 | Full user-agent editing policy belongs to the shipped Lambda DOM behavior package, never to Radiant's native … |
 | D7.2.6 | 1496 | Import resolution follows the S16.9.8 roots, one resolver for every caller |
-| D7.2.7* | 1508 | LaTeX is read by TeX expansion, never by TeX typesetting |
+| D7.2.7v2* | 1508 | LaTeX is read by TeX expansion, never by TeX typesetting |
 | D7.2.8* | 1510 | Document math preserves its source notation's layout policy |
 | **§D7.3** | 1522 | *Jube modules: the module system* |
 | D7.3.1 | 1524 | Core = ECMA-262 + engine substrate + `./lib` + a **closed globals allowlist** (console, timers, … |

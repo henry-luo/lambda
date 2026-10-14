@@ -16,6 +16,7 @@ static BlockProp make_block_prop_default() {
     value.writing_mode = WM_HORIZONTAL_TB;
     value.zoom = 1.0f;
     value.hyphens = CSS_VALUE_MANUAL;
+    value.hyphenate_limits[0] = value.hyphenate_limits[1] = value.hyphenate_limits[2] = -1;
     value.text_spacing_trim = CSS_VALUE_NORMAL;
     value.text_autospace = TEXT_AUTOSPACE_NORMAL;
     value.text_autospace_is_set = false;
@@ -61,6 +62,7 @@ static FontProp make_font_prop_default() {
     value.font_weight_numeric = 400;
     value.font_variant = CSS_VALUE_NORMAL;
     value.font_size_from_medium = true;
+    value.text_deco_color_current = true;
     value.text_emphasis_color_current = true;
     value.text_deco_skip_ink = CSS_VALUE_AUTO;
     value.text_underline_position = CSS_VALUE_AUTO;

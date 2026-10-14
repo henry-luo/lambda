@@ -2,6 +2,7 @@
 #include "../js_property_attrs.h"
 #include "../js_props.h"
 #include "../js_runtime.h"
+#include "../js_typed_array.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/heap_api.h"
 #include "../../runtime/runtime-state.h"
@@ -46,7 +47,7 @@ static uint64_t key_hash(Item key) {
     }
     return hashmap_sip(&key.item, sizeof(key.item), 2, 0);
 }
-bool mvp_lmd_same_value_zero(Item a, Item b) {
+extern "C" int64_t mvp_lmd_same_value_zero(Item a, Item b) {
     if (a.item == b.item) return true;
     // distinct packed integers need no double conversion for SameValueZero.
     if (get_type_id(a) == LMD_TYPE_INT && get_type_id(b) == LMD_TYPE_INT) return false;
@@ -139,37 +140,75 @@ Map* mvp_lmd_property_map(Item owner, bool writing) {
     TypeMap* type = (TypeMap*)map->type;
     return type && type->nominal && !type->js_meta &&
         (map->map_kind == MAP_KIND_PLAIN || map->map_kind == MAP_KIND_ORDERED ||
-         map->map_kind == MAP_KIND_GENERATOR || map->map_kind == MAP_KIND_ITERATOR) ? map : NULL;
+         map->map_kind == MAP_KIND_GENERATOR || map->map_kind == MAP_KIND_ITERATOR ||
+         map->map_kind == MAP_KIND_ARRAYBUFFER || map->map_kind == MAP_KIND_DATAVIEW ||
+         map->map_kind == MAP_KIND_TYPED_ARRAY) ? map : NULL;
+}
+bool mvp_lmd_typed_array_index(Item owner, Item key, double* index) {
+    if (get_type_id(owner) != LMD_TYPE_MAP || owner.map->map_kind != MAP_KIND_TYPED_ARRAY) return false;
+    bool negative_zero;
+    bool numeric = js_ta_key_canonical_numeric(key, index, &negative_zero);
+    if (numeric && negative_zero) *index = -0.0;
+    return numeric;
+}
+Item mvp_lmd_typed_array_property(Item owner, Item key, Item value, int64_t operation, Item receiver) {
+    double number; bool negative_zero; int index;
+    if (!js_ta_key_canonical_numeric(key, &number, &negative_zero)) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    bool valid = js_ta_numeric_index_valid(owner, number, negative_zero, &index);
+    bool strict = operation & LMD_PROP_STRICT;
+    operation &= ~LMD_PROP_STRICT;
+    if (operation == LMD_PROP_GET || operation == LMD_PROP_CALLEE)
+        return valid ? js_typed_array_get(owner, Item{.item = i2it(index)}) : Item{.item = ITEM_JS_UNDEFINED};
+    if (operation == LMD_PROP_OWN || operation == LMD_PROP_HAS) return Item{.item = b2it(valid)};
+    if (operation == LMD_PROP_DELETE) return valid && strict ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : Item{.item = b2it(!valid)};
+    if (operation == LMD_PROP_SET) {
+        Item status = mvp_lmd_set_completion(owner, key, value, receiver);
+        return item_is_error(status) ? status : status.item == ITEM_FALSE && strict ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : value;
+    }
+    return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
 }
 static ShapeEntry* own_field(Map* map, String* key) {
     return typemap_hash_lookup_key((TypeMap*)map->type, key);
 }
 const MvpLmdBuiltinMethod mvp_lmd_builtin_methods[] = {
-        {"get", LMD_TYPE_MAP, 1}, {"set", LMD_TYPE_MAP, 2}, {"has", LMD_TYPE_MAP, 3},
-        {"delete", LMD_TYPE_MAP, 4}, {"clear", LMD_TYPE_MAP, 5}, {"entries", LMD_TYPE_MAP, 6},
-        {"keys", LMD_TYPE_MAP, 7}, {"values", LMD_TYPE_MAP, 8},
+        {"get", LMD_TYPE_MAP, 1}, {"set", LMD_TYPE_MAP, 2, 2}, {"has", LMD_TYPE_MAP, 3},
+        {"delete", LMD_TYPE_MAP, 4}, {"clear", LMD_TYPE_MAP, 5, 0}, {"entries", LMD_TYPE_MAP, 6, 0},
+        {"keys", LMD_TYPE_MAP, 7, 0}, {"values", LMD_TYPE_MAP, 8, 0},
         {"fill", LMD_TYPE_ARRAY, LMD_METHOD_FILL}, {"push", LMD_TYPE_ARRAY, LMD_METHOD_PUSH},
-        {"pop", LMD_TYPE_ARRAY, LMD_METHOD_POP}, {"join", LMD_TYPE_ARRAY, LMD_METHOD_JOIN},
-        {"slice", LMD_TYPE_ARRAY, LMD_METHOD_SLICE}, {"forEach", LMD_TYPE_ARRAY, LMD_METHOD_FOREACH},
+        {"pop", LMD_TYPE_ARRAY, LMD_METHOD_POP, 0}, {"join", LMD_TYPE_ARRAY, LMD_METHOD_JOIN},
+        {"slice", LMD_TYPE_ARRAY, LMD_METHOD_SLICE, 2}, {"forEach", LMD_TYPE_ARRAY, LMD_METHOD_FOREACH},
         {"map", LMD_TYPE_ARRAY, LMD_METHOD_ARRAY_MAP},
         {"filter", LMD_TYPE_ARRAY, LMD_METHOD_FILTER}, {"indexOf", LMD_TYPE_ARRAY, LMD_METHOD_ARRAY_INDEX_OF},
-        {"reverse", LMD_TYPE_ARRAY, LMD_METHOD_REVERSE}, {"sort", LMD_TYPE_ARRAY, LMD_METHOD_SORT},
-        {"flat", LMD_TYPE_ARRAY, LMD_METHOD_FLAT}, {"reduce", LMD_TYPE_ARRAY, LMD_METHOD_REDUCE},
+        {"reverse", LMD_TYPE_ARRAY, LMD_METHOD_REVERSE, 0}, {"sort", LMD_TYPE_ARRAY, LMD_METHOD_SORT},
+        {"flat", LMD_TYPE_ARRAY, LMD_METHOD_FLAT, 0}, {"reduce", LMD_TYPE_ARRAY, LMD_METHOD_REDUCE},
         {"some", LMD_TYPE_ARRAY, LMD_METHOD_SOME}, {"includes", LMD_TYPE_ARRAY, LMD_METHOD_INCLUDES},
-        {"toString", LMD_TYPE_ARRAY, LMD_METHOD_ARRAY_STRING},
-        {"concat", LMD_TYPE_ARRAY, LMD_METHOD_CONCAT}, {"splice", LMD_TYPE_ARRAY, LMD_METHOD_SPLICE},
+        {"toString", LMD_TYPE_ARRAY, LMD_METHOD_ARRAY_STRING, 0},
+        {"concat", LMD_TYPE_ARRAY, LMD_METHOD_CONCAT}, {"splice", LMD_TYPE_ARRAY, LMD_METHOD_SPLICE, 2},
         {"unshift", LMD_TYPE_ARRAY, LMD_METHOD_UNSHIFT},
-        {"shift", LMD_TYPE_ARRAY, LMD_METHOD_SHIFT},
-        {"toReversed", LMD_TYPE_ARRAY, LMD_METHOD_TO_REVERSED},
+        {"shift", LMD_TYPE_ARRAY, LMD_METHOD_SHIFT, 0},
+        {"toReversed", LMD_TYPE_ARRAY, LMD_METHOD_TO_REVERSED, 0},
         {"at", LMD_TYPE_ARRAY, LMD_METHOD_AT},
+        {"every", LMD_TYPE_ARRAY, LMD_METHOD_EVERY}, {"find", LMD_TYPE_ARRAY, LMD_METHOD_FIND},
+        {"findIndex", LMD_TYPE_ARRAY, LMD_METHOD_FIND_INDEX}, {"reduceRight", LMD_TYPE_ARRAY, LMD_METHOD_REDUCE_RIGHT},
+        {"lastIndexOf", LMD_TYPE_ARRAY, LMD_METHOD_LAST_INDEX_OF},
+        {"flatMap", LMD_TYPE_ARRAY, LMD_METHOD_FLAT_MAP},
+        {"findLast", LMD_TYPE_ARRAY, LMD_METHOD_FIND_LAST},
+        {"findLastIndex", LMD_TYPE_ARRAY, LMD_METHOD_FIND_LAST_INDEX},
         {"charAt", LMD_TYPE_STRING, LMD_METHOD_CHAR_AT}, {"charCodeAt", LMD_TYPE_STRING, LMD_METHOD_CODE_AT},
         {"repeat", LMD_TYPE_STRING, LMD_METHOD_REPEAT},
-        {"substring", LMD_TYPE_STRING, LMD_METHOD_SUBSTRING}, {"slice", LMD_TYPE_STRING, LMD_METHOD_STRING_SLICE},
-        {"split", LMD_TYPE_STRING, LMD_METHOD_SPLIT}, {"indexOf", LMD_TYPE_STRING, LMD_METHOD_INDEX_OF},
-        {"startsWith", LMD_TYPE_STRING, LMD_METHOD_STARTS_WITH}, {"toUpperCase", LMD_TYPE_STRING, LMD_METHOD_UPPER},
+        {"substring", LMD_TYPE_STRING, LMD_METHOD_SUBSTRING, 2}, {"slice", LMD_TYPE_STRING, LMD_METHOD_STRING_SLICE, 2},
+        {"split", LMD_TYPE_STRING, LMD_METHOD_SPLIT, 2}, {"indexOf", LMD_TYPE_STRING, LMD_METHOD_INDEX_OF},
+        {"startsWith", LMD_TYPE_STRING, LMD_METHOD_STARTS_WITH}, {"toUpperCase", LMD_TYPE_STRING, LMD_METHOD_UPPER, 0},
         {"endsWith", LMD_TYPE_STRING, LMD_METHOD_ENDS_WITH}, {"padStart", LMD_TYPE_STRING, LMD_METHOD_PAD_START},
-        {"match", LMD_TYPE_STRING, LMD_METHOD_MATCH}, {"replace", LMD_TYPE_STRING, LMD_METHOD_REPLACE},
-        {"toLowerCase", LMD_TYPE_STRING, LMD_METHOD_LOWER}, {"toLocaleLowerCase", LMD_TYPE_STRING, LMD_METHOD_LOWER},
+        {"match", LMD_TYPE_STRING, LMD_METHOD_MATCH}, {"replace", LMD_TYPE_STRING, LMD_METHOD_REPLACE, 2},
+        {"toLowerCase", LMD_TYPE_STRING, LMD_METHOD_LOWER, 0}, {"toLocaleLowerCase", LMD_TYPE_STRING, LMD_METHOD_LOWER, 0},
+        {"concat", LMD_TYPE_STRING, LMD_METHOD_STRING_CONCAT},
+        {"trim", LMD_TYPE_STRING, LMD_METHOD_TRIM, 0}, {"trimStart", LMD_TYPE_STRING, LMD_METHOD_TRIM_START, 0},
+        {"trimEnd", LMD_TYPE_STRING, LMD_METHOD_TRIM_END, 0},
+        {"trimLeft", LMD_TYPE_STRING, LMD_METHOD_TRIM_START, 0}, {"trimRight", LMD_TYPE_STRING, LMD_METHOD_TRIM_END, 0},
+        {"codePointAt", LMD_TYPE_STRING, LMD_METHOD_CODE_POINT_AT}, {"at", LMD_TYPE_STRING, LMD_METHOD_STRING_AT},
+        {"includes", LMD_TYPE_STRING, LMD_METHOD_STRING_INCLUDES}, {"padEnd", LMD_TYPE_STRING, LMD_METHOD_PAD_END},
+        {"lastIndexOf", LMD_TYPE_STRING, LMD_METHOD_STRING_LAST_INDEX_OF},
         {"toFixed", LMD_TYPE_FLOAT, LMD_METHOD_TO_FIXED},
         {"toString", LMD_TYPE_FLOAT, LMD_METHOD_NUMBER_STRING},
         {"toString", LMD_TYPE_DECIMAL, LMD_METHOD_BIGINT_STRING}};
@@ -280,7 +319,8 @@ extern "C" Item mvp_lmd_array_index_property(Item owner, int64_t index, Item val
     bool own_storage = operation & LMD_PROP_OWN_STORAGE;
     operation &= ~LMD_PROP_OWN_STORAGE;
     int64_t op = operation & ~LMD_PROP_STRICT;
-    if (get_type_id(owner) == LMD_TYPE_ARRAY) {
+    // 2^32-1 and larger integer keys are ordinary named properties, never array indices.
+    if (get_type_id(owner) == LMD_TYPE_ARRAY && index < UINT32_MAX) {
         if (op == LMD_PROP_GET || op == LMD_PROP_PRESENT || op == LMD_PROP_HAS || op == LMD_PROP_OWN) {
             if (index == -1) return op == LMD_PROP_HAS || op == LMD_PROP_OWN ? Item{.item = ITEM_TRUE} : Item{.item = i2it(owner.array->length)};
             Item element = mvp_lmd_array_own_item(owner.array, index);
@@ -332,6 +372,21 @@ extern "C" Item mvp_lmd_property_get(Item owner, Item name, int64_t callee) {
     TypeId tid = get_type_id(owner);
     if (tid == LMD_TYPE_ARRAY) return mvp_lmd_array_property(owner, name, ItemNull,
         callee ? LMD_PROP_CALLEE : LMD_PROP_GET, owner);
+    if (tid == LMD_TYPE_STRING || tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL ||
+            tid == LMD_TYPE_DECIMAL || tid == LMD_TYPE_SYMBOL) {
+        MvpLmdLibraryState* state = mvp_lmd_program_library();
+        if (state && state->primitives) {
+            if (tid == LMD_TYPE_STRING) {
+                int64_t index = mvp_lmd_string_key(name.get_string());
+                if (index == -1) return Item{.item = i2it(utf8_to_utf16_length(owner.get_string()->chars, owner.get_string()->len))};
+                if (index >= 0) return mvp_lmd_string_at(owner, index, LMD_STRING_INDEX);
+            }
+            int kind = tid == LMD_TYPE_STRING ? LMD_PRIMITIVE_STRING : tid == LMD_TYPE_BOOL ? LMD_PRIMITIVE_BOOLEAN :
+                tid == LMD_TYPE_DECIMAL ? LMD_PRIMITIVE_BIGINT : LMD_PRIMITIVE_NUMBER;
+            Item prototype = mvp_lmd_class_values(tid == LMD_TYPE_SYMBOL ? &state->symbol : &state->primitives[kind])[1];
+            return mvp_lmd_property_with_receiver(prototype, name, ItemNull, LMD_PROP_GET, owner);
+        }
+    }
     if (tid == LMD_TYPE_ARRAY || tid == LMD_TYPE_STRING || tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_DECIMAL) {
         int method = mvp_lmd_builtin_method(name.get_string(), tid == LMD_TYPE_INT ? LMD_TYPE_FLOAT : tid);
         if (method) return callee ? Item{.item = mvp_lmd_method_token(method)} : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
@@ -435,6 +490,54 @@ extern "C" Item mvp_lmd_define_accessor(Item owner, Item name, Item function, in
     return cell && js_map_store_accessor(mvp_lmd_property_map(object.get(), true), key.get().get_string(), cell,
         (uint8_t)(attributes >> 8), context->pool) ? object.get() : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
+extern "C" Item mvp_lmd_private_element(Item owner, Item key, Item input, int64_t operation) {
+    if (operation == LMD_PRIVATE_NAME) {
+        String* spelling = key.get_string();
+        NameRef name = name_pool_create_unique_private(context->name_pool, {spelling->chars, spelling->len});
+        return name ? Item{.item = s2it(name)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    }
+    if (!mvp_lmd_is_object(owner)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    uint64_t home = 0;
+    Rooted<Item> object(roots, owner), name(roots, key), storage(roots, owner);
+    Rooted<Item> value(roots, lambda_item_adopt_scalar_home(input, &home));
+    bool add = operation == LMD_PRIVATE_ADD || operation == LMD_PRIVATE_METHOD;
+    if (mvp_lmd_is_proxy(object.get())) {
+        storage.set(js_proxy_private_slots(object.get(), add, []() {
+            return mvp_lmd_object_new(mvp_lmd_program_library()->object_shape, 0);
+        }, true));
+    } else if (get_type_id(object.get()) == LMD_TYPE_FUNC && !mvp_lmd_class_record(object.get())) {
+        Item ready = mvp_lmd_function_prepare(object.get());
+        if (item_is_error(ready)) return ready;
+    }
+    Map* map = mvp_lmd_property_map(storage.get(), add || operation == LMD_PRIVATE_SET);
+    ShapeEntry* field = map && map->type ? own_field(map, name.get().get_string()) : NULL;
+    if (operation == LMD_PRIVATE_HAS) return Item{.item = b2it(field != NULL)};
+    if (add ? field != NULL : field == NULL) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (!map) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    if (!map->type) map->type = type_tree_map_root(runtime_shape_tree());
+    if (field && (field->flags & JSPD_IS_ACCESSOR)) {
+        JsAccessorCell* pair = js_shape_entry_accessor_pair(field);
+        Item callable = operation == LMD_PRIVATE_SET ? pair->setter : pair->getter;
+        // private accessors throw for either missing half, even in sloppy callers.
+        if (callable.item == ITEM_NULL || callable.item == ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+        return mvp_lmd_accessor_call(object.get(), field, value.get(),
+            operation == LMD_PRIVATE_SET ? LMD_PROP_SET | LMD_PROP_STRICT : LMD_PROP_GET);
+    }
+    if (operation == LMD_PRIVATE_GET) return map_shape_field_to_item(map->data, field);
+    if (field && (field->flags & JSPD_NON_WRITABLE)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (!map_shape_set_resolved(map, name.get().get_string(), field, value.get())) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    if (operation == LMD_PRIVATE_METHOD) {
+        field = own_field(map, name.get().get_string());
+        // the descriptor is shared immutable shape metadata; use its existing transition kernel.
+        JsPropertyDescriptor descriptor = {};
+        descriptor.flags = JS_PD_HAS_WRITABLE;
+        Item result = mvp_lmd_define_own_property(storage.get(), name.get(), &descriptor);
+        if (item_is_error(result)) return result;
+    }
+    return lambda_item_uses_scalar_home(value.get()) ? push_d(it2d(value.get())) : value.get();
+}
 static Item mvp_lmd_descriptor_read(Item owner, Item key, bool presence) {
     return mvp_lmd_class_property(owner, key, ItemNull, presence ? LMD_PROP_HAS : LMD_PROP_GET, NULL);
 }
@@ -512,6 +615,17 @@ extern "C" Item mvp_lmd_define_property(Item owner, Item name, Item descriptor) 
     return item_is_error(status) ? status : status.item == ITEM_FALSE ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : object.get();
 }
 Item mvp_lmd_define_own_property(Item owner, Item name, const JsPropertyDescriptor* descriptor) {
+    double numeric; int index;
+    if (mvp_lmd_typed_array_index(owner, name, &numeric)) {
+        if (!js_ta_numeric_index_valid(owner, numeric, numeric == 0 && signbit(numeric), &index) ||
+                js_pd_is_accessor(descriptor) ||
+                ((descriptor->flags & JS_PD_HAS_CONFIGURABLE) && !js_pd_is_configurable(descriptor)) ||
+                ((descriptor->flags & JS_PD_HAS_ENUMERABLE) && !(descriptor->flags & JS_PD_ENUMERABLE)) ||
+                ((descriptor->flags & JS_PD_HAS_WRITABLE) && !(descriptor->flags & JS_PD_WRITABLE)))
+            return Item{.item = ITEM_FALSE};
+        Item stored = descriptor->flags & JS_PD_HAS_VALUE ? mvp_lmd_typed_array_store(owner, numeric, descriptor->value) : ItemNull;
+        return item_is_error(stored) ? stored : Item{.item = ITEM_TRUE};
+    }
     uint64_t home = 0;
     JsPropertyDescriptor converted = *descriptor;
     converted.value = lambda_item_adopt_scalar_home(descriptor->value, &home);
@@ -690,7 +804,14 @@ extern "C" Item mvp_lmd_define_properties(Item owner, Item descriptors) {
     if (!roots.valid()) return ItemError;
     Rooted<Item> object(roots, owner), input(roots, descriptors), keys(roots, ItemNull);
     Rooted<Item> pending(roots, ItemNull), descriptor(roots, ItemNull), key(roots, ItemNull);
-    if (!mvp_lmd_property_map(object.get()) && !mvp_lmd_is_proxy(object.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    // lazy callable metadata is independent of whether the target is an object.
+    if (!mvp_lmd_is_object(object.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    input.set(mvp_lmd_box_primitive(input.get()));
+    if (item_is_error(input.get())) return input.get();
+    if (get_type_id(input.get()) == LMD_TYPE_FUNC) {
+        Item status = mvp_lmd_function_prepare(input.get());
+        if (item_is_error(status)) return status;
+    }
     keys.set(mvp_lmd_object_project(input.get(), 5));
     if (item_is_error(keys.get())) return keys.get();
     pending.set(mvp_lmd_array_new(0));
@@ -724,6 +845,16 @@ extern "C" Item mvp_lmd_define_properties(Item owner, Item descriptors) {
     return object.get();
 }
 Item mvp_lmd_get_own_property(Item owner, Item name, JsPropertyDescriptor* descriptor) {
+    double numeric; int index;
+    if (mvp_lmd_typed_array_index(owner, name, &numeric)) {
+        if (!js_ta_numeric_index_valid(owner, numeric, numeric == 0 && signbit(numeric), &index)) return Item{.item = ITEM_FALSE};
+        *descriptor = {};
+        descriptor->flags = JS_PD_HAS_VALUE | JS_PD_HAS_WRITABLE | JS_PD_WRITABLE |
+            JS_PD_HAS_ENUMERABLE | JS_PD_ENUMERABLE | JS_PD_HAS_CONFIGURABLE;
+        js_pd_set_configurable(descriptor, true);
+        descriptor->value = js_typed_array_get(owner, Item{.item = i2it(index)});
+        return item_is_error(descriptor->value) ? descriptor->value : Item{.item = ITEM_TRUE};
+    }
     if (mvp_lmd_is_proxy(owner)) return mvp_lmd_proxy_property(owner, name, ItemNull, owner, LMD_PROXY_DESCRIPTOR, descriptor);
     if (get_type_id(owner) == LMD_TYPE_FUNC && !mvp_lmd_class_record(owner)) {
         RootFrame roots(2);
@@ -812,6 +943,15 @@ Item mvp_lmd_set_completion(Item owner, Item name, Item value, Item receiver, Mv
             return item_is_error(ready) ? ready :
                 mvp_lmd_set_completion(object.get(), key.get(), argument.get(), target.get());
         }
+        double numeric; int index;
+        if (mvp_lmd_typed_array_index(owner, name, &numeric)) {
+            if (owner.item == receiver.item) {
+                Item stored = mvp_lmd_typed_array_store(owner, numeric, value);
+                return item_is_error(stored) ? stored : Item{.item = ITEM_TRUE};
+            }
+            // an invalid numeric key terminates the exotic prototype's Set without receiver creation.
+            if (!js_ta_numeric_index_valid(owner, numeric, numeric == 0 && signbit(numeric), &index)) return Item{.item = ITEM_TRUE};
+        }
         Item found = mvp_lmd_get_own_property(owner, name, &descriptor);
         if (item_is_error(found)) return found;
         if (found.item == ITEM_TRUE) break;
@@ -883,7 +1023,7 @@ extern "C" Item mvp_lmd_object_integrity(Item owner, int64_t operation) {
     MvpLmdLibraryState* state = mvp_lmd_program_library();
     bool arguments = state && state->arguments_key && get_type_id(owner) == LMD_TYPE_MAP &&
         typemap_hash_lookup_key((TypeMap*)owner.map->type, state->arguments_key);
-    if (get_type_id(owner) == LMD_TYPE_ARRAY || mvp_lmd_is_proxy(owner) || arguments) {
+    if (get_type_id(owner) == LMD_TYPE_ARRAY || mvp_lmd_is_proxy(owner) || arguments || js_is_typed_array(owner)) {
         Rooted<Item> keys(roots, mvp_lmd_object_project(object.get(), 5));
         Rooted<Item> descriptor(roots, ItemNull), attributes(roots, ItemNull);
         if (item_is_error(keys.get())) return keys.get();
@@ -1197,6 +1337,7 @@ extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
     if (mvp_lmd_is_proxy(owner)) return mvp_lmd_proxy_project(owner, projection);
     Map* map = mvp_lmd_property_map(owner);
     bool indexed = get_type_id(owner) == LMD_TYPE_ARRAY;
+    bool typed = js_is_typed_array(owner);
     if (!map && !indexed) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     if (!context->name_pool) context->name_pool = name_pool_create_runtime(context->pool);
     TypeMap* type = map ? (TypeMap*)map->type : NULL;
@@ -1208,26 +1349,26 @@ extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
     Rooted<Array*> result(roots, array()), pair(roots, NULL);
     Rooted<Item> key(roots, ItemNull), value(roots, ItemNull);
     if (!result.get()) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    int64_t dense_count = indexed ? object.get().array->length : 0;
+    int64_t dense_count = indexed ? object.get().array->length : typed ? js_typed_array_length(owner) : 0;
     if (indexed && dense_count > container_dense_capacity(object.get().array)) dense_count = container_dense_capacity(object.get().array);
     int64_t sparse_count = indexed ? js_array_sparse_collect_indices(object.get(), 0, object.get().array->length, NULL, 0) : 0;
     int64_t capacity = (type ? type->length : 0) + dense_count + sparse_count + (indexed ? 1 : 0);
     ProjectionField* fields = capacity ? (ProjectionField*)pool_calloc(context->pool, capacity * sizeof(ProjectionField)) : NULL;
     if (capacity && !fields) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     int64_t count = 0;
-    bool callbacks = indexed || arguments;
-    if (indexed) {
+    bool callbacks = indexed || typed || arguments;
+    if (indexed || typed) {
         // descriptor entries replace storage entries in the ordered own-key list.
         for (int64_t i = 0; i < dense_count; i++) {
-            if (object.get().array->items[i].item == ITEM_JS_DELETED_SENTINEL) continue;
+            if (indexed && object.get().array->items[i].item == ITEM_JS_DELETED_SENTINEL) continue;
             fields[count++] = {NULL, (uint32_t)i, -1};
         }
         int64_t* indices = sparse_count ? (int64_t*)pool_alloc(context->pool, sparse_count * sizeof(int64_t)) : NULL;
         if (sparse_count && !indices) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-        js_array_sparse_collect_indices(object.get(), 0, object.get().array->length, indices, sparse_count);
+        if (indexed) js_array_sparse_collect_indices(object.get(), 0, object.get().array->length, indices, sparse_count);
         for (int64_t i = 0; i < sparse_count; i++) fields[count++] = {NULL, (uint32_t)indices[i], -1};
         if (indices) pool_free(context->pool, indices);
-        if (projection == 3 || projection == 5) fields[count++] = {NULL, UINT32_MAX, -1};
+        if (indexed && (projection == 3 || projection == 5)) fields[count++] = {NULL, UINT32_MAX, -1};
     }
     if (type) {
         FOR_EACH_MAP_FIELD(type, field) {
@@ -1269,9 +1410,10 @@ extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
             if (callbacks) field = own_field(mvp_lmd_property_map(object.get()), key.get().get_string());
             if (field && (field->flags & JSPD_NON_ENUMERABLE)) continue;
             if (!field && !element && !length_key) continue;
-            if (element && !field && mvp_lmd_array_own_item(object.get().array, fields[i].index).item == ITEM_JS_DELETED_SENTINEL) continue;
+            if (element && !field && (typed ? fields[i].index >= (uint32_t)js_typed_array_length(object.get()) :
+                    mvp_lmd_array_own_item(object.get().array, fields[i].index).item == ITEM_JS_DELETED_SENTINEL)) continue;
         }
-        value.set(projection == 0 || projection >= 3 ? key.get() : lambda_item_adopt_scalar_home(arguments ?
+        value.set(projection == 0 || projection >= 3 ? key.get() : lambda_item_adopt_scalar_home(arguments || typed ?
             mvp_lmd_class_property(object.get(), key.get(), ItemNull, LMD_PROP_GET, NULL) : indexed ?
             mvp_lmd_array_property(object.get(), key.get(), ItemNull, LMD_PROP_GET, object.get()) :
             field->flags & JSPD_IS_ACCESSOR ? mvp_lmd_accessor_call(object.get(), field, ItemNull, LMD_PROP_GET) :

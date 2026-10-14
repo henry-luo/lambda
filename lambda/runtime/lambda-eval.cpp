@@ -5366,6 +5366,16 @@ Symbol* fn_name(Item item) {
         if (!elmt || !elmt->type) return nullptr;
         return fn_name_from_type((Type*)elmt->type);
     }
+    case LMD_TYPE_VELMT: {
+        // D7.4.5v2: read the virtual intrinsic tag, rooting both owner and result across symbol allocation.
+        RootFrame roots(2);
+        Rooted<Item> owner(roots, item);
+        Item tag = ItemNull;
+        if (element_tag_for(owner.get(), &tag) != VIRTUAL_OP_OK ||
+                !is_text_type_id(get_type_id(tag))) return nullptr;
+        Rooted<Item> rooted_tag(roots, tag);
+        return fn_name_symbol_from_chars(rooted_tag.get().get_chars(), rooted_tag.get().get_len());
+    }
     case LMD_TYPE_FUNC: {
         // return the function's name as a symbol
         Function* fn = item.function;
@@ -6202,7 +6212,8 @@ static void collect_names(Map* options_map, const char* key, ArrayList* names) {
 }
 
 static bool parse_tex_options(Map* options_map, InputParseOptions* options,
-                              ArrayList* adapter_names, ArrayList* raw_names) {
+                              ArrayList* adapter_names, ArrayList* raw_names,
+                              ArrayList* chaptered_names) {
     bool is_found = false;
     Item ini = _map_get((TypeMap*)options_map->type, options_map->data, "ini", &is_found);
     if (is_found && get_type_id(ini) == LMD_TYPE_BOOL) options->tex_ini = it2b(ini);
@@ -6214,6 +6225,9 @@ static bool parse_tex_options(Map* options_map, InputParseOptions* options,
     collect_names(options_map, "raw", raw_names);
     options->tex_raw_commands = (const char* const*)raw_names->data;
     options->tex_raw_command_count = raw_names->length;
+    collect_names(options_map, "chaptered", chaptered_names);
+    options->tex_chaptered = (const char* const*)chaptered_names->data;
+    options->tex_chaptered_count = chaptered_names->length;
     return options->tex_ini || options->tex_base || options->tex_adapter_count ||
         options->tex_raw_command_count;
 }
@@ -6315,6 +6329,7 @@ Item fn_parse2(Item str_item, Item type) {
     InputParseOptions parse_options = {};
     ArrayList* adapter_names = arraylist_new(8);
     ArrayList* raw_names = arraylist_new(8);
+    ArrayList* chaptered_names = arraylist_new(8);
     bool has_tex_options = false;
     bool highlight_spans = false;   // sourcepos: 'spans'
     Item window_item = ItemNull;
@@ -6386,12 +6401,14 @@ Item fn_parse2(Item str_item, Item type) {
             if (get_type_id(whitespace) != LMD_TYPE_BOOL) {
                 arraylist_free(adapter_names);
                 arraylist_free(raw_names);
+                arraylist_free(chaptered_names);
                 set_runtime_error(ERR_TYPE_MISMATCH, "parse: preserve_whitespace option must be a bool");
                 return ItemError;
             }
             parse_options.xml_preserve_whitespace = it2b(whitespace);
         }
-        has_tex_options = parse_tex_options(options_map, &parse_options, adapter_names, raw_names);
+        has_tex_options = parse_tex_options(options_map, &parse_options, adapter_names, raw_names,
+            chaptered_names);
     }
     else {
         set_runtime_error(ERR_TYPE_MISMATCH,
@@ -6434,11 +6451,13 @@ Item fn_parse2(Item str_item, Item type) {
     log_debug("fn_parse2: type=%s, flavor=%s", type_str ? type_str->chars : "auto", flavor_str ? flavor_str->chars : "null");
 
     parse_options.source_positions = source_positions;
-    Input* input = (source_positions || has_tex_options || parse_options.xml_preserve_whitespace)
-        ? input_from_source_with_options(str->chars, dummy_url, type_str, flavor_str, &parse_options)
-        : input_from_source(str->chars, dummy_url, type_str, flavor_str);
+    // preserve the Item's byte count so document XML cannot accept a NUL-truncated prefix.
+    Input* input = input_from_source_n_with_name_parent(str->chars, str->len, dummy_url,
+        type_str, flavor_str, NULL,
+        (source_positions || has_tex_options || parse_options.xml_preserve_whitespace) ? &parse_options : NULL);
     arraylist_free(adapter_names);
     arraylist_free(raw_names);
+    arraylist_free(chaptered_names);
     if (!input) {
         set_runtime_error(ERR_OUT_OF_MEMORY,
             "parse: failed to initialize parser for format '%s'",

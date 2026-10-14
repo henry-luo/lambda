@@ -2770,11 +2770,13 @@ static DomDocument* load_image_layout_file(Url* url, int width, int height, Pool
 struct LayoutFormatRoute {
     const char* extension;
     LayoutFormatLoader loader;
+    const char* transform_type = nullptr;
 };
 
 static const LayoutFormatRoute layout_format_routes[] = {
     {".ls", load_lambda_script_doc},
     {".slides", load_slides_doc},
+    {".docx", nullptr, "docx"},
     {".tex", load_latex_doc}, {".latex", load_latex_doc},
     {".pgf", load_tikz_doc},
     {".md", load_markdown_doc}, {".markdown", load_markdown_doc},
@@ -2793,7 +2795,7 @@ static const LayoutFormatRoute layout_format_routes[] = {
 static const LayoutFormatRoute* layout_find_format_route(const char* extension) {
     if (!extension) return nullptr;
     for (size_t i = 0; i < sizeof(layout_format_routes) / sizeof(layout_format_routes[0]); i++) {
-        if (strcmp(extension, layout_format_routes[i].extension) == 0) {
+        if (str_ieq_cstr(extension, layout_format_routes[i].extension)) {
             return &layout_format_routes[i];
         }
     }
@@ -2870,7 +2872,10 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
         if (text_route && !include_text) return nullptr;
         if (handled) *handled = true;
         log_info("[Layout] Detected %s file, using format loader", ext);
-        DomDocument* document = route->loader(url, width, height, pool);
+        // Script document formats share the configured transform boundary (D7.2.4).
+        DomDocument* document = route->transform_type
+            ? load_input_type_transform_doc(route->transform_type, url, nullptr, 0, width, height, pool)
+            : route->loader(url, width, height, pool);
         if (document && document->page_kind == DOM_PAGE_KIND_LAMBDA_SCRIPT) {
             // generated HTML needs the same script lifecycle, after its host is bound.
             document_apply_js_host_config(document, host_config);

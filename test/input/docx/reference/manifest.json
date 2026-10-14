@@ -1,0 +1,92 @@
+{
+  "commit": "791a189230977143cde64dbf9f1d24dce96ac8a1",
+  "fixtures": [
+    {
+      "file": "simple-list.docx",
+      "sha256": "ed3c015cf411d07b08bf34264ff709363740b0747af355479088079d0796dfb3",
+      "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/simple-list.docx",
+      "producer": {
+        "Application": "Microsoft Office Word",
+        "AppVersion": "14.0000"
+      },
+      "expected": "semantic-import"
+    },
+    {
+      "file": "single-paragraph.docx",
+      "sha256": "7d89bf44b4d6940234efb6973d24706c881aa875bb794bfbe54efd92f9c6cf3e",
+      "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/single-paragraph.docx",
+      "producer": {
+        "Application": "Microsoft Office Word",
+        "AppVersion": "14.0000"
+      },
+      "expected": "semantic-import"
+    },
+    {
+      "file": "strict-format.docx",
+      "sha256": "86d90f50d8fd3310c4079291c6622878d8f4d8864d665d1e34841f407e7b7662",
+      "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/strict-format.docx",
+      "producer": {
+        "Application": "Microsoft Office Word",
+        "AppVersion": "16.0000"
+      },
+      "expected": "semantic-import"
+    },
+    {
+      "file": "strikethrough.docx",
+      "sha256": "1058370d03b42e797384e25b2142fce805f5520693e5ddbdf5e5ee64a3cf910c",
+      "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/strikethrough.docx",
+      "producer": {
+        "Application": "Microsoft Office Word",
+        "AppVersion": "14.0000"
+      },
+      "expected": "semantic-import"
+    },
+    {
+      "file": "tables.docx",
+      "sha256": "9f75a82d36530d91989a43fcb8940f2e753051787714cecbf6a1f49a22e58ded",
+      "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/tables.docx",
+      "producer": {
+        "Application": "Microsoft Office Word",
+        "AppVersion": "14.0000"
+      },
+      "expected": "semantic-import"
+    },
+    {
+      "file": "tiny-picture-target-base-relative.docx",
+      "sha256": "7ce8d0d134ce59d89217eeee8e604ec5c60f57ff726f38ccda8201c2e8fedf12",
+      "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/tiny-picture-target-base-relative.docx",
+      "producer": {
+        "Application": "Microsoft Office Word",
+        "AppVersion": "14.0000"
+      },
+      "expected": "zip-version-rejection"
+    },
+    {
+      "file": "tiny-picture.docx",
+      "sha256": "791b57c038328560d710c33c5b53bc3ea67a6c08bd9fa0fce0770883e39228d8",
+      "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/tiny-picture.docx",
+      "producer": {
+        "Application": "Microsoft Office Word",
+        "AppVersion": "14.0000"
+      },
+      "expected": "semantic-import"
+    },
+    {
+      "file": "underline.docx",
+      "sha256": "3cc0b83be6c543ef74624303b5a37881ae1784cddb3a238f4410448c81604dde",
+      "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/underline.docx",
+      "producer": {
+        "Application": "Microsoft Office Word",
+        "AppVersion": "14.0000"
+      },
+      "expected": "semantic-import"
+    },
+    {
+      "file": "utf8-bom.docx",
+      "sha256": "8b59e5faa28793693ce0801711525f88b1f94f62d150ae9a92d1e70012d786ee",
+      "url": "https://raw.githubusercontent.com/mwilliamson/mammoth.js/791a189230977143cde64dbf9f1d24dce96ac8a1/test/test-data/utf8-bom.docx",
+      "producer": {},
+      "expected": "semantic-import"
+    }
+  ]
+}

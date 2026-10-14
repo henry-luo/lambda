@@ -748,9 +748,7 @@ static bool pdf_push_clip_path(PdfRenderContext* ctx, RdtPath* path,
 static void pdf_render_glyph_run(PdfRenderContext* ctx, const PaintGlyphRun* run,
                                  const RdtMatrix* stack_transform) {
     if (!ctx || !run) return;
-    RdtPath* path = run->count > 0 && run->glyph_ids
-        ? render_path_create_glyph_run(run)
-        : render_path_create_text_run(run, ctx->ui_context ? ctx->ui_context->font_ctx.get() : nullptr);
+    RdtPath* path = render_path_create_paint_glyph_run(run, ctx->ui_context ? ctx->ui_context->font_ctx.get() : nullptr);
     RdtMatrix composed;
     const RdtMatrix* transform = pdf_compose_transform(stack_transform,
         pdf_optional_transform(run->has_transform, &run->transform), &composed);
@@ -970,6 +968,11 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
         if (!paint_op_has_flags(cmd->op, PAINT_OP_FLAG_EFFECT_STACK)) return false;
         if (paint_op_has_flags(cmd->op, PAINT_OP_FLAG_STACK_PUSH)) {
             PaintEffectGroup* p = &cmd->effect_group;
+            if (state->passthrough_effect_depth > 0) {
+                state->passthrough_effect_depth++;
+                state->emitted_count++;
+                return true;
+            }
             if (!pdf_effect_group_is_opacity_only(caps, p)) {
                 state->passthrough_effect_depth++;
                 if (!state->logged_unsupported_effect) {
@@ -985,24 +988,32 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
                 log_error("[PDF_PAINT_IR] opacity effect stack overflow; rendering group without opacity");
                 return true;
             }
+            // PDF alpha belongs to the isolated group invocation, not each overlapping primitive.
+            Bound bounds = p->bounds;
+            if (state->active_transform_depth > 0 &&
+                    !rdt_matrix_project_rect_bounds(&state->current_transform,
+                        bounds.left, bounds.top, bounds.right, bounds.bottom,
+                        &bounds.left, &bounds.top, &bounds.right, &bounds.bottom))
+                bounds = {};
+            if (!(bounds.right > bounds.left && bounds.bottom > bounds.top))
+                bounds = {0.0f, 0.0f, ctx->page_width, ctx->page_height};
+            // a Form BBox clips its contents; enclose fractional ink edges instead of clipping AA twice.
+            float density = ui_context_raster_scale(ctx->ui_context);
+            bounds = {floorf(bounds.left * density) / density,
+                floorf(bounds.top * density) / density,
+                ceilf(bounds.right * density) / density,
+                ceilf(bounds.bottom * density) / density};
+            if (HPDF_Page_BeginTransparencyGroup(ctx->current_page, p->opacity,
+                    bounds.left, ctx->page_height - bounds.bottom,
+                    bounds.right, ctx->page_height - bounds.top) != HPDF_OK) {
+                state->passthrough_effect_depth++;
+                state->fallback_count++;
+                log_error("[PDF_PAINT_IR] failed to begin isolated opacity group");
+                return true;
+            }
+            HPDF_Page_TrackTransparencyGroupInk(ctx->current_page, density);
             state->opacity_stack[state->active_effect_depth++] = state->current_opacity;
-            state->current_opacity *= p->opacity;
-            state->current_opacity = clamp_unit(state->current_opacity);
-            if (HPDF_Page_GSave(ctx->current_page) != HPDF_OK) {
-                log_error("[PDF_PAINT_IR] failed to save PDF graphics state for opacity group");
-                return true;
-            }
-            HPDF_ExtGState ext_gstate = HPDF_CreateExtGState(ctx->pdf_doc);
-            if (!ext_gstate) {
-                log_error("[PDF_PAINT_IR] failed to create PDF opacity ExtGState");
-                return true;
-            }
-            HPDF_ExtGState_SetAlphaFill(ext_gstate, state->current_opacity);
-            HPDF_ExtGState_SetAlphaStroke(ext_gstate, state->current_opacity);
-            if (HPDF_Page_SetExtGState(ctx->current_page, ext_gstate) != HPDF_OK) {
-                log_error("[PDF_PAINT_IR] failed to apply PDF opacity ExtGState");
-                return true;
-            }
+            state->current_opacity = 1.0f;
             state->emitted_count++;
             return true;
         }
@@ -1017,7 +1028,10 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
                 return true;
             }
             state->current_opacity = state->opacity_stack[--state->active_effect_depth];
-            HPDF_Page_GRestore(ctx->current_page);
+            if (HPDF_Page_EndTransparencyGroup(ctx->current_page) != HPDF_OK) {
+                state->unsupported_count++;
+                log_error("[PDF_PAINT_IR] failed to close isolated opacity group");
+            }
             state->emitted_count++;
             return true;
         }
@@ -1314,9 +1328,7 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
         adjusted_space_width = space_width + (extra_space / space_count);
     }
 
-    float baseline_offset = ctx->font.style && ctx->font.style->ascender > 0.0f
-        ? ctx->font.style->ascender : font_size * 0.8f;
-    float baseline_y = y + baseline_offset;
+    float baseline_y = render_text_baseline_y(&ctx->font, y);
     PaintGlyphRun run = {};
     run.font = lam::up(&ctx->font);
     run.color = ctx->color;
@@ -1334,9 +1346,34 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
             parent, &run, {ctx->block.x, ctx->block.y, parent->width, parent->height})) {
         pdf_lower_paint_list(ctx);
     }
-    if (parent && parent->font && render_paint_text_shadows(pdf_active_paint_list(ctx),
-            ctx->ui_context, &run, parent->fontp()->text_shadow)) pdf_lower_paint_list(ctx);
+    RenderTextDecorationSource decoration = {str, text_rect, ctx->block.x, ctx->block.y};
+    if (parent && parent->font && parent->fontp()->text_shadow) {
+        if (!render_paint_text_shadows(pdf_active_paint_list(ctx), ctx->ui_context,
+                &run, parent->fontp()->text_shadow, &decoration)) {
+            ctx->paint_state.unsupported_count++;
+            log_error("[PDF_TEXT_SHADOW] cannot record complete shadow geometry");
+        }
+        pdf_lower_paint_list(ctx);
+    }
+    if (!render_paint_text_decorations(pdf_active_paint_list(ctx), &ctx->font, str, text_rect,
+        ctx->block.x, ctx->block.y, ctx->color, true)) {
+        ctx->paint_state.unsupported_count++;
+        log_error("[PDF_TEXT_DECORATION] cannot record complete decoration geometry");
+    }
+    pdf_lower_paint_list(ctx);
     paint_glyph_run(pdf_active_paint_list(ctx), &run);
+    pdf_lower_paint_list(ctx);
+    if (!render_paint_text_emphasis(pdf_active_paint_list(ctx),
+            ctx->ui_context ? ctx->ui_context->font_ctx.get() : nullptr, &run)) {
+        ctx->paint_state.unsupported_count++;
+        log_error("[PDF_TEXT_EMPHASIS] cannot record selected mark geometry");
+    }
+    pdf_lower_paint_list(ctx);
+    if (!render_paint_text_decorations(pdf_active_paint_list(ctx), &ctx->font, str, text_rect,
+        ctx->block.x, ctx->block.y, ctx->color, false)) {
+        ctx->paint_state.unsupported_count++;
+        log_error("[PDF_TEXT_DECORATION] cannot record complete decoration geometry");
+    }
     pdf_lower_paint_list(ctx);
 
     pdf_record_link_rect(ctx, pdf_nearest_link(text), base_x, y,
@@ -1510,16 +1547,10 @@ static void pdf_cb_render_svg_subscene(RenderContext* vctx, const PaintSvgSubsce
 
 static void pdf_cb_render_column_rules(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
-    if (!ctx || !block || !block->multicol_prop()) return;
-
+    RenderColumnRuleIterator iterator;
+    if (!ctx || !render_column_rules_begin(block, &iterator)) return;
     MultiColumnProp* mc = block->multicol_prop();
-    int rule_column_count = mc->computed_used_column_count > 0
-        ? mc->computed_used_column_count
-        : mc->computed_column_count;
-    if (rule_column_count <= 1 || mc->rule_width <= 0.0f ||
-        mc->rule_style == CSS_VALUE_NONE || mc->rule_color.a == 0) {
-        return;
-    }
+    if (mc->rule_color.a == 0) return;
 
     if (mc->rule_style == CSS_VALUE_DOTTED ||
         mc->rule_style == CSS_VALUE_DASHED) {
@@ -1528,28 +1559,10 @@ static void pdf_cb_render_column_rules(RenderContext* vctx, ViewBlock* block, fl
         return;
     }
 
-    float column_width = mc->computed_column_width;
-    float gap = multicol_column_gap(block);
-    float block_x = abs_x;
-    float block_y = abs_y;
-    if (block->bound) {
-        block_x += block->boundary()->padding.left;
-        block_y += block->boundary()->padding.top;
-    }
-
-    float rule_height = block->height;
-    if (block->bound) {
-        rule_height -= layout_box_metrics(block).pad_border_v;
-    }
-
-    if (rule_height <= 0.0f) {
-        rule_height = layout_view_children_bottom(block, false);
-    }
-    if (rule_height <= 0.0f) return;
-
-    for (int i = 0; i < rule_column_count - 1; i++) {
-        float rule_x = block_x + (i + 1) * column_width + i * gap +
-                       gap / 2.0f - mc->rule_width / 2.0f;
+    float rule_x = 0.0f, block_y = 0.0f, rule_height = 0.0f;
+    while (render_column_rule_next(&iterator, &rule_x, &block_y, &rule_height)) {
+        rule_x += abs_x;
+        block_y += abs_y;
 
         if (mc->rule_style == CSS_VALUE_DOUBLE) {
             float thin_width = mc->rule_width / 3.0f;

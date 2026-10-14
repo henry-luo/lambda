@@ -7,7 +7,7 @@
 #include <float.h>
 #include <cstring>
 
-static bool view_has_non_trailing_line_content(View* view, ViewSpan* span);
+static bool view_has_non_trailing_line_content(View* view);
 static bool has_following_content(DomNode* node, bool inline_only);
 
 float layout_inline_end_edge(ViewSpan* span) {
@@ -41,12 +41,7 @@ static bool quirks_br_after_nested_inline_text(LayoutContext* lycon,
     return nested_inline_text;
 }
 
-typedef struct InlineOutOfFlowKind {
-    bool floated;
-    bool positioned;
-} InlineOutOfFlowKind;
-
-static InlineOutOfFlowKind inline_out_of_flow_kind(DomElement* elem) {
+InlineOutOfFlowKind inline_out_of_flow_kind(DomElement* elem) {
     InlineOutOfFlowKind kind = {};
     if (!elem) return kind;
     kind.floated = layout_position_is_floated(elem->position);
@@ -113,18 +108,16 @@ static bool inline_has_axis_edge_decoration(ViewSpan* span, bool rtl, bool start
     return inline_span_edge_extent(span, rtl, start_edge, include_margin) > 0.0f;
 }
 
-static bool text_is_all_collapsible_space(DomText* text, ViewSpan* span);
-
-static bool inline_text_has_visible_content(View* child, ViewSpan* span) {
+static bool inline_text_has_visible_content(View* child) {
     return child && child->view_type == RDT_VIEW_TEXT &&
         child->width > 0.0f && child->height > 0.0f &&
-        !text_is_all_collapsible_space(
-            lam::dom_as<DOM_NODE_TEXT>(static_cast<DomNode*>(child)), span);
+        !layout_text_is_collapsible_whitespace(
+            lam::dom_as<DOM_NODE_TEXT>(static_cast<DomNode*>(child)));
 }
 
 static bool span_has_direct_visible_text(ViewSpan* span) {
     for (View* child = span ? span->first_child : nullptr; child; child = child->next()) {
-        if (inline_text_has_visible_content(child, span)) return true;
+        if (inline_text_has_visible_content(child)) return true;
     }
     return false;
 }
@@ -205,7 +198,7 @@ static bool inline_child_is_empty_strut(View* child) {
 
 static bool span_has_in_flow_text_descendant(ViewSpan* span) {
     for (View* child = span ? span->first_child : nullptr; child; child = child->next()) {
-        if (inline_text_has_visible_content(child, span)) return true;
+        if (inline_text_has_visible_content(child)) return true;
         ViewSpan* inline_child = lam::view_as<RDT_VIEW_INLINE>(child);
         if (inline_child && span_has_in_flow_text_descendant(inline_child)) return true;
     }
@@ -220,7 +213,7 @@ static bool inline_span_single_replaced_baseline_y(ViewSpan* span, float* baseli
             continue;
         }
         if (child->view_type == RDT_VIEW_TEXT) {
-            if (!inline_text_has_visible_content(child, span)) continue;
+            if (!inline_text_has_visible_content(child)) continue;
             return false;
         }
         ViewBlock* block = lam::view_as_block(child);
@@ -265,8 +258,8 @@ static bool inline_contents_descendant_bounds(ViewSpan* span, float* min_x, floa
         }
         if (child->view_type == RDT_VIEW_TEXT) {
             if (child->width <= 0.0f || child->height <= 0.0f ||
-                text_is_all_collapsible_space(
-                    lam::dom_as<DOM_NODE_TEXT>(static_cast<DomNode*>(child)), span)) {
+                layout_text_is_collapsible_whitespace(
+                    lam::dom_as<DOM_NODE_TEXT>(static_cast<DomNode*>(child)))) {
                 continue;
             }
             float child_max_x = child->x + child->width;
@@ -320,7 +313,7 @@ static bool inline_span_has_text_overflow_ellipsis(ViewSpan* span,
                                                    float* max_x,
                                                    FontHandle* fallback_fh) {
     if (!span || !min_x || !max_x || !span->first_child ||
-        !view_has_non_trailing_line_content(span->first_child, span) ||
+        !view_has_non_trailing_line_content(span->first_child) ||
         has_following_content(span, true)) {
         return false;
     }
@@ -366,7 +359,7 @@ static bool span_has_direct_text_on_both_sides_of_block(ViewSpan* span) {
     bool has_text_before_block = false;
     bool has_text_after_block = false;
     for (View* child = span ? span->first_child : nullptr; child; child = child->next()) {
-        if (inline_text_has_visible_content(child, span)) {
+        if (inline_text_has_visible_content(child)) {
             if (saw_in_flow_block) has_text_after_block = true;
             else has_text_before_block = true;
             continue;
@@ -377,17 +370,6 @@ static bool span_has_direct_text_on_both_sides_of_block(ViewSpan* span) {
         }
     }
     return has_text_before_block && has_text_after_block;
-}
-
-static bool text_is_all_collapsible_space(DomText* text, ViewSpan* span) {
-    if (!text || !text->text || text->length == 0) return false;
-    CssEnum white_space = span && span->blk ? span->block()->white_space : CSS_VALUE_NORMAL;
-    bool collapse_spaces = white_space == CSS_VALUE_NORMAL ||
-        white_space == CSS_VALUE_NOWRAP ||
-        white_space == CSS_VALUE_PRE_LINE ||
-        white_space == 0;
-    if (!collapse_spaces) return false;
-    return str_all(text->text, text->length, str_is_html_space);
 }
 
 bool layout_inline_is_collapsed_whitespace_only(ViewSpan* span) {
@@ -418,7 +400,7 @@ bool layout_inline_is_collapsed_whitespace_only(ViewSpan* span) {
         if (child->is_text()) {
             DomText* text = lam::dom_as<DOM_NODE_TEXT>(static_cast<DomNode*>(child));
             if ((child->view_type == RDT_VIEW_TEXT && child->width > 0.0f) ||
-                !text_is_all_collapsible_space(text, span)) {
+                !layout_text_is_collapsible_whitespace(text)) {
                 return false;
             }
             saw_collapsed_text = true;
@@ -429,7 +411,7 @@ bool layout_inline_is_collapsed_whitespace_only(ViewSpan* span) {
     return saw_collapsed_text;
 }
 
-static bool view_has_non_trailing_line_content(View* view, ViewSpan* span) {
+static bool view_has_non_trailing_line_content(View* view) {
     if (!view) return false;
     bool found = false;
     auto inspect = [&](View* candidate) -> bool {
@@ -437,8 +419,8 @@ static bool view_has_non_trailing_line_content(View* view, ViewSpan* span) {
         if (candidate->view_type == RDT_VIEW_NONE) return false;
         if (candidate->view_type == RDT_VIEW_TEXT) {
             found = (candidate->width > 0.0f || candidate->height > 0.0f) &&
-                !text_is_all_collapsible_space(
-                    lam::dom_as<DOM_NODE_TEXT>(static_cast<DomNode*>(candidate)), span);
+                !layout_text_is_collapsible_whitespace(
+                    lam::dom_as<DOM_NODE_TEXT>(static_cast<DomNode*>(candidate)));
         } else if (candidate->view_type != RDT_VIEW_INLINE) {
             found = candidate->width > 0.0f || candidate->height > 0.0f;
         }
@@ -553,12 +535,9 @@ void layout_trim_isolated_inline_text_edges(LayoutContext* lycon, View* view) {
     }
 }
 
-static bool inline_boundary_allows_soft_wrap(DomNode* inline_node) {
-    if (!inline_node) return false;
-    CssEnum white_space = get_white_space_value(inline_node);
-    return white_space == CSS_VALUE_NORMAL || white_space == CSS_VALUE_PRE_LINE ||
-        white_space == CSS_VALUE_PRE_WRAP || white_space == CSS_VALUE_BREAK_SPACES ||
-        white_space == 0;
+static bool inline_boundary_allows_soft_wrap(LayoutContext* lycon, DomNode* inline_node) {
+    return inline_node &&
+        get_text_wrap_mode_value(inline_node->parent, lycon) != CSS_VALUE_NOWRAP;
 }
 
 bool layout_inline_has_prior_in_flow_content(DomNode* inline_box) {
@@ -578,22 +557,29 @@ bool layout_inline_has_prior_in_flow_content(DomNode* inline_box) {
     return false;
 }
 
-static bool inline_edge_whitespace_can_collapse(DomNode* node) {
+bool layout_text_is_collapsible_whitespace(DomNode* node, size_t start_index,
+                                           size_t length) {
     if (!node || !node->is_text()) return false;
+    DomText* text_node = node->as_text();
     const char* text = (const char*)node->text_data();
-    if (!text || !is_only_whitespace(text)) return false;
+    if (!text || start_index >= text_node->length) return false;
+    size_t available = text_node->length - start_index;
+    if (length == SIZE_MAX) length = available;
+    if (length == 0 || length > available) return false;
 
     CssEnum white_space = get_white_space_value(node);
-    if (white_space_preserves_space_advance(white_space)) return false;
-    if (white_space == CSS_VALUE_PRE_LINE) {
-        for (const char* current = text; *current; current++) {
-            if (*current == '\n' || *current == '\r') return false;
+    if (!layout_white_space_collapses(white_space)) return false;
+    for (size_t i = start_index; i < start_index + length; i++) {
+        // CSS Text 3 §4.1: pre-line preserves segment breaks even at zero advance.
+        if (!is_space(text[i]) ||
+            (white_space == CSS_VALUE_PRE_LINE && text[i] == '\n')) {
+            return false;
         }
     }
-    return layout_white_space_collapses(white_space);
+    return true;
 }
 
-static bool inline_child_is_block_split(DomNode* node) {
+bool layout_inline_child_is_block_split(DomNode* node) {
     if (!node || !node->is_element()) return false;
     DomElement* elem = lam::dom_as<DOM_NODE_ELEMENT>(node);
     DisplayValue display = resolve_display_value(elem);
@@ -610,7 +596,7 @@ static DomNode* inline_next_participating_child(DomNode* node) {
     for (DomNode* sibling = node ? node->next_sibling : nullptr;
          sibling; sibling = sibling->next_sibling) {
         if (sibling->is_comment()) continue;
-        if (inline_edge_whitespace_can_collapse(sibling)) continue;
+        if (layout_text_is_collapsible_whitespace(sibling)) continue;
         if (sibling->is_element() &&
             layout_display_is_none(resolve_display_value(sibling))) {
             continue;
@@ -625,7 +611,7 @@ static bool inline_empty_box_between_block_siblings(DomNode* node) {
     DomNode* previous = nullptr;
     for (DomNode* sibling = node->prev_sibling; sibling;
          sibling = sibling->prev_sibling) {
-        if (sibling->is_comment() || inline_edge_whitespace_can_collapse(sibling)) continue;
+        if (sibling->is_comment() || layout_text_is_collapsible_whitespace(sibling)) continue;
         if (sibling->is_element() &&
             layout_display_is_none(resolve_display_value(sibling))) {
             continue;
@@ -634,7 +620,7 @@ static bool inline_empty_box_between_block_siblings(DomNode* node) {
         break;
     }
     DomNode* next = inline_next_participating_child(node);
-    return inline_child_is_block_split(previous) && inline_child_is_block_split(next);
+    return layout_inline_child_is_block_split(previous) && layout_inline_child_is_block_split(next);
 }
 
 // Find the last block exposed by an inline wrapper; trailing inline content
@@ -645,7 +631,7 @@ static bool inline_wrapper_last_block(DomElement* wrapper,
     *last_block = nullptr;
     bool has_content = false;
     for (DomNode* child = wrapper->first_child; child; child = child->next_sibling) {
-        if (child->is_comment() || inline_edge_whitespace_can_collapse(child)) continue;
+        if (child->is_comment() || layout_text_is_collapsible_whitespace(child)) continue;
         if (child->is_text()) {
             if (layout_dom_text_has_non_whitespace(
                     lam::dom_as<DOM_NODE_TEXT>(child))) {
@@ -661,7 +647,7 @@ static bool inline_wrapper_last_block(DomElement* wrapper,
             layout_display_is_none(resolve_display_value(element))) {
             continue;
         }
-        if (inline_child_is_block_split(child)) {
+        if (layout_inline_child_is_block_split(child)) {
             has_content = true;
             *last_block = element;
             continue;
@@ -685,7 +671,7 @@ static DomElement* inline_previous_wrapper_block(DomElement* inline_elem) {
     if (!inline_elem) return nullptr;
     for (DomNode* sibling = inline_elem->prev_sibling; sibling;
          sibling = sibling->prev_sibling) {
-        if (sibling->is_comment() || inline_edge_whitespace_can_collapse(sibling)) continue;
+        if (sibling->is_comment() || layout_text_is_collapsible_whitespace(sibling)) continue;
         if (!sibling->is_element()) return nullptr;
         DomElement* element = lam::dom_as<DOM_NODE_ELEMENT>(sibling);
         InlineOutOfFlowKind kind = inline_out_of_flow_kind(element);
@@ -702,11 +688,11 @@ static DomElement* inline_previous_wrapper_block(DomElement* inline_elem) {
     return nullptr;
 }
 
-static bool view_is_collapsed_whitespace_text(View* view, ViewSpan* span) {
+static bool view_is_collapsed_whitespace_text(View* view) {
     if (!view || view->view_type != RDT_VIEW_TEXT) return false;
     if (view->width > 0.0f) return false;
     DomText* text = lam::dom_as<DOM_NODE_TEXT>(static_cast<DomNode*>(view));
-    return text_is_all_collapsible_space(text, span);
+    return layout_text_is_collapsible_whitespace(text);
 }
 
 static bool ruby_annotation_is_outside_base_bounds(ViewSpan* span, View* child) {
@@ -763,7 +749,7 @@ static bool ruby_has_visible_base_content(ViewSpan* ruby) {
             continue;
         }
         if (child->view_type == RDT_VIEW_TEXT &&
-            view_is_collapsed_whitespace_text(child, ruby)) {
+            view_is_collapsed_whitespace_text(child)) {
             continue;
         }
         return true;
@@ -771,18 +757,18 @@ static bool ruby_has_visible_base_content(ViewSpan* ruby) {
     return false;
 }
 
-static bool ruby_ends_with_annotation_space(DomNode* first_child, ViewSpan* ruby) {
+static bool ruby_ends_with_annotation_space(DomNode* first_child) {
     DomNode* last = nullptr;
     for (DomNode* child = first_child; child; child = child->next_sibling) {
         last = child;
     }
-    if (!last || !last->is_text() || !text_is_all_collapsible_space(
-            lam::dom_as<DOM_NODE_TEXT>(last), ruby)) {
+    if (!last || !last->is_text() || !layout_text_is_collapsible_whitespace(
+            lam::dom_as<DOM_NODE_TEXT>(last))) {
         return false;
     }
     for (DomNode* child = last->prev_sibling; child; child = child->prev_sibling) {
-        if (child->is_text() && text_is_all_collapsible_space(
-                lam::dom_as<DOM_NODE_TEXT>(child), ruby)) {
+        if (child->is_text() && layout_text_is_collapsible_whitespace(
+                lam::dom_as<DOM_NODE_TEXT>(child))) {
             continue;
         }
         return ruby_annotation_node(child);
@@ -983,7 +969,7 @@ static void inline_text_line_range(View* view, ViewSpan* whitespace_context, boo
     if (!view) return;
     if (view->view_type == RDT_VIEW_TEXT) {
         // cannot make an ancestor a multi-line inline box.
-        if (view_is_collapsed_whitespace_text(view, whitespace_context)) return;
+        if (view_is_collapsed_whitespace_text(view)) return;
         ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
         for (TextRect* rect = text->rect; rect; rect = rect->next) {
             if (!*found) {
@@ -1063,7 +1049,7 @@ static bool inline_span_has_list_item_atomic_candidate(View* child,
                                                        ViewSpan* span) {
     return child && child->view_type != RDT_VIEW_NONE &&
         !layout_view_is_out_of_flow(child) &&
-        !view_is_collapsed_whitespace_text(child, span);
+        !view_is_collapsed_whitespace_text(child);
 }
 
 static bool inline_span_has_list_item_atomic_child(ViewSpan* span) {
@@ -1072,8 +1058,8 @@ static bool inline_span_has_list_item_atomic_child(ViewSpan* span) {
     for (View* child = span->first_child; child; child = child->next()) {
         if (!inline_span_has_list_item_atomic_candidate(child, span)) continue;
         if (child->view_type == RDT_VIEW_TEXT &&
-            text_is_all_collapsible_space(
-                lam::dom_as<DOM_NODE_TEXT>(static_cast<DomNode*>(child)), span)) {
+            layout_text_is_collapsible_whitespace(
+                lam::dom_as<DOM_NODE_TEXT>(static_cast<DomNode*>(child)))) {
             continue;
         }
         if (!inline_child_is_list_item(child)) return false;
@@ -1121,7 +1107,7 @@ static bool inline_fragment_union_extends_child_bounds(ViewSpan* span) {
     float max_y = 0.0f;
     for (View* child = span->first_child; child; child = child->next()) {
         if (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child) ||
-            view_is_collapsed_whitespace_text(child, span)) {
+            view_is_collapsed_whitespace_text(child)) {
             continue;
         }
         float child_min_y = child->y;
@@ -1238,8 +1224,8 @@ static bool inline_span_flow_root_list_item_line_box_bounds(
             continue;
         }
         if (child->view_type == RDT_VIEW_TEXT &&
-            text_is_all_collapsible_space(
-                lam::dom_as<DOM_NODE_TEXT>(static_cast<DomNode*>(child)), span)) {
+            layout_text_is_collapsible_whitespace(
+                lam::dom_as<DOM_NODE_TEXT>(static_cast<DomNode*>(child)))) {
             continue;
         }
         float child_baseline_y = child->y + child->height;
@@ -1326,6 +1312,18 @@ void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewSpan* sp
     span->content_height = lycon->block.line_height;
 }
 
+static bool inline_span_has_nonempty_split_block(ViewSpan* span) {
+    bool found = false;
+    auto inspect = [&](View* child) -> bool {
+        if (child->height > 0.0f &&
+            layout_inline_child_is_block_split(static_cast<DomNode*>(child))) found = true;
+        return false;
+    };
+    auto no_finish = [](View*) {};
+    layout_walk_inline_views(span->first_child, inspect, no_finish);
+    return found;
+}
+
 static void span_record_ancestor_fragment(ViewSpan* span, View* fragment) {
     if (!span || !fragment || fragment->width <= 0.0f) return;
     float min_x = fragment->x;
@@ -1378,10 +1376,10 @@ static bool inline_span_has_content_before(ViewSpan* ancestor, View* descendant)
     for (View* child = ancestor->first_child; child; child = child->next()) {
         if (child == descendant) return false;
         if (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child) ||
-            view_is_collapsed_whitespace_text(child, ancestor)) {
+            view_is_collapsed_whitespace_text(child)) {
             continue;
         }
-        if (view_has_non_trailing_line_content(child, ancestor)) return true;
+        if (view_has_non_trailing_line_content(child)) return true;
     }
     return false;
 }
@@ -1495,10 +1493,10 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     while (child && (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child) ||
            (child->is_block() && layout_block_is_self_collapsing(lam::view_require_block(child))) ||
            ruby_annotation_is_outside_base_bounds(span, child) ||
-           view_is_collapsed_whitespace_text(child, span) ||
+           view_is_collapsed_whitespace_text(child) ||
            (span_has_direct_text && inline_child_is_empty_strut(child)) ||
            is_boxless_contents_child(child))) {
-        if (view_is_collapsed_whitespace_text(child, span)) {
+        if (view_is_collapsed_whitespace_text(child)) {
             span_record_ancestor_fragment(span, child);
         }
         child = child->next();
@@ -1707,12 +1705,12 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         if (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child) ||
             (child->is_block() && layout_block_is_self_collapsing(lam::view_require_block(child))) ||
             ruby_annotation_is_outside_base_bounds(span, child) ||
-            view_is_collapsed_whitespace_text(child, span) ||
+            view_is_collapsed_whitespace_text(child) ||
             (span_has_direct_text && inline_child_is_empty_strut(child)) ||
             is_boxless_contents_child(child)) {
             // CSSOM View: an empty descendant strut grows its line box but
             // does not enlarge an ancestor fragment with direct text.
-            if (view_is_collapsed_whitespace_text(child, span)) {
+            if (view_is_collapsed_whitespace_text(child)) {
                 span_record_ancestor_fragment(span, child);
             }
             child = child->next();
@@ -1815,6 +1813,30 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     bool forced_break_decoration = inline_span_has_forced_break_view(
         static_cast<View*>(span));
     bool clone_forced_break = clone_decoration_break && forced_break_decoration;
+    ViewBlock* font_box_owner = layout_nearest_block_ancestor(span->parent_view());
+    bool horizontal_font_box = !font_box_owner ||
+        !layout_block_inline_axis_is_vertical(font_box_owner);
+    if (horizontal_font_box && !is_multi_line &&
+        !span->has_split_inline_fragment_union() && span_has_direct_text) {
+        // the inline's own text defines its font box; taller descendants may
+        // protrude. Vertical flow owns its mapped X font box, not this Y extent.
+        bool has_text_box = false;
+        float text_min_y = FLT_MAX, text_max_y = -FLT_MAX;
+        for (View* text_child = span->first_child; text_child; text_child = text_child->next()) {
+            float edge = 0.0f;
+            if (get_text_visible_edge(text_child, false, false, &edge)) {
+                text_min_y = min(text_min_y, edge);
+                has_text_box = true;
+            }
+            if (get_text_visible_edge(text_child, false, true, &edge)) {
+                text_max_y = max(text_max_y, edge);
+            }
+        }
+        if (has_text_box) {
+            content_min_y = text_min_y;
+            content_max_y = text_max_y;
+        }
+    }
     float content_width = max_x - min_x;
     float visual_height = visual_max_y - visual_min_y;
     if (content_width == 0 && visual_height == 0 && inline_sum == 0) {
@@ -1838,12 +1860,27 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         final_min_y = min(final_min_y, line_box->min_y);
         final_max_y = max(final_max_y, line_box->max_y);
     }
-    if (span->has_split_inline_fragment_union() && !span_has_direct_visible_text(span)) {
+    if (span->has_split_inline_fragment_union() &&
+        (!span_has_direct_visible_text(span) || inline_span_has_nonempty_split_block(span))) {
         const FragmentUnion* split = span->fragment_union(FRAGMENT_UNION_SPLIT_INLINE);
-        if (span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->min_x < min_x) min_x = span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->min_x;
-        if (span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_x > max_x) max_x = span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_x;
+        // nonempty anonymous block fragments remain in the union beside direct text;
+        // empty splits expose only their inline fragments.
+        min_x = min(min_x, split->min_x);
+        max_x = max(max_x, split->max_x);
+        // the ledger stores the inline's own font boxes, not atomic descendant overflow.
         final_min_y = split->min_y - roundf(edges.top);
         final_max_y = split->max_y + roundf(edges.bottom);
+        // later atomic siblings can raise a trailing baseline after the split
+        // ledger was recorded; include the finalized direct text font boxes.
+        for (View* fragment = span->first_child; fragment; fragment = fragment->next()) {
+            float text_edge = 0.0f;
+            if (get_text_visible_edge(fragment, false, false, &text_edge)) {
+                final_min_y = min(final_min_y, text_edge - roundf(edges.top));
+            }
+            if (get_text_visible_edge(fragment, false, true, &text_edge)) {
+                final_max_y = max(final_max_y, text_edge + roundf(edges.bottom));
+            }
+        }
         content_width = max_x - min_x;
         // CSS 2.1 §9.2.1.1: split inline boxes expose the union of their own
         layout_set_view_geometry(span, min_x, final_min_y,
@@ -1928,14 +1965,14 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             child = child->next_sibling;
             continue;
         }
-        if (inline_edge_whitespace_can_collapse(child)) {
+        if (layout_text_is_collapsible_whitespace(child)) {
             DomNode* next_participating = inline_next_participating_child(child);
             bool before_block = !had_block_child &&
                 !visible_inline_before_first_block && next_participating &&
-                inline_child_is_block_split(next_participating);
+                layout_inline_child_is_block_split(next_participating);
             bool after_block = had_block_child &&
                 !visible_inline_after_last_block &&
-                (!next_participating || inline_child_is_block_split(next_participating));
+                (!next_participating || layout_inline_child_is_block_split(next_participating));
             if (before_block || after_block) {
                 // CSS 2.1 §9.2.1.1: collapsible whitespace in an anonymous
                 // inline box at a block-in-inline edge is not rendered.
@@ -1946,7 +1983,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
         }
         DisplayValue child_display = child->is_element() ?
             resolve_display_value(child) : DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW};
-        bool is_block_or_table_internal = inline_child_is_block_split(child);
+        bool is_block_or_table_internal = layout_inline_child_is_block_split(child);
         if (is_block_or_table_internal) {
             // CSS 2.1 §9.2.1.1: Leading anonymous block strut.
             if (!had_block_child && lycon->line.is_line_start && span->bound) {
@@ -1973,7 +2010,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
                 if (!lycon->line.is_line_start &&
                     (visible_inline_in_sequence || sequence_has_start_edge)) {
                     span_record_current_split_line_fragment(lycon, span, span_line_height);
-                    line_break(lycon);
+                    line_break(lycon, true);
                 }
                 in_inline_sequence = false;
                 visible_inline_in_sequence = false;
@@ -2104,7 +2141,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             }
             layout_flow_node(lycon, child);
             bool child_has_line_content = view_has_non_trailing_line_content(
-                static_cast<View*>(child), span);
+                static_cast<View*>(child));
             if (child_has_line_content) visible_inline_in_sequence = true;
             if (!had_block_child && child_has_line_content) {
                 visible_inline_before_first_block = true;
@@ -2276,6 +2313,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     int inline_start_line_number = lycon->block.line_number;
 
+    DomNode* parent_element = lycon->elmt;
     FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // unresolved yet
     CssEnum pa_direction = lycon->block.direction;
     CssEnum pa_line_align = lycon->line.vertical_align;
@@ -2287,6 +2325,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     float pa_line_height = lycon->block.line_height;
     bool pa_line_height_is_normal = lycon->block.line_height_is_normal;
     auto restore_parent_state = [&](bool restore_line_metrics) {
+        // inherited text properties after this span belong to its parent;
+        // leaving the span as the context owner leaks its wrapping policy.
+        lycon->elmt = lam::up(parent_element);
         lycon->font = pa_font;
         lycon->block.direction = pa_direction;
         lycon->line.vertical_align = pa_line_align;
@@ -2449,9 +2490,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         inline_left_edge = inline_span_edge_extent(span, rtl, true, true);
         inline_right_edge = inline_span_edge_extent(span, rtl, false, true);
     }
-    bool span_is_unbreakable = span->blk &&
-        (span->block()->white_space == CSS_VALUE_NOWRAP ||
-         span->block()->white_space == CSS_VALUE_PRE);
+    // text-wrap-mode can override the wrapping component of white-space.
+    bool span_is_unbreakable = get_text_wrap_mode_value(span, lycon) == CSS_VALUE_NOWRAP;
     if (span_is_unbreakable && child && !lycon->line.is_line_start &&
         line_has_prior_flow_content(&lycon->line)) {
         float line_left = lycon->line.has_float_intrusion
@@ -2751,7 +2791,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 }
             }
         }
-        if (empty_ruby_base && ruby_ends_with_annotation_space(child, span)) {
+        if (empty_ruby_base && ruby_ends_with_annotation_space(child)) {
             empty_ruby_inline_advance += layout_measure_space_advance(
                 lycon, font_box_handle(&lycon->font), lycon->font.style);
         }
@@ -2892,7 +2932,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // CSS Inline 3 §7 handles an initial letter's line contributions separately.
     // Atomic descendants export their own baseline, so their wrapper must not
     // create a second font strut in the same line box.
-    if (!is_initial_letter && had_children &&
+    // a span closed at a completed line has no strut on the next sibling's line.
+    if (!ended_at_new_line_start && !is_initial_letter && had_children &&
         span_has_in_flow_text_descendant(span) &&
         span->content_height > 0.0f &&
         (!span->in_line || !span->inl()->vertical_align ||
@@ -2909,7 +2950,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 inline_prop->content_strut_establishes_line = true;
             }
         }
-    } else if (span->in_line && span->inl()->vertical_align &&
+    } else if (!ended_at_new_line_start && span->in_line && span->inl()->vertical_align &&
                span->inl()->vertical_align != CSS_VALUE_BASELINE &&
                span->content_height > 0.0f) {
         // CSS 2.1 §10.8.1: non-baseline vertical-align adjusts the strut contribution.
@@ -3120,7 +3161,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // nearest common ancestor's wrapping mode, not the inline's own mode.
     if (span_is_unbreakable && !lycon->line.is_line_start &&
         has_following_content(elmt, true) &&
-        inline_boundary_allows_soft_wrap(elmt)) {
+        inline_boundary_allows_soft_wrap(lycon, elmt)) {
         lycon->line.wrap_opportunity_before_nowrap = true;
     }
 

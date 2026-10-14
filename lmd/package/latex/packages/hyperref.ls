@@ -43,7 +43,34 @@ pub fn explicit_bookmark(node, settings) {
         trim(target) == "" or level < 0 or level > 32 or
         contains(title, "\\") or contains(title, "$"))
         util.unsupported_element("hyperref", "pdfbookmark needs text, target, and level 0–32", node.source_offset)
-    else if (not outlines_enabled(settings)) null
+    else outline_anchor(title, target, level, settings)
+}
+
+// sectioning names the bookmark package accepts for its level key
+let BOOKMARK_LEVELS = {part: 0, chapter: 0, section: 1, subsection: 2, subsubsection: 3,
+    paragraph: 4, subparagraph: 5}
+
+// \bookmark[level=…]{title}: an outline entry at its own position. An outline
+// entry marks the element that carries it, so dest (an anchor elsewhere) and the
+// other keys (page, uri, color, style, open, …) are reported.
+pub fn bookmark_command(node, settings) {
+    let title = util.raw_argument(node, "required", 0)
+    let opts = util.parse_kv_options(util.optional_raw(node))
+    let unknown = [for (key, value at opts where string(key) != "level") string(key)]
+    let level = if (opts.level == null) 0
+        else if (BOOKMARK_LEVELS[trim(opts.level)] != null) BOOKMARK_LEVELS[trim(opts.level)]
+        else int(trim(opts.level)) ^ { -1 }
+    if (settings == null or title == null or trim(title) == "" or level < 0 or level > 32 or
+        contains(title, "\\") or contains(title, "$"))
+        util.unsupported_element("bookmark", "bookmark needs plain text and level 0–32", node.source_offset)
+    else if (len(unknown) > 0)
+        util.unsupported_element("bookmark", "Unsupported bookmark keys: " ++ join(unknown, ", "),
+            node.source_offset)
+    else outline_anchor(title, title, level, settings)
+}
+
+fn outline_anchor(title, target, level, settings) {
+    if (not outlines_enabled(settings)) null
     else <span id: "pdfbookmark-" ++ util.slugify(target),
         'data-pdf-outline-title': title, 'data-pdf-outline-level': level,
         style: "font-size:0;line-height:0;", "​">

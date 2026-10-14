@@ -2,6 +2,104 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <limits.h>
+#include "../lib/utf.h"
+#include <utf8proc.h>
+
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+
+static CFLocaleRef hyphenation_native_locale(const char* lang) {
+    if (!lang || !*lang) return nullptr;
+    CFStringRef name = CFStringCreateWithCString(
+        kCFAllocatorDefault, lang, kCFStringEncodingUTF8);
+    if (!name) return nullptr;
+    CFLocaleRef locale = CFLocaleCreate(kCFAllocatorDefault, name);
+    CFRelease(name);
+    if (locale && !CFStringIsHyphenationAvailableForLocale(locale)) {
+        CFRelease(locale);
+        locale = nullptr;
+    }
+    return locale;
+}
+#endif
+
+bool layout_hyphenation_language_supported(const char* lang) {
+#ifdef __APPLE__
+    CFLocaleRef locale = hyphenation_native_locale(lang);
+    if (locale) {
+        CFRelease(locale);
+        return true;
+    }
+#endif
+    return layout_hyphenation_en_us_language(lang);
+}
+
+size_t layout_hyphenation_next_break(const char* word, size_t length,
+                                    size_t after, const char* lang) {
+    if (!word || after >= length || length > LONG_MAX) return SIZE_MAX;
+#ifdef __APPLE__
+    CFLocaleRef locale = hyphenation_native_locale(lang);
+    if (locale) {
+        CFStringRef text = CFStringCreateWithBytes(kCFAllocatorDefault,
+            (const UInt8*)word, (CFIndex)length, kCFStringEncodingUTF8, false);
+        size_t next = SIZE_MAX;
+        if (text) {
+            CFIndex count = CFStringGetLength(text);
+            if (count >= 5) {
+                CFIndex before = count - 1;
+                while (before > 2) {
+                    CFIndex point = CFStringGetHyphenationLocationBeforeIndex(
+                        text, before, CFRangeMake(0, count), 0, locale, nullptr);
+                    if (point < 2 || point >= before) break;
+                    // native positions are UTF-16 indices; layout consumes
+                    // source byte offsets even for accented letters.
+                    CFIndex bytes = 0;
+                    CFStringGetBytes(text, CFRangeMake(0, point),
+                        kCFStringEncodingUTF8, 0, false, nullptr, 0, &bytes);
+                    if ((size_t)bytes > after) next = (size_t)bytes;
+                    else break;
+                    before = point;
+                }
+            }
+            CFRelease(text);
+        }
+        CFRelease(locale);
+        return next;
+    }
+#endif
+    return layout_hyphenation_en_us_language(lang)
+        ? layout_hyphenation_en_us_next_break(word, length, after) : SIZE_MAX;
+}
+
+size_t layout_hyphenation_character_count(const char* word, size_t length) {
+    size_t count = 0;
+    size_t offset = 0;
+    while (word && offset < length) {
+        uint32_t cp = 0;
+        int bytes = utf8_decode(word + offset, length - offset, &cp);
+        if (bytes <= 0) break;
+        utf8proc_category_t category = utf8proc_category(cp);
+        // CSS Text 4 excludes nonspacing marks and intra-word punctuation.
+        if (category != UTF8PROC_CATEGORY_MN &&
+            (category < UTF8PROC_CATEGORY_PC || category > UTF8PROC_CATEGORY_PO)) count++;
+        offset += (size_t)bytes;
+    }
+    return count;
+}
+
+size_t layout_hyphenation_next_limited_break(const char* word, size_t length,
+    size_t after, const char* lang, const int limits[3], size_t total_characters) {
+    if (!limits || total_characters < (size_t)limits[0]) return SIZE_MAX;
+    size_t point = after;
+    while ((point = layout_hyphenation_next_break(word, length, point, lang)) != SIZE_MAX) {
+        if (layout_hyphenation_character_count(word, point) >= (size_t)limits[1] &&
+            layout_hyphenation_character_count(word + point, length - point) >= (size_t)limits[2]) {
+            return point;
+        }
+    }
+    return SIZE_MAX;
+}
 
 // en-US Liang patterns derived from the ISC-licensed hyphen resource used by
 // Lambda's text tests; the data is kept separate from the line-break policy.

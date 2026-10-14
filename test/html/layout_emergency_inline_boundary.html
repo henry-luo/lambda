@@ -1,0 +1,15 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/support/fonts/Ahem.ttf'); }
+body { margin: 0; font: 20px/1 Ahem; }
+.line { width: 40px; }
+.anywhere { overflow-wrap: anywhere; }
+</style>
+<div id="result">
+<div id="tail" class="line">X<span class="anywhere">XX</span>XX</div>
+<div id="control" class="line">XX<br>X<br>XX</div>
+<div id="unbroken" class="line">X<span>XX</span>XX</div>
+<div id="break-all" style="width: 80px; word-break: break-all">XX<span id="break-all-middle">XXXX</span>XX</div>
+<div id="any-line-break" style="width: 80px; line-break: anywhere">XX<span id="any-line-break-middle">XXXX</span>XX</div>
+<div id="nowrap-break-all" style="width: 80px; word-break: break-all; white-space: nowrap">XX<span>XXXX</span>XX</div>
+</div>

@@ -2215,15 +2215,25 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         else if (strcmp(effective_type, "scene3d-asset") == 0)
             input_scene3d_asset(input, source, source_len, flavor ? flavor->chars : nullptr);
         else if (strcmp(effective_type, "xml") == 0 &&
-                ((flavor && strcmp(flavor->chars, "strict") == 0) || (options && options->xml_preserve_whitespace))) {
-            // document packages need the shared XML validator, without external entity resolution.
-            XmlParseOptions xml_options = {};
-            bool strict_xml = flavor && strcmp(flavor->chars, "strict") == 0;
-            xml_options.preserve_whitespace = options && options->xml_preserve_whitespace;
-            xml_options.require_well_formed = strict_xml;
-            xml_options.require_namespaces = strict_xml;
-            xml_options.allow_inert_doctype = strict_xml;
-            parse_xml_with_options(input, source, &xml_options);
+                ((flavor && (strcmp(flavor->chars, "strict") == 0 ||
+                             strcmp(flavor->chars, "document") == 0)) ||
+                 (options && options->xml_preserve_whitespace))) {
+            bool document_xml = flavor && strcmp(flavor->chars, "document") == 0;
+            bool strict_xml = document_xml || (flavor && strcmp(flavor->chars, "strict") == 0);
+            // strict XML must validate all transported bytes, including embedded NULs.
+            if (strict_xml && memchr(source, 0, source_len)) {
+                input->parse_failed = true;
+                input->parse_error_message = pool_strdup(input->pool, "XML document contains a NUL byte");
+                input->root = ItemError;
+            } else {
+                XmlParseOptions xml_options = {};
+                xml_options.preserve_whitespace = document_xml || (options && options->xml_preserve_whitespace);
+                xml_options.require_well_formed = strict_xml;
+                xml_options.require_namespaces = strict_xml;
+                // DOCX document XML rejects DTDs; general strict XML permits inert declarations.
+                xml_options.allow_inert_doctype = strict_xml && !document_xml;
+                parse_xml_with_options(input, source, &xml_options);
+            }
         }
         else if (strcmp(effective_type, "eps") == 0 || strcmp(effective_type, "epsi") == 0) {
             parse_eps(input, source, source_len);

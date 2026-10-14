@@ -4,6 +4,7 @@
 // layout coordinates and dimensions are float; justified integer casts use INT_CAST_OK.
 
 #include "view.hpp"
+#include "text_breaks.hpp"
 #include "grid_track.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_parser.hpp"
@@ -260,7 +261,10 @@ inline float compute_shrink_to_fit_width(float min_content, float max_content, A
 struct TextIntrinsicWidths {
     float min_content;
     float max_content;
+    float first_segment_min = -1.0f;
+    float remaining_min_content = 0.0f;
 };
+
 // The fast text paths share the same glyph-run probe; only their CSS
 // eligibility rules differ. Keeping the byte scan and font measurement here
 // prevents intrinsic sizing from maintaining a second shaping implementation.
@@ -271,7 +275,7 @@ struct LayoutSimpleLatinRun {
     uint32_t last_codepoint;
 };
 
-struct LayoutBidiRun {
+struct LayoutScriptRun {
     size_t bytes;
     float width;
     uint32_t first_codepoint;
@@ -283,16 +287,22 @@ bool layout_measure_simple_latin_run(LayoutContext* lycon,
                                      const unsigned char* text,
                                      size_t remaining,
                                      LayoutSimpleLatinRun* result);
-bool layout_measure_bidi_run(LayoutContext* lycon,
+bool layout_measure_script_run(LayoutContext* lycon,
                              const unsigned char* text,
                              size_t remaining,
                              CssEnum text_transform,
                              CssEnum font_variant,
                              bool break_anywhere,
-                             bool break_word,
                              bool hyphenation,
                              uint8_t text_autospace,
-                             LayoutBidiRun* result);
+                             LayoutScriptRun* result,
+                             const LayoutTextBreaks* breaks = nullptr,
+                             size_t source_offset = 0);
+bool layout_measure_inline_text_context(LayoutContext* lycon, DomNode* text_node,
+    const unsigned char* start, size_t length, bool cursive, float* width,
+    const unsigned char* text_start = nullptr, const unsigned char* text_end = nullptr);
+bool layout_measure_shaping_text(LayoutContext* lycon, const char* text, size_t length,
+    size_t range_start, size_t range_length, float* width);
 // Intrinsic measurements may temporarily replace the active font and allocate
 // pooled font props. One scope owns both restorations so early exits cannot
 // leave speculative font state in the parent layout pass.
@@ -326,6 +336,8 @@ bool layout_inline_element_is_orthogonal(DomElement* element);
 // CSS 2.2 §9.2.1.1: block-in-inline fragments cannot collapse through a
 // parent when the inline box follows prior in-flow content.
 bool layout_inline_has_prior_in_flow_content(DomNode* inline_box);
+struct InlineOutOfFlowKind { bool floated; bool positioned; };
+InlineOutOfFlowKind inline_out_of_flow_kind(DomElement* element);
 CssDeclaration* layout_specified_physical_size_declaration(DomElement* element,
                                                             bool horizontal);
 CssDeclaration* layout_specified_physical_minmax_size_declaration(DomElement* element,
@@ -358,22 +370,28 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    CssEnum font_variant = CSS_VALUE_NONE,
                                                    CssEnum white_space = CSS_VALUE_NORMAL,
                                                    CssEnum overflow_wrap = CSS_VALUE_NORMAL,
-                                                   CssEnum word_break = CSS_VALUE_NORMAL);
+                                                   CssEnum word_break = CSS_VALUE_NORMAL,
+                                                   CssEnum line_break = CSS_VALUE_AUTO);
+CssEnum get_inherited_text_enum(LayoutContext* lycon, CssPropertyCode property,
+    CssEnum BlockProp::*member, CssEnum fallback, DomNode* node = nullptr);
 float layout_broken_image_fallback_width(LayoutContext* lycon, ViewBlock* block,
                                           const char* fallback_text);
 uint8_t layout_text_autospace_flags(LayoutContext* lycon, DomNode* text_node = nullptr);
 bool layout_text_contains_rtl_codepoint(const char* text, size_t length);
-bool layout_utf8_next_codepoint(const char** cursor, const char* end,
-                                uint32_t* codepoint);
-bool layout_utf8_next_codepoint(const unsigned char** cursor,
-                                const unsigned char* end,
-                                uint32_t* codepoint);
 void layout_resolve_inherited_text_wrap(DomNode* node, CssEnum* overflow_wrap,
                                          CssEnum* word_break = nullptr);
-bool is_typographic_letter_unit(uint32_t codepoint);
+// CSS Text §5.2: layout and standalone paint clients share Unicode letter units.
+inline bool is_typographic_letter_unit(uint32_t cp) {
+    utf8proc_category_t cat = utf8proc_category(cp);
+    return (cat >= UTF8PROC_CATEGORY_LU && cat <= UTF8PROC_CATEGORY_LO) ||
+           (cat >= UTF8PROC_CATEGORY_ND && cat <= UTF8PROC_CATEGORY_NO);
+}
 bool layout_text_allows_letter_break(uint32_t current, uint32_t next,
                                       CssEnum line_break, bool zwj_preceded,
                                       bool cj_non_starter);
+bool layout_text_native_break_allowed(const LayoutTextBreaks& breaks, size_t offset,
+    uint32_t current, const unsigned char* next, const unsigned char* end,
+    bool keep_all);
 bool layout_text_autospace_pair(uint8_t flags, uint32_t previous, uint32_t current);
 float layout_text_autospace_advance(LayoutContext* lycon);
 bool layout_get_grapheme_cluster_bytes(const unsigned char* cluster_start,
@@ -382,7 +400,8 @@ bool layout_get_grapheme_cluster_bytes(const unsigned char* cluster_start,
 bool layout_measure_grapheme_cluster_advance(
     LayoutContext* lycon, const unsigned char* cluster_start,
     const unsigned char* text_end, size_t* cluster_bytes,
-    float* cluster_width);
+    float* cluster_width, DomNode* text_node = nullptr,
+    const unsigned char* text_start = nullptr);
 float layout_vertical_text_block_extent(const char* text, size_t length,
                                          float line_advance,
                                          float available_inline_size);
@@ -431,6 +450,8 @@ typedef struct LayoutIntrinsicMarginPair {
 LayoutIntrinsicMarginPair layout_intrinsic_horizontal_margin_pair(
         LayoutContext* lycon, DomElement* element,
         LayoutIntrinsicMarginOptions options = {false, true, true, false, false});
+float layout_intrinsic_inline_edge(LayoutContext* lycon, DomElement* element,
+    bool physical_left, bool include_margin = true);
 float layout_resolve_intrinsic_margin_side(LayoutContext* lycon,
                                             ViewElement* element,
                                             CssPropertyCode property,
@@ -569,7 +590,26 @@ TextIntrinsicWidths layout_measure_text_intrinsic_widths(LayoutContext* lycon,
     CssEnum font_variant = CSS_VALUE_NONE,
     CssEnum white_space = CSS_VALUE_NORMAL,
     CssEnum overflow_wrap = CSS_VALUE_NORMAL,
-    CssEnum word_break = CSS_VALUE_NORMAL);
+    CssEnum word_break = CSS_VALUE_NORMAL,
+    CssEnum line_break = CSS_VALUE_AUTO);
+bool layout_intrinsic_element_is_atomic_inline(DomElement* element);
+struct LayoutTextIntrinsicLineOptions {
+    CssEnum text_transform = CSS_VALUE_NONE;
+    CssEnum font_variant = CSS_VALUE_NONE;
+    CssEnum white_space = CSS_VALUE_NORMAL;
+    CssEnum overflow_wrap = CSS_VALUE_NORMAL;
+    CssEnum word_break = CSS_VALUE_NORMAL;
+    CssEnum line_break = CSS_VALUE_AUTO;
+    float start_offset = 0.0f;
+    float tab_size = 8.0f;
+    float tab_size_length = -1.0f;
+    float vertical_line_advance = 0.0f;
+    float vertical_inline_basis = 0.0f;
+};
+// measure processed text per forced line, retaining edges for its parent's inline run.
+IntrinsicSizes layout_measure_text_intrinsic_lines(LayoutContext* lycon,
+    const char* text, size_t length, const LayoutTextIntrinsicLineOptions& options,
+    float* vertical_text_extent = nullptr);
 // Normalize every accepted aspect-ratio representation before layout policy consumes it.
 float layout_aspect_ratio_value(const CssValue* value);
 bool layout_aspect_ratio_value_has_auto(const CssValue* value);
@@ -1644,7 +1684,11 @@ float compute_view_last_text_baseline(
 } // namespace radiant
 
 CssEnum get_white_space_value(DomNode* node);
-CssEnum get_text_wrap_mode_value(DomNode* node);
+CssEnum get_text_wrap_mode_value(DomNode* node, LayoutContext* lycon = nullptr);
+bool layout_resolve_text_wrap_value(const CssValue* value, CssEnum* mode, CssEnum* style);
+bool layout_text_is_collapsible_whitespace(DomNode* node,
+                                           size_t start_index = 0,
+                                           size_t length = SIZE_MAX);
 bool layout_inline_is_collapsed_whitespace_only(ViewSpan* span);
 inline bool layout_white_space_collapses(CssEnum white_space) {
     return white_space == CSS_VALUE_NORMAL || white_space == CSS_VALUE_NOWRAP ||
@@ -1682,11 +1726,14 @@ inline float text_space_advance(const FontProp* font, float extra_spacing = 0.0f
 }
 
 CssEnum layout_inherited_text_transform(DomNode* node);
+uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards);
 bool layout_text_combine_upright_applies(DomNode* text_node);
 float layout_inline_end_edge(ViewSpan* span);
 bool text_codepoint_has_zero_advance(uint32_t codepoint);
 bool text_emphasis_marks_codepoint(uint32_t codepoint);
+bool text_codepoint_is_extended_pictographic(uint32_t codepoint);
 float text_unicode_space_width_em(uint32_t codepoint);
+float layout_unicode_space_advance(LayoutContext* lycon, uint32_t codepoint);
 // tier-3: layout-transient, valid within pass
 struct TableMetadata {
     int column_count;
@@ -2057,6 +2104,12 @@ typedef struct ColumnGroup {
     float row_gap;
     float target_height;
     float group_used_height;
+    // fixed row tracks can contain a shorter balanced final column set.
+    float row_height;
+    float first_row_height;
+    float last_row_height;
+    float initial_row_offset;
+    int last_balanced_row;
     bool wraps_rows;
     bool vertical_writing;
 } ColumnGroup;
@@ -2084,6 +2137,7 @@ typedef struct MulticolFragmentPlacement {
 } MulticolFragmentPlacement;
 
 bool is_multicol_container(ViewBlock* block);
+bool multicol_is_spanner_block(ViewBlock* block);
 bool multicol_find_spanner_containing_block(ViewBlock* block,
                                             ViewBlock** out_containing_block);
 float multicol_used_block_axis_extent(ViewBlock* block);
@@ -2330,6 +2384,7 @@ typedef struct Linebox {
     CssEnum vertical_align;
     float vertical_align_offset;    // length/percentage vertical-align offset (px), positive = raise
     bool is_line_start;
+    bool pending_hyphenation_break; // retain terminal-mark anchors until the next in-flow content
     bool has_space;                 // whether last layout character is a space
     bool has_float_intrusion;       // true if floats affect this line
     bool has_replaced_content;      // true if line has inline replaced elements (images, inline-blocks)
@@ -2382,6 +2437,8 @@ typedef struct Linebox {
     float inline_start_edge_pending;  // CSS 2.1 §8.3: accumulated left margin+border+padding from
                                       // inline spans that haven't produced content yet; re-applied
                                       // after line break so the span's first content is indented
+    float text_indent_advance;        // applied LTR indent retained while float bounds change
+    bool initial_letter_exclusion_by_count; // selected once per line, retained across float refresh
     float text_indent_offset;         // CSS 2.1 §16.1: RTL first-line text-indent amount that
                                       // narrows the wrap boundary and alignment width from the right
     FontBox line_start_font;
@@ -2390,7 +2447,6 @@ typedef struct Linebox {
     uint32_t prev_text_spacing_codepoint = 0; // previous character for CSS text-spacing pairs
     uint32_t prev_text_autospace_codepoint = 0; // previous typographic unit for CSS text-autospace
     lam::Up<FontProp> prev_kerning_font_style = nullptr;
-    bool has_cjk_text = false;       // true if line contains CJK characters (for line-height blending)
     float max_top_bottom_height = 0; // CSS 2.1 §10.8.1: max height of vertical-align:top/bottom elements
                                      // (used in second pass to expand line box if needed)
     float max_top_height = 0;        // CSS 2.1 §10.8.1: max height of vertical-align:top elements
@@ -2562,6 +2618,7 @@ bool flex_item_will_stretch_cross_axis(ViewElement* item, FlexContainerLayout* f
 bool flex_item_has_content_flex_basis(ViewElement* item);
 bool flex_item_is_anonymous_text(ViewElement* item);
 bool flex_item_contains_anonymous_text(ViewElement* item, DomText* text);
+ViewElement* flex_find_anonymous_text_item(FlexContainerLayout* flex, DomText* text);
 float flex_column_item_content_extent(LayoutContext* lycon,
                                       ViewElement* item,
                                       FlexContainerLayout* flex_layout);
@@ -2658,6 +2715,32 @@ bool layout_tag_is_replaced_widget(NameId tag);
 bool layout_tag_is_css_replaced(NameId tag);
 bool layout_tag_is_non_caret_container(NameId tag, bool include_button = false);
 bool layout_tag_is_default_inline(NameId tag);
+bool layout_tag_has_monospace_family_default(NameId tag);
+
+// HTML Rendering §15.3 element defaults, read by the default view's element defaults and
+// serialized as the secondary views' UA stylesheet. Negative lengths and CSS_VALUE__UNDEF
+// keywords are absent; presentational attributes, form and media chrome stay with the default view.
+struct HtmlUaElementDefault {
+    float font_scale;              // multiplies the inherited size; 1 keeps it
+    bool keeps_medium;             // a scaled heading size keeps the inherited medium lineage
+    bool monospace;
+    CssEnum font_weight, font_style, text_decoration, vertical_align, white_space, text_align;
+    CssEnum list_style, color;
+    float margin_px, margin_block_em, margin_inline_px, margin_inline_start_px;
+    float padding_px, padding_inline_start_px;
+};
+bool layout_html_ua_element_default(NameId tag, HtmlUaElementDefault* result);
+// nested lists drop their outer margins; unordered markers step disc, circle, square.
+bool layout_html_ua_list_nesting_ancestor(NameId tag);
+CssEnum layout_html_ua_list_marker(NameId tag, size_t unordered_ancestors);
+struct StrBuf;
+bool layout_html_ua_stylesheet(StrBuf* css);
+// Chromium CheckForGenericFamilyChange: a medium-lineage size that switches to monospace scales by 13/16.
+void layout_apply_monospace_medium_size(FontProp* font, const FontProp* parent);
+
+inline bool layout_multicol_has_column_width(const MultiColumnProp* multicol) {
+    return multicol && (multicol->column_width_is_specified || multicol->column_width > 0.0f);
+}
 bool layout_block_is_replaced_baseline(ViewBlock* block, bool include_select_listbox);
 
 inline CssBoxSide layout_axis_side(LayoutAxis axis, bool start) {
@@ -4051,6 +4134,8 @@ float block_context_next_float_boundary(BlockContext* ctx, float y);
  * @param element_height Height of the element to place (queries full height range for floats)
  */
 float block_context_find_y_for_width(BlockContext* ctx, float required_width, float min_y, float element_height = 1.0f);
+float find_line_y_for_width_with_floats(BlockContext* bfc, BlockContext* block_ctx,
+    Linebox* line, float required_width, float min_local_y, float query_height);
 
 /**
  * Find Y position to clear floats
@@ -4259,7 +4344,7 @@ inline bool layout_parse_font_shorthand(const CssValue* value,
  * @return const char* font family name
  */
 
-void line_break(LayoutContext* lycon);
+void line_break(LayoutContext* lycon, bool forced_break = false);
 void layout_finalize_static_line_self_alignment(LayoutContext* lycon,
                                                 float used_line_height);
 void layout_finalize_static_inline_positions(LayoutContext* lycon);
@@ -4273,6 +4358,7 @@ void layout_trim_isolated_inline_text_edges(LayoutContext* lycon, View* view);
 void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
                                               View* view, float offset);
 void layout_bidi_line(LayoutContext* lycon);
+void layout_place_bidi_static_inline(ViewBlock* block, float line_x, int level);
 int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir);
 int layout_find_last_strong_direction(DomNode* node, bool skip_explicit_dir);
 CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback);
@@ -4673,19 +4759,20 @@ static inline bool layout_walk_inline_views(View* view, Enter enter, Leave leave
     }
     return changed;
 }
-// Generic inline-tree traversal carries depth for algorithms such as bidi
-// collection; the callback decides whether an inline node has descendants.
+// the callback controls descent; block traversal is opt-in for flow measurements.
 template <typename Visit, typename Leave>
 static inline void layout_walk_view_tree(View* view, Visit visit, Leave leave,
-                                         bool skip_out_of_flow = true, int depth = 0) {
+                                         bool skip_out_of_flow = true, int depth = 0,
+                                         bool descend_blocks = false) {
     while (view) {
         bool descend = false;
         if (!skip_out_of_flow || !layout_view_is_out_of_flow(view)) {
             descend = visit(view, depth);
-            if (descend && view->view_type == RDT_VIEW_INLINE) {
-                ViewSpan* span = static_cast<ViewSpan*>(view);
-                layout_walk_view_tree(span->first_child, visit, leave,
-                                      skip_out_of_flow, depth + 1);
+            if (descend && view->is_element() &&
+                (descend_blocks || view->view_type == RDT_VIEW_INLINE)) {
+                layout_walk_view_tree(
+                    static_cast<ViewElement*>(view)->first_placed_child(), visit, leave,
+                    skip_out_of_flow, depth + 1, descend_blocks);
             }
             leave(view, depth);
         }
@@ -4847,6 +4934,9 @@ inline bool layout_element_is_abs_or_fixed(DomElement* element) {
     return layout_position_is_abs_fixed(element->position) ||
         position == CSS_VALUE_ABSOLUTE || position == CSS_VALUE_FIXED;
 }
+inline bool layout_element_is_out_of_flow(DomElement* element) {
+    return layout_element_is_abs_or_fixed(element) || layout_element_is_floated(element);
+}
 // shared flow-box classification keeps flex finalization and descendant extent
 // scans aligned; table boxes participate in both traversals.
 inline bool layout_view_is_block_flow_box(View* view) {
@@ -4909,6 +4999,9 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block);
 void layout_setup_block_font_metrics(LayoutContext* lycon);
 // Initializes the local inline formatting state for a block's content box.
 void setup_inline(LayoutContext* lycon, ViewBlock* block);
+void layout_setup_text_indent(LayoutContext* lycon, ViewBlock* block, float content_width);
+void layout_intrinsic_apply_first_line_indent(float text_indent, float first_segment_min,
+    float remaining_min_content, float* max_content, float* min_content);
 void layout_setup_line_clamp(LayoutContext* lycon, ViewBlock* block,
                               const BlockContext* parent);
 void layout_finalize_line_clamp(LayoutContext* lycon, ViewBlock* block);
@@ -4921,6 +5014,8 @@ bool ruby_has_text_box_trim_ancestor(const ViewSpan* ruby, uint8_t trim);
 bool inline_span_has_multiple_line_fragments(ViewSpan* span);
 bool layout_inline_span_has_in_flow_block_child(ViewSpan* span,
                                                 bool include_inline_table = false);
+bool layout_inline_child_is_block_split(DomNode* node);
+bool layout_node_has_in_flow_inline_content(DomNode* node);
 bool layout_inline_span_starts_with_in_flow_block_fragment(ViewSpan* span);
 bool layout_inline_span_has_direct_visible_text_child(ViewSpan* span);
 bool layout_inline_span_has_direct_inline_atomic_child(ViewSpan* span);
@@ -5078,9 +5173,26 @@ static inline bool layout_atomic_wrap_neighbor_allows(uint32_t cp) {
     return true;
 }
 
-static inline bool text_justify_cjk_gap(uint32_t previous, uint32_t current) {
-    return has_id_line_break_class(previous) &&
-           has_id_line_break_class(current);
+struct TextJustifyContext {
+    uint32_t previous;
+    uint32_t unit_base;
+    utf8proc_int32_t grapheme_state;
+};
+
+static inline bool text_justify_character_gap(TextJustifyContext* context,
+                                               uint32_t current) {
+    bool boundary = context->previous == 0 || utf8proc_grapheme_break_stateful(
+        (utf8proc_int32_t)context->previous, (utf8proc_int32_t)current,
+        &context->grapheme_state);
+    uint32_t previous_unit = context->unit_base;
+    context->previous = current;
+    if (!boundary) return false;
+    context->unit_base = current;
+    // CSS Text §6.4.5: clustered scripts admit gaps between typographic
+    // units; combining marks and conjuncts stay inside their grapheme.
+    return (has_id_line_break_class(previous_unit) && has_id_line_break_class(current)) ||
+        ((utf_is_clustered_script(previous_unit) || utf_is_clustered_script(current)) &&
+         is_typographic_letter_unit(previous_unit) && is_typographic_letter_unit(current));
 }
 
 /**
@@ -5253,6 +5365,18 @@ struct LayoutViewScope {
     }
     LayoutViewScope(const LayoutViewScope&) = delete;
     LayoutViewScope& operator=(const LayoutViewScope&) = delete;
+};
+
+// consume-only probes copy scalar results before releasing substituted CSS values.
+struct CssComputedValueScratch {
+    LayoutContext* context;
+    Pool* previous;
+    Pool* owned;
+    CssComputedValueScratch(LayoutContext* context, CssPropertyCode property,
+                            const CssValue* value, bool consume_only = false);
+    ~CssComputedValueScratch();
+    CssComputedValueScratch(const CssComputedValueScratch&) = delete;
+    CssComputedValueScratch& operator=(const CssComputedValueScratch&) = delete;
 };
 // Font setup is a borrowed mutation of the surrounding layout pass; every
 // measurement helper must restore it even when the measured subtree returns

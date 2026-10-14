@@ -4163,6 +4163,7 @@
           {
             "source": "test/test_radiant_view_gtest.cpp",
             "name": "Radiant View Tests",
+            "artifact_dirs": ["radiant_view"],
             "additional_sources": [
               "test/test_radiant_view_scene3d.cpp"
             ],

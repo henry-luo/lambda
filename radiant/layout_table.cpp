@@ -759,9 +759,7 @@ static float table_inline_line_stack_height(const TableCellContentExtent* extent
     return line_stack_height;
 }
 
-static float table_text_font_normal_line_height(ViewText* text, FontProp* font,
-                                                bool* has_cjk_text) {
-    if (has_cjk_text) *has_cjk_text = false;
+static float table_text_font_normal_line_height(ViewText* text, FontProp* font) {
     if (!text || !font) return 0.0f;
     const char* data = reinterpret_cast<const char*>(text->text_data());
     size_t len = text->length;
@@ -775,7 +773,6 @@ static float table_text_font_normal_line_height(ViewText* text, FontProp* font,
         uint32_t cp = 0;
         int consumed = utf8_decode(data + pos, len - pos, &cp);
         if (consumed <= 0) break;
-        if (has_cjk_text && utf_is_cjk(cp)) *has_cjk_text = true;
         LoadedGlyph* glyph = font_load_glyph(handle, &style, cp, false);
         if (glyph && glyph->font_normal_line_height > max_normal_line_height) {
             max_normal_line_height = glyph->font_normal_line_height;
@@ -787,21 +784,16 @@ static float table_text_font_normal_line_height(ViewText* text, FontProp* font,
 
 static float table_resolve_cell_line_height(View* view, float line_height,
                                             bool line_height_is_normal,
-                                            float parent_font_size,
                                             FontProp* cell_font) {
     if (!view || !line_height_is_normal || view->view_type != RDT_VIEW_TEXT) {
         return line_height;
     }
     ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
     FontProp* text_font = text->font ? text->font : cell_font;
-    bool has_cjk_text = false;
     float normal_height = table_text_font_normal_line_height(
-        text, text_font, &has_cjk_text);
+        text, text_font);
     if (normal_height > line_height) return normal_height;
-    if (has_cjk_text) {
-        float cjk_height = get_cjk_system_line_height(parent_font_size);
-        if (cjk_height > line_height) return cjk_height;
-    }
+    // fallback metrics already belong to the selected face, including CJK glyphs.
     return line_height;
 }
 
@@ -812,7 +804,7 @@ static float table_cell_line_box_height_for_view(View* view, float cell_line_hei
     if (!view) return cell_line_height;
     float view_height = view->height;
     cell_line_height = table_resolve_cell_line_height(
-        view, cell_line_height, line_height_is_normal, parent_font_size, cell_font);
+        view, cell_line_height, line_height_is_normal, cell_font);
     if (!line_height_is_normal && cell_line_height > 0.0f) {
         // CSS Inline: an explicit line-height owns the line box; glyph ink may
         // overflow it and must not enlarge an auto table row.
@@ -842,7 +834,7 @@ static void table_collect_inline_line_box_extent(View* view, float cell_line_hei
         }
         float line_height = cell_line_height;
         line_height = table_resolve_cell_line_height(
-            view, line_height, line_height_is_normal, parent_font_size, cell_font);
+            view, line_height, line_height_is_normal, cell_font);
         if (line_height <= 0.0f) line_height = view->height;
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
@@ -2880,7 +2872,7 @@ static uint8_t get_border_style_priority(CssEnum style) {
     }
 }
 
-static CollapsedBorder select_winning_border(const CollapsedBorder& a, const CollapsedBorder& b) {
+CollapsedBorder layout_table_collapsed_winner(const CollapsedBorder& a, const CollapsedBorder& b) {
     if (a.style == CSS_VALUE_HIDDEN) {
         CollapsedBorder result = a;
         result.width = 0;
@@ -3184,7 +3176,7 @@ static void apply_collapsed_border_pair(LayoutContext* lycon, ViewTable* table,
     if (candidates.size() == 0) return;
     CollapsedBorder winner = *candidates[0];
     for (size_t i = 1; i < candidates.size(); i++) {
-        winner = select_winning_border(winner, *candidates[i]);
+        winner = layout_table_collapsed_winner(winner, *candidates[i]);
     }
     if (axis.has_previous(row, col)) {
         ViewTableCell* previous = table_collapsed_border_cell(
@@ -3263,18 +3255,15 @@ static void collect_collapsed_border_candidates(ViewTable* table,
     int edge = axis.edge(row, col);
     bool at_start = edge == 0;
     bool at_end = edge == axis.edge_count;
-    if (at_start) {
-        append_collapsed_border_candidate(candidates,
-            table_view_border(table, axis.table_side(true)));
-    } else {
+    // the winner fold keeps the earlier of equal borders, so candidates enter in CSS 2.2 §17.6.2.1
+    // precedence: cell, row, row group, column, column group, then table (CSS Tables 3 §3.7.1 keeps
+    // the cell over an equal table border); within a type the upper or left element comes first.
+    if (!at_start) {
         table_append_border(candidates, table_collapsed_border_cell(
             lookup, table, axis.previous_row(row, col), axis.previous_col(row, col)),
             axis.previous_side());
     }
-    if (at_end) {
-        append_collapsed_border_candidate(candidates,
-            table_view_border(table, axis.table_side(false)));
-    } else {
+    if (!at_end) {
         table_append_border(candidates, table_collapsed_border_cell(lookup, table, row, col),
                             axis.next_side());
     }
@@ -3287,45 +3276,39 @@ static void collect_collapsed_border_candidates(ViewTable* table,
             table_append_border(candidates, table_collapsed_border_row(lookup, table, row),
                                 0, true);
         }
-        if (!at_end) {
-            ViewBlock* group = table_collapsed_border_row_group(lookup, table, row);
-            ViewBlock* previous_group = table_collapsed_border_row_group(lookup, table, row - 1);
-            if (group && group != previous_group) table_append_border(candidates, group, 0, true);
-        }
-        if (!at_start) {
-            ViewBlock* group = table_collapsed_border_row_group(lookup, table, row - 1);
-            ViewBlock* next_group = table_collapsed_border_row_group(lookup, table, row);
-            if (group && group != next_group) table_append_border(candidates, group, 2, true);
-        }
+        ViewBlock* upper_group = !at_start ? table_collapsed_border_row_group(lookup, table, row - 1) : nullptr;
+        ViewBlock* lower_group = !at_end ? table_collapsed_border_row_group(lookup, table, row) : nullptr;
+        if (upper_group && upper_group != lower_group) table_append_border(candidates, upper_group, 2, true);
+        if (lower_group && lower_group != upper_group) table_append_border(candidates, lower_group, 0, true);
         if (at_start || at_end) {
             int side = at_start ? 0 : 2;
             table_append_border(candidates, find_column_element(table, col), side, true);
             table_append_border(candidates, find_colgroup_element(table, col), side, true);
         }
-        return;
+    } else {
+        if (at_start || at_end) {
+            int side = at_start ? 3 : 1;
+            table_append_border(candidates, table_collapsed_border_row(lookup, table, row), side, true);
+            ViewBlock* group = table_collapsed_border_row_group(lookup, table, row);
+            table_append_border(candidates, group, side, true);
+        }
+        if (!at_start) {
+            table_append_border(candidates, find_column_element(table, col - 1), 1, true);
+        }
+        if (!at_end) {
+            table_append_border(candidates, find_column_element(table, col), 3, true);
+        }
+        ViewBlock* left_group = !at_start ? find_colgroup_element(table, col - 1) : nullptr;
+        ViewBlock* right_group = !at_end ? find_colgroup_element(table, col) : nullptr;
+        if (left_group && left_group != right_group) {
+            table_append_border(candidates, left_group, 1, true);
+        }
+        if (right_group && right_group != left_group) {
+            table_append_border(candidates, right_group, 3, true);
+        }
     }
-    if (at_start || at_end) {
-        int side = at_start ? 3 : 1;
-        table_append_border(candidates, table_collapsed_border_row(lookup, table, row), side, true);
-        ViewBlock* group = table_collapsed_border_row_group(lookup, table, row);
-        table_append_border(candidates, group, side, true);
-    }
-    if (!at_start) {
-        table_append_border(candidates, find_column_element(table, col - 1), 1, true);
-    }
-    if (!at_end) {
-        table_append_border(candidates, find_column_element(table, col), 3, true);
-    }
-    ViewBlock* left_group = !at_start ? find_colgroup_element(table, col - 1) : nullptr;
-    ViewBlock* right_group = !at_end ? find_colgroup_element(table, col) : nullptr;
-    if (left_group && left_group != right_group) {
-        table_append_border(candidates, left_group, 1, true);
-    }
-    if (right_group && right_group != left_group) {
-        table_append_border(candidates, right_group, 3, true);
-    }
-    if (at_start) table_append_border(candidates, right_group, 3, true);
-    if (at_end) table_append_border(candidates, left_group, 1, true);
+    if (at_start) append_collapsed_border_candidate(candidates, table_view_border(table, axis.table_side(true)));
+    if (at_end) append_collapsed_border_candidate(candidates, table_view_border(table, axis.table_side(false)));
 }
 
 static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, TableMetadata* meta) {
@@ -4664,7 +4647,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             for (; child; child = child->next_sibling) {
                 layout_flow_node(lycon, child);
             }
-            if (!lycon->line.is_line_start) { line_break(lycon); }
+            if (!lycon->line.is_line_start) { line_break(lycon, true); }
             layout_table_caption_content_finish(
                 lycon, caption, layout_box_metrics(caption).pad_border_v);
             caption->width = (float)caption_width;  // Preliminary width; final width set during positioning
@@ -6322,8 +6305,9 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
     bool collapse_ws = should_collapse_whitespace(cell);
     // CSS Text 3 §5.2: word-break: break-word behaves as overflow-wrap: anywhere
     CssEnum cell_overflow_wrap = CSS_VALUE_NORMAL;
+    CssEnum cell_word_break = CSS_VALUE_NORMAL;
     layout_resolve_inherited_text_wrap(static_cast<DomNode*>(cell),
-                                       &cell_overflow_wrap);
+                                       &cell_overflow_wrap, &cell_word_break);
     // CSS 2.1: For inline content, consecutive text nodes flow on the same line.
     float inline_run_max = 0.0f;  // Running sum for current inline sequence
     float float_run_max = 0.0f;   // Sum of side-by-side floats in the current run
@@ -6339,6 +6323,29 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
     if (cell->blk && cell->block_mut()->text_indent != 0.0f && isnan(cell->block_mut()->text_indent_percent)) {
         cell_text_indent = cell->block()->text_indent;
     }
+    bool first_line = true;
+    auto append_inline_widths = [&](const IntrinsicSizes& widths) {
+        if (widths.min_content > min_width) min_width = widths.min_content;
+        if (widths.has_forced_break) {
+            // forced lines remain separate at max-content, including across inline siblings.
+            inline_run_max += widths.first_line_max;
+            if (first_line && cell_text_indent > 0.0f) {
+                inline_run_max += cell_text_indent;
+                // an unwrapped later line must not acquire the first line's indent.
+                min_width = should_prevent_wrapping(cell)
+                    ? max(min_width, inline_run_max) : min_width + cell_text_indent;
+            }
+            table_intrinsic_flush_inline_run(
+                &inline_run_max, &float_run_max, &float_run_min, &max_width, &min_width,
+                &has_inline_content, &prev_ended_with_space);
+            max_width = max(max_width, widths.max_content);
+            inline_run_max = widths.last_line_max;
+            first_line = false;
+        } else {
+            inline_run_max += widths.max_content;
+        }
+        has_inline_content = true;
+    };
     for (DomNode* child = cell_elem->first_child; child; child = child->next_sibling) {
         if (child->is_text()) {
             const unsigned char* text = child->text_data();
@@ -6368,11 +6375,21 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                     measure_text = normalized_buffer;
                     measure_len = normalized_len;
                 }
-                TextIntrinsicWidths widths = layout_measure_text_intrinsic_widths(
-                    lycon, measure_text, measure_len, cell_text_transform, cell_font_variant,
-                    CSS_VALUE_NORMAL, cell_overflow_wrap, CSS_VALUE_NORMAL);
-                float text_max = (float)widths.max_content;  // PCW (max-content)
-                float text_min = (float)widths.min_content;  // MCW (min-content)
+                LayoutTextIntrinsicLineOptions line_options;
+                line_options.text_transform = cell_text_transform;
+                line_options.font_variant = cell_font_variant;
+                line_options.white_space = table_cell_white_space(cell);
+                line_options.overflow_wrap = cell_overflow_wrap;
+                line_options.word_break = cell_word_break;
+                line_options.start_offset = inline_run_max;
+                if (cell->blk) {
+                    if (cell->block()->tab_size >= 0.0f) {
+                        line_options.tab_size = cell->block()->tab_size;
+                    }
+                    line_options.tab_size_length = cell->block()->tab_size_length;
+                }
+                IntrinsicSizes widths = layout_measure_text_intrinsic_lines(
+                    lycon, measure_text, measure_len, line_options);
                 // Text normalization trims its edge spaces, while an inline
                 // child's intrinsic width already includes its trailing space.
                 if (collapse_ws && has_inline_content && !prev_end_space_measured &&
@@ -6380,9 +6397,7 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                      original_has_leading_ws) && lycon->font.style) {
                     inline_run_max += lycon->font.style->space_width;
                 }
-                inline_run_max += text_max;
-                has_inline_content = true;
-                if (text_min > min_width) min_width = text_min;
+                append_inline_widths(widths);
                 prev_ended_with_space = original_has_trailing_ws;
                 prev_end_space_measured = false;
                 pending_whitespace_only = false;
@@ -6467,10 +6482,21 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                         }
                     }
                 }
-                inline_run_max += child_max + inline_margin_h;
                 child_min += inline_margin_h;
                 if (child_min < 0) child_min = 0;
-                has_inline_content = true;
+                IntrinsicSizes inline_widths = child_sizes;
+                inline_widths.min_content = child_min;
+                inline_widths.max_content = child_max + inline_margin_h;
+                // atomic inline boxes retain their own formatting context's forced breaks.
+                if (layout_intrinsic_element_is_atomic_inline(child_elem)) {
+                    inline_widths.has_forced_break = false;
+                } else if (inline_widths.has_forced_break) {
+                    LayoutIntrinsicMarginPair margins =
+                        layout_intrinsic_horizontal_margin_pair(lycon, child_elem);
+                    inline_widths.first_line_max += margins.left;
+                    inline_widths.last_line_max += margins.right;
+                }
+                append_inline_widths(inline_widths);
                 prev_ended_with_space = layout_element_edge_has_whitespace(child, true);
                 prev_end_space_measured = prev_ended_with_space;
                 pending_whitespace_only = false;
@@ -6503,7 +6529,7 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
         }
     }
     // CSS 2.1 §16.1: text-indent adds to the first line of inline content.
-    if (cell_text_indent > 0 && has_inline_content) {
+    if (first_line && cell_text_indent > 0 && has_inline_content) {
         inline_run_max += cell_text_indent;
         min_width += cell_text_indent;
     }

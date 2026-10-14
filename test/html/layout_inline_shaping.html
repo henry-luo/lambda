@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Inline shaping retains source context and CSS boundaries</title>
+<style>
+@font-face {
+  font-family: ContextNaskh;
+  src: url("../layout/data/support/fonts/noto/NotoNaskhArabic-regular.woff2");
+}
+@font-face {
+  font-family: ContextLibertine;
+  src: url("../layout/data/wpt-css-text/boundary-shaping/resources/LinLibertine_Re-4.7.5.woff");
+}
+@font-face {
+  font-family: ContextMongolian;
+  src: url("../layout/data/support/fonts/noto/NotoSansMongolian-regular.woff2");
+}
+.row { font: 120px/1 ContextNaskh; direction: rtl; width: 360px; }
+.latin { font: 36px ContextLibertine; }
+.mongolian { font: 120px/1 ContextMongolian; }
+</style>
+<body id="result">
+<div class="row" id="plain">ع<span id="plain-middle">ع</span>ع</div>
+<div class="row">ع<span id="color-middle" style="color: blue">ع</span>ع</div>
+<div class="row">ع&#x200D;<span id="joined-middle">&#x200D;ع&#x200D;</span>&#x200D;ع</div>
+<div class="row">ع<span id="zero-middle" style="padding: 0; margin: 0; vertical-align: initial">ع</span>ع</div>
+<div class="row">ع<span id="padding-middle" style="padding-right: 20px">ع</span>ع</div>
+<div class="row">ع<span id="isolate-middle" style="unicode-bidi: isolate">ع</span>ع</div>
+<div class="row">ع<span id="auto-middle" dir="auto">ع</span>ع</div>
+<div class="row">ع<span id="raised-middle" style="vertical-align: 12px">ع</span>ع</div>
+<div class="row">ع<span id="size-middle" style="font-size: 120%">ع</span>ع</div>
+<div class="row">ع<span id="uppercase-middle" style="text-transform: uppercase">ع</span>ع</div>
+<div class="row">ع<span id="lowercase-middle" style="text-transform: lowercase">ع</span>ع</div>
+<div class="row">ع<span id="capitalize-middle" style="text-transform: capitalize">ع</span>ع</div>
+<div class="row">ع<span id="autospace-middle" style="text-autospace: normal">ع</span>ع</div>
+<div class="row" style="overflow-wrap: break-word">ع<span id="wrap-middle">ع</span>ع</div>
+<div class="mongolian">ᠨ<span id="mongolian-middle" style="color: blue">ᠨ</span>ᠨ</div>
+<div class="latin">of<span id="ligature-middle">f</span>ice</div>
+<div class="latin">of<span id="ligature-padding" style="padding-left: 10px">f</span>ice</div>
+<div class="latin">of<span id="ligature-border" style="border-right: 10px solid transparent">f</span>ice</div>
+<div class="latin" id="empty-boundary">f<i style="padding-left: 10px"></i>i</div>
+</body>

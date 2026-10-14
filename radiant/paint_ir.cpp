@@ -23,18 +23,17 @@ void paint_svg_append_cjk_dx(StrBuf* out, const char* text, int text_len,
     if (!out || !text || text_len <= 0 || cjk_spacing <= 0.0f) return;
     const char* cursor = text;
     const char* end = text + text_len;
-    uint32_t previous = 0;
+    TextJustifyContext justify_context = {};
     strbuf_append_str(out, " dx=\"");
     while (cursor < end) {
         uint32_t current = 0;
         int bytes = str_utf8_decode(cursor, (size_t)(end - cursor), &current);
         if (bytes <= 0) { cursor++; continue; }
         cursor += bytes;
-        if (previous) strbuf_append_char(out, ' ');
-        float gap = text_justify_cjk_gap(previous, current)
+        if (justify_context.previous) strbuf_append_char(out, ' ');
+        float gap = text_justify_character_gap(&justify_context, current)
             ? cjk_spacing : 0.0f;
         strbuf_append_format(out, "%.2f", gap);
-        previous = current;
     }
     strbuf_append_char(out, '"');
 }
@@ -1099,6 +1098,8 @@ void paint_end_semantic_group(PaintList* pl) {
 
 typedef struct PaintIrRasterEffectFrame {
     PaintEffectGroup group;
+    int recording_start;
+    int source_start;
 } PaintIrRasterEffectFrame;
 
 #define PAINT_IR_RASTER_EFFECT_STACK_MAX 64
@@ -1112,27 +1113,11 @@ static const Bound* paint_optional_clip(bool has_clip, const Bound* clip) {
     return has_clip ? clip : nullptr;
 }
 
-static bool paint_ir_effect_bounds_to_region(const Bound* bounds,
-                                             int* x0, int* y0,
-                                             int* w, int* h) {
-    if (!bounds || !x0 || !y0 || !w || !h) return false;
-    float left = floorf(bounds->left);
-    float top = floorf(bounds->top);
-    float right = ceilf(bounds->right);
-    float bottom = ceilf(bounds->bottom);
-    if (right <= left || bottom <= top) return false;
-    *x0 = (int)left; // INT_CAST_OK: effect bounds lower to integer display-list pixel regions.
-    *y0 = (int)top; // INT_CAST_OK: effect bounds lower to integer display-list pixel regions.
-    *w = (int)(right - left); // INT_CAST_OK: effect bounds lower to integer display-list pixel regions.
-    *h = (int)(bottom - top); // INT_CAST_OK: effect bounds lower to integer display-list pixel regions.
-    return *w > 0 && *h > 0;
-}
-
 static void paint_ir_lower_raster_effect_begin(const PaintEffectGroup* group,
                                                DisplayList* dl) {
     if (!group || !dl) return;
-    int x0 = 0, y0 = 0, w = 0, h = 0;
-    if (!paint_ir_effect_bounds_to_region(&group->bounds, &x0, &y0, &w, &h)) {
+    IRect region = {};
+    if (!dl_effect_bounds_to_region(&group->bounds, &region)) {
         return;
     }
     if (group->backdrop_filter) {
@@ -1147,16 +1132,16 @@ static void paint_ir_lower_raster_effect_begin(const PaintEffectGroup* group,
     }
     if (group->isolation && !group->blend_mode && group->opacity >= 0.9995f && !group->backdrop && !group->mask.gradient) {
         // a pure isolated group also clears the parent backdrop before its children paint.
-        dl_save_backdrop(dl, x0, y0, w, h);
+        dl_save_backdrop(dl, region.x, region.y, region.w, region.h);
     }
     if (group->blend_mode) {
-        dl_save_backdrop(dl, x0, y0, w, h);
+        dl_save_backdrop(dl, region.x, region.y, region.w, region.h);
     }
     if (group->opacity < 0.9995f || group->mask.gradient) {
-        dl_save_backdrop(dl, x0, y0, w, h);
+        dl_save_backdrop(dl, region.x, region.y, region.w, region.h);
     }
     if (group->backdrop) {
-        dl_save_backdrop(dl, x0, y0, w, h);
+        dl_save_backdrop(dl, region.x, region.y, region.w, region.h);
     }
 }
 
@@ -1175,22 +1160,22 @@ static void paint_ir_lower_raster_effect_finish(const PaintEffectGroup* group,
                         paint_optional_clip(group->has_clip, &clip));
     }
 
-    int x0 = 0, y0 = 0, w = 0, h = 0;
-    if (!paint_ir_effect_bounds_to_region(&group->bounds, &x0, &y0, &w, &h)) {
+    IRect region = {};
+    if (!dl_effect_bounds_to_region(&group->bounds, &region)) {
         return;
     }
     if (group->backdrop) {
         // vector replay stores premultiplied foreground pixels in its isolated region.
-        dl_composite_opacity(dl, x0, y0, w, h, 1.0f, true);
+        dl_composite_opacity(dl, region.x, region.y, region.w, region.h, 1.0f, true);
     }
     if (group->opacity < 0.9995f || group->mask.gradient) {
-        dl_composite_opacity(dl, x0, y0, w, h, group->opacity, true, group->mask.gradient ? &group->mask : nullptr);
+        dl_composite_opacity(dl, region.x, region.y, region.w, region.h, group->opacity, true, group->mask.gradient ? &group->mask : nullptr);
     }
     if (group->blend_mode) {
-        dl_apply_blend_mode(dl, x0, y0, w, h, group->blend_mode);
+        dl_apply_blend_mode(dl, region.x, region.y, region.w, region.h, group->blend_mode);
     }
     if (group->isolation && !group->blend_mode && group->opacity >= 0.9995f && !group->backdrop && !group->mask.gradient) {
-        dl_composite_opacity(dl, x0, y0, w, h, 1.0f, true);
+        dl_composite_opacity(dl, region.x, region.y, region.w, region.h, 1.0f, true);
     }
 }
 
@@ -1212,8 +1197,11 @@ static bool paint_ir_lower_raster_effect_stack_command(const PaintCmd* cmd, Disp
                 log_error("[FILTER_DENSITY] export filter length capture failed"); return true;
             }
         }
-        effect_stack[(*effect_depth)++].group = group;
+        PaintIrRasterEffectFrame* frame = &effect_stack[(*effect_depth)++];
+        frame->group = group;
+        frame->recording_start = dl->item_count();
         paint_ir_lower_raster_effect_begin(&group, dl);
+        frame->source_start = dl->item_count();
         return true;
     }
     if (*effect_depth <= 0) {
@@ -1221,6 +1209,13 @@ static bool paint_ir_lower_raster_effect_stack_command(const PaintCmd* cmd, Disp
         return true;
     }
     PaintIrRasterEffectFrame* frame = &effect_stack[--(*effect_depth)];
+    if (!frame->group.has_clip) {
+        // the filter consumes source ink, including bearings and strokes outside the border box.
+        float padding = render_geometry_filter_effect_expand(frame->group.filter, 1.0f);
+        frame->group.bounds = dl_effect_capture_bounds(dl, frame->source_start, dl->item_count(),
+            frame->group.bounds, padding);
+        dl_resize_saved_backdrops(dl, frame->recording_start, frame->source_start, &frame->group.bounds);
+    }
     paint_ir_lower_raster_effect_finish(&frame->group, dl);
     return true;
 }

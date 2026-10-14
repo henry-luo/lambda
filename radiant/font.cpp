@@ -131,7 +131,14 @@ static bool font_handle_matches_prop(FontHandle* handle, FontProp* fprop,
 static void populate_font_prop_metrics(UiContext* uicon, FontProp* fprop,
                                        FontHandle* handle,
                                        const FontStyleDesc* style) {
-    if (!fprop || !handle || !style) return;
+    if (!fprop || !style) return;
+    if (style->size_px == 0.0f) {
+        fprop->space_width = fprop->average_char_width = 0.0f;
+        fprop->ascender = fprop->descender = fprop->font_height = 0.0f;
+        fprop->has_kerning = false;
+        return;
+    }
+    if (!handle) return;
     const FontMetrics* m = font_get_metrics(handle);
     if (!m) return;
 
@@ -166,6 +173,13 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
 
     FontStyleDesc style = font_style_desc_from_prop(fprop);
     style.family = family;
+    if (style.size_px == 0.0f) {
+        // native font APIs interpret size zero as a default-sized face;
+        // CSS zero-size text retains controls but has no glyph metrics.
+        font_prop_release_handle(fprop);
+        populate_font_prop_metrics(uicon, fprop, nullptr, &style);
+        return;
+    }
     FontWeight fw = style.weight;
     FontSlant fs = style.slant;
 

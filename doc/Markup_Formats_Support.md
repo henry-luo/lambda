@@ -254,6 +254,13 @@ data.address.city       // "New York"
 
 XML maps one-to-one onto Lambda **elements**: a tag, attributes, and ordered children. The parser wraps the result in a `<document>` element that also carries the XML declaration, and attribute values stay **strings** (`id: "1"`, never `id: 1`).
 
+For document packages, `{type: "xml", flavor: "document"}` selects the existing
+strict XML 1.0/UTF-8 parser with namespace validation and all significant
+whitespace preserved. It rejects malformed documents, unbound prefixes, DTDs,
+and embedded NUL bytes. This mode is available to both `input` and `parse`,
+including archive-member input (S12.4.1v2/S14.3.1v2). Plain `'xml'` retains its
+data-oriented whitespace and recovery behavior.
+
 <table>
 <thead>
 <tr><th>XML</th><th>Lambda / Mark</th></tr>

@@ -1,0 +1,29 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+.columns { width: 50px; height: 100px; columns: 2; column-gap: 0; column-fill: auto; }
+.relative { position: relative; }
+.absolute { position: absolute; width: 25px; height: 400px; }
+.fixed { position: fixed; width: 100px; height: 100px; }
+.outer { width: 100px; height: 100px; columns: 2; column-gap: 0; column-fill: auto; }
+.inner { width: 50px; columns: 2; column-gap: 0; column-fill: auto; }
+</style>
+<div id="result">
+<div class="columns"><div class="relative">
+  <div style="height: 400px"></div>
+  <div id="absolute" class="absolute">
+    <div id="continuous-child" style="width: 25px; height: 400px"></div>
+    <div id="fixed" class="fixed"></div>
+  </div>
+</div></div>
+<div class="outer"><div class="inner" style="height: 100px"><div class="relative">
+  <div style="height: 100px"></div>
+  <div id="nested-absolute" class="absolute" style="height: 200px">
+    <div id="nested-child" style="width: 25px; height: 200px"></div>
+    <div id="nested-fixed" class="fixed"></div>
+  </div>
+</div></div></div>
+<div class="outer"><div id="empty-inner" class="inner"><div class="relative">
+  <div id="empty-absolute" class="absolute"><div class="fixed"></div></div>
+</div></div></div>
+</div>

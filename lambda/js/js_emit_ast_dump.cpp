@@ -129,13 +129,13 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent);
 static void emit_js_dump_list(const char* source, const char* label, JsAstNode* node, int indent) {
     printf("\n");
     emit_dump_indent(indent);
-    printf("(%s", label);
+    printf("<%s", label);
     while (node) {
         printf("\n");
         emit_js_dump_node(source, node, indent + 1);
         node = node->next;
     }
-    printf(")");
+    printf(">");
 }
 
 // Publish the node's inferred static type so IP6 fixtures can assert it, the
@@ -144,25 +144,25 @@ static void js_dump_value_type(JsAstNode* node) {
     if (!node || !node->type) return;
     char name[128];
     lambda_type_format_name(node->type, name, sizeof(name));
-    printf(" (value_type \"%s\")", name);
+    printf(" <value_type \"%s\">", name);
 }
 
 static void emit_js_dump_field(const char* source, const char* label, JsAstNode* node, int indent) {
     if (!node) return;
     printf("\n");
     emit_dump_indent(indent);
-    printf("(%s\n", label);
+    printf("<%s\n", label);
     emit_js_dump_node(source, node, indent + 1);
-    printf(")");
+    printf(">");
 }
 
 static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
     emit_dump_indent(indent);
     if (!node) {
-        printf("(null)");
+        printf("<none>");
         return;
     }
-    printf("(%s", js_dump_kind_name(node->node_type));
+    printf("<%s", js_dump_kind_name(node->node_type));
 
     switch (node->node_type) {
         case AST_SCRIPT:
@@ -170,7 +170,7 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
             break;
         case AST_NODE_VAR_STAM: {
             JsVariableDeclarationNode* var_decl = (JsVariableDeclarationNode*)node;
-            printf(" (kind %s)", var_decl->kind == JS_VAR_VAR ? "var" : var_decl->kind == JS_VAR_LET ? "let" : "const");
+            printf(" <kind \"%s\">", var_decl->kind == JS_VAR_VAR ? "var" : var_decl->kind == JS_VAR_LET ? "let" : "const");
             emit_js_dump_list(source, "declarations", var_decl->declarations, indent + 1);
             break;
         }
@@ -186,16 +186,16 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
         case AST_NODE_LITERAL: {
             JsLiteralNode* lit = (JsLiteralNode*)node;
             if (lit->literal_type == AST_LITERAL_STRING) {
-                printf(" (literal string)");
+                printf(" <literal \"string\">");
                 emit_dump_string_field("value", lit->value.string_value);
             } else if (lit->literal_type == AST_LITERAL_BOOLEAN) {
-                printf(" (literal %s)", lit->value.boolean_value ? "true" : "false");
+                printf(" <literal %s>", lit->value.boolean_value ? "true" : "false");
             } else if (lit->literal_type == AST_LITERAL_NULL) {
-                printf(" (literal null)");
+                printf(" <literal \"null\">");
             } else if (lit->literal_type == AST_LITERAL_UNDEFINED) {
-                printf(" (literal undefined)");
+                printf(" <literal \"undefined\">");
             } else {
-                printf(" (literal number)");
+                printf(" <literal \"number\">");
                 emit_dump_source_field(source, node->source_span);
             }
             if (lit->is_bigint) emit_dump_string_field("bigint", lit->bigint_str);
@@ -203,7 +203,7 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
         }
         case AST_NODE_BINARY: {
             JsBinaryNode* bin = (JsBinaryNode*)node;
-            printf(" (op %s)", js_dump_operator_name(bin->op));
+            printf(" <op \"%s\">", js_dump_operator_name(bin->op));
             js_dump_value_type(node);
             emit_js_dump_field(source, "left", bin->left, indent + 1);
             emit_js_dump_field(source, "right", bin->right, indent + 1);
@@ -211,7 +211,7 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
         }
         case AST_NODE_UNARY: {
             JsUnaryNode* un = (JsUnaryNode*)node;
-            printf(" (op %s)", js_dump_operator_name(un->op));
+            printf(" <op \"%s\">", js_dump_operator_name(un->op));
             js_dump_value_type(node);
             emit_js_dump_field(source, "operand", un->operand, indent + 1);
             break;
@@ -219,7 +219,7 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
         case AST_NODE_ASSIGN:
         case AST_NODE_ASSIGN_PATTERN: {
             JsAssignmentNode* assign = (JsAssignmentNode*)node;
-            printf(" (op %s)", js_dump_operator_name(assign->op));
+            printf(" <op \"%s\">", js_dump_operator_name(assign->op));
             emit_js_dump_field(source, "left", assign->left, indent + 1);
             emit_js_dump_field(source, "right", assign->right, indent + 1);
             break;
@@ -387,7 +387,7 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
             break;
     }
 
-    printf(")");
+    printf(">");
 }
 
 extern "C" int emit_js_ast_dump_file(const char* script_path) {
@@ -428,9 +428,9 @@ extern "C" int emit_js_ast_dump_file(const char* script_path) {
         return 1;
     }
 
-    printf("(ast-dump js\n");
+    printf("<ast-dump \"js\"\n");
     emit_js_dump_node(source, ast, 1);
-    printf(")\n");
+    printf(">\n");
 
     js_transpiler_destroy(tp);
     mem_free(source);

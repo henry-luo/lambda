@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><style>
+body { margin:0; font:16px/20px Arial; }
+div { width:300px; height:20px; }
+</style><div id="result">
+<div><span dir="rtl">1<span id="numeric-boundary"></span>;234;56א;</span></div>
+<div><span dir="rtl">1;2<span id="numeric-run"></span>34;56א;</span></div>
+<div><span dir="rtl">1;234<span id="neutral-boundary"></span>;56א;</span></div>
+<div><span dir="rtl"><span id="first-boundary"></span>1;234;56א;</span></div>
+<div><span dir="ltr">ab<span id="ltr-boundary"></span>cd</span></div>
+<div><span dir="rtl">א<span id="nested" dir="ltr">ab<span id="nested-boundary"></span>cd</span>ב</span></div>
+</div>

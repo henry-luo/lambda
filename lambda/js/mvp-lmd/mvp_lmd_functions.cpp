@@ -5,9 +5,35 @@
 #include "../../runtime/heap_api.h"
 #include "../js_well_known_names.h"
 #include "../js_props.h"
+#include "../js_runtime.h"
 #include "../../input/input.hpp"
 #include "../../../lib/mem.h"
 #include <math.h>
+
+extern "C" Item mvp_lmd_with_binding(Item owner, Item key, Item value, int64_t operation) {
+    static const JsWithBindingOps ops = {
+        [](Item object, Item name) { return mvp_lmd_property_with_receiver(object, name, ItemNull, LMD_PROP_HAS, object); },
+        [](Item object, Item name) { return mvp_lmd_property_with_receiver(object, name, ItemNull, LMD_PROP_GET, object); },
+        mvp_lmd_is_object, mvp_lmd_truthy
+    };
+    if (operation == LMD_PROP_HAS)
+        return js_with_binding_is_visible_with_ops(key, owner,
+            Item{.item = s2it(well_known_name_ref(JS_SYMBOL_UNSCOPABLES))}, &ops);
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> object(roots, owner), name(roots, key), input(roots, value);
+    int64_t mode = operation & ~LMD_PROP_STRICT;
+    // resolution precedes RHS/arguments; Get/SetBindingValue rechecks this saved base.
+    if (mode == LMD_PROP_GET || mode == LMD_PROP_SET) {
+        Item present = ops.has(object.get(), name.get());
+        if (item_is_error(present)) return present;
+        if (present.item == ITEM_FALSE) {
+            if (operation & LMD_PROP_STRICT) return mvp_lmd_fail(LMD_MVP_REFERENCE, 0);
+            if (mode == LMD_PROP_GET) return Item{.item = ITEM_JS_UNDEFINED};
+        }
+    }
+    return mvp_lmd_property_with_receiver(object.get(), name.get(), input.get(), operation, object.get());
+}
 
 Item mvp_lmd_function_forward(Item function, Item receiver, Item prefix, Item* arguments, uint64_t count, int skip, MvpLmdNativeEntry entry, Item target) {
     RootFrame roots(4);
@@ -193,9 +219,18 @@ extern "C" Item mvp_lmd_arguments_new(Item function, Item* values, uint64_t coun
     status = mvp_lmd_define_own_property(object.get(), Item{.item = s2it(heap_create_name("callee", 6))}, &descriptor);
     return item_is_error(status) ? status : object.get();
 }
+extern "C" Item mvp_lmd_function_set_name(Item function, Item key, int64_t prefix) {
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, function), name(roots, key);
+    name.set(js_function_name_display(name.get().get_string(), prefix));
+    if (item_is_error(name.get())) return name.get();
+    return mvp_lmd_named_set(owner.get(), "name", name.get(), JSPD_NON_ENUMERABLE | JSPD_NON_WRITABLE);
+}
 Item mvp_lmd_function_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
     for (int i = LMD_LIBRARY_CALL; i <= LMD_LIBRARY_BIND; i++) {
-        state->values[i] = mvp_lmd_native_function(program, state, function_method, i == LMD_LIBRARY_APPLY ? 2 : 1);
+        state->values[i] = mvp_lmd_native_function(program, state, function_method, i == LMD_LIBRARY_APPLY ? 2 : 1,
+            i == LMD_LIBRARY_APPLY ? "apply" : i == LMD_LIBRARY_BIND ? "bind" : "call");
         if (item_is_error(state->values[i])) return state->values[i];
     }
     if (state->mutable_prototypes) {
