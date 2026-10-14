@@ -1383,6 +1383,8 @@ Charts reuse `lambda.chart.chart` for SVG layout (D7.2.4), retain explicit RGB
 series colors and titles, and contribute a data table to extracted text.
 Paragraph-relative column anchors support left/right square wrapping,
 centered largest-side wrapping, and top/bottom wrapping at paragraph top.
+Signed column-start and paragraph offsets with square wrapping on both sides
+use CSS float margins (D7.2.4); this remains a flowing approximation of Word.
 The viewer also reads the document theme, inherited and direct run properties
 (font family, size, color, tracking and capitalization), paragraph spacing,
 table grid widths, cell shading and borders, row heights, and page size/margins.

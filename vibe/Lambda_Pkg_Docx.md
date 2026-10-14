@@ -210,7 +210,7 @@ void-element implementations.
 | Content controls (`w:sdt`) | Display saved `sdtContent` in its inline/block/row/cell context; retain source order and inherited formatting, without executing bindings or editing behavior |
 | Package-internal raster images | `<img>` with a data URI by default, or omit with a diagnostic |
 | Cached clustered column charts | SVG through `lambda.chart.chart`, preserving indexed cached values, series order, labels and RGB colors; a data table in plain text |
-| Paragraph-relative anchored drawings | CSS alignment/wrapping for supported column-relative left/right/center anchors at paragraph top |
+| Paragraph-relative anchored drawings | CSS alignment/wrapping for supported column-relative left/right/center anchors and signed column-start/paragraph offsets with square wrapping on both sides |
 | Source presentation | Resolve theme fonts/colors, inherited run size and tracking, paragraph spacing, table grid widths, cell shading/borders, row heights, and page dimensions into validated CSS |
 | Page/section break | Stable semantic break marker; no claim of Word pagination |
 
@@ -218,8 +218,10 @@ Preserve Unicode text and run order. Apply document defaults, named styles,
 paragraph/run properties, and direct formatting in a defined precedence order
 before lowering. Full visual properties such as font metrics, exact spacing,
 columns, borders, and page-relative floating placement are not part of the
-semantic v1 contract. The supported paragraph-anchor subset uses CSS floats
-and distance/effect extents; unsupported anchors retain diagnostics.
+semantic v1 contract. The supported paragraph-anchor subset uses CSS floats,
+distance/effect extents, and signed offsets for column-start square wrapping
+at a paragraph anchor (D7.2.4). Arbitrary positions that need text on both
+sides of an interior image still retain diagnostics.
 Footnote/endnote parts are inspected before diagnosing separate stories:
 parts containing only separator and continuation-separator definitions have
 no actual notes to omit. Normal notes and other separate stories remain

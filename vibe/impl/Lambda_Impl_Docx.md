@@ -175,6 +175,32 @@ defines `w:sz` in half-points; the [table guide](https://learn.microsoft.com/en-
 describes grid columns, and the [theme font rule](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.runfonts?view=openxml-3.0.1)
 defines theme font references.
 
+## Sample 3 offset anchors follow-up
+
+`sample3.docx` has two internal raster drawings with `positionH` offsets of
+−53340 and 0 EMU from the column start, `positionV` offsets of 18415 and
+−195580 EMU from their paragraphs, and `wrapSquare wrapText="bothSides"`.
+The importer previously accepted only named horizontal alignment and vertical
+top/zero, so it emitted two `unsupported-floating-image` warnings and left
+both pictures inline before their text. This is the source of the reported
+warning banner and run-under-image layout.
+
+`drawing.ls` now reads signed offsets and positions this left-edge square-wrap
+subset with float margins, adjusting for the separate wrapping distances so
+the picture remains at its source offset. The existing aligned-anchor path is
+unchanged. Interior positive horizontal offsets still receive diagnostics:
+a single CSS float cannot reproduce Word's text on both sides (D7.2.4).
+This flow preview does not claim exact Word wrap geometry or pagination.
+
+The sample now converts with **zero DOCX diagnostics**; the native 1100 × 1800
+render completed with exit code 0. `temp/docx/sample3-before.png` and
+`sample3-after.png` were inspected: both images are visible, and the adjacent
+paragraphs wrap alongside them. No regression suites or new tests were run.
+The [OOXML position-offset rule](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.wordprocessing.positionoffset?view=openxml-3.0.1)
+defines the signed EMU measurement relative to its positioning base; the
+[square-wrap rule](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.wordprocessing.wrapsquare?view=openxml-3.0.1)
+defines the bounding rectangle used for text wrapping.
+
 ## Implemented surface
 
 `lambda.doc.docx` exports `convert`, `to_elements`, `to_html`, and
