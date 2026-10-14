@@ -66,6 +66,9 @@ typedef struct ModuleDescriptor {
     int body_executed;
     int post_await_pending;
     uint64_t roots_epoch;
+    // optional source-language link metadata; frontend code outlives this native table.
+    void* source_record;
+    void (*source_record_destroy)(void*);
 } ModuleDescriptor;
 
 // Initialize the registry owned by one Runtime.  Module namespace Items are

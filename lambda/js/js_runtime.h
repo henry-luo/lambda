@@ -697,6 +697,84 @@ struct JsStringCodeOps {
 Item js_string_from_codes_with_ops(void* source, int64_t count, bool code_points,
     const struct JsStringCodeOps* ops);
 
+// RegExp protocols share algorithms; front ends retain property/coercion and native-slot policy.
+// Callbacks may enter guest code. Inputs and all cross-callback results are precisely rooted.
+typedef struct JsRegExpOps {
+    Item (*get)(Item, const char*);
+    Item (*set_last_index)(Item, Item);
+    Item (*to_string)(Item);
+    Item (*to_number)(Item);
+    bool (*is_object)(Item);
+    bool (*is_callable)(Item);
+    bool (*truthy)(Item);
+    bool (*same_value)(Item, Item);
+    Item (*call)(Item, Item, Item*, int);
+    Item (*builtin_exec)(Item, Item, bool);
+    Item (*intrinsic_exec)(void);
+    Item (*intrinsic_get)(Item, int);
+    Item (*array_new)(int);
+    Item (*append)(Item, Item);
+    Item (*type_error)(const char*);
+    Item (*match_bulk)(Item, Item, bool*);
+    Item (*match_flags)(Item);
+    int64_t (*advance)(Item, String*, int64_t, bool);
+    Item (*get_key)(Item, Item);
+    Item (*to_object)(Item);
+    bool (*is_constructor)(Item);
+    Item (*construct)(Item, Item*, int);
+    Item (*default_constructor)(void);
+    Item (*replace_bulk)(Item, Item, Item, bool*);
+    bool (*split_utf8_native)(Item);
+    bool (*native_is_regexp)(Item);
+    Item (*create)(Item, Item);
+} JsRegExpOps;
+// native matchers provide UTF-16 offsets and pool-owned names; unmatched spans start at -1.
+typedef struct JsRegExpIndexSpan { int64_t start, end; } JsRegExpIndexSpan;
+typedef struct JsRegExpIndexName { const char* chars; int length, capture; } JsRegExpIndexName;
+typedef struct JsRegExpIndicesOps {
+    const JsRegExpOps* values;
+    Item (*null_object)(void);
+    Item (*create_data)(Item object, Item key, Item value);
+} JsRegExpIndicesOps;
+Item js_regexp_attach_indices_with_ops(Item result, const JsRegExpIndexSpan* spans, int count,
+    const JsRegExpIndexName* names, int named, const JsRegExpIndicesOps* ops);
+// native slots never observe public source/flags; allocation consumes rooted strings.
+typedef struct JsRegExpConstructorOps {
+    const JsRegExpOps* values;
+    Item (*native_slot)(Item regexp, bool flags);
+    Item (*prototype)(Item new_target);
+    Item (*initialize)(Item pattern, Item flags, Item prototype);
+    Item (*replace)(Item receiver, Item replacement);
+} JsRegExpConstructorOps;
+Item js_regexp_compile_with_ops(Item receiver, Item pattern, Item flags,
+    const JsRegExpConstructorOps* ops);
+Item js_regexp_is_regexp_with_ops(Item value, bool* result, const JsRegExpOps* ops);
+Item js_regexp_initialize_with_ops(Item pattern, Item flags, Item prototype,
+    const JsRegExpConstructorOps* ops);
+Item js_regexp_construct_with_ops(Item pattern, Item flags, Item constructor,
+    Item new_target, const JsRegExpConstructorOps* ops);
+// storage reads are nonallocating; the caller registers the two Item output slots before read.
+typedef struct JsRegExpIteratorOps {
+    Item (*create)(Item regexp, Item string, bool global, bool unicode);
+    bool (*read)(Item iterator, Item* state, bool* flags); // state: regexp/string; flags: global/unicode/done
+    Item (*set_done)(Item iterator);
+    Item (*result)(Item value, bool done);
+} JsRegExpIteratorOps;
+Item js_regexp_match_all_with_ops(Item receiver, Item string,
+    const JsRegExpOps* ops, const JsRegExpIteratorOps* iterators);
+Item js_regexp_match_all_next_with_ops(Item receiver,
+    const JsRegExpOps* ops, const JsRegExpIteratorOps* iterators);
+Item js_regexp_string_match_all_with_ops(Item receiver, Item regexp, const JsRegExpOps* ops);
+Item js_regexp_exec_with_ops(Item receiver, Item string, const JsRegExpOps* ops, bool test_only);
+Item js_regexp_protocol_with_ops(int builtin_id, Item receiver, Item* args, int argc, const JsRegExpOps* ops);
+int64_t js_regex_advance_string_index_units(String* string, int64_t index, bool full_unicode);
+Item js_str_substring_utf16(Item string, int64_t start, int64_t end);
+struct StrBuf;
+// caller roots the borrowed string spans and captures; generic positions are UTF-16 units.
+Item js_apply_replacement_from_items(struct StrBuf* output, const char* replacement, int replacement_length,
+    const char* source, int source_length, int64_t position, const char* matched, int matched_length,
+    Item* captures, int capture_count, Item groups, const JsRegExpOps* ops, Item source_item, bool utf16);
+
 // =============================================================================
 // v5: Console multi-argument log
 // =============================================================================
@@ -719,6 +797,13 @@ Item js_nullish_coalesce(Item left, Item right);
 Item js_object_keys(Item object);
 Item js_typed_array_enumerable_custom_keys(Item object);
 Item js_for_in_keys(Item object);
+// enumeration policies return undefined for an absent own key, bool for present, or an error.
+typedef struct JsForInOps {
+    Item (*to_object)(Item);
+    Item (*prototype)(Item);
+    Item (*own_enumerability)(Item, Item key);
+} JsForInOps;
+Item js_for_in_key_is_live_with_ops(Item object, Item key, const JsForInOps* ops);
 bool js_for_in_key_is_live(Item object, Item key);
 Item js_object_get_own_property_names(Item object);
 Item js_object_get_own_property_symbols(Item object);
@@ -772,6 +857,50 @@ Item js_map_collection_new_from(Item iterable);
 Item js_set_collection_new(void);
 Item js_set_collection_new_from(Item iterable);
 Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2);
+// Shared collection storage preserves the existing native ephemeron carrier;
+// front ends supply language operations without creating another JS realm.
+typedef struct JsCollectionOps {
+    bool (*is_object)(Item);
+    bool (*is_callable)(Item);
+    Item (*get)(Item, const char*);
+    Item (*call)(Item, Item, Item*, int);
+    Item (*iterator)(Item);
+    Item (*step)(Item); // yielded value or JS_ITER_DONE_SENTINEL
+    Item (*close)(Item, Item);
+    Item (*error)(bool range, const char*);
+    bool (*weak_key)(Item);
+    Item (*number)(Item);
+    bool (*truthy)(Item);
+    Item (*iterator_from_method)(Item, Item);
+} JsCollectionOps;
+Item js_collection_create_with_storage(struct TypeMap* shape, Pool* pool, int kind, bool weak);
+bool js_collection_has_brand(Item object, int kind, bool weak);
+bool js_can_be_held_weakly(Item key);
+Item js_collection_add_entries_with_ops(Item collection, Item iterable, bool is_map,
+    const JsCollectionOps* ops);
+Item js_collection_method_with_ops(Item object, int method, Item arg1, Item arg2,
+    const JsCollectionOps* ops);
+// Cursors hold only stable native positions; callers root the collection. A
+// storage scope pins ordered ordinals until every normal or abrupt exit.
+typedef struct JsCollectionCursor { uintptr_t position; bool started; } JsCollectionCursor;
+typedef struct JsCollectionStorageOps {
+    bool (*brand)(Item, int kind);
+    int64_t (*size)(Item);
+    Item (*create)(int kind);
+    Item (*get)(Item, Item);
+    Item (*has)(Item, Item);
+    Item (*put)(Item, Item, Item);
+    Item (*erase)(Item, Item);
+    void (*begin)(Item);
+    bool (*next)(Item, JsCollectionCursor*, Item* key, Item* value);
+    void (*end)(Item);
+} JsCollectionStorageOps;
+Item js_collection_for_each_with_ops(Item collection, Item callback, Item this_arg,
+    bool is_set, const JsCollectionOps* ops, const JsCollectionStorageOps* storage);
+Item js_set_operation_with_ops(Item receiver, Item other, int operation,
+    const JsCollectionOps* ops, const JsCollectionStorageOps* storage);
+
+
 LAMBDA_RT_API void js_set_prototype(Item object, Item prototype);
 void js_object_proto_setter(Item object, Item value);
 LAMBDA_RT_API void js_mark_non_enumerable(Item object, Item name);
@@ -832,6 +961,8 @@ typedef struct JsTemplateObjectOps {
 } JsTemplateObjectOps;
 Item js_build_template_object_with_ops(Item* cooked, Item* raw, int count, const JsTemplateObjectOps* ops);
 Item js_build_template_object_cached(Item* cooked, Item* raw, int count, int64_t site_id);
+Item js_build_template_object_cached_with_ops(Item* cooked, Item* raw, int count,
+    int64_t site_id, const JsTemplateObjectOps* ops, const void* site_owner);
 typedef struct JsStringRawOps {
     Item (*to_object)(Item);
     Item (*get)(Item, Item);
@@ -1004,7 +1135,10 @@ Item js_construct_value(Item callee, Item* args, int argc, Item new_target,
 // Object rest destructuring: create object with all props except excluded keys
 Item js_object_rest(Item src, Item* exclude_keys, int exclude_count);
 
-// URI encoding/decoding
+// URI encoding/decoding. The shared kernel takes an already converted string;
+// malformed may raise through another frontend, preserving its thrown identity.
+Item js_uri_transform_string(Item text, bool component, bool decode,
+    Item (*malformed)(const char*));
 Item js_encodeURIComponent(Item str_item);
 Item js_decodeURIComponent(Item str_item);
 Item js_encodeURI(Item str_item);
@@ -1182,6 +1316,14 @@ Item js_text_decoder_stream_new(Item encoding, Item options);
 Item js_symbol_create(Item description);
 LAMBDA_RT_API Item js_symbol_for(Item key);
 Item js_symbol_key_for(Item sym);
+typedef struct JsSymbolOps {
+    Item (*string)(Item value);
+    Item (*error)(const char* message);
+} JsSymbolOps;
+Item js_symbol_for_with_ops(Item key, const JsSymbolOps* semantics);
+Item js_symbol_key_for_with_ops(Item symbol, const JsSymbolOps* semantics);
+bool js_symbol_from_name_id(NameId name_id, Item* out_symbol);
+
 Item js_symbol_to_string(Item sym);
 Item js_symbol_get_description(Item sym);
 Item js_symbol_well_known(Item name);
@@ -1191,6 +1333,11 @@ Item js_symbol_well_known(Item name);
 // =============================================================================
 
 struct JsGeneratorStateRecord;
+struct Activation;
+Item js_generator_create_body(Item (*body)(struct Activation*, Item), void* func_ptr,
+    Item* env, int env_size, int is_async, Item function, Item arguments, Item receiver,
+    struct TypeMap* shape);
+Item js_async_generator_request(Item generator, int operation, Item value);
 
 /**
  * Create a generator object from a state machine function pointer.
@@ -1247,21 +1394,25 @@ Item js_iterable_to_array(Item iterable);
  * js_iterator_close: Call iterator.return() for IteratorClose (on break/return).
  */
 Item js_get_iterator(Item iterable);
+// async iteration returns a private record retaining the iterator and its next method.
 Item js_get_async_iterator(Item iterable);
 Item js_get_iterator_lazy(Item iterable);
 // IDL callers have already read @@iterator; validate its result and capture next once.
 Item js_iterator_return_checked(Item iterator, bool cache_next, const char* error_message);
 bool js_is_fixed_layout_iterator(Item object);
 Item js_iterator_step(Item iterator);
-// Async iteration keeps the protocol result intact until its promise settles,
-// then reads `done` and `value` through these shared runtime accessors.
-Item js_async_iterator_step_result(Item iterator);
+// async iteration consumes the private record from js_get_async_iterator and keeps
+// the protocol result intact until its promise settles.
+Item js_async_iterator_step_result(Item record);
+Item js_async_iterator_method_result(Item record, int operation, Item value, int count);
 Item js_iterator_result_done(Item result);
 Item js_iterator_result_value(Item result);
 // Returns the raw `return()` result. An absent method produces the internal
 // close-absent sentinel, while a callable that returns undefined stays an
 // awaitable result.
 Item js_async_iterator_close_result(Item iterator);
+// record callers retain async-from-sync adaptation and use the same absent sentinel.
+Item js_async_iterator_record_close_result(Item record);
 bool js_async_iterator_close_needs_await(Item result);
 Item js_iterator_close(Item iterator);
 Item js_get_iterator_proto();
@@ -1270,6 +1421,41 @@ Item js_iterator_collect_rest(Item iterator);
 // =============================================================================
 // v14: Promise Runtime
 // =============================================================================
+
+// Frontend policy is fixed for one EvalContext. Native Promise jobs retain that
+// owner through the existing realm queue; ordinary LJS uses the null policy.
+typedef struct JsPromiseHostOps {
+    Item (*get)(void*, Item, Item, Item);
+    bool (*callable)(void*, Item);
+    bool (*constructor)(void*, Item);
+    Item (*call)(void*, Item, Item, Item*, int);
+    Item (*construct)(void*, Item, Item*, int, Item);
+    Item (*intrinsic)(void*, bool);
+    Item (*new_object)(void*);
+    Item (*create_data)(void*, Item, Item, Item);
+    Item (*iterator)(void*, Item);
+    Item (*iterator_step)(void*, Item);
+    Item (*iterator_close)(void*, Item, Item);
+    Item (*error)(void*, const char*, Item, Item);
+    Item (*error_payload)(void*, Item);
+    Item (*expose_function)(void*, Item);
+} JsPromiseHostOps;
+void js_promise_set_host_ops(const JsPromiseHostOps* ops, void* host_context);
+Item js_promise_property_storage(Item promise, bool create);
+typedef enum JsPromiseIntrinsicOp {
+    JS_PROMISE_INTRINSIC_RESOLVE,
+    JS_PROMISE_INTRINSIC_REJECT,
+    JS_PROMISE_INTRINSIC_ALL,
+    JS_PROMISE_INTRINSIC_ALL_SETTLED,
+    JS_PROMISE_INTRINSIC_ANY,
+    JS_PROMISE_INTRINSIC_RACE,
+    JS_PROMISE_INTRINSIC_WITH_RESOLVERS,
+    JS_PROMISE_INTRINSIC_THEN,
+    JS_PROMISE_INTRINSIC_CATCH,
+    JS_PROMISE_INTRINSIC_FINALLY,
+} JsPromiseIntrinsicOp;
+Item js_intrinsic_promise_operation(JsPromiseIntrinsicOp operation,
+    Item this_value, Item* args, int argc);
 
 LAMBDA_RT_API Item js_promise_create(Item executor);           // new Promise((resolve, reject) => ...)
 LAMBDA_RT_API Item js_promise_resolve(Item value);             // Promise.resolve(value)
@@ -1281,19 +1467,30 @@ void js_promise_reject_existing(Item promise, Item reason);
 const char* js_promise_state_name(Item promise); // "pending", "fulfilled", "rejected", or NULL
 int js_promise_pending_count(void);
 Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
+// internal reactions use the supplied native result Promise, without species lookup.
+bool js_promise_observe(Item promise, Item fulfilled, Item rejected, Item result_promise);
+void js_promise_mark_handled(Item promise);
 Item js_promise_finally(Item promise, Item on_finally);
 Item js_promise_all(Item iterable);              // Promise.all([...])
 Item js_promise_with_resolvers(void);            // Promise.withResolvers()
 // An await outside any activation; runs jobs only until this promise settles.
 Item js_await_sync(Item value);
 
+// Re-home a borrowed wide scalar in the active runtime number extent.
+Item js_retain_scalar(Item value);
+
 // Phase 6: Async state machine runtime
 Item js_async_wrap_return(Item value);           // fresh async-function result promise
+struct Activation;
+Item js_async_context_create_body(Item (*body)(struct Activation*, Item), void* fn_ptr,
+    Item* env, int64_t env_size, Item this_val, Item function, Item arguments);
 Item js_async_context_create_mir(void* fn_ptr, Item* env, int64_t env_size,
                                  Item this_val);
 Item js_async_context_create_ast(Item function, Item arguments, Item this_val);
 Item js_async_context_create_module(struct JsScript* script, void* mir_main,
     uint32_t module_state_id, Item specifier);
+Item js_async_context_create_module_body(Item (*body)(struct Activation*, Item),
+    void* payload, struct JsScript* script, uint32_t module_state_id, Item specifier);
 Item js_async_start(Item ctx_idx);               // begin async execution at state 0
 Item js_async_get_promise(Item ctx_idx);          // get result promise for async ctx
 
@@ -1476,6 +1673,8 @@ Item js_get_import_meta();
  */
 Item js_require(Item specifier);
 Item js_dynamic_import(Item specifier);
+Item js_dynamic_import_at(Item specifier, const char* reference);
+Item js_p5_chain_dynamic_import(Item awaited, Item namespace_obj, Item result_promise);
 
 // Native SHA hash functions (Jube node-crypto host primitive provider)
 Item js_native_sha256(Item data, Item offset, Item length);
@@ -1507,6 +1706,18 @@ Item js_evalscript_check_global_var_decl(Item key);
 Item js_evalscript_check_global_function_decl(Item key);
 Item js_object_group_by(Item items, Item callback);
 Item js_map_group_by(Item items, Item callback);
+extern const JsCollectionOps js_collection_default_ops;
+typedef struct JsGroupByOps {
+    Item (*find)(Item result, Item key); // group Array or ItemNull
+    Item (*put)(Item result, Item key, Item group);
+    Item (*key_of)(Item raw_key);
+    Item (*create)(void);
+    Item (*new_array)(void);
+    Item (*append)(Item array, Item value);
+} JsGroupByOps;
+Item js_group_by_with_ops(Item items, Item callback, const JsGroupByOps* groups,
+    const JsCollectionOps* semantics);
+
 Item js_object_set_prototype_of(Item obj, Item proto);
 void js_set_class_name(Item cls_item, Item name_item);
 void js_set_default_constructor_property(Item proto_item, Item cls_item);

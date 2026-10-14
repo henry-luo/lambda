@@ -4091,6 +4091,11 @@ static inline Item js_uri_make_four_byte_string(char* decoded) {
 // and fromCharCode caches above.
 static inline String* js_ascii_char_intern(int code) {
     bool cache_rooted = js_global_string_caches_ensure_roots();
+    // shared string kernels also run without an LJS realm; an unrooted cache is not an owner.
+    if (!cache_rooted) {
+        char byte = (char)code;
+        return heap_create_name(&byte, 1);
+    }
     uint64_t epoch = js_get_heap_epoch();
     if (epoch != g_ascii_char_pool_epoch) {
         for (int i = 0; i < 128; i++) g_ascii_char_pool[i] = ItemNull;
@@ -8000,8 +8005,6 @@ static Item js_map_own_string_keys(Item object, bool enumerable_only) {
     return result_root.get();
 }
 
-static bool js_name_id_to_symbol(NameId name_id, Item* out_symbol);
-
 static bool js_property_key_to_public_symbol(Item key, Item* out_symbol) {
     if (js_key_is_symbol_c(key)) {
         *out_symbol = key;
@@ -8010,7 +8013,7 @@ static bool js_property_key_to_public_symbol(Item key, Item* out_symbol) {
     if (get_type_id(key) != LMD_TYPE_STRING) return false;
     String* key_str = it2s(key);
     if (!key_str) return false;
-    return js_name_id_to_symbol(property_key_id(key_str), out_symbol);
+    return js_symbol_from_name_id(property_key_id(key_str), out_symbol);
 }
 
 static void js_collect_own_symbol_keys_from_map(Item result, Map* m) {
@@ -8021,7 +8024,7 @@ static void js_collect_own_symbol_keys_from_map(Item result, Map* m) {
         if (e->name) {
             Item symbol = ItemNull;
             bool semantic_symbol = e->key_kind == NAME_KEY_SYMBOL &&
-                js_name_id_to_symbol(e->name_id, &symbol);
+                js_symbol_from_name_id(e->name_id, &symbol);
             if (semantic_symbol) {
                 Item map_item = (Item){.map = m};
                 JsShapeSlotStatus status = js_own_shape_slot_status_name_id(
@@ -8390,9 +8393,9 @@ extern "C" Item js_for_in_keys(Item object) {
         }
     }
 
-    int depth = 0;
+    // ordinary prototype chains are acyclic; inherited keys have no arbitrary depth cutoff.
     while (current_root.get().item != ItemNull.item &&
-            get_type_id(current_root.get()) == LMD_TYPE_MAP && depth < 64) {
+            get_type_id(current_root.get()) == LMD_TYPE_MAP) {
         Map* m = current_root.get().map;
         if (m && m->type) {
             TypeMap* tm = (TypeMap*)m->type;
@@ -8451,7 +8454,6 @@ extern "C" Item js_for_in_keys(Item object) {
 
         // walk up prototype chain
         current_root.set(js_get_prototype(current_root.get()));
-        depth++;
     }
 
     hashmap_free(seen);
@@ -8576,74 +8578,75 @@ static JsOwnEnumerability js_own_enumerability_inspect(Item object, Item key,
     return JS_OWN_ENUMERABILITY_PRESENT;
 }
 
-extern "C" bool js_for_in_key_is_live(Item object, Item key) {
+extern "C" Item js_for_in_key_is_live_with_ops(Item object, Item key,
+        const JsForInOps* ops) {
     RootFrame roots(4);
     Rooted<Item> object_root(roots, object);
     Rooted<Item> key_root(roots, key);
     Rooted<Item> current_root(roots, ItemNull);
     Rooted<Item> desc_root(roots, ItemNull);
-    if (!roots.valid()) return false;
+    if (!roots.valid()) return ItemError;
 
     TypeId key_type = get_type_id(key_root.get());
-    if (key_type != LMD_TYPE_STRING && key_type != LMD_TYPE_SYMBOL) {
+    // host policies receive string keys from their own internal enumeration snapshot.
+    if (!ops && key_type != LMD_TYPE_STRING && key_type != LMD_TYPE_SYMBOL) {
         key_root.set(js_to_property_key(key_root.get()));
+        if (item_is_error(key_root.get())) return key_root.get();
         key_type = get_type_id(key_root.get());
     }
-    if (key_type != LMD_TYPE_STRING) return false;
+    if (key_type != LMD_TYPE_STRING) return (Item){.item = ITEM_FALSE};
 
     TypeId object_type = get_type_id(object_root.get());
-    if (object_root.get().item == ItemNull.item || object_type == LMD_TYPE_UNDEFINED) return false;
-    if (object_type != LMD_TYPE_MAP && !js_is_js_array(object) &&
-        object_type != LMD_TYPE_FUNC && object_type != LMD_TYPE_ELEMENT &&
-        !is_virtual_container_type_id(object_type)) {
-        object_root.set(js_to_object(object_root.get()));
-    }
+    if (object_root.get().item == ItemNull.item || object_type == LMD_TYPE_UNDEFINED)
+        return (Item){.item = ITEM_FALSE};
+    object_root.set(ops ? ops->to_object(object_root.get()) : js_to_object(object_root.get()));
+    if (item_is_error(object_root.get())) return object_root.get();
 
     current_root.set(object_root.get());
-    int depth = 0;
-    while (current_root.get().item != ItemNull.item && depth < 64) {
+    while (current_root.get().item != ItemNull.item) {
         TypeId current_type = get_type_id(current_root.get());
-        if (current_type != LMD_TYPE_MAP && !js_is_js_array(current_root.get()) &&
-            current_type != LMD_TYPE_FUNC && current_type != LMD_TYPE_ELEMENT &&
-            !is_virtual_container_type_id(current_type)) {
-            break;
-        }
-        // Inspect ordinary shape/companion storage before materializing a JS
-        // descriptor Map. An absent own key must continue to the prototype.
-        bool enumerable = false;
-        JsOwnEnumerability inspection = js_own_enumerability_inspect(
-            current_root.get(), key_root.get(), &enumerable);
-        if (inspection == JS_OWN_ENUMERABILITY_PRESENT) {
+        if (ops) {
+            desc_root.set(ops->own_enumerability(current_root.get(), key_root.get()));
+            if (item_is_error(desc_root.get())) return desc_root.get();
+            if (desc_root.get().item != ITEM_JS_UNDEFINED) return desc_root.get();
+        } else {
+            if (current_type != LMD_TYPE_MAP && !js_is_js_array(current_root.get()) &&
+                    current_type != LMD_TYPE_FUNC && current_type != LMD_TYPE_ELEMENT &&
+                    !is_virtual_container_type_id(current_type)) break;
+            // preserve the ordinary shape fast path without allocating a descriptor.
+            bool enumerable = false;
+            JsOwnEnumerability inspection = js_own_enumerability_inspect(
+                current_root.get(), key_root.get(), &enumerable);
             js_opt_trace_record(JS_OPT_OWN_ENUMERABILITY_INSPECT,
-                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
-            return enumerable;
+                JS_OPT_REASON_NONE, inspection == JS_OWN_ENUMERABILITY_UNSUPPORTED
+                    ? JS_OPT_OUTCOME_FALLBACK : JS_OPT_OUTCOME_TAKEN);
+            if (inspection == JS_OWN_ENUMERABILITY_PRESENT)
+                return (Item){.item = enumerable ? ITEM_TRUE : ITEM_FALSE};
+            if (inspection == JS_OWN_ENUMERABILITY_UNSUPPORTED) {
+                desc_root.set(js_object_get_own_property_descriptor(
+                    current_root.get(), key_root.get()));
+                if (item_is_error(desc_root.get())) return desc_root.get();
+                if (desc_root.get().item != ITEM_JS_UNDEFINED &&
+                        desc_root.get().item != ItemNull.item) {
+                    Item enumerable = js_get_key_cstr(desc_root.get(), "enumerable");
+                    if (item_is_error(enumerable)) return enumerable;
+                    return (Item){.item = js_is_truthy(enumerable) ? ITEM_TRUE : ITEM_FALSE};
+                }
+            }
         }
-        if (inspection == JS_OWN_ENUMERABILITY_ABSENT) {
-            js_opt_trace_record(JS_OPT_OWN_ENUMERABILITY_INSPECT,
-                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
-            current_root.set(js_get_prototype(current_root.get()));
-            depth++;
-            continue;
-        }
-        js_opt_trace_record(JS_OPT_OWN_ENUMERABILITY_INSPECT,
-            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
-        desc_root.set(js_object_get_own_property_descriptor(
-            current_root.get(), key_root.get()));
-        if (item_is_error(desc_root.get())) return false;
-        if (desc_root.get().item != ITEM_JS_UNDEFINED &&
-                desc_root.get().item != ItemNull.item) {
-            key_root.set((Item){.item = s2it(
-                heap_create_name("enumerable", 10))});
-            Item enumerable = js_get_key_default(desc_root.get(), key_root.get());
-            return js_is_truthy(enumerable);
-        }
-        current_root.set((current_type == LMD_TYPE_FUNC ||
-                is_virtual_container_type_id(current_type))
-            ? js_get_prototype_of(current_root.get())
-            : js_get_prototype(current_root.get()));
-        depth++;
+        // proxy failures must remain abrupt; an absent own key continues up the chain.
+        current_root.set(ops ? ops->prototype(current_root.get())
+            : (current_type == LMD_TYPE_FUNC || is_virtual_container_type_id(current_type) ||
+                js_is_proxy(current_root.get()))
+                ? js_get_prototype_of(current_root.get()) : js_get_prototype(current_root.get()));
+        if (item_is_error(current_root.get())) return current_root.get();
     }
-    return false;
+    return (Item){.item = ITEM_FALSE};
+}
+
+extern "C" bool js_for_in_key_is_live(Item object, Item key) {
+    Item live = js_for_in_key_is_live_with_ops(object, key, NULL);
+    return !item_is_error(live) && js_is_truthy(live);
 }
 
 extern "C" Item js_object_get_own_property_symbols(Item object) {
@@ -8856,44 +8859,52 @@ extern "C" Item js_object_from_entries(Item iterable) {
 // Object.groupBy and Map.groupBy walk the iterable identically and differ only
 // in how a group is addressed: Object keys through ToPropertyKey into a
 // null-prototype object, Map uses the callback's key value as-is.
-typedef struct JsGroupByOps {
-    // find the existing group array for `key`, or ItemNull
-    Item (*find)(Item result, Item key);
-    // publish a freshly created group array under `key`
-    Item (*put)(Item result, Item key, Item group);
-    // normalise the callback's return into the container's key form
-    Item (*key_of)(Item raw_key);
-} JsGroupByOps;
-
-static Item js_group_by_kernel(Item items, Item callback, Item result,
-        const JsGroupByOps* ops, const char* callback_error) {
-    if (!js_is_callable(callback)) return js_throw_type_error(callback_error);
-    JS_ASSIGN_OR_RETURN(arr, js_iterable_to_array(items));
-    int64_t len = js_array_length(arr);
-    for (int64_t i = 0; i < len; i++) {
-        Item elem = js_elements_get(arr, (Item){.item = i2it(i)});
-        Item fn_args[2] = {elem, (Item){.item = i2it(i)}};
-        JS_ASSIGN_OR_RETURN(raw_key, js_call_function(callback, make_js_undefined(), fn_args, 2));
-        JS_ASSIGN_OR_RETURN(key, ops->key_of(raw_key));
-        Item group = ops->find(result, key);
-        if (group.item == ItemNull.item) {
-            group = js_array_new(0);
-            JS_ASSIGN_OR_RETURN(put_result, ops->put(result, key, group));
+Item js_group_by_with_ops(Item items, Item callback, const JsGroupByOps* groups,
+        const JsCollectionOps* supplied_ops) {
+    const JsCollectionOps* ops = supplied_ops ? supplied_ops : &js_collection_default_ops;
+    RootFrame roots(7);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> input(roots, items), function(roots, callback), result(roots, ItemNull),
+        iterator(roots, ItemNull), element(roots, ItemNull), key(roots, ItemNull), group(roots, ItemNull);
+    if (input.get().item == ITEM_NULL || input.get().item == ITEM_JS_UNDEFINED)
+        return ops->error(false, "groupBy input is null or undefined");
+    if (!ops->is_callable(function.get())) return ops->error(false, "groupBy callback is not callable");
+    result.set(groups->create());
+    if (item_is_error(result.get())) return result.get();
+    iterator.set(ops->iterator(input.get()));
+    if (item_is_error(iterator.get())) return iterator.get();
+    uint64_t homes[2] = {};
+    for (int64_t index = 0;; index++) {
+        if (index >= INT53_MAX) return ops->close(iterator.get(), ops->error(false, "groupBy index exceeds safe integer range"));
+        element.set(lambda_item_adopt_scalar_home(ops->step(iterator.get()), &homes[0]));
+        if (item_is_error(element.get())) return element.get();
+        if (element.get().item == JS_ITER_DONE_SENTINEL) return result.get();
+        Item arguments[] = {element.get(), Item{.item = i2it(index)}};
+        key.set(lambda_item_adopt_scalar_home(ops->call(function.get(), make_js_undefined(), arguments, 2), &homes[1]));
+        if (item_is_error(key.get())) return ops->close(iterator.get(), key.get());
+        key.set(lambda_item_adopt_scalar_home(groups->key_of(key.get()), &homes[1]));
+        if (item_is_error(key.get())) return ops->close(iterator.get(), key.get());
+        group.set(groups->find(result.get(), key.get()));
+        if (item_is_error(group.get())) return ops->close(iterator.get(), group.get());
+        if (group.get().item == ITEM_NULL) {
+            group.set(groups->new_array());
+            if (item_is_error(group.get())) return ops->close(iterator.get(), group.get());
+            Item stored = groups->put(result.get(), key.get(), group.get());
+            if (item_is_error(stored)) return ops->close(iterator.get(), stored);
         }
-        js_array_push(group, elem);
+        Item appended = groups->append(group.get(), element.get());
+        if (item_is_error(appended)) return ops->close(iterator.get(), appended);
     }
-    return result;
 }
 
 static Item js_group_by_object_find(Item result, Item key) {
-    String* ks = it2s(js_property_storage_key(key));
-    if (!ks) return ItemNull;
-    bool found = false;
-    Item group = js_map_shape_lookup_ext(result.map, ks->chars, (int)ks->len, &found);
-    return found ? group : ItemNull;
+    // The null-prototype result has own data groups; the property kernel also
+    // preserves Symbol identity instead of reducing its key to description text.
+    JS_ASSIGN_OR_RETURN(group, js_get_key_default(result, key));
+    return group.item == ITEM_JS_UNDEFINED ? ItemNull : group;
 }
 JS_FORWARD_STATIC_ITEM(js_group_by_object_put, (Item result, Item key, Item group),
-    js_set_key_default, (result, key, group))
+    js_create_data_property, (result, key, group))
 
 // Object.groupBy preserves a Symbol returned from ToPropertyKey until the
 // ordinary object lookup/store boundary.
@@ -8905,11 +8916,11 @@ static Item js_group_by_object_key(Item raw_key) {
 
 extern "C" Item js_object_group_by(Item items, Item callback) {
     static const JsGroupByOps ops = {
-        js_group_by_object_find, js_group_by_object_put, js_group_by_object_key
+        js_group_by_object_find, js_group_by_object_put, js_group_by_object_key,
+        []() { return js_object_create(ItemNull); }, []() { return js_array_new(0); }, js_array_push
     };
     // null-prototype result object per spec
-    return js_group_by_kernel(items, callback, js_object_create(ItemNull), &ops,
-                              "groupBy callback is not a function");
+    return js_group_by_with_ops(items, callback, &ops, NULL);
 }
 
 // Map.groupBy addresses groups through the collection methods: 2=has, 1=get,
@@ -8925,10 +8936,10 @@ static Item js_group_by_map_key(Item raw_key) { return raw_key; }
 
 extern "C" Item js_map_group_by(Item items, Item callback) {
     static const JsGroupByOps ops = {
-        js_group_by_map_find, js_group_by_map_put, js_group_by_map_key
+        js_group_by_map_find, js_group_by_map_put, js_group_by_map_key,
+        js_map_collection_new, []() { return js_array_new(0); }, js_array_push
     };
-    return js_group_by_kernel(items, callback, js_map_collection_new(), &ops,
-                              "Map.groupBy callback is not a function");
+    return js_group_by_with_ops(items, callback, &ops, NULL);
 }
 
 // =============================================================================
@@ -12288,12 +12299,6 @@ static bool js_has_lone_surrogate(const char* s, int len) {
     return false;
 }
 
-static Item js_throw_uri_error(const char* msg) {
-    Item tn = js_name_item("URIError", 8);
-    Item m  = js_name_item(msg, strlen(msg));
-    return js_throw_value(js_new_error_with_name(tn, m));
-}
-
 // Percent-encode / decode straight into a stack buffer where the string fits.
 // The byte-level rules (keep sets, %XX emission, strict UTF-8 validation) live
 // in lib/url.c; what stays here is Item/String boxing and the identity
@@ -12350,18 +12355,6 @@ static Item js_uri_encode_to_item(Item str_val, String* s, bool component) {
     if (heap_out) mem_free(out);
     return encoded;
 }
-
-static Item js_encode_uri_common(Item str_item, bool component) {
-    JS_ASSIGN_OR_RETURN(str_val, js_to_string(str_item));
-    String* s = it2s(str_val);
-    if (!s || s->len == 0) return ItemEmptyString;
-    // ES spec: throw URIError for lone surrogates
-    if (js_has_lone_surrogate(s->chars, s->len)) {
-        return js_throw_uri_error("URI malformed");
-    }
-    return js_uri_encode_to_item(str_val, s, component);
-}
-JS_FORWARD_ITEM(js_encodeURIComponent, (Item str_item), js_encode_uri_common, (str_item, true))
 
 static bool js_uri_try_decode_four_byte_cp(String* s, uint32_t* cp_out) {
     if (!s || s->len != 12) return false;
@@ -12426,14 +12419,22 @@ static Item js_uri_make_four_byte_string_from_cp(uint32_t cp) {
     return result;
 }
 
-static Item js_decode_uri_common(Item str_item, bool component,
-                                  Item* error_cache, uint64_t* error_epoch) {
+Item js_uri_transform_string(Item text, bool component, bool decode,
+        Item (*malformed)(const char*)) {
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> source(roots, text);
+    String* s = it2s(source.get());
+    if (!decode) {
+        if (!s || s->len == 0) return ItemEmptyString;
+        if (js_has_lone_surrogate(s->chars, s->len))
+            return malformed ? malformed("URI malformed") : js_throw_named_error_text("URIError", "URI malformed");
+        return js_uri_encode_to_item(source.get(), s, component);
+    }
     bool cache_rooted = js_global_string_caches_ensure_roots();
-    Item str_val = (get_type_id(str_item) == LMD_TYPE_STRING) ? str_item : js_to_string(str_item);
-    String* s = it2s(str_val);
     if (!s || s->len == 0) return ItemEmptyString;
-    if (!js_string_has_percent(s)) return str_val;
-    int64_t cached_cp = js_string_last_four_byte_uri_escape_cp(str_val);
+    if (!js_string_has_percent(s)) return source.get();
+    int64_t cached_cp = js_string_last_four_byte_uri_escape_cp(source.get());
     if (cached_cp >= 0) return js_uri_make_four_byte_string_from_cp((uint32_t)cached_cp);
     Item decoded_result = ItemNull;
     if (js_uri_try_decode_four_byte_escape(s, &decoded_result)) return decoded_result;
@@ -12441,7 +12442,11 @@ static Item js_decode_uri_common(Item str_item, bool component,
 
     // the decode core already rejected this string; malformed input reaches the
     // URIError path without a second parse by a fallback decoder
+    if (malformed) return malformed("URI malformed");
     if (!cache_rooted) return js_throw_named_error_text("URIError", "URI malformed");
+    // only the default LJS path owns these realm cache slots.
+    Item* error_cache = component ? &js_decode_uri_component_error : &js_decode_uri_error;
+    uint64_t* error_epoch = component ? &js_decode_uri_component_error_epoch : &js_decode_uri_error_epoch;
     bool cache_hit = error_cache->item &&
         *error_epoch == js_get_heap_epoch();
     js_opt_trace_record(cache_hit ? JS_OPT_URI_ERROR_CACHE_HIT :
@@ -12456,11 +12461,19 @@ static Item js_decode_uri_common(Item str_item, bool component,
     }
     return js_throw_value(*error_cache);
 }
-JS_FORWARD_ITEM(js_decodeURIComponent, (Item str_item), js_decode_uri_common, (str_item, true, &js_decode_uri_component_error, &js_decode_uri_component_error_epoch))
-
-// v20: encodeURI / decodeURI (non-Component variants preserving URI structural chars)
-JS_FORWARD_ITEM(js_encodeURI, (Item str_item), js_encode_uri_common, (str_item, false))
-JS_FORWARD_ITEM(js_decodeURI, (Item str_item), js_decode_uri_common, (str_item, false, &js_decode_uri_error, &js_decode_uri_error_epoch))
+// ToString belongs to the frontend; never inspect an abrupt completion as a String.
+static Item js_uri_common(Item value, bool component, bool decode) {
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> text(roots, value);
+    text.set(js_to_string(text.get()));
+    if (item_is_error(text.get())) return text.get();
+    return js_uri_transform_string(text.get(), component, decode, NULL);
+}
+JS_FORWARD_ITEM(js_encodeURIComponent, (Item value), js_uri_common, (value, true, false))
+JS_FORWARD_ITEM(js_decodeURIComponent, (Item value), js_uri_common, (value, true, true))
+JS_FORWARD_ITEM(js_encodeURI, (Item value), js_uri_common, (value, false, false))
+JS_FORWARD_ITEM(js_decodeURI, (Item value), js_uri_common, (value, false, true))
 
 // =============================================================================
 // unescape(string) — legacy percent-decoding (%XX and %uXXXX)
@@ -17168,8 +17181,8 @@ extern "C" NameId js_symbol_name_id(Item sym) {
     return symbol ? symbol->name_id : NAME_ID_NONE;
 }
 
-static bool js_name_id_to_symbol(NameId name_id, Item* out_symbol) {
-    if (name_id == NAME_ID_NONE || !out_symbol) return false;
+bool js_symbol_from_name_id(NameId name_id, Item* out_symbol) {
+    if (!js_active_runtime_state || name_id == NAME_ID_NONE || !out_symbol) return false;
     Symbol* symbol = js_symbol_lookup_name_id(name_id);
     if (!symbol) {
         for (uint64_t id = JS_SYMBOL_ID_ITERATOR; id <= JS_SYMBOL_ID_DISPOSE; id++) {
@@ -17227,12 +17240,21 @@ extern "C" Item js_symbol_create(Item description) {
     return js_make_symbol_item(symbol);
 }
 
+static const JsSymbolOps js_symbol_default_ops = {js_to_string, js_throw_type_error};
+
 extern "C" Item js_symbol_for(Item key) {
-    JS_ROOTS(roots, key_root, key, string_root, js_to_string(key_root.get()));
+    return js_symbol_for_with_ops(key, NULL);
+}
+
+Item js_symbol_for_with_ops(Item key, const JsSymbolOps* supplied_ops) {
+    const JsSymbolOps* ops = supplied_ops ? supplied_ops : &js_symbol_default_ops;
+    JS_ROOTS(roots, key_root, key, string_root, ops->string(key_root.get()));
     if (item_is_error(string_root.get())) return string_root.get();
+    if (!js_active_runtime_state) return ops->error("Symbol registry has no active realm");
     js_symbol_text_index_init();
+    if (!js_symbol_registry) return ops->error("failed to allocate symbol registry");
     String* s = it2s(string_root.get());
-    if (!s) return js_symbol_create(key_root.get());
+    if (!s) return ops->error("Symbol registry key is not a string");
 
     size_t iter = 0;
     void* raw = NULL;
@@ -17248,20 +17270,27 @@ extern "C" Item js_symbol_for(Item key) {
     // Symbol.for keys and violate their process-wide identity contract.
     NameId name_id = js_symbol_create_name_id(s->chars, s->len);
     if (name_id == NAME_ID_NONE) {
-        return js_throw_type_error("failed to allocate registry symbol property key");
+        return ops->error("failed to allocate registry symbol property key");
     }
     Symbol* symbol = js_symbol_alloc(SYMBOL_JS_REGISTERED, name_id,
         s->chars, s->len);
     if (!js_symbol_index(symbol) || !js_symbol_registry_index(symbol)) {
-        return js_throw_type_error("failed to allocate registry symbol value");
+        return ops->error("failed to allocate registry symbol value");
     }
     return js_make_symbol_item(symbol);
 }
 
 extern "C" Item js_symbol_key_for(Item sym) {
+    return js_symbol_key_for_with_ops(sym, NULL);
+}
+
+Item js_symbol_key_for_with_ops(Item sym, const JsSymbolOps* supplied_ops) {
+    const JsSymbolOps* ops = supplied_ops ? supplied_ops : &js_symbol_default_ops;
     if (!js_is_symbol_item(sym))
-        return js_throw_type_error("Symbol.keyFor requires a Symbol argument");
+        return ops->error("Symbol.keyFor requires a Symbol argument");
+    if (!js_active_runtime_state) return ops->error("Symbol registry has no active realm");
     js_symbol_text_index_init();
+    if (!js_symbol_registry) return ops->error("failed to allocate symbol registry");
     Symbol* symbol = js_symbol_item_ptr(sym);
     // linear scan — the registry is small and entries directly own no record.
     size_t iter = 0;

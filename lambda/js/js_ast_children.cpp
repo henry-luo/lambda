@@ -282,7 +282,7 @@ static void js_ast_collect_function_facts_node(JsAstNode* node,
         } else if (node->node_type == AST_NODE_MEMBER_EXPR) {
             JsMemberNode* member = (JsMemberNode*)node;
             if (js_ast_identifier_named(member->object, "super", 5)) {
-                walk.facts->observations |= JS_AST_OBSERVES_THIS;
+                walk.facts->observations |= JS_AST_OBSERVES_THIS | JS_AST_OBSERVES_SUPER_PROPERTY;
             }
         }
     }
@@ -393,17 +393,27 @@ JsIdentifierNode* js_ast_parameter_binding_identifier(JsAstNode* parameter) {
     return NULL;
 }
 
-static bool js_ast_parameter_has_default_value(JsAstNode* parameter);
+static bool js_ast_parameter_has_expression(JsAstNode* parameter, bool computed_keys);
 
-static bool js_ast_parameter_default_child(JsAstNode* child, void*) {
-    return js_ast_parameter_has_default_value(child);
+static bool js_ast_parameter_expression_child(JsAstNode* child, void* opaque) {
+    return js_ast_parameter_has_expression(child, *(bool*)opaque);
 }
 
-static bool js_ast_parameter_has_default_value(JsAstNode* parameter) {
-    return parameter &&
-        (parameter->node_type == AST_NODE_ASSIGN_PATTERN ||
-         js_ast_any_binding_pattern_child(parameter,
-             js_ast_parameter_default_child, NULL));
+static bool js_ast_parameter_has_expression(JsAstNode* parameter, bool computed_keys) {
+    if (!parameter) return false;
+    if (parameter->node_type == AST_NODE_ASSIGN_PATTERN) return true;
+    if (parameter->node_type == (int)TS_AST_NODE_PARAMETER &&
+            ((TsParameterNode*)parameter)->default_value) return true;
+    // computed binding keys execute in the parameter environment even without defaults.
+    if (computed_keys && parameter->node_type == AST_NODE_MAP_PATTERN) {
+        for (JsAstNode* property = ((JsObjectPatternNode*)parameter)->properties;
+                property; property = property->next) {
+            if (property->node_type == AST_NODE_PROPERTY &&
+                    ((JsPropertyNode*)property)->computed) return true;
+        }
+    }
+    return js_ast_any_binding_pattern_child(parameter,
+        js_ast_parameter_expression_child, &computed_keys);
 }
 
 static bool js_ast_parameter_names_equal(JsAstNode* left, JsAstNode* right) {
@@ -440,7 +450,9 @@ JsAstParameterFacts js_ast_collect_parameter_facts(JsAstNode* parameters) {
             }
         }
         facts.has_default_params = facts.has_default_params ||
-            js_ast_parameter_has_default_value(parameter);
+            js_ast_parameter_has_expression(parameter, false);
+        facts.has_parameter_expressions = facts.has_parameter_expressions ||
+            js_ast_parameter_has_expression(parameter, true);
         if (parameter->node_type == AST_NODE_ASSIGN_PATTERN ||
             parameter->node_type == AST_NODE_ARRAY_PATTERN ||
             parameter->node_type == AST_NODE_MAP_PATTERN ||

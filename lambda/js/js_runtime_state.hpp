@@ -23,6 +23,9 @@ struct JsFunction;
 struct JsCallableCode;
 struct JsRuntimeState;
 struct JsInterpEnv;
+struct JsInterpHostOps;
+// the ambient snapshot needs only the immutable profile pointer, not parser declarations.
+extern __thread const JsInterpHostOps* js_interp_host;
 struct Activation;
 struct JsScript;
 struct AstNode;
@@ -32,6 +35,7 @@ struct UiContext;
 struct JsAtomicsRuntimeState;
 struct JsPrototypeSnapshotState;
 struct JsMirCompileRecoveryState;
+struct JsPromiseHostOps;
 
 // Namespace selection is the JS profile's counterpart to the shared module
 // slab scope.  Keep restoration identical for AST and MIR module entries.
@@ -52,6 +56,7 @@ private:
 };
 
 struct JsTemplateRegistryEntry {
+    const void* site_owner = NULL; // hosted scripts have no Runtime-assigned index
     int64_t site_id = 0;
     int count = 0;
     int64_t root_slot = -1;
@@ -89,6 +94,8 @@ struct JsEventLoopState {
     RuntimeJobQueue microtask_queue = {};
     RuntimeJobQueue animation_frame_queue = {};
     bool microtask_running = false;
+    // a result-returning drain lends an exact RootFrame cell only during that call.
+    uint64_t* task_error_sink = NULL;
 
     int64_t next_raf_id = 1;
     bool auto_close_mode = false;
@@ -584,6 +591,9 @@ struct JsPromise : VMap {
 };
 
 struct JsPromiseRuntimeState : RootVector {
+    // immutable frontend policy belongs to this EvalContext, including its queued jobs.
+    const JsPromiseHostOps* host_ops = NULL;
+    void* host_context = NULL;
     RuntimeJobQueue unhandled_queue = {};
     // Keep the two GC-visible owner slots contiguous; the deque control
     // record is native metadata and must never be scanned as an Item range.
@@ -607,11 +617,15 @@ enum JsModuleRuntimeSlot : int {
 // namespace/TLA edges live in Runtime::module_registry. All module-provider
 // namespaces, including the replaceable active namespace, share one exact-root
 // carrier instead of independent Item/epoch registrations (D5.3.5).
+struct JsSourceModuleOps;
 struct JsModuleRuntimeState {
     RootVector values = {};
     int module_depth = 0;
     int draining_depth = 0;
     int vm_source_text_identifier_counter = 0;
+    const JsSourceModuleOps* source_ops = NULL;
+    void* source_owner = NULL;
+    uint64_t source_evaluation_order = 0;
 };
 
 struct JsPerformanceState {
@@ -637,6 +651,8 @@ struct JsAsyncContextStateRecord : JsSuspendedActivation {
     // resumed MIR property names must use the module image that compiled the body.
     uint32_t module_state_id = UINT32_MAX;
     Item this_val = {};
+    // captured strict receivers may outlive their caller's number home.
+    uint64_t this_scalar = 0;
     // The body is an async function of either tier, or a module program, which
     // resumes in the module's existing lexical slab (an interpreted Script, or
     // a MIR module's js_main in state_fn). It parks on the promise it awaits

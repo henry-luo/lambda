@@ -129,7 +129,7 @@ struct JsEventLoopCallbackScope {
 };
 
 static Item js_run_queued_callback(const RuntimeJob* job) {
-    RootFrame roots(7);
+    RootFrame roots(8);
     // Queue pop clears the persistent slots before context setup can allocate;
     // keep the dequeued callback graph exact-rooted for the entire invocation.
     Rooted<Item> callback_root(roots, job->callback);
@@ -144,23 +144,30 @@ static Item js_run_queued_callback(const RuntimeJob* job) {
     previous_resource_root.set(js_async_hooks_enter_resource(resource_root.get()));
     previous_domain_root.set(js_domain_set_stack(domain_root.get()));
     JsEventLoopCallbackScope callback_scope;
-    Item result = make_js_undefined();
+    // domain restoration can allocate; retain the exact thrown carrier until the drain adopts it.
+    Rooted<Item> result(roots, make_js_undefined());
     if (get_type_id(arguments_root.get()) == LMD_TYPE_ARRAY &&
             arguments_root.get().array->length > 0) {
         Array* args = arguments_root.get().array;
-        result = js_als_context_call_args(als_root.get(), callback_root.get(),
-            ItemNull, args->items, args->length);
+        result.set(js_als_context_call_args(als_root.get(), callback_root.get(),
+            ItemNull, args->items, args->length));
     } else {
-        result = js_als_context_call(als_root.get(), callback_root.get(),
-            ItemNull, ItemNull, 0);
+        result.set(js_als_context_call(als_root.get(), callback_root.get(),
+            ItemNull, ItemNull, 0));
     }
     js_domain_restore_stack(previous_domain_root.get());
     js_async_hooks_restore_resource(previous_resource_root.get());
-    return result;
+    return result.get();
+}
+
+static void js_event_loop_capture_error(Item result) {
+    if (!item_is_error(result) || !js_active_runtime_state) return;
+    uint64_t* sink = js_runtime_state.event_loop->task_error_sink;
+    if (sink && !item_is_error(Item{.item = *sink})) *sink = result.item;
 }
 
 extern "C" void js_microtask_flush(void) {
-    (void)js_microtask_flush_result();
+    js_event_loop_capture_error(js_microtask_flush_result());
 }
 
 static void js_drain_async_queue(RuntimeJobQueue* queue,
@@ -510,7 +517,7 @@ static void timer_close_handle(JsTimerHandle *th) {
 
 static void timer_mark_object_destroyed(JsTimerHandle* th) {
     Item owner = timer_resource_owner(th);
-    if (!owner.item) return;
+    if (!owner.item || get_type_id(owner) == LMD_TYPE_INT) return;
     // The JS Timeout object is separate from the libuv handle; update it on
     // observable clear/fire paths, not during process-exit cleanup of unref'd intervals.
     js_set_key_cstr(owner, "_destroyed", (Item){.item = b2it(true)});
@@ -586,6 +593,7 @@ static void timer_fire_cb(uv_timer_t *handle) {
     js_domain_restore_stack(previous_domain_root.get());
     js_async_hooks_restore_resource(previous_resource_root.get());
     timer_runtime_exit(&scope);
+    js_event_loop_capture_error(callback_result_root.get());
     if (th && th->is_interval && item_is_error(callback_result_root.get()) && !th->closing) {
         // An interval callback that throws before its clearInterval call can
         // otherwise re-enter forever and starve the drain watchdog.
@@ -605,6 +613,8 @@ static double item_to_ms(Item delay) {
         return it2d(delay);
     } else if (get_type_id(delay) == LMD_TYPE_INT) {
         return (double)it2i(delay);
+    } else if (get_type_id(delay) == LMD_TYPE_INT64) {
+        return (double)it2l(delay);
     }
     return 0;
 }
@@ -930,7 +940,7 @@ static void js_timer_capture_argument_pack(JsTimerHandle* th, Item args_array,
 
 static Item js_timer_finish_create(uv_loop_t* loop, JsTimerHandle* th,
         JsClass timer_class, uint64_t delay, uint64_t repeat,
-        const char* capture_name, int capture_name_len) {
+        const char* capture_name, int capture_name_len, bool numeric_handle = false) {
     timer_capture_runtime(th, capture_name, capture_name_len);
     // The native timer is not GC-managed. Keep its whole job envelope exact
     // while constructing the public handle, then publish that same envelope
@@ -944,7 +954,7 @@ static Item js_timer_finish_create(uv_loop_t* loop, JsTimerHandle* th,
         timer_root, ItemNull);
     uv_timer_init(loop, &th->timer);
     timer_start(loop, th, delay, repeat);
-    timer_root.set(make_timer_object(th->job.id, timer_class));
+    timer_root.set(numeric_handle ? Item{.item = i2it(th->job.id)} : make_timer_object(th->job.id, timer_class));
     th->job.callback = callback_root.get();
     th->job.arguments = arguments_root.get();
     th->job.context.resource = resource_root.get();
@@ -984,11 +994,16 @@ static Item js_timer_normalize_handler(Item handler) {
     return js_new_native_closure(js_timer_run_string_handler, 0, env, 1);
 }
 
-static Item js_schedule_timer(Item callback, Item delay, Item args_array,
-                              bool has_args, bool is_interval) {
+extern "C" Item js_schedule_timer(Item callback, Item delay, Item args_array,
+                              bool has_args, bool is_interval, bool numeric_handle) {
     RootFrame roots(1);
     Rooted<Item> callback_root(roots, js_timer_normalize_handler(callback));
     if (item_is_error(callback_root.get())) return callback_root.get();
+    // lazy host scheduling must preserve Promise jobs already queued in this turn.
+    if (numeric_handle) {
+        if (!lambda_uv_loop() && lambda_uv_init() != 0) return ItemError;
+        lambda_uv_set_microtask_drain(js_microtask_flush);
+    }
     uv_loop_t *loop = js_timer_get_loop(
         is_interval ? "setInterval" : "setTimeout");
     if (!loop) return ItemNull;
@@ -1006,16 +1021,16 @@ static Item js_schedule_timer(Item callback, Item delay, Item args_array,
     th->timer.data = th;
     js_timer_capture_argument_pack(th, args_array, has_args);
     return js_timer_finish_create(loop, th, JS_CLASS_TIMEOUT, ms,
-        is_interval ? ms : 0, "Timeout", 7);
+        is_interval ? ms : 0, "Timeout", 7, numeric_handle);
 }
 
 #define JS_TIMER_FORWARD(name, args, has_args, interval) \
 extern "C" Item name(Item callback, Item delay) { \
-    return js_schedule_timer(callback, delay, args, has_args, interval); \
+    return js_schedule_timer(callback, delay, args, has_args, interval, false); \
 }
 #define JS_TIMER_FORWARD_ARGS(name, interval) \
 extern "C" Item name(Item callback, Item delay, Item args_array) { \
-    return js_schedule_timer(callback, delay, args_array, true, interval); \
+    return js_schedule_timer(callback, delay, args_array, true, interval, false); \
 }
 JS_TIMER_FORWARD(js_setTimeout, ItemNull, false, false)
 JS_TIMER_FORWARD_ARGS(js_setTimeout_args, false)
@@ -1050,20 +1065,28 @@ extern "C" Item js_pack_args_span(Item* values, int count) {
     RootSpan value_roots(count > 0 ? (size_t)count : 0);
     if (count > 0 && !value_roots.valid()) return ItemNull;
     for (int i = 0; i < count; i++) {
-        value_roots.words()[i] = values[i].item;
+        // a call-pack Item must not retain its caller's reusable numeric scratch home.
+        value_roots.items()[i] = js_retain_scalar(values[i]);
+        if (item_is_error(value_roots.items()[i])) return value_roots.items()[i];
     }
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemNull;
+    Rooted<Item> output(roots, ItemNull);
     Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
     if (!arr) return ItemNull;
     arr->type_id = LMD_TYPE_ARRAY;
     arr->items = nullptr;
     arr->length = 0;
     arr->capacity = 0;
+    output.set(Item{.array = arr});
     for (int i = 0; i < count; i++) {
-        // an argument pack is positional: one argument, one item (D2.6.5v3)
-        array_push_verbatim(arr, (Item){.item = value_roots.words()[i]});
+        // append can collect while growing storage; output owns the fresh array throughout.
+        array_push_verbatim(output.get().array, value_roots.items()[i]);
+        if (output.get().array->length != i + 1) return ItemNull;
     }
-    return (Item){.array = arr};
+    return output.get();
 }
+
 JS_TIMER_FORWARD(js_setInterval, ItemNull, false, true)
 JS_TIMER_FORWARD_ARGS(js_setInterval_args, true)
 #undef JS_TIMER_FORWARD_ARGS
@@ -1724,7 +1747,7 @@ static bool event_loop_has_pending_requests(void) {
     return false;
 }
 
-extern "C" int js_event_loop_drain(void) {
+static int js_event_loop_drain_impl(bool keep_intervals) {
     // D5.4.1: the drain may resume parent timers after a rendering checkpoint,
     // so it is not a quiescent handoff boundary for nested document realms.
     RuntimeExecutionScope execution_scope(context);
@@ -1823,9 +1846,8 @@ extern "C" int js_event_loop_drain(void) {
         uv_timer_start(&watchdog, drain_watchdog_timer_cb,
                        EVENT_LOOP_DRAIN_TIMEOUT_MS, 0);
 
-        // Browser page-load drains should not wait for persistent intervals; close
-        // them before blocking so recurring timers cannot stall static rendering.
-        stop_all_interval_timers();
+        // existing page-load drains retain their interval cleanup policy; host programs opt in.
+        if (!keep_intervals) stop_all_interval_timers();
         uv_run(loop, UV_RUN_NOWAIT);
         if (dom_get_ui_context() && !animation_frame_drain_active &&
             js_animation_frame_has_pending()) {
@@ -1870,6 +1892,27 @@ extern "C" int js_event_loop_drain(void) {
     }
 
     return result;
+}
+
+extern "C" int js_event_loop_drain(void) {
+    return js_event_loop_drain_impl(false);
+}
+
+extern "C" Item js_event_loop_drain_result(bool keep_intervals) {
+    if (!js_active_runtime_state) return ItemNull;
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> error(roots, ItemNull);
+    JsEventLoopState* owner = js_runtime_state.event_loop;
+    uint64_t* previous = owner->task_error_sink;
+    owner->task_error_sink = error.home();
+    // the initial checkpoint must precede the first timer, including a lazily created loop.
+    do { js_microtask_flush(); } while (js_microtask_pending_count() > 0);
+    js_event_loop_drain_impl(keep_intervals);
+    do { js_microtask_flush(); } while (js_microtask_pending_count() > 0);
+    owner->task_error_sink = previous;
+    js_event_loop_capture_error(error.get());
+    return error.get();
 }
 
 extern "C" void js_event_loop_drain_script_turn(bool has_dom_document,

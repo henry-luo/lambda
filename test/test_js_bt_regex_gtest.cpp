@@ -340,11 +340,21 @@ TEST(BtNegative, UnterminatedClass) {
 }
 
 TEST(BtNegative, BadHexEscape) {
-    EXPECT_EQ(run_bt("\\x{zzzz}", "x", F()).compiled, 0);
+    // non-u identity escapes are valid under Annex B; Unicode keeps the rejection.
+    EXPECT_EQ(run_bt("\\x{zzzz}", "x", F()).compiled, 1);
+    EXPECT_EQ(run_bt("\\x{zzzz}", "x", F()).matched, 0);
+    EXPECT_EQ(run_bt("\\x{zzzz}", "x{zzzz}", F()).matched, 1);
+    EXPECT_EQ(run_bt("\\x{zzzz}", "x", Fu()).compiled, 0);
 }
 
 TEST(BtNegative, NamedBackrefToMissingGroup) {
-    EXPECT_EQ(run_bt("\\k<missing>", "x", F()).compiled, 0);
+    // without named captures, non-u \k is an identity escape rather than a backreference.
+    EXPECT_EQ(run_bt("\\k<missing>", "x", F()).compiled, 1);
+    EXPECT_EQ(run_bt("\\k<missing>", "x", F()).matched, 0);
+    EXPECT_EQ(run_bt("\\k<missing>", "k<missing>", F()).matched, 1);
+    EXPECT_EQ(run_bt("\\k<missing>", "x", Fu()).compiled, 0);
+    EXPECT_EQ(run_bt("(?<a>x)\\k<missing>", "x", F()).compiled, 0);
+    EXPECT_EQ(run_bt("(?<a>x)\\k<missing>", "x", Fu()).compiled, 0);
 }
 
 TEST(BtNegative, ReversedClassRange) {
@@ -449,3 +459,16 @@ TEST(BtAnchor, StickyFlag) {
 }
 
 }  // namespace
+
+TEST(BtBasic, QuantifierSyntaxBeforeBoundSaturation) {
+    const char* invalid[] = {"?", "*", "+", "a**", "a+*", "a??*", "{2}", "a{1}{2}",
+        ".{2,1}", "a{02,001}", ".{4294967297,4294967296}"};
+    for (const char* pattern : invalid) {
+        SCOPED_TRACE(pattern);
+        EXPECT_EQ(run_bt(pattern, "", F()).compiled, 0);
+        EXPECT_EQ(run_bt(pattern, "", Fu()).compiled, 0);
+    }
+    EXPECT_EQ(run_bt("a{2,1x}", "a{2,1x}", F()).matched, 1);
+    EXPECT_EQ(run_bt("a{0001,02}", "aa", F()).matched, 1);
+    EXPECT_EQ(run_bt("b{4294967297,4294967298}", "", F()).compiled, 1);
+}

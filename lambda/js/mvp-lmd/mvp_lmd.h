@@ -3,13 +3,20 @@
 
 struct MvpLmdExecution;
 enum MvpLmdFailurePhase { MVP_LMD_SUCCESS, MVP_LMD_PARSE_FAILURE,
-    MVP_LMD_ADMISSION_FAILURE, MVP_LMD_RUNTIME_FAILURE, MVP_LMD_INTERNAL_FAILURE };
+    MVP_LMD_ADMISSION_FAILURE, MVP_LMD_RESOLUTION_FAILURE, MVP_LMD_RUNTIME_FAILURE, MVP_LMD_INTERNAL_FAILURE };
 struct MvpLmdHost {
     int argc;
     const char* const* argv;
     FILE* output;
     bool test262 = false;       // require the real $DONE completion flag for async jobs
 };
+
+struct MvpLmdOptions {
+    const char* filename;
+    bool module;
+};
+MvpLmdExecution* mvp_lmd_execute_with_options(const char* source, size_t length,
+    double* execution_ms, const MvpLmdHost* host, const MvpLmdOptions* options);
 
 // the execution owns its AST, MIR, heap and result until destroy (D5.3).
 // optional timing covers only the generated entry, excluding compile/setup and result publication.

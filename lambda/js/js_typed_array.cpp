@@ -1836,8 +1836,8 @@ static Item js_typed_array_alloc_carrier(JsTypedArrayType element_type,
 
 static const JsTypedArrayOps js_typed_array_default_ops = {
     &js_buffer_view_default_ops, NULL, NULL,
-    [](Item source, int index) { return js_get_key_default(source, Item{.item = i2it(index)}); },
-    NULL, NULL, NULL, NULL
+    [](Item source, int64_t index) { return js_get_key_default(source, Item{.item = i2it(index)}); },
+    NULL, NULL, NULL, NULL, NULL, NULL
 };
 
 // Create a standalone typed array (owns its buffer)
@@ -2609,9 +2609,14 @@ JS_FORWARD_EXPRESSION(int, js_typed_array_byte_length, (Item ta_item),
 JS_FORWARD_EXPRESSION(int, js_typed_array_byte_offset, (Item ta_item),
     js_typed_array_byte_measure(ta_item, true))
 
-extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start,
-        int end, bool array_semantics) {
+extern "C" Item js_typed_array_fill_with_ops(Item ta_item, Item value, int start,
+        int end, bool array_semantics, const JsBufferViewOps* ops) {
     if (!js_is_typed_array(ta_item)) return ta_item;
+
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    uint64_t value_home = 0;
+    Rooted<Item> owner(roots, ta_item), argument(roots, lambda_item_adopt_scalar_home(value, &value_home));
 
     Map* m = ta_item.map;
     JsTypedArray* ta = js_get_typed_array_ptr(m);
@@ -2622,7 +2627,8 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start,
 
     if (is_bigint_array) {
         Item bigint_item;
-        JS_ASSIGN_OR_RETURN(validation, js_dataview_to_bigint_value(value, &bigint_item));
+        JS_ASSIGN_OR_RETURN(validation, ops->bigint(argument.get(), &bigint_item));
+        argument.set(bigint_item);
         // BigInt typed-array stores wrap modulo 64 bits; bigint_to_int64 alone clamps oversized inputs.
         JS_ASSIGN_OR_RETURN(wrapped, (ta->element_type == JS_TYPED_BIGINT64)
             ? js_bigint_as_int_n((Item){.item = i2it(64)}, bigint_item)
@@ -2636,7 +2642,8 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start,
         if (value.item == ITEM_JS_UNDEFINED) {
             num_val = NAN;
         } else {
-            JS_ASSIGN_OR_RETURN(validation, js_dataview_to_number_value(value, &num_val));
+            JS_ASSIGN_OR_RETURN(number, ops->number(argument.get()));
+            num_val = js_get_number(number);
         }
     }
 
@@ -2644,7 +2651,7 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start,
     // via Array.prototype.fill.call(ta_oob, ...) the spec uses LengthOfArrayLike
     // (which yields 0 for an OOB TA) and the method silently no-ops.
     if (!array_semantics && js_typed_array_is_out_of_bounds(ta)) {
-        return js_throw_type_error("Cannot perform %TypedArray%.prototype.fill on an out-of-bounds ArrayBuffer");
+        return ops->error(false, "Cannot perform %TypedArray%.prototype.fill on an out-of-bounds ArrayBuffer");
     }
 
     int len = js_typed_array_current_length(ta);
@@ -2676,67 +2683,78 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start,
     return ta_item;
 }
 
+extern "C" Item js_typed_array_fill(Item ta, Item value, int start, int end,
+        bool array_semantics) {
+    return js_typed_array_fill_with_ops(ta, value, start, end, array_semantics,
+        &js_buffer_view_default_ops);
+}
+
 // .set(source [, offset]) — bulk copy from another array/typed array
-extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
+extern "C" Item js_typed_array_set_from_with_ops(Item ta_item, Item source, int offset,
+        const JsTypedArrayOps* ops) {
+    const JsBufferViewOps* buffer = ops ? ops->buffer : &js_buffer_view_default_ops;
     if (!js_is_typed_array(ta_item)) return ItemNull;
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    uint64_t value_home = 0;
+    Rooted<Item> owner(roots, ta_item), input(roots, source), current(roots, ItemNull);
     JsTypedArray* dst = js_get_typed_array_ptr(ta_item.map);
     // Js54 P6: gate the TA-spec OOB throw on dispatch mode (see fill).
     if (!dst || js_typed_array_is_out_of_bounds(dst)) {
-        return js_throw_type_error("Cannot perform %TypedArray%.prototype.set on a detached or out-of-bounds ArrayBuffer");
+        return buffer->error(false, "Cannot perform %TypedArray%.prototype.set on a detached or out-of-bounds ArrayBuffer");
     }
     int target_len = js_typed_array_current_length(dst);
-    if (offset < 0) return js_throw_range_error("offset is out of bounds");
+    if (offset < 0) return buffer->error(true, "offset is out of bounds");
 
     if (js_is_typed_array(source)) {
         JsTypedArray* src = js_get_typed_array_ptr(source.map);
         // Js54 P6: gate the TA-spec OOB throw on dispatch mode.
         if (!src || js_typed_array_is_out_of_bounds(src) ||
             js_typed_array_is_out_of_bounds(dst)) {
-            return js_throw_type_error("Cannot perform %TypedArray%.prototype.set on a detached or out-of-bounds ArrayBuffer");
+            return buffer->error(false, "Cannot perform %TypedArray%.prototype.set on a detached or out-of-bounds ArrayBuffer");
         }
         int src_len = js_typed_array_current_length(src);
         if ((int64_t)offset + (int64_t)src_len > (int64_t)target_len) {
-            return js_throw_range_error("source is too large");
-        }
-        if (src_len <= 0) {
-            return (Item){.item = ITEM_JS_UNDEFINED};
+            return buffer->error(true, "source is too large");
         }
         if (js_typed_array_is_bigint_element(dst->element_type) !=
             js_typed_array_is_bigint_element(src->element_type)) {
-            return js_throw_type_error("Cannot mix BigInt and non-BigInt typed arrays");
+            return buffer->error(false, "Cannot mix BigInt and non-BigInt typed arrays");
         }
+        if (src_len <= 0) return (Item){.item = ITEM_JS_UNDEFINED};
         if (js_typed_array_try_raw_set_same_type(dst, src, offset)) {
             return (Item){.item = ITEM_JS_UNDEFINED};
         }
 
-        Item* values = (Item*)mem_alloc((size_t)src_len * sizeof(Item), MEM_CAT_JS_RUNTIME);
-        if (!values) return js_throw_type_error("TypedArray.prototype.set allocation failed");
+        // overlap requires a snapshot; precise roots also retain BigInt elements
+        // while reading later elements allocates or destination writes convert.
+        RootSpan values(src_len);
+        if (!values.valid()) return ItemError;
         for (int i = 0; i < src_len; i++) {
-            values[i] = js_typed_array_get(source, (Item){.item = i2it(i)});
-            if (item_is_error(values[i])) {
-                mem_free(values);
-                return values[i];
-            }
+            Item value = js_typed_array_get(input.get(), (Item){.item = i2it(i)});
+            if (item_is_error(value)) return value;
+            uint64_t* home = lambda_item_uses_scalar_home(value) ? lambda_side_number_alloc() : NULL;
+            if (lambda_item_uses_scalar_home(value) && !home) return ItemError;
+            values.items()[i] = lambda_item_adopt_scalar_home(value, home);
         }
         for (int i = 0; i < src_len; i++) {
-            Item set_result = js_typed_array_set(ta_item, (Item){.item = i2it(offset + i)}, values[i]);
-            if (item_is_error(set_result)) {
-                mem_free(values);
-                return set_result;
-            }
+            Item set_result = js_typed_array_set_numeric_with_ops(owner.get(), offset + i,
+                false, values.items()[i], buffer);
+            if (item_is_error(set_result)) return set_result;
         }
-        mem_free(values);
         return (Item){.item = ITEM_JS_UNDEFINED};
     }
 
     TypeId source_type = get_type_id(source);
     if (source_type == LMD_TYPE_NULL || source_type == LMD_TYPE_UNDEFINED || source.item == ITEM_JS_UNDEFINED) {
-        return js_throw_type_error("Cannot convert undefined or null to object");
+        return buffer->error(false, "Cannot convert undefined or null to object");
     }
-    JS_ASSIGN_OR_RETURN(src_obj, js_to_object(source));
+    if (!ops) input.set(js_to_object(input.get()));
+    if (item_is_error(input.get())) return input.get();
 
-    JS_ASSIGN_OR_RETURN(length_item, js_get_name_key(src_obj, "length"));
-    JS_ASSIGN_OR_RETURN(length_num, js_to_number(length_item));
+    current.set(buffer->get(input.get(), "length"));
+    if (item_is_error(current.get())) return current.get();
+    JS_ASSIGN_OR_RETURN(length_num, buffer->number(current.get()));
     double length_double = js_get_number(length_num);
     int64_t src_len = 0;
     if (length_double != length_double || length_double <= 0.0) {
@@ -2754,49 +2772,60 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
     // js_typed_array_set, which silently no-ops for OOB indices via the
     // IsValidIntegerIndex check.
     if ((int64_t)offset + src_len > (int64_t)target_len) {
-        return js_throw_range_error("source is too large");
+        return buffer->error(true, "source is too large");
     }
 
     for (int64_t i = 0; i < src_len; i++) {
-        JS_ASSIGN_OR_RETURN(value, js_get_key_default(src_obj, (Item){.item = i2it(i)}));
-        JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set(ta_item, (Item){.item = i2it((int64_t)offset + i)}, value));
+        current.set(lambda_item_adopt_scalar_home(ops ? ops->get_index(input.get(), (int)i) :
+            js_get_key_default(input.get(), (Item){.item = i2it(i)}), &value_home));
+        if (item_is_error(current.get())) return current.get();
+        JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set_numeric_with_ops(owner.get(),
+            (double)offset + i, false, current.get(), buffer));
     }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
+extern "C" Item js_typed_array_set_from(Item ta, Item source, int offset) {
+    return js_typed_array_set_from_with_ops(ta, source, offset, NULL);
+}
+
 // .slice(begin, end) — creates a copy
-extern "C" Item js_typed_array_slice(Item ta_item, int start, int end,
-        bool array_semantics) {
+extern "C" Item js_typed_array_slice_with_ops(Item ta_item, int start, int end,
+        bool array_semantics, const JsTypedArrayOps* ops) {
+    const JsBufferViewOps* buffer = ops ? ops->buffer : &js_buffer_view_default_ops;
     if (!js_is_typed_array(ta_item)) return (Item){.item = ITEM_NULL};
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    uint64_t value_home = 0;
+    Rooted<Item> owner(roots, ta_item), output(roots, ItemNull), value(roots, ItemNull);
     JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
 
-    // Js54 P6: gate the TA-spec OOB throw on dispatch mode.
-    if (!array_semantics && js_typed_array_is_out_of_bounds(ta)) {
-        return js_throw_type_error("Cannot perform %TypedArray%.prototype.slice on an out-of-bounds ArrayBuffer");
-    }
-
+    // the caller validated before index coercion; species construction must
+    // still run if those coercions detached the source, including empty slices.
     int current_len = js_typed_array_current_length(ta);
 
     if (start < 0) start = current_len + start;
     if (end < 0) end = current_len + end;
     if (start < 0) start = 0;
     if (start >= end) {
-        JS_ASSIGN_OR_RETURN(result, js_typed_array_species_create(ta_item, 0));
-        return result;
+        Item argument = {.item = i2it(0)};
+        return js_typed_array_species_create_with_ops(owner.get(), &argument, 1, ops);
     }
 
     int new_length = end - start;
-    JS_ASSIGN_OR_RETURN(result, js_typed_array_species_create(ta_item, new_length));
+    Item argument = {.item = i2it(new_length)};
+    output.set(js_typed_array_species_create_with_ops(owner.get(), &argument, 1, ops));
+    if (item_is_error(output.get())) return output.get();
     if (new_length > 0 && !array_semantics) {
         if (ta->base.buffer && js_arraybuffer_detached(ta->base.buffer)) {
-            return js_throw_type_error("Cannot perform %TypedArray%.prototype.slice on a detached ArrayBuffer");
+            return buffer->error(false, "Cannot perform %TypedArray%.prototype.slice on a detached ArrayBuffer");
         }
         if (js_typed_array_is_out_of_bounds(ta)) {
-            return js_throw_type_error("Cannot perform %TypedArray%.prototype.slice on an out-of-bounds ArrayBuffer");
+            return buffer->error(false, "Cannot perform %TypedArray%.prototype.slice on an out-of-bounds ArrayBuffer");
         }
     }
     // Copy elements — species may return a different typed array type, so use element-by-element copy
-    JsTypedArray* rta = js_get_typed_array_ptr(result.map);
+    JsTypedArray* rta = js_get_typed_array_ptr(output.get().map);
     if (rta && rta->element_type == ta->element_type &&
             js_typed_array_current_length(rta) >= new_length) {
         int elem_size = js_typed_array_element_size(ta->element_type);
@@ -2837,10 +2866,17 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end,
             } else {
                 elem = (Item){.item = i2it(0)};
             }
-            js_typed_array_set(result, (Item){.item = i2it(i)}, elem);
+            value.set(lambda_item_adopt_scalar_home(elem, &value_home));
+            if (item_is_error(value.get())) return value.get();
+            JS_ASSIGN_OR_RETURN(stored, js_typed_array_set_numeric_with_ops(output.get(),
+                i, false, value.get(), buffer));
         }
     }
-    return result;
+    return output.get();
+}
+
+extern "C" Item js_typed_array_slice(Item ta, int start, int end, bool array_semantics) {
+    return js_typed_array_slice_with_ops(ta, start, end, array_semantics, NULL);
 }
 
 // .subarray(begin, end) shares storage and captures length before coercion.

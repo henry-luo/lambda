@@ -1948,10 +1948,22 @@ static String* js_module_source_from_literal(JsAstNode* node) {
         ? literal->value.string_value : NULL;
 }
 
+static String* js_module_name_from_node(JsTranspiler* tp, JsAstNode* node) {
+    String* name = js_name_from_binding_node(node);
+    if (name) return name;
+    name = js_module_source_from_literal(node);
+    // canonical name interning joins valid surrogate pairs; remaining surrogates are ill-formed.
+    if (name && !utf8_valid(name->chars, name->len)) {
+        js_syntax_error(tp, node->source_span, "module export names must be well-formed Unicode");
+        return NULL;
+    }
+    return name;
+}
+
 // build an import specifier from parser-owned remote/local name nodes
 JsAstNode* build_js_import_specifier_from_children(JsTranspiler* tp,
         SourceSpan span, JsAstNode* remote, JsAstNode* local) {
-    String* remote_name = js_name_from_binding_node(remote);
+    String* remote_name = js_module_name_from_node(tp, remote);
     String* local_name = js_name_from_binding_node(local);
     if (!tp || !remote_name) {
         log_error("JavaScript import specifier has no remote name");
@@ -2000,13 +2012,12 @@ JsAstNode* build_js_import_from_children(JsTranspiler* tp, SourceSpan span,
 // build an export specifier from parser-owned local/exported name nodes
 JsAstNode* build_js_export_specifier_from_children(JsTranspiler* tp,
         SourceSpan span, JsAstNode* local, JsAstNode* export_name) {
-    String* local_name = js_name_from_binding_node(local);
-    String* exported_name = js_name_from_binding_node(export_name);
-    if (!tp || !local_name) {
-        log_error("JavaScript export specifier has no local name");
+    String* local_name = js_module_name_from_node(tp, local);
+    String* exported_name = export_name ? js_module_name_from_node(tp, export_name) : local_name;
+    if (!tp || !local_name || !exported_name) {
+        log_error("JavaScript export specifier has no module name");
         return NULL;
     }
-    if (!exported_name) exported_name = local_name;
     JsExportSpecifierNode* specifier = (JsExportSpecifierNode*)alloc_js_ast_node_span(
         tp, AST_NODE_EXPORT_SPECIFIER, span, sizeof(JsExportSpecifierNode));
     specifier->local_name = local_name;

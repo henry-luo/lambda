@@ -204,7 +204,7 @@ extern "C" Item mvp_lmd_number_to_fixed(double value, double digits) {
 extern "C" Item mvp_lmd_primitive_to_number(Item value, int64_t explicit_number) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_SYMBOL) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ARRAY_NUM) {
+    if (mvp_lmd_is_object(value)) {
         RootFrame roots(1);
         if (!roots.valid()) return ItemError;
         Rooted<Item> primitive(roots, mvp_lmd_to_primitive(value, 1));
@@ -231,7 +231,7 @@ extern "C" Item mvp_lmd_primitive_to_string(Item value, int64_t library_objects)
         return result ? Item{.item = s2it(result)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     }
     if (type == LMD_TYPE_STRING) return value;
-    if (type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ARRAY_NUM) {
+    if (mvp_lmd_is_object(value)) {
         RootFrame roots(1);
         if (!roots.valid()) return ItemError;
         Rooted<Item> primitive(roots, mvp_lmd_to_primitive(value, 2, library_objects & 1));
