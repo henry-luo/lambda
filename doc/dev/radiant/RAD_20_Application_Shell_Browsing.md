@@ -65,6 +65,31 @@ The GUI branch (`ui_context.cpp:114-151`) forces the X11 platform on Linux (Wayl
 
 ---
 
+### 3.1 Window fullscreen
+
+Window fullscreen is owned by `UiContext::fullscreen`, independently of the
+document. `view` and `edit` accept `--fullscreen`; F11 toggles the latest
+requested mode and Escape exits fullscreen before viewer close or document
+dispatch. The common key gate in `handle_event` also serves replay input.
+
+`dom.set_window_fullscreen(node, enabled)` queues a native request;
+`dom.window_fullscreen(node)` and `dom.window_fullscreen_enabled(node)` read
+published state. Connected nodes of the presented top-level document identify
+the window. The shared DOM catalog/provider path preserves **D7.5.3** and
+**D7.3.3**. Windowless execution reports unavailable (**D7.1.4v2**).
+
+The controller in `window_fullscreen.cpp` coalesces requests, preserves normal
+bounds and maximization, and reconciles actual state after platform calls.
+`window.cpp` supplies GLFW operations, selects the overlapping monitor, and
+commits requests after input/script callbacks return. Rendering publishes
+logical and physical metrics through the ordinary resize path before sending
+`windowfullscreenchange` or `windowfullscreenerror` notifications. Native
+callbacks that occur during a switch cannot recursively paint half-updated
+metrics or discard a newer request.
+
+Element fullscreen, `:fullscreen`, and the JS Fullscreen API are a separate
+follow-on stage in [Radiant Fullscreen](../../../vibe/radiant/Radiant_Design_Fullscreen.md).
+
 ## 4. The main loop: one thread pumping three event sources
 
 `view_doc_in_window_with_events_internal` is the driver. Setup order: `ui_context_init` → optional `event_sim_load` → `js_dom_set_ui_context(&ui_context)` → `js_dom_set_host_driven_loop(host_driven_loop)` where `host_driven_loop = (!headless || sim_ctx != nullptr)` → load the document (`load_doc_by_format`, or a configured native transform for optioned graph views) → conditionally initialize network support for HTTP documents (`network_downloader_init_shared` + `enhanced_cache_create`) → `session_create` → pre-layout resource discovery. It then splits into a headless synchronous path (running `event_sim_update` in a loop and pumping `js_event_loop_pump_nowait` between events) and the GUI frame loop.
@@ -119,6 +144,7 @@ The per-format flows (all in `cmd_layout.cpp` unless noted):
 - **`.ls` Lambda script** — `load_lambda_script_doc`. Allocates a heap `Runtime`, creates a retained result `Input` with `ui_mode=true`, binds it as the runtime's UI result (`runtime_bind_ui_result_input`, so generated nodes allocate in its arena), runs the file with MIR, then interprets the result: a full `<html>` element is used directly; another element is wrapped in `html > body`; a scalar/text value is stringified into a `<div>`; an SVG element/string is wrapped as in-memory HTML; an HTML string is parsed. It builds the `DomDocument` from the retained input and stores `dom_doc->lambda_runtime` so the heap, JIT code, name pool, generated nodes and event-handler state stay live for an interactive script document.
 - **PDF / LaTeX / TikZ / graph** — `load_lambda_document_transform_doc` selects a `LambdaDocumentTransformConfig`, loads its actual shipped package file, parses the input using the configured type, then invokes the configured public export with a typed option map. PDF's package owns its default page cap; LaTeX and graph package entries own their view defaults. This follows the ordinary package/public-export boundary of **D7.2.1–D7.2.2**. A transform marked `stateless` runs on the window's **loader runtime** when a top-level load in a window or batch runs it (§6.2). The edit application, `.ls` pages, and loads outside a window keep a runtime of their own on `dom_doc->lambda_runtime`.
 - **Markdown + math** (`.md`, `.markdown`) — `load_markdown_doc` parses Markdown with `InputParseOptions::embedded_math`: the markup parser attaches each formula's math AST (`ast` attribute, via `parse_math_direct_to_ast`, flavor-aware) and lists the `<math>` elements on `Input::embedded_math`. A document without math takes the plain path — no runtime, no package. Otherwise `lambda.doc.math.math.render_math` renders each listed AST with a typed display option, on the window's loader runtime (§6.2) or, outside a window, on one runtime started only then. Each `<math>` element takes the rendered element's content in place — no tree walk, no second parse, no parent bookkeeping. No Lambda source is constructed.
+- **HTML MathML** — namespace-qualified math roots with math inner display invoke `lambda.doc.math.mathml_layout` through retained custom layout during intrinsic/flow/flex layout. The package supplies measured SVG paint while semantic children and annotations remain in the DOM; HTML is not preconverted or reparsed. Static documents acquire an evaluator lazily, and nested renders share their active evaluator. Root CSS size/color and box decoration remain native; the supported math subset and CSS/accessibility limits are recorded in `vibe/Lambda_Pkg_Math.md` §11.6 (**D7.2.8**).
 - **Wiki** (`.wiki`) — `load_wiki_doc` (`cmd_layout.cpp:4432`). Parses via `input_from_source(..., "wiki")`, builds the DOM, loads `wiki.css`, applies the cascade. Simpler than HTML/Markdown: no scripts, no math pass.
 
 ### 6.1 Retained-generated-node invariants

@@ -84,3 +84,25 @@ are introduced inside the package. Logs and captures are under `temp/ui_bold/`.
 across execution tiers, returning failure while UI-2 remains open. Browser
 hydration, dark presets, motion timing, advanced collections and the remaining
 reference catalog are unimplemented. The sibling dtna roadmap remains intact.
+
+## Native badge alignment — 2026-10-13
+
+The gallery's three status badges exposed a Radiant anonymous-flex-text defect.
+Measurement used the glyph cell instead of the inherited line height, and final
+positioning discarded the leading above the baseline. The engine now uses the
+shared line-height and baseline metrics during measurement and final layout;
+the theme needs no compensating styles (**S12.1.3**).
+
+The 12px/18px badges now match Chromium: a 26px outer height and a 14px text
+cell starting 6px below the top border. `RadiantTextLayout` compares direct and
+wrapped text across font sizes, line heights, fixed heights, column layout, SVG
+siblings and reflow. Both native text tests, six focused UI fixtures, the
+gallery's 11 assertions and the Radiant integer-cast lint pass.
+
+The full baseline remains unclean. Before/after comparison confirms existing
+page snapshot failures. Correcting a shared flex header from 37.25px to 38px
+also exposes `md_nuxt-readme`'s existing broken-image anchor baseline error:
+its unchanged 6px local baseline error now exceeds the 5.5px comparison tolerance.
+No golden or comparison threshold was changed. Sandbox-blocked macOS GUI
+initialization also interrupted the broad native run; the two affected scene
+tests pass with native GUI access. Evidence is under `temp/bold_badge_alignment/`.

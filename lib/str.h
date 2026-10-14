@@ -359,6 +359,8 @@ bool str_to_int64(const char* s, size_t len, int64_t* out, const char** end);
 size_t str_format_roman(uint64_t value, char* buffer, size_t capacity, bool uppercase);
 bool str_to_uint64(const char* s, size_t len, uint64_t* out, const char** end);
 bool str_to_double(const char* s, size_t len, double* out, const char** end);
+// whitespace/comma/bracket-separated finite numbers: 1 = number, 0 = end, -1 = invalid.
+int str_next_double(const char** cursor, double* out);
 
 /** parse up to `capacity` floats separated by bytes from `separators`.
  *  Returns the number parsed; `end` (if non-NULL) receives the first

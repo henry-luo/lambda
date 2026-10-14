@@ -1,0 +1,108 @@
+{
+  "name": "blade theme inherits scoped tokens and coexists with Clay and dtna",
+  "html": "test/ui/blade/theme.ls",
+  "viewport": {
+    "width": 1100,
+    "height": 1600
+  },
+  "events": [
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#base"
+      },
+      "property": "border-color",
+      "equals": "rgb(215, 173, 98)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#blue"
+      },
+      "property": "border-color",
+      "equals": "rgb(82, 122, 156)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#inherited"
+      },
+      "property": "border-color",
+      "equals": "rgb(82, 122, 156)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#inherited"
+      },
+      "property": "border-radius",
+      "equals": "12px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#after"
+      },
+      "property": "border-color",
+      "equals": "rgb(215, 173, 98)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#ink"
+      },
+      "property": "color",
+      "equals": "rgb(56, 42, 32)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#clay"
+      },
+      "property": "border-color",
+      "equals": "rgb(107, 81, 219)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#ant"
+      },
+      "property": "background-color",
+      "equals": "rgb(22, 119, 255)"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#large-slot"
+      },
+      "width": 96,
+      "height": 96,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#large-art"
+      },
+      "width": 256,
+      "height": 256,
+      "tolerance": 0.2
+    },
+    {
+      "type": "assert_state",
+      "target": {
+        "selector": "#locked"
+      },
+      "state": ":disabled",
+      "value": true
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#blue-meter .blade-meter-frame"
+      },
+      "property": "color",
+      "equals": "rgb(120, 180, 212)"
+    }
+  ]
+}

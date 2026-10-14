@@ -154,6 +154,10 @@ pn notify_select_change(select) {
 
 // One commit path for the pointer, Enter, and the harness's select_option.
 pn commit_option(elem, index) {
+    let options = tree.options_of(elem);
+    // User commits must reject disabled rows; the programmatic setter remains unrestricted.
+    if (index < 0 or index >= len(options)) { return false }
+    if (not option_enabled(elem, options[index])) { return false }
     let before = dom.selected_index(elem);
     dom.set_selected_index(elem, index)
     dom.set_dropdown_open(elem, false)

@@ -1,0 +1,59 @@
+{
+  "name": "blade gallery adapts between narrow and wide layouts",
+  "html": "test/ui/blade_gallery.ls",
+  "viewport": {
+    "width": 480,
+    "height": 2100
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".blade-gallery"
+      },
+      "width": 440,
+      "tolerance": 0.5
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".blade-gallery-grid"
+      },
+      "width": 440,
+      "tolerance": 0.5
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#blade-item-0"
+      },
+      "width": 64,
+      "height": 64,
+      "tolerance": 0.2
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_blade/gallery_mobile.png"
+    },
+    {
+      "type": "resize",
+      "width": 1376,
+      "height": 1100
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": ".blade-gallery"
+      },
+      "width": 1280,
+      "tolerance": 0.5
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".blade-ability"
+      },
+      "count": 8
+    }
+  ]
+}

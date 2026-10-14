@@ -11,6 +11,8 @@ bundled document viewer with its startup splash (D7.2.4).
 | `superlambda` | `superlambda/superlambda.ls` | [Superlambda](superlambda/README.md) |
 | `doom` | `doom/doom.ls` | [DOOM](doom/README.md) |
 | `photo` | `photo/photo.ls` | [Photo Studio](photo/README.md) |
+| `draw` | `draw/draw.ls` | [Draw](draw/README.md) |
+| `cellscope` | `cellscope/cellscope.ls` | [CellScope](cellscope/README.md) |
 | `scene3d`, `ringworld` | `scene3d/ringworld.ls` | [Native 3D](scene3d/README.md) |
 | `observatory` | `scene3d/observatory.html` | [Native 3D](scene3d/README.md) |
 | `three-gallery` | `scene3d/three-gallery.html` | [Native 3D](scene3d/README.md) |
@@ -30,6 +32,11 @@ Paths in the table are relative to `test/demo/`. Viewer options follow the name:
 
 The games and Ringworld include an **Auto Play** button. Direct `lambda view`
 commands and individual test/replay commands remain available in each guide.
+
+The [physics playground](physics/README.md) contains four interactive native
+Scene3D experiments: a domino cascade, compound bodies in zero gravity, a
+marble sorter and a bounce comparison with trajectory charts. Open its gallery
+with `./lambda.exe view test/demo/physics/index.ls`.
 
 ## Readability extraction
 

@@ -5,6 +5,7 @@
 #include "../lib/log.h"
 #include "../lib/mime-detect.h"
 #include "../lib/url.h"
+#include "../lib/strbuf.h"
 
 class ModelInputTest : public ::testing::Test {
 protected:
@@ -297,6 +298,163 @@ static Input* load_scene_asset(const char* path) {
     Input* owner=InputManager::create_input(nullptr);MarkBuilder b(owner);
     Url* cwd=get_current_dir();Input* result=input_from_url(b.createString(path),b.createString("scene3d-asset"),nullptr,cwd);
     url_destroy(cwd);return result;
+}
+
+static void glb_test_word(StrBuf* out,uint32_t word) {
+    for(unsigned i=0;i<4;i++) strbuf_append_char(out,(char)(word>>(i*8)));
+}
+static StrBuf* glb_test_model(unsigned vertices) {
+    StrBuf* json=strbuf_new();
+    strbuf_append_format(json,R"({"asset":{"version":"2.0"},"buffers":[{"byteLength":%u}],
+        "bufferViews":[{"buffer":0,"byteLength":%u,"byteStride":20}],
+        "accessors":[{"bufferView":0,"componentType":5126,"count":%u,"type":"VEC3"},
+        {"bufferView":0,"byteOffset":12,"componentType":5126,"count":%u,"type":"VEC2"}],
+        "meshes":[{"primitives":[{"attributes":{"POSITION":0,"TEXCOORD_0":1}}]}],
+        "nodes":[{"mesh":0}]})",vertices*20,vertices*20,vertices,vertices);
+    while(json->length%4) strbuf_append_char(json,' ');
+    StrBuf* glb=strbuf_new();strbuf_append_str(glb,"glTF");glb_test_word(glb,2);
+    glb_test_word(glb,28+json->length+vertices*20);glb_test_word(glb,json->length);glb_test_word(glb,0x4e4f534a);
+    strbuf_append_str_n(glb,json->str,json->length);strbuf_free(json);
+    glb_test_word(glb,vertices*20);glb_test_word(glb,0x004e4942);
+    for(unsigned i=0;i<vertices;i++) {
+        float values[5]={i%3==1?1.0f:0.0f,i%3==2?1.0f:0.0f,0.0f,0.25f,0.75f};
+        for(float value:values) {uint32_t bits;memcpy(&bits,&value,4);glb_test_word(glb,bits);}
+    }
+    return glb;
+}
+
+static StrBuf* quantized_test_model(const char* extension="\"KHR_mesh_quantization\"",
+    unsigned normal_type=5120,bool normalize_normal=true,bool signed_uv=false) {
+    StrBuf* json=strbuf_new();
+    // Three padded vertices: signed-short positions, signed-byte normals, and ushort UVs.
+    strbuf_append_format(json,R"({"asset":{"version":"2.0"},"extensionsUsed":[%s],"extensionsRequired":[%s],
+        "buffers":[{"byteLength":48,"uri":"data:application/octet-stream;base64,AIAAAAAAAAAAAIAAAAD///9/AAAAAAAAAACAAACAAAAAAP9/AAAAAAAAgAD//wCA"}],
+        "bufferViews":[{"buffer":0,"byteLength":48,"byteStride":16}],
+        "accessors":[{"bufferView":0,"componentType":5122,"count":3,"type":"VEC3","normalized":true},
+        {"bufferView":0,"byteOffset":8,"componentType":%u,"count":3,"type":"VEC3","normalized":%s},
+        {"bufferView":0,"byteOffset":12,"componentType":%u,"count":3,"type":"VEC2","normalized":%s}],
+        "meshes":[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2},
+        "targets":[{"POSITION":0,"NORMAL":1}]}],"weights":[0.25]}],
+        "nodes":[{"mesh":0,"translation":[10,20,30],"scale":[2,2,2]}]})",
+        extension,extension,normal_type,normalize_normal?"true":"false",signed_uv?5122:5123,signed_uv?"false":"true");
+    return json;
+}
+
+TEST_F(ModelInputTest, SceneAssetQuantizedAttributesPreserveSignedValuesMorphsAndTransforms) {
+    StrBuf* source=quantized_test_model();
+    Input* input=parse(source->str,"scene3d-asset","quantized.gltf");strbuf_free(source);
+    ASSERT_NE(input,nullptr);ASSERT_FALSE(input->parse_failed)<<input->parse_error_message;
+    auto node=ElementReader(input->root).findChildElement("group");
+    EXPECT_DOUBLE_EQ(node.get_attr("position").asArray().get(0).asFloat(),10);
+    EXPECT_DOUBLE_EQ(node.get_attr("scale").asArray().get(0).asFloat(),2);
+    auto geometry=node.findChildElement("mesh").findChildElement("geometry");
+    auto positions=geometry.get_attr("positions").asArray(),normals=geometry.get_attr("normals").asArray();
+    ASSERT_EQ(positions.length(),9);ASSERT_EQ(normals.length(),9);
+    EXPECT_DOUBLE_EQ(positions.get(0).asFloat(),-1);EXPECT_DOUBLE_EQ(positions.get(3).asFloat(),1);
+    EXPECT_DOUBLE_EQ(positions.get(7).asFloat(),1);EXPECT_DOUBLE_EQ(normals.get(2).asFloat(),-1);
+    EXPECT_DOUBLE_EQ(geometry.get_attr("morph-positions").asArray().get(0).asFloat(),-1);
+    EXPECT_DOUBLE_EQ(geometry.get_attr("morph-normals").asArray().get(2).asFloat(),-1);
+    auto uv=geometry.get_attr("uvs").asArray();
+    EXPECT_DOUBLE_EQ(uv.get(1).asFloat(),0);EXPECT_DOUBLE_EQ(uv.get(2).asFloat(),32768.0/65535);
+}
+
+TEST_F(ModelInputTest, SceneAssetQuantizedSignedIntegerUvsRetainTheirRangeAndOrientation) {
+    StrBuf* source=quantized_test_model("\"KHR_mesh_quantization\"",5120,true,true);
+    Input* input=parse(source->str,"scene3d-asset","quantized-uv.gltf");strbuf_free(source);
+    ASSERT_NE(input,nullptr);ASSERT_FALSE(input->parse_failed)<<input->parse_error_message;
+    auto geometry=ElementReader(input->root).findChildElement("group").findChildElement("mesh").findChildElement("geometry");
+    auto uv=geometry.get_attr("uvs").asArray();ASSERT_EQ(uv.length(),6);
+    EXPECT_DOUBLE_EQ(uv.get(1).asFloat(),2);EXPECT_DOUBLE_EQ(uv.get(2).asFloat(),-32768);
+    EXPECT_DOUBLE_EQ(uv.get(4).asFloat(),-1);EXPECT_DOUBLE_EQ(uv.get(5).asFloat(),32769);
+}
+
+TEST_F(ModelInputTest, SceneAssetRejectsUndeclaredQuantizationAndInvalidIntegerNormals) {
+    struct Case {const char* extension;unsigned normal_type;bool normalized;};
+    const Case cases[]={{"",5120,true},{"\"KHR_mesh_quantization\"",5121,true},
+        {"\"KHR_mesh_quantization\"",5120,false}};
+    for(const auto& c:cases) {
+        SCOPED_TRACE(c.normal_type);StrBuf* source=quantized_test_model(c.extension,c.normal_type,c.normalized);
+        Input* input=parse(source->str,"scene3d-asset","invalid-quantized.gltf");strbuf_free(source);
+        ASSERT_NE(input,nullptr);EXPECT_TRUE(input->parse_failed);
+    }
+}
+
+TEST_F(ModelInputTest, SceneAssetRejectsUnsignedQuantizedMorphDisplacements) {
+    StrBuf* source=quantized_test_model();
+    char* type=strstr(source->str,"\"componentType\":5122");ASSERT_NE(type,nullptr);
+    type[strlen("\"componentType\":512")]='3';
+    Input* input=parse(source->str,"scene3d-asset","unsigned-morph.gltf");strbuf_free(source);
+    ASSERT_NE(input,nullptr);ASSERT_TRUE(input->parse_failed);
+    EXPECT_NE(strstr(input->parse_error_message,"invalid morph target"),nullptr);
+}
+
+TEST_F(ModelInputTest, SceneAssetGlbOwnsBinaryGeometryAndPreservesUvOrientation) {
+    StrBuf* glb=glb_test_model(3);
+    Input* input=parse(glb->str,"scene3d-asset","model.glb",glb->length);
+    strbuf_free(glb);ASSERT_NE(input,nullptr);ASSERT_FALSE(input->parse_failed)<<input->parse_error_message;
+    auto geometry=ElementReader(input->root).findChildElement("group").findChildElement("group").findChildElement("mesh").findChildElement("geometry");
+    EXPECT_EQ(geometry.get_attr("positions").asArray().length(),9);
+    EXPECT_DOUBLE_EQ(geometry.get_attr("positions").asArray().get(3).asFloat(),1);
+    EXPECT_DOUBLE_EQ(geometry.get_attr("uvs").asArray().get(1).asFloat(),0.25);
+}
+
+TEST_F(ModelInputTest, SceneAssetGlbRejectsCorruptContainers) {
+    StrBuf* glb=glb_test_model(3);
+    const unsigned offsets[]={0,4,8,12,16};
+    for(unsigned offset:offsets) {
+        SCOPED_TRACE(offset);char saved=glb->str[offset];glb->str[offset]^=1;
+        Input* input=parse(glb->str,"scene3d-asset","model.glb",glb->length);
+        ASSERT_NE(input,nullptr);EXPECT_TRUE(input->parse_failed);glb->str[offset]=saved;
+    }
+    Input* truncated=parse(glb->str,"scene3d-asset","model.glb",glb->length-1);
+    ASSERT_NE(truncated,nullptr);EXPECT_TRUE(truncated->parse_failed);
+    strbuf_free(glb);
+}
+
+TEST_F(ModelInputTest, SceneAssetDropsZeroAreaFacesAndTheirOrphanedVertices) {
+    StrBuf* glb=glb_test_model(6);
+    // The second triangle consists of three coincident positions, with independent UVs.
+    size_t last=glb->length-60;
+    for(unsigned v=0;v<3;v++) memset(glb->str+last+v*20,0,12);
+    Input* input=parse(glb->str,"scene3d-asset","degenerate.glb",glb->length);
+    strbuf_free(glb);ASSERT_NE(input,nullptr);ASSERT_FALSE(input->parse_failed)<<input->parse_error_message;
+    auto geometry=ElementReader(input->root).findChildElement("group").findChildElement("group")
+        .findChildElement("mesh").findChildElement("geometry");
+    EXPECT_EQ(geometry.get_attr("positions").asArray().length(),9);
+    EXPECT_EQ(geometry.get_attr("indices").asArray().length(),3);
+    EXPECT_EQ(geometry.get_attr("uvs").asArray().length(),6);
+}
+
+TEST_F(ModelInputTest, SceneAssetMissingNormalsPreservesOppositeFaces) {
+    StrBuf* glb=glb_test_model(6);
+    // Reverse the second face: averaging these shared positions would cancel both normals.
+    char corner[20];size_t last=glb->length-40;
+    memcpy(corner,glb->str+last,20);memcpy(glb->str+last,glb->str+last+20,20);memcpy(glb->str+last+20,corner,20);
+    Input* input=parse(glb->str,"scene3d-asset","opposite.glb",glb->length);
+    strbuf_free(glb);ASSERT_NE(input,nullptr);ASSERT_FALSE(input->parse_failed)<<input->parse_error_message;
+    auto geometry=ElementReader(input->root).findChildElement("group").findChildElement("group")
+        .findChildElement("mesh").findChildElement("geometry");
+    auto normals=geometry.get_attr("normals").asArray();ASSERT_EQ(normals.length(),18);
+    for(unsigned vertex=0;vertex<6;vertex++) EXPECT_DOUBLE_EQ(normals.get(vertex*3+2).asFloat(),vertex<3?1:-1);
+    EXPECT_EQ(geometry.get_attr("indices").asArray().length(),6);
+}
+
+TEST_F(ModelInputTest, SceneAssetPartitionsLargeStaticMeshWithoutDroppingTrianglesOrUvs) {
+    const unsigned vertices=262146;StrBuf* glb=glb_test_model(vertices);
+    Input* input=parse(glb->str,"scene3d-asset","large.glb",glb->length);
+    strbuf_free(glb);ASSERT_NE(input,nullptr);ASSERT_FALSE(input->parse_failed)<<input->parse_error_message;
+    auto group=ElementReader(input->root).findChildElement("group").findChildElement("group");
+    ASSERT_EQ(group.childCount(),2);size_t count=0;
+    for(int64_t i=0;i<group.childCount();i++) {
+        auto geometry=group.childAt(i).asElement().findChildElement("geometry");
+        auto positions=geometry.get_attr("positions").asArray(),uvs=geometry.get_attr("uvs").asArray();
+        auto indices=geometry.get_attr("indices").asArray();
+        EXPECT_LE(positions.length()/3,262144);EXPECT_EQ(uvs.length(),positions.length()/3*2);
+        EXPECT_EQ(indices.length()%3,0);count+=indices.length();
+        EXPECT_DOUBLE_EQ(indices.get(indices.length()-1).asFloat(),positions.length()/3-1);
+        EXPECT_DOUBLE_EQ(uvs.get(uvs.length()-1).asFloat(),0.25);
+    }
+    EXPECT_EQ(count,vertices);
 }
 
 TEST_F(ModelInputTest, SceneAssetResolvesObjMaterialTextureAndConcaveNegativeCorners) {

@@ -17,6 +17,13 @@ inline bool scene3d_normalize(Scene3dVec* v) {
 inline Scene3dMatrix scene3d_identity() {
     Scene3dMatrix m = {}; m.v[0] = m.v[5] = m.v[10] = m.v[15] = 1; return m;
 }
+inline Scene3dMatrix scene3d_rotation_matrix(const double rotation[16],Scene3dVec position,Scene3dVec scale={1,1,1}) {
+    // animation rotation matrices are row-major; scene matrices use GLSL's column-major convention.
+    Scene3dMatrix matrix=scene3d_identity();const float scales[]={scale.x,scale.y,scale.z};
+    for(unsigned column=0;column<3;column++)for(unsigned row=0;row<3;row++)
+        matrix.v[column*4+row]=(float)rotation[row*4+column]*scales[column];
+    matrix.v[12]=position.x;matrix.v[13]=position.y;matrix.v[14]=position.z;return matrix;
+}
 inline Scene3dMatrix scene3d_multiply(const Scene3dMatrix& a, const Scene3dMatrix& b) {
     Scene3dMatrix m = {};
     for (unsigned c = 0; c < 4; c++) for (unsigned r = 0; r < 4; r++)
@@ -66,4 +73,11 @@ inline Scene3dMatrix scene3d_perspective(float fov, float aspect, float near_pla
     Scene3dMatrix m = {}; float f = 1 / tanf(fov * .00872664625997165f);
     m.v[0]=f/aspect; m.v[5]=f; m.v[10]=(far_plane+near_plane)/(near_plane-far_plane);
     m.v[11]=-1; m.v[14]=2*far_plane*near_plane/(near_plane-far_plane); return m;
+}
+// view_height is the full vertical span, independent of distance from the camera.
+inline Scene3dMatrix scene3d_orthographic(float view_height, float aspect, float near_plane, float far_plane) {
+    Scene3dMatrix m = scene3d_identity();
+    m.v[0]=2/(view_height*aspect);m.v[5]=2/view_height;
+    m.v[10]=2/(near_plane-far_plane);m.v[14]=(far_plane+near_plane)/(near_plane-far_plane);
+    return m;
 }

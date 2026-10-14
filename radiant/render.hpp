@@ -2212,6 +2212,7 @@ struct RenderBackend {
     void (*render_inline_svg)(RenderContext* ctx, ViewBlock* block, float abs_x, float abs_y,
                               FontBox* font, Color color);
     void (*render_geomap)(RenderContext* ctx, ViewBlock* block, float abs_x, float abs_y);
+    void (*render_scene3d)(RenderContext* ctx, ViewBlock* block, float abs_x, float abs_y);
     void (*render_svg_subscene)(RenderContext* ctx, const PaintSvgSubscene* subscene);
 
     // Semantic export can attach destinations to elements with no paint box.
@@ -3807,6 +3808,7 @@ uint8_t render_pixel_premultiply_channel(uint8_t channel, uint8_t alpha);
 uint8_t render_pixel_unpremultiply_channel(uint8_t channel, uint8_t alpha);
 uint32_t render_pixel_premultiply_abgr(uint32_t pixel);
 uint32_t render_pixel_unpremultiply_abgr(uint32_t pixel);
+void render_pixel_unpremultiply_row(uint32_t* destination, const uint32_t* source, size_t count);
 uint32_t render_pixel_scale_premultiplied(uint32_t pixel, uint8_t opacity);
 float render_color_srgb_to_linear(float channel);
 float render_color_linear_to_srgb(float channel);
@@ -4275,6 +4277,7 @@ typedef struct RenderOutputTarget {
     float output_scale;
     float device_scale;
     bool paged;
+    bool transparent_background;
     lam::Up<const RenderPagedOptions> paged_options;
 } RenderOutputTarget;
 
@@ -4318,7 +4321,8 @@ bool render_export_session_begin_document_transform(RenderExportSession* session
     float output_scale, float device_scale, bool raster_surface, bool paged = false,
     bool print_media = false);
 void render_export_session_end(RenderExportSession* session);
-int render_export_session_to_png(RenderExportSession* session, const char* filename);
+int render_export_session_to_png(RenderExportSession* session, const char* filename,
+                                  bool transparent_background = false);
 int render_export_session_to_jpeg(RenderExportSession* session, const char* filename, int quality);
 int render_export_session_to_svg(RenderExportSession* session, const char* filename);
 int render_export_session_to_pdf(RenderExportSession* session, const char* filename);

@@ -733,6 +733,12 @@ static char* url_decode(const char* str, size_t* out_len) {
 // Convert file:// URL to local file system path
 // Returns a newly allocated string that must be freed by the caller
 // Returns NULL if the URL is not a valid file:// URL
+char* url_file_to_local_path(const char* source) {
+    if(!source||strncmp(source,"file:",5))return NULL;
+    Url* url=url_parse(source);char* local=url?url_to_local_path(url):NULL;
+    if(url)url_destroy(url);return local;
+}
+
 char* url_to_local_path(const Url* url) {
     if (!url || !url->is_valid) {
         log_warn("Invalid URL provided to url_to_local_path");

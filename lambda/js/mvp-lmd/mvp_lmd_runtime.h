@@ -65,6 +65,7 @@ Item mvp_lmd_native_function(MvpLmdProgram* program, void* state, MvpLmdNativeEn
     const char* name = NULL);
 Item mvp_lmd_named_set(Item owner, const char* key, Item value, int descriptor_flags = -1);
 Item mvp_lmd_object_value(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item receiver, Item);
+Item mvp_lmd_receiver_identity(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item receiver, Item);
 enum MvpLmdLibraryBinding { LMD_LIBRARY_JSON, LMD_LIBRARY_DATE, LMD_LIBRARY_DATE_PROTOTYPE,
     LMD_LIBRARY_DATE_STATICS, LMD_LIBRARY_REGEXP, LMD_LIBRARY_REGEXP_PROTOTYPE,
     LMD_LIBRARY_REGEXP_STATICS, LMD_LIBRARY_CALL, LMD_LIBRARY_APPLY, LMD_LIBRARY_BIND,
@@ -113,6 +114,8 @@ struct MvpLmdLibraryState {
     NameRef prototype_key;
     NameRef extensibility_key;
     bool mutable_prototypes;
+    bool date_observed;
+    NameRef date_key;           // private DateValue slot, owned by the shared Map layout
     MvpLmdClass date;
     MvpLmdClass regexp;
     MvpLmdClass object;
@@ -127,6 +130,11 @@ struct MvpLmdLibraryState {
     NameRef error_data_key;     // native Error allocation brand, independent of nominal ancestry
     MvpLmdClass* primitives;
     Item* primitive_values;
+    MvpLmdClass* buffers;       // optional ArrayBuffer/DataView carrier families
+    Item* buffer_values;
+    MvpLmdClass* typed_arrays;  // twelve concrete families plus the abstract TypedArray constructor
+    Item* typed_values;
+    bool test262_host;
     NameRef primitive_key;      // boxed primitive payload, traced by the shared Map layout
     NameRef arguments_key;      // private Array of aliases to existing mutable parameter cells
     int abort_kind;             // one-based non-JS failure, retained across finally completions
@@ -140,6 +148,12 @@ Item mvp_lmd_library_class_initialize(MvpLmdProgram* program, MvpLmdLibraryState
 Item mvp_lmd_regexp_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
 Item mvp_lmd_function_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
 Item mvp_lmd_generator_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
+Item mvp_lmd_buffer_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
+Item mvp_lmd_date_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
+Item mvp_lmd_typed_array_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state);
+bool mvp_lmd_typed_array_index(Item owner, Item key, double* index);
+Item mvp_lmd_typed_array_property(Item owner, Item key, Item value, int64_t operation, Item receiver);
+Item mvp_lmd_typed_array_store(Item owner, double index, Item value);
 Item mvp_lmd_generator_call(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
 Item mvp_lmd_function_method(Item owner, String* name);
 Item mvp_lmd_function_source(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item);
@@ -261,9 +275,15 @@ Item mvp_lmd_to_primitive(Item value, int64_t hint, int64_t library_objects = 1)
 Item mvp_lmd_caught_value(MvpLmdLibraryState* state, Item error);
 Item mvp_lmd_generator_park(Item value, int64_t kind);
 Item mvp_lmd_iterator_get(MvpLmdProgram* program, Item source);
+Item mvp_lmd_iterator_method(MvpLmdProgram* program, Item source);
+Item mvp_lmd_sequence_iterator_create(MvpLmdProgram* program, Item source,
+    int projection, bool ordered, bool set);
+Item mvp_lmd_iterator_get_with_method(MvpLmdProgram* program, Item source, Item method);
 Item mvp_lmd_iterator_step(Item record, Item value, int64_t count);
 Item mvp_lmd_iterator_close(Item record, Item completion);
 Item mvp_lmd_iterator_collect(MvpLmdProgram* program, Item target, Item source, Item mapper, Item receiver);
+Item mvp_lmd_iterator_collect_with_method(MvpLmdProgram* program, Item target, Item source,
+    Item mapper, Item receiver, Item method, int64_t array_length = -1, bool create_properties = false);
 Item mvp_lmd_call_array(Item function, Item receiver, Item arguments, Item target);
 int64_t mvp_lmd_truthy(Item value);
 int64_t mvp_lmd_generator_resume_kind();

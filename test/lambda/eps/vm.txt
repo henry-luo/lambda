@@ -1,0 +1,1 @@
+{ checks: 4, passed: true, preserved_paint: true, invalid_restore: true, readonly_dictionary: true}

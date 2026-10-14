@@ -2,7 +2,9 @@
 #include "scene3d_math.hpp"
 #include "scene3d_source.hpp"
 #include "scene3d_animation.hpp"
+#include "scene3d_physics.hpp"
 #include "render.hpp"
+#include "radiant.hpp"
 #include "layout.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -25,16 +27,17 @@ struct Scene3dVertex {
 };
 struct Scene3dGeometry {
     NativeGlResource vertices, indices;
-    unsigned vertex_count, index_count;
+    unsigned vertex_count, index_count, vertex_stride;
     Scene3dVec center;
     NativeGlResource unit_vertices;
     unsigned bone_index_count, morph_count;
+    bool has_colors;
 };
 struct Scene3dMaterial {
     DomNodeRef source;
     float color[4];
     bool source_transparent;
-    bool lambert, transparent, force_opaque;
+    bool lambert, transparent, force_opaque, depth_only;
     int side;
     NativeGlResource texture;
 };
@@ -67,7 +70,8 @@ struct Scene3dProjection {
     Scene3dMatrix camera_world;
     Scene3dVec camera_target, camera_up;
     bool camera_has_target, camera_found;
-    float fov, near_plane, far_plane, aspect;
+    float fov, near_plane, far_plane, aspect, view_height;
+    bool orthographic;
     float background[4], ambient[3], directions[8][3], lights[8][3];
     unsigned light_count, geometry_count, texture_count;
     DomNodeRef* dynamic_objects;
@@ -81,6 +85,8 @@ struct Scene3dEntry {
     Scene3dProjection projection;
     Scene3dAnimationState* animation;
     uint64_t animated_generation;
+    Scene3dPhysics* physics;
+    uint64_t physical_generation;
     ImageSurface* snapshot;
     uint64_t mutation_epoch, projection_generation, snapshot_generation;
     float width, height, scale;
@@ -172,12 +178,10 @@ bool scene3d_numbers(DomElement* node, const char* key, Pool* pool,
     unsigned length = 0;
     if (text) {
         const char* cursor = text;
-        while (*cursor) {
-            cursor += strspn(cursor, " ,\t\r\n[]"); if (!*cursor) break;
-            char* end; float number = strtof(cursor, &end);
-            if (end == cursor || !isfinite(number) || ++length > limit) return false;
-            cursor = end;
-        }
+        double number;int status;
+        while((status=str_next_double(&cursor,&number))==1)
+            if(!isfinite((float)number)||++length>limit)return false;
+        if(status<0)return false;
     } else {
         int64_t n = value.asArray().length(); if (n < 0 || (uint64_t)n > limit) return false;
         length = (unsigned)n;
@@ -194,10 +198,10 @@ bool scene3d_components(DomElement* node,const char* key,float* data,unsigned co
     if(text) {
         const char* cursor=text;
         for(unsigned i=0;i<count;i++) {
-            cursor+=strspn(cursor," ,\t\r\n[");char* end;data[i]=strtof(cursor,&end);
-            if(end==cursor||!isfinite(data[i])) return false;cursor=end;
+            double number;if(str_next_double(&cursor,&number)!=1)return false;
+            data[i]=(float)number;if(!isfinite(data[i]))return false;
         }
-        return !*str_skip_ascii_space(cursor+strspn(cursor," ]\t\r\n"));
+        double extra;return str_next_double(&cursor,&extra)==0;
     }
     if(!value.isArray()||value.asArray().length()!=count) return false;
     for(unsigned i=0;i<count;i++) if(!scene3d_scalar(value.asArray().get(i),&data[i])) return false;
@@ -226,10 +230,7 @@ static bool scene3d_local(DomElement* node, Scene3dMatrix* matrix, Scene3dAnimat
     if(quaternion||animated_quaternion) {
         if(!animated_quaternion) for(unsigned i=0;i<4;i++) value.numbers[i]=q[i];
         double rotation_matrix[16];if(!animation_quaternion_matrix(value.numbers,rotation_matrix)) return false;
-        *matrix=scene3d_identity();const float scales[]={scale.x,scale.y,scale.z};
-        for(unsigned column=0;column<3;column++) for(unsigned row=0;row<3;row++)
-            matrix->v[column*4+row]=(float)rotation_matrix[row*4+column]*scales[column];
-        matrix->v[12]=position.x;matrix->v[13]=position.y;matrix->v[14]=position.z;
+        *matrix=scene3d_rotation_matrix(rotation_matrix,position,scale);
     } else *matrix = scene3d_transform(position, rotation, scale);
     return true;
 }
@@ -347,7 +348,7 @@ static Scene3dGeometry* scene3d_geometry(Scene3dBuild* build, Scene3dDefinition*
             !scene3d_numbers(node,"indices",p->pool,&raw_indices,&ic,SCENE_VERTEX_LIMIT*6) ||
             !pc || pc%3 || (nc && nc!=pc) || (uc && uc!=pc/3*2) || (cc && cc!=pc) ||
             (ic ? ic%3 : (pc/3)%3)) { scene3d_fail(build->entry,"invalid geometry component counts"); return nullptr; }
-        geometry->vertex_count=pc/3; geometry->index_count=ic;
+        geometry->vertex_count=pc/3; geometry->index_count=ic;geometry->has_colors=cc!=0;
         vertices=(Scene3dVertex*)pool_calloc(p->pool,sizeof(Scene3dVertex)*geometry->vertex_count);
         indices=ic?(uint32_t*)pool_alloc(p->pool,sizeof(uint32_t)*ic):nullptr;
         if (!vertices || (ic && !indices)) return nullptr;
@@ -416,7 +417,11 @@ static Scene3dGeometry* scene3d_geometry(Scene3dBuild* build, Scene3dDefinition*
         hi={fmaxf(hi.x,v[0]),fmaxf(hi.y,v[1]),fmaxf(hi.z,v[2])};
     }
     geometry->center={lo.x*.5f+hi.x*.5f,lo.y*.5f+hi.y*.5f,lo.z*.5f+hi.z*.5f};
-    geometry->vertices=native_gl_buffer(build->entry->graphics,vertices,sizeof(Scene3dVertex)*geometry->vertex_count);
+    // static meshes omit deformation lanes and default-white colors; only indices need CPU validation copies.
+    geometry->vertex_stride=geometry->bone_index_count||geometry->morph_count?sizeof(Scene3dVertex):geometry->has_colors?offsetof(Scene3dVertex,skin_indices):offsetof(Scene3dVertex,color);
+    if(geometry->vertex_stride<sizeof(Scene3dVertex)) for(unsigned i=1;i<geometry->vertex_count;i++)
+        memmove((char*)vertices+i*geometry->vertex_stride,vertices+i,geometry->vertex_stride);
+    geometry->vertices=native_gl_buffer(build->entry->graphics,vertices,geometry->vertex_stride*geometry->vertex_count,false);
     if (!scene3d_resource(build,geometry->vertices)) return nullptr;
     if (geometry->index_count) {
         geometry->indices=native_gl_buffer(build->entry->graphics,indices,sizeof(uint32_t)*geometry->index_count);
@@ -446,6 +451,11 @@ static NativeGlResource scene3d_texture(Scene3dBuild* build, Scene3dDefinition* 
             scene3d_fail(build->entry,"invalid texture sampler");return {};
         }*fields[i]=(unsigned)value;
     }
+    float max_size;
+    if(!scene3d_number(definition->source,"max-size",4096,&max_size)||max_size<1||max_size>4096||floorf(max_size)!=max_size) {
+        scene3d_fail(build->entry,"texture max-size must be an integer in 1..4096");return {};
+    }
+    sampler.max_size=(unsigned)max_size;
     NativeGlResource texture=native_gl_texture(build->entry->graphics,image,sampler);
     if (!scene3d_resource(build,texture)) return {};
     for (unsigned y=0;y<(unsigned)image->height && !definition->texture_alpha;y++)
@@ -464,7 +474,8 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
     material->source=dom_node_ref(node);
     if (!scene3d_animated_color(build->entry,node,material->color) ||
         !scene3d_animated_number(build->entry,node,"opacity",1,&opacity) || opacity<0 || opacity>1 ||
-        !scene3d_flag(node,"transparent",false,&material->transparent)) {
+        !scene3d_flag(node,"transparent",false,&material->transparent) ||
+        !scene3d_flag(node,"depth_only",false,&material->depth_only)) {
         scene3d_fail(build->entry,"invalid material color or opacity"); return nullptr;
     }
     const char* alpha_mode=scene3d_text(node,"alpha-mode");
@@ -494,6 +505,9 @@ static Scene3dMaterial* scene3d_material(Scene3dBuild* build, Scene3dDefinition*
     }
     // glTF OPAQUE ignores alpha from both factors and textures and writes opaque depth.
     if(material->force_opaque) material->transparent=false;
+    if (material->depth_only && material->transparent) {
+        scene3d_fail(build->entry,"depth-only material must be opaque");return nullptr;
+    }
     definition->material=material; return material;
 }
 
@@ -544,20 +558,23 @@ static bool scene3d_mesh_record(Scene3dBuild* build, Scene3dGeometry* geometry, 
     else {
         if (unit && !p->identity.id) {
             Scene3dMatrix identity=scene3d_identity();
-            p->identity=native_gl_buffer(build->entry->graphics,identity.v,sizeof(identity.v));
+            p->identity=native_gl_buffer(build->entry->graphics,identity.v,sizeof(identity.v),false);
             if (!scene3d_resource(build,p->identity)) return false;
         }
-        mesh->instances=unit?p->identity:native_gl_buffer(build->entry->graphics,matrices,count*16*sizeof(float));
+        mesh->instances=unit?p->identity:native_gl_buffer(build->entry->graphics,matrices,count*16*sizeof(float),false);
         if (!unit && !scene3d_resource(build,mesh->instances)) return false;
-        NativeGlAttribute attributes[14]={};
+        NativeGlAttribute attributes[14]={};unsigned attribute_count=0;
         const unsigned components[]={3,3,2,3},offsets[]={0,3*sizeof(float),6*sizeof(float),8*sizeof(float)};
-        for (unsigned i=0;i<4;i++) attributes[i]={geometry->vertices,i,components[i],sizeof(Scene3dVertex),offsets[i],0};
-        for (unsigned i=0;i<4;i++) attributes[i+4]={mesh->instances,i+4,4,16*sizeof(float),i*4*sizeof(float),1};
-        const unsigned deformation_offsets[]={offsetof(Scene3dVertex,skin_indices),offsetof(Scene3dVertex,skin_weights),
-            offsetof(Scene3dVertex,morph_positions),offsetof(Scene3dVertex,morph_positions)+3*sizeof(float),
-            offsetof(Scene3dVertex,morph_normals),offsetof(Scene3dVertex,morph_normals)+3*sizeof(float)};
-        for(unsigned i=0;i<6;i++) attributes[i+8]={geometry->vertices,i+8,i<2?4u:3u,sizeof(Scene3dVertex),deformation_offsets[i],0};
-        mesh->vertices=native_gl_vertices(build->entry->graphics,attributes,14,geometry->indices);
+        for(unsigned i=0;i<(geometry->has_colors?4u:3u);i++)
+            attributes[attribute_count++]={geometry->vertices,i,components[i],geometry->vertex_stride,offsets[i],0};
+        for(unsigned i=0;i<4;i++) attributes[attribute_count++]={mesh->instances,i+4,4,16*sizeof(float),i*4*sizeof(float),1};
+        if(geometry->bone_index_count||geometry->morph_count) {
+            const unsigned deformation_offsets[]={offsetof(Scene3dVertex,skin_indices),offsetof(Scene3dVertex,skin_weights),
+                offsetof(Scene3dVertex,morph_positions),offsetof(Scene3dVertex,morph_positions)+3*sizeof(float),
+                offsetof(Scene3dVertex,morph_normals),offsetof(Scene3dVertex,morph_normals)+3*sizeof(float)};
+            for(unsigned i=0;i<6;i++) attributes[attribute_count++]={geometry->vertices,i+8,i<2?4u:3u,sizeof(Scene3dVertex),deformation_offsets[i],0};
+        }
+        mesh->vertices=native_gl_vertices(build->entry->graphics,attributes,attribute_count,geometry->indices);
         if (!scene3d_resource(build,mesh->vertices)) return false;
         if (unit) geometry->unit_vertices=mesh->vertices;
     }
@@ -637,11 +654,14 @@ static bool scene3d_project_dynamic(Scene3dBuild* build, DomElement* node, const
         const Scene3dMatrix& world, bool visible) {
     Scene3dProjection* p=&build->entry->projection;
     if (scene3d_tag(node,"camera")) {
-        const char* type=scene3d_text(node,"type"); float fov,near_plane,far_plane,aspect;
-        if (!type || strcmp(type,"perspective") || !scene3d_animated_number(build->entry,node,"fov",50,&fov) ||
+        const char* type=scene3d_text(node,"type"); float fov,near_plane,far_plane,aspect,view_height;
+        bool orthographic=type && !strcmp(type,"orthographic");
+        if (!type || (!orthographic && strcmp(type,"perspective")) || !scene3d_animated_number(build->entry,node,"fov",50,&fov) ||
             !scene3d_animated_number(build->entry,node,"near",.1f,&near_plane) || !scene3d_animated_number(build->entry,node,"far",1000,&far_plane) ||
-            !scene3d_animated_number(build->entry,node,"aspect",0,&aspect) || fov<=0 || fov>=180 || near_plane<=0 || far_plane<=near_plane || aspect<0)
-            return scene3d_fail(build->entry,"invalid perspective camera");
+            !scene3d_animated_number(build->entry,node,"aspect",0,&aspect) ||
+            !scene3d_animated_number(build->entry,node,"view_height",4,&view_height) ||
+            fov<=0 || fov>=180 || view_height<=0 || near_plane<=0 || far_plane<=near_plane || aspect<0)
+            return scene3d_fail(build->entry,"invalid scene camera");
         Scene3dVec target,up;
         if (!scene3d_vector(node,"target",{},&target) || !scene3d_vector(node,"up",{0,1,0},&up)) return scene3d_fail(build->entry,"invalid camera orientation");
         const char* id=scene3d_text(node,"id");
@@ -649,6 +669,7 @@ static bool scene3d_project_dynamic(Scene3dBuild* build, DomElement* node, const
             p->camera_found=true; p->camera_world=world; p->camera_target=scene3d_point(parent,target);
             p->camera_up=scene3d_point(parent,up,0);
             p->camera_has_target=node->has_attribute("target"); p->fov=fov;p->near_plane=near_plane;p->far_plane=far_plane;p->aspect=aspect;
+            p->orthographic=orthographic;p->view_height=view_height;
         }
     } else if (scene3d_tag(node,"light")) {
         const char* type=scene3d_text(node,"type"); float color[4],intensity;
@@ -669,14 +690,16 @@ static bool scene3d_project_dynamic(Scene3dBuild* build, DomElement* node, const
 }
 
 static bool scene3d_project_node(Scene3dBuild* build, DomElement* node, const Scene3dMatrix& parent, bool inherited_visible) {
+    if(scene3d_tag(node,"physics")||scene3d_tag(node,"collider")) return true;
     if (node!=build->root && scene3d_tag(node,"scene3d")) return scene3d_fail(build->entry,"nested scene viewport is not a scene object");
     Scene3dMatrix local; bool visible;
     if (!scene3d_local(node,&local,build->entry->animation) || !scene3d_animated_flag(build->entry,node,&visible)) return scene3d_fail(build->entry,"invalid object transform or visibility");
     Scene3dMatrix world=scene3d_multiply(parent,local); visible=visible&&inherited_visible;
+    scene3d_physics_pose(build->entry->physics,node,&world);
     for (float component:world.v) if (!isfinite(component)) return scene3d_fail(build->entry,"world transform overflow");
     // resources and objects have distinct child vocabularies; ignored children must never look valid.
     bool rig=scene3d_tag(node,"skeleton")||scene3d_tag(node,"bone");
-    bool branch=scene3d_tag(node,"scene3d") || scene3d_tag(node,"group") || scene3d_tag(node,"resources")||rig;
+    bool branch=scene3d_tag(node,"scene3d") || scene3d_tag(node,"group") || scene3d_tag(node,"rigid-body") || scene3d_tag(node,"resources")||rig;
     if (!branch && !scene3d_tag(node,"mesh") && node->first_child)
         return scene3d_fail(build->entry,"invalid scene child");
     Scene3dProjection* p=&build->entry->projection;
@@ -721,6 +744,7 @@ static bool scene3d_world(Scene3dEntry* entry,DomElement* node,Scene3dMatrix* wo
         DomElement* ancestor=ancestors[--count];Scene3dMatrix local;bool shown;
         if(!scene3d_local(ancestor,&local,authored?nullptr:entry->animation)||!scene3d_animated_flag(entry,ancestor,&shown)) return false;
         *world=scene3d_multiply(*world,local);*visible=*visible&&shown;
+        if(!authored)scene3d_physics_pose(entry->physics,ancestor,world);
     }
     for(float component:world->v) if(!isfinite(component)) return false;
     return true;
@@ -771,6 +795,7 @@ static bool scene3d_refresh_pose(Scene3dEntry* entry,DomElement* root) {
     return p->camera_found;
 }
 static void scene3d_entry_destroy(Scene3dEntry* entry) {
+    scene3d_physics_destroy(entry->physics);
     scene3d_animation_destroy(entry->animation);
     scene3d_projection_destroy(entry); scene3d_retire_snapshot(entry);
     native_gl_destroy(entry->graphics); mem_free(entry);
@@ -835,6 +860,17 @@ const char* scene3d_diagnostic(DomElement* root) {
 Scene3dAnimationState* scene3d_animations(DomElement* root) {
     Scene3dEntry* entry=scene3d_entry(root,false);return entry?entry->animation:nullptr;
 }
+Item scene3d_physics_control(DomElement* root,Item request) {
+    Scene3dEntry* entry=scene3d_entry(root,true);if(!entry)return ItemNull;
+    if(!scene3d_physics_matches(entry->physics,root)) {
+        scene3d_physics_destroy(entry->physics);
+        entry->physics=scene3d_physics_create(root,entry->diagnostic,sizeof(entry->diagnostic),true);
+    }
+    return scene3d_physics_operate(entry->physics,request);
+}
+Scene3dPhysics* scene3d_physics(DomElement* root) {
+    Scene3dEntry* entry=scene3d_entry(root,false);return entry?entry->physics:nullptr;
+}
 bool scene3d_stats(DomElement* root, Scene3dStats* stats) {
     Scene3dEntry* e=scene3d_entry(root,false); if (!e || !stats) return false;
     *stats=e->stats; native_gl_stats(e->graphics,&stats->graphics);
@@ -864,7 +900,7 @@ layout(location=13) in vec3 morph_normal1;
 uniform mat4 model, projection;
 uniform mat4 bones[16];
 uniform vec2 morph_weights;
-uniform float skinned;
+uniform float skinned, colored;
 out vec3 world_normal, vertex_color;
 out vec2 texture_uv;
 void main() {
@@ -877,7 +913,7 @@ void main() {
         vertex=(skin*vec4(vertex,1.0)).xyz;posed_normal=mat3(skin)*posed_normal;
     }
     world_normal = transpose(inverse(mat3(world))) * posed_normal;
-    vertex_color = color; texture_uv = uv;
+    vertex_color = colored>0.5?color:vec3(1); texture_uv = uv;
     gl_Position = projection * world * vec4(vertex,1.0);
 }
 )GLSL";
@@ -905,6 +941,11 @@ void main() {
 
 static bool scene3d_compile(Scene3dEntry* entry, DomElement* root, UiContext* ui) {
     scene3d_projection_destroy(entry); entry->diagnostic[0]=0;
+    if(!scene3d_physics_matches(entry->physics,root)) {
+        scene3d_physics_destroy(entry->physics);
+        entry->physics=scene3d_physics_create(root,entry->diagnostic,sizeof(entry->diagnostic),!ui->export_native_graphics);
+        if(!entry->physics)return false;
+    }
     if(!scene3d_animation_matches(entry->animation,root)) {
         scene3d_animation_destroy(entry->animation);
         entry->animation=scene3d_animation_create(root,entry->diagnostic,sizeof(entry->diagnostic));
@@ -925,6 +966,7 @@ static bool scene3d_compile(Scene3dEntry* entry, DomElement* root, UiContext* ui
 }
 static int scene3d_draw_compare(const void* a, const void* b) {
     const Scene3dMesh* left=*(Scene3dMesh* const*)a;const Scene3dMesh* right=*(Scene3dMesh* const*)b;
+    if (left->material->depth_only!=right->material->depth_only) return left->material->depth_only?-1:1;
     if (left->material->transparent!=right->material->transparent) return left->material->transparent?1:-1;
     if (left->material->transparent && left->depth!=right->depth) return left->depth<right->depth?-1:1;
     return left->order<right->order?-1:left->order>right->order?1:0;
@@ -945,8 +987,12 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     if (!isfinite(pixel_width) || !isfinite(pixel_height) || pixel_width>4096 || pixel_height>4096)
         { scene3d_fail(entry,"scene raster dimensions exceed quota");scene3d_retire_snapshot(entry);return nullptr; }
     bool changed=entry->mutation_epoch!=root->doc->mutation_epoch || entry->width!=width || entry->height!=height || entry->scale!=raster_scale ||
-        entry->animated_generation!=scene3d_animation_generation(entry->animation);
+        entry->animated_generation!=scene3d_animation_generation(entry->animation) ||
+        entry->physical_generation!=scene3d_physics_generation(entry->physics);
     if (!changed && entry->snapshot) return entry->snapshot;
+    if (!entry->graphics && ui->export_native_graphics && !ui_context_enable_native_graphics(ui)) {
+        scene3d_fail(entry,"native graphics host unavailable for export");ui->render_failed=true;return nullptr;
+    }
     if (!entry->graphics) entry->graphics=native_gl_create(ui->window!=nullptr,entry->diagnostic,sizeof(entry->diagnostic));
     if (!entry->graphics) return nullptr;
     if (!entry->program.id) entry->program=native_gl_program(entry->graphics,scene3d_vertex_shader,scene3d_fragment_shader);
@@ -974,7 +1020,9 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     Scene3dVec up=p->camera_has_target?p->camera_up:scene3d_point(p->camera_world,{0,1,0},0);
     Scene3dMatrix view;
     if (!scene3d_camera(eye,target,up,&view)) { scene3d_fail(entry,"camera orientation is degenerate");scene3d_retire_snapshot(entry);return nullptr; }
-    Scene3dMatrix projection=scene3d_multiply(scene3d_perspective(p->fov,aspect,p->near_plane,p->far_plane),view);
+    Scene3dMatrix projection=scene3d_multiply(p->orthographic?
+        scene3d_orthographic(p->view_height,aspect,p->near_plane,p->far_plane):
+        scene3d_perspective(p->fov,aspect,p->near_plane,p->far_plane),view);
     if (vb.has_viewbox) {
         RdtMatrix fit=svg_viewbox_transform(&vb,width,height,scene3d_text(root,"preserveAspectRatio"));
         if (!scene3d_text(root,"preserveAspectRatio")) fit=svg_viewbox_transform(&vb,width,height,scene3d_text(root,"preserveaspectratio"));
@@ -997,12 +1045,14 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
         rendered=scene3d_uniform(entry,"model",mesh->world.v,16) && scene3d_uniform(entry,"material",material->color,4) &&
             scene3d_uniform(entry,"lambert",&lambert,1) && scene3d_uniform(entry,"textured",&textured,1) &&
             scene3d_uniform(entry,"opaque",&opaque,1);
-        float skinned=mesh->bone_count?1:0;
-        rendered=rendered&&scene3d_uniform(entry,"skinned",&skinned,1)&&scene3d_uniform(entry,"morph_weights",mesh->morph_weights,2);
+        float skinned=mesh->bone_count?1:0,colored=mesh->geometry->has_colors?1:0;
+        rendered=rendered&&scene3d_uniform(entry,"skinned",&skinned,1)&&scene3d_uniform(entry,"colored",&colored,1)&&
+            scene3d_uniform(entry,"morph_weights",mesh->morph_weights,2);
         if(mesh->bone_count) rendered=rendered&&scene3d_uniform(entry,"bones[0]",mesh->bone_matrices[0].v,16,mesh->bone_count);
         NativeGlDraw draw={entry->program,mesh->vertices,material->texture.id?material->texture:entry->white,
             mesh->geometry->index_count?mesh->geometry->index_count:mesh->geometry->vertex_count,mesh->instance_count,
             mesh->geometry->index_count!=0,material->transparent,material->side,mesh->clockwise};
+        draw.depth_only=material->depth_only;
         rendered=rendered&&native_gl_draw(entry->graphics,&draw);
     }
     ImageSurface* snapshot=rendered?native_gl_snapshot(entry->graphics,entry->target):nullptr;
@@ -1011,6 +1061,7 @@ ImageSurface* scene3d_snapshot(DomElement* root, UiContext* ui, float width, flo
     scene3d_retire_snapshot(entry);image_surface_snapshot_publish(snapshot);entry->snapshot=snapshot;entry->snapshot_generation++;
     entry->width=width;entry->height=height;entry->scale=raster_scale;entry->mutation_epoch=root->doc->mutation_epoch;
     entry->animated_generation=scene3d_animation_generation(entry->animation);
+    entry->physical_generation=scene3d_physics_generation(entry->physics);
     entry->stats.projection_generation=entry->projection_generation;entry->stats.snapshot_generation=entry->snapshot_generation;
     entry->stats.meshes=p->mesh_count;entry->stats.geometries=p->geometry_count;entry->stats.textures=p->texture_count;
     entry->stats.raster_width=(unsigned)pixel_width;entry->stats.raster_height=(unsigned)pixel_height;entry->stats.camera_aspect=aspect;
@@ -1025,7 +1076,8 @@ void scene3d_prepare_document(DomDocument* document, UiContext* ui, float raster
         if (node && node->is_element()) {
             BlockBlot origin={};
             Rect rect=render_geometry_block_content_rect(&origin,(ViewBlock*)node->as_element(),1);
-            if (entry->mutation_epoch!=document->mutation_epoch || entry->animated_generation!=scene3d_animation_generation(entry->animation) || entry->width!=rect.width ||
+            if (entry->mutation_epoch!=document->mutation_epoch || entry->animated_generation!=scene3d_animation_generation(entry->animation) ||
+                entry->physical_generation!=scene3d_physics_generation(entry->physics) || entry->width!=rect.width ||
                 entry->height!=rect.height || entry->scale!=raster_scale)
                 scene3d_snapshot(node->as_element(),ui,rect.width,rect.height,raster_scale);
         }
@@ -1038,4 +1090,18 @@ void render_scene3d_content(RasterRenderContext* context, ViewBlock* view) {
     ImageSurface* image=scene3d_snapshot(view->as_element(),context->ui_context,
         rect.width/context->raster_scale,rect.height/context->raster_scale,context->raster_scale);
     if (image) render_surface_content(context,view,image);
+    // an invalid scene aborts file export; live documents must remain usable for repair and diagnostics.
+    else if (rect.width>0 && rect.height>0 && context->ui_context->export_native_graphics) context->ui_context->render_failed=true;
+}
+
+// Vector exports embed the same generation-owned snapshot used by live raster presentation.
+bool scene3d_paint_content(PaintList* paint, UiContext* ui, ViewBlock* view, float x, float y) {
+    if (!paint || !ui || !view) return false;
+    BlockBlot parent={};parent.x=x-view->x;parent.y=y-view->y;
+    Rect rect=render_geometry_block_content_rect(&parent,view,1);
+    if (rect.width<=0 || rect.height<=0) return true;
+    ImageSurface* image=scene3d_snapshot(view->as_element(),ui,rect.width,rect.height,ui_context_raster_scale(ui));
+    if (!image) { ui->render_failed=true;return false; }
+    paint_draw_image_resource(paint,image,rect.x,rect.y,rect.width,rect.height,255,nullptr);
+    return true;
 }

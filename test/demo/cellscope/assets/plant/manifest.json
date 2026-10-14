@@ -1,0 +1,26 @@
+{
+  "source": "https://github.com/cclank/cell-architecture-studio",
+  "revision": "1cab982e7a0f96af854a696430c0724707764358",
+  "source_file": "public/models/plant-cell-first001.glb",
+  "source_sha256": "180e6bbd75ca2ae446807108cd257c672fc6c0e9233aa46c76ff13ea3b44cd49",
+  "texture_sha256": "d3a68c2ff15722ddef00043732eea55a21f73d265a74200691846457cbc4f498",
+  "preparation": {
+    "gltf_transform": "4.5.0",
+    "meshoptimizer": "1.0.1",
+    "ratio": 0.004,
+    "error": 0.01,
+    "position_bits": 14,
+    "normal_bits": 8,
+    "uv_bits": 16,
+    "max_binary_bytes": 250000
+  },
+  "original": {
+    "vertices": 1039994,
+    "triangles": 1943049
+  },
+  "reduced": {
+    "vertices": 11382,
+    "triangles": 9152,
+    "binary_bytes": 237024
+  }
+}

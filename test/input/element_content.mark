@@ -1,0 +1,21 @@
+// Element content keeps every value a Lambda element literal keeps
+// (S2.6.1v2): bools, symbols and bare words, numbers including poison and
+// negatives, nested elements. Only null and "" drop (S2.6.2). Children are
+// separated by whitespace or ';' alike.
+<root
+  <flag true>
+  <flag false>
+  <sym 'quoted symbol'>
+  <word bare_word>
+  <num 1.5>
+  <neg -3>
+  <poison nan inf -inf>
+  <nothing null>
+  <empty "">
+  <mixed true 'sym' -2.5 <inner false> "text" null 42>
+  <attrs v:true, w:'sym', n:nan; false>
+  <leading true; "text">
+  <trailing "text" true>
+  <words trueish nullable infinite nanometer falsey>
+  <quoted 'quoted name':1; 'sym'>
+>

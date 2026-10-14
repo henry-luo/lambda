@@ -197,6 +197,11 @@ static bool render_walk_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock*
         p->stop_after_self = true;
         return false;
     }
+    if (block->tag_id == MARKUP_NAME_SCENE3D) {
+        if (backend->render_scene3d) backend->render_scene3d(backend->ctx, block, state->x, state->y);
+        p->stop_after_self = true;
+        return false;
+    }
 
     if (render_media_image_surface(block) && backend->render_image) {
         backend->render_image(backend->ctx, block, state->x, state->y);

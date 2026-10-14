@@ -16,6 +16,7 @@ This document provides comprehensive documentation for all built-in system funct
 10. [Error Handling](#error-handling)
 11. [Quick Reference Table](#quick-reference-table)
 12. [Return-Value Conventions](#return-value-conventions)
+13. [Physics Functions](#physics-functions)
 
 ## Return-Value Conventions
 
@@ -277,6 +278,104 @@ x is nan         // NaN check — `nan == nan` is false, so `==` cannot test it
 | `math.cbrt(x)` | Cube root | `math.cbrt(27)` | `3` |
 | `math.hypot(x, y)` | Hypotenuse √(x²+y²) | `math.hypot(3, 4)` | `5` |
 
+#### Error Functions
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `math.erf(x)` | Gaussian error function | `math.erf(1)` | `0.8427007929497149` |
+| `math.erfc(x)` | Complementary error function, evaluated directly for accurate tails | `math.erfc(8)` | `1.1224297172982928e-29` |
+
+Both accept real scalars or numeric sequences and follow the existing
+element-wise math conventions, including typed empty float arrays and `null`
+propagation (S7.10.5v3). Complex arguments are unsupported.
+
+#### Fourier Transforms
+
+| Function | Input | Result |
+|----------|-------|--------|
+| `math.fft(x)` | One-dimensional real or complex sequence of length `n` | Complex array of length `n` |
+| `math.ifft(x)` | One-dimensional real or complex spectrum of length `n` | Complex array of length `n` |
+| `math.rfft(x)` | One-dimensional real sequence of length `n` | Nonnegative-frequency complex bins, length `floor(n/2)+1` for `n > 0` |
+| `math.irfft(x, n)` | Nonnegative-frequency bins and original sample count | Real float array of length `n` |
+
+The forward convention is `X[k] = sum(x[j] * exp(-2*pi*i*j*k/n))`;
+the inverse uses the positive sign and divides by `n`. Bins start with DC,
+then positive frequencies; the full complex transform ends with negative
+frequencies. No window, padding, frequency shift, or sample-rate scaling is
+applied. All lengths, including primes, are supported. Real scalar inputs
+are converted to binary64; complex values retain their binary64 components.
+
+`irfft` requires `n` explicitly because the half spectrum does not distinguish
+odd from even original lengths. It must contain exactly `floor(n/2)+1` bins
+for positive `n`; DC and the even-length Nyquist bin must be real. `rfft`
+sets those imaginary components to zero. An empty transform returns `[]`;
+`irfft([], 0)` returns an empty float array. Singletons remain arrays
+(S7.10.1v3).
+
+These functions accept arrays, one-dimensional views, and numeric ranges.
+Non-finite samples, null lanes, nested arrays, incompatible spectrum lengths,
+or a negative/non-integral `n` produce `error` (S7.10.2). A whole `null`
+argument propagates `null`; an error operand takes precedence. Floating-point
+overflow during the transform follows IEEE arithmetic.
+
+```lambda
+let signal = [1, 2, 3, 4, 5];
+let spectrum = math.rfft(signal);
+math.irfft(spectrum, len(signal))  // approximately [1, 2, 3, 4, 5]
+```
+
+#### Linear Systems and Least Squares
+
+| Function | Contract |
+|----------|----------|
+| `math.solve(a, b)` | Solve `a*x = b`, with square real matrix `a` |
+| `math.lstsq(a, b)` | Minimize `norm(a*x-b)` for a real matrix with rows ≥ columns and full column rank |
+
+`a` has shape `[m,n]`. `b` may be a vector `[m]` or a matrix `[m,k]`;
+the result is respectively a float vector `[n]` or float matrix `[n,k]`.
+Nested rectangular arrays and strided numeric views are supported; inputs
+are preserved. Values are converted to finite binary64 before solving.
+`solve` uses LU with partial row pivoting. `lstsq` uses Householder QR with
+column pivoting; it rejects a remaining column norm at or below
+`epsilon * m * largest_initial_column_norm`, where `epsilon` is binary64
+machine epsilon. It returns the solution only, without residual/rank metadata.
+
+Incompatible shapes, ragged/non-real/non-finite inputs, singular systems,
+numerically rank-deficient least-squares problems, and non-finite solutions
+return `error`. Underdetermined and rank-deficient minimum-norm solutions
+are not supported in this version. As with other floating-point solvers,
+ill-conditioned matrices can produce inaccurate results; inspect residuals
+when accuracy matters. A whole `null` argument propagates `null`.
+`solve([], [])` and `lstsq([], [])` represent an empty system and return an
+empty float vector. Arrays never collapse to scalars (S7.10.1v3, S7.10.2).
+
+```lambda
+math.solve([[0, 2], [1, 3]], [4, 7])  // [1, 2]
+math.lstsq([[1, 0], [1, 1], [1, 2], [1, 3]], [1, 2, 2, 4])
+// approximately [0.9, 0.9]: intercept and slope
+```
+
+#### Exact Geometric Predicate Signs
+
+| Function | Positive result means |
+|----------|-----------------------|
+| `math.orient2d(a, b, c)` | Points `a,b,c` are counterclockwise |
+| `math.orient3d(a, b, c, d)` | `det(a-d, b-d, c-d) > 0` |
+| `math.incircle(a, b, c, d)` | `d` lies inside the circle through counterclockwise `a,b,c` |
+
+The result is `-1`, `0`, or `1`, representing the exact determinant sign,
+not its magnitude. Zero means the determinant is exactly zero. Reversing
+the orientation of `a,b,c` reverses `incircle`'s sign; the inside/outside
+interpretation requires a non-collinear defining triangle.
+
+Points must contain exactly two or three finite real coordinates as required
+by the function. Coordinates are first converted to binary64, then the
+determinant is evaluated exactly for those converted values. Decimal and
+wide-integer precision lost during conversion is not recovered. Exact integer
+arithmetic prevents cancellation, overflow, or underflow in the determinant
+from changing its sign. Malformed points produce `error`; whole-point `null`
+propagates `null` (S7.10.2, S7.10.5v3).
+
 #### Statistical
 
 | Function                | Description         | Example                         | Result      |
@@ -333,6 +432,24 @@ x                                // 0.7415648788 (float in [0.0, 1.0))
 let x2, seed2 = math.random(seed1)
 let dice = floor(x * 6) + 1     // random 1-6
 ```
+
+---
+
+## Physics Functions
+
+These pure functions evaluate `scene3d` physics descriptions under
+**S12.1.1v2**, returning boxed data or an error (**D6.4.1**).
+
+| Function | Result |
+|----------|--------|
+| `physics_validate(scene)` | `true` when the scene and mass properties are valid |
+| `physics_simulate(scene, options)` | `{engine, timestep, ticks, frames, events}` |
+| `physics_query(scene, requests)` | Initial-scene ray, point or AABB query results |
+
+The initial native engine supports 3D sphere/box bodies. See [Physics](Lambda_Physics.md)
+for scene tags, bounded simulation options, command records, queries and the
+`lambda.physics` wrappers. Live scene controls are procedures supplied by
+`lambda.physics.scene` through the Radiant host boundary (**D7.5.3**).
 
 ---
 
@@ -1127,6 +1244,11 @@ Parse a string into Lambda data structures. Like `input()` but operates on strin
 
 **Supported Formats**: Same as `input()` — `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `css`, `ini`, `math`, `obj`, `mtl`, `gltf`, `a3d`
 
+For XML, `{type:'xml', flavor:'strict', preserve_whitespace:true}` retains
+leading/trailing spaces and whitespace-only text nodes. The default remains
+`false`, which trims text-only elements and omits whitespace-only children.
+The option must be a boolean; strict validation still applies (S7.4.2).
+
 ```lambda
 // Parse JSON string
 let data = parse("{\"name\": \"Alice\", \"age\": 30}", 'json')^
@@ -1651,7 +1773,7 @@ yet; their signatures come from the system-function registry
 | Complex numbers | `complex(re, im)`, `real(z)`, `imag(z)`, `conj(z)` — `complex(1, 2) + 1` is `2+2j` |
 | Array shape | `shape(a)`, `reshape(a, shape)`, `transpose(a)`, `flatten(a)`, `ravel(a)`, `matmul(a, b)`, `concat(a, b)`, `stack(a, b)`, `subview(a, start, end)`, `is_view(a)`, `ndim(a)` |
 | In-place mutation (`pn`) | `push(arr, value)`, `splice(arr, start, count)` |
-| Image processing | `load(path_or_bytes)`, `save(img, path)`, `as_float`, `as_ubyte`, `invert`, `gamma`, `threshold`, `grayscale`, `flip`, `rot90`, `crop(img, rows, columns)`, `resize(img, height, width)`, `rotate`, `affine_warp`, `convolve`, `blur`, `erode`, `dilate`, `median_filter`, `maxpool`, `avgpool`, `histogram`, `otsu`, `label` |
+| Image processing | `load(path_or_bytes)`, `save(img, path)`, `image_process(img, options)`, `as_float`, `as_ubyte`, `invert`, `gamma`, `threshold`, `grayscale`, `flip`, `rot90`, `crop(img, rows, columns)`, `resize(img, height, width)`, `rotate`, `affine_warp`, `convolve`, `blur`, `erode`, `dilate`, `median_filter`, `maxpool`, `avgpool`, `histogram`, `otsu`, `label` |
 | Reactive UI | `apply(target, options?)`, `emit(event, payload)` — see [Reactive_UI.md](Reactive_UI.md) |
 | Editor bridge | `undo()`, `redo()`, `edit_commit(description?)` |
 | HTTP server (`pn`, untested) | `io.http_create_server(config)`, `io.http_listen(server, port)`, `io.http_route(server, method, path, handler)`, `io.http_use(server, middleware)`, `io.http_static(server, url_path, dir)`, `io.http_stop(server)` |
@@ -1659,6 +1781,32 @@ yet; their signatures come from the system-function registry
 ---
 
 ### Image snapshots and native canvas upload
+
+`image_process(image, options)^` is a pure, fused evaluator for `(H,W,4)` ubyte
+RGBA images, returning a fresh array without modifying the source (**S1.4**).
+It applies quarter turns/flips, straightening, normalized crop, RGB adjustments,
+a color matrix, vignette/soft focus/sharpening, and optional bilinear resizing.
+Resampling and neighborhood filtering use premultiplied color; the returned
+array uses straight alpha. Quantization happens at the final RGBA8 boundary.
+
+Options default to neutral processing. Supported fields are `turns` (0–3),
+`flip_x`, `flip_y`, `angle` (−15–15 degrees), `crop` (`left,top,right,bottom`
+fractions), `exposure`, `brightness`, `contrast`, `saturation`, `temperature`,
+`gamma`, `black`, `white`, `shadows`, `highlights`, `intensity`, `vignette`,
+`softness`, `sharpen`, and `output_width`/`output_height`. Both output dimensions
+are zero or both positive. `matrix` is a flat array of 12 finite coefficients:
+three `[R,G,B,offset]` rows, blended with adjusted RGB by `intensity`.
+`compare:true` skips color/effects, and `uncropped:true` skips crop/output resize.
+The Photo demo supplies preset matrices from one shared coefficient catalog.
+
+Inputs and outputs are limited to 16 megapixels; requested dimensions are at
+most 16384 each, and evaluator row storage has a 16 MiB per-row admission bound.
+Invalid types, bounds, non-finite parameters or allocations return an error.
+The existing `as_float()` conversion still produces float64.
+
+`blur(image, kernel_size)` preserves its float64 output and edge replication.
+Finite, safely summable inputs use running sums; non-finite/overflow-risk inputs
+retain the local stencil evaluation so values do not contaminate distant windows.
 
 `load(string_path)` retains its existing raw-orientation behavior.
 `load(binary_bytes)` decodes an immutable encoded snapshot into an `(H,W,4)`
@@ -1737,6 +1885,13 @@ The [Photo Studio demo](../test/demo/photo/README.md) uses this bridge.
 | `math.asinh` | 1 | Inverse hyp. sine |
 | `math.acosh` | 1 | Inverse hyp. cosine |
 | `math.atanh` | 1 | Inverse hyp. tangent |
+| `math.erf` / `math.erfc` | 1 | Gaussian error function / accurate complementary tail |
+| `math.fft` / `math.ifft` | 1 | Complex forward / normalized inverse Fourier transform |
+| `math.rfft` | 1 | Real-input Fourier half spectrum |
+| `math.irfft` | 2 | Real inverse transform with explicit original length |
+| `math.solve` / `math.lstsq` | 2 | Square solve / full-column-rank least squares |
+| `math.orient2d` | 3 | Exact 2D orientation sign after binary64 conversion |
+| `math.orient3d` / `math.incircle` | 4 | Exact 3D orientation / oriented incircle sign |
 | `math.pi` | - | Pi (π) constant |
 | `math.e` | - | Euler's number constant |
 | `math.max_int` | - | Maximum compact `int` constant |

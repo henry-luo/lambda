@@ -568,7 +568,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
-	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
+	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep semantics-verify interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-headless build-headless lambda-jube build-jube build-node-core build-node-fs build-node-net build-node-crypto build-rdb-deps build-rdb-drivers test-rdb-drivers test-rdb-drivers-local rdb-test-servers-up rdb-test-servers-down check-rdb-module-architecture verify-rdb-module-licenses release-rdb-drivers release-node-core release-node-fs release-node-net release-node-crypto package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic release-jube format lint lint-full check-doc-code formal-index check-formal-index check-code-dup check-lambda-dup check-radiant-dup check-node-module-architecture hosted-node-coupling-inventory check-host-exports docs intellisense analyze-binary \
 	    build-debug build-release build-debug-asan build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs \
@@ -652,6 +652,9 @@ help:
 	@echo "  test-radiant-baseline - Run the radiant suite baseline (native, layout, UI/DOM, render), with one report"
 	@echo "  test-ui-dtna        - Run dtna catalog, tier contracts and native interaction tests"
 	@echo "  test-ui-bold        - Run bold package contracts and native interaction tests across tiers"
+	@echo "  test-ui-wired       - Run wired package contracts and native interaction tests across tiers"
+	@echo "  test-ui-clay        - Run clay catalog contracts and native interaction tests across tiers"
+	@echo "  test-ui-blade       - Run blade contracts, RPG widgets and native interaction tests across tiers"
 	@echo "  test-map            - Run native geomap rendering/input and Lambda package tests"
 	@echo "  test-map-export     - Verify native map PNG/SVG/PDF geometry and vector output"
 	@echo "  test-map-reference  - Compare native expressions with pinned MapLibre style-spec"
@@ -671,6 +674,7 @@ help:
 	@echo "  drawing-editor-e2e   - Run offline Raphaël, maxGraph, and JointJS SVG probes"
 	@echo "  test-drawing         - Run all editable-drawing compatibility probes"
 	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
+	@echo "  semantics-verify     - Four-bucket check of test/lambda fixtures against the semantics model (test=<stem>, ARGS='--update')"
 	@echo "  test-graph-mermaid   - Run Mermaid graph corpus and Lambda integration fixtures"
 	@echo "  test-graph-graphviz  - Run DOT parser and Graphviz package integration fixtures"
 	@echo "  test-graph-structurizr - Run Structurizr parser and C4 package fixtures"
@@ -1637,6 +1641,18 @@ interp-sweep:
 	@python3 test/interp/tier_sweep.py --out temp/sweep_full.tsv
 	@python3 test/interp/refresh_lists.py --sweep temp/sweep_full.tsv
 
+# Semantics model as oracle (vibe/Lambda_Semantics_DSL_POC.md §13.1): every
+# fixture is dumped (--emit-ast-dump), lowered to the model's terms, evaluated,
+# and placed in one of four buckets against its golden alongside the runtime's
+# own output. The gate is the manifest's verified set staying verified
+# (test/lambda/sem/semantics-manifest.json); --update grows that set from one
+# sweep and refreshes the pending census -- never hand-edit the lists.
+#   make semantics-verify                      # test/lambda, bucket report + gate
+#   make semantics-verify test=closure         # one fixture, with its diffs
+#   make semantics-verify ARGS='--update'      # record newly verified fixtures
+semantics-verify:
+	@python3 test/lambda/sem/semantics_verify.py $(if $(test),--test $(test)) $(if $(suite),--dir test/$(suite)) $(ARGS)
+
 # §6 turnaround + memory report. Release build only (CLAUDE rule 10).
 interp-bench:
 	@echo "Generating the synthetic scale corpus..."
@@ -1664,6 +1680,8 @@ test-lambda-full: test-lambda-baseline
 	@./test/test_lambda_domnode_gtest.exe
 	@echo "Running Lambda validator-input gate..."
 	@./test/test_validator_input_gtest.exe
+	@echo "Running semantics-model verification gate..."
+	@python3 test/lambda/sem/semantics_verify.py
 
 # Permanent exact-root CI lane. Collection is injected only at public allocator
 # boundaries, and poison makes a missed root deterministic instead of relying
@@ -2126,13 +2144,13 @@ test-ui-dtna: build
 		LAMBDA_EXEC_BACKEND=$$tier ./test/test_ui_automation_gtest.exe --suite dtna $(ARGS) || exit $$?; \
 	done
 
-# Shipped bold source contracts and native control/gallery fixtures.
-.PHONY: test-ui-bold
-test-ui-bold: build
+# Source theme contracts and native control/gallery fixtures share one tier gate.
+.PHONY: test-ui-bold test-ui-wired test-ui-clay test-ui-blade
+test-ui-bold test-ui-wired test-ui-clay test-ui-blade: build
 	@$(MAKE) -C build/premake config=debug_native test_lambda_gtest test_ui_automation_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
-	@status=0; for tier in interp auto jit; do \
-		LAMBDA_EXEC_BACKEND=$$tier ./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*ui_bold*' || status=1; \
-		LAMBDA_EXEC_BACKEND=$$tier ./test/test_ui_automation_gtest.exe --suite baseline,bold --test 'bold_*' $(ARGS) || status=1; \
+	@theme=$(patsubst test-ui-%,%,$@); status=0; for tier in interp auto jit; do \
+		LAMBDA_EXEC_BACKEND=$$tier ./test/test_lambda_gtest.exe --gtest_filter="AutoDiscovered/*ui_$$theme*" || status=1; \
+		LAMBDA_EXEC_BACKEND=$$tier ./test/test_ui_automation_gtest.exe --suite "baseline,$$theme" --test "$${theme}_*" $(ARGS) || status=1; \
 	done; exit $$status
 
 # Requires test/render Node dependencies, librsvg and Poppler.

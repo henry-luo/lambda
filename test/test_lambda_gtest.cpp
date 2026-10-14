@@ -20,19 +20,28 @@
 static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda",
     "test/lambda/chart",
+    "test/lambda/docx",
     "test/lambda/latex",
     "test/lambda/math",
+    "test/lambda/music",
     "test/lambda/editor",
     "test/lambda/editing",
     "test/lambda/edit",
     "test/lambda/slide",
     "test/lambda/scene3d",
+    "test/lambda/physics",
     "test/lambda/ui_dtna",
     "test/lambda/ui_bold",
+    "test/lambda/ui_wired",
+    "test/lambda/ui_clay",
+    "test/lambda/ui_blade",
     "test/lambda/map",
     "test/lambda/grammar",
+    "test/lambda/sem",
     "test/demo/doom/tests",
     "test/demo/photo/tests",
+    "test/demo/cellscope/tests",
+    "test/demo/draw/tests",
     "test/lambda/graph/mermaid",
     "test/lambda/graph/graphviz",
     "test/lambda/graph/structurizr",
@@ -111,6 +120,7 @@ static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
     "test/demo/photo/tests/proc",
     "test/lambda/conc",
     "test/lambda/pdf",
+    "test/lambda/eps",
     "test/benchmark/awfy",
     "test/benchmark/r7rs",
     "test/benchmark/beng",
@@ -588,6 +598,7 @@ static const TierParityFixture kTune27TierParity[] = {
     // value; the JIT let it leak into constructors and operators around a
     // self-call, which then returned the callee's value without the wrapper
     {"test/lambda/tail_position_constructors.ls", "test/lambda/tail_position_constructors.txt"},
+    {"test/lambda/any_lane_range_sized_store.ls", "test/lambda/any_lane_range_sized_store.txt"},
     // a self call inside a for comprehension is not a tail call: in a function
     // with a real tail call elsewhere, the JIT's TCO turned it into a jump back
     // to the start and returned one item's value instead of the comprehension

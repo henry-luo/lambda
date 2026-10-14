@@ -1,535 +1,508 @@
-# Lambda Module System — Design & Implementation
+# Lambda Packages — Design
 
-## 1. Overview
+**Status:** working design doc (secondary ADR) for Lambda script packages.
+Consolidated 2026-10-14 from `Lambda_Package (idea).md`, `Lambda_Package.md`
+and `Lambda_Package2.md`; implementation history and the retired C-text
+module linkage are omitted.
 
-Lambda's module system allows scripts to import functions and variables from other Lambda script files. Modules are compiled as separate JIT compilation units and linked at runtime through generated C struct indirection.
+**Authority.** The formal specs win: `doc/Lambda_Formal_Semantics.md` (`S#`)
+and `doc/Lambda_Formal_Design.md` (`D#`). This document carries the design
+and its reasoning; where a point has no formal ruling it says so (§10).
 
-**Key design principles:**
-- **Eager loading**: imports are resolved during AST building, not lazily at runtime.
-- **Separate JIT contexts**: each script (main + each import) gets its own MIR JIT context.
-- **Shared runtime**: all modules share a single `Context* rt` (heap, pool, allocator).
-- **Module-local constants and types**: each module maintains its own `const_list` and `type_list`, injected at link time.
-- **Execute-once semantics**: a module's `main()` evaluates once regardless of how many scripts import it.
-- **Deduplication**: importing the same module path twice returns the cached `Script*`.
+**Spec linkage.**
+
+| Section | Rulings |
+|---|---|
+| §1 Model | D7 terminology, D7.2.1, D8.2.1, D1.7 |
+| §2 Exports | S16.9.1, S9.1.7, D7.2.1, D7.2.2, D8.3.4v4, S12.3.7 |
+| §3 Imports | S16.9.6, S16.10.1v3, S12.3.3v2 |
+| §4 Resolution | S16.9.8, D7.2.6, D7.2.4, D7.2.3 |
+| §5 The `lambda.*` namespace | D7.2.4, S17.2.1, S17.2.2, S16.10.1v3 |
+| §6 Instantiation | D7.2.1–D7.2.3, S7.7.6, D5.4.3, D8.5.1 |
+| §7 Type identity | S2.1.4 |
+| §8 Cross-language packages | D8.2.1, D7.2.6, D7.1.6 |
+
+**Scope.** Lambda script packages (`.ls` files): what they export, how
+imports bind and resolve, the shipped `lambda.*` tree, and package
+instantiation. Out of scope: build packaging (D7.1), Jube native modules
+(D7.3–D7.5), and the JS module system beyond its import boundary with
+Lambda. User-facing reference: [`doc/Lambda_Modules.md`](../doc/Lambda_Modules.md);
+the shipped package catalogue: [`doc/Lambda_Packages.md`](../doc/Lambda_Packages.md).
 
 ---
 
-## 1b. The `lambda.*` namespace (decided 2026-08-27, user)
+## 1. Model
 
-Ratified as **S17.2.1/S17.2.2** (semantics v16.2.0) and **D7.2.4** (design
-v1.38.0); closes **SO37**.
+**Terminology.** A Lambda script module is a **package** where
+disambiguation matters; Jube/native DSOs are **modules** (D7 terminology).
+Every `.ls` file is a package — there is no separate package declaration.
 
-**The question.** S12.3.7 made sys-func shadowing user-first, which left no
-way to reach a shadowed builtin — deferred as SO37 with the direction fixed:
-"it rides the module system as a prelude import, not new syntax."
+**A package is the compilation unit** (D7.2.1). Its language profile is a
+property of the unit (D8.2.1): mixed-language *programs* exist,
+mixed-language *packages* do not. Its bindings are immutable at module scope,
+and its instantiation is effectful even though its bindings are not.
 
-**The scheme.** `lambda.*` becomes the one root for everything Lambda ships:
+**Packages distribute as source** (D1.7, D7.2.3). Compiled artifacts are
+local derived caches keyed by build and content, never a format.
+
+**Design goals.**
+
+1. **Explicit dependencies** — a package states what it uses by importing
+   it; nothing becomes visible ambiently.
+2. **Namespace control** — an importer chooses between unqualified and
+   alias-qualified access, so two packages exporting the same name can be
+   used side by side.
+3. **First-class type sharing** — types, object types and string patterns
+   cross package boundaries as readily as functions.
+4. **Predictable resolution** — an import means the same thing wherever the
+   script is run from, and moving a directory of packages preserves their
+   imports.
+5. **One root for what Lambda ships** — built-ins, system functions and
+   shipped packages live under the reserved `lambda.*` root.
+
+---
+
+## 2. Exports
+
+**`pub` is a uniform prefix modifier** (S16.9.1). A top-level declaration is
+private unless prefixed with `pub`:
+
+| Declaration | Exports |
+|---|---|
+| `pub let x = …` | a value |
+| `pub fn f() …` / `pub pn p() …` | a function / a procedure |
+| `pub type T = …` | a type alias — including a string or symbol pattern (`pub type Email = \(…)`) |
+| `pub type T { … }` | an object type, with its methods |
+| `let`, `fn`, `pn`, `type` without `pub` | nothing — private to the package |
+
+- Bare `pub x = 1` is not a declaration (S16.9.1); the repair is `pub let`.
+- **There is no `pub var`**, by non-composition: a package has no mutable
+  module-scope binding at all (S9.1.7, D7.2.1), so there is nothing mutable
+  to export. A `var` at module scope is E224.
+- **Exported functions have a boxed entry.** An import resolves to the boxed
+  `_b` symbol of an exported function, so export makes the boxed entry
+  mandatory (D7.2.2, D8.3.4v4); private functions are free to exist only in
+  their unboxed specialisations.
+- **A shadowing export travels only through the explicit import.** A
+  package-level definition that shadows a system function exports like any
+  other declaration; it reaches an importer through that importer's
+  `import`, never ambiently (S12.3.7).
+
+**Why types are exported.** Real packages publish *contracts*, not just
+functions: a data shape that callers build and receive (`User`), a schema
+used in `is`/`match` checks, an object type with methods that callers
+instantiate. Without type export every importer would redefine the type,
+violating DRY and making two "identical" types that are not the same type
+(§7). String and symbol patterns are types (`type Code = \("ID-\d" "\w"*)`),
+so `pub type` exports them too — no separate pattern-export form is needed.
+
+**No re-export.** A package exports only what it declares. To pass an
+imported name on, bind it again: `pub let sq = square`. A dedicated
+re-export form for facade packages is an open proposal (§10.2).
+
+---
+
+## 3. Imports
+
+### 3.1 Forms
+
+```lambda
+import .shapes              // unqualified: every pub name bound directly
+import s: .shapes           // aliased: names reached only as s.name
+import .util, u: .util2     // several imports in one statement
+import math                 // a built-in module, unqualified
+import m: lambda.math       // a built-in module, aliased
+import svg: 'http://…'      // a markup namespace prefix, not a package
+```
+
+- **Unqualified import** binds every `pub` name of the package into the
+  importing file.
+- **Aliased import** binds only the alias. The package's names are reached
+  as `alias.name` and are **not** bound bare, so the import adds exactly one
+  name to the importer's scope. Qualified access is ordinary member access
+  on the imported package (S12.3.3v2).
+- An import's tail is a package path (§4) or a symbol (`'uri'`); a symbol
+  tail declares a markup namespace prefix, not a package.
+
+**Why aliasing is essential.** Type exports make name collisions routine —
+two packages each exporting a `Point` cannot both be imported unqualified.
+With aliases, `geo.Point` and `ui.Point` coexist, and the alias documents
+at every use site where a name came from. The design intent is that an
+aliased name works in **every** position its bare form would: calls, values,
+element and object literals (`<s.Circle r: 2.0>`), annotations
+(`let p: geo.Point`), and `is`/`match`.
+
+### 3.2 Binding rules
+
+- **An import binds names like a declaration does.** Importing a name that
+  is already bound — by a local declaration or another import — is E209,
+  *duplicate definition*; an alias is the way to keep two packages apart.
+- **The alias is a binding name**, so the keyword bar applies: a keyword or
+  the reserved root `lambda` cannot be an alias, and there is no quoted
+  escape (`import 'edit': …` is rejected) (S16.10.1v3).
+- **Imports come first.** A name exists only after its `import` line, so
+  imports belong at the top of the file; `import` is not allowed inside a
+  function.
+- **Private names are never bound** in the importer.
+- **Shadowing a system function** by import is permitted and warned, exactly
+  as for a local definition; the built-in stays reachable as `lambda.sys.f`
+  (S12.3.7, S17.2.2).
+
+### 3.3 Built-in modules
+
+`math` and `io` are always reachable by prefix without any import
+(`math.sqrt(x)`). Importing them is optional and offers the same two
+styles as any package: `import math` (unqualified, for math-heavy scripts)
+and `import m: math` (a short prefix of the importer's choosing).
+
+---
+
+## 4. Resolution
+
+### 4.1 Rules
+
+**`.` is the only import separator** (S16.9.6): `import .a.b`, never
+`.a/b` or `.a\b`, so a package path reads the same as a dotted name.
+
+**The first token of a path picks one of three roots** (S16.9.8):
+
+| Root | Spelling | Resolves to |
+|---|---|---|
+| **Name** — a package path | `import lambda.editor.x`, `import math` | `lambda` is the reserved root for everything Lambda ships (§5); a built-in or runtime-registered module is named by its root (`import math` ≡ `import lambda.math`); **every other root is reserved for the Lambda package registry** and is E216 until a package claims it |
+| **`.` or `~~`** — a relative path | `import .a.b`, `import ~~.~~.a` | resolved against the importing script's directory: `.a.b` → `a/b`; each leading `~~` step adds one `../` |
+| **`/`** — reserved | `import /.a` | an error, holding the rooted form for a later meaning |
+
+- `~~` steps form the leading run and nothing else (`import .~~.a`,
+  `import ~~.a.~~.b` and a module-less `import ~~` are errors), so every
+  relative package has exactly one spelling.
+- **One resolver serves every caller** (D7.2.6): AST import, dependency
+  prebuild, and the document-transform package loader all resolve the same
+  path the same way. Lookup order for a name root: the built-in modules,
+  the runtime-registered host modules, then `lambda.<package>` beneath
+  `<lambda-home>/package/`.
+- **A relative path tries `.ls`, then `.js`** (D7.2.6). A directory is not a
+  package.
+- A script with no file (REPL, stdin) resolves relative imports against the
+  working directory.
+
+### 4.2 Why script-relative
+
+Nearly every modern language resolves a relative import against the
+*importing file*, not the working directory — JavaScript/TypeScript, Python
+(package-relative), Ruby's `require_relative`, Dart, Zig, Rust's module tree.
+The languages that used the working directory have been moving away from
+it: Perl 5.26 dropped `.` from `@INC` as a security fix, PHP practice moved
+to `__DIR__`-relative includes, and shell `source ./x` is a known footgun.
+Script-relative resolution buys:
+
+1. **Predictability** — a script behaves identically whatever directory it
+   is run from.
+2. **Composability** — nested imports work: if `a.ls` imports `lib/b.ls`
+   and `b.ls` imports `.c`, `c` is found beside `b`, so a library directory
+   with internal imports can be moved or vendored whole.
+3. **Security** — the working directory cannot inject an unintended file.
+4. **In-place execution** — a checked-in script with relative imports runs
+   where it sits. (The flip side, D7.2.6: a harness that copies the script's
+   text elsewhere breaks its imports.)
+
+### 4.3 Why a bare name never falls back to a file
+
+Bare names belong to packages. If `import a.b` could also mean `./a/b.ls`,
+a package name and a local file could collide, and an import's meaning would
+again depend on the working directory. Keeping the name space of import
+roots for packages means a file is *always* reached relative to its
+importer, and a future registry package can never be shadowed by a stray
+file — nor capture one. A root that no package claims is therefore an
+error (E216), never retried against the working directory or the Lambda
+home (D7.2.6).
+
+### 4.4 Canonical identity
+
+A package is identified by its **canonical file**, not by the path spelling
+that reached it: `import .utils.math` from `main.ls` and `import .math` from
+`utils/helper.ls` name the same package, and so does an import through a
+symlink (D7.2.3). Canonical identity is what makes "instantiated once"
+(§6) and cycle detection reliable — two spellings of one file can neither
+duplicate the package nor hide a cycle. Two *copies* of a file are two
+packages.
+
+### 4.5 The Lambda home
+
+`<lambda-home>` is the runtime's asset directory (`LAMBDA_HOME`). Shipped
+source maps beneath `<lambda-home>/package/`: `lambda.<package>.*` maps
+beneath that package's directory, and `lambda.doc.math.*` maps to
+`package/math/` (D7.2.4).
+
+---
+
+## 5. The `lambda.*` namespace
+
+Ratified as S17.2.1/S17.2.2 and D7.2.4 (2026-08-27), closing SO37.
+
+**The question.** S12.3.7 made system-function shadowing user-first, which
+left no way to reach a shadowed builtin. The direction was fixed when SO37
+was deferred: the escape rides the package system as a prelude import, not
+new syntax.
+
+**The scheme.** `lambda.*` is the one root for everything Lambda ships:
 
 | Tier | Path | Notes |
 |---|---|---|
-| System functions | `lambda.sys.*` | prelude-imported unqualified; qualified form is the shadow escape |
-| Built-in modules | `lambda.math`, `lambda.io` | bare `import math` is an alias for `import lambda.math` |
-| Shipped packages | `lambda.editor`, `lambda.graph`, … | the former `package` level is dropped |
-| Document packages | `lambda.doc.*` | where the math typesetting package moves |
+| System functions | `lambda.sys.*` | prelude-imported unqualified; the qualified form is the shadow escape (S17.2.1, S17.2.2) |
+| Built-in modules | `lambda.math`, `lambda.io` | the bare spelling is an alias: `import math` ≡ `import lambda.math` |
+| Shipped packages | `lambda.editor`, `lambda.graph`, `lambda.chart`, … | no intermediate `package` level |
+| Document packages | `lambda.doc.*` | document-processing packages, including math typesetting at `lambda.doc.math` |
 
-**Why `lambda.sys.*` over the alternatives.** `sys.*`, `lang.*` and
-`sys.func.*` were considered. Plain `lambda.*` for the functions themselves
-was ruled out because that root is already the package tree (`import
-lambda.editor.mod_doc`), so `lambda.len` would mix builtins with
-shipped packages and a future `lambda.len.*` package would collide.
-`sys.func.*` pre-pays for a collision the conventions avoid — adjacent
-facilities get their own modules (`math`, `io`) rather than becoming `sys`
-members. `lambda.sys.*` keeps one root, matches the established terminology
-(`doc/Lambda_Sys_Func.md`, spec §S17, `is_sys_func_name` in the runtime), and
-extends the module machinery that `math`/`io` already use.
+**One owner of the builtin list.** `lambda.sys.f` and the unqualified `f`
+address the same registry row — the prelude import is how the unqualified
+names arrive, not a parallel table (S17.2.1).
 
-**The `math` collision, and its resolution.** Shortening the former
-`lambda.package.math` path to `lambda.math` collided with the built-in math
-module: the shipped package is the LaTeX math *typesetting* library
-(`lambda/doc/math/` — boxes,
-atoms, CSS), while built-in `math` is `sqrt`/`pi`. Ruled: the typesetting
-package moves to **`lambda.doc.math`**, leaving `lambda.math` for the
-built-in module. Hence D7.2.4's rule that a path names exactly one thing.
+**Why `lambda.sys.*` over the alternatives.** `sys.*`, `lang.*`,
+`sys.func.*` and plain `lambda.*` were considered.
 
-**Reserved root.** `lambda` may not name a binding (S16.10.1v2), so the
-escape cannot itself be shadowed — the failure mode Python accepts with a
-shadowable `builtins`. This costs one reserved word and makes `let lambda =
-…` an E201.
+- Plain `lambda.*` for the functions themselves was ruled out: that root is
+  already the package tree (`import lambda.editor.mod_doc`), so `lambda.len`
+  would mix builtins with shipped packages, and a future `lambda.len.*`
+  package would collide.
+- `sys.func.*` pre-pays for a collision the conventions avoid — adjacent
+  facilities get their own modules (`math`, `io`) rather than becoming
+  `sys` members.
+- `lambda.sys.*` keeps one root, matches the established terminology
+  (*system functions*, spec §S17), and reuses the module machinery `math`
+  and `io` already use.
 
-**Not needed for the reserved core.** `int`, `string`, `type` are base-type
-words already barred from binding names, so they can never be shadowed and
-never need qualification.
+**A path names exactly one thing.** Shortening the shipped math typesetting
+package to `lambda.math` collided with the built-in `math` module
+(`sqrt`/`pi`). The typesetting package moved to `lambda.doc.math`, leaving
+`lambda.math` for the built-in. Hence D7.2.4's rule: no path may be both a
+built-in module and a shipped package.
 
----
+**The root is reserved.** `lambda` may not name a binding (S16.10.1v3), so
+the escape can never itself be shadowed — the failure mode Python accepts
+with a shadowable `builtins`. The cost is one reserved word: `let lambda = …`
+is E201.
 
-## 2. Syntax
-
-Defined in `lambda/tree-sitter-lambda/grammar.js`:
-
-```
-import .relative.module.path       // relative import (dot-separated → file path)
-import name: .relative.module      // aliased import (NOT fully implemented)
-import .mod1, .mod2                // multiple imports
-```
-
-- **Relative paths** start with `.` — dots are converted to `/` with `.ls` appended.
-  - `import .utils.readability` → loads `./utils/readability.ls`
-- **Quoted paths** are also supported: `import "./utils/readability.ls"`
-- **Lambda absolute module paths** use the reserved `lambda.*` root. Built-in
-  modules (`lambda.math`, `lambda.io`) resolve through the registry, shipped
-  packages (`lambda.editor`, `lambda.graph`, …) resolve through `LAMBDA_HOME`,
-  and document packages use `lambda.doc.*`.
-- Imports must appear at the **top of the document**, before any other content.
-
-### Visibility
-
-Only `pub fn`, `pub pn`, and `pub let` declarations are exported from a module:
-
-```
-pub fn add(a, b) => a + b          // exported function
-pub let PI = 3.14159               // exported variable
-fn helper(x) => x * 2             // private — not visible to importers
-```
+**The reserved core needs no qualification.** `int`, `string`, `type` are
+base-type words already barred as binding names, so they can never be
+shadowed and never need `lambda.sys.`.
 
 ---
 
-## 3. Architecture
+## 6. Instantiation
 
-### 3.1 End-to-End Flow
-
-```
- Source Code                 AST Building              Transpilation             Runtime Linking
- ───────────                ────────────              ─────────────             ───────────────
- import .utils.math    →    AstImportNode         →    struct Mod1 {        →   find BSS "m1"
-                             ├── module path             void** consts;         ├── _init_mod_consts()
-                             ├── alias (opt)              Item(*_mod_main)();   ├── _init_mod_types()
-                             └── script*                  void(*_init_vars)();  ├── main_func → _mod_main
-                                  │                       Item (*_add)(...);    ├── init_vars_fn → _init_vars
-                                  │                       Item _PI;             └── fn ptrs → struct
-                                  └── load_script() ──→ parse → build AST → transpile → JIT compile
-                                      (recursive, eager, circular-import-safe)
-```
-
-### Execution Flow at Runtime
-
-When the main script's `main()` runs:
-1. For each import: call `m{N}._mod_main(runtime)` — executes the module's `main()`
-2. Module `main()` checks `_mod_executed` guard — if already executed, returns immediately
-3. Module `main()` assigns all globals at top level (not inside `({...})`)
-4. After module main returns: call `m{N}._init_vars(&m{N})` — copies module globals into the Mod struct
-5. Main script accesses imported values via `m{N}._varname` and `m{N}._funcname()`
-
-### 3.2 Key Data Structures
-
-#### `AstImportNode` (`lambda/ast.hpp`)
-```cpp
-struct AstImportNode : AstNode {
-    String* alias;      // optional alias name (grammar supports, not fully used)
-    StrView module;     // module path string (e.g., "./utils/readability.ls")
-    Script* script;     // pointer to the loaded/compiled imported script
-    bool is_relative;   // whether path starts with '.'
-};
-```
-
-#### `Script` (`lambda/ast.hpp`)
-```cpp
-struct Script : Input {
-    const char* reference;      // path (relative to main script) and name of the script
-    int index;                  // unique index in scripts list (used as m0, m1, ...)
-    bool is_main;               // main script vs imported module
-    bool is_loading;            // true while script is being loaded (for circular import detection)
-    const char* source;
-    TSTree* syntax_tree;
-    AstNode *ast_root;          // the AST tree
-    NameScope* current_scope;   // current name scope
-    ArrayList* const_list;      // module-local constant table
-    // type_list is accessed via Input base: tp->type_list
-    MIR_context_t jit_context;  // separate MIR JIT context for this module
-    main_func_t main_func;      // compiled entry point
-};
-```
-
-#### `NameEntry` (scope table)
-Each name in the symbol table has an `import` field. When non-null, it indicates the name was imported from a module. The transpiler uses this to generate `m{N}.` prefixed references.
+- **Eager.** Imports are resolved and their packages compiled while the
+  importer is being built, depth-first, so an importer is never compiled
+  against an unloaded dependency. The static import closure may be
+  prebuilt concurrently, each loader waiting only on the package it is
+  about to consume (D8.5.1).
+- **Once per process.** A package is compiled and instantiated once however
+  many packages import it and by whatever spelling (§4.4); later importers
+  share the instance (D7.2.3). Package state lives in per-context slabs,
+  never at code-baked addresses (D5.4.3).
+- **In import order, before the importer's body.** Each imported package
+  runs its top level in import-declaration order before any code of the
+  importer that could read its names.
+- **Top-level effects run at import time.** A `pub let config =
+  input('config.json')^` reads the file when the package is instantiated.
+  The values of a package's top-level content expressions are discarded;
+  only the entry script's result (or its `main`) is the program's output.
+- **Initialization is a transaction barrier** (D7.2.2, S7.7.6). A failed
+  initializer aborts instantiation and the import fails; a package with
+  half-established top-level state never becomes importable. Optionality is
+  the package's own decision, made inside its initializer with a handler:
+  `pub let config = input('config.json') ^ { {} }`.
+- **Cycles are errors.** A package that is re-entered while it is still
+  loading is a circular import. Under eager instantiation a cycle could only
+  be served by exposing a half-initialized package, which D7.2.2 forbids.
+- **Imported values are the instantiated values.** Module-scope bindings are
+  immutable (D7.2.1), so whether an importer holds a snapshot or a live
+  view of a `pub let` is unobservable.
+- **One runtime, one value currency.** All packages of a program share one
+  runtime context and heap; `Item` values pass between packages freely, with
+  no marshalling at the boundary.
 
 ---
 
-## 4. Compilation Pipeline
+## 7. Cross-package type identity
 
-### 4.1 AST Building (`lambda/build_ast.cpp`)
+An imported type **is** the exporting package's type, not a copy: an object
+type keeps its nominal identity across the boundary (S2.1.4), so
+`c is Counter` holds in the importer for a `Counter` built by the exporter
+and vice versa, construction with `<Counter …>` in the importer stamps the
+exporter's type, and its methods dispatch to the exporter's definitions.
 
-When `import .utils.math` is encountered:
+Consequences:
 
-1. **Parse**: Extract module path from Tree-sitter CST, convert dot-notation to file path.
-2. **Load**: Call `load_script()` — eagerly reads, parses, builds AST, transpiles, and JIT-compiles the imported module. This is **recursive** — if the imported module has imports of its own, those are loaded first.
-3. **Register names**: Walk the imported script's AST root, find all `pub fn`/`pub pn`/`pub let` declarations, and push them into the importing script's scope table with the `import` pointer set.
-
-### 4.2 Transpilation (`lambda/transpile.cpp`)
-
-#### Module Struct Generation (`define_module_import` + `write_mod_struct_fields`)
-
-For each import, the transpiler generates a C struct with a **fixed layout** (order matters for runtime pointer arithmetic in `init_module_import`):
-
-```c
-struct Mod1 {
-    // --- fixed fields (always present) ---
-    void** consts;                    // pointer to module's const_list
-    Item (*_mod_main)(Context*);      // module's main() entry point
-    void (*_init_vars)(void*);        // copies module globals into this struct
-
-    // --- pass 1: function pointer fields (pub fn/pn only) ---
-    Item (*_add_42)(Item, Item);      // function pointer for each pub fn
-
-    // --- pass 2: pub variable fields ---
-    Item _PI;                         // each pub variable, typed correctly
-} m1;
-```
-
-The struct instance is named `m{N}` where N is the script's unique index. The two-pass field ordering (fn ptrs first, pub vars second) in `write_mod_struct_fields()` ensures the runner's pointer arithmetic can correctly walk past function pointers before reaching pub vars.
-
-#### Module Self-Struct and `_init_mod_vars` (non-main scripts only)
-
-Each imported module also generates a **self-struct** that mirrors the importer's `Mod{N}` struct, plus an `_init_mod_vars()` function that copies the module's global variables into the struct:
-
-```c
-// generated in the module's own transpiled code
-struct Mod1 { /* same layout as importer's Mod1 */ };
-
-void _init_mod_vars(void* _mp) {
-    struct Mod1* _m = (struct Mod1*)_mp;
-    _m->_PI = _PI;       // copy module global _PI into struct
-}
-
-static int _mod_executed = 0;  // execute-once guard
-```
-
-#### Module `main()` Generation
-
-For modules (non-main scripts), the transpiled `main()` has special structure:
-
-```c
-Item main(Context *runtime) {
-    _lambda_rt = runtime;
-    if (_mod_executed) return ITEM_NULL;  // execute-once guard
-    _mod_executed = 1;
-
-    // hoisted global assignments (outside ({...}) to avoid MIR optimization issues)
-    _PI = ((double)(3.14159));
-    _greeting = fn_join(const_s2it(0), const_s2it(1));
-
-    // content block (may be empty for pure-definition modules)
-    Item result = ({({List* ls = list(); list_end(ls);});});
-    return result;
-}
-```
-
-**Critical**: Module global assignments are **hoisted to the top level** of `main()`, not inside the content block's `({...})` statement expression. This prevents MIR JIT's SSA/GVN optimization from eliminating writes to global BSS variables (see §5.5).
-
-#### Name Prefixing
-
-When transpiling an identifier whose `NameEntry.import` is non-null, the name is prefixed with `m{N}.`:
-
-```c
-// Lambda:  add(1, 2)    (where add is imported from module index 1)
-// C:       m1._add_42(i2it(1), i2it(2))
-```
-
-#### Module-Local Constants and Types (non-main scripts only)
-
-Each imported module needs its own constant table and type definitions. The transpiler emits:
-
-**Constants** — `static void** _mod_consts` with `_init_mod_consts()`:
-```c
-static void** _mod_consts;
-void _init_mod_consts(void** consts) { _mod_consts = consts; }
-
-// Override const macros to use module-local constants
-#undef const_d2it
-#undef const_s2it
-// ... (all 10 const_ macros)
-#define const_d2it(index)  d2it(_mod_consts[index])
-#define const_s2it(index)  s2it(_mod_consts[index])
-#define const_s(index)     ((String*)_mod_consts[index])
-// ...
-```
-
-**Types** — `static void* _mod_type_list` with `_init_mod_types()` and wrapper functions:
-```c
-static void* _mod_type_list;
-void _init_mod_types(void* tl) { _mod_type_list = tl; }
-
-// Wrappers that swap rt->type_list to module's before calling real functions
-static Map* _mod_map(int ti) {
-    void* sv = rt->type_list;
-    rt->type_list = _mod_type_list;
-    Map* r = map(ti);
-    rt->type_list = sv;
-    return r;
-}
-static Element* _mod_elmt(int ti) { /* same pattern */ }
-static Type* _mod_const_type(int ti) { /* same pattern */ }
-static TypePattern* _mod_const_pattern(int ti) { /* same pattern */ }
-
-// Redirect calls to use module-local wrappers
-#define map(idx) _mod_map(idx)
-#define elmt(idx) _mod_elmt(idx)
-#define const_type(idx) _mod_const_type(idx)
-#define const_pattern(idx) _mod_const_pattern(idx)
-```
-
-### 4.3 Runtime Linking (`lambda/runner.cpp` — `init_module_import`)
-
-After JIT compilation, the runner links cross-module references by populating the `Mod{N}` struct:
-
-1. **Find BSS item**: Locate the `m{N}` struct in the main script's JIT context via MIR BSS lookup.
-2. **Initialize constants**: Call `_init_mod_consts()` from the imported module's JIT context, passing the module's `const_list->data` pointer.
-3. **Initialize types**: Call `_init_mod_types()` from the imported module's JIT context, passing the module's `type_list` pointer.
-4. **Populate fixed fields** (pointer arithmetic, matching struct layout):
-   - Skip `consts` pointer (sizeof void**)
-   - Write `_mod_main` = module's `main_func`
-   - Write `_init_vars` = address of `_init_mod_vars` from module's JIT
-5. **Populate function pointers**: For each `pub fn`/`pub pn`, look up the function address in the imported module's JIT context, write it into the `Mod{N}` struct.
-6. **Pub vars**: Skipped at link time — they are populated at runtime when `_init_mod_vars` is called from the importing script's `main()`.
-
-### 4.4 Module Initialization Order (Runtime)
-
-In the importing script's `main()`, module initialization happens in import declaration order:
-
-```c
-// generated in main script's main()
-m1._mod_main(runtime);                      // execute module 1's main()
-if (m1._init_vars) m1._init_vars(&m1);      // copy module 1's globals → struct
-m2._mod_main(runtime);                      // execute module 2's main()
-if (m2._init_vars) m2._init_vars(&m2);      // copy module 2's globals → struct
-// ... then main script body
-```
-
-This ensures:
-- Module code runs **before** the importing script accesses any imported values
-- The `_mod_executed` guard prevents double-execution when multiple scripts import the same module
-- Pub var values are snapshots taken **after** the module has fully executed
-
-### 4.4 Shared Runtime
-
-All modules share a single runtime context via:
-```c
-extern Context* _lambda_rt;
-#define rt _lambda_rt
-```
-
-This means all modules access the same heap, pool, and allocator — they can freely pass `Item` values between each other.
+- **Identity follows the canonical file** (§4.4). The same file imported by
+  two spellings is one type; two copies of a file declare two distinct
+  types, even when structurally identical.
+- **Each package owns its own type and constant tables.** An importer refers
+  to the defining package's entries rather than re-declaring them; a
+  package's code always reads its own tables, whoever calls it.
+- **Package lifetime bounds type lifetime.** Type objects defined by a
+  package are referenced from every importer, which is safe because a
+  package lives as long as the process (§6). Hot reload, unloading, and
+  multi-threaded instantiation would each break that assumption; see §10.8.
 
 ---
 
-## 5. Resolved Issues
+## 8. Cross-language packages
 
-### 5.1 Module `const_list` Sharing (Critical)
-
-**Symptom**: Imported module functions returned garbage values for string/float/decimal constants.
-
-**Root cause**: All modules shared the main script's `rt->consts` pointer. Each module has its own `const_list` with its own indexing (e.g., constant index 0 in module A is a different string than index 0 in module B). Without separate constant access, an imported module would index into the wrong constant list, reading garbage or crashing.
-
-**Fix**: Added `static void** _mod_consts` and `_init_mod_consts()` in transpiled code for non-main scripts. Override all `const_*` macros to use `_mod_consts` instead of `rt->consts`. At link time, `init_module_import()` calls `_init_mod_consts(script->const_list->data)`.
-
-**Files**: `lambda/transpile.cpp` (lines ~4794-4816), `lambda/runner.cpp` (lines ~163-170).
-
-### 5.2 Module `type_list` Sharing (Critical)
-
-**Symptom**: Imported module functions that create maps or elements produced corrupted structures — wrong shapes, wrong field layouts.
-
-**Root cause**: Same pattern as const_list. Functions like `map()`, `elmt()`, `const_type()`, and `const_pattern()` look up type definitions from `rt->type_list` using an integer type index. Each module has its own type indices that correspond to its own `type_list`. Without separation, module code would look up types from the main script's type_list, getting wrong struct shapes.
-
-**Fix**: Added `static void* _mod_type_list` and `_init_mod_types()`. Added 4 wrapper functions (`_mod_map`, `_mod_elmt`, `_mod_const_type`, `_mod_const_pattern`) that **save/restore** `rt->type_list` before calling the real function. Macros redirect all calls to the wrappers. At link time, `init_module_import()` calls `_init_mod_types(script->type_list)`.
-
-**Files**: `lambda/transpile.cpp` (lines ~4818-4838), `lambda/runner.cpp` (lines ~172-182).
-
-### 5.3 Arena vs Heap Container Crash (`is_heap` flag)
-
-**Symptom**: `malloc: pointer being freed was not allocated` crash when module functions return or manipulate DOM elements from parsed HTML input.
-
-**Root cause**: Lambda has two allocation strategies:
-- **Arena allocation**: for input document parsing (HTML DOM, XML, etc.) — bulk-freed at arena lifecycle end, ref_cnt is irrelevant.
-- **Heap allocation**: for runtime computation — individually reference counted and freed via `free_container`.
-
-Before this fix, `free_container` / `free_item` couldn't distinguish between the two. When `frame_end()` decremented ref_cnt on arena-allocated containers (which always have ref_cnt=0), it would trigger `free_container` on arena pointers, corrupting memory.
-
-**Fix**: Added `uint8_t is_heap:1` bit flag to the `Container` struct in `lambda.h`. `heap_calloc()` sets `is_heap = 1` for all container types. `free_container()` returns early with `if (!cont->is_heap)`. `free_item()` and `free_map_item()` check `container->is_heap` before decrementing ref_cnt or freeing.
-
-**Files**: `lambda/lambda.h` (Container struct), `lambda/lambda-mem.cpp` (heap_calloc, free_container, free_item, free_map_item).
-
-### 5.4 `fn_join` Inline Array Crash
-
-**Symptom**: `free()` crash when concatenating lists/arrays containing DOM elements.
-
-**Root cause**: `fn_join` (the `++` operator) in `lambda-eval.cpp` allocates arrays with inline items: `result->items = (Item*)(result + 1)`. The items are part of the same memory block as the container header. When `free_container` later does `free(arr->items)`, it tries to `free()` a pointer into the middle of an already-allocated block.
-
-**Fix**: Added inline-items detection in `free_container`: `if (arr->items && arr->items != (Item*)(arr + 1))` — only calls `free(arr->items)` for separately allocated item buffers. Same pattern for ArrayInt/ArrayInt64/ArrayFloat.
-
-**Files**: `lambda/lambda-mem.cpp` (free_container for Array/List/ArrayInt/ArrayInt64/ArrayFloat sections).
-
-### 5.5 MIR JIT Optimization of Module Global Assignments (Critical)
-
-**Symptom**: Complex pub var assignments (string concatenation, function call results like `fn_join`, `string()`, array constructors) returned `null` when accessed from importing scripts. Simple scalars (int, float) and string literal references worked fine.
-
-**Root cause**: Module file-scope `pub let` and `let` assignments were generated inside a **content block** wrapped in a GCC statement expression `({...})`:
-
-```c
-Item result = ({({
-  List* ls = list();
-  _greeting = fn_join(const_s2it(0), const_s2it(1));  // inside ({...})
-  list_end(ls);
-});});
-```
-
-MIR's SSA/GVN optimization pass can eliminate writes to global BSS variables when the write is inside a `({...})` statement expression and the variable is not read within the same expression. For simple types (int, float), the optimizer preserved the write, but for function call results (Items returned from `fn_join`, `string()`, etc.), the write was optimized away.
-
-**Discovery path**: The initial attempt was to use the `*(&var)=expr` anti-optimization pattern (already used for while-loop swap variables). This was added to `assign_global_var()` but had no effect. Root cause analysis revealed that the content block calls `transpile_content_expr()` → `transpile_let_stam()` → `transpile_assign_expr()` — a completely different code path that never reaches `assign_global_var()`.
-
-**Fix**: Hoisted module global assignments to the **top level of `main()`**, before the content block:
-
-```c
-Item main(Context *runtime) {
-    _lambda_rt = runtime;
-    if (_mod_executed) return ITEM_NULL;
-    _mod_executed = 1;
-    // hoisted assignments — at top level, NOT inside ({...})
-    _greeting = fn_join(const_s2it(0), const_s2it(1));
-    _items = ({ArrayInt* arr = array_int(); array_int_fill(arr,3,10,20,30); });
-    // content block (now has no let/pub assignments)
-    Item result = ({({List* ls = list(); list_end(ls);});});
-    return result;
-}
-```
-
-Three changes in `lambda/transpile.cpp`:
-1. In `transpile_content_expr()`: Skip `LET_STAM`/`PUB_STAM` for modules (`is_global && !tp->is_main`) — they're handled separately.
-2. In `transpile_ast_root()`: Added a pre-pass before `Item result = ({...})` that calls `assign_global_var()` for all file-scope LET/PUB vars (including those inside CONTENT nodes).
-3. `assign_global_var()`: Simple direct assignment (no `*(&var)=` workaround needed since code is at top level).
-
-**Files**: `lambda/transpile.cpp` (transpile_content_expr, transpile_ast_root main() generation).
-
-### 5.6 Pub Var Byte Offset Mismatch (Critical)
-
-**Symptom**: Importing scripts crashed or read garbage values for pub vars when using the old `memcpy` approach.
-
-**Root cause**: The old implementation used `memcpy` with `type_info[type_id].byte_size` to copy pub var data from the module's BSS into the Mod struct at link time. However, the byte sizes in `type_info[]` did not match the actual C types used in the struct. For example:
-- `INT` type_info says 8 bytes, but `write_type()` emits `int32_t` (4 bytes)
-- `NULL` type_info says 1 byte, but `write_type()` emits `Item` (8 bytes)
-- Pointer types had similar mismatches
-
-Additionally, BSS data addresses found via `find_data()` pointed to uninitialized memory (module `main()` hadn't run yet), so the values were always zero/null.
-
-**Fix**: Replaced the `memcpy`-at-link-time approach entirely with `_init_mod_vars()`:
-- Module generates `_init_mod_vars()` which copies globals using proper C type assignments
-- `_init_mod_vars()` is called from the importing script's `main()` **after** the module's `main()` has executed and populated the globals
-- No more `type_info` byte-size lookups or pointer arithmetic for pub vars
-
-**Files**: `lambda/transpile.cpp` (_init_mod_vars generation), `lambda/runner.cpp` (removed memcpy, added _init_vars fn ptr).
-
-### 5.7 Circular Import Detection
-
-**Symptom**: Circular imports caused infinite recursion in `load_script()` → AST building → `load_script()`, leading to stack overflow.
-
-**Root cause**: `load_script()` is called during AST building (eager loading), which can trigger recursive `load_script()` for nested imports. No cycle detection existed.
-
-**Fix**: Added `bool is_loading` flag to the `Script` struct. Set to `true` before `transpile_script()` and `false` after. In `load_script()`, if a script is found in the cache with `is_loading == true`, it's a circular import — log error, print to stderr, return NULL.
-
-**Files**: `lambda/ast.hpp` (is_loading field), `lambda/runner.cpp` (load_script).
-
-### 5.8 Module Error Propagation
-
-**Symptom**: If a module failed to compile (e.g., type errors), the importing script would crash trying to access the module's functions.
-
-**Root cause**: After `transpile_script()` failed for a module, `load_script()` continued and returned the Script with `jit_context == NULL`. The importing script would then try to look up functions in a null JIT context.
-
-**Fix**: Added check in `load_script()`: if `!new_script->jit_context` after transpilation, log error and return NULL.
-
-**Files**: `lambda/runner.cpp` (load_script).
+- **`.js` fallback.** `import .name` loads `name.js` when there is no
+  `name.ls` (D7.2.6). The JS file is its own compilation unit with its own
+  language profile (D8.2.1): a program may mix languages, a package may not.
+- **JS → Lambda.** Exported JS functions become callable Lambda functions,
+  and the JS module keeps its own state between calls. A Promise-returning
+  function is awaited with `wait` inside a procedure; a rejection becomes a
+  Lambda error. An `export default` is reachable only through an alias
+  (`j.default()`).
+- **Lambda → JS.** JavaScript can import a Lambda package
+  (`import * as m from './lib.ls'`): each `pub fn` arrives as a function and
+  each `pub pn` as a Promise-returning function; `pub let` values are not
+  exported to JavaScript.
+- **Reduced hosts.** In a build without the JS runtime (`lambda-cli`,
+  D7.1.6), importing a `.js` file is an ordinary import error — nothing
+  degrades silently.
 
 ---
 
-## 6. Outstanding Issues & Known Concerns
+## 9. Diagnostics
 
-### 6.1 Aliased Imports Not Functional
+| Condition | Diagnostic |
+|---|---|
+| A bare root that no package claims (`import tools.util`) | **E216** — *no package 'tools' for import 'tools.util'* |
+| A missing file, or a package that fails to compile | **E217** — *failed to import Lambda module '.x'*, after the package's own errors |
+| A package re-entered while loading | *Circular import detected*, then E217 |
+| An imported name already bound | **E209** — duplicate definition |
+| A keyword or `lambda` as an alias, or `lambda` as any binding | E201 / parse error (S16.10.1v3) |
+| A rooted path, a misplaced `~~`, a `/` or `\` separator | syntax error (S16.9.6, S16.9.8) |
 
-**Status**: Grammar and AST support exist, but semantic analysis and transpiler don't use the alias.
+An import failure names **the path it resolved and the importing script**,
+so a reader can tell a wrong spelling from a wrong base directory without
+re-deriving the resolution.
 
-**Symptom**: `import math: .utils.math` parses successfully but behaves identically to `import .utils.math` — the alias `math` is ignored.
+---
 
-**Root cause**: The `alias` field is parsed and stored on `AstImportNode`, but `declare_module_import()` always registers imported names under their **original names** directly into the importing scope. The alias is never referenced during name resolution or transpilation.
+## 10. Open design points
 
-**What's needed**: For aliased imports to work, `declare_module_import()` would need to register the alias as a namespace prefix (e.g., `math.add` instead of `add`), and the transpiler would need to resolve qualified names through the alias to the module struct.
+None of these is ruled. Each needs a user ruling before implementation
+(`doc/Doc_Convention.md` §2); the notes record how each proposal meets the
+current rulings.
 
-### 6.2 `let a^err = ...` — Error Variable Not Declared Globally
+### 10.1 Selective import
 
-**Status**: Workaround available (`?` operator), root cause identified.
+Import only named members, optionally renamed:
 
-**Symptom**: `let doc^err = input(...)` at top-level causes MIR compilation failure: "undeclared identifier `_err`".
-
-**Root cause**: The error destructuring `let a^err = expr` transpiles to:
-```c
-Item _etN = <expr>;
-_a = (item_type_id(_etN) == LMD_TYPE_ERROR) ? ITEM_NULL : _etN;
-_err = (item_type_id(_etN) == LMD_TYPE_ERROR) ? _etN : ITEM_NULL;
+```lambda
+import .math.utils: factorial, fibonacci as fib
 ```
-The `_a` variable is declared as a global, but `_err` is not declared. The transpiler generates the assignment to `_err` without ensuring it was previously declared.
 
-**Workaround**: Use `let doc = input(...)?` with the error propagation operator `?` instead of error destructuring.
+*Benefit:* states dependencies precisely and keeps the importer's scope
+small without an alias prefix. *Conflict:* the `name: path` form is already
+the alias spelling (`import s: .shapes`), so this exact syntax is
+ambiguous; a selective import needs a spelling that does not reuse `:` after
+the path.
 
-### 6.3 Absolute Module Paths
+### 10.2 Re-exports and facade packages
 
-The reserved `lambda.*` root is now the supported absolute package/module
-namespace. Its loader maps the logical path below `lambda` into the configured
-`LAMBDA_HOME`; `lambda.math` and `lambda.io` are built-in module aliases, while
-the typesetting package is exposed at `lambda.doc.math`.
+```lambda
+// math/index.ls
+pub import .trig: sin, cos, tan
+pub import .constants: *
+```
+
+*Benefit:* a facade package can present one import surface over several
+implementation packages. *Status:* today a package passes a name on only by
+rebinding it (`pub let sin = trig.sin`). D7.3.4 already anticipates *script
+re-export* as the way Jube modules expose each other's surfaces, so a
+re-export form would serve both. Depends on the selective-import spelling
+(§10.1).
+
+### 10.3 Directory packages (index files)
+
+A directory with an `index.ls` imported as a package (`import .math` →
+`math/index.ls`). *Status:* a directory is not a package today; adopting
+this changes D7.2.6's lookup (`.ls`, then `.js`) and needs a precedence rule
+against a sibling `math.ls`.
+
+### 10.4 Optional import
+
+`import? .feature` binding `null` when the package is missing, for optional
+dependencies. *Status:* today optionality lives inside the dependency's
+initializer (§6). An optional import would need to distinguish *missing*
+(→ `null`) from *failed to initialize* (still a transaction-barrier failure
+under D7.2.2), and to say what an unqualified `import?` binds.
+
+### 10.5 Package metadata and project manifest
+
+A package-level metadata declaration (name, version, description) and a
+project manifest (dependencies, path aliases such as `@utils`). *Status:*
+these belong with the Lambda package registry that S16.9.8 reserves bare
+roots for, which is not yet designed. An `@alias` root is not one of
+S16.9.8's three roots and would need a ruling of its own.
+
+### 10.6 Export list
+
+An explicit `export a, b, c` list at the end of a package as an alternative
+to per-declaration `pub`. *Status:* it would be a second export spelling
+beside S16.9.1's uniform `pub` prefix.
+
+### 10.7 Package-relative resources
+
+Data paths inside a package — `input("data.json")`, `\.'data.json'` —
+resolve against the working directory, not the package's directory, so a
+package cannot portably read a file shipped beside it. No ruling defines a
+package-relative resource root.
+
+### 10.8 Type identity beyond load-once
+
+§7 relies on packages living for the whole process on one thread. If hot
+reload, unloading, or concurrent instantiation is ever adopted, cross-package
+type references need a different footing. Options recorded: a global type
+registry that deduplicates every package's types and remaps their indices;
+structural comparison for cross-package type tests; a single long-lived type
+arena independent of package lifetime.
+
+### 10.9 Import suggestions
+
+On E216/E217, suggest a near spelling when a similar file or package exists
+(*did you mean `.utils.math`?*).
 
 ---
 
-## 7. Design Notes
+## Appendix A — Implementation notes
 
-1. **Circular import detection**: `load_script()` tracks `is_loading` state per script. If a script is re-entered while still loading, a circular import error is reported and NULL is returned.
+- **Back end.** Packages compile through MIR Direct only (D8); the former
+  C-text module structs and link-time pointer patching are gone.
+- **Resolver.** `lambda_resolve_import_module_path`
+  (`lambda/runtime/ast_build.hpp`) is D7.2.6's one resolver; `resolve_import`
+  reports E216 after the built-in and registered-module checks. Cycle
+  detection is in `load_script` (`lambda/runtime/runner.cpp`).
+- **Regression fixtures.** `test/lambda/import_pub_types.ls` (type alias,
+  object type with methods, cross-package `is`),
+  `test/lambda/import_error_destr.ls` (error values exported from a
+  package initializer), `test/lambda/lambda_namespace.ls` and
+  `test/lambda/negative/semantic/lambda_namespace_root.ls` (§5).
+- **Known gaps against this design** (tracked in
+  [`doc/Lambda_Modules.md` — Known Issues](../doc/Lambda_Modules.md#known-issues)):
+  an aliased type in a type position (`let a: s.Angle`, `x is s.Circle`) is
+  a syntax error (§3.1's intent); a method of an imported object type that
+  reads a module-level `let` of its own package returns `null` (§7); a
+  duplicated alias is accepted and keeps the first package (§3.2); an E209
+  caused by an import is printed against the importing file.
 
-2. **Script deduplication**: `load_script()` checks the runtime's `scripts` ArrayList by path. Importing the same module from two different scripts returns the same `Script*`, avoiding redundant compilation.
+## Appendix S — Superseded designs
 
-3. **Single-threaded assumption**: The type_list swap pattern (`void* sv = rt->type_list; rt->type_list = _mod_type_list; ... rt->type_list = sv;`) is not thread-safe. This is acceptable since Lambda is single-threaded.
-
-4. **Module functions are indirect calls**: Imported functions go through a function pointer in the `Mod{N}` struct, while local functions are direct calls. This adds one level of indirection but is negligible in practice.
-
-5. **No dynamic re-exports**: If module A imports from module B, module A's users cannot access module B's exports through A. Each import is a direct link to the source module.
-
-6. **Public variables are snapshots**: At runtime, `_init_mod_vars()` copies module globals into the importing script's `Mod{N}` struct after the module's `main()` has executed. The importer gets a snapshot — mutations to the original are not reflected (Lambda is pure functional, so this is moot for immutable values).
-
-7. **Execute-once semantics**: Module `main()` has a `static int _mod_executed` guard. The first call executes and sets the guard; subsequent calls return immediately. This is important when multiple scripts import the same module — only the first `m{N}._mod_main(runtime)` call does work.
-
----
-
-## 8. Type List Concern
-
-### Current State
-
-Each module has its own `type_list` — an array of type definitions (TypeArray, TypeMap, TypeFunc, etc.) built during AST construction. Type objects (`Type*`) are allocated in the module's AST builder memory, which lives in the `Script` struct's allocator.
-
-At runtime, functions like `map()`, `elmt()`, `const_type()`, and `const_pattern()` look up type definitions from `rt->type_list` using integer type indices. The module wrapper functions (`_mod_map`, `_mod_elmt`, etc.) temporarily swap `rt->type_list` to the module's own type_list before calling the real function.
-
-### The Concern
-
-**Cross-module type pointer sharing**: When module A's functions operate on data structures whose types are defined in module B's `type_list`, or when types from module B are referenced in module A's scope, the `Type*` pointers stored in AST nodes and Items point into module B's memory.
-
-This is currently safe because:
-1. All `Script` objects persist for the entire program lifetime
-2. Type memory is never freed until program exit
-3. Lambda is single-threaded, so the type_list swap is race-free
-
-However, this could become **fragile** if:
-- **Module hot-reloading** is implemented: reloading a module would invalidate `Type*` pointers held by other modules
-- **Module unloading** is added: freeing a module's memory would leave dangling `Type*` pointers in importers
-- **Multi-threading** is introduced: the save/restore pattern for `rt->type_list` is inherently racy
-- **Type comparison across modules**: Two modules may define structurally identical types (e.g., both have `{name: string, age: int}` maps), but they'll have different `Type*` pointers and different type indices, potentially causing unexpected type mismatches
-
-### Potential Future Solutions
-
-1. **Global type registry**: Deduplicate types across all modules into a single shared `type_list`. Each module's type indices would be remapped to the global registry. This eliminates the swap pattern entirely.
-2. **Structural type equality**: When comparing types cross-module, use structural comparison rather than pointer identity or type index comparison.
-3. **Type arena**: Allocate all types from a single long-lived arena rather than per-module allocators, ensuring pointers remain valid regardless of module lifecycle.
-
-For now, the current approach works correctly for Lambda's single-threaded, load-once model.
+| Superseded | Replaced by |
+|---|---|
+| ~~`import .mod as m` (namespace import)~~ | `import m: .mod` (§3.1) |
+| ~~bare `import a.b` resolving against the working directory~~ | bare roots are packages; E216 when unclaimed (S16.9.8) |
+| ~~relative imports resolving against the working directory~~ | resolved against the importing script's directory (D7.2.6) |
+| ~~`..parent.module`~~ | `~~.parent.module` (S16.9.8) |
+| ~~`import "./utils/x.ls"` quoted paths; `/` and `\` separators~~ | dotted paths only (S16.9.6) |
+| ~~`import 'chart'` symbol import of built-in modules~~ | `import lambda.chart`; a symbol tail is a markup namespace (§3.1) |
+| ~~`std.*` standard-library tree and a separate `std/prelude.ls`~~ | the `lambda.*` root and the `lambda.sys` prelude (§5) |
+| ~~`lambda.package.<name>`; math typesetting at `lambda.package.math`~~ | `lambda.<name>`; `lambda.doc.math` (D7.2.4) |
+| ~~`pub x = 1` bare export~~ | `pub let x = 1` (S16.9.1) |
+| ~~`pub string p = …` / `pub symbol p = …` pattern exports~~ | patterns are types: `pub type P = \(…)` (§2) |
+| ~~module-scope `let a^err = e` error destructuring~~ | retired language-wide (S7.6.5v2); handle with `e ^ { … }` (§6) |

@@ -27,7 +27,7 @@
 
 // External Type globals (defined in lambda-data.cpp)
 extern Type TYPE_NULL, TYPE_BOOL, TYPE_INT, TYPE_INT64, TYPE_FLOAT, TYPE_COMPLEX;
-extern Type TYPE_STRING, TYPE_SYMBOL, TYPE_DTIME, TYPE_ANY, TYPE_ERROR, TYPE_TYPE;
+extern Type TYPE_STRING, TYPE_SYMBOL, TYPE_DTIME, TYPE_ANY, TYPE_ERROR, TYPE_TYPE, TYPE_MAP;
 extern Type TYPE_NUMBER, TYPE_DECIMAL, TYPE_BINARY;
 // The registry is C while TypeArray is a C++ extension of Type. The exported
 // object's Type prefix is enough here; AST consumers see the full TypeArray.
@@ -154,6 +154,9 @@ extern Item edit_array_delete(Item array, int64_t index);
 extern Item edit_array_append(Item array, Item value);
 extern Item pdf_parse_content_stream(Item bytes);
 extern Item fn_pdf_parse_content_stream(Item bytes);
+extern Item fn_ps_scan(Item source, Item offset, Item limits);
+extern Item fn_ps_read(Item source, Item offset, Item options);
+extern Item fn_ps_png(Item planes, Item geometry, Item limits);
 extern Item fn_pdf_register_svg_image_resolver(Item svg_item, Item pdf_item);
 extern int edit_commit(const char* description);
 extern bool edit_undo(void);
@@ -342,6 +345,15 @@ static const SysFuncArgDesc sysfunc_int_lane_args_2[] = {
 #endif
 
 SysFuncInfo sys_func_defs[] = {
+    {SYSFUNC_PHYSICS_SIMULATE, "physics_simulate", 2, &TYPE_MAP, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_physics_simulate", FPTR(fn_physics_simulate), NULL, NULL, false, 0,
+     false, NULL, true},
+    {SYSFUNC_PHYSICS_VALIDATE, "physics_validate", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_physics_validate", FPTR(fn_physics_validate), NULL, NULL, false, 0,
+     false, NULL, true},
+    {SYSFUNC_PHYSICS_QUERY, "physics_query", 2, &TYPE_ARRAY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_physics_query", FPTR(fn_physics_query), NULL, NULL, false, 0,
+     false, NULL, true},
     // ========================================================================
     // Type/conversion functions — all method-eligible
     // ========================================================================
@@ -529,6 +541,9 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "fn_convolve", PROFILE_IMAGE_PROCESSING_FPTR(fn_convolve), NULL, NULL, false, 0},
     {SYSFUNC_BLUR, "blur", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_blur", PROFILE_IMAGE_PROCESSING_FPTR(fn_blur), NULL, NULL, false, 0},
+    {SYSFUNC_IMAGE_PROCESS, "image_process", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_image_process", PROFILE_IMAGE_PROCESSING_FPTR(fn_image_process), NULL, NULL, false, 0,
+     false, &TYPE_ANY, true},
     {SYSFUNC_ERODE, "erode", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_erode", PROFILE_IMAGE_PROCESSING_FPTR(fn_erode), NULL, NULL, false, 0},
     {SYSFUNC_DILATE, "dilate", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
@@ -873,6 +888,51 @@ SysFuncInfo sys_func_defs[] = {
     // ========================================================================
     // Element-wise math functions — math module (with native C math optimization)
     // ========================================================================
+    // pure scientific kernels; rank and domain failures remain boxed errors
+    {SYSFUNC_ERF, "math_erf", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_erf", FPTR(fn_math_erf), "erf", NPTR(erf), true, 1,
+     false, NULL, false, SYS_RESULT_REAL_TO_FLOAT},
+
+    {SYSFUNC_ERFC, "math_erfc", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_erfc", FPTR(fn_math_erfc), "erfc", NPTR(erfc), true, 1,
+     false, NULL, false, SYS_RESULT_REAL_TO_FLOAT},
+
+    {SYSFUNC_FFT, "math_fft", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_fft", FPTR(fn_math_fft), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_IFFT, "math_ifft", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_ifft", FPTR(fn_math_ifft), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_RFFT, "math_rfft", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_rfft", FPTR(fn_math_rfft), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_IRFFT, "math_irfft", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_irfft", FPTR(fn_math_irfft), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_SOLVE, "math_solve", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_solve", FPTR(fn_math_solve), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_LSTSQ, "math_lstsq", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_lstsq", FPTR(fn_math_lstsq), NULL, NULL, false, 0,
+     false, &TYPE_ARRAY, true},
+
+    {SYSFUNC_ORIENT2D, "math_orient2d", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_orient2d", FPTR(fn_math_orient2d), NULL, NULL, false, 0,
+     false, &TYPE_INT, true},
+
+    {SYSFUNC_ORIENT3D, "math_orient3d", 4, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_orient3d", FPTR(fn_math_orient3d), NULL, NULL, false, 0,
+     false, &TYPE_INT, true},
+
+    {SYSFUNC_INCIRCLE, "math_incircle", 4, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_math_incircle", FPTR(fn_math_incircle), NULL, NULL, false, 0,
+     false, &TYPE_INT, true},
+
     {SYSFUNC_SQRT, "math_sqrt", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_math_sqrt", FPTR(fn_math_sqrt), "sqrt", NPTR(sqrt), true, 1,
      /* is_async */ false, /* success */ NULL, /* may_error */ false,
@@ -1335,6 +1395,13 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_PDF_PARSE_CONTENT_STREAM, "pdf_parse_content_stream", 1, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_pdf_parse_content_stream", PROFILE_PDF_FPTR(fn_pdf_parse_content_stream), NULL, NULL, false, 0},
 
+    {SYSFUNC_PS_SCAN, "ps_scan", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_ps_scan", FPTR(fn_ps_scan), NULL, NULL, false, 0},
+    {SYSFUNC_PS_READ, "ps_read", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_ps_read", FPTR(fn_ps_read), NULL, NULL, false, 0},
+    {SYSFUNC_PS_PNG, "ps_png", 3, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_ps_png", FPTR(fn_ps_png), NULL, NULL, false, 0},
+
     // PDF package: bind page SVG roots to their parsed PDF object tree for image handle resolution
     {SYSFUNC_PDF_REGISTER_SVG_IMAGE_RESOLVER, "pdf_register_svg_image_resolver", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_pdf_register_svg_image_resolver", PROFILE_PDF_FPTR(fn_pdf_register_svg_image_resolver), NULL, NULL, false, 0},
@@ -1428,7 +1495,7 @@ extern Item js_reflect_get_with_receiver(Item target, Item key, Item receiver);
 // One list feeds both the import rows and the NO_GC audit below.
 #define JIT_LIBM_LEAVES(X) \
     X(sqrt) X(cbrt) X(hypot) X(exp) X(exp2) X(expm1) \
-    X(log) X(log2) X(log10) X(log1p) \
+    X(log) X(log2) X(log10) X(log1p) X(erf) X(erfc) \
     X(sin) X(cos) X(tan) X(asin) X(acos) X(atan) X(atan2) \
     X(sinh) X(cosh) X(tanh) X(asinh) X(acosh) X(atanh) \
     X(floor) X(ceil) X(round) X(trunc)
@@ -1539,6 +1606,9 @@ JitImport jit_runtime_imports[] = {
     {"array_end", FPTR(array_end)},
     {"pdf_parse_content_stream", FPTR(pdf_parse_content_stream)},
     {"fn_pdf_parse_content_stream", FPTR(fn_pdf_parse_content_stream)},
+    {"fn_ps_scan", FPTR(fn_ps_scan)},
+    {"fn_ps_read", FPTR(fn_ps_read)},
+    {"fn_ps_png", FPTR(fn_ps_png)},
     {"fn_pdf_register_svg_image_resolver", FPTR(fn_pdf_register_svg_image_resolver)},
     // typed array constructors
     {"array_float_new", FPTR(array_float_new)},
@@ -4091,7 +4161,11 @@ static const char* const output_option_names[] = {
     "max_entries", "max_name_bytes", "max_path_depth", "max_nesting_depth", NULL
 };
 const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
+    static const char* const physics_options[] = {"steps", "sample_every", "bodies", "commands", NULL};
     switch (fn) {
+    case SYSFUNC_PHYSICS_SIMULATE:
+        if (options_arg_index) *options_arg_index = 1;
+        return physics_options;
     case SYSFUNC_INPUT2:
         if (options_arg_index) *options_arg_index = 1;
         return input_option_names;

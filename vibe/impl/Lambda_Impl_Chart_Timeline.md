@@ -1,6 +1,6 @@
 # Timeline chart implementation
 
-> **Status:** paused at the user's wrap-up request, 2026-10-12; full parity is incomplete.
+> **Status:** scalability and keyed animation tranche implemented and verified, 2026-10-13. Retained upstream parity remains incomplete.
 > **Design:** [Timeline package](../Lambda_Pkg_Chart_Timeline.md).
 > **Formal linkage:** D7.2.1–D7.2.4/D7.2.6 (source packages),
 > S12.1.1v2/S12.1.3 (pure presentation and procedural handlers),
@@ -9,7 +9,9 @@
 
 ## Scope and acceptance
 
-The full proposal remains the completion contract. The machine-readable
+The revised proposal remains the completion contract. Browser delivery, automatic
+resource lifecycle, export, and accessibility/localization requirements were
+removed by the user; existing compatibility implementations may remain. The machine-readable
 [reference inventory](../../test/timeline/reference_inventory.json) pins all four
 upstream commits, option-definition hashes, declared fields, examples, and feature
 families. Its host statuses remain open until acceptance evidence exists.
@@ -24,7 +26,7 @@ they are not runtime dependencies or vendored implementation code.
   dates and deep-time coordinates, source adapters, shared card/axis/story
   presentation, curved projection/inversion, immutable interaction state,
   slideshow timing, media descriptors, and resource request/result lifetimes.
-- Animation support moved to `lambda.chart.playback`; the seven old timeline
+- Chart keyframe playback moved to `lambda.chart.playback`; the seven old timeline
   animation exports forward to it. Existing chart animation goldens are retained.
 - dtna translates its legacy props into the core schema and supplies its skin.
   Rendering and live handlers delegate to the timeline package. Legacy dtna
@@ -409,11 +411,11 @@ Later engine changes still require the affected baseline gates to be rerun.
   contracts pass in T0/JIT, including bounded leaf visits for a narrow query over
   4,096 points. Integration and release performance measurements remain pending.
 
-## Wrap-up checkpoint
+## Historical wrap-up checkpoint — 2026-10-12
 
 The user requested a wrap-up on 2026-10-12 before full proposal completion.
-Implementation work stops at this checkpoint after recording the current gates;
-the implementation is paused, not complete. No upstream feature family is
+Implementation work stopped at that checkpoint after recording the gates;
+the following paragraph records the state before the later scope revision and resumption. No upstream feature family is
 declared complete: the inventory currently has 51 partial and 215 planned host
 or example records.
 
@@ -443,3 +445,113 @@ native playback/completion/lifetime also passes ASan in both tiers. Python
 benchmark syntax, Lambda benchmark-module import, inventory consistency, and
 `git diff --check` pass. Release measurements and full parity acceptance remain
 open.
+
+
+## Scalability and animation tranche — 2026-10-13
+
+The user resumed implementation with browser support, automatic resource
+lifecycle, export, and accessibility/localization removed from acceptance.
+The revised inventory contains 27 feature families and pure/native host records.
+Existing compatibility APIs and their regression fixtures remain available.
+
+### Retained preparation and bounded layout work
+
+`prepared.record/source` retains normalized source records, an exact interval
+index, source extent, and a visibility index. Selection, window, and playback
+changes reuse normalization; query/filter/collapsed-group changes rebuild only
+visibility. Source replacement builds fresh indices. Exact ordering and inclusive
+window boundaries follow S6.2.2v3/S6.2.3; immutable preparation follows S5.1.4v2,
+S9.1.4/S9.3.1.
+
+Layout queries intersecting index leaves, projects candidates, clusters them,
+and then measures the resulting rich cards. Cluster runs use a shared stable
+sort instead of repeatedly copying growing partitions. Canonical ID uniqueness
+uses sorted adjacent checks, and group/active-item lookups use the existing
+binary index helper. `plan.work` exposes index use, examined records, candidate
+count, and measured cards. Identical-date clusters still inspect all eligible
+members; clustering bounds measurement rather than hiding that cost.
+
+`timeline_scalability.ls` covers retained normalization, visibility invalidation,
+inclusive canonical queries, bounded leaf scans, and clustering before content
+measurement. Release workloads cover 100, 1,000, 10,000, and 100,000 events for
+uniform points, identical dates, many groups, rich cards, and million-year dates.
+The benchmark records binary and package-source hashes, stage timings, eight
+window updates, cache reuse, child-process peak RSS, failures, and timeouts.
+
+### Keyed animation and native presentation
+
+Root `animate` accepts a boolean or duration/delay/easing/phase configuration.
+The immutable motion sampler retains displayed geometry and SVG, interpolates
+card/marker bounds and exact windows, and retires passive outgoing records at
+completion. Explicit `render_frame({time_ms, previous})` uses the same sampler;
+native frame scheduling stops when motion and playback settle
+(S12.1.1v2/S12.1.3, S9.1.4/S9.3.1, D7.5.3).
+
+Sequence cards use measured native flow boxes and translation from displayed to
+target bounds. Native canvas picking and gesture initialization use the displayed
+plan/window during an interrupted transition. Authored reduced/none motion and
+host `reduced_motion: true` settle immediately. Invalid fallback presentations
+remain error values before preview records are constructed (S7.4.1).
+
+Shared SVG animation retains a private correspondence key on outgoing fade
+wrappers without restoring a picking key. This prevents outgoing SVG markers
+from disappearing on interruption. The zero-progress sample preserves the
+already passive displayed wrapper. SVG rebuilding also supports `desc` nodes.
+Shared chart animation fixtures continue to cover picking and phase timing.
+
+`timeline_motion.ls` verifies 23 contracts, including exact visible SVG retention
+on interruption, partial enter opacity, passive exit retirement, explicit frames,
+reduced motion, invalid options, and gesture-window continuity. The native
+`keyed_motion` page verifies axis and sequence replacements/interruption plus
+host-reduced motion with 16 assertions. It is directly viewable with
+`./lambda.exe view test/ui/timeline/keyed_motion.ls`.
+
+### Validation and remaining scope
+
+Current evidence: all 121 chart golden fixtures pass through T0; all 36 timeline
+and two shared animation goldens pass through MIR Direct. All 31 existing native
+timeline scenarios pass, and the new 10,000-event `scalability` page passes its
+eight distant-window assertions. The dtna Timeline/Statistic DOM and pixel
+scenario passes. The full Lambda baseline passes **6,801/6,801**: 2,112 input
+parser cases and 4,689 runtime cases. Logs live under
+`temp/timeline-implementation/` (`lambda-baseline.log`, `chart-interp.log`,
+`timeline-jit.log`, `native-timeline.log`, `native-scalability.log`,
+`native-dtna.log`).
+The native keyed-motion scenario also passes all 16 assertions under explicit
+T0 and MIR Direct execution (`native-motion-interp.log`, `native-motion-jit.log`).
+
+Pinned upstream option/example equivalence for other retained feature families
+remains open. The historical wrap-up's browser/resource/export/localization
+items are excluded by the revised scope and are no longer outstanding gates.
+
+
+### Release measurements
+
+All 20 release/MIR workloads pass. The durable report is
+[`test/timeline/scalability_release.json`](../../test/timeline/scalability_release.json).
+It records the binary identity, all chart source hashes, recorded platform,
+source preparation, first layout, eight window updates with per-frame work
+counts, cache reuse, child-process peak RSS, and timeouts/failures. The release
+host was linked to a separate temporary target so shared debug builds could not
+replace the measured executable.
+
+| 100,000-event workload | Normalize (ms) | Median window update (ms) | Examined / measured | Peak process RSS (MiB) |
+|---|---:|---:|---:|---:|
+| points | 7752.8 | 12.4 | 36 / 33 | 2941.3 |
+| identical | 7755.1 | 2998.3 | 100,000 / 1 | 3384.0 |
+| groups | 7437.0 | 50.8 | 36 / 33 | 4191.2 |
+| rich | 9092.5 | 27.5 | 36 / 33 | 3770.7 |
+| large_years | 9157.8 | 24.6 | 36 / 33 | 3744.8 |
+
+Sparse workloads examine 36 source records to measure 33 visible cards. The
+identical-date workload keeps all 100,000 members inside every updated window
+and measures one aggregate card per update. Its full candidate scan/projection
+remains O(N), which explains the higher update cost. The runner rejects empty
+update samples and dense updates that lose members; earlier measurements that
+panned outside the identical-date cluster are superseded by this report.
+
+These are single-run timings and peak process memory on the recorded machine,
+including JIT and source preparation. They demonstrate the bounded sparse query
+and premeasurement clustering contracts; dense scans, large-source startup,
+and process memory remain substantial costs. Full retained pinned option/example
+parity remains open in the inventory.

@@ -1,0 +1,84 @@
+{
+  "name": "PhysicsDemoBounceTracesAndMaterialResponse",
+  "viewport": {
+    "width": 1120,
+    "height": 1000
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "globalThis.physicsDemo && physicsDemo.ready"
+    },
+    {
+      "type": "script",
+      "js": "physicsDemo.restart()"
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsDemo.state.tick === 0"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('.plot-card svg') !== null"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 1040,
+      "height": 500,
+      "name": "initial"
+    },
+    {
+      "type": "script",
+      "js": "physicsDemo.request({operation:'step',ticks:150})"
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsDemo.state.bodies[1].position[1] < 0.4 && physicsDemo.state.bodies[5].position[1] > 2.5"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 1040,
+      "height": 500,
+      "reference": "initial",
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "script",
+      "js": "physicsDemo.request({operation:'query',queries:[{type:'ray',origin:[3.4,5,0],direction:[0,-1,0],distance:8}]}).then(value => { physicsDemo.lastQuery = value; })"
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsDemo.lastQuery[0].body === 'ball-4'"
+    },
+    {
+      "type": "collect_gc",
+      "count": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#camera-top"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsDemo.state.tick === 150"
+    },
+    {
+      "type": "script",
+      "js": "physicsDemo.restart()"
+    },
+    {
+      "type": "assert_script",
+      "js": "physicsDemo.state.tick === 0 && physicsDemo.state.bodies[1].position[1] === 3.8"
+    }
+  ]
+}

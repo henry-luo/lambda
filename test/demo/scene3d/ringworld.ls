@@ -1,13 +1,8 @@
 // visual demo: open with ./lambda.exe view test/demo/scene3d/ringworld.ls
 import s: lambda.scene3d
+import geometry: ._geometry
 
 let pi = 3.141592653589793
-
-fn sphere_point(latitude, longitude, rows, columns) array {
-    let theta = pi * latitude / rows
-    let phi = 2.0 * pi * longitude / columns;
-    [sin(theta) * cos(phi), cos(theta), sin(theta) * sin(phi)]
-}
 
 fn planet_color(latitude, longitude, rows, columns) array {
     let theta = pi * latitude / rows
@@ -24,16 +19,9 @@ fn planet_color(latitude, longitude, rows, columns) array {
 }
 
 fn sphere(id, rows, columns, banded) element {
-    let positions = [for (j in 0 to rows) for (i in 0 to columns)
-        *sphere_point(j, i, rows, columns)]
-    // the duplicated seam keeps each triangle local in longitude.
-    let indices = [for (j in 0 to (rows - 1), i in 0 to (columns - 1),
-        let a = j * (columns + 1) + i, let b = a + columns + 1)
-        *[a, a + 1, b, a + 1, b + 1, b]]
     let colors = if (banded) [for (j in 0 to rows) for (i in 0 to columns)
         *planet_color(j, i, rows, columns)] else null;
-    s.geometry(positions, {id: id, normals: positions, indices: indices,
-        *: (if (banded) {colors: colors} else {})})
+    geometry.sphere(id, rows, columns, colors)
 }
 
 fn ring(inner, outer, color, options = {}) element {

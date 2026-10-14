@@ -1,0 +1,21 @@
+{
+  "name": "ScientificChartCamerasAndPickingStayIndependent",
+  "viewport": {"width": 640, "height": 280},
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {"type":"snapshot_surface","source":"scene3d","target":"#first scene3d","width":300,"height":240,"name":"first"},
+    {"type":"snapshot_surface","source":"scene3d","target":"#second scene3d","width":300,"height":240,"name":"second"},
+    {"type":"mouse_down","x":150,"y":120},
+    {"type":"mouse_up","x":150,"y":120},
+    {"type":"assert_attribute","target":{"selector":"#first .lambda-chart-3d-interactive"},"attribute":"data-chart-picked","equals":"\"triangle\""},
+    {"type":"mouse_down","x":150,"y":120},
+    {"type":"mouse_move","x":195,"y":145},
+    {"type":"mouse_up","x":195,"y":145},
+    {"type":"assert_surface","source":"scene3d","target":"#first scene3d","width":300,"height":240,"reference":"first","count":{"min":100}},
+    {"type":"assert_surface","source":"scene3d","target":"#second scene3d","width":300,"height":240,"reference":"second","count":{"max":0}},
+    {"type":"script","js":"document.querySelector('#first .lambda-chart-3d-interactive').focus()"},
+    {"type":"key_press","key":"Home","mods_str":""},
+    {"type":"assert_surface","source":"scene3d","target":"#first scene3d","width":300,"height":240,"reference":"first","count":{"max":0}}
+  ]
+}

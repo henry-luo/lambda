@@ -670,6 +670,17 @@ extern int64_t g_layout_cache_hits;
 extern int64_t g_layout_cache_misses;
 extern int64_t g_layout_cache_stores;
 extern int64_t g_layout_shifted_reuse_count;
+extern int64_t g_layout_flex_retained_count;
+// A clean subtree whose committed geometry nothing outside it can change.
+// formatting_root also admits relative boxes and absolute boxes positioned
+// inside the subtree, which an independent formatting context (a flex item) contains.
+bool layout_retained_subtree_is_stable(DomNode* root, bool formatting_root);
+// Only the committed pass of an incremental layout without running animations
+// may keep retained geometry.
+bool layout_can_retain_geometry(LayoutContext* lycon);
+// Normal-flow collapse consumed this element's used boundary, so its next
+// committed style pass resolves it afresh (dom_node_resolve_style).
+bool layout_boundary_consumed_by_flow(DomElement* element);
 
 namespace radiant {
 
@@ -1889,6 +1900,13 @@ typedef struct CustomLayoutPaintLayer {
 typedef struct CustomLayoutPaintState {
     lam::OwnArr<CustomLayoutPaintLayer> layers;
     int layer_count;
+    // Package content can share one intrinsic query within a measurement epoch.
+    uint32_t intrinsic_generation;
+    float intrinsic_font_size;
+    float intrinsic_width;
+    float intrinsic_height;
+    float intrinsic_baseline;
+    bool has_intrinsic_measurement;
 } CustomLayoutPaintState;
 
 // tier-3: layout-transient, valid within pass
@@ -1906,6 +1924,15 @@ typedef struct CustomLayoutResult {
 
 typedef bool (*CustomLayoutFn)(const CustomLayoutContext* context, CustomLayoutResult* result);
 
+// Package-backed built-in layouts share the retained callback and paint ownership door.
+Runtime* layout_document_package_runtime(DomDocument* document, const char* package_module);
+bool radiant_package_layout_callback(const CustomLayoutContext* context,
+                                     CustomLayoutResult* result, const char* package_module);
+bool layout_is_mathml_root(DomElement* element);
+bool layout_measure_mathml(LayoutContext* lycon, DomElement* element,
+                           float* width, float* height, float* baseline = nullptr);
+bool layout_apply_mathml(LayoutContext* lycon, ViewBlock* block);
+
 bool custom_layout_register(const char* name, CustomLayoutFn fn);
 CustomLayoutFn custom_layout_lookup(const char* name);
 void custom_layout_registry_clear(void);
@@ -1915,7 +1942,8 @@ void custom_layout_fill_radiant_velmt_from_view(
 
 const char* custom_layout_name_from_css_value(const CssValue* value);
 const char* custom_layout_name_for_element(DomElement* element);
-bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* layout_name);
+bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* layout_name,
+                          CustomLayoutFn callback = nullptr);
 
 typedef struct StyleTree StyleTree;
 
@@ -2712,6 +2740,27 @@ bool layout_tag_is_non_caret_container(NameId tag, bool include_button = false);
 bool layout_tag_is_default_inline(NameId tag);
 bool layout_tag_has_monospace_family_default(NameId tag);
 
+// HTML Rendering §15.3 element defaults, read by the default view's element defaults and
+// serialized as the secondary views' UA stylesheet. Negative lengths and CSS_VALUE__UNDEF
+// keywords are absent; presentational attributes, form and media chrome stay with the default view.
+struct HtmlUaElementDefault {
+    float font_scale;              // multiplies the inherited size; 1 keeps it
+    bool keeps_medium;             // a scaled heading size keeps the inherited medium lineage
+    bool monospace;
+    CssEnum font_weight, font_style, text_decoration, vertical_align, white_space, text_align;
+    CssEnum list_style, color;
+    float margin_px, margin_block_em, margin_inline_px, margin_inline_start_px;
+    float padding_px, padding_inline_start_px;
+};
+bool layout_html_ua_element_default(NameId tag, HtmlUaElementDefault* result);
+// nested lists drop their outer margins; unordered markers step disc, circle, square.
+bool layout_html_ua_list_nesting_ancestor(NameId tag);
+CssEnum layout_html_ua_list_marker(NameId tag, size_t unordered_ancestors);
+struct StrBuf;
+bool layout_html_ua_stylesheet(StrBuf* css);
+// Chromium CheckForGenericFamilyChange: a medium-lineage size that switches to monospace scales by 13/16.
+void layout_apply_monospace_medium_size(FontProp* font, const FontProp* parent);
+
 inline bool layout_multicol_has_column_width(const MultiColumnProp* multicol) {
     return multicol && (multicol->column_width_is_specified || multicol->column_width > 0.0f);
 }
@@ -3248,6 +3297,20 @@ typedef struct MeasurementCacheEntry {
 } MeasurementCacheEntry;
 
 void measure_flex_child_content(LayoutContext* lycon, DomNode* child);
+// FlexRetainedPass: qualify a clean item for replay in this pass, then replay
+// or record its hypothetical cross size and content pass memos.
+bool flex_retained_item_begin(LayoutContext* lycon, ViewElement* item,
+                              float container_width, float container_height);
+bool flex_retained_replay_cross(LayoutContext* lycon, ViewElement* item, float width,
+                                float* height);
+void flex_retained_forget_content(DomElement* element);
+void flex_retained_record_cross(LayoutContext* lycon, ViewElement* item, float width,
+                                float height);
+bool flex_retained_replay_content(LayoutContext* lycon, ViewBlock* item,
+                                  FlexContainerLayout* parent_flex);
+void flex_retained_record_content(LayoutContext* lycon, ViewBlock* item,
+                                  FlexContainerLayout* parent_flex,
+                                  float final_width, float final_height);
 float flex_resolve_inherited_line_height(LayoutContext* lycon, DomElement* target);
 void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout);
 void store_in_measurement_cache(DomNode* node, float width, float height, float content_width, float content_height, float context_width = -1);
@@ -3598,6 +3661,8 @@ typedef struct LayoutContext {
     lam::Up<ViewTree> selected_view_tree; // explicit secondary environment for shared value resolution
     lam::Up<struct ViewCssStyle> selected_style;
     bool css_query_probe; // resolve geometry without committing new motion timelines/snapshots
+    // the root of the outermost intrinsic query (LayoutMeasurementRootScope)
+    lam::Up<DomElement> measurement_root;
 
     BlockContext block;  // unified block context (layout state + floats + BFC)
     Linebox line;  // current linebox
@@ -5309,6 +5374,25 @@ struct IntrinsicMeasureScope {
     }
     IntrinsicMeasureScope(const IntrinsicMeasureScope&) = delete;
     IntrinsicMeasureScope& operator=(const IntrinsicMeasureScope&) = delete;
+};
+// The outermost intrinsic query re-resolves its root in the caller's own
+// context (a flex container's, a grid area's), which the committed pass keeps;
+// dom_node_resolve_style flags only the descendants the query walks with the
+// measured width as their percentage basis.
+// tier-3: layout-transient, valid within pass
+struct LayoutMeasurementRootScope {
+    lam::Up<LayoutContext> lycon;
+    bool claimed;
+
+    LayoutMeasurementRootScope(LayoutContext* l, DomElement* root)
+        : lycon(l), claimed(l && root && !l->measurement_root) {
+        if (claimed) lycon->measurement_root = lam::Up<DomElement>(root);
+    }
+    ~LayoutMeasurementRootScope() {
+        if (claimed) lycon->measurement_root = nullptr;
+    }
+    LayoutMeasurementRootScope(const LayoutMeasurementRootScope&) = delete;
+    LayoutMeasurementRootScope& operator=(const LayoutMeasurementRootScope&) = delete;
 };
 // Nested DOM/view work must restore both handles together; restoring only the
 // view leaves style resolution attached to the previous element on early exit.

@@ -779,6 +779,36 @@ TEST_F(CssEngineParserTest, ResizeCursorsRetainComputedKeywordIdentity) {
     }
 }
 
+TEST_F(CssEngineParserTest, ImageCursorRequiresValidHotspotsAndFallback) {
+    const char* accepted[] = {
+        "cursor: crosshair",
+        "cursor: none",
+        "cursor: inherit",
+        "cursor: url('gauntlet.svg') 5 4, pointer",
+        "cursor: url(first.png), url(second.svg) 2.5 3, auto",
+    };
+    for (const char* text : accepted) {
+        CssDeclaration* declaration = css_parse_declaration_text(text, strlen(text), pool);
+        ASSERT_NE(declaration, nullptr) << text;
+        ASSERT_TRUE(css_property_validate_value(CSS_PROPERTY_CURSOR, declaration->value)) << text;
+        CssEnum fallback = CSS_VALUE__UNDEF;
+        ASSERT_TRUE(css_cursor_value_parse(declaration->value, &fallback, nullptr, nullptr));
+        EXPECT_NE(fallback, CSS_VALUE__UNDEF);
+    }
+    const char* rejected[] = {
+        "cursor: url('gauntlet.svg')",
+        "cursor: url('gauntlet.svg') 5, pointer",
+        "cursor: url('gauntlet.svg') 5px 4, pointer",
+        "cursor: pointer, url('gauntlet.svg')",
+        "cursor: url('gauntlet.svg'), inherit",
+    };
+    for (const char* text : rejected) {
+        CssDeclaration* declaration = css_parse_declaration_text(text, strlen(text), pool);
+        if (declaration)
+            EXPECT_FALSE(css_property_validate_value(CSS_PROPERTY_CURSOR, declaration->value)) << text;
+    }
+}
+
 TEST_F(CssEngineParserTest, IndividualTransformsValidateAxisAndComponentGrammar) {
     const char* valid[] = {
         "translate: 10px", "translate: -25% 2em 3px", "translate: 0 0",

@@ -1,94 +1,30 @@
 // Immutable, per-render font facts. Resource reads stay in Lambda IO (D7.1.2v2).
 import radiant
 import sym: .symbols
+import alphabet: .alphabet
 import util: .util
 import fallback: .fallback
 import bundled: .bundled
 import tex_metrics: .tex_metrics
 import mhchem: .mhchem
+import embedded_fonts: lambda.doc.font
 
 pub let UNITS = 1000.0
 
-// Unicode mathematical alphabets describe semantic variants, not a font's cmap.
-let alphabets = {
-    italic: [0x1D434, 0x1D44E, 0], bold: [0x1D400, 0x1D41A, 0x1D7CE],
-    bolditalic: [0x1D468, 0x1D482, 0], script: [0x1D49C, 0x1D4B6, 0],
-    fraktur: [0x1D504, 0x1D51E, 0], double: [0x1D538, 0x1D552, 0x1D7D8],
-    sans: [0x1D5A0, 0x1D5BA, 0x1D7E2], sansitalic:[0x1D608,0x1D622,0], mono: [0x1D670, 0x1D68A, 0x1D7F6]
-}
-// Unicode preserves these alphabet members in the Letterlike Symbols block.
-let exceptions = {
-    italic: {h: 0x210E},
-    script: {B: 0x212C, E: 0x2130, F: 0x2131, H: 0x210B, I: 0x2110,
-        L: 0x2112, M: 0x2133, R: 0x211B, e: 0x212F, g: 0x210A, o: 0x2134},
-    fraktur: {C: 0x212D, H: 0x210C, I: 0x2111, R: 0x211C, Z: 0x2128},
-    double: {C: 0x2102, H: 0x210D, N: 0x2115, P: 0x2119, Q: 0x211A, R: 0x211D, Z: 0x2124}
-}
-
-fn effective_style(ch, style) => if (style == "auto")
-    (if (ord(ch) >= 0x391 and ord(ch) <= 0x3A9) "normal" else "italic") else style
-
-pub fn variant(ch, style) {
-    let cp = ord(ch)
-    let actual = effective_style(ch, style)
-    let alphabet = alphabets[if (actual == "cal") "script" else actual]
-    let special = exceptions[if (actual == "cal") "script" else actual][ch]
-    let greek = if (actual == "italic") 0x1D6E2 else if (actual == "bold") 0x1D6A8
-        else if (actual == "bolditalic") 0x1D71C else null
-    let greek_special = index_of([0x2207, 0x2202, 0x3F5, 0x3D1, 0x3F0, 0x3D5, 0x3F1, 0x3D6], cp)
-    if (special != null) special
-    else if (alphabet != null and cp >= 65 and cp <= 90) alphabet[0] + cp - 65
-    else if (alphabet != null and cp >= 97 and cp <= 122) alphabet[1] + cp - 97
-    else if (alphabet != null and alphabet[2] > 0 and cp >= 48 and cp <= 57) alphabet[2] + cp - 48
-    else if (greek != null and cp >= 0x391 and cp <= 0x3A9) greek + cp - 0x391
-    else if (greek != null and cp >= 0x3B1 and cp <= 0x3C9) greek + 26 + cp - 0x3B1
-    else if (greek != null and cp == 0x3F4) greek + 17
-    else if (greek != null and greek_special != null) greek + (if (greek_special == 0) 25 else 50 + greek_special)
-    else cp
-}
-
-// Share command spellings between rendering and style-face acquisition.
-let styled_commands = [
-    {cmd:"\\rm", style:"normal"}, {cmd:"\\it", style:"italic"}, {cmd:"\\bf", style:"bold"},
-    {cmd:"\\sf", style:"sans"}, {cmd:"\\tt", style:"mono"}, {cmd:"\\cal", style:"cal"},
-    {cmd: "\\mathrm", style: "normal"},
-    {cmd: "\\mathbf", style: "bold"},
-    {cmd: "\\boldsymbol", style: "bolditalic"},
-    {cmd: "\\mathit", style: "italic"},
-    {cmd: "\\mathcal", style: "cal"},
-    {cmd: "\\mathscr", style: "script"},
-    {cmd: "\\mathfrak", style: "fraktur"},
-    {cmd: "\\mathbb", style: "double"},
-    {cmd: "\\mathsf", style: "sans"},
-    {cmd: "\\mathsfit", style: "sansitalic"},
-    {cmd: "\\mathtt", style: "mono"},
-    {cmd: "\\operatorname", style: "normal"},
-    {cmd:"\\textbf",style:"bold"}, {cmd:"\\textit",style:"italic"}, {cmd:"\\emph",style:"italic"},
-    {cmd:"\\textsf",style:"sans"}, {cmd:"\\texttt",style:"mono"}
-]
-
-// math alphabets other packages spell differently: bbm's \mathbbm, dsfont's \mathds,
-// and bm's \bm and heavy \hm, which bold symbols as \boldsymbol does
-let ALPHABET_ALIASES = {mathbbm: "\\mathbb", mathds: "\\mathbb", bm: "\\boldsymbol", hm: "\\boldsymbol"}
-
-pub fn alphabet_alias(name) => ALPHABET_ALIASES[name]
-
-// bm.sty sets a symbol that has no bold version in poor man's bold; \boldsymbol does not
+// Keep the compatibility surface while conversion imports the pure mapping.
+pub fn variant(ch, style) => alphabet.variant(ch, style)
+pub fn command_variant(cmd) => alphabet.command_variant(cmd)
+pub fn alphabet_alias(name) => alphabet.alphabet_alias(name)
 pub fn poor_bold_alias(name) => name == "bm" or name == "hm"
-
-pub fn command_variant(cmd) {
-    let direct = [for (entry in styled_commands where entry.cmd == cmd) entry.style][0]
-    let alias = ALPHABET_ALIASES[if (starts_with(cmd, "\\")) slice(cmd, 1, len(cmd)) else cmd]
-    if (direct != null) direct else if (alias != null) command_variant(alias) else null
-}
 
 fn source_items(node) {
     let attrs = ["value", "name", "cmd", "text", "base", "sub", "sup", "numer", "denom",
         "radicand", "index", "arg", "content", "body", "left", "right", "above", "below",
         "label", "over", "under", "delim", "annotation", "upper", "lower", "target", "display", "script", "scriptscript",
         "separator"];
-    if (node is array) node
-    // chemistry is measured as the math its notation becomes
+    if (node is element and contains(['annotation','annotation-xml'],name(node))) []
+    else if (node is array) node
+    // chemistry is measured as the math its notation becomes.
     else if (node is element and name(node) == 'chemistry') mhchem.items(node)
     else if (node is element) [*[for (attr in attrs) node[attr]], *content(node)] else []
 }
@@ -121,6 +57,7 @@ fn text_facts(facts, family) {
 fn measure(style, points, faces, family = null) => text_facts(radiant.math_metrics(style, points, faces), family)
 
 pub fn prepare(ast, options) map | error {
+    let core = options.notation == "mathml"
     let use_bundled = options.font_family == null and options.fonts == null
     let family = options.font_family or bundled.FAMILY
     let faces = if (options.fonts != null) options.fonts else if (options.font_family != null) null
@@ -128,14 +65,15 @@ pub fn prepare(ast, options) map | error {
     let variant_families = if (use_bundled) bundled.VARIANT_FAMILIES else {sans: "sans-serif", mono: "monospace"}
     // One batch owns all glyphs used by this formula; no mutable last-font state.
     let source = collect(ast)
-    let closed_composites = if (use_bundled) [for (ch in unique(split(source,""))
+    let closed_composites = if (use_bundled and not core) [for (ch in unique(split(source,""))
         where sym.closed_integral_base(ch) != null) ch] else []
     let components = util.str_join([for (ch in closed_composites) sym.closed_integral_base(ch) ++ "◯"],"")
-    let chars = unique(split(source ++ components ++ "()[]{}|‖⌈⌉⌊⌋⟨⟩√̂̃̄⃗̇̈⏞⏟←→↔⇀↽− /", ""))
+    let chars = unique([*split(source ++ components ++ "()[]{}|‖⌈⌉⌊⌋⟨⟩√̂̃̄⃗̇̈⏞⏟←→↔⇀↽− /", ""),
+        *if (core) [for (ch in split(source,"")) alphabet.decode(ch).character] else []])
     let styles = ["normal", "auto", "italic", "bold", "bolditalic", "script", "fraktur", "double", "sans", "sansitalic", "mono"]
     let points = unique([for (ch in chars, style in styles) variant(ch, style)])
-    let large_points = [for (ch in sym.large_symbols() where contains(chars, ch)) ord(ch)]
-    let delimiter_data = if (use_bundled) tex_metrics.delimiters()^ else null
+    let large_points = if (core) [] else [for (ch in sym.large_symbols() where contains(chars, ch)) ord(ch)]
+    let delimiter_data = if (use_bundled and not core) tex_metrics.delimiters()^ else null
     let delimiter_small_points = unique([*[for (r in delimiter_data.recipes where len(r.small) > 0) r.codepoint],
         *[for (r in delimiter_data.arrow_symbols) r.codepoint]])
     let native = measure({font_family: family, font_size: UNITS}, points, faces, family)
@@ -144,8 +82,8 @@ pub fn prepare(ast, options) map | error {
     let facts = {*:native, constants: if (native.has_math) native.constants else fallback.constants(native.font_metrics)}
     // Ordinary fonts put italic/bold letters in separate faces, not Unicode math alphabets.
     // Only request style faces used by this formula; each query owns its font resources.
-    // bold symbols come from the bold upright face (bold_symbol), so \boldsymbol needs it too
-    let requested = unique(["italic",*collect_styles(ast)])
+    // bold symbols also need an upright bold face; Core requests its own styles.
+    let requested = if (core) styles else unique(["italic",*collect_styles(ast)])
     let needed_styles = if (contains(requested, "bolditalic")) unique([*requested, "bold"]) else requested
     let style_faces = if (native.has_math) [] else [for (style in needed_styles where style != "normal")
         (let weight = if (style == "bold" or style == "bolditalic") 700 else 400,
@@ -162,18 +100,18 @@ pub fn prepare(ast, options) map | error {
         measure({font_family: if (use_bundled) bundled.SYMBOL_FAMILIES else family,
             font_size: UNITS, fallback: true}, fallback_points, faces)
     // Keep paired harpoons in one bundled face instead of unrelated system fallbacks.
-    let reaction_points = if (use_bundled) [ord("⇀"), ord("↽"), ord("↼"), ord("⇁")] else []
+    let reaction_points = if (use_bundled and not core) [ord("⇀"), ord("↽"), ord("↼"), ord("⇁")] else []
     // amssymb shapes that share a code point with a plain command (symbols.AMS_SHAPES)
-    let ams_shape_points = if (use_bundled) [for (name in sym.AMS_SHAPES) ord(sym.lookup_symbol(name))] else []
+    let ams_shape_points = if (use_bundled and not core) [for (name in sym.AMS_SHAPES) ord(sym.lookup_symbol(name))] else []
     if (facts.constants.script_percent_scale_down <= 0 or facts.constants.script_script_percent_scale_down <= 0)
         error("math: selected font has invalid script scale constants")
-    else {facts: facts, points: points, family: facts.font_family,
+    else {facts: facts, points: points, family: facts.font_family, core: core,
         font_metrics: facts.font_metrics, style_faces: style_faces,
         fallback_points: fallback_points, fallback_facts: fallback_facts, faces: faces,
         reaction_points: reaction_points,
-        reaction_facts: if (use_bundled) measure({font_family:"KaTeX_Main", font_size:UNITS}, reaction_points, faces, "KaTeX_Main") else null,
+        reaction_facts: if (use_bundled and not core) measure({font_family:"KaTeX_Main", font_size:UNITS}, reaction_points, faces, "KaTeX_Main") else null,
         ams_shape_points: ams_shape_points,
-        ams_shape_facts: if (use_bundled) measure({font_family:"KaTeX_AMS", font_size:UNITS}, ams_shape_points, faces, "KaTeX_AMS") else null,
+        ams_shape_facts: if (use_bundled and not core) measure({font_family:"KaTeX_AMS", font_size:UNITS}, ams_shape_points, faces, "KaTeX_AMS") else null,
         closed_composites: closed_composites,
         delimiter_data:delimiter_data,
         delimiter_faces:[for (family in unique([for (p in delimiter_data.pieces) p.family]))
@@ -182,30 +120,14 @@ pub fn prepare(ast, options) map | error {
         delimiter_small_points:delimiter_small_points,
         delimiter_small_facts:if (delimiter_data != null) measure({font_family:"KaTeX_Main",font_size:UNITS},
             delimiter_small_points,faces,"KaTeX_Main") else null,
-        tex: if (use_bundled) tex_metrics.load()^ else null,
+        tex: if (use_bundled and not core) tex_metrics.load()^ else null,
         large_points: large_points,
         large_facts: if (use_bundled and len(large_points) > 0)
             measure({font_family:"KaTeX_Size2", font_size:UNITS}, large_points, faces, "KaTeX_Size2") else null}
     }
 }
 
-fn text_faces(body) {
-    if (not (body is element)) []
-    else [*if (name(body) == 'text') [{family: body["font-family"], weight: body["font-weight"], style: body["font-style"]}] else [],
-        *[for (child in content(body), face in text_faces(child)) face]]
-}
-
-pub fn stylesheet(profile, body) {
-    let used = unique(text_faces(body))
-    let rules = [for (face in profile.faces where len([for (use in used where
-        use.family == face.font_family and use.weight == (face.font_weight or 400) and
-        use.style == (face.font_style or "normal")) use]) > 0) (
-        let encoded = format(face.data, 'json')^,
-        "@font-face{font-family:" ++ format(face.font_family, 'json')^ ++
-            ";font-weight:" ++ string(face.font_weight or 400) ++ ";font-style:" ++ (face.font_style or "normal") ++
-            ";src:url(data:application/octet-stream;base64," ++ slice(encoded, 1, len(encoded) - 1) ++ ")}")];
-    util.str_join(rules, "\n")
-}
+pub fn stylesheet(profile, body) => embedded_fonts.stylesheet(profile.faces, body)
 
 fn lookup(profile, facts, cp) {
     let index = index_of(profile.points, cp)
@@ -282,10 +204,11 @@ pub fn text_metrics(profile, style) => (style_facts(profile,style) or profile.fa
 pub fn character(profile, ch, style, literal = false) map | error {
     let cp = if (literal) ord(ch) else variant(ch, style)
     let preferred = lookup(profile, profile.facts, cp)
-    let actual = effective_style(ch, style)
+    let actual = alphabet.effective_style(ch, style)
     let styled = style_facts(profile,actual)
     let ordinary = lookup(profile, styled or profile.facts, ord(ch))
-    let bold = if (not literal and style == "bolditalic") bold_symbol(profile, ch) else null
+    // D7.2.8 keeps TeX's boldsymbol face selection in the TeX profile.
+    let bold = if (not profile.core and not literal and style == "bolditalic") bold_symbol(profile, ch) else null
     // Text punctuation must follow its text face, not the base math face's unchanged codepoint.
     if (bold != null) bold
     else if (literal and ordinary != null) ordinary

@@ -1670,25 +1670,84 @@ using fresh private NameRefs, Lambda shapes and existing mutable capture cells
 (**D3.4.3v5**, **S8.2.2v6**, **D6.2.3v2**). Brands belong to each evaluated class
 and receiver, including constructor-returned objects and revoked proxies; public
 reflection excludes private names. Shared analysis now retains enclosing bindings
-for class computed keys and validates private declarations/initializers. The
-complete required-mode audit passes **24,803/40,261 IDs (61.6%)**: **21,708 positive
-and 3,095 negative**, including **5,601** class-family cases. This proves **3,056
-gains over phase-entry canonical results**; the sole extra-mode failure is the
-pre-existing strict `delete this` case, confirmed on the unchanged control.
-There are no new crash/timeout IDs and no missing outcomes after isolated replay.
-Focused checks pass **206/206**, also under forced GC and poisoning; shared gates
-pass Lambda **6,841/6,841** and full LJS **40,261/40,261**. Oversized class
-environments retain their existing closure-capacity limit and remain unsupported.
+for class computed keys and validates private declarations/initializers. Oversized
+class environments retain their existing closure-capacity limit and remain unsupported.
 
-Another **11,432 passes** are needed for 90%. The interpreter bridge, remaining
-library/storage/async/module work and builtin subclass interactions remain open.
-The matched-release screen passes **84/84** benchmark output/backend contracts;
-31-round repeats cover all eight suspects. Pidigits and Three-way Merge remain
-positive against one control and inconclusive against the other; Map lookup also
-remains inconclusive. The other initial suspect signals are not confirmed by the
-repeats. A separate original-control Sieve comparison still confirms **0.090 vs
-0.087 ms** (roughly **3 µs** slower). Older gaps retain their original controls;
-complete performance acceptance remains open. No jq workload was executed.
+The interpreter bridge, remaining library/storage/async/module work and builtin
+subclass interactions remain open.
+
+The buffer/view increment adds ArrayBuffer and DataView, including shared views,
+numeric/BigInt access, resize, transfer, species-aware slice and Test262
+detachment. It reuses the existing backing-store operations with frontend
+coercion/prototype policies (**D1.3v3**, **D2.6.9v3**); subclasses retain Lambda
+nominal ancestry (**S2.1.3v2**, **D6.2.3v2**) and precise GC ownership
+(**D5.2–D5.3**). Existing numeric-array MIR specialization is retained.
+Focused and forced/poisoned-GC checks pass **211/211** each; shared gates pass
+**6,850/6,850 Lambda/Input** and **40,261/40,261 LJS Test262**. The complete
+MVP audit now passes **25,406/40,261 IDs (63.1%)**: **22,311 positive and 3,095
+negative**, a gain of **603** with zero lost passes from the preceding audit.
+All **593** buffer/view-family passes satisfy every required mode. No new
+crash/timeout IDs were introduced; the six existing timeouts and sole strict
+`delete this` failure remain unsuccessful. Another **10,829 passes** are needed
+for 90%.
+
+The Date increment shares calendar/parsing/formatting kernels with LJS through
+frontend operation policies (**D1.3v3**). Private Lambda shape fields own each
+instance's DateValue; subclass ancestry and precise roots follow **D6.2.3v2**
+and **D5.2–D5.3**. Focused and forced/poisoned-GC checks pass **215/215** each;
+shared gates pass **6,854/6,854 Lambda/Input** and **40,261/40,261 LJS Test262**.
+All **609** selected Date cases pass their canonical mode. The complete MVP
+required-mode audit remains incomplete. Timing is deferred at the user's request
+while feature work continues; the coverage and performance figures here remain
+those of buffer7.
+
+The typed-array follow-up shares LJS storage and conversion operations through
+frontend policies (**D1.3v3**, **D2.6.9v3**). It adds numeric/BigInt constructors,
+buffer aliases, indexed reflection, subclass construction, iterator projections
+and the species getter. Array.from now covers array-like input and custom
+constructors through the shared collector. Subarray adds shared-buffer views,
+length tracking and custom species construction through the existing LJS
+algorithms. Lambda shapes and precise roots retain ownership across
+coercion, resize and detach (**D5.2–D5.3**, **D6.2.3v2**). Existing numeric-only
+constructor proofs retain their fast path; publishing unused global constructors
+does not invalidate ordinary-array optimizations. Other typed-array methods,
+the dynamic-source interpreter bridge and realm support remain open. The preceding
+typed-view pin passes **223/223** focused and GC-stress checks, **292/315** selected IDs in
+every required mode, and **40,261/40,261** full-LJS Test262 cases. This retains
+**72** additional selected passes over the preceding typed-view increment.
+Shared MIR root analysis now reuses one predecessor graph (**D5.3.1**,
+**D8.6.1**); the Lambda/Input gate passes **6,863/6,863**. Isolated replays
+resolve interrupted results; **23** selected cases remain unsupported, and the
+original timeout captures remain archived. Detailed evidence is recorded in the
+implementation plan; no new whole-population coverage or performance claim is made.
+
+The next typed-array increment adds map/filter, forEach, every/some, four find
+variants and both reductions through the shared callback algorithm. Species,
+conversion and exact-root ownership reuse the existing runtime operations
+(**D1.3v3**, **D5.2–D5.3**). Focused and forced-GC checks pass **227/227** each.
+All required modes pass for **807/842** selected IDs: **515/550** callback cases
+and all **292** preceding selected passes. Full-LJS passes **40,261/40,261**.
+The remaining 35 selected cases require the dynamic-Function interpreter bridge.
+The Lambda/Input gate passes **6,880/6,881** twice, with one LaTeX corpus timeout
+that passes three isolated replays; aggregate acceptance remains open. A planner
+follow-up admits computed typed-method calls and passes **227/227** focused
+checks. A further planner change uses inferred non-numeric keys to admit saved
+method aliases while retaining numeric-loop specialization (**D8.4.1v2**).
+That follow-up passes **227/227** focused and **227/227** forced/poisoned-GC
+checks. Its fresh audit also passes **807/842** selected IDs in every required
+mode, including **779/779** additional strict variants, with no timeouts, missing
+outcomes or lost preceding selected passes. Full-LJS also passes
+**40,261/40,261**, zero regressions. Its Lambda/Input gate is in progress;
+whole-population coverage and timing remain open.
+
+The latest matched-release screen passes **84/84** output/backend contracts;
+two independent 31-round repeats cover the same eleven suspects. A 99-round
+follow-up leaves `object_retype_escaped` about **0.5–0.6%** slower by medians,
+positive against one control and inconclusive against the other. Its cause is
+unresolved. Sieve remains roughly **3 µs** slower against its original control
+(**0.091 vs 0.088 ms**); other historical gaps retain their controls and status.
+All captures, including noisy ones, are retained. Complete performance
+acceptance remains open. No jq workload was executed.
 
 Dependencies, reuse boundaries, acceptance cases and evidence requirements:
 [implementation plan](../impl/JS_MVP_Lmd_Test262_90.md).

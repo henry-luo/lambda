@@ -1,0 +1,50 @@
+{
+  "name": "clay_gallery presents clay surfaces and the shared component catalog",
+  "html": "test/ui/clay_gallery.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 1200
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".clay-root"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#clay-orders tbody tr"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#clay-goal"
+      },
+      "attribute": "aria-valuenow",
+      "equals": "78"
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_clay/gallery.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#clay-period-item-0"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#clay-period-item-0"
+      },
+      "attribute": "aria-checked",
+      "equals": "true"
+    }
+  ]
+}

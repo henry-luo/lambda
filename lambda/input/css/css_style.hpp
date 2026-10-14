@@ -1875,6 +1875,11 @@ enum CssTextDecorationLineFlag : uint8_t {
 };
 uint8_t css_text_decoration_line_flag(CssEnum keyword);
 bool css_property_validate_value(CssPropertyCode id, const CssValue* value);
+typedef bool (*CssCursorImageVisitor)(const char* url, double hotspot_x,
+                                       double hotspot_y, bool has_hotspot, void* context);
+// Parse cursor image alternatives and the mandatory keyword fallback once for all consumers.
+bool css_cursor_value_parse(const CssValue* value, CssEnum* fallback,
+                            CssCursorImageVisitor visitor, void* context);
 uint8_t css_intrinsic_size_axes(CssPropertyCode property, bool vertical);
 bool css_property_is_svg_paint(CssPropertyCode id);
 bool css_property_is_svg_resource(CssPropertyCode id);

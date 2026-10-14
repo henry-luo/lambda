@@ -1,0 +1,586 @@
+{
+  "name": "CellScope local specimen navigation and comparison",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 60
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('.specimen img')).every(el=>{const r=el.getBoundingClientRect();return r.width===48&&r.height===44})"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('.specimen').length===3&&['search','choose-epithelial','choose-neuron','choose-bacteria','choose-animal'].every(id=>document.getElementById(id)===null)&&Array.from(document.querySelectorAll('#peer option')).map(o=>o.value).join(',')==='plant,whiteBlood,muscle'"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('scene3d').length===2 && document.querySelectorAll('script').length===0"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#cell-scene #imported-specimen').getAttribute('data-model')==='plant' && document.querySelector('#cell-scene #imported-specimen').getAttribute('data-error')==='' && document.querySelector('#cell-scene texture').getAttribute('src').endsWith('/plant-basecolor.jpg')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#choose-plant"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cellscope').getAttribute('data-cell')==='plant'"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#cell-scene",
+      "width": 256,
+      "height": 192,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 300
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "scene3d",
+      "target": "#cell-scene",
+      "width": 512,
+      "height": 384,
+      "file": "temp/cellscope-plant.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#part-plant-vacuole"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cellscope').getAttribute('data-part')==='vacuole' && document.getElementById('detail-plant-vacuole').style.display==='block'"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.loadedPlant=document.querySelector('#cell-scene #imported-specimen').firstElementChild"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#cell-scene #imported-specimen').firstElementChild===loadedPlant"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('model-error').style.display==='none' && document.querySelectorAll('#cell-scene texture').length===1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#choose-plant"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#favorite"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#library"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('choose-whiteBlood').style.display==='none' && document.getElementById('choose-plant').style.display==='flex'"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#gallery"
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#peer"
+      },
+      "value": "plant"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#compare"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cellscope').getAttribute('data-compare')==='true' && document.querySelector('#peer-scene #imported-specimen').getAttribute('data-model')==='plant'"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#peer-scene",
+      "width": 256,
+      "height": 192,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 300
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#peer"
+      },
+      "value": "plant"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#peer-scene #imported-specimen').getAttribute('data-model')==='plant' && document.querySelector('#cell-scene #imported-specimen').getAttribute('data-model')==='plant'"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#peer-scene",
+      "width": 256,
+      "height": 192,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 300
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/cellscope-comparison.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#compare"
+      }
+    },
+    {
+      "type": "script",
+      "js": "globalThis.cameraBefore=document.querySelector('#cell-scene #camera').getAttribute('position')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#cell-scene #camera').getAttribute('position')!==cameraBefore"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-in"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const c=document.querySelector('#cell-scene #camera');const p=c.getAttribute('position').trim().split(/[,\\s]+/).map(Number);return Number(c.getAttribute('fov'))<2&&Math.abs(Math.hypot(...p)-4)<0.00001&&c.getAttribute('fov')===document.querySelector('#peer-scene #camera').getAttribute('fov')})()"
+    },
+    {
+      "type": "capture_surface",
+      "source": "scene3d",
+      "target": "#cell-scene",
+      "width": 512,
+      "height": 384,
+      "file": "temp/cellscope-zoom.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zoom-out"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const c=document.querySelector('#cell-scene #camera');const p=c.getAttribute('position').trim().split(/[,\\s]+/).map(Number);return Number(c.getAttribute('fov'))===42&&Math.abs(Math.hypot(...p)-6.5)<0.00001})()"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "script",
+      "js": "globalThis.pose=document.querySelector('#cell-scene #camera').getAttribute(\"position\");document.getElementById(\"cell-scene\").focus()"
+    },
+    {
+      "type": "pointer_drag",
+      "pointerType": "mouse",
+      "target": {
+        "selector": "#cell-scene"
+      },
+      "dx": 50,
+      "dy": 25,
+      "steps": 3
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#cell-scene #camera').getAttribute(\"position\")!==pose"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.pose=document.querySelector('#cell-scene #camera').getAttribute(\"position\")"
+    },
+    {
+      "type": "key_press",
+      "key": "Right",
+      "mods_str": ""
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#cell-scene #camera').getAttribute(\"position\")!==pose"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rotate"
+      }
+    },
+    {
+      "type": "script",
+      "js": "globalThis.pose=document.querySelector('#cell-scene #camera').getAttribute(\"position\")"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#cell-scene #camera').getAttribute(\"position\")!==pose"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rotate"
+      }
+    },
+    {
+      "type": "script",
+      "js": "globalThis.pose=document.querySelector('#cell-scene #camera').getAttribute(\"position\")"
+    },
+    {
+      "type": "advance_time",
+      "ms": 200
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#cell-scene #camera').getAttribute(\"position\")===pose"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/cellscope-desktop.png"
+    }
+  ]
+}

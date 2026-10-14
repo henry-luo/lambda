@@ -6,6 +6,12 @@
 #include <string.h>
 
 void parse_math(Input* input, const char* math_string, const char* flavor_str) {
+    // MathML is XML, never a spelling that may fall through to the TeX parser.
+    if (input && flavor_str && strcmp(flavor_str, "mathml") == 0) {
+        Element* root = parse_mathml_document(input, math_string);
+        input->root = root ? Item{.element = root} : ItemError;
+        return;
+    }
     if (!input || !math_string || !*math_string) {
         if (input) input->root = ItemNull;
         return;

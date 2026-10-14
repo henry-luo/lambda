@@ -1,0 +1,14 @@
+{
+  "name": "Native startup fullscreen exits through Escape",
+  "html": "test/native/fullscreen/window.ls",
+  "events": [
+    {"type":"wait","ms":100},
+    {"type":"assert_attribute","target":{"selector":"#result"},"attribute":"data-available","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#result"},"attribute":"data-mode","equals":"true"},
+    {"type":"key_press","key":"Escape"},
+    {"type":"wait","ms":200},
+    {"type":"assert_attribute","target":{"selector":"#result"},"attribute":"data-mode","equals":"false"},
+    {"type":"assert_attribute","target":{"selector":"#result"},"attribute":"data-metrics","equals":"true"},
+    {"type":"assert_attribute","target":{"selector":"#result"},"attribute":"data-error","equals":"false"}
+  ]
+}

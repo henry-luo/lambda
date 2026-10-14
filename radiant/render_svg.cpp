@@ -1,5 +1,6 @@
 #include "render.hpp"
 #include "geomap.hpp"
+#include "scene3d.hpp"
 #include "view.hpp"
 #include "layout.hpp"
 #include "render_effect_raster_fallback.hpp"
@@ -631,6 +632,11 @@ static void svg_cb_render_image(RenderContext* vctx, ViewBlock* block, float abs
     }
 }
 
+static void svg_cb_render_scene3d(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    auto* ctx = (SvgRenderContext*)vctx;
+    if (scene3d_paint_content(svg_active_paint_list(ctx),ctx->ui_context,block,abs_x,abs_y)) svg_lower_paint_list(ctx);
+}
+
 static void svg_cb_render_geomap(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
     auto* ctx = (SvgRenderContext*)vctx;
     BlockBlot parent = {};
@@ -979,6 +985,7 @@ static RenderBackend svg_make_backend(SvgRenderContext* ctx) {
     b.render_image          = svg_cb_render_image;
     b.render_inline_svg     = svg_cb_render_inline_svg;
     b.render_geomap         = svg_cb_render_geomap;
+    b.render_scene3d        = svg_cb_render_scene3d;
     b.render_svg_subscene   = svg_cb_render_svg_subscene;
     b.begin_block_children  = svg_cb_begin_block_children;
     b.end_block_children    = svg_cb_end_block_children;
@@ -1166,7 +1173,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, float width, fl
     render_profiler_emit_path_trace(nullptr, uicon, state, &trace);
 
     // Extract the final SVG string
-    char* result = mem_strdup(ctx.svg_content->str, MEM_CAT_RENDER);
+    char* result = uicon->render_failed ? nullptr : mem_strdup(ctx.svg_content->str, MEM_CAT_RENDER);
     strbuf_free(ctx.svg_content);
     paint_list_destroy(&ctx.paint_list);
     paint_list_destroy(&ctx.effect_fallback.paint_list);

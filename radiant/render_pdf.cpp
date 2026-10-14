@@ -1,5 +1,6 @@
 #include "render.hpp"
 #include "geomap.hpp"
+#include "scene3d.hpp"
 #include "render_effect_raster_fallback.hpp"
 #include "render_glyph_run_raster_lower.hpp"
 #include "view.hpp"
@@ -1433,6 +1434,11 @@ static void pdf_cb_visit_element(RenderContext* vctx, ViewElement* view,
     }
 }
 
+static void pdf_cb_render_scene3d(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    auto* ctx = (PdfRenderContext*)vctx;
+    if (scene3d_paint_content(pdf_active_paint_list(ctx),ctx->ui_context,block,abs_x,abs_y)) pdf_lower_paint_list(ctx);
+}
+
 static void pdf_cb_render_geomap(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
     auto* ctx = (PdfRenderContext*)vctx;
     BlockBlot parent = {};
@@ -1666,6 +1672,7 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
     b.render_image     = pdf_cb_render_image;
     b.render_inline_svg = pdf_cb_render_inline_svg;
     b.render_geomap = pdf_cb_render_geomap;
+    b.render_scene3d = pdf_cb_render_scene3d;
     b.render_svg_subscene = pdf_cb_render_svg_subscene;
     b.visit_element     = pdf_cb_visit_element;
     b.begin_block_children  = NULL;
@@ -1792,6 +1799,7 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     render_profiler_emit_path_trace(nullptr, uicon, nullptr, &trace);
 
     pdf_context_destroy(&ctx);
+    if (uicon->render_failed) { HPDF_Free(ctx.pdf_doc);return nullptr; }
     return ctx.pdf_doc;
 }
 

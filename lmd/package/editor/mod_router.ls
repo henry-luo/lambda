@@ -152,25 +152,39 @@ pub fn compute_route(connector, doc) {
 
 pub fn route_to_svg_path(points) => polyline_to_svg_d(points)
 
+// share corner control geometry between SVG emission and geometric selection.
+pub fn curved_corner(prev, cur, next, radius) {
+  let in_dx = sign(cur.x - prev.x)
+  let in_dy = sign(cur.y - prev.y)
+  let out_dx = sign(next.x - cur.x)
+  let out_dy = sign(next.y - cur.y)
+  let in_len = min(radius, hypot(cur.x - prev.x, cur.y - prev.y) / 2.0)
+  let out_len = min(radius, hypot(next.x - cur.x, next.y - cur.y) / 2.0);
+  {entry: {x: cur.x - in_dx * in_len, y: cur.y - in_dy * in_len}, control: cur,
+   exit: {x: cur.x + out_dx * out_len, y: cur.y + out_dy * out_len}}
+}
+
 fn curved_at(points, radius, i, last_i, acc) {
   if (i >= last_i) { acc }
   else {
-    let prev = points[i - 1]
-    let cur  = points[i]
-    let next = points[i + 1]
-    let in_dx  = sign(cur.x - prev.x)
-    let in_dy  = sign(cur.y - prev.y)
-    let out_dx = sign(next.x - cur.x)
-    let out_dy = sign(next.y - cur.y)
-    let in_len  = min(radius, hypot(cur.x - prev.x, cur.y - prev.y) / 2.0)
-    let out_len = min(radius, hypot(next.x - cur.x, next.y - cur.y) / 2.0)
-    let p1 = {x: cur.x - in_dx * in_len,  y: cur.y - in_dy * in_len}
-    let p2 = {x: cur.x + out_dx * out_len, y: cur.y + out_dy * out_len}
-    let seg = " L " ++ (p1.x) ++ " " ++ (p1.y) ++
-              " Q " ++ (cur.x) ++ " " ++ (cur.y) ++
-              " " ++ (p2.x) ++ " " ++ (p2.y)
+    let corner = curved_corner(points[i - 1], points[i], points[i + 1], radius)
+    let seg = " L " ++ (corner.entry.x) ++ " " ++ (corner.entry.y) ++
+              " Q " ++ (corner.control.x) ++ " " ++ (corner.control.y) ++
+              " " ++ (corner.exit.x) ++ " " ++ (corner.exit.y)
     curved_at(points, radius, i + 1, last_i, acc ++ seg)
   }
+}
+
+pub fn route_to_curved_points(points, radius, steps = 8) {
+  if (len(points) < 3) points
+  else (
+    let count = max(2, min(32, steps)),
+    [points[0], *[for (i in 1 to len(points) - 2)
+      *(let c = curved_corner(points[i - 1], points[i], points[i + 1], radius),
+        [for (j in 0 to count) (let t = j / count,
+          {x: (1-t)*(1-t)*c.entry.x + 2*(1-t)*t*c.control.x + t*t*c.exit.x,
+           y: (1-t)*(1-t)*c.entry.y + 2*(1-t)*t*c.control.y + t*t*c.exit.y})])], points[len(points) - 1]]
+  )
 }
 
 // Curved SVG `d` with quarter-arc corners at each bend.

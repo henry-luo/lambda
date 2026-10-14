@@ -486,6 +486,7 @@ typedef enum SysFunc {
     SYSFUNC_RESIZE,           // resize(img, h, w) - bilinear resample
     SYSFUNC_ROTATE,           // rotate(img, deg) - bilinear rotation
     SYSFUNC_AFFINE_WARP,      // affine_warp(img, M) - 2x3 affine gather
+    SYSFUNC_IMAGE_PROCESS,    // image_process(img, options) - bounded RGBA pipeline
     SYSFUNC_ALL,
     SYSFUNC_ANY,
     SYSFUNC_MIN1,
@@ -670,6 +671,9 @@ typedef enum SysFunc {
     // reactive UI event dispatch
     SYSPROC_EMIT,            // emit(event_name, data) - dispatch event to parent template handler
     SYSFUNC_PDF_PARSE_CONTENT_STREAM,  // pdf_parse_content_stream(bytes) - fast PDF content tokenizer
+    SYSFUNC_PS_SCAN,         // ps_scan(bytes, offset, limits) - one bounded PostScript source object
+    SYSFUNC_PS_READ,         // ps_read(bytes, offset, request) - bounded byte/codec read
+    SYSFUNC_PS_PNG,          // ps_png(planes, geometry, limits) - portable image transport
     SYSFUNC_PDF_REGISTER_SVG_IMAGE_RESOLVER,  // pdf_register_svg_image_resolver(svg, pdf) - bind PDF image handles to SVG root
     SYSFUNC_CONTENT,          // content(e) - read-only array view over an element's content (LR09-9)
     SYSPROC_PUSH,            // push(arr, val) - append val to a growable array in place (procedural)
@@ -696,6 +700,20 @@ typedef enum SysFunc {
     SYSPROC_IO_GREP,         // io.grep(source, pattern, options?) - line-oriented file search (lib/grep, GRP26)
     SYSPROC_IO_TEXT_SEARCH,       // io.text_search(source, query, options?) - ranked full-text file search (lib/fts, FTX11)
     SYSFUNC_PARSE3,         // parse(str, grammar, 'rule') - run a grammar from a named rule (GM5.1)
+    SYSFUNC_ERF,
+    SYSFUNC_ERFC,
+    SYSFUNC_FFT,
+    SYSFUNC_IFFT,
+    SYSFUNC_RFFT,
+    SYSFUNC_IRFFT,
+    SYSFUNC_SOLVE,
+    SYSFUNC_LSTSQ,
+    SYSFUNC_ORIENT2D,
+    SYSFUNC_ORIENT3D,
+    SYSFUNC_INCIRCLE,
+    SYSFUNC_PHYSICS_SIMULATE,
+    SYSFUNC_PHYSICS_VALIDATE,
+    SYSFUNC_PHYSICS_QUERY,
 } SysFunc;
 
 typedef struct Type {
@@ -3141,6 +3159,22 @@ extern "C" {
     // random number generation (pure functional, SplitMix64)
     Item fn_math_random(Item seed);
 
+    // scientific kernels (math module); boxed boundaries preserve error results
+    Item fn_math_erf(Item a);
+    Item fn_math_erfc(Item a);
+    Item fn_math_fft(Item a);
+    Item fn_physics_simulate(Item scene, Item options);
+    Item fn_physics_validate(Item scene);
+    Item fn_physics_query(Item scene, Item queries);
+    Item fn_math_ifft(Item a);
+    Item fn_math_rfft(Item a);
+    Item fn_math_irfft(Item a, Item length);
+    Item fn_math_solve(Item a, Item b);
+    Item fn_math_lstsq(Item a, Item b);
+    Item fn_math_orient2d(Item a, Item b, Item c);
+    Item fn_math_orient3d(Item a, Item b, Item c, Item d);
+    Item fn_math_incircle(Item a, Item b, Item c, Item d);
+
     // ============================================================================
     // UNBOXED SYSTEM FUNCTIONS (fn_*_u)
     // Native C implementations that bypass Item boxing overhead.
@@ -3229,6 +3263,7 @@ extern "C" {
                            int64_t stride_h, int64_t stride_w, int64_t pad_h, int64_t pad_w);
     Item fn_convolve(Item img, Item kernel);       // weighted-sum correlation (DOT)
     Item fn_blur(Item img, Item ksize);            // box (mean) blur
+    Item fn_image_process(Item img, Item options); // fused, bounded RGBA8 processing
     Item fn_erode(Item img, Item ksize);           // morphological min
     Item fn_dilate(Item img, Item ksize);          // morphological max
     Item fn_median_filter(Item img, Item ksize);   // rank (median) filter

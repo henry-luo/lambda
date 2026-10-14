@@ -136,9 +136,13 @@ bool view_css_context_begin(ViewTree* tree) {
     css->engine->container_provider = view_css_container_provider;
     css->engine->container_context = tree;
     DomDocument* doc = tree->model->document;
-    // the GCPM Appendix B fallback stays at UA origin so author resets can override it.
-    CssStylesheet* defaults = css_parse_stylesheet(css->engine,
-        "::footnote-call { font-size: 65%; vertical-align: super }", nullptr);
+    // HTML element defaults come from the default view's shared table; they and the GCPM
+    // Appendix B fallback stay at UA origin so author resets can override them.
+    StrBuf* ua = strbuf_new();
+    if (ua) strbuf_append_str(ua, "::footnote-call { font-size: 65%; vertical-align: super }");
+    const char* ua_text = ua && layout_html_ua_stylesheet(ua) ? pool_strdup(css->pool, ua->str) : nullptr;
+    if (ua) strbuf_free(ua);
+    CssStylesheet* defaults = ua_text ? css_parse_stylesheet(css->engine, ua_text, nullptr) : nullptr;
     css->stylesheet_count = (size_t)doc->stylesheet_count + 1;
     css->stylesheets = lam::up((CssStylesheet**)pool_calloc(css->pool,
         css->stylesheet_count * sizeof(CssStylesheet*)));
@@ -842,6 +846,7 @@ static bool view_css_font_style(ViewTree* tree, ViewCssStyle* style, ViewCssStyl
         style->font.font_style = parent->font.font_style;
         style->font.letter_spacing = parent->font.letter_spacing;
         style->font.word_spacing = parent->font.word_spacing;
+        style->font.font_size_from_medium = parent->font.font_size_from_medium;
         for (size_t i = 0; i < 3; i++) style->font_values[i] = parent->font_values[i];
         style->color = parent->color;
     } else {
@@ -849,13 +854,21 @@ static bool view_css_font_style(ViewTree* tree, ViewCssStyle* style, ViewCssStyl
         style->font.font_size = 16.0f;
         style->font.font_weight_numeric = 400;
         style->font.font_style = CSS_VALUE_NORMAL;
+        style->font.font_size_from_medium = true;
         style->color = {.r = 0, .g = 0, .b = 0, .a = 255};
     }
     style->font.used_zoom = 1.0f;
     style->font_box.style = lam::up(&style->font);
     style->font_box.current_font_size = style->font.font_size;
-    value = view_css_property(tree, style, "font-size");
+    CssDeclaration size_source = {};
+    value = view_css_property(tree, style, "font-size", &size_source);
     if (value && !css_value_is_inherit(value) && !css_value_is_unset(value)) {
+        // medium lineage drives the monospace size; UA heading sizes keep the inherited lineage.
+        HtmlUaElementDefault ua = {};
+        bool keeps = size_source.origin == CSS_ORIGIN_USER_AGENT && style->source && !style->pseudo_element &&
+            layout_html_ua_element_default(style->source->tag_id, &ua) && ua.keeps_medium;
+        if (!keeps) style->font.font_size_from_medium = value->type == CSS_VALUE_TYPE_KEYWORD &&
+            value->data.keyword == CSS_VALUE_MEDIUM;
         float size = NAN;
         if (value->type == CSS_VALUE_TYPE_KEYWORD) {
             size = value->data.keyword == CSS_VALUE_LARGER ? style->font.font_size * 1.2f :
@@ -874,6 +887,9 @@ static bool view_css_font_style(ViewTree* tree, ViewCssStyle* style, ViewCssStyl
         style->font.family = lam::up(const_cast<char*>(family ? family : "serif"));
         // the flattened renderer family string cannot reconstruct quoted names containing commas.
         style->font_values[0] = lam::up(css_value_is_initial(value) ? nullptr : value);
+        layout_apply_monospace_medium_size(&style->font, parent ? &parent->font : nullptr);
+        style->font_box.current_font_size = style->font.font_size;
+        if (!parent && !style->page_context) css->root_font_size = style->font.font_size;
     }
     style->font.font_style = view_css_keyword(tree, style, "font-style", CSS_VALUE_NORMAL,
         parent ? parent->font.font_style : CSS_VALUE_NORMAL, true);
@@ -1091,32 +1107,16 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
     lam::Up<const CssValue>* destinations[] = {&style->width, &style->height, &style->min_width,
         &style->max_width, &style->min_height, &style->max_height};
     for (size_t i = 0; i < 6; i++) *destinations[i] = lam::up(view_css_property(tree, style, lengths[i]));
-    size_t list_level = 0;
-    if (element && !pseudo_element && layout_is_html_list_container_tag(element->tag_id)) {
-        if (!style->padding[3]) style->padding[3] = lam::up(css_value_create_length(css->pool, 40.0, CSS_UNIT_PX));
-        bool nested = false;
-        for (DomElement* ancestor = element->parent_element(); ancestor; ancestor = ancestor->parent_element())
-            if (layout_is_html_list_container_tag(ancestor->tag_id)) { nested = true; list_level++; }
-        for (size_t edge = 0; edge < 4; edge += 2)
-            if (!style->margin[edge]) style->margin[edge] = lam::up(css_value_create_length(css->pool, nested ? 0.0 : 1.0, CSS_UNIT_EM));
-    }
     style->text_align = view_css_keyword(tree, style, "text-align", CSS_VALUE_START,
         parent ? parent->text_align : CSS_VALUE_START, true);
-    // the HTML caption UA alignment is overridden by any authored text-align declaration.
-    if (element && !pseudo_element && element->tag_id == MARKUP_NAME_CAPTION && !view_css_property(tree, style, "text-align"))
-        style->text_align = CSS_VALUE_CENTER;
     style->white_space = view_css_keyword(tree, style, "white-space", CSS_VALUE_NORMAL,
         parent ? parent->white_space : CSS_VALUE_NORMAL, true);
     style->caption_side = view_css_keyword(tree, style, "caption-side", CSS_VALUE_TOP,
         parent ? parent->caption_side : CSS_VALUE_TOP, true);
+    style->border_collapse = view_css_keyword(tree, style, "border-collapse", CSS_VALUE_SEPARATE,
+        parent ? parent->border_collapse : CSS_VALUE_SEPARATE, true);
     style->list_style_type = parent ? parent->list_style_type : CSS_VALUE_DISC;
     style->list_style_string = parent ? parent->list_style_string : nullptr;
-    if (element && !pseudo_element && element->tag_id == MARKUP_NAME_OL) {
-        style->list_style_type = CSS_VALUE_DECIMAL; style->list_style_string = nullptr;
-    } else if (element && !pseudo_element && layout_is_html_list_container_tag(element->tag_id)) {
-        style->list_style_type = list_level == 0 ? CSS_VALUE_DISC : list_level == 1 ? CSS_VALUE_CIRCLE : CSS_VALUE_SQUARE;
-        style->list_style_string = nullptr;
-    }
     value = view_css_property(tree, style, "list-style-type");
     if (value && (css_value_is_inherit(value) || css_value_is_unset(value))) {
         style->list_style_type = parent ? parent->list_style_type : CSS_VALUE_DISC;
@@ -1390,25 +1390,28 @@ static ViewCssStyle* view_css_page_context_style(ViewTree* tree, ViewCssStyle* p
     return style;
 }
 
+float view_css_border_width(ViewTree* tree, const ViewCssStyle* source, size_t side, float width) {
+    CssEnum border_style = source->border_style[side];
+    if (border_style == CSS_VALUE_NONE || border_style == CSS_VALUE_HIDDEN) return 0.0f;
+    const CssValue* value = source->border_width[side];
+    return !value || value->type == CSS_VALUE_TYPE_KEYWORD
+        ? layout_css_border_width_keyword(value ? value->data.keyword : CSS_VALUE_MEDIUM)
+        : view_css_length(tree, source, value, radiant_border_width_property(static_cast<CssBoxSide>(side)), width, NAN);
+}
+
 ViewModelStatus view_css_box_edges(ViewTree* tree, const ViewCssStyle* source,
         float width, ViewCssBoxEdges* box) {
     *box = {};
     box->background.color = source->background;
     for (size_t i = 0; i < 4; i++) {
         CssBoxSide side = static_cast<CssBoxSide>(i);
-        CssPropertyCode width_property = radiant_border_width_property(side);
         CssPropertyCode padding_property = radiant_box_side_property(CSS_PROPERTY_PADDING, side);
         const CssValue* value = source->padding[i];
         box->padding[i] = value ? view_css_length(tree, source, value, padding_property, width, NAN) : 0.0f;
         CssEnum border_style = source->border_style[i];
         if (border_style != CSS_VALUE_NONE && border_style != CSS_VALUE_HIDDEN && border_style != CSS_VALUE_SOLID) return VIEW_MODEL_INVALID_ARGUMENT;
         box->border.styles[i] = border_style;
-        value = source->border_width[i];
-        if (border_style != CSS_VALUE_NONE && border_style != CSS_VALUE_HIDDEN) {
-            box->border.width.values[i] = !value || value->type == CSS_VALUE_TYPE_KEYWORD
-                ? layout_css_border_width_keyword(value ? value->data.keyword : CSS_VALUE_MEDIUM)
-                : view_css_length(tree, source, value, width_property, width, NAN);
-        }
+        box->border.width.values[i] = view_css_border_width(tree, source, i, width);
         box->edges[i] = box->padding[i] + box->border.width.values[i];
         if (!isfinite(box->padding[i]) || box->padding[i] < 0.0f ||
             !isfinite(box->border.width.values[i]) || box->border.width.values[i] < 0.0f) return VIEW_MODEL_INVALID_ARGUMENT;

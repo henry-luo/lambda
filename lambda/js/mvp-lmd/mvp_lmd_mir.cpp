@@ -2,6 +2,7 @@
 #include "mvp_lmd_runtime.h"
 #include "../js_transpiler.hpp"
 #include "../js_runtime.h"
+#include "../js_typed_array.h"
 #include "../../runtime/mir_emitter_shared.hpp"
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/heap_api.h"
@@ -24,11 +25,13 @@ enum LmdIntrinsic { I_UNDEFINED = 1, I_NAN, I_INFINITY, I_MAP, I_OBJECT,
     I_MATH, I_INT32_ARRAY, I_UINT8_ARRAY, I_FLOAT64_ARRAY, I_ARRAY, I_STRING, I_ERROR,
     I_NUMBER, I_PARSE_INT, I_IS_NAN, I_PERFORMANCE, I_CONSOLE, I_PROCESS, I_REQUIRE, I_JSON, I_DATE, I_REGEXP, I_GLOBAL_THIS, I_SYMBOL, I_SET, I_REFLECT, I_PROXY,
     I_EVAL_ERROR, I_RANGE_ERROR, I_REFERENCE_ERROR, I_SYNTAX_ERROR, I_TYPE_ERROR, I_URI_ERROR, I_AGGREGATE_ERROR,
-    I_BOOLEAN, I_BIGINT, I_FUNCTION, I_COUNT };
+    I_BOOLEAN, I_BIGINT, I_FUNCTION, I_ARRAYBUFFER, I_DATAVIEW, I_TEST262, I_INT8_ARRAY, I_INT16_ARRAY, I_UINT16_ARRAY,
+    I_UINT32_ARRAY, I_FLOAT32_ARRAY, I_UINT8_CLAMPED_ARRAY, I_BIGINT64_ARRAY, I_BIGUINT64_ARRAY, I_FLOAT16_ARRAY, I_COUNT };
 static const char* intrinsic_names[] = {"undefined", "NaN", "Infinity", "Map", "Object",
     "Math", "Int32Array", "Uint8Array", "Float64Array", "Array", "String", "Error",
     "Number", "parseInt", "isNaN", "performance", "console", "process", "require", "JSON", "Date", "RegExp", "globalThis", "Symbol", "Set", "Reflect", "Proxy",
-    "EvalError", "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError", "Boolean", "BigInt", "Function"};
+    "EvalError", "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError", "Boolean", "BigInt", "Function", "ArrayBuffer", "DataView", "$262", "Int8Array", "Int16Array", "Uint16Array",
+    "Uint32Array", "Float32Array", "Uint8ClampedArray", "BigInt64Array", "BigUint64Array", "Float16Array"};
 // MIR needs ABI offsets for inherited callable and nominal class records, as in the Lambda emitter.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winvalid-offsetof"
@@ -38,6 +41,13 @@ static constexpr size_t LMD_CLASS_FIELD_KEYS_OFFSET = offsetof(MvpLmdClass, fiel
 static constexpr size_t LMD_CLASS_INITIALIZERS_OFFSET = offsetof(MvpLmdClass, initializers);
 #pragma clang diagnostic pop
 static const ArrayNumElemType typed_lanes[] = {ELEM_INT32, ELEM_UINT8, ELEM_FLOAT64};
+static const int typed_intrinsics[] = {I_INT8_ARRAY, I_UINT8_ARRAY, I_INT16_ARRAY, I_UINT16_ARRAY,
+    I_INT32_ARRAY, I_UINT32_ARRAY, I_FLOAT32_ARRAY, I_FLOAT64_ARRAY, I_UINT8_CLAMPED_ARRAY,
+    I_BIGINT64_ARRAY, I_BIGUINT64_ARRAY, I_FLOAT16_ARRAY};
+static int typed_intrinsic(int id) {
+    for (int type = 0; type < 12; type++) if (typed_intrinsics[type] == id) return type;
+    return -1;
+}
 static const struct { const char* name; const char* native; int arity;
     double (*unary)(double); double (*binary)(double, double); bool binary_once = false; } math_operations[] = {
     {"sqrt", "sqrt", 1, sqrt}, {"sin", "sin", 1, sin}, {"floor", "floor", 1, floor}, {"trunc", "trunc", 1, trunc},
@@ -187,6 +197,7 @@ struct MvpLmdProgram {
     bool map_method_overrides;
     bool primitive_method_overrides;
     bool math_observed;
+    bool date_observed;
     ArrayList* classes;
     bool receiver_abi;
     bool deletes_properties;
@@ -206,6 +217,13 @@ struct MvpLmdProgram {
     uint32_t error_slot;
     bool primitives;
     uint32_t primitive_slot;
+    bool buffers;
+    bool test262_host;
+    uint32_t buffer_slot;
+    bool typed_storage;
+    bool typed_explicit;
+    bool typed_members;
+    uint32_t typed_slot;
 };
 struct MvpLmdExecution {
     MvpLmdProgram program;
@@ -957,6 +975,20 @@ static void walk(AstNode* n, LmdWalk* state) {
                     if (!direct && (!member_owner || !member || named(member, "prototype")))
                         p->primitive_method_overrides = true;
                     if (i + 1 == I_BIGINT) p->bigints = true;
+                } else if (typed_intrinsic(i + 1) >= 0) {
+                    p->typed_explicit = true;
+                    bool simple = constructor && parent->node_type == AST_NODE_NEW_EXPR &&
+                        i + 1 >= I_INT32_ARRAY && i + 1 <= I_FLOAT64_ARRAY;
+                    AstNode* argument = simple ? ((AstCallNode*)parent)->arguments : NULL;
+                    if (!simple || (argument && (argument->next || argument->node_type == AST_NODE_ARRAY ||
+                            argument->node_type == AST_NODE_OBJECT_LITERAL || argument->node_type == AST_NODE_NEW_EXPR)))
+                        p->typed_storage = true;
+                } else if (i + 1 == I_TEST262) {
+                    if (!p->test262_host) continue;
+                    activate_library(p, n); p->buffers = p->primitives = p->property_callbacks = true;
+                } else if (i + 1 == I_ARRAYBUFFER || i + 1 == I_DATAVIEW) {
+                    activate_library(p, n); p->buffers = p->primitives = p->property_callbacks = true;
+                    p->intrinsics[i].kinds = K_FUNCTION;
                 } else if (i + 1 == I_FUNCTION) {
                     activate_library(p, n); p->property_callbacks = true;
                     p->intrinsics[i].kinds = K_FUNCTION;
@@ -971,6 +1003,7 @@ static void walk(AstNode* n, LmdWalk* state) {
                     p->immutable_objects = false;
                 } else if (i + 1 >= I_JSON) {
                     activate_library(p, n);
+                    if (i + 1 == I_DATE) p->date_observed = true;
                     if (i + 1 == I_SYMBOL) p->symbols = p->iterators = true;
                     if (i + 1 == I_SET) p->iterators = true;
                     if (i + 1 == I_REFLECT || i + 1 == I_PROXY) p->property_callbacks = true;
@@ -1034,8 +1067,18 @@ static void walk(AstNode* n, LmdWalk* state) {
         AstFieldNode* field = (AstFieldNode*)n;
         String* spelling = member_spelling(field);
         int collection_method = spelling ? mvp_lmd_builtin_method(spelling) : 0;
+        // typed callbacks share Array spellings, not the Map collection table.
+        int indexed_method = spelling ? mvp_lmd_builtin_method(spelling, LMD_TYPE_ARRAY) : 0;
         bool method_call = state->parent && state->parent->node_type == AST_NODE_CALL_EXPR &&
             ((AstCallNode*)state->parent)->callee == n;
+        // these operations observe a typed view beyond the raw numeric lane.
+        // apply the requirement after gathering so declaration order is irrelevant.
+        if (named(spelling, "subarray") || named(spelling, "buffer") || named(spelling, "byteOffset") ||
+                named(spelling, "byteLength") || named(spelling, "keys") || named(spelling, "values") || named(spelling, "entries") ||
+                (mvp_lmd_array_visit_method(indexed_method) && indexed_method != LMD_METHOD_FLAT_MAP) ||
+                // computed calls observe the typed prototype even without a known method name.
+                (!spelling && method_call))
+            p->typed_members = true;
         AstNode* consumer = method_call ? ast_index_parent(&p->frontend->ast_index, state->parent) : NULL;
         AstIdentNode* receiver = field->object->node_type == AST_NODE_IDENT ? (AstIdentNode*)field->object : NULL;
         // borrowed methods and Object reflection can box receivers without spelling a primitive constructor.
@@ -1432,7 +1475,7 @@ static unsigned kind(MvpLmdProgram* p, AstNode* n, LmdInlineFrame* facts = NULL)
         LmdBinding* ctor = call->callee->node_type == AST_NODE_IDENT
             ? identifier_binding(p, (AstIdentNode*)call->callee) : NULL;
         return ctor && ctor->intrinsic == I_ARRAY ? K_ARRAY :
-            ctor && ctor->intrinsic >= I_INT32_ARRAY && ctor->intrinsic <= I_FLOAT64_ARRAY ? K_TYPED_ARRAY :
+            ctor && typed_intrinsic(ctor->intrinsic) >= 0 ? (p->typed_storage ? K_OBJECT : K_TYPED_ARRAY) :
             ctor && ctor->intrinsic == I_MAP ? K_MAP : K_OBJECT | K_ARRAY | K_TYPED_ARRAY | K_FUNCTION;
     }
     case AST_NODE_CALL_EXPR: {
@@ -1542,7 +1585,7 @@ static LmdArrayFacts array_facts(MvpLmdProgram* p, AstNode* n) {
         AstCallNode* call = (AstCallNode*)n;
         LmdBinding* ctor = call->callee->node_type == AST_NODE_IDENT
             ? identifier_binding(p, (AstIdentNode*)call->callee) : NULL;
-        if (!ctor || ctor->intrinsic < I_INT32_ARRAY || ctor->intrinsic > I_FLOAT64_ARRAY) break;
+        if (p->typed_storage || !ctor || ctor->intrinsic < I_INT32_ARRAY || ctor->intrinsic > I_FLOAT64_ARRAY) break;
         LmdRange length = call->arguments ? range(p, call->arguments) : finite_range(0, 0);
         if (length.state == 2) length = finite_range(0, INT53_MAX);
         if (length.state == 1) length = finite_range(fmax(0, length.lower), fmax(0, length.upper));
@@ -2951,7 +2994,7 @@ static LmdValue read_binding(LmdCompiler* c, LmdBinding* b, AstNode* site, bool 
     if (b->reflected_global) return stable_item(c, global_binding_access(c, site, false, 0, false, b->entry->name));
     if (b->intrinsic == I_GLOBAL_THIS)
         return boxed(c, em_load_at(&c->em, module_slots(c), c->program->global_slot * sizeof(Item), MIR_T_I64, "global_this"), K_OBJECT);
-    if (b->intrinsic >= I_PERFORMANCE || ((b->intrinsic == I_ERROR ||
+    if (b->intrinsic >= I_PERFORMANCE || (c->program->typed_storage && typed_intrinsic(b->intrinsic) >= 0) || ((b->intrinsic == I_ERROR ||
             ((b->intrinsic == I_STRING || b->intrinsic == I_NUMBER) && c->program->primitives) ||
             b->intrinsic == I_OBJECT || b->intrinsic == I_ARRAY || b->intrinsic == I_MAP || b->intrinsic == I_MATH) && c->program->library_active))
         return boxed(c, em_load_at(&c->em, module_slots(c), b->slot * sizeof(Item), MIR_T_I64,
@@ -6513,7 +6556,8 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
         }
         if (c->program->receiver_abi && (!b || !b->intrinsic || b->intrinsic == I_ERROR ||
                 b->intrinsic == I_STRING || b->intrinsic == I_NUMBER || b->intrinsic >= I_JSON ||
-                (b->intrinsic == I_MAP && c->program->iterators))) {
+                (b->intrinsic == I_MAP && c->program->iterators) ||
+                (c->program->typed_storage && typed_intrinsic(b->intrinsic) >= 0))) {
             LmdValue constructor = box(c, expression(c, call->callee));
             MvpLmdClass* cls = class_plan(c->program, NULL, b);
             LmdFunction* initializer = cls && cls->reusable_layout
@@ -8191,10 +8235,13 @@ extern "C" Item mvp_lmd_class_new(MvpLmdClass* cls, Item base, Item constructor_
             MvpLmdClass* parent = mvp_lmd_class_record(parent_value.get());
             if (!parent || parent->program != cls->program) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
             MvpLmdCallable* parent_callable = (MvpLmdCallable*)parent_value.get().function;
-            // Symbol always throws during construction, so its heritage needs no builtin instance-slot allocator.
+            // buffer/view constructors allocate their internal slots before applying the live newTarget prototype.
+            MvpLmdLibraryState* library = mvp_lmd_program_library(cls->program);
             if (parent_callable->native_constructor && parent_callable->custom_new_target &&
-                    parent != &mvp_lmd_program_library(cls->program)->symbol &&
-                    mvp_lmd_error_kind(&parent->nominal, mvp_lmd_program_library(cls->program)) < 0)
+                    parent != &library->symbol && parent != &library->date &&
+                    (!library->typed_arrays || !lambda_nominal_derives_from(&parent->nominal, &library->typed_arrays[12].nominal)) && (!library->buffers ||
+                    (parent != &library->buffers[0] && parent != &library->buffers[1])) &&
+                    mvp_lmd_error_kind(&parent->nominal, library) < 0)
                 return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
             cls->nominal.base = &parent->nominal;
             cls->prototype_nominal.base = &parent->prototype_nominal;
@@ -8298,6 +8345,7 @@ static void plan_library_shapes(MvpLmdProgram* p, bool metadata_only = false) {
         const char* names[] = {"Date", "RegExp", "Object", "Array", "Generator", "Symbol", "Iterator", "Map", "Set"};
         for (int i = 0; i < 9; i++)
             plan_library_class(p, classes[i], names[i], i == 3 ? LMD_TYPE_ARRAY : LMD_TYPE_MAP);
+        p->library->date.nominal.base = &p->library->object.nominal;
         p->library->regexp.nominal.base = &p->library->object.nominal;
         p->library->generator.nominal.base = &p->library->object.nominal;
         p->library->iterator.nominal.base = &p->library->object.nominal;
@@ -8374,6 +8422,7 @@ static void plan_library_shapes(MvpLmdProgram* p, bool metadata_only = false) {
         }
     }
     if (metadata_only) return;
+    p->library->date_observed = p->date_observed;
     if (p->errors && !p->library->errors) {
         p->library->errors = (MvpLmdClass*)pool_calloc(p->frontend->pool, LMD_ERROR_COUNT * sizeof(MvpLmdClass));
         if (!p->library->errors) { diagnostic(p, NULL, "error class metadata allocation"); return; }
@@ -8404,6 +8453,34 @@ static void plan_library_shapes(MvpLmdProgram* p, bool metadata_only = false) {
             p->intrinsics[intrinsics[i] - 1].slot = p->primitive_slot + i * 3;
         }
     }
+    if (p->buffers && !p->library->buffers) {
+        p->library->buffers = (MvpLmdClass*)pool_calloc(p->frontend->pool, 2 * sizeof(MvpLmdClass));
+        if (!p->library->buffers) { diagnostic(p, NULL, "buffer class metadata allocation"); return; }
+        p->buffer_slot = p->slot_count; p->slot_count += p->test262_host ? 7 : 6;
+        p->library->test262_host = p->test262_host;
+        if (p->test262_host) p->intrinsics[I_TEST262 - 1].slot = p->buffer_slot + 6;
+        for (int i = 0; i < 2; i++) {
+            MvpLmdClass* cls = &p->library->buffers[i];
+            plan_library_class(p, cls, i ? "DataView" : "ArrayBuffer");
+            cls->nominal.base = &p->library->object.nominal;
+            p->intrinsics[I_ARRAYBUFFER + i - 1].kinds = K_FUNCTION;
+            p->intrinsics[I_ARRAYBUFFER + i - 1].slot = p->buffer_slot + i * 3;
+        }
+    }
+    if (p->typed_storage && !p->library->typed_arrays) {
+        p->library->typed_arrays = (MvpLmdClass*)pool_calloc(p->frontend->pool, 13 * sizeof(MvpLmdClass));
+        if (!p->library->typed_arrays) { diagnostic(p, NULL, "typed array metadata allocation"); return; }
+        p->typed_slot = p->slot_count; p->slot_count += 39;
+        for (int step = 0; step < 13; step++) {
+            int type = step ? step - 1 : 12;
+            MvpLmdClass* cls = &p->library->typed_arrays[type];
+            plan_library_class(p, cls, type == 12 ? "TypedArray" : js_typed_array_spec((JsTypedArrayType)type)->name);
+            cls->nominal.base = type == 12 ? &p->library->object.nominal : &p->library->typed_arrays[12].nominal;
+            if (type == 12) continue;
+            p->intrinsics[typed_intrinsics[type] - 1].kinds = K_FUNCTION;
+            p->intrinsics[typed_intrinsics[type] - 1].slot = p->typed_slot + 3 * type;
+        }
+    }
     p->roots[1]->nominal = &p->library->map.nominal;
     p->roots[0]->nominal = &p->library->object.nominal;
     p->library->object_shape = p->roots[0];
@@ -8414,6 +8491,16 @@ static void plan_library_shapes(MvpLmdProgram* p, bool metadata_only = false) {
     p->intrinsics[I_MAP - 1].kinds = p->intrinsics[I_SET - 1].kinds = K_FUNCTION;
     p->intrinsics[I_MAP - 1].slot = p->library_slot + LMD_LIBRARY_MAP;
     p->intrinsics[I_MATH - 1].slot = p->library_slot + LMD_LIBRARY_MATH;
+}
+static void plan_typed_storage(MvpLmdProgram* p) {
+    if (!p->typed_storage) return;
+    activate_library(p, p->frontend->ast_root);
+    p->buffers = p->primitives = p->iterators = p->symbols = true;
+    // publishing unused global constructors does not expose ordinary array mutation.
+    if (p->typed_explicit) {
+        p->property_callbacks = true;
+        p->array_method_overrides = p->map_method_overrides = p->primitive_method_overrides = true;
+    }
 }
 static void plan_global_bindings(MvpLmdProgram* p) {
     NameScope* scope = ((AstScript*)p->frontend->ast_root)->global_vars;
@@ -8428,7 +8515,7 @@ static void plan_global_bindings(MvpLmdProgram* p) {
     for (AstNodeId i = 0; i < p->frontend->ast_index.count; i++) {
         LmdBinding* original = p->intrinsic_uses[i];
         if (!original || original->intrinsic <= I_INFINITY ||
-                (original->intrinsic >= I_INT32_ARRAY && original->intrinsic <= I_FLOAT64_ARRAY)) continue;
+                (!p->typed_storage && typed_intrinsic(original->intrinsic) >= 0)) continue;
         int intrinsic = original->intrinsic;
         if (intrinsic >= I_PERFORMANCE && intrinsic <= I_REQUIRE && !p->host_enabled) continue;
         if (!reflected[intrinsic]) {
@@ -8451,7 +8538,9 @@ static Item mvp_lmd_global_initialize(MvpLmdProgram* p) {
     if (!roots.valid()) return ItemError;
     Rooted<Item> value(roots, ItemNull);
     for (int i = 1; i < I_COUNT; i++) {
-        if (i >= I_INT32_ARRAY && i <= I_FLOAT64_ARRAY) continue;
+        if (typed_intrinsic(i) >= 0 && !p->typed_storage) continue;
+        if (i >= I_ARRAYBUFFER && !p->buffers) continue;
+        if (i == I_TEST262 && !p->test262_host) continue;
         if (i >= I_PERFORMANCE && i <= I_REQUIRE && !p->host_active) continue;
         int library = i == I_JSON ? LMD_LIBRARY_JSON : i == I_DATE ? LMD_LIBRARY_DATE :
             i == I_REGEXP ? LMD_LIBRARY_REGEXP : i == I_SYMBOL ? LMD_LIBRARY_SYMBOL :
@@ -8558,7 +8647,7 @@ static int admission_pass(void* opaque) {
     if (p->global_receiver) p->global_slot = p->slot_count++;
     if (p->global_reflection) {
         activate_library(p, p->frontend->ast_root);
-        p->primitives = p->errors = p->math_observed = true;
+        p->primitives = p->errors = p->math_observed = p->buffers = p->date_observed = true;
         p->primitive_method_overrides = true;
         if (p->host_enabled && !p->host_active) {
             p->host_active = true; p->host_slot = p->slot_count; p->slot_count += LMD_HOST_COUNT;
@@ -8566,12 +8655,34 @@ static int admission_pass(void* opaque) {
         }
         if (p->property_callbacks) p->array_method_overrides = p->map_method_overrides = p->primitive_method_overrides = true;
     }
+    p->typed_storage |= p->buffers || p->global_reflection || (p->typed_explicit && p->typed_members);
+    for (AstNodeId i = 0; !p->typed_storage && i < p->frontend->ast_index.count; i++) {
+        AstNode* node = p->frontend->ast_index.nodes[i];
+        if (node->node_type != AST_NODE_NEW_EXPR) continue;
+        AstCallNode* call = (AstCallNode*)node;
+        LmdBinding* ctor = call->callee->node_type == AST_NODE_IDENT ? identifier_binding(p, (AstIdentNode*)call->callee) : NULL;
+        if (!ctor || typed_intrinsic(ctor->intrinsic) < 0) continue;
+        unsigned argument = call->arguments ? kind(p, call->arguments) : K_NUMBER;
+        if (p->property_callbacks || (argument && argument != K_NUMBER)) p->typed_storage = true;
+    }
+    plan_typed_storage(p);
     if (p->library_active) plan_library_shapes(p);
     if (p->global_reflection) plan_global_bindings(p);
     for (int i = 0; i < p->bindings->length; i++) {
         LmdBinding* b = (LmdBinding*)p->bindings->data[i]; b->seed_kinds = b->kinds;
     }
     return !p->diagnostic[0];
+}
+static void reset_representation_facts(MvpLmdProgram* p) {
+    for (int i = 0; i < p->bindings->length; i++) {
+        LmdBinding* b = (LmdBinding*)p->bindings->data[i];
+        b->kinds = b->seed_kinds; b->range = {}; b->range_changes = 0;
+        b->present_range = {}; b->present_range_changes = 0;
+    }
+    for (int i = 0; i < p->functions->length; i++) {
+        LmdFunction* f = (LmdFunction*)p->functions->data[i];
+        f->returns = 0; f->range = {}; f->range_changes = 0;
+    }
 }
 static int representation_pass(void* opaque) {
     MvpLmdProgram* p = (MvpLmdProgram*)opaque;
@@ -8647,6 +8758,21 @@ static int representation_pass(void* opaque) {
             if (!f->array.length.state) { f->array.length.state = 2; ranges.changed = true; }
         }
         while (ranges.changed) { ranges.changed = false; range_walk(p->frontend->ast_root, &ranges); }
+    }
+    if (p->typed_explicit && !p->typed_storage) for (AstNodeId i = 0; i < p->frontend->ast_index.count; i++) {
+        AstNode* node = p->frontend->ast_index.nodes[i];
+        if (node->node_type != AST_NODE_MEMBER_EXPR && node->node_type != AST_NODE_INDEX_EXPR) continue;
+        AstFieldNode* field = (AstFieldNode*)node;
+        if (!field->computed || member_spelling(field) || !(kind(p, field->object) & K_TYPED_ARRAY)) continue;
+        if (!(kind(p, field->property) & ~(K_NUMBER | K_UNDEFINED))) continue;
+        // a named-key read can expose an escaped method; numeric loops retain raw lanes.
+        // promotion is monotone, so replay the existing solver once before choosing ABIs.
+        p->typed_storage = true;
+        plan_typed_storage(p);
+        plan_library_shapes(p);
+        if (p->diagnostic[0]) return false;
+        reset_representation_facts(p);
+        return representation_pass(p);
     }
     for (int i = 0; i < p->bindings->length; i++) {
         LmdBinding* b = (LmdBinding*)p->bindings->data[i];
@@ -10178,15 +10304,7 @@ static int lower_pass(void* opaque) {
     if (p->diagnostic[0]) return false;
     plan_scalar_objects(p);
     // proven unobservable fields feed the existing type/range solver, including accumulator lanes.
-    for (int i = 0; i < p->bindings->length; i++) {
-        LmdBinding* b = (LmdBinding*)p->bindings->data[i];
-        b->kinds = b->seed_kinds; b->range = {}; b->range_changes = 0;
-        b->present_range = {}; b->present_range_changes = 0;
-    }
-    for (int i = 0; i < p->functions->length; i++) {
-        LmdFunction* f = (LmdFunction*)p->functions->data[i];
-        f->returns = 0; f->range = {}; f->range_changes = 0;
-    }
+    reset_representation_facts(p);
     if (!representation_pass(p) || p->diagnostic[0]) return false;
     for (int i = 1; i < p->functions->length; i++)
         plan_numeric_region(p, (LmdFunction*)p->functions->data[i]);
@@ -10333,6 +10451,7 @@ MvpLmdExecution* mvp_lmd_execute(const char* source, size_t length, double* exec
     if (!e) return NULL;
     e->result = Item{.item = ITEM_ERROR};
     e->program.host_enabled = host != NULL;
+    e->program.test262_host = host && host->test262;
     if (!source || !compile(&e->program, source, length)) return e;
     e->program.failure_phase = MVP_LMD_INTERNAL_FAILURE;
     if (context) { diagnostic(&e->program, NULL, "execution needs its own unbound evaluator thread"); return e; }
@@ -10376,6 +10495,8 @@ MvpLmdExecution* mvp_lmd_execute(const char* source, size_t length, double* exec
         p->library->values = p->slots + p->library_slot;
         if (p->errors) p->library->error_values = p->slots + p->error_slot;
         if (p->primitives) p->library->primitive_values = p->slots + p->primitive_slot;
+        if (p->buffers) p->library->buffer_values = p->slots + p->buffer_slot;
+        if (p->typed_storage) p->library->typed_values = p->slots + p->typed_slot;
         p->library->mutable_prototypes = p->property_callbacks;
         static const ContextCapsuleOps ops = {"js-mvp-library", CONTEXT_CAPSULE_LIFETIME_CONTEXT,
             sizeof(MvpLmdLibraryState*), NULL, NULL, NULL};

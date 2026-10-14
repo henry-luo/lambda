@@ -1,0 +1,1 @@
+[["full catalog size", true], ["every constructor qualified", true], ["every renderer shares behavior", true], ["broad collection surface", true], ["icon catalog", true], ["description item shared shape", true]]

@@ -1,0 +1,14 @@
+{
+  "name":"absolute SVG percentage heights use auto-sized containing blocks; normal-flow percentages remain auto",
+  "html":"test/ui/wired/absolute_svg_height.html",
+  "viewport":{"width":640,"height":600},
+  "events":[
+    {"type":"assert_rect","target":{"selector":"#button"},"width":200,"height":40,"tolerance":0.1},
+    {"type":"assert_rect","target":{"selector":"#button-svg"},"width":196,"height":36,"tolerance":0.1},
+    {"type":"assert_rect","target":{"selector":"#card-svg"},"width":264,"height":64,"tolerance":0.1},
+    {"type":"assert_rect","target":{"selector":"#normal"},"width":200,"height":200,"tolerance":0.1},
+    {"type":"assert_rect","target":{"selector":"#zero"},"width":150,"height":0,"tolerance":0.1},
+    {"type":"assert_rect","target":{"selector":"#late-card"},"width":268,"height":120,"tolerance":0.1},
+    {"type":"assert_rect","target":{"selector":"#late-svg"},"width":264,"height":116,"tolerance":0.1}
+  ]
+}

@@ -773,6 +773,16 @@ DOM_OP(CORE, relative_mouse_active, input, 1, "fn(n: any) -> bool", dom_engine_r
 // append the shared select value reader without changing published catalog slots.
 DOM_RAW(select_value_bridge, select, Item, (void* elem), dom_select_value_bridge, DOM_F_NATIVE)
 
+// timed MIDI events and byte-backed SoundFonts; all musical policy lives in lambda.music.
+DOM_OP(CORE, midi_open, media, 3, "pn(n: any, performance: map, font: binary) -> int|null", dom_engine_midi_open, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, midi_command, media, 4, "pn(n: any, token: int, command: string, value: float) -> bool", dom_engine_midi_command, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, midi_info, media, 2, "fn(n: any, token: int) -> map|null", dom_engine_midi_info, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+
+// window presentation is distinct from the document's element fullscreen state.
+DOM_OP(CORE, set_window_fullscreen, window, 2, "pn(n: any, enabled: bool) -> bool", dom_engine_set_window_fullscreen, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, window_fullscreen, window, 1, "fn(n: any) -> bool", dom_engine_window_fullscreen, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, window_fullscreen_enabled, window, 1, "fn(n: any) -> bool", dom_engine_window_fullscreen_enabled, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP
 #undef DOM_API_DEF_CLEAR_OP

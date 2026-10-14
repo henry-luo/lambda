@@ -1079,6 +1079,7 @@ static Script* lambda_script_template_clone(Runtime* runtime, const Script* cach
     instance->is_loading = false;
     instance->is_retired = false;
     instance->interp_slab = NULL;
+    instance->module_initialized = false;
     instance->interp_views_registered = false;
     instance->ast_overlay_strings = NULL;
     instance->ast_promotion_overlay = NULL;
@@ -1409,6 +1410,7 @@ static bool lambda_cache_promote_ast_shell_mir(Runtime* runtime, Script* script)
     image->interp_satellite_queue = NULL;
     image->interp_satellite_images = NULL;
     image->interp_slab = NULL;
+    image->module_initialized = false;
     image->destroy_extension = NULL;
     bool prepared = image->reference &&
         (!script->directory || image->directory) &&
@@ -1920,6 +1922,17 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
 // ============================================================================
 
+#ifndef LAMBDA_NO_JS
+static void register_lambda_script_namespace(Runtime* runtime, Script* script) {
+    if (!script || script->is_main || !script->jit_context || !context || !context->heap ||
+            !js_runtime_state_thread_matches(context) || !js_input) return;
+    ModuleDescriptor* existing = module_get_for_runtime(runtime, script->reference);
+    if (existing && existing->initialized) return;
+    Item ns = module_build_lambda_namespace(script);
+    module_register_for_runtime(runtime, script->reference, "lambda", ns, script->jit_context);
+}
+#endif
+
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import) {
     log_info("Loading script: %s (is_import=%d)", script_path, is_import);
 
@@ -2346,12 +2359,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     // A Lambda behavior package can compile inside an initialized evaluator
     // without a JS realm. Its exports need no JS callable wrappers, whose
     // allocation requires the active realm's Input owner.
-    if (!new_script->is_main && context && context->heap &&
-            js_runtime_state_thread_matches(context) && js_input) {
-        Item ns = module_build_lambda_namespace(new_script);
-        module_register_for_runtime(
-            runtime, new_script->reference, "lambda", ns, new_script->jit_context);
-    }
+    register_lambda_script_namespace(runtime, new_script);
 
 #endif
 
@@ -2380,6 +2388,10 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
     Script* script = load_script(runtime, script_path, source, is_import);
     lambda_tier_set(was_tier);
     runtime->use_mir_direct = was_mir_direct;
+#ifndef LAMBDA_NO_JS
+    // cached MIR shells also need fresh exports in the importing Runtime (D5.4.3 / D8.5.1v7).
+    register_lambda_script_namespace(runtime, script);
+#endif
     return script;
 }
 
@@ -3065,6 +3077,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
             log_debug("exec main func");
             result = runtime_publish_result(context,
                 runner->script->main_func(context));
+            runner->script->module_initialized = !item_is_error(result);
             lambda_recovery_frame_end(recovery_frame);
             log_debug("after main func, result type_id=%d", get_type_id(result));
         }

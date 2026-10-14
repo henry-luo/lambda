@@ -1,14 +1,22 @@
 import geometry: .mod_geometry
 import presets: .mod_presets
+import layers: .mod_layers
 
 pub let limits = {exposure:[-3.0,3.0],brightness:[-1.0,1.0],contrast:[0.0,2.0],
-    saturation:[0.0,2.0],temperature:[-1.0,1.0],gamma:[0.2,3.0],intensity:[0.0,1.0],angle:[-15.0,15.0]}
+    saturation:[0.0,2.0],temperature:[-1.0,1.0],gamma:[0.2,3.0],intensity:[0.0,1.0],angle:[-15.0,15.0],
+    black:[0.0,0.95],white:[0.05,1.0],shadows:[-1.0,1.0],highlights:[-1.0,1.0],
+    vignette:[0.0,1.0],softness:[0.0,6.0],sharpen:[0.0,2.0]}
 pub fn recipe() => {turns:0,flip_x:false,flip_y:false,angle:0.0,crop:geometry.full(),
     exposure:0.0,brightness:0.0,contrast:1.0,saturation:1.0,temperature:0.0,gamma:1.0,
-    preset:"original",intensity:1.0,output_width:0,output_height:0}
+    preset:"original",intensity:1.0,output_width:0,output_height:0,black:0.0,white:1.0,
+    shadows:0.0,highlights:0.0,vignette:0.0,softness:0.0,sharpen:0.0,layers:[]}
+pub fn upgrade(value) => {*:recipe(),*:value}
 pub fn valid(value) => value is map and value.turns is int and value.turns >= 0 and value.turns < 4 and
     value.flip_x is bool and value.flip_y is bool and geometry.valid(value.crop) and
     all([for (key,interval in limits) value[key] is number and value[key] >= interval[0] and value[key] <= interval[1]]) and
+    value.white > value.black and value.layers is array and len(value.layers) <= 24 and
+    all([for (layer in value.layers) layers.valid(layer)]) and
+    len(unique([for (layer in value.layers) layer.id])) == len(value.layers) and
     contains([for (item in presets.catalog) item.id],value.preset) and
     value.output_width is int and value.output_width >= 0 and value.output_width <= 16384 and
     value.output_height is int and value.output_height >= 0 and value.output_height <= 16384 and
@@ -29,7 +37,9 @@ pub fn commit_edit(history_state, value) {
 pub fn step_back(history_state) => {*:history_state,cursor:max(0,history_state.cursor-1),draft:null}
 pub fn step_forward(history_state) => {*:history_state,cursor:min(len(history_state.entries)-1,history_state.cursor+1),draft:null}
 pub fn change(value, key, requested) => if (contains(limits,key))
-    {*:value,[key]:geometry.clamp(requested,limits[key][0],limits[key][1])} else value
+    {*:value,[key]:geometry.clamp(requested,
+        if (key == "white") value.black+0.01 else limits[key][0],
+        if (key == "black") value.white-0.01 else limits[key][1])} else value
 pub fn orient(value, action) => {*:value,crop:geometry.full(),
     turns:if (action == "rotate") (value.turns+3)%4 else value.turns,
     flip_x:if (action == "flip-x") not value.flip_x else value.flip_x,

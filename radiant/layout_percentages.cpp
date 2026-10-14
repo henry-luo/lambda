@@ -214,6 +214,9 @@ bool layout_block_has_automatic_size(ViewBlock* block, bool horizontal) {
         ? layout_specified_physical_size_declaration(block->as_element(), horizontal) : nullptr;
     if (specified_size && specified_size->value) {
         if (!horizontal && specified_size->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+            // css 2.1 §10.5 exempts abspos percentages from the auto-height
+            // ancestor rule; a resolved viewport must not revert to its ratio.
+            if (layout_view_is_abs_or_fixed(block)) return false;
             if (block->block()->percentage_height_resolved_late) {
                 // A positioned percentage can become definite after its containing
                 // block finishes; retain that used-value definiteness for descendants.

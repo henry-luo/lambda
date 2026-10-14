@@ -248,6 +248,20 @@ TEST_F(InputPdfTest, ObjectsAreWrappedAsIndirectObjects) {
     EXPECT_GE(indirect_count, 1);
 }
 
+TEST_F(InputPdfTest, HexStringPairsCanSpanWhitespace) {
+    const char source[] = "%PDF-1.7\n1 0 obj\n<< /Label <4 1 4 2> >>\nendobj\ntrailer\n<< /Size 2 >>\n%%EOF\n";
+    Input* input = InputManager::create_input(nullptr);
+    ASSERT_NE(input, nullptr);
+    parse_pdf(input, source, sizeof(source) - 1);
+    MapReader root = MapReader::fromItem(input->root);
+    MapReader object = find_indirect_object(root.get("objects").asArray(), 1);
+    String* value = object.get("Label").asString();
+    ASSERT_NE(value, nullptr);
+    ASSERT_EQ(value->len, 2u);
+    EXPECT_EQ(value->chars[0], 'A');
+    EXPECT_EQ(value->chars[1], 'B');
+}
+
 TEST_F(InputPdfTest, AdvancedFixtureHasManyIndirectObjects) {
     Input* input = parse_pdf_file(PDF_FIXTURE_ADVANCED);
     ASSERT_NE(input, nullptr);

@@ -2,6 +2,7 @@
 #include "lambda/js/mvp-lmd/mvp_lmd.h"
 #include "lambda/js/mvp-lmd/mvp_lmd_runtime.h"
 #include "lambda/js/js_object_meta.h"
+#include "lambda/js/js_typed_array.h"
 #include "lambda/runtime/runtime-state.h"
 #include "lambda/runtime/context_capsule.h"
 #include "lambda/runtime/heap_api.h"
@@ -51,6 +52,310 @@ protected:
         return read_text_file(path);
     }
 };
+TEST_F(JsMvpLmd, TypedArrayConstructorsAndStorage) {
+    boolean("let constructors=[Int8Array,Uint8Array,Int16Array,Uint16Array,Int32Array,Uint32Array,Float32Array,Float64Array,Uint8ClampedArray,Float16Array];let ok=true;for(let C of constructors){let a=new C([1,2,3]);ok=ok&&a.length===3&&a[1]===2&&a.byteLength===3*C.BYTES_PER_ELEMENT&&a.buffer.byteLength===a.byteLength&&Object.getPrototypeOf(a)===C.prototype}ok");
+    boolean("let a=new Int8Array([255,128,-129]),b=new Uint8ClampedArray([-1,1.5,2.5,300,NaN]);a[0]===-1&&a[1]===-128&&a[2]===127&&b[0]===0&&b[1]===2&&b[2]===2&&b[3]===255&&b[4]===0");
+    boolean("let a=new BigInt64Array([1n,-2n,18446744073709551615n]),b=new BigUint64Array(a);a[2]===-1n&&b[1]===18446744073709551614n&&b[0]===1n");
+    boolean("let a=new Float64Array([5e-324,-0,NaN]),b=new Float64Array(a);a[0]=7;b[0]===5e-324&&1/b[1]===-Infinity&&Number.isNaN(b[2])");
+    error("new BigInt64Array([1])", "TypeError");
+    error("new Uint8Array(new BigInt64Array(1))", "TypeError");
+    error("Int16Array(2)", "TypeError");
+    boolean("let reads=0,F=(function(){}).bind(null);Object.defineProperty(F,'prototype',{get(){reads++;throw 7}});let type=false;try{Reflect.construct(Int16Array,[Symbol()],F)}catch(e){type=e instanceof TypeError}type&&reads===0");
+}
+TEST_F(JsMvpLmd, TypedArrayAliasingResizeAndCoercion) {
+    boolean("let b=new ArrayBuffer(8,{maxByteLength:24}),a=new Int16Array(b),v=new Int16Array(b,2,2);a[1]=1234;let first=v[0]===1234;b.resize(16);first&&a.length===8&&v.length===2&&a.buffer===b&&v.byteOffset===2");
+    boolean("let b=new ArrayBuffer(8,{maxByteLength:16}),a=new Int16Array(b,2,2);b.resize(2);let empty=a.length===0&&a.byteLength===0&&a.byteOffset===0&&a[0]===undefined;b.resize(8);empty&&a.length===2&&a.byteOffset===2");
+    boolean("let b=new ArrayBuffer(8,{maxByteLength:16}),a=new Int16Array(b),calls=0;a[0]={valueOf(){calls++;b.resize(0);return 7}};calls===1&&a.length===0&&a[0]===undefined");
+    boolean("let b=new ArrayBuffer(8),a=new Int16Array(b),calls=0;a[0]={valueOf(){calls++;b.transfer();return 7}};calls===1&&a.length===0&&a.buffer===b&&b.detached");
+    boolean("let b=new ArrayBuffer(16),a=new BigInt64Array(b);a[0]={valueOf(){b.transfer();return 4n}};a.length===0&&a[0]===undefined");
+    error("new Uint16Array(new ArrayBuffer(4),1)", "RangeError");
+    error("new Uint32Array(new ArrayBuffer(4),0,2)", "RangeError");
+}
+TEST_F(JsMvpLmd, TypedArrayNumericReflectionAndReceivers) {
+    boolean("let a=new Uint16Array([7,8]),s=Symbol('0');a['01']=9;a[s]=10;let d=Object.getOwnPropertyDescriptor(a,'0'),k=Reflect.ownKeys(a);d.value===7&&d.writable&&d.enumerable&&d.configurable&&k.length===4&&k[0]==='0'&&k[1]==='1'&&k[2]==='01'&&k[3]===s&&a[s]===10");
+    boolean("let a=new Int8Array(1),n=0;for(let key of ['-0','-1','1.5','NaN','Infinity','1e+100']){a[key]={valueOf(){n++;return 5}};if(key in a)throw 9}n===6&&a[0]===0&&Reflect.deleteProperty(a,'-0')&&!Reflect.deleteProperty(a,'0')");
+    boolean("let a=new Int8Array([1]);Reflect.defineProperty(a,'0',{value:3})&&a[0]===3&&!Reflect.defineProperty(a,'0',{configurable:false})&&!Reflect.defineProperty(a,'1',{value:4})&&!Reflect.defineProperty(a,'0',{get(){return 7}})");
+    boolean("let a=new Int8Array([1]),r={};let yes=Reflect.set(a,'0',7,r),skip=Reflect.set(a,'2',9,r);yes&&skip&&a[0]===1&&r[0]===7&&!('2' in r)");
+    boolean("let a=new Int8Array([1,2]);a.x=3;Object.keys(a).join(',')==='0,1,x'&&Object.values(a).join(',')==='1,2,3'&&Object.entries(a)[1].join(',')==='1,2'");
+    boolean("let a=new Int8Array(1);Object.preventExtensions(a);a[0]=7;a[0]===7&&!Reflect.defineProperty(a,'x',{value:1})");
+    error("Object.freeze(new Int16Array(1))", "TypeError");
+}
+TEST_F(JsMvpLmd, TypedArrayIterationAndSubclassOwnership) {
+    boolean("let reads=0,steps=0,source={get [Symbol.iterator](){reads++;return function*(){steps++;yield {valueOf(){return steps}};steps++;yield 7}}};let a=new Int16Array(source);reads===1&&steps===2&&a[0]===2&&a[1]===7");
+    boolean("let source={length:2,0:4,1:7,[Symbol.iterator]:undefined};let a=new Uint16Array(source);a.length===2&&a[0]===4&&a[1]===7");
+    boolean("class C extends Uint16Array{constructor(b){super(b);this.tag=9}}let a=new C([2,3]);a instanceof C&&a instanceof Uint16Array&&a[1]===3&&a.tag===9&&Object.getPrototypeOf(a)===C.prototype&&a.buffer.byteLength===4");
+    boolean("function F(){}F.prototype={tag:7};let a=Reflect.construct(Int16Array,[2],F);a[0]=9;Object.getPrototypeOf(a)===F.prototype&&a.tag===7&&a[0]===9&&ArrayBuffer.isView(a)");
+    boolean("let a=new Int16Array([2,3]),i=a.values();Object.defineProperty(a,'length',{value:99});i.next().value===2&&i.next().value===3&&i.next().done");
+    boolean("let a=new Int16Array([2,3]),b=Array.from(a);b.length===2&&b[0]===2&&b[1]===3&&a.values===a[Symbol.iterator]");
+    boolean("let b=new ArrayBuffer(4),a=new Int16Array(b),i=a.values();b.transfer();let caught=false;try{i.next()}catch(e){caught=e instanceof TypeError}caught");
+}
+TEST_F(JsMvpLmd, TypedArrayScalarReturnOwnership) {
+    Item array = run("new Uint16Array(1)");
+    ASSERT_EQ(get_type_id(array), LMD_TYPE_MAP);
+    RootFrame roots(3);
+    ASSERT_TRUE(roots.valid());
+    Rooted<Item> owner(roots, array), first(roots, ItemNull), second(roots, ItemNull);
+    const int64_t initial = INT64_C(9007199254740993), later = INT64_C(9007199254741001);
+    JsBufferViewOps ops = {};
+    // the shared policy may admit Lambda wide integers at a native interop boundary.
+    ops.number = [](Item value) { return push_d((double)value.get_int64()); };
+    first.set(js_typed_array_set_numeric_with_ops(owner.get(), 0, false, box_int64_value(initial), &ops));
+    second.set(js_typed_array_set_numeric_with_ops(owner.get(), 0, false, box_int64_value(later), &ops));
+    // a second native call must not overwrite the first assignment's scalar home.
+    ASSERT_EQ(get_type_id(first.get()), LMD_TYPE_INT64);
+    EXPECT_EQ(first.get().get_int64(), initial);
+    EXPECT_EQ(second.get().get_int64(), later);
+}
+TEST_F(JsMvpLmd, TypedArrayIteratorProjectionsAndSpecies) {
+    boolean("let a=new Float64Array([5e-324,-0]),keys=a.keys(),entries=a.entries();let first=entries.next().value,second=entries.next().value;keys.next().value===0&&keys.next().value===1&&keys.next().done&&first[0]===0&&first[1]===5e-324&&second[0]===1&&1/second[1]===-Infinity&&entries.next().done");
+    boolean("let b=new ArrayBuffer(2,{maxByteLength:4}),a=new Uint8Array(b),i=a.entries();a[0]=7;let first=i.next().value;b.resize(4);a[2]=9;let second=i.next().value,third=i.next().value;first[0]===0&&first[1]===7&&second[0]===1&&third[0]===2&&third[1]===9");
+    boolean("let b=new ArrayBuffer(2,{maxByteLength:4}),a=new Uint8Array(b),i=a.keys();i.next();i.next();let done=i.next().done;b.resize(4);done&&i.next().done");
+    boolean("let b=new ArrayBuffer(2),a=new Uint8Array(b),k=a.keys(),e=a.entries();b.transfer();let caught=0;for(let i of [k,e])try{i.next()}catch(error){if(error instanceof TypeError)caught++}caught===2");
+    boolean("let T=Object.getPrototypeOf(Uint16Array),d=Object.getOwnPropertyDescriptor(T,Symbol.species);class C extends Uint16Array{}C[Symbol.species]===C&&Uint16Array[Symbol.species]===Uint16Array&&!d.enumerable&&d.configurable&&d.set===undefined&&d.get.call(7)===7");
+    error("Int16Array.prototype.keys.call({length:2})", "TypeError");
+    error("new Int16Array.prototype.entries()", "TypeError");
+}
+TEST_F(JsMvpLmd, TypedArraySubarraySpeciesAndResize) {
+    boolean("let a=new Int16Array([1,2,3,4]),b=a.subarray(-3,-1);b[0]=8;b.buffer===a.buffer&&b.byteOffset===2&&b.length===2&&a[1]===8&&a.subarray(Infinity).length===0&&a.subarray(-Infinity).length===4");
+    boolean("class C extends Uint16Array{}let a=new C([1,2,3]),b=a.subarray(1);a.extra=7;b instanceof C&&b.length===2&&b[0]===2&&b.extra===undefined");
+    boolean("let a=new Uint8Array([1,2,3]);a.constructor={[Symbol.species]:null};Object.setPrototypeOf(a,{subarray:Uint8Array.prototype.subarray});let b=a.subarray(1);Object.getPrototypeOf(b)===Uint8Array.prototype&&b[0]===2");
+    boolean("let a=new Uint8Array([1,2,3]),log='',argc=0;let out=new Int8Array(0);a.constructor={get [Symbol.species](){log+='s';return function(b,o,n){argc=arguments.length;log+='c';if(b!==a.buffer||o!==1||n!==1)throw 9;return out}}};let result=a.subarray({valueOf(){log+='b';return 1}},{valueOf(){log+='e';return 2}});result===out&&log==='besc'&&argc===3");
+    boolean("let b=new ArrayBuffer(4,{maxByteLength:8}),a=new Uint8Array(b,1),v=a.subarray(1),f=a.subarray(1,2);b.resize(8);v.buffer===b&&v.byteOffset===2&&v.length===6&&f.length===1");
+    boolean("let b=new ArrayBuffer(8,{maxByteLength:8}),a=new Uint8Array(b,4,2);b.resize(0);let v=a.subarray({valueOf(){b.resize(8);return 1}});v.byteOffset===4&&v.length===0");
+    boolean("let b=new ArrayBuffer(4),a=new Uint8Array(b,1,2),out=new Uint8Array(0),seen=false;a.constructor={[Symbol.species]:function(buffer,offset,length){seen=buffer===b&&offset===2&&length===0;return out}};a.subarray(1,{valueOf(){b.transfer();return 0}})===out&&seen");
+    boolean("let b=new ArrayBuffer(4,{maxByteLength:8}),a=new Uint8Array(b),out=new Uint8Array(0),seen=false;a.constructor={[Symbol.species]:function(buffer,offset,length){seen=buffer===b&&offset===3&&length===1;return out}};a.subarray({valueOf(){b.resize(0);return 3}},4)===out&&seen");
+    error("let a=new Uint8Array(2);a.constructor={[Symbol.species]:function(){return new BigInt64Array(0)}};a.subarray(0)", "TypeError");
+    error("let a=new Uint8Array(2);a.constructor={[Symbol.species]:function(){let b=new ArrayBuffer(1),v=new Uint8Array(b);b.transfer();return v}};a.subarray(0)", "TypeError");
+    error("Uint8Array.prototype.subarray.call({})", "TypeError");
+    boolean("let a=new Uint8Array(2),b=a.subarray(1);b.length===1&&b.buffer===a.buffer");
+    error("let a=new Uint8Array(2);a.subarray(Symbol())", "TypeError");
+}
+TEST_F(JsMvpLmd, TypedArrayCallbacksAndReductions) {
+    boolean("let a=new Uint8Array([1,2,3]),seen=0;a.forEach(function(v,i,o){if(o!==a||this.step!==4)throw 1;seen+=v+i}, {step:4});seen===9&&a.every(v=>v>0)&&a.some(v=>v===2)&&a.find(v=>v>1)===2&&a.findIndex(v=>v>1)===1&&a.findLast(v=>v>1)===3&&a.findLastIndex(v=>v>1)===2");
+    boolean("let a=new Int8Array([1,2,3]);a.reduce((s,v)=>s*10+v)===123&&a.reduceRight((s,v)=>s*10+v)===321&&a.reduce((s,v)=>s+v,4)===10&&new Uint8Array(0).reduce(()=>{throw 1},undefined)===undefined");
+    boolean("let a=new BigInt64Array([1n,2n,3n]);a.reduce((s,v)=>s+v,0n)===6n&&a.findLast(v=>v<3n)===2n");
+    boolean("let a=new Uint8Array(2),b=a.map(v=>v+3);b instanceof Uint8Array&&b[0]===3&&b.length===2&&new Uint8Array(0).every(()=>false)&&!new Uint8Array(0).some(()=>true)");
+    boolean("let a=new Uint8Array(2),key='ma'+'p',b=a[key](v=>v+3);b[0]===3&&b[1]===3");
+    boolean("let a=new Float64Array(2);let run=(key)=>a[key](v=>v+0.5);let b=run('map');b[0]===0.5&&b[1]===0.5");
+    boolean("let a=new Uint8Array(2),key='ma'+'p',method=a[key];let b=method.call(a,v=>v+3);b[0]===3&&b[1]===3");
+    boolean("let a=new Float64Array(2);let get=(key)=>a[key];let method=get('map'),b=method.call(a,v=>v+0.5);b[0]===0.5&&b[1]===0.5");
+    error("let a=new Uint8Array(1);a[0]()", "TypeError");
+    error("new Uint8Array(0).reduce(v=>v)", "TypeError");
+    error("Uint8Array.prototype.find.call({length:1},()=>true)", "TypeError");
+    error("new Uint8Array(1).map(null)", "TypeError");
+    error("new Uint8Array.prototype.filter()", "TypeError");
+}
+TEST_F(JsMvpLmd, TypedArrayCallbacksSpeciesAndEffectOrder) {
+    boolean("let a=new Uint8Array([1,2,3]),log='';a.constructor={get [Symbol.species](){log+='s';return class extends Int16Array{constructor(n){super(n);log+='c'}}}};let b=a.map(v=>{log+='m';return v+256});b instanceof Int16Array&&b[0]===257&&log==='scmmm'");
+    boolean("let a=new Uint8Array([1,2,3]),log='',size=0;a.constructor={get [Symbol.species](){log+='s';return function(n){size=n;log+='c';return new Float64Array(n)}}};let b=a.filter(v=>{log+='f';return v!==2});b.length===2&&b[1]===3&&log==='fffsc'&&size===2");
+    boolean("class C extends Uint8Array{}let a=new C([1,2]);a.map(v=>v) instanceof C&&a.filter(v=>true) instanceof C");
+    boolean("let a=new Uint8Array([1]),called=0;a.constructor={get [Symbol.species](){called++;throw 7}};let value;try{a.map(null)}catch(e){value=e instanceof TypeError}value&&called===0");
+    error("let a=new Uint8Array([1]);a.constructor={[Symbol.species]:function(){return new BigInt64Array(1)}};a.map(x=>x)", "TypeError");
+    error("let a=new BigInt64Array([1n]);a.map(x=>1)", "TypeError");
+    error("let a=new Uint8Array([1,2]);a.constructor={[Symbol.species]:function(){return new Uint8Array(1)}};a.filter(()=>true)", "TypeError");
+}
+TEST_F(JsMvpLmd, TypedArrayCallbacksResizeAndBorrowing) {
+    boolean("let b=new ArrayBuffer(3,{maxByteLength:6}),a=new Uint8Array(b),seen=[];a[0]=3;a[1]=4;a[2]=5;a.forEach((v,i)=>{seen.push(v);if(i===0)b.resize(0)});seen.length===3&&seen[0]===3&&seen[1]===undefined&&seen[2]===undefined");
+    boolean("let b=new ArrayBuffer(3),a=new Uint8Array(b),seen=[];a[0]=3;a.reduce((s,v,i)=>{seen.push(v);if(i===0)b.transfer();return s+1},0);seen.length===3&&seen[1]===undefined");
+    boolean("let b=new ArrayBuffer(2,{maxByteLength:4}),a=new Uint8Array(b),seen=0;a.forEach(()=>{seen++;b.resize(4)});seen===2");
+    boolean("let b=new ArrayBuffer(3,{maxByteLength:6}),a=new Uint8Array(b),seen=0;Array.prototype.forEach.call(a,()=>{seen++;b.resize(0)});seen===1");
+    boolean("let b=new ArrayBuffer(3),a=new Uint8Array(b);a[0]=7;let result=a.find((v,i)=>{b.transfer();return true});result===7");
+    error("let b=new ArrayBuffer(1),a=new Uint8Array(b);b.transfer();a.forEach(()=>{})", "TypeError");
+    boolean("let a=new Int8Array([1,2]),n=0;a.constructor={[Symbol.species]:function(k){return new Int8Array(k)}};let b=a.map(v=>({valueOf(){n++;return v+1}}));n===2&&b[0]===2&&b[1]===3");
+}
+TEST_F(JsMvpLmd, TypedArrayCallbacksScalarOwnership) {
+    boolean("let a=new Float64Array([5e-324,-0,1e-323]);let b=a.filter((v,i)=>{a[i]=9;let n=new Float64Array([0.5,1.5]);return n[0]===0.5});b[0]===5e-324&&1/b[1]===-Infinity&&b[2]===1e-323");
+    boolean("let a=new Float64Array([5e-324,1e-323]);let x=a.find((v,i)=>{a[i]=7;return true}),y=a.reduce((s,v)=>s+v,5e-324);x===5e-324&&y===7");
+    boolean("let a=new BigInt64Array([3n,4n,5n]);let b=a.filter(v=>{let junk=[];for(let i=0;i<30;i++)junk.push({value:i});return v!==4n});b[0]===3n&&b[1]===5n");
+    boolean("let a=new Uint8Array([1,2]),error={};let caught;try{a.map(()=>{throw error})}catch(e){caught=e}caught===error");
+}
+TEST_F(JsMvpLmd, ArrayFromArrayLikeAndConstructors) {
+    boolean("let a=Array.from({length:3,0:4,2:7},function(v,i){return v===undefined?i:v+this.step},{step:1});a.length===3&&a[0]===5&&a[1]===1&&a[2]===8");
+    boolean("let a=Array.from({length:2});a.length===2&&a.hasOwnProperty('0')&&a.hasOwnProperty('1')&&a[0]===undefined");
+    boolean("let log='';let source={get [Symbol.iterator](){log+='i';return undefined},get length(){log+='l';return {valueOf(){log+='n';return 1}}},get 0(){log+='v';return 3}};function C(n){log+='c';this.request=n}let a=Array.from.call(C,source,function(v,i){log+='m';return v+i});a instanceof C&&a.request===1&&a.length===1&&a[0]===3&&log==='ilncvm'");
+    boolean("let log='',reads=0;let source={get [Symbol.iterator](){reads++;log+='g';return function*(){log+='i';yield 4}}};function C(){log+='c';this.argc=arguments.length}let a=Array.from.call(C,source);reads===1&&log==='gci'&&a.argc===0&&a[0]===4&&a.length===1");
+    boolean("let closed=0;function* source(){try{yield 1;yield 2}finally{closed++}}function C(){return Object.preventExtensions({})}let type=false;try{Array.from.call(C,source())}catch(e){type=e instanceof TypeError}type&&closed===1");
+    boolean("let reads=0,source={get [Symbol.iterator](){reads++;throw 3}};let type=false;try{Array.from(source,7)}catch(e){type=e instanceof TypeError}type&&reads===0");
+    boolean("let setter=0,proto={set 0(v){setter++}};function C(){return Object.create(proto)}let a=Array.from.call(C,{0:9,length:1});a[0]===9&&a.length===1&&a.hasOwnProperty('0')&&setter===0");
+    boolean("let a=Array.from.call(()=>{},[3,4]);Array.isArray(a)&&a.length===2&&a[1]===4");
+    error("Array.from({[Symbol.iterator]:7,length:1})", "TypeError");
+    error("Array.from(null)", "TypeError");
+}
+
+TEST_F(JsMvpLmd, DateCalendarParsingAndFormatting) {
+    boolean(R"JS(
+        let d=new Date('2000-02-29T12:34:56.789Z');
+        d.getUTCFullYear()===2000&&d.getUTCMonth()===1&&d.getUTCDate()===29&&d.getUTCDay()===2&&
+        d.getUTCHours()===12&&d.getUTCMinutes()===34&&d.getUTCSeconds()===56&&d.getUTCMilliseconds()===789&&
+        d.toISOString()==='2000-02-29T12:34:56.789Z'&&Date.parse(d.toISOString())===d.getTime()&&
+        Date.UTC(2000,1,29,12,34,56,789)===d.getTime()&&Date.UTC(1970)===0&&
+        new Date(1970,0,1).getFullYear()===1970&&typeof Date()==='string'&&
+        new Date(NaN).toString()==='Invalid Date'&&Date.UTC.length===7&&Date.length===7;
+    )JS");
+}
+TEST_F(JsMvpLmd, DateBrandAndSubclassOwnership) {
+    boolean(R"JS(
+        class Clock extends Date {constructor(t){super(t);this.extra=7;}}
+        let d=new Clock(123.9),copy=new Date(d),bad=0;
+        d.valueOf=()=>{throw 1;};let copy2=new Date(d);
+        for(let o of [{__time__:0},Object.create(Date.prototype),new Proxy(d,{}),Date.prototype]){
+            try{Date.prototype.getTime.call(o);}catch(e){bad+=e instanceof TypeError;}
+        }
+        Object.freeze(copy);copy.setTime(456);
+        d instanceof Date&&d instanceof Clock&&d.extra===7&&copy2.getTime()===123&&copy.getTime()===456&&bad===4&&
+        Object.prototype.toString.call(d)==='[object Date]'&&
+        Object.prototype.toString.call(Date.prototype)==='[object Object]'&&
+        Reflect.ownKeys(copy2).length===0&&
+        Date.prototype.toGMTString===Date.prototype.toUTCString;
+    )JS");
+}
+TEST_F(JsMvpLmd, DateReentrantSettersAndCoercion) {
+    boolean(R"JS(
+        let d=new Date(0),order='';
+        let result=d.setUTCFullYear({valueOf(){order+='y';d.setTime(86400000);return 2000;}},
+            {valueOf(){order+='m';return 1;}},{valueOf(){order+='d';return 29;}});
+        let snapshot=result===Date.UTC(2000,1,29)&&order==='ymd';
+        d.setUTCSeconds(10,{valueOf(){return 50;}},{valueOf(){throw 8;}});
+        let extras=d.getUTCSeconds()===10&&d.getUTCMilliseconds()===50;
+        d.setTime(NaN);let invalid=d.setUTCMonth({valueOf(){d.setTime(0);return 2;}});
+        snapshot&&extras&&isNaN(invalid)&&d.getTime()===0&&
+        new Date({[Symbol.toPrimitive](hint){return hint==='default'?'1970-01-01T00:00:00.000Z':1;}}).getTime()===0;
+    )JS");
+    boolean(R"JS(
+        let d=new Date(0),large=d.setUTCMilliseconds(2147483648);
+        let infinite=d.setUTCMilliseconds(Infinity);
+        d.setTime(NaN);
+        let result=d.setUTCMonth({valueOf(){d.setTime(123);return NaN;}});
+        large===2147483648&&isNaN(infinite)&&isNaN(result)&&d.getTime()===123&&
+        new Date(0).setUTCFullYear(1)===-62135596800000;
+    )JS");
+}
+TEST_F(JsMvpLmd, DateGenericJsonAndPrimitiveProtocols) {
+    boolean(R"JS(
+        let p=Date.prototype,order='';
+        let object={valueOf(){order+='v';return 0;},toISOString(){order+='i';return 'iso';}};
+        let result=p.toJSON.call(object),nothing=p.toJSON.call({valueOf(){return Infinity;}});
+        let d=new Date(0),text=d+'';let bad=0;
+        try{p[Symbol.toPrimitive].call(d,'bad');}catch(e){bad+=e instanceof TypeError;}
+        try{new Date(NaN).toISOString();}catch(e){bad+=e instanceof RangeError;}
+        result==='iso'&&order==='vi'&&nothing===null&&text===d.toString()&&+d===0&&bad===2&&
+        JSON.stringify({date:d})==='{"date":"1970-01-01T00:00:00.000Z"}'&&
+        p[Symbol.toPrimitive].call({valueOf(){return 3;}},'number')===3;
+    )JS");
+}
+TEST_F(JsMvpLmd, BufferViewAliasingAndNumericStorage) {
+    boolean(R"JS(
+        let b=new ArrayBuffer(24),a=new DataView(b),v=new DataView(b,4,16);
+        a.setUint32(4,0x12345678,true);
+        let same=v.getUint8(0)===0x78&&v.getUint16(0,true)===0x5678&&v.getUint32(0,false)===0x78563412;
+        v.setInt8(0,-1);v.setInt16(2,-1234,true);v.setFloat64(8,-0,true);
+        same&&a.getUint8(4)===255&&a.getInt16(6,true)===-1234&&1/v.getFloat64(8,true)===-Infinity&&
+        v.buffer===b&&v.byteOffset===4&&v.byteLength===16&&b.byteLength===24&&ArrayBuffer.isView(v)&&!ArrayBuffer.isView(b);
+    )JS");
+    boolean(R"JS(
+        let v=new DataView(new ArrayBuffer(8));
+        v.setUint32(0,Math.pow(2,64)+Math.pow(2,32)+4096,true);
+        let huge=v.getUint32(0,true)===4096;
+        v.setFloat32(0,Infinity);let inf=v.getFloat32(0)===Infinity;
+        v.setFloat64(0,NaN);huge&&inf&&Number.isNaN(v.getFloat64(0));
+    )JS");
+    boolean(R"JS(
+        let v=new DataView(new ArrayBuffer(8));v.setBigInt64(0,-1n,true);
+        let ok=v.getBigInt64(0,true)===-1n&&v.getBigUint64(0,true)===18446744073709551615n;
+        v.setBigUint64(0,{valueOf(){return '18446744073709551617'}},true);
+        ok&&v.getBigInt64(0,true)===1n;
+    )JS");
+}
+TEST_F(JsMvpLmd, BufferViewResizableAndTransferOwnership) {
+    boolean(R"JS(
+        let b=new ArrayBuffer(8,{maxByteLength:32}),fixed=new DataView(b,4,4),tracking=new DataView(b,4);
+        fixed.setUint32(0,123);b.resize(16);
+        let ok=fixed.byteLength===4&&tracking.byteLength===12&&tracking.getUint32(0)===123;
+        b.resize(3);let threw=false;try{fixed.byteLength}catch(e){threw=e instanceof TypeError}
+        b.resize(12);ok=ok&&threw&&fixed.byteLength===4&&tracking.byteLength===8&&fixed.getUint32(0)===0;
+        let next=b.transfer(16);threw=false;try{tracking.getUint8(0)}catch(e){threw=e instanceof TypeError}
+        ok&&threw&&b.detached&&b.byteLength===0&&tracking.buffer===b&&next.resizable&&next.maxByteLength===32&&next.byteLength===16;
+    )JS");
+    boolean(R"JS(
+        let b=new ArrayBuffer(8,{maxByteLength:16});new DataView(b).setUint8(0,77);
+        let fixed=b.transferToFixedLength(12);
+        b.detached&&!fixed.resizable&&fixed.maxByteLength===12&&new DataView(fixed).getUint8(0)===77&&new DataView(fixed).getUint8(10)===0;
+    )JS");
+    boolean(R"JS(
+        function f(){let b=new ArrayBuffer(16);let v=new DataView(b,8);v.setFloat64(0,42.5);return v}
+        let v=f();for(let i=0;i<200;i++){let junk={a:[i]};}
+        v.getFloat64(0)===42.5&&v.buffer.byteLength===16;
+    )JS");
+}
+TEST_F(JsMvpLmd, BufferViewBrandsReflectionAndSubclassing) {
+    boolean(R"JS(
+        class B extends ArrayBuffer{};class V extends DataView{};
+        let b=new B(8),v=new V(b),errors=0;
+        for(let f of [()=>ArrayBuffer(8),()=>DataView(b),()=>new DataView({}),
+            ()=>DataView.prototype.getUint8.call({}),()=>new DataView(new Proxy(b,{})),
+            ()=>Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,'byteLength').get.call(ArrayBuffer.prototype),
+            ()=>v.setBigInt64(0,1),()=>v.setUint8(0,1n)]){try{f()}catch(e){if(e instanceof TypeError)errors++}}
+        v.x=3;Object.freeze(v);v.setUint8(0,9);
+        errors===8&&b instanceof B&&b instanceof ArrayBuffer&&v instanceof V&&v instanceof DataView&&
+        v.getUint8(0)===9&&v.x===3&&Object.keys(v).join()==='x'&&Object.prototype.toString.call(v)==='[object DataView]'&&
+        Object.prototype.toString.call(b)==='[object ArrayBuffer]'&&ArrayBuffer[Symbol.species]===ArrayBuffer;
+    )JS");
+    boolean(R"JS(
+        let d=Object.getOwnPropertyDescriptor(DataView.prototype,'byteLength'),m=DataView.prototype.setInt16;
+        !d.enumerable&&d.configurable&&d.set===undefined&&d.get.name==='get byteLength'&&d.get.length===0&&
+        m.length===2&&m.name==='setInt16'&&ArrayBuffer.length===1&&DataView.length===1;
+    )JS");
+}
+TEST_F(JsMvpLmd, BufferViewReentrantCoercionAndBounds) {
+    boolean(R"JS(
+        let b=new ArrayBuffer(8,{maxByteLength:16}),v=new DataView(b),order='';
+        v.setUint16({valueOf(){order+='i';return 0}},{valueOf(){order+='v';b.resize(4);return 513}},true);
+        let ok=order==='iv'&&v.getUint16(0,true)===513;
+        let marker={},same=false;try{v.setInt8(0,{valueOf(){throw marker}})}catch(e){same=e===marker}
+        b.transfer();let observed=false;try{v.setInt8(0,{valueOf(){observed=true;return 0}})}catch(e){ok=ok&&e instanceof TypeError}
+        ok&&same&&observed;
+    )JS");
+    boolean(R"JS(
+        let order='',b=new ArrayBuffer(8,{maxByteLength:16});
+        function Target(){};let target=new Proxy(Target,{get(t,k){if(k==='prototype'){order+='p';b.resize(12)}return t[k]}});
+        let v=Reflect.construct(DataView,[b,{valueOf(){order+='o';return 4}}],target);
+        order==='op'&&v.byteLength===undefined&&Object.getOwnPropertyDescriptor(DataView.prototype,'byteLength').get.call(v)===8&&
+        Object.getPrototypeOf(v)===Target.prototype;
+    )JS");
+    boolean(R"JS(
+        let v=new DataView(new ArrayBuffer(8)),errors=0;
+        for(let x of [-1,Infinity,2147483647,9007199254740991]){try{v.getUint32(x)}catch(e){if(e instanceof RangeError)errors++}}
+        v.setUint8(-0.5,7);errors===4&&v.getUint8(NaN)===7;
+    )JS");
+}
+TEST_F(JsMvpLmd, BufferViewSliceSpeciesAndDetachment) {
+    boolean(R"JS(
+        let b=new ArrayBuffer(8),v=new DataView(b);v.setUint8(2,77);
+        let copy=b.slice(2,6);let ok=copy.byteLength===4&&new DataView(copy).getUint8(0)===77;
+        let result=new ArrayBuffer(8);b.constructor={[Symbol.species]:function(n){return result}};
+        ok&&b.slice(2,6)===result&&new DataView(result).getUint8(0)===77&&b.slice(7,2).byteLength===8;
+    )JS");
+    boolean(R"JS(
+        let b=new ArrayBuffer(8,{maxByteLength:16}),v=new DataView(b);v.setUint8(2,77);
+        b.constructor={[Symbol.species]:function(n){b.resize(3);return new ArrayBuffer(n)}};
+        let copy=b.slice(2,7);let ok=copy.byteLength===5&&new DataView(copy).getUint8(0)===77&&new DataView(copy).getUint8(1)===0;
+        b.constructor={[Symbol.species]:function(n){b.transfer();return new ArrayBuffer(n)}};
+        let threw=false;try{b.slice(0)}catch(e){threw=e instanceof TypeError}ok&&threw;
+    )JS");
+    MvpLmdHost host = {0, NULL, NULL, true};
+    Item value = run(R"JS(
+        let b=new ArrayBuffer(8),v=new DataView(b);$262.detachArrayBuffer(b);
+        let threw=false;try{v.getUint8(0)}catch(e){threw=e instanceof TypeError}
+        threw&&b.detached&&v.buffer===b;
+    )JS", &host);
+    ASSERT_EQ(get_type_id(value), LMD_TYPE_BOOL);
+    EXPECT_EQ(value.item, ITEM_TRUE);
+    const char* unsupported = "let host=$262;try{host['evalScript']('1')}catch(e){}";
+    mvp_lmd_destroy(execution);
+    execution = mvp_lmd_execute(unsupported, strlen(unsupported), NULL, &host);
+    ASSERT_NE(mvp_lmd_diagnostic(execution), nullptr);
+    EXPECT_NE(strstr(mvp_lmd_diagnostic(execution), "capability"), nullptr);
+}
 TEST_F(JsMvpLmd, WithLexicalAndObjectEnvironments) {
     boolean(R"JS(
         let x=1,o={x:7},seen=0;
@@ -1531,7 +1836,7 @@ TEST_F(JsMvpLmd, ExplicitCatchFinallyCompletions) {
     )JS");
     boolean("let n=0;try{for(let i=0;i<2;i++){break;}n++;}finally{n+=2;}n===3");
     boolean("let n=0;try{throw undefined;}catch(e){n=e===undefined?1:0;}n===1");
-    error("try {new Date('unsupported');}catch(e){1;}", "capability");
+    boolean("isNaN(new Date('unsupported').getTime())");
 }
 TEST_F(JsMvpLmd, GeneratorsUseLambdaActivations) {
     boolean("function* g(){yield 1;}let it=g();let a=it.next();a.value===1&&!a.done&&it.next().done");

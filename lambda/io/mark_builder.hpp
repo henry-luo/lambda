@@ -50,6 +50,7 @@ private:
 
     bool ui_mode_;              // true = allocate DomElement/DomText (for layout/render/view)
     bool copying_view_ = false; // DOM occurrences copy owned markup as well as external values
+    bool preserving_owned_content_ = false;
 
 public:
     /**
@@ -268,6 +269,8 @@ public:
     // DOM construction needs independent elements/content even within one arena
     // (D4.5.3); ordinary evaluation keeps deep_copy's ownership optimization.
     Item deep_copy_for_view(Item item);
+    // UI content adopts external containers while retaining owned render identities.
+    Item copy_ui_content(Item item);
 
     /**
      * Check if an Item's data is in this Input's arena chain

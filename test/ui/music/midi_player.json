@@ -1,0 +1,15 @@
+{
+  "name":"Standalone MIDI uses the native player without a notation view",
+  "html":"test/music/_midi_player.ls",
+  "viewport":{"width":1000,"height":400},
+  "events":[
+    {"type":"assert_count","target":{"selector":"svg"},"count":0},
+    {"type":"click","target":{"selector":"button[data-action=play]"}},
+    {"type":"wait","ms":100},
+    {"type":"assert_attribute","target":{"selector":".lambda-music-player"},"attribute":"data-state","equals":"playing"},
+    {"type":"wait","ms":1700},
+    {"type":"assert_attribute","target":{"selector":".lambda-music-player"},"attribute":"data-state","equals":"ended"},
+    {"type":"click","target":{"selector":"button[data-action=stop]"}},
+    {"type":"assert_attribute","target":{"selector":".lambda-music-player"},"attribute":"data-state","equals":"ready"}
+  ]
+}

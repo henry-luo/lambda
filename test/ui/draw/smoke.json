@@ -1,0 +1,12 @@
+{
+  "name": "Draw native diagram editor",
+  "html": "test/demo/draw/draw.ls",
+  "viewport": {"width": 1280, "height": 820},
+  "events": [
+    {"type":"advance_time","ms":50},
+    {"type":"assert_attribute","target":{"selector":"#draw"},"attribute":"data-error","equals":""},
+    {"type":"assert_attribute","target":{"selector":"#draw"},"attribute":"data-shapes","equals":"5"},
+    {"type":"assert_count","target":{"selector":"#paper svg"},"count":1},
+    {"type":"render","file":"temp/draw/preview.png"}
+  ]
+}

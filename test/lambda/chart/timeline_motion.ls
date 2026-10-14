@@ -1,6 +1,9 @@
 import timeline: lambda.chart.timeline
 import motion: lambda.chart.timeline.motion
 import vector: lambda.chart.timeline.svg
+import animation: lambda.chart.animation
+import gesture: lambda.chart.timeline.gesture
+import host: lambda.chart.timeline.events
 
 let raw={id:"motion",view:"axis",width:800,height:400,animate:{duration:200},scales:[{kind:"numeric",unit:"year"}],
     window:{from:0,to:100},events:[{id:"a",at:20,title:"Alpha"},{id:"b",at:60,title:"Beta"}]}
@@ -25,6 +28,8 @@ let half=(middle.plan.events |: ~.id=="b")[0]
 let old=(a.plan.events |: ~.id=="b")[0]
 let final=(b.plan.events |: ~.id=="b")[0]
 let frozen=timeline.render_frame(next,{time_ms:100,previous:a},{width:800,height:400});
+let grabbed=gesture.update({window:b.plan.window},{type:"gesture_start",point:[400,200]},middle.plan,
+    {*:spec,interaction:{pan:true,pinch:true}});
 [
  ["enter starts transparent",entry.displayed.plan.events[0].opacity==0 and entry.running],
  ["enter samples explicit time",entered.displayed.plan.events[0].opacity==0.5],
@@ -37,6 +42,9 @@ let frozen=timeline.render_frame(next,{time_ms:100,previous:a},{width:800,height
  ["window and picking use sampled bounds",middle.plan.window=={from:0m,to:150m} and middle.plan.time_map.domain==middle.plan.window],
  ["interruption retains visible positions",interrupted.displayed.plan.events[0].point==partial.displayed.plan.events[0].point],
  ["interruption retains partial enter opacity",interrupted.displayed.plan.events[1].opacity==partial.displayed.plan.events[1].opacity],
+ ["interruption retains visible SVG",animation.geometry_signature(interrupted.displayed.svg)==animation.geometry_signature(partial.displayed.svg)],
+ ["gesture starts from displayed window",grabbed.gesture.window==middle.plan.window and grabbed.gesture.original==b.plan.window],
+ ["invalid native presentation returns error",host.presentation({spec:{view:"invalid"}},null) is error],
  ["reduced motion settles immediately",motion.sample(a,b,0,{*:spec,motion:"reduced"})==b],
  ["disabled animation settles immediately",motion.sample(a,b,0,{*:spec,animate:motion.configure(false)})==b],
  ["delay retains source geometry",motion.sample(a,b,50,{*:spec,animate:motion.configure({duration:200,delay:100})}).plan.events[0].point==old.point],

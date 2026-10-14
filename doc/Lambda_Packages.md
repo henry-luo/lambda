@@ -27,6 +27,8 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 11. [map — Geographic Maps](#11-map--geographic-maps)
 12. [grammar — Language Grammars](#12-grammar--language-grammars)
 13. [Tests](#13-tests)
+14. [eps — EPS Rendering](#14-eps--eps-rendering)
+15. [docx — Word DOCX Import](#15-docx--word-docx-import)
 
 ---
 
@@ -36,12 +38,19 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 |---------|-------------|--------|--------------|-----------------|
 | `ui.dtna` | `lambda.ui.dtna` | Experimental, partial native catalog | Ant-inspired components, collections, scoped tokens and native interaction; see [Lambda UI](Lambda_UI.md) | `lambda view test/ui/dtna_gallery.ls` |
 | `ui.bold` | `lambda.ui.bold` | Experimental, initial native subset | Neobrutalist components with thick borders, hard shadows, scoped tokens and shared native controls; see [bold UI](Lambda_UI_Bold.md) | `lambda view test/ui/bold_gallery.ls` |
-| `chart` | `lambda.chart.chart`, `lambda.chart.vega`, `lambda.chart.wordcloud` | Library | Declarative charts and weighted word clouds, rendered as SVG elements | No command of its own; `lambda render` and `lambda view` display a script whose result is a chart |
+| `ui.wired` | `lambda.ui.wired` | Experimental, initial native subset | Hand-drawn SVG pencil outlines, paper surfaces, hatched progress, scoped tokens and native controls; see [wired UI](Lambda_UI_Wired.md) | `lambda view test/ui/wired_gallery.ls` |
+| `ui.clay` | `lambda.ui.clay` | Experimental, broad native theme | Claymorphism surfaces and 59 components/subcomponents sharing the Ant-inspired behavior layer; see [clay UI](Lambda_UI_Clay.md) | `lambda view test/ui/clay_gallery.ls` |
+| `ui.blade` | `lambda.ui.blade` | Experimental, broad native theme | High-resolution fantasy materials, 64 components/subcomponents, inventory slots, abilities and 18 original vector icons; see [blade UI](Lambda_UI_Blade.md) | `lambda view test/ui/blade_gallery.ls` |
+| `chart` | `lambda.chart.chart`, `lambda.chart.vega`, `lambda.chart.wordcloud` | Library | Declarative SVG charts, scientific analysis and native 3D figures | No command of its own; `lambda render` and `lambda view` display a script whose result is a chart |
 | `map` | `lambda.map` | Library, initial offline subset | Native `<geomap>` viewports with typed GeoJSON, camera interaction, feature queries and vector export | `lambda render` and `lambda view` display a script whose result is a map |
+| `physics` | `lambda.physics`, `lambda.physics.scene` | Experimental 3D rigid-body profile | Native sphere/box dynamics, Scene3D controls, batch simulation and trajectory analysis; see [Physics](Lambda_Physics.md) | `lambda view test/demo/physics/index.ls` |
+| `music` | `lambda.music` | Experimental notation and MIDI profile | Native MusicXML/MXL, SVG sheet music, SMF import/export and SoundFont playback; see [MusicXML and MIDI](Lambda_Music.md) | `lambda view test/music/_player.ls` |
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
 | `latex` | `lambda.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
+| `docx` | `lambda.doc.docx` | Library, initial semantic import profile | Reads Word DOCX into elements, HTML fragments, text, metadata and diagnostics (§14) | Import from a Lambda script; direct DOCX viewing remains archive browsing |
 | `pdf` | `lambda.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
+| `eps` | `lambda.doc.eps.eps` | Library, initial vector profile | Interprets EPS PostScript and produces standalone SVG | `convert -t svg`, `view`, `layout` and `render` on `.eps`/`.epsi` |
 | `grammar` | `lambda.grammar.xpath`, `lambda.grammar.xquery`, `lambda.grammar.jq`, `lambda.grammar.rnc` | Library, experimental | Grammars for other languages, written as Lambda `grammar` declarations: XPath 3.1, XQuery 3.1, jq 1.7.1 and RELAX NG compact parse to Lambda element trees | None |
 | `openapi` | `lambda.openapi.openapi`, `lambda.openapi.server` | Experimental | Route listing, Lambda type generation, validation and Swagger UI pages for OpenAPI specs | None |
 | `slide` | `lambda.slide` | Library, experimental | Slide elements, cues/effects, presenter console/navigation tools, themes/layouts/masters, snapshots and handouts; see [Slide Presentations](Lambda_Slide.md) | `lambda view deck.slides` |
@@ -84,8 +93,13 @@ The `lambda.*` root is reserved for everything Lambda ships (D7.2.4). Shipped pa
 | `lambda.<package>.<module>` | `<LAMBDA_HOME>/package/<package>/<module>.ls` |
 | `lambda.ui.dtna` | `<LAMBDA_HOME>/package/ui/dtna.ls` (explicit public module) |
 | `lambda.ui.bold` | `<LAMBDA_HOME>/package/ui/bold.ls` (explicit public module) |
+| `lambda.ui.wired` | `<LAMBDA_HOME>/package/ui/wired.ls` (explicit public module) |
+| `lambda.ui.clay` | `<LAMBDA_HOME>/package/ui/clay.ls` (explicit public module) |
+| `lambda.ui.blade` | `<LAMBDA_HOME>/package/ui/blade.ls` (explicit public module) |
 | `lambda.slide` | `<LAMBDA_HOME>/package/slide.ls` (explicit public module) |
 | `lambda.map` | `<LAMBDA_HOME>/package/map.ls` (explicit public module) |
+| `lambda.physics` | `<LAMBDA_HOME>/package/physics.ls` (explicit public module) |
+| `lambda.music` | `<LAMBDA_HOME>/package/music.ls` (explicit public module) |
 | `lambda.<package>.<dir>.<module>` | `<LAMBDA_HOME>/package/<package>/<dir>/<module>.ls` |
 | `lambda.doc.math.<module>` | `<LAMBDA_HOME>/package/math/<module>.ls` |
 | `lambda.math`, `lambda.io` | The built-in `math` and `io` modules, which are not packages |
@@ -145,6 +159,12 @@ Keep your packages next to the scripts that use them. The `lambda.*` namespace i
 ## 4. `chart` — Charts
 
 The chart package turns a declarative chart specification into an SVG element tree. It follows the Vega-Lite grammar: rows of data, a mark type, and encoding channels that map data fields to position, colour and size. A specification is either a `<chart>` element or a Vega-Lite document converted with `lambda.chart.vega`.
+
+Scientific grids/meshes, streamlines, spectral analysis, and native 3D figures
+are described in [Scientific Charts](Lambda_Chart_Plot.md). `chart.figure`
+returns SVG for 2D or a native scene with SVG guides for 3D; `chart.render`
+retains its SVG-only contract. The pure numerical modules are
+`lambda.chart.mesh`, `lambda.chart.stream`, and `lambda.chart.signal`.
 
 ```lambda
 import chart: lambda.chart.chart
@@ -224,6 +244,8 @@ svg.width                // 400, the default width
 | `chart.model(spec, viewport = null, options = {})` | Creates a chart source element; retain and `apply` it to preserve chart state across parent rerenders |
 | `chart.interactive(spec, viewport = null, options = {})` | Applies a Lambda view template with independent interaction state, SVG, and bound input controls |
 | `chart.render_frame(spec, frame, viewport = null, st = null)` | Samples SVG at an explicit `time_ms`; a `previous` specification or SVG supplies the source of an update transition (S12.1.1v2) |
+| `chart.figure(spec, viewport = null)` | Constructs a 2D SVG or native 3D scientific figure; see [supported marks and limits](Lambda_Chart_Plot.md) |
+| `chart.figure_frame(spec, frame, viewport = null)` | Existing 2D sampling; static figures and exact timeline endpoints for 3D |
 | `vega.convert(vl)` | Converts a parsed Vega-Lite document (a map) into a specification map for `render_spec` |
 
 ### 4.3 Specification elements
@@ -656,6 +678,8 @@ Implementation is in progress against the
 [timeline proposal](../vibe/Lambda_Pkg_Chart_Timeline.md); the
 [acceptance inventory](../test/timeline/reference_inventory.json) records open
 features and host coverage. Native Radiant is the current interactive host.
+The revised proposal excludes browser delivery, automatic resource lifecycle,
+export, and accessibility/localization gates; existing compatibility APIs remain.
 
 ```lambda
 import timeline: lambda.chart.timeline
@@ -674,6 +698,29 @@ partial dates, exact numeric deep time, explicit timezones, duration events,
 eras, nested groups, hidden intervals, curved coordinates, and quantitative
 chart overlays. Rendering consumes explicit state and resource results;
 procedural handlers own effects (**S12.1.1v2, S9.1.4/S9.3.1**).
+
+Retained models reuse source normalization and an exact interval index across
+window, selection, and playback changes. Query/filter/group changes rebuild
+visibility while retaining the source index. Layout clusters projected candidates
+before measuring rich cards; `plan.work` reports index use, examined records,
+candidates, and measured cards. Dense identical-date clusters still examine all
+their members (**S6.2.2v3/S6.2.3**).
+
+Set `animate: true` or `animate: {duration: 300, delay: 0, easing: 'linear',
+enter: true, update: true, exit: true, guides: true}` to animate keyed event
+replacement, geometry, windows, and guides. Interruption starts from the displayed
+geometry and opacity; outgoing cards retire at completion. `motion: 'reduced'`
+or `'none'`, or `model(spec, viewport, {reduced_motion: true})`, settles immediately.
+For a deterministic sample, `render_frame(spec, {time_ms: 100, previous: {plan,
+svg}}, viewport)` consumes an explicit previous snapshot
+(**S12.1.1v2/S12.1.3, S9.1.4/S9.3.1**).
+
+Open the native [animation sample](../test/ui/timeline/keyed_motion.ls) with
+`./lambda.exe view test/ui/timeline/keyed_motion.ls`. Additional pages show
+[rich cards and dtna styling](../test/ui/timeline/cards.ls),
+[clustering](../test/ui/timeline/cluster.ls), and
+[dark-theme presentation](../test/ui/timeline/presentation.ls), and a
+[10,000-event chronology](../test/ui/timeline/scalability.ls).
 
 `search.highlight: true` preserves rich inline elements and their attributes,
 including matches split across element boundaries. Case and diacritic options
@@ -890,6 +937,18 @@ contains(format(el, 'html'), "<text") // true
 | `render_display(ast)` | Display (block) style |
 | `render_standalone(ast)` | Self-contained display style SVG |
 | `stylesheet(options = null)` | Returns `""`; each SVG embeds its required font declarations |
+| `to_mathml(ast, options = null)` | Presentation MathML element tree; optional `display` and inert TeX `source` annotation |
+| `parse_mathml(source)` | Strict MathML XML tree with namespaces validated and token whitespace preserved |
+
+The font-independent `lambda.doc.math.mathml` module exposes the same conversion
+and parsing APIs without importing Radiant. Runtime
+`format(ast, {type: 'math', flavor: 'mathml'})` and CLI `-t math-mathml`
+use its exporter. It supports common fractions, scripts/limits, roots,
+groups/fences, alphabets, simple text, accents, spacing, phantoms and matrices;
+unsupported TeX constructs report errors. The renderer also accepts a documented
+Presentation MathML subset through its separate Core policy, sharing measured
+SVG geometry with TeX. Radiant paints that subset in HTML while preserving the
+MathML DOM; full CSS and accessibility integration remain open (**D7.2.8**).
 
 `fonts` uses the same binary face records as Radiant's metrics API. An explicit
 `font_family` without `fonts` uses installed fonts. MATH is optional: ordinary
@@ -1334,14 +1393,171 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 | `chart` | `test/lambda/chart/` |
 | `ui.dtna` | `test/lambda/ui_dtna/`; native UI fixtures in `test/ui/dtna/` (`make test-ui-dtna`) |
 | `ui.bold` | `test/lambda/ui_bold/`; native controls in `test/ui/bold/` and `test/ui/bold_gallery.json` (`make test-ui-bold`) |
+| `ui.wired` | `test/lambda/ui_wired/`; native controls/geometry in `test/ui/wired/` and `test/ui/wired_gallery.json` (`make test-ui-wired`) |
+| `ui.clay` | `test/lambda/ui_clay/`; native controls/collections/scopes in `test/ui/clay/` and the two galleries (`make test-ui-clay`) |
+| `ui.blade` | `test/lambda/ui_blade/`; native RPG/collection/scope/responsive fixtures in `test/ui/blade/` and two galleries (`make test-ui-blade`) |
 | `map` | `test/lambda/map/`; native rendering and input in `test/test_map_gtest.cpp`; PNG/SVG/PDF fixtures in `test/map/` (`make test-map`, `make test-map-export`) |
 | `graph` | `test/lambda/graph/mermaid/`, `test/lambda/graph/graphviz/`, `test/lambda/graph/structurizr/`; `test/lambda/graph_layout*.ls` and `test/lambda/graph_transform_*.ls` |
 | `math` | `test/lambda/math/` |
+| `music` | `test/lambda/music/`; score fixtures and viewer example in `test/music/` |
 | `latex` | `test/lambda/latex/` |
+| `docx` | `test/lambda/docx/`; synthetic and pinned reference documents in `test/input/docx/` |
 | `grammar` | `test/lambda/grammar/xpath.ls` (the grammar module itself: `test/lambda/grammar/`) |
 | `pdf` | `test/lambda/pdf/` |
+| `eps` | `test/lambda/eps/`; native parsing/scanning in `test/test_input_eps_gtest.cpp` |
 | `openapi` | None yet |
 | `edit` | `test/lambda/edit/`, `test/lambda/proc/edit_session_save.ls`; UI scripts `test/ui/edit_*.json` |
 | `editor` | `test/lambda/editor/`, `test/lambda/editing/` |
 | `dom` | `test/lambda/dom_*.ls`; UI scripts `test/ui/dom_pkg_*.json` |
 | The `lambda.*` namespace | `test/lambda/lambda_namespace.ls` |
+
+---
+
+## 14. `eps` — EPS Rendering
+
+The EPS package lives under the document namespace (**D7.2.4**). A C+ parser
+reads the EPS envelope and scans source objects; Lambda Script executes the
+PostScript machine and emits portable SVG. The initial profile supports vector
+paths, colors, strokes, transforms, clipping, procedures, common stack/control
+operators, local VM saves, base-font text and raster images. External resources and full
+PostScript LanguageLevel conformance remain outside this profile; an executed
+unsupported operator raises an error.
+
+```lambda no-run
+import eps: lambda.doc.eps.eps
+
+pn main() {
+    let doc = input("artwork.eps", 'eps')^
+    let picture = eps.eps_to_svg(doc, {id_prefix: "artwork"})^
+    output(format(picture, 'xml')^, "artwork.svg")^
+}
+```
+
+`eps_metadata(doc)` reads declared metadata without executing the artwork.
+`interpret(doc, options)` returns drawing records, definitions, geometry,
+diagnostics and statistics; `display_to_svg(display, options)` converts that
+result to an element. `eps_to_svg` composes the two. Execution is procedural
+(**S12.1.2**); handle failures with a procedure statement handler
+(**S7.6.7v4**) or propagate with `^`.
+
+Options include `id_prefix`, `scale`, `background` and a `limits` map. Use
+separate ID prefixes when combining SVG fragments. Output is transparent by
+default, with dimensions in points. The exact supported operator names are
+available as `eps.supported_operators`; the initial dictionary-key profile
+accepts names and its logical operators accept booleans. Auto/JIT are the
+supported package execution tiers.
+
+Font setup supports `findfont`, `scalefont`, `makefont`, `setfont`, `currentfont`
+and `selectfont` for the Standard 14 names and four Palatino variants, sharing
+the PDF font mappings. `show`, `stringwidth`, `ashow`, `widthshow` and
+`awidthshow` support printable ASCII StandardEncoding text. Glyph advances
+come from Radiant's installed font metrics; explicit SVG glyph origins preserve
+those advances. Font selection follows graphics and VM saves. Unknown names
+raise `invalidfont`; reencoding and embedded/custom font programs remain open.
+
+Legacy `image`/`colorimage` support 1/2/4/8-bit gray, RGB and CMYK samples,
+interleaved or planar, with strings, in-memory files and procedure callbacks.
+`currentfile`, byte/hex/line reads, `token` and ASCIIHex/ASCII85/RunLength filters
+share one source cursor, so inline pixels are consumed before lexical scanning
+resumes. PNG encoding and filter codecs reuse native PDF helpers. The default
+ceilings include 10 million VM steps, 16 million pixels and 64 MiB of cumulative
+decoded bytes; lower caller limits remain enforced.
+
+```bash
+./lambda.exe convert artwork.eps -t svg -o artwork.svg
+./lambda.exe render artwork.eps -o artwork.png
+./lambda.exe layout artwork.eps
+./lambda.exe view artwork.eps
+```
+
+See the [EPS design](../vibe/Lambda_Pkg_EPS.md) and
+[implementation record](../vibe/impl/Lambda_Impl_EPS.md) for source contracts,
+budgets, tests and remaining resource/font/image work.
+
+---
+
+## 15. `docx` — Word DOCX Import
+
+`lambda.doc.docx` is a shipped script module under D7.2.1/D7.2.4. It reads a
+local `.docx` path or a captured ZIP file tree and converts the document's main
+story to semantic HTML elements. The source package is read through Lambda's
+bounded ZIP input (S12.4.1v2/S14.3.1v2); conversion follows relationships and
+namespace URIs rather than fixed member paths or namespace prefixes.
+
+```lambda
+import docx: lambda.doc.docx
+let result = docx.convert("test/input/docx/minimal.docx")^;
+result.document
+```
+
+`convert(source, options = null)` returns
+`{document, html, text, metadata, diagnostics}`. `document` is an `<article
+class="docx-document">` element, `html` its escaped HTML fragment, and `text`
+the reading-order text. Paragraphs end with two newlines; table rows use tabs
+between cells and newlines between rows. Images do not contribute prose text.
+Available core properties such as title and creator appear in `metadata`.
+
+`to_elements`, `to_html`, and `extract_text` take the same arguments and return
+the corresponding field. Use `convert` when the caller needs diagnostics.
+
+Supported content includes paragraphs; headings derived from styles/outline
+levels; inherited and direct bold, italic, underline, strike, superscript and
+subscript; tabs and breaks; simple lists with numbering starts, continuation
+and nesting, including lists with hidden markers; tables with grid spans and
+vertical merges; hyperlinks and simple bookmarks; embedded raster images;
+and clustered column charts rendered from their cached category/series values.
+Charts reuse `lambda.chart.chart` for SVG layout (D7.2.4), retain explicit RGB
+series colors and titles, and contribute a data table to extracted text.
+Paragraph-relative column anchors support left/right square wrapping,
+centered largest-side wrapping, and top/bottom wrapping at paragraph top.
+Signed column-start and paragraph offsets with square wrapping on both sides
+use CSS float margins (D7.2.4); this remains a flowing approximation of Word.
+The viewer also reads the document theme, inherited and direct run properties
+(font family, size, color, tracking and capitalization), paragraph spacing,
+table grid widths, cell shading and borders, row heights, and page size/margins.
+Values are converted from OOXML units into CSS; the named font must be
+available to the host font resolver for a matching face. CSS remains a flow
+preview and does not reproduce Word's full layout engine.
+Both Transitional and Strict Word
+namespace families are recognized. HTML is flow content, with semantic break
+markers and no Word pagination guarantee.
+
+Content controls display their saved `sdtContent` at inline, block, row and
+cell boundaries, preserving surrounding formatting and reading order. Control
+properties are editing metadata; bindings and placeholder definitions are not
+evaluated. Footnote/endnote parts containing only separator definitions do not
+represent omitted notes; actual note content remains diagnosed.
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `style_map` | `{}` | Style ID/name to `p`, `h1`–`h6`, `blockquote`, `pre`, or `{tag, class}`. |
+| `presentation` | `"semantic"` | `"source"` adds validated Word theme, run, table, and page CSS; the viewer selects it. |
+| `include_empty_paragraphs` | `false` | Preserve empty paragraph elements and text boundaries. |
+| `images` | `"data-uri"` | Embed supported internal images; `"omit"` reports their omission. |
+| `id_prefix` | `""` | Prefix bookmark IDs and internal anchor links. |
+| `unsupported` | `"warn"` | Return diagnostics; `"error"` rejects a conversion with diagnostics. |
+
+Diagnostics have `{severity, code, part, message}`. Unsupported visible
+constructs are reported. Headers/footers, notes, comments, revision semantics,
+field execution, other chart types, shapes, equations, page-relative floating
+placement, DOCX writing,
+encrypted documents, and `.docm` are outside this profile. External resources
+are never fetched; emitted hyperlink schemes are validated. XML parts use
+strict UTF-8 XML with significant whitespace and reject DTDs and embedded NULs.
+Unknown options, unsafe mappings, invalid package targets, required malformed
+XML, and style cycles raise ordinary Lambda errors.
+
+Package errors use codes 7600–7607: invalid source, options, package, missing
+part, XML, target, unsupported content in strict mode, and style cycle.
+Underlying source/ZIP errors keep their existing codes. In particular, the
+pinned `tiny-picture-target-base-relative.docx` reference is rejected by the
+shared ZIP reader for its `0x0314` version-needed declaration; it is recorded
+as an unsupported input, not a successful import.
+
+Design and phased scope: [DOCX package](../vibe/Lambda_Pkg_Docx.md).
+
+`lambda view report.docx` presents the imported Word document with the shared
+`lambda.doc.docx.view` presentation module (D7.2.4). The bundled file browser
+also previews DOCX and exposes its converted HTML on the Source tab. Use
+`lambda view report.docx --archive` for the underlying ZIP tree. Unsupported
+content is listed above the preview; Word pagination is outside this profile.

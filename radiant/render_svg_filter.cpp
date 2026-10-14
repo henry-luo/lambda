@@ -473,17 +473,50 @@ bool render_gaussian_blur_axis(ScratchArena* scratch, const ImageSurface* source
     uint32_t* output = (uint32_t*)destination->pixels;
     size_t source_stride = (size_t)source->pitch / sizeof(uint32_t);
     size_t destination_stride = (size_t)destination->pitch / sizeof(uint32_t);
-    for (int row = 0; row < source->height; row++) for (int column = 0; column < source->width; column++) {
-        float values[4] = {};
-        for (int tap = -radius; tap <= radius; tap++) {
-            int sample = svg_filter_edge_index((int64_t)(axis ? row : column) + tap, low, high, edge);
-            int px = axis ? column : sample, py = axis ? sample : row;
-            if (px < 0 || py < 0 || px >= source->width || py >= source->height) continue;
-            uint32_t pixel = data[(size_t)py * source_stride + (size_t)px];
-            for (unsigned channel = 0; channel < 4; channel++) values[channel] +=
-                (float)((pixel >> (channel * 8)) & 255u) / 255.0f * weights[tap + radius];
+    // coverage masks have four identical channels; one accumulation is exact for all four.
+    bool equal_channels = true;
+    for (int row = 0; equal_channels && row < source->height; row++) {
+        for (int column = 0; column < source->width; column++) {
+            uint32_t pixel = data[(size_t)row * source_stride + (size_t)column];
+            if (pixel != (pixel & 255u) * 0x01010101u) { equal_channels = false; break; }
         }
-        output[(size_t)row * destination_stride + (size_t)column] = svg_filter_pack(values);
+    }
+    int line_count = axis ? source->width : source->height;
+    int length = axis ? source->height : source->width;
+    size_t source_step = axis ? source_stride : 1;
+    size_t destination_step = axis ? destination_stride : 1;
+    for (int line = 0; line < line_count; line++) {
+        const uint32_t* input_line = data + (axis ? (size_t)line : (size_t)line * source_stride);
+        uint32_t* output_line = output + (axis ? (size_t)line : (size_t)line * destination_stride);
+        int run_begin = 0, run_end = 0;
+        for (int position = 0; position < length;) {
+            if (position >= run_end) {
+                run_begin = position;
+                run_end = position + 1;
+                while (run_end < length && input_line[(size_t)run_end * source_step] ==
+                       input_line[(size_t)position * source_step]) run_end++;
+            }
+            int next = position + 1;
+            // flat mask interiors share every kernel sample; convolve once, including rounding.
+            // keep edge extension and run boundaries on the ordinary convolution path.
+            if ((int64_t)position - radius >= run_begin && (int64_t)position - radius >= low &&
+                (int64_t)position + radius < run_end && (int64_t)position + radius < high) {
+                next = run_end - radius;
+                if (next > high - radius) next = high - radius;
+            }
+            float values[4] = {};
+            for (int tap = -radius; tap <= radius; tap++) {
+                int sample = svg_filter_edge_index((int64_t)position + tap, low, high, edge);
+                if (sample < 0 || sample >= length) continue;
+                uint32_t pixel = input_line[(size_t)sample * source_step];
+                if (equal_channels) values[0] += (float)(pixel & 255u) / 255.0f * weights[tap + radius];
+                else for (unsigned channel = 0; channel < 4; channel++) values[channel] +=
+                        (float)((pixel >> (channel * 8)) & 255u) / 255.0f * weights[tap + radius];
+            }
+            if (equal_channels) values[1] = values[2] = values[3] = values[0];
+            uint32_t pixel = svg_filter_pack(values);
+            do { output_line[(size_t)position * destination_step] = pixel; } while (++position < next);
+        }
     }
     return true;
 }

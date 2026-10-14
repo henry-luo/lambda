@@ -13,6 +13,7 @@
 #include "../../dom/dom_collection_types.h"
 #include "../../dom/dom_event_host.h"
 #include "radiant_input_value.hpp"
+#include "radiant_image_job.hpp"
 #include "../../../lib/tagged.hpp"
 #include "../../../radiant/layout.hpp"
 #include "../../../radiant/render.hpp"
@@ -22,6 +23,7 @@
 #include "../../../radiant/event.hpp"
 #include "../../../radiant/radiant.hpp"
 #include "../../../radiant/audio.hpp"
+#include "../../../radiant/scene3d.hpp"
 #include "../../../radiant/rdt_video.h"
 #include "../../../lib/log.h"
 #include "../../../lib/mem.h"
@@ -163,7 +165,7 @@ static Item radiant_key_item(const char* key) {
     return radiant_string_item(key);
 }
 
-static Item radiant_obj_new(void) {
+Item radiant_obj_new(void) {
     return vmap_new();
 }
 
@@ -182,7 +184,7 @@ static void radiant_obj_set(Item obj, const char* key, Item value) {
     radiant_host_api->value->property_set(owner.get(), key_item, stored.get());
 }
 
-static void radiant_rooted_obj_set(Rooted<Item>& rooted_obj, const char* key, Item value) {
+void radiant_rooted_obj_set(Rooted<Item>& rooted_obj, const char* key, Item value) {
     radiant_obj_set(rooted_obj.get(), key, value);
 }
 
@@ -271,6 +273,7 @@ static void radiant_custom_paint_clear(RadiantCustomPaintResource* resource) {
     resource->root_count = 0;
     resource->paint.layers = nullptr;
     resource->paint.layer_count = 0;
+    resource->paint.has_intrinsic_measurement = false;
 }
 
 static void radiant_custom_paint_destroy(DomDocumentResourceData* data) {
@@ -976,6 +979,12 @@ static Item radiant_layout_context_item(const CustomLayoutContext* context) {
     radiant_rooted_obj_set(rooted_obj, "writing_mode", radiant_string_item(
         context->writing_mode ? context->writing_mode : "horizontal-tb"));
     radiant_rooted_obj_set(rooted_obj, "child_count", radiant_int_item(context->child_count));
+    if (context->parent && context->parent->is_element()) {
+        DomElement* element = context->parent->as_element();
+        radiant_rooted_obj_set(rooted_obj, "element", (Item){.element = dom_element_to_element(element)});
+        radiant_rooted_obj_set(rooted_obj, "font_size", radiant_float_item(
+            element->font ? element->fontp()->font_size : 16.0f));
+    }
     return rooted_obj.get();
 }
 
@@ -1083,12 +1092,18 @@ static bool radiant_custom_layout_parse_result(const CustomLayoutContext* contex
     return ok;
 }
 
-static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* context,
-                                                  CustomLayoutResult* result) {
-    if (!radiant_host_api || !radiant_host_api->script || !context || !result) return false;
+static bool radiant_lambda_layout_callback(const CustomLayoutContext* context,
+                                           CustomLayoutResult* result,
+                                           const char* package_module) {
+    if (!context || !result) return false;
+    DomDocument* layout_doc = context->parent ? context->parent->doc : nullptr;
+    Runtime* runtime = package_module ? layout_document_package_runtime(layout_doc, package_module)
+        : dom_document_loader_runtime(layout_doc);
+    // Importing the first package installs the native Radiant host API.
+    if (!radiant_host_api || !radiant_host_api->script || (package_module && !runtime)) return false;
     Heap* owner_heap = radiant_custom_layout_heap(context);
     RadiantCustomLayoutEntry* entry = radiant_custom_layout_entry(context->layout_name, owner_heap);
-    if (!entry || get_type_id(entry->fn) != LMD_TYPE_FUNC) {
+    if (!package_module && (!entry || get_type_id(entry->fn) != LMD_TYPE_FUNC)) {
         log_error("CUSTOM_LAYOUT_LAMBDA_MISSING_FN: layout='%s' heap=%p",
                   context && context->layout_name ? context->layout_name : "(null)", owner_heap);
         return false;
@@ -1101,8 +1116,6 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
 
     EvalContext* callback_context = nullptr;
     Context* saved_input_context = input_context;
-    DomDocument* layout_doc = context->parent ? context->parent->doc : nullptr;
-    Runtime* runtime = dom_document_loader_runtime(layout_doc);
     // A window's loader runtime serves every document built on it, so it works
     // on this document's Input only for the duration of the callback; every
     // exit then hands the document the values the callback rooted.
@@ -1118,11 +1131,11 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
             g_radiant_velmt_active_pass_id = previous_pass_id;
             return false;
         }
-        if (loader_runtime && ::context && ::context != callback_context) {
+        if (::context != callback_context) {
             // The document's own evaluator may hold the thread. Take it only
             // at a quiescent layout boundary (EO5v2), never under another
             // evaluator's live frames.
-            if (::context->execution_depth != 0 ||
+            if ((::context && ::context->execution_depth != 0) ||
                     !radiant_eval_context_switch(callback_context)) {
                 g_radiant_velmt_active_pass_id = previous_pass_id;
                 log_error("CUSTOM_LAYOUT_LAMBDA_BUSY: layout='%s' needs the loader runtime",
@@ -1159,13 +1172,19 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
         // A layout callback is reentrant in the document's active script call;
         // handing that EvalContext to a worker tears down the parent activation.
         RootFrame roots(5);
-        Rooted<Item> rooted_fn(roots, entry->fn);
+        Rooted<Item> rooted_fn(roots, entry ? entry->fn : ItemNull);
         Rooted<Item> rooted_parent(roots, radiant_layout_parent_item(context));
         Rooted<Item> rooted_children(roots, radiant_layout_children_item(context));
         Rooted<Item> rooted_layout_context(roots, radiant_layout_context_item(context));
         Rooted<Item> rooted_result(roots, ItemNull);
         bool retained_callback = runtime && !interp_has_active_state();
-        if (retained_callback && rooted_fn.get().function->def_module) {
+        if (package_module) {
+            Item callback_args[] = {
+                rooted_parent.get(), rooted_children.get(), rooted_layout_context.get()};
+            RuntimeExecutionScope execution_scope(callback_context);
+            rooted_result.set(interp_call_package_export(runtime, package_module,
+                "layout", callback_args, 3));
+        } else if (retained_callback && rooted_fn.get().function->def_module) {
             Item callback_args[] = {
                 rooted_parent.get(), rooted_children.get(), rooted_layout_context.get()};
             // Document transforms finish before their retained layout pass. Route
@@ -1193,6 +1212,16 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
     g_radiant_velmt_active_pass_id = previous_pass_id;
     input_context = saved_input_context;
     return ok;
+}
+
+static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* context,
+                                                  CustomLayoutResult* result) {
+    return radiant_lambda_layout_callback(context, result, nullptr);
+}
+
+bool radiant_package_layout_callback(const CustomLayoutContext* context,
+                                     CustomLayoutResult* result, const char* package_module) {
+    return radiant_lambda_layout_callback(context, result, package_module);
 }
 
 static DomDocument* radiant_dom_document_from_node(DomNode* node) {
@@ -2427,6 +2456,57 @@ RADIANT_C_API Item fn_radiant_audio_pause(Item node, Item token) { return radian
 RADIANT_C_API Item fn_radiant_audio_close(Item node, Item token) { return radiant_audio_operation(node, token, AUDIO_CLOSE); }
 RADIANT_C_API Item fn_radiant_audio_state(Item node, Item token) { return radiant_audio_operation(node, token, AUDIO_STATE); }
 
+RADIANT_C_API Item fn_radiant_midi_open(Item node, Item performance, Item font) {
+    DomElement* owner = radiant_dom_element_from_item(node, "MIDI_OPEN");
+    ItemReader data(performance.to_const());
+    if (!owner || !data.isMap() || get_type_id(font) != LMD_TYPE_BINARY) return ItemNull;
+    MapReader model = data.asMap();
+    ItemReader rows = model.get("events"), duration = model.get("seconds");
+    if (!rows.isArray() || !duration.isNumber()) return ItemNull;
+    ArrayReader array = rows.asArray();
+    int64_t count = array.length();
+    if (count < 1 || count > 200000) return ItemNull;
+    auto* events = (MidiEvent*)mem_alloc((size_t)count * sizeof(MidiEvent), MEM_CAT_RENDER);
+    if (!events) return ItemNull;
+    bool valid = true;
+    for (int64_t i = 0; i < count && valid; i++) {
+        ItemReader entry = array.get(i);
+        if (!entry.isMap()) { valid = false; break; }
+        MapReader e = entry.asMap();
+        ItemReader time = e.get("seconds"), status = e.get("status"), a = e.get("a"), b = e.get("b");
+        double values[] = {it2d(status.item()), it2d(a.item()), it2d(b.item())};
+        valid = time.isNumber() && status.isNumber() && a.isNumber() && b.isNumber();
+        for (double value : values) valid = valid && isfinite(value) && value == floor(value) && value >= 0 && value <= 255;
+        if (valid) events[i] = {it2d(time.item()), (uint8_t)values[0], (uint8_t)values[1], (uint8_t)values[2]};
+    }
+    uint64_t token = valid ? radiant_midi_open(owner, events, (size_t)count, it2d(duration.item()),
+        binary_data(font.get_binary()), font.get_binary()->len) : 0;
+    mem_free(events);
+    return token ? radiant_int_item((int64_t)token) : ItemNull;
+}
+RADIANT_C_API Item fn_radiant_midi_command(Item node, Item token, Item command, Item value) {
+    DomDocument* doc = radiant_window_document_from_item(node, "MIDI_COMMAND");
+    ItemReader id(token.to_const()), number(value.to_const());
+    if (!doc || !id.isInt() || id.asInt() <= 0 || get_type_id(command) != LMD_TYPE_STRING || !number.isNumber()) return radiant_bool_item(false);
+    return radiant_bool_item(radiant_midi_command(doc, (uint64_t)id.asInt(), command.get_chars(), it2d(number.item())));
+}
+RADIANT_C_API Item fn_radiant_midi_info(Item node, Item token) {
+    DomDocument* doc = radiant_window_document_from_item(node, "MIDI_INFO");
+    ItemReader id(token.to_const()); MidiSnapshot snapshot;
+    if (!doc || !id.isInt() || id.asInt() <= 0 || !radiant_midi_info(doc, (uint64_t)id.asInt(), &snapshot)) return ItemNull;
+    static const char* names[] = {"ready", "playing", "paused", "ended", "error"};
+    RootFrame roots(1);
+    Rooted<Item> result(roots, radiant_obj_new());
+    radiant_rooted_obj_set(result, "state", radiant_string_item(names[snapshot.state]));
+    radiant_rooted_obj_set(result, "position", radiant_float_item(snapshot.position));
+    radiant_rooted_obj_set(result, "duration", radiant_float_item(snapshot.duration));
+    radiant_rooted_obj_set(result, "speed", radiant_float_item(snapshot.speed));
+    radiant_rooted_obj_set(result, "volume", radiant_float_item(snapshot.volume));
+    radiant_rooted_obj_set(result, "mute", radiant_int_item(snapshot.mute));
+    radiant_rooted_obj_set(result, "solo", radiant_int_item(snapshot.solo));
+    return result.get();
+}
+
 RADIANT_C_API Item fn_radiant_media_info(Item node) {
     DomElement* elem = radiant_dom_element_from_item(node, "MEDIA_INFO");
     MediaViewState* media = elem && elem->doc
@@ -2496,6 +2576,22 @@ RADIANT_C_API Item fn_radiant_set_close_guard(Item node_item, Item armed_item) {
 RADIANT_C_API Item fn_radiant_request_window_close(Item node_item) {
     DomDocument* doc = radiant_window_document_from_item(node_item, "REQUEST_WINDOW_CLOSE");
     return radiant_bool_item(doc && radiant_window_approve_close(doc));
+}
+
+RADIANT_C_API Item fn_radiant_set_window_fullscreen(Item node, Item enabled) {
+    DomNode* owner = radiant_dom_node_from_item(node, "SET_WINDOW_FULLSCREEN");
+    return radiant_bool_item(owner && get_type_id(enabled) == LMD_TYPE_BOOL &&
+        radiant_window_set_fullscreen(owner, it2b(enabled)));
+}
+
+RADIANT_C_API Item fn_radiant_window_fullscreen(Item node) {
+    return radiant_bool_item(radiant_window_fullscreen(
+        radiant_dom_node_from_item(node, "WINDOW_FULLSCREEN")));
+}
+
+RADIANT_C_API Item fn_radiant_window_fullscreen_enabled(Item node) {
+    return radiant_bool_item(radiant_window_fullscreen_enabled(
+        radiant_dom_node_from_item(node, "WINDOW_FULLSCREEN_ENABLED")));
 }
 
 RADIANT_C_API Item fn_radiant_set_window_title(Item node_item, Item title_item) {
@@ -3863,6 +3959,11 @@ RADIANT_C_API Item fn_radiant_export_document(Item html_item, Item path_item, It
     bool paged = get_type_id(pagination) == LMD_TYPE_BOOL && it2b(pagination);
     if (pagination.item != ItemNull.item && get_type_id(pagination) != LMD_TYPE_BOOL)
         return radiant_string_item("render export: pagination must be boolean");
+    Item transparent = radiant_obj_get(options.get(), "transparent");
+    if (transparent.item != ItemNull.item && get_type_id(transparent) != LMD_TYPE_BOOL)
+        return radiant_string_item("render export: transparent must be boolean");
+    if (get_type_id(transparent) == LMD_TYPE_BOOL && it2b(transparent) && (output_kind != RENDER_OUTPUT_PNG || paged))
+        return radiant_string_item("render export: transparent requires continuous PNG output");
     Item local = radiant_obj_get(options.get(), "local_resources");
     if (local.item != ItemNull.item && get_type_id(local) != LMD_TYPE_BOOL)
         return radiant_string_item("render export: local_resources must be boolean");
@@ -3883,6 +3984,7 @@ RADIANT_C_API Item fn_radiant_export_document(Item html_item, Item path_item, It
     target.device_scale = (float)device_scale;
     target.jpeg_quality = (int)quality; // INT_CAST_OK: validated JPEG encoder quality.
     target.paged = paged;
+    target.transparent_background = get_type_id(transparent) == LMD_TYPE_BOOL && it2b(transparent);
     int status = render_html_source_to_output_target(source.get(), &target, base_url.get(),
         get_type_id(local) == LMD_TYPE_BOOL && it2b(local));
     return status == 0 ? radiant_bool_item(true) : radiant_string_item("render export: layout, resource, encoding, or destination write failed");
@@ -4966,7 +5068,17 @@ RADIANT_C_API const void* radiant_dom_css_rule_list_host_type(void) {
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
+static Item fn_radiant_physics(Item node,Item request) {
+    RootFrame roots(2);Rooted<Item> receiver(roots,node),operation(roots,request);
+    auto* element=(DomElement*)radiant_dom_unwrap_node(receiver.get());
+    if(!element||!element->is_element())return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,"radiant.physics: requires a scene DOM node",nullptr));
+    return scene3d_physics_control(element,operation.get());
+}
 static const JubeFuncDef radiant_functions[] = {
+    {"image_job", "pn(owner: any, request: map) -> any^", (fn_ptr)fn_radiant_image_job, JUBE_FN_NONE,
+     "Item fn_radiant_image_job(Item owner, Item request)", (fn_ptr)fn_radiant_image_job},
+    {"physics", "pn(node: any, request: map) -> any", (fn_ptr)fn_radiant_physics, JUBE_FN_NONE,
+     "Item fn_radiant_physics(Item node, Item request)", (fn_ptr)fn_radiant_physics},
     {"with_content", "fn(source: element, children: array) -> element|error", (fn_ptr)fn_radiant_with_content, JUBE_FN_NONE,
      "Item fn_radiant_with_content(Item element, Item children)", (fn_ptr)fn_radiant_with_content},
     {"present_content", "fn(source: element, children: array) -> element|error", (fn_ptr)fn_radiant_present_content, JUBE_FN_NONE,
@@ -5370,11 +5482,17 @@ RADIANT_PROVIDE_ENGINE_1(capture_pointer, fn_radiant_capture_pointer)
 RADIANT_PROVIDE_ENGINE_2(set_canvas_pixels, fn_radiant_set_canvas_pixels)
 RADIANT_PROVIDE_ENGINE_2(audio_open, fn_radiant_audio_open)
 RADIANT_PROVIDE_ENGINE_3(audio_play, fn_radiant_audio_play)
+RADIANT_PROVIDE_ENGINE_3(midi_open, fn_radiant_midi_open)
+RADIANT_PROVIDE_ENGINE_4(midi_command, fn_radiant_midi_command)
+RADIANT_PROVIDE_ENGINE_2(midi_info, fn_radiant_midi_info)
 RADIANT_PROVIDE_ENGINE_2(audio_pause, fn_radiant_audio_pause)
 RADIANT_PROVIDE_ENGINE_2(audio_close, fn_radiant_audio_close)
 RADIANT_PROVIDE_ENGINE_2(audio_state, fn_radiant_audio_state)
 RADIANT_PROVIDE_ENGINE_2(set_relative_mouse, fn_radiant_set_relative_mouse)
 RADIANT_PROVIDE_ENGINE_1(relative_mouse_active, fn_radiant_relative_mouse_active)
+RADIANT_PROVIDE_ENGINE_2(set_window_fullscreen, fn_radiant_set_window_fullscreen)
+RADIANT_PROVIDE_ENGINE_1(window_fullscreen, fn_radiant_window_fullscreen)
+RADIANT_PROVIDE_ENGINE_1(window_fullscreen_enabled, fn_radiant_window_fullscreen_enabled)
 RADIANT_PROVIDE_ENGINE_2(input_operation, fn_radiant_input_operation)
 RADIANT_PROVIDE_ENGINE_3(set_range_from_point, fn_radiant_set_range_from_point)
 RADIANT_PROVIDE_ENGINE_1(range_max, fn_radiant_range_max)

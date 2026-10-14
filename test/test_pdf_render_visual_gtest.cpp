@@ -1510,6 +1510,30 @@ TEST(RenderOutputParity, PagedViewerAdmitsNativeAndFoDocumentsThroughCommonLoade
     }
 }
 
+TEST(RenderOutputParity, PagedMarkdownPaginatesCollapsedTablesAndUnbreakableCodeThroughItsLoader) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* md_path = "temp/render_output_parity/paged_notes.md";
+    const char* pdf_path = "temp/render_output_parity/paged_notes.pdf";
+    // GitHub-style tables collapse their borders; an unbreakable code run neither fails nor drops pages.
+    StrBuf* markdown = strbuf_new(); ASSERT_NE(markdown, nullptr);
+    strbuf_append_str(markdown, "# Notes\n\n```\n");
+    for (int i = 0; i < 160; i++) strbuf_append_char(markdown, (char)('a' + i % 26));
+    strbuf_append_str(markdown, "\n```\n\n| Form | Meaning |\n|---|---|\n");
+    for (int i = 0; i < 80; i++) strbuf_append_format(markdown, "| `row %d` | value %d |\n", i, i);
+    bool rendered = render_html_fixture(md_path, pdf_path, markdown->str, "--paged");
+    strbuf_free(markdown); ASSERT_TRUE(rendered);
+    EXPECT_GE(pdf_page_count(pdf_path), 2);
+    CommandResult info = pdf_info(pdf_path); ASSERT_EQ(info.exit_code, 0) << info.output;
+    const char* size = strstr(info.output, "Page size:"); ASSERT_NE(size, nullptr);
+    double width = 0.0, height = 0.0;
+    ASSERT_EQ(sscanf(size, "Page size: %lf x %lf", &width, &height), 2);
+    EXPECT_NEAR(width, 210.0 * 72.0 / 25.4, 0.01); EXPECT_NEAR(height, 297.0 * 72.0 / 25.4, 0.01);
+    char command[PATH_MAX + 64];
+    snprintf(command, sizeof(command), "\"%s\" view \"%s\" --paged --headless 2>&1", LAMBDA_EXE, md_path);
+    CommandResult viewed = run_command_capture(command);
+    EXPECT_EQ(viewed.exit_code, 0) << viewed.output;
+}
+
 TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
@@ -4254,6 +4278,24 @@ TEST(RenderOutputParity, ColumnCombinatorStylesCellsAfterColumnMutation) {
     EXPECT_TRUE(file_contains_text(svg_path,
         "x=\"32.00\" y=\"22.00\" width=\"32.00\" height=\"22.00\" fill=\"rgb(0,128,0)\""));
     EXPECT_FALSE(file_contains_text(svg_path, "fill=\"rgb(0,0,255)\""));
+}
+
+TEST(RenderOutputParity, CollapsedCellBordersWinEqualTableBordersOnEveryOuterEdge) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/collapsed_tie.html";
+    const char* png_path = "temp/render_output_parity/collapsed_tie.png";
+    // equal width and style keep the cell's color over the table's (CSS 2.2 §17.6.2.1, CSS Tables 3 §3.7.1).
+    const char* html = "<!doctype html><style>html,body{margin:0;background:white}"
+        "table{border-collapse:collapse;border:4px solid red}td{width:30px;height:20px;padding:0;border:4px solid lime}"
+        "</style><table><tr><td></td><td></td></tr><tr><td></td><td></td></tr></table>";
+    ASSERT_TRUE(render_html_fixture(html_path, png_path, html, "-vw 100 -vh 60"));
+    ImageData image = {}; ASSERT_TRUE(load_png_rgba(png_path, &image));
+    expect_preview_pixel(image, 1, 20, 0, 255, 0);   // left outer edge
+    expect_preview_pixel(image, 20, 1, 0, 255, 0);   // top outer edge
+    expect_preview_pixel(image, 70, 20, 0, 255, 0);  // right outer edge
+    expect_preview_pixel(image, 20, 50, 0, 255, 0);  // bottom outer edge
+    expect_preview_pixel(image, 20, 14, 255, 255, 255);
+    image_free(image.pixels);
 }
 
 TEST(RenderOutputParity, IndividualTransformsComposeBeforeTransformAndSurviveRestyle) {

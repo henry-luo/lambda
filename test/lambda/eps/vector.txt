@@ -1,0 +1,1 @@
+{ format: "eps", bbox: [-10, 5, 110, 65], draws: 3, clips: 1, viewport: "0 0 120 60", width: "120pt", height: "60pt", flipped: true, red: true, blue: true, clipped: true}

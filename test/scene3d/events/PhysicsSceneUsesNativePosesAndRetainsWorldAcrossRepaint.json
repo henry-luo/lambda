@@ -1,0 +1,86 @@
+{
+  "name": "PhysicsSceneUsesNativePosesAndRetainsWorldAcrossRepaint",
+  "viewport": {
+    "width": 800,
+    "height": 600
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "typeof physicsControl === 'function'"
+    },
+    {
+      "type": "script",
+      "js": "physicsControl({operation:'reset'})"
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.physicsState !== null && globalThis.physicsState.tick === 0"
+    },
+    {
+      "type": "snapshot_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 720,
+      "height": 440,
+      "name": "initial"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.physicsContacts = 0; document.getElementById('world').addEventListener('physicscontactstart', event => { if (event.detail.tick > 0 && event.detail.body_a && event.detail.body_b) globalThis.physicsContacts++; })"
+    },
+    {
+      "type": "script",
+      "js": "physicsControl({operation:'step',ticks:120})"
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.physicsState !== null && globalThis.physicsState.tick === 120"
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.physicsContacts > 0"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#world",
+      "width": 720,
+      "height": 440,
+      "reference": "initial",
+      "count": {
+        "min": 100
+      }
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('#world camera').setAttribute('fov','65')"
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.physicsState !== null && globalThis.physicsState.tick === 120"
+    },
+    {
+      "type": "collect_gc",
+      "count": 3
+    },
+    {
+      "type": "script",
+      "js": "physicsControl({operation:'query',queries:[{type:'ray',origin:[0,10,0],direction:[0,-1,0],distance:20}]})"
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.physicsState[0] !== null && globalThis.physicsState[0].body !== ''"
+    },
+    {
+      "type": "script",
+      "js": "physicsControl({operation:'reset'})"
+    },
+    {
+      "type": "assert_script",
+      "js": "globalThis.physicsState !== null && globalThis.physicsState.tick === 0"
+    }
+  ]
+}

@@ -11,6 +11,7 @@ const char* emit_dump_node_src(const char* source, SourceSpan span, int* out_len
 void emit_dump_escaped_string(const char* str, int len);
 void emit_dump_indent(int indent);
 void emit_dump_string_field(const char* label, String* str);
+void emit_dump_bool_field(const char* label, bool value);
 void emit_dump_source_field(const char* source, SourceSpan span);
 #endif
 

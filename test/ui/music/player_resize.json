@@ -1,0 +1,19 @@
+{
+  "name":"A4 score scales within narrow viewports and retains its aspect ratio",
+  "description":"The full-height sample caps content at 800px. Player padding (32px) and sheet padding (24px) leave a 744px page at wide viewports; its height follows the A4 ratio within an independent scrollport.",
+  "html":"test/music/_player.ls",
+  "viewport":{"width":1200,"height":900},
+  "events":[
+    {"type":"assert_rect","target":{"selector":".lambda-music svg"},"width":744,"height":1052.228571,"tolerance":1},
+    {"type":"resize","width":800,"height":800},
+    {"type":"assert_rect","target":{"selector":".lambda-music svg"},"width":744,"height":1052.228571,"tolerance":1},
+    {"type":"resize","width":480,"height":800},
+    {"type":"assert_position","element_a":{"selector":".lambda-music svg"},"element_b":{"selector":".lambda-music"},"relation":"inside"},
+    {"type":"assert_position","element_a":{"selector":".music-sheet-viewport"},"element_b":{"selector":".lambda-music-player"},"relation":"inside"},
+    {"type":"resize","width":320,"height":800},
+    {"type":"assert_position","element_a":{"selector":".lambda-music svg"},"element_b":{"selector":".lambda-music"},"relation":"inside"},
+    {"type":"assert_position","element_a":{"selector":".music-sheet-viewport"},"element_b":{"selector":".lambda-music-player"},"relation":"inside"},
+    {"type":"resize","width":1200,"height":900},
+    {"type":"assert_rect","target":{"selector":".lambda-music svg"},"width":744,"height":1052.228571,"tolerance":1}
+  ]
+}

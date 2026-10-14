@@ -1,0 +1,12 @@
+{"name":"Image jobs own pixels and discard superseded results","html":"test/demo/photo/tests/_image_jobs.ls","viewport":{"width":400,"height":300},"events":[
+ {"type":"click","target":{"selector":"#red"}},
+ {"type":"click","target":{"selector":"#blue"}},
+ {"type":"assert_attribute","target":{"selector":"#fixture"},"attribute":"data-color","equals":"blue"},
+ {"type":"assert_pixel","x":25,"y":25,"max_r":1,"max_g":1,"min_b":254},
+ {"type":"click","target":{"selector":"#existing"}},
+ {"type":"assert_attribute","target":{"selector":"#fixture"},"attribute":"data-preserved","equals":"true"},
+ {"type":"assert_pixel","x":25,"y":25,"max_r":1,"max_g":1,"min_b":254},
+ {"type":"click","target":{"selector":"#red"}},
+ {"type":"window_close"},
+ {"type":"assert_window_closed","closed":true}
+]}

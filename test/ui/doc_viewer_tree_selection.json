@@ -13,6 +13,7 @@
     {"type": "assert_count", "target": {"selector": ".tree-hit-__doc_Lambda_Cheatsheet_md"}, "count": 1},
     {"type": "click", "target": {"selector": ".tree-hit-__doc", "offset_x": 250, "offset_y": 14}},
     {"type": "assert_count", "target": {"selector": ".tree-hit-__doc_Lambda_Cheatsheet_md"}, "count": 0},
+    {"type": "assert_rect", "target": {"selector": "#file-filter"}, "width": 271, "tolerance": 0.5},
     {"type": "click", "target": {"selector": ".tree-hit-__doc", "offset_x": 250, "offset_y": 14}},
     {"type": "assert_count", "target": {"selector": ".tree-hit-__doc_Lambda_Cheatsheet_md.selected"}, "count": 1}
   ]

@@ -32,6 +32,86 @@ static bool g_initialized = false;
 // Context Management
 // ─────────────────────────────────────────────────────────────────────
 
+// Scale binary64 coordinates by 2^1074 into exact integers. The degree-four
+// incircle determinant needs at most 4*2099+4 bits, including differences,
+// squared lifts, and six signed terms. 30103/100000 bounds log10(2) above.
+bool decimal_geometry_sign(const double* points, int count, int dimension,
+        bool lifted, int* sign) {
+    if (!points || !sign || !((count == 3 && dimension == 2 && !lifted) ||
+            (count == 4 && dimension == (lifted ? 2 : 3)))) return false;
+    for (int i = 0; i < count * dimension; i++) if (!isfinite(points[i])) return false;
+    mpd_context_t ctx;
+    mpd_maxcontext(&ctx);
+    const int bits = 4 * (DBL_MAX_EXP - DBL_MIN_EXP + DBL_MANT_DIG + 1) + 4;
+    ctx.prec = (bits * 30103 + 99999) / 100000 + 1;
+    ctx.traps = 0;
+    uint32_t status = 0;
+    mpd_t* storage[26] = {NULL};
+    for (int i = 0; i < 26; i++) {
+        storage[i] = mpd_new(&ctx);
+        if (!storage[i]) {
+            for (int j = 0; j < i; j++) mpd_del(storage[j]);
+            return false;
+        }
+    }
+    mpd_t** coords = storage;
+    mpd_t** matrix = storage + 12;
+    mpd_t* two = storage[21];
+    mpd_t* exponent = storage[22];
+    mpd_t* work = storage[23];
+    mpd_t* product = storage[24];
+    mpd_t* result = storage[25];
+    mpd_qset_i32(two, 2, &ctx, &status);
+    for (int i = 0; i < count * dimension; i++) {
+        uint64_t raw;
+        memcpy(&raw, &points[i], sizeof(raw));
+        int exp = (int)((raw >> 52) & 0x7ff);
+        uint64_t mantissa = raw & UINT64_C(0x000fffffffffffff);
+        if (exp) mantissa |= UINT64_C(0x0010000000000000);
+        mpd_qset_u64(coords[i], mantissa, &ctx, &status);
+        mpd_qset_i32(exponent, exp ? exp - 1 : 0, &ctx, &status);
+        mpd_qpow(work, two, exponent, &ctx, &status);
+        mpd_qmul(coords[i], coords[i], work, &ctx, &status);
+        if (raw >> 63) mpd_qcopy_negate(coords[i], coords[i], &status);
+    }
+    int rank = count - 1;
+    for (int row = 0; row < rank; row++) {
+        for (int col = 0; col < dimension; col++)
+            mpd_qsub(matrix[row * 3 + col], coords[row * dimension + col],
+                coords[rank * dimension + col], &ctx, &status);
+        if (lifted) {
+            mpd_qmul(matrix[row * 3 + 2], matrix[row * 3], matrix[row * 3], &ctx, &status);
+            mpd_qmul(work, matrix[row * 3 + 1], matrix[row * 3 + 1], &ctx, &status);
+            mpd_qadd(matrix[row * 3 + 2], matrix[row * 3 + 2], work, &ctx, &status);
+        }
+    }
+    mpd_qset_i32(result, 0, &ctx, &status);
+    int permutation[] = {0, 1, 2};
+    while (true) {
+        mpd_qset_i32(product, 1, &ctx, &status);
+        int inversions = 0;
+        for (int row = 0; row < rank; row++) {
+            mpd_qmul(product, product, matrix[row * 3 + permutation[row]], &ctx, &status);
+            for (int j = row + 1; j < rank; j++) inversions += permutation[row] > permutation[j];
+        }
+        if (inversions & 1) mpd_qsub(result, result, product, &ctx, &status);
+        else mpd_qadd(result, result, product, &ctx, &status);
+        int k = rank - 2;
+        while (k >= 0 && permutation[k] > permutation[k + 1]) k--;
+        if (k < 0) break;
+        int j = rank - 1;
+        while (permutation[j] < permutation[k]) j--;
+        int t = permutation[k]; permutation[k] = permutation[j]; permutation[j] = t;
+        for (int lo = k + 1, hi = rank - 1; lo < hi; lo++, hi--) {
+            t = permutation[lo]; permutation[lo] = permutation[hi]; permutation[hi] = t;
+        }
+    }
+    bool ok = !(status & (MPD_Errors | MPD_Inexact | MPD_Overflow | MPD_Underflow));
+    if (ok) *sign = mpd_iszero(result) ? 0 : mpd_isnegative(result) ? -1 : 1;
+    for (int i = 0; i < 26; i++) mpd_del(storage[i]);
+    return ok;
+}
+
 void decimal_init() {
     if (g_initialized) return;
     

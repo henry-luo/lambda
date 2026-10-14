@@ -1,6 +1,105 @@
 #include <gtest/gtest.h>
 
 #include "../radiant/render.hpp"
+#include "../lib/image_process.h"
+#include "../lib/memtrack.h"
+#include <string.h>
+
+TEST(ImageProcessTest, RunningBoxMatchesIndependentNeighborhoods) {
+    struct Rows { double input[70], output[70]; } rows={};
+    for (int i=0;i<70;i++) rows.input[i]=(i*17%31)*0.125;
+    auto read=[](void* data,int64_t y,double* row) -> bool {
+        memcpy(row,((Rows*)data)->input+y*14,14*sizeof(double)); return true;
+    };
+    auto write=[](void* data,int64_t y,const double* row) -> bool {
+        memcpy(((Rows*)data)->output+y*14,row,14*sizeof(double)); return true;
+    };
+    for (int kernel : {1,2,3,8,127}) {
+        ASSERT_TRUE(image_box_filter(7,5,2,kernel,read,write,&rows));
+        for (int y=0;y<5;y++) for (int x=0;x<7;x++) for (int c=0;c<2;c++) {
+            double sum=0;
+            for (int ky=0;ky<kernel;ky++) for (int kx=0;kx<kernel;kx++) {
+                int sy=y+ky-kernel/2, sx=x+kx-kernel/2;
+                sy=sy<0 ? 0 : sy>4 ? 4 : sy; sx=sx<0 ? 0 : sx>6 ? 6 : sx;
+                sum+=rows.input[(sy*7+sx)*2+c];
+            }
+            EXPECT_NEAR(rows.output[(y*7+x)*2+c],sum/(kernel*kernel),1e-12);
+        }
+    }
+}
+
+TEST(ImageProcessTest, CacheInvalidationMatchesFreshEvaluation) {
+    uint8_t pixels[64*48*4];
+    for (size_t i=0;i<sizeof(pixels);i++) pixels[i]=(uint8_t)(i*37%256);
+    ImageProcessSource source={pixels,64,48,{64*4,4,1},1};
+    ImageProcessOptions options; options.angle=3; options.gamma=1.2; options.softness=3;
+    ImageProcessCache* cache=image_process_cache_create(200000);
+    ASSERT_NE(cache,nullptr);
+    for (int step=0;step<6;step++) {
+        if (step==1) options.vignette=0.7;
+        if (step==2) options.sharpen=0.9;
+        if (step==3) options.exposure=0.4;
+        if (step==4) { options.output_width=31; options.output_height=27; }
+        if (step==5) { source.revision++; pixels[0]=255; }
+        ImageProcessResult cached, fresh;
+        ASSERT_TRUE(image_process(source,options,&cached,cache));
+        ASSERT_TRUE(image_process(source,options,&fresh));
+        ASSERT_EQ(cached.width,fresh.width); ASSERT_EQ(cached.height,fresh.height);
+        for (size_t i=0;i<(size_t)fresh.width*fresh.height*4;i++)
+            EXPECT_LE(abs((int)cached.pixels[i]-(int)fresh.pixels[i]),1) << "step=" << step << " offset=" << i;
+        if (step==1 || step==2 || step==4) {
+            EXPECT_EQ(cached.color_hits,1u); EXPECT_EQ(cached.blur_hits,1u);
+        }
+        if (step==3) { EXPECT_EQ(cached.color_hits,0u); EXPECT_EQ(cached.blur_hits,0u); }
+        if (step==5) { EXPECT_EQ(cached.geometry_hits,0u); EXPECT_EQ(cached.color_hits,0u); EXPECT_EQ(cached.blur_hits,0u); }
+        EXPECT_LE(cached.cache_bytes,200000u);
+        image_process_result_free(&cached); image_process_result_free(&fresh);
+    }
+    image_process_cache_destroy(cache);
+}
+
+TEST(ImageProcessTest, CacheBudgetAndCancellationKeepOwnedBuffersBounded) {
+    uint8_t pixels[32*24*4]={};
+    ImageProcessSource source={pixels,32,24,{32*4,4,1},1};
+    ImageProcessCache* cache=image_process_cache_create(8192);
+    ImageProcessOptions options; options.angle=2; options.softness=6;
+    ImageProcessResult result;
+    ASSERT_TRUE(image_process(source,options,&result,cache));
+    EXPECT_LE(result.cache_bytes,8192u);
+    image_process_result_free(&result);
+    bool cancelled=true;
+    EXPECT_FALSE(image_process(source,options,&result,cache,&cancelled));
+    EXPECT_EQ(result.pixels,nullptr);
+    image_process_cache_destroy(cache);
+}
+
+TEST(ImageProcessTest, CallerOwnsTheProvidedOutputBuffer) {
+    uint8_t pixels[]={255,0,0,255,0,0,255,127}, output[8]={};
+    ImageProcessSource source={pixels,2,1,{8,4,1},1};
+    ImageProcessOptions options;
+    ImageProcessResult result;
+    ASSERT_TRUE(image_process(source,options,&result,nullptr,nullptr,output,sizeof(output)));
+    EXPECT_FALSE(result.owns_pixels);
+    EXPECT_EQ(result.pixels,output);
+    EXPECT_EQ(memcmp(pixels,output,sizeof(output)),0);
+    image_process_result_free(&result);
+    EXPECT_EQ(memcmp(pixels,output,sizeof(output)),0);
+    EXPECT_FALSE(image_process(source,options,&result,nullptr,nullptr,output,sizeof(output)-1));
+}
+
+TEST(ImageProcessTest, TwelveMegapixelEffectsUseStripScratch) {
+    size_t bytes=4000u*3000u*4u;
+    uint8_t* pixels=(uint8_t*)mem_alloc(bytes,MEM_CAT_TEMP);
+    ASSERT_NE(pixels,nullptr);
+    memset(pixels,128,bytes);
+    ImageProcessSource source={pixels,4000,3000,{4000*4,4,1},1};
+    ImageProcessOptions options; options.softness=6; options.sharpen=0.8; options.vignette=0.5;
+    ImageProcessResult result;
+    ASSERT_TRUE(image_process(source,options,&result));
+    EXPECT_LT(result.scratch_bytes,8u*1024u*1024u);
+    EXPECT_EQ(result.pixels[3],128); EXPECT_EQ(result.pixels[bytes-1],128);
+    image_process_result_free(&result); mem_free(pixels);
+}
 
 TEST(RdtVectorTest, CompactRectangleAffineExpansionPreservesContourBounds) {
     RdtPath* source = rdt_path_new();
@@ -52,6 +151,7 @@ TEST(RdtVectorTest, RectangleClipBoundsRejectCurvesCompoundPathsAndRotation) {
 #include "../lib/font/font_tables.h"
 #include "../lib/endian.h"
 #include "../lib/str.h"
+
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -66,6 +166,49 @@ TEST(RdtVectorTest, RectangleClipBoundsRejectCurvesCompoundPathsAndRotation) {
 #include "../lib/file.h"
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
+
+TEST(RdtVectorTest, GaussianFlatRunsPreserveEdgesChannelsAndPitches) {
+    // independent Gaussian step-response samples (sigma=1.25, support=4).
+    const int points[] = {0,4,6,10,11,16,21,22,28,32};
+    const uint32_t expected[][10] = {
+        {0x542a150bu,0x80402010u,0x80402010u,0x6a351b0du,0x562b150bu,0x40201008u,0x2a150b05u,0x160b0503u,0,0},
+        {0x80402010u,0x80402010u,0x80402010u,0x6a351b0du,0x562b150bu,0x40201008u,0x2a150b05u,0x160b0503u,0,0},
+        {0x542a150bu,0x80402010u,0x80402010u,0x6a351b0du,0x562b150bu,0x40201008u,0x2a150b05u,0x160b0503u,0,0x2c160b05u},
+        {0x03010100u,0x72391d0eu,0x80402010u,0x6a351b0du,0x562b150bu,0x40201008u,0x2a150b05u,0x160b0503u,0,0},
+        {0x80402010u,0x80402010u,0x80402010u,0x6a351b0du,0x562b150bu,0x40201008u,0x2a150b05u,0x160b0503u,0,0},
+        {0x03010100u,0x72391d0eu,0x80402010u,0x6a351b0du,0x562b150bu,0x40201008u,0x2a150b05u,0x160b0503u,0x0e070302u,0x7d3f1f10u}
+    };
+    Arena* arena = arena_create_default();
+    ASSERT_NE(arena, nullptr);
+    ScratchArena scratch = {}; scratch_init(&scratch, arena);
+    uint32_t source_pixels[33 * 35], output_pixels[33 * 37];
+    ImageSurface source = {}, output = {};
+    source.width = output.width = source.height = output.height = 33;
+    source.pitch = 35 * 4; output.pitch = 37 * 4;
+    source.pixels = source_pixels; output.pixels = output_pixels;
+    for (unsigned mask = 0; mask < 2; mask++) for (unsigned axis = 0; axis < 2; axis++) {
+        for (int row = 0; row < 33; row++) for (int column = 0; column < 35; column++) {
+            int position = axis ? row : column;
+            source_pixels[row * 35 + column] = position < 11 ? 0x80402010u : position < 22 ? 0x40201008u : 0;
+            if (mask) source_pixels[row * 35 + column] = (source_pixels[row * 35 + column] >> 24) * 0x01010101u;
+        }
+        for (unsigned variant = 0; variant < 6; variant++) {
+            for (uint32_t& pixel : output_pixels) pixel = 0xdeadbeefu;
+            ASSERT_TRUE(render_gaussian_blur_axis(&scratch, &source, &output, 1.25f,
+                axis, variant < 3 ? 0 : 3, variant < 3 ? 33 : 30, variant % 3));
+            for (int line = 0; line < 33; line++) {
+                for (unsigned sample = 0; sample < sizeof(points) / sizeof(points[0]); sample++) {
+                    int index = axis ? points[sample] * 37 + line : line * 37 + points[sample];
+                    uint32_t want = expected[variant][sample];
+                    if (mask) want = (want >> 24) * 0x01010101u;
+                    EXPECT_EQ(output_pixels[index], want) << mask << ':' << axis << ':' << variant << ':' << sample;
+                }
+                EXPECT_EQ(output_pixels[line * 37 + 33], 0xdeadbeefu);
+            }
+        }
+    }
+    arena_destroy(arena);
+}
 
 TEST(ClipGeometry, EllipticalCornersRetainTheSamePaintAndHitRegion) {
     Corner radius = {};
@@ -1229,15 +1372,15 @@ TEST(RasterPaintTest, TranslucentFillPreservesAnIsolatedSourceAlpha) {
     }
 }
 
-TEST(SvgExportTest, EncodingCopyRespectsMemoryBudgetAndRecovers) {
+TEST(SvgExportTest, EncodingRowRespectsMemoryBudgetAndRecovers) {
     uint32_t pixels[64 * 64] = {};
     ImageSurface surface = {};
     surface.width = surface.height = 64; surface.pitch = 64 * sizeof(uint32_t);
     surface.pixels = pixels; surface.alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
     size_t soft, hard, critical;
     memtrack_get_limits(&soft, &hard, &critical);
-    // the 16KB straight-alpha copy cannot fit the temporary 256-byte critical budget.
-    memtrack_set_limits(0, 0, 256);
+    // encoding needs one 256-byte row, which cannot fit this critical budget.
+    memtrack_set_limits(0, 0, 128);
     StrBuf* rejected = render_encode_surface_data_uri(&surface);
     memtrack_set_limits(soft, hard, critical);
     EXPECT_EQ(rejected, nullptr);
@@ -1245,6 +1388,31 @@ TEST(SvgExportTest, EncodingCopyRespectsMemoryBudgetAndRecovers) {
     StrBuf* recovered = render_encode_surface_data_uri(&surface);
     EXPECT_NE(recovered, nullptr);
     if (recovered) strbuf_free(recovered);
+}
+
+TEST(SvgExportTest, PngEncodingPreservesAlphaAndDoesNotMutatePaddedRows) {
+    for (ImageAlphaMode mode : {IMAGE_ALPHA_STRAIGHT, IMAGE_ALPHA_PREMULTIPLIED}) {
+        uint32_t pixels[] = {0x80000080u, 0xff00ff00u, 0xdeadbeefu,
+                             0x40004000u, 0x00ffffffu, 0xdeadbeefu};
+        const uint32_t original[] = {0x80000080u, 0xff00ff00u, 0xdeadbeefu,
+                                     0x40004000u, 0x00ffffffu, 0xdeadbeefu};
+        ImageSurface surface = {};
+        surface.width = surface.height = 2; surface.pitch = 3 * sizeof(uint32_t);
+        surface.pixels = pixels; surface.alpha_mode = mode;
+        StrBuf* encoded = render_encode_surface_png(&surface);
+        ASSERT_NE(encoded, nullptr);
+        int width = 0, height = 0, channels = 0;
+        uint8_t* decoded = image_load_from_memory((const unsigned char*)encoded->str,
+            encoded->length, &width, &height, &channels);
+        ASSERT_NE(decoded, nullptr);
+        EXPECT_EQ(width, 2); EXPECT_EQ(height, 2);
+        EXPECT_EQ(decoded[0], mode == IMAGE_ALPHA_STRAIGHT ? 128 : 255);
+        EXPECT_EQ(decoded[3], 128);
+        EXPECT_EQ(decoded[9], mode == IMAGE_ALPHA_STRAIGHT ? 64 : 255);
+        EXPECT_EQ(decoded[11], 64); EXPECT_EQ(decoded[15], 0);
+        EXPECT_EQ(memcmp(pixels, original, sizeof(pixels)), 0);
+        image_free(decoded); strbuf_free(encoded);
+    }
 }
 
 TEST(SvgTextTest, PlainGlyphsKeepNativeCoverageAndOwnPixelsAfterFontContextDies) {

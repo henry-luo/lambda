@@ -17056,15 +17056,9 @@ static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
 
     MIR_reg_t result = new_reg(mt, "match", MIR_T_I64);
     MIR_label_t l_end = new_label(mt);
-
-    // Each arm runs only on its own path, as a handler's arms do, so a `raise`
-    // or `return` in one arm does not end the match: the join is reachable
-    // unless every arm exits and a default arm closes the no-match path.
-    // Without this, a raising arm leaked block_returned to an enclosing `if`,
-    // whose join then discarded the match value as a returned branch.
     bool entry_returned = mt->block_returned;
-    bool every_arm_exits = true;
-    bool has_default_arm = false;
+    bool all_arms_exit = true;
+    bool has_default = false;
 
     // every arm starts from the facts after the scrutinee (S9.1.2)
     MirCowJoin cow_join(mt);
@@ -17084,7 +17078,9 @@ static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
 
             // Body (restore tail position before each arm body)
             mt->in_tail_position = saved_tail;
+            mt->block_returned = false;
             MIR_reg_t body = transpile_box_item(mt, match_arm->body);
+            all_arms_exit = all_arms_exit && mt->block_returned;
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, body)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
@@ -17094,17 +17090,17 @@ static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
             // Default arm (restore tail position)
             MirFlowScope arm_flow(mt);
             mt->in_tail_position = saved_tail;
+            mt->block_returned = false;
+            has_default = true;
             MIR_reg_t body = transpile_box_item(mt, match_arm->body);
+            all_arms_exit = all_arms_exit && mt->block_returned;
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, body)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-            has_default_arm = true;
         }
-        every_arm_exits = every_arm_exits && mt->block_returned;
         cow_join.arm_end();
         arm = arm->next;
     }
-    mt->block_returned = entry_returned || (has_default_arm && every_arm_exits);
 
     // No match - return ITEM_NULL
     cow_join.arm_begin();
@@ -17118,6 +17114,8 @@ static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
 
     // Restore old pipe state
     mir_pipe_context_restore(mt, saved);
+    // S11.2.1: an exiting arm does not terminate its successful siblings.
+    mt->block_returned = entry_returned || (has_default && all_arms_exit);
 
     // Every arm joins through the Item result slot; the semantic arm type is
     // preserved separately from that physical carrier (D2.4.1–D2.4.3).
@@ -18099,21 +18097,19 @@ static MIR_reg_t mir_prepare_dense_for_guard(MirTranspiler* mt,
         AstForNode* for_node, NameEntry* counter, AstNode* range_src,
         MIR_reg_t range_start);
 
-// A loop's sources and body are never in tail position: the body runs per item
-// and its values are collected, so a self call there must not become the
-// enclosing function's TCO jump (it returned that call's value and dropped the
-// comprehension).
-struct MirTailPositionOff {
+// collected child values return to their loop/constructor, so recursive calls
+// cannot replace the enclosing producer; share the save/restore scope (D8.2.6).
+struct MirNonTailScope {
     MirTranspiler* mt;
     bool saved;
-    explicit MirTailPositionOff(MirTranspiler* owner)
+    explicit MirNonTailScope(MirTranspiler* owner)
         : mt(owner), saved(owner->in_tail_position) { owner->in_tail_position = false; }
-    ~MirTailPositionOff() { mt->in_tail_position = saved; }
+    ~MirNonTailScope() { mt->in_tail_position = saved; }
 };
 
 static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
         bool result_demanded) {
-    MirTailPositionOff not_tail(mt);
+    MirNonTailScope not_tail(mt);
     MirFlowScope flow(mt);
     // Before push_scope: a binding this body widens is declared OUTSIDE the
     // loop, so it must be widened in the enclosing scope where its reads live.
@@ -23191,6 +23187,8 @@ static void mir_emit_ndim_leaves(MirTranspiler* mt, AstNode* node, MIR_reg_t arr
 }
 
 static MIR_reg_t emit_array_storage(MirTranspiler* mt, AstArrayNode* arr_node) {
+    // Construction consumes its children; their recursive calls cannot replace it.
+    MirNonTailScope non_tail(mt);
     // A child that can produce a stream (for-expression, spread, pipe) keeps the
     // literal off the compact and N-D paths. It no longer picks the append:
     // every item goes through the sequence append, which spreads a list by its
@@ -24999,6 +24997,7 @@ static MIR_reg_t mir_box_slot_value(MirTranspiler* mt, AstNode* value) {
 }
 
 static MIR_reg_t emit_map_storage(MirTranspiler* mt, AstMapNode* map_node) {
+    MirNonTailScope non_tail(mt);
     if (map_node->has_computed_key) {
         MIR_reg_t owner_item = emit_call_0(mt, "map_literal_begin", MIR_T_I64);
         emit_return_if_item_error(mt, owner_item);
@@ -25385,6 +25384,7 @@ static MIR_reg_t emit_map_storage(MirTranspiler* mt, AstMapNode* map_node) {
 // ============================================================================
 
 static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_node) {
+    MirNonTailScope non_tail(mt);
     if (!elmt_node || !elmt_node->type) {
         log_error("mir: transpile_element with null node or type");
         MIR_reg_t r = new_reg(mt, "elmt_err", MIR_T_I64);
@@ -48871,6 +48871,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
                         ? imp_script->const_list->data : nullptr;
                     runner.context->type_list = imp_script->type_list;
                     Item module_result = imp_script->main_func(runner.context);
+                    imp_script->module_initialized = !item_is_error(module_result);
                     lambda_recovery_frame_end(module_frame);
                     // D7.2.2: a module whose init ends in an ordinary error
                     // never becomes importable, so its importer does not run,
@@ -48893,6 +48894,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
                     (void)module_scope.activate(runner.script->module_state_id);
                     result = runtime_publish_result(runner.context,
                         runner.script->main_func(runner.context));
+                    runner.script->module_initialized = !item_is_error(result);
                 }
                 lambda_recovery_frame_end(recovery_frame);
             }
@@ -48936,8 +48938,10 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
 // Document loaders select this fixed native contract instead of generated code.
 static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
     {"pdf", "lambda.pdf.pdf", "pdf_to_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
+    {"eps", "lambda.doc.eps.eps", "eps_to_svg", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     // the package parses its own source so the engine sees the adapter registry (D7.2.7)
     {"latex", "lambda.latex.latex", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
+    {"docx", "lambda.doc.docx.view", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
     {"tikz", "lambda.doc.tikz.tikz", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     {"graph", "lambda.graph.document", "to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     {"math", "lambda.doc.math.math", "render_math", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},

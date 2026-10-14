@@ -197,6 +197,25 @@ bool ui_context_set_device_scale(UiContext* uicon,
     return true;
 }
 
+bool ui_context_enable_native_graphics(UiContext* uicon) {
+    if (!uicon) return false;
+    if (uicon->window) return true;
+    #if defined(__linux__) && defined(GLFW_PLATFORM) && defined(GLFW_PLATFORM_X11)
+    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+    #endif
+    #ifdef __APPLE__
+    glfwInitHint(GLFW_COCOA_MENUBAR, GLFW_FALSE);
+    #endif
+    if (!glfwInit()) { log_error("[NATIVE_GRAPHICS_HOST] GLFW initialization failed");return false; }
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    uicon->window=glfwCreateWindow(1,1,"Lambda Headless",nullptr,nullptr);
+    if (!uicon->window) {
+        log_error("[NATIVE_GRAPHICS_HOST] hidden window creation failed");glfwTerminate();return false;
+    }
+    log_info("[NATIVE_GRAPHICS_HOST] hidden graphics host ready");
+    return true;
+}
+
 int ui_context_init(UiContext* uicon, bool headless, float requested_device_scale) {
     radiant_register_css_counter_hooks();
     radiant_register_resource_processor();
@@ -225,27 +244,7 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
         // truly need a parent window can opt into the old behavior.
         bool create_hidden_window = getenv("LAMBDA_HEADLESS_GLFW_WINDOW") != NULL;
         if (create_hidden_window) {
-            #if defined(__linux__) && defined(GLFW_PLATFORM) && defined(GLFW_PLATFORM_X11)
-            glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-            #endif
-            #ifdef __APPLE__
-            // Prevent dock icon and menu bar creation in headless mode.
-            // Must be set before glfwInit() — glfwInit() creates the NSApp dock icon.
-            glfwInitHint(GLFW_COCOA_MENUBAR, GLFW_FALSE);
-            #endif
-            if (!glfwInit()) {
-                log_error("GLFW init failed (headless mode)");
-                return EXIT_FAILURE;
-            }
-            glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);  // hidden window
-            window = glfwCreateWindow(window_width, window_height, "Lambda Headless", NULL, NULL);
-            if (!window) {
-                log_error("Headless: could not create hidden GLFW window, falling back to NULL window");
-                glfwTerminate();
-                window = NULL;
-            } else {
-                log_info("Running in headless mode (hidden GLFW window)");
-            }
+            if (!ui_context_enable_native_graphics(this)) return EXIT_FAILURE;
         } else {
             window = NULL;
             log_info("Running in headless mode (windowless)");

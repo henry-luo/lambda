@@ -110,9 +110,11 @@ pub fn validate(spec) {
 }
 
 fn metadata(node) => if (node["data-chart-animation"] == null) null else parse(node["data-chart-animation"], 'json') ^ {~}
+// retired geometry keeps correspondence without regaining a picking key.
+fn retained_key(node) => if (node["data-chart-key"]!=null) node["data-chart-key"] else node["data-chart-retained-key"]
 // guide roles keep titles separate from ticks when domain or tick counts change.
-fn identity(node, index, parent) => if (node is element and node["data-chart-key"] != null)
-    "key:" ++ node["data-chart-view"] ++ ":" ++ string(node["data-chart-part"]) ++ ":" ++ node["data-chart-key"]
+fn identity(node, index, parent) => if (node is element and retained_key(node) != null)
+    "key:" ++ node["data-chart-view"] ++ ":" ++ string(node["data-chart-part"]) ++ ":" ++ retained_key(node)
     else if (node is element and node["data-chart-row"] != null) "row:" ++ node["data-chart-row"]
     else if (node is element and node.id != null) "id:" ++ node.id
     else if (node is element and contains(axis_classes, node.class)) "guide:" ++ node.class
@@ -128,8 +130,9 @@ fn decorative(node) => if (not (node is element)) node else svg.rebuild(name(nod
     {*:map([for (key, value in map(node) where not starts_with(string(key), "data-chart-") and not contains(["tabindex","data-focus-key"],string(key)))
         for (part in [string(key), value]) part]), 'pointer-events': "none"}, content(node) |> decorative(~))
 fn faded(node, opacity, exit = false) => if (node == null) null else <g opacity: opacity,
-    *:map([for (key,value in map(node) where contains(["data-chart-key","data-chart-view","data-chart-part","data-chart-animation"],string(key))) (key,value)]),
-    *:(if (exit) {'pointer-events': "none",inert:""} else {}),
+    *:map([for (key,value in map(node) where contains(["data-chart-view","data-chart-part","data-chart-animation"],string(key))) (key,value)]),
+    *:(if (exit) {'pointer-events': "none",inert:"",'data-chart-retained-key':retained_key(node)}
+        else {'data-chart-key':retained_key(node)}),
     if (exit) decorative(node) else node>
 fn crossfade(a, b, t) => <g class: "chart-crossfade", faded(a, 1.0 - t, true); faded(b, t)>
 fn points(node) => if (contains(['path','rect','line','circle','ellipse'],name(node))) picking.outlines(node) else null
@@ -207,7 +210,7 @@ fn transition(node, config, phase, t) {
             else "scale("++util.fmt_num(if (config.type=="grow_y") 1.0 else progress)++","++util.fmt_num(if (config.type=="grow_x") 1.0 else progress)++")",image>
     else if (config.type=="path_reveal" and name(node)=='path')
         svg.rebuild('path',{*:map(image),pathLength:1.0,'stroke-dasharray':"1",'stroke-dashoffset':1.0-progress},content(image))
-    else faded(image,progress)
+    else faded(node,progress,phase=="exit")
 }
 pub fn progress(config, elapsed) => if (config.progress!=null) config.progress else
     curve(config.easing,if (config.duration==0) (if (elapsed<config.delay) 0.0 else 1.0) else util.clamp_val((elapsed-config.delay)/config.duration,0.0,1.0))
@@ -247,7 +250,7 @@ fn sample_node(a,b,elapsed,default_config,overall) {
     if (disabled) b
     else if (t is error) t
     // A retained frame may contain fade wrappers; recurse only after time advances.
-    else if (a!=null and b!=null and a["data-chart-key"]!=null and t<=0) if (a is element and b is element) svg.rebuild(name(a),{*:map(a),
+    else if (a!=null and b!=null and retained_key(a)!=null and t<=0) if (a is element and b is element) svg.rebuild(name(a),{*:map(a),
         *:map([for (key,value in map(b) where starts_with(string(key),"data-chart-") or string(key)=="data-focus-key")
             for (part in [string(key),value]) part])},content(a)) else a
     else if (container and (a==null or a is element and name(a)==name(b))) (
@@ -257,7 +260,7 @@ fn sample_node(a,b,elapsed,default_config,overall) {
         if (failure is error) failure else svg.rebuild(name(b),
             if (name(b)=='svg' and (b.viewBox!=null or t>0 and t<1)) {*:attrs,viewBox:"0 0 "++string(attrs.width)++" "++string(attrs.height)} else attrs,children))
     else if (a==null) if (own==null) b else if (t>=1) b else transition(b,config,phase,t)
-    else if (b==null) if (own==null or t>=1) null else transition(a,config,phase,t)
+    else if (b==null) if (own==null or t>=1) null else if (t<=0 and a.inert=="") a else transition(a,config,phase,t)
     else if (t<=0) if (a is element and b is element) svg.rebuild(name(a),{*:map(a),
         *:map([for (key,value in map(b) where starts_with(string(key),"data-chart-") or string(key)=="data-focus-key")
             for (part in [string(key),value]) part])},content(a)) else a else if (t>=1) b

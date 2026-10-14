@@ -20,6 +20,8 @@ struct XmlInputContext : InputContext {
     const char* end;
     const char* document_start;
     XmlNamespaceFrame* namespaces = nullptr;
+    bool doctype_seen = false;
+    bool document_seen = false;
     XmlInputContext(Input* input, const char* source, const XmlParseOptions* opts)
         : InputContext(input, source), options(opts), begin(source), end(source + strlen(source)), document_start(source) {}
     bool preserving() const { return options && options->preserve_whitespace; }
@@ -616,6 +618,56 @@ static Item parse_doctype(XmlInputContext& ctx, const char **xml, int depth) {
     // Skip past the "!DOCTYPE" part (already consumed by caller)
     skip_whitespace(xml);
 
+    if (ctx.strict()) {
+        // external IDs in interchange documents are metadata, never executable DTDs.
+        const char* start = *xml;
+        if (depth || ctx.doctype_seen || ctx.document_seen || !ctx.options->allow_inert_doctype) {
+            xml_error(ctx, start, "XML_DOCTYPE_POSITION", "DOCTYPE must precede the document element exactly once");
+            return ItemError;
+        }
+        String* root_name = parse_tag_name(ctx, xml);
+        if (!root_name) return ItemError;
+        skip_whitespace(xml);
+        int literal_count = 0;
+        if (!strncmp(*xml, "SYSTEM", 6)) { literal_count = 1; *xml += 6; }
+        else if (!strncmp(*xml, "PUBLIC", 6)) { literal_count = 2; *xml += 6; }
+        for (int index = 0; index < literal_count; index++) {
+            const char* before_space = *xml;
+            skip_whitespace(xml);
+            char quote = **xml;
+            if (*xml == before_space || (quote != '\'' && quote != '"')) {
+                xml_error(ctx, *xml, "XML_DOCTYPE_LITERAL", "DOCTYPE requires a separated quoted identifier");
+                return ItemError;
+            }
+            const char* end = strchr(*xml + 1, quote);
+            if (!end) {
+                xml_error(ctx, *xml, "XML_DOCTYPE_LITERAL", "Unterminated DOCTYPE identifier");
+                return ItemError;
+            }
+            // public literals have a narrower alphabet than system identifiers (XML 1.0 PubidChar).
+            if (literal_count == 2 && index == 0) {
+                for (const char* p = *xml + 1; p < end; p++) {
+                    unsigned char ch = (unsigned char)*p;
+                    bool valid = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                        (ch >= '0' && ch <= '9') || strchr(" \r\n-'()+,./:=?;!*#@$_%", ch);
+                    if (!valid) {
+                        xml_error(ctx, p, "XML_DOCTYPE_PUBLIC_ID", "Invalid character in DOCTYPE public identifier");
+                        return ItemError;
+                    }
+                }
+            }
+            *xml = end + 1;
+        }
+        skip_whitespace(xml);
+        if (**xml != '>') {
+            xml_error(ctx, *xml, "XML_DECLARATION_PROFILE", "Internal DTD subsets and entity declarations are unsupported");
+            return ItemError;
+        }
+        (*xml)++;
+        ctx.doctype_seen = true;
+        return builder.element("!DOCTYPE").attr("name", {.item = s2it(root_name)}).final();
+    }
+
     // Skip DOCTYPE name and external ID
     while (**xml && **xml != '[' && **xml != '>') {
         (*xml)++;
@@ -778,6 +830,11 @@ static Item parse_element(XmlInputContext& ctx, const char **xml, int depth) {
         return parse_cdata(ctx, xml);
     }
 
+    if (ctx.strict() && ctx.options->allow_inert_doctype && !strncmp(*xml, "!DOCTYPE", 8) &&
+        ((*xml)[8] == ' ' || (*xml)[8] == '\t' || (*xml)[8] == '\r' || (*xml)[8] == '\n')) {
+        *xml += 8;
+        return parse_doctype(ctx, xml, depth);
+    }
     if (ctx.strict() && **xml == '!') {
         xml_error(ctx, element_start, "XML_DECLARATION_PROFILE", "DTD declarations require an explicit XML entity policy");
         return {.item = ITEM_ERROR};
@@ -1058,6 +1115,7 @@ void parse_xml_with_options(Input* input, const char* xml_string, const XmlParse
                         elmt_type->name.str[0] != '!' &&
                         !(elmt_type->name.length >= 3 && strncmp(elmt_type->name.str, "!--", 3) == 0)) {
                         document_elements++;
+                        ctx.document_seen = true;
                         if (ctx.strict() && document_elements > 1) {
                             xml_error(ctx, old_xml, "XML_DOCUMENT_ELEMENT", "XML requires exactly one document element"); break;
                         }
@@ -1098,34 +1156,57 @@ void parse_xml(Input* input, const char* xml_string) {
     parse_xml_with_options(input, xml_string, nullptr);
 }
 
-Element* parse_svg_document(Input* input, const char* svg_source) {
-    if (!input || !svg_source) return nullptr;
-    if (strlen(svg_source) >= 3 && (unsigned char)svg_source[0] == 0xEF &&
-        (unsigned char)svg_source[1] == 0xBB && (unsigned char)svg_source[2] == 0xBF) svg_source += 3;
+bool xml_document_element_matches(Pool* pool, Element* element, const char* local_name,
+        const char* namespace_uri, bool allow_missing_namespace) {
+    if (!element || !element->type) return false;
+    TypeElmt* type = (TypeElmt*)element->type;
+    if (!type->name.str) return false;
+    const char* name = type->name.str;
+    const char* colon = strchr(name, ':');
+    if (strcmp(colon ? colon + 1 : name, local_name)) return false;
+    const char* declaration = "xmlns";
+    if (colon) {
+        size_t length = (size_t)(colon - name);
+        char* qualified = (char*)pool_alloc(pool, length + 7);
+        if (!qualified) return false;
+        memcpy(qualified, "xmlns:", 6);
+        memcpy(qualified + 6, name, length);
+        qualified[length + 6] = '\0';
+        declaration = qualified;
+    }
+    String* uri = element->get_attr(declaration).string();
+    return (uri && !strcmp(uri->chars, namespace_uri)) ||
+        (allow_missing_namespace && !colon && !uri);
+}
+
+static Element* parse_xml_document_element(Input* input, const char* source,
+        const char* local_name, const char* namespace_uri, bool strict) {
+    if (!input || !source) return nullptr;
+    if (strlen(source) >= 3 && (unsigned char)source[0] == 0xEF &&
+        (unsigned char)source[1] == 0xBB && (unsigned char)source[2] == 0xBF) source += 3;
     // XML preserves namespace declarations, case and self-closing foreign-content boundaries.
-    parse_xml(input, svg_source);
+    XmlParseOptions options = {};
+    options.preserve_whitespace = strict;
+    options.require_well_formed = strict;
+    options.require_namespaces = strict;
+    parse_xml_with_options(input, source, strict ? &options : nullptr);
     if (get_type_id(input->root) != LMD_TYPE_ELEMENT) return nullptr;
     Element* document = input->root.element;
     for (int64_t i = 0; i < document->length; i++) {
         Item child = document->items[i];
         if (get_type_id(child) != LMD_TYPE_ELEMENT) continue;
-        TypeElmt* type = (TypeElmt*)child.element->type;
-        if (!type || !type->name.str) continue;
-        const char* name = type->name.str;
-        const char* colon = strchr(name, ':');
-        if (strcmp(colon ? colon + 1 : name, "svg")) continue;
-        const char* declaration = "xmlns";
-        if (colon) {
-            size_t length = (size_t)(colon - name);
-            char* qualified = (char*)pool_alloc(input->pool, length + 7);
-            if (!qualified) return nullptr;
-            memcpy(qualified, "xmlns:", 6); memcpy(qualified + 6, name, length); qualified[length + 6] = '\0';
-            declaration = qualified;
-        }
-        String* uri = child.element->get_attr(declaration).string();
-        // preserve namespace-free legacy inputs; an authored namespace must identify SVG.
-        if ((uri && !strcmp(uri->chars, "http://www.w3.org/2000/svg")) || (!colon && !uri)) return child.element;
+        // strict document formats require namespace identity; legacy SVG may omit it.
+        if (xml_document_element_matches(input->pool, child.element,
+                local_name, namespace_uri, !strict)) return child.element;
     }
-    log_error("svg_document: no SVG root element found in external XML document");
+    log_error("xml-document-element: expected {%s}%s root", namespace_uri, local_name);
     return nullptr;
+}
+
+Element* parse_svg_document(Input* input, const char* source) {
+    return parse_xml_document_element(input, source, "svg", "http://www.w3.org/2000/svg", false);
+}
+
+Element* parse_mathml_document(Input* input, const char* source) {
+    return parse_xml_document_element(input, source, "math", "http://www.w3.org/1998/Math/MathML", true);
 }

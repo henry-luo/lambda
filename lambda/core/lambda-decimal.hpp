@@ -278,6 +278,10 @@ bool decimal_is_any(Item item);
 // Convert a decimal Item to double without a silent numeric fallback.
 bool decimal_try_to_double(Item item, double* out);
 
+// Exact sign of a binary64 orientation/incircle determinant, with no GC allocation.
+LAMBDA_CORE_API bool decimal_geometry_sign(const double* points, int count,
+    int dimension, bool lifted, int* sign);
+
 // Legacy scalar conversion for callers that have already checked the source.
 double decimal_to_double(Item item);
 

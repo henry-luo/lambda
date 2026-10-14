@@ -1164,6 +1164,7 @@ struct Script : Input {
     bool cache_source_inline; // preserve the source-key kind when promoting an AST image
     bool is_main;               // true if this is the main entry-point script
     bool is_loading;            // true while script is being loaded (for circular import detection)
+    bool module_initialized;   // execution-local; lazy package calls never rerun a live initializer
     bool is_retired;            // removed from the current Runtime load registry
     bool cache_cross_lang_tainted;  // true when the import subtree contains a cross-language module
     const char* source;

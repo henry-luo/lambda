@@ -1,0 +1,10 @@
+'=== error functions scalar vector and native calls ==='
+[true, true, true, true, true, true, [], null, true, true]
+'=== oriented geometry conventions ==='
+[1, -1, 0, 1, -1, 0, 1]
+'=== incircle orientation and degeneracy ==='
+[1, -1, 0, -1, 1]
+'=== cancellation and extreme exponents ==='
+[-1, -1, 1, 1, 1]
+'=== point validation and absence ==='
+[null, true, true, true, true, true]

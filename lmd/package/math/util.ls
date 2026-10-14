@@ -1,5 +1,11 @@
 // math/util.ls — Numeric and string helpers for the math package
 
+// Command identity is shared by TeX layout, symbol lookup and MathML conversion.
+pub fn command_name(raw) {
+    let text=string(raw or "");
+    if (len(text)>1 and slice(text,0,1)=="\\") slice(text,1,len(text)) else text
+}
+
 // ============================================================
 // Number formatting
 // ============================================================

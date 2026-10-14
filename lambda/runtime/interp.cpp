@@ -22,6 +22,7 @@
 #include "heap_api.h"
 #include "type_contract.hpp"
 #include "type_build.hpp"   // ast_static_literal_item: const-value resolution (RC15)
+#include "ast_build.hpp"
 #include "lambda-number-types.hpp"
 #include "lambda-number-runtime.hpp"
 #include "../js/js_runtime.h"
@@ -8782,7 +8783,9 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
     runner->context->consts = script->const_list ? script->const_list->data : NULL;
     runner->context->type_list = script->type_list;
     interp_register_view_templates(script);
-    return interp_execute_top_level_nodes(runner, st, script, root->child, run_main);
+    Item result = interp_execute_top_level_nodes(runner, st, script, root->child, run_main);
+    script->module_initialized = !item_is_error(result);
+    return result;
 }
 
 static Item interp_run_module_init(Runner* runner, InterpState* st, Script* module);
@@ -8923,11 +8926,80 @@ static Item interp_run_module_init(Runner* runner, InterpState* st, Script* modu
         return ItemError;
     }
     log_info("interp: running imported module init index=%d", module->index);
-    Item result = interp_execute_module(runner, st, module, false);
+    Item result = ItemError;
+    if (module->interp_supported) {
+        result = interp_execute_module(runner, st, module, false);
+    } else if (module->main_func) {
+        RuntimeCurrentFileScope current_file(runner->context, module->reference);
+        RuntimeJitModuleStateScope module_scope(runner->context);
+#ifndef LAMBDA_NO_MIR
+        if (prepare_context_module_state(module->jit_context,
+                module->const_list ? module->const_list->data : NULL, module->type_list) &&
+                module_scope.activate(module->module_state_id)) {
+            runner->context->consts = module->const_list ? module->const_list->data : NULL;
+            runner->context->type_list = module->type_list;
+            result = module->main_func(runner->context);
+            module->module_initialized = !item_is_error(result);
+        }
+#endif
+    }
     lambda_recovery_frame_end(barrier);
     // Module transaction cleanup is complete before the explicit completion
     // crosses to the importing frame; ordinary errors never use the barrier.
     return result;
+}
+
+Item interp_call_package_export(Runtime* runtime, const char* package_name,
+        const char* export_name, const Item* args, int argc) {
+    EvalContext* owner = runtime ? runtime_get_eval_context(runtime) : NULL;
+    if (!owner || owner != context || !package_name || !export_name || argc < 0 ||
+            argc > LAMBDA_MAX_FUNCTION_ARGS || (argc && !args)) return ItemError;
+    RootSpan arguments((size_t)argc);
+    if (argc && !arguments.valid()) return ItemError;
+    for (int i = 0; i < argc; i++) arguments.items()[i] = args[i];
+
+    // A nested adapter must not run runner_setup_context, which replaces the
+    // caller's metadata and CWD. Its values stay in the same precise GC heap.
+    struct MetadataScope {
+        EvalContext* owner;
+        void** consts;
+        void* types;
+        bool run_main;
+        MetadataScope(EvalContext* value) : owner(value), consts(value->consts),
+            types(value->type_list), run_main(value->run_main) {}
+        ~MetadataScope() {
+            owner->consts = consts;
+            owner->type_list = types;
+            owner->run_main = run_main;
+        }
+    } metadata(owner);
+    RuntimeModuleStateScope module_scope(owner);
+    RuntimeJitModuleStateScope jit_scope(owner);
+    char* path = lambda_resolve_import_module_path("./", strview_from_cstr(package_name));
+    if (!path) return ItemError;
+    Script* package = load_script(runtime, path, NULL, true);
+    mem_free(path);
+    if (!package || !package->ast_root) return ItemError;
+    InterpStateGuard state_guard((Context*)owner);
+    if (!state_guard.get()) return ItemError;
+    Runner runner = {};
+    runner.runtime = runtime;
+    runner.context = owner;
+    runner.script = package;
+    owner->run_main = false;
+    ArrayList* cone = interp_repl_import_cone(package);
+    if (!cone) return ItemError;
+    for (int i = 0; i < cone->length; i++) {
+        Script* module = (Script*)cone->data[i];
+        if (!module || (module->module_initialized && interp_module_state(module))) continue;
+        Item initialized = interp_run_module_init(&runner, state_guard.get(), module);
+        if (item_is_error(initialized)) {
+            arraylist_free(cone);
+            return initialized;
+        }
+    }
+    arraylist_free(cone);
+    return interp_call_module_export(runtime, package, export_name, arguments.items(), argc);
 }
 
 // Post-order over the import cone, then the main script — the order

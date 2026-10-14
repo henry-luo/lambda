@@ -2,20 +2,25 @@
 
 > **Status:** active design; consolidated and checked against the source tree on
 > 2026-10-10, revision `4c8f7eaae` plus the current AMS horizontal-arrow
-> changes. Remaining gaps are recorded in §10.
+> changes. MathML's first delivery stage was added on 2026-10-14 in §11.
+> Remaining gaps are recorded in §10 and §11.
 > **Scope:** static mathematical typesetting through `lambda.doc.math`.
-> **Formal linkage:** **D7.2.4** — package namespace and distribution;
+> **Formal linkage:** **D7.2.4 / D7.2.8** — package namespace, distribution and source-specific math policy;
 > **D7.1.1 / D7.1.2v2** — layering and resource acquisition;
 > **D7.4.6 / S12.1.1v2** — declared host-function effects;
 > **D4.2.3 / D4.5.2 / D5.4.2–D5.4.4** — context ownership and retention;
 > **D7.1.6** — hosts that exclude Radiant. This consolidation changes no formal
-> language ruling. The two rules below were user-ratified on 2026-10-10.
+> language ruling. The original two rules were user-ratified on 2026-10-10;
+> the MathML scope and source-policy extension were accepted on 2026-10-14 (D7.2.8).
 
-> **DESIGN RULE 1 — TeX conformance before visual similarity.**
+> **DESIGN RULE 1v2 — Source conformance before visual similarity.**
 >
-> Every math layout change MUST follow TeX's math-list algorithms and the
-> supported command's TeX/LaTeX definition, using the selected font's measured
-> data or its explicitly matched TeX companion. Numeric dimensions require a
+> TeX-derived math layout MUST follow TeX's math-list algorithms and the
+> supported command's TeX/LaTeX definition. MathML-derived layout MUST follow
+> MathML Core, sharing geometry without applying TeX spacing or companion
+> constants. Both use the selected font's measured data; TeX may additionally
+> use its explicitly matched companion, while MathML uses MATH or Core fallback
+> constants. Numeric dimensions require a
 > cited algorithm, macro, font table, or authored length. Never fit offsets,
 > gaps, glyph centering, sizes, or curves to a screenshot, fixture name, or
 > expected image. Missing data or constructions remain explicit limitations.
@@ -52,8 +57,9 @@ surface; §10 identifies incomplete constructions.
 
 Full LaTeX document processing belongs to `lambda.latex`. Arbitrary package
 execution, paragraph/page layout, automatic equation numbering, an interactive
-math editor, MathML, and speech generation are outside the current renderer's
-contract. Existing AsciiMath input can supply the same AST, but a formula
+math editor, Content MathML, and speech generation are outside the renderer's
+contract. Presentation MathML extends the contract as specified in §11.
+Existing AsciiMath input can supply the same AST, but a formula
 corpus pass does not establish complete AsciiMath or serialization parity.
 
 ## 2. Architecture and ownership
@@ -883,13 +889,216 @@ shape, reduced raster diff, or green smoke count cannot close these items.
 
 ### 10.3 Deferred product scope
 
-Full MathML/speech output, stable atom/source mappings, placeholders and math
+Full MathML layout/speech output, stable atom/source mappings, placeholders and math
 editing, arbitrary HTML integration commands, chemistry beyond the bounded
 mhchem profile of §7, complete
 AsciiMath/LaTeX serialization parity and equation line breaking remain
 separate design work. None follows automatically from static SVG coverage.
 Any expansion must preserve the existing resource boundary and the two
 prominent rules.
+
+## 11. Presentation MathML support
+
+**Status:** proposal accepted for implementation on 2026-10-14; delivery is
+incremental and the supported subset must be reported separately from the
+planned surface. **Authority:** D7.2.8; package and IO boundaries remain
+D7.2.4 / D7.1.1 / D7.1.2v2. This section revises Rule 1 as Rule 1v2:
+TeX remains governed by TeX; MathML gains its own source-specific policy.
+
+### 11.1 Scope and representation
+
+Support Presentation MathML, targeting the
+[MathML Core snapshot](https://www.w3.org/TR/2025/CR-mathml-core-20250624/).
+Content MathML, symbolic evaluation, arbitrary embedded HTML/CSS layout and
+interactive MathML are separate work. No new production font resources are
+introduced (Rule 2); optional supplied MATH fonts remain supported.
+
+Keep imported MathML as an element tree with token boundaries, attributes,
+ordered children and annotations intact. Do not translate it through LaTeX
+or rebuild the existing TeX AST as a new universal IR. XML's namespace
+bindings identify MathML by URI, including prefixed input; an unqualified
+internal `<math>` AST is a different input kind (S5.4.3). Empty argument
+elements remain arguments, and significant token text survives normal
+content construction (S2.6.1v2). XML syntax, UTF-8/entity decoding and
+well-formedness use the existing XML parser, with whitespace preservation.
+
+```mermaid
+flowchart LR
+    tex[Existing math AST] --> texlayout[TeX policy]
+    tex --> export[MathML exporter]
+    export --> tree[MathML tree]
+    input[XML or HTML input] --> tree
+    tree --> mathlayout[MathML Core policy]
+    texlayout --> geometry[Shared font facts and box geometry]
+    mathlayout --> geometry
+    geometry --> svg[Measured SVG]
+    tree --> serialize[XML or HTML serialization]
+```
+
+### 11.2 Public operations and integration
+
+| Operation | Contract |
+|---|---|
+| `to_mathml(ast, options)` | Return a Presentation MathML `<math>` element or an explicit conversion error; no font measurement is required. |
+| `parse_mathml(source)` | Parse strict, namespace-aware XML, preserve token whitespace, validate the MathML root and return its tree or an error. |
+| `render_box(tree, options)` / `render_math(tree, options)` | Accept the supported MathML subset using its layout policy; retain the existing measured-box/SVG result contract. |
+| `format(tree, 'xml')` / `format(tree, 'html')` | Serialize the exported MathML through existing markup serializers. |
+
+`display` chooses `display="block"` or `display="inline"`; an explicit
+render option overrides the root attribute. Optional original TeX source is
+retained in a `semantics` / `annotation encoding="application/x-tex"` wrapper.
+Annotations are preserved as data and are never executed or fetched.
+Re-export of an imported tree preserves supported structure rather than
+promising exact original XML spelling or arbitrary MathML-to-TeX recovery.
+
+`parse(source, {type: 'math', flavor: 'mathml'})` and `math-mathml` input
+must explicitly select XML parsing, never the current LaTeX fallback.
+Runtime `format(ast, {type: 'math', flavor: 'mathml'})` and CLI conversion
+invoke the one package exporter above IO; the lower native formatter may
+serialize a MathML tree but must not import or execute a Lambda package.
+Exports must remain usable in hosts without Radiant (D7.1.6).
+
+### 11.3 Conversion and layout
+
+Map tokens to `mi`, `mn`, `mo`, `mtext`; groups to `mrow`; fractions to
+`mfrac`; scripts to `msub` / `msup` / `msubsup`; roots to `msqrt` / `mroot`;
+limits and accents to `munder` / `mover` / `munderover`; and matrices to
+`mtable` / `mtr` / `mtd`. Emit explicit `mo` fences, not legacy `mfenced`.
+Preserve style scope, bar thickness, explicit spaces and limit modifiers.
+Use Unicode mathematical alphabets for Core export, reusing the existing
+alphabet mapping; `mathvariant="normal"` cancels identifier auto-italic.
+Unknown commands and unsupported constructs must not silently disappear.
+
+MathML layout traverses its own tree and reuses `font`, `stretch` and
+`svg_box`; shared fraction/script/root geometry is extracted when reused,
+not copied. Row spacing uses the Core operator dictionary and explicit
+`form`, `lspace`, `rspace`, `stretchy`, `symmetric`, `largeop` and
+`movablelimits` overrides. Embellished operators preserve their core
+operator's properties. Style propagation observes displaystyle, scriptlevel
+and the distinction between side scripts and under/over annotations.
+MathML uses the selected face's MATH constants or the existing Core fallback
+constants, independently of whether the font files come from the CM bundle.
+Unsupported CSS, table attributes or constructions remain explicit errors.
+
+### 11.4 Delivery and verification
+
+1. Export common constructs, preserve source annotations, and wire the
+   package into runtime/CLI conversion without reversing the layering DAG.
+2. Import strict MathML and render a documented Core subset through shared
+   geometry, adding operator/style coverage with the corresponding features.
+3. Extend matrices, multiscripts and document output/accessibility integration.
+   Native MathML and an optional SVG plus visually hidden MathML wrapper must
+   expose only one accessible representation; verify with actual browser/AT
+   evidence before claiming accessibility conformance.
+
+Add `.ls` / `.txt` structural and failure goldens, strict XML/namespace and
+whitespace cases, supported-tree round trips, and CLI conversion checks.
+Test both interpreter and JIT, and exercise export without font services.
+Use independent Core formulas and selected pinned MathML WPT cases for
+geometry, including operator overrides, empty children, scripts and fractions.
+Keep the existing TeX package/corpus and Lambda baseline gates; native
+Radiant changes also require its baseline and dimension lint. A successful
+SVG or a browser image comparison alone does not establish conformance.
+
+### 11.5 First delivery stage
+
+The exporter and strict XML input are implemented in the pure
+`lambda.doc.math.mathml` module, with convenience exports in `math`.
+Runtime formatting lazily initializes the package in its current evaluator;
+CLI conversion uses the existing document transform contract. Both delegate
+syntax emission to the XML serializer. Alphabet and command-name helpers are
+shared with the SVG renderer, without importing font measurement into export.
+
+The implemented export subset covers the common constructs in §11.3, scoped
+font/math styles, named operators and explicit limits, source annotations,
+ordinary phantoms and basic matrices/cases. Explicit TeX atom-class overrides,
+compound `mathop`, fixed delimiter sizes, continued-fraction struts, custom
+array alignment/row gaps and other extension commands remain errors.
+Imported MathML retains lexical QNames and namespace declarations; strict XML
+validates their bindings. Canonical namespace-aware name carriers across the
+whole document model remain a separate existing namespace obligation.
+The current direct ASCII parser also retains infix `/` as an operator;
+conversion preserves that AST and does not repair this pre-existing input gap.
+
+MathML SVG layout was not implemented in this first stage. The public renderer rejected
+MathML explicitly so its TeX default traversal cannot flatten fractions or
+drop token distinctions. Operator-dictionary layout, browser accessibility
+integration and the geometry gates in §11.4 remain planned.
+
+Focused goldens cover conversion, namespace validation, whitespace/empty
+arguments, annotations and round trips; native/CLI tests cover both tiers,
+repeated lazy calls and forced GC. The implementation also fixes two exposed
+MIR bugs: a raising match arm leaking its exit flag into the join (S11.2.1),
+and recursive calls inside constructed containers inheriting tail position
+(D8.2.6). Their dedicated regression retains both successful match values and
+the enclosing element/map/array construction.
+
+| Verification on 2026-10-14 | Result and limits |
+|---|---|
+| MathML native/CLI integration | **10/10** on both `lambda.exe` and the runtime-only `lambda-cli.exe`; interpreter, JIT, auto promotion, strict input, CLI formats and forced GC. `temp/mathml/node-tests-final.log`, `cli-node-tests-final.log`. |
+| Final builds and Input baseline | Both hosts build; **2,112/2,112** Input checks pass after the shared XML-root matcher change. `temp/mathml/build-final.log`, `build-cli-final.log`, `input-baseline-final.log`. |
+| Focused math and compiler regression goldens | **36/36**; existing TeX cases, new MathML cases and the two exposed JIT regressions. `temp/mathml/focused-math.log`. |
+| Existing SVG corpus | **921/921** geometry smoke cases; `temp/mathml/corpus.json`. |
+| Lambda plus Input baseline | **6,564/6,566**: Input **2,112/2,112**, runtime **4,452/4,454**. The existing `edit_view_only` boolean-attribute mismatch remains. The GC sweep times out at the runner's 180-second idle limit; a standalone diagnostic run reaches `music_layout` and records exit 137 in randomized-forced mode, then is stopped before completing the remaining modes. Its cause is not established, and a green aggregate baseline is not claimed. `temp/mathml/baseline.log`, `gc-stress.log`. |
+
+### 11.6 Native MathML layout in Radiant
+
+The follow-up delivery on 2026-10-14 adds `mathml_layout.ls`, selected by
+`math.render_box` / `render_math` for MathML input (D7.2.8). It traverses the
+MathML tree directly, using Core fraction, side-script, radical, under/over,
+operator and table policies. `geometry.ls` now shares the composition of
+fractions, scripts and radicals with TeX; each caller still supplies its own
+source-policy offsets. A MathML font profile never acquires TeX companion
+metrics. Mathematical Unicode alphabets can use corresponding styled base
+characters in the distributed ordinary fonts.
+
+`mathml_operators.ls` is generated from the repository's pinned WPT operator
+dictionary by `utils/generate_mathml_operators.py`, with source revision/hash
+and its BSD license retained. Operator forms, explicit spacing and property
+overrides, embellished operators, vertical fences and horizontal accents
+enter the MathML policy. MATH variants/assemblies and the existing measured
+outline fallback share `stretch.ls`; no screenshot-specific dimensions or
+additional production font resources are introduced.
+
+Radiant recognizes namespace-qualified math roots with math inner display
+and invokes the package through its existing retained custom-layout/paint
+boundary. The generic callback supplies the live source element and computed
+font size, then retains the returned SVG using precise roots on the owning
+heap (D5.3.3). Static HTML initializes a package runtime lazily; nested renders
+share their active evaluator. Root CSS box decoration, color and size stay
+with Radiant. Semantic MathML children are not flattened into flow, replaced,
+or reparsed, and annotations never enter painted text. Intrinsic queries,
+normal flow and flex use the same package measurement; retained paint shares
+one measurement per font size and layout measurement epoch (D4.5.1v4).
+
+This delivery covers the gallery's ten formulas, core token rows, fractions
+including zero bars and empty arguments, side scripts and movable limits,
+roots/degrees, basic under/over accents, phantoms, spaces and matrices. Invalid
+argument counts use Core's row fallback. Unknown layout elements, foreign
+namespaces in the math tree, nested HTML, RTL, unsupported inline CSS and
+legacy matrix layout attributes report errors. Multiscripts, general CSS
+layout inside tokens/tables, automatic descendant stylesheet/font-face
+projection and verified browser/AT accessibility remain open. The HTML
+viewer currently selects the package's bundled fonts; explicit package API
+font options remain available. A supported-subset rendering is not a claim
+of complete MathML Core conformance.
+
+The durable sample is `test/html/mathml_gallery.html`; view it with
+`./lambda.exe view test/html/mathml_gallery.html`. Regressions compare fraction
+geometry against independently calculated MATH/Core constants and exercise
+operator forms, nested scripts, limits, matrices, namespaces and inert source.
+The native regression lays out inline, block and flex math twice, checks its
+paint layers and verifies that the original MathML DOM is retained.
+
+| Native-layout verification on 2026-10-14 | Result and limits |
+|---|---|
+| MathML integration | **14/14** on the full host, including interpreter/JIT/auto layout, all ten gallery formulas and native paint under forced compacting GC with freed-memory poisoning. Runtime-only CLI conversion remains **10/10**, with four native-layout cases skipped. `temp/mathml/node-layout-final.log`, `cli-node-layout-final.log`. |
+| Focused math/compiler goldens | **38/38**, including the existing TeX cases and independent Core fraction checks. `temp/mathml/focused-layout-final.log`. |
+| Existing TeX corpus and Lambda/Input gate | SVG corpus **921/921** and Input **2,112/2,112** pass. The aggregate is **6,570/6,572**: the earlier `edit_view_only` boolean-attribute mismatch and GC-stress runner idle timeout remain. The timeout's cause is unresolved; native MathML's separate forced-GC paint test passes. `temp/mathml/lambda-baseline-layout.log`. |
+| Native DOM/layout and source retention | Text/query suite **21/21**; the MathML case also passes after adding root CSS size/color to its fixture. Isolated custom-layout suite **12/12**. `temp/mathml/radiant-baseline-host.log`, `native-mathml-final.log`. |
+| Native gallery paint | The original `temp/mathml/sample.html` renders to `sample-radiant.png`; reviewed fractions, radicals, scripts, sums, integrals and binomial fences are visible. This is paint evidence, not complete Core conformance. |
+| Radiant aggregate gate | Remains red: `md_nuxt-readme` element comparison regresses **100.0% → 99.3%**, and four document-editor cases fail (DCT PDF, two EML previews, TSV table). Their causes are not established here. **347** layout cases remain partial. Page snapshots **51/51**, scene tests **28/28** and view tests **193/193** pass with host access. The visual suite hits the runner's idle timeout but subsequently completes with all **211** applicable baseline checks passing. `temp/mathml/radiant-baseline-host.log`, `markdown-baseline-diagnostic.log`, `test_output/test_radiant_render_baseline.log`. |
+| Generated data and layout lint | Operator dictionary/license regenerate identically; `no-int-cast-radiant` and formal-index checks pass. |
 
 ## Appendix A. Brief implementation history
 

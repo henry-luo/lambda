@@ -88,11 +88,22 @@ float form_control_em_size(LayoutContext* lycon, ViewBlock* block, float em) {
     return font_size * em;
 }
 
-static void layout_form_option_child(DomElement* option, bool listbox,
+static void layout_form_child_style(LayoutContext* lycon, DomElement* child) {
+    LayoutViewScope view_scope(lycon);
+    LayoutFontScope font_scope(lycon);
+    BlockContextScope block_scope(lycon);
+    Linebox saved_line = lycon->line;
+    // native rows have no ordinary child layout, but still need their author cascade.
+    set_view(lycon, RDT_VIEW_BLOCK, child);
+    dom_node_resolve_style(child, lycon);
+    lycon->line = saved_line;
+}
+
+static void layout_form_option_child(LayoutContext* lycon, DomElement* option, bool listbox,
                                      float x, float* current_y, float width,
                                      float row_height) {
     if (!option) return;
-    option->view_type = RDT_VIEW_BLOCK;
+    layout_form_child_style(lycon, option);
     if (!listbox) {
         zero_form_child_box(option);
         return;
@@ -1083,7 +1094,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
 
             if (ctag == MARKUP_NAME_OPTION) {
                 if (hide_select_child_if_needed(celem)) continue;
-                layout_form_option_child(celem, is_listbox, border_left,
+                layout_form_option_child(lycon, celem, is_listbox, border_left,
                                          &current_y, option_width, row_height);
             } else if (ctag == MARKUP_NAME_HR) {
                 celem->view_type = RDT_VIEW_BLOCK;
@@ -1097,7 +1108,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                 }
             } else if (ctag == MARKUP_NAME_OPTGROUP) {
                 if (hide_select_child_if_needed(celem)) continue;
-                celem->view_type = RDT_VIEW_BLOCK;
+                layout_form_child_style(lycon, celem);
                 if (is_listbox) {
                     // Native listboxes expose each optgroup label as one row;
                     // the option rows follow it in the same internal list.
@@ -1114,7 +1125,7 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                     uintptr_t gctag = gcelem->tag();
                     if (gctag == MARKUP_NAME_OPTION) {
                         if (hide_select_child_if_needed(gcelem)) continue;
-                        layout_form_option_child(gcelem, is_listbox, border_left,
+                        layout_form_option_child(lycon, gcelem, is_listbox, border_left,
                                                  &current_y, option_width, row_height);
                     } else if (gctag == MARKUP_NAME_OPTGROUP) {
                         if (hide_select_child_if_needed(gcelem)) continue;

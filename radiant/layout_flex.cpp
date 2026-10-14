@@ -202,7 +202,10 @@ static bool measure_anonymous_flex_text_run(LayoutContext* lycon,
     if (!text_view) return false;
 
     LayoutFontScope font_scope(lycon);
+    BlockContextScope block_scope(lycon);
     if (item->font) setup_font(lycon->ui_context, &lycon->font, item->font);
+    setup_line_height(lycon, lam::view_as_block(item));
+    layout_setup_block_font_metrics(lycon);
     const char* text_data = (const char*)text->text_data();
     // CSS Flexbox intrinsic sizing uses the collapsed anonymous text run;
     // raw indentation whitespace must not freeze the item wider than its content.
@@ -242,10 +245,13 @@ static bool measure_anonymous_flex_text_run(LayoutContext* lycon,
             lycon, font_box_handle(&lycon->font), lycon->font.style);
     }
 
-    float text_height = text_view->height;
-    if (text_height <= 0.0f) {
-        text_height = lycon->font.style ? lycon->font.style->font_height : 0.0f;
-    }
+    // the anonymous block contains a line box (Flexbox §4), not just the glyph
+    // cell; inherited leading contributes to its size and exported baseline.
+    float text_height = lycon->block.line_height;
+    float ascender = lycon->block.init_ascender;
+    float descender = lycon->block.init_descender;
+    layout_apply_line_height_leading(text_height, &ascender, &descender);
+    item->fi->baseline_offset = ascender;
     float min_width = widths.min_content;
     float max_width = widths.max_content;
     float height = text_height;
@@ -350,16 +356,6 @@ static ViewElement* create_anonymous_flex_text_item(LayoutContext* lycon,
     item->fi->has_intrinsic_height = true;
     item->width = item->content_width = item_width_max;
     item->height = item->content_height = item_height;
-    FontHandle* baseline_font = text_view->font && text_view->font->font_handle
-        ? text_view->font->font_handle : font_box_handle(&lycon->font);
-    float baseline_offset = baseline_font
-        ? font_get_rendering_ascender(baseline_font) : 0.0f;
-    if (baseline_offset <= 0.0f && lycon->font.style) {
-        baseline_offset = lycon->font.style->ascender;
-    }
-    // Flexbox §8.5 needs this before anonymous text receives final geometry.
-    item->fi->baseline_offset = baseline_offset > 0.0f
-        ? baseline_offset : item_height * 0.8f;
     return item;
 }
 
@@ -464,6 +460,7 @@ static void layout_anonymous_flex_text(ViewElement* item, LayoutContext* lycon,
     lycon->block.text_align = CSS_VALUE_LEFT;
     if (item->font) setup_font(lycon->ui_context, &lycon->font, item->font);
     setup_line_height(lycon, lam::view_as_block(item));
+    layout_setup_block_font_metrics(lycon);
     line_init(lycon, item->x, item->x + item->width);
 
     for (FlexAnonymousTextRun* run = runs; run; run = run->next) {
@@ -549,6 +546,7 @@ void apply_anonymous_flex_text_geometry(FlexContainerLayout* flex_layout) {
             preserve_text_align = only_text_and_breaks && has_forced_break &&
                 (text_align == CSS_VALUE_CENTER || text_align == CSS_VALUE_RIGHT);
         }
+        // translate from the line origin, retaining both leading and authored indentation.
         float dx = preserve_text_align ? 0.0f : item->x - item->fi->anonymous_text_origin_x;
         float dy = preserve_text_align ? 0.0f : item->y - item->fi->anonymous_text_origin_y;
         for (FlexAnonymousTextRun* run = item->fi->anonymous_text_runs;
@@ -1919,6 +1917,8 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
                                && isnan(item_block->block()->given_width_percent));
         bool has_definite_h = (item_block && item_block->blk && item_block->block_mut()->given_height >= 0
                                && isnan(item_block->block()->given_height_percent));
+        // a clean item of an incremental pass replays its last measurement and content pass.
+        flex_retained_item_begin(lycon, item, container_content_width, container_content_height);
         if (!(has_definite_w && has_definite_h)) {
             measure_flex_child_content(lycon, child);
         }
@@ -4209,10 +4209,13 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
                     item_block, item->width, true);
                 // Intrinsic height is width-dependent; use the shared query so flex,
                 // block-flow, and anonymous text all follow one sizing contract.
-                float measured_height = item_content_width > 0.0f
-                    ? flex_measure_intrinsic_max_height(
-                        lycon, static_cast<DomNode*>(item), item_content_width)
-                    : 0.0f;
+                float measured_height = 0.0f;
+                if (item_content_width > 0.0f &&
+                    !flex_retained_replay_cross(lycon, item, item_content_width, &measured_height)) {
+                    measured_height = flex_measure_intrinsic_max_height(
+                        lycon, static_cast<DomNode*>(item), item_content_width);
+                    flex_retained_record_cross(lycon, item, item_content_width, measured_height);
+                }
                 if (flex_item_is_anonymous_text(item) && item->fi->anonymous_text &&
                     item_content_width > 0.0f && lycon &&
                     item->blk->writing_mode != WM_VERTICAL_LR &&

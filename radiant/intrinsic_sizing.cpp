@@ -539,8 +539,7 @@ static bool intrinsic_style_length_declaration(LayoutContext* lycon, StyleTree* 
     return true;
 }
 
-static void intrinsic_apply_monospace_font_size_quirk(FontProp* font,
-                                                      FontProp* parent_font) {
+void layout_apply_monospace_medium_size(FontProp* font, const FontProp* parent_font) {
     if (!font || !font->family || font->font_size <= 0.0f ||
         !font->font_size_from_medium) {
         return;
@@ -3171,6 +3170,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         return {0, 0};
     }
     radiant::layout_profiler_note_intrinsic_request(&lycon->profiler, false, false);
+    LayoutMeasurementRootScope root_scope(lycon, element);
     IntrinsicMeasureScope measure_scope(lycon, element);
     IntrinsicProfileScope profile_scope(lycon, element);
     IntrinsicWidthCacheScope cache_scope = {
@@ -3366,7 +3366,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             intrinsic_complete_inherited_font(
                 temp_font_prop, saved_font.style,
                 intrinsic_element_has_specified_font_size(element));
-            intrinsic_apply_monospace_font_size_quirk(temp_font_prop, saved_font.style);
+            layout_apply_monospace_medium_size(temp_font_prop, saved_font.style);
             setup_font(lycon->ui_context, &lycon->font, temp_font_prop);
             spacing_font_ready = true;
             need_font_setup = true;
@@ -3424,7 +3424,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 intrinsic_complete_inherited_font(
                     temp_font_prop, saved_font.style,
                     intrinsic_element_has_specified_font_size(element));
-                intrinsic_apply_monospace_font_size_quirk(temp_font_prop, saved_font.style);
+                layout_apply_monospace_medium_size(temp_font_prop, saved_font.style);
                 setup_font(lycon->ui_context, &lycon->font, temp_font_prop);
             }
             font_changed = true;
@@ -3447,7 +3447,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             intrinsic_complete_inherited_font(
                 ua_font, lycon->font.style,
                 intrinsic_element_has_specified_font_size(element));
-            intrinsic_apply_monospace_font_size_quirk(ua_font, lycon->font.style);
+            layout_apply_monospace_medium_size(ua_font, lycon->font.style);
             setup_font(lycon->ui_context, &lycon->font, ua_font);
             font_changed = true;
         }
@@ -3463,6 +3463,15 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (layout_block_is_display_none(check_none)) {
             return sizes;
         }
+    }
+
+    float math_width = 0.0f;
+    if (layout_measure_mathml(lycon, element, &math_width, nullptr)) {
+        float decoration = content_only ? 0.0f : layout_intrinsic_padding_border_axis(
+            lycon, element, true, lycon->block.content_width,
+            !intrinsic_percentage_width_is_indefinite(lycon));
+        sizes.min_content = sizes.max_content = math_width + decoration;
+        return sizes;
     }
 
     bool is_table_display = false;
@@ -6301,6 +6310,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 	    DomElement* element = node->as_element();
 	    if (!element) return 0;
 
+    LayoutMeasurementRootScope root_scope(lycon, element);
     {
         IntrinsicFontScope style_font_scope(lycon, lycon->font);
         LayoutViewScope style_view_scope(lycon);
@@ -6319,6 +6329,11 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         (view->block()->given_width_type == CSS_VALUE_MIN_CONTENT ||
          view->block()->given_width_type == CSS_VALUE_MAX_CONTENT);
     float replaced_query_width = replaced_intrinsic_width_query ? -1.0f : width;
+
+    float math_height = 0.0f;
+    if (layout_measure_mathml(lycon, element, nullptr, &math_height)) {
+        return math_height + layout_intrinsic_padding_border_axis(lycon, element, false, width, true);
+    }
 
     float height = 0;
 
@@ -6831,7 +6846,17 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             // Get child's intrinsic width
             DomElement* child_elem = child->as_element();
             IntrinsicSizes child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
-            float child_width = child_sizes.max_content;  // Use max-content width for flex items
+            float child_width = child_sizes.max_content;
+            ViewBlock* child_view = lam::view_as_block(child_elem);
+            if (child_view && child_view->fi && child_view->fi->flex_basis >= 0.0f) {
+                // Flex line breaks use the hypothetical main size, not a prior
+                // stretched width left on an item with an explicit flex basis.
+                float basis = child_view->fi->flex_basis_is_percent
+                    ? child_view->fi->flex_basis * width / 100.0f
+                    : child_view->fi->flex_basis;
+                child_width = layout_apply_min_max_border_box_axis(child_view, basis, true);
+            }
+            LayoutContainingBlockScope child_cb_scope(lycon, LAYOUT_AXIS_X, width);
             float child_height = calculate_max_content_height(lycon, child, width);
 
             // Check if we need to wrap to a new line
@@ -6930,7 +6955,14 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     if (child_content_w < 0.0f) child_content_w = 0.0f;
                 }
             }
-            float child_height = calculate_max_content_height(lycon, child, child_content_w);
+            float child_height = 0.0f;
+            {
+                // the child re-resolves its style here; its percentages refer to
+                // this element's content box, not an outer measurement scope.
+                LayoutContainingBlockScope child_cb_scope(
+                    lycon, LAYOUT_AXIS_X, content_w, content_w > 0.0f);
+                child_height = calculate_max_content_height(lycon, child, child_content_w);
+            }
             bool cyclic_percentage_ratio_child = false;
             if (child->is_element() &&
                 !intrinsic_declared_css_height_is_definite(lycon, element)) {

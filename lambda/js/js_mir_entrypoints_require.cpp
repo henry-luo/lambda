@@ -1816,9 +1816,7 @@ char* js_load_script_source_from_cache(const char* path,
     bool is_http = js_path_is_http_url(path);
     bool is_data = is_data_uri(path);
     bool is_file_url = strncmp(path, "file:", 5) == 0;
-    Url* file_url = is_file_url ? url_parse(path) : nullptr;
-    lam::Temp<char> local_path(file_url ? url_to_local_path(file_url) : nullptr);
-    if (file_url) url_destroy(file_url);
+    lam::Temp<char> local_path(url_file_to_local_path(path));
     if (is_file_url && !local_path) return NULL;
     // inline document modules resolve to file URLs; decode them before filesystem/cache access.
     const char* read_path = local_path ? local_path.get() : path;

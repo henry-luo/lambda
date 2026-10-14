@@ -1,0 +1,31 @@
+<!doctype html><html><head><style>
+body { margin:0; font-family:Arial,sans-serif; font-size:12px; line-height:normal; }
+button { display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box;
+  height:34px; padding:0 12px; border:1px solid; font:inherit; }
+#unset { line-height:unset; }
+#initial { line-height:initial; }
+#missing { line-height:calc(var(--missing) + 8px); }
+#cycle { --a:var(--b); --b:var(--a); line-height:var(--a); }
+#bad-type { --leading:red; line-height:var(--leading); }
+#fallback { line-height:var(--missing,22px); }
+#zero { line-height:0; }
+.number-parent { font-size:20px; line-height:1.5; }
+.number-parent button { font-size:12px; }
+#inherited-missing { line-height:calc(var(--missing) + 8px); }
+#inherited-unset { line-height:unset; }
+#inherited-initial { line-height:initial; }
+</style></head><body id="result">
+<button id="normal"><span>Add text</span></button>
+<button id="unset"><span>Add text</span></button>
+<button id="initial"><span>Add text</span></button>
+<button id="missing"><span>Add text</span></button>
+<button id="cycle"><span>Add text</span></button>
+<button id="bad-type"><span>Add text</span></button>
+<button id="fallback"><span>Add text</span></button>
+<button id="zero"><span>Add text</span></button>
+<div class="number-parent">
+  <button id="inherited-missing"><span>Add text</span></button>
+  <button id="inherited-unset"><span>Add text</span></button>
+  <button id="inherited-initial"><span>Add text</span></button>
+</div>
+</body></html>

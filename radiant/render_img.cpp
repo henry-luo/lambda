@@ -166,7 +166,8 @@ static bool render_png_resolve_auto_size(DomDocument* doc, float raster_scale,
     return true;
 }
 
-int render_export_session_to_png(RenderExportSession* session, const char* png_file) {
+int render_export_session_to_png(RenderExportSession* session, const char* png_file,
+                                  bool transparent_background) {
     if (!session) return 1;
     uint64_t t_start = time_now_ns();
 
@@ -203,6 +204,7 @@ int render_export_session_to_png(RenderExportSession* session, const char* png_f
                 output_width, output_height, PNG_TILE_THRESHOLD);
             RenderOutputTarget target;
             render_output_target_init(&target, RENDER_OUTPUT_TILED_PNG, png_file);
+            target.transparent_background = transparent_background;
             target.width = output_width;
             target.height = output_height;
             render_output_target_apply_session(&target, session);
@@ -218,6 +220,7 @@ int render_export_session_to_png(RenderExportSession* session, const char* png_f
         if (doc && doc->view_tree) {
             RenderOutputTarget target;
             render_output_target_init(&target, RENDER_OUTPUT_PNG, png_file);
+            target.transparent_background = transparent_background;
             target.surface = lam::up(ui_context->surface);
             render_output_target_apply_session(&target, session);
             if (render_output_render_view_tree_to_target(ui_context, doc->view_tree, &target) != 0) return 1;
