@@ -13,7 +13,7 @@ fn cancel(st) => {*:st,doc:if (st.drag.before != null) st.drag.before else if (s
     pan:if (st.drag.pan != null) st.drag.pan else st.pan,
     selection:if (st.drag.mode == "marquee") st.drag.previous else st.selection,
     selected:if (st.drag.mode == "marquee") st.drag.primary else st.selected,
-    editing:null,drag:null,source:"",tool:"select",dialog:"",error:"",hover:""}
+    arrow_menu:"",editing:null,drag:null,source:"",tool:"select",dialog:"",error:"",hover:""}
 pn publish(owner,st) { present.sync(owner,st); return st }
 fn finish_edit(st) {
     if (st.editing == null) st else (
@@ -38,6 +38,14 @@ pn update_property(owner,st,control,final=false) {
 }
 pn command(owner,st,action) any^ {
     if (st.drag != null) { return st }
+    if (starts_with(action,"arrow-open-")) {
+        let key = slice(action,11)
+        return {*:st,arrow_menu:if (st.arrow_menu == key) "" else key}
+    }
+    if (starts_with(action,"arrow-set-")) {
+        let choice = split(slice(action,10),"/")
+        return {*:model.edit_properties(st,{[choice[0]]:choice[1]})^,arrow_menu:""}
+    }
     if (starts_with(action,"tool-")) { return {*:st,tool:slice(action,5),source:"",status:"Tool selected."} }
     if (starts_with(action,"add-")) { return {*:st,tool:slice(action,4),source:"",status:"Click on the page to place a shape."} }
     if (action == "undo" or action == "redo") { return model.step_history(st,action == "redo") }
@@ -87,7 +95,7 @@ pn dispatch(owner,st,action) {
     let base = finish_edit(st)
     var result = base
     command(owner,base,action) ^ { result = {*:base,error:^.message,status:^.message} } ~ { result = ~ }
-    return result
+    return if (starts_with(action,"arrow-open-")) result else {*:result,arrow_menu:""}
 }
 
 pn drag_to(owner,st,x,y,shift=false) {
@@ -110,7 +118,7 @@ pn drag_to(owner,st,x,y,shift=false) {
     return {*:st,doc:model.move_selection(drag.before,drag.ids,dx/st.zoom,dy/st.zoom,st.grid)}
 }
 
-view <draw_session> state session:model.initial() { ~.rendered }
+view <draw_session> state session:{*:model.initial(),arrow_menu:""} { ~.rendered }
 on draw_activate(evt) {
     if (evt.event_phase != 2) { return 'pass' }
     session = publish(evt.target,present.fit(evt.target,session))
@@ -128,6 +136,11 @@ on click(evt) {
         session = dispatch(owner,session,action)
     } else { return 'pass' }
     session = publish(owner,session)
+    if (starts_with(action,"arrow-open-") and session.arrow_menu != "") {
+        let kind = model.attr(model.lookup(session.doc,session.selected).shape,session.arrow_menu)
+        dom.focus_set(dom.get_element_by_id(owner,session.arrow_menu ++ "-option-" ++ kind),true)
+    }
+    if (starts_with(action,"arrow-set-")) dom.focus_set(dom.get_element_by_id(owner,"prop-" ++ split(slice(action,10),"/")[0]),false)
     if (session.dialog != "" and previous_dialog == "") dom.focus_set(dom.get_element_by_id(owner,"file-path"),false)
     if (session.dialog == "" and previous_dialog != "") dom.focus_set(dom.get_element_by_id(owner,previous_dialog),false)
     return 'handled'
@@ -149,12 +162,16 @@ on change(evt) {
     return 'handled'
 }
 on focusout(evt) {
+    if (session.arrow_menu != "" and dom.get_attribute(dom.closest(evt.relatedTarget,"[data-arrow-key]"),"data-arrow-key") != session.arrow_menu) {
+        session = publish(owner_of(evt),{*:session,arrow_menu:""})
+    }
     if (session.editing == null or dom.get_attribute(evt.target,"data-property") != session.editing.key) { return 'pass' }
     session = publish(owner_of(evt),finish_edit(session))
     return 'handled'
 }
 on pointerdown(evt) {
     let owner = owner_of(evt)
+    if (session.arrow_menu != "" and dom.closest(evt.target,"[data-arrow-key]") == null) { session = publish(owner,{*:session,arrow_menu:""}) }
     let stage = dom.get_element_by_id(owner,"stage")
     if (session.dialog != "" or evt.button != 0 or dom.closest(evt.target,"#stage") == null or session.drag != null) { return 'pass' }
     let viewport = present.viewport(owner)
@@ -235,6 +252,30 @@ on wheel(evt) {
 }
 on keydown(evt) {
     let owner = owner_of(evt)
+    let picker = dom.closest(evt.target,"[data-arrow-key]")
+    if (picker != null and session.dialog == "" and contains(["ArrowUp","ArrowDown","Home","End","Enter"," ","Escape","Tab"],evt.key)) {
+        let property = dom.get_attribute(picker,"data-arrow-key")
+        let focused = dom.get_attribute(dom.closest(evt.target,"[data-arrow-value]"),"data-arrow-value")
+        let current = model.attr(model.lookup(session.doc,session.selected).shape,property)
+        if (evt.key == "Tab" or evt.key == "Escape") {
+            session = publish(owner,{*:session,arrow_menu:""})
+            dom.focus_set(dom.get_element_by_id(owner,"prop-" ++ property),true)
+            return if (evt.key == "Tab") 'pass' else 'prevent-default'
+        }
+        if ((evt.key == "Enter" or evt.key == " ") and focused != null) {
+            session = publish(owner,dispatch(owner,session,"arrow-set-" ++ property ++ "/" ++ focused))
+            dom.focus_set(dom.get_element_by_id(owner,"prop-" ++ property),true)
+        } else {
+            let positions = [for (i,kind in model.arrows where kind == (if (focused != null) focused else current)) i]
+            let index = if (len(positions)>0) positions[0] else 0
+            let next = if (evt.key == "Home") 0 else if (evt.key == "End") len(model.arrows)-1
+                else if (session.arrow_menu != property or evt.key == "Enter" or evt.key == " ") index
+                else (index+(if (evt.key == "ArrowUp") len(model.arrows)-1 else 1))%len(model.arrows)
+            session = publish(owner,{*:finish_edit(session),arrow_menu:property})
+            dom.focus_set(dom.get_element_by_id(owner,property ++ "-option-" ++ model.arrows[next]),true)
+        }
+        return 'prevent-default'
+    }
     if (evt.key == "Escape") {
         if (session.drag != null) dom.release_pointer_capture(dom.get_element_by_id(owner,"stage"),session.drag.pointer)
         let dialog = session.dialog

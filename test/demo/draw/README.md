@@ -24,7 +24,8 @@ Choose Connect, then click a source and a destination shape. Arrows stay
 attached when either shape moves or resizes. Select a connector to edit its
 label, source/destination shapes, attachment sides, and straight, orthogonal
 or curved routing. Both ends independently offer no arrowhead, triangle,
-open arrow, diamond, circle or bar. Drag a selected connector's blue endpoint
+open arrow, diamond, circle or bar. Both arrowhead pickers show the actual
+connector graphics, with keyboard navigation and accessible names. Drag a selected connector's blue endpoint
 anywhere on the page to move it freely, or drop it onto another shape to attach.
 The inspector also offers Free endpoint. Drag its gold handle to change the route.
 Reset bend restores automatic routing. Reverse swaps the source and destination

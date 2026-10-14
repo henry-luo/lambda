@@ -1,6 +1,7 @@
 import dom
 import model: .mod_model
 import scene: .mod_scene
+import paint: .mod_paint
 import geom: lambda.editor.mod_geom
 
 pub fn viewport(owner) => dom.bounding_box(dom.get_element_by_id(owner,"stage"))
@@ -14,7 +15,18 @@ pub fn point(owner,st,x,y) {
 }
 pn control_value(owner,key,requested) {
     let control = dom.get_element_by_id(owner,"prop-" ++ key)
-    if (dom.matches(control,"select")) {
+    if (dom.matches(control,".arrow-trigger")) {
+        if (dom.get_attribute(control,"value") != string(requested)) {
+            dom.set_attribute(control,"value",string(requested))
+            dom.set_inner_html(dom.get_element_by_id(owner,key ++ "-preview"),format(
+                paint.arrow_preview(requested,if (key == "start-arrow") "start" else "end","preview-" ++ key),'xml'))
+        }
+        let label = dom.get_attribute(control,"data-label") ++ ": " ++ string(requested)
+        dom.set_attribute(control,"aria-label",label)
+        dom.set_attribute(control,"title",label)
+        for (option in dom.query_selector_all(dom.get_element_by_id(owner,key ++ "-options"),"[data-arrow-value]"))
+            dom.set_attribute(option,"aria-selected",string(dom.get_attribute(option,"data-arrow-value") == requested))
+    } else if (dom.matches(control,"select")) {
         let options = dom.query_selector_all(control,"option")
         let indexes = [for (i,option in options where dom.get_attribute(option,"value") == string(requested)) i]
         if (len(indexes)>0 and dom.selected_index(control) != indexes[0]) dom.set_selected_index(control,indexes[0])
@@ -82,6 +94,20 @@ pub pn sync(owner,st) {
     for (target,pressed in {'tool-select':st.tool=="select",'tool-marquee':st.tool=="marquee",'tool-connect':st.tool=="connect",'tool-pan':st.tool=="pan",grid:st.grid})
         dom.set_attribute(dom.get_element_by_id(owner,string(target)),"aria-pressed",string(pressed))
     for (kind in model.kinds) dom.set_attribute(dom.get_element_by_id(owner,"add-" ++ kind),"aria-pressed",string(st.tool == kind))
+    for (key in ["start-arrow","end-arrow"]) {
+        let opened = st.arrow_menu == key and chosen.tag == 'connector' and len(ids)==1
+        let trigger = dom.get_element_by_id(owner,"prop-" ++ key)
+        let menu = dom.get_element_by_id(owner,key ++ "-options")
+        let b = dom.bounding_box(trigger)
+        let root = dom.bounding_box(owner)
+        let menu_height = len(model.arrows)*34+10
+        let above = root.y+root.height-b.y-b.height < menu_height+4
+        dom.set_attribute(trigger,"aria-expanded",string(opened))
+        dom.style_set_property(menu,"display",if (opened) "block" else "none")
+        dom.style_set_property(menu,"left",string(b.x-root.x) ++ "px")
+        dom.style_set_property(menu,"top",string(if (above) max(4,b.y-root.y-menu_height-3) else b.y-root.y+b.height+3) ++ "px")
+        dom.style_set_property(menu,"width",string(b.width) ++ "px")
+    }
     object_options(owner,st)
     if (chosen != null) {
         for (key in model.editable_keys(chosen) where key != st.editing.key) control_value(owner,key,model.attr(chosen,key))
