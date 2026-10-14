@@ -55,22 +55,30 @@ fn picture(node, pkg, options, width, height, properties) map^ {
     }
 }
 
-fn drawing_node(node, pkg, options) map^ {
+fn drawing_node(node, pkg, sheet, options) map^ {
     let extent = c.first(c.descendants(node,"extent",c.WP))
     let width = c.pixels(c.attr(extent,"cx",""))
     let height = c.pixels(c.attr(extent,"cy",""))
     let properties = c.first(c.descendants(node,"docPr",c.WP))
     let references = c.descendants(node,"chart",c.CH)
     let reference = c.first(references)
+    let shape = drawing.shape(node,sheet.theme)
     let contents = if (reference != null) charts.read(pkg,reference,width,height)^
+        else if (shape != null and width > 0 and height > 0) result([{*:shape,width:width,height:height}])
+        else if (len(c.descendants(node,"wsp",c.WPS)) > 0)
+            result([],[warning(pkg,"unsupported-shape","Shape geometry, fill, outline or effects are outside the flat rectangle profile")^])
         else picture(node,pkg,options,width,height,properties)^
-    let placement = drawing.placement(node,width);
-    result([for (value in contents.nodes) {*:value,placement:placement.value}],
+    let placement = drawing.placement(node,width,height)
+    let crop = drawing.crop(node,width,height);
+    result([for (value in contents.nodes) {*:value,placement:placement.value,
+        crop:if (value.kind == "image") crop.value else null}],
         contents.diagnostics ++ (if (reference != null and (len(references) > 1 or
             len(c.descendants(node,"blip",c.A)) > 0 or len(c.descendants(node,"txbxContent",c.W)) > 0))
             [warning(pkg,"unsupported-drawing-content","Only the first chart in the drawing is supported")^] else []) ++
         (if (placement.unsupported and len(contents.nodes) > 0)
-            [warning(pkg,"unsupported-floating-image","Drawing position or wrapping is outside the paragraph-relative profile")^] else []))
+            [warning(pkg,"unsupported-floating-image","Drawing position or wrapping is outside the paragraph-relative profile")^] else []) ++
+        (if (crop.unsupported and any([for (value in contents.nodes) value.kind == "image"]))
+            [warning(pkg,"unsupported-image-crop","Image crop is outside the bounded inset profile")^] else []))
 }
 
 fn inline_many(nodes, pkg, sheet, marks, options) map^ {
@@ -100,6 +108,10 @@ fn inline_node(node, pkg, sheet, marks, options) map^ {
         let contents = inline_many(c.children(node,null,null),pkg,sheet,resolved.props,options)^;
         result(contents.nodes,resolved.diagnostics ++ contents.diagnostics)
     } else if (node.uri == c.W and node.tag == "rPr") result()
+    // fields display their saved runs; instructions and delimiters never execute (S1.8).
+    else if (node.uri == c.W and contains(["fldChar","instrText"],node.tag)) result()
+    else if (node.uri == c.W and node.tag == "fldSimple")
+        inline_many(c.children(node,null,null),pkg,sheet,marks,options)^
     else if (node.uri == c.W and contains(["t","delText"],node.tag))
         result([{kind:"text",text:c.text(node),marks:marks}],
             if (node.tag == "delText") [warning(pkg,"unsupported-revision","Deleted source text retained without revision semantics")^] else [])
@@ -125,18 +137,20 @@ fn inline_node(node, pkg, sheet, marks, options) map^ {
         "commentRangeStart","commentRangeEnd","footnoteRef","endnoteRef","annotationRef"],node.tag)) result()
     else if (node.uri == c.W and contains(["drawing","pict"],node.tag) and
         len(c.descendants(node,"txbxContent",c.W)) > 0) text_box(node,pkg,sheet,options)^
-    else if (node.uri == c.W and node.tag == "drawing") drawing_node(node,pkg,options)^
+    else if (node.uri == c.W and node.tag == "drawing") drawing_node(node,pkg,sheet,options)^
     else if (node.uri == c.MC and node.tag == "AlternateContent") {
         // choose a single representation, so fallback material never duplicates the choice.
-        let branch = c.child(node,"Fallback",c.MC)
-        let chosen = if (branch != null) branch else c.child(node,"Choice",c.MC)
+        let modern = c.first([for (branch in c.children(node,"Choice",c.MC)
+            where drawing.shape_choice(branch,sheet.theme)) branch])
+        let fallback = c.child(node,"Fallback",c.MC)
+        let chosen = if (modern != null) modern else if (fallback != null) fallback else c.child(node,"Choice",c.MC)
         let contents = inline_many(c.children(chosen,null,null),pkg,sheet,marks,options)^;
-        result(contents.nodes,contents.diagnostics ++ (if (len(c.descendants(chosen,"txbxContent",c.W)) > 0) []
+        result(contents.nodes,contents.diagnostics ++ (if (modern != null or len(c.descendants(chosen,"txbxContent",c.W)) > 0) []
             else [warning(pkg,"unsupported-alternate-content","Selected one compatibility representation")^]))
     } else {
         let contents = inline_many(c.children(node,null,null),pkg,sheet,marks,options)^
         let leaf_text = if (len(c.children(node,null,null)) == 0) c.text(node) else "";
-        result(contents.nodes ++ (if (leaf_text == "" or node.tag == "instrText") [] else [{kind:"text",text:leaf_text,marks:marks}]),
+        result(contents.nodes ++ (if (leaf_text == "") [] else [{kind:"text",text:leaf_text,marks:marks}]),
             [warning(pkg,"unsupported-element","Unsupported inline element {" ++ node.uri ++ "}" ++ node.tag)^] ++ contents.diagnostics)
     }
 }
@@ -170,9 +184,11 @@ fn row(node, pkg, sheet, options) map^ {
             merge:if (merge == null) null else c.get(merge.attrs,c.W ++ "#val","continue"),
             blocks:blocks.nodes,diagnostics:blocks.diagnostics ++
                 (if (c.child(properties,"hMerge") == null) [] else [warning(pkg,"unsupported-horizontal-merge","Legacy hMerge requires gridSpan conversion")^])}]
-    let before = c.as_int(c.attr(c.child(c.child(node,"trPr"),"gridBefore"),"val"),0);
+    let properties = c.child(node,"trPr")
+    let before = max(0,c.as_int(c.attr(c.child(properties,"gridBefore"),"val"),0));
     {header:c.on(c.child(c.child(node,"trPr"),"tblHeader")),
         height:c.pixels(c.attr(c.child(c.child(node,"trPr"),"trHeight"),"val"),15.0),
+        before:before,after:max(0,c.as_int(c.attr(c.child(properties,"gridAfter"),"val"),0)),
         cells:[for (i,cell in cells) {*:cell,column:before+sum([for (j,prior in cells where j < i) prior.span])}],
         diagnostics:c.collect(cells,"diagnostics") ++ [for (child in children
             where child.uri != c.W or not contains(["trPr","tc"],child.tag))
@@ -198,11 +214,8 @@ fn block(node, pkg, sheet, options) map^ {
         result(nested.nodes,[warning(pkg,"unsupported-element","Unsupported block element {" ++ node.uri ++ "}" ++ node.tag)^] ++ nested.diagnostics)
     }
 }
-fn references(nodes) => [for (node in nodes, ref in
-    (if (node.kind == "reference") [node] else references(c.get(node,"children",[]) ++
-        c.get(node,"blocks",[]) ++ c.get(node,"rows",[]) ++ c.get(node,"cells",[])))) ref]
 fn annotations(blocks, pkg, sheet, options) array^ {
-    let refs = references(blocks)
+    let refs = [for (node in c.model_nodes(blocks) where node.kind == "reference") node]
     let unique_refs = [for (i,ref in refs where not any([for (j,prior in refs where j < i) prior.key == ref.key])) ref];
     [for (i,ref in unique_refs, let story = pkg.stories[ref.story],
         let context = {*:pkg,main:story.part,relationships:story.relationships,in_story:true},

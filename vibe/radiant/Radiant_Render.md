@@ -13,6 +13,16 @@ This document organizes the gaps by priority tier and proposes implementation st
 
 ## Implementation Progress
 
+The 2026-10-14 DOCX cover regression added negative positioned block layers at
+their nearest stacking context. Numeric zero differs from auto z-index; raster
+and vector paths replay intervening geometry/overflow scopes, and hit testing
+visits the same stable layer list in reverse. This fixes behind-text paragraph
+anchors without document-specific CSS. `test/ui/negative_stacking` and
+`RenderOutputParity.NegativeLayersRespectContextFlowAndAncestorClips` cover
+context boundaries, clipping, flow layers and PNG/SVG/PDF parity. Complete
+positive/zero descendant lifting, negative inline contexts and blend isolation remain
+deferred; see [the implementation](../../doc/dev/radiant/RAD_13_Render_Walk_Painters.md#24-paint-order-and-z-index).
+
 | Phase | Features | Status |
 |-------|----------|--------|
 | **Phase 1** | HSL colors, `visibility:hidden`, `outline` | ✅ Complete |

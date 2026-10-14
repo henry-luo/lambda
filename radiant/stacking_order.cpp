@@ -31,13 +31,82 @@ bool radiant_stack_is_out_of_flow_positioned(View* view) {
 
 bool radiant_stack_is_deferred_from_normal_flow(View* view) {
     return radiant_stack_is_positive_z_positioned(view) ||
+        radiant_stack_is_negative_z_block(view) ||
         radiant_stack_is_out_of_flow_positioned(view);
+}
+
+bool radiant_stack_is_negative_z_block(View* view) {
+    ViewBlock* block = lam::view_as_block(view);
+    return block && block->position && block->positionp()->z_index < 0 &&
+        block->positionp()->position != CSS_VALUE_STATIC;
+}
+
+bool radiant_stack_is_context(View* view) {
+    if (!view || !view->parent) return true;
+    ViewElement* element = lam::view_as_element(view);
+    if (!element) return false;
+    const char* clip = render_clip_css_value(element);
+    if (clip && strncmp(clip, "none", 4) != 0) return true;
+    const PositionProp* position = element->positionp();
+    if (position->has_custom_layout_z_index ||
+        (position->position != CSS_VALUE_STATIC && (position->has_z_index || position->z_index != 0)) ||
+        position->position == CSS_VALUE_FIXED || position->position == CSS_VALUE_STICKY) return true;
+    if (transform_has_functions(element->transform) ||
+        (element->transform && element->transformp()->perspective > 0.0f) ||
+        (element->in_line && (element->inl()->isolation == CSS_VALUE_ISOLATE || element->inl()->opacity < 0.9995f ||
+            (element->inl()->mix_blend_mode && element->inl()->mix_blend_mode != CSS_VALUE_NORMAL))) ||
+        element->filter_prop() || element->backdrop_filter_prop() ||
+        (element->bound && element->boundary()->mask)) return true;
+    ViewBlock* block = lam::view_as_block(view);
+    return block && ((block->blk && block->block()->contain_positioning) || block->custom_layout_paint_prop());
+}
+
+View* radiant_stack_path_child(View* ancestor, View* descendant) {
+    for (View* child = descendant; child; child = child->parent) {
+        if (child->parent == ancestor) return child;
+    }
+    return nullptr;
+}
+
+static void radiant_stack_collect_negative_into(View* view, ArrayList* out) {
+    for (View* child = view; child; child = child->next()) {
+        if (radiant_stack_is_negative_z_block(child)) {
+            if (!arraylist_append(out, child)) {
+                log_warn("[RAD_STACK_NEGATIVE] failed to grow negative paint list");
+                return;
+            }
+        } else if (!view_contents_are_skipped(child) && !radiant_stack_is_context(child)) {
+            ViewElement* element = lam::view_as_element(child);
+            if (element) radiant_stack_collect_negative_into(element->first_child, out);
+        }
+    }
+}
+
+static ArrayList* radiant_stack_collect_negative_z_descendants(View* owner) {
+    ViewElement* element = lam::view_as_element(owner);
+    if (!element || !radiant_stack_is_context(owner)) return nullptr;
+    ArrayList* views = arraylist_new(8);
+    if (!views) return nullptr;
+    radiant_stack_collect_negative_into(element->first_child, views);
+    radiant_stack_sort_in_paint_order(views);
+    return views;
+}
+
+void radiant_stack_visit_negative_z_descendants(View* owner, bool reverse, void* context,
+        bool (*visit)(void* context, View* owner, View* layer)) {
+    ArrayList* views = radiant_stack_collect_negative_z_descendants(owner);
+    if (!views) return;
+    for (int i = 0; i < views->length; i++) {
+        int index = reverse ? views->length - 1 - i : i;
+        if (!visit(context, owner, (View*)views->data[index])) break;
+    }
+    arraylist_free(views);
 }
 
 // CSS 2.1 Appendix E step 8: in-flow positioned boxes (relative, sticky) with
 // z-index auto or 0 paint after their non-positioned siblings, in tree order,
 // so one pulled over a later sibling stays on top. Stacking is resolved among
-// siblings, as for positive z; negative z still paints in tree order.
+// siblings, as for positive z; negative blocks belong to their enclosing context.
 bool radiant_stack_is_in_flow_positioned_step8(View* view) {
     ViewElement* element = lam::view_as_element(view);
     if (!element) return false;
@@ -97,7 +166,7 @@ ArrayList* radiant_stack_collect_positioned_children(ViewBlock* block, const cha
 
     ViewBlock* child = block->positionp()->first_abs_child;
     while (child) {
-        if (!arraylist_append(views, child)) {
+        if (!radiant_stack_is_negative_z_block(child) && !arraylist_append(views, child)) {
             log_warn("%s failed to grow positioned list", log_prefix);
             break;
         }

@@ -1512,6 +1512,12 @@ Paragraph-relative column anchors support left/right square wrapping,
 centered largest-side wrapping, and top/bottom wrapping at paragraph top.
 Signed column-start and paragraph offsets with square wrapping on both sides
 use CSS float margins (D7.2.4); this remains a flowing approximation of Word.
+No-wrap column/paragraph anchors with explicit offsets retain their extents
+and front/behind-text layer order. Inset raster crops keep their saved frames.
+Flat DrawingML rectangles support validated solid RGB/theme fills with no
+outline; a supported modern compatibility branch takes precedence over its
+fallback. Decorative rectangles are hidden from accessibility text (S1.8,
+D7.2.4).
 The viewer also reads the document theme, inherited and direct run properties
 (font family, size, color, tracking and capitalization), paragraph spacing,
 table grid widths, cell shading and borders, row heights, and page size/margins.
@@ -1533,6 +1539,10 @@ cell boundaries, preserving surrounding formatting and reading order. Control
 properties are editing metadata; bindings and placeholder definitions are not
 evaluated. Footnote/endnote parts containing only separator definitions do not
 represent document notes and are excluded from annotation content.
+Simple and complex fields display their saved text and links, including cached
+TOC/page-reference results. Instructions are never executed or refreshed
+(S1.8). Table rows retain omitted leading/trailing grid columns as empty HTML
+slots, preserving the alignment of financial tables (D7.2.4).
 
 | Option | Default | Meaning |
 |--------|---------|---------|
@@ -1546,7 +1556,7 @@ represent document notes and are excluded from annotation content.
 Diagnostics have `{severity, code, part, message}`. Unsupported visible
 constructs are reported. Headers/footers, comment ranges/author metadata, custom
 note numbering, revision semantics,
-field execution, other chart types, shapes, equations, page-relative floating
+field execution, other chart types, shapes beyond flat rectangles, equations, page-relative floating
 placement, DOCX writing,
 encrypted documents, and `.docm` are outside this profile. External resources
 are never fetched; emitted hyperlink schemes are validated. XML parts use

@@ -233,6 +233,8 @@ static double render_walk_block_paint_children(RenderPaintBlockDriver* ctx, View
             backend->begin_block_children(backend->ctx, block);
         }
 
+        render_walk_negative_z_descendants(backend, state, block);
+
         if (block->custom_layout_paint_prop()) {
             RadiantStackPaintList paint = radiant_stack_collect_custom_layout_paint(block);
             for (int i = 0; i < paint.count; i++) {
@@ -437,6 +439,59 @@ static void render_walk_view(RenderBackend* backend, RenderWalkState* state, Vie
 
 void render_walk_view_one(RenderBackend* backend, RenderWalkState* state, View* view) {
     render_walk_view(backend, state, view);
+}
+
+// replay only the ancestry scopes, so lifted layers keep their local geometry and clipping.
+static void render_walk_negative_path(RenderBackend* backend, RenderWalkState* state,
+                                      View* owner, View* target) {
+    View* child = radiant_stack_path_child(owner, target);
+    if (!child) return;
+    if (child == target) {
+        render_walk_view(backend, state, child);
+        return;
+    }
+    ViewBlock* block = lam::view_as_block(child);
+    if (!block) {
+        RenderWalkState saved = *state;
+        ViewElement* span = lam::view_as_element(child);
+        if (span && span->font) {
+            setup_font(state->ui_context, &state->font, span->font);
+            if (backend->on_font_change) backend->on_font_change(backend->ctx, span->font);
+        }
+        if (span && span->in_line && span->inl()->has_color) state->color = span->inl()->color;
+        render_walk_negative_path(backend, state, child, target);
+        *state = saved;
+        return;
+    }
+    RenderWalkState saved = *state;
+    state->x += block->x; state->y += block->y;
+    if (block->font) {
+        setup_font(state->ui_context, &state->font, block->font);
+        if (backend->on_font_change) backend->on_font_change(backend->ctx, block->font);
+    }
+    if (block->in_line && block->inl()->has_color) state->color = block->inl()->color;
+    bool shape_clip = backend->begin_clip && backend->end_clip &&
+        backend->begin_clip(backend->ctx, block, state->x, state->y, RENDER_CLIP_SHAPE);
+    bool content_clip = backend->begin_clip && backend->end_clip &&
+        backend->begin_clip(backend->ctx, block, state->x, state->y, RENDER_CLIP_CONTENTS);
+    if (backend->begin_block_children) backend->begin_block_children(backend->ctx, block);
+    render_walk_negative_path(backend, state, child, target);
+    if (backend->end_block_children) backend->end_block_children(backend->ctx, block);
+    if (content_clip) backend->end_clip(backend->ctx);
+    if (shape_clip) backend->end_clip(backend->ctx);
+    *state = saved;
+}
+
+static bool render_walk_negative_layer(void* context, View* owner, View* layer) {
+    RenderWalkBlockDriver* driver = (RenderWalkBlockDriver*)context;
+    render_walk_negative_path(driver->backend, driver->state, owner, layer);
+    return true;
+}
+
+void render_walk_negative_z_descendants(RenderBackend* backend, RenderWalkState* state, ViewBlock* block) {
+    RenderWalkBlockDriver driver = {};
+    driver.backend = backend; driver.state = state;
+    radiant_stack_visit_negative_z_descendants(block, false, &driver, render_walk_negative_layer);
 }
 
 void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* view) {

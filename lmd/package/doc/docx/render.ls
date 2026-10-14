@@ -15,8 +15,17 @@ let marks = [{key:"b",tag:"strong"},{key:"i",tag:"em"},{key:"u",tag:"u"},{key:"s
 fn make(tag, attributes, children) element^ => tags[tag](attributes,children)^
 fn wrap(names, index, value) any^ => if (index >= len(names)) value else
     make(names[index],{},[wrap(names,index+1,value)^])^
-fn graphic(node, value) => if (node.placement == null) value else
-    <span class:"docx-anchor",style:node.placement.box,value>
+fn graphic(node, value, options) {
+    let placement = node.placement
+    let peers = [for (layer in options.layers where layer.behind == placement.behind) layer]
+    // rank the unsigned OOXML order into small CSS integers, on either side of flowing text.
+    let rank = len([for (layer in peers where layer.order < placement.order) layer])
+    let layer_style = if (placement.absolute != true) "" else
+        "z-index:" ++ string(if (placement.behind) rank-len(peers) else rank+1) ++ ";" ++
+        "margin-left:" ++ string(0.0-c.get(options,"anchor_indent",0.0)) ++ "px;"
+    let contents = if (node.crop == null) value else <span class:"docx-image-crop",style:node.crop.box,value>;
+    if (placement == null) contents else <span class:"docx-anchor",style:(placement.box ++ layer_style),contents>
+}
 fn reference_label(node, options) => "[" ++ string(c.first([for (note in options.annotations
     where note.key == node.key) note.number])) ++ "]"
 fn inline_node(node, options) any^ {
@@ -33,23 +42,36 @@ fn inline_node(node, options) any^ {
     else if (node.kind == "bookmark") <span id:node.id>
     // HTML attributes are text at the DOM boundary; numeric values stay in the private model.
     else if (node.kind == "image") graphic(node,<img src:node.src,alt:node.alt,
-        *:if (node.placement == null) {} else {style:node.placement.image},
+        *:if (node.crop != null) {style:node.crop.image}
+            else if (node.placement == null) {} else {style:node.placement.image},
         width:if (node.width == null) null else string(node.width),
-        height:if (node.height == null) null else string(node.height)>)
-    else if (node.kind == "chart") graphic(node,<span class:"docx-chart",node.svg>)
+        height:if (node.height == null) null else string(node.height)>,options)
+    else if (node.kind == "shape") graphic(node,<span class:"docx-shape",["aria-hidden"]:"true",
+        style:("display:inline-block;width:" ++ string(node.width) ++ "px;height:" ++ string(node.height) ++
+            "px;background-color:" ++ node.fill ++ ";")>,options)
+    else if (node.kind == "chart") graphic(node,<span class:"docx-chart",node.svg>,options)
     else if (node.kind == "page-break") <br class:"docx-page-break">
     else <br>
 }
 fn inline_nodes(nodes, options) array^ => [for (node in nodes) inline_node(node,options)^]
 fn paragraph(node, options) array^ {
-    let empty = all([for (child in node.children) child.kind == "text" and child.text == ""])
+    let descendants = c.model_nodes(node.children)
+    let anchored = any([for (child in descendants) child.placement.absolute == true])
+    let empty = all([for (child in descendants) child.kind == "text" and child.text == "" or
+        anchored and (child.placement.absolute == true or contains(["link","bookmark"],child.kind))])
+    let opts = {*:options,anchor_indent:if (options.presentation == "source" and node.list == null)
+        c.get(node.props,"left",0.0) else 0.0}
     let style = (if (options.presentation == "source")
         presentation.paragraph_style(node.props,if (empty) node.empty_run else node.run,node.list) else "") ++
-        (if (node.list.format == "none") "text-indent:" ++ string(0.0-node.list.hanging) ++ "px;" else "");
+        (if (node.list.format == "none") "text-indent:" ++ string(0.0-node.list.hanging) ++ "px;" else "") ++
+        (if (anchored) "position:relative;" else "");
     [if (node.break_before) <hr class:"docx-page-break"> else null,
-        if (not empty or options.include_empty_paragraphs) make(node.tag,
+        if (anchored or not empty or options.include_empty_paragraphs) make(node.tag,
             {*:node.attrs,*:presentation.attributes(style)},
-            if (empty and options.presentation == "source") [<br>] else inline_nodes(node.children,options)^)^ else null,
+            // an out-of-flow drawing still owns a paragraph mark and its line height in Word.
+            if (empty and options.presentation == "source")
+                (if (anchored) inline_nodes(node.children,opts)^ ++ [<br>] else [<br>])
+            else inline_nodes(node.children,opts)^)^ else null,
         if (node.section_after) <hr class:"docx-section-break"> else null]
 }
 fn advance(info, counters) {
@@ -127,13 +149,17 @@ fn cells(rows, row_index, index, counters, options, table) map^ {
             counters:rest.counters,diagnostics:merge_issues ++ contents.diagnostics ++ rest.diagnostics}
     }
 }
+// omitted grid columns need empty slots so HTML keeps following cells in their source columns.
+fn grid_gap(span) => if (span <= 0) [] else [<td class:"docx-grid-gap",colspan:string(span),
+    ["aria-hidden"]:"true",style:"border:0;padding:0;background:transparent;">]
 fn table_rows(rows, index, counters, options, table) map^ {
     if (index >= len(rows)) {nodes:[],counters:counters,diagnostics:[]} else {
         let row = cells(rows,index,0,counters,options,table)^
         let rest = table_rows(rows,index+1,row.counters,options,table)^;
         {nodes:[<tr *:if (options.presentation == "source" and rows[index].height > 0)
             {style:"height:" ++ string(rows[index].height) ++ "px;"} else {},
-            *row.nodes>,*rest.nodes],counters:rest.counters,diagnostics:row.diagnostics ++ rest.diagnostics}
+            *(grid_gap(rows[index].before) ++ row.nodes ++ grid_gap(rows[index].after))>,*rest.nodes],
+            counters:rest.counters,diagnostics:row.diagnostics ++ rest.diagnostics}
     }
 }
 fn render_blocks(blocks, index, counters, options) map^ {
@@ -166,7 +192,9 @@ fn plain_text(blocks, options) => join([for (node in blocks)
     } else join([for (row in node.rows) join([for (cell in row.cells where cell.merge != "continue")
         (let text = plain_text(cell.blocks,options), if (ends_with(text,"\n\n")) slice(text,0,len(text)-2) else text)],"\t") ++ "\n"],"")],"")
 pub fn render(model, options) map^ {
-    let opts = {*:options,annotations:model.annotations}
+    let layers = [for (node in c.model_nodes(model.blocks ++ model.annotations)
+        where node.placement.absolute == true) node.placement]
+    let opts = {*:options,annotations:model.annotations,layers:layers}
     let blocks = render_blocks(model.blocks,0,{},opts)^
     let notes = [for (note in model.annotations, let rendered = render_blocks(note.blocks,0,{},opts)^)
         {*:note,nodes:rendered.nodes,diagnostics:[for (issue in rendered.diagnostics) {*:issue,part:note.part}]}]
@@ -174,8 +202,9 @@ pub fn render(model, options) map^ {
         let group = [for (note in notes where note.story == kind) note] where len(group) > 0)
         <section class:("docx-" ++ kind ++ "s"),<ol *[for (note in group)
             <li id:(options.id_prefix ++ note.key),*note.nodes>]>>]
-    let document = <article class:"docx-document",*:if (options.presentation == "source")
-        presentation.attributes(model.page_style) else {},*(blocks.nodes ++ sections)>;
+    let root_style = (if (options.presentation == "source") model.page_style else "") ++
+        (if (len(layers) > 0) "position:relative;z-index:0;" else "")
+    let document = <article class:"docx-document",*:presentation.attributes(root_style),*(blocks.nodes ++ sections)>;
     {document:document,html:html.to_html(document),text:plain_text(model.blocks,opts) ++
         join([for (kind in ["footnote","endnote","comment"], note in notes where note.story == kind)
             reference_label(note,opts) ++ " " ++ plain_text(note.blocks,opts)],""),
