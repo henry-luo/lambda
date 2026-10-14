@@ -2872,7 +2872,7 @@ static uint8_t get_border_style_priority(CssEnum style) {
     }
 }
 
-static CollapsedBorder select_winning_border(const CollapsedBorder& a, const CollapsedBorder& b) {
+CollapsedBorder layout_table_collapsed_winner(const CollapsedBorder& a, const CollapsedBorder& b) {
     if (a.style == CSS_VALUE_HIDDEN) {
         CollapsedBorder result = a;
         result.width = 0;
@@ -3176,7 +3176,7 @@ static void apply_collapsed_border_pair(LayoutContext* lycon, ViewTable* table,
     if (candidates.size() == 0) return;
     CollapsedBorder winner = *candidates[0];
     for (size_t i = 1; i < candidates.size(); i++) {
-        winner = select_winning_border(winner, *candidates[i]);
+        winner = layout_table_collapsed_winner(winner, *candidates[i]);
     }
     if (axis.has_previous(row, col)) {
         ViewTableCell* previous = table_collapsed_border_cell(

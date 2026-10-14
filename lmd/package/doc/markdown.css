@@ -475,12 +475,21 @@ footnote::before {
     }
 }
 
-/* Print styles */
+/* Print styles: page margins replace the screen body padding */
+@page {
+    margin: 15mm;
+}
+
 @media print {
     body {
         background-color: white;
         color: black;
         max-width: none;
+        padding: 0;
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+        break-after: avoid;
     }
 
     a {
@@ -490,5 +499,10 @@ footnote::before {
 
     pre, code {
         border: 1px solid #d0d7de;
+    }
+
+    /* paper cannot scroll, so long code lines wrap inside the page */
+    pre, code[type="block"] {
+        white-space: pre-wrap;
     }
 }

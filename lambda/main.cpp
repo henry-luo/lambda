@@ -3599,6 +3599,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  calculates layout, and generates output in the specified format based on file extension.\n");
             printf("\nSupported Input Formats:\n");
             printf("  .html, .htm    HTML documents\n");
+            printf("  .md, .markdown Markdown documents (GitHub-style stylesheet)\n");
             printf("  .pdf           PDF documents (converted through Lambda PDF package)\n");
             printf("  .tex, .latex   LaTeX documents (converted to HTML for rendering)\n");
             printf("  .pgf           TikZ/PGF picture fragments\n");
@@ -3619,7 +3620,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  -vh, --viewport-height   Viewport height in CSS pixels (default: auto-size to content)\n");
             printf("  -s, --scale              Raster export density (default: 1.0; does not change layout)\n");
             printf("  --pixel-ratio            Device scale for HiDPI/Retina (default: 1.0; legacy option spelling)\n");
-            fputs("  --paged                  Paginate HTML/FO/native input or preserve fixed PDF pages\n", stdout);
+            fputs("  --paged                  Paginate HTML/Markdown/FO/native input or preserve fixed PDF pages\n", stdout);
             fputs("  --import-pages <sel>     Import source PDF pages: all or 1,3-5 (default: all)\n"
                   "  --import-page-limit <N> Fail if the PDF import exceeds N pages\n", stdout);
             fputs("  --block-remote-resources  Use local document dependencies for paged export\n", stdout);
@@ -3830,8 +3831,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             return lambda_main_finish(1);
         }
         if (paged && !render_paged_input_supported(html_file)) {
-            log_error("[EXPORT_PAGED] --paged requires HTML, Lambda, FO, Radiant page or PDF input");
-            fputs("Error: --paged requires HTML, Lambda, FO, Radiant page or PDF input\n", stderr);
+            log_error("[EXPORT_PAGED] --paged requires HTML, Markdown, Lambda, FO, Radiant page or PDF input");
+            fputs("Error: --paged requires HTML, Markdown, Lambda, FO, Radiant page or PDF input\n", stderr);
             return lambda_main_finish(1);
         }
         if (input_ext && strcmp(input_ext, ".pdf") == 0) {
@@ -4127,7 +4128,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
         if (launch.paged) {
             if (!is_http_url && !render_paged_input_supported(filename)) {
-                fputs("Error: view --paged supports HTML, Lambda, FO, Radiant page and PDF documents\n", stderr);
+                fputs("Error: view --paged supports HTML, Markdown, Lambda, FO, Radiant page and PDF documents\n", stderr);
                 return lambda_main_finish(1);
             }
             int result = view_doc_in_window_with_events(filename, event_file, headless,
