@@ -88,6 +88,8 @@ static const RadiantViewCase g_radiant_view_cases[] = {
     {"RadiantViewTest.LoadsEpsAsHeadlessView", "eps", "test/input/eps/vector.eps", nullptr, true},
     {"RadiantViewTest.LoadsDictionaryPrologEpsAsHeadlessView", "eps_dictionary_prolog",
      "test/input/eps/dictionary-prolog.eps", nullptr, true},
+    {"RadiantViewTest.LoadsFontSelectionEpsAsHeadlessView", "eps_font_selection",
+     "test/input/eps/font-selection.eps", nullptr, true},
 };
 
 static const size_t g_radiant_view_case_count =
@@ -910,6 +912,10 @@ TEST(RadiantViewTest, LoadsEpsAsHeadlessView) {
 
 TEST(RadiantViewTest, LoadsDictionaryPrologEpsAsHeadlessView) {
     test_radiant_view_expect_case(22);
+}
+
+TEST(RadiantViewTest, LoadsFontSelectionEpsAsHeadlessView) {
+    test_radiant_view_expect_case(23);
 }
 
 TEST(RadiantViewTest, ReleasesDetachedScriptTextControl) {

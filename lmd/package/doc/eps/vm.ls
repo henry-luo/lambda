@@ -8,7 +8,7 @@ pub pn dispatch(var m, op, args) int^ {
     if (op == "save") {
         let allowed = obj.require(m, len(m.saves) < m.limits.max_graphics_depth, "limitcheck: VM saves")^
         let id = len(m.saves)
-        push(m.saves, {heap: m.heap, graphics: m.graphics, gstack: m.gstack})
+        push(m.saves, {heap: m.heap, graphics: m.graphics, gstack: m.gstack, fonts: m.fonts})
         push(m.stack, {kind: "save", id: id})
         return 0
     }
@@ -24,6 +24,7 @@ pub pn dispatch(var m, op, args) int^ {
     m.heap = restored
     m.graphics = saved.graphics
     m.gstack = saved.gstack
+    m.fonts = saved.fonts
     m.saves = slice(m.saves, 0, token.id)
     return 0
 }

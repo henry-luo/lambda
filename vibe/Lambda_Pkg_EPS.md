@@ -594,7 +594,9 @@ a thin runtime bridge using an Input owner (**D4.1.3**). Literal-string parsing,
 bounded ASCIIHex/ASCII85 decoding and SVG path painting are shared with PDF.
 The script package implements explicit object IDs, procedure/control-flow
 frames, local `save`/`restore`, and ordered vector draws, including clips,
-paint-time transforms and bounding-box normalization.
+paint-time transforms and bounding-box normalization. Standard 14 font lookup,
+matrix derivation and graphics-state selection are also implemented, reusing
+the PDF font-name mapping; text painting and metrics remain a later gate.
 
 `lambda convert artwork.eps -t svg -o artwork.svg`, `render`, `layout` and
 `view` route through the package. The conversion API is procedural

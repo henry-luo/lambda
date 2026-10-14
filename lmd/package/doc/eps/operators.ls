@@ -2,6 +2,7 @@ import obj: .objects
 import gfx: .graphics
 import matrices: .matrices
 import vm: .vm
+import fonts: .fonts
 
 let CORE = {
     'pop': "x", 'dup': "x", 'exch': "xx", 'index': "i", 'roll': "ii", 'copy': "*", 'clear': "", 'count': "",
@@ -18,7 +19,7 @@ let CORE = {
     'eq': "xx", 'ne': "xx", 'lt': "nn", 'le': "nn", 'gt': "nn", 'ge': "nn", 'and': "bb", 'or': "bb", 'xor': "bb", 'not': "b",
     'showpage': ""
 }
-pub let SIGNATURES = {*: CORE, *: gfx.SIGNATURES, *: matrices.SIGNATURES, *: vm.SIGNATURES}
+pub let SIGNATURES = {*: CORE, *: gfx.SIGNATURES, *: matrices.SIGNATURES, *: vm.SIGNATURES, *: fonts.SIGNATURES}
 let ARITHMETIC = ["add", "sub", "mul", "div", "idiv", "mod", "neg", "abs", "sqrt", "sin", "cos", "atan", "exp", "ln", "log", "floor", "ceiling", "round", "truncate", "cvi", "cvr"]
 
 fn matches(m, value, letter) bool^ {
@@ -97,6 +98,7 @@ pub pn dispatch(var m, op) int^ {
     if (op at vm.SIGNATURES) { let applied = vm.dispatch(m, op, args)^; return 0 }
     if (op at gfx.SIGNATURES) { let applied = gfx.dispatch(m, op, args)^; return 0 }
     if (op at matrices.SIGNATURES) { let applied = matrices.dispatch(m, op, args)^; return 0 }
+    if (op at fonts.SIGNATURES) { let applied = fonts.dispatch(m, op, args)^; return 0 }
     if (op in ARITHMETIC) { push(m.stack, numeric(m, op, args)^); return 0 }
     if (op == "pop" or op == "showpage") { return 0 }
     if (op == "dup") { push(m.stack, args[0]); push(m.stack, args[0]); return 0 }

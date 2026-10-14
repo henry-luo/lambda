@@ -1,13 +1,5 @@
 import eps: lambda.doc.eps.eps
-
-fn doc(body) any^ => parse("%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 10 10\n%%EndComments\n" ++ body, 'eps')^
-
-// S7.6.7v4: procedure handlers are statements; capture diagnostics through a var.
-pn diagnose(body, options = null) string^ {
-    var message = ""
-    eps.interpret(doc(body)^, options) ^ { message = ^.message }
-    return message
-}
+import .mod_helpers
 
 pn main() {
     let underflow = diagnose("moveto")^

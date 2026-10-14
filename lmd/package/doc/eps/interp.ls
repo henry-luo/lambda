@@ -33,7 +33,7 @@ pub pn run(doc, options) map^ {
     for (key, signature in ops.SIGNATURES) { let operator_name = string(key); system[operator_name] = {kind: "operator", value: operator_name, executable: true} }
     var m = {stack: [], dicts: [obj.reference(0), obj.reference(1)], exec: [{kind: "source", offset: doc.program.offset, end: doc.program.offset + doc.program.length}],
         heap: [{kind: "dict", value: system, access: "readonly"}, {kind: "dict", value: {}, access: "unlimited"}],
-        graphics: gfx.initial(), gstack: [], saves: [], draws: [], definitions: [], offset: doc.program.offset, steps: 0,
+        graphics: gfx.initial(), gstack: [], saves: [], fonts: {}, draws: [], definitions: [], offset: doc.program.offset, steps: 0,
         limits: {*: budget, source_end: doc.program.offset + doc.program.length}}
     while (len(m.exec) > 0) {
         let allowed = obj.require(m, m.steps < budget.max_steps and len(m.stack) <= budget.max_stack and

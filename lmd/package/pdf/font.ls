@@ -69,6 +69,9 @@ pub fn standard14(name: string) {
     else                                  { _UNKNOWN }
 }
 
+// share exact base-font recognition without exposing the fallback record.
+pub fn is_standard14(name: string) => standard14(name) != _UNKNOWN
+
 // ============================================================
 // BaseFont heuristics
 // ============================================================

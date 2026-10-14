@@ -1,7 +1,7 @@
 # Lambda EPS implementation record
 
-**Date:** 2026-10-14. **Status:** initial vector profile implemented; broader
-text/image/font profiles remain open.
+**Date:** 2026-10-14. **Status:** initial vector profile and Standard 14 font
+selection implemented; text/image/font-program profiles remain open.
 
 Design: [Lambda_Pkg_EPS.md](../Lambda_Pkg_EPS.md). This implementation follows
 **D7.2.4** (shipped document packages), **D4.1.3** (Input-owned parsing),
@@ -27,6 +27,8 @@ handlers). No formal language ruling changes.
 - Vector painting supports paths/cubic arcs, RGB/gray/CMYK, line styles,
   hairlines, clipping, saved paths, matrix operations and explicit transforms.
   Path points remain fixed in EPS space while strokes use the paint-time CTM.
+- Standard 14 font dictionaries support lookup, scaling/matrix derivation and
+  selection. Graphics and local VM saves preserve the selected font and cache.
 - Standalone SVG preserves draw order, normalizes the bounding-box origin,
   flips y, clips the viewport and retains point dimensions. Optional scale,
   background and resource ID prefixes are explicit.
@@ -45,6 +47,7 @@ handlers). No formal language ruling changes.
 | `lmd/package/doc/eps/objects.ls` | Explicit object store, permissions, references and operand helpers. |
 | `lmd/package/doc/eps/interp.ls`, `operators.ls` | Execution frames, budgets, operator signatures and dispatch. |
 | `lmd/package/doc/eps/graphics.ls`, `matrices.ls`, `vm.ls` | Guest graphics, transforms and local VM saves. |
+| `lmd/package/doc/eps/fonts.ls` | Standard 14 font identities, dictionaries, transformed matrices and selection. |
 | `lmd/package/doc/eps/svg.ls`, `eps.ls` | SVG output and public exports. |
 
 PDF retains its public token schema. Its content and dictionary literal-string
@@ -86,8 +89,9 @@ through `options.limits`; defaults are policy ceilings, not performance claims:
 | `max_draws` | 50000 |
 
 Dictionary keys are names in this profile; boolean logical forms are supported.
-`rect*` operators support the four-number form. Fonts/text, images, file/filter
-operators, `stopped`, global VM, arbitrary executable strings, PostScript
+`rect*` operators support the four-number form. Text painting/metrics,
+embedded/custom fonts, reencoding, images, file/filter operators, `stopped`,
+global VM, arbitrary executable strings, PostScript
 binary object encodings, printer/device control and vendor extensions fail if
 executed. There is no producer-specific substitution or external renderer
 fallback. Unsupported code in an unexecuted procedure can remain unused.
@@ -99,7 +103,7 @@ numeric syntax rather than accepting Lambda's boolean/null coercions.
 
 Provide a distinct `id_prefix` when combining independent EPS fragments in one
 HTML document. Transparent SVG is the default; document/raster backgrounds
-follow the existing renderer. Base-font and image support remain separate
+follow the existing renderer. Base-font painting/metrics and image support remain separate
 delivery gates, requiring metrics/codec and visual-reference fixtures.
 
 ## Verification
@@ -116,7 +120,7 @@ diagnostics, graphics transforms/clips, local VM restoration and portable SVG.
 |---|---|
 | EPS native parser/scanner/codec tests | 9/9 passed. |
 | PDF parser regressions | 26/26 passed. |
-| EPS script goldens | 7/7 passed under auto and under JIT with forced collection and freed-memory poisoning. |
+| EPS script goldens | 8/8 passed under auto and under JIT with forced collection and freed-memory poisoning. |
 | Build and CLI | `make build` passed; fixture and unknown-extension input converted to standalone SVG; direct EPS layout and PNG rendering passed. Debug allocation tracking reported no leaks. |
 | Radiant dimension lint | `no-int-cast-radiant` passed. |
 
@@ -162,7 +166,7 @@ shadowing then use the ordinary object-store implementation.
 This vector artwork completes with 106452 execution steps, 51 guest objects
 and 188 draws. The default step budget is now 250000, with caller-specified
 lower ceilings still enforced. This policy change applies to every input;
-there is no producer or filename dispatch. Fonts/text remain unsupported.
+there is no producer or filename dispatch. Text painting remains unsupported.
 
 The independently authored `test/input/eps/dictionary-prolog.eps` fixture
 covers empty dictionaries, dictionary-stack shadowing and bound drawing
@@ -175,3 +179,35 @@ and JIT with forced GC, plus four EPS/PDF/SVG headless viewer cases. The full
 user artwork loads through both headless and GUI viewers and converts to SVG
 with all 188 draws and 10666 cubic curves. The package modules load from source,
 so this correction does not require rebuilding the native executable.
+
+### Standard 14 font selection
+
+The supplied `test/input/eps/knightstour.eps` selects Times-Roman at size 72
+before drawing vector paths; it never calls a text-painting operator. Its first
+failure was the missing `findfont` operator. The package now implements
+`findfont`, `scalefont`, `makefont`, `setfont`, `currentfont` and `selectfont`.
+
+The PDF package exports `is_standard14` beside its existing `standard14`
+mapping; EPS uses both. Font dictionaries expose `FontType`, `FontName`,
+`FontMatrix` and an opaque `FID` guest object. These objects are readonly and
+use the existing explicit ID store (**S1.4**). Derived fonts share the base
+identity and replace their matrix; the base matrix remains unchanged, following
+the [PostScript Language Reference, third edition, `scalefont`/`makefont`](https://www.adobe.com/jp/print/postscript/pdfs/PLRM.pdf).
+`currentfont` initially selects Courier in this profile. The name cache belongs
+to each interpreter activation (**S9.1.7**), and local VM saves rewind it with
+the heap. Selection is part of the graphics state and follows graphics saves.
+
+Unknown font names and invalid dictionaries raise `invalidfont`; discarded
+font identities are rejected by `restore`. Glyph painting, metrics, reencoding
+and embedded font resources remain unsupported. In particular, adding setup
+support does not make `show` succeed or drop its content.
+
+The authored `font-selection.eps` fixture exercises Times-Roman setup around
+saved vector draws. Its `fonts.ls` golden checks all 14 names, 31 positive
+font/state invariants and seven failure boundaries. Shared test document/error
+helpers live in `mod_helpers.ls`, excluded from test discovery as a module.
+Verification passed 96 EPS/PDF script cases, all eight EPS cases under JIT
+with forced GC and freed-memory poisoning, and five EPS/PDF/SVG viewer cases
+with clean teardown for the EPS fixtures. The supplied artwork also passed the
+headless and actual GUI viewers with automatic close enabled.
+SVG conversion preserves the supplied artwork's 401 painted paths.

@@ -13,7 +13,7 @@ pub let SIGNATURES = {
     'rectfill': "nnnn", 'rectstroke': "nnnn", 'rectclip': "nnnn"
 }
 
-pub fn initial() => {ctm: util.IDENTITY, path: path.new_state(), current: false, clips: [], space: "gray", components: [0.0]}
+pub fn initial() => {ctm: util.IDENTITY, path: path.new_state(), current: false, clips: [], space: "gray", components: [0.0], font: null}
 pub fn point(matrix, x, y) => [matrix[0] * x + matrix[2] * y + matrix[4], matrix[1] * x + matrix[3] * y + matrix[5]]
 
 pub fn inverse(m, matrix) array^ {

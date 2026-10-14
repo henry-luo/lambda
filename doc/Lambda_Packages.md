@@ -1404,7 +1404,8 @@ The EPS package lives under the document namespace (**D7.2.4**). A C+ parser
 reads the EPS envelope and scans source objects; Lambda Script executes the
 PostScript machine and emits portable SVG. The initial profile supports vector
 paths, colors, strokes, transforms, clipping, procedures, common stack/control
-operators and local VM saves. Text, images, external resources and full
+operators, local VM saves and Standard 14 font selection. Text painting,
+images, external resources and full
 PostScript LanguageLevel conformance remain outside this profile; an executed
 unsupported operator raises an error.
 
@@ -1431,6 +1432,12 @@ default, with dimensions in points. The exact supported operator names are
 available as `eps.supported_operators`; the initial dictionary-key profile
 accepts names and its logical operators accept booleans. Auto/JIT are the
 supported package execution tiers.
+
+Font setup supports `findfont`, `scalefont`, `makefont`, `setfont`, `currentfont`
+and `selectfont` for the Standard 14 names already recognized by the PDF
+package. Font selection follows graphics and VM saves; unknown names raise
+`invalidfont`. This permits vector files with font setup to render. Glyph
+painting, text metrics, reencoding and embedded/custom fonts remain open.
 
 ```bash
 ./lambda.exe convert artwork.eps -t svg -o artwork.svg
