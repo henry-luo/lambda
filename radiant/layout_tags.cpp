@@ -64,7 +64,8 @@ bool layout_tag_is_default_inline(NameId tag) {
         MARKUP_NAME_METER, MARKUP_NAME_PROGRESS, MARKUP_NAME_BUTTON,
         MARKUP_NAME_INPUT, MARKUP_NAME_SELECT, MARKUP_NAME_TEXTAREA
     };
-    return layout_tag_in_list(tag, inline_tags,
+    // custom HTML elements have no UA display override and retain initial inline.
+    return tag == NAME_ID_NONE || layout_tag_in_list(tag, inline_tags,
                               sizeof(inline_tags) / sizeof(*inline_tags));
 }
 

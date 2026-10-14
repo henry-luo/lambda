@@ -115,11 +115,11 @@ IntrinsicSizes layout_measure_intrinsic_widths(LayoutContext* lycon, DomElement*
 
 TextIntrinsicWidths layout_measure_text_intrinsic_widths(LayoutContext* lycon,
     const char* text, size_t length, CssEnum text_transform, CssEnum font_variant,
-    CssEnum white_space, CssEnum overflow_wrap, CssEnum word_break) {
+    CssEnum white_space, CssEnum overflow_wrap, CssEnum word_break, CssEnum line_break) {
     TextIntrinsicWidths widths = {};
     if (!lycon || !text) return widths;
 
     widths = measure_text_intrinsic_widths(lycon, text, length, text_transform, font_variant,
-                                           white_space, overflow_wrap, word_break);
+                                           white_space, overflow_wrap, word_break, line_break);
     return widths;
 }

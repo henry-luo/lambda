@@ -1,0 +1,21 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; font: 20px/1 Ahem; }
+.line { width: 120px; }
+.all { word-break: break-all; }
+.any { line-break: anywhere; }
+.emergency { overflow-wrap: anywhere; }
+</style>
+<div id="result">
+<div class="line" id="own">AAA <span class="all" id="own-span">BBBBBB</span></div>
+<div class="line all" id="inherited">AAA <span id="inherited-span">BBBBBB</span></div>
+<div class="line" id="line-any">AAA <span class="any" id="line-any-span">BBBBBB</span></div>
+<div class="line" id="emergency">AAA <span class="emergency" id="emergency-span">BBBBBB</span></div>
+<div class="line" id="variable" style="--break: break-all">AAA <span id="variable-span" style="word-break: var(--break)">BBBBBB</span></div>
+<div class="line all" id="reset">AAA <span id="reset-span" style="word-break: initial">BBBBBB</span></div>
+<div class="line" id="normal">AAA <span id="normal-span">BBBBBB</span></div>
+<div class="line" id="nowrap">AAA <span class="all" id="nowrap-span" style="white-space: nowrap">BBBBBB</span></div>
+<div class="line" id="mode">AAA <span class="all" id="mode-span" style="white-space: nowrap; text-wrap-mode: wrap">BBBBBB</span></div>
+<div class="line" id="shorthand">AAA <span class="all" id="shorthand-span" style="text-wrap-mode: nowrap; text-wrap: wrap">BBBBBB</span></div>
+</div>

@@ -16,6 +16,7 @@ static BlockProp make_block_prop_default() {
     value.writing_mode = WM_HORIZONTAL_TB;
     value.zoom = 1.0f;
     value.hyphens = CSS_VALUE_MANUAL;
+    value.hyphenate_limits[0] = value.hyphenate_limits[1] = value.hyphenate_limits[2] = -1;
     value.text_spacing_trim = CSS_VALUE_NORMAL;
     value.text_autospace = TEXT_AUTOSPACE_NORMAL;
     value.text_autospace_is_set = false;

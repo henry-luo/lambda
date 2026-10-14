@@ -1541,16 +1541,10 @@ static void pdf_cb_render_svg_subscene(RenderContext* vctx, const PaintSvgSubsce
 
 static void pdf_cb_render_column_rules(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
-    if (!ctx || !block || !block->multicol_prop()) return;
-
+    RenderColumnRuleIterator iterator;
+    if (!ctx || !render_column_rules_begin(block, &iterator)) return;
     MultiColumnProp* mc = block->multicol_prop();
-    int rule_column_count = mc->computed_used_column_count > 0
-        ? mc->computed_used_column_count
-        : mc->computed_column_count;
-    if (rule_column_count <= 1 || mc->rule_width <= 0.0f ||
-        mc->rule_style == CSS_VALUE_NONE || mc->rule_color.a == 0) {
-        return;
-    }
+    if (mc->rule_color.a == 0) return;
 
     if (mc->rule_style == CSS_VALUE_DOTTED ||
         mc->rule_style == CSS_VALUE_DASHED) {
@@ -1559,28 +1553,10 @@ static void pdf_cb_render_column_rules(RenderContext* vctx, ViewBlock* block, fl
         return;
     }
 
-    float column_width = mc->computed_column_width;
-    float gap = multicol_column_gap(block);
-    float block_x = abs_x;
-    float block_y = abs_y;
-    if (block->bound) {
-        block_x += block->boundary()->padding.left;
-        block_y += block->boundary()->padding.top;
-    }
-
-    float rule_height = block->height;
-    if (block->bound) {
-        rule_height -= layout_box_metrics(block).pad_border_v;
-    }
-
-    if (rule_height <= 0.0f) {
-        rule_height = layout_view_children_bottom(block, false);
-    }
-    if (rule_height <= 0.0f) return;
-
-    for (int i = 0; i < rule_column_count - 1; i++) {
-        float rule_x = block_x + (i + 1) * column_width + i * gap +
-                       gap / 2.0f - mc->rule_width / 2.0f;
+    float rule_x = 0.0f, block_y = 0.0f, rule_height = 0.0f;
+    while (render_column_rule_next(&iterator, &rule_x, &block_y, &rule_height)) {
+        rule_x += abs_x;
+        block_y += abs_y;
 
         if (mc->rule_style == CSS_VALUE_DOUBLE) {
             float thin_width = mc->rule_width / 3.0f;

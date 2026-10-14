@@ -40,6 +40,7 @@ MARKUP_EXTRA_ENTRIES = [
 MARKUP_TRAILING_ENTRIES = [
     ("SCENE3D", "scene3d"), ("GEOMAP", "geomap"),
     ("CSS_WEBKIT_BOX_ORIENT", "-webkit-box-orient"),
+    ("CSS_HYPHENATE_LIMIT_CHARS", "hyphenate-limit-chars"),
 ]
 MARKUP_ENTRY_SYMBOLS = {
     spelling: symbol for symbol, spelling in MARKUP_TAG_ENTRIES + MARKUP_EXTRA_ENTRIES + MARKUP_TRAILING_ENTRIES
@@ -89,7 +90,7 @@ column-gap block-size inline-size min-block-size min-inline-size max-block-size 
 inset inset-block inset-block-start inset-block-end inset-inline inset-inline-start inset-inline-end
 text-decoration-line text-decoration-style text-decoration-color text-decoration-thickness
 text-emphasis text-emphasis-style text-emphasis-color text-emphasis-position text-overflow word-break
-line-break hyphens hyphenate-character overflow-wrap word-wrap tab-size hanging-punctuation text-justify text-align-all
+line-break hyphens hyphenate-character hyphenate-limit-chars overflow-wrap word-wrap tab-size hanging-punctuation text-justify text-align-all
 text-align-last list-style list-style-type list-style-position list-style-image counter-reset
 counter-increment counter-set content quotes font-stretch text-orientation text-combine-upright
 text-indent border-collapse border-spacing caption-side empty-cells table-layout resize accent-color

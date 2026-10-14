@@ -165,7 +165,7 @@ UnicodeChar css_parse_unicode_char(const char* input, size_t max_length) {
 char* css_decode_unicode_escapes(const char* input, Pool* pool) {
     if (!input || !pool) return NULL;
     return escape_css_unescape_pool(pool, input, strlen(input), false,
-        ESCAPE_CSS_EOF_PRESERVE, false, true);
+        ESCAPE_CSS_EOF_PRESERVE, true, true);
 }
 
 // check if input[pos] starts a valid CSS escape sequence
@@ -188,8 +188,7 @@ static inline void css_consume_escape_seq(const char* input, size_t length, size
             count++;
         }
         // skip optional whitespace after hex escape
-        if (*pos < length && (input[*pos] == ' ' || input[*pos] == '\t' ||
-            input[*pos] == '\n' || input[*pos] == '\r')) {
+        if (*pos < length && css_is_whitespace(input[*pos])) {
             (*pos)++;
         }
     } else if (*pos < length) {
@@ -656,7 +655,7 @@ static void css_token_set_value(CssToken* token, Pool* pool) {
                 // CSS strings drop a trailing escape while identifiers replace it.
                 token->value = escape_css_unescape_pool(pool,
                     token->start + content_start, content_len, true,
-                    ESCAPE_CSS_EOF_DROP, false, false);
+                    ESCAPE_CSS_EOF_DROP, true, true);
             } else {
                 char* value = (char*)pool_alloc(pool, 1);
                 if (value) value[0] = '\0';
@@ -673,7 +672,7 @@ static void css_token_set_value(CssToken* token, Pool* pool) {
         token->type == CSS_TOKEN_FUNCTION || token->type == CSS_TOKEN_DIMENSION) {
         if (memchr(token->start, '\\', token->length)) {
             token->value = escape_css_unescape_pool(pool, token->start,
-                token->length, true, ESCAPE_CSS_EOF_REPLACEMENT, false, false);
+                token->length, true, ESCAPE_CSS_EOF_REPLACEMENT, true, true);
             return;
         }
     }
@@ -866,9 +865,13 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                             // \<EOF>: per CSS spec, do nothing (consume backslash only)
                             pos++;
                         } else if (input[pos + 1] == '\n' || input[pos + 1] == '\r' || input[pos + 1] == '\f') {
-                            pos += 2; // escaped newline
+                            pos++;
+                            if (input[pos] == '\r' && pos + 1 < length && input[pos + 1] == '\n') pos++;
+                            pos++; // a CRLF continuation is one preprocessed newline.
                         } else {
-                            pos += 2; // escaped character
+                            // a hex escape consumes its optional whitespace,
+                            // so that terminator cannot become a bad newline.
+                            css_consume_escape_seq(input, length, &pos);
                         }
                     } else if (input[pos] == '\n' || input[pos] == '\r' || input[pos] == '\f') {
                         // CSS §4.3.5: unescaped newline in string is a parse error

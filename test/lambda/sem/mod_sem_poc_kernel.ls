@@ -3,8 +3,8 @@
 // runtime. Design: vibe/Lambda_Semantics_DSL_POC.md (P1-P10).
 //
 // This file declares only `pub fn`s and produces no output, so it has no `.txt`
-// golden and the test discovery skips it (it only collects `.ls` files that
-// have a matching `.txt`). Its consumers are the fixtures beside it:
+// golden; the `mod_` prefix tells the baseline's discovery it is an imported
+// module, not a test. Its consumers are the fixtures beside it:
 //   sem_poc_core.ls      positive differential checks (M0-M2)
 //   sem_poc_stuck.ls     the negative suite: what the model calls an error (M3)
 //   sem_poc_fixtures.ls  real test/lambda programs, hand-translated (M3)
@@ -71,6 +71,20 @@ pub fn closure_of(f, kinds) any^ =>
 // the list of ALL its statements' results (S2.5.3) and an else-less `if` yields
 // null in value position (S16.6.3), so a guard statement would make every
 // result `(null, v)`.
+// ===== content normalization (S2.6.2–S2.6.4) =====
+// A block's or a script's value is content. After splicing (S2.6.3, done by
+// the host's `for` when it built `items`), null and "" items are dropped
+// (S2.6.2) and each run of adjacent strings becomes one string (S2.6.4).
+// Binaries merge the same way; the modelled core has no binary literal.
+fn string_run_end(xs, i) =>
+    if (i + 1 < len(xs) and type(xs[i + 1]) == string) string_run_end(xs, i + 1) else i
+fn content_norm(items) {
+    let xs = [for (x in items where x != null and x != "") x]
+    for (i in 0 to len(xs) - 1
+         where not (i > 0 and type(xs[i]) == string and type(xs[i - 1]) == string))
+        (if (type(xs[i]) == string) join([for (k in i to string_run_end(xs, i)) xs[k]], "") else xs[i])
+}
+
 pub fn ev(t, env, fuel) any^ =>
     if (fuel <= 0) raise error("out of fuel")
     else match name(t) {
@@ -82,10 +96,13 @@ pub fn ev(t, env, fuel) any^ =>
     case 'sub': ev(t[0], env, fuel - 1)^ - ev(t[1], env, fuel - 1)^
     case 'mul': ev(t[0], env, fuel - 1)^ * ev(t[1], env, fuel - 1)^
     case 'div': ev(t[0], env, fuel - 1)^ / ev(t[1], env, fuel - 1)^
+    // `div` stays in its operand domain (S4.5.3, SI7); the host's `div` is that rule
+    case 'idiv': ev(t[0], env, fuel - 1)^ div ev(t[1], env, fuel - 1)^
     case 'mod': ev(t[0], env, fuel - 1)^ % ev(t[1], env, fuel - 1)^
     case 'cat': ev(t[0], env, fuel - 1)^ ++ ev(t[1], env, fuel - 1)^
     case 'pow': ev(t[0], env, fuel - 1)^ ** ev(t[1], env, fuel - 1)^
     case 'neg': - ev(t[0], env, fuel - 1)^
+    case 'pos': + ev(t[0], env, fuel - 1)^
     // comparison
     case 'lt':  ev(t[0], env, fuel - 1)^ <  ev(t[1], env, fuel - 1)^
     case 'le':  ev(t[0], env, fuel - 1)^ <= ev(t[1], env, fuel - 1)^
@@ -93,11 +110,15 @@ pub fn ev(t, env, fuel) any^ =>
     case 'ge':  ev(t[0], env, fuel - 1)^ >= ev(t[1], env, fuel - 1)^
     case 'eq':  ev(t[0], env, fuel - 1)^ == ev(t[1], env, fuel - 1)^
     case 'ne':  ev(t[0], env, fuel - 1)^ != ev(t[1], env, fuel - 1)^
-    // logical — short-circuit is expressed by NOT recursing into the second
-    // child, so an ill-formed or stuck right operand is never reached. The
-    // checks below prove that by putting an unbound variable there.
-    case 'andd': if (ev(t[0], env, fuel - 1)^) ev(t[1], env, fuel - 1)^ else false
-    case 'orr':  if (ev(t[0], env, fuel - 1)^) true else ev(t[1], env, fuel - 1)^
+    // logical — the result is an OPERAND, not a boolean: `or` is the coalescing
+    // operator (S3.3v2), so `a or b` is `a` when truthy (S3.1) and `b` otherwise;
+    // `and` mirrors it, `a and b` being `b` when `a` is truthy and `a` otherwise
+    // (the runtime's reading; no S# rules `and`'s value yet). Short-circuit is
+    // expressed by NOT recursing into the second child, so an ill-formed or
+    // stuck right operand is never reached; the checks prove that by putting an
+    // unbound variable there. Found by the Stage 5 harness on comp_expr.ls.
+    case 'andd': { let l = ev(t[0], env, fuel - 1)^; if (l) ev(t[1], env, fuel - 1)^ else l }
+    case 'orr':  { let l = ev(t[0], env, fuel - 1)^; if (l) l else ev(t[1], env, fuel - 1)^ }
     case 'nott': not ev(t[0], env, fuel - 1)^
     case 'iff': if (ev(t[0], env, fuel - 1)^) ev(t[1], env, fuel - 1)^
                 else ev(t[2], env, fuel - 1)^
@@ -117,6 +138,11 @@ pub fn ev(t, env, fuel) any^ =>
         let body = t[0];
         <clon ps: t.ps, body env>
     }
+    // n-ary named function: `fun` with a parameter list, consumed by `appn`
+    case 'funn': {
+        let body = t[0];
+        <rclon f: t.f, ps: t.ps, body env>
+    }
     case 'app': {
         let f = closure_of(ev(t[0], env, fuel - 1)^, ['clo', 'rclo'])^
         let a = ev(t[1], env, fuel - 1)^
@@ -131,7 +157,7 @@ pub fn ev(t, env, fuel) any^ =>
         ev(body, env2, fuel - 1)^
     }
     case 'appn': {
-        let f = closure_of(ev(t[0], env, fuel - 1)^, ['clon'])^
+        let f = closure_of(ev(t[0], env, fuel - 1)^, ['clon', 'rclon'])^
         // `appn` carries no attributes, so len(t) is its child count: the
         // callee followed by the arguments.
         let args = [for (i in 1 to len(t) - 1) ev(t[i], env, fuel - 1)^]
@@ -142,7 +168,12 @@ pub fn ev(t, env, fuel) any^ =>
         // rule, so it is stuck rather than binding null or dropping arguments.
         // `else` keeps the guard from adding a null item to the arm (S2.5.3).
         if (len(ps) != len(args)) raise error("arity mismatch")
-        else ev(body, bind_params(cenv, ps, args, 0), fuel - 1)^
+        else {
+            // a named closure re-binds itself as `app` does; `clon` has no `f`
+            let env1 = bind_params(cenv, ps, args, 0)
+            let env2 = if (f.f) bind(env1, f.f, f) else env1
+            ev(body, env2, fuel - 1)^
+        }
     }
     case 'lett': ev(t[1], bind(env, t.n, ev(t[0], env, fuel - 1)^), fuel - 1)^
 
@@ -195,6 +226,21 @@ pub fn ev(t, env, fuel) any^ =>
     // the trusted-primitive boundary (DSL design §12.3.6): `len` is not derived from
     // rules, it is delegated to the host and declared as such here
     case 'lenn': len(ev(t[0], env, fuel - 1)^)
+
+    // ===== M4: a content block's value items =====
+    // Declarations never reach here: `normalize` folds them into `lett`
+    // wrappers (S2.5.4v2). What remains is the list the block builds
+    // (S2.5.3), normalized as content (S2.6.1v2, S16.7.1): the host's `for`
+    // splices list-valued items (S2.6.3), and `content_norm` drops absent
+    // items and merges adjacent strings. As a value it collapses exactly as a
+    // script's or block's content does (S2.5.5v2): none is null, one is the
+    // item, more is the list.
+    case 'cont': {
+        // an array, not a bare `for`: a one-item list would collapse to the
+        // item before normalization and an array item would then be walked
+        let items = [for (i in 0 to len(t) - 1) ev(t[i], env, fuel - 1)^];
+        content_norm(items)
+    }
 
     default: raise error("stuck: no rule for term")
     }

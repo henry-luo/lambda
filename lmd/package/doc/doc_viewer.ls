@@ -15,6 +15,7 @@ import latex_css: lambda.latex.css
 import math_renderer: lambda.doc.math.math
 import graph_doc: lambda.graph.document
 import tikz: lambda.doc.tikz.tikz
+import media: .media
 
 let PROJECT_ROOT = "."
 
@@ -290,9 +291,7 @@ fn selected_image_source(file) {
     let mime = if (extension == "svg") "image/svg+xml"
       else if (contains(["jpg", "jpeg"], extension)) "image/jpeg"
       else "image/" ++ extension
-    // JSON's binary representation reuses the shared base64 encoder.
-    let encoded = format(input(file["source"], 'binary')^, 'json')^;
-    "data:" ++ mime ++ ";base64," ++ slice(encoded, 1, len(encoded) - 1)
+    media.data_uri(input(file["source"], 'binary')^, mime)^
   }
 }
 

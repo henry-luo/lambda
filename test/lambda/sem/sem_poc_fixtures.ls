@@ -1,5 +1,5 @@
 // Semantics POC — REAL FIXTURE SLICE (M3, Phase 2 of §6.2).
-// Interpreter: sem_poc_kernel.ls. Design: vibe/Lambda_Semantics_DSL_POC.md.
+// Interpreter: mod_sem_poc_kernel.ls. Design: vibe/Lambda_Semantics_DSL_POC.md.
 //
 // The other fixtures check terms this POC invented, which risks a model that is
 // only ever asked what it happens to be good at. This file translates programs
@@ -13,7 +13,7 @@
 // path yet, so a human maps surface syntax to terms. Phase 3 (§6.3) is what
 // would mechanise it, and every line here becomes a regression test for that.
 
-import .sem_poc_kernel
+import .mod_sem_poc_kernel
 
 // A parse constraint shapes how the terms below are written: an identifier in
 // element-content position followed by `<` is read as a LESS-THAN, so

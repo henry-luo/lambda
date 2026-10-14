@@ -27,6 +27,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 11. [map — Geographic Maps](#11-map--geographic-maps)
 12. [grammar — Language Grammars](#12-grammar--language-grammars)
 13. [Tests](#13-tests)
+14. [docx — Word DOCX Import](#14-docx--word-docx-import)
 
 ---
 
@@ -41,6 +42,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
 | `latex` | `lambda.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
+| `docx` | `lambda.doc.docx` | Library, initial semantic import profile | Reads Word DOCX into elements, HTML fragments, text, metadata and diagnostics (§14) | Import from a Lambda script; direct DOCX viewing remains archive browsing |
 | `pdf` | `lambda.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
 | `grammar` | `lambda.grammar.xpath`, `lambda.grammar.xquery`, `lambda.grammar.jq`, `lambda.grammar.rnc` | Library, experimental | Grammars for other languages, written as Lambda `grammar` declarations: XPath 3.1, XQuery 3.1, jq 1.7.1 and RELAX NG compact parse to Lambda element trees | None |
 | `openapi` | `lambda.openapi.openapi`, `lambda.openapi.server` | Experimental | Route listing, Lambda type generation, validation and Swagger UI pages for OpenAPI specs | None |
@@ -1338,6 +1340,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 | `graph` | `test/lambda/graph/mermaid/`, `test/lambda/graph/graphviz/`, `test/lambda/graph/structurizr/`; `test/lambda/graph_layout*.ls` and `test/lambda/graph_transform_*.ls` |
 | `math` | `test/lambda/math/` |
 | `latex` | `test/lambda/latex/` |
+| `docx` | `test/lambda/docx/`; synthetic and pinned reference documents in `test/input/docx/` |
 | `grammar` | `test/lambda/grammar/xpath.ls` (the grammar module itself: `test/lambda/grammar/`) |
 | `pdf` | `test/lambda/pdf/` |
 | `openapi` | None yet |
@@ -1345,3 +1348,61 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 | `editor` | `test/lambda/editor/`, `test/lambda/editing/` |
 | `dom` | `test/lambda/dom_*.ls`; UI scripts `test/ui/dom_pkg_*.json` |
 | The `lambda.*` namespace | `test/lambda/lambda_namespace.ls` |
+
+## 14. `docx` — Word DOCX Import
+
+`lambda.doc.docx` is a shipped script module under D7.2.1/D7.2.4. It reads a
+local `.docx` path or a captured ZIP file tree and converts the document's main
+story to semantic HTML elements. The source package is read through Lambda's
+bounded ZIP input (S12.4.1v2/S14.3.1v2); conversion follows relationships and
+namespace URIs rather than fixed member paths or namespace prefixes.
+
+```lambda
+import docx: lambda.doc.docx
+let result = docx.convert("test/input/docx/minimal.docx")^;
+result.document
+```
+
+`convert(source, options = null)` returns
+`{document, html, text, metadata, diagnostics}`. `document` is an `<article
+class="docx-document">` element, `html` its escaped HTML fragment, and `text`
+the reading-order text. Paragraphs end with two newlines; table rows use tabs
+between cells and newlines between rows. Images do not contribute prose text.
+Available core properties such as title and creator appear in `metadata`.
+
+`to_elements`, `to_html`, and `extract_text` take the same arguments and return
+the corresponding field. Use `convert` when the caller needs diagnostics.
+
+Supported content includes paragraphs; headings derived from styles/outline
+levels; inherited and direct bold, italic, underline, strike, superscript and
+subscript; tabs and breaks; simple lists with numbering starts, continuation
+and nesting; tables with grid spans and vertical merges; hyperlinks and simple
+bookmarks; and embedded raster images. Both Transitional and Strict Word
+namespace families are recognized. HTML is flow content, with semantic break
+markers and no Word pagination guarantee.
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `style_map` | `{}` | Style ID/name to `p`, `h1`–`h6`, `blockquote`, `pre`, or `{tag, class}`. |
+| `include_empty_paragraphs` | `false` | Preserve empty paragraph elements and text boundaries. |
+| `images` | `"data-uri"` | Embed supported internal images; `"omit"` reports their omission. |
+| `id_prefix` | `""` | Prefix bookmark IDs and internal anchor links. |
+| `unsupported` | `"warn"` | Return diagnostics; `"error"` rejects a conversion with diagnostics. |
+
+Diagnostics have `{severity, code, part, message}`. Unsupported visible
+constructs are reported. Headers/footers, notes, comments, revision semantics,
+field execution, charts, shapes, equations, floating placement, DOCX writing,
+encrypted documents, and `.docm` are outside this profile. External resources
+are never fetched; emitted hyperlink schemes are validated. XML parts use
+strict UTF-8 XML with significant whitespace and reject DTDs and embedded NULs.
+Unknown options, unsafe mappings, invalid package targets, required malformed
+XML, and style cycles raise ordinary Lambda errors.
+
+Package errors use codes 7600–7607: invalid source, options, package, missing
+part, XML, target, unsupported content in strict mode, and style cycle.
+Underlying source/ZIP errors keep their existing codes. In particular, the
+pinned `tiny-picture-target-base-relative.docx` reference is rejected by the
+shared ZIP reader for its `0x0314` version-needed declaration; it is recorded
+as an unsupported input, not a successful import.
+
+Design and phased scope: [DOCX package](../vibe/Lambda_Pkg_Docx.md).

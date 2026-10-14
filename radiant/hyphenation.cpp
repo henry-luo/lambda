@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <limits.h>
+#include "../lib/utf.h"
+#include <utf8proc.h>
 
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
@@ -68,6 +70,35 @@ size_t layout_hyphenation_next_break(const char* word, size_t length,
 #endif
     return layout_hyphenation_en_us_language(lang)
         ? layout_hyphenation_en_us_next_break(word, length, after) : SIZE_MAX;
+}
+
+size_t layout_hyphenation_character_count(const char* word, size_t length) {
+    size_t count = 0;
+    size_t offset = 0;
+    while (word && offset < length) {
+        uint32_t cp = 0;
+        int bytes = utf8_decode(word + offset, length - offset, &cp);
+        if (bytes <= 0) break;
+        utf8proc_category_t category = utf8proc_category(cp);
+        // CSS Text 4 excludes nonspacing marks and intra-word punctuation.
+        if (category != UTF8PROC_CATEGORY_MN &&
+            (category < UTF8PROC_CATEGORY_PC || category > UTF8PROC_CATEGORY_PO)) count++;
+        offset += (size_t)bytes;
+    }
+    return count;
+}
+
+size_t layout_hyphenation_next_limited_break(const char* word, size_t length,
+    size_t after, const char* lang, const int limits[3], size_t total_characters) {
+    if (!limits || total_characters < (size_t)limits[0]) return SIZE_MAX;
+    size_t point = after;
+    while ((point = layout_hyphenation_next_break(word, length, point, lang)) != SIZE_MAX) {
+        if (layout_hyphenation_character_count(word, point) >= (size_t)limits[1] &&
+            layout_hyphenation_character_count(word + point, length - point) >= (size_t)limits[2]) {
+            return point;
+        }
+    }
+    return SIZE_MAX;
 }
 
 // en-US Liang patterns derived from the ISC-licensed hyphen resource used by

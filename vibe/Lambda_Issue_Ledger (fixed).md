@@ -307,7 +307,7 @@ crash shape.
 
 <a id="lr02-16"></a>**LR02-16 · `lambda.*` namespace not implemented · RESOLVED 2026-09-08**
 Ruled 2026-08-27 as **S17.2.1/S17.2.2** (semantics v16.2.0) and **D7.2.4**
-(design v1.38.0); deliberation in `vibe/Lambda_Package.md` §1b. Implemented
+(design v1.38.0); deliberation in `vibe/Lambda_Package.md` §5. Implemented
 the complete namespace migration:
 
 1. `lambda.sys.*` resolves directly to the existing system-function registry,

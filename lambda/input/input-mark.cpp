@@ -163,23 +163,51 @@ static String* parse_symbol(InputContext& ctx, const char **mark) {
     return parse_mark_quoted_string(ctx, mark, '\'', true, MARK_QUOTED_ESCAPE_SYMBOL);
 }
 
+// an unquoted name starts with an ASCII alpha, '_' or a UTF-8 byte and
+// continues with those, digits and '-'
+static bool mark_is_name_start(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' ||
+        (unsigned char)c >= 0x80;
+}
+
+static bool mark_is_name_char(char c) {
+    return mark_is_name_start(c) || (c >= '0' && c <= '9') || c == '-';
+}
+
+// a bare keyword (`true`, `null`, `nan`, …) ends at a name boundary, so
+// `trueish` or `nullable` is one symbol rather than a keyword plus a tail
+static bool mark_take_keyword(const char** mark, const char* word) {
+    size_t len = strlen(word);
+    if (strncmp(*mark, word, len) != 0 || mark_is_name_char((*mark)[len])) return false;
+    *mark += len;
+    return true;
+}
+
+// Non-consuming scan of one name token — an unquoted name, a 'symbol' or a
+// "string" — returning the position after it, or NULL when none starts at p.
+// It mirrors the three name parsers (a symbol stops at a newline, a backslash
+// escapes the next byte) so the attribute lookahead decides without allocating.
+static const char* mark_scan_name_token(const char* p) {
+    if (*p == '"' || *p == '\'') {
+        char quote = *p++;
+        while (*p && *p != quote && (quote != '\'' || *p != '\n')) {
+            if (*p == '\\' && p[1]) p++;
+            p++;
+        }
+        return *p == quote ? p + 1 : NULL;
+    }
+    if (!mark_is_name_start(*p)) return NULL;
+    while (mark_is_name_char(*p)) p++;
+    return p;
+}
+
 static String* parse_unquoted_identifier(InputContext& ctx, const char **mark) {
     MarkBuilder& builder = ctx.builder;
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset buffer before use
 
-    // First character must be ASCII alpha, underscore, or a UTF-8 byte.
-    if (!(**mark >= 'a' && **mark <= 'z') &&
-        !(**mark >= 'A' && **mark <= 'Z') &&
-        **mark != '_' && (unsigned char)**mark < 0x80) {
-        return NULL;
-    }
-
-    while (**mark && ((**mark >= 'a' && **mark <= 'z') ||
-                      (**mark >= 'A' && **mark <= 'Z') ||
-                      (**mark >= '0' && **mark <= '9') ||
-                      **mark == '_' || **mark == '-' ||
-                      (unsigned char)**mark >= 0x80)) {
+    if (!mark_is_name_start(**mark)) return NULL;
+    while (mark_is_name_char(**mark)) {
         stringbuf_append_char(sb, **mark);
         (*mark)++;
     }
@@ -460,36 +488,18 @@ static Element* parse_element(InputContext& ctx, const char **mark, int depth) {
 
     skip_comments(mark);
 
-    // Parse attributes
+    // Parse attributes: a name token followed by ':'; anything else starts the
+    // content. The lookahead must not consume: parsing the name first and
+    // breaking on a missing ':' lost a leading bool, symbol or bare word
+    // child (`<a true>` and `<b 'sym'>` read back empty), with no error.
     while (**mark && **mark != '>') {
-        String* attr_name = NULL;
-
-        // Check if this might be content instead of an attribute
-        // If we see a quote, angle bracket, or brace that doesn't look like an attribute
-        if (**mark == '"' || **mark == '<' || **mark == '{' || **mark == '[') {
-            // Look ahead to see if this looks like an attribute or content
-            const char* lookahead = *mark;
-            if (**mark == '"') {
-                // Skip the string to see what comes after
-                lookahead++;
-                while (*lookahead && *lookahead != '"') {
-                    if (*lookahead == '\\') lookahead++; // skip escaped chars
-                    if (*lookahead) lookahead++;
-                }
-                if (*lookahead == '"') lookahead++;
-                skip_whitespace(&lookahead);
-
-                // If we don't see a colon after the string, treat as content
-                if (*lookahead != ':') {
-                    break; // Start parsing content
-                }
-            } else {
-                // For other content markers, just break to content parsing
-                break;
-            }
-        }
+        const char* lookahead = mark_scan_name_token(*mark);
+        if (!lookahead) break;
+        skip_comments(&lookahead);
+        if (*lookahead != ':') break;
 
         // Parse attribute name
+        String* attr_name = NULL;
         if (**mark == '"') {
             attr_name = parse_string(ctx, mark);
         } else if (**mark == '\'') {
@@ -497,12 +507,10 @@ static Element* parse_element(InputContext& ctx, const char **mark, int depth) {
         } else {
             attr_name = parse_unquoted_identifier(ctx, mark);
         }
-
         if (!attr_name) break;
 
         skip_comments(mark);
-        if (**mark != ':') break;
-        (*mark)++;
+        (*mark)++; // the ':' the lookahead saw
         skip_comments(mark);
 
         // Parse attribute value
@@ -606,58 +614,34 @@ static Item parse_value(InputContext& ctx, const char **mark, int depth) {
             }
             goto UNQUOTED_IDENTIFIER;
         case 't':
-            if (*(*mark + 1) == '\'') {
-                return parse_datetime(ctx, mark);
-            } else if (strncmp(*mark, "true", 4) == 0) {
-                *mark += 4;
-                return {.item = b2it(true)};
-            }
+            if (*(*mark + 1) == '\'') return parse_datetime(ctx, mark);
+            if (mark_take_keyword(mark, "true")) return {.item = b2it(true)};
             goto UNQUOTED_IDENTIFIER;
         case 'f':
-            if (strncmp(*mark, "false", 5) == 0) {
-                *mark += 5;
-                return {.item = b2it(false)};
-            }
+            if (mark_take_keyword(mark, "false")) return {.item = b2it(false)};
             goto UNQUOTED_IDENTIFIER;
         case 'n':
-            if (strncmp(*mark, "null", 4) == 0) {
-                *mark += 4;
-                return {.item = ITEM_NULL};
-            } else if (strncmp(*mark, "nan", 3) == 0) {
-                *mark += 3;
-                return ctx.builder.createFloat(NAN);
-            }
+            if (mark_take_keyword(mark, "null")) return {.item = ITEM_NULL};
+            if (mark_take_keyword(mark, "nan")) return ctx.builder.createFloat(NAN);
             goto UNQUOTED_IDENTIFIER;
         case 'i':
-            if (strncmp(*mark, "inf", 3) == 0) {
-                *mark += 3;
-                return ctx.builder.createFloat(INFINITY);
-            }
+            if (mark_take_keyword(mark, "inf")) return ctx.builder.createFloat(INFINITY);
             goto UNQUOTED_IDENTIFIER;
         case '-':
-            if (strncmp(*mark, "-inf", 4) == 0) {
-                *mark += 4;
-                return ctx.builder.createFloat(-INFINITY);
-            } else if (strncmp(*mark, "-nan", 4) == 0) {
-                *mark += 4;
-                return ctx.builder.createFloat(-NAN);
-            }
+            if (mark_take_keyword(mark, "-inf")) return ctx.builder.createFloat(-INFINITY);
+            if (mark_take_keyword(mark, "-nan")) return ctx.builder.createFloat(-NAN);
             // Fall through to number parsing
         default:
             if ((**mark >= '0' && **mark <= '9') || **mark == '-' || **mark == '+') {
                 return parse_number(ctx, mark);
             }
-            else if ((**mark >= 'a' && **mark <= 'z') ||
-                (**mark >= 'A' && **mark <= 'Z') || **mark == '_') {
+            else if (mark_is_name_start(**mark)) {
                 UNQUOTED_IDENTIFIER:
                 // Parse as identifier/symbol
                 String* id = parse_unquoted_identifier(ctx, mark);
                 if (!id) return {.item = ITEM_ERROR};
                 Symbol* sym = ctx.builder.createSymbol(id->chars, id->len);
                 return sym ? (Item){.item = y2it(sym)} : (Item){.item = ITEM_ERROR};
-            }
-            else if ((unsigned char)**mark >= 0x80) {
-                goto UNQUOTED_IDENTIFIER;
             }
             return {.item = ITEM_ERROR};
     }

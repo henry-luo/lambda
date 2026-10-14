@@ -1,0 +1,38 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+.group { display: flow-root; margin-bottom: 10px; }
+.case { font: 16px/1.4 monospace; width: 6ch; border: 1px solid gray; float: left; margin: 10px; }
+.exclusion { float: right; width: 2ch; background: lightblue; }
+.automatic { hyphens: auto; }
+.manual { hyphens: manual; }
+</style>
+<body lang="en">
+<section id="result">
+<div class="group automatic">
+<div class="case" id="auto-one"><div class="exclusion" style="height: 16px"></div>hyphenate!</div>
+<div class="case" id="auto-two"><div class="exclusion" style="height: 32px"></div>hyphenate!</div>
+<div class="case" id="auto-three"><div class="exclusion" style="height: 48px"></div>hyphenate!</div>
+<div class="case" id="auto-four"><div class="exclusion" style="height: 64px"></div>hyphenate!</div>
+</div>
+<div class="group manual">
+<div class="case" id="manual-one"><div class="exclusion" style="height: 16px"></div>hy&shy;phen&shy;ate!</div>
+<div class="case" id="manual-two"><div class="exclusion" style="height: 32px"></div>hy&shy;phen&shy;ate!</div>
+<div class="case" id="manual-three"><div class="exclusion" style="height: 48px"></div>hy&shy;phen&shy;ate!</div>
+<div class="case" id="manual-four"><div class="exclusion" style="height: 64px"></div>hy&shy;phen&shy;ate!</div>
+</div>
+<div class="group manual">
+<div class="case" id="left-float"><div class="exclusion" style="height: 48px; float: left"></div>hy&shy;phen&shy;ate!</div>
+<div class="case" id="indented" style="text-indent: 1ch"><div class="exclusion" style="height: 48px"></div>phen&shy;ate!</div>
+<div class="case" id="long-mark" style="hyphenate-character: '--'"><div class="exclusion" style="height: 48px"></div>hy&shy;phen&shy;ate!</div>
+<div class="case" id="empty-mark" style="hyphenate-character: ''"><div class="exclusion" style="height: 48px"></div>hy&shy;phen&shy;ate!</div>
+<div class="case" id="space-before"><div class="exclusion" style="height: 48px"></div>a phen&shy;ate!</div>
+<div class="case" id="nowrap" style="white-space: nowrap"><div class="exclusion" style="height: 48px"></div>hy&shy;phen&shy;ate!</div>
+</div>
+<div class="group manual">
+<div class="case" id="terminal-source" style="width: 2ch">ab&shy;c</div>
+<div class="case" id="terminal-unicode" style="width: 2ch">ab&shy;é</div>
+<div class="case" id="clipped-terminal" style="width: 2ch; overflow: hidden; text-overflow: ellipsis">ab&shy;c</div>
+<div class="case" id="clipped-unicode" style="width: 2ch; overflow: hidden; text-overflow: ellipsis">ab&shy;é</div>
+</div>
+</section>

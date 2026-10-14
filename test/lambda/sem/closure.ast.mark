@@ -1,0 +1,526 @@
+// AST dump of test/lambda/closure.ls for the semantics POC ingestion fixture.
+// Regenerate: ./lambda.exe --emit-ast-dump test/lambda/closure.ls > test/lambda/sem/closure.ast.mark (keep these two lines)
+<ast-dump "lambda"
+  <AST_SCRIPT
+    <child
+      <AST_NODE_CONTENT
+        <declare>
+        <item
+          <AST_NODE_FUNC <name "make_adder"> <return_contract "any \\ error"> <return_contract_explicit false> <effective_return "fn">
+            <param
+              <AST_NODE_PARAM <name "n"> <contract "any \\ error"> <contract_explicit false>>>
+            <body
+              <AST_NODE_CONTENT
+                <declare>
+                <item
+                  <AST_NODE_FUNC <name "inner"> <return_contract "any \\ error"> <return_contract_explicit false> <effective_return "any \\ error">
+                    <param
+                      <AST_NODE_PARAM <name "x"> <contract "any \\ error"> <contract_explicit false>>>
+                    <body
+                      <AST_NODE_BINARY <op "+"> <value_type "any \\ error"> <value_may_error false>
+                        <left
+                          <AST_NODE_PRIMARY
+                            <expr
+                              <AST_NODE_IDENT <name "x">>>>>
+                        <right
+                          <AST_NODE_PRIMARY
+                            <expr
+                              <AST_NODE_IDENT <name "n">>>>>>>>
+                  <AST_NODE_PRIMARY
+                    <expr
+                      <AST_NODE_IDENT <name "inner"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "any \\ error">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "add10">
+                <init
+                  <AST_NODE_CALL_EXPR <value_type "fn"> <value_may_error false>
+                    <function
+                      <AST_NODE_PRIMARY
+                        <expr
+                          <AST_NODE_IDENT <name "make_adder"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "fn">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY <source "10">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "t1">
+                <init
+                  <AST_NODE_CALL_EXPR <value_type "any \\ error"> <value_may_error false>
+                    <function
+                      <AST_NODE_PRIMARY
+                        <expr
+                          <AST_NODE_IDENT <name "add10">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY <source "5">>>>>>>>
+          <AST_NODE_FUNC <name "make_affine"> <return_contract "any \\ error"> <return_contract_explicit false> <effective_return "fn">
+            <param
+              <AST_NODE_PARAM <name "a"> <contract "any \\ error"> <contract_explicit false>>
+              <AST_NODE_PARAM <name "b"> <contract "any \\ error"> <contract_explicit false>>>
+            <body
+              <AST_NODE_CONTENT
+                <declare>
+                <item
+                  <AST_NODE_FUNC <name "transform"> <return_contract "any \\ error"> <return_contract_explicit false> <effective_return "any \\ error">
+                    <param
+                      <AST_NODE_PARAM <name "x"> <contract "any \\ error"> <contract_explicit false>>>
+                    <body
+                      <AST_NODE_BINARY <op "+"> <value_type "any \\ error"> <value_may_error false>
+                        <left
+                          <AST_NODE_BINARY <op "*"> <value_type "any \\ error"> <value_may_error false>
+                            <left
+                              <AST_NODE_PRIMARY
+                                <expr
+                                  <AST_NODE_IDENT <name "x">>>>>
+                            <right
+                              <AST_NODE_PRIMARY
+                                <expr
+                                  <AST_NODE_IDENT <name "a">>>>>>>
+                        <right
+                          <AST_NODE_PRIMARY
+                            <expr
+                              <AST_NODE_IDENT <name "b">>>>>>>>
+                  <AST_NODE_PRIMARY
+                    <expr
+                      <AST_NODE_IDENT <name "transform"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "any \\ error">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "affine">
+                <init
+                  <AST_NODE_CALL_EXPR <value_type "fn"> <value_may_error false>
+                    <function
+                      <AST_NODE_PRIMARY
+                        <expr
+                          <AST_NODE_IDENT <name "make_affine"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "fn">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY <source "3">>
+                      <AST_NODE_PRIMARY <source "7">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "t2">
+                <init
+                  <AST_NODE_CALL_EXPR <value_type "any \\ error"> <value_may_error false>
+                    <function
+                      <AST_NODE_PRIMARY
+                        <expr
+                          <AST_NODE_IDENT <name "affine">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY <source "10">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "t3">
+                <init
+                  <AST_NODE_CALL_EXPR <value_type "any \\ error"> <value_may_error false>
+                    <function
+                      <AST_NODE_CALL_EXPR <value_type "fn"> <value_may_error false>
+                        <function
+                          <AST_NODE_PRIMARY
+                            <expr
+                              <AST_NODE_IDENT <name "make_adder"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "fn">>>>>
+                        <argument
+                          <AST_NODE_PRIMARY <source "20">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY <source "5">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "add5">
+                <init
+                  <AST_NODE_CALL_EXPR <value_type "fn"> <value_may_error false>
+                    <function
+                      <AST_NODE_PRIMARY
+                        <expr
+                          <AST_NODE_IDENT <name "make_adder"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "fn">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY <source "5">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "add100">
+                <init
+                  <AST_NODE_CALL_EXPR <value_type "fn"> <value_may_error false>
+                    <function
+                      <AST_NODE_PRIMARY
+                        <expr
+                          <AST_NODE_IDENT <name "make_adder"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "fn">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY <source "100">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "t4">
+                <init
+                  <AST_NODE_BINARY <op "+"> <value_type "any \\ error"> <value_may_error false>
+                    <left
+                      <AST_NODE_CALL_EXPR <value_type "any \\ error"> <value_may_error false>
+                        <function
+                          <AST_NODE_PRIMARY
+                            <expr
+                              <AST_NODE_IDENT <name "add5">>>>>
+                        <argument
+                          <AST_NODE_PRIMARY <source "10">>>>>
+                    <right
+                      <AST_NODE_CALL_EXPR <value_type "any \\ error"> <value_may_error false>
+                        <function
+                          <AST_NODE_PRIMARY
+                            <expr
+                              <AST_NODE_IDENT <name "add100">>>>>
+                        <argument
+                          <AST_NODE_PRIMARY <source "10">>>>>>>>>>
+          <AST_NODE_FUNC <name "make_nested"> <return_contract "any \\ error"> <return_contract_explicit false> <effective_return "fn">
+            <param
+              <AST_NODE_PARAM <name "a"> <contract "any \\ error"> <contract_explicit false>>>
+            <body
+              <AST_NODE_CONTENT
+                <declare>
+                <item
+                  <AST_NODE_FUNC <name "middle"> <return_contract "any \\ error"> <return_contract_explicit false> <effective_return "fn">
+                    <param
+                      <AST_NODE_PARAM <name "b"> <contract "any \\ error"> <contract_explicit false>>>
+                    <body
+                      <AST_NODE_CONTENT
+                        <declare>
+                        <item
+                          <AST_NODE_FUNC <name "inner"> <return_contract "any \\ error"> <return_contract_explicit false> <effective_return "any \\ error">
+                            <param
+                              <AST_NODE_PARAM <name "x"> <contract "any \\ error"> <contract_explicit false>>>
+                            <body
+                              <AST_NODE_BINARY <op "+"> <value_type "any \\ error"> <value_may_error false>
+                                <left
+                                  <AST_NODE_BINARY <op "+"> <value_type "any \\ error"> <value_may_error false>
+                                    <left
+                                      <AST_NODE_PRIMARY
+                                        <expr
+                                          <AST_NODE_IDENT <name "x">>>>>
+                                    <right
+                                      <AST_NODE_PRIMARY
+                                        <expr
+                                          <AST_NODE_IDENT <name "a">>>>>>>
+                                <right
+                                  <AST_NODE_PRIMARY
+                                    <expr
+                                      <AST_NODE_IDENT <name "b">>>>>>>>
+                          <AST_NODE_PRIMARY
+                            <expr
+                              <AST_NODE_IDENT <name "inner"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "any \\ error">>>>>>>>
+                  <AST_NODE_PRIMARY
+                    <expr
+                      <AST_NODE_IDENT <name "middle"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "fn">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "step1">
+                <init
+                  <AST_NODE_CALL_EXPR <value_type "fn"> <value_may_error false>
+                    <function
+                      <AST_NODE_PRIMARY
+                        <expr
+                          <AST_NODE_IDENT <name "make_nested"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "fn">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY <source "10">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "step2">
+                <init
+                  <AST_NODE_CALL_EXPR <value_type "fn"> <value_may_error false>
+                    <function
+                      <AST_NODE_PRIMARY
+                        <expr
+                          <AST_NODE_IDENT <name "step1">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY <source "20">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "t5">
+                <init
+                  <AST_NODE_CALL_EXPR <value_type "any \\ error"> <value_may_error false>
+                    <function
+                      <AST_NODE_PRIMARY
+                        <expr
+                          <AST_NODE_IDENT <name "step2">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY <source "3">>>>>>>>
+          <AST_NODE_FUNC <name "outer"> <return_contract "any \\ error"> <return_contract_explicit false> <effective_return "fn">
+            <param
+              <AST_NODE_PARAM <name "x"> <contract "any \\ error"> <contract_explicit false>>>
+            <body
+              <AST_NODE_CONTENT
+                <declare>
+                <item
+                  <AST_NODE_FUNC <name "mid"> <return_contract "any \\ error"> <return_contract_explicit false> <effective_return "fn">
+                    <param
+                      <AST_NODE_PARAM <name "y"> <contract "any \\ error"> <contract_explicit false>>>
+                    <body
+                      <AST_NODE_CONTENT
+                        <declare>
+                        <item
+                          <AST_NODE_FUNC <name "inner"> <return_contract "any \\ error"> <return_contract_explicit false> <effective_return "any \\ error">
+                            <param
+                              <AST_NODE_PARAM <name "z"> <contract "any \\ error"> <contract_explicit false>>>
+                            <body
+                              <AST_NODE_BINARY <op "+"> <value_type "any \\ error"> <value_may_error false>
+                                <left
+                                  <AST_NODE_BINARY <op "*"> <value_type "any \\ error"> <value_may_error false>
+                                    <left
+                                      <AST_NODE_PRIMARY
+                                        <expr
+                                          <AST_NODE_IDENT <name "x">>>>>
+                                    <right
+                                      <AST_NODE_PRIMARY
+                                        <expr
+                                          <AST_NODE_IDENT <name "y">>>>>>>
+                                <right
+                                  <AST_NODE_PRIMARY
+                                    <expr
+                                      <AST_NODE_IDENT <name "z">>>>>>>>
+                          <AST_NODE_PRIMARY
+                            <expr
+                              <AST_NODE_IDENT <name "inner"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "any \\ error">>>>>>>>
+                  <AST_NODE_PRIMARY
+                    <expr
+                      <AST_NODE_IDENT <name "mid"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "fn">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "t6">
+                <init
+                  <AST_NODE_CALL_EXPR <value_type "any \\ error"> <value_may_error false>
+                    <function
+                      <AST_NODE_CALL_EXPR <value_type "fn"> <value_may_error false>
+                        <function
+                          <AST_NODE_CALL_EXPR <value_type "fn"> <value_may_error false>
+                            <function
+                              <AST_NODE_PRIMARY
+                                <expr
+                                  <AST_NODE_IDENT <name "outer"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "fn">>>>>
+                            <argument
+                              <AST_NODE_PRIMARY <source "2">>>>>
+                        <argument
+                          <AST_NODE_PRIMARY <source "3">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY <source "4">>>>>>>>
+          <AST_NODE_FUNC <name "make_scaled_adder"> <return_contract "any \\ error"> <return_contract_explicit false> <effective_return "fn">
+            <param
+              <AST_NODE_PARAM <name "scale"> <contract "any \\ error"> <contract_explicit false>>
+              <AST_NODE_PARAM <name "offset"> <contract "any \\ error"> <contract_explicit false>>>
+            <body
+              <AST_NODE_CONTENT
+                <declare>
+                <item
+                  <AST_NODE_FUNC <name "adder"> <return_contract "any \\ error"> <return_contract_explicit false> <effective_return "any \\ error">
+                    <param
+                      <AST_NODE_PARAM <name "x"> <contract "any \\ error"> <contract_explicit false>>>
+                    <body
+                      <AST_NODE_BINARY <op "+"> <value_type "any \\ error"> <value_may_error false>
+                        <left
+                          <AST_NODE_PRIMARY
+                            <expr
+                              <AST_NODE_IDENT <name "x">>>>>
+                        <right
+                          <AST_NODE_BINARY <op "*"> <value_type "any \\ error"> <value_may_error false>
+                            <left
+                              <AST_NODE_PRIMARY
+                                <expr
+                                  <AST_NODE_IDENT <name "scale">>>>>
+                            <right
+                              <AST_NODE_PRIMARY
+                                <expr
+                                  <AST_NODE_IDENT <name "offset">>>>>>>>>>
+                  <AST_NODE_PRIMARY
+                    <expr
+                      <AST_NODE_IDENT <name "adder"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "any \\ error">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "scaled">
+                <init
+                  <AST_NODE_CALL_EXPR <value_type "fn"> <value_may_error false>
+                    <function
+                      <AST_NODE_PRIMARY
+                        <expr
+                          <AST_NODE_IDENT <name "make_scaled_adder"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "fn">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY <source "3">>
+                      <AST_NODE_PRIMARY <source "4">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "t7">
+                <init
+                  <AST_NODE_CALL_EXPR <value_type "any \\ error"> <value_may_error false>
+                    <function
+                      <AST_NODE_PRIMARY
+                        <expr
+                          <AST_NODE_IDENT <name "scaled">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY <source "10">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "counter_base">
+                <init
+                  <AST_NODE_CALL_EXPR <value_type "fn"> <value_may_error false>
+                    <function
+                      <AST_NODE_PRIMARY
+                        <expr
+                          <AST_NODE_IDENT <name "make_adder"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "fn">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY <source "100">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "t8">
+                <init
+                  <AST_NODE_BINARY <op "+"> <value_type "any \\ error"> <value_may_error false>
+                    <left
+                      <AST_NODE_BINARY <op "+"> <value_type "any \\ error"> <value_may_error false>
+                        <left
+                          <AST_NODE_CALL_EXPR <value_type "any \\ error"> <value_may_error false>
+                            <function
+                              <AST_NODE_PRIMARY
+                                <expr
+                                  <AST_NODE_IDENT <name "counter_base">>>>>
+                            <argument
+                              <AST_NODE_PRIMARY <source "1">>>>>
+                        <right
+                          <AST_NODE_CALL_EXPR <value_type "any \\ error"> <value_may_error false>
+                            <function
+                              <AST_NODE_PRIMARY
+                                <expr
+                                  <AST_NODE_IDENT <name "counter_base">>>>>
+                            <argument
+                              <AST_NODE_PRIMARY <source "2">>>>>>>
+                    <right
+                      <AST_NODE_CALL_EXPR <value_type "any \\ error"> <value_may_error false>
+                        <function
+                          <AST_NODE_PRIMARY
+                            <expr
+                              <AST_NODE_IDENT <name "counter_base">>>>>
+                        <argument
+                          <AST_NODE_PRIMARY <source "3">>>>>>>>>>
+          <AST_NODE_FUNC <name "apply_twice"> <return_contract "any \\ error"> <return_contract_explicit false> <effective_return "any">
+            <param
+              <AST_NODE_PARAM <name "f"> <contract "any \\ error"> <contract_explicit false>>
+              <AST_NODE_PARAM <name "x"> <contract "any \\ error"> <contract_explicit false>>>
+            <body
+              <AST_NODE_CALL_EXPR <value_type "any"> <value_may_error true>
+                <function
+                  <AST_NODE_PRIMARY
+                    <expr
+                      <AST_NODE_IDENT <name "f">>>>>
+                <argument
+                  <AST_NODE_CALL_EXPR <value_type "any"> <value_may_error true>
+                    <function
+                      <AST_NODE_PRIMARY
+                        <expr
+                          <AST_NODE_IDENT <name "f">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY
+                        <expr
+                          <AST_NODE_IDENT <name "x">>>>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "add3">
+                <init
+                  <AST_NODE_CALL_EXPR <value_type "fn"> <value_may_error false>
+                    <function
+                      <AST_NODE_PRIMARY
+                        <expr
+                          <AST_NODE_IDENT <name "make_adder"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "fn">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY <source "3">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "t9">
+                <init
+                  <AST_NODE_CALL_EXPR <value_type "any"> <value_may_error true>
+                    <function
+                      <AST_NODE_PRIMARY
+                        <expr
+                          <AST_NODE_IDENT <name "apply_twice"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "any">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY
+                        <expr
+                          <AST_NODE_IDENT <name "add3">>>>
+                      <AST_NODE_PRIMARY <source "10">>>>>>>>
+          <AST_NODE_FUNC <name "curry_add"> <return_contract "any \\ error"> <return_contract_explicit false> <effective_return "fn">
+            <param
+              <AST_NODE_PARAM <name "a"> <contract "any \\ error"> <contract_explicit false>>>
+            <body
+              <AST_NODE_CONTENT
+                <declare>
+                <item
+                  <AST_NODE_FUNC <name "add_b"> <return_contract "any \\ error"> <return_contract_explicit false> <effective_return "fn">
+                    <param
+                      <AST_NODE_PARAM <name "b"> <contract "any \\ error"> <contract_explicit false>>>
+                    <body
+                      <AST_NODE_CONTENT
+                        <declare>
+                        <item
+                          <AST_NODE_FUNC <name "add_c"> <return_contract "any \\ error"> <return_contract_explicit false> <effective_return "any \\ error">
+                            <param
+                              <AST_NODE_PARAM <name "c"> <contract "any \\ error"> <contract_explicit false>>>
+                            <body
+                              <AST_NODE_BINARY <op "+"> <value_type "any \\ error"> <value_may_error false>
+                                <left
+                                  <AST_NODE_BINARY <op "+"> <value_type "any \\ error"> <value_may_error false>
+                                    <left
+                                      <AST_NODE_PRIMARY
+                                        <expr
+                                          <AST_NODE_IDENT <name "a">>>>>
+                                    <right
+                                      <AST_NODE_PRIMARY
+                                        <expr
+                                          <AST_NODE_IDENT <name "b">>>>>>>
+                                <right
+                                  <AST_NODE_PRIMARY
+                                    <expr
+                                      <AST_NODE_IDENT <name "c">>>>>>>>
+                          <AST_NODE_PRIMARY
+                            <expr
+                              <AST_NODE_IDENT <name "add_c"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "any \\ error">>>>>>>>
+                  <AST_NODE_PRIMARY
+                    <expr
+                      <AST_NODE_IDENT <name "add_b"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "fn">>>>>>>>
+          <AST_NODE_LET_STAM
+            <declare
+              <AST_NODE_VARIABLE_DECLARATOR <name "t10">
+                <init
+                  <AST_NODE_CALL_EXPR <value_type "any \\ error"> <value_may_error false>
+                    <function
+                      <AST_NODE_CALL_EXPR <value_type "fn"> <value_may_error false>
+                        <function
+                          <AST_NODE_CALL_EXPR <value_type "fn"> <value_may_error false>
+                            <function
+                              <AST_NODE_PRIMARY
+                                <expr
+                                  <AST_NODE_IDENT <name "curry_add"> <function_return_contract "any \\ error"> <function_return_contract_explicit false> <function_effective_return "fn">>>>>
+                            <argument
+                              <AST_NODE_PRIMARY <source "1">>>>>
+                        <argument
+                          <AST_NODE_PRIMARY <source "2">>>>>
+                    <argument
+                      <AST_NODE_PRIMARY <source "3">>>>>>>>
+          <AST_NODE_ARRAY
+            <item
+              <AST_NODE_PRIMARY
+                <expr
+                  <AST_NODE_IDENT <name "t1">>>>
+              <AST_NODE_PRIMARY
+                <expr
+                  <AST_NODE_IDENT <name "t2">>>>
+              <AST_NODE_PRIMARY
+                <expr
+                  <AST_NODE_IDENT <name "t3">>>>
+              <AST_NODE_PRIMARY
+                <expr
+                  <AST_NODE_IDENT <name "t4">>>>
+              <AST_NODE_PRIMARY
+                <expr
+                  <AST_NODE_IDENT <name "t5">>>>
+              <AST_NODE_PRIMARY
+                <expr
+                  <AST_NODE_IDENT <name "t6">>>>
+              <AST_NODE_PRIMARY
+                <expr
+                  <AST_NODE_IDENT <name "t7">>>>
+              <AST_NODE_PRIMARY
+                <expr
+                  <AST_NODE_IDENT <name "t8">>>>
+              <AST_NODE_PRIMARY
+                <expr
+                  <AST_NODE_IDENT <name "t9">>>>
+              <AST_NODE_PRIMARY
+                <expr
+                  <AST_NODE_IDENT <name "t10">>>>>>>>>>
+  <any_census <total 17> <list 1> <arith_operand 14> <call_result 2>>
+>

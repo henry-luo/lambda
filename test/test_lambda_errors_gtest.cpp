@@ -353,15 +353,15 @@ TEST(TypeContractMetadataTest, OrNarrowingRetainsTheCleanInternalTop) {
     // An explicit-any source remains dynamically open. `or` removes its
     // error/null cases without collapsing the result back to true any.
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_BINARY (op \"or\") (value_type \"any \\\\ {error, null}\")"),
+        "<AST_NODE_BINARY <op \"or\"> <value_type \"any \\\\ {error, null}\">"),
         nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_BINARY (op \"or\") (value_type \"int\")"), nullptr);
+        "<AST_NODE_BINARY <op \"or\"> <value_type \"int\">"), nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_CALL_EXPR (value_type \"type\") (value_may_error true)"),
+        "<AST_NODE_CALL_EXPR <value_type \"type\"> <value_may_error true>"),
         nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_BINARY (op \"or\") (value_type \"type\") (value_may_error false)"),
+        "<AST_NODE_BINARY <op \"or\"> <value_type \"type\"> <value_may_error false>"),
         nullptr);
 
     shell_result_free(&result);
@@ -377,31 +377,31 @@ TEST(TypeContractMetadataTest, AstDumpPreservesSignatureAndEffectMetadata) {
     ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     ASSERT_NE(result.stdout_buf, nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_FUNC (name \"forward\") (return_contract \"any \\\\ error\") "
-        "(return_contract_explicit false)"), nullptr);
+        "<AST_NODE_FUNC <name \"forward\"> <return_contract \"any \\\\ error\"> "
+        "<return_contract_explicit false>"), nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_PARAM (name \"value\") (contract \"any \\\\ error\") "
-        "(contract_explicit false)"), nullptr);
+        "<AST_NODE_PARAM <name \"value\"> <contract \"any \\\\ error\"> "
+        "<contract_explicit false>"), nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_FUNC (name \"explicit\") (return_contract \"any\") "
-        "(return_contract_explicit true)"), nullptr);
+        "<AST_NODE_FUNC <name \"explicit\"> <return_contract \"any\"> "
+        "<return_contract_explicit true>"), nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_PARAM (name \"value\") (contract \"any\") "
-        "(contract_explicit true)"), nullptr);
+        "<AST_NODE_PARAM <name \"value\"> <contract \"any\"> "
+        "<contract_explicit true>"), nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_FUNC_EXPR (return_contract \"any \\\\ error\") "
-        "(return_contract_explicit false)"), nullptr);
+        "<AST_NODE_FUNC_EXPR <return_contract \"any \\\\ error\"> "
+        "<return_contract_explicit false>"), nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_FUNC (name \"precise\") (return_contract \"any \\\\ error\") "
-        "(return_contract_explicit false) (effective_return \"int\")"), nullptr);
+        "<AST_NODE_FUNC <name \"precise\"> <return_contract \"any \\\\ error\"> "
+        "<return_contract_explicit false> <effective_return \"int\">"), nullptr);
     // An unannotated procedure can propagate its unannotated parameter's
     // error effect even though its declared return contract remains `any`.
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_PROC (name \"procedural\") (return_contract \"any\") "
-        "(return_contract_explicit false) (effective_return \"any \\\\ error\")"), nullptr);
+        "<AST_NODE_PROC <name \"procedural\"> <return_contract \"any\"> "
+        "<return_contract_explicit false> <effective_return \"any \\\\ error\">"), nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_SYS_FUNC (name \"int\") (success_type \"number\") "
-        "(may_return_error true)"), nullptr);
+        "<AST_NODE_SYS_FUNC <name \"int\"> <success_type \"number\"> "
+        "<may_return_error true>"), nullptr);
 
     shell_result_free(&result);
 
@@ -411,13 +411,13 @@ TEST(TypeContractMetadataTest, AstDumpPreservesSignatureAndEffectMetadata) {
     ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     ASSERT_NE(result.stdout_buf, nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_IDENT (name \"imported\") (function_return_contract \"any \\\\ error\") "
-        "(function_return_contract_explicit false) (function_effective_return \"any \\\\ error\")"),
+        "<AST_NODE_IDENT <name \"imported\"> <function_return_contract \"any \\\\ error\"> "
+        "<function_return_contract_explicit false> <function_effective_return \"any \\\\ error\">"),
         nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_IDENT (name \"imported_precise\") "
-        "(function_return_contract \"any \\\\ error\") "
-        "(function_return_contract_explicit false) (function_effective_return \"int\")"),
+        "<AST_NODE_IDENT <name \"imported_precise\"> "
+        "<function_return_contract \"any \\\\ error\"> "
+        "<function_return_contract_explicit false> <function_effective_return \"int\">"),
         nullptr);
     shell_result_free(&result);
 }
@@ -435,17 +435,17 @@ TEST(TypeContractMetadataTest, AstDumpViewStateBindingsCarryNoParameterContract)
     ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
     ASSERT_NE(result.stdout_buf, nullptr);
     // the census trailer follows the tree, so the whole dump was emitted
-    EXPECT_NE(strstr(result.stdout_buf, "(any_census "), nullptr);
-    EXPECT_NE(strstr(result.stdout_buf, "(AST_NODE_PARAM (name \"flag\")))"), nullptr);
-    EXPECT_NE(strstr(result.stdout_buf, "(AST_NODE_PARAM (name \"cursor\")))"), nullptr);
+    EXPECT_NE(strstr(result.stdout_buf, "<any_census "), nullptr);
+    EXPECT_NE(strstr(result.stdout_buf, "<AST_NODE_PARAM <name \"flag\">>>"), nullptr);
+    EXPECT_NE(strstr(result.stdout_buf, "<AST_NODE_PARAM <name \"cursor\">>>"), nullptr);
     // f16 initializers: the width NUM_FLOAT16 equals TYPE_KIND_PARAM, so a
     // plain Type here was taken for a TypeParam and still crashed
-    EXPECT_NE(strstr(result.stdout_buf, "(AST_NODE_PARAM (name \"level\")))"), nullptr);
-    EXPECT_NE(strstr(result.stdout_buf, "(AST_NODE_PARAM (name \"trim\")))"), nullptr);
+    EXPECT_NE(strstr(result.stdout_buf, "<AST_NODE_PARAM <name \"level\">>>"), nullptr);
+    EXPECT_NE(strstr(result.stdout_buf, "<AST_NODE_PARAM <name \"trim\">>>"), nullptr);
     // a handler's own parameter is still a TypeParam with its contract
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_PARAM (name \"e\") (contract \"any \\\\ error\") "
-        "(contract_explicit false))"), nullptr);
+        "<AST_NODE_PARAM <name \"e\"> <contract \"any \\\\ error\"> "
+        "<contract_explicit false>>"), nullptr);
 
     shell_result_free(&result);
 }
@@ -462,27 +462,27 @@ TEST(TypeContractMetadataTest, SysFuncRelationsInstantiateSelectedArguments) {
     // S11.4.9/D3.3.5: fill binds from argument 1, and its collection/text
     // consumers retain that relation rather than falling back to `any`.
     EXPECT_NE(strstr(result.stdout_buf,
-        "(value_type_element_type \"int\")"), nullptr);
+        "<value_type_element_type \"int\">"), nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(value_type_element_type \"string\")"), nullptr);
+        "<value_type_element_type \"string\">"), nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_SYS_FUNC (name \"fill\")"), nullptr);
+        "<AST_NODE_SYS_FUNC <name \"fill\">"), nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_CALL_EXPR (value_type \"any\") (value_may_error true)\n"
-        "                (function\n"
-        "                  (AST_NODE_SYS_FUNC (name \"fill\")"), nullptr);
+        "<AST_NODE_CALL_EXPR <value_type \"any\"> <value_may_error true>\n"
+        "                <function\n"
+        "                  <AST_NODE_SYS_FUNC <name \"fill\">"), nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_SYS_FUNC (name \"slice\")"), nullptr);
+        "<AST_NODE_SYS_FUNC <name \"slice\">"), nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_SYS_FUNC (name \"sort\")"), nullptr);
+        "<AST_NODE_SYS_FUNC <name \"sort\">"), nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_CALL_EXPR (value_type \"array\") (value_may_error false)\n"
-        "                    (function\n"
-        "                      (AST_NODE_SYS_FUNC (name \"take\")"), nullptr);
+        "<AST_NODE_CALL_EXPR <value_type \"array\"> <value_may_error false>\n"
+        "                    <function\n"
+        "                      <AST_NODE_SYS_FUNC <name \"take\">"), nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_CALL_EXPR (value_type \"string\") (value_may_error false)\n"
-        "                    (function\n"
-        "                      (AST_NODE_SYS_FUNC (name \"replace\")"), nullptr);
+        "<AST_NODE_CALL_EXPR <value_type \"string\"> <value_may_error false>\n"
+        "                    <function\n"
+        "                      <AST_NODE_SYS_FUNC <name \"replace\">"), nullptr);
 
     shell_result_free(&result);
 }
@@ -498,9 +498,9 @@ TEST(TypeBinderTest, AstDumpPreservesBinderSitesAndDependentReferences) {
     ASSERT_NE(result.stdout_buf, nullptr);
     // S11.4.8/D3.1.1v4: slots make binder sites and dependent uses distinct.
     EXPECT_NE(strstr(result.stdout_buf,
-        "(TypeBinder (name \"U\") (slot 0) (bound \"number\"))"), nullptr);
+        "<TypeBinder <name \"U\"> <slot 0> <bound \"number\">>"), nullptr);
     EXPECT_NE(strstr(result.stdout_buf,
-        "(TypeBoundRef (slot 0) (bound \"number\"))"), nullptr);
+        "<TypeBoundRef <slot 0> <bound \"number\">>"), nullptr);
 
     shell_result_free(&result);
 }
@@ -519,19 +519,19 @@ TEST(TypeInferenceStructuralTest, IP1OperatorsPublishPreciseTypes) {
     // TIG5: `and` over two bools is bool, not any; over mixed operands it is
     // their union (a union renders under the shared `type` tag).
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_BINARY (op \"and\") (value_type \"bool\")"), nullptr)
+        "<AST_NODE_BINARY <op \"and\"> <value_type \"bool\">"), nullptr)
         << result.stdout_buf;
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_BINARY (op \"and\") (value_type \"type\")"), nullptr)
+        "<AST_NODE_BINARY <op \"and\"> <value_type \"type\">"), nullptr)
         << result.stdout_buf;
     // TIG6: string/string relational comparison is bool — the old rule only
     // admitted native-numeric pairs and left every other comparable pair open.
     EXPECT_NE(strstr(result.stdout_buf,
-        "(AST_NODE_BINARY (op \"<\") (value_type \"bool\")"), nullptr)
+        "<AST_NODE_BINARY <op \"<\"> <value_type \"bool\">"), nullptr)
         << result.stdout_buf;
     // No relational node may still report `any` in this fixture.
     EXPECT_EQ(strstr(result.stdout_buf,
-        "(AST_NODE_BINARY (op \"<\") (value_type \"any\")"), nullptr)
+        "<AST_NODE_BINARY <op \"<\"> <value_type \"any\">"), nullptr)
         << result.stdout_buf;
 
     shell_result_free(&result);
@@ -550,14 +550,14 @@ TEST(TypeInferenceStructuralTest, IP2SysFuncRowsResolvePreciseResults) {
 
     // Real-scalar transcendentals and carrier-preserving rounding → float;
     // text transforms → string; order-preserving collection ops → array.
-    EXPECT_NE(strstr(result.stdout_buf, "CALL_EXPR (value_type \"float\")"), nullptr)
+    EXPECT_NE(strstr(result.stdout_buf, "CALL_EXPR <value_type \"float\">"), nullptr)
         << result.stdout_buf;
-    EXPECT_NE(strstr(result.stdout_buf, "CALL_EXPR (value_type \"string\")"), nullptr)
+    EXPECT_NE(strstr(result.stdout_buf, "CALL_EXPR <value_type \"string\">"), nullptr)
         << result.stdout_buf;
-    EXPECT_NE(strstr(result.stdout_buf, "CALL_EXPR (value_type \"array\")"), nullptr)
+    EXPECT_NE(strstr(result.stdout_buf, "CALL_EXPR <value_type \"array\">"), nullptr)
         << result.stdout_buf;
     // Every sys-func call in this fixture must be resolved; none may remain open.
-    EXPECT_EQ(strstr(result.stdout_buf, "CALL_EXPR (value_type \"any\")"), nullptr)
+    EXPECT_EQ(strstr(result.stdout_buf, "CALL_EXPR <value_type \"any\">"), nullptr)
         << result.stdout_buf;
 
     shell_result_free(&result);
@@ -576,23 +576,23 @@ TEST(TypeInferenceStructuralTest, IP6JsOperatorsPublishPreciseTypes) {
 
     // Equality, relational and membership tests are predicates.
     EXPECT_NE(strstr(result.stdout_buf,
-        "(op strict_eq) (value_type \"bool\")"), nullptr) << result.stdout_buf;
+        "<op \"strict_eq\"> <value_type \"bool\">"), nullptr) << result.stdout_buf;
     EXPECT_NE(strstr(result.stdout_buf,
-        "(op lt) (value_type \"bool\")"), nullptr) << result.stdout_buf;
+        "<op \"lt\"> <value_type \"bool\">"), nullptr) << result.stdout_buf;
     EXPECT_NE(strstr(result.stdout_buf,
-        "(op in) (value_type \"bool\")"), nullptr) << result.stdout_buf;
+        "<op \"in\"> <value_type \"bool\">"), nullptr) << result.stdout_buf;
     // `+` is overloaded: string concatenation and numeric addition both appear.
     EXPECT_NE(strstr(result.stdout_buf,
-        "(op add) (value_type \"string\")"), nullptr) << result.stdout_buf;
+        "<op \"add\"> <value_type \"string\">"), nullptr) << result.stdout_buf;
     EXPECT_NE(strstr(result.stdout_buf,
-        "(op add) (value_type \"float\")"), nullptr) << result.stdout_buf;
+        "<op \"add\"> <value_type \"float\">"), nullptr) << result.stdout_buf;
     // JS numbers are binary64: a bitwise result is still a number, and typing
     // it `int` would claim a carrier the lowering does not produce.
     EXPECT_NE(strstr(result.stdout_buf,
-        "(op bit_or) (value_type \"float\")"), nullptr) << result.stdout_buf;
+        "<op \"bit_or\"> <value_type \"float\">"), nullptr) << result.stdout_buf;
     // No comparison may still report the old blanket `float`.
     EXPECT_EQ(strstr(result.stdout_buf,
-        "(op strict_eq) (value_type \"float\")"), nullptr) << result.stdout_buf;
+        "<op \"strict_eq\"> <value_type \"float\">"), nullptr) << result.stdout_buf;
 
     shell_result_free(&result);
 }

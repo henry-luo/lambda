@@ -500,6 +500,14 @@ bool utf_is_clustered_script(uint32_t cp) {
     return false;
 }
 
+bool utf_requires_contextual_shaping(uint32_t cp) {
+    // Indic and related scripts require substitutions beyond isolated graphemes;
+    // they still admit tracking and are not CSS Text's cursive/clustered categories.
+    return utf_is_cursive_script(cp) || utf_is_clustered_script(cp) ||
+        (cp >= 0x0900 && cp <= 0x0DFF) || (cp >= 0x0F00 && cp <= 0x0FFF) ||
+        (cp >= 0x1B00 && cp <= 0x1BFF) || (cp >= 0xA980 && cp <= 0xA9DF);
+}
+
 int utf_bidi_strong_class(uint32_t cp) {
     if (cp > 0x10FFFF) return 0;
     // block membership cannot distinguish strong letters from digits or combining marks.

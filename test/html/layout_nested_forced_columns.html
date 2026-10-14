@@ -1,0 +1,16 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+.outer { columns: 2; column-fill: auto; width: 100px; height: 100px; column-gap: 20px; margin-bottom: 10px; background: red; }
+.inner { columns: 2; column-gap: 20px; column-rule: 20px solid green; }
+.wrapper { background: green; }
+.short { height: 10px; }
+.tail { height: 200px; background: lime; }
+.after { break-after: column; }
+.before { break-before: column; }
+</style>
+<div id="result">
+<div class="outer"><div class="inner" id="after-inner"><div class="wrapper" id="after-wrapper"><div id="after-first" class="short after"></div><div id="after-second" class="short after"></div><div id="after-tail" class="tail"></div></div></div></div>
+<div class="outer"><div class="inner" id="before-inner"><div class="wrapper" id="before-wrapper"><div id="before-first" class="short"></div><div id="before-second" class="short before"></div><div id="before-tail" class="tail before"></div></div></div></div>
+<div class="outer"><div class="inner" id="plain-inner"><div class="wrapper" id="plain-wrapper"><div id="plain-tail" class="tail"></div></div></div></div>
+</div>
