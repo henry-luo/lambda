@@ -1095,10 +1095,10 @@ bool js_ta_numeric_index_valid(Item object, double numeric_index, bool is_negati
     double int_part = floor(numeric_index);
     if (int_part != numeric_index || numeric_index < 0) return false;
     if (js_typed_array_is_out_of_bounds_item(object)) return false;
-    int64_t idx64 = (int64_t)numeric_index;
     int len = js_typed_array_length(object);
-    if (idx64 < 0 || idx64 >= len) return false;
-    if (out_index) *out_index = (int)idx64;
+    // compare in Number space before narrowing a possibly huge canonical index.
+    if (numeric_index >= (double)len) return false;
+    if (out_index) *out_index = (int)numeric_index;
     return true;
 }
 

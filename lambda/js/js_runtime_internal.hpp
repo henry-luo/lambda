@@ -171,8 +171,6 @@ extern "C" Item js_object_has_own(Item obj, Item key);
 extern "C" Item js_object_prototype_has_own_property(Item this_val, Item key);
 
 void js_double_to_string(double d, char* out, int out_size);
-bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negative_zero);
-bool js_ta_numeric_index_valid(Item object, double numeric_index, bool is_negative_zero, int* out_index);
 bool js_ta_proto_chain_set(Item object, Item key, Item value, Item receiver,
                            bool bypass_accessor_dispatch, Item* out_result);
 bool js_array_ta_proto_numeric_set(Item array, Item key, bool* no_op);

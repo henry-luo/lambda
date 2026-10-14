@@ -24,16 +24,6 @@
 #include "../../lib/mem.h"
 #include <cmath>
 
-typedef struct JsArrayBufferMapCarrier {
-    Map base;
-    JsArrayBuffer* payload;
-} JsArrayBufferMapCarrier;
-
-typedef struct JsDataViewMapCarrier {
-    Map base;
-    JsDataView payload;
-} JsDataViewMapCarrier;
-
 extern double js_get_number(Item value);
 
 extern "C" int js_262_agent_current_slot_for_atomics(void);
@@ -79,44 +69,70 @@ static uint64_t js_dataview_bigint_to_uint64(Item value) {
     return (uint64_t)raw_value;
 }
 
-static Item js_dataview_to_index(Item value, int* out_index) {
-    if (get_type_id(value) == LMD_TYPE_UNDEFINED) {
+static const JsBufferViewOps js_buffer_view_default_ops = {
+    js_to_number, js_dataview_to_bigint_value,
+    [](Item owner, const char* key) { return js_get_key_cstr(owner, key); },
+    [](Item target, bool view) { return js_get_prototype_from_constructor_default(
+        target, view ? JS_CLASS_DATA_VIEW : JS_CLASS_ARRAY_BUFFER, -1); },
+    [](Item owner, Item prototype) { js_set_prototype(owner, prototype); return owner; },
+    [](bool range, const char* message) { return range ? js_throw_range_error(message) : js_throw_type_error(message); },
+    js_is_truthy,
+    [](Item value) { TypeId type = get_type_id(value); return type == LMD_TYPE_MAP ||
+        type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ELEMENT; },
+    NULL,
+    [](Item owner) { return js_get_key_default(owner, js_well_known_symbol_key(6)); },
+    [](Item constructor, int length, bool shared) {
+        Item argument = {.item = i2it(length)};
+        if (constructor.item == ITEM_JS_UNDEFINED) return shared
+            ? js_sharedarraybuffer_construct(argument) : js_arraybuffer_construct(argument);
+        if (!js_has_construct_capability(constructor)) return js_throw_type_error("ArrayBuffer species is not a constructor");
+        return js_construct_value(constructor, &argument, 1, constructor, NULL, false);
+    }
+};
+
+static Item js_to_index_i64(Item value, int64_t* out_index,
+        const char* error_message, const JsBufferViewOps* ops = &js_buffer_view_default_ops) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
         *out_index = 0;
         return js_status_ok();
     }
-    TypeId value_type = get_type_id(value);
-    if (value_type == LMD_TYPE_SYMBOL) {
-        return js_throw_type_error("Cannot convert a Symbol value to a number");
+    if (type == LMD_TYPE_SYMBOL) {
+        return ops->error(false, "Cannot convert a Symbol value to a number");
     }
-    JS_ASSIGN_OR_RETURN(num, js_to_number(value));
-    TypeId type = get_type_id(num);
-    double d = (type == LMD_TYPE_FLOAT) ? it2d(num) : (double)it2i(num);
-    if (std::isnan(d)) {
+    JS_ASSIGN_OR_RETURN(num, ops->number(value));
+    type = get_type_id(num);
+    double dval = (type == LMD_TYPE_FLOAT) ? it2d(num) : (double)it2i(num);
+    if (std::isnan(dval)) {
         *out_index = 0;
         return js_status_ok();
     }
-    d = std::trunc(d);
-    if (d < 0 || !std::isfinite(d) || d > (double)INT_MAX) {
-        return js_throw_range_error("Invalid DataView index");
+    dval = std::trunc(dval);
+    // ToIndex rejects values above Number.MAX_SAFE_INTEGER before any host allocation cap;
+    // large JS Numbers may arrive as boxed floats and must not wrap through int storage.
+    if (dval < 0 || !std::isfinite(dval) || dval > 9007199254740991.0) {
+        return ops->error(true, error_message);
     }
-    *out_index = (int)d;
+    *out_index = (int64_t)dval;
     return js_status_ok();
 }
 
-static Item js_dataview_to_number_value(Item value, double* out_number) {
-    TypeId value_type = get_type_id(value);
-    if (value_type == LMD_TYPE_SYMBOL) {
-        return js_throw_type_error("Cannot convert a Symbol value to a number");
-    }
-    JS_ASSIGN_OR_RETURN(num, js_to_number(value));
-    TypeId num_type = get_type_id(num);
-    *out_number = (num_type == LMD_TYPE_FLOAT) ? it2d(num) : (double)it2i(num);
-    return js_status_ok();
+static Item js_dataview_to_index(Item value, int* index,
+        const JsBufferViewOps* ops = &js_buffer_view_default_ops) {
+    int64_t amount;
+    Item result = js_to_index_i64(value, &amount, "Invalid DataView index", ops);
+    if (item_is_error(result)) return result;
+    if (amount > INT_MAX) return ops->error(true, "Invalid DataView index");
+    *index = (int)amount;
+    return result;
 }
 
-static int64_t js_dataview_to_integer_value(double value) {
-    if (std::isnan(value) || !std::isfinite(value)) return 0;
-    return (int64_t)std::trunc(value);
+static Item js_dataview_to_number_value(Item value, double* number,
+        const JsBufferViewOps* ops = &js_buffer_view_default_ops) {
+    Item result = ops->number(value);
+    if (item_is_error(result)) return result;
+    *number = it2d(result);
+    return js_status_ok();
 }
 
 static void js_dataview_link_prototype(Item view) {
@@ -231,12 +247,6 @@ JS_FORWARD_STATIC_EXPRESSION(bool, js_typed_array_is_number_element,
 
 static int js_typed_array_stored_byte_offset(JsTypedArray* ta) {
     return ta ? ta->base.byte_offset : 0;
-}
-
-static int js_typed_array_stored_length(JsTypedArray* ta) {
-    if (!ta) return 0;
-    int elem_size = js_typed_array_element_size(ta->element_type);
-    return elem_size > 0 ? ta->base.byte_length / elem_size : 0;
 }
 
 static int js_typed_array_current_byte_length(JsTypedArray* ta) {
@@ -450,43 +460,16 @@ extern "C" bool js_typed_array_raw_reverse(Item ta_item) {
 }
 JS_FORWARD_RETURN(bool, js_typed_array_raw_copy_reversed, (Item dst_item, Item src_item), js_typed_array_raw_copy_same_type_impl, (dst_item, src_item, true))
 
-static Item js_to_index_i64(Item value, int64_t* out_index,
-        const char* error_message) {
-    TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
-        *out_index = 0;
-        return js_status_ok();
-    }
-    if (type == LMD_TYPE_SYMBOL) {
-        return js_throw_type_error("Cannot convert a Symbol value to a number");
-    }
-    JS_ASSIGN_OR_RETURN(num, js_to_number(value));
-    type = get_type_id(num);
-    double dval = (type == LMD_TYPE_FLOAT) ? it2d(num) : (double)it2i(num);
-    if (std::isnan(dval)) {
-        *out_index = 0;
-        return js_status_ok();
-    }
-    dval = std::trunc(dval);
-    // ToIndex rejects values above Number.MAX_SAFE_INTEGER before any host allocation cap;
-    // large JS Numbers may arrive as boxed floats and must not wrap through int storage.
-    if (dval < 0 || !std::isfinite(dval) || dval > 9007199254740991.0) {
-        return js_throw_range_error(error_message);
-    }
-    *out_index = (int64_t)dval;
-    return js_status_ok();
-}
-
 static Item js_to_index_int(Item value, int* out_index,
-        const char* error_message) {
+        const char* error_message, const JsBufferViewOps* ops = &js_buffer_view_default_ops) {
     int64_t index = 0;
     JS_ASSIGN_OR_RETURN(validation, js_to_index_i64(
-        value, &index, error_message));
+        value, &index, error_message, ops));
     // Fixed-width runtime views use int indices. The host allocation cap is
     // applied only after spec ToIndex succeeds.
     double dval = (double)index;
     if (dval > 1073741824.0) {
-        return js_throw_range_error(error_message);
+        return ops->error(true, error_message);
     }
     *out_index = (int)dval;
     return js_status_ok();
@@ -1221,7 +1204,6 @@ extern "C" const char* js_typed_array_type_name(Item val) {
 // ArrayBuffer
 // ============================================================================
 
-static JsArrayBuffer* js_get_arraybuffer_ptr(Map* m);
 
 // The charge follows the refcounted allocation, not its ArrayBuffer wrapper:
 // Binary snapshots may retain a buffer after JS detaches or finalizes it.
@@ -1311,7 +1293,8 @@ static void js_arraybuffer_link_prototype(Item buffer_item, bool is_shared) {
 }
 
 static Item js_arraybuffer_wrap_item_with_prototype(JsArrayBuffer* ab,
-        Item prototype, bool use_provided_prototype) {
+        Item prototype, bool use_provided_prototype,
+        const JsBufferViewOps* ops = &js_buffer_view_default_ops, Item target = ItemNull) {
     if (!ab) return (Item){.item = ITEM_NULL};
     bool shared = js_arraybuffer_shared(ab);
     RootFrame roots(2);
@@ -1322,16 +1305,25 @@ static Item js_arraybuffer_wrap_item_with_prototype(JsArrayBuffer* ab,
     Map* m = &carrier->base;
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_ARRAYBUFFER;
-    m->type = js_object_type_for_class(shared
+    m->type = ops->shape ? ops->shape(false, target) : js_object_type_for_class(shared
         ? JS_CLASS_SHARED_ARRAY_BUFFER : JS_CLASS_ARRAY_BUFFER);
     if (!m->type) m->type = js_empty_object_type_map();
     m->data = NULL;
     m->data_cap = 0;
     carrier->payload = ab;
     Rooted<Item> result_root(roots, (Item){.map = m});
+    if (!map_fill_reserve_data(m)) {
+        ((JsArrayBufferMapCarrier*)result_root.get().map)->payload = NULL;
+        return ItemError;
+    }
     if (use_provided_prototype) {
-        js_set_prototype(result_root.get(), prototype_root.get());
-    } else {
+        Item linked = ops->link(result_root.get(), prototype_root.get());
+        if (item_is_error(linked)) {
+            // the caller releases storage on failure; the abandoned carrier must not release it twice.
+            ((JsArrayBufferMapCarrier*)result_root.get().map)->payload = NULL;
+            return linked;
+        }
+    } else if (!ops->shape) {
         js_arraybuffer_link_prototype(result_root.get(), js_arraybuffer_shared(ab));
     }
     return result_root.get();
@@ -1371,19 +1363,20 @@ struct JsArrayBufferConstructOptions {
 
 static Item js_arraybuffer_parse_construct_options(Item length_arg,
         Item options_arg, const char* length_error, const char* max_error,
-        JsArrayBufferConstructOptions* out) {
+        JsArrayBufferConstructOptions* out,
+        const JsBufferViewOps* ops = &js_buffer_view_default_ops) {
     out->byte_length = 0;
     JS_ASSIGN_OR_RETURN(validation, js_to_index_i64(
-        length_arg, &out->byte_length, length_error));
+        length_arg, &out->byte_length, length_error, ops));
     out->max_byte_length = out->byte_length;
     out->resizable = false;
-    if (get_type_id(options_arg) == LMD_TYPE_MAP) {
-        JS_ASSIGN_OR_RETURN(max_item, js_get_name_key(options_arg, "maxByteLength"));
-        if (get_type_id(max_item) != LMD_TYPE_UNDEFINED && max_item.item != ITEM_NULL) {
+    if (ops->object(options_arg)) {
+        JS_ASSIGN_OR_RETURN(max_item, ops->get(options_arg, "maxByteLength"));
+        if (get_type_id(max_item) != LMD_TYPE_UNDEFINED) {
             JS_ASSIGN_OR_RETURN_INTO(validation, js_to_index_i64(
-                max_item, &out->max_byte_length, max_error));
+                max_item, &out->max_byte_length, max_error, ops));
             if (out->max_byte_length < out->byte_length) {
-                return js_throw_range_error(max_error);
+                return ops->error(true, max_error);
             }
             out->resizable = true;
         }
@@ -1393,16 +1386,17 @@ static Item js_arraybuffer_parse_construct_options(Item length_arg,
 
 static Item js_arraybuffer_allocate_constructed(
         const JsArrayBufferConstructOptions* options, Item prototype,
-        bool use_provided_prototype, bool shared) {
+        bool use_provided_prototype, bool shared,
+        const JsBufferViewOps* ops = &js_buffer_view_default_ops, Item target = ItemNull) {
     // OrdinaryCreateFromConstructor is observable before the backing-store
     // allocation. Keep the host's 1 GiB cap here rather than in ToIndex so a
     // throwing newTarget.prototype getter wins over allocation RangeError.
     if (options->byte_length > 1073741824LL) {
-        return js_throw_range_error(shared
+        return ops->error(true, shared
             ? "Invalid shared array buffer length" : "Invalid array buffer length");
     }
     if (options->max_byte_length > 1073741824LL) {
-        return js_throw_range_error(shared
+        return ops->error(true, shared
             ? "Invalid shared array buffer maxByteLength" : "Invalid array buffer maxByteLength");
     }
     uint32_t flags = shared ? BYTE_BUFFER_FLAG_SHARED : BYTE_BUFFER_FLAG_NONE;
@@ -1411,8 +1405,8 @@ static Item js_arraybuffer_allocate_constructed(
         (int)options->max_byte_length, flags);
     if (!ab) return ItemError;
     Item result = js_arraybuffer_wrap_item_with_prototype(
-        ab, prototype, use_provided_prototype);
-    if (!js_is_arraybuffer(result)) js_arraybuffer_destroy(ab);
+        ab, prototype, use_provided_prototype, ops, target);
+    if (get_type_id(result) != LMD_TYPE_MAP || !js_get_arraybuffer_ptr(result.map)) js_arraybuffer_destroy(ab);
     return result;
 }
 
@@ -1431,7 +1425,7 @@ JS_FORWARD_ITEM(js_sharedarraybuffer_construct_with_options, (Item length_arg, I
     js_construct_arraybuffer_from_options, (length_arg, options_arg, true))
 
 static Item js_construct_arraybuffer_target(Item length_arg, Item options_arg,
-        Item new_target, bool shared) {
+        Item new_target, bool shared, const JsBufferViewOps* ops = &js_buffer_view_default_ops) {
     JS_ROOTS(roots,
         length_root, length_arg,
         options_root, options_arg,
@@ -1444,12 +1438,12 @@ static Item js_construct_arraybuffer_target(Item length_arg, Item options_arg,
         length_root.get(), options_root.get(),
         shared ? "Invalid shared array buffer length" : "Invalid array buffer length",
         shared ? "Invalid shared array buffer maxByteLength" : "Invalid array buffer maxByteLength",
-        &options));
-    prototype_root.set(js_get_prototype_from_constructor_default(
-        target_root.get(), shared ? JS_CLASS_SHARED_ARRAY_BUFFER : JS_CLASS_ARRAY_BUFFER, -1));
+        &options, ops));
+    prototype_root.set(shared ? js_get_prototype_from_constructor_default(
+        target_root.get(), JS_CLASS_SHARED_ARRAY_BUFFER, -1) : ops->prototype(target_root.get(), false));
     if (item_is_error(prototype_root.get())) return prototype_root.get();
     return js_arraybuffer_allocate_constructed(
-        &options, prototype_root.get(), true, shared);
+        &options, prototype_root.get(), true, shared, ops, target_root.get());
 }
 JS_FORWARD_ITEM(js_arraybuffer_construct_resizable_target,
     (Item length_arg, Item options_arg, Item new_target),
@@ -1458,20 +1452,19 @@ JS_FORWARD_ITEM(js_sharedarraybuffer_construct_with_options_target,
     (Item length_arg, Item options_arg, Item new_target),
     js_construct_arraybuffer_target, (length_arg, options_arg, new_target, true))
 
+extern "C" Item js_arraybuffer_construct_with_ops(Item length, Item options,
+        Item target, const JsBufferViewOps* ops) {
+    return js_construct_arraybuffer_target(length, options, target, false, ops);
+}
+
 extern "C" bool js_is_arraybuffer(Item val) {
     if (get_type_id(val) != LMD_TYPE_MAP || !val.map ||
             val.map->map_kind != MAP_KIND_ARRAYBUFFER) return false;
     // The intrinsic prototype carries ArrayBuffer metadata for ordinary
     // lookup, but only the trailing carrier owns [[ArrayBufferData]]; branding
     // by class alone made prototype accessors return a fake zero length.
-    return js_object_has_class(val, JS_CLASS_ARRAY_BUFFER) ||
-           js_object_has_class(val, JS_CLASS_SHARED_ARRAY_BUFFER);
-}
-
-// Get the typed trailing payload after validating the physical carrier.
-static JsArrayBuffer* js_get_arraybuffer_ptr(Map* m) {
-    if (!m || (m->map_kind != MAP_KIND_ARRAYBUFFER)) return NULL;
-    return ((JsArrayBufferMapCarrier*)m)->payload;
+    // the same carrier may use LJS or MVP nominal metadata; backing storage owns the brand.
+    return js_get_arraybuffer_ptr(val.map) != NULL;
 }
 
 extern "C" JsArrayBuffer* js_get_arraybuffer_ptr_item(Item val) {
@@ -1506,9 +1499,10 @@ extern "C" bool js_arraybuffer_is_resizable(Item val) {
     return js_arraybuffer_resizable(ab);
 }
 
-extern "C" Item js_arraybuffer_resize(Item val, Item new_length_item) {
-    if (!js_is_arraybuffer(val) || js_is_sharedarraybuffer(val)) {
-        return js_throw_type_error("ArrayBuffer.prototype.resize requires a resizable ArrayBuffer receiver");
+extern "C" Item js_arraybuffer_resize_with_ops(Item val, Item new_length_item, const JsBufferViewOps* ops) {
+    if (get_type_id(val) != LMD_TYPE_MAP || !js_get_arraybuffer_ptr(val.map) ||
+            js_arraybuffer_shared(js_get_arraybuffer_ptr(val.map))) {
+        return ops->error(false, "ArrayBuffer.prototype.resize requires a resizable ArrayBuffer receiver");
     }
     RootFrame roots(1);
     Rooted<Item> buffer_root(roots, val);
@@ -1517,18 +1511,18 @@ extern "C" Item js_arraybuffer_resize(Item val, Item new_length_item) {
     // If the buffer is already detached at entry, the coercion still runs (and
     // can have side effects); we throw afterwards. Test:
     // built-ins/ArrayBuffer/prototype/resize/coerced-new-length-detach.js.
-    if (!ab) return js_throw_type_error("ArrayBuffer is detached");
-    if (!js_arraybuffer_resizable(ab)) return js_throw_type_error("ArrayBuffer is not resizable");
+    if (!ab) return ops->error(false, "ArrayBuffer is detached");
+    if (!js_arraybuffer_resizable(ab)) return ops->error(false, "ArrayBuffer is not resizable");
     int new_length = 0;
-    JS_ASSIGN_OR_RETURN(validation, js_to_index_int(new_length_item, &new_length, "Invalid array buffer length"));
+    JS_ASSIGN_OR_RETURN(validation, js_to_index_int(new_length_item, &new_length, "Invalid array buffer length", ops));
     ab = js_get_arraybuffer_ptr(buffer_root.get().map);
-    if (!ab) return js_throw_type_error("ArrayBuffer is detached");
-    if (js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
-    if (new_length > js_arraybuffer_max_length(ab)) return js_throw_range_error("Invalid array buffer length");
+    if (!ab) return ops->error(false, "ArrayBuffer is detached");
+    if (js_arraybuffer_detached(ab)) return ops->error(false, "ArrayBuffer is detached");
+    if (new_length > js_arraybuffer_max_length(ab)) return ops->error(true, "Invalid array buffer length");
     void* external_owner = heap_gc_external_preflight((size_t)new_length,
         HEAP_GC_EXTERNAL_ARRAYBUFFER);
     ab = js_get_arraybuffer_ptr(buffer_root.get().map);
-    if (!ab || js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
+    if (!ab || js_arraybuffer_detached(ab)) return ops->error(false, "ArrayBuffer is detached");
     ByteStorage* previous = ab->storage;
     if (!byte_buffer_resize(ab, (size_t)new_length)) return ItemError;
     if (ab->storage != previous) {
@@ -1542,26 +1536,27 @@ extern "C" Item js_arraybuffer_resize(Item val, Item new_length_item) {
 // min(srcByteLength, newLength) bytes from source, detach the source. For
 // `transfer`, preserve resizable + maxByteLength from the source; for
 // `transferToFixedLength`, the result is always non-resizable.
-static Item js_arraybuffer_transfer_impl(Item val, Item new_length_item, int argc,
-                                         bool to_fixed_length) {
-    if (!js_is_arraybuffer(val) || js_is_sharedarraybuffer(val)) {
-        return js_throw_type_error("ArrayBuffer.prototype.transfer requires a non-shared ArrayBuffer receiver");
+extern "C" Item js_arraybuffer_transfer_with_ops(Item val, Item new_length_item, int argc,
+        bool to_fixed_length, const JsBufferViewOps* ops) {
+    if (get_type_id(val) != LMD_TYPE_MAP || !js_get_arraybuffer_ptr(val.map) ||
+            js_arraybuffer_shared(js_get_arraybuffer_ptr(val.map))) {
+        return ops->error(false, "ArrayBuffer.prototype.transfer requires a non-shared ArrayBuffer receiver");
     }
     RootFrame roots(1);
     Rooted<Item> buffer_root(roots, val);
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer_root.get().map);
-    if (!ab) return js_throw_type_error("ArrayBuffer is detached");
+    if (!ab) return ops->error(false, "ArrayBuffer is detached");
     // Per spec: validate detached AFTER coercing newLength so the valueOf side
     // effect runs first when applicable.
     int new_length;
     if (argc == 0 || get_type_id(new_length_item) == LMD_TYPE_UNDEFINED) {
-        if (js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
+        if (js_arraybuffer_detached(ab)) return ops->error(false, "ArrayBuffer is detached");
         new_length = js_arraybuffer_length(ab);
     } else {
-        JS_ASSIGN_OR_RETURN(validation, js_to_index_int(new_length_item, &new_length, "Invalid array buffer length"));
+        JS_ASSIGN_OR_RETURN(validation, js_to_index_int(new_length_item, &new_length, "Invalid array buffer length", ops));
     }
     ab = js_get_arraybuffer_ptr(buffer_root.get().map);
-    if (!ab || js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
+    if (!ab || js_arraybuffer_detached(ab)) return ops->error(false, "ArrayBuffer is detached");
 
     // Determine resizable / maxByteLength for the new buffer.
     bool new_resizable;
@@ -1574,13 +1569,13 @@ static Item js_arraybuffer_transfer_impl(Item val, Item new_length_item, int arg
         new_max_byte_length = new_resizable ? js_arraybuffer_max_length(ab) : new_length;
     }
     if (new_length > new_max_byte_length) {
-        return js_throw_range_error("Invalid array buffer length");
+        return ops->error(true, "Invalid array buffer length");
     }
 
     void* external_owner = heap_gc_external_preflight((size_t)new_length,
         HEAP_GC_EXTERNAL_ARRAYBUFFER);
     ab = js_get_arraybuffer_ptr(buffer_root.get().map);
-    if (!ab || js_arraybuffer_detached(ab)) return js_throw_type_error("ArrayBuffer is detached");
+    if (!ab || js_arraybuffer_detached(ab)) return ops->error(false, "ArrayBuffer is detached");
 
     JsArrayBuffer* nab = (JsArrayBuffer*)mem_calloc(1, sizeof(JsArrayBuffer), MEM_CAT_JS_RUNTIME);
     if (!nab) return ItemError;
@@ -1592,24 +1587,29 @@ static Item js_arraybuffer_transfer_impl(Item val, Item new_length_item, int arg
     js_arraybuffer_charge_new_storage(nab->storage, external_owner);
     // The stable source handle is detached by transfer, so all extant views
     // invalidate through its generation instead of retaining a freed pointer.
-    Item result = js_arraybuffer_wrap(nab);
-    if (!js_is_arraybuffer(result)) {
+    Item result = js_arraybuffer_wrap_item_with_prototype(nab, ItemNull, false, ops);
+    if (get_type_id(result) != LMD_TYPE_MAP || !js_get_arraybuffer_ptr(result.map)) {
         js_arraybuffer_destroy(nab);
     }
     return result;
 }
 
+extern "C" Item js_arraybuffer_resize(Item val, Item length) {
+    return js_arraybuffer_resize_with_ops(val, length, &js_buffer_view_default_ops);
+}
+
 #define JS_ARRAYBUFFER_TRANSFER_WRAPPER(name, to_fixed_length) \
 extern "C" Item name(Item val, Item new_length_item, int argc) { \
-    return js_arraybuffer_transfer_impl(val, new_length_item, argc, to_fixed_length); \
+    return js_arraybuffer_transfer_with_ops(val, new_length_item, argc, to_fixed_length, &js_buffer_view_default_ops); \
 }
 JS_ARRAYBUFFER_TRANSFER_WRAPPER(js_arraybuffer_transfer, false)
 JS_ARRAYBUFFER_TRANSFER_WRAPPER(js_arraybuffer_transfer_to_fixed_length, true)
 #undef JS_ARRAYBUFFER_TRANSFER_WRAPPER
 
-static bool js_arraybuffer_slice_index(Item value, int len, int* out_index) {
-    Item num = js_to_number(value);
-    if (item_is_error(num)) return false;
+static Item js_arraybuffer_slice_index(Item value, int len, int* out_index,
+        const JsBufferViewOps* ops = &js_buffer_view_default_ops) {
+    Item num = ops->number(value);
+    if (item_is_error(num)) return num;
     TypeId nt = get_type_id(num);
     double n = (nt == LMD_TYPE_FLOAT) ? it2d(num) : (double)it2i(num);
     if (std::isnan(n)) n = 0;
@@ -1621,87 +1621,77 @@ static bool js_arraybuffer_slice_index(Item value, int len, int* out_index) {
         n = len;
     }
     *out_index = (int)n;
-    return true;
+    return js_status_ok();
 }
 
 static Item js_arraybuffer_slice_species(Item source, JsArrayBuffer* source_buffer,
-        int begin, int new_len, bool shared) {
-    const char* type_name = shared ? "SharedArrayBuffer" : "ArrayBuffer";
-    Item result_item = ItemNull;
-    JS_ASSIGN_OR_RETURN(ctor, js_get_name_key(source, "constructor"));
-
-    bool use_default_ctor = get_type_id(ctor) == LMD_TYPE_UNDEFINED;
-    if (!use_default_ctor) {
-        TypeId ctor_type = get_type_id(ctor);
-        if (ctor_type != LMD_TYPE_MAP && ctor_type != LMD_TYPE_ARRAY &&
-                ctor_type != LMD_TYPE_FUNC && ctor_type != LMD_TYPE_ELEMENT) {
-            return js_throw_type_errorf("%s species constructor must be an object", type_name);
-        }
-        Item species_key = js_well_known_symbol_key(6);
-        JS_ASSIGN_OR_RETURN(species, js_get_key_default(ctor, species_key));
-        TypeId species_type = get_type_id(species);
-        if (species_type == LMD_TYPE_UNDEFINED || species_type == LMD_TYPE_NULL) {
-            use_default_ctor = true;
-        } else {
-            if (!shared && !js_has_construct_capability(species)) {
-                return js_throw_type_error("ArrayBuffer species is not a constructor");
-            }
-            Item len_arg = (Item){.item = i2it(new_len)};
-            JS_ASSIGN_OR_RETURN_INTO(result_item, js_construct_value(species,
-                &len_arg, 1, species, NULL, false));
-        }
+        int begin, int new_len, bool shared, const JsBufferViewOps* ops = &js_buffer_view_default_ops) {
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, source), constructor(roots, ItemNull), result(roots, ItemNull);
+    constructor.set(ops->get(owner.get(), "constructor"));
+    if (item_is_error(constructor.get())) return constructor.get();
+    if (constructor.get().item != ITEM_JS_UNDEFINED) {
+        if (!ops->object(constructor.get())) return ops->error(false, "ArrayBuffer species constructor must be an object");
+        constructor.set(ops->species(constructor.get()));
+        if (item_is_error(constructor.get())) return constructor.get();
+        if (constructor.get().item == ITEM_NULL) constructor.set(Item{.item = ITEM_JS_UNDEFINED});
     }
-    if (use_default_ctor) {
-        result_item = shared
-            ? js_sharedarraybuffer_construct((Item){.item = i2it(new_len)})
-            : js_arraybuffer_construct((Item){.item = i2it(new_len)});
+    result.set(ops->construct(constructor.get(), new_len, shared));
+    if (item_is_error(result.get())) return result.get();
+    JsArrayBuffer* destination = get_type_id(result.get()) == LMD_TYPE_MAP ? js_get_arraybuffer_ptr(result.get().map) : NULL;
+    if (!destination || js_arraybuffer_shared(destination) != shared || js_arraybuffer_detached(destination))
+        return ops->error(false, "ArrayBuffer species returned an invalid buffer");
+    if (result.get().item == owner.get().item) return ops->error(false, "ArrayBuffer species returned the same buffer");
+    if (js_arraybuffer_length(destination) < new_len) return ops->error(false, "ArrayBuffer species returned a buffer that is too small");
+    source_buffer = js_get_arraybuffer_ptr(owner.get().map);
+    // species callbacks can detach or resize the source; acquire raw pointers only after revalidation.
+    if (js_arraybuffer_detached(source_buffer)) return ops->error(false, "ArrayBuffer is detached");
+    int available = js_arraybuffer_length(source_buffer) - begin;
+    int copied = available < new_len ? available : new_len;
+    if (copied > 0) {
+        uint8_t* bytes = js_arraybuffer_prepare_write(destination);
+        if (!bytes) return ItemError;
+        memcpy(bytes, js_arraybuffer_data_const(source_buffer) + begin, (size_t)copied);
     }
-    if (item_is_error(result_item)) return result_item;
-    bool correct_type = shared ? js_is_sharedarraybuffer(result_item)
-        : js_is_arraybuffer(result_item) && !js_is_sharedarraybuffer(result_item);
-    if (!correct_type) {
-        return js_throw_type_errorf(
-            "%s species constructor did not return a %s", type_name, type_name);
-    }
-    if (result_item.item == source.item) {
-        return js_throw_type_errorf("%s species constructor returned the same buffer", type_name);
-    }
-    JsArrayBuffer* result_buffer = js_get_arraybuffer_ptr(result_item.map);
-    if (!result_buffer || js_arraybuffer_length(result_buffer) < new_len) {
-        return js_throw_type_errorf(
-            "%s species constructor returned a buffer that is too small", type_name);
-    }
-    if (new_len > 0) {
-        memcpy(js_arraybuffer_prepare_write(result_buffer),
-            js_arraybuffer_data_const(source_buffer) + begin, (size_t)new_len);
-    }
-    return result_item;
+    return result.get();
 }
 
-extern "C" Item js_arraybuffer_slice_items(Item val, Item begin_item, Item end_item, int argc) {
-    if (!js_is_arraybuffer(val)) return (Item){.item = ITEM_NULL};
-    if (js_is_sharedarraybuffer(val)) {
-        return js_throw_type_error("ArrayBuffer.prototype.slice requires that |this| not be a SharedArrayBuffer");
+extern "C" Item js_arraybuffer_slice_with_ops(Item val, Item begin_item, Item end_item, int argc, const JsBufferViewOps* ops) {
+    if (get_type_id(val) != LMD_TYPE_MAP || !js_get_arraybuffer_ptr(val.map))
+        return ops->error(false, "ArrayBuffer.prototype.slice requires an ArrayBuffer");
+    if (js_arraybuffer_shared(js_get_arraybuffer_ptr(val.map))) {
+        return ops->error(false, "ArrayBuffer.prototype.slice requires that |this| not be a SharedArrayBuffer");
     }
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, val), first(roots, begin_item), last(roots, end_item);
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     if (!ab) return (Item){.item = ITEM_NULL};
     if (js_arraybuffer_detached(ab)) {
-        return js_throw_type_error("ArrayBuffer.prototype.slice called on detached buffer");
+        return ops->error(false, "ArrayBuffer.prototype.slice called on detached buffer");
     }
 
     int begin = 0;
     int source_length = js_arraybuffer_length(ab);
     int end = source_length;
     if (argc > 0) {
-        if (!js_arraybuffer_slice_index(begin_item, source_length, &begin)) return ItemNull;
+        Item converted = js_arraybuffer_slice_index(first.get(), source_length, &begin, ops);
+        if (item_is_error(converted)) return converted;
     }
     if (argc > 1 && get_type_id(end_item) != LMD_TYPE_UNDEFINED) {
-        if (!js_arraybuffer_slice_index(end_item, source_length, &end)) return ItemNull;
+        Item converted = js_arraybuffer_slice_index(last.get(), source_length, &end, ops);
+        if (item_is_error(converted)) return converted;
     }
     if (end < begin) end = begin;
     int new_len = end - begin;
 
-    return js_arraybuffer_slice_species(val, ab, begin, new_len, false);
+    return js_arraybuffer_slice_species(owner.get(), ab, begin, new_len, false, ops);
+}
+
+extern "C" Item js_arraybuffer_slice_items(Item val, Item begin, Item end, int argc) {
+    if (!js_is_arraybuffer(val)) return ItemNull;
+    return js_arraybuffer_slice_with_ops(val, begin, end, argc, &js_buffer_view_default_ops);
 }
 
 // Item-returning wrapper for MIR JIT calls (MIR expects Item return type)
@@ -1810,9 +1800,8 @@ extern "C" Item js_sharedarraybuffer_operation(Item sab,
 // ============================================================================
 
 extern "C" bool js_is_typed_array(Item val) {
-    if (!js_object_has_class(val, JS_CLASS_TYPED_ARRAY)) return false;
-    // The class identity selects the semantic lane; the checked accessor
-    // rejects %TypedArray%.prototype, which has no trailing payload.
+    if (get_type_id(val) != LMD_TYPE_MAP) return false;
+    // the physical carrier owns the brand independently of frontend nominal ancestry.
     JsTypedArray* ptr = js_get_typed_array_ptr(val.map);
     return ptr != NULL;
 }
@@ -1824,14 +1813,14 @@ extern "C" JsTypedArray* js_get_typed_array_ptr(Map* m) {
 }
 
 static Item js_typed_array_alloc_carrier(JsTypedArrayType element_type,
-        Item buffer_item, bool length_tracking) {
+        Item buffer_item, bool length_tracking, TypeMap* shape = NULL) {
     JsTypedArrayMapCarrier* carrier = (JsTypedArrayMapCarrier*)heap_calloc(
         sizeof(JsTypedArrayMapCarrier), LMD_TYPE_MAP);
     if (!carrier) return ItemNull;
     Map* map = &carrier->base;
     map->type_id = LMD_TYPE_MAP;
     map->map_kind = MAP_KIND_TYPED_ARRAY;
-    map->type = js_object_type_for_class(JS_CLASS_TYPED_ARRAY);
+    map->type = shape ? shape : js_object_type_for_class(JS_CLASS_TYPED_ARRAY);
     if (!map->type) map->type = js_empty_object_type_map();
     map->data = NULL;
     map->data_cap = 0;
@@ -1845,24 +1834,32 @@ static Item js_typed_array_alloc_carrier(JsTypedArrayType element_type,
     return (Item){.map = map};
 }
 
+static const JsTypedArrayOps js_typed_array_default_ops = {
+    &js_buffer_view_default_ops, NULL, NULL,
+    [](Item source, int index) { return js_get_key_default(source, Item{.item = i2it(index)}); }, NULL, NULL
+};
+
 // Create a standalone typed array (owns its buffer)
-extern "C" Item js_typed_array_new(int type_id, int length) {
+static Item js_typed_array_new_with_ops(int type_id, int length,
+        const JsTypedArrayOps* ops, Item target) {
     JsTypedArrayType arr_type = (JsTypedArrayType)type_id;
     int elem_size = js_typed_array_element_size(arr_type);
+    if (length < 0 || length > 1073741824 / elem_size)
+        return ops->buffer->error(true, "Invalid typed array length");
     int byte_length = length * elem_size;
-    JsArrayBuffer* ab = js_arraybuffer_alloc(byte_length);
-    if (!ab) return ItemError;
+    JsArrayBufferConstructOptions options = {byte_length, byte_length, false};
     RootFrame roots(3);
-    Rooted<Item> buffer_root(roots, js_arraybuffer_wrap(ab));
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> buffer_root(roots, js_arraybuffer_allocate_constructed(
+        &options, ItemNull, false, false, ops->buffer));
     Rooted<Item> view_root(roots, ItemNull);
-    if (!js_is_arraybuffer(buffer_root.get())) {
-        js_arraybuffer_destroy(ab);
-        return ItemNull;
-    }
+    if (item_is_error(buffer_root.get())) return buffer_root.get();
+    if (!js_is_arraybuffer(buffer_root.get())) return ItemError;
     Rooted<Item> carrier_root(roots, js_typed_array_alloc_carrier(
-        arr_type, buffer_root.get(), false));
-    if (!js_is_typed_array(carrier_root.get())) return ItemNull;
-    ab = js_get_arraybuffer_ptr(buffer_root.get().map);
+        arr_type, buffer_root.get(), false, ops->shape ? ops->shape(arr_type, target) : NULL));
+    if (!js_is_typed_array(carrier_root.get())) return ItemError;
+    if (!map_fill_reserve_data(carrier_root.get().map)) return ItemError;
+    JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     view_root.set((Item){.array_num = array_num_new_buffer_view(
         (Container*)buffer_root.get().map, ab,
         js_typed_array_elem_type(arr_type), 0, length, true)});
@@ -1878,6 +1875,10 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     js_typed_array_refresh_arraynum_view(ta);
     ta->base.buffer_item = buffer_root.get().item;
     return carrier_root.get();
+}
+
+extern "C" Item js_typed_array_new(int type_id, int length) {
+    return js_typed_array_new_with_ops(type_id, length, &js_typed_array_default_ops, ItemNull);
 }
 
 extern "C" Item js_buffer_from_bytes(const char* data, int len) {
@@ -1974,32 +1975,34 @@ extern "C" Item binary_from_dataview(JsDataView* dv) {
 }
 
 // Create a typed array as a view over an ArrayBuffer
-extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, int byte_offset, int length) {
+static Item js_typed_array_from_buffer_with_ops(int type_id, Item buffer_item,
+        int byte_offset, int length, const JsTypedArrayOps* ops, Item target) {
     RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
     Rooted<Item> buffer_root(roots, buffer_item);
     Rooted<Item> view_root(roots, ItemNull);
     buffer_item = buffer_root.get();
     if (!js_is_arraybuffer(buffer_item)) {
         log_error("js_typed_array_new_from_buffer: argument is not an ArrayBuffer");
-        return js_throw_type_error("TypedArray buffer argument must be an ArrayBuffer");
+        return ops->buffer->error(false, "TypedArray buffer argument must be an ArrayBuffer");
     }
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer_item.map);
     JsTypedArrayType arr_type = (JsTypedArrayType)type_id;
     int elem_size = js_typed_array_element_size(arr_type);
 
     if (js_arraybuffer_detached(ab)) {
-        return js_throw_type_error("Cannot construct TypedArray from detached ArrayBuffer");
+        return ops->buffer->error(false, "Cannot construct TypedArray from detached ArrayBuffer");
     }
     if (byte_offset < 0) {
-        return js_throw_range_error("Invalid typed array byteOffset");
+        return ops->buffer->error(true, "Invalid typed array byteOffset");
     }
     if (byte_offset % elem_size != 0) {
         log_error("js_typed_array_new_from_buffer: byte_offset %d not aligned to element size %d", byte_offset, elem_size);
-        return js_throw_range_error("Invalid typed array byteOffset");
+        return ops->buffer->error(true, "Invalid typed array byteOffset");
     }
     int buffer_length = js_arraybuffer_length(ab);
     if (byte_offset > buffer_length) {
-        return js_throw_range_error("Invalid typed array byteOffset");
+        return ops->buffer->error(true, "Invalid typed array byteOffset");
     }
 
     int available = buffer_length - byte_offset;
@@ -2013,19 +2016,21 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
         // resizable buffer whose byteLength isn't a multiple of 8 throws
         // RangeError, blocking the species-ctor cluster.
         if (!js_arraybuffer_resizable(ab) && (available % elem_size != 0)) {
-            return js_throw_range_error("Invalid typed array byteLength");
+            return ops->buffer->error(true, "Invalid typed array byteLength");
         }
         length = available / elem_size;
     }
-    int byte_length = length * elem_size;
-    if (length < 0 || byte_length < 0 || byte_offset + byte_length > buffer_length) {
+    if (length < 0 || length > available / elem_size) {
         log_error("js_typed_array_new_from_buffer: view exceeds buffer bounds");
-        return js_throw_range_error("Invalid typed array length");
+        return ops->buffer->error(true, "Invalid typed array length");
     }
 
+    int byte_length = length * elem_size;
     Rooted<Item> carrier_root(roots, js_typed_array_alloc_carrier(
-        arr_type, buffer_root.get(), length_tracking));
-    if (!js_is_typed_array(carrier_root.get())) return ItemNull;
+        arr_type, buffer_root.get(), length_tracking && js_arraybuffer_resizable(ab),
+        ops->shape ? ops->shape(arr_type, target) : NULL));
+    if (!js_is_typed_array(carrier_root.get())) return ItemError;
+    if (!map_fill_reserve_data(carrier_root.get().map)) return ItemError;
     ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     if (!ab) return ItemNull;
     view_root.set((Item){.array_num = array_num_new_buffer_view(
@@ -2045,76 +2050,98 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
     return carrier_root.get();
 }
 
+extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, int byte_offset, int length) {
+    return js_typed_array_from_buffer_with_ops(type_id, buffer_item, byte_offset,
+        length, &js_typed_array_default_ops, ItemNull);
+}
+
 // Create a typed array from another array (copy)
-extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
-    JS_ROOTS(roots, source_root, source, result_root, ItemNull);
-    source = source_root.get();
-    TypeId src_type = get_type_id(source);
-
-    if (js_is_typed_array(source)) {
-        // Copy from another typed array
+static Item js_typed_array_from_array_with_ops(int type_id, Item source,
+        int length, const JsTypedArrayOps* ops, Item target) {
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> input(roots, source), result(roots, ItemNull), value(roots, ItemNull);
+    bool typed = js_is_typed_array(source);
+    if (typed) {
         JsTypedArray* src = js_get_typed_array_ptr(source.map);
-        // Js55 P22: per ES2024 §23.2.5.1.1 InitializeTypedArrayFromTypedArray,
-        // step 2 — IsTypedArrayOutOfBounds(srcRecord) must throw TypeError.
-        // This catches the case where the source TA's backing resizable
-        // ArrayBuffer was shrunk past the view's range.
-        if (js_typed_array_is_out_of_bounds(src)) {
-            return js_throw_type_error("Cannot construct from an out-of-bounds TypedArray");
-        }
-        bool src_bigint = js_typed_array_is_bigint_element(src->element_type);
-        bool dst_bigint = js_typed_array_is_bigint_element((JsTypedArrayType)type_id);
-        if (src_bigint != dst_bigint) {
-            return js_throw_type_error("Cannot mix BigInt and non-BigInt typed arrays");
-        }
-        // Js55 P22: for length-tracking source TAs on a resized buffer, use
-        // current length (TypedArrayLength of the witness record), not the
-        // cached src->length which may be stale.
-        int src_len = js_typed_array_current_length(src);
-        result_root.set(js_typed_array_new(type_id, src_len));
-        Item result = result_root.get();
-        JsTypedArray* dst = js_get_typed_array_ptr(result.map);
-        if (src->element_type == (JsTypedArrayType)type_id &&
-                js_typed_array_try_raw_set_same_type(dst, src, 0)) {
-            return result_root.get();
-        }
-        for (int i = 0; i < src_len; i++) {
-            source = source_root.get();
-            Item idx = (Item){.item = i2it(i)};
-            Item val = js_typed_array_get(source, idx);
-            JS_ASSIGN_OR_RETURN(set_result, js_typed_array_set(result_root.get(), idx, val));
-        }
-        return result_root.get();
+        if (js_typed_array_is_out_of_bounds(src))
+            return ops->buffer->error(false, "Cannot construct from an out-of-bounds TypedArray");
+        if (js_typed_array_is_bigint_element(src->element_type) !=
+                js_typed_array_is_bigint_element((JsTypedArrayType)type_id))
+            return ops->buffer->error(false, "Cannot mix BigInt and non-BigInt typed arrays");
+        length = js_typed_array_current_length(src);
     }
-
-    if (src_type == LMD_TYPE_ARRAY || src_type == LMD_TYPE_ARRAY_NUM) {
-        // Copy from a regular or compact numeric array. MIR Direct may keep a
-        // literal numeric array in ArrayNum form, and treating that value as a
-        // scalar length silently constructs an empty TypedArray.
-        Array* arr = src_type == LMD_TYPE_ARRAY ? source.array : NULL;
-        ArrayNum* num_arr = src_type == LMD_TYPE_ARRAY_NUM ? source.array_num : NULL;
-        int len = (int)(arr ? arr->length : (num_arr ? num_arr->length : 0));
-        result_root.set(js_typed_array_new(type_id, len));
-        Item* values = len > 0 ? (Item*)mem_alloc(sizeof(Item) * len, MEM_CAT_JS_RUNTIME) : NULL;
-        for (int i = 0; i < len; i++) {
-            values[i] = arr ? arr->items[i] : array_num_get(num_arr, i);
-        }
-        for (int i = 0; i < len; i++) {
-            Item idx = (Item){.item = i2it(i)};
-            Item val = values ? values[i] : ItemNull;
-            if (val.item == JS_DELETED_SENTINEL_VAL) val = (Item){.item = ITEM_JS_UNDEFINED};
-            Item set_result = js_typed_array_set(result_root.get(), idx, val);
-            if (item_is_error(set_result)) {
-                if (values) mem_free(values);
-                return set_result;
-            }
-        }
-        if (values) mem_free(values);
-        return result_root.get();
+    result.set(js_typed_array_new_with_ops(type_id, length, ops, target));
+    if (item_is_error(result.get())) return result.get();
+    if (typed && js_typed_array_raw_copy_same_type(result.get(), input.get())) return result.get();
+    uint64_t home = 0;
+    for (int i = 0; i < length; i++) {
+        value.set(lambda_item_adopt_scalar_home(typed ? js_typed_array_get(input.get(), Item{.item = i2it(i)}) :
+            ops->get_index(input.get(), i), &home));
+        if (item_is_error(value.get())) return value.get();
+        Item status = js_typed_array_set_numeric_with_ops(result.get(), i, false, value.get(), ops->buffer);
+        if (item_is_error(status)) return status;
     }
+    return result.get();
+}
 
-    // Fallback: treat as length
-    int len = (int)it2i(source);
-    return js_typed_array_new(type_id, len);
+extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
+    TypeId type = get_type_id(source);
+    int length = type == LMD_TYPE_ARRAY ? (int)source.array->length :
+        type == LMD_TYPE_ARRAY_NUM ? (int)source.array_num->length : js_is_typed_array(source) ? 0 : (int)it2i(source);
+    return js_typed_array_from_array_with_ops(type_id, source, length, &js_typed_array_default_ops, ItemNull);
+}
+
+extern "C" Item js_typed_array_construct_with_ops(int type_id, Item source, Item offset,
+        Item length, int argc, Item target, const JsTypedArrayOps* ops) {
+    RootFrame roots(6);
+    if (!roots.valid()) return ItemError;
+    uint64_t homes[3] = {};
+    Rooted<Item> input(roots, lambda_item_adopt_scalar_home(source, &homes[0])),
+        start(roots, lambda_item_adopt_scalar_home(offset, &homes[1])),
+        extent(roots, lambda_item_adopt_scalar_home(length, &homes[2])),
+        constructor(roots, target), prototype(roots, ItemNull), result(roots, ItemNull);
+    // primitive ToIndex precedes AllocateTypedArray; object inputs observe the prototype first.
+    bool object_input = ops->buffer->object(input.get());
+    int64_t primitive_length = 0;
+    if (!object_input) {
+        JS_ASSIGN_OR_RETURN(status, js_to_index_i64(input.get(), &primitive_length, "Invalid typed array length", ops->buffer));
+    }
+    prototype.set(ops->prototype((JsTypedArrayType)type_id, constructor.get()));
+    if (item_is_error(prototype.get())) return prototype.get();
+    if (js_is_arraybuffer(input.get())) {
+        int64_t first = 0, count = -1;
+        JS_ASSIGN_OR_RETURN(status, js_to_index_i64(start.get(), &first, "Invalid typed array byteOffset", ops->buffer));
+        int width = js_typed_array_element_size((JsTypedArrayType)type_id);
+        if (first % width) return ops->buffer->error(true, "Invalid typed array alignment");
+        if (argc > 2 && extent.get().item != ITEM_JS_UNDEFINED) {
+            JS_ASSIGN_OR_RETURN(checked, js_to_index_i64(extent.get(), &count, "Invalid typed array length", ops->buffer));
+        }
+        if (first > INT_MAX || count > INT_MAX) return ops->buffer->error(true, "Invalid typed array length");
+        result.set(js_typed_array_from_buffer_with_ops(type_id, input.get(), (int)first, (int)count, ops, constructor.get()));
+    } else if (js_is_typed_array(input.get())) {
+        result.set(js_typed_array_from_array_with_ops(type_id, input.get(), 0, ops, constructor.get()));
+    } else if (object_input) {
+        result.set(ops->collect(input.get()));
+        if (item_is_error(result.get())) return result.get();
+        int64_t count;
+        if (result.get().item != ITEM_JS_UNDEFINED) {
+            input.set(result.get()); count = input.get().array->length;
+        } else {
+            JS_ASSIGN_OR_RETURN(size, ops->buffer->get(input.get(), "length"));
+            JS_ASSIGN_OR_RETURN(number, ops->buffer->number(size));
+            double value = it2d(number);
+            count = isnan(value) || value <= 0 ? 0 : !isfinite(value) || value > INT_MAX ? INT64_MAX : (int64_t)value;
+        }
+        if (count > INT_MAX) return ops->buffer->error(true, "Invalid typed array length");
+        result.set(js_typed_array_from_array_with_ops(type_id, input.get(), (int)count, ops, constructor.get()));
+    } else {
+        if (primitive_length > INT_MAX) return ops->buffer->error(true, "Invalid typed array length");
+        result.set(js_typed_array_new_with_ops(type_id, (int)primitive_length, ops, constructor.get()));
+    }
+    if (item_is_error(result.get())) return result.get();
+    Item linked = ops->buffer->link(result.get(), prototype.get());
+    return item_is_error(linked) ? linked : result.get();
 }
 
 // Smart constructor: dispatches based on argument type
@@ -2299,7 +2326,7 @@ extern "C" Item js_typed_array_get(Item ta_item, Item index) {
 }
 
 static Item js_typed_array_set_numeric_impl(Item ta_item, double numeric_index,
-        bool is_negative_zero, Item value) {
+        bool is_negative_zero, Item value, const JsBufferViewOps* ops = &js_buffer_view_default_ops) {
     if (!js_is_typed_array(ta_item)) return (Item){.item = ITEM_NULL};
 
     Map* m = ta_item.map;
@@ -2312,43 +2339,27 @@ static Item js_typed_array_set_numeric_impl(Item ta_item, double numeric_index,
         idx = (int)numeric_index;
     }
 
-    // BigInt types: ToBigInt(value), then store as int64/uint64.
-    // Per ES spec §22.2.3.5.4 IntegerIndexedElementSet: BigInt typed arrays use ToBigInt
-    // which throws TypeError for Numbers; only BigInt, String (parseable), and Boolean coerce.
-    if (ta->element_type == JS_TYPED_BIGINT64 || ta->element_type == JS_TYPED_BIGUINT64) {
-        // Inline BigInt detection (avoids exposing js_is_bigint as static)
-        TypeId vt = get_type_id(value);
-        bool is_bi = false;
-        if (vt == LMD_TYPE_DECIMAL) {
-            Decimal* dec = (Decimal*)(value.item & 0x00FFFFFFFFFFFFFFULL);
-            is_bi = dec && dec->storage_kind == DECIMAL_BIGINT;
-        }
-        Item bi;
-        if (is_bi) {
-            bi = value;
-        } else {
-            // ToBigInt rejects Number/null/undefined per spec
-            if (vt == LMD_TYPE_INT) {
-                return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
-            } else if (vt == LMD_TYPE_FLOAT) {
-                return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
-            } else if (vt == LMD_TYPE_NULL || value.item == ITEM_JS_UNDEFINED) {
-                return js_throw_type_error("Cannot convert non-BigInt value to BigInt");
-            }
-            JS_ASSIGN_OR_RETURN_INTO(bi, js_bigint_constructor(value));
-        }
-        int current_length = js_typed_array_current_length(ta);
+    if (js_typed_array_is_bigint_element(ta->element_type)) {
+        RootFrame roots(3);
+        if (!roots.valid()) return ItemError;
+        uint64_t* home = lambda_item_uses_scalar_home(value) ? lambda_side_number_alloc() : NULL;
+        if (lambda_item_uses_scalar_home(value) && !home) return ItemError;
+        Rooted<Item> owner(roots, ta_item), argument(roots, lambda_item_adopt_scalar_home(value, home)), bigint(roots, ItemNull);
+        Item converted;
+        JS_ASSIGN_OR_RETURN(status, ops->bigint(argument.get(), &converted));
+        bigint.set(converted);
+        ta = js_get_typed_array_ptr(owner.get().map);
+        if (idx < 0 || idx >= js_typed_array_current_length(ta)) return argument.get();
+        // wrap before acquiring the storage pointer: BigInt allocation may collect.
+        bool signed_value = ta->element_type == JS_TYPED_BIGINT64;
+        bigint.set(signed_value ? js_bigint_as_int_n(Item{.item = i2it(64)}, bigint.get()) :
+            js_bigint_as_uint_n(Item{.item = i2it(64)}, bigint.get()));
+        if (item_is_error(bigint.get())) return bigint.get();
+        uint64_t bits = signed_value ? (uint64_t)bigint_to_int64(bigint.get()) : js_dataview_bigint_to_uint64(bigint.get());
+        ta = js_get_typed_array_ptr(owner.get().map);
         void* data = js_typed_array_prepare_write(ta);
-        if (idx < 0 || idx >= current_length || !data) return value;
-        if (ta->element_type == JS_TYPED_BIGINT64) {
-            JS_ASSIGN_OR_RETURN(wrapped, js_bigint_as_int_n((Item){.item = i2it(64)}, bi));
-            int64_t iv = bigint_to_int64(wrapped);
-            ((int64_t*)data)[idx] = iv;
-        } else {
-            JS_ASSIGN_OR_RETURN(wrapped, js_bigint_as_uint_n((Item){.item = i2it(64)}, bi));
-            ((uint64_t*)data)[idx] = js_dataview_bigint_to_uint64(wrapped);
-        }
-        return value;
+        if (data && idx < js_typed_array_current_length(ta)) memcpy((char*)data + (size_t)idx * 8, &bits, 8);
+        return argument.get();
     }
 
     double num_val;
@@ -2365,13 +2376,20 @@ static Item js_typed_array_set_numeric_impl(Item ta_item, double numeric_index,
         num_val = it2d(value);
         primitive_value = true;
     } else {
-        // ES spec: IntegerIndexedElementSet calls ToNumber(value)
-        // This throws TypeError for Symbol, which is the spec-required behavior
-        JS_ASSIGN_OR_RETURN(num_item, js_to_number(value));
-        vtype = get_type_id(num_item);
-        if (vtype == LMD_TYPE_INT) num_val = (double)it2i(num_item);
-        else if (vtype == LMD_TYPE_FLOAT) num_val = it2d(num_item);
-        else num_val = 0.0;
+        RootFrame roots(2);
+        if (!roots.valid()) return ItemError;
+        // the assignment result escapes this C frame; give wide scalars a caller-lived number home.
+        uint64_t* home = lambda_item_uses_scalar_home(value) ? lambda_side_number_alloc() : NULL;
+        if (lambda_item_uses_scalar_home(value) && !home) return ItemError;
+        Rooted<Item> owner(roots, ta_item), argument(roots, lambda_item_adopt_scalar_home(value, home));
+        JS_ASSIGN_OR_RETURN(num_item, ops->number(argument.get()));
+        num_val = it2d(num_item);
+        // coercion may detach or resize; reacquire the current carrier before touching storage.
+        ta = js_get_typed_array_ptr(owner.get().map);
+        if (idx < 0 || idx >= js_typed_array_current_length(ta)) return argument.get();
+        void* data = js_typed_array_prepare_write(ta);
+        if (data) js_typed_array_store_number_direct(ta->element_type, (char*)data, idx, num_val);
+        return argument.get();
     }
 
     int current_length = js_typed_array_current_length(ta);
@@ -2385,6 +2403,11 @@ static Item js_typed_array_set_numeric_impl(Item ta_item, double numeric_index,
     js_typed_array_store_number_direct(ta->element_type, (char*)data, idx, num_val);
 
     return value;
+}
+
+extern "C" Item js_typed_array_set_numeric_with_ops(Item owner, double index,
+        bool negative_zero, Item value, const JsBufferViewOps* ops) {
+    return js_typed_array_set_numeric_impl(owner, index, negative_zero, value, ops);
 }
 
 extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
@@ -2819,38 +2842,32 @@ extern "C" Item js_typed_array_slice(Item ta_item, int start, int end,
     return result;
 }
 
-// .subarray(begin, end) — creates a view (shares buffer)
-extern "C" Item js_typed_array_subarray(Item ta_item, int start, int end, bool end_is_default) {
-    if (!js_is_typed_array(ta_item)) return (Item){.item = ITEM_NULL};
-    JsTypedArray* ta = js_get_typed_array_ptr(ta_item.map);
-
-    int elem_size = js_typed_array_element_size(ta->element_type);
-    int byte_offset = js_typed_array_stored_byte_offset(ta);
-    int available_len = js_typed_array_stored_length(ta);
-    int begin_byte_offset = byte_offset + start * elem_size;
-    bool result_length_tracking = ta->base.buffer && ta->base.length_tracking && end_is_default;
-
-    if (ta->base.buffer && !js_arraybuffer_detached(ta->base.buffer)) {
-        int buffer_length = js_arraybuffer_length(ta->base.buffer);
-        int available_bytes = buffer_length - byte_offset;
-        if (available_bytes < 0) available_bytes = 0;
-        available_len = available_bytes / elem_size;
-        if (begin_byte_offset > buffer_length) {
-            return js_throw_range_error("offset is out of bounds");
-        }
-        if (!result_length_tracking && end > available_len) {
-            return js_throw_range_error("length is out of bounds");
-        }
+// .subarray(begin, end) shares storage and captures length before coercion.
+extern "C" Item js_typed_array_subarray(Item ta_item, Item begin, Item end,
+        const JsTypedArrayOps* ops) {
+    const JsBufferViewOps* buffer_ops = ops ? ops->buffer : &js_buffer_view_default_ops;
+    if (!js_is_typed_array(ta_item)) return buffer_ops->error(false, "not a typed array");
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    uint64_t homes[2] = {};
+    Rooted<Item> owner(roots, ta_item),
+        first(roots, lambda_item_adopt_scalar_home(begin, &homes[0])),
+        last(roots, lambda_item_adopt_scalar_home(end, &homes[1]));
+    int length = js_typed_array_length(owner.get());
+    int start = 0, finish = length;
+    JS_ASSIGN_OR_RETURN(status, js_arraybuffer_slice_index(first.get(), length, &start, buffer_ops));
+    bool end_is_default = last.get().item == ITEM_JS_UNDEFINED;
+    if (!end_is_default) {
+        JS_ASSIGN_OR_RETURN(end_status, js_arraybuffer_slice_index(last.get(), length, &finish, buffer_ops));
     }
-
-    if (end < start) end = start;
-    int new_length = result_length_tracking ? available_len - start : end - start;
-    if (new_length < 0) new_length = 0;
-
-    if (!ta->base.buffer_item || !ta->base.buffer) return js_throw_type_error("TypedArray has no backing ArrayBuffer");
-    return js_typed_array_species_create_from_buffer(
-        ta_item, (Item){.item = ta->base.buffer_item}, byte_offset + start * elem_size,
-        new_length, result_length_tracking);
+    JsTypedArray* ta = js_get_typed_array_ptr(owner.get().map);
+    int offset = js_typed_array_stored_byte_offset(ta) + start * js_typed_array_element_size(ta->element_type);
+    bool tracking = ta->base.length_tracking && end_is_default;
+    // species may ignore a detached/shrunken source and return another valid
+    // view. Bounds checks belong to the selected constructor, after its lookup.
+    Item args[3] = {Item{.item = ta->base.buffer_item}, Item{.item = i2it(offset)},
+        Item{.item = i2it(finish > start ? finish - start : 0)}};
+    return js_typed_array_species_create_with_ops(owner.get(), args, tracking ? 2 : 3, ops);
 }
 
 // ============================================================================
@@ -2865,45 +2882,40 @@ extern "C" bool js_is_dataview(Item val) {
     return js_object_has_class(val, JS_CLASS_DATA_VIEW);
 }
 
-// Get the typed trailing DataView payload after validating the carrier.
-static JsDataView* js_get_dataview_ptr_from_map(Map* m) {
-    if (!m || m->map_kind != MAP_KIND_DATAVIEW) return NULL;
-    return &((JsDataViewMapCarrier*)m)->payload;
-}
-
 extern "C" JsDataView* js_get_dataview_ptr(Item val) {
     if (!js_is_dataview(val)) return NULL;
     return js_get_dataview_ptr_from_map(val.map);
 }
 
-static Item js_dataview_create(Item buffer, Item offset_item, Item length_item,
-        Item new_target) {
+extern "C" Item js_dataview_construct_with_ops(Item buffer, Item offset_item, Item length_item,
+        Item new_target, const JsBufferViewOps* ops) {
     JS_ROOTS(roots,
         buffer_root, buffer,
         new_target_root, new_target,
         prototype_root, ItemNull,
-        view_root, ItemNull);
+        view_root, ItemNull,
+        offset_root, offset_item, length_root, length_item);
     buffer = buffer_root.get();
-    if (!js_is_arraybuffer(buffer)) {
-        return js_throw_type_error("First argument to DataView constructor must be an ArrayBuffer");
+    if (get_type_id(buffer) != LMD_TYPE_MAP || !js_get_arraybuffer_ptr(buffer.map)) {
+        return ops->error(false, "First argument to DataView constructor must be an ArrayBuffer");
     }
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer.map);
     if (!ab) return ItemNull;
 
     int byte_offset = 0;
-    JS_ASSIGN_OR_RETURN(validation, js_dataview_to_index(offset_item, &byte_offset));
+    JS_ASSIGN_OR_RETURN(validation, js_dataview_to_index(offset_root.get(), &byte_offset, ops));
 
     if (js_arraybuffer_detached(ab)) {
-        return js_throw_type_error("DataView buffer is detached");
+        return ops->error(false, "DataView buffer is detached");
     }
 
     int buffer_length = js_arraybuffer_length(ab);
     if (byte_offset < 0 || byte_offset > buffer_length) {
-        return js_throw_range_error("Start offset is outside the bounds of the buffer");
+        return ops->error(true, "Start offset is outside the bounds of the buffer");
     }
 
     int byte_length;
-    TypeId lt = get_type_id(length_item);
+    TypeId lt = get_type_id(length_root.get());
     // Js54 P2: length_tracking when constructor called without explicit byteLength.
     // The recorded byte_length is the initial value; readers re-derive from the
     // buffer's current byte_length on every access for length-tracking views.
@@ -2911,11 +2923,11 @@ static Item js_dataview_create(Item buffer, Item offset_item, Item length_item,
     if (lt == LMD_TYPE_UNDEFINED) {
         byte_length = buffer_length - byte_offset;
     } else {
-        JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_index(length_item, &byte_length));
+        JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_index(length_root.get(), &byte_length, ops));
     }
 
     if (byte_length < 0 || (int64_t)byte_offset + (int64_t)byte_length > buffer_length) {
-        return js_throw_range_error("Invalid DataView length");
+        return ops->error(true, "Invalid DataView length");
     }
 
     if (new_target_root.get().item != ItemNull.item) {
@@ -2923,17 +2935,16 @@ static Item js_dataview_create(Item buffer, Item offset_item, Item length_item,
         // OrdinaryCreateFromConstructor, then revalidates the buffer after the
         // observable prototype lookup. Fetching the prototype in the generic
         // constructor wrapper ran user code before byteOffset.valueOf.
-        prototype_root.set(js_get_prototype_from_constructor_default(
-            new_target_root.get(), JS_CLASS_DATA_VIEW, -1));
+        prototype_root.set(ops->prototype(new_target_root.get(), true));
         if (item_is_error(prototype_root.get())) return prototype_root.get();
         buffer = buffer_root.get();
         ab = js_get_arraybuffer_ptr(buffer.map);
         if (!ab || js_arraybuffer_detached(ab)) {
-            return js_throw_type_error("DataView buffer is detached");
+            return ops->error(false, "DataView buffer is detached");
         }
         buffer_length = js_arraybuffer_length(ab);
         if (byte_offset < 0 || byte_offset > buffer_length) {
-            return js_throw_range_error(
+            return ops->error(true,
                 "Start offset is outside the bounds of the buffer");
         }
         if (length_tracking) {
@@ -2943,7 +2954,7 @@ static Item js_dataview_create(Item buffer, Item offset_item, Item length_item,
             byte_length = buffer_length - byte_offset;
         } else if (byte_length < 0 ||
                 (int64_t)byte_offset + (int64_t)byte_length > buffer_length) {
-            return js_throw_range_error("Invalid DataView length");
+            return ops->error(true, "Invalid DataView length");
         }
     }
 
@@ -2965,20 +2976,22 @@ static Item js_dataview_create(Item buffer, Item offset_item, Item length_item,
     Map* m = &carrier->base;
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_DATAVIEW;
-    m->type = js_object_type_for_class(JS_CLASS_DATA_VIEW);
+    m->type = ops->shape ? ops->shape(true, new_target_root.get()) : js_object_type_for_class(JS_CLASS_DATA_VIEW);
     if (!m->type) m->type = js_empty_object_type_map();
     m->data = NULL;
     m->data_cap = 0;
     view_root.set((Item){.map = m});
+    if (!map_fill_reserve_data(m)) return ItemError;
     if (new_target_root.get().item != ItemNull.item) {
-        js_set_prototype(view_root.get(), prototype_root.get());
-    } else {
+        Item linked = ops->link(view_root.get(), prototype_root.get());
+        if (item_is_error(linked)) return linked;
+    } else if (!ops->shape) {
         js_dataview_link_prototype(view_root.get());
     }
     return view_root.get();
 }
-JS_FORWARD_ITEM(js_dataview_new, (Item buffer, Item offset_item,         Item length_item), js_dataview_create, (buffer, offset_item, length_item, ItemNull))
-JS_FORWARD_ITEM(js_dataview_construct, (Item buffer, Item offset_item,         Item length_item, Item new_target), js_dataview_create, (buffer, offset_item, length_item, new_target))
+JS_FORWARD_ITEM(js_dataview_new, (Item buffer, Item offset_item,         Item length_item), js_dataview_construct_with_ops, (buffer, offset_item, length_item, ItemNull, &js_buffer_view_default_ops))
+JS_FORWARD_ITEM(js_dataview_construct, (Item buffer, Item offset_item,         Item length_item, Item new_target), js_dataview_construct_with_ops, (buffer, offset_item, length_item, new_target, &js_buffer_view_default_ops))
 
 // Js54 P2: current byte_length honoring length-tracking views over resizable
 // buffers. For non-length-tracking views the stored byte_length is authoritative;
@@ -2996,9 +3009,9 @@ static inline bool dv_is_out_of_bounds(JsDataView* dv) {
 
 // Js54 P2: throws TypeError if the DataView is detached or out-of-bounds.
 // The status Item keeps the coercion error on the same lane as DataView calls.
-static inline Item dv_validate_or_throw(JsDataView* dv) {
+static inline Item dv_validate_or_throw(JsDataView* dv, const JsBufferViewOps* ops) {
     if (dv_is_out_of_bounds(dv)) {
-        return js_throw_type_error("DataView buffer is detached or out of bounds");
+        return ops->error(false, "DataView buffer is detached or out of bounds");
     }
     return js_status_ok();
 }
@@ -3008,13 +3021,13 @@ static inline Item dv_validate_or_throw(JsDataView* dv) {
 // views see live shrink/grow, not the cached construction-time byte_length.
 static inline const uint8_t* dv_ptr(JsDataView* dv, int offset, int size) {
     int current_len = dv_current_byte_length(dv);
-    if (offset < 0 || offset + size > current_len) return NULL;
+    if (offset < 0 || (int64_t)offset + size > current_len) return NULL;
     return js_arraybuffer_data_const(dv->buffer) + dv->byte_offset + offset;
 }
 
 static inline uint8_t* dv_write_ptr(JsDataView* dv, int offset, int size) {
     int current_len = dv_current_byte_length(dv);
-    if (offset < 0 || offset + size > current_len) return NULL;
+    if (offset < 0 || (int64_t)offset + size > current_len) return NULL;
     uint8_t* base = js_arraybuffer_prepare_write(dv->buffer);
     // DataView setters share the ArrayBuffer handle with typed arrays, so COW
     // must occur before deriving the view-relative mutable pointer.
@@ -3065,11 +3078,11 @@ static bool js_dataview_write_raw(JsDataView* dv, int offset, int size,
 }
 
 static Item js_dataview_read_value(JsDataView* dv, JsDataViewOperation operation,
-        int offset, Item* args, int argc, bool system_little_endian) {
-    bool little_endian = (argc > 1) && js_is_truthy(args[1]);
+        int offset, Item* args, int argc, bool system_little_endian, const JsBufferViewOps* ops) {
+    bool little_endian = (argc > 1) && ops->truthy(args[1]);
     if (operation == JS_DATAVIEW_GET_INT8 || operation == JS_DATAVIEW_GET_UINT8) {
         const uint8_t* data = dv_ptr(dv, offset, 1);
-        if (!data) return js_throw_range_error("Invalid DataView offset");
+        if (!data) return ops->error(true, "Invalid DataView offset");
         return (Item){.item = i2it(operation == JS_DATAVIEW_GET_INT8
             ? (int64_t)(int8_t)*data : (int64_t)*data)};
     }
@@ -3080,7 +3093,7 @@ static Item js_dataview_read_value(JsDataView* dv, JsDataViewOperation operation
     uint64_t raw = 0;
     if (!js_dataview_read_raw(dv, offset, size, little_endian,
             system_little_endian, &raw)) {
-        return js_throw_range_error("Invalid DataView offset");
+        return ops->error(true, "Invalid DataView offset");
     }
     switch (operation) {
     case JS_DATAVIEW_GET_INT16: return (Item){.item = i2it((int64_t)(int16_t)raw)};
@@ -3104,28 +3117,32 @@ static Item js_dataview_read_value(JsDataView* dv, JsDataViewOperation operation
     }
 }
 
-static Item js_dataview_write_value(JsDataView* dv, JsDataViewOperation operation,
-        int offset, Item* args, int argc, bool system_little_endian) {
+static Item js_dataview_write_value(Item view, JsDataViewOperation operation,
+        int offset, Item* args, int argc, bool system_little_endian, const JsBufferViewOps* ops) {
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, view), integer(roots, ItemNull);
     Item value_item = (argc >= 2) ? args[1] : (Item){.item = ITEM_JS_UNDEFINED};
     Item validation = ItemNull;
-    bool little_endian = (argc > 2) && js_is_truthy(args[2]);
+    bool little_endian = (argc > 2) && ops->truthy(args[2]);
     uint64_t raw = 0;
     int size = 0;
     if (operation == JS_DATAVIEW_SET_BIGINT64 || operation == JS_DATAVIEW_SET_BIGUINT64) {
         Item bigint_value;
-        JS_ASSIGN_OR_RETURN(validation, js_dataview_to_bigint_value(value_item, &bigint_value));
-        JS_ASSIGN_OR_RETURN_INTO(validation, dv_validate_or_throw(dv));
+        JS_ASSIGN_OR_RETURN(validation, ops->bigint(value_item, &bigint_value));
+        integer.set(bigint_value);
+        JS_ASSIGN_OR_RETURN_INTO(validation, dv_validate_or_throw(js_get_dataview_ptr_from_map(owner.get().map), ops));
         JS_ASSIGN_OR_RETURN(wrapped, operation == JS_DATAVIEW_SET_BIGINT64
-            ? js_bigint_as_int_n((Item){.item = i2it(64)}, bigint_value)
-            : js_bigint_as_uint_n((Item){.item = i2it(64)}, bigint_value));
+            ? js_bigint_as_int_n((Item){.item = i2it(64)}, integer.get())
+            : js_bigint_as_uint_n((Item){.item = i2it(64)}, integer.get()));
         raw = operation == JS_DATAVIEW_SET_BIGINT64
             ? (uint64_t)bigint_to_int64(wrapped) : js_dataview_bigint_to_uint64(wrapped);
         size = 8;
     } else {
         double number_value = 0.0;
-        JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(value_item, &number_value));
-        JS_ASSIGN_OR_RETURN_INTO(validation, dv_validate_or_throw(dv));
-        int64_t integer_value = js_dataview_to_integer_value(number_value);
+        JS_ASSIGN_OR_RETURN_INTO(validation, js_dataview_to_number_value(value_item, &number_value, ops));
+        JS_ASSIGN_OR_RETURN_INTO(validation, dv_validate_or_throw(js_get_dataview_ptr_from_map(owner.get().map), ops));
+        int64_t integer_value = js_to_int32(number_value);
         switch (operation) {
         case JS_DATAVIEW_SET_INT8: raw = (uint8_t)(int8_t)integer_value; size = 1; break;
         case JS_DATAVIEW_SET_UINT8: raw = (uint8_t)integer_value; size = 1; break;
@@ -3146,38 +3163,54 @@ static Item js_dataview_write_value(JsDataView* dv, JsDataViewOperation operatio
         default: return (Item){.item = ITEM_NULL};
         }
     }
-    if (!js_dataview_write_raw(dv, offset, size, little_endian,
+    // coercion and BigInt wrapping may collect; rederive the trailing payload from its exact root.
+    if (!js_dataview_write_raw(js_get_dataview_ptr_from_map(owner.get().map), offset, size, little_endian,
             system_little_endian, raw)) {
-        return js_throw_range_error("Invalid DataView offset");
+        return ops->error(true, "Invalid DataView offset");
     }
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
 // D6.2.2v2: the published callable fixes this operation; display spelling
 // must never select DataView semantics after function creation.
-extern "C" Item js_dataview_operation(Item dv_item,
-        JsDataViewOperation operation, Item* args, int argc) {
-    if (!js_is_dataview(dv_item)) return (Item){.item = ITEM_NULL};
+extern "C" Item js_dataview_operation_with_ops(Item dv_item,
+        JsDataViewOperation operation, Item* args, int argc, const JsBufferViewOps* ops) {
+    if (get_type_id(dv_item) != LMD_TYPE_MAP || !js_get_dataview_ptr_from_map(dv_item.map))
+        return ops->error(false, "DataView method requires a DataView");
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> owner(roots, dv_item);
+    Item absent = {.item = ITEM_JS_UNDEFINED};
+    Rooted<Item> offset_root(roots, argc ? args[0] : absent),
+        value_root(roots, argc > 1 ? args[1] : absent), endian_root(roots, argc > 2 ? args[2] : absent);
+    Item arguments[] = {offset_root.get(), value_root.get(), endian_root.get()};
+    args = arguments;
     JsDataView* dv = js_get_dataview_ptr_from_map(dv_item.map);
     if (!dv) return (Item){.item = ITEM_NULL};
 
     int offset = 0;
     Item offset_item = (argc > 0) ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
-    JS_ASSIGN_OR_RETURN(validation, js_dataview_to_index(offset_item, &offset));
+    JS_ASSIGN_OR_RETURN(validation, js_dataview_to_index(offset_item, &offset, ops));
+    dv = js_get_dataview_ptr_from_map(owner.get().map);
     bool is_set_method = operation >= JS_DATAVIEW_SET_INT8;
     // Js54 P2: get-methods validate up front (spec: TypeError on detached or OOB).
     // set-methods perform ToNumber/ToBigInt on the value first (those calls can
     // observe side effects that resize the buffer), so per spec the OOB check
     // moves into each individual setter after the value coercion.
     if (!is_set_method) {
-        JS_ASSIGN_OR_RETURN_INTO(validation, dv_validate_or_throw(dv));
+        JS_ASSIGN_OR_RETURN_INTO(validation, dv_validate_or_throw(dv, ops));
     }
     bool sys_le = is_little_endian_system();
 
     // Getter methods use one raw-load path so width and endian validation cannot drift.
     if (!is_set_method) {
-        return js_dataview_read_value(dv, operation, offset, args, argc, sys_le);
+        return js_dataview_read_value(dv, operation, offset, args, argc, sys_le, ops);
     }
-    return js_dataview_write_value(dv, operation, offset, args, argc, sys_le);
+    return js_dataview_write_value(owner.get(), operation, offset, args, argc, sys_le, ops);
 
+}
+
+extern "C" Item js_dataview_operation(Item view, JsDataViewOperation operation, Item* args, int argc) {
+    if (!js_is_dataview(view)) return ItemNull;
+    return js_dataview_operation_with_ops(view, operation, args, argc, &js_buffer_view_default_ops);
 }

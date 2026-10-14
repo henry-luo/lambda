@@ -77,7 +77,7 @@ Item mvp_lmd_array_species_create(Item source, int64_t length) {
                 mvp_lmd_get_own_property(state->values[LMD_LIBRARY_ARRAY],
                     Item{.item = s2it(well_known_name_ref(JS_SYMBOL_SPECIES))}, &descriptor).item == ITEM_TRUE &&
                 (descriptor.flags & JS_PD_HAS_GET) && get_type_id(descriptor.getter) == LMD_TYPE_FUNC &&
-                descriptor.getter.function->ptr == (fn_ptr)mvp_lmd_object_value)
+                descriptor.getter.function->ptr == (fn_ptr)mvp_lmd_receiver_identity)
             return mvp_lmd_array_new(length);
     }
     RootFrame roots(2);

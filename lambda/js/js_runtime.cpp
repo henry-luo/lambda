@@ -3926,110 +3926,80 @@ static bool js_typed_array_use_default_species(Item constructor, Item* species) 
     return true;
 }
 
-// ES §22.2.4.7 TypedArraySpeciesCreate(exemplar, argumentList)
-// Creates a new TypedArray using the species constructor if available, otherwise
-// uses the default constructor for exemplar's element type.
-extern "C" Item js_typed_array_species_create(Item exemplar, int length) {
-    if (!js_is_typed_array(exemplar)) {
-        return js_throw_type_error("not a typed array");
+// both frontends share TypedArraySpeciesCreate and result validation; only
+// property lookup and callable representation belong to the frontend (D1.3v3).
+extern "C" Item js_typed_array_species_create_with_ops(Item exemplar, Item* args,
+        int argc, const JsTypedArrayOps* ops) {
+    auto fail = [ops](const char* message) {
+        return ops ? ops->buffer->error(false, message) : js_throw_type_error(message);
+    };
+    if (!js_is_typed_array(exemplar)) return fail("not a typed array");
+    RootFrame roots(6);
+    if (!roots.valid()) return ItemError;
+    uint64_t homes[3] = {};
+    Rooted<Item> owner(roots, exemplar),
+        first(roots, lambda_item_adopt_scalar_home(args[0], &homes[0])),
+        second(roots, argc > 1 ? lambda_item_adopt_scalar_home(args[1], &homes[1]) : ItemNull),
+        third(roots, argc > 2 ? lambda_item_adopt_scalar_home(args[2], &homes[2]) : ItemNull),
+        constructor(roots, ItemNull), result(roots, ItemNull);
+    JsTypedArrayType default_type = js_get_typed_array_ptr(owner.get().map)->element_type;
+    bool from_buffer = argc > 1;
+    int length = from_buffer ? (argc > 2 ? (int)it2i(third.get()) : -1) : (int)it2i(first.get());
+    constructor.set(ops ? ops->buffer->get(owner.get(), "constructor") :
+        js_typed_array_species_constructor_property(owner.get()));
+    if (item_is_error(constructor.get())) return constructor.get();
+    Item absent = {.item = ITEM_JS_UNDEFINED};
+    int direct_type = -1;
+    if (ops) {
+        if (constructor.get().item != ITEM_JS_UNDEFINED) {
+            if (!ops->buffer->object(constructor.get())) return fail("constructor is not an object");
+            constructor.set(ops->buffer->species(constructor.get()));
+            if (item_is_error(constructor.get())) return constructor.get();
+            if (constructor.get().item == ITEM_NULL) constructor.set(absent);
+        }
+    } else if (get_type_id(constructor.get()) != LMD_TYPE_UNDEFINED) {
+        Item species = ItemNull;
+        JS_ASSIGN_OR_RETURN(status, js_typed_array_resolve_species(constructor.get(), &species, &direct_type));
+        bool use_default = direct_type < 0 && js_typed_array_use_default_species(constructor.get(), &species);
+        constructor.set(use_default ? absent : species);
+        if (direct_type < 0 && !use_default) {
+            if (!js_is_constructor_internal(constructor.get())) return fail("species is not a constructor");
+            direct_type = js_resolve_ta_type_from_ctor(constructor.get());
+        }
     }
-    JsTypedArray* ta = js_get_typed_array_ptr(exemplar.map);
-    int default_type = (int)ta->element_type;
-
-    JS_ASSIGN_OR_RETURN(C, js_typed_array_species_constructor_property(exemplar));
-
-    // If C is undefined, return default
-    if (get_type_id(C) == LMD_TYPE_UNDEFINED) {
-        return js_typed_array_default_species_from_length(exemplar, default_type, length);
+    Item arguments[3] = {first.get(), second.get(), third.get()};
+    if (ops) {
+        result.set(ops->construct(default_type, constructor.get(), arguments, argc));
+    } else if (direct_type >= 0) {
+        result.set(from_buffer ? js_typed_array_new_from_buffer(direct_type, first.get(),
+            (int)it2i(second.get()), length) : js_typed_array_new(direct_type, length));
+    } else if (get_type_id(constructor.get()) == LMD_TYPE_UNDEFINED) {
+        result.set(from_buffer ? js_typed_array_default_species_from_buffer(owner.get(), default_type,
+            first.get(), (int)it2i(second.get()), length, argc == 2) :
+            js_typed_array_default_species_from_length(owner.get(), default_type, length));
+    } else {
+        result.set(js_construct_value(constructor.get(), arguments, argc, constructor.get(), NULL, false));
     }
-
-    Item S = (Item){.item = ITEM_NULL};
-    int inherited_type = -1;
-    JS_ASSIGN_OR_RETURN(species_status, js_typed_array_resolve_species(C, &S, &inherited_type));
-    if (inherited_type >= 0) return js_typed_array_new(inherited_type, length);
-
-    // If S is undefined or null, return default. Class objects that inherit
-    // %TypedArray%[@@species] through their constructor chain should observe
-    // the built-in getter's `return this` behavior even when the generic
-    // property walker misses the FUNC prototype link.
-    if (js_typed_array_use_default_species(C, &S))
-        return js_typed_array_default_species_from_length(exemplar, default_type, length);
-
-    if (!js_is_constructor_internal(S)) {
-        // SpeciesConstructor is capability-based; inspecting the carrier type
-        // rejects constructable Proxies before [[Construct]] (D6.2.2v2).
-        return js_throw_type_error("species is not a constructor");
-    }
-
-    // TypedArrayCreate: Construct(constructor, «length»)
-    int direct_type = js_resolve_ta_type_from_ctor(S);
-    if (direct_type >= 0) return js_typed_array_new(direct_type, length);
-    Item len_arg = (Item){.item = i2it(length)};
-    JS_ASSIGN_OR_RETURN(result, js_construct_value(S, &len_arg, 1, S, NULL,
-        false));
-
-    // ValidateTypedArray(newTypedArray)
-    if (!js_is_typed_array(result)) {
-        return js_throw_type_error("species constructor did not return a TypedArray");
-    }
-    JsTypedArray* rta = js_get_typed_array_ptr(result.map);
-    if (rta && rta->base.buffer && js_arraybuffer_detached(rta->base.buffer)) {
-        return js_throw_type_error("species constructor returned a detached TypedArray");
-    }
-    if (rta && js_typed_array_length(result) < length) {
-        return js_throw_type_error("species constructor returned a TypedArray that is too small");
-    }
-
-    return result;
+    if (item_is_error(result.get())) return result.get();
+    if (!js_is_typed_array(result.get())) return fail("species constructor did not return a TypedArray");
+    if (js_typed_array_is_out_of_bounds_item(result.get())) return fail("species returned an out-of-bounds TypedArray");
+    JsTypedArray* output = js_get_typed_array_ptr(result.get().map);
+    if (js_typed_array_spec(output->element_type)->bigint != js_typed_array_spec(default_type)->bigint)
+        return fail("species returned a TypedArray with a different content type");
+    if (!from_buffer && js_typed_array_length(result.get()) < length)
+        return fail("species returned a TypedArray that is too small");
+    return result.get();
 }
 
-extern "C" Item js_typed_array_species_create_from_buffer(Item exemplar, Item buffer, int byte_offset, int length, bool length_tracking) {
-    if (!js_is_typed_array(exemplar)) {
-        return js_throw_type_error("not a typed array");
-    }
-    JsTypedArray* ta = js_get_typed_array_ptr(exemplar.map);
-    int default_type = (int)ta->element_type;
+extern "C" Item js_typed_array_species_create(Item exemplar, int length) {
+    Item argument = {.item = i2it(length)};
+    return js_typed_array_species_create_with_ops(exemplar, &argument, 1, NULL);
+}
 
-    JS_ASSIGN_OR_RETURN(C, js_typed_array_species_constructor_property(exemplar));
-
-    if (get_type_id(C) == LMD_TYPE_UNDEFINED) {
-        return js_typed_array_default_species_from_buffer(exemplar, default_type, buffer, byte_offset, length, length_tracking);
-    }
-
-    Item S = (Item){.item = ITEM_NULL};
-    int inherited_type = -1;
-    JS_ASSIGN_OR_RETURN(species_status, js_typed_array_resolve_species(C, &S, &inherited_type));
-    if (inherited_type >= 0) {
-        return js_typed_array_new_from_buffer(
-            inherited_type, buffer, byte_offset, length_tracking ? -1 : length);
-    }
-
-    if (js_typed_array_use_default_species(C, &S))
-        return js_typed_array_default_species_from_buffer(exemplar, default_type, buffer, byte_offset, length, length_tracking);
-
-    if (!js_is_constructor_internal(S)) {
-        // SpeciesConstructor tests the stored [[Construct]] capability; a
-        // constructable Proxy must not be rejected by its MAP representation
-        // before the common construct kernel sees it (D6.2.2v2).
-        return js_throw_type_error("Species constructor is not a constructor");
-    }
-
-    Item args[3];
-    args[0] = buffer;
-    args[1] = (Item){.item = i2it(byte_offset)};
-    args[2] = (Item){.item = i2it(length)};
-    int argc = length_tracking ? 2 : 3;
-    JS_ASSIGN_OR_RETURN(result, js_construct_value(S, args, argc, S, NULL,
-        false));
-
-    if (!js_is_typed_array(result)) {
-        return js_throw_type_error("species constructor did not return a TypedArray");
-    }
-    JsTypedArray* rta = js_get_typed_array_ptr(result.map);
-    if (rta && rta->base.buffer && js_arraybuffer_detached(rta->base.buffer)) {
-        return js_throw_type_error("species constructor returned a detached TypedArray");
-    }
-    return result;
+extern "C" Item js_typed_array_species_create_from_buffer(Item exemplar, Item buffer,
+        int byte_offset, int length, bool length_tracking) {
+    Item args[3] = {buffer, Item{.item = i2it(byte_offset)}, Item{.item = i2it(length)}};
+    return js_typed_array_species_create_with_ops(exemplar, args, length_tracking ? 2 : 3, NULL);
 }
 
 extern "C" Item js_new_object_with_typemap(TypeMap* tm) {
@@ -21522,38 +21492,9 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 return js_typed_array_set_from(obj, source, offset);
             }
             if (operation == JS_TYPED_ARRAY_INTRINSIC_SUBARRAY) {
-                int len = js_typed_array_length(obj);
-                double d_start = 0;
-                if (argc > 0) {
-                    if (js_is_symbol(args[0])) {
-                        return js_throw_type_error("Cannot convert a Symbol value to a number");
-                    }
-                    JS_ASSIGN_OR_RETURN(start_num, js_to_number(args[0]));
-                    d_start = js_get_number(start_num);
-                    if (d_start != d_start) d_start = 0;
-                    d_start = d_start >= 0 ? floor(d_start) : ceil(d_start);
-                }
-                bool end_is_default = argc <= 1 || args[1].item == ITEM_JS_UNDEFINED;
-                double d_end = (double)len;
-                if (!end_is_default) {
-                    if (js_is_symbol(args[1])) {
-                        return js_throw_type_error("Cannot convert a Symbol value to a number");
-                    }
-                    JS_ASSIGN_OR_RETURN(end_num, js_to_number(args[1]));
-                    d_end = js_get_number(end_num);
-                    if (d_end != d_end) d_end = 0;
-                    d_end = d_end >= 0 ? floor(d_end) : ceil(d_end);
-                }
-                int start, end;
-                if (d_start == -INFINITY) start = 0;
-                else if (d_start < 0) { start = d_start < -(double)len ? 0 : len + (int)d_start; }
-                else if (d_start == INFINITY || d_start > (double)len) start = len;
-                else start = (int)d_start;
-                if (d_end == -INFINITY) end = 0;
-                else if (d_end < 0) { end = d_end < -(double)len ? 0 : len + (int)d_end; }
-                else if (d_end == INFINITY || d_end > (double)len) end = len;
-                else end = (int)d_end;
-                return js_typed_array_subarray(obj, start, end, end_is_default);
+                return js_typed_array_subarray(obj,
+                    argc > 0 ? args[0] : Item{.item = ITEM_JS_UNDEFINED},
+                    argc > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}, NULL);
             }
             if (operation == JS_ARRAY_INTRINSIC_SLICE) {
                 // Js55 P19: when Array.prototype.slice is called on a TA, ES spec
