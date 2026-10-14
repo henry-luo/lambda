@@ -25,7 +25,7 @@ budget. Conversion errors appear in the preview rather than becoming ZIP text.
 
 `lambda view file.docx --archive` explicitly opens the underlying package tree.
 The option requires a source and cannot be combined with `--paged`. Generic
-ZIP/JAR browsing remains the default. Word pagination, separate stories and
+ZIP/JAR browsing remains the default. Word pagination, header/footer stories and
 editing are still outside the converter profile.
 
 Visual capture exposed a relative icon-font URL resolving beneath the browsed
@@ -110,8 +110,9 @@ bindings or looking up placeholder text in the glossary (S1.8, D7.2.4).
 Both note parts contain only separator and continuation-separator definitions.
 `package.ls` now reads internal footnote/endnote parts and checks their roots
 and note types before diagnosing omitted stories. Separator-only parts have
-no actual notes to display; ordinary notes, external stories and other
-unsupported story types retain diagnostics. Missing/malformed note parts
+no actual notes to display. At this stage ordinary notes, external stories and
+other unsupported story types retained diagnostics; referenced annotations
+are supported by the subsequent Mammoth corpus extension below. Missing/malformed note parts
 follow the existing package/XML error lane.
 
 The original document now reports **zero import diagnostics** and retains
@@ -220,7 +221,7 @@ empty paragraphs and significant Unicode text. HTML numeric attributes are
 textual at the DOM boundary, matching the existing LaTeX package convention;
 the private model keeps numeric values.
 
-Separate stories, revision/field semantics, complex drawings/equations, exact
+Header/footer stories, revision/field semantics, complex drawings/equations, exact
 Word page layout, writing DOCX, and encrypted/macro-enabled documents remain
 outside the initial profile. External resources
 are never fetched; URI targets, hyperlink schemes and option mappings are
@@ -291,14 +292,46 @@ after the full native baseline. No other package imports this style helper.
 
 ## Fixture provenance and boundaries
 
-Nine public Mammoth reference documents are pinned to commit
+All 17 public Mammoth DOCX reference documents are pinned to commit
 `791a189230977143cde64dbf9f1d24dce96ac8a1`, with license, source URLs,
 SHA-256 hashes and producer metadata under `test/input/docx/reference/`.
-Eight import. The unchanged ninth, `tiny-picture-target-base-relative.docx`,
-declares version-needed `0x0314`, rejected by the shared ZIP reader's supported
-version bound. It is an explicit rejection case, never counted as an import
-pass. These are Lambda's own tests using reference documents, not a run of the
-upstream Mammoth suite. LibreOffice producer coverage remains unverified.
+All import: 15 without diagnostics, plus external-image and text-box-placement
+diagnostic cases. The shared ZIP reader previously compared both bytes of the
+version-needed field against 45, incorrectly rejecting the platform byte in
+`0x0314`. It now checks the low version byte in both headers, following
+[APPNOTE §4.4.3.1](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT);
+the original root-relative raster fixture imports without repacking. A native
+regression checks platform bytes, supported versions and genuine unsupported
+versions in both local and central headers.
+
+The package now retains referenced footnote, endnote and comment content,
+including part-local hyperlinks, through shared model/render helpers under
+D7.2.4. Annotation IDs are validated, repeated references share one appended
+entry, and numbering follows reference order independently for each kind.
+Text boxes reuse block lowering and move after their containing paragraph;
+their floating geometry remains diagnosed. External images are never loaded,
+and Mammoth's embedded style-map extension does not become executable input
+or override Lambda's options (S1.8). The generated annotation controls exercise
+part relocation, table-cell references, malformed IDs/roots, nested references
+and unsafe/external targets. This follows the
+[OOXML footnote-reference rule](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.footnotereference?view=openxml-3.0.1)
+and [text-box content model](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.textboxcontent?view=openxml-3.0.1).
+
+These are Lambda's own tests using unchanged reference documents, not a run
+of the upstream Mammoth suite. Producer metadata now includes both Word and
+LibreOffice. No formal ruling changes are required for this package extension.
+
+Mammoth corpus verification: all **17/17** source hashes match the pinned
+manifest; **12/12** DOCX goldens pass on each of `interp`, `auto` and `jit`;
+the native ZIP suite passes **16/16**, including the extraction-version
+regression. The aggregate Lambda baseline passes **6,655/6,656** reported
+checks: all 2,112 input checks and all 4,543 completed Lambda checks pass,
+but the MIR GC stress runner hits its 180-second idle limit in
+`regression_music_layout`. That MusicXML script does not import DOCX. An
+isolated retry passes all three stress modes in **241.6 seconds**, exceeding
+that idle window. A stack sample shows string construction and precise
+collection rather than DOCX/ZIP work. The aggregate timeout is not counted
+as a pass, and no runner limits or test expectations were weakened.
 
 The existing unrelated dirty worktree edits are outside this change; no files
 were staged or committed.

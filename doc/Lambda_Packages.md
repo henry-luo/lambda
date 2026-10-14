@@ -1518,6 +1518,12 @@ table grid widths, cell shading and borders, row heights, and page size/margins.
 Values are converted from OOXML units into CSS; the named font must be
 available to the host font resolver for a matching face. CSS remains a flow
 preview and does not reproduce Word's full layout engine.
+Footnotes, endnotes and comments become numbered links and appended ordered
+sections, with each kind numbered in first-reference order and repeated
+references sharing one entry (D7.2.4). Links in annotations resolve against
+that annotation part's relationships. Extracted text includes reference marks
+and labelled annotation text after the main body. Text-box paragraphs/tables
+are retained after their containing paragraph, with a placement diagnostic.
 Both Transitional and Strict Word
 namespace families are recognized. HTML is flow content, with semantic break
 markers and no Word pagination guarantee.
@@ -1526,7 +1532,7 @@ Content controls display their saved `sdtContent` at inline, block, row and
 cell boundaries, preserving surrounding formatting and reading order. Control
 properties are editing metadata; bindings and placeholder definitions are not
 evaluated. Footnote/endnote parts containing only separator definitions do not
-represent omitted notes; actual note content remains diagnosed.
+represent document notes and are excluded from annotation content.
 
 | Option | Default | Meaning |
 |--------|---------|---------|
@@ -1534,11 +1540,12 @@ represent omitted notes; actual note content remains diagnosed.
 | `presentation` | `"semantic"` | `"source"` adds validated Word theme, run, table, and page CSS; the viewer selects it. |
 | `include_empty_paragraphs` | `false` | Preserve empty paragraph elements and text boundaries. |
 | `images` | `"data-uri"` | Embed supported internal images; `"omit"` reports their omission. |
-| `id_prefix` | `""` | Prefix bookmark IDs and internal anchor links. |
+| `id_prefix` | `""` | Prefix bookmark/annotation IDs and internal anchor links. |
 | `unsupported` | `"warn"` | Return diagnostics; `"error"` rejects a conversion with diagnostics. |
 
 Diagnostics have `{severity, code, part, message}`. Unsupported visible
-constructs are reported. Headers/footers, notes, comments, revision semantics,
+constructs are reported. Headers/footers, comment ranges/author metadata, custom
+note numbering, revision semantics,
 field execution, other chart types, shapes, equations, page-relative floating
 placement, DOCX writing,
 encrypted documents, and `.docm` are outside this profile. External resources
@@ -1549,10 +1556,11 @@ XML, and style cycles raise ordinary Lambda errors.
 
 Package errors use codes 7600–7607: invalid source, options, package, missing
 part, XML, target, unsupported content in strict mode, and style cycle.
-Underlying source/ZIP errors keep their existing codes. In particular, the
-pinned `tiny-picture-target-base-relative.docx` reference is rejected by the
-shared ZIP reader for its `0x0314` version-needed declaration; it is recorded
-as an unsupported input, not a successful import.
+Underlying source/ZIP errors keep their existing codes. All 17 pinned Mammoth
+DOCX reference documents import; the external-image and floating-text-box
+fixtures report their unsupported resources/geometry. Mammoth's embedded
+style-map extension does not override Lambda's explicit `style_map` option
+(S1.8, D7.2.4). See the [fixture inventory](../test/input/docx/README.md).
 
 Design and phased scope: [DOCX package](../vibe/Lambda_Pkg_Docx.md).
 

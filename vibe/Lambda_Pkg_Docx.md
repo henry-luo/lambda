@@ -68,8 +68,8 @@ library.
   external resources.
 - Full coverage of OOXML, drawing canvas, chart types beyond cached clustered
   columns, SmartArt, embedded OLE,
-  equations, tracked changes, comments, content-control editing/binding semantics, or floating text
-  boxes in v1.
+  equations, tracked changes, content-control editing/binding semantics, or
+  floating text-box geometry in v1.
 - Silently claiming support for an item that is merely skipped. Unsupported
   material that affects visible content must produce a diagnostic.
 - Changing generic `input()` format dispatch. The separate Phase 4 viewer
@@ -204,6 +204,8 @@ void-element implementations.
 | Superscript and subscript | `<sup>` and `<sub>` |
 | Tabs and line breaks | Text plus `<br>` where needed, preserving visible order |
 | Hyperlink relationship | `<a href="…">`; external targets remain inert until the caller activates a link |
+| Footnotes, endnotes and comments | Numbered superscript links with referenced content appended in separate ordered sections; each kind numbers independently in first-reference order, deduplicating repeated references |
+| Text-box content | Preserve paragraphs/tables after the containing paragraph, selecting one compatibility representation; diagnose omitted floating geometry |
 | Simple ordered/unordered lists | `<ol>` / `<ul>` and nested `<li>`, derived from numbering definitions and paragraph level |
 | Lists with `numFmt="none"` | Nested lists with hidden markers and numbering-level indentation/hanging indent |
 | Tables | `<table>`, row and cell elements; preserve text, nested paragraphs, and supported row/column spans |
@@ -222,10 +224,19 @@ semantic v1 contract. The supported paragraph-anchor subset uses CSS floats,
 distance/effect extents, and signed offsets for column-start square wrapping
 at a paragraph anchor (D7.2.4). Arbitrary positions that need text on both
 sides of an interior image still retain diagnostics.
-Footnote/endnote parts are inspected before diagnosing separate stories:
-parts containing only separator and continuation-separator definitions have
-no actual notes to omit. Normal notes and other separate stories remain
-outside the supported profile.
+Footnote/endnote separator and continuation-separator definitions are metadata,
+not document notes. Annotation parts resolve IDs and relationships in their
+own part context; referenced content shares the paragraph/table/style lowering
+used by the main body (D7.2.4). Repeated references point to one annotation,
+and source numeric IDs do not determine display numbering. Plain text retains
+reference markers and appends labelled annotation text after the body, grouped
+as footnotes, endnotes and comments. Significant source whitespace is retained.
+Missing targets, nested references and custom note marks are diagnosed;
+duplicate/missing annotation IDs, invalid part roots and external annotation
+parts fail package validation. Headers and footers remain unsupported stories.
+Comment range geometry, author metadata and Word's page-local/custom numbering
+are outside this semantic representation. Mammoth-specific embedded style
+maps do not override Lambda's explicit conversion options (S1.8).
 
 ### 5.4 Diagnostics and errors
 
@@ -363,9 +374,9 @@ relevant Radiant baseline only for this viewer integration.
 
 ## 9. Deferred features
 
-- Footnotes and endnotes with reciprocal links.
+- Reciprocal backlinks and Word-specific/custom numbering for notes.
 - Headers and footers as section-aware semantic content.
-- Comments, tracked-change policy, bookmarks beyond simple main-story anchors,
+- Comment ranges/author metadata, tracked-change policy, bookmarks beyond simple main-story anchors,
   and additional field types.
 - More complete table borders/styles, column layout, and shape-to-SVG subset.
 - Equations, chart types beyond cached clustered columns, SmartArt, embedded
@@ -426,16 +437,16 @@ with precise roots for the owner and returned tag during symbol allocation.
 
 Fixtures and supported behaviors are documented in `test/input/docx/README.md`.
 The independent fixture set is pinned to Mammoth commit
-`791a189230977143cde64dbf9f1d24dce96ac8a1`: eight documents import; a ninth
-declares ZIP version-needed `0x0314` and remains rejected by the existing ZIP
-reader. The latter is an explicit negative case, never counted as import
-coverage. The fixtures are reused reference documents, not a run of Mammoth's
-upstream test suite. Word producer metadata is recorded; no LibreOffice
-installation or producer corpus was available for this initial run.
+`791a189230977143cde64dbf9f1d24dce96ac8a1`: all 17 DOCX documents import,
+15 without diagnostics and two with explicit external-image/text-box-layout
+diagnostics. The ZIP reader correctly reads the low version byte of the
+`0x0314` declaration, so the original root-relative image document imports.
+The fixtures are reused reference documents, not a run of Mammoth's upstream
+test suite. Producer metadata includes both Word and LibreOffice.
 
 Plain text uses two trailing newlines per paragraph and tab/newline separators
 for tables. Bookmarks and anchor links are implemented for the simple main-story
-case. Separate stories, full revision/field semantics and Word pagination
+case. Header/footer stories, full revision/field semantics and Word pagination
 remain outside this profile. The native XML mode is UTF-8 only; unsupported
 encodings fail explicitly. Detailed validation results are recorded in
 `vibe/impl/Lambda_Impl_Docx.md`.
