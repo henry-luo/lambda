@@ -33,6 +33,9 @@ struct MvpLmdClass {
     bool dynamic;              // definition needs fresh per-evaluation nominal metadata
     Function* owner;             // ordinary callable; nonmoving GC object, traced from nominal instances
     uint8_t property_slot;       // first of three metadata Items in its closure environment
+    uint8_t private_method_mask; // instance/static templates occupy optional slots after field keys
+    bool has_instance_elements; // one admission fact for fields or private methods, in existing padding
+    bool has_private_names;
     uint32_t initializer_slot;
     uint32_t initializer_count;
     uint32_t field_count;
@@ -295,6 +298,9 @@ Item mvp_lmd_define_properties(Item owner, Item descriptors);
 Item mvp_lmd_get_own_descriptor(Item owner, Item name);
 Item mvp_lmd_object_integrity(Item owner, int64_t operation);
 Item mvp_lmd_define_accessor(Item owner, Item name, Item function, int64_t attributes);
+enum MvpLmdPrivateOperation { LMD_PRIVATE_NAME, LMD_PRIVATE_GET, LMD_PRIVATE_SET,
+    LMD_PRIVATE_HAS, LMD_PRIVATE_ADD, LMD_PRIVATE_METHOD };
+extern "C" Item mvp_lmd_private_element(Item owner, Item key, Item value, int64_t operation);
 Item mvp_lmd_accessor_call(Item receiver, ShapeEntry* field, Item value, int64_t operation);
 Item mvp_lmd_array_sort(Item owner, Item comparator);
 Item mvp_lmd_array_spread(Item target, Item source, int64_t projection);
@@ -314,7 +320,7 @@ Item mvp_lmd_map_entry(Item owner, int64_t cursor, int64_t projection);
 Item mvp_lmd_function_new(uint64_t code_id, MvpLmdProgram* program);
 Item mvp_lmd_function_prepare(Item function);
 Item mvp_lmd_class_new(MvpLmdClass* plan, Item base, Item constructor = ItemNull);
-Item mvp_lmd_class_initialize_instance(Item constructor, Item receiver);
+Item mvp_lmd_class_initialize_instance(Item constructor, Item receiver, int64_t static_methods = 0);
 Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments, int64_t argc, Item new_target);
 Item mvp_lmd_class_super(Item function, int64_t constructor);
 Item mvp_lmd_get_prototype(Item object);

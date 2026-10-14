@@ -141,6 +141,7 @@ bool css_property_runtime_inherited(CssPropertyCode property) {
         CSS_PROPERTY_TEXT_EMPHASIS_STYLE, CSS_PROPERTY_TEXT_EMPHASIS_POSITION,
         CSS_PROPERTY_TEXT_TRANSFORM, CSS_PROPERTY_TEXT_INDENT,
         CSS_PROPERTY_TEXT_SPACING_TRIM, CSS_PROPERTY_HYPHENATE_CHARACTER,
+        CSS_PROPERTY_HYPHENATE_LIMIT_CHARS,
         CSS_PROPERTY_DOMINANT_BASELINE, CSS_PROPERTY_LETTER_SPACING,
         CSS_PROPERTY_WORD_SPACING, CSS_PROPERTY_WHITE_SPACE,
         CSS_PROPERTY_TAB_SIZE,
@@ -397,6 +398,30 @@ static bool format_css_value(DomElement* element, CssPropertyCode id,
         return format_grid_computed_value(element, value, out);
     if (id == CSS_PROPERTY_LINE_CLAMP || id == CSS_PROPERTY_WEBKIT_LINE_CLAMP)
         return format_clamp_computed_value(element, value, out);
+    if (id == CSS_PROPERTY_HYPHENATE_LIMIT_CHARS) {
+        const CssValue* components[3];
+        if (!css_hyphenate_limit_components(value, components)) return false;
+        int limits[3] = {-1, -1, -1};
+        for (size_t i = 0; i < 3; i++) {
+            if (!components[i] || css_value_keyword_equals(components[i], CSS_VALUE_AUTO)) continue;
+            CssMathResult math;
+            double count = 0.0;
+            if (!css_prop_compute_numeric_value(element, components[i], &math) ||
+                !css_compute_integer_result(components[i], &math, 0.0, (double)INT_MAX, &count)) return false;
+            limits[i] = (int)count; // INT_CAST_OK: computed character-count limit
+        }
+        // CSSOM omits a repeated suffix and a remaining auto prefix.
+        size_t count = limits[2] == limits[1] ? 2 : 3;
+        if (count == 2 && limits[1] < 0) count = 1;
+        stringbuf_reset(out);
+        for (size_t i = 0; i < count; i++) {
+            bool written = limits[i] < 0
+                ? stringbuf_append_format(out, "%sauto", i ? " " : "")
+                : stringbuf_append_format(out, "%s%d", i ? " " : "", limits[i]);
+            if (!written) return false;
+        }
+        return true;
+    }
     if (id == CSS_PROPERTY_WEBKIT_BOX_ORIENT) {
         return copy_text(out, css_value_has_identifier(value, "vertical") ||
             css_value_has_identifier(value, "block-axis") ? "vertical" : "horizontal");
@@ -1855,6 +1880,7 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DIRECT_ROW(CSS_PROPERTY_TEXT_OVERFLOW, PROP_GROUP_BLOCK, BlockProp, text_overflow, CSS_PROP_VALUE_ENUM, 0),
     DERIVED_ROW(CSS_PROPERTY_LINE_CLAMP, serialize_line_clamp, 0),
     DERIVED_ROW(CSS_PROPERTY_WEBKIT_LINE_CLAMP, serialize_line_clamp, 0),
+    DECL_ROW(CSS_PROPERTY_HYPHENATE_LIMIT_CHARS),
     DECL_ROW(CSS_PROPERTY_WEBKIT_BOX_ORIENT),
     DIRECT_ROW(CSS_PROPERTY_WHITE_SPACE, PROP_GROUP_BLOCK, BlockProp, white_space, CSS_PROP_VALUE_ENUM, 0),
     DIRECT_ROW(CSS_PROPERTY_TEXT_WRAP_MODE, PROP_GROUP_BLOCK, BlockProp, text_wrap_mode, CSS_PROP_VALUE_ENUM, 0),

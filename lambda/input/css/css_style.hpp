@@ -226,6 +226,9 @@ bool css_image_set_valid(const CssValue* value);
 bool css_integer_value_valid(const CssValue* value);
 bool css_compute_integer_value(const CssValue* value, const CssMathEvaluationContext* context,
     double minimum, double maximum, double* result);
+bool css_compute_integer_result(const CssValue* value, const CssMathResult* math,
+    double minimum, double maximum, double* result);
+bool css_hyphenate_limit_components(const CssValue* value, const CssValue* components[3]);
 CssValue* css_simplify_math_value(Pool* pool, const CssValue* value);
 
 // line-height numbers retain their multiplier; other numeric forms compute to inherited px.
@@ -867,6 +870,7 @@ typedef enum CssPropertyCode {
     CSS_PROPERTY_TEXT_ANCHOR,
 
     CSS_PROPERTY_WEBKIT_BOX_ORIENT,
+    CSS_PROPERTY_HYPHENATE_LIMIT_CHARS,
 
     // Custom Properties (CSS Variables)
     CSS_PROPERTY_CUSTOM,

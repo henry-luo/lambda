@@ -464,6 +464,54 @@ extern "C" Item mvp_lmd_define_accessor(Item owner, Item name, Item function, in
     return cell && js_map_store_accessor(mvp_lmd_property_map(object.get(), true), key.get().get_string(), cell,
         (uint8_t)(attributes >> 8), context->pool) ? object.get() : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
+extern "C" Item mvp_lmd_private_element(Item owner, Item key, Item input, int64_t operation) {
+    if (operation == LMD_PRIVATE_NAME) {
+        String* spelling = key.get_string();
+        NameRef name = name_pool_create_unique_private(context->name_pool, {spelling->chars, spelling->len});
+        return name ? Item{.item = s2it(name)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    }
+    if (!mvp_lmd_is_object(owner)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    RootFrame roots(4);
+    if (!roots.valid()) return ItemError;
+    uint64_t home = 0;
+    Rooted<Item> object(roots, owner), name(roots, key), storage(roots, owner);
+    Rooted<Item> value(roots, lambda_item_adopt_scalar_home(input, &home));
+    bool add = operation == LMD_PRIVATE_ADD || operation == LMD_PRIVATE_METHOD;
+    if (mvp_lmd_is_proxy(object.get())) {
+        storage.set(js_proxy_private_slots(object.get(), add, []() {
+            return mvp_lmd_object_new(mvp_lmd_program_library()->object_shape, 0);
+        }, true));
+    } else if (get_type_id(object.get()) == LMD_TYPE_FUNC && !mvp_lmd_class_record(object.get())) {
+        Item ready = mvp_lmd_function_prepare(object.get());
+        if (item_is_error(ready)) return ready;
+    }
+    Map* map = mvp_lmd_property_map(storage.get(), add || operation == LMD_PRIVATE_SET);
+    ShapeEntry* field = map && map->type ? own_field(map, name.get().get_string()) : NULL;
+    if (operation == LMD_PRIVATE_HAS) return Item{.item = b2it(field != NULL)};
+    if (add ? field != NULL : field == NULL) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (!map) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+    if (!map->type) map->type = type_tree_map_root(runtime_shape_tree());
+    if (field && (field->flags & JSPD_IS_ACCESSOR)) {
+        JsAccessorCell* pair = js_shape_entry_accessor_pair(field);
+        Item callable = operation == LMD_PRIVATE_SET ? pair->setter : pair->getter;
+        // private accessors throw for either missing half, even in sloppy callers.
+        if (callable.item == ITEM_NULL || callable.item == ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+        return mvp_lmd_accessor_call(object.get(), field, value.get(),
+            operation == LMD_PRIVATE_SET ? LMD_PROP_SET | LMD_PROP_STRICT : LMD_PROP_GET);
+    }
+    if (operation == LMD_PRIVATE_GET) return map_shape_field_to_item(map->data, field);
+    if (field && (field->flags & JSPD_NON_WRITABLE)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+    if (!map_shape_set_resolved(map, name.get().get_string(), field, value.get())) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    if (operation == LMD_PRIVATE_METHOD) {
+        field = own_field(map, name.get().get_string());
+        // the descriptor is shared immutable shape metadata; use its existing transition kernel.
+        JsPropertyDescriptor descriptor = {};
+        descriptor.flags = JS_PD_HAS_WRITABLE;
+        Item result = mvp_lmd_define_own_property(storage.get(), name.get(), &descriptor);
+        if (item_is_error(result)) return result;
+    }
+    return lambda_item_uses_scalar_home(value.get()) ? push_d(it2d(value.get())) : value.get();
+}
 static Item mvp_lmd_descriptor_read(Item owner, Item key, bool presence) {
     return mvp_lmd_class_property(owner, key, ItemNull, presence ? LMD_PROP_HAS : LMD_PROP_GET, NULL);
 }

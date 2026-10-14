@@ -611,6 +611,7 @@ enum MarkupNameId {
     MARKUP_NAME_SCENE3D = 0x0000025Eu,
     MARKUP_NAME_GEOMAP = 0x0000025Fu,
     MARKUP_NAME_CSS_WEBKIT_BOX_ORIENT = 0x00000260u,
+    MARKUP_NAME_CSS_HYPHENATE_LIMIT_CHARS = 0x00000261u,
 };
 
 extern const WellKnownNameRecord g_well_known_markup_names[];

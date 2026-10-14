@@ -1,0 +1,14 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+.row { width: 12px; height: 10px; column-gap: 0; column-fill: auto; }
+.child { width: 1px; height: 20px; background: green; }
+</style>
+<div id="result">
+<div class="row" id="longhand" style="column-width: 0px"><div class="child"></div></div>
+<div class="row" id="shorthand" style="columns: 0px"><div class="child"></div></div>
+<div class="row" id="unitless" style="column-width: 0"><div class="child"></div></div>
+<div class="row" id="subpixel" style="column-width: .5px"><div class="child"></div></div>
+<div class="row" id="capped" style="columns: 0px 3"><div class="child"></div></div>
+<div class="row" id="automatic" style="column-width: auto"><div class="child"></div></div>
+</div>

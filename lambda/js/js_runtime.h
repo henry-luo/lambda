@@ -1328,6 +1328,10 @@ Item js_proxy_revocable(Item target, Item handler);
 bool js_is_proxy(Item obj);
 // Get proxy data (returns NULL if not a proxy)
 JsProxyData* js_get_proxy_data(Item obj);
+#ifdef __cplusplus
+Item js_proxy_private_slots(Item proxy, bool create, Item (*allocate)() = nullptr,
+    bool allow_revoked = false);
+#endif
 // Get the ultimate non-proxy target (unwrap nested proxies)
 Item js_proxy_get_target(Item obj);
 Item js_set_private_proxy_property(Item proxy, Item key, Item value);

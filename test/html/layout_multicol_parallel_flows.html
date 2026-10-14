@@ -1,0 +1,13 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+.set { width: 100px; height: 100px; columns: 2; column-gap: 0; column-fill: auto; }
+.cb { position: relative; height: 100px; }
+.abs { position: absolute; width: 50px; height: 200px; }
+</style>
+<div id="result">
+<div class="set"><div class="cb"><div class="abs" id="long" style="top: 0"><div id="long-child" style="height: 200px; width: 50px"></div></div></div></div>
+<div class="set"><div class="cb"><div style="height: 100px"></div><div class="abs" id="static" style="height: 100px"></div></div></div>
+<div class="set"><div class="cb"><div class="abs" id="offset" style="top: 20px; height: 170px"></div></div></div>
+<div class="set"><div class="cb" style="overflow: auto"><div class="abs" id="scroll" style="top: 0; width: 20px"></div></div></div>
+</div>

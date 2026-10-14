@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+@font-face {
+  font-family: ContextNaskh;
+  src: url("../layout/data/support/fonts/noto/NotoNaskhArabic-regular.woff2");
+}
+body { margin: 0; }
+.word { display: inline-block; white-space: nowrap; font: 32px/2 "Kohinoor Bangla"; font-kerning: none; }
+.selected { font-family: "Bangla MN"; }
+.tracked { letter-spacing: 16px; }
+.arabic { font: 120px/1 ContextNaskh; width: 90px; word-break: break-all; }
+</style>
+<div id="result">
+<div id="plain" class="word">অ্যান্টিগুয়া</div>
+<div id="selected" class="word selected">অ্যান্টিগুয়া</div>
+<div id="selected-tracked" class="word selected tracked">অ্যান্টিগুয়া</div>
+<div id="arabic" class="arabic">ععع</div>
+</div>

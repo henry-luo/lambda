@@ -1,0 +1,20 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+body { margin: 0; font: 20px/1 Ahem; }
+.box { display: inline-block; vertical-align: top; }
+.min { width: min-content; }
+</style>
+<div id="result">
+<div class="box" id="direct">XXXXXX <br id="direct-break">Y</div>
+<div class="box" id="nested">XXXXXX <span><br>Y</span></div>
+<div class="box" id="after">XXXXXX<br> <span>Y</span></div>
+<div class="box" id="space">XXXXXX <span>Y</span></div>
+<div class="box" id="preserved" style="white-space: pre">XXXXXX <br>Y</div>
+<div class="box" id="decorated">XXXXXX <span style="border: 1px solid"><br>Y</span></div>
+<div class="min" id="normal-punctuation"><span>X</span><span>.</span></div>
+<div class="min" id="word-punctuation" style="overflow-wrap: break-word"><span>X</span><span>.</span></div>
+<div class="min" id="any-punctuation" style="overflow-wrap: anywhere"><span>X</span><span>.</span></div>
+<div class="min" id="all-punctuation" style="word-break: break-all"><span>X</span><span>.</span></div>
+<div class="min" id="keep-punctuation" style="word-break: keep-all"><span>X</span><span>.</span></div>
+</div>

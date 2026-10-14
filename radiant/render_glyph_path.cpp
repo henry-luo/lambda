@@ -81,15 +81,15 @@ bool render_visit_text_run_glyphs(const PaintGlyphRun* run, FontContext* font_co
     float pen = run->x;
     const char* cursor = run->text;
     const char* end = cursor + (run->text_len >= 0 ? (size_t)run->text_len : strlen(cursor));
-    uint32_t previous = 0;
+    TextJustifyContext justify_context = {};
     while (ok && cursor < end) {
         uint32_t codepoint = 0;
         int bytes = str_utf8_decode(cursor, (size_t)(end - cursor), &codepoint);
         if (bytes <= 0) { ok = false; break; }
         cursor += bytes;
+        bool character_gap = text_justify_character_gap(&justify_context, codepoint);
         if (codepoint == 0xFE0F) continue;
-        if (text_justify_cjk_gap(previous, codepoint)) pen += run->cjk_spacing;
-        previous = codepoint;
+        if (character_gap) pen += run->cjk_spacing;
         if (codepoint == ' ') {
             pen += text_space_advance(box->style, run->word_spacing);
             continue;

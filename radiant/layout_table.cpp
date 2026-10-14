@@ -759,9 +759,7 @@ static float table_inline_line_stack_height(const TableCellContentExtent* extent
     return line_stack_height;
 }
 
-static float table_text_font_normal_line_height(ViewText* text, FontProp* font,
-                                                bool* has_cjk_text) {
-    if (has_cjk_text) *has_cjk_text = false;
+static float table_text_font_normal_line_height(ViewText* text, FontProp* font) {
     if (!text || !font) return 0.0f;
     const char* data = reinterpret_cast<const char*>(text->text_data());
     size_t len = text->length;
@@ -775,7 +773,6 @@ static float table_text_font_normal_line_height(ViewText* text, FontProp* font,
         uint32_t cp = 0;
         int consumed = utf8_decode(data + pos, len - pos, &cp);
         if (consumed <= 0) break;
-        if (has_cjk_text && utf_is_cjk(cp)) *has_cjk_text = true;
         LoadedGlyph* glyph = font_load_glyph(handle, &style, cp, false);
         if (glyph && glyph->font_normal_line_height > max_normal_line_height) {
             max_normal_line_height = glyph->font_normal_line_height;
@@ -787,21 +784,16 @@ static float table_text_font_normal_line_height(ViewText* text, FontProp* font,
 
 static float table_resolve_cell_line_height(View* view, float line_height,
                                             bool line_height_is_normal,
-                                            float parent_font_size,
                                             FontProp* cell_font) {
     if (!view || !line_height_is_normal || view->view_type != RDT_VIEW_TEXT) {
         return line_height;
     }
     ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
     FontProp* text_font = text->font ? text->font : cell_font;
-    bool has_cjk_text = false;
     float normal_height = table_text_font_normal_line_height(
-        text, text_font, &has_cjk_text);
+        text, text_font);
     if (normal_height > line_height) return normal_height;
-    if (has_cjk_text) {
-        float cjk_height = get_cjk_system_line_height(parent_font_size);
-        if (cjk_height > line_height) return cjk_height;
-    }
+    // fallback metrics already belong to the selected face, including CJK glyphs.
     return line_height;
 }
 
@@ -812,7 +804,7 @@ static float table_cell_line_box_height_for_view(View* view, float cell_line_hei
     if (!view) return cell_line_height;
     float view_height = view->height;
     cell_line_height = table_resolve_cell_line_height(
-        view, cell_line_height, line_height_is_normal, parent_font_size, cell_font);
+        view, cell_line_height, line_height_is_normal, cell_font);
     if (!line_height_is_normal && cell_line_height > 0.0f) {
         // CSS Inline: an explicit line-height owns the line box; glyph ink may
         // overflow it and must not enlarge an auto table row.
@@ -842,7 +834,7 @@ static void table_collect_inline_line_box_extent(View* view, float cell_line_hei
         }
         float line_height = cell_line_height;
         line_height = table_resolve_cell_line_height(
-            view, line_height, line_height_is_normal, parent_font_size, cell_font);
+            view, line_height, line_height_is_normal, cell_font);
         if (line_height <= 0.0f) line_height = view->height;
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);

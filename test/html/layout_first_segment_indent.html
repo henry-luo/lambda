@@ -1,0 +1,29 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+body { margin: 0; font: 10px/1 Ahem; }
+.min { width: min-content; }
+.max { width: max-content; }
+.positive { text-indent: 50px; }
+.negative { text-indent: -30px; }
+.nowrap { white-space: nowrap; }
+.pre { white-space: pre; }
+.anonymous-flex { display: flex; width: 100px; text-indent: 50px; }
+.zero { width: 0; }
+</style>
+<div id="result">
+<div id="positive" class="min positive">12 456 89012</div>
+<div id="maximum" class="max positive">12 456 89012</div>
+<div id="later-wide" class="min negative">12 89012</div>
+<div id="first-wide" class="min negative">89012 1</div>
+<div id="nowrap" class="min positive nowrap">12 456 89012</div>
+<div id="pre" class="min positive pre">12
+89012</div>
+<div id="nested-min" class="min positive"><span>12 456 89012</span></div>
+<div id="nested-max" class="max positive"><span>12 456 89012</span></div>
+<div id="anonymous-multi" class="anonymous-flex"><div class="zero"></div>ABCDE ABCDEABCDE</div>
+<div id="anonymous-single" class="anonymous-flex"><div class="zero"></div>ABCDE</div>
+<div id="anonymous-percent" class="anonymous-flex" style="text-indent: 50%"><div class="zero"></div>ABCDE</div>
+<div id="anonymous-plain" class="anonymous-flex" style="text-indent: 0"><div class="zero"></div>ABCDE</div>
+<div id="anonymous-following" class="anonymous-flex">ABCDE<div id="following-box" style="width: 20px; height: 20px"></div></div>
+</div>

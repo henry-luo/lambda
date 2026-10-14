@@ -1,0 +1,32 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; font: 20px/1 Ahem; --prefix: 3; }
+.word { width: 20px; hyphens: auto; }
+</style>
+<body lang="en-US">
+<section id="result">
+<div class="word" id="auto">example</div>
+<div class="word" id="whole" style="hyphenate-limit-chars: 8">example</div>
+<div class="word" id="prefix-two" style="hyphenate-limit-chars: auto 2 2">example</div>
+<div class="word" id="prefix-three" style="hyphenate-limit-chars: auto 3 2">example</div>
+<div class="word" id="prefix-four" style="hyphenate-limit-chars: auto 4 2">example</div>
+<div class="word" id="prefix-five" style="hyphenate-limit-chars: auto 5 2">example</div>
+<div class="word" id="suffix-three" style="hyphenate-limit-chars: auto 2 3">example</div>
+<div class="word" id="suffix-four" style="hyphenate-limit-chars: auto 2 4">example</div>
+<div class="word" id="both" style="hyphenate-limit-chars: auto 3 4">example</div>
+<div class="word" id="zero" style="hyphenate-limit-chars: 0 0 0">example</div>
+<div class="word" id="two-values" style="hyphenate-limit-chars: auto 3">example</div>
+<div class="word" id="rounded" style="hyphenate-limit-chars: 5 2 calc(3.1)">example</div>
+<div class="word" id="negative-math" style="hyphenate-limit-chars: calc(-1)">example</div>
+<div class="word" id="variable" style="hyphenate-limit-chars: auto var(--prefix) 2">example</div>
+<div class="word" id="relative-math" style="hyphenate-limit-chars: calc(1em / 1px)">example</div>
+<section style="hyphenate-limit-chars: 8">
+<div class="word" id="inherited">example</div>
+<div class="word" id="explicit-inherit" style="hyphenate-limit-chars: inherit">example</div>
+<div class="word" id="unset" style="hyphenate-limit-chars: unset">example</div>
+<div class="word" id="initial" style="hyphenate-limit-chars: initial">example</div>
+<div class="word" id="invalid" style="hyphenate-limit-chars: -1">example</div>
+</section>
+<div class="word" id="manual" style="hyphens: manual; hyphenate-limit-chars: 8">ex&#xad;am&#xad;ple</div>
+</section>

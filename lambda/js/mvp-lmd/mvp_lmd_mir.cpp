@@ -78,6 +78,7 @@ struct LmdBinding {
     unsigned range_changes;
     bool assigned;
     bool observed;
+    bool private_name;
     bool external;
     bool native;
     bool integer;
@@ -331,7 +332,7 @@ struct LmdReference { LmdBinding* binding; LmdValue owner; MIR_reg_t key;
     unsigned lanes = 0; bool numeric_key = false; bool in_bounds = false; LmdRange elements;
     MIR_reg_t key_present = 0; String* string_literal = NULL; LmdValue deferred_name = {}; MIR_reg_t receiver = 0;
     bool dense_storage = false; bool uncoerced_name = false; MIR_reg_t with_object = 0;
-    bool invalid_target = false; };
+    bool invalid_target = false; bool private_element = false; };
 
 static LmdBinding* binding(MvpLmdProgram* p, NameEntry* entry) {
     for (int i = 0; i < p->bindings->length; i++) {
@@ -446,7 +447,13 @@ static MvpLmdClass* class_plan(MvpLmdProgram* p, AstClassNode* ast, LmdBinding* 
                   named(property_spelling(((AstMethodNode*)node)->key, false), "length"))))) cls->dynamic = true;
     }
     if (ast->superclass && ast->superclass->node_type != AST_NODE_IDENT) cls->dynamic = true;
+    // class metadata shares the constructor's bounded closure layout; reject an impossible layout before lowering.
+    if ((uint64_t)cls->field_count + cls->initializer_count + 3 > UINT8_MAX) {
+        diagnostic(p, (AstNode*)ast, "class environment exceeds closure layout");
+        return NULL;
+    }
     p->slot_count += cls->initializer_count;
+    cls->has_instance_elements = cls->initializer_count != 0;
     mvp_lmd_nominal_initialize(cls, ast->name ? ast->name : name_pool_create_len(p->frontend->name_pool, "", 0), p);
     arraylist_append(p->classes, cls);
     return cls;
@@ -485,6 +492,31 @@ static void capture_binding(MvpLmdProgram* p, LmdFunction* f, LmdBinding* b, Ast
         if (!present) arraylist_append(f->captures, b);
         if (f->captures->length >= UINT8_MAX) diagnostic(p, site, "closure capture limit");
     }
+}
+static LmdBinding* private_binding(MvpLmdProgram* p, AstNode* site, String* name,
+        LmdFunction* declaring_function = NULL) {
+    if (!name || name->len < 2 || name->chars[0] != '#') return NULL;
+    AstNode* child = NULL;
+    for (AstNode* node = site; node; child = node, node = ast_index_parent(&p->frontend->ast_index, node)) {
+        if (node->node_type != AST_NODE_CLASS && node->node_type != AST_NODE_CLASS_EXPR) continue;
+        if (child && child == ((AstClassNode*)node)->superclass) continue;
+        for (int i = 0; i < p->bindings->length; i++) {
+            LmdBinding* binding = (LmdBinding*)p->bindings->data[i];
+            if (binding->private_name && binding->entry->node == node &&
+                    named(binding->entry->name, name->chars)) return binding;
+        }
+        if (!declaring_function) continue;
+        NameEntry* entry = (NameEntry*)pool_calloc(p->frontend->pool, sizeof(NameEntry));
+        LmdBinding* binding = (LmdBinding*)mem_calloc(1, sizeof(LmdBinding), MEM_CAT_TEMP);
+        if (!entry || !binding) { mem_free(binding); diagnostic(p, site, "private binding allocation"); return NULL; }
+        entry->name = name; entry->node = node; entry->is_lexical = entry->is_const = true;
+        binding->entry = entry; binding->owner = declaring_function; binding->kinds = K_STRING;
+        binding->private_name = true;
+        arraylist_append(p->bindings, binding);
+        capture_binding(p, declaring_function, binding, site);
+        return binding;
+    }
+    return NULL;
 }
 static void walk(AstNode* n, LmdWalk* state);
 static void child(AstNode* n, void* context) { walk(n, (LmdWalk*)context); }
@@ -617,6 +649,19 @@ static void walk(AstNode* n, LmdWalk* state) {
         p->receiver_abi = true; p->immutable_objects = false;
         MvpLmdClass* class_type = class_plan(p, cls);
         if (!class_type) { diagnostic(p, n, "class allocation"); return; }
+        if (!state->facts) for (AstNode* member = ((AstBlockNode*)cls->body)->statements; member; member = member->next) {
+            bool computed, statics;
+            AstNode* key = js_ast_class_element_key(member, &computed, &statics);
+            if (!computed && key && key->node_type == AST_NODE_IDENT &&
+                    private_binding(p, n, ((AstIdentNode*)key)->name, state->owner)) {
+                class_type->dynamic = class_type->has_private_names = true;
+                p->property_callbacks = true;
+                if (member->node_type == AST_NODE_METHOD) {
+                    class_type->private_method_mask |= statics ? 2 : 1;
+                    class_type->has_instance_elements |= !statics;
+                }
+            }
+        }
         if (class_type->dynamic) activate_library(p, n);
         if (cls->superclass && cls->superclass->node_type != AST_NODE_IDENT) p->property_callbacks = true;
         collect_scope(p, state->owner, cls->entry ? cls->entry->scope : NULL);
@@ -630,9 +675,7 @@ static void walk(AstNode* n, LmdWalk* state) {
     }
     case AST_NODE_FIELD: {
         AstClassFieldNode* field = (AstClassFieldNode*)n;
-        if (field->is_private || !field->key) {
-            diagnostic(p, n, "private fields remain outside this phase"); return;
-        }
+        if (!field->key) { diagnostic(p, n, "missing field key"); return; }
         String* name = !field->computed && field->key->node_type == AST_NODE_IDENT ? ((AstIdentNode*)field->key)->name : NULL;
         observe_coercion_member(p, n, name);
         if (field->computed) { p->property_callbacks = true; walk(field->key, &inner); }
@@ -701,9 +744,7 @@ static void walk(AstNode* n, LmdWalk* state) {
         if (n->node_type == AST_NODE_METHOD) {
             AstMethodNode* method = (AstMethodNode*)n;
             AstNode* parent = ast_index_parent(&p->frontend->ast_index, state->parent);
-            if (!parent || (parent->node_type != AST_NODE_CLASS && parent->node_type != AST_NODE_CLASS_EXPR) ||
-                    (!method->computed && method->key->node_type == AST_NODE_IDENT &&
-                     ((AstIdentNode*)method->key)->name->chars[0] == '#')) {
+            if (!parent || (parent->node_type != AST_NODE_CLASS && parent->node_type != AST_NODE_CLASS_EXPR)) {
                 diagnostic(p, n, "class member outside basic method scope"); return;
             }
             if (method->kind == AstMethodNode::JS_METHOD_GET || method->kind == AstMethodNode::JS_METHOD_SET) {
@@ -834,6 +875,11 @@ static void walk(AstNode* n, LmdWalk* state) {
     }
     case AST_NODE_IDENT: {
         AstIdentNode* id = (AstIdentNode*)n;
+        if (LmdBinding* private_name = private_binding(p, n, id->name)) {
+            id->entry = private_name->entry;
+            capture_binding(p, state->owner, private_name, n);
+            return;
+        }
         if (named(id->name, "arguments")) {
             LmdBinding* existing = binding(p, id->entry);
             for (LmdFunction* owner = state->owner; owner; owner = owner->parent) {
@@ -1057,7 +1103,7 @@ static void walk(AstNode* n, LmdWalk* state) {
         if (write) p->immutable_objects = false;
         if (field->optional) activate_library(p, n);
         walk(field->object, &inner);
-        if (field->computed) walk(field->property, &inner);
+        if (field->computed || (spelling && spelling->len && spelling->chars[0] == '#')) walk(field->property, &inner);
         else if (!field->property || field->property->node_type != AST_NODE_IDENT)
             diagnostic(p, n, "invalid named property");
         return;
@@ -1217,6 +1263,8 @@ static void plan_with_bindings(MvpLmdProgram* p) {
         AstIdentNode* id = (AstIdentNode*)node;
         if (named(id->name, "this") || named(id->name, "super") || named(id->name, "new.target")) continue;
         LmdBinding* original = identifier_binding(p, id);
+        // private names use their lexical class environment, never an object environment.
+        if (original && original->private_name) continue;
         LmdFunction* owner = NULL;
         AstFunctionId function_id = index->owner_functions[i];
         if (function_id < index->function_count) owner = function(p, index->functions[function_id].node);
@@ -3509,6 +3557,15 @@ static LmdReference reference(LmdCompiler* c, AstNode* n, bool capture_name = fa
         branch(c, MIR_BEQ, c->optional_exit, reg(c, owner.reg), integer(c, ITEM_NULL));
         branch(c, MIR_BEQ, c->optional_exit, reg(c, owner.reg), integer(c, ITEM_JS_UNDEFINED));
     }
+    if (!field->computed && field->property->node_type == AST_NODE_IDENT &&
+            ((AstIdentNode*)field->property)->name->chars[0] == '#') {
+        LmdBinding* binding = identifier_binding(c->program, (AstIdentNode*)field->property);
+        if (binding && binding->private_name) {
+            LmdReference ref = {NULL, owner};
+            ref.name = binding_item(c, binding); ref.private_element = true;
+            return ref;
+        }
+    }
     // lexical property names are canonical pooled names; only computed keys need runtime conversion.
     LmdValue key = field->computed ? expression(c, field->property) : boxed(c, constant(c, s2it(
         name_pool_create_string(c->program->frontend->name_pool, ((AstIdentNode*)field->property)->name))), K_STRING);
@@ -3940,6 +3997,12 @@ static LmdValue sequence_reference(LmdCompiler* c, LmdReference ref, unsigned ow
 static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, bool callee = false,
         bool borrow_scalar = false, bool numeric = false) {
     if (ref.invalid_target) return boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED);
+    if (ref.private_element) {
+        MIR_reg_t result = em_call_4(&c->em, "mvp_lmd_private_element", MIR_T_I64,
+            MIR_T_I64, reg(c, ref.owner.reg), MIR_T_I64, reg(c, ref.name), MIR_T_I64, integer(c, ITEM_JS_UNDEFINED),
+            MIR_T_I64, integer(c, LMD_PRIVATE_GET), true);
+        check_error(c, result); return stable_item(c, result);
+    }
     if (ref.with_object) return with_reference_operation(c, ref, site, LMD_PROP_GET);
     if (ref.receiver) {
         MIR_reg_t result = em_call_5(&c->em, "mvp_lmd_property_with_receiver", MIR_T_I64,
@@ -4133,6 +4196,12 @@ static void array_length_write(LmdCompiler* c, LmdReference ref, LmdValue value,
 }
 static void write_reference(LmdCompiler* c, LmdReference ref, LmdValue value, AstNode* site) {
     if (ref.invalid_target) return;
+    if (ref.private_element) {
+        MIR_reg_t result = em_call_4(&c->em, "mvp_lmd_private_element", MIR_T_I64,
+            MIR_T_I64, reg(c, ref.owner.reg), MIR_T_I64, reg(c, ref.name), MIR_T_I64, reg(c, box(c, value).reg),
+            MIR_T_I64, integer(c, LMD_PRIVATE_SET), true);
+        check_error(c, result); return;
+    }
     if (ref.with_object) { with_reference_operation(c, ref, site, LMD_PROP_SET, value); return; }
     if (ref.uncoerced_name) {
         // pattern references retain the key value; PutValue converts it after the source/default effects.
@@ -5274,9 +5343,9 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
         fail(c, LMD_MVP_REFERENCE, (AstNode*)n); put_label(c, uninitialized);
         move(c, c->receiver, reg(c, result.reg));
         if (c->receiver_cell) array_index_write(c, {NULL, boxed(c, c->receiver_cell, K_ARRAY), constant(c, 0)}, result, true);
-        if (method->home->initializer_count) {
-            MIR_reg_t initialized = em_call_2(&c->em, "mvp_lmd_class_initialize_instance", MIR_T_I64,
-                MIR_T_I64, reg(c, constructor), MIR_T_I64, reg(c, c->receiver), true);
+        if (method->home->has_instance_elements) {
+            MIR_reg_t initialized = em_call_3(&c->em, "mvp_lmd_class_initialize_instance", MIR_T_I64,
+                MIR_T_I64, reg(c, constructor), MIR_T_I64, reg(c, c->receiver), MIR_T_I64, integer(c, 0), true);
             check_error(c, initialized);
         }
         return result;
@@ -6362,6 +6431,17 @@ static LmdValue expression(LmdCompiler* c, AstNode* n, bool borrow_scalar, bool 
     }
     case AST_NODE_BINARY: {
         AstBinaryNode* b = (AstBinaryNode*)n;
+        if (b->op == OPERATOR_IN && b->left->node_type == AST_NODE_IDENT) {
+            LmdBinding* name = identifier_binding(c->program, (AstIdentNode*)b->left);
+            if (name && name->private_name) {
+                MIR_reg_t key = binding_item(c, name);
+                LmdValue owner = box(c, expression(c, b->right));
+                MIR_reg_t result = em_call_4(&c->em, "mvp_lmd_private_element", MIR_T_I64,
+                    MIR_T_I64, reg(c, owner.reg), MIR_T_I64, reg(c, key), MIR_T_I64, integer(c, ITEM_JS_UNDEFINED),
+                    MIR_T_I64, integer(c, LMD_PRIVATE_HAS), true);
+                check_error(c, result); return boxed(c, result, K_BOOL);
+            }
+        }
         LmdValue divisible;
         if (remainder_zero(c, b, &divisible)) return divisible;
         LmdValue concatenated;
@@ -6752,6 +6832,16 @@ static LmdValue class_expression(LmdCompiler* c, AstClassNode* ast) {
     if (cls->dynamic) scope_initialize(c, ((JsClassNode*)ast)->expression_scope);
     else if (inner) write_binding(c, inner, boxed(c, constant(c, ITEM_JS_TDZ)), site, true);
     LmdValue base = box(c, expression(c, ast->superclass));
+    if (cls->has_private_names) for (int i = 0; i < c->program->bindings->length; i++) {
+        LmdBinding* binding = (LmdBinding*)c->program->bindings->data[i];
+        if (!binding->private_name || binding->entry->node != site) continue;
+        // each class evaluation creates new cells; escaping closures keep the earlier identities.
+        initialize_capture(c, binding, false);
+        MIR_reg_t key = em_call_4(&c->em, "mvp_lmd_private_element", MIR_T_I64,
+            MIR_T_I64, integer(c, ITEM_NULL), MIR_T_I64, integer(c, s2it(binding->entry->name)),
+            MIR_T_I64, integer(c, ITEM_JS_UNDEFINED), MIR_T_I64, integer(c, LMD_PRIVATE_NAME), true);
+        check_error(c, key); write_binding(c, binding, boxed(c, key, K_STRING), site, true);
+    }
     LmdValue constructor = cls->dynamic && cls->constructor_id >= 0 ?
         new_function(c, (LmdFunction*)c->program->functions->data[cls->constructor_id]) : boxed(c, constant(c, ITEM_NULL));
     MIR_reg_t created = em_call_3(&c->em, "mvp_lmd_class_new", MIR_T_I64,
@@ -6773,11 +6863,13 @@ static LmdValue class_expression(LmdCompiler* c, AstClassNode* ast) {
         AstMethodNode* method = field ? NULL : (AstMethodNode*)member;
         if (method && method->kind == AstMethodNode::JS_METHOD_CONSTRUCTOR) continue;
         AstClassFieldNode* definition = field ? (AstClassFieldNode*)member : NULL;
-        AstNode* key_node = field ? definition->key : method->key;
-        bool computed = field ? definition->computed : method->computed;
-        bool statics = field ? definition->is_static : method->static_method;
+        bool computed, statics;
+        AstNode* key_node = js_ast_class_element_key(member, &computed, &statics);
+        LmdBinding* private_name = !computed && key_node->node_type == AST_NODE_IDENT ?
+            private_binding(c->program, site, ((AstIdentNode*)key_node)->name) : NULL;
         LmdValue key = !computed && key_node->node_type == AST_NODE_IDENT ?
             boxed(c, constant(c, s2it(((AstIdentNode*)key_node)->name)), K_STRING) : canonical_key(c, expression(c, key_node));
+        if (private_name) key = boxed(c, binding_item(c, private_name), K_STRING);
         if (field) {
             em_store_at(&c->em, keys, field_index++ * sizeof(Item), MIR_T_I64, key.reg);
             if (!statics) {
@@ -6793,9 +6885,15 @@ static LmdValue class_expression(LmdCompiler* c, AstClassNode* ast) {
             MIR_T_I64, reg(c, value.reg), MIR_T_I64, reg(c, key.reg), MIR_T_I64, integer(c, prefix), true);
         check_error(c, named);
         MIR_reg_t owner = statics ? created : em_load_at(&c->em, values, sizeof(Item), MIR_T_I64, "class_prototype");
+        if (private_name) {
+            owner = em_load_at(&c->em, keys, (cls->field_count + (statics ? 1 : 0)) * sizeof(Item), MIR_T_I64, "private_methods");
+        }
         MIR_reg_t defined = prefix ? em_call_4(&c->em, "mvp_lmd_define_accessor", MIR_T_I64,
             MIR_T_I64, reg(c, owner), MIR_T_I64, reg(c, key.reg), MIR_T_I64, reg(c, value.reg),
-            MIR_T_I64, integer(c, (JSPD_NON_ENUMERABLE << 8) | (prefix == 2)), true) :
+            MIR_T_I64, integer(c, (JSPD_NON_ENUMERABLE << 8) | (prefix == 2)), true) : private_name ?
+            em_call_4(&c->em, "mvp_lmd_private_element", MIR_T_I64,
+            MIR_T_I64, reg(c, owner), MIR_T_I64, reg(c, key.reg), MIR_T_I64, reg(c, value.reg),
+            MIR_T_I64, integer(c, LMD_PRIVATE_METHOD), true) :
             em_call_5(&c->em, "mvp_lmd_class_property", MIR_T_I64,
             MIR_T_I64, reg(c, owner), MIR_T_I64, reg(c, key.reg), MIR_T_I64, reg(c, value.reg),
             MIR_T_I64, integer(c, LMD_PROP_CREATE_DATA | LMD_PROP_NON_ENUMERABLE), MIR_T_P, integer(c, 0), true);
@@ -6803,6 +6901,8 @@ static LmdValue class_expression(LmdCompiler* c, AstClassNode* ast) {
     }
     // the private class binding stays in TDZ through computed keys, then initializes before static execution.
     if (inner) write_binding(c, inner, result, site, true);
+    if (cls->private_method_mask & 2) check_error(c, em_call_3(&c->em, "mvp_lmd_class_initialize_instance", MIR_T_I64,
+        MIR_T_I64, reg(c, created), MIR_T_I64, reg(c, created), MIR_T_I64, integer(c, 1), true));
     field_index = 0;
     if (cls->dynamic) for (AstNode* member = ((AstBlockNode*)ast->body)->statements; member; member = member->next) {
         bool block = member->node_type == JS_AST_NODE_STATIC_BLOCK;
@@ -6823,7 +6923,9 @@ static LmdValue class_expression(LmdCompiler* c, AstClassNode* ast) {
         }
         if (!block) {
             MIR_reg_t key = em_load_at(&c->em, keys, key_slot * sizeof(Item), MIR_T_I64, "static_field_key");
-            MIR_reg_t defined = em_call_5(&c->em, "mvp_lmd_class_property", MIR_T_I64,
+            MIR_reg_t defined = field->is_private ? em_call_4(&c->em, "mvp_lmd_private_element", MIR_T_I64,
+                MIR_T_I64, reg(c, created), MIR_T_I64, reg(c, key), MIR_T_I64, reg(c, box(c, value).reg),
+                MIR_T_I64, integer(c, LMD_PRIVATE_ADD), true) : em_call_5(&c->em, "mvp_lmd_class_property", MIR_T_I64,
                 MIR_T_I64, reg(c, created), MIR_T_I64, reg(c, key), MIR_T_I64, reg(c, box(c, value).reg),
                 MIR_T_I64, integer(c, LMD_PROP_CREATE_DATA), MIR_T_P, integer(c, 0), true);
             check_error(c, defined);
@@ -7622,7 +7724,8 @@ static const LmdImport imports[] = {
     {"map_shape_delete", (void*)map_shape_delete, AUDIT(JIT_EFFECT_MAY_GC, SCALAR, ARG(0,GC_PTR)|ARG(1,GC_PTR))},
     {"map_shape_delete_text", (void*)map_shape_delete_text, AUDIT(JIT_EFFECT_MAY_GC, SCALAR, ARG(0,GC_PTR)|ARG(1,GC_PTR))},
     {"mvp_lmd_class_new", (void*)mvp_lmd_class_new, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,RAW_PTR)|ARG(1,ITEM)|ARG(2,ITEM))},
-    {"mvp_lmd_class_initialize_instance", (void*)mvp_lmd_class_initialize_instance, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM))},
+    {"mvp_lmd_class_initialize_instance", (void*)mvp_lmd_class_initialize_instance, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
+    {"mvp_lmd_private_element", (void*)mvp_lmd_private_element, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR))},
     {"mvp_lmd_template_object", (void*)mvp_lmd_template_object, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,RAW_PTR)|ARG(1,RAW_PTR)|ARG(2,SCALAR))},
     {"mvp_lmd_with_binding", (void*)mvp_lmd_with_binding, REENTRY(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,ITEM)|ARG(3,SCALAR))},
     {"mvp_lmd_function_set_name", (void*)mvp_lmd_function_set_name, AUDIT(JIT_EFFECT_MAY_GC, ITEM, ARG(0,ITEM)|ARG(1,ITEM)|ARG(2,SCALAR))},
@@ -8060,7 +8163,8 @@ extern "C" Item mvp_lmd_class_new(MvpLmdClass* cls, Item base, Item constructor_
             constructor_root.set(Item{.function = fn});
         }
         MvpLmdCallable* fn = (MvpLmdCallable*)constructor_root.get().function;
-        int captures = fn->closure_field_count, count = captures + 3 + cls->initializer_count + cls->field_count;
+        int captures = fn->closure_field_count, count = captures + 3 + cls->initializer_count + cls->field_count +
+            (cls->private_method_mask ? 2 : 0);
         if (count > UINT8_MAX) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
         Item* env = (Item*)heap_calloc_closure_env(count * sizeof(Item));
         if (!env) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
@@ -8069,6 +8173,13 @@ extern "C" Item mvp_lmd_class_new(MvpLmdClass* cls, Item base, Item constructor_
         cls->owner = fn; cls->property_slot = captures; cls->values = env + captures;
         cls->initializers = cls->values + 3; cls->field_keys = cls->initializers + cls->initializer_count;
         cls->values[0] = constructor_root.get();
+        if (cls->private_method_mask) {
+            for (int i = 0; i < 2; i++) if (cls->private_method_mask & (1 << i)) {
+                Item& methods = cls->field_keys[cls->field_count + i];
+                methods = mvp_lmd_object_new(mvp_lmd_program_library(cls->program)->object_shape, 0);
+                if (item_is_error(methods)) return methods;
+            }
+        }
     }
     if (cls->ast && cls->ast->superclass) {
         if (base.item != ITEM_NULL) {
@@ -8124,7 +8235,10 @@ extern "C" Item mvp_lmd_class_new(MvpLmdClass* cls, Item base, Item constructor_
     ShapeEntry* name = typemap_hash_lookup(&cls->static_shape, "name", 4);
     ShapeEntry* length = typemap_hash_lookup(&cls->static_shape, "length", 6);
     if (name->type->type_id == LMD_TYPE_STRING)
-        map_field_store((char*)statics->data + name->byte_offset, Item{.item = s2it(cls->ast && cls->ast->name ? cls->ast->name : cls->owner && cls->owner->def && ((AstFuncNode*)cls->owner->def)->name ?
+        // an anonymous class with an explicit constructor still has an empty class name.
+        map_field_store((char*)statics->data + name->byte_offset, Item{.item = s2it(cls->ast ?
+            (cls->ast->name ? cls->ast->name : name_pool_create_len(cls->program->frontend->name_pool, "", 0)) :
+            cls->owner && cls->owner->def && ((AstFuncNode*)cls->owner->def)->name ?
             ((AstFuncNode*)cls->owner->def)->name : name_pool_create_len(cls->program->frontend->name_pool, "", 0))}, LMD_TYPE_STRING);
     if (length->type->type_id == LMD_TYPE_INT)
         map_field_store((char*)statics->data + length->byte_offset, Item{.item = i2it(mvp_lmd_class_values(cls)[0].function->arity)}, LMD_TYPE_INT);

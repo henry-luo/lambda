@@ -49,8 +49,7 @@ static void render_text_paint_collect(RenderTextPaintData* data, RenderContext* 
                 entry->text = lam::up(text);
                 entry->rect = lam::up(rect);
                 entry->font = text_font;
-                entry->start_index = rect->start_index;
-                entry->length = rect->length;
+                text_rect_painted_source_range(rect, &entry->start_index, &entry->length);
                 entry->x = rect->x;
                 entry->width = rect->width;
                 arraylist_append(data->entries, entry);
@@ -95,21 +94,23 @@ static bool render_text_source_word_start(const unsigned char* text, int byte_of
 static void render_text_paint_fit(RenderTextPaintEntry* entry, float edge,
                                   RenderContext* context, bool first_cluster_required = false,
                                   bool retain_suffix = false) {
-    const unsigned char* start = entry->text->text_data() + entry->rect->start_index;
-    const unsigned char* end = start + entry->rect->length;
+    int source_start, source_length;
+    text_rect_painted_source_range(entry->rect, &source_start, &source_length);
+    const unsigned char* start = entry->text->text_data() + source_start;
+    const unsigned char* end = start + source_length;
     const unsigned char* cursor = start;
     const unsigned char* retained_start = start;
     float discarded_width = 0.0f;
     bool suffix_started = false;
     bool preserve_spaces = white_space_preserves_space_advance(get_white_space_value(entry->text));
     bool has_space = render_text_source_has_space(
-        entry->text->text_data(), entry->rect->start_index, preserve_spaces);
+        entry->text->text_data(), source_start, preserve_spaces);
     float width = 0.0f;
     float scale = ui_context_raster_scale(context->ui_context);
     FontStyleDesc descriptor = font_style_desc_from_prop(entry->font.style);
     CssEnum transform = render_text_inherited_transform(entry->text);
     bool word_start = render_text_source_word_start(
-        entry->text->text_data(), entry->rect->start_index);
+        entry->text->text_data(), source_start);
     while (cursor < end) {
         size_t bytes = 0;
         if (!layout_get_grapheme_cluster_bytes(cursor, end, &bytes)) {
@@ -155,7 +156,7 @@ static void render_text_paint_fit(RenderTextPaintEntry* entry, float edge,
             discarded_width = width;
         }
     }
-    entry->start_index = entry->rect->start_index +
+    entry->start_index = source_start +
         (int)(retained_start - start); // INT_CAST_OK: retained byte offset is bounded by the source TextRect.
     entry->length = (int)(cursor - retained_start); // INT_CAST_OK: retained byte count is bounded by the source TextRect.
     entry->x = entry->rect->x + discarded_width;
@@ -264,6 +265,22 @@ RenderTextPaintIterator::~RenderTextPaintIterator() {
     context->color = saved_color;
 }
 
+static void render_text_project_source_rect(const TextRect* source, TextRect* projection) {
+    // query ranges associate the generated mark with a continuation character;
+    // raster and vector paint must give that character to its actual line.
+    *projection = {};
+    projection->x = source->x;
+    projection->y = source->y;
+    projection->width = source->width;
+    projection->height = source->height;
+    projection->hanging_trim = source->hanging_trim;
+    text_rect_painted_source_range(source, &projection->start_index, &projection->length);
+    projection->line_number = source->line_number;
+    projection->has_trailing_hyphen = source->has_trailing_hyphen;
+    projection->trailing_hyphenate_character = source->trailing_hyphenate_character;
+    projection->has_trailing_ellipsis = source->has_trailing_ellipsis;
+}
+
 TextRect* RenderTextPaintIterator::next() {
     context->font = saved_font;
     context->color = saved_color;
@@ -285,8 +302,14 @@ TextRect* RenderTextPaintIterator::next() {
     while (cursor) {
         TextRect* source = cursor;
         cursor = source->next.borrow();
+        auto source_rect = [&]() -> TextRect* {
+            if (!source->hyphenated_leading_bytes && !source->hyphenated_trailing_bytes)
+                return source;
+            render_text_project_source_rect(source, &projection);
+            return &projection;
+        };
         RenderTextPaintData* data = context->text_paint;
-        if (!data) return source;
+        if (!data) return source_rect();
         int low = 0, high = data->entries->length;
         while (low < high) {
             int middle = low + (high - low) / 2;
@@ -294,9 +317,9 @@ TextRect* RenderTextPaintIterator::next() {
             if ((uintptr_t)entry->rect.get() < (uintptr_t)source) low = middle + 1;
             else high = middle;
         }
-        if (low == data->entries->length) return source;
+        if (low == data->entries->length) return source_rect();
         RenderTextPaintEntry* entry = (RenderTextPaintEntry*)data->entries->data[low];
-        if (entry->rect != source || !entry->projected) return source;
+        if (entry->rect != source || !entry->projected) return source_rect();
         bool combined_marker = entry->marker && entry->length &&
             !data->rtl &&
             saved_font.style == data->font.style && saved_color.c == data->color.c;
@@ -305,18 +328,16 @@ TextRect* RenderTextPaintIterator::next() {
             if (pending_marker) return next();
             continue;
         }
-        // copy only scalar paint geometry; ownership of the layout chain stays with the view.
-        projection = {};
+        render_text_project_source_rect(source, &projection);
+        bool complete_source = entry->start_index == projection.start_index &&
+            entry->length == projection.length;
         projection.x = entry->x;
-        projection.y = source->y;
         projection.width = entry->width;
-        projection.height = source->height;
         projection.start_index = entry->start_index;
         projection.length = entry->length;
-        projection.line_number = source->line_number;
-        if (entry->length == source->length) {
-            projection.has_trailing_hyphen = source->has_trailing_hyphen;
-            projection.trailing_hyphenate_character = source->trailing_hyphenate_character;
+        if (!complete_source) {
+            projection.has_trailing_hyphen = false;
+            projection.trailing_hyphenate_character = nullptr;
         }
         projection.has_trailing_ellipsis = combined_marker;
         if (combined_marker) projection.width += data->marker_width;
@@ -380,17 +401,19 @@ char* render_text_create_export_segment(const unsigned char* text,
     const char* trailing_character = text_rect->trailing_hyphenate_character;
     if (text_rect->has_trailing_hyphen && !trailing_character) trailing_character = "-";
     size_t trailing_length = trailing_character ? strlen(trailing_character) : 0;
+    int source_start, source_length;
+    text_rect_painted_source_range(text_rect, &source_start, &source_length);
     // Transforms can expand each source byte to one four-byte codepoint; reserve
     // the computed hyphenation string separately because it is not source text.
-    size_t content_size = (size_t)text_rect->length * 4 + trailing_length + 4;
+    size_t content_size = (size_t)source_length * 4 + trailing_length + 4;
     char* content = (char*)mem_alloc(content_size, MEM_CAT_RENDER);
-    unsigned char* src = (unsigned char*)text + text_rect->start_index;
-    unsigned char* src_end = src + text_rect->length;
+    unsigned char* src = (unsigned char*)text + source_start;
+    unsigned char* src_end = src + source_length;
     char* dst = content;
 
     bool preserve_spaces = white_space_preserves_space_advance(white_space);
-    bool has_space = render_text_source_has_space(text, text_rect->start_index, preserve_spaces);
-    bool is_word_start = render_text_source_word_start(text, text_rect->start_index);
+    bool has_space = render_text_source_has_space(text, source_start, preserve_spaces);
+    bool is_word_start = render_text_source_word_start(text, source_start);
     while (src < src_end) {
         uint32_t codepoint = *src;
         int bytes = 1;
@@ -601,7 +624,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
         uint32_t codepoint;
         bool is_word_start = render_text_source_word_start(str, text_rect->start_index);
         int char_index = text_rect->start_index;  // Track character offset for selection
-        uint32_t previous_codepoint = 0;
+        TextJustifyContext justify_context = {};
 
         bool shadow_prepass = text_shadow != nullptr;
         if (shadow_prepass && !render_text_paint_background_and_shadows(rdcon, str, text_rect,
@@ -630,7 +653,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
                 }
                 // else  // skip consecutive spaces
                 is_word_start = true;  // Next non-space is word start
-                previous_codepoint = 0;
+                justify_context = {};
                 p++;
                 char_index++;
             }
@@ -642,7 +665,10 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
 
                 // Variation selectors are consumed by the preceding glyph; asking
                 // CoreText to paint them standalone triggers hidden UI-font lookup.
-                if (codepoint == 0x00AD || text_codepoint_has_zero_advance(codepoint)) continue;
+                if (codepoint == 0x00AD || text_codepoint_has_zero_advance(codepoint)) {
+                    text_justify_character_gap(&justify_context, codepoint);
+                    continue;
+                }
 
                 // Apply text-transform before loading glyph
                 uint32_t tt_out[3];
@@ -653,13 +679,13 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
                 for (int tti = 0; tti < tt_count; tti++) {
                     uint32_t render_cp = render_text_resolve_mathlive_fallback_glyph(tt_out[tti]);
                     if (render_cp == 0) continue;
+                    bool character_gap = text_justify_character_gap(&justify_context, render_cp);
                     if (text_codepoint_has_zero_advance(render_cp)) continue;
                     if (justification_per_gap > 0.0f &&
                         text_justify != CSS_VALUE_INTER_WORD &&
-                        text_justify_cjk_gap(previous_codepoint, render_cp)) {
+                        character_gap) {
                         x += justification_per_gap;
                     }
-                    previous_codepoint = render_cp;
 
                     static int glyph_debug_count = 0;
                     if (render_text_trace_enabled() && glyph_debug_count < 500) {
@@ -957,7 +983,7 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
         bool s_has_space = render_text_source_has_space(str, text_rect->start_index, preserve_spaces);
         FontStyleDesc sd = font_style_desc_from_prop(rdcon->font.style);
         bool s_word_start = render_text_source_word_start(str, text_rect->start_index);
-        uint32_t previous_codepoint = 0;
+        TextJustifyContext justify_context = {};
 
         while (sp < s_end) {
             if (is_space(*sp)) {
@@ -966,7 +992,7 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
                     sx_pos += space_width;
                 }
                 s_word_start = true;
-                previous_codepoint = 0;
+                justify_context = {};
                 sp++;
                 continue;
             }
@@ -993,11 +1019,10 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
                 if (s_tt_cp == 0) {
                     continue;
                 }
+                bool character_gap = text_justify_character_gap(&justify_context, s_tt_cp);
                 if (text_codepoint_has_zero_advance(s_tt_cp)) continue;
-                if (cjk_spacing > 0.0f &&
-                    text_justify_cjk_gap(previous_codepoint, s_tt_cp))
+                if (cjk_spacing > 0.0f && character_gap)
                     sx_pos += cjk_spacing;
-                previous_codepoint = s_tt_cp;
 
                 LoadedGlyph* s_glyph = font_load_glyph(font_box_handle(&rdcon->font), &sd, s_tt_cp, true);
                 if (!s_glyph) {

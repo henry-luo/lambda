@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+@font-face {
+  font-family: ContextMongolian;
+  src: url("../layout/data/support/fonts/noto/NotoSansMongolian-regular.woff2");
+}
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+body { margin: 0; }
+.word {
+  font: 120px ContextMongolian;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 360px;
+  padding: 10px;
+  border: 1px solid;
+  float: left;
+}
+.ahem { font: 20px/1 Ahem; width: 80px; padding: 3px; }
+</style>
+<div id="result">
+<div id="mongolian" class="word">ᠨ<span id="middle" style="color: blue">ᠨ</span>ᠨ</div>
+<div id="latin" class="word ahem">ABC</div>
+</div>

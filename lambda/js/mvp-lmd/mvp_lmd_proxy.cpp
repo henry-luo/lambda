@@ -289,7 +289,8 @@ static Item proxy_revoke(Context*, MvpLmdProgram*, Item*, uint64_t, Item self, I
     Item* env = (Item*)self.function->closure_env;
     if (env[0].item != ITEM_NULL) {
         JsProxyData* data = js_get_proxy_data(env[0]);
-        if (data) { data->revoked = true; data->target = data->handler = data->private_slots = ITEM_NULL; }
+        // private elements belong to the proxy itself, independently of its revoked target.
+        if (data) { data->revoked = true; data->target = data->handler = ITEM_NULL; }
         env[0] = ItemNull;
     }
     return Item{.item = ITEM_JS_UNDEFINED};

@@ -1,0 +1,20 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+.columns { width: 100px; columns: 5; gap: 10px; column-fill: auto; margin-bottom: 10px; }
+.short { height: 10px; background: green; }
+.medium { height: 20px; background: lime; }
+.long { height: 80px; background: green; }
+.before { break-before: column; }
+.after { break-after: column; }
+</style>
+<div id="result">
+  <div class="columns" id="direct"><div class="short"></div><div class="medium before"></div><div class="long before" id="direct-tail"></div></div>
+  <div class="columns" id="wrapped"><div id="wrapper"><div class="short"></div><div><div class="medium before"></div><div class="long before" id="wrapped-tail"></div></div></div></div>
+  <div class="columns" id="after"><div><div class="short after"></div><div class="medium after"></div><div class="long" id="after-tail"></div></div></div>
+  <div class="columns" id="merged"><div class="short"></div><div class="medium"></div><div class="long before" id="merged-tail"></div></div>
+  <div class="columns" id="plain"><div class="short"></div><div class="medium"></div><div class="long" id="plain-tail"></div></div>
+  <div class="columns" id="finite" style="height: 40px"><div class="short"></div><div class="medium before"></div><div class="long before"></div></div>
+  <div class="columns" id="single" style="column-count: 1"><div class="short"></div><div class="long before" id="single-tail"></div></div>
+  <div class="columns" id="independent"><div style="columns: 2; column-fill: auto"><div class="short"></div><div class="long before"></div></div><div class="medium" id="independent-tail"></div></div>
+</div>

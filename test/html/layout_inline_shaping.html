@@ -10,8 +10,13 @@
   font-family: ContextLibertine;
   src: url("../layout/data/wpt-css-text/boundary-shaping/resources/LinLibertine_Re-4.7.5.woff");
 }
+@font-face {
+  font-family: ContextMongolian;
+  src: url("../layout/data/support/fonts/noto/NotoSansMongolian-regular.woff2");
+}
 .row { font: 120px/1 ContextNaskh; direction: rtl; width: 360px; }
 .latin { font: 36px ContextLibertine; }
+.mongolian { font: 120px/1 ContextMongolian; }
 </style>
 <body id="result">
 <div class="row" id="plain">ع<span id="plain-middle">ع</span>ع</div>
@@ -23,6 +28,12 @@
 <div class="row">ع<span id="auto-middle" dir="auto">ع</span>ع</div>
 <div class="row">ع<span id="raised-middle" style="vertical-align: 12px">ع</span>ع</div>
 <div class="row">ع<span id="size-middle" style="font-size: 120%">ع</span>ع</div>
+<div class="row">ع<span id="uppercase-middle" style="text-transform: uppercase">ع</span>ع</div>
+<div class="row">ع<span id="lowercase-middle" style="text-transform: lowercase">ع</span>ع</div>
+<div class="row">ع<span id="capitalize-middle" style="text-transform: capitalize">ع</span>ع</div>
+<div class="row">ع<span id="autospace-middle" style="text-autospace: normal">ع</span>ع</div>
+<div class="row" style="overflow-wrap: break-word">ع<span id="wrap-middle">ع</span>ع</div>
+<div class="mongolian">ᠨ<span id="mongolian-middle" style="color: blue">ᠨ</span>ᠨ</div>
 <div class="latin">of<span id="ligature-middle">f</span>ice</div>
 <div class="latin">of<span id="ligature-padding" style="padding-left: 10px">f</span>ice</div>
 <div class="latin">of<span id="ligature-border" style="border-right: 10px solid transparent">f</span>ice</div>

@@ -2782,9 +2782,11 @@ inline void radiant_copy_font_values(FontProp* target, const FontProp* source) {
     target->letter_spacing = source->letter_spacing;
     target->letter_spacing_percent = source->letter_spacing_percent;
     target->letter_spacing_is_percent = source->letter_spacing_is_percent;
+    target->letter_spacing_is_set = source->letter_spacing_is_set;
     target->word_spacing = source->word_spacing;
     target->word_spacing_percent = source->word_spacing_percent;
     target->word_spacing_is_percent = source->word_spacing_is_percent;
+    target->word_spacing_is_set = source->word_spacing_is_set;
     target->platform_fallback_family = source->platform_fallback_family;
 }
 
@@ -2824,15 +2826,17 @@ inline void radiant_fill_missing_font_values(FontProp* target, const FontProp* s
     if (target->text_underline_offset == 0.0f && source->text_underline_offset != 0.0f) {
         target->text_underline_offset = source->text_underline_offset;
     }
-    if (target->letter_spacing == 0.0f) {
+    if (!target->letter_spacing_is_set && target->letter_spacing == 0.0f) {
         target->letter_spacing = source->letter_spacing;
         target->letter_spacing_percent = source->letter_spacing_percent;
         target->letter_spacing_is_percent = source->letter_spacing_is_percent;
+        target->letter_spacing_is_set = source->letter_spacing_is_set;
     }
-    if (target->word_spacing == 0.0f) {
+    if (!target->word_spacing_is_set && target->word_spacing == 0.0f) {
         target->word_spacing = source->word_spacing;
         target->word_spacing_percent = source->word_spacing_percent;
         target->word_spacing_is_percent = source->word_spacing_is_percent;
+        target->word_spacing_is_set = source->word_spacing_is_set;
     }
 }
 
@@ -3049,6 +3053,7 @@ RenderPaintBlockResult render_paint_block_run(RenderPaintBlockOps* ops,
 // Returns false when the boundary needs a richer backend-specific fallback.
 bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
                                        float x, float y);
+bool render_paint_boundary_emit_fragmented_simple(PaintList* paint_list, ViewBlock* view, Rect rect);
 bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* boundary, Rect rect);
 bool render_border_is_uniform_solid(const BorderProp* border);
 bool render_paint_boundary_emit_solid_border(PaintList* paint_list, BorderProp* border, Rect rect);
@@ -4045,6 +4050,17 @@ void render_outline(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
 // ===== render_columns.hpp =====
 struct RasterRenderContext;
 
+struct RenderColumnRuleIterator {
+    ViewBlock* block;
+    LayoutFragmentBox* fragment;
+    int remaining_columns;
+    int rule_index;
+    int fragment_columns;
+    float column_width;
+    float gap;
+};
+bool render_column_rules_begin(ViewBlock* block, RenderColumnRuleIterator* iterator);
+bool render_column_rule_next(RenderColumnRuleIterator* iterator, float* x, float* y, float* height);
 void render_column_rules(struct RasterRenderContext* rdcon, ViewBlock* block);
 
 // ===== render_effects.hpp =====

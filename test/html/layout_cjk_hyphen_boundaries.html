@@ -1,0 +1,25 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+.case { font: 16px/22px serif; width: 32px; }
+.intrinsic { width: min-content; }
+</style>
+<body lang="en">
+<section id="result">
+<div id="normal-hyphen" class="case" style="line-break: normal">文文‐文</div>
+<div id="normal-dash" class="case" style="line-break: normal">文文–文</div>
+<div id="strict-hyphen" class="case" style="line-break: strict">文文‐文</div>
+<div id="auto-hyphen" class="case">文文‐文</div>
+<div id="loose-hyphen" class="case" style="line-break: loose">文文‐文</div>
+<div id="loose-japanese" class="case" lang="ja" style="line-break: loose">文文‐文</div>
+<div id="anywhere-hyphen" class="case" style="line-break: anywhere">文文‐文</div>
+<div id="normal-inline" class="case" style="line-break: normal">文文<span>‐文</span></div>
+<div id="normal-nowrap" class="case" style="white-space: nowrap; line-break: normal">文文‐文</div>
+<div id="intrinsic-normal" class="case intrinsic" style="line-break: normal">文‐文</div>
+<div id="intrinsic-loose" class="case intrinsic" lang="ja" style="line-break: loose">文‐文</div>
+<div id="intrinsic-anywhere" class="case intrinsic" style="line-break: anywhere">文‐文</div>
+<div id="intrinsic-variable" class="case intrinsic" lang="ja" style="--break-mode: loose; line-break: var(--break-mode)">文‐文</div>
+<section style="line-break: loose">
+<div id="intrinsic-initial" class="case intrinsic" style="line-break: initial">文‐文</div>
+</section>
+</section>

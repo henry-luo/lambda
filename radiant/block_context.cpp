@@ -301,8 +301,7 @@ bool block_context_establishes_bfc(ViewBlock* block) {
 
     // CSS Multicol §6: a column spanner has its own formatting context, so
     // descendant margins and floats cannot escape into either column group.
-    if (block->multicol_prop() &&
-        block->multicol_prop()->span == COLUMN_SPAN_ALL) {
+    if (multicol_is_spanner_block(block)) {
         return true;
     }
 

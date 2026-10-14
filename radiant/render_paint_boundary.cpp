@@ -138,9 +138,36 @@ static bool boundary_emit_styled_path(void* context, RdtPath* path, Color color,
 bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
                                        float x, float y) {
     if (!paint_list || !view || !view->bound) return false;
+    Rect rect = {x, y, view->width, view->height};
+    if (render_paint_boundary_emit_fragmented_simple(paint_list, view, rect)) return true;
     // continuous SVG/PDF retain their direct per-side painter beyond the uniform-color fast path.
     if (view->bound->border && !boundary_border_uniform_color(view->bound->border)) return false;
-    return render_paint_boundary_emit_box(paint_list, view->bound, {x, y, view->width, view->height});
+    return render_paint_boundary_emit_box(paint_list, view->bound, rect);
+}
+
+bool render_paint_boundary_emit_fragmented_simple(PaintList* paint_list, ViewBlock* view, Rect rect) {
+    if (!paint_list || !view || !view->bound || view->width <= 0.0f) return false;
+    // boundary painting also accepts retained blocks without a DOM node tag.
+    LayoutFragmentBox* first = view->layout_fragment_list();
+    if (!first || !first->next) return false;
+    const BoundaryProp* bound = view->boundary();
+    if (!boundary_background_simple(bound->background) ||
+        boundary_border_has_visible_side(bound->border) || boundary_has_radius(bound->border) ||
+        bound->box_shadow || bound->outline ||
+        (bound->border && (bound->border->border_image_url ||
+            bound->border->border_image_type != GRADIENT_NONE))) return false;
+    float scale = rect.width / view->width;
+    Color color = bound->background ? bound->background->color : Color{};
+    // CSS Break §5.4 paints each fragment's decoration; the DOMRect union
+    // includes gutters that do not belong to the box's background.
+    for (LayoutFragmentBox* fragment = first; fragment; fragment = fragment->next) {
+        if (color.a && fragment->width > 0.0f && fragment->height > 0.0f) {
+            paint_fill_rect(paint_list, rect.x + fragment->x * scale,
+                rect.y + fragment->y * scale, fragment->width * scale,
+                fragment->height * scale, color);
+        }
+    }
+    return true;
 }
 
 bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* bound, Rect rect) {
