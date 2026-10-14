@@ -19,8 +19,8 @@
 // the Type graph, binds names, registers constants/types, and reports
 // semantic diagnostics when the resolve pass reaches the slot.
 //
-// Grammar reference: lambda/tree-sitter-lambda/grammar.js is normative.
-// Design: vibe/Lambda_Grammar_Reduce5.md, vibe/Lambda_Type_Pattern.md §3.
+// Structural reference: lambda/tree-sitter-lambda/grammar.js (D8.1.2v3).
+// Design: vibe/Lambda_Grammar_Reduce.md, vibe/Lambda_Type_Pattern.md §3.
 
 #include "ast.hpp"
 #include "lambda-error.h"
