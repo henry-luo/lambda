@@ -178,11 +178,7 @@ extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_
         if (item_is_error(current.get())) return current.get();
         if (mvp_lmd_is_callable(current.get()))
             return mvp_lmd_class_invoke(current.get(), target.get(), NULL, 0, Item{.item = ITEM_JS_UNDEFINED});
-        Item array = mvp_lmd_array_is_array(target.get());
-        if (item_is_error(array)) return array;
-        const char* text = array.item == ITEM_TRUE ? "[object Array]" : "[object Object]";
-        String* result = heap_strcpy(text, strlen(text));
-        return result ? Item{.item = s2it(result)} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        return mvp_lmd_object_string(target.get());
     }
     if (method == LMD_METHOD_JOIN)
         return mvp_lmd_array_to_string(target.get(), count ? args[0] : Item{.item = ITEM_JS_UNDEFINED});

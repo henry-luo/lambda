@@ -164,6 +164,7 @@ static void direct_walk_pattern(DirectPatternWalk walk, JsAstNode* pattern) {
             id->entry = entry;
             if (entry) {
                 entry->is_parameter = entry->is_parameter || walk.is_parameter;
+                if (!walk.is_parameter && walk.kind == JS_VAR_VAR) entry->is_js_body_var = true;
                 entry->is_for_in_head = entry->is_for_in_head || walk.is_for_in_head;
             }
             // Binding identifiers are not reads. Rebuild their open parameter
@@ -187,6 +188,7 @@ static void direct_walk_pattern(DirectPatternWalk walk, JsAstNode* pattern) {
             }
             NameEntry* entry = js_scope_define(walk.tp, id->name, binding_node,
                 walk.kind);
+            if (entry && walk.kind == JS_VAR_VAR) entry->is_js_body_var = true;
             // Every declaration pattern publishes its resolved binding. Later
             // MIR module/local registration must use this identity rather than
             // recovering a same-spelled name from a scope map.
@@ -316,6 +318,7 @@ static void direct_define_function(JsTranspiler* tp, JsFunctionNode* function,
         // GlobalDeclarationInstantiation selects the final same-named function
         // declaration; keep the shared var binding's owner on that declaration.
         lexical->node = (AstNode*)function;
+        lexical->is_js_body_var = true;
     }
     if (tp->current_scope && tp->current_scope->is_function_body &&
             lexical && !lexical->is_lexical) {
@@ -377,6 +380,7 @@ static void direct_define_function(JsTranspiler* tp, JsFunctionNode* function,
     NameEntry* outer = js_scope_define_in_scope(tp, var_scope,
         function->name, (JsAstNode*)placeholder, JS_VAR_VAR);
     if (outer && companion_is_new) outer->is_annex_b_companion = true;
+    if (outer) outer->is_js_body_var = true;
     if (outer && !outer->is_parameter) {
         lexical->annex_b_outer_binding = outer;
         // the global companion keeps its established unresolved-name path
@@ -671,11 +675,14 @@ static void direct_walk_class(JsTranspiler* tp, JsClassNode* class_node) {
     JsScope* saved = tp->current_scope;
     Type* saved_class_type = class_node->type;
     bool class_expression = class_node->node_type == AST_NODE_CLASS_EXPR;
+    JsScope* scope = js_scope_create(tp, JS_SCOPE_BLOCK, saved);
+    if (!scope) return;
+    // all class syntax is strict, including anonymous heritage/computed keys;
+    // the block scope retains the enclosing this/super and variable owners.
+    scope->strict = true;
+    class_node->expression_scope = scope;
+    js_scope_push(tp, scope);
     if (class_node->name) {
-        JsScope* scope = js_scope_create(tp, JS_SCOPE_BLOCK, saved);
-        if (!scope) return;
-        class_node->expression_scope = scope;
-        js_scope_push(tp, scope);
         // Every named class has a private immutable name environment for its
         // heritage expression and methods, including class declarations.
         class_node->type = NULL;

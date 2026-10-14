@@ -1,4 +1,5 @@
 #include "mvp_lmd_runtime.h"
+#include "mvp_lmd_dynamic.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/runtime-state.h"
 #include "../../runtime/side_stack.h"
@@ -151,10 +152,7 @@ static Item function_method(Context*, MvpLmdProgram* program, Item* args, uint64
     if (item_is_error(defined)) return defined;
     return bound.get();
 }
-static Item function_prototype(Context*, MvpLmdProgram*, Item*, uint64_t, Item self, Item, Item) {
-    // reflection is available before P3's interpreter-only dynamic body bridge.
-    MvpLmdLibraryState* state = mvp_lmd_program_library();
-    if (self.item == state->values[LMD_LIBRARY_FUNCTION].item) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
+static Item function_prototype(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item) {
     return Item{.item = ITEM_JS_UNDEFINED};
 }
 static Item function_throw_type(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item, Item) {
@@ -239,7 +237,7 @@ Item mvp_lmd_function_initialize(MvpLmdProgram* program, MvpLmdLibraryState* sta
         if (item_is_error(prototype)) return prototype;
         Item ready = mvp_lmd_function_prepare(prototype);
         if (item_is_error(ready)) return ready;
-        state->values[LMD_LIBRARY_FUNCTION] = mvp_lmd_native_function(program, state, function_prototype, 1, "Function");
+        state->values[LMD_LIBRARY_FUNCTION] = mvp_lmd_native_function(program, state, mvp_lmd_dynamic_function, 1, "Function");
         if (item_is_error(state->values[LMD_LIBRARY_FUNCTION])) return state->values[LMD_LIBRARY_FUNCTION];
         MvpLmdCallable* constructor = (MvpLmdCallable*)state->values[LMD_LIBRARY_FUNCTION].function;
         constructor->native_constructor = constructor->custom_new_target = true;

@@ -122,6 +122,8 @@ struct JsScript : Script {
     bool ast_index_overlay;
     HashMap* ast_callables;
     HashMap* field_initializers;
+    // dynamic code keeps its creator origin separately from its display reference.
+    const char* dynamic_import_origin;
 };
 
 // JsTranspiler is an ephemeral builder extending the retained JsScript prefix.

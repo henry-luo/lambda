@@ -334,6 +334,8 @@ struct NameEntry {
     bool is_mutable;
     bool is_var_param;
     bool is_parameter;
+    // JS var declarations may reuse a parameter identity but own a separate body cell.
+    bool is_js_body_var;
     // Type-binder names are lexical type values, not storage bindings.  Their
     // call-frame slot lives in TypeFunc::binders rather than FnFramePlan.
     bool is_binder;

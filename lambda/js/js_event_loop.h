@@ -28,6 +28,8 @@ void js_event_loop_init(void);
 // without resetting queues or timers belonging to the current JS turn.
 void js_event_loop_attach_lambda_scheduler(void);
 int  js_event_loop_drain(void);
+// retain the first thrown task completion while the existing native loop drains.
+Item js_event_loop_drain_result(bool keep_intervals);
 // Complete one headless script turn, including the render checkpoint and rAFs.
 // Host-driven documents retain ownership of this cadence and only flush microtasks.
 void js_event_loop_drain_script_turn(bool has_dom_document, bool drain_timers);
@@ -80,6 +82,9 @@ int  js_animation_frame_drain(int max_frames);
 // Timers
 // =============================================================================
 
+// numeric handles share the existing timer/resource owner without foreign nominal objects.
+Item js_schedule_timer(Item callback, Item delay, Item args_array,
+    bool has_args, bool is_interval, bool numeric_handle);
 Item js_setTimeout(Item callback, Item delay);
 Item js_setTimeout_args(Item callback, Item delay, Item args_array);
 Item js_setInterval(Item callback, Item delay);

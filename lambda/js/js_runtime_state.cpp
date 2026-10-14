@@ -25,6 +25,7 @@ __thread JsRuntimeState* js_active_runtime_state = NULL;
 // (JsOwnedCallActivation), so no later resume reads the first resumer's chain.
 typedef struct JsAmbient {
     JsRuntimeState* state;
+    const JsInterpHostOps* interpreter_host;
     JsCallActivation* current_activation;
     // Set only for a fresh activation: keep the resumer's chain on the first
     // switch in. A saved NULL chain is the base activation, not "inherit".
@@ -45,6 +46,7 @@ static void js_ambient_init(void* storage) {
     memset(ambient, 0, sizeof(*ambient));
     JsRuntimeState* state = js_active_runtime_state;
     ambient->state = state;
+    ambient->interpreter_host = js_interp_host;
     if (!state) return;
     ambient->inherit_call_chain = true;
     ambient->strict_mode = state->strict_mode;
@@ -56,6 +58,7 @@ static void js_ambient_save(void* storage) {
     JsAmbient* ambient = (JsAmbient*)storage;
     JsRuntimeState* state = js_active_runtime_state;
     ambient->state = state;
+    ambient->interpreter_host = js_interp_host;
     ambient->inherit_call_chain = false;
     if (!state) return;
     ambient->current_activation = state->execution.current_activation;
@@ -74,6 +77,7 @@ static void js_ambient_load(const void* storage) {
     const JsAmbient* ambient = (const JsAmbient*)storage;
     JsRuntimeState* state = ambient->state;
     js_active_runtime_state = state;
+    js_interp_host = ambient->interpreter_host;
     if (!state) return;
     if (!ambient->inherit_call_chain) {
         state->execution.current_activation = ambient->current_activation;

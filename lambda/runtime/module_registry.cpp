@@ -173,11 +173,15 @@ void module_registry_cleanup_for_runtime(Runtime* runtime) {
                     context->heap->gc &&
                     entry->desc->roots_epoch == js_get_heap_epoch()) {
                 heap_unregister_gc_root(&entry->desc->namespace_obj.item);
+                // every registered descriptor slot must retire before its native owner is freed.
+                heap_unregister_gc_root(&entry->desc->cjs_module.item);
                 heap_unregister_gc_root(&entry->desc->specifier_item.item);
                 heap_unregister_gc_root(&entry->desc->awaited_target.item);
                 heap_unregister_gc_root(&entry->desc->evaluation_error.item);
                 heap_unregister_gc_root(&entry->desc->deferred_async_frame.item);
             }
+            if (entry->desc->source_record_destroy)
+                entry->desc->source_record_destroy(entry->desc->source_record);
             mem_free(entry->desc->async_parents);
             mem_free(entry->desc->static_dependencies);
             mem_free((void*)entry->desc->path);

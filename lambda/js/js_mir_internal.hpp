@@ -3,6 +3,7 @@
 // js_mir_internal.hpp - shared declarations for the split JS MIR transpiler.
 
 #include "js_mir_context.hpp"
+#include "js_source_module.hpp"
 #include "js_runtime_state.hpp"
 #include "../runtime/heap_api.h"
 #include "../runtime/mir_policy.hpp"
@@ -800,7 +801,6 @@ bool jm_retain_p2_mir_context(MIR_context_t ctx);
 void jm_destroy_p2_mir_contexts(JsRuntimeState* runtime_state);
 void jm_resolve_module_path(const char* base_file, const char* specifier, int spec_len,
                                    char* out, int out_size);
-const char* jm_document_script_base_url(Runtime* runtime, const char* script_reference);
 // Resolve an inline document script through the page URL rather than its
 // synthetic diagnostic label. Returns false for ordinary file/URL scripts.
 bool jm_resolve_document_module_path(Runtime* runtime, const char* script_reference,
@@ -833,12 +833,6 @@ bool js_activate_runtime_name_pool(void);
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);
 Item js_mir_execute_ast_module(Runtime* runtime, JsTranspiler* tp,
     const char* filename);
-char* js_load_script_source_from_cache(const char* path,
-                                       const char* profile,
-                                       const char* execution_mode,
-                                       bool module_mode,
-                                       size_t* out_length,
-                                       InputResourcePolicy resource_policy = INPUT_RESOURCE_ALLOW_NETWORK);
 bool jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename,
     const char* importer_source, size_t importer_source_length,
     bool record_cache_dependencies);

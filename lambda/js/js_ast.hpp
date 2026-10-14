@@ -163,6 +163,7 @@ struct JsAstParameterFacts {
     int parameter_count = 0;
     int formal_length = -1;
     bool has_default_params = false;
+    bool has_parameter_expressions = false;
     bool has_duplicate_param_names = false;
     JsIdentifierNode* first_duplicate_param = NULL;
     bool has_rest_param = false;
@@ -195,6 +196,7 @@ enum JsAstObservation {
     JS_AST_OBSERVES_ARGUMENTS = 1u << 0,
     JS_AST_OBSERVES_THIS = 1u << 1,
     JS_AST_OBSERVES_NEW_TARGET = 1u << 2,
+    JS_AST_OBSERVES_SUPER_PROPERTY = 1u << 3,
 };
 struct JsAstFunctionFacts {
     uint8_t observations = 0;

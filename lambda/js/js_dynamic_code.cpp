@@ -179,10 +179,10 @@ static void js_dynamic_function_append_normalized_params(StrBuf* out,
 // Set the spec name and toString() source: "function anonymous(params\n) {\n
 // body\n}" and its generator/async variants. The parsed wrapper differs.
 static void js_dynamic_function_apply_metadata(Item fn_item, Item* args, int argc,
-        const char* source_prefix) {
+        const char* source_prefix, const JsDynamicFunctionOps* ops) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     Item anon_name = js_name_item("anonymous", 9);
-    js_set_function_name(fn_item, anon_name);
+    if (!ops) js_set_function_name(fn_item, anon_name);
 
     StrBuf* src_buf = strbuf_new_cap(256);
     strbuf_append_all(src_buf, 2, source_prefix, "(");
@@ -208,15 +208,28 @@ static void js_dynamic_function_apply_metadata(Item fn_item, Item* args, int arg
     String* src_str = heap_create_name(src_buf->str, src_buf->length);
     strbuf_free(src_buf);
     Item src_item = (Item){.item = s2it(src_str)};
-    js_set_function_source(fn_item, src_item);
+    if (ops) ops->metadata(ops->state, fn_item, anon_name, src_item);
+    else js_set_function_source(fn_item, src_item);
 }
 
-static Item js_new_function_from_string_kind(Item* args, int argc, const char* parse_prefix,
-        const char* source_prefix) {
-    if (!js_current_runtime() || !js_active_runtime_state) {
+Item js_new_function_from_string_with_ops(Item* args, int argc, const char* parse_prefix,
+        const char* source_prefix, const JsDynamicFunctionOps* ops) {
+    if (!ops && (!js_current_runtime() || !js_active_runtime_state)) {
         log_error("js-new-function: no runtime context for dynamic function compilation");
         return ItemNull;
     }
+
+    RootSpan converted(argc > 0 ? (size_t)argc : 0);
+    if (argc > 0 && !converted.valid()) return ItemError;
+    for (int i = 0; i < argc; i++) {
+        converted.items()[i] = ops ? ops->to_string(args[i]) : js_to_string(args[i]);
+        if (item_is_error(converted.items()[i])) return converted.items()[i];
+    }
+    args = converted.items();
+    auto syntax_error = [ops](const char* message) {
+        return ops ? ops->syntax_error(ops->state, message)
+            : js_dynamic_function_throw_syntax_error(message);
+    };
 
     // Build the JS source for the function expression.
     // new Function("param1", "param2", "body") or new Function("body")
@@ -244,15 +257,15 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         if (ps && ps->len > 0) {
             if (js_source_contains_import_meta(ps->chars, ps->len)) {
                 strbuf_free(sb);
-                return js_dynamic_function_throw_syntax_error("Cannot use import.meta outside a module");
+                return syntax_error("Cannot use import.meta outside a module");
             }
             if (js_dynamic_function_source_has_hashbang(ps->chars, ps->len)) {
                 strbuf_free(sb);
-                return js_dynamic_function_throw_syntax_error("Hashbang is not allowed here");
+                return syntax_error("Hashbang is not allowed here");
             }
             if (js_dynamic_function_param_has_invalid_html_close_comment(ps->chars, ps->len)) {
                 strbuf_free(sb);
-                return js_dynamic_function_throw_syntax_error("Unexpected token '-->'");
+                return syntax_error("Unexpected token '-->'");
             }
             // The parser receives a function-expression wrapper, where a
             // valid Annex-B close comment is not recognized in parameter
@@ -277,11 +290,11 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     if (body && body->len > 0) {
         if (js_source_contains_import_meta(body->chars, body->len)) {
             strbuf_free(sb);
-            return js_dynamic_function_throw_syntax_error("Cannot use import.meta outside a module");
+            return syntax_error("Cannot use import.meta outside a module");
         }
         if (js_dynamic_function_source_has_hashbang(body->chars, body->len)) {
             strbuf_free(sb);
-            return js_dynamic_function_throw_syntax_error("Hashbang is not allowed here");
+            return syntax_error("Hashbang is not allowed here");
         }
         strbuf_append_str(sb, "\n");
         strbuf_append_str_n(sb, body->chars, (int)body->len);
@@ -292,29 +305,30 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     // The wrapper is global script code whose completion value is the
     // function. The interpreter's AST template cache absorbs repeated sources.
     RootFrame roots(1);
-    Rooted<Item> fn_root(roots, js_interp_execute_source(js_current_runtime(),
-        sb->str, sb->length, "<new Function>", NULL));
+    Rooted<Item> fn_root(roots, ops ? ops->execute(ops->state, sb->str, sb->length)
+        : js_interp_execute_source(js_current_runtime(),
+            sb->str, sb->length, "<new Function>", NULL, true));
     strbuf_free(sb);
     if (!item_is_error(fn_root.get())) {
-        js_dynamic_function_apply_metadata(fn_root.get(), args, argc, source_prefix);
+        js_dynamic_function_apply_metadata(fn_root.get(), args, argc, source_prefix, ops);
     }
     return fn_root.get();
 }
 
 JS_FORWARD_ITEM(js_new_function_from_string, (Item* args, int argc),
-    js_new_function_from_string_kind,
-    (args, argc, "function", "function anonymous"))
+    js_new_function_from_string_with_ops,
+    (args, argc, "function", "function anonymous", NULL))
 JS_FORWARD_ITEM(js_new_async_function_from_string, (Item* args, int argc),
-    js_new_function_from_string_kind,
-    (args, argc, "async function", "async function anonymous"))
+    js_new_function_from_string_with_ops,
+    (args, argc, "async function", "async function anonymous", NULL))
 
 extern "C" Item js_new_generator_function_from_string(Item* args, int argc, int is_async) {
     if (is_async) {
-        return js_new_function_from_string_kind(args, argc, "async function*",
-            "async function* anonymous");
+        return js_new_function_from_string_with_ops(args, argc, "async function*",
+            "async function* anonymous", NULL);
     }
-    return js_new_function_from_string_kind(args, argc, "function*",
-        "function* anonymous");
+    return js_new_function_from_string_with_ops(args, argc, "function*",
+        "function* anonymous", NULL);
 }
 
 // ============================================================================

@@ -561,6 +561,8 @@ static bool regex_pattern_has_line_terminator(const char* pattern, int pattern_l
 static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node);
 static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node);
 static void walk_statements(EarlyErrorCtx* ctx, JsAstNode* stmts);
+static void walk_function_for_early_errors(EarlyErrorCtx* ctx, JsFunctionNode* fn,
+    bool method = false, bool derived_constructor = false);
 
 static void walk_expression_child(JsAstNode* child, void* opaque) {
     walk_expression((EarlyErrorCtx*)opaque, child);
@@ -578,9 +580,11 @@ static void walk_class_for_early_errors(EarlyErrorCtx* ctx, JsClassNode* cls) {
     collect_class_private_names(ctx, cls);
     JsAstNode* members = cls->body;
     if (members && members->node_type == AST_NODE_BLOCK) members = ((JsBlockNode*)members)->statements;
+    bool has_constructor = false;
     for (JsAstNode* m = members; m; m = m->next) {
         bool computed, statics;
         JsAstNode* key = js_ast_class_element_key(m, &computed, &statics);
+        bool constructor = false;
         if (key && !computed) {
             String* name = key->node_type == AST_NODE_IDENT ? ((JsIdentifierNode*)key)->name :
                 key->node_type == AST_NODE_LITERAL &&
@@ -589,14 +593,32 @@ static void walk_class_for_early_errors(EarlyErrorCtx* ctx, JsClassNode* cls) {
             if (name && ((m->node_type == AST_NODE_FIELD && name->len == 11 && !memcmp(name->chars, "constructor", 11)) ||
                     (statics && name->len == 9 && !memcmp(name->chars, "prototype", 9))))
                 ee_error(ctx, m, "Invalid class element name");
+            constructor = !statics && m->node_type == AST_NODE_METHOD &&
+                name && name->len == 11 && !memcmp(name->chars, "constructor", 11);
         }
-        walk_statement(ctx, m);
+        if (m->node_type == AST_NODE_METHOD) {
+            JsMethodDefinitionNode* fn = (JsMethodDefinitionNode*)m;
+            if (constructor) {
+                if (has_constructor) ee_error(ctx, m, "Duplicate class constructor");
+                has_constructor = true;
+                if (fn->is_async || fn->is_generator || fn->kind == JsMethodDefinitionNode::JS_METHOD_GET ||
+                        fn->kind == JsMethodDefinitionNode::JS_METHOD_SET)
+                    ee_error(ctx, m, "Class constructor cannot be a special method");
+            }
+            // keys execute in the surrounding lexical context; only the
+            // method's parameters/body acquire its own super capability.
+            if (computed) walk_expression(ctx, key);
+            walk_function_for_early_errors(ctx, fn, true, constructor && cls->superclass);
+        } else {
+            walk_statement(ctx, m);
+        }
     }
     ee_name_ledger_truncate(&ctx->names, private_name_mark);
     ctx->in_strict = was_strict;
 }
 
-static void walk_function_for_early_errors(EarlyErrorCtx* ctx, JsFunctionNode* fn) {
+static void walk_function_for_early_errors(EarlyErrorCtx* ctx, JsFunctionNode* fn,
+        bool method, bool derived_constructor) {
     bool was_gen = ctx->in_generator;
     bool was_async = ctx->in_async;
     bool was_strict = ctx->in_strict;
@@ -606,6 +628,23 @@ static void walk_function_for_early_errors(EarlyErrorCtx* ctx, JsFunctionNode* f
     bool was_field = ctx->in_field_initializer;
     bool was_static = ctx->in_static_init;
     int was_function_scope = ctx->names.function_scope;
+
+    if (fn->node_type != AST_NODE_ARROW_FUNC) {
+        JsAstFunctionFacts facts = js_ast_collect_function_facts(NULL, fn->body);
+        bool super_call = facts.has_direct_super_call || facts.has_lexical_super_call;
+        bool super_property = (facts.observations & JS_AST_OBSERVES_SUPER_PROPERTY) != 0;
+        // parameter roots need their own direct-body observation; the shared
+        // collector otherwise reserves direct-super placement for the body.
+        for (JsAstNode* param = fn->params; param; param = param->next) {
+            JsAstFunctionFacts parameter = js_ast_collect_function_facts(NULL, param);
+            super_call |= parameter.has_direct_super_call || parameter.has_lexical_super_call;
+            super_property |= (parameter.observations & JS_AST_OBSERVES_SUPER_PROPERTY) != 0;
+        }
+        if (super_call && !derived_constructor)
+            ee_error(ctx, (JsAstNode*)fn, "SuperCall requires a derived constructor");
+        if (super_property && !method)
+            ee_error(ctx, (JsAstNode*)fn, "SuperProperty requires a method home");
+    }
 
     ctx->in_generator = fn->is_generator;
     ctx->in_async = fn->is_async;
@@ -791,7 +830,9 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
                     else if (prop->key && prop->key->node_type == AST_NODE_IDENT &&
                             is_private_name_string(((JsIdentifierNode*)prop->key)->name))
                         ee_error(ctx, prop->key, "Private names cannot be object property keys");
-                    walk_expression(ctx, prop->value);
+                    if (prop->method || prop->is_getter || prop->is_setter)
+                        walk_function_for_early_errors(ctx, (JsFunctionNode*)prop->value, true);
+                    else walk_expression(ctx, prop->value);
                 } else if (pattern) {
                     walk_expression(ctx, p);
                 } else if (p->node_type == AST_NODE_SPREAD) {
@@ -811,10 +852,21 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             // grouping ends an optional chain; the outer tagged span then starts before its tag node.
             if (tag && node->source_span.start_byte == tag->source_span.start_byte && js_ast_has_optional_chain(tag))
                 ee_error(ctx, node, "An optional chain cannot be a template tag");
-            js_ast_visit_children(node, walk_expression_child, ctx);
+            walk_expression(ctx, tag);
+            // tagged quasis allow invalid escapes; their substitutions still
+            // undergo ordinary expression early errors, including nested templates.
+            JsTemplateLiteralNode* quasi = ((JsTaggedTemplateNode*)node)->quasi;
+            if (quasi) js_ast_visit_children((JsAstNode*)quasi, walk_expression_child, ctx);
             break;
         }
         case JS_AST_NODE_TEMPLATE_LITERAL:
+            for (JsAstNode* quasi = ((JsTemplateLiteralNode*)node)->quasis;
+                    quasi; quasi = quasi->next) {
+                if (quasi->node_type == JS_AST_NODE_TEMPLATE_ELEMENT &&
+                        !((JsTemplateElementNode*)quasi)->cooked) {
+                    ee_error(ctx, quasi, "Invalid escape in untagged template literal");
+                }
+            }
             js_ast_visit_children(node, walk_expression_child, ctx);
             break;
 
@@ -842,7 +894,8 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
         case AST_NODE_METHOD: {
             if (node->node_type == AST_NODE_METHOD && ((JsMethodDefinitionNode*)node)->computed)
                 walk_expression(ctx, ((JsMethodDefinitionNode*)node)->key);
-            walk_function_for_early_errors(ctx, (JsFunctionNode*)node);
+            walk_function_for_early_errors(ctx, (JsFunctionNode*)node,
+                node->node_type == AST_NODE_METHOD);
             break;
         }
 
@@ -1162,6 +1215,21 @@ int js_check_early_errors(JsTranspiler* tp, JsAstNode* ast) {
     ctx.tp = tp;
     ctx.error_count = tp->binding_error_count;
     ctx.in_strict = tp->strict_mode;
+
+    // import records retain decoded binding names, not identifier AST children.
+    for (JsInterpModuleBinding* binding = tp->interp_imports; binding;
+            binding = binding->next) {
+        if (!binding->local_name) continue;
+        JsIdentifierNode identifier = {};
+        identifier.node_type = AST_NODE_IDENT;
+        identifier.name = binding->local_name;
+        if (binding->entry && binding->entry->node) {
+            identifier.source_span = binding->entry->node->source_span;
+            // the declaration span is not the local identifier's raw token.
+            identifier.source_span.end_byte = identifier.source_span.start_byte;
+        }
+        check_identifier_reserved(&ctx, (JsAstNode*)&identifier);
+    }
 
     // for programs, check top-level "use strict"
     if (ast->node_type == AST_SCRIPT) {
