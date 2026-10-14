@@ -61,7 +61,7 @@ Item ui_copy_content_to_input(Input* owner, Item item) {
     if (!storage || !owner) return item;
     if (arena_owns(owner->arena, storage) || pool_owns(owner->pool, storage)) return item;
     MarkBuilder builder(owner);
-    return builder.deep_copy(item);
+    return builder.copy_ui_content(item);
 }
 
 bool list_grow_io(List* list, int64_t min_capacity, Pool* pool, Arena* arena) {

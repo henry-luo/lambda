@@ -86,3 +86,25 @@ pub pn select_change(node, evt, family = "dtna") {
     let selected = [for (option in p.options where c.text(option.value) == raw) option.value];
     notify_change(node,evt,'select',selected[0],family)
 }
+
+// skins register one native-control view and delegate the event policy here.
+pub fn present(node, family = "dtna") {
+    let kind = c.kind(node);
+    if (kind == 'input') input(node,family)
+    else if (kind == 'text-area') text_area(node,family)
+    else if (kind == 'select') select(node,family)
+    else if (kind == 'switch') switch(node,family)
+    else check(node,c.text(kind),family)
+}
+pub pn edited(node, evt, family = "dtna") {
+    if (c.kind(node) == 'input' or c.kind(node) == 'text-area') {
+        notify_change(node,evt,'input',dom.get_state(evt.target,"value"),family)
+    }
+}
+pub pn changed(node, evt, family = "dtna") {
+    let kind = c.kind(node);
+    if (kind == 'select') { select_change(node,evt,family) }
+    else if (kind == 'radio') { notify_change(node,evt,'select',c.props(node).value,family) }
+    else if (kind == 'checkbox' or kind == 'switch') { notify_change(node,evt,'check',dom.get_state(evt.target,"checked"),family) }
+    else if (kind == 'input') { emit("ui_action",c.action(node,'change',dom.get_state(evt.target,"value"))) }
+}

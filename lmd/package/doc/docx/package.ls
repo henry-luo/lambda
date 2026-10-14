@@ -20,7 +20,7 @@ pub fn xml(parts, path, required = false) any^ {
     }
 }
 
-fn relationships(parts, owner, required = false) array^ {
+pub fn relationships(parts, owner, required = false) array^ {
     let path = if (owner == "") "_rels/.rels" else c.rels_path(owner)
     let root = xml(parts,path,required)^;
     if (root == null) [] else if (root.tag != "Relationships" or root.uri != c.P)
@@ -80,21 +80,28 @@ fn metadata(parts, rels) map^ {
             (node.tag,c.text(node))])
     }
 }
-fn story_diagnostics(pkg) array^ => [for (rel in pkg.relationships,
-    let kind = c.first(reverse(split(rel.type,"/")))
-    where contains(["header","footer","footnotes","endnotes","comments"],kind))
-    *{
-        // Word writes note separator definitions even when the document has no actual notes.
-        let notes = contains(["footnotes","endnotes"],kind) and not rel.external
-        let root = if (notes) xml(pkg.parts,rel.target,true)^ else null
-        let note_tag = if (kind == "footnotes") "footnote" else "endnote";
-        if (notes and (root.uri != c.W or root.tag != kind))
-            raise c.fail("invalid-package","Invalid " ++ kind ++ " root",rel.target)
-        else if (notes and all([for (node in c.children(root,null,null))
-            node.uri == c.W and node.tag == note_tag and
-            contains(["separator","continuationSeparator"],c.attr(node,"type"))])) []
-        else [c.issue("unsupported-story",pkg.main,"Separate document story is outside the v1 profile")]
-    }]
+// each annotation part owns its relationships; IDs such as rId1 are local to that part.
+fn stories(pkg) map^ => map([for (kind in ["footnote","endnote","comment"],
+    let rel = related(pkg.relationships,kind ++ "s") where rel != null)
+    (kind,{
+        let root = related_xml(pkg,kind ++ "s")^;
+        if (root.uri != c.W or root.tag != kind ++ "s")
+            raise c.fail("invalid-package","Invalid " ++ kind ++ "s root",rel.target)
+        else {
+            let nodes = c.children(root,kind)
+            let invalid = any([for (i,node in nodes, let id = c.attr(node,"id"))
+                id == null or c.as_int(id,null) == null or
+                any([for (j,prior in nodes where j < i) c.attr(prior,"id") == id])]);
+            if (invalid) raise c.fail("invalid-package","Missing or duplicate annotation ID",rel.target)
+            else {part:rel.target,relationships:relationships(pkg.parts,rel.target)^,
+                nodes:c.dictionary([for (node in nodes where
+                    not contains(["separator","continuationSeparator"],c.attr(node,"type")))
+                    {key:c.attr(node,"id"),value:node}])}
+        }
+    })])
+fn story_diagnostics(pkg) array^ => [for (rel in pkg.relationships
+    where contains([c.R ++ "/header",c.R ++ "/footer"],rel.type))
+    c.issue("unsupported-story",pkg.main,"Separate document story is outside the v1 profile")]
 pub fn open_package(source) map^ {
     let archive = if (source is string) {
         if (contains(source,":") or starts_with(source,"//")) raise c.fail("invalid-source","A local DOCX path is required")
@@ -114,7 +121,7 @@ pub fn open_package(source) map^ {
         if (content_type(pkg,main.target) != "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml" or
             document.uri != c.W or document.tag != "document" or c.child(document,"body") == null)
             raise c.fail("invalid-package","Expected a DOCX WordprocessingML document",main.target)
-        else {*:pkg,body:c.child(document,"body"),metadata:metadata(parts,root_rels)^,
+        else {*:pkg,body:c.child(document,"body"),stories:stories(pkg)^,metadata:metadata(parts,root_rels)^,
             diagnostics:story_diagnostics(pkg)^}
     }
 }

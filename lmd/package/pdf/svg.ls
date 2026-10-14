@@ -53,11 +53,12 @@ pub fn path(d: string, fill: string, stroke: string, stroke_width) {
 }
 
 pub fn text_run(xform: string, font_family: string, font_size,
-                fill: string, content) {
+                fill: string, content, attrs = null) {
     <text transform: xform,
           'font-family': font_family,
           'font-size':   util.fmt_num(font_size),
           fill: fill,
+          *: if (attrs == null) {} else attrs,
         content
     >
 }

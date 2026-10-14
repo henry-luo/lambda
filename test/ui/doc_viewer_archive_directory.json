@@ -16,33 +16,33 @@
     {
       "type": "assert_count",
       "target": {
-        "selector": ".tree-entry[data-tree-path$='/sample.docx'] > .tree-row .tree-label"
+        "selector": ".tree-entry[data-tree-path$='/sample.zip'] > .tree-row .tree-label"
       },
       "count": 1
     },
     {
       "type": "click",
       "target": {
-        "selector": ".tree-entry[data-tree-path$='/sample.docx'] > .tree-row .tree-label"
+        "selector": ".tree-entry[data-tree-path$='/sample.zip'] > .tree-row .tree-label"
       }
     },
     {
       "type": "assert_count",
       "target": {
-        "selector": ".tree-entry[data-tree-path$='sample.docx/word'] > .tree-row .tree-label"
+        "selector": ".tree-entry[data-tree-path$='sample.zip/word'] > .tree-row .tree-label"
       },
       "count": 1
     },
     {
       "type": "click",
       "target": {
-        "selector": ".tree-entry[data-tree-path$='sample.docx/nested.zip'] > .tree-row .tree-label"
+        "selector": ".tree-entry[data-tree-path$='sample.zip/nested.zip'] > .tree-row .tree-label"
       }
     },
     {
       "type": "click",
       "target": {
-        "selector": ".tree-entry[data-tree-path$='sample.docx/nested.zip/inner.txt'] > .tree-row .tree-label"
+        "selector": ".tree-entry[data-tree-path$='sample.zip/nested.zip/inner.txt'] > .tree-row .tree-label"
       }
     },
     {
@@ -55,7 +55,7 @@
     {
       "type": "click",
       "target": {
-        "selector": ".tree-entry[data-tree-path$='sample.docx/bad.json'] > .tree-row .tree-label"
+        "selector": ".tree-entry[data-tree-path$='sample.zip/bad.json'] > .tree-row .tree-label"
       }
     },
     {

@@ -136,6 +136,7 @@ struct LambdaTask {
 };
 
 struct LambdaScheduler {
+    EvalContext* owner;
     LambdaTask* all_tasks;
     Queue run_queue;
     LambdaTask* current;
@@ -567,6 +568,7 @@ extern "C" LambdaScheduler* lambda_scheduler_create(int mailbox_capacity) {
     LambdaScheduler* scheduler = (LambdaScheduler*)mem_calloc(
         1, sizeof(LambdaScheduler), MEM_CAT_EVAL);
     if (!scheduler) return NULL;
+    scheduler->owner = context;
     queue_init(&scheduler->run_queue);
     scheduler->mailbox_capacity = mailbox_capacity > 0
         ? mailbox_capacity : LAMBDA_MAILBOX_DEFAULT_CAPACITY;
@@ -742,6 +744,8 @@ extern "C" LambdaTask* lambda_task_create(LambdaScheduler* scheduler,
 }
 
 extern "C" int lambda_scheduler_run_one(LambdaScheduler* scheduler) {
+    // shared-loop wakeups during another document's teardown must leave this owner's task queued (D5.4.1).
+    if (!scheduler || scheduler->owner != context) return 0;
     LambdaTask* task = scheduler_dequeue(scheduler);
     if (!task) return 0;
     if (task->cancel_requested && !task->cleanup_masked && !task->started) {
@@ -784,7 +788,7 @@ extern "C" int lambda_scheduler_run_one(LambdaScheduler* scheduler) {
 }
 
 extern "C" int lambda_scheduler_run_ready(LambdaScheduler* scheduler) {
-    if (!scheduler || scheduler->draining) return 0;
+    if (!scheduler || scheduler->owner != context || scheduler->draining) return 0;
     scheduler->draining = true;
     int ran = 0;
     QueueNode* boundary = queue_last(&scheduler->run_queue);

@@ -1,0 +1,1 @@
+[["paper and ink defaults", true], ["independent overrides", true], ["length and number units", true], ["nested inheritance", true], ["unknown token", true], ["invalid colors", true], ["finite stroke", true], ["positive font", true], ["font declaration injection", true], ["local selectors", true], ["decoration hit policy", true]]

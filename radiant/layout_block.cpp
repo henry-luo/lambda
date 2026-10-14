@@ -27,7 +27,6 @@
 
 extern void adjust_text_bounds(ViewText* text);
 
-static void align_and_discard_phantom_inline_line(LayoutContext* lycon);
 
 bool line_has_prior_flow_content(const Linebox* line) {
     return line &&
@@ -3446,12 +3445,8 @@ static void adjust_block_children_after_shrink(LayoutContext* lycon,
     // and CSS Grid §11: grid item sizes are determined by track sizing.
     if (parent->display.inner == CSS_VALUE_FLEX ||
         parent->display.inner == CSS_VALUE_GRID) return;
-    float child_containing_width = new_parent_cw;
-    if (parent->multicol_prop() && is_multicol_container(parent) &&
-        parent->multicol_prop()->computed_column_count > 1 &&
-        parent->multicol_prop()->computed_column_width > 0.0f) {
-        child_containing_width = parent->multicol_prop()->computed_column_width;
-    }
+    float child_containing_width = layout_block_inline_axis_is_vertical(parent)
+        ? new_parent_cw : layout_multicol_in_flow_inline_size(parent, new_parent_cw);
     for (View* child = lam::view_require_element(parent)->first_placed_child(); child; child = child->next()) {
         if (child->view_type != RDT_VIEW_BLOCK && child->view_type != RDT_VIEW_LIST_ITEM)
             continue;
@@ -5689,10 +5684,13 @@ static void layout_set_bfc_float_edges(LayoutContext* lycon, ViewBlock* block,
     lycon->block.float_right_edge = bfc_inline_start + content_width;
 }
 
-static bool layout_shift_subtree_has_stable_flow(DomNode* node, int depth) {
+static bool layout_retained_subtree_walk(DomNode* node, int depth,
+                                         bool formatting_root, bool abs_contained) {
     if (!node || node->layout_dirty || depth >= MAX_LAYOUT_DEPTH) return false;
     if (!node->is_element()) return true;
     DomElement* element = node->as_element();
+    // a measurement-restyled node keeps its committed geometry here; its flag
+    // stays until the next committed layout of that node resolves it again.
     if (!element->styles_resolved() || element->needs_style_recompute() ||
         element->has_animated_display() ||
         element->web_animation_state() || element->shadow_root_element()) return false;
@@ -5700,8 +5698,16 @@ static bool layout_shift_subtree_has_stable_flow(DomNode* node, int depth) {
     if (custom_layout && custom_layout[0]) return false;
     if (element->position) {
         const PositionProp* position = element->positionp();
-        if ((position->position != CSS_VALUE_STATIC && position->position != CSS_VALUE__UNDEF) ||
-            (position->float_prop != CSS_VALUE_NONE && position->float_prop != CSS_VALUE__UNDEF) ||
+        CssEnum scheme = position->position;
+        if (scheme != CSS_VALUE_STATIC && scheme != CSS_VALUE__UNDEF) {
+            // a formatting root keeps relative offsets and the absolute boxes of
+            // a positioned box inside it; anything else is placed from outside.
+            bool contained = formatting_root && (scheme == CSS_VALUE_RELATIVE ||
+                (scheme == CSS_VALUE_ABSOLUTE && abs_contained));
+            if (!contained) return false;
+            abs_contained = true;
+        }
+        if ((position->float_prop != CSS_VALUE_NONE && position->float_prop != CSS_VALUE__UNDEF) ||
             (position->clear != CSS_VALUE_NONE && position->clear != CSS_VALUE__UNDEF)) return false;
     }
     if (element->display.list_item ||
@@ -5714,9 +5720,24 @@ static bool layout_shift_subtree_has_stable_flow(DomNode* node, int depth) {
     // A positioned or floated descendant can depend on the old Y even when
     // the direct child is clean, so inspect the retained subtree before reuse.
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        if (!layout_shift_subtree_has_stable_flow(child, depth + 1)) return false;
+        if (!layout_retained_subtree_walk(child, depth + 1, formatting_root, abs_contained)) {
+            return false;
+        }
     }
     return true;
+}
+
+bool layout_retained_subtree_is_stable(DomNode* root, bool formatting_root) {
+    return layout_retained_subtree_walk(root, 0, formatting_root, false);
+}
+
+bool layout_can_retain_geometry(LayoutContext* lycon) {
+    if (!lycon || !lycon->doc || !lycon->doc->incremental_layout ||
+        lycon->run_mode != radiant::RunMode::PerformLayout) return false;
+    DocState* state = (DocState*)lycon->doc->state;
+    // Active animations can alter retained geometry outside the dirty path.
+    return !(state && state->animation_scheduler &&
+             state->animation_scheduler->has_active_animations);
 }
 
 static float layout_block_child_width_contribution(const BlockContext* parent,
@@ -5742,9 +5763,7 @@ static float layout_block_child_width_contribution(const BlockContext* parent,
 
 static bool layout_can_shift_clean_block(LayoutContext* lycon, ViewBlock* parent,
                                          DomNode* child) {
-    if (!lycon || !parent || !child || !lycon->doc ||
-        !lycon->doc->incremental_layout ||
-        lycon->run_mode != radiant::RunMode::PerformLayout ||
+    if (!parent || !child || !layout_can_retain_geometry(lycon) ||
         !lycon->line.is_line_start ||
         line_has_prior_flow_content(&lycon->line) ||
         lycon->line.has_float_intrusion ||
@@ -5757,10 +5776,6 @@ static bool layout_can_shift_clean_block(LayoutContext* lycon, ViewBlock* parent
            parent->block()->align_content != CSS_VALUE__UNDEF)))) return false;
     BlockContext* bfc = block_context_find_bfc(&lycon->block);
     if (!bfc || bfc->left_float_count || bfc->right_float_count) return false;
-    DocState* state = (DocState*)lycon->doc->state;
-    // Active animations can alter retained geometry outside the dirty path.
-    if (state && state->animation_scheduler &&
-        state->animation_scheduler->has_active_animations) return false;
     ViewBlock* view = child->is_element()
         ? lam::view_as_block(static_cast<View*>(child)) : nullptr;
     if (!view || view->view_type != RDT_VIEW_BLOCK ||
@@ -5780,7 +5795,7 @@ static bool layout_can_shift_clean_block(LayoutContext* lycon, ViewBlock* parent
             boundary->margin_chain_negative != 0.0f || boundary->has_clearance ||
             boundary->clearance_in_margin_chain) return false;
     }
-    return layout_shift_subtree_has_stable_flow(child, 0);
+    return layout_retained_subtree_is_stable(child, false);
 }
 
 static void layout_shift_clean_block(LayoutContext* lycon, DomNode* child) {
@@ -5925,7 +5940,10 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
         layout_form_control(lycon, block);
     } else {  // layout block child content
         DomNode *child = nullptr;
-        if (block->is_element()) {
+        // MathML's package consumes semantic children directly, before generic
+        // flow can flatten scripts or allocate text boxes for inert annotations.
+        if (block->is_element() && !(layout_is_mathml_root(block->as_element()) &&
+                resolve_display_value(block).inner == CSS_VALUE_MATH)) {
             child = layout_render_child_list(block->as_element());
         }
         if (child) {
@@ -6021,7 +6039,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                         lycon->line.is_last_line = true;
                         line_break(lycon);
                     } else {
-                        align_and_discard_phantom_inline_line(lycon);
+                        layout_finalize_phantom_inline_line(lycon);
                     }
                 }
             }
@@ -6146,7 +6164,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             lycon->line.is_last_line = true;
             line_break(lycon);
         } else {
-            align_and_discard_phantom_inline_line(lycon);
+            layout_finalize_phantom_inline_line(lycon);
         }
         // CSS Box 4 §3.1 margin-trim: block-end — trim the last in-flow child's
         if (block->blk && (block->block()->margin_trim & MARGIN_TRIM_BLOCK_END)) {
@@ -7200,8 +7218,8 @@ static float line_trimmable_end_space_width(Linebox* line) {
     } else if (line->committed_trailing_space > 0.0f) {
         trimmable_width = line->committed_trailing_space;
     }
-    if (line->hanging_space_width > 0.0f) {
-        trimmable_width += line->hanging_space_width;
+    if (line->hanging_space.width > 0.0f) {
+        trimmable_width += line->hanging_space.width;
     }
     return trimmable_width;
 }
@@ -9518,9 +9536,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
 static int layout_block_count = 0;
 
-static void align_and_discard_phantom_inline_line(LayoutContext* lycon) {
+void layout_finalize_phantom_inline_line(LayoutContext* lycon) {
     if (!lycon || !lycon->line.is_line_start) return;
-    // CSS 2.1 §9.4.2 suppresses the phantom line's height, but §16.2 still
+    // CSS 2.1 §9.4.2 suppresses height; §16.2 still aligns its static cursor.
     if (lycon->line.first_static_inline_position ||
         (lycon->line.start_view && lycon->line.has_phantom_inline_fragment)) {
         line_align(lycon);
@@ -9575,8 +9593,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // that line for static-position resolution without a phantom break.
         if (!lycon->line.is_line_start) {
             line_break(lycon, true);
-        } else if (lycon->line.start_view) {
-            align_and_discard_phantom_inline_line(lycon);
+        } else if (lycon->line.start_view || lycon->line.first_static_inline_position) {
+            layout_finalize_phantom_inline_line(lycon);
         }
     }
     BlockContext pa_block = lycon->block;  Linebox pa_line = lycon->line;
@@ -9661,6 +9679,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
     DomElement* dom_elem = elmt->is_element() ? elmt->as_element() : nullptr;
     const char* custom_layout_name = custom_layout_name_for_element(dom_elem);
+    bool package_mathml = !custom_layout_name && layout_is_mathml_root(dom_elem) &&
+        resolve_display_value(dom_elem).inner == CSS_VALUE_MATH;
+    if (package_mathml) {
+        custom_layout_name = "lambda-mathml";
+    }
     char custom_layout_name_storage[128];
     if (custom_layout_name && custom_layout_name[0] != '\0') {
         custom_layout_name = stabilize_custom_layout_name(
@@ -9709,7 +9732,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                              &original_margin_top,
                              &sibling_margin_collapsed_before_layout);
         if (has_custom_layout) {
-            layout_custom_apply(lycon, block, custom_layout_name);
+            if (package_mathml) layout_apply_mathml(lycon, block);
+            else layout_custom_apply(lycon, block, custom_layout_name);
         }
         bool child_line_clamp_inherited = block->blk && block->block_mut()->line_clamp_inherited;
         bool child_line_clamped = block->blk && block->block_mut()->line_clamped;

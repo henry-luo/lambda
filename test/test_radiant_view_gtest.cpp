@@ -85,6 +85,17 @@ static const RadiantViewCase g_radiant_view_cases[] = {
      "foreign_document_registry", "test/html/js_foreign_document_registry.html", nullptr, true},
     {"RadiantViewTest.ReleasesFailedFontFallbackHandles",
      "failed_font_fallback_registry", "test/html/failed_font_fallback_registry.html", nullptr, true},
+    {"RadiantViewTest.LoadsEpsAsHeadlessView", "eps", "test/input/eps/vector.eps", nullptr, true},
+    {"RadiantViewTest.LoadsDictionaryPrologEpsAsHeadlessView", "eps_dictionary_prolog",
+     "test/input/eps/dictionary-prolog.eps", nullptr, true},
+    {"RadiantViewTest.LoadsFontSelectionEpsAsHeadlessView", "eps_font_selection",
+     "test/input/eps/font-selection.eps", nullptr, true},
+    {"RadiantViewTest.LoadsTextGraphicsEpsAsHeadlessView", "eps_text_graphics",
+     "test/input/eps/text-graphics.eps", nullptr, true},
+    {"RadiantViewTest.LoadsHexRasterEpsAsHeadlessView", "eps_raster_hex",
+     "test/input/eps/raster-hex.eps", nullptr, true},
+    {"RadiantViewTest.LoadsPlanarRasterEpsAsHeadlessView", "eps_raster_planar",
+     "test/input/eps/raster-planar.eps", nullptr, true},
 };
 
 static const size_t g_radiant_view_case_count =
@@ -293,13 +304,13 @@ static bool test_radiant_view_profile_has_intrinsic_measurement(const char* path
     return found;
 }
 
-static bool test_radiant_view_profile_shifted_reuse_at(const char* path,
-                                                       size_t layout_index,
-                                                       unsigned long long* reuse_count) {
+// One field of the per-layout "[LAYOUT_PROFILE] shifted_reuse: N flex_retained: M" line.
+static bool test_radiant_view_profile_reuse_at(const char* path, const char* prefix,
+                                               size_t layout_index,
+                                               unsigned long long* reuse_count) {
     if (!reuse_count) return false;
     char* buffer = test_radiant_view_read_file(path);
     if (!buffer) return false;
-    const char* prefix = "[LAYOUT_PROFILE] shifted_reuse: ";
     const char* cursor = buffer;
     bool found = false;
     for (size_t index = 0; index <= layout_index; index++) {
@@ -899,6 +910,30 @@ TEST(RadiantViewTest, LoadsLambdaChartDashboardAsHeadlessView) {
 
 TEST(RadiantViewTest, LoadsPdfAsHeadlessView) {
     test_radiant_view_expect_case(14);
+}
+
+TEST(RadiantViewTest, LoadsEpsAsHeadlessView) {
+    test_radiant_view_expect_case(21);
+}
+
+TEST(RadiantViewTest, LoadsDictionaryPrologEpsAsHeadlessView) {
+    test_radiant_view_expect_case(22);
+}
+
+TEST(RadiantViewTest, LoadsFontSelectionEpsAsHeadlessView) {
+    test_radiant_view_expect_case(23);
+}
+
+TEST(RadiantViewTest, LoadsTextGraphicsEpsAsHeadlessView) {
+    test_radiant_view_expect_case(24);
+}
+
+TEST(RadiantViewTest, LoadsHexRasterEpsAsHeadlessView) {
+    test_radiant_view_expect_case(25);
+}
+
+TEST(RadiantViewTest, LoadsPlanarRasterEpsAsHeadlessView) {
+    test_radiant_view_expect_case(26);
 }
 
 TEST(RadiantViewTest, ReleasesDetachedScriptTextControl) {
@@ -1890,7 +1925,7 @@ TEST(RadiantViewTest, ReportsNestedFlexIntrinsicMeasurements) {
 TEST(RadiantViewTest, ArchivesAndDirectoriesOpenAsFileTrees) {
     const char* paths[] = {"test/input/zip", "test/input/zip/wide.zip",
         "test/input/zip/viewer.zip", "test/input/zip/empty.zip", "test/input/zip/renamed.dat", "test/input/zip/extensionless",
-        "test/input/zip/office.docx", "test/input/zip/sample.jar"};
+        "test/input/zip/sample.zip", "test/input/zip/sample.jar"};
     const char* view_log = "./temp/test_radiant_view_archive_tree.log";
     const ShellEnvEntry env[] = {
         {"LAMBDA_LOG_FILE", view_log}, {"LAMBDA_LOG_LEVEL", "INFO"}, {NULL, NULL},
@@ -1911,6 +1946,16 @@ TEST(RadiantViewTest, ArchivesAndDirectoriesOpenAsFileTrees) {
     }
     remove(view_log);
     remove(events);
+}
+
+TEST(RadiantViewTest, WordDocumentsOpenAsDocumentPreviews) {
+    // D7.2.4: the DOCX package supplies the preview through ordinary view dispatch.
+    ShellResult result = test_radiant_view_run_logged_headless(
+        "test/input/zip/office.docx", "test/ui/doc_viewer_docx_archive.json", nullptr);
+    EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+    EXPECT_NE(strstr(result.stdout_buf ? result.stdout_buf : "",
+        "Assertions: 3 passed, 0 failed"), nullptr);
+    shell_result_free(&result);
 }
 
 TEST(RadiantViewTest, RejectsUnsafeArchiveBeforeOpeningTree) {
@@ -1943,9 +1988,9 @@ TEST(RadiantViewTest, ReusesCleanRowsAfterDirectoryClose) {
 
     unsigned long long initial_reuse = 0;
     unsigned long long close_reuse = 0;
-    ASSERT_TRUE(test_radiant_view_profile_shifted_reuse_at(view_log, 0, &initial_reuse));
+    ASSERT_TRUE(test_radiant_view_profile_reuse_at(view_log, "shifted_reuse: ", 0, &initial_reuse));
     // Two setup layouts and two opens precede the close relayout in this fixture.
-    ASSERT_TRUE(test_radiant_view_profile_shifted_reuse_at(view_log, 4, &close_reuse));
+    ASSERT_TRUE(test_radiant_view_profile_reuse_at(view_log, "shifted_reuse: ", 4, &close_reuse));
     EXPECT_EQ(0ULL, initial_reuse);
     EXPECT_GT(close_reuse, 0ULL);
     remove(view_log);
@@ -1967,8 +2012,33 @@ TEST(RadiantViewTest, ReusesCleanBlocksAroundCollapsedWhitespaceAndHiddenSibling
     ASSERT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
     shell_result_free(&result);
     unsigned long long reuse_count = 0;
-    ASSERT_TRUE(test_radiant_view_profile_shifted_reuse_at(view_log, 1, &reuse_count));
+    ASSERT_TRUE(test_radiant_view_profile_reuse_at(view_log, "shifted_reuse: ", 1, &reuse_count));
     EXPECT_GT(reuse_count, 0ULL);
+    remove(view_log);
+}
+
+TEST(RadiantViewTest, ReplaysCleanFlexSiblingOfMutatedPane) {
+    const char* view_log = "./temp/test_radiant_view_flex_retained.log";
+    test_radiant_view_ensure_temp_dir();
+    remove(view_log);
+    const ShellEnvEntry env[] = {
+        {"LAYOUT_PROFILE", "1"},
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult result = test_radiant_view_run_logged_headless(
+        "test/ui/dom_mutation_flex_retained.html",
+        "test/ui/dom_mutation_flex_retained.json", env);
+    ASSERT_EQ(0, result.exit_code) << (result.stdout_buf ? result.stdout_buf : "");
+    shell_result_free(&result);
+    unsigned long long initial = 0;
+    unsigned long long replayed = 0;
+    // the load layout records the side panel; each pane mutation replays it.
+    ASSERT_TRUE(test_radiant_view_profile_reuse_at(view_log, "flex_retained: ", 0, &initial));
+    ASSERT_TRUE(test_radiant_view_profile_reuse_at(view_log, "flex_retained: ", 2, &replayed));
+    EXPECT_EQ(0ULL, initial);
+    EXPECT_GT(replayed, 0ULL);
     remove(view_log);
 }
 
@@ -2796,6 +2866,16 @@ TEST(RadiantViewTest, PhotoCanvasCopiesRgbaAndReleasesItAcrossGc) {
         "test/demo/photo/tests/_canvas_bridge.ls", "test/demo/photo/tests/canvas_bridge.json", env, true);
 }
 
+TEST(RadiantViewTest, PhotoImageJobsOwnPixelsAcrossGcAndClose) {
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"},
+        {"LAMBDA_FUNC_JIT_THRESHOLD", "1"}, {"LAMBDA_SATELLITE_SYNC", "1"},
+        {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {nullptr, nullptr},
+    };
+    test_radiant_view_expect_replay("test/demo/photo/tests/_image_jobs.ls",
+        "test/demo/photo/tests/image_jobs.json",env,true);
+}
+
 static const struct {
     const char* name; const char* tier; const char* replay; const char* source;
 } g_radiant_view_photo_cases[] = {
@@ -2805,6 +2885,10 @@ static const struct {
     {"PhotoCropDraftAndKeyboardCompare_jit_gestures", "jit", "photo_gestures", "test/demo/photo/tests/rgba.png"},
     {"PhotoCropDraftAndKeyboardCompare_auto_responsive", "auto", "photo_responsive", "test/demo/photo/tests/rgba.png"},
     {"PhotoCropDraftAndKeyboardCompare_jit_responsive", "jit", "photo_responsive", "test/demo/photo/tests/rgba.png"},
+    {"PhotoCreativeLayersAndExport_auto", "auto", "photo_creative", "test/demo/photo/tests/rgba.png"},
+    {"PhotoCreativeLayersAndExport_jit", "jit", "photo_creative", "test/demo/photo/tests/rgba.png"},
+    {"PhotoAsynchronousProcessingAndCacheReuse_auto", "auto", "photo_performance", nullptr},
+    {"PhotoAsynchronousProcessingAndCacheReuse_jit", "jit", "photo_performance", nullptr},
 };
 
 static void test_radiant_view_photo_replay(size_t selected) {

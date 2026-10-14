@@ -201,8 +201,8 @@
             "view",
             "visible",
             "weights",
-            "←",
-            "↑"
+            "\u2190",
+            "\u2191"
           ]
         },
         {
@@ -2783,14 +2783,16 @@
         {
           "path": "examples/timeline/other/localization.html",
           "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/localization.html",
-          "status": "planned",
-          "acceptance": []
+          "status": "excluded",
+          "acceptance": [],
+          "exclusion": "localization"
         },
         {
           "path": "examples/timeline/other/localizationCustom.html",
           "url": "https://github.com/visjs/vis-timeline/blob/67b24bb2b80bf5fef510476b2897e0a3e32f3f63/examples/timeline/other/localizationCustom.html",
-          "status": "planned",
-          "acceptance": []
+          "status": "excluded",
+          "acceptance": [],
+          "exclusion": "localization"
         },
         {
           "path": "examples/timeline/other/onTimeout.html",
@@ -3817,16 +3819,18 @@
     {
       "family": "Motion",
       "requirements": "Keyed enter/update/exit, animated windows/guides, interruption from visible state, reduced motion, explicit frozen samples.",
-      "schema": "Chart animation helpers",
+      "schema": "`animate`, chart animation helpers",
       "references": "RC, AC; chart reuse",
       "hosts": {
         "pure": {
           "status": "partial",
           "acceptance": [
             "test/lambda/chart/timeline_story.ls",
-            "test/lambda/chart/timeline_story.txt"
+            "test/lambda/chart/timeline_story.txt",
+            "test/lambda/chart/timeline_motion.ls",
+            "test/lambda/chart/timeline_motion.txt"
           ],
-          "remaining": "Incoming/outgoing story fade, slide/reveal samples, reverse/repeat boundaries, pause/resume, retirement, and reduced motion have evidence. Keyed event enter/update/exit, interrupted windows/guides, and full pinned option/example parity remain open."
+          "remaining": "Keyed enter/update/exit, window/guide sampling, visible SVG/opacity interruption, passive retirement, deterministic frames and reduced motion have evidence. Complete pinned option/example equivalence remains open."
         },
         "native": {
           "status": "partial",
@@ -3835,9 +3839,11 @@
             "test/ui/timeline/story_timing.json",
             "test/ui/timeline/story_motion.ls",
             "test/ui/timeline/story_motion.json",
-            "test/test_view_reuse_gtest.cpp"
+            "test/test_view_reuse_gtest.cpp",
+            "test/ui/timeline/keyed_motion.ls",
+            "test/ui/timeline/keyed_motion.json"
           ],
-          "remaining": "Incoming/outgoing story fade, slide/reveal samples, reverse/repeat boundaries, pause/resume, retirement, and reduced motion have evidence. Keyed event enter/update/exit, interrupted windows/guides, and full pinned option/example parity remain open."
+          "remaining": "Keyed enter/update/exit, window/guide sampling, visible SVG/opacity interruption, passive retirement, deterministic frames and reduced motion have evidence. Complete pinned option/example equivalence remains open."
         }
       }
     },
@@ -3948,24 +3954,39 @@
     {
       "family": "Scale and diagnostics",
       "requirements": "Indexed window queries, cached visibility, clustering before rich-card measurement, bounded work, release timings and memory measurements.",
-      "schema": "`cluster`, resources, layout",
+      "schema": "Prepared index, `cluster`, layout",
       "references": "VT, RC; Lambda requirement",
       "hosts": {
         "pure": {
           "status": "partial",
           "acceptance": [
             "test/lambda/chart/timeline_resources.ls",
-            "test/lambda/chart/timeline_resources.txt"
+            "test/lambda/chart/timeline_resources.txt",
+            "test/lambda/chart/timeline_index.ls",
+            "test/lambda/chart/timeline_index.txt",
+            "test/lambda/chart/timeline_scalability.ls",
+            "test/lambda/chart/timeline_scalability.txt",
+            "test/lambda/chart/timeline_prepared.ls",
+            "test/lambda/chart/timeline_prepared.txt",
+            "test/timeline/run_benchmarks.py",
+            "test/timeline/scalability_release.json"
           ],
-          "remaining": "Interval-index integration, premeasurement clustering and release scalability measurements are the active implementation tranche."
+          "remaining": "Interval-index integration, retained normalization/visibility, premeasurement clustering and all 20 release workloads have evidence. Sparse 100,000-event windows examine 36 records and measure 33 cards; dense identical dates still scan all members while measuring one card. Complete pinned option/example equivalence remains open."
         },
         "native": {
           "status": "partial",
           "acceptance": [
             "test/ui/timeline/resource_lifetime.ls",
-            "test/ui/timeline/resource_lifetime.json"
+            "test/ui/timeline/resource_lifetime.json",
+            "test/ui/timeline/cluster.ls",
+            "test/ui/timeline/cluster.json",
+            "test/ui/timeline/source.ls",
+            "test/ui/timeline/source.json",
+            "test/ui/timeline/scalability.ls",
+            "test/ui/timeline/scalability.json",
+            "test/timeline/scalability_release.json"
           ],
-          "remaining": "Interval-index integration, premeasurement clustering and release scalability measurements are the active implementation tranche."
+          "remaining": "Interval-index integration, retained normalization/visibility, premeasurement clustering and all 20 release workloads have evidence. Sparse 100,000-event windows examine 36 records and measure 33 cards; dense identical dates still scan all members while measuring one card. Complete pinned option/example equivalence remains open."
         }
       }
     }

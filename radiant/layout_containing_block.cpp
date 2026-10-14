@@ -224,6 +224,9 @@ LayoutContainingBlock layout_absolute_containing_block(LayoutContext* lycon, Vie
     // CSS Position resolves an abspos percentage inline size against the
     // containing block's used padding box, including an auto-width block.
     cb.has_definite_width = true;
+    // css 2.1 §10.5: abspos percentage heights also use an auto-height
+    // containing block's used padding box, rather than the replaced ratio.
+    cb.has_definite_height = true;
     return cb;
 }
 

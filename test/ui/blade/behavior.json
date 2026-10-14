@@ -1,0 +1,359 @@
+{
+  "name": "blade widgets integrate with native controls and retained collections",
+  "html": "test/ui/blade/behavior.ls",
+  "viewport": {
+    "width": 1050,
+    "height": 1600
+  },
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#health"
+      },
+      "attribute": "aria-valuenow",
+      "equals": "240"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#health"
+      },
+      "attribute": "aria-valuemax",
+      "equals": "500"
+    },
+    {
+      "type": "assert_state",
+      "target": {
+        "selector": "#cooldown"
+      },
+      "state": ":disabled",
+      "value": true
+    },
+    {
+      "type": "assert_state",
+      "target": {
+        "selector": "#provider-disabled"
+      },
+      "state": ":disabled",
+      "value": true
+    },
+    {
+      "type": "assert_state",
+      "target": {
+        "selector": "#provider-input"
+      },
+      "state": ":disabled",
+      "value": true
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#blue"
+      },
+      "property": "border-color",
+      "equals": "rgb(82, 122, 156)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#inherited"
+      },
+      "property": "border-color",
+      "equals": "rgb(82, 122, 156)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#inherited"
+      },
+      "property": "border-radius",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#large-slot"
+      },
+      "width": 96,
+      "height": 96,
+      "tolerance": 0.2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#select"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#select"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last"
+      },
+      "equals": "select:activate"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#actions"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#select"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#actions"
+      },
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#fixed"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#fixed"
+      },
+      "attribute": "aria-pressed",
+      "equals": "false"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last"
+      },
+      "equals": "fixed:activate"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#disabled"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cooldown"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#provider-disabled"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#actions"
+      },
+      "equals": "3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#cast"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last"
+      },
+      "equals": "cast:activate"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#actions"
+      },
+      "equals": "4"
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#actions"
+      },
+      "equals": "5"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#accepted"
+      },
+      "text": "Knight"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#accepted"
+      },
+      "equals": "Knight"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#draft"
+      },
+      "text": "Remember"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tabs-item-0"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "right"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#tabs-item-2"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#tabs-item-2"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#nested"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#last"
+      },
+      "equals": "nested:activate"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tabs-item-0"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#draft"
+      },
+      "equals": "Remember"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table [data-dtna-table-sort='0']"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#table [aria-sort]"
+      },
+      "attribute": "aria-sort",
+      "equals": "ascending"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#table tbody tr:first-child td:last-child"
+      },
+      "equals": "Ada"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table [data-dtna-table-select='1']"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#table [data-dtna-table-select='1']"
+      },
+      "attribute": "aria-checked",
+      "equals": "true"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#table [aria-label='Next page']"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#table [aria-current=page]"
+      },
+      "equals": "2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#submit"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#requests"
+      },
+      "equals": "name=Blade"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#name"
+      },
+      "text": "X"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#name"
+      },
+      "equals": "Blade"
+    }
+  ]
+}

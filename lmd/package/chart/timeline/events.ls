@@ -44,13 +44,17 @@ pn canvas_point(host, model, spec, current, evt) {
 }
 
 pub fn source(model, clock = null) => if (clock.source!=null) clock.source else if (model.spec!=null) model.spec else model
+// host preference may reduce authored motion; invalid fallback state stays an error value.
+fn visual_spec(spec, current, options) => if (current is error) current else {
+    *:editing.preview(spec,current),view:current.view,
+    motion:if (options.reduced_motion==true) "reduced" else spec.motion}
 pub fn presentation(model, clock) {
     let cache=prepared.source(source(model,clock),clock.interaction,c.option(clock,"prepared",model.prepared));
     let loaded=cache.normalized;
     let normalized=cache.fallback;
     let current=if (normalized is error) normalized else reducer.reconcile(normalized,
         if (clock.interaction==null) reducer.initial(normalized) else clock.interaction);
-    let visual={*:editing.preview(normalized,current),view:current.view};
+    let visual=visual_spec(normalized,current,model.options);
     let sequence=visual.view=="cards" and visual.spacing=="sequence";
     let displayed=if (sequence and clock.geometry_cache.key!=prepared.geometry_key(visual,model.viewport,current)) null else clock.motion.displayed;
     if (current is error) current else if (model.legacy_list==true)
@@ -147,7 +151,7 @@ pub pn handle(model, clock, evt) {
         effects=[*effects,{name:"timeline_request",detail:started.request}]
     }
     let next_cache=prepared.record(source(model,clock),next,accepted_spec,cache);
-    let visual={*:editing.preview(next_cache.normalized,next),view:next.view};
+    let visual=visual_spec(next_cache.normalized,next,model.options);
     let sequence=visual.view=="cards" and visual.spacing=="sequence";
     let measured=if (spec.animate.enabled==true) prepared.geometry(visual,model.viewport,next,clock.geometry_cache) else null;
     let changed=measured.key!=clock.geometry_cache.key;

@@ -4,7 +4,7 @@ Implemented against [WebGL design §15](../radiant/Radiant_Design_WebGL.md#15-as
 Ownership and module boundaries follow **D4.1.3**, **D7.2.4**, and
 **S12.1.1v2**; no new Lambda value domain or formal ruling is introduced.
 
-`lambda.scene3d.load()` adapts the raw OBJ/MTL, glTF JSON, and A3D mappings into
+`lambda.scene3d.load()` adapts the raw OBJ/MTL, glTF JSON/GLB, and A3D mappings into
 ordinary scene elements. Dependencies use the existing input/URL path; resource
 references and animation bindings are namespaced by the caller's group ID.
 Native static quaternion/matrix transforms and authored inverse binds preserve
@@ -16,7 +16,7 @@ use the existing sorted transparent pass.
 
 The supported profiles and unmapped material/geometry features are enumerated
 in §15. Full PBR rendering, glTF alpha masks, compressed geometry, A3D texture
-name resolution, parametric surfaces, voxel meshing and binary model containers
+name resolution, parametric surfaces, voxel meshing and binary A3D containers
 are outside this increment. WASM source registration is included; WASM
 execution is unverified.
 
@@ -78,3 +78,100 @@ The exact pre-change comparison lives under `temp/asset-baseline-src`; build
 and comparison logs use `temp/asset-*`. Backdating its copied RE2 files per
 Developer Guide §7 avoided regenerating the shared vendor build cache. No
 vendor source was patched.
+
+## CellScope model loading (2026-10-13)
+
+GLB v2 JSON/BIN chunks now enter the existing glTF adapter. Header/version,
+chunk alignment and bounds, duplicate chunks, and declared BIN size are checked;
+geometry is copied into Input-owned values (**D4.1.3**). Static primitives over
+native draw limits are partitioned with original UV/normal/color seams retained.
+Static glTF primitives without normals receive per-face normals, as required by
+[glTF §3.7.2.1](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#meshes-overview);
+zero-area triangles are discarded. Animated oversized primitives still fail.
+
+HTTP acquisition of explicit `scene3d-asset` inputs uses the same 64 MiB limit
+as the glTF buffer decoder; other HTTP inputs retain their 50 MiB default and
+all paths honor the configured archive limit. Static native meshes omit unused deformation and default-white color lanes.
+Vertex/instance buffers do not retain redundant CPU copies; index buffers
+retain their exact range-validation data.
+Textures accept `max-size` (integer 1..4096, default 4096), box-downsampling by
+powers of two while preserving aspect ratio and source pixels. Alpha-weighted
+RGB averaging avoids transparent-edge halos; mip storage uses the actual upload
+dimensions. The existing 128 MiB graphics-context limit is unchanged.
+
+`test/demo/cellscope` keeps one reduced, textured plant model locally and loads
+four pinned upstream GLBs over HTTP on selection. Its manual online fixture
+verifies each published model produces nonblank native pixels; routine UI
+fixtures exercise the bundled plant and procedural Muscle without remote
+model downloads. Texture caps are a presentation choice in the demo, not a
+source-data rewrite.
+
+The gallery omits Epithelial. Muscle retains upstream's seven bundles, 84
+sarcomeres with three bands each, capsule membrane, nuclei, mitochondria, and
+four 80-by-12 Catmull–Rom tubes. Tube positions and normals match Three.js r181
+to float precision. The NIH models use upstream's generated vertex coloring;
+the split Neuron draws share the original primitive's color bounds. Bacteria
+is explicitly labeled as a wall cross-section. Scene3D's Lambert lighting
+still differs from upstream's PBR environment and contact shadows.
+
+The follow-up demo checks passed: **9/9** golden runs across the three execution
+tiers, **3/3** native UI cases, **13/13** online assertions for all four models,
+and **9/9** additional online assertions after sharing the NIH color bounds.
+
+The bundled plant buffer is now **237,024 bytes (237 KB / 231 KiB)**, below the
+strict 250,000-byte budget, 53% smaller than the previous 503,752-byte asset,
+and 90% smaller than the first 2,383,652-byte port. Preparation uses mesh
+simplification ratio 0.004 / error 0.01, 14-bit positions in signed shorts,
+8-bit signed normals, and 16-bit UVs. It preserves texture seams, authored
+normal directions, and the exact source JPEG; the mesh has 11,382 vertices
+and 9,152 triangles. Fine structures show more facets when enlarged.
+
+The adapter now recognizes required `KHR_mesh_quantization` and applies its
+component-encoding rules to positions, normals, UVs, and supported morph
+attributes. Existing accessor decoding, node/skin transforms, and destination
+Input ownership (**D4.1.3**) handle dequantization. Integer normals without
+normalization, unsigned normals/morph displacements, and undeclared quantized
+attributes remain errors. Model input tests passed **30/30**; the updated
+asset/package goldens passed **9/9** runs across all execution tiers. All
+**3/3** native UI cases passed with an isolated executable after a concurrent
+build briefly removed the shared host during the first mobile run. Three
+native viewing angles retain 98.6–98.9% silhouette overlap against the previous
+mesh; the plant thumbnail and desktop preview were refreshed.
+
+CellScope zoom continues optically after the camera reaches its 4-unit clearance
+distance. Its framing distance now reaches 0.05 instead of stopping at 4,
+allowing about 30 toolbar or keyboard zoom-in steps from the default view.
+The field of view follows the perspective tangent relation, so magnification
+and pan sensitivity stay continuous across the dolly/optical transition.
+Both comparison cameras receive the same field of view. Regression checks
+cover 30 decreasing projected spans, 24 native zoom-in clicks, matching peer
+zoom, zooming back out, and reset. All **9/9** package golden runs and **3/3**
+native UI cases passed; the desktop fixture now has 109 events.
+
+CellScope validation on macOS (2026-10-13):
+
+- Model input tests: **30/30**; native Scene3D unit tests: **24/24**.
+- Scene3D/cellscope package goldens: **30/30** runs across interpreter, automatic,
+  and JIT tiers. Desktop, compact, and mobile cellscope event fixtures passed.
+- All four pinned remote GLBs loaded and produced native pixels: **13/13**
+  assertions in the explicit online fixture. Plant and remote captures were
+  visually inspected; the checked-in preview and local thumbnails were refreshed.
+- Full native view suite: **175/175**. Radiant baseline: **5,427 passed,
+  351 partial, one skipped, one failure**. The remaining `md_nuxt-readme` layout
+  failure is the same anchor Y offset (148.5px versus browser 142.5px) in both
+  this executable and the saved 09:22 pre-change executable
+  `temp/timeline-implementation/lambda-release-measure.exe`. Comparison logs:
+  `temp/cellview-markdown-{before,current}.log`. No baseline was changed.
+- Radiant dimension-cast lint and whitespace checks passed.
+
+The full Lambda baseline after quantization support completed **6,824/6,825**
+checks: input **2,112/2,112**, runtime **4,712/4,713**. The sole failure is
+`ui_blade_blade_catalog`, whose shared-contract equality check differs while
+the Blade artwork is being changed independently. The same false result
+reproduces with the saved 13:21 executable, before this importer change;
+no Blade source or golden was changed here. Evidence is in
+`temp/cellview-quarter-lambda-baseline.log`,
+`temp/cellview-quarter-blade-rerun.log`, and
+`temp/cellview-quarter-blade-before.txt`.
+Build-time upstream sources and preparation tools stay under ignored `temp/`;
+the shipped assets and preparation instructions are self-contained.

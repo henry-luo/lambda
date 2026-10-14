@@ -16,6 +16,7 @@
 #include "../lambda/runtime/sys_func_registry.h"
 #include "../lambda/runtime/type_contract.hpp"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/lambda-number-runtime.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lib/hashmap.h"
 #include "../lib/memtrack.h"
@@ -353,6 +354,27 @@ TEST_F(RuntimeShapeTransition, EmptyStringUsesPinnedSharedItem) {
     EXPECT_FALSE(empty->is_pooled);
     EXPECT_EQ(heap_strcpy("", 0), empty);
     EXPECT_EQ(heap_strcpy("", 0), empty);
+}
+
+TEST_F(RuntimeShapeTransition, LargeNdimConstructionDoesNotPromoteItsUnwrittenPayload) {
+    gc_heap_t* heap=eval.heap->gc;
+    heap->gc_threshold=gc_data_zone_used(heap->data_zone)+1024;
+    const int64_t dimensions[]={1024,1024,4};
+    RootFrame roots(1);
+    Rooted<ArrayNum*> image(roots,alloc_ndim_arraynum(ELEM_UINT8,3,dimensions));
+    ASSERT_NE(image.get(),nullptr);
+    EXPECT_TRUE(gc_data_zone_owns(heap->data_zone,image.get()->data));
+    EXPECT_EQ(image.get()->length,1024*1024*4);
+    uint8_t* bytes=(uint8_t*)image.get()->data;
+    ASSERT_NE(bytes,nullptr);
+    EXPECT_EQ(bytes[0],0); EXPECT_EQ(bytes[1024*1024*4-1],0);
+    bytes[0]=17; bytes[1024*1024*4-1]=42;
+    heap_gc_collect();
+    int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
+    ASSERT_EQ(array_num_get_shape_strides(image.get(),shape,strides),3);
+    EXPECT_EQ(shape[0],1024); EXPECT_EQ(shape[1],1024); EXPECT_EQ(shape[2],4);
+    EXPECT_EQ(((uint8_t*)image.get()->data)[0],17);
+    EXPECT_EQ(((uint8_t*)image.get()->data)[1024*1024*4-1],42);
 }
 
 TEST(ItemRepresentation, SharedMasksKeepSentinelsOutOfDoubleSpace) {

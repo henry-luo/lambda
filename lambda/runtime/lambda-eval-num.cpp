@@ -52,7 +52,7 @@ static bool complex_component_from_item(Item item, double* out) {
     }
 }
 
-static bool complex_components_from_item(Item item, double* real, double* imag) {
+bool complex_components_from_item(Item item, double* real, double* imag) {
     if (!real || !imag) return false;
     if (get_type_id(item) == LMD_TYPE_COMPLEX) {
         Complex* value = item.get_complex();

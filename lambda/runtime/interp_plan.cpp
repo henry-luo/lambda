@@ -1428,15 +1428,14 @@ static uint32_t plan_need(AstNode* node) {
             return 14 + widest;
         }
         if (!fr->group) {
-            // eval_for always reserves the output and ordering-key homes,
-            // even when the enclosing statement discards the stream;
-            // interp_for_level then publishes one collection home before
-            // evaluating each loop source. The old one-home floor omitted
-            // those fixed homes, so nested call/for bodies could exhaust the
-            // statically planned window at a GC safepoint.
+            // each recursive Cartesian level retains its own collection home
+            // through the body, above the fixed output and ordering-key homes.
+            // counting only one source under-sized frames for multi-source loops.
+            uint32_t collections = 0;
+            for (AstNode* item = fr->loop; item; item = item->next) collections++;
             NeedAcc acc = {0};
             interp_visit_children(node, plan_need_child, &acc);
-            return 3 + acc.best;
+            return 2 + collections + acc.best;
         }
         // Group materialization keeps the output/key streams, source, row
         // stream, key stream, and current row alive while row clauses run.

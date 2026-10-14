@@ -1,9 +1,11 @@
 #include "input-scene3d.hpp"
+#include "input-parsers.h"
 #include "../../lib/base64.h"
 
 namespace lambda {
 namespace {
 struct GltfBuffer { const uint8_t* data; size_t length; };
+struct GltfColumn { const char* name=nullptr; unsigned width=0; lam::ArrayList<double> values; };
 struct GltfSkin {
     Item value;
     unsigned count = 0;
@@ -17,7 +19,11 @@ struct Gltf {
     lam::ArrayList<int> parents;
     lam::ArrayList<unsigned char> visited;
     lam::ArrayList<GltfSkin> skins;
-    explicit Gltf(SceneAsset& asset,Item input):a(asset),source(asset_read(input)) {}
+    const uint8_t* binary;
+    size_t embedded_length;
+    bool quantization=false;
+    explicit Gltf(SceneAsset& asset,Item input,const uint8_t* data,size_t length):
+        a(asset),source(asset_read(input)),binary(data),embedded_length(length) {}
     ItemReader field(const char* key) {return asset_field(source,key);}
     ItemReader object(const char* key,size_t i) {return asset_at(field(key),i);}
     bool fail(const char* reason) {return a.fail(reason);}
@@ -36,7 +42,13 @@ struct Gltf {
         for(size_t i=0;i<asset_count(field("buffers"));i++) {
             auto buffer=object("buffers",i);int length=integer(buffer,"byteLength");
             const char* uri=asset_field(buffer,"uri").cstring();
-            if(!uri||length<0||length>67108864) return fail("buffer requires a URI and a byteLength no greater than 64 MiB");
+            if(length<0||(size_t)length>SCENE_ASSET_BUFFER_LIMIT) return fail("buffer byteLength must be no greater than 64 MiB");
+            if(!uri) {
+                // GLB's first buffer refers to BIN; its final 0..3 alignment bytes are not buffer data.
+                if(i!=0||!binary||(size_t)length>embedded_length||embedded_length-(size_t)length>3)
+                    return fail("missing or incorrectly sized GLB binary buffer");
+                buffers.append({binary,(size_t)length});continue;
+            }
             Input* input=a.dependency(uri,"binary");if(!input) return false;
             Binary* binary=input->root.get_binary();size_t actual=binary?binary_length(binary):0;
             if(actual<(size_t)length) return fail("buffer is shorter than its declared byteLength");
@@ -68,9 +80,9 @@ struct Gltf {
         int ct=integer(ac,"componentType"),count=integer(ac,"count"),offset=integer(ac,"byteOffset",0),vi=integer(ac,"bufferView");
         unsigned width=ct==5120||ct==5121?1:ct==5122||ct==5123?2:ct==5125||ct==5126?4:0;
         auto norm=asset_field(ac,"normalized");bool normalized=norm.isBool()&&norm.asBool();
-        if(!c||!width||count<=0||count>1048576||offset<0||offset%(int)width||
+        if(!c||!width||count<=0||count>(c==1?8388608:1048576)||offset<0||offset%(int)width||
             (!norm.isNull()&&!norm.isBool())||(normalized&&(ct==5125||ct==5126))) return fail("invalid accessor layout or normalization");
-        if((size_t)count*c>4194304) return fail("accessor component quota exceeded");
+        if((size_t)count*c>8388608) return fail("accessor component quota exceeded");
         unsigned stride=c*width;const uint8_t* bytes=nullptr;
         if(vi>=0) {
             auto v=object("bufferViews",vi);int declared=integer(v,"byteStride",stride);
@@ -102,9 +114,20 @@ struct Gltf {
         }
         if(components) *components=c;if(component_type) *component_type=ct;return true;
     }
-    bool components(ItemReader object,const char* key,unsigned expected,lam::ArrayList<double>& values) {
-        unsigned count,ct;if(!accessor(integer(object,key),values,&count,&ct)) return false;
-        return (count==expected&&ct==5126)||fail("expected a floating-point vector accessor");
+    bool attribute_encoding(const char* key,unsigned ct,bool normalized,bool morph=false) {
+        if(ct==5126) return true;
+        bool signed_type=ct==5120||ct==5122,unsigned_type=ct==5121||ct==5123;
+        if(asset_is(key,"TEXCOORD_0"))
+            return !morph&&((unsigned_type&&normalized)||(quantization&&(signed_type||unsigned_type)));
+        // KHR_mesh_quantization uses the existing accessor decoder and node/skin transforms.
+        return quantization&&((asset_is(key,"POSITION")&&(signed_type||(!morph&&unsigned_type)))||
+            (asset_is(key,"NORMAL")&&signed_type&&normalized));
+    }
+    bool components(ItemReader attributes,const char* key,unsigned expected,lam::ArrayList<double>& values,bool morph=false) {
+        unsigned count,ct;if(!accessor(integer(attributes,key),values,&count,&ct)) return false;
+        bool vertex=asset_is(key,"POSITION")||asset_is(key,"NORMAL");
+        bool normalized=asset_field(object("accessors",integer(attributes,key)),"normalized").asBool();
+        return (count==expected&&(vertex?attribute_encoding(key,ct,normalized,morph):ct==5126))||fail("invalid vector accessor encoding");
     }
     bool transform(Item out,ItemReader in) {
         const char* keys[]={"translation","rotation","scale","matrix"};const char* attrs[]={"position","quaternion","scale","matrix"};
@@ -221,11 +244,63 @@ struct Gltf {
         }
         return true;
     }
+    void geometry_columns(Item geometry,GltfColumn* columns,const lam::ArrayList<unsigned>* vertices=nullptr) {
+        for(unsigned k=0;k<6;k++) if(columns[k].name) {
+            auto& column=columns[k];
+            if(!vertices) a.attr(geometry,column.name,a.array(column.values.data(),column.values.size()));
+            else {
+                auto array=a.ctx.builder.array();
+                for(unsigned vertex:*vertices) for(unsigned axis=0;axis<column.width;axis++)
+                    array.append(a.number(column.values[(size_t)vertex*column.width+axis]));
+                a.attr(geometry,column.name,array.final());
+            }
+        }
+    }
+    bool face_normal(const lam::ArrayList<double>& points,unsigned p,unsigned q,unsigned r,double* normal) {
+        double u[3],v[3];for(unsigned axis=0;axis<3;axis++) {u[axis]=points[q*3+axis]-points[p*3+axis];v[axis]=points[r*3+axis]-points[p*3+axis];}
+        for(unsigned axis=0;axis<3;axis++) normal[axis]=u[(axis+1)%3]*v[(axis+2)%3]-u[(axis+2)%3]*v[(axis+1)%3];
+        double length=hypot(hypot(normal[0],normal[1]),normal[2]);if(!length) return false;
+        for(unsigned axis=0;axis<3;axis++) normal[axis]/=length;return true;
+    }
+    void static_chunks(Item parent,Item material,GltfColumn* columns,const lam::ArrayList<double>& triangles,size_t vertex_count,bool flat) {
+        lam::ArrayList<int> remap;for(size_t i=0;i<vertex_count;i++) remap.append(-1);
+        lam::ArrayList<unsigned> vertices;lam::ArrayList<double> indices;
+        auto flush=[&]() {
+            if(indices.empty()) return;
+            Item mesh=a.element("mesh"),geometry=a.element("geometry");
+            a.attr(mesh,"id",a.id("mesh",a.serial++));a.attr(mesh,"material",material);
+            a.attr(geometry,"type",a.symbol("buffer"));geometry_columns(geometry,columns,&vertices);
+            if(flat) {
+                auto normals=a.ctx.builder.array();
+                for(size_t i=0;i<vertices.size();i+=3) {
+                    double normal[3];face_normal(columns[0].values,vertices[i],vertices[i+1],vertices[i+2],normal);
+                    for(unsigned corner=0;corner<3;corner++) for(double component:normal) normals.append(a.number(component));
+                }
+                a.attr(geometry,"normals",normals.final());
+            }
+            a.attr(geometry,"indices",a.array(indices.data(),indices.size()));a.append(mesh,geometry);a.append(parent,mesh);
+            for(unsigned vertex:vertices) remap[vertex]=-1;
+            vertices.clear();indices.clear();
+        };
+        // preserve every triangle and UV seam while bounding each native draw's buffers.
+        for(size_t i=0;i<triangles.size();i+=3) {
+            unsigned needed=0;for(unsigned j=0;j<3;j++) if(flat||remap[(unsigned)triangles[i+j]]<0) needed++;
+            if(vertices.size()+needed>262144||indices.size()+3>1572864) flush();
+            for(unsigned j=0;j<3;j++) {
+                unsigned vertex=(unsigned)triangles[i+j];
+                if(flat||remap[vertex]<0) {remap[vertex]=(int)vertices.size();vertices.append(vertex);}
+                indices.append(remap[vertex]);
+            }
+        }
+        flush();
+    }
     bool primitive(Item parent,ItemReader node,unsigned node_index,ItemReader mesh,ItemReader primitive,unsigned primitive_index) {
         auto attributes=asset_field(primitive,"attributes");lam::ArrayList<double> positions;
-        if(!components(attributes,"POSITION",3,positions)||positions.empty()||positions.size()>786432) return fail("invalid mesh positions");
+        if(!components(attributes,"POSITION",3,positions)||positions.empty()) return fail("invalid mesh positions");
         size_t vertices=positions.size()/3;Item geometry=a.element("geometry"),out=a.element("mesh");
-        a.attr(out,"id",a.id("mesh",a.serial++));a.attr(geometry,"type",a.symbol("buffer"));a.attr(geometry,"positions",a.array(positions.data(),positions.size()));
+        GltfColumn columns[6];columns[0].name="positions";columns[0].width=3;
+        columns[0].values=static_cast<lam::ArrayList<double>&&>(positions);
+        a.attr(out,"id",a.id("mesh",a.serial++));a.attr(geometry,"type",a.symbol("buffer"));
         const char* keys[]={"NORMAL","TEXCOORD_0","COLOR_0","JOINTS_0","WEIGHTS_0"};const char* attrs[]={"normals","uvs","colors","skin-indices","skin-weights"};
         int si=integer(node,"skin");if(si>=0&&(size_t)si>=skins.size()) return fail("skin index out of bounds");
         bool has_joints=!asset_field(attributes,"JOINTS_0").isNull(),has_weights=!asset_field(attributes,"WEIGHTS_0").isNull();
@@ -235,8 +310,8 @@ struct Gltf {
             lam::ArrayList<double> data;unsigned c,ct;if(!accessor(integer(attributes,keys[k]),data,&c,&ct)) return false;
             unsigned expected=k==1?2:k<3?3:4;
             bool normalized=asset_field(object("accessors",integer(attributes,keys[k])),"normalized").asBool();
-            if((k==0&&ct!=5126)||(k==3&&normalized)||
-                (k!=0&&k!=3&&ct!=5126&&!((ct==5121||ct==5123)&&normalized))) return fail("invalid vertex attribute component encoding");
+            if((k<2&&!attribute_encoding(keys[k],ct,normalized))||(k==3&&normalized)||
+                (k>=2&&k!=3&&ct!=5126&&!((ct==5121||ct==5123)&&normalized))) return fail("invalid vertex attribute component encoding");
             if((c!=expected&&!(k==2&&c==4))||data.size()!=vertices*c) return fail("vertex attribute size mismatch");
             // native raster textures use lower-left UVs; glTF image UVs start at the top.
             if(k==1) for(size_t v=0;v<vertices;v++) data[v*2+1]=1-data[v*2+1];
@@ -259,7 +334,8 @@ struct Gltf {
                     rgb.append(value<=.0031308?12.92*value:1.055*pow(value,1.0/2.4)-.055);
                 }}data=static_cast<lam::ArrayList<double>&&>(rgb);
             }
-            a.attr(geometry,attrs[k],a.array(data.data(),data.size()));
+            columns[k+1].name=attrs[k];columns[k+1].width=expected;
+            columns[k+1].values=static_cast<lam::ArrayList<double>&&>(data);
         }
         if(si>=0) {if(!has_joints) return fail("skinned primitive lacks joint weights");a.attr(out,"skeleton",a.id("skeleton",si));}
         lam::ArrayList<double> indices;int ii=integer(primitive,"indices");
@@ -272,15 +348,37 @@ struct Gltf {
             double p=indices[mode==6?0:i-2],q=indices[i-1],r=indices[i];if(p==q||q==r||r==p) continue;
             triangles.append(mode==5&&(i%2)?q:p);triangles.append(mode==5&&(i%2)?p:q);triangles.append(r);
         } else return fail("only TRIANGLES, TRIANGLE_STRIP and TRIANGLE_FAN primitives are supported");
-        if(triangles.empty()||triangles.size()>1572864) return fail("triangle index quota exceeded");a.attr(geometry,"indices",a.array(triangles.data(),triangles.size()));
+        if(triangles.empty()||triangles.size()>8388608) return fail("triangle index quota exceeded");
         auto targets=asset_field(primitive,"targets");size_t target_count=asset_count(targets);
         if(target_count>2) return fail("more than two morph targets are not supported");
+        bool flat=si<0&&!target_count&&!columns[1].name;
+        if(flat) {
+            // glTF 2.0 §3.7.2.1 requires flat normals when NORMAL is absent.
+            // Opposite faces must not cancel at shared vertices; zero-area faces have no normal.
+            lam::ArrayList<double> faces;
+            for(size_t i=0;i<triangles.size();i+=3) {
+                double normal[3];
+                if(!face_normal(columns[0].values,(unsigned)triangles[i],(unsigned)triangles[i+1],(unsigned)triangles[i+2],normal)) continue;
+                for(unsigned j=0;j<3;j++) faces.append(triangles[i+j]);
+            }
+            triangles=static_cast<lam::ArrayList<double>&&>(faces);
+            if(triangles.empty()) return fail("mesh contains no nondegenerate triangles");
+        }
+        int mi=integer(primitive,"material",materials.size()-1);if(mi<0||(size_t)mi>=materials.size()) return fail("material index out of bounds");
+        Item material=ElementReader(materials[mi]).get_attr("id").item();
+        char id[80];snprintf(id,sizeof(id),"asset-node-%u-primitive-%u",node_index,primitive_index);
+        if(flat||vertices>262144||triangles.size()>1572864) {
+            if(si>=0||target_count) return fail("large animated primitives exceed the native deformation budget");
+            Item group=a.element("group");a.attr(group,"id",a.text(id));
+            static_chunks(group,material,columns,triangles,vertices,flat);a.append(parent,group);return true;
+        }
+        geometry_columns(geometry,columns);a.attr(geometry,"indices",a.array(triangles.data(),triangles.size()));
         if(target_count) {
             lam::ArrayList<double> morph,normals;
             for(size_t t=0;t<target_count;t++) for(unsigned k=0;k<2;k++) {
                 auto target=asset_at(targets,t);lam::ArrayList<double> data;
-                if(!asset_field(target,k?"NORMAL":"POSITION").isNull()) {if(!components(target,k?"NORMAL":"POSITION",3,data)||data.size()!=positions.size()) return fail("invalid morph target");}
-                else for(size_t i=0;i<positions.size();i++) data.append(0);
+                if(!asset_field(target,k?"NORMAL":"POSITION").isNull()) {if(!components(target,k?"NORMAL":"POSITION",3,data,true)||data.size()!=vertices*3) return fail("invalid morph target");}
+                else for(size_t i=0;i<vertices*3;i++) data.append(0);
                 auto& destination=k?normals:morph;for(double value:data) destination.append(value);
             }
             a.attr(geometry,"morph-positions",a.array(morph.data(),morph.size()));a.attr(geometry,"morph-normals",a.array(normals.data(),normals.size()));
@@ -289,10 +387,9 @@ struct Gltf {
             double values[2]={};for(size_t t=0;t<target_count;t++) values[t]=asset_component(weights,t,0);
             a.attr(out,"morph-weights",a.array(values,target_count));
         }
-        int mi=integer(primitive,"material",materials.size()-1);if(mi<0||(size_t)mi>=materials.size()) return fail("material index out of bounds");
-        a.attr(out,"material",ElementReader(materials[mi]).get_attr("id").item());
+        a.attr(out,"material",material);
         // retain a stable address for weights channels on every primitive of a node.
-        char id[80];snprintf(id,sizeof(id),"asset-node-%u-primitive-%u",node_index,primitive_index);a.attr(out,"id",a.text(id));
+        a.attr(out,"id",a.text(id));
         a.append(out,geometry);a.append(parent,out);return true;
     }
     bool build_node(unsigned index,Item parent,unsigned depth=0) {
@@ -379,13 +476,45 @@ struct Gltf {
     }
 };
 }
-bool asset_import_gltf(SceneAsset& asset,Item source) {
-    Gltf g(asset,source);const char* version=asset_field(asset_field(g.source,"asset"),"version").cstring();
+bool asset_import_gltf(SceneAsset& asset,Item source,const uint8_t* binary,size_t binary_length) {
+    Gltf g(asset,source,binary,binary_length);const char* version=asset_field(asset_field(g.source,"asset"),"version").cstring();
     if(!asset_is(version,"2.0")) return g.fail("only glTF 2.0 is supported");
-    auto required=g.field("extensionsRequired");for(size_t i=0;i<asset_count(required);i++)
-        if(!asset_is(asset_at(required,i).cstring(),"KHR_materials_unlit")) return g.fail("unsupported required glTF extension");
-    auto used=g.field("extensionsUsed");for(size_t i=0;i<asset_count(used);i++) if(!asset_is(asset_at(used,i).cstring(),"KHR_materials_unlit"))
+    auto required=g.field("extensionsRequired");for(size_t i=0;i<asset_count(required);i++) {
+        const char* extension=asset_at(required,i).cstring();
+        if(asset_is(extension,"KHR_mesh_quantization")) g.quantization=true;
+        else if(!asset_is(extension,"KHR_materials_unlit")) return g.fail("unsupported required glTF extension");
+    }
+    auto used=g.field("extensionsUsed");for(size_t i=0;i<asset_count(used);i++) if(!asset_is(asset_at(used,i).cstring(),"KHR_materials_unlit")&&
+        !asset_is(asset_at(used,i).cstring(),"KHR_mesh_quantization"))
         asset.ctx.addWarning("scene3d asset: optional glTF extension '%s' uses its core fallback",asset_at(used,i).cstring());
     return g.load_buffers()&&g.load_materials()&&g.hierarchy()&&g.load_skins()&&g.load_scene()&&g.load_animations();
+}
+
+static uint32_t glb_word(const char* bytes) {
+    const uint8_t* p=(const uint8_t*)bytes;
+    return (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24);
+}
+bool asset_import_glb(SceneAsset& asset,const char* source,size_t length) {
+    if(length<20||memcmp(source,"glTF",4)||glb_word(source+4)!=2||glb_word(source+8)!=length)
+        return asset.fail("invalid GLB 2.0 header or declared length");
+    const char* json=nullptr;size_t json_length=0;const uint8_t* binary=nullptr;size_t binary_length=0;
+    for(size_t offset=12;offset<length;) {
+        if(length-offset<8) return asset.fail("truncated GLB chunk header");
+        uint32_t size=glb_word(source+offset),kind=glb_word(source+offset+4);offset+=8;
+        if(size%4||size>length-offset) return asset.fail("invalid GLB chunk bounds or alignment");
+        if(!json&&kind!=0x4e4f534a) return asset.fail("GLB JSON must be the first chunk");
+        if(kind==0x4e4f534a) {
+            if(json) return asset.fail("duplicate GLB JSON chunk");
+            json=source+offset;json_length=size;
+        } else if(kind==0x004e4942) {
+            if(binary) return asset.fail("duplicate GLB BIN chunk");
+            binary=(const uint8_t*)source+offset;binary_length=size;
+        }
+        offset+=size;
+    }
+    if(!json||!input_parse_model(asset.ctx.input(),json,json_length,"gltf")||asset.ctx.input()->parse_failed)
+        return asset.fail("invalid GLB JSON document");
+    // D4.1.3: import copies decoded values into the destination Input before the source bytes expire.
+    return asset_import_gltf(asset,asset.ctx.input()->root,binary,binary_length);
 }
 }

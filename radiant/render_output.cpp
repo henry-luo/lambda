@@ -77,7 +77,8 @@ static void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree,
                                           const char* output_file);
 static bool render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
                                            const char* output_file,
-                                           int total_width, int total_height);
+                                           int total_width, int total_height,
+                                           bool transparent_background = false);
 
 typedef DomDocument* (*RenderExportDocumentLoader)(RenderExportSession* session,
     int layout_width, int layout_height, void* request);
@@ -413,6 +414,8 @@ static bool render_export_session_begin_internal(
         lam::free_owned(session->ui_context);
         return false;
     }
+    // Only documents that actually request scene pixels acquire a graphics host.
+    session->ui_context->export_native_graphics=true;
     int surface_width = raster_surface
         ? (int)(layout_width * session->raster_scale)
         : layout_width;
@@ -762,8 +765,8 @@ static bool render_display_list_replay_surface(DisplayList* list, MemContext* me
     rdt_vector_flush_batch(&vec); rdt_vector_destroy(&vec); scratch_release(&scratch);
     mem_arena_destroy(scratch_arena);
     // encoders and snapshot callers consume straight channels; vector replay writes premultiplied ABGR.
-    for (size_t i = 0, count = (size_t)surface->width * (size_t)surface->height; i < count; i++)
-        ((uint32_t*)surface->pixels)[i] = render_pixel_unpremultiply_abgr(((uint32_t*)surface->pixels)[i]);
+    render_pixel_unpremultiply_row((uint32_t*)surface->pixels, (const uint32_t*)surface->pixels,
+        (size_t)surface->width * (size_t)surface->height);
     surface->alpha_mode = IMAGE_ALPHA_STRAIGHT;
     return true;
 }
@@ -1163,7 +1166,10 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
     RenderFrameScope frame(&rdcon, uicon, view_tree, &profiler);
     DisplayList& display_list = *frame.list();
 
-    uint32_t canvas_bg = render_output_canvas_background(view_tree->root);
+    // image compositions request alpha explicitly; document exports retain their opaque default.
+    uint32_t canvas_bg = target->transparent_background
+        ? render_document_canvas_background(view_tree->root).c
+        : render_output_canvas_background(view_tree->root);
     DocState* state = uicon->document ? (DocState*)uicon->document->state : nullptr;
     RenderOutputClearResult clear_result =
         render_output_clear_surface(&rdcon, view_tree, state, canvas_bg);
@@ -1280,7 +1286,7 @@ int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tr
             return render_output_render_raster_target(uicon, view_tree, target);
         case RENDER_OUTPUT_TILED_PNG:
             return render_output_render_tiled_png(uicon, view_tree, target->output_file,
-                target->width, target->height) ? 0 : 1;
+                target->width, target->height, target->transparent_background) ? 0 : 1;
         case RENDER_OUTPUT_PDF:
         case RENDER_OUTPUT_SVG:
             log_error("render_output_render_view_tree_to_target: PDF/SVG targets require file-level export");
@@ -1413,7 +1419,7 @@ int render_html_source_to_output_target(const char* html_source, RenderOutputTar
         false, render_export_load_html_source, &request)) return 1;
     int result = 1;
     switch (target->kind) {
-        case RENDER_OUTPUT_PNG: result = render_export_session_to_png(&session, target->output_file); break;
+        case RENDER_OUTPUT_PNG: result = render_export_session_to_png(&session, target->output_file, target->transparent_background); break;
         case RENDER_OUTPUT_JPEG: result = render_export_session_to_jpeg(&session, target->output_file, target->jpeg_quality); break;
         case RENDER_OUTPUT_SVG: result = render_export_session_to_svg(&session, target->output_file); break;
         case RENDER_OUTPUT_PDF: result = render_export_session_to_pdf(&session, target->output_file); break;
@@ -1534,7 +1540,8 @@ static void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree,
  */
 static bool render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
                                            const char* output_file,
-                                           int total_width, int total_height) {
+                                           int total_width, int total_height,
+                                           bool transparent_background) {
     uint64_t t_start = time_now_ns();
 
     // physical pixels per strip; overridable for parity testing against normal PNG.
@@ -1567,7 +1574,9 @@ static bool render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
                  PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
     png_write_info(png, info);
 
-    uint32_t canvas_bg = render_output_canvas_background(view_tree->root);
+    uint32_t canvas_bg = transparent_background
+        ? render_document_canvas_background(view_tree->root).c
+        : render_output_canvas_background(view_tree->root);
 
     ImageSurface* saved_surface = uicon->surface;
     int saved_window_height = uicon->window_height;
@@ -1648,6 +1657,8 @@ static bool render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
 
         for (int y = 0; y < tile_h; y++) {
             uint8_t* row = (uint8_t*)tile_surf->pixels + y * tile_surf->pitch;
+            if (tile_surf->alpha_mode != IMAGE_ALPHA_STRAIGHT)
+                render_pixel_unpremultiply_row((uint32_t*)row, (const uint32_t*)row, total_width);
             png_write_row(png, row);
         }
 

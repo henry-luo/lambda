@@ -36,12 +36,61 @@ import animation: .animation
 import timeline: .playback
 import renderer: .mark_renderer
 import history: .timeline.chart_adapter
+import plot3d: .plot3d
+import dataflow: .dataflow
+import mesh: .mesh
 
 // ============================================================
 // Public API: render a <chart> element into an SVG element
 // ============================================================
 
 pub fn render(chart_el, viewport = null) => render_spec(chart_el, viewport)
+
+pub fn figure(raw, viewport = null) {
+    let spec=timeline.target(raw);
+    if (spec is error) spec else if (not figure_has3d(spec)) render_spec(raw,viewport)
+    else if (spec.concat!=null) figure_grid(spec,spec.children,if (spec.concat=="horizontal") len(spec.children) else 1,viewport)
+    else if (spec.repeat_row!=null or spec.repeat_column!=null) (
+        let rows=if (spec.repeat_row!=null) spec.repeat_row else [""],let columns=if (spec.repeat_column!=null) spec.repeat_column else [""],
+        figure_grid(spec,[for (row in rows) for (column in columns) parse.substitute(spec.template,row,column)],len(columns),viewport))
+    else if (spec.facet!=null) (
+        let resolved=dataflow.resolve(spec,null,null),let plan=if (resolved.data is array) dataflow.facet_plan({*:spec,*:resolved}) else null,
+        if (resolved.data is error) resolved.data else if (plan==null) error("chart.figure: facet requires records before mesh construction")
+        else figure_grid(spec,[for (i,rows in plan.data) {*:spec,data:rows,transform:null,facet:null,title:plan.headers[i]}],plan.columns,viewport))
+    else if (plot3d.enabled(spec)) plot3d.figure(spec,viewport) else render_spec(raw,viewport)
+}
+
+fn figure_has3d(raw) {
+    let spec=if (raw is element and name(raw)!='svg') parse.parse_top(raw) else raw;
+    plot3d.enabled(spec) or any([for (child in spec.children) figure_has3d(child)]) or
+        (spec.template!=null and figure_has3d(spec.template)) or any([for (child in spec.layer) figure_has3d(child)])
+}
+fn figure_grid(spec,children,columns,viewport) {
+    let spacing=if (spec.spacing!=null) spec.spacing else 20.0;
+    let context=sizing.viewport(viewport);
+    if (not mesh.positive_int(columns) or not util.finite_number(spacing) or spacing<0) error("chart.figure: invalid grid columns or spacing")
+    else if (context is error) context else {
+        let images=[for (child in children,let parsed=if (child is element) parse.parse_top(child) else child)
+            figure({data:spec.data,datasets:spec.datasets,config:spec.config,coordinate:spec.coordinate,*:parsed},
+                if (context.width!=null) {width:(context.width-spacing*(columns-1))/columns,height:context.height} else null)];
+        let failure=util.first_error(images);
+        if (failure is error) failure else <div class:"lambda-chart-figures",style:"display:grid;grid-template-columns:repeat("++string(columns)++",max-content);gap:"++string(spacing)++"px",
+            for (image in images) <div image>>
+    }
+}
+
+pub fn figure_frame(raw, frame, viewport = null) {
+    let spec=if (raw is element) parse.parse_top(raw) else raw;
+    if (not plot3d.enabled(spec)) render_frame(raw,frame,viewport)
+    else {
+        let elapsed=if (frame is number) frame else if (frame.time_ms!=null) frame.time_ms else frame.time;
+        if (not util.finite_number(elapsed) or elapsed<0) error("chart.figure_frame: time must be finite and nonnegative")
+        else if (spec.timeline==null) figure(spec,viewport)
+        else (let segment=timeline.segment(spec,elapsed,frame.exact==true),
+            if (segment is error) segment else if (segment.progress!=0 and segment.progress!=1) error("chart.figure_frame: 3D interpolation is not yet supported")
+            else figure(if (segment.progress==1) segment.target else segment.source,viewport))
+    }
+}
 
 // render from a pre-parsed spec map (no element tree needed)
 pub fn render_spec(spec, viewport = null, st = null) {
@@ -90,7 +139,8 @@ fn render_chart(raw, viewport, st) {
     let definitions = parameter.definitions(spec);
     let initial = parameter.reconcile(definitions,st);
     let values = if (initial is error) initial else parameter.values(definitions, initial);
-    if (spec is error) spec else if (context is error) context else if (values is error) values else {
+    if (spec is error) spec else if (figure_has3d(spec)) error("chart.render: cartesian3d requires chart.figure")
+    else if (context is error) context else if (values is error) values else {
         let parsed = if (spec is element) parse.parse_top(spec) else spec;
         let prepared = composition.resolve(composition.prepare({*:parsed,
             _parameters: definitions, _parameter_state: initial, _parameter_values: values, _interactive: st != null}, prepare_mark_data));
@@ -100,7 +150,10 @@ fn render_chart(raw, viewport, st) {
 
 // State belongs to this chart instance, never a module global or a closure (S9.1.4).
 pub fn model(spec, viewport = null, options = {}) => <chart_view spec: spec, viewport: viewport, options: options>
-pub fn interactive(spec, viewport = null, options = {}) => apply(model(spec, viewport, options))
+pub fn interactive(spec, viewport = null, options = {}) {
+    let parsed=if (spec is element) parse.parse_top(spec) else spec;
+    if (plot3d.enabled(parsed)) plot3d.interactive(parsed,viewport,options) else apply(model(spec, viewport, options))
+}
 
 view <chart_view> state interaction_state: null, playback_state: null {
     let definitions = parameter.definitions(behavior.prepare(~.spec,interaction_state));

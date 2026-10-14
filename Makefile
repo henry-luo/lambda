@@ -652,6 +652,9 @@ help:
 	@echo "  test-radiant-baseline - Run the radiant suite baseline (native, layout, UI/DOM, render), with one report"
 	@echo "  test-ui-dtna        - Run dtna catalog, tier contracts and native interaction tests"
 	@echo "  test-ui-bold        - Run bold package contracts and native interaction tests across tiers"
+	@echo "  test-ui-wired       - Run wired package contracts and native interaction tests across tiers"
+	@echo "  test-ui-clay        - Run clay catalog contracts and native interaction tests across tiers"
+	@echo "  test-ui-blade       - Run blade contracts, RPG widgets and native interaction tests across tiers"
 	@echo "  test-map            - Run native geomap rendering/input and Lambda package tests"
 	@echo "  test-map-export     - Verify native map PNG/SVG/PDF geometry and vector output"
 	@echo "  test-map-reference  - Compare native expressions with pinned MapLibre style-spec"
@@ -2141,13 +2144,13 @@ test-ui-dtna: build
 		LAMBDA_EXEC_BACKEND=$$tier ./test/test_ui_automation_gtest.exe --suite dtna $(ARGS) || exit $$?; \
 	done
 
-# Shipped bold source contracts and native control/gallery fixtures.
-.PHONY: test-ui-bold
-test-ui-bold: build
+# Source theme contracts and native control/gallery fixtures share one tier gate.
+.PHONY: test-ui-bold test-ui-wired test-ui-clay test-ui-blade
+test-ui-bold test-ui-wired test-ui-clay test-ui-blade: build
 	@$(MAKE) -C build/premake config=debug_native test_lambda_gtest test_ui_automation_gtest -j$(TEST_JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
-	@status=0; for tier in interp auto jit; do \
-		LAMBDA_EXEC_BACKEND=$$tier ./test/test_lambda_gtest.exe --gtest_filter='AutoDiscovered/*ui_bold*' || status=1; \
-		LAMBDA_EXEC_BACKEND=$$tier ./test/test_ui_automation_gtest.exe --suite baseline,bold --test 'bold_*' $(ARGS) || status=1; \
+	@theme=$(patsubst test-ui-%,%,$@); status=0; for tier in interp auto jit; do \
+		LAMBDA_EXEC_BACKEND=$$tier ./test/test_lambda_gtest.exe --gtest_filter="AutoDiscovered/*ui_$$theme*" || status=1; \
+		LAMBDA_EXEC_BACKEND=$$tier ./test/test_ui_automation_gtest.exe --suite "baseline,$$theme" --test "$${theme}_*" $(ARGS) || status=1; \
 	done; exit $$status
 
 # Requires test/render Node dependencies, librsvg and Poppler.

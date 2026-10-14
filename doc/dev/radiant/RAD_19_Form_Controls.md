@@ -1,6 +1,7 @@
 # Radiant — Form Controls & Text-Control Editing
 
 > **Last verified against tree:** 2026-09-05
+> **Select popup styling verified:** 2026-10-13 (§6 amendment).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's HTML form controls (`<input>`, `<textarea>`, `<select>`, `<button>`) as replaced elements with UA-chrome layout and rendering, and — critically — the **native** text-control editing engine that still applies value mutations in C++. [RAD_18 — Editing, Selection & DOM Ranges](RAD_18_Editing_Selection_Ranges.md) documents the registered contenteditable action gate; form controls remain a distinct value-store action between their cancelable `beforeinput` and non-cancelable post-mutation `input` notifications.
 >
@@ -115,7 +116,19 @@ The OS input method's partial text lives in `preedit_utf8` and is *not* part of 
 
 `render_form_control` (`render_form.cpp:1579`) dispatches on `control_type` to `render_text_input`, `render_checkbox`, `render_radio`, `render_button`, `render_select`, `render_textarea`, or `render_range`; hidden and broken-image buttons paint nothing. This runs inside the render walk ([RAD_13 — Render Walk & Painters](RAD_13_Render_Walk_Painters.md)) after `render_block_view` has painted any author background/border, so the UA chrome (white fill, 3-D inset border) is drawn *only* when the author has not overridden it (`form_border_has_author_override`, `render_form.cpp:178`) to avoid stomping CSS styling.
 
-`render_text_input` (`render_form.cpp:442`) is the richest painter and is where all the text-control editing state becomes visible. It resolves the display text — substituting U+25CF for password masking (`build_password_display`, keeping the unmasked source only for caret byte→codepoint mapping), or overlaying the IME preedit (`build_preedit_display_text`, `render_form.cpp:403`), or falling back to the placeholder. It computes a logical caret X, clamps `scroll_x` so the caret stays inside the content box (auto-scroll, F4), and paints the selection highlight via `paint_text_control_selection_rect` (`render_form.cpp:101`) using the shared editing-geometry resolver `editing_geometry_text_control_caret_rect` (`render_form.cpp:551`) so selection edges align pixel-exactly with the caret. Caret visibility follows `caret_on`/`caret_blink_t` (forced on in headless renders for deterministic snapshots). `render_select_dropdown` (`render_form.cpp:1080`) paints the open listbox popup separately (above the normal display list) with `hover_index`/`selected_index` highlighting.
+`render_text_input` (`render_form.cpp:442`) is the richest painter and is where all the text-control editing state becomes visible. It resolves the display text — substituting U+25CF for password masking (`build_password_display`, keeping the unmasked source only for caret byte→codepoint mapping), or overlaying the IME preedit (`build_preedit_display_text`, `render_form.cpp:403`), or falling back to the placeholder. It computes a logical caret X, clamps `scroll_x` so the caret stays inside the content box (auto-scroll, F4), and paints the selection highlight via `paint_text_control_selection_rect` (`render_form.cpp:101`) using the shared editing-geometry resolver `editing_geometry_text_control_caret_rect` (`render_form.cpp:551`) so selection edges align pixel-exactly with the caret. Caret visibility follows `caret_on`/`caret_blink_t` (forced on in headless renders for deterministic snapshots). `render_select_dropdown` paints the open combo-box popup separately above the normal display list.
+
+**Select styling amendment (2026-10-13).** Native option and optgroup children
+resolve computed styles during form layout even when their ordinary boxes
+are zero-sized. The popup consumes the select's computed background/border;
+its arrow well uses the authored background and resolved text color. Popup
+and listbox rows share option background, text, font and left-padding
+resolution, with UA highlight colors retained as fallbacks. An open option's
+`:hover` reads the select's canonical hover index, and open/close/index
+transitions invalidate matching CSS rules. No second hover owner is added
+(**S12.1.5v2**). The source `dom/form.ls` commit procedure rejects disabled
+options and options in disabled groups before changing selectedness; direct
+programmatic setters retain their own contract (**S12.1.3**, **D7.2.4**).
 
 ---
 

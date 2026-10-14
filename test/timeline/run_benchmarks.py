@@ -7,7 +7,6 @@ import json
 import os
 import pathlib
 import platform
-import re
 import signal
 import subprocess
 import time
@@ -35,15 +34,23 @@ def main():
         executable = args.release_executable.resolve()
         # The debug validator trace is compiled out of release binaries (Developer Guide §7.3).
         symbols = subprocess.run(["strings", str(executable)], capture_output=True, check=True).stdout
-        if not (ROOT / ".lambda_release_build").exists() or b"VALIDATOR] validate_against_base_type" in symbols:
+        if b"VALIDATOR] validate_against_base_type" in symbols:
             parser.error("a verified release build is required")
-        build_description = "captured release executable; release marker and debug-trace exclusion verified"
+        # The shared checkout marker tracks lambda.exe, not a separately captured binary.
+        build_description = "captured release executable; debug-trace exclusion verified"
     else:
         with (output / "build.log").open("w") as log:
             subprocess.run(["make", "release"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
         executable = ROOT / "lambda.exe"
         build_description = "make release"
-    report = {"built_with": build_description, "binary_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+    # Packages load from source at runtime, so the binary hash alone cannot identify a run.
+    sources = sorted((ROOT / "lmd/package/chart").rglob("*.ls")) + [
+        ROOT / "lmd/package/slide/easing.ls", ROOT / "lmd/package/slide/color.ls",
+        ROOT / "test/timeline/_benchmark.ls", pathlib.Path(__file__).resolve()]
+    report = {"recorded_at": stamp, "built_with": build_description,
+              "git_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+              "binary_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+              "source_sha256": {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in sources},
               "platform": platform.platform(), "backend": "jit", "results": []}
     environment = {**os.environ, "LAMBDA_EXEC_BACKEND": "jit"}
     module = pathlib.Path(os.path.relpath(ROOT / "test/timeline/_benchmark", output))
@@ -90,7 +97,11 @@ def main():
             if not timed_out and process.returncode == 0 and "__TIMELINE_BENCH__\n" in text:
                 try:
                     metrics = json.loads(text.split("__TIMELINE_BENCH__\n", 1)[1])
-                    if metrics["normalized_count"] == count:
+                    work = metrics["viewport_work"]
+                    if metrics["normalized_count"] == count and len(work) == 8 and all(
+                            frame["indexed"] and frame["measured"] > 0 and
+                            (scenario != "identical" or frame["candidates"] == count and frame["measured"] == 1)
+                            for frame in work):
                         record.update(status="ok", metrics=metrics)
                 except (ValueError, KeyError, TypeError):
                     pass

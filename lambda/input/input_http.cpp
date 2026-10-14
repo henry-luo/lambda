@@ -9,6 +9,7 @@
 #include "../../lib/mem.h"
 #include "../../lib/byte_builder.h"
 #include "input.hpp"
+#include "input-scene3d.hpp"
 #include "../io/fs_node.hpp"
 #include "../network/http_client.h"
 #include "../network/cookie_jar.h"
@@ -27,6 +28,7 @@ typedef struct {
     const char* request_url;
     char* content_language;
     bool capture_language;
+    size_t max_bytes;
 } HttpResponse;
 
 // HttpConfig is now defined in input.h
@@ -75,8 +77,8 @@ static struct curl_slist* http_document_navigation_headers() {
 #define HTTP_CACHE_MAX_SIZE (100 * 1024 * 1024)
 #define HTTP_CACHE_MAX_ENTRIES 10000
 
-static size_t http_input_byte_limit() {
-    uint64_t limit = HTTP_MAX_RESPONSE_SIZE;
+static size_t http_input_byte_limit(size_t requested = HTTP_MAX_RESPONSE_SIZE) {
+    uint64_t limit = requested;
     if (input_zip_limits && input_zip_limits->archive_bytes < limit) limit = input_zip_limits->archive_bytes;
     return (size_t)limit;
 }
@@ -85,10 +87,11 @@ static size_t http_input_byte_limit() {
 static size_t write_response_callback(void* contents, size_t size, size_t nmemb, HttpResponse* response) {
     if (nmemb && size > SIZE_MAX / nmemb) return 0;
     size_t total_size = size * nmemb;
+    size_t limit = http_input_byte_limit(response && response->max_bytes ? response->max_bytes : HTTP_MAX_RESPONSE_SIZE);
     if (!response || !byte_builder_append_limited(&response->body, contents,
-                                                   total_size, http_input_byte_limit())) {
+                                                   total_size, limit)) {
         log_error("HTTP: Response exceeds maximum size (%zu bytes), aborting download",
-                  http_input_byte_limit());
+                  limit);
         return 0;  // returning 0 causes curl to abort with CURLE_WRITE_ERROR
     }
     return total_size;
@@ -165,7 +168,8 @@ const char* content_type_to_extension(const char* content_type) {
 
 // Download HTTP/HTTPS resource and return content in memory
 static char* download_http_content_impl(const char* url, size_t* content_size,
-    const HttpConfig* config, char** effective_url, char** content_language) {
+    const HttpConfig* config, char** effective_url, char** content_language,
+    size_t max_bytes = HTTP_MAX_RESPONSE_SIZE) {
     if (content_language) *content_language = NULL;
     if (!init_curl()) {
         return NULL;
@@ -178,6 +182,7 @@ static char* download_http_content_impl(const char* url, size_t* content_size,
     }
 
     HttpResponse response = {0};
+    response.max_bytes = max_bytes;
     if (!byte_builder_init(&response.body, 0, MEM_CAT_TEMP, true)) {
         curl_easy_cleanup(curl);
         return NULL;
@@ -327,7 +332,8 @@ static char* download_http_content_with_enhanced_cache(const char* url,
                                                        size_t* content_size,
                                                        const char* cache_dir,
                                                        char** out_cache_path,
-                                                       bool require_cache_path) {
+                                                       bool require_cache_path,
+                                                       size_t max_bytes = HTTP_MAX_RESPONSE_SIZE) {
     if (content_size) *content_size = 0;
     if (out_cache_path) *out_cache_path = NULL;
     if (!url || !cache_dir) return NULL;
@@ -336,14 +342,14 @@ static char* download_http_content_with_enhanced_cache(const char* url,
         cache_dir, HTTP_CACHE_MAX_SIZE, HTTP_CACHE_MAX_ENTRIES);
     if (!cache) {
         log_debug("HTTP: enhanced cache unavailable for %s", url);
-        return require_cache_path ? NULL : download_http_content(url, content_size, NULL);
+        return require_cache_path ? NULL : download_http_content_impl(url, content_size, NULL, NULL, NULL, max_bytes);
     }
 
     char* cache_path = enhanced_cache_lookup(cache, url);
     if (cache_path) {
         size_t cached_size = 0;
         char* content = nullptr;
-        file_read_all_limit(cache_path, MEM_CAT_INPUT_OTHER, http_input_byte_limit(), &content, &cached_size);
+        file_read_all_limit(cache_path, MEM_CAT_INPUT_OTHER, http_input_byte_limit(max_bytes), &content, &cached_size);
         if (content) {
             log_debug("HTTP: native cache hit for %s (%zu bytes)", url, cached_size);
             if (content_size) *content_size = cached_size;
@@ -357,7 +363,7 @@ static char* download_http_content_with_enhanced_cache(const char* url,
     }
 
     size_t downloaded_size = 0;
-    char* content = download_http_content(url, &downloaded_size, NULL);
+    char* content = download_http_content_impl(url, &downloaded_size, NULL, NULL, NULL, max_bytes);
     if (content) {
         cache_path = enhanced_cache_store(cache, url, content, downloaded_size, NULL);
         if (cache_path) {
@@ -418,8 +424,10 @@ Input* input_from_http_with_name_parent(const char* url, const char* type,
     // Download content (with caching)
     char* cache_path = NULL;
     size_t content_size = 0;
+    // Match the native asset parser's bounded buffer admission on both downloads and cache hits.
+    size_t max_bytes = type && !strcmp(type, "scene3d-asset") ? lambda::SCENE_ASSET_BUFFER_LIMIT : HTTP_MAX_RESPONSE_SIZE;
     char* content = download_http_content_with_enhanced_cache(url, &content_size,
-        effective_cache_dir, &cache_path, false);
+        effective_cache_dir, &cache_path, false, max_bytes);
 
     if (!content) {
         return NULL;

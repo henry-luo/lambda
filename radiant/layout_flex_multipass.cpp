@@ -304,9 +304,10 @@ static void layout_in_flow_content_bounds_impl(ViewElement* elem, LayoutAxis axi
                 child_block->positionp()->position == CSS_VALUE_FIXED;
             bool child_is_out_of_flow = child_block &&
                 layout_view_is_abs_or_fixed(child_block);
+            // paint bounds include floating overflow; normal-flow measurements exclude it.
             if (child_is_fixed ||
                 (child_is_out_of_flow && !include_out_of_flow) ||
-                (child_block && element_has_float(child_block))) {
+                (child_block && element_has_float(child_block) && !include_out_of_flow)) {
                 continue;
             }
 
@@ -998,9 +999,21 @@ static void flex_apply_content_height_after_layout(
     }
 }
 
+static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_item);
+
 void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     if (!flex_item) return;
+    // every content pass of an item comes through here, so a replay always
+    // finds the subtree as the recorded pass left it.
+    FlexContainerLayout* parent_flex = lycon->flex_container;
+    if (flex_retained_replay_content(lycon, flex_item, parent_flex)) return;
+    float final_width = flex_item->width;
+    float final_height = flex_item->height;
+    layout_flex_item_content_pass(lycon, flex_item);
+    flex_retained_record_content(lycon, flex_item, parent_flex, final_width, final_height);
+}
 
+static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_item) {
     log_enter();
 
     LayoutContext saved_context = *lycon;
@@ -1062,6 +1075,19 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     // final flex-item content needs its own strut; parent metrics enlarge lines containing icons.
     layout_setup_block_font_metrics(lycon);
     lycon->block.block_container_font = lam::up(lycon->font.style);
+
+    float math_width = 0.0f, math_height = 0.0f, math_baseline = 0.0f;
+    if (layout_measure_mathml(lycon, flex_item->as_element(),
+            &math_width, &math_height, &math_baseline)) {
+        // Flex owns the allocated border box; math supplies its content and
+        // baseline through the same package callback used by normal flow.
+        flex_item->content_width = math_width;
+        flex_item->content_height = math_height;
+        if (flex_item->blk) flex_item->block_mut()->first_line_baseline = math_baseline;
+        *lycon = saved_context;
+        log_leave();
+        return;
+    }
 
     line_init(lycon, content_x_offset, content_x_offset + content_width);
     // CRITICAL: Check if this flex item is ITSELF a flex container (nested flex)
@@ -1264,8 +1290,10 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     FlexContainerLayout* parent_flex = saved_context.flex_container;
     flex_apply_content_height_after_layout(lycon, flex_item, parent_flex);
     if (flex_item->scroller) {
-        // the overflow viewport uses the final flex-refined height, including a clamped flow item.
-        update_scroller(flex_item, flex_item->content_width, flex_item->content_height);
+        // content_height excludes the content origin; scrollers compare against the border box.
+        float scroll_height = layout_border_size_from_content_box(
+            flex_item, flex_item->content_height, false);
+        update_scroller(flex_item, flex_item->content_width, scroll_height);
     }
     // flex items bypass block finalization; center native labels after their used height settles.
     layout_center_button_text(flex_item);
@@ -1319,12 +1347,15 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         if (flex_container->font) {
             setup_font(lycon->ui_context, &lycon->font, flex_container->font);
         }
+        // direct text uses the container's inherited line box, including its
+        // strut; stale parent metrics can otherwise enlarge an auto-sized flex.
+        setup_line_height(lycon, flex_container);
+        layout_setup_block_font_metrics(lycon);
 
         bool handled_direct_text_br_run = false;
         bool only_direct_text_and_br = flex_container_has_only_direct_text_and_br(flex_container);
         if (only_direct_text_and_br) {
             // CSS Flexbox section 4: direct text runs in a flex container are wrapped in
-            setup_line_height(lycon, flex_container);
             if (flex_container->blk) {
                 lycon->block.text_align = flex_container->block()->text_align;
             }
@@ -1391,13 +1422,13 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                         layout_inherited_text_transform(flex_container), CSS_VALUE_NONE,
                         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL);
                     float text_width = widths.max_content;
-                    float text_height = lycon->font.style ? lycon->font.style->font_size : 16.0f;
+                    float text_height = lycon->block.line_height;
 
                     bool is_vertical_wm = flex_prop &&
                         (flex_prop->writing_mode == WM_VERTICAL_LR || flex_prop->writing_mode == WM_VERTICAL_RL);
                     if (is_vertical_wm) {
                         float tmp = text_width;
-                        text_width = text_height;  // font_size
+                        text_width = text_height; // line box block extent
                         text_height = tmp;         // text max_content becomes height
                     }
                     // CSS Flexbox: anonymous text items shrink (flex-shrink: 1 default).
@@ -1818,6 +1849,16 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             }
         }
     }
+
+    // flex stretch can replace a content-sized item's height after its abspos
+    // children were laid out; publish that final percentage-height basis.
+    flex_for_each_final_content_item(flex_container, flex,
+        [&](ViewElement* item) {
+            ViewBlock* block = lam::view_require_block(item);
+            if (!layout_view_is_abs_or_fixed(block)) {
+                re_resolve_abs_children_vertical(lycon, block);
+            }
+        });
 
     flex_normalize_break_item_boxes(lycon, flex_container);
 

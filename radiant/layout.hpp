@@ -386,6 +386,11 @@ inline bool is_typographic_letter_unit(uint32_t cp) {
     return (cat >= UTF8PROC_CATEGORY_LU && cat <= UTF8PROC_CATEGORY_LO) ||
            (cat >= UTF8PROC_CATEGORY_ND && cat <= UTF8PROC_CATEGORY_NO);
 }
+inline bool is_typographic_character_unit(uint32_t cp) {
+    utf8proc_category_t cat = utf8proc_category(cp);
+    return cp != 0 && cat != UTF8PROC_CATEGORY_CC && cat != UTF8PROC_CATEGORY_CF &&
+        cat != UTF8PROC_CATEGORY_ZL && cat != UTF8PROC_CATEGORY_ZP;
+}
 bool layout_text_allows_letter_break(uint32_t current, uint32_t next,
                                       CssEnum line_break, bool zwj_preceded,
                                       bool cj_non_starter);
@@ -665,6 +670,17 @@ extern int64_t g_layout_cache_hits;
 extern int64_t g_layout_cache_misses;
 extern int64_t g_layout_cache_stores;
 extern int64_t g_layout_shifted_reuse_count;
+extern int64_t g_layout_flex_retained_count;
+// A clean subtree whose committed geometry nothing outside it can change.
+// formatting_root also admits relative boxes and absolute boxes positioned
+// inside the subtree, which an independent formatting context (a flex item) contains.
+bool layout_retained_subtree_is_stable(DomNode* root, bool formatting_root);
+// Only the committed pass of an incremental layout without running animations
+// may keep retained geometry.
+bool layout_can_retain_geometry(LayoutContext* lycon);
+// Normal-flow collapse consumed this element's used boundary, so its next
+// committed style pass resolves it afresh (dom_node_resolve_style).
+bool layout_boundary_consumed_by_flow(DomElement* element);
 
 namespace radiant {
 
@@ -1660,14 +1676,15 @@ float compute_view_first_text_baseline(
     bool skip_block_children_of_table,
     FirstBaselineRowCallback row_baseline
 );
-// Return the last descendant text baseline relative to `parent`. Multicol
-// fragmentation uses this after child boxes have moved to their final columns.
+// Multicol can select the lowest positioned fragment baseline instead of
+// the last descendant in source order (CSS Align 3 §9.1).
 float compute_view_last_text_baseline(
     ::LayoutContext* lycon,
     View* parent,
     float cumulative_y,
     bool use_normal_line_height,
-    bool skip_block_children_of_table
+    bool skip_block_children_of_table,
+    bool block_end_most = false
 );
 
 } // namespace radiant
@@ -1715,7 +1732,13 @@ inline float text_space_advance(const FontProp* font, float extra_spacing = 0.0f
 }
 
 CssEnum layout_inherited_text_transform(DomNode* node);
-uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards);
+enum LayoutInlineTextEdgeMode {
+    LAYOUT_INLINE_TEXT_SKIP_ASCII_SPACE,
+    LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT,
+};
+bool layout_ruby_annotation_node(DomNode* node);
+uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
+    LayoutInlineTextEdgeMode mode = LAYOUT_INLINE_TEXT_SKIP_ASCII_SPACE);
 bool layout_text_combine_upright_applies(DomNode* text_node);
 float layout_inline_end_edge(ViewSpan* span);
 bool text_codepoint_has_zero_advance(uint32_t codepoint);
@@ -1723,6 +1746,10 @@ bool text_emphasis_marks_codepoint(uint32_t codepoint);
 bool text_codepoint_is_extended_pictographic(uint32_t codepoint);
 float text_unicode_space_width_em(uint32_t codepoint);
 float layout_unicode_space_advance(LayoutContext* lycon, uint32_t codepoint);
+bool text_unicode_space_has_explicit_advance(uint32_t codepoint);
+bool layout_unicode_space_is_synthesized(struct FontHandle* handle, uint32_t codepoint);
+float layout_measure_font_unicode_space_advance(struct FontHandle* handle, FontProp* style,
+    uint32_t codepoint, float raster_scale, float em_size);
 // tier-3: layout-transient, valid within pass
 struct TableMetadata {
     int column_count;
@@ -1873,6 +1900,13 @@ typedef struct CustomLayoutPaintLayer {
 typedef struct CustomLayoutPaintState {
     lam::OwnArr<CustomLayoutPaintLayer> layers;
     int layer_count;
+    // Package content can share one intrinsic query within a measurement epoch.
+    uint32_t intrinsic_generation;
+    float intrinsic_font_size;
+    float intrinsic_width;
+    float intrinsic_height;
+    float intrinsic_baseline;
+    bool has_intrinsic_measurement;
 } CustomLayoutPaintState;
 
 // tier-3: layout-transient, valid within pass
@@ -1890,6 +1924,15 @@ typedef struct CustomLayoutResult {
 
 typedef bool (*CustomLayoutFn)(const CustomLayoutContext* context, CustomLayoutResult* result);
 
+// Package-backed built-in layouts share the retained callback and paint ownership door.
+Runtime* layout_document_package_runtime(DomDocument* document, const char* package_module);
+bool radiant_package_layout_callback(const CustomLayoutContext* context,
+                                     CustomLayoutResult* result, const char* package_module);
+bool layout_is_mathml_root(DomElement* element);
+bool layout_measure_mathml(LayoutContext* lycon, DomElement* element,
+                           float* width, float* height, float* baseline = nullptr);
+bool layout_apply_mathml(LayoutContext* lycon, ViewBlock* block);
+
 bool custom_layout_register(const char* name, CustomLayoutFn fn);
 CustomLayoutFn custom_layout_lookup(const char* name);
 void custom_layout_registry_clear(void);
@@ -1899,7 +1942,8 @@ void custom_layout_fill_radiant_velmt_from_view(
 
 const char* custom_layout_name_from_css_value(const CssValue* value);
 const char* custom_layout_name_for_element(DomElement* element);
-bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* layout_name);
+bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* layout_name,
+                          CustomLayoutFn callback = nullptr);
 
 typedef struct StyleTree StyleTree;
 
@@ -2321,6 +2365,19 @@ typedef struct LineMetricsSnapshot {
     float max_bottom_height;
 } LineMetricsSnapshot;
 
+struct LineHangingSpaceUnit {
+    float width;
+    bool conditional;
+    bool trim_ink;
+    lam::Up<TextRect> rect;
+    lam::Up<LineHangingSpaceUnit> previous;
+};
+
+struct LineHangingSpace {
+    float width;               // potential hanging width before final line classification.
+    lam::Up<LineHangingSpaceUnit> tail;
+};
+
 // tier-3: layout-transient, valid within pass
 typedef struct Linebox {
     float left, right;                // left and right bounds of the line
@@ -2342,8 +2399,7 @@ typedef struct Linebox {
     lam::Up<unsigned char> last_non_shy_space; // previous non-SHY break opportunity before a soft hyphen
     float last_non_shy_space_pos;
     BreakKind last_non_shy_space_kind;
-    float last_non_shy_space_hanging_width;
-    float last_non_shy_space_hanging_text_trim;
+    LineHangingSpace last_non_shy_space_hanging;
     LineMetricsSnapshot last_space_metrics;
     LineMetricsSnapshot last_non_shy_space_metrics;
     lam::Up<View> start_view;
@@ -2392,12 +2448,8 @@ typedef struct Linebox {
     lam::Up<struct ViewText> committed_trailing_view;  // ViewText that owns committed_trailing_rect
     float committed_trailing_space;     // trailing space width saved at output_text time; survives
                                         // cross-node char processing so line_break can trim correctly
-    float hanging_space_width;      // CSS Text 3 §4.1.3: accumulated trailing preserved space width
-                                    // for pre-wrap mode; used to compute hanging space at wrap points
-    float hanging_space_text_trim;  // portion of hanging_space_width from regular ASCII spaces only;
-                                    // used to trim text rects (U+3000 has visible glyph, not trimmed)
-    float last_space_hanging_width;  // hanging_space_width saved at the time last_space was recorded
-    float last_space_hanging_text_trim; // hanging_space_text_trim saved at the time last_space was recorded
+    LineHangingSpace hanging_space;
+    LineHangingSpace last_space_hanging;
     float rtl_hanging_space;            // CSS Text 3 §4.1.3: hanging space width saved for RTL alignment adjust;
                                         // in RTL, trailing space hangs past the inline-end (left edge), so
                                         // after alignment, the last text rect's x must be shifted left by this
@@ -2428,10 +2480,9 @@ typedef struct Linebox {
 
     inline void reset_space() {
         is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;
-        last_space_kind = BRK_TEXT;  last_space_hanging_width = 0;
+        last_space_kind = BRK_TEXT;  last_space_hanging = {};
         last_non_shy_space = NULL;  last_non_shy_space_pos = 0;
-        last_non_shy_space_kind = BRK_TEXT;  last_non_shy_space_hanging_width = 0;
-        last_non_shy_space_hanging_text_trim = 0;
+        last_non_shy_space_kind = BRK_TEXT;  last_non_shy_space_hanging = {};
         last_space_metrics.valid = false;
         last_non_shy_space_metrics.valid = false;
         trailing_space_width = 0;
@@ -3246,6 +3297,20 @@ typedef struct MeasurementCacheEntry {
 } MeasurementCacheEntry;
 
 void measure_flex_child_content(LayoutContext* lycon, DomNode* child);
+// FlexRetainedPass: qualify a clean item for replay in this pass, then replay
+// or record its hypothetical cross size and content pass memos.
+bool flex_retained_item_begin(LayoutContext* lycon, ViewElement* item,
+                              float container_width, float container_height);
+bool flex_retained_replay_cross(LayoutContext* lycon, ViewElement* item, float width,
+                                float* height);
+void flex_retained_forget_content(DomElement* element);
+void flex_retained_record_cross(LayoutContext* lycon, ViewElement* item, float width,
+                                float height);
+bool flex_retained_replay_content(LayoutContext* lycon, ViewBlock* item,
+                                  FlexContainerLayout* parent_flex);
+void flex_retained_record_content(LayoutContext* lycon, ViewBlock* item,
+                                  FlexContainerLayout* parent_flex,
+                                  float final_width, float final_height);
 float flex_resolve_inherited_line_height(LayoutContext* lycon, DomElement* target);
 void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout);
 void store_in_measurement_cache(DomNode* node, float width, float height, float content_width, float content_height, float context_width = -1);
@@ -3596,6 +3661,8 @@ typedef struct LayoutContext {
     lam::Up<ViewTree> selected_view_tree; // explicit secondary environment for shared value resolution
     lam::Up<struct ViewCssStyle> selected_style;
     bool css_query_probe; // resolve geometry without committing new motion timelines/snapshots
+    // the root of the outermost intrinsic query (LayoutMeasurementRootScope)
+    lam::Up<DomElement> measurement_root;
 
     BlockContext block;  // unified block context (layout state + floats + BFC)
     Linebox line;  // current linebox
@@ -4310,6 +4377,12 @@ void line_consume_trailing_collapsible_space(LayoutContext* lycon,
                                              bool update_ancestor_bounds);
 bool line_has_prior_flow_content(const Linebox* line);
 void line_align(LayoutContext* lycon);
+void layout_finalize_phantom_inline_line(LayoutContext* lycon);
+bool layout_inherited_direction_is_rtl(View* view);
+CssEnum inline_box_decoration_break_value(DomElement* parent);
+View* layout_inline_span_edge_leaf(ViewSpan* span, bool source_end,
+    float* left_decoration = nullptr, float* right_decoration = nullptr,
+    float* relative_offset = nullptr);
 void layout_trim_isolated_inline_text_edges(LayoutContext* lycon, View* view);
 void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
                                               View* view, float offset);
@@ -4326,7 +4399,8 @@ View* layout_inline_fragment_root(View* view);
 float layout_rtl_inline_item_x(Linebox* line, float item_width);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
 void layout_flow_children(LayoutContext* lycon, DomNode* first_child,
-                         bool finalize_line = false);
+                          bool finalize_line = false,
+                          void (*prepare_child)(LayoutContext*, DomNode*) = nullptr);
 void layout_center_button_text(ViewBlock* block);
 // CSS Shadow DOM: return the tree that supplies a host's rendered children;
 // light-DOM children remain the DOM/API tree and are projected at <slot>.
@@ -4404,6 +4478,7 @@ static inline bool layout_element_is_display_none(const DomElement* element) {
     return !element || layout_display_is_none(element->display);
 }
 // CSS Positioning functions
+float layout_multicol_in_flow_inline_size(ViewBlock* container, float fallback);
 void layout_relative_position_offset(ViewBlock* block, float* offset_x, float* offset_y);
 float layout_relative_axis_offset(ViewBlock* block, bool horizontal, float containing_size);
 void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
@@ -5136,7 +5211,12 @@ struct TextJustifyContext {
 };
 
 static inline bool text_justify_character_gap(TextJustifyContext* context,
-                                               uint32_t current) {
+                                               uint32_t current,
+                                               CssEnum mode = CSS_VALUE_AUTO) {
+    // tracking ignores invisible formatting controls, but ZWJ still joins
+    // emoji graphemes and must reach the grapheme state machine.
+    if (mode == CSS_VALUE_INTER_CHARACTER && current != 0x200D &&
+        utf8proc_category(current) == UTF8PROC_CATEGORY_CF) return false;
     bool boundary = context->previous == 0 || utf8proc_grapheme_break_stateful(
         (utf8proc_int32_t)context->previous, (utf8proc_int32_t)current,
         &context->grapheme_state);
@@ -5144,6 +5224,15 @@ static inline bool text_justify_character_gap(TextJustifyContext* context,
     context->previous = current;
     if (!boundary) return false;
     context->unit_base = current;
+    if (mode == CSS_VALUE_INTER_CHARACTER) {
+        // CSS Text §6.4 permits all typographic units, including spaces and
+        // punctuation, while §6.4.4 forbids separating cursive letter pairs.
+        return is_typographic_character_unit(previous_unit) &&
+            is_typographic_character_unit(current) &&
+            !(utf_is_cursive_script(previous_unit) && utf_is_cursive_script(current) &&
+              is_typographic_letter_unit(previous_unit) && is_typographic_letter_unit(current));
+    }
+    if (mode == CSS_VALUE_INTER_WORD || mode == CSS_VALUE_NONE) return false;
     // CSS Text §6.4.5: clustered scripts admit gaps between typographic
     // units; combining marks and conjuncts stay inside their grapheme.
     return (has_id_line_break_class(previous_unit) && has_id_line_break_class(current)) ||
@@ -5285,6 +5374,25 @@ struct IntrinsicMeasureScope {
     }
     IntrinsicMeasureScope(const IntrinsicMeasureScope&) = delete;
     IntrinsicMeasureScope& operator=(const IntrinsicMeasureScope&) = delete;
+};
+// The outermost intrinsic query re-resolves its root in the caller's own
+// context (a flex container's, a grid area's), which the committed pass keeps;
+// dom_node_resolve_style flags only the descendants the query walks with the
+// measured width as their percentage basis.
+// tier-3: layout-transient, valid within pass
+struct LayoutMeasurementRootScope {
+    lam::Up<LayoutContext> lycon;
+    bool claimed;
+
+    LayoutMeasurementRootScope(LayoutContext* l, DomElement* root)
+        : lycon(l), claimed(l && root && !l->measurement_root) {
+        if (claimed) lycon->measurement_root = lam::Up<DomElement>(root);
+    }
+    ~LayoutMeasurementRootScope() {
+        if (claimed) lycon->measurement_root = nullptr;
+    }
+    LayoutMeasurementRootScope(const LayoutMeasurementRootScope&) = delete;
+    LayoutMeasurementRootScope& operator=(const LayoutMeasurementRootScope&) = delete;
 };
 // Nested DOM/view work must restore both handles together; restoring only the
 // view leaves style resolution attached to the previous element on early exit.

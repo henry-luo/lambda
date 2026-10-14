@@ -1,4 +1,4 @@
-import c: lambda.ui.core.component
+import shared: lambda.ui.core.theme
 
 // hard shadows and ink borders define the family independently of its accent colors.
 pub let defaults = {
@@ -10,21 +10,9 @@ pub let defaults = {
     control_height:44, radius:4, border_width:2, shadow_offset:4, spacing:12
 }
 let lengths = ["font_size","control_height","radius","border_width","shadow_offset","spacing"]
-pub fn resolve(overrides = {}) map^ {
-    let names = c.properties(overrides,[for (key,value in defaults) string(key)],"tokens",false,"bold")^
-    let values = {*:defaults,*:overrides}
-    let colors = [for (key,value in defaults where value is string and starts_with(value,"#")) string(key)];
-    if (not all([for (key in colors) c.hex_color(values[key])])) raise c.fail("tokens","colors must be #rrggbb","bold")
-    else if (not all([for (key in [*lengths,"line_height"]) c.finite(values[key]) and
-        (if (contains(["radius","shadow_offset","spacing"],key)) values[key] >= 0 else values[key] > 0)]))
-        raise c.fail("tokens","dimensions must be finite and positive (radius, shadow_offset and spacing may be zero)","bold")
-    else if (not c.css_color(values.font_family)) raise c.fail("tokens","font_family must be a CSS font-family value","bold")
-    else values
-}
+pub fn resolve(overrides = {}) map^ => shared.resolve(defaults,overrides,lengths,["radius","shadow_offset","spacing"],"bold")^
 pub fn variables(overrides = {}, scoped = false) string^ {
     let values = resolve(overrides)^;
     // nested providers emit supplied fields only, retaining outer customizations.
-    join([for (key,value in (if (scoped) overrides else values))
-        "--bold-" ++ replace(string(key),"_","-") ++ ":" ++ string(value) ++
-        (if (contains(lengths,string(key))) "px" else "") ++ ";"],"")
+    shared.variables(if (scoped) overrides else values,lengths,"bold")
 }

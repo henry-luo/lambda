@@ -1,0 +1,1 @@
+[["logical identity", true], ["constructor identity", true], ["normalized aliases", true], ["page shell", true], ["native button", true], ["nested slots", true], ["layout detection", true], ["provider keeps semantic fieldset", true], ["native markup stays native", true], ["foreign names stay distinct", true], ["explicit null preserved", true], ["explicit false preserved", true]]

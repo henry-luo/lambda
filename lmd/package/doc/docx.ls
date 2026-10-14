@@ -40,7 +40,7 @@ pub fn convert(source, options = null) map^ {
     let pkg = package.open_package(source)^
     let parsed = model.build(pkg,opts)^
     let rendered = renderer.render(parsed,opts)^
-    let diagnostics = parsed.diagnostics ++ [for (issue in rendered.diagnostics) {*:issue,part:pkg.main}];
+    let diagnostics = parsed.diagnostics ++ [for (issue in rendered.diagnostics) {*:issue,part:c.get(issue,"part",pkg.main)}];
     if (opts.unsupported == "error" and len(diagnostics) > 0)
         raise c.fail("unsupported",diagnostics[0].code ++ ": " ++ diagnostics[0].message,diagnostics[0].part)
     else {*:rendered,metadata:pkg.metadata,diagnostics:diagnostics}

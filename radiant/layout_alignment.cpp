@@ -292,14 +292,17 @@ static float compute_view_text_baseline(
     bool use_normal_line_height,
     bool skip_block_children_of_table,
     bool reverse,
-    FirstBaselineRowCallback row_baseline
+    FirstBaselineRowCallback row_baseline,
+    bool block_end_most = false
 ) {
     if (!parent || (reverse && !parent->is_element())) return -1.0f;
 
     ViewElement* element = lam::view_require_element(parent);
     View* child = static_cast<View*>(reverse ? element->last_child : element->first_child);
+    float selected_baseline = -1.0f;
     while (child) {
-        if (!child->view_type) {
+        if (!child->view_type ||
+            (block_end_most && layout_view_is_out_of_flow(child))) {
             child = static_cast<View*>(reverse ? child->prev_sibling : child->next_sibling);
             continue;
         }
@@ -309,12 +312,28 @@ static float compute_view_text_baseline(
             float fallback_ascent = text->font ? text->font->font_size * 0.8f : 0.0f;
             float ascent = compute_font_baseline_ascender(
                 lycon, text->font, use_normal_line_height, fallback_ascent);
-            float baseline = cumulative_y + child->y + ascent;
+            float line_y = child->y;
+            if (block_end_most) {
+                bool has_line = false;
+                for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                    if (rect->length <= 0 || layout_text_is_collapsible_whitespace(
+                            text, rect->start_index, rect->length)) continue;
+                    // CSS Align 3 §9.1 selects the lowest column line, not the text union's top.
+                    line_y = has_line ? max(line_y, rect->y) : rect->y;
+                    has_line = true;
+                }
+                if (!has_line) {
+                    child = static_cast<View*>(child->prev_sibling);
+                    continue;
+                }
+            }
+            float baseline = cumulative_y + line_y + ascent;
             if (!reverse) {
                 log_debug("compute_view_first_text_baseline: text cumulative_y=%.1f, text.y=%.1f, ascent=%.1f -> baseline=%.1f",
                           cumulative_y, child->y, ascent, baseline);
             }
-            return baseline;
+            if (!block_end_most) return baseline;
+            selected_baseline = max(selected_baseline, baseline);
         }
 
         bool is_table_structure = (child->view_type == RDT_VIEW_TABLE ||
@@ -346,13 +365,16 @@ static float compute_view_text_baseline(
                 float result = compute_view_text_baseline(
                     lycon, child, cumulative_y + child->y,
                     use_normal_line_height, skip_block_children_of_table,
-                    reverse, row_baseline);
-                if (result >= 0) return result;
+                    reverse, row_baseline, block_end_most);
+                if (result >= 0) {
+                    if (!block_end_most) return result;
+                    selected_baseline = max(selected_baseline, result);
+                }
             }
         }
         child = static_cast<View*>(reverse ? child->prev_sibling : child->next_sibling);
     }
-    return -1.0f;
+    return selected_baseline;
 }
 
 float compute_view_first_text_baseline(
@@ -373,11 +395,12 @@ float compute_view_last_text_baseline(
     View* parent,
     float cumulative_y,
     bool use_normal_line_height,
-    bool skip_block_children_of_table
+    bool skip_block_children_of_table,
+    bool block_end_most
 ) {
     return compute_view_text_baseline(
         lycon, parent, cumulative_y, use_normal_line_height,
-        skip_block_children_of_table, true, nullptr);
+        skip_block_children_of_table, true, nullptr, block_end_most);
 }
 
 } // namespace radiant

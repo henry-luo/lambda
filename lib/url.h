@@ -170,6 +170,7 @@ Url* parse_url(Url *base, const char* doc_url);
 // Returns a newly allocated string that must be freed by the caller
 // Returns NULL if the URL is not a valid file:// URL
 char* url_to_local_path(const Url* url);
+char* url_file_to_local_path(const char* source);
 
 // Build a file:// URL from an absolute local file system path.
 // Percent-encodes path segments, handles Windows drive letters and backslashes,

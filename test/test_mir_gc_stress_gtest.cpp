@@ -42,6 +42,7 @@ static const char* kExtraJsScripts[] = {
     "test/js/class_method_capture_hoist.js",
     "test/js/function_decl_callback_hoist.js",
     "test/js/concurrency_lambda_promise.js",
+    "test/js/lambda_data_map.js",
     "test/js/tune4_closure_scalar_ownership.js",
     "test/js/js_shared_scalar_analysis.js",
     "test/js/js_shared_construction_plans.js",
@@ -53,6 +54,18 @@ static const char* kExtraJsScripts[] = {
 };
 
 static const char* kExtraLambdaScripts[] = {
+    // parse converts independent symbol options into allocating string homes.
+    "test/lambda/parse_option_roots.ls",
+    // native physics builders retain frame/event owners across scalar allocations.
+    "test/lambda/physics/freefall.ls",
+    "test/lambda/physics/contacts.ls",
+    "test/lambda/physics/invalid.ls",
+    "test/lambda/physics/package.ls",
+    "test/lambda/physics/queries.ls",
+    "test/lambda/music/music_layout.ls",
+    "test/lambda/music/music_performance.ls",
+    "test/lambda/music/music_midi.ls",
+    "test/lambda/cartesian_scratch_roots.ls",
     // typed fill/store/record plans retain owners through checked cold arms
     "test/lambda/proc/typed_tuning_boundary_guards.ls",
     "test/lambda/proc/typed_call_argument_layout.ls",

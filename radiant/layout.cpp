@@ -1125,6 +1125,7 @@ int64_t g_layout_cache_hits = 0;
 int64_t g_layout_cache_misses = 0;
 int64_t g_layout_cache_stores = 0;
 int64_t g_layout_shifted_reuse_count = 0;
+int64_t g_layout_flex_retained_count = 0;
 
 void reset_layout_timing() {
     g_style_resolve_time = 0;
@@ -1144,6 +1145,7 @@ void reset_layout_timing() {
     g_layout_cache_misses = 0;
     g_layout_cache_stores = 0;
     g_layout_shifted_reuse_count = 0;
+    g_layout_flex_retained_count = 0;
 }
 
 void log_layout_timing_summary() {
@@ -1216,6 +1218,8 @@ static bool layout_marker_has_list_item_trailing_space(LayoutContext* lycon,
  */
 static bool is_block_level_element(DomNode* node) {
     if (!node || !node->is_element()) return false;
+    // blockification of an out-of-flow box does not discard an inline separator.
+    if (layout_element_is_out_of_flow(node->as_element())) return false;
     DisplayValue display = resolve_display_value(node);
     return display.outer == CSS_VALUE_BLOCK ||
            display.outer == CSS_VALUE_LIST_ITEM ||
@@ -1935,17 +1939,32 @@ float layout_measure_space_advance(LayoutContext* lycon, FontHandle* handle,
 
 float layout_unicode_space_advance(LayoutContext* lycon, uint32_t codepoint) {
     if (!lycon || !lycon->font.style) return 0.0f;
-    FontHandle* handle = font_box_handle(&lycon->font);
+    float em = lycon->font.current_font_size > 0.0f
+        ? lycon->font.current_font_size : lycon->font.style->font_size;
+    return layout_measure_font_unicode_space_advance(font_box_handle(&lycon->font),
+        lycon->font.style, codepoint, ui_context_raster_scale(lycon->ui_context), em);
+}
+
+bool layout_unicode_space_is_synthesized(FontHandle* handle, uint32_t codepoint) {
+    float advance = 0.0f;
+    return font_get_synthesized_space_advance(handle, codepoint, &advance);
+}
+
+float layout_measure_font_unicode_space_advance(FontHandle* handle, FontProp* style,
+    uint32_t codepoint, float raster_scale, float em_size) {
+    if (!style || style->font_size <= 0.0f) return 0.0f;
     if (handle && font_has_codepoint(handle, codepoint)) {
-        return layout_measure_glyph_advance(lycon, handle, lycon->font.style, codepoint);
+        return layout_measure_font_glyph_advance(handle, style, codepoint, raster_scale);
     }
+    float synthesized = 0.0f;
+    if (font_get_synthesized_space_advance(handle, codepoint, &synthesized)) return synthesized;
     // use the face's actual metric first; a missing narrow no-break space
     // uses half its regular space, matching the shaper's space synthesis.
     if (codepoint == 0x202F) {
-        return 0.5f * layout_measure_space_advance(lycon, handle, lycon->font.style);
+        float space = layout_measure_font_glyph_advance(handle, style, ' ', raster_scale);
+        return 0.5f * (space > 0.0f ? space : style->space_width);
     }
-    float em = lycon->font.current_font_size > 0.0f
-        ? lycon->font.current_font_size : lycon->font.style->font_size;
+    float em = em_size > 0.0f ? em_size : style->font_size;
     return max(text_unicode_space_width_em(codepoint), 0.0f) * em;
 }
 
@@ -2201,6 +2220,19 @@ void layout_setup_block_font_metrics(LayoutContext* lycon) {
 
 }
 
+// Normal-flow margin collapsing consumes the used boundary in place (see
+// reset_non_inherited_style_cache). A relayout that kept the style would
+// collapse the consumed margins again, so it must resolve the style afresh.
+bool layout_boundary_consumed_by_flow(DomElement* element) {
+    if (!element->bound || !element->boundary()->has_flow_margin) return false;
+    const BoundaryProp* boundary = element->boundary();
+    return boundary->margin.top != boundary->flow_margin.top ||
+        boundary->margin.bottom != boundary->flow_margin.bottom ||
+        boundary->collapsed_through_mb != 0.0f || boundary->has_clearance ||
+        boundary->clearance_in_margin_chain ||
+        boundary->margin_chain_positive != 0.0f || boundary->margin_chain_negative != 0.0f;
+}
+
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     uint64_t t_start = time_now_ns();
 
@@ -2209,8 +2241,12 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
         if (dom_elem && dom_elem->specified_style) {
             bool styles_current = dom_elem->styles_resolved() &&
                                   !dom_elem->needs_style_recompute();
-            // IMPORTANT: Skip this check during measurement mode (run_mode==ComputeSize)
-            if (styles_current && !layout_context_is_measuring(lycon)) {
+            bool measuring = layout_context_is_measuring(lycon);
+            // IMPORTANT: Skip this check during measurement mode (run_mode==ComputeSize),
+            // after a measurement re-resolved this element as a walked descendant,
+            // and after normal-flow collapse consumed its used boundary.
+            if (styles_current && !measuring && !dom_elem->measure_restyled() &&
+                !layout_boundary_consumed_by_flow(dom_elem)) {
                 // calling us. When we skip resolution, these must be restored from
                 ViewBlock* block = lam::unsafe_view_block_api_span(lam::view_require_element(static_cast<View*>(dom_elem)));
                 if (block->blk) {
@@ -2308,7 +2344,15 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 css_transition_resolve(dom_elem, lycon);
             }
 
-            if (!layout_context_is_measuring(lycon)) {
+            if (measuring) {
+                // a walked descendant's percentages resolved against the measured
+                // width; the committed pass must not keep them as its own.
+                if (dom_elem != lycon->measurement_root) dom_elem->set_measure_restyled(true);
+            } else {
+                // a committed style pass resets the position (abspos list) and
+                // scroll state that only the item's next content pass rebuilds.
+                flex_retained_forget_content(dom_elem);
+                dom_elem->set_measure_restyled(false);
                 dom_elem->set_styles_resolved(true);
                 dom_elem->set_needs_style_recompute(false);
             }
@@ -2377,6 +2421,24 @@ float layout_apply_baseline_shift(LayoutContext* lycon,
         *descender -= shift;
     }
     return shift;
+}
+
+bool layout_inherited_direction_is_rtl(View* view) {
+    for (ViewElement* ancestor = view ? view->parent_view() : nullptr;
+         ancestor; ancestor = ancestor->parent_view()) {
+        if (!ancestor->is_element()) continue;
+        DomElement* element = ancestor->as_element();
+        CssEnum specified = layout_specified_keyword(
+            element, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
+        if (specified == CSS_VALUE_LTR || specified == CSS_VALUE_RTL) {
+            return specified == CSS_VALUE_RTL;
+        }
+        if (element->blk && (element->block()->direction == CSS_VALUE_LTR ||
+                             element->block()->direction == CSS_VALUE_RTL)) {
+            return element->block()->direction == CSS_VALUE_RTL;
+        }
+    }
+    return false;
 }
 
 CssEnum layout_resolve_text_align(CssEnum align, CssEnum direction) {
@@ -3741,6 +3803,7 @@ static float view_line_justify_walk(LayoutContext* lycon, float space_per_gap, V
                     if (gap_count > 0) {
                         float added_space = gap_count * space_per_gap;
                         rect->width += added_space;
+                        rect->justification_spacing = space_per_gap;
                         state.offset += added_space;
                     }
                 }
@@ -4004,6 +4067,7 @@ void line_align(LayoutContext* lycon) {
                             // Fast path only when no sibling views need repositioning.
                             if (!view->next()) {
                                 last_rect->width += extra_width;
+                                last_rect->justification_spacing = extra_width / num_gaps;
                                 adjust_text_bounds(text);
                                 return;
                             }
@@ -4652,6 +4716,14 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             // computed table-internal display remains observable to CSSOM.
             layout_display.inner = RDT_DISPLAY_REPLACED;
         }
+        if (display.inner == CSS_VALUE_MATH && layout_is_mathml_root(elem)) {
+            // Core math is an atomic content box. Keep computed display observable
+            // while the package supplies its used geometry through custom layout.
+            if (display.outer == CSS_VALUE_INLINE) {
+                display.outer = CSS_VALUE_INLINE_BLOCK;
+                layout_display.outer = CSS_VALUE_INLINE_BLOCK;
+            }
+        }
 
         if (elem->tag() == MARKUP_NAME_BR && display.outer != CSS_VALUE_NONE) {
             display.outer = CSS_VALUE_INLINE;
@@ -4753,12 +4825,17 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 }
 
 void layout_flow_children(LayoutContext* lycon, DomNode* first_child,
-                          bool finalize_line) {
+                          bool finalize_line,
+                          void (*prepare_child)(LayoutContext*, DomNode*)) {
     if (!lycon) return;
     for (DomNode* child = first_child; child; child = child->next_sibling) {
+        if (prepare_child) prepare_child(lycon, child);
         layout_flow_node(lycon, child);
     }
-    if (finalize_line && !lycon->line.is_line_start) line_break(lycon, true);
+    if (finalize_line) {
+        if (!lycon->line.is_line_start) line_break(lycon, true);
+        else layout_finalize_phantom_inline_line(lycon);
+    }
 }
 
 static void layout_set_root_available_width(LayoutContext* lycon, ViewBlock* root,

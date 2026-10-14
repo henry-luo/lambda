@@ -1,0 +1,1 @@
+[["pure seeded strokes", true], ["seed changes shape", true], ["two passes per edge", true], ["non scaling strokes", true], ["quadratic pencil paths", true], ["responsive canvas", true], ["elevation strokes", true], ["divider strokes", true], ["text button omits outline", true], ["authored seed zero", true]]

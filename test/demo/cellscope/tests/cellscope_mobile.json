@@ -1,0 +1,85 @@
+{
+  "name": "CellScope mobile",
+  "viewport": {
+    "width": 390,
+    "height": 1100
+  },
+  "events": [
+    {
+      "type": "advance_time",
+      "ms": 60
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('.specimen img')).every(el=>{const r=el.getBoundingClientRect();return r.width===48&&r.height===44})"
+    },
+    {
+      "type": "assert_script",
+      "js": "['.catalog','.stage','.inspector'].every(s=>{const r=document.querySelector(s).getBoundingClientRect();return r.width>0&&r.left>=0&&r.right<=390})"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#favorite"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#favorite"
+      },
+      "attribute": "aria-pressed",
+      "equals": "true"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#cell-scene",
+      "width": 256,
+      "height": 192,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 300
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#peer"
+      },
+      "value": "plant"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#compare"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "['#cell-scene','#peer-scene'].every(s=>{const r=document.querySelector(s).getBoundingClientRect();return r.width>0&&r.left>=0&&r.right<=390})"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#peer-scene",
+      "width": 256,
+      "height": 192,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 300
+      }
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/cellscope-mobile.png"
+    }
+  ]
+}

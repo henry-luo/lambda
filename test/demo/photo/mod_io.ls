@@ -1,5 +1,7 @@
 import model: .mod_model
 import pipeline: .mod_pipeline
+import layers: .mod_layers
+import radiant
 
 // Two independent polynomial checksums fingerprint the encoded snapshot.
 // This is accidental-change detection, not an authentication mechanism.
@@ -19,15 +21,16 @@ pub fn open_image(path) any^ {
             pixels:pixels,proxy:pipeline.proxy(pixels,960)}
     )
 }
-pub fn document(source, recipe) => {schema_version:1,source:{path:source.path,
+pub fn document(source, recipe) => {schema_version:2,source:{path:source.path,
     identity:source.identity,width:source.width,height:source.height},recipe:recipe}
 pub fn read_recipe(path, source) any^ {
     let value = input(path,'json')^
-    if (not (value is map) or value.schema_version != 1 or not model.valid(value.recipe))
+    let recipe = if (value.schema_version == 1 and value.recipe is map) model.upgrade(value.recipe) else value.recipe
+    if (not (value is map) or not contains([1,2],value.schema_version) or not model.valid(recipe))
         raise error("Photo: unsupported or invalid recipe")
     else if (value.source.identity != source.identity or value.source.width != source.width or value.source.height != source.height)
         raise error("Photo: recipe belongs to a different image; open its source first")
-    else value.recipe
+    else recipe
 }
 fn destination(path, source, extension) any^ {
     if (not (path is string) or not ends_with(lower(path),extension))
@@ -40,20 +43,39 @@ pub pn write_recipe(path, source, recipe) any^ {
     let target = destination(path,source,".json")^
     return output(document(source,recipe),target,{format:'json',atomic:true})^
 }
-pub pn export_png(path, source, recipe) any^ {
-    let target = destination(path,source,".png")^
-    if (not model.valid(recipe) or recipe.output_width*recipe.output_height > 16000000) {
+pub pn prepare_export(path,source,recipe) any^ {
+    let target=destination(path,source,".png")^
+    if (not model.valid(recipe) or recipe.output_width*recipe.output_height>16000000)
         raise error("Photo: output must be at most 16 megapixels")
+    let pending=target ++ ".photo-" ++ string(int(clock()*1000000)) ++ ".png"
+    let background=pending ++ ".base.png";
+    {target:target,pending:pending,background:background,
+        raster:if (len(recipe.layers)==0) pending else background,source:source,recipe:recipe}
+}
+pub pn abort_export(request) {
+    io.delete(request.pending) ^ { null }
+    io.delete(request.background) ^ { null }
+}
+pub pn finish_export(request,dimensions) any^ {
+    var problem=null
+    if (len(request.recipe.layers)>0) {
+        let svg=layers.svg(request.recipe,dimensions[1],dimensions[0],
+            url_resolve("file://" ++ sys.proc.self.cwd# ++ "/",request.background))
+        let html=<html <head <style "html,body{margin:0;padding:0;background:transparent}svg{display:block}">> <body svg>>
+        let done=radiant.export_document(format(html,'html'),request.pending,
+            {format:"png",width:dimensions[1],height:dimensions[0],local_resources:true,transparent:true})
+        if (done!=true) { problem=error("Photo: " ++ string(done)) }
+        io.delete(request.background) ^ { null }
     }
-    let pixels = pipeline.evaluate(source.pixels,recipe)
-    // Encode beside the destination; publish only a completed PNG.
-    let pending = target ++ ".photo-" ++ string(int(clock()*1000000)) ++ ".png"
-    var problem = null
-    save(pixels,pending) ^ { problem = ^ };
-    if (problem == null) { io.rename(pending,target) ^ { problem = ^ } }
-    if (problem != null) {
-        io.delete(pending) ^ { null };
-        raise problem
-    }
-    return shape(pixels)
+    if (problem==null) { io.rename(request.pending,request.target) ^ { problem=^ } }
+    if (problem!=null) { abort_export(request); raise problem }
+    return dimensions
+}
+pub pn export_png(path,source,recipe) any^ {
+    let request=prepare_export(path,source,recipe)^
+    let pixels=pipeline.evaluate(source.pixels,recipe)^
+    var problem=null
+    save(pixels,request.raster) ^ { problem=^ }
+    if (problem!=null) { abort_export(request); raise problem }
+    return finish_export(request,shape(pixels))^
 }

@@ -158,6 +158,7 @@ bool dom_ensure_computed(DomElement* element, bool needs_used_value = false);
 struct DirtyTracker;
 
 DomElement* dom_select_next_option(DomElement* select, DomElement* previous);
+DomElement* dom_select_option_at_index(DomElement* select, int index);
 const char* dom_option_text(DomElement* option);
 
 typedef enum AnimationType {
@@ -1014,6 +1015,32 @@ typedef struct FlexAnonymousTextRun {
     lam::Own<struct FlexAnonymousTextRun> next;
 } FlexAnonymousTextRun;
 
+// tier-2: view-pool, retained across incremental relayouts. Memos of a flex
+// item's last committed measurement, hypothetical cross size and content pass;
+// incremental layout replays them while the item's subtree is clean and its
+// container inputs are unchanged, so a sibling of a re-rendered subtree is not
+// re-measured or re-laid out. A style reset clears them with the rest of fi.
+typedef struct FlexRetainedPass {
+    uint32_t eligible_generation;   // layout pass in which the item qualified for replay
+    float container_width;          // flex container content box the memos were taken in
+    float container_height;         // -1 when indefinite
+    // measure_flex_child_content
+    float measured_width, measured_height, content_width, content_height;
+    float measure_context_width;
+    // hypothetical cross size query: the max-content height at cross_query_width
+    float cross_query_width, cross_height;
+    // content pass: the flex-sized box it ran in and the box it committed
+    float final_width, final_height;
+    float laid_width, laid_height, laid_content_width, laid_content_height;
+    float first_line_baseline, last_line_baseline;
+    uint8_t has_measure : 1;
+    uint8_t has_cross : 1;
+    uint8_t has_content : 1;
+    uint8_t content_row_parent : 1;       // parent direction the content pass saw
+    uint8_t content_definite_cross : 1;   // parent definite cross size the content pass saw
+    uint8_t content_main_from_flex : 1;
+} FlexRetainedPass;
+
 // FlexItemProp definition (needed by flex.hpp)
 // tier-2: view-pool, rebuilt each relayout
 typedef struct FlexItemProp {
@@ -1069,15 +1096,26 @@ typedef struct FlexItemProp {
     bool anonymous_text_preserve_leading_space;
     bool anonymous_text_preserve_trailing_space;
     bool anonymous_text_is_whitespace;
+    FlexRetainedPass retained;
     // text alignment and indentation can offset the content union from its line origin.
     float anonymous_text_origin_x;
     float anonymous_text_origin_y;
     bool has_anonymous_text_origin;
 } FlexItemProp;
 
+// Immutable cursor alternatives borrow URLs interned by the view tree.
+struct CursorImageSpec {
+    const char* url;
+    float hotspot_x, hotspot_y;
+    bool has_hotspot;
+    CursorImageSpec* next;
+};
+uint64_t cursor_images_hash(const CursorImageSpec* images);
+
 // tier-2: view-pool, rebuilt each relayout
 struct InlineProp {
     CssEnum cursor;
+    CursorImageSpec* cursor_images;
     CssEnum image_rendering;
     CssEnum caret_shape;
     Color color;
@@ -1908,6 +1946,8 @@ typedef struct PositionProp {
     lam::Up<ViewBlock> next_static_inline_position; // current line's deferred inline static-position link
     bool static_inline_bidi_candidate; // neutral zero-width anchor in the parent line
     bool static_inline_bidi_placed;
+    bool static_inline_phantom; // auto-inset cursor on a line with no in-flow content
+    float static_inline_phantom_x; // aligned cursor relative to its static parent
     float static_line_initial_extent; // provisional line-box extent used for static self-alignment
     bool static_block_after_line; // hypothetical block follows the unfinished inline line
     bool static_x_needs_parent_offset;  // flex static x was computed in parent-local coords
@@ -2372,6 +2412,7 @@ inline struct FontHandle* font_box_handle(const FontBox* fbox) {
 typedef struct TextRect {
     float x, y, width, height;
     float hanging_trim;  // preserved hanging space width excluded from line advance, not from CSSOM rects
+    float justification_spacing;  // CSS-pixel expansion selected by the owning line
     int start_index, length;  // start and length of the text in the style node
     int hyphenated_leading_bytes, hyphenated_trailing_bytes; // source ownership carried across a generated-mark query range
     int line_number;  // block-local line index assigned when this rect enters inline flow
@@ -4327,6 +4368,8 @@ typedef struct {
     float last_x, last_y;
     bool has_position;
     int cursor;  // current cursor style (CssEnum value)
+    uint64_t cursor_image_hash;  // stable across relayout; never retains a style pointer
+    bool cursor_image_ready;  // retry deferred image resources without rebuilding the fallback
     GLFWcursor* sys_cursor;
 } MouseState;
 
@@ -4338,8 +4381,11 @@ typedef enum UiAppMode {
 } UiAppMode;
 
 // tier-2: view-pool, rebuilt each relayout
+#include "window_fullscreen.hpp"
+
 typedef struct UiContext {
     GLFWwindow *window;    // current window
+    RadiantFullscreenState fullscreen; // window-owned; survives document navigation
     float window_width;    // window pixel width (actual framebuffer size, physical pixels)
     float window_height;   // window pixel height (actual framebuffer size, physical pixels)
     float viewport_width;  // intended viewport width (CSS logical pixels, for vh/vw units)
@@ -4347,6 +4393,7 @@ typedef struct UiContext {
     lam::Up<ImageSurface> surface;  // the current render target: window_surface, or one an export pass swaps in
     lam::Own<ImageSurface> window_surface;  // the surface create_surface made; destroy releases it
     bool render_failed;             // sticky host failure; never present an invalid paint stream
+    bool export_native_graphics;    // file export may lazily create a hidden graphics host for scene snapshots
 
     // font handling
     lam::Up<struct FontContext> font_ctx; // the font context in use: owned_font_ctx, or the host's for an isolated UI

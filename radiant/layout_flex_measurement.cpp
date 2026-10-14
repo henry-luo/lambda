@@ -542,9 +542,143 @@ void invalidate_measurement_cache_for_node(DomNode* node) {
         }
     }
 }
+// ---------------------------------------------------------------------------
+// Retained flex items (FlexRetainedPass). Each memo is refreshed by a fresh
+// computation in a committed pass and replayed only while the item qualified
+// in the current pass, under the same key it was taken with.
+// ---------------------------------------------------------------------------
+
+static uint32_t flex_retained_generation(LayoutContext* lycon) {
+    return lycon && lycon->doc && lycon->doc->view_tree
+        ? lycon->doc->view_tree->measurement_cache_generation : 0;
+}
+
+static FlexRetainedPass* flex_retained_replayable(LayoutContext* lycon, ViewElement* item) {
+    if (!item || !has_flex_item_prop(item) || !layout_can_retain_geometry(lycon)) return nullptr;
+    FlexRetainedPass* retained = &item->fi->retained;
+    uint32_t generation = flex_retained_generation(lycon);
+    return generation != 0 && retained->eligible_generation == generation ? retained : nullptr;
+}
+
+bool flex_retained_item_begin(LayoutContext* lycon, ViewElement* item,
+                              float container_width, float container_height) {
+    // a measurement pass neither qualifies an item nor touches its memos.
+    if (!lycon || layout_context_is_measuring(lycon) || !item || !has_flex_item_prop(item)) {
+        return false;
+    }
+    FlexRetainedPass* retained = &item->fi->retained;
+    bool eligible = layout_can_retain_geometry(lycon) &&
+        retained->container_width == container_width &&
+        retained->container_height == container_height &&
+        !item->form_control() && !flex_item_is_anonymous_text(item) &&
+        item->display.inner != RDT_DISPLAY_REPLACED &&
+        !layout_boundary_consumed_by_flow(item->as_element()) &&
+        layout_retained_subtree_is_stable(static_cast<DomNode*>(item), true);
+    if (!eligible) {
+        // the subtree or its container changed; this pass recomputes every memo.
+        retained->has_measure = retained->has_cross = retained->has_content = false;
+    }
+    retained->container_width = container_width;
+    retained->container_height = container_height;
+    retained->eligible_generation = eligible ? flex_retained_generation(lycon) : 0;
+    return eligible;
+}
+
+static bool flex_retained_replay_measure(LayoutContext* lycon, DomNode* child) {
+    FlexRetainedPass* retained = child->is_element()
+        ? flex_retained_replayable(lycon, lam::view_as_element(child)) : nullptr;
+    if (!retained || !retained->has_measure) return false;
+    store_in_measurement_cache(child, retained->measured_width, retained->measured_height,
+                               retained->content_width, retained->content_height,
+                               retained->measure_context_width);
+    return true;
+}
+
+static void flex_retained_record_measure(LayoutContext* lycon, DomNode* child,
+                                         float measured_width, float measured_height,
+                                         float content_width, float content_height,
+                                         float context_width) {
+    ViewElement* item = child->is_element() ? lam::view_as_element(child) : nullptr;
+    if (layout_context_is_measuring(lycon) || !item || !has_flex_item_prop(item)) return;
+    FlexRetainedPass* retained = &item->fi->retained;
+    retained->measured_width = measured_width;
+    retained->measured_height = measured_height;
+    retained->content_width = content_width;
+    retained->content_height = content_height;
+    retained->measure_context_width = context_width;
+    retained->has_measure = true;
+}
+
+void flex_retained_forget_content(DomElement* element) {
+    ViewElement* item = element ? lam::view_as_element(static_cast<DomNode*>(element)) : nullptr;
+    if (has_flex_item_prop(item)) item->fi->retained.has_content = false;
+}
+
+bool flex_retained_replay_cross(LayoutContext* lycon, ViewElement* item, float width,
+                                float* height) {
+    FlexRetainedPass* retained = flex_retained_replayable(lycon, item);
+    if (!retained || !retained->has_cross || retained->cross_query_width != width) return false;
+    *height = retained->cross_height;
+    return true;
+}
+
+void flex_retained_record_cross(LayoutContext* lycon, ViewElement* item, float width,
+                                float height) {
+    if (layout_context_is_measuring(lycon) || !item || !has_flex_item_prop(item)) return;
+    FlexRetainedPass* retained = &item->fi->retained;
+    retained->cross_query_width = width;
+    retained->cross_height = height;
+    retained->has_cross = true;
+}
+
+bool flex_retained_replay_content(LayoutContext* lycon, ViewBlock* item,
+                                  FlexContainerLayout* parent_flex) {
+    FlexRetainedPass* retained = flex_retained_replayable(lycon, item);
+    if (!retained || !retained->has_content || !parent_flex ||
+        retained->final_width != item->width || retained->final_height != item->height ||
+        retained->content_row_parent != is_main_axis_horizontal(parent_flex) ||
+        retained->content_definite_cross != parent_flex->has_definite_cross_size ||
+        retained->content_main_from_flex != item->fi->main_size_from_flex) return false;
+    // a measurement since the item qualified may have re-resolved its subtree.
+    if (!layout_retained_subtree_is_stable(static_cast<DomNode*>(item), true)) return false;
+    // the subtree still holds the committed result of this same content pass.
+    item->width = retained->laid_width;
+    item->height = retained->laid_height;
+    item->content_width = retained->laid_content_width;
+    item->content_height = retained->laid_content_height;
+    if (item->blk) {
+        item->blk->first_line_baseline = retained->first_line_baseline;
+        item->blk->last_line_baseline = retained->last_line_baseline;
+    }
+    g_layout_flex_retained_count++;
+    return true;
+}
+
+void flex_retained_record_content(LayoutContext* lycon, ViewBlock* item,
+                                  FlexContainerLayout* parent_flex,
+                                  float final_width, float final_height) {
+    if (!item || !has_flex_item_prop(item)) return;
+    FlexRetainedPass* retained = &item->fi->retained;
+    // a measurement pass leaves trial geometry in the subtree that no memo describes.
+    retained->has_content = !layout_context_is_measuring(lycon) && parent_flex;
+    if (!retained->has_content) return;
+    retained->final_width = final_width;
+    retained->final_height = final_height;
+    retained->content_row_parent = is_main_axis_horizontal(parent_flex);
+    retained->content_definite_cross = parent_flex->has_definite_cross_size;
+    retained->content_main_from_flex = item->fi->main_size_from_flex;
+    retained->laid_width = item->width;
+    retained->laid_height = item->height;
+    retained->laid_content_width = item->content_width;
+    retained->laid_content_height = item->content_height;
+    retained->first_line_baseline = item->blk ? item->blk->first_line_baseline : 0.0f;
+    retained->last_line_baseline = item->blk ? item->blk->last_line_baseline : 0.0f;
+}
+
 // Measure flex child content without applying final sizing
 void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
     if (!lycon || !child || get_from_measurement_cache(child)) return;
+    if (flex_retained_replay_measure(lycon, child)) return;
 
     float measured_width = 0.0f;
     float measured_height = 0.0f;
@@ -623,7 +757,9 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
     store_in_measurement_cache(child, measured_width, measured_height,
                                content_width, content_height,
                                lycon->block.content_width);
-
+    flex_retained_record_measure(lycon, child, measured_width, measured_height,
+                                 content_width, content_height,
+                                 lycon->block.content_width);
 }
 // Create lightweight View for flex item element only (no child processing)
 void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
@@ -749,6 +885,10 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
     // Initialize to zero
     // Use float to preserve precision from text measurement (avoids truncation)
     float min_width = 0, max_width = 0, min_height = 0, max_height = 0;
+    if (lycon && layout_measure_mathml(lycon, item->as_element(), &min_width, &min_height)) {
+        flex_store_intrinsic_sizes(item, min_width, min_width, min_height, min_height);
+        return;
+    }
     // Check if this is a replaced element (img, video, or SVG) - needs special handling
     NameId elmt_name = item->tag();
     bool is_replaced = layout_tag_is_replaced_content(elmt_name) &&

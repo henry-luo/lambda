@@ -1,5 +1,6 @@
 // ordinary shipped facade; presentation stays pure and handlers own effects (D7.2.4; S12.1.3).
 import c: lambda.ui.core.component
+import shell: lambda.ui.core.presentation
 import theme: .bold.tokens
 import styles: .bold.style
 import contract: .bold.contract
@@ -18,9 +19,7 @@ pub fn render(root) {
 pub fn page(root, options = {}) element^ {
     let valid = contract.validate('page',options)^
     let variables = theme.variables(c.option(options,"tokens",{}))^;
-    <html lang:c.option(options,"locale","en-US"),dir:c.text(c.option(options,"direction","ltr")),
-        <head <meta charset:"UTF-8"> <title c.option(options,"title","Lambda UI · bold")> <style styles.css>>
-        <body style:"margin:0;",<div class:"bold-root",style:variables,*c.children(render(root)^)>>>
+    shell.page(c.children(render(root)^),options,"bold",variables,styles.css,"bold-root")
 }
 view bold_page: <bold.page> | <bold kind:'page'> { page(content(~),c.props(~))^ }
 

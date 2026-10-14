@@ -17,6 +17,8 @@ fn wrap(names, index, value) any^ => if (index >= len(names)) value else
     make(names[index],{},[wrap(names,index+1,value)^])^
 fn graphic(node, value) => if (node.placement == null) value else
     <span class:"docx-anchor",style:node.placement.box,value>
+fn reference_label(node, options) => "[" ++ string(c.first([for (note in options.annotations
+    where note.key == node.key) note.number])) ++ "]"
 fn inline_node(node, options) any^ {
     if (node.kind == "text") {
         let names = [for (entry in marks where node.marks[entry.key] == true or
@@ -26,6 +28,8 @@ fn inline_node(node, options) any^ {
         if (style == "") wrap(names,0,node.text)^
         else <span style:style,wrap(names,0,node.text)^>
     } else if (node.kind == "link") <a href:node.href,*inline_nodes(node.children,options)^>
+    else if (node.kind == "reference") <sup class:("docx-" ++ node.story ++ "-reference"),
+        <a href:("#" ++ options.id_prefix ++ node.key),reference_label(node,options)>>
     else if (node.kind == "bookmark") <span id:node.id>
     // HTML attributes are text at the DOM boundary; numeric values stay in the private model.
     else if (node.kind == "image") graphic(node,<img src:node.src,alt:node.alt,
@@ -150,19 +154,30 @@ fn render_blocks(blocks, index, counters, options) map^ {
         {nodes:current.nodes ++ rest.nodes,counters:rest.counters,diagnostics:current.diagnostics ++ rest.diagnostics}
     }
 }
-fn inline_text(nodes) => join([for (node in nodes)
-    if (node.kind == "text") node.text else if (node.kind == "link") inline_text(node.children)
+fn inline_text(nodes, options) => join([for (node in nodes)
+    if (node.kind == "text") node.text else if (node.kind == "link") inline_text(node.children,options)
+    else if (node.kind == "reference") reference_label(node,options)
     else if (node.kind == "chart") node.text
     else if (contains(["break","page-break"],node.kind)) "\n" else ""],"")
 fn plain_text(blocks, options) => join([for (node in blocks)
     if (node.kind == "paragraph") {
-        let text = inline_text(node.children);
+        let text = inline_text(node.children,options);
         if (text == "" and not options.include_empty_paragraphs) "" else text ++ "\n\n"
     } else join([for (row in node.rows) join([for (cell in row.cells where cell.merge != "continue")
         (let text = plain_text(cell.blocks,options), if (ends_with(text,"\n\n")) slice(text,0,len(text)-2) else text)],"\t") ++ "\n"],"")],"")
 pub fn render(model, options) map^ {
-    let blocks = render_blocks(model.blocks,0,{},options)^
+    let opts = {*:options,annotations:model.annotations}
+    let blocks = render_blocks(model.blocks,0,{},opts)^
+    let notes = [for (note in model.annotations, let rendered = render_blocks(note.blocks,0,{},opts)^)
+        {*:note,nodes:rendered.nodes,diagnostics:[for (issue in rendered.diagnostics) {*:issue,part:note.part}]}]
+    let sections = [for (kind in ["footnote","endnote","comment"],
+        let group = [for (note in notes where note.story == kind) note] where len(group) > 0)
+        <section class:("docx-" ++ kind ++ "s"),<ol *[for (note in group)
+            <li id:(options.id_prefix ++ note.key),*note.nodes>]>>]
     let document = <article class:"docx-document",*:if (options.presentation == "source")
-        presentation.attributes(model.page_style) else {},*blocks.nodes>;
-    {document:document,html:html.to_html(document),text:plain_text(model.blocks,options),diagnostics:blocks.diagnostics}
+        presentation.attributes(model.page_style) else {},*(blocks.nodes ++ sections)>;
+    {document:document,html:html.to_html(document),text:plain_text(model.blocks,opts) ++
+        join([for (kind in ["footnote","endnote","comment"], note in notes where note.story == kind)
+            reference_label(note,opts) ++ " " ++ plain_text(note.blocks,opts)],""),
+        diagnostics:blocks.diagnostics ++ c.collect(notes,"diagnostics")}
 }

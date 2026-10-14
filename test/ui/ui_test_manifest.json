@@ -6,6 +6,12 @@
   },
   "suites": [
     {
+      "name": "music",
+      "globs": ["test/ui/music/*.json"],
+      "headless": false,
+      "tags": ["music", "native-gui"]
+    },
+    {
       "name": "baseline",
       "worker_mb": 1024,
       "globs": ["test/ui/*.json"],
@@ -41,6 +47,26 @@
       "name": "bold",
       "globs": ["test/ui/bold/*.json"],
       "tags": ["bold", "baseline"]
+    },
+    {
+      "name": "wired",
+      "globs": ["test/ui/wired/*.json"],
+      "tags": ["wired", "baseline"]
+    },
+    {
+      "name": "clay",
+      "globs": ["test/ui/clay/*.json"],
+      "tags": ["clay", "baseline"]
+    },
+    {
+      "name": "blade",
+      "globs": ["test/ui/blade/*.json"],
+      "tags": ["blade", "baseline"]
+    },
+    {
+      "name": "draw",
+      "globs": ["test/ui/draw/*.json"],
+      "tags": ["draw", "baseline"]
     },
     {
       "name": "dom",

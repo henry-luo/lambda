@@ -7,7 +7,11 @@ The final section records optional compatibility work and scope boundaries.
 
 **Scope:** Declarative statistical, hierarchical, flow, network, and geographic
 charts, weighted word/tag clouds, composable coordinates, and animated
-interactive Lambda views, all producing SVG. This document replaces the
+interactive Lambda views producing SVG. The selected
+[scientific plotting extension](Lambda_Design_Chart_Plot.md) adds topology,
+field/signal analysis, and native 3D figures through `chart.figure`, under
+**S12.1.1v2/D7.5.3**; `chart.render` retains its SVG return contract.
+This document replaces the
 separate chart proposal, round-two report, and advanced-features proposal.
 Implementation plans, module inventories, debugging history, and test reports
 are omitted.
@@ -1819,7 +1823,13 @@ adopted contract.
 
 These charts retain declarative input and SVG output. Full Vega/Vega-Lite or
 G2 specification conformance, a Vega signal runtime, G2 JavaScript plugins,
-alternate Canvas/WebGL chart backends, 3D scenes, general simulation APIs,
+alternate Canvas/WebGL chart backends, general simulation APIs,
 and Voronoi transforms remain outside the adopted chart scope. The bounded
 force-graph and density-contour chart families above supersede the earlier
 exclusion of force and contour charts.
+
+Scientific 3D charts are now covered by the selected
+[plotting extension](Lambda_Design_Chart_Plot.md), implemented incrementally;
+its [implementation record](impl/Lambda_Impl_Chart_Plot.md) lists the remaining
+work. Native scene presentation reuses Radiant under **D7.5.3**, and applied
+camera state follows **S9.1.4/S12.1.3**.

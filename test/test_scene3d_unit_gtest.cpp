@@ -3,6 +3,8 @@
 #include "../radiant/scene3d_math.hpp"
 #include "../radiant/animation_mixer.hpp"
 #include "../radiant/scene3d_animation.hpp"
+#include "../radiant/scene3d_physics.hpp"
+#include "../lib/physics/physics_math.h"
 #include "../radiant/svg_animation.hpp"
 #include "../radiant/radiant.hpp"
 #include "../radiant/layout.hpp"
@@ -327,6 +329,100 @@ protected:
 };
 
 
+TEST_F(Scene3dTest, OrthographicSizeIsDistanceIndependentAndDepthClipped) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","4");
+    DomElement* plane=mesh();
+    pixel(snapshot(),40,64,255,0,0);
+    attr(plane,"position","0 0 -10");
+    pixel(snapshot(),40,64,255,0,0);
+    attr(camera,"far","8");
+    pixel(snapshot(),40,64,0,0,0,0);
+    attr(camera,"view_height","0");
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+}
+
+TEST_F(Scene3dTest, PhysicsPosesSurviveCameraResizeAndGraphicsRecovery) {
+    DomElement* config=element("physics",root);attr(config,"gravity","0 -1 0");attr(config,"state","paused");
+    DomElement* body=element("rigid-body",root);attr(body,"id","falling");attr(body,"type","dynamic");attr(body,"position","0 1 0");
+    DomElement* collider=element("collider",body);attr(collider,"id","falling-shape");attr(collider,"shape","box");attr(collider,"size","1 1 1");
+    mesh("box","#ff0000","basic",body);ASSERT_NE(snapshot(),nullptr);
+    Scene3dPhysics* physics=scene3d_physics(root);ASSERT_NE(physics,nullptr);PhysicsState result={};PhysicsError error={};
+    ASSERT_TRUE(scene3d_physics_advance(physics,120,&result,&error));ASSERT_EQ(result.body_count,1u);EXPECT_EQ(result.tick,120u);
+    EXPECT_NEAR(result.bodies[0].pose.position.y,1.0-121.0/240.0,1e-10);
+    Scene3dStats before={};ASSERT_TRUE(scene3d_stats(root,&before));ASSERT_NE(snapshot(192,160),nullptr);
+    Scene3dStats after={};ASSERT_TRUE(scene3d_stats(root,&after));EXPECT_EQ(before.projection_generation,after.projection_generation);
+    attr(camera,"fov","70");ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_physics(root),physics);
+    scene3d_context_lost(root);ASSERT_NE(snapshot(),nullptr);EXPECT_EQ(scene3d_physics(root),physics);
+    ASSERT_TRUE(scene3d_physics_advance(physics,0,&result,&error));EXPECT_EQ(result.tick,120u);
+}
+
+TEST_F(Scene3dTest, PhysicsRejectsUnimplementedCcdAndNonRigidBodyTransforms) {
+    element("physics",root);DomElement* body=element("rigid-body",root);attr(body,"id","body");attr(body,"type","dynamic");
+    DomElement* collider=element("collider",body);attr(collider,"id","shape");attr(collider,"shape","box");mesh("box","#ff0000","basic",body);
+    attr(body,"ccd","true");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"CCD"),nullptr);
+    attr(body,"ccd","false");attr(body,"scale","2 1 1");EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"rigid"),nullptr);
+    attr(body,"scale","1 1 1");ASSERT_NE(snapshot(),nullptr);
+    DomElement* track=element("keyframe-track",root);attr(track,"path","body.position");
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);EXPECT_NE(strstr(scene3d_diagnostic(root),"tick sampling"),nullptr);
+}
+
+TEST_F(Scene3dTest, PhysicsBatchFaultPublishesOnlyCompletedTicks) {
+    DomElement* config=element("physics",root);attr(config,"gravity","0 0 0");attr(config,"timestep","0.75");
+    DomElement* body=element("rigid-body",root);attr(body,"id","fast");attr(body,"type","dynamic");attr(body,"linear-velocity","1e308 0 0");
+    DomElement* collider=element("collider",body);attr(collider,"id","shape");attr(collider,"shape","sphere");
+    mesh("box","#ff0000","basic",body);ASSERT_NE(snapshot(),nullptr);
+    PhysicsState result={};PhysicsError error={};
+    EXPECT_FALSE(scene3d_physics_advance(scene3d_physics(root),3,&result,&error));
+    ASSERT_EQ(result.tick,2u);ASSERT_EQ(result.body_count,1u);
+    EXPECT_DOUBLE_EQ(result.bodies[0].pose.position.x,1.5e308);
+}
+
+TEST_F(Scene3dTest, PhysicsRenderRotationMatchesColliderAxes) {
+    DomElement* config=element("physics",root);attr(config,"gravity","0 0 0");
+    DomElement* body=element("rigid-body",root);attr(body,"id","rotating");attr(body,"type","dynamic");
+    attr(body,"rotation","0 0 -0.12");attr(body,"position","0 1 0");attr(body,"angular-velocity","0 1 0");
+    DomElement* collider=element("collider",body);attr(collider,"id","shape");attr(collider,"shape","box");
+    mesh("box","#ff0000","basic",body);ASSERT_NE(snapshot(),nullptr);
+    auto* physics=scene3d_physics(root);PhysicsState state={};PhysicsError error={};
+    for(unsigned sample=0;sample<2;sample++) {
+        ASSERT_TRUE(scene3d_physics_advance(physics,sample?60:0,&state,&error));Scene3dMatrix rendered;
+        ASSERT_TRUE(scene3d_physics_pose(physics,body,&rendered));
+        // compare rendered axes to the independent vector rotation used by native collision detection.
+        for(unsigned axis=0;axis<3;axis++) {
+            PhysicsVec point=pbase(axis),expected=padd(state.bodies[0].pose.position,prot(state.bodies[0].pose.rotation,point));
+            Scene3dVec actual=scene3d_point(rendered,{(float)point.x,(float)point.y,(float)point.z});
+            EXPECT_NEAR(actual.x,expected.x,1e-6);EXPECT_NEAR(actual.y,expected.y,1e-6);EXPECT_NEAR(actual.z,expected.z,1e-6);
+        }
+    }
+}
+
+TEST_F(Scene3dTest, DepthOnlyOccluderPreservesBackgroundAndHidesRearGeometry) {
+    attr(camera,"type","orthographic");attr(camera,"view_height","4");
+    attr(root,"background","#ffffff");
+    DomElement* occluder=mesh();
+    DomElement* material=occluder->last_child->as_element();
+    attr(material,"depth_only","true");
+    DomElement* rear=mesh("plane","#0000ff");attr(rear,"position","0 0 -1");
+    pixel(snapshot(),64,64,255,255,255);
+    attr(rear,"position","0 0 1");
+    pixel(snapshot(),64,64,0,0,255);
+    attr(material,"transparent","true");
+    EXPECT_EQ(scene3d_snapshot(root,&ui,128,128,1),nullptr);
+}
+
+TEST_F(Scene3dTest, SvgExportEmbedsScenePixelsAndRejectsInvalidScene) {
+    ASSERT_NE(load_page("test/scene3d/mixed.html"),nullptr);
+    lam::Temp<char> svg(render_view_tree_to_svg(&ui,page->view_tree->root,320,240,nullptr,1));
+    ASSERT_NE(svg.get(),nullptr);
+    EXPECT_NE(strstr(svg.get(),"data:image/png;base64,"),nullptr);
+    ASSERT_FALSE(ui.render_failed);
+    DomElement* scene=dom_find_element_by_id(page->root->as_element(),"viewport");
+    ASSERT_NE(scene,nullptr);
+    ASSERT_TRUE(scene->set_attribute("camera","absent-camera"));page->mutation_epoch++;
+    lam::Temp<char> invalid(render_view_tree_to_svg(&ui,page->view_tree->root,320,240,nullptr,1));
+    EXPECT_EQ(invalid.get(),nullptr);EXPECT_TRUE(ui.render_failed);
+}
+
 struct ScriptResourceRetirementProbe : DomDocumentResourceData {
     RootVector roots;
     bool* released;
@@ -445,6 +541,41 @@ TEST_F(Scene3dTest, ShaderReflectionUniformsFailuresAndForeignGenerations) {
     EXPECT_EQ(native_gl_buffer(graphics,color,129u*1024u*1024u).id,0u);
     native_gl_destroy(graphics);EXPECT_EQ(native_gl_create(false,diagnostic,sizeof(diagnostic)),nullptr);
 }
+TEST_F(Scene3dTest, TextureResolutionCapBoundsMipBytesAndPreservesSourceAndOrientation) {
+    char diagnostic[256];NativeGlContext* graphics=native_gl_create(true,diagnostic,sizeof(diagnostic));ASSERT_NE(graphics,nullptr)<<diagnostic;
+    uint32_t pixels[16];for(unsigned i=0;i<16;i++) pixels[i]=i<8?0xff0000ff:0xffff0000;
+    ImageSurface image={};image.width=4;image.height=4;image.pitch=16;image.pixels=pixels;image.alpha_mode=IMAGE_ALPHA_STRAIGHT;
+    NativeGlSampler sampler;sampler.max_size=2;sampler.min_filter=0x2703;
+    NativeGlResource texture=native_gl_texture(graphics,&image,sampler);ASSERT_NE(texture.id,0u)<<native_gl_diagnostic(graphics);
+    NativeGlStats stats;ASSERT_TRUE(native_gl_stats(graphics,&stats));EXPECT_EQ(stats.allocated_bytes,20u);
+    EXPECT_EQ(image.width,4);EXPECT_EQ(image.height,4);EXPECT_EQ(pixels[0],0xff0000ffu);EXPECT_EQ(pixels[15],0xffff0000u);
+    NativeGlResource program=native_gl_program(graphics,
+        "#version 330 core\nlayout(location=0) in vec2 p;out vec2 uv;void main(){uv=(p+1)*.5;gl_Position=vec4(p,0,1);}",
+        "#version 330 core\nin vec2 uv;uniform sampler2D tex;out vec4 result;void main(){result=texture(tex,uv);}");
+    float positions[]={-1,-1,1,-1,-1,1,-1,1,1,-1,1,1};
+    NativeGlResource buffer=native_gl_buffer(graphics,positions,sizeof(positions));
+    NativeGlAttribute attribute={buffer,0,2,2*sizeof(float),0,0};
+    NativeGlResource vertices=native_gl_vertices(graphics,&attribute,1,{}),target=native_gl_target(graphics,32,32);
+    const float clear[]={0,0,0,0};ASSERT_TRUE(native_gl_begin(graphics,target,clear));
+    NativeGlDraw draw={program,vertices,texture,6,1,false,false,0,false};ASSERT_TRUE(native_gl_draw(graphics,&draw));
+    ImageSurface* capture=native_gl_snapshot(graphics,target);ASSERT_NE(capture,nullptr);
+    pixel(capture,16,4,255,0,0);pixel(capture,16,27,0,0,255);image_surface_destroy(capture);
+    native_gl_release(graphics,texture);sampler.max_size=0;EXPECT_EQ(native_gl_texture(graphics,&image,sampler).id,0u);
+    native_gl_destroy(graphics);
+}
+
+TEST_F(Scene3dTest, VertexOnlyBuffersDoNotRetainIndexShadows) {
+    char diagnostic[256];NativeGlContext* graphics=native_gl_create(true,diagnostic,sizeof(diagnostic));ASSERT_NE(graphics,nullptr)<<diagnostic;
+    float positions[]={0,0,0,1,0,0,0,1,0};
+    NativeGlResource buffer=native_gl_buffer(graphics,positions,sizeof(positions),false);ASSERT_NE(buffer.id,0u);
+    NativeGlStats stats;ASSERT_TRUE(native_gl_stats(graphics,&stats));EXPECT_EQ(stats.allocated_bytes,sizeof(positions));
+    NativeGlAttribute attribute={buffer,0,3,3*sizeof(float),0,0};
+    EXPECT_NE(native_gl_vertices(graphics,&attribute,1,{}).id,0u);
+    EXPECT_EQ(native_gl_vertices(graphics,&attribute,1,buffer).id,0u);
+    EXPECT_NE(strstr(native_gl_diagnostic(graphics),"validation data"),nullptr);
+    native_gl_destroy(graphics);
+}
+
 TEST(Scene3dMath, ViewBoxRejectsNonfiniteNegativeAndTrailingComponents) {
     const char* invalid[]={"0 0 -1 1","0 0 1 -1","nan 0 1 1","0 0 inf 1","0 0 1 1 2","0 0 1 1junk"};
     for (const char* value:invalid) EXPECT_FALSE(svg_parse_viewbox(value).has_viewbox)<<value;

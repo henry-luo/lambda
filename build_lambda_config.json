@@ -44,7 +44,8 @@
     "lambda/module/hostobj_demo",
     "lambda/ts",
     "lambda/network",
-    "radiant"
+    "radiant",
+    "lib/physics"
   ],
   "source_files": [
     "lib/sqlite/sqlite3.c",
@@ -455,7 +456,8 @@
         "lib/font/woff2/*.c",
         "lib/font/woff2/*.cpp",
         "lib/grep/*.cpp",
-        "lib/fts/*.cpp"
+        "lib/fts/*.cpp",
+        "lib/physics/*.c"
       ],
       "exclude_patterns": [
         "lib/clock_compat.c",
@@ -592,7 +594,8 @@
         "lambda/input/html5/html5_tokenizer.cpp",
         "lambda/input/html5/html5_parser.cpp",
         "lambda/input/html5/html5_token.cpp",
-        "lib/rdb_sqlite.c"
+        "lib/rdb_sqlite.c",
+        "lambda/core/physics_scene.cpp"
       ],
       "libraries": [
         "lambda-lib",
@@ -718,6 +721,7 @@
         "lambda/runtime/context_capsule.cpp",
         "lambda/runtime/lambda-stack.cpp",
         "lambda/runtime/lambda-vector.cpp",
+        "lambda/runtime/lambda-eval-science.cpp",
         "lambda/runtime/lambda-eval-num.cpp",
         "lambda/runtime/runner.cpp",
         "lambda/runtime/transpile-mir.cpp",
@@ -768,7 +772,8 @@
         "lambda/core/mem_factory_core.cpp",
         "lambda/core/collection_storage.cpp",
         "lambda/core/target_identity.cpp",
-        "lambda/core/path.c"
+        "lambda/core/path.c",
+        "lambda/core/physics_scene.cpp"
       ],
       "libraries": [
         "lambda-lib",
@@ -1245,6 +1250,7 @@
       "output": "lambda-cli.exe",
       "source_dirs": [
         "lib",
+        "lib/physics",
         "lib/grep",
         "lib/fts",
         "lambda",
@@ -2264,6 +2270,7 @@
         "lambda/runtime/lambda-proc.cpp",
         "lambda/runtime/lambda-stack.cpp",
         "lambda/runtime/lambda-vector.cpp",
+        "lambda/runtime/lambda-eval-science.cpp",
         "lambda/runtime/mem_factory_rt.cpp",
         "lambda/runtime/module_registry.cpp",
         "lambda/runtime/no_js_stubs.cpp",
@@ -3357,6 +3364,19 @@
             ],
             "binary": "test_serve_phase2_gtest.exe",
             "icon": "\ud83c\udf10"
+          },
+          {
+            "source": "test/test_physics_gtest.cpp",
+            "name": "Native Physics Tests",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_physics_gtest.exe",
+            "icon": "\u2699\ufe0f"
           }
         ],
         "type": "library"
@@ -3504,6 +3524,9 @@
           },
           {
             "source": "test/test_radiant_text_query_gtest.cpp",
+            "additional_sources": [
+              "test/test_window_fullscreen_gtest.cpp"
+            ],
             "name": "Radiant Text Query Tests",
             "dependencies": [
               "lambda-rt",
@@ -3816,6 +3839,22 @@
             "icon": "\ud83c\udfac"
           },
           {
+            "source": "test_midi_player_gtest.cpp",
+            "name": "MIDI Playback Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "additional_sources": [
+              "radiant/midi_player.cpp"
+            ],
+            "binary": "test_midi_player_gtest.exe",
+            "icon": "\ud83c\udfb5"
+          },
+          {
             "source": "test_lottie_player_gtest.cpp",
             "name": "Lottie Animation Tests",
             "dependencies": [
@@ -4066,7 +4105,7 @@
             "icon": "\ud83d\uddb1\ufe0f",
             "runner_args": [
               "--suite",
-              "baseline,dtna,timeline"
+              "baseline,dtna,timeline,wired,clay,blade"
             ]
           },
           {
@@ -4458,6 +4497,13 @@
             ],
             "binary": "test_input_rdb_gtest.exe",
             "icon": "\ud83d\uddc4\ufe0f"
+          },
+          {
+            "source": "test_input_eps_gtest.cpp",
+            "name": "Input EPS Parser Tests",
+            "dependencies": ["lambda-data"],
+            "libraries": ["gtest", "gtest_main"],
+            "binary": "test_input_eps_gtest.exe"
           },
           {
             "source": "test_input_pdf_gtest.cpp",

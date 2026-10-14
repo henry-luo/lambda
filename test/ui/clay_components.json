@@ -1,0 +1,72 @@
+{
+  "name": "clay_components presents clay surfaces and the shared component catalog",
+  "html": "test/ui/clay_components.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 4500
+  },
+  "events": [
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".clay-root"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#clay-demo-table tbody tr"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#clay-mint"
+      },
+      "property": "border-color",
+      "equals": "rgb(40, 123, 99)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#clay-inherited"
+      },
+      "property": "border-color",
+      "equals": "rgb(40, 123, 99)"
+    },
+    {
+      "type": "render",
+      "file": "temp/ui_clay/components.png"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#clay-email"
+      },
+      "text": "alex@example.com"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#clay-email"
+      },
+      "equals": "alex@example.com"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#clay-demo-tabs-item-1"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#clay-demo-tabs-item-1"
+      },
+      "attribute": "aria-selected",
+      "equals": "true"
+    }
+  ]
+}

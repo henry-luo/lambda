@@ -6311,6 +6311,12 @@ Item fn_parse3(Item str_item, Item grammar_item, Item rule_item) {
 
 Item fn_parse2(Item str_item, Item type) {
     GUARD_ERROR2(str_item, type);
+    // symbol-to-string option conversions allocate; retain earlier conversions through parser dispatch.
+    RootFrame parse_roots(4);
+    Rooted<Item> parse_source_root(parse_roots, str_item);
+    Rooted<Item> parse_options_root(parse_roots, type);
+    Rooted<String*> parse_type_root(parse_roots, (String*)NULL);
+    Rooted<String*> parse_flavor_root(parse_roots, (String*)NULL);
     if (get_type_id(type) == LMD_TYPE_TYPE &&
             (lambda_type_grammar(type.type) || lambda_type_grammar_rule(type.type))) {
         return fn_parse_grammar(str_item, type.type, ItemNull);
@@ -6335,6 +6341,7 @@ Item fn_parse2(Item str_item, Item type) {
     }
     else if (is_text_type_id(type_id)) {
         type_str = fn_string(type);
+        parse_type_root.set(type_str);
     }
     else if (type_id == LMD_TYPE_MAP) {
         Map* options_map = type.map;
@@ -6346,6 +6353,7 @@ Item fn_parse2(Item str_item, Item type) {
             TypeId type_value_type = get_type_id(input_type);
             if (is_text_type_id(type_value_type)) {
                 type_str = fn_string(input_type);
+                parse_type_root.set(type_str);
             } else {
                 set_runtime_error(ERR_TYPE_MISMATCH,
                     "parse: type option must be a string or symbol, got type: %s",
@@ -6360,6 +6368,7 @@ Item fn_parse2(Item str_item, Item type) {
             TypeId flavor_value_type = get_type_id(input_flavor);
             if (is_text_type_id(flavor_value_type)) {
                 flavor_str = fn_string(input_flavor);
+                parse_flavor_root.set(flavor_str);
             } else {
                 set_runtime_error(ERR_TYPE_MISMATCH,
                     "parse: flavor option must be a string or symbol, got type: %s",
@@ -6386,6 +6395,17 @@ Item fn_parse2(Item str_item, Item type) {
             } else {
                 source_positions = it2b(input_sourcepos);
             }
+        }
+        Item whitespace = _map_get((TypeMap*)options_map->type, options_map->data, "preserve_whitespace", &is_found);
+        if (is_found && get_type_id(whitespace) != LMD_TYPE_NULL) {
+            if (get_type_id(whitespace) != LMD_TYPE_BOOL) {
+                arraylist_free(adapter_names);
+                arraylist_free(raw_names);
+                arraylist_free(chaptered_names);
+                set_runtime_error(ERR_TYPE_MISMATCH, "parse: preserve_whitespace option must be a bool");
+                return ItemError;
+            }
+            parse_options.xml_preserve_whitespace = it2b(whitespace);
         }
         has_tex_options = parse_tex_options(options_map, &parse_options, adapter_names, raw_names,
             chaptered_names);
@@ -6431,9 +6451,10 @@ Item fn_parse2(Item str_item, Item type) {
     log_debug("fn_parse2: type=%s, flavor=%s", type_str ? type_str->chars : "auto", flavor_str ? flavor_str->chars : "null");
 
     parse_options.source_positions = source_positions;
-    // preserve the Item's byte count so document XML cannot silently accept a NUL-truncated prefix.
+    // preserve the Item's byte count so document XML cannot accept a NUL-truncated prefix.
     Input* input = input_from_source_n_with_name_parent(str->chars, str->len, dummy_url,
-        type_str, flavor_str, NULL, (source_positions || has_tex_options) ? &parse_options : NULL);
+        type_str, flavor_str, NULL,
+        (source_positions || has_tex_options || parse_options.xml_preserve_whitespace) ? &parse_options : NULL);
     arraylist_free(adapter_names);
     arraylist_free(raw_names);
     arraylist_free(chaptered_names);
@@ -6619,7 +6640,27 @@ Item fn_format2(Item item, Item type) {
     }
 
     log_debug("format item type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
-    String* result = format_data(item, type_str, flavor_str, context->heap->pool);
+    RootFrame format_roots(4);
+    Rooted<Item> source(format_roots, item);
+    Rooted<Item> converted(format_roots, ItemNull);
+    Rooted<String*> rooted_type(format_roots, type_str);
+    Rooted<String*> rooted_flavor(format_roots, flavor_str);
+#ifndef LAMBDA_NO_MATH_FORMAT
+    if (type_str && ((strcmp(type_str->chars, "math") == 0 && flavor_str &&
+            strcmp(flavor_str->chars, "mathml") == 0) ||
+            strcmp(type_str->chars, "math-mathml") == 0)) {
+        // D7.1.1/D7.2.8: invoke conversion here, never from lambda-io.
+        Item args[2] = {source.get(), ItemNull};
+        converted.set(interp_call_package_export(context->runtime,
+            "lambda.doc.math.mathml", "to_mathml", args, 2));
+        if (item_is_error(converted.get())) return converted.get();
+        // The package result is XML; normalize the legacy compound spelling too.
+        source.set(converted.get());
+        rooted_type.set(heap_strcpy("xml", 3));
+        rooted_flavor.set(nullptr);
+    }
+#endif
+    String* result = format_data(source.get(), rooted_type.get(), rooted_flavor.get(), context->heap->pool);
     if (!result) {
         set_runtime_error(ERR_FORMAT_ERROR, "format: could not format a %s value",
             get_type_name(get_type_id(item)));

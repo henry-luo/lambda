@@ -34,6 +34,7 @@ struct XmlParseOptions {
     void* context;
     void (*element_span)(void* context, Element* element, size_t start, size_t end);
     bool require_namespaces = false;
+    bool allow_inert_doctype = false; // external identifier only: no subset, entity declarations, or fetching.
 };
 void parse_xml_with_options(Input* input, const char* xml_string, const XmlParseOptions* options);
 void parse_css(Input* input, const char* css_string);
@@ -56,9 +57,14 @@ Element* html5_parse_n(Input* input, const char* html, size_t length,
                         Html5ParseOptions* opts);
 Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts);
 Element* parse_svg_document(Input* input, const char* svg_source);
+Element* parse_mathml_document(Input* input, const char* source);
+// Standalone XML roots carry their own namespace declarations, including QNames.
+bool xml_document_element_matches(Pool* pool, Element* element, const char* local_name,
+                                 const char* namespace_uri, bool allow_missing_namespace = false);
 
 void parse_rtf(Input* input, const char* rtf_string);
 void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length);
+void parse_eps(Input* input, const char* bytes, size_t length);
 // Post-processing pass run at the end of parse_pdf(): flattens the page tree
 // into a `pages: [Map]` array on the root and attaches a `to_unicode: Map`
 // field to each Font dict that carries a /ToUnicode CMap stream.

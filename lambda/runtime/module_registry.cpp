@@ -15,6 +15,8 @@
 #include "../../lib/file.h"
 #include "../../lib/path_str.h"
 #include "../../lib/string.h"
+#include "../../lib/url.h"
+#include "../../lib/ownership.hpp"
 
 #include <string.h>
 #include <stdlib.h>
@@ -97,6 +99,12 @@ static void module_descriptor_ensure_roots(ModuleDescriptor* desc) {
 // relative spelling from retaining a namespace in a different registry slot.
 static char* module_registry_key_dup(const char* path) {
     if (!path || !*path) return NULL;
+#ifndef LAMBDA_NO_FILE_IO
+    // document URLs and native paths must name one registry entry, including live import reads.
+    lam::Temp<char> local_path(url_file_to_local_path(path));
+    if(!strncmp(path,"file:",5)&&!local_path)return NULL;
+    if(local_path)path=local_path.get();
+#endif
 
     char lexical[4096];
     if (path_str_normalize_lexical_posix(path, lexical, (int)sizeof(lexical), false) < 0) {
@@ -381,9 +389,18 @@ bool module_is_loading(const char* path) {
 // =============================================================================
 
 #ifndef LAMBDA_NO_MIR
+extern "C" bool prepare_context_module_state(void* mir_ctx, void* consts,
+    void* type_list);
+
 Item module_build_lambda_namespace(void* script_ptr) {
     Script* script = (Script*)script_ptr;
     if (!script || !script->ast_root) return ItemNull;
+
+    // JS imports skip the ordinary Lambda runner; bind the defining constant
+    // image before exported MIR entries can read literals or property keys.
+    if (!prepare_context_module_state(script->jit_context,
+            script->const_list ? script->const_list->data : NULL,
+            script->type_list)) return ItemError;
 
     AstScript* ast = (AstScript*)script->ast_root;
     Item ns = js_new_object();
@@ -431,6 +448,7 @@ Item module_build_lambda_namespace(void* script_ptr) {
                     RootFrame export_roots(3);
                     Rooted<Item> key_root(export_roots, key);
                     Function* fn = to_fn_named((fn_ptr)func_ptr, arity, export_name);
+                    fn->def_module = script;
                     Rooted<Item> function_root(export_roots,
                         (Item){.function = fn});
                     if (uses_public_wrapper) {

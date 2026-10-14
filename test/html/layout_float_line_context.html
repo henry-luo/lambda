@@ -1,0 +1,16 @@
+<!doctype html>
+<style>
+@font-face {font-family: MetricAhem; src:url('../layout/support/fonts/Ahem.ttf');}
+body {margin:0;font:10px/20px MetricAhem;}
+.case {width:100px;margin-bottom:20px;}
+.left {float:left;width:20px; background:orange;}
+.right {float:right;width:20px;height:35px;background:green;}
+</style>
+<section id="result">
+<div class="case" id="flat25"><div class="left" style="height:25px"></div>ABCDEFGH<div class="right"></div> IJ KL MN OP</div>
+<div class="case" id="flat35"><div class="left" style="height:35px"></div>ABCDEFGH<div class="right"></div> IJ KL MN OP</div>
+<div class="case" id="flat45"><div class="left" style="height:45px"></div>ABCDEFGH<div class="right"></div> IJ KL MN OP</div>
+<div class="case" id="inline"><div class="left" style="height:35px"></div>ABCDEFGH<div class="right"></div><span> IJ KL MN OP</span></div>
+<div class="case" id="same-line"><div class="left" style="height:35px"></div>ABCD<div class="right"></div> IJ KL MN OP</div>
+<div class="case" id="isolated"><div class="left" style="height:45px">AA BB</div>ABCDEFGH<div class="right"></div> IJ KL MN OP</div>
+</section>

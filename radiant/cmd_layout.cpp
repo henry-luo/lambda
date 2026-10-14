@@ -55,6 +55,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/input-parsers.h"
+#include "../lambda/input/input-postscript.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "page_fo.hpp"
 #include "layout_paged.hpp"
@@ -2804,6 +2805,7 @@ static const LayoutFormatRoute* layout_find_format_route(const char* extension) 
 static bool layout_path_has_known_extension(const char* path) {
     if (!path) return false;
     if (graph_path_is_graph(path)) return true;
+    if (eps_source_expected(path, nullptr, 0)) return true;
     const char* extension = file_path_ext(path);
     return extension && (strcmp(extension, ".pdf") == 0 ||
                          layout_find_format_route(extension));
@@ -2812,6 +2814,7 @@ static bool layout_path_has_known_extension(const char* path) {
 bool layout_path_uses_loader_runtime(const char* path) {
     if (!path) return false;
     if (graph_path_is_graph(path)) return true;
+    if (eps_source_expected(path, nullptr, 0)) return true;
     const char* extension = file_path_ext(path);
     if (!extension) return false;
     if (strcmp(extension, ".pdf") == 0) return true;
@@ -2849,6 +2852,11 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
     if (graph_path_is_graph(path)) {
         if (handled) *handled = true;
         return load_graph_transform_doc(url, width, height, pool);
+    }
+
+    if (eps_source_expected(path, nullptr, 0)) {
+        if (handled) *handled = true;
+        return load_input_type_transform_doc("eps", url, nullptr, 0, width, height, pool);
     }
 
     const char* ext = file_path_ext(path);
@@ -3436,6 +3444,28 @@ void loader_runtime_finish_document(DomDocument* doc, Runtime* loader) {
 static void layout_adopt_loader_runtime(DomDocument* doc, Runtime* loader) {
     loader_runtime_finish_document(doc, loader);
     doc->loader_runtime = lam::up(loader);
+}
+
+Runtime* layout_document_package_runtime(DomDocument* document, const char* package_module) {
+    if (!document) return nullptr;
+    Runtime* runtime = dom_document_loader_runtime(document);
+    if (runtime) return runtime;
+    // A synchronous render inside Lambda shares its live evaluator; it cannot
+    // transfer that thread to a second runtime while caller roots are active.
+    if (context && context->execution_depth != 0) return context->runtime;
+    // Static HTML pays for an evaluator only when a package layout is requested.
+    runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
+    if (!runtime) return nullptr;
+    runtime_init(runtime);
+    runtime->resource_policy = document->resource_policy;
+    Script* package = nullptr;
+    if (!run_lambda_package_module(runtime, package_module, &package) || !package) {
+        log_error("package-layout-runtime: failed to initialize %s", package_module);
+        release_layout_runtime(runtime);
+        return nullptr;
+    }
+    document->lambda_runtime = runtime;
+    return runtime;
 }
 
 static DomDocument* create_layout_dom(Input* input, Element* root,
@@ -4182,9 +4212,10 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
             svg_content);
         release_runtime();
         pool_destroy(result_pool);
-        // The serialized result gets its own base URL; the caller still owns script_url.
+        // successful loaders consume their source URL; retain it for SVG assets and teardown.
         log_info("[Lambda Script] Loading SVG-in-HTML from string (%zu bytes)", html_buf->length);
-        DomDocument* doc = load_html_string_doc(html_buf->str, viewport_width, viewport_height);
+        DomDocument* doc = load_lambda_html_doc(script_url, nullptr, viewport_width, viewport_height,
+            pool, html_buf->str, false, false, nullptr, print_media);
         strbuf_free(html_buf);
         return doc;
     };
@@ -4560,20 +4591,15 @@ static bool capture_lambda_focus_restore(DocState* state,
     return true;
 }
 
+static bool set_layout_dirty_visitor(DomNode* node, void* context) {
+    node->layout_dirty = *(bool*)context;
+    return true;
+}
+
 static void set_layout_dirty_subtree(DomNode* root, bool dirty) {
-    if (!root) return;
-    DomNode* stack[256];
-    int top = 0;
-    stack[top++] = root;
-    while (top > 0) {
-        DomNode* node = stack[--top];
-        node->layout_dirty = dirty;
-        if (!node->is_element()) continue;
-        for (DomNode* child = lam::dom_require_element(node)->first_child;
-             child && top < 255; child = child->next_sibling) {
-            stack[top++] = child;
-        }
-    }
+    // retained-geometry reuse trusts these marks; a fixed 256-entry stack left
+    // the tail of a wide rebuilt subtree looking clean.
+    view_geometry_walk_dom_tree(root, set_layout_dirty_visitor, &dirty);
 }
 
 static View* resolve_lambda_focus_restore(DomDocument* doc,

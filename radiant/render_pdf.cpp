@@ -1,5 +1,6 @@
 #include "render.hpp"
 #include "geomap.hpp"
+#include "scene3d.hpp"
 #include "render_effect_raster_fallback.hpp"
 #include "render_glyph_run_raster_lower.hpp"
 #include "view.hpp"
@@ -1287,45 +1288,8 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
         HPDF_Page_SetFontAndSize(ctx->current_page, ctx->current_font, font_size);
     }
 
-    // Check if text is justified by comparing TextRect width with natural width
-    // Use shared font backend to measure text width (similar to canvas renderer)
-    float space_width = text_space_advance(ctx->font.style);
-    float adjusted_space_width = space_width;
-
-    // Calculate natural width using glyph metrics (excluding trailing spaces)
-    float natural_width = 0.0f;
-    int space_count = 0;
-    size_t content_len = strlen(text_content.get());
-    // Find end of non-whitespace content
-    while (content_len > 0 && text_content.get()[content_len - 1] == ' ') {
-        content_len--;
-    }
-
-    if (font_box_handle(&ctx->font) && ctx->font.style) {
-        FontStyleDesc descriptor = font_style_desc_from_prop(ctx->font.style);
-        const char* cursor = text_content.get();
-        const char* end = cursor + content_len;
-        while (cursor < end) {
-            uint32_t codepoint = 0;
-            if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) continue;
-            if (codepoint == ' ') {
-                natural_width += space_width;
-                space_count++;
-            } else if (codepoint != 0xFE0F) {
-                LoadedGlyph* glyph = font_load_glyph(font_box_handle(&ctx->font), &descriptor, codepoint, false);
-                if (glyph) natural_width += glyph->advance_x * render_font_pixel_to_css(font_box_handle(&ctx->font));
-            }
-            if (codepoint != ' ') natural_width += text_character_spacing(ctx->font.style, codepoint);
-        }
-    }
-
-    // If text_rect width is larger than natural width and there are spaces, apply justify
-    if (text_justify_computed_value(text->parent) != CSS_VALUE_NONE &&
-        space_count > 0 && natural_width > 0 &&
-        text_rect->width > natural_width + 0.5f) {
-        float extra_space = text_rect->width - natural_width;
-        adjusted_space_width = space_width + (extra_space / space_count);
-    }
+    CssEnum justify_mode = text_justify_computed_value(text->parent);
+    RenderTextJustification justification = render_text_justification(text_rect, justify_mode);
 
     float baseline_y = render_text_baseline_y(&ctx->font, y);
     PaintGlyphRun run = {};
@@ -1339,7 +1303,9 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     run.font_size = font_size;
     run.x = base_x;
     run.baseline_y = baseline_y;
-    run.word_spacing = adjusted_space_width - space_width;
+    run.word_spacing = justification.word;
+    run.cjk_spacing = justification.character;
+    run.justify_mode = justify_mode;
     DomElement* parent = text->parent ? text->parent->as_element() : nullptr;
     if (parent && render_paint_text_background(pdf_active_paint_list(ctx), ctx->ui_context,
             parent, &run, {ctx->block.x, ctx->block.y, parent->width, parent->height})) {
@@ -1466,6 +1432,11 @@ static void pdf_cb_visit_element(RenderContext* vctx, ViewElement* view,
         pdf_record_link_rect(ctx, element->get_attribute("href"), abs_x, abs_y,
             view->width, view->height);
     }
+}
+
+static void pdf_cb_render_scene3d(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    auto* ctx = (PdfRenderContext*)vctx;
+    if (scene3d_paint_content(pdf_active_paint_list(ctx),ctx->ui_context,block,abs_x,abs_y)) pdf_lower_paint_list(ctx);
 }
 
 static void pdf_cb_render_geomap(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
@@ -1701,6 +1672,7 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
     b.render_image     = pdf_cb_render_image;
     b.render_inline_svg = pdf_cb_render_inline_svg;
     b.render_geomap = pdf_cb_render_geomap;
+    b.render_scene3d = pdf_cb_render_scene3d;
     b.render_svg_subscene = pdf_cb_render_svg_subscene;
     b.visit_element     = pdf_cb_visit_element;
     b.begin_block_children  = NULL;
@@ -1827,6 +1799,7 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     render_profiler_emit_path_trace(nullptr, uicon, nullptr, &trace);
 
     pdf_context_destroy(&ctx);
+    if (uicon->render_failed) { HPDF_Free(ctx.pdf_doc);return nullptr; }
     return ctx.pdf_doc;
 }
 

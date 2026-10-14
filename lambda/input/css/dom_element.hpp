@@ -559,7 +559,7 @@ static inline Runtime* dom_document_script_runtime(const DomDocument* doc) {
 // document's own runtime.
 static inline Runtime* dom_document_loader_runtime(const DomDocument* doc) {
     if (!doc) return nullptr;
-    return doc->loader_runtime ? doc->loader_runtime.get() : doc->lambda_runtime;
+    return doc->loader_runtime ? doc->loader_runtime.get() : dom_document_script_runtime(doc);
 }
 
 // Does this document own a live JS DOM script realm? Capability, not provenance:
@@ -584,12 +584,16 @@ typedef struct DomDocumentResource {
     lam::Up<Context> runtime_owner; // release before this evaluator's context retires (D5.3.3).
     DomDocumentResourceDestroyFn retire_runtime; // optional: preserve native state after unrooting.
     lam::Own<DomDocumentResource> next;
+    bool (*pending_work)(DomDocumentResourceData* data); // native jobs awaiting execution/publication.
 } DomDocumentResource;
 
 bool dom_document_add_resource(DomDocument* document, struct DomDocumentResourceData* data,
                                DomDocumentResourceDestroyFn destroy, Context* runtime_owner = nullptr,
                                DomDocumentResourceDestroyFn retire_runtime = nullptr);
 bool dom_document_release_resource(DomDocument* document, DomDocumentResourceData* data);
+bool dom_document_set_resource_pending_work(DomDocument* document, DomDocumentResourceData* data,
+    bool (*pending)(DomDocumentResourceData*));
+bool dom_document_has_pending_work(DomDocument* document);
 bool dom_document_bind_resource_runtime(DomDocument* document, DomDocumentResourceData* data,
     Context* runtime_owner, DomDocumentResourceDestroyFn retire_runtime = nullptr);
 void dom_document_release_runtime_resources(DomDocument* document, Context* runtime_owner);
@@ -652,6 +656,8 @@ extern const FormControlProp FORM_CONTROL_PROP_DEFAULT;
 // tier-1: doc-pool, survives relayout
 typedef struct LayoutFragmentBox {
     float x, y, width, height;
+    float flow_extent;  // consumed block flow can be smaller than visible monolithic overflow
+    bool has_flow_extent;
     int fragment_index;
     int column_index;
     int row_index;
@@ -736,6 +742,9 @@ enum DomElementFlag : uint32_t {
     // A pass-local element in layout scratch (an anonymous flex text item): its
     // props live in that scratch too, so it never reaches the view-tree pool.
     ELMT_FLAG_SCRATCH_LIVED = 1u << 30,
+    // An intrinsic measurement walked this element and re-resolved its style
+    // against the measured width; the next committed pass resolves it again.
+    ELMT_FLAG_MEASURE_RESTYLED = 1u << 31,
 };
 
 static_assert((ELMT_FLAG_INLINE_PROP_SHARED & ((1u << 17) - 1u)) == 0,
@@ -1089,6 +1098,8 @@ struct DomElement : DomNode {
         // A reset discards the cascade that produced any cached contribution.
         if (!value) set_has_cached_intrinsic_widths(false);
     }
+    bool measure_restyled() const { return flag(ELMT_FLAG_MEASURE_RESTYLED); }
+    void set_measure_restyled(bool value) { set_flag(ELMT_FLAG_MEASURE_RESTYLED, value); }
     bool float_prelaid() const { return flag(ELMT_FLAG_FLOAT_PRELAID); }
     void set_float_prelaid(bool value) { set_flag(ELMT_FLAG_FLOAT_PRELAID, value); }
     bool has_cached_intrinsic_widths() const { return flag(ELMT_FLAG_HAS_CACHED_INTRINSIC_WIDTHS); }

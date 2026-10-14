@@ -1,0 +1,29 @@
+<!doctype html>
+<style>
+@font-face { font-family: MetricAhem; src: url('../layout/support/fonts/Ahem.ttf'); }
+body { margin: 0; font: 10px/10px MetricAhem; }
+.case { margin-bottom: 10px; }
+.edge { border-left: 30px solid green; }
+.preserved { white-space: pre; }
+.absolute { position: absolute; }
+.generated::before { content: 'B'; }
+.after::after { content: 'C'; }
+</style>
+<section id="result">
+<div class="case" id="terminal"><span id="terminal-outer">A   <span class="edge" id="terminal-edge">  </span>   </span></div>
+<div class="case" id="followed">A <span class="edge" id="followed-edge"> </span>B</div>
+<div class="case" id="preserved-following">A <span class="edge preserved" id="preserved-edge"> </span></div>
+<div class="case" id="inner-space">A<span class="edge" id="inner-space-edge">  </span></div>
+<div class="case" id="nested">A <span id="nested-outer"><span class="edge" id="nested-edge"> </span></span> </div>
+<div class="case" id="forced">A <span class="edge" id="forced-edge"> </span><br>B</div>
+<div class="case" id="before-block">A <span class="edge" id="before-block-edge"> </span><div>B</div></div>
+<div class="case" id="out-of-flow">A <span class="edge" id="out-of-flow-edge"> </span><span class="absolute" id="anchor">B</span></div>
+<div class="case" id="contents-following">A <span class="edge" id="contents-edge"> </span><span style="display: contents">B</span></div>
+<div class="case" id="contents-terminal">A <span style="display: contents"><span class="edge" id="contents-terminal-edge"> </span></span></div>
+<div class="case" id="pre-line">A <span class="edge" id="pre-line-edge"> </span><span style="white-space: pre-line">
+B</span></div>
+<div class="case" id="ruby-case" style="line-height: 0"><ruby><span style="display: inline-block; width: 10px; height: 50px"></span> <rt id="ruby-annotation"><span style="display: inline-block; width: 10px; height: 50px"></span> </rt></ruby></div>
+<div class="case" id="generated-following">A <span class="edge" id="generated-edge"> </span><span class="generated"></span></div>
+<div class="case" id="generated-after-following">A <span class="edge" id="generated-after-edge"> </span><span class="after"></span></div>
+<div class="case" id="contents-ancestor"><span style="display: contents">A <span class="edge" id="contents-ancestor-edge"> </span></span>B</div>
+</section>

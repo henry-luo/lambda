@@ -5,6 +5,7 @@
 > **Original design records:** 2026-03-27 through 2026-04-12, including later appendices.
 > **Consolidated and reviewed:** 2026-10-08, against tree `62f3c21d2` and the
 > working changes present at review time.
+> **Revised:** 2026-10-13 — **D4.5.3v2** scope (copy at construction, retain downstream), presentation authority by state tier (§2.7), reconciliation within a regenerated result, and ownership of retained nodes (§5.3, §9.1, §9.4, §10.1, §11, §17, §18.1).
 > **Scope:** the `view`/`edit` template model, state and model ownership,
 > pattern dispatch, events, observer-based regeneration, incremental presentation,
 > text interaction, drag-and-drop, prior art, alternatives, and unresolved design.
@@ -26,6 +27,8 @@ collected in the final section.
 | Event participants and cancellation | **S12.1.3**, **D7.2.5** | [DOM Dispatch](Lambda_Design_DOM_Dispatch.md), ES22–ES29 |
 | Script packages and one document's execution ownership | **D7.2.1–D7.2.4**, **D5.3.3** | [DOM State](Lambda_Design_DOM_State.md), ES11/ES12v2 |
 | Presentation lifetime and the runtime boundary | **D4.5.1v4**, **D4.5.2** | This document §12 |
+| DOM construction from a script and retention downstream | **D4.5.3v2** | This document §5.3, §9.4, §10.1; [DOM Reconciliation proposal](Lambda_Proposal_DOM_Reconciliation.md) |
+| Presentation authority by state tier | **S12.1.5v2** | This document §2.7, §9.4, §11 |
 | Execution profiles | **D8.1.1v17**, **D7.1.4v2**, **D7.1.7v6** | This document §§2, 12 |
 | Bare `apply` and ordinary statement boundaries | **S16.2** | [Syntax](Lambda_Design_Syntax.md#77-apply-fused-token-retired-decided), §7.7 |
 | Persistence and stable identity | **S12.1.3**, **S9.1.4**, **S9.1.7** | [State Management](radiant/Radiant_Design_State_Management.md), RS1–RS24 |
@@ -140,6 +143,16 @@ Template semantics do not depend on whether a body or handler is interpreted or
 compiled. **D8.1.1v17** defines Lambda's tiered execution. The design no longer
 requires every template to be JIT-compiled before it can participate in a UI.
 Likewise, static transformation does not require a window or an event loop.
+
+### 2.7 Presentation authority by state tier
+
+**Ruled 2026-10-13 (user; S12.1.5v2).** Presentation state has tiers, and each piece of state has exactly one owner. An author template owns the high-level state it regenerates its result from: its model, its declared state, and therefore the markup, attributes and children the result expresses. A lower tier of transient, implementation-level state may live directly in DOM/CSS inside that result, written by Lambda `on`/render handlers through `dom.*` or by JS. The slide player is the model case: the template holds the slide-level presentation state (which slide, which cue), while the animation within a slide is an implementation detail kept in presentation style, a few attributes and lazily mounted layers (`lmd/package/slide/live.ls`).
+
+The two tiers work together under two conditions. They never manage the same state: the exclusiveness is per state, not per subtree, so two tiers writing one attribute or one child list would fight and override each other. And precedence is fixed: a higher-tier action (previous or next slide, any state write that regenerates) discards or overrides whatever lower-tier state it touches, and the lower tier is written knowing that. A page composes scripted and templated subtrees the same way, by owning different state.
+
+The behavior tier (§11) is a different arrangement: Lambda behavior templates and JS share the *same* canonical interaction state of a form control rather than tiers of it, and the behavior template regenerates nothing.
+
+The engine tracks no lower-tier state. Reconciliation compares results (§9.4), so lower-tier state on a kept node survives and lower-tier state on a patched or rebuilt node is lost; that is the intended precedence, not a defect.
 
 ## 3. Template declaration and context
 
@@ -352,16 +365,9 @@ their observable retention policy.
 
 ### 5.3 Runtime identity and durable identity
 
-**Ordinary markup occurrences — ruled 2026-10-11 (D4.5.3).** Only UI/view-mode
-DOM construction deep-copies ordinary Elements and their content with
-MarkBuilder, even when already in the document arena. Reusing one SVG or HTML
-value in several slots therefore produces independent native nodes and child
-chains. Normal Lambda evaluation retains value sharing and the existing
-ownership-based copy optimization. Rooted callables and native handles retain
-their identity. Copying at the DOM boundary preserves template source/result
-keys for event dispatch and regeneration. This settles ordinary markup reuse;
-repeated stateful template applications and durable addressing remain the open
-questions below.
+**Ordinary markup occurrences — ruled 2026-10-11, scope clarified 2026-10-13 (D4.5.3v2).** Only UI/view-mode DOM construction deep-copies ordinary Elements and their content with MarkBuilder, even when already in the document arena. Reusing one SVG or HTML value in several slots therefore produces independent native nodes and child chains. Normal Lambda evaluation retains value sharing and the existing ownership-based copy optimization. Rooted callables and native handles retain their identity. Copying at the DOM boundary preserves template source/result keys for event dispatch and regeneration. This settles ordinary markup reuse; repeated stateful template applications and durable addressing remain the open questions below.
+
+The ruling covers how DOM is built from Lambda scripts and nothing downstream. It does not ask a regeneration to rebuild its whole result: an existing occurrence's subtree may be kept and patched in place to present the new result (§10.1), and style, layout and paint reuse every retained structure that is still valid. *Copy at construction, retain downstream.* Retention is the preferred path, not a tolerated exception ([DOM Reconciliation proposal](Lambda_Proposal_DOM_Reconciliation.md)).
 
 Live source identity supports state lookup and result ownership during a session.
 Stable source paths are the identity spine for persistence and reconstruction
@@ -680,6 +686,8 @@ Both directions must agree after regeneration. Event dispatch must always bind
 to the current source and template. Replacing an output element cannot silently
 disconnect its new presentation from state or handlers.
 
+A retained node needs the same ownership update as a rebuilt one. Regeneration publishes new result identities even when the output is equal, so a kept occurrence must be rebound from the old result element to the new one (the element map and the lifecycle backing source), and every template instance whose result lies inside it must receive its render events. Rebinding the map alone proved insufficient on 2026-10-12 (§9.4).
+
 ### 9.2 Marking dependencies dirty
 
 A local-state write affects its owning template instance. An editor write affects
@@ -708,7 +716,7 @@ one lookup. A body can itself recursively apply child templates, compute aggrega
 data, or produce substantial output. Dirty discovery, ownership maintenance, and
 layout may also require broader work.
 
-### 9.4 No-op elision
+### 9.4 No-op elision and reconciliation within a result
 
 Dirty means a presentation *may* have changed. After regeneration, equivalent
 output permits skipping DOM replacement, cascade, layout, and content paint.
@@ -718,6 +726,18 @@ and nested content, with identity equality as an early success where meaningful.
 This comparison is limited to regenerated results. It does not reintroduce a
 whole-page virtual DOM diff. Its cost depends on the compared output, and a
 semantically unchanged output is not necessarily pointer-identical.
+
+**Reconciliation within a regenerated result.** Retention is ruled (**D4.5.3v2**, user 2026-10-13): a partly changed result does not replace its presentation whole. The matching rules below are the design that realizes it; of them, patching attributes in place is also ruled (user, 2026-10-13). The old result, the new result and the live DOM are walked together in document order, and at each position the first applicable rule decides:
+
+1. **Equal subtree → keep.** The new node is equal to the old one (the equality above). The DOM subtree stays in place and is rebound to the new result (§9.1).
+2. **Same tag → patch.** The tag is the same but attributes or children differ. The element is kept, each changed attribute is patched in place (a row whose `class` changed keeps its node — ruled by the user), and its children are reconciled positionally by these rules. Each attribute change and each child insertion, removal or replacement is published as a DOM mutation, so the ordinary mutation path restyles exactly the affected nodes (§10.2).
+3. **Otherwise → fresh copy.** The node is built from the script as **D4.5.3v2** describes, and owner migration runs for it.
+
+Matching is positional. Keyed matching (§18.3) can extend rule 2 later without changing rules 1 or 3. Kept and patched nodes keep their resolved style, layout and view state; the retained-layout paths of §10.3 depend on that.
+
+*Lower-tier state.* The rules compare the old and new results only; the live DOM is not inspected, and lower-tier DOM/CSS state (§2.7) is not tracked. A kept node keeps it; a patched or rebuilt node loses it, which is the §2.7 precedence. Whole-result elision shipped on 2026-10-11 and was withdrawn on 2026-10-12 because its ownership update was incomplete (§9.1); since then only an exact same-value return keeps the DOM, which rule 1 subsumes, and which the slide player relies on by returning a cached tree so that regeneration never touches its animated layers. Interaction state (value, checkedness, selection, focus, hover, scroll) lives in view state (**S9.1.4**) and survives on a kept node by construction.
+
+*Implementation status (2026-10-13):* identity-equal results are kept; rules 1–2 are designed in the [DOM Reconciliation proposal](Lambda_Proposal_DOM_Reconciliation.md) and not yet built.
 
 No-op content does not discard unrelated interaction effects. Focus, caret,
 selection, scrolling, or default actions may still require their own settling or
@@ -742,11 +762,7 @@ entire event pipeline or for React's behavior.
 
 ### 10.1 Replacing only affected content
 
-Changed result subtrees replace corresponding DOM subtrees. Unchanged DOM,
-resolved styles, and layout results remain reusable. The replacement must preserve
-the containing order and parent relation and publish the new source/result
-association. Fragment ranges may need a broader correctness fallback than a
-single-element replacement.
+Changed result content updates the corresponding DOM: an existing occurrence is kept and patched in place where it can present the new result, and only content that cannot be patched is replaced by a fresh copy (**D4.5.3v2** governs that copy; it does not require replacing what can be kept). Unchanged DOM, resolved styles, and layout results remain reusable, and retained-layout paths (block shift reuse, retained flex items) depend on that. A replacement or patch must preserve the containing order and parent relation and publish the new source/result association. Fragment ranges may need a broader correctness fallback than a single-element replacement.
 
 Full rebuild remains the correctness path for initial presentation or when the
 change cannot safely be expressed as a local patch. Missing ownership/location
@@ -859,6 +875,8 @@ The same behavior package governs parsed HTML and author-template output. This
 eliminates the need for a separate handwritten checkbox, caret, paste, or editing
 policy for every Lambda app. Native presentation mechanisms remain shared across
 language realms.
+
+This tier is where Lambda and JS share the *same* state rather than tiers of it (§2.7, **S12.1.5v2**). A behavior template regenerates nothing; it reads and writes the canonical interaction state of the element it matched, which JS reads and writes through the DOM API, so a form control keeps one `checked`, one value and one validity whichever realm acts on it (ES11).
 
 **D7.2.5** assigns full user-agent editing policy to the shipped Lambda DOM
 package: uncanceled contenteditable actions, structural normalization, history,
@@ -1273,6 +1291,10 @@ not lost. Struck wording is historical and is not a current ruling.
 | ~~Retaining a runtime makes arbitrary persistent pointers from presentation into its heap safe; copying is unnecessary.~~ | Borrow to read; document ownership or registered roots to keep (**D4.5.2**) |
 | ~~Source parenthood can be identified uniquely from allocation ownership.~~ | Shared source versions require document/version/path context (§6.4) |
 | ~~Every reactive event requires full DOM, CSS, layout, and paint reconstruction.~~ | Local replacement, invalidation, no-op elision, and safe escalation are separate stages (§10) |
+| ~~D4.5.3 requires every regeneration to deep-copy its whole result into fresh DOM, so retained DOM cannot carry style and layout across a re-render.~~ | **D4.5.3v2**: the copy governs construction only; a regeneration keeps and patches existing occurrences, and downstream stages reuse what stays valid (§5.3, §10.1) |
+| ~~A regenerated result is compared whole: equal results skip replacement, any other result replaces its presentation.~~ | Reconcile within the result: keep equal subtrees, patch same-tag elements in place, copy the rest (§9.4) |
+| ~~Regeneration must preserve direct DOM edits made under an author template's result, so equality of results alone cannot decide whether retained DOM is kept.~~ | Direct writes are a lower tier of state that yields to regeneration; the engine does not track them, so results alone decide (§2.7, §9.4) |
+| ~~Direct DOM edits inside an author template's result are unsupported; one owner per subtree (S12.1.5, superseded the same day).~~ | One owner per *state*: transient implementation-level state may live in DOM/CSS inside the result and yields to higher-tier regeneration (**S12.1.5v2**, §2.7) |
 | ~~Subtree layout must be implemented by detaching and recreating an isolated formatting context.~~ | Dirty-path layout can reuse valid context and unaffected siblings; arbitrary isolation remains conditional (§10.3) |
 | ~~A glyph cache must retain vector shape handles.~~ | Reuse the rendering data appropriate to the renderer and configuration (§10.5) |
 | ~~Selective clearing alone means only dirty content is rendered.~~ | Clearing, scene traversal, and paint culling are independent; overflow/effects require correct bounds (§10.4) |
@@ -1359,6 +1381,11 @@ ledger series is introduced. Concrete defect tracking remains in the central
     task-resume results use the same owner/invalidation path. Template-local `emit`
     and task/mailbox messages have different destinations and lifetimes; making a
     template instance a general addressable endpoint remains explicitly deferred.
+
+13. **Reconciliation phasing.** Decide the delivery order of equal-subtree
+   retention, same-tag patching and keyed matching (§9.4). The
+   [DOM Reconciliation proposal](Lambda_Proposal_DOM_Reconciliation.md) §8
+   holds the options.
 
 ### 18.2 Original application/dispatch extensions retained for decision
 

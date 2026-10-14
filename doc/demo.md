@@ -17,6 +17,7 @@ With no name, this opens the bundled `lambda.doc` viewer and its startup splash
 ./lambda demo doom
 ./lambda demo photo
 ./lambda demo scene3d
+./lambda demo cellscope
 ./lambda demo slides
 ./lambda demo wordcloud
 ./lambda demo --list

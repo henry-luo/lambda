@@ -1,0 +1,18 @@
+{
+  specimens: 3,
+  defaults: true,
+  comparisons: true,
+  selected: true,
+  removed: true,
+  invalid_selection: true,
+  save: true,
+  unsave: true,
+  saved_filter: true,
+  camera_limits: true,
+  near_limit: true,
+  deep_zoom: true,
+  camera_clearance: true,
+  projection_scale: true,
+  zoom_reversible: true,
+  reset: true
+}

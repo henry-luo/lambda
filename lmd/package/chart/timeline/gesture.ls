@@ -16,17 +16,19 @@ pub fn update(current, action, plan, spec) {
     let point=action.point;
     let valid=point is array and len(point)==2 and all(point |> util.finite_number(~));
     let overview=action.surface=="navigator" or gesture.surface=="navigator";
+    // interrupted main-canvas gestures start from the window currently displayed.
+    let window=if (overview) current.window else plan.window;
     if (action.type=="gesture_cancel") {gesture:null,window:gesture.original,moved:gesture.moved}
     else if (action.type=="gesture_start") {
         if (not valid or not overview and spec.interaction.pan!=true and spec.interaction.pinch!=true) {gesture:gesture}
-        else if (gesture==null) {gesture:begin([{id:key,point:point}],plan,current.window,current.window,c.option(action,"surface","main"))}
+        else if (gesture==null) {gesture:begin([{id:key,point:point}],plan,window,current.window,c.option(action,"surface","main"))}
         else if (spec.interaction.pinch==true and len(gesture.points)==1 and gesture.points[0].id!=key)
-            {gesture:begin([*gesture.points,{id:key,point:point}],plan,current.window,gesture.original)}
+            {gesture:begin([*gesture.points,{id:key,point:point}],plan,window,gesture.original)}
         else {gesture:gesture}
     } else if (gesture==null or not contains(gesture.points |> ~.id,key)) {gesture:gesture}
     else if (action.type=="gesture_end") {
         let remaining=gesture.points |: ~.id!=key;
-        {gesture:if (len(remaining)==0) null else begin(remaining,plan,current.window,gesture.original,gesture.surface),moved:gesture.moved}
+        {gesture:if (len(remaining)==0) null else begin(remaining,plan,window,gesture.original,gesture.surface),moved:gesture.moved}
     } else if (not valid) c.fail("gesture.point","expected finite two-dimensional coordinates")
     else {
         let points=[for (item in gesture.points) if (item.id==key) {id:key,point:point} else item];

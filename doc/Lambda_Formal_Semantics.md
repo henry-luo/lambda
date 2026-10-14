@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 60.1.0 (2026-10-12)
+**Spec version:** 61.0.0 (2026-10-13)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1839,6 +1839,19 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   built-in instance with one polymorphic parameter. *Colour what changes the
   caller's contract* — the keyword makes the dependence visible in the
   declaration. [C20-2–C20-6, C20.6, Features §3.6]
+- **S12.1.5v2** **Presentation authority by state tier.** Presentation
+  state has tiers, and each piece of state has one owner. An author template
+  owns the high-level state it regenerates its result from; a lower tier of
+  transient, implementation-level state (an in-slide animation) may live
+  directly in DOM/CSS inside that result, written by handlers or scripts.
+  The tiers never manage the same state, and precedence is fixed: a
+  higher-tier action regenerates and discards or overrides whatever
+  lower-tier state it touches, which the lower tier is written to expect.
+  Scripted and templated subtrees compose on one page the same way, by
+  owning different state. Behavior templates (UA default actions) attach to
+  live elements and share canonical interaction state with JS; they
+  regenerate nothing. *One owner per state; the higher tier wins.*
+  [Reactive_UI §2.7; user, 2026-10-13]
 
 ### S12.2 Assignment
 
@@ -2899,7 +2912,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md` |
 | S10 operators | C6, C6.2–C6.4, C10; Design_Syntax §7.27; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29; Expr_Pipe §F.1–§F.7 (`|:` filter stage, `that` proviso, result kind, implicit fields) | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Syntax.md`, `Lambda_Type_Path.md`, `Lambda_Expr_Pipe.md` |
 | S11 types | C7, C8.5c, C20; TE-1–TE-20; OB13; Type_Pattern §1.3; Design_Syntax §7.28; SP1–SP21 | ibid.; `Lambda_Design_Type_Enforcement.md`, `Lambda_Type_Object.md`, `Lambda_Type_Pattern.md`, `Lambda_Design_Syntax.md`, `Lambda_Design_String_Pattern.md`, `Lambda_Expr_String_Pattern.md` |
-| S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg; C19, C20; OB5–OB6; IO ZIP §2, §5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md`, `Lambda_Type_Object.md`, `Lambda_IO_Zip.md` |
+| S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg; C19, C20; OB5–OB6; IO ZIP §2, §5; Reactive_UI §2.7 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md`, `Lambda_Type_Object.md`, `Lambda_IO_Zip.md`, `Lambda_Design_Reactive_UI.md` |
 | S13 concurrency | K11–K32 | `Lambda_Design_Concurrency.md` |
 | S14 data processing | PD9–PD16; FC1–FC11; IO ZIP §5 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses2.md`, `Lambda_IO_Zip.md` |
 | S15 metaprogramming | C9, C9a | `Lambda_Semantics_Formal2.md` |

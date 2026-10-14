@@ -168,6 +168,27 @@
       },
       "property": "opacity",
       "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#replace-reduced"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#motion-reduced article[data-timeline-id='c']"
+      },
+      "property": "opacity",
+      "equals": "1"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#motion-reduced [data-timeline-outgoing]"
+      },
+      "count": 0
     }
   ]
 }

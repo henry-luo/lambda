@@ -2,6 +2,7 @@
 #include "input.hpp"
 #include "../io/fs_node.hpp"
 #include "input-parsers.h"
+#include "input-postscript.hpp"
 #include "../core/lambda-decimal.hpp"
 #include "../io/mark_builder.hpp"
 #include "../../lib/url.h"
@@ -2124,7 +2125,8 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
     // Determine the effective type to use
     if (!type || strcmp(type->chars, "auto") == 0) {
         // in-memory auto inputs may omit a URL, so content detection must stay null-safe.
-        if (zip_source_expected(pathname, source, source_len)) effective_type = "zip";
+        if (eps_source_expected(pathname, source, source_len)) effective_type = "eps";
+        else if (zip_source_expected(pathname, source, source_len)) effective_type = "zip";
         else if (detected_graph_flavor) effective_type = "graph";
         // Auto-detect MIME type
         MimeDetector* detector = effective_type ? NULL : mime_detector_init();
@@ -2212,18 +2214,29 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         }
         else if (strcmp(effective_type, "scene3d-asset") == 0)
             input_scene3d_asset(input, source, source_len, flavor ? flavor->chars : nullptr);
-        else if (strcmp(effective_type, "xml") == 0 && flavor &&
-                strcmp(flavor->chars, "document") == 0) {
-            // document formats need significant text and namespace-checked XML, without data-mode recovery.
-            if (memchr(source, 0, source_len)) {
-                // the XML cursor is NUL-terminated; reject embedded NULs before it can accept a prefix.
+        else if (strcmp(effective_type, "xml") == 0 &&
+                ((flavor && (strcmp(flavor->chars, "strict") == 0 ||
+                             strcmp(flavor->chars, "document") == 0)) ||
+                 (options && options->xml_preserve_whitespace))) {
+            bool document_xml = flavor && strcmp(flavor->chars, "document") == 0;
+            bool strict_xml = document_xml || (flavor && strcmp(flavor->chars, "strict") == 0);
+            // strict XML must validate all transported bytes, including embedded NULs.
+            if (strict_xml && memchr(source, 0, source_len)) {
                 input->parse_failed = true;
                 input->parse_error_message = pool_strdup(input->pool, "XML document contains a NUL byte");
                 input->root = ItemError;
             } else {
-                XmlParseOptions xml_options = {true, true, nullptr, nullptr, true};
+                XmlParseOptions xml_options = {};
+                xml_options.preserve_whitespace = document_xml || (options && options->xml_preserve_whitespace);
+                xml_options.require_well_formed = strict_xml;
+                xml_options.require_namespaces = strict_xml;
+                // DOCX document XML rejects DTDs; general strict XML permits inert declarations.
+                xml_options.allow_inert_doctype = strict_xml && !document_xml;
                 parse_xml_with_options(input, source, &xml_options);
             }
+        }
+        else if (strcmp(effective_type, "eps") == 0 || strcmp(effective_type, "epsi") == 0) {
+            parse_eps(input, source, source_len);
         }
         else if (input_parse_model(input, source, source_len, effective_type)) {}
         else if (dispatch_exact_input_parser(effective_type, input, source)) {}

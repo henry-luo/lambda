@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 30.0.0 (2026-10-13)
+**Spec version:** 30.1.0 (2026-10-14)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1049,13 +1049,18 @@ that carries them.
   alive (script-identity values such as a `FileList` or a Selection wrapper).
   *Radiant storage is invisible to the collector (D4.1.1v2): borrow to read,
   copy or root to keep.* [Memory_Safety_Template §2.3]
-- **D4.5.3** **UI/view-mode DOM construction deep-copies ordinary Elements
+- **D4.5.3v2** **UI/view-mode DOM construction deep-copies ordinary Elements
   and their content through MarkBuilder**, including values already owned by
   the document arena. Each presentation occurrence owns its native parent and
   sibling links. Normal Lambda evaluation retains ordinary value sharing and
   ownership-based copy elision; rooted callables and native handles keep their
   existing identity. DOM copies preserve the evaluator's source/result mapping.
-  [Reactive_UI §5.3; user, 2026-10-11]
+  The ruling governs only how DOM is built from Lambda scripts; it does not
+  constrain style, layout or rendering. Incremental presentation fully embraces
+  retention: a regeneration may keep an existing occurrence's subtree, patched
+  in place to present the new result, and restyle, reflow and repaint reuse
+  every retained structure that is still valid. *Copy at construction, retain
+  downstream.* [Reactive_UI §5.3, §10.1; user, 2026-10-11, 2026-10-13]
 
 ### D4.6 Name identity
 
@@ -1501,6 +1506,18 @@ loosely across the corpus — context disambiguates, and we live with it.
   script with relative imports runs in place; a harness that copies its text
   elsewhere breaks it. [S16.9.8, D7.2.4]
 - **D7.2.7v2*** **LaTeX is read by TeX expansion, never by TeX typesetting.** Every LaTeX parse runs Lambda's TeX expansion engine at the input boundary before the one direct-parser digester builds the Mark AST; there is no unexpanded front end, so one source yields one AST whatever the entry point. The engine executes TeX *programming* — catcodes, macros, registers, grouping, conditionals, e-TeX and expl3 — for the bundled packages and for `.sty`/`.cls` files beside the document, and passes document constructs through as constructors to the `lambda.latex` script adapters, which own their meaning (D7.2.1–D7.2.4). Bundled packages are either unmodified upstream programming packages, which emit no document material, or Lambda-owned bindings, whose macros only expand a package's user commands into constructs the digester and the script adapters already own; a binding neither typesets nor carries semantics of its own. It never reproduces TeX's paragraph builder, page builder, `\output` or font machinery: Radiant owns layout. Reading TeX source as TeX inside this sandbox is not running a string as Lambda code (S1.8): nothing it reads becomes a Lambda import, source or `compile()` input, and `\directlua` stays unsupported. Reads are read-only and path-gated to the document's directory plus the bundled resources in the package tree (D7.1.2v2, D7.5.2) — no TeX installation, network, shell escape or disk write — and output depends only on source and resources (S12.1.1v2). A package or class name resolves once, in source order: a bundled package runs on the engine (an adapter of the same name still receives the declaration); else a script adapter; else a file beside the document; else the located `unknown-package` diagnostic. A local file never replaces an adapter or a built-in class profile. Callers that render with `lambda.latex` parse through it, so the engine receives the adapter registry. [`vibe/latex/Lambda_Design_TeX_Engine.md` §1–§8]
+
+- **D7.2.8*** **Document math preserves its source notation's layout policy.**
+  `lambda.doc.math` exports Presentation MathML and accepts MathML element
+  trees alongside the existing TeX/AsciiMath AST. TeX-derived layout follows
+  the supported TeX definitions; MathML-derived layout follows MathML Core.
+  Both reuse font facts and baseline-relative box geometry, without converting
+  MathML through TeX or borrowing TeX companion constants for MathML. Conversion
+  policy belongs to the script package; XML syntax and serialization remain IO
+  mechanisms, with package invocation above IO (D7.1.1, D7.1.2v2). Unsupported
+  conversion/rendering features report errors; support is a documented subset,
+  not a claim of complete MathML conformance. Namespace and content identity
+  follow S5.4.3 and S2.6.1v2. [Lambda_Pkg_Math §11]
 
 ### D7.3 Jube modules: the module system
 
@@ -2485,6 +2502,7 @@ slice; no formal semantic ruling or document semver changes.
 | D7.2.5 | Implemented 2026-09-07. The shipped `lmd/package/dom` behavior package owns the shared descriptor/context/plan/result pipeline, text and structural editing, formatting, objects, clipboard, history, `designMode`, `execCommand`, and all five `queryCommand*` surfaces. Native Radiant retains only platform transport and generic, checked DOM/Selection/Range/clipboard transaction mechanisms. Applicable WPT and pinned Chromium contenteditable manifests, package-disabled behavior, editor integration, form regressions, Lambda/Radiant baselines, and lint pass; the release/lifecycle record is `vibe/radiant/Radiant_Editable_UA6_Report.md`. The separate `Radiant_Design_Edit_History.md` expansion (including form-history migration and its different retention contract) remains a proposal and does not alter this ruling. |
 | D7.2.6 | **Implemented 2026-09-29.** `lambda_resolve_import_module_path` is the one resolver (AST import, dependency prebuild, document-transform package loader); it returns NULL for a bare root other than `lambda`, and `resolve_import` reports E216 after the built-in and registered-module checks. `run_source_fixture` in `test/test_lambda_opt_gtest.cpp` runs checked-in scripts in place for the same reason the ruling states. |
 | D7.2.7v2 | **Partially implemented 2026-10-12; bindings 2026-10-13.** Expansion is the only front end: `parse_latex_direct` always runs the engine (the unexpanded branch and the `LAMBDA_TEX_EXPAND` knob are gone), the native document transform and the doc viewer parse through `lambda.latex`, and the script's macro substitution is retired. Engine, bundled programming packages, expl3 through an in-memory format, the path gate and the resolution order are built; 151 trace records match `pdftex -ini -etex`. Lambda-owned bindings run from the bundled `binding/` directory: `physics.sty` and the `mathtools.sty` macro layer. Residue: the layout-metrics hook (box widths are estimates), in-memory write streams for multi-pass runs, the `local-package-shadowed` diagnostic, engine reads through the central IO door, and an on-disk format cache. Pointer: `vibe/latex/Lambda_Design_TeX_Engine.md` §10. |
+| D7.2.8 | **Partially implemented 2026-10-14.** Font-independent export, strict XML input and runtime/CLI conversion implement the first delivery stage. The next stage adds a separate MathML box builder, generated operator dictionary, shared SVG geometry, and Radiant package-layout integration that retains the source DOM and inert annotations. The supported subset uses selected MATH/Core constants, never TeX companions; full Core/CSS and accessibility integration remain open. Scope and verification: `vibe/Lambda_Pkg_Math.md` §11. |
 | D7.3.6 | **Implemented 2026-10-07 on macOS; Linux generated but unverified; Windows not covered.** `utils/generate_premake.py` turns the one list into `-Wl,-exported_symbols_list` (macOS) or `-Wl,--dynamic-list` (Linux) for every Jube-capable host configuration, debug included, and release compiles with `-fvisibility=hidden` again (dropped 2026-07-20 for hosted Python, with `-export_dynamic`). The initial list is the 400 symbols the built `lang-python` and `node-*` modules import: 102 from vendored mbedTLS, mpdecimal and RE2 archives, 298 Lambda-owned. Release exe size, before → after (macOS arm64, stripped ThinLTO release builds of commit `f6e11aa33` that differ only in the visibility and export flags): `lambda.exe` 21,702,952 → 19,158,984 bytes (−2,543,968 bytes, −11.7%); exported symbols 15,971 → 400. Removing `lang-python` (2026-10-07) dropped its 126 entries: the list is now 274 symbols (79 vendored mbedTLS, 195 Lambda-owned) imported by `node-core`, `node-crypto`, `node-fs` and `node-net`, and the release host exports exactly those. `utils/check_host_exports.py` runs after every release link (host ⊇ list: the linker silently skips a listed hidden symbol), and `make check-host-exports` also checks module imports ⊆ list. Windows hosts still link `--export-all-symbols` for the module import library. Working record: `vibe/Lambda_Design_Jube_Architecture.md` JA5.1. |
 | D7.4.1v2 | Native-module POC 1 remains unstarted; the engine-owned Promise VMap is designed by JR7/Tune7 but not yet implemented. |
 | D7.4.3 | **Not implemented since 2026-10-07 (USER):** `lang-python` and the host's hosted-language and hosted-compiler services (source, diagnostics, output, session memory, guest execution with the MIR compiler cursor, module graph, runtime catalog, data API, language descriptors and `lambda <language>` dispatch) were removed with a Jube ABI bump (`JUBE_ABI_VERSION` 8, `JUBE_HOST_API_VERSION` 5). No guest language is hosted; the ruling constrains any future one. Record: `vibe/Lambda_Design_Jube_Lang_Hosting.md`. |

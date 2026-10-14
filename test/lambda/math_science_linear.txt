@@ -1,0 +1,12 @@
+'=== pivoted solve vector and multiple RHS ==='
+[true, true, [2, 1], [1], [[0, 2], [1, 3]]]
+'=== views and decimal conversion ==='
+[true, true]
+'=== least squares with residual and column pivot ==='
+[true, true, true]
+'=== scaling avoids avoidable overflow and underflow ==='
+[true, true, true]
+'=== empty systems and null ==='
+[[], [], [], null, null]
+'=== shape domain and rank errors ==='
+[true, true, true, true, true, true, true, true, true, true]

@@ -326,7 +326,7 @@ int view_lambda_document_transform_with_events(const char* document_file,
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,
     const char* event_file, bool headless, const char** font_dirs,
-    int font_dir_count, bool enable_event_log, bool enable_state_dump);
+    int font_dir_count, bool enable_event_log, bool enable_state_dump, bool fullscreen = false);
 // Open a local document in the lambda.edit authoring application. The window
 // runs in edit app mode: Escape reaches the document, and a close request
 // consults the session's close guard (Radiant_Design_Edit_Mode §7-§8).
@@ -334,7 +334,7 @@ int view_lambda_document_transform_with_events(const char* document_file,
 // (Radiant_Design_Source_Editor CED20).
 int edit_doc_in_window_with_events(const char* document_file, bool source_surface,
     const char* event_file, bool headless, const char** font_dirs,
-    int font_dir_count, bool enable_event_log, bool enable_state_dump);
+    int font_dir_count, bool enable_event_log, bool enable_state_dump, bool fullscreen = false);
 // Edit-application window decisions. Each acts only when `doc` is the
 // presented top-level document: the session arms the close guard while it is
 // dirty, approves a close after its Save / Discard decision, and retitles the
@@ -342,6 +342,10 @@ int edit_doc_in_window_with_events(const char* document_file, bool source_surfac
 bool radiant_window_set_close_guard(DomDocument* doc, bool armed);
 bool radiant_window_approve_close(DomDocument* doc);
 bool radiant_window_set_title(DomDocument* doc, const char* title);
+bool radiant_window_set_fullscreen(DomNode* node, bool enabled);
+bool radiant_window_fullscreen(DomNode* node);
+bool radiant_window_fullscreen_enabled(DomNode* node);
+bool radiant_window_fullscreen_key(UiContext* uicon, const union RdtEvent* event);
 bool radiant_window_set_relative_mouse(DomElement* owner, bool enabled);
 DomElement* radiant_relative_mouse_target(UiContext* uicon);
 bool radiant_window_relative_mouse_active(DomElement* owner);
@@ -352,6 +356,7 @@ void radiant_window_focus_changed(UiContext* uicon, bool focused);
 bool radiant_window_platform_close(UiContext* uicon);
 int view_doc_in_window(const char* doc_file);
 int ui_context_init(UiContext* uicon, bool headless, float requested_device_scale);
+bool ui_context_enable_native_graphics(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void ui_context_cleanup(UiContext* uicon);
 void free_document(DomDocument* doc);

@@ -1,0 +1,21 @@
+{
+  "name":"wired SVG overlays follow auto-height flex items and retained content growth",
+  "html":"test/ui/wired/geometry.ls",
+  "viewport":{"width":640,"height":700},
+  "events":[
+    {"type":"assert_rect","target":{"selector":"#grow"},"width":200,"height":42,"tolerance":0.1},
+    {"type":"assert_rect","target":{"selector":"#grow .wired-sketch"},"width":196,"height":38,"tolerance":0.1},
+    {"type":"assert_rect","target":{"selector":"#badge .wired-sketch"},"width":120,"height":30,"tolerance":0.1},
+    {"type":"assert_rect","target":{"selector":"#card"},"width":240,"height":96,"tolerance":0.1},
+    {"type":"assert_rect","target":{"selector":"#card .wired-sketch"},"width":240,"height":96,"tolerance":0.1},
+    {"type":"assert_rect","target":{"selector":"#field"},"width":180,"tolerance":0.1},
+    {"type":"assert_rect","target":{"selector":"#stretched"},"width":240,"height":180,"tolerance":0.1},
+    {"type":"assert_rect","target":{"selector":"#stretched .wired-sketch"},"width":240,"height":180,"tolerance":0.1},
+    {"type":"assert_rect","target":{"selector":"#progress .wired-sketch"},"width":240,"height":26,"tolerance":0.1},
+    {"type":"click","target":{"selector":"#grow"}},
+    {"type":"assert_rect","target":{"selector":"#card"},"width":240,"height":136,"tolerance":0.1},
+    {"type":"assert_rect","target":{"selector":"#card .wired-sketch"},"width":240,"height":136,"tolerance":0.1},
+    {"type":"click","target":{"selector":"#grow"}},
+    {"type":"assert_rect","target":{"selector":"#card .wired-sketch"},"width":240,"height":96,"tolerance":0.1}
+  ]
+}

@@ -1666,7 +1666,8 @@ typedef struct PaintGlyphRun {
     float font_size;
     float x, baseline_y;
     float word_spacing;     // line justification in addition to the captured font's authored spacing
-    float cjk_spacing;      // extra spacing before an adjacent ideograph
+    float cjk_spacing;      // extra spacing before an eligible character unit
+    CssEnum justify_mode;   // shared layout/paint policy for character boundaries
     int font_weight;         // CSS numeric weight; 0 = omit
     bool italic;
     lam::Up<const uint32_t> glyph_ids;   // borrowed
@@ -1712,7 +1713,7 @@ LoadedGlyph* render_text_emphasis_bitmap_glyph(const RenderTextEmphasis* emphasi
     float* mark_x, float* mark_y);
 
 void paint_svg_append_cjk_dx(StrBuf* out, const char* text, int text_len,
-                             float cjk_spacing);
+                             float cjk_spacing, CssEnum mode = CSS_VALUE_AUTO);
 
 typedef void (*PaintGlyphRunRasterLowerFn)(const PaintGlyphRun* run,
                                            DisplayList* dl);
@@ -2211,6 +2212,7 @@ struct RenderBackend {
     void (*render_inline_svg)(RenderContext* ctx, ViewBlock* block, float abs_x, float abs_y,
                               FontBox* font, Color color);
     void (*render_geomap)(RenderContext* ctx, ViewBlock* block, float abs_x, float abs_y);
+    void (*render_scene3d)(RenderContext* ctx, ViewBlock* block, float abs_x, float abs_y);
     void (*render_svg_subscene)(RenderContext* ctx, const PaintSvgSubscene* subscene);
 
     // Semantic export can attach destinations to elements with no paint box.
@@ -3806,6 +3808,7 @@ uint8_t render_pixel_premultiply_channel(uint8_t channel, uint8_t alpha);
 uint8_t render_pixel_unpremultiply_channel(uint8_t channel, uint8_t alpha);
 uint32_t render_pixel_premultiply_abgr(uint32_t pixel);
 uint32_t render_pixel_unpremultiply_abgr(uint32_t pixel);
+void render_pixel_unpremultiply_row(uint32_t* destination, const uint32_t* source, size_t count);
 uint32_t render_pixel_scale_premultiplied(uint32_t pixel, uint8_t opacity);
 float render_color_srgb_to_linear(float channel);
 float render_color_linear_to_srgb(float channel);
@@ -4274,6 +4277,7 @@ typedef struct RenderOutputTarget {
     float output_scale;
     float device_scale;
     bool paged;
+    bool transparent_background;
     lam::Up<const RenderPagedOptions> paged_options;
 } RenderOutputTarget;
 
@@ -4317,7 +4321,8 @@ bool render_export_session_begin_document_transform(RenderExportSession* session
     float output_scale, float device_scale, bool raster_surface, bool paged = false,
     bool print_media = false);
 void render_export_session_end(RenderExportSession* session);
-int render_export_session_to_png(RenderExportSession* session, const char* filename);
+int render_export_session_to_png(RenderExportSession* session, const char* filename,
+                                  bool transparent_background = false);
 int render_export_session_to_jpeg(RenderExportSession* session, const char* filename, int quality);
 int render_export_session_to_svg(RenderExportSession* session, const char* filename);
 int render_export_session_to_pdf(RenderExportSession* session, const char* filename);
@@ -4669,6 +4674,18 @@ public:
     RenderTextPaintScope& operator=(const RenderTextPaintScope&) = delete;
 };
 
+struct RenderTextJustification {
+    float word, character;
+};
+
+inline RenderTextJustification render_text_justification(const TextRect* rect, CssEnum mode) {
+    // line layout already accounts for last-line alignment, shaping and trims;
+    // painters must not infer expansion from their own glyph measurements.
+    float spacing = rect && mode != CSS_VALUE_NONE ? rect->justification_spacing : 0.0f;
+    return {mode == CSS_VALUE_INTER_CHARACTER ? 0.0f : spacing,
+            mode == CSS_VALUE_INTER_WORD ? 0.0f : spacing};
+}
+
 class RenderTextPaintIterator {
     lam::Up<RenderContext> context;
     lam::Up<TextRect> cursor;
@@ -4687,6 +4704,7 @@ public:
 void render_text_view(RasterRenderContext* rdcon, ViewText* text_view);
 bool render_text_subtree_overflows_block(RasterRenderContext* rdcon, ViewBlock* block);
 CssEnum render_text_inherited_transform(ViewText* text_view);
+bool render_text_synthesized_space_advance(const FontBox* font, uint32_t codepoint, float* advance);
 char* render_text_create_export_segment(const unsigned char* text,
                                         const TextRect* text_rect,
                                         CssEnum text_transform,

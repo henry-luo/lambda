@@ -22,6 +22,7 @@
 #include "input.hpp"
 #include "input-parsers.h"
 #include "input-pdf-type1.hpp"
+#include "input-pdf-image.hpp"
 #include "../io/mark_builder.hpp"
 #include "../core/mark_reader.hpp"
 #include "lib/log.h"
@@ -1743,27 +1744,8 @@ static String* image_to_data_uri(Input* input, Map* stream_map,
         }
     }
 
-    uint8_t* png_buf = nullptr; size_t png_len = 0;
-    bool ok = encode_png_rgba(rgba, w, h, &png_buf, &png_len);
+    String* out = pdf_rgba_image_data_uri(input, rgba, w, h);
     mem_free(rgba);
-    if (!ok) return nullptr;
-
-    char* b64 = base64_alloc(png_buf, png_len);
-    mem_free(png_buf);
-    if (!b64) return nullptr;
-
-    static const char prefix[] = "data:image/png;base64,";
-    size_t plen = sizeof(prefix) - 1;
-    size_t blen = strlen(b64);
-    size_t total = plen + blen;
-    String* out = (String*)pool_calloc(input->pool, sizeof(String) + total + 1);
-    if (!out) { mem_free(b64); return nullptr; }
-    memcpy(out->chars, prefix, plen);
-    memcpy(out->chars + plen, b64, blen);
-    out->chars[total] = '\0';
-    out->len = (uint32_t)total;
-    out->is_ascii = 1;
-    mem_free(b64);
     return out;
 }
 
@@ -1900,6 +1882,17 @@ static void encode_embedded_fonts(Input* input, MarkBuilder& builder,
 // ---------------------------------------------------------------------------
 // Public entry point.
 // ---------------------------------------------------------------------------
+
+String* pdf_rgba_image_data_uri(Input* input, const uint8_t* pixels, int width, int height) {
+    if (!input || width <= 0 || height <= 0 ||
+        (size_t)width > (SIZE_MAX / (size_t)height - 1) / 4 ||
+        ((size_t)width * 4 + 1) * (size_t)height > UINT_MAX) return nullptr;
+    uint8_t* png = nullptr; size_t length = 0;
+    if (!encode_png_rgba(pixels, width, height, &png, &length)) return nullptr;
+    String* result = bytes_to_data_uri(input, "image/png", png, length);
+    mem_free(png);
+    return result;
+}
 
 void pdf_postprocess(Input* input) {
     if (!input || input->root.item == ITEM_NULL ||

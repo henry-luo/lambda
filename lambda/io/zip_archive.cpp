@@ -359,7 +359,7 @@ static bool zip_validate_local(ZipArchive* archive, ZipEntry* entry,
     const uint8_t* local = data + offset;
     uint16_t local_name = read_le16(local + 26), extra = read_le16(local + 28);
     if (!zip_range(offset + 30, (uint64_t)local_name + extra, limit) ||
-            local_name != name_length || read_le16(local + 4) > 45 || memcmp(local + 30, name, name_length) ||
+            local_name != name_length || local[4] > 45 || memcmp(local + 30, name, name_length) ||
             read_le16(local + 6) != entry->flags || read_le16(local + 8) != entry->method) {
         return zip_fail(error, "ZIP central/local headers disagree: %s", entry->path);
     }
@@ -441,7 +441,8 @@ static bool zip_build_index(ZipArchive* archive, ZipError* error) {
         uint16_t flags = read_le16(central + 8), method = read_le16(central + 10);
         if (!zip_range(offset, record_size, end)) { ok = zip_fail(error, "ZIP central entry is truncated"); break; }
         if (flags & 0x2041) { ok = zip_fail(error, "ZIP encryption is unsupported"); break; }
-        if ((flags & ~0x080e) || (method != 0 && method != 8) || read_le16(central + 6) > 45) {
+        // APPNOTE 4.4.3.1 maps the extraction version to the low byte; the high byte is platform metadata.
+        if ((flags & ~0x080e) || (method != 0 && method != 8) || central[6] > 45) {
             ok = zip_fail(error, "ZIP compression method/feature is unsupported"); break;
         }
         uint64_t size = read_le32(central + 24), compressed = read_le32(central + 20);

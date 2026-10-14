@@ -1,0 +1,1848 @@
+{
+  "recorded_at": "20261013T013621796628Z",
+  "built_with": "captured release executable; debug-trace exclusion verified",
+  "git_revision": "38163b37a402492f2cabfac7308a1632adcbc6eb",
+  "binary_sha256": "6adb9c3224c5251535377b590d2c509036f6644a78f1b0535b87be254db6fdda",
+  "source_sha256": {
+    "lmd/package/chart/animation.ls": "b9f9a7e82a6685c70bd4992a11ddaf12bbb375cd6506d4a497aa4a765a25f5dd",
+    "lmd/package/chart/annotation.ls": "eed3eee20cfd16a9acf65b5727ca7b602f9bb389f255da7ff7d65d334520f923",
+    "lmd/package/chart/axis.ls": "395f1265de65ceb78d9231a5ecd29ddb54d70f55f50fa640d26c35fd581999ef",
+    "lmd/package/chart/behavior.ls": "cac4184875d6730c36284646031ed543a843a57551c7bbc8fdb0ef1eb38bc79e",
+    "lmd/package/chart/calendar.ls": "c800ef5465a8b246bbb37dc413e32faf72ba623a65edf54aa2ee16b46858b2b1",
+    "lmd/package/chart/chart.ls": "f058d795872f5a0e86a61e54d2a31d1cd102d187886af2794f76728fedcbd1f5",
+    "lmd/package/chart/cluster.ls": "12c4bfc0febc10fbdda9a12f93fadd2263d466396e3049cab5bfdfec13a616c9",
+    "lmd/package/chart/collision.ls": "ee2e34b04e11b577c02efbb2d2f7f3a49ef70bea807f91a5dadee5b96e903b20",
+    "lmd/package/chart/color.ls": "e3977d70e6eff8810ab28fb65dc5eff044b7caf466247ac131bdd8fff42db31e",
+    "lmd/package/chart/composite.ls": "23357fd45cc9058c14f068904573f9a8825a9ebca964aa60b53a644f357e7358",
+    "lmd/package/chart/composition.ls": "bf3f9667f75fbbbbdefd42c8c8f5fae1fb740aaa566d94309a81e5dd083d534d",
+    "lmd/package/chart/config.ls": "c9505706d72550441a22211e1cdd59ec4dd6ed227339f1465ad04863e607eb39",
+    "lmd/package/chart/coordinate.ls": "d16efd863c2ec4a156b915dda5ef6e1314ad7ccbb1b175eb1a42976b6cb5d3c0",
+    "lmd/package/chart/dataflow.ls": "715d3772b79abf2bfa68b61797087c5723b1da92d1c90dc11ae0c4a6449fe04c",
+    "lmd/package/chart/event_stream.ls": "b1ff3a4953c7201b7cea54e4fb63c6ceb74f6e895d2c08080a0fb6cba8aea3de",
+    "lmd/package/chart/events.ls": "56f9bb436a2e63a5a955fbd310eebd0f2dcf4210319d22baefb8d34149791c20",
+    "lmd/package/chart/export.ls": "b74be83ce5d273ec7ac16bb6fa56790ff20562845c989e2ce2795b81b70b30a8",
+    "lmd/package/chart/expression.ls": "6d9332d5f74bb4aec13573a159d67c32d980bf1d8fddfc0feba9201cd1233510",
+    "lmd/package/chart/field.ls": "978189bf465941ddb9afa0bcd3f0a0140575f26386f5562d8ba1393bec1d04fe",
+    "lmd/package/chart/geo.ls": "ed8da902f2a5e1d2e0ebc153494c7655964b63209bbed5561d4d88bfa06a5581",
+    "lmd/package/chart/geometry.ls": "6df57902b642afffcd01648281b55a0f692f4453d64dcead210614aac7aefb99",
+    "lmd/package/chart/hierarchy.ls": "4a8c718bd4be1182353ed3b15af6ea99a8bcaffa10db4331b0b68cf5a69e94bc",
+    "lmd/package/chart/indicator.ls": "26a7e9b06425ca9b34958218847e3ed3a35127d2762a9bc3e0c0d6b2623a5b0d",
+    "lmd/package/chart/interaction.ls": "21027ee2f44096fb22dca441344b0d2507d9609cd1bb525383506d46a1bbdb00",
+    "lmd/package/chart/layout.ls": "c4de22b5c9bdd5ddbfa61ede7623c2f84ddfb04e4956faedf9c127631dacfebc",
+    "lmd/package/chart/legend.ls": "7ff38adefa0ec907ea4f9d3031083052569c83807239397358387769d5024834",
+    "lmd/package/chart/mark.ls": "f60ed3a5e2fc5047b17c7346a5525e7e66d75495542bb962f69cc9a4b94778c0",
+    "lmd/package/chart/mark_renderer.ls": "92d23e409f5e8d2e747f58ba15d0216de6e3712e37ad5b2dd848ca234eb771d0",
+    "lmd/package/chart/network.ls": "94125a4a857894a0ccc9c8183444d9cebb6b90adbca49be6ef218bb0a0939eff",
+    "lmd/package/chart/numbers.ls": "eabe3182c31af90ef4a1aada6ef260ca8923451edf64a2127a4651705c60ac9f",
+    "lmd/package/chart/paint.ls": "cdead7e22dab9f5ea47c25ac1db990dc4069d60e8a7732d14ba0d9dfb380e4d9",
+    "lmd/package/chart/parameter.ls": "e47c1f4883740bea4cae7944648ed4b9ecbdb8402f4e18cb79d2f145ebab2570",
+    "lmd/package/chart/parse.ls": "b9b649b4f6f6cea243b3b8674d5bb35916c884d622827186a7f6830523d01105",
+    "lmd/package/chart/path_geometry.ls": "fb11a848ddae15abbaa0053a107835bcbac7e7cb6ba37a7f8f26fa7eb442ea1a",
+    "lmd/package/chart/picking.ls": "2e2a46881161c1479dcb559dd9f0b4518ce8c146f7bf8125a68ef5f7def0c628",
+    "lmd/package/chart/playback.ls": "f9c4791545c7a5a3f7f411c2c6e37eaac004dba83f70be91326adca764042566",
+    "lmd/package/chart/primitive.ls": "94385de24cec688456e46f1fc9edf4db73143169ccdfc0ae927838b0bfc74818",
+    "lmd/package/chart/projection.ls": "8ac45dbe358ec74783f154e882b3426f0de9daee3b4f832d5c06dc273e1873d8",
+    "lmd/package/chart/records.ls": "ac44ea88b5e8e1f1ddd14fdca7f0110420177808764e396120f81255e5e4dc18",
+    "lmd/package/chart/reshape.ls": "2f3b0e133cfaf1c739215135916ab928ae9c8c5fc516f1d8baf2d48b6636bee5",
+    "lmd/package/chart/scale.ls": "bde4599d2dd22723a3cecaa2efa56b57af3b7e765f0faa4b9e2d8f757278ddfa",
+    "lmd/package/chart/sequence.ls": "0d0184e5de1a4c418974913b1a28cd0d020d0ccfb06cd347c75692c92bc1a52c",
+    "lmd/package/chart/sizing.ls": "78d2c0dffa2d5e658bc98b6185b8bde4d7b2f1b419a3af21fb85e91b508a6cc0",
+    "lmd/package/chart/source.ls": "89ba18b5452f16920db84bb37c70b685ef14d6f87b71784761deb2d0e3ce0415",
+    "lmd/package/chart/specialized.ls": "bf8651165b94daef6089caf24dd94c5d8e967943be759d75713547b0754b7861",
+    "lmd/package/chart/stack.ls": "0e8ea09038029630e880a19658016af22082356f6b692e4be69d6c478c5e12ea",
+    "lmd/package/chart/statistics.ls": "71a29a181dc252eb5fa757b2bdfd9b0dae15c146037fc77622fc7576f5cc1d40",
+    "lmd/package/chart/svg.ls": "9fb7a4c9a3c755e0a1d4eb50e1af2818576d5ca48a8143031ce46db6939c4701",
+    "lmd/package/chart/svg_transform.ls": "e3a046dd9c1db79e3523b86e01c20d7c39cb9badaba2c294606603a6c3ebdcbc",
+    "lmd/package/chart/text.ls": "5aa8093eb45d52275d8d9e0f60ff20316dbf8167300c2883fb011b56041a53f2",
+    "lmd/package/chart/timeline/adapters.ls": "6c44a02c45e9455086d940cb1b5488e8fd9d73854910cf1a382d7ac8c5464f24",
+    "lmd/package/chart/timeline/annotation.ls": "bb6e0f2b6b2b1741b647dc3b2e9b85ce8cf4cad49123ac61b6ea7f4b817573f7",
+    "lmd/package/chart/timeline/axis.ls": "d5202e51d2c174e0815d79fc71550098894a90e6dbe44160eb1e8fe0d5e046a8",
+    "lmd/package/chart/timeline/bookmark.ls": "4abbde25e05570aa8af991cfa419e4d5117998388d1f74cc1a72ae17dfee7316",
+    "lmd/package/chart/timeline/card.ls": "df8983d267804504194c11d98ec7a222b64c50d9cb1e8ea1eb9636b5d74f7da9",
+    "lmd/package/chart/timeline/chart_adapter.ls": "d297cfa56d8773181e7a59aeee532f781c69c5158cffc91234b7fcff80a4af8f",
+    "lmd/package/chart/timeline/cluster.ls": "6e8d51ac111789dc7377d8f336ab2bbfc683cc57acc9377239264c48a041e8ef",
+    "lmd/package/chart/timeline/common.ls": "bdbec9243e90d44ad93e304995d05a23937501ec800cdfad573ad86fe3c77e4d",
+    "lmd/package/chart/timeline/coordinate.ls": "c5b7a6e697e2f79bf8f20b0b3e28f0b0d4efed8066543ef00ef3ed4652b88352",
+    "lmd/package/chart/timeline/date.ls": "0dd985bd96b24e6be6c54c3a30cccc22d6b5d0062864ecad769e418d5b12241c",
+    "lmd/package/chart/timeline/edit.ls": "43d9c40a8dc6e52629c19c221ea7d4d95a55823b5735b23d8ce538c7bc10b3af",
+    "lmd/package/chart/timeline/events.ls": "07b11802dc66ccd902b64c7c937e01636426662ab611637da61d2e58599adaa9",
+    "lmd/package/chart/timeline/export.ls": "9d6101bff61307a504e6435bc1e0b51aee10afa56bee0a68a4f4eab286b3874c",
+    "lmd/package/chart/timeline/filter_controls.ls": "4fb8bcef861ca9c5c32952686619dfec1183900c7a9dc218d9b4b0f16605a615",
+    "lmd/package/chart/timeline/gesture.ls": "148d3a88a277ab4269aed226e1dbb0d99a83c68350fc764b560c2d182df2961d",
+    "lmd/package/chart/timeline/groups.ls": "654315a40e95c73b36f01778cd390ac502c1212b4a38bbf0b620f0e734abd319",
+    "lmd/package/chart/timeline/index.ls": "47ceb6099a438c7a9d85220ac6c70579fd3cded7fa68a1d63ff341bacde6b7b5",
+    "lmd/package/chart/timeline/layout.ls": "e489e664023f55a70074753ea89a1973646c0831e564492eb46c58dfed2f625d",
+    "lmd/package/chart/timeline/locale.ls": "83acad0123eb02ab670cc628fc29c2d269c9e5afb37acc2bd61b1fad32e76051",
+    "lmd/package/chart/timeline/media.ls": "a4af1d05d7a019217ed9d08732a8ad7cdc3c1f2b1e03e1562a517f093df41da8",
+    "lmd/package/chart/timeline/media_playback.ls": "dd56e22fb7ce0acf97743ece4d3c5240f980e91460729831a152b49f24e36def",
+    "lmd/package/chart/timeline/motion.ls": "e2d8231ab96f3833929e41900fd9a8cec2cbad0d0cf5c58bd7464ccf3de4e7a9",
+    "lmd/package/chart/timeline/native_media.ls": "9b1a412f028c631f2e671bb714569d35b07f3d96ae602375212bc0a0476b2cfb",
+    "lmd/package/chart/timeline/navigator.ls": "cc793dc4051c849b2aeff377de78703bc15a4e82536a0a6ca67b27bfcba42671",
+    "lmd/package/chart/timeline/prepared.ls": "a85021ef7e105726811029a30c6b3cf1a5c491f1505f03d1d4ae9eedd7b38cc5",
+    "lmd/package/chart/timeline/present.ls": "347fc16cfec569f1bfffc24c2a2cd36da2ed00a328b0c986a29a12ceb47f062e",
+    "lmd/package/chart/timeline/resource.ls": "3dff6f85bc2ff7121794cf395a7facec746e2358431a6c1e5ea00edd4b4aa63d",
+    "lmd/package/chart/timeline/schema.ls": "2f20263208db638ec7fb21ffc5f6ec179d7a420c7d9d726012c02b38e50a1714",
+    "lmd/package/chart/timeline/search.ls": "759f616d2eecddcda45f367f42cc0ffd0738b143b245468dbfd4ab12f0710e31",
+    "lmd/package/chart/timeline/series.ls": "7db67740a6fcdda418fd799a1498eedfc3251a39c889043afd49825553b36370",
+    "lmd/package/chart/timeline/state.ls": "497d6852967a9bc5ad7830cd9e01c1c4c907ee889a4363333dc02d36bac16d90",
+    "lmd/package/chart/timeline/story.ls": "1cc7991b4c6fcbe08ec06ce396df73d1118f3c47f97692288f6f4df1b80515b3",
+    "lmd/package/chart/timeline/svg.ls": "9e7a3d69e9289ec4566eb1149433947c4756e51f219f16f034c02a3849fbf8fb",
+    "lmd/package/chart/timeline/theme.ls": "634f94d4fda7d7d9104eb42ec81c6076fa52be4d47de979c533aa2bfa4c00c58",
+    "lmd/package/chart/timeline/time_map.ls": "ae37e357ca4035153de22704fa5e6503f7e09753a5bf952a70e2b489cd1094d1",
+    "lmd/package/chart/timeline.ls": "a0deb77c079f477ece587983a3969670d7467c32980f9e2a542d4c4889f95abf",
+    "lmd/package/chart/timezone.ls": "b2b858a2a8d4284c96a12a8b59324927615efcbc481cab8169e532ffdde2ab91",
+    "lmd/package/chart/transform.ls": "8e46c234e37e07a7f3a102d8c01c9b6a15a1c6fd330d49d0adfa5545b5a7c1d5",
+    "lmd/package/chart/util.ls": "d42391824873ff89399ee7c8a90b0dd247338cad663a2cb24815322845d8c972",
+    "lmd/package/chart/vega.ls": "7b93f53907df8d2a6140ce083a0f1c14ae49ee06b5c458140edb744bfd375387",
+    "lmd/package/chart/window.ls": "7c6db774c275062514bec4337ff991637b1c054345b3df7618b32f0b45ccda7d",
+    "lmd/package/chart/wordcloud.ls": "2830e34bd0185a206f956c8c880c3443a3f5fed299c5819695f2d814ecf4a918",
+    "lmd/package/slide/easing.ls": "82ae71e55b5d39038f76456c4a3b040b704215f7dd2eebb705901ca8adc99317",
+    "lmd/package/slide/color.ls": "49187201d399438fe1fbfda8406c242543454361dcfe016dde9ca94392443635",
+    "test/timeline/_benchmark.ls": "f2d5bf9435bc565284ab7fb213d688f86089b573d66293bd7c26e2a68c1d5c26",
+    "test/timeline/run_benchmarks.py": "73decbb64d13712c64d69d2c9a20aea7c846ac4e8a8e10b2b3a45525f5de9220"
+  },
+  "platform": "macOS-26.3-arm64-arm-64bit",
+  "backend": "jit",
+  "results": [
+    {
+      "count": 100,
+      "scenario": "points",
+      "wall_s": 5.972455708,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 100,
+        "scenario": "points",
+        "normalized_count": 100,
+        "visible": 33,
+        "cards": 33,
+        "work": {
+          "indexed": true,
+          "examined": 37,
+          "measured": 33,
+          "candidates": 33
+        },
+        "checksum": 10297,
+        "generate_ms": 0.0779999973019585,
+        "normalize_ms": 5.9669999973266385,
+        "initialize_ms": 0.10900000052060932,
+        "layout_ms": 24.16100000118604,
+        "viewport_updates_ms": [
+          11.070000000472646,
+          10.790000000270084,
+          10.396999998192769,
+          10.43999999819789,
+          10.312000005797017,
+          10.21799999580253,
+          13.057000003755093,
+          9.948000006261282
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 50,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 50,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 50,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 50,
+            "measured": 33,
+            "candidates": 33
+          }
+        ],
+        "cached_source_100_ms": 2.422999998088926
+      },
+      "peak_rss_bytes": 762626048
+    },
+    {
+      "count": 100,
+      "scenario": "identical",
+      "wall_s": 6.098151250000001,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 100,
+        "scenario": "identical",
+        "normalized_count": 100,
+        "visible": 100,
+        "cards": 1,
+        "work": {
+          "indexed": true,
+          "examined": 100,
+          "measured": 1,
+          "candidates": 100
+        },
+        "checksum": 10009,
+        "generate_ms": 0.04400000034365803,
+        "normalize_ms": 6.921000000147615,
+        "initialize_ms": 0.11899999663000926,
+        "layout_ms": 27.90400000230875,
+        "viewport_updates_ms": [
+          30.345999999553896,
+          9.795999998459592,
+          9.826000001339708,
+          9.71900000149617,
+          8.92300000123214,
+          9.105000004637986,
+          11.382999997294974,
+          8.54599999729544
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 100,
+            "measured": 1,
+            "candidates": 100
+          },
+          {
+            "indexed": true,
+            "examined": 100,
+            "measured": 1,
+            "candidates": 100
+          },
+          {
+            "indexed": true,
+            "examined": 100,
+            "measured": 1,
+            "candidates": 100
+          },
+          {
+            "indexed": true,
+            "examined": 100,
+            "measured": 1,
+            "candidates": 100
+          },
+          {
+            "indexed": true,
+            "examined": 100,
+            "measured": 1,
+            "candidates": 100
+          },
+          {
+            "indexed": true,
+            "examined": 100,
+            "measured": 1,
+            "candidates": 100
+          },
+          {
+            "indexed": true,
+            "examined": 100,
+            "measured": 1,
+            "candidates": 100
+          },
+          {
+            "indexed": true,
+            "examined": 100,
+            "measured": 1,
+            "candidates": 100
+          }
+        ],
+        "cached_source_100_ms": 2.9190000059315935
+      },
+      "peak_rss_bytes": 761331712
+    },
+    {
+      "count": 100,
+      "scenario": "groups",
+      "wall_s": 6.000376667000001,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 100,
+        "scenario": "groups",
+        "normalized_count": 100,
+        "visible": 33,
+        "cards": 33,
+        "work": {
+          "indexed": true,
+          "examined": 37,
+          "measured": 33,
+          "candidates": 33
+        },
+        "checksum": 10297,
+        "generate_ms": 0.04699999408330768,
+        "normalize_ms": 6.374000004143454,
+        "initialize_ms": 0.10299999848939478,
+        "layout_ms": 21.235000000160653,
+        "viewport_updates_ms": [
+          10.996999997587409,
+          10.340000000724103,
+          10.472000001755077,
+          10.363000001234468,
+          10.105999994266313,
+          11.312000002362765,
+          14.79799999651732,
+          10.842000003322028
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 50,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 50,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 50,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 50,
+            "measured": 33,
+            "candidates": 33
+          }
+        ],
+        "cached_source_100_ms": 2.5499999974272214
+      },
+      "peak_rss_bytes": 764248064
+    },
+    {
+      "count": 100,
+      "scenario": "rich",
+      "wall_s": 6.458192292,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 100,
+        "scenario": "rich",
+        "normalized_count": 100,
+        "visible": 33,
+        "cards": 33,
+        "work": {
+          "indexed": true,
+          "examined": 37,
+          "measured": 33,
+          "candidates": 33
+        },
+        "checksum": 10297,
+        "generate_ms": 0.4939999998896383,
+        "normalize_ms": 7.255000004079193,
+        "initialize_ms": 0.11999999696854502,
+        "layout_ms": 44.25300000002608,
+        "viewport_updates_ms": [
+          33.30300000379793,
+          29.70400000049267,
+          27.573999999731313,
+          28.838000005634967,
+          30.560999999579508,
+          26.58299999893643,
+          24.81899999838788,
+          24.29899999697227
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 50,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 50,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 50,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 50,
+            "measured": 33,
+            "candidates": 33
+          }
+        ],
+        "cached_source_100_ms": 2.520000001823064
+      },
+      "peak_rss_bytes": 764231680
+    },
+    {
+      "count": 100,
+      "scenario": "large_years",
+      "wall_s": 6.455471291999999,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 100,
+        "scenario": "large_years",
+        "normalized_count": 100,
+        "visible": 33,
+        "cards": 33,
+        "work": {
+          "indexed": true,
+          "examined": 37,
+          "measured": 33,
+          "candidates": 33
+        },
+        "checksum": 10289,
+        "generate_ms": 0.03999999898951501,
+        "normalize_ms": 7.864999999583233,
+        "initialize_ms": 0.12900000001536682,
+        "layout_ms": 23.262000002432615,
+        "viewport_updates_ms": [
+          12.062999994668644,
+          14.584000004106201,
+          12.34199999453267,
+          12.832000000344124,
+          12.790000000677537,
+          15.928000000712927,
+          11.891000001924112,
+          11.090999993029982
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 37,
+            "measured": 32,
+            "candidates": 32
+          }
+        ],
+        "cached_source_100_ms": 2.82800000422867
+      },
+      "peak_rss_bytes": 760954880
+    },
+    {
+      "count": 1000,
+      "scenario": "points",
+      "wall_s": 6.414075208000003,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 1000,
+        "scenario": "points",
+        "normalized_count": 1000,
+        "visible": 33,
+        "cards": 33,
+        "work": {
+          "indexed": true,
+          "examined": 46,
+          "measured": 33,
+          "candidates": 33
+        },
+        "checksum": 100297,
+        "generate_ms": 0.27599999884841964,
+        "normalize_ms": 61.22799999866402,
+        "initialize_ms": 0.13300000136950985,
+        "layout_ms": 23.153999994974583,
+        "viewport_updates_ms": [
+          11.915000002773013,
+          11.758000000554603,
+          15.009000002464745,
+          11.914999995497055,
+          11.048000000300817,
+          10.977999998431187,
+          10.97900000604568,
+          10.871000005863607
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          }
+        ],
+        "cached_source_100_ms": 2.6629999993019737
+      },
+      "peak_rss_bytes": 784056320
+    },
+    {
+      "count": 1000,
+      "scenario": "identical",
+      "wall_s": 6.210392415999998,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 1000,
+        "scenario": "identical",
+        "normalized_count": 1000,
+        "visible": 1000,
+        "cards": 1,
+        "work": {
+          "indexed": true,
+          "examined": 1000,
+          "measured": 1,
+          "candidates": 1000
+        },
+        "checksum": 100009,
+        "generate_ms": 0.26200000138487667,
+        "normalize_ms": 59.20299999706913,
+        "initialize_ms": 0.12599999899975955,
+        "layout_ms": 34.95000000111759,
+        "viewport_updates_ms": [
+          23.729000000457745,
+          26.5949999957229,
+          27.121000006445684,
+          25.64900000288617,
+          20.903999997244682,
+          29.400999999779742,
+          38.45300000102725,
+          27.404000000387896
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 1000,
+            "measured": 1,
+            "candidates": 1000
+          },
+          {
+            "indexed": true,
+            "examined": 1000,
+            "measured": 1,
+            "candidates": 1000
+          },
+          {
+            "indexed": true,
+            "examined": 1000,
+            "measured": 1,
+            "candidates": 1000
+          },
+          {
+            "indexed": true,
+            "examined": 1000,
+            "measured": 1,
+            "candidates": 1000
+          },
+          {
+            "indexed": true,
+            "examined": 1000,
+            "measured": 1,
+            "candidates": 1000
+          },
+          {
+            "indexed": true,
+            "examined": 1000,
+            "measured": 1,
+            "candidates": 1000
+          },
+          {
+            "indexed": true,
+            "examined": 1000,
+            "measured": 1,
+            "candidates": 1000
+          },
+          {
+            "indexed": true,
+            "examined": 1000,
+            "measured": 1,
+            "candidates": 1000
+          }
+        ],
+        "cached_source_100_ms": 2.653999996255152
+      },
+      "peak_rss_bytes": 787103744
+    },
+    {
+      "count": 1000,
+      "scenario": "groups",
+      "wall_s": 6.317732209000006,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 1000,
+        "scenario": "groups",
+        "normalized_count": 1000,
+        "visible": 33,
+        "cards": 33,
+        "work": {
+          "indexed": true,
+          "examined": 46,
+          "measured": 33,
+          "candidates": 33
+        },
+        "checksum": 100297,
+        "generate_ms": 0.42299999768147245,
+        "normalize_ms": 70.41799999569776,
+        "initialize_ms": 0.1790000023902394,
+        "layout_ms": 28.59100000205217,
+        "viewport_updates_ms": [
+          18.427999995765276,
+          13.946000006399117,
+          13.339000004634727,
+          12.606999996933155,
+          23.358999998890795,
+          16.518000003998168,
+          12.941000000864733,
+          12.62299999507377
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          }
+        ],
+        "cached_source_100_ms": 2.7259999988018535
+      },
+      "peak_rss_bytes": 786710528
+    },
+    {
+      "count": 1000,
+      "scenario": "rich",
+      "wall_s": 6.428387792000002,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 1000,
+        "scenario": "rich",
+        "normalized_count": 1000,
+        "visible": 33,
+        "cards": 33,
+        "work": {
+          "indexed": true,
+          "examined": 46,
+          "measured": 33,
+          "candidates": 33
+        },
+        "checksum": 100297,
+        "generate_ms": 4.826000003959052,
+        "normalize_ms": 68.15600000118138,
+        "initialize_ms": 0.1849999971454963,
+        "layout_ms": 41.279999997641426,
+        "viewport_updates_ms": [
+          30.141000002913643,
+          29.195000002800953,
+          28.701999995973893,
+          26.869000001170207,
+          26.854999996430706,
+          26.170000004640315,
+          25.507999998808373,
+          25.637999999162275
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 33,
+            "candidates": 33
+          }
+        ],
+        "cached_source_100_ms": 10.929999996733386
+      },
+      "peak_rss_bytes": 811450368
+    },
+    {
+      "count": 1000,
+      "scenario": "large_years",
+      "wall_s": 6.339537915999998,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 1000,
+        "scenario": "large_years",
+        "normalized_count": 1000,
+        "visible": 33,
+        "cards": 33,
+        "work": {
+          "indexed": true,
+          "examined": 46,
+          "measured": 33,
+          "candidates": 33
+        },
+        "checksum": 100289,
+        "generate_ms": 0.3079999951296486,
+        "normalize_ms": 75.51000000239583,
+        "initialize_ms": 0.15800000255694613,
+        "layout_ms": 23.368000001937617,
+        "viewport_updates_ms": [
+          12.481999998271931,
+          16.181999999389518,
+          11.684999997669365,
+          15.100000004167669,
+          31.047999997099396,
+          12.060000000928994,
+          11.655000002065208,
+          11.677000002237037
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 46,
+            "measured": 32,
+            "candidates": 32
+          }
+        ],
+        "cached_source_100_ms": 5.662999996275175
+      },
+      "peak_rss_bytes": 792985600
+    },
+    {
+      "count": 10000,
+      "scenario": "points",
+      "wall_s": 6.608740084000004,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 10000,
+        "scenario": "points",
+        "normalized_count": 10000,
+        "visible": 33,
+        "cards": 33,
+        "work": {
+          "indexed": true,
+          "examined": 39,
+          "measured": 33,
+          "candidates": 33
+        },
+        "checksum": 1000297,
+        "generate_ms": 2.8989999991608784,
+        "normalize_ms": 622.1110000042245,
+        "initialize_ms": 0.39000000106170774,
+        "layout_ms": 21.76099999633152,
+        "viewport_updates_ms": [
+          10.650000003806781,
+          10.498999996343628,
+          11.680000003252644,
+          10.772000001452398,
+          11.253000004217029,
+          10.892999998759478,
+          10.95299999724375,
+          10.753000002296176
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          }
+        ],
+        "cached_source_100_ms": 2.541000001656357
+      },
+      "peak_rss_bytes": 1024819200
+    },
+    {
+      "count": 10000,
+      "scenario": "identical",
+      "wall_s": 8.573910124999998,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 10000,
+        "scenario": "identical",
+        "normalized_count": 10000,
+        "visible": 10000,
+        "cards": 1,
+        "work": {
+          "indexed": true,
+          "examined": 10000,
+          "measured": 1,
+          "candidates": 10000
+        },
+        "checksum": 1000009,
+        "generate_ms": 2.53800000064075,
+        "normalize_ms": 625.2540000059525,
+        "initialize_ms": 0.5799999998998828,
+        "layout_ms": 194.25599999522092,
+        "viewport_updates_ms": [
+          226.8370000019786,
+          217.59000000020023,
+          152.07699999882607,
+          238.29799999657553,
+          233.1479999993462,
+          145.6560000005993,
+          251.71899999986636,
+          263.7529999992694
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 10000,
+            "measured": 1,
+            "candidates": 10000
+          },
+          {
+            "indexed": true,
+            "examined": 10000,
+            "measured": 1,
+            "candidates": 10000
+          },
+          {
+            "indexed": true,
+            "examined": 10000,
+            "measured": 1,
+            "candidates": 10000
+          },
+          {
+            "indexed": true,
+            "examined": 10000,
+            "measured": 1,
+            "candidates": 10000
+          },
+          {
+            "indexed": true,
+            "examined": 10000,
+            "measured": 1,
+            "candidates": 10000
+          },
+          {
+            "indexed": true,
+            "examined": 10000,
+            "measured": 1,
+            "candidates": 10000
+          },
+          {
+            "indexed": true,
+            "examined": 10000,
+            "measured": 1,
+            "candidates": 10000
+          },
+          {
+            "indexed": true,
+            "examined": 10000,
+            "measured": 1,
+            "candidates": 10000
+          }
+        ],
+        "cached_source_100_ms": 3.2080000019050203
+      },
+      "peak_rss_bytes": 1363574784
+    },
+    {
+      "count": 10000,
+      "scenario": "groups",
+      "wall_s": 7.558738500000004,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 10000,
+        "scenario": "groups",
+        "normalized_count": 10000,
+        "visible": 33,
+        "cards": 33,
+        "work": {
+          "indexed": true,
+          "examined": 39,
+          "measured": 33,
+          "candidates": 33
+        },
+        "checksum": 1000297,
+        "generate_ms": 4.128000000491738,
+        "normalize_ms": 698.3230000041658,
+        "initialize_ms": 0.5279999968479387,
+        "layout_ms": 74.78000000264728,
+        "viewport_updates_ms": [
+          68.50799999665469,
+          49.55599999811966,
+          51.249000003736,
+          88.73499999754131,
+          68.76500000362284,
+          50.58600000484148,
+          51.961999997729436,
+          74.47900000261143
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          }
+        ],
+        "cached_source_100_ms": 5.4419999942183495
+      },
+      "peak_rss_bytes": 1196883968
+    },
+    {
+      "count": 10000,
+      "scenario": "rich",
+      "wall_s": 7.003704124999999,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 10000,
+        "scenario": "rich",
+        "normalized_count": 10000,
+        "visible": 33,
+        "cards": 33,
+        "work": {
+          "indexed": true,
+          "examined": 39,
+          "measured": 33,
+          "candidates": 33
+        },
+        "checksum": 1000297,
+        "generate_ms": 58.37500000052387,
+        "normalize_ms": 688.5249999977532,
+        "initialize_ms": 0.3780000042752363,
+        "layout_ms": 36.91699999762932,
+        "viewport_updates_ms": [
+          29.12800000194693,
+          28.372000000672415,
+          28.18200000183424,
+          25.601000001188368,
+          25.304000002506655,
+          25.09299999655923,
+          25.33199999743374,
+          25.574000006599817
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          }
+        ],
+        "cached_source_100_ms": 3.05099999968661
+      },
+      "peak_rss_bytes": 1319682048
+    },
+    {
+      "count": 10000,
+      "scenario": "large_years",
+      "wall_s": 7.008343291999992,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 10000,
+        "scenario": "large_years",
+        "normalized_count": 10000,
+        "visible": 33,
+        "cards": 33,
+        "work": {
+          "indexed": true,
+          "examined": 39,
+          "measured": 33,
+          "candidates": 33
+        },
+        "checksum": 1000289,
+        "generate_ms": 2.5690000038594007,
+        "normalize_ms": 845.1739999945858,
+        "initialize_ms": 0.5070000042906031,
+        "layout_ms": 24.285999999847263,
+        "viewport_updates_ms": [
+          12.238999996043276,
+          12.360000000626314,
+          12.008999998215586,
+          11.616000003414229,
+          12.074999998731073,
+          11.843000000226311,
+          11.926999999559484,
+          11.757000000216067
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 39,
+            "measured": 32,
+            "candidates": 32
+          }
+        ],
+        "cached_source_100_ms": 2.7289999998174608
+      },
+      "peak_rss_bytes": 1043070976
+    },
+    {
+      "count": 100000,
+      "scenario": "points",
+      "wall_s": 14.393113792000008,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 100000,
+        "scenario": "points",
+        "normalized_count": 100000,
+        "visible": 33,
+        "cards": 33,
+        "work": {
+          "indexed": true,
+          "examined": 36,
+          "measured": 33,
+          "candidates": 33
+        },
+        "checksum": 10000297,
+        "generate_ms": 32.293999996909406,
+        "normalize_ms": 7752.777000001515,
+        "initialize_ms": 4.948000001604669,
+        "layout_ms": 27.76599999924656,
+        "viewport_updates_ms": [
+          12.256999994860962,
+          12.65600000624545,
+          12.81600000220351,
+          13.201000001572538,
+          12.633999998797663,
+          11.678000002575573,
+          11.955999994825106,
+          12.088000003132038
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 36,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 36,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 36,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          }
+        ],
+        "cached_source_100_ms": 3.059000002394896
+      },
+      "peak_rss_bytes": 3084140544
+    },
+    {
+      "count": 100000,
+      "scenario": "identical",
+      "wall_s": 41.695063250000004,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 100000,
+        "scenario": "identical",
+        "normalized_count": 100000,
+        "visible": 100000,
+        "cards": 1,
+        "work": {
+          "indexed": true,
+          "examined": 100000,
+          "measured": 1,
+          "candidates": 100000
+        },
+        "checksum": 10000009,
+        "generate_ms": 32.037999997555744,
+        "normalize_ms": 7755.053000000771,
+        "initialize_ms": 5.59600000269711,
+        "layout_ms": 2318.100999997114,
+        "viewport_updates_ms": [
+          2496.392000000924,
+          2585.855999997875,
+          2531.1169999986305,
+          3676.675000002433,
+          2897.398000000976,
+          3099.133999996411,
+          3223.911000000953,
+          3163.242000002356
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 100000,
+            "measured": 1,
+            "candidates": 100000
+          },
+          {
+            "indexed": true,
+            "examined": 100000,
+            "measured": 1,
+            "candidates": 100000
+          },
+          {
+            "indexed": true,
+            "examined": 100000,
+            "measured": 1,
+            "candidates": 100000
+          },
+          {
+            "indexed": true,
+            "examined": 100000,
+            "measured": 1,
+            "candidates": 100000
+          },
+          {
+            "indexed": true,
+            "examined": 100000,
+            "measured": 1,
+            "candidates": 100000
+          },
+          {
+            "indexed": true,
+            "examined": 100000,
+            "measured": 1,
+            "candidates": 100000
+          },
+          {
+            "indexed": true,
+            "examined": 100000,
+            "measured": 1,
+            "candidates": 100000
+          },
+          {
+            "indexed": true,
+            "examined": 100000,
+            "measured": 1,
+            "candidates": 100000
+          }
+        ],
+        "cached_source_100_ms": 2.842000001692213
+      },
+      "peak_rss_bytes": 3548381184
+    },
+    {
+      "count": 100000,
+      "scenario": "groups",
+      "wall_s": 15.548360917000025,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 100000,
+        "scenario": "groups",
+        "normalized_count": 100000,
+        "visible": 33,
+        "cards": 33,
+        "work": {
+          "indexed": true,
+          "examined": 36,
+          "measured": 33,
+          "candidates": 33
+        },
+        "checksum": 10000297,
+        "generate_ms": 57.158999996318016,
+        "normalize_ms": 7436.992000002647,
+        "initialize_ms": 8.69300000340445,
+        "layout_ms": 420.1539999994566,
+        "viewport_updates_ms": [
+          48.823999997694045,
+          48.70600000140257,
+          49.69599999458296,
+          49.80400000204099,
+          51.698000002943445,
+          51.80799999652663,
+          55.13500000233762,
+          57.541999995009974
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 36,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 36,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 36,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          }
+        ],
+        "cached_source_100_ms": 5.520999999134801
+      },
+      "peak_rss_bytes": 4394795008
+    },
+    {
+      "count": 100000,
+      "scenario": "rich",
+      "wall_s": 17.833797917,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 100000,
+        "scenario": "rich",
+        "normalized_count": 100000,
+        "visible": 33,
+        "cards": 33,
+        "work": {
+          "indexed": true,
+          "examined": 36,
+          "measured": 33,
+          "candidates": 33
+        },
+        "checksum": 10000297,
+        "generate_ms": 738.8039999932516,
+        "normalize_ms": 9092.510000002221,
+        "initialize_ms": 8.254000000306405,
+        "layout_ms": 42.792000000190455,
+        "viewport_updates_ms": [
+          27.70299999974668,
+          26.05300000141142,
+          27.377999998861924,
+          28.792999997676816,
+          29.434000003675465,
+          29.109999995853286,
+          26.9479999988107,
+          26.387000005342998
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 36,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 36,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 36,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          },
+          {
+            "indexed": true,
+            "examined": 48,
+            "measured": 33,
+            "candidates": 33
+          }
+        ],
+        "cached_source_100_ms": 3.5899999929824844
+      },
+      "peak_rss_bytes": 3953836032
+    },
+    {
+      "count": 100000,
+      "scenario": "large_years",
+      "wall_s": 17.543782084000014,
+      "status": "ok",
+      "exit_code": 0,
+      "metrics": {
+        "count": 100000,
+        "scenario": "large_years",
+        "normalized_count": 100000,
+        "visible": 33,
+        "cards": 33,
+        "work": {
+          "indexed": true,
+          "examined": 36,
+          "measured": 33,
+          "candidates": 33
+        },
+        "checksum": 10000289,
+        "generate_ms": 33.86799999861978,
+        "normalize_ms": 9157.837999999174,
+        "initialize_ms": 631.0130000056233,
+        "layout_ms": 46.02799999702256,
+        "viewport_updates_ms": [
+          21.987000000081025,
+          26.422999995702412,
+          21.827000004122965,
+          31.379000000015367,
+          26.93100000033155,
+          22.8549999956158,
+          20.12500000273576,
+          27.570999998715706
+        ],
+        "viewport_work": [
+          {
+            "indexed": true,
+            "examined": 36,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 36,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 36,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 36,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 36,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 36,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 36,
+            "measured": 32,
+            "candidates": 32
+          },
+          {
+            "indexed": true,
+            "examined": 36,
+            "measured": 32,
+            "candidates": 32
+          }
+        ],
+        "cached_source_100_ms": 7.382999996480066
+      },
+      "peak_rss_bytes": 3926720512
+    }
+  ]
+}

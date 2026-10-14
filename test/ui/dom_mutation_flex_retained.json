@@ -1,0 +1,13 @@
+{
+  "name": "A clean flex sibling of a mutated pane replays its retained layout",
+  "html": "test/ui/dom_mutation_flex_retained.html",
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#third"}, "y": 80, "height": 24, "tolerance": 0.5},
+    {"type": "click", "target": {"selector": "#next"}},
+    {"type": "assert_text", "target": {"selector": "#detail"}, "equals": "selected 1"},
+    {"type": "click", "target": {"selector": "#next"}},
+    {"type": "assert_text", "target": {"selector": "#detail"}, "equals": "selected 2"},
+    {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "eligible"},
+    {"type": "assert_rect", "target": {"selector": "#third"}, "y": 80, "height": 24, "tolerance": 0.5}
+  ]
+}

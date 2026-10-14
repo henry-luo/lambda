@@ -1362,12 +1362,14 @@ extern "C" void js_event_loop_attach_lambda_scheduler(void) {
 
 extern "C" void js_event_loop_init(void) {
     js_event_loop_attach_lambda_scheduler();
-    if (timer_handle_count > 0 || runtime_job_queue_size(&animation_frame_queue) > 0) {
+    if (timer_handle_count > 0 || runtime_job_queue_size(&animation_frame_queue) > 0 ||
+            runtime_job_queue_size(&next_tick_queue) > 0 || runtime_job_queue_size(&microtask_queue) > 0) {
         // Timers and pending animation-frame callbacks belong to the active
         // document realm. Nested script entries in a static capture must retain
         // them until the document load boundary: the synthetic lifecycle scripts
         // (`<window-pageshow>`) run as outermost turns right after `load`, and a
         // frame requested by the load handler must not be wiped by their init.
+        // a host eval can also begin after a Lambda task queued a Promise reaction, before any timer exists.
         event_loop_shutting_down = false;
         return;
     }

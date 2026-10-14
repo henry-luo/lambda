@@ -58,8 +58,10 @@ compatibility fields for these facilities may remain; they do not gate acceptanc
 Application procedures may supply already loaded data and media. Playback and
 immutable source replacement remain in scope (S12.1.1v2/S12.1.3, S9.1.4/S9.3.1).
 
-The active implementation tranche is scalability and keyed animation. Other
-retained feature families keep their existing open acceptance records.
+Scalability and keyed animation have pure/native implementations and release
+benchmark evidence; see the [implementation record](impl/Lambda_Impl_Chart_Timeline.md)
+for measured limits. Retained feature families keep their open pinned acceptance
+records until complete option/example equivalence is verified.
 
 ## 2. Proposed element schema
 
@@ -74,7 +76,7 @@ the chart grammar's existing, contextual `<timeline><keyframe ...>` playback
 declaration. History events and animation keyframes have different vocabularies.
 
 ```lambda no-run
-// no-run: proposed timeline elements and views are not implemented yet.
+// no-run: illustrative schema example; acceptance fixtures live under test/ui/timeline/.
 import timeline: lambda.chart.timeline
 
 let history = <timeline.chart id: "project-history", width: 960,
@@ -103,7 +105,7 @@ apply(history)
 The same events can be presented on a date scale:
 
 ```lambda no-run
-// no-run: proposed timeline elements and views are not implemented yet.
+// no-run: illustrative schema example; acceptance fixtures live under test/ui/timeline/.
 import timeline: lambda.chart.timeline
 
 apply(<timeline.chart id: "science", width: 1000, height: 540,
@@ -138,15 +140,16 @@ the proposal needs no lexer, parser, or grammar extension.
 | `orientation` | `'vertical'` or `'horizontal'`; default vertical for cards, horizontal for axis/story. |
 | `placement` | `'start'`, `'end'`, `'alternate'`, or `'auto'`; default `'alternate'` for cards and `'auto'` otherwise. Start/end are relative to writing direction and path normal. |
 | `order` | `'source'`, `'chronological'`, or `'reverse_chronological'`; default `'source'` for sequence spacing and `'chronological'` for time spacing. Stable ties preserve source order. |
-| `width`, `height` | Positive finite CSS-pixel numbers or `'auto'`; default auto. `viewport` supplies resolved dimensions. Headless export requires a resolved finite box. |
+| `width`, `height` | Positive finite CSS-pixel numbers or `'auto'`; default auto. `viewport` supplies resolved dimensions. |
 | `min_width`, `max_width`, `min_height`, `max_height` | Optional finite layout constraints. Contradictory constraints are errors. |
 | `padding`, `gap` | Nonnegative pixels; padding also accepts the chart package's four-side map. |
 | `time_scale` | Primary chronology scale ID; default `"time"`. |
 | `value`, `default_value` | Controlled or initial interaction-state projection (§4). Supplying both is an error; absence means instance-owned state. |
 | `theme`, `parts` | Immutable visual tokens and semantic-part recipes (§2.10). The core has a neutral default skin. |
-| `locale`, `direction` | Locale identifier and `'ltr'`/`'rtl'`; default locale `"en-US"`. An omitted direction follows the language's writing direction; an explicit direction overrides it. Both remain independent of machine settings. |
+| `direction` | `'ltr'` or `'rtl'`; default left-to-right. Explicit direction is independent of machine settings. |
+| `animate` | `false` (default), `true`, or `{duration, delay, easing, enter, update, exit, guides}`; keyed geometry and opacity transitions (§3.1). |
 | `motion` | `'full'`, `'reduced'`, or `'none'`; host preference can reduce, never increase, authored motion. |
-| `label`, `description` | Accessible chart name and description; a visible title may provide the default name. |
+| `label`, `description` | Chart name and description; a visible title may provide the default name. |
 | `class`, `style`, `aria-*`, `data-*` | Ordinary presentation attributes; apply at the root unless a semantic part is explicitly targeted. |
 
 Axis presentation requires time spacing. Cards support either spacing. Story
@@ -171,7 +174,7 @@ children. Configuration children can be provided as equivalent map properties.
 | `<timeline.data>` | 0–1 | Record array or named immutable dataset, before encoding. |
 | `<timeline.encoding>` | 0–1 | Maps record fields to the canonical event model. |
 | `<timeline.transform>` | 0–1 | Existing chart transform grammar over supplied records. |
-| `<timeline.source>` | 0–1 | Declarative resource request, resolved outside pure rendering. |
+| `<timeline.source>` | 0–1 | Application-supplied source descriptor and immutable data revision. |
 | `<timeline.scale>` | 0–many | Named chronology or quantitative scales. |
 | `<timeline.axis>` | 0–many | Major/minor date labels and optional quantitative axes. |
 | `<timeline.window>` | 0–1 | Initial visible domain, bounds, and zoom constraints. |
@@ -186,13 +189,11 @@ children. Configuration children can be provided as equivalent map properties.
 | `<timeline.search>` | 0–1 | Search fields, matching, highlighting, result navigation, and filters. |
 | `<timeline.slideshow>` | 0–1 | Story playback, timing, transitions, repeat, and progress. |
 | `<timeline.media_options>` | 0–1 | Media sizing, loading, playback, providers, and fallback policy. |
-| `<timeline.toolbar>` | 0–1 | Controls, quick jump, layout/theme switching, fullscreen, and export. |
+| `<timeline.toolbar>` | 0–1 | Controls, quick jump, layout/theme switching, and fullscreen. |
 | `<timeline.pending>` | 0–1 | Pending/loading continuation, independent of dated events. |
 | `<timeline.empty>`, `<timeline.loading>`, `<timeline.error>` | Each 0–1 | Application-supplied status presentations. |
 | `<timeline.annotation>` | 0–many | Notes, rules, current/custom times, and reference bands. |
 | `<timeline.series>` | 0–many | Additional chart series sharing the timeline coordinate. |
-| `<timeline.messages>` | 0–1 | Locale strings and pure formatting functions. |
-| `<timeline.export>` | 0–1 | Snapshot, resource, expansion, pagination, and unsupported-content policy. |
 
 Direct events and encoded records may coexist; the direct events precede encoded
 records in source order, and IDs must be unique across both. Data and source are
@@ -223,7 +224,7 @@ namespace boundary, so an event address is a chart path plus an event ID.
 | `link`, `target` | Optional title/card navigation destination and target policy. Activation uses the host's ordinary navigation behavior. |
 | `visible`, `selectable`, `editable` | Explicit visibility, selection, and per-event edit permissions. |
 | `uncertainty` | `{earliest, latest, label}` around a point, or separate start/end uncertainty around a duration. Bounds must enclose the authored date. |
-| `metadata` | Application data preserved through selection, search, edits, clustering, and export. |
+| `metadata` | Application data preserved through selection, search, edits, and clustering. |
 | `class`, `style`, `aria-*`, `data-*` | Attributes for the event's semantic presentation part. |
 
 Event slots are `<timeline.content>` for rich body content,
@@ -248,9 +249,9 @@ Lane height supports `'auto'`, `'fixed'`, and `'fit_items'`; group reordering em
 an application change request rather than mutating the supplied dataset.
 
 Nested charts have their own ID scope and state. Their dates are not clamped to
-the parent event's interval unless the author asks for that constraint. Depth,
-total events, media resources, and layout work have explicit configurable limits;
-exceeding a limit produces a diagnostic instead of truncating the source silently.
+the parent event's interval unless the author asks for that constraint. Window
+queries bound candidate work, clustering bounds rich-card measurement, and layout
+diagnostics expose the actual work; source records are never silently truncated.
 
 ### 2.5 Dates, precision, and time scales
 
@@ -280,12 +281,11 @@ leap-year rules are checked before ordering.
 | `domain`, `unit`, `origin` | Optional bounds; numeric time requires an explicit unit. Cosmological time is measured in exact years relative to an explicit origin, default astronomical year zero. |
 | `timezone` | Default `"UTC"`; support fixed offsets and named IANA zones through the chart timezone module. No implicit host timezone. |
 | `calendar`, `week_start` | Proleptic Gregorian initially, with configurable week start. Alternate calendars require an explicit adapter; never relabel Gregorian dates as another calendar. |
-| `numbering`, `era_labels` | Display conversion for astronomical versus human BCE/CE years; locale supplies era labels. Adapters convert human input into canonical astronomical records. |
+| `numbering`, `era_labels` | Display conversion for astronomical versus human BCE/CE years; authored labels may override the defaults. Adapters convert human input into canonical astronomical records. |
 | `ambiguous_time`, `nonexistent_time` | Explicit fold/gap policies; default reject ambiguous or nonexistent local timestamps unless the input carries an offset. |
 | `hidden_intervals` | Excluded/compressed spans, optionally recurring by day/week/month/year. Preserve a reversible mapping outside those spans and disclose events inside a hidden interval. |
 | `interval_limit` | Positive integral bound on expanded interval occurrences per visible window; default 10,000. Exceeding it returns a diagnostic. |
 | `format`, `formatter` | Existing chart date formatting or a pure formatter. Formatting never participates in comparisons. |
-| `locale` | Optional scale-specific locale overriding the root locale for labels; chronology and timezone stay unchanged. |
 
 Deep time uses exact integer/decimal year coordinates, without forcing them into
 the native datetime range or JavaScript Date limits. Compare exact values first,
@@ -343,7 +343,7 @@ with visibility all; it does not require a fourth unrelated rendering engine.
 Responsive changes preserve active event, selected IDs, and expanded content.
 
 Stacking uses measured bounds with explicit gaps. Optional labels can be omitted
-with an accessible overflow summary, but event identity and the event's exact
+with an overflow summary, but event identity and the event's exact
 time position are retained. Equal-time events use stable source order. Overflow
 can stack, cluster, scroll, or expand; it must not silently drop records.
 
@@ -356,7 +356,7 @@ can stack, cluster, scroll, or expand; it must not silently drop records.
 | `search` | Fields, query, case/diacritic policy, highlight versus filter, next/previous match, count/no-results text, tag/group/date filters, and pure match predicate. |
 | `cluster` | Enabled, minimum overlapping count, screen-distance threshold, grouping criteria, title/renderer, count badge, max expansion, and click/double-click expand-to-fit. |
 | `edit` | Add/update/remove, move-time, move-group, range resize, subgroup/group edits, drag-and-drop, per-item permissions, snap unit/step/function, validation and confirmation requests. Default disabled. |
-| `toolbar` | Ordered buttons for first/previous/next/last, fit/zoom/reset, search, quick-jump, layout, compact/details, theme, fullscreen, play/pause, export, and keyboard help; top/bottom placement, sticky mode, custom slots and localized labels. |
+| `toolbar` | Ordered buttons for first/previous/next/last, fit/zoom/reset, search, quick-jump, layout, compact/details, theme, fullscreen, play/pause, and keyboard help; top/bottom placement, sticky mode, custom slots and authored labels. |
 | `story` | Title slide, initial active ID, start-at-end, panel order, explicit event order, hash bookmarks, active media behavior, and narrative metadata. |
 | `slideshow` | Enabled/autoplay, per-event duration, progress/overall progress, fade/slide/reveal transition, delay, easing, repeat, direction, pause/resume/seek/stop, and media-end synchronization. |
 
@@ -364,7 +364,7 @@ can stack, cluster, scroll, or expand; it must not silently drop records.
 event record with rich content and media. Its default ID is `"__title__"`, distinct
 from all event IDs; an explicit ID resolves an authored name collision.
 Introductions join narrative navigation/playback but have no chronology position
-and are excluded from exported event records. `story.order` lists unique known
+and are excluded from chronology records. `story.order` lists unique known
 event IDs after the introduction. `story.panel_order` orders the `"text"`,
 `"media"`, and `"children"` sections. Initialization, manual navigation,
 quick jump, keyboard movement, and playback consume this same sequence.
@@ -512,12 +512,12 @@ compact, and presentation presets; per-part fonts, weights, spacing, radii,
 shadows, alignment, marker shapes, and pure renderers remain customizable.
 
 `parts` maps semantic names to `{class, style, attributes, render?}` recipes.
-Core layout owns geometry and accessible relationships; skins cannot replace
+Core layout owns geometry and event/control relationships; skins cannot replace
 those contracts through arbitrary positioning. A structural renderer receives
-semantic slots/context and must return the required landmark/control relationships.
-Fonts may be bundled or loaded as declared resources, including a Google Fonts
-adapter. Font changes invalidate measurements; loading them cannot mutate module
-globals or produce host-dependent export without a recorded font choice.
+semantic slots/context and preserves the required event/control relationships.
+Applications supply fonts explicitly. Font changes invalidate measurements; pure
+rendering consumes supplied font choices without loading resources or mutating
+module globals (S12.1.1v2/S12.1.3).
 
 The dtna wrapper supplies Ant-inspired tokens, icons, spacing, and semantic part
 classes through this same interface. The core has no dependency on dtna.
@@ -550,18 +550,18 @@ They are source labels, not a new design-ruling ledger.
 | Selection | Single/multiple, modifier/range/contiguous/per-group selection, deselection, hover, tooltips, item visibility and disablement. | `interaction`, event flags | VT, RC |
 | Search and filters | Search across configured fields, highlighting, match navigation/counts, empty results, tags/groups/time filtering, quick jump. | `search`, `toolbar` | RC; Lambda extension |
 | Editing | Create/update/delete, move date/group, resize duration, group changes, snapping, drag/drop, permission overrides, confirmation and validation. | `edit`, requests | VT |
-| Live data | Add/remove/reorder/update by ID, immutable source revisions, retain state, reject stale edit validation. | `convert`, `update`, resource state | VT, RC |
+| Live data | Add/remove/reorder/update by ID, immutable source revisions, retain state, reject stale edit validation. | `convert`, `update`, source revisions | VT, RC |
 | Multimedia | Images, video/audio, captions/credits/alt text, media links, poster/thumbnail, lazy loading, fit/alignment, active-player handling. | `media`, `media_options` | RC, KL |
 | Hosted content | Video/audio/document/map/social providers, generic embeds, custom content, per-provider status and fallback. | Provider adapters | KL, RC |
 | Presentation controls | Toolbar order/position/sticky sizing, custom labels/icons, quick-jump, fullscreen, lightbox, layout/theme switches. | `toolbar`, `media_options` | RC |
 | Slideshow | Per-slide timing, autoplay, play/pause/resume/seek/stop, repeat/direction, progress, transition effects, media-aware advancement. | `slideshow`, `render_frame` | RC; chart reuse |
-| Motion | Keyed enter/update/exit, animated windows/guides, interruption from visible state, reduced motion, explicit frozen samples. | Chart animation helpers | RC, AC; chart reuse |
+| Motion | Keyed enter/update/exit, animated windows/guides, interruption from visible state, reduced motion, explicit frozen samples. | `animate`, chart animation helpers | RC, AC; chart reuse |
 | Shape vocabulary | Straight, serpentine, spiral, arbitrary path/points, smoothing, levels/angles/radii, tangent labels, lane offsets. | `coordinate` | AC |
 | Quantitative overlays | Multiple scales/axes/series; line/step/area/column/point, fills, stacking, legend toggles, cursors and annotations. | `series`, `axis` | AC |
 | Visual customization | Theme presets, dark/high-contrast, semantic classes/styles/renderers, per-element typography, custom fonts, visual states. | `theme`, `parts` | RC, KL, VT, AC |
 | Authoring/import | Element/map forms, records/encoding, JSON, CSV/TSV, Google Sheets, named datasets, supported upstream data adapters. | `data`, `source`, `convert` | KL, VT, RC |
 | Composition | Shared chart parameters, linked views, annotations, dashboard panels, chart grammar SVG adapter, reusable render callbacks. | `series`, chart adapter | AC, VT; chart reuse |
-| Scale and diagnostics | Indexed window queries, cached visibility, clustering before rich-card measurement, bounded work, release benchmarks and capability reports. | `cluster`, resources, layout | VT, RC; Lambda requirement |
+| Scale and diagnostics | Indexed window queries, cached visibility, clustering before rich-card measurement, bounded work, release benchmarks and capability reports. | Prepared index, `cluster`, layout | VT, RC; Lambda requirement |
 
 ### 3.1 Scalability and animation contract
 
@@ -572,10 +572,17 @@ rich-card measurement. A layout reports examined candidates and measured cards s
 bounded-work assertions accompany release timing and memory measurements.
 Exact interval ordering and window endpoints follow S6.2.2v3/S6.2.3.
 
+`plan.work` reports `indexed`, `examined`, `candidates`, and `measured`. A narrow
+window over sparse points should examine only intersecting index leaves. An
+identical-date cluster still examines all intersecting members, but measures only
+its aggregate card. Source preparation and many-group bookkeeping remain real
+costs and are included in release timing and memory reports.
+
 `animate: true` enables keyed enter/update/exit. A map configures nonnegative
 `duration` (default 300 ms), `delay` (default 0), `easing` (shared chart easing or a
 pure callback), and boolean `enter`, `update`, `exit`, `guides` switches. Omission
 or false disables these transitions. `motion: reduced/none` settles immediately.
+Native `model` options may additionally set `reduced_motion: true`.
 The retained displayed geometry and SVG are the source of an interrupted
 transition. Exiting cards are passive and retire at completion. Frame work stops
 when animation and playback settle. `render_frame` accepts `{time_ms, previous}`,
@@ -598,6 +605,8 @@ equivalent; a missing user-visible capability stays open. A static image does no
 complete video support, and a working small demo does not complete dense-timeline
 or keyboard support. Later upstream additions require an explicit scope update;
 "all features" refers to the pinned inventory, not an unbounded moving target.
+Examples solely covering a removed requirement are marked `excluded` with that
+explicit scope reason and do not gate retained parity.
 
 ## 4. Public API and state model
 
@@ -656,14 +665,14 @@ existing chart model contract. Deleted records lose active picking targets;
 retained selection is reconciled by an explicit policy. A filtered active event
 moves to a deterministic visible neighbor or an explicit empty stage. Collapsing
 a group moves focus to its header and preserves child selection unless configured
-otherwise. Removing an instance cancels its scheduling, captures, and outstanding
-resource/application requests.
+otherwise. Removing an instance cancels its scheduling and captures. Applications
+own outstanding data/resource work outside this acceptance contract.
 
 ## 5. Absorb dtna Timeline
 
 `lambda.chart.timeline` becomes the **sole owner of timeline data normalization,
 layout, connectors, markers, ordering, nesting, selection, interaction, playback,
-and accessibility behavior**. `lambda.ui.dtna.timeline` remains a compatibility
+and keyed animation**. `lambda.ui.dtna.timeline` remains a compatibility
 and skin adapter; `ui.timeline()` and `<dtna.timeline>` remain available.
 
 | Existing dtna surface | Mapping to the new package |
@@ -707,14 +716,14 @@ and the rendered history example under `temp/dtna-history-timeline/` when availa
 That temporary example is illustrative, not a durable test dependency; promote
 an independent fixture and expected result into the corpus during implementation.
 
-## 6. Rendering, accessibility, and host contracts
+## 6. Rendering and native host contracts
 
 ### 6.1 Shared pipeline
 
 Resolve supplied records → apply data transformations → normalize and validate
-events/dates/IDs/references → establish order/groups/window → project events/series
-→ measure content → resolve
-stacking/clusters → produce geometry plus semantic event order → present.
+events/dates/IDs/references → retain source/visibility indices → query the window
+→ project candidates → cluster → measure retained cards → resolve stacking
+→ produce geometry plus semantic event order → present.
 
 Reuse chart `parse`, `records`, `transform`, `calendar`, `timezone`, `scale`,
 `axis`, `text`, `collision`, `path_geometry`, `coordinate`, `picking`, `parameter`,
@@ -803,7 +812,7 @@ lmd/package/chart/
     view.ls                    shared live presenter and state reducer integration
     present.ls                 HTML/SVG semantic presentation
     story.ls                   active stage and narrative policy
-    media.ls                   media descriptions and resource state policy
+    media.ls                   supplied media descriptions and presentation policy
     adapters.ls                external data/provider normalization
     theme.ls                   neutral tokens and semantic parts
 lmd/package/ui/dtna/timeline.ls compatibility adapter and dtna skin only

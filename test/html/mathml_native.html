@@ -1,0 +1,12 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Native MathML layout</title>
+<style>
+body { margin: 12px; font-size: 20px; }
+.flex { display: flex; justify-content: center; align-items: center; min-height: 90px; }
+</style></head><body><div id="result">
+<p>Inline fraction <math id="inline" style="font-size:20px;color:#214e78"><mfrac><mi>a</mi><mi>b</mi></mfrac></math> and text.</p>
+<math id="display" display="block"><msqrt><mrow><mi>x</mi><mo>+</mo><mn>1</mn></mrow></msqrt></math>
+<div class="flex"><math id="flex" display="block"><semantics><mfrac><mi>x</mi><mi>y</mi></mfrac><annotation encoding="application/x-tex">INERT SOURCE</annotation></semantics></math></div>
+<math id="matrix" display="block"><mrow><mo>(</mo><mtable><mtr><mtd><mi>a</mi></mtd><mtd><mi>b</mi></mtd></mtr><mtr><mtd><mi>c</mi></mtd><mtd><mi>d</mi></mtd></mtr></mtable><mo>)</mo></mrow></math>
+<math id="cssflow" style="display:block"><mi>x</mi></math>
+</div></body></html>

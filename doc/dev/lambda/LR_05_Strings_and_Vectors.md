@@ -138,6 +138,29 @@ Layered on the N-D `ArrayNum` is a complete image toolkit (the "Typed_Array4" sc
 - **Analysis.** `fn_histogram` (`:4229`, integer bincount or float linear bins), `fn_otsu` (`:4256`, fixed 256-bin between-class-variance threshold with a plateau-centering tie-break), and `fn_label` (`:4296`, 4-connected flood-fill connected-component labelling).
 - **Resampling.** `fn_resize`/`fn_rotate`/`fn_affine_warp` (`:4375`/`:4394`/`:4414`) all gather through the shared `bilinear_gather` + `bilinear_sample` engine (`:4358`/`:4338`) — each output pixel maps back to a fractional source coordinate and is bilinearly interpolated, with edge-clamp (resize) or zero-fill (warp/rotate) outside the image.
 
+Photo performance extension (2026-10-14): `fn_blur` uses the shared
+`lib/image_process.h` rolling-sum filter for finite, safely summable inputs.
+The same helper filters premultiplied color/alpha in the fused photo evaluator.
+Even kernels retain the original floor(k/2) anchor; non-finite and overflow-risk
+inputs keep the generic local stencil. Empty windows become exact zero after
+their nonzero samples depart, avoiding residual color around transparency.
+Edge indexing and bilinear mixing are shared with the existing array resamplers.
+
+`fn_image_process` in `lambda/runtime/image_process.cpp` validates RGBA8 and
+option records, allocates one GC-owned destination, refreshes its rooted source
+after allocation (**D5.3.3**), and calls the native evaluator without further GC
+safepoints. Point transforms use double-precision registers; geometry/effects
+and final resizing use bounded rows/rings. The source remains immutable
+(**S1.4**), and `as_float` retains its existing float64 contract. No Radiant
+dependency enters the runtime (**D7.5.3**).
+
+`alloc_ndim_arraynum` now shares the ArrayNum factory in
+`lambda/runtime/lambda-data-runtime.cpp`. It snapshots/validates dimensions,
+attaches shape metadata to a rooted owner, and allocates the payload last.
+This avoids promoting a newly allocated, unwritten large buffer at the shape
+allocation safepoint (**D4.3.1 / D5.3.3**). A native regression checks nursery
+ownership at return and the shape/data after explicit collection.
+
 ---
 
 ## 9. Known Issues & Future Improvements

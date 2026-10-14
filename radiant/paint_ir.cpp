@@ -19,7 +19,7 @@
 #define PAINT_LIST_INITIAL_CAPACITY 1024
 
 void paint_svg_append_cjk_dx(StrBuf* out, const char* text, int text_len,
-                             float cjk_spacing) {
+                             float cjk_spacing, CssEnum mode) {
     if (!out || !text || text_len <= 0 || cjk_spacing <= 0.0f) return;
     const char* cursor = text;
     const char* end = text + text_len;
@@ -31,7 +31,7 @@ void paint_svg_append_cjk_dx(StrBuf* out, const char* text, int text_len,
         if (bytes <= 0) { cursor++; continue; }
         cursor += bytes;
         if (justify_context.previous) strbuf_append_char(out, ' ');
-        float gap = text_justify_character_gap(&justify_context, current)
+        float gap = text_justify_character_gap(&justify_context, current, mode)
             ? cjk_spacing : 0.0f;
         strbuf_append_format(out, "%.2f", gap);
     }
@@ -2165,7 +2165,7 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
                 strbuf_append_format(out, " letter-spacing=\"%.2f\"", style->letter_spacing);
             }
             paint_svg_append_cjk_dx(out, p->text, p->text_len,
-                                    p->cjk_spacing);
+                                    p->cjk_spacing, p->justify_mode);
             paint_svg_append_matrix_attr(out,
                                          paint_optional_transform(p->has_transform, &p->transform));
             strbuf_append_char(out, '>');

@@ -1,5 +1,6 @@
 #include "render.hpp"
 #include "geomap.hpp"
+#include "scene3d.hpp"
 #include "view.hpp"
 #include "layout.hpp"
 #include "render_effect_raster_fallback.hpp"
@@ -178,71 +179,8 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     lam::Temp<char> text_content(render_text_create_export_segment(
         str, text_rect, text_transform, true, get_white_space_value(text)));
 
-    // Calculate natural text width and gap count for justify rendering.
-    // NOTE: includes trailing spaces. The layout's count_justify_opportunities
-    // (see layout_text.cpp) counts every space including trailing ones, so the
-    // text_rect->width has been expanded based on all spaces. Stripping trailing
-    // spaces here would cause the renderer to compute a smaller space_count and
-    // therefore a larger word-spacing per gap, visibly over-spacing the line.
-    float natural_width = 0.0f;
-    int space_count = 0;
-    if (font_box_handle(&ctx->font)) {
-        size_t content_len = strlen(text_content.get());
-
-        unsigned char* scan = (unsigned char*)text_content.get();
-        unsigned char* content_end = scan + content_len;
-        while (scan < content_end) {  // Only scan up to content_end
-            if (is_space(*scan)) {
-                natural_width += text_space_advance(ctx->font.style);
-                space_count++;
-                scan++;
-            }
-            else {
-                uint32_t codepoint;
-                int bytes = str_utf8_decode((const char*)scan, (size_t)(content_end - scan), &codepoint);
-                if (bytes <= 0) { scan++; }
-                else { scan += bytes; }
-
-                // Skip VS16 (U+FE0F) — zero-width variation selector
-                if (codepoint == 0xFE0F) continue;
-
-                FontStyleDesc _sd = font_style_desc_from_prop(ctx->font.style);
-                // Use emoji font for codepoints that default to emoji presentation
-                bool emoji_pres = false;
-                if (scan < content_end) {
-                    uint32_t peek_cp;
-                    int peek_bytes = str_utf8_decode((const char*)scan, (size_t)(content_end - scan), &peek_cp);
-                    if (peek_bytes > 0 && peek_cp == 0xFE0F) emoji_pres = true;
-                }
-                // SVG text is rendered by the viewer, which handles emoji presentation.
-                // Use regular font for advance metrics to match layout dimensions.
-                // VS16-preceded codepoints use emoji font for correct advance.
-                LoadedGlyph* glyph = emoji_pres
-                    ? font_load_glyph_emoji(font_box_handle(&ctx->font), &_sd, codepoint, false)
-                    : font_load_glyph(font_box_handle(&ctx->font), &_sd, codepoint, false);
-                if (glyph) {
-                    natural_width += glyph->advance_x * render_font_pixel_to_css(font_box_handle(&ctx->font));
-                } else {
-                    natural_width += ctx->font.style->space_width;
-                }
-                natural_width += text_character_spacing(ctx->font.style, codepoint);
-            }
-        }
-    }
-
-    // Share the line's expansion across word and CJK gaps, as layout does.
-    float word_spacing = 0.0f;
-    float cjk_spacing = 0.0f;
     CssEnum justify_mode = text_justify_computed_value(text->parent);
-    int gap_count = count_rendered_justify_opportunities(text, text_rect, false);
-    if (justify_mode != CSS_VALUE_NONE && gap_count > 0 &&
-        natural_width > 0 && text_rect->width > natural_width) {
-        float extra_space = text_rect->width - natural_width;
-        float gap_spacing = extra_space / gap_count;
-        if (space_count > 0) word_spacing = gap_spacing;
-        if (justify_mode != CSS_VALUE_INTER_WORD && gap_count > space_count)
-            cjk_spacing = gap_spacing;
-    }
+    RenderTextJustification justification = render_text_justification(text_rect, justify_mode);
 
     // Use CSS font-size from style, fallback to 16 if not available
     float font_size = ctx->font.style->font_size > 0 ? ctx->font.style->font_size : 16;
@@ -278,8 +216,9 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     run.font_size = font_size;
     run.x = x;
     run.baseline_y = baseline_y;
-    run.word_spacing = word_spacing;
-    run.cjk_spacing = cjk_spacing;
+    run.word_spacing = justification.word;
+    run.cjk_spacing = justification.character;
+    run.justify_mode = justify_mode;
     run.font_weight = font_weight;
     run.italic = italic;
     if (parent_elem && render_paint_text_background(svg_active_paint_list(ctx), ctx->ui_context,
@@ -693,6 +632,11 @@ static void svg_cb_render_image(RenderContext* vctx, ViewBlock* block, float abs
     }
 }
 
+static void svg_cb_render_scene3d(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    auto* ctx = (SvgRenderContext*)vctx;
+    if (scene3d_paint_content(svg_active_paint_list(ctx),ctx->ui_context,block,abs_x,abs_y)) svg_lower_paint_list(ctx);
+}
+
 static void svg_cb_render_geomap(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
     auto* ctx = (SvgRenderContext*)vctx;
     BlockBlot parent = {};
@@ -1041,6 +985,7 @@ static RenderBackend svg_make_backend(SvgRenderContext* ctx) {
     b.render_image          = svg_cb_render_image;
     b.render_inline_svg     = svg_cb_render_inline_svg;
     b.render_geomap         = svg_cb_render_geomap;
+    b.render_scene3d        = svg_cb_render_scene3d;
     b.render_svg_subscene   = svg_cb_render_svg_subscene;
     b.begin_block_children  = svg_cb_begin_block_children;
     b.end_block_children    = svg_cb_end_block_children;
@@ -1228,7 +1173,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, float width, fl
     render_profiler_emit_path_trace(nullptr, uicon, state, &trace);
 
     // Extract the final SVG string
-    char* result = mem_strdup(ctx.svg_content->str, MEM_CAT_RENDER);
+    char* result = uicon->render_failed ? nullptr : mem_strdup(ctx.svg_content->str, MEM_CAT_RENDER);
     strbuf_free(ctx.svg_content);
     paint_list_destroy(&ctx.paint_list);
     paint_list_destroy(&ctx.effect_fallback.paint_list);

@@ -308,6 +308,13 @@ lib?<title> |> ~[0]           // ["Clean Code", …] — every title's text
 lib?<book>?<year> |> int(~[0])   // [2008, …]
 ```
 
+Use `input(path, {type: 'xml', flavor: 'strict'})^` or
+`parse(text, {type: 'xml', flavor: 'strict'})^` for namespace-aware,
+well-formed XML validation. This profile accepts an external DOCTYPE
+identifier as inert metadata; it never fetches a DTD and rejects internal
+subsets and unknown entities. The ordinary `'xml'` data reader remains
+permissive. [MusicXML sheet music](Lambda_Music.md) uses the strict profile.
+
 ### 2.4 YAML → Lambda Map / Array
 
 YAML documents (including multi-document streams) map to the same map/array model as JSON. All YAML scalar types — strings, ints, floats, booleans, nulls and timestamps — become their Lambda equivalents.

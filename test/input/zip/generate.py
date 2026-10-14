@@ -29,6 +29,7 @@ normal = archive([
     ('bad.json', b'{invalid', 8),
 ])
 (base / 'sample.docx').write_bytes(normal)
+(base / 'sample.zip').write_bytes(normal)
 (base / 'renamed.dat').write_bytes(normal)
 (base / 'extensionless').write_bytes(normal)
 (base / 'legacy.doc').write_bytes(bytes.fromhex('d0cf11e0a1b11ae1') + b'legacy compound container')

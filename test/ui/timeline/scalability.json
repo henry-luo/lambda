@@ -1,0 +1,18 @@
+{
+  "name": "Ten thousand source events retain bounded native cards across distant window updates",
+  "html": "test/ui/timeline/scalability.ls",
+  "viewport": {"width": 900, "height": 1040},
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#large-history article[data-timeline-id]"}, "count": 9},
+    {"type": "assert_count", "target": {"selector": "#large-history article[data-timeline-id='event-5000']"}, "count": 1},
+    {"type": "click", "target": {"selector": "#window-start"}},
+    {"type": "assert_count", "target": {"selector": "#large-history article[data-timeline-id]"}, "count": 9},
+    {"type": "assert_count", "target": {"selector": "#large-history article[data-timeline-id='event-0']"}, "count": 1},
+    {"type": "click", "target": {"selector": "#window-end"}},
+    {"type": "assert_count", "target": {"selector": "#large-history article[data-timeline-id]"}, "count": 9},
+    {"type": "assert_count", "target": {"selector": "#large-history article[data-timeline-id='event-9999']"}, "count": 1},
+    {"type": "click", "target": {"selector": "#window-middle"}},
+    {"type": "assert_count", "target": {"selector": "#large-history article[data-timeline-id]"}, "count": 9},
+    {"type": "assert_count", "target": {"selector": "#large-history article[data-timeline-id='event-5000']"}, "count": 1}
+  ]
+}

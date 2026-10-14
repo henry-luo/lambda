@@ -131,7 +131,7 @@ pub fn parse_mark(mark_el) {
 
 fn parse_encoding(encoding_el) {
     let count = len(content(encoding_el));
-    map([for (key in ["x", "y", "color", "size", "opacity", "theta", "text", "stroke", "x_offset",
+    map([for (key in ["x", "y", "z", "z2", "color", "size", "opacity", "theta", "text", "stroke", "x_offset",
         "x2", "y2", "detail", "tooltip", "shape", "order", "url", "theta2", "radius", "radius2", "longitude", "latitude",
         "position", "key", "group_key", "path", "direction", "magnitude", "enter_delay", "enter_duration", "update_delay", "update_duration", "exit_delay", "exit_duration",
         "id", "at", "from", "to", "title", "subtitle", "content", "display_date", "group", "subgroup", "tags", "marker", "media", "link", "priority", "metadata"],

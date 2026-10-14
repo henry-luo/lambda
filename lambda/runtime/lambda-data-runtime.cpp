@@ -266,7 +266,24 @@ ArrayNum* array_num_reserve_capacity(ArrayNum* arr, int64_t minimum_capacity) {
 }
 
 static ArrayNum* array_num_new_with_extra_init(ArrayNumElemType elem_type,
-        int64_t length, int64_t extra, bool zeroed);
+        int64_t length, int64_t extra, bool zeroed,
+        int ndim=1, const int64_t* dimensions=nullptr);
+
+// construct metadata before the payload so a tiny shape allocation cannot promote a new image.
+ArrayNum* alloc_ndim_arraynum(ArrayNumElemType etype, int ndim, const int64_t* shape) {
+    if (ndim<1 || ndim>LAMBDA_ARRAY_NUM_MAX_NDIM || !shape) return nullptr;
+    int64_t dimensions[LAMBDA_ARRAY_NUM_MAX_NDIM];
+    size_t total=1;
+    for (int i=ndim-1;i>=0;i--) {
+        dimensions[i]=shape[i];
+        // validate suffix products even when an earlier axis is zero.
+        if (shape[i]<0 || !math_checked_mul(total,(size_t)shape[i],&total) || total>INT64_MAX) return nullptr;
+    }
+    ArrayNum* result=array_num_new_with_extra_init(etype,(int64_t)total,0,true,ndim,dimensions);
+    return result && (total==0 || result->data) ? result : nullptr;
+}
+
+
 
 ArrayNum* array_num_new_with_extra(ArrayNumElemType elem_type, int64_t length,
                                    int64_t extra) {
@@ -280,7 +297,8 @@ ArrayNum* array_num_new_uninit(ArrayNumElemType elem_type, int64_t length) {
 }
 
 static ArrayNum* array_num_new_with_extra_init(ArrayNumElemType elem_type, int64_t length,
-                                               int64_t extra, bool zeroed) {
+                                               int64_t extra, bool zeroed,
+        int ndim, const int64_t* dimensions) {
     if (length < 0 || extra < 0 || length > INT64_MAX - extra) return NULL;
     ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
     if (!arr) return NULL;
@@ -297,6 +315,24 @@ static ArrayNum* array_num_new_with_extra_init(ArrayNumElemType elem_type, int64
     if (elem_size <= 0 ||
             !lam::checked_mul((size_t)(length + extra), (size_t)elem_size, &bytes)) {
         return arr;
+    }
+    if (ndim>1) {
+        size_t shape_bytes=sizeof(ArrayNumShape)+2*(size_t)ndim*sizeof(int64_t);
+        ArrayNumShape* shape=(ArrayNumShape*)heap_data_calloc(shape_bytes);
+        arr=rooted_arr.get();
+        if (!shape) return nullptr;
+        shape->ndim=(uint8_t)ndim;
+        shape->is_c_contig=1;
+        shape->is_f_contig=0;
+        int64_t* dims=array_num_shape_dims(shape);
+        int64_t* strides=array_num_shape_strides(shape);
+        int64_t stride=1;
+        for (int i=ndim-1;i>=0;i--) {
+            dims[i]=dimensions[i]; strides[i]=stride; stride*=dimensions[i];
+        }
+        // the rooted owner carries its shape across the payload's MAY_GC allocation (D5.3.3).
+        arr->is_ndim=1;
+        arr->extra=(int64_t)(uintptr_t)shape;
     }
     if (bytes > 0) {
         void* data = zeroed ? heap_data_alloc(bytes) : heap_data_alloc_uninit(bytes);

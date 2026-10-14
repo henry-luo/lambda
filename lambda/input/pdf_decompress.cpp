@@ -256,152 +256,113 @@ char* lzw_decode(const char* compressed_data, size_t compressed_len,
 /**
  * Decode ASCII85 (base-85) encoded data
  */
-char* ascii85_decode(const char* encoded_data, size_t encoded_len, size_t* out_len) {
-    if (!encoded_data || encoded_len == 0 || !out_len) {
-        return NULL;
-    }
-
-    // Allocate output buffer (worst case: 4 bytes per 5 input chars)
-    size_t buffer_size = (encoded_len * 4) / 5 + 4;
-    char* output = (char*)mem_alloc(buffer_size, MEM_CAT_INPUT_PDF);
-    if (!output) {
-        return NULL;
-    }
-
-    const char* in = encoded_data;
-    const char* in_end = encoded_data + encoded_len;
-    char* out = output;
-    uint32_t value = 0;
-    int count = 0;
-
-    // Skip whitespace and look for start marker
-    while (in < in_end && (*in == ' ' || *in == '\t' || *in == '\n' || *in == '\r')) {
-        in++;
-    }
-
-    // Handle <~ prefix if present
-    if (in < in_end - 1 && in[0] == '<' && in[1] == '~') {
-        in += 2;
-    }
-
-    while (in < in_end) {
-        char c = *in++;
-
-        // Skip whitespace
-        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
-            continue;
-        }
-
-        // Check for end marker ~>
-        if (c == '~' && in < in_end && *in == '>') {
-            break;
-        }
-
-        // Handle 'z' (represents 4 zero bytes)
-        if (c == 'z') {
-            if (count != 0) {
-                mem_free(output);
-                return NULL; // 'z' can only appear at group start
+bool ascii85_decode_bounded(const char* data, size_t length, StrBuf* output,
+                            size_t max_bytes, bool require_eod, size_t* consumed) {
+    if (!data || !output || !consumed) return false;
+    strbuf_reset(output);
+    *consumed = 0;
+    size_t pos = 0;
+    uint64_t value = 0;
+    unsigned count = 0;
+    bool closed = false;
+    while (pos < length && (data[pos] == 0 || data[pos] == 9 || data[pos] == 10 ||
+            data[pos] == 12 || data[pos] == 13 || data[pos] == 32)) pos++;
+    if (length - pos >= 2 && data[pos] == '<' && data[pos + 1] == '~') pos += 2;
+    while (pos < length) {
+        unsigned char c = (unsigned char)data[pos++];
+        if (c == 0 || c == 9 || c == 10 || c == 12 || c == 13 || c == 32) continue;
+        if (c == '~' && pos < length && data[pos] == '>') { pos++; closed = true; break; }
+        unsigned produced = 0;
+        if (c == 'z' && count == 0) { value = 0; produced = 4; }
+        else if (c >= '!' && c <= 'u') {
+            value = value * 85 + c - '!';
+            if (++count == 5) {
+                if (value > UINT32_MAX) return false;
+                produced = 4;
             }
-            *out++ = 0;
-            *out++ = 0;
-            *out++ = 0;
-            *out++ = 0;
-            continue;
-        }
-
-        // Decode base-85 character
-        if (c < '!' || c > 'u') {
-            mem_free(output);
-            return NULL; // Invalid character
-        }
-
-        value = value * 85 + (c - '!');
-        count++;
-
-        if (count == 5) {
-            // Output 4 bytes
-            *out++ = (value >> 24) & 0xFF;
-            *out++ = (value >> 16) & 0xFF;
-            *out++ = (value >> 8) & 0xFF;
-            *out++ = value & 0xFF;
-            value = 0;
-            count = 0;
-        }
+        } else return false;
+        // 'z' expands one source byte to four bytes; encoded length is not an output capacity.
+        if (produced > max_bytes - output->length) return false;
+        if (!strbuf_ensure_cap(output, output->length + produced + 1)) return false;
+        for (unsigned i = 0; i < produced; i++)
+            strbuf_append_char(output, (char)(value >> (24 - i * 8)));
+        if (produced) { count = 0; value = 0; }
     }
-
-    // Handle partial group at end
-    if (count > 0) {
-        // Pad with 'u' characters
-        for (int i = count; i < 5; i++) {
-            value = value * 85 + 84; // 'u' = 84
-        }
-        // Output count-1 bytes
-        for (int i = 0; i < count - 1; i++) {
-            *out++ = (value >> (24 - i * 8)) & 0xFF;
-        }
+    *consumed = pos;
+    if ((require_eod && !closed) || count == 1) return false;
+    if (count > 1) {
+        for (unsigned i = count; i < 5; i++) value = value * 85 + 84;
+        if (value > UINT32_MAX || count - 1 > max_bytes - output->length) return false;
+        if (!strbuf_ensure_cap(output, output->length + count)) return false;
+        for (unsigned i = 0; i < count - 1; i++)
+            strbuf_append_char(output, (char)(value >> (24 - i * 8)));
     }
+    return true;
+}
 
-    *out_len = out - output;
-
-    // Shrink buffer to actual size
-    char* final_output = (char*)mem_realloc(output, *out_len + 1, MEM_CAT_INPUT_PDF);
-    if (final_output) {
-        final_output[*out_len] = '\0';
-        return final_output;
+static char* copy_decoded_buffer(StrBuf* buffer, size_t* out_len) {
+    char* result = (char*)mem_alloc(buffer->length + 1, MEM_CAT_INPUT_PDF);
+    if (result) {
+        if (buffer->length) memcpy(result, buffer->str, buffer->length);
+        result[buffer->length] = 0;
+        *out_len = buffer->length;
     }
+    strbuf_free(buffer);
+    return result;
+}
 
-    output[*out_len] = '\0';
-    return output;
+char* ascii85_decode(const char* encoded_data, size_t encoded_len, size_t* out_len) {
+    if (!encoded_data || !encoded_len || !out_len) return NULL;
+    StrBuf* buffer = strbuf_new();
+    size_t consumed = 0;
+    if (!buffer || !ascii85_decode_bounded(encoded_data, encoded_len, buffer, SIZE_MAX, false, &consumed)) {
+        strbuf_free(buffer); return NULL;
+    }
+    return copy_decoded_buffer(buffer, out_len);
 }
 
 /**
  * Decode ASCIIHex (hexadecimal) encoded data
  * Based on pdf.js src/core/ascii_hex_stream.js
  */
-char* asciihex_decode(const char* encoded_data, size_t encoded_len, size_t* out_len) {
-    if (!encoded_data || encoded_len == 0 || !out_len) {
-        return NULL;
-    }
-
-    // output is half the size of input (2 hex chars = 1 byte)
-    size_t buffer_size = (encoded_len + 1) / 2;
-    char* output = (char*)mem_alloc(buffer_size + 1, MEM_CAT_INPUT_PDF);
-    if (!output) {
-        return NULL;
-    }
-
-    const char* in = encoded_data;
-    const char* in_end = encoded_data + encoded_len;
-    char* out = output;
-    int first_digit = -1;
-
-    while (in < in_end) {
-        char c = *in++;
-        if (c == '>') break; // end marker
-
-        int digit = hex_decode_byte(c);
+bool asciihex_decode_bounded(const char* data, size_t length, StrBuf* output,
+                             size_t max_bytes, bool strict, bool require_eod,
+                             size_t* consumed) {
+    if (!data || !output || !consumed) return false;
+    strbuf_reset(output);
+    *consumed = 0;
+    int high = -1;
+    bool closed = false;
+    for (size_t pos = 0; pos < length; pos++) {
+        unsigned char c = (unsigned char)data[pos];
+        *consumed = pos + 1;
+        if (c == '>') { closed = true; break; }
+        int digit = hex_decode_byte((char)c);
         if (digit < 0) {
-            // skip whitespace and any other invalid character
+            if (strict && !(c == 0 || c == 9 || c == 10 || c == 12 || c == 13 || c == 32)) return false;
             continue;
         }
-
-        if (first_digit < 0) {
-            first_digit = digit;
-        } else {
-            *out++ = (char)((first_digit << 4) | digit);
-            first_digit = -1;
-        }
+        if (high < 0) { high = digit; continue; }
+        if (output->length >= max_bytes || !strbuf_ensure_cap(output, output->length + 2)) return false;
+        strbuf_append_char(output, (char)(high * 16 + digit));
+        high = -1;
     }
-
-    // handle odd number of digits
-    if (first_digit >= 0) {
-        *out++ = (char)(first_digit << 4);
+    if (require_eod && !closed) return false;
+    if (high >= 0) {
+        if (output->length >= max_bytes || !strbuf_ensure_cap(output, output->length + 2)) return false;
+        strbuf_append_char(output, (char)(high * 16));
     }
+    return true;
+}
 
-    *out_len = out - output;
-    output[*out_len] = '\0';
-    return output;
+char* asciihex_decode(const char* encoded_data, size_t encoded_len, size_t* out_len) {
+    if (!encoded_data || !encoded_len || !out_len) return NULL;
+    StrBuf* buffer = strbuf_new();
+    size_t consumed = 0;
+    if (!buffer || !asciihex_decode_bounded(encoded_data, encoded_len, buffer, SIZE_MAX, false, false, &consumed)) {
+        strbuf_free(buffer); return NULL;
+    }
+    return copy_decoded_buffer(buffer, out_len);
 }
 
 /**
@@ -412,59 +373,35 @@ char* asciihex_decode(const char* encoded_data, size_t encoded_len, size_t* out_
  *         n (129-255) = repeat next byte (257-n) times
  *         n (128) = end of data
  */
-char* runlength_decode(const char* encoded_data, size_t encoded_len, size_t* out_len) {
-    if (!encoded_data || encoded_len == 0 || !out_len) {
-        return NULL;
-    }
-
-    // estimate output size (could be larger or smaller)
-    if (encoded_len > SIZE_MAX / 2u) return NULL;
-    ByteBuilder output = {};
-    if (!byte_builder_init(&output, encoded_len * 2u, MEM_CAT_INPUT_PDF, true)) return NULL;
-
-    const uint8_t* in = (const uint8_t*)encoded_data;
-    const uint8_t* in_end = in + encoded_len;
-
-    while (in < in_end) {
-        uint8_t n = *in++;
-        
-        if (n == 128) {
-            // end of data
-            break;
+bool runlength_decode_bounded(const char* data, size_t length, StrBuf* out,
+                              size_t max_bytes, bool strict, bool require_eod, size_t* consumed) {
+    strbuf_reset(out); *consumed = 0;
+    while (*consumed < length) {
+        unsigned n = (unsigned char)data[(*consumed)++];
+        if (n == 128) return true;
+        size_t amount = n < 128 ? n + 1 : 257 - n;
+        size_t input = n < 128 ? amount : 1;
+        if (input > length - *consumed) {
+            if (strict) return false;
+            if (n >= 128) break;
+            amount = input = length - *consumed;
         }
-
-        if (n < 128) {
-            // copy next n+1 bytes
-            size_t copy_count = (size_t)n + 1u;
-            size_t available = (size_t)(in_end - in);
-            if (copy_count > available) copy_count = available;
-            if (!byte_builder_append(&output, in, copy_count)) {
-                byte_builder_destroy(&output);
-                return NULL;
-            }
-            in += copy_count;
-        } else {
-            // repeat next byte (257-n) times
-            size_t repeat_count = 257u - (size_t)n;
-            
-            if (in >= in_end) break;
-            uint8_t repeat_byte = *in++;
-            
-            // fill with repeated byte
-            if (!byte_builder_reserve(&output, repeat_count)) {
-                byte_builder_destroy(&output);
-                return NULL;
-            }
-            memset(byte_builder_writable_tail(&output, NULL), repeat_byte, repeat_count);
-            if (!byte_builder_commit(&output, repeat_count)) {
-                byte_builder_destroy(&output);
-                return NULL;
-            }
-        }
+        if (amount > max_bytes - out->length || !strbuf_ensure_cap(out, out->length + amount + 1)) return false;
+        if (n < 128) strbuf_append_str_n(out, data + *consumed, amount);
+        else for (size_t i = 0; i < amount; i++) strbuf_append_char(out, data[*consumed]);
+        *consumed += input;
     }
+    return !require_eod;
+}
 
-    *out_len = output.length;
-    return (char*)byte_builder_take(&output, NULL);
+char* runlength_decode(const char* data, size_t length, size_t* out_len) {
+    if (!data || !length || !out_len) return nullptr;
+    StrBuf* out = strbuf_new(); size_t consumed = 0;
+    if (!out) return nullptr;
+    if (!runlength_decode_bounded(data, length, out, SIZE_MAX - 1, false, false, &consumed)) {
+        strbuf_free(out); return nullptr;
+    }
+    return copy_decoded_buffer(out, out_len);
 }
 
 /**

@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Definite zero flex width and inherited anonymous line height</title>
+<style>
+@font-face {font-family:Ahem;src:url(../layout/data/support/fonts/Ahem.ttf)}
+body {margin:0;font:20px/20px Ahem}
+.row {display:flex;background:lightgreen}
+.case {margin-bottom:20px}
+</style>
+<div id="result">
+  <div class="case" style="width:0"><div id="auto" class="row">X</div></div>
+  <div id="explicit" class="row case" style="width:0">X</div>
+  <div class="case" style="width:0"><div id="padding" class="row" style="padding:7px">X</div></div>
+  <div class="case" style="width:0"><div id="column" class="row" style="flex-direction:column">X</div></div>
+  <div class="case" style="width:0"><div id="reverse" class="row" style="flex-direction:row-reverse">X</div></div>
+  <div id="empty" class="row case" style="width:0"></div>
+  <div class="case"><div id="intrinsic" style="display:inline-flex">X</div></div>
+  <div id="ordinary" class="row" style="width:80px">X</div>
+</div>

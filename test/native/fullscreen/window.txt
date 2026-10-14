@@ -1,0 +1,11 @@
+<html
+  <body id: "result", data-available: "false", data-mode: "false", data-changes: "0", data-accepted: "false", data-error: "false", data-metrics: "false", data-restored: "false", style: "font:20px sans-serif;padding:24px",
+    <div id: "viewport-check", style: "position:fixed;left:0;top:0;width:100vw;height:100vh;pointer-events:none">
+    <h1
+      "Radiant fullscreen">
+    <button id: "enter",
+      "Enter fullscreen">
+    <button id: "exit",
+      "Exit fullscreen">
+    <p
+      "F11 toggles fullscreen. Escape returns to the window.">>>

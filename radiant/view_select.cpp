@@ -33,6 +33,15 @@ DomElement* dom_select_next_option(DomElement* select, DomElement* previous) {
     return nullptr;
 }
 
+DomElement* dom_select_option_at_index(DomElement* select, int index) {
+    if (index < 0) return nullptr;
+    for (DomElement* option = dom_select_next_option(select, nullptr); option;
+         option = dom_select_next_option(select, option)) {
+        if (index-- == 0) return option;
+    }
+    return nullptr;
+}
+
 const char* dom_option_text(DomElement* option) {
     if (!option || option->tag() != MARKUP_NAME_OPTION) return nullptr;
     for (DomNode* child = option->first_child; child; child = child->next_sibling) {

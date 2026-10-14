@@ -1,4 +1,6 @@
 #include "input/input.hpp"
+#include "input/input-postscript.hpp"
+#include "core/mark_reader.hpp"
 #include "io/zip_archive.hpp"
 #include "format/format.h"
 #include "format/format-markup.h"
@@ -872,6 +874,7 @@ struct DocWindowLaunchOptions {
     bool headless;
     bool event_log;
     bool state_dump;
+    bool fullscreen;
     const char* graph_view_key;
     bool source_surface;
     bool browse_archive;
@@ -924,6 +927,8 @@ static bool parse_doc_window_launch_options(int argc, char** argv, bool is_view,
             out->event_result = argv[++i];
         } else if (strcmp(argv[i], "--headless") == 0) {
             out->headless = true;
+        } else if (strcmp(argv[i], "--fullscreen") == 0) {
+            out->fullscreen = true;
         } else if (strcmp(argv[i], "--event-log") == 0) {
             out->event_log = true;
         } else if (strcmp(argv[i], "--state-dump") == 0) {
@@ -948,6 +953,10 @@ static bool parse_doc_window_launch_options(int argc, char** argv, bool is_view,
         } else if (argv[i][0] != '-' && out->filename == NULL) {
             out->filename = argv[i];
         }
+    }
+    if (out->fullscreen && out->headless) {
+        fputs("Error: --fullscreen requires a visible window; remove --headless\n", stderr);
+        return false;
     }
     if (has_paged_options && !out->paged) {
         fputs("Error: page preview options require --paged\n", stderr);
@@ -983,15 +992,19 @@ int cmd_layout(int argc, char** argv);
 // here breaks once render_export_support.hpp is a DD4 shim to the global header.
 
 // Document viewer function from radiant - unified viewer for all document types (HTML, PDF, Markdown, etc.)
+#ifndef LAMBDA_HEADLESS
+// The runtime-only host excludes these providers and their rendering types.
 extern int view_doc_in_window(const char* doc_file);
 extern int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
                                            const char** font_dirs = nullptr, int font_dir_count = 0,
                                            bool enable_event_log = false,
                                            bool enable_state_dump = false,
-                                           const RenderPagedOptions* paged_options = nullptr);
+                                           const RenderPagedOptions* paged_options = nullptr,
+                                           bool fullscreen = false);
 extern char* event_sim_replay_document_path(const char* jsonl_file);
 extern void event_sim_set_replay_assert_state(bool assert_state);
 extern void event_sim_set_result_path(const char* result_path);
+#endif
 
 // REPL functions from main-repl.cpp
 extern int lambda_repl_init(InterpReplSession* session);
@@ -1487,10 +1500,10 @@ void run_assertions() {
     assert(-1.0/0.0 == -INFINITY);
 }
 
-// Invoke configured package transforms directly and preserve their HTML output.
-static StrBuf* run_document_transform_html(const char* input_file,
+// serialize the transform before its runtime owner is released.
+static StrBuf* run_document_transform_markup(const char* input_file,
         const LambdaDocumentTransformConfig* transform,
-        const LambdaDocumentTransformOption* options, int option_count) {
+        const LambdaDocumentTransformOption* options, int option_count, bool as_xml = false) {
     if (!input_file || !transform) return nullptr;
     Runtime runtime;
     runtime_init(&runtime);
@@ -1501,7 +1514,8 @@ static StrBuf* run_document_transform_html(const char* input_file,
         get_type_id(result->root) != LMD_TYPE_ERROR) {
         output = strbuf_new_cap(8192);
         if (get_type_id(result->root) == LMD_TYPE_ELEMENT) {
-            String* html = format_html(result->pool, result->root);
+            String* html = as_xml ? format_xml(result->pool, result->root)
+                                  : format_html(result->pool, result->root);
             if (html) strbuf_append_str(output, html->chars);
             else {
                 strbuf_free(output);
@@ -1759,6 +1773,8 @@ int exec_convert(int argc, char* argv[]) {
         bool is_graph_input = graph_path_is_graph(input_file) ||
             (from_format && (strcmp(from_format, "graph") == 0 ||
                 strncmp(from_format, "graph:", 6) == 0));
+        const char* parsed_format = MapReader(input->root.get_safe_map()).get("format").cstring();
+        bool is_eps_input = parsed_format && strcmp(parsed_format, "eps") == 0;
 
         // Step 2: Format the parsed data to the target format
         printf("Converting to format: %s\n", to_format);
@@ -1768,7 +1784,10 @@ int exec_convert(int argc, char* argv[]) {
 
         // Use the existing format functions based on target format
         bool is_yaml_input = from_format && (strcmp(from_format, "yaml") == 0 || strcmp(from_format, "yml") == 0);
-        if (strcmp(to_format, "json") == 0) {
+        if (strcmp(to_format, "svg") == 0 && is_eps_input) {
+            full_doc_output = run_document_transform_markup(input_file,
+                lambda_document_transform_for_input_type("eps"), nullptr, 0, true);
+        } else if (strcmp(to_format, "json") == 0) {
             // empty YAML document (comments-only, whitespace-only, etc.)
             if (is_yaml_input && input->doc_count == 0 && get_type_id(input->root) == LMD_TYPE_NULL) {
                 full_doc_output = strbuf_new_cap(1);
@@ -1801,7 +1820,7 @@ int exec_convert(int argc, char* argv[]) {
                     options[option_count++] = {"view_key",
                         LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, graph_view_key, false};
                 }
-                full_doc_output = run_document_transform_html(input_file, transform,
+                full_doc_output = run_document_transform_markup(input_file, transform,
                     options, option_count);
                 if (!full_doc_output) {
                     printf("Error: Lambda graph package - HTML conversion failed\n");
@@ -1819,7 +1838,7 @@ int exec_convert(int argc, char* argv[]) {
                     options[option_count++] = {"font_option",
                         LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, font_option, false};
                 }
-                full_doc_output = run_document_transform_html(input_file, transform,
+                full_doc_output = run_document_transform_markup(input_file, transform,
                     options, option_count);
                 if (!full_doc_output) {
                     printf("Error: Lambda LaTeX package - HTML rendering failed\n");
@@ -1868,7 +1887,16 @@ int exec_convert(int argc, char* argv[]) {
         } else if (strcmp(to_format, "math-typst") == 0) {
             formatted_output = format_math_typst(input->pool, input->root);
         } else if (strcmp(to_format, "math-mathml") == 0) {
-            formatted_output = format_math_mathml(input->pool, input->root);
+            // The package owns conversion; XML serialization stays in IO (D7.2.8).
+            const LambdaDocumentTransformConfig transform = {
+                "math", "lambda.doc.math.mathml", "export_file",
+                LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true};
+            LambdaDocumentTransformOption options[] = {
+                {"input_type", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, type_string->chars, false},
+                {"flavor", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING,
+                    flavor_string ? flavor_string->chars : "", false},
+            };
+            full_doc_output = run_document_transform_markup(input_file, &transform, options, 2, true);
         } else if (strcmp(to_format, "mark") == 0) {
             // Use print_root_item to format as mark representation
             StrBuf* sb = strbuf_new_cap(1024);
@@ -2396,6 +2424,8 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"superlambda", "test/demo/superlambda/superlambda.ls"},
     {"doom", "test/demo/doom/doom.ls"},
     {"photo", "test/demo/photo/photo.ls"},
+    {"draw", "test/demo/draw/draw.ls"},
+    {"cellscope", "test/demo/cellscope/cellscope.ls"},
     {"scene3d", "test/demo/scene3d/ringworld.ls"},
     {"ringworld", "test/demo/scene3d/ringworld.ls"},
     {"observatory", "test/demo/scene3d/observatory.html"},
@@ -3828,6 +3858,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, graph_view_key, false};
             }
             log_info("GRAPH_RENDER_TRANSFORM: rendering '%s' through Lambda graph transform", html_file);
+        } else if (eps_source_expected(html_file, nullptr, 0)) {
+            render_transform = lambda_document_transform_for_input_type("eps");
         } else if (input_ext && strcmp(input_ext, ".pgf") == 0) {
             render_transform = lambda_document_transform_for_input_type("tikz");
             if (!render_transform) {
@@ -3982,11 +4014,11 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  --source                   Open the file as source text, whatever its format\n");
             printf("  --event-file <file.json>   Load simulated events from JSON file for testing\n");
             printf("  --event-result <file.json> Write a machine-readable event result\n");
-            printf("  --headless                 Run without creating a window\n");
+            fputs("  --headless                 Run without creating a window\n  --fullscreen               Start in fullscreen (F11 toggles)\n", stdout);
             printf("\nKeyboard Controls:\n");
             printf("  Cmd/Ctrl+S        Save (Shift for Save As)\n");
             printf("  Cmd/Ctrl+Z        Undo (Shift for redo)\n");
-            printf("  ESC               Cancel the current dialog or gesture\n");
+            fputs("  F11               Toggle fullscreen\n  ESC               Exit fullscreen, or cancel the current dialog or gesture\n", stdout);
             return lambda_main_finish(0);
         }
         DocWindowLaunchOptions launch;
@@ -4012,7 +4044,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                  launch.event_file ? launch.event_file : "none");
         int exit_code = edit_doc_in_window_with_events(filename, launch.source_surface,
             launch.event_file, launch.headless, launch.font_dirs, launch.font_dir_count,
-            launch.event_log, launch.state_dump);
+            launch.event_log, launch.state_dump, launch.fullscreen);
         if (exit_code < 0) {
             const char* diagnostic = lambda_document_load_diagnostic();
             printf("Error: cannot edit '%s': %s\n", filename,
@@ -4084,6 +4116,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                   "  --book [--book-page <n>]  Preview a facing-page spread\n"
                   "  --right-binding          Use right-bound book order\n"
                   "  --block-remote-resources Disable remote subresources\n", stdout);
+            fputs("  --fullscreen              Start in fullscreen (F11 toggles)\n", stdout);
             printf("  --view-key <key>           Structurizr view key (default: first declared view)\n");
             printf("\nExamples:\n");
             printf("  %s view                          # Open the bundled lambda.doc document viewer\n", argv[0]);
@@ -4104,7 +4137,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  %s view page.html --event-file events.json --headless  # Headless testing (no window)\n", argv[0]);
             printf("  --state-dump  Emit per-cascade Mark state-store dump under ./temp/state/\n");
             printf("\nKeyboard Controls:\n");
-            printf("  ESC        Close window\n");
+            fputs("  F11        Toggle fullscreen\n  ESC        Exit fullscreen, or close the window\n", stdout);
             fputs("  Paged mode: wheel/arrows scroll; PageUp/PageDown, Home/End navigate\n", stdout);
             printf("  Q          Quit viewer\n");
             return lambda_main_finish(0);
@@ -4146,7 +4179,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 return lambda_main_finish(1);
             }
             int result = view_doc_in_window_with_events(filename, event_file, headless,
-                font_dirs, font_dir_count, event_log, state_dump, &launch.paged_options);
+                font_dirs, font_dir_count, event_log, state_dump, &launch.paged_options, launch.fullscreen);
             lambda_view_log_completion(result);
             return lambda_main_finish(result);
         }
@@ -4234,7 +4267,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             };
             log_info("VIEW_FILE_TREE: opening directory or ZIP archive: %s", filename);
             exit_code = view_lambda_document_transform_with_events(filename, &browser_transform,
-                nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump);
+                nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump, launch.fullscreen);
         } else if (is_graph_file && graph_view_key) {
             const LambdaDocumentTransformConfig* transform =
                 lambda_document_transform_for_input_type("graph");
@@ -4248,11 +4281,11 @@ static int lambda_main_impl(int argc, char *argv[]) {
             log_info("GRAPH_VIEW_TRANSFORM: viewing '%s' through Lambda graph transform", filename);
             exit_code = view_lambda_document_transform_with_events(filename, transform,
                 &option, 1, event_file, headless, font_dirs, font_dir_count,
-                event_log, state_dump);
+                event_log, state_dump, launch.fullscreen);
 
             lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);
-        } else if (is_docx_file || is_graph_file || (ext && (strcmp(ext, ".pdf") == 0 ||
+        } else if (is_docx_file || is_graph_file || eps_source_expected(filename, nullptr, 0) || (ext && (strcmp(ext, ".pdf") == 0 ||
                     strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 ||
                     strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
@@ -4271,7 +4304,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             log_info("Opening document file: %s (event_file: %s)", filename, event_file ? event_file : "none");
             exit_code = view_doc_in_window_with_events(filename, event_file, headless,
                                                        font_dirs, font_dir_count, event_log,
-                                                       state_dump);
+                                                       state_dump, nullptr, launch.fullscreen);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
             printf("Supported formats: .docx, .pdf, .html, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");

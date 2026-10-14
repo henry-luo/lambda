@@ -1,0 +1,183 @@
+{
+  "name": "CellScope loading popup, cancellation, Retry and comparison",
+  "viewport": {
+    "width": 390,
+    "height": 600
+  },
+  "input_turn_ms": 0,
+  "event_interval_ms": 0,
+  "events": [
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cellscope').getAttribute('data-loading')==='true'&&document.querySelectorAll('#cell-scene geometry').length===0"
+    },
+    {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "(()=>{const card=document.querySelector('.loading-card').getBoundingClientRect();return document.getElementById('model-loading').style.display==='flex'&&document.getElementById('loading-specimen').textContent==='Plant Cell'&&document.querySelectorAll('#cell-scene geometry').length===0&&card.width>200&&card.left>=0&&card.right<=390&&Math.abs((card.left+card.right)/2-195)<1&&Math.abs((card.top+card.bottom)/2-300)<1})()"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/cellscope-loading-popup.png"
+    },
+    {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('model-loading').style.display==='none'&&document.querySelector('#cell-scene #imported-specimen').getAttribute('data-model')==='plant'&&document.getElementById('scene-pair').getAttribute('aria-busy')==='false'"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.loadedPlant=document.querySelector('#cell-scene #imported-specimen').firstElementChild"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('choose-plant').click()"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cellscope').getAttribute('data-loading')==='false'&&document.querySelector('#cell-scene #imported-specimen').firstElementChild===loadedPlant"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('choose-whiteBlood').click()"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('loading-specimen').textContent==='White Blood Cell'&&document.getElementById('model-loading').style.display==='flex'"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('choose-plant').click()"
+    },
+    {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('cellscope').getAttribute('data-cell')==='plant'&&document.getElementById('cellscope').getAttribute('data-loading')==='false'&&document.querySelector('#cell-scene #imported-specimen').firstElementChild===loadedPlant"
+    },
+    {
+      "type": "script",
+      "js": "document.querySelector('#cell-scene #imported-specimen').setAttribute('data-error','Model unavailable');document.getElementById('choose-plant').click()"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('model-error').style.display==='block'&&document.getElementById('model-error-text').textContent==='Model unavailable'&&document.getElementById('model-loading').style.display==='none'"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('retry-model').click()"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('model-loading').style.display==='flex'&&document.getElementById('model-error').style.display==='none'&&document.querySelector('#cell-scene #imported-specimen').getAttribute('data-model')===null"
+    },
+    {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('model-loading').style.display==='flex'&&document.querySelector('#cell-scene #imported-specimen').getAttribute('data-model')===null"
+    },
+    {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('model-loading').style.display==='none'&&document.querySelector('#cell-scene #imported-specimen').getAttribute('data-error')===''"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('peer').value='plant';document.getElementById('peer').dispatchEvent(new Event('change',{bubbles:true}));document.getElementById('compare').click()"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('model-loading').style.display==='flex'&&document.querySelector('#peer-scene #imported-specimen').getAttribute('data-model')===null"
+    },
+    {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('model-loading').style.display==='none'&&document.querySelector('#peer-scene #imported-specimen').getAttribute('data-model')==='plant'"
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById('retry-model').click()"
+    },
+    {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('model-loading').style.display==='flex'&&document.querySelector('#cell-scene #imported-specimen').getAttribute('data-model')==='plant'&&document.querySelector('#peer-scene #imported-specimen').getAttribute('data-model')===null"
+    },
+    {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
+      "type": "advance_time",
+      "ms": 16,
+      "steps": 1
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById('model-loading').style.display==='none'&&document.getElementById('scene-pair').getAttribute('aria-busy')==='false'&&document.querySelector('#peer-scene #imported-specimen').getAttribute('data-error')===''"
+    },
+    {
+      "type": "assert_surface",
+      "source": "scene3d",
+      "target": "#peer-scene",
+      "width": 256,
+      "height": 192,
+      "different_from_pixel": [
+        0,
+        0
+      ],
+      "count": {
+        "min": 300
+      }
+    }
+  ]
+}

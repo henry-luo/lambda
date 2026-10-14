@@ -1,0 +1,1 @@
+{ hex_draws: 2, planar_draws: 1, resumed: true, embedded: true, planar_embedded: true, empty: true, pixel_limit: true, filter_limit: true, files: true, closed: true}

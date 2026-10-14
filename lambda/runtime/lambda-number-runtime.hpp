@@ -303,5 +303,7 @@ Item vector_get(Item item, int64_t index);
 // above sees its leaves, so a caller that wants rows unstacks first.
 bool vector_is_ndim(Item item);
 Item vector_unstack_rows(Item item);
+ArrayNum* alloc_ndim_arraynum(ArrayNumElemType etype, int ndim, const int64_t* shape);
+bool complex_components_from_item(Item item, double* real, double* imag);
 
 #endif

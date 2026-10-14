@@ -1,0 +1,11 @@
+{
+  "name": "A retained relayout does not collapse already-collapsed sibling margins again",
+  "html": "test/ui/dom_mutation_margin_relayout.html",
+  "events": [
+    {"type": "assert_rect", "target": {"selector": "#heading"}, "y": 47.1, "tolerance": 0.5},
+    {"type": "click", "target": {"selector": "#go"}},
+    {"type": "assert_text", "target": {"selector": "#note"}, "equals": "note changed"},
+    {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "eligible"},
+    {"type": "assert_rect", "target": {"selector": "#heading"}, "y": 47.1, "tolerance": 0.5}
+  ]
+}

@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+body { margin: 0; font: 14px/20px Arial; }
+.row { display: flex; align-items: flex-start; gap: 16px; }
+.owner { position: relative; width: 240px; padding: 12px; border: 2px solid black; }
+.overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+#button { position: relative; width: 200px; padding: 8px 12px; border: 2px solid black; font: inherit; }
+#normal-owner { width: 200px; }
+#normal { display: block; width: 100%; height: 100%; }
+#zero-owner { position: relative; width: 150px; height: 0; }
+#late-form textarea { display: block; width: 200px; border: 0; padding: 0; font: inherit; box-sizing: border-box; }
+</style>
+<div class="row">
+  <button id="button">Sketch<svg id="button-svg" class="overlay" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M1 1H99V99H1Z" fill="none" stroke="blue"/></svg></button>
+  <section class="owner"><div style="height:40px">Card</div><svg id="card-svg" class="overlay" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M1 1H99V99H1Z" fill="none" stroke="green"/></svg></section>
+</div>
+<div id="normal-owner"><svg id="normal" viewBox="0 0 100 100"><rect width="100" height="100" fill="orange"/></svg></div>
+<div id="zero-owner"><svg id="zero" class="overlay" viewBox="0 0 100 100"><rect width="100" height="100" fill="red"/></svg></div>
+<!-- native textarea rows determine the final flex cross size after intrinsic measurement. -->
+<div class="row" style="align-items:stretch">
+  <section id="late-card" class="owner"><div style="height:40px">Short</div><svg id="late-svg" class="overlay" viewBox="0 0 100 100" preserveAspectRatio="none"><rect width="100" height="100" fill="lightblue"/></svg></section>
+  <form id="late-form"><textarea rows="3"></textarea><textarea rows="3"></textarea></form>
+</div>

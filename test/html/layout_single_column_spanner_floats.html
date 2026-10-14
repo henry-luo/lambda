@@ -1,0 +1,37 @@
+<!doctype html>
+<style>
+body {margin:0;font:20px/20px sans-serif} .case {columns:1;width:100px;margin-bottom:20px;background:lightgreen} .float {float:left;width:30px;height:60px;background:blue} .prefix {height:20px} .span {column-span:all;height:10px;background:orange} .tail {height:20px;background:yellow}
+</style>
+<div id="result">
+
+  <div class="case" id="left"><div class="float"></div>
+    <div class="prefix"></div>
+    <div id="left-span" class="span"></div>
+    <div id="left-tail" class="tail"></div>
+  </div>
+  <div class="case" id="right"><div class="float" style="float:right;height:80px"></div>
+    <div class="prefix"></div>
+    <div id="right-span" class="span"></div>
+    <div id="right-tail" class="tail"></div>
+  </div>
+  <div class="case" id="parallel"><div class="float"></div>
+    <div class="float" style="height:80px"></div>
+    <div class="prefix"></div>
+    <div id="parallel-span" class="span"></div>
+    <div id="parallel-tail" class="tail"></div>
+  </div>
+  <div class="case" id="margins"><div class="float" style="margin-bottom:5px"></div>
+    <div class="prefix"></div>
+    <div id="margins-span" class="span" style="margin-top:10px;margin-bottom:4px"></div>
+    <div id="margins-tail" class="tail"></div>
+  </div>
+  <div class="case" id="later"><div class="float"></div>
+    <div class="prefix"></div>
+    <div id="later-span" class="span"></div>
+    <div id="later-float" class="float" style="height:40px"></div>
+    <div id="later-tail" class="tail"></div>
+  </div>
+  <div class="case" id="none"><div class="prefix"></div>
+    <div id="none-span" class="span"></div>
+    <div id="none-tail" class="tail"></div>
+  </div></div>
