@@ -14,5 +14,8 @@ size_t layout_hyphenation_en_us_next_break(const char* word, size_t length,
 bool layout_hyphenation_language_supported(const char* lang);
 size_t layout_hyphenation_next_break(const char* word, size_t length,
                                     size_t after, const char* lang);
+size_t layout_hyphenation_character_count(const char* word, size_t length);
+size_t layout_hyphenation_next_limited_break(const char* word, size_t length,
+    size_t after, const char* lang, const int limits[3], size_t total_characters);
 
 #endif

@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+body { margin: 0; font: 16px/1 Ahem; }
+.zero { width: 0; hyphens: manual; }
+.wide { width: 400px; hyphens: manual; }
+.mark { font-size: 48px; color: red; }
+</style>
+<div id="result">
+<div class="zero" id="separate">ex<span class="mark" id="separate-mark">&shy;</span>ample</div>
+<div class="zero" id="combined"><span class="mark" id="combined-mark">ex&shy;</span>ample</div>
+<div class="wide" id="unchosen">ex<span class="mark" id="unchosen-mark">&shy;</span>ample</div>
+<div id="forced">ex<span class="mark"><br></span>ample</div>
+</div>

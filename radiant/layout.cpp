@@ -1568,6 +1568,7 @@ bool layout_display_contents_has_block_child(DomElement* element) {
 
 bool layout_element_was_inline(DomElement* element, bool include_replaced) {
     if (!element) return false;
+    if (element->is_table_fixup()) return layout_display_is_inline_level(element->display.outer);
     CssEnum display = layout_specified_keyword(
         element, CSS_PROPERTY_DISPLAY, CSS_VALUE__UNDEF);
     if (display != CSS_VALUE__UNDEF) return layout_display_is_inline_level(display);
@@ -3236,8 +3237,9 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             (inline_span_has_multiple_line_fragments(span) ||
              has_block_fragment_child);
         bool recompute_split_inline_bounds =
-            preserve_inline_list_marker_fragment && has_block_fragment_child &&
-            span_is_multi_line && layout_inline_span_has_direct_visible_text_child(span);
+            has_block_fragment_child &&
+            (span->has_split_inline_fragment_union() || span_is_multi_line) &&
+            layout_inline_span_has_direct_visible_text_child(span);
         bool is_ruby_container = span->tag() == MARKUP_NAME_RUBY &&
             span->display.inner == CSS_VALUE_RUBY;
         if (!has_block_fragment_child || recompute_split_inline_bounds) {
@@ -3245,7 +3247,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             // later line; refresh the split inline union after that line moves.
             float finalized_inline_x = span->x;
             float finalized_inline_width = span->width;
-            compute_span_bounding_box(span, span_is_multi_line, span_fh);
+            compute_span_bounding_box(span,
+                span_is_multi_line || recompute_split_inline_bounds, span_fh);
             if (recompute_split_inline_bounds) {
                 // preserve the line-wide fragment extent while refreshing the vertical union.
                 span->x = finalized_inline_x;
@@ -3664,6 +3667,9 @@ void place_rtl_initial_letter_line(LayoutContext* lycon) {
 
 void view_line_align(LayoutContext* lycon, float offset, View* view) {
     auto align_view = [&](View* view) -> bool {
+        // a block split out of an inline participates as an anonymous block sibling,
+        // so aligning the current text line cannot translate that block.
+        if (layout_inline_child_is_block_split(static_cast<DomNode*>(view))) return false;
         view->x += offset;
         if (view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require_text(view);
@@ -3673,11 +3679,18 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
             ViewSpan* sp = lam::view_require<RDT_VIEW_INLINE>(view);
             shift_span_line_fragment_unions(sp, offset);
         }
-        return false;
+        return true;
     };
-    auto no_finish = [](View*) {};
+    auto finish_span = [](View* view) {
+        if (view->view_type != RDT_VIEW_INLINE) return;
+        ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
+        if (!span->has_split_inline_fragment_union()) return;
+        FontHandle* handle = span->font ? span->fontp()->font_handle : nullptr;
+        // the block fragment remains fixed while only its inline continuations move.
+        recompute_span_bounding_box_after_line_layout(span, true, handle);
+    };
     (void)lycon;
-    layout_walk_inline_views(view, align_view, no_finish);
+    layout_walk_inline_views(view, align_view, finish_span);
 }
 
 // CSS Text 3 §7.3: counts word spaces AND CJK inter-character gaps.
@@ -4411,6 +4424,11 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     if (node_name && (strcmp(node_name, "!--") == 0 || strcmp(node_name, "#comment") == 0)) {
         lycon->depth--;
         return;
+    }
+
+    if (lycon->line.pending_hyphenation_break &&
+        layout_node_has_in_flow_inline_content(node)) {
+        line_break(lycon);
     }
 
     if (node->is_element()) {

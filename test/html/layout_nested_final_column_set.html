@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+body { margin: 0; }
+.outer { width: 400px; height: 100px; columns: 2; column-gap: 0; column-fill: auto; }
+.inner { width: 200px; height: 300px; columns: 2; column-gap: 0; font: 20px/1 Ahem; }
+.auto { column-fill: auto; }
+.three { columns: 3; }
+.orphans { orphans: 4; widows: 1; }
+.widows { orphans: 1; widows: 4; }
+</style>
+<div id="result">
+<div class="outer"><div class="inner">A<br>B<br>C<br><span id="first-final">D</span><br>E</div></div>
+<div class="outer"><div class="inner">A<br>B<br>C<br>D<br>E<br><span id="first-full">F</span><br>G<br>H<br>I<br>J<br><span id="continuation-left">K</span><br><span id="continuation-right">L</span></div></div>
+<div class="outer"><div class="inner auto">A<br>B<br>C<br><span id="auto">D</span><br>E</div></div>
+<div class="outer"><div class="inner three">A<br>B<br>C<br><span id="three-middle">D</span><br>E<br><span id="three-last">F</span><br>G</div></div>
+<div class="outer"><div class="inner orphans">A<br>B<br>C<br>D<br><span id="orphans-last">E</span></div></div>
+<div class="outer"><div class="inner widows">A<br><span id="widows-first">B</span><br>C<br>D<br>E</div></div>
+</div>

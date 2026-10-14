@@ -437,6 +437,12 @@ static int escape_hex_value(char c) {
 static void escape_css_append_codepoint(char* out, size_t* out_pos,
                                         uint32_t codepoint,
                                         bool replace_invalid_codepoint) {
+    // CSS Syntax §4.3.7 replaces zero and non-scalar escape values before
+    // encoding; U+0000 would otherwise terminate the decoded token's string.
+    if (replace_invalid_codepoint && (codepoint == 0 ||
+        (codepoint >= 0xD800 && codepoint <= 0xDFFF) || codepoint > 0x10FFFF)) {
+        codepoint = 0xFFFD;
+    }
     char encoded[4];
     size_t length = str_utf8_encode(codepoint, encoded, sizeof(encoded));
     if (length == 0 && replace_invalid_codepoint) {
@@ -486,6 +492,12 @@ static size_t escape_css_unescape_write(char* out, const char* s, size_t len,
         }
 
         if (decode_single_character) {
+            // CSS string continuations contribute no code point; CRLF is one newline.
+            if (s[i] == '\n' || s[i] == '\r' || s[i] == '\f') {
+                if (s[i] == '\r' && i + 1 < len && s[i + 1] == '\n') i++;
+                i++;
+                continue;
+            }
             if (out) out[out_pos] = s[i];
             out_pos++;
             i++;

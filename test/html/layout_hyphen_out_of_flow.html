@@ -1,0 +1,21 @@
+<!doctype html>
+<style>
+body { margin: 0; font: 16px/18px serif; }
+.case { width: 6ch; border: 3px solid orange; margin: 5px; hyphens: manual; }
+.absolute { position: absolute; color: transparent; }
+</style>
+<body lang="en">
+<section id="result">
+<div class="case" id="manual-direct">high&shy;way</div>
+<div class="case" id="manual-abs-prefix"><span class="absolute">abspos</span>high&shy;way</div>
+<div class="case" id="manual-abs-suffix">high&shy;wa<span class="absolute" id="suffix-anchor">abspos</span>y</div>
+<div class="case" id="manual-abs-boundary">high&shy;<span class="absolute" id="boundary-anchor">abspos</span>way</div>
+<div class="case" id="manual-empty-boundary">high&shy;<span id="empty-boundary"></span>way</div>
+<div class="case" id="manual-abs-inline">high&shy;<span class="absolute" id="inline-anchor">abspos</span><span>way</span></div>
+<div class="case" id="manual-two-abs">high&shy;<span class="absolute" id="first-anchor">abspos</span><span class="absolute" id="second-anchor">abspos</span>way</div>
+<div class="case" id="manual-relative">high&shy;<span style="position: relative">way</span></div>
+<div class="case" id="manual-br">high&shy;<br>way</div>
+<div class="case" id="manual-space">high&shy; <span class="absolute">abspos</span>way</div>
+<div class="case" id="manual-nowrap" style="white-space: nowrap">high&shy;<span class="absolute">abspos</span>way</div>
+<div class="case" id="automatic-suffix" style="hyphens: auto">highwa<span class="absolute" id="auto-suffix-anchor">abspos</span>y</div>
+</section>

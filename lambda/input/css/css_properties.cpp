@@ -426,6 +426,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_LINE_BREAK, "line-break", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_HYPHENS, "hyphens", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "manual", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_HYPHENATE_CHARACTER, "hyphenate-character", PROP_TYPE_STRING, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_HYPHENATE_LIMIT_CHARS, "hyphenate-limit-chars", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_OVERFLOW_WRAP, "overflow-wrap", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_WORD_WRAP, "word-wrap", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TAB_SIZE, "tab-size", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "8", true, false, NULL, 0, validate_length, NULL},
@@ -955,11 +956,16 @@ static bool css_positive_integer_value_valid(const CssValue* value) {
 
 bool css_compute_integer_value(const CssValue* value, const CssMathEvaluationContext* context,
         double minimum, double maximum, double* result) {
-    if (!result || !css_integer_value_valid(value)) return false;
     CssMathResult math = css_math_evaluate(value, context);
-    if (!math.resolved || math.type != CSS_MATH_NUMBER) return false;
+    return css_compute_integer_result(value, &math, minimum, maximum, result);
+}
+
+bool css_compute_integer_result(const CssValue* value, const CssMathResult* math,
+        double minimum, double maximum, double* result) {
+    if (!result || !math || !css_integer_value_valid(value) ||
+        !math->resolved || math->type != CSS_MATH_NUMBER) return false;
     // math rounds ties toward positive infinity before the property's range is applied.
-    double number = value->type == CSS_VALUE_TYPE_FUNCTION ? floor(math.value + 0.5) : math.value;
+    double number = value->type == CSS_VALUE_TYPE_FUNCTION ? floor(math->value + 0.5) : math->value;
     *result = fmax(minimum, fmin(maximum, isnan(number) ? 0.0 : number));
     return true;
 }
@@ -2325,6 +2331,22 @@ static size_t css_space_list_count(const CssValue* value) {
         ? value->data.list.comma_separated ? 0 : (size_t)value->data.list.count : 1;
 }
 
+bool css_hyphenate_limit_components(const CssValue* value, const CssValue* components[3]) {
+    size_t count = css_space_list_count(value);
+    if (!components || count < 1 || count > 3) return false;
+    for (size_t i = 0; i < count; i++) {
+        const CssValue* item = css_space_list_item(value, i);
+        if (!css_value_keyword_equals(item, CSS_VALUE_AUTO) &&
+            (!css_integer_value_valid(item) ||
+             (item->type == CSS_VALUE_TYPE_NUMBER && item->data.number.value < 0.0))) return false;
+    }
+    // omitted prefix is auto; an omitted suffix copies the prefix component.
+    components[0] = css_space_list_item(value, 0);
+    components[1] = count > 1 ? css_space_list_item(value, 1) : nullptr;
+    components[2] = count > 2 ? css_space_list_item(value, 2) : components[1];
+    return true;
+}
+
 bool css_value_is_background_size_component(const CssValue* value) {
     return css_value_keyword_equals(value, CSS_VALUE_AUTO) ||
         css_value_keyword_equals(value, CSS_VALUE_COVER) ||
@@ -2935,6 +2957,11 @@ bool css_property_validate_value_mode(CssPropertyCode id,
         return css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value) ||
             (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) ||
             css_positive_integer_value_valid(value);
+    }
+    if (id == CSS_PROPERTY_HYPHENATE_LIMIT_CHARS) {
+        const CssValue* components[3];
+        return css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value) ||
+            css_hyphenate_limit_components(value, components);
     }
     if (id == CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE || id == CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH ||
         id == CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT || id == CSS_PROPERTY_CONTAIN_INTRINSIC_INLINE_SIZE ||

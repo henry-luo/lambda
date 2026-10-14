@@ -173,6 +173,7 @@ bool utf_is_hangul(uint32_t cp);
 /** True if cp belongs to a Unicode script that does not admit inter-letter gaps. */
 bool utf_is_cursive_script(uint32_t cp);
 bool utf_is_clustered_script(uint32_t cp);
+bool utf_requires_contextual_shaping(uint32_t cp);
 
 /**
  * Unicode 17 Bidirectional Algorithm strong classification, including derived defaults.

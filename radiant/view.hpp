@@ -826,8 +826,10 @@ struct FontProp {
     float word_spacing;  // word spacing in pixels (default 0)
     float letter_spacing_percent;  // authored percentage, retained for inheritance
     bool letter_spacing_is_percent;
+    bool letter_spacing_is_set;  // resolved zero must not be treated as missing
     float word_spacing_percent;  // authored percentage, retained for inheritance
     bool word_spacing_is_percent;
+    bool word_spacing_is_set;
     bool font_size_from_medium;  // true if font_size originates from the CSS 'medium' keyword (initial value)
     // derived font properties
     float space_width;  // width of a space character of the current font
@@ -983,6 +985,8 @@ struct GridItemProp {
 typedef struct {
     float min_content;  // Minimum content width (longest word/element)
     float max_content;  // Maximum content width (no wrapping)
+    float first_segment_min = -1.0f;
+    float remaining_min_content = 0.0f;
     // CSS Text 3 §5.2: For inline content with forced line breaks (pre/pre-wrap newlines),
     // the content spans multiple lines. These fields allow the parent's inline run
     // accumulation to split at forced break points rather than summing all lines.
@@ -1065,6 +1069,10 @@ typedef struct FlexItemProp {
     bool anonymous_text_preserve_leading_space;
     bool anonymous_text_preserve_trailing_space;
     bool anonymous_text_is_whitespace;
+    // text alignment and indentation can offset the content union from its line origin.
+    float anonymous_text_origin_x;
+    float anonymous_text_origin_y;
+    bool has_anonymous_text_origin;
 } FlexItemProp;
 
 // tier-2: view-pool, rebuilt each relayout
@@ -1787,7 +1795,8 @@ typedef enum ColumnWrap {
 typedef struct MultiColumnProp {
     // Column sizing
     int column_count;            // Number of columns (0 = auto)
-    float column_width;          // Ideal column width (0 = auto)
+    float column_width;          // Ideal column width
+    bool column_width_is_specified; // Distinguishes an explicit 0 from auto
     float column_height;         // Fragmentainer height
     bool column_height_is_specified; // Distinguishes an explicit 0 from auto
     float column_gap;            // Gap between columns (default: 1em)
@@ -1897,6 +1906,8 @@ typedef struct PositionProp {
     lam::Up<ViewBlock> next_abs_sibling;    // next sibling absolute/fixed positioned view
     lam::Up<ViewBlock> next_static_line_alignment; // current line's deferred static self-alignment link
     lam::Up<ViewBlock> next_static_inline_position; // current line's deferred inline static-position link
+    bool static_inline_bidi_candidate; // neutral zero-width anchor in the parent line
+    bool static_inline_bidi_placed;
     float static_line_initial_extent; // provisional line-box extent used for static self-alignment
     bool static_block_after_line; // hypothetical block follows the unfinished inline line
     bool static_x_needs_parent_offset;  // flex static x was computed in parent-local coords
@@ -1907,6 +1918,8 @@ typedef struct PositionProp {
     bool has_static_parent_offset_y;    // static y captured parent-to-containing-block offset
     float static_parent_offset_x;       // parent-to-containing-block offset when static x was set
     float static_parent_offset_y;       // parent-to-containing-block offset when static y was set
+    bool has_multicol_flow_origin;
+    float multicol_flow_origin_x, multicol_flow_origin_y; // continuous origin before fragment publication
     // sticky (CSS Position 3): a scroll re-solves the offset from the box's
     // normal-flow position, so keep what the last solve applied and where it
     // left the box; a box found anywhere else was re-placed by layout
@@ -2260,6 +2273,8 @@ typedef struct BlockProp {
     CssEnum overflow_wrap;  // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_WORD, CSS_VALUE_ANYWHERE
     CssEnum hyphens;  // CSS_VALUE_MANUAL or CSS_VALUE_AUTO
     lam::Shared<char> hyphenate_character;  // CSS Text 4: null means the UA default ('auto')
+    int hyphenate_limits[3];  // word/prefix/suffix character counts; -1 preserves computed auto
+    bool hyphenate_limits_is_set;
     CssEnum line_break;    // CSS_VALUE_AUTO, CSS_VALUE_LOOSE, CSS_VALUE_NORMAL, CSS_VALUE_STRICT, CSS_VALUE_ANYWHERE
     CssEnum text_spacing_trim;  // CSS Text 4 text-spacing-trim
     uint8_t text_autospace;  // CSS Text 4 text-autospace feature flags
@@ -2358,12 +2373,18 @@ typedef struct TextRect {
     float x, y, width, height;
     float hanging_trim;  // preserved hanging space width excluded from line advance, not from CSSOM rects
     int start_index, length;  // start and length of the text in the style node
+    int hyphenated_leading_bytes, hyphenated_trailing_bytes; // source ownership carried across a generated-mark query range
     int line_number;  // block-local line index assigned when this rect enters inline flow
     bool has_trailing_hyphen;  // CSS Text 3 §5.2: a hyphenation break generated a trailing mark
     lam::Up<const char> trailing_hyphenate_character;  // computed CSS Text 4 mark; null uses the UA default
     bool has_trailing_ellipsis; // -webkit-line-clamp: render '…' after text on this rect
     lam::Own<TextRect> next;
 } TextRect;
+
+inline void text_rect_painted_source_range(const TextRect* rect, int* start, int* length) {
+    *start = rect->start_index - rect->hyphenated_leading_bytes;
+    *length = rect->length + rect->hyphenated_leading_bytes - rect->hyphenated_trailing_bytes;
+}
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct ViewText : DomText {

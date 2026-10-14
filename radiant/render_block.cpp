@@ -200,6 +200,10 @@ void render_bound(RasterRenderContext* rdcon, ViewBlock* view) {
     Rect rect;
     rect.x = rdcon->block.x + view->x * s;  rect.y = rdcon->block.y + view->y * s;
     rect.width = view->width * s;  rect.height = view->height * s;
+    if (render_paint_boundary_emit_fragmented_simple(rdcon->paint_list, view, rect)) {
+        paint_ir_lower_raster_fragment(rdcon->paint_list, rdcon->dl);
+        return;
+    }
 
     // Resolve percentage border-radius values against element's own dimensions (in CSS px)
     if (view->boundary()->border) {

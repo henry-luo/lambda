@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+body { margin: 0; }
+.row { font: 20px/1 Ahem; text-align: center; width: 200px; }
+.box { width: 100px; height: 40px; background: green; }
+.atomic { display: inline-block; width: 40px; height: 20px; background: green; }
+</style>
+<div id="result">
+<div class="row"><a id="mixed"><div class="box" id="mixed-block"></div><b id="tail">XX</b></a></div>
+<div class="row"><a id="only"><div class="box" id="only-block"></div></a></div>
+<div class="row"><a id="bracket">X<div class="box" id="bracket-block"></div>XX</a></div>
+<div class="row"><span><i class="atomic" id="atomic"></i></span></div>
+<div class="row"><a id="direct-tail"><div class="box"></div>XX</a></div>
+<div class="row"><span id="empty-split" style="position: relative"><div></div>XX<i style="position: absolute; width: 100px; height: 100px"></i></span></div>
+<div class="row" style="text-align: left"><span id="raised-tail">X<div class="box"></div>X</span><i class="atomic" style="height: 50px"></i></div>
+</div>

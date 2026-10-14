@@ -32,6 +32,26 @@ protected:
     }
 };
 
+TEST_F(CssParserTest, HyphenateCharacterLimitsValidateEveryComponent) {
+    const char* valid[] = {
+        "hyphenate-limit-chars: auto", "hyphenate-limit-chars: 0",
+        "hyphenate-limit-chars: 5 2", "hyphenate-limit-chars: auto 2 3",
+        "hyphenate-limit-chars: 5 auto 0", "hyphenate-limit-chars: 5 2 calc(3.1)",
+        "hyphenate-limit-chars: inherit", "hyphenate-limit-chars: var(--limit)",
+    };
+    const char* invalid[] = {
+        "hyphenate-limit-chars: normal", "hyphenate-limit-chars: 1 none",
+        "hyphenate-limit-chars: 1.2", "hyphenate-limit-chars: 5 2 1.2",
+        "hyphenate-limit-chars: -1", "hyphenate-limit-chars: 5 -2",
+        "hyphenate-limit-chars: 1 2 3 4", "hyphenate-limit-chars: 1, 2",
+        "hyphenate-limit-chars: 1px", "hyphenate-limit-chars: auto inherit",
+    };
+    for (const char* source : valid)
+        EXPECT_NE(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+    for (const char* source : invalid)
+        EXPECT_EQ(css_parse_declaration_text(source, strlen(source), pool), nullptr) << source;
+}
+
 TEST_F(CssParserTest, ValueDependencySearchVisitsCompleteMixedTrees) {
     CssValue* leading = css_value_create_length(pool, 2.0, CSS_UNIT_LH);
     CssValue* pending = css_value_create_function(pool, "var", nullptr, 0);

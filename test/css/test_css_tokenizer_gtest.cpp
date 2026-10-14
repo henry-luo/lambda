@@ -56,6 +56,26 @@ TEST_F(CssTokenizerTest, StringTokenGeneration) {
     expectTokensGenerated("'world'", 1);
 }
 
+TEST_F(CssTokenizerTest, EscapedZeroAndNonScalarValuesKeepTheirFollowingContent) {
+    struct Case { const char* source; CSSTokenType type; const char* value; } cases[] = {
+        {"\"\\0000suffix\"", CSS_TOKEN_STRING, "\xef\xbf\xbdsuffix"},
+        {"\"pre\\d800 suffix\"", CSS_TOKEN_STRING, "pre\xef\xbf\xbdsuffix"},
+        {"\"\\110000 end\"", CSS_TOKEN_STRING, "\xef\xbf\xbd" "end"},
+        {"\\0 name", CSS_TOKEN_IDENT, "\xef\xbf\xbdname"},
+        {"\"\\41\fB\"", CSS_TOKEN_STRING, "AB"},
+        {"\"A\\\nB\"", CSS_TOKEN_STRING, "AB"},
+        {"\"A\\\r\nB\"", CSS_TOKEN_STRING, "AB"},
+    };
+    for (const Case& entry : cases) {
+        size_t count = 0;
+        CSSToken* tokens = tokenize(entry.source, &count);
+        ASSERT_NE(tokens, nullptr) << entry.source;
+        ASSERT_GT(count, 0u);
+        EXPECT_EQ(tokens[0].type, entry.type) << entry.source;
+        EXPECT_STREQ(tokens[0].value, entry.value) << entry.source;
+    }
+}
+
 TEST_F(CssTokenizerTest, HashTokenGeneration) {
     expectTokensGenerated("#id", 1);
     expectTokensGenerated("#123", 1);

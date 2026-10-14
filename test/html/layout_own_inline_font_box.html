@@ -1,0 +1,19 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url('../layout/data/font/Ahem.ttf'); }
+body { margin: 0; }
+.line { font: 16px monospace; white-space: pre; tab-size: 10; }
+.small { font-size: 1px; }
+.medium { font-size: 10px; }
+b { font: bold 16px monospace; }
+</style>
+<div id="result">
+<div class="line"><span class="small" id="small-tab">&#9;<b>A</b></span></div>
+<div class="line"><span class="medium" id="medium-tab">&#9;<b>A</b></span></div>
+<div class="line"><span class="small" id="small-text">x<b>A</b></span></div>
+<div class="line"><span class="medium" id="medium-text">x<b>A</b></span></div>
+<div class="line"><span class="medium" id="text-both">x<b>A</b>y</span></div>
+<div class="line"><span class="medium" id="nested"><b>A</b></span></div>
+<div class="line"><span class="medium" id="breaks">x<b>A</b><br>y<b>B</b></span></div>
+<div style="writing-mode: vertical-lr; height: 200px; font: 16px/1 Ahem"><span id="vertical">XX<span>XXXXX</span></span></div>
+</div>

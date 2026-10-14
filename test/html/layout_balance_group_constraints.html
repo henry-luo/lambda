@@ -1,0 +1,15 @@
+<!doctype html>
+<style>
+@font-face { font-family: Ahem; src: url("../layout/data/font/Ahem.ttf"); }
+body { margin: 0; font: 20px/1 Ahem; }
+.columns { width: 100px; columns: 2; gap: 0; orphans: 1; widows: 1; }
+.spanner { column-span: all; }
+p { margin: 0; }
+</style>
+<div id="result">
+<div class="columns" id="one-line"><p>XX</p><div><div class="spanner"></div></div></div>
+<div class="columns" id="three-lines"><p>XX<br>XX<br>XX</p><div><div class="spanner"></div></div></div>
+<div class="columns" id="contained"><div id="contained-before" style="contain: size; height: 40px; background: green"></div><div class="spanner" style="height: 10px; background: blue"></div><div id="contained-after" style="contain: size; height: 60px; background: green"></div></div>
+<div class="columns" id="continuous"><span><div style="height: 200px; background: green"></div></span></div>
+<div class="columns" id="continuous-text" style="columns: 3; width: 120px"><span><div style="height: 300px; background: green">X</div></span></div>
+</div>

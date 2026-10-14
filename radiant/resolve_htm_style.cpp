@@ -168,6 +168,13 @@ static void apply_html_text_align_attribute(LayoutContext* lycon, DomNode* eleme
     apply_html_align_attribute(lycon, element, block, false);
 }
 
+bool layout_tag_has_monospace_family_default(NameId tag) {
+    static const NameId tags[] = {
+        MARKUP_NAME_CODE, MARKUP_NAME_KBD, MARKUP_NAME_SAMP, MARKUP_NAME_TT,
+        MARKUP_NAME_PRE, MARKUP_NAME_LISTING, MARKUP_NAME_XMP};
+    return layout_tag_in_list(tag, tags, sizeof(tags) / sizeof(*tags));
+}
+
 static void apply_html_form_control_font(LayoutContext* lycon, ViewBlock* block) {
     // Chrome UA form controls share this Arial medium-derived override.
     FontProp* font = block->ensure_font(lycon);

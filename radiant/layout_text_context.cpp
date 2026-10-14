@@ -101,7 +101,10 @@ static DomText* text_shaping_neighbor(LayoutContext* lycon, DomNode* node,
 
 static bool text_shaping_codepoint(uint32_t codepoint, bool cursive) {
     if (is_space(codepoint)) return false;
-    if (cursive) return utf_bidi_strong_class(codepoint) == 1 ||
+    // cursive shaping includes left-to-right scripts such as Mongolian;
+    // bidi direction alone does not classify contextual glyph substitution.
+    if (cursive) return utf_requires_contextual_shaping(codepoint) ||
+        utf_bidi_strong_class(codepoint) == 1 || codepoint == 0x00AD ||
         codepoint == 0x200C || codepoint == 0x200D;
     return (codepoint >= 'A' && codepoint <= 'Z') ||
         (codepoint >= 'a' && codepoint <= 'z');
@@ -140,60 +143,72 @@ bool layout_measure_shaping_text(LayoutContext* lycon, const char* text, size_t 
     return measured;
 }
 
+static void text_shaping_context_slice(const char* source, size_t length,
+        bool forward, bool cursive, size_t* first, size_t* last) {
+    *first = 0;
+    *last = length;
+    const char* cursor = source;
+    const char* end = source + length;
+    while (cursor < end) {
+        const char* prior = cursor;
+        uint32_t codepoint = 0;
+        if (!layout_utf8_next_codepoint(&cursor, end, &codepoint) ||
+            !text_shaping_codepoint(codepoint, cursive)) {
+            if (forward) { *last = (size_t)(prior - source); break; }
+            *first = (size_t)(cursor - source);
+        }
+    }
+}
+
 bool layout_measure_inline_text_context(LayoutContext* lycon, DomNode* text_node,
-        const unsigned char* start, size_t length, bool cursive, float* width) {
-    if (!lycon || !text_node || !text_node->is_text() || !start || !length || !width ||
+        const unsigned char* start, size_t length, bool cursive, float* width,
+        const unsigned char* text_start, const unsigned char* text_end) {
+    if (!lycon || !start || !length || !width ||
+        (text_node && !text_node->is_text()) ||
         !font_box_handle(&lycon->font)) return false;
-    const unsigned char* text_start = text_node->text_data();
-    if (!text_start) return false;
-    const unsigned char* text_end = text_start + text_node->as_text()->length;
+    if (!text_start && text_node) text_start = text_node->text_data();
+    if (!text_end && text_node && text_start) text_end = text_start + text_node->as_text()->length;
+    if (!text_start || !text_end) return false;
     if (start < text_start || start > text_end || length > (size_t)(text_end - start)) return false;
-    // context in this node is already included by the ordinary whole-run probe.
-    if (start != text_start && start + length != text_end) return false;
     ScratchScope scope(&lycon->scratch);
     struct Piece { const char* text; size_t length; Piece* next; };
     Piece* before = nullptr;
     Piece* after = nullptr;
     Piece** after_tail = &after;
     size_t before_length = 0, after_length = 0;
+    auto append_piece = [&](const char* source, size_t count, bool forward) {
+        Piece* piece = scope.array<Piece>(1);
+        if (!piece) return false;
+        *piece = {source, count, nullptr};
+        if (forward) {
+            *after_tail = piece; after_tail = &piece->next;
+            after_length += count;
+        } else {
+            piece->next = before; before = piece;
+            before_length += count;
+        }
+        return true;
+    };
     const bool directions[] = {false, true};
     for (bool forward : directions) {
-        if ((forward && start + length != text_end) || (!forward && start != text_start)) continue;
+        const char* local = (const char*)(forward ? start + length : text_start);
+        size_t local_length = forward ? (size_t)(text_end - start - length)
+            : (size_t)(start - text_start);
+        size_t local_first, local_last;
+        text_shaping_context_slice(local, local_length, forward, cursive,
+            &local_first, &local_last);
+        // an emergency break or tracked grapheme still shapes in its unbroken word.
+        if (local_last > local_first) {
+            if (!append_piece(local + local_first, local_last - local_first, forward)) return false;
+        }
+        if (local_first != 0 || local_last != local_length) continue;
         DomNode* node = text_node;
         while (DomText* neighbor = text_shaping_neighbor(lycon, node, forward, cursive)) {
             const char* source = neighbor->text;
-            size_t first = 0, last = neighbor->length;
-            if (forward) {
-                const char* cursor = source;
-                const char* end = source + last;
-                while (cursor < end) {
-                    const char* prior = cursor;
-                    uint32_t codepoint = 0;
-                    if (!layout_utf8_next_codepoint(&cursor, end, &codepoint) ||
-                        !text_shaping_codepoint(codepoint, cursive)) { cursor = prior; break; }
-                }
-                last = (size_t)(cursor - source);
-            } else {
-                // scan forward to keep UTF-8 boundaries while selecting the last word suffix.
-                const char* cursor = source;
-                const char* end = source + last;
-                while (cursor < end) {
-                    uint32_t codepoint = 0;
-                    if (!layout_utf8_next_codepoint(&cursor, end, &codepoint) ||
-                        !text_shaping_codepoint(codepoint, cursive)) first = (size_t)(cursor - source);
-                }
-            }
+            size_t first, last;
+            text_shaping_context_slice(source, neighbor->length, forward, cursive, &first, &last);
             if (last == first) break;
-            Piece* piece = scope.array<Piece>(1);
-            if (!piece) return false;
-            *piece = {source + first, last - first, nullptr};
-            if (forward) {
-                *after_tail = piece; after_tail = &piece->next;
-                after_length += piece->length;
-            } else {
-                piece->next = before; before = piece;
-                before_length += piece->length;
-            }
+            if (!append_piece(source + first, last - first, forward)) return false;
             if (first != 0 || last != neighbor->length) break;
             node = neighbor;
         }

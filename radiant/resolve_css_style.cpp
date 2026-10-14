@@ -1227,6 +1227,22 @@ static bool layout_compute_css_integer(LayoutContext* lycon, CssPropertyCode pro
     return css_compute_integer_value(value, &math, minimum, maximum, result);
 }
 
+static bool layout_compute_hyphenate_limits(LayoutContext* lycon, const CssValue* value, int limits[3]) {
+    const CssValue* components[3];
+    if (!limits || !css_hyphenate_limit_components(value, components)) return false;
+    for (size_t i = 0; i < 3; i++) {
+        if (!components[i] || css_value_keyword_equals(components[i], CSS_VALUE_AUTO)) {
+            limits[i] = -1;
+        } else {
+            double count = 0.0;
+            if (!layout_compute_css_integer(lycon, CSS_PROPERTY_HYPHENATE_LIMIT_CHARS,
+                    components[i], 0.0, (double)INT_MAX, &count)) return false;
+            limits[i] = (int)count; // INT_CAST_OK: computed character-count limit
+        }
+    }
+    return true;
+}
+
 struct CssGridAxisSlots {
     int* start;
     int* end;
@@ -2487,6 +2503,7 @@ static bool css_property_consumes_substitution(CssPropertyCode property) {
         case CSS_PROPERTY_TRANSFORM_ORIGIN: case CSS_PROPERTY_PERSPECTIVE_ORIGIN:
         case CSS_PROPERTY_FILTER: case CSS_PROPERTY_BACKDROP_FILTER:
         case CSS_PROPERTY_OPACITY: case CSS_PROPERTY_VISIBILITY:
+        case CSS_PROPERTY_HYPHENATE_LIMIT_CHARS:
         case CSS_PROPERTY_BACKGROUND_IMAGE: case CSS_PROPERTY_BACKGROUND_SIZE:
         case CSS_PROPERTY_BACKGROUND_COLOR: case CSS_PROPERTY_BACKGROUND_REPEAT:
         case CSS_PROPERTY_MASK_IMAGE:
@@ -2500,24 +2517,24 @@ static bool css_property_consumes_substitution(CssPropertyCode property) {
     }
 }
 
-struct CssComputedValueScratch {
-    LayoutContext* context;
-    Pool* previous;
-    Pool* owned;
-    CssComputedValueScratch(LayoutContext* context, CssPropertyCode property, const CssValue* value)
-        : context(context), previous(context->css_value_scratch), owned(nullptr) {
-        if (!css_property_consumes_substitution(property)) context->css_value_scratch = nullptr;
-        else if (!previous && (value->type == CSS_VALUE_TYPE_TOKEN_SEQUENCE ||
-                css_value_contains_pending_substitution(value))) {
-            owned = pool_create_sized(0);
-            context->css_value_scratch = lam::up(owned);
-        }
+CssComputedValueScratch::CssComputedValueScratch(
+    LayoutContext* context, CssPropertyCode property, const CssValue* value,
+    bool consume_only)
+    : context(context), previous(context ? context->css_value_scratch.get() : nullptr), owned(nullptr) {
+    if (!context) return;
+    if (!consume_only && !css_property_consumes_substitution(property)) {
+        context->css_value_scratch = nullptr;
+    } else if (!previous && value && (value->type == CSS_VALUE_TYPE_TOKEN_SEQUENCE ||
+            css_value_contains_pending_substitution(value))) {
+        owned = pool_create_sized(0);
+        context->css_value_scratch = lam::up(owned);
     }
-    ~CssComputedValueScratch() {
-        context->css_value_scratch = lam::up(previous);
-        if (owned) pool_destroy(owned);
-    }
-};
+}
+
+CssComputedValueScratch::~CssComputedValueScratch() {
+    if (context) context->css_value_scratch = lam::up(previous);
+    if (owned) pool_destroy(owned);
+}
 
 static ContainIntrinsicComputedAxis resolve_contain_intrinsic_declaration(LayoutContext* lycon,
         DomElement* element, const CssDeclaration* declaration, CssPropertyCode property, size_t axis) {
@@ -4554,8 +4571,8 @@ static void resolve_file_button_pseudo_style(DomElement* element,
 static bool apply_chromium_monospace_font_size_quirk(StyleTree* style_tree,
                                                      FontProp* parent_font_style,
                                                      ViewSpan* span,
-                                                     LayoutContext* lycon,
-                                                     DomElement* element) {
+                                                     DomElement* element,
+                                                     bool default_family_is_monospace) {
     if (!style_tree || !style_tree->tree || !span || !span->font ||
         !span->fontp()->family || span->fontp()->font_size <= 0) {
         return false;
@@ -4570,6 +4587,18 @@ static bool apply_chromium_monospace_font_size_quirk(StyleTree* style_tree,
     bool textarea_font_size_override = element &&
         element->tag() == MARKUP_NAME_TEXTAREA &&
         style_tree_get_declaration(style_tree, CSS_PROPERTY_FONT_SIZE) != nullptr;
+    bool has_author_size =
+        style_tree_get_declaration(style_tree, CSS_PROPERTY_FONT_SIZE) != nullptr ||
+        style_tree_get_declaration(style_tree, CSS_PROPERTY_FONT) != nullptr;
+    if (has_author_font_family && !has_author_size &&
+        default_family_is_monospace && !parent_is_mono &&
+        span->fontp()->font_size_from_medium) {
+        // HTML defaults already scaled the generic family. Keep that size for
+        // the same winning family, or undo it when a named family replaces it.
+        if (current_is_mono) return false;
+        span->font->font_size *= 16.0f / 13.0f;
+        return true;
+    }
     if ((!has_author_font_family && !textarea_font_size_override) ||
         !current_is_mono || parent_is_mono ||
         !span->fontp()->font_size_from_medium) {
@@ -4580,10 +4609,6 @@ static bool apply_chromium_monospace_font_size_quirk(StyleTree* style_tree,
     float original_size = span->fontp()->font_size;
     span->font->font_size = original_size * 13.0f / 16.0f;
     span->font->font_size_from_medium = false;
-    if (lycon) {
-        lycon->font.style = lam::up(span->font);
-        lycon->font.current_font_size = span->fontp()->font_size;
-    }
     return true;
 }
 
@@ -4671,10 +4696,7 @@ static bool preserve_html_ua_font_size(LayoutContext* lycon, DomElement* element
         span->font->font_size_from_medium = true;
         return true;
     }
-    if (tag == MARKUP_NAME_CODE || tag == MARKUP_NAME_KBD ||
-        tag == MARKUP_NAME_SAMP || tag == MARKUP_NAME_TT ||
-        tag == MARKUP_NAME_PRE || tag == MARKUP_NAME_LISTING ||
-        tag == MARKUP_NAME_XMP) {
+    if (layout_tag_has_monospace_family_default(tag)) {
         return span->font && span->fontp()->family &&
             str_ieq_cstr(span->fontp()->family, "monospace") &&
             span->fontp()->font_size > 0 && span->fontp()->font_size_from_medium;
@@ -5294,6 +5316,11 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     bool has_any_font_prop = css_style_tree_has_font_property(style_tree, true);
     FontProp* parent_font_style = lycon->font.style;
     FontBox parent_font = lycon->font;
+    ViewSpan* default_font_span = lam::view_require_element(lycon->view);
+    bool default_family_is_monospace = default_font_span && default_font_span->font &&
+        layout_tag_has_monospace_family_default(dom_elem->tag()) &&
+        default_font_span->fontp()->family &&
+        str_ieq_cstr(default_font_span->fontp()->family, "monospace");
     CssEnum all_reset_keyword = layout_element_css_all_reset_keyword(dom_elem);
     bool all_initial = all_reset_keyword == CSS_VALUE_INITIAL;
     if (all_initial) {
@@ -5320,7 +5347,8 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     if (has_any_font_prop) {
         ViewSpan* span = lam::view_require_element(lycon->view);
         apply_chromium_monospace_font_size_quirk(
-            style_tree, parent_font_style, span, lycon, dom_elem);
+            style_tree, parent_font_style, span, dom_elem,
+            default_family_is_monospace);
         if (span && span->font && span->fontp()->font_size > 0) {
             lycon->font.style = lam::up(span->font);
             lycon->font.current_font_size = span->fontp()->font_size;
@@ -5580,10 +5608,12 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                     inheritance_span->font->letter_spacing = ancestor->font->letter_spacing;
                     inheritance_span->font->letter_spacing_percent = ancestor->font->letter_spacing_percent;
                     inheritance_span->font->letter_spacing_is_percent = ancestor->font->letter_spacing_is_percent;
+                    inheritance_span->font->letter_spacing_is_set = true;
                 } else {
                     inheritance_span->font->word_spacing = ancestor->font->word_spacing;
                     inheritance_span->font->word_spacing_percent = ancestor->font->word_spacing_percent;
                     inheritance_span->font->word_spacing_is_percent = ancestor->font->word_spacing_is_percent;
+                    inheritance_span->font->word_spacing_is_set = true;
                 }
                 if (inheritance_span->font->word_spacing_is_percent && prop_id == CSS_PROPERTY_WORD_SPACING) {
                     inheritance_span->font->word_spacing = inheritance_span->font->word_spacing_percent *
@@ -6349,15 +6379,18 @@ static void resolve_multicol_dimension(LayoutContext* lycon, ViewBlock* block,
     MultiColumnProp* multicol = resolve_multicol_prop(lycon, block);
     if (!multicol || !value) return;
     float* target = height ? &multicol->column_height : &multicol->column_width;
+    bool* specified = height ? &multicol->column_height_is_specified
+                             : &multicol->column_width_is_specified;
     if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
         *target = 0.0f;
-        if (height) multicol->column_height_is_specified = false;
+        *specified = false;
     } else if (value->type == CSS_VALUE_TYPE_LENGTH ||
-               (allow_number && value->type == CSS_VALUE_TYPE_NUMBER)) {
+               (value->type == CSS_VALUE_TYPE_NUMBER &&
+                (allow_number || value->data.number.value == 0.0))) {
         float size = resolve_length_value(lycon, property, value);
-        if (size > 0.0f || (height && size == 0.0f)) {
+        if (size >= 0.0f) {
             *target = size;
-            if (height) multicol->column_height_is_specified = true;
+            *specified = true;
         }
     }
 }
@@ -6881,25 +6914,31 @@ static void resolve_font_spacing_property(LayoutContext* lycon, ViewSpan* span,
     // calc() is a length-valued spacing expression for both letter- and word-spacing.
     bool length_value = value->type == CSS_VALUE_TYPE_LENGTH ||
         value->type == CSS_VALUE_TYPE_FUNCTION ||
+        // CSS Values permits unitless zero wherever a length is accepted.
+        (value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value == 0.0) ||
         (letter && value->type == CSS_VALUE_TYPE_PERCENTAGE);
     if (length_value) {
         float spacing = resolve_length_value(lycon, property, value);
         if (letter) {
             span->font->letter_spacing = spacing;
+            span->font->letter_spacing_is_set = true;
             span->font->letter_spacing_is_percent = value->type == CSS_VALUE_TYPE_PERCENTAGE;
             span->font->letter_spacing_percent = span->font->letter_spacing_is_percent
                 ? (float)value->data.percentage.value : 0.0f;
         } else {
             span->font->word_spacing = spacing;
+            span->font->word_spacing_is_set = true;
         }
     } else if (value->type == CSS_VALUE_TYPE_KEYWORD &&
                value->data.keyword == CSS_VALUE_NORMAL) {
         if (letter) {
             span->font->letter_spacing = 0.0f;
+            span->font->letter_spacing_is_set = true;
             span->font->letter_spacing_is_percent = false;
             span->font->letter_spacing_percent = 0.0f;
         } else {
             span->font->word_spacing = 0.0f;
+            span->font->word_spacing_is_set = true;
         }
     }
 }
@@ -8032,7 +8071,7 @@ static bool resolve_text_wrap_mode_keyword(CssEnum keyword, CssEnum* mode) {
     return false;
 }
 
-static bool resolve_text_wrap_value(const CssValue* value, CssEnum* mode,
+bool layout_resolve_text_wrap_value(const CssValue* value, CssEnum* mode,
                                     CssEnum* style) {
     if (!value || !mode || !style) return false;
     *mode = CSS_VALUE_WRAP;
@@ -8069,7 +8108,7 @@ static void resolve_text_wrap_property(LayoutContext* lycon, ViewSpan* span,
         CssEnum mode = value->data.keyword;
         if (mode == CSS_VALUE_INHERIT || mode == CSS_VALUE_UNSET) {
             target->text_wrap_mode = get_text_wrap_mode_value(
-                dom_parent_element(lam::dom_require_element(lycon->view)));
+                dom_parent_element(lam::dom_require_element(lycon->view)), lycon);
         } else if (mode == CSS_VALUE_INITIAL || mode == CSS_VALUE_REVERT) {
             target->text_wrap_mode = CSS_VALUE_WRAP;
         } else if (!resolve_text_wrap_mode_keyword(mode, &target->text_wrap_mode)) {
@@ -8079,7 +8118,7 @@ static void resolve_text_wrap_property(LayoutContext* lycon, ViewSpan* span,
     }
     CssEnum mode = CSS_VALUE_WRAP;
     CssEnum style = CSS_VALUE_AUTO;
-    if (!resolve_text_wrap_value(value, &mode, &style)) return;
+    if (!layout_resolve_text_wrap_value(value, &mode, &style)) return;
     target->text_wrap_mode = mode;
     target->text_wrap_style = style;
 }
@@ -9247,6 +9286,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             MultiColumnProp* multicol = block->multicol_prop();
             multicol->column_count = 0;
             multicol->column_width = 0;
+            multicol->column_width_is_specified = false;
             multicol->column_height = 0;
             multicol->column_height_is_specified = false;
             multicol->wrap = COLUMN_WRAP_AUTO;
@@ -9271,10 +9311,15 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                     int count = (int)v->data.number.value; // INT_CAST_OK: column count
                     if (v->data.number.value == (double)count && count > 0) {
                         multicol->column_count = count;
+                    } else if (v->data.number.value == 0.0) {
+                        multicol->column_width_is_specified = true;
                     }
                 } else if (v->type == CSS_VALUE_TYPE_LENGTH) {
                     float width = resolve_length_value(lycon, prop_id, v);
-                    if (width > 0.0f) multicol->column_width = width;
+                    if (width >= 0.0f) {
+                        multicol->column_width = width;
+                        multicol->column_width_is_specified = true;
+                    }
                 }
             }
             if (slash_index >= 0 && slash_index + 1 < value_count) {
@@ -9649,6 +9694,20 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_WORD_SPACING:
             resolve_font_spacing_property(lycon, span, prop_id, value);
             break;
+        case CSS_PROPERTY_HYPHENATE_LIMIT_CHARS: {
+            int limits[3] = {-1, -1, -1};
+            CssEnum keyword = value->type == CSS_VALUE_TYPE_KEYWORD
+                ? value->data.keyword : CSS_VALUE__UNDEF;
+            if (keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET) {
+                DomElement* parent = dom_parent_element(lam::dom_require_element(lycon->view));
+                if (parent) memcpy(limits, parent->block()->hyphenate_limits, sizeof(limits));
+            } else if (keyword != CSS_VALUE_INITIAL && keyword != CSS_VALUE_REVERT &&
+                       !layout_compute_hyphenate_limits(lycon, value, limits)) break;
+            BlockProp* rules = span->ensure_block(lycon);
+            memcpy(rules->hyphenate_limits, limits, sizeof(limits));
+            rules->hyphenate_limits_is_set = true;
+            break;
+        }
         case CSS_PROPERTY_HYPHENATE_CHARACTER: {
             span->ensure_block(lycon);
             const CssValue* resolved = resolve_var_function(lycon, value);

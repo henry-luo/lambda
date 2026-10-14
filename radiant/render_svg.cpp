@@ -592,53 +592,16 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
 
 // Render multi-column rules (vertical lines between columns)
 static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
-    if (!block->multicol_prop()) return;
-
+    RenderColumnRuleIterator iterator;
+    if (!render_column_rules_begin(block, &iterator)) return;
     MultiColumnProp* mc = block->multicol_prop();
-
-    // Only render rules between columns that actually received content.
-    int rule_column_count = mc->computed_used_column_count > 0
-        ? mc->computed_used_column_count
-        : mc->computed_column_count;
-    if (rule_column_count <= 1 || mc->rule_width <= 0 ||
-        mc->rule_style == CSS_VALUE_NONE) {
-        return;
-    }
-
-    float column_width = mc->computed_column_width;
-    float gap = multicol_column_gap(block);
-
-    // Calculate block position
-    float block_x = ctx->block.x + block->x;
-    float block_y = ctx->block.y + block->y;
-
-    // Adjust for padding
-    if (block->bound) {
-        block_x += block->boundary()->padding.left;
-        block_y += block->boundary()->padding.top;
-    }
-
-    // Rule height is the content area height
-    float rule_height = block->height;
-    if (block->bound) {
-        rule_height -= layout_box_metrics(block).pad_border_v;
-    }
-
-    // Ensure minimum rule height - compute from children if needed
-    if (rule_height <= 0) {
-        // SVG rule geometry only uses block boxes before inline wrapping.
-        rule_height = layout_view_children_bottom(block, true);
-    }
-
-    if (rule_height <= 0) return;
-
-
-    // Draw rule between each pair of columns
-    for (int i = 0; i < rule_column_count - 1; i++) {
-        float rule_x = block_x + (i + 1) * column_width + i * gap + gap / 2.0f;
+    float rule_x = 0.0f, block_y = 0.0f, rule_height = 0.0f;
+    while (render_column_rule_next(&iterator, &rule_x, &block_y, &rule_height)) {
+        rule_x += ctx->block.x + block->x;
+        block_y += ctx->block.y + block->y;
         if (mc->rule_style == CSS_VALUE_DOUBLE) {
             float thin_width = mc->rule_width / 3.0f;
-            float offset = mc->rule_width / 2.0f;
+            float offset = thin_width;
             RdtPath* left = rdt_path_new();
             RdtPath* right = rdt_path_new();
             if (left && right) {

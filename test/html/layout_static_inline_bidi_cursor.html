@@ -1,0 +1,17 @@
+<!doctype html><style>
+@font-face {font-family:Ahem;src:url("../layout/data/font/Ahem.ttf");}
+body {margin:40px;font:10px/1 Ahem}.line{width:100px;height:20px;text-indent:20px}.rtl{direction:rtl}
+.abs{position:absolute;display:inline;width:20px;height:20px}.float{width:20px;height:20px}
+</style><div id="result">
+<div class="line" style="text-indent:-20px"><span id="negative" class="abs"></span></div>
+<div class="line rtl"><span id="rtl-first" class="abs"></span></div>
+<div class="line rtl" style="text-indent:10px">foobar<span id="rtl-after" class="abs"></span></div>
+<div class="line rtl" style="text-indent:-20px"><span id="rtl-negative" class="abs"></span></div>
+<div class="line rtl"><span id="rtl-own" class="abs">f</span></div>
+<div class="line rtl"><span id="explicit" class="abs" style="left:40px"></span></div>
+<div class="line"><span id="block" class="abs" style="display:block"></span></div>
+<div class="line rtl" style="text-indent:10px"><span class="float" style="float:left"></span><span id="left-float" class="abs"></span></div>
+<div class="line rtl" style="text-indent:10px"><span class="float" style="float:right"></span><span id="right-float" class="abs"></span></div>
+<div class="line rtl" style="text-indent:0">XXX<span style="direction:rtl">XX<span id="rtl-latin-run" class="abs" style="width:50px">XXXXX</span><span>XXXXX</span></span></div>
+<div class="line rtl" style="text-indent:0">XXX<span style="direction:ltr">XX<span id="ltr-latin-run" class="abs" style="width:50px">XXXXX</span><span>XXXXX</span></span></div>
+</div>

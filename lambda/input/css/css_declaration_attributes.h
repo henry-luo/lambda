@@ -249,6 +249,7 @@
     X(line_break) \
     X(hyphens) \
     X(hyphenate_character) \
+    X(hyphenate_limit_chars) \
     X(overflow_wrap) \
     X(word_wrap) \
     X(tab_size) \
@@ -871,6 +872,8 @@
     X(hyphens, "hyphens", "hyphens") \
     X(hyphenate_character, "hyphenateCharacter", "hyphenate-character") \
     X(hyphenate_character, "hyphenate-character", "hyphenate-character") \
+    X(hyphenate_limit_chars, "hyphenateLimitChars", "hyphenate-limit-chars") \
+    X(hyphenate_limit_chars, "hyphenate-limit-chars", "hyphenate-limit-chars") \
     X(overflow_wrap, "overflowWrap", "overflow-wrap") \
     X(overflow_wrap, "overflow-wrap", "overflow-wrap") \
     X(word_wrap, "wordWrap", "word-wrap") \
