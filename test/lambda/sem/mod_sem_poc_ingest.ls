@@ -51,6 +51,7 @@ fn binary_term(op, l, r) any^ => match string(op) {
   case "-": <sub l r>
   case "*": <mul l r>
   case "/": <div l r>
+  case "div": <idiv l r>
   case "%": <mod l r>
   case "++": <cat l r>
   case "**": <pow l r>
@@ -67,16 +68,21 @@ fn binary_term(op, l, r) any^ => match string(op) {
 
 fn unary_term(op, o) any^ => match string(op) {
   case "-": <neg o>
+  case "+": <pos o>
   case "not": <nott o>
   default: <unsupported kind: "unary", op: op>
 }
 
 // a function value: n-ary throughout, named when the declaration has a name
 fn func_term(n) any^ {
-  let ps = [for (p in kids(n, 'param')) attr(p, 'name')]
+  let params = kids(n, 'param')
+  let ps = [for (p in params) attr(p, 'name')]
+  // a type binder (`value: as T`) is a contract the model does not read
+  let binders = [for (p in params where len(kids(p, 'contract')) > 0) p]
   let body = norm(first(n, 'body')^)^
   let nm = attr(n, 'name')
-  if (nm == null) (<lamn ps: ps, body>) else (<funn f: nm, ps: ps, body>)
+  if (len(binders) > 0) (<unsupported kind: "type binder">)
+  else if (nm == null) (<lamn ps: ps, body>) else (<funn f: nm, ps: ps, body>)
 }
 
 // a call: a system function keeps its name, so the builtin boundary can be
@@ -85,15 +91,17 @@ fn call_term(n) any^ {
   let f = norm(first(n, 'function')^)^
   let args = for (a in kids(n, 'argument')) norm(a)^
   if (name(f) == 'sysf') {
-    if (f.n == "len") (<lenn args>) else (<unsupported kind: "sysfunc", name: f.n>)
+    if (f.n == "len") (<lenn args>) else (<unsupported kind: "sysfunc", n: f.n>)
   }
   else (<appn f args>)
 }
 
+// a map entry; a spread entry (`*: m`) is outside the modelled core
 fn kv_term(kv) any^ {
-  let v = norm(first(kv, 'as')^)^
-  let k = attr(kv, 'name');
-  <kv k: k, v>
+  let k = attr(kv, 'name')
+  if (name(kv) != 'AST_NODE_KEY_EXPR' or k == null) (<unsupported kind: name(kv)>)
+  else if (string(k) == "*") (<unsupported kind: "map spread">)
+  else { let v = norm(first(kv, 'as')^)^;  <kv k: k, v> }
 }
 
 // a one-clause comprehension with no index, join, let, where, group, order,
@@ -113,42 +121,52 @@ fn for_term(n) any^ {
   }
 }
 
-// a content block: leading declarations become nested `lett` wrappers
-// (a named function binds its own `funn` value); the value items that follow
-// form a `cont`. A declaration after a value item is outside this slice.
+// a content block (S2.5.3): a declaration scopes over the rest of the block,
+// so it becomes a `lett` wrapping the lowering of what follows — a named
+// function binds its own `funn` value, a multi-declarator `let` nests one
+// `lett` per declarator in order — and a run of value items becomes a `cont`.
+// When a declaration follows value items, the `cont`'s last child is its
+// `lett`: that child's value is the list of the remaining items, and lists
+// splice (S2.5.1v2), so the block's value stays the flat list of all its
+// value items, as the host's `for` builds it.
+fn is_decl(it) => name(it) == 'AST_NODE_LET_STAM' or name(it) == 'AST_NODE_FUNC'
+
+// the index of the next declaration at or after i, or the item count
+fn next_decl(items, i) => if (i >= len(items) or is_decl(items[i])) i else next_decl(items, i + 1)
+
 fn block(items, i) any^ {
   if (i >= len(items)) (<cont>)
   else {
     let it = items[i]
-    let kind = name(it)
-    if (kind == 'AST_NODE_LET_STAM') {
-      let ds = kids(it, 'declare')
-      if (len(ds) != 1) raise error("unsupported: multi-declarator let")
-      else {
-        let init = norm(first(ds[0], 'init')^)^
-        let rest = block(items, i + 1)^
-        let nm = attr(ds[0], 'name');
-        <lett n: nm, init rest>
-      }
-    }
-    else if (kind == 'AST_NODE_FUNC') {
+    if (name(it) == 'AST_NODE_LET_STAM') declare(kids(it, 'declare'), 0, items, i + 1)^
+    else if (name(it) == 'AST_NODE_FUNC') {
       let fnv = func_term(it)^
       let rest = block(items, i + 1)^
       let nm = attr(it, 'name');
       <lett n: nm, fnv rest>
     }
     else {
-      let vals = for (j in i to len(items) - 1) value_item(items[j])^;
-      <cont vals>
+      let j = next_decl(items, i)
+      let vals = for (k in i to j - 1) norm(items[k])^
+      if (j < len(items)) { let rest = block(items, j)^;  <cont vals rest> }
+      else (<cont vals>)
     }
   }
 }
 
-fn value_item(it) any^ {
-  let kind = name(it)
-  if (kind == 'AST_NODE_LET_STAM' or kind == 'AST_NODE_FUNC')
-    raise error("unsupported: declaration after a value item")
-  else norm(it)^
+// one `lett` per declarator, then the rest of the block; a declarator with no
+// plain name (a destructuring pattern) is outside this slice
+fn declare(ds, d, items, i) any^ {
+  if (d >= len(ds)) block(items, i)^
+  else {
+    let nm = attr(ds[d], 'name')
+    if (nm == null) (<unsupported kind: "declarator">)
+    else {
+      let init = norm(first(ds[d], 'init')^)^
+      let rest = declare(ds, d + 1, items, i)^;
+      <lett n: nm, init rest>
+    }
+  }
 }
 
 pub fn norm(n) any^ => match name(n) {

@@ -4,9 +4,9 @@
 // and emits a structural dump for parser/type-inference verification. The dump
 // is Mark (Lambda's data notation), so `input(path, 'mark')` reads it back as
 // elements: a node is `<KIND attr… field…>`, an attribute `<label value>`, a
-// field `<label child…>`. Every scalar is a string or a number — the Mark
-// reader keeps no bare word in content — and no two strings sit side by side
-// in one element, since content merges adjacent strings (S2.6.4).
+// field `<label child…>`. Every scalar is a string, a number or a bare
+// boolean, and no two strings sit side by side in one element, since content
+// merges adjacent strings (S2.6.4).
 #include "../../lib/memtrack.h"
 #include "../../lib/mem_factory.h"
 #include "emit_ast_dump.h"
@@ -249,10 +249,9 @@ void emit_dump_string_field(const char* label, String* str) {
     printf(">");
 }
 
-// a boolean attribute: spelled as a string, since the Mark reader drops a
-// bare `true`/`false` from element content
+// a boolean attribute: a bare `true`/`false`, which Mark content keeps (S2.6.2)
 void emit_dump_bool_field(const char* label, bool value) {
-    printf(" <%s \"%s\">", label, value ? "true" : "false");
+    printf(" <%s %s>", label, value ? "true" : "false");
 }
 
 static void emit_dump_strview_field(const char* label, StrView view) {
@@ -788,7 +787,7 @@ int emit_ast_dump_file(const char* script_path) {
         return 1;
     }
 
-    // the language is a string child: the Mark reader drops a bare word
+    // the language is a string child (a bare word would read back as a symbol)
     printf("<ast-dump \"lambda\"\n");
     emit_lambda_dump_node(source, tp.ast_root, 1);
     // ANY-census block [Type_Infer TI3]: the machine-readable form of the

@@ -1,0 +1,3 @@
+[true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]
+[['flag', [[bool, true]]], ['flag', [[bool, false]]], ['sym', [[symbol, 'quoted symbol']]], ['word', [[symbol, 'bare_word']]], ['num', [[float, 1.5]]], ['neg', [[int, -3]]], ['poison', [[int, "nan"], [int, inf], [int, -inf]]], ['nothing', []], ['empty', []], ['mixed', [[bool, true], [symbol, 'sym'], [float, -2.5], [element, <inner
+          false>], [string, "text"], [int, 42]]], ['attrs', [[bool, false]]], ['leading', [[bool, true], [string, "text"]]], ['trailing', [[string, "text"], [bool, true]]], ['words', [[symbol, 'trueish'], [symbol, 'nullable'], [symbol, 'infinite'], [symbol, 'nanometer'], [symbol, 'falsey']]], ['quoted', [[symbol, 'sym']]]]

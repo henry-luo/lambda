@@ -189,7 +189,7 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
                 printf(" <literal \"string\">");
                 emit_dump_string_field("value", lit->value.string_value);
             } else if (lit->literal_type == AST_LITERAL_BOOLEAN) {
-                printf(" <literal \"%s\">", lit->value.boolean_value ? "true" : "false");
+                printf(" <literal %s>", lit->value.boolean_value ? "true" : "false");
             } else if (lit->literal_type == AST_LITERAL_NULL) {
                 printf(" <literal \"null\">");
             } else if (lit->literal_type == AST_LITERAL_UNDEFINED) {

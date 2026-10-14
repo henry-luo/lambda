@@ -20,6 +20,7 @@
 static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda",
     "test/lambda/chart",
+    "test/lambda/docx",
     "test/lambda/latex",
     "test/lambda/math",
     "test/lambda/editor",

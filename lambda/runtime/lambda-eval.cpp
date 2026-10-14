@@ -5366,6 +5366,16 @@ Symbol* fn_name(Item item) {
         if (!elmt || !elmt->type) return nullptr;
         return fn_name_from_type((Type*)elmt->type);
     }
+    case LMD_TYPE_VELMT: {
+        // D7.4.5v2: read the virtual intrinsic tag, rooting both owner and result across symbol allocation.
+        RootFrame roots(2);
+        Rooted<Item> owner(roots, item);
+        Item tag = ItemNull;
+        if (element_tag_for(owner.get(), &tag) != VIRTUAL_OP_OK ||
+                !is_text_type_id(get_type_id(tag))) return nullptr;
+        Rooted<Item> rooted_tag(roots, tag);
+        return fn_name_symbol_from_chars(rooted_tag.get().get_chars(), rooted_tag.get().get_len());
+    }
     case LMD_TYPE_FUNC: {
         // return the function's name as a symbol
         Function* fn = item.function;
@@ -6421,9 +6431,9 @@ Item fn_parse2(Item str_item, Item type) {
     log_debug("fn_parse2: type=%s, flavor=%s", type_str ? type_str->chars : "auto", flavor_str ? flavor_str->chars : "null");
 
     parse_options.source_positions = source_positions;
-    Input* input = (source_positions || has_tex_options)
-        ? input_from_source_with_options(str->chars, dummy_url, type_str, flavor_str, &parse_options)
-        : input_from_source(str->chars, dummy_url, type_str, flavor_str);
+    // preserve the Item's byte count so document XML cannot silently accept a NUL-truncated prefix.
+    Input* input = input_from_source_n_with_name_parent(str->chars, str->len, dummy_url,
+        type_str, flavor_str, NULL, (source_positions || has_tex_options) ? &parse_options : NULL);
     arraylist_free(adapter_names);
     arraylist_free(raw_names);
     arraylist_free(chaptered_names);
