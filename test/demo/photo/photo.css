@@ -1,8 +1,7 @@
 :root { color-scheme:dark; }
 * { box-sizing:border-box; }
 html,body { margin:0; width:100%; height:100%; overflow:hidden; background:#14171c; color:#e7e9ee; font-family:"Helvetica Neue",Arial,sans-serif; font-size:13px; }
-#photo { width:100vw; height:100vh; display:flex; flex-direction:column; outline:none;
- --dtna-color-text:#e7e9ee; --dtna-color-bg-container:#252a32; --dtna-color-border:#39414e; --dtna-color-primary:#80d6b3; }
+#photo { width:100vw; height:100vh; display:flex; flex-direction:column; outline:none; }
 .toolbar { height:72px; flex-shrink:0; display:flex; align-items:center; justify-content:space-between; gap:20px; padding:0 24px; border-bottom:1px solid #30353e; background:#1b1f26; }
 .brand { display:flex; align-items:center; gap:10px; white-space:nowrap; }
 .brand strong { font-size:18px; letter-spacing:-.4px; }

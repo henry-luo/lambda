@@ -11152,6 +11152,9 @@ extern "C" bool dom_engine_frame_tick(DomDocument* doc, double timestamp_ms) {
     evcon.ui_context = static_cast<UiContext*>(doc->js.host_ui_context);
     JsCtxScope scope = {};
     if (!radiant_js_ctx_enter(&scope, &evcon)) return false;
+    DocState* state = doc->state;
+    // frame mutations settle focus during reconciliation, before interaction validation.
+    state_begin_batch(state);
     uint64_t started = time_now_ns();
     FrameCommitProfile profile = {};
     profile.document = doc;
@@ -11178,6 +11181,7 @@ extern "C" bool dom_engine_frame_tick(DomDocument* doc, double timestamp_ms) {
         delivered_count++;
     }
     radiant_js_ctx_exit(&scope, &evcon, started);
+    state_end_batch(state);
     active_frame_profile = previous_profile;
     if (queue->profile) {
         size_t dom_live = 0, view_live = 0;

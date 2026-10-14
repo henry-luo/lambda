@@ -1,7 +1,12 @@
 import ui: lambda.ui.dtna
+import theme: lambda.ui.dtna.tokens
 import model: .mod_model
 import presets: .mod_presets
 import layers: .mod_layers
+
+// embedded DTNA buttons need the typography tokens normally supplied by its page shell.
+let THEME = theme.variables({primary:"#80d6b3",text:"#e7e9ee",background:"#252a32",border:"#39414e",
+    font_size:12,control_height:34})^
 
 // apply the imported button view before embedding it in the retained native scene (S12.1.3).
 fn button(id, action, label, primary=false) => apply(<dtna.button id:id,'data-action':action,
@@ -21,7 +26,7 @@ fn object_slider(key,caption,low,high,step="1") => <label class:"object-control"
 fn asset_grid(catalog,kind) => <div class:"asset-grid", *[for (asset in catalog)
     <button id:("add-" ++ asset.id),'data-add':asset.id,class:("asset " ++ kind),title:asset.label,
         *[layers.icon(asset.id),<span (asset.label)>]>]>
-pub fn tree() => <main id:"photo",tabindex:0,'data-inspector':"false", *[
+pub fn tree() => <main id:"photo",tabindex:0,'data-inspector':"false",style:THEME, *[
     <header class:"toolbar", *[
         <div class:"brand",<span class:"brand-mark","λ"> <strong "Photo Studio"> <span class:"badge","RADIANT">>,
         <div class:"toolbar-group", *[button("inspector-toggle","toggle-inspector","Tools"),button("open","open","Open image"),button("undo","undo","Undo"),

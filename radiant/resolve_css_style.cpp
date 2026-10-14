@@ -3577,6 +3577,17 @@ static float resolve_length_value_mode(LayoutContext* lycon, uintptr_t property,
 void radiant_compute_stored_line_height(LayoutContext* lycon, DomElement* span) {
     const CssValue* value = span && span->blk ? span->block()->line_height : nullptr;
     if (!value) return;
+    CssValue inherited = {};
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        // invalid variable substitutions arrive as unset; inherit before resolving used leading.
+        if (value->data.keyword == CSS_VALUE_UNSET || value->data.keyword == CSS_VALUE_INHERIT) {
+            inherited = inherit_line_height(lycon,
+                lam::unsafe_view_block_api_span(lam::view_require_element(span)));
+            value = &inherited;
+        } else if (value->data.keyword == CSS_VALUE_INITIAL) {
+            value = css_line_height_normal_value();
+        }
+    }
     CssValue computed = {};
     if (value->type == CSS_VALUE_TYPE_NUMBER) {
         computed.type = value->type;

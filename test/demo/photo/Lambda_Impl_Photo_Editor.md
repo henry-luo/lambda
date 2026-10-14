@@ -660,3 +660,60 @@ whole-application memory bound.
   Neither broad gate is green; no harness failures were suppressed.
 
 Detailed local verification logs are under `temp/photo/performance/`.
+
+### Crop focus correction (2026-10-14)
+
+The interactive display clock delivered named Lambda frames without the state
+batch used by the headless host loop. Applying a crop hides the focused Apply
+button's panel in a later frame; `doc_state_request_reflow` then validated the
+partially committed tree before the existing post-handler focus cleanup ran.
+Frame delivery now opens a nested state batch and closes it after reconciliation
+and focus cleanup. The final interaction assertion remains enabled; the retained
+tree contract (**S12.1.3 / D4.5.1v4**) is unchanged.
+
+An in-process `RadiantFrameDelivery` regression calls the frame tick directly,
+without a host batch, then checks focus/pseudo-state cleanup and validation.
+The photo gesture replay additionally checks Tab/Enter activation of Crop Apply
+and Cancel in automatic and forced-JIT modes. With the fix removed, the direct
+frame regression reproduces the reported `doc_state_request_reflow` assertion
+and SIGABRT; with it restored, all four in-process query/layout/frame tests pass.
+All 21 StateStore tests pass, as do both 43-event photo gesture replays and the
+existing CSS focus-fixup (24 assertions) and named-frame (nine assertions) replays.
+The debug host was rebuilt, and Radiant's no-int-cast lint passed.
+
+A fresh `make test-radiant-baseline` run passed the new regression, vector,
+animation, view-reuse, DOM UI, page-load and other completed native suites.
+It also reported video, page-snapshot, layout and document-editor UI failures.
+The run was stopped after repeated Scene3D idle timeouts with blocked macOS
+GUI service connections; it is an incomplete, failing gate, not a clean baseline.
+Local logs are under `temp/photo/crop-focus/`.
+
+### Button leading correction (2026-10-14)
+
+DTNA's button leading uses `calc(var(--dtna-font-size) + 8px)`. The embedded
+photo scene loaded the stylesheet without supplying the theme tokens. Radiant
+correctly converted the missing-variable declaration to `unset`, but retained
+that keyword as line-height; used-value resolution then treated it as zero.
+The label wrapper was centered while its text rectangle appeared seven pixels
+above it. The same exported markup was centered in Chromium.
+
+Stored line-height now resolves `unset`/`inherit` through the existing inherited
+value helper and `initial` to `normal`, before storing its owned computed value
+(**D4.5.1v4**). This follows the [CSS Variables invalid-value rule](https://www.w3.org/TR/css-variables-1/#invalid-variables).
+The scene also installs typography, sizing and color tokens through the shared
+DTNA token helper, preserving the retained tree (**S12.1.3**). The 34-pixel Add
+text button now has 20-pixel leading and a measured text-center offset of zero.
+
+Native regressions cover missing/cyclic variables, invalid types, initial and
+inherited leading, explicit zero, retained reflow and the actual photo button.
+All six native text-query/layout/frame tests, 527 selected view/layout tests,
+104 CSS parser tests and three photo toolbar/gesture replays passed. The gesture
+replays exercised automatic and forced-JIT execution. Radiant's no-int-cast lint
+and the scoped diff whitespace check passed.
+
+The layout baseline inventory passed 14 of 15 categories. Markdown retained one
+failure, `md_nuxt-readme` (99.3% element matching); the saved pre-fix and fixed
+hosts produced the same 42 passing, 15 partial and one failing Markdown results.
+This is a failing layout gate, with no new failure attributable to this fix.
+Local verification logs and before/after captures are under
+`temp/photo/button-alignment/`.

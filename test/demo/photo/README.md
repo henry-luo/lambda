@@ -117,8 +117,9 @@ mkdir -p temp/photo
 The Lambda tests are auto-discovered by the core baseline. The Radiant tests
 register the 60-event editor replay and a pixel-level RGBA upload fixture with
 forced collection, poisoned frees, promotion, and clean document teardown.
-An additional 23-event replay covers crop dragging/cancellation, keyboard
-comparison, and closing with a pending frame in automatic and forced-JIT modes.
+An additional 43-event replay covers crop dragging/cancellation, keyboard
+activation of Apply/Cancel, comparison, and closing with a pending frame in
+automatic and forced-JIT modes.
 The 39-event narrow-window replay checks drawer controls, adding/dragging
 artwork, and export dialog size.
 Its small RGBA fixture is generated from numeric pixels in Lambda.
@@ -132,6 +133,11 @@ checks superseded jobs, owned input pixels, painted colors and zero tracked
 allocations at teardown. Reference pixels captured before optimization cover
 20 recipes; non-neutral RGB comparisons allow one 8-bit value of rounding
 difference. Neutral output and untransformed alpha remain exact.
+The in-process `RadiantFrameDelivery` regression in `test_radiant_text_query_gtest`
+delivers a frame without the replay host's surrounding state batch. It checks
+that hiding a focused panel clears focus before final interaction validation.
+`RadiantTextLayout` checks Add text's actual label geometry and shared DTNA theme
+tokens, plus inherited line-height when CSS variables are missing, cyclic or invalid.
 A glyph-geometry probe checks that native button text retains authored flex/grid
 alignment instead of overlapping neighboring labels.
 IO tests check all eight EXIF orientations, malformed/oversized headers,

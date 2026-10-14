@@ -1,9 +1,10 @@
-// in-process Lambda text-measurement queries and native text layout checks.
+// in-process Lambda text queries, retained layout and frame delivery checks.
 #include <gtest/gtest.h>
 #include "../radiant/radiant.hpp"
 #include "../radiant/layout.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/dom/dom.h"
+#include "../lambda/dom/dom_engine.h"
 #include "../lib/tagged.hpp"
 
 extern "C" uint64_t radiant_query_font_build_count(void);
@@ -46,7 +47,80 @@ TEST_F(RadiantTextQuery, FacelessQueriesReuseOneCachedFontContext) {
     EXPECT_LE(radiant_query_font_build_count() - builds_before, 1u);
 }
 
-class RadiantTextLayout : public RadiantTextQuery {};
+class RadiantTextLayout : public RadiantTextQuery {
+protected:
+    void expect_centered_button_text(DomElement* button) {
+        ASSERT_NE(button, nullptr);
+        DomElement* label = button->first_child->as_element();
+        DomText* text = label->first_child->as_text();
+        ASSERT_NE(text->rect, nullptr);
+        float x, y, width, height;
+        view_get_visual_bounds(button, &x, &y, &width, &height);
+        RdtLogicalPoint origin = view_geometry_text_rect_document_origin(text, text->rect);
+        EXPECT_NEAR(origin.y + text->rect->height / 2, y + height / 2, 0.6f);
+    }
+};
+
+TEST_F(RadiantTextLayout, InvalidVariableLeadingInheritsWithoutMovingButtonText) {
+    DomElement* owner = load("test/html/line_height_invalid_variables.html");
+    ASSERT_NE(owner, nullptr);
+    const char* centered[] = {"normal", "unset", "initial", "missing", "cycle", "bad-type",
+        "fallback", "inherited-missing", "inherited-unset", "inherited-initial"};
+    for (int pass = 0; pass < 2; pass++) {
+        layout_html_doc(&ui, document, pass != 0);
+        for (const char* id : centered) {
+            SCOPED_TRACE(id);
+            DomElement* button = dom_find_element_by_id(owner, id);
+            ASSERT_NE(button, nullptr);
+            expect_centered_button_text(button);
+            if (strcmp(id, "inherited-missing") == 0 || strcmp(id, "inherited-unset") == 0) {
+                ASSERT_EQ(button->block()->line_height->type, CSS_VALUE_TYPE_NUMBER);
+                EXPECT_DOUBLE_EQ(button->block()->line_height->data.number.value, 1.5);
+            }
+        }
+        DomElement* zero = dom_find_element_by_id(owner, "zero");
+        ASSERT_NE(zero, nullptr);
+        ASSERT_EQ(zero->block()->line_height->type, CSS_VALUE_TYPE_NUMBER);
+        EXPECT_DOUBLE_EQ(zero->block()->line_height->data.number.value, 0);
+    }
+}
+
+TEST_F(RadiantTextLayout, PhotoDtnaButtonHasThemeLeadingAndCenteredText) {
+    DomElement* owner = load("test/lambda/ui/_photo_button_layout.ls");
+    ASSERT_NE(owner, nullptr);
+    for (int pass = 0; pass < 2; pass++) {
+        layout_html_doc(&ui, document, pass != 0);
+        DomElement* button = dom_find_element_by_id(owner, "add-text");
+        ASSERT_NE(button, nullptr);
+        ASSERT_EQ(button->block()->line_height->type, CSS_VALUE_TYPE_LENGTH);
+        EXPECT_DOUBLE_EQ(button->block()->line_height->data.length.value, 20);
+        expect_centered_button_text(button);
+    }
+}
+
+class RadiantFrameDelivery : public RadiantTextQuery {};
+
+TEST_F(RadiantFrameDelivery, HidingFocusedPanelSettlesBeforeValidationWithoutHostBatch) {
+    DomElement* owner = load("test/lambda/ui/_frame_focus.ls");
+    ASSERT_NE(owner, nullptr);
+    layout_html_doc(&ui, document, false);
+    ASSERT_NE(dom_engine_document_ensure_state(document, "frame_focus_test"), nullptr);
+    ASSERT_NE(dom_engine_frame_request(owner, "prepare_frame"), 0u);
+    ASSERT_TRUE(dom_engine_frame_tick(document, 1.0));
+    ASSERT_STREQ(owner->get_attribute("data-prepared"), "true");
+    DomElement* button = dom_find_element_by_id(owner, "focused");
+    ASSERT_NE(button, nullptr);
+    ASSERT_EQ(focus_get(document->state), static_cast<View*>(button));
+    ASSERT_TRUE(radiant_document_has_pending_frames(document));
+    ASSERT_EQ(document->state->state_batch_depth, 0u);
+    // the interactive clock calls directly, without the replay loop's outer batch.
+    ASSERT_TRUE(dom_engine_frame_tick(document, 2.0));
+    EXPECT_STREQ(owner->get_attribute("data-finished"), "true");
+    EXPECT_EQ(focus_get(document->state), nullptr);
+    EXPECT_FALSE(state_get_bool(document->state, button, STATE_FOCUS));
+    EXPECT_EQ(document->state->state_batch_depth, 0u);
+    EXPECT_TRUE(radiant_state_validate_interaction(document->state, nullptr));
+}
 
 TEST_F(RadiantTextLayout, ShadowMathKeepsLengthsDistinctFromColors) {
     ASSERT_NE(load("test/html/shadow_math.html"), nullptr);
