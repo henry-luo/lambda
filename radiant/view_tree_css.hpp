@@ -59,7 +59,7 @@ struct ViewCssStyle {
     Color border_color[4];
     float line_height;
     lam::Up<const CssValue> line_height_value;
-    CssEnum text_align, white_space, float_value, clear_value, position, box_sizing, caption_side;
+    CssEnum text_align, white_space, float_value, clear_value, position, box_sizing, caption_side, border_collapse;
     CssEnum list_style_type;
     bool list_marker_inside;
     bool list_reversed;
@@ -185,5 +185,7 @@ ViewModelStatus view_css_page_style(ViewTree* tree, const char* name, uint32_t p
                                   ViewPageSide side, bool blank, ViewPageStyle* result,
                                   RadiantPageDiagnostic* diagnostic = nullptr);
 
+// used border width of one physical side; none and hidden styles have zero width.
+float view_css_border_width(ViewTree* tree, const ViewCssStyle* source, size_t side, float width);
 ViewModelStatus view_css_box_edges(ViewTree* tree, const ViewCssStyle* source,
     float width, ViewCssBoxEdges* box);

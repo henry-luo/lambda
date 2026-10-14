@@ -1510,6 +1510,30 @@ TEST(RenderOutputParity, PagedViewerAdmitsNativeAndFoDocumentsThroughCommonLoade
     }
 }
 
+TEST(RenderOutputParity, PagedMarkdownPaginatesCollapsedTablesAndUnbreakableCodeThroughItsLoader) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* md_path = "temp/render_output_parity/paged_notes.md";
+    const char* pdf_path = "temp/render_output_parity/paged_notes.pdf";
+    // GitHub-style tables collapse their borders; an unbreakable code run neither fails nor drops pages.
+    StrBuf* markdown = strbuf_new(); ASSERT_NE(markdown, nullptr);
+    strbuf_append_str(markdown, "# Notes\n\n```\n");
+    for (int i = 0; i < 160; i++) strbuf_append_char(markdown, (char)('a' + i % 26));
+    strbuf_append_str(markdown, "\n```\n\n| Form | Meaning |\n|---|---|\n");
+    for (int i = 0; i < 80; i++) strbuf_append_format(markdown, "| `row %d` | value %d |\n", i, i);
+    bool rendered = render_html_fixture(md_path, pdf_path, markdown->str, "--paged");
+    strbuf_free(markdown); ASSERT_TRUE(rendered);
+    EXPECT_GE(pdf_page_count(pdf_path), 2);
+    CommandResult info = pdf_info(pdf_path); ASSERT_EQ(info.exit_code, 0) << info.output;
+    const char* size = strstr(info.output, "Page size:"); ASSERT_NE(size, nullptr);
+    double width = 0.0, height = 0.0;
+    ASSERT_EQ(sscanf(size, "Page size: %lf x %lf", &width, &height), 2);
+    EXPECT_NEAR(width, 210.0 * 72.0 / 25.4, 0.01); EXPECT_NEAR(height, 297.0 * 72.0 / 25.4, 0.01);
+    char command[PATH_MAX + 64];
+    snprintf(command, sizeof(command), "\"%s\" view \"%s\" --paged --headless 2>&1", LAMBDA_EXE, md_path);
+    CommandResult viewed = run_command_capture(command);
+    EXPECT_EQ(viewed.exit_code, 0) << viewed.output;
+}
+
 TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));

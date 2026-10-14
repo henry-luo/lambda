@@ -102,6 +102,8 @@ struct LayoutViewNode {
     bool generated;
     bool clip_content;
     float clip_inset[4];
+    // collapsed table borders straddle the grid lines that bound a cell's border box (CSS 2.2 §17.6.2).
+    float border_outset[4];
     bool first_fragment, last_fragment;
     bool paint_box;
 };
