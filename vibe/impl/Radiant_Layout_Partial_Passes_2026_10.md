@@ -1767,3 +1767,874 @@ where the old oracle has 87px. A direct platform probe also returns a 16px
 synthesized vertical advance for Menlo's zero, whereas Chromium uses 19px for
 upright ch lengths. Neither observation justifies replacing current font
 metrics with reference-specific dimensions.
+
+The out-of-flow checkpoint passes the full Radiant gate at **5,669 passed / 187
+expected partial / one existing skip / zero failures**.
+
+### Selected-face punctuation-space synthesis
+
+U+2008 was absent from the selected document face, so layout and paint used a
+replacement font's narrow space instead of the selected period's advance.
+Classify that space through the existing explicit-space measurement path and
+share one font-based metric across intrinsic sizing, line fitting and bidi
+redistribution. Keep an authored space glyph when the selected face covers it.
+For a synthesized blank, raster, overflow clipping, shadows, decorations and
+vector glyph traversal advance without drawing the replacement glyph. The
+original source bytes remain unchanged.
+
+All eight browser controls match native geometry, including an overflowing
+unbreakable prefix, an inline boundary, RTL, intrinsic sizing and ellipsis. The
+paired raster, SVG and PDF images retain the blank and following glyph positions.
+All 67 native text controls and 151 vector controls pass. Five inventories have
+no losses; `trailing-other-space-separators-break-spaces-010` becomes full,
+bringing this round to **55 additional full matches**. Authority:
+[Unicode 17 §6.2.3](https://www.unicode.org/versions/Unicode17.0.0/core-spec/chapter-6/),
+[CSS Text 3 §4.3](https://www.w3.org/TR/css-text-3/#white-space-phase-2).
+
+The remaining autospace probes separate several issues: the current
+specification defines normal as alpha/numeric spacing, while the Chinese
+punctuation oracle inserts four extra gaps; upright character classification and
+vertical advances need a shared layout/paint design; bidi autospace must be
+inserted after visual reordering. The supplementary-ideograph control currently
+differs only on the lines containing U+3002 because the browser uses Ahem's
+missing glyph while native chooses a CJK fallback. No reference-specific font
+selection is introduced.
+
+The shared font-layer implementation passes the exact gate at **3,112 full /
+182 partial / zero failures** and the full Radiant gate at **5,672 passed / 186
+expected partial / one existing skip / zero failures**. All 83 display-list, 67
+native text and 152 vector controls pass. Keeping synthesis in the common font
+layer lets dependency-light glyph-path consumers use the same metric; the new
+vector control verifies its CSS advance at pixel densities one and two.
+
+### Terminal whitespace across empty inline decorations
+
+The end-of-line trim removes the text advance after following empty inline
+decorations already acquired their positions. Reuse the source-context edge
+walker with an explicit line-content mode: ignore collapsed whitespace and
+out-of-flow boxes, retain preserved spaces and atomic content, traverse
+`display:contents`, and stop at forced line boundaries. A terminal text run can
+then consume its existing collapsed-space ledger before later decorations are
+positioned. Source bytes and ordinary separator behavior stay in the shared
+text paths. Authority: [CSS Text 3 §4.1.2](https://www.w3.org/TR/css-text-3/#white-space-phase-2).
+
+Early trimming exposed a second defect: the atomic-only fallback for inline
+line identity compared the y-position of collapsed whitespace against an atomic
+child, declaring a single-line ruby annotation multi-line. Exclude collapsed
+text in both the first-fragment lookup and that fallback. The source probe also
+keeps ruby base and annotation contexts independent by reusing the existing
+annotation classifier. An overflowing annotation child must not replace its
+annotation font box. Authority: [CSS Ruby 1 §2.5](https://www.w3.org/TR/css-ruby-1/#white-space).
+
+The exact gate exposed prospective-content and flattened-tree cases outside
+the initial five inventories. A not-yet-materialized pseudo box is not empty:
+retain its separator until its counter/quote scope produces content, and defer
+slot-content decisions until projection. Continue the source probe through
+`display:contents` ancestors; forced block/BR boundaries still end the line
+before examining pending generated content. Native controls cover before/after
+content and a contents ancestor. The first exact attempt failed these gates; its
+result is not counted as a completed checkpoint.
+
+The source probe treats an inline math box as an atomic boundary through the
+existing MathML helper. Its source subtree can be empty while the box still
+controls a preserved separator between math boxes; ordinary inline recursion
+would incorrectly conclude that there is no following content.
+
+All 68 native controls pass. Seven focused inventories retain their prior full
+matches. `line-edge-white-space-collapse-001` becomes full, bringing this round
+to **56 additional full matches**. The completed exact gate passes at **3,113
+full / 181 partial / zero failures**. Paired Ahem decoration images agree on
+glyph and border positions; antialiasing/line-edge raster differences remain.
+The additional ruby control verifies its 10×5 annotation font box; its baseline
+still differs from Chromium and is not claimed as a complete visual match.
+
+### Float exclusions after a text preflight starts a new line: design
+
+The next text node can break during preflight before it installs a new current
+view. `adjust_line_for_floats` then consults the previous float view and returns
+from its DOM-ancestry check, despite the restored block context describing the
+parent line. The active block/BFC context already defines which float list owns
+that line; remove the stale-view gate so overlapping left and right floats both
+constrain it. Independent float contents retain their own BFC. Browser probes
+cover three float heights, a later inline wrapper, same-line placement and the
+float child context. Authority: [CSS 2.2 §9.5](https://www.w3.org/TR/CSS22/visuren.html#floats).
+
+The terminal-whitespace checkpoint passes the full Radiant gate at **5,674
+passed / 185 expected partial / one existing skip / zero failures**.
+
+The active-BFC implementation passes all 69 native text controls. Six Ahem
+controls match browser line and float geometry, including partially overlapping
+float heights and text inside the float itself. Seven inventories retain all
+prior full matches; `text-wrap-balance-float-005` becomes full. The unrelated
+external-float balancing case still differs because balance probes estimate
+line count and measure without the actual float-constrained sequence.
+
+The active-float checkpoint passes the exact gate at **3,114 full / 180 partial /
+zero failures**, bringing this round to **57 additional full matches**.
+
+### Mixed hanging-space suffixes: next design
+
+A trailing `break-spaces` space takes up space and prevents earlier U+3000
+glyphs from hanging, but the current whitespace branch keeps the earlier
+hanging ledger. Clear that ledger when accepting a non-hanging preserved
+space. The forced-break path also clamps an unconditional U+3000 prefix
+together with a conditional pre-wrap suffix. When the entire conditional
+suffix overflows, both suffix and prefix hang; when some conditional spaces
+fit, only the overflowing conditional portion hangs. Retain the unconditional
+portion explicitly in the existing current/candidate/pre-SHY hanging state,
+extracting their common record rather than adding a third scalar-copy variant.
+Browser controls distinguish these cases and preserve later hanging spaces
+after non-hanging content. Authority: [CSS Text 3 §4.1.2](https://www.w3.org/TR/css-text-3/#white-space-phase-2) and [§8.2](https://www.w3.org/TR/css-text-3/#hanging).
+
+The float-context checkpoint passes the full Radiant gate at **5,676 passed /
+184 expected partial / one existing skip / zero failures**.
+
+A scalar unconditional subtotal is insufficient when conditional and
+unconditional spaces alternate. Preserve immutable per-space records with the
+policy and text rectangle that owns each advance. The current line and both
+break candidates share one small hanging-state record. At a forced break, walk
+back from the physical line end, hanging unconditional units and overflowing
+conditional portions until a fitting conditional unit stops the suffix. Track
+ASCII ink trimming on its owning rectangle. View-pool records follow D4.5.1v4
+lifetime ownership, and candidate snapshots borrow immutable records. `pre` and
+`break-spaces` spaces retain their advances and end an earlier hanging suffix.
+
+Only the terminal pre-wrap sequence is directly followed by the forced break.
+Earlier pre-wrap spaces followed by an unconditional hanging glyph also hang
+unconditionally; the backward walk switches to that rule at the first such
+glyph. Alternating-mode browser controls and WPT hanging-whitespace-002 verify
+this distinction.
+
+The RTL control exposes an independent optimization defect: an RTL paragraph
+with Latin-only text still reorders its trailing neutral spaces by UAX #9.
+The bidi early exit assumed that absence of a strong RTL code point implied
+absence of visual changes. Restrict that shortcut to LTR paragraphs; retain
+the existing atomic-flow limitations. Authority: [CSS Writing Modes 4 §2.4](https://www.w3.org/TR/css-writing-modes-4/#bidi-algo).
+
+All 70 native text controls pass, including 26 mixed-space geometry checks,
+three rectangle-owned trim checks and the RTL-neutral control. Sixteen source
+cases cover fixed spaces, conditional suffixes, alternating modes and `pre`.
+Seven inventories have no losses; both `hanging-whitespace-001.tentative` and
+`hanging-whitespace-003.tentative` become full. Paired images retain the same
+space/background positions with raster edge differences.
+
+The first exact run rejects an RTL form-line regression: its first logical text
+rectangle already follows the control physically, so using that rectangle as
+the paragraph origin adds the control width a second time. Probes of both
+atomic orders show mixed provisional coordinates: ordinary text still uses
+logical advances while atomic boxes may already use RTL positions. For an
+outer paragraph with atomic inline boxes, use its float/indent-adjusted flow
+origin. Text-only paragraphs retain their measured origins, including shaping
+and hanging-punctuation adjustments; nested isolates retain their own
+interval. Native controls cover both orders and inline padding/borders.
+Authority: CSS Writing Modes 4 §2.4.3. No rejected checkpoint is counted.
+
+The completed exact gate passes at **3,116 full / 178 partial / zero failures**.
+All 71 native text controls pass, and the eight focused inventories retain
+every previous full match. The RTL form retains its previous element scores;
+its existing fragmented text-range difference remains partial. The two hanging
+whitespace tests bring this round to **59 additional full matches**.
+
+The mixed-space/bidi checkpoint also passes the full Radiant gate: **5,680
+passed / 182 expected partial / one existing skip / zero failures**.
+
+### One-column overflow extent: design
+
+The single-column shortcut formats ordinary flow and sizes the multicol from
+the wrapper's normal-flow height. It omits visible in-flow overflow that must
+fit the auto-sized column, even though the wrapper keeps its specified size.
+Reuse the existing in-flow extent walker to size an unbounded column.
+Positioned descendants and scroll-container contents remain separate; a
+definite fragmentainer still caps its own size. Six Chromium controls cover
+balance/auto filling, a definite height, clipping, positioning and following
+normal-flow content. Authority: CSS Multicol 1 §§2, 7.1 and CSS Break 3 §2.1.
+
+The one-column controls pass all 72 native text tests. The first inventory
+attempt exposed a collapsed-margin regression: a placed child already includes
+its leading margin, so its measured end adds only the trailing margin. Nine
+controls now include collapsed margins and nested clipped content. The corrected
+seven-category inventory has no losses; `multicol-span-all-children-height-005-ref`
+becomes full. Its exact checkpoint is still pending.
+
+### Whole line boxes before a spanner: design
+
+Pre-spanner collection marks ordinary block wrappers as fragmentable. The
+balancing search applies its one-line floor only to a lone flow item; two
+one-line siblings can therefore receive a target smaller than either line.
+Their published border boxes then split at arbitrary block offsets. Apply
+the unbreakable line floor to each one-line item, while keeping line-boundary
+rounding for a lone multi-line item. Only the group's first leading margin
+sets a mandatory floor; later column-start margins may be discarded. Ordinary
+blocks and buttons share this constraint. Authority: CSS Break 3 §4.1 and
+CSS Multicol 1 §7.1.
+
+All 73 native controls pass, including whole line geometry before/after a
+spanner and discarded column-start margins. The seven inventories have no
+losses, and `multicol-span-all-button-001-ref` becomes full. The two multi-column
+fixes pass the exact gate at **3,118 full / 176 partial / zero failures**,
+bringing this round to **61 additional full matches**. The two positioned
+button references retain unrelated static-anchor differences and remain partial.
+
+The multi-column checkpoint passes the full Radiant gate at **5,684 passed /
+180 expected partial / one existing skip / zero failures**.
+
+### Inter-character justification: design
+
+The shared character-boundary predicate only admits CJK and clustered-script
+pairs. `inter-character` needs every adjacent typographic character-unit pair,
+including Latin, symbols and spaces, while keeping graphemes and cursive letter
+pairs joined. Thread the computed method through counting and the semantic
+paint run; use the same predicate for raster glyphs, shadows, outline/effect
+paths, SVG dx and PDF paths. Inter-character expansion belongs to character
+boundaries, so it must not also expand a word-space slot. Invisible formatting
+controls do not supply a unit; ZWJ still participates in emoji graphemes.
+Authority: CSS Text 3 §§6.4, 6.4.4 and 7.2.
+
+The first raster comparison exposes a separate paint-policy defect: the
+painter checks inherited `text-align`, ignoring a justified last line. Its
+independent width scans also reinterpret shaped advances. Store the line's
+per-opportunity expansion on `TextRect` and retain it in paint projections.
+Raster, SVG and PDF then consume one shared spacing result instead of
+re-measuring natural width. This removes three copies of the inference shape
+and preserves the distinction between expanded ranges and actual justification
+for `text-justify:none`. Eight controls check recorded expansion and glyph
+placements; combining-mark fallback remains an independent visual difference.
+
+All 74 native text controls, 152 vector tests and 83 display-list tests pass.
+Seven inventories retain all previous full matches. `text-justify-distribute-001`
+and `text-justify-inter-character-001` become full. Raster, SVG and PDF agree
+with the browser on Latin/space/punctuation/invisible-control glyph positions;
+the combining-mark case retains its independent cluster-fallback difference.
+The exact gate passes at **3,120 full / 174 partial / zero failures**, bringing
+this round to **63 additional full matches**.
+
+The justification checkpoint passes the full Radiant gate at **5,687 passed /
+178 expected partial / one existing skip / zero failures**.
+
+### Nested block-column capacities: next design
+
+`getclientrects-003` exposes correct positioned fragments but incorrect
+in-flow nested boxes. The nested slot projector is limited to over-wide
+content; ordinary block descendants use equal capacities and can count an
+inner fragment as an outer fragmentainer. Reuse the existing unequal-capacity
+slot iterator for uninterrupted nested block flow. Return inner rectangle
+count separately from consumed outer flow and outer fragment count. The first
+outer remainder applies to every inner column in that set; later sets use
+full capacity. Unwrapped finite columns overflow in the inline direction
+regardless of whether a flow child itself has columns. Ordinary/partial/full
+first sets and an overflow continuation provide independent browser controls.
+Authority: CSS Break 3 §2.2 and CSS Multicol 1 §§2, 8.1; CSS Multicol 2 §4.4.
+
+The first generalized inventory is rejected: it improves two partial cases but
+regresses existing balanced, contained and authored-height nested flows. A
+resolved content sequence must not replace an authored nested block size or
+a specified row track. Continuous sequential slots also do not represent the
+consumption caused by forced breaks or a balanced last set. Keep those
+constraints explicit while refining the projector; no gain from this failed
+inventory is added to the manifest.
+
+The authored-size refinements restore the native forced-break controls and
+most inventory regressions. Sequential source overflow is distinct from a
+fixed wrapper's own rectangles: reconstruct its last in-flow descendant end
+with the existing static-flow/continuous-size helpers and include that visible
+flow in the enclosing slot summary without enlarging the wrapper. Direct floats
+remain parallel flows. Reuse one eligibility predicate for sizing and projection.
+
+The default overflow-policy change remains deferred: it interacts with existing
+parallel-float and fixed-row projection and still loses two prior full matches.
+Restore that separate policy to the pre-change implementation. The overflow
+control explicitly requests `column-wrap:nowrap`, isolating the completed slot
+projection from the unresolved default-policy investigation. No test reference,
+tolerance or baseline expectation is changed.
+
+The explicit-nowrap overflow diagnostic exposes a separate nested break-before
+limitation: the existing planner moves the whole auto-sized inner flow to a
+new outer column and leaves it unfragmented. Keep that diagnostic under `temp/`
+for the next investigation; the completed native control covers the partial,
+full and single surviving column sets. The fragment-border image comparison
+also retains a separate paint issue: its absolute border is drawn around the
+fragment union instead of the individual sliced pieces. Neither visual issue
+is claimed as fixed by the layout checkpoint.
+
+All 75 native controls pass, and seven focused inventories retain every
+previous full match. `getclientrects-003` and `multicol-nested-column-rule-002`
+become full. The exact gate passes at **3,122 full / 172 partial / zero failures**,
+bringing this round to **65 additional full matches**. The checkpoint covers
+layout geometry; the recorded overflow-planner and fragmented-border visual
+issues remain separate investigations.
+
+The nested-slot checkpoint also passes the full Radiant gate at **5,690 passed /
+176 expected partial / one existing skip / zero failures**.
+
+### Auto-height monolithic wrapper fragments: design
+
+The principal-box guard treats an auto-height wrapper's continuous content
+height as an authored height. It skips the existing monolithic child planner
+and creates six uniform slices instead of three overflowing pieces. An
+authored height still owns its own sequence; auto height follows the child
+planner. Preserve each piece's visible overflow separately from consumed
+fragmentainer flow, so client rectangles can be 250px high while following
+content advances through 100px column capacities. Reuse the existing planner
+and fragment writer. Browser controls cover mixed/one/fitting children, an
+authored height, leading padding and following flow. Authority: CSS Break 3
+§§2.1, 4.1 and CSSOM View §6.
+
+The first inventory gains `getclientrects-008` without regressions, and the
+first three raster cases match Chromium exactly. The following-flow control
+rejects the first attempt: the distributor only consumed the planner's result
+for forced breaks, retaining the old continuous height for the monolithic
+sequence. Consume explicitly recorded flow extents from the shared fragment
+reader; existing trim-aware sequences keep their own extent. The fragment
+record retains both visible height and consumed flow, including a single
+visible piece, so later projection does not reconstruct flow from painted
+overflow. The checkpoint is still pending.
+
+All 76 native controls pass, including following flow. Seven focused inventories
+retain all previous full matches. `getclientrects-008` becomes full. The exact
+gate passes at **3,123 full / 171 partial / zero failures**, bringing this round
+to **66 additional full matches**. The first three raster cases match Chromium
+exactly; the following-flow case is checked by native geometry assertions.
+
+The monolithic-wrapper checkpoint also passes the full Radiant gate at
+**5,692 passed / 175 expected partial / one existing skip / zero failures**.
+
+### Vertical nested column slots: design
+
+`getclientrects-004` calculates nested column widths from a union height and
+projects block descendants through equal capacities. Vertical layout needs the
+same partial-first-set sequence as horizontal layout. Generalize the existing
+slot planner in logical coordinates, convert its rectangles through one axis
+mapping, and publish consumed outer flow separately from visible unions.
+Browser controls cover vertical-rl and vertical-lr, partial/full first sets and
+a short final piece. Authority: CSS Multicol 1 §§2–3, CSS Writing Modes 3 §6
+and CSSOM View §6. No Lambda formal semantics or design ruling changes.
+
+The initial generalized inventory is rejected: it loses one old nested full
+match. Keep a principal box's size separate from visible descendant overflow,
+and honor `vertical_auto_inline_size_constrained` when deciding whether an
+inline size was authored. Physical fragment unions also change their local
+origin: carry that origin and source block offset into recursive projection,
+and avoid translating descendants a second time after their pieces have been
+published. Both writing directions and a single surviving set now match the
+browser's bounds and physical piece rectangles.
+
+The paired images retain the existing fragmented absolute-border paint issue:
+its border still uses the union. The CSSOM bridge also returns the bounding
+rectangle rather than the fragment list. Positioned fragment records currently
+use containing-block coordinates; native assertions check that representation.
+Neither separate limitation is claimed as fixed by this geometry checkpoint.
+
+All 77 native controls and the seven focused inventories pass with no lost
+full matches. `getclientrects-004` becomes full. The exact gate passes at
+**3,124 full / 170 partial / zero failures**, bringing this round to
+**67 additional full matches**. Targeted dimension lint and diff checks pass.
+
+The vertical-slot checkpoint passes the full Radiant gate at **5,694 passed /
+174 expected partial / one existing skip / zero failures**.
+
+### Relative offsets on fragmented flow items: design
+
+The column cursor replaces a relatively positioned wrapper's block coordinate,
+while the saved inline coordinate still contains the original relative inset.
+This loses `top`/`bottom` and mixes visual offsets with normal flow. Resolve the
+existing relative-position helper when collecting normal inline placement,
+then translate each published flow item after the cursor has consumed it.
+Browser controls cover both inset edges, percentages, fragment rectangles,
+text and following flow. Authority: CSS Position 3 §3.4 and CSS Break 3 §5.4.
+
+The initial focused inventory gains both move-after-paint cases with no losses.
+The percentage control reveals a separate containing-size defect: relative
+inline insets use the entire multicol content width instead of one anonymous
+column. Share the column-inline-size helper with post-shrink child sizing,
+including zero-width columns, and select the physical inline axis in the
+relative resolver. Additional controls check both vertical writing directions.
+
+All 78 native controls pass. Seven inventories retain all prior full matches
+and gain `move-with-text-after-paint` and its reference. The paired raster
+images agree on the positions; small Ahem edge differences remain. The vertical
+diagnostics still expose a separate auto-inline-size union issue and remain
+under `temp/`; they are not included in this checkpoint's claimed controls.
+
+The exact gate passes at **3,126 full / 168 partial / zero failures**, bringing
+this round to **69 additional full matches**. Native controls, targeted
+dimension lint and diff checks pass; references and baseline expectations are
+unchanged.
+
+### Cleared float runs in intrinsic sizing: design
+
+`letter-spacing-206` has correctly sized children but gives their floating
+parent 1,144px instead of 266px. Intrinsic max-content sums all float children
+even though `clear:left` puts each child below the preceding left float.
+Track the active float sides and flush a run when the next float clears every
+active side; retain the existing aggregate for partially cleared mixed sides,
+whose overlapping heights need a separate model. Reuse one run-flush operation
+for clearance, non-float blocks and the terminal run. Adjacent inline sizing
+uses the widest completed float run rather than adding cleared rows together.
+Browser controls cover left/right/both clearance, no clearance, irrelevant
+clearance and mixed uncleared floats. Authority: CSS 2.1 §§9.5.2, 10.3.5 and
+CSS Sizing 3 §§3.2.2, 5.1.
+
+The relative-position checkpoint also passes the full Radiant gate at
+**5,697 passed / 172 expected partial / one existing skip / zero failures**.
+
+All 79 native controls pass, and seven inventories retain every old full match.
+`letter-spacing-206` becomes full. The exact gate passes at **3,127 full /
+167 partial / zero failures**, bringing this round to **70 additional full
+matches**. The image capture finds a separate visibility-bounds defect: the
+renderer requests out-of-flow bounds, but the shared helper unconditionally
+excludes floats and culls their zero-height wrapper. Honor the existing flag
+for floats; ordinary flow measurements keep excluding them. Add assertions
+for both modes and compare the same raster control again. Authority: CSS 2.1
+§§9.5, E.2 and CSS Overflow 3 §2.1.
+
+After honoring floating overflow in requested paint bounds, the six-control
+raster matches Chromium exactly: **zero differing channels out of 3,840,000**.
+All 79 native controls pass, including distinct normal-flow and paint bounds
+for the zero-height wrapper. The broader checkpoint rerun is pending.
+
+Seven inventories show no gains or losses from the paint-bounds correction.
+The exact gate rerun remains **3,127 full / 167 partial / zero failures**.
+Targeted dimension lint and diff checks pass; the full Radiant rerun is pending.
+
+The final float checkpoint passes the full Radiant gate at **5,699 passed /
+171 expected partial / one existing skip / zero failures**. The long-running
+objective remains active at 70 additional full matches.
+
+### Root strut line height during inline breaks: design
+
+Wrapped Markdown code advances by the smaller inline's computed line height
+while the containing block owns a taller strut. Independent Ahem controls
+show the same defect for automatic/forced breaks and explicit/normal heights.
+Bind the block's font and line-height together at the existing block, flex and
+grid content setup points. Line formatting uses that immutable root height,
+then restores the inline's computed height when text layout resumes. Reuse
+one binding helper for the three entry points. Authority: CSS 2.1 §10.8.1 and
+CSS Inline 3 §§2, 5.3. No Lambda formal semantics or design ruling changes.
+
+The first approach matches the five Ahem controls but is rejected: temporarily
+replacing the entire line-height style loses a styled forced-break contribution
+and regresses six existing shaping full matches. Keep the inline style intact.
+Read the saved root height only for strut leading and the line's minimum CSS
+height; normal-height root boxes also contribute their own ascent/descent.
+The refined implementation is pending validation.
+
+The reader still rejects the checkpoint because table-cell setup inherits the
+table's saved root height instead of binding the cell's own height. Use the
+shared root setup in all five existing cell metric/content entry points. The
+forced-break control exposes the other missing input: an empty styled inline
+also supplies line-height. The line minimum includes that recorded inline
+contribution while retaining the immutable block strut. No test expectation
+is changed.
+
+All 79 old native controls pass after the cell/empty-inline corrections. The
+focused comparison retains one baseline-export regression: `baseline-005`
+ignores its direct `SS` text and exports the later spanner's baseline. The new
+correct empty-line strut exposes that prior omission. Include direct horizontal
+text rectangles and forced breaks in the existing positioned-baseline scan,
+reusing the shared font-baseline resolver and whitespace-content classifier.
+Vertical direct-run baseline export remains its own axis-mapping task.
+Authority: CSS Align 3 §9.1 and CSS Multicol 1 §2. Temporary trace removed.
+
+The direct-run scan restores `baseline-005` but reveals that empty block caches
+can hold synthetic border-edge baselines. They are not formatted line baselines
+and must not outrank a later real line (`baseline-007`). Require placed line
+content before using that fallback; a computed zero baseline remains valid.
+All previous native controls pass. Add six independent root/cell strut controls
+and retain the existing WPT baseline cases as regression checks.
+
+The forced-break exporter also needs its inherited font: BR nodes have no
+text-font snapshot, and using the block's initial ascent can include leading
+that is already present in the break's position. Resolve the inherited face
+and use the shared font-baseline API without adding that leading twice. The
+next inventory and required gates are pending.
+
+The exporter trace confirms that `baseline-007` now exports its actual BR
+baseline. The generic element-cache change does not address the active caller
+and is reverted. Flex's `calculate_item_baseline` tries child synthesis before
+its existing used first-line cache, selecting the preceding empty block's
+border edge. Consult that cache first while preserving the established nested
+flex and multicol export paths. The used formatted line then supplies the flex
+item's baseline. Temporary exporter trace removed.
+
+All 80 native controls pass. Eight focused inventories retain all prior full
+matches. The strut controls match Chromium's geometry, and the paired images
+agree on glyph positions with minor raster-edge differences (5,652 differing
+channels out of 3,840,000). This checkpoint improves partial layout behavior
+but adds **no new full match**; the manifest remains at 70. The exact and full
+Radiant gates are pending.
+
+The exact gate rejects this strut checkpoint: the already partial
+`md_ky-readme` element score falls from its 36.4% baseline floor to 35.1%.
+No full match is lost or gained, but the required gate has one failure. Save
+the feature-only patch and six browser/native controls under
+`temp/layout-analysis/round7/unaccepted-block-strut.patch`, then restore the
+verified 70-pass source checkpoint. The independent controls establish the
+strut defect; the remaining Markdown regression must be diagnosed before
+this implementation can be accepted. No reference or expectation is changed.
+
+The restored 70-pass checkpoint is reverified: exact layout **3,127 full /
+167 partial / 0 failed**, full Radiant **5,699 passed / 171 expected partial /
+1 existing skip / 0 failed**, including all 79 native text-query controls.
+
+## Investigation: centered inline static positions around column spanners
+
+Fresh Chromium captures reproduce the stored reference for both positioned
+button variants. Direct inline auto-inset anchors use the center of the
+369.344px multicol content box (absolute x=208px), at the preceding balanced
+column line end (38.328px and 102.516px). Native anchors remain at a column
+edge and/or the continuous pre-fragmentation block offset. CSS Position 3
+§3.5.3 derives the static-position rectangle from the hypothetical formatting
+context; CSS 2.1 §9.4.2 suppresses phantom line height but does not discard its
+static cursor. Inspect phantom-line completion and later multicol projection
+before making a correction. No implementation change is accepted yet.
+
+The continuous trace proves two missing finalization paths: the next block
+checks only `start_view`, and `layout_flow_children(..., true)` completes only
+non-empty lines. Out-of-flow inline boxes can leave a deferred static cursor
+without an in-flow start view. Promote the existing phantom-line completion
+helper and use it at both boundaries; no line height is added.
+
+Independent non-button controls clarify the position rule: the browser cursor
+is centered **within the preceding column**, whose center happens to coincide
+with the button center when the last block occupies column two of three. It
+is not generally centered across the multicol container. Record the completed
+phantom cursor's aligned inline offset and project it from the preceding flow
+fragment. Use the actual positioning containing block for coordinates,
+exclude floats from normal-flow predecessors, subtract a predecessor's
+relative displacement, retain explicit insets and the anchor's margins, and
+prevent the continuous out-of-flow projector from projecting it a second time.
+The new native control covers left/right/center, unequal atomic block heights,
+leading anchors, spanners, fixed positioning, relative predecessors, margins,
+explicit insets, an exact fragment boundary, a float, and ordinary block flow.
+All 16 anchor positions match current Chromium exactly.
+
+The original temporary fractional empty-block controls also expose two
+separate pre-existing limits: a rounded quotient can publish an empty extra
+fragment, and a centered float-only phantom line can retain the full-width BFC
+bound. Those controls remain diagnostic; neither defect is claimed fixed by
+this cursor change. Real inline text after an anchor requires the existing
+mixed-inline projection path and is likewise not claimed fixed here.
+
+Checkpoint 72: exact layout **3,129 full / 165 partial / 0 failed**; all
+80 native text-query controls pass. The 16-anchor control PNG is identical
+to Chromium (0 differing channels out of 5,760,000). Eight inventories retain
+all prior full matches and have no regression-floor failures. Targeted Radiant
+integer-cast lint and `git diff --check` pass. The full Radiant gate is pending.
+
+The full Radiant 72 checkpoint passes: **5,702 passed / 169 expected partial /
+1 existing skip / 0 failed**.
+
+## Investigation: zero-width flex flow in a narrow root column
+
+Fresh Chromium confirms `multicol-dynamic-add-002-ref`: a 0px-wide body and
+flex q, both 18px high. Native q expands to its content width and is 18.4px
+high. The UA default switch incorrectly includes q among italic elements;
+[HTML §15.3.4](https://html.spec.whatwg.org/multipage/rendering.html#phrasing-content-3)
+limits that default to cite/dfn/em/i/var. Remove q from that list so normal
+inheritance and authored font-style remain authoritative.
+
+The flex initializer also requires a positive used width to recognize a
+block flex container's resolved inline size as definite. A 0px width is a
+valid definite size (CSS Sizing 3 §2), not an intrinsic sizing sentinel; the
+available-space representation already records definiteness separately.
+Inspect the resulting geometry and independent controls before changing
+that classification. No additional full pass is claimed yet.
+
+Recognizing the zero constraint fixes q's width to 0px, but its 18.4px
+anonymous-item height still creates an erroneous second body fragment. The
+anonymous text measurement uses a prior text view's height or the raw font
+ink height. Independent Ahem controls with 40px inherited line-height render
+30px flex boxes, while Chromium renders 40px; authored line-height:0 renders
+20px natively and 0px in Chromium. Resolve the anonymous block's inherited
+line-height with the existing cascade/value helpers, including normal font
+metrics and valid zero. This is separate from the rejected block strut
+experiment and does not modify the general inline strut implementation.
+
+The anonymous-height attempt is rejected at focused verification: Markdown
+loses `md_nuxt-readme` (100% to 99.3% element match) and crosses the existing
+`md_test-emoji` floor (97.3% to 96.4%). It improves the 40px controls, but their
+inline-flex baseline and zero-height ink-overflow cases still expose additional
+ownership problems. Save the attempt in the temporary directory and roll back
+that height reader. Retain only the separately diagnosed q UA inheritance and
+zero-width definiteness changes for verification. No full pass is added.
+
+The remaining zero-width controls isolate sizing with 20px Ahem line-height;
+all eight browser boxes match natively, including auto/explicit width, padding,
+column and reverse flex directions, an empty box, an intrinsic inline-flex
+control, and ordinary definite width. Preserve the 40px, zero-line-height,
+and baseline counterexamples under `temp/`; no existing expectation changed.
+All 82 native text-query controls pass, including q inheritance/author-style
+checks. The zero-width raster agrees on positions, with 738 differing edge
+channels out of 3,840,000. Exact layout verification is pending, and the new
+full-match manifest remains at 72.
+
+The q UA/zero-constraint checkpoint passes the exact layout gate unchanged at
+**3,129 full / 165 partial / 0 failed**. All 82 native controls pass; no new
+full match is counted for these two corrections.
+
+## Investigation: float lifetime at a column spanner
+
+`float-with-line-after-spanner` has a 225px preceding float and a 65px normal
+block. The zero-height spanner appears at native y=115px with a reduced inline
+size; Chromium places it at y=275px at full width. The one-column fast path
+uses a continuous BFC through the spanner. CSS Multicol 1 §6.1 ends the
+preceding column line and starts another after the spanner; its floats cannot
+intrude into the spanner or the subsequent column line. Six independent
+controls confirm the same error for left/right/parallel floats, margins, a
+later float, and the no-float control.
+
+Reuse the normal child traversal with a before-child preparation callback.
+The multicol callback completes the preceding inline line, accounts for its
+float margin-box extent, and resets that line's float context before formatting
+a direct spanner. Extract the existing spanner predicate to accept a DOM
+element so it also works before the child's layout view is installed. The
+normal traversal remains responsible for final line completion. Verify the
+complete multicol category before accepting this correction.
+
+The six control geometries now match Chromium exactly, including all span and
+tail boxes, parent heights, and the later float's origin. All 83 native
+text-query controls pass. Eight inventories retain prior full matches and
+have no regression-floor failures; `float-with-line-after-spanner` is a new
+full match pending the exact gate. Integer-cast lint and diff checks pass.
+
+The paired control raster differs in 1,800 channels out of 3,840,000, entirely
+where the later float overlaps the following block's background: Chromium
+paints the float above that background, while native paints the background
+over it. Geometry is correct; float paint ordering is a separate remaining
+root and is not claimed fixed here. Exact layout verification is pending.
+
+Checkpoint 73: exact layout **3,130 full / 164 partial / 0 failed**. The
+manifest has 73 verified additional full matches and no lost full matches.
+All 83 native text-query controls pass; the full Radiant gate is pending.
+
+The full Radiant 73 checkpoint passes: **5,706 passed / 168 expected partial /
+1 existing skip / 0 failed**.
+
+## Investigation: nested auto columns constrained by remaining outer space
+
+In `multicol-nested-019`, 75px of a 100px outer column is occupied. The nested
+auto-height, auto-fill two-column box has two 25px lines and break-before:avoid.
+It fits a whole outer column, so the ancestor classifies it as monolithic and
+`should_fragment` is false. That prevents the existing nested fitting helper
+from trying the remaining 25px, despite both inner columns being able to hold
+the content there. `multicol-nested-020` has the same relationship with 90px
+remaining and two 50px lines. The inline fragment collector also omits atomic
+inline blocks, so a nested fitting attempt can move BRs while leaving their
+inline-block contents in the original flow. These are distinct diagnosed
+caller/inline-item gaps; confirm the classification before correcting them.
+
+The targeted trace confirms h=50px, outer offset=75px, target=100px,
+`should_fragment=false`, avoid=true, auto fill. Broaden the fitting caller for
+an auto-fill inner context, leaving its own auto-height/capacity guards in
+charge. Extend the inline leaf collector's optional horizontal atomic-item
+mode and retain those boxes and their BRs in the same completed projection.
+The initial build identified a second projector caller; the new optional
+result parameter preserves its interface. Discard the first focused capture
+as stale because that build failed before linking the new executable. Use
+`nested-atomic-remainder-built` for actual verification.
+
+The first built inventory loses `multicol-nested-015`, whose real block prefix
+is not part of an inline-only projection. Keep mixed block-prefix flow with
+its existing block projector. A trace then exposes a classifier detail: the
+shared "block flow box" view predicate intentionally includes inline-blocks
+for other consumers. The inline-only eligibility check must explicitly
+exclude atomic inlines, so add an optional mode to the existing child scan,
+retaining its original default for other callers. Nested BR markers continue
+through their established column-edge owner; preserve their baseline offset
+from the collected line when doing so. No new full match is counted until
+the corrected classifier and native controls are verified.
+
+The active atomic trace confirms two 50px lines and one line slot per 90px
+inner column. Both atomic boxes now move to separate inner columns. The final
+BR edge pass was still resetting the completed line's half-leading to zero;
+retain its recorded local offset when the atomic projector owns that line.
+Both nested WPT cases now fully match, with no regression floors crossed in
+eight inventories.
+
+The new authored-height control's empty 100px tail exercises a separate
+remaining-space fragmentation difference: native moves it whole to the next
+outer column, while Chromium splits its box. Keep that counterexample under
+`temp/nested-inline-authored-height-empty-tail.html` (within the analysis
+folder). Give the permanent authored-height control an explicit
+break-inside:avoid tail to isolate the preserved-height contract; capture the
+new browser expectation before updating the new assertion. Existing tests,
+references, and expectations remain unchanged. Exact verification is pending.
+
+Checkpoint 75: exact layout **3,132 full / 162 partial / 0 failed**. The
+manifest has 75 verified additional full matches and no lost full matches.
+All 84 native controls pass; the four nested-column control PNGs match
+Chromium exactly (0 differing channels out of 3,840,000). Eight inventories
+retain all previous full matches and have no regression-floor failures.
+Integer-cast lint and diff checks pass. The full Radiant gate is pending.
+
+## Investigation: collapsible separators next to out-of-flow siblings
+
+Current Chromium and native renders of `text-transform-capitalize-034` show
+`Abc Abc` versus native `Abcabc` for a separator following an empty absolute
+sibling. The whitespace-only node is discarded before text layout.
+`should_collapse_inter_element_whitespace` classifies either immediate sibling
+as a block via the local display-only predicate. An absolute or floated inline
+box is blockified but does not participate in normal block flow (CSS 2.1
+§9.6 / §9.5), so it must not cause that separator to disappear. The same
+predicate is also used by the quirks line-height scan, which already skips
+positioned children. Filter out-of-flow
+objects through the existing DOM/style helper; retained whitespace will also
+restore the capitalization word-start state without changing transform code.
+The full 75-checkpoint Radiant gate must finish before implementation changes.
+
+The full Radiant 75 checkpoint passes: **5,709 passed / 166 expected partial /
+1 existing skip / 0 failed**.
+
+The separator filter restores the visible `Abc Abc` pairs and makes
+`text-transform-capitalize-034` fully match the existing browser reference.
+Nine inventories retain all prior full matches and have no regression-floor
+failures. Independent controls verify one collapsed separator before/after
+absolute boxes, fixed boxes, explicitly blockified positioned boxes, floats,
+and a display:none sibling, plus a genuine in-flow block and a no-space
+control. Disable optional kerning in these controls to isolate separator
+advance; Chromium reports exactly 12px (5px space plus authored 7px spacing).
+
+The no-space control with font-kerning:none also exposes a separate existing
+capitalize initialization issue: the native glyph path restarts capitalization
+at the next text node, while Chromium retains the continuous word. Preserve
+that diagnostic; the new separator test asserts only that no separator is
+invented in that case. No transform implementation is changed or claimed
+fixed by this whitespace correction. Exact layout verification is pending.
+
+All 85 native text-query controls pass after the separator correction. The
+selected page now matches the browser on word positions and capitalization;
+the paired raster retains font-edge differences (16,086 differing channels
+out of 3,840,000). The exact layout gate is running; the manifest remains at
+75 until its result confirms the new full match.
+
+Checkpoint 76: exact layout **3,133 full / 161 partial / 0 failed**, all 85
+native text-query controls pass. The manifest has 76 verified additional full
+matches and no lost full matches. The full Radiant gate is pending.
+
+The full Radiant 76 checkpoint passes: **5,711 passed / 165 expected partial /
+1 existing skip / 0 failed**.
+
+Arabic margin-boundary diagnostic: current Chromium and native both load the
+same declared Noto Naskh Arabic WOFF2 face. Native uses isolated 72.5px forms
+for all three letters in both the margin test and its ZWNJ control. Chromium
+still joins the first test across positive margins (60.59px / 49.64px /
+57.19px), while its ZWNJ control uses 72.48px forms. CSS Text §8.7 and the
+fixture assertion require shaping to break at those nonzero margins. Keep
+`shaping-009` partial; matching the joined browser forms would contradict
+that requirement. Font loading/decompression is working in this case.
+
+The core Lambda 76 checkpoint passes: **6,845/6,845** combined input and runtime checks (2,112 input /4,733 runtime). Production source edits can resume.
+
+## Investigation: last line baseline inside a multicol inline-block
+
+Fresh Chromium confirms `multicol-gap-percentage-001` has the same column widths as native. The remaining short inline-blocks align 20px above their expected position. The multicol baseline publisher calls the shared last-descendant text baseline helper after placement. That helper traverses descendants in reverse but reads the text node's union-box `y`, which is the first line top, instead of the last line fragment. A two-line child therefore exports the first line baseline. CSS 2.1 §10.8.1 and CSS Align 3 §9.1 require the last in-flow line baseline (the lowest baseline among multicol columns). Diagnose with unequal-height Ahem columns and ordinary nested block controls before changing the shared helper.
+
+The fresh `getclientrects-001` native text fragments already match Chromium's four Range rectangles in each writing mode. Its remaining stored comparison combines discontiguous same-y text differently; do not alter correct native layout or the harness to obtain a score. `multicol-margin-003` may have the same extraction mismatch; retain for separate diagnosis.
+
+The completed-fragment baseline change retains the existing recursive baseline walker and adds a block-end-most mode for horizontal multicol publication. It selects the lowest non-collapsed text fragment across eligible descendants; source-order traversal and vertical publication keep their existing contracts. Independent controls cover unequal heights, fragmented text, an unbreakable tall column followed by a shorter column, a spanner, positioned text exclusion, first-baseline selection, overflow:hidden synthesis, and ordinary block descendants. All **86 native controls pass** and nine inventories have no lost full matches or regression-floor failures. `multicol-gap-percentage-001` becomes full; exact verification is pending. Raster differences are 6,363/3,840,000 channels despite matching geometry, so no pixel-identical claim is made.
+
+Checkpoint77: exact layout **3,134 full /160 partial /0 failed**, native **86/86**. Manifest77 gained, none lost. Full Radiant pending.
+
+Further browser diagnostics: Chromium treats `text-align:justify-all` as unsupported and falls back to start; CSS Text3 §6.1 requires justify on both longhands. Do not remove valid native support merely to match those six partial references. Fresh Japanese `word-space-transform-022/024` boxes are486px wide with injected Liberation Serif/Noto Sans SC faces, matching native width; stored636.72px boxes have a different font environment. Do not change ch metrics to force those stored widths. Atomic-inline WJ/ZWJ/FEFF cases similarly need CSS Text line-break-detail verification before adopting Chrome's extra wrap.
+
+Fresh `md_ky-readme` confirms a600×600 logo box, as native uses; its stored32.75×24 broken-image box comes from a different resource state. This explains the earlier strut attempt's Markdown floor conflict; changing correct image sizing would not resolve it legitimately. Keep the rejected strut experiment rolled back. CSS Text3 §5.5 explicitly suppresses wraps at atomic WJ/ZWJ/FEFF boundaries, so leave those Chrome-wrapping partial cases unchanged.
+
+Full Radiant77 passes: **5,713 passed /164 expected partial /1 existing skip /0 failed**.
+
+## Investigation: nested avoid-inside box in an unequal outer remainder
+
+Fresh Chromium `multicol-nested-013` confirms the second nested200%-wide box remains one50×100 fragment in the next outer column. Native splits it into two50×50 pieces beginning in the remaining50px inner slot, making its union75px wide. Its `break-inside:avoid` is authored and a later100px outer slot can fit it. Diagnose why the existing nested unbreakable-slot selector is not applied before publishing those descendant fragments (CSS Break3 §4.4 / nested fragmentation). No reference change is needed.
+
+The avoid constraint reuses the existing nested slot iterator and whole-box selector, retains forced-break precedence, and records consumed outer flow independently of visible child bounds. An oversized avoid box must use a complete slot before normal fragmentation relaxes avoidance; select with the largest available capacity instead of treating it as permanently monolithic. Native controls now match that oversized Chrome geometry. Vertical controls reveal that the old whole-box branch published logical inline/block coordinates directly as x/y and width/height; reuse `multicol_physical_fragment_rect`, already used by split pieces. The200% vertical control independently exposes an older percentage inline-size mismatch; retain it under temp and use explicit50px inline sizes to isolate the projection contract. The shorter same-outer control also exposes an older auto-fill wrapper-height difference (60px vs75px); its descendants agree, but do not claim its wrapper fixed.
+
+The final nested avoid fixture uses eight independent cases: avoid, avoid-column, auto, avoid-page, oversized avoid, vertical-lr, vertical-rl, and a whole box with a local descendant. All **87 native controls pass**. Its1200×1200 raster is **pixel-identical to current Chromium (0/5,760,000 differing channels)**. Nine inventories retain all full matches and cross no regression floor; `multicol-nested-013` becomes full. Forced-break precedence is additionally checked under temp; the parent fragmentation agrees, while its nested descendant coordinates reveal a separate older sizing/projection issue. Keep that diagnostic distinct from the accepted whole-box contract. The exact gate is pending.
+
+Checkpoint78: exact layout **3,135 full /159 partial /0 failed**, native87/87. Manifest78 gained, none lost. Full Radiant pending.
+
+Full Radiant78 passes: **5,715 passed /163 expected partial /1 existing skip /0 failed**.
+
+## Investigation: nested continuous flow in balanced wrapped rows
+
+Fresh `column-height-008` has outer fixed row height60px and10px row gap, with360px uninterrupted nested content. Four inner columns consume240px in the first outer row; the remaining120px divides over four30px inner columns in the final row. Chromium exposes an100px union and eight leaf fragments. Native exposes130px and six60px leaf fragments. The existing continuous-row balancer excludes nested contexts, and the nested slot iterator accepts a uniform capacity only. Reuse the row group's capacity/origin helpers for eligible continuous nested flows and carry the same plan into descendant publication. CSS Multicol2 column-height/column-wrap and CSS Break3 §5.1 govern variable fragmentainer capacities.
+
+The first row-plan phase fixes the parent union but leaves the nested leaf on its uniform projection: the local slot eligibility accepts only nested column-fill:auto. Extend it to uninterrupted nested flow in a wrapped parent, sharing that eligibility with publication. The first inventory also exposes `column-height-013`: a descendant spanner interrupts continuous row flow, so explicitly exclude spanners from the recursive eligibility predicate. No new full match is counted until both corrections pass. A separate new three-column control initially combines `columns:2` with inline `column-count:3` and reveals a shorthand/longhand cascade defect; preserve that counterexample and use one longhand declaration for the row-capacity control.
+
+The corrected continuous-flow eligibility excludes spanners, discrete inline lines, authored non-leaf block sizes, margins/decorations, containment, scrolling, floats, and avoid/forced breaks. Nested wrapped flow uses the existing shared slot iterator with the row group's actual capacity and origin. Consumed outer flow now accumulates outer capacities rather than multiplying a uniform target; split leaf and parent unions keep that same plan. Varied two/three-column and auto-fill controls match Chromium geometry, including12 pieces in the three-column case and preserving the unbalanced auto-fill130px union. Nine inventories have no lost full matches or regression-floor failures; `column-height-008` becomes full. Native and exact verification pending.
+
+All **88 native controls pass**, including varying final-row heights, three inner columns, auto-fill, ordinary continuous flow, and the spanner interruption. The final control raster differs by19,500/3,840,000 channels, beginning inside the spanner counterexample (y605); do not claim that existing spanner background painting is fixed. Exact verification is pending.
+
+Checkpoint79: exact layout **3,136 full /158 partial /0 failed**, native88/88. Manifest79 gained, none lost. The first five row-control PNG regions are pixel-identical to Chromium (0/2,880,000 channels); the spanner background paint difference is separate. Full Radiant pending.
+
+Full Radiant79 passes: **5,717 passed /162 expected partial /1 existing skip /0 failed**.
+
+## Investigation: avoid floor exceeds a definite column capacity
+
+Fresh `multicol-nested-028` and independent fixed/max/auto-height controls confirm the avoid target floor raises a definite100px column to200px, which preserves the oversize sibling whole and prevents the minimum125px nested box from fragmenting. The floor runs after the existing definite-target calculation and does not reapply its limit. Cap the floor with the existing content-box limit helper; unconstrained balancing still grows to200px. Reuse the avoid/avoid-column predicate added for nested slots. Native before/Chrome geometry evidence is saved under `avoid-fragmentainer-limits-*`.
+
+The definite floor cap restores `multicol-nested-028` to full in all nine inventories without losses. The fragment records reveal a further principal/content distinction: nested content consumes105px of outer flow, but the wrapper's authored minimum requires125px. Publishing105px incorrectly shortens its second background fragment to5px instead of25px, even though the bounding union and following sibling placement look correct. Preserve the used minimum border-box flow and its provisional fragment count before replacing the wrapper records. Do not count the pass until fragment and raster controls verify this correction.
+
+The seven final capacity/minimum controls pass all **89 native tests**, including25px and325px principal remainders and separate205px leaf flow. Nine inventories retain all full matches and regression floors; exact verification is pending. The larger minimum with following overflow siblings exposes an older finite-sequence continuation policy: native keeps the later box below the final nominal column while Chromium creates another inline overflow column. Preserve that full counterexample in temp; the permanent larger-minimum control isolates its four principal fragments without adding those unrelated overflow siblings.
+
+Checkpoint80: exact layout **3,137 full /157 partial /0 failed**, native89/89. Manifest80 gained, none lost. The final capacity/minimum control raster is pixel-identical to Chromium (0/5,760,000 differing channels). Full Radiant pending.
+
+Zero-height wrapper diagnostics: in `multicol-span-all-children-height-004b-ref`, Chrome getClientRects reports first zero-height box at x8 and another at x216, but getBoundingClientRect returns the latter; `multicol-fill-balance-023` similarly returns the last y28 box instead of its first y8 box. CSSOM View §6 bounding-box algorithm step3 requires the first rectangle when every rectangle has zero width or height. Keep these partial; do not force native bounding boxes to the browser's last empty rectangle. Native still needs a separate full client-rectangle-list audit, which is not fixed here.
+
+Fresh Markdown diagnostics: `md_commander-readme` uses a remote packagephobia badge and current Chrome matches stored116.5×20 while native has its offline broken-image alternative. This is a resource-state difference, not an established CSS sizing root; do not enable network or fake a badge to pass it. `md_test-unicode` current arrows815.47px (stored809.05) versus native866.8px, and current Arabic code line156.69px (stored171.84) versus native215.1px. Chrome uses Menlo plus per-glyph system fallbacks; investigate native selected glyph faces and required shaping before a change.
+
+Full Radiant80 passes: **5,719 passed /161 expected partial /1 existing skip /0 failed**. The long-running objective remains active at80 verified gains, with20 further full matches required.
+
+
+## Investigation: multiline inline source edges and lookahead separators
+
+Fresh `hanging-punctuation-allow-end-inlines` agrees with its reference: a wrapped span's final48px text fragment plus16px end border gives a64px bounding union. Native publishes48px because the multiline bounding-box branch omits decorations entirely. In the adjacent start-border case, lookahead detects overflow after the text node is exhausted but disables restoration of the chosen collapsible separator. Its first text range retains48px instead of32px. Use the same separator-restoration policy as immediate overflow (CSS Text3 §4.1.2), and add sliced decorations to their source-edge fragments instead of the widest line (CSS Break3 §5.4).
+
+Independent RTL controls expose another edge-ownership defect: bidi reserves both physical decorations on every line, then subtracts a physical left edge from the provisional logical origin. Sliced RTL continuation text consequently lands16px on the wrong side. Track whether each source boundary belongs to the current line, keep its logical leading advance separate from its physical decorations, and reuse the existing inherited-direction resolver. The helper is promoted from multicol, not copied. Promote the existing box-decoration-break resolver as well. The shared source-edge leaf traversal supplies both bbox and bidi callers; nested relative offsets are excluded from the parent's normal-flow box.
+
+Cloned automatic-wrap fragments require both edges on every line. Include their decorated content bounds without decorating an already complete decoration-only ledger twice. The first inventory caught two formerly full sizing cases, `slice-intrinsic-size` and `clone-intrinsic-size`: their leading space wraps after a border-only first fragment. Recording the span's opening line preserves that fragment's ownership instead of attaching its start edge again to the later text. The final nine-category inventory restores both and retains every previous full match, with no regression-floor failures.
+
+`layout_inline_slice_edges.html` supplies ten browser-matching geometry controls: sliced right/both edges, unequal first/last lines, nested edges, forced breaks, RTL source boundaries, lookahead trimming, cloned automatic wraps, and relative descendants. All90 native text-query tests pass, including RTL text origins and the retained source-space byte range. The raster comparison still differs in12,734 of3,840,000 channels: the existing `render_text_inline_background` / `render_text_inline_border` path clones padding and borders on each direct text rectangle, so sliced start/end borders also appear on inappropriate lines. No claim of pixel equality or a painting fix is made.
+
+Additional Ahem leading-space prefix controls expose an older wrap-preflight difference from Chromium; retain the complete counterexample under `temp/layout-analysis/round7/inline-slice-edge-leading-space-counterexample.html`. It is distinct from the formerly full monospace sizing controls and from the accepted ten geometry controls. Exact and full Radiant verification are pending; the goal remains active.
+
+## Rejected experiment: DOM carriage returns
+
+CSS Text3 §4 explicitly treats DOM U+000D as U+0020; HTML source CR/CRLF normalization already happens in `html5_tokenizer.cpp`. A candidate changed layout, bidi classes/advances, intrinsic edge detection, and painted text accordingly. Independent six-mode Ahem controls preserve equal CR/space layout in native, while current Chromium drops preserved CRs in pre/pre-wrap/break-spaces and exposes different ranges and intrinsic widths. The candidate adds no full match and lowers `control-chars-00D` text score38.1→33.3. Restore every production file to checkpoint80, retain the candidate and controls under temp, and leave the case partial rather than remove CR space advances to imitate Chromium. This experiment is not counted or left in production.
+
+Checkpoint81: sequential exact layout **3,138 full /156 partial /0 failed**, native90/90, targeted lint and diff checks pass. Manifest81 gained, none lost. The first exact attempt overlapped a Radiant build that temporarily removed `lambda.exe`, producing ENOENT batch errors; it is invalid as a code regression result. Stop the overlapping gate and rerun sequentially. The isolated exact rerun passes; the isolated full Radiant gate is pending.
+
+Full Radiant81 passes: **5,721 passed /160 expected partial /1 existing skip /0 failed**. The prior sequential run's seven view failures were CLI precondition errors: a forced post-load settle duration requires auto-close. All seven pass when both settings are supplied; the isolated complete rerun also passes. No engine/test change is needed. Goal remains active at81 gains, with19 required.
+
+
+## Investigation: single-line grid items spanning column fragments
+
+Fresh `multicol-dynamic-add-003-ref` confirms a40px two-row grid and row-spanning item in10px columns. Their first fragment consumes the whole18px line, followed by10px,10px,2px continuations; native publishes10px four times and clips both unions to10px. The existing row planner explicitly excludes spanning items. Its generic fallback consequently loses the unbreakable first-line constraint and the corresponding source-flow prefix. CSS Grid1 §12 and CSS Break3 §4.1 preserve indivisible line boxes in parallel grid flows.
+
+Build a shared whole-prefix count/store path instead of adding a visual-height cap. For a first parallel grid group whose items start at the same content edge and contain one line or no content, resolve the real line advance and include its start decoration. Reserve that prefix before slicing the remaining grid area. Propagate the same capacity through the grid-item projection so empty stretched items and the visible spanning item share the parent plan. Later rows, multiline items, forced breaks and scrolling grids retain their existing planners. If earlier content leaves insufficient room for this minimum prefix, take the available break before the grid; the line can then overflow an empty short column. Zero-height fragmentainers retain their separate progress policy.
+
+Reuse the prefix count helper for the existing ordinary single-line path; both count and stored piece extents now consume the same whole first line and remaining flow. Do not duplicate the prior ceil/remainder branch. Six independent Ahem controls vary line advances18/20/24/10, total flow40/60, and a5px preceding block. All twelve grid/item boxes and their first/last fragment extents match fresh Chromium. All91 native text-query tests pass. The raster differs in591 of3,840,000 channels, with matching visible box geometry; no pixel-identical claim is made.
+
+The final nine-category inventory gains `multicol-dynamic-add-003` and its reference, loses no full matches, and crosses no regression floor. Targeted Radiant lint and diff checks pass. Exact verification is pending, so these two gains are not yet added to the verified manifest. Additional float-wrapper reference004 returns the last of three all-zero-height fragments from Chromium's bounding-box API; CSSOM View §6 step3 requires the first. As with the earlier zero-height diagnostics, leave that bbox difference partial instead of imitating the nonconforming last-rectangle choice.
+
+Checkpoint83: exact layout **3,140 full /154 partial /0 failed**, native91/91. Manifest83 gained, none lost. Full Radiant pending. Goal remains active,17 more full matches required.
+
+Full Radiant83 passes: **5,724 passed /158 expected partial /1 existing skip /0 failed**. The objective remains active at83 verified new full matches, with17 still required.
+
+
+## Investigation: atomic inline boxes in anonymous multicol runs
+
+A phase trace of `multicol-dynamic-change-inside-break-inside-avoid-001-ref` locates the first input correctly at local y18 after normal inline layout. The block distributor then resets it to y0: its broad block-storage predicate includes inline-block views. The mixed-inline collector also omits atomic boxes, preventing its anonymous-block planner from preserving the completed line. CSS2.1 §§9.2.1.1,9.2.2,9.4.2 require these boxes to stay in their inline formatting context.
+
+Extend the existing mixed record collector to atomic boxes and use their completed source-line numbers when grouping baseline-aligned leaves. Retain the actual enlarged line advance and reuse the common inline position setter. Dispatch supported auto-sized horizontal mixed runs to that planner; nested fragmentainer capacities, constrained heights, spanner groups and unsupported block kinds retain their dedicated paths. The initial broad classification attempt lost nested/spanner full cases and was superseded before validation. A fixed-height mixed-run counterexample remains under temp for that separate planner; it is not counted as fixed.
+
+Seven permanent Ahem controls cover inputs, inline-blocks, authored block display, a solely atomic run, a trailing run, baseline alignment, and a nested span. Their boxes match fresh Chromium; all92 native text-query tests pass. The first new unit invocation lacked the loader's expected `result` fixture root; adding that fixture root resolves it without changing the loader. Browser/native raster comparison differs in1,500 of3,840,000 channels, including existing span edge antialiasing; no pixel equality is claimed. Targeted lint and diff checks pass.
+
+All nine inventory categories lose no full matches and cross no regression floor. Both dynamic avoid001 cases become fully matched. Checkpoint85 exact layout: **3,142 full /152 partial /0 failed**; manifest85 gained, none lost. Full Radiant is running with sources/libraries/executable frozen. The goal remains active, with15 more full matches required.
+
+Read-only diagnosis leaves `justify-all` cases partial: CSS Text3 §6.1 still defines this value, while the browser reference ignores it. Atomic WORD JOINER/ZWJ wrap cases likewise conflict with CSS Text3 §5.5's explicit non-breaking exceptions. Transform overflow fixtures expose another reference mismatch: native executes test callbacks that update transforms to200/300px, while stored browser boxes retain20/30px. Do not disable those valid transforms to match stale script state. Root columns:0px uses the normative1px preferred minimum; Chromium's zero-width columns are not grounds to remove it.
+
+Full Radiant85 passes: **5,727 passed /156 expected partial /1 existing skip /0 failed**. Sources are unfrozen; goal remains active at85 gained cases,15 more required.
+
+
+User wrap-up checkpoint: **85 additional full matches**, independently recomputed against the original round7 inventory, with zero lost full matches. The100-test target remains incomplete. Work is stopped at the user's wrap-up request; the goal service reports no active goal. No diagnostic instrumentation remains. Exact layout and full Radiant gates both pass with zero failures; native92/92, targeted lint and diff checks pass. References, comparison tolerances and baseline skips are unchanged.
+
+Next confirmed diagnosis, not implemented: percentage word spacing is excluded by the shared font-spacing resolver's letter-only percentage condition, its length percentage basis omits word spacing, and the intrinsic path also omits percentage/functions for word spacing. Fresh Chromium resolves the authored100% and calc(50% +0.5em) examples against each element's used font size. CSS Text4 §8.1 requires percentage-preserving inheritance. Complete a shared resolver design, including retained affine calc components and final font-size timing, before changing production; the stable85 source backups and next-investigation notes are under temp.

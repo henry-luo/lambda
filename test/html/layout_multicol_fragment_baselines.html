@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8">
+<style>
+@font-face {font-family:Ahem;src:url('../layout/data/support/fonts/Ahem.ttf')}
+body {margin:0;font:20px/20px Ahem}
+.row {height:100px; white-space:nowrap}
+.box {display:inline-block;white-space:normal;vertical-align:baseline; background:#abc}
+.cols {columns:2;column-gap:10px;width:90px;orphans:1;widows:1}
+.marker {display:inline-block;width:20px;height:20px;background:green}
+.top {vertical-align:top} .hidden {overflow:hidden} .first {baseline-source:first}
+</style>
+<div id="result" class="row"><div id="short" class="box cols"><div>X</div><div>X</div></div><div id="tall" class="box cols"><div>X X</div><div>X X</div></div><span id="marker" class="marker"></span></div>
+<div class="row"><div id="plain-short" class="box"><div>X</div></div><div id="plain-tall" class="box"><div>X<br>X</div></div><span id="plain-marker" class="marker"></span></div>
+<div class="row"><div id="hidden-short" class="box cols hidden"><div>X</div><div>X</div></div><div id="hidden-tall" class="box cols hidden"><div>X X</div><div>X X</div></div><span id="hidden-marker" class="marker"></span></div>
+<div class="row"><div id="first-short" class="box cols first"><div>X</div><div>X</div></div><div id="first-tall" class="box cols first"><div>X X</div><div>X X</div></div><span id="first-marker" class="marker"></span></div>
+<div class="row"><div id="frag-short" class="box cols"><div>X</div><div>X</div></div><div id="frag-tall" class="box cols"><div>X X X</div></div><span id="frag-marker" class="marker"></span></div>
+<div class="row"><div id="span-short" class="box cols"><div>X</div><div>X</div></div><div id="span-tall" class="box cols"><div>X X</div><div>X X</div><div style="column-span:all">X</div></div><span id="span-marker" class="marker"></span></div>
+<div class="row"><div id="unequal-short" class="box cols"><div>X</div><div>X</div></div><div id="unequal-tall" class="box cols"><div style="break-inside:avoid">X<br>X<br>X</div><div>X</div></div><span id="unequal-marker" class="marker"></span></div>
+<div class="row"><div id="positioned-short" class="box cols"><div>X</div><div>X</div></div><div id="positioned-tall" class="box cols" style="position:relative"><div>X X</div><div>X X<span style="position:absolute;top:80px">X</span></div></div><span id="positioned-marker" class="marker"></span></div>

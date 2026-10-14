@@ -656,6 +656,8 @@ extern const FormControlProp FORM_CONTROL_PROP_DEFAULT;
 // tier-1: doc-pool, survives relayout
 typedef struct LayoutFragmentBox {
     float x, y, width, height;
+    float flow_extent;  // consumed block flow can be smaller than visible monolithic overflow
+    bool has_flow_extent;
     int fragment_index;
     int column_index;
     int row_index;

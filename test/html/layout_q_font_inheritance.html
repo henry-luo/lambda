@@ -1,0 +1,11 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Quotation font style follows the cascade</title>
+<style>body { margin:0; font:20px/24px "Times New Roman"; }</style>
+<div id="result">
+  <q id="plain">X</q>
+  <em><q id="inherited">X</q></em>
+  <q id="author" style="font-style:italic">X</q>
+  <em><q id="normal" style="font-style:normal">X</q></em>
+  <cite id="cite">X</cite><dfn id="dfn">X</dfn><var id="var">X</var>
+</div>

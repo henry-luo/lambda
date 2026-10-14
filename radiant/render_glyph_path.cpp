@@ -14,6 +14,15 @@ float render_font_pixel_to_css(FontHandle* font, const GlyphBitmap* bitmap) {
     return scale * (bitmap && bitmap->bitmap_scale > 0.0f ? bitmap->bitmap_scale : 1.0f);
 }
 
+bool render_text_synthesized_space_advance(const FontBox* font, uint32_t codepoint,
+    float* advance) {
+    if (!font || !font->style || !advance ||
+        !font_get_synthesized_space_advance(font_box_handle(font), codepoint, advance)) return false;
+    *advance = (font->style->font_size > 0.0f ? *advance : 0.0f) +
+        text_character_spacing(font->style, codepoint);
+    return true;
+}
+
 static bool render_font_path_command(void* context, FontPathCommand command,
     const float* values, int count) {
     RenderGlyphPathWriter* writer = (RenderGlyphPathWriter*)context;
@@ -87,11 +96,17 @@ bool render_visit_text_run_glyphs(const PaintGlyphRun* run, FontContext* font_co
         int bytes = str_utf8_decode(cursor, (size_t)(end - cursor), &codepoint);
         if (bytes <= 0) { ok = false; break; }
         cursor += bytes;
-        bool character_gap = text_justify_character_gap(&justify_context, codepoint);
-        if (codepoint == 0xFE0F) continue;
+        bool character_gap = text_justify_character_gap(&justify_context, codepoint, run->justify_mode);
+        if (codepoint == 0xFE0F || codepoint == 0x00AD ||
+            utf8proc_category(codepoint) == UTF8PROC_CATEGORY_CF) continue;
         if (character_gap) pen += run->cjk_spacing;
         if (codepoint == ' ') {
             pen += text_space_advance(box->style, run->word_spacing);
+            continue;
+        }
+        float synthetic_advance = 0.0f;
+        if (render_text_synthesized_space_advance(box, codepoint, &synthetic_advance)) {
+            pen += synthetic_advance;
             continue;
         }
         uint32_t next = 0;

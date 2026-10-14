@@ -60,6 +60,39 @@ def numbered(text, num, level=0):
 package("minimal.docx", paragraph("Hello, DOCX!"))
 package("relocated.docx", paragraph("  Café 世界 &amp; &lt;XML&gt;  "), main="stories/body.xml")
 package("empty.docx", '<w:p/>' + paragraph(""))
+
+# References use story-local IDs and relationships, including relocated annotation parts.
+def annotation(kind, ident):
+    return f'<w:r><w:{kind}Reference w:id="{ident}"/></w:r>'
+
+
+note_body = paragraph("Foot ") + '<w:p><w:hyperlink r:id="shared"><w:r><w:t>note</w:t></w:r></w:hyperlink></w:p>'
+notes = f'<w:footnotes xmlns:w="{W}" xmlns:r="{R}"><w:footnote w:id="9">{note_body}</w:footnote><w:footnote w:id="2">{paragraph("Second")}</w:footnote></w:footnotes>'
+endnotes = f'<w:endnotes xmlns:w="{W}"><w:endnote w:id="3">{paragraph("End")}</w:endnote></w:endnotes>'
+comments = f'<w:comments xmlns:w="{W}"><w:comment w:id="2">{paragraph("Comment")}</w:comment></w:comments>'
+story_rels = relationship("notes","footnotes","../annotations/footnotes.xml")
+story_rels += relationship("endnotes","endnotes","endnotes.xml") + relationship("comments","comments","comments.xml")
+story_rels += relationship("shared","hyperlink","https://example.com/main",True)
+annotation_parts = {"annotations/footnotes.xml":notes,"word/endnotes.xml":endnotes,"word/comments.xml":comments,
+    "annotations/_rels/footnotes.xml.rels":f'<Relationships xmlns="{P}">{relationship("shared","hyperlink","https://example.com/note",True)}</Relationships>'}
+annotation_body = '<w:p><w:hyperlink r:id="shared"><w:r><w:t>Body</w:t></w:r></w:hyperlink>'
+annotation_body += annotation("footnote",9) + annotation("footnote",9) + annotation("endnote",3) + annotation("comment",2) + '</w:p>'
+annotation_body += '<w:tbl><w:tr><w:tc><w:p>' + annotation("footnote",2) + '</w:p></w:tc></w:tr></w:tbl>'
+package("annotations.docx",annotation_body,rels=story_rels,extras=annotation_parts)
+for name, content in [
+    ("duplicate-note",notes.replace('w:id="2"','w:id="9"')),
+    ("missing-note-id",notes.replace(' w:id="9"','')),
+    ("invalid-notes-root",notes.replace('w:footnotes','w:endnotes')),
+    ("nested-note",notes.replace(paragraph("Foot "),'<w:p>' + annotation("footnote",9) + '</w:p>')),
+    ("unsafe-note-link",notes),
+]:
+    parts = {**annotation_parts,"annotations/footnotes.xml":content}
+    if name == "unsafe-note-link":
+        parts["annotations/_rels/footnotes.xml.rels"] = f'<Relationships xmlns="{P}">{relationship("shared","hyperlink","javascript:alert(1)",True)}</Relationships>'
+    package(name + ".docx",annotation_body,rels=story_rels,extras=parts)
+package("external-notes.docx",'<w:p>' + annotation("footnote",9) + '</w:p>',
+    rels=relationship("notes","footnotes","https://example.invalid/notes.xml",True))
+
 styles = f'''<w:styles xmlns:w="{W}">
 <w:docDefaults><w:rPrDefault><w:rPr><w:i/></w:rPr></w:rPrDefault></w:docDefaults>
 <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>

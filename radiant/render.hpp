@@ -1666,7 +1666,8 @@ typedef struct PaintGlyphRun {
     float font_size;
     float x, baseline_y;
     float word_spacing;     // line justification in addition to the captured font's authored spacing
-    float cjk_spacing;      // extra spacing before an adjacent ideograph
+    float cjk_spacing;      // extra spacing before an eligible character unit
+    CssEnum justify_mode;   // shared layout/paint policy for character boundaries
     int font_weight;         // CSS numeric weight; 0 = omit
     bool italic;
     lam::Up<const uint32_t> glyph_ids;   // borrowed
@@ -1712,7 +1713,7 @@ LoadedGlyph* render_text_emphasis_bitmap_glyph(const RenderTextEmphasis* emphasi
     float* mark_x, float* mark_y);
 
 void paint_svg_append_cjk_dx(StrBuf* out, const char* text, int text_len,
-                             float cjk_spacing);
+                             float cjk_spacing, CssEnum mode = CSS_VALUE_AUTO);
 
 typedef void (*PaintGlyphRunRasterLowerFn)(const PaintGlyphRun* run,
                                            DisplayList* dl);
@@ -4673,6 +4674,18 @@ public:
     RenderTextPaintScope& operator=(const RenderTextPaintScope&) = delete;
 };
 
+struct RenderTextJustification {
+    float word, character;
+};
+
+inline RenderTextJustification render_text_justification(const TextRect* rect, CssEnum mode) {
+    // line layout already accounts for last-line alignment, shaping and trims;
+    // painters must not infer expansion from their own glyph measurements.
+    float spacing = rect && mode != CSS_VALUE_NONE ? rect->justification_spacing : 0.0f;
+    return {mode == CSS_VALUE_INTER_CHARACTER ? 0.0f : spacing,
+            mode == CSS_VALUE_INTER_WORD ? 0.0f : spacing};
+}
+
 class RenderTextPaintIterator {
     lam::Up<RenderContext> context;
     lam::Up<TextRect> cursor;
@@ -4691,6 +4704,7 @@ public:
 void render_text_view(RasterRenderContext* rdcon, ViewText* text_view);
 bool render_text_subtree_overflows_block(RasterRenderContext* rdcon, ViewBlock* block);
 CssEnum render_text_inherited_transform(ViewText* text_view);
+bool render_text_synthesized_space_advance(const FontBox* font, uint32_t codepoint, float* advance);
 char* render_text_create_export_segment(const unsigned char* text,
                                         const TextRect* text_rect,
                                         CssEnum text_transform,

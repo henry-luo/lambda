@@ -326,8 +326,11 @@ bool layout_html_ua_element_default(NameId tag, HtmlUaElementDefault* result) {
         break;
     case MARKUP_NAME_B: case MARKUP_NAME_STRONG: value.font_weight = CSS_VALUE_BOLD; break;
     case MARKUP_NAME_I: case MARKUP_NAME_EM: case MARKUP_NAME_CITE:
-    case MARKUP_NAME_DFN: case MARKUP_NAME_VAR: case MARKUP_NAME_Q:
+    case MARKUP_NAME_DFN: case MARKUP_NAME_VAR:
         value.font_style = CSS_VALUE_ITALIC;
+        break;
+    case MARKUP_NAME_Q:
+        // HTML §15.3.4: q inherits font-style; its UA additions are quote marks.
         break;
     case MARKUP_NAME_U: case MARKUP_NAME_INS: case MARKUP_NAME_ABBR: case MARKUP_NAME_ACRONYM:
         value.text_decoration = CSS_VALUE_UNDERLINE;

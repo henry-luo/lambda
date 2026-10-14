@@ -182,6 +182,12 @@ void layout_relative_position_offset(ViewBlock* block, float* offset_x_out, floa
         }
     }
 
+    if (parent_block) {
+        // relative percentages use the anonymous column's inline containing size.
+        if (layout_block_inline_axis_is_vertical(parent_block))
+            cb_height = layout_multicol_in_flow_inline_size(parent_block, cb_height);
+        else cb_width = layout_multicol_in_flow_inline_size(parent_block, cb_width);
+    }
     LayoutAxisPair<float> containing_sizes = layout_axis_pair(cb_width, cb_height);
     LayoutAxisPair<float> offsets = {};
     for (LayoutAxis axis : layout_axes()) {
@@ -1511,10 +1517,14 @@ void layout_finalize_static_inline_positions(LayoutContext* lycon) {
             ? block->positionp()->next_static_inline_position : nullptr;
         if (block->position) {
             block->position->next_static_inline_position = nullptr;
-            if (!block->positionp()->static_inline_bidi_candidate ||
-                block->positionp()->static_inline_bidi_placed) {
+            if (!block->positionp()->has_left && !block->positionp()->has_right &&
+                (!block->positionp()->static_inline_bidi_candidate ||
+                 block->positionp()->static_inline_bidi_placed)) {
                 block->x += offset;
             }
+            block->position->static_inline_phantom = lycon->line.is_line_start;
+            block->position->static_inline_phantom_x = block->x -
+                block->positionp()->static_parent_offset_x;
         }
         block = next;
     }
@@ -2793,8 +2803,13 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
         !positioned_axis_uses_static_self_alignment(block, static_containing_block, LAYOUT_AXIS_X);
     block->position->static_inline_bidi_candidate = bidi_static_inline;
     block->position->static_inline_bidi_placed = false;
+    block->position->static_inline_phantom = false;
     if (bidi_static_inline) block->inline_line_number = pa_block->line_number;
-    if (defer_static_inline_x || bidi_static_inline) {
+    // an auto-inset phantom cursor needs completion even without an in-flow view.
+    bool track_phantom_cursor = was_inline && static_containing_block &&
+        !layout_block_inline_axis_is_vertical(static_containing_block) &&
+        !block->positionp()->has_top && !block->positionp()->has_bottom;
+    if (defer_static_inline_x || bidi_static_inline || track_phantom_cursor) {
         positioned_register_static_inline_position(block, pa_line);
     }
     lycon->depth--;
@@ -3162,37 +3177,8 @@ void adjust_line_for_floats(LayoutContext* lycon) {
         return;
     }
 
-    View* current_view = lycon->view;
-    if (!current_view) {
-        return;
-    }
-
-    ViewElement* ancestor = current_view->is_element()
-        ? lam::view_require_element(current_view)
-        : lam::view_as_element(static_cast<View*>(current_view->parent));
-    if (!ancestor) {
-        return;
-    }
-    ViewBlock* container = bfc->establishing_element;
-    bool found_container = false;
-    while (ancestor) {
-        if (ancestor == container) {
-            found_container = true;
-            break;
-        }
-        if (ancestor->is_block()) {
-            ViewBlock* block = lam::view_require_block(ancestor);
-            if (block->position && element_has_float(block)) {
-                return;
-            }
-        }
-        ancestor = ancestor->parent_view();
-    }
-
-    if (!found_container) {
-        return;
-    }
-
+    // text preflight can reset the parent line while view still names a float;
+    // the restored block context, including an independent float BFC, owns it.
     float block_offset_x = lycon->block.bfc_offset_x;
     float block_offset_y = lycon->block.bfc_offset_y;
 

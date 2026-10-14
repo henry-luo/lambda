@@ -69,13 +69,30 @@ fn drawing_node(node, pkg, options) map^ {
         contents.diagnostics ++ (if (reference != null and (len(references) > 1 or
             len(c.descendants(node,"blip",c.A)) > 0 or len(c.descendants(node,"txbxContent",c.W)) > 0))
             [warning(pkg,"unsupported-drawing-content","Only the first chart in the drawing is supported")^] else []) ++
-        (if (placement.unsupported)
+        (if (placement.unsupported and len(contents.nodes) > 0)
             [warning(pkg,"unsupported-floating-image","Drawing position or wrapping is outside the paragraph-relative profile")^] else []))
 }
 
 fn inline_many(nodes, pkg, sheet, marks, options) map^ {
     let results = [for (node in unwrap_controls(nodes,pkg)^) inline_node(node,pkg,sheet,marks,options)^];
     result(c.collect(results,"nodes"),c.collect(results,"diagnostics"))
+}
+fn annotation_reference(node, pkg) map^ {
+    let kind = slice(node.tag,0,len(node.tag)-len("Reference"))
+    let id = c.attr(node,"id");
+    if (pkg.in_story == true)
+        result([],[warning(pkg,"unsupported-nested-reference","Annotation contains another annotation reference")^])
+    else if (id == null or pkg.stories[kind].nodes[id] == null)
+        result([],[warning(pkg,"missing-annotation","Unresolved " ++ kind ++ " reference")^])
+    else result([{kind:"reference",story:kind,id:id,key:kind ++ "-" ++ id}],
+        if (contains(["1","true","on"],c.attr(node,"customMarkFollows")))
+            [warning(pkg,"unsupported-custom-note-mark","Custom annotation numbering is outside the semantic profile")^] else [])
+}
+fn text_box(node, pkg, sheet, options) map^ {
+    let boxes = [for (box in c.descendants(node,"txbxContent",c.W))
+        block_many(c.children(box,null,null),pkg,sheet,options)^];
+    result([{kind:"text-box",blocks:c.collect(boxes,"nodes")}],c.collect(boxes,"diagnostics") ++
+        [warning(pkg,"unsupported-text-box-layout","Text box content retained after its paragraph; floating geometry omitted")^])
 }
 fn inline_node(node, pkg, sheet, marks, options) map^ {
     if (node is string) result() else if (node.uri == c.W and node.tag == "r") {
@@ -102,14 +119,20 @@ fn inline_node(node, pkg, sheet, marks, options) map^ {
     } else if (node.uri == c.W and node.tag == "bookmarkStart") {
         let id = c.attr(node,"name");
         if (id == null) result() else result([{kind:"bookmark",id:options.id_prefix ++ id}])
-    } else if (node.uri == c.W and contains(["bookmarkEnd","proofErr","lastRenderedPageBreak","permStart","permEnd"],node.tag)) result()
+    } else if (node.uri == c.W and contains(["footnoteReference","endnoteReference","commentReference"],node.tag))
+        annotation_reference(node,pkg)^
+    else if (node.uri == c.W and contains(["bookmarkEnd","proofErr","lastRenderedPageBreak","permStart","permEnd",
+        "commentRangeStart","commentRangeEnd","footnoteRef","endnoteRef","annotationRef"],node.tag)) result()
+    else if (node.uri == c.W and contains(["drawing","pict"],node.tag) and
+        len(c.descendants(node,"txbxContent",c.W)) > 0) text_box(node,pkg,sheet,options)^
     else if (node.uri == c.W and node.tag == "drawing") drawing_node(node,pkg,options)^
     else if (node.uri == c.MC and node.tag == "AlternateContent") {
         // choose a single representation, so fallback material never duplicates the choice.
         let branch = c.child(node,"Fallback",c.MC)
         let chosen = if (branch != null) branch else c.child(node,"Choice",c.MC)
         let contents = inline_many(c.children(chosen,null,null),pkg,sheet,marks,options)^;
-        result(contents.nodes,contents.diagnostics ++ [warning(pkg,"unsupported-alternate-content","Selected one compatibility representation")^])
+        result(contents.nodes,contents.diagnostics ++ (if (len(c.descendants(chosen,"txbxContent",c.W)) > 0) []
+            else [warning(pkg,"unsupported-alternate-content","Selected one compatibility representation")^]))
     } else {
         let contents = inline_many(c.children(node,null,null),pkg,sheet,marks,options)^
         let leaf_text = if (len(c.children(node,null,null)) == 0) c.text(node) else "";
@@ -118,6 +141,11 @@ fn inline_node(node, pkg, sheet, marks, options) map^ {
     }
 }
 
+// text boxes contain blocks; lifting them avoids invalid block elements inside a paragraph/link.
+fn without_boxes(nodes) => [for (node in nodes where node.kind != "text-box")
+    if (node.kind == "link") {*:node,children:without_boxes(node.children)} else node]
+fn box_blocks(nodes) => [for (node in nodes, block in
+    (if (node.kind == "text-box") node.blocks else if (node.kind == "link") box_blocks(node.children) else [])) block]
 fn paragraph(node, pkg, sheet, options) map^ {
     let properties = c.child(node,"pPr")
     let resolved = styles.paragraph(sheet,properties)^
@@ -126,9 +154,10 @@ fn paragraph(node, pkg, sheet, options) map^ {
     let paragraph_mark = styles.run(sheet,resolved.run,c.child(properties,"rPr"))^
     let contents = inline_many([for (child in c.children(node,null,null)
         where not (child.uri == c.W and child.tag == "pPr")) child],pkg,sheet,resolved.run,options)^;
-    result([{kind:"paragraph",tag:tag.tag,attrs:tag.attrs,children:contents.nodes,list:numbering.value,
+    result([{kind:"paragraph",tag:tag.tag,attrs:tag.attrs,children:without_boxes(contents.nodes),list:numbering.value,
         props:resolved.props,run:resolved.run,empty_run:paragraph_mark.props,
-        break_before:resolved.props.break_before == true,section_after:c.child(properties,"sectPr") != null}],
+        break_before:resolved.props.break_before == true,section_after:c.child(properties,"sectPr") != null},
+        *box_blocks(contents.nodes)],
         resolved.diagnostics ++ numbering.diagnostics ++ contents.diagnostics)
 }
 fn row(node, pkg, sheet, options) map^ {
@@ -169,10 +198,23 @@ fn block(node, pkg, sheet, options) map^ {
         result(nested.nodes,[warning(pkg,"unsupported-element","Unsupported block element {" ++ node.uri ++ "}" ++ node.tag)^] ++ nested.diagnostics)
     }
 }
+fn references(nodes) => [for (node in nodes, ref in
+    (if (node.kind == "reference") [node] else references(c.get(node,"children",[]) ++
+        c.get(node,"blocks",[]) ++ c.get(node,"rows",[]) ++ c.get(node,"cells",[])))) ref]
+fn annotations(blocks, pkg, sheet, options) array^ {
+    let refs = references(blocks)
+    let unique_refs = [for (i,ref in refs where not any([for (j,prior in refs where j < i) prior.key == ref.key])) ref];
+    [for (i,ref in unique_refs, let story = pkg.stories[ref.story],
+        let context = {*:pkg,main:story.part,relationships:story.relationships,in_story:true},
+        let contents = block_many(c.children(story.nodes[ref.id],null,null),context,{*:sheet,part:story.part},options)^)
+        {*:ref,part:story.part,number:1+len([for (j,prior in unique_refs where j < i and prior.story == ref.story) prior]),
+            blocks:contents.nodes,diagnostics:contents.diagnostics}]
+}
 pub fn build(pkg, options) map^ {
     let sheet = styles.prepare(pkg)^
     let defaults = styles.paragraph(sheet,null)^
-    let contents = block_many(c.children(pkg.body,null,null),pkg,sheet,options)^;
-    {blocks:contents.nodes,page_style:presentation.page_style(c.child(pkg.body,"sectPr"),defaults.run),
-        diagnostics:pkg.diagnostics ++ contents.diagnostics}
+    let contents = block_many(c.children(pkg.body,null,null),pkg,sheet,options)^
+    let notes = annotations(contents.nodes,pkg,sheet,options)^;
+    {blocks:contents.nodes,annotations:notes,page_style:presentation.page_style(c.child(pkg.body,"sectPr"),defaults.run),
+        diagnostics:pkg.diagnostics ++ contents.diagnostics ++ c.collect(notes,"diagnostics")}
 }

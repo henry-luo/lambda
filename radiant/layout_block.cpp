@@ -27,7 +27,6 @@
 
 extern void adjust_text_bounds(ViewText* text);
 
-static void align_and_discard_phantom_inline_line(LayoutContext* lycon);
 
 bool line_has_prior_flow_content(const Linebox* line) {
     return line &&
@@ -3446,12 +3445,8 @@ static void adjust_block_children_after_shrink(LayoutContext* lycon,
     // and CSS Grid §11: grid item sizes are determined by track sizing.
     if (parent->display.inner == CSS_VALUE_FLEX ||
         parent->display.inner == CSS_VALUE_GRID) return;
-    float child_containing_width = new_parent_cw;
-    if (parent->multicol_prop() && is_multicol_container(parent) &&
-        parent->multicol_prop()->computed_column_count > 1 &&
-        parent->multicol_prop()->computed_column_width > 0.0f) {
-        child_containing_width = parent->multicol_prop()->computed_column_width;
-    }
+    float child_containing_width = layout_block_inline_axis_is_vertical(parent)
+        ? new_parent_cw : layout_multicol_in_flow_inline_size(parent, new_parent_cw);
     for (View* child = lam::view_require_element(parent)->first_placed_child(); child; child = child->next()) {
         if (child->view_type != RDT_VIEW_BLOCK && child->view_type != RDT_VIEW_LIST_ITEM)
             continue;
@@ -6044,7 +6039,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                         lycon->line.is_last_line = true;
                         line_break(lycon);
                     } else {
-                        align_and_discard_phantom_inline_line(lycon);
+                        layout_finalize_phantom_inline_line(lycon);
                     }
                 }
             }
@@ -6169,7 +6164,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             lycon->line.is_last_line = true;
             line_break(lycon);
         } else {
-            align_and_discard_phantom_inline_line(lycon);
+            layout_finalize_phantom_inline_line(lycon);
         }
         // CSS Box 4 §3.1 margin-trim: block-end — trim the last in-flow child's
         if (block->blk && (block->block()->margin_trim & MARGIN_TRIM_BLOCK_END)) {
@@ -7223,8 +7218,8 @@ static float line_trimmable_end_space_width(Linebox* line) {
     } else if (line->committed_trailing_space > 0.0f) {
         trimmable_width = line->committed_trailing_space;
     }
-    if (line->hanging_space_width > 0.0f) {
-        trimmable_width += line->hanging_space_width;
+    if (line->hanging_space.width > 0.0f) {
+        trimmable_width += line->hanging_space.width;
     }
     return trimmable_width;
 }
@@ -9541,9 +9536,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 
 static int layout_block_count = 0;
 
-static void align_and_discard_phantom_inline_line(LayoutContext* lycon) {
+void layout_finalize_phantom_inline_line(LayoutContext* lycon) {
     if (!lycon || !lycon->line.is_line_start) return;
-    // CSS 2.1 §9.4.2 suppresses the phantom line's height, but §16.2 still
+    // CSS 2.1 §9.4.2 suppresses height; §16.2 still aligns its static cursor.
     if (lycon->line.first_static_inline_position ||
         (lycon->line.start_view && lycon->line.has_phantom_inline_fragment)) {
         line_align(lycon);
@@ -9598,8 +9593,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // that line for static-position resolution without a phantom break.
         if (!lycon->line.is_line_start) {
             line_break(lycon, true);
-        } else if (lycon->line.start_view) {
-            align_and_discard_phantom_inline_line(lycon);
+        } else if (lycon->line.start_view || lycon->line.first_static_inline_position) {
+            layout_finalize_phantom_inline_line(lycon);
         }
     }
     BlockContext pa_block = lycon->block;  Linebox pa_line = lycon->line;

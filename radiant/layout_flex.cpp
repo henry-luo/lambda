@@ -876,7 +876,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     LayoutAxis main_axis = axes.main;
     LayoutAxis cross_axis = axes.cross;
     bool has_parent_used_width = !has_explicit_width && lycon->flex_container &&
-        lycon->block.given_width >= 0.0f && content_width > 0.0f &&
+        lycon->block.given_width >= 0.0f && content_width >= 0.0f &&
         fabsf(lycon->block.given_width - content_width) <= 0.5f;
     bool width_is_intrinsic_keyword = layout_axis_uses_intrinsic_size(
         container->blk, LAYOUT_AXIS_X);
@@ -1002,8 +1002,10 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
             min_main_supplies_used_size = true;
         }
     }
+    // CSS Sizing 3 §2: definiteness belongs to the constraint, including 0px.
+    bool definite_inline_constraint = lycon->available_space.width.is_definite();
     if (main_axis == LAYOUT_AXIS_X && !has_definite_main && !is_absolute &&
-        content_width > 0.0f && !width_is_intrinsic_keyword) {
+        content_width >= 0.0f && definite_inline_constraint && !width_is_intrinsic_keyword) {
         bool is_inline_level = container->display.outer == CSS_VALUE_INLINE_BLOCK ||
             container->display.outer == CSS_VALUE_INLINE;
         has_definite_main = !is_inline_level;
@@ -1012,8 +1014,8 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         // A parent flex size is the definite basis for nested inline-flex content.
         has_definite_main = true;
     }
-    if (main_axis == LAYOUT_AXIS_X && !has_definite_main && container->width > 0.0f &&
-        !is_shrink_to_fit && !width_is_intrinsic_keyword) {
+    if (main_axis == LAYOUT_AXIS_X && !has_definite_main && container->width >= 0.0f &&
+        definite_inline_constraint && !is_shrink_to_fit && !width_is_intrinsic_keyword) {
         has_definite_main = true;
     }
     if (main_axis == LAYOUT_AXIS_Y && !has_definite_main && height_assigned_by_parent) {
@@ -1038,7 +1040,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
             (placement.has_start() && placement.has_end());
     }
     if (!has_definite_cross && cross_axis == LAYOUT_AXIS_X && !is_absolute &&
-        content_width > 0.0f) {
+        content_width >= 0.0f && definite_inline_constraint) {
         bool is_inline_level = container->display.outer == CSS_VALUE_INLINE_BLOCK ||
             container->display.outer == CSS_VALUE_INLINE;
         has_definite_cross = !is_inline_level;

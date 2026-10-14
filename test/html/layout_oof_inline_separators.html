@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><title>Inline separators ignore out-of-flow blockification</title>
+<style>
+body {margin:0;font:20px/24px "Times New Roman";font-kerning:none}
+.line {width:300px;margin-bottom:20px;word-spacing:7px;position:relative}
+.caps {text-transform:capitalize}
+.abs {position:absolute}
+.fixed {position:fixed}
+.float {float:left;width:10px;height:10px}
+</style><div id="result">
+  <div class="line" id="after"><span class="caps" id="after-lead">abc</span><span class="abs"></span> <span class="caps" id="after-tail">abc</span></div>
+  <div class="line" id="before"><span class="caps" id="before-lead">abc</span> <span class="abs"></span><span class="caps" id="before-tail">abc</span></div>
+  <div class="line" id="both"><span class="caps" id="both-lead">abc</span> <span class="abs"></span> <span class="caps" id="both-tail">abc</span></div>
+  <div class="line" id="fixed"><span class="caps" id="fixed-lead">abc</span><span class="fixed"></span> <span class="caps" id="fixed-tail">abc</span></div>
+  <div class="line" id="blockified"><span class="caps" id="blockified-lead">abc</span><span class="abs" style="display:block"></span> <span class="caps" id="blockified-tail">abc</span></div>
+  <div class="line" id="float"><span class="caps" id="float-lead">abc</span><span class="float"></span> <span class="caps" id="float-tail">abc</span></div>
+  <div class="line" id="hidden"><span class="caps" id="hidden-lead">abc</span><span style="display:none"></span> <span class="caps" id="hidden-tail">abc</span></div>
+  <div class="line" id="none"><span class="caps" id="none-lead">abc</span><span class="abs"></span><span class="caps" id="none-tail">abc</span></div>
+  <div class="line" id="real"><span class="caps" id="real-lead">abc</span> <div style="height:10px"></div> <span class="caps" id="real-tail">abc</span></div>
+</div>

@@ -136,6 +136,11 @@ static void render_text_paint_fit(RenderTextPaintEntry* entry, float edge,
                 continue;
             }
             has_space = false;
+            float synthetic_advance = 0.0f;
+            if (render_text_synthesized_space_advance(&entry->font, codepoint, &synthetic_advance)) {
+                advance += synthetic_advance;
+                continue;
+            }
             uint32_t transformed[3];
             int count = apply_text_transform_full(codepoint, transform, word_start, transformed);
             word_start = is_space(codepoint);
@@ -274,6 +279,7 @@ static void render_text_project_source_rect(const TextRect* source, TextRect* pr
     projection->width = source->width;
     projection->height = source->height;
     projection->hanging_trim = source->hanging_trim;
+    projection->justification_spacing = source->justification_spacing;
     text_rect_painted_source_range(source, &projection->start_index, &projection->length);
     projection->line_number = source->line_number;
     projection->has_trailing_hyphen = source->has_trailing_hyphen;
@@ -366,7 +372,7 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
                                               TextRect* text_rect, TextShadow* text_shadow,
                                               CssEnum text_transform, bool preserve_spaces,
                                               float space_width, float scaled_space_width,
-                                              float cjk_spacing,
+                                              float cjk_spacing, CssEnum justify_mode,
                                               float x, float y, DomElement* parent_elem,
                                               const RenderTextEmphasis* emphasis);
 static LoadedGlyph* render_text_load_glyph_for_paint(RasterRenderContext* rdcon,
@@ -510,25 +516,6 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
 
     // Get text-transform from parent elements
     CssEnum text_transform = get_text_transform_from_node(text_view->parent);
-    CssEnum text_align = CSS_VALUE_LEFT;  // default to left alignment
-    bool text_align_found = false;
-    DomNode* parent = text_view->parent;
-    while (parent) {
-        if (parent->is_element()) {
-            DomElement* elem = lam::dom_require_element(parent);
-            // Get text-align from the nearest ancestor that has block properties.
-            // text-align is CSS-inherited, so the closest block already holds the
-            // resolved value; walking further would overwrite it with an outer
-            // (e.g. <html>) default and lose 'justify'.
-            if (!text_align_found && elem->blk) {
-                BlockProp* blk_prop = (BlockProp*)elem->blk;
-                text_align = blk_prop->text_align;
-                text_align_found = true;
-            }
-        }
-        parent = parent->parent;
-    }
-
     DomElement* parent_elem = text_view->parent ? text_view->parent->as_element() : nullptr;
     bool has_selection_foreground = parent_elem && parent_elem->in_line &&
         parent_elem->inl()->has_selection_color;
@@ -557,67 +544,10 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
         if (render_text_trace_enabled()) {
         }
 
-        // Calculate natural text width and space count for justify rendering
-        // Note: space_width is in CSS pixels (scaled down for layout), need to scale up for render
         float scaled_space_width = rdcon->font.style->space_width * s;
-        float computed_space_width = text_space_advance(rdcon->font.style) * s;
-        float natural_width = 0.0f;
-        int space_count = 0;
-        unsigned char* scan = p;
-        bool scan_has_space = render_text_source_has_space(str, text_rect->start_index, preserve_spaces);
-
-        // Scan all content including trailing spaces for width calculation
-        // Trailing whitespace is intentionally included because layout has already
-        // determined the correct width and positioning - we should render exactly
-        // what was laid out, including spaces between inline elements
-        unsigned char* content_end = end;
-
-        while (scan < content_end) {
-            if (is_space(*scan)) {
-                if (preserve_spaces || !scan_has_space) {
-                    scan_has_space = true;
-                    natural_width += computed_space_width;
-                    space_count++;
-                }
-                scan++;
-            }
-            else {
-                scan_has_space = false;
-                uint32_t scan_codepoint;
-                int bytes = str_utf8_decode((const char*)scan, (size_t)(content_end - scan), &scan_codepoint);
-                if (bytes <= 0) { scan++; }
-                else { scan += bytes; }
-
-                uint64_t t1 = time_now_ns();
-                FontStyleDesc _sd = font_style_desc_from_prop(rdcon->font.style);
-                LoadedGlyph* glyph = font_load_glyph(font_box_handle(&rdcon->font), &_sd, scan_codepoint, false);
-                uint64_t t2 = time_now_ns();
-                render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_GLYPH_LOAD,
-                    time_elapsed_ms_f(t1, t2));
-                if (glyph) {
-                    natural_width += glyph->advance_x + text_character_spacing(rdcon->font.style, scan_codepoint) * s;  // already in physical pixels
-                } else {
-                    natural_width += scaled_space_width;  // fallback width in physical pixels
-                }
-            }
-        }
-
-        // Calculate adjusted space width for justified text (in physical pixels)
-        float space_width = computed_space_width;
-        float justification_per_gap = 0.0f;
-        int justification_gaps = count_rendered_justify_opportunities(
-            text_view, text_rect, false);
-        // Layout may widen a sole run even for `none`; only the paint spacing
-        // must stay at its natural advance in that case.
-        if (text_align == CSS_VALUE_JUSTIFY && text_justify != CSS_VALUE_NONE &&
-            justification_gaps > 0 && natural_width > 0 &&
-            text_rect->width * s > natural_width) {
-            float extra_space = (text_rect->width * s) - natural_width;
-            justification_per_gap = extra_space / justification_gaps;
-            if (space_count > 0) space_width += justification_per_gap;
-            if (render_text_trace_enabled()) {
-            }
-        }
+        RenderTextJustification justification = render_text_justification(text_rect, text_justify);
+        float space_width = (text_space_advance(rdcon->font.style) + justification.word) * s;
+        float justification_per_gap = justification.character * s;
 
         // Render the text with adjusted spacing
         bool has_space = render_text_source_has_space(str, text_rect->start_index, preserve_spaces);
@@ -630,7 +560,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
         if (shadow_prepass && !render_text_paint_background_and_shadows(rdcon, str, text_rect,
                 text_shadow, text_transform, preserve_spaces, space_width,
                 scaled_space_width, text_justify == CSS_VALUE_INTER_WORD ? 0.0f : justification_per_gap,
-                x, y, parent_elem, &emphasis)) {
+                text_justify, x, y, parent_elem, &emphasis)) {
             rdcon->paint_failed = true;
             log_error("[TEXT_SHADOW_CAPTURE] native glyph layer capture failed");
         }
@@ -645,7 +575,8 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
             if (is_space(*p)) {
                 if (preserve_spaces || !has_space) {  // preserve all spaces or add single whitespace
                     has_space = true;
-
+                    if (text_justify_character_gap(&justify_context, ' ', text_justify))
+                        x += justification_per_gap;
                     // Render space by advancing x position
                     // All spaces are rendered (not just non-trailing) because layout has
                     // already determined correct positioning including inter-element whitespace
@@ -653,7 +584,6 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
                 }
                 // else  // skip consecutive spaces
                 is_word_start = true;  // Next non-space is word start
-                justify_context = {};
                 p++;
                 char_index++;
             }
@@ -666,7 +596,7 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
                 // Variation selectors are consumed by the preceding glyph; asking
                 // CoreText to paint them standalone triggers hidden UI-font lookup.
                 if (codepoint == 0x00AD || text_codepoint_has_zero_advance(codepoint)) {
-                    text_justify_character_gap(&justify_context, codepoint);
+                    text_justify_character_gap(&justify_context, codepoint, text_justify);
                     continue;
                 }
 
@@ -679,12 +609,18 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
                 for (int tti = 0; tti < tt_count; tti++) {
                     uint32_t render_cp = render_text_resolve_mathlive_fallback_glyph(tt_out[tti]);
                     if (render_cp == 0) continue;
-                    bool character_gap = text_justify_character_gap(&justify_context, render_cp);
+                    bool character_gap = text_justify_character_gap(&justify_context, render_cp, text_justify);
                     if (text_codepoint_has_zero_advance(render_cp)) continue;
                     if (justification_per_gap > 0.0f &&
                         text_justify != CSS_VALUE_INTER_WORD &&
                         character_gap) {
                         x += justification_per_gap;
+                    }
+
+                    float synthetic_advance = 0.0f;
+                    if (render_text_synthesized_space_advance(&rdcon->font, render_cp, &synthetic_advance)) {
+                        x += synthetic_advance * s;
+                        continue;
                     }
 
                     static int glyph_debug_count = 0;
@@ -954,7 +890,7 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
                                               TextRect* text_rect, TextShadow* text_shadow,
                                               CssEnum text_transform, bool preserve_spaces,
                                               float space_width, float scaled_space_width,
-                                              float cjk_spacing,
+                                              float cjk_spacing, CssEnum justify_mode,
                                               float x, float y, DomElement* parent_elem,
                                               const RenderTextEmphasis* emphasis) {
     if (!rdcon || !str || !text_rect || !text_shadow ||
@@ -989,10 +925,11 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
             if (is_space(*sp)) {
                 if (preserve_spaces || !s_has_space) {
                     s_has_space = true;
+                    if (text_justify_character_gap(&justify_context, ' ', justify_mode))
+                        sx_pos += cjk_spacing;
                     sx_pos += space_width;
                 }
                 s_word_start = true;
-                justify_context = {};
                 sp++;
                 continue;
             }
@@ -1019,10 +956,16 @@ static bool render_text_paint_background_and_shadows(RasterRenderContext* rdcon,
                 if (s_tt_cp == 0) {
                     continue;
                 }
-                bool character_gap = text_justify_character_gap(&justify_context, s_tt_cp);
+                bool character_gap = text_justify_character_gap(&justify_context, s_tt_cp, justify_mode);
                 if (text_codepoint_has_zero_advance(s_tt_cp)) continue;
                 if (cjk_spacing > 0.0f && character_gap)
                     sx_pos += cjk_spacing;
+
+                float synthetic_advance = 0.0f;
+                if (render_text_synthesized_space_advance(&rdcon->font, s_tt_cp, &synthetic_advance)) {
+                    sx_pos += synthetic_advance * s;
+                    continue;
+                }
 
                 LoadedGlyph* s_glyph = font_load_glyph(font_box_handle(&rdcon->font), &sd, s_tt_cp, true);
                 if (!s_glyph) {
@@ -1180,6 +1123,12 @@ static float render_text_trailing_marks(RasterRenderContext* rdcon, TextRect* te
                     (size_t)(end - cursor), &codepoint);
                 if (bytes <= 0) bytes = 1;
             }
+            float synthetic_advance = 0.0f;
+            if (render_text_synthesized_space_advance(&rdcon->font, codepoint, &synthetic_advance)) {
+                x += synthetic_advance * rdcon->raster_scale;
+                cursor += bytes;
+                continue;
+            }
             LoadedGlyph* h_glyph = font_load_glyph(
                 font_box_handle(&rdcon->font), &sd_h, codepoint, true);
             if (h_glyph) {
@@ -1231,6 +1180,12 @@ static int collect_skip_ink_gaps(TextDecorationPaintContext* context, unsigned c
         uint32_t codepoint;
         if (!layout_utf8_next_codepoint(&p, end, &codepoint)) continue;
         if (codepoint == 0x00AD || text_codepoint_has_zero_advance(codepoint)) continue;
+
+        float synthetic_advance = 0.0f;
+        if (render_text_synthesized_space_advance(context->font, codepoint, &synthetic_advance)) {
+            x += synthetic_advance * s;
+            continue;
+        }
 
         LoadedGlyph* glyph = font_load_glyph(font_box_handle(context->font), &sd, codepoint, true);
         if (!glyph) {

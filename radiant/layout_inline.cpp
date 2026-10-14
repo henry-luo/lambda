@@ -703,7 +703,7 @@ static bool ruby_annotation_is_outside_base_bounds(ViewSpan* span, View* child) 
     return static_cast<DomNode*>(child)->tag() == MARKUP_NAME_RT;
 }
 
-static bool ruby_annotation_node(DomNode* node) {
+bool layout_ruby_annotation_node(DomNode* node) {
     return node && node->is_element() && node->tag() == MARKUP_NAME_RT;
 }
 
@@ -771,7 +771,7 @@ static bool ruby_ends_with_annotation_space(DomNode* first_child) {
                 lam::dom_as<DOM_NODE_TEXT>(child))) {
             continue;
         }
-        return ruby_annotation_node(child);
+        return layout_ruby_annotation_node(child);
     }
     return false;
 }
@@ -815,7 +815,7 @@ static ViewText* simple_ruby_base_text(ViewSpan* ruby, ViewSpan* annotation) {
 static bool ruby_has_simple_text_pair(DomNode* first_child) {
     if (!first_child || !first_child->is_text()) return false;
     DomNode* annotation = first_child->next_sibling;
-    if (!ruby_annotation_node(annotation) || annotation->next_sibling) return false;
+    if (!layout_ruby_annotation_node(annotation) || annotation->next_sibling) return false;
     DomElement* annotation_element = annotation->as_element();
     DomNode* annotation_text = annotation_element->first_child;
     return annotation_text && annotation_text->is_text() && !annotation_text->next_sibling;
@@ -1015,13 +1015,78 @@ static bool inline_span_marker_splits_text_line(ViewSpan* span) {
     return false;
 }
 
-static View* inline_span_first_line_fragment_child(ViewSpan* span) {
+static View* inline_span_edge_fragment_child(ViewSpan* span, bool end = false) {
     if (!span) return nullptr;
-    View* first = span->first_placed_child();
-    while (first && (first->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(first))) {
-        first = first->next();
+    View* edge = nullptr;
+    for (View* child = span->first_placed_child(); child; child = child->next()) {
+        if (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child) ||
+            view_is_collapsed_whitespace_text(child)) continue;
+        edge = child;
+        if (!end) break;
     }
-    return first;
+    return edge;
+}
+
+View* layout_inline_span_edge_leaf(ViewSpan* span, bool source_end,
+                                  float* left_decoration, float* right_decoration,
+                                  float* relative_offset) {
+    if (left_decoration) *left_decoration = 0.0f;
+    if (right_decoration) *right_decoration = 0.0f;
+    if (relative_offset) *relative_offset = 0.0f;
+    View* child = inline_span_edge_fragment_child(span, source_end);
+    while (ViewSpan* nested = lam::view_as<RDT_VIEW_INLINE>(child)) {
+        if (nested->has_split_inline_fragment_union()) return nullptr;
+        LayoutInlineDecorationEdges edges = layout_inline_decoration_edges(nested);
+        if (left_decoration) *left_decoration += edges.left +
+            (nested->bound ? nested->boundary()->margin.left : 0.0f);
+        if (right_decoration) *right_decoration += edges.right +
+            (nested->bound ? nested->boundary()->margin.right : 0.0f);
+        if (relative_offset) {
+            float offset = 0.0f;
+            layout_relative_position_offset(lam::unsafe_view_block_api_span(nested), &offset, nullptr);
+            *relative_offset += offset;
+        }
+        child = inline_span_edge_fragment_child(nested, source_end);
+    }
+    if (relative_offset) {
+        if (ViewBlock* block = lam::view_as_block(child)) {
+            float offset = 0.0f;
+            layout_relative_position_offset(block, &offset, nullptr);
+            *relative_offset += offset;
+        }
+    }
+    return child;
+}
+
+static bool inline_span_slice_edge(ViewSpan* span, bool source_end, bool physical_end,
+                                   float* edge) {
+    float left_decoration = 0.0f, right_decoration = 0.0f;
+    float relative_offset = 0.0f;
+    View* child = layout_inline_span_edge_leaf(span, source_end,
+        &left_decoration, &right_decoration, &relative_offset);
+    if (!child) return false;
+    if (child->view_type == RDT_VIEW_TEXT) {
+        ViewText* text = lam::view_require_text(child);
+        TextRect* fragment = nullptr;
+        for (TextRect* rect = text->rect; rect; rect = rect->next) {
+            if (rect->width <= 0.0f || rect->height <= 0.0f) continue;
+            fragment = rect;
+            if (!source_end) break;
+        }
+        if (!fragment) return false;
+        if (!source_end && span->has_inline_fragment_union() &&
+            fragment->line_number > span->inline_line_number) {
+            // an earlier decoration-only fragment already owns the sliced start edge.
+            return false;
+        }
+        *edge = fragment->x + (physical_end ? fragment->width : 0.0f);
+    } else {
+        if (layout_inline_child_is_block_split(static_cast<DomNode*>(child))) return false;
+        *edge = child->x + (physical_end ? child->width : 0.0f);
+    }
+    *edge += physical_end ? right_decoration : -left_decoration;
+    *edge -= relative_offset;
+    return true;
 }
 
 static bool inline_block_contains_list_item(View* atomic) {
@@ -1127,7 +1192,7 @@ static bool inline_fragment_union_extends_child_bounds(ViewSpan* span) {
 }
 
 bool inline_span_has_multiple_line_fragments(ViewSpan* span) {
-    View* first = inline_span_first_line_fragment_child(span);
+    View* first = inline_span_edge_fragment_child(span);
     if (!first) return false;
     if (layout_span_children_have_no_line_content(span)) {
         // zero-width breaks and preserved newline records do not create a
@@ -1158,7 +1223,9 @@ bool inline_span_has_multiple_line_fragments(ViewSpan* span) {
 
     float first_y = first->y;
     for (View* child = first->next(); child; child = child->next()) {
-        if (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child)) continue;
+        // collapsed text has no fragment whose y-position can imply another line.
+        if (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child) ||
+            view_is_collapsed_whitespace_text(child)) continue;
         if (child->y != first_y) {
             return true;
         }
@@ -1801,18 +1868,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     float left_edge = edges.left;
     float right_edge = edges.right;
     float inline_sum = left_edge + right_edge;
-    bool clone_decoration_break = false;
-    if (span->specified_style) {
-        CssDeclaration* decoration_decl = style_tree_get_declaration(
-            span->specified_style, CSS_PROPERTY_BOX_DECORATION_BREAK);
-        CssEnum decoration_value = decoration_decl && decoration_decl->value &&
-            decoration_decl->value->type == CSS_VALUE_TYPE_KEYWORD
-            ? decoration_decl->value->data.keyword : CSS_VALUE__UNDEF;
-        clone_decoration_break = decoration_value == CSS_VALUE_CLONE;
-    }
-    bool forced_break_decoration = inline_span_has_forced_break_view(
-        static_cast<View*>(span));
-    bool clone_forced_break = clone_decoration_break && forced_break_decoration;
+    bool clone_decoration_break = inline_box_decoration_break_value(span) == CSS_VALUE_CLONE;
     ViewBlock* font_box_owner = layout_nearest_block_ancestor(span->parent_view());
     bool horizontal_font_box = !font_box_owner ||
         !layout_block_inline_axis_is_vertical(font_box_owner);
@@ -1900,7 +1956,26 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     content_width = max_x - min_x;
     // CSS 2.1 §8.5.1: Inline elements' border/padding appear at the start and end
     // first line fragment and right on the last — the union bounding box cannot simply
-    if (is_multi_line && !clone_forced_break) {
+    if (is_multi_line) {
+        if (horizontal_font_box && clone_decoration_break) {
+            // clone each content fragment without adding edges twice to a decoration-only ledger.
+            for (View* fragment = span->first_placed_child(); fragment; fragment = fragment->next()) {
+                if (fragment->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(fragment) ||
+                    view_is_collapsed_whitespace_text(fragment)) continue;
+                min_x = min(min_x, get_child_static_x(fragment) - left_edge);
+                max_x = max(max_x, get_child_static_right(fragment) + right_edge);
+            }
+            content_width = max_x - min_x;
+        } else if (horizontal_font_box && (left_edge != 0.0f || right_edge != 0.0f)) {
+            // sliced decorations belong to source-edge fragments, not to the widest line.
+            bool rtl = layout_inherited_direction_is_rtl(span->first_placed_child());
+            float edge = 0.0f;
+            if (inline_span_slice_edge(span, rtl, false, &edge))
+                min_x = min(min_x, edge - left_edge);
+            if (inline_span_slice_edge(span, !rtl, true, &edge))
+                max_x = max(max_x, edge + right_edge);
+            content_width = max_x - min_x;
+        }
         layout_set_view_geometry(span, min_x, final_min_y,
                                  content_width, final_max_y - final_min_y);
     } else {
@@ -2377,6 +2452,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(set_view(lycon, RDT_VIEW_INLINE, elmt));
+    span->inline_line_number = lycon->block.line_number;
     span->x = lycon->line.advance_x;  span->y = lycon->block.advance_y;
     span->width = 0;  span->height = 0;
     span->display = display;
@@ -2716,7 +2792,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         bool has_simple_ruby_pair = ruby_has_simple_text_pair(child);
         for (DomNode* base_child = child; base_child;
              base_child = base_child->next_sibling) {
-            if (!ruby_annotation_node(base_child)) {
+            if (!layout_ruby_annotation_node(base_child)) {
                 layout_flow_node(lycon, base_child);
             }
         }
@@ -2735,7 +2811,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         float simple_ruby_inline_advance_extra = 0.0f;
         for (DomNode* annotation = child; annotation;
              annotation = annotation->next_sibling) {
-            if (!ruby_annotation_node(annotation)) continue;
+            if (!layout_ruby_annotation_node(annotation)) continue;
 
             BlockContext saved_base_block = lycon->block;
             Linebox saved_base_line = lycon->line;

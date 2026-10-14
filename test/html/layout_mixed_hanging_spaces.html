@@ -1,0 +1,25 @@
+<!doctype html>
+<style>
+@font-face {font-family: MetricAhem; src:url('../layout/support/fonts/Ahem.ttf');}
+body {margin:0;font:25px/25px MetricAhem;}
+.case {width:125px;text-align:right;margin-bottom:25px;}
+span {background:#ccc;} .fixed {white-space:break-spaces; background:green;}
+</style>
+<section id="result">
+<div class="case" id="one"><span id="one-leading">X&#x3000;&#x3000;</span><span class="fixed" id="one-fixed"> </span></div>
+<div class="case" id="two"><span id="two-leading">XX&#x3000;</span><span class="fixed" id="two-fixed"> </span></div>
+<div class="case" id="double"><span id="double-leading">X&#x3000;</span><span class="fixed" id="double-fixed">  </span></div>
+<div class="case" id="ideographic"><span id="ideographic-leading">X&#x3000;</span><span class="fixed" id="ideographic-fixed">&#x3000;</span></div>
+<div class="case" id="following"><span class="fixed">X </span><span id="following-hanging">&#x3000;</span></div>
+<div class="case" id="forced"><span id="forced-leading">X&#x3000;&#x3000;</span><span class="fixed"> </span><br>X</div>
+<div class="case" style="width:100px" id="conditional4"><span id="conditional4-leading">XXXX&#x3000;&#x3000;</span><span style="white-space:pre-wrap" id="conditional4-suffix">  </span></div>
+<div class="case" style="width:100px" id="conditional3"><span id="conditional3-leading">XXX&#x3000;&#x3000;</span><span style="white-space:pre-wrap" id="conditional3-suffix">  </span></div>
+<div class="case" style="width:100px" id="conditional2"><span id="conditional2-leading">XX&#x3000;&#x3000;</span><span style="white-space:pre-wrap" id="conditional2-suffix">  </span></div>
+<div class="case" style="width:100px" id="conditional1"><span id="conditional1-leading">X&#x3000;&#x3000;</span><span style="white-space:pre-wrap" id="conditional1-suffix">  </span></div>
+<div class="case" style="width:100px;white-space:pre-wrap" id="prewrap-all">XX&#x3000;&#x3000;  </div>
+<div class="case" dir="rtl" id="rtl"><span id="rtl-leading">X&#x3000;&#x3000;</span><span class="fixed" id="rtl-fixed"> </span></div>
+<div class="case" id="alternating"><span id="alternating-visible">X</span><span style="white-space:pre-wrap" id="alternating-conditional">  </span><span id="alternating-hanging">&#x3000;</span></div>
+<div class="case" id="alternating-prefix"><span id="alternating-prefix-visible">X&#x3000;</span><span style="white-space:pre-wrap" id="alternating-prefix-conditional"> </span><span id="alternating-prefix-hanging">&#x3000;</span></div>
+<div class="case" id="pre-fixed"><span id="pre-fixed-leading">X&#x3000;</span><span style="white-space:pre" id="pre-fixed-suffix"> </span></div>
+<div class="case" id="pre-ideographic"><span id="pre-ideographic-leading">X&#x3000;</span><span style="white-space:pre" id="pre-ideographic-suffix">&#x3000;</span></div>
+</section>
