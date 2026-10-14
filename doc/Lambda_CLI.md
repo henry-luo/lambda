@@ -550,7 +550,7 @@ Runs a TypeScript file on LambdaJS. Type annotations are stripped; there is no t
 - `math` — retired. It prints a message pointing at Lambda script math rendering and exits with status 1.
 - `serve` — parses its options but is not implemented; exits with status 1.
 - `replay --event-log <file.jsonl> [document] [--assert-state|--record|--headless|--window|--font-dir DIR]` — replays a recorded interaction against a document (testing).
-- `render-batch`, `test-batch`, `js-test-batch`, `--test*`, `--emit-ast-dump <path>`, `--emit-js-ast-dump <path>` — internal harness and development commands.
+- `render-batch`, `test-batch`, `js-test-batch`, `--test*`, `--emit-ast-dump <path>`, `--emit-js-ast-dump <path>` (the resolved AST as Mark, readable with `input(file, 'mark')`) — internal harness and development commands.
 
 ---
 

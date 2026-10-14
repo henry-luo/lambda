@@ -1,4 +1,4 @@
-// Semantics POC — the NEGATIVE suite (M3). Interpreter: sem_poc_kernel.ls.
+// Semantics POC — the NEGATIVE suite (M3). Interpreter: mod_sem_poc_kernel.ls.
 // Design: vibe/Lambda_Semantics_DSL_POC.md.
 //
 // This file is a spec artifact rather than a differential one. The other
@@ -19,7 +19,7 @@
 // Everything here is `== 'stuck'` or `== null` or `== <value>`; goldens are
 // `true` throughout.
 
-import .sem_poc_kernel
+import .mod_sem_poc_kernel
 
 // ===== STUCK: no rule applies =====
 

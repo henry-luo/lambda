@@ -1,6 +1,6 @@
 # Lambda Semantics POC — Executable Semantics in Today's Lambda
 
-**Status:** POC milestones M0–M3 landed 2026-08-29 (126 checks under `test/lambda/sem/`, not yet in the baseline — §5). The fixtures regressed silently under the S2.5 list rulings and a JIT defect, and were repaired 2026-10-13 (F11, F12): 127 checks, all `true` on the interp, jit and auto tiers. M4 and the DSL of Part II not started. On 2026-10-13 this doc absorbed the former `Lambda_Semantics_DSL_Proposal.md` (draft, 2026-07-03) as Part II, and that file was deleted.
+**Status:** POC milestones M0–M3 landed 2026-08-29 (126 checks under `test/lambda/sem/`). The fixtures regressed silently under the S2.5 list rulings and a JIT defect, and were repaired 2026-10-13 (F11, F12): 127 checks, all `true` on the interp, jit and auto tiers. **In the baseline since 2026-10-14** (`test/lambda/sem` added to `FUNCTIONAL_TEST_DIRECTORIES`; the kernel renamed `mod_sem_poc_kernel.ls` per the harness's module-naming rule — §5). **M4 landed 2026-10-14**: `--emit-ast-dump` now prints Mark, `mod_sem_poc_ingest.ls` lowers it to terms, and `sem_poc_ingest.ls` grades the model on `test/lambda/closure.ls` with no hand-written term (§6.3, §8). The DSL of Part II is not started. On 2026-10-13 this doc absorbed the former `Lambda_Semantics_DSL_Proposal.md` (draft, 2026-07-03) as Part II, and that file was deleted.
 **Scope:** Part I — the **functional core of Lambda only**: no procedural (`pn`) subset, no new syntax, no new runtime machinery. Part II — the native semantics DSL the POC seeds, for Lambda and LambdaJS.
 **End goal:** an executable, independent semantic model that *verifies* the Lambda test fixtures under `test/lambda/`, breaking the circularity of goldens captured from the very runtime they test (§1.1).
 **Spec linkage:** no `S#`/`D#` ruling covers meta-circular modeling, so the P-ledger (§1.5) holds working-doc decisions. By construction the model checks SI1 (boxing invisibility) and SI3v2 (inference evaluation-invariance); it relies on S4.1/SI7 (int arithmetic), SI4 (equality laws) and SI13 (no aliasing) in its host (§11.2).
@@ -124,6 +124,7 @@ covers meta-circular modeling, so these are working-doc decisions):
 | P8 | Scope ceiling: functional core (literals, arithmetic/comparison/logical, `let`, `if`, closures/application, recursion, arrays/maps/for basics). Errors-as-modeled-values, `pn`, modules, system functions beyond a tiny builtin list: out (§8, §9). |
 | P9 | The POC model is the migration seed for the DSL's Stage 4 (§15.2); arm ↔ rule correspondence is maintained deliberately (§9.2). |
 | P10 | Meta-fragment findings made while building the POC are recorded in §7 and fed to the `Lambda_Semantics_Formal.md` worklist — the §11.3 hardening loop, started early. |
+| P11 | **Ingestion (M4) reads the production parser's own AST dump**, which `--emit-ast-dump` prints as Mark: `(X …)` → `<X …>` for nodes, fields and attributes alike (designer ruling 2026-10-14). The dump of a fixture is committed beside the model (`closure.ast.mark`, regeneration command in its header), `normalize` reads shapes only and never the inference annotations, and anything outside the core lowers to `<unsupported>` — stuck by the kernel's default arm. |
 
 ---
 
@@ -225,6 +226,9 @@ MVP node-kind inventory (grows per the §8 ladder):
 | `<arr e*>` / `<idx a i>` | array literal / indexing |
 | `<mp (<kv k:'k', e>)*>` / `<fld m k>` | map literal / field access |
 | `<forr n:'x', src body>` | for-comprehension |
+| `<funn f:'f', ps:['x','y'], body>` | named n-ary function (M4; `rclon` value, applied by `appn`) |
+| `<cont e*>` | a content block's value items, as the list they build (M4; S2.5.3, collapses per S2.5.5v2) |
+| `<sysf n:"len">` / `<unsupported kind:…>` | a system function by name (only `len` maps, to `lenn`); a construct outside the core — stuck |
 
 ### 4.2 Values, environments, closures
 
@@ -365,29 +369,34 @@ section). No declaration form needed at this scale.
 ## 5. Files and layout
 
 ```
-test/lambda/sem/sem_poc_kernel.ls    // the interpreter, `pub fn`s — NO .txt, so not discovered
+test/lambda/sem/mod_sem_poc_kernel.ls  // the interpreter, `pub fn`s — a module (mod_ prefix), no .txt
 test/lambda/sem/sem_poc_core.ls      // positive differential checks, M0-M2      (58)  [LANDED]
 test/lambda/sem/sem_poc_stuck.ls     // negative suite: STUCK / TOTAL / ADOPTED  (36)  [LANDED]
 test/lambda/sem/sem_poc_fixtures.ls  // real test/lambda programs, translated    (33)  [LANDED]
+test/lambda/sem/mod_sem_poc_ingest.ls  // M4: the AST dump (Mark) lowered to terms — a module, no .txt
+test/lambda/sem/closure.ast.mark       // M4: committed `--emit-ast-dump test/lambda/closure.ls`
+test/lambda/sem/sem_poc_ingest.ls      // M4: closure.ls graded with no hand-written term   (4)  [LANDED]
 ```
 
-Discovery collects only `.ls` files that have a matching `.txt`, so the kernel
-module is skipped automatically and the three fixtures share one copy of the
-interpreter — no duplication, and no harness change to arrange it.
+Every `.ls` in a golden-driven directory is a test and needs its golden
+(AGENTS.md rule 8); an imported module is named `mod_*` so discovery skips
+it. The kernel carries that prefix, and the three fixtures share one copy of
+the interpreter — no duplication, and no harness change to arrange it.
 
 Per P7 these are ordinary `.ls`+`.txt` fixtures under `test/lambda/sem/`, so
 AGENTS.md rule 8 supplies the golden discipline and no harness, Makefile
 target, or manifest is added for Phases 1–2. The kernel is duplicated per
 fixture file at first (fixtures are self-contained); if that grates, module
-import of a shared `sem_poc_kernel.ls` is an ordinary Lambda `import` —
+import of a shared `mod_sem_poc_kernel.ls` is an ordinary Lambda `import` —
 a later cleanup, not a requirement.
 
-**Not in the baseline yet** (designer call, 2026-08-29): `test/lambda/sem` is
-deliberately absent from `FUNCTIONAL_TEST_DIRECTORIES` in
-`test/test_lambda_gtest.cpp`, so `make test-lambda-baseline` does not run these
-while the model is still being shaped. Adding that one line is what turns the
-POC into a CI gate — do it when the M3 negative suite lands, not before, so a
-half-written model cannot start dictating what the runtime must do.
+**In the baseline** (designer call, 2026-10-14): `test/lambda/sem` is listed in
+`FUNCTIONAL_TEST_DIRECTORIES` in `test/test_lambda_gtest.cpp`, so
+`make test-lambda-baseline` runs the three fixtures on the auto tier. It was
+deliberately kept out from 2026-08-29 while the model was being shaped, so a
+half-written model could not dictate what the runtime must do; that hold also
+let the fixtures sit silently red for six weeks (F11), which is why M3's
+completion closed it.
 
 Goldens for these fixtures are arrays of `true` — which sidesteps the
 "golden captured from the implementation" objection for the *checks
@@ -436,27 +445,46 @@ fixtures suffice to exercise the loop), it needs no host code, and every
 translated fixture becomes a regression test for Phase 3's mechanical
 translation.
 
-### 6.3 Phase 3 (optional, the only host-code item) — Mark AST ingestion
+### 6.3 Phase 3 — Mark AST ingestion (M4, landed 2026-10-14)
 
-The production C parser already emits a canonical s-expression AST dump
-(`lambda.exe --emit-ast-dump f.ls`, `lambda/runtime/emit_ast_dump.cpp`), and
-`input(f, 'mark')` already parses Mark — Lambda's own data notation — into
-elements. The gap is only the *format*: add a Mark-flavored sibling of the
-existing dump emitter (`--emit-ast-mark`), a formatter over the already-built
-AST, not a parser. Then:
+The production C parser's canonical AST dump (`lambda.exe --emit-ast-dump
+f.ls`, `lambda/runtime/emit_ast_dump.cpp`) **is now Mark** — Lambda's own data
+notation — so `input(f, 'mark')` reads it back as elements with no new parser.
+The change was the delimiters alone (P11): `(AST_NODE_PRIMARY (expr
+(AST_NODE_IDENT (name "x"))))` became `<AST_NODE_PRIMARY <expr <AST_NODE_IDENT
+<name "x">>>>`, for nodes, fields and attributes alike; the header's language
+and the boolean flags are strings (`<ast-dump "lambda" …>`,
+`<value_may_error "false">`) because the Mark reader keeps no bare word in
+content (F14), and a decomposition's names are one element each because
+adjacent strings in content merge (S2.6.4). The JS dump followed, since the two
+share their attribute primitives. The format's consumers moved with it (the
+`TypeContractMetadataTest` expectations and `test/type_infer/refresh_census.sh`),
+and every script under `test/lambda` dumps and reads back (481 of 481).
 
 ```lambda
-let raw  = input("temp/fixture_ast.mark", 'mark')   // dump of the fixture, as elements
-let term = normalize(raw)                            // AST-dump shapes → §4.1 terms, written in Lambda
-let v    = ev(term, env0)^
+let dump = input("test/lambda/sem/closure.ast.mark", 'mark')  // the fixture's dump, as elements
+let term = normalize(dump)^      // dump shapes → §4.1 terms, written in Lambda (mod_sem_poc_ingest.ls)
+run(term) == input("test/lambda/closure.txt", 'mark')          // the model vs the fixture's golden
 ```
 
-`normalize` is itself a Lambda function over elements — the first real test of
-the model style on a *big* vocabulary, and the direct descendant of the Redex
-bridge's `--emit-sexpr` mapping (§1.2). Phase 3 is severable: if it is
-never built, Phases 1–2 still deliver the POC's evidence. If it is built, the
-§13.1–§13.2 manifest/`make semantics-verify` machinery becomes worth adding —
-*that* is the natural graduation point from POC to the real Stage 5 (§15.2).
+`normalize` is a Lambda function over elements that knows shapes, never
+semantics: `AST_NODE_IDENT` → `vr`, `BINARY op` → `add`/…, `CALL_EXPR` → `appn`,
+`FUNC`/`FUNC_EXPR` → `funn`/`lamn`, `IF_EXPR` → `iff`, `ARRAY`/`INDEX`/`MAP`/
+`MEMBER`/a plain `FOR_EXPR` → `arr`/`idx`/`mp`/`fld`/`forr`, a `PRIMARY`'s
+literal source text read back through `parse(src, 'mark')`; a content block's
+leading declarations become nested `lett` wrappers (a named `fn` binds its own
+`funn` value) and its value items a `cont` term, which the kernel evaluates as
+the list the block builds (S2.5.3, collapsing per S2.5.5v2). Inference
+annotations are never read. Anything else — a `match`, a `pn`, a pipe — lowers
+to `<unsupported>`, which the kernel's default arm reports as stuck: the
+stuck-by-default property survives ingestion, and `sem_poc_ingest.ls` pins
+that with a hand-built dump of a `match`. The dump of a fixture is committed
+beside the model (its header carries the regeneration command) rather than
+generated at test time, so the fixture depends on no tooling; drift shows up
+as the lowering breaking. This is the direct descendant of the Redex bridge's
+`--emit-sexpr` mapping (§1.2), and the §13.1–§13.2 manifest/`make
+semantics-verify` machinery is now worth adding — the graduation point from
+POC to the real Stage 5 (§15.2).
 
 ---
 
@@ -661,6 +689,22 @@ that building the model is itself the hardening instrument:
     array and keeps the strings alive — several early "the tree survives"
     experiments were masked exactly this way.
 
+- **F13 — `if (c) <e>` reads `<` as less-than.** `if (i >= len(items))
+  <cont> else {…}` parsed as `(…) < cont > else …`: the JIT reported
+  "undefined variable 'cont'", the interpreter returned `null`. An element
+  literal can open an *expression* only where no complete expression precedes
+  it, so after `if (…)` it needs parentheses, a block, or a `match` arm. Same
+  family as F10 (content position), now in expression position; the parser's
+  `<` disambiguation deserves a ruling. Found writing `normalize` (M4).
+
+- **F14 — the Mark reader drops a bool or symbol child silently.**
+  `input` of `<r <a true> <b 'sym'> <c 1.5>>` keeps only `c`'s child, while
+  the same literal in Lambda source keeps all three and an attribute `v:true`
+  reads back as a bool; `parse_value` does return `b2it(true)`, so the loss is
+  in the reader's content push (`input-mark.cpp`). S2.6.2 drops only `null`
+  and `""`. Flagged as a task; until it is fixed the AST dump spells its
+  boolean flags as strings (P11).
+
 - **F12 — a bound list became an array in the model.** An attribute stores a
   list as the array it is (S2.5.6), so a list bound by `lett` or a parameter
   and held in the environment's `v:` attribute came back as an array. It then
@@ -730,9 +774,9 @@ Each milestone is a committed fixture set, green under
   inclusive-range case.
 - **M3 — negative suite + real-fixture slice. LANDED** (2026-08-29).
   **126 checks across three fixtures**, all `true`, sharing one kernel:
-  `sem_poc_kernel.ls` holds the interpreter as `pub fn`s and has **no golden**,
-  so test discovery — which only collects `.ls` files having a matching `.txt` —
-  skips it. That removes the kernel duplication the original layout implied.
+  the kernel module (now `mod_sem_poc_kernel.ls`) holds the interpreter as
+  `pub fn`s and has **no golden**, so test discovery skips it. That removes the
+  kernel duplication the original layout implied.
   - `sem_poc_core.ls` (57) — positive differential checks, M0-M2.
   - `sem_poc_stuck.ls` (36) — the negative suite, written as a **spec artifact**
     rather than a differential one: it partitions terms into **STUCK** (no rule
@@ -760,9 +804,19 @@ Each milestone is a committed fixture set, green under
   Also notable: the discriminator's native side needs a factory, because
   rebinding a name in one scope is a duplicate-definition error — only the
   *term* can spell the shadowing that makes it discriminating.
-- **M4 (optional) — Mark ingestion.** §6.3's `--emit-ast-mark` + `normalize`
-  + first mechanically-ingested fixture. Graduation gate to the DSL's
-  Stage 5 machinery (§15.2).
+- **M4 — Mark ingestion. LANDED** (2026-10-14). The AST dump prints Mark
+  (P11, §6.3); `mod_sem_poc_ingest.ls` (≈200 lines of Lambda) lowers it to
+  terms; `sem_poc_ingest.ls` grades the model on `test/lambda/closure.ls` with
+  **no hand-written term**: all ten closure results equal the fixture's golden,
+  nothing in the program fell outside the core, and a dump of a `match`
+  lowers to `unsupported` and is stuck. Two kernel additions were needed, both
+  foreseen: `funn` (a named n-ary function, applied by `appn`, which now
+  re-binds a `rclon`'s self-name as `app` does) and `cont` (a block's value
+  items). What the lowering could *not* express is itself the finding: a
+  declaration after a value item in one block (the fold would need a `cont`
+  that splices), multi-declarator `let`s, and the remaining system functions
+  — each raises an explicit "unsupported" rather than guessing. Graduation
+  gate to the DSL's Stage 5 machinery (§15.2) is now open.
 
 Estimated model size at M3, extrapolating from the kernel: 300–500 lines of
 Lambda including checks — small enough to review as a whole.
@@ -820,7 +874,7 @@ Lambda cannot express) would be the cheapest possible time to learn it.
 4. **Where does the shared kernel live** once fixtures stop duplicating it —
    `test/lambda/` module vs. a new `semantics/` root (§16 Q3). Defer
    until duplication actually hurts (M2). Interim answer since M3: the
-   golden-less `test/lambda/sem/sem_poc_kernel.ls` (§5).
+   golden-less `test/lambda/sem/mod_sem_poc_kernel.ls` (§5).
 5. **n-ary functions and multi-binding `lett`** encoding: parameter lists as
    attribute-held arrays vs. header children — pick by probing which reads
    better under F3's content restrictions (M1).
@@ -1005,12 +1059,15 @@ substitution and store allocation do.
 To model real programs, source text must become element terms. This is an
 input-side addition, not a language construct. The 2026-07 draft planned
 `input(f, 'lambda')` over a tree-sitter CST; the production parser is now the
-first-party C parser (D8.1.1v18), so the concrete route is §6.3: a Mark-flavored
-sibling of `--emit-ast-dump`, read back with `input(f, 'mark')`. The mapping is
-mechanical: node kind → element tag (symbol), named fields → attributes, children →
-children, tokens → strings/symbols/numbers. A thin `normalize` pass, written in Lambda
-as rules, lowers the raw dump to the abstract grammar of §12.3.1. LambdaJS takes the
-same shape over its own front end's AST.
+first-party C parser (D8.1.1v18), and since M4 (§6.3, P11) its AST dump *is*
+Mark, read back with `input(f, 'mark')`: node kind → element tag, fields and
+attributes → child elements, literals → their source text (re-read as Mark
+scalars by `normalize`). The `normalize` pass, written in Lambda, lowers the
+dump to the abstract grammar of §12.3.1; today it targets the POC's §4.1
+vocabulary. Two refinements remain open: emitting literals as typed values
+rather than source text, and an in-process `parse(src, 'lambda')` that returns
+the dump without a file, so a fixture can carry its program inline. LambdaJS
+takes the same shape — its dump moved to Mark in the same change.
 
 #### 12.2.5 Computed-key map construction (POC-derived)
 

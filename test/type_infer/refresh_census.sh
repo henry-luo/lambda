@@ -17,7 +17,7 @@ mkdir -p temp
 # checked in and stable, so the baseline moves only when inference moves.
 for f in test/lambda/*.ls test/benchmark/*/*.ls; do
     [ -f "$f" ] || continue
-    "$EXE" --emit-ast-dump "$f" 2>/dev/null | grep -o '(any_census .*' >> "$TMP" || true
+    "$EXE" --emit-ast-dump "$f" 2>/dev/null | grep -o '<any_census .*' >> "$TMP" || true
 done
 
 python3 - "$TMP" "$OUT" <<'PY'
@@ -27,10 +27,11 @@ totals = collections.Counter()
 files = 0
 for line in open(raw):
     line = line.strip()
-    if not line.startswith('(any_census'):
+    if not line.startswith('<any_census'):
         continue
     files += 1
-    for name, count in re.findall(r'\((\w+) (\d+)\)', line):
+    # the dump is Mark: each reason is a child element `<reason count>`
+    for name, count in re.findall(r'<(\w+) (\d+)>', line):
         totals[name] += int(count)
 with open(out, 'w') as f:
     f.write("# ANY-census baseline [Type_Infer TI3]. Regenerate with\n")

@@ -1,5 +1,5 @@
 // Semantics POC — positive differential checks (M0 kernel, M1 breadth,
-// M2 collections). The interpreter itself lives in sem_poc_kernel.ls; this file
+// M2 collections). The interpreter itself lives in mod_sem_poc_kernel.ls; this file
 // is only the checks. Design: vibe/Lambda_Semantics_DSL_POC.md.
 //
 // Every check is DIFFERENTIAL (P6): it evaluates a term through the model and
@@ -10,7 +10,7 @@
 // to coincide. Goldens here are `true`, i.e. a specification rather than
 // captured output.
 
-import .sem_poc_kernel
+import .mod_sem_poc_kernel
 
 // ===== M0: core differential checks — model result == native result =====
 
