@@ -1690,6 +1690,36 @@ bool render_paint_text_emphasis(PaintList* paint, FontContext* fonts,
 
 
 
+char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
+        const FontBox* font, Color color, float block_x, float block_y, PaintGlyphRun* run) {
+    if (!text || !text_rect || !font || !font->style || !run) return nullptr;
+    char* content = render_text_create_export_segment(text->text_data(), text_rect,
+        render_text_inherited_transform(text), true, get_white_space_value(text));
+    if (!content) return nullptr;
+    CssEnum justify_mode = text_justify_computed_value(text->parent);
+    RenderTextJustification justification = render_text_justification(text_rect, justify_mode);
+    const FontProp* style = font->style;
+    *run = {};
+    run->font = lam::up(const_cast<FontBox*>(font));
+    run->color = color;
+    run->text = lam::up((const char*)content);
+    run->text_len = (int)strlen(content); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
+    // vector targets name the selected face; a missing handle keeps the authored family.
+    run->font_family = lam::up(font_box_handle(font)
+        ? font_handle_get_family_name(font_box_handle(font)) : (const char*)style->family.get());
+    run->font_size = style->font_size > 0 ? style->font_size : 16.0f;
+    run->x = block_x + text_rect->x;
+    run->baseline_y = render_text_baseline_y(font, block_y + text_rect->y);
+    run->word_spacing = justification.word;
+    run->cjk_spacing = justification.character;
+    run->justify_mode = justify_mode;
+    run->font_weight = style->font_weight_numeric > 0 ? style->font_weight_numeric :
+        style->font_weight == CSS_VALUE_BOLD || style->font_weight == CSS_VALUE_BOLDER ? 700 :
+        style->font_weight == CSS_VALUE_LIGHTER ? 300 : 0;
+    run->italic = style->font_style == CSS_VALUE_ITALIC;
+    return content;
+}
+
 bool render_paint_text_shadows(PaintList* paint, UiContext* ui,
         const PaintGlyphRun* run, TextShadow* shadows, const RenderTextDecorationSource* decoration) {
     if (!paint || !run || !shadows) return false;

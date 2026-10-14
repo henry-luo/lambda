@@ -239,6 +239,8 @@ static uint64_t style_environment_key(CssEngine* engine) {
     hash = style_hash_mix(hash, ratio);
     hash = style_hash_mix(hash, engine->context.reduced_motion ? 1u : 0u);
     hash = style_hash_mix(hash, engine->context.high_contrast ? 1u : 0u);
+    // print media selects other @media blocks, so a toggle is a new cascade environment
+    hash = style_hash_mix(hash, engine->context.print_media ? 1u : 0u);
     hash = style_hash_mix(hash, style_hash_text(engine->context.color_scheme));
     return hash ? hash : 1;
 }
