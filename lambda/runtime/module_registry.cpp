@@ -16,7 +16,7 @@
 #include "../../lib/path_str.h"
 #include "../../lib/string.h"
 #include "../../lib/url.h"
-#include "../../lib/tagged.hpp"
+#include "../../lib/ownership.hpp"
 
 #include <string.h>
 #include <stdlib.h>

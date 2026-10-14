@@ -396,6 +396,10 @@ Script* interp_repl_fragment_unsupported_import(AstNode* fragment);
 Item interp_call_module_export(Runtime* runtime, Script* module,
                                const char* export_name,
                                const Item* args, int argc);
+// Lazy native adapters load one package into the current evaluator, preserving
+// the caller's stacks, module state and execution metadata (D7.1.1/D7.2.2).
+Item interp_call_package_export(Runtime* runtime, const char* package_name,
+                               const char* export_name, const Item* args, int argc);
 
 // Publish `entry`, the boxed (`_b`) MIR entry of `def`, as `fn`'s native entry
 // with its context ABI, procedure/function colour, and public return shape.

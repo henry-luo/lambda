@@ -977,6 +977,8 @@ int cmd_layout(int argc, char** argv);
 // here breaks once render_export_support.hpp is a DD4 shim to the global header.
 
 // Document viewer function from radiant - unified viewer for all document types (HTML, PDF, Markdown, etc.)
+#ifndef LAMBDA_HEADLESS
+// The runtime-only host excludes these providers and their rendering types.
 extern int view_doc_in_window(const char* doc_file);
 extern int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless,
                                            const char** font_dirs = nullptr, int font_dir_count = 0,
@@ -986,6 +988,7 @@ extern int view_doc_in_window_with_events(const char* doc_file, const char* even
 extern char* event_sim_replay_document_path(const char* jsonl_file);
 extern void event_sim_set_replay_assert_state(bool assert_state);
 extern void event_sim_set_result_path(const char* result_path);
+#endif
 
 // REPL functions from main-repl.cpp
 extern int lambda_repl_init(InterpReplSession* session);
@@ -1868,7 +1871,16 @@ int exec_convert(int argc, char* argv[]) {
         } else if (strcmp(to_format, "math-typst") == 0) {
             formatted_output = format_math_typst(input->pool, input->root);
         } else if (strcmp(to_format, "math-mathml") == 0) {
-            formatted_output = format_math_mathml(input->pool, input->root);
+            // The package owns conversion; XML serialization stays in IO (D7.2.8).
+            const LambdaDocumentTransformConfig transform = {
+                "math", "lambda.doc.math.mathml", "export_file",
+                LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true};
+            LambdaDocumentTransformOption options[] = {
+                {"input_type", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, type_string->chars, false},
+                {"flavor", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING,
+                    flavor_string ? flavor_string->chars : "", false},
+            };
+            full_doc_output = run_document_transform_markup(input_file, &transform, options, 2, true);
         } else if (strcmp(to_format, "mark") == 0) {
             // Use print_root_item to format as mark representation
             StrBuf* sb = strbuf_new_cap(1024);

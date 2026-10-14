@@ -6621,7 +6621,27 @@ Item fn_format2(Item item, Item type) {
     }
 
     log_debug("format item type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
-    String* result = format_data(item, type_str, flavor_str, context->heap->pool);
+    RootFrame format_roots(4);
+    Rooted<Item> source(format_roots, item);
+    Rooted<Item> converted(format_roots, ItemNull);
+    Rooted<String*> rooted_type(format_roots, type_str);
+    Rooted<String*> rooted_flavor(format_roots, flavor_str);
+#ifndef LAMBDA_NO_MATH_FORMAT
+    if (type_str && ((strcmp(type_str->chars, "math") == 0 && flavor_str &&
+            strcmp(flavor_str->chars, "mathml") == 0) ||
+            strcmp(type_str->chars, "math-mathml") == 0)) {
+        // D7.1.1/D7.2.8: invoke conversion here, never from lambda-io.
+        Item args[2] = {source.get(), ItemNull};
+        converted.set(interp_call_package_export(context->runtime,
+            "lambda.doc.math.mathml", "to_mathml", args, 2));
+        if (item_is_error(converted.get())) return converted.get();
+        // The package result is XML; normalize the legacy compound spelling too.
+        source.set(converted.get());
+        rooted_type.set(heap_strcpy("xml", 3));
+        rooted_flavor.set(nullptr);
+    }
+#endif
+    String* result = format_data(source.get(), rooted_type.get(), rooted_flavor.get(), context->heap->pool);
     if (!result) {
         set_runtime_error(ERR_FORMAT_ERROR, "format: could not format a %s value",
             get_type_name(get_type_id(item)));

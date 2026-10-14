@@ -1250,6 +1250,7 @@
       "output": "lambda-cli.exe",
       "source_dirs": [
         "lib",
+        "lib/physics",
         "lib/grep",
         "lib/fts",
         "lambda",

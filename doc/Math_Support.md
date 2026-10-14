@@ -21,8 +21,14 @@ let ascii = parse("(a + b) / c", {type: 'math', flavor: 'ascii'})^
 | `'math'`        | LaTeX math (default)                     |
 | `'math-latex'`  | Explicit LaTeX math                      |
 | `'math-ascii'`  | ASCII Math flavor (see §10)              |
+| `'math-mathml'` | Presentation MathML XML                 |
 
-Typst math input is not implemented; any other `math-<flavor>` string is parsed as LaTeX. The result is a Lambda element tree rooted at a `math` element, which can be rendered to HTML via the `lambda.doc.math` package.
+MathML input uses strict, namespace-aware XML parsing and preserves token
+whitespace. Its root must identify the MathML namespace; prefixed roots are
+accepted. Other math input returns the existing TeX/AsciiMath AST. Typst input
+remains unimplemented, and other unrecognized flavors still use the legacy
+LaTeX fallback. MathML SVG layout is a later stage; the current SVG renderer
+returns an explicit error for MathML trees (**D7.2.8**).
 
 ### 1.2 Math in Markdown
 
@@ -64,7 +70,25 @@ lambda convert formula.tex -f math -t math-latex -o out.tex     # LaTeX
 lambda convert formula.tex -f math -t math-ascii -o out.txt     # ASCII math
 ```
 
-The `math-typst` and `math-mathml` targets are accepted by the command line but are stubs that produce no output today.
+MathML export uses the font-independent `lambda.doc.math.mathml` package:
+
+```lambda
+import mml: lambda.doc.math.mathml
+let tree = mml.to_mathml(parse("\\frac{a+b}{c}", 'math')^,
+    {display: true, source: "\\frac{a+b}{c}"})^
+format(tree, 'xml')^
+```
+
+`format(ast, {type: 'math', flavor: 'mathml'})` and the legacy
+`format(ast, 'math-mathml')` invoke the same exporter. CLI conversion uses
+`lambda convert formula.tex -f math -t math-mathml -o formula.mml`.
+`mml.parse_mathml(source)` returns a strict MathML tree; importing/exporting
+requires no fonts or Radiant. Fractions, scripts/limits, roots, groups/fences,
+mathematical alphabets, simple text, accents, spacing, phantoms and basic
+matrices are supported. Unsupported commands, explicit TeX atom classes,
+fixed delimiter sizing and other extensions report conversion errors.
+Optional `source` is inert TeX annotation data; arbitrary MathML-to-TeX
+conversion is not provided. The `math-typst` target remains a stub.
 
 ---
 
@@ -499,7 +523,13 @@ The `'ascii'` flavor is a lighter spelling handled by the same parser:
 let ast = parse("(a + b) / sqrt(c^2 + d^2)", 'math-ascii')^
 ```
 
-What the flavor changes today: a run of letters is one identifier (`alpha` is the Greek letter, `sqrt` a function), a parenthesised group after `^` or `_` is a script group, and infix `/` is a fraction. The multi-character symbol tokens of AsciiMath proper (`->`, `<=`, `xx`, `+-`, `~~`, `..`, quoted text, …) are **not yet recognized**: `x->0` parses as `x - 0`. Use the LaTeX flavor for anything beyond identifiers, scripts and fractions.
+What the flavor changes today: a run of letters is one identifier and a
+parenthesised group after `^` or `_` is a script group. The current direct
+parser retains infix `/` as an operator rather than constructing a fraction;
+use LaTeX `\frac` for a structured fraction. This is an existing ASCII input
+gap, and MathML export preserves the parser's AST. The multi-character symbol
+tokens of AsciiMath proper (`->`, `<=`, `xx`, `+-`, `~~`, `..`, quoted text, …)
+are **not yet recognized**. Use the LaTeX flavor for more complete notation.
 
 ---
 
@@ -547,7 +577,7 @@ The following constructs are not currently supported. Unknown commands are passe
 
 | Missing               | Notes                                               |
 |-----------------------|-----------------------------------------------------|
-| MathML and Typst output | `format(ast, 'math')` and `lambda convert` accept the `mathml` and `typst` targets but they are stubs; LaTeX and ASCII output work |
+| MathML and Typst | Presentation MathML conversion and strict input work through the package; MathML SVG layout and Content MathML remain planned. Typst output remains a stub. |
 | DVI / PDF math output | Math reaches PDF only through the HTML/CSS rendering pipeline |
 | Interactive editing   | Cursor, selection, virtual keyboard — out of scope  |
 

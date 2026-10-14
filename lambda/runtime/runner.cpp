@@ -1079,6 +1079,7 @@ static Script* lambda_script_template_clone(Runtime* runtime, const Script* cach
     instance->is_loading = false;
     instance->is_retired = false;
     instance->interp_slab = NULL;
+    instance->module_initialized = false;
     instance->interp_views_registered = false;
     instance->ast_overlay_strings = NULL;
     instance->ast_promotion_overlay = NULL;
@@ -1409,6 +1410,7 @@ static bool lambda_cache_promote_ast_shell_mir(Runtime* runtime, Script* script)
     image->interp_satellite_queue = NULL;
     image->interp_satellite_images = NULL;
     image->interp_slab = NULL;
+    image->module_initialized = false;
     image->destroy_extension = NULL;
     bool prepared = image->reference &&
         (!script->directory || image->directory) &&
@@ -3075,6 +3077,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
             log_debug("exec main func");
             result = runtime_publish_result(context,
                 runner->script->main_func(context));
+            runner->script->module_initialized = !item_is_error(result);
             lambda_recovery_frame_end(recovery_frame);
             log_debug("after main func, result type_id=%d", get_type_id(result));
         }

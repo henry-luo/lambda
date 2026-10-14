@@ -57,6 +57,10 @@ Element* html5_parse_n(Input* input, const char* html, size_t length,
                         Html5ParseOptions* opts);
 Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts);
 Element* parse_svg_document(Input* input, const char* svg_source);
+Element* parse_mathml_document(Input* input, const char* source);
+// Standalone XML roots carry their own namespace declarations, including QNames.
+bool xml_document_element_matches(Pool* pool, Element* element, const char* local_name,
+                                 const char* namespace_uri, bool allow_missing_namespace = false);
 
 void parse_rtf(Input* input, const char* rtf_string);
 void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length);

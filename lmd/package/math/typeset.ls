@@ -52,7 +52,7 @@ fn math_quad(c) => metric(c, "math_quad", font.UNITS)
 fn with_style(c, style) => {*:c, style: style, cramped: false}
 fn script(c) => {*:c, style: if (c.style == "display" or c.style == "text") "script" else "scriptscript"}
 fn fraction_child(c) => if (c.style == "display") {*:c, style: "text"} else script(c)
-fn command_name(text) => if (len(text) > 1 and slice(text, 0, 1) == "\\") slice(text, 1, len(text)) else text
+fn command_name(text) => util.command_name(text)
 fn value(n) => string(n.value or n.text or util.text_of(n))
 
 fn atom_type(ch) {

@@ -1156,34 +1156,57 @@ void parse_xml(Input* input, const char* xml_string) {
     parse_xml_with_options(input, xml_string, nullptr);
 }
 
-Element* parse_svg_document(Input* input, const char* svg_source) {
-    if (!input || !svg_source) return nullptr;
-    if (strlen(svg_source) >= 3 && (unsigned char)svg_source[0] == 0xEF &&
-        (unsigned char)svg_source[1] == 0xBB && (unsigned char)svg_source[2] == 0xBF) svg_source += 3;
+bool xml_document_element_matches(Pool* pool, Element* element, const char* local_name,
+        const char* namespace_uri, bool allow_missing_namespace) {
+    if (!element || !element->type) return false;
+    TypeElmt* type = (TypeElmt*)element->type;
+    if (!type->name.str) return false;
+    const char* name = type->name.str;
+    const char* colon = strchr(name, ':');
+    if (strcmp(colon ? colon + 1 : name, local_name)) return false;
+    const char* declaration = "xmlns";
+    if (colon) {
+        size_t length = (size_t)(colon - name);
+        char* qualified = (char*)pool_alloc(pool, length + 7);
+        if (!qualified) return false;
+        memcpy(qualified, "xmlns:", 6);
+        memcpy(qualified + 6, name, length);
+        qualified[length + 6] = '\0';
+        declaration = qualified;
+    }
+    String* uri = element->get_attr(declaration).string();
+    return (uri && !strcmp(uri->chars, namespace_uri)) ||
+        (allow_missing_namespace && !colon && !uri);
+}
+
+static Element* parse_xml_document_element(Input* input, const char* source,
+        const char* local_name, const char* namespace_uri, bool strict) {
+    if (!input || !source) return nullptr;
+    if (strlen(source) >= 3 && (unsigned char)source[0] == 0xEF &&
+        (unsigned char)source[1] == 0xBB && (unsigned char)source[2] == 0xBF) source += 3;
     // XML preserves namespace declarations, case and self-closing foreign-content boundaries.
-    parse_xml(input, svg_source);
+    XmlParseOptions options = {};
+    options.preserve_whitespace = strict;
+    options.require_well_formed = strict;
+    options.require_namespaces = strict;
+    parse_xml_with_options(input, source, strict ? &options : nullptr);
     if (get_type_id(input->root) != LMD_TYPE_ELEMENT) return nullptr;
     Element* document = input->root.element;
     for (int64_t i = 0; i < document->length; i++) {
         Item child = document->items[i];
         if (get_type_id(child) != LMD_TYPE_ELEMENT) continue;
-        TypeElmt* type = (TypeElmt*)child.element->type;
-        if (!type || !type->name.str) continue;
-        const char* name = type->name.str;
-        const char* colon = strchr(name, ':');
-        if (strcmp(colon ? colon + 1 : name, "svg")) continue;
-        const char* declaration = "xmlns";
-        if (colon) {
-            size_t length = (size_t)(colon - name);
-            char* qualified = (char*)pool_alloc(input->pool, length + 7);
-            if (!qualified) return nullptr;
-            memcpy(qualified, "xmlns:", 6); memcpy(qualified + 6, name, length); qualified[length + 6] = '\0';
-            declaration = qualified;
-        }
-        String* uri = child.element->get_attr(declaration).string();
-        // preserve namespace-free legacy inputs; an authored namespace must identify SVG.
-        if ((uri && !strcmp(uri->chars, "http://www.w3.org/2000/svg")) || (!colon && !uri)) return child.element;
+        // strict document formats require namespace identity; legacy SVG may omit it.
+        if (xml_document_element_matches(input->pool, child.element,
+                local_name, namespace_uri, !strict)) return child.element;
     }
-    log_error("svg_document: no SVG root element found in external XML document");
+    log_error("xml-document-element: expected {%s}%s root", namespace_uri, local_name);
     return nullptr;
+}
+
+Element* parse_svg_document(Input* input, const char* source) {
+    return parse_xml_document_element(input, source, "svg", "http://www.w3.org/2000/svg", false);
+}
+
+Element* parse_mathml_document(Input* input, const char* source) {
+    return parse_xml_document_element(input, source, "math", "http://www.w3.org/1998/Math/MathML", true);
 }

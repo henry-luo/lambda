@@ -1,6 +1,8 @@
 // math/symbols.ls — LaTeX command → Unicode character mapping tables
 // Used to convert \alpha, \infty, etc. to their Unicode equivalents
 
+import util: .util
+
 let reaction_arrows = {
     xrightleftarrows: {upper: "→", lower: "←", upper_short: 0, lower_short: 0},
     xrightequilibrium: {upper: "⇀", lower: "↽", upper_short: 0, lower_short: 1},
@@ -222,7 +224,7 @@ let delim_sizes = {
 
 pub fn lookup_symbol(cmd) {
     // strip leading backslash if present
-    let name = if (len(cmd) > 0 and slice(cmd, 0, 1) == "\\") slice(cmd, 1, len(cmd)) else cmd
+    let name = util.command_name(cmd)
 
     greek_lower[name] or greek_upper[name] or
     bin_operators[name] or relations[name] or
@@ -237,7 +239,7 @@ pub fn closed_integral_base(ch) => if (ch == "∯") "∬" else if (ch == "∰") 
 
 // classify a symbol command into atom type
 pub fn classify_symbol(cmd) {
-    let name = if (len(cmd) > 0 and slice(cmd, 0, 1) == "\\") slice(cmd, 1, len(cmd)) else cmd
+    let name = util.command_name(cmd)
 
     if (name == "neg" or name == "lnot") "mrel"
     else if (bin_operators[name]) "mbin"
@@ -255,7 +257,7 @@ pub fn get_operator_name(name) {
 
 // check if a command name is a limit-style operator (limits above/below in display)
 pub fn is_limit_op(cmd) {
-    let name = if (len(cmd) > 0 and slice(cmd, 0, 1) == "\\") slice(cmd, 1, len(cmd)) else cmd
+    let name = util.command_name(cmd)
     big_operators[name] != null or
     name == "lim" or name == "limsup" or name == "liminf" or
     name == "sup" or name == "inf" or

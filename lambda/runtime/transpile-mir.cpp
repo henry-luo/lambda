@@ -17056,6 +17056,9 @@ static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
 
     MIR_reg_t result = new_reg(mt, "match", MIR_T_I64);
     MIR_label_t l_end = new_label(mt);
+    bool entry_returned = mt->block_returned;
+    bool all_arms_exit = true;
+    bool has_default = false;
 
     // every arm starts from the facts after the scrutinee (S9.1.2)
     MirCowJoin cow_join(mt);
@@ -17074,7 +17077,9 @@ static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
 
             // Body (restore tail position before each arm body)
             mt->in_tail_position = saved_tail;
+            mt->block_returned = false;
             MIR_reg_t body = transpile_box_item(mt, match_arm->body);
+            all_arms_exit = all_arms_exit && mt->block_returned;
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, body)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
@@ -17084,7 +17089,10 @@ static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
             // Default arm (restore tail position)
             MirFlowScope arm_flow(mt);
             mt->in_tail_position = saved_tail;
+            mt->block_returned = false;
+            has_default = true;
             MIR_reg_t body = transpile_box_item(mt, match_arm->body);
+            all_arms_exit = all_arms_exit && mt->block_returned;
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, body)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
@@ -17105,6 +17113,8 @@ static MirValue transpile_match(MirTranspiler* mt, AstMatchNode* match_node) {
 
     // Restore old pipe state
     mir_pipe_context_restore(mt, saved);
+    // S11.2.1: an exiting arm does not terminate its successful siblings.
+    mt->block_returned = entry_returned || (has_default && all_arms_exit);
 
     // Every arm joins through the Item result slot; the semantic arm type is
     // preserved separately from that physical carrier (D2.4.1–D2.4.3).
@@ -23164,7 +23174,17 @@ static void mir_emit_ndim_leaves(MirTranspiler* mt, AstNode* node, MIR_reg_t arr
     }
 }
 
+struct MirNonTailScope {
+    MirTranspiler* mt;
+    bool previous;
+    explicit MirNonTailScope(MirTranspiler* owner)
+        : mt(owner), previous(owner->in_tail_position) { mt->in_tail_position = false; }
+    ~MirNonTailScope() { mt->in_tail_position = previous; }
+};
+
 static MIR_reg_t emit_array_storage(MirTranspiler* mt, AstArrayNode* arr_node) {
+    // Construction consumes its children; their recursive calls cannot replace it.
+    MirNonTailScope non_tail(mt);
     // A child that can produce a stream (for-expression, spread, pipe) keeps the
     // literal off the compact and N-D paths. It no longer picks the append:
     // every item goes through the sequence append, which spreads a list by its
@@ -24968,6 +24988,7 @@ static MIR_reg_t mir_box_slot_value(MirTranspiler* mt, AstNode* value) {
 }
 
 static MIR_reg_t emit_map_storage(MirTranspiler* mt, AstMapNode* map_node) {
+    MirNonTailScope non_tail(mt);
     if (map_node->has_computed_key) {
         MIR_reg_t owner_item = emit_call_0(mt, "map_literal_begin", MIR_T_I64);
         emit_return_if_item_error(mt, owner_item);
@@ -25354,6 +25375,7 @@ static MIR_reg_t emit_map_storage(MirTranspiler* mt, AstMapNode* map_node) {
 // ============================================================================
 
 static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_node) {
+    MirNonTailScope non_tail(mt);
     if (!elmt_node || !elmt_node->type) {
         log_error("mir: transpile_element with null node or type");
         MIR_reg_t r = new_reg(mt, "elmt_err", MIR_T_I64);
@@ -48819,6 +48841,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
                         ? imp_script->const_list->data : nullptr;
                     runner.context->type_list = imp_script->type_list;
                     Item module_result = imp_script->main_func(runner.context);
+                    imp_script->module_initialized = !item_is_error(module_result);
                     lambda_recovery_frame_end(module_frame);
                     // D7.2.2: a module whose init ends in an ordinary error
                     // never becomes importable, so its importer does not run,
@@ -48841,6 +48864,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
                     (void)module_scope.activate(runner.script->module_state_id);
                     result = runtime_publish_result(runner.context,
                         runner.script->main_func(runner.context));
+                    runner.script->module_initialized = !item_is_error(result);
                 }
                 lambda_recovery_frame_end(recovery_frame);
             }

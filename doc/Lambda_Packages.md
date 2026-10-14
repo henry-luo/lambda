@@ -935,6 +935,16 @@ contains(format(el, 'html'), "<text") // true
 | `render_display(ast)` | Display (block) style |
 | `render_standalone(ast)` | Self-contained display style SVG |
 | `stylesheet(options = null)` | Returns `""`; each SVG embeds its required font declarations |
+| `to_mathml(ast, options = null)` | Presentation MathML element tree; optional `display` and inert TeX `source` annotation |
+| `parse_mathml(source)` | Strict MathML XML tree with namespaces validated and token whitespace preserved |
+
+The font-independent `lambda.doc.math.mathml` module exposes the same conversion
+and parsing APIs without importing Radiant. Runtime
+`format(ast, {type: 'math', flavor: 'mathml'})` and CLI `-t math-mathml`
+use its exporter. It supports common fractions, scripts/limits, roots,
+groups/fences, alphabets, simple text, accents, spacing, phantoms and matrices;
+unsupported TeX constructs report errors. MathML SVG layout remains a later
+stage, and the existing renderer explicitly rejects MathML trees (**D7.2.8**).
 
 `fonts` uses the same binary face records as Radiant's metrics API. An explicit
 `font_family` without `fonts` uses installed fonts. MATH is optional: ordinary
