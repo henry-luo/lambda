@@ -1,4 +1,4 @@
-// Exercise the real CLI and both execution tiers without font/Radiant services.
+// Conversion runs on both hosts; measured layout also exercises native Radiant.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -40,6 +40,35 @@ test('MathML conversion keeps exact roots under forced compacting GC', () => {
   });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(result.stdout.trim(), '[]');
+});
+
+for (const tier of ['interp', 'jit', 'auto']) {
+  test(`MathML measured layout follows font constants on ${tier}`, {
+    skip: path.basename(EXE) === 'lambda-cli.exe',
+  }, () => {
+    for (const [file, expected] of [
+      ['test/lambda/math/test_mathml_layout.ls', '[]'],
+      ['test/lambda/math/test_mathml_gallery.ls', '[]'],
+      ['test/lambda/math/test_mathml_renderer_guard.ls', '[true, true]'],
+    ]) {
+      const result = run([file], tier);
+      assert.equal(result.status, 0, `${file}: ${result.stdout}\n${result.stderr}`);
+      assert.equal(result.stdout.trim(), expected, file);
+    }
+  });
+}
+
+test('Radiant retains MathML paint under forced compacting GC', {
+  skip: path.basename(EXE) === 'lambda-cli.exe',
+}, () => {
+  const output = path.join(dir, 'native-mathml.svg');
+  const result = run(['render', 'test/html/mathml_native.html', '-o', output], 'auto', {
+    LAMBDA_GC_FORCE_EVERY: '1', LAMBDA_GC_POISON_FREED: '1',
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const xml = fs.readFileSync(output, 'utf8');
+  assert.match(xml, /<svg/);
+  assert.ok((xml.match(/<path\b/g) || []).length >= 8, 'formulas must paint visible glyphs');
 });
 
 for (const flavor of ['math', 'math-latex', 'math:latex', 'math-ascii', 'math:ascii']) {

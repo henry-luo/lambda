@@ -4598,6 +4598,7 @@ typedef struct EventContext {
 
     // effects fields
     CssEnum new_cursor;
+    const CursorImageSpec* new_cursor_images;
     bool need_repaint;
 
     // §7 unification (U-2): set by JS bridge dispatch when a listener calls

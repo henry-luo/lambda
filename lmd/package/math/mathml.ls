@@ -10,7 +10,7 @@ fn value(n) => string(n.value or n.text or util.text_of(n))
 fn require(ok, message) bool^ => if (ok) true else raise error("mathml: " ++ message)
 
 // XML currently retains lexical QNames and xmlns attributes; resolve each scope.
-fn bindings(n, inherited) => reduce([inherited, *[for (k,v in n)
+pub fn bindings(n, inherited) => reduce([inherited, *[for (k,v in n)
     if (string(k) == "xmlns") {[""]:v}
     else if (starts_with(string(k), "xmlns:")) {[slice(string(k),6,len(string(k)))]:v}
     else {}]], (a,b) => {*:a,*:b})

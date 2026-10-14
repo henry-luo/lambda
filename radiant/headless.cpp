@@ -91,6 +91,7 @@ void glfwGetCursorPos(GLFWwindow* window, double* xpos, double* ypos) {
     if (ypos) *ypos = 0.0;
 }
 GLFWcursor* glfwCreateStandardCursor(int shape) { return NULL; }
+GLFWcursor* glfwCreateCursor(const GLFWimage* image, int xhot, int yhot) { return NULL; }
 void glfwDestroyCursor(GLFWcursor* cursor) {}
 void glfwSetCursor(GLFWwindow* window, GLFWcursor* cursor) {}
 const char* glfwGetClipboardString(GLFWwindow* window) { return NULL; }

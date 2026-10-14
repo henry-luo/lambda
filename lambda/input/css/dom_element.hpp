@@ -559,7 +559,7 @@ static inline Runtime* dom_document_script_runtime(const DomDocument* doc) {
 // document's own runtime.
 static inline Runtime* dom_document_loader_runtime(const DomDocument* doc) {
     if (!doc) return nullptr;
-    return doc->loader_runtime ? doc->loader_runtime.get() : doc->lambda_runtime;
+    return doc->loader_runtime ? doc->loader_runtime.get() : dom_document_script_runtime(doc);
 }
 
 // Does this document own a live JS DOM script realm? Capability, not provenance:

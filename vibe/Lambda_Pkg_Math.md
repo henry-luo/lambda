@@ -998,7 +998,7 @@ whole document model remain a separate existing namespace obligation.
 The current direct ASCII parser also retains infix `/` as an operator;
 conversion preserves that AST and does not repair this pre-existing input gap.
 
-MathML SVG layout is not implemented in this stage. The public renderer rejects
+MathML SVG layout was not implemented in this first stage. The public renderer rejected
 MathML explicitly so its TeX default traversal cannot flatten fractions or
 drop token distinctions. Operator-dictionary layout, browser accessibility
 integration and the geometry gates in §11.4 remain planned.
@@ -1018,6 +1018,65 @@ the enclosing element/map/array construction.
 | Focused math and compiler regression goldens | **36/36**; existing TeX cases, new MathML cases and the two exposed JIT regressions. `temp/mathml/focused-math.log`. |
 | Existing SVG corpus | **921/921** geometry smoke cases; `temp/mathml/corpus.json`. |
 | Lambda plus Input baseline | **6,564/6,566**: Input **2,112/2,112**, runtime **4,452/4,454**. The existing `edit_view_only` boolean-attribute mismatch remains. The GC sweep times out at the runner's 180-second idle limit; a standalone diagnostic run reaches `music_layout` and records exit 137 in randomized-forced mode, then is stopped before completing the remaining modes. Its cause is not established, and a green aggregate baseline is not claimed. `temp/mathml/baseline.log`, `gc-stress.log`. |
+
+### 11.6 Native MathML layout in Radiant
+
+The follow-up delivery on 2026-10-14 adds `mathml_layout.ls`, selected by
+`math.render_box` / `render_math` for MathML input (D7.2.8). It traverses the
+MathML tree directly, using Core fraction, side-script, radical, under/over,
+operator and table policies. `geometry.ls` now shares the composition of
+fractions, scripts and radicals with TeX; each caller still supplies its own
+source-policy offsets. A MathML font profile never acquires TeX companion
+metrics. Mathematical Unicode alphabets can use corresponding styled base
+characters in the distributed ordinary fonts.
+
+`mathml_operators.ls` is generated from the repository's pinned WPT operator
+dictionary by `utils/generate_mathml_operators.py`, with source revision/hash
+and its BSD license retained. Operator forms, explicit spacing and property
+overrides, embellished operators, vertical fences and horizontal accents
+enter the MathML policy. MATH variants/assemblies and the existing measured
+outline fallback share `stretch.ls`; no screenshot-specific dimensions or
+additional production font resources are introduced.
+
+Radiant recognizes namespace-qualified math roots with math inner display
+and invokes the package through its existing retained custom-layout/paint
+boundary. The generic callback supplies the live source element and computed
+font size, then retains the returned SVG using precise roots on the owning
+heap (D5.3.3). Static HTML initializes a package runtime lazily; nested renders
+share their active evaluator. Root CSS box decoration, color and size stay
+with Radiant. Semantic MathML children are not flattened into flow, replaced,
+or reparsed, and annotations never enter painted text. Intrinsic queries,
+normal flow and flex use the same package measurement; retained paint shares
+one measurement per font size and layout measurement epoch (D4.5.1v4).
+
+This delivery covers the gallery's ten formulas, core token rows, fractions
+including zero bars and empty arguments, side scripts and movable limits,
+roots/degrees, basic under/over accents, phantoms, spaces and matrices. Invalid
+argument counts use Core's row fallback. Unknown layout elements, foreign
+namespaces in the math tree, nested HTML, RTL, unsupported inline CSS and
+legacy matrix layout attributes report errors. Multiscripts, general CSS
+layout inside tokens/tables, automatic descendant stylesheet/font-face
+projection and verified browser/AT accessibility remain open. The HTML
+viewer currently selects the package's bundled fonts; explicit package API
+font options remain available. A supported-subset rendering is not a claim
+of complete MathML Core conformance.
+
+The durable sample is `test/html/mathml_gallery.html`; view it with
+`./lambda.exe view test/html/mathml_gallery.html`. Regressions compare fraction
+geometry against independently calculated MATH/Core constants and exercise
+operator forms, nested scripts, limits, matrices, namespaces and inert source.
+The native regression lays out inline, block and flex math twice, checks its
+paint layers and verifies that the original MathML DOM is retained.
+
+| Native-layout verification on 2026-10-14 | Result and limits |
+|---|---|
+| MathML integration | **14/14** on the full host, including interpreter/JIT/auto layout, all ten gallery formulas and native paint under forced compacting GC with freed-memory poisoning. Runtime-only CLI conversion remains **10/10**, with four native-layout cases skipped. `temp/mathml/node-layout-final.log`, `cli-node-layout-final.log`. |
+| Focused math/compiler goldens | **38/38**, including the existing TeX cases and independent Core fraction checks. `temp/mathml/focused-layout-final.log`. |
+| Existing TeX corpus and Lambda/Input gate | SVG corpus **921/921** and Input **2,112/2,112** pass. The aggregate is **6,570/6,572**: the earlier `edit_view_only` boolean-attribute mismatch and GC-stress runner idle timeout remain. The timeout's cause is unresolved; native MathML's separate forced-GC paint test passes. `temp/mathml/lambda-baseline-layout.log`. |
+| Native DOM/layout and source retention | Text/query suite **21/21**; the MathML case also passes after adding root CSS size/color to its fixture. Isolated custom-layout suite **12/12**. `temp/mathml/radiant-baseline-host.log`, `native-mathml-final.log`. |
+| Native gallery paint | The original `temp/mathml/sample.html` renders to `sample-radiant.png`; reviewed fractions, radicals, scripts, sums, integrals and binomial fences are visible. This is paint evidence, not complete Core conformance. |
+| Radiant aggregate gate | Remains red: `md_nuxt-readme` element comparison regresses **100.0% → 99.3%**, and four document-editor cases fail (DCT PDF, two EML previews, TSV table). Their causes are not established here. **347** layout cases remain partial. Page snapshots **51/51**, scene tests **28/28** and view tests **193/193** pass with host access. The visual suite hits the runner's idle timeout but subsequently completes with all **211** applicable baseline checks passing. `temp/mathml/radiant-baseline-host.log`, `markdown-baseline-diagnostic.log`, `test_output/test_radiant_render_baseline.log`. |
+| Generated data and layout lint | Operator dictionary/license regenerate identically; `no-int-cast-radiant` and formal-index checks pass. |
 
 ## Appendix A. Brief implementation history
 

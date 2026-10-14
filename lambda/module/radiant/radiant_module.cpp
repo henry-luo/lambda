@@ -273,6 +273,7 @@ static void radiant_custom_paint_clear(RadiantCustomPaintResource* resource) {
     resource->root_count = 0;
     resource->paint.layers = nullptr;
     resource->paint.layer_count = 0;
+    resource->paint.has_intrinsic_measurement = false;
 }
 
 static void radiant_custom_paint_destroy(DomDocumentResourceData* data) {
@@ -978,6 +979,12 @@ static Item radiant_layout_context_item(const CustomLayoutContext* context) {
     radiant_rooted_obj_set(rooted_obj, "writing_mode", radiant_string_item(
         context->writing_mode ? context->writing_mode : "horizontal-tb"));
     radiant_rooted_obj_set(rooted_obj, "child_count", radiant_int_item(context->child_count));
+    if (context->parent && context->parent->is_element()) {
+        DomElement* element = context->parent->as_element();
+        radiant_rooted_obj_set(rooted_obj, "element", (Item){.element = dom_element_to_element(element)});
+        radiant_rooted_obj_set(rooted_obj, "font_size", radiant_float_item(
+            element->font ? element->fontp()->font_size : 16.0f));
+    }
     return rooted_obj.get();
 }
 
@@ -1085,12 +1092,18 @@ static bool radiant_custom_layout_parse_result(const CustomLayoutContext* contex
     return ok;
 }
 
-static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* context,
-                                                  CustomLayoutResult* result) {
-    if (!radiant_host_api || !radiant_host_api->script || !context || !result) return false;
+static bool radiant_lambda_layout_callback(const CustomLayoutContext* context,
+                                           CustomLayoutResult* result,
+                                           const char* package_module) {
+    if (!context || !result) return false;
+    DomDocument* layout_doc = context->parent ? context->parent->doc : nullptr;
+    Runtime* runtime = package_module ? layout_document_package_runtime(layout_doc, package_module)
+        : dom_document_loader_runtime(layout_doc);
+    // Importing the first package installs the native Radiant host API.
+    if (!radiant_host_api || !radiant_host_api->script || (package_module && !runtime)) return false;
     Heap* owner_heap = radiant_custom_layout_heap(context);
     RadiantCustomLayoutEntry* entry = radiant_custom_layout_entry(context->layout_name, owner_heap);
-    if (!entry || get_type_id(entry->fn) != LMD_TYPE_FUNC) {
+    if (!package_module && (!entry || get_type_id(entry->fn) != LMD_TYPE_FUNC)) {
         log_error("CUSTOM_LAYOUT_LAMBDA_MISSING_FN: layout='%s' heap=%p",
                   context && context->layout_name ? context->layout_name : "(null)", owner_heap);
         return false;
@@ -1103,8 +1116,6 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
 
     EvalContext* callback_context = nullptr;
     Context* saved_input_context = input_context;
-    DomDocument* layout_doc = context->parent ? context->parent->doc : nullptr;
-    Runtime* runtime = dom_document_loader_runtime(layout_doc);
     // A window's loader runtime serves every document built on it, so it works
     // on this document's Input only for the duration of the callback; every
     // exit then hands the document the values the callback rooted.
@@ -1120,11 +1131,11 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
             g_radiant_velmt_active_pass_id = previous_pass_id;
             return false;
         }
-        if (loader_runtime && ::context && ::context != callback_context) {
+        if (::context != callback_context) {
             // The document's own evaluator may hold the thread. Take it only
             // at a quiescent layout boundary (EO5v2), never under another
             // evaluator's live frames.
-            if (::context->execution_depth != 0 ||
+            if ((::context && ::context->execution_depth != 0) ||
                     !radiant_eval_context_switch(callback_context)) {
                 g_radiant_velmt_active_pass_id = previous_pass_id;
                 log_error("CUSTOM_LAYOUT_LAMBDA_BUSY: layout='%s' needs the loader runtime",
@@ -1161,13 +1172,19 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
         // A layout callback is reentrant in the document's active script call;
         // handing that EvalContext to a worker tears down the parent activation.
         RootFrame roots(5);
-        Rooted<Item> rooted_fn(roots, entry->fn);
+        Rooted<Item> rooted_fn(roots, entry ? entry->fn : ItemNull);
         Rooted<Item> rooted_parent(roots, radiant_layout_parent_item(context));
         Rooted<Item> rooted_children(roots, radiant_layout_children_item(context));
         Rooted<Item> rooted_layout_context(roots, radiant_layout_context_item(context));
         Rooted<Item> rooted_result(roots, ItemNull);
         bool retained_callback = runtime && !interp_has_active_state();
-        if (retained_callback && rooted_fn.get().function->def_module) {
+        if (package_module) {
+            Item callback_args[] = {
+                rooted_parent.get(), rooted_children.get(), rooted_layout_context.get()};
+            RuntimeExecutionScope execution_scope(callback_context);
+            rooted_result.set(interp_call_package_export(runtime, package_module,
+                "layout", callback_args, 3));
+        } else if (retained_callback && rooted_fn.get().function->def_module) {
             Item callback_args[] = {
                 rooted_parent.get(), rooted_children.get(), rooted_layout_context.get()};
             // Document transforms finish before their retained layout pass. Route
@@ -1195,6 +1212,16 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
     g_radiant_velmt_active_pass_id = previous_pass_id;
     input_context = saved_input_context;
     return ok;
+}
+
+static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* context,
+                                                  CustomLayoutResult* result) {
+    return radiant_lambda_layout_callback(context, result, nullptr);
+}
+
+bool radiant_package_layout_callback(const CustomLayoutContext* context,
+                                     CustomLayoutResult* result, const char* package_module) {
+    return radiant_lambda_layout_callback(context, result, package_module);
 }
 
 static DomDocument* radiant_dom_document_from_node(DomNode* node) {

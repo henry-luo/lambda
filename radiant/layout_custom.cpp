@@ -439,9 +439,10 @@ const char* custom_layout_name_for_element(DomElement* element) {
     return nullptr;
 }
 
-bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* layout_name) {
+bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* layout_name,
+                          CustomLayoutFn callback) {
     if (!lycon || !block || !layout_name || layout_name[0] == '\0') return false;
-    CustomLayoutFn fn = custom_layout_lookup(layout_name);
+    CustomLayoutFn fn = callback ? callback : custom_layout_lookup(layout_name);
     if (!fn) {
         custom_layout_log_unregistered_once(block, layout_name);
         return false;

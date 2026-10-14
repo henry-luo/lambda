@@ -58,3 +58,20 @@ let styled_commands = [
 ]
 
 pub fn command_variant(cmd) => [for (entry in styled_commands where entry.cmd == cmd) entry.style][0]
+
+// Ordinary bundled faces encode alphabet variants as styled base characters.
+pub fn decode(ch) {
+    let cp=ord(ch)
+    if (cp<0x2100 or cp>0x1D7FF) { {character:ch,style:null} }
+    else {
+    let special=[for (style, entries in exceptions, base, value in entries where value==cp)
+        {character:string(base),style:string(style)}][0]
+    let latin=[for (style, starts in alphabets, i, start in starts
+        where start>0 and cp>=start and cp<start+(if (i==2) 10 else 26))
+        {character:chr(cp-start+[65,97,48][i]),style:string(style)}][0]
+    let greek=if (cp<0x1D6A8) null else [for (style in ["italic","bold","bolditalic"],
+        base in [*[for (i in 0x391 to 0x3A9) chr(i)],*[for (i in 0x3B1 to 0x3C9) chr(i)],"ϴ","∇","∂","ϵ","ϑ","ϰ","ϕ","ϱ","ϖ"]
+        where variant(base,style)==cp and ord(base)!=cp) {character:base,style:style}][0];
+    special or latin or greek or {character:ch,style:null}
+    }
+}

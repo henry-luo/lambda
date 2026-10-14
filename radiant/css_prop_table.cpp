@@ -1343,6 +1343,29 @@ static bool serialize_place_content(const CssPropAccessor*, DomElement* element,
         css_parse_place_content_alignment, css_parse_content_alignment_value);
 }
 
+static bool serialize_cursor(const CssPropAccessor*, DomElement* element, int pseudo_type,
+                             StringBuf* out) {
+    if (!element || pseudo_type != 0 || !out) return false;
+    const InlineProp* style = element->inl();
+    stringbuf_reset(out);
+    for (const CursorImageSpec* image = style->cursor_images; image; image = image->next) {
+        stringbuf_append_str(out, "url(\"");
+        for (const unsigned char* p = (const unsigned char*)image->url; *p; p++) {
+            if (*p == '"' || *p == '\\') stringbuf_append_char(out, '\\');
+            if (*p < 0x20 || *p == 0x7f)
+                stringbuf_append_format(out, "\\%x ", (unsigned)*p);
+            else stringbuf_append_char(out, (char)*p);
+        }
+        stringbuf_append_str(out, "\")");
+        if (image->has_hotspot)
+            stringbuf_append_format(out, " %.6g %.6g", image->hotspot_x, image->hotspot_y);
+        stringbuf_append_str(out, ", ");
+    }
+    const CssEnumInfo* fallback = css_enum_info(style->cursor);
+    stringbuf_append_str(out, fallback && fallback->name ? fallback->name : "auto");
+    return true;
+}
+
 static bool serialize_display(const CssPropAccessor*, DomElement* element, int pseudo_type,
                               StringBuf* out) {
     if (!element || pseudo_type != 0) return false;
@@ -1869,7 +1892,7 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
                 CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_COLOR, serialize_color_prop, 0),
     DIRECT_ROW(CSS_PROPERTY_OPACITY, PROP_GROUP_INLINE, InlineProp, opacity, CSS_PROP_VALUE_NUMBER, 0),
-    DIRECT_ROW(CSS_PROPERTY_CURSOR, PROP_GROUP_INLINE, InlineProp, cursor, CSS_PROP_VALUE_ENUM, 0),
+    DERIVED_ROW(CSS_PROPERTY_CURSOR, serialize_cursor, 0),
     DECL_ROW(CSS_PROPERTY_ALIGN_SELF),
     // CSS Align modifiers such as safe/unsafe are retained in the declaration tree.
     DECL_ROW(CSS_PROPERTY_JUSTIFY_SELF),

@@ -1075,6 +1075,19 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
     layout_setup_block_font_metrics(lycon);
     lycon->block.block_container_font = lam::up(lycon->font.style);
 
+    float math_width = 0.0f, math_height = 0.0f, math_baseline = 0.0f;
+    if (layout_measure_mathml(lycon, flex_item->as_element(),
+            &math_width, &math_height, &math_baseline)) {
+        // Flex owns the allocated border box; math supplies its content and
+        // baseline through the same package callback used by normal flow.
+        flex_item->content_width = math_width;
+        flex_item->content_height = math_height;
+        if (flex_item->blk) flex_item->block_mut()->first_line_baseline = math_baseline;
+        *lycon = saved_context;
+        log_leave();
+        return;
+    }
+
     line_init(lycon, content_x_offset, content_x_offset + content_width);
     // CRITICAL: Check if this flex item is ITSELF a flex container (nested flex)
     if (flex_item->display.inner == CSS_VALUE_FLEX) {

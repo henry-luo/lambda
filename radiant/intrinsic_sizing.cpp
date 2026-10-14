@@ -3367,6 +3367,15 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
 
+    float math_width = 0.0f;
+    if (layout_measure_mathml(lycon, element, &math_width, nullptr)) {
+        float decoration = content_only ? 0.0f : layout_intrinsic_padding_border_axis(
+            lycon, element, true, lycon->block.content_width,
+            !intrinsic_percentage_width_is_indefinite(lycon));
+        sizes.min_content = sizes.max_content = math_width + decoration;
+        return sizes;
+    }
+
     bool is_table_display = false;
     {
         if (intrinsic_element_display_matches(
@@ -6221,6 +6230,11 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         (view->block()->given_width_type == CSS_VALUE_MIN_CONTENT ||
          view->block()->given_width_type == CSS_VALUE_MAX_CONTENT);
     float replaced_query_width = replaced_intrinsic_width_query ? -1.0f : width;
+
+    float math_height = 0.0f;
+    if (layout_measure_mathml(lycon, element, nullptr, &math_height)) {
+        return math_height + layout_intrinsic_padding_border_axis(lycon, element, false, width, true);
+    }
 
     float height = 0;
 

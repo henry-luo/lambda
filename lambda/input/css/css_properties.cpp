@@ -316,7 +316,7 @@ static CssProperty property_definitions[] = {
 
     // Other Properties
     {CSS_PROPERTY_OPACITY, "opacity", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "1", true, false, NULL, 0, validate_number, NULL},
-    {CSS_PROPERTY_CURSOR, "cursor", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_CURSOR, "cursor", PROP_TYPE_LIST, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_BORDER_RADIUS, "border-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
 
     // Additional Border Properties (Group 15)
@@ -2890,10 +2890,54 @@ static bool css_background_value_valid(const CssBackgroundValueSpec* spec,
     return true;
 }
 
+bool css_cursor_value_parse(const CssValue* value, CssEnum* fallback,
+                            CssCursorImageVisitor visitor, void* context) {
+    if (!value) return false;
+    bool alternatives = value->type == CSS_VALUE_TYPE_LIST && value->data.list.comma_separated;
+    if (!alternatives && value->type == CSS_VALUE_TYPE_LIST &&
+        value->data.list.count == 1 && value->data.list.values)
+        value = value->data.list.values[0];
+    int count = alternatives ? value->data.list.count : 1;
+    if (count < 1 || (alternatives && !value->data.list.values)) return false;
+    const CssValue* last = alternatives ? value->data.list.values[count - 1] : value;
+    if (!last || last->type != CSS_VALUE_TYPE_KEYWORD || last->data.keyword <= 0)
+        return false;
+    if (alternatives && css_value_is_global_keyword(last)) return false;
+    if (fallback) *fallback = last->data.keyword;
+    for (int index = 0; index < count - 1; index++) {
+        const CssValue* group = value->data.list.values[index];
+        if (!group) return false;
+        int parts = group->type == CSS_VALUE_TYPE_LIST && !group->data.list.comma_separated
+            ? group->data.list.count : 1;
+        if (parts != 1 && parts != 3) return false;
+        if (parts == 3 && !group->data.list.values) return false;
+        const CssValue* url = parts == 1 ? group : group->data.list.values[0];
+        if (!url || url->type != CSS_VALUE_TYPE_URL || !url->data.url || !url->data.url[0])
+            return false;
+        double x = 0.0, y = 0.0;
+        if (parts == 3) {
+            const CssValue* x_value = group->data.list.values[1];
+            const CssValue* y_value = group->data.list.values[2];
+            if (!x_value || !y_value || x_value->type != CSS_VALUE_TYPE_NUMBER ||
+                y_value->type != CSS_VALUE_TYPE_NUMBER) return false;
+            x = x_value->data.number.value;
+            y = y_value->data.number.value;
+            if (!isfinite(x) || !isfinite(y)) return false;
+        }
+        if (visitor && !visitor(url->data.url, x, y, parts == 3, context)) return false;
+    }
+    return !alternatives || count > 1;
+}
+
 bool css_property_validate_value_mode(CssPropertyCode id,
                                       const CssValue* value,
                                       bool quirks_mode) {
     if (!value) return false;
+    if (id == CSS_PROPERTY_CURSOR) {
+        if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value))
+            return true;
+        return css_cursor_value_parse(value, nullptr, nullptr, nullptr);
+    }
     if (const CssBackgroundValueSpec* spec = css_background_value_spec(id))
         return css_background_value_valid(spec, value, quirks_mode);
     if ((id == CSS_PROPERTY_CONTENT || id == CSS_PROPERTY_LIST_STYLE || id == CSS_PROPERTY_LIST_STYLE_IMAGE ||

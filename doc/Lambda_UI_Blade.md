@@ -25,6 +25,8 @@ The first is an interactive character inventory: select equipment, cast spells,
 or use Heal to update vitality. The second presents forms, collections,
 feedback, resource meters, materials, rarities and the full RPG icon set.
 The character gallery adapts to narrow and wide windows.
+Its armored gauntlet pointer is an SVG `cursor: url(...)` image with a click hotspot,
+installed as a native mouse cursor by Radiant.
 
 ```lambda
 import ui: lambda.ui.blade

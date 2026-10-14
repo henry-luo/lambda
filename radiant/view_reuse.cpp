@@ -31,11 +31,36 @@ static uint32_t inline_float_hash_bits(float value) {
     return bits;
 }
 
+static bool cursor_images_equal(const CursorImageSpec* left,
+                                const CursorImageSpec* right) {
+    while (left && right) {
+        if (strcmp(left->url, right->url) != 0 ||
+            left->hotspot_x != right->hotspot_x ||
+            left->hotspot_y != right->hotspot_y ||
+            left->has_hotspot != right->has_hotspot) return false;
+        left = left->next;
+        right = right->next;
+    }
+    return !left && !right;
+}
+
+uint64_t cursor_images_hash(const CursorImageSpec* images) {
+    uint64_t hash = HASH_FNV1A_64_OFFSET_BASIS;
+    for (const CursorImageSpec* image = images; image; image = image->next) {
+        hash = hash_fnv1a_64_extend_cstr(hash, image->url);
+        hash = hash_fnv1a_64_extend_u64le(hash, inline_float_hash_bits(image->hotspot_x));
+        hash = hash_fnv1a_64_extend_u64le(hash, inline_float_hash_bits(image->hotspot_y));
+        hash = hash_fnv1a_64_extend_byte(hash, image->has_hotspot);
+    }
+    return hash_fnv1a_64_extend_byte(hash, 0xff);
+}
+
 uint64_t inline_prop_hash(const InlineProp* value) {
     if (!value) return 0;
     uint64_t hash = HASH_FNV1A_64_OFFSET_BASIS;
 #define INLINE_HASH_FIELD(field) hash = hash_fnv1a_64_extend_u64le(hash, (uint64_t)value->field)
     INLINE_HASH_FIELD(cursor);
+    hash = hash_fnv1a_64_extend_u64le(hash, cursor_images_hash(value->cursor_images));
     INLINE_HASH_FIELD(caret_shape);
     INLINE_HASH_FIELD(color.c);
     INLINE_HASH_FIELD(accent_color.c);
@@ -72,6 +97,7 @@ bool inline_prop_equal(const InlineProp* left, const InlineProp* right) {
     // Explicit semantic comparison keeps padding and future compiler layout out
     // of the canonicalization contract.
     return left->cursor == right->cursor &&
+           cursor_images_equal(left->cursor_images, right->cursor_images) &&
            left->image_rendering == right->image_rendering &&
            left->caret_shape == right->caret_shape &&
            left->color.c == right->color.c &&

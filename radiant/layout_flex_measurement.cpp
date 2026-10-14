@@ -885,6 +885,10 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
     // Initialize to zero
     // Use float to preserve precision from text measurement (avoids truncation)
     float min_width = 0, max_width = 0, min_height = 0, max_height = 0;
+    if (lycon && layout_measure_mathml(lycon, item->as_element(), &min_width, &min_height)) {
+        flex_store_intrinsic_sizes(item, min_width, min_width, min_height, min_height);
+        return;
+    }
     // Check if this is a replaced element (img, video, or SVG) - needs special handling
     NameId elmt_name = item->tag();
     bool is_replaced = layout_tag_is_replaced_content(elmt_name) &&

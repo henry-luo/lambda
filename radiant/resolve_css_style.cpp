@@ -2816,9 +2816,13 @@ DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNode* node
         return {CSS_VALUE_NONE, CSS_VALUE_NONE};
     }
     if (css_is_mathml_element(dom_elem)) {
-        return (dom_elem->tag_name && strcmp(dom_elem->tag_name, "math") == 0)
-            ? DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_MATH}
-            : DisplayValue{CSS_VALUE_BLOCK, CSS_VALUE_MATH};
+        if (strcmp(dom_elem->tag_name, "math") == 0) {
+            const char* mode = dom_elem->get_attribute("display");
+            // Core §2.1.1: display="block" changes the outer box, retaining math internals.
+            return {mode && str_icmp_cstr(mode, "block") == 0 ? CSS_VALUE_BLOCK : CSS_VALUE_INLINE,
+                CSS_VALUE_MATH};
+        }
+        return DisplayValue{CSS_VALUE_BLOCK, CSS_VALUE_MATH};
     }
     static const NameId block_tags[] = {
         MARKUP_NAME_HTML, MARKUP_NAME_BODY, MARKUP_NAME_H1, MARKUP_NAME_H2,
@@ -4857,6 +4861,18 @@ static CssEnum overflow_axis_value(LayoutContext* lycon,
 
 static void resolve_grid_components(DomElement* element, LayoutContext* lycon) {
     StyleTree* style = element ? element->specified_style : nullptr;
+    GridItemProp* item = element && element->parent_item_kind() == DomElement::PARENT_ITEM_GRID
+        ? element->gi : nullptr;
+    if (item) {
+        // a removed media-query line must resolve to auto instead of retaining its last placement.
+        CssGridLineReference automatic = {};
+        for (unsigned i = 0; i < 4; i++) {
+            CssPropertyCode property = css_grid_placement_member(i);
+            if (!style || !style->tree || !layout_cascaded_physical_declaration(element, property))
+                css_grid_apply_line_reference(lycon, item,
+                    css_grid_axis_slots(item, i % 2 == 0), i >= 2, automatic);
+        }
+    }
     if (!style || !style->tree) return;
     const CssPropertyCode shorthands[] = {CSS_PROPERTY_GRID, CSS_PROPERTY_GRID_TEMPLATE,
         CSS_PROPERTY_GRID_AREA, CSS_PROPERTY_GRID_ROW, CSS_PROPERTY_GRID_COLUMN, CSS_PROPERTY_ALL};
@@ -6945,8 +6961,6 @@ static const CssSimpleKeywordSpec* css_simple_keyword_spec(CssPropertyCode prope
          CSS_SIMPLE_KEYWORD_BACKFACE_VISIBILITY, offsetof(TransformProp, backface_visibility)},
         {CSS_PROPERTY_FONT_KERNING, CSS_SIMPLE_KEYWORD_FONT,
          CSS_SIMPLE_KEYWORD_FONT_KERNING, offsetof(FontProp, font_kerning)},
-        {CSS_PROPERTY_CURSOR, CSS_SIMPLE_KEYWORD_INLINE,
-         CSS_SIMPLE_KEYWORD_POSITIVE, offsetof(InlineProp, cursor)},
         {CSS_PROPERTY_IMAGE_RENDERING, CSS_SIMPLE_KEYWORD_INLINE,
          CSS_SIMPLE_KEYWORD_IMAGE_RENDERING, offsetof(InlineProp, image_rendering)},
         {CSS_PROPERTY_CARET_SHAPE, CSS_SIMPLE_KEYWORD_INLINE,
@@ -7052,10 +7066,64 @@ static void resolve_simple_keyword_property(LayoutContext* lycon, ViewSpan* span
     *(CssEnum*)((char*)target + spec->offset) = keyword;
 }
 
+struct CursorResolveContext {
+    LayoutContext* lycon;
+    const CssDeclaration* declaration;
+    CursorImageSpec* first;
+    CursorImageSpec* last;
+};
+
+static bool resolve_cursor_image(const char* url, double x, double y,
+                                 bool has_hotspot, void* opaque) {
+    CursorResolveContext* context = (CursorResolveContext*)opaque;
+    // Inherited declarations retain their source file, so relative URLs keep the ancestor's base.
+    const char* resolved = resolve_css_resource_url(context->lycon,
+        context->declaration, url, true);
+    if (!resolved) return false;
+    CursorImageSpec* image = (CursorImageSpec*)alloc_prop(
+        context->lycon, sizeof(CursorImageSpec));
+    if (!image) return false;
+    *image = {resolved, (float)x, (float)y, has_hotspot, nullptr};
+    if (context->last) context->last->next = image;
+    else context->first = image;
+    context->last = image;
+    return true;
+}
+
+static void resolve_cursor_property(LayoutContext* lycon, ViewSpan* span,
+                                    const CssDeclaration* declaration,
+                                    const CssValue* value) {
+    InlineProp* target = span->ensure_inline(lycon);
+    if (!target || !value) return;
+    CursorResolveContext context = {lycon, declaration, nullptr, nullptr};
+    CssEnum fallback = CSS_VALUE_AUTO;
+    if (!css_cursor_value_parse(value, &fallback, resolve_cursor_image, &context)) return;
+    if (!context.first &&
+        (fallback == CSS_VALUE_INHERIT || fallback == CSS_VALUE_UNSET)) {
+        DomElement* current = lam::dom_require_element(lycon->view);
+        DomElement* parent = dom_parent_element(current);
+        target->cursor = parent ? parent->inl()->cursor : CSS_VALUE_AUTO;
+        target->cursor_images = parent ? parent->inl()->cursor_images : nullptr;
+        return;
+    }
+    if (!context.first &&
+        (fallback == CSS_VALUE_INITIAL || fallback == CSS_VALUE_REVERT)) {
+        target->cursor = CSS_VALUE_AUTO;
+        target->cursor_images = nullptr;
+        return;
+    }
+    target->cursor = fallback;
+    target->cursor_images = context.first;
+}
+
 static bool resolve_common_keyword_property(LayoutContext* lycon, ViewSpan* span,
                                             ViewBlock* block, CssPropertyCode property,
                                             const CssDeclaration* decl,
                                             const CssValue* value) {
+    if (property == CSS_PROPERTY_CURSOR) {
+        resolve_cursor_property(lycon, span, decl, value);
+        return true;
+    }
     if (property == CSS_PROPERTY_FONT_STYLE || property == CSS_PROPERTY_FONT_VARIANT) {
         if (shorthand_overrides_longhand(lycon, CSS_PROPERTY_FONT, decl)) return true;
         span->ensure_font(lycon);

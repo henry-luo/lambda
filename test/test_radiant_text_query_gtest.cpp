@@ -100,6 +100,34 @@ TEST_F(RadiantTextLayout, PhotoDtnaButtonHasThemeLeadingAndCenteredText) {
 
 class RadiantFrameDelivery : public RadiantTextQuery {};
 
+TEST_F(RadiantTextLayout, MathMLUsesMeasuredPaintAndRetainsItsSourceDom) {
+    DomElement* owner = load("test/html/mathml_native.html");
+    ASSERT_NE(owner, nullptr);
+    for (int pass = 0; pass < 2; pass++) {
+        layout_html_doc(&ui, document, pass != 0);
+        for (const char* id : {"inline", "display", "flex", "matrix"}) {
+            SCOPED_TRACE(id);
+            DomElement* math = dom_find_element_by_id(owner, id);
+            ASSERT_NE(math, nullptr);
+            EXPECT_STREQ(dom_element_namespace_uri(math), "http://www.w3.org/1998/Math/MathML");
+            ASSERT_NE(math->first_child, nullptr);
+            EXPECT_GT(math->content_width, 0.0f);
+            EXPECT_GT(math->content_height, 0.0f);
+            ASSERT_NE(math->custom_layout_paint_prop(), nullptr);
+            CustomLayoutPaintState* paint = math->custom_layout_paint_prop();
+            ASSERT_EQ(paint->layer_count, 1);
+            ASSERT_NE(paint->layers[0].content, nullptr);
+            EXPECT_TRUE(strview_equal(&((TypeElmt*)paint->layers[0].content->type)->name, "svg"));
+        }
+        DomElement* inline_math = dom_find_element_by_id(owner, "inline");
+        EXPECT_STREQ(inline_math->first_child->node_name(), "mfrac");
+        DomElement* flex_math = dom_find_element_by_id(owner, "flex");
+        DomElement* semantics = flex_math->first_child->as_element();
+        EXPECT_STREQ(semantics->last_child->node_name(), "annotation");
+        EXPECT_EQ(dom_find_element_by_id(owner, "cssflow")->custom_layout_paint_prop(), nullptr);
+    }
+}
+
 TEST_F(RadiantFrameDelivery, FullscreenCatalogRefusesWindowlessTransitions) {
     DomElement* owner = load("test/lambda/ui/_window_fullscreen.ls");
     ASSERT_NE(owner, nullptr);

@@ -7,6 +7,7 @@ import sym: .symbols
 import spaces: .spacing_table
 import util: .util
 import graphics: .graphics
+import geometry: .geometry
 
 pub fn render(ast, options) map | error {
     if (ast.error != null) error("math: " ++ string(ast.error))
@@ -349,10 +350,8 @@ fn side_scripts(n, c, base) {
         let width = max([base.width, if (n.sup != null) x_sup + sup.width else 0.0,
             if (n.sub != null) x_sub + sub.width else 0.0]) +
             (if (c.profile.tex != null) dimension("0.5pt", c) else metric(c, "space_after_script"))
-        let entries = [{box: base, x: 0.0, y: 0.0},
-            *if (n.sup != null) [{box: sup, x: x_sup, y: 0.0 - up}] else [],
-            *if (n.sub != null) [{box: sub, x: x_sub, y: down}] else []];
-        bx.compose(entries, width, base.type)
+        geometry.scripts(base,if (n.sub!=null) sub else null,if (n.sup!=null) sup else null,
+            x_sub,x_sup,up,down,width)
     }
 }
 
@@ -409,9 +408,7 @@ fn fraction(n, c) {
     let width = max(numer.width, denom.width)
     let alignment = if (key == "cfrac") util.text_of(n.options) else "c"
     let num_x = if (alignment == "l") 0.0 else if (alignment == "r") width - numer.width else (width - numer.width) / 2.0
-    let result = bx.compose([{box: numer, x:num_x, y: 0.0 - up},
-        {box: denom, x: (width - denom.width) / 2.0, y: down},
-        *if (bar) [{box: bx.rule(width, thickness, 0.0 - axis - thickness / 2.0), x: 0.0, y: 0.0}] else []], width, "mord")
+    let result = geometry.fraction(numer,denom,width,num_x,up,down,axis,thickness)
     let fences = if (contains(["binom", "dbinom", "tbinom", "choose"], key)) ["(", ")"]
         else if (key == "brace") ["{", "}"] else if (key == "brack") ["[", "]"]
         else [string(n.left_delim or n.left or "."), string(n.right_delim or n.right or ".")]
@@ -536,11 +533,8 @@ fn font_radical(n, c) {
     let before = if (n.index != null) max(0.0, metric(c, "radical_kern_before_degree")) else 0.0
     let offset = if (n.index != null) before + index.width + max(0.0 - index.width, metric(c, "radical_kern_after_degree")) else 0.0
     let index_y = top + sign.height + sign.depth - (sign.height + sign.depth) * c.profile.facts.constants.radical_degree_bottom_raise_percent / 100.0 - index.depth
-    let entries = [{box: sign, x: offset, y: top + sign.height}, {box: body, x: offset + sign.width, y: 0.0},
-        {box: bx.rule(body.width, thickness, top), x: offset + sign.width, y: 0.0},
-        *if (n.index != null) [{box: index, x: before, y: index_y}] else []]
-    let result = bx.compose(entries, offset + sign.width + body.width);
-    {*:result, height: result.height + metric(c, "radical_extra_ascender")}
+    geometry.radical(body,sign,if (n.index!=null) index else null,top,thickness,offset,before,
+        index_y,metric(c,"radical_extra_ascender"))
 }
 
 fn accent(n, c, attached = null) {

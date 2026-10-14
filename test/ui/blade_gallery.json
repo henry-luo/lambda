@@ -18,8 +18,10 @@
       "target": {
         "selector": "#blade-inventory .blade-item-slot"
       },
-      "count": 16
+      "count": 20
     },
+    {"type":"assert_attribute","target":{"selector":"#blade-item-16"},"attribute":"aria-label","equals":"Empty slot"},
+    {"type":"assert_attribute","target":{"selector":"#blade-item-19"},"attribute":"aria-label","equals":"Empty slot"},
     {
       "type": "assert_attribute",
       "target": {
@@ -40,6 +42,7 @@
       "type": "render",
       "file": "temp/ui_blade/gallery.png"
     },
+    {"type":"mouse_move","target":{"selector":"#blade-item-0"}},
     {
       "type": "click",
       "target": {
@@ -88,18 +91,62 @@
       "attribute": "aria-valuenow",
       "equals": "920"
     },
+    {"type":"assert_attribute","target":{"selector":"#blade-journal"},"attribute":"href","equals":"blade_components.ls"},
+    {"type":"assert_style","target":{"selector":"#blade-gallery"},"property":"cursor","contains":"blade_gauntlet.svg"},
+    {"type":"assert_count","target":{"selector":"#blade-arcade"},"count":0},
+    {"type":"assert_style","target":{"selector":"#blade-mana .blade-meter-fill"},"property":"transition-property","equals":"width"},
+    {"type":"assert_attribute","target":{"selector":"#blade-mana"},"attribute":"aria-valuenow","equals":"360"},
+    {"type":"click","target":{"selector":"#blade-item-3"}},
+    {"type":"assert_attribute","target":{"selector":"#blade-health"},"attribute":"aria-valuenow","equals":"960"},
+    {"type":"assert_attribute","target":{"selector":"#blade-mana"},"attribute":"aria-valuenow","equals":"360"},
+    {"type":"assert_text","target":{"selector":"#blade-last-action"},"equals":"Drank Crimson elixir. Vitality +40."},
+    {"type":"assert_text","target":{"selector":"#blade-item-3 .blade-slot-quantity"},"equals":"7"},
+    {"type":"click","target":{"selector":"#blade-item-4"}},
+    {"type":"assert_attribute","target":{"selector":"#blade-mana"},"attribute":"aria-valuenow","equals":"480"},
+    {"type":"assert_attribute","target":{"selector":"#blade-health"},"attribute":"aria-valuenow","equals":"960"},
+    {"type":"assert_text","target":{"selector":"#blade-item-4 .blade-slot-quantity"},"equals":"4"},
+    {"type":"click","target":{"selector":"#blade-item-3"}},
+    {"type":"assert_attribute","target":{"selector":"#blade-health"},"attribute":"aria-valuenow","equals":"1000"},
+    {"type":"assert_attribute","target":{"selector":"#blade-mana"},"attribute":"aria-valuenow","equals":"480"},
+    {"type":"assert_text","target":{"selector":"#blade-item-3 .blade-slot-quantity"},"equals":"6"},
+    {"type":"click","target":{"selector":"#blade-item-3"}},
+    {"type":"assert_text","target":{"selector":"#blade-last-action"},"equals":"Your vitality is already full."},
+    {"type":"assert_attribute","target":{"selector":"#blade-mana"},"attribute":"aria-valuenow","equals":"480"},
+    {"type":"assert_text","target":{"selector":"#blade-item-3 .blade-slot-quantity"},"equals":"6"},
+    {"type":"click","target":{"selector":"#blade-item-4"}},
+    {"type":"assert_attribute","target":{"selector":"#blade-mana"},"attribute":"aria-valuenow","equals":"500"},
+    {"type":"assert_text","target":{"selector":"#blade-item-4 .blade-slot-quantity"},"equals":"3"},
+    {"type":"click","target":{"selector":"#blade-item-4"}},
+    {"type":"assert_text","target":{"selector":"#blade-last-action"},"equals":"Your arcane power is already full."},
+    {"type":"assert_text","target":{"selector":"#blade-item-4 .blade-slot-quantity"},"equals":"3"},
+    {"type":"click","target":{"selector":"#blade-item-0"}},
+    {"type":"assert_attribute","target":{"selector":"#blade-equipped-weapon"},"attribute":"aria-label","equals":"Iron Oath"},
+    {"type":"assert_attribute","target":{"selector":"#blade-item-0"},"attribute":"aria-label","equals":"Dawn blade"},
+    {"type":"click","target":{"selector":"#blade-equipped-weapon"}},
+    {"type":"assert_attribute","target":{"selector":"#blade-item-15"},"attribute":"aria-label","equals":"Iron Oath"},
+    {"type":"assert_attribute","target":{"selector":"#blade-equipped-weapon"},"attribute":"aria-label","equals":"Empty slot"},
     {
-      "type": "click",
-      "target": {
-        "selector": "#blade-journal"
-      }
+      "type": "assert_position",
+      "element_a": {"selector": ".blade-equipment-panel"},
+      "element_b": {"selector": ".blade-character"},
+      "relation": "right_of"
     },
+    {"type": "resize", "width": 900, "height": 1100},
     {
-      "type": "assert_text",
-      "target": {
-        "selector": "#blade-last-action"
-      },
-      "equals": "Journal opened. The path to Ashenvale continues."
-    }
+      "type": "assert_position",
+      "element_a": {"selector": ".blade-equipment-panel"},
+      "element_b": {"selector": ".blade-character"},
+      "relation": "below"
+    },
+    {"type": "resize", "width": 1376, "height": 1100},
+    {
+      "type": "assert_position",
+      "element_a": {"selector": ".blade-equipment-panel"},
+      "element_b": {"selector": ".blade-character"},
+      "relation": "right_of"
+    },
+    {"type":"click","target":{"selector":"#blade-journal"}},
+    {"type":"assert_text","target":{"selector":"h1"},"equals":"The Component Forge"},
+    {"type":"assert_count","target":{"selector":"#forge-health"},"count":1}
   ]
 }

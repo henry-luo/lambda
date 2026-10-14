@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="43" height="43" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="iron" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#91a6ab"/><stop offset=".38" stop-color="#40535a"/>
+      <stop offset="1" stop-color="#17232a"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#fff1b2"/><stop offset=".42" stop-color="#d7a54e"/>
+      <stop offset="1" stop-color="#795226"/>
+    </linearGradient>
+    <radialGradient id="gem"><stop stop-color="#e2ffff"/><stop offset=".4" stop-color="#54cdec"/><stop offset="1" stop-color="#14658f"/></radialGradient>
+  </defs>
+  <!-- The extended index tip scales to the native cursor hotspot at 3,3. -->
+  <path d="M5 4 16 7 32 25 45 22 53 28 57 37 52 47 54 57 39 62 30 53 21 46 17 35Z" fill="#100f12" stroke="#f6df9b" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M7 7 15 10 29 29 23 35 18 30Z" fill="url(#iron)" stroke="#a67b3b" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="m10 8 6 2 14 18-4 2Z" fill="#c0d0c8" opacity=".8"/>
+  <path d="m24 31 8-6 11-2 8 5 5 9-5 8-12 7-11-6-8-9Z" fill="url(#iron)" stroke="url(#gold)" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="m37 24 8-3 5 4-2 6-8 2Z" fill="#354b54" stroke="#e7c575" stroke-width="2"/>
+  <path d="m46 27 7-1 4 6-3 5-8-1Z" fill="#30434a" stroke="#c99a4d" stroke-width="2"/>
+  <path d="m49 35 8 1 1 6-7 5-7-5Z" fill="#263940" stroke="#c99a4d" stroke-width="2"/>
+  <path d="m29 35 9-6 9 5-1 9-9 5-9-6Z" fill="url(#gold)" stroke="#3b251a" stroke-width="2"/>
+  <path d="m38 31 7 5-1 6-7 4-7-5 1-5Z" fill="#18384a"/>
+  <path d="m37 33 6 5-5 6-6-5Z" fill="url(#gem)" stroke="#eaf6cf" stroke-width="1.5"/>
+  <path d="m30 49 11 5 11-7 3 9-15 5Z" fill="#26313b" stroke="url(#gold)" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="m39 55 2 5m5-7 2 5" stroke="#d1a253" stroke-width="2"/>
+</svg>

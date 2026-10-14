@@ -943,8 +943,10 @@ and parsing APIs without importing Radiant. Runtime
 `format(ast, {type: 'math', flavor: 'mathml'})` and CLI `-t math-mathml`
 use its exporter. It supports common fractions, scripts/limits, roots,
 groups/fences, alphabets, simple text, accents, spacing, phantoms and matrices;
-unsupported TeX constructs report errors. MathML SVG layout remains a later
-stage, and the existing renderer explicitly rejects MathML trees (**D7.2.8**).
+unsupported TeX constructs report errors. The renderer also accepts a documented
+Presentation MathML subset through its separate Core policy, sharing measured
+SVG geometry with TeX. Radiant paints that subset in HTML while preserving the
+MathML DOM; full CSS and accessibility integration remain open (**D7.2.8**).
 
 `fonts` uses the same binary face records as Radiant's metrics API. An explicit
 `font_family` without `fonts` uses installed fonts. MATH is optional: ordinary

@@ -4665,6 +4665,14 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             // computed table-internal display remains observable to CSSOM.
             layout_display.inner = RDT_DISPLAY_REPLACED;
         }
+        if (display.inner == CSS_VALUE_MATH && layout_is_mathml_root(elem)) {
+            // Core math is an atomic content box. Keep computed display observable
+            // while the package supplies its used geometry through custom layout.
+            if (display.outer == CSS_VALUE_INLINE) {
+                display.outer = CSS_VALUE_INLINE_BLOCK;
+                layout_display.outer = CSS_VALUE_INLINE_BLOCK;
+            }
+        }
 
         if (elem->tag() == MARKUP_NAME_BR && display.outer != CSS_VALUE_NONE) {
             display.outer = CSS_VALUE_INLINE;

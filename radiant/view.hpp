@@ -1092,9 +1092,19 @@ typedef struct FlexItemProp {
     FlexRetainedPass retained;
 } FlexItemProp;
 
+// Immutable cursor alternatives borrow URLs interned by the view tree.
+struct CursorImageSpec {
+    const char* url;
+    float hotspot_x, hotspot_y;
+    bool has_hotspot;
+    CursorImageSpec* next;
+};
+uint64_t cursor_images_hash(const CursorImageSpec* images);
+
 // tier-2: view-pool, rebuilt each relayout
 struct InlineProp {
     CssEnum cursor;
+    CursorImageSpec* cursor_images;
     CssEnum image_rendering;
     CssEnum caret_shape;
     Color color;
@@ -4330,6 +4340,8 @@ typedef struct {
     float last_x, last_y;
     bool has_position;
     int cursor;  // current cursor style (CssEnum value)
+    uint64_t cursor_image_hash;  // stable across relayout; never retains a style pointer
+    bool cursor_image_ready;  // retry deferred image resources without rebuilding the fallback
     GLFWcursor* sys_cursor;
 } MouseState;
 

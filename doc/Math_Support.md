@@ -27,8 +27,9 @@ MathML input uses strict, namespace-aware XML parsing and preserves token
 whitespace. Its root must identify the MathML namespace; prefixed roots are
 accepted. Other math input returns the existing TeX/AsciiMath AST. Typst input
 remains unimplemented, and other unrecognized flavors still use the legacy
-LaTeX fallback. MathML SVG layout is a later stage; the current SVG renderer
-returns an explicit error for MathML trees (**D7.2.8**).
+LaTeX fallback. The math package now lays out a supported Presentation MathML
+subset as measured SVG; Radiant's HTML viewer uses that package while retaining
+the original MathML DOM (**D7.2.8**).
 
 ### 1.2 Math in Markdown
 
@@ -89,6 +90,23 @@ matrices are supported. Unsupported commands, explicit TeX atom classes,
 fixed delimiter sizing and other extensions report conversion errors.
 Optional `source` is inert TeX annotation data; arbitrary MathML-to-TeX
 conversion is not provided. The `math-typst` target remains a stub.
+
+View the native MathML gallery with:
+
+```bash
+./lambda.exe view test/html/mathml_gallery.html
+```
+
+`math.render_box(tree)` and `math.render_math(tree)` accept MathML trees as
+well as TeX ASTs. MathML layout uses its operator dictionary and the selected
+font's MATH constants or Core fallbacks, independently of TeX companion
+metrics. Fractions, scripts, movable limits, roots, accents, spacing, phantoms
+and basic matrices are supported. HTML tokens and annotations remain in the
+DOM; annotations do not paint or execute. Nested arbitrary HTML/CSS, RTL,
+multiscripts and legacy matrix layout attributes remain unsupported. The
+viewer inherits the root's CSS size/color and currently uses the package's
+bundled font selection; full descendant stylesheet/font-face integration and
+browser/assistive-technology conformance remain open.
 
 ---
 
@@ -577,7 +595,7 @@ The following constructs are not currently supported. Unknown commands are passe
 
 | Missing               | Notes                                               |
 |-----------------------|-----------------------------------------------------|
-| MathML and Typst | Presentation MathML conversion and strict input work through the package; MathML SVG layout and Content MathML remain planned. Typst output remains a stub. |
+| MathML and Typst | Presentation MathML conversion, strict input and the documented native layout subset work through the package. Full Core/CSS integration and Content MathML remain open. Typst output remains a stub. |
 | DVI / PDF math output | Math reaches PDF only through the HTML/CSS rendering pipeline |
 | Interactive editing   | Cursor, selection, virtual keyboard — out of scope  |
 

@@ -5934,7 +5934,10 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
         layout_form_control(lycon, block);
     } else {  // layout block child content
         DomNode *child = nullptr;
-        if (block->is_element()) {
+        // MathML's package consumes semantic children directly, before generic
+        // flow can flatten scripts or allocate text boxes for inert annotations.
+        if (block->is_element() && !(layout_is_mathml_root(block->as_element()) &&
+                resolve_display_value(block).inner == CSS_VALUE_MATH)) {
             child = layout_render_child_list(block->as_element());
         }
         if (child) {
@@ -9669,6 +9672,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
     DomElement* dom_elem = elmt->is_element() ? elmt->as_element() : nullptr;
     const char* custom_layout_name = custom_layout_name_for_element(dom_elem);
+    bool package_mathml = !custom_layout_name && layout_is_mathml_root(dom_elem) &&
+        resolve_display_value(dom_elem).inner == CSS_VALUE_MATH;
+    if (package_mathml) {
+        custom_layout_name = "lambda-mathml";
+    }
     char custom_layout_name_storage[128];
     if (custom_layout_name && custom_layout_name[0] != '\0') {
         custom_layout_name = stabilize_custom_layout_name(
@@ -9717,7 +9725,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                              &original_margin_top,
                              &sibling_margin_collapsed_before_layout);
         if (has_custom_layout) {
-            layout_custom_apply(lycon, block, custom_layout_name);
+            if (package_mathml) layout_apply_mathml(lycon, block);
+            else layout_custom_apply(lycon, block, custom_layout_name);
         }
         bool child_line_clamp_inherited = block->blk && block->block_mut()->line_clamp_inherited;
         bool child_line_clamped = block->blk && block->block_mut()->line_clamped;

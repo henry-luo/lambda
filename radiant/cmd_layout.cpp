@@ -3441,6 +3441,28 @@ static void layout_adopt_loader_runtime(DomDocument* doc, Runtime* loader) {
     doc->loader_runtime = lam::up(loader);
 }
 
+Runtime* layout_document_package_runtime(DomDocument* document, const char* package_module) {
+    if (!document) return nullptr;
+    Runtime* runtime = dom_document_loader_runtime(document);
+    if (runtime) return runtime;
+    // A synchronous render inside Lambda shares its live evaluator; it cannot
+    // transfer that thread to a second runtime while caller roots are active.
+    if (context && context->execution_depth != 0) return context->runtime;
+    // Static HTML pays for an evaluator only when a package layout is requested.
+    runtime = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
+    if (!runtime) return nullptr;
+    runtime_init(runtime);
+    runtime->resource_policy = document->resource_policy;
+    Script* package = nullptr;
+    if (!run_lambda_package_module(runtime, package_module, &package) || !package) {
+        log_error("package-layout-runtime: failed to initialize %s", package_module);
+        release_layout_runtime(runtime);
+        return nullptr;
+    }
+    document->lambda_runtime = runtime;
+    return runtime;
+}
+
 static DomDocument* create_layout_dom(Input* input, Element* root,
                                       const char* document_kind,
                                       DomPageKind page_kind,

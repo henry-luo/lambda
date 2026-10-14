@@ -1,6 +1,7 @@
 // Public document math API: SVG layout and Presentation MathML conversion.
 import typeset: .typeset
 import mathml: .mathml
+import mathml_layout: .mathml_layout
 
 // The pure mathml module can also be imported directly by runtime-only hosts.
 pub fn to_mathml(ast, options = null) element^ => mathml.to_mathml(ast, options)^
@@ -9,8 +10,7 @@ pub fn parse_mathml(source) element^ => mathml.parse_mathml(source)^
 // Options: display, color, font_family, fonts [{font_family, data: binary}],
 // font_size (CSS px, optional), base_uri (directory for relative images). Box dimensions remain in em.
 pub fn render_box(ast, options = null) map | error {
-    // The TeX walk would flatten MathML's layout elements and silently lose notation.
-    if (mathml.is_mathml(ast)) error("mathml: SVG layout is not implemented; export native MathML instead")
+    if (mathml.is_mathml(ast)) mathml_layout.render(ast, options)^
     else typeset.render(ast, options)^
 }
 pub fn render_math(ast, options = null) element | error { render_box(ast, options)^.element }

@@ -1837,6 +1837,13 @@ typedef struct CustomLayoutPaintLayer {
 typedef struct CustomLayoutPaintState {
     lam::OwnArr<CustomLayoutPaintLayer> layers;
     int layer_count;
+    // Package content can share one intrinsic query within a measurement epoch.
+    uint32_t intrinsic_generation;
+    float intrinsic_font_size;
+    float intrinsic_width;
+    float intrinsic_height;
+    float intrinsic_baseline;
+    bool has_intrinsic_measurement;
 } CustomLayoutPaintState;
 
 // tier-3: layout-transient, valid within pass
@@ -1854,6 +1861,15 @@ typedef struct CustomLayoutResult {
 
 typedef bool (*CustomLayoutFn)(const CustomLayoutContext* context, CustomLayoutResult* result);
 
+// Package-backed built-in layouts share the retained callback and paint ownership door.
+Runtime* layout_document_package_runtime(DomDocument* document, const char* package_module);
+bool radiant_package_layout_callback(const CustomLayoutContext* context,
+                                     CustomLayoutResult* result, const char* package_module);
+bool layout_is_mathml_root(DomElement* element);
+bool layout_measure_mathml(LayoutContext* lycon, DomElement* element,
+                           float* width, float* height, float* baseline = nullptr);
+bool layout_apply_mathml(LayoutContext* lycon, ViewBlock* block);
+
 bool custom_layout_register(const char* name, CustomLayoutFn fn);
 CustomLayoutFn custom_layout_lookup(const char* name);
 void custom_layout_registry_clear(void);
@@ -1863,7 +1879,8 @@ void custom_layout_fill_radiant_velmt_from_view(
 
 const char* custom_layout_name_from_css_value(const CssValue* value);
 const char* custom_layout_name_for_element(DomElement* element);
-bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* layout_name);
+bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* layout_name,
+                          CustomLayoutFn callback = nullptr);
 
 typedef struct StyleTree StyleTree;
 

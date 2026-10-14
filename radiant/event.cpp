@@ -62,6 +62,8 @@ extern Item js_make_number(double value);
 #include "../lib/uv_loop.h"
 #include "../lambda/runtime/lambda-stack.h"
 #include <pthread.h>
+#include <limits.h>
+#include <math.h>
 #include <string.h>
 
 // thread-local eval context used by heap allocation functions
@@ -1528,7 +1530,7 @@ ArrayList* build_view_stack(EventContext* evcon, View* view) {
 
 void fire_text_event(EventContext* evcon, ViewText* text) {
     log_debug("fire text event");
-    if (evcon->new_cursor == CSS_VALUE_AUTO) {
+    if (evcon->new_cursor == CSS_VALUE_AUTO && !evcon->new_cursor_images) {
         log_debug("set text cursor");
         evcon->new_cursor = CSS_VALUE_TEXT;
     }
@@ -1541,6 +1543,7 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
     log_debug("fire inline event");
     if (span->in_line && span->inl()->cursor) {
         evcon->new_cursor = span->inl()->cursor;
+        evcon->new_cursor_images = span->inl()->cursor_images;
     }
     log_debug("fired at view %s", span->node_name());
 }
@@ -13149,6 +13152,102 @@ void rdt_event_set_text_input(RdtEvent* event, uint32_t codepoint,
     event->text_input.codepoint = codepoint;
 }
 
+static int native_cursor_hotspot(float coordinate, int extent) {
+    // CSS hotspot coordinates are clamped to the image before GLFW's integer API.
+    if (!isfinite(coordinate) || coordinate <= 0.0f) return 0;
+    if (coordinate >= (float)(extent - 1)) return extent - 1;
+    return (int)lroundf(coordinate); // INT_CAST_OK: bounded native cursor pixel index.
+}
+
+static GLFWcursor* create_native_image_cursor(UiContext* uicon,
+                                              const CursorImageSpec* specification) {
+    if (!uicon || !specification || !specification->url) return nullptr;
+    ImageSurfaceReadScope scope;
+    ImageSurface* surface = load_image(uicon, specification->url);
+    if (!surface || surface->width <= 0 || surface->height <= 0 ||
+        surface->width > INT_MAX / 4 ||
+        (size_t)surface->width > SIZE_MAX / 4u / (size_t)surface->height) return nullptr;
+    int width = surface->width, height = surface->height;
+    if (surface->pic) {
+        if (!render_media_rasterize_svg_picture(surface, width, height)) return nullptr;
+    } else {
+        image_surface_ensure_decoded(surface, width, height);
+    }
+    // A decoder may return a scaled buffer; GLFW must receive its actual extent.
+    if (surface->decoded_width > 0) width = surface->decoded_width;
+    if (surface->decoded_height > 0) height = surface->decoded_height;
+    if (width <= 0 || height <= 0 || width > INT_MAX / 4 ||
+        (size_t)width > SIZE_MAX / 4u / (size_t)height ||
+        !surface->pixels || surface->pitch < width * 4) return nullptr;
+    size_t bytes = (size_t)width * (size_t)height * 4u;
+    uint8_t* rgba = (uint8_t*)mem_alloc(bytes, MEM_CAT_RENDER);
+    if (!rgba) return nullptr;
+    // GLFW consumes straight RGBA; SVG paint surfaces are premultiplied ABGR words.
+    for (int row = 0; row < height; row++) {
+        const uint32_t* source = (const uint32_t*)((const uint8_t*)surface->pixels +
+                                                    (size_t)row * surface->pitch);
+        uint8_t* target = rgba + (size_t)row * (size_t)width * 4u;
+        for (int column = 0; column < width; column++) {
+            uint32_t pixel = surface->alpha_mode == IMAGE_ALPHA_PREMULTIPLIED
+                ? render_pixel_unpremultiply_abgr(source[column]) : source[column];
+            target[column * 4] = (uint8_t)pixel;
+            target[column * 4 + 1] = (uint8_t)(pixel >> 8);
+            target[column * 4 + 2] = (uint8_t)(pixel >> 16);
+            target[column * 4 + 3] = (uint8_t)(pixel >> 24);
+        }
+    }
+    GLFWimage image = {width, height, rgba};
+    int hotspot_x = specification->has_hotspot
+        ? native_cursor_hotspot(specification->hotspot_x, width) : 0;
+    int hotspot_y = specification->has_hotspot
+        ? native_cursor_hotspot(specification->hotspot_y, height) : 0;
+    GLFWcursor* cursor = glfwCreateCursor(&image, hotspot_x, hotspot_y);
+    mem_free(rgba);
+    if (cursor) log_debug("[CURSOR_IMAGE] native cursor %s (%dx%d hotspot %d,%d)",
+                          specification->url, width, height, hotspot_x, hotspot_y);
+    return cursor;
+}
+
+static void update_native_cursor(UiContext* uicon, CssEnum keyword,
+                                 const CursorImageSpec* images) {
+    if (!uicon || !uicon->window) return;
+    uint64_t image_hash = cursor_images_hash(images);
+    MouseState* state = &uicon->mouse_state;
+    bool unchanged = state->cursor == keyword && state->cursor_image_hash == image_hash;
+    if (unchanged && (!images || state->cursor_image_ready)) return;
+    CssEnum previous = (CssEnum)state->cursor;
+    state->cursor = keyword;
+    state->cursor_image_hash = image_hash;
+    GLFWcursor* cursor = nullptr;
+    for (const CursorImageSpec* image = images; image && !cursor; image = image->next)
+        cursor = create_native_image_cursor(uicon, image);
+    // Network images may become ready after the first hover; retain the fallback until then.
+    if (unchanged && !cursor) return;
+    state->cursor_image_ready = cursor != nullptr && images != nullptr;
+    if (!cursor && keyword != CSS_VALUE_NONE) {
+        int shape = GLFW_ARROW_CURSOR;
+        switch (keyword) {
+            case CSS_VALUE_TEXT: shape = GLFW_IBEAM_CURSOR; break;
+            case CSS_VALUE_POINTER: shape = GLFW_HAND_CURSOR; break;
+            case CSS_VALUE_COL_RESIZE: shape = GLFW_HRESIZE_CURSOR; break;
+            case CSS_VALUE_ROW_RESIZE: shape = GLFW_VRESIZE_CURSOR; break;
+            case CSS_VALUE_CROSSHAIR: shape = GLFW_CROSSHAIR_CURSOR; break;
+            default: break;
+        }
+        cursor = glfwCreateStandardCursor(shape);
+    }
+    // An image overrides a `none` fallback; hide only when no image was usable.
+    if ((previous == CSS_VALUE_NONE || keyword == CSS_VALUE_NONE) &&
+        !radiant_relative_mouse_target(uicon))
+        glfwSetInputMode(uicon->window, GLFW_CURSOR,
+            cursor || keyword != CSS_VALUE_NONE ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_HIDDEN);
+    if (cursor) {
+        glfwSetCursor(uicon->window, cursor);
+        if (state->sys_cursor) glfwDestroyCursor(state->sys_cursor);
+        state->sys_cursor = cursor;
+    }
+}
+
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     // host presentation keys use the same gate for native input and event replay.
     if (radiant_window_fullscreen_key(uicon, event)) {
@@ -13686,26 +13785,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             radiant_dispatch_behavior_pointer_drag(&evcon, captured);
         }
 
-        if (uicon->mouse_state.cursor != evcon.new_cursor) {
-            log_debug("Change cursor to %d", evcon.new_cursor);
-            uicon->mouse_state.cursor = evcon.new_cursor; // update the mouse state
-            int cursor_type;
-            switch (evcon.new_cursor) {
-            case CSS_VALUE_TEXT: cursor_type = GLFW_IBEAM_CURSOR; break;
-            case CSS_VALUE_POINTER: cursor_type = GLFW_HAND_CURSOR; break;
-            case CSS_VALUE_COL_RESIZE: cursor_type = GLFW_HRESIZE_CURSOR; break;
-            case CSS_VALUE_ROW_RESIZE: cursor_type = GLFW_VRESIZE_CURSOR; break;
-            default: cursor_type = GLFW_ARROW_CURSOR; break;
-            }
-            GLFWcursor* cursor = glfwCreateStandardCursor(cursor_type);
-            if (cursor) {
-                if (uicon->mouse_state.sys_cursor) {
-                    glfwDestroyCursor(uicon->mouse_state.sys_cursor);
-                }
-                uicon->mouse_state.sys_cursor = cursor;
-                glfwSetCursor(uicon->window, cursor);
-            }
-        }
+        update_native_cursor(uicon, evcon.new_cursor, evcon.new_cursor_images);
         break;
     }
     case RDT_EVENT_MOUSE_DOWN:   case RDT_EVENT_MOUSE_UP: {
