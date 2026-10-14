@@ -21206,113 +21206,94 @@ static Item js_typed_array_parse_from_index(Item value, int length, bool reverse
     return ItemNull;
 }
 
-static Item js_typed_array_prepare_callback(Item obj, Item* args, int argc,
-        bool array_semantics, const char* error_message, Item* callback,
-        Item* this_arg) {
-    if (argc < 1 || !js_is_callable(args[0])) {
-        return js_throw_type_error("callback is not a function");
-    }
-    if (!array_semantics) {
-        JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
-        if (ta && js_typed_array_is_out_of_bounds_item(obj)) {
-            return js_throw_type_error(error_message);
-        }
-    }
-    if (callback) *callback = args[0];
-    if (this_arg) *this_arg = argc > 1 ? args[1] : make_js_undefined();
-    return ItemNull;
-}
-
-enum JsTypedArrayCallbackKind {
-    JS_TYPED_CALLBACK_FOR_EACH,
-    JS_TYPED_CALLBACK_REDUCE,
-    JS_TYPED_CALLBACK_FIND,
-    JS_TYPED_CALLBACK_FIND_INDEX,
-    JS_TYPED_CALLBACK_EVERY,
-    JS_TYPED_CALLBACK_SOME,
-    JS_TYPED_CALLBACK_FIND_LAST,
-    JS_TYPED_CALLBACK_FIND_LAST_INDEX,
-    JS_TYPED_CALLBACK_REDUCE_RIGHT,
-};
-
-static Item js_typed_array_callback_algorithm(Item obj, Item* args, int argc,
-        bool array_semantics, JsTypedArrayCallbackKind kind) {
-    static const char* const error_names[] = {
-        "forEach", "reduce", "find", "findIndex", "every", "some",
-        "findLast", "findLastIndex", "reduceRight"
+// shared typed iteration snapshots internal length and retains every value across
+// user callbacks; borrowed Array methods keep their existing hole policy.
+extern "C" Item js_typed_array_callback_algorithm(Item obj, Item* args, int argc,
+        bool array_semantics, JsTypedArrayCallbackKind kind, const JsTypedArrayOps* ops) {
+    const JsBufferViewOps* buffer = ops ? ops->buffer : &js_buffer_view_default_ops;
+    if (!js_is_typed_array(obj) || (!array_semantics && js_typed_array_is_out_of_bounds_item(obj)))
+        return buffer->error(false, "TypedArray callback receiver is invalid or out of bounds");
+    bool reduce = kind == JS_TYPED_CALLBACK_REDUCE || kind == JS_TYPED_CALLBACK_REDUCE_RIGHT;
+    bool reverse = kind == JS_TYPED_CALLBACK_FIND_LAST || kind == JS_TYPED_CALLBACK_FIND_LAST_INDEX ||
+        kind == JS_TYPED_CALLBACK_REDUCE_RIGHT;
+    bool map = kind == JS_TYPED_CALLBACK_MAP, filter = kind == JS_TYPED_CALLBACK_FILTER;
+    bool return_index = kind == JS_TYPED_CALLBACK_FIND_INDEX || kind == JS_TYPED_CALLBACK_FIND_LAST_INDEX;
+    bool find = return_index || kind == JS_TYPED_CALLBACK_FIND || kind == JS_TYPED_CALLBACK_FIND_LAST;
+    RootFrame roots(7);
+    if (!roots.valid()) return ItemError;
+    uint64_t homes[4] = {};
+    Item absent = {.item = ITEM_JS_UNDEFINED};
+    Rooted<Item> owner(roots, obj), callback(roots, argc ? args[0] : absent),
+        self(roots, lambda_item_adopt_scalar_home(!reduce && argc > 1 ? args[1] : absent, &homes[0])),
+        accumulator(roots, lambda_item_adopt_scalar_home(reduce && argc > 1 ? args[1] : absent, &homes[1])),
+        value(roots, absent), result(roots, absent), output(roots, absent);
+    int length = js_typed_array_length(owner.get());
+    if (!(ops ? ops->callable(callback.get()) : js_is_callable(callback.get())))
+        return buffer->error(false, "callback is not a function");
+    // returned values and filter's retained values must outlive reusable local homes.
+    auto retain_scalar = [](Item item) {
+        if (!lambda_item_uses_scalar_home(item)) return item;
+        uint64_t* home = lambda_side_number_alloc();
+        return home ? lambda_item_adopt_scalar_home(item, home) : ItemError;
     };
-    const char* method_name = error_names[(int)kind];
-    char error_message[128];
-    snprintf(error_message, sizeof(error_message),
-        "Cannot perform %%TypedArray%%.prototype.%s on an out-of-bounds ArrayBuffer",
-        method_name);
-    bool is_reduce = kind == JS_TYPED_CALLBACK_REDUCE ||
-        kind == JS_TYPED_CALLBACK_REDUCE_RIGHT;
-    bool reverse = kind == JS_TYPED_CALLBACK_FIND_LAST ||
-        kind == JS_TYPED_CALLBACK_FIND_LAST_INDEX ||
-        kind == JS_TYPED_CALLBACK_REDUCE_RIGHT;
-    Item callback;
-    Item this_arg = make_js_undefined();
-    JS_ASSIGN_OR_RETURN(callback_status, js_typed_array_prepare_callback(obj, args,
-        argc, array_semantics, error_message, &callback,
-        is_reduce ? NULL : &this_arg));
-    int len = js_typed_array_length(obj);
-
-    if (is_reduce) {
-        int start = reverse ? len - 1 : 0;
-        Item accumulator;
-        if (argc > 1) {
-            accumulator = args[1];
-        } else if (len > 0) {
-            accumulator = js_typed_array_get(obj, (Item){.item = i2it(start)});
-            start += reverse ? -1 : 1;
-        } else {
-            return js_throw_type_error("Reduce of empty array with no initial value");
-        }
-        int step = reverse ? -1 : 1;
-        for (int i = start; reverse ? i >= 0 : i < len; i += step) {
-            // Array.prototype borrowing skips indices that became OOB after a
-            // callback resized the backing buffer; native TypedArray calls do not.
-            if (array_semantics && i >= js_typed_array_length(obj)) continue;
-            Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
-            Item fn_args[4] = {accumulator, elem, (Item){.item = i2it(i)}, obj};
-            JS_ASSIGN_OR_RETURN_INTO(accumulator, js_call_function(
-                callback, make_js_undefined(), fn_args, 4));
-        }
-        return accumulator;
+    if (map) {
+        Item argument = {.item = i2it(length)};
+        output.set(js_typed_array_species_create_with_ops(owner.get(), &argument, 1, ops));
+        if (item_is_error(output.get())) return output.get();
     }
-
-    bool skip_oob = kind == JS_TYPED_CALLBACK_FOR_EACH ||
-        kind == JS_TYPED_CALLBACK_EVERY || kind == JS_TYPED_CALLBACK_SOME;
-    bool return_index = kind == JS_TYPED_CALLBACK_FIND_INDEX ||
-        kind == JS_TYPED_CALLBACK_FIND_LAST_INDEX;
-    bool find_mode = kind == JS_TYPED_CALLBACK_FIND || return_index ||
-        kind == JS_TYPED_CALLBACK_FIND_LAST;
-    int step = reverse ? -1 : 1;
-    int start = reverse ? len - 1 : 0;
-    for (int i = start; reverse ? i >= 0 : i < len; i += step) {
-        bool out_of_bounds = array_semantics && i >= js_typed_array_length(obj);
-        if (out_of_bounds && skip_oob) continue;
-        Item elem = out_of_bounds ? make_js_undefined()
-            : js_typed_array_get(obj, (Item){.item = i2it(i)});
-        if (find_mode && elem.item == ITEM_NULL) elem = make_js_undefined();
-        Item fn_args[3] = {elem, (Item){.item = i2it(i)}, obj};
-        JS_ASSIGN_OR_RETURN(result, js_call_function(callback, this_arg, fn_args, 3));
-        if (kind == JS_TYPED_CALLBACK_FOR_EACH) continue;
-        if (find_mode) {
-            if (js_is_truthy(result)) {
-                return return_index ? (Item){.item = i2it(i)} : elem;
-            }
-        } else if (kind == JS_TYPED_CALLBACK_EVERY) {
-            if (!js_is_truthy(result)) return (Item){.item = ITEM_FALSE};
-        } else if (js_is_truthy(result)) {
-            return (Item){.item = ITEM_TRUE};
+    JsRootedItems kept;
+    bool initialized = argc > 1;
+    for (int visited = 0; visited < length; visited++) {
+        int index = reverse ? length - visited - 1 : visited;
+        if (array_semantics && !find && index >= js_typed_array_length(owner.get())) continue;
+        value.set(lambda_item_adopt_scalar_home(js_typed_array_get(owner.get(),
+            Item{.item = i2it(index)}), &homes[2]));
+        if (item_is_error(value.get())) return value.get();
+        if (reduce && !initialized) {
+            accumulator.set(lambda_item_adopt_scalar_home(value.get(), &homes[1]));
+            initialized = true;
+            continue;
+        }
+        Item arguments[4]; int count = 0;
+        if (reduce) arguments[count++] = accumulator.get();
+        arguments[count++] = value.get();
+        arguments[count++] = Item{.item = i2it(index)};
+        arguments[count++] = owner.get();
+        result.set(lambda_item_adopt_scalar_home(ops ?
+            ops->call(callback.get(), self.get(), arguments, count) :
+            js_call_function(callback.get(), self.get(), arguments, count), &homes[3]));
+        if (item_is_error(result.get())) return result.get();
+        if (reduce) accumulator.set(lambda_item_adopt_scalar_home(result.get(), &homes[1]));
+        else if (map) {
+            Item stored = js_typed_array_set_numeric_with_ops(output.get(), index, false, result.get(), buffer);
+            if (item_is_error(stored)) return stored;
+        } else if (filter && buffer->truthy(result.get())) {
+            Item retained = retain_scalar(value.get());
+            if (item_is_error(retained)) return retained;
+            if (!kept.push(retained)) return buffer->error(false, "TypedArray filter allocation failed");
+        } else if (find && buffer->truthy(result.get())) {
+            return return_index ? Item{.item = i2it(index)} : retain_scalar(value.get());
+        } else if (kind == JS_TYPED_CALLBACK_EVERY && !buffer->truthy(result.get())) {
+            return Item{.item = ITEM_FALSE};
+        } else if (kind == JS_TYPED_CALLBACK_SOME && buffer->truthy(result.get())) {
+            return Item{.item = ITEM_TRUE};
         }
     }
-    if (kind == JS_TYPED_CALLBACK_FOR_EACH) return make_js_undefined();
-    if (kind == JS_TYPED_CALLBACK_EVERY) return (Item){.item = ITEM_TRUE};
-    if (kind == JS_TYPED_CALLBACK_SOME) return (Item){.item = ITEM_FALSE};
-    return return_index ? (Item){.item = i2it(-1)} : make_js_undefined();
+    if (filter) {
+        Item argument = {.item = i2it(kept.count)};
+        output.set(js_typed_array_species_create_with_ops(owner.get(), &argument, 1, ops));
+        if (item_is_error(output.get())) return output.get();
+        for (int index = 0; index < kept.count; index++) {
+            Item stored = js_typed_array_set_numeric_with_ops(output.get(), index, false, kept.items[index], buffer);
+            if (item_is_error(stored)) return stored;
+        }
+    }
+    if (reduce) return initialized ? retain_scalar(accumulator.get()) :
+        buffer->error(false, "Reduce of empty array with no initial value");
+    if (map || filter) return output.get();
+    if (kind == JS_TYPED_CALLBACK_EVERY) return Item{.item = ITEM_TRUE};
+    if (kind == JS_TYPED_CALLBACK_SOME) return Item{.item = ITEM_FALSE};
+    return return_index ? Item{.item = i2it(-1)} : absent;
 }
 
 // Join and toLocaleString differ only in the separator and in how each
@@ -21551,31 +21532,11 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 return js_typed_array_slice(obj, start, end, array_semantics);
             }
             if (operation == JS_ARRAY_INTRINSIC_MAP) {
-                Item callback;
-                Item this_arg;
-                JS_ASSIGN_OR_RETURN(callback_status, js_typed_array_prepare_callback(obj, args, argc, array_semantics,
-                        "Cannot perform %TypedArray%.prototype.map on an out-of-bounds ArrayBuffer",
-                        &callback, &this_arg));
-                // Js55 P21: when Array.prototype.map is called on a TA, ES spec
-                // ArraySpeciesCreate creates a regular Array (not a TA). The
-                // generic path uses HasProperty (skip on OOB → sparse holes).
-                // TA species_create would return a TA with element-type zeros.
-                if (array_semantics) {
-                    return js_array_generic_iterative_callback_with_object(
-                        obj, obj, args, argc, JS_ARRAY_ITER_MAP);
-                }
-                int len = js_typed_array_length(obj);
-                JS_ASSIGN_OR_RETURN(result, js_typed_array_species_create(obj, len));
-                for (int i = 0; i < len; i++) {
-                    if (array_semantics && i >= js_typed_array_length(obj)) continue;
-                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
-                    if (elem.item == ITEM_NULL) elem = make_js_undefined();
-                    Item idx_item = {.item = i2it(i)};
-                    Item fn_args[3] = {elem, idx_item, obj};
-                    JS_ASSIGN_OR_RETURN(mapped, js_call_function(callback, this_arg, fn_args, 3));
-                    js_typed_array_set(result, (Item){.item = i2it(i)}, mapped);
-                }
-                return result;
+                // borrowed Array.map retains ArraySpeciesCreate and sparse holes.
+                if (array_semantics) return js_array_generic_iterative_callback_with_object(
+                    obj, obj, args, argc, JS_ARRAY_ITER_MAP);
+                return js_typed_array_callback_algorithm(obj, args, argc,
+                    false, JS_TYPED_CALLBACK_MAP, NULL);
             }
             if (operation == JS_ARRAY_INTRINSIC_INDEX_OF) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
@@ -21648,39 +21609,39 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
             }
             if (operation == JS_ARRAY_INTRINSIC_FOR_EACH) {
                 return js_typed_array_callback_algorithm(obj, args, argc,
-                    array_semantics, JS_TYPED_CALLBACK_FOR_EACH);
+                    array_semantics, JS_TYPED_CALLBACK_FOR_EACH, NULL);
             }
             if (operation == JS_ARRAY_INTRINSIC_REDUCE) {
                 return js_typed_array_callback_algorithm(obj, args, argc,
-                    array_semantics, JS_TYPED_CALLBACK_REDUCE);
+                    array_semantics, JS_TYPED_CALLBACK_REDUCE, NULL);
             }
             if (operation == JS_ARRAY_INTRINSIC_FIND) {
                 return js_typed_array_callback_algorithm(obj, args, argc,
-                    array_semantics, JS_TYPED_CALLBACK_FIND);
+                    array_semantics, JS_TYPED_CALLBACK_FIND, NULL);
             }
             if (operation == JS_ARRAY_INTRINSIC_FIND_INDEX) {
                 return js_typed_array_callback_algorithm(obj, args, argc,
-                    array_semantics, JS_TYPED_CALLBACK_FIND_INDEX);
+                    array_semantics, JS_TYPED_CALLBACK_FIND_INDEX, NULL);
             }
             if (operation == JS_ARRAY_INTRINSIC_EVERY) {
                 return js_typed_array_callback_algorithm(obj, args, argc,
-                    array_semantics, JS_TYPED_CALLBACK_EVERY);
+                    array_semantics, JS_TYPED_CALLBACK_EVERY, NULL);
             }
             if (operation == JS_ARRAY_INTRINSIC_SOME) {
                 return js_typed_array_callback_algorithm(obj, args, argc,
-                    array_semantics, JS_TYPED_CALLBACK_SOME);
+                    array_semantics, JS_TYPED_CALLBACK_SOME, NULL);
             }
             if (operation == JS_ARRAY_INTRINSIC_FIND_LAST) {
                 return js_typed_array_callback_algorithm(obj, args, argc,
-                    array_semantics, JS_TYPED_CALLBACK_FIND_LAST);
+                    array_semantics, JS_TYPED_CALLBACK_FIND_LAST, NULL);
             }
             if (operation == JS_ARRAY_INTRINSIC_FIND_LAST_INDEX) {
                 return js_typed_array_callback_algorithm(obj, args, argc,
-                    array_semantics, JS_TYPED_CALLBACK_FIND_LAST_INDEX);
+                    array_semantics, JS_TYPED_CALLBACK_FIND_LAST_INDEX, NULL);
             }
             if (operation == JS_ARRAY_INTRINSIC_REDUCE_RIGHT) {
                 return js_typed_array_callback_algorithm(obj, args, argc,
-                    array_semantics, JS_TYPED_CALLBACK_REDUCE_RIGHT);
+                    array_semantics, JS_TYPED_CALLBACK_REDUCE_RIGHT, NULL);
             }
             if (operation == JS_ARRAY_INTRINSIC_JOIN) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);
@@ -21699,33 +21660,8 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                 return js_array_like_to_locale_string(obj, true);
             }
             if (operation == JS_ARRAY_INTRINSIC_FILTER) {
-                Item callback;
-                Item this_arg;
-                JS_ASSIGN_OR_RETURN(callback_status, js_typed_array_prepare_callback(obj, args, argc, array_semantics,
-                        "Cannot perform %TypedArray%.prototype.filter on an out-of-bounds ArrayBuffer",
-                        &callback, &this_arg));
-                int len = js_typed_array_length(obj);
-                // collect matching elements first; a BigInt element stays
-                // rooted across its callback and the species constructor
-                JsRootedItems kept;
-                JS_ROOTS(roots, elem_root, ItemNull, result_root, ItemNull);
-                for (int i = 0; i < len; i++) {
-                    if (array_semantics && i >= js_typed_array_length(obj)) continue;
-                    elem_root.set(js_typed_array_get(obj, (Item){.item = i2it(i)}));
-                    if (elem_root.get().item == ITEM_NULL) elem_root.set(make_js_undefined());
-                    Item idx_item = {.item = i2it(i)};
-                    Item fn_args[3] = {elem_root.get(), idx_item, obj};
-                    JS_ASSIGN_OR_RETURN(selected, js_call_function(callback, this_arg, fn_args, 3));
-                    if (js_is_truthy(selected) && !kept.push(elem_root.get())) {
-                        return js_throw_type_error("TypedArray.prototype.filter allocation failed");
-                    }
-                }
-                JS_ASSIGN_OR_RETURN(created, js_typed_array_species_create(obj, (int)kept.count));
-                result_root.set(created);
-                for (int i = 0; i < kept.count; i++) {
-                    js_typed_array_set(result_root.get(), (Item){.item = i2it(i)}, kept.items[i]);
-                }
-                return result_root.get();
+                return js_typed_array_callback_algorithm(obj, args, argc,
+                    array_semantics, JS_TYPED_CALLBACK_FILTER, NULL);
             }
             if (operation == JS_ARRAY_INTRINSIC_REVERSE) {
                 JsTypedArray* ta = js_get_typed_array_ptr(obj.map);

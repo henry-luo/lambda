@@ -69,7 +69,7 @@ static uint64_t js_dataview_bigint_to_uint64(Item value) {
     return (uint64_t)raw_value;
 }
 
-static const JsBufferViewOps js_buffer_view_default_ops = {
+const JsBufferViewOps js_buffer_view_default_ops = {
     js_to_number, js_dataview_to_bigint_value,
     [](Item owner, const char* key) { return js_get_key_cstr(owner, key); },
     [](Item target, bool view) { return js_get_prototype_from_constructor_default(
@@ -1836,7 +1836,8 @@ static Item js_typed_array_alloc_carrier(JsTypedArrayType element_type,
 
 static const JsTypedArrayOps js_typed_array_default_ops = {
     &js_buffer_view_default_ops, NULL, NULL,
-    [](Item source, int index) { return js_get_key_default(source, Item{.item = i2it(index)}); }, NULL, NULL
+    [](Item source, int index) { return js_get_key_default(source, Item{.item = i2it(index)}); },
+    NULL, NULL, NULL, NULL
 };
 
 // Create a standalone typed array (owns its buffer)

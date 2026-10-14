@@ -130,6 +130,45 @@ TEST_F(JsMvpLmd, TypedArraySubarraySpeciesAndResize) {
     boolean("let a=new Uint8Array(2),b=a.subarray(1);b.length===1&&b.buffer===a.buffer");
     error("let a=new Uint8Array(2);a.subarray(Symbol())", "TypeError");
 }
+TEST_F(JsMvpLmd, TypedArrayCallbacksAndReductions) {
+    boolean("let a=new Uint8Array([1,2,3]),seen=0;a.forEach(function(v,i,o){if(o!==a||this.step!==4)throw 1;seen+=v+i}, {step:4});seen===9&&a.every(v=>v>0)&&a.some(v=>v===2)&&a.find(v=>v>1)===2&&a.findIndex(v=>v>1)===1&&a.findLast(v=>v>1)===3&&a.findLastIndex(v=>v>1)===2");
+    boolean("let a=new Int8Array([1,2,3]);a.reduce((s,v)=>s*10+v)===123&&a.reduceRight((s,v)=>s*10+v)===321&&a.reduce((s,v)=>s+v,4)===10&&new Uint8Array(0).reduce(()=>{throw 1},undefined)===undefined");
+    boolean("let a=new BigInt64Array([1n,2n,3n]);a.reduce((s,v)=>s+v,0n)===6n&&a.findLast(v=>v<3n)===2n");
+    boolean("let a=new Uint8Array(2),b=a.map(v=>v+3);b instanceof Uint8Array&&b[0]===3&&b.length===2&&new Uint8Array(0).every(()=>false)&&!new Uint8Array(0).some(()=>true)");
+    boolean("let a=new Uint8Array(2),key='ma'+'p',b=a[key](v=>v+3);b[0]===3&&b[1]===3");
+    boolean("let a=new Float64Array(2);let run=(key)=>a[key](v=>v+0.5);let b=run('map');b[0]===0.5&&b[1]===0.5");
+    boolean("let a=new Uint8Array(2),key='ma'+'p',method=a[key];let b=method.call(a,v=>v+3);b[0]===3&&b[1]===3");
+    boolean("let a=new Float64Array(2);let get=(key)=>a[key];let method=get('map'),b=method.call(a,v=>v+0.5);b[0]===0.5&&b[1]===0.5");
+    error("let a=new Uint8Array(1);a[0]()", "TypeError");
+    error("new Uint8Array(0).reduce(v=>v)", "TypeError");
+    error("Uint8Array.prototype.find.call({length:1},()=>true)", "TypeError");
+    error("new Uint8Array(1).map(null)", "TypeError");
+    error("new Uint8Array.prototype.filter()", "TypeError");
+}
+TEST_F(JsMvpLmd, TypedArrayCallbacksSpeciesAndEffectOrder) {
+    boolean("let a=new Uint8Array([1,2,3]),log='';a.constructor={get [Symbol.species](){log+='s';return class extends Int16Array{constructor(n){super(n);log+='c'}}}};let b=a.map(v=>{log+='m';return v+256});b instanceof Int16Array&&b[0]===257&&log==='scmmm'");
+    boolean("let a=new Uint8Array([1,2,3]),log='',size=0;a.constructor={get [Symbol.species](){log+='s';return function(n){size=n;log+='c';return new Float64Array(n)}}};let b=a.filter(v=>{log+='f';return v!==2});b.length===2&&b[1]===3&&log==='fffsc'&&size===2");
+    boolean("class C extends Uint8Array{}let a=new C([1,2]);a.map(v=>v) instanceof C&&a.filter(v=>true) instanceof C");
+    boolean("let a=new Uint8Array([1]),called=0;a.constructor={get [Symbol.species](){called++;throw 7}};let value;try{a.map(null)}catch(e){value=e instanceof TypeError}value&&called===0");
+    error("let a=new Uint8Array([1]);a.constructor={[Symbol.species]:function(){return new BigInt64Array(1)}};a.map(x=>x)", "TypeError");
+    error("let a=new BigInt64Array([1n]);a.map(x=>1)", "TypeError");
+    error("let a=new Uint8Array([1,2]);a.constructor={[Symbol.species]:function(){return new Uint8Array(1)}};a.filter(()=>true)", "TypeError");
+}
+TEST_F(JsMvpLmd, TypedArrayCallbacksResizeAndBorrowing) {
+    boolean("let b=new ArrayBuffer(3,{maxByteLength:6}),a=new Uint8Array(b),seen=[];a[0]=3;a[1]=4;a[2]=5;a.forEach((v,i)=>{seen.push(v);if(i===0)b.resize(0)});seen.length===3&&seen[0]===3&&seen[1]===undefined&&seen[2]===undefined");
+    boolean("let b=new ArrayBuffer(3),a=new Uint8Array(b),seen=[];a[0]=3;a.reduce((s,v,i)=>{seen.push(v);if(i===0)b.transfer();return s+1},0);seen.length===3&&seen[1]===undefined");
+    boolean("let b=new ArrayBuffer(2,{maxByteLength:4}),a=new Uint8Array(b),seen=0;a.forEach(()=>{seen++;b.resize(4)});seen===2");
+    boolean("let b=new ArrayBuffer(3,{maxByteLength:6}),a=new Uint8Array(b),seen=0;Array.prototype.forEach.call(a,()=>{seen++;b.resize(0)});seen===1");
+    boolean("let b=new ArrayBuffer(3),a=new Uint8Array(b);a[0]=7;let result=a.find((v,i)=>{b.transfer();return true});result===7");
+    error("let b=new ArrayBuffer(1),a=new Uint8Array(b);b.transfer();a.forEach(()=>{})", "TypeError");
+    boolean("let a=new Int8Array([1,2]),n=0;a.constructor={[Symbol.species]:function(k){return new Int8Array(k)}};let b=a.map(v=>({valueOf(){n++;return v+1}}));n===2&&b[0]===2&&b[1]===3");
+}
+TEST_F(JsMvpLmd, TypedArrayCallbacksScalarOwnership) {
+    boolean("let a=new Float64Array([5e-324,-0,1e-323]);let b=a.filter((v,i)=>{a[i]=9;let n=new Float64Array([0.5,1.5]);return n[0]===0.5});b[0]===5e-324&&1/b[1]===-Infinity&&b[2]===1e-323");
+    boolean("let a=new Float64Array([5e-324,1e-323]);let x=a.find((v,i)=>{a[i]=7;return true}),y=a.reduce((s,v)=>s+v,5e-324);x===5e-324&&y===7");
+    boolean("let a=new BigInt64Array([3n,4n,5n]);let b=a.filter(v=>{let junk=[];for(let i=0;i<30;i++)junk.push({value:i});return v!==4n});b[0]===3n&&b[1]===5n");
+    boolean("let a=new Uint8Array([1,2]),error={};let caught;try{a.map(()=>{throw error})}catch(e){caught=e}caught===error");
+}
 TEST_F(JsMvpLmd, ArrayFromArrayLikeAndConstructors) {
     boolean("let a=Array.from({length:3,0:4,2:7},function(v,i){return v===undefined?i:v+this.step},{step:1});a.length===3&&a[0]===5&&a[1]===1&&a[2]===8");
     boolean("let a=Array.from({length:2});a.length===2&&a.hasOwnProperty('0')&&a.hasOwnProperty('1')&&a[0]===undefined");

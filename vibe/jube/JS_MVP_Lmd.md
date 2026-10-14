@@ -1711,8 +1711,8 @@ algorithms. Lambda shapes and precise roots retain ownership across
 coercion, resize and detach (**D5.2–D5.3**, **D6.2.3v2**). Existing numeric-only
 constructor proofs retain their fast path; publishing unused global constructors
 does not invalidate ordinary-array optimizations. Other typed-array methods,
-the dynamic-source interpreter bridge and realm support remain open. The latest
-pin passes **223/223** focused and GC-stress checks, **292/315** selected IDs in
+the dynamic-source interpreter bridge and realm support remain open. The preceding
+typed-view pin passes **223/223** focused and GC-stress checks, **292/315** selected IDs in
 every required mode, and **40,261/40,261** full-LJS Test262 cases. This retains
 **72** additional selected passes over the preceding typed-view increment.
 Shared MIR root analysis now reuses one predecessor graph (**D5.3.1**,
@@ -1720,6 +1720,25 @@ Shared MIR root analysis now reuses one predecessor graph (**D5.3.1**,
 resolve interrupted results; **23** selected cases remain unsupported, and the
 original timeout captures remain archived. Detailed evidence is recorded in the
 implementation plan; no new whole-population coverage or performance claim is made.
+
+The next typed-array increment adds map/filter, forEach, every/some, four find
+variants and both reductions through the shared callback algorithm. Species,
+conversion and exact-root ownership reuse the existing runtime operations
+(**D1.3v3**, **D5.2–D5.3**). Focused and forced-GC checks pass **227/227** each.
+All required modes pass for **807/842** selected IDs: **515/550** callback cases
+and all **292** preceding selected passes. Full-LJS passes **40,261/40,261**.
+The remaining 35 selected cases require the dynamic-Function interpreter bridge.
+The Lambda/Input gate passes **6,880/6,881** twice, with one LaTeX corpus timeout
+that passes three isolated replays; aggregate acceptance remains open. A planner
+follow-up admits computed typed-method calls and passes **227/227** focused
+checks. A further planner change uses inferred non-numeric keys to admit saved
+method aliases while retaining numeric-loop specialization (**D8.4.1v2**).
+That follow-up passes **227/227** focused and **227/227** forced/poisoned-GC
+checks. Its fresh audit also passes **807/842** selected IDs in every required
+mode, including **779/779** additional strict variants, with no timeouts, missing
+outcomes or lost preceding selected passes. Full-LJS also passes
+**40,261/40,261**, zero regressions. Its Lambda/Input gate is in progress;
+whole-population coverage and timing remain open.
 
 The latest matched-release screen passes **84/84** output/backend contracts;
 two independent 31-round repeats cover the same eleven suspects. A 99-round

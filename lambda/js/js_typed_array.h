@@ -130,6 +130,7 @@ typedef struct JsBufferViewOps {
     Item (*species)(Item);
     Item (*construct)(Item, int, bool);
 } JsBufferViewOps;
+extern const JsBufferViewOps js_buffer_view_default_ops;
 
 // typed views reuse buffer ownership while each frontend supplies object semantics.
 typedef struct JsTypedArrayOps {
@@ -139,7 +140,20 @@ typedef struct JsTypedArrayOps {
     Item (*get_index)(Item, int);
     Item (*collect)(Item); // undefined means GetMethod(@@iterator) was absent
     Item (*construct)(JsTypedArrayType, Item, Item*, int); // undefined selects the intrinsic constructor
+    bool (*callable)(Item);
+    Item (*call)(Item, Item, Item*, int);
 } JsTypedArrayOps;
+
+typedef enum JsTypedArrayCallbackKind {
+    JS_TYPED_CALLBACK_FOR_EACH, JS_TYPED_CALLBACK_REDUCE,
+    JS_TYPED_CALLBACK_FIND, JS_TYPED_CALLBACK_FIND_INDEX,
+    JS_TYPED_CALLBACK_EVERY, JS_TYPED_CALLBACK_SOME,
+    JS_TYPED_CALLBACK_FIND_LAST, JS_TYPED_CALLBACK_FIND_LAST_INDEX,
+    JS_TYPED_CALLBACK_REDUCE_RIGHT, JS_TYPED_CALLBACK_MAP, JS_TYPED_CALLBACK_FILTER,
+} JsTypedArrayCallbackKind;
+
+Item js_typed_array_callback_algorithm(Item owner, Item* args, int argc,
+    bool array_semantics, JsTypedArrayCallbackKind kind, const JsTypedArrayOps* ops);
 
 Item js_typed_array_construct_with_ops(int type_id, Item source, Item offset,
     Item length, int argc, Item target, const JsTypedArrayOps* ops);

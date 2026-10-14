@@ -1210,6 +1210,10 @@ static const JsTypedArrayOps typed_array_ops = {
             constructor = mvp_lmd_program_library()->typed_arrays[type].values[0];
         if (!mvp_lmd_is_constructor(constructor)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
         return mvp_lmd_class_invoke(constructor, Item{.item = ITEM_JS_UNDEFINED}, args, count, constructor);
+    },
+    mvp_lmd_is_callable,
+    [](Item callback, Item receiver, Item* args, int count) {
+        return mvp_lmd_class_invoke(callback, receiver, args, count, Item{.item = ITEM_JS_UNDEFINED});
     }
 };
 Item mvp_lmd_typed_array_store(Item owner, double index, Item value) {
@@ -1240,6 +1244,8 @@ static Item typed_array_method(Context*, MvpLmdProgram* program, Item* args, uin
     if (operation == 8) return js_typed_array_subarray(receiver,
         count ? args[0] : Item{.item = ITEM_JS_UNDEFINED},
         count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}, &typed_array_ops);
+    if (operation >= 9) return js_typed_array_callback_algorithm(receiver, args, count,
+        false, (JsTypedArrayCallbackKind)(operation - 9), &typed_array_ops);
     if (js_typed_array_is_out_of_bounds_item(receiver)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     return mvp_lmd_sequence_iterator_create(program, receiver, operation - 5, false, false);
 }
@@ -1286,9 +1292,11 @@ Item mvp_lmd_typed_array_initialize(MvpLmdProgram* program, MvpLmdLibraryState* 
     Item status = mvp_lmd_define_accessor(state->typed_arrays[12].values[0],
         Item{.item = s2it(well_known_name_ref(JS_SYMBOL_SPECIES))}, method.get(), JSPD_NON_ENUMERABLE << 8);
     if (item_is_error(status)) return status;
-    const char* methods[] = {"values", "keys", "entries", "subarray"};
-    for (int i = 0; i < 4; i++) {
-        method.set(mvp_lmd_native_function(program, (void*)(intptr_t)(5 + i), typed_array_method, i == 3 ? 2 : 0, methods[i]));
+    const char* methods[] = {"values", "keys", "entries", "subarray", "forEach", "reduce",
+        "find", "findIndex", "every", "some", "findLast", "findLastIndex", "reduceRight", "map", "filter"};
+    for (int i = 0; i < (int)(sizeof(methods) / sizeof(methods[0])); i++) {
+        method.set(mvp_lmd_native_function(program, (void*)(intptr_t)(5 + i), typed_array_method,
+            i < 3 ? 0 : i == 3 ? 2 : 1, methods[i]));
         if (item_is_error(method.get())) return method.get();
         status = mvp_lmd_named_set(base, methods[i], method.get(), JSPD_NON_ENUMERABLE);
         if (item_is_error(status)) return status;

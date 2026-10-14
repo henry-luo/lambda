@@ -1,6 +1,6 @@
 # JS MVP: 90% of LJS Test262 coverage
 
-**Date:** 2026-10-14. **Status:** in progress; initial P1/P2/P3 increments, native private-class execution, ArrayBuffer/DataView and typed-view construction/reflection/iteration are implemented; typed species/subarray and shared MIR predecessor reuse are implemented. The latest complete whole-population audit (buffer7) passes **25,406/40,261 IDs (63.1%)** after every required variant, plus focused, forced-GC and shared baseline gates. Another **10,829** passes are needed for 90%; performance acceptance remains open. Earlier captures remain build-specific evidence.
+**Date:** 2026-10-14. **Status:** in progress; initial P1/P2/P3 increments, native private-class execution, ArrayBuffer/DataView and typed-view construction/reflection/iteration are implemented; typed species/subarray/callback methods and shared MIR predecessor reuse are implemented. The latest complete whole-population audit (buffer7) passes **25,406/40,261 IDs (63.1%)** after every required variant, plus focused, forced-GC and shared baseline gates. Another **10,829** passes are needed for 90%; performance acceptance remains open. Earlier captures remain build-specific evidence.
 **Design:** [JS_MVP_Lmd §34](../jube/JS_MVP_Lmd.md#34-ninety-percent-of-ljs-test262-coverage).
 **Scope:** extend the implemented MVP toward 90% of the frozen LJS passing
 population, preserving ordinary benchmark performance. This plan stages the
@@ -234,6 +234,17 @@ length-tracking construction, and detached/shrunken source callbacks. Named
 view properties and iterator/subarray methods require observable typed storage
 when typed constructors are used; numeric-only programs retain the existing
 ArrayNum proof. No ordinary object representation or runtime flag changes.
+
+P4 callback follow-up: promote `js_typed_array_callback_algorithm` and its kind
+enum and expose the existing default buffer policy; extend `JsTypedArrayOps`
+with callable/invocation operations. Merge the
+existing typed map/filter loops into that visitor, reusing species construction,
+typed stores and `JsRootedItems`. MVP publishes the eleven callback methods only
+with observable typed storage. Snapshot internal length, retain callback values
+and filter selections across reentry, and preserve borrowed Array hole behavior
+(**D1.3v3**, **D5.2–D5.3**, **D8.4.1v2**). Ordinary Array visitors and numeric-only
+loops retain their current implementation. The selected frozen cohort contains
+550 callback-method IDs; entry MVP lacks these methods. Timing remains deferred.
 
 ### P5. Promises, async bodies and iteration
 
@@ -1195,3 +1206,76 @@ logs, shared-gate logs and their archived suite artifacts. `increment-record.jso
 checks source/binary/corpus identity and required-mode completeness. Buffer7
 remains the last complete whole-population audit. Benchmark timing remains
 deferred; this increment does not close the 90% or performance acceptance gates.
+
+### Typed callback increment (2026-10-14; validation in progress)
+
+The eleven typed callback methods now share `js_typed_array_callback_algorithm`
+across LJS and MVP, including the existing map/filter walks. `JsTypedArrayOps`
+supplies callable/invocation operations; the existing default buffer policy is
+visible to the shared algorithm. Species creation and typed conversion/stores
+reuse the preceding kernels (**D1.3v3**, **D2.6.9v3**). Precise roots retain the
+receiver, callback, thisArg, accumulator, current value, callback result and
+output; selected filter scalars and returned scalars receive durable number
+homes (**D5.2–D5.3**). The walk captures internal length, preserves callback/
+species order and propagates conversion exceptions. Borrowed Array methods keep
+their existing hole policy. Ordinary Array visitors are unchanged.
+
+Focused testing found that callback-name planning queried the Map method table,
+leaving numeric constructors such as `new Uint8Array(0).reduce(...)` on raw
+storage. Querying the Array method table fixes this capability failure and
+preserves the required TypeError. The failed `typed_methods1` pin and reproducer
+remain archived. The corrected `typed_methods2/mvp-typed-methods2.exe` pin has
+SHA-256 `d0b6c5c6f57a58c6b4ad2f71c8d5e84acd361d24f3829ba424a197ffc8480044`
+at HEAD `a8d254c0e48001904e449c4ddae5c34470132365`. It passes **227/227** focused
+and **227/227** forced/poisoned-GC checks. The selected cohort contains **550**
+callback IDs plus **292** preceding selected passes. After unchanged-limit
+isolated replay, **807/842 IDs pass every required mode**, including **515/550**
+callback IDs and all **292** preceding passes. All **779** additional required
+strict variants pass on their first run. The initial canonical capture
+(**785 pass, 53 fail, four timeouts**) and isolated replay (**22 pass, eight
+fail**) remain archived; the initial failures include 26 missing batch tails.
+All 35 remaining IDs fail admission in cases using the unchanged resizable
+buffer harness's dynamic `Function` subclass factory. They remain unsuccessful.
+Full-LJS Test262 passes **40,261/40,261**, zero regressions. The initial
+Lambda/Input gate passes **6,880/6,881**: `latex_test_latex_phase3_corpus`
+reaches its 60-second limit. Three isolated runs on unchanged binaries pass
+under that same limit. The complete rerun with the existing
+`AST_TUNE_BATCH_WORKERS=2` control also passes **6,880/6,881**, with the same
+timeout. This does not establish a cause or close the shared aggregate gate.
+Original artifacts remain under `gate-artifacts/`; isolated replays and the
+complete rerun are separate. No timeout or test source was changed.
+
+A final planning review reproduces a capability failure for
+`new Uint8Array(2)` followed by `a[key](...)`, where `key` selects `map`.
+An array-initialized typed view passes the same call, identifying the raw-storage
+selection as the cause. Computed method calls now select observable typed storage
+even without a known spelling; numeric element reads retain the preceding rule
+(**D8.4.1v2**). The follow-up `typed_methods3/mvp-typed-methods3.exe`, SHA-256
+`f490df0026636d2bf2e75b1ab85207101e29bfabeee402155fa59fb386cfb466`, passes
+**227/227** focused and **227/227** forced/poisoned-GC checks, including computed
+callback dispatch and numeric non-callable TypeError. Its selected audit was
+interrupted explicitly for the following alias fix; the partial capture is
+retained and is not counted as a completed audit.
+
+The raw adapter's pre-existing computed named-key read limit also affected
+saving `a[key]` into an alias before invoking it. Both forms and their results
+are retained under `typed_methods2/`. The inferred-key follow-up extracts
+`plan_typed_storage` and `reset_representation_facts` from existing blocks. After
+type inference, a typed receiver with a potentially non-numeric key selects
+observable storage and reruns the existing solver once before choosing ABIs.
+The storage decision is monotone; numeric/optional-numeric reads retain their
+preceding specialization and capability boundary (**D1.3v3**, **D8.4.1v2**).
+No runtime helper or ordinary-container flag is added. Direct and returned
+computed method aliases have focused checks. The follow-up
+`typed_methods4/mvp-typed-methods4.exe`, SHA-256
+`65ab0e2c7da8cf8db6aa39dacc0605bb6a6767eab0e06722c4f0e236ecc139b4`,
+passes **227/227** focused and **227/227** forced/poisoned-GC checks. Both direct
+and saved computed-method reproducers complete successfully on this pin.
+Its fresh selected canonical run passes **807/842** with **35 admission
+failures**, no timeouts and no missing outcomes; all **779** additional required
+strict variants pass. Thus **807/842 IDs pass every required mode** on this pin,
+including **515/550** callback IDs and all **292** preceding selected passes.
+No isolated replay is needed. The unsuccessful ID set equals `typed_methods2`'s
+35 dynamic-Function harness cases. Full-LJS Test262 passes **40,261/40,261**,
+zero regressions. The Lambda/Input gate is in progress; neither selected audit
+is a new whole-population coverage result. Benchmark timing remains deferred.
