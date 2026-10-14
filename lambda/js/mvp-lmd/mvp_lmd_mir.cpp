@@ -1066,14 +1066,19 @@ static void walk(AstNode* n, LmdWalk* state) {
     case AST_NODE_MEMBER_EXPR: case AST_NODE_INDEX_EXPR: {
         AstFieldNode* field = (AstFieldNode*)n;
         String* spelling = member_spelling(field);
+        int collection_method = spelling ? mvp_lmd_builtin_method(spelling) : 0;
+        // typed callbacks share Array spellings, not the Map collection table.
+        int indexed_method = spelling ? mvp_lmd_builtin_method(spelling, LMD_TYPE_ARRAY) : 0;
+        bool method_call = state->parent && state->parent->node_type == AST_NODE_CALL_EXPR &&
+            ((AstCallNode*)state->parent)->callee == n;
         // these operations observe a typed view beyond the raw numeric lane.
         // apply the requirement after gathering so declaration order is irrelevant.
         if (named(spelling, "subarray") || named(spelling, "buffer") || named(spelling, "byteOffset") ||
-                named(spelling, "byteLength") || named(spelling, "keys") || named(spelling, "values") || named(spelling, "entries"))
+                named(spelling, "byteLength") || named(spelling, "keys") || named(spelling, "values") || named(spelling, "entries") ||
+                (mvp_lmd_array_visit_method(indexed_method) && indexed_method != LMD_METHOD_FLAT_MAP) ||
+                // computed calls observe the typed prototype even without a known method name.
+                (!spelling && method_call))
             p->typed_members = true;
-        int collection_method = spelling ? mvp_lmd_builtin_method(spelling) : 0;
-        bool method_call = state->parent && state->parent->node_type == AST_NODE_CALL_EXPR &&
-            ((AstCallNode*)state->parent)->callee == n;
         AstNode* consumer = method_call ? ast_index_parent(&p->frontend->ast_index, state->parent) : NULL;
         AstIdentNode* receiver = field->object->node_type == AST_NODE_IDENT ? (AstIdentNode*)field->object : NULL;
         // borrowed methods and Object reflection can box receivers without spelling a primitive constructor.
@@ -8487,6 +8492,16 @@ static void plan_library_shapes(MvpLmdProgram* p, bool metadata_only = false) {
     p->intrinsics[I_MAP - 1].slot = p->library_slot + LMD_LIBRARY_MAP;
     p->intrinsics[I_MATH - 1].slot = p->library_slot + LMD_LIBRARY_MATH;
 }
+static void plan_typed_storage(MvpLmdProgram* p) {
+    if (!p->typed_storage) return;
+    activate_library(p, p->frontend->ast_root);
+    p->buffers = p->primitives = p->iterators = p->symbols = true;
+    // publishing unused global constructors does not expose ordinary array mutation.
+    if (p->typed_explicit) {
+        p->property_callbacks = true;
+        p->array_method_overrides = p->map_method_overrides = p->primitive_method_overrides = true;
+    }
+}
 static void plan_global_bindings(MvpLmdProgram* p) {
     NameScope* scope = ((AstScript*)p->frontend->ast_root)->global_vars;
     for (int i = 0; i < p->bindings->length; i++) {
@@ -8650,21 +8665,24 @@ static int admission_pass(void* opaque) {
         unsigned argument = call->arguments ? kind(p, call->arguments) : K_NUMBER;
         if (p->property_callbacks || (argument && argument != K_NUMBER)) p->typed_storage = true;
     }
-    if (p->typed_storage) {
-        activate_library(p, p->frontend->ast_root);
-        p->buffers = p->primitives = p->iterators = p->symbols = true;
-        // publishing unused global constructors does not expose ordinary array mutation.
-        if (p->typed_explicit) {
-            p->property_callbacks = true;
-            p->array_method_overrides = p->map_method_overrides = p->primitive_method_overrides = true;
-        }
-    }
+    plan_typed_storage(p);
     if (p->library_active) plan_library_shapes(p);
     if (p->global_reflection) plan_global_bindings(p);
     for (int i = 0; i < p->bindings->length; i++) {
         LmdBinding* b = (LmdBinding*)p->bindings->data[i]; b->seed_kinds = b->kinds;
     }
     return !p->diagnostic[0];
+}
+static void reset_representation_facts(MvpLmdProgram* p) {
+    for (int i = 0; i < p->bindings->length; i++) {
+        LmdBinding* b = (LmdBinding*)p->bindings->data[i];
+        b->kinds = b->seed_kinds; b->range = {}; b->range_changes = 0;
+        b->present_range = {}; b->present_range_changes = 0;
+    }
+    for (int i = 0; i < p->functions->length; i++) {
+        LmdFunction* f = (LmdFunction*)p->functions->data[i];
+        f->returns = 0; f->range = {}; f->range_changes = 0;
+    }
 }
 static int representation_pass(void* opaque) {
     MvpLmdProgram* p = (MvpLmdProgram*)opaque;
@@ -8740,6 +8758,21 @@ static int representation_pass(void* opaque) {
             if (!f->array.length.state) { f->array.length.state = 2; ranges.changed = true; }
         }
         while (ranges.changed) { ranges.changed = false; range_walk(p->frontend->ast_root, &ranges); }
+    }
+    if (p->typed_explicit && !p->typed_storage) for (AstNodeId i = 0; i < p->frontend->ast_index.count; i++) {
+        AstNode* node = p->frontend->ast_index.nodes[i];
+        if (node->node_type != AST_NODE_MEMBER_EXPR && node->node_type != AST_NODE_INDEX_EXPR) continue;
+        AstFieldNode* field = (AstFieldNode*)node;
+        if (!field->computed || member_spelling(field) || !(kind(p, field->object) & K_TYPED_ARRAY)) continue;
+        if (!(kind(p, field->property) & ~(K_NUMBER | K_UNDEFINED))) continue;
+        // a named-key read can expose an escaped method; numeric loops retain raw lanes.
+        // promotion is monotone, so replay the existing solver once before choosing ABIs.
+        p->typed_storage = true;
+        plan_typed_storage(p);
+        plan_library_shapes(p);
+        if (p->diagnostic[0]) return false;
+        reset_representation_facts(p);
+        return representation_pass(p);
     }
     for (int i = 0; i < p->bindings->length; i++) {
         LmdBinding* b = (LmdBinding*)p->bindings->data[i];
@@ -10271,15 +10304,7 @@ static int lower_pass(void* opaque) {
     if (p->diagnostic[0]) return false;
     plan_scalar_objects(p);
     // proven unobservable fields feed the existing type/range solver, including accumulator lanes.
-    for (int i = 0; i < p->bindings->length; i++) {
-        LmdBinding* b = (LmdBinding*)p->bindings->data[i];
-        b->kinds = b->seed_kinds; b->range = {}; b->range_changes = 0;
-        b->present_range = {}; b->present_range_changes = 0;
-    }
-    for (int i = 0; i < p->functions->length; i++) {
-        LmdFunction* f = (LmdFunction*)p->functions->data[i];
-        f->returns = 0; f->range = {}; f->range_changes = 0;
-    }
+    reset_representation_facts(p);
     if (!representation_pass(p) || p->diagnostic[0]) return false;
     for (int i = 1; i < p->functions->length; i++)
         plan_numeric_region(p, (LmdFunction*)p->functions->data[i]);
