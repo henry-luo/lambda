@@ -1,6 +1,6 @@
 # Radiant multiple views and paged-media implementation
 
-**Status:** active long-running implementation, resumed at the user's request on 2026-10-09. The complete publishing proposal remains unfinished; verified increments and remaining gates are recorded below.
+**Status:** active long-running implementation, resumed at the user's request on 2026-10-09. The complete publishing proposal remains unfinished; verified increments and remaining gates are recorded below. **Direction change 2026-10-14:** the P4 engine in `layout_paged.cpp` is to be re-based onto the browsing layout engine with a paged mode and breaks as the only paged step, per [Radiant_Layout_Paged_Media §1.3](../radiant/Radiant_Layout_Paged_Media.md#13-design-principle-2026-10-14-paged-layout-is-normal-layout-with-breaks); the plan is [Radiant_Impl_Paged_Integration](Radiant_Impl_Paged_Integration.md). The records below remain the history of the delivered engine and of the page model, which stays.
 **Design authority:** [Radiant_Layout_Paged_Media](../radiant/Radiant_Layout_Paged_Media.md), including multiple views, preview roots, page selection and book spreads.
 **Formal linkage:** D4.5.1v4 (Radiant regions/pools and generation handles), D4.1.4v5 (allocator lifetime and single-writer publication), D5.3.3/D5.4.1 (precise callback/evaluator ownership), D7.1.2v2/D7.1.4v2 (resource layering and headless profiles), D7.3.6 (test-host export allowlist). Geometry follows RSC1 and RSC6–RSC8 in [Radiant_Scale](../radiant/Radiant_Scale.md). No formal language ruling is changed.
 
