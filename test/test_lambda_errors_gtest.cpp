@@ -32,6 +32,35 @@
 // Type-contract metadata tests
 //==============================================================================
 
+TEST(MirRootGraphTest, SparsePredecessorsPreserveDenseTraversalOrder) {
+    constexpr int blocks = 70, words = (blocks + 63) / 64;
+    uint64_t successors[blocks * words] = {};
+    for (int mode = 0; mode < 3; mode++) {
+        memset(successors, 0, sizeof(successors));
+        // empty graphs, loops and an indirect jump exercise the same edge contract.
+        for (int from = 0; from < blocks; from++) for (int to = 0; to < blocks; to++) {
+            bool edge = mode == 1 ? to == from || to == (from + 1) % blocks :
+                mode == 2 && (from == 35 || (from * 17 + to * 13) % 37 == 0);
+            if (edge) successors[from * words + to / 64] |= UINT64_C(1) << (to % 64);
+        }
+        MirRootPredecessors graph = em_root_build_predecessors(successors, blocks, words);
+        ASSERT_NE(graph.offsets, nullptr);
+        int position = 0;
+        for (int to = 0; to < blocks; to++) {
+            EXPECT_EQ(graph.offsets[to], position);
+            for (int from = 0; from < blocks; from++) {
+                if (!(successors[from * words + to / 64] & (UINT64_C(1) << (to % 64)))) continue;
+                ASSERT_NE(graph.edges, nullptr);
+                EXPECT_EQ(graph.edges[position++], from);
+            }
+            EXPECT_EQ(graph.offsets[to + 1], position);
+        }
+        em_root_free_predecessors(&graph);
+        EXPECT_EQ(graph.offsets, nullptr);
+        EXPECT_EQ(graph.edges, nullptr);
+    }
+}
+
 TEST(ValueRepresentationTest, CanonicalRepUsesTheFullSemanticContract) {
     EXPECT_EQ(lambda_canonical_rep(&TYPE_INT), VALUE_REP_INT_LANE);
     EXPECT_EQ(lambda_canonical_rep(&TYPE_FLOAT), VALUE_REP_F64);

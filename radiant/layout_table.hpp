@@ -1,6 +1,7 @@
 #pragma once
 #include <stddef.h>
 struct DomElement;
+struct CollapsedBorder;
 
 size_t layout_table_cell_colspan(DomElement* element);
 size_t layout_table_column_span(DomElement* element);
@@ -23,6 +24,10 @@ Index layout_table_place_span(Index rows, Index columns, Index row, Index col,
 
 void layout_table_distribute_rowspan_height(float* heights, size_t count, size_t start,
     size_t span, float required, float spacing, size_t empty_target);
+
+// collapsed-border conflict resolution (CSS 2.2 §17.6.2.1): hidden, then width, then style;
+// the first argument wins full ties, so callers pass candidates in precedence order.
+CollapsedBorder layout_table_collapsed_winner(const CollapsedBorder& a, const CollapsedBorder& b);
 
 // shared top/middle/bottom placement; valign uses TableCellProp::CELL_VALIGN_*.
 float layout_table_cell_vertical_align_target(int valign, float content_area_height,

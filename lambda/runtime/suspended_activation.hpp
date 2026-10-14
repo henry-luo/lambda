@@ -40,7 +40,13 @@ struct JsGeneratorStateRecord : JsSuspendedActivation {
 
 // One carrier layout and lifecycle for full JS and MVP MIR activations.
 struct JsGeneratorMapCarrier { Map base; JsGeneratorStateRecord state; };
-struct JsIterData { Item source; int64_t index; int64_t length; uint8_t ordered_projection; };
+struct JsIterData {
+    Item source;
+    int64_t index;
+    int64_t length;
+    uint8_t ordered_projection;
+    uint8_t sequence_projection; // 0: values, 1: keys, 2: entries; independent of ordered cursor leases
+};
 struct JsIteratorMapCarrier { Map base; JsIterData payload; };
 extern "C" void js_iterator_map_gc_trace(Map* map, gc_heap_t* gc);
 extern "C" void js_iterator_map_heap_destroy(Map* map);

@@ -15,6 +15,7 @@
 #include "../jube/jube_registry.h"
 #include "../js/js_runtime.h"
 #include "../js/js_typed_array.h"
+#include "../js/js_typed_array_carrier.hpp"
 #include "../core/lambda-decimal.hpp"
 #include "lambda-stack.h"
 #include "side_stack.h"
@@ -243,7 +244,7 @@ static JsTypedArray* gc_typed_array_from_map(Map* map) {
 }
 
 static JsDataView* gc_dataview_from_map(Map* map) {
-    return map ? js_get_dataview_ptr((Item){.map = map}) : NULL;
+    return js_get_dataview_ptr_from_map(map);
 }
 
 static void js_native_map_gc_trace(void* data, gc_heap_t* gc) {
@@ -305,7 +306,7 @@ static void gc_finalize_js_native_map(Map* map, gc_native_seen_t* seen_native) {
         break;
     }
     case MAP_KIND_ARRAYBUFFER: {
-        JsArrayBuffer* ab = js_get_arraybuffer_ptr_item((Item){.map = map});
+        JsArrayBuffer* ab = js_get_arraybuffer_ptr(map);
         gc_finalize_arraybuffer(ab, seen_native);
         break;
     }

@@ -321,6 +321,9 @@ Item js_class_heritage_prototype_parent(Item superclass);
 void js_set_class_constructor_parent(Item class_function, Item superclass);
 Item js_get_class_superclass(Item class_function);
 bool js_is_class_constructor_value(Item value);
+// canonical typed-array index parsing is shared across frontend property authorities.
+bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negative_zero);
+bool js_ta_numeric_index_valid(Item object, double numeric_index, bool negative_zero, int* index);
 // Shared numeric property-key materialization for JS element/descriptor code.
 Item js_property_index_key(int64_t index);
 String* js_property_index_name(int64_t index);
@@ -750,6 +753,20 @@ Item js_date_method(Item date_obj, int method_id);
 Item js_date_setter(Item date_obj, int method_id, Item arg0, Item arg1, Item arg2, Item arg3);
 Item js_date_new_multi(Item args_array);
 Item js_date_parse(Item str_item);
+
+// front ends share calendar kernels while retaining their own internal slots and completions.
+typedef struct JsDateOps {
+    Item (*number)(Item);
+    Item (*read)(Item, bool*);
+    Item (*store)(Item, double);
+    Item (*error)(bool, const char*);
+} JsDateOps;
+double js_date_time_clip(double value);
+double js_date_components_time(double* parts, bool local, bool relative_year);
+Item js_date_parse_text(String* text);
+Item js_date_method_with_ops(Item receiver, int method, const JsDateOps* ops);
+Item js_date_setter_with_ops(Item receiver, int method, Item arg0, Item arg1, Item arg2, Item arg3,
+    const JsDateOps* ops);
 Item js_map_collection_new(void);
 Item js_map_collection_new_from(Item iterable);
 Item js_set_collection_new(void);

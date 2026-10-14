@@ -186,7 +186,8 @@ static Item mvp_lmd_inherited_member_flags(Item owner, const char* key, size_t l
     Item cursor = get_prototype_with_library(owner, traversal_library);
     while (cursor.item != ITEM_NULL) {
         if (item_is_error(cursor)) return cursor;
-        if (semantic && (get_type_id(cursor) != LMD_TYPE_MAP || mvp_lmd_is_proxy(cursor))) {
+        if (semantic && (get_type_id(cursor) != LMD_TYPE_MAP || mvp_lmd_is_proxy(cursor) ||
+                cursor.map->map_kind == MAP_KIND_TYPED_ARRAY)) {
             // array indices and exotic internal methods need the original receiver and semantic dispatch.
             RootFrame roots(3);
             if (!roots.valid()) return ItemError;
@@ -294,6 +295,11 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
     }
     if (get_type_id(owner) == LMD_TYPE_ARRAY)
         return mvp_lmd_array_property(owner, name, value, operation, receiver);
+    if (!fixed && get_type_id(owner) == LMD_TYPE_MAP && owner.map->map_kind == MAP_KIND_TYPED_ARRAY) {
+        double index;
+        if (mvp_lmd_typed_array_index(owner, name, &index))
+            return mvp_lmd_typed_array_property(owner, name, value, operation, receiver);
+    }
     bool strict = (operation & LMD_PROP_STRICT) != 0;
     operation &= ~LMD_PROP_STRICT;
     if (!fixed && mvp_lmd_is_proxy(owner)) {

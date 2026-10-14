@@ -1109,6 +1109,8 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
         parent ? parent->white_space : CSS_VALUE_NORMAL, true);
     style->caption_side = view_css_keyword(tree, style, "caption-side", CSS_VALUE_TOP,
         parent ? parent->caption_side : CSS_VALUE_TOP, true);
+    style->border_collapse = view_css_keyword(tree, style, "border-collapse", CSS_VALUE_SEPARATE,
+        parent ? parent->border_collapse : CSS_VALUE_SEPARATE, true);
     style->list_style_type = parent ? parent->list_style_type : CSS_VALUE_DISC;
     style->list_style_string = parent ? parent->list_style_string : nullptr;
     if (element && !pseudo_element && element->tag_id == MARKUP_NAME_OL) {
@@ -1390,25 +1392,28 @@ static ViewCssStyle* view_css_page_context_style(ViewTree* tree, ViewCssStyle* p
     return style;
 }
 
+float view_css_border_width(ViewTree* tree, const ViewCssStyle* source, size_t side, float width) {
+    CssEnum border_style = source->border_style[side];
+    if (border_style == CSS_VALUE_NONE || border_style == CSS_VALUE_HIDDEN) return 0.0f;
+    const CssValue* value = source->border_width[side];
+    return !value || value->type == CSS_VALUE_TYPE_KEYWORD
+        ? layout_css_border_width_keyword(value ? value->data.keyword : CSS_VALUE_MEDIUM)
+        : view_css_length(tree, source, value, radiant_border_width_property(static_cast<CssBoxSide>(side)), width, NAN);
+}
+
 ViewModelStatus view_css_box_edges(ViewTree* tree, const ViewCssStyle* source,
         float width, ViewCssBoxEdges* box) {
     *box = {};
     box->background.color = source->background;
     for (size_t i = 0; i < 4; i++) {
         CssBoxSide side = static_cast<CssBoxSide>(i);
-        CssPropertyCode width_property = radiant_border_width_property(side);
         CssPropertyCode padding_property = radiant_box_side_property(CSS_PROPERTY_PADDING, side);
         const CssValue* value = source->padding[i];
         box->padding[i] = value ? view_css_length(tree, source, value, padding_property, width, NAN) : 0.0f;
         CssEnum border_style = source->border_style[i];
         if (border_style != CSS_VALUE_NONE && border_style != CSS_VALUE_HIDDEN && border_style != CSS_VALUE_SOLID) return VIEW_MODEL_INVALID_ARGUMENT;
         box->border.styles[i] = border_style;
-        value = source->border_width[i];
-        if (border_style != CSS_VALUE_NONE && border_style != CSS_VALUE_HIDDEN) {
-            box->border.width.values[i] = !value || value->type == CSS_VALUE_TYPE_KEYWORD
-                ? layout_css_border_width_keyword(value ? value->data.keyword : CSS_VALUE_MEDIUM)
-                : view_css_length(tree, source, value, width_property, width, NAN);
-        }
+        box->border.width.values[i] = view_css_border_width(tree, source, i, width);
         box->edges[i] = box->padding[i] + box->border.width.values[i];
         if (!isfinite(box->padding[i]) || box->padding[i] < 0.0f ||
             !isfinite(box->border.width.values[i]) || box->border.width.values[i] < 0.0f) return VIEW_MODEL_INVALID_ARGUMENT;

@@ -115,6 +115,45 @@ typedef struct JsTypedArray {
     ArrayNum* view;                  // ArrayNum descriptor over the same non-moving byte storage
 } JsTypedArray;
 
+// Front ends share storage and operation order while retaining their own
+// coercion, error and prototype authorities (D1.3v3, D5.3).
+typedef struct JsBufferViewOps {
+    Item (*number)(Item);
+    Item (*bigint)(Item, Item*);
+    Item (*get)(Item, const char*);
+    Item (*prototype)(Item, bool);
+    Item (*link)(Item, Item);
+    Item (*error)(bool, const char*);
+    bool (*truthy)(Item);
+    bool (*object)(Item);
+    struct TypeMap* (*shape)(bool, Item);
+    Item (*species)(Item);
+    Item (*construct)(Item, int, bool);
+} JsBufferViewOps;
+
+// typed views reuse buffer ownership while each frontend supplies object semantics.
+typedef struct JsTypedArrayOps {
+    const JsBufferViewOps* buffer;
+    struct TypeMap* (*shape)(JsTypedArrayType, Item);
+    Item (*prototype)(JsTypedArrayType, Item);
+    Item (*get_index)(Item, int);
+    Item (*collect)(Item); // undefined means GetMethod(@@iterator) was absent
+    Item (*construct)(JsTypedArrayType, Item, Item*, int); // undefined selects the intrinsic constructor
+} JsTypedArrayOps;
+
+Item js_typed_array_construct_with_ops(int type_id, Item source, Item offset,
+    Item length, int argc, Item target, const JsTypedArrayOps* ops);
+Item js_typed_array_set_numeric_with_ops(Item owner, double index, bool negative_zero,
+    Item value, const JsBufferViewOps* ops);
+
+Item js_arraybuffer_construct_with_ops(Item length, Item options, Item target,
+    const JsBufferViewOps* ops);
+Item js_arraybuffer_resize_with_ops(Item buffer, Item length, const JsBufferViewOps* ops);
+Item js_arraybuffer_transfer_with_ops(Item buffer, Item length, int argc,
+    bool fixed_length, const JsBufferViewOps* ops);
+Item js_arraybuffer_slice_with_ops(Item buffer, Item begin, Item end, int argc,
+    const JsBufferViewOps* ops);
+
 typedef enum JsAtomicsOp {
     JS_ATOMICS_OP_ADD,
     JS_ATOMICS_OP_AND,
@@ -163,7 +202,7 @@ void* js_typed_array_data_at_if_kind(Item ta_item, int expected_type,
                                      int64_t index);
 LAMBDA_RT_API void* js_typed_array_prepare_write_ptr(Item ta_item);
 bool js_item_bytes(Item item, const char** data, int* len);
-Item js_typed_array_subarray(Item ta, int start, int end, bool end_is_default);
+Item js_typed_array_subarray(Item ta, Item begin, Item end, const JsTypedArrayOps* ops);
 Item js_typed_array_slice(Item ta, int start, int end, bool array_semantics);
 Item js_typed_array_set_from(Item ta, Item source, int offset);
 bool js_typed_array_raw_reverse(Item ta);
@@ -252,6 +291,10 @@ typedef enum JsDataViewOperation {
 Item js_dataview_new(Item buffer, Item offset_item, Item length_item);
 Item js_dataview_construct(Item buffer, Item offset_item, Item length_item,
     Item new_target);
+Item js_dataview_construct_with_ops(Item buffer, Item offset, Item length,
+    Item target, const JsBufferViewOps* ops);
+Item js_dataview_operation_with_ops(Item view, JsDataViewOperation operation,
+    Item* args, int argc, const JsBufferViewOps* ops);
 LAMBDA_RT_API bool js_is_dataview(Item val);
 LAMBDA_RT_API JsDataView* js_get_dataview_ptr(Item val);
 Item js_dataview_operation(Item dv, JsDataViewOperation operation,
@@ -267,6 +310,8 @@ const char* js_typed_array_type_name(Item val);
 // ES §22.2.4.7 TypedArraySpeciesCreate — creates result using @@species constructor
 Item js_typed_array_species_create(Item exemplar, int length);
 Item js_typed_array_species_create_from_buffer(Item exemplar, Item buffer, int byte_offset, int length, bool length_tracking);
+Item js_typed_array_species_create_with_ops(Item exemplar, Item* args, int argc,
+    const JsTypedArrayOps* ops);
 
 #ifdef __cplusplus
 }
