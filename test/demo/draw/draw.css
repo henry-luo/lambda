@@ -10,7 +10,7 @@ button svg { flex-shrink: 0; }
 h1, h2, h3, p { margin: 0; }
 h2 { font-size: 17px; line-height: 1.4; font-weight: 600; }
 p { line-height: 1.65; }
-#draw { height: 100vh; display: flex; flex-direction: column; }
+#draw { user-select: none; height: 100vh; display: flex; flex-direction: column; }
 .topbar { display: flex; align-items: center; gap: 30px; flex-shrink: 0; height: 68px; padding: 0 24px; background: #fff; border-bottom: 1px solid #e2e6ee; }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand-mark { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 9px; background: #e8a747; color: #fff; }
@@ -20,7 +20,7 @@ p { line-height: 1.65; }
 .document-title strong { font-size: 13px; }
 #save-state { font-size: 11px; color: #929aab; }
 .file-actions { margin-left: auto; display: flex; gap: 8px; }
-#export, #file-confirm, #apply-properties { background: #4c6ef5; color: white; border-color: #4c6ef5; }
+#export, #file-confirm { background: #4c6ef5; color: white; border-color: #4c6ef5; }
 .toolbar { display: flex; align-items: center; gap: 14px; height: 52px; padding: 0 24px; background: #fff; border-bottom: 1px solid #e2e6ee; flex-shrink: 0; }
 .tool-group, .toolbar-end { display: flex; align-items: center; gap: 4px; }
 .toolbar .tool-group button { border-color: transparent; background: transparent; padding: 7px 9px; }
@@ -36,10 +36,12 @@ p { line-height: 1.65; }
 .inspector { width: 242px; border-left: 1px solid #e2e6ee; }
 .eyebrow { color: #959eaf; font-size: 9px; font-weight: 600; letter-spacing: 1.7px; margin-bottom: 12px; }
 .muted { color: #929bad; font-size: 12px; margin-top: 9px; }
-.shape-library { display: flex; flex-direction: column; gap: 10px; margin: 24px 0 6px; }
-.shape-library button { justify-content: flex-start; height: 68px; padding: 12px 18px; gap: 16px; background: #fafbfe; border-color: #e9ecf3; }
-.shape-library button svg { width: 34px; height: 34px; color: #7885a2; }
-.shape-library button strong { font-size: 12px; font-weight: 400; }
+.shape-library { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 18px 0 6px; }
+.shape-library button { flex-direction: column; height: 72px; padding: 9px 4px; gap: 6px; background: #fafbfe; border-color: #e9ecf3; }
+.shape-library button svg { width: 30px; height: 28px; color: #7885a2; }
+.shape-library button strong { font-size: 10px; font-weight: 400; }
+.object-picker { margin-top: 20px; }
+#showcase { width: 100%; color: #4263df; background: #edf1ff; border-color: #d9e2ff; }
 .library-section { margin-top: 25px; padding-top: 23px; border-top: 1px solid #edf0f5; }
 .library-section p:not(.eyebrow) { color: #939bad; font-size: 12px; margin-bottom: 12px; }
 .library-section button { width: 100%; margin-bottom: 8px; font-size: 12px; }
@@ -71,7 +73,9 @@ textarea { height: 72px; resize: none; }
 .swatches button[aria-pressed="true"] { outline: 2px solid #6480f2; outline-offset: 2px; }
 .arrange-actions { display: flex; gap: 8px; }
 .arrange-actions button { flex: 1; font-size: 12px; }
-#apply-properties { width: 100%; margin-top: 24px; }
+.style-actions { display: flex; gap: 7px; }
+.style-actions button { flex: 1; font-size: 11px; padding: 6px 8px; }
+.control-note { font-size: 11px; color: #929bad; margin: 12px 0 20px; }
 .inspector-foot { margin-top: auto; border-top: 1px solid #edf0f5; padding-top: 22px; }
 .inspector-foot strong { font-size: 12px; font-weight: 400; color: #78859d; }
 .inspector-foot p:not(.eyebrow) { font-size: 11px; color: #9aa3b4; margin-top: 12px; }
@@ -101,7 +105,7 @@ footer { display: flex; align-items: center; gap: 8px; height: 34px; flex-shrink
   .library { width: 100px; padding: 18px 10px; }
   .library h2, .library .muted, .library-section, .library-note { display: none; }
   .library .eyebrow { font-size: 8px; letter-spacing: .4px; }
-  .shape-library { margin-top: 8px; }
+  .shape-library { margin-top: 8px; grid-template-columns: 1fr; }
   .shape-library button { height: 72px; padding: 8px 4px; flex-direction: column; gap: 4px; }
   .shape-library button strong { font-size: 9px; }
   .inspector { width: 180px; padding: 18px 12px; }
@@ -109,3 +113,9 @@ footer { display: flex; align-items: center; gap: 8px; height: 34px; flex-shrink
   .canvas-caption { padding: 16px 12px 0; font-size: 8px; letter-spacing: .5px; }
   .canvas-help { padding: 0 12px 16px; font-size: 9px; }
 }
+
+.alignment-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 8px; }
+.alignment-actions button, .orientation-actions button { font-size: 11px; padding: 6px 4px; }
+.orientation-actions { display: flex; gap: 5px; }
+.orientation-actions button { flex: 1; }
+input, textarea { user-select: text; }

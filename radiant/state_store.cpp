@@ -7381,8 +7381,9 @@ void state_store_selection_start_pointer(DocState* state, View* view, int char_o
             return;
         }
         state->editing.pointer_selecting = true;
-        state->editing.drag_anchor_view = view;
-        state->editing.drag_anchor_offset = char_offset;
+        // pointer hit offsets can exceed a shortened control; retain the normalized boundary.
+        selection_get_anchor_snapshot(state, &state->editing.drag_anchor_view,
+            &state->editing.drag_anchor_offset, NULL);
         state->editing.drag_mode = EDITING_DRAG_CHAR;
         state->selection_layout_dirty = true;
         state->needs_repaint = true;
@@ -7401,8 +7402,9 @@ void state_store_selection_start_pointer(DocState* state, View* view, int char_o
         return;
     }
     state->editing.pointer_selecting = true;
-    state->editing.drag_anchor_view = view;
-    state->editing.drag_anchor_offset = char_offset;
+    // the DOM boundary is clamped; its drag anchor must use the same normalized offset.
+    dom_boundary_to_projection(boundary, &state->editing.drag_anchor_view,
+        &state->editing.drag_anchor_offset);
     state->editing.drag_mode = EDITING_DRAG_CHAR;
     state->selection_layout_dirty = true;
     state->needs_repaint = true;

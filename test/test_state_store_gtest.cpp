@@ -649,3 +649,17 @@ TEST_F(StateStoreDomMutationTest, PruneAfterReflowClearsDragWhenSourceRemoved) {
     EXPECT_FALSE(doc_state->drag_drop->pending);
     EXPECT_EQ(doc_state->drag_drop->drop_target, nullptr);
 }
+
+TEST_F(StateStoreDomMutationTest, PointerSelectionUsesNormalizedDragAnchor) {
+    // this target stubs the transition dispatcher; exercise its StateStore writer directly.
+    state()->transition_depth++;
+    // an element boundary clamps to its child count, including hits past either edge.
+    state_store_selection_start_pointer(state(), root, 100);
+    EXPECT_EQ(state()->editing.drag_anchor_view, root);
+    EXPECT_EQ(state()->editing.drag_anchor_offset, 3);
+
+    state_store_selection_start_pointer(state(), root, -10);
+    EXPECT_EQ(state()->editing.drag_anchor_view, root);
+    EXPECT_EQ(state()->editing.drag_anchor_offset, 0);
+    state()->transition_depth--;
+}

@@ -4,31 +4,37 @@ import resources: ~~.mod_resources
 import model: .mod_model
 import scene: .mod_scene
 import present: .mod_present
+import geom: lambda.editor.mod_geom
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 fn owner_of(evt) => dom.get_element_by_id(dom.root_node(evt.target),"draw")
 fn field(owner,target) => dom.get_state(dom.get_element_by_id(owner,target),"value")
-fn cancel(st) => {*:st,doc:if (st.drag.before != null) st.drag.before else st.doc,
-    pan:if (st.drag.pan != null) st.drag.pan else st.pan,drag:null,source:"",tool:"select",dialog:"",error:""}
+fn cancel(st) => {*:st,doc:if (st.drag.before != null) st.drag.before else if (st.editing.before != null) st.editing.before else st.doc,
+    pan:if (st.drag.pan != null) st.drag.pan else st.pan,
+    selection:if (st.drag.mode == "marquee") st.drag.previous else st.selection,
+    selected:if (st.drag.mode == "marquee") st.drag.primary else st.selected,
+    editing:null,drag:null,source:"",tool:"select",dialog:"",error:"",hover:""}
 pn publish(owner,st) { present.sync(owner,st); return st }
-pn apply_properties(owner,st) any^ {
-    let selected = model.lookup(st.doc,st.selected).shape
-    if (selected == null) { return st }
-    let label = field(owner,"prop-label")
-    if (len(label)>200) raise error("Draw: labels may contain at most 200 characters")
-    var next = model.change(st,"label",label)
-    if (selected.tag == 'connector') { next = model.change(next,"routing",symbol(field(owner,"prop-routing"))) }
-    if (selected.tag == 'shape') {
-        let values = [for (key in ["x","y","width","height"]) float(field(owner,"prop-" ++ key))^]
-        let x = values[0]
-        let y = values[1]
-        let w = values[2]
-        let h = values[3]
-        if (not all([for (v in values) v >= 0 and v <= max(model.width,model.height)]) or
-            w<60 or h<40 or x+w>model.width or y+h>model.height) raise error("Draw: keep the shape on the page, at least 60 × 40")
-        for (i,key in ["x","y","width","height"]) { next = model.change(next,key,values[i]) }
+fn finish_edit(st) {
+    if (st.editing == null) st else (
+        let committed = model.commit_edit(st,st.editing.before,st.doc),
+        {*:committed,editing:null})
+}
+pn update_property(owner,st,control,final=false) {
+    let key = dom.get_attribute(control,"data-property")
+    let base = if (st.editing.key != key) finish_edit(st) else st
+    // preserve the last valid preview while the native field owns an incomplete draft.
+    let editing = if (base.editing != null) base.editing else {key:key,before:base.doc}
+    var result = {*:base,editing:editing}
+    let input_value = dom.get_state(control,"value")
+    let requested = (if (model.numeric_fields[key] != null) float(input_value) else if (key == "routing") symbol(input_value) else input_value) ^ {
+        result = {*:result,error:"Draw: enter a valid number",status:"Enter a valid number."}
+    } ~ {
+        model.preview_properties(result,{[key]:~}) ^ { result = {*:result,error:^.message,status:^.message} }
+            ~ { result = {*:~,status:"Properties updated."} }
     }
-    return {*:model.commit_edit(st,st.doc,next.doc),error:"",status:"Properties updated."}
+    if (final or dom.matches(control,"select")) { result = finish_edit(result) }
+    return result
 }
 pn command(owner,st,action) any^ {
     if (st.drag != null) { return st }
@@ -38,15 +44,21 @@ pn command(owner,st,action) any^ {
     if (action == "duplicate") { return model.duplicate(st) }
     if (action == "delete") { return model.remove(st) }
     if (action == "front" or action == "back") { return model.reorder(st,action == "front") }
-    if (action == "apply-properties") { return apply_properties(owner,st)^ }
+    if (starts_with(action,"fill-")) { return model.edit_properties(st,{fill:slice(action,5)})^ }
+    if (action == "copy-style") { return model.copy_style(st) }
+    if (action == "paste-style") { return model.paste_style(st)^ }
+    if (action == "reverse-edge") { return model.reverse_edge(st)^ }
+    if (action == "reset-bend") { return model.edit_properties(st,{'bend-x':-1.0,'bend-y':-1.0})^ }
+    if (starts_with(action,"align-")) { return model.align(st,slice(action,6))^ }
+    if (contains(["rotate","flip-x","flip-y"],action)) { return model.orient(st,action) }
     if (action == "grid") { return {*:st,grid:not st.grid} }
     if (action == "fit") { return present.fit(owner,st) }
     if (action == "zoom-in" or action == "zoom-out") {
         return {*:st,zoom:model.clamp(st.zoom*(if (action == "zoom-in") 1.2 else 1/1.2),0.1,3)}
     }
-    if (action == "blank" or action == "example") {
-        let changed = model.commit_edit(st,st.doc,if (action == "blank") model.drawing([]) else model.starter())
-        return {*:changed,selected:"",source:"",tool:"select",status:"New page. Undo restores your previous diagram."}
+    if (contains(["blank","example","showcase"],action)) {
+        let changed = model.commit_edit(st,st.doc,if (action == "blank") model.drawing([]) else if (action == "showcase") model.showcase() else model.starter())
+        return {*:changed,selected:"",selection:[],source:"",tool:"select",status:"New page. Undo restores your previous diagram."}
     }
     if (contains(["open","save","export"],action)) {
         // file controls keep their native buffers while the surrounding editor updates.
@@ -72,9 +84,30 @@ pn command(owner,st,action) any^ {
     return st
 }
 pn dispatch(owner,st,action) {
-    var result = st
-    command(owner,st,action) ^ { result = {*:st,error:^.message,status:^.message} } ~ { result = ~ }
+    let base = finish_edit(st)
+    var result = base
+    command(owner,base,action) ^ { result = {*:base,error:^.message,status:^.message} } ~ { result = ~ }
     return result
+}
+
+pn drag_to(owner,st,x,y,shift=false) {
+    let drag = st.drag
+    let dx = x-drag.x
+    let dy = y-drag.y
+    let point = present.point(owner,st,x,y)
+    let snapped = {x:model.snap(point.x,st.grid),y:model.snap(point.y,st.grid)}
+    let drop = model.hit_shape(drag.before,point)
+    if (dx == 0 and dy == 0 and not contains(["pan","marquee"],drag.mode)) { return {*:st,doc:drag.before} }
+    if (drag.mode == "pan") { return {*:st,pan:{x:drag.pan.x+dx,y:drag.pan.y+dy}} }
+    if (drag.mode == "marquee") {
+        let ids = model.enclosed(st.doc,geom.rect_from_points(drag.start,point))
+        return {*:model.select_ids(st,if (drag.additive) [*drag.previous,*ids] else ids),drag:{*:drag,current:point}}
+    }
+    if (contains(["from","to","bend"],drag.mode)) { return {*:st,hover:if (drag.mode == "bend") "" else drop,
+        doc:model.edit_edge_document(drag.before,drag.selected,drag.mode,snapped,drop)} }
+    if (drag.mode == "rotate") { return {*:st,doc:model.rotate_document(drag.before,drag.selected,point,shift)} }
+    if (drag.mode == "resize") { return {*:st,doc:model.resize_document(drag.before,drag.selected,dx/st.zoom,dy/st.zoom,st.grid)} }
+    return {*:st,doc:model.move_selection(drag.before,drag.ids,dx/st.zoom,dy/st.zoom,st.grid)}
 }
 
 view <draw_session> state session:model.initial() { ~.rendered }
@@ -90,7 +123,7 @@ on click(evt) {
     let color = dom.get_attribute(button,"data-color")
     if (button == null or (session.dialog != "" and dom.closest(button,"#file-dialog") == null)) { return 'pass' }
     let previous_dialog = session.dialog
-    if (color != null) { session = model.change(session,"fill",color) }
+    if (color != null) { session = dispatch(owner,finish_edit(session),"fill-" ++ color) }
     else if (action != null) {
         session = dispatch(owner,session,action)
     } else { return 'pass' }
@@ -99,10 +132,34 @@ on click(evt) {
     if (session.dialog == "" and previous_dialog != "") dom.focus_set(dom.get_element_by_id(owner,previous_dialog),false)
     return 'handled'
 }
+on input(evt) {
+    // selects emit input and change together; validate their committed choice once.
+    if (session.dialog != "" or session.drag != null or dom.matches(evt.target,"select") or dom.get_attribute(evt.target,"data-property") == null) { return 'pass' }
+    session = publish(owner_of(evt),update_property(owner_of(evt),session,evt.target))
+    return 'handled'
+}
+on change(evt) {
+    if (session.dialog != "" or session.drag != null) { return 'pass' }
+    let owner = owner_of(evt)
+    if (dom.get_attribute(evt.target,"id") == "object-list") {
+        session = publish(owner,{*:model.select_ids(finish_edit(session),[dom.get_state(evt.target,"value")]),tool:"select",source:"",error:""})
+    } else if (dom.get_attribute(evt.target,"data-property") != null) {
+        session = publish(owner,update_property(owner,session,evt.target,true))
+    } else { return 'pass' }
+    return 'handled'
+}
+on focusout(evt) {
+    if (session.editing == null or dom.get_attribute(evt.target,"data-property") != session.editing.key) { return 'pass' }
+    session = publish(owner_of(evt),finish_edit(session))
+    return 'handled'
+}
 on pointerdown(evt) {
     let owner = owner_of(evt)
     let stage = dom.get_element_by_id(owner,"stage")
     if (session.dialog != "" or evt.button != 0 or dom.closest(evt.target,"#stage") == null or session.drag != null) { return 'pass' }
+    let viewport = present.viewport(owner)
+    if (not geom.rect_contains(viewport,{x:evt.clientX,y:evt.clientY})) { return 'pass' }
+    session = finish_edit(session)
     dom.focus_set(stage,false)
     let p = present.point(owner,session,evt.clientX,evt.clientY)
     let target = model.hit(session.doc,p,6/session.zoom)
@@ -114,15 +171,26 @@ on pointerdown(evt) {
         if (target != "") { session = publish(owner,model.connect(session,target)) }
         return 'prevent-default'
     }
-    let chosen = model.lookup(session.doc,session.selected).shape
-    let b = model.box(chosen)
-    let resize = b != null and abs(p.x-b.x-b.width)<=10/session.zoom and abs(p.y-b.y-b.height)<=10/session.zoom
-    if (session.tool == "pan" or evt.shiftKey) {
-        session = {*:session,drag:{mode:"pan",x:evt.clientX,y:evt.clientY,pan:session.pan,pointer:evt.pointerId}}
+    let ids = model.selected_ids(session)
+    let chosen = if (len(ids)==1) model.lookup(session.doc,session.selected).shape else null
+    let handles = if (chosen.tag == 'connector') model.edge_handles(session.doc,chosen)
+        else if (chosen.tag == 'shape') model.shape_handles(chosen,session.zoom) else {}
+    let handle_hits = [for (key,position in handles where geom.v2_dist(position,p)<=10/session.zoom) string(key)]
+    let handle = handle_hits[0]
+    let base_drag = {x:evt.clientX,y:evt.clientY,start:p,before:session.doc,selected:session.selected,ids:ids,pointer:evt.pointerId};
+    if (session.tool == "pan") {
+        session = {*:session,drag:{*:base_drag,mode:"pan",pan:session.pan}}
+    } else if (session.tool == "marquee" or (target == "" and handle == null)) {
+        session = {*:session,drag:{*:base_drag,mode:"marquee",current:p,previous:ids,primary:session.selected,additive:evt.shiftKey},
+            status:"Drag a rectangle around objects. Shift adds to the selection."}
+    } else if (handle != null) {
+        session = {*:session,drag:{*:base_drag,mode:handle}}
+    } else if (evt.shiftKey) {
+        let toggled = if (contains(ids,target)) [for (value in ids where value != target) value] else [*ids,target]
+        session = model.select_ids(session,toggled)
     } else {
-        let selected = if (resize) session.selected else target
-        session = {*:session,selected:selected,drag:if (model.box(model.lookup(session.doc,selected).shape) == null) null else
-            {mode:if (resize) "resize" else "move",x:evt.clientX,y:evt.clientY,before:session.doc,selected:selected,pointer:evt.pointerId}}
+        session = if (contains(ids,target)) session else model.select_ids(session,[target])
+        session = {*:session,drag:{*:base_drag,mode:"move",ids:model.selected_ids(session),selected:session.selected}}
     }
     if (session.drag != null) dom.set_pointer_capture(stage,evt.pointerId)
     session = publish(owner,session)
@@ -135,21 +203,18 @@ on mousedown(evt) {
     return 'prevent-default'
 }
 on pointermove(evt) {
-    let drag = session.drag
-    if (drag == null or evt.pointerId != drag.pointer) { return 'pass' }
-    let dx = evt.clientX-drag.x
-    let dy = evt.clientY-drag.y
-    session = if (drag.mode == "pan") {*:session,pan:{x:drag.pan.x+dx,y:drag.pan.y+dy}}
-        else {*:session,doc:model.transform(drag.before,drag.selected,drag.mode,dx/session.zoom,dy/session.zoom,session.grid)}
-    session = publish(owner_of(evt),session)
+    if (session.drag == null or evt.pointerId != session.drag.pointer) { return 'pass' }
+    session = publish(owner_of(evt),drag_to(owner_of(evt),session,evt.clientX,evt.clientY,evt.shiftKey))
     return 'prevent-default'
 }
 on pointerup(evt) {
     let drag = session.drag
     if (drag == null or evt.pointerId != drag.pointer) { return 'pass' }
-    let next = if (drag.mode == "pan") session else model.commit_edit(session,drag.before,session.doc)
-    dom.release_pointer_capture(dom.get_element_by_id(owner_of(evt),"stage"),evt.pointerId)
-    session = publish(owner_of(evt),{*:next,drag:null})
+    let owner = owner_of(evt)
+    session = drag_to(owner,session,evt.clientX,evt.clientY,evt.shiftKey)
+    let next = if (contains(["pan","marquee"],drag.mode)) session else model.commit_edit(session,drag.before,session.doc)
+    dom.release_pointer_capture(dom.get_element_by_id(owner,"stage"),evt.pointerId)
+    session = publish(owner,{*:next,drag:null,hover:""})
     return 'prevent-default'
 }
 on pointercancel(evt) {
@@ -188,12 +253,20 @@ on keydown(evt) {
         return 'pass'
     }
     if (dom.closest(evt.target,"input,textarea,select") != null or session.drag != null) { return 'pass' }
+    session = finish_edit(session)
     let key = lower(evt.key)
     let modifier = evt.ctrlKey or evt.metaKey
-    let action = if (modifier and key == "z") (if (evt.shiftKey) "redo" else "undo")
+    if (modifier and key == "a") {
+        session = publish(owner,model.select_ids(session,[for (node in model.objects(session.doc)) model.id(node)]))
+        return 'prevent-default'
+    }
+    let action = if (modifier and evt.shiftKey and key == "c") "copy-style"
+        else if (modifier and evt.shiftKey and key == "v") "paste-style"
+        else if (modifier and key == "z") (if (evt.shiftKey) "redo" else "undo")
         else if (modifier and key == "y") "redo" else if (modifier and key == "d") "duplicate"
         else if (modifier and key == "s") "save" else if (key == "delete" or key == "backspace") "delete"
-        else if (key == "v") "tool-select" else if (key == "c") "tool-connect" else if (key == "h") "tool-pan"
+        else if (not modifier and key == "v") "tool-select" else if (not modifier and key == "c") "tool-connect" else if (not modifier and key == "h") "tool-pan"
+        else if (not modifier and key == "m") "tool-marquee"
         else if (key == "+" or key == "=") "zoom-in" else if (key == "-") "zoom-out" else null
     if (contains(["arrowleft","arrowright","arrowup","arrowdown"],key)) {
         let amount = if (evt.shiftKey) 10 else 1
