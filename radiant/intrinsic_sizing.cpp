@@ -539,8 +539,7 @@ static bool intrinsic_style_length_declaration(LayoutContext* lycon, StyleTree* 
     return true;
 }
 
-static void intrinsic_apply_monospace_font_size_quirk(FontProp* font,
-                                                      FontProp* parent_font) {
+void layout_apply_monospace_medium_size(FontProp* font, const FontProp* parent_font) {
     if (!font || !font->family || font->font_size <= 0.0f ||
         !font->font_size_from_medium) {
         return;
@@ -3366,7 +3365,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             intrinsic_complete_inherited_font(
                 temp_font_prop, saved_font.style,
                 intrinsic_element_has_specified_font_size(element));
-            intrinsic_apply_monospace_font_size_quirk(temp_font_prop, saved_font.style);
+            layout_apply_monospace_medium_size(temp_font_prop, saved_font.style);
             setup_font(lycon->ui_context, &lycon->font, temp_font_prop);
             spacing_font_ready = true;
             need_font_setup = true;
@@ -3424,7 +3423,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 intrinsic_complete_inherited_font(
                     temp_font_prop, saved_font.style,
                     intrinsic_element_has_specified_font_size(element));
-                intrinsic_apply_monospace_font_size_quirk(temp_font_prop, saved_font.style);
+                layout_apply_monospace_medium_size(temp_font_prop, saved_font.style);
                 setup_font(lycon->ui_context, &lycon->font, temp_font_prop);
             }
             font_changed = true;
@@ -3447,7 +3446,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             intrinsic_complete_inherited_font(
                 ua_font, lycon->font.style,
                 intrinsic_element_has_specified_font_size(element));
-            intrinsic_apply_monospace_font_size_quirk(ua_font, lycon->font.style);
+            layout_apply_monospace_medium_size(ua_font, lycon->font.style);
             setup_font(lycon->ui_context, &lycon->font, ua_font);
             font_changed = true;
         }

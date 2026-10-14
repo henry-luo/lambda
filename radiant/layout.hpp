@@ -2689,6 +2689,27 @@ bool layout_tag_is_non_caret_container(NameId tag, bool include_button = false);
 bool layout_tag_is_default_inline(NameId tag);
 bool layout_tag_has_monospace_family_default(NameId tag);
 
+// HTML Rendering §15.3 element defaults, read by the default view's element defaults and
+// serialized as the secondary views' UA stylesheet. Negative lengths and CSS_VALUE__UNDEF
+// keywords are absent; presentational attributes, form and media chrome stay with the default view.
+struct HtmlUaElementDefault {
+    float font_scale;              // multiplies the inherited size; 1 keeps it
+    bool keeps_medium;             // a scaled heading size keeps the inherited medium lineage
+    bool monospace;
+    CssEnum font_weight, font_style, text_decoration, vertical_align, white_space, text_align;
+    CssEnum list_style, color;
+    float margin_px, margin_block_em, margin_inline_px, margin_inline_start_px;
+    float padding_px, padding_inline_start_px;
+};
+bool layout_html_ua_element_default(NameId tag, HtmlUaElementDefault* result);
+// nested lists drop their outer margins; unordered markers step disc, circle, square.
+bool layout_html_ua_list_nesting_ancestor(NameId tag);
+CssEnum layout_html_ua_list_marker(NameId tag, size_t unordered_ancestors);
+struct StrBuf;
+bool layout_html_ua_stylesheet(StrBuf* css);
+// Chromium CheckForGenericFamilyChange: a medium-lineage size that switches to monospace scales by 13/16.
+void layout_apply_monospace_medium_size(FontProp* font, const FontProp* parent);
+
 inline bool layout_multicol_has_column_width(const MultiColumnProp* multicol) {
     return multicol && (multicol->column_width_is_specified || multicol->column_width > 0.0f);
 }

@@ -169,10 +169,8 @@ static void apply_html_text_align_attribute(LayoutContext* lycon, DomNode* eleme
 }
 
 bool layout_tag_has_monospace_family_default(NameId tag) {
-    static const NameId tags[] = {
-        MARKUP_NAME_CODE, MARKUP_NAME_KBD, MARKUP_NAME_SAMP, MARKUP_NAME_TT,
-        MARKUP_NAME_PRE, MARKUP_NAME_LISTING, MARKUP_NAME_XMP};
-    return layout_tag_in_list(tag, tags, sizeof(tags) / sizeof(*tags));
+    HtmlUaElementDefault value;
+    return layout_html_ua_element_default(tag, &value) && value.monospace;
 }
 
 static void apply_html_form_control_font(LayoutContext* lycon, ViewBlock* block) {
@@ -294,6 +292,131 @@ static void apply_html_body_margin_attribute(LayoutContext* lycon, ViewBlock* bl
 }
 
 static constexpr float HTML_BODY_DEFAULT_MARGIN = 8.0f;
+
+bool layout_html_ua_element_default(NameId tag, HtmlUaElementDefault* result) {
+    HtmlUaElementDefault value = {1.0f, false, false,
+        CSS_VALUE__UNDEF, CSS_VALUE__UNDEF, CSS_VALUE__UNDEF, CSS_VALUE__UNDEF, CSS_VALUE__UNDEF, CSS_VALUE__UNDEF,
+        CSS_VALUE__UNDEF, CSS_VALUE__UNDEF, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f};
+    // heading sizes scale the inherited size; heading margins are relative to the heading's own size.
+    static const float heading_scales[] = {2.0f, 1.5f, 1.17f, 1.0f, 0.83f, 0.67f};
+    static const float heading_margins[] = {0.67f, 0.83f, 1.0f, 1.33f, 1.67f, 2.33f};
+    switch (tag) {
+    case MARKUP_NAME_BODY: value.margin_px = HTML_BODY_DEFAULT_MARGIN; break;
+    case MARKUP_NAME_H1: case MARKUP_NAME_H2: case MARKUP_NAME_H3:
+    case MARKUP_NAME_H4: case MARKUP_NAME_H5: case MARKUP_NAME_H6:
+        value.font_scale = heading_scales[tag - MARKUP_NAME_H1]; value.keeps_medium = true;
+        value.font_weight = CSS_VALUE_BOLD; value.margin_block_em = heading_margins[tag - MARKUP_NAME_H1];
+        break;
+    case MARKUP_NAME_P: case MARKUP_NAME_DL: value.margin_block_em = 1.0f; break;
+    case MARKUP_NAME_UL: case MARKUP_NAME_OL: case MARKUP_NAME_MENU:
+        value.margin_block_em = 1.0f; value.padding_inline_start_px = 40.0f;
+        value.list_style = layout_html_ua_list_marker(tag, 0);
+        break;
+    case MARKUP_NAME_PRE: case MARKUP_NAME_LISTING: case MARKUP_NAME_XMP:
+        value.monospace = true; value.white_space = CSS_VALUE_PRE; value.margin_block_em = 1.0f;
+        break;
+    case MARKUP_NAME_BLOCKQUOTE: case MARKUP_NAME_FIGURE:
+        value.margin_block_em = 1.0f; value.margin_inline_px = 40.0f;
+        break;
+    case MARKUP_NAME_DD: value.margin_inline_start_px = 40.0f; break;
+    case MARKUP_NAME_CENTER: case MARKUP_NAME_CAPTION: value.text_align = CSS_VALUE_CENTER; break;
+    case MARKUP_NAME_ADDRESS: value.font_style = CSS_VALUE_ITALIC; break;
+    case MARKUP_NAME_CODE: case MARKUP_NAME_KBD: case MARKUP_NAME_SAMP: case MARKUP_NAME_TT:
+        value.monospace = true;
+        break;
+    case MARKUP_NAME_B: case MARKUP_NAME_STRONG: value.font_weight = CSS_VALUE_BOLD; break;
+    case MARKUP_NAME_I: case MARKUP_NAME_EM: case MARKUP_NAME_CITE:
+    case MARKUP_NAME_DFN: case MARKUP_NAME_VAR: case MARKUP_NAME_Q:
+        value.font_style = CSS_VALUE_ITALIC;
+        break;
+    case MARKUP_NAME_U: case MARKUP_NAME_INS: case MARKUP_NAME_ABBR: case MARKUP_NAME_ACRONYM:
+        value.text_decoration = CSS_VALUE_UNDERLINE;
+        break;
+    case MARKUP_NAME_S: case MARKUP_NAME_DEL: case MARKUP_NAME_STRIKE:
+        value.text_decoration = CSS_VALUE_LINE_THROUGH;
+        break;
+    case MARKUP_NAME_SMALL: value.font_scale = 0.83f; break;
+    case MARKUP_NAME_BIG: value.font_scale = 1.17f; break;
+    case MARKUP_NAME_RT: value.font_scale = 0.5f; break;
+    case MARKUP_NAME_SUB: value.font_scale = 0.83f; value.vertical_align = CSS_VALUE_SUB; break;
+    case MARKUP_NAME_SUP: value.font_scale = 0.83f; value.vertical_align = CSS_VALUE_SUPER; break;
+    case MARKUP_NAME_A: value.color = CSS_VALUE_BLUE; value.text_decoration = CSS_VALUE_UNDERLINE; break;
+    case MARKUP_NAME_TABLE: value.text_align = CSS_VALUE_START; break;
+    case MARKUP_NAME_TR: value.vertical_align = CSS_VALUE_MIDDLE; break;
+    case MARKUP_NAME_TH:
+        value.font_weight = CSS_VALUE_BOLD; value.text_align = CSS_VALUE_CENTER;
+        value.vertical_align = CSS_VALUE_MIDDLE; value.padding_px = 1.0f;
+        break;
+    case MARKUP_NAME_TD: value.vertical_align = CSS_VALUE_MIDDLE; value.padding_px = 1.0f; break;
+    default: return false;
+    }
+    if (result) *result = value;
+    return true;
+}
+
+bool layout_html_ua_list_nesting_ancestor(NameId tag) {
+    return layout_is_html_list_container_tag(tag) || tag == MARKUP_NAME_DL;
+}
+
+CssEnum layout_html_ua_list_marker(NameId tag, size_t unordered_ancestors) {
+    if (tag == MARKUP_NAME_UL)
+        return unordered_ancestors == 0 ? CSS_VALUE_DISC : unordered_ancestors == 1 ? CSS_VALUE_CIRCLE : CSS_VALUE_SQUARE;
+    return tag == MARKUP_NAME_OL || tag == MARKUP_NAME_MENU ? CSS_VALUE_DECIMAL : CSS_VALUE__UNDEF;
+}
+
+static void html_ua_keyword(StrBuf* css, const char* property, CssEnum value) {
+    const CssEnumInfo* info = value != CSS_VALUE__UNDEF ? css_enum_info(value) : nullptr;
+    if (info) strbuf_append_format(css, "%s:%s;", property, info->name);
+}
+
+static void html_ua_length(StrBuf* css, const char* property, float value, const char* unit,
+        const char* paired = nullptr) {
+    if (value < 0.0f) return;
+    strbuf_append_format(css, "%s:%g%s;", property, value, unit);
+    if (paired) strbuf_append_format(css, "%s:%g%s;", paired, value, unit);
+}
+
+bool layout_html_ua_stylesheet(StrBuf* css) {
+    if (!css) return false;
+    // physical sides follow the default view's left-to-right element defaults.
+    for (size_t index = 0; index < g_well_known_markup_name_count; index++) {
+        const WellKnownNameRecord& record = g_well_known_markup_names[index];
+        HtmlUaElementDefault value;
+        if (!layout_html_ua_element_default(record.meta.name_id, &value)) continue;
+        strbuf_append_format(css, "%s{", record.chars);
+        if (value.font_scale != 1.0f) strbuf_append_format(css, "font-size:%gem;", value.font_scale);
+        if (value.monospace) strbuf_append_str(css, "font-family:monospace;");
+        html_ua_keyword(css, "font-weight", value.font_weight);
+        html_ua_keyword(css, "font-style", value.font_style);
+        html_ua_keyword(css, "text-decoration", value.text_decoration);
+        html_ua_keyword(css, "vertical-align", value.vertical_align);
+        html_ua_keyword(css, "white-space", value.white_space);
+        html_ua_keyword(css, "text-align", value.text_align);
+        html_ua_keyword(css, "list-style-type", value.list_style);
+        html_ua_keyword(css, "color", value.color);
+        html_ua_length(css, "margin", value.margin_px, "px");
+        html_ua_length(css, "margin-top", value.margin_block_em, "em", "margin-bottom");
+        html_ua_length(css, "margin-left", value.margin_inline_px, "px", "margin-right");
+        html_ua_length(css, "margin-left", value.margin_inline_start_px, "px");
+        html_ua_length(css, "padding", value.padding_px, "px");
+        html_ua_length(css, "padding-left", value.padding_inline_start_px, "px");
+        strbuf_append_char(css, '}');
+    }
+    // nested lists drop their outer margins and step unordered markers by unordered depth.
+    for (size_t outer = 0; outer < g_well_known_markup_name_count; outer++) {
+        const WellKnownNameRecord& ancestor = g_well_known_markup_names[outer];
+        if (!layout_html_ua_list_nesting_ancestor(ancestor.meta.name_id)) continue;
+        for (size_t inner = 0; inner < g_well_known_markup_name_count; inner++) {
+            const WellKnownNameRecord& list = g_well_known_markup_names[inner];
+            if (layout_html_ua_list_marker(list.meta.name_id, 0) != CSS_VALUE__UNDEF)
+                strbuf_append_format(css, "%s %s{margin-top:0;margin-bottom:0}", ancestor.chars, list.chars);
+        }
+    }
+    strbuf_append_format(css, "ul ul{list-style-type:%s}ul ul ul{list-style-type:%s}",
+        css_enum_info(layout_html_ua_list_marker(MARKUP_NAME_UL, 1))->name,
+        css_enum_info(layout_html_ua_list_marker(MARKUP_NAME_UL, 2))->name);
+    return true;
+}
 
 void layout_refresh_html_body_ua_margin(LayoutContext* lycon, DomElement* dom_elem) {
     if (!lycon || !dom_elem || dom_elem->tag() != MARKUP_NAME_BODY || !dom_elem->bound) {
@@ -728,22 +851,24 @@ static const char* get_parent_tr_valign(DomNode* elmt) {
 static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_node,
                                            ViewBlock* block, bool is_header) {
     DomElement* cell = cell_node->as_element();
-    if (is_header) {
+    HtmlUaElementDefault ua;
+    layout_html_ua_element_default(is_header ? MARKUP_NAME_TH : MARKUP_NAME_TD, &ua);
+    if (ua.font_weight == CSS_VALUE_BOLD) {
         apply_html_font_weight(block->ensure_font(lycon), CSS_VALUE_BOLD, 700);
     }
 
     BlockProp* block_prop = block->ensure_block(lycon);
     // A plain td inherits text-align through the CSS resolver; a physical
     // left default would suppress the table's computed end alignment.
-    block_prop->text_align = is_header ? CSS_VALUE_CENTER : CSS_VALUE_START;
+    block_prop->text_align = ua.text_align != CSS_VALUE__UNDEF ? ua.text_align : CSS_VALUE_START;
     apply_table_cell_dimension_attribute(cell, block, LAYOUT_AXIS_X);
     apply_table_cell_dimension_attribute(cell, block, LAYOUT_AXIS_Y);
 
     block->ensure_inline(lycon);
-    block->in_line->vertical_align = CSS_VALUE_MIDDLE;
+    block->in_line->vertical_align = ua.vertical_align;
 
     float cellpadding = get_parent_table_number(cell_node, "cellpadding");
-    float padding = cellpadding >= 0.0f ? cellpadding : 1.0f;
+    float padding = cellpadding >= 0.0f ? cellpadding : ua.padding_px;
     block->ensure_boundary(lycon);
     radiant_spacing_set_all(&block->boundary_mut()->padding, padding);
 
@@ -796,56 +921,49 @@ static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_n
 
 static void apply_html_heading_default(LayoutContext* lycon, DomNode* element,
                                        ViewBlock* block, NameId tag) {
-    // HTML heading defaults are a data table: the same font/margin pipeline
-    // applies to every level, so only the level-specific scales stay indexed.
-    static const float font_scales[] = {2.0f, 1.5f, 1.17f, 1.0f, 0.83f, 0.67f};
-    static const float margin_scales[] = {0.67f, 0.83f, 1.0f, 1.33f, 1.67f, 2.33f};
-    size_t level = (size_t)(tag - MARKUP_NAME_H1);
-    if (level >= sizeof(font_scales) / sizeof(font_scales[0])) return;
+    // HTML heading defaults are a shared data table: the same font/margin pipeline
+    // applies to every level, so only the level-specific scales differ.
+    HtmlUaElementDefault value;
+    if (!layout_html_ua_element_default(tag, &value)) return;
 
     FontProp* font = block->ensure_font(lycon);
-    float heading_size = lycon->font.style->font_size * font_scales[level];
+    float heading_size = lycon->font.style->font_size * value.font_scale;
     // UA heading sizes are relative to the inherited size; preserve its
     // medium lineage for a descendant's monospace family change.
     apply_html_font_size(font, heading_size,
-        lycon->font.style->font_size_from_medium);
-    apply_html_font_weight(font, CSS_VALUE_BOLD, 700);
+        value.keeps_medium && lycon->font.style->font_size_from_medium);
+    apply_html_font_weight(font, value.font_weight, 700);
     block->ensure_boundary(lycon);
     radiant_spacing_set_pair(&block->boundary_mut()->margin,
-        CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, heading_size * margin_scales[level]);
+        CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, heading_size * value.margin_block_em);
     apply_html_text_align_attribute(lycon, element, block);
 }
 
 static bool apply_html_inline_text_default(LayoutContext* lycon, ViewSpan* span, NameId tag) {
-    CssEnum style = CSS_VALUE__UNDEF;
-    CssEnum weight = CSS_VALUE__UNDEF;
-    CssEnum decoration = CSS_VALUE__UNDEF;
-    CssEnum vertical_align = CSS_VALUE__UNDEF;
-    float size_scale = 1.0f;
     switch (tag) {
-        case MARKUP_NAME_B: case MARKUP_NAME_STRONG: weight = CSS_VALUE_BOLD; break;
+        case MARKUP_NAME_B: case MARKUP_NAME_STRONG:
         case MARKUP_NAME_I: case MARKUP_NAME_EM: case MARKUP_NAME_CITE:
         case MARKUP_NAME_DFN: case MARKUP_NAME_VAR: case MARKUP_NAME_Q:
-            style = CSS_VALUE_ITALIC; break;
-        case MARKUP_NAME_U: case MARKUP_NAME_INS: case MARKUP_NAME_ABBR:
-        case MARKUP_NAME_ACRONYM: decoration = CSS_VALUE_UNDERLINE; break;
+        case MARKUP_NAME_U: case MARKUP_NAME_INS: case MARKUP_NAME_ABBR: case MARKUP_NAME_ACRONYM:
         case MARKUP_NAME_S: case MARKUP_NAME_DEL: case MARKUP_NAME_STRIKE:
-            decoration = CSS_VALUE_LINE_THROUGH; break;
-        case MARKUP_NAME_SMALL: size_scale = 0.83f; break;
-        case MARKUP_NAME_BIG: size_scale = 1.17f; break;
+        case MARKUP_NAME_SMALL: case MARKUP_NAME_BIG: case MARKUP_NAME_SUB: case MARKUP_NAME_SUP:
+            break;
         case MARKUP_NAME_RT:
             // css ruby: an HTML rt element generates a ruby-text box.
             span->display = {CSS_VALUE_INLINE, CSS_VALUE_RUBY_TEXT};
-            size_scale = 0.5f;
             break;
-        case MARKUP_NAME_SUB: size_scale = 0.83f; vertical_align = CSS_VALUE_SUB; break;
-        case MARKUP_NAME_SUP: size_scale = 0.83f; vertical_align = CSS_VALUE_SUPER; break;
         case MARKUP_NAME_RUBY:
             // Ruby's inner formatting context is a display default, not a font default.
             span->display = {CSS_VALUE_INLINE, CSS_VALUE_RUBY};
             return true;
         default: return false;
     }
+    // the font values come from the element defaults shared with selected views.
+    HtmlUaElementDefault value;
+    if (!layout_html_ua_element_default(tag, &value)) return false;
+    CssEnum style = value.font_style, weight = value.font_weight;
+    CssEnum decoration = value.text_decoration, vertical_align = value.vertical_align;
+    float size_scale = value.font_scale;
     FontProp* font = span->ensure_font(lycon);
     if (tag == MARKUP_NAME_RT) {
         // CSS Text Decoration 4 §3.1: the UA disables emphasis inheritance on
@@ -941,12 +1059,15 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         apply_html_q_quote_defaults(lycon, elmt->as_element());
     }
     if (apply_html_inline_text_default(lycon, span, elmt_name)) return;
+    // literal UA values below come from the table shared with selected views' UA stylesheet.
+    HtmlUaElementDefault ua;
+    if (!layout_html_ua_element_default(elmt_name, &ua)) ua = {};
     switch (elmt_name) {
     case MARKUP_NAME_BODY: {
         block->ensure_boundary(lycon);
         // the UA margin is a CSS length and must follow the ancestor zoom;
         // leaving this literal unscaled shortens auto-height roots under zoom.
-        float body_margin = HTML_BODY_DEFAULT_MARGIN *
+        float body_margin = ua.margin_px *
             layout_effective_zoom(static_cast<View*>(block));
         radiant_spacing_set_all(&block->boundary_mut()->margin, body_margin);
         // Handle HTML bgcolor attribute (e.g., <body bgcolor="#fff">)
@@ -979,7 +1100,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->ensure_boundary(lycon);
         // margin: 1em 0;
         radiant_spacing_set_pair(&block->boundary_mut()->margin,
-            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, lycon->font.style->font_size);
+            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, lycon->font.style->font_size * ua.margin_block_em);
         apply_html_text_align_attribute(lycon, elmt, block);
         break;
     }
@@ -1006,10 +1127,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             DomNode* ancestor = elmt->parent;
             while (ancestor) {
                 if (ancestor->is_element()) {
-                    uintptr_t atag = ancestor->tag();
-                    if (atag == MARKUP_NAME_UL || atag == MARKUP_NAME_OL ||
-                        atag == MARKUP_NAME_MENU || atag == MARKUP_NAME_DIR ||
-                        atag == MARKUP_NAME_DL) {
+                    NameId atag = ancestor->tag();
+                    if (layout_html_ua_list_nesting_ancestor(atag)) {
                         is_nested = true;
                     }
                     if (atag == MARKUP_NAME_UL) {
@@ -1018,20 +1137,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 }
                 ancestor = ancestor->parent;
             }
-            if (elmt_name == MARKUP_NAME_UL) {
-                // Browser UA: ul=disc, ul ul=circle, ul ul ul (and deeper)=square
-                block->blk->list_style_type =
-                    (ul_ancestor_count == 0) ? CSS_VALUE_DISC :
-                    (ul_ancestor_count == 1) ? CSS_VALUE_CIRCLE :
-                                               CSS_VALUE_SQUARE;
-            } else {
-                block->blk->list_style_type = CSS_VALUE_DECIMAL;
-            }
+            // Browser UA: ul=disc, ul ul=circle, ul ul ul (and deeper)=square
+            block->blk->list_style_type = layout_html_ua_list_marker(elmt_name, (size_t)ul_ancestor_count);
             if (!is_nested) {
                 float ua_zoom = layout_effective_zoom((View*)block);
                 radiant_spacing_set_pair(&block->boundary_mut()->margin,
                     CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM,
-                    lycon->font.style->font_size * ua_zoom);
+                    lycon->font.style->font_size * ua.margin_block_em * ua_zoom);
             }
         }
         CssEnum direction = layout_specified_keyword(
@@ -1050,13 +1162,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // CSS Writing Modes: the list UA rule is padding-inline-start; a
         // physical left default would remain in RTL and inflate the list box.
         *radiant_spacing_value(&block->boundary_mut()->padding, inline_start) =
-            40.0f * layout_effective_zoom((View*)block);
+            ua.padding_inline_start_px * layout_effective_zoom((View*)block);
         *radiant_spacing_specificity(&block->boundary_mut()->padding, inline_start) = -1;
         break;
     }
     case MARKUP_NAME_CENTER:
         block->ensure_block(lycon);
-        block->blk->text_align = CSS_VALUE_CENTER;
+        block->blk->text_align = ua.text_align;
         break;
     case MARKUP_NAME_DIV: {
         // HTML spec §14.3.3: <div align> maps to text-align
@@ -1209,9 +1321,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // anchor style
         span->ensure_inline(lycon);
         span->in_line->cursor = CSS_VALUE_POINTER;
-        span->in_line->color = color_name_to_rgb(CSS_VALUE_BLUE);
+        span->in_line->color = color_name_to_rgb(ua.color);
         span->in_line->has_color = true;
-        span->ensure_font(lycon)->text_deco = CSS_VALUE_UNDERLINE;
+        span->ensure_font(lycon)->text_deco = ua.text_decoration;
         break;
     }
     case MARKUP_NAME_CODE:  case MARKUP_NAME_KBD:  case MARKUP_NAME_SAMP:  case MARKUP_NAME_TT: {
@@ -1254,10 +1366,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             }
         }
         block->ensure_block(lycon);
-        block->blk->white_space = CSS_VALUE_PRE;
+        block->blk->white_space = ua.white_space;
         block->ensure_boundary(lycon);
         radiant_spacing_set_pair(&block->boundary_mut()->margin,
-            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, pre_font_size);
+            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, pre_font_size * ua.margin_block_em);
         break;
     }
     case MARKUP_NAME_BLOCKQUOTE:
@@ -1265,24 +1377,24 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // margin: 1em 40px
         block->ensure_boundary(lycon);
         radiant_spacing_set_pair(&block->boundary_mut()->margin,
-            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, lycon->font.style->font_size);
+            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, lycon->font.style->font_size * ua.margin_block_em);
         radiant_spacing_set_pair(&block->boundary_mut()->margin,
-            CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, 40);
+            CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, ua.margin_inline_px);
         break;
     case MARKUP_NAME_ADDRESS:
         // italic, block display
-        block->ensure_font(lycon)->font_style = CSS_VALUE_ITALIC;
+        block->ensure_font(lycon)->font_style = ua.font_style;
         break;
     case MARKUP_NAME_DL:
         // definition list: margin 1em 0
         block->ensure_boundary(lycon);
         radiant_spacing_set_pair(&block->boundary_mut()->margin,
-            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, lycon->font.style->font_size);
+            CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, lycon->font.style->font_size * ua.margin_block_em);
         break;
     case MARKUP_NAME_DD:
         // definition description: margin-left 40px
         block->ensure_boundary(lycon);
-        *radiant_spacing_value(&block->boundary_mut()->margin, CSS_BOX_SIDE_LEFT) = 40;
+        *radiant_spacing_value(&block->boundary_mut()->margin, CSS_BOX_SIDE_LEFT) = ua.margin_inline_start_px;
         *radiant_spacing_specificity(&block->boundary_mut()->margin, CSS_BOX_SIDE_LEFT) = -1;
         break;
     case MARKUP_NAME_SUMMARY: {
@@ -1311,7 +1423,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // This is applied at the TableProp level in layout_table.cpp, not here in block props
         // A table resets inherited alignment from wrappers such as <center>;
         // descendants can still inherit an authored alignment on the table.
-        block->ensure_block(lycon)->text_align = CSS_VALUE_START;
+        block->ensure_block(lycon)->text_align = ua.text_align;
 
         apply_html_table_dimension_attribute(lycon, elmt, block, LAYOUT_AXIS_X);
         apply_html_table_dimension_attribute(lycon, elmt, block, LAYOUT_AXIS_Y);
@@ -1359,7 +1471,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // middle, and table rows inherit it. Preserve that computed value even
         // when author CSS changes a <tr> to an inline box.
         block->ensure_inline(lycon);
-        block->in_line->vertical_align = CSS_VALUE_MIDDLE;
+        block->in_line->vertical_align = ua.vertical_align;
 
         // Handle HTML bgcolor attribute for table rows
         const char* bgcolor_attr = elmt->get_attribute("bgcolor");
@@ -1388,7 +1500,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Chromium's caption UA rule uses -webkit-center, which centers block
         // descendants as well as inline content; preserve that semantic here.
         block->ensure_block(lycon);
-        block->blk->text_align = CSS_VALUE_CENTER;
+        block->blk->text_align = ua.text_align;
         block->blk->legacy_align_center_blocks = true;
         block->blk->legacy_block_align = CSS_VALUE_CENTER;
         break;

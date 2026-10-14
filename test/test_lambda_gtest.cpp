@@ -590,6 +590,7 @@ static const TierParityFixture kTune27TierParity[] = {
     // value; the JIT let it leak into constructors and operators around a
     // self-call, which then returned the callee's value without the wrapper
     {"test/lambda/tail_position_constructors.ls", "test/lambda/tail_position_constructors.txt"},
+    {"test/lambda/any_lane_range_sized_store.ls", "test/lambda/any_lane_range_sized_store.txt"},
     // a self call inside a for comprehension is not a tail call: in a function
     // with a real tail call elsewhere, the JIT's TCO turned it into a jump back
     // to the start and returned one item's value instead of the comprehension

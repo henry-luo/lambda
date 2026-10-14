@@ -145,7 +145,10 @@ def verify_one(script, timeout):
     diag_script = f"{TEMP}/{stem}.diag.ls"
     write(diag_script, f"{MODULE_IMPORT}\n\npn main() {{\n"
           f"  print(format(diag({lambda_string(dump_path)}, [{expect_lit}]), 'json'))\n}}\n")
-    diag = run_lambda_process("./lambda.exe", diag_script, None, timeout, procedural=True, no_log=True)
+    # the model runs on the T0 interpreter: the oracle should not inherit a
+    # JIT-only defect (F24b), and the fixture itself still runs on the
+    # baseline's tier below, so the two sides also differ by tier
+    diag = run_lambda_process("./lambda.exe", diag_script, "interp", timeout, procedural=True, no_log=True)
     if diag.status != "ok":
         v.reason = f"diag {diag.status}: {diag.stderr.strip().splitlines()[-1] if diag.stderr.strip() else ''}"
         return v
@@ -167,7 +170,7 @@ def verify_one(script, timeout):
     # 3. the model's value through the script printer, versus the golden
     model_script = f"{TEMP}/{stem}.model.ls"
     write(model_script, f"{MODULE_IMPORT}\n\nmodel_value({lambda_string(dump_path)})\n")
-    model = run_lambda_process("./lambda.exe", model_script, None, timeout, no_log=True)
+    model = run_lambda_process("./lambda.exe", model_script, "interp", timeout, no_log=True)
     if model.status != "ok":
         v.reason = f"model {model.status}"
         return v
@@ -261,18 +264,20 @@ def main():
         names = by_bucket[b]
         shown = ", ".join(names[:12]) + (" …" if len(names) > 12 else "")
         print(f"  {BUCKET_TITLE[b]}: {len(names)}" + (f"  {shown}" if names and b != "verified" else ""))
-    stuck = {k: r for k, r in pending.items() if r.startswith("stuck")}
+    stuck = {k: r for k, r in pending.items() if r.startswith("stuck") or r.startswith("raised")}
     print(f"  pending (outside the modelled core): {len(pending)}  of which stuck: {len(stuck)}")
     census = Counter()
     for r in pending.values():
         if r.startswith("unsupported: "):
             census.update(r[len("unsupported: "):].split(", "))
+        elif r.startswith("stuck: builtin not declared: "):
+            census["builtin " + r[len("stuck: builtin not declared: "):]] += 1
         else:
-            census[r.split(":")[0]] += 1
+            census[r] += 1
     if census:
         print("  top pending reasons: " + "; ".join(f"{k} ({n})" for k, n in census.most_common(10)))
     for k, r in sorted(stuck.items())[:12]:
-        print(f"    stuck: {k}: {r[len('stuck: '):]}")
+        print(f"    {k}: {r}")
     checked = [e for v in verdicts.values() for e in v.expects]
     if checked:
         tally = Counter(e["status"] for e in checked)

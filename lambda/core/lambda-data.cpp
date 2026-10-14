@@ -875,6 +875,15 @@ bool typeditem_store_item(TypedItem* titem, Item item) {
     case LMD_TYPE_ELEMENT:
         stored.container = item.container;
         break;
+    // a range is a container the reader already decodes; without this case a
+    // range passed as `any` into a map field or an attribute stored an error
+    case LMD_TYPE_RANGE:
+        stored.range = item.range;
+        break;
+    // a sized number is a self-contained compact word: keep it whole, as the
+    // plain-field store does (set_field_value, LMD_TYPE_NUM_SIZED)
+    case LMD_TYPE_NUM_SIZED:
+        break;
     case LMD_TYPE_TYPE:
         stored.type = item.type;
         break;
@@ -1173,6 +1182,10 @@ Item typeditem_to_item(TypedItem *titem) {
         // kept the whole Item word, so the error keeps its payload (S7.4.4).
         memcpy(&item_val, ((char*)titem) + 1, sizeof(uint64_t));
         return {.item = item_val ? item_val : ITEM_ERROR};
+    case LMD_TYPE_NUM_SIZED:
+        // the store kept the compact word, which carries the sized subtype
+        memcpy(&item_val, ((char*)titem) + 1, sizeof(uint64_t));
+        return {.item = item_val};
     case LMD_TYPE_UNDEFINED:
         return {.item = ITEM_JS_UNDEFINED};
     default:

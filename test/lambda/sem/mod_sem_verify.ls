@@ -28,6 +28,7 @@ fn detail(t) {
   let k = string(t.kind)
   if (t.op != null) k ++ " " ++ string(t.op)
   else if (t.n != null) k ++ " " ++ string(t.n)
+  else if (t.src != null) k ++ " " ++ string(t.src)
   else if (t.why != null) k ++ ": " ++ string(t.why)
   else k
 }
@@ -50,6 +51,12 @@ fn expect_value(text) any^ => parse(text, 'mark') ^ {
 // visible as the array's items (S2.5.1v2)
 fn probe(t, nm) => match name(t) {
   case 'lett': { let init = t[0]  let rest = probe(t[1], nm);  <lett n: t.n, init rest> }
+  // a recursive group's last child is the rest of the block
+  case 'letrec': {
+    let fns = for (i in 0 to len(t) - 2) t[i]
+    let rest = probe(t[len(t) - 1], nm);
+    <letrec fns rest>
+  }
   case 'cont': {
     // a block's later declarations hang off its last child (mod_sem_poc_ingest.ls)
     let tail = if (len(t) > 0) t[len(t) - 1] else null
@@ -63,7 +70,7 @@ fn probe(t, nm) => match name(t) {
 // its own, against the comment's value. A `(…)` expectation is already the
 // spread the probe's array shows; any other value is wrapped to match it.
 fn check_expect(t, e) {
-  let v = ev(probe(t, e.n), <env>, fuel()) ^ { 'stuck' }
+  let v = printable(ev(probe(t, e.n), <env>, fuel()) ^ { 'stuck' })
   let expected = expect_value(e.e) ^ { 'unparsable' }
   let want = if (starts_with(trim(e.e), "(")) expected else [expected]
   let status = if (expected == 'unparsable') "unparsable"
@@ -75,9 +82,11 @@ fn check_expect(t, e) {
 
 // the lowering census, the model's stuckness and the `// expect:` results, as
 // one map the driver reads back as JSON
-// a modelled map is an assoc-list element (mod_sem_poc_kernel.ls `mp`), so a
-// map that reaches the output cannot print as the host's map does
-fn holds_mapv(v) => if (type(v) == element) (name(v) == 'mapv' or len([for (c in content(v) where holds_mapv(c)) c]) > 0)
+// the printing boundary (P12) lives in the kernel (`printable`); what it
+// cannot rebuild stays a modelled container and keeps its fixture pending
+fn is_mapv(v) => type(v) == element and (name(v) == 'mapv' or name(v) == 'elmv')
+// a modelled map or element that survived `printable` cannot print as the host's does
+fn holds_mapv(v) => if (type(v) == element) (is_mapv(v) or len([for (c in content(v) where holds_mapv(c)) c]) > 0)
   else if (type(v) == array or type(v) == list) len([for (c in v where holds_mapv(c)) c]) > 0
   else false
 
@@ -86,9 +95,11 @@ pub fn diag(dump_path, expects) {
   let kinds = unsupported_kinds(t)
   let outcome = if (len(kinds) > 0) "unsupported"
     else {
-      let v = ev(t, <env>, fuel()) ^ { <sem_stuck why: ^.message> }
+      let v = printable(ev(t, <env>, fuel()) ^ { if (^.message == "sem-propagate") (<sem_raised why: ^.source.message>) else (<sem_stuck why: ^.message>) })
       if (type(v) == element and name(v) == 'sem_stuck') "stuck: " ++ string(v.why)
-      else if (holds_mapv(v)) "model: map value in output"
+      // the modelled program raised past its top level: natively the script fails
+      else if (type(v) == element and name(v) == 'sem_raised') "raised: " ++ string(v.why)
+      else if (holds_mapv(v)) "model: map or element value in output"
       else "value"
     };
   {outcome: outcome, unsupported: kinds, expects: [for (e in expects) check_expect(t, e)]}
@@ -96,4 +107,4 @@ pub fn diag(dump_path, expects) {
 
 // the model's value of the whole fixture; the generated script's top level
 // splices it (S2.5.1v2) exactly as the fixture's own content is spliced
-pub fn model_value(dump_path) => ev(term_of(dump_path), <env>, fuel()) ^ { <sem_stuck why: ^.message> }
+pub fn model_value(dump_path) any | error => printable(ev(term_of(dump_path), <env>, fuel()) ^ { <sem_stuck why: ^.message> })

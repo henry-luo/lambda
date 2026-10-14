@@ -2141,7 +2141,7 @@ TEST_F(SecondaryViewTest, NativeLabelBodyGridRejectsUnsupportedShapesWithoutPubl
 }
 
 TEST_F(SecondaryViewTest, NativeLabelBodyContinuationRetainsEverySourceByteOnceAcrossChangingWidths) {
-    stylesheet("@page{size:200px 100px;margin:10px}@page :left{size:160px 100px}"
+    stylesheet("p{margin:0}@page{size:200px 100px;margin:10px}@page :left{size:160px 100px}"
         "table{width:100%;border-spacing:0;border-collapse:separate}td{padding:0;vertical-align:top}"
         "div{margin:0;font:10px/12px Arial;white-space:pre;orphans:1;widows:1}");
     ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
@@ -2215,7 +2215,7 @@ TEST_F(SecondaryViewTest, FoListsLowerToCommonNativeGridsAndKeepOriginalPartDiag
 
 TEST_F(SecondaryViewTest, NativeImageContentSizingPositionsClipsAndRetainsTheExactSelectedObject) {
     init_vector_engine();
-    stylesheet("@page { size:200px 120px; margin:10px } img { display:block; width:60px; height:40px; object-position:100% 100%; overflow:hidden }");
+    stylesheet("p{margin:0}@page { size:200px 120px; margin:10px } img { display:block; width:60px; height:40px; object-position:100% 100%; overflow:hidden }");
     ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
     DomElement* image = svg_image("width='30px' height='15px'"); ASSERT_NE(image, nullptr);
     ASSERT_TRUE(image->set_attribute("r:content-width", "200%"));
@@ -2256,7 +2256,7 @@ TEST_F(SecondaryViewTest, NativeImageContentInheritanceComputesLengthsInTheOrigi
 
 TEST_F(SecondaryViewTest, NativeImageAllowedScalesInheritAcrossBlocksRemeasureAndRetainPaint) {
     init_vector_engine();
-    stylesheet("@page{size:200px 120px;margin:10px}img{display:block;width:120px;height:60px;overflow:hidden;object-position:0% 0%}");
+    stylesheet("p{margin:0}@page{size:200px 120px;margin:10px}img{display:block;width:120px;height:60px;overflow:hidden;object-position:0% 0%}");
     ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
     ASSERT_TRUE(source->set_attribute("r:allowed-width-scale", "any calc(25% * 2) 150% 300%"));
     DomElement* parent = block(nullptr); ASSERT_NE(parent, nullptr);
@@ -2559,7 +2559,7 @@ TEST_F(SecondaryViewTest, FoInstreamSvgUsesTheCommonImageOwnerAndTranslationBudg
 
 TEST_F(SecondaryViewTest, NativeLineStackingRetainsRawAllocationAndLeadingAsDistinctPolicies) {
     init_vector_engine();
-    stylesheet("@page { size:100px 100px; margin:10px } div { font:10px/20px Arial } img { width:40px; height:40px }");
+    stylesheet("p{margin:0}@page { size:100px 100px; margin:10px } div { font:10px/20px Arial } img { width:40px; height:40px }");
     ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
     DomElement* images[2] = {};
     for (size_t i = 0; i < 2; i++) {
@@ -2589,7 +2589,7 @@ TEST_F(SecondaryViewTest, NativeLineStackingRetainsRawAllocationAndLeadingAsDist
 }
 
 TEST_F(SecondaryViewTest, NativeNominalTextGeometryComputesFontPercentagesAndInheritedBaselinesOnce) {
-    stylesheet("@page { size:200px 120px; margin:10px } div { font:10px/20px Arial } span { font-size:20px }");
+    stylesheet("p{margin:0}@page { size:200px 120px; margin:10px } div { font:10px/20px Arial } span { font-size:20px }");
     ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
     DomElement* parent = block("P"); ASSERT_NE(parent, nullptr);
     ASSERT_TRUE(parent->set_attribute("r:line-stacking-strategy", "max-height"));
@@ -2615,7 +2615,7 @@ TEST_F(SecondaryViewTest, NativeNominalTextGeometryComputesFontPercentagesAndInh
 }
 
 TEST_F(SecondaryViewTest, NativeZeroAltitudeAndNegativeLeadingKeepTheExplicitBaseline) {
-    stylesheet("@page { size:100px 100px; margin:10px } div { font:10px/0px Arial } img { width:40px; height:40px }");
+    stylesheet("p{margin:0}@page { size:100px 100px; margin:10px } div { font:10px/0px Arial } img { width:40px; height:40px }");
     ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
     DomElement* parent = block(nullptr); ASSERT_NE(parent, nullptr);
     ASSERT_TRUE(parent->set_attribute("r:line-stacking-strategy", "max-height"));
@@ -2804,7 +2804,7 @@ TEST_F(SecondaryViewTest, SvgImageMetadataUsesAbsoluteUnitsWithoutPromotingRelat
 
 TEST_F(SecondaryViewTest, AdjacentImagesWrapAtAtomicBoundariesAndResumeOnTheNextPage) {
     init_vector_engine();
-    stylesheet("@page { size: 100px 60px; margin: 10px } div { margin: 0; font-size: 10px; line-height: 12px; orphans: 1; widows: 1 }");
+    stylesheet("p{margin:0}@page { size: 100px 60px; margin: 10px } div { margin: 0; font-size: 10px; line-height: 12px; orphans: 1; widows: 1 }");
     DomElement* body = block(nullptr); ASSERT_NE(body, nullptr);
     DomElement* images[3] = {};
     for (size_t i = 0; i < 3; i++) {
@@ -2874,6 +2874,60 @@ TEST_F(SecondaryViewTest, AtomicWrapUsesTheCommonAncestorAndPreservesUnicodeNoBr
     LayoutViewNode* placed[] = {source_image_fragment(tree, first), source_image_fragment(tree, second)};
     ASSERT_NE(placed[0], nullptr); ASSERT_NE(placed[1], nullptr);
     EXPECT_FLOAT_EQ(placed[0]->rect.y, placed[1]->rect.y); EXPECT_FLOAT_EQ(placed[1]->rect.x, 60.0f);
+}
+
+TEST_F(SecondaryViewTest, PagedHtmlDefaultsShareTheDefaultViewElementTable) {
+    init_vector_engine();
+    stylesheet("@page { size: 400px 600px; margin: 10px } .plain { white-space: normal }");
+    DomElement* heading = block("Title ", nullptr, "h1"); ASSERT_NE(heading, nullptr);
+    DomElement* heading_code = block("code", nullptr, "code", heading); ASSERT_NE(heading_code, nullptr);
+    DomElement* paragraph = block(nullptr, nullptr, "p"); ASSERT_NE(paragraph, nullptr);
+    DomElement* bold = block("bold", nullptr, "b", paragraph); ASSERT_NE(bold, nullptr);
+    DomElement* small = block("small", nullptr, "small", paragraph); ASSERT_NE(small, nullptr);
+    DomElement* code = block("code", nullptr, "code", paragraph); ASSERT_NE(code, nullptr);
+    DomElement* preformatted = block("a  b", nullptr, "pre"); ASSERT_NE(preformatted, nullptr);
+    DomElement* plain = block("a  b", nullptr, "pre"); ASSERT_NE(plain, nullptr); ASSERT_TRUE(plain->set_attribute("class", "plain"));
+    DomElement* sized = block(nullptr, "font-size: 20px", "div"); ASSERT_NE(sized, nullptr);
+    DomElement* sized_code = block("code", nullptr, "code", sized); ASSERT_NE(sized_code, nullptr);
+    DomElement* quote = block("quote", nullptr, "blockquote"); ASSERT_NE(quote, nullptr);
+    DomElement* outer = block(nullptr, nullptr, "ul"); ASSERT_NE(outer, nullptr);
+    DomElement* item = block("one", nullptr, "li", outer); ASSERT_NE(item, nullptr);
+    DomElement* inner = block(nullptr, nullptr, "ul", item); ASSERT_NE(inner, nullptr);
+    DomElement* deepest = block(nullptr, nullptr, "ul", block(nullptr, nullptr, "li", inner)); ASSERT_NE(deepest, nullptr);
+    DomElement* ordered = block(nullptr, nullptr, "ol"); ASSERT_NE(ordered, nullptr);
+    DomElement* list = block(nullptr, nullptr, "dl"); ASSERT_NE(list, nullptr);
+    DomElement* description = block("description", nullptr, "dd", list); ASSERT_NE(description, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    // headings, inline text and preformatted defaults come from layout_html_ua_element_default at UA origin.
+    ViewCssStyle* style = view_css_resolve(tree, heading); ASSERT_NE(style, nullptr);
+    EXPECT_FLOAT_EQ(style->font.font_size, 32.0f); EXPECT_EQ(style->font.font_weight_numeric, 700);
+    EXPECT_FLOAT_EQ(view_css_resolve(tree, bold)->font.font_weight_numeric, 700);
+    EXPECT_NEAR(view_css_resolve(tree, small)->font.font_size, 16.0f * 0.83f, 0.001f);
+    // a medium-lineage size switching to monospace scales by 13/16; heading sizes keep that lineage.
+    EXPECT_FLOAT_EQ(view_css_resolve(tree, code)->font.font_size, 13.0f);
+    EXPECT_STREQ(view_css_resolve(tree, code)->font.family, "monospace");
+    EXPECT_FLOAT_EQ(view_css_resolve(tree, heading_code)->font.font_size, 26.0f);
+    EXPECT_FLOAT_EQ(view_css_resolve(tree, sized_code)->font.font_size, 20.0f);
+    style = view_css_resolve(tree, preformatted); ASSERT_NE(style, nullptr);
+    EXPECT_EQ(style->white_space, CSS_VALUE_PRE); EXPECT_FLOAT_EQ(style->font.font_size, 13.0f);
+    EXPECT_EQ(view_css_resolve(tree, plain)->white_space, CSS_VALUE_NORMAL);  // author rules win over UA rules
+    EXPECT_EQ(view_css_resolve(tree, outer)->list_style_type, CSS_VALUE_DISC);
+    EXPECT_EQ(view_css_resolve(tree, inner)->list_style_type, CSS_VALUE_CIRCLE);
+    EXPECT_EQ(view_css_resolve(tree, deepest)->list_style_type, CSS_VALUE_SQUARE);
+    EXPECT_EQ(view_css_resolve(tree, ordered)->list_style_type, CSS_VALUE_DECIMAL);
+    // margins use the heading's own em, the 40px indents, and nested lists drop their outer margins.
+    LayoutViewNode* heading_box = source_fragment(tree, heading, VIEW_FRAGMENT_BODY, true); ASSERT_NE(heading_box, nullptr);
+    LayoutViewNode* paragraph_box = source_fragment(tree, paragraph, VIEW_FRAGMENT_BODY, true); ASSERT_NE(paragraph_box, nullptr);
+    EXPECT_NEAR(paragraph_box->rect.y - (heading_box->rect.y + heading_box->rect.height), 32.0f * 0.67f, 0.01f);
+    LayoutViewNode* quote_box = source_fragment(tree, quote, VIEW_FRAGMENT_BODY, true); ASSERT_NE(quote_box, nullptr);
+    EXPECT_FLOAT_EQ(quote_box->rect.x, paragraph_box->rect.x + 40.0f);
+    EXPECT_FLOAT_EQ(source_fragment(tree, description, VIEW_FRAGMENT_BODY, true)->rect.x, paragraph_box->rect.x + 40.0f);
+    LayoutViewNode* outer_box = source_fragment(tree, outer, VIEW_FRAGMENT_BODY, true); ASSERT_NE(outer_box, nullptr);
+    LayoutViewNode* inner_box = source_fragment(tree, inner, VIEW_FRAGMENT_BODY, true); ASSERT_NE(inner_box, nullptr);
+    EXPECT_FLOAT_EQ(inner_box->rect.x, outer_box->rect.x + 40.0f);
+    LayoutViewNode* item_text = source_fragment(tree, item->first_child, VIEW_FRAGMENT_BODY, false); ASSERT_NE(item_text, nullptr);
+    EXPECT_FLOAT_EQ(inner_box->rect.y, item_text->rect.y + item_text->rect.height);
 }
 
 TEST_F(SecondaryViewTest, OverfullLinesOverflowTheirMeasureInsteadOfRejectingTheEdition) {
@@ -3788,7 +3842,7 @@ TEST_F(SecondaryViewTest, AutoTablePercentTracksRemeasureOnAlternatingPages) {
 }
 
 TEST_F(SecondaryViewTest, AutoTableColumnMinimaOverrideSmallerDeclaredTableAndMaximumWidths) {
-    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top; padding: 0 }");
     DomElement* table = block(nullptr, "width: 20px; max-width: 100px; box-sizing: border-box; padding: 5px; border: 1px solid black; border-spacing: 0", "table");
     ASSERT_NE(table, nullptr); DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
     DomElement* first = block("A", "width: 70px; min-width: 90px; max-width: 80px; box-sizing: border-box; padding: 2px; border: 1px solid black", "td", row);
@@ -3831,7 +3885,7 @@ TEST_F(SecondaryViewTest, AutoTableIntrinsicWidthsRespectNoWrapAndRejectAnImposs
 }
 
 TEST_F(SecondaryViewTest, FixedTableWithAutoWidthUsesIntrinsicSizingAndForcedLineBreaks) {
-    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top; padding: 0 }");
     DomElement* table = block(nullptr, "table-layout: fixed; border-spacing: 0; box-sizing: border-box; padding: 2px; border: 1px solid black", "table");
     ASSERT_NE(table, nullptr); DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
     DomElement* first = block("WW\nI", "white-space: pre", "td", row); ASSERT_NE(first, nullptr);
@@ -3849,7 +3903,7 @@ TEST_F(SecondaryViewTest, FixedTableWithAutoWidthUsesIntrinsicSizingAndForcedLin
 }
 
 TEST_F(SecondaryViewTest, AutoTableMeasuresNestedFlowAndNaturalInlineImages) {
-    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top; padding: 0 }");
     DomElement* table = block(nullptr, "border-spacing: 0", "table"); ASSERT_NE(table, nullptr);
     DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
     DomElement* first = block(nullptr, nullptr, "td", row); ASSERT_NE(first, nullptr);
@@ -3956,7 +4010,7 @@ TEST_F(SecondaryViewTest, FixedColumnSpansDivideFirstVisualRowWidthsAndIncludeIn
 
 TEST_F(SecondaryViewTest, AutomaticColumnSpansKeepSingleColumnConstraintsAndAccountForOverlappingSpans) {
     stylesheet("@page { size: 240px 180px; margin: 10px } p { margin: 0; font: 10px/12px Arial } "
-        "td { vertical-align: top }");
+        "td { vertical-align: top; padding: 0 }");
     DomElement* table = block(nullptr, "table-layout: auto; margin: 0 auto; border-spacing: 4px 2px", "table");
     ASSERT_NE(table, nullptr);
     DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
@@ -3986,7 +4040,7 @@ TEST_F(SecondaryViewTest, AutomaticColumnSpansKeepSingleColumnConstraintsAndAcco
 
 TEST_F(SecondaryViewTest, SpanningCellsUseActualTracksOnAlternatingPagesAndRetainTheirEdition) {
     stylesheet("@page { size: 240px 100px; margin: 10px } @page :left { size: 200px 100px } "
-        "p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+        "p { margin: 0; font: 10px/12px Arial } td { vertical-align: top; padding: 0 }");
     DomElement* table = block(nullptr, nullptr, "table"); ASSERT_NE(table, nullptr);
     DomElement* row = block(nullptr, "height: 60px", "tr", table); ASSERT_NE(row, nullptr);
     ASSERT_NE(block("A", "width: 25%", "td", row), nullptr);
@@ -4016,7 +4070,7 @@ TEST_F(SecondaryViewTest, SpanningCellsUseActualTracksOnAlternatingPagesAndRetai
 }
 
 TEST_F(SecondaryViewTest, AutomaticSpansApplyShorterConstraintsBeforeEarlierLongerSpans) {
-    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top; padding: 0 }");
     DomElement* table = block(nullptr, "border-spacing: 4px 2px", "table"); ASSERT_NE(table, nullptr);
     DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
     DomElement* longest = block(nullptr, "width: 180px", "td", row); ASSERT_NE(longest, nullptr);
@@ -4062,7 +4116,7 @@ TEST_F(SecondaryViewTest, ColumnSpanNormalizationKeepsOneCellCursorEvenAtTheHtml
 }
 
 TEST_F(SecondaryViewTest, RowSpansOccupyGridSlotsAlongsideColumnSpansInBothAlgorithms) {
-    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top; padding: 0 }");
     DomElement* span = nullptr; DomElement* lower = nullptr;
     DomElement* table = rowspan_table(&span, &lower); ASSERT_NE(table, nullptr);
     ASSERT_TRUE(span->set_attribute("colspan", "2"));
@@ -4091,7 +4145,7 @@ TEST_F(SecondaryViewTest, RowSpansOccupyGridSlotsAlongsideColumnSpansInBothAlgor
 }
 
 TEST_F(SecondaryViewTest, RowSpansNormalizeToTheirActualGroupAndPreserveCoveredEmptyRows) {
-    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top; padding: 0 }");
     DomElement* span = nullptr; DomElement* lower = nullptr; DomElement* table = rowspan_table(&span, &lower);
     ASSERT_NE(table, nullptr);
     DomElement* second = lower->parent->as_element(); ASSERT_TRUE(second->remove_child(lower));
@@ -4117,7 +4171,7 @@ TEST_F(SecondaryViewTest, RowSpansNormalizeToTheirActualGroupAndPreserveCoveredE
 }
 
 TEST_F(SecondaryViewTest, RowSpanHeightDistributionIncludesSpacingAndAlignsContent) {
-    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top; padding: 0 }");
     DomElement* span = nullptr; DomElement* lower = nullptr; DomElement* table = rowspan_table(&span, &lower); ASSERT_NE(table, nullptr);
     ASSERT_TRUE(span->parent->as_element()->set_attribute("style", "height: 12px"));
     ASSERT_TRUE(lower->parent->as_element()->set_attribute("style", "height: 24px"));
@@ -4208,7 +4262,7 @@ TEST_F(SecondaryViewTest, OverlappingRowSpansAndSpanCoverageBudgetsRejectAtTheir
 
 TEST_F(SecondaryViewTest, SpanningHeaderAndFooterCellsRepeatAndRemeasureOnAlternatingPages) {
     stylesheet("@page { size: 240px 120px; margin: 10px } @page :left { size: 200px 120px } "
-        "p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+        "p { margin: 0; font: 10px/12px Arial } td { vertical-align: top; padding: 0 }");
     DomElement* header = nullptr; DomElement* footer = nullptr;
     DomElement* table = fixed_table(8, &header, &footer); ASSERT_NE(table, nullptr);
     for (DomElement* group : {header, footer}) {
@@ -4506,7 +4560,7 @@ TEST_F(SecondaryViewTest, ColumnSpanTrackBudgetsFailBeforePublishing) {
 }
 
 TEST_F(SecondaryViewTest, PercentageColumnSpansUseEachAlgorithmsTrackBudget) {
-    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    stylesheet("@page { size: 240px 140px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top; padding: 0 }");
     DomElement* table = block(nullptr, nullptr, "table"); ASSERT_NE(table, nullptr);
     DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
     DomElement* cell = block("A", "width: 50%", "td", row); ASSERT_NE(cell, nullptr);
@@ -4527,7 +4581,7 @@ TEST_F(SecondaryViewTest, PercentageColumnSpansUseEachAlgorithmsTrackBudget) {
 }
 
 TEST_F(SecondaryViewTest, TableSpacingUsesSelectedInheritanceHtmlDefaultsAndCalculatedLengths) {
-    stylesheet("@page { size: 240px 180px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+    stylesheet("@page { size: 240px 180px; margin: 10px } p { margin: 0; font: 10px/12px Arial } td { vertical-align: top; padding: 0 }");
     ASSERT_TRUE(source->set_attribute("style", "border-spacing: .5em 1em; font-size: 8px"));
     DomElement* table = block(nullptr, nullptr, "table"); ASSERT_NE(table, nullptr);
     DomElement* row = block(nullptr, nullptr, "tr", table); ASSERT_NE(row, nullptr);
@@ -4581,7 +4635,7 @@ TEST_F(SecondaryViewTest, SpacedTablesReserveRepeatedGroupsAndBothFragmentEdges)
 
 TEST_F(SecondaryViewTest, SpacedPercentageTableTracksRemeasureForAlternatingPageWidths) {
     stylesheet("@page { size: 240px 100px; margin: 10px } @page :left { size: 200px 100px } "
-        "p { margin: 0; font: 10px/12px Arial } td { vertical-align: top }");
+        "p { margin: 0; font: 10px/12px Arial } td { vertical-align: top; padding: 0 }");
     DomElement* table = block(nullptr, nullptr, "table"); ASSERT_NE(table, nullptr);
     for (size_t i = 0; i < 3; i++) {
         DomElement* row = block(nullptr, "height: 60px", "tr", table); ASSERT_NE(row, nullptr);
@@ -6262,7 +6316,7 @@ static LayoutViewNode* table_grid_fragment(LayoutViewNode* node) {
 
 TEST_F(SecondaryViewTest, CollapsedTableBordersResolveConflictsAndStraddleTheirGridLines) {
     init_vector_engine();
-    stylesheet("@page { size: 240px 140px; margin: 10px } "
+    stylesheet("p{margin:0}@page { size: 240px 140px; margin: 10px } "
         "table { table-layout: fixed; width: 100%; border-collapse: collapse; border: 4px solid red } "
         "td { padding: 2px; border: 2px solid blue; font: 10px/12px Arial; vertical-align: top }");
     DomElement* table = block(nullptr, nullptr, "table"); ASSERT_NE(table, nullptr);
@@ -10741,7 +10795,7 @@ TEST_F(SecondaryViewTest, FoAlignmentRefinesInheritedAutoRelativeAndRegionValues
 }
 
 TEST_F(SecondaryViewTest, RelativeCellBeforeAlignsContentEdgesSeparatelyFromBaselinesAndBorderEdges) {
-    stylesheet("@page { size:220px 120px; margin:10px } div { margin:0; font:10px/12px Arial } "
+    stylesheet("p{margin:0}@page { size:220px 120px; margin:10px } div { margin:0; font:10px/12px Arial } "
         "table { table-layout:fixed; width:100%; border-spacing:0 } td { padding:0; vertical-align:top }");
     ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
     DomElement* table = block(nullptr, nullptr, "table"); ASSERT_NE(table, nullptr);
@@ -10772,7 +10826,7 @@ TEST_F(SecondaryViewTest, RelativeCellBeforeAlignsContentEdgesSeparatelyFromBase
 }
 
 TEST_F(SecondaryViewTest, RelativeCellBeforeReservesAlignmentAcrossCellContinuations) {
-    stylesheet("@page { size:120px 80px; margin:10px } div { margin:0; font:10px/12px Arial } "
+    stylesheet("p{margin:0}@page { size:120px 80px; margin:10px } div { margin:0; font:10px/12px Arial } "
         "table { table-layout:fixed; width:100%; border-spacing:0 } td { padding:0; vertical-align:top }");
     ASSERT_TRUE(source->set_attribute("xmlns:r", RADIANT_PAGE_NAMESPACE));
     DomElement* table = block(nullptr, nullptr, "table"); ASSERT_NE(table, nullptr);
@@ -13030,7 +13084,7 @@ TEST_F(SecondaryViewTest, ColumnNotesAndTopFloatsReserveOnlyTheirSelectedBodyCol
 }
 
 TEST_F(SecondaryViewTest, ColumnTablesRepeatGroupsWithinOnePhysicalSheetAndKeepEveryBodyRange) {
-    stylesheet("p,div,td{margin:0;font:8px/20px Arial;orphans:1;widows:1}td{vertical-align:top}");
+    stylesheet("p,div,td{margin:0;font:8px/20px Arial;orphans:1;widows:1}td{vertical-align:top;padding:0}");
     DomElement* master = page_master("native", "size:240px 100px;margin:10px"); ASSERT_NE(master, nullptr);
     ASSERT_NE(page_region(master, "body", "body", nullptr, "column-count:2;column-gap:20px"), nullptr);
     DomElement* sequence = page_sequence("native"); ASSERT_NE(sequence, nullptr);

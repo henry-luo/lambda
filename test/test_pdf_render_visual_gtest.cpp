@@ -4280,6 +4280,24 @@ TEST(RenderOutputParity, ColumnCombinatorStylesCellsAfterColumnMutation) {
     EXPECT_FALSE(file_contains_text(svg_path, "fill=\"rgb(0,0,255)\""));
 }
 
+TEST(RenderOutputParity, CollapsedCellBordersWinEqualTableBordersOnEveryOuterEdge) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/collapsed_tie.html";
+    const char* png_path = "temp/render_output_parity/collapsed_tie.png";
+    // equal width and style keep the cell's color over the table's (CSS 2.2 §17.6.2.1, CSS Tables 3 §3.7.1).
+    const char* html = "<!doctype html><style>html,body{margin:0;background:white}"
+        "table{border-collapse:collapse;border:4px solid red}td{width:30px;height:20px;padding:0;border:4px solid lime}"
+        "</style><table><tr><td></td><td></td></tr><tr><td></td><td></td></tr></table>";
+    ASSERT_TRUE(render_html_fixture(html_path, png_path, html, "-vw 100 -vh 60"));
+    ImageData image = {}; ASSERT_TRUE(load_png_rgba(png_path, &image));
+    expect_preview_pixel(image, 1, 20, 0, 255, 0);   // left outer edge
+    expect_preview_pixel(image, 20, 1, 0, 255, 0);   // top outer edge
+    expect_preview_pixel(image, 70, 20, 0, 255, 0);  // right outer edge
+    expect_preview_pixel(image, 20, 50, 0, 255, 0);  // bottom outer edge
+    expect_preview_pixel(image, 20, 14, 255, 255, 255);
+    image_free(image.pixels);
+}
+
 TEST(RenderOutputParity, IndividualTransformsComposeBeforeTransformAndSurviveRestyle) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";

@@ -24,8 +24,8 @@ unsupported_in(term) == 0;
 run(term) == golden;
 
 // the stuck-by-default property survives ingestion: a construct the kernel has
-// no rule for (a `match`) lowers to an `unsupported` term, and the run is stuck
-let mini = <ast-dump "lambda" <AST_SCRIPT <child <AST_NODE_CONTENT <declare> <item <AST_NODE_MATCH_EXPR>>>>>>
+// no rule for (a `?` query) lowers to an `unsupported` term, and the run is stuck
+let mini = <ast-dump "lambda" <AST_SCRIPT <child <AST_NODE_CONTENT <declare> <item <AST_NODE_QUERY_EXPR>>>>>>
 let stuck_term = normalize(mini) ^ { null };
 unsupported_in(stuck_term) == 1;
 run(stuck_term) == 'stuck'

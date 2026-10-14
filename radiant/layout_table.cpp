@@ -3255,18 +3255,15 @@ static void collect_collapsed_border_candidates(ViewTable* table,
     int edge = axis.edge(row, col);
     bool at_start = edge == 0;
     bool at_end = edge == axis.edge_count;
-    if (at_start) {
-        append_collapsed_border_candidate(candidates,
-            table_view_border(table, axis.table_side(true)));
-    } else {
+    // the winner fold keeps the earlier of equal borders, so candidates enter in CSS 2.2 §17.6.2.1
+    // precedence: cell, row, row group, column, column group, then table (CSS Tables 3 §3.7.1 keeps
+    // the cell over an equal table border); within a type the upper or left element comes first.
+    if (!at_start) {
         table_append_border(candidates, table_collapsed_border_cell(
             lookup, table, axis.previous_row(row, col), axis.previous_col(row, col)),
             axis.previous_side());
     }
-    if (at_end) {
-        append_collapsed_border_candidate(candidates,
-            table_view_border(table, axis.table_side(false)));
-    } else {
+    if (!at_end) {
         table_append_border(candidates, table_collapsed_border_cell(lookup, table, row, col),
                             axis.next_side());
     }
@@ -3279,45 +3276,39 @@ static void collect_collapsed_border_candidates(ViewTable* table,
             table_append_border(candidates, table_collapsed_border_row(lookup, table, row),
                                 0, true);
         }
-        if (!at_end) {
-            ViewBlock* group = table_collapsed_border_row_group(lookup, table, row);
-            ViewBlock* previous_group = table_collapsed_border_row_group(lookup, table, row - 1);
-            if (group && group != previous_group) table_append_border(candidates, group, 0, true);
-        }
-        if (!at_start) {
-            ViewBlock* group = table_collapsed_border_row_group(lookup, table, row - 1);
-            ViewBlock* next_group = table_collapsed_border_row_group(lookup, table, row);
-            if (group && group != next_group) table_append_border(candidates, group, 2, true);
-        }
+        ViewBlock* upper_group = !at_start ? table_collapsed_border_row_group(lookup, table, row - 1) : nullptr;
+        ViewBlock* lower_group = !at_end ? table_collapsed_border_row_group(lookup, table, row) : nullptr;
+        if (upper_group && upper_group != lower_group) table_append_border(candidates, upper_group, 2, true);
+        if (lower_group && lower_group != upper_group) table_append_border(candidates, lower_group, 0, true);
         if (at_start || at_end) {
             int side = at_start ? 0 : 2;
             table_append_border(candidates, find_column_element(table, col), side, true);
             table_append_border(candidates, find_colgroup_element(table, col), side, true);
         }
-        return;
+    } else {
+        if (at_start || at_end) {
+            int side = at_start ? 3 : 1;
+            table_append_border(candidates, table_collapsed_border_row(lookup, table, row), side, true);
+            ViewBlock* group = table_collapsed_border_row_group(lookup, table, row);
+            table_append_border(candidates, group, side, true);
+        }
+        if (!at_start) {
+            table_append_border(candidates, find_column_element(table, col - 1), 1, true);
+        }
+        if (!at_end) {
+            table_append_border(candidates, find_column_element(table, col), 3, true);
+        }
+        ViewBlock* left_group = !at_start ? find_colgroup_element(table, col - 1) : nullptr;
+        ViewBlock* right_group = !at_end ? find_colgroup_element(table, col) : nullptr;
+        if (left_group && left_group != right_group) {
+            table_append_border(candidates, left_group, 1, true);
+        }
+        if (right_group && right_group != left_group) {
+            table_append_border(candidates, right_group, 3, true);
+        }
     }
-    if (at_start || at_end) {
-        int side = at_start ? 3 : 1;
-        table_append_border(candidates, table_collapsed_border_row(lookup, table, row), side, true);
-        ViewBlock* group = table_collapsed_border_row_group(lookup, table, row);
-        table_append_border(candidates, group, side, true);
-    }
-    if (!at_start) {
-        table_append_border(candidates, find_column_element(table, col - 1), 1, true);
-    }
-    if (!at_end) {
-        table_append_border(candidates, find_column_element(table, col), 3, true);
-    }
-    ViewBlock* left_group = !at_start ? find_colgroup_element(table, col - 1) : nullptr;
-    ViewBlock* right_group = !at_end ? find_colgroup_element(table, col) : nullptr;
-    if (left_group && left_group != right_group) {
-        table_append_border(candidates, left_group, 1, true);
-    }
-    if (right_group && right_group != left_group) {
-        table_append_border(candidates, right_group, 3, true);
-    }
-    if (at_start) table_append_border(candidates, right_group, 3, true);
-    if (at_end) table_append_border(candidates, left_group, 1, true);
+    if (at_start) append_collapsed_border_candidate(candidates, table_view_border(table, axis.table_side(true)));
+    if (at_end) append_collapsed_border_candidate(candidates, table_view_border(table, axis.table_side(false)));
 }
 
 static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, TableMetadata* meta) {

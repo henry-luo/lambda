@@ -432,6 +432,8 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         case AST_NODE_VARIABLE_DECLARATOR: {
             AstDeclaratorNode* declarator = (AstDeclaratorNode*)node;
             emit_dump_string_field("name", declarator->name);
+            // the destination contract a `let x: T = e` declares (S7.8.1)
+            if (declarator->declared_type) emit_dump_type_field("declared_type", declarator->declared_type);
             emit_lambda_dump_field(source, "init", declarator->init, indent + 1);
             break;
         }
@@ -452,6 +454,10 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
                 emit_dump_contract_field("contract", parameter->contract_type,
                     parameter->has_explicit_contract);
             }
+            // a parameter that may be omitted (`a?`, or one with a default):
+            // without this a reader cannot tell `fn f(a?, b?)` from `fn f(a, b)`
+            if (parameter && parameter->is_optional) emit_dump_bool_field("optional", true);
+            // a parameter's `as` is its default value (build_param_syntax)
             emit_lambda_dump_field(source, "as", named->as, indent + 1);
             break;
         }
@@ -477,6 +483,12 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             AstLoopNode* loop = (AstLoopNode*)node;
             emit_dump_string_field("name", loop->name);
             emit_dump_string_field("index", loop->index_name);
+            // the axis and key class (S8.1.1v2, S8.1.3v2): `at` and `k: symbol`
+            // walk the name-keyed members, `of` and `k: int` the positional ones;
+            // the one-name `at`/`of` form binds the key itself
+            if (loop->key_filter == LOOP_KEY_SYMBOL) printf(" <key_filter \"symbol\">");
+            else if (loop->key_filter == LOOP_KEY_INT) printf(" <key_filter \"int\">");
+            if (loop->key_only) emit_dump_bool_field("key_only", true);
             emit_lambda_dump_field(source, "as", loop->as, indent + 1);
             emit_lambda_dump_field(source, "on", loop->on, indent + 1);
             emit_lambda_dump_list(source, "join_keys", (AstNode*)loop->join_keys, indent + 1);
@@ -490,6 +502,7 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         }
         case AST_NODE_FOR_EXPR: {
             AstForNode* for_node = (AstForNode*)node;
+            if (for_node->limit_from_end) emit_dump_bool_field("limit_last", true);
             emit_lambda_dump_list(source, "loop", for_node->loop, indent + 1);
             emit_lambda_dump_list(source, "let", for_node->let_clause, indent + 1);
             emit_lambda_dump_field(source, "where", for_node->where, indent + 1);
@@ -513,6 +526,7 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             break;
         }
         case AST_NODE_ORDER_SPEC:
+            if (((AstOrderSpec*)node)->descending) emit_dump_bool_field("descending", true);
             emit_lambda_dump_field(source, "expr", ((AstOrderSpec*)node)->expr, indent + 1);
             break;
         case AST_NODE_LOOP: {
@@ -565,6 +579,10 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
         case AST_NODE_ELEMENT:
         case AST_NODE_ELMT_TYPE: {
             AstElementNode* elmt = (AstElementNode*)node;
+            // the tag lives on the element's type, not on the node
+            if (node->type && node->type->type_id == LMD_TYPE_ELEMENT) {
+                emit_dump_strview_field("name", ((TypeElmt*)node->type)->name);
+            }
             emit_lambda_dump_list(source, "item", elmt->item, indent + 1);
             emit_lambda_dump_field(source, "content", elmt->content, indent + 1);
             break;
@@ -630,6 +648,9 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             TypeFunc* signature = fn->type && fn->type->type_id == LMD_TYPE_FUNC
                 ? (TypeFunc*)fn->type : NULL;
             emit_dump_string_field("name", fn->name);
+            // the trailing `...` has no parameter node of its own; it lives on
+            // the signature (extra arguments are reached through `varg()`)
+            if (signature && signature->is_variadic) emit_dump_bool_field("variadic", true);
             if (signature && signature->return_contract) {
                 emit_dump_contract_field("return_contract", signature->return_contract,
                     signature->has_explicit_return_contract);

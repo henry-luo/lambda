@@ -1,6 +1,6 @@
 # Lambda Semantics POC — Executable Semantics in Today's Lambda
 
-**Status:** POC milestones M0–M3 landed 2026-08-29 (126 checks under `test/lambda/sem/`). The fixtures regressed silently under the S2.5 list rulings and a JIT defect, and were repaired 2026-10-13 (F11, F12): 127 checks, all `true` on the interp, jit and auto tiers. **In the baseline since 2026-10-14** (`test/lambda/sem` added to `FUNCTIONAL_TEST_DIRECTORIES`; the kernel renamed `mod_sem_poc_kernel.ls` per the harness's module-naming rule — §5). **M4 landed 2026-10-14**: `--emit-ast-dump` now prints Mark, `mod_sem_poc_ingest.ls` lowers it to terms, and `sem_poc_ingest.ls` grades the model on `test/lambda/closure.ls` with no hand-written term (§6.3, §8). **Stage 5 landed 2026-10-14**: `make semantics-verify` runs the model over all of `test/lambda` (26 fixtures verified, 439 pending with reasons) and gates the manifest's verified set in `make test-lambda-full` (§6.4, §13). The DSL of Part II is not started. On 2026-10-13 this doc absorbed the former `Lambda_Semantics_DSL_Proposal.md` (draft, 2026-07-03) as Part II, and that file was deleted.
+**Status:** POC milestones M0–M3 landed 2026-08-29 (126 checks under `test/lambda/sem/`). The fixtures regressed silently under the S2.5 list rulings and a JIT defect, and were repaired 2026-10-13 (F11, F12): 127 checks, all `true` on the interp, jit and auto tiers. **In the baseline since 2026-10-14** (`test/lambda/sem` added to `FUNCTIONAL_TEST_DIRECTORIES`; the kernel renamed `mod_sem_poc_kernel.ls` per the harness's module-naming rule — §5). **M4 landed 2026-10-14**: `--emit-ast-dump` now prints Mark, `mod_sem_poc_ingest.ls` lowers it to terms, and `sem_poc_ingest.ls` grades the model on `test/lambda/closure.ls` with no hand-written term (§6.3, §8). **Stage 5 landed 2026-10-14**: `make semantics-verify` runs the model over all of `test/lambda` (26 fixtures verified, 439 pending with reasons) and gates the manifest's verified set in `make test-lambda-full` (§6.4, §13). **Stage 6 round 1 landed 2026-10-14**: errors as values, builtins by table, types, pipes, lists, spread, richer `for` — 129 fixtures verified, 3 suspect, 334 pending (§6.4, §8 M6); one runtime defect fixed on the way (F21). **Round 2 landed 2026-10-14**: elements, `match`, recursive groups, named arguments, decomposition, `for` axes and shaping, provisos, constrained and array types, higher-order builtins — **208 verified, 6 suspect, 252 pending** (§6.4, §8 M7); the dump gained the element tag, the loop axis and key class, the order direction, `limit last` and declared contracts (F25). The DSL of Part II is not started. On 2026-10-13 this doc absorbed the former `Lambda_Semantics_DSL_Proposal.md` (draft, 2026-07-03) as Part II, and that file was deleted.
 **Scope:** Part I — the **functional core of Lambda only**: no procedural (`pn`) subset, no new syntax, no new runtime machinery. Part II — the native semantics DSL the POC seeds, for Lambda and LambdaJS.
 **End goal:** an executable, independent semantic model that *verifies* the Lambda test fixtures under `test/lambda/`, breaking the circularity of goldens captured from the very runtime they test (§1.1).
 **Spec linkage:** no `S#`/`D#` ruling covers meta-circular modeling, so the P-ledger (§1.5) holds working-doc decisions. By construction the model checks SI1 (boxing invisibility) and SI3v2 (inference evaluation-invariance); it relies on S4.1/SI7 (int arithmetic), SI4 (equality laws) and SI13 (no aliasing) in its host (§11.2).
@@ -124,6 +124,7 @@ covers meta-circular modeling, so these are working-doc decisions):
 | P8 | Scope ceiling: functional core (literals, arithmetic/comparison/logical, `let`, `if`, closures/application, recursion, arrays/maps/for basics). Errors-as-modeled-values, `pn`, modules, system functions beyond a tiny builtin list: out (§8, §9). |
 | P9 | The POC model is the migration seed for the DSL's Stage 4 (§15.2); arm ↔ rule correspondence is maintained deliberately (§9.2). |
 | P10 | Meta-fragment findings made while building the POC are recorded in §7 and fed to the `Lambda_Semantics_Formal.md` worklist — the §11.3 hardening loop, started early. |
+| P12 | **The model prints through the host's printer, and only the printing boundary converts** (Stage 5/6). A held host error (`<errv v: e>`) becomes the error; a modelled map (`<mapv <ent k v>…>`, an assoc list because no literal can build a map from a computed key, §12.2.5) is rebuilt as a host map by writing it as Mark text and reading it back — the one place the model leans on the formatter, used only to print. A map holding an error, a type or a closure has no faithful spelling and stays a `mapv`, which keeps its fixture pending rather than suspect. |
 | P11 | **Ingestion (M4) reads the production parser's own AST dump**, which `--emit-ast-dump` prints as Mark: `(X …)` → `<X …>` for nodes, fields and attributes alike (designer ruling 2026-10-14). The dump of a fixture is committed beside the model (`closure.ast.mark`, regeneration command in its header), `normalize` reads shapes only and never the inference annotations, and anything outside the core lowers to `<unsupported>` — stuck by the kernel's default arm. |
 
 ---
@@ -228,7 +229,21 @@ MVP node-kind inventory (grows per the §8 ladder):
 | `<forr n:'x', src body>` | for-comprehension |
 | `<funn f:'f', ps:['x','y'], body>` | named n-ary function (M4; `rclon` value, applied by `appn`) |
 | `<cont e*>` | a content block's value items, normalized as content (M4, Stage 5; S2.5.3, S2.6.2–S2.6.4, collapses per S2.5.5v2); a trailing `lett` child carries the block's later declarations |
-| `<sysf n:"len">` / `<unsupported kind:…>` | a system function by name (only `len` maps, to `lenn`); a construct outside the core — stuck |
+| `<syscall n:"sum", e*>` | a system function through the kernel's declared builtin table (P8, §12.3.6); an undeclared name is stuck |
+| `<lst e*>` / `<spr e>` | list literal (S2.5.1v2); a spread child in an array, list or map |
+| `<rng a b>` `<inn a b>` `<iss v ty>` `<tylit src:"int?">` `<tyor a b>` `<tyand a b>` | range, membership (S8.1.1), type test (S11.3.1v2) against a type value: a base name, `T?`, a union (S10.1.1v3) |
+| `<forr n:'x', i:'i', w:true, src body where>` | comprehension with an optional index binder (S8.1.3v2) and filter; clauses nest |
+| `<pipe src body>` / `<filt src pred>` | the mapping pipe and the filter stage, `~`/`~#` bound (S10.1.2v4, S10.1.6) |
+| `<rse e>` `<prop e>` `<hdl e body [arm]>` / `<errv v: e>` | `raise`, postfix `^`, the handler with its optional `~` arm (S7.4.6, S7.6.1v4, S7.6.3v2); a held host error value |
+| `<elm n: tag, attrs content>` / `<elmv n: tag, <mapv…> <kids…>>` | element literal and value: attributes a modelled map, children the content of a host element (S2.6.1v2) |
+| `<mtch scrutinee <arm pattern body>… <dflt body>>` | type match (S11.2.1): literal arms by `==`, type arms by `is`, `~` the matched value |
+| `<letrec <funn>… rest>` | a run of adjacent function declarations, mutually visible (F18) |
+| `<narg n: p, e>` | a named argument, bound by parameter name |
+| `<tycon base pred>` / `<tyarrv e: T>` | `T that pred` and `T[]` as type values; `<sub_ty a b>` `<att k c>` for `<:` and `at` |
+| `<that c pred>` | the proviso (S10.1.7v2) |
+| `<sysfv n: name>` | a system function as a value, applied through the builtin table |
+| `<errv v: e, r: true>` | a RAISED error leaving an application: postfix `^` propagates it; a soft error value (no `r`) flows (S7.4.1, S7.6.3v2) |
+| `<unsupported kind:…>` | a construct outside the core — stuck |
 
 ### 4.2 Values, environments, closures
 
@@ -525,6 +540,39 @@ reaching the output. Pending census leaders: `is` (96 fixtures), `type(…)`
 pipes (40), `for` clauses beyond one plain loop (38), `sum` (37), handlers
 (33) — the §13.2 tier order, measured.
 
+Stage 6, round 1 (2026-10-14, §8 M6) worked that census down: **129 verified,
+3 suspect, 334 pending** (93 stuck). The model now runs on the T0
+interpreter (`LAMBDA_EXEC_BACKEND=interp` for the generated scripts) while the
+fixture runs on the baseline's tier, so the oracle cannot inherit a JIT-only
+defect — the round found one (F23) — and the two axes differ by tier as well.
+The suspects left are two known representation gaps the lowering cannot see
+through: a literal nested array is a matrix to `shape`/`ndim`/`format` where
+a computed one is not (F22), and Mark reads an integer spelled past its range
+as a float (`0xFFFFFFFF`, a `u64` maximum) — refused as `unsupported: literal`
+where the lowering can tell, suspect where it cannot. Pending leaders now:
+elements (63, no dynamic constructor — §12.2.5), imports (48), object
+literals (27), `match` (24), destructuring declarators (18), type literals the
+kernel cannot build (13), the richer `for` clauses (13), queries (10).
+
+Round 2 (2026-10-14, §8 M7): **208 verified, 6 suspect, 252 pending** (74
+stuck). Elements are modelled the way maps are (`elmv`, printed through P12),
+`match` as the type match S11.2.1 describes, adjacent function declarations as
+one recursive group, and the `for` axes, key classes, `let`/`order by`/
+`limit`/`offset`, named arguments, decomposition, `T that p`, `T[]`, `<:`,
+`at`, `last`, `~#`, `that`, text pipes, and the higher-order builtins
+(`call`, `reduce`, keyed `sort`) followed. The dump had to grow five times
+for it (F25). Two findings reshaped the kernel: a raised error must stay
+distinct from a soft error value across a function boundary (otherwise every
+function that *returns* an error looked like one that raised, and its caller's
+missing `^` propagated it), and map keys are unique by construction (a later
+writer replaces its entry in place, which `len` and iteration then see once).
+The suspects left: F22's four, the structural-equality depth limit the model
+does not implement (S5.1.3, `eq_phase1_remaining`), and `contract_return_check`,
+which tests the return-contract enforcement the model deliberately skips (F26).
+Pending leaders now: imports (48), object literals (26), destructuring
+declarators (14), structural type literals (13), queries (10), the dump's
+missing param flags (9, F17 — since fixed, now 14 `param form`), paths (9), integers past i64 (8, F24).
+
 ---
 
 ## 7. Findings already produced (the loop is already paying)
@@ -784,22 +832,91 @@ POC itself is approved, which is the strongest argument that the loop works.
   reads the first entry. Hidden today behind `unsupported: map spread`; it
   resurfaces as a suspect once spread is modelled — a ruling is needed before
   the model takes a side.
-- **F17 — the AST dump does not record parameter optionality or variadics.**
-  `fn f(a?, b?)` and `fn g(a, ...)` dump as plain params, so the lowering
-  cannot mark them unsupported and the model reports `arity mismatch`
-  stuckness instead (`func_param`, `box_unbox_negative`,
-  `default_callback_frame`). Emitter follow-up: `<optional>` / `<variadic>`
-  attributes; deferred while the emitter is being edited for F14.
+- **F17 — the AST dump did not record parameter optionality or variadics.
+  FIXED 2026-10-14.** `fn f(a?, b?)` and `fn g(a, ...)` dumped as plain
+  params, so the lowering read them as required and the model reported
+  `arity mismatch` stuckness (`func_param`, `arrow_variadic`,
+  `box_unbox_negative`, `default_callback_frame`,
+  `type_enforcement_dynamic_call`). A default was already there — a
+  parameter's `as` field *is* its default (`build_param_syntax`), which the
+  lowering had ignored, so a defaulted parameter was silently required too.
+  The dump now prints `<optional true>` on a parameter whose `TypeParam` is
+  optional (`?` or a default) and `<variadic true>` on a function whose
+  signature takes `...` (the marker has no parameter node of its own); both
+  only when set, so every other dump is unchanged. The lowering marks a
+  function with an optional, defaulted or variadic parameter `unsupported:
+  param form` (14 fixtures), which turned twelve stuck runs into classified
+  pending ones. Modelling these forms needs the binding rules for omitted
+  arguments, defaults and `varg()`.
 - **F18 — forward references between functions need a recursive group.**
   `forward_ref.ls` calls `second()` from a `first()` declared above it; the
   sequential `lett` chain binds names in source order, so the call is
   `unbound variable`. The model needs the §4.4 group binding (a `rclon`
   carrying its sibling declarations) — Stage 6.
-- **F19 — a host error value is stuckness to the model.** `numeric_expr.ls`
-  prints `error` items for `true % 2`; the kernel propagates every error
-  through `^`, so the whole run is stuck. Whether an operator's error result
-  is a *value* the model carries (S3.1 lists it as falsy; S2.5.5v2 reads it as
-  no result) or stuckness is the tier-6 error-handling decision (§13.2).
+- **F19 — a host error value is stuckness to the model. RESOLVED 2026-10-14
+  (Stage 6).** `numeric_expr.ls` prints `error` items for `true % 2`, while
+  the kernel propagated every error through `^` and reported the run stuck.
+  Now a host error is a value the kernel holds (`<errv v: e>`, S7.4.1,
+  S7.9.1–S7.9.4): it is falsy (S3.1), `or` rescues it (S7.5.3), a value
+  function returns it unchanged (S7.9.3), `type` sees it (S7.9.1); the
+  kernel's own `T^` channel is kept for stuckness (one reserved error code)
+  and for the modelled program's propagation (`raise`, postfix `^`, caught at
+  an application or a handler under one fixed message). The postfix `^` is
+  not in the dump, so a call not engaged by a handler or an `or` propagates —
+  the only reading a well-typed program allows (E228, S7.5.1) — except a
+  system function whose failures are plain values (`may_return_error` false,
+  S7.4.5). Lambda has no static narrowing of `any | error`, so a non-error
+  value reaches a host operation through a handled identity call (`val`).
+- **F20 — a type literal's span runs into the next line's comment.** The
+  dump of `x is null` followed by a comment line prints
+  `<AST_NODE_TYPE <source "null\n\n// Test 15: Large arrays\n">>`; a type may
+  legitimately continue across a break (`int ⏎ ?`, S16.2.2v2), but the
+  comment is not type source. The kernel reads type sources line by line with
+  comments dropped; the parser's span is the defect (`array_float.ls`).
+- **F21 — a range or a sized number passed as `any` and stored into a map
+  field or an element attribute read back as an error. FIXED 2026-10-14.**
+  `fn mk(v) => <b v: v>; type(mk(1 to 3).v)` was `error` on both tiers,
+  `{v: v}` likewise, while the literal `<b v: (1 to 3)>` and an array item
+  survived. `typeditem_store_item` (`lambda/core/lambda-data.cpp`), the
+  any-lane store, had no case for `LMD_TYPE_RANGE` or `LMD_TYPE_NUM_SIZED`
+  and fell to its "unknown type" default; the reader side already decoded
+  both. Found because the model's environment is an element whose `v`
+  attribute holds every bound value (`func.ls` printed `range` as `error`,
+  `bitwise_lane_preservation.ls` lost its `u8`s). Pin:
+  `test/lambda/any_lane_range_sized_store.ls`, in `kTune27TierParity`.
+- **F22 — a literal nested array is a matrix, a computed one is not.**
+  `shape([[1, 2, 3]])` is `[1, 3]` and `shape([for (i in 1 to 1) [1, 2, 3]])`
+  is an error natively (`ndim` 0, `format(…, 'json')` prints differently).
+  The model builds every array by comprehension, so `typed_array_ndim_*` and
+  `typed_array_format` stay suspect by representation: whether a computed
+  array of equal-length numeric arrays should be a matrix is unruled (S2.5.7v4
+  speaks of lists, S7.10.5v3 of vectorized functions) — a candidate ruling.
+- **F24 — three Mark-reader gaps the literal lowering must refuse.** A string
+  `\u{41}` escape and a symbol's `\u03A9` escape are not decoded (`string.ls`,
+  `value.ls`); an integer spelled past the i64 range reads as a decimal
+  (`18446744073709551615`, S4.3.4), which `u64()` then cannot take back; and
+  an integer spelled as hex past 2³¹ reads as a float. The lowering marks
+  each `unsupported: literal` rather than guess.
+- **F25 — five shapes the AST dump did not record, now added.** The element
+  tag (`<AST_NODE_ELEMENT <name "div">`), the loop's key class and one-name
+  form (`<key_filter "symbol">`, `<key_only true>` — the `at`/`of` axes and
+  `k: int`/`k: symbol`, S8.1.1v2/S8.1.3v2), the order direction
+  (`<descending true>`), `limit last` (`<limit_last true>`) and a declarator's
+  destination contract (`<declared_type "float">`, S7.8.1). Each was found as
+  a wrong model value that the dump could not have told apart.
+- **F26 — contract enforcement is not modelled.** The lowering reads a
+  declared contract only to widen a number at a declaration (`let x: float =
+  4`); it never checks one. `contract_return_check.ls`, which exercises the
+  deferred return check (S7.7.x), is suspect by that design, and a fixture
+  whose contract silently coerces elsewhere could be too.
+- **F23 — `u64()` of a dynamic i64 is `nan` on the JIT.** `fn c(v) => u64(v);
+  c(9223372036854775807i64)` prints `nan` under `LAMBDA_EXEC_BACKEND=jit` and
+  the value under `interp` (SI3v2). Found when the model's builtin table
+  delegated the conversion; the harness now runs the model on the
+  interpreter so the oracle does not inherit it. Task filed.
+  (Checked and not a finding: `9223372036854775807i64 + 1` is `integer`
+  on the dynamic lane and wraps on the typed `i64` lane — S4.4.4 rules exactly
+  that, sized×non-sized leaves the machine domain.)
 
 ## 8. Scope ladder and milestones
 
@@ -904,6 +1021,32 @@ Each milestone is a committed fixture set, green under
   gained `idiv`, `pos`, content normalization in `cont` (S2.6.2–S2.6.4) and
   operand-valued `and`/`or` (F15). Next: the census leaders, in §13.2 order,
   and F16–F19.
+- **M6 — Stage 6, round 1. LANDED** (2026-10-14, §6.4). The census leaders in
+  §13.2 order: a declared builtin table (`syscall`, some 80 host functions by
+  name and arity, P8), `to`/`in`/`is` with type values (base names, `T?`,
+  unions, `|`/`&` in value position), `type` declarations, list literals with
+  their declarations, spread in arrays and maps, `for` with an index binder,
+  a `where` and several clauses, the pipe family with `~`/`~#`, host errors as
+  values with `raise`/`^`/handlers and the two-arm handler (F19), structural
+  map equality, the splice-position rule (`items_of`: a `for`, list or block
+  written in place splices, S2.5.1v2/S2.5.5v2), sized numeric literals through
+  their conversions, and the printing boundary (P12). 129 fixtures verified
+  (from 26), 3 suspect (F22 and Mark's integer range), 334 pending with
+  reasons. One runtime defect fixed (F21), one JIT defect filed (F23), one
+  dump gap filed (F17). The model runs on the interpreter. Next: elements
+  (needs a dynamic constructor, §12.2.5), `match`, forward references (F18),
+  destructuring, the remaining `for` clauses, imports.
+- **M7 — Stage 6, round 2. LANDED** (2026-10-14, §6.4). Elements (`elmv`,
+  §12.2.5's missing constructor sidestepped as maps were), `match` (S11.2.1),
+  recursive groups (F18 closed), named arguments, `let a, b = …`, the `for`
+  axes and key classes, `let`/`order by`/`limit`/`offset`, provisos, text
+  pipes, `T that p`, `T[]`, `<:`, `at`, `last`, `~#`, system functions as
+  values, `call`/`reduce`/keyed `sort`, raised-versus-soft errors, unique map
+  keys, declared numeric contracts. 208 verified (from 129), 6 suspect, 252
+  pending. The dump grew five attributes (F25). Next: imports (a module
+  environment from the imported file's dump), object literals, destructuring
+  in `for`, queries and paths, F17 (fixed the same day: the dump records
+  `<optional>` and `<variadic>`, and those functions lower to `param form`).
 
 Estimated model size at M3, extrapolating from the kernel: 300–500 lines of
 Lambda including checks — small enough to review as a whole.
@@ -1457,7 +1600,7 @@ Do **not** attempt the whole suite at once. Order by semantic dependency, roughl
    promoted to rules)
 
 The POC covers tiers 1–2 and part of 3 (§8). `test/lambda/sem/semantics-manifest.json`
-(§6.4) tracks it: the verified set (26 fixtures on 2026-10-14), the pending census with
+(§6.4) tracks it: the verified set (208 fixtures on 2026-10-14, after Stage 6 round 2), the pending census with
 each fixture's reason — the tier order above, measured — and exclusions with a reason
 (none yet; real I/O would be the first). The CI gate is "verified set stays verified"
 — the set only grows, by `--update` from one sweep, never by hand.
@@ -1569,7 +1712,7 @@ Staged so each stage lands with its own tests and is useful standalone.
 | 3 | `judgment` + strictness expansion (§12.3.4, §12.4.1), derivation recording. Milestone: typed calculus with auto-generated evaluation order. | not started |
 | 4 | Lambda model, functional core (§13.2 tiers 1–5); `builtin` declarations. Milestone: `closure.ls` and `numeric_expr.ls` verified. | **pulled forward as the POC** — M0–M3 in plain Lambda (§8) |
 | 5 | Verification harness: `make semantics-verify`, `// expect:` extraction, four-bucket report, `semantics-manifest.json`, CI gate on the verified set — the first end-goal payoff. | **landed 2026-10-14 in POC form** (§6.4, M5): driver, manifest gate, `// expect:` checks; the rule trace waits for §12.3.4 |
-| 6 | Lambda model completion (§13.2 tiers 6–8) + first triage sweep: every ✓/✗ entry resolved to a runtime fix, a model fix, or a ruling. | — |
+| 6 | Lambda model completion (§13.2 tiers 6–8) + first triage sweep: every ✓/✗ entry resolved to a runtime fix, a model fix, or a ruling. | **rounds 1–2 landed 2026-10-14** (§8 M6–M7): tiers 1–6 in part, 208 verified; every suspect resolved to a model fix (F15), a runtime fix (F21), a dump fix (F25), a filed defect (F23) or a candidate ruling (F16, F22, F26) |
 | 7 | LambdaJS model (KJS as the map; validated against `test/js/` and the Node-compat baseline), starting with the AST-normalization judgment and §12.4 already in place. | — |
 
 Risk notes: Stage 0 touches the shared pattern grammar — the one stage with regression

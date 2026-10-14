@@ -97,16 +97,21 @@ run(<iff <lit v:"s"> <lit v:1> <lit v:2>>) == (if ("s") 1 else 2);
 run(<iff <lit v:0> <lit v:1> <lit v:2>>) == (if (0) 1 else 2);
 run(<iff <lit v:null> <lit v:1> <lit v:2>>) == (if (null) 1 else 2);
 
-// ===== a KNOWN model limitation, pinned rather than hidden =====
+// ===== a host error is a VALUE, not stuckness (F19, resolved) =====
 // Lambda has two error channels: a returned error VALUE that flows as ordinary
-// data, and a raised error that must be handled. Natively `1 + "str"` (a real
-// line in test/lambda/expr.ls) yields an error *value*. The model cannot
-// reproduce that: every arm propagates with `^`, so the same term is raised and
-// reported 'stuck'. Both sides agree the term has no ordinary value; they
-// disagree on which channel carries that fact. P8 puts errors-as-modelled-values
-// out of POC scope, so this is compared on is-there-a-value rather than on
-// equality — a divergence recorded as a fact instead of papered over.
-(run(<add <lit v:1> <lit v:"str">>) == 'stuck') and ((1 + "str") is error);
+// data (S7.4.1), and a raised error that must be handled (S7.4.2). Natively
+// `1 + "str"` (a real line in test/lambda/expr.ls) yields an error *value*.
+// Until Stage 6 the model could not reproduce that — every arm propagated with
+// `^`, so the term was reported 'stuck' — and this check pinned the divergence.
+// Now the kernel holds a host error as a value (`<errv v: e>`, read back with
+// `raw`), reserving its own channel for stuckness and for the modelled
+// program's `raise`; the term has an error value on both sides, and the
+// model's stuckness partition is unchanged by it.
+(raw(run(<add <lit v:1> <lit v:"str">>)) is error) and ((1 + "str") is error);
+// and an error is a value the program goes on computing with (S7.9.3): it is
+// falsy (S3.1), `or` rescues it (S7.5.3), and arithmetic on it stays an error
+run(<orr <add <lit v:1> <lit v:"str">> <lit v:7>>) == ((1 + "str") or 7);
+(raw(run(<add <add <lit v:1> <lit v:"str">> <lit v:1>>)) is error) and (((1 + "str") + 1) is error);
 
 // ===== the partition is exhaustive for the modelled grammar =====
 // A term is stuck or it has a value; there is no third outcome, and evaluation
