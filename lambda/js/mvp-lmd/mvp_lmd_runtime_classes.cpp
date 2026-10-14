@@ -1,6 +1,8 @@
 #include "mvp_lmd_runtime.h"
 #include "../js_ast.hpp"
 #include "../js_props.h"
+#include "../js_runtime.h"
+#include "../js_property_attrs.h"
 #include "../js_well_known_names.h"
 #include "../../input/input.hpp"
 #include "../../runtime/lambda-root-frame.hpp"
@@ -477,11 +479,34 @@ extern "C" Item mvp_lmd_constructor_result(Item value, Item receiver, int64_t de
     if (derived && value.item != ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     return receiver.item == ITEM_JS_TDZ ? mvp_lmd_fail(LMD_MVP_REFERENCE, 0) : receiver;
 }
-extern "C" Item mvp_lmd_class_initialize_instance(Item constructor, Item receiver) {
+extern "C" Item mvp_lmd_class_initialize_instance(Item constructor, Item receiver, int64_t static_methods) {
     MvpLmdClass* cls = ((MvpLmdCallable*)constructor.function)->home;
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     Rooted<Item> held(roots, constructor), object(roots, receiver), value(roots, ItemNull);
+    if (cls->private_method_mask & (static_methods ? 2 : 1)) {
+        RootFrame private_roots(1);
+        if (!private_roots.valid()) return ItemError;
+        Rooted<Item> methods(private_roots, ItemNull);
+        methods.set(cls->field_keys[cls->field_count + (static_methods ? 1 : 0)]);
+        FOR_EACH_MAP_FIELD((TypeMap*)methods.get().map->type, field) {
+            NameRef name = name_pool_resolve_id(context->name_pool, field->name_id);
+            if (!name) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            Item key = {.item = s2it(name)};
+            // install all methods before fields; a repeated stamp throws on the existing own brand.
+            Item stored = mvp_lmd_private_element(object.get(), key,
+                field->flags & JSPD_IS_ACCESSOR ? Item{.item = ITEM_JS_UNDEFINED} :
+                    map_shape_field_to_item(methods.get().map->data, field), LMD_PRIVATE_METHOD);
+            if (item_is_error(stored)) return stored;
+            if (field->flags & JSPD_IS_ACCESSOR) {
+                Item storage = mvp_lmd_is_proxy(object.get()) ? js_proxy_private_slots(object.get(), false, nullptr, true) : object.get();
+                if (!js_map_store_accessor(mvp_lmd_property_map(storage, true), name,
+                        js_shape_entry_accessor_pair(field), JSPD_NON_ENUMERABLE, context->pool))
+                    return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            }
+        }
+    }
+    if (static_methods) return object.get();
     uint32_t index = 0, key_index = 0;
     for (AstNode* node = ((AstBlockNode*)cls->ast->body)->statements; node; node = node->next) {
         if (node->node_type != AST_NODE_FIELD) continue;
@@ -495,7 +520,8 @@ extern "C" Item mvp_lmd_class_initialize_instance(Item constructor, Item receive
             mvp_lmd_class_invoke(initializer, object.get(), &key, 1, Item{.item = ITEM_JS_UNDEFINED}), &home));
         if (item_is_error(value.get())) return value.get();
         MvpLmdLibraryState* library = mvp_lmd_program_library(cls->program);
-        Item stored = library && library->mutable_prototypes ?
+        Item stored = field->is_private ? mvp_lmd_private_element(object.get(), key, value.get(), LMD_PRIVATE_ADD) :
+            library && library->mutable_prototypes ?
             mvp_lmd_property_with_receiver(object.get(), key, value.get(), LMD_PROP_CREATE_DATA, object.get()) :
             mvp_lmd_property_set(object.get(), key, value.get());
         if (item_is_error(stored)) return stored;
@@ -529,7 +555,7 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
             return item_is_error(self.get()) ? self.get() : mvp_lmd_class_initialize_instance(held.get(), self.get());
         }
         while (cls->constructor_id < 0 && cls->nominal.base) {
-            if (cls->initializer_count) {
+            if (cls->has_instance_elements) {
                 MvpLmdClass* base = (MvpLmdClass*)cls->nominal.base->extension_data;
                 self.set(mvp_lmd_class_invoke(mvp_lmd_class_values(base)[0], receiver, arguments, argc, target.get()));
                 return item_is_error(self.get()) ? self.get() : mvp_lmd_class_initialize_instance(held.get(), self.get());
@@ -563,7 +589,7 @@ extern "C" Item mvp_lmd_class_invoke(Item callee, Item receiver, Item* arguments
                 Item linked = mvp_lmd_set_prototype(self.get(), prototype.get());
                 if (item_is_error(linked)) return linked;
             }
-            if (cls->initializer_count) {
+            if (cls->has_instance_elements) {
                 Item initialized = mvp_lmd_class_initialize_instance(held.get(), self.get());
                 if (item_is_error(initialized)) return initialized;
             }

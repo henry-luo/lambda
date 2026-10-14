@@ -103,10 +103,11 @@ null-on-missing conventions do not implement the corresponding JS operations.
 
 ## 3. Implemented admission boundary
 
-This table records the initial admission boundary. Later implemented extensions
-in §§10–31 supersede its exclusions; §32 is planned work. In particular,
-BigInt, Symbols, generators, exceptions and property expansion already have
-implemented subsets. Section 10 defines the initial object/Map boundary.
+This table records the initial admission boundary. Implemented extensions in
+§§10–34 supersede its exclusions; §§32–34 distinguish completed increments from
+remaining work. BigInt, Symbols, generators, exceptions, property expansion and
+private classes have implemented subsets. Section 10 defines the initial
+object/Map boundary.
 
 | Area | Implemented | Excluded from the implemented phase |
 |---|---|---|
@@ -1614,7 +1615,7 @@ Scope, reuse inventory, helper disclosures and evidence:
 
 ## 34. Ninety percent of LJS Test262 coverage
 
-**In progress (2026-10-13).** Reach **36,235 distinct fully passing cases** from
+**In progress (2026-10-14).** Reach **36,235 distinct fully passing cases** from
 the frozen **40,261-case LJS baseline**, with every required execution mode
 passing on one MVP build. This is 90% of LJS's supported population, not the
 entire upstream corpus. The §33 audit establishes 21,747 passes, so the target
@@ -1662,15 +1663,32 @@ nominal ancestry (**S11.3.1v2**), and Array `flatMap`, `findLast` and
 `findLastIndex` through the existing visitor/flattening operations. Follow-up
 fixes preserve native Error branding, implement Annex B call-target errors,
 validate concise arrow/meta-property/ImportCall targets, initialize named-function
-self captures before defaults, and reuse guarded Map entry stores. The
-affected-family required-mode audit gains **464 cases** (949/1,050); all 254
-recorded entry crashes pass. Focused checks pass **203/203**, forced-GC checks
-**16/16**, Lambda **6,823/6,823** and full LJS **40,261/40,261**. This is a
-selected-population result. Matched-release repeats show Map lookup **12.1%**
-and knucleotide **2.6% faster** than entry; Sieve's roughly **3 µs** cold-setup
-slowdown remains open. The
-interpreter bridge, private classes, remaining library/storage/async/module work,
-90% coverage target and complete performance acceptance remain open.
+self captures before defaults, and reuse guarded Map entry stores.
+
+Private fields, methods, accessors and `#name in` now execute natively
+using fresh private NameRefs, Lambda shapes and existing mutable capture cells
+(**D3.4.3v5**, **S8.2.2v6**, **D6.2.3v2**). Brands belong to each evaluated class
+and receiver, including constructor-returned objects and revoked proxies; public
+reflection excludes private names. Shared analysis now retains enclosing bindings
+for class computed keys and validates private declarations/initializers. The
+complete required-mode audit passes **24,803/40,261 IDs (61.6%)**: **21,708 positive
+and 3,095 negative**, including **5,601** class-family cases. This proves **3,056
+gains over phase-entry canonical results**; the sole extra-mode failure is the
+pre-existing strict `delete this` case, confirmed on the unchanged control.
+There are no new crash/timeout IDs and no missing outcomes after isolated replay.
+Focused checks pass **206/206**, also under forced GC and poisoning; shared gates
+pass Lambda **6,841/6,841** and full LJS **40,261/40,261**. Oversized class
+environments retain their existing closure-capacity limit and remain unsupported.
+
+Another **11,432 passes** are needed for 90%. The interpreter bridge, remaining
+library/storage/async/module work and builtin subclass interactions remain open.
+The matched-release screen passes **84/84** benchmark output/backend contracts;
+31-round repeats cover all eight suspects. Pidigits and Three-way Merge remain
+positive against one control and inconclusive against the other; Map lookup also
+remains inconclusive. The other initial suspect signals are not confirmed by the
+repeats. A separate original-control Sieve comparison still confirms **0.090 vs
+0.087 ms** (roughly **3 µs** slower). Older gaps retain their original controls;
+complete performance acceptance remains open. No jq workload was executed.
 
 Dependencies, reuse boundaries, acceptance cases and evidence requirements:
 [implementation plan](../impl/JS_MVP_Lmd_Test262_90.md).

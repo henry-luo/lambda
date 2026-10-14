@@ -1295,21 +1295,21 @@ extern "C" Item js_proxy_get_target(Item obj) {
     return obj;
 }
 
-static Item js_proxy_private_slots(Item proxy, bool create) {
+Item js_proxy_private_slots(Item proxy, bool create, Item (*allocate)(), bool allow_revoked) {
     RootFrame roots(2);
     Rooted<Item> proxy_root(roots, proxy);
     if (!roots.valid()) return ItemNull;
     JsProxyData* pd = js_get_proxy_data(proxy_root.get());
-    if (!pd || pd->revoked) return ItemNull;
+    if (!pd || (pd->revoked && !allow_revoked)) return ItemNull;
     Item slots = PD_PRIVATE_SLOTS(pd);
     if (get_type_id(slots) == LMD_TYPE_MAP) return slots;
     if (!create) return ItemNull;
     // Private slots are created lazily; the allocation may compact the Proxy,
     // so reacquire its carrier before publishing the new slot pointer (D5.3.2).
-    Rooted<Item> slots_root(roots, js_new_object());
+    Rooted<Item> slots_root(roots, allocate ? allocate() : js_new_object());
     if (get_type_id(slots_root.get()) != LMD_TYPE_MAP) return ItemNull;
     pd = js_get_proxy_data(proxy_root.get());
-    if (!pd || pd->revoked) return ItemNull;
+    if (!pd || (pd->revoked && !allow_revoked)) return ItemNull;
     pd->private_slots = slots_root.get().item;
     return slots_root.get();
 }
