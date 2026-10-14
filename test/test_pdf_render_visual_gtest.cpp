@@ -985,7 +985,7 @@ TEST(RenderOutputParity, LogicalPageLabelsMatchAuthoredTextInPhysicalPdfAndFilte
     }
 }
 
-TEST(RenderOutputParity, PagedPdfUsesPostScriptStylesAndRejectsUnimplementedContexts) {
+TEST(RenderOutputParity, PagedPdfUsesPostScriptStylesAndAdmitsEveryFormattingContext) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const char* html_path = "temp/render_output_parity/paged_settled.html";
     const char* pdf_path = "temp/render_output_parity/paged_settled.pdf";
@@ -994,12 +994,11 @@ TEST(RenderOutputParity, PagedPdfUsesPostScriptStylesAndRejectsUnimplementedCont
         "<script>document.getElementById('next').style.breakBefore='page';</script></body></html>";
     ASSERT_TRUE(render_html_fixture(html_path, pdf_path, html, "--paged"));
     EXPECT_EQ(pdf_page_count(pdf_path), 2);
-    const char* invalid = "<!doctype html><html><body><div style='display:grid'>Grid</div></body></html>";
-    const char* invalid_path = "temp/render_output_parity/paged_invalid.pdf";
-    remove(invalid_path);
-    EXPECT_FALSE(render_html_fixture(html_path, invalid_path, invalid, "--paged"));
-    EXPECT_FALSE(file_exists(invalid_path));
-    EXPECT_TRUE(file_contains_text("temp/render_output_parity/paged_invalid.pdf.err", "formatting context requires"));
+    // the page flow admits every browsing formatting context; a grid is placed whole (plan §4.1)
+    const char* grid = "<!doctype html><html><body><div style='display:grid'>Grid</div></body></html>";
+    const char* grid_path = "temp/render_output_parity/paged_grid.pdf";
+    ASSERT_TRUE(render_html_fixture(html_path, grid_path, grid, "--paged"));
+    EXPECT_EQ(pdf_page_count(grid_path), 1);
     const char* preview = "temp/render_output_parity/paged_settled.png";
     ASSERT_TRUE(render_html_fixture(html_path, preview, html, "--paged"));
     ImageData image = {}; ASSERT_TRUE(load_png_rgba(preview, &image));

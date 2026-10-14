@@ -7532,6 +7532,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         block->blk->vertical_geometry_published = false;
     }
     block->x = pa_line->left;  block->y = pa_block->advance_y;
+    // a page flow consumes forced breaks and a full fragmentainer before the box is placed
+    if (lycon->paged) paged_block_before(lycon, block, pa_block);
     bool is_float = layout_position_is_floated(block->position);
     *out_original_margin_top = 0.0f;
     *out_sibling_margin_collapsed_before_layout = false;
@@ -10477,6 +10479,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     break;
                 }
                 bool parent_child_collapsed = false;
+                // the post-hoc collapses below move an already laid out subtree;
+                // a page flow re-anchors the struts inside it afterwards
+                ViewBlock* paged_parent = !lycon->paged ? nullptr :
+                    collapse_parent_view && collapse_parent_view->is_block()
+                    ? lam::view_require_block(collapse_parent_view)
+                    : layout_nearest_block_ancestor(block->parent_view());
+                float paged_y_before = block->y;
+                float paged_parent_y_before = paged_parent ? paged_parent->y : 0.0f;
                 if (first_in_flow_child == block) {  // first in-flow child
                     // CSS Box 4 §margin-trim: block-start trims the first child's block-start
                     // CSS 2.1 §9.5.2: If clearance was applied (saved_clear_y >= 0),
@@ -10602,6 +10612,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         }
                     }
                 }
+                if (lycon->paged) {
+                    float moved = block->y - paged_y_before +
+                        (paged_parent ? paged_parent->y - paged_parent_y_before : 0.0f);
+                    if (moved != 0.0f) paged_block_moved(lycon, block, moved);
+                }
                 // CSS 2.2 Section 8.3.1: Self-collapsing blocks
                 // CSS 2.1 §8.3.1: Elements with clearance CAN be self-collapsing.
                 bool is_self_collapsing = layout_block_is_self_collapsing(block);
@@ -10696,6 +10711,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     lycon->line.left + layout_block_child_width_contribution(
                         &lycon->block, block));
             }
+            // the parent cursor passed the child: a page flow applies break-after,
+            // monolithic and keep rules while the parent is still open
+            if (lycon->paged) paged_block_after(lycon, block);
             if (!is_float) {
                 assert(lycon->line.is_line_start);
             }

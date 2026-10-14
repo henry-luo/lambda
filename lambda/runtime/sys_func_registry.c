@@ -67,10 +67,11 @@ extern Item js_jube_member_call_by_ordinal(Item receiver, int64_t slot,
 extern Item js_create_data_property(Item obj, Item name, Item value);
 extern bool js_for_in_key_is_live(Item object, Item key);
 extern Item js_get_async_iterator(Item iterable);
-extern Item js_async_iterator_step_result(Item iterator);
+extern Item js_async_iterator_step_result(Item record);
 extern Item js_iterator_result_done(Item result);
 extern Item js_iterator_result_value(Item result);
 extern Item js_async_iterator_close_result(Item iterator);
+extern Item js_async_iterator_record_close_result(Item record);
 extern bool js_async_iterator_close_needs_await(Item result);
 extern bool js_is_object_value(Item value);
 // super() for class-expression superclasses: handles FUNC and MAP (class object) callee
@@ -3250,6 +3251,9 @@ JitImport jit_runtime_imports[] = {
     {"js_iterator_result_done", FPTR(js_iterator_result_done)},
     {"js_iterator_result_value", FPTR(js_iterator_result_value)},
     {"js_async_iterator_close_result", FPTR(js_async_iterator_close_result),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM), JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"js_async_iterator_record_close_result", FPTR(js_async_iterator_record_close_result),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_YES, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM), JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"js_async_iterator_close_needs_await", FPTR(js_async_iterator_close_needs_await),

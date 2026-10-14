@@ -137,11 +137,13 @@ typedef struct JsTypedArrayOps {
     const JsBufferViewOps* buffer;
     struct TypeMap* (*shape)(JsTypedArrayType, Item);
     Item (*prototype)(JsTypedArrayType, Item);
-    Item (*get_index)(Item, int);
+    Item (*get_index)(Item, int64_t);
     Item (*collect)(Item); // undefined means GetMethod(@@iterator) was absent
     Item (*construct)(JsTypedArrayType, Item, Item*, int); // undefined selects the intrinsic constructor
     bool (*callable)(Item);
     Item (*call)(Item, Item, Item*, int);
+    bool (*constructor)(Item);
+    Item (*string)(Item);
 } JsTypedArrayOps;
 
 typedef enum JsTypedArrayCallbackKind {
@@ -154,6 +156,25 @@ typedef enum JsTypedArrayCallbackKind {
 
 Item js_typed_array_callback_algorithm(Item owner, Item* args, int argc,
     bool array_semantics, JsTypedArrayCallbackKind kind, const JsTypedArrayOps* ops);
+
+typedef enum JsTypedArrayMethodKind {
+    JS_TYPED_METHOD_INDEX_OF, JS_TYPED_METHOD_LAST_INDEX_OF, JS_TYPED_METHOD_INCLUDES,
+    JS_TYPED_METHOD_AT, JS_TYPED_METHOD_FILL, JS_TYPED_METHOD_SET,
+    JS_TYPED_METHOD_COPY_WITHIN, JS_TYPED_METHOD_REVERSE, JS_TYPED_METHOD_SLICE,
+    JS_TYPED_METHOD_SORT, JS_TYPED_METHOD_TO_SORTED, JS_TYPED_METHOD_TO_REVERSED,
+    JS_TYPED_METHOD_WITH,
+} JsTypedArrayMethodKind;
+
+Item js_typed_array_method_with_ops(Item owner, Item* args, int argc,
+    bool array_semantics, JsTypedArrayMethodKind kind, const JsTypedArrayOps* ops);
+Item js_typed_array_static_with_ops(Item constructor, Item* args, int argc,
+    bool from, const JsTypedArrayOps* ops);
+Item js_typed_array_string_with_ops(Item owner, Item* args, int argc,
+    bool locale, const JsTypedArrayOps* ops);
+Item js_array_like_join_kernel(Item owner, bool typed_array, int64_t length,
+    const char* separator, int separator_length, bool locale, const JsTypedArrayOps* ops);
+Item js_object_to_locale_string_with_ops(Item owner, uint64_t* result_home,
+    const JsTypedArrayOps* ops);
 
 Item js_typed_array_construct_with_ops(int type_id, Item source, Item offset,
     Item length, int argc, Item target, const JsTypedArrayOps* ops);
@@ -207,6 +228,8 @@ LAMBDA_RT_API bool js_typed_array_is_out_of_bounds_item(Item ta);
 Item js_typed_array_raw_get_item(JsTypedArray* ta, void* data, int index);
 Item js_typed_array_fill(Item ta, Item value, int start, int end,
                          bool array_semantics);
+Item js_typed_array_fill_with_ops(Item ta, Item value, int start, int end,
+    bool array_semantics, const JsBufferViewOps* ops);
 LAMBDA_RT_API bool js_is_typed_array(Item val);
 LAMBDA_RT_API JsTypedArray* js_get_typed_array_ptr(Map* m);
 LAMBDA_RT_API void* js_typed_array_current_data_ptr(Item ta_item);
@@ -219,6 +242,10 @@ bool js_item_bytes(Item item, const char** data, int* len);
 Item js_typed_array_subarray(Item ta, Item begin, Item end, const JsTypedArrayOps* ops);
 Item js_typed_array_slice(Item ta, int start, int end, bool array_semantics);
 Item js_typed_array_set_from(Item ta, Item source, int offset);
+Item js_typed_array_slice_with_ops(Item ta, int start, int end,
+    bool array_semantics, const JsTypedArrayOps* ops);
+Item js_typed_array_set_from_with_ops(Item ta, Item source, int offset,
+    const JsTypedArrayOps* ops);
 bool js_typed_array_raw_reverse(Item ta);
 bool js_typed_array_raw_copy_reversed(Item dst, Item src);
 bool js_typed_array_raw_copy_same_type(Item dst, Item src);

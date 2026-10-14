@@ -557,6 +557,19 @@ static bool js_parser_parse_property_name(JsParser* parser, JsToken* js_parser_t
     return true;
 }
 
+// module export names accept string literals; ordinary property access does not.
+static bool js_parser_parse_module_export_name(JsParser* parser, JsToken* token) {
+    if (parser->current.kind == JS_TOK_STRING) {
+        if (token) *token = parser->current;
+        js_parser_parser_advance(parser);
+        return true;
+    }
+    if (parser->current.kind == JS_TOK_PRIVATE_IDENTIFIER)
+        return js_parser_parser_fail(parser, JS_PARSE_ERROR_UNEXPECTED_TOKEN,
+            "expected a module export name", JS_TOK_IDENTIFIER);
+    return js_parser_parse_property_name(parser, token);
+}
+
 static bool js_parser_parse_type_parameters(JsParser* parser, uint32_t* count_out) {
     if (count_out) *count_out = 0;
     if (!(parser->mode & JS_PARSE_TYPESCRIPT) ||
@@ -2945,7 +2958,7 @@ static bool js_parser_parse_import_declaration(JsParser* parser) {
                     js_parser_parser_advance(parser);
                 }
                 JsToken remote;
-                if (!js_parser_parse_property_name(parser, &remote) ||
+                if (!js_parser_parse_module_export_name(parser, &remote) ||
                         !js_parser_parser_reduce(parser, JS_REDUCE_EXPRESSION,
                             JS_REDUCTION_TOKEN, remote.span, remote,
                             (JsToken){0}, JS_REDUCTION_FLAG_PROPERTY, 0)) return false;
@@ -2957,6 +2970,9 @@ static bool js_parser_parse_import_declaration(JsParser* parser) {
                                 JS_REDUCTION_TOKEN, local.span, local,
                                 (JsToken){0}, JS_REDUCTION_FLAG_BINDING, 0)) return false;
                     specifier_children = 2;
+                } else if (remote.kind == JS_TOK_STRING) {
+                    return js_parser_parser_fail(parser, JS_PARSE_ERROR_UNEXPECTED_TOKEN,
+                        "string import names require a local alias", JS_TOK_AS);
                 }
                 if (!js_parser_parser_reduce(parser, JS_REDUCE_DECLARATION,
                         JS_REDUCTION_IMPORT_SPECIFIER,
@@ -3036,7 +3052,7 @@ static bool js_parser_parse_export_declaration(JsParser* parser) {
         JsToken namespace_start = parser->previous;
         if (js_parser_parser_accept(parser, JS_TOK_AS)) {
             JsToken local;
-            if (!js_parser_parse_name(parser, &local) ||
+            if (!js_parser_parse_module_export_name(parser, &local) ||
                     !js_parser_parser_reduce(parser, JS_REDUCE_EXPRESSION,
                         JS_REDUCTION_TOKEN, local.span, local,
                         (JsToken){0}, JS_REDUCTION_FLAG_PROPERTY, 0)) return false;
@@ -3060,19 +3076,21 @@ static bool js_parser_parse_export_declaration(JsParser* parser) {
         child_count++;
         if (!js_parser_parse_semicolon(parser)) return false;
     } else if (js_parser_parser_accept(parser, JS_TOK_LBRACE)) {
+        bool requires_source = false;
         while (parser->current.kind != JS_TOK_RBRACE) {
             JsToken local;
-            if (!js_parser_parse_name(parser, &local) ||
+            if (!js_parser_parse_module_export_name(parser, &local) ||
                     !js_parser_parser_reduce(parser, JS_REDUCE_EXPRESSION,
                         JS_REDUCTION_TOKEN, local.span, local,
                         (JsToken){0}, JS_REDUCTION_FLAG_PROPERTY, 0)) return false;
+            requires_source |= local.kind == JS_TOK_STRING;
             uint32_t specifier_children = 1;
             if (js_parser_parser_accept(parser, JS_TOK_AS)) {
                 JsToken exported;
-                if (!js_parser_parse_property_name(parser, &exported) ||
-                        !js_parser_parser_reduce(parser, JS_REDUCE_EXPRESSION,
-                            JS_REDUCTION_TOKEN, exported.span, exported,
-                            (JsToken){0}, JS_REDUCTION_FLAG_PROPERTY, 0)) return false;
+                if (!js_parser_parse_module_export_name(parser, &exported)) return false;
+                if (!js_parser_parser_reduce(parser, JS_REDUCE_EXPRESSION,
+                        JS_REDUCTION_TOKEN, exported.span, exported,
+                        (JsToken){0}, JS_REDUCTION_FLAG_PROPERTY, 0)) return false;
                 specifier_children = 2;
             }
             if (!js_parser_parser_reduce(parser, JS_REDUCE_DECLARATION,
@@ -3097,6 +3115,9 @@ static bool js_parser_parse_export_declaration(JsParser* parser) {
                     (JsToken){0}, 0, 0)) return false;
             flags |= JS_REDUCTION_FLAG_EXPORT_SOURCE;
             child_count++;
+        } else if (requires_source) {
+            return js_parser_parser_fail(parser, JS_PARSE_ERROR_UNEXPECTED_TOKEN,
+                "string local export names require a source module", JS_TOK_FROM);
         }
         if (!js_parser_parse_semicolon(parser)) return false;
     } else if ((parser->mode & JS_PARSE_TYPESCRIPT) &&
@@ -3105,22 +3126,25 @@ static bool js_parser_parse_export_declaration(JsParser* parser) {
              parser->current.kind == JS_TOK_ENUM ||
              parser->current.kind == JS_TOK_NAMESPACE)) {
         if (!js_parser_parse_ts_declaration(parser)) return false;
+        child_count = 1;
     } else if (parser->current.kind == JS_TOK_VAR || parser->current.kind == JS_TOK_LET ||
             parser->current.kind == JS_TOK_CONST) {
         if (!js_parser_parse_variable_declaration(parser, false)) return false;
-    } else if (parser->current.kind == JS_TOK_FUNCTION) {
-        if (!js_parser_parse_function(parser, true, false, false, NULL)) return false;
+        child_count = 1;
+    } else if (parser->current.kind == JS_TOK_FUNCTION ||
+            (parser->current.kind == JS_TOK_ASYNC && parser->next.kind == JS_TOK_FUNCTION &&
+             !parser->next.line_terminator_before)) {
+        bool async = parser->current.kind == JS_TOK_ASYNC;
+        if (!js_parser_parse_function(parser, true, async, false, NULL)) return false;
+        child_count = 1;
     } else if (parser->current.kind == JS_TOK_CLASS) {
         if (!js_parser_parse_class(parser, true, NULL)) return false;
+        child_count = 1;
     } else {
         return js_parser_parser_fail(parser, JS_PARSE_ERROR_UNEXPECTED_TOKEN,
             "expected declaration after export", JS_TOK_IDENTIFIER);
     }
-    if (!(flags & JS_REDUCTION_FLAG_EXPORT_SOURCE) &&
-            !(flags & JS_REDUCTION_FLAG_EXPORT_STAR) &&
-            child_count == 0) {
-        child_count = 1;
-    }
+    // an empty export clause has no AST child to consume.
     return js_parser_parser_reduce(parser, JS_REDUCE_DECLARATION, JS_REDUCTION_EXPORT,
         js_parser_span_from_start(first, parser->previous.span), first, (JsToken){0},
         flags, child_count);

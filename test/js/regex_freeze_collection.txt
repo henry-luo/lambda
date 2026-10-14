@@ -1,10 +1,26 @@
-t1:Cannot set on a frozen Map
+t1:no error
 t1b:1
-t2:Cannot delete on a frozen Map
-t3:Cannot clear on a frozen Map
+t1c:2,2
+t2:no error
+t2b:false,0
+t3:no error
+t3b:false,0
 t4:value,true,1
-t5:Cannot add on a frozen Set
-t5b:true,1
-t6:Cannot delete on a frozen Set
-t7:Cannot clear on a frozen Set
+t5:no error
+t5b:true,2
+t5c:true
+t6:no error
+t6b:false,true,2
+t7:no error
+t7b:false,0
 t8:1,true
+t9map:own:true,true,false,false,false
+t9map:reflect:false,false,false
+t9map:kept:before,false
+t9map:strict:true
+t9map:data:7,before,true
+t9set:own:true,true,false,false,false
+t9set:reflect:false,false,false
+t9set:kept:before,false
+t9set:strict:true
+t9set:data:true,before,true

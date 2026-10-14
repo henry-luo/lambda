@@ -21,6 +21,8 @@
 #include <math.h>
 
 typedef struct LayoutContext LayoutContext;
+// paged flow state owned by the page composition (layout_paged.cpp); null in browsing layout
+struct PagedFlowState;
 
 // native scene viewports share SVG intrinsic sizing without adopting its DOM namespace.
 inline bool layout_is_svg_viewport(NameId tag) {
@@ -3730,6 +3732,10 @@ typedef struct LayoutContext {
     // Structured layout debug categories and optional release profiling buckets
     radiant::LayoutDebugState layout_debug;
     radiant::LayoutProfiler profiler;
+    // paged media: non-null while this pass lays out a page flow; the browsing
+    // engine then branches to the paged hooks only at block and line boundaries
+    // (Radiant_Layout_Paged_Media §1.3)
+    lam::Up<struct PagedFlowState> paged;
 } LayoutContext;
 // LayoutContext Run Mode Helpers
 
@@ -4426,6 +4432,32 @@ bool layout_block_resolve_intrinsic_axis_constraints(LayoutContext* lycon,
                                                      float content_width);
 void layout_flex_container(LayoutContext* lycon, ViewBlock* container);
 void layout_html_root(LayoutContext* lycon, DomNode* elmt);
+
+// ===== paged flow hooks (layout_paged.cpp) =====
+// Every hook is called only while lycon->paged is set. The page flow is the
+// ordinary browsing layout of the document at the page body width; pages are
+// consecutive fragmentainers of that one flow, and a page break is a strut
+// inserted before the line or box that would cross a fragmentainer end.
+// before a normal-flow block child is positioned at pa_block->advance_y:
+// forced breaks and a full fragmentainer advance the parent's cursor first
+void paged_block_before(LayoutContext* lycon, ViewBlock* block, BlockContext* pa_block);
+// after the parent's cursor passed the finished child: forced break-after,
+// monolithic and break-inside: avoid boxes, keep chains, widows
+void paged_block_after(LayoutContext* lycon, ViewBlock* block);
+// after a line's used height is final and before the block cursor advances:
+// a line that crosses the fragmentainer end moves to the next one (with its
+// orphans); the hook adjusts lycon->block.advance_y when it shifts the line
+void paged_line_commit(LayoutContext* lycon, float used_line_height);
+// after a post-hoc margin adjustment moved a finished block by delta: the
+// content after the first strut inside it is re-anchored to its page top
+void paged_block_moved(LayoutContext* lycon, ViewBlock* block, float delta);
+// page-control elements carry composition inputs, never flow content
+bool paged_flow_skips_element(LayoutContext* lycon, DomElement* element);
+// around each layout_html_root pass of a page flow: begin rewinds the pages
+// of a repeated pass; settle returns false when the composition failed, which
+// stops the pass loop (a failed flow keeps no partial pages)
+bool paged_flow_pass_begin(LayoutContext* lycon);
+bool paged_flow_pass_settle(LayoutContext* lycon);
 void layout_svg_foreign_object(LayoutContext* lycon, DomElement* element, float width, float height);
 void layout_svg_foreign_objects(LayoutContext* lycon, DomElement* element, unsigned depth = 0);
 bool is_only_whitespace(const char* str);
@@ -4902,6 +4934,8 @@ float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float
 bool layout_zero_sized_atomic_in_vertical_lr(ViewBlock* block);
 float layout_unresolved_html_cell_horizontal_box_extra(DomElement* cell);
 void view_vertical_align(LayoutContext* lycon, View* view);
+// recompute a text view's box from its rects after they moved
+void adjust_text_bounds(ViewText* text);
 // Shift a view subtree and its text fragments as one coordinate-space unit.
 // Fragmentation, ruby annotation, and positioned inline correction all need
 // this same projection; keeping it here prevents each layout phase from

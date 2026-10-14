@@ -108,6 +108,8 @@ static JsScript* js_common_ast_cache_clone(Runtime* runtime,
     instance->es_module_scope_initialized = false;
     instance->ast_callables = NULL;
     instance->field_initializers = NULL;
+    // a cache image never lends one execution's dynamic-import origin to another.
+    instance->dynamic_import_origin = NULL;
     runtime_register_script(runtime, (Script*)instance);
     return instance;
 }
@@ -661,9 +663,11 @@ JsCallableCode* js_script_ast_callable_ensure(JsScript* script,
     code->uses_arguments = (facts.observations & JS_AST_OBSERVES_ARGUMENTS) ||
         facts.observes_direct_eval;
     code->has_non_simple_params = parameter_facts.has_non_simple_params;
+    code->has_parameter_expressions = parameter_facts.has_parameter_expressions;
     // The canonical definition owns this static proof, avoiding repeated
     // scope/fact walks for every closure activation (D8.2.4–D8.2.5v2).
-    code->elides_function_environment = js_callable_elides_function_environment(
+    code->elides_function_environment = !parameter_facts.has_parameter_expressions &&
+        js_callable_elides_function_environment(
         function, facts);
     code->definition_owned = true;
     key.code = code;

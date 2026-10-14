@@ -47,7 +47,7 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
                               uint64_t* result_home);
 Item js_interp_execute_source(Runtime* runtime, const char* source,
                               size_t source_length, const char* filename,
-                              uint64_t* result_home);
+                              uint64_t* result_home, bool dynamic_source = false);
 // Execute a Test262 classic source with its realm-local native helper object.
 Item js_interp_execute_test262_source(Runtime* runtime, const char* source,
                                       size_t source_length, const char* filename,
@@ -97,3 +97,134 @@ extern "C" Item js_interp_async_body(Activation* self, Item unused);
 extern "C" Item js_interp_module_async_body(Activation* self, Item unused);
 extern "C" Item js_mir_module_async_body(Activation* self, Item unused);
 bool js_interp_script_is_supported(JsScript* script);
+
+// A dynamic-source client supplies its own value semantics while sharing the
+// retained AST walker and durable lexical cells (D8.1.3v24, D5.2-D5.3).
+// This profile never creates a second realm or promotes a dynamic body to MIR.
+enum JsInterpHostOperation {
+    JS_INTERP_HOST_GET, JS_INTERP_HOST_HAS, JS_INTERP_HOST_SET,
+    JS_INTERP_HOST_DELETE, JS_INTERP_HOST_DECLARE, JS_INTERP_HOST_CHECK_DECLARE,
+    JS_INTERP_HOST_HAS_LEXICAL, JS_INTERP_HOST_CHECK_DECLARE_FUNCTION,
+    JS_INTERP_HOST_DECLARE_FUNCTION
+};
+enum JsInterpHostError {
+    JS_INTERP_HOST_CAPABILITY, JS_INTERP_HOST_REFERENCE, JS_INTERP_HOST_TYPE,
+    JS_INTERP_HOST_RANGE, JS_INTERP_HOST_MEMORY, JS_INTERP_HOST_SYNTAX
+};
+enum JsInterpPrivateOperation {
+    JS_INTERP_PRIVATE_NAME, JS_INTERP_PRIVATE_GET, JS_INTERP_PRIVATE_SET,
+    JS_INTERP_PRIVATE_HAS, JS_INTERP_PRIVATE_ADD, JS_INTERP_PRIVATE_METHOD
+};
+struct JsInterpHostOps {
+    void* state;
+    Item (*global)(void*, Item key, Item value, int operation, bool strict);
+    Item (*global_this)(void*);
+    Item (*property)(void*, Item object, Item key, Item value, int operation, bool strict, Item receiver);
+    Item (*property_key)(Item);
+    Item (*call)(void*, Item callee, Item receiver, Item*, int, Item new_target);
+    Item (*object)(void*);
+    Item (*wrap_function)(void*, Item);
+    JsFunction* (*unwrap_function)(Item);
+    Item (*name_function)(Item, Item);
+    Item (*binary)(int, Item, Item);
+    Item (*unary)(int, Item);
+    Item (*fail)(int);
+    Item (*raise)(Item);
+    Item (*caught)(Item);
+    Item (*bind_this)(void*, Item, bool strict);
+    bool (*retain_script)(void*, JsScript*);
+    Item (*class_create)(void*, AstClassNode*, JsScript*, Item base, Item constructor);
+    Item (*array_new)(int64_t length);
+    Item (*array_append)(Item, Item value, bool hole);
+    Item (*arguments_create)(void*, Item callee, Item*, int, AstFuncNode*, JsInterpEnv*, bool mapped);
+    Item (*parameter_cell)(Item cell, Item value, bool write);
+    Item (*to_string)(Item);
+    Item (*iterator_get)(void*, Item);
+    Item (*iterator_step)(Item, bool read_value);
+    Item (*iterator_close)(Item, Item completion);
+    Item (*iterator_collect_rest)(void*, Item);
+    Item (*array_spread)(void*, Item target, Item source);
+    Item (*object_copy)(void*, Item target, Item source, Item* excluded, int count);
+    Item (*template_object)(void*, JsScript*, JsTemplateLiteralNode*, Item* cooked, Item* raw, int count);
+    Item (*intrinsic_eval)(void*);
+    Item (*generator_create)(void*, Item internal, Item wrapper, Item arguments, Item receiver, bool is_async);
+    Item (*class_method)(void*, Item, AstMethodNode*, Item key, Item function);
+    Item (*class_field)(void*, Item, AstClassFieldNode*, Item key, Item value,
+        uint32_t field_index, uint32_t initializer_index, bool initialize);
+    Item (*initialize_instance)(Item, Item receiver, int64_t statics);
+    Item (*private_element)(Item, Item key, Item value, int64_t operation);
+    Item (*prototype)(Item);
+    Item (*constructor_result)(Item value, Item receiver, int64_t derived);
+    bool (*is_derived_constructor)(Item);
+    Item (*object_property)(void*, Item, JsPropertyNode*, Item key, Item value);
+    Item (*for_in_keys)(Item);
+    Item (*for_in_key_is_live)(Item, Item key);
+};
+// The caller owns these exact roots for the duration of a host operation.
+// Escaped functions retain env, never this activation-local descriptor.
+enum JsInterpHostCallerFlags : uint32_t {
+    JS_INTERP_CALLER_STRICT = 1, JS_INTERP_CALLER_PARAMETERS = 2,
+    JS_INTERP_CALLER_METHOD = 4, JS_INTERP_CALLER_INITIALIZER = 8
+};
+struct JsInterpHostCaller {
+    JsScript* script;
+    JsInterpEnv* env;
+    Item receiver;
+    Item new_target;
+    Item home_object;
+    Item class_constructor;
+    uint32_t flags;
+};
+enum JsInterpLookupKind : uint8_t {
+    JS_INTERP_LOOKUP_OUTER, JS_INTERP_LOOKUP_SLOT,
+    JS_INTERP_LOOKUP_EVAL, JS_INTERP_LOOKUP_ARGUMENTS
+};
+struct JsInterpLookup {
+    JsInterpLookupKind kind;
+    NameEntry* entry;
+    JsInterpEnv* env;
+    JsScript* outer_script;
+};
+struct JsInterpHostReference {
+    JsInterpLookup lookup;
+    Item key;
+    bool unresolvable;
+};
+enum JsInterpHostReferenceOperation {
+    JS_INTERP_REFERENCE_RESOLVE, JS_INTERP_REFERENCE_GET,
+    JS_INTERP_REFERENCE_SET, JS_INTERP_REFERENCE_DELETE,
+    JS_INTERP_REFERENCE_TYPEOF
+};
+JsInterpEnv* js_interp_env_create(NameScope*, JsInterpEnv*);
+Item js_interp_initialize_body_vars(JsInterpEnv* body, JsInterpEnv* parameters);
+Item js_interp_host_reference(const JsInterpHostOps*, const JsInterpHostCaller*,
+    JsInterpHostReference*, Item key, Item value, int operation);
+Item js_interp_execute_host_eval(const JsInterpHostOps*, const JsInterpHostCaller*, Item source);
+
+class JsInterpHostScope {
+    const JsInterpHostOps* previous_;
+public:
+    explicit JsInterpHostScope(const JsInterpHostOps* ops);
+    ~JsInterpHostScope();
+    JsInterpHostScope(const JsInterpHostScope&) = delete;
+    JsInterpHostScope& operator=(const JsInterpHostScope&) = delete;
+};
+Item js_interp_execute_host_source(const JsInterpHostOps*, const char*, size_t,
+    const char* filename, bool indirect_eval);
+Item js_interp_call_host_function(const JsInterpHostOps*, Item wrapper,
+    JsFunction*, Item receiver, Item*, int, Item new_target);
+
+// The Function source builder owns parsing/early errors once; a host profile
+// replaces only conversion, execution and metadata publication.
+struct JsDynamicFunctionOps {
+    void* state;
+    Item (*to_string)(Item);
+    Item (*syntax_error)(void*, const char*);
+    Item (*execute)(void*, const char*, size_t);
+    void (*metadata)(void*, Item, Item name, Item source);
+};
+Item js_new_function_from_string_with_ops(Item*, int, const char* parse_prefix,
+    const char* source_prefix, const JsDynamicFunctionOps*);
+
+Item js_new_interpreted_function_with_host(AstFuncNode*, JsScript*, JsInterpEnv*,
+    uint32_t flags, Item home_global, Item lexical_this, Item lexical_new_target);

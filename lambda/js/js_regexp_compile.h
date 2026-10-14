@@ -20,6 +20,12 @@ typedef struct JsRegExpCompileInfo {
     char error[512];
 } JsRegExpCompileInfo;
 
+struct StrBuf;
+// decode capture/backreference names only; original pattern bytes remain caller-owned.
+// false is allocation failure; true with null output means unchanged. free output with strbuf_free.
+bool js_regexp_decode_name_escapes(const char* pattern, int pattern_len,
+    struct StrBuf** out);
+
 bool js_regexp_compile_frontend(const char* pattern, int pattern_len,
     const char* flags, int flags_len, JsRegExpCompileInfo* out);
 

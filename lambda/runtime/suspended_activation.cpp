@@ -46,6 +46,11 @@ extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
     gc_mark_item(gc, gen->private_home_class.item);
     gc_mark_item(gc, gen->delegate.item);
     gc_mark_item(gc, gen->ast_this.item);
+    if (gen->is_async) {
+        JsAsyncGeneratorMapCarrier* carrier = (JsAsyncGeneratorMapCarrier*)map;
+        gc_mark_item(gc, carrier->request_storage.item);
+        gc_mark_item(gc, carrier->request.item);
+    }
 }
 
 // A generator collected before it finishes abandons its parked activation:

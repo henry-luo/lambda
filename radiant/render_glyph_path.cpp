@@ -97,8 +97,10 @@ bool render_visit_text_run_glyphs(const PaintGlyphRun* run, FontContext* font_co
         if (bytes <= 0) { ok = false; break; }
         cursor += bytes;
         bool character_gap = text_justify_character_gap(&justify_context, codepoint, run->justify_mode);
+        // format and control characters (a preserved line feed in pre text) have no outline
+        utf8proc_category_t category = utf8proc_category(codepoint);
         if (codepoint == 0xFE0F || codepoint == 0x00AD ||
-            utf8proc_category(codepoint) == UTF8PROC_CATEGORY_CF) continue;
+            category == UTF8PROC_CATEGORY_CF || category == UTF8PROC_CATEGORY_CC) continue;
         if (character_gap) pen += run->cjk_spacing;
         if (codepoint == ' ') {
             pen += text_space_advance(box->style, run->word_spacing);

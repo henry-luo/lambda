@@ -223,6 +223,10 @@ static void js_builtin_catalog_initialize_index() {
     js_builtin_lookup_index_initialized = true;
 }
 
+const JsBuiltinMethodSpec* js_builtin_method_at(int index) {
+    return index >= 0 && index < JS_INTRINSIC_BINDING_COUNT ? &JS_BUILTIN_METHOD_SPECS[index] : NULL;
+}
+
 const JsBuiltinMethodSpec* js_builtin_catalog_find(JsBuiltinOwner owner,
                                                     const char* name, int len) {
     if (owner <= JS_BUILTIN_OWNER_NONE || owner >= JS_BUILTIN_OWNER_MAX || !name) return NULL;

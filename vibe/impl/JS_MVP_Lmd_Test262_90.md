@@ -1,6 +1,6 @@
 # JS MVP: 90% of LJS Test262 coverage
 
-**Date:** 2026-10-14. **Status:** in progress; initial P1/P2/P3 increments, native private-class execution, ArrayBuffer/DataView and typed-view construction/reflection/iteration are implemented; typed species/subarray/callback methods and shared MIR predecessor reuse are implemented. The latest complete whole-population audit (buffer7) passes **25,406/40,261 IDs (63.1%)** after every required variant, plus focused, forced-GC and shared baseline gates. Another **10,829** passes are needed for 90%; performance acceptance remains open. Earlier captures remain build-specific evidence.
+**Date:** 2026-10-14. **Status:** in progress. The latest complete whole-population audit (`typed_methods4`) passes **27,597/40,261 IDs (68.5%)** after every required variant. Another **8,638** passes are needed for 90%. Newer interpreter, library and async increments are undergoing integrated verification; they are not included in that coverage figure. The shared Lambda/Input gate and performance acceptance remain open. Earlier captures remain build-specific evidence.
 **Design:** [JS_MVP_Lmd §34](../jube/JS_MVP_Lmd.md#34-ninety-percent-of-ljs-test262-coverage).
 **Scope:** extend the implemented MVP toward 90% of the frozen LJS passing
 population, preserving ordinary benchmark performance. This plan stages the
@@ -71,7 +71,7 @@ finalization may remain residual only if the actual audited target is met.
 
 ## 3. Packages and dependencies
 
-P0–P4 are **in progress**; P5–P7 are **pending**. P1–P6 are planned feature work; P7 chooses
+P0–P5 are **in progress**; P6–P7 are **pending**. P1–P6 are planned feature work; P7 chooses
 additional fixes from measured residuals. Crossing the numeric target does not
 silently mark unfinished packages complete. Publish any remaining family limits.
 
@@ -1277,5 +1277,247 @@ strict variants pass. Thus **807/842 IDs pass every required mode** on this pin,
 including **515/550** callback IDs and all **292** preceding selected passes.
 No isolated replay is needed. The unsuccessful ID set equals `typed_methods2`'s
 35 dynamic-Function harness cases. Full-LJS Test262 passes **40,261/40,261**,
-zero regressions. The Lambda/Input gate is in progress; neither selected audit
-is a new whole-population coverage result. Benchmark timing remains deferred.
+zero regressions. The Lambda/Input gate completes at **6,880/6,881**, with the
+same LaTeX corpus timeout; this pin does not close aggregate acceptance. Its
+whole-population required-mode audit is running against the immutable source
+snapshot. Neither selected audit is a new whole-population coverage result.
+Benchmark timing remains deferred.
+
+#### Completed typed_methods4 whole-population audit
+
+The immutable `typed_methods4` pin completes its whole audit at
+**27,597/40,261 distinct required-mode passes (68.5%)**: **24,502 positive** and
+**3,095 negative**. Canonical modes finish at 27,598 passes, 12,648 failures and
+15 timeouts after isolated replay. Additional required modes finish at 25,780
+passes and one failure. The strict replay resolves all 186 interrupted outcomes
+without changing limits; original captures remain available.
+
+Relative to buffer7, this pin gains **2,192** IDs and loses **one**:
+`language_expressions_multiplication_bigint_arithmetic_js` times out in the
+audit and a subsequent isolated replay. The same isolated control passes on
+buffer7. Its cause remains under investigation; it is not excluded or counted
+as passing. **8,638** more fully passing IDs are needed for the 90% target.
+The source snapshot, `whole-audit.json`, `residual-inventory.json`, and separate
+`lost-pass-replay/` captures are under `temp/mvp_test262_90/typed_methods4/`.
+Newer pins are not mixed into this count. Timing remains deferred.
+
+### Parallel interpreter, library and async integration (2026-10-14)
+
+Three coding workers own the interpreter bridge, library/compiler work and
+async/module adapters. They deliver temp-only patches with source hashes and
+focused cases. The integrating agent reviews, applies and builds private
+release pins, then runs normal, forced/poisoned-GC, selected required-mode and
+shared baseline gates. The frozen target remains **36,235/40,261**; selected
+cohorts never replace a whole-population audit. Timing remains deferred.
+
+#### Integrated architecture
+
+- **Interpreter and closures:** `JsInterpHostOps` routes the shared AST
+  interpreter through MVP property, call, construction and binding operations.
+  Function/eval bodies remain interpreted. MIR direct eval exposes the existing
+  canonical Array cells through exact-rooted environment records, preserving
+  reference resolution before RHS evaluation. Parameter-expression functions
+  project separate PARAMETERS and BODY_VARS records; the promoted
+  `js_interp_initialize_body_vars` and one
+  `mvp_lmd_dynamic_initialize_body` adapter perform the existing instantiation
+  transfer. Default closures retain parameter cells while body vars and hoists
+  use their own cells. Plain functions retain their prior path
+  (**D5.2–D5.3**, **D5.3.3**, **D6.2.3v2**, **D8.1.3v24**).
+- **Suspension and jobs:** native Promise reactions, async/generator activations,
+  for-await, dynamic suspended Function bodies and host timers reuse existing
+  jobs, request queues, exact roots and forwarding/storage helpers. Public
+  Promise expandos use MVP maps while their native exotic carrier is retained.
+  Argument packs and scalar results have durable owners across suspension and
+  callback domain restoration (**D2.6.9v3**, **D5.2–D5.3**).
+- **Library reuse:** typed-array methods and static constructors, generic locale
+  strings, weak collections, Set operations, grouping and RegExp protocols
+  parameterize existing algorithms. RegExp matchAll iterators share the native
+  algorithm; iterator prototypes share the existing hierarchy. Primitive
+  String protocol dispatch and split coercion ordering preserve observable
+  evaluation order. Immutable program proofs retain the ordinary RegExp bulk
+  lane (**D1.3v3**, **D3.4.8**, **D8.4.1v2**).
+- **Modules:** source loading, resolution/cache, linking, instantiation and
+  evaluation use the shared registry and Lambda module-state slabs. Namespace
+  reflection resolves live export cells, including TDZ and ambiguity; only this
+  exotic uses VMap. import.meta is cached and precisely rooted per module.
+  Shared handwritten JS parsing now accepts empty exports and quoted export
+  aliases, with decoded string names retained by the AST. Teardown releases the
+  module registry while its runtime state is still alive
+  (**D7.2.1**, **D8.5.1v7**, **D5.2–D5.3**).
+- **Compiler size:** `emit_iterator_error_pad` factors exceptional iterator
+  cleanup once per lexical iterator. Normal loop paths gain no instructions;
+  nested catches/finally and destructuring retain their existing close/error
+  precedence. Exact root liveness stays in the shared MIR emitter; no vendor
+  optimizer, harness timeout or GC ownership rule is changed
+  (**D5.1.1v3**, **D5.2–D5.3**, **D8.4.1v2**).
+
+#### Current evidence and open gates
+
+Final integration is progressing through immutable release pins. Completed
+selected audits are evidence for their exact populations only:
+
+| Pin / cohort | Every required mode | Remaining evidence |
+|---|---:|---|
+| parallel12 protocol/async | 5,890/6,063 | Later primitive String.match repairs verified separately |
+| parallel28 typed methods/eval/library | 4,529/4,973 | Four distinct timeout IDs across canonical/strict modes; no prior selected passes lost |
+| parallel33 class/object/for-in/RegExp | 144/148 | Two older RegExp syntax/name gaps and explicit Unicode-sets/realm boundaries; no prior selected passes lost |
+| parallel37 final RegExp residuals | 8/8 | Canonical and additional strict variants all pass; the two preceding syntax/name gaps are fixed |
+
+The latest complete whole audit remains `typed_methods4/whole-audit.json`:
+**27,597/40,261 (68.5%)**, **8,638** short of the **36,235** target. Its older
+`required-record.json` is a selected 807/842 cohort and must not be used as the
+whole baseline. The parallel18 canonical diagnostic and isolated replay ended
+at 35,615 PASS, 4,606 FAIL and 40 TIMEOUT, but were superseded before additional
+required modes. They establish no new aggregate coverage. The partial parallel33
+whole run was stopped when shared LJS verification exposed a real regression;
+its captures remain marked cancelled. Do not add gains from different pins.
+
+The superseded `parallel37` runtime pin, SHA-256
+`67c01292fa424fb18833bb60aec5db4d6d7568ed32688ff64a01c2bef2e549e3`,
+passes **565/565** focused checks both normally and under forced/poisoned GC.
+Its shared LJS baseline passes **40,261/40,261**, zero regressions or unstable
+outcomes. Both dedicated LJS RegExp fixtures pass AST and MIR with normal and
+forced/poisoned collection. The final eight RegExp candidates pass **8/8**
+canonical and **8/8** additional strict variants, with no prior selected pass
+lost. Its whole audit was cancelled after the complete native JS suite exposed
+an async-iterator helper ABI regression. No partial result is used for coverage.
+Its Lambda/Input aggregate is **7,019/7,022**: a stale Map/Set freeze golden,
+an infinite legacy async-iterator fixture, and the previously observed LaTeX
+corpus timeout. The full native suite then finished **202/203**, identifying the
+separate raw-iterator ABI mismatch described below. These are superseded checks.
+
+The direct backtracker suite passes **51/51** after two native-fixture
+corrections. Their unchanged assertions failed against both the exact
+predecessor source and parallel37: non-Unicode incomplete hex escapes and `k`
+without named captures are valid identity escapes under
+[ECMA-262 Annex B.1.2](https://tc39.es/ecma262/multipage/additional-ecmascript-features-for-web-browsers.html#sec-regular-expressions-patterns).
+The corrections retain the original inputs, verify literal matching/nonmatching,
+and add Unicode and named-reference rejection controls. Six exact programs pass
+Node, predecessor MVP and predecessor LJS; original failure captures are retained.
+No Test262 harness/corpus or runtime expectation was relaxed. The fixture-only
+correction and final whitespace/comment cleanup are recorded separately from the
+immutable runtime source snapshot.
+
+For huge descending quantifier bounds, the focused fixture follows
+[ECMA-262 §22.2.1.1](https://tc39.es/ecma262/multipage/text-processing.html#sec-patterns-static-semantics-early-errors):
+compare the mathematical decimal values before matcher saturation. Node 22.13.0
+accepts the tested descending pair after saturation; that oracle discrepancy is
+retained separately. The other 14/15 MVP programs and the shared program pass Node.
+Benchmark timing remains deferred; no jq workload has been run.
+
+#### Final delegated increments and repairs
+
+- **Class and dynamic source:** shared early-error validation handles method homes,
+  derived-constructor super calls, nested lexical arrows and constructor spelling.
+  The existing class name scope supplies strictness to anonymous/named heritage,
+  computed names and bodies. Hosted object methods/accessors reuse existing
+  descriptors and method homes. Calls preserve eval/call/apply forwarding context
+  while actual source calls install their own initializer context. With/module
+  eval callers remain explicit capability boundaries (**D1.3v3**, **D6.2.3v2**,
+  **D8.1.3v24**).
+- **Nominal-parent lifetime:** forced collection exposed an untraced dynamic base
+  constructor behind the shared nominal link. One trailing parent Item in the
+  existing dynamic constructor closure now preserves that edge even after both
+  public prototype links change. Existing closure counts/tracing own it; closed
+  static classes keep their prior layout/path. The unchanged original fixture
+  and two controls all crashed on parallel33 and pass the Node oracle
+  (**D3.4.8**, **D5.2–D5.3**, **D5.3.3**).
+- **Hosted for-in:** the shared key snapshot and liveness policy handle inherited
+  keys, primitive boxing, absent proxy keys, deletion and suspension. Existing
+  loop scopes/completions and activation roots own the snapshot and cursor. The
+  MIR receiver is boxed once only when mutable prototypes make primitive
+  enumeration observable. Deep chains no longer stop at an arbitrary 64-link
+  cutoff; ordinary closed paths retain existing proofs (**D1.3v3**, **D5.2–D5.3**,
+  **D8.4.1v2**).
+- **Module lifecycle:** shared registry cleanup now unregisters `cjs_module`
+  alongside its other descriptor Item roots. This pre-existing omission was
+  reproduced against parallel35 archives by checking the exact stale slot before
+  requesting collection; the corrected fixture passes normally and with forced/poisoned GC.
+  No new root cache or module representation is introduced (**D5.3.3**, **D7.2.1**).
+- **RegExp:** `JsRegExpIndicesOps` shares result-pair construction, unmatched
+  captures, null-prototype groups and named-pair identity. A direct dense-array
+  read regressed five LJS cases because retained LJS can use companion property
+  storage; existing rooted `get_key` fixes all five. The shared compile operation
+  preserves native brands, original pattern/flags, coercion order, payload
+  ownership and strict lastIndex failure ordering. No-d paths allocate no indices
+  scratch. The decoder extraction reuses existing UTF primitives and StrBuf,
+  preserves original public spelling, and checks quantifiers in the existing
+  parser. Unicode sets and new realms remain separate boundaries (**D1.3v3**,
+  **D5.3.3**, **D8.4.1v2**).
+- **Compiler size:** shared exceptional iterator cleanup reduces the includes
+  reproducer from 1,865 IteratorClose calls to two without adding normal-path
+  instructions. Cold top-level property reads then reduce its finalized main
+  from 142,142 to **77,724 MIR lines**; capture-by-index drops from 97,184 to
+  **59,734**. Capture-by-index now passes at 7.35 seconds under the unchanged
+  ten-second limit; five of six TypedArray probes still time out. Existing
+  scalar retention and sized-number widening cover the C helper boundary.
+  No vendor optimizer, harness limit or ownership rule is changed
+  (**D5.1.1v3**, **D5.2–D5.3**, **D8.4.1v2**).
+
+The final candidate must pass normal/forced-GC checks, the shared LJS gate and
+Lambda/Input verification before closure. Measure all frozen IDs and additional
+required modes on that same immutable candidate. No ordinary-object flag, VMap
+conversion, second closure representation or conservative stack scan is
+introduced. Performance acceptance remains open until the deferred matched
+benchmark runs are completed.
+
+#### Integrated native audit and iterator API restoration (2026-10-15)
+
+The complete native JS suite exposed an actual contract regression that source
+Test262 did not exercise: `js_async_iterator_close_result(Item iterator)` had
+been repurposed to accept the new private record. A native caller's ordinary
+Map was consequently read as an Array. The original helper now again calls
+`js_iterator_call_return(iterator, false)`. The disclosed
+`js_async_iterator_record_close_result` names the existing record operation;
+interpreter, MIR, MVP and generator-delegation callers use it explicitly.
+Both imports retain may-GC/reentrant/boxed-Item metadata. No type guessing,
+algorithm duplication or ordinary-call overhead is introduced
+(**D1.3v3**, **D5.2–D5.3**, **D8.4.3**).
+
+The original failing native assertion is unchanged. A new control checks absent
+and undefined record results, a guest Array passed through the raw API, and
+import metadata. The immutable `parallel38` CLI SHA-256 is
+`8747e0880ae733144dd4849b67ca8dc307ff92036b72345b2b7da7f2b36140c1`.
+It passes **565/565** MVP focused tests both normally and with forced/poisoned
+GC, **204/204** complete native JS tests, **51/51** backtracker tests and **5/5**
+affected native groups under forced GC. The shared LJS gate passes
+**40,261/40,261**, zero regressions or unstable outcomes. The final Lambda/Input
+aggregate is **7,224/7,225** (Input **2,112/2,112**, runtime **5,112/5,113**), with
+only `latex_test_latex_phase3_corpus` retaining its previously observed timeout.
+Native JS **204/204**, JS files **503/503** and MVP **565/565** also pass in that
+aggregate. Current runtime source hashes still match the immutable pin.
+
+The fresh whole audit is running. Canonical and all 37,098 eligible additional
+strict modes are measured independently on the same immutable binary; final
+coverage intersects their outcomes. Strict work started after the broad baseline
+finished. Its three workers use ten-case batches to reduce unexecuted work after
+the existing timeout/signal retirement path. Canonical batches retain fifty
+cases. Every case keeps its existing deadline, and unresolved outcomes are
+replayed individually. A separate final verifier checks mode manifests, source,
+runner/corpus/log hashes, recomputes the intersection and compares earlier fully
+verified cohorts before publishing coverage. Runtime, archive, fixture and patch hashes
+are retained under `temp/mvp_test262_90/parallel38/` and the delegated patch
+packages. Selected and whole required-mode records remain separate.
+
+Two additional local fixture repairs preserve their original intent:
+
+- Frozen Map/Set entries remain mutable; freezing protects ordinary own
+  descriptors. The original eight scenarios are retained, with entry-effect
+  checks and frozen-property/strict-write controls added. Exact original and
+  strengthened programs agree between Node and pinned LJS.
+  [ECMA-262 SetIntegrityLevel](https://tc39.es/ecma262/multipage/abstract-operations.html#sec-setintegritylevel)
+  and [Map.prototype.set](https://tc39.es/ecma262/multipage/keyed-collections.html#sec-map.prototype.set).
+- A true async iterator's result value is passed through. The old close fixture
+  returned `done:false` forever and incorrectly relied on an extra implicit
+  value await. Its explicit body await now provides the abrupt completion while
+  preserving the close assertion. A finite control checks Promise/thenable
+  identity, zero then-getter reads and no close on natural completion, in AST
+  and MIR. Exact programs agree across Node and both LJS backends.
+  [ECMA-262 ForIn/OfBodyEvaluation](https://tc39.es/ecma262/multipage/ecmascript-language-statements-and-declarations.html#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset).
+
+These fixture changes alter no Test262 source, harness, metadata, deadline or
+baseline. Original failures, sources and independent controls remain archived.
+Benchmark timing is still deferred. The historical residual inventory records
+1,664 older nonpasses superseded by selected canonical passes and 2,982 queued
+candidates; those bookkeeping figures are not current coverage or confirmed
+current failures. Only the fresh same-build whole audit can close the 90% gate.

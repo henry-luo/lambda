@@ -2815,6 +2815,9 @@ void line_break(LayoutContext* lycon, bool forced_break) {
 
     layout_finalize_static_line_self_alignment(lycon, used_line_height);
 
+    // a page flow moves a line that would cross its fragmentainer end to the next one
+    if (lycon->paged) paged_line_commit(lycon, used_line_height);
+
     record_inline_line_box_union(lycon, lycon->block.advance_y,
                                  lycon->block.advance_y + used_line_height);
 

@@ -2627,9 +2627,7 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     jm_emit_branch(mt, MIR_BT, l_end, is_done);
     if (is_for_await) {
         step_result = jm_callr_1(mt, "js_iterator_result_value", MIR_T_I64, step_iter_result);
-        step_result = jm_emit_await_value_reg(mt, step_result,
-            JS_MIR_SUSPEND_IMPLICIT_AWAIT);
-        jm_emit_error_lane_propagate_check(mt);
+        jm_emit_for_of_step_error_lane_check(mt, pushed_try);
     }
 
     // Assign current value to loop variable
@@ -2825,6 +2823,12 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
     } else {
         // v18: bare return produces undefined, not null
         val = jm_emit_undefined(mt);
+    }
+
+    if (ret->argument && mt->in_async && mt->current_fc &&
+            mt->current_fc->node && mt->current_fc->node->is_generator) {
+        // async-generator return awaits before finally and iterator closing observe the completion.
+        val = jm_emit_await_value_reg(mt, val, JS_MIR_SUSPEND_IMPLICIT_AWAIT);
     }
 
     // The nearest active for-of owns a synthetic delayed-return landing pad.

@@ -462,7 +462,8 @@ static bool render_export_session_begin_internal(
                                           session->document);
     process_document_font_faces(session->ui_context, session->document);
     if (paged) {
-        // The settled shared DOM owns this output view; no embedded geometry is overwritten.
+        // the page flow is laid out by the browsing engine through this host (design §1.3)
+        environment.ui_context = lam::up(session->ui_context.get());
         session->paged_view = lam::up(view_tree_secondary_create(session->document, &environment));
         PagedLayoutOptions options = paged_layout_options_default();
         PagedLayoutDiagnostic diagnostic = {};
@@ -801,6 +802,7 @@ bool render_paged_window_compose(UiContext* ui) {
     DomDocument* doc = ui->document;
     ViewEnvironment environment = view_environment_default(VIEW_PRESENTATION_PAGED);
     environment.device_scale = ui->device_scale;
+    environment.ui_context = lam::up(ui);
     ViewTree* tree = view_tree_secondary_create(doc, &environment);
     PagedLayoutOptions layout = paged_layout_options_default();
     layout.right_binding = ui->paged_options->preview.right_binding;

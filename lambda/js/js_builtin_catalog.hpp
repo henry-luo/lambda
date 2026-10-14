@@ -221,6 +221,13 @@ struct JsBuiltinGlobalSpec {
     int flags;
 };
 
+// immutable catalog rows are shared by frontend adapters without a second method table.
+const JsBuiltinMethodSpec* js_builtin_method_at(int index);
+struct JsMathConstantSpec { const char* name; double value; };
+extern const JsMathConstantSpec js_math_constants[];
+extern const int js_math_constant_count;
+Item js_math_intrinsic_with_number(JsBuiltinId op, Item* args, int argc,
+    Item (*to_number)(Item) = NULL);
 const JsBuiltinMethodSpec* js_builtin_catalog_find(JsBuiltinOwner owner, const char* name, int len);
 const JsBuiltinGlobalSpec* js_builtin_global_find(const char* name, int len);
 bool js_builtin_global_has_flag(const char* name, int len, int flag);

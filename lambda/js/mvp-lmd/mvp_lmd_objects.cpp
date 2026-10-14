@@ -2,6 +2,7 @@
 #include "../js_property_attrs.h"
 #include "../js_props.h"
 #include "../js_runtime.h"
+#include "../js_source_module.hpp"
 #include "../js_typed_array.h"
 #include "../../runtime/lambda-root-frame.hpp"
 #include "../../runtime/heap_api.h"
@@ -123,6 +124,10 @@ extern "C" Item mvp_lmd_object_new(TypeMap* shape, int64_t collection) {
     return map->index ? Item{.map = map} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
 Map* mvp_lmd_property_map(Item owner, bool writing) {
+    if (get_type_id(owner) == LMD_TYPE_VMAP && js_promise_is(owner)) {
+        Item storage = js_promise_property_storage(owner, writing);
+        return get_type_id(storage) == LMD_TYPE_MAP ? storage.map : NULL;
+    }
     if (writing && (get_type_id(owner) == LMD_TYPE_MAP || get_type_id(owner) == LMD_TYPE_ARRAY)) {
         TypeMap* shape = (TypeMap*)owner.map->type;
         // D3.2.4v4: guest descriptor operations cannot rewrite a foreign declared prefix.
@@ -142,7 +147,7 @@ Map* mvp_lmd_property_map(Item owner, bool writing) {
         (map->map_kind == MAP_KIND_PLAIN || map->map_kind == MAP_KIND_ORDERED ||
          map->map_kind == MAP_KIND_GENERATOR || map->map_kind == MAP_KIND_ITERATOR ||
          map->map_kind == MAP_KIND_ARRAYBUFFER || map->map_kind == MAP_KIND_DATAVIEW ||
-         map->map_kind == MAP_KIND_TYPED_ARRAY) ? map : NULL;
+         map->map_kind == MAP_KIND_TYPED_ARRAY || map->map_kind == MAP_KIND_COLLECTION) ? map : NULL;
 }
 bool mvp_lmd_typed_array_index(Item owner, Item key, double* index) {
     if (get_type_id(owner) != LMD_TYPE_MAP || owner.map->map_kind != MAP_KIND_TYPED_ARRAY) return false;
@@ -200,6 +205,8 @@ const MvpLmdBuiltinMethod mvp_lmd_builtin_methods[] = {
         {"split", LMD_TYPE_STRING, LMD_METHOD_SPLIT, 2}, {"indexOf", LMD_TYPE_STRING, LMD_METHOD_INDEX_OF},
         {"startsWith", LMD_TYPE_STRING, LMD_METHOD_STARTS_WITH}, {"toUpperCase", LMD_TYPE_STRING, LMD_METHOD_UPPER, 0},
         {"endsWith", LMD_TYPE_STRING, LMD_METHOD_ENDS_WITH}, {"padStart", LMD_TYPE_STRING, LMD_METHOD_PAD_START},
+        {"search", LMD_TYPE_STRING, LMD_METHOD_SEARCH},
+        {"matchAll", LMD_TYPE_STRING, LMD_METHOD_MATCH_ALL},
         {"match", LMD_TYPE_STRING, LMD_METHOD_MATCH}, {"replace", LMD_TYPE_STRING, LMD_METHOD_REPLACE, 2},
         {"toLowerCase", LMD_TYPE_STRING, LMD_METHOD_LOWER, 0}, {"toLocaleLowerCase", LMD_TYPE_STRING, LMD_METHOD_LOWER, 0},
         {"concat", LMD_TYPE_STRING, LMD_METHOD_STRING_CONCAT},
@@ -375,7 +382,7 @@ extern "C" Item mvp_lmd_property_get(Item owner, Item name, int64_t callee) {
     if (tid == LMD_TYPE_STRING || tid == LMD_TYPE_INT || tid == LMD_TYPE_FLOAT || tid == LMD_TYPE_BOOL ||
             tid == LMD_TYPE_DECIMAL || tid == LMD_TYPE_SYMBOL) {
         MvpLmdLibraryState* state = mvp_lmd_program_library();
-        if (state && state->primitives) {
+        if (state && (state->primitives || tid == LMD_TYPE_SYMBOL)) {
             if (tid == LMD_TYPE_STRING) {
                 int64_t index = mvp_lmd_string_key(name.get_string());
                 if (index == -1) return Item{.item = i2it(utf8_to_utf16_length(owner.get_string()->chars, owner.get_string()->len))};
@@ -615,6 +622,8 @@ extern "C" Item mvp_lmd_define_property(Item owner, Item name, Item descriptor) 
     return item_is_error(status) ? status : status.item == ITEM_FALSE ? mvp_lmd_fail(LMD_MVP_TYPE, 0) : object.get();
 }
 Item mvp_lmd_define_own_property(Item owner, Item name, const JsPropertyDescriptor* descriptor) {
+    if (get_type_id(owner) == LMD_TYPE_VMAP && js_module_namespace_record(owner))
+        return js_module_namespace_define(owner, name, descriptor);
     double numeric; int index;
     if (mvp_lmd_typed_array_index(owner, name, &numeric)) {
         if (!js_ta_numeric_index_valid(owner, numeric, numeric == 0 && signbit(numeric), &index) ||
@@ -845,6 +854,8 @@ extern "C" Item mvp_lmd_define_properties(Item owner, Item descriptors) {
     return object.get();
 }
 Item mvp_lmd_get_own_property(Item owner, Item name, JsPropertyDescriptor* descriptor) {
+    if (get_type_id(owner) == LMD_TYPE_VMAP && js_module_namespace_record(owner))
+        return js_module_namespace_get_own(owner, name, descriptor);
     double numeric; int index;
     if (mvp_lmd_typed_array_index(owner, name, &numeric)) {
         if (!js_ta_numeric_index_valid(owner, numeric, numeric == 0 && signbit(numeric), &index)) return Item{.item = ITEM_FALSE};
@@ -867,6 +878,7 @@ Item mvp_lmd_get_own_property(Item owner, Item name, JsPropertyDescriptor* descr
     // descriptor inspection invokes no guest code; only lazy function preparation can collect.
     Item value = ItemNull, setter = ItemNull;
     Map* map = mvp_lmd_property_map(owner);
+    if (!map && get_type_id(owner) == LMD_TYPE_VMAP && js_promise_is(owner)) return Item{.item = ITEM_FALSE};
     if (!map) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     ShapeEntry* field = map->type ? own_field(map, name.get_string()) : NULL;
     uint8_t flags = field ? field->flags : 0;
@@ -902,6 +914,8 @@ Item mvp_lmd_get_own_property(Item owner, Item name, JsPropertyDescriptor* descr
     return Item{.item = ITEM_TRUE};
 }
 Item mvp_lmd_set_completion(Item owner, Item name, Item value, Item receiver, MvpLmdPropertyCache* cache) {
+    if (get_type_id(owner) == LMD_TYPE_VMAP && js_module_namespace_record(owner))
+        return Item{.item = ITEM_FALSE};
     if (lambda_stack_is_exhausted(context->stack_limit)) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
     if (mvp_lmd_is_proxy(owner)) return mvp_lmd_proxy_property(owner, name, value, receiver, LMD_PROXY_SET);
     if (owner.item == receiver.item && get_type_id(owner) == LMD_TYPE_MAP && owner.map->map_kind == MAP_KIND_PLAIN) {
@@ -932,6 +946,8 @@ Item mvp_lmd_set_completion(Item owner, Item name, Item value, Item receiver, Mv
     value = lambda_item_adopt_scalar_home(value, &home);
     JsPropertyDescriptor descriptor = {};
     for (;;) {
+        // an exotic prototype retains its own Set algorithm for a different receiver.
+        if (get_type_id(owner) == LMD_TYPE_VMAP && js_module_namespace_record(owner)) return Item{.item = ITEM_FALSE};
         // ordinary descriptor/link inspection cannot collect; exotic adapters root before reentry.
         if (mvp_lmd_is_proxy(owner))
             return mvp_lmd_proxy_property(owner, name, value, receiver, LMD_PROXY_SET);
@@ -973,7 +989,7 @@ Item mvp_lmd_set_completion(Item owner, Item name, Item value, Item receiver, Mv
     }
     if (!(descriptor.flags & JS_PD_WRITABLE)) return Item{.item = ITEM_FALSE};
     TypeId type = get_type_id(receiver);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC) return Item{.item = ITEM_FALSE};
+    if (!mvp_lmd_is_object(receiver)) return Item{.item = ITEM_FALSE};
     auto write_receiver = [&]() -> Item {
         JsPropertyDescriptor current = {};
         Item found = mvp_lmd_get_own_property(receiver, name, &current);
@@ -1023,7 +1039,8 @@ extern "C" Item mvp_lmd_object_integrity(Item owner, int64_t operation) {
     MvpLmdLibraryState* state = mvp_lmd_program_library();
     bool arguments = state && state->arguments_key && get_type_id(owner) == LMD_TYPE_MAP &&
         typemap_hash_lookup_key((TypeMap*)owner.map->type, state->arguments_key);
-    if (get_type_id(owner) == LMD_TYPE_ARRAY || mvp_lmd_is_proxy(owner) || arguments || js_is_typed_array(owner)) {
+    if (get_type_id(owner) == LMD_TYPE_ARRAY || mvp_lmd_is_proxy(owner) || arguments || js_is_typed_array(owner) ||
+            (get_type_id(owner) == LMD_TYPE_VMAP && js_module_namespace_record(owner))) {
         Rooted<Item> keys(roots, mvp_lmd_object_project(object.get(), 5));
         Rooted<Item> descriptor(roots, ItemNull), attributes(roots, ItemNull);
         if (item_is_error(keys.get())) return keys.get();
@@ -1052,6 +1069,8 @@ extern "C" Item mvp_lmd_object_integrity(Item owner, int64_t operation) {
         return query ? Item{.item = ITEM_TRUE} : object.get();
     }
     Map* map = mvp_lmd_property_map(object.get());
+    if (!map && get_type_id(object.get()) == LMD_TYPE_VMAP && js_promise_is(object.get()))
+        return query ? Item{.item = ITEM_TRUE} : object.get();
     TypeMap* original = (TypeMap*)map->type;
     FOR_EACH_MAP_FIELD(original, field) {
         if (field->key_kind == NAME_KEY_PRIVATE) continue;
@@ -1282,6 +1301,16 @@ static bool for_in_own_keys_suffice(Item owner) {
 }
 extern "C" Item mvp_lmd_for_in_keys(Item owner) {
     if (for_in_own_keys_suffice(owner)) return mvp_lmd_object_project(owner, 0);
+    if (owner.item != ITEM_NULL && owner.item != ITEM_JS_UNDEFINED && !mvp_lmd_is_object(owner)) {
+        MvpLmdLibraryState* library = mvp_lmd_program_library();
+        if (library && library->mutable_prototypes) {
+            // open primitive prototypes contribute inherited keys through the existing object walker.
+            RootFrame roots(1);
+            if (!roots.valid()) return ItemError;
+            Rooted<Item> object(roots, mvp_lmd_box_primitive(owner));
+            return item_is_error(object.get()) ? object.get() : mvp_lmd_for_in_keys(object.get());
+        }
+    }
     RootFrame roots(5);
     if (!roots.valid()) return ItemError;
     Rooted<Item> object(roots, owner), result(roots, mvp_lmd_array_new(0));
@@ -1301,7 +1330,8 @@ extern "C" Item mvp_lmd_for_in_keys(Item owner) {
         return result.get();
     }
     TypeId type = get_type_id(owner);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC) return result.get();
+    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC &&
+            !(type == LMD_TYPE_VMAP && js_promise_is(owner))) return result.get();
     MvpLmdClass* cls = mvp_lmd_class_record(owner);
     bool statics = type == LMD_TYPE_FUNC;
     if (statics) {
@@ -1316,12 +1346,14 @@ extern "C" Item mvp_lmd_for_in_keys(Item owner) {
             for (int64_t j = 0; j < seen.get().array->length; j++)
                 if (mvp_lmd_same_value_zero(key.get(), seen.get().array->items[j])) { visited = true; break; }
             if (visited) continue;
-            Item stored = mvp_lmd_array_store(seen.get(), seen.get().array->length, key.get());
-            if (item_is_error(stored)) return stored;
             JsPropertyDescriptor descriptor = {};
             Item found = mvp_lmd_get_own_property(object.get(), key.get(), &descriptor);
             if (item_is_error(found)) return found;
-            if (found.item == ITEM_FALSE || !(descriptor.flags & JS_PD_ENUMERABLE)) continue;
+            // an absent proxy key cannot shadow an inherited property with the same name.
+            if (found.item == ITEM_FALSE) continue;
+            Item stored = mvp_lmd_array_store(seen.get(), seen.get().array->length, key.get());
+            if (item_is_error(stored)) return stored;
+            if (!(descriptor.flags & JS_PD_ENUMERABLE)) continue;
             stored = mvp_lmd_array_store(result.get(), result.get().array->length, key.get());
             if (item_is_error(stored)) return stored;
         }
@@ -1334,10 +1366,13 @@ extern "C" Item mvp_lmd_for_in_keys(Item owner) {
     return result.get();
 }
 extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
+    if (get_type_id(owner) == LMD_TYPE_VMAP && js_module_namespace_record(owner))
+        return js_module_namespace_project(owner, projection);
     if (mvp_lmd_is_proxy(owner)) return mvp_lmd_proxy_project(owner, projection);
     Map* map = mvp_lmd_property_map(owner);
     bool indexed = get_type_id(owner) == LMD_TYPE_ARRAY;
     bool typed = js_is_typed_array(owner);
+    if (!map && get_type_id(owner) == LMD_TYPE_VMAP && js_promise_is(owner)) return mvp_lmd_array_new(0);
     if (!map && !indexed) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     if (!context->name_pool) context->name_pool = name_pool_create_runtime(context->pool);
     TypeMap* type = map ? (TypeMap*)map->type : NULL;
@@ -1437,7 +1472,7 @@ extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
 }
 extern "C" Item mvp_lmd_object_copy(Item target, Item source, int64_t assign, Item excluded) {
     TypeId type = get_type_id(source);
-    if (type != LMD_TYPE_MAP && type != LMD_TYPE_ARRAY && type != LMD_TYPE_FUNC && type != LMD_TYPE_STRING) return target;
+    if (!mvp_lmd_is_object(source) && type != LMD_TYPE_STRING) return target;
     RootFrame roots(6);
     if (!roots.valid()) return ItemError;
     Rooted<Item> output(roots, target), input(roots, source), keys(roots, ItemNull), key(roots, ItemNull), value(roots, ItemNull);

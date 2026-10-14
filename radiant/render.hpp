@@ -4118,7 +4118,9 @@ int ui_context_init(UiContext* uicon, bool headless, float requested_device_scal
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 
-void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
+// paged: lay the document out as a page flow for that composition (layout_paged.cpp)
+void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow,
+                     struct PagedFlowState* paged = nullptr);
 void view_pool_destroy(ViewTree* tree);
 void view_pool_reset_retained(ViewTree* tree);
 void view_pool_reset_retained_subtree(ViewTree* tree, DomNode* root);
@@ -4721,6 +4723,12 @@ char* render_text_create_export_segment(const unsigned char* text,
                                         CssEnum text_transform,
                                         bool include_ellipsis,
                                         CssEnum white_space = CSS_VALUE_PRE);
+// fill the glyph run of one text rect painted at the containing block origin
+// (block_x, block_y) with `font` and `color`; returns the export text the run
+// borrows (caller owns it; null when the rect paints nothing)
+char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
+                                 const FontBox* font, Color color,
+                                 float block_x, float block_y, PaintGlyphRun* run);
 
 // ===== render_vector_path.hpp =====
 struct RasterRenderContext;

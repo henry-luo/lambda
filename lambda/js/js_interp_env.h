@@ -9,6 +9,18 @@
 struct NameScope;
 struct JsScript;
 
+enum JsInterpEnvironmentRole {
+    JS_INTERP_ENV_ORDINARY,
+    JS_INTERP_ENV_PARAMETERS,
+    JS_INTERP_ENV_BODY_VARS,
+    JS_INTERP_ENV_GLOBAL_OBJECT, // vars resolve through the host global property record
+};
+
+enum JsInterpHostCells {
+    JS_INTERP_CELL_PARAMETERS = 1, JS_INTERP_CELL_ALL = 2,
+    JS_INTERP_CELL_ARGUMENTS = 4, JS_INTERP_CELL_THIS = 8
+};
+
 typedef struct JsInterpEnv {
     struct JsInterpEnv* outer;
     struct NameScope* scope;
@@ -34,9 +46,19 @@ typedef struct JsInterpEnv {
     uint32_t slot_count;
     uint8_t arguments_are_mapped;
     uint8_t has_lexical_this;
-    uint8_t reserved[2];
+    // hosted records retain canonical Array cells in existing slots/metadata.
+    // arguments aliases may detach; lexical and receiver cell ownership does not.
+    uint8_t host_cells;
+    uint8_t binding_role; // projects shared source slots into the activation record
+    // arguments is mutable and can outlive a caller-owned numeric payload.
+    uint64_t arguments_scalar_home;
     uint64_t slots[1];
 } JsInterpEnv;
+
+static inline void js_interp_env_arguments_store(JsInterpEnv* env, Item value) {
+    if (env) *(Item*)(void*)&env->arguments_object = lambda_item_adopt_scalar_home(value,
+        &env->arguments_scalar_home);
+}
 
 // JS adds lexical metadata to the common durable Item/scalar slot storage.
 // The five Item words are deliberately contiguous so the generic visitor can

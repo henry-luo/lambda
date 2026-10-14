@@ -535,17 +535,18 @@ static Item js_test262_execute_batch_source(Runtime* runtime,
         const JsPreambleState* preamble, bool has_preamble,
         uint64_t* result_home, volatile long* harness_us, bool mvp_lmd) {
     if (mvp_lmd) {
-        if (inline_module_source || has_preamble || ast_harness || test262_native_harness) {
-            fputs("MVP_FAILURE admission -\nMVP batch requires a complete classic source\n", stdout);
+        if (has_preamble || ast_harness || test262_native_harness) {
+            fputs("MVP_FAILURE admission -\nMVP batch requires a complete source\n", stdout);
             return ItemError;
         }
         MvpLmdHost host = {0, NULL, stdout, true};
-        MvpLmdExecution* execution = mvp_lmd_execute(source, source_len, NULL, &host);
+        MvpLmdOptions options = {filename, inline_module_source};
+        MvpLmdExecution* execution = mvp_lmd_execute_with_options(source, source_len, NULL, &host, &options);
         MvpLmdFailurePhase phase;
         const char* type = NULL;
         const char* diagnostic = mvp_lmd_diagnostic(execution, &phase, &type);
         if (diagnostic) {
-            const char* phases[] = {"success", "parse", "admission", "runtime", "internal"};
+            const char* phases[] = {"success", "parse", "admission", "resolution", "runtime", "internal"};
             fputs("MVP_FAILURE ", stdout); fputs(phases[phase], stdout);
             fputc(' ', stdout); fputs(type ? type : "-", stdout); fputc('\n', stdout);
             fputs(diagnostic, stdout); fputc('\n', stdout);
@@ -2744,6 +2745,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             size_t length = 0;
             bool print = false;
             bool timing = false;
+            bool module = false;
             bool invalid = false;
             const char** script_arguments = (const char**)mem_calloc((size_t)argc + 2, sizeof(char*), MEM_CAT_JS_RUNTIME);
             if (!script_arguments) { runtime_cleanup(&runtime); return lambda_main_finish(1); }
@@ -2752,6 +2754,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             for (int arg = 2; arg < argc; arg++) {
                 if (arg == selector || strcmp(argv[arg], "--no-log") == 0) continue;
                 if (strcmp(argv[arg], "--timing") == 0) { timing = true; continue; }
+                if (strcmp(argv[arg], "--module") == 0) { module = true; continue; }
                 if ((!strcmp(argv[arg], "-e") || !strcmp(argv[arg], "--eval") ||
                      !strcmp(argv[arg], "-p") || !strcmp(argv[arg], "--print")) && arg + 1 < argc) {
                     print = !strcmp(argv[arg], "-p") || !strcmp(argv[arg], "--print");
@@ -2769,7 +2772,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             double execution_ms = 0;
             script_arguments[1] = filename ? filename : "[eval]";
             MvpLmdHost host = {script_argc, script_arguments, stdout};
-            MvpLmdExecution* execution = mvp_lmd_execute(source, length, timing ? &execution_ms : NULL, &host);
+            MvpLmdOptions options = {filename, module};
+            MvpLmdExecution* execution = mvp_lmd_execute_with_options(source, length, timing ? &execution_ms : NULL, &host, &options);
             const char* error = mvp_lmd_diagnostic(execution);
             if (error) { fputs(error, stderr); fputc('\n', stderr); }
             else if (print) {

@@ -803,8 +803,9 @@ static Item js_new_function_impl(void* func_ptr, int param_count,
     return (Item){.function = (Function*)fn};
 }
 
-extern "C" Item js_new_interpreted_function(AstFuncNode* function,
-        JsScript* script, JsInterpEnv* environment, uint32_t flags) {
+static Item js_new_interpreted_function_impl(AstFuncNode* function,
+        JsScript* script, JsInterpEnv* environment, uint32_t flags,
+        bool hosted, Item home_global, Item lexical_this, Item lexical_new_target) {
     if (!function) return ItemError;
     RootFrame roots(1);
     Rooted<Item> function_root(roots, ItemNull);
@@ -815,7 +816,7 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
     JsAstBody* ast = js_fn_ast_ensure(fn);
     if (!ast) return ItemError;
     JsCallableCode* code = js_script_ast_callable_ensure(script, function,
-        lambda_active_module_state_id());
+        hosted ? UINT32_MAX : lambda_active_module_state_id());
     if (!code) return ItemError;
     ast->definition = code;
     // definition metadata is installed directly, with no per-value temporary.
@@ -828,17 +829,35 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
             code->runtime_context == (Context*)context) {
         fn->flags |= JS_FUNC_FLAG_MIR_CONTEXT_ABI;
     }
-    fn->home_global = js_get_global_this();
-    ast->lexical_this = (flags & JS_FUNC_FLAG_ARROW) ? js_get_this() : ItemNull;
+    fn->home_global = hosted ? home_global : js_get_global_this();
+    ast->lexical_this = (flags & JS_FUNC_FLAG_ARROW)
+        ? (hosted ? lexical_this : js_get_this()) : ItemNull;
     ast->lexical_new_target = (flags & JS_FUNC_FLAG_ARROW)
-        ? js_get_new_target() : ItemNull;
+        ? (hosted ? lexical_new_target : js_get_new_target()) : ItemNull;
     js_function_root_ast_payload(fn);
     fn->name = function->name;
     // AST closures created inside `with` use the same captured object
     // environment stack as compiled and native JS functions.
-    js_function_capture_with_env(fn);
-    js_function_finalize_capabilities(fn);
+    if (!hosted) {
+        js_function_capture_with_env(fn);
+        js_function_finalize_capabilities(fn);
+    }
     return function_root.get();
+}
+
+extern "C" Item js_new_interpreted_function(AstFuncNode* function,
+        JsScript* script, JsInterpEnv* environment, uint32_t flags) {
+    return js_new_interpreted_function_impl(function, script, environment, flags,
+        false, ItemNull, ItemNull, ItemNull);
+}
+
+Item js_new_interpreted_function_with_host(AstFuncNode* function,
+        JsScript* script, JsInterpEnv* environment, uint32_t flags,
+        Item home_global, Item lexical_this, Item lexical_new_target) {
+    // The host wrapper owns invocation; this GC object owns only retained AST
+    // and live lexical cells, so no LJS realm/call capabilities are installed.
+    return js_new_interpreted_function_impl(function, script, environment, flags,
+        true, home_global, lexical_this, lexical_new_target);
 }
 
 bool js_function_promote_ast_body(JsFunction* fn, void* entry) {
@@ -1638,7 +1657,9 @@ extern "C" void js_finalize_function(Item fn_item, const char* name_chars,
         JsCallableCode* code = js_fn_code_ensure(fn);
         if (code) code->eval_initializer_context = true;
     }
-    if (js_private_field_initializing || js_eval_initializer_context) {
+    if ((init_flags & JS_FUNC_INIT_ARROW) &&
+            (js_private_field_initializing || js_eval_initializer_context)) {
+        // ordinary functions end the initializer's lexical eval restriction.
         JsCallableCode* code = js_fn_code_ensure(fn);
         if (code) code->eval_initializer_context = true;
     }

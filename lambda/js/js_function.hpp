@@ -149,6 +149,7 @@ struct JsCallableCode {
     // Parser-owned parameter shape is fixed for every closure of an AST
     // definition; activations must not rediscover it by walking the list.
     bool has_non_simple_params;
+    bool has_parameter_expressions;
     // This synchronous AST definition owns no function/body binding slots or
     // observable lexical activation state, so calls may use their outer env.
     bool elides_function_environment;

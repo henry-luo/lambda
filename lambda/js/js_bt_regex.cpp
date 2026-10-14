@@ -324,6 +324,23 @@ static uint32_t parse_unicode_escape(Parser* ps, bool* ok) {
     *ok = true; return v;
 }
 
+// Annex B retries an incomplete hex/unicode escape as an identity character.
+// all three atom positions share the same rollback; Unicode mode keeps strict failure.
+static uint32_t parse_character_escape(Parser* ps, char kind, bool* ok) {
+    int start = ps->pos;
+    uint32_t value = 0;
+    *ok = false;
+    // braced escapes belong to Unicode grammar (including normalized /v classes).
+    if (ps->flags.unicode || ps->pos >= ps->len || ps->p[ps->pos] != '{')
+        value = kind == 'x' ? parse_hex_escape(ps, ok) : parse_unicode_escape(ps, ok);
+    if (!*ok && !ps->flags.unicode) {
+        ps->pos = start;
+        *ok = true;
+        value = (unsigned char)kind;
+    }
+    return value;
+}
+
 // \cX — control escape. A non-letter after \c is not a control escape; the
 // caller then treats the sequence as the literal 'c' (Annex B behaviour).
 static bool parse_control_escape(Parser* ps, uint32_t* out) {
@@ -450,8 +467,8 @@ static RxNode* parse_class(Parser* ps) {
                 case '4': case '5': case '6': case '7':
                     if (!ps->flags.unicode) { lo = parse_legacy_octal_escape(ps); break; }
                     lo = e == '0' ? 0 : (unsigned char)e; ps->pos++; break;
-                case 'x': { ps->pos++; bool ok; lo = parse_hex_escape(ps, &ok); if (!ok) { ps->error = true; arraylist_free(ranges); return NULL; } break; }
-                case 'u': { ps->pos++; bool ok; lo = parse_unicode_escape(ps, &ok); if (!ok) { ps->error = true; arraylist_free(ranges); return NULL; } break; }
+                case 'x': { ps->pos++; bool ok; lo = parse_character_escape(ps, 'x', &ok); if (!ok) { ps->error = true; arraylist_free(ranges); return NULL; } break; }
+                case 'u': { ps->pos++; bool ok; lo = parse_character_escape(ps, 'u', &ok); if (!ok) { ps->error = true; arraylist_free(ranges); return NULL; } break; }
                 case 'c': { ps->pos++; if (!parse_control_escape(ps, &lo)) lo = 'c'; break; }
                 default: lo = (unsigned char)e; ps->pos++; break;
             }
@@ -478,8 +495,8 @@ static RxNode* parse_class(Parser* ps) {
                     case '4': case '5': case '6': case '7':
                         if (!ps->flags.unicode) { hi = parse_legacy_octal_escape(ps); break; }
                         hi = e == '0' ? 0 : (unsigned char)e; ps->pos++; break;
-                    case 'x': { ps->pos++; bool ok; hi = parse_hex_escape(ps,&ok); if(!ok){ps->error=true;arraylist_free(ranges);return NULL;} break; }
-                    case 'u': { ps->pos++; bool ok; hi = parse_unicode_escape(ps,&ok); if(!ok){ps->error=true;arraylist_free(ranges);return NULL;} break; }
+                    case 'x': { ps->pos++; bool ok; hi = parse_character_escape(ps, 'x', &ok); if(!ok){ps->error=true;arraylist_free(ranges);return NULL;} break; }
+                    case 'u': { ps->pos++; bool ok; hi = parse_character_escape(ps, 'u', &ok); if(!ok){ps->error=true;arraylist_free(ranges);return NULL;} break; }
                     case 'c': { ps->pos++; if (!parse_control_escape(ps, &hi)) hi = 'c'; break; }
                     default: hi=(unsigned char)e; ps->pos++; break;
                 }
@@ -520,12 +537,20 @@ static int lookup_named(Parser* ps, const char* name, int name_len) {
     return -1;
 }
 
+static bool parse_brace_quant(Parser* ps, int* outmin, int* outmax);
+
 // Parse a single atom (without trailing quantifier). Returns NULL on error or
 // when nothing parseable (e.g. at '|' or ')').
 static RxNode* parse_atom(Parser* ps) {
     if (ps->pos >= ps->len) return NULL;
     char c = ps->p[ps->pos];
     if (c == '|' || c == ')') return NULL;
+    // quantifiers need a preceding atom; malformed braces remain Annex B literals.
+    if (c == '*' || c == '+' || c == '?') { ps->error = true; return NULL; }
+    if (c == '{') {
+        int lower, upper;
+        if (parse_brace_quant(ps, &lower, &upper)) { ps->error = true; return NULL; }
+    }
 
     if (c == '(') {
         // group / lookaround
@@ -618,7 +643,7 @@ static RxNode* parse_atom(Parser* ps) {
             n->backref_index = val;
             return n;
         }
-        if (e == 'k') {
+        if (e == 'k' && (ps->flags.unicode || ps->named_count)) {
             // \k<name>
             ps->pos += 2; // \k
             if (ps->pos >= ps->len || ps->p[ps->pos] != '<') { ps->error = true; return NULL; }
@@ -664,8 +689,8 @@ static RxNode* parse_atom(Parser* ps) {
                 ps->pos++; // backslash
                 if (!ps->flags.unicode) { cp = parse_legacy_octal_escape(ps); break; }
                 cp = 0; ps->pos++; break;
-            case 'x': { ps->pos += 2; bool ok; cp = parse_hex_escape(ps, &ok); if (!ok) { ps->error = true; return NULL; } break; }
-            case 'u': { ps->pos += 2; bool ok; cp = parse_unicode_escape(ps, &ok); if (!ok) { ps->error = true; return NULL; } break; }
+            case 'x': { ps->pos += 2; bool ok; cp = parse_character_escape(ps, 'x', &ok); if (!ok) { ps->error = true; return NULL; } break; }
+            case 'u': { ps->pos += 2; bool ok; cp = parse_character_escape(ps, 'u', &ok); if (!ok) { ps->error = true; return NULL; } break; }
             case 'c': { ps->pos += 2; if (!parse_control_escape(ps, &cp)) cp = 'c'; break; }
             default: cp = (unsigned char)e; ps->pos += 2; break;
         }
@@ -689,18 +714,27 @@ static bool parse_brace_quant(Parser* ps, int* outmin, int* outmax) {
         int d = digit - '0';
         return value > (INT_MAX - d) / 10 ? INT_MAX : value * 10 + d;
     };
+    int lo_start = ps->pos;
     int lo = 0; bool has_lo = false;
     while (ps->pos < ps->len && ps->p[ps->pos] >= '0' && ps->p[ps->pos] <= '9') { lo = accumulate(lo, ps->p[ps->pos]); has_lo = true; ps->pos++; }
     if (!has_lo) { ps->pos = save; return false; }
+    int lo_end = ps->pos;
     int hi;
     if (ps->pos < ps->len && ps->p[ps->pos] == '}') { hi = lo; ps->pos++; }
     else if (ps->pos < ps->len && ps->p[ps->pos] == ',') {
         ps->pos++;
         if (ps->pos < ps->len && ps->p[ps->pos] == '}') { hi = -1; ps->pos++; }
         else {
+            int hi_start = ps->pos;
             int h = 0; bool has_hi = false;
             while (ps->pos < ps->len && ps->p[ps->pos] >= '0' && ps->p[ps->pos] <= '9') { h = accumulate(h, ps->p[ps->pos]); has_hi = true; ps->pos++; }
             if (!has_hi || ps->pos >= ps->len || ps->p[ps->pos] != '}') { ps->pos = save; return false; }
+            // compare decimal spellings before saturation loses the order of large bounds.
+            while (lo_start + 1 < lo_end && ps->p[lo_start] == '0') lo_start++;
+            while (hi_start + 1 < ps->pos && ps->p[hi_start] == '0') hi_start++;
+            int lo_digits = lo_end - lo_start, hi_digits = ps->pos - hi_start;
+            if (lo_digits > hi_digits || (lo_digits == hi_digits &&
+                    memcmp(ps->p + lo_start, ps->p + hi_start, lo_digits) > 0)) ps->error = true;
             ps->pos++; hi = h;
         }
     } else { ps->pos = save; return false; }
@@ -722,6 +756,7 @@ static RxNode* parse_term(Parser* ps) {
     else if (c == '+') { qmin = 1; qmax = -1; has_q = true; ps->pos++; }
     else if (c == '?') { qmin = 0; qmax = 1; has_q = true; ps->pos++; }
     else if (c == '{') { if (parse_brace_quant(ps, &qmin, &qmax)) has_q = true; }
+    if (ps->error) return NULL;
     if (!has_q) return atom;
     bool greedy = true;
     if (ps->pos < ps->len && ps->p[ps->pos] == '?') { greedy = false; ps->pos++; }

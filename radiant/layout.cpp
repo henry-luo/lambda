@@ -4498,6 +4498,13 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     if (node->is_element()) {
         DomElement* elem = node->as_element();
 
+        if (lycon->paged && paged_flow_skips_element(lycon, elem)) {
+            // page masters, regions and static content feed the composition, not the flow.
+            node->view_type = RDT_VIEW_NONE;
+            lycon->depth--;
+            return;
+        }
+
         if (layout_is_shadow_slot(node)) {
             // CSS Shadow DOM flattened-tree layout projects assigned nodes at
             // the slot without changing their light-DOM parentage.
@@ -4897,6 +4904,8 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     lycon->block.parent = lam::up(&saved_block);
 
     ViewBlock* html = lam::view_require_block(set_view(lycon, RDT_VIEW_BLOCK, elmt));
+    // the root box is the initial containing block: its origin is the document origin
+    html->x = html->y = 0.0f;
     html->width = lycon->block.content_width;
     lycon->doc->view_tree->root = lam::up((View*)html);  lycon->elmt = lam::up(elmt);
 
@@ -5815,7 +5824,7 @@ static bool layout_clear_dirty_visitor(DomNode* node, void*) {
     return true;
 }
 
-void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
+void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFlowState* paged) {
     uint64_t t_start = time_now_ns();
 
     reset_layout_timing();
@@ -5893,6 +5902,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     LayoutContainerMeasurements previous = engine && engine->container_dependencies
         ? layout_container_measurements(root_node) : LayoutContainerMeasurements{};
     LayoutPassScope layout_scope(&lycon, doc, uicon);
+    lycon.paged = lam::up(paged);
     bool visibility_dependencies = false;
     view_geometry_walk_dom_tree(root_node, content_visibility_has_declaration, &visibility_dependencies);
     // relevance measurement must settle before styles can create motion timelines.
@@ -5902,7 +5912,10 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     size_t container_pass = 0;
     size_t visibility_pass = 0;
     for (;;) {
+        // a repeated page-flow pass rewinds the pages of the one it replaces
+        if (lycon.paged && !paged_flow_pass_begin(&lycon)) break;
         layout_html_root(&lycon, root_node);
+        if (lycon.paged && !paged_flow_pass_settle(&lycon)) break;
         ViewBlock* viewport = lam::view_as_block(doc->view_tree->root);
         if (viewport && viewport->scroller && viewport->scroll()->pane) {
             // a rebuilt viewport pane must restore scroll before relevance reads its geometry.
@@ -5946,6 +5959,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         view_pool_reset_retained(doc->view_tree);
         reset_float_prelaid_flags(root_node);
         layout_init(&lycon, doc, uicon);
+        lycon.paged = lam::up(paged);
         lycon.css_query_probe = container_dependencies && !stable;
     }
 

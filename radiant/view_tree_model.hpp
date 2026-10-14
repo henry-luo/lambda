@@ -11,6 +11,7 @@
 struct DomDocument;
 struct DomNode;
 struct ViewTree;
+struct UiContext;
 struct FontProp;
 struct InlineProp;
 struct BoundaryProp;
@@ -44,6 +45,9 @@ struct ViewEnvironment {
     float page_width, page_height;
     uint64_t resource_generation;
     double sampled_time;
+    // the host whose fonts, image cache and layout services lay out the page
+    // flow; borrowed for the edition's lifetime (null for model-only editions)
+    lam::Up<struct UiContext> ui_context;
 };
 
 enum LayoutViewKind : uint8_t {

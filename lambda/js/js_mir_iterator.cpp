@@ -38,7 +38,7 @@ void jm_emit_iterator_close_checked(JsMirTranspiler* mt, MIR_reg_t iterator) {
 
 void jm_emit_async_iterator_close_checked(JsMirTranspiler* mt,
         MIR_reg_t iterator) {
-    MIR_reg_t raw_close = jm_callr_1(mt, "js_async_iterator_close_result",
+    MIR_reg_t raw_close = jm_callr_1(mt, "js_async_iterator_record_close_result",
         MIR_T_I64, iterator);
     // A lookup/call failure is an ordinary abrupt close completion here and
     // therefore overrides a pending break or return.
@@ -92,7 +92,7 @@ void jm_emit_async_iterator_close_preserving_throw(JsMirTranspiler* mt,
     // The source throw remains observable after cleanup, but its payload must
     // stay rooted while `return()` and the awaited close result can collect.
     jm_create_gc_root_slot(mt, thrown_value);
-    MIR_reg_t raw_close = jm_callr_1(mt, "js_async_iterator_close_result",
+    MIR_reg_t raw_close = jm_callr_1(mt, "js_async_iterator_record_close_result",
         MIR_T_I64, iterator);
     MIR_label_t rethrow_source = jm_new_label(mt);
     MIR_reg_t close_failed = jm_emit_error_lane_test(mt);

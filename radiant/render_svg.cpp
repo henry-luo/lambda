@@ -169,35 +169,16 @@ static void svg_color_to_string(Color color, char* result) {
 static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     if (!text || !text->text_data()) return;
     unsigned char* str = text->text_data();
-    CssEnum text_transform = render_text_inherited_transform(text);
 
     RenderTextPaintIterator paint_iterator(ctx, text);
     TextRect* text_rect;
     while ((text_rect = paint_iterator.next())) {
-    float x = ctx->block.x + text_rect->x, y = ctx->block.y + text_rect->y;
+    PaintGlyphRun run = {};
+    lam::Temp<char> text_content(render_text_rect_glyph_run(text, text_rect, &ctx->font, ctx->color,
+        ctx->block.x, ctx->block.y, &run));
+    if (!text_content.get()) continue;
+    if (!run.font_family) run.font_family = lam::up("Arial");
 
-    lam::Temp<char> text_content(render_text_create_export_segment(
-        str, text_rect, text_transform, true, get_white_space_value(text)));
-
-    CssEnum justify_mode = text_justify_computed_value(text->parent);
-    RenderTextJustification justification = render_text_justification(text_rect, justify_mode);
-
-    // Use CSS font-size from style, fallback to 16 if not available
-    float font_size = ctx->font.style->font_size > 0 ? ctx->font.style->font_size : 16;
-    // Use font ascender from FontProp (already in pixels), or fallback to 80% of font_size
-    float baseline_y = render_text_baseline_y(&ctx->font, y);
-
-    int font_weight = 0;
-    if (ctx->font.style->font_weight_numeric > 0) {
-        font_weight = ctx->font.style->font_weight_numeric;
-    } else if (ctx->font.style->font_weight == CSS_VALUE_BOLD ||
-               ctx->font.style->font_weight == CSS_VALUE_BOLDER) {
-        font_weight = 700;
-    } else if (ctx->font.style->font_weight == CSS_VALUE_LIGHTER) {
-        font_weight = 300;
-    }
-
-    bool italic = ctx->font.style->font_style == CSS_VALUE_ITALIC;
     char deco_line[48];
     font_text_decoration_names(ctx->font.style, deco_line, sizeof(deco_line));
     bool has_text_deco = strcmp(deco_line, "none") != 0;
@@ -205,22 +186,6 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     bool has_text_shadow = parent_elem && parent_elem->font &&
                            parent_elem->fontp()->text_shadow;
 
-    PaintGlyphRun run = {};
-    run.font = lam::up(&ctx->font);
-    run.color = ctx->color;
-    run.text = lam::up(text_content.get());
-    run.text_len = (int)strlen(text_content.get()); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
-    run.font_family = lam::up(font_box_handle(&ctx->font)
-        ? font_handle_get_family_name(font_box_handle(&ctx->font))
-        : "Arial");
-    run.font_size = font_size;
-    run.x = x;
-    run.baseline_y = baseline_y;
-    run.word_spacing = justification.word;
-    run.cjk_spacing = justification.character;
-    run.justify_mode = justify_mode;
-    run.font_weight = font_weight;
-    run.italic = italic;
     if (parent_elem && render_paint_text_background(svg_active_paint_list(ctx), ctx->ui_context,
             parent_elem, &run, {ctx->block.x, ctx->block.y, parent_elem->width, parent_elem->height})) {
         svg_lower_paint_list(ctx);
