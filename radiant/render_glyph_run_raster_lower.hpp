@@ -50,16 +50,23 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
             continue;
         }
 
-        bool character_gap = text_justify_character_gap(&justify_context, codepoint);
-        if (codepoint == 0xFE0F) {
-            continue;
-        }
-        if (codepoint == (uint32_t)' ') {
-            x += adjusted_space_width;
+        bool character_gap = text_justify_character_gap(&justify_context, codepoint, run->justify_mode);
+        if (codepoint == 0xFE0F || codepoint == 0x00AD ||
+            utf8proc_category(codepoint) == UTF8PROC_CATEGORY_CF) {
             continue;
         }
         if (run->cjk_spacing > 0.0f && character_gap)
             x += run->cjk_spacing;
+        if (codepoint == (uint32_t)' ') {
+            x += adjusted_space_width;
+            continue;
+        }
+
+        float synthetic_advance = 0.0f;
+        if (render_text_synthesized_space_advance(font, codepoint, &synthetic_advance)) {
+            x += synthetic_advance;
+            continue;
+        }
 
         bool emoji_presentation = utf_is_emoji_presentation_default(codepoint);
         if (cursor < end) {

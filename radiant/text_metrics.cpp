@@ -104,3 +104,8 @@ float text_unicode_space_width_em(uint32_t codepoint) {
         default: return 0.0f;
     }
 }
+
+bool text_unicode_space_has_explicit_advance(uint32_t codepoint) {
+    return text_unicode_space_width_em(codepoint) > 0.0f ||
+        codepoint == 0x202F || codepoint == 0x2008;
+}

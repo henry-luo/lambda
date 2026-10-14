@@ -1,0 +1,69 @@
+<!doctype html><meta charset="utf-8"><title>Phantom inline cursors follow column fragments</title>
+<style>
+@font-face {font-family:Ahem;src:url(../layout/data/support/fonts/Ahem.ttf)}
+body {margin:0;font:20px/20px Ahem}
+.case {columns:3;column-gap:10px;width:320px;position:relative;margin-bottom:40px}
+.block {height:20px;break-inside:avoid;background:lightgreen}
+.anchor {position:absolute;width:10px;height:10px;background:blue}
+h3 {column-span:all;margin:10px 0;height:20px;font:inherit;background:lightgreen}
+</style>
+
+  <div id="result">
+
+  <div id="center" class="case" style="text-align:center"><div class="block"></div>
+    <div class="block"></div>
+    <a id="center-a" class="anchor"></a>
+  </div>
+  <div id="right" class="case" style="text-align:right"><div class="block"></div>
+    <div class="block"></div>
+    <a id="right-a" class="anchor"></a>
+  </div>
+  <div id="left" class="case" style="text-align:left"><div class="block"></div>
+    <div class="block"></div>
+    <a id="left-a" class="anchor"></a>
+  </div>
+  <div id="unequal" class="case" style="text-align:center"><div class="block" style="height:60px"></div>
+    <div class="block"></div>
+    <a id="unequal-a" class="anchor"></a>
+  </div>
+  <div id="before" class="case" style="text-align:center"><a id="before-a" class="anchor"></a>
+    <div class="block"></div>
+    <div class="block"></div></div>
+  <div id="spanners" class="case" style="text-align:center"><div class="block"></div>
+    <div class="block"></div>
+    <a id="spanners-first-a" class="anchor"></a>
+    <h3></h3>
+    <div class="block"></div>
+    <div class="block"></div>
+    <a id="spanners-last-a" class="anchor"></a>
+  </div>
+  <div id="fixed" class="case" style="text-align:center"><div class="block"></div>
+    <div class="block"></div>
+    <a id="fixed-a" class="anchor" style="position:fixed"></a>
+  </div>
+  <div id="relative" class="case" style="text-align:center;column-fill:auto;height:50px"><div class="block" style="position:relative;left:20px;top:10px"></div>
+    <a id="relative-a" class="anchor"></a>
+  </div>
+  <div id="margins" class="case" style="text-align:center"><div class="block"></div>
+    <div class="block"></div>
+    <a id="margins-a" class="anchor" style="margin-left:3px;margin-top:4px"></a>
+  </div>
+  <div id="explicit-x" class="case" style="text-align:center"><div class="block"></div>
+    <div class="block"></div>
+    <a id="explicit-x-a" class="anchor" style="left:7px"></a>
+  </div>
+  <div id="explicit-y" class="case" style="text-align:center"><div class="block"></div>
+    <div class="block"></div>
+    <a id="explicit-y-a" class="anchor" style="top:7px"></a>
+  </div>
+  <div id="boundary" class="case" style="text-align:center;column-fill:auto;height:20px"><div class="block"></div>
+    <a id="boundary-a" class="anchor"></a>
+    <div class="block"></div></div>
+  <div id="float" class="case" style="text-align:left;column-fill:auto;height:50px"><div class="block" style="float:left;width:20px"></div>
+    <a id="float-a" class="anchor"></a>
+  </div>
+  <div id="ordinary" style="width:320px;position:relative;text-align:center"><div class="block"></div>
+    <a id="ordinary-first-a" class="anchor"></a>
+    <div class="block"></div>
+    <a id="ordinary-last-a" class="anchor"></a>
+  </div></div>

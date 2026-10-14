@@ -21,7 +21,6 @@ extern int64_t g_text_layout_count;
 
 static void clear_slice_inline_start_edge(LayoutContext* lycon, DomNode* text_node);
 static void record_inline_box_decoration_fragment(LayoutContext* lycon, DomNode* text_node);
-static CssEnum inline_box_decoration_break_value(DomElement* parent);
 
 // CSS layout comparisons use subpixel coordinates; keep a run on the line
 // when its measured edge differs only by the 1/64px layout-unit quantization.
@@ -428,7 +427,7 @@ static int count_justify_opportunities_impl(const char* str, int len,
                                             bool collapse_spaces,
                                             bool collapse_newlines,
                                             bool trim_trailing_space,
-                                            bool allow_cjk) {
+                                            CssEnum mode) {
     if (!str || len <= 0) return 0;
 
     int count = 0;
@@ -436,6 +435,7 @@ static int count_justify_opportunities_impl(const char* str, int len,
     TextJustifyContext justify_context = {};
     bool in_collapsible_space = false;
     bool ends_in_collapsible_space = false;
+    int trailing_space_opportunities = 0;
 
     while (str < end) {
         uint32_t cp;
@@ -443,37 +443,42 @@ static int count_justify_opportunities_impl(const char* str, int len,
             justify_context = {};
             continue;
         }
-        bool character_gap = text_justify_character_gap(&justify_context, cp);
-
         bool ascii_space = cp <= 0x7F && is_space((char)cp);
         if (collapse_spaces && ascii_space) {
             bool preserved_newline = !collapse_newlines && (cp == '\n' || cp == '\r');
             if (preserved_newline) {
-                if (in_collapsible_space && count > 0) count--;
+                count -= trailing_space_opportunities;
                 in_collapsible_space = false;
                 ends_in_collapsible_space = false;
+                trailing_space_opportunities = 0;
+                justify_context = {};
+                continue;
             } else {
-                if (!in_collapsible_space) count++;
+                if (in_collapsible_space) continue;
+                cp = ' ';
                 in_collapsible_space = true;
                 ends_in_collapsible_space = true;
             }
         } else if (cp == ' ') {
-            count++;
             in_collapsible_space = false;
             ends_in_collapsible_space = false;
         } else {
-            if (allow_cjk && character_gap) count++;
             in_collapsible_space = false;
             ends_in_collapsible_space = false;
         }
+        bool character_gap = text_justify_character_gap(&justify_context, cp, mode);
+        int opportunities = mode == CSS_VALUE_INTER_CHARACTER
+            ? (character_gap ? 1 : 0) : ((cp == ' ' || character_gap) ? 1 : 0);
+        count += opportunities;
+        trailing_space_opportunities = ends_in_collapsible_space ? opportunities : 0;
     }
 
-    if (trim_trailing_space && ends_in_collapsible_space && count > 0) count--;
+    if (trim_trailing_space && ends_in_collapsible_space) count -= trailing_space_opportunities;
     return count;
 }
 
 int count_justify_opportunities(const char* str, int len) {
-    return count_justify_opportunities_impl(str, len, false, false, false, true);
+    return count_justify_opportunities_impl(str, len, false, false, false, CSS_VALUE_AUTO);
 }
 
 static inline CssEnum get_text_spacing_trim(LayoutContext* lycon, DomNode* text_node) {
@@ -972,17 +977,24 @@ static uint32_t peek_next_inline_codepoint(DomNode* node);
 
 // nearest source character after collapsible ASCII whitespace; an object
 // replacement character marks a boundary that source context cannot cross.
-uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards) {
+uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards,
+        LayoutInlineTextEdgeMode mode) {
     while (node) {
         if (node->is_text()) {
             const unsigned char* text = node->text_data();
             if (text && *text) {
+                CssEnum white_space = mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT
+                    ? get_white_space_value(node) : CSS_VALUE_NORMAL;
+                bool retained_space = mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT &&
+                    !layout_white_space_collapses(white_space);
                 uint32_t edge = 0;
                 const unsigned char* end = text + strlen((const char*)text);
                 while (text < end) {
                     uint32_t cp = 0;
                     if (!layout_utf8_next_codepoint(&text, end, &cp)) break;
-                    if (!is_space(cp)) {
+                    if (mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT && cp == '\n' &&
+                        white_space == CSS_VALUE_PRE_LINE) return '\n';
+                    if (!is_space(cp) || retained_space) {
                         edge = cp;
                         if (!backwards) break;
                     }
@@ -995,16 +1007,35 @@ uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards) {
             InlineOutOfFlowKind kind = inline_out_of_flow_kind(elmt);
             // segment-break context ignores decorations and out-of-flow boxes,
             // but an atomic inline or forced break separates adjacent text.
-            if (display.outer == CSS_VALUE_NONE || kind.floated || kind.positioned) {
+            bool parallel_annotation = mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT &&
+                layout_ruby_annotation_node(node) && node->parent &&
+                resolve_display_value(node->parent).inner == CSS_VALUE_RUBY;
+            if (display.outer == CSS_VALUE_NONE || kind.floated || kind.positioned ||
+                parallel_annotation) {
                 node = backwards ? node->prev_sibling : node->next_sibling;
                 continue;
             }
-            if (display.outer == CSS_VALUE_INLINE &&
+            if (mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT) {
+                if (elmt->tag() == MARKUP_NAME_BR ||
+                    (!layout_display_is_inline_level(display.outer) &&
+                     display.outer != CSS_VALUE_CONTENTS)) return '\n';
+                if (layout_is_inline_math_box(node)) return 0xFFFC;
+                bool pending_before = dom_element_has_before_content(elmt) &&
+                    (!elmt->pseudo || !elmt->pseudo->before_generated);
+                bool pending_after = dom_element_has_after_content(elmt) &&
+                    (!elmt->pseudo || !elmt->pseudo->after_generated);
+                // generated text needs its own counter/quote scope; slot content
+                // needs its projection. Neither is absent before that layout.
+                if (pending_before || pending_after || layout_is_shadow_slot(node)) return 0xFFFC;
+            }
+            if ((display.outer == CSS_VALUE_INLINE ||
+                 (mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT &&
+                  display.outer == CSS_VALUE_CONTENTS)) &&
                 !layout_intrinsic_element_is_atomic_inline(elmt) &&
                 elmt->tag() != MARKUP_NAME_BR) {
                 DomNode* child = backwards ? elmt->last_child : elmt->first_child;
                 if (child) {
-                    uint32_t cp = layout_inline_text_edge_codepoint(child, backwards);
+                    uint32_t cp = layout_inline_text_edge_codepoint(child, backwards, mode);
                     if (cp) return cp;
                 }
             } else {
@@ -1016,17 +1047,23 @@ uint32_t layout_inline_text_edge_codepoint(DomNode* node, bool backwards) {
     return 0;
 }
 
-static uint32_t adjacent_inline_codepoint(DomNode* node, bool backwards) {
+static uint32_t adjacent_inline_codepoint(DomNode* node, bool backwards,
+        LayoutInlineTextEdgeMode mode = LAYOUT_INLINE_TEXT_SKIP_ASCII_SPACE) {
     while (node) {
         DomNode* sibling = backwards ? node->prev_sibling : node->next_sibling;
         if (sibling) {
-            uint32_t cp = layout_inline_text_edge_codepoint(sibling, backwards);
+            uint32_t cp = layout_inline_text_edge_codepoint(sibling, backwards, mode);
             if (cp) return cp;
         }
         DomNode* parent = node->parent;
         if (!parent || !parent->is_element()) break;
+        // css ruby: an annotation owns a separate inline formatting context.
+        if (mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT &&
+            layout_ruby_annotation_node(parent)) break;
         CssEnum parent_display = resolve_display_value(parent).outer;
-        if (parent_display != CSS_VALUE_INLINE) break;
+        if (parent_display != CSS_VALUE_INLINE &&
+            !(mode == LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT &&
+              parent_display == CSS_VALUE_CONTENTS)) break;
         node = parent;
     }
     return 0;
@@ -1081,6 +1118,9 @@ static float measure_current_glyph_advance(LayoutContext* lycon, uint32_t codepo
                                            bool trim_cjk_spacing,
                                            uint32_t previous_codepoint = 0) {
     if (!lycon || !lycon->font.style) return 0.0f;
+    if (text_unicode_space_has_explicit_advance(codepoint)) {
+        return layout_unicode_space_advance(lycon, codepoint);
+    }
     if (document_font_missing_figure_space(lycon, codepoint)) {
         return layout_font_em_size(lycon);
     }
@@ -1786,7 +1826,7 @@ int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
         text_data + rect->start_index, rect->length,
         collapse_spaces, collapse_newlines,
         collapse_spaces && trim_trailing_space,
-        mode != CSS_VALUE_INTER_WORD);
+        mode);
 }
 
 /**
@@ -2183,11 +2223,9 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.committed_trailing_rect = NULL;
     lycon->line.committed_trailing_view = NULL;
     lycon->line.committed_trailing_space = 0;
-    lycon->line.hanging_space_width = 0;
-    lycon->line.hanging_space_text_trim = 0;
+    lycon->line.hanging_space = {};
     lycon->line.rtl_hanging_space = 0;
-    lycon->line.last_space_hanging_width = 0;
-    lycon->line.last_space_hanging_text_trim = 0;
+    lycon->line.last_space_hanging = {};
     lycon->line.wrap_opportunity_before_nowrap = false;
     lycon->line.is_last_line = false;
     lycon->line.inline_base_direction = lycon->block.direction;
@@ -2505,30 +2543,36 @@ static bool line_trailing_space_is_vertical_atomic_gap(ViewText* text_view,
 void line_break(LayoutContext* lycon, bool forced_break) {
     line_consume_trailing_collapsible_space(lycon, true, true);
     // CSS Text 3 §4.1.3: Hanging spaces (U+3000, pre-wrap spaces) at end of line
-    if (lycon->line.hanging_space_width > 0) {
-        float hanging_width = lycon->line.hanging_space_width;
-        if ((forced_break || lycon->line.is_last_line) &&
-            lycon->line.last_text_view &&
-            get_white_space_value(lycon->line.last_text_view) == CSS_VALUE_PRE_WRAP) {
-            // before a forced break, only the part beyond the available line
-            // hangs; fitting preserved spaces still participate in alignment.
+    if (lycon->line.hanging_space.width > 0) {
+        float hanging_width = lycon->line.hanging_space.width;
+        if (lycon->line.hanging_space.tail) {
+            float cursor = lycon->line.advance_x;
             float line_right = lycon->line.has_float_intrusion
                 ? lycon->line.effective_right : lycon->line.right;
-            hanging_width = min(hanging_width,
-                max(lycon->line.advance_x - line_right, 0.0f));
-        }
-        float hang_trim = min(lycon->line.hanging_space_text_trim, hanging_width);
-        if (hang_trim > 0 && lycon->line.last_text_rect) {
-            // whitespace-only fragments also need the hanging marker for justification.
-            lycon->line.last_text_rect->hanging_trim = hang_trim;
+            hanging_width = 0.0f;
+            bool conditional_suffix = forced_break || lycon->line.is_last_line;
+            for (LineHangingSpaceUnit* unit = lycon->line.hanging_space.tail;
+                 unit; unit = unit->previous) {
+                // only the terminal pre-wrap sequence precedes the forced break;
+                // preserved spaces before an unconditional glyph also hang unconditionally.
+                if (!unit->conditional) conditional_suffix = false;
+                float amount = conditional_suffix
+                    ? min(unit->width, max(cursor - line_right, 0.0f)) : unit->width;
+                hanging_width += amount;
+                if (amount > 0.0f && unit->trim_ink && unit->rect)
+                    unit->rect->hanging_trim += amount;
+                // a fitting part of a conditional space prevents earlier units
+                // from hanging, including an unconditional prefix in another inline.
+                if (amount + kTextLayoutSubpixelEpsilon < unit->width) break;
+                cursor -= unit->width;
+            }
         }
         // CSS Text 3 §4.1.3: In RTL, trailing whitespace hangs past the inline-end
         if (lycon->block.direction == CSS_VALUE_RTL) {
             lycon->line.rtl_hanging_space = hanging_width;
         }
         lycon->line.advance_x -= hanging_width;
-        lycon->line.hanging_space_width = 0;
-        lycon->line.hanging_space_text_trim = 0;
+        lycon->line.hanging_space = {};
     }
     lycon->block.max_width = max(lycon->block.max_width, lycon->line.advance_x);
     if (lycon->line.trailing_letter_spacing != 0) {
@@ -2918,7 +2962,7 @@ static float measure_first_word_width(LayoutContext* lycon, const unsigned char*
         if (unicode_space_em < 0.0f) {
             str += char_bytes;
             continue;
-        } else if (unicode_space_em > 0.0f || codepoint == 0x202F) {
+        } else if (text_unicode_space_has_explicit_advance(codepoint)) {
             float sc_scale = is_small_caps_lower ?
                 font_get_small_caps_scale(font_box_handle(&lycon->font)) : 1.0f;
             char_width = layout_unicode_space_advance(lycon, codepoint) * sc_scale;
@@ -3031,7 +3075,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
         }
 
         text_width += text_kerning_adjustment(lycon, prev_codepoint, codepoint);
-        if (unicode_space_em > 0.0f || codepoint == 0x202F) {
+        if (text_unicode_space_has_explicit_advance(codepoint)) {
             float sc_scale = is_small_caps_lower ?
                 font_get_small_caps_scale(font_box_handle(&lycon->font)) : 1.0f;
             text_width += layout_unicode_space_advance(lycon, codepoint) * sc_scale;
@@ -3535,7 +3579,7 @@ void adjust_text_bounds(ViewText* text) {
     }
 }
 
-static CssEnum inline_box_decoration_break_value(DomElement* parent) {
+CssEnum inline_box_decoration_break_value(DomElement* parent) {
     if (!parent || !parent->specified_style) return CSS_VALUE__UNDEF;
     CssDeclaration* declaration = style_tree_get_declaration(
         parent->specified_style, CSS_PROPERTY_BOX_DECORATION_BREAK);
@@ -3721,6 +3765,26 @@ static void record_line_break_opportunity(LayoutContext* lycon,
     capture_line_metrics(&lycon->line.last_space_metrics, &lycon->line);
 }
 
+static bool append_line_hanging_space(LayoutContext* lycon, TextRect* rect,
+        float width, bool conditional, bool trim_ink) {
+    LineHangingSpaceUnit* unit = (LineHangingSpaceUnit*)alloc_prop(
+        lycon, sizeof(LineHangingSpaceUnit));
+    if (!unit) {
+        log_error("hanging space: cannot retain line unit");
+        return false;
+    }
+    // immutable view-pool records keep backtracked candidates independent of
+    // later space styles and retain the text rectangle that owns each unit.
+    unit->width = width;
+    unit->conditional = conditional;
+    unit->trim_ink = trim_ink;
+    unit->rect = lam::up(rect);
+    unit->previous = lycon->line.hanging_space.tail;
+    lycon->line.hanging_space.tail = lam::up(unit);
+    lycon->line.hanging_space.width += width;
+    return true;
+}
+
 static int decode_text_codepoint_or_byte(const unsigned char* cursor,
                                          const unsigned char* end,
                                          uint32_t* codepoint) {
@@ -3778,9 +3842,8 @@ static bool output_break_at_last_space(LayoutContext* lycon, DomNode* text_node,
                                        int* soft_hyphen_leading_bytes) {
     unsigned char* str = lycon->line.last_space + 1;
     const LineMetricsSnapshot* break_metrics = &lycon->line.last_space_metrics;
-    if (lycon->line.last_space_hanging_width > 0) {
-        lycon->line.hanging_space_width = lycon->line.last_space_hanging_width;
-        lycon->line.hanging_space_text_trim = lycon->line.last_space_hanging_text_trim;
+    if (lycon->line.last_space_hanging.width > 0) {
+        lycon->line.hanging_space = lycon->line.last_space_hanging;
     }
 
     float output_width = lycon->line.last_space_pos;
@@ -3803,8 +3866,7 @@ static bool output_break_at_last_space(LayoutContext* lycon, DomNode* text_node,
             output_width = lycon->line.last_non_shy_space_pos;
             text_len = str - text_start - rect->start_index;
             lycon->line.last_space_kind = lycon->line.last_non_shy_space_kind;
-            lycon->line.hanging_space_width = lycon->line.last_non_shy_space_hanging_width;
-            lycon->line.hanging_space_text_trim = lycon->line.last_non_shy_space_hanging_text_trim;
+            lycon->line.hanging_space = lycon->line.last_non_shy_space_hanging;
             break_metrics = &lycon->line.last_non_shy_space_metrics;
         } else {
             const unsigned char* continuation = lycon->line.last_space + 1;
@@ -3967,8 +4029,7 @@ static void mark_line_non_space(Linebox* line) {
     line->is_line_start = false;
     line->has_space = false;
     line->trailing_space_width = 0;
-    line->hanging_space_width = 0;
-    line->hanging_space_text_trim = 0;
+    line->hanging_space = {};
 }
 
 void layout_text(LayoutContext* lycon, DomNode *text_node) {
@@ -4555,8 +4616,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                         lycon->line.last_non_shy_space = lycon->line.last_space;
                         lycon->line.last_non_shy_space_pos = lycon->line.last_space_pos;
                         lycon->line.last_non_shy_space_kind = lycon->line.last_space_kind;
-                        lycon->line.last_non_shy_space_hanging_width = lycon->line.last_space_hanging_width;
-                        lycon->line.last_non_shy_space_hanging_text_trim = lycon->line.last_space_hanging_text_trim;
+                        lycon->line.last_non_shy_space_hanging = lycon->line.last_space_hanging;
                         lycon->line.last_non_shy_space_metrics = lycon->line.last_space_metrics;
                     }
                     record_line_break_opportunity(
@@ -4571,7 +4631,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 lycon->line.has_space = false;
                 if (codepoint == 0x200D && prev_is_zwj_base) zwj_preceded = true;
                 continue;  // Skip to next character without adding width
-            } else if (unicode_space_em > 0.0f || codepoint == 0x202F) {
+            } else if (text_unicode_space_has_explicit_advance(codepoint)) {
                 float sc_scale = is_small_caps_lower ?
                     font_get_small_caps_scale(font_box_handle(&lycon->font)) : 1.0f;
                 wd = layout_unicode_space_advance(lycon, codepoint) * sc_scale;
@@ -4787,9 +4847,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 next_auto_hyphen_offset, lang, auto_hyphen_limits, auto_hyphen_word_characters);
         }
         // CSS Text 3 §4.1.3: Pre-wrap trailing spaces "hang" and don't count for
-        if (!is_space(*str) && codepoint != 0x3000 && lycon->line.hanging_space_width > 0) {
-            lycon->line.hanging_space_width = 0;
-            lycon->line.hanging_space_text_trim = 0;
+        if (lycon->line.hanging_space.width > 0 &&
+            ((!is_space(*str) && codepoint != 0x3000) ||
+             white_space == CSS_VALUE_BREAK_SPACES || white_space == CSS_VALUE_PRE)) {
+            // non-hanging preserved spaces prevent earlier spaces from being terminal.
+            lycon->line.hanging_space = {};
         }
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
@@ -4803,7 +4865,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             else if (is_space(*str) && !collapse_spaces && white_space != CSS_VALUE_BREAK_SPACES) {
                 // CSS Text 3 §4.1.3: In pre-wrap, trailing spaces hang at end of line.
             }
-            else if (is_space(*str) && lycon->line.hanging_space_width > 0) {
+            else if (is_space(*str) && lycon->line.hanging_space.width > 0) {
             }
             else if (collapse_spaces && is_space(*str) &&
                      layout_text_is_collapsible_whitespace(
@@ -4886,10 +4948,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 else return;
             }
             // CSS Text 3 §4.1.3: For pre-wrap, preserved spaces at end of line "hang"
-            else if (lycon->line.hanging_space_width > 0
-                     && rect->x + rect->width - lycon->line.hanging_space_width <= line_right) {
+            else if (lycon->line.hanging_space.width > 0
+                     && rect->x + rect->width - lycon->line.hanging_space.width <= line_right) {
                 log_debug("pre-wrap hanging: content fits without %dpx hanging spaces",
-                    (int)lycon->line.hanging_space_width); // INT_CAST_OK: pixel count for log
+                    (int)lycon->line.hanging_space.width); // INT_CAST_OK: pixel count for log
             }
             else if (lycon->line.last_space) { // break at the last space
                 bool auto_break_after_current = lycon->line.last_space_kind == BRK_AUTO_HYPHEN &&
@@ -5057,11 +5119,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // CSS Text 3 §4.1.3: For pre-wrap, track accumulated trailing space
             // of line (CSS Text 3 §3: "preserved white space takes up space and
             if (!collapse_spaces && wrap_lines && white_space != CSS_VALUE_BREAK_SPACES) {
-                lycon->line.hanging_space_width += wd;
-                lycon->line.hanging_space_text_trim += wd;  // regular ASCII spaces get trimmed from text rects
+                if (!append_line_hanging_space(lycon, rect, wd, true, true)) return;
             }
-            lycon->line.last_space_hanging_width = lycon->line.hanging_space_width;
-            lycon->line.last_space_hanging_text_trim = lycon->line.hanging_space_text_trim;
+            lycon->line.last_space_hanging = lycon->line.hanging_space;
         }
         else if (codepoint == 0x3000) {
             // CSS Text 3 §4.1.3: U+3000 IDEOGRAPHIC SPACE is a hangable break opportunity.
@@ -5074,11 +5134,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
             lycon->line.is_line_start = false;
             // For break-spaces, spaces don't hang (CSS Text 3 §3), so skip accumulation.
-            if (white_space != CSS_VALUE_BREAK_SPACES) {
-                lycon->line.hanging_space_width += wd;
+            if (white_space != CSS_VALUE_BREAK_SPACES && white_space != CSS_VALUE_PRE) {
+                if (!append_line_hanging_space(lycon, rect, wd, !collapse_spaces, false)) return;
             }
-            lycon->line.last_space_hanging_width = lycon->line.hanging_space_width;
-            lycon->line.last_space_hanging_text_trim = lycon->line.hanging_space_text_trim;
+            lycon->line.last_space_hanging = lycon->line.hanging_space;
         }
         else if (is_other_space_separator(codepoint) && codepoint != 0x3000
                  && codepoint != 0x00A0 && codepoint != 0x202F) {
@@ -5188,7 +5247,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 lycon->line.advance_x = saved_advance_x;
                 if (output_break_at_last_space(
                         lycon, text_node, text_view, rect, &str, text_start, text_end,
-                        trim_cjk_spacing, false, &soft_hyphen_leading_width,
+                        // lookahead breaks trim the chosen separator just like immediate overflow.
+                        trim_cjk_spacing, collapse_spaces, &soft_hyphen_leading_width,
                         &soft_hyphen_leading_bytes)) {
                     goto LAYOUT_TEXT;
                 }
@@ -5205,7 +5265,15 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         }
     }
     output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
-
+    if (collapse_spaces && lycon->line.trailing_space_width > 0.0f) {
+        uint32_t following = adjacent_inline_codepoint(
+            text_node, false, LAYOUT_INLINE_TEXT_FIND_LINE_CONTENT);
+        if (!following || following == '\n') {
+            // css text 3 §4.1.2 removes end spaces across inline boundaries;
+            // consume them before later empty decorations acquire an origin.
+            line_consume_trailing_collapsible_space(lycon, true, true);
+        }
+    }
 
     g_text_layout_time += time_elapsed_ms_f(t_start, time_now_ns());
     g_text_layout_count++;

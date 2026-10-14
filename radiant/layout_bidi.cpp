@@ -54,6 +54,7 @@ typedef struct BidiSpanInfo {
     int max_visual;
     float left_edge;
     float right_edge;
+    float flow_start_edge;
 } BidiSpanInfo;
 
 typedef struct BidiLineCounts {
@@ -325,6 +326,26 @@ static float bidi_span_edge_width(ViewSpan* span, bool left) {
     return margin + padding + border;
 }
 
+static bool bidi_span_owns_source_edge(ViewSpan* span, int line_number, bool end) {
+    View* leaf = layout_inline_span_edge_leaf(span, end);
+    if (!leaf) return true;
+    if (leaf->view_type != RDT_VIEW_TEXT) return leaf->inline_line_number == line_number;
+    ViewText* text = lam::view_require_text(leaf);
+    TextRect* edge = text->rect;
+    if (!edge) return false;
+    if (end) {
+        while (edge->next) edge = edge->next;
+        size_t remaining = (size_t)max(0, text->length - edge->start_index - edge->length);
+        if (remaining && !layout_text_is_collapsible_whitespace(leaf)) {
+            const unsigned char* cursor = text->text_data() + edge->start_index + edge->length;
+            const unsigned char* limit = cursor + remaining;
+            if (!layout_white_space_collapses(get_white_space_value(leaf))) return false;
+            while (cursor < limit) if (!is_space(*cursor++)) return false;
+        }
+    }
+    return edge->line_number == line_number;
+}
+
 static BidiCharFragment* bidi_append_atomic_fragment(
     BidiCharFragment* chars, int* cursor, View* view, uint32_t codepoint,
     float width) {
@@ -353,6 +374,12 @@ static float bidi_char_raw_width(LayoutContext* lycon, ViewText* text,
     if (!lycon || !text || text_codepoint_has_zero_advance(codepoint) ||
         !text->font) {
         return 0.0f;
+    }
+    if (layout_unicode_space_is_synthesized(text->font->font_handle, codepoint)) {
+        // bidi redistribution must retain the selected-face synthetic space width.
+        return layout_measure_font_unicode_space_advance(text->font->font_handle,
+            text->font, codepoint, ui_context_raster_scale(lycon->ui_context),
+            text->font->font_size) + text->font->letter_spacing;
     }
     float width = use_fallback_metrics
         ? (codepoint == 0x0009
@@ -497,12 +524,21 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
             span_info->max_visual = -1;
             span_info->left_edge = bidi_span_edge_width(span_info->span, true);
             span_info->right_edge = bidi_span_edge_width(span_info->span, false);
+            bool rtl = layout_inherited_direction_is_rtl(span_info->span->first_placed_child());
+            bool clone = inline_box_decoration_break_value(span_info->span) == CSS_VALUE_CLONE;
+            bool owns_start = clone || bidi_span_owns_source_edge(span_info->span, line_number, false);
+            bool owns_end = clone || bidi_span_owns_source_edge(span_info->span, line_number, true);
+            // CSS Break §5.4 slices inline decorations at source boundaries, including RTL continuations.
+            if (!(rtl ? owns_end : owns_start)) span_info->left_edge = 0.0f;
+            if (!(rtl ? owns_start : owns_end)) span_info->right_edge = 0.0f;
+            span_info->flow_start_edge = rtl ? span_info->right_edge : span_info->left_edge;
             bool isolate = layout_inline_span_isolate(span_info->span);
             if (isolate) {
                 // CSS Writing Modes: an isolated inline is already represented
                 // by its complete atomic border box, including inline padding.
                 span_info->left_edge = 0.0f;
                 span_info->right_edge = 0.0f;
+                span_info->flow_start_edge = 0.0f;
                 bidi_append_atomic_fragment(
                     chars, char_cursor, static_cast<View*>(span_info->span),
                     0xFFFC, span_info->span->width);
@@ -648,7 +684,7 @@ static float bidi_line_origin(BidiCharFragment* chars, BidiSpanInfo* spans,
         for (int span_index = 0; span_index < span_count; span_index++) {
             BidiSpanInfo* span = &spans[span_index];
             if (i >= span->logical_start && i <= span->logical_end) {
-                origin -= span->left_edge;
+                origin -= span->flow_start_edge;
             }
         }
         return origin;
@@ -662,8 +698,15 @@ static void bidi_place_visual_line(LayoutContext* lycon,
                                    BidiSpanInfo* spans, int span_count,
                                    const int* visual_to_logical,
                                    int char_count, int max_depth,
-                                   const int* levels, bool use_visual_bounds) {
+                                   const int* levels, bool use_visual_bounds,
+                                   bool use_line_flow_origin) {
     float cursor = bidi_line_origin(chars, spans, char_count, span_count);
+    if (use_line_flow_origin) {
+        // atomic boxes mix provisional RTL positions with logical text;
+        // their paragraph starts at the float/indent-adjusted flow origin.
+        cursor = lycon->line.has_float_intrusion ? lycon->line.effective_left
+            : lycon->line.left + lycon->line.text_indent_advance;
+    }
     float range_cursor = cursor;
     if (use_visual_bounds &&
         lycon->line.inline_base_direction == CSS_VALUE_RTL) {
@@ -868,7 +911,7 @@ static void bidi_position_forced_breaks(View* view, int line_number,
 }
 
 static void bidi_resolve_line(LayoutContext* lycon, View* root,
-                               CssEnum line_direction) {
+                               CssEnum line_direction, bool isolated_paragraph) {
     if (!root) return;
     BidiLineCounts counts = {};
     bidi_count_views(root, lycon->block.line_number, 0,
@@ -881,13 +924,11 @@ static void bidi_resolve_line(LayoutContext* lycon, View* root,
     }
     // Ordinary LTR lines already have correct fragment geometry; UAX #9 must
     // only rewrite lines whose bidi data can change visual order.
-    // CSS Writing Modes applies bidi to the paragraph, but an ordinary line
-    // with no reorder trigger is already in visual order. Keep the pass for
-    // tabs, explicit bidi modes, and hanging punctuation because those
-    // features still require fragment-bound updates without an RTL codepoint
-    // to trigger reordering.
+    // an RTL paragraph reorders neutral spaces without a strong RTL character.
+    // tabs, explicit bidi modes and hanging punctuation also need fragment updates.
     if (counts.chars <= 0 || counts.rects <= 0 || counts.has_atomic ||
-        (!counts.has_bidi_trigger && !counts.has_bidi_layout_feature)) return;
+        (!counts.has_bidi_trigger && !counts.has_bidi_layout_feature &&
+         line_direction != CSS_VALUE_RTL)) return;
 
     // every bidi temporary of this line is released when the scope ends
     ScratchScope scope(&lycon->scratch);
@@ -1034,7 +1075,8 @@ static void bidi_resolve_line(LayoutContext* lycon, View* root,
                                    counts.chars);
     bidi_place_visual_line(lycon, chars, rects, counts.rects, spans, counts.spans,
                            visual_to_logical, counts.chars, counts.max_depth,
-                           levels, max_level > 0 && has_visual_metrics);
+                           levels, max_level > 0 && has_visual_metrics,
+                           counts.has_inline_block && !isolated_paragraph);
     float visual_left = FLT_MAX;
     float visual_right = -FLT_MAX;
     for (int i = 0; i < counts.chars; i++) {
@@ -1073,7 +1115,7 @@ static void bidi_resolve_inline_isolates(LayoutContext* lycon, View* view) {
         // treating it atomically outside does not reorder its split text runs.
         CssEnum parent_direction = lycon->line.inline_base_direction;
         lycon->line.inline_base_direction = span->block()->direction;
-        bidi_resolve_line(lycon, span->first_child, span->block()->direction);
+        bidi_resolve_line(lycon, span->first_child, span->block()->direction, true);
         lycon->line.inline_base_direction = parent_direction;
     }
 }
@@ -1082,5 +1124,5 @@ void layout_bidi_line(LayoutContext* lycon) {
     if (!lycon || !lycon->line.start_view) return;
     View* root = layout_inline_fragment_root(lycon->line.start_view);
     bidi_resolve_inline_isolates(lycon, root);
-    bidi_resolve_line(lycon, root, lycon->line.inline_base_direction);
+    bidi_resolve_line(lycon, root, lycon->line.inline_base_direction, false);
 }

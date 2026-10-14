@@ -1946,6 +1946,8 @@ typedef struct PositionProp {
     lam::Up<ViewBlock> next_static_inline_position; // current line's deferred inline static-position link
     bool static_inline_bidi_candidate; // neutral zero-width anchor in the parent line
     bool static_inline_bidi_placed;
+    bool static_inline_phantom; // auto-inset cursor on a line with no in-flow content
+    float static_inline_phantom_x; // aligned cursor relative to its static parent
     float static_line_initial_extent; // provisional line-box extent used for static self-alignment
     bool static_block_after_line; // hypothetical block follows the unfinished inline line
     bool static_x_needs_parent_offset;  // flex static x was computed in parent-local coords
@@ -2410,6 +2412,7 @@ inline struct FontHandle* font_box_handle(const FontBox* fbox) {
 typedef struct TextRect {
     float x, y, width, height;
     float hanging_trim;  // preserved hanging space width excluded from line advance, not from CSSOM rects
+    float justification_spacing;  // CSS-pixel expansion selected by the owning line
     int start_index, length;  // start and length of the text in the style node
     int hyphenated_leading_bytes, hyphenated_trailing_bytes; // source ownership carried across a generated-mark query range
     int line_number;  // block-local line index assigned when this rect enters inline flow

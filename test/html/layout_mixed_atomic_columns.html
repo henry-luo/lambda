@@ -1,0 +1,15 @@
+<!doctype html><meta charset="utf-8">
+<style>
+@font-face{font-family:Ahem;src:url(../layout/data/support/fonts/Ahem.ttf)}
+body{margin:0;font:20px/20px Ahem}.case{height:90px}.columns{width:200px;columns:2;column-gap:0}.avoid{break-inside:avoid}.atom{display:inline-block;vertical-align:top;width:30px;height:25px;border:0;padding:0;background:blue}input{appearance:none;box-sizing:border-box}.baseline{vertical-align:baseline;height:30px}.block{display:block}
+</style>
+<div id="result">
+<div class="case"><div id="input" class="columns">a<br><input id="input-first" class="atom"><div id="input-avoid" class="avoid">b<br><input id="input-last" class="atom"></div></div></div>
+<div class="case"><div id="inline" class="columns">a<br><span id="inline-first" class="atom"></span><div id="inline-avoid" class="avoid">b<br><span id="inline-last" class="atom"></span></div></div></div>
+<div class="case"><div id="block" class="columns">a<br><input id="block-first" class="atom block"><div id="block-avoid" class="avoid">b<br><input id="block-last" class="atom"></div></div></div>
+<div class="case"><div id="only" class="columns"><input id="only-first" class="atom"><div id="only-avoid" class="avoid" style="height:25px"></div></div></div>
+<div class="case"><div id="tail" class="columns"><div id="tail-avoid" class="avoid" style="height:45px"></div>a<br><input id="tail-last" class="atom"></div></div>
+<div class="case"><div id="baseline" class="columns">a<span id="baseline-first" class="atom baseline"></span><div id="baseline-avoid" class="avoid">b<span id="baseline-last" class="atom baseline"></span></div></div></div>
+<div class="case"><div id="nested" class="columns">a<br><span><input id="nested-first" class="atom"></span><div id="nested-avoid" class="avoid">b<br><input id="nested-last" class="atom"></div></div></div>
+
+</div>

@@ -304,9 +304,10 @@ static void layout_in_flow_content_bounds_impl(ViewElement* elem, LayoutAxis axi
                 child_block->positionp()->position == CSS_VALUE_FIXED;
             bool child_is_out_of_flow = child_block &&
                 layout_view_is_abs_or_fixed(child_block);
+            // paint bounds include floating overflow; normal-flow measurements exclude it.
             if (child_is_fixed ||
                 (child_is_out_of_flow && !include_out_of_flow) ||
-                (child_block && element_has_float(child_block))) {
+                (child_block && element_has_float(child_block) && !include_out_of_flow)) {
                 continue;
             }
 

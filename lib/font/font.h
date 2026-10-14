@@ -301,6 +301,8 @@ bool font_measure_text_range(FontHandle* handle, const char* text, int byte_len,
 
 // measure width of a single codepoint (convenience wrapper)
 float font_measure_char(FontHandle* handle, uint32_t codepoint);
+// selected-face synthetic space width in CSS pixels; false keeps normal glyph/fallback selection.
+bool font_get_synthesized_space_advance(FontHandle* handle, uint32_t codepoint, float* advance);
 
 // ============================================================================
 // Font Fallback — for codepoints not covered by the primary font

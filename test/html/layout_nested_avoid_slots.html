@@ -1,0 +1,15 @@
+<!doctype html><meta charset="utf-8"><style>
+body{margin:0;font:20px/20px sans-serif}
+.outer{columns:2;column-fill:auto;column-gap:0;width:100px;height:100px;margin-bottom:20px;background:#fbb}
+.inner{columns:2;column-fill:auto;column-gap:0;background:#bfb}
+.inner>div{width:200%;background:#08c}
+</style><div id="result">
+<div id="avoid" class="outer"><div style="height:50px"></div><div id="avoid-inner" class="inner"><div id="avoid-first" style="height:50px"></div><div id="avoid-last" style="height:100px;break-inside:avoid"></div></div></div>
+<div id="column" class="outer"><div style="height:50px"></div><div id="column-inner" class="inner"><div id="column-first" style="height:50px"></div><div id="column-last" style="height:100px;break-inside:avoid-column"></div></div></div>
+<div id="auto" class="outer"><div style="height:50px"></div><div id="auto-inner" class="inner"><div id="auto-first" style="height:50px"></div><div id="auto-last" style="height:100px;break-inside:auto"></div></div></div>
+<div id="oversize" class="outer"><div style="height:50px"></div><div id="oversize-inner" class="inner"><div id="oversize-first" style="height:50px"></div><div id="oversize-last" style="height:150px;break-inside:avoid"></div></div></div>
+<div id="page" class="outer"><div style="height:50px"></div><div id="page-inner" class="inner"><div id="page-first" style="height:50px"></div><div id="page-last" style="height:100px;break-inside:avoid-page"></div></div></div>
+<div id="lr" class="outer" style="writing-mode:vertical-lr"><div style="width:50px"></div><div id="lr-inner" class="inner"><div id="lr-first" style="height:50px;width:50px"></div><div id="lr-last" style="height:50px;width:100px;break-inside:avoid"></div></div></div>
+<div id="rl" class="outer" style="writing-mode:vertical-rl"><div style="width:50px"></div><div id="rl-inner" class="inner"><div id="rl-first" style="height:50px;width:50px"></div><div id="rl-last" style="height:50px;width:100px;break-inside:avoid"></div></div></div>
+<div id="content" class="outer"><div style="height:50px"></div><div id="content-inner" class="inner"><div id="content-first" style="height:50px"></div><div id="content-last" style="height:100px;break-inside:avoid"><div id="content-child" style="height:20px;width:20px;background:green"></div></div></div></div>
+</div>
