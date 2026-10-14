@@ -1172,6 +1172,8 @@ static inline VirtualOpStatus varray_set(VArray* array, int64_t index,
 }
 
 static inline int64_t velmt_attr_count(const Velmt* element) {
+    // an invalidated element must fail before an empty attribute count hides it.
+    if (element && element->vtable && get_type_id(virtual_prepare(element->vtable->element.children, element->data)) == LMD_TYPE_ERROR) return 0;
     return element && element->vtable && element->vtable->element.attrs.count
         ? element->vtable->element.attrs.count(element->data) : 0;
 }

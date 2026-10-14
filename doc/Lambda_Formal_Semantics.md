@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 62.0.0 (2026-10-15)
+**Spec version:** 63.0.0 (2026-10-15)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1810,12 +1810,26 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   schema declaration, which `record is A` recognizes; an alias preserves
   that declaration. Native-bound schemas cannot decode arbitrary bytes.
   [Binary_Schema §10]
-- **S11.5.3v2*** A native schema names a host binding. A field `T? &
+- **S11.5.3v3*** A native schema names a host binding. A versioned host binding
+  requires an exactly matching `version` metadata value before admission. A field `T? &
   {pointer: 'native'}` exposes null or a lazy `T` value; a null nonnullable
   reference fails. Native reference fields need no script-visible pointer
   type or dereference operator. Native projections are read-only and access
   after owner invalidation fails. The host provides the frozen lifetime
   required for pure callbacks. [D7.4.1v2, Binary_Schema §10]
+- **S11.5.4** A native pointer field `T[n] & {pointer: 'native'}` exposes a
+  lazy read-only array of contiguous fixed-width scalars or native records.
+  `n` is a nonnegative integer literal or an admitted integer count field;
+  the count field may follow the pointer field. The host supplies a checked
+  capacity and compiler-derived stride. Negative counts, overflowing extents,
+  counts beyond capacity and null with positive count fail before access.
+  Null with zero count is an empty array, or `null` for `T[n]?`; a nonnull
+  pointer with zero count is empty in either case (USER, 2026-10-15).
+  `binary[n]` exposes an owned byte copy, whose lifetime is independent of
+  the native allocation after the read. Native arrays and record subviews
+  retain the owner's invalidation control; their structural reads cannot
+  turn invalidation into missing fields or an empty collection.
+  [D3.5.2v2, Binary_Schema §11]
 
 ---
 
@@ -2726,7 +2740,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 
 | Ruling | Status |
 |---|---|
-| S11.5.1v2, S11.5.2, S11.5.3v2 | **Initial profile implemented 2026-10-15 on interpreter and MIR Direct.** Binary declarations accept fixed scalars, nested records, constant byte offsets and native record references; `& {…}` layout metadata is parsed and validated separately from predicates; binary field and record predicates are explicitly unsupported in this profile. `binary_decode`, declaration membership and lazy property reads are exercised by `binary_schema.ls` and the PDF export fixtures. Native projections reject writes and stale-owner reads. Array/count metadata, offset references and serialization remain future binary-schema extensions. [PDF phase 2 progress](../vibe/impl/Lambda_Impl_PDF_Output_Phase2.md#10-implementation-progress-2026-10-15). |
+| S11.5.1v2, S11.5.2, S11.5.3v3, S11.5.4 | **Fixed-record/native P2 profile implemented 2026-10-15 on interpreter and MIR Direct.** Fixed byte layouts, nested records, lazy native references and counted native spans use separate `& {…}` metadata. Versioned bindings reject mismatches; native spans check count/extent contracts and implement the ratified empty/absent distinction. Byte spans return owned copies. Native projections reject writes and stale structural reads. Buffer counted arrays, offset references, serialization and binary predicates remain outside the profile. [PDF P2 progress](../vibe/impl/Lambda_Impl_PDF_Output_Phase2.md#11-p2-native-reference-binding-progress-2026-10-15). |
 | S11.1.2v4 | **Implemented 2026-10-09 on interp, jit and auto.** The production lexer recognizes quoted class escapes only inside the shared island; the type-pattern resolver checks every quoted fragment and resolved reference for one consistent domain, rejecting mixed and wildcard-only islands. Literal-only string and symbol islands retain ordinary literal-union identity. Lowering and canonical printing preserve quotes and domains, including named symbol literal unions; string search refuses symbol-domain operands. The reference grammar and executable corpus use the new surface. Fixtures `pattern_quoted_classes.ls` and `negative/semantic/pattern_*.ls` cover fragment repetition, one-pass ordinary escapes, references, ranges, complement, wildcards, contracts and value-run separation. Syntax gates: C 411/411, Tree-sitter 397/397. Design and validation: [String Pattern SP24](../vibe/Lambda_Design_String_Pattern.md#4-implementation-and-validation). |
 | S2.4.1v2, S2.4.2v5, S2.4.3v3–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path/name scope on 2026-08-19, with the S2.4.3v3 spelling re-verified on 2026-08-28: maximal namespace-qualified element/attribute names, the undelimited relative-path element child `<svg \.rect>` (no `;`, no comma), logical `/.a`, relative `\.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. **S2.4.2v5 conformant as of 2026-09-21** (JIT and interpreter identical): the bare roots `/` and `\`, and `\` prints as the empty relative path; integer first keys `\.1` and `/.1`; index steps (`/[1]` ≡ `/.1`, `\[1]` ≡ `\.1`, `p[k]` ≡ `p.k`, numeric keys normalized through S8.2.1v4); key steps throughout a path literal (`\[1].name` is `\.1.name`, `\.a['name']` is `\.a.name`); integer steps after `.`, `\`, `./`, `~~` and `.*` (`\.1.2`, `file./.1`). `\.` alone and `.[` anywhere are E100. Broken path lines were checked against S16.1.1. That day's probe defect, `\.1.x` evaluating to `file./`, is fixed ([Type_Path §10.1](../vibe/Lambda_Type_Path.md)). Fixtures: `path_roots_steps.ls`, `path_line_continuation.ls`, `path_index_capture.ls`, `member_int_steps.ls`, `proc/return_relative_path.ls`, and four negative syntax fixtures. S16 harnesses: C parser 197/197, reference grammar 180/180. Lambda baseline 3632/3633; the one failure is an unrelated JS trace-parser test. Still deferred: the default resolver qualifies logical roots to local `file./`, and generalized immutable mount tables, remote transport, network hostname discovery, and S8.2.1v4 key normalization outside path subscripts are not built. |
 | S4.8.1 | Float printer is not yet shortest-round-trip (`0.1 + 0.2` prints `0.3`). |

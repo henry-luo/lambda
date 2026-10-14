@@ -120,6 +120,10 @@ run A "object type one comma list"       'type E { a: int, that ~.a > 0, fn r() 
 # S11.5.1v2: metadata is confined to binary root/field slots.
 run A "binary root and field metadata"   "type A : binary & {endian: 'big'} { value: u32 & {offset: 4} }\n"
 run A "binary empty metadata maps"       'type A : binary & {} { value: u8 & {} }\n'
+run A "native counted and nullable spans" "type A : binary & {layout: 'native', binding: 'fixture.A'} { values: u8[count]? & {pointer: 'native'}, count: i64 }\n"
+run A "native fixed byte span" "type A : binary & {layout: 'native', binding: 'fixture.A'} { bytes: binary[4] & {pointer: 'native'} }\n"
+run R "native span negative count" "type A : binary & {layout: 'native', binding: 'fixture.A'} { bytes: u8[-1] & {pointer: 'native'} }\n"
+run R "field count stays binary-only" 'type A = u8[count]\n'
 run A "binary metadata across newline"   'type A : binary { value: u8\n& {offset: 4} }\n'
 run R "binary legacy root that map"      "type A : binary that {endian: 'big'} { value: u8 }\n"
 run R "binary metadata needs map"        'type A : binary & options { value: u8 }\n'

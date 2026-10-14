@@ -23,60 +23,6 @@ extern "C" Item vmap_new();
 
 namespace {
 
-#define SCHEMA(name, Record, fields) \
-    const BinarySchema name = {#Record, sizeof(Record), fields, \
-        sizeof(fields) / sizeof(fields[0]), BINARY_SCHEMA_NATIVE, "radiant." #Record}
-
-const BinarySchemaField color_fields[] = {
-    BINARY_SCHEMA_MEMBER(Color, r, BINARY_FIELD_U8), BINARY_SCHEMA_MEMBER(Color, g, BINARY_FIELD_U8),
-    BINARY_SCHEMA_MEMBER(Color, b, BINARY_FIELD_U8), BINARY_SCHEMA_MEMBER(Color, a, BINARY_FIELD_U8),
-};
-SCHEMA(color_schema, Color, color_fields);
-const BinarySchemaField spacing_fields[] = {
-    BINARY_SCHEMA_MEMBER(Spacing, top, BINARY_FIELD_F32), BINARY_SCHEMA_MEMBER(Spacing, right, BINARY_FIELD_F32),
-    BINARY_SCHEMA_MEMBER(Spacing, bottom, BINARY_FIELD_F32), BINARY_SCHEMA_MEMBER(Spacing, left, BINARY_FIELD_F32),
-};
-SCHEMA(spacing_schema, Spacing, spacing_fields);
-const BinarySchemaField background_fields[] = {BINARY_SCHEMA_RECORD(BackgroundProp, color, &color_schema)};
-SCHEMA(background_schema, BackgroundProp, background_fields);
-const BinarySchemaField border_fields[] = {
-    BINARY_SCHEMA_RECORD(BorderProp, width, &spacing_schema),
-    BINARY_SCHEMA_RECORD(BorderProp, top_color, &color_schema), BINARY_SCHEMA_RECORD(BorderProp, right_color, &color_schema),
-    BINARY_SCHEMA_RECORD(BorderProp, bottom_color, &color_schema), BINARY_SCHEMA_RECORD(BorderProp, left_color, &color_schema),
-};
-SCHEMA(border_schema, BorderProp, border_fields);
-const BinarySchemaField boundary_fields[] = {
-    BINARY_SCHEMA_REFERENCE(BoundaryProp, background, &background_schema, true),
-    BINARY_SCHEMA_REFERENCE(BoundaryProp, border, &border_schema, true),
-    BINARY_SCHEMA_RECORD(BoundaryProp, padding, &spacing_schema),
-};
-SCHEMA(boundary_schema, BoundaryProp, boundary_fields);
-const BinarySchemaField font_fields[] = {
-    BINARY_SCHEMA_MEMBER(FontProp, font_size, BINARY_FIELD_F32),
-    BINARY_SCHEMA_MEMBER(FontProp, letter_spacing, BINARY_FIELD_F32),
-    BINARY_SCHEMA_MEMBER(FontProp, word_spacing, BINARY_FIELD_F32),
-};
-SCHEMA(font_schema, FontProp, font_fields);
-const BinarySchemaField element_fields[] = {
-    BINARY_SCHEMA_MEMBER(DomElement, x, BINARY_FIELD_F32), BINARY_SCHEMA_MEMBER(DomElement, y, BINARY_FIELD_F32),
-    BINARY_SCHEMA_MEMBER(DomElement, width, BINARY_FIELD_F32), BINARY_SCHEMA_MEMBER(DomElement, height, BINARY_FIELD_F32),
-    BINARY_SCHEMA_REFERENCE(DomElement, bound, &boundary_schema, true),
-    BINARY_SCHEMA_REFERENCE(DomElement, font, &font_schema, true),
-};
-SCHEMA(element_schema, DomElement, element_fields);
-const BinarySchemaField text_rect_fields[] = {
-    BINARY_SCHEMA_MEMBER(TextRect, x, BINARY_FIELD_F32), BINARY_SCHEMA_MEMBER(TextRect, y, BINARY_FIELD_F32),
-    BINARY_SCHEMA_MEMBER(TextRect, width, BINARY_FIELD_F32), BINARY_SCHEMA_MEMBER(TextRect, height, BINARY_FIELD_F32),
-    BINARY_SCHEMA_MEMBER(TextRect, start_index, BINARY_FIELD_I32), BINARY_SCHEMA_MEMBER(TextRect, length, BINARY_FIELD_I32),
-};
-SCHEMA(text_rect_schema, TextRect, text_rect_fields);
-const BinarySchemaField matrix_fields[] = {
-    BINARY_SCHEMA_MEMBER(RdtMatrix, e11, BINARY_FIELD_F32), BINARY_SCHEMA_MEMBER(RdtMatrix, e12, BINARY_FIELD_F32),
-    BINARY_SCHEMA_MEMBER(RdtMatrix, e13, BINARY_FIELD_F32), BINARY_SCHEMA_MEMBER(RdtMatrix, e21, BINARY_FIELD_F32),
-    BINARY_SCHEMA_MEMBER(RdtMatrix, e22, BINARY_FIELD_F32), BINARY_SCHEMA_MEMBER(RdtMatrix, e23, BINARY_FIELD_F32),
-};
-SCHEMA(matrix_schema, RdtMatrix, matrix_fields);
-
 struct PdfWalkFrame {
     float x, y, page_width, page_height, baseline, font_size, opacity;
     Color color;
@@ -92,18 +38,7 @@ struct PdfWalkFrame {
     int32_t sequence;
     ViewBlock* image_view;
 };
-const BinarySchemaField frame_fields[] = {
-    BINARY_SCHEMA_MEMBER(PdfWalkFrame, x, BINARY_FIELD_F32), BINARY_SCHEMA_MEMBER(PdfWalkFrame, y, BINARY_FIELD_F32),
-    BINARY_SCHEMA_MEMBER(PdfWalkFrame, page_width, BINARY_FIELD_F32), BINARY_SCHEMA_MEMBER(PdfWalkFrame, page_height, BINARY_FIELD_F32),
-    BINARY_SCHEMA_MEMBER(PdfWalkFrame, baseline, BINARY_FIELD_F32), BINARY_SCHEMA_MEMBER(PdfWalkFrame, font_size, BINARY_FIELD_F32),
-    BINARY_SCHEMA_MEMBER(PdfWalkFrame, opacity, BINARY_FIELD_F32),
-    BINARY_SCHEMA_RECORD(PdfWalkFrame, color, &color_schema), BINARY_SCHEMA_RECORD(PdfWalkFrame, matrix, &matrix_schema),
-    BINARY_SCHEMA_ITEM(PdfWalkFrame, text, &TYPE_STRING, true),
-    BINARY_SCHEMA_MEMBER(PdfWalkFrame, clip_evenodd, BINARY_FIELD_BOOL),
-    BINARY_SCHEMA_MEMBER(PdfWalkFrame, sequence, BINARY_FIELD_I32),
-};
-SCHEMA(frame_schema, PdfWalkFrame, frame_fields);
-#undef SCHEMA
+#include "pdf_view_schema.inc"
 
 const PdfWalkFrame* pdf_walk_frame(Item context) {
     return (const PdfWalkFrame*)binary_schema_native_record(context, frame_schema.binding);

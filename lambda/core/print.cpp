@@ -583,6 +583,8 @@ struct PrintItemVisitor {
 
     void operator()(lam::ItemOf<LMD_TYPE_VARRAY> item) const {
         VArray* array = item.ptr();
+        Item error = virtual_content_error({.varray = array});
+        if (get_type_id(error) == LMD_TYPE_ERROR) { print_item(strbuf, error, depth + 1, indent); return; }
         int64_t count = varray_count(array);
         strbuf_append_char(strbuf, '[');
         for (int64_t i = 0; i < count; i++) {

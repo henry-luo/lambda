@@ -1,9 +1,9 @@
 # PDF output phase 2 — schema-backed Radiant views
 
-> **Status:** implementation in progress, 2026-10-15. The fixed-record/native-reference foundation and an experimental continuous-page export are implemented; the complete migration is not qualified. See §10 for verified scope and remaining gates.
+> **Status:** implementation in progress, 2026-10-15. The native binding foundation, counted spans, generated contracts and an experimental continuous-page export are implemented; the complete migration is not qualified. See §10–§11 for verified scope and remaining gates.
 > **Confirmed direction:** retain shared native tree walking; pass schema-backed views and traversal context to Lambda callbacks in rendering order; Lambda reads view properties and emits PDF directly. Native helpers supply glyph outlines, image bytes and effect rasterization as needed (USER, 2026-10-14). Traversal links stay native; schema pointer access serves property/resource references.
 > **Design basis:** [PDF Output](../Lambda_Design_PDF_Output.md), [Binary Schema](../Lambda_Type_Binary_Schema.md), [Virtual Containers](../Lambda_Design_Type_Virtual.md).
-> **Formal linkage:** S11.5.1v2, S11.5.2, S11.5.3v2 / D3.5.1–D3.5.2 (binary records/native references); S2.6.6v2 / D2.6.12v2 (PDF byte destination); D3.1.1v5 (type descriptors); D7.4.1v2 / D7.4.4 / D7.4.5v2 (host boundary and virtual carriers); D2.6.8 (node identity); D4.1.4v5 / D4.5.1v4 (native storage lifetime); D5.3.3–D5.3.4 (precise roots); S12.1.1v2 (effects). PDF follow-ups remain SO48 / DO32.
+> **Formal linkage:** S11.5.1v2–S11.5.4 / D3.5.1v2–D3.5.2v2 (binary records/native references and counted spans); S2.6.6v2 / D2.6.12v2 (PDF byte destination); D3.1.1v5 (type descriptors); D7.4.1v2 / D7.4.4 / D7.4.5v2 (host boundary and virtual carriers); D2.6.8 (node identity); D4.1.4v5 / D4.5.1v4 (native storage lifetime); D5.3.3–D5.3.4 (precise roots); S12.1.1v2 (effects). PDF follow-ups remain SO48 / DO32.
 > **Scope:** the next implementation after the [PDF byte-output MVP](Lambda_Impl_PDF_Output_MVP.md), including the unfinished export bridge from the earlier design's phase 1 and the resource/helper work assigned there to phase 2. This numbering is independent of the binary-schema proposal's own phases.
 
 ## 1. Outcome and current starting point
@@ -88,9 +88,9 @@ address domain.
 ## 3. Proposed pointer contract
 
 The fixed-record and native-reference subset below is implemented under
-S11.5.1v2, S11.5.2, S11.5.3v2 / D3.5.1–D3.5.2. Examples using `layout: 'native'`
-and `pointer: 'native'` are runnable. The proposed offset-pointer and counted
-span extensions remain design notation, and have no parser/runtime support.
+S11.5.1v2, S11.5.2, S11.5.3v3 / D3.5.1v2–D3.5.2v2. Examples using `layout: 'native'`
+and `pointer: 'native'` are runnable. Native counted spans are specified by S11.5.4 and implemented in P2 (§11).
+The proposed offset-pointer extension remains design notation without runtime support.
 
 ### 3.1 Keep the logical type separate from physical indirection
 
@@ -136,7 +136,7 @@ the PDF schema surface needs no parent/sibling navigation.
 
 Prefer this annotation spelling over `T*`: `*` already denotes repetition in
 Lambda types (S11.1.6v3). The user selected trailing `& {…}` metadata on
-2026-10-15 (S11.5.1v2, S11.5.3v2). This is scoped to binary declaration
+2026-10-15 (S11.5.1v2, S11.5.3v3). This is scoped to binary declaration
 slots; ordinary intersections and `that` predicates retain their meaning
 (S10.1.1v4). Metadata has a separate AST channel from predicate constraints.
 
@@ -183,7 +183,7 @@ to an object or contiguous span. Traversal chains stay behind native visitors.
 | `T?` with native pointer annotation | Null or a lazily decoded `T`. Null in a nonnullable scalar/struct reference is an error. |
 | `T[count]` with native pointer annotation | One pointer to `count` contiguous `T` records; a lazy `VArray`. It does not mean an array of pointers. |
 | `binary[length]` with native pointer annotation | A bounded byte span with an explicit owner. Never infer a length from an address. |
-| Pointer plus zero count | Allow native null to represent an empty nonnullable span; null plus positive count fails. Pin down nullable-span distinctions in P0. |
+| Pointer plus zero count | Allow native null to represent an empty nonnullable span; null plus positive count fails. For a nullable whole span, null plus zero count is null (S11.5.4, USER 2026-10-15). |
 | Native text | Use the existing length where available; a NUL-terminated field needs a bounded scan within an admitted span and an explicit encoding. |
 | View/tree or text-fragment chain | Native traversal follows its links and supplies the current record to a callback; no link field is required in the Lambda schema. |
 | Tagged native union/subtype | Validate the discriminator and admitted object type before selecting a target schema or union arm. |
@@ -586,9 +586,9 @@ It does not change the production CLI PDF writer.
 
 | Milestone | Current state | Remaining acceptance work |
 |---|---|---|
-| P0 | Fixed-record/native-reference metadata and lifetime contracts recorded in S11.5 and D3.5. | Counted-span and complete output-demand contracts. |
+| P0 | Fixed-record/native-reference metadata, counted-span empty/absent rules and lifetime contracts recorded in S11.5 and D3.5. | Complete output-demand contracts. |
 | P1 | Fixed-width byte fields, explicit offsets, nesting, endianness, lazy Velmt access and `binary_decode`. | Counted arrays and full compiler rejection corpus. |
-| P2 | Generic compiler-derived member locators and typed raw/ownership-wrapper references; shared owner invalidation and precise tracing. | Counted spans, generated binding manifest/version checks and full virtual-operation invalidation audit. |
+| P2 | Native references and counted scalar/record/byte spans; shared owner invalidation and precise GC; manifest-generated declarations/bindings with ABI/revision checks; structural invalidation audit (§11). | P2 qualification results are recorded below. Offset pointers, pointer tables and recursive graphs are separate extensions. |
 | P3 | Default element geometry, boundary/font/color/matrix properties, projected text fragments and traversal contexts; no navigation links. | Secondary-view occurrences and page schemas. |
 | P4 | Shared continuous walker callbacks, checked abort, glyph and clip path helpers, copied image RGB/alpha bytes. | Shared paged visitor, remaining helper features, handled-subtree effects. |
 | P5 | Lambda drawing operators, resource plan, object numbers, image soft masks, graphics-state alpha, stream byte lengths, xref/trailer and atomic output. | General producer destination forwarding and measuring destinations; multiple physical pages. |
@@ -673,3 +673,73 @@ Earlier logs and generated artifacts are under `temp/pdf_phase2_*`; baseline det
 are also in `test_output/`. Whole-phase completion still requires the feature
 and integration rows above. The completed increment is a usable, explicitly
 bounded export API, not a production-writer replacement.
+
+
+## 11. P2 native reference binding progress (2026-10-15)
+
+The P2 implementation extends **S11.5.3v3–S11.5.4 / D3.5.1v2–D3.5.2v2**.
+Native counted spans have lazy VArray access for fixed-width scalars and records;
+`binary[n]` returns an owned binary copy. Counts are a fixed nonnegative integer
+or an admitted integer field, resolved after all fields so declaration order
+need not follow C++ layout. The host supplies compiler-derived pointer unwrap,
+stride and allocation capacity. Binding and access reject missing/wrong count
+fields, negative counts/capacities, extent overflow, incompatible stride and
+null with positive count. The ratified nullable whole-array distinction is
+implemented without exposing navigation pointers or arrays of pointers.
+
+`lambda/module/radiant/pdf_view_schema.json` is now the editable source for the
+PDF view contract. `utils/generate_binary_bindings.py` generates the Lambda
+module, typed C++ binding include and shared revision header. Build generators
+are declared in `build_lambda_config.json` and run before Premake consumes the
+headers. Generation is idempotent and `--check` rejects stale outputs. Compiler
+assertions pin scalar representation and exact record targets. Binding checks
+both the descriptor ABI and the complete manifest fingerprint, including fields
+not selected by a script projection. The separate native fixture manifest
+exercises the same generator and backend with unrelated scalar/record layouts.
+
+The invalidation audit covers record fields, indexed attributes, tags/namespaces,
+child/index reads, checked counts, enumeration, read-only mutation callbacks,
+schema/type validation, equality and formatting. It found and fixed attribute
+counts appearing empty after failure, VArray occurrence validation missing the
+virtual carrier, stale array printing as `[]`, and virtual failures disappearing
+as ordinary negative type/equality results. Generic paths now preserve the
+existing status/error channel. Carrier publication and GC share the precise
+Item visitor, including Item fields inside contiguous record spans. Allocation
+of carrier payloads follows exact-root publication preparation.
+
+Tests compile the generated Lambda fixture declarations and bind those actual
+descriptors to native structs. Coverage includes nullable/nonnullable empty
+spans, positive-count null errors, negative/overflowing counts, capacity and
+stride mismatches, fixed-count projections, stale/missing ABI revisions, lazy
+reads, owned byte lifetime and escaped spans/subrecords after storage release.
+Optional whole-array contracts also follow the ordinary run-of-one fallback
+(S11.1.6v3); nonempty virtual arrays are checked against the complete array
+operand rather than against a single element.
+
+| Check | P2 result |
+|---|---|
+| `make build-test` | Pass after the final changes; Premake generator self-test passes. |
+| `BinarySchemaTest.*:PdfFileBuilder.*` | 17/17 pass, including native Item edges under forced GC, nullable/nonnullable spans, optional array contracts, released-storage invalidation, and independent PDF xref/stream-length checking on both tiers. |
+| Focused Lambda goldens | 16/16 on interpreter and 16/16 on JIT, both with `LAMBDA_GC_FORCE_EVERY=1` and `LAMBDA_GC_POISON_FREED=1`; includes binary schemas, generated declarations, ordinary constraints/type operators, structural element patterns and PDF resources/views. |
+| Direct lexer/parser and syntax conformance | 39/39 native parser tests; 408/408 reference grammar cases; 422/422 production syntax cases. Both generated/new schema fixtures also parse through `lambda-cst`. |
+| `Lambda_Type.md` examples | All 107 checked units meet their compile contracts; no violations. |
+| Manifest generator | 4/4 tests pass; both manifests pass `--check`. Checks cover idempotence, stale-output detection/repair, complete revision changes and rejected unsupported descriptors. |
+| Formal index / Radiant cast lint / diff whitespace | Pass. Formal-index tooling still reports the existing duplicate DO25 definition. |
+| Final Lambda baseline | **7,334/7,334 pass**: 2,112 input-parser checks and 5,222 runtime checks, including 313/313 MIR GC stress and 1,536/1,536 Lambda runtime tests. Command: `LAMBDA_TEST_IDLE_TIMEOUT=600 make test-lambda-baseline`. |
+| Standalone validator suites | No test verdicts: both attempted executables abort at load with missing `_LIT_BOOL`. Their host export allowlist hides private compiler imports; the same conflict exists in HEAD before P2. Current evidence is recorded in [LR13-9](../Lambda_Issue_Ledger.md#lr13-9). No host exports or test verdicts were widened to hide the failure. |
+
+The first aggregate Lambda baseline run found an `is` refactor selecting the
+boundary validator's fast mode, which skipped structural sequence slots.
+The membership helper now preserves its original validation mode while
+propagating virtual errors; the existing `element_content_pattern` golden
+passes on both tiers. The generated module's initially empty golden was also
+corrected to its declaration-only result, `null`. That run additionally hit
+the 180-second MIR GC stress idle timeout at `regression_music_layout`.
+The final aggregate rerun passes with the supported
+`LAMBDA_TEST_IDLE_TIMEOUT=600` override. `regression_music_layout` completes in
+3m49s; the full MIR GC stress sweep passes in 4m59s. This is correctness
+qualification of a debug build, not a release performance measurement.
+
+P2 logs are under `temp/pdf_p2_*`; aggregate suite details are in `test_output/`.
+The overall PDF phase remains incomplete: paged views, effects and production
+integration are still P3–P7 work.

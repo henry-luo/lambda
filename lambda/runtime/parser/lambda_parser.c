@@ -454,7 +454,7 @@ static bool token_is_binder_name_candidate(LambdaTokenKind kind) {
 // S16.10.2: data-name positions admit every keyword spelling. Both the key
 // and element-name predicates derive from this one set so a tag, an
 // attribute, and a map key can never drift apart as keywords are added.
-static bool token_is_name_word(LambdaTokenKind kind) {
+bool lambda_token_is_data_name(LambdaTokenKind kind) {
     return token_is_identifier_like(kind) || kind == LAMBDA_TOK_BASE_TYPE || kind == LAMBDA_TOK_TYPE || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_PUB || kind == LAMBDA_TOK_VAR || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_PN || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_ELSE || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_CASE || kind == LAMBDA_TOK_DEFAULT || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_WHILE || kind == LAMBDA_TOK_BREAK || kind == LAMBDA_TOK_CONTINUE || kind == LAMBDA_TOK_RETURN || kind == LAMBDA_TOK_RAISE || kind == LAMBDA_TOK_IMPORT ||
         // The Tier-3 statement heads are barred as BINDING names (S16.10.1)
         // but stay legal DATA names (S16.10.2): `{open: true}`, `.open`,
@@ -465,11 +465,11 @@ static bool token_is_name_word(LambdaTokenKind kind) {
 }
 
 static bool token_is_key(LambdaTokenKind kind) {
-    return token_is_name_word(kind) || kind == LAMBDA_TOK_SYMBOL || kind == LAMBDA_TOK_STAR;
+    return lambda_token_is_data_name(kind) || kind == LAMBDA_TOK_SYMBOL || kind == LAMBDA_TOK_STAR;
 }
 
 static bool token_is_element_name(LambdaTokenKind kind) {
-    return token_is_name_word(kind) || kind == LAMBDA_TOK_SYMBOL;
+    return lambda_token_is_data_name(kind) || kind == LAMBDA_TOK_SYMBOL;
 }
 
 static bool token_is_literal(LambdaTokenKind kind) {
@@ -873,7 +873,7 @@ static LambdaParseValue parse_type_slot_mode(LambdaRdParser* parser,
     SourceSpan span = {first.span.start_byte, parser->current.span.start_byte};
     return parser_reduce_tokens(parser, LAMBDA_REDUCE_TYPE_SLOT,
         LAMBDA_REDUCTION_FORM_TOKEN, span, first, (LambdaToken){0},
-        reduction_flags, NULL, 0);
+        reduction_flags | (binary_field ? LAMBDA_REDUCTION_FLAG_BINARY_FIELD : 0), NULL, 0);
 }
 
 static LambdaParseValue parse_type_slot(LambdaRdParser* parser) {

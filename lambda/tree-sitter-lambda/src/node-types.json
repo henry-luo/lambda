@@ -377,6 +377,10 @@
         "required": true,
         "types": [
           {
+            "type": "binary_counted_type",
+            "named": true
+          },
+          {
             "type": "binary_expr",
             "named": true
           },
@@ -587,6 +591,51 @@
     "type": "base_type",
     "named": true,
     "fields": {}
+  },
+  {
+    "type": "binary_array_count",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "symbol",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "binary_counted_type",
+    "named": true,
+    "fields": {
+      "count": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_array_count",
+            "named": true
+          }
+        ]
+      },
+      "operand": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "primary_type",
+            "named": true
+          }
+        ]
+      }
+    }
   },
   {
     "type": "binary_expr",
@@ -6224,11 +6273,11 @@
   },
   {
     "type": "binary",
-    "named": true
+    "named": false
   },
   {
     "type": "binary",
-    "named": false
+    "named": true
   },
   {
     "type": "break",

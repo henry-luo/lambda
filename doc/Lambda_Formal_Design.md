@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 30.2.0 (2026-10-15)
+**Spec version:** 31.0.0 (2026-10-15)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -794,16 +794,23 @@ that carries them.
 
 ### D3.5 Physical binary schemas
 
-- **D3.5.1*** Binary schemas compile to immutable, module-owned field
+- **D3.5.1v2*** Binary schemas compile to immutable, module-owned field
   descriptors; one schema-backed Velmt backend serves bounded byte buffers
   and declared native layouts. Native fields use compiler-derived locations,
   widths and typed reference loads, including inherited members and ownership
-  wrappers. A binding mismatch rejects admission; a byte buffer cannot grant
-  native memory access. [Binary_Schema §10]
-- **D3.5.2*** Native schema views retain an invalidatable lifetime control;
+  wrappers. A single manifest generates the native bindings and Lambda
+  declarations. Admission checks the binding ABI, complete manifest revision,
+  selected logical/storage kinds, typed targets and span stride/extent
+  contracts before publication. A mismatch rejects admission; a byte buffer
+  cannot grant native memory access. [Binary_Schema §10]
+- **D3.5.2v2*** Native schema views retain an invalidatable lifetime control;
   the host pins the admitted storage, and invalidation precedes its release.
-  Every subview shares that control. Precisely trace declared native Item
-  fields and byte-source edges; never scan arbitrary native memory. Field
+  Every record and VArray subview shares that control. Counted native spans
+  validate counts against host-admitted allocation extents before lazy access.
+  Structural reads, enumeration and validation check invalidation before
+  treating a count as empty. Precisely trace declared native Item fields,
+  including records in spans, before publishing a carrier and while it lives;
+  retain byte-source edges; never scan arbitrary native memory. Field
   access checks validity before touching storage. No native address or
   ownership transfer becomes script-visible. [D4.5.1v4, D5.3.3–D5.3.4;
   Binary_Schema §10]
@@ -2456,7 +2463,7 @@ slice; no formal semantic ruling or document semver changes.
 
 | Ruling | Status |
 |---|---|
-| D3.5.1–D3.5.2 | **Initial fixed-record/native profile implemented 2026-10-15.** The shared Velmt backend reads byte schemas and compiler-bound native records/references, traces declared Item/source edges, and invalidates owners before storage release. Tests cover inherited fields, width mismatch, nullable/required references, source retention, escaped callback contexts and original-error propagation. Counted spans, general cyclic schemas and generated binding manifests remain outside this increment. [PDF phase 2 progress](../vibe/impl/Lambda_Impl_PDF_Output_Phase2.md#10-implementation-progress-2026-10-15). |
+| D3.5.1v2–D3.5.2v2 | **Native P2 profile implemented 2026-10-15.** One manifest generates compiler-checked bindings and Lambda declarations with matching complete revisions. Native record/scalar spans validate counts, capacity and stride, share invalidation controls and precisely trace record Item edges during publication and collection. Structural reads, enumeration, validation and formatting reject stale views. Buffer counted arrays, offset references and general cyclic schemas remain separate extensions. [PDF P2 progress](../vibe/impl/Lambda_Impl_PDF_Output_Phase2.md#11-p2-native-reference-binding-progress-2026-10-15). |
 | D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |
 | D2.2.5 | **Implemented 2026-10-07 (USER).** MVP-Lmd preserves finite INT Items through storage and boxed calls, classifies INT/FLOAT as JS Number, and uses range-proven native integer regions plus checked boxed add/subtract/remainder. Widening retains JS binary64 rounding and signed zero. Shared finite boxing/unboxing/band emitters also serve Lambda; no runtime helper was added. Focused tests pass normally and under forced GC; the shared-emitter baseline passes 6284/6284 and the unchanged Test262 baseline 40261/40261. Archived release evidence and conservative proof limits: [JS_MVP_Lmd §9.6](../vibe/jube/JS_MVP_Lmd.md#96-archived-integer-evidence--2026-10-07). |
 | D2.3.2 | Container unbox helpers + `p2it` returns designed, not landed (Box_Unbox2 Phase 1); MIR path still boxes container params as ANY (safe, unoptimized). |

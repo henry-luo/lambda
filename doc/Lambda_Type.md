@@ -584,7 +584,7 @@ let p2 = <Point *:p, x: 10.0>   // copy p, override x
 ### Physical binary schemas
 
 Binary schemas declare a physical layout while exposing its logical fields as
-read-only element attributes (**S11.5.1v2, S11.5.2, S11.5.3v2 / D3.5.1–D3.5.2**):
+read-only element attributes (**S11.5.1v2, S11.5.2, S11.5.3v3 / D3.5.1v2–D3.5.2v2**):
 
 ```lambda
 type Header : binary & {endian: 'big'} {
@@ -610,8 +610,32 @@ Scripts cannot obtain or reconstruct native addresses from bytes. Layout
 metadata uses a trailing `& {…}` directly at the root or field slot of a
 `: binary` declaration (**S10.1.1v4**). Elsewhere `&` remains type intersection,
 and `that` keeps its predicate meaning. Binary field and record predicates
-are not supported by the current physical-layout profile. Counted spans, offset pointers,
-recursive schemas and serialization remain outside the current profile.
+are not supported by the current physical-layout profile. Offset pointers, recursive schemas and serialization remain outside the current
+profile. Versioned host bindings require matching root `version` metadata
+before they publish a native view (S11.5.3v3).
+
+Native counted spans use a fixed integer or another integer field as their
+count. The count field may follow the span (S11.5.4):
+
+```lambda
+type Entry : binary & {layout: 'native', binding: 'host.Entry', version: 'v1'} {
+    id: u32
+}
+type Batch : binary & {layout: 'native', binding: 'host.Batch', version: 'v1'} {
+    entries: Entry[count] & {pointer: 'native'},
+    optional_entries: Entry[count]? & {pointer: 'native'},
+    bytes: binary[count] & {pointer: 'native'},
+    count: i64
+}
+```
+
+`Entry[count]` reads as a lazy, read-only array over contiguous records; scalar
+spans work the same way. The host binding supplies the allocation capacity and
+stride. Negative counts, overflow, counts beyond capacity and null with positive
+count fail. Null with zero count is an empty array, or `null` for the nullable
+whole-array form `Entry[count]?`. A nonnull pointer with zero count is empty.
+`binary[count]` returns an owned byte copy that remains usable after native
+storage closes. Array and record views fail after owner invalidation.
 
 ## Type Occurrences
 

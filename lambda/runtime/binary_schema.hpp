@@ -8,6 +8,7 @@ enum BinaryFieldKind : uint8_t {
     BINARY_FIELD_I16, BINARY_FIELD_U16, BINARY_FIELD_I32, BINARY_FIELD_U32,
     BINARY_FIELD_I64, BINARY_FIELD_U64, BINARY_FIELD_F32, BINARY_FIELD_F64,
     BINARY_FIELD_RECORD, BINARY_FIELD_REFERENCE, BINARY_FIELD_ITEM,
+    BINARY_FIELD_SPAN, BINARY_FIELD_BYTES,
 };
 
 enum BinarySchemaEndian : uint8_t {
@@ -16,6 +17,7 @@ enum BinarySchemaEndian : uint8_t {
 
 struct BinarySchema;
 struct BinarySchemaOwner;
+inline constexpr uint32_t BINARY_SCHEMA_BINDING_ABI = 1;
 
 struct BinarySchemaField {
     const char* name;
@@ -28,6 +30,14 @@ struct BinarySchemaField {
     const void* (*locate)(const void* record);
     const void* (*dereference)(const void* slot);
     Type* logical_type = nullptr;
+    BinaryFieldKind element_kind = BINARY_FIELD_U8;
+    const char* count_field = nullptr;
+    uint64_t fixed_count = 0;
+    bool has_fixed_count = false;
+    size_t stride = 0;
+    const BinarySchemaField* count_binding = nullptr;
+    // the host admits an allocation extent independently of the script's count.
+    bool (*extent)(const void* record, uint64_t* capacity) = nullptr;
 };
 
 struct BinarySchema {
@@ -38,6 +48,8 @@ struct BinarySchema {
     BinarySchemaEndian endian;
     const char* binding = nullptr;
     const BinarySchema* identity = nullptr;
+    uint32_t binding_abi = BINARY_SCHEMA_BINDING_ABI;
+    const char* binding_version = nullptr;
 };
 
 // The shared declaration prefix retains module-local type indexing.
@@ -47,6 +59,7 @@ struct TypeBinarySchema : TypeObject {
 
 const BinarySchema* binary_schema_from_type(Type* type);
 bool binary_schema_matches(Item value, const BinarySchema* schema);
+bool binary_schema_parse_count(StrView brackets, uint64_t* fixed, StrView* field);
 extern "C" Item fn_binary_decode(Item binary, Item schema);
 
 // A wrapper retains the control object, never ownership of an arbitrary pointee.
@@ -66,19 +79,70 @@ const void* binary_schema_member_location(const void* record) {
     return &(((const Record*)record)->*Member);
 }
 
+template<class T> struct BinarySchemaRemoveRef { using Type = T; };
+template<class T> struct BinarySchemaRemoveRef<T&> { using Type = T; };
+template<class A, class B> struct BinarySchemaSameType { static constexpr bool value = false; };
+template<class T> struct BinarySchemaSameType<T, T> { static constexpr bool value = true; };
+template<class T> struct BinarySchemaSameType<const T, T> { static constexpr bool value = true; };
 template<class Pointer> struct BinarySchemaPointer {
+    using Target = typename BinarySchemaRemoveRef<decltype(*((const Pointer*)nullptr)->get())>::Type;
     static const void* read(const void* slot) {
         return ((const Pointer*)slot)->get();
     }
 };
 
-template<class Target> struct BinarySchemaPointer<Target*> {
+template<class T> struct BinarySchemaPointer<T*> {
+    using Target = T;
     static const void* read(const void* slot) {
-        Target* pointer;
+        T* pointer;
         memcpy(&pointer, slot, sizeof(pointer));
         return pointer;
     }
 };
+
+template<class T> struct BinarySchemaScalarKind;
+template<class T> struct BinarySchemaScalarKind<const T> : BinarySchemaScalarKind<T> {};
+#define BINARY_SCHEMA_SCALAR_KIND(T, Kind) \
+    template<> struct BinarySchemaScalarKind<T> { static constexpr BinaryFieldKind kind = Kind; }
+BINARY_SCHEMA_SCALAR_KIND(bool, BINARY_FIELD_BOOL);
+BINARY_SCHEMA_SCALAR_KIND(int8_t, BINARY_FIELD_I8);
+BINARY_SCHEMA_SCALAR_KIND(uint8_t, BINARY_FIELD_U8);
+BINARY_SCHEMA_SCALAR_KIND(int16_t, BINARY_FIELD_I16);
+BINARY_SCHEMA_SCALAR_KIND(uint16_t, BINARY_FIELD_U16);
+BINARY_SCHEMA_SCALAR_KIND(int32_t, BINARY_FIELD_I32);
+BINARY_SCHEMA_SCALAR_KIND(uint32_t, BINARY_FIELD_U32);
+BINARY_SCHEMA_SCALAR_KIND(int64_t, BINARY_FIELD_I64);
+BINARY_SCHEMA_SCALAR_KIND(uint64_t, BINARY_FIELD_U64);
+BINARY_SCHEMA_SCALAR_KIND(float, BINARY_FIELD_F32);
+BINARY_SCHEMA_SCALAR_KIND(double, BINARY_FIELD_F64);
+#undef BINARY_SCHEMA_SCALAR_KIND
+
+template<class Record, auto Capacity>
+bool binary_schema_span_capacity(const void* record, uint64_t* out) {
+    auto value = ((const Record*)record)->*Capacity;
+    using Count = decltype(value);
+    constexpr BinaryFieldKind kind = BinarySchemaScalarKind<Count>::kind;
+    static_assert(kind >= BINARY_FIELD_I8 && kind <= BINARY_FIELD_U64,
+        "native span capacity must be an integer field");
+    if constexpr (Count(-1) < Count(0)) { if (value < 0) return false; }
+    *out = (uint64_t)value;
+    return true;
+}
+
+template<class Record, auto Member, auto Capacity>
+BinarySchemaField binary_schema_span_binding(const char* name, const char* count,
+        BinaryFieldKind kind, BinaryFieldKind element_kind, const BinarySchema* target,
+        bool nullable, Type* logical = nullptr) {
+    using Pointer = decltype(((Record*)nullptr)->*Member);
+    using Slot = typename BinarySchemaRemoveRef<Pointer>::Type;
+    BinarySchemaField field = {name, kind, 0, sizeof(Slot), target, nullable,
+        binary_schema_member_location<Record, Member>, BinarySchemaPointer<Slot>::read, logical};
+    field.element_kind = element_kind;
+    field.count_field = count;
+    field.stride = sizeof(typename BinarySchemaPointer<Slot>::Target);
+    field.extent = binary_schema_span_capacity<Record, Capacity>;
+    return field;
+}
 
 // These bindings derive sizes and member access from the actual host compiler.
 #define BINARY_SCHEMA_MEMBER(Record, member, kind) \
@@ -94,4 +158,10 @@ template<class Target> struct BinarySchemaPointer<Target*> {
 #define BINARY_SCHEMA_ITEM(Record, member, logical, nullable) \
     {#member, BINARY_FIELD_ITEM, 0, sizeof(((Record*)nullptr)->member), nullptr, \
      nullable, binary_schema_member_location<Record, &Record::member>, nullptr, logical}
+#define BINARY_SCHEMA_SPAN(Record, member, count, capacity, kind, target, nullable) \
+    binary_schema_span_binding<Record, &Record::member, &Record::capacity>( \
+        #member, #count, BINARY_FIELD_SPAN, kind, target, nullable)
+#define BINARY_SCHEMA_BYTES(Record, member, count, capacity, nullable) \
+    binary_schema_span_binding<Record, &Record::member, &Record::capacity>( \
+        #member, #count, BINARY_FIELD_BYTES, BINARY_FIELD_U8, nullptr, nullable)
 

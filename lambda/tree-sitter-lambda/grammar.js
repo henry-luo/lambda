@@ -1532,10 +1532,16 @@ module.exports = grammar({
     )),
     binary_attr_type: $ => prec.dynamic(3, prec(2, seq(
       field('name', $._field_name), optional(field('optional', '?')),
-      ':', field('as', $._annotation_type),
+      ':', field('as', choice($._annotation_type, $.binary_counted_type)),
       optional($._binary_layout),
       optional(seq('=', field('default', $._element_expr))),
     ))),
+    // Native span counts name another field; ordinary array types keep fixed counts.
+    binary_counted_type: $ => prec.right(seq(
+      field('operand', $.primary_type),
+      field('count', $.binary_array_count), optional('?'),
+    )),
+    binary_array_count: $ => seq(alias($._index_lbracket, '['), $._data_name, ']'),
 
     // ==================== String / symbol pattern islands =================
 

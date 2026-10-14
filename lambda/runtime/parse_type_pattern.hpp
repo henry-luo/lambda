@@ -32,6 +32,7 @@ typedef enum TypePatternMode {
     // a declaration return type: named/base atoms with one occurrence suffix,
     // joined by `|`, `&` or `!`
     TYPE_PATTERN_RETURN_VALUE,
+    TYPE_PATTERN_BINARY_FIELD,
 } TypePatternMode;
 
 // The first syntax error in a type slot. It is reported when the slot is

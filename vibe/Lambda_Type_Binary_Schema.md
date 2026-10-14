@@ -3,7 +3,7 @@
 > **Status:** fixed-record/native-binding implementation started 2026-10-15;
 > syntax ratified 2026-10-15: trailing `& {…}` metadata is confined to binary
 > declaration slots. Broader array/serializer phases below remain proposals.
-> **Formal linkage:** S11.5.1v2, S11.5.2, S11.5.3v2, D3.1.1v5, D3.5.1–D3.5.2,
+> **Formal linkage:** S11.5.1v2, S11.5.2, S11.5.3v3, D3.1.1v5, D3.5.1v2–D3.5.2v2,
 > D7.4.5v2. The current contract is recorded in §10; older implementation
 > sketches below precede the common Velmt carrier and MIR-only runtime.
 > **Scope:** Schema-driven binary (de)serialization for Lambda Script — a typed binary layout language expressed in Lambda's `type` system, a lazy zero-copy virtual element (`Velmt`) backed by a byte buffer + schema, and a schema-driven serializer for the round trip.
@@ -304,7 +304,7 @@ Phase 1 treats `Velmt` as read-only; producing modified binary = build a new con
 The [PDF phase 2 implementation](impl/Lambda_Impl_PDF_Output_Phase2.md) uses
 the shared native walker and schema-backed callback records. Tree and text
 fragment links remain native. Property references use the same lazy field
-accessor as bounded byte layouts, under **S11.5.1v2, S11.5.2, S11.5.3v2 / D3.5.1–D3.5.2**.
+accessor as bounded byte layouts, under **S11.5.1v2, S11.5.2, S11.5.3v3 / D3.5.1v2–D3.5.2v2**.
 
 The implemented declaration form uses trailing `& {…}` metadata directly at
 the root and field slots of `: binary` declarations (S11.5.1v2). Metadata is
@@ -341,12 +341,50 @@ The same field visitor temporarily roots these Items during carrier allocation,
 before the new wrapper can publish its own trace edge (D5.3.3–D5.3.4).
 
 Fixed-width fields, nested records, explicit field offsets and typed native
-property references are the initial subset. Counted arrays, full schema
-serialization, general relative references and cyclic graphs remain unfinished.
-The native export bindings currently use shared C++ binding macros; generation
-from one schema manifest remains follow-up work. The complete phase 1 scope
+property references form the initial subset. Native counted spans and
+manifest-generated bindings are specified in §11. Buffer counted arrays,
+serialization, general relative references and cyclic graphs remain unfinished. The complete phase 1 scope
 in §8 is therefore not marked finished. Formal implementation marks remain
 until those gates close.
+
+
+## 11. Native counted spans and generated bindings (USER, 2026-10-15)
+
+**S11.5.3v3–S11.5.4 / D3.5.1v2–D3.5.2v2** extend the fixed-record profile.
+A native field `Entry[count] & {pointer: 'native'}` is one pointer to contiguous
+entries, never an array of pointers. Scalar spans use the same generic accessor
+and return VArray. A count is a nonnegative integer literal or an admitted
+integer field, which can occur after the pointer in the declaration and C++
+layout. The binding resolves that dependency after all fields are admitted.
+The host binding supplies capacity and compiler-derived stride; script count
+metadata cannot enlarge the allocation admitted by the host. General count
+expressions, pointer tables and recursive schema graphs remain outside P2.
+
+The user selected both nonnullable and nullable spans. `Entry[n]?` means the
+whole collection may be absent, whereas nullable elements are not part of this
+profile. Null plus zero count yields an empty VArray for `Entry[n]` and null for
+`Entry[n]?`. A nonnull pointer with zero count yields an empty VArray in either
+case. Null with positive count, negative counts, overflow and counts beyond
+capacity fail before reading elements. An owned `binary[n]` byte copy cannot
+keep a dangling native address after invalidation; live arrays and record
+subviews retain the shared owner control and fail after it closes.
+
+The native manifest is the editable source for selected fields, C++ member
+bindings, count/capacity members and Lambda declarations. Generation emits
+compiler-checked scalar/target types and a complete manifest fingerprint in
+both the host descriptor and Lambda root `version` metadata. Binding requires
+exact fingerprint and descriptor-ABI equality before publishing a view, then
+checks every selected field's representation, target and extent contract.
+Changing an unselected manifest field still changes the fingerprint. Unversioned
+handwritten fixture bindings can bind only unversioned declarations.
+
+Structural invalidation checks cover fields, keys/values, tags/namespaces,
+child/index access, counts, validation and formatting. Error reporting happens
+before an invalidated count can appear empty. Precise GC visits span records'
+selected Item edges, including during carrier publication; arbitrary native
+memory is never scanned. The host must freeze and pin all admitted allocations
+for the owner scope. A capacity describes the host's allocation contract, not
+proof that any arbitrary process address is readable.
 
 
 ## Appendix S. Superseded syntax decisions
@@ -355,10 +393,19 @@ until those gates close.
 annotation map and used `: binary that {…}` for root metadata. The first native
 PDF increment limited that reinterpretation to binary declarations.~~
 Superseded by the user's 2026-10-15 selection of `& {…}` at binary declaration
-slots (S11.5.1v2, S11.5.3v2). `that` keeps its predicate role.
+slots (S11.5.1v2, S11.5.3v3). `that` keeps its predicate role.
 
 ~~S10.1.1v3 described `|`, `&` and `!` as type operators, and only that,
 everywhere.~~ S10.1.1v4 preserves that algebra outside the explicit binary
 metadata slots and records the scoped exception. The exception avoids making
 a scalar layout such as `u32 & {offset: 4}` an impossible scalar/map
 intersection. No new metadata keyword or script-visible pointer type is added.
+
+
+
+~~Native schemas name a host binding, without requiring a complete manifest
+revision. Native export bindings use shared C++ macros, with generation from
+one manifest left as follow-up work.~~ Replaced by S11.5.3v3 / D3.5.1v2:
+generated versioned contracts reject stale or incompatible declarations before
+publishing a native view. D3.5.2v2 extends the same owner control and precise
+Item tracing to span records and all structural read paths.

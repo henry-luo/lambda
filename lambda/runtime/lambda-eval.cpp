@@ -2457,6 +2457,15 @@ static bool runtime_validate_value_against_type(Item item, Type* expected,
     return result && result->valid;
 }
 
+static Bool runtime_type_membership(Item value, Type* expected) {
+    uint64_t failure_version = virtual_failure_version;
+    ValidationResult* result = context && context->validator
+        ? schema_validator_validate_type(context->validator, value.to_const(), expected) : nullptr;
+    // a failed virtual read is an error, rather than a negative type match.
+    if (virtual_failure_version != failure_version) return BOOL_ERROR;
+    return result && result->valid ? BOOL_TRUE : BOOL_FALSE;
+}
+
 static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
     Item* converted);
 static bool runtime_type_admit_array_env(Item value, Type* expected, Type** env,
@@ -2855,8 +2864,10 @@ Bool fn_is(Item a, Item b) {
     }
 
     Type* b_type = b.type;
-    if (const BinarySchema* schema = binary_schema_from_type(b_type))
+    if (const BinarySchema* schema = binary_schema_from_type(b_type)) {
+        if (get_type_id(virtual_content_error(a)) == LMD_TYPE_ERROR) return BOOL_ERROR;
         return binary_schema_matches(a, schema) ? BOOL_TRUE : BOOL_FALSE;
+    }
     if (b_type->kind == TYPE_KIND_PATTERN) {
         TypeId a_type_id = get_type_id(a);
         TypePattern* pattern = (TypePattern*)b_type;
@@ -2894,8 +2905,7 @@ Bool fn_is(Item a, Item b) {
     }
 
     if (b_type->kind == TYPE_KIND_UNARY || b_type->kind == TYPE_KIND_BINARY) {
-        ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), b_type);
-        return result->valid ? BOOL_TRUE : BOOL_FALSE;
+        return runtime_type_membership(a, b_type);
     }
 
     // a range type may arrive bare (type lists register it raw) or wrapped
@@ -2918,8 +2928,7 @@ Bool fn_is(Item a, Item b) {
     Type* actual_type = item_static_type_for_is(a, &actual_type_scratch);
     if (type_b->type->type_id != LMD_TYPE_NUM_SIZED &&
             (type_b->type->kind == TYPE_KIND_UNARY || type_b->type->kind == TYPE_KIND_BINARY)) {
-        ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
-        return result->valid ? BOOL_TRUE : BOOL_FALSE;
+        return runtime_type_membership(a, type_b->type);
     }
 
     switch (type_b->type->type_id) {
@@ -2987,8 +2996,7 @@ Bool fn_is(Item a, Item b) {
                 (const void*)(uintptr_t)a.item) ? BOOL_TRUE : BOOL_FALSE;
         }
         {
-            ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
-            return result->valid ? BOOL_TRUE : BOOL_FALSE;
+            return runtime_type_membership(a, type_b->type);
         }
     case LMD_TYPE_FUNC:
         return lambda_function_admitted(a, a_type_id, type_b->type)
@@ -3829,7 +3837,9 @@ Bool fn_sym_eq_ptr(Symbol* a, Symbol* b) {
 
 // 3-states comparison (public entry point)
 Bool fn_eq(Item a_item, Item b_item) {
-    return fn_eq_depth(a_item, b_item, 0, EQUALITY_VALUE);
+    uint64_t failure_version = virtual_failure_version;
+    Bool result = fn_eq_depth(a_item, b_item, 0, EQUALITY_VALUE);
+    return virtual_failure_version == failure_version ? result : BOOL_ERROR;
 }
 
 Bool fn_eq_strict(Item a_item, Item b_item) {

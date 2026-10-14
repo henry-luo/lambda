@@ -14,6 +14,10 @@
   "memtrack_poison_exempt": [
     "lambda/lambda-wasm-main.c"
   ],
+  "code_generators": [
+    {"script": "utils/generate_binary_bindings.py", "args": ["lambda/module/radiant/pdf_view_schema.json"]},
+    {"script": "utils/generate_binary_bindings.py", "args": ["test/binary_schema_fixture.json"]}
+  ],
   "source_dirs": [
     "lib",
     "lib/font",

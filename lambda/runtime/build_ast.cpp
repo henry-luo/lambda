@@ -14783,7 +14783,8 @@ static AstNode* syntax_type_slot_reduction(LambdaSyntaxSink* sink,
     }
     AstNode* node = syntax_type_slot(sink, span,
         (flags & LAMBDA_REDUCTION_FLAG_RETURN_TYPE)
-            ? TYPE_PATTERN_RETURN_VALUE : TYPE_PATTERN_FULL);
+            ? TYPE_PATTERN_RETURN_VALUE : (flags & LAMBDA_REDUCTION_FLAG_BINARY_FIELD)
+            ? TYPE_PATTERN_BINARY_FIELD : TYPE_PATTERN_FULL);
     if (flags & LAMBDA_REDUCTION_FLAG_ANNOTATION_RANGE) {
         // `T to e` re-reads as one range type; the parts reduced on the way
         // still resolve first, in source order
@@ -15715,7 +15716,7 @@ static bool binary_schema_validate_metadata(Transpiler* tp, AstNode* metadata,
         }
         const char* name = entry->name->chars;
         bool admitted = root ? strcmp(name, "layout") == 0 || strcmp(name, "binding") == 0 ||
-            strcmp(name, "endian") == 0 : strcmp(name, "pointer") == 0 || strcmp(name, "offset") == 0;
+            strcmp(name, "endian") == 0 || strcmp(name, "version") == 0 : strcmp(name, "pointer") == 0 || strcmp(name, "offset") == 0;
         if (!admitted) {
             record_semantic_error_span(tp, item->source_span, ERR_SEMANTIC_ERROR,
                 "unsupported binary schema metadata '%s'", name);
@@ -15742,7 +15743,7 @@ static bool binary_schema_validate_metadata(Transpiler* tp, AstNode* metadata,
         bool text = ast_static_literal_item(tp, entry->as, &value) &&
             is_text_type_id(get_type_id(value));
         bool accepted = text;
-        if (strcmp(name, "binding") == 0) accepted = text && native && value.get_len() &&
+        if (strcmp(name, "binding") == 0 || strcmp(name, "version") == 0) accepted = text && native && value.get_len() &&
             !memchr(value.get_chars(), 0, value.get_len());
         else if (strcmp(name, "endian") == 0) accepted =
             binary_schema_metadata_text(tp, metadata, name, "native") || (!native &&
@@ -15781,6 +15782,7 @@ static void resolve_binary_schema(LambdaResolver* r) {
         sizeof(AstObjectTypeNode))[LSF_OBJECT_LAYOUT];
     BinarySchema& schema = type->layout;
     schema.tag = r->object_node->name->chars;
+    schema.binding_abi = BINARY_SCHEMA_BINDING_ABI;
     schema.endian = BINARY_SCHEMA_INHERIT;
     if (binary_schema_metadata_text(tp, metadata, "endian", "big")) schema.endian = BINARY_SCHEMA_BIG;
     else if (binary_schema_metadata_text(tp, metadata, "endian", "little")) schema.endian = BINARY_SCHEMA_LITTLE;
@@ -15808,6 +15810,14 @@ static void resolve_binary_schema(LambdaResolver* r) {
     if (native && !schema.binding) {
         record_semantic_error_span(tp, r->object_node->source_span, ERR_SEMANTIC_ERROR,
             "native binary schema requires a binding name");
+    }
+    Item version = ItemNull;
+    AstNode* version_node = binary_schema_metadata(metadata, "version");
+    if (version_node && ast_static_literal_item(tp, version_node, &version) &&
+            is_text_type_id(get_type_id(version))) {
+        char* copy = (char*)pool_calloc(tp->pool, version.get_len() + 1);
+        memcpy(copy, version.get_chars(), version.get_len());
+        schema.binding_version = copy;
     }
     schema.field_count = r->object_type->length;
     BinarySchemaField* fields = (BinarySchemaField*)pool_calloc(tp->pool,
@@ -15847,12 +15857,50 @@ static void resolve_binary_schema(LambdaResolver* r) {
             physical.nullable = true;
             logical = unwrap_simple_type_type(((TypeUnary*)logical)->operand);
         }
+        bool span = logical && logical->type_id == LMD_TYPE_TYPE && logical->kind == TYPE_KIND_UNARY &&
+            ((TypeUnary*)logical)->op == OPERATOR_ARRAY;
+        if (span) {
+            TypeUnary* array = (TypeUnary*)logical;
+            logical = unwrap_simple_type_type(array->operand);
+            AstNode* count_node = annotation;
+            if (count_node && count_node->node_type == AST_NODE_UNARY_TYPE &&
+                    ((AstUnaryNode*)count_node)->op == OPERATOR_OPTIONAL)
+                count_node = ast_unwrap_primary(((AstUnaryNode*)count_node)->operand);
+            StrView count_field = {};
+            bool count_valid = count_node && count_node->node_type == AST_NODE_UNARY_TYPE &&
+                ((AstUnaryNode*)count_node)->op == OPERATOR_ARRAY &&
+                binary_schema_parse_count(((AstUnaryNode*)count_node)->op_str, &physical.fixed_count, &count_field);
+            if (!count_valid && array->max_count >= 0 && array->max_count == array->min_count) {
+                physical.fixed_count = (uint64_t)array->max_count;
+                count_valid = true;
+            }
+            if (!native || !binary_schema_metadata_text(tp, field_metadata, "pointer", "native") || !count_valid) {
+                record_semantic_error_span(tp, field->source_span, ERR_SEMANTIC_ERROR,
+                    "counted spans require a native pointer and an explicit integer or count field");
+                continue;
+            }
+            physical.has_fixed_count = !count_field.length;
+            if (count_field.length) {
+                physical.count_field = name_pool_create_strview(tp->name_pool, count_field)->chars;
+            }
+        }
         const BinarySchema* nested = binary_schema_from_type(logical);
         if (nested && (bool)nested->binding != native) {
             record_semantic_error_span(tp, field->source_span, ERR_SEMANTIC_ERROR,
                 "nested binary schemas must use the same address domain");
         }
-        if (nested) {
+        if (span) {
+            physical.logical_type = logical;
+            physical.kind = logical == &TYPE_BINARY ? BINARY_FIELD_BYTES : BINARY_FIELD_SPAN;
+            physical.storage_size = 0;
+            physical.target = nested;
+            size_t width = 0;
+            if (nested) physical.element_kind = BINARY_FIELD_RECORD;
+            else if (logical == &TYPE_BINARY) physical.element_kind = BINARY_FIELD_U8;
+            else if (!binary_schema_field_kind(logical, &physical.element_kind, &width))
+                record_semantic_error_span(tp, field->source_span, ERR_SEMANTIC_ERROR,
+                    "native span elements require a fixed-width scalar or native record");
+        } else if (nested) {
             physical.target = nested;
             physical.kind = BINARY_FIELD_RECORD;
             physical.storage_size = nested->byte_size;
@@ -15864,13 +15912,13 @@ static void resolve_binary_schema(LambdaResolver* r) {
             record_semantic_error_span(tp, field->source_span, ERR_SEMANTIC_ERROR,
                 "binary schema field requires a fixed-width scalar or binary schema type");
         }
-        if (binary_schema_metadata_text(tp, field_metadata, "pointer", "native")) {
+        if (!span && binary_schema_metadata_text(tp, field_metadata, "pointer", "native")) {
             if (!native || !nested) record_semantic_error_span(tp, field->source_span,
                 ERR_SEMANTIC_ERROR, "native pointer field requires a native schema and record target");
             physical.kind = BINARY_FIELD_REFERENCE;
             physical.storage_size = sizeof(void*);
         }
-        if (physical.nullable && physical.kind != BINARY_FIELD_REFERENCE && physical.kind != BINARY_FIELD_ITEM)
+        if (physical.nullable && physical.kind != BINARY_FIELD_REFERENCE && physical.kind != BINARY_FIELD_ITEM && !span)
             record_semantic_error_span(tp, field->source_span, ERR_SEMANTIC_ERROR,
                 "nullable binary fields require a native reference or boxed native value");
         AstNode* at = binary_schema_metadata(field_metadata, "offset");
@@ -15885,6 +15933,15 @@ static void resolve_binary_schema(LambdaResolver* r) {
                 "binary schema field size overflows its layout");
         } else offset += physical.storage_size;
         if (offset > schema.byte_size) schema.byte_size = offset;
+    }
+    for (size_t i = 0; i < schema.field_count; i++) {
+        if (!fields[i].count_field) continue;
+        const BinarySchemaField* count = nullptr;
+        for (size_t j = 0; j < schema.field_count; j++)
+            if (strcmp(fields[j].name, fields[i].count_field) == 0) count = &fields[j];
+        if (!count || count->kind < BINARY_FIELD_I8 || count->kind > BINARY_FIELD_U64)
+            record_semantic_error_span(tp, r->object_node->source_span, ERR_SEMANTIC_ERROR,
+                "native span count must name an admitted integer field");
     }
     // This declaration describes physical storage, rather than a nominal map constructor.
     type->type_id = LMD_TYPE_TYPE;
