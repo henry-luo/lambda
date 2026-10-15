@@ -17,13 +17,7 @@ static void image_png_error(png_structp png, const char *message) {
 }
 static void image_png_warning(png_structp png, const char *message) {
     ImagePngState *state = (ImagePngState *)png_get_error_ptr(png);
-    if (state->op->context->warning) {
-        ImageError warning = {};
-        warning.format = IMAGE_CODEC_PNG;
-        snprintf(warning.operation, sizeof(warning.operation), "%s", state->op->name);
-        snprintf(warning.message, sizeof(warning.message), "PNG: %s", message);
-        state->op->context->warning(state->op->context->user, &warning);
-    }
+    image_warn(state->op, IMAGE_CODEC_PNG, "PNG: %s", message);
 }
 static png_voidp image_png_alloc(png_structp png, png_alloc_size_t size) {
     return image_op_alloc((ImageOperation *)png_get_mem_ptr(png), size, false);

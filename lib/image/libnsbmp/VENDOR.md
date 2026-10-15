@@ -14,6 +14,10 @@ and application directories are omitted; only library targets are built.
 
 Lambda adaptations: allocator callbacks carry operation userdata; palettes and ICO nodes use those callbacks; metadata-only probing skips bitmap allocation; byte order uses `lib/endian.h`; DIB/palette offsets and partial-byte AND masks are validated before access; legacy all-zero 32-bit alpha follows the AND mask.
 
+Utility consolidation (2026-10-15): local endian forwarding functions are
+removed; call sites use the shared signed/unsigned readers directly. See
+`vibe/impl/Lib_Image_Refactor.md` for validation.
+
 
 Build integration (2026-10-15): upstream build systems, templates, and
 repository metadata are removed. `build_lambda_config.json` owns the

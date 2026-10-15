@@ -260,20 +260,9 @@ ImageStatus image_bitmap_encode(ImageOperation *op, const ImagePixelView *pixels
         return op->error->code;
     memset(row, 0, stride);
     for (uint32_t y = pixels->height; y > 0; y--) {
-        const uint8_t *source = pixels->pixels + (size_t)(y - 1) * pixels->stride;
-        for (uint32_t x = 0; x < pixels->width; x++) {
-            const uint8_t *p = source + (size_t)x * pixels->channels;
-            unsigned alpha = pixels->channels == 4 ? p[3] : 255;
-            if (alpha != 255 && !options->has_background)
-                return image_fail(op, IMAGE_INVALID_ARGUMENT,
-                                  "24-bit BMP alpha requires an explicit background");
-            for (unsigned c = 0; c < 3; c++) {
-                unsigned sample = pixels->channels == 1 ? p[0] : p[2 - c];
-                row[x * 3 + c] =
-                    (uint8_t)((sample * alpha + options->background[2 - c] * (255 - alpha) + 127) / 255);
-            }
-        }
-        if (!image_sink_write(op, sink, row, stride))
+        if (!image_rgb_row(op, pixels, y - 1, row,
+                           options->has_background ? options->background : NULL, true) ||
+            !image_sink_write(op, sink, row, stride))
             break;
     }
     return op->error->code;

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 #include "avif/internal.h"
+#include "lib/endian.h"
 
 #include <assert.h>
 #include <math.h>
@@ -16,68 +17,49 @@ float avifRoundf(float v)
 
 uint16_t avifHTONS(uint16_t s)
 {
-    uint16_t result = 0;
-    uint8_t * data = (uint8_t *)&result;
-    data[0] = (s >> 8) & 0xff;
-    data[1] = (s >> 0) & 0xff;
+    uint16_t result;
+    write_be16((uint8_t *)&result, s);
     return result;
 }
 
 uint16_t avifNTOHS(uint16_t s)
 {
-    const uint8_t * data = (const uint8_t *)&s;
-    return (uint16_t)((data[1] << 0) | (data[0] << 8));
+    return read_be16((const uint8_t *)&s);
 }
 
 uint16_t avifCTOHS(uint16_t s)
 {
-    const uint8_t * data = (const uint8_t *)&s;
-    return (uint16_t)((data[0] << 0) | (data[1] << 8));
+    return read_le16((const uint8_t *)&s);
 }
 
 uint32_t avifHTONL(uint32_t l)
 {
-    uint32_t result = 0;
-    uint8_t * data = (uint8_t *)&result;
-    data[0] = (l >> 24) & 0xff;
-    data[1] = (l >> 16) & 0xff;
-    data[2] = (l >> 8) & 0xff;
-    data[3] = (l >> 0) & 0xff;
+    uint32_t result;
+    write_be32((uint8_t *)&result, l);
     return result;
 }
 
 uint32_t avifNTOHL(uint32_t l)
 {
-    const uint8_t * data = (const uint8_t *)&l;
-    return ((uint32_t)data[3] << 0) | ((uint32_t)data[2] << 8) | ((uint32_t)data[1] << 16) | ((uint32_t)data[0] << 24);
+    return read_be32((const uint8_t *)&l);
 }
 
 uint32_t avifCTOHL(uint32_t l)
 {
-    const uint8_t * data = (const uint8_t *)&l;
-    return ((uint32_t)data[0] << 0) | ((uint32_t)data[1] << 8) | ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
+    return read_le32((const uint8_t *)&l);
 }
 
 uint64_t avifHTON64(uint64_t l)
 {
-    uint64_t result = 0;
-    uint8_t * data = (uint8_t *)&result;
-    data[0] = (l >> 56) & 0xff;
-    data[1] = (l >> 48) & 0xff;
-    data[2] = (l >> 40) & 0xff;
-    data[3] = (l >> 32) & 0xff;
-    data[4] = (l >> 24) & 0xff;
-    data[5] = (l >> 16) & 0xff;
-    data[6] = (l >> 8) & 0xff;
-    data[7] = (l >> 0) & 0xff;
+    uint64_t result;
+    write_be32((uint8_t *)&result, (uint32_t)(l >> 32));
+    write_be32((uint8_t *)&result + 4, (uint32_t)l);
     return result;
 }
 
 uint64_t avifNTOH64(uint64_t l)
 {
-    const uint8_t * data = (const uint8_t *)&l;
-    return ((uint64_t)data[7] << 0) | ((uint64_t)data[6] << 8) | ((uint64_t)data[5] << 16) | ((uint64_t)data[4] << 24) |
-           ((uint64_t)data[3] << 32) | ((uint64_t)data[2] << 40) | ((uint64_t)data[1] << 48) | ((uint64_t)data[0] << 56);
+    return read_be64((const uint8_t *)&l);
 }
 
 AVIF_ARRAY_DECLARE(avifArrayInternal, uint8_t, ptr);

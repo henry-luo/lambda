@@ -27,10 +27,6 @@ static bool image_data_range_valid(size_t total, size_t offset, size_t length) {
     return offset <= total && length <= total - offset;
 }
 
-static uint16_t image_read_le16(const unsigned char* data) {
-    return (uint16_t)((uint16_t)data[0] | ((uint16_t)data[1] << 8));
-}
-
 static bool gif_skip_sub_blocks(const unsigned char* data, size_t length,
                                 size_t* position) {
     while (*position < length) {
@@ -52,8 +48,8 @@ static bool gif_preflight(const unsigned char* data, size_t length,
         return false;
     }
 
-    int screen_width = image_read_le16(data + 6);
-    int screen_height = image_read_le16(data + 8);
+    int screen_width = read_le16(data + 6);
+    int screen_height = read_le16(data + 8);
     size_t screen_bytes = 0;
     if (!image_rgba_layout(screen_width, screen_height, NULL, &screen_bytes)) return false;
 
@@ -82,8 +78,8 @@ static bool gif_preflight(const unsigned char* data, size_t length,
         }
         if (marker != 0x2c || !image_data_range_valid(length, position, 9)) return false;
 
-        int frame_width = image_read_le16(data + position + 4);
-        int frame_height = image_read_le16(data + position + 6);
+        int frame_width = read_le16(data + position + 4);
+        int frame_height = read_le16(data + position + 6);
         unsigned char frame_flags = data[position + 8];
         position += 9;
         size_t frame_pixels = 0;

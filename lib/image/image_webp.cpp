@@ -89,6 +89,9 @@ ImageStatus image_webp_encode(ImageOperation *op, const ImagePixelView *pixels,
                               const ImageEncodeOptions *options, const ImageSink *sink) {
     if (pixels->stride > INT_MAX)
         return image_fail(op, IMAGE_LIMIT_EXCEEDED, "WebP stride exceeds codec range");
+    ImagePixelView prepared;
+    if (!image_prepare_pixels(op, pixels, pixels->channels == 1 ? 3 : pixels->channels, NULL, &prepared))
+        return op->error->code;
     WebPConfig config;
     WebPPicture picture;
     if (!WebPConfigInit(&config) || !WebPPictureInit(&picture))
@@ -100,20 +103,8 @@ ImageStatus image_webp_encode(ImageOperation *op, const ImagePixelView *pixels,
     picture.width = (int)pixels->width;
     picture.height = (int)pixels->height;
     picture.use_argb = 1;
-    const uint8_t *data = pixels->pixels;
-    size_t stride = pixels->stride;
-    if (pixels->channels == 1) {
-        uint8_t *rgb = (uint8_t *)image_op_alloc(op, (size_t)pixels->width * pixels->height * 3, false);
-        if (!rgb)
-            return op->error->code;
-        for (uint32_t y = 0; y < pixels->height; y++)
-            for (uint32_t x = 0; x < pixels->width; x++)
-                memset(rgb + ((size_t)y * pixels->width + x) * 3, data[(size_t)y * stride + x], 3);
-        data = rgb;
-        stride = (size_t)pixels->width * 3;
-    }
-    int imported = pixels->channels == 4 ? WebPPictureImportRGBA(&picture, data, (int)stride)
-                                         : WebPPictureImportRGB(&picture, data, (int)stride);
+    int imported = prepared.channels == 4 ? WebPPictureImportRGBA(&picture, prepared.pixels, (int)prepared.stride)
+                                           : WebPPictureImportRGB(&picture, prepared.pixels, (int)prepared.stride);
     if (!imported) {
         WebPPictureFree(&picture);
         return image_fail(op, IMAGE_OUT_OF_MEMORY, "cannot import WebP pixels");

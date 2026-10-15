@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <tiffio.h>
+#include <avif/avif.h>
 
 static const ImageCodecFormat writable_formats[] = {IMAGE_CODEC_PNG,  IMAGE_CODEC_JPEG, IMAGE_CODEC_WEBP,
                                                     IMAGE_CODEC_AVIF, IMAGE_CODEC_BMP,  IMAGE_CODEC_TIFF,
@@ -82,6 +83,211 @@ TEST(ImageIO, LosslessTransparency) {
             ASSERT_EQ(decoded.pixels[i], fixture.pixels[i]) << "byte " << i;
         image_decoded_dispose(&decoded);
         image_free(bytes.data);
+    }
+}
+// exercise layouts at the public boundary so shared conversion cannot read row padding.
+TEST(ImageIO, ChannelLayoutsAndPremultipliedInputs) {
+    const uint8_t channels[] = {1, 3, 4};
+    const uint8_t samples[] = {96, 128, 160};
+    for (ImageCodecFormat format : writable_formats) {
+        SCOPED_TRACE(image_codec_capabilities(format)->name);
+        for (uint8_t count : channels) {
+            SCOPED_TRACE(count);
+            for (bool premultiplied : {false, true}) {
+                if (premultiplied && count != 4)
+                    continue;
+                uint8_t pixels[3 * (5 * 4 + 7)], original[sizeof(pixels)];
+                memset(pixels, 0xa7, sizeof(pixels));
+                size_t stride = 5 * count + 7;
+                for (unsigned y = 0; y < 3; y++)
+                    for (unsigned x = 0; x < 5; x++) {
+                        uint8_t *p = pixels + y * stride + x * count;
+                        for (unsigned c = 0; c < count; c++)
+                            p[c] = c == 3 ? 128 : premultiplied ? samples[c] / 2 : samples[c];
+                    }
+                memcpy(original, pixels, sizeof(pixels));
+                ImagePixelView view = {pixels, sizeof(pixels), stride, 5, 3, count, premultiplied};
+                ImageEncodeOptions options;
+                image_encode_options_init(&options, format);
+                options.lossless = true;
+                options.quality = 100;
+                options.has_background = true;
+                options.background[0] = 32;
+                options.background[1] = 64;
+                options.background[2] = 96;
+                ImageEncoded bytes = {};
+                ImageError error = {};
+                ASSERT_EQ(image_encode_to_memory(NULL, &view, &options, &bytes, &error), IMAGE_OK)
+                    << error.message;
+                EXPECT_EQ(memcmp(pixels, original, sizeof(pixels)), 0);
+                ImageSource source = image_source_memory(bytes.data, bytes.length);
+                ImageDecoded decoded = {};
+                ASSERT_EQ(image_decode(NULL, &source, NULL, &decoded, &error), IMAGE_OK) << error.message;
+                bool flatten = format == IMAGE_CODEC_JPEG || format == IMAGE_CODEC_BMP;
+                for (size_t i = 0; i < decoded.size; i++) {
+                    unsigned c = i % 4;
+                    uint8_t expected = c == 3 ? (count == 4 && !flatten ? 128 : 255)
+                                              : count == 1 ? samples[0] : samples[c];
+                    if (count == 4 && c < 3) {
+                        unsigned sample = premultiplied ? samples[c] / 2 : samples[c];
+                        if (premultiplied && format != IMAGE_CODEC_JPEG)
+                            sample = (sample * 255 + 64) / 128;
+                        expected = flatten ? (sample * (premultiplied && format == IMAGE_CODEC_JPEG ? 255 : 128) +
+                                              options.background[c] * 127 + 127) / 255 : sample;
+                    }
+                    if (format == IMAGE_CODEC_JPEG)
+                        EXPECT_NEAR(decoded.pixels[i], expected, 3) << "byte " << i;
+                    else
+                        ASSERT_EQ(decoded.pixels[i], expected) << "byte " << i;
+                }
+                image_decoded_dispose(&decoded);
+                image_free(bytes.data);
+            }
+        }
+    }
+}
+TEST(ImageIO, AlphaFlatteningRequiresBackground) {
+    ImageFixture fixture;
+    // the BMP writer visits the last row first; fail after it has already produced opaque rows.
+    fixture.pixels[3] = 0;
+    const ImageCodecFormat formats[] = {IMAGE_CODEC_JPEG, IMAGE_CODEC_BMP};
+    for (ImageCodecFormat format : formats) {
+        SCOPED_TRACE(image_codec_capabilities(format)->name);
+        ImageEncoded bytes = {};
+        ImageError error = {};
+        EXPECT_EQ(encode_fixture(&fixture, format, &bytes, &error), IMAGE_INVALID_ARGUMENT);
+        EXPECT_EQ(error.format, format);
+        EXPECT_STREQ(error.operation, "encode");
+        EXPECT_NE(strstr(error.message, "background"), nullptr);
+        EXPECT_EQ(bytes.data, nullptr);
+        EXPECT_EQ(bytes.length, 0u);
+    }
+}
+struct ImageWarningCapture {
+    unsigned count;
+    ImageError warning;
+};
+static void capture_image_warning(void *user, const ImageError *warning) {
+    ImageWarningCapture *capture = (ImageWarningCapture *)user;
+    capture->count++;
+    capture->warning = *warning;
+}
+TEST(ImageIO, RecoverableMetadataWarningsUseOperationContext) {
+    ImageFixture fixture;
+    const ImageCodecFormat formats[] = {IMAGE_CODEC_PNG, IMAGE_CODEC_TIFF};
+    for (ImageCodecFormat format : formats) {
+        SCOPED_TRACE(image_codec_capabilities(format)->name);
+        ImageEncoded bytes = {};
+        ImageError error = {};
+        ASSERT_EQ(encode_fixture(&fixture, format, &bytes, &error), IMAGE_OK);
+        uint8_t tagged[8192];
+        ASSERT_LE(bytes.length + 15, sizeof(tagged));
+        size_t length = bytes.length;
+        if (format == IMAGE_CODEC_PNG) {
+            memcpy(tagged, bytes.data, 33);
+            // invalid significant-bit metadata is recoverable; the pixels remain intact.
+            write_be32(tagged + 33, 3);
+            memcpy(tagged + 37, "sBIT", 4);
+            memset(tagged + 41, 9, 3);
+            memset(tagged + 44, 0, 4);
+            memcpy(tagged + 48, bytes.data + 33, bytes.length - 33);
+            length += 15;
+        } else {
+            memcpy(tagged, bytes.data, bytes.length);
+            bool little = tagged[0] == 'I';
+            size_t offset = little ? read_le32(tagged + 4) : read_be32(tagged + 4);
+            ASSERT_LE(offset + 2, length);
+            unsigned count = little ? read_le16(tagged + offset) : read_be16(tagged + offset);
+            bool replaced = false;
+            for (unsigned i = 0; i < count; i++) {
+                uint8_t *entry = tagged + offset + 2 + i * 12;
+                ASSERT_LE((size_t)(entry - tagged) + 12, length);
+                unsigned tag = little ? read_le16(entry) : read_be16(entry);
+                if (tag == TIFFTAG_ORIENTATION) {
+                    // an unknown optional TIFF tag warns and leaves the default orientation.
+                    if (little) write_le16(entry, 65000);
+                    else write_be16(entry, 65000);
+                    replaced = true;
+                }
+            }
+            ASSERT_TRUE(replaced);
+        }
+        ImageContext context;
+        image_context_init(&context);
+        ImageWarningCapture capture = {};
+        context.warning = capture_image_warning;
+        context.user = &capture;
+        ImageSource source = image_source_memory(tagged, length);
+        ImageDecoded image = {};
+        ASSERT_EQ(image_decode(&context, &source, NULL, &image, &error), IMAGE_OK) << error.message;
+        ASSERT_GT(capture.count, 0u);
+        EXPECT_EQ(capture.warning.code, IMAGE_OK);
+        EXPECT_EQ(capture.warning.format, format);
+        EXPECT_STREQ(capture.warning.operation, "decode");
+        EXPECT_NE(capture.warning.message[0], '\0');
+        EXPECT_EQ(memcmp(image.pixels, fixture.pixels, sizeof(fixture.pixels)), 0);
+        image_decoded_dispose(&image);
+        image_free(bytes.data);
+    }
+}
+static void expect_oriented_corners(const ImageDecoded *actual, const uint8_t *reference,
+                                    uint32_t width, uint32_t height, unsigned orientation) {
+    // corner labels are TL, TR, BL, BR; this asserts observable EXIF placement.
+    static const unsigned corners[8][4] = {{0, 1, 2, 3}, {1, 0, 3, 2}, {3, 2, 1, 0}, {2, 3, 0, 1},
+                                           {0, 2, 1, 3}, {2, 0, 3, 1}, {3, 1, 2, 0}, {1, 3, 0, 2}};
+    ASSERT_EQ(actual->width, orientation >= 5 ? height : width);
+    ASSERT_EQ(actual->height, orientation >= 5 ? width : height);
+    for (unsigned i = 0; i < 4; i++) {
+        unsigned source = corners[orientation - 1][i];
+        const uint8_t *expected = reference + ((source / 2) * (height - 1) * width +
+                                               (source % 2) * (width - 1)) * 4;
+        const uint8_t *pixel = actual->pixels + (i / 2) * (actual->height - 1) * actual->stride +
+                                                (i % 2) * (actual->width - 1) * 4;
+        EXPECT_EQ(memcmp(pixel, expected, 4), 0) << "corner " << i;
+    }
+}
+TEST(ImageIO, AvifRotationsAndMirrorsPlacePixels) {
+    ImageFixture fixture;
+    // irot is counterclockwise; imir axis 0 flips vertically, axis 1 horizontally.
+    const unsigned orientations[4][3] = {{1, 4, 2}, {8, 5, 7}, {3, 2, 4}, {6, 7, 5}};
+    for (unsigned angle = 0; angle < 4; angle++) {
+        for (unsigned mirror = 0; mirror < 3; mirror++) {
+            SCOPED_TRACE(angle * 3 + mirror);
+            avifImage *image = avifImageCreate(32, 24, 8, AVIF_PIXEL_FORMAT_YUV444);
+            ASSERT_NE(image, nullptr);
+            image->matrixCoefficients = AVIF_MATRIX_COEFFICIENTS_IDENTITY;
+            image->yuvRange = AVIF_RANGE_FULL;
+            image->transformFlags = AVIF_TRANSFORM_IROT;
+            image->irot.angle = (uint8_t)angle;
+            if (mirror) {
+                image->transformFlags |= AVIF_TRANSFORM_IMIR;
+                image->imir.axis = (uint8_t)(mirror - 1);
+            }
+            avifRGBImage rgb;
+            avifRGBImageSetDefaults(&rgb, image);
+            rgb.format = AVIF_RGB_FORMAT_RGBA;
+            rgb.pixels = fixture.pixels;
+            rgb.rowBytes = (uint32_t)fixture.view.stride;
+            ASSERT_EQ(avifImageRGBToYUV(image, &rgb), AVIF_RESULT_OK);
+            avifEncoder *encoder = avifEncoderCreate();
+            ASSERT_NE(encoder, nullptr);
+            encoder->quality = encoder->qualityAlpha = AVIF_QUALITY_LOSSLESS;
+            encoder->speed = 10;
+            avifRWData bytes = AVIF_DATA_EMPTY;
+            ASSERT_EQ(avifEncoderWrite(encoder, image, &bytes), AVIF_RESULT_OK) << encoder->diag.error;
+            ImageSource source = image_source_memory(bytes.data, bytes.size);
+            ImageInfo info = {};
+            ImageError error = {};
+            ASSERT_EQ(image_probe(NULL, &source, &info, &error), IMAGE_OK) << error.message;
+            EXPECT_EQ(info.orientation, orientations[angle][mirror]);
+            ImageDecoded decoded = {};
+            ASSERT_EQ(image_decode(NULL, &source, NULL, &decoded, &error), IMAGE_OK) << error.message;
+            expect_oriented_corners(&decoded, fixture.pixels, 32, 24, orientations[angle][mirror]);
+            image_decoded_dispose(&decoded);
+            avifRWDataFree(&bytes);
+            avifEncoderDestroy(encoder);
+            avifImageDestroy(image);
+        }
     }
 }
 TEST(ImageIO, ThumbnailBoundsAndStrategy) {
@@ -314,6 +520,9 @@ TEST(ImageIO, ExifOrientationUsesDisplayedThumbnailBounds) {
     ImageEncoded bytes = {};
     ImageError error = {};
     ASSERT_EQ(encode_fixture(&fixture, IMAGE_CODEC_JPEG, &bytes, &error), IMAGE_OK);
+    ImageSource raw_source = image_source_memory(bytes.data, bytes.length);
+    ImageDecoded reference = {};
+    ASSERT_EQ(image_decode(NULL, &raw_source, NULL, &reference, &error), IMAGE_OK);
     uint8_t tagged[8192] = {};
     ASSERT_LE(bytes.length + 36, sizeof(tagged));
     memcpy(tagged, bytes.data, 2);
@@ -342,7 +551,11 @@ TEST(ImageIO, ExifOrientationUsesDisplayedThumbnailBounds) {
         EXPECT_EQ(image.height, orientation >= 5 ? 9u : 6u);
         EXPECT_EQ(image.info.orientation, 1);
         image_decoded_dispose(&image);
+        ASSERT_EQ(image_decode(NULL, &source, NULL, &image, &error), IMAGE_OK) << error.message;
+        expect_oriented_corners(&image, reference.pixels, reference.width, reference.height, orientation);
+        image_decoded_dispose(&image);
     }
+    image_decoded_dispose(&reference);
     image_free(bytes.data);
 }
 

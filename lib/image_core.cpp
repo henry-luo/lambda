@@ -167,6 +167,18 @@ ImageStatus image_fail(ImageOperation *op, ImageStatus code, const char *message
     va_end(args);
     return code;
 }
+void image_warn(ImageOperation *op, ImageCodecFormat format, const char *message, ...) {
+    if (!op->context->warning)
+        return;
+    ImageError warning = {};
+    warning.format = format;
+    snprintf(warning.operation, sizeof(warning.operation), "%s", op->name);
+    va_list args;
+    va_start(args, message);
+    vsnprintf(warning.message, sizeof(warning.message), message, args);
+    va_end(args);
+    op->context->warning(op->context->user, &warning);
+}
 bool image_op_cancelled(ImageOperation *op) {
     if (!op->context->cancelled || !op->context->cancelled(op->context->user))
         return false;
@@ -451,6 +463,10 @@ void image_reducer_finish(ImageReducer *r) {
     image_op_free(r->op, r->sums);
     r->sums = NULL;
 }
+// the eight EXIF transforms also describe AVIF's composed irot/imir metadata.
+const int8_t image_orientation_matrices[8][4] = {
+    {1, 0, 0, 1}, {-1, 0, 0, 1}, {-1, 0, 0, -1}, {1, 0, 0, -1},
+    {0, 1, 1, 0}, {0, -1, 1, 0}, {0, -1, -1, 0}, {0, 1, -1, 0}};
 bool image_normalize_pixels(ImageOperation *op, ImageDecoded *image) {
     unsigned o = image->info.orientation;
     if (o <= 1 || o > 8)
@@ -459,42 +475,18 @@ bool image_normalize_pixels(ImageOperation *op, ImageDecoded *image) {
     if (!image_allocate_pixels(op, o >= 5 ? image->height : image->width,
                                o >= 5 ? image->width : image->height, &next))
         return false;
+    const int8_t *m = image_orientation_matrices[o - 1];
+    int64_t dx0 = m[0] < 0 ? image->width - 1 : m[1] < 0 ? image->height - 1 : 0;
+    int64_t dy0 = m[2] < 0 ? image->width - 1 : m[3] < 0 ? image->height - 1 : 0;
+    int64_t step = m[0] * 4 + m[2] * (int64_t)next.stride;
     for (uint32_t y = 0; y < image->height; y++) {
         if (image_op_cancelled(op))
             return false;
-        for (uint32_t x = 0; x < image->width; x++) {
-            uint32_t dx = x, dy = y;
-            switch (o) {
-            case 2:
-                dx = image->width - 1 - x;
-                break;
-            case 3:
-                dx = image->width - 1 - x;
-                dy = image->height - 1 - y;
-                break;
-            case 4:
-                dy = image->height - 1 - y;
-                break;
-            case 5:
-                dx = y;
-                dy = x;
-                break;
-            case 6:
-                dx = image->height - 1 - y;
-                dy = x;
-                break;
-            case 7:
-                dx = image->height - 1 - y;
-                dy = image->width - 1 - x;
-                break;
-            case 8:
-                dx = y;
-                dy = image->width - 1 - x;
-                break;
-            }
-            memcpy(next.pixels + (size_t)dy * next.stride + dx * 4,
+        uint8_t *row = next.pixels + (dy0 + m[3] * (int64_t)y) * next.stride +
+                                    (dx0 + m[1] * (int64_t)y) * 4;
+        for (uint32_t x = 0; x < image->width; x++)
+            memcpy(row + x * step,
                    image->pixels + (size_t)y * image->stride + x * 4, 4);
-        }
     }
     image_op_free(op, image->pixels);
     image->pixels = next.pixels;
@@ -690,19 +682,8 @@ static ImageStatus image_encode_run(ImageOperation *operation, const ImagePixelV
             return op.error->code;
         ImagePixelView straight = *pixels;
         if (pixels->premultiplied && op.format != IMAGE_CODEC_PNG && op.format != IMAGE_CODEC_JPEG) {
-            size_t bytes;
-            if (!math_checked_mul(row, pixels->height, &bytes))
-                return image_fail(&op, IMAGE_LIMIT_EXCEEDED, "straight pixel layout overflow");
-            uint8_t *buffer = (uint8_t *)image_op_alloc(&op, bytes, false);
-            if (!buffer)
+            if (!image_prepare_pixels(&op, pixels, 4, NULL, &straight))
                 return op.error->code;
-            for (uint32_t y = 0; y < pixels->height; y++)
-                image_unpremultiply_rgba_row(buffer + (size_t)y * row,
-                                             pixels->pixels + (size_t)y * pixels->stride, pixels->width);
-            straight.pixels = buffer;
-            straight.capacity = bytes;
-            straight.stride = row;
-            straight.premultiplied = false;
             pixels = &straight;
         }
         if (!image_codecs[op.format].encode)
@@ -727,6 +708,52 @@ void image_unpremultiply_rgba_row(uint8_t *destination, const uint8_t *source, s
             destination[x * 4 + c] = image_unpremultiply_channel(source[x * 4 + c], alpha);
         destination[x * 4 + 3] = alpha;
     }
+}
+bool image_rgb_row(ImageOperation *op, const ImagePixelView *pixels, uint32_t y,
+                   uint8_t *output, const uint8_t *background, bool bgr) {
+    const uint8_t *source = pixels->pixels + (size_t)y * pixels->stride;
+    for (uint32_t x = 0; x < pixels->width; x++, source += pixels->channels, output += 3) {
+        unsigned alpha = pixels->channels == 4 ? source[3] : 255;
+        if (alpha != 255 && !background) {
+            image_fail(op, IMAGE_INVALID_ARGUMENT, "%s alpha requires an explicit background",
+                       image_codecs[op->format].capabilities.name);
+            return false;
+        }
+        for (unsigned c = 0; c < 3; c++) {
+            unsigned index = bgr ? 2 - c : c;
+            unsigned sample = source[pixels->channels == 1 ? 0 : index];
+            // composite premultiplied JPEG samples directly without an intermediate rounding step.
+            output[c] = (uint8_t)((sample * (pixels->premultiplied ? 255 : alpha) +
+                                  (background ? background[index] : 0) * (255 - alpha) + 127) / 255);
+        }
+    }
+    return true;
+}
+bool image_prepare_pixels(ImageOperation *op, const ImagePixelView *pixels, uint8_t channels,
+                          const uint8_t *background, ImagePixelView *output) {
+    *output = *pixels;
+    if (channels == pixels->channels && !pixels->premultiplied)
+        return true;
+    size_t stride, bytes;
+    if (!math_checked_mul(pixels->width, channels, &stride) ||
+        !math_checked_mul(stride, pixels->height, &bytes)) {
+        image_fail(op, IMAGE_LIMIT_EXCEEDED, "converted pixel layout overflow");
+        return false;
+    }
+    uint8_t *buffer = (uint8_t *)image_op_alloc(op, bytes, false);
+    if (!buffer)
+        return false;
+    for (uint32_t y = 0; y < pixels->height; y++) {
+        if (image_op_cancelled(op))
+            return false;
+        uint8_t *row = buffer + (size_t)y * stride;
+        if (channels == 4)
+            image_unpremultiply_rgba_row(row, pixels->pixels + (size_t)y * pixels->stride, pixels->width);
+        else if (!image_rgb_row(op, pixels, y, row, background, false))
+            return false;
+    }
+    *output = {buffer, bytes, stride, pixels->width, pixels->height, channels, false};
+    return true;
 }
 ImageStatus image_encode(ImageContext *context, const ImagePixelView *pixels,
                          const ImageEncodeOptions *options, const ImageSink *sink, ImageError *error) {

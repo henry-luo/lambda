@@ -31,7 +31,7 @@
 #include <stdint.h>
 
 #include <libnsbmp.h>
-/* shared Lambda helpers also resolve when codec sources are staged out of tree. */
+/* use Lambda byte-order and allocation helpers across image codecs. */
 #include "lib/endian.h"
 #include "lib/memtrack.h"
 
@@ -58,22 +58,6 @@ static inline uint8_t read_uint8(uint8_t *data, unsigned int o) {
         return (uint8_t) data[o];
 }
 
-static inline int16_t read_int16(uint8_t *data, unsigned int o) {
-        return read_le16s(data + o);
-}
-
-static inline uint16_t read_uint16(uint8_t *data, unsigned int o) {
-        return read_le16(data + o);
-}
-
-static inline int32_t read_int32(uint8_t *data, unsigned int o) {
-        return read_le32s(data + o);
-}
-
-static inline uint32_t read_uint32(uint8_t *data, unsigned int o) {
-        return read_le32(data + o);
-}
-
 
 /**
  * Parse the bitmap info header
@@ -94,7 +78,7 @@ static bmp_result bmp_info_header_parse(bmp_image *bmp, uint8_t *data)
                 return BMP_INSUFFICIENT_DATA;
         }
 
-        header_size = read_uint32(data, 0);
+        header_size = read_le32(data);
 
         /* ensure there is enough data for the declared header size*/
         if ((bmp->buffer_size - file_header_size) < header_size) {
@@ -113,8 +97,8 @@ static bmp_result bmp_info_header_parse(bmp_image *bmp, uint8_t *data)
                  *	+8	UINT16	number of colour planes (always 1)
                  *	+10	UINT16	number of bits per pixel
                  */
-                width = read_int16(data, 4);
-                height = read_int16(data, 6);
+                width = read_le16s(data + 4);
+                height = read_le16s(data + 6);
                 if ((width <= 0) || (height == 0))
                         return BMP_DATA_ERROR;
                 if (height < 0) {
@@ -138,9 +122,9 @@ static bmp_result bmp_info_header_parse(bmp_image *bmp, uint8_t *data)
                         bmp->width = width;
                         bmp->height = height;
                 }
-                if (read_uint16(data, 8) != 1)
+                if (read_le16(data + 8) != 1)
                         return BMP_DATA_ERROR;
-                bmp->bpp = read_uint16(data, 10);
+                bmp->bpp = read_le16(data + 10);
                 /**
                  * The bpp value should be in the range 1-32, but the only
                  * values considered legal are:
@@ -190,8 +174,8 @@ static bmp_result bmp_info_header_parse(bmp_image *bmp, uint8_t *data)
                  *	+100	UINT32	gamma green coordinate scale value
                  *	+104	UINT32	gamma blue coordinate scale value
                  */
-                width = read_int32(data, 4);
-                height = read_int32(data, 8);
+                width = read_le32s(data + 4);
+                height = read_le32s(data + 8);
                 if ((width <= 0) || (height == 0))
                         return BMP_DATA_ERROR;
                 if (height < 0) {
@@ -219,12 +203,12 @@ static bmp_result bmp_info_header_parse(bmp_image *bmp, uint8_t *data)
                         bmp->width = width;
                         bmp->height = height;
                 }
-                if (read_uint16(data, 12) != 1)
+                if (read_le16(data + 12) != 1)
                         return BMP_DATA_ERROR;
-                bmp->bpp = read_uint16(data, 14);
+                bmp->bpp = read_le16(data + 14);
                 if (bmp->bpp == 0)
                         bmp->bpp = 8;
-                bmp->encoding = read_uint32(data, 16);
+                bmp->encoding = read_le32(data + 16);
                 /**
                  * The bpp value should be in the range 1-32, but the only
                  * values considered legal are:
@@ -269,12 +253,12 @@ static bmp_result bmp_info_header_parse(bmp_image *bmp, uint8_t *data)
                                 if (bmp->buffer_size < (file_header_size + header_size))
                                         return BMP_INSUFFICIENT_DATA;
                                 for (i = 0; i < 3; i++)
-                                        bmp->mask[i] = read_uint32(data, 40 + (i << 2));
+                                        bmp->mask[i] = read_le32(data + 40 + (i << 2));
                         } else {
                                 if (header_size < 56)
                                         return BMP_INSUFFICIENT_DATA;
                                 for (i = 0; i < 4; i++)
-                                        bmp->mask[i] = read_uint32(data, 40 + (i << 2));
+                                        bmp->mask[i] = read_le32(data + 40 + (i << 2));
                         }
                         for (i = 0; i < 4; i++) {
                                 if (bmp->mask[i] == 0)
@@ -290,7 +274,7 @@ static bmp_result bmp_info_header_parse(bmp_image *bmp, uint8_t *data)
                                         }
                         }
                 }
-                bmp->colours = read_uint32(data, 32);
+                bmp->colours = read_le32(data + 32);
                 if (bmp->colours == 0 && bmp->bpp < 16)
                         bmp->colours = (1 << bmp->bpp);
                 palette_size = 4;
@@ -330,7 +314,7 @@ static bmp_result bmp_info_header_parse(bmp_image *bmp, uint8_t *data)
                         if (bmp->opaque)
                                 colour |= ((uint32_t)0xff << 24);
                         data += palette_size;
-                        bmp->colour_table[i] = read_uint32((uint8_t *)&colour,0);
+                        bmp->colour_table[i] = read_le32((uint8_t *)&colour);
                 }
 
                 /* some bitmaps have a bad offset if there is a pallete, work
@@ -387,7 +371,7 @@ static bmp_result bmp_file_header_parse(bmp_image *bmp, uint8_t *data)
         if ((data[0] != (uint8_t)'B') || (data[1] != (uint8_t)'M'))
                 return BMP_DATA_ERROR;
 
-        bmp->bitmap_offset = read_uint32(data, 10);
+        bmp->bitmap_offset = read_le32(data + 10);
 
         /* check the offset to data lies within the file */
         if (bmp->bitmap_offset >= bmp->buffer_size) {
@@ -435,11 +419,11 @@ static bmp_result ico_header_parse(ico_collection *ico, uint8_t *data)
          */
         if (ico->buffer_size < ICO_FILE_HEADER_SIZE)
                 return BMP_INSUFFICIENT_DATA;
-        //      if (read_int16(data, 2) != 0x0000)
+        //      if (read_le16s(data + 2) != 0x0000)
         //              return BMP_DATA_ERROR;
-        if (read_uint16(data, 2) != 0x0001)
+        if (read_le16(data + 2) != 0x0001)
                 return BMP_DATA_ERROR;
-        count = read_uint16(data, 4);
+        count = read_le16(data + 4);
         if (count == 0)
                 return BMP_DATA_ERROR;
         data += ICO_FILE_HEADER_SIZE;
@@ -475,9 +459,9 @@ static bmp_result ico_header_parse(ico_collection *ico, uint8_t *data)
                 image->bmp.height = read_uint8(data, 1);
                 if (image->bmp.height == 0)
                         image->bmp.height = 256;
-                image->bmp.buffer_size = read_uint32(data, 8);
+                image->bmp.buffer_size = read_le32(data + 8);
                 /* validate integer ranges before forming a pointer into hostile input. */
-                uint32_t offset = read_uint32(data, 12);
+                uint32_t offset = read_le32(data + 12);
                 if (offset > ico->buffer_size ||
                     image->bmp.buffer_size > ico->buffer_size - offset)
                         return BMP_INSUFFICIENT_DATA;
@@ -537,7 +521,7 @@ static bmp_result bmp_decode_rgb32(bmp_image *bmp, uint8_t **start, int bytes)
                 if ((data + 4) > end)
                         return BMP_INSUFFICIENT_DATA;
                 if (bmp->encoding == BMP_ENCODING_BITFIELDS)
-                        bmp->transparent_index = read_uint32(data, 0);
+                        bmp->transparent_index = read_le32(data);
                 else
                         bmp->transparent_index = data[2] | (data[1] << 8) | (data[0] << 16);
         }
@@ -551,7 +535,7 @@ static bmp_result bmp_decode_rgb32(bmp_image *bmp, uint8_t **start, int bytes)
                         scanline = (void *)(bottom - (y * swidth));
                 if (bmp->encoding == BMP_ENCODING_BITFIELDS) {
                         for (x = 0; x < bmp->width; x++) {
-                                word = read_uint32(data, 0);
+                                word = read_le32(data);
                                 for (i = 0; i < 4; i++)
                                         if (bmp->shift[i] > 0)
                                                 scanline[x] |= ((word & bmp->mask[i]) << bmp->shift[i]);
@@ -561,7 +545,7 @@ static bmp_result bmp_decode_rgb32(bmp_image *bmp, uint8_t **start, int bytes)
                                 if (bmp->opaque)
                                         scanline[x] |= ((unsigned)0xff << 24);
                                 data += 4;
-                                scanline[x] = read_uint32((uint8_t *)&scanline[x],0);
+                                scanline[x] = read_le32((uint8_t *)&scanline[x]);
                         }
                 } else {
                         for (x = 0; x < bmp->width; x++) {
@@ -575,7 +559,7 @@ static bmp_result bmp_decode_rgb32(bmp_image *bmp, uint8_t **start, int bytes)
                                         scanline[x] |= (unsigned)data[3] << 24;
                                 }
                                 data += 4;
-                                scanline[x] = read_uint32((uint8_t *)&scanline[x],0);
+                                scanline[x] = read_le32((uint8_t *)&scanline[x]);
                         }
                 }
         }
@@ -645,7 +629,7 @@ static bmp_result bmp_decode_rgb24(bmp_image *bmp, uint8_t **start, int bytes)
                                 scanline[x] |= ((uint32_t)0xff << 24);
                         }
                         data += 3;
-                        scanline[x] = read_uint32((uint8_t *)&scanline[x],0);
+                        scanline[x] = read_le32((uint8_t *)&scanline[x]);
                 }
 
                 while (addr != (((intptr_t)data) & 3)) {
@@ -690,7 +674,7 @@ static bmp_result bmp_decode_rgb16(bmp_image *bmp, uint8_t **start, int bytes)
         if (bmp->limited_trans) {
                 if ((data + 2) > end)
                         return BMP_INSUFFICIENT_DATA;
-                bmp->transparent_index = read_uint16(data, 0);
+                bmp->transparent_index = read_le16(data);
         }
 
         for (y = 0; y < bmp->height; y++) {
@@ -702,7 +686,7 @@ static bmp_result bmp_decode_rgb16(bmp_image *bmp, uint8_t **start, int bytes)
                         scanline = (void *)(bottom - (y * swidth));
                 if (bmp->encoding == BMP_ENCODING_BITFIELDS) {
                         for (x = 0; x < bmp->width; x++) {
-                                word = read_uint16(data, 0);
+                                word = read_le16(data);
                                 if ((bmp->limited_trans) && (word == bmp->transparent_index))
                                         scanline[x] = bmp->trans_colour;
                                 else {
@@ -716,11 +700,11 @@ static bmp_result bmp_decode_rgb16(bmp_image *bmp, uint8_t **start, int bytes)
                                                 scanline[x] |= ((unsigned)0xff << 24);
                                 }
                                 data += 2;
-                                scanline[x] = read_uint32((uint8_t *)&scanline[x],0);
+                                scanline[x] = read_le32((uint8_t *)&scanline[x]);
                         }
                 } else {
                         for (x = 0; x < bmp->width; x++) {
-                                word = read_uint16(data, 0);
+                                word = read_le16(data);
                                 if ((bmp->limited_trans) && (word == bmp->transparent_index))
                                         scanline[x] = bmp->trans_colour;
                                 else {
@@ -732,7 +716,7 @@ static bmp_result bmp_decode_rgb16(bmp_image *bmp, uint8_t **start, int bytes)
                                 if (bmp->opaque)
                                         scanline[x] |= ((unsigned)0xff << 24);
                                 data += 2;
-                                scanline[x] = read_uint32((uint8_t *)&scanline[x],0);
+                                scanline[x] = read_le32((uint8_t *)&scanline[x]);
                         }
                 }
                 while (addr != (((intptr_t)data) & 3))
@@ -857,13 +841,13 @@ static bmp_result bmp_decode_mask(bmp_image *bmp, uint8_t *data, int bytes)
                 for (x = 0; x < bmp->width; x++) {
                         if ((x & 7) == 0)
                                 cur_byte = *data++;
-                        scanline[x] = read_uint32((uint8_t *)&scanline[x], 0);
+                        scanline[x] = read_le32((uint8_t *)&scanline[x]);
                         if ((cur_byte & 128) == 0) {
                                 scanline[x] |= ((unsigned)0xff << 24);
                         } else {
                                 scanline[x] &= 0xffffff;
                         }
-                        scanline[x] = read_uint32((uint8_t *)&scanline[x], 0);
+                        scanline[x] = read_le32((uint8_t *)&scanline[x]);
                         cur_byte = cur_byte << 1;
                 }
                 while (addr != (((intptr_t)data) & 3))

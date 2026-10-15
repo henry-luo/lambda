@@ -11,6 +11,10 @@ Spec linkage: **D7.1.1–D7.1.3** (codec mechanisms versus resource acquisition)
 **S7.4.3–S7.4.4** (faults and rich errors), **S17.8.1** (option validation).
 No formal ruling changes are introduced.
 
+The subsequent [utility consolidation analysis](Lib_Image_Refactor.md) records
+shared pixel preparation, orientation, warnings, output buffering, endian
+helpers, and measured release source/binary changes.
+
 ## Implementation
 
 `lib/image.h` exposes a C ABI for memory/random-access sources, probing,

@@ -101,43 +101,19 @@ ImageStatus image_jpeg_decode(ImageOperation *op, const ImageSource *source,
 }
 ImageStatus image_jpeg_encode(ImageOperation *op, const ImagePixelView *pixels,
                               const ImageEncodeOptions *options, const ImageSink *sink) {
-    const uint8_t *input = pixels->pixels;
-    size_t stride = pixels->stride;
+    ImagePixelView prepared;
+    if (!image_prepare_pixels(op, pixels, pixels->channels == 4 ? 3 : pixels->channels,
+                              options->has_background ? options->background : NULL, &prepared))
+        return op->error->code;
     int format = pixels->channels == 1 ? TJPF_GRAY : TJPF_RGB;
-    if (pixels->channels == 4) {
-        size_t bytes;
-        if (!math_checked_mul((size_t)pixels->width * pixels->height, 3, &bytes))
-            return image_fail(op, IMAGE_LIMIT_EXCEEDED, "JPEG RGB layout overflow");
-        uint8_t *rgb = (uint8_t *)image_op_alloc(op, bytes, false);
-        if (!rgb)
-            return op->error->code;
-        for (uint32_t y = 0; y < pixels->height; y++) {
-            if (image_op_cancelled(op))
-                return op->error->code;
-            const uint8_t *row = input + (size_t)y * stride;
-            for (uint32_t x = 0; x < pixels->width; x++) {
-                unsigned alpha = row[x * 4 + 3];
-                if (alpha != 255 && !options->has_background)
-                    return image_fail(op, IMAGE_INVALID_ARGUMENT,
-                                      "JPEG alpha requires an explicit background");
-                for (unsigned c = 0; c < 3; c++)
-                    rgb[((size_t)y * pixels->width + x) * 3 + c] =
-                        (uint8_t)((row[x * 4 + c] * (pixels->premultiplied ? 255 : alpha) +
-                                   options->background[c] * (255 - alpha) + 127) /
-                                  255);
-            }
-        }
-        input = rgb;
-        stride = (size_t)pixels->width * 3;
-    }
-    if (stride > INT_MAX)
+    if (prepared.stride > INT_MAX)
         return image_fail(op, IMAGE_LIMIT_EXCEEDED, "JPEG stride exceeds codec range");
     tjhandle handle = tjInitCompress();
     if (!handle)
         return image_fail(op, IMAGE_OUT_OF_MEMORY, "cannot create JPEG encoder");
     unsigned char *encoded = NULL;
     unsigned long length = 0;
-    if (tjCompress2(handle, input, (int)pixels->width, (int)stride, (int)pixels->height, format, &encoded,
+    if (tjCompress2(handle, prepared.pixels, (int)pixels->width, (int)prepared.stride, (int)pixels->height, format, &encoded,
                     &length, pixels->channels == 1 ? TJSAMP_GRAY : TJSAMP_444, options->quality,
                     TJFLAG_ACCURATEDCT) < 0)
         image_jpeg_error(op, handle);

@@ -13,19 +13,17 @@ static ImageStatus image_avif_error(ImageOperation *op, avifResult status,
     return op->error->code;
 }
 static uint8_t image_avif_orientation(const avifImage *image) {
-    static const int matrices[8][4] = {{1, 0, 0, 1}, {-1, 0, 0, 1}, {-1, 0, 0, -1}, {1, 0, 0, -1},
-                                       {0, 1, 1, 0}, {0, -1, 1, 0}, {0, -1, -1, 0}, {0, 1, -1, 0}};
     static const unsigned rotation[4] = {0, 7, 2, 5};
     unsigned angle = image->transformFlags & AVIF_TRANSFORM_IROT ? image->irot.angle : 0;
-    int matrix[4];
-    memcpy(matrix, matrices[rotation[angle & 3]], sizeof(matrix));
+    int8_t matrix[4];
+    memcpy(matrix, image_orientation_matrices[rotation[angle & 3]], sizeof(matrix));
     if (image->transformFlags & AVIF_TRANSFORM_IMIR) {
         unsigned first = image->imir.axis ? 0 : 2;
         matrix[first] = -matrix[first];
         matrix[first + 1] = -matrix[first + 1];
     }
     for (unsigned i = 0; i < 8; i++)
-        if (!memcmp(matrix, matrices[i], sizeof(matrix)))
+        if (!memcmp(matrix, image_orientation_matrices[i], sizeof(matrix)))
             return (uint8_t)(i + 1);
     return 1;
 }
@@ -127,6 +125,9 @@ ImageStatus image_avif_encode(ImageOperation *op, const ImagePixelView *pixels,
                               const ImageEncodeOptions *options, const ImageSink *sink) {
     if ((uint64_t)pixels->width * pixels->height * 8 > op->context->limits.max_scratch_bytes)
         return image_fail(op, IMAGE_LIMIT_EXCEEDED, "AVIF working planes exceed scratch budget");
+    ImagePixelView prepared;
+    if (!image_prepare_pixels(op, pixels, pixels->channels == 1 ? 3 : pixels->channels, NULL, &prepared))
+        return op->error->code;
     avifImage *image = avifImageCreate(pixels->width, pixels->height, 8, AVIF_PIXEL_FORMAT_YUV444);
     if (!image)
         return image_fail(op, IMAGE_OUT_OF_MEMORY, "cannot create AVIF image");
@@ -139,22 +140,8 @@ ImageStatus image_avif_encode(ImageOperation *op, const ImagePixelView *pixels,
     rgb.depth = 8;
     rgb.alphaPremultiplied = AVIF_FALSE;
     rgb.format = pixels->channels == 4 ? AVIF_RGB_FORMAT_RGBA : AVIF_RGB_FORMAT_RGB;
-    const uint8_t *data = pixels->pixels;
-    size_t stride = pixels->stride;
-    if (pixels->channels == 1) {
-        uint8_t *buffer = (uint8_t *)image_op_alloc(op, (size_t)pixels->width * pixels->height * 3, false);
-        if (!buffer) {
-            avifImageDestroy(image);
-            return op->error->code;
-        }
-        for (uint32_t y = 0; y < pixels->height; y++)
-            for (uint32_t x = 0; x < pixels->width; x++)
-                memset(buffer + ((size_t)y * pixels->width + x) * 3, data[(size_t)y * stride + x], 3);
-        data = buffer;
-        stride = (size_t)pixels->width * 3;
-    }
-    rgb.pixels = (uint8_t *)data;
-    rgb.rowBytes = (uint32_t)stride;
+    rgb.pixels = (uint8_t *)prepared.pixels;
+    rgb.rowBytes = (uint32_t)prepared.stride;
     avifResult status = avifImageRGBToYUV(image, &rgb);
     avifEncoder *encoder = NULL;
     avifRWData encoded = AVIF_DATA_EMPTY;

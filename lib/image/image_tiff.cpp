@@ -5,8 +5,8 @@
 typedef struct ImageTiffIO {
     ImageOperation *op;
     const ImageSource *source;
-    uint8_t *buffer;
-    size_t length, capacity, position;
+    ImageByteBuffer buffer;
+    size_t position;
 } ImageTiffIO;
 
 static int image_tiff_diagnostic(TIFF *, void *user, const char *module, const char *format, va_list args) {
@@ -19,28 +19,24 @@ static int image_tiff_diagnostic(TIFF *, void *user, const char *module, const c
 static int image_tiff_warning(TIFF *, void *user, const char *module, const char *format, va_list args) {
     ImageOperation *op = (ImageOperation *)user;
     if (op->context->warning) {
-        ImageError warning = {};
-        warning.format = IMAGE_CODEC_TIFF;
         char text[192];
         vsnprintf(text, sizeof(text), format, args);
-        snprintf(warning.message, sizeof(warning.message), "TIFF %s: %s", module ? module : "codec", text);
-        snprintf(warning.operation, sizeof(warning.operation), "%s", op->name);
-        op->context->warning(op->context->user, &warning);
+        image_warn(op, IMAGE_CODEC_TIFF, "TIFF %s: %s", module ? module : "codec", text);
     }
     return 1;
 }
 static tmsize_t image_tiff_read(thandle_t handle, void *data, tmsize_t requested) {
     ImageTiffIO *io = (ImageTiffIO *)handle;
-    if (requested < 0 || io->position > io->length)
+    if (requested < 0 || io->position > io->buffer.length)
         return 0;
     size_t size = (size_t)requested;
-    if (size > io->length - io->position)
-        size = io->length - io->position;
+    if (size > io->buffer.length - io->position)
+        size = io->buffer.length - io->position;
     if (io->source) {
         if (!image_source_read(io->op, io->source, io->position, data, size))
             return 0;
     } else
-        memcpy(data, io->buffer + io->position, size);
+        memcpy(data, io->buffer.data + io->position, size);
     io->position += size;
     return (tmsize_t)size;
 }
@@ -52,12 +48,8 @@ static tmsize_t image_tiff_write(thandle_t handle, void *data, tmsize_t requeste
     }
     if (image_op_cancelled(io->op))
         return 0;
-    ImageByteBuffer buffer = {io->op, io->buffer, io->length, io->capacity};
-    if (!image_buffer_write_at(&buffer, io->position, data, (size_t)requested))
+    if (!image_buffer_write_at(&io->buffer, io->position, data, (size_t)requested))
         return 0;
-    io->buffer = buffer.data;
-    io->length = buffer.length;
-    io->capacity = buffer.capacity;
     io->position += (size_t)requested;
     return requested;
 }
@@ -65,7 +57,7 @@ static toff_t image_tiff_seek(thandle_t handle, toff_t offset, int whence) {
     ImageTiffIO *io = (ImageTiffIO *)handle;
     uint64_t position = offset;
     if (whence != SEEK_SET) {
-        uint64_t base = whence == SEEK_CUR ? io->position : io->length;
+        uint64_t base = whence == SEEK_CUR ? io->position : io->buffer.length;
         int64_t delta = (int64_t)offset;
         if (delta < 0) {
             uint64_t distance = (uint64_t)(-(delta + 1)) + 1;
@@ -80,7 +72,7 @@ static toff_t image_tiff_seek(thandle_t handle, toff_t offset, int whence) {
     }
     if (position > SIZE_MAX || position > io->op->context->limits.max_encoded_bytes)
         return (toff_t)-1;
-    if (io->source && position > io->length)
+    if (io->source && position > io->buffer.length)
         return (toff_t)-1;
     io->position = (size_t)position;
     return (toff_t)position;
@@ -89,7 +81,7 @@ static int image_tiff_close(thandle_t) {
     return 0;
 }
 static toff_t image_tiff_size(thandle_t handle) {
-    return ((ImageTiffIO *)handle)->length;
+    return ((ImageTiffIO *)handle)->buffer.length;
 }
 static TIFF *image_tiff_open(ImageTiffIO *io, bool write) {
     TIFFOpenOptions *options = TIFFOpenOptionsAlloc();
@@ -136,7 +128,7 @@ static bool image_tiff_info(ImageOperation *op, TIFF *tiff, ImageInfo *info) {
     return image_check_dimensions(op, info->width, info->height);
 }
 ImageStatus image_tiff_probe(ImageOperation *op, const ImageSource *source, ImageInfo *info) {
-    ImageTiffIO io = {op, source, NULL, source->length, 0, 0};
+    ImageTiffIO io = {op, source, {op, NULL, source->length, 0}, 0};
     TIFF *tiff = image_tiff_open(&io, false);
     if (tiff) {
         image_tiff_info(op, tiff, info);
@@ -226,7 +218,7 @@ static uint32_t image_tiff_select_level(ImageOperation *op, TIFF *tiff, const Im
 }
 ImageStatus image_tiff_decode(ImageOperation *op, const ImageSource *source,
                               const ImageDecodeOptions *options, ImageDecoded *result) {
-    ImageTiffIO io = {op, source, NULL, source->length, 0, 0};
+    ImageTiffIO io = {op, source, {op, NULL, source->length, 0}, 0};
     TIFF *tiff = image_tiff_open(&io, false);
     if (!tiff)
         return op->error->code;
@@ -346,7 +338,7 @@ ImageStatus image_tiff_decode(ImageOperation *op, const ImageSource *source,
 }
 ImageStatus image_tiff_encode(ImageOperation *op, const ImagePixelView *pixels, const ImageEncodeOptions *,
                               const ImageSink *sink) {
-    ImageTiffIO io = {op, NULL, NULL, 0, 0, 0};
+    ImageTiffIO io = {op, NULL, {op, NULL, 0, 0}, 0};
     TIFF *tiff = image_tiff_open(&io, true);
     if (!tiff)
         return op->error->code;
@@ -373,6 +365,6 @@ ImageStatus image_tiff_encode(ImageOperation *op, const ImagePixelView *pixels, 
         image_fail(op, IMAGE_INVALID_DATA, "cannot finish TIFF directory");
     TIFFClose(tiff);
     if (op->error->code == IMAGE_OK)
-        image_sink_write(op, sink, io.buffer, io.length);
+        image_sink_write(op, sink, io.buffer.data, io.buffer.length);
     return op->error->code;
 }

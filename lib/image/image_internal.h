@@ -46,6 +46,7 @@ void *image_op_alloc(ImageOperation *op, size_t bytes, bool pixels);
 void image_op_free(ImageOperation *op, void *pointer);
 void image_op_detach(ImageOperation *op, void *pointer);
 ImageStatus image_fail(ImageOperation *op, ImageStatus code, const char *message, ...);
+void image_warn(ImageOperation *op, ImageCodecFormat format, const char *message, ...);
 bool image_op_cancelled(ImageOperation *op);
 bool image_check_dimensions(ImageOperation *op, uint32_t width, uint32_t height);
 bool image_allocate_pixels(ImageOperation *op, uint32_t width, uint32_t height, ImageDecoded *image);
@@ -61,6 +62,11 @@ bool image_reducer_init(ImageReducer *reducer, ImageOperation *op, uint32_t sour
 bool image_reducer_row(ImageReducer *reducer, const uint8_t *rgba, uint32_t y);
 void image_reducer_finish(ImageReducer *reducer);
 bool image_normalize_pixels(ImageOperation *op, ImageDecoded *image);
+extern const int8_t image_orientation_matrices[8][4];
+bool image_rgb_row(ImageOperation *op, const ImagePixelView *pixels, uint32_t y,
+                   uint8_t *output, const uint8_t *background, bool bgr);
+bool image_prepare_pixels(ImageOperation *op, const ImagePixelView *pixels, uint8_t channels,
+                          const uint8_t *background, ImagePixelView *output);
 
 ImageStatus image_png_probe(ImageOperation *, const ImageSource *, ImageInfo *);
 ImageStatus image_png_decode(ImageOperation *, const ImageSource *, const ImageDecodeOptions *,

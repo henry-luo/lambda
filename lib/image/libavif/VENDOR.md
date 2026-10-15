@@ -14,6 +14,10 @@ and application directories are omitted; only library targets are built.
 
 Lambda uses only the libaom AV1 backend and the bundled minimal libyuv scaling fallback; optional applications and backends are not built.
 
+Byte-order adaptation (2026-10-15): the existing host/network conversion entry
+points delegate to `lib/endian.h`, retaining their signatures and portable
+unaligned byte semantics. See `vibe/impl/Lib_Image_Refactor.md` for validation.
+
 
 Build integration (2026-10-15): upstream build systems, templates, and
 repository metadata are removed. `build_lambda_config.json` owns the
