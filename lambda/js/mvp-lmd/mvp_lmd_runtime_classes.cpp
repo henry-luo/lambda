@@ -593,17 +593,20 @@ Item mvp_lmd_object_from_constructor(Item new_target, MvpLmdClass* fallback) {
     MvpLmdClass* actual = mvp_lmd_class_record(target.get());
     // a source subclass can still require its native base's physical carrier.
     // ordinary construction keeps its live prototype without claiming that ancestry.
-    MvpLmdLibraryState* library = mvp_lmd_program_library(fallback->program);
-    for (TypeNominal* nominal = actual ? &actual->nominal : NULL; nominal; nominal = nominal->base) {
-        if (nominal == &library->object.nominal) break;
-        if (nominal->extension != &mvp_lmd_class_extension || !nominal->extension_data) {
-            actual = NULL; break;
-        }
-        Item constructor = mvp_lmd_class_values((MvpLmdClass*)nominal->extension_data)[0];
-        if (get_type_id(constructor) != LMD_TYPE_FUNC ||
-                constructor.function->entry_abi != FN_ENTRY_ABI_MVP_LMD ||
-                ((MvpLmdCallable*)constructor.function)->native_constructor) {
-            actual = NULL; break;
+    // the caller's ordinary allocation class is already admitted; only a different newTarget needs this walk.
+    if (actual && actual != fallback) {
+        MvpLmdLibraryState* library = mvp_lmd_program_library(fallback->program);
+        for (TypeNominal* nominal = &actual->nominal; nominal; nominal = nominal->base) {
+            if (nominal == &library->object.nominal) break;
+            if (nominal->extension != &mvp_lmd_class_extension || !nominal->extension_data) {
+                actual = NULL; break;
+            }
+            Item constructor = mvp_lmd_class_values((MvpLmdClass*)nominal->extension_data)[0];
+            if (get_type_id(constructor) != LMD_TYPE_FUNC ||
+                    constructor.function->entry_abi != FN_ENTRY_ABI_MVP_LMD ||
+                    ((MvpLmdCallable*)constructor.function)->native_constructor) {
+                actual = NULL; break;
+            }
         }
     }
     MvpLmdClass* allocation = actual ? actual : fallback;

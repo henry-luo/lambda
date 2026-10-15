@@ -11904,7 +11904,8 @@ TypeElmt* runtime_shape_tree_element_root(const char* tag, size_t length, Target
 static bool map_extend_via_runtime_tree(Item map_item, Item key, Item value) {
     TypeId container_type = get_type_id(map_item);
     TypeId key_type = get_type_id(key);
-    if ((container_type != LMD_TYPE_MAP && container_type != LMD_TYPE_ELEMENT && container_type != LMD_TYPE_ARRAY) ||
+    if ((container_type != LMD_TYPE_MAP && container_type != LMD_TYPE_ELEMENT &&
+            container_type != LMD_TYPE_ARRAY && container_type != LMD_TYPE_ARRAY_NUM) ||
             (key_type != LMD_TYPE_STRING && key_type != LMD_TYPE_SYMBOL)) {
         return false;
     }
@@ -11928,7 +11929,7 @@ static bool map_extend_via_runtime_tree(Item map_item, Item key, Item value) {
     // D2.6.6v2: an element shares Map's attribute face (type, data, data_cap)
     Map* map = map_item.map;
     if (!map || value_type == LMD_TYPE_ERROR) return false;
-    if (!is_element && map->map_kind != MAP_KIND_PLAIN &&
+    if (!is_element && container_type != LMD_TYPE_ARRAY_NUM && map->map_kind != MAP_KIND_PLAIN &&
             map->map_kind != MAP_KIND_ORDERED) return false;
     // UI-mode elements keep their attribute buffers in the context arena, which
     // only the private path allocates from
@@ -11937,8 +11938,9 @@ static bool map_extend_via_runtime_tree(Item map_item, Item key, Item value) {
     Input* tree = runtime_shape_tree();
     // a tree node takes its kind from its parent, so a container whose type is
     // of the other kind keeps the private path
-    // an Array's attribute face is a TypeMap; its indexed storage has a separate contract.
-    TypeId shape_kind = container_type == LMD_TYPE_ARRAY ? LMD_TYPE_MAP : container_type;
+    // both array carriers use a TypeMap attribute face; ArrayNum's map_kind selects its numeric lane.
+    TypeId shape_kind = container_type == LMD_TYPE_ARRAY || container_type == LMD_TYPE_ARRAY_NUM
+        ? LMD_TYPE_MAP : container_type;
     if (!old_type || !tree || old_type->type_id != shape_kind) return false;
     // `{}`, a fresh map and a computed-key literal all start at the root, so
     // they share one path; every other type is the parent itself
@@ -11982,7 +11984,8 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     // upcast below is valid and only the attribute face is touched (the content
     // items are left alone).
     TypeId extend_tid = get_type_id(map_item);
-    if (!lambda_type_id_has_attr_face(extend_tid) && extend_tid != LMD_TYPE_ARRAY) return false;
+    if (!lambda_type_id_has_attr_face(extend_tid) && extend_tid != LMD_TYPE_ARRAY &&
+            extend_tid != LMD_TYPE_ARRAY_NUM) return false;
     Map* map = map_item.map;
     if (!map || !map->type || !context || !context->pool) return false;
     const char* key_chars = NULL;
