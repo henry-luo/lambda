@@ -1,4 +1,12 @@
 import model: .mod_model
+import dom
+
+// native scroll does not bubble; notify the retained Finder owner directly.
+view <finder_scrollport> { ~.rendered }
+on scroll(evt) {
+    dom.request_frame(dom.get_element_by_id(dom.root_node(evt.target),"finder"),"finder_thumbnails")
+    return 'handled'
+}
 
 let strokes = {
     back:"M15 5l-7 7 7 7",forward:"M9 5l7 7-7 7",up:"M5 14l7-7 7 7",
@@ -32,6 +40,12 @@ pub fn file_icon(entry) => <svg class:"file-icon",width:"76",height:"68",viewBox
             upper(slice(entry.extension or "FILE",0,5))>
     >)>
 pub fn button(id,title,graphic) => <button id:id,type:"button",class:"tool",'data-action':id,title:title,'aria-label':title,(icon(graphic))>
+fn graphic(entry,role="tile") => <span class:if (entry.kind == "Image" and entry.extension != "svg") "file-graphic thumbnail-slot" else "file-graphic",
+    *:(if (entry.kind == "Image" and entry.extension != "svg")
+        {'data-thumb-path':entry.path,'data-thumb-role':role,'data-thumb-state':"pending"} else {}),
+    (if (entry.kind == "Image" and entry.extension == "svg") <img class:"vector-thumbnail",src:entry.path,alt:"">
+    else (file_icon(entry)));
+    (if (entry.kind == "Image" and entry.extension != "svg") <canvas class:"thumbnail-canvas",width:"1",height:"1",'aria-hidden':"true"> else null)>
 pub fn files(st) {
     let rows = model.visible(st);
     if (len(rows)==0) <div class:"empty",(icon("search"));<h2 if (trim(st.query)!="") "No matching files" else "This folder is empty">
@@ -39,7 +53,7 @@ pub fn files(st) {
     else <div class:if (st.mode == "icons") "icon-grid" else "file-list",
         *[for (i,e in rows) <button id:"file-" ++ string(i),class:"file",type:"button",role:"option",tabindex:"-1",
             'data-path':e.path,'data-name':e.name,'aria-selected':"false",title:e.name,
-            file_icon(e);<span class:"file-name",e.name><span class:"file-date",e.modified>
+            graphic(e);<span class:"file-name",e.name><span class:"file-date",e.modified>
             <span class:"file-size",if (e.dir) "—" else model.size_label(e.size)><span class:"file-kind",e.kind>>]>
 }
 pub fn breadcrumb(st) => <nav 'aria-label':"Folder path",class:"crumbs",
@@ -55,7 +69,8 @@ pub fn preview(st,large=false) {
     if (e == null) <div class:"preview-empty",(icon("preview"));<h3 "A closer look"><p "Select a file to see its preview and details.">>
     else <div class:if (large) "preview-content large" else "preview-content",
         <div class:"preview-media",
-            (if (data.kind == "image") <img src:data.src,alt:e.name>
+            (if (data.kind == "image" and e.extension == "svg") <img src:data.src,alt:e.name>
+            else if (data.kind == "image") (graphic(e,if (large) "look" else "preview"))
             else if (data.kind == "text") <pre data.text>
             else <div class:"generic-preview",(file_icon(e));<p if (data.kind == "folder") "Folder" else data.message or "Preview unavailable.">>)>;
         <div class:"preview-description",<h2 e.name><p class:"preview-subtitle",e.kind>;
@@ -95,7 +110,7 @@ pub fn tree(st,places) => <main id:"finder",'data-mode':st.mode,'data-path':st.p
         <div class:"content",id:"content",
             <section class:"browser",'aria-label':"Folder contents",
                 <div class:"list-heading",id:"list-heading",style:"display:none",<span "Name"><span "Date modified"><span "Size"><span "Kind">>;
-                <div id:"files",tabindex:"0",role:"listbox",'aria-label':"Files",'aria-multiselectable':"true",(files(st))>
+                apply(<finder_scrollport rendered:<div id:"files",tabindex:"0",role:"listbox",'aria-label':"Files",'aria-multiselectable':"true",(files(st))>>)
             >;
             <aside id:"preview-pane",class:"preview-pane",'aria-label':"File preview",<div class:"preview-heading",<span "PREVIEW">
                 <button type:"button",class:"text-tool",'data-action':"look","Quick Look ↗">>;

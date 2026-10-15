@@ -4,6 +4,8 @@ import resources: ~~.mod_resources
 import model: .mod_model
 import files: .mod_io
 import ui: .mod_ui
+import thumbs: .mod_thumbnails
+import updates: .mod_dom
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let CWD = sys.proc.self.cwd#
@@ -23,8 +25,7 @@ pn text(owner,id,value) {
     if (dom.text_content(target) != value) dom.set_text_content(target,value)
 }
 pn attr(target,key,value) {
-    let requested = string(value)
-    if (dom.get_attribute(target,key) != requested) dom.set_attribute(target,key,requested)
+    updates.attr(target,key,value)
 }
 pn show(owner,id,visible,display="block") {
     let target = node(owner,id)
@@ -35,6 +36,7 @@ pn region(owner,id,markup) {
     let target = node(owner,id)
     // avoid retiring the clicked row between the first and second click of a double-click.
     if (dom.get_attribute(target,"data-markup") != markup) {
+        thumbs.release(target)
         dom.set_inner_html(target,markup)
         dom.set_attribute(target,"data-markup",markup)
     }
@@ -47,6 +49,7 @@ pn disabled(owner,id,value) {
 }
 pn publish(owner,st) {
     var next = st
+    if (dom.get_attribute(owner,"data-path") != st.path) { next = {*:next,thumbnails:thumbs.cancel_jobs(owner,next.thumbnails)} }
     if (st.preview_data == null and st.focus != "" and (st.preview or st.look)) {
         let data = files.preview(model.focused(st)) ^ { {kind:"error",message:^.message} }
         next = {*:st,preview_data:data}
@@ -84,7 +87,7 @@ pn publish(owner,st) {
         region(owner,"look-body",format(ui.preview(next,true),'html'))
     }
     if (dom.get_state(node(owner,"search"),"value") != next.query) dom.set_state(node(owner,"search"),"value",next.query)
-    return next
+    return {*:next,thumbnails:thumbs.schedule(owner,next.thumbnails)}
 }
 fn navigate(st,path,cursor=-1) map^ {
     if (not (path is string) or trim(path)=="") raise error("Enter a folder path.")
@@ -102,7 +105,12 @@ pn command(owner,st,action) map^ {
     if (action == "back" and st.cursor>0) { return navigate(st,st.history[st.cursor-1],st.cursor-1)^ }
     if (action == "forward" and st.cursor<len(st.history)-1) { return navigate(st,st.history[st.cursor+1],st.cursor+1)^ }
     if (action == "parent") { return navigate(st,model.parent(st.path))^ }
-    if (action == "refresh") { return model.reconcile({*:st,entries:files.read_folder(st.path)^,error:""}) }
+    if (action == "refresh") {
+        let entries = files.read_folder(st.path)^
+        let thumbnails = thumbs.cancel_jobs(owner,st.thumbnails,true)
+        thumbs.release(owner)
+        return model.reconcile({*:st,entries:entries,thumbnails:thumbnails,error:""})
+    }
     if (action == "icons" or action == "list") { return {*:st,mode:action} }
     if (action == "preview") { return {*:st,preview:not st.preview} }
     if (action == "direction") { return {*:st,descending:not st.descending} }
@@ -137,6 +145,23 @@ on finder_activate(evt) {
     if (evt.event_phase != 2) { return 'pass' }
     session = publish(evt.target,session)
     return 'handled'
+}
+on finder_thumbnails(evt) {
+    if (evt.event_phase != 2) { return 'pass' }
+    if (session.thumbnails.frame>0 and evt.detail != session.thumbnails.frame) dom.cancel_frame(evt.target,session.thumbnails.frame)
+    session = {*:session,thumbnails:thumbs.tick(evt.target,session.thumbnails)}
+    return 'handled'
+}
+on resize(evt) {
+    let owner = owner_of(evt)
+    let thumbnails = thumbs.cancel_jobs(owner,session.thumbnails)
+    thumbs.release(owner)
+    session = publish(owner,{*:session,thumbnails:thumbnails})
+    return 'pass'
+}
+on closerequest(evt) {
+    session = {*:session,thumbnails:thumbs.cancel_jobs(owner_of(evt),session.thumbnails)}
+    return 'pass'
 }
 on click(evt) {
     let owner = owner_of(evt)

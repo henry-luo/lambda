@@ -39,7 +39,7 @@ let branched = m.listing(back,"/demo/Projects",[]);
     back.history == child.history and back.cursor == 0,
     branched.history == ["/demo","/demo/Projects"] and branched.cursor == 1,
     m.listing(st,"/demo",rows).history == ["/demo"],
-    m.kind("svg") == "Image" and m.kind("ls") == "Source code",
+    m.kind("svg") == "Image" and m.kind("ico") == "Image" and m.kind("tif") == "Image" and m.kind("ls") == "Source code",
     m.size_label(0) == "0 bytes" and m.size_label(2048) == "2 KB",
     m.status(extended) == "4 items · 3 selected"
 ]

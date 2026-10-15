@@ -763,6 +763,36 @@ static GridTrackSize** expand_repeat_track_entries(ScratchArena* scratch,
     return expanded;
 }
 
+// shared by definite-width intrinsic measurement and final track expansion.
+int layout_grid_auto_repeat_count(GridTrackList* tracks, int repeat_index,
+                                  float available_size, float gap, bool definite_size) {
+    GridTrackSize* repeat = tracks->tracks[repeat_index];
+    float percentage_base = definite_size ? available_size : -1.0f;
+    float pattern_size = calculate_track_pattern_size(
+        repeat->repeat_tracks, repeat->repeat_track_count, percentage_base);
+
+    float fixed_track_space = 0.0f;
+    int fixed_track_count = 0;
+    for (int i = 0; i < tracks->track_count; i++) {
+        if (i == repeat_index) continue;
+        GridTrackSize* other = tracks->tracks[i];
+        float size = auto_repeat_track_size(other, percentage_base);
+        if (size < 0.0f || !isfinite(size)) definite_size = false;
+        else fixed_track_space += fmaxf(1.0f, size);
+        fixed_track_count++;
+    }
+    float available = available_size - fixed_track_space - fixed_track_count * gap;
+    int repeat_count = 1;
+    if (definite_size && pattern_size > 0.0f) {
+        float repetitions = floorf((available + gap) /
+        (pattern_size + repeat->repeat_track_count * gap));
+        // expanded definitions cannot exceed the canonical track storage bound.
+        float capacity = fmaxf(1.0f, (radiant::grid::GRID_MAX_EXPLICIT_TRACKS - fixed_track_count) / (float)repeat->repeat_track_count);
+        repeat_count = (int)fmaxf(1.0f, fminf(repetitions, capacity)); // INT_CAST_OK: CSS repeat count is integral and bounded by track capacity.
+    }
+    return repeat_count;
+}
+
 static bool expand_auto_repeat_axis(GridContainerLayout* grid_layout, bool is_column) {
     lam::Own<GridTrackList>* list_slot = is_column ? &grid_layout->grid_template_columns
                                          : &grid_layout->grid_template_rows;
@@ -778,7 +808,6 @@ static bool expand_auto_repeat_axis(GridContainerLayout* grid_layout, bool is_co
     bool definite_size = is_column
         ? !grid_layout->is_shrink_to_fit_width && !grid_layout->is_min_content_width && !grid_layout->is_max_content_width
         : grid_layout->has_explicit_height;
-    float percentage_base = definite_size ? available_size : -1.0f;
     if (is_column ? grid_layout->column_gap_is_percent : grid_layout->row_gap_is_percent) gap = 0.0f;
 
     for (int repeat_index = 0; repeat_index < tracks->track_count; repeat_index++) {
@@ -786,28 +815,8 @@ static bool expand_auto_repeat_axis(GridContainerLayout* grid_layout, bool is_co
         if (!repeat || repeat->type != GRID_TRACK_SIZE_REPEAT ||
             (!repeat->is_auto_fill && !repeat->is_auto_fit)) continue;
 
-        float pattern_size = calculate_track_pattern_size(
-            repeat->repeat_tracks, repeat->repeat_track_count, percentage_base);
-
-        float fixed_track_space = 0.0f;
-        int fixed_track_count = 0;
-        for (int i = 0; i < tracks->track_count; i++) {
-            if (i == repeat_index) continue;
-            GridTrackSize* other = tracks->tracks[i];
-            float size = auto_repeat_track_size(other, percentage_base);
-            if (size < 0.0f || !isfinite(size)) definite_size = false;
-            else fixed_track_space += fmaxf(1.0f, size);
-            fixed_track_count++;
-        }
-        float available = available_size - fixed_track_space - fixed_track_count * gap;
-        int repeat_count = 1;
-        if (definite_size && pattern_size > 0.0f) {
-            float repetitions = floorf((available + gap) /
-                (pattern_size + repeat->repeat_track_count * gap));
-            // expanded definitions cannot exceed the canonical track storage bound.
-            float capacity = fmaxf(1.0f, (radiant::grid::GRID_MAX_EXPLICIT_TRACKS - fixed_track_count) / (float)repeat->repeat_track_count);
-            repeat_count = (int)fmaxf(1.0f, fminf(repetitions, capacity)); // INT_CAST_OK: CSS repeat count is integral and bounded by track capacity.
-        }
+        int repeat_count = layout_grid_auto_repeat_count(
+            tracks, repeat_index, available_size, gap, definite_size);
         long long expanded = (long long)repeat_count * (long long)repeat->repeat_track_count;
         long long total_tracks = (long long)tracks->track_count - 1 + expanded;
         if (total_tracks <= 0) return false;

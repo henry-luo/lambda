@@ -9,7 +9,7 @@ let missing = f.read_folder("test/demo/finder/files/does-not-exist") ^ { "missin
 let data = f.preview(welcome)^;
 [
     len(entries) == 5,
-    welcome.kind == "Text document" and welcome.size > 0 and len(welcome.modified)>0,
+    welcome.kind == "Text document" and welcome.size > 0 and len(welcome.modified)>0 and welcome.modified_raw != null,
     ends_with(welcome.path,"/test/demo/finder/files/Welcome.md"),
     assets.dir and assets.kind == "Folder",
     data.kind == "text" and contains(data.text,"A place for everything."),

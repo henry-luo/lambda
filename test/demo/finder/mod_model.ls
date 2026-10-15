@@ -15,7 +15,7 @@ pub fn crumbs(path) {
     [{name:"Computer",path:"/"},*[for (i,p in parts) {name:p,path:"/" ++ join(slice(parts,0,i+1),"/")}]]
 }
 pub fn kind(extension, dir=false) => if (dir) "Folder"
-    else if (contains(["png","jpg","jpeg","gif","webp","svg","avif","bmp","tiff"],extension)) "Image"
+    else if (contains(["png","jpg","jpeg","gif","webp","svg","avif","bmp","tif","tiff","ico"],extension)) "Image"
     else if (contains(["md","markdown","txt","log","csv"],extension)) "Text document"
     else if (contains(["ls","js","ts","cpp","c","h","hpp","py","css","html","sh"],extension)) "Source code"
     else if (contains(["json","yaml","yml","toml","xml"],extension)) "Data file"
@@ -29,8 +29,8 @@ pub fn size_label(bytes) => if (bytes == null) "—" else if (bytes < 1024) stri
     else string(round(bytes/107374182.4)/10) ++ " GB"
 pub fn initial(path) => {path:path,entries:[],history:[path],cursor:0,query:"",sort:"name",descending:false,
     mode:"icons",hidden:false,preview:true,selected:[],focus:"",anchor:"",look:false,dialog:false,
-    error:"",preview_data:null}
-fn sort_key(entry, key) => if (key == "size") entry.size else if (key == "modified") entry.modified
+    error:"",preview_data:null,thumbnails:{frame:0,job:0,request:null,generation:0}}
+fn sort_key(entry, key) => if (key == "size") entry.size else if (key == "modified") entry.modified_raw or entry.modified
     else if (key == "kind") entry.kind else lower(entry.name)
 pub fn visible(st) {
     let matching = [for (e in st.entries where (st.hidden or not starts_with(e.name,".")) and

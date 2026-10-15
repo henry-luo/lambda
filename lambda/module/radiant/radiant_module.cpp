@@ -134,7 +134,7 @@ static THREAD_LOCAL uint64_t g_radiant_velmt_active_pass_id = 0;
 
 RADIANT_C_API const void* radiant_velmt_host_type(void);
 
-static Item radiant_string_item(const char* value) {
+Item radiant_string_item(const char* value) {
     return value ? (Item){.item = s2it(heap_create_name(value))} : ItemNull;
 }
 

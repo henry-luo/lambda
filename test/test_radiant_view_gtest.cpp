@@ -2984,25 +2984,26 @@ static void test_radiant_view_expect_replay(const char* page, const char* replay
     shell_result_free(&result);
 }
 
+static const ShellEnvEntry RADIANT_IMAGE_GC_ENV[] = {
+    {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"},
+    {"LAMBDA_FUNC_JIT_THRESHOLD", "1"}, {"LAMBDA_SATELLITE_SYNC", "1"},
+    {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {nullptr, nullptr},
+};
+
 TEST(RadiantViewTest, PhotoCanvasCopiesRgbaAndReleasesItAcrossGc) {
     // D4.5.2 / D5.3.3: the retained surface must outlive borrowed Lambda pixels.
-    const ShellEnvEntry env[] = {
-        {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"},
-        {"LAMBDA_FUNC_JIT_THRESHOLD", "1"}, {"LAMBDA_SATELLITE_SYNC", "1"},
-        {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {nullptr, nullptr},
-    };
     test_radiant_view_expect_replay(
-        "test/demo/photo/tests/_canvas_bridge.ls", "test/demo/photo/tests/canvas_bridge.json", env, true);
+        "test/demo/photo/tests/_canvas_bridge.ls", "test/demo/photo/tests/canvas_bridge.json", RADIANT_IMAGE_GC_ENV, true);
 }
 
 TEST(RadiantViewTest, PhotoImageJobsOwnPixelsAcrossGcAndClose) {
-    const ShellEnvEntry env[] = {
-        {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"},
-        {"LAMBDA_FUNC_JIT_THRESHOLD", "1"}, {"LAMBDA_SATELLITE_SYNC", "1"},
-        {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {nullptr, nullptr},
-    };
     test_radiant_view_expect_replay("test/demo/photo/tests/_image_jobs.ls",
-        "test/demo/photo/tests/image_jobs.json",env,true);
+        "test/demo/photo/tests/image_jobs.json",RADIANT_IMAGE_GC_ENV,true);
+}
+
+TEST(RadiantViewTest, FinderThumbnailJobsOwnPixelsAcrossGcAndClose) {
+    test_radiant_view_expect_replay("test/demo/finder/tests/_thumbnail_jobs.ls",
+        "test/ui/finder/thumbnail_jobs.json", RADIANT_IMAGE_GC_ENV, true);
 }
 
 static const struct {

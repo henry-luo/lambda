@@ -55,6 +55,13 @@ typedef struct FileStat {
     bool exists;
 } FileStat;
 
+// revision metadata is separate so existing FileStat callers retain their ABI.
+typedef struct FileRevision {
+    FileStat stat;
+    uint32_t modified_nsec;
+    uint64_t device, inode;
+} FileRevision;
+
 // ---------------------------------------------------------------------------
 // Options for file copy
 // ---------------------------------------------------------------------------
@@ -130,6 +137,7 @@ bool     file_is_readable(const char* path);
 bool     file_is_writable(const char* path);
 bool     file_is_executable(const char* path);
 FileStat file_stat(const char* path);
+FileRevision file_revision(const char* path);
 int64_t  file_size(const char* path);
 
 // Resolve to absolute canonical path. Caller must free(). NULL on error.

@@ -1910,6 +1910,30 @@ limited to 4096 pixels per dimension and 4,194,304 pixels, and reject an existin
 WebGL context. No borrowed array pointer survives the call (**D4.5.2**).
 The [Photo Studio demo](../test/demo/photo/README.md) uses this bridge.
 
+`radiant.image_job(owner, request)^` also accepts `channel:"thumbnail"` for
+asynchronous file decoding. Import `radiant`, then submit
+`{action:"start", channel:"thumbnail", path:"photo.jpg", width:76, height:68}`.
+Width and height are CSS bounds; the document's device scale converts them to
+physical thumbnail bounds. Poll with `{action:"poll", channel:"thumbnail", token}`:
+`null` means pending; a completion reports `success`, `cache_hit`, an
+`error:{status,message}` record, and, on success, RGBA `pixels`, `width`, `height`
+and cache metrics. Upload pixels with the canvas bridge above. Native jobs retain
+copied paths and native buffers, never borrowed GC pointers (**D4.5.2**).
+
+An optional nonnegative integer `canvas_bytes` reports the consumer's retained
+canvas pixels. The cache's 32 MiB pixel budget reserves those bytes and the
+pending output bounds before caching decoded pixels. This budget is separate
+from the decoder's source/scratch admission limits and transient result arrays.
+
+Each channel keeps only its latest request. `action:"cancel"` discards that
+request; `action:"invalidate"` on the thumbnail channel also clears its
+document-owned 32 MiB / 128-entry LRU cache. Cache revisions include subsecond
+modification time and file identity. Thumbnail loading normalizes orientation,
+uses GIF frame/TIFF page zero and permits budgeted full-decode fallback. Paths
+use the shared IO adapter (**D7.1.2v2**). The existing `preview` and `export`
+channels continue to process pixel-array input. See the
+[Finder demo](../test/demo/finder/README.md) for a viewport-driven consumer.
+
 ## Quick Reference Table
 
 ### Type Functions

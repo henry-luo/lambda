@@ -59,6 +59,12 @@ h1 { font-size: 20px; letter-spacing: -.6px; font-weight: 600; margin: 0 0 5px; 
 .file[aria-selected="true"] .file-name { color: #2365aa; }
 .file[data-focused="true"] { box-shadow: inset 0 0 0 1px #b7cee8; }
 .file-name { overflow-wrap: anywhere; line-height: 1.5; }
+.file-graphic { display: flex; align-items: center; justify-content: center; width: 76px; height: 68px; flex-shrink: 0; }
+.file-graphic > .file-icon, .vector-thumbnail { width: 100%; height: 100%; object-fit: contain; }
+.thumbnail-canvas { display: none; flex-shrink: 0; }
+.thumbnail-slot[data-thumb-state="ready"] > .file-icon { display: none; }
+.thumbnail-slot[data-thumb-state="ready"] > canvas { display: block; }
+.thumbnail-slot[data-thumb-state="ready"] { background: repeating-conic-gradient(#edf0f3 0% 25%,#fff 0% 50%) 0 0 / 12px 12px; border-radius: 4px; }
 .icon-grid .file-name { text-align: center; max-width: 120px; }
 .icon-grid .file-date, .icon-grid .file-kind { display: none; }
 .icon-grid .file-size { color: #a4afbc; font-size: 10px; margin-top: -4px; }
@@ -68,7 +74,7 @@ h1 { font-size: 20px; letter-spacing: -.6px; font-weight: 600; margin: 0 0 5px; 
 .file-list .file { position: relative; width: 100%; padding: 9px 10px 9px 40px; text-align: left; border-radius: 5px; min-height: 36px; }
 .file-list .file:nth-child(even) { background: #f8fafc; }
 .file-list .file[aria-selected="true"] { background: #e6eff9; }
-.file-list .file-icon { position: absolute; width: 25px; height: 24px; left: 7px; top: 6px; }
+.file-list .file-graphic { position: absolute; width: 25px; height: 24px; left: 7px; top: 6px; }
 .file-list .file-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .file-list .file-date, .file-list .file-size, .file-list .file-kind { color: #94a0ae; font-size: 10px; }
 .preview-pane { width: 260px; flex-shrink: 0; border-left: 1px solid #eef0f3; background: #fcfdfe; overflow: auto; }
@@ -81,6 +87,8 @@ h1 { font-size: 20px; letter-spacing: -.6px; font-weight: 600; margin: 0 0 5px; 
 .preview-content { padding: 18px 22px; }
 .preview-media { height: 200px; display: flex; align-items: center; justify-content: center; background: #f1f4f7; border: 1px solid #e9edf2; border-radius: 8px; overflow: hidden; }
 .preview-media img { width: 100%; height: 100%; object-fit: contain; }
+.preview-media > .file-graphic { width: 100%; height: 100%; }
+.preview-media > .file-graphic > .file-icon { width: 76px; height: 68px; }
 .preview-media pre { width: 100%; height: 100%; overflow: auto; padding: 18px; margin: 0; background: #fff; color: #6d7d8e; font-family: Menlo, monospace; font-size: 10px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
 .generic-preview { text-align: center; padding: 20px; }
 .generic-preview .file-icon { width: 96px; height: 86px; }

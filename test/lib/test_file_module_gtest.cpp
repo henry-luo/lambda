@@ -28,6 +28,7 @@
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <climits>
 #include <pthread.h>
 #ifdef _WIN32
@@ -485,6 +486,27 @@ TEST_F(FileQueryTest, FileStatDir) {
     EXPECT_FALSE(st.is_file);
     EXPECT_TRUE(st.is_dir);
 }
+
+#ifndef _WIN32
+TEST_F(FileQueryTest, FileStatDistinguishesSubsecondRevisions) {
+    char* path = file_path_join(TEST_DIR, "subsecond-revision.txt");
+    ASSERT_NE(path, nullptr);
+    ASSERT_EQ(write_binary_file(path, "red", 3), 0);
+    struct timespec times[2] = {{1700000000, 100000000}, {1700000000, 100000000}};
+    ASSERT_EQ(utimensat(AT_FDCWD, path, times, 0), 0);
+    FileRevision before = file_revision(path);
+    ASSERT_EQ(write_binary_file(path, "sky", 3), 0);
+    times[1].tv_nsec = 200000000;
+    ASSERT_EQ(utimensat(AT_FDCWD, path, times, 0), 0);
+    FileRevision after = file_revision(path);
+    EXPECT_EQ(before.stat.modified, after.stat.modified);
+    EXPECT_EQ(before.stat.size, after.stat.size);
+    EXPECT_EQ(before.inode, after.inode);
+    EXPECT_EQ(before.modified_nsec, 100000000u);
+    EXPECT_EQ(after.modified_nsec, 200000000u);
+    mem_free(path);
+}
+#endif
 
 TEST_F(FileQueryTest, FileStatNonExistent) {
     FileStat st = file_stat(test_path("nonexistent.xyz").c_str());

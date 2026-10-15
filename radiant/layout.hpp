@@ -3586,6 +3586,9 @@ typedef struct GridContainerLayout : GridProp {
     ScratchMark scratch_mark;
 } GridContainerLayout;
 
+int layout_grid_auto_repeat_count(GridTrackList* tracks, int repeat_index,
+                                  float available_size, float gap, bool definite_size);
+
 void init_grid_container(LayoutContext* lycon, struct ViewBlock* container);
 void cleanup_grid_container(LayoutContext* lycon);
 float layout_grid_row_border_box_extent(struct ViewBlock* container,

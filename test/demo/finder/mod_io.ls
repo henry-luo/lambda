@@ -5,6 +5,7 @@ pub fn read_folder(path) array^ {
     let paths = input(path,'dir')^;
     [for (p in paths) (let dir = p.is_dir, let ext = lower(p.extension or ""),
         {name:p.name,path:p.path,dir:dir,extension:ext,size:p.size or 0,
+            modified_raw:p.modified,
             modified:if (p.modified == null) "" else format(p.modified,"YYYY-MM-DD HH:mm"),kind:model.kind(ext,dir)})]
 }
 pub fn preview(entry) map^ {

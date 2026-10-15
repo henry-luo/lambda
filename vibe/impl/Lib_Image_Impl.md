@@ -106,6 +106,40 @@ patent notices, copyright attributions, and provenance records remain, including
 JPEG's required `README.ijg`. No formal ruling changes are introduced
 (**D7.1.1–D7.1.3**, **D7.1.6–D7.1.7v6**).
 
+## Finder thumbnail integration (2026-10-15)
+
+Finder consumes the shared decoder through the document-owned `radiant.image_job`
+thumbnail channel. The existing worker/cancellation lifecycle now admits copied
+file paths and CSS bounds, converting bounds through the document's device scale.
+Workers call `image_io_decode_path`; codecs remain in `lib` (**D7.1.2v2**).
+The channel owns a 128-entry LRU cache, including decoder failures. Its 32 MiB
+retained-pixel budget reserves the consumer's reported canvas bytes and pending
+upload before admitting cached pixels; transient results and codec scratch
+remain separately admitted by the shared image limits.
+`FileRevision` adds subsecond modification time and file identity without changing
+the existing `FileStat` ABI. Revisions are checked around decoding; explicit refresh
+invalidates the cache even when publication metadata was preserved.
+
+The app measures viewport geometry before mutations, prioritizes selected previews,
+and uploads transient arrays into retained canvases (**S12.1.3**, **D4.5.2**).
+Offscreen and retiring canvases release their pixels. Folder generations and job
+tokens reject stale completions; document teardown cancels and joins native work
+(**D4.5.1v4**). SVG remains on Radiant's vector path. No formal ruling changes.
+
+Validation: 84 assertions across five Finder UI replays and 14 assertions in the
+real-folder scrolling replay pass. Two Finder goldens pass on interp/auto/JIT;
+18 file metadata tests pass, including a same-size, same-second revision change.
+The forced-GC native worker replay passes with zero live tracked allocations at
+shutdown. The complete Radiant View runner passes 203/203.
+
+The full Radiant baseline is not green: document previews, timeline scripts,
+table-caption view reuse, two recorded layout cases and one render reference fail.
+Document/timeline failures reproduce with the original layout code; original-code
+layout runs retain the same `tab-bidi-001` and `md_nuxt-readme` failures, and the
+background-image render is byte-identical. The view-reuse caption crash remains
+unresolved. Diagnostic reports are under `temp/finder/` and `test_output/`;
+successful-run verbose logs were removed after the run exhausted disk space.
+
 ## Supported subsets and thumbnail behavior
 
 | Format | Reading/writing | Thumbnail path |
