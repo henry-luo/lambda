@@ -185,6 +185,7 @@ extern "C" {
 // Unified markup parsing functions (from input-markup.cpp)
 Item input_markup(Input *input, const char* content);
 Item input_markup_with_format(Input *input, const char* content, MarkupFormat format);
+Item input_markup_wiki(Input* input, const char* source, const char* flavor);
 Item input_markup_commonmark(Input *input, const char* content);  // Strict CommonMark (no GFM extensions)
 
 // JSX parsing functions (from input-jsx.cpp)

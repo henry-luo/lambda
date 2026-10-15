@@ -690,54 +690,6 @@ void MarkupEmitter::format_element(const ElementReader& elem) {
 // Format-Specific Custom Element Handlers
 // ==============================================================================
 
-bool wiki_custom_handler(void* ctx, StringBuf* sb, const ElementReader& elem) {
-    (void)sb;
-    const char* tag = elem.tagName();
-    if (!tag) return false;
-    if (strcmp(tag, "span") == 0) {
-        ItemReader nowiki = elem.get_attr("data-wiki-nowiki");
-        if (nowiki.isString()) {
-            ItemReader source = elem.get_attr("source");
-            MarkupEmitter* em = (MarkupEmitter*)ctx;
-            if (source.isString()) {
-                em->write_text(source.cstring());
-            } else {
-                em->write_text("<nowiki>");
-                em->format_children_raw(elem);
-                em->write_text("</nowiki>");
-            }
-            return true;
-        }
-    }
-    if (strcmp(tag, "var") == 0) {
-        ItemReader marker = elem.get_attr("data-wiki-template");
-        if (!marker.isString()) marker = elem.get_attr("data-wiki-parameter");
-        if (!marker.isString()) return false;
-    } else if (strcmp(tag, "wiki-template") != 0) {
-        return false;
-    }
-
-    MarkupEmitter* em = (MarkupEmitter*)ctx;
-    ItemReader source = elem.get_attr("source");
-    if (source.isString()) {
-        em->write_text(source.cstring());
-    } else {
-        // older trees retain only the name and unsplit argument text.
-        ItemReader name = elem.get_attr("name");
-        ItemReader parameter = elem.get_attr("data-wiki-parameter");
-        ItemReader function = elem.get_attr("data-wiki-parser-function");
-        ItemReader args = elem.get_attr(parameter.isString() ? "default" : "args");
-        em->write_text(parameter.isString() ? "{{{" : "{{");
-        if (name.isString()) em->write_text(name.cstring());
-        if (args.isString()) {
-            em->write_char(function.isString() ? ':' : '|');
-            em->write_text(args.cstring());
-        }
-        em->write_text(parameter.isString() ? "}}}" : "}}");
-    }
-    return true;
-}
-
 // Utility: get text content of a named child element
 static const char* get_child_text(const ElementReader& elem, const char* tag) {
     ElementReader child = elem.findChildElement(tag);
@@ -1141,46 +1093,6 @@ void emit_table_rst(StringBuf* sb, const ElementReader& elem, void* emitter_ctx)
     MarkupTableContext mc = {em, 0};
     iterate_table_rows(elem, sb, rst_table_row, &mc);
     stringbuf_append_char(sb, '\n');
-}
-
-// Wiki table row handler
-static void wiki_table_row(
-    StringBuf* sb, const ElementReader& row,
-    int row_idx, bool is_header, void* ctx
-) {
-    MarkupTableContext* mc = (MarkupTableContext*)ctx;
-    MarkupEmitter* em = mc->emitter;
-
-    // start table on first row
-    if (row_idx == 0 && !mc->header_row_done) {
-        stringbuf_append_str(sb, "{| class=\"wikitable\"\n");
-    }
-
-    stringbuf_append_str(sb, "|-\n");
-
-    auto it = row.children();
-    ItemReader cell;
-    while (it.next(&cell)) {
-        if (cell.isElement()) {
-            if (is_header) {
-                stringbuf_append_str(sb, "! ");
-            } else {
-                stringbuf_append_str(sb, "| ");
-            }
-            em->format_children(cell.asElement());
-            stringbuf_append_char(sb, '\n');
-        }
-    }
-
-    (void)mc; // header_row_done not needed for wiki style
-}
-
-// emit_table callback for Wiki
-void emit_table_wiki(StringBuf* sb, const ElementReader& elem, void* emitter_ctx) {
-    MarkupEmitter* em = (MarkupEmitter*)emitter_ctx;
-    MarkupTableContext mc = {em, 0};
-    iterate_table_rows(elem, sb, wiki_table_row, &mc);
-    stringbuf_append_str(sb, "|}\n\n");
 }
 
 // Textile table row handler

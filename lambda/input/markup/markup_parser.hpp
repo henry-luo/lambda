@@ -167,6 +167,12 @@ public:
     int link_def_count_;
     struct hashmap* footnote_defs_;
     Element* footnotes_;
+    Array* wiki_tags_ = nullptr;
+    Element* wiki_metadata_ = nullptr;
+    unsigned wiki_inline_depth_ = 0;
+    unsigned wiki_block_depth_ = 0;
+    size_t wiki_inline_line_ = 0;
+    bool wiki_header_ = true;
 
     // HTML5 fragment parser for accumulating HTML content
     // When markdown contains HTML blocks/inline, all HTML is parsed into

@@ -52,6 +52,7 @@ lambda demo
 
 **Markup input parsing & formatting**
 - **Multi-format parsing**: JSON, XML, HTML, Markdown, Wiki, YAML/TOML/INI, CSV, LaTeX, PDF, and more.
+- **Wiki dialects**: MediaWiki, DokuWiki, TikiWiki, TWiki, Vimwiki, XWiki, ZimWiki, Creole, Jira and Confluence static profiles, with Lambda Script writers in `lambda.doc.wiki`; see [coverage and limits](doc/Markup_Formats_Support.md#15-wiki-dialect-coverage).
 - **One universal representation**: parse disparate syntaxes into a common Lambda/Mark node tree.
 - **Conversion pipeline**: convert between formats using `lambda convert` (auto-detect input formats when possible).
 - **DOM-centric tooling**: designed to treat "documents as data/objects", not just as text.

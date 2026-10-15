@@ -1,5 +1,6 @@
 #include "../../lib/utf.h"
 #include "input.hpp"
+#include "../io/wiki_format.hpp"
 #include "../io/fs_node.hpp"
 #include "input-parsers.h"
 #include "input-postscript.hpp"
@@ -2192,7 +2193,11 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         allocation_context.input = input;
         input_allocation_context = &allocation_context;
 
-        if (strcmp(effective_type, "markup") == 0) {
+        const char* wiki_flavor = wiki_format_flavor(effective_type, flavor ? flavor->chars : nullptr);
+        if (wiki_flavor) {
+            input->root = input_markup_wiki(input, source, wiki_flavor);
+        }
+        else if (strcmp(effective_type, "markup") == 0) {
             // Generic markup type - use flavor to select format
             const char* markup_flavor = (flavor) ? flavor->chars : "markdown";
             log_debug("input_from_source markup: flavor='%s'", markup_flavor);

@@ -11,6 +11,7 @@
 #include "../../lib/time_util.h"
 #include "../core/utf_string.h"
 #include "../format/format.h"
+#include "../io/wiki_format.hpp"
 #include "radiant_event_hook.h"
 
 #include <stdarg.h>
@@ -270,6 +271,7 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
             else if (strcmp(ext, "html") == 0 || strcmp(ext, "htm") == 0) effective_format = "html";
             else if (strcmp(ext, "md") == 0) effective_format = "markdown";
             else if (strcmp(ext, "csv") == 0) effective_format = "csv";
+            else if (strcmp(ext, "wiki") == 0 || strcmp(ext, "mediawiki") == 0) effective_format = "wiki";
             else if (strcmp(ext, "txt") == 0) effective_format = "text";
             else if (strcmp(ext, "toml") == 0) effective_format = "toml";
             else if (strcmp(ext, "ini") == 0) effective_format = "ini";
@@ -294,15 +296,23 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
     log_debug("pn_output_internal: using format '%s'", effective_format);
 
     // Complete formatting before opening the destination, including lazy read failures.
-    RootFrame roots(1);
+    RootFrame roots(2);
     Rooted<Item> source_root(roots, source);
+    Rooted<Item> script_result(roots, ItemNull);
     Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "proc.output.format");
     size_t format_length = strlen(effective_format);
     String* format = (String*)pool_calloc(temp_pool, sizeof(String) + format_length + 1);
     if (!format) { mem_pool_destroy(temp_pool); strbuf_free(path_buf); return ItemError; }
     format->len = format_length; format->is_ascii = 1;
     memcpy(format->chars, effective_format, format_length);
-    String* formatted = format_data(source_root.get(), format, nullptr, temp_pool);
+    String* formatted = nullptr;
+    if (wiki_format_flavor(effective_format)) {
+        script_result.set(fn_format2(source_root.get(), Item{.item = s2it(format)}));
+        if (item_is_error(script_result.get())) {
+            mem_pool_destroy(temp_pool); strbuf_free(path_buf); return script_result.get();
+        }
+        formatted = script_result.get().get_string();
+    } else formatted = format_data(source_root.get(), format, nullptr, temp_pool);
     if (!formatted) {
         mem_pool_destroy(temp_pool);
         strbuf_free(path_buf);

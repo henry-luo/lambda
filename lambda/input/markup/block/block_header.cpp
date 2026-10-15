@@ -152,6 +152,9 @@ Item parse_header(MarkupParser* parser, const char* line) {
         skip_whitespace(&text_start);
     }
 
+    if (parser->config.format == Format::WIKI && parser->config.flavor == Flavor::VIMWIKI && text_end)
+        add_attribute_to_element(parser, header, "id", parser->builder.createString(text_start, text_end - text_start)->chars);
+
     // Calculate text length
     size_t text_len = 0;
     if (text_end && text_start) {

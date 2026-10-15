@@ -124,6 +124,7 @@ Item input_markup(Input* input, const char* content);
 // here, and it is deliberately split out to break the input.hpp include cycle
 #include "markup-format.h"
 Item input_markup_with_format(Input* input, const char* content, MarkupFormat format);
+Item input_markup_wiki(Input* input, const char* source, const char* flavor);
 #endif
 
 #endif // LAMBDA_INPUT_PARSERS_H

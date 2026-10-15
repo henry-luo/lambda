@@ -148,7 +148,7 @@ arbitrary filenames, including files without an extension (D2.9.2).
 | `eml` | `eml_schema.ls` |
 | `ics` | `ics_schema.ls` |
 | `vcf` | `vcf_schema.ls` |
-| `asciidoc`, `man`, `markdown`, `rst`, `textile`, `wiki` | `doc_schema.ls` |
+| `asciidoc`, `man`, `markdown`, `rst`, `textile`, `wiki` / `wiki:<flavor>` | `doc_schema.ls` |
 | `.ls` files | Built-in AST validation |
 
 Formats such as `json`, `xml`, `yaml`, `csv`, `ini`, `toml`, `latex`, `rtf`, `pdf`, and `text` require an explicit schema via `-s`. With a custom schema the **root type** is the type named `Document` if the schema defines one, otherwise the last type defined in the file. See [Lambda_Validator.md](Lambda_Validator.md).
@@ -158,6 +158,7 @@ Formats such as `json`, `xml`, `yaml`, `csv`, `ini`, `toml`, `latex`, `rtf`, `pd
 ```bash
 lambda validate data.json -s schema.ls
 lambda validate page.html
+lambda validate notes.txt -f wiki:zimwiki
 lambda validate --strict config.yaml -s config_schema.ls --max-errors 50
 ```
 
@@ -182,13 +183,24 @@ lambda convert <input> [-f <from>] -t <to> -o <output> [options]
 | | `--view-key <key>` | Select a named view when the source defines several | |
 | | `--font-option default\|katex` | Math font set for LaTeX→HTML output | `default` |
 | | `--pipeline legacy\|unified` | Accepted for compatibility; currently has no effect | |
+| | `--loss error\|allow` | Wiki output: fail on conversion diagnostics or allow reported losses | `error` |
 | `-h` | `--help` | Show help | |
 
 **Supported output formats:**
 
-`mark`, `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `css`, `jsx`, `mdx`, `latex`, `rst`, `org`, `wiki`, `textile`, `text`, `markdown`/`md`, `math-ascii`, `math-latex`, `math-typst`, `math-mathml`, `properties`
+`mark`, `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `css`, `jsx`, `mdx`, `latex`, `rst`, `org`, `wiki`/`wiki:<flavor>`, `textile`, `text`, `markdown`/`md`, `math-ascii`, `math-latex`, `math-typst`, `math-mathml`, `properties`
 
 The input format flag `-f` supports colon-separated `type:flavor` syntax (e.g., `graph:mermaid`).
+
+Wiki input and output accept `wiki:mediawiki`, `wiki:dokuwiki`,
+`wiki:tikiwiki`, `wiki:twiki`, `wiki:vimwiki`, `wiki:xwiki` (Syntax 2.1),
+`wiki:zimwiki`, `wiki:creole` (1.0), `wiki:jira`, and `wiki:confluence`.
+Unqualified `wiki` and auto-detected `.wiki` input mean MediaWiki; specify
+`-f` for other dialects even when they use `.wiki` or `.txt` filenames.
+All wiki output runs through the `lambda.doc.wiki` Lambda Script package
+(D7.2.4). It fails on conversion diagnostics by default. `--loss allow`
+permits degraded output; the option is rejected for other output families.
+See [wiki coverage and loss reports](Markup_Formats_Support.md#15-wiki-dialect-coverage).
 
 **Examples:**
 
@@ -197,6 +209,8 @@ lambda convert input.json -t yaml -o output.yaml
 lambda convert doc.md -t html -o doc.html
 lambda convert formula.tex -t html -o formula.html --full-document
 lambda convert data.xml -f xml -t json -o data.json
+lambda convert page.wiki -f wiki:creole -t wiki:jira -o page.jira
+lambda convert notes.txt -f wiki:zimwiki -t wiki:creole --loss allow -o notes.creole
 ```
 
 ---

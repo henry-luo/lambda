@@ -3,6 +3,7 @@
 #include "core/mark_reader.hpp"
 #include "io/zip_archive.hpp"
 #include "format/format.h"
+#include "io/wiki_format.hpp"
 #include "format/format-markup.h"
 #include "../lib/mime-detect.h"
 #include "../lib/mempool.h"
@@ -1557,6 +1558,7 @@ int exec_convert(int argc, char* argv[]) {
     const char* pipeline = NULL;     // Pipeline selection: "legacy" or "unified"
     const char* font_option = NULL;  // LaTeX math fonts: default or katex
     const char* graph_view_key = NULL; // Structurizr view key for graph-to-HTML conversion
+    const char* wiki_loss = nullptr; // Explicit permission to serialize diagnosed wiki losses
 
     // Skip "convert" and parse remaining arguments
     for (int i = 1; i < argc; i++) {
@@ -1580,6 +1582,12 @@ int exec_convert(int argc, char* argv[]) {
             } else {
                 printf("Error: -o option requires an output file argument\n");
                 return 1;
+            }
+        } else if (strcmp(argv[i], "--loss") == 0) {
+            if (i + 1 >= argc) { fputs("Error: --loss requires error or allow\n", stderr); return 1; }
+            wiki_loss = argv[++i];
+            if (strcmp(wiki_loss, "error") && strcmp(wiki_loss, "allow")) {
+                fputs("Error: --loss requires error or allow\n", stderr); return 1;
             }
         } else if (strcmp(argv[i], "--full-document") == 0) {
             full_document = true;
@@ -1656,6 +1664,10 @@ int exec_convert(int argc, char* argv[]) {
     if (!output_file) {
         printf("Error: Output file (-o) is required\n");
         return 1;
+    }
+
+    if (wiki_loss && !wiki_format_flavor(to_format)) {
+        fputs("Error: --loss is supported for wiki output formats\n", stderr); return 1;
     }
 
     // Check if input file exists (skip check for HTTP/HTTPS URLs)
@@ -1869,8 +1881,22 @@ int exec_convert(int argc, char* argv[]) {
             formatted_output = format_markup_string(input->pool, input->root, &RST_RULES);
         } else if (strcmp(to_format, "org") == 0) {
             formatted_output = format_markup_string(input->pool, input->root, &ORG_RULES);
-        } else if (strcmp(to_format, "wiki") == 0) {
-            formatted_output = format_markup_string(input->pool, input->root, &WIKI_RULES);
+        } else if (const char* wiki_flavor = wiki_format_flavor(to_format)) {
+            const LambdaDocumentTransformConfig transform = {
+                "wiki", "lambda.doc.wiki", "format_file",
+                LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true};
+            LambdaDocumentTransformOption options[] = {
+                {"input_type", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, type_string->chars, false},
+                {"input_flavor", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING,
+                    flavor_string ? flavor_string->chars : "", false},
+                {"flavor", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, wiki_flavor, false},
+                {"loss", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, wiki_loss ? wiki_loss : "error", false},
+            };
+            full_doc_output = run_document_transform_markup(input_file, &transform, options, 4);
+            if (!full_doc_output) {
+                LambdaError* last_error = get_persistent_last_error();
+                if (last_error) { err_print(last_error); clear_persistent_last_error(); }
+            }
         } else if (strcmp(to_format, "textile") == 0) {
             formatted_output = format_markup_string(input->pool, input->root, &TEXTILE_RULES);
         } else if (strcmp(to_format, "text") == 0) {
@@ -2678,7 +2704,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  markdown       - doc_schema.ls\n");
             printf("  rst            - doc_schema.ls\n");
             printf("  textile        - doc_schema.ls\n");
-            printf("  wiki           - doc_schema.ls\n");
+            printf("  wiki[:flavor]  - doc_schema.ls (mediawiki, dokuwiki, tikiwiki, twiki, vimwiki, xwiki, zimwiki, creole, jira, confluence)\n");
             printf("  lambda         - doc_schema.ls\n");
             printf("\nRequire Explicit Schema (-s option):\n");
             printf("  json, xml, yaml, csv, ini, toml, latex, rtf, pdf, text\n");

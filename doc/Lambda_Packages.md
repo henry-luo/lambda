@@ -30,6 +30,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 14. [eps — EPS Rendering](#14-eps--eps-rendering)
 15. [docx — Word DOCX Import](#15-docx--word-docx-import)
 16. [docbook — DocBook to HTML/CSS](#16-docbook--docbook-to-htmlcss)
+17. [doc.wiki — Wiki writers](#17-docwiki--wiki-writers)
 
 ---
 
@@ -37,6 +38,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 
 | Package | Import path | Status | What it does | Used by the CLI |
 |---------|-------------|--------|--------------|-----------------|
+| `doc.wiki` | `lambda.doc.wiki` | Initial static profiles | Wiki-family writers, shared tasks, and loss reports | `lambda convert -t wiki:<flavor>` |
 | `ui.dtna` | `lambda.ui.dtna` | Experimental, partial native catalog | Ant-inspired components, collections, scoped tokens and native interaction; see [Lambda UI](Lambda_UI.md) | `lambda view test/ui/dtna_gallery.ls` |
 | `ui.bold` | `lambda.ui.bold` | Experimental, initial native subset | Neobrutalist components with thick borders, hard shadows, scoped tokens and shared native controls; see [bold UI](Lambda_UI_Bold.md) | `lambda view test/ui/bold_gallery.ls` |
 | `ui.wired` | `lambda.ui.wired` | Experimental, initial native subset | Hand-drawn SVG pencil outlines, paper surfaces, hatched progress, scoped tokens and native controls; see [wired UI](Lambda_UI_Wired.md) | `lambda view test/ui/wired_gallery.ls` |
@@ -1708,3 +1710,49 @@ See the [design](../vibe/Lambda_Pkg_Docbook.md),
 [upstream/support record](../lmd/package/doc/docbook/UPSTREAM.md). The registered
 Lambda tests include the offline single-page and chunked official-body parity
 gate; expected bodies are refreshed separately using the pinned processor.
+
+## 17. doc.wiki — Wiki writers
+
+`lambda.doc.wiki` serializes Mark Doc to MediaWiki, DokuWiki, TikiWiki, TWiki,
+Vimwiki, XWiki 2.1, ZimWiki, Creole 1.0, Jira, and Confluence wiki markup.
+A shared Lambda Script traversal uses declarative syntax profiles; native code
+routes calls and owns package invocation (D7.1.1, D7.2.4).
+
+```lambda
+import wiki: lambda.doc.wiki
+let document = parse("= Title =\n\n**Text**", "wiki:creole")^
+wiki.format_report(document, {flavor:"jira"})^
+```
+
+| Export | Result |
+|---|---|
+| `format_report(document, options = null)` | `{text, diagnostics}`; returns a report even when there are losses |
+| `format(document, options = null)` | Serialized string; errors on losses by default |
+| `format_file(path, options = null)` | Reads with `input_type` / `input_flavor`, then formats |
+
+Options are `flavor` (default `mediawiki`) and `loss` (`error` or `allow`).
+`format_file` additionally accepts `input_type` (default `auto`) and
+`input_flavor` (default empty). Unknown options and flavors are errors.
+`format_report` reports unsupported nodes, attributes, task states/progress,
+source dialect mismatches, and delimiter collisions. Saved TODO markers are
+reused only if they still match the current task. It preserves native coarse
+progress ranges rather than inventing exact percentages.
+
+Diagnostics have `code`, `severity`, `element`, and `message` fields.
+`format` defaults to `loss:"error"` and raises on the first diagnostic;
+`loss:"allow"` returns the text. `format_report` returns diagnostics in
+either mode. Malformed task attributes produce `invalid-task` diagnostics.
+
+```lambda
+import wiki: lambda.doc.wiki
+wiki.format_file("notes.txt", {
+    input_type:"wiki", input_flavor:"zimwiki", flavor:"creole", loss:"allow"
+})^
+```
+
+The same writer is selected by `format(document,"wiki:creole")`, formatted
+`output`, and `lambda convert -t wiki:creole`. The native MediaWiki formatter
+has been retired. These are initial static profiles; builds and package/schema
+compilation passed, while conformance and regression suites remain pending.
+See [dialect coverage and limits](Markup_Formats_Support.md#15-wiki-dialect-coverage)
+and the [working design](../vibe/input/Input_Wiki.md).

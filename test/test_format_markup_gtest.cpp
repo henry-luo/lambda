@@ -41,6 +41,25 @@ static const char* format_with_rules(Pool* pool, Item item, const MarkupOutputRu
     return sb->str->chars;
 }
 
+// Keep the existing wiki assertions at the public CLI boundary after native retirement.
+static const char* format_wiki_script(Pool* pool, Item item) {
+    String* mark = format_mark(pool, item);
+    if (!mark) return nullptr;
+    char* source = tu_write_temp("wiki_format_source", "mark", mark->chars);
+    char* destination = tu_write_temp("wiki_format_output", "wiki", "");
+    if (!source || !destination) { free(source); free(destination); return nullptr; }
+    char command[2048];
+    snprintf(command, sizeof(command), "./lambda.exe convert '%s' -f mark -t wiki -o '%s'", source, destination);
+    int status = -1;
+    char* diagnostics = tu_run(command, &status);
+    if (status) log_error("wiki-script-format: CLI conversion failed: %s", diagnostics ? diagnostics : "no output");
+    char* output = status == 0 ? tu_slurp(destination) : nullptr;
+    const char* result = output ? pool_strdup(pool, output) : nullptr;
+    remove(source); remove(destination);
+    free(output); free(diagnostics); free(source); free(destination);
+    return result;
+}
+
 // ==============================================================================
 // Test Fixture
 // ==============================================================================
@@ -372,7 +391,7 @@ TEST_F(FormatMarkupTest, OrgHR) {
 
 TEST_F(FormatMarkupTest, WikiHeading) {
     Item item = build_heading_paragraph();
-    const char* out = format_with_rules(pool_, item, &WIKI_RULES);
+    const char* out = format_wiki_script(pool_, item);
     ASSERT_NE(out, nullptr);
     // Wiki h1: = Hello World =
     EXPECT_NE(strstr(out, "= Hello World ="), nullptr) << "Output: " << out;
@@ -380,7 +399,7 @@ TEST_F(FormatMarkupTest, WikiHeading) {
 
 TEST_F(FormatMarkupTest, WikiInline) {
     Item item = build_inline_formatting();
-    const char* out = format_with_rules(pool_, item, &WIKI_RULES);
+    const char* out = format_wiki_script(pool_, item);
     ASSERT_NE(out, nullptr);
     EXPECT_NE(strstr(out, "'''bold'''"), nullptr) << "Output: " << out;
     EXPECT_NE(strstr(out, "''italic''"), nullptr) << "Output: " << out;
@@ -389,7 +408,7 @@ TEST_F(FormatMarkupTest, WikiInline) {
 
 TEST_F(FormatMarkupTest, WikiLink) {
     Item item = build_link();
-    const char* out = format_with_rules(pool_, item, &WIKI_RULES);
+    const char* out = format_wiki_script(pool_, item);
     ASSERT_NE(out, nullptr);
     // Wiki link: [url text]
     EXPECT_NE(strstr(out, "[https://example.com here]"), nullptr) << "Output: " << out;
@@ -397,7 +416,7 @@ TEST_F(FormatMarkupTest, WikiLink) {
 
 TEST_F(FormatMarkupTest, WikiUnorderedList) {
     Item item = build_unordered_list();
-    const char* out = format_with_rules(pool_, item, &WIKI_RULES);
+    const char* out = format_wiki_script(pool_, item);
     ASSERT_NE(out, nullptr);
     // Wiki uses * for unordered list items (depth repetition)
     EXPECT_NE(strstr(out, "* Item one"), nullptr) << "Output: " << out;
@@ -405,7 +424,7 @@ TEST_F(FormatMarkupTest, WikiUnorderedList) {
 
 TEST_F(FormatMarkupTest, WikiOrderedList) {
     Item item = build_ordered_list();
-    const char* out = format_with_rules(pool_, item, &WIKI_RULES);
+    const char* out = format_wiki_script(pool_, item);
     ASSERT_NE(out, nullptr);
     // Wiki uses # for ordered list items (depth repetition)
     EXPECT_NE(strstr(out, "# First"), nullptr) << "Output: " << out;
@@ -413,7 +432,7 @@ TEST_F(FormatMarkupTest, WikiOrderedList) {
 
 TEST_F(FormatMarkupTest, WikiTable) {
     Item item = build_table();
-    const char* out = format_with_rules(pool_, item, &WIKI_RULES);
+    const char* out = format_wiki_script(pool_, item);
     ASSERT_NE(out, nullptr);
     EXPECT_NE(strstr(out, "{|"), nullptr) << "Output: " << out;
     EXPECT_NE(strstr(out, "|}"), nullptr) << "Output: " << out;
@@ -518,8 +537,8 @@ TEST_F(FormatMarkupTest, RulesLookup) {
     EXPECT_EQ(get_markup_rules("restructuredtext"), &RST_RULES);
     EXPECT_EQ(get_markup_rules("org"), &ORG_RULES);
     EXPECT_EQ(get_markup_rules("orgmode"), &ORG_RULES);
-    EXPECT_EQ(get_markup_rules("wiki"), &WIKI_RULES);
-    EXPECT_EQ(get_markup_rules("mediawiki"), &WIKI_RULES);
+    EXPECT_EQ(get_markup_rules("wiki"), nullptr);
+    EXPECT_EQ(get_markup_rules("mediawiki"), nullptr);
     EXPECT_EQ(get_markup_rules("textile"), &TEXTILE_RULES);
     EXPECT_EQ(get_markup_rules("unknown"), nullptr);
 }
@@ -545,6 +564,10 @@ protected:
         Input* input = input_from_source(src, url, type_str, NULL);
         if (!input) { free(src); free_str(type_str); return nullptr; }
 
+        if (!strcmp(fmt_name, "wiki")) {
+            free_str(type_str);
+            return format_wiki_script(input->pool, input->root);
+        }
         const MarkupOutputRules* rules = get_markup_rules(fmt_name);
         if (!rules) { free_str(type_str); return nullptr; }
 

@@ -9,6 +9,7 @@
  * Extracted from input-markup.cpp lines 1558-1907
  */
 #include "inline_common.hpp"
+#include "../wiki.hpp"
 #include "../markup_highlight.hpp"
 #include "../../../../lib/strbuf.h"
 #include "../../../../lib/log.h"
@@ -129,6 +130,8 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
     if (!parser || !text || !*text) {
         return Item{.item = ITEM_UNDEFINED};
     }
+
+    if (parser->config.format == Format::WIKI) return parse_wiki_inlines(parser, text);
 
     log_debug("parse_inline_spans: input='%s', len=%zu", text, strlen(text));
     // highlight mode: where this call's text lies in the root inline text
@@ -434,9 +437,6 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             }
         }
 
-        if (*pos == '<' && format == Format::WIKI &&
-            try_parse_inline_item(parser, span, sb, &pos, parse_wiki_nowiki)) continue;
-
         // Check for raw HTML (<) - Markdown only
         if (*pos == '<' && format == Format::MARKDOWN) {
             // Try autolink first (<http://...> or <email@...>)
@@ -459,16 +459,6 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 if (try_parse_inline_item(parser, span, sb, &pos, parse_org_link)) continue;
             }
 
-            // MediaWiki-specific link parsing
-            if (format == Format::WIKI && *(pos+1) == '[') {
-                if (try_parse_inline_item(parser, span, sb, &pos, parse_wiki_link)) continue;
-            }
-
-            // MediaWiki external link
-            if (format == Format::WIKI) {
-                if (try_parse_inline_item(parser, span, sb, &pos, parse_wiki_external_link)) continue;
-            }
-
             // Check for footnote reference [^1]
             if (*(pos+1) == '^' && parser->config.flavor != Flavor::COMMONMARK) {
                 if (try_parse_inline_item(parser, span, sb, &pos, parse_footnote_reference)) continue;
@@ -486,19 +476,6 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             stringbuf_append_char(sb, *pos);
             pos++;
             continue;
-        }
-
-        // MediaWiki bold/italic (')
-        if (*pos == '\'' && format == Format::WIKI) {
-            const char* old_pos = pos;
-            if (try_parse_inline_item(parser, span, sb, &pos, parse_wiki_bold_italic)) {
-                continue;
-            } else if (pos == old_pos) {
-                // Parse failed and didn't advance, add character and move on
-                stringbuf_append_char(sb, *pos);
-                pos++;
-                continue;
-            }
         }
 
         // Check for image (![)
@@ -569,16 +546,6 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
 
             // Not emoji, restore position and add : to buffer
             pos = old_pos;
-            stringbuf_append_char(sb, *pos);
-            pos++;
-            continue;
-        }
-
-        // Check for wiki template ({{)
-        if (*pos == '{' && *(pos+1) == '{' && format == Format::WIKI) {
-            if (try_parse_inline_item(parser, span, sb, &pos, parse_wiki_template)) continue;
-
-            // Not template, add { to buffer
             stringbuf_append_char(sb, *pos);
             pos++;
             continue;

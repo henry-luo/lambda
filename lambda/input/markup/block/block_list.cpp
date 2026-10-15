@@ -12,6 +12,7 @@
  * Supports nested lists with proper indentation handling.
  */
 #include "block_common.hpp"
+#include "../wiki.hpp"
 #include "../markup_highlight.hpp"
 #include <cstdio>
 #include "../../../../lib/mem.h"
@@ -20,6 +21,36 @@
 
 namespace lambda {
 namespace markup {
+
+void apply_task_attributes(MarkupParser* parser, Element* item, const ListItemInfo& info) {
+    add_attribute_to_element(parser, item, "class", "task-list-item");
+    add_attribute_to_element(parser, item, "data-checked", info.task_checked ? "true" : "false");
+    if (!info.task_state) return;
+    add_attribute_to_element(parser, item, "data-task-state", info.task_state);
+    if (info.task_label) add_attribute_to_element(parser, item, "data-task-label", info.task_label);
+    else if (!strcmp(info.task_state, "custom") && info.task_marker)
+        add_attribute_to_element(parser, item, "data-task-label", wiki_slice(parser, info.task_marker, info.task_marker_length));
+    if (info.task_marker) {
+        add_attribute_to_element(parser, item, "data-task-marker", wiki_slice(parser, info.task_marker, info.task_marker_length));
+        add_attribute_to_element(parser, item, "data-task-flavor", info.task_flavor);
+    }
+    if (info.progress_min >= 0) {
+        char number[16];
+        snprintf(number, sizeof(number), "%d", info.progress_min);
+        add_attribute_to_element(parser, item, "data-task-progress-min", number);
+        snprintf(number, sizeof(number), "%d", info.progress_max);
+        add_attribute_to_element(parser, item, "data-task-progress-max", number);
+    }
+}
+
+void append_task_checkbox(MarkupParser* parser, Element* item, const ListItemInfo& info) {
+    Element* checkbox = create_element(parser, "input");
+    add_attribute_to_element(parser, checkbox, "type", "checkbox");
+    add_attribute_to_element(parser, checkbox, "disabled", "disabled");
+    if (info.task_checked) add_attribute_to_element(parser, checkbox, "checked", "checked");
+    list_push((List*)item, Item{.element = checkbox});
+}
+
 
 // Forward declaration for inline parsing
 extern Item parse_inline_spans(MarkupParser* parser, const char* text);
@@ -867,15 +898,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             if (item_info.valid && item_info.is_task) {
                 has_task_items = true;  // Mark list as containing task items
 
-                // Add class="task-list-item" for styling
-                String* class_key = parser->builder.createName("class");
-                String* class_val = parser->builder.createString("task-list-item");
-                parser->builder.putToElement(lam::gc_borrow(item), class_key, Item{.item = s2it(class_val)});
-
-                // Add data-checked attribute to indicate checkbox state
-                String* checked_key = parser->builder.createName("data-checked");
-                String* checked_val = parser->builder.createString(item_info.task_checked ? "true" : "false");
-                parser->builder.putToElement(lam::gc_borrow(item), checked_key, Item{.item = s2it(checked_val)});
+                apply_task_attributes(parser, item, item_info);
             }
 
             // Calculate content column first - needed for proper stripping
@@ -1077,27 +1100,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     // For task list items, add checkbox as first child
                     // This creates: <li class="task-list-item"><input type="checkbox" checked/> content...</li>
                     if (item_info.valid && item_info.is_task) {
-                        Element* checkbox = create_element(parser, "input");
-                        if (checkbox) {
-                            // Set type="checkbox"
-                            String* type_key = parser->builder.createName("type");
-                            String* type_val = parser->builder.createString("checkbox");
-                            parser->builder.putToElement(lam::gc_borrow(checkbox), type_key, Item{.item = s2it(type_val)});
-
-                            // Set disabled attribute (GFM spec: checkboxes are typically disabled)
-                            String* disabled_key = parser->builder.createName("disabled");
-                            String* disabled_val = parser->builder.createString("disabled");
-                            parser->builder.putToElement(lam::gc_borrow(checkbox), disabled_key, Item{.item = s2it(disabled_val)});
-
-                            // Set checked attribute if task is checked
-                            if (item_info.task_checked) {
-                                String* checked_key = parser->builder.createName("checked");
-                                String* checked_val = parser->builder.createString("checked");
-                                parser->builder.putToElement(lam::gc_borrow(checkbox), checked_key, Item{.item = s2it(checked_val)});
-                            }
-
-                            list_push((List*)item, Item{.item = (uint64_t)checkbox});
-                        }
+                        append_task_checkbox(parser, item, item_info);
                     }
 
                     // Parse blocks

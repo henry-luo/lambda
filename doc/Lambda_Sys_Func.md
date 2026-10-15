@@ -1156,6 +1156,11 @@ explicit-format spelling, and `exists(p)` the probe that forces nothing.
 
 **Supported Input Formats**: `json`, `xml`, `html`, `xhtml`, `yaml`, `toml`, `ini`, `properties`, `csv`, `markdown`, `rst`, `asciidoc`, `wiki`, `org`, `textile`, `man`, `latex`, `typst`, `mark`, `rtf`, `pdf`, `eml`, `ics`, `vcf`, `css`, `math`, `graph`, `text`, `binary`, `zip` — see [Markup_Formats_Support.md](Markup_Formats_Support.md) for the tree each one produces and the `{type, flavor}` option form.
 
+Wiki dialects use `"wiki:<flavor>"` or `{type:"wiki", flavor:"zimwiki"}`.
+Unqualified `wiki` and `.wiki` input default to MediaWiki; other dialects
+require explicit selection. See the [ten wiki profiles](Markup_Formats_Support.md#15-wiki-dialect-coverage)
+for supported syntax, task/tag mappings, and current limits.
+
 **ZIP32/ZIP64** input returns an archive-backed `fs` element, including for
 ZIP-backed `.docx` and other package files. It captures and closes the complete
 source during `input()` (**S12.4.1v2**); listing children and reading metadata
@@ -1358,6 +1363,18 @@ let pretty_json = format(data, {type: 'json', indent: 2})
 let compact_json = format(data, {type: 'json', compact: true})
 ```
 
+Wiki targets accept `"wiki:<flavor>"` or
+`{type:"wiki", flavor:"jira", loss:"error"}` and invoke the shipped
+`lambda.doc.wiki` Lambda Script writers (D7.2.4). The default flavor is
+`mediawiki`; the default loss policy is `error`. `loss:"allow"` permits
+diagnosed losses. Use `wiki.format_report` to inspect `{text, diagnostics}`
+before allowing them. See [wiki output](Markup_Formats_Support.md#51-wiki-output).
+
+```lambda
+let document = parse("= Title =\n\n**Text**", "wiki:creole")^
+format(document, {type:"wiki", flavor:"jira"})^
+```
+
 ### Procedural I/O Functions
 
 Functions that have side effects (I/O, state changes). These are only available in procedural functions (`pn`).
@@ -1449,6 +1466,7 @@ for defaults and constructed-tree examples.
 | `xml` | `.xml` | XML format |
 | `html` | `.html`, `.htm` | HTML format |
 | `markdown` | `.md` | Markdown format |
+| `wiki` / `wiki:<flavor>` | `.wiki`, `.mediawiki` default to MediaWiki | Lambda Script wiki writers; explicit selector for other dialects |
 | `mark` | `.mark` | Mark Notation (D2.9.1) |
 | `text` | `.txt` | Plain text |
 | `toml` | `.toml` | TOML format |

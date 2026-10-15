@@ -11,6 +11,7 @@
 #include "../lambda-data.hpp"
 #include "../../lib/mem_factory.h"
 #include "../input/input.hpp"
+#include "../io/wiki_format.hpp"
 #include "../../lib/mempool.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/log.h"
@@ -590,7 +591,7 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
                                  strcmp(input_format, "markdown") == 0 ||
                                  strcmp(input_format, "rst") == 0 ||
                                  strcmp(input_format, "textile") == 0 ||
-                                 strcmp(input_format, "wiki") == 0)) {
+                                 wiki_format_flavor(input_format))) {
             schema_file = lambda_home_path("package/doc/doc_schema.ls");
             schema_file_allocated = true;
             printf("Using document schema for %s input\n", input_format);

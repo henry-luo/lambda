@@ -8,11 +8,11 @@ Lambda parses a wide variety of text and binary formats into a single, uniform i
 
 Every tree shown below is the real output of `lambda convert <file> -t mark` on the current build; where a parser's output differs from the shape it is heading for, the difference is stated. This document covers:
 
-1. [Lightweight markup languages](#1-lightweight-markup-languages) — human-authored prose that maps to the **Mark Doc** element schema
+1. [Lightweight markup languages](#1-lightweight-markup-languages) — human-authored prose that maps to the **Mark Doc** element schema, including [wiki dialect coverage](#15-wiki-dialect-coverage)
 2. [Data-interchange formats](#2-data-interchange-formats) — structured data that maps to Lambda **maps, arrays and elements**
 3. [Other formats](#3-other-formats) — LaTeX, PDF, email, contacts, calendars, diagrams, CSS, MDX, directories and [DocBook](#312-docbook)
 4. [Reading and writing](#4-reading-and-writing) — `input()`, `parse()`, `format()` and `lambda convert`
-5. [Output formats](#5-output-formats)
+5. [Output formats](#5-output-formats), including [wiki writers and loss handling](#51-wiki-output)
 
 ---
 
@@ -26,7 +26,8 @@ All lightweight markup flavors (Markdown, reStructuredText, AsciiDoc, …) parse
 |--------|:-----------------:|-------|
 | CommonMark / GitHub Flavored Markdown | `markdown` (`md`) | CommonMark plus GFM tables, tasks, strikethrough and bare autolinks; math, Mermaid, footnotes and all aliases in the versioned GitHub emoji catalog; embedded HTML without GFM tag filtering. See [Markdown dialect](../vibe/input/Input_Markdown.md). `{type: 'markup', flavor: 'commonmark'}` selects strict CommonMark. |
 | reStructuredText | `rst` | |
-| MediaWiki / DokuWiki markup | `wiki` | |
+| MediaWiki / DokuWiki markup | `wiki`, `wiki:mediawiki`, `wiki:dokuwiki` | Unqualified `wiki` means MediaWiki |
+| Wiki-family markup | `wiki:<flavor>` | `tikiwiki`, `twiki`, `vimwiki`, `xwiki` (2.1), `zimwiki`, `creole` (1.0), `jira`, `confluence` |
 | AsciiDoc | `asciidoc` / `adoc` | |
 | Emacs Org-mode | `org` | |
 | Textile | `textile` | |
@@ -48,13 +49,26 @@ let adoc = input("guide.adoc",   'asciidoc')^
 let html = input("index.html",   'html')^
 ```
 
+Wiki dialects require explicit selection when the filename is ambiguous:
+
+```lambda
+let notebook = input("notes.txt", {type:"wiki",flavor:"zimwiki"})^
+let document = parse("= Heading =\n\n**bold**", "wiki:creole")^
+```
+
+These readers extend the shared MediaWiki parser and construct normalized
+Mark Doc (S2.6.1v2, S2.6.2–S2.6.5; D7.1.5). They preserve dynamic macros and
+unsupported source features as inert raw nodes with diagnostics. Rich task
+states retain progress ranges and source markers; tags use existing metadata
+where their scope is defined. See [wiki coverage and limits](../vibe/input/Input_Wiki.md).
+
 ### 1.2 Unified Mark Doc Schema
 
 Every prose parser produces the same element-tree shape. Element names are aligned with HTML so the tree passes straight to the Radiant layout engine.
 
 | Category | Mark element(s) | Notes |
 |----------|-----------------|-------|
-| Document root | `<doc version: "1.0", <body …>>` | the `<meta>` element is part of the schema but not produced yet; Markdown front matter currently parses as a thematic break and a heading |
+| Document root | `<doc version: "1.0", <meta …>?, <body …>>` | Wiki page tags and Zim creation metadata can produce the optional `<meta>`; Markdown front matter currently parses as a thematic break and a heading |
 | Headings | `<h1 level: "1">` … `<h6 level: "6">` | `level` is emitted as a string |
 | Paragraph | `<p <span …>>` | the inline run is wrapped in one `<span>` |
 | Block quote | `<blockquote>` | |
@@ -171,6 +185,65 @@ HTML5 is a first-class input format and is preserved verbatim, whitespace text n
 </tr>
 </tbody>
 </table>
+
+---
+
+### 1.5 Wiki Dialect Coverage
+
+Ten explicit profiles have readers and writers. Readers extend the shared
+native wiki parser; all writers live in the shipped **`lambda.doc.wiki`**
+Lambda Script package. Each reader constructs the same normalized Mark Doc
+vocabulary (S2.6.1v2, S2.6.2–S2.6.5; D7.1.5), with no dialect-specific root.
+
+The common static profile covers headings, paragraphs, emphasis, code,
+nested lists, links, images, rules, and tables. Dialect-specific mappings and
+limits include:
+
+| Dialect | Input and output selector | Additional mappings and limits |
+|---|---|---|
+| MediaWiki | `wiki:mediawiki` or `wiki` | Native table captions and supported table/row/cell attributes; templates remain inert source constructs. |
+| DokuWiki | `wiki:dokuwiki` | Inverse-level equals headings, literal regions, indented lists, and quoted blocks; image option queries remain raw. |
+| TikiWiki | `wiki:tikiwiki` | Bang headings, page links, multiline tables, no-parse regions, and selected static macros; other plugins remain raw. |
+| TWiki | `wiki:twiki` | `---+` headings, WikiWord links, literal/verbatim regions, and explicit anchors; variables and includes remain raw. |
+| Vimwiki | `wiki:vimwiki` | Native Vimwiki syntax, TODO progress ranges, automatic heading/bold anchors, and page tags; local tag scope, explicit invisible anchors, and hard breaks have writer limits. Markdown-mode notebooks should use `markdown`. |
+| XWiki Syntax 2.1 | `wiki:xwiki` | Explicit IDs/classes on supported blocks, code and ID macros; unimplemented link/image parameters and other macros remain raw. |
+| ZimWiki | `wiki:zimwiki` | TODO/migration markers, inline tags and page tag metadata, anchors, and creation metadata; image option queries remain raw. |
+| Creole 1.0 | `wiki:creole` | Standard prose syntax, escapes, hard breaks, and nowiki; extension placeholders remain raw. |
+| Jira / Atlassian | `wiki:jira` | Shared Atlassian static syntax and supported `code`, `noformat`, `quote`, `panel`, `color`, and `anchor` macros; host-dependent macros remain raw. |
+| Confluence wiki markup | `wiki:confluence` | The shared Atlassian profile; page, space, and attachment targets stay symbolic. This is wiki markup, not Confluence storage XML or Atlassian Document Format (ADF). |
+
+`wiki` and `.wiki` retain the MediaWiki default. Select the dialect explicitly
+for `.txt`, Vimwiki `.wiki`, and other ambiguous filenames; the reader does
+not guess a dialect from page content. Both string selectors and
+`{type:"wiki", flavor:"zimwiki"}` options are accepted by `input` and `parse`.
+CLI validation selects the common `doc_schema.ls` for these wiki selectors.
+
+**Tasks and tags.** Vimwiki and ZimWiki readers add `data-task-state`, optional
+labels and progress bounds, and original marker/flavor attributes to the
+existing task-list representation. Page tags use `meta.tags`; Zim inline tags
+also retain their position. See the [task and tag schema](Doc_Schema.md#tasks-and-tags)
+for field names and invariants. A target without a matching workflow state or
+progress range produces a writer diagnostic.
+
+**Conversion limits.** Plugins, scripts, variables, includes, searches, and
+extension placeholders are preserved as inert, flavor-labelled `<raw>` nodes
+with parser diagnostics. Matching-dialect source can be re-emitted; conversion
+to another dialect reports a loss. Site databases, permissions, page history,
+notebook operations, and resource resolution require context outside one
+document. Symbolic links remain symbolic.
+
+Some static content is representable in Mark Doc but still lacks a writer
+mapping: blockquotes outside DokuWiki/XWiki/Atlassian, Vimwiki hard breaks,
+some text effects and anchors, and captions/table attributes/spans outside the
+supported MediaWiki mapping. These also produce diagnostics; see
+[wiki output](#51-wiki-output) for strict and permissive handling.
+
+**Implementation status (2026-10-15):** initial static profiles. Native builds
+and package/schema compilation succeeded. Dialect conformance, regression,
+and round-trip suites have not been run for this implementation; the table is
+an implementation summary, not a full conformance claim. The
+[working design and implementation notes](../vibe/input/Input_Wiki.md#implementation-notes-2026-10-15)
+record the remaining gaps.
 
 ---
 
@@ -871,12 +944,45 @@ lambda convert arch.mmd    -f graph:mermaid -t mark -o arch.mark
 | Category | Output formats |
 |----------|----------------|
 | **Data** | `mark` (lossless), `json`, `yaml`, `toml`, `ini`, `properties`, `xml` |
-| **Documents** | `html`, `markdown`/`md`, `rst`, `org`, `wiki`, `textile`, `latex`, `jsx`, `mdx`, `text` |
+| **Documents** | `html`, `markdown`/`md`, `rst`, `org`, `wiki`/`wiki:<flavor>`, `textile`, `latex`, `jsx`, `mdx`, `text` |
 | **Styles** | `css` |
 | **Math** | `math-latex`, `math-ascii` (`math-typst` and `math-mathml` are stubs) |
 | **Diagrams** | graph as `dot`, `mermaid` or `d2` |
 
 Where a target lacks a concept the conversion is predictable rather than silently lossy: a `binary` value becomes a base64 string in JSON and YAML, and an element written to a data format becomes its map-and-array projection. There is no CSV writer.
+
+### 5.1 Wiki Output
+
+All wiki output uses the shipped **`lambda.doc.wiki`** Lambda Script package
+(D7.2.4), including MediaWiki. Runtime `format()`, formatted file `output()`, and
+CLI conversion invoke it above the IO boundary (D7.1.1). The native MediaWiki
+formatter has been retired. Use any selector in the [coverage table](#15-wiki-dialect-coverage).
+
+```lambda
+import wiki: lambda.doc.wiki
+let document = parse("= Title =\n\n**bold**", "wiki:creole")^
+let report = wiki.format_report(document, {flavor:"jira"})^
+let text = wiki.format(document, {flavor:"jira"})^
+let via_builtin = format(document, {type:"wiki", flavor:"jira"})^
+```
+
+`format_report` returns `{text, diagnostics}` even when conversion loses
+information. Each diagnostic has `code`, `severity`, `element`, and `message`
+fields. `format` defaults to `loss:"error"` and raises on the first diagnostic;
+`loss:"allow"` returns the serialized text despite reported losses. Inspect a
+report before choosing permissive output. Both package functions default to
+`flavor:"mediawiki"`. See the [package API](Lambda_Packages.md#17-docwiki--wiki-writers)
+for file conversion and options.
+
+```bash
+./lambda.exe convert page.wiki -f wiki:creole -t wiki:jira -o page.jira
+./lambda.exe convert notes.txt -f wiki:zimwiki -t mark -o notes.mark
+./lambda.exe convert notes.mark -f mark -t wiki:creole --loss allow -o notes.creole
+```
+
+`--loss error|allow` applies only to wiki output and defaults to `error`.
+Native hosts must use the runtime format API or package export; the
+runtime-free `format_data` API refuses wiki output.
 
 ---
 
@@ -884,7 +990,7 @@ Where a target lacks a concept the conversion is predictable rather than silentl
 
 | Category | Formats |
 |----------|---------|
-| **Lightweight markup** | Markdown (GFM/CommonMark), HTML5, reStructuredText, AsciiDoc, Wiki, Org-mode, Textile, troff/man, MDX, LaTeX, Typst, Mark |
+| **Lightweight markup** | Markdown (GFM/CommonMark), HTML5, reStructuredText, AsciiDoc, [ten wiki profiles](#15-wiki-dialect-coverage), Org-mode, Textile, troff/man, MDX, LaTeX, Typst, Mark |
 | **Data interchange** | JSON, XML, YAML 1.2, TOML, CSV, INI, Java .properties, SQLite |
 | **Document / rich text** | PDF, LaTeX (.tex), DocBook 5.x (.xml, partial HTML/CSS profile); RTF experimental |
 | **Personal data** | vCard (VCF), iCalendar (ICS), Email (EML / RFC 822) |

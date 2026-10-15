@@ -51,6 +51,7 @@
 #endif
 #include "../validator/validator.hpp"
 #include "../input/input.hpp"
+#include "../io/wiki_format.hpp"
 #include "../io/fs_node.hpp"
 #include "io_file_search.hpp"
 #include "../input/html5/html5_parser.h"
@@ -6676,11 +6677,22 @@ Item fn_format2(Item item, Item type) {
     }
 
     log_debug("format item type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
-    RootFrame format_roots(4);
+    RootFrame format_roots(6);
     Rooted<Item> source(format_roots, item);
     Rooted<Item> converted(format_roots, ItemNull);
     Rooted<String*> rooted_type(format_roots, type_str);
     Rooted<String*> rooted_flavor(format_roots, flavor_str);
+    Rooted<Item> rooted_options(format_roots, type);
+    Rooted<Item> wiki_flavor(format_roots, ItemNull);
+    if (const char* flavor = wiki_format_flavor(type_str ? type_str->chars : nullptr,
+            flavor_str ? flavor_str->chars : nullptr)) {
+        // Package evaluation can allocate; keep all arguments precisely rooted (D5.3.3).
+        wiki_flavor.set(Item{.item = s2it(heap_strcpy(flavor, strlen(flavor)))});
+        Item args[3] = {source.get(), wiki_flavor.get(),
+            type_id == LMD_TYPE_MAP ? rooted_options.get() : ItemNull};
+        return interp_call_package_export(context->runtime,
+            "lambda.doc.wiki", "format_native", args, 3);
+    }
 #ifndef LAMBDA_NO_MATH_FORMAT
     if (type_str && ((strcmp(type_str->chars, "math") == 0 && flavor_str &&
             strcmp(flavor_str->chars, "mathml") == 0) ||

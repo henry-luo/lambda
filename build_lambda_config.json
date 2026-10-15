@@ -2170,7 +2170,6 @@
         "lambda/format/format-textile.cpp",
         "lambda/format/format-toml.cpp",
         "lambda/format/format-utils.cpp",
-        "lambda/format/format-wiki.cpp",
         "lambda/format/format-xml.cpp",
         "lambda/format/format-yaml.cpp",
         "lambda/format/format.cpp",
@@ -2214,6 +2213,7 @@
         "lambda/input/markup/block/block_detection.cpp",
         "lambda/input/markup/block/block_divider.cpp",
         "lambda/input/markup/block/block_document.cpp",
+        "lambda/input/markup/block/block_wiki.cpp",
         "lambda/input/markup/block/block_header.cpp",
         "lambda/input/markup/block/block_html.cpp",
         "lambda/input/markup/block/block_link_def.cpp",
@@ -4408,6 +4408,7 @@
               "lib/test_utils.c",
               "lib/test_utils_pool.c"
             ],
+            "requires_lambda_exe": true,
             "binary": "test_format_markup_gtest.exe",
             "icon": "\ud83d\udcdd"
           },
