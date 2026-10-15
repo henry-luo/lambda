@@ -289,9 +289,11 @@ static bool mvp_lmd_class_widen_allocation(MvpLmdClass* cls, String* key, TypeId
     return false;
 }
 
-template<bool fixed, bool binding = false>
+template<bool fixed, bool binding = false, int known_operation = -1>
 static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64_t operation,
         MvpLmdPropertyCache* cache, Item receiver) {
+    // a known Get prunes unrelated operation gates without duplicating property semantics.
+    if constexpr (known_operation >= 0) operation = known_operation;
     auto inherited_binding = [&]() -> Item {
         RootFrame roots(3);
         if (!roots.valid()) return ItemError;
@@ -515,6 +517,10 @@ extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_
 extern "C" Item mvp_lmd_class_property_fixed(Item owner, Item name, Item value, int64_t operation,
         MvpLmdPropertyCache* cache) {
     // the compiler's closed-unit proof excludes proxies and reflective mutation before selecting this import.
+    if (operation == LMD_PROP_GET)
+        return mvp_lmd_class_property_impl<true, false, LMD_PROP_GET>(owner, name, value, operation, cache, owner);
+    if (operation == LMD_PROP_CALLEE)
+        return mvp_lmd_class_property_impl<true, false, LMD_PROP_CALLEE>(owner, name, value, operation, cache, owner);
     if (operation == LMD_PROP_GET_BINDING)
         return mvp_lmd_class_property_impl<true, true>(owner, name, value, LMD_PROP_GET, cache, owner);
     return mvp_lmd_class_property_impl<true>(owner, name, value, operation, cache, owner);

@@ -1792,3 +1792,21 @@ The standalone Mandelbrot
 output path retains a conservative full-storage fallback, documented in the plan.
 Detailed implementation, evidence and
 residual inventories are in [the implementation plan](../impl/JS_MVP_Lmd_Test262_90.md).
+
+The remaining-case pass reuses pooled key hashes and Lambda's ordinary NameId
+equality proof, selects numeric property lanes earlier, and specializes the
+existing fixed-property reader (**D3.4.4v4**, **D4.6.1v4**, **D8.4.1v2**).
+It adds no helper or runtime cache. The final 15-workload paired release-MIR
+capture improves NBody **5.0%** and Splay **5.3%** against the clean merged
+pre-change build, returning both to historical parity. All outputs pass, with
+no new statistically clear regression in this capture. Historical gaps remain
+for Microdiff **8.4%**, object-delete **5.9%**, DeltaBlue **5.5%** and Hashmap
+**5.0%**. Busy background activity is recorded; this is not a whole-benchmark
+replay. The candidate passes **665/665** MVP tests, **13/13** focused GC checks,
+**94/94** shared map-building tests and **23/23** name-pool tests. It also passes
+**1,957 canonical + 1,716 strict** selected Test262 variants, the **40,261-case
+LJS baseline**, and all **313** GC stress cases. Lambda's aggregate is
+**7,441/7,445**: the PDF page-walker and chart wordcloud failures reproduce on
+the clean pre-change pin (three checks and one check respectively). No expected
+output or harness was changed. Details and rejected experiments are in
+`temp/mvp_perf_remaining_20261015/REPORT.md`; published results remain unchanged.

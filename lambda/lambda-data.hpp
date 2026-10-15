@@ -1030,10 +1030,9 @@ static inline bool typemap_hash_is_usable(TypeMap* tm) {
 
 // A1: Lookup a ShapeEntry by name through the hash table.
 // Returns the ShapeEntry or NULL if not found.
-// A6: Uses pointer comparison first (interned strings via name pool share
-// the same char* pointer), falling back to memcmp only on pointer mismatch.
+// a pooled text key can prove equality by NameId; other spellings use the byte fallback.
 static inline ShapeEntry* typemap_hash_lookup_by_hash(TypeMap* tm, const char* key,
-        int key_len, uint32_t key_hash) {
+        int key_len, uint32_t key_hash, NameId name_id = NAME_ID_NONE) {
     if (!tm || !key || key_len < 0) return NULL;
     if (key_hash == 0) key_hash = typemap_name_hash(key, key_len);
     int capacity = typemap_hash_capacity(tm);
@@ -1046,7 +1045,9 @@ static inline ShapeEntry* typemap_hash_lookup_by_hash(TypeMap* tm, const char* k
         uint32_t slot = (idx + (uint32_t)probe) & ((uint32_t)capacity - 1);
         ShapeEntry* e = slots[slot];
         if (!e) return NULL;  // empty slot → not found
-        if (typemap_shape_name_equals_hash(e, key, key_len, key_hash)) {
+        // D3.4.4v4: owned shape copies retain the record id even when their bytes move.
+        if ((name_id != NAME_ID_NONE && e->key_kind == NAME_KEY_STRING && e->name_id == name_id) ||
+                typemap_shape_name_equals_hash(e, key, key_len, key_hash)) {
             return typemap_hash_entry_is_own(tm, e) ? e : NULL;
         }
     }
@@ -1064,7 +1065,8 @@ static inline ShapeEntry* typemap_hash_lookup_key(TypeMap* tm, String* key) {
     if (meta && meta->key_kind != NAME_KEY_STRING)
         return typemap_hash_lookup_by_name_id(tm, meta->name_id, meta->hash);
     // canonical pooled names already carry the shared FNV hash; unpooled text uses the byte fallback.
-    return typemap_hash_lookup_by_hash(tm, key->chars, key->len, meta ? meta->hash : 0);
+    return typemap_hash_lookup_by_hash(tm, key->chars, key->len, meta ? meta->hash : 0,
+        meta ? meta->name_id : NAME_ID_NONE);
 }
 
 static inline ShapeEntry* typemap_hash_lookup_idless(TypeMap* tm,

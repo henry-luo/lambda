@@ -3991,6 +3991,9 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
                     branch(c, MIR_BNE, nullable_store ? nullable_store : miss, reg(c, actual), reg(c, storage));
                 }
                 MIR_label_t scalar = label(c);
+                // numeric consumers can select the physical scalar lane before inspecting pointer metadata.
+                if (numeric) for (int i = 0; i < 3; i++)
+                    branch(c, MIR_BEQ, lanes[i], reg(c, storage), integer(c, scalars[i].type));
                 MIR_reg_t pointer_lane = em_load_at(&c->em, address,
                     offsetof(MvpLmdPropertyCacheEntry, pointer_lane), MIR_T_U8, "cached_pointer_lane");
                 branch(c, MIR_BEQ, scalar, reg(c, pointer_lane), integer(c, 0));
@@ -4011,7 +4014,7 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
                     move(c, joined, reg(c, numeric ? to_number(c, boxed(c, loaded)) : loaded), numeric);
                 }
                 jump(c, done); put_label(c, scalar);
-                for (int i = 0; i < 3; i++)
+                if (!numeric) for (int i = 0; i < 3; i++)
                     branch(c, MIR_BEQ, lanes[i], reg(c, storage), integer(c, scalars[i].type));
                 put_label(c, shared);
                 if (operation == LMD_PROP_SET) {

@@ -3446,6 +3446,43 @@ TEST_F(JsMvpLmd, GuardedMethodParametersAndReturns) {
     error("class A{f(x){const a=x;a=3;return a}}new A().f(1)", "TypeError");
     error("class A{f(x){let y=z;let z=x;return y}}new A().f(1)", "ReferenceError");
 }
+TEST_F(JsMvpLmd, RepeatedPropertyReadsKeepLivePrototypeAndNullableLanes) {
+    boolean(R"JS(
+        class Node { constructor() { this.child=null; } }
+        function read(node) { return node.child; }
+        function number(node) { return +node.child; }
+        let node=new Node(), child={valueOf(){return 7}}, ok=true;
+        for(let i=0;i<12;i++) {
+            node.child=child;
+            ok=ok && read(node)===child && number(node)===7;
+            node.child=null;
+            ok=ok && read(node)===null && number(node)===0 && 1/number(node)===Infinity;
+        }
+        node.child=undefined;
+        ok=ok && read(node)===undefined && Number.isNaN(number(node));
+        for(let v of [1,2.5,true,false,'3',NaN,-0]) {
+            node.child=v;
+            ok=ok && Object.is(read(node),v) && Object.is(number(node),+v);
+        }
+        ok;
+    )JS");
+    boolean(R"JS(
+        const first={value:3}, second={get value(){return this.own+1}};
+        let middle=Object.create(first), object=Object.create(middle), ok=true;
+        object.own=8;
+        function read(o){return o.value;}
+        function keys(o){let out='';for(let k in o)out+=k+',';return out;}
+        for(let i=0;i<10;i++) {
+            Object.setPrototypeOf(middle,first);
+            ok=ok && read(object)===3 && keys(object)==='own,value,';
+            Object.setPrototypeOf(middle,second);
+            ok=ok && read(object)===9 && keys(object)==='own,value,';
+        }
+        let hits=0, proxy=new Proxy({}, {get(t,k,r){hits++;return r.own+2}});
+        Object.setPrototypeOf(middle,proxy);
+        ok && read(object)===10 && hits===1;
+    )JS");
+}
 TEST_F(JsMvpLmd, ConstructorLayoutReuseAndObservation) {
     boolean("class A{constructor(x,y){this.x=x;this.y=y;this.z=null}}let ok=true;"
         "for(let v of [1,2,1.5,'s',true,null,5e-324,{n:1}]){let a=new A(v,[v]);"

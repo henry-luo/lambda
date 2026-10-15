@@ -624,12 +624,13 @@ static TransitionKey transition_key_of_string(String* key) {
     // names equal at once; an unpooled or computed key has none and is
     // matched by its spelling (D3.4.4v4).
     TransitionKey k = {};
-    k.name_id = string_is_pooled(key) ? name_ref_id(key) : NAME_ID_NONE;
-    k.key_kind = property_key_kind(key);
+    const NameMeta* meta = property_key_meta(key);
+    k.name_id = meta ? meta->name_id : NAME_ID_NONE;
+    k.key_kind = meta ? meta->key_kind : NAME_KEY_STRING;
     k.name = key->chars;
     k.name_len = (uint32_t)key->len;
-    k.name_hash = property_key_requires_identity(key)
-        ? property_key_hash(key) : typemap_name_hash(key->chars, (int)key->len);
+    // the record already owns the routing hash for both text and identity keys.
+    k.name_hash = meta ? meta->hash : typemap_name_hash(key->chars, (int)key->len);
     return k;
 }
 

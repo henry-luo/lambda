@@ -2336,3 +2336,71 @@ object-delete still need further tuning against their historical controls.
 Brainfuck is near parity (+1.6% with an interval including parity); the small
 formatted-output difference varies across captures. Performance acceptance
 remains open; this is not a new complete 88-workload replay.
+
+### Remaining-case tuning (2026-10-15)
+
+This continuation compares private release-MIR builds against the clean merged
+checkout `1f25b6c53` and the same historical controls. Evidence lives under
+`temp/mvp_perf_remaining_20261015/`; Results3–9 and the archived coverage score
+are unchanged.
+
+The retained candidate changes existing routes, adding no helper or per-site
+cache (**D8.4.1v2**):
+
+- Numeric consumers test the existing property's scalar storage lane before
+  loading pointer metadata. Optional, nonnumeric and legacy pointer cases keep
+  shared coercion/readers (**D3.4.5**, **D5.2–D5.3**).
+- Shared shape lookup accepts a nonzero matching ordinary `NameId` as a proof
+  of equality, retaining byte comparison for absent or differing IDs. Shape
+  transitions reuse the pooled record's hash; canonicalization, Symbol/private
+  identity and chain ownership checks are unchanged (**D3.4.4v4**,
+  **D4.6.1v4**, **D3.4.3v5**).
+- The fixed-property dispatcher specializes its existing implementation for
+  `Get` and callee reads. The compiler's existing closed-unit proof selects
+  that route; reflective units keep general dispatch. Both variants share
+  the same source for prototype, descriptor and ownership semantics.
+
+Rejected experiments remain captured: resolved prototype-face reuse, inline
+null-container reads, pointer-based spelling shortcuts, planned-name allocation/
+lexical setter changes, and specializing the reflective `Get` dispatcher.
+The last made Microdiff slower despite improving Splay, so only the fixed
+dispatcher specialization proceeds. Scaled sampling workloads are diagnostic
+only; acceptance uses original benchmark work and self-timing contracts.
+
+The retained `fixed-reads` release has SHA-256
+`2c266e7ac7bddb251a8f6afdf623a18c074a1863b38881ee0c22b2f5d6bd7697`.
+All **15/15** benchmark outputs pass in the final seven-round rotating comparison;
+all source/binary guards match. No new slowdown versus the clean pre-change
+control has a 95% paired interval wholly above parity. NBody improves **5.0%**
+and Splay **5.3%**, with both historical intervals including parity.
+
+| Workload | Candidate ms | Pre-change ms | Historical ms | Historical difference |
+|---|---:|---:|---:|---:|
+| NBody | 44.101 | 46.419 | 44.000 | +0.23% |
+| Splay | 61.207 | 64.619 | 61.830 | -1.01% |
+| DeltaBlue | 53.423 | 53.610 | 50.624 | +5.53% |
+| object-delete | 0.862 | 0.858 | 0.814 | +5.90% |
+| Microdiff | 110.337 | 110.208 | 101.780 | +8.41% |
+| Hashmap | 489.146 | 489.909 | 465.907 | +4.99% |
+
+The historical control is Result9 except Hashmap/Text Search, which retain the
+Phase34-entry control. Monitoring records zero competing build/test observations
+and busy background processes in **60/96** observations. Raw intervals and
+samples remain in `final-retained/comparison.json`; this is a focused comparison,
+not a new 88-workload sweep. Four historical gaps therefore remain open.
+
+Freshly rebuilt release archives pass **665/665** MVP tests, **13/13** focused
+forced-GC/poisoning checks, **94/94** shared map-building and **23/23** name-pool
+tests. The private CLI passes **1,957/1,957** selected canonical Test262 cases
+and **1,716/1,716** strict variants without retries. The full LJS baseline passes
+**40,261/40,261**, also without retries; the integrated GC stress sweep passes
+**313/313**.
+
+The Lambda aggregate records **7,441/7,445**. Three checks fail through
+`test/lambda/pdf/output_pages.ls`; the clean pre-change pin and candidate both
+produce the same page-fragment traversal failure in interpreter, JIT and auto
+tiers. The fourth is the chart dashboard's existing half-pixel wordcloud golden
+mismatch: both pins produce byte-identical output. Their separate replays,
+untouched baseline failures and provenance are retained in `validation.json`,
+`pdf-control-replay.json`, `chart-control-replay.json` and `baseline-results/`.
+No golden, test deadline or Test262 harness was changed.
