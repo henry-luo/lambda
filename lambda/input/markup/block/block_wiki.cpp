@@ -17,7 +17,9 @@ void wiki_record_tag(MarkupParser* parser, const char* tag, size_t length) {
         Item existing = parser->wiki_tags_->items[i];
         if (get_type_id(existing) == LMD_TYPE_STRING && !strcasecmp(existing.get_string()->chars, value)) return;
     }
-    array_push(parser->wiki_tags_, wiki_text(parser, tag, length));
+    // tags belong to the Input arena, including in standalone parser builds.
+    array_append(parser->wiki_tags_, wiki_text(parser, tag, length),
+        parser->builder.pool(), parser->builder.arena());
     if (!parser->wiki_metadata_) parser->wiki_metadata_ = create_element(parser, "meta");
     parser->builder.putToElement(lam::gc_borrow(parser->wiki_metadata_),
         parser->builder.createName("tags"), Item{.array = parser->wiki_tags_});

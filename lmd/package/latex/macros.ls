@@ -27,30 +27,21 @@ pub fn get_defs(ast) {
 // recursively scan for newcommand elements
 fn collect_all_defs(el, i, n, acc) {
     if (i >= n) acc
-    else collect_def_at(el, i, n, acc)
-}
-
-fn collect_def_at(el, i, n, acc) {
-    let child = el[i]
-    if (child is element and is_newcommand_el(child)) parse_and_continue(el, i, n, acc, child)
-    else if (child is element) scan_child_for_defs(el, i, n, acc, child)
-    else collect_all_defs(el, i + 1, n, acc)
+    else {
+        let child = el[i]
+        let found = if (child is element and is_newcommand_el(child)) {
+            let definition = parse_newcommand(child)
+            if (definition != null) [definition] else []
+        } else if (child is element) collect_all_defs(child, 0, len(child), [])
+        else []
+        // sibling count must not retain a mutually recursive helper activation.
+        collect_all_defs(el, i + 1, n, acc ++ found)
+    }
 }
 
 fn is_newcommand_el(el) {
     let tag = string(name(el))
     tag == "newcommand" or tag == "renewcommand" or tag == "providecommand"
-}
-
-fn parse_and_continue(el, i, n, acc, nc_el) {
-    let def = parse_newcommand(nc_el)
-    let new_acc = if (def != null) acc ++ [def] else acc
-    collect_all_defs(el, i + 1, n, new_acc)
-}
-
-fn scan_child_for_defs(el, i, n, acc, child) {
-    let child_defs = collect_all_defs(child, 0, len(child), [])
-    collect_all_defs(el, i + 1, n, acc ++ child_defs)
 }
 
 // parse a newcommand element:

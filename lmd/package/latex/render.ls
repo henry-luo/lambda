@@ -2602,8 +2602,14 @@ fn split_rows(content, col_spec, info) {
 
 fn collect_rows(el, i, n, current_cells, acc_rows, col_spec, info) {
     if (i >= n) finalize_rows(current_cells, acc_rows, col_spec, info)
-    else route_child(el, i, n, current_cells, acc_rows, col_spec, info)
+    else {
+        // helpers finish one token; the sole self-tail call keeps table width off the native stack.
+        let next = route_child(el[i], current_cells, acc_rows, col_spec, info)
+        collect_rows(el, i + 1, n, next.cells, next.rows, col_spec, info)
+    }
 }
+
+fn table_state(cells, rows) => {cells: cells, rows: rows}
 
 fn finalize_rows(current_cells, acc_rows, col_spec, info) {
     let final_row = make_row(current_cells, col_spec, info)
@@ -2614,78 +2620,68 @@ fn finalize_rows(current_cells, acc_rows, col_spec, info) {
     }
 }
 
-fn route_child(el, i, n, current_cells, acc_rows, col_spec, info) {
-    let child = el[i]
-    if (child is string) handle_string_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
-    else if (child is symbol) handle_symbol_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
-    else if (child is element) handle_element_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
-    else collect_rows(el, i + 1, n, current_cells, acc_rows, col_spec, info)
+fn route_child(child, current_cells, acc_rows, col_spec, info) {
+    if (child is string) handle_text_content(current_cells, acc_rows, col_spec, info, child)
+    else if (child is symbol) handle_symbol_child(current_cells, acc_rows, col_spec, info, child)
+    else if (child is element) handle_element_child(current_cells, acc_rows, col_spec, info, child)
+    else table_state(current_cells, acc_rows)
 }
 
-fn handle_symbol_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
+fn handle_symbol_child(current_cells, acc_rows, col_spec, info, child) {
     let sv = string(child)
-    if (sv == "alignment_tab") collect_rows(el, i + 1, n, current_cells ++ [null], acc_rows, col_spec, info)
-    else if (sv == "row_sep") handle_row_break(el, i, n, current_cells, acc_rows, col_spec, info)
-    else collect_rows(el, i + 1, n, current_cells, acc_rows, col_spec, info)
+    if (sv == "alignment_tab") table_state(current_cells ++ [null], acc_rows)
+    else if (sv == "row_sep") handle_row_break(current_cells, acc_rows, col_spec, info)
+    else table_state(current_cells, acc_rows)
 }
 
-fn handle_string_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
-    handle_text_content(el, i, n, current_cells, acc_rows, col_spec, info, child)
-}
-
-fn handle_text_content(el, i, n, current_cells, acc_rows, col_spec, info, child) {
+fn handle_text_content(current_cells, acc_rows, col_spec, info, child) {
     let trimmed = trim(child)
-    if (trimmed == null or len(trimmed) == 0) collect_rows(el, i + 1, n, current_cells, acc_rows, col_spec, info)
-    else add_text_to_cell(el, i, n, current_cells, acc_rows, col_spec, info, trimmed)
+    if (trimmed == null or len(trimmed) == 0) table_state(current_cells, acc_rows)
+    else add_text_to_cell(current_cells, acc_rows, col_spec, info, trimmed)
 }
 
-fn add_text_to_cell(el, i, n, current_cells, acc_rows, col_spec, info, trimmed) {
+fn add_text_to_cell(current_cells, acc_rows, col_spec, info, trimmed) {
     let new_cells = append_to_last_cell(current_cells, trimmed)
-    collect_rows(el, i + 1, n, new_cells, acc_rows, col_spec, info)
+    table_state(new_cells, acc_rows)
 }
 
-fn handle_element_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
+fn handle_element_child(current_cells, acc_rows, col_spec, info, child) {
     let child_name = name(child)
     // The table owns its caption; it is not cell content.
-    if (child_name == 'caption') collect_rows(el, i + 1, n, current_cells, acc_rows, col_spec, info)
-    else if (child_name == 'linebreak_command') handle_row_break(el, i, n, current_cells, acc_rows, col_spec, info)
+    if (child_name == 'caption') table_state(current_cells, acc_rows)
+    else if (child_name == 'linebreak_command') handle_row_break(current_cells, acc_rows, col_spec, info)
     else if (child_name == 'hline' or child_name == 'toprule' or child_name == 'midrule' or child_name == 'bottomrule')
-        handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info,
+        handle_rule_row(current_cells, acc_rows, col_spec, info,
             rule_row(string(child_name), rule_color_at(info, child), len(col_spec)))
     else if (child_name == 'hhline' and registry.active(info.packages, "hhline"))
-        handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info,
+        handle_rule_row(current_cells, acc_rows, col_spec, info,
             hhline.rule_row(util.raw_argument(child, "required", 0) or "", len(col_spec), rule_color_at(info, child)))
     else if (child_name == 'cmidrule' and registry.active(info.packages, "booktabs"))
-        handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info,
+        handle_rule_row(current_cells, acc_rows, col_spec, info,
             booktabs.cmidrule(child, len(col_spec)))
     else if (child_name == 'addlinespace' and registry.active(info.packages, "booktabs"))
-        handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info,
+        handle_rule_row(current_cells, acc_rows, col_spec, info,
             booktabs.addlinespace(child, len(col_spec)))
     else if (child_name == 'rowcolor' and info.colortbl)
-        handle_row_color(el, i, n, current_cells, acc_rows, col_spec, info, child)
-    else if (child_name == 'multicolumn') handle_multicol_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
-    else if (child_name == 'multirow') handle_multirow_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
-    else handle_rendered_child(el, i, n, current_cells, acc_rows, col_spec, info, child)
+        handle_row_color(current_cells, acc_rows, col_spec, info, child)
+    else if (child_name == 'multicolumn') handle_multicol_child(current_cells, acc_rows, col_spec, info, child)
+    else if (child_name == 'multirow') handle_multirow_child(current_cells, acc_rows, col_spec, info, child)
+    else handle_rendered_child(current_cells, acc_rows, col_spec, info, child)
 }
 
 // Keep the color directive with its row so the shared table builder applies it
 // after column spans and rule rows have been resolved.
-fn handle_row_color(el, i, n, current_cells, acc_rows, col_spec, info, child) {
+fn handle_row_color(current_cells, acc_rows, col_spec, info, child) {
     let css = color.command_color(child, 0, info.custom_colors)
     let marker = if (css == null) color.invalid_color(child)
         else {type: "rowcolor", color: css}
-    collect_rows(el, i + 1, n, [marker] ++
-        (if (len(current_cells) == 0) [null] else current_cells), acc_rows, col_spec, info)
+    table_state([marker] ++
+        (if (len(current_cells) == 0) [null] else current_cells), acc_rows)
 }
 
-fn handle_row_break(el, i, n, current_cells, acc_rows, col_spec, info) {
-    let row = make_row(current_cells, col_spec, info)
-    if (row != null) {
-        let new_rows = append_row(acc_rows, row)
-        collect_rows(el, i + 1, n, [], new_rows, col_spec, info)
-    } else {
-        collect_rows(el, i + 1, n, [], acc_rows, col_spec, info)
-    }
+fn handle_row_break(current_cells, acc_rows, col_spec, info) {
+    let rows = finalize_rows(current_cells, acc_rows, col_spec, info)
+    table_state([], rows)
 }
 
 fn append_row(rows, row) {
@@ -2707,28 +2703,20 @@ fn rule_color_at(info, child) =>
     if (info.colortbl) util.setting_at(info.settings, "arrayrulecolor", child.source_offset) else null
 
 // flush cells before each horizontal rule so partial rules retain their column span.
-fn handle_rule_row(el, i, n, current_cells, acc_rows, col_spec, info, rule) {
-    // flush current cells if any, then add rule row
-    let row = make_row(current_cells, col_spec, info)
-    if (row != null) {
-        let flushed = append_row(acc_rows, row)
-        let new_rows = append_row(flushed, rule)
-        collect_rows(el, i + 1, n, [], new_rows, col_spec, info)
-    } else {
-        let new_rows = append_row(acc_rows, rule)
-        collect_rows(el, i + 1, n, [], new_rows, col_spec, info)
-    }
+fn handle_rule_row(current_cells, acc_rows, col_spec, info, rule) {
+    let rows = finalize_rows(current_cells, acc_rows, col_spec, info)
+    table_state([], append_row(rows, rule))
 }
 
-fn handle_rendered_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
+fn handle_rendered_child(current_cells, acc_rows, col_spec, info, child) {
     let rendered = render_node(child, info)
     let new_cells = append_to_last_cell(current_cells, rendered)
-    collect_rows(el, i + 1, n, new_cells, acc_rows, col_spec, info)
+    table_state(new_cells, acc_rows)
 }
 
 // --- multicolumn / multirow cell handling ---
 
-fn handle_multicol_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
+fn handle_multicol_child(current_cells, acc_rows, col_spec, info, child) {
     let args = util.command_args(child)
     let colspan = int(args[0])
     // the span's own preamble sets its alignment and its rules
@@ -2738,16 +2726,16 @@ fn handle_multicol_child(el, i, n, current_cells, acc_rows, col_spec, info, chil
     let content = render_span_content(args, 2, info)
     let cell_desc = {type: "multicol", colspan: colspan, align: align, column: column, content: content}
     let new_cells = current_cells ++ [cell_desc]
-    collect_rows(el, i + 1, n, new_cells, acc_rows, col_spec, info)
+    table_state(new_cells, acc_rows)
 }
 
-fn handle_multirow_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
+fn handle_multirow_child(current_cells, acc_rows, col_spec, info, child) {
     let args = util.command_args(child)
     let rowspan = int(args[0])
     let content = render_span_content(args, 2, info)
     let cell_desc = {type: "multirow", rowspan: rowspan, content: content}
     let new_cells = current_cells ++ [cell_desc]
-    collect_rows(el, i + 1, n, new_cells, acc_rows, col_spec, info)
+    table_state(new_cells, acc_rows)
 }
 
 fn render_span_content(child, start, info) {

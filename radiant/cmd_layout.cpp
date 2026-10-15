@@ -3735,21 +3735,11 @@ static DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width,
     log_info("[TIMING] Step 3 - CSS parse: %.1fms",
         time_elapsed_ms_f(step3_start, step3_end));
 
-    // Step 4.5: Load math CSS and KaTeX font CSS for math rendering
-    CssStylesheet* math_stylesheet = nullptr;
-    CssStylesheet* katex_stylesheet = nullptr;
-    {
-        math_stylesheet = load_home_stylesheet(
-            css_engine, pool, "package/math/math.css", "Lambda Markdown", "math stylesheet", false);
-        katex_stylesheet = load_home_stylesheet(
-            css_engine, pool, "package/math/katex.css", "Lambda Markdown", "KaTeX font stylesheet", false);
-    }
-
     // Step 5: Apply CSS cascade to DOM tree
     auto step4_start = time_now_ns();
-    CssStylesheet* markdown_stylesheets[3] = {
-        markdown_stylesheet, math_stylesheet, katex_stylesheet};
-    layout_apply_css_stylesheets(dom_doc, dom_root, markdown_stylesheets, 3, pool, css_engine);
+    // math renders self-contained SVG; the retired KaTeX stylesheets are not dependencies.
+    CssStylesheet* markdown_stylesheets[1] = {markdown_stylesheet};
+    layout_apply_css_stylesheets(dom_doc, dom_root, markdown_stylesheets, 1, pool, css_engine);
     auto step4_end = time_now_ns();
     log_info("[TIMING] Step 4 - CSS cascade: %.1fms",
         time_elapsed_ms_f(step4_start, step4_end));

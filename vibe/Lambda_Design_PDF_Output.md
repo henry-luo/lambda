@@ -938,3 +938,16 @@ migration boundary remains DO32:
 ~~The recommendation is that PDFBuilder handles byte storage and invokes a
 Lambda PDF encoder for structured values. A native object encoder inside the
 specialized builder is an alternative requiring an explicit boundary choice.~~
+
+
+### PDF-LINK-1 — ordinary source fragment links (2026-10-15)
+
+The user ruled that a missing ordinary `#fragment` target does not abort PDF
+export. Preserve its painted content and omit its annotation. Resolve links
+against destinations in the selected emitted pages before allocating annotation
+object numbers, so page selection and viewport clipping cannot create dangling
+references. URI links and resolved internal links retain annotations. Explicit
+PDF outline attributes still require valid emitted destinations and remain
+errors when unresolved. Functional generation and final saving retain
+S2.6.6v3, D2.6.12v3 and D8.2.6v2; this changes the presentation package’s link
+policy, not element/file content semantics.

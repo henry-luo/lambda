@@ -630,11 +630,9 @@ void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
 
                     LoadedGlyph* glyph = render_text_load_glyph_for_paint(rdcon, render_cp, p, end);
                     if (!glyph) {
-                        // draw a square box for missing glyph (scaled_space_width is in physical pixels)
-                        float phys_size = font_handle_get_physical_size_px(font_box_handle(&rdcon->font));
-                        const FontMetrics* _m = font_get_metrics(font_box_handle(&rdcon->font));
-                        float box_height = (phys_size > 0) ? phys_size : (_m ? (_m->hhea_line_height * rdcon->raster_scale / 1.2f) : 16.0f);
-                        Rect rect = {x + 1, y, (float)(scaled_space_width - 2), box_height};
+                        // share the missing-glyph geometry with offscreen text captures.
+                        Rect rect = render_text_missing_glyph_rect(&rdcon->font, x / s, y / s, scaled_space_width / s);
+                        rect.x *= s; rect.y *= s; rect.width *= s; rect.height *= s;
                         rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
                         x += scaled_space_width;
                     }

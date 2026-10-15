@@ -2615,10 +2615,11 @@ static DomElement* dom_collection_varray_find_rec(DomNode* node,
                 (*seen)++;
             }
             DomElement* found = dom_collection_varray_find_rec(
-                elem->first_child, collection, target, seen);
+                dom_first_script_visible_child(elem), collection, target, seen);
             if (found) return found;
         }
-        node = node->next_sibling;
+        // layout pseudo nodes have no script identity or lifecycle wrapper pin.
+        node = dom_next_script_visible_sibling(node);
     }
     return nullptr;
 }
@@ -2784,7 +2785,7 @@ static DomNode* dom_collection_varray_walk(void* data, int64_t target,
         return found;
     }
     DomNode* first = collection->include_root
-        ? (DomNode*)owner : owner->first_child;
+        ? (DomNode*)owner : dom_first_script_visible_child(owner);
     DomNode* found = (DomNode*)dom_collection_varray_find_rec(
         first, collection, target, &seen);
     if (out_count) *out_count = seen;

@@ -787,3 +787,171 @@ ImageSurface* dl_blit_source_resolve(const DlBlitSurfaceScaled* item) {
     if (item->local_source) return item->local_source;
     return image_surface_lookup(item->src_resource);
 }
+
+// shared cloning/replacement preserves payload ownership for retained lists and deferred effects.
+static void dl_copy_clip_shape_stack(DisplayList* dst,
+                                              DlClipShapeStack* out,
+                                              const DlClipShapeStack* in) {
+    if (!out) return;
+    memset(out, 0, sizeof(DlClipShapeStack));
+    if (!dst || !in || in->depth <= 0) return;
+
+    *out = *in;
+    for (int i = 0; i < out->depth && i < RDT_MAX_CLIP_SHAPES; i++) {
+        if (in->type[i] != CLIP_SHAPE_POLYGON ||
+            in->polygon_count[i] <= 0 ||
+            !in->polygon_vx[i] || !in->polygon_vy[i]) {
+            continue;
+        }
+        size_t sz = (size_t)in->polygon_count[i] * sizeof(float);
+        float* vx = (float*)scratch_alloc(&dst->arena, sz);
+        float* vy = (float*)scratch_alloc(&dst->arena, sz);
+        if (!vx || !vy) {
+            out->type[i] = CLIP_SHAPE_NONE;
+            out->polygon_count[i] = 0;
+            out->polygon_vx[i] = nullptr;
+            out->polygon_vy[i] = nullptr;
+            continue;
+        }
+        memcpy(vx, in->polygon_vx[i], sz);
+        memcpy(vy, in->polygon_vy[i], sz);
+        out->polygon_vx[i] = lam::own_arr(vx);
+        out->polygon_vy[i] = lam::own_arr(vy);
+    }
+}
+
+static bool dl_clone_path(lam::Own<RdtPath>* out, RdtPath* in) {
+    if (!out) return false; *out = lam::own(in ? rdt_path_clone(in) : nullptr); return !in || *out;
+}
+
+static bool dl_copy_gradient_stops(DisplayList* dst, lam::OwnArr<RdtGradientStop>* out,
+                                            const RdtGradientStop* stops, int count) {
+    if (!out) return false; *out = lam::own_arr(dl_copy_stops(dst, stops, count)); return !stops || count <= 0 || *out;
+}
+
+static bool dl_copy_dashes(DisplayList* dst, lam::OwnArr<float>* out, const float* dashes, int count) {
+    if (!out) return false; *out = lam::own_arr(dl_copy_dashes(dst, dashes, count)); return !dashes || count <= 0 || *out;
+}
+
+static bool dl_clone_item_payload(DisplayList* dst,
+                                           DisplayItem* out,
+                                           const DisplayItem* in,
+                                           int source_start,
+                                           int dest_start) {
+    if (!dst || !out || !in) return false;
+
+    switch (in->op) {
+        case DL_DRAW_IMAGE:
+            out->draw_image.snapshot_lease=lam::up(image_surface_snapshot_retain(in->draw_image.snapshot_lease));
+            break;
+        case DL_FILL_PATH:
+            if (!dl_clone_path(&out->fill_path.path, in->fill_path.path)) return false;
+            break;
+        case DL_STROKE_PATH:
+            if (!dl_clone_path(&out->stroke_path.path, in->stroke_path.path)) return false;
+            if (!dl_copy_dashes(dst, &out->stroke_path.dash_array,
+                    in->stroke_path.dash_array, in->stroke_path.dash_count)) return false;
+            break;
+        case DL_FILL_LINEAR_GRADIENT:
+            if (!dl_clone_path(&out->fill_linear_gradient.path,
+                    in->fill_linear_gradient.path)) return false;
+            if (!dl_copy_gradient_stops(dst, &out->fill_linear_gradient.stops,
+                    in->fill_linear_gradient.stops, in->fill_linear_gradient.stop_count)) return false;
+            out->fill_linear_gradient.options.dash_array = lam::up(dl_copy_dashes(dst,
+                in->fill_linear_gradient.options.dash_array, in->fill_linear_gradient.options.dash_count));
+            if (in->fill_linear_gradient.options.dash_count > 0 &&
+                !out->fill_linear_gradient.options.dash_array) return false;
+            break;
+        case DL_FILL_RADIAL_GRADIENT:
+            if (!dl_clone_path(&out->fill_radial_gradient.path,
+                    in->fill_radial_gradient.path)) return false;
+            if (!dl_copy_gradient_stops(dst, &out->fill_radial_gradient.stops,
+                    in->fill_radial_gradient.stops, in->fill_radial_gradient.stop_count)) return false;
+            out->fill_radial_gradient.options.dash_array = lam::up(dl_copy_dashes(dst,
+                in->fill_radial_gradient.options.dash_array, in->fill_radial_gradient.options.dash_count));
+            if (in->fill_radial_gradient.options.dash_count > 0 &&
+                !out->fill_radial_gradient.options.dash_array) return false;
+            break;
+        case DL_DRAW_PICTURE:
+            out->draw_picture.picture = lam::counted(in->draw_picture.picture ?
+                rdt_picture_dup(in->draw_picture.picture) : nullptr);
+            if (in->draw_picture.picture && !out->draw_picture.picture) return false;
+            break;
+        case DL_PUSH_CLIP:
+            if (!dl_clone_path(&out->push_clip.path, in->push_clip.path)) return false;
+            break;
+        case DL_FILL_SURFACE_RECT:
+            dl_copy_clip_shape_stack(dst, &out->fill_surface_rect.clip_shapes,
+                                              &in->fill_surface_rect.clip_shapes);
+            break;
+        case DL_BLIT_SURFACE_SCALED:
+            out->blit_surface_scaled.snapshot_lease = lam::up(image_surface_snapshot_retain(in->blit_surface_scaled.snapshot_lease));
+            dl_copy_clip_shape_stack(dst, &out->blit_surface_scaled.clip_shapes,
+                                              &in->blit_surface_scaled.clip_shapes);
+            break;
+        case DL_BEGIN_ELEMENT:
+            if (!dl_copy_semantic_group(dst, &out->element_marker.semantics,
+                &in->element_marker.semantics)) return false;
+            [[fallthrough]];
+        case DL_END_ELEMENT:
+            if (in->element_marker.matching_index >= source_start) {
+                out->element_marker.matching_index =
+                    dest_start + (in->element_marker.matching_index - source_start);
+            }
+            break;
+        default:
+            break;
+    }
+    return true;
+}
+
+void dl_truncate(DisplayList* dl, int target_count) {
+    if (!dl || target_count < 0 || target_count > dl->item_count()) return;
+    int current_count = dl->item_count();
+    for (int i = target_count; i < current_count; i++) {
+        dl_item_free_owned_payload(&dl->data()[i]);
+    }
+    dl->remove_range((size_t)target_count, (size_t)(current_count - target_count));
+}
+
+bool dl_copy_range(DisplayList* dst, const DisplayList* src,
+                                   int start, int end) {
+    if (!dst || !src || start < 0 || end < start || end >= src->item_count()) return false;
+
+    int dest_start = dst->item_count();
+    for (int i = start; i <= end; i++) {
+        DisplayItem* out = dl_alloc_item(dst);
+        if (!out) {
+            dl_truncate(dst, dest_start);
+            return false;
+        }
+        DisplayItem copy = src->data()[i];
+        *out = copy;
+        if (!dl_clone_item_payload(dst, out, &src->data()[i], start, dest_start)) {
+            dl_truncate(dst, dest_start);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool dl_replace_tail(DisplayList* dst, int start, const DisplayList* src, int first, int last) {
+    if (!dst || start < 0 || start > dst->item_count()) return false;
+    int old_count = dst->item_count();
+    // Clone before retiring the old tail: allocation failure preserves the
+    // original stream, including its owned paths, pictures and image leases.
+    if (!dl_copy_range(dst, src, first, last)) return false;
+    int copied = dst->item_count() - old_count;
+    for (int i = start; i < old_count; i++) dl_item_free_owned_payload(&dst->data()[i]);
+    for (int i = old_count; i < old_count + copied; i++) {
+        DisplayItem* item = &dst->data()[i];
+        if ((item->op == DL_BEGIN_ELEMENT || item->op == DL_END_ELEMENT) &&
+            item->element_marker.matching_index >= old_count)
+            item->element_marker.matching_index += start - old_count;
+    }
+    memmove(dst->data() + start, dst->data() + old_count, (size_t)copied * sizeof(DisplayItem));
+    // payload ownership moved with the commands; discarded trailing slots are
+    // stale aliases and must not be passed through dl_truncate's payload free.
+    dst->remove_range((size_t)(start + copied), (size_t)(old_count - start));
+    return true;
+}

@@ -108,7 +108,8 @@ fn draw(event, node, ctx) any^ {
     else if (event == "boundary") boundary(node, ctx)^
     else if (event == "text") {
         let outline = radiant.pdf_glyph_path(ctx)^;
-        colored(ctx.color, "R" ++ string(ctx.sequence),
+        if (outline == null) graphic_fragment(ctx)^
+        else colored(ctx.color, "R" ++ string(ctx.sequence),
             <file format:'pdf', for (command in outline) path_command(command)^ "f\n">)^
     }
     else if (event == "image") image_data_fragment(radiant.pdf_image(ctx)^, ctx.sequence)^
@@ -242,9 +243,6 @@ fn document(plan) element^ {
     let header = "%PDF-1.4\n";
     let first_extra = first_resource + len(resources);
     let links = [for (page_index, page in pages) for (link in page.links) {page: page_index, link: link}];
-    let annotations = [for (index, link in links) {*: link, number: first_extra + index}];
-    let info_number = first_extra + len(annotations);
-    let outline_number = info_number + 1;
     let outlines = if (plan.outlines == null) [] else plan.outlines;
     let destinations = [for (page_index, page in pages) for (destination in page.destinations)
         {*: destination, page: page_index, x: destination.x * page.scale, y: (page.height - destination.y) * page.scale}];
@@ -252,8 +250,12 @@ fn document(plan) element^ {
         where destinations[previous].id == destination.id) previous]) == 0) destination];
     let ordered = sort(distinct, (destination) => name_key(destination.id));
     let unresolved = [for (outline in outlines where len([for (destination in distinct where destination.id == outline.destination) destination]) == 0) outline];
-    let missing_links = [for (link in links where starts_with(link.link.href, "#") and
-        len([for (destination in distinct where destination.id == slice(link.link.href, 1, len(link.link.href))) destination]) == 0) link];
+    // broken source links keep their painted content without creating dangling PDF references.
+    let resolved_links = [for (link in links where not starts_with(link.link.href, "#") or
+        len([for (destination in distinct where destination.id == slice(link.link.href, 1, len(link.link.href))) destination]) > 0) link];
+    let annotations = [for (index, link in resolved_links) {*: link, number: first_extra + index}];
+    let info_number = first_extra + len(annotations);
+    let outline_number = info_number + 1;
     let roots = [for (index in range(0, len(outlines), 1) where outline_parent(outlines, index) < 0) index];
     let extras = [for (annotation in annotations) annotation_object(annotation, pages[annotation.page])^] ++
         [<file format:'pdf', string(info_number) " 0 obj\n" radiant.pdf_object(plan.info or {Producer: "Lambda PDF Renderer"})^ "\nendobj\n">] ++
@@ -285,7 +287,7 @@ fn document(plan) element^ {
     let ends = math.cumsum(lengths);
     let offsets = [for (index in range(0, object_count, 1)) len(header) + if (index == 0) 0 else ends[index - 1]];
     let xref = len(header) + sum(lengths);
-    if (len(unresolved) > 0 or len(missing_links) > 0) raise error("PDF output has an unresolved internal destination")
+    if (len(unresolved) > 0) raise error("PDF output has an unresolved internal destination")
     else if (len(pages) == 0 or xref > 9999999999) raise error("PDF output has no pages or exceeds classic cross-reference offset range")
     else <file format:'pdf', header
         for (index in range(0, object_count, 1)) object_parts(index, pages, resources, first_resource, catalog, page_tree, annotations, extras)^

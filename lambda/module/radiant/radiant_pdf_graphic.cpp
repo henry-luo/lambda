@@ -207,18 +207,23 @@ Item radiant_pdf_graphic(const PaintList* paint, UiContext* ui, Bound bounds,
         return result.get();
     }
     RdtMatrix inverse = rdt_matrix_identity();
-    if (backdrop && transform && !rdt_matrix_inverse(transform, &inverse))
-        return radiant_pdf_error("backdrop capture requires an invertible placement");
     ImageSurface* surface = nullptr;
     Rect placement = {};
     if (!render_paint_snapshot(paint, bounds, viewport_width, viewport_height,
-            ui_context_raster_scale(ui), &surface, &placement, backdrop, backdrop ? transform : nullptr))
+            ui_context_raster_scale(ui), &surface, &placement, backdrop, transform))
         return radiant_pdf_error("cannot rasterize the selected native graphic");
+    if (!surface) {
+        paths.set({.array = array_plain()});
+        radiant_rooted_obj_set(result, "paths", paths.get());
+        return result.get();
+    }
     struct SurfaceCleanup { ImageSurface* value; ~SurfaceCleanup() { image_surface_destroy(value); } } cleanup = {surface};
+    if (transform && !rdt_matrix_inverse(transform, &inverse))
+        return radiant_pdf_error("raster capture requires an invertible placement");
     paths.set(radiant_pdf_surface(surface, placement, placement));
     if (get_type_id(paths.get()) == LMD_TYPE_ERROR) return paths.get();
     radiant_rooted_obj_set(result, "image", paths.get());
-    // Backdrop sampling is in page coordinates; cancel the enclosing PDF transform for this image.
-    if (backdrop && transform) radiant_rooted_obj_set(result, "matrix", pdf_matrix(inverse));
+    // capture is in page coordinates; cancel the enclosing PDF transform for this image.
+    if (transform) radiant_rooted_obj_set(result, "matrix", pdf_matrix(inverse));
     return result.get();
 }

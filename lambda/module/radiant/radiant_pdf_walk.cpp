@@ -101,6 +101,7 @@ struct PdfWalkContext : RenderContext {
     OffscreenRenderArenas backdrop_arenas;
     DisplayList backdrop;
     bool backdrop_ready;
+    int backdrop_clip_depth;
     RdtMatrix backdrop_matrix;
     lam::ArrayList<RdtMatrix> backdrop_transforms{MEM_CAT_RENDER, 0};
     lam::ArrayList<float> effect_opacities{MEM_CAT_RENDER, 0};
@@ -167,11 +168,17 @@ void pdf_walk_dispatch(PdfWalkContext* ctx, const char* event,
 }
 
 // A bounded native resource is consumed synchronously; Lambda owns its returned bytes.
+void pdf_walk_dispatch_graphic(PdfWalkContext* ctx, const char* event, PaintList* paint,
+        Bound bounds, const BinarySchema* schema = nullptr, const void* source = nullptr, bool copy = false) {
+    ctx->frame.graphic = paint; ctx->frame.graphic_bounds = bounds;
+    ctx->frame.graphic_transform = ctx->backdrop_matrix;
+    ctx->frame.ui = ctx->ui_context.get();
+    pdf_walk_dispatch(ctx, event, schema, source, copy);
+    ctx->frame.graphic = nullptr;
+}
+
 void pdf_walk_graphic(PdfWalkContext* ctx, PaintList* paint, Bound bounds) {
     if (pdf_walk_aborted(ctx)) return;
-    ctx->frame.graphic = paint;
-    ctx->frame.graphic_bounds = bounds;
-    ctx->frame.graphic_transform = ctx->backdrop_matrix;
     bool needs_backdrop = false;
     for (int i = 0; i < paint_list_count(paint); i++) {
         const PaintCmd& command = paint->data()[i];
@@ -179,9 +186,12 @@ void pdf_walk_graphic(PdfWalkContext* ctx, PaintList* paint, Bound bounds) {
             needs_backdrop = true;
     }
     ctx->frame.backdrop = needs_backdrop && ctx->backdrop_ready ? &ctx->backdrop : nullptr;
-    ctx->frame.ui = ctx->ui_context.get();
-    pdf_walk_dispatch(ctx, "graphic");
-    ctx->frame.graphic = nullptr;
+    int backdrop_count = ctx->backdrop.item_count();
+    // a streamed prefix can have open clips; close only the sampled edition.
+    if (ctx->frame.backdrop)
+        for (int i = 0; i < ctx->backdrop_clip_depth; i++) dl_pop_clip(&ctx->backdrop);
+    pdf_walk_dispatch_graphic(ctx, "graphic", paint, bounds);
+    if (ctx->frame.backdrop) dl_truncate(&ctx->backdrop, backdrop_count);
     ctx->frame.backdrop = nullptr;
 }
 
@@ -203,6 +213,10 @@ void pdf_walk_record_backdrop(PdfWalkContext* ctx, PaintList* paint) {
     // Deferred backdrop replay must retain snapshots beyond the originating fragment.
     for (int i = 0; i < paint_list_count(paint); i++) {
         PaintCmd& command = paint->data()[i];
+        if (command.op == PAINT_PUSH_CLIP) ctx->backdrop_clip_depth++;
+        if (command.op == PAINT_POP_CLIP && --ctx->backdrop_clip_depth < 0) {
+            pdf_walk_fail(ctx, "unbalanced backdrop clip scope"); return;
+        }
         if (command.op == PAINT_DRAW_IMAGE_RESOURCE && command.draw_image_resource.release_image) {
             PaintDrawImageResource& image = command.draw_image_resource;
             if (!ctx->page_images.push_back({image.image, image.release_image})) { pdf_walk_fail(ctx, "cannot retain backdrop image"); return; }
@@ -289,13 +303,14 @@ void pdf_walk_text(RenderContext* base, ViewText* view, float x, float y, FontBo
             {x, y, parent->width, parent->height});
         bool direct = !decorated && !background && !ctx->effect.active;
         if (direct) {
+            paint_glyph_run(batch.paint, &run);
             RootFrame roots(1);
             Rooted<Item> text(roots, {.item = s2it(heap_strcpy(segment.get(), strlen(segment.get())))});
             ctx->frame.text = text.get(); ctx->frame.glyph_run = &run;
             ctx->frame.x = run.x; ctx->frame.y = y + rect->y;
             ctx->frame.font_size = run.font_size; ctx->frame.baseline = run.baseline_y;
             ctx->frame.color = color; ctx->frame.font = *font; ctx->frame.ui = ctx->ui_context;
-            pdf_walk_dispatch(ctx, "text", ctx->text_rect, rect, true);
+            pdf_walk_dispatch_graphic(ctx, "text", batch.paint, batch.bounds, ctx->text_rect, rect, true);
             ctx->frame.text = ItemNull; ctx->frame.glyph_run = nullptr;
         }
         // Captured groups outlive this fragment; the PaintList owns their text.
@@ -305,7 +320,7 @@ void pdf_walk_text(RenderContext* base, ViewText* view, float x, float y, FontBo
             pdf_walk_fail(ctx, "cannot record text shadows");
         if (!render_paint_text_decorations(batch.paint, font, view->text_data(), rect, x, y, color, true))
             pdf_walk_fail(ctx, "cannot record text decorations");
-        paint_glyph_run(batch.paint, &run);
+        if (!direct) paint_glyph_run(batch.paint, &run);
         if (!render_paint_text_emphasis(batch.paint, ctx->ui_context->font_ctx, &run) ||
             !render_paint_text_decorations(batch.paint, font, view->text_data(), rect, x, y, color, false))
             pdf_walk_fail(ctx, "cannot record text emphasis or decorations");
@@ -620,7 +635,9 @@ bool pdf_secondary_glyph(void* data, const LayoutViewNode* node, const PaintGlyp
     ctx->frame.x = run->x; ctx->frame.baseline = run->baseline_y;
     ctx->frame.font_size = run->font_size; ctx->frame.color = run->color;
     ctx->frame.ui = ctx->ui_context.get();
-    pdf_walk_dispatch(ctx, "text", ctx->fragment_schema, node);
+    PdfPaintBatch batch(ctx, {node->rect.x, node->rect.y, node->rect.width, node->rect.height});
+    paint_glyph_run(batch.paint, run);
+    pdf_walk_dispatch_graphic(ctx, "text", batch.paint, batch.bounds, ctx->fragment_schema, node);
     ctx->frame.glyph_run = nullptr;
     return !pdf_walk_aborted(ctx);
 }
@@ -652,6 +669,7 @@ bool pdf_secondary_page(ViewTree* tree, const ViewPageBox* selected, const ViewP
     Rooted<Item> label(roots, page->label ? Item{.item = s2it(heap_strcpy(page->label, strlen(page->label)))} : ItemNull);
     ctx->frame.page_label = label.get(); ctx->frame.page_number = selected->page_number;
     if (ctx->backdrop_ready) dl_clear(&ctx->backdrop);
+    ctx->backdrop_clip_depth = 0;
     for (size_t i = 0; i < ctx->page_images.size(); i++) ctx->page_images[i].release(ctx->page_images[i].image);
     ctx->page_images.clear();
     ctx->frame.page_width = page->node.rect.width; ctx->frame.page_height = page->node.rect.height;
@@ -740,6 +758,8 @@ RADIANT_C_API Item fn_radiant_pdf_glyph_path(Item context_item) {
         run.justify_mode = frame->justify_mode;
     }
     RdtPath* path = render_path_create_paint_glyph_run(frame->glyph_run ? frame->glyph_run : &run, frame->ui->font_ctx);
+    // missing/bitmap-only glyphs use the bounded native text painter instead.
+    if (!path) return ItemNull;
     struct Cleanup {
         RdtPath* path;
         ~Cleanup() { if (path) rdt_path_free(path); }
@@ -771,15 +791,21 @@ RADIANT_C_API Item fn_radiant_pdf_image(Item context_item) {
     Rect content = frame->image_box ? frame->image_box->content_rect : render_geometry_block_content_rect(&origin, view, 1.0f);
     Rect placement = frame->image_box ? frame->image_box->image_rect : render_media_image_rect(view, image, content, 1.0f);
     if (placement.width <= 0.0f || placement.height <= 0.0f) return ItemNull;
-    if (!isfinite(placement.width) || !isfinite(placement.height) ||
-            (double)placement.width > INT_MAX || (double)placement.height > INT_MAX)
-        return radiant_pdf_error("image placement exceeds supported decoder dimensions");
-    int target_width = (int)ceilf(placement.width); // INT_CAST_OK: validated integer decoder extent.
-    int target_height = (int)ceilf(placement.height); // INT_CAST_OK: validated integer decoder extent.
+    if (!isfinite(placement.width) || !isfinite(placement.height))
+        return radiant_pdf_error("image placement requires finite dimensions");
     if (image->format == IMAGE_FORMAT_SVG) {
+        if ((double)placement.width > INT_MAX || (double)placement.height > INT_MAX)
+            return radiant_pdf_error("SVG placement exceeds supported decoder dimensions");
+        int target_width = (int)ceilf(placement.width); // INT_CAST_OK: validated integer decoder extent.
+        int target_height = (int)ceilf(placement.height); // INT_CAST_OK: validated integer decoder extent.
         if (!render_media_rasterize_svg_picture(image, target_width, target_height))
             return radiant_pdf_error("cannot rasterize the selected SVG image");
-    } else image_surface_ensure_decoded(image, target_width, target_height);
+    } else {
+        // PDF places intrinsic pixels with its image matrix; CSS size is not a decode allocation.
+        image_surface_ensure_decoded(image, 0, 0);
+        // unavailable lazy images keep the native painter's absent-image behavior.
+        if (!image->pixels) return ItemNull;
+    }
     return radiant_pdf_surface(image, placement, content);
 }
 
@@ -886,7 +912,11 @@ static Item pdf_walk(Item path_item, Item options_item,
     metadata.set(radiant_pdf_metadata(session.document));
     if (get_type_id(metadata.get()) == LMD_TYPE_ERROR) return metadata.get();
     ctx.ui_context = lam::up(session.ui_context.get());
-    ctx.font.style = lam::up(&session.ui_context->default_font);
+    // legacy documents inherit a different initial face from HTML5 documents.
+    ViewTree* source_tree = session.document->view_tree;
+    FontProp* default_font = source_tree && source_tree->html_version != HTML5
+        ? &session.ui_context->legacy_default_font : &session.ui_context->default_font;
+    setup_font(session.ui_context, &ctx.font, default_font);
     ctx.color = {.r = 0, .g = 0, .b = 0, .a = 255};
     if (!ctx.backdrop_arenas.init("pdf.backdrop", "pdf.backdrop.list", "pdf.backdrop.scratch"))
         return radiant_pdf_error("cannot allocate page backdrop");

@@ -14,6 +14,15 @@ float render_font_pixel_to_css(FontHandle* font, const GlyphBitmap* bitmap) {
     return scale * (bitmap && bitmap->bitmap_scale > 0.0f ? bitmap->bitmap_scale : 1.0f);
 }
 
+Rect render_text_missing_glyph_rect(const FontBox* font, float x, float top, float space_width) {
+    FontHandle* handle = font_box_handle(font);
+    float size = font_handle_get_size_px(handle);
+    const FontMetrics* metrics = font_get_metrics(handle);
+    float height = size > 0.0f ? size : metrics ? metrics->hhea_line_height / 1.2f : 16.0f;
+    float pixel = render_font_pixel_to_css(handle);
+    return {x + pixel, top, fmaxf(0.0f, space_width - 2.0f * pixel), height};
+}
+
 bool render_text_synthesized_space_advance(const FontBox* font, uint32_t codepoint,
     float* advance) {
     if (!font || !font->style || !advance ||
@@ -84,7 +93,10 @@ bool render_visit_text_run_glyphs(const PaintGlyphRun* run, FontContext* font_co
     RenderTextRunGlyphFn visitor, void* context) {
     const FontBox* box = paint_glyph_run_font(run);
     FontHandle* primary = font_box_handle(box);
-    if (!run || !run->text || !primary || !box->style || !visitor) return false;
+    if (!run || !run->text || !box || !box->style || !visitor) return false;
+    // match raster text: a zero-size run has no ink and needs no font outline.
+    if (box->style->font_size <= 0.0f) return true;
+    if (!primary) return false;
     FontStyleDesc descriptor = font_style_desc_from_prop(box->style);
     bool ok = true;
     float pen = run->x;
@@ -122,6 +134,8 @@ bool render_visit_text_run_glyphs(const PaintGlyphRun* run, FontContext* font_co
         float advance = font_get_glyph(face, codepoint).advance_x;
         ok = font_has_codepoint(face, codepoint) &&
             visitor(context, codepoint, face, pen, run->baseline_y, advance);
+        if (!ok) log_debug("TEXT_OUTLINE: cannot extract U+%04X from %s (coverage=%u)",
+            codepoint, font_handle_get_family_name(face), font_has_codepoint(face, codepoint));
         pen += advance + text_character_spacing(box->style, codepoint);
         if (fallback) font_handle_release(fallback);
     }
@@ -136,10 +150,11 @@ struct RenderTextOutlineContext {
 static bool render_text_outline_glyph(void* pointer, uint32_t codepoint,
     FontHandle* face, float x, float baseline_y, float advance) {
     RenderTextOutlineContext* context = (RenderTextOutlineContext*)pointer;
+    bool color_bitmap = false;
     bool ok = render_path_append_font_glyph(context->path, face, codepoint,
-        x, baseline_y, 1.0f, context->scratch, nullptr);
+        x, baseline_y, 1.0f, context->scratch, &color_bitmap);
     arena_reset(context->scratch);
-    return ok;
+    return ok && !color_bitmap;
 }
 
 RdtPath* render_path_create_text_run(const PaintGlyphRun* run, FontContext* font_context) {

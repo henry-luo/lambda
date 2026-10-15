@@ -990,7 +990,7 @@ unverified qualification gates.
 - Owned document plans carry title/author/subject/keywords, links, named
   destinations, nested outlines, labels and fixed-page boxes/rotation/placement.
   Lambda writes their dictionaries and references. Invalid outline attributes,
-  unresolved internal destinations and forged session capabilities fail before
+  unresolved explicit outline destinations and forged session capabilities fail before
   saving a completed file.
 - Manifest revision 3 adds the point scale to callback context. Traversal and
   native helper pointers remain private. The opaque committed-session
@@ -1066,3 +1066,192 @@ shadows, deferred outlines and transformed backdrop blending.
 Broader platform/release and full Radiant qualification remain explicit P7
 work. A failing layout or import fixture is not repaired by falling back to the
 retired writer or by weakening its geometry/visual assertion.
+
+## 15. PDF generation on a retained UI evaluator — 2026-10-15
+
+The XHTML feature gallery exposed two export defects after P6 retirement.
+Executing page JavaScript binds the document's Input arena to its evaluator.
+PDF generation reused that canonical evaluator correctly (D5.4.1), but
+`elmt_with_type` allocated its `<file format:'pdf'>` values as ordinary arena
+DOM elements. `elmt_content_begin` could not initialize their byte destination,
+and the first completed fragment was rejected by the PDF builder.
+
+File candidates now reserve their GC-owned output extension even when a UI
+arena is bound. Attribute buffers follow the element's actual owner, and
+collection content uses a UI arena only when that arena owns the destination.
+The format selector still decides whether the file becomes a byte destination;
+no evaluator or allocator context is replaced (S2.6.6v3, D2.6.12v3).
+
+Continuous gallery export then exposed a marker fully outside the page clip.
+Its valid display list contained only balanced clip commands and no ink.
+The bounded raster helper now accepts that empty result; nonempty snapshot
+failures and painter/validation failures continue to abort export.
+
+Two CLI regressions exercise script-created UI evaluators and fully clipped
+decimal list markers. Both fail with the P6 verification executable and pass
+on interpreter/JIT/auto with forced collection, poisoned freed memory and
+disabled MIR caching. The script fixture independently checks its mutated
+color in Poppler rasters for continuous and paginated output; the marker
+fixture checks that a visible marker retains its image resource.
+The six existing PDF output fixtures also pass in all three modes under forced
+collection and poisoned freed memory (**18/18**).
+
+The full gallery exports successfully in all three modes: one continuous
+page or four paginated A4 pages. Poppler accepts both files and rasterizes all
+four physical pages. The expanded focused export gate is **17/18**; the RPD
+one-versus-seven-page failure from §14 remains visible. Dimension lint and
+`git diff --check` pass.
+
+Both required aggregate baseline attempts stop during test linking on an
+unrelated Wiki parser dependency: `_array_push` from `block_wiki.o` in
+`liblambda-data-cpp.a`. Their tests did not run, so §14's earlier complete
+Lambda baseline is not a fresh qualification of this correction. Logs are
+under `temp/pdf_gallery_*`; the main executable and PDF regression target build.
+
+## 16. Viewer-format and corpus export audit — 2026-10-15
+
+The user requested wider PDF testing across the formats and input files the
+viewer admits, with root-cause fixes for export errors. Generation still
+follows S2.6.6v3, D2.6.12v3 and D8.2.6v2; the native writer remains retired.
+
+### 16.1 Corrections
+
+- The PDF walker now initializes the same initial font as the screen renderer,
+  selecting the legacy face for non-HTML5 documents. Merely assigning the
+  HTML5 style left legacy documents with an unloaded face. This caused failures
+  across ordinary HTML4 text, lists and iframe placeholders.
+- Missing monospace characters now reach the platform font fallback path.
+  A fixed-pitch check had prevented system fallback for CJK in the source-text
+  viewer, breaking text, JSON, TOML and CSV export.
+- Zero-size text produces an empty outline. Missing or color/bitmap-only glyphs
+  use the existing bounded native graphic capture. The text callback retains
+  access to its live local paint resource; Lambda receives owned image bytes,
+  never a paint-command ABI. Native and captured text share missing-glyph
+  marker geometry, and ordinary supported glyphs remain vector paths.
+- Backdrop captures temporarily close the streamed prefix's open clips, then
+  restore its original item count before traversal resumes. Nine backdrop and
+  blend fixtures previously failed display-list validation because the prefix
+  was valid as an active stream but incomplete as a sampled display list.
+- Raster captures use transformed page coordinates, intersect the physical
+  sheet and measure actual painted ink. Transparent space in enormous owner
+  boxes no longer becomes a bitmap allocation. Empty off-page resources stay
+  empty, including singular transforms. PDF image placement scales intrinsic
+  pixels independently of CSS dimensions; unavailable lazy images follow the
+  native painter's absent-image behavior and retain decoder diagnostics.
+- Zero-height effect owners can acquire descendant ink. Their measured group
+  now receives its deferred backdrop-save prefix before compositing. Existing
+  display-list copy/replace helpers moved into common storage so both retained
+  and one-shot lowering share their ownership implementation.
+- Extremely negative outline offsets keep the independent minimum horizontal
+  and vertical extents required by
+  [CSS UI 4 §3.5](https://drafts.csswg.org/css-ui/#outline-offset), preventing
+  negative path dimensions and nonfinite corner geometry.
+- Live DOM descendant collections now use the shared script-visible traversal
+  helpers. Raw traversal exposed layout-only nodes without script identities,
+  causing stale lifecycle-pin assertions during page JavaScript. The same
+  assertion reproduced in PNG rendering, before PDF generation.
+- Ordinary broken fragment links retain their painted content and omit their
+  PDF annotation, as the user explicitly ruled. Resolve annotations before
+  allocating their object IDs. Explicit outline destinations remain checked.
+  This is the presentation policy PDF-LINK-1 in
+  [Lambda_Design_PDF_Output](../Lambda_Design_PDF_Output.md#pdf-link-1--ordinary-source-fragment-links-2026-10-15),
+  not a change to virtual-file content semantics.
+- Large LaTeX tables exposed mutually recursive sibling traversal in the table
+  renderer and macro-definition collector. Helpers now return intermediate
+  state, leaving one validated self-tail edge (D8.1.1v18) per traversal.
+  `ding.tex` and `omencodings.tex` crashed before PDF emission on interpreter
+  and auto; both now export. The 400-row regression fails with the old package
+  and passes with the corrected package, including interpreter depth 200.
+- The input-owned Wiki tag array uses `array_append` with its Input owners.
+  Calling the runtime GC append introduced an unresolved symbol into standalone
+  input-parser links and prevented the required baseline build in §15.
+- Markdown no longer tries to load retired math stylesheets. Current math
+  output consists of self-contained SVGs and its package stylesheet is empty.
+
+### 16.2 Verification and limits
+
+The reusable `test/pdf_export_corpus.py` runner snapshots the executable and
+package tree, checks object offsets, stream extents and physical page trees,
+then rasterizes every page with Poppler. Documented negative DOCX/EPUB fixtures must
+return their specified errors; crashes do not count as rejection. Successful
+PDF artifacts are discarded by default; JSON reports and failure diagnostics
+remain under `temp/`. Early runs retained every PDF and exhausted available
+space; those disposable artifacts were removed, and interrupted/failed cases
+were retried. The first layout run also overlapped an executable rebuild;
+the runner now uses a private executable to prevent replacement races.
+
+The completed audit covers **42,409 distinct export cases** from **42,167 input
+files**: **42,052 export and rasterize**, **21 correctly reject documented
+malformed/protected inputs**, and **336 retain failures**. This combines full
+sweeps with corrective retries; each case retains its executable hash. The
+final render-corpus sweep was rerun in full after the capture corrections.
+`temp/pdf_export_audit.json` consolidates counts and all remaining failures.
+Qualification ran in the shared checkout with concurrent adapter/layout work
+present, including the pending EPUB adapter; those changes are separate from
+this PDF correction.
+
+| Corpus | Exported | Expected rejection | Failure |
+|---|---:|---:|---:|
+| Input/HTML/SVG/markup/slides | 636 | 17 | 3 |
+| Render fixtures, final full sweep | 1,322 | 0 | 0 |
+| Layout fixtures | 37,720 | 0 | 317 |
+| LaTeX fixtures | 468 | 0 | 7 |
+| Viewer Lambda/slides scripts | 113 | 0 | 3 |
+| PDF input, copied and paginated | 24 | 0 | 4 |
+| EPUB fixtures | 8 | 4 | 0 |
+| Markdown/demo files and assets | 1,539 | 0 | 2 |
+| Additional paginated HTML/Markdown cases | 228 | 0 | 0 |
+
+Rows overlap; the aggregate above deduplicates resolved input path and paged
+mode. The representative route audit passes **31/32**, retaining the native
+RPD page-count failure. The committed manifest has **31** cases (**30** passing,
+**1** failing); the additional EPUB case awaits its adapter and fixture commit.
+The audit includes EPUB, DOCX, DocBook/XML, LaTeX/TikZ, slides,
+Lambda, source-text formats, diagrams, EPS, SVG, raster images, PDF and FO.
+
+Focused native export regressions pass **13/13**; **12/12** bounded native cases
+also pass with forced GC, poisoned freed storage and MIR caching disabled.
+The 400-row case passes normally; its separate forced-GC run was stopped after
+three minutes, not reported as a pass. PDF script goldens pass **21/21** across
+interpreter/JIT/auto under the same forced-GC settings. LaTeX goldens pass
+**73/73**. Font suites pass **22/22**; display-list suites pass **85/85** and
+retained-list suites **30/30**. The independent phase-6 checker retains
+its fourteen Poppler pixel samples, Unicode metadata, nested outlines, links,
+SVG strokes, stream-length and offset checks. Dimension lint and diff checks
+pass.
+
+The final Lambda/Input aggregate passes **7,452/7,452**: **2,112/2,112** input
+and **5,340/5,340** runtime, including all **313/313** forced-GC cases. Run with
+the documented `LAMBDA_TEST_IDLE_TIMEOUT=600`; the earlier 180-second attempt
+timed out in the music layout case. The final phase-3 LaTeX case also passes.
+
+The final Radiant aggregate completes outside the sandbox: **4,494/4,654**,
+with **6 failed**, **153 partial** and **1 skipped**. The native view runner
+passes **201/201**, page loads **109/109**, page snapshots **51/51**, and cascade
+memory **1/1**. Layout remains **3,143/3,294**; UI preflight cannot find
+`test/ui/docbook_source.html`, and the view-reuse runner fails assertions and
+terminates with SIGSEGV. Earlier sandbox graphics stalls do not reproduce in
+this run. No checks were weakened or rerouted to the retired writer.
+
+The seven-page native RPD fixture still exports one page. The new corpus oracle
+retains this failure even though the file is structurally readable. The native
+stream/FO adapter is pending P6 of
+[Radiant_Impl_Paged_Integration](Radiant_Impl_Paged_Integration.md#p6-native-streams-and-fo).
+Remaining corpus failures are **313** strict-XHTML parser rejections, **3**
+negative `@page` margin failures, **8** LaTeX input/template failures, **4** PDF
+input or original-source Poppler warnings, **3** nonstandalone scripts, **2**
+missing/invalid input dependencies, **1** large Unicode print-fixture timeout,
+the **1** RPD page-count failure and **1** CSS 3D projection failure.
+
+`test/demo/doom/tests/render/viewer-concave.html` exposes the last PDF-specific
+gap: the shared vector walker applies affine slices of CSS 3D transforms,
+where the native raster renderer uses `Css3dPaintContext` to compose and order
+projected planes. A roof becomes noninvertible in the affine walk and cannot
+place its captured filter resource. Native PNG correctly paints both ceiling
+samples green; export requires a bridge to that native projected-subtree
+renderer. Dropping the roof would lose visible content, so the failure remains
+explicit. This audit does not qualify CSS perspective parity.
+
+Structural/raster success establishes readable output; it does not establish
+browser pixel equivalence for every fixture. Broader release/platform and
+remaining native pagination/projection qualification remain outstanding.

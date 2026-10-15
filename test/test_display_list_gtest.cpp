@@ -1147,6 +1147,23 @@ TEST_F(PaintIrParityTest, RasterEffectFragmentsMatchDirect) {
     expect_lists_equal(lowered, direct);
 }
 
+TEST_F(PaintIrParityTest, ZeroHeightEffectAcquiresItsDescendantsBackdropRegion) {
+    PaintEffectGroup group = {};
+    group.bounds = {0.0f, 0.0f, 100.0f, 0.0f};
+    group.opacity = 0.5f;
+    paint_begin_effect_group(&pl, &group);
+    paint_fill_rect(&pl, 0.0f, 0.0f, 100.0f, 100.0f, test_color(0xff0000ff));
+    paint_end_effect_group(&pl);
+    lower();
+    DisplayListValidationResult result = {};
+    ASSERT_TRUE(dl_validate(&lowered, &result)) << result.message;
+    ASSERT_EQ(lowered.item_count(), 3);
+    EXPECT_EQ(lowered.data()[0].op, DL_SAVE_BACKDROP);
+    EXPECT_EQ(lowered.data()[1].op, DL_FILL_RECT);
+    EXPECT_EQ(lowered.data()[2].op, DL_COMPOSITE_OPACITY);
+    EXPECT_EQ(lowered.data()[0].save_backdrop.h, 100);
+}
+
 TEST_F(PaintIrParityTest, RasterClipFragmentsMatchDirect) {
     RdtPath* path = (RdtPath*)0x1200;
     test_display_list_stub_set_path_bounds(path, true, 0.0f, 0.0f, 30.0f, 20.0f);

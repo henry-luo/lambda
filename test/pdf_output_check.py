@@ -5,7 +5,7 @@ import zlib
 from pathlib import Path
 
 
-def validate(path, expected_pages=None, expected_box=(0, 0, 150, 90)):
+def validate(path, expected_pages=None, expected_box=(0, 0, 150, 90), quiet=False):
     data = Path(path).read_bytes()
     assert data.startswith(b"%PDF-1.4\n"), "missing PDF header"
     footer = re.search(rb"startxref\n([0-9]+)\n%%EOF\n$", data)
@@ -53,7 +53,8 @@ def validate(path, expected_pages=None, expected_box=(0, 0, 150, 90)):
                 assert box.encode() in page, "CSS-to-point page geometry mismatch"
             content = re.search(rb"/Contents ([0-9]+) 0 R", page)
             assert content and b"\nstream\n" in objects[int(content[1]) - 1], "missing page content stream"
-    print(f"PDF_OUTPUT_CHECK: {count - 1} object offsets and stream lengths verified")
+    if not quiet:
+        print(f"PDF_OUTPUT_CHECK: {count - 1} object offsets and stream lengths verified")
     return objects
 
 

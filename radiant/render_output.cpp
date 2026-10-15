@@ -49,7 +49,9 @@ bool render_paint_raster_resource(PaintList* destination, UiContext* ui, const R
     painter(&raster, data);
     Bound ink = dl_content_bounds(&display);
     bool ok = !raster.paint_failed && dl_validate_or_log(&display, "bounded raster resource");
-    ImageSurface* image = ok && ink.right > ink.left && ink.bottom > ink.top
+    // A fully clipped painter can retain balanced clip commands without any ink.
+    bool has_ink = ink.right > ink.left && ink.bottom > ink.top;
+    ImageSurface* image = ok && has_ink
         ? render_display_list_snapshot(&display, mem_context_process(MEM_ROLE_RENDER), ink, density, Color{}) : nullptr;
     if (image) {
         size_t before = destination->size();
@@ -58,7 +60,7 @@ bool render_paint_raster_resource(PaintList* destination, UiContext* ui, const R
             255, nullptr, image_surface_destroy);
         ok = destination->size() == before + 1;
         if (!ok) image_surface_destroy(image);
-    } else if (display.item_count()) ok = false;
+    } else if (has_ink) ok = false;
     scratch_release(&raster.scratch); dl_destroy(&display); arenas.destroy();
     return ok;
 }
@@ -71,8 +73,9 @@ bool render_paint_snapshot(const PaintList* paint, Bound bounds, float viewport_
     render_svg_inline_register_paint_ir_lowerers();
     paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
     RenderEffectRasterImage image = {};
+    Bound page_clip = {0.0f, 0.0f, viewport_width * density, viewport_height * density};
     if (!render_effect_rasterize_paint_list(paint, backdrop, &bounds, viewport_width,
-            viewport_height, false, density, &image, "PDF_SCHEMA_RASTER", transform)) return false;
+            viewport_height, false, density, &image, "PDF_SCHEMA_RASTER", transform, &page_clip)) return false;
     *surface = image.surface;
     *placement = {image.x, image.y, image.width, image.height};
     return true;

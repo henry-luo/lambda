@@ -640,10 +640,14 @@ bool render_outline_emit(Rect rect, const OutlineProp* outline, const BorderProp
             outline->style == CSS_VALUE_NONE || outline->style == CSS_VALUE_HIDDEN) return true;
     float width = outline->width;
     float expand = width * 0.5f + outline->offset;
-    Rect outside = {rect.x - expand, rect.y - expand, rect.width + expand * 2, rect.height + expand * 2};
+    // negative offsets retain two outline widths outside the stroke (CSS UI 4 §3.5).
+    float expand_x = max(expand, (width - rect.width) * 0.5f);
+    float expand_y = max(expand, (width - rect.height) * 0.5f);
+    Rect outside = {rect.x - expand_x, rect.y - expand_y,
+        rect.width + expand_x * 2, rect.height + expand_y * 2};
     RdtPath* path;
     if (border && corner_has_radius(&border->radius)) {
-        Corner radius = radiant_corner_expand(&border->radius, expand, expand);
+        Corner radius = radiant_corner_expand(&border->radius, expand_x, expand_y);
         constrain_corner_radii(&radius, outside.width, outside.height);
         path = render_path_create_rounded_rect(outside, &radius);
     } else {
