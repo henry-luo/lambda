@@ -6,6 +6,7 @@
 #include "page_document.hpp"
 #include "view_tree_css.hpp"
 #include "render_glyph_run_raster_lower.hpp"
+#include "render_effect_raster_fallback.hpp"
 #include "event.hpp"
 
 #include "../lib/tagged.hpp"
@@ -27,6 +28,21 @@
 
 static RenderPool* g_render_pool = nullptr;
 static pthread_mutex_t g_render_pool_lock = PTHREAD_MUTEX_INITIALIZER;
+
+bool render_paint_snapshot(const PaintList* paint, Bound bounds, float viewport_width,
+        float viewport_height, float density, ImageSurface** surface, Rect* placement,
+        DisplayList* backdrop) {
+    if (!surface || !placement) return false;
+    *surface = nullptr;
+    render_svg_inline_register_paint_ir_lowerers();
+    paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
+    RenderEffectRasterImage image = {};
+    if (!render_effect_rasterize_paint_list(paint, backdrop, &bounds, viewport_width,
+            viewport_height, false, density, &image, "PDF_SCHEMA_RASTER")) return false;
+    *surface = image.surface;
+    *placement = {image.x, image.y, image.width, image.height};
+    return true;
+}
 
 static void render_paged_origin_error(const PagedLayoutDiagnostic& diagnostic) {
     const RadiantSourceOrigin* origin = diagnostic.origin;

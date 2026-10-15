@@ -26,7 +26,7 @@
 > the phase 2 progress record.
 > **Scope:** PDF export, the view projection it needs, and a reusable file
 > content builder. PDF input and CSS layout remain separate subsystems.
-> **Spec linkage:** S2.2.2v2/S2.2.4, S2.6.1v2–S2.6.5, S12.1.1v2,
+> **Spec linkage:** S2.2.2v2/S2.2.4, S2.6.1v2–S2.6.5, S12.1.1v3,
 > S16.7.1, S2.6.6v2; D2.6.5v4/D2.6.6v3/D2.6.12v2, D7.4.4/D7.4.5v2,
 > D5.3.3–D5.3.4, D5.4.1, D8.2.6.
 
@@ -117,7 +117,7 @@ selector convention; a dynamic selector must behave like a literal one.
 ambient script context activates the special builder.
 
 Construction is proposed to remain an in-memory value operation. Actual file
-I/O stays at the procedural boundary, consistent with **S12.1.1v2**. The
+I/O stays at the procedural boundary, consistent with **S12.1.1v3**. The
 requested output buffer does not by itself imply incremental disk writes or
 constant memory independent of final file size.
 
@@ -221,7 +221,7 @@ callback path (**D7.4.4 / D5.4.1**), with precise argument/result ownership
 (**D5.3.3–D5.3.4**). Callbacks are synchronous and cannot suspend beneath a
 native barrier (**D7.4.2v2**). Output forwarding across this callback boundary
 must carry the destination explicitly under **D2.6.12v2**, preserve
-**S12.1.1v2**, and return errors without emitting the rest of a failed document.
+**S12.1.1v3**, and return errors without emitting the rest of a failed document.
 Exact callback signatures and the producer ABI remain implementation work.
 
 Native helpers provide glyph outlines, image bytes, path access and admitted
@@ -564,6 +564,23 @@ entry. The interpreter carries the same receiver through evaluator calls
 without installing it in EvalContext. Calls used to initialize variables or
 compute arguments still construct ordinary values.
 
+The eligible producers here are **pure functions**. A procedure call cannot
+be nested in functional element content (S12.1.1v3; USER, 2026-10-15).
+Procedural preparation runs in a preceding statement, and its completed
+value is then supplied to the file:
+
+```lambda
+pn load_parts() { return "%PDF-1.4\n%%EOF\n" }
+pn main() {
+    let parts = load_parts();
+    let file = <file format:'pdf', parts>;
+    return output(file, "result.pdf")^
+}
+```
+
+Destination forwarding does not move that procedure call into the file,
+change its ordinary return contract, or replay its effects for measurement.
+
 Current function/block results may use `array_push_spread`, and small or
 single-result forms can bypass `list_push`. MIR's small-element `list_fill`
 path also evaluates all child arguments before appending them. These paths
@@ -767,7 +784,7 @@ claimed by this proposal. Keep temporary artifacts under `./temp/`.
 | S2.3.1 | Preserve source/insertion order when emitting dictionary entries. |
 | S2.5.1v2 and S2.6.1v2–S2.6.5 | Keep lists spreading and arrays structured; apply content normalization only at content boundaries, not inside object slots; settle observation/update behavior. |
 | S16.7.1 and S16.9.3 | Activate only the explicit PDF file constructor; preserve script-top-level semantics and the attribute/content boundary comma. |
-| S12.1.1v2 | Preserve the boundary between value construction and external I/O, including measurement eligibility. |
+| S12.1.1v3 | Preserve the boundary between value construction and external I/O, including measurement eligibility. |
 | D2.6.5v4 and D2.6.6v3 | Document the extended List destination and representation flag; preserve the shared container prefix and content/sequence/slot distinction. |
 | D7.4.4 and D7.4.5v2 | Reuse the declared host interface and structural virtual carriers. |
 | D5.3.3–D5.3.4 and D8.2.6 | Document ownership/rooting and content-destination lowering without weakening semantic equivalence. |

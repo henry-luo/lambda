@@ -6895,11 +6895,17 @@ void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
     case AST_NODE_LIST:
     case AST_NODE_ARRAY:
     case AST_NODE_MAP:
+    case AST_NODE_OBJECT_LITERAL:
     case AST_NODE_ELEMENT: {
         AstNode* item = ((AstArrayNode*)node)->item;
         for (; item; item = item->next) {
             walk_lambda_ast(item, visitor, data, descend_functions);
         }
+        // element content is a separate edge after the resolver splits attributes.
+        if (node->node_type == AST_NODE_ELEMENT)
+            walk_lambda_ast(((AstElementNode*)node)->content, visitor, data, descend_functions);
+        else if (node->node_type == AST_NODE_OBJECT_LITERAL)
+            walk_lambda_ast(((AstObjectLiteralNode*)node)->content, visitor, data, descend_functions);
         break;
     }
     case AST_NODE_VARIABLE_DECLARATOR:
@@ -8062,9 +8068,11 @@ typedef struct CallColourWalk {
     AstFuncNode* function;  // innermost enclosing function; NULL at module level
     // S16.7.6: a procedural REPL session's module level is a `pn` body
     bool module_is_proc;
+    bool functional_element = false;
 } CallColourWalk;
 
 static bool colour_walk_is_passthrough(CallColourWalk* walk, AstNode* node) {
+    if (walk->functional_element) return false;
     AstFuncNode* fn = walk->function;
     if (!fn || !((TypeFunc*)fn->type)->is_colour_poly) return false;
     node = ast_unwrap_primary(node);
@@ -8188,6 +8196,14 @@ static void colour_walk_constraint(Transpiler* tp, AstNode* constraint);
 
 static bool colour_walk_visit(AstNode* node, void* data) {
     CallColourWalk* walk = (CallColourWalk*)data;
+    if ((node->node_type == AST_NODE_ELEMENT || node->node_type == AST_NODE_OBJECT_LITERAL) &&
+            !walk->functional_element) {
+        // S12.1.1v3: construction stays pure even inside a procedural statement.
+        CallColourWalk literal = *walk;
+        literal.functional_element = true;
+        walk_lambda_ast(node, colour_walk_visit, &literal, true);
+        return false;
+    }
     if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
             node->node_type == AST_NODE_PROC) {
         AstFuncNode* fn = (AstFuncNode*)node;
@@ -8201,8 +8217,8 @@ static bool colour_walk_visit(AstNode* node, void* data) {
             colour_walk_constraint(walk->tp, constraint);
         }
     }
-    bool in_proc = walk->function ? walk->function->node_type == AST_NODE_PROC
-        : walk->module_is_proc;
+    bool in_proc = !walk->functional_element && (walk->function
+        ? walk->function->node_type == AST_NODE_PROC : walk->module_is_proc);
     if (node->node_type == AST_NODE_CALL_EXPR && !in_proc) {
         colour_walk_call(walk, (AstCallNode*)node);
     }

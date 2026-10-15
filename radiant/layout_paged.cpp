@@ -9246,32 +9246,6 @@ const TypesetMark* layout_secondary_mark(ViewTree* tree, TypesetMarkKind kind, c
     return typeset_mark_select(&tree->model->composition->marks, kind, name, page_number, selection);
 }
 
-static void paged_paint_table_background(LayoutViewNode* node, PaintList* paint, Color color,
-        const ViewTableRange* columns = nullptr) {
-    for (LayoutViewNode* child = node->first_child; child; child = child->next_sibling) {
-        if (!child->computed_style) continue;
-        if (child->computed_style->display.inner == CSS_VALUE_TABLE_CELL) {
-            // grid identity survives subpixel tracks, float rounding and retained-source mutations.
-            const ViewTableRange* cell = child->table_range;
-            // missing-cell fixup suppresses every cell background layer (CSS Tables 3 §5.3.2).
-            if (cell && cell->missing) continue;
-            if (!columns || (cell && cell->column >= columns->column && cell->column - columns->column < columns->span))
-                paint_fill_rect(paint, child->rect.x, child->rect.y, child->rect.width, child->rect.height, color);
-        } else if (child->computed_style->display.inner == CSS_VALUE_TABLE_ROW ||
-            layout_display_is_table_row_group(child->computed_style->display.inner))
-            paged_paint_table_background(child, paint, color, columns);
-    }
-}
-
-static void paged_paint_column_backgrounds(LayoutViewNode* table, LayoutViewNode* parent, PaintList* paint, bool groups) {
-    for (LayoutViewNode* column = parent->first_child; column && paged_is_column_box(column); column = column->next_sibling) {
-        ViewCssStyle* style = column->computed_style;
-        if ((style->display.inner == CSS_VALUE_TABLE_COLUMN_GROUP) == groups && style->background.a)
-            paged_paint_table_background(table, paint, style->background, column->table_range);
-        paged_paint_column_backgrounds(table, column, paint, groups);
-    }
-}
-
 static bool paged_paint_clip(PaintList* paint, const RdtLogicalRect& rect, const float* inset = nullptr) {
     RdtPath* clip = rdt_path_new();
     if (!clip) return false;
@@ -9283,52 +9257,104 @@ static bool paged_paint_clip(PaintList* paint, const RdtLogicalRect& rect, const
     return true;
 }
 
-static bool paged_paint_node(LayoutViewNode* node, PaintList* paint) {
-    if (node->table_range && node->table_range->missing) return true;
-    if (node->paint_box && node->computed_boundary) {
-        const float* outset = node->border_outset;
-        Rect box = {node->rect.x - outset[3], node->rect.y - outset[0],
-            node->rect.width + outset[1] + outset[3], node->rect.height + outset[0] + outset[2]};
-        if (!render_paint_boundary_emit_box(paint, node->computed_boundary, box)) {
-            // the simple boundary painter declines rounded visible borders and layered
-            // backgrounds; a page keeps the box with square corners, then its colour
-            BoundaryProp plain = *node->computed_boundary;
-            BorderProp border = {};
-            if (plain.border) { border = *plain.border; border.radius = {}; plain.border = lam::own(&border); }
-            if (!render_paint_boundary_emit_box(paint, &plain, box)) {
-                DomNode* source = node->source.address;
-                log_debug("[PAGED_PAINT] boundary of %s painted as its background colour only",
-                    source ? source->source_loc() : "fragment");
-                if (plain.background && plain.background->color.a)
-                    paint_fill_rect(paint, box.x, box.y, box.width, box.height, plain.background->color);
-            }
+static bool paged_native_boundary(void* context, const BoundaryProp* input, RdtLogicalRect box) {
+    PaintList* paint = (PaintList*)context;
+    BoundaryProp copy = *input;
+    BorderProp owned_border = {};
+    if (copy.border) { owned_border = *copy.border; copy.border = lam::own(&owned_border); }
+    Rect rect = {box.x, box.y, box.width, box.height};
+    if (!render_paint_boundary_emit_box(paint, &copy, rect)) {
+        // preserve the native page painter's admitted square-border fallback.
+        BoundaryProp plain = *input;
+        BorderProp border = {};
+        if (plain.border) { border = *plain.border; border.radius = {}; plain.border = lam::own(&border); }
+        if (!render_paint_boundary_emit_box(paint, &plain, rect)) {
+            log_debug("PAGED_PAINT_BOUNDARY: fragment painted as its background colour only");
+            if (plain.background && plain.background->color.a)
+                paint_fill_rect(paint, rect.x, rect.y, rect.width, rect.height, plain.background->color);
         }
     }
-    else if (node->paint_box && (node->computed_style || (node->state && node->state->computed_style))) {
-        ViewCssStyle* style = node->computed_style ? node->computed_style.get() : node->state->computed_style.get();
-        if (style->background.a) {
-            // separated-border row/group backgrounds stop at cell borders, leaving grid gaps transparent.
-            if (style->display.inner == CSS_VALUE_TABLE_ROW || layout_display_is_table_row_group(style->display.inner))
-                paged_paint_table_background(node, paint, style->background);
-            else paint_fill_rect(paint, node->rect.x, node->rect.y, node->rect.width, node->rect.height, style->background);
-        }
+    return true;
+}
+static bool paged_native_fill(void* context, Color color, RdtLogicalRect rect) {
+    paint_fill_rect((PaintList*)context, rect.x, rect.y, rect.width, rect.height, color);
+    return true;
+}
+static bool paged_native_clip(void* context, const RdtLogicalRect* rect, const float* inset) {
+    if (rect) return paged_paint_clip((PaintList*)context, *rect, inset);
+    paint_pop_clip((PaintList*)context);
+    return true;
+}
+static bool paged_native_glyph(void* context, const LayoutViewNode*, const PaintGlyphRun* run) {
+    paint_glyph_run((PaintList*)context, run);
+    return true;
+}
+static bool paged_native_image(void* context, const LayoutViewNode*, const PaintImageBox* image) {
+    return render_paint_image_box((PaintList*)context, image);
+}
+static SecondaryViewVisitor paged_native_visitor(PaintList* paint) {
+    return {paint, nullptr, paged_native_boundary, paged_native_fill, paged_native_clip,
+        paged_native_glyph, paged_native_image};
+}
+
+static bool paged_paint_table_background(LayoutViewNode* node, const SecondaryViewVisitor* visitor, Color color,
+        const ViewTableRange* columns = nullptr) {
+    for (LayoutViewNode* child = node->first_child; child; child = child->next_sibling) {
+        if (!child->computed_style) continue;
+        if (child->computed_style->display.inner == CSS_VALUE_TABLE_CELL) {
+            // grid identity survives subpixel tracks, float rounding and retained-source mutations.
+            const ViewTableRange* cell = child->table_range;
+            // missing-cell fixup suppresses every cell background layer (CSS Tables 3 §5.3.2).
+            if (cell && cell->missing) continue;
+            if (!columns || (cell && cell->column >= columns->column && cell->column - columns->column < columns->span))
+                if (!visitor->fill(visitor->context, color, child->rect)) return false;
+        } else if (child->computed_style->display.inner == CSS_VALUE_TABLE_ROW ||
+            layout_display_is_table_row_group(child->computed_style->display.inner))
+            if (!paged_paint_table_background(child, visitor, color, columns)) return false;
     }
-    if (node->paint_box && node->computed_style && node->computed_style->display.inner == CSS_VALUE_TABLE) {
-        // table layers paint all column groups before all columns, then the ordinary row/cell walk.
-        paged_paint_column_backgrounds(node, node, paint, true);
-        paged_paint_column_backgrounds(node, node, paint, false);
-    }
-    // overflow clips the padding box's content; it never cuts the region's own border/background.
-    if (node->clip_content && !paged_paint_clip(paint, node->rect, node->clip_inset)) return false;
-    if (node->glyph_run) paint_glyph_run(paint, node->glyph_run);
-    if (node->image_box && !render_paint_image_box(paint, node->image_box)) return false;
-    for (LayoutViewNode* child = node->first_child; child; child = child->next_sibling)
-        if (!paged_paint_node(child, paint)) return false;
-    if (node->clip_content) paint_pop_clip(paint);
     return true;
 }
 
-static bool paged_paint_column_rules(const ViewPageBox* page, PaintList* paint) {
+static bool paged_paint_column_backgrounds(LayoutViewNode* table, LayoutViewNode* parent, const SecondaryViewVisitor* visitor, bool groups) {
+    for (LayoutViewNode* column = parent->first_child; column && paged_is_column_box(column); column = column->next_sibling) {
+        ViewCssStyle* style = column->computed_style;
+        if ((style->display.inner == CSS_VALUE_TABLE_COLUMN_GROUP) == groups && style->background.a)
+            if (!paged_paint_table_background(table, visitor, style->background, column->table_range)) return false;
+        if (!paged_paint_column_backgrounds(table, column, visitor, groups)) return false;
+    }
+    return true;
+}
+
+static bool paged_visit_node(LayoutViewNode* node, const SecondaryViewVisitor* visitor) {
+    if (node->table_range && node->table_range->missing) return true;
+    if (visitor->fragment && !visitor->fragment(visitor->context, node, true)) return false;
+    if (node->paint_box && node->computed_boundary) {
+        const float* outset = node->border_outset;
+        RdtLogicalRect box = {node->rect.x - outset[3], node->rect.y - outset[0],
+            node->rect.width + outset[1] + outset[3], node->rect.height + outset[0] + outset[2]};
+        if (!visitor->boundary(visitor->context, node->computed_boundary, box)) return false;
+    } else if (node->paint_box && (node->computed_style || (node->state && node->state->computed_style))) {
+        ViewCssStyle* style = node->computed_style ? node->computed_style.get() : node->state->computed_style.get();
+        if (style->background.a) {
+            if (style->display.inner == CSS_VALUE_TABLE_ROW || layout_display_is_table_row_group(style->display.inner)) {
+                if (!paged_paint_table_background(node, visitor, style->background)) return false;
+            } else if (!visitor->fill(visitor->context, style->background, node->rect)) return false;
+        }
+    }
+    if (node->paint_box && node->computed_style && node->computed_style->display.inner == CSS_VALUE_TABLE) {
+        if (!paged_paint_column_backgrounds(node, node, visitor, true) ||
+            !paged_paint_column_backgrounds(node, node, visitor, false)) return false;
+    }
+    if (node->clip_content && !visitor->clip(visitor->context, &node->rect, node->clip_inset)) return false;
+    if (node->glyph_run && !visitor->glyph(visitor->context, node, node->glyph_run)) return false;
+    if (node->image_box && !visitor->image(visitor->context, node, node->image_box)) return false;
+    for (LayoutViewNode* child = node->first_child; child; child = child->next_sibling)
+        if (!paged_visit_node(child, visitor)) return false;
+    if (node->clip_content && !visitor->clip(visitor->context, nullptr, nullptr)) return false;
+    return !visitor->fragment || visitor->fragment(visitor->context, node, false);
+}
+
+static bool paged_paint_column_rules(const ViewPageBox* page, const SecondaryViewVisitor* visitor) {
     const ViewPageStyle* style = page->style;
     const ViewCssStyle* body = style ? style->body_style.get() : nullptr;
     if (!body || body->column_rule_style == CSS_VALUE_NONE || body->column_rule_style == CSS_VALUE_HIDDEN ||
@@ -9341,7 +9367,7 @@ static bool paged_paint_column_rules(const ViewPageBox* page, PaintList* paint) 
         body->column_rule_style == CSS_VALUE_OUTSET ? CSS_VALUE_GROOVE : body->column_rule_style;
     border.left_color = body->column_rule_color;
     BoundaryProp boundary = {}; boundary.border = lam::own(&border);
-    if (style->body_clip && !paged_paint_clip(paint, style->body_rect, style->body_box.border.width.values)) return false;
+    if (style->body_clip && !visitor->clip(visitor->context, &style->body_rect, style->body_box.border.width.values)) return false;
     for (const ViewPageColumn* right = page->occupied_columns; right && right->previous; right = right->previous) {
         const ViewPageColumn* left = right->previous;
         if (left->index + 1 != right->index) continue;
@@ -9353,37 +9379,42 @@ static bool paged_paint_column_rules(const ViewPageBox* page, PaintList* paint) 
         // explicit rectangles share a vertical rule only along their horizontally separated, overlapping edges.
         if (gap_end < gap_start || bottom <= top) continue;
         float x = gap_start + (gap_end - gap_start - width) * 0.5f;
-        if (!render_paint_boundary_emit_box(paint, &boundary, {x, top, width, bottom - top})) return false;
+        if (!visitor->boundary(visitor->context, &boundary, {x, top, width, bottom - top})) return false;
     }
-    if (style->body_clip) paint_pop_clip(paint);
+    if (style->body_clip && !visitor->clip(visitor->context, nullptr, nullptr)) return false;
     return true;
 }
 
-bool layout_secondary_paint_page(ViewTree* tree, const ViewPageBox* page, PaintList* paint) {
-    if (!paint) return false;
+bool layout_secondary_visit_page(ViewTree* tree, const ViewPageBox* page, const SecondaryViewVisitor* visitor) {
+    if (!visitor || !visitor->boundary || !visitor->fill || !visitor->clip || !visitor->glyph || !visitor->image) return false;
     page = view_tree_page_material(tree, page);
     if (!page) return false;
     Color white = {.r = 255, .g = 255, .b = 255, .a = 255};
-    paint_fill_rect(paint, 0.0f, 0.0f, page->node.rect.width, page->node.rect.height, page->style ? page->style->background : white);
-    if (!paged_paint_clip(paint, page->node.rect)) return false;
+    if (!visitor->fill(visitor->context, page->style ? page->style->background : white, page->node.rect)) return false;
+    if (!visitor->clip(visitor->context, &page->node.rect, nullptr)) return false;
     if (!page->blank && page->style && page->style->body_style) {
         // the boundary painter may normalize radii; keep immutable edition geometry untouched.
         ViewCssBoxEdges box = page->style->body_box;
         BoundaryProp boundary = {}; boundary.border = lam::own(&box.border); boundary.background = lam::own(&box.background);
         const RdtLogicalRect& rect = page->style->body_rect;
-        if (!render_paint_boundary_emit_box(paint, &boundary, {rect.x, rect.y, rect.width, rect.height})) return false;
+        if (!visitor->boundary(visitor->context, &boundary, rect)) return false;
     }
-    if (!page->blank && !paged_paint_column_rules(page, paint)) return false;
+    if (!page->blank && !paged_paint_column_rules(page, visitor)) return false;
     for (LayoutViewNode* child = page->node.first_child; child; child = child->next_sibling) {
         if (page->blank && child->role != VIEW_FRAGMENT_MARGIN && child->role != VIEW_FRAGMENT_STATIC) continue;
         bool body_clip = page->style && page->style->body_clip &&
             (child->role == VIEW_FRAGMENT_BODY || child->role == VIEW_FRAGMENT_NOTE || child->role == VIEW_FRAGMENT_FLOAT);
-        if (body_clip && !paged_paint_clip(paint, page->style->body_rect, page->style->body_box.border.width.values)) return false;
-        if (!paged_paint_node(child, paint)) return false;
-        if (body_clip) paint_pop_clip(paint);
+        if (body_clip && !visitor->clip(visitor->context, &page->style->body_rect, page->style->body_box.border.width.values)) return false;
+        if (!paged_visit_node(child, visitor)) return false;
+        if (body_clip && !visitor->clip(visitor->context, nullptr, nullptr)) return false;
     }
-    paint_pop_clip(paint);
-    return true;
+    return visitor->clip(visitor->context, nullptr, nullptr);
+}
+
+bool layout_secondary_paint_page(ViewTree* tree, const ViewPageBox* page, PaintList* paint) {
+    if (!paint) return false;
+    SecondaryViewVisitor visitor = paged_native_visitor(paint);
+    return layout_secondary_visit_page(tree, page, &visitor);
 }
 
 static bool paged_paint_placement(ViewTree* tree, const ViewPageBox* page,
@@ -9401,7 +9432,8 @@ static bool paged_paint_placement(ViewTree* tree, const ViewPageBox* page,
 bool layout_secondary_paint_root(ViewTree* tree, PaintList* paint, const RdtLogicalRect* clip) {
     if (!paint || !view_tree_model_source_valid(tree) || !tree->model->committed) return false;
     if (tree->model->environment.presentation == VIEW_PRESENTATION_CONTINUOUS) {
-        return paged_paint_node(tree->model->root, paint);
+        SecondaryViewVisitor visitor = paged_native_visitor(paint);
+        return paged_visit_node(tree->model->root, &visitor);
     }
     // shared placement traversal culls offscreen sheets before recording glyphs and images.
     return view_tree_preview_paint(tree, clip, paged_paint_placement, paint) == VIEW_MODEL_OK;

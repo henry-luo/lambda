@@ -1,10 +1,11 @@
 """Validate emitted byte offsets and stream extents independently of PDF intake."""
 import re
 import sys
+import zlib
 from pathlib import Path
 
 
-def validate(path):
+def validate(path, expected_pages=None):
     data = Path(path).read_bytes()
     assert data.startswith(b"%PDF-1.4\n"), "missing PDF header"
     footer = re.search(rb"startxref\n([0-9]+)\n%%EOF\n$", data)
@@ -30,11 +31,28 @@ def validate(path):
         if stream:
             ending = stream.end() + int(stream[1])
             assert body[ending:] == b"\nendstream\nendobj\n", "stream length mismatch"
-    assert any(b"/Subtype /Image" in body and b"/SMask " in body for body in objects), "missing image alpha mask"
-    assert any(b"/ColorSpace /DeviceGray" in body for body in objects), "missing alpha image"
-    assert any(b"/Type /ExtGState" in body for body in objects), "missing transparent fill state"
+            if b"/Filter /FlateDecode" in body[:stream.end()]:
+                zlib.decompress(body[stream.end():ending])
+    if expected_pages is None:
+        assert any(b"/Subtype /Image" in body and b"/SMask " in body for body in objects), "missing image alpha mask"
+        assert any(b"/ColorSpace /DeviceGray" in body for body in objects), "missing alpha image"
+        assert any(b"/Type /ExtGState" in body for body in objects), "missing transparent fill state"
+    else:
+        pages = [body for body in objects if re.search(rb"/Type /Page\b", body)]
+        assert len(pages) == expected_pages, "incorrect physical page count"
+        tree = next(body for body in objects if b"/Type /Pages " in body)
+        kids = re.search(rb"/Kids \[([^]]*)\] /Count ([0-9]+)", tree)
+        assert kids and int(kids[2]) == expected_pages, "incorrect page tree count"
+        identifiers = [int(value) for value in re.findall(rb"([0-9]+) 0 R", kids[1])]
+        assert len(identifiers) == expected_pages and len(set(identifiers)) == expected_pages
+        for identifier in identifiers:
+            page = objects[identifier - 1]
+            assert re.search(rb"/Type /Page\b", page), "page tree addresses a nonpage object"
+            assert b"/MediaBox [0 0 150 90]" in page, "CSS-to-point page geometry mismatch"
+            content = re.search(rb"/Contents ([0-9]+) 0 R", page)
+            assert content and b"\nstream\n" in objects[int(content[1]) - 1], "missing page content stream"
     print(f"PDF_OUTPUT_CHECK: {count - 1} object offsets and stream lengths verified")
 
 
 if __name__ == "__main__":
-    validate(sys.argv[1])
+    validate(sys.argv[1], int(sys.argv[2]) if len(sys.argv) > 2 else None)

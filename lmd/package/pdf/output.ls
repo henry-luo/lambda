@@ -76,7 +76,8 @@ fn draw(event, node, ctx) any^ {
             fill_rect(ctx.color, 0, 0, ctx.page_width, ctx.page_height, "R" ++ string(ctx.sequence))^])
     }
     else if (event == "end_page") "Q\n"
-    else if (event == "element") ""
+    else if (event == "element" or event == "begin_fragment" or event == "end_fragment") ""
+    else if (event == "fill") fill_rect(ctx.color, ctx.x, ctx.y, ctx.width, ctx.height, "R" ++ string(ctx.sequence))^
     else if (event == "boundary") boundary(node, ctx)^
     else if (event == "text") {
         let outline = radiant.pdf_glyph_path(ctx)^;
@@ -103,45 +104,63 @@ fn xref_entry(offset) {
     slice("0000000000", 0, 10 - len(digits)) ++ digits ++ " 00000 n \n"
 }
 
-fn reference(resources, resource_name) string^ {
-    let matches = [for (index, resource in resources where resource.name == resource_name) index + 5];
+fn reference(resources, resource_name, first_resource) string^ {
+    let matches = [for (index, resource in resources where resource.name == resource_name) index + first_resource];
     if (len(matches) != 1) raise error("PDF output: resource reference must resolve uniquely")
     else string(matches[0]) ++ " 0 R"
 }
 
-fn resource_object(resource, resources, object_number) array^ {
+fn resource_object(resource, resources, object_number, first_resource) array^ {
     let begin = string(object_number) ++ " 0 obj\n";
     if (resource.category == "ExtGState") [begin, "<< /Type /ExtGState /ca " ++ util.pdf_num(resource.alpha)^ ++
         " /CA " ++ util.pdf_num(resource.alpha)^ ++ " >>\nendobj\n"]
     else if (resource.category == "XObject") {
-        let mask = if (resource.mask == null) "" else " /SMask " ++ reference(resources, resource.mask)^;
+        let mask = if (resource.mask == null) "" else " /SMask " ++ reference(resources, resource.mask, first_resource)^;
         let dictionary = "<< /Type /XObject /Subtype /Image /Width " ++ string(resource.width) ++
             " /Height " ++ string(resource.height) ++ " /ColorSpace " ++ (if (resource.gray) "/DeviceGray" else "/DeviceRGB") ++
-            " /BitsPerComponent 8" ++ mask ++ " /Length " ++ string(len(resource.bytes)) ++ " >>\nstream\n";
+            " /BitsPerComponent 8 /Filter /FlateDecode" ++ mask ++ " /Length " ++ string(len(resource.bytes)) ++ " >>\nstream\n";
         [begin, dictionary, resource.bytes, "\nendstream\nendobj\n"]
     }
     else raise error("PDF output: unknown resource category")
 }
 
-fn document(page) element^ {
+fn page_objects(page, index, resources, first_resource) array^ {
+    let sheet_number = 3 + index * 2;
+    let resource_entries = [for (category in ["ExtGState", "XObject"]) "/" ++ category ++ " << " ++
+        ([for (resource in page.resources where resource.category == category)
+            "/" ++ resource.name ++ " " ++ reference(resources, resource.name, first_resource)^] |> join(" ")) ++ " >>"] |> join(" ");
+    let sheet = string(sheet_number) ++ " 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " ++
+        util.pdf_num(page.width * 0.75)^ ++ " " ++ util.pdf_num(page.height * 0.75)^ ++
+        "] /Resources << " ++ resource_entries ++ " >> /Contents " ++ string(sheet_number + 1) ++ " 0 R >>\nendobj\n";
+    let stream = string(sheet_number + 1) ++ " 0 obj\n<< /Filter /FlateDecode /Length " ++ string(len(page.content)) ++ " >>\nstream\n";
+    [[sheet], [stream, page.content, "\nendstream\nendobj\n"]]
+}
+
+// Resource preparation happens once; measuring and final emission use these exact bytes.
+fn prepared_resource(resource) map^ {
+    if (resource.category == "XObject") {*: resource, bytes: radiant.pdf_deflate(resource.bytes)^}
+    else resource
+}
+
+fn document(plan) element^ {
+    let source_pages = if (plan.pages == null) [plan] else plan.pages;
+    let pages = [for (page in source_pages) {*: page, content: radiant.pdf_deflate(page.content)^,
+        resources: [for (resource in page.resources) prepared_resource(resource)^]}];
+    let resources = [for (page in pages) for (resource in page.resources) resource];
+    let first_resource = 3 + 2 * len(pages);
     let header = "%PDF-1.4\n";
     let catalog = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
-    let pages = "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n";
-    let resource_entries = [for (category in ["ExtGState", "XObject"]) "/" ++ category ++ " << " ++
-        ([for (index, resource in page.resources where resource.category == category)
-            "/" ++ resource.name ++ " " ++ string(index + 5) ++ " 0 R"] |> join(" ")) ++ " >>"] |> join(" ");
-    let sheet = "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " ++
-        util.pdf_num(page.width * 0.75)^ ++ " " ++ util.pdf_num(page.height * 0.75)^ ++
-        "] /Resources << " ++ resource_entries ++ " >> /Contents 4 0 R >>\nendobj\n";
-    let stream = "4 0 obj\n<< /Length " ++ string(len(page.content)) ++ " >>\nstream\n";
-    let endstream = "\nendstream\nendobj\n";
-    let objects = [[catalog], [pages], [sheet], [stream, page.content, endstream]] ++
-        [for (index, resource in page.resources) resource_object(resource, page.resources, index + 5)^];
-    let lengths = [for (entry in objects) sum([for (part in entry) len(part)])];
+    let page_tree = "2 0 obj\n<< /Type /Pages /Kids [" ++
+        ([for (index in range(0, len(pages), 1)) string(3 + 2 * index) ++ " 0 R"] |> join(" ")) ++
+        "] /Count " ++ string(len(pages)) ++ " >>\nendobj\n";
+    let objects = [[catalog], [page_tree]] ++
+        [for (index, page in pages) for (entry in page_objects(page, index, resources, first_resource)^) entry] ++
+        [for (index, resource in resources) resource_object(resource, resources, index + first_resource, first_resource)^];
+    let lengths = [for (entry in objects) sum([for (part in entry) len(binary(part))])];
     let ends = math.cumsum(lengths);
     let offsets = [for (index in range(0, len(objects), 1)) len(header) + if (index == 0) 0 else ends[index - 1]];
     let xref = len(header) + sum(lengths);
-    if (xref > 9999999999) raise error("PDF output exceeds classic cross-reference offset range")
+    if (len(pages) == 0 or xref > 9999999999) raise error("PDF output has no pages or exceeds classic cross-reference offset range")
     else <file format:'pdf', header
         for (entry in objects) for (part in entry) part
         "xref\n0 " string(len(objects) + 1) "\n0000000000 65535 f \n"

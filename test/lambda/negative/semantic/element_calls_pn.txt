@@ -1,0 +1,3 @@
+element_calls_pn.ls:6:33: error[E224]: 'load_parts' is a procedure (pn) and cannot be called from a function (fn)
+element_calls_pn.ls:7:39: error[E224]: 'load_parts' is a procedure (pn) and cannot be called from a function (fn)
+element_calls_pn.ls:8:31: error[E224]: 'load_parts' is a procedure (pn) and cannot be called from a function (fn)
