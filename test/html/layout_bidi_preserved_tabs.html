@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+body { margin: 0 }
+.rows { white-space: pre; font: 20px/1 monospace; text-align: left }
+.rows > div > span { border: solid orange; border-width: 0 3px }
+</style>
+<main id="result">
+<section class="rows">
+<div dir="ltr"><span id="latin-ltr-nested">A	<span dir="rtl">B	C</span>	D	</span></div>
+<div dir="ltr"><span id="latin-ltr-override"><bdo dir="rtl">A	B	C</bdo>	D	</span></div>
+<div style="unicode-bidi:bidi-override;direction:ltr"><span id="latin-ltr-control">A	B	C	D	</span></div>
+<div dir="ltr"><span id="hebrew-ltr-nested">א	<span dir="rtl">בּ	ג</span>	ד	</span></div>
+<div dir="ltr"><span id="hebrew-ltr-override"><bdo dir="rtl">א	בּ	ג</bdo>	ד	</span></div>
+<div style="unicode-bidi:bidi-override;direction:ltr"><span id="hebrew-ltr-control">א	בּ	ג	ד	</span></div>
+<div dir="rtl"><span id="latin-rtl-nested">A	<span dir="ltr">B	C</span>	D	</span></div>
+<div dir="rtl"><span id="latin-rtl-override"><bdo dir="ltr">A	B	C</bdo>	D	</span></div>
+<div style="unicode-bidi:bidi-override;direction:rtl"><span id="latin-rtl-control">A	B	C	D	</span></div>
+<div dir="rtl"><span id="hebrew-rtl-nested">א	<span dir="ltr">בּ	ג</span>	ד	</span></div>
+<div dir="rtl"><span id="hebrew-rtl-override"><bdo dir="ltr">א	בּ	ג</bdo>	ד	</span></div>
+<div style="unicode-bidi:bidi-override;direction:rtl"><span id="hebrew-rtl-control">א	בּ	ג	ד	</span></div>
+</section>
+</main>

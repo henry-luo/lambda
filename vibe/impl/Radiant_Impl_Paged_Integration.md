@@ -573,3 +573,61 @@ environment failures. Final aggregate log:
 `temp/view_reuse_radiant_gate_native.log`. The gate remains red solely on the
 161 recorded paged cases; broader native/FO integration and legacy test
 migration remain open.
+
+### 2026-10-16: merged baseline regression repair
+
+**Implemented behavior.** Single font-family names and single-part shorthands
+now use the existing tree-owned canonical string store, as family lists already
+did. The timeline fixtures exposed retained `FontProp::family` pointers into
+`CssComputedValueScratch` after substitution; hit testing dereferenced the
+released pool. Longhand and pseudo fonts share the same selector and ownership
+path (**D4.5.1v4 / D4.1.4v5**). Both original timeline fixtures pass with the
+supported ASan CLI, with leak detection disabled.
+
+PDF export uses the edition environment's host when its optional explicit host
+is absent; the functional package still owns generation under **S2.6.6v3**.
+Fixed-page admission rejects surrounding flow content before composition can
+silently discard it. Existing fixed-page geometry, metadata, budget and retained
+generation checks pass.
+
+The bidi pass retains advance-based bounds for text rectangles containing tabs.
+Fallback glyph ink cannot proportionally redistribute a tab-stop advance
+([CSS Text 3 §4.1.2](https://drafts.csswg.org/css-text-3/#white-space-phase-2)).
+The original `tab-bidi-001` reproducer matches all element, span and text bounds;
+the native regression covers Latin/Hebrew, LTR/RTL, nested directions and
+overrides. The native text/layout suite passes **129/129**.
+
+**Reference repair.** The companion corpus's `render/page/bg_image_01.html`
+contained a complete PNG container whose deflate payload supplied only 14 of
+the 52 scanline bytes required by its 4×4 RGB header. Its old browser reference
+showed partially decoded pixels. The fixture now contains a complete red/blue
+checkerboard, matching its stated purpose, and its reference was independently
+captured with Chromium headless shell 152.0.7977.42. Radiant matches exactly.
+The codec's error policy and render comparison floors are unchanged. Fixture
+and reference hashes, CRC/row validation and the capture command are in
+`temp/fix-failed-bg-provenance.json`; both changed artifacts belong to the
+sibling `lambda-test` repository.
+
+**Test migration.** The picture-source control now uses an unsupported media
+type; AVIF is supported by the shared codec registry. Workspace assertions
+follow paged-media §1.3.5, retaining exact geometry, retained pixel and ownership
+checks (**D4.5.1v4 / D4.1.4v5**). Three PDF media-box checks parse numeric
+coordinates instead of requiring the retired writer's decimal padding
+(**S2.6.6v3**). All nine focused migrated cases pass.
+
+**Qualification and open behavior.** The baseline View Reuse selection improves
+**292/490 → 338/490**, with no new failing case. Its **152 remaining failures**
+cover native/FO integration, changed-width table continuations, whitespace and
+folio behavior, and additional legacy-model expectations. Their assertions and
+suite selection remain active; exact diagnostics are in
+`temp/fix-failed-remaining-views.json`.
+
+`make test-radiant-baseline` completes with **5,698 pass, 154 accepted partial,
+152 fail and one skip** of 6,005. All failures belong to that View Reuse
+selection. UI automation passes **631/631**; the full layout baseline has
+**3,144 pass / 150 accepted partial / zero regressions**, including
+**890 pass / 90 partial / zero failed** for CSS text. Render visual passes with
+**207 passes, four expected failures and one skip**. Integer-cast lint and
+whitespace checks pass. Aggregate evidence:
+`temp/fix-failed-radiant-gate.log` and `temp/fix-failed-radiant-summary.json`.
+This closes the merged regressions above; it does not complete P6/P7.

@@ -65,7 +65,9 @@ bool render_secondary_view_to_pdf(ViewTree* tree, const char* filename,
     log_info("PDF_LAMBDA_SOURCE: physical pages=%zu", tree->model->page_count);
     RenderExportSession session = {};
     session.document = lam::up(tree->model->document.get());
-    session.ui_context = lam::own(ui); session.paged_view = lam::up(tree); session.output_scale = 1;
+    // embedding callers may omit the host already retained by the edition environment.
+    session.ui_context = lam::own(ui ? ui : tree->model->environment.ui_context.get());
+    session.paged_view = lam::up(tree); session.output_scale = 1;
     return render_lambda_pdf(&session, filename, selection);
 }
 

@@ -1221,6 +1221,24 @@ TEST_F(RadiantTextQuery, IsolatesReorderSplitRunsAndTransparentEmptyBoundaries) 
     EXPECT_NEAR(nested->x, 8.671875f, 0.1f);
 }
 
+TEST_F(RadiantTextQuery, PreservedTabsKeepAdvanceBoundsWithFallbackBidiGlyphs) {
+    ASSERT_NE(load("test/html/layout_bidi_preserved_tabs.html"), nullptr);
+    ui.viewport_width = ui.window_width = 1200;
+    layout_html_doc(&ui, document, false);
+    DomElement* control = dom_find_element_by_id(document->root->as_element(), "latin-ltr-control");
+    ASSERT_NE(control, nullptr);
+    ASSERT_GT(control->width, 300.0f);
+    const char* ids[] = {"latin-ltr-nested", "latin-ltr-override", "hebrew-ltr-nested",
+        "hebrew-ltr-override", "hebrew-ltr-control", "latin-rtl-nested", "latin-rtl-override",
+        "latin-rtl-control", "hebrew-rtl-nested", "hebrew-rtl-override", "hebrew-rtl-control"};
+    for (const char* id : ids) {
+        DomElement* span = dom_find_element_by_id(document->root->as_element(), id);
+        ASSERT_NE(span, nullptr) << id;
+        EXPECT_NEAR(span->width, control->width, 0.1f) << id;
+        EXPECT_NEAR(span->x, control->x, 0.1f) << id;
+    }
+}
+
 TEST_F(RadiantTextQuery, UnicodeSeparatorsKeepTheirPrecedingLetterUnits) {
     ASSERT_NE(load("test/html/layout_unicode_separator_boundaries.html"), nullptr);
     process_document_font_faces(&ui, document);

@@ -26,6 +26,19 @@
 #include "../lib/font/font.h"
 #include "../lib/ref_count.h"
 #include <math.h>
+#include <stdio.h>
+
+static void expect_pdf_media_box(const char* pdf, float width, float height) {
+    const char* box = strstr(pdf, "/MediaBox");
+    ASSERT_NE(box, nullptr);
+    float left, bottom, right, top;
+    int consumed = 0;
+    // S2.6.6v3 emits shortest numeric spellings; PDF geometry does not depend on decimal padding.
+    ASSERT_EQ(sscanf(box, "/MediaBox [ %f %f %f %f ]%n", &left, &bottom, &right, &top, &consumed), 4);
+    ASSERT_GT(consumed, 0);
+    EXPECT_FLOAT_EQ(left, 0.0f); EXPECT_FLOAT_EQ(bottom, 0.0f);
+    EXPECT_FLOAT_EQ(right, width); EXPECT_FLOAT_EQ(top, height);
+}
 
 TEST(ViewModelOptionsTest, PageSelectionsParseStrictPhysicalRangesWithoutPartialPublication) {
     Pool* pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "test.page.selection"); ASSERT_NE(pool, nullptr);
@@ -1510,7 +1523,9 @@ TEST_F(SecondaryViewTest, PictureSourcesUseTheSelectedEnvironmentAndOnlyPrecedin
     stylesheet("p { margin: 0 }"); CssEngine* engine = (CssEngine*)doc.services.cached_css_engine;
     DomElement* picture = block(nullptr, nullptr, "picture"); ASSERT_NE(picture, nullptr);
     DomElement* unsupported = block(nullptr, nullptr, "source", picture); ASSERT_NE(unsupported, nullptr);
-    ASSERT_TRUE(unsupported->set_attribute("type", "image/avif")); ASSERT_TRUE(unsupported->set_attribute("srcset", "unsupported.avif"));
+    // AVIF is supported by the shared codec registry; use an actually unsupported media type.
+    EXPECT_TRUE(layout_image_type_supported("image/avif"));
+    ASSERT_TRUE(unsupported->set_attribute("type", "image/x-unsupported")); ASSERT_TRUE(unsupported->set_attribute("srcset", "unsupported.bin"));
     DomElement* print = block(nullptr, nullptr, "source", picture); ASSERT_NE(print, nullptr);
     ASSERT_TRUE(print->set_attribute("media", "print")); ASSERT_TRUE(print->set_attribute("type", "IMAGE/PNG"));
     ASSERT_TRUE(print->set_attribute("srcset", "print.png 2x")); ASSERT_TRUE(print->set_attribute("width", "40"));
@@ -3023,7 +3038,9 @@ TEST_F(SecondaryViewTest, SourceFontShorthandAndBlockBordersBelongToTheSelectedV
     ASSERT_NE(box->computed_boundary->border, nullptr);
     EXPECT_FLOAT_EQ(box->computed_boundary->border->width.left, 2.0f);
     EXPECT_FLOAT_EQ(box->rect.height, 80.0f);
-    EXPECT_EQ(child->x, 0.0f); EXPECT_EQ(child->width, 0.0f);
+    // paged-media §1.3.5 uses the DOM workspace and publishes owned copies (D4.5.1v4).
+    EXPECT_EQ(child->x, 0.0f); EXPECT_FLOAT_EQ(child->width, 220.0f);
+    EXPECT_NE(box->computed_boundary.get(), child->boundary());
     DomNode* text = child->first_child; ASSERT_NE(text, nullptr);
     ViewNodeState* text_state = view_tree_node_state(tree, text, false); ASSERT_NE(text_state, nullptr);
     EXPECT_FLOAT_EQ(text_state->first_occurrence->rect.x, box->rect.x + 5.0f);
@@ -3448,7 +3465,7 @@ TEST_F(SecondaryViewTest, AutoTableWidthsIncludeLaterRowsAndFootersAndCenterTheD
     state = view_tree_node_state(tree, last, false); ASSERT_NE(state, nullptr);
     for (LayoutViewNode* fragment = state->first_occurrence; fragment; fragment = fragment->next_occurrence)
         if (fragment->paint_box) EXPECT_FLOAT_EQ(fragment->rect.width, 106.0f);
-    EXPECT_FLOAT_EQ(first->width, 0.0f); EXPECT_EQ(first->parent->parent, header);
+    EXPECT_FLOAT_EQ(first->width, 86.0f); EXPECT_EQ(first->parent->parent, header);
 }
 
 TEST_F(SecondaryViewTest, AutoTablePercentTracksRemeasureOnAlternatingPages) {
@@ -3662,7 +3679,7 @@ TEST_F(SecondaryViewTest, AutomaticColumnSpansKeepSingleColumnConstraintsAndAcco
     }
     EXPECT_FLOAT_EQ(source_fragment(tree, first, VIEW_FRAGMENT_BODY, true)->rect.width, 150.0f);
     EXPECT_FLOAT_EQ(source_fragment(tree, second, VIEW_FRAGMENT_BODY, true)->rect.width, 140.0f);
-    EXPECT_EQ(first->parent->as_element()->first_child, first); EXPECT_FLOAT_EQ(first->width, 0.0f);
+    EXPECT_EQ(first->parent->as_element()->first_child, first); EXPECT_FLOAT_EQ(first->width, 150.0f);
 }
 
 TEST_F(SecondaryViewTest, SpanningCellsUseActualTracksOnAlternatingPagesAndRetainTheirEdition) {
@@ -10727,7 +10744,7 @@ TEST_F(SecondaryViewTest, NativePageMastersUseTheCommonCssCascadeAndMarginContex
         EXPECT_EQ(page->style->computed_style->color.b, 255);
         EXPECT_NE(page->margin_boxes[CSS_PAGE_BOTTOM_CENTER], nullptr);
     }
-    EXPECT_FLOAT_EQ(source->width, 640.0f); EXPECT_EQ(master->parent.get(), set);
+    EXPECT_FLOAT_EQ(source->width, 192.0f); EXPECT_EQ(master->parent.get(), set);
 }
 
 TEST_F(SecondaryViewTest, NativeBodyRegionsKeepGeometryAndBackgroundDistinctFromCssMarginBoxes) {
@@ -10904,8 +10921,8 @@ TEST_F(SecondaryViewTest, ForcedBreaksProducePhysicalPagesAndNoTrailingBlank) {
         EXPECT_EQ(page->side, i % 2 ? VIEW_PAGE_LEFT : VIEW_PAGE_RIGHT);
         EXPECT_FALSE(page->blank);
     }
-    EXPECT_FLOAT_EQ(source->width, 640.0f);
-    EXPECT_FLOAT_EQ(source->x, 11.25f);
+    EXPECT_FLOAT_EQ(source->width, 240.0f);
+    EXPECT_FLOAT_EQ(source->x, 0.0f);
     PaintList paint = {}; paint_list_init(&paint, nullptr);
     ASSERT_TRUE(layout_secondary_paint_page(tree, tree->model->pages.get()[0], &paint));
     EXPECT_TRUE(paint_ir_validate_or_log(&paint, "paged test"));
@@ -10921,7 +10938,7 @@ TEST_F(SecondaryViewTest, ForcedBreaksProducePhysicalPagesAndNoTrailingBlank) {
     char* pdf = read_text_file("temp/paged-media-impl/three-pages.pdf");
     ASSERT_NE(pdf, nullptr);
     EXPECT_NE(strstr(pdf, "/Count 3"), nullptr);
-    EXPECT_NE(strstr(pdf, "/MediaBox [0 0 240.00 360.00]"), nullptr);
+    expect_pdf_media_box(pdf, 240.0f, 360.0f);
     free(pdf);
     ASSERT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-impl/selected-page.pdf", &selection));
     pdf = read_text_file("temp/paged-media-impl/selected-page.pdf");
@@ -11721,7 +11738,7 @@ TEST_F(SecondaryViewTest, NativeGlyphFragmentsSharePaintSnapshotsAndPdfAfterProd
     ASSERT_TRUE(create_dir("temp/paged-media-impl"));
     ASSERT_TRUE(render_secondary_view_to_pdf(retained, "temp/paged-media-impl/native-glyphs.pdf"));
     char* pdf = read_text_file("temp/paged-media-impl/native-glyphs.pdf"); ASSERT_NE(pdf, nullptr);
-    EXPECT_NE(strstr(pdf, "/Count 1"), nullptr); EXPECT_NE(strstr(pdf, "/MediaBox [0 0 150.00 90.00]"), nullptr);
+    EXPECT_NE(strstr(pdf, "/Count 1"), nullptr); expect_pdf_media_box(pdf, 150.0f, 90.0f);
     free(pdf); EXPECT_EQ(source->x, 11.25f); EXPECT_EQ(source->height, 91.75f);
     ASSERT_TRUE(view_tree_secondary_release(&doc, retained)); EXPECT_EQ(ref_count_get(&fixture->references), 1);
     EXPECT_EQ(fixture->retained, fixture->released); native_fragment_release(fixture);
@@ -11878,14 +11895,14 @@ static void expect_same_page_pixels(ViewTree* left, ViewTree* right, uint32_t nu
     image_surface_destroy(a); image_surface_destroy(b);
 }
 
-TEST_F(SecondaryViewTest, WindowPreviewRecomposesWithoutReplacingDefaultGeometryOrGrowingItsSurface) {
+TEST_F(SecondaryViewTest, WindowPreviewRecomposesInSharedWorkspaceWithoutGrowingItsSurface) {
     preview_document();
     RenderPagedOptions options = render_paged_options_default();
     UiContext ui = {}; ui.document = lam::up(&doc); ui.paged_options = lam::up(&options);
     ui.device_scale = 1.0f; ui.viewport_width = 120.0f; ui.viewport_height = 160.0f;
     ViewTree* browsing = doc.view_tree;
     ASSERT_TRUE(render_paged_window_compose(&ui));
-    EXPECT_EQ(doc.view_tree.get(), browsing); EXPECT_FLOAT_EQ(source->width, 640.0f);
+    EXPECT_EQ(doc.view_tree.get(), browsing); EXPECT_FLOAT_EQ(source->width, 80.0f);
     uint64_t original_id = ui.paged_view->model->tree_id;
     ImageSurface* surface = render_surface_create_budgeted((MemContext*)doc.services.mem_ctx, 120.0f, 160.0f);
     ASSERT_NE(surface, nullptr); ui.surface = lam::up(surface);
@@ -11902,8 +11919,8 @@ TEST_F(SecondaryViewTest, WindowPreviewRecomposesWithoutReplacingDefaultGeometry
     EXPECT_NE(ui.paged_view->model->tree_id, original_id);
     EXPECT_EQ(snapshot_pixel(surface, 25, 70), 0xffffffffu);
     EXPECT_EQ(ui.surface.get(), surface); EXPECT_EQ(surface->width, 120); EXPECT_EQ(surface->height, 160);
-    EXPECT_EQ(doc.view_tree.get(), browsing); EXPECT_FLOAT_EQ(source->x, 11.25f);
-    EXPECT_FLOAT_EQ(source->width, 640.0f); EXPECT_FLOAT_EQ(source->height, 91.75f);
+    EXPECT_EQ(doc.view_tree.get(), browsing); EXPECT_FLOAT_EQ(source->x, 0.0f);
+    EXPECT_FLOAT_EQ(source->width, 80.0f); EXPECT_FLOAT_EQ(source->height, 120.0f);
     options.preview_pages = lam::up("99");
     ViewTree* committed = ui.paged_view;
     EXPECT_FALSE(render_paged_window_compose(&ui));
@@ -11962,7 +11979,7 @@ TEST_F(SecondaryViewTest, PageInstanceRootsShareFinalizedContentWithIndependentP
     EXPECT_EQ(render_page_snapshot_cache_stats(cache.cache).hits, 2u);
     EXPECT_EQ(material->node.parent.get(), parent); EXPECT_EQ(state->first_occurrence->glyph_run.get(), run);
     EXPECT_EQ(view_tree_node_resolve(sibling, sibling_page), &sibling->model->pages.get()[0]->node);
-    EXPECT_FLOAT_EQ(source->width, 640.0f); EXPECT_FLOAT_EQ(source->x, 11.25f);
+    EXPECT_FLOAT_EQ(source->width, 80.0f); EXPECT_FLOAT_EQ(source->x, 0.0f);
 }
 
 TEST_F(SecondaryViewTest, PageInstancesRetainOldArenaAndFontsAcrossSourceResetAndRelease) {
@@ -11996,7 +12013,7 @@ TEST_F(SecondaryViewTest, PageInstancesRetainOldArenaAndFontsAcrossSourceResetAn
     EXPECT_EQ(snapshot_pixel(page, 10, 35), 0xff0000ffu); image_surface_destroy(page);
     ASSERT_TRUE(view_tree_secondary_release(&doc, another_old));
     EXPECT_EQ(mem_context_live_count((MemContext*)doc.services.mem_ctx), baseline);
-    EXPECT_EQ(doc.secondary_view_trees, nullptr); EXPECT_FLOAT_EQ(source->width, 640.0f);
+    EXPECT_EQ(doc.secondary_view_trees, nullptr); EXPECT_FLOAT_EQ(source->width, 80.0f);
 }
 
 TEST_F(SecondaryViewTest, PageInstanceResetAndRawSourceDestroyRespectGenerationLeases) {
@@ -12266,11 +12283,11 @@ TEST_F(SecondaryViewTest, GridSnapshotsPaintPagesAndFurnitureWithoutRepagination
     EXPECT_EQ(tree->model->presentation_generation, generation);
     EXPECT_EQ(view_tree_node_resolve(tree, page_ref), &tree->model->pages.get()[0]->node);
     EXPECT_EQ(glyph->glyph_run.get(), run);
-    EXPECT_FLOAT_EQ(source->width, 640.0f); EXPECT_FLOAT_EQ(source->x, 11.25f);
+    EXPECT_FLOAT_EQ(source->width, 80.0f); EXPECT_FLOAT_EQ(source->x, 0.0f);
     ASSERT_TRUE(render_secondary_view_to_pdf(tree, "temp/paged-media-impl/preview-grid-physical.pdf"));
     char* pdf = read_text_file("temp/paged-media-impl/preview-grid-physical.pdf"); ASSERT_NE(pdf, nullptr);
     EXPECT_NE(strstr(pdf, "/Count 5"), nullptr);
-    EXPECT_NE(strstr(pdf, "/MediaBox [0 0 90.00 120.00]"), nullptr); free(pdf);
+    expect_pdf_media_box(pdf, 90.0f, 120.0f); free(pdf);
     options.groups_horizontal = options.column_major = true;
     ASSERT_EQ(view_tree_preview_arrange(tree, nullptr, &options), VIEW_MODEL_OK);
     surface = render_secondary_view_snapshot(tree);

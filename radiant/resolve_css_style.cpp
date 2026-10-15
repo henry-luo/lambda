@@ -1537,7 +1537,10 @@ static const char* css_join_font_family_parts(LayoutContext* lycon,
             lycon, list->data.list.values[index]) :
             css_font_family_name_from_value(list->data.list.values[index]);
     };
-    if (!prefix && end == start + 1) return part_name(start);
+    if (!prefix && end == start + 1) {
+        const char* family = part_name(start);
+        return family ? view_tree_canonical_font_family(tree, family, strlen(family)) : nullptr;
+    }
     size_t total_len = prefix ? strlen(prefix) : 0;
     size_t part_count = prefix ? 1 : 0;
     for (size_t i = start; i < end; i++) {
@@ -1592,7 +1595,12 @@ const CssValue* css_line_height_normal_value() {
 
 const char* css_select_font_family(LayoutContext* lycon, const CssValue* value) {
     if (!value) return NULL;
-    if (value->type != CSS_VALUE_TYPE_LIST) return css_font_family_name_from_value(value);
+    if (value->type != CSS_VALUE_TYPE_LIST) {
+        const char* family = css_font_family_name_from_value(value);
+        // computed substitutions and style epochs can retire before retained fonts (D4.5.1v4).
+        return family ? view_tree_canonical_font_family(layout_context_view_tree(lycon),
+            family, strlen(family)) : nullptr;
+    }
     // Glyph fallback happens per character, so computed style must retain the
     // authored family order instead of collapsing it to the first loadable face.
     return css_join_font_family_parts(
@@ -4202,34 +4210,12 @@ static bool css_style_tree_has_font_property(StyleTree* style_tree,
     return false;
 }
 
-static const char* placeholder_font_family_from_value(const CssValue* value) {
-    if (!value) return nullptr;
-    if (value->type == CSS_VALUE_TYPE_STRING) {
-        return value->data.string;
-    }
-    if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
-        return value->data.custom_property.name;
-    }
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        const CssEnumInfo* info = css_enum_info(value->data.keyword);
-        return info ? info->name : nullptr;
-    }
-    return nullptr;
-}
-
 static void apply_pseudo_font_family(LayoutContext* lycon, FontProp* font,
                                      const CssValue* raw_value) {
     if (!font || !raw_value) return;
     const CssValue* value = resolve_var_function(lycon, raw_value);
     if (!value) return;
-    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-        const char* family = css_select_font_family(lycon, value);
-        if (family && *family) {
-            radiant_retain_font_family(font, lam::PoolPtr<char>((char*)family));
-        }
-        return;
-    }
-    const char* family = placeholder_font_family_from_value(value);
+    const char* family = css_select_font_family(lycon, value);
     if (family && *family) {
         radiant_retain_font_family(font, lam::PoolPtr<char>((char*)family));
     }
@@ -8786,13 +8772,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             span->ensure_font(lycon);
 
 
-            if (value->type == CSS_VALUE_TYPE_STRING) {
-                radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)value->data.string));
-            }
-            else if (value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name) {
-                radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)value->data.custom_property.name));
-            }
-            else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 if (value->data.keyword == CSS_VALUE_INHERIT) {
                     const FontProp* parent_font = lycon->font.style;
                     if (parent_font && parent_font->family) {
@@ -8806,7 +8786,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                     else radiant_clear_font_family(span->font);
                 }
             }
-            else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
+            else {
                 const char* family = css_select_font_family(lycon, value);
                 if (family) {
                     radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)family));

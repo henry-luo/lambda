@@ -1178,6 +1178,29 @@ static bool page_fixed_scan(RadiantPageDocument* program, DomElement* source, Po
     return true;
 }
 
+static bool page_fixed_validate_surroundings(RadiantPageDocument* program, DomElement* root) {
+    // fixed-page composition bypasses flow layout, so reject material it would silently omit.
+    DomElement* container = program->fixed_source.address->as_element();
+    for (DomElement* branch = container; branch && branch != root; branch = branch->parent_element()) {
+        DomElement* parent = branch->parent_element();
+        for (DomNode* sibling = parent ? parent->first_child.get() : nullptr; sibling; sibling = sibling->next_sibling) {
+            if (sibling == branch) continue;
+            if (sibling->is_text()) {
+                if (!radiant_page_whitespace(sibling->as_text()))
+                    return page_document_fail(program, VIEW_MODEL_INVALID_ARGUMENT, parent, "fixed pages cannot mix with flow content");
+            } else if (sibling->is_element()) {
+                DomElement* element = sibling->as_element();
+                if (radiant_page_control_hidden(element) ||
+                    css_default_display_for_element(element, element).outer == CSS_VALUE_NONE) continue;
+                return page_document_fail(program, VIEW_MODEL_INVALID_ARGUMENT, element,
+                    radiant_page_element(element, "page-sequence") ? "fixed pages cannot mix with flow page sequences" :
+                    "fixed pages cannot mix with flow content");
+            }
+        }
+    }
+    return true;
+}
+
 static CssDeclaration** page_declarations_snapshot(CssDeclaration** declarations, size_t count, Pool* pool) {
     if (!count) return nullptr;
     CssDeclaration** result = (CssDeclaration**)pool_calloc(pool, count * sizeof(CssDeclaration*));
@@ -1605,6 +1628,7 @@ RadiantPageDocument* radiant_page_document_compile(ViewTree* tree, CssEngine* en
     if (!program) return nullptr;
     DomDocument* doc = tree->model->document;
     if (!page_fixed_scan(program, doc->root, pool, 0)) return program;
+    if (program->fixed_count && !page_fixed_validate_surroundings(program, doc->root)) return program;
     for (int i = 0; i < doc->stylesheet_count; i++)
         if (!page_css_sheet_compile(program, doc->stylesheets.get()[i], engine, pool, 0)) return program;
     if (!page_native_compile(program, doc->root, pool, 0)) return program;
