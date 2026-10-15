@@ -4772,6 +4772,8 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             }
             break;
         case CSS_VALUE_NONE:
+            // a hidden subtree still assigns its named strings in the page flow
+            if (lycon->paged) paged_element_hidden(lycon, elem);
             // A retained element can become display:none after previously
             elem->display = display;
             elem->view_type = RDT_VIEW_NONE;
@@ -5197,6 +5199,12 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         lycon->block.given_height = html->content_height;
         line_init(lycon, root_bp_left, html->content_width + root_bp_left);
     }
+    // CSS Lists 3 §4: the root's own counter operations open the document's
+    // counter scope, as every other element's do in layout_block
+    LayoutCounterScope root_counter_scope;
+    if (elmt->is_element() && !root_counter_scope.enter(lycon, html, elmt->as_element(), html->display)) {
+        log_error("counter scope: cannot allocate root counter frame");
+    }
     // CSS 2.1 §12.2: Generate pseudo-elements for the root <html> element
     if (elmt->is_element()) {
         layout_materialize_pseudo_content(lycon, html);
@@ -5245,7 +5253,12 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             if (child->is_element()) {
                 const char* tag_name = child->node_name();
                 DisplayValue child_display = resolve_display_value(child);
-                if (!layout_display_is_none(child_display)) {
+                // page controls and running elements leave the page flow, and a
+                // hidden root child still assigns its named strings there
+                bool skipped = lycon->paged && paged_flow_skips_element(lycon, child->as_element());
+                if (skipped) child->view_type = RDT_VIEW_NONE;
+                else if (lycon->paged && layout_display_is_none(child_display)) paged_element_hidden(lycon, child->as_element());
+                if (!skipped && !layout_display_is_none(child_display)) {
                     if (child_display.outer == CSS_VALUE_CONTENTS) {
                         // CSS Display 3: root-level boxless elements still
                         // contribute their descendants to the root flow.
@@ -5963,6 +5976,8 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFl
         lycon.css_query_probe = container_dependencies && !stable;
     }
 
+    // the page flow composes its pages while the layout context is live
+    if (lycon.paged) paged_flow_compose(&lycon);
     layout_store_last_remembered_sizes(&lycon, root_node);
     // retain skipped-to-active transition suppression only after the final style pass.
     if (!view_geometry_walk_dom_tree(root_node, content_visibility_commit_motion, &lycon)) {

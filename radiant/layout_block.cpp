@@ -946,7 +946,8 @@ static bool pseudo_materialize_content_children(LayoutContext* lycon, DomElement
             }
         } else {
             // Append into the retained builder; unscoped scratch cannot live inside an inline trial.
-            dom_element_append_content(parent, item, lycon->counter_context, &open_quote_count, text_buf);
+            dom_element_append_content(parent, item, lycon->counter_context, &open_quote_count, text_buf,
+                lycon->paged ? paged_content_function : nullptr, lycon);
         }
     }
     if (text_buf->length > 0) {
@@ -1325,7 +1326,7 @@ void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
     if (apply_counters) apply_pseudo_counter_ops(lycon, style);
     const char* content = dom_element_get_pseudo_element_content_with_counters(
         origin, pseudo, lycon->counter_context, lycon->pass_arena,
-        &lycon->counter_context->quote_depth);
+        &lycon->counter_context->quote_depth, lycon->paged ? paged_content_function : nullptr, lycon);
     if (!content) content = dom_element_get_pseudo_element_content(origin, pseudo);
     if (!content) content = "";
     DomNode* first = pseudo_element->first_child;
