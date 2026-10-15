@@ -66,6 +66,7 @@ struct CssRule;
 struct SelectorMatcher;
 struct CssEngine;
 struct CssStylesheet;
+struct LayoutContext;
 
 constexpr int MAX_RADIANT_CSS_TREE_DEPTH = 512;
 void state_configure_selector_matcher(struct DocState* state, SelectorMatcher* matcher);
@@ -92,7 +93,7 @@ struct CssBackgroundWinner {
 };
 // layout and CSSOM share cascade competition, substitution and shorthand decoding.
 CssBackgroundWinner background_component_winner(DomElement* element, Pool* scratch,
-    CssPropertyCode property, int pseudo_type = 0);
+    CssPropertyCode property, int pseudo_type = 0, LayoutContext* context = nullptr);
 int background_list_count(const CssValue* value);
 const CssValue* background_winner_component(Pool* scratch, const CssBackgroundWinner& winner,
     CssPropertyCode property, int index);
@@ -1948,6 +1949,7 @@ typedef struct PositionProp {
         bool inset_present[4];
     };  // which offsets are set
     bool has_custom_layout_z_index;
+    float inline_relative_y; // applied inline block-axis offset retained across final line alignment
     CssEnum clear;        // clear property for floats
     CssEnum float_prop;   // float property (left, right, none)
     lam::Up<ViewBlock> first_abs_child;   // first child absolute/fixed positioned view

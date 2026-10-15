@@ -2291,6 +2291,8 @@ static float table_resolve_fixed_explicit_size(LayoutContext* lycon, ViewTable* 
             ? style_tree_get_declaration(element->specified_style, property) : nullptr;
         CssValue* value = declaration ? declaration->value : nullptr;
         if (value && value->type == CSS_VALUE_TYPE_PERCENTAGE && axis == LAYOUT_AXIS_X) {
+            // block sizing already resolved this percentage against the containing block, before table decorations narrowed available space.
+            if (table->blk && table->block()->given_width >= 0.0f) return table->block()->given_width;
             float container_width = lycon->available_space.width.is_definite()
                 ? lycon->available_space.width.value : lycon->block.content_width;
             if (container_width <= 0.0f) container_width = lycon->line.right - lycon->line.left;
@@ -2316,11 +2318,9 @@ static float table_fixed_content_width_for_columns(ViewTable* table,
     bool fixed_width_is_border_box = table->tb->border_collapse ||
         layout_uses_border_box(table);
     if (fixed_width_is_border_box) {
-        float table_border_h = 0.0f;
-        if (table->bound && table->boundary_mut()->border) {
-            table_border_h = layout_box_metrics(table).border_h;
-        }
-        content_width -= table_border_h;
+        BoxMetrics box = layout_box_metrics(table);
+        // separate fixed tracks exclude padding as well as borders; publication adds the padding once.
+        content_width -= table->tb->border_collapse ? box.border_h : box.pad_border_h;
     }
     // fixed-layout column percentages resolve against content tracks, not table border or spacing overhead.
     float column_spacing = table_inter_spacing(table, true);
@@ -4660,6 +4660,10 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             caption->display.inner = CSS_VALUE_TABLE_CAPTION;
             lycon->view = lam::up(static_cast<View*>(caption));
             dom_node_resolve_style(node, lycon);
+            // captions participate in source-order counters before visual caption-side reordering.
+            LayoutCounterScope counter_scope;
+            if (!counter_scope.enter(lycon, caption, elem, display)) return;
+            layout_materialize_pseudo_content(lycon, caption);
             DomElement* dom_elem = lam::dom_require_element(node);
             if (dom_elem->specified_style && parent && parent->view_type == RDT_VIEW_TABLE) {
                 ViewTable* table = lam::view_require<RDT_VIEW_TABLE>(parent);
@@ -5015,6 +5019,22 @@ static bool table_caption_is_bottom(ViewBlock* caption) {
         return false;
     }
     return false;
+}
+
+bool layout_table_grid_block_bounds(ViewTable* table, float* top, float* bottom) {
+    *top = 0.0f;
+    *bottom = table->height;
+    bool captions = false;
+    table->each_direct_block([&](ViewBlock* child) {
+        if (!table_view_is_caption(child)) return;
+        captions = true;
+        if (table_caption_is_bottom(child))
+            *bottom = fminf(*bottom, child->y - table_caption_positive_margin(child, false, true));
+        else
+            *top = fmaxf(*top, child->y + child->height + table_caption_positive_margin(child, false, false));
+    });
+    *bottom = fmaxf(*top, *bottom);
+    return captions;
 }
 
 template <typename Fn>
@@ -7577,8 +7597,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
     // Position captions at bottom if caption-side is bottom (CSS 2.1 Section 17.4.1)
     if (bottom_captions->length > 0) {
+        // the bottom border closes the grid before the wrapper's bottom captions.
+        float bottom_border = table->tb->border_collapse
+            ? meta->collapsed_border_bottom * 0.5f : table_box.border.bottom;
         float total_bottom_caption_height = table_position_caption_stack(
-            lycon, table, bottom_captions, final_table_height, table_width, wrapper_content_width,
+            lycon, table, bottom_captions, final_table_height + bottom_border, table_width, wrapper_content_width,
             TABLE_CAPTION_WIDTH_REFERENCE_WRAPPER);
         final_table_height += total_bottom_caption_height;
     }

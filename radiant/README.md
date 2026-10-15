@@ -208,7 +208,16 @@ See the [Make guide](../doc/dev/Make_Guide.md) for more targets.
 - **Keep builds and consumers separate.** Never replace `lambda.exe`, a DSO or
   a test executable while a running check uses it. Run the long core/forced-GC
   gate without competing builds or render sweeps; use the shared runner's bounded
-  scheduling instead of stacking several aggregate processes.
+  scheduling instead of stacking several aggregate processes. Wait for the
+  entire core gate, including package/corpus checks after forced GC, to finish.
+- **Isolate page-load failures with the CLI.** The page-load runner executes
+  its page batch before applying the GTest reporting filter. For one crashing
+  page, use `./lambda.exe view path/to/page.html --headless` instead of rerunning
+  the whole page batch under a single-test filter.
+- **Canonicalize capture paths.** The companion corpus is symlinked. Compare
+  canonical category and request paths when resolving missing WPT support
+  files, and verify the scripts/images actually loaded before replacing a
+  browser reference. Equal page filenames do not prove equal capture inputs.
 - **Check setup once.** Verify corpus links, fonts, reference tools, build profile
   and native graphics access before a large run. Follow the developer guide for
   worktree links, same-second source changes and stale archive members. Rebuild

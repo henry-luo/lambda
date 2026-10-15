@@ -3079,6 +3079,64 @@ TEST_F(RadiantTextLayout, ExplicitSnapshotReadinessSettlesLongFrameChains) {
     expect_snapshot_capture("test/html/layout_snapshot_ready.html", 22.0f);
 }
 
+TEST_F(RadiantTextLayout, RelativeInlineOffsetsSurviveFinalLineAlignmentAndReflow) {
+    ASSERT_NE(load("test/html/layout_relative_inline_break.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    const struct { const char* id; float offset; } cases[] = {
+        {"normal", 0.0f}, {"relative", -6.0f}, {"nested", -9.0f}
+    };
+    for (unsigned pass = 0; pass < 2; pass++) {
+        DomElement* normal = dom_find_element_by_id(document->root->as_element(), "normal");
+        ASSERT_NE(normal, nullptr);
+        ViewText* first = lam::view_require_text(normal->first_child);
+        ASSERT_NE(first->rect, nullptr);
+        for (const auto& item : cases) {
+            DomElement* span = dom_find_element_by_id(document->root->as_element(), item.id);
+            ASSERT_NE(span, nullptr);
+            ViewText* begin = lam::view_require_text(span->first_child);
+            ViewText* end = lam::view_require_text(span->last_child);
+            ASSERT_NE(begin->rect, nullptr); ASSERT_NE(end->rect, nullptr);
+            EXPECT_NEAR(begin->rect->y, first->rect->y + item.offset, 0.01f) << item.id;
+            EXPECT_NEAR(end->rect->y - begin->rect->y, 24.0f, 0.01f) << item.id;
+            EXPECT_NEAR(span->height, normal->height, 0.01f) << item.id;
+        }
+        if (pass == 0) layout_html_doc(&ui, document, true);
+    }
+}
+
+TEST_F(RadiantTextLayout, PunctuationRetainsKerningAcrossInlineBoundariesAndReflow) {
+    ASSERT_NE(load("test/html/layout_inline_punctuation_kerning.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    for (unsigned pass = 0; pass < 2; pass++) {
+        DomElement* whole = dom_find_element_by_id(document->root->as_element(), "whole");
+        DomElement* split = dom_find_element_by_id(document->root->as_element(), "split");
+        DomElement* wrapped = dom_find_element_by_id(document->root->as_element(), "split-wrap");
+        DomElement* separated = dom_find_element_by_id(document->root->as_element(), "separated");
+        ASSERT_NE(whole, nullptr); ASSERT_NE(split, nullptr); ASSERT_NE(wrapped, nullptr);
+        ASSERT_NE(separated, nullptr);
+        EXPECT_NEAR(split->width, whole->width, 0.02f);
+        EXPECT_NEAR(wrapped->width, whole->width, 0.02f);
+        // padding ends the shaping run; its width must survive along with the unkerned pair.
+        EXPECT_GE(separated->width, whole->width + 7.99f);
+        if (pass == 0) layout_html_doc(&ui, document, true);
+    }
+}
+
+TEST_F(RadiantTextLayout, SnapshotReadinessNotifiesTheCommittedFirstFrame) {
+    expect_snapshot_capture("test/html/layout_snapshot_test_rendered.html", 37.0f);
+    DomElement* box = dom_find_element_by_id(document->root->as_element(), "result");
+    ASSERT_NE(box, nullptr);
+    EXPECT_STREQ(box->get_attribute("data-rendered"), "yes");
+}
+
+TEST_F(RadiantTextLayout, ScrollReadsUpdateStickyGeometryAndFixedSubtreesUseTheViewport) {
+    DomElement* body = load("test/html/layout_snapshot_sticky_scroll.html", true);
+    ASSERT_NE(body, nullptr);
+    EXPECT_FALSE(document->root->has_class("reftest-wait"));
+    for (const char* attribute : {"data-scroll", "data-offset", "data-flow", "data-fixed", "data-reset"})
+        EXPECT_STREQ(body->get_attribute(attribute), "yes") << attribute;
+}
+
 TEST_F(RadiantTextLayout, SnapshotReadinessPreservesFrameCancellation) {
     expect_snapshot_capture("test/html/layout_snapshot_cancelled.html", 34.0f);
 }

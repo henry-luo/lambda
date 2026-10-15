@@ -87,6 +87,8 @@ char* dom_engine_element_inner_text(DomElement* element);
 void dom_engine_svg_timing_event(DomElement* target, const char* type, bool bubbles, double detail);
 void dom_engine_svg_timing_key(DomElement* target, const char* key);
 bool dom_engine_layout_active(DomDocument* doc);
+// synchronize scroll-dependent offsets without committing pending DOM layout.
+void dom_engine_resolve_scrolled_geometry(DomDocument* doc);
 
 struct DomCssBoxSizes {
     float content_width, content_height;
@@ -105,7 +107,7 @@ int dom_engine_pointer_capture(DomElement* element,int32_t pointer_id,unsigned o
 
 // HTML image loading: the engine owns decoding and intrinsic-image state; the
 // DOM core owns the deferred `load` event and node lifetime around it.
-bool dom_engine_set_image_source(DomElement* element, const char* source);
+bool dom_engine_set_image_source(DomElement* element, const char* source, bool* pending);
 bool dom_engine_image_natural_size(DomElement* element, int* width, int* height);
 bool dom_engine_image_rendered_size(DomElement* element, int* width, int* height);
 void dom_engine_install_animation_globals(void);

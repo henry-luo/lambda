@@ -2575,12 +2575,22 @@ static ContainIntrinsicComputedAxis resolve_contain_intrinsic_declaration(Layout
         : ContainIntrinsicComputedAxis{-1.0f, false};
 }
 
+static const CssValue* resolve_layout_var_value(LayoutContext* lycon, DomElement* element,
+        const CssValue* value, CssPropertyCode property, Pool* scratch = nullptr) {
+    if (lycon->paged) {
+        bool handled = false;
+        const CssValue* selected = paged_resolve_css_value(lycon, element, value, &handled);
+        if (handled) return selected;
+    }
+    return css_resolve_element_var_value(scratch ? scratch : lycon->css_value_scratch
+        ? lycon->css_value_scratch.get() : lycon->pool.get(), element, value, property);
+}
+
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value) {
     if (!lycon || !lycon->pool) return nullptr;
     DomElement* context = lycon && lycon->view
         ? view_geometry_nearest_dom_element(lycon->view, 0) : nullptr;
-    return css_resolve_element_var_value(lycon->css_value_scratch
-        ? lycon->css_value_scratch.get() : lycon->pool.get(), context, value);
+    return resolve_layout_var_value(lycon, context, value, CSS_PROPERTY_UNKNOWN);
 }
 
 static Color resolve_color_using_current(LayoutContext* lycon, const CssValue* value, Color current) {
@@ -7686,7 +7696,7 @@ static const CssValue* background_list_item(const CssValue* value, int index) {
 }
 
 CssBackgroundWinner background_component_winner(DomElement* element, Pool* scratch,
-                                                       CssPropertyCode property, int pseudo_type) {
+        CssPropertyCode property, int pseudo_type, LayoutContext* context) {
     StyleTree* style = pseudo_type ? dom_element_get_pseudo_style(element, pseudo_type) : element->specified_style.get();
     const CssPropertyCode sources[] = {property, CSS_PROPERTY_BACKGROUND, CSS_PROPERTY_ALL};
     const CssPropertyCode blend_sources[] = {property, CSS_PROPERTY_ALL};
@@ -7698,8 +7708,10 @@ CssBackgroundWinner background_component_winner(DomElement* element, Pool* scrat
         ? style_tree_get_component_declaration(style, blend_sources, 2)
         : position_axis ? style_tree_get_component_declaration(style, position_sources, 4)
         : style_tree_get_component_declaration(style, sources, 3);
-    const CssValue* value = declaration ? css_resolve_element_var_value(scratch,
-        element, declaration->value, declaration->property_code) : nullptr;
+    // the final background pass must retain the selected edition's native property bindings.
+    const CssValue* value = !declaration ? nullptr : context
+        ? resolve_layout_var_value(context, element, declaration->value, declaration->property_code, scratch)
+        : css_resolve_element_var_value(scratch, element, declaration->value, declaration->property_code);
     if (value && !css_property_validate_value_mode(declaration->property_code, value,
             dom_element_uses_quirks_css(element))) value = nullptr;
     return {declaration, value};
@@ -7969,8 +7981,8 @@ static void resolve_background_style(DomElement* element, LayoutContext* context
     BackgroundProp* previous = span->boundary()->background;
     CssBackgroundWinner winners[sizeof(background_layer_properties) / sizeof(*background_layer_properties)] = {};
     for (size_t index = 0; index < sizeof(background_layer_properties) / sizeof(*background_layer_properties); index++)
-        winners[index] = background_component_winner(element, scratch, background_layer_properties[index]);
-    CssBackgroundWinner color = background_component_winner(element, scratch, CSS_PROPERTY_BACKGROUND_COLOR);
+        winners[index] = background_component_winner(element, scratch, background_layer_properties[index], 0, context);
+    CssBackgroundWinner color = background_component_winner(element, scratch, CSS_PROPERTY_BACKGROUND_COLOR, 0, context);
     bool valid = compute_background_winners(context, scratch, winners, color, &replacement, previous);
     pool_destroy(scratch);
     ViewTree* tree = layout_context_view_tree(context);
@@ -8625,7 +8637,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         decl->property_code == CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE || flex_projection ? decl->property_code : prop_id;
     CssComputedValueScratch value_scope(lycon, value_property, value);
     Pool* value_pool = lycon->css_value_scratch ? lycon->css_value_scratch.get() : lycon->pool.get();
-    const CssValue* substituted = css_resolve_element_var_value(value_pool, current_element, value, value_property);
+    // native/FO computed bindings belong to the selected edition, not the mutable DOM variable list.
+    const CssValue* substituted = resolve_layout_var_value(lycon, current_element, value, value_property);
     if (substituted != value) {
         if (!substituted || !css_property_validate_value(value_property, substituted)) {
             // Invalid substitution happens at computed-value time. Keep the

@@ -29,6 +29,7 @@
 #include "../lib/mem_factory.h"
 #include "../lib/log.h"
 #include "../lib/url.h"
+#include "../lib/re2/re2/re2.h"
 
 using namespace lambda::markup;
 
@@ -288,7 +289,12 @@ static bool markdown_text_matches(const char* kind, const char* line, int32_t s,
     if (strcmp(kind, "em") == 0) return (line[bs] == '*' || line[bs] == '_') && (last == '*' || last == '_');
     if (strcmp(kind, "del") == 0) return line[bs] == '~' && last == '~';
     if (strcmp(kind, "img") == 0) return starts_with(line, bs, "![");
-    if (strcmp(kind, "a") == 0) return line[bs] == '[' || line[bs] == '<' || line[bs] == 'h' || line[bs] == 'w';
+    if (strcmp(kind, "a") == 0) {
+        if (line[bs] == '[' || line[bs] == '<' || line[bs] == 'h' || line[bs] == 'w') return true;
+        // GFM §6.9 admits bare email autolinks, including numeric domain labels; validate their complete source range.
+        static const RE2 email(R"([A-Za-z0-9._+\-]+@[A-Za-z0-9_\-]+(?:\.[A-Za-z0-9_\-]+)*\.[A-Za-z0-9_\-]*[A-Za-z0-9])");
+        return be > bs && RE2::FullMatch(re2::StringPiece(line + bs, (size_t)(be - bs)), email);
+    }
     return true;
 }
 

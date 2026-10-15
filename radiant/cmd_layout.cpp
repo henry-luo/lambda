@@ -2924,6 +2924,15 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
         return NULL;
     }
 
+    char mirrored_resource[PATH_MAX];
+    if (base && full_url->scheme == URL_SCHEME_FILE &&
+        radiant_resolve_layout_relative_resource_path(url_get_pathname(full_url),
+            url_get_href(base), mirrored_resource, sizeof(mirrored_resource))) {
+        // mirrored fixtures share their missing embedded documents with the pinned WPT tree.
+        Url* canonical = url_parse_path_or_url(mirrored_resource, nullptr);
+        if (canonical) { url_destroy(full_url); full_url = canonical; }
+    }
+
     DomDocument* doc = nullptr;
 
     const LayoutFormatRoute* page_route = layout_find_format_route(file_path_ext(url_get_pathname(full_url)));
@@ -3456,7 +3465,14 @@ static void layout_adopt_loader_runtime(DomDocument* doc, Runtime* loader) {
 Runtime* layout_document_package_runtime(DomDocument* document, const char* package_module) {
     if (!document) return nullptr;
     Runtime* runtime = dom_document_loader_runtime(document);
-    if (runtime) return runtime;
+    if (runtime) {
+        // package paint roots and callbacks outlive JS realm teardown; the document retains their evaluator (D5.3.3).
+        if (!document->loader_runtime && !document->lambda_runtime && runtime == document->js.runtime) {
+            document->lambda_runtime = runtime;
+            document->owns_script_runtime = true;
+        }
+        return runtime;
+    }
     // A synchronous render inside Lambda shares its live evaluator; it cannot
     // transfer that thread to a second runtime while caller roots are active.
     if (context && context->execution_depth != 0) return context->runtime;
@@ -3472,6 +3488,7 @@ Runtime* layout_document_package_runtime(DomDocument* document, const char* pack
         return nullptr;
     }
     document->lambda_runtime = runtime;
+    document->owns_script_runtime = true;
     return runtime;
 }
 

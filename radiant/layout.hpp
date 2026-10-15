@@ -302,7 +302,8 @@ bool layout_measure_script_run(LayoutContext* lycon,
                              size_t source_offset = 0);
 bool layout_measure_inline_text_context(LayoutContext* lycon, DomNode* text_node,
     const unsigned char* start, size_t length, bool cursive, float* width,
-    const unsigned char* text_start = nullptr, const unsigned char* text_end = nullptr);
+    const unsigned char* text_start = nullptr, const unsigned char* text_end = nullptr,
+    bool* following_context = nullptr);
 bool layout_measure_shaping_text(LayoutContext* lycon, const char* text, size_t length,
     size_t range_start, size_t range_length, float* width);
 // Intrinsic measurements may temporarily replace the active font and allocate
@@ -2224,6 +2225,7 @@ typedef struct FloatAvailableSpace {
 // tier-3: layout-transient, valid within pass
 typedef struct BlockContext {
     float content_width;
+    float paged_reference_width; // the fragmentainer width represented by this context's inline geometry
     float content_height;
     float advance_y;
     float max_width;
@@ -2490,6 +2492,7 @@ typedef struct Linebox {
     uint32_t prev_text_spacing_codepoint = 0; // previous character for CSS text-spacing pairs
     uint32_t prev_text_autospace_codepoint = 0; // previous typographic unit for CSS text-autospace
     lam::Up<FontProp> prev_kerning_font_style = nullptr;
+    bool prev_kerning_has_following_context = false; // the prior advance already owns its outgoing pair
     float max_top_bottom_height = 0; // CSS 2.1 §10.8.1: max height of vertical-align:top/bottom elements
                                      // (used in second pass to expand line box if needed)
     float max_top_height = 0;        // CSS 2.1 §10.8.1: max height of vertical-align:top elements
@@ -4496,6 +4499,9 @@ void paged_block_after(LayoutContext* lycon, ViewBlock* block);
 // a line that crosses the fragmentainer end moves to the next one (with its
 // orphans); the hook adjusts lycon->block.advance_y when it shifts the line
 void paged_line_commit(LayoutContext* lycon, float used_line_height);
+void paged_line_start(LayoutContext* lycon, ViewBlock* block);
+const CssValue* paged_resolve_css_value(LayoutContext* lycon, DomElement* element,
+    const CssValue* value, bool* handled);
 // after a post-hoc margin adjustment moved a finished block by delta: the
 // content after the first strut inside it is re-anchored to its page top
 void paged_block_moved(LayoutContext* lycon, ViewBlock* block, float delta);

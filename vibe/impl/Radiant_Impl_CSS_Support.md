@@ -3,11 +3,11 @@
 **Replanned and delivered:** 2026-10-15. Phases 0–6 are closed for their bounded
 scope. Failed aggregate checks and excluded contexts remain explicitly qualified.
 
-**Next action:** no active feature task remains in this schedule. Preserve the
-regression cases and [current failure register](Radiant_CSS_Qualification.md).
-Promote deferred work only for a named common-page need, finite acceptance cases
-and an agreed verification budget; the existing long tail does not reopen these
-milestones automatically.
+**Next action:** the subsequent user request activates a bounded repair goal for
+export precision and the registered regression debt. Follow the ordered cases
+and current evidence in [the active repair section](Radiant_CSS_Qualification.md#active-repair-request--2026-10-15).
+The completed feature phases below remain closed; this repair goal explicitly
+includes their previously deferred precision comparisons.
 
 **Authority:** This is an implementation schedule. Preserve style/view ownership
 (**D4.5.1v4 / D4.1.4v5**), property identity (**D4.6.1v4**), precise roots and
@@ -40,8 +40,8 @@ number of historical failures do not determine the next feature.
 | 5 | [Basic motion syntax](#phase-5) | P2: calculated durations and piecewise linear easing run on existing motion consumers | Two time properties per motion family and numeric `linear()` stops |
 | 6 | [Visible gradient export differences](#phase-6) | P2: SVG/PDF preserve colors for stops outside the gradient interval | The existing non-repeating linear/radial fixtures |
 
-Phases 0–4 are the next core delivery. Phases 5–6 follow after that delivery;
-they do not hold it open. Modern theme colors move ahead of the former P3 color
+Phases 0–4 formed the core delivery; Phases 5–6 followed that delivery.
+Modern theme colors moved ahead of the former P3 color
 bucket because they add an actual missing style consumer across text, borders
 and backgrounds. Exhaustive pseudo/owner-unit combinations and small reader
 edge differences have lower delivery value than these missing behaviors.
@@ -114,7 +114,7 @@ Completed tasks and limits are in A.7.
 Radiant records 5,340 passed /155 partial /19 failed /one skipped, retaining
 the independently owned layout/paged failures in the
 [current register](Radiant_CSS_Qualification.md). Core Phases 0–4 are delivered
-with these explicit qualification limits; Phase 5 is now active.
+with these explicit qualification limits. Phases 5–6 are closed below.
 
 <a id="phase-5"></a>
 ## 7. Phase 5 — Basic motion syntax after core delivery
@@ -218,7 +218,7 @@ newly discovered residue is not automatically promoted into the active schedule.
 | Background/image consumers | Ordered layers/component periods, URL/image-set selection, gradient math/centers/radii/stops, bounded text-clipped color/linear layers, border/list image selection and retained payloads. |
 | Sampling/effects | Image-rendering computation, affine pixelated device footprints, retained clips/effects, native group opacity, visibility/link suppression and bounded SVG/Canvas/WebGL capture consumers. |
 | Scrolling/overflow/controls | Physical/logical axis computation, open-axis and rounded clip/hit geometry, clip-margin reads/outsets, snap pairs/oversized areas/math, wheel chaining, focus/selection and bounded file-button paint. |
-| Motion | Existing animation shorthand and list writers, keyframes, transition sampling/lifecycle and individual transform consumers; the remaining scheduled syntax is isolated in Phase 5. |
+| Motion | Animation shorthand and list writers, keyframes, transition sampling/lifecycle and individual transform consumers; delivered typed time math and numeric piecewise easing are recorded in A.8. |
 | Ownership/invalidation | Native DOM/CSS/style/event/state/control providers, pseudo identity/dirty dispatch, retained-fragment memory fixes and the shared Jube catalog activation lock. |
 | Snapshot/merge integration | Bounded explicit readiness drain, unresolved-layout rejection with batch continuation, calculated/inherited numeric-zero stacking identity and the incoming PDF callback's clip API adaptation. |
 
@@ -226,7 +226,7 @@ Use the dated record in Appendix B and the qualification manifest to find the
 actual fixtures and source/configuration for a row. Do not rerun or reimplement
 an entire delivered family merely because its remaining limits are broad.
 
-### A.2 Latest recorded qualification — distinct configurations
+### A.2 Earlier qualification checkpoints — distinct configurations
 
 - **Merged source:** the merge-resolution runtime (`0bcfb7f60170…`, recorded
   before commit `dffad2ab1`) builds; 136 computation, 123 text, 164 vector and 601
@@ -248,8 +248,8 @@ an entire delivered family merely because its remaining limits are broad.
 
 The historical marker checkpoint remains the older all-green core/Radiant
 configuration. No historical total is transferred to the merged source. The
-current qualification work is Q0.1–Q0.4; detailed historical hashes, experiments
-and raw failures remain below.
+current frozen-source results are in A.8/A.9 and the failure register; detailed
+historical hashes, experiments and raw failures remain below.
 
 ### A.3 Completed qualification intake (2026-10-15)
 

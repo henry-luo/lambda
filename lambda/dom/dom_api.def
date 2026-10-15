@@ -783,6 +783,8 @@ DOM_OP(CORE, set_window_fullscreen, window, 2, "pn(n: any, enabled: bool) -> boo
 DOM_OP(CORE, window_fullscreen, window, 1, "fn(n: any) -> bool", dom_engine_window_fullscreen, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, window_fullscreen_enabled, window, 1, "fn(n: any) -> bool", dom_engine_window_fullscreen_enabled, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 
+DOM_OP(CORE, close_dialog, forms, 2, "pn(n: any, value: any) -> null", dom_core_close_dialog, DOM_F_MUTATES, "", html_element, "", "close")
+
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP
 #undef DOM_API_DEF_CLEAR_OP

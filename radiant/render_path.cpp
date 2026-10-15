@@ -359,6 +359,11 @@ RdtPath* render_path_create_clip_path(RasterRenderContext* rdcon) {
     return render_path_create_rounded_rect(clip_rect, nullptr);
 }
 
+static bool render_path_decoration_line(void* path, float, float, float x, float y) {
+    rdt_path_line_to((RdtPath*)path, x, y);
+    return true;
+}
+
 RdtPath* render_path_create_decoration(const Rect* rect, CssEnum style, bool wavy_fill) {
     if (!rect || rect->width <= 0.0f || rect->height <= 0.0f) return nullptr;
     RdtPath* path = rdt_path_new();
@@ -381,8 +386,15 @@ RdtPath* render_path_create_decoration(const Rect* rect, CssEnum style, bool wav
         for (float x = left; x < right; segment++) {
             float half = fminf(half_wave, right - x);
             float crest = center + (segment % 2 ? amplitude : -amplitude) - half_stroke;
-            rdt_path_cubic_to(path, x + half * 0.33f, crest, x + half * 0.67f, crest,
-                x + half, center - half_stroke);
+            if (wavy_fill) {
+                rdt_path_cubic_to(path, x + half * 0.33f, crest, x + half * 0.67f, crest,
+                    x + half, center - half_stroke);
+            } else {
+                // tessellate before ink-gap clipping: backend cubic subdivision depends on clip bounds.
+                render_path_flatten_cubic(x, center, x + half * 0.33f, crest,
+                    x + half * 0.67f, crest, x + half, center, .01f, 16,
+                    render_path_decoration_line, path);
+            }
             x += half;
         }
         if (wavy_fill) {

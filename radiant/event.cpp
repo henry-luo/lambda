@@ -8150,6 +8150,7 @@ typedef struct {
     Context*     saved_input_ctx;
     DomDocument* doc;
     bool         active;
+    bool         nested_execution;
 } JsCtxScope;
 
 bool radiant_bind_document_script_host(UiContext* uicon, DomDocument* doc) {
@@ -8175,6 +8176,7 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     if (!runtime) return false;
     s->handler_ctx = runtime_get_eval_context(runtime);
     if (!s->handler_ctx || !runtime_heap(runtime) || !runtime_name_pool(runtime)) return false;
+    s->nested_execution = s->handler_ctx->execution_depth != 0;
     s->handler_ctx->heap = runtime_heap(runtime);
     s->handler_ctx->name_pool = runtime_name_pool(runtime);
     s->handler_ctx->type_list = runtime_type_list(runtime);
@@ -8192,7 +8194,7 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     // A queued callback may change the DOM immediately before dispatching a
     // custom event. Its records belong to that callback turn and must survive
     // until the nested dispatch scope reconciles them.
-    if (!js_runtime_state.event_loop->callback_running) {
+    if (!s->nested_execution && !js_runtime_state.event_loop->callback_running) {
         dom_js_mutation_reset_records(s->doc);
     }
     s->active = true;
@@ -8205,7 +8207,8 @@ static void radiant_js_ctx_exit(JsCtxScope* s, EventContext* evcon,
     if (!s->active) return;
     uint64_t t_handler = time_now_ns();
     input_context = s->saved_input_ctx;
-    post_html_handler_rebuild(evcon, t_start, t_handler);
+    // a synthetic event inside a script shares its outer mutation ledger and commit boundary (D5.4.1).
+    if (!s->nested_execution) post_html_handler_rebuild(evcon, t_start, t_handler);
     s->active = false;
 }
 
@@ -13172,9 +13175,15 @@ extern "C" bool radiant_eval_context_switch(EvalContext* target) {
 
 struct EventDocumentScope {
     bool active;
+    UiContext* ui;
+    DomDocument* document;
+    DomDocument* previous_document;
 
     EventDocumentScope(UiContext* uicon, DomDocument* doc)
-        : active(false) {
+        : active(false), ui(uicon), document(doc),
+          previous_document(uicon ? uicon->document.get() : nullptr) {
+        // load-time automation dispatches before the host publishes its initial document.
+        if (ui) ui->document = lam::up(doc);
         Runtime* runtime = dom_document_script_runtime(doc);
         if (!runtime) return;
         EvalContext* owner = runtime_get_eval_context(runtime);
@@ -13218,6 +13227,7 @@ struct EventDocumentScope {
 
     ~EventDocumentScope() {
         if (active) s_event_scope_depth--;
+        if (ui && ui->document == document) ui->document = lam::up(previous_document);
         // No restore: the document that just ran keeps the thread until some
         // other document's dispatch switches it away (EO5v2).
     }

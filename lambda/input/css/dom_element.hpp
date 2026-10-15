@@ -929,6 +929,7 @@ struct DomElementExt {
     bool has_empty_ruby_base;
     bool popover_open;
     bool dialog_modal;
+    lam::Own<const char> dialog_return_value; // document-pooled WebIDL state, independent of JS expandos
     // Deferred text-control events are DOM task state, so their queue links
     // outlive layout-property teardown while a control is detached.
     uint8_t selectionchange_event_pending;

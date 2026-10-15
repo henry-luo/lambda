@@ -13,6 +13,7 @@
 #include "../radiant/render.hpp"
 #include "../radiant/radiant.hpp"
 #include "../lambda/input/css/css_paged_media.hpp"
+#include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lambda/io/mark_builder.hpp"
@@ -3144,7 +3145,9 @@ TEST_F(SecondaryViewTest, CaptionMinimumSizesBothAutomaticAndFixedTableGrids) {
     LayoutViewNode* fixed_grid = source_fragment(tree, fixed, VIEW_FRAGMENT_BODY, true);
     ASSERT_NE(auto_grid, nullptr); ASSERT_NE(fixed_grid, nullptr);
     EXPECT_FLOAT_EQ(auto_grid->rect.width, 134.0f); EXPECT_FLOAT_EQ(fixed_grid->rect.width, 134.0f);
-    EXPECT_FLOAT_EQ(auto_grid->first_child->rect.width, 134.0f);
+    // grid decoration is separate from row occurrences in the browsing-flow publisher.
+    LayoutViewNode* auto_row = source_fragment(tree, automatic->last_child_element(), VIEW_FRAGMENT_BODY, true);
+    ASSERT_NE(auto_row, nullptr); EXPECT_FLOAT_EQ(auto_row->rect.width, 134.0f);
 }
 
 TEST_F(SecondaryViewTest, TableCaptionsOccurOnceAroundRepeatingGroupsAtChangingPageWidths) {
@@ -3210,12 +3213,19 @@ TEST_F(SecondaryViewTest, CaptionInheritanceAndGeneratedCountersPreserveSourceOr
     LayoutViewNode* final = source_fragment(tree, last, VIEW_FRAGMENT_BODY, true);
     ASSERT_NE(above, nullptr); ASSERT_NE(below, nullptr); ASSERT_NE(final, nullptr);
     EXPECT_LT(above->rect.y, below->rect.y); EXPECT_LT(below->rect.y, final->rect.y);
-    EXPECT_EQ(above->computed_style->caption_side, CSS_VALUE_TOP); EXPECT_EQ(below->computed_style->caption_side, CSS_VALUE_BOTTOM);
-    EXPECT_EQ(above->computed_style->text_align, CSS_VALUE_LEFT); EXPECT_EQ(below->computed_style->text_align, CSS_VALUE_CENTER);
+    // body fragments no longer own page-context styles; the layout workspace owns alignment (D4.5.1v4).
+    EXPECT_EQ(above->computed_style, nullptr); EXPECT_EQ(below->computed_style, nullptr);
+    ASSERT_NE(top->blk, nullptr); ASSERT_NE(bottom->blk, nullptr);
+    EXPECT_EQ(top->block()->text_align, CSS_VALUE_LEFT); EXPECT_EQ(bottom->block()->text_align, CSS_VALUE_CENTER);
     StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr);
-    append_fragment_text(above, text); EXPECT_STREQ(text->str, "2:Top");
-    strbuf_reset(text); append_fragment_text(below, text); EXPECT_STREQ(text->str, "1:Bottom");
-    strbuf_reset(text); append_fragment_text(final, text); EXPECT_STREQ(text->str, "3:Last");
+    const struct { LayoutViewNode* fragment; const char* expected; } captions[] = {
+        {above, "2:Top"}, {below, "1:Bottom"}, {final, "3:Last"}
+    };
+    for (const auto& caption : captions) {
+        strbuf_reset(text);
+        append_fragment_text(caption.fragment, text);
+        EXPECT_STREQ(text->str, caption.expected);
+    }
     strbuf_free(text);
 }
 
@@ -9292,6 +9302,23 @@ TEST(FoExpressions, RgbChannelsUseCommonMathAndRejectNonNumericOrNonfiniteResult
 
 TEST(FoExpressions, RgbPercentagesUseTheirFunctionBaseThroughNestedNumericExpressions) {
     Pool* pool = mem_pool_create(nullptr, MEM_ROLE_RENDER, "test.fo.color.percent"); ASSERT_NE(pool, nullptr);
+    const struct { const char* text; uint8_t expected[3]; } colors[] = {
+        {"rgb(86.66666666666667%, 100%, 173.33333333333334% div 2)", {221, 255, 221}},
+        {"rgb(100% * 2 div 3, round(66.50980392156863%), 100%)", {170, 170, 255}}
+    };
+    for (const auto& color : colors) {
+        SCOPED_TRACE(color.text);
+        RadiantFoExpression expression = radiant_fo_expression(pool, color.text, 1000, 32);
+        ASSERT_EQ(expression.status, TYPESET_OK);
+        CssDeclaration declaration = {}; declaration.value = expression.value;
+        const char* text = css_serialize_declaration_value(&declaration, pool);
+        SCOPED_TRACE(text);
+        CssDeclaration* reparsed = css_parse_property_value_declaration("color", 5, text, strlen(text), pool);
+        ASSERT_NE(reparsed, nullptr); ASSERT_TRUE(css_declaration_is_supported(reparsed));
+        CssComputedColor computed; ASSERT_TRUE(css_color_compute(reparsed->value, &computed));
+        uint8_t r, g, b, a; ASSERT_TRUE(css_color_to_rgba(&computed, &r, &g, &b, &a));
+        EXPECT_EQ(r, color.expected[0]); EXPECT_EQ(g, color.expected[1]); EXPECT_EQ(b, color.expected[2]);
+    }
     for (const char* invalid : {"rgb(100% * 1pt, 0, 0)", "rgb(100% div 0%, 0, 0)",
             "rgb(1e308%, 0, 0)", "floor(50%)", "rgb(100%, 0%, 0%) + 50%"}) {
         SCOPED_TRACE(invalid);
@@ -13130,10 +13157,11 @@ TEST_F(SecondaryViewTest, NativeWhitespaceCollapsesAcrossInlineSourcesAndRetains
 
 TEST_F(SecondaryViewTest, FoWhitespaceRefinesToInheritedNativeTraitsAndCommonDiagnosticsKeepOriginalSources) {
     DomElement* fo = formatting_root(
-        "<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt'>"
+        "<f:root xmlns:f='http://www.w3.org/1999/XSL/Format' font-family='Arial' font-size='7.5pt' line-height='9pt' "
+        "linefeed-treatment='preserve' white-space-treatment='preserve'>"
         "<f:layout-master-set><f:simple-page-master master-name='sheet' page-width='150pt' page-height='90pt'><f:region-body/></f:simple-page-master></f:layout-master-set>"
         "<f:page-sequence master-reference='sheet' force-page-count='no-force'><f:flow flow-name='xsl-region-body'>"
-        "<f:block linefeed-treatment='preserve' white-space-treatment='preserve' white-space-collapse='false'>A\n<f:inline>B</f:inline></f:block>"
+        "<f:block white-space-collapse='false'>A\n<f:inline>B</f:inline></f:block>"
         "</f:flow></f:page-sequence></f:root>"); ASSERT_NE(fo, nullptr);
     DomElement* original = fo->last_child_element()->last_child_element()->first_child_element(); ASSERT_NE(original, nullptr);
     RadiantFoOptions fo_options = radiant_fo_options_default(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
@@ -13143,13 +13171,21 @@ TEST_F(SecondaryViewTest, FoWhitespaceRefinesToInheritedNativeTraitsAndCommonDia
         ASSERT_EQ(translated->diagnostic.status, TYPESET_OK) << translated->diagnostic.reason;
         DomElement* generated = build_dom_tree_from_element(translated->root, &doc, nullptr); ASSERT_NE(generated, nullptr);
         ASSERT_TRUE(radiant_page_set_origins(&doc, translated->origins)); doc.root = lam::up(generated);
-        ViewTree* tree = secondary(); TypesetStatus status = layout_secondary_view(tree, &options, &diagnostic);
+        DomElement* block = generated->last_child_element()->last_child_element()->first_child_element();
+        DomElement* inline_source = block->last_child_element(); ASSERT_NE(inline_source, nullptr);
+        DomNode* block_text = block->first_child;
+        ViewTree* tree = secondary();
         if (!i) {
-            ASSERT_EQ(status, TYPESET_OK) << diagnostic.reason;
-            DomElement* block = generated->last_child_element()->last_child_element()->first_child_element();
-            ViewCssStyle* inline_style = view_css_resolve(tree, block->last_child_element()); ASSERT_NE(inline_style, nullptr); ASSERT_NE(inline_style->whitespace, nullptr);
+            const ViewCssStyle* inline_style = view_css_resolve(tree, inline_source); ASSERT_NE(inline_style, nullptr); ASSERT_NE(inline_style->whitespace, nullptr);
             EXPECT_EQ(inline_style->whitespace->linefeed, RADIANT_LINEFEED_PRESERVE); EXPECT_FALSE(inline_style->whitespace->collapse);
             EXPECT_FALSE(inline_style->whitespace->discard_start); EXPECT_FALSE(inline_style->whitespace->discard_end);
+        }
+        TypesetStatus status = layout_secondary_view(tree, &options, &diagnostic);
+        if (!i) {
+            ASSERT_EQ(status, TYPESET_OK) << diagnostic.reason;
+            LayoutViewNode* a = source_fragment(tree, block_text, VIEW_FRAGMENT_BODY, false); ASSERT_NE(a, nullptr);
+            LayoutViewNode* b = source_glyph_text(tree, inline_source->first_child, "B"); ASSERT_NE(b, nullptr);
+            EXPECT_FLOAT_EQ(b->rect.y - a->rect.y, 12.0f);
         } else {
             EXPECT_EQ(status, TYPESET_INVALID); EXPECT_EQ(tree->model->page_count, 0u); ASSERT_NE(diagnostic.origin, nullptr);
             EXPECT_EQ(diagnostic.origin->source.address, original); EXPECT_STREQ(diagnostic.reason, "invalid native whitespace trait");
@@ -14347,6 +14383,61 @@ TEST_F(SecondaryViewTest, PagedFlowRestartsTheRunWidthWhereAPageChangesItsBodyWi
     ViewTree* rejected = secondary();
     EXPECT_EQ(layout_secondary_view(rejected, &options, &diagnostic), TYPESET_UNPLACEABLE);
     EXPECT_FALSE(rejected->model->committed);
+}
+
+TEST_F(SecondaryViewTest, PagedFlowRewrapsLinesAtUnequalColumnWidths) {
+    stylesheet("p,div{margin:0;font:10px/12px Arial;orphans:1;widows:1}");
+    DomElement* body = nullptr;
+    DomElement* sequence = body_column_sequence("size:180px 120px;margin:10px", nullptr, &body);
+    ASSERT_NE(sequence, nullptr); ASSERT_NE(body, nullptr);
+    ASSERT_NE(page_column(body, "80px", "24px"), nullptr);
+    ASSERT_NE(page_column(body, "40px", "72px", "100px"), nullptr);
+    DomElement* paragraph = block("MMMM MMMM MMMM MMMM MMMM MMMM", nullptr, "div", sequence);
+    ASSERT_NE(paragraph, nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 1u);
+    ViewNodeState* text = view_tree_node_state(tree, paragraph->first_child, false); ASSERT_NE(text, nullptr);
+    unsigned left = 0, right = 0;
+    StrBuf* lines = strbuf_new(); ASSERT_NE(lines, nullptr);
+    for (LayoutViewNode* node = text->first_occurrence; node; node = node->next_occurrence) {
+        if (!node->glyph_run) continue;
+        strbuf_append_format(lines, "%.2f,%.2f:%.*s|", node->rect.x, node->rect.y,
+            node->glyph_run->text_len, node->glyph_run->text.get());
+        if (node->rect.x < 100.0f) { left++; EXPECT_LE(node->rect.x + node->rect.width, 90.01f); }
+        else { right++; EXPECT_LE(node->rect.x + node->rect.width, 150.01f); }
+    }
+    EXPECT_EQ(left, 2u) << lines->str; EXPECT_EQ(right, 2u) << lines->str;
+    strbuf_free(lines);
+}
+
+TEST_F(SecondaryViewTest, PagedFlowContinuesTallNotesBeforeTheFollowingSequence) {
+    stylesheet("p,div,span{margin:0;font:10px/12px Arial;white-space:pre-wrap;orphans:1;widows:1}");
+    ASSERT_NE(page_master("sheet", "size:160px 100px;margin:10px"), nullptr);
+    DomElement* sequence = page_sequence("sheet"); ASSERT_NE(sequence, nullptr);
+    DomElement* paragraph = block("Call ", nullptr, "div", sequence); ASSERT_NE(paragraph, nullptr);
+    DomElement* body = nullptr;
+    ASSERT_NE(authored_note(paragraph, "[a]", nullptr, nullptr, &body), nullptr);
+    ASSERT_NE(body, nullptr); ASSERT_TRUE(body->set_attribute("id", "note"));
+    for (const char* text : {"L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8"})
+        ASSERT_NE(block(text, nullptr, "div", body), nullptr);
+    DomElement* following = page_sequence("sheet", "20"); ASSERT_NE(following, nullptr);
+    ASSERT_NE(block("Following", nullptr, "div", following), nullptr);
+    ViewTree* tree = secondary(); PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 3u);
+    ViewNodeState* notes = view_tree_node_state(tree, body, false); ASSERT_NE(notes, nullptr);
+    unsigned pieces = 0;
+    for (LayoutViewNode* node = notes->first_occurrence; node; node = node->next_occurrence) {
+        if (node->role != VIEW_FRAGMENT_NOTE || !node->paint_box) continue;
+        StrBuf* text = strbuf_new(); ASSERT_NE(text, nullptr); append_fragment_text(node, text);
+        EXPECT_STREQ(text->str, pieces == 0 ? "L1L2L3L4L5" : "L6L7L8");
+        EXPECT_EQ(occurrence_page(node), pieces + 1); strbuf_free(text); pieces++;
+    }
+    EXPECT_EQ(pieces, 2u);
+    EXPECT_EQ(tree->model->pages.get()[2]->sequence->source.address, following);
+    const TypesetTarget* target = layout_secondary_target(tree, "note"); ASSERT_NE(target, nullptr);
+    EXPECT_EQ(target->page_number, 1u); EXPECT_EQ(target->last_page_number, 2u);
 }
 
 TEST_F(SecondaryViewTest, PagedFlowReservesFootnotesWhereTheirCallsCommit) {

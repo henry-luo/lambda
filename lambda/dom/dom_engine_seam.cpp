@@ -191,6 +191,7 @@ DOM_ENGINE_WEAK void dom_engine_svg_timing_key(DomElement* target, const char* k
     (void)target; (void)key;
 }
 DOM_ENGINE_WEAK bool dom_engine_layout_active(DomDocument* d) { (void)d; return false; }
+DOM_ENGINE_WEAK void dom_engine_resolve_scrolled_geometry(DomDocument* d) { (void)d; }
 DOM_ENGINE_WEAK bool dom_engine_element_css_boxes(DomElement* e, DomCssBoxSizes* s) {
     (void)e; (void)s; return false;
 }
@@ -206,8 +207,8 @@ DOM_ENGINE_WEAK bool dom_engine_attribute_has_relational_css_dependency(DomDocum
 DOM_ENGINE_WEAK void dom_engine_sync_pseudo_state(void* v, uint32_t f, bool set) {
     (void)v; (void)f; (void)set;
 }
-DOM_ENGINE_WEAK bool dom_engine_set_image_source(DomElement* e, const char* s) {
-    (void)e; (void)s; return false;
+DOM_ENGINE_WEAK bool dom_engine_set_image_source(DomElement* e, const char* s, bool* pending) {
+    (void)e; (void)s; if (pending) *pending = false; return false;
 }
 DOM_ENGINE_WEAK bool dom_engine_image_natural_size(DomElement* e, int* w, int* h) {
     (void)e;

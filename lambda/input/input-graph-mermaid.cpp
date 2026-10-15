@@ -311,6 +311,13 @@ static String* normalize_mermaid_label(InputContext& ctx, const char* text, size
     return ctx.builder.createString(text, length);
 }
 
+// relationship and annotation labels share quote/Markdown/HTML normalization.
+static String* parse_mermaid_label_line(InputContext& ctx, bool strip_semicolon,
+                                        const char** out_format) {
+    String* raw = parse_mermaid_line_text(ctx, strip_semicolon);
+    return normalize_mermaid_label(ctx, raw->chars, raw->len, out_format);
+}
+
 static void add_mermaid_meta_value(InputContext& ctx, Element* graph, const char* value_tag,
                                     String* value, const SourceLocation& source_start,
                                     const SourceLocation& source_end) {
@@ -1770,8 +1777,7 @@ static void parse_mermaid_class_relation(InputContext& ctx, Element* graph,
     const char* label_format = "text";
     if (tracker.current() == ':') {
         tracker.advance();
-        String* raw = parse_mermaid_line_text(ctx, true);
-        label = normalize_mermaid_label(ctx, raw->chars, raw->len, &label_format);
+        label = parse_mermaid_label_line(ctx, true, &label_format);
     }
 
     ensure_mermaid_class_node(ctx, graph, root_graph, from);
@@ -2150,8 +2156,7 @@ static void parse_mermaid_er_statement(InputContext& ctx, Element* graph,
     const char* label_format = "text";
     if (tracker.current() == ':') {
         tracker.advance();
-        String* raw = parse_mermaid_line_text(ctx, true);
-        label = normalize_mermaid_label(ctx, raw->chars, raw->len, &label_format);
+        label = parse_mermaid_label_line(ctx, true, &label_format);
     } else {
         ctx.addErrorCode(source_start, "mermaid.er.missing-label",
             "Expected ':' and an ER relationship label");
@@ -2256,9 +2261,8 @@ static void add_mermaid_state_description(InputContext& ctx, Element* graph, Str
                                            const SourceLocation& source_start) {
     SourceTracker& tracker = ctx.tracker;
     tracker.advance();
-    String* raw = parse_mermaid_line_text(ctx, true);
     const char* format = "text";
-    String* value = normalize_mermaid_label(ctx, raw->chars, raw->len, &format);
+    String* value = parse_mermaid_label_line(ctx, true, &format);
     Element* node = add_mermaid_state_declaration(ctx, graph, id->chars, id->chars,
         "rounded", "state", "text", source_start);
     Element* description = ctx.builder.element("state-description")
@@ -2388,8 +2392,7 @@ static void parse_mermaid_state_transition_or_description(
     const char* label_format = "text";
     if (tracker.current() == ':') {
         tracker.advance();
-        String* raw = parse_mermaid_line_text(ctx, true);
-        label = normalize_mermaid_label(ctx, raw->chars, raw->len, &label_format);
+        label = parse_mermaid_label_line(ctx, true, &label_format);
     } else {
         skip_to_eol(tracker);
     }
@@ -2555,9 +2558,8 @@ static void parse_mermaid_sequence_note(InputContext& ctx, Element* graph,
         return;
     }
     tracker.advance();
-    String* raw = parse_mermaid_line_text(ctx, false);
     const char* format = "text";
-    String* label = normalize_mermaid_label(ctx, raw->chars, raw->len, &format);
+    String* label = parse_mermaid_label_line(ctx, false, &format);
     Element* node = ensure_mermaid_node(ctx, graph, graph, id->chars);
     graph_set_source_span(ctx, node, source_start, tracker.location(), true);
     if (to_id) {
@@ -2602,9 +2604,8 @@ static void parse_mermaid_sequence_message(InputContext& ctx, Element* graph,
         return;
     }
     tracker.advance();
-    String* raw = parse_mermaid_line_text(ctx, false);
     const char* format = "text";
-    String* label = normalize_mermaid_label(ctx, raw->chars, raw->len, &format);
+    String* label = parse_mermaid_label_line(ctx, false, &format);
     Element* from_node = ensure_mermaid_node(ctx, graph, graph, from->chars);
     Element* to_node = ensure_mermaid_node(ctx, graph, graph, to->chars);
     graph_set_source_span(ctx, from_node, source_start, tracker.location(), true);

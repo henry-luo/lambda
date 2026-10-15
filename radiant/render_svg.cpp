@@ -172,10 +172,11 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
 
     RenderTextPaintIterator paint_iterator(ctx, text);
     TextRect* text_rect;
-    while ((text_rect = paint_iterator.next())) {
+    while ((text_rect = paint_iterator.next(true))) {
     PaintGlyphRun run = {};
+    const char* logical_text = nullptr;
     lam::Temp<char> text_content(render_text_rect_glyph_run(text, text_rect, &ctx->font, ctx->color,
-        ctx->block.x, ctx->block.y, &run));
+        ctx->block.x, ctx->block.y, &run, paint_iterator.reverses_clusters(), &logical_text));
     if (!text_content.get()) continue;
     if (!run.font_family) run.font_family = lam::up("Arial");
 
@@ -217,7 +218,7 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         : nullptr;
     if (outline) {
         // outlines retain accessible text without asking the viewer to paint a replacement font.
-        RenderSemanticGroup label = {}; label.title = run.text;
+        RenderSemanticGroup label = {}; label.title = lam::up(logical_text);
         paint_begin_semantic_group(svg_active_paint_list(ctx), &label);
         int index = paint_list_count(svg_active_paint_list(ctx));
         paint_fill_path(svg_active_paint_list(ctx), outline, run.color, RDT_FILL_WINDING, nullptr);

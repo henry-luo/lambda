@@ -1720,6 +1720,30 @@ wc -l lambda/input/input-graph-dot.cpp \
   lambda/input/input-graph.cpp lambda/input/input-graph.h
 ```
 
+The 2026-10-15 sequence-family audit reconciles the already implemented
+participant/actor declarations, ordered messages, notes and nested loop/alt/par
+blocks with the native budget. It reuses identifiers, source spans, node/edge
+builders and annotations; relationship and annotation line-label parsing now
+shares `parse_mermaid_label_line` across class, ER, state and sequence families.
+The sequence state machine remains separate because its ordered block events
+and activation suffixes have no counterpart in the other grammars. This audit
+removes the duplicated label-normalization shape before admitting the new
+family, without deleting comments or moving parser code out of the measurement.
+
+The current gate includes Structurizr and its resolver, which the earlier
+four-unit table omitted. Every ceiling is tightened to the measured source size;
+the combined budget is the sum, with no unused per-file allowance:
+
+| Source unit | Audited physical lines |
+|---|---:|
+| `input-graph-dot.cpp` | 471 |
+| `input-graph-mermaid.cpp` | 2,902 |
+| `input-graph-structurizr.cpp` | 429 |
+| `input-graph-structurizr-resolver.cpp` | 273 |
+| `input-graph.cpp` | 227 |
+| `input-graph.h` | 107 |
+| total | 4,409 |
+
 `GraphParserTest.ParserLocBudget` enforces every current per-file ceiling and
 the combined ceiling during the native graph parser suite. A parser change that
 increases a ceiling must reduce duplication first, then update this ledger and

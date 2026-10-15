@@ -231,6 +231,19 @@ extern "C" void dom_after_srcdoc_set(void* dom_elem);
 // door to them and are used well before their definitions.
 static bool dom_expando_flag_is(DomElement* elem, const char* name);
 static void dom_expando_flag_set(DomElement* elem, const char* name, Item value);
+
+static Item dom_dialog_set_return_value(DomElement* element, Item value) {
+    RootFrame roots(1);
+    Rooted<Item> converted(roots, js_to_string(value));
+    if (item_is_error(converted.get())) return converted.get();
+    DomElementExt* storage = element->ensure_ext();
+    const char* text = fn_to_cstr(converted.get());
+    const char* copy = storage && element->doc
+        ? pool_strdup(element->doc->document_pool, text ? text : "") : nullptr;
+    if (!copy) return js_throw_type_error("Dialog return value storage is unavailable");
+    storage->dialog_return_value = lam::own(copy);
+    return converted.get();
+}
 extern "C" Item radiant_dom_element_operation(Item elem_item,
                                                 JubeDomElementOperation operation,
                                                 Item* args, int argc);
@@ -903,6 +916,11 @@ static bool dom_flush_pending_document_layout(UiContext* uicon, DomDocument* doc
 
 extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     if (!doc) return false;
+    // initial script layout can precede the loader's state acquisition; scroll geometry needs its owner now.
+    if (dom_has_committed_geometry_snapshot(doc) && !doc->state && doc->js.host_ui_context &&
+        !dom_engine_layout_active(doc)) dom_engine_document_ensure_state(doc, "dom_geometry_snapshot");
+    // CSSOM scroll writes change sticky offsets immediately, without advancing the host's DOM commit.
+    if (dom_has_committed_geometry_snapshot(doc)) dom_engine_resolve_scrolled_geometry(doc);
     // Host event turns expose their last committed tree. Re-entering layout
     // from a callback advances geometry before that turn has settled and
     // breaks the shared snapshot contract. Initial load has no snapshot yet,
@@ -1069,7 +1087,7 @@ static int dom_testdriver_platform_key(uint32_t key) {
     }
 }
 
-extern "C" Item dom_testdriver_key(Item key_item,
+static Item dom_testdriver_key_event(bool pressed, Item key_item,
                                   Item shift_item,
                                   Item ctrl_item,
                                   Item alt_item,
@@ -1078,6 +1096,7 @@ extern "C" Item dom_testdriver_key(Item key_item,
     if (!dom_testdriver_state() || !_js_current_ui_context) {
         return (Item){.item = ITEM_FALSE};
     }
+    dom_ensure_geometry_snapshot(_js_current_document);
 
     uint32_t wpt_key = dom_to_u32(key_item);
     int mods = 0;
@@ -1091,11 +1110,40 @@ extern "C" Item dom_testdriver_key(Item key_item,
     }
     RdtEvent event;
     memset(&event, 0, sizeof(event));
-    event.key.type = RDT_EVENT_KEY_DOWN;
+    event.key.type = pressed ? RDT_EVENT_KEY_DOWN : RDT_EVENT_KEY_UP;
     event.key.key = dom_testdriver_platform_key(wpt_key);
     event.key.mods = mods;
     // Testdriver input must traverse the public platform event path so the
     // same route snapshot, notifications, and DOM fallback serve tests/users.
+    handle_event(_js_current_ui_context, _js_current_document, &event);
+    return (Item){.item = ITEM_TRUE};
+}
+
+extern "C" Item dom_testdriver_key(Item key, Item shift, Item ctrl, Item alt, Item meta) {
+    return dom_testdriver_key_event(true, key, shift, ctrl, alt, meta);
+}
+
+extern "C" Item dom_testdriver_key_up(Item key, Item shift, Item ctrl, Item alt, Item meta) {
+    return dom_testdriver_key_event(false, key, shift, ctrl, alt, meta);
+}
+
+extern "C" Item dom_testdriver_pointer(Item type_item, Item x_item, Item y_item, Item button_item) {
+    if (!_js_current_document || !_js_current_ui_context || !dom_testdriver_state())
+        return (Item){.item = ITEM_FALSE};
+    RootFrame roots(4);
+    Rooted<Item> type(roots, type_item), x(roots, x_item), y(roots, y_item), button(roots, button_item);
+    const char* name = fn_to_cstr(type.get());
+    EventType event_type = name && strcmp(name, "pointerMove") == 0 ? RDT_EVENT_MOUSE_MOVE :
+        name && strcmp(name, "pointerDown") == 0 ? RDT_EVENT_MOUSE_DOWN :
+        name && strcmp(name, "pointerUp") == 0 ? RDT_EVENT_MOUSE_UP : RDT_EVENT_NIL;
+    if (event_type == RDT_EVENT_NIL) return (Item){.item = ITEM_FALSE};
+    dom_ensure_geometry_snapshot(_js_current_document);
+    RdtEvent event = {};
+    event.mouse_button.type = event_type;
+    event.mouse_button.x = dom_item_to_float(x.get());
+    event.mouse_button.y = dom_item_to_float(y.get());
+    event.mouse_button.button = (uint8_t)dom_to_u32(button.get());
+    event.mouse_button.clicks = 1;
     handle_event(_js_current_ui_context, _js_current_document, &event);
     return (Item){.item = ITEM_TRUE};
 }
@@ -1367,7 +1415,6 @@ static void expando_reset(); // forward declaration
 static void reset_dom_wrapper_cache(); // forward declaration
 static void reset_foreign_document_cache(); // forward declaration
 static void reset_pending_iframe_loads();
-static void _schedule_image_load(DomElement* image,bool loaded);
 // Phase 6E: text-control helpers are shared with Radiant event/render paths
 // (radiant/event.hpp is already included at the top of this file).
 #define tc_is_text_control_elem(e)      tc_is_text_control(e)
@@ -3948,6 +3995,14 @@ extern "C" Item dom_parser_parse_from_string(Item source_item, Item type_item) {
 extern "C" Item dom_iframe_get_content_document(DomElement* iframe) {
     if (!iframe || !dom_foreign_document_state_ensure()) return ItemNull;
     IframeContentEntry* e = lookup_iframe_entry(iframe);
+    DomDocument* loaded = iframe->embed ? iframe->embedp()->doc : nullptr;
+    if (e && loaded && e->doc != loaded) {
+        // the frames collection may have exposed about:blank before navigation committed.
+        if (!dom_transfer_document_storage(e->doc, loaded)) return ItemNull;
+        e->doc = loaded;
+        e->owns_doc = false;
+        dom_doc_mark_has_browsing_context(loaded);
+    }
     if (!e) {
         DomDocument* embedded_doc = iframe->embed ? iframe->embedp()->doc : nullptr;
         if (embedded_doc) {
@@ -4162,7 +4217,13 @@ extern "C" void dom_iframe_navigation_complete(void* iframe) {
     _schedule_iframe_load((DomElement*)iframe);
 }
 
-static void _schedule_image_load(DomElement* image,bool loaded) {
+extern "C" void dom_dispatch_pending_resource_loads() {
+    // the parent load boundary drains completed child loads before window.load.
+    _iframe_load_drain(ItemNull, nullptr, 0);
+}
+
+extern "C" void dom_queue_image_completion(void* image_pointer, bool loaded) {
+    DomElement* image = (DomElement*)image_pointer;
     if (!image || !dom_foreign_document_state_ensure()) return;
     DomPendingImageEvent** tail=&s_pending_images;
     while(*tail) {
@@ -8246,7 +8307,9 @@ static void _after_image_src_set(DomElement* elem, const char* attr_name,
                                  const char* attr_value) {
     // the decoder owns intrinsic state; DOM queues completion after accepting or rejecting the source.
     if (!_is_tag(elem, "img") || str_icmp_cstr(attr_name, "src") != 0) return;
-    _schedule_image_load(elem,dom_engine_set_image_source(elem,attr_value));
+    bool pending = false;
+    bool loaded = dom_engine_set_image_source(elem, attr_value, &pending);
+    if (!pending) dom_queue_image_completion(elem, loaded);
 }
 
 extern "C" void dom_after_set_attribute(void* elem_ptr,
@@ -10109,6 +10172,10 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
 
     // Element properties below — safe to cast
     DomElement* elem = node->as_element();
+    if (elem->tag_id == MARKUP_NAME_DIALOG && strcmp(prop, "returnValue") == 0) {
+        return js_name_item(elem->ext && elem->ext->dialog_return_value
+            ? elem->ext->dialog_return_value.get() : "");
+    }
 
     // The document node carries the Document's own properties as well as the
     // Node's. Before ESO101 these lived only on a separate proxy object served
@@ -10192,7 +10259,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // iframe.contentDocument / contentWindow — lazy-create a foreign HTML
     // document that backs the iframe's browsing context. Cached per element
     // so identity comparisons (===) work.
-    if (elem->tag_name && str_icmp_cstr(elem->tag_name, "iframe") == 0 &&
+    if ((elem->tag() == MARKUP_NAME_IFRAME || elem->tag() == MARKUP_NAME_OBJECT) &&
         (prop_id == JS_DOM_PROP_CONTENT_DOCUMENT || prop_id == JS_DOM_PROP_CONTENT_WINDOW)) {
         extern Item dom_iframe_get_content_document(DomElement* iframe);
         extern Item dom_iframe_get_content_window  (DomElement* iframe);
@@ -11254,6 +11321,13 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     // would read as a Document but not accept one's writes.
     if (elem->tag_name && strcmp(elem->tag_name, "#document") == 0) {
         return dom_document_proxy_set_property(prop_name, value);
+    }
+    if (elem->tag_id == MARKUP_NAME_DIALOG && strcmp(prop, "returnValue") == 0) {
+        RootFrame roots(2);
+        Rooted<Item> target(roots, elem_item);
+        Rooted<Item> original(roots, value);
+        Item converted = dom_dialog_set_return_value(elem, original.get());
+        return item_is_error(converted) ? converted : original.get();
     }
 
     if (const DomAriaElementRef* aria_ref = dom_aria_ref_for_property(prop)) {
@@ -16774,6 +16848,34 @@ extern "C" Item dom_core_show_modal(Item n) {
         elem->set_attribute("open", "");
         dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
     }
+    return make_js_undefined();
+}
+
+static Item dom_dispatch_dialog_close(Item env_item) {
+    JS_ENV_UNPACK(env, env_item);
+    RootFrame roots(2);
+    Rooted<Item> target(roots, env[0]);
+    Rooted<Item> event(roots, js_create_native_event("close", false, false));
+    return dom_dispatch_event(target.get(), event.get());
+}
+
+extern "C" Item dom_core_close_dialog(Item n, Item value) {
+    DomElement* elem = dom_op_element(n);
+    if (!elem || elem->tag_id != MARKUP_NAME_DIALOG || !elem->has_attribute("open"))
+        return make_js_undefined();
+    RootFrame roots(2);
+    Rooted<Item> target(roots, n);
+    Rooted<Item> returned(roots, value);
+    if (!is_js_undefined(returned.get())) {
+        returned.set(dom_dialog_set_return_value(elem, returned.get()));
+        if (item_is_error(returned.get())) return returned.get();
+    }
+    // close changes modal state synchronously; its notification is a later task.
+    elem->set_dialog_modal(false);
+    elem->remove_attribute("open");
+    dom_notify_mutation(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
+    Item values[] = {target.get()};
+    js_schedule_native_env(dom_schedule_task, dom_dispatch_dialog_close, 0, values, 1);
     return make_js_undefined();
 }
 

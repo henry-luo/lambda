@@ -3686,7 +3686,7 @@ static int css_parse_rule_from_tokens_with_context(const CssToken* tokens,
                                  strcmp(keyword_name, "charset") == 0)) {
             // Simple at-rules with no block
             rule->type = strcmp(keyword_name, "import") == 0 ? CSS_RULE_IMPORT : CSS_RULE_CHARSET;            // Parse until semicolon
-            int value_start = pos;
+            int value_start = css_skip_whitespace_tokens(tokens, pos, token_count);
             while (pos < token_count && tokens[pos].type != CSS_TOKEN_SEMICOLON) {
                 pos++;
             }

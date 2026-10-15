@@ -4896,7 +4896,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
     bool evaluation_active = active_context && active_context->execution_depth != 0;
     if (!(block->embed && block->embedp()->doc) && !evaluation_active) {
         const char* srcdoc = block->get_attribute("srcdoc");
-        const char* src = block->get_attribute("src");
+        const char* src = block->get_attribute(block->tag() == MARKUP_NAME_OBJECT ? "data" : "src");
         if ((srcdoc && *srcdoc) || (src && *src)) {
             if (!srcdoc && iframe_navigation_must_not_run_in_layout(lycon, src)) {
                 // D5.4.1: a cross-origin frame needs a separate evaluator, so
@@ -4935,8 +4935,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                 layout_iframe_embedded_doc(lycon, doc, iframe_width, iframe_height);
                 lycon->ui_context->iframe_depth--;
                 DomDocument* parent_doc = lycon->ui_context->document;
-                if (doc->page_kind == DOM_PAGE_KIND_LAMBDA_SCRIPT &&
-                    dom_document_has_js_realm(parent_doc)) {
+                if (dom_document_has_js_realm(parent_doc)) {
                     // Navigation finished on the child's evaluator. Queue load
                     // in the parent's realm at this quiescent layout boundary.
                     EvalContext* parent_owner = runtime_get_eval_context(parent_doc->js.runtime);
@@ -5986,7 +5985,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             block->width = layout_border_size_from_content_box(block, block->content_width, true);
             block->height = layout_border_size_from_content_box(block, block->content_height, false);
         }
-        else if (elmt_name == MARKUP_NAME_IFRAME) {
+        else if (elmt_name == MARKUP_NAME_IFRAME ||
+                 (elmt_name == MARKUP_NAME_OBJECT && block->get_attribute(MARKUP_NAME_DATA) &&
+                  !(block->embed && block->embedp()->img))) {
             layout_iframe(lycon, block, block->display);
         }
         else if (elmt_name == MARKUP_NAME_WEBVIEW) {
@@ -9265,6 +9266,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 lycon->block.balance_wrap_active = false;
                 lycon->block.balance_wrap_width = 0.0f;
                 line_init(lycon, inner_left, inner_right);
+                if (lycon->paged) paged_line_start(lycon, block);
             }
         }
         // CSS 2.1 §10.3.3: Re-resolve auto margins after shrink-to-fit changed the

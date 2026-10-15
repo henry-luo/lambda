@@ -1,0 +1,29 @@
+<!doctype html><html class=reftest-wait><style>
+html,body { margin:0; width:100%; height:100% }
+.parent { position:absolute; top:100vh; width:100%; height:100vh }
+.fixed { position:fixed; top:25vh }
+.container { width:100px; height:100% }
+.spacer { height:90% }
+.sticky { position:sticky; bottom:50vh; width:100px; height:10% }
+.long { height:600vh }
+</style><body id=result><div class=parent><div class=container><div class=spacer></div><div class=sticky></div></div></div><div class=long></div>
+
+<script>
+const sticky = document.querySelector('.sticky');
+const parent = document.querySelector('.parent');
+requestAnimationFrame(() => {
+    window.scrollTo(0, document.querySelector('.long').clientHeight);
+    const height = window.innerHeight;
+    const offset = sticky.offsetTop;
+    document.body.setAttribute('data-scroll', window.scrollY > 0 ? 'yes' : 'no');
+    document.body.setAttribute('data-offset', Math.abs(offset - height * 0.9) < 1 ? 'yes' : 'no');
+    document.body.setAttribute('data-flow', Math.abs(document.querySelector('.long').getBoundingClientRect().y + window.scrollY) < 1 ? 'yes' : 'no');
+    parent.classList.add('fixed');
+    requestAnimationFrame(() => {
+        document.body.setAttribute('data-fixed', Math.abs(sticky.getBoundingClientRect().y - height * 0.4) < 1 ? 'yes' : 'no');
+        window.scrollTo(0, 0);
+        document.body.setAttribute('data-reset', Math.abs(sticky.getBoundingClientRect().y - height * 0.4) < 1 ? 'yes' : 'no');
+        document.documentElement.classList.remove('reftest-wait');
+    });
+});
+</script></body></html>

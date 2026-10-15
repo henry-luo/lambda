@@ -10801,7 +10801,8 @@ TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {
                 continue;
             }
 
-            if (!render_lambda_png_page(&files[i], page - 1, ref_height, lambda_png, sizeof(lambda_png))) {
+            // Poppler rounds the raster height up; retain the PDF aspect ratio instead of centering in that rounded height.
+            if (!render_lambda_png_page(&files[i], page - 1, ref_height, lambda_png, sizeof(lambda_png), true)) {
                 add_pdf_page_result(results, &result_count, test_id, &files[i], page, diff_png,
                                     100.0, 255.0, "Lambda render failed");
                 continue;

@@ -367,3 +367,35 @@ Space is opened inside the table by position, not source order (`paged_table_ope
 The aggregate Radiant run before the final margin-lifetime fix completed with **5,272 pass / 153 partial / 28 fail / 1 skip**. It includes the legacy caption test's null-style crash, CSS memory and page-snapshot failures, the layout residuals above and application/network/JIT failures. The UI automation gate passes **601/601**, and native scene3d passes **28/28** with normal macOS graphics access. An earlier sandbox run was stopped after graphics/XPC timeouts; its partial totals are not qualification evidence. The repaired margin path was replayed through the current focused and paged gates. The full PDF visual binary completed **279 pass / 15 fail** of 294 before the final margin fix; replaying those 15 failures on the installed final executable passes the repaired logical-label case and reproduces the other **14 failures**. The complete remaining failure inventory is in `temp/paged-integration-current/pdf-failures-replay.log`. Aggregate P7 qualification remains open.
 
 **Remaining integration scope.** P2 inline decorations and richer boundary paint; P3 caption/grid separation; P4 leaders and page-dependent body/named-string bindings; the remaining P5 anchor/refit/width-reservation cases; the P6 provider adapter and `break_candidate` contract, remaining native/FO fidelity and pair gates; P7 secondary-cascade reduction, test migration, complete raster/aggregate evidence and release performance/size measurements. §7 extensions remain outside this increment.
+
+
+### 2026-10-15 CSS qualification repairs
+
+The [CSS failure register](Radiant_CSS_Qualification.md#active-repair-request--2026-10-15)
+records this bounded repair request. All 53 FO/native export pairs now pass
+exact preview pixels and their physical PDF page comparisons
+(`temp/css_debt_repair/fo_computed_edges.json`). The caption, column-rule,
+explicit-column, fixed-PDF import and definite-height tail export groups also
+have focused passing receipts in that register.
+
+Flow blocks replay discovered containing and line widths over the existing
+bounded convergence passes; they are laid out again at those widths. Half-open
+page lookup applies its closing-edge bias once. Sequence terminal extents are
+updated once per sequence, retaining a real last-sheet body tail to settle
+narrower terminal masters. Explicitly nested named-page width transitions are
+still diagnosed as unsupported.
+
+Tall note bodies use source block/text break edges and reserve independent
+same-width continuation pieces before a following sequence. Changed-width note
+continuations remain unsupported. Published pieces retain their own fragment
+windows and first/last identity under **D4.5.1v4 / D4.1.4v5**; this does not
+complete the separate legacy paged migration or qualify every multi-note case.
+
+Native computed-property bindings now reach the live CSS workspace, including
+its final background recomputation. Decoration conditionality drives individual
+padding/border break reservations and published edges. FO root whitespace
+defaults no longer precede duplicate authored attributes or override them with
+an inline CSS reset. Invalid native traits are admitted through the common
+source-preserving diagnostic path before layout. The focused flow, FO color,
+whitespace and original caption controls pass 22/22
+(`temp/css_debt_repair/flow_fo_final.json`); aggregate qualification remains open.

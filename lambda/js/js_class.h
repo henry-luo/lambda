@@ -140,6 +140,7 @@ enum JsClass : uint8_t {
     JS_CLASS_NAVIGATOR,
     JS_CLASS_MESSAGE_EVENT,
     JS_CLASS_XML_HTTP_REQUEST,
+    JS_CLASS_FILE_READER,
     JS_CLASS__COUNT  // sentinel
 };
 
@@ -222,6 +223,7 @@ static inline JsClass js_class_from_name(const char* nm, int nl) {
             if (!strncmp(nm, "Transform", 9)) return JS_CLASS_TRANSFORM;
             break;
         case 10:
+            if (!strncmp(nm, "FileReader", 10)) return JS_CLASS_FILE_READER;
             if (!strncmp(nm, "TypedArray", 10)) return JS_CLASS_TYPED_ARRAY;
             if (!strncmp(nm, "AbortError", 10)) return JS_CLASS_ABORT_ERROR;
             if (!strncmp(nm, "RangeError", 10)) return JS_CLASS_RANGE_ERROR;
@@ -337,6 +339,7 @@ static inline const char* js_class_to_name(JsClass cls) {
         case JS_CLASS_EVENT: return "Event";
         case JS_CLASS_CUSTOM_EVENT: return "CustomEvent";
         case JS_CLASS_EVENT_TARGET: return "EventTarget";
+        case JS_CLASS_FILE_READER: return "FileReader";
         case JS_CLASS_EVENT_EMITTER: return "EventEmitter";
         case JS_CLASS_DOM_EXCEPTION: return "DOMException";
         case JS_CLASS_ABORT_CONTROLLER: return "AbortController";

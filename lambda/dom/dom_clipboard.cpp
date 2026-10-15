@@ -33,11 +33,14 @@
 #include "../core/name_pool.hpp"
 #include "dom_events.h"
 #include "dom.h"
+#include "dom_platform.h"
 #include "../lambda-data.hpp"
 #include "../module/radiant/radiant_dom_bridge.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
+#include "../../lib/base64.h"
+#include "../../lib/url.h"
 #include "../../radiant/event.hpp"
 #include <string.h>
 #include <stdlib.h>
@@ -78,8 +81,9 @@ JS_FORWARD_STATIC_VOID( js_clipboard_set_method, (Item object, const char* name,
 #define g_data_transfer_proto (js_runtime_state.clipboard.data_transfer_prototype)
 #define g_file_list_proto (js_runtime_state.clipboard.file_list_prototype)
 #define g_drag_data_transfer (js_runtime_state.clipboard.drag_data_transfer)
+#define g_file_reader_proto (js_runtime_state.clipboard.file_reader_prototype)
 #define g_clipboard_generation (js_runtime_state.clipboard.generation)
-#define g_next_object_url_id (js_runtime_state.clipboard.next_object_url_id)
+static uint64_t blob_url_next_id = 1;
 JS_FORWARD_STATIC_EXPRESSION(bool, clipboard_ensure_roots, (void), (js_active_runtime_state && js_root_vector_ensure_registered(&js_runtime_state.clipboard)))
 
 static void attach_known_prototype(Item obj, Item proto) {
@@ -252,23 +256,196 @@ static Item js_blob_new_with_class(Item parts, Item options, JsClass class_id) {
 extern "C" LAMBDA_RT_API Item js_blob_new(Item parts, Item options);
 JS_FORWARD_ITEM(js_blob_new, (Item parts, Item options), js_blob_new_with_class, (parts, options, JS_CLASS_BLOB))
 
+static char* blob_data_uri(Item blob) {
+    RootFrame roots(2);
+    Rooted<Item> object(roots, blob);
+    Rooted<Item> bytes(roots, dom_realm_get_cstr(object.get(), "_text"));
+    if (get_type_id(bytes.get()) != LMD_TYPE_STRING) return nullptr;
+    String* data = it2s(bytes.get());
+    lam::Temp<char> encoded(base64_encode_alloc(data->chars, data->len, BASE64_STD));
+    if (!encoded) return nullptr;
+    const char* mime = str_prop_get(object.get(), "type", nullptr);
+    StrBuf* uri = strbuf_new();
+    if (!uri) return nullptr;
+    strbuf_append_str(uri, "data:");
+    if (mime && *mime) strbuf_append_str(uri, mime);
+    strbuf_append_str(uri, ";base64,");
+    strbuf_append_str(uri, encoded.get());
+    char* result = mem_dup_n(uri->str, uri->length, MEM_CAT_SYSTEM);
+    strbuf_free(uri);
+    return result;
+}
+
+struct DomBlobUrl : DomDocumentResourceData {
+    char* url;
+    char* data_uri;
+};
+
+static void blob_url_destroy(DomDocumentResourceData* data) {
+    DomBlobUrl* entry = (DomBlobUrl*)data;
+    mem_free(entry->url); mem_free(entry->data_uri); mem_free(entry);
+}
+
+static DomBlobUrl* blob_url_find(DomDocument* document, const char* url) {
+    if (!document || !url) return nullptr;
+    for (DomDocumentResource* resource = document->resources; resource; resource = resource->next) {
+        if (resource->destroy != blob_url_destroy) continue;
+        DomBlobUrl* entry = (DomBlobUrl*)resource->data.get();
+        if (strcmp(entry->url, url) == 0) return entry;
+    }
+    return nullptr;
+}
+
+extern "C" const char* dom_blob_url_data_uri(DomDocument* document, const char* url) {
+    DomBlobUrl* entry = blob_url_find(document, url);
+    return entry ? entry->data_uri : nullptr;
+}
+
 extern "C" Item js_dom_url_create_object_url(Item object) {
     JsClass class_id = js_class_id(object);
     if (class_id != JS_CLASS_BLOB && class_id != JS_CLASS_FILE) {
         return dom_realm_throw_type_error("URL.createObjectURL requires a Blob");
     }
-    // Headless Worker does not consume blob bytes, but callers still require a
-    // stable, revocable origin-scoped URL identity for feature detection.
+    RootFrame roots(1);
+    Rooted<Item> blob(roots, object);
+    DomDocument* document = (DomDocument*)dom_get_document();
+    if (!document) return dom_realm_throw_type_error("Blob URLs require a document");
+    DomBlobUrl* entry = (DomBlobUrl*)mem_calloc(1, sizeof(DomBlobUrl), MEM_CAT_SYSTEM);
+    if (!entry) return ItemError;
+    entry->data_uri = blob_data_uri(blob.get());
     StrBuf* url = strbuf_new();
-    strbuf_append_format(url, "blob:lambda/%lld", (long long)g_next_object_url_id++);
-    Item result = make_str_n(url->str, url->length);
+    if (!url || !entry->data_uri) { strbuf_free(url); blob_url_destroy(entry); return ItemError; }
+    const char* origin = document->url ? url_get_origin(document->url) : nullptr;
+    uint64_t id = __atomic_fetch_add(&blob_url_next_id, 1, __ATOMIC_RELAXED);
+    strbuf_append_format(url, "blob:%s/%llu", origin && *origin ? origin : "null", (unsigned long long)id);
+    entry->url = mem_dup_n(url->str, url->length, MEM_CAT_SYSTEM);
+    // D4.5.1v4: decoding and selected editions can outlive the script heap that created the Blob.
+    if (!entry->url || !dom_document_add_resource(document, entry, blob_url_destroy)) {
+        strbuf_free(url); blob_url_destroy(entry); return ItemError;
+    }
+    Item result = make_str_n(entry->url, strlen(entry->url));
     strbuf_free(url);
     return result;
 }
 
-extern "C" Item js_dom_url_revoke_object_url(Item /*url*/) {
-    // Object URLs only back headless feature probes; their Blob lifetime is
-    // already owned by the caller and the per-document heap.
+extern "C" Item js_dom_url_revoke_object_url(Item url) {
+    RootFrame roots(1);
+    Rooted<Item> text(roots, js_to_string(url));
+    if (item_is_error(text.get())) return text.get();
+    DomDocument* document = (DomDocument*)dom_get_document();
+    DomBlobUrl* entry = blob_url_find(document, fn_to_cstr(text.get()));
+    if (entry) dom_document_release_resource(document, entry);
+    return make_js_undefined();
+}
+
+enum FileReaderSlot { FILE_READER_READY, FILE_READER_RESULT, FILE_READER_ERROR,
+    FILE_READER_GENERATION, FILE_READER_SLOT_COUNT };
+
+static Item file_reader_state(Item reader) {
+    return dom_realm_native_private_array_state(reader, JS_CLASS_FILE_READER,
+        FILE_READER_SLOT_COUNT, "Illegal FileReader receiver");
+}
+
+static Item file_reader_getter(Item callee, Item receiver, Item*, int, uint64_t*) {
+    JS_ASSIGN_OR_RETURN(state, file_reader_state(receiver));
+    return js_elements_get_int(state, (int)js_fn_native((JsFunction*)callee.function)->target.bits);
+}
+
+static Item file_reader_new(void) {
+    RootFrame roots(2);
+    Rooted<Item> reader(roots, dom_realm_new_object_of_class(JS_CLASS_FILE_READER));
+    Rooted<Item> state(roots, js_array_new(0));
+    JS_RETURN_IF_ERROR(js_array_push(state.get(), (Item){.item = i2it(0)}));
+    JS_RETURN_IF_ERROR(js_array_push(state.get(), ItemNull));
+    JS_RETURN_IF_ERROR(js_array_push(state.get(), ItemNull));
+    JS_RETURN_IF_ERROR(js_array_push(state.get(), (Item){.item = i2it(0)}));
+    NameRef key = name_pool_create_unique_private(context->name_pool, {"FileReader", 10});
+    if (!key) return ItemError;
+    JS_RETURN_IF_ERROR(js_private_field_define(reader.get(), (Item){.item = s2it(key)}, state.get()));
+    attach_known_prototype(reader.get(), g_file_reader_proto);
+    return reader.get();
+}
+
+static bool file_reader_loading(Item state, Item generation) {
+    return it2i(js_elements_get_int(state, FILE_READER_READY)) == 1 &&
+        js_elements_get_int(state, FILE_READER_GENERATION).item == generation.item;
+}
+
+static void file_reader_event(Item reader, const char* type, size_t loaded, size_t total) {
+    RootFrame roots(2);
+    Rooted<Item> target(roots, reader);
+    Rooted<Item> event(roots, js_create_native_event(type, false, false));
+    dom_realm_set_cstr(event.get(), "lengthComputable", (Item){.item = b2it(true)});
+    dom_realm_set_cstr(event.get(), "loaded", (Item){.item = i2it((int64_t)loaded)});
+    dom_realm_set_cstr(event.get(), "total", (Item){.item = i2it((int64_t)total)});
+    dom_dispatch_event(target.get(), event.get());
+}
+
+static Item file_reader_read_task(Item environment) {
+    JS_ENV_UNPACK(values, environment);
+    RootFrame roots(4);
+    Rooted<Item> reader(roots, values[0]), blob(roots, values[1]);
+    Rooted<Item> state(roots, file_reader_state(reader.get())), result(roots, ItemNull);
+    if (item_is_error(state.get())) return state.get();
+    Item generation = values[2];
+    if (!file_reader_loading(state.get(), generation)) return make_js_undefined();
+    Item bytes = dom_realm_get_cstr(blob.get(), "_text");
+    size_t total = get_type_id(bytes) == LMD_TYPE_STRING ? (size_t)it2s(bytes)->len : 0;
+    if (it2i(values[3]) == 0) {
+        file_reader_event(reader.get(), "loadstart", 0, total);
+        if (file_reader_loading(state.get(), generation)) {
+            Item next[] = {reader.get(), blob.get(), generation, (Item){.item = i2it(1)}};
+            js_schedule_native_env(dom_schedule_task, file_reader_read_task, 0, next, 4);
+        }
+        return make_js_undefined();
+    }
+    lam::Temp<char> uri(blob_data_uri(blob.get()));
+    if (uri) result.set(make_str(uri.get()));
+    file_reader_event(reader.get(), "progress", total, total);
+    if (!file_reader_loading(state.get(), generation)) return make_js_undefined();
+    if (!uri) result.set(dom_realm_new_dom_exception(make_str("NotReadableError"), make_str("Blob data could not be read")));
+    js_elements_set_int(state.get(), uri ? FILE_READER_RESULT : FILE_READER_ERROR, result.get());
+    js_elements_set_int(state.get(), FILE_READER_READY, (Item){.item = i2it(2)});
+    file_reader_event(reader.get(), uri ? "load" : "error", total, total);
+    // a load handler may start the next read; that new operation owns its loadend.
+    if (it2i(js_elements_get_int(state.get(), FILE_READER_READY)) != 1)
+        file_reader_event(reader.get(), "loadend", total, total);
+    return make_js_undefined();
+}
+
+static Item file_reader_read_as_data_url(Item blob) {
+    RootFrame roots(3);
+    Rooted<Item> reader(roots, dom_realm_receiver()), source(roots, blob);
+    Rooted<Item> state(roots, file_reader_state(reader.get()));
+    if (item_is_error(state.get())) return state.get();
+    if (js_class_id(source.get()) != JS_CLASS_BLOB && js_class_id(source.get()) != JS_CLASS_FILE)
+        return dom_realm_throw_type_error("FileReader requires a Blob");
+    if (it2i(js_elements_get_int(state.get(), FILE_READER_READY)) == 1)
+        return dom_realm_throw(dom_realm_new_dom_exception(make_str("InvalidStateError"), make_str("FileReader is loading")));
+    Item generation = (Item){.item = i2it(it2i(js_elements_get_int(state.get(), FILE_READER_GENERATION)) + 1)};
+    js_elements_set_int(state.get(), FILE_READER_GENERATION, generation);
+    js_elements_set_int(state.get(), FILE_READER_READY, (Item){.item = i2it(1)});
+    js_elements_set_int(state.get(), FILE_READER_RESULT, ItemNull);
+    js_elements_set_int(state.get(), FILE_READER_ERROR, ItemNull);
+    // precise callback environments retain both the reader and immutable source until completion (D5.3.3).
+    Item values[] = {reader.get(), source.get(), generation, (Item){.item = i2it(0)}};
+    js_schedule_native_env(dom_schedule_task, file_reader_read_task, 0, values, 4);
+    return make_js_undefined();
+}
+
+static Item file_reader_abort(void) {
+    RootFrame roots(2);
+    Rooted<Item> reader(roots, dom_realm_receiver());
+    Rooted<Item> state(roots, file_reader_state(reader.get()));
+    if (item_is_error(state.get())) return state.get();
+    js_elements_set_int(state.get(), FILE_READER_RESULT, ItemNull);
+    if (it2i(js_elements_get_int(state.get(), FILE_READER_READY)) != 1) return make_js_undefined();
+    js_elements_set_int(state.get(), FILE_READER_GENERATION,
+        (Item){.item = i2it(it2i(js_elements_get_int(state.get(), FILE_READER_GENERATION)) + 1)});
+    js_elements_set_int(state.get(), FILE_READER_READY, (Item){.item = i2it(2)});
+    file_reader_event(reader.get(), "abort", 0, 0);
+    if (it2i(js_elements_get_int(state.get(), FILE_READER_READY)) != 1)
+        file_reader_event(reader.get(), "loadend", 0, 0);
     return make_js_undefined();
 }
 
@@ -1881,6 +2058,32 @@ extern "C" void js_register_clipboard_globals(Item global_this) {
     js_clipboard_install_interface(global_root.get(), "File", js_file_new, &g_file_proto);
     if (get_type_id(g_blob_proto) == LMD_TYPE_MAP) {
         js_set_prototype(g_file_proto, g_blob_proto);
+    }
+
+    // ---- FileReader DataURL reads -----------------------------------------
+    {
+        RootFrame roots(3);
+        Rooted<Item> constructor(roots, js_clipboard_install_interface(global_root.get(), "FileReader", file_reader_new, &g_file_reader_proto));
+        Rooted<Item> value(roots, ItemNull), descriptor(roots, ItemNull);
+        js_event_target_install_methods(g_file_reader_proto);
+        js_clipboard_set_method(g_file_reader_proto, "readAsDataURL", file_reader_read_as_data_url);
+        js_clipboard_set_method(g_file_reader_proto, "abort", file_reader_abort);
+        value.set(dom_realm_get_cstr(global_root.get(), "EventTarget"));
+        if (get_type_id(value.get()) == LMD_TYPE_FUNC)
+            dom_realm_set_prototype(g_file_reader_proto, dom_realm_get_cstr(value.get(), "prototype"));
+        const char* attributes[] = {"readyState", "result", "error"};
+        for (size_t slot = 0; slot < 3; slot++) {
+            value.set(js_new_native_payload_function(file_reader_getter, slot, 0));
+            dom_realm_install_accessor(g_file_reader_proto, make_str(attributes[slot]), value.get(), ItemNull, 0);
+        }
+        const char* constants[] = {"EMPTY", "LOADING", "DONE"};
+        for (size_t slot = 0; slot < 3; slot++) {
+            descriptor.set(js_new_object());
+            dom_realm_set_cstr(descriptor.get(), "value", (Item){.item = i2it((int64_t)slot)});
+            dom_realm_set_cstr(descriptor.get(), "enumerable", (Item){.item = b2it(true)});
+            dom_realm_define_property(g_file_reader_proto, make_str(constants[slot]), descriptor.get());
+            dom_realm_define_property(constructor.get(), make_str(constants[slot]), descriptor.get());
+        }
     }
 
     // ---- ClipboardItem ---------------------------------------------------

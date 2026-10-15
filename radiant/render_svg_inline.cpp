@@ -5530,7 +5530,8 @@ static bool svg_text_can_paint_native(const SvgTextLayout* layout, const SvgText
     // retain vector geometry for exports, paint servers, strokes, and transformed glyphs.
     return g_svg_active_rdcon && !ctx->semantic_target && ctx->font_ctx &&
         (ctx->fill_paint.kind == SVG_PAINT_COLOR || ctx->fill_paint.kind == SVG_PAINT_CURRENT_COLOR) && ctx->stroke_none &&
-        !run->on_path && !run->paint_warped &&
+        // calibrated positions need vector coverage; integer bitmap placement loses fractional advances.
+        !run->on_path && !run->paint_warped && run->length_owner < 0 &&
         fabsf(run->glyph_scale_x - 1.0f) < 0.00001f &&
         matrix->e11 > 0.0f && matrix->e22 > 0.0f &&
         fabsf(matrix->e12) < 0.00001f && fabsf(matrix->e21) < 0.00001f &&

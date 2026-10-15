@@ -185,6 +185,7 @@ const char radiant_dom_interface_decl[] =
     "    scroll_to: fn(a0: any, a1: any) any, scroll_by: fn(a0: any, a1: any) any,\n"
     "    focus: fn() any, blur: fn() any, click: fn() any,\n"
     "    show_popover: fn() any, hide_popover: fn() any, show_modal: fn() any,\n"
+    "    close_dialog: fn(value: any) any,\n"
     "    reset: fn() any,\n"
     "    submit: fn() any, request_submit: fn(a0: any) any, check_validity: fn() any,\n"
     "    report_validity: fn() any, set_custom_validity: fn(a0: any) any,\n"

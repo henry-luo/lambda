@@ -370,8 +370,10 @@ static bool gradient_shape_record_constant_intervals(PaintList* paint, RdtPath* 
     return true;
 }
 
+static bool background_record_solid_rect(PaintList* paint, Rect rect, Color color, const RdtMatrix* transform);
+
 static bool gradient_image_record_shape(PaintList* paint, const ListStyleImage* image, Rect rect,
-    float pixel_ratio, const RdtMatrix* transform, RdtPath* shape) {
+    float pixel_ratio, const RdtMatrix* transform, RdtPath* shape, bool image_sampling = false) {
     if (!paint || !image || !isfinite(rect.x) || !isfinite(rect.y) ||
         !isfinite(rect.width) || !isfinite(rect.height) || rect.width <= 0.0f || rect.height <= 0.0f ||
         !isfinite(pixel_ratio) || pixel_ratio <= 0.0f) return false;
@@ -409,9 +411,13 @@ static bool gradient_image_record_shape(PaintList* paint, const ListStyleImage* 
         uniform_image = gradient_interval_is_uniform(stops.get(), count, 0.0f, last, &uniform_color);
     }
     if (uniform_image) {
-        // retain gradient alpha lowering; a solid path uses different edge/blend quantization.
+        // transparent gradients retain their alpha lowering below.
         render_set_uniform_gradient_stops(stops.get(), uniform_color);
         count = 2;
+    }
+    if (uniform_image && uniform_color.a == 255 && !image_sampling && !shape) {
+        // out-of-range stops can resolve to the same solid image as equal authored colors.
+        return background_record_solid_rect(paint, rect, uniform_color, transform);
     }
     RdtPath* path = shape ? rdt_path_clone(shape) : background_rect_path(rect);
     if (!path) return false;
@@ -449,6 +455,10 @@ static bool gradient_image_record_shape(PaintList* paint, const ListStyleImage* 
         paint_fill_radial_gradient(paint, path, geometry.cx, geometry.cy, geometry.rx,
             stops.get(), count, RDT_FILL_WINDING, transform, &ellipse);
     }
+    if (paint_list_count(paint) == index + 1) {
+        if (op == PAINT_FILL_LINEAR_GRADIENT) paint->data()[index].fill_linear_gradient.image_sampling = image_sampling;
+        else if (op == PAINT_FILL_RADIAL_GRADIENT) paint->data()[index].fill_radial_gradient.image_sampling = image_sampling;
+    }
     if (paint_list_take_path_payload(paint, index, op, op == PAINT_FILL_PATH ? nullptr : stops.get())) {
         if (op != PAINT_FILL_PATH) stops.release();
         return true;
@@ -458,8 +468,8 @@ static bool gradient_image_record_shape(PaintList* paint, const ListStyleImage* 
 }
 
 bool render_paint_gradient_image(PaintList* paint, const ListStyleImage* image, Rect rect,
-    float pixel_ratio, const RdtMatrix* transform) {
-    return gradient_image_record_shape(paint, image, rect, pixel_ratio, transform, nullptr);
+    float pixel_ratio, const RdtMatrix* transform, bool image_sampling) {
+    return gradient_image_record_shape(paint, image, rect, pixel_ratio, transform, nullptr, image_sampling);
 }
 
 bool render_paint_gradient_shape(PaintList* paint, const ListStyleImage* image, Rect rect,
@@ -1653,6 +1663,18 @@ static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, 
     return recorded;
 }
 
+static bool background_surface_opaque_color(const ImageSurface* surface, Color* color) {
+    if (!surface || !surface->pixels || surface->width <= 0 || surface->height <= 0) return false;
+    uint32_t pixel = *(const uint32_t*)surface->pixels;
+    if ((pixel >> 24) != 255) return false;
+    for (int row = 0; row < surface->height; row++) {
+        const uint32_t* pixels = (const uint32_t*)((const uint8_t*)surface->pixels + (size_t)row * surface->pitch);
+        for (int column = 0; column < surface->width; column++) if (pixels[column] != pixel) return false;
+    }
+    color->c = pixel;
+    return true;
+}
+
 bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
                              RenderExportTargetKind target) {
     if (!paint || !ui || !view || !view->bound || !view->boundary()->background) return false;
@@ -1675,10 +1697,25 @@ bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, R
     // PDF gradient fallbacks must composite the layers before the viewer reconstructs edge coverage.
     if (!render_effect_rasterize_paint_list(&layers, nullptr, &bounds, rect.width, rect.height,
             false, density, &image, "[BACKGROUND_COMPOSITE]") || !image.surface) return false;
+    Color uniform = {};
+    if (target == RENDER_EXPORT_TARGET_PDF && background_surface_opaque_color(image.surface, &uniform)) {
+        // an opaque constant composite is a fill, with the same geometric edge as an authored solid color.
+        bool recorded = background_record_solid_rect(paint,
+            {image.x, image.y, image.width, image.height}, uniform, nullptr);
+        image_surface_destroy(image.surface);
+        return recorded;
+    }
+    RdtPath* extent = target == RENDER_EXPORT_TARGET_PDF
+        ? background_rect_path({image.x, image.y, image.width, image.height}) : nullptr;
+    if (target == RENDER_EXPORT_TARGET_PDF && !extent) { image_surface_destroy(image.surface); return false; }
+    // a captured fill ends at its coverage extent; PDF image sampling otherwise extends its last texel.
+    if (extent) paint_push_clip(paint, extent, nullptr);
     int index = paint_list_count(paint);
     paint_draw_image_resource(paint, image.surface, image.x, image.y, image.width, image.height,
         255, nullptr, image_surface_destroy);
-    return paint_list_count(paint) == index + 1;
+    bool recorded = paint_list_count(paint) == index + 1;
+    if (extent) { paint_pop_clip(paint); rdt_path_free(extent); }
+    return recorded;
 }
 
 /**

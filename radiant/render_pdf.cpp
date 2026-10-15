@@ -74,6 +74,9 @@ typedef struct PdfRenderContext : RenderContext {
     DisplayList page_backdrop_dl;
     bool page_backdrop_ready;
     PdfPaintLoweringState paint_state;
+    bool has_opaque_rect;
+    Rect opaque_rect;
+    Color opaque_rect_color;
     bool transform_emitted_stack[PDF_PAINT_TRANSFORM_STACK_MAX];
     int transform_emitted_depth;
     int transform_emitted_overflow_depth;
@@ -82,6 +85,8 @@ typedef struct PdfRenderContext : RenderContext {
 // Forward declarations
 static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text);
 static RenderBackend pdf_make_backend(PdfRenderContext* ctx);
+static bool pdf_push_clip_path(PdfRenderContext* ctx, RdtPath* path,
+    const RdtMatrix* transform, RdtFillRule rule = RDT_FILL_WINDING);
 
 
 // Error handler for libharu
@@ -305,6 +310,37 @@ static void pdf_render_rect(PdfRenderContext* ctx, float x, float y, float width
     } else {
         HPDF_Page_Stroke(ctx->current_page);
     }
+}
+
+static void pdf_flush_opaque_rect(PdfRenderContext* ctx) {
+    if (!ctx->has_opaque_rect) return;
+    const Rect& rect = ctx->opaque_rect;
+    pdf_render_rect(ctx, rect.x, rect.y, rect.width, rect.height, ctx->opaque_rect_color, true);
+    ctx->has_opaque_rect = false;
+}
+
+static void pdf_record_opaque_rect(PdfRenderContext* ctx, Rect rect, Color color) {
+    if (ctx->has_opaque_rect && color.c == ctx->opaque_rect_color.c) {
+        Rect& previous = ctx->opaque_rect;
+        const float positions[2][2] = {{previous.x, previous.y}, {rect.x, rect.y}};
+        const float sizes[2][2] = {{previous.width, previous.height}, {rect.width, rect.height}};
+        for (unsigned axis = 0; axis < 2; axis++) {
+            unsigned cross = 1 - axis;
+            if (positions[0][cross] != positions[1][cross] || sizes[0][cross] != sizes[1][cross] ||
+                positions[0][axis] > positions[1][axis] + sizes[1][axis] ||
+                positions[1][axis] > positions[0][axis] + sizes[0][axis]) continue;
+            float start = fminf(positions[0][axis], positions[1][axis]);
+            float end = fmaxf(positions[0][axis] + sizes[0][axis], positions[1][axis] + sizes[1][axis]);
+            // one opaque union preserves edge coverage before group alpha is applied.
+            if (axis == 0) { previous.x = start; previous.width = end - start; }
+            else { previous.y = start; previous.height = end - start; }
+            return;
+        }
+    }
+    pdf_flush_opaque_rect(ctx);
+    ctx->opaque_rect = rect;
+    ctx->opaque_rect_color = color;
+    ctx->has_opaque_rect = true;
 }
 
 static float pdf_coord_y(PdfRenderContext* ctx, float y) {
@@ -715,12 +751,17 @@ static void pdf_finish_effect_raster_fallback(PdfRenderContext* ctx) {
         &image,
         "[PDF_PAINT_IR]");
     ctx->paint_state.command_count += paint_list_count(&ctx->effect_fallback.paint_list);
-    bool drew_fallback = ok && image.surface &&
+    RdtPath* extent = ok && image.surface ? rdt_path_new() : nullptr;
+    if (extent) rdt_path_add_rect(extent, image.x, image.y, image.width, image.height, 0.0f, 0.0f);
+    bool clipped = extent && pdf_push_clip_path(ctx, extent, &ctx->paint_state.current_transform);
+    bool drew_fallback = clipped &&
         pdf_draw_abgr_image_preserve_alpha(ctx, (const uint32_t*)image.surface->pixels,
                                            image.surface->width, image.surface->height,
                                            image.surface->width,
                                            image.x, image.y, image.width, image.height,
                                            255, &ctx->paint_state.current_transform);
+    if (clipped) HPDF_Page_GRestore(ctx->current_page);
+    rdt_path_free(extent);
     pdf_paint_record_fallback(&ctx->paint_state, drew_fallback, nullptr);
     pdf_record_page_backdrop_paint_list(ctx, &ctx->effect_fallback.paint_list);
     if (image.surface) image_surface_destroy(image.surface);
@@ -730,7 +771,7 @@ static void pdf_finish_effect_raster_fallback(PdfRenderContext* ctx) {
 }
 
 static bool pdf_push_clip_path(PdfRenderContext* ctx, RdtPath* path,
-                               const RdtMatrix* transform, RdtFillRule rule = RDT_FILL_WINDING) {
+                               const RdtMatrix* transform, RdtFillRule rule) {
     if (!ctx || !path) return false;
     if (HPDF_Page_GSave(ctx->current_page) != HPDF_OK) return false;
     if (!pdf_render_path(ctx, path, transform)) {
@@ -842,10 +883,14 @@ static bool pdf_raster_fallback_gradient(PdfRenderContext* ctx,
     dl_destroy(&dl);
     arenas.destroy();
     if (!surface) return false;
-    // the snapshot already clips the path; another mask changes edge coverage.
-    bool ok = pdf_draw_abgr_image_preserve_alpha(ctx, (const uint32_t*)surface->pixels,
+    // PDF image sampling can extend the last texel past the painted path's geometric edge.
+    bool image_sampling = command->op == PAINT_FILL_LINEAR_GRADIENT
+        ? command->fill_linear_gradient.image_sampling : command->fill_radial_gradient.image_sampling;
+    bool clipped = !image_sampling && pdf_push_clip_path(ctx, path, transform);
+    bool ok = (image_sampling || clipped) && pdf_draw_abgr_image_preserve_alpha(ctx, (const uint32_t*)surface->pixels,
         surface->width, surface->height, surface->pitch / 4, left, top,
         (float)surface->width / density, (float)surface->height / density, 255, transform);
+    if (clipped) HPDF_Page_GRestore(ctx->current_page);
     image_surface_destroy(surface);
     return ok;
 }
@@ -1043,6 +1088,8 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
     for (int i = 0; i < paint.item_count(); i++) {
         PaintCmd* cmd = &paint.data()[i];
         state->command_count++;
+        if (cmd->op != PAINT_FILL_RECT && cmd->op != PAINT_BEGIN_SEMANTIC_GROUP &&
+            cmd->op != PAINT_END_SEMANTIC_GROUP) pdf_flush_opaque_rect(ctx);
         if (handle_transform_stack(cmd)) continue;
         if (handle_effect_stack(cmd)) continue;
 
@@ -1103,15 +1150,20 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
         case PAINT_FILL_RECT: {
             if (!caps || !caps->rects) break;
             PaintFillRect* p = &cmd->fill_rect;
+            bool buffer = state->active_effect_depth > 0 && !stack_transform && p->color.a == 255;
+            if (!buffer) pdf_flush_opaque_rect(ctx);
             Rect intersection;
             if (pdf_intersect_rect_clips(state, {p->x, p->y, p->w, p->h}, stack_transform, &intersection)) {
-                if (intersection.width > 0.0f && intersection.height > 0.0f)
-                    pdf_render_rect(ctx, intersection.x, intersection.y, intersection.width, intersection.height, p->color, true);
+                if (intersection.width > 0.0f && intersection.height > 0.0f) {
+                    if (buffer) pdf_record_opaque_rect(ctx, intersection, p->color);
+                    else pdf_render_rect(ctx, intersection.x, intersection.y, intersection.width, intersection.height, p->color, true);
+                }
                 state->emitted_count++;
                 break;
             }
             if (!stack_transform) {
-                pdf_render_rect(ctx, p->x, p->y, p->w, p->h, p->color, true);
+                if (buffer) pdf_record_opaque_rect(ctx, {p->x, p->y, p->w, p->h}, p->color);
+                else pdf_render_rect(ctx, p->x, p->y, p->w, p->h, p->color, true);
                 state->emitted_count++;
                 break;
             }
@@ -1274,12 +1326,12 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     unsigned char* str = text->text_data();
     RenderTextPaintIterator paint_iterator(ctx, text);
     TextRect* text_rect;
-    while ((text_rect = paint_iterator.next())) {
+    while ((text_rect = paint_iterator.next(true))) {
     float base_x = (float)ctx->block.x + text_rect->x, y = (float)ctx->block.y + text_rect->y;
 
     PaintGlyphRun run = {};
     lam::Temp<char> text_content(render_text_rect_glyph_run(text, text_rect, &ctx->font, ctx->color,
-        ctx->block.x, ctx->block.y, &run));
+        ctx->block.x, ctx->block.y, &run, paint_iterator.reverses_clusters()));
     if (!text_content.get() || !text_content.get()[0]) continue;
 
     // Set font if available

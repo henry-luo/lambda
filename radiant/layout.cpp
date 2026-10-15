@@ -3013,6 +3013,15 @@ static bool layout_inline_span_has_content_on_line(View* view, int line_number) 
     return view->inline_line_number == line_number;
 }
 
+static float layout_applied_inline_relative_y(View* view) {
+    float offset = 0.0f;
+    for (View* parent = view->parent; parent && parent->view_type == RDT_VIEW_INLINE; parent = parent->parent) {
+        ViewElement* span = lam::view_require_element(parent);
+        if (span->position) offset += span->positionp()->inline_relative_y;
+    }
+    return offset;
+}
+
 void view_vertical_align(LayoutContext* lycon, View* view) {
     // CSS 2.1 §10.8.1: The line box height is determined by baseline-aligned content
     float baseline_line_height = 0.0f;
@@ -3095,6 +3104,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             } else {
                 rect->y = lycon->block.advance_y + vertical_offset;
             }
+            // a closed relative inline already shifted earlier lines; rebasing its last line must retain that shift.
+            rect->y += layout_applied_inline_relative_y(view);
             rect = rect->next;
         }
         adjust_text_bounds(text_view);
@@ -3115,7 +3126,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         float vertical_offset = calculate_vertical_align_offset(
             lycon, lycon->line.vertical_align, item_height, line_height,
             baseline_pos, item_baseline, lycon->line.vertical_align_offset);
-        view->y = lycon->block.advance_y + vertical_offset;
+        view->y = lycon->block.advance_y + vertical_offset + layout_applied_inline_relative_y(view);
     }
     else if (view->view_type == RDT_VIEW_MARKER) {
         ViewMarker* marker = lam::view_require<RDT_VIEW_MARKER>(view);
@@ -5729,6 +5740,10 @@ extern "C" bool dom_engine_layout_active(DomDocument* doc) {
         if (s_layout_active_documents[index] == doc) return true;
     }
     return false;
+}
+
+extern "C" void dom_engine_resolve_scrolled_geometry(DomDocument* doc) {
+    if (doc && !dom_engine_layout_active(doc)) layout_resolve_scrolled_sticky(doc->view_tree);
 }
 
 static bool layout_container_compute_value(void* context, const CssValue* value, CssMathResult* result) {

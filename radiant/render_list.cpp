@@ -30,7 +30,7 @@ bool render_paint_marker_image(PaintList* paint, UiContext* ui, ViewSpan* marker
         : font && font->style ? font_prop_used_size(font->style) : 16.0f;
     Rect rect = marker_image_rect(marker, prop, origin_x, origin_y, font_size, 1.0f);
     if (prop->is_image_marker)
-        return render_paint_gradient_image(paint, &prop->image, rect, ui_context_raster_scale(ui));
+        return render_paint_gradient_image(paint, &prop->image, rect, ui_context_raster_scale(ui), nullptr, true);
     if (!prop->image.url || strcmp(prop->image.url, "none") == 0) return false;
     ImageSurface* image = load_document_image(ui->document, ui, prop->image.url);
     if (!image) return false;
@@ -75,7 +75,7 @@ void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
         rc_push_clip(rdcon, clip, nullptr);
         // all backends record the same gradient image; retained effects own its payloads.
         bool painted = render_paint_gradient_image(rdcon->paint_list, &marker_prop->image,
-            image_rect, scale, &transform);
+            image_rect, scale, &transform, true);
         if (painted) {
             paint_ir_lower_raster_fragment(rdcon->paint_list, rdcon->dl);
             paint_list_clear(rdcon->paint_list);

@@ -1896,8 +1896,11 @@ TEST_F(DomIntegrationTest, UiRepeatedValuesHaveIndependentDomOccurrences) {
     EXPECT_EQ(second->next_sibling, nullptr);
     EXPECT_EQ(third->next_sibling, nullptr);
 
-    // later builds retain the materialized occurrences instead of stealing or cloning them again.
-    EXPECT_EQ(build_dom_tree_from_element(tree.element, doc, nullptr), root);
+    // a new presentation boundary copies ordinary values, even in the same arena (D4.5.3v2).
+    DomElement* next_root = build_dom_tree_from_element(tree.element, doc, nullptr);
+    ASSERT_NE(next_root, nullptr);
+    EXPECT_NE(next_root, root);
+    EXPECT_NE(next_root->first_child, root->first_child);
     EXPECT_EQ(root->first_child->as_element()->first_child, first);
     EXPECT_EQ(first->next_sibling, second);
     EXPECT_EQ(root->last_child->as_element()->first_child, third);
@@ -1939,6 +1942,7 @@ TEST_F(DomIntegrationTest, UiChildRelinkRetainsCommentIdentity) {
         input->root = root_item;
         DomElement* root = build_dom_tree_from_element(root_item.element, doc, nullptr);
         ASSERT_NE(root, nullptr);
+        Item occurrence = {.element = dom_element_to_element(root)};
         DomNode* original = root->first_child;
         ASSERT_NE(original, nullptr);
         ASSERT_TRUE(original->is_comment());
@@ -1948,7 +1952,8 @@ TEST_F(DomIntegrationTest, UiChildRelinkRetainsCommentIdentity) {
         // a sibling edit must preserve the comment wrapper and its generation (D4.5.1v4).
         MarkEditor editor(input, EDIT_MODE_INLINE);
         Item prefix = editor.builder()->createStringItem("prefix");
-        ASSERT_EQ(editor.dom_insert_child(root_item, 0, prefix).element, root_item.element);
+        // edit the mutable occurrence; the evaluator's ordinary value stays separate (D4.5.3v2).
+        ASSERT_EQ(editor.dom_insert_child(occurrence, 0, prefix).element, occurrence.element);
         ASSERT_TRUE(root->first_child->is_text());
         EXPECT_EQ(root->first_child->next_sibling, original);
         EXPECT_EQ(original->next_sibling, span);
@@ -1957,10 +1962,11 @@ TEST_F(DomIntegrationTest, UiChildRelinkRetainsCommentIdentity) {
         ASSERT_TRUE(dom_comment_remove(original->as_comment()));
         EXPECT_EQ(root->first_child, span);
         EXPECT_EQ(root->last_child, span);
-        EXPECT_EQ(root_item.element->length, 1);
+        EXPECT_EQ(occurrence.element->length, 1);
+        EXPECT_EQ(root_item.element->length, 2);
 
         Item inserted = builder.element(tag).child(builder.createStringItem("inserted")).final();
-        ASSERT_EQ(editor.dom_insert_child(root_item, 0, inserted).element, root_item.element);
+        ASSERT_EQ(editor.dom_insert_child(occurrence, 0, inserted).element, occurrence.element);
         ASSERT_TRUE(root->first_child->is_comment());
         EXPECT_EQ(root->first_child->as_comment()->native_element, inserted.element);
         EXPECT_EQ(root->first_child->next_sibling, span);

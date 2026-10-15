@@ -210,6 +210,12 @@ bool render_image_project_pixels(const uint32_t* pixels, int width, int height, 
     source.width = width; source.height = height; source.pitch = stride * 4; source.pixels = (void*)pixels;
     Rect source_rect = {0, 0, (float)width, (float)height};
     Rect sampling_rect = repeated_tile ? *repeated_tile : destination;
+    // affine axis-aligned minification has the same pixel footprint as an ordinary CPU blit.
+    float footprint_x = fabsf(inverse.e11 / inverse.e33) * width / sampling_rect.width;
+    float footprint_y = fabsf(inverse.e22 / inverse.e33) * height / sampling_rect.height;
+    bool area_sample = mode == SCALE_MODE_LINEAR && !repeated_tile &&
+        inverse.e12 == 0.0f && inverse.e21 == 0.0f && inverse.e31 == 0.0f && inverse.e32 == 0.0f &&
+        (footprint_x > 1.0f || footprint_y > 1.0f);
     double x_scale = 1.0, y_scale = 1.0;
     if (mode == SCALE_MODE_PIXELATED && matrix.e31 == 0.0f &&
         matrix.e32 == 0.0f && matrix.e33 != 0.0f) {
@@ -249,6 +255,9 @@ bool render_image_project_pixels(const uint32_t* pixels, int width, int height, 
                 } else if (mode == SCALE_MODE_PIXELATED) {
                     sample = raster_pixelated_sample(&source, &source_rect, &sampling_rect, u - 0.5f, v - 0.5f,
                         width, height, multiple_x, multiple_y, straight_alpha);
+                } else if (area_sample) {
+                    sample = raster_area_average(&source, sx - footprint_x * 0.5f, sy - footprint_y * 0.5f,
+                        sx + footprint_x * 0.5f, sy + footprint_y * 0.5f, straight_alpha);
                 } else {
                     sample = render_pixel_sample_bilinear((const uint8_t*)pixels, width, height, stride * 4,
                         sx - 0.5f, sy - 0.5f, mode == SCALE_MODE_LINEAR_WRAP, true, straight_alpha);

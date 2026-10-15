@@ -29,6 +29,7 @@ struct RenderTextPaintEntry {
     bool projected;
     bool hidden;
     bool marker;
+    bool rtl_cluster;
     float marker_x, marker_y;
 };
 
@@ -140,7 +141,7 @@ static void render_text_paint_collect(RenderTextPaintData* data, RenderContext* 
                         slice.hyphenated_leading_bytes = slice.hyphenated_trailing_bytes = 0;
                         slice.x = rect->x + rect->width - advance;
                         slice.width = width;
-                        render_text_paint_append(data, text, rect, text_font, &slice);
+                        render_text_paint_append(data, text, rect, text_font, &slice)->rtl_cluster = true;
                         cursor += bytes;
                     }
                 } else render_text_paint_append(data, text, rect, text_font);
@@ -398,7 +399,8 @@ static void render_text_project_source_rect(const TextRect* source, TextRect* pr
     projection->has_trailing_ellipsis = source->has_trailing_ellipsis;
 }
 
-TextRect* RenderTextPaintIterator::next() {
+TextRect* RenderTextPaintIterator::next(bool combine_visual_rtl) {
+    reverse_visual_clusters = false;
     context->font = saved_font;
     context->color = saved_color;
     if (pending_marker) {
@@ -440,6 +442,38 @@ TextRect* RenderTextPaintIterator::next() {
         if (low == data->entries->length) return source_rect();
         RenderTextPaintEntry* entry = (RenderTextPaintEntry*)data->entries->data[low];
         if (entry->source_rect != source || !entry->projected) return source_rect();
+        if (combine_visual_rtl && entry->rtl_cluster) {
+            // vector outlines consume one visual run per source line, just as an explicit visual-order reference does.
+            render_text_project_source_rect(source, &projection);
+            float left = INFINITY, right = -INFINITY;
+            int first = projection.start_index + projection.length, last = projection.start_index;
+            bool combined_marker = false;
+            for (int index = low; index < data->entries->length; index++) {
+                RenderTextPaintEntry* part = (RenderTextPaintEntry*)data->entries->data[index];
+                if (part->source_rect != source) break;
+                if (part->marker) {
+                    if (saved_font.style == data->font.style && saved_color.c == data->color.c) {
+                        combined_marker = true;
+                        left = fminf(left, part->marker_x);
+                        right = fmaxf(right, part->marker_x + data->marker_width);
+                    } else pending_marker = lam::up(part);
+                }
+                if (part->length <= 0) continue;
+                left = fminf(left, part->x); right = fmaxf(right, part->x + part->width);
+                first = min(first, part->start_index); last = max(last, part->start_index + part->length);
+            }
+            pending_source = nullptr;
+            if (first >= last) return next(combine_visual_rtl);
+            if (first != projection.start_index || last != projection.start_index + projection.length) {
+                projection.has_trailing_hyphen = false;
+                projection.trailing_hyphenate_character = nullptr;
+            }
+            projection.x = left; projection.width = right - left;
+            projection.start_index = first; projection.length = last - first;
+            projection.has_trailing_ellipsis = combined_marker;
+            reverse_visual_clusters = true;
+            return &projection;
+        }
         if (low + 1 < data->entries->length &&
             ((RenderTextPaintEntry*)data->entries->data[low + 1])->source_rect == source) {
             pending_source = lam::up(source);
@@ -450,7 +484,7 @@ TextRect* RenderTextPaintIterator::next() {
             saved_font.style == data->font.style && saved_color.c == data->color.c;
         if (entry->marker && !combined_marker) pending_marker = lam::up(entry);
         if (!entry->length) {
-            if (pending_marker) return next();
+            if (pending_marker) return next(combine_visual_rtl);
             continue;
         }
         render_text_project_source_rect(source, &projection);
@@ -1356,8 +1390,8 @@ static int collect_skip_ink_gaps(TextDecorationPaintContext* context, unsigned c
 static bool draw_deco_with_gaps(TextDecorationPaintContext* context, Rect rect, uint32_t color,
         SkipInkGap* gaps, int gap_count, RdtPath* decoration = nullptr,
         float stroke_width = 0.0f) {
-    RdtPath* clip = decoration && gap_count ? rdt_path_new() : nullptr;
-    if (decoration && gap_count && !clip) {
+    RdtPath* clip = decoration ? rdt_path_new() : nullptr;
+    if (decoration && !clip) {
         context->failed = true;
         log_error("[TEXT_DECO_GAPS] cannot allocate decoration gap clip");
         return false;
@@ -1810,11 +1844,32 @@ bool render_paint_text_emphasis(PaintList* paint, FontContext* fonts,
 
 
 char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
-        const FontBox* font, Color color, float block_x, float block_y, PaintGlyphRun* run) {
+        const FontBox* font, Color color, float block_x, float block_y, PaintGlyphRun* run,
+        bool reverse_clusters, const char** logical_text) {
     if (!text || !text_rect || !font || !font->style || !run) return nullptr;
     char* content = render_text_create_export_segment(text->text_data(), text_rect,
         render_text_inherited_transform(text), true, get_white_space_value(text));
     if (!content) return nullptr;
+    if (reverse_clusters) {
+        size_t length = strlen(content);
+        char* visual = (char*)mem_alloc((length + 1) * 2, MEM_CAT_RENDER);
+        if (!visual) { mem_free(content); return nullptr; }
+        // preserve logical bytes beside the paint string for accessible SVG labels.
+        memcpy(visual + length + 1, content, length + 1);
+        const unsigned char* cursor = (const unsigned char*)content;
+        const unsigned char* end = cursor + length;
+        char* destination = visual + length;
+        *destination = '\0';
+        while (cursor < end) {
+            size_t bytes = render_text_paint_cluster_bytes(cursor, end);
+            destination -= bytes;
+            memcpy(destination, cursor, bytes);
+            cursor += bytes;
+        }
+        mem_free(content);
+        content = visual;
+        if (logical_text) *logical_text = visual + length + 1;
+    } else if (logical_text) *logical_text = content;
     CssEnum justify_mode = text_justify_computed_value(text->parent);
     RenderTextJustification justification = render_text_justification(text_rect, justify_mode);
     const FontProp* style = font->style;

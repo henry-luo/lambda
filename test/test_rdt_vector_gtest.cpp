@@ -2354,7 +2354,11 @@ TEST(GradientImagePaintTest, SourceReplacementAndRecordingReleasePreserveDeferre
                 PaintSvgLoweringStats stats = {};
                 paint_ir_lower_svg(&paint, svg, nullptr, &stats);
                 EXPECT_EQ(stats.unsupported_count, 0);
-                EXPECT_EQ(stats.emitted_count, 1);
+                // opaque constant images now use a solid rectangle inside the retained transform pair.
+                bool solid = strstr(svg->str, "<rect ") != nullptr;
+                EXPECT_EQ(stats.emitted_count, solid ? 3 : 1);
+                EXPECT_EQ(stats.command_count, solid ? 3 : 1);
+                if (solid) EXPECT_NE(strstr(svg->str, "<g transform="), nullptr);
                 EXPECT_GT(svg->length, 0u);
                 strbuf_free(svg);
                 uint32_t pixels[16 * 16] = {};
@@ -2536,6 +2540,25 @@ TEST(ImagePaintTest, PixelatedAffineFootprintsPreserveDevicePixelBlocks) {
                 unsigned quadrant = (y >= height / 2 ? 2 : 0) + (x >= width / 2 ? 1 : 0);
                 EXPECT_EQ(pixels[y * width + x], expected[item.quadrants[quadrant]]) << x << "," << y;
             }
+            mem_free(pixels);
+        }
+}
+
+TEST(ImagePaintTest, AffineMinificationAveragesTheSourceFootprint) {
+    for (bool straight : {false, true}) for (bool translucent : {false, true})
+        for (bool flipped : {false, true}) {
+            uint32_t source[9];
+            for (unsigned i = 0; i < 9; i++) {
+                source[i] = translucent ? (i == 4 ? 0u : 0x80ffffffu) : (i == 4 ? 0xff000000u : 0xffffffffu);
+                if (!straight) source[i] = render_pixel_premultiply_abgr(source[i]);
+            }
+            RdtMatrix transform = rdt_matrix_scale(flipped ? -1.0f / 3.0f : 1.0f / 3.0f, 1.0f / 3.0f);
+            if (flipped) transform.e13 = 1.0f;
+            uint32_t* pixels = nullptr; Rect bounds = {};
+            ASSERT_TRUE(render_image_project_pixels(source, 3, 3, 3, {0, 0, 3, 3},
+                &transform, {0, 0, 1, 1}, SCALE_MODE_LINEAR, straight, &pixels, &bounds));
+            ASSERT_NE(pixels, nullptr);
+            EXPECT_EQ(pixels[0], translucent ? 0x72727272u : 0xffe3e3e3u);
             mem_free(pixels);
         }
 }

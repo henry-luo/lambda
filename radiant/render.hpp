@@ -1403,6 +1403,7 @@ typedef struct {
     lam::Up<RdtPath> path;  // the path drawn: borrowed, or owned_path
     lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     float x1, y1, x2, y2;
+    bool image_sampling; // a replaced CSS image retains image-edge sampling in vector fallbacks
     lam::Up<const RdtGradientStop> stops;  // the stops drawn: borrowed, or owned_stops
     lam::OwnArr<RdtGradientStop> owned_stops;  // set when this command took the stop array
     int stop_count;
@@ -1419,6 +1420,7 @@ typedef struct {
     lam::Up<RdtPath> path;  // the path drawn: borrowed, or owned_path
     lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     float cx, cy, r;
+    bool image_sampling;
     lam::Up<const RdtGradientStop> stops;  // the stops drawn: borrowed, or owned_stops
     lam::OwnArr<RdtGradientStop> owned_stops;  // set when this command took the stop array
     int stop_count;
@@ -3984,7 +3986,8 @@ void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
 bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
                              RenderExportTargetKind target);
 bool render_paint_gradient_image(PaintList* paint, const ListStyleImage* image, Rect rect,
-                                float pixel_ratio, const RdtMatrix* transform = nullptr);
+                                float pixel_ratio, const RdtMatrix* transform = nullptr,
+                                bool image_sampling = false);
 bool render_paint_gradient_shape(PaintList* paint, const ListStyleImage* image, Rect rect,
     float pixel_ratio, const RdtMatrix* transform, RdtPath* shape);
 
@@ -4714,10 +4717,12 @@ class RenderTextPaintIterator {
     TextRect projection;
     FontBox saved_font;
     Color saved_color;
+    bool reverse_visual_clusters = false;
 public:
     RenderTextPaintIterator(RenderContext* context, ViewText* text);
     ~RenderTextPaintIterator();
-    TextRect* next();
+    TextRect* next(bool combine_visual_rtl = false);
+    bool reverses_clusters() const { return reverse_visual_clusters; }
     RenderTextPaintIterator(const RenderTextPaintIterator&) = delete;
     RenderTextPaintIterator& operator=(const RenderTextPaintIterator&) = delete;
 };
@@ -4736,7 +4741,8 @@ char* render_text_create_export_segment(const unsigned char* text,
 // borrows (caller owns it; null when the rect paints nothing)
 char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
                                  const FontBox* font, Color color,
-                                 float block_x, float block_y, PaintGlyphRun* run);
+                                 float block_x, float block_y, PaintGlyphRun* run,
+                                 bool reverse_clusters = false, const char** logical_text = nullptr);
 
 // ===== render_vector_path.hpp =====
 struct RasterRenderContext;

@@ -238,6 +238,7 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     block->x += applied_x;  block->y += applied_y;
     // so we must also offset all descendants to move with the inline box
     if (block->view_type == RDT_VIEW_INLINE && (applied_x != 0 || applied_y != 0)) {
+        block->position->inline_relative_y = applied_y;
         layout_shift_inline_descendants(
             lam::view_require_element(block), applied_x, applied_y);
     }
@@ -331,6 +332,15 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
     LayoutAxisPair<float> scroll_end = layout_axis_pair(
         sticky_scrollport_axis_size(scroller, LAYOUT_AXIS_X),
         sticky_scrollport_axis_size(scroller, LAYOUT_AXIS_Y));
+    if (scroller->position && scroller->positionp()->position == CSS_VALUE_FIXED) {
+        // a fixed ancestor stops document scrolling, but its local origin is offset from the viewport.
+        float fixed_x = 0.0f, fixed_y = 0.0f;
+        layout_view_absolute_origin(scroller, &fixed_x, &fixed_y);
+        UiContext* ui = lycon ? lycon->ui_context.get()
+            : (scroller->doc ? (UiContext*)scroller->doc->js.host_ui_context : nullptr);
+        scroll_start = layout_axis_pair(-fixed_x, -fixed_y);
+        if (ui) scroll_end = layout_axis_pair(ui->viewport_width, ui->viewport_height);
+    }
     // Walk from element's parent up to (not including) the scroller, accumulating
     LayoutAxisPair<float> offset_to_scroller = {};
     for (ViewElement* p = block->parent_view(); p && p != scroll_ancestor; p = p->parent_view()) {
