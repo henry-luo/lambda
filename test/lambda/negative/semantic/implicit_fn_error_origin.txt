@@ -1,0 +1,1 @@
+error[E208]: function 'branches' may return error from call to 'first': call result has type int | error

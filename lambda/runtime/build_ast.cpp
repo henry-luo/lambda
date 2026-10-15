@@ -1493,7 +1493,7 @@ void record_type_error(Transpiler* tp, int line, const char* format, ...) {
     record_type_error_code(tp, line, ERR_TYPE_MISMATCH, "%s", error_msg);
 }
 
-static void record_semantic_error_message(Transpiler* tp, SourceSpan span,
+static LambdaError* record_semantic_error_message(Transpiler* tp, SourceSpan span,
         LambdaErrorCode code, const char* error_msg) {
     LambdaSourcePoint start = lambda_source_span_start_point(tp->source, span);
     LambdaSourcePoint end = lambda_source_span_end_point(tp->source, span);
@@ -1509,7 +1509,7 @@ static void record_semantic_error_message(Transpiler* tp, SourceSpan span,
         log_warn("static_warning[E%d] at %s:%u:%u: %s", code,
             tp->reference ? tp->reference : "<unknown>",
             start.row + 1, start.column + 1, error_msg);
-        return;
+        return error;
     }
     tp->error_count++;
 
@@ -1527,6 +1527,7 @@ static void record_semantic_error_message(Transpiler* tp, SourceSpan span,
     if (tp->error_count >= tp->max_errors) {
         log_error("error_threshold: max errors (%d) reached", tp->max_errors);
     }
+    return error;
 }
 
 // Record a semantic error against a source span.
@@ -3214,27 +3215,12 @@ static bool report_missing_named_parameter(Transpiler* tp, AstCallNode* call,
     return false;
 }
 
-bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
-        SourceSpan diagnostic_span, int arg_count, AstNode* injected) {
-    // a `function`-typed callee has no signature to validate against
-    TypeFunc* func_type = call && call->function
-        ? lambda_type_func_signature(call->function->type) : NULL;
-    if (!func_type) return true;
-    TypeParam* expected_param = func_type->param;
-    // Calls normally succeed. Source points scan from the input head, so only
-    // recover this diagnostic value on a failing path (D8.2.4).
-    int line = 0;
-    NameEntry* var_arg_root_entries[64];
-    int var_arg_root_count = 0;
-    bool parameter_short_circuits_error = false;
-    Type* binder_env[LAMBDA_MAX_FUNCTION_ARGS] = {};
-    bool binder_written[LAMBDA_MAX_FUNCTION_ARGS] = {};
-
+static int resolve_call_boundary_arguments(AstCallNode* call, AstNode* injected,
+        AstNode** by_param) {
     // Each parameter's argument, in parameter order. Named arguments bind by
     // name: walked by position, a direct call naming typed parameters out of
     // order was rejected with E207 (found with LR07-19). A parameter with no
     // argument, or a skipped one (ast_is_omitted_argument), has none to check.
-    AstNode* by_param[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     // S10.1.2v4: the pipe receiver fills slot zero outside the written argument list
     int slot_count = call->pipe_inject ? 1 : 0;
     if (slot_count) by_param[0] = injected;
@@ -3250,6 +3236,34 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
             by_param[slot_count++] = a;
         }
     }
+    return slot_count;
+}
+
+static bool parameter_short_circuits_argument_error(TypeParam* parameter, AstNode* argument) {
+    return parameter && argument && !ast_is_omitted_argument(argument) &&
+        parameter->contract_type && !lambda_type_accepts_error(parameter->contract_type) &&
+        lambda_type_accepts_error(argument->type);
+}
+
+bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
+        SourceSpan diagnostic_span, int arg_count, AstNode* injected) {
+    // a `function`-typed callee has no signature to validate against
+    TypeFunc* func_type = call && call->function
+        ? lambda_type_func_signature(call->function->type) : NULL;
+    if (!func_type) return true;
+    TypeParam* expected_param = func_type->param;
+    // Calls normally succeed. Source points scan from the input head, so only
+    // recover this diagnostic value on a failing path (D8.2.4).
+    int line = 0;
+    NameEntry* var_arg_root_entries[64];
+    int var_arg_root_count = 0;
+    bool parameter_short_circuits_error = false;
+    Type* binder_env[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    bool binder_written[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    AstNode* by_param[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    int slot_count = resolve_call_boundary_arguments(call, injected, by_param);
+    AstFuncNode* named_callee = ast_call_has_named_args(call)
+        ? ast_direct_call_function(call) : NULL;
 
     // Resolve every binder site before checking references. This makes a
     // same-name multi-site join independent of parameter order (TG13v2).
@@ -3407,9 +3421,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
         Type* full_type = parameter_boundary_type(expected_param);
         full_type = static_contract_resolve_binder(full_type, binder_env);
         if (binder_site) full_type = binder_site->bound;
-        if (expected_param->contract_type &&
-                !lambda_type_accepts_error(expected_param->contract_type) &&
-                lambda_type_accepts_error(arg->type)) {
+        if (parameter_short_circuits_argument_error(expected_param, arg)) {
             parameter_short_circuits_error = true;
         }
         StaticBoundaryResult relation = expected_param->binder
@@ -5821,15 +5833,33 @@ typedef struct ReturnErrorOriginScan {
 
 static bool find_first_return_error_call(AstNode* node, void* data) {
     ReturnErrorOriginScan* scan = (ReturnErrorOriginScan*)data;
-    if (node && node->node_type == AST_NODE_CALL_EXPR &&
-            lambda_type_has_proven_error(node->type)) {
+    // a contained error (`risky() or default`) does not reach the return.
+    // stop after the first origin instead of overwriting it with later calls.
+    if (scan->call || !node || !lambda_type_has_proven_error(node->type)) return false;
+    if (node->node_type == AST_NODE_CALL_EXPR) {
         scan->call = (AstCallNode*)node;
+        return false;
+    }
+    if (node->node_type == AST_NODE_BINARY && ((AstBinaryNode*)node)->op == OPERATOR_OR) {
+        walk_lambda_ast(((AstBinaryNode*)node)->right, find_first_return_error_call, data, false);
+        return false;
+    }
+    if (node->node_type == AST_NODE_IF_EXPR) {
+        AstIfNode* branch = (AstIfNode*)node;
+        walk_lambda_ast(branch->then, find_first_return_error_call, data, false);
+        walk_lambda_ast(branch->otherwise, find_first_return_error_call, data, false);
+        return false;
+    }
+    if (node->node_type == AST_NODE_HANDLER_EXPR) {
+        AstHandlerNode* handler = (AstHandlerNode*)node;
+        walk_lambda_ast(handler->body, find_first_return_error_call, data, false);
+        walk_lambda_ast(handler->value_body, find_first_return_error_call, data, false);
         return false;
     }
     return true;
 }
 
-static bool return_error_call_name(AstCallNode* call, const char** name, int* length) {
+static bool error_call_name(Transpiler* tp, AstCallNode* call, const char** name, int* length) {
     if (!call || !name || !length) return false;
     AstNode* callee = call->function;
     while (callee && callee->node_type == AST_NODE_PRIMARY) {
@@ -5851,7 +5881,60 @@ static bool return_error_call_name(AstCallNode* call, const char** name, int* le
             return true;
         }
     }
+    if (callee && callee->node_type == AST_NODE_MEMBER_EXPR) {
+        StrView member = ast_node_source(tp, callee);
+        *name = member.str;
+        *length = (int)member.length;
+        return true;
+    }
     return false;
+}
+
+static TypeFunc* call_function_signature(AstCallNode* call) {
+    AstNode* function = call ? boundary_unwrap_primary(call->function) : NULL;
+    return function ? lambda_type_func_signature(function->type) : NULL;
+}
+
+static AstNode* describe_return_error_call(AstCallNode* call, char* reason,
+        size_t capacity, bool* argument_error) {
+    TypeFunc* signature = call_function_signature(call);
+    if (call->can_raise) {
+        snprintf(reason, capacity, "callee declares a raised error channel (`^`)");
+    } else if (signature && !signature->may_return_error &&
+            !lambda_type_has_proven_error(function_success_result_type(signature))) {
+        // use the same slot binding and predicate as call validation (S7.7.3),
+        // including named operands and the pipe's virtual first argument.
+        AstNode* arguments[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+        int count = resolve_call_boundary_arguments(call, call->pipe_receiver, arguments);
+        AstFuncNode* definition = ast_direct_call_function(call);
+        AstNamedNode* named = definition ? definition->param : NULL;
+        TypeParam* parameter = signature->param;
+        for (int index = 0; parameter && index < count;
+                index++, parameter = parameter->next,
+                named = named ? (AstNamedNode*)named->next : NULL) {
+            AstNode* argument = arguments[index];
+            if (!parameter_short_circuits_argument_error(parameter, argument)) continue;
+            char actual_name[128], expected_name[128], parameter_name[128] = "";
+            lambda_type_format_name(argument->type, actual_name, sizeof(actual_name));
+            lambda_type_format_contract_name(parameter->contract_type,
+                expected_name, sizeof(expected_name));
+            if (named && named->name) {
+                snprintf(parameter_name, sizeof(parameter_name), " ('%.*s')",
+                    (int)named->name->len, named->name->chars);
+            }
+            snprintf(reason, capacity,
+                "argument %d%s has type %s, which may contain error; parameter requires %s",
+                index + 1, parameter_name, actual_name, expected_name);
+            *argument_error = true;
+            return argument;
+        }
+    }
+    if (!reason[0]) {
+        char result_name[128];
+        lambda_type_format_name(call->type, result_name, sizeof(result_name));
+        snprintf(reason, capacity, "call result has type %s", result_name);
+    }
+    return (AstNode*)call;
 }
 
 static void record_return_contract_error(Transpiler* tp, AstFuncNode* fn,
@@ -5861,12 +5944,30 @@ static void record_return_contract_error(Transpiler* tp, AstFuncNode* fn,
     if (site) walk_lambda_ast(site, find_first_return_error_call, &origin, false);
     const char* call_name = NULL;
     int call_name_length = 0;
-    if (lambda_type_has_proven_error(actual) &&
-            return_error_call_name(origin.call, &call_name, &call_name_length)) {
-        record_type_error_code(tp, (int)point.row + 1, ERR_RETURN_TYPE_MISMATCH,
-            "function '%.*s' may return error from call to '%.*s'; contain it with `or`, declare `| error`, or propagate with `^`",
+    if (lambda_type_has_proven_error(actual) && origin.call) {
+        if (!error_call_name(tp, origin.call, &call_name, &call_name_length)) {
+            call_name = "<function>";
+            call_name_length = 10;
+        }
+        char reason[384] = "", message[768], help[768], contract[128];
+        bool argument_error = false;
+        AstNode* cause = describe_return_error_call(origin.call, reason,
+            sizeof(reason), &argument_error);
+        snprintf(message, sizeof(message),
+            "function '%.*s' may return error from call to '%.*s': %s",
             fn->name ? (int)fn->name->len : 10,
-            fn->name ? fn->name->chars : "<function>", call_name_length, call_name);
+            fn->name ? fn->name->chars : "<function>", call_name_length, call_name, reason);
+        lambda_type_format_contract_name(expected, contract, sizeof(contract));
+        snprintf(help, sizeof(help),
+            "The %s return contract `%s` excludes error. %s"
+            "Recover with `call(...) or default`, return errors as data with `T | error`, "
+            "or declare `T^` and propagate with `call(...)^`.",
+            has_explicit_contract ? "declared" : "implicit", contract,
+            argument_error
+                ? "Narrow the argument to an error-free type or handle its error before this call. " : "");
+        LambdaError* error = record_semantic_error_message(tp, cause->source_span,
+            ERR_RETURN_TYPE_MISMATCH, message);
+        err_add_help(error, help);
         return;
     }
     char expected_name[128];
@@ -5956,22 +6057,9 @@ static void validate_function_return_contract(Transpiler* tp, AstFuncNode* fn,
 // consume an enforcing call; arbitrary wrappers must not hide the obligation.
 static void record_unhandled_error_call(Transpiler* tp, AstCallNode* call) {
     if (!tp || !call) return;
-    AstNode* function = boundary_unwrap_primary(call->function);
     const char* name = "function";
     int name_length = 8;
-    if (function && function->node_type == AST_NODE_SYS_FUNC) {
-        SysFuncInfo* info = ((AstSysFuncNode*)function)->fn_info;
-        if (info && info->name) {
-            name = info->name;
-            name_length = (int)strlen(name);
-        }
-    } else if (function && function->node_type == AST_NODE_IDENT) {
-        String* ident_name = ((AstIdentNode*)function)->name;
-        if (ident_name) {
-            name = ident_name->chars;
-            name_length = (int)ident_name->len;
-        }
-    }
+    error_call_name(tp, call, &name, &name_length);
     record_semantic_error_span(tp, call->source_span, ERR_UNHANDLED_ERROR,
         "error from '%.*s' must be handled: use '%.*s(...)^' to propagate, "
         "handle with '%.*s(...) ^ { ... }', or recover with '%.*s(...) or default'",
@@ -5996,11 +6084,6 @@ static bool match_has_error_handler(AstMatchNode* match) {
         if (match_arm_is_error_handler(arm)) return true;
     }
     return false;
-}
-
-static TypeFunc* call_function_signature(AstCallNode* call) {
-    AstNode* function = call ? boundary_unwrap_primary(call->function) : NULL;
-    return function ? lambda_type_func_signature(function->type) : NULL;
 }
 
 // A declared contract that textually admits error is a receiving position
