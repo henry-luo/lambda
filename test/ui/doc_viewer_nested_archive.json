@@ -1,0 +1,55 @@
+{
+  "name": "Mixed 7z and RAR5 nesting inside tar",
+  "html": "test/input/archive/nested.tar",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='nested.tar/inside.7z'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='nested.tar/inside.7z/file1'] > .tree-row .tree-label"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='nested.tar/inside.7z/file1'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "file1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='nested.tar/inside.rar'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='nested.tar/inside.rar/helloworld.txt'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview"
+      },
+      "equals": "hello libarchive test suite!\n"
+    }
+  ]
+}

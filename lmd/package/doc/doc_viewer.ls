@@ -1,7 +1,7 @@
 // doc_viewer.ls — bundled lambda.doc document viewer (D7.2.4)
 //
 // A read-only project browser built with Lambda's reactive UI. The left
-// panel browses local directories or captured ZIP trees; children load on demand.
+// panel browses local directories or captured archive trees; children load on demand.
 //
 // Run: ./lambda.exe view
 // With the startup splash: ./lambda.exe demo
@@ -32,11 +32,15 @@ let ICON_FONT = media.data_uri(input(sys.lambda.home# ++ "/package/doc/icons/set
 // --------------------------------------------------------------------------
 
 fn archive_extension(extension) => contains(
-  ["zip", "xlsx", "pptx", "jar", "war", "odt", "ods", "odp"], lower(extension)) or false
+  ["zip", "xlsx", "pptx", "jar", "war", "odt", "ods", "odp", "7z", "tar", "rar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst"], lower(extension)) or false
+fn archive_input_format(extension) => if (extension == "7z") '7z'
+  else if (extension == "rar") 'rar'
+  else if (contains(["tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "zst", "tzst"], extension)) 'tar'
+  else 'zip'
 fn entry_is_container(entry) => entry.is_dir == true or (archive_extension(entry.extension) or false)
 fn directory_entries(source) {
   let loaded = if (type(source) == element) {
-    if (source.is_dir or source.format == 'zip') source else input(source, 'zip')^
+    if (source.is_dir or source.entry_path == "") source else input(source, archive_input_format(lower(source.extension)))^
   } else { input(source)^ }
   let entries = if (type(loaded) == array) loaded else content(loaded)^;
   // The directory reader sorts names; keep that order within each group.

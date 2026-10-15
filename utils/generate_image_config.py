@@ -15,7 +15,10 @@ def write_changed(path, text):
 
 
 def main():
-    config = json.loads(Path(sys.argv[1]).read_text())['image_codecs']
+    settings = json.loads(Path(sys.argv[1]).read_text())
+    configs = [settings[name] for name in ('image_codecs', 'archive_codecs') if name in settings]
+    config = {key: [spec for group in configs for spec in group.get(key, [])]
+              for key in ('generated_files', 'dispatch_generators')}
     for spec in config['generated_files']:
         lines = ['/* generated from build_lambda_config.json; do not edit. */']
         lines += spec.get('preamble', [])

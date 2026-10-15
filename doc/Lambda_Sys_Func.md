@@ -1154,25 +1154,36 @@ Parse content from a file path or URL.
 `p#a.b` forces and then navigates. `input(p, format)` stays the
 explicit-format spelling, and `exists(p)` the probe that forces nothing.
 
-**Supported Input Formats**: `json`, `xml`, `html`, `xhtml`, `yaml`, `toml`, `ini`, `properties`, `csv`, `markdown`, `rst`, `asciidoc`, `wiki`, `org`, `textile`, `man`, `latex`, `typst`, `mark`, `rtf`, `pdf`, `eml`, `ics`, `vcf`, `css`, `math`, `graph`, `text`, `binary`, `zip` — see [Markup_Formats_Support.md](Markup_Formats_Support.md) for the tree each one produces and the `{type, flavor}` option form.
+**Supported Input Formats**: `json`, `xml`, `html`, `xhtml`, `yaml`, `toml`, `ini`, `properties`, `csv`, `markdown`, `rst`, `asciidoc`, `wiki`, `org`, `textile`, `man`, `latex`, `typst`, `mark`, `rtf`, `pdf`, `eml`, `ics`, `vcf`, `css`, `math`, `graph`, `text`, `binary`, `zip`, `7z`, `tar`, `rar`, `rar5` — see [Markup_Formats_Support.md](Markup_Formats_Support.md) for the tree each one produces and the `{type, flavor}` option form.
 
 Wiki dialects use `"wiki:<flavor>"` or `{type:"wiki", flavor:"zimwiki"}`.
 Unqualified `wiki` and `.wiki` input default to MediaWiki; other dialects
 require explicit selection. See the [ten wiki profiles](Markup_Formats_Support.md#15-wiki-dialect-coverage)
 for supported syntax, task/tag mappings, and current limits.
 
-**ZIP32/ZIP64** input returns an archive-backed `fs` element, including for
-ZIP-backed `.docx` and other package files. It captures and closes the complete
-source during `input()` (**S12.4.1v2**); listing children and reading metadata
-never decompress payloads. `content(file)^` and `input(member, format)^` force
-only that member, validate its CRC, and cache bytes/results/errors
-(**S14.3.1v2**). Ordinary directory input still returns child Paths.
+**Archive input** returns a captured `fs` tree. Supported native formats are
+ZIP32/ZIP64 (including ZIP-backed `.docx`/JAR packages), 7z, tar, legacy RAR,
+and RAR 5.0. `input()` captures and closes the source, then validates its
+index (**S12.4.1v3**). Ordinary directory input still returns child Paths.
 
-Use `input(path, 'binary')^` or `input(member, 'binary')^` for exact bytes;
-explicit formats override ZIP auto-detection. An empty binary source returns
-`null` (**S2.2.2v2**). Nested ZIP members remain binary by default and open
-only with explicit `'zip'`. Stored and DEFLATE are supported; encryption,
-split archives and other compression/container formats are rejected.
+ZIP, 7z and non-solid legacy-RAR member bytes decode on first content access;
+listing children never decodes their bodies. Solid 7z access can also decode
+predecessors, charged to the same expansion budget. Compressed tar and RAR5
+capture/check their payloads eagerly; member parsing stays lazy for every
+format (**S14.3.1v3**). Bytes, parse results and failures are cached.
+
+7z admits Copy/LZMA/LZMA2 with supported BCJ/Delta filters. Tar admits
+V7/ustar/pax/GNU files/directories and gzip/bzip2/xz/zstd wrappers (`.tgz`,
+`.tbz2`, `.txz`, `.tzst` aliases included). `'rar'` accepts either RAR signature;
+`'rar5'` requires RAR 5.0. Legacy solid RAR, encryption, split volumes,
+self-extracting archives, links/special entries and unadmitted methods are
+rejected. Native tar/RAR/7z input is unavailable in the browser WASM build.
+Archive writing remains ZIP-only; captured trees can be converted to ZIP.
+
+Use `input(path, 'binary')^` or `input(member, 'binary')^` for exact bytes.
+Explicit formats override auto-detection. An empty binary source returns
+`null` (**S2.2.2v2**). Nested archive members remain binary by default; open
+one explicitly with `'zip'`, `'7z'`, `'tar'`, `'rar'` or `'rar5'`.
 
 Input maps accept the bounded quota options listed in
 [ZIP I/O §9.1](../vibe/Lambda_IO_Zip.md#91-limits-and-output-options).

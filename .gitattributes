@@ -32,3 +32,6 @@ test/input/script_formats/*.ics -text whitespace=blank-at-eol,blank-at-eof,space
 
 # preserve the pinned upstream SoundFont header and its recorded checksum
 lib/tinysoundfont/tsf.h -text
+
+# preserve archive-reader upstream bytes, including the Android header's CRLF
+lib/zip/*.[ch] -text

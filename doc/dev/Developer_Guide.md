@@ -92,7 +92,10 @@ These libraries and tools are required on every platform.
 | **libcurl** | Built from source with mbedTLS | HTTP/HTTPS client library |
 | **mbedTLS** | System package | TLS/SSL for libcurl |
 | **zlib** | System package | Gzip compression (HTTP, PDF, etc.) |
-| **bzip2** | System package | Alternative compression format |
+| **bzip2** | System package | bzip2-compressed tar input |
+| **liblzma (xz)** | System package | Native 7z LZMA/LZMA2 and xz-compressed tar input |
+| **zstd** | System package | Zstandard-compressed tar input |
+| **libarchive** | Selected sources in `lib/zip/`, provenance in `lib/zip/VENDOR.md` | Memory-only 7z/tar/RAR/RAR5 input; bounded embedding under **D7.5.2** |
 
 #### Radiant Engine Libraries
 

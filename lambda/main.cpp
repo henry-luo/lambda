@@ -887,14 +887,14 @@ struct DocWindowLaunchOptions {
 };
 
 static bool lambda_view_path_is_archive(const char* path) {
-    if (zip_source_expected(path, nullptr, 0)) return true;
+    if (archive_source_format(path, nullptr, 0) != ARCHIVE_UNKNOWN) return true;
     FILE* stream = file_open_regular_read(path);
     if (!stream) return false;
-    uint8_t signature[4];
+    uint8_t signature[512];
     size_t size = fread(signature, 1, sizeof(signature), stream);
     fclose(stream);
     // only route by the signature here; input() validates and captures the archive.
-    return zip_source_expected(path, signature, size);
+    return archive_source_format(path, signature, size) != ARCHIVE_UNKNOWN;
 }
 
 // Parse argv[2..] for a document-window command. `--view-key` belongs to the
@@ -4109,7 +4109,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  The 'view' command opens a document in an interactive window.\n");
             printf("  Supports multiple document formats with full rendering and styling.\n");
             printf("  If no file is specified, opens the bundled lambda.doc document viewer.\n");
-            printf("  Directories and ZIP archives open as browsable file trees.\n"); // PRINTF_OK: user-facing CLI help.
+            printf("  Directories and ZIP/7z/tar/RAR archives open as browsable file trees.\n"); // PRINTF_OK: user-facing CLI help.
             printf("\nSupported Formats:\n");
             printf("  .pdf       Portable Document Format\n");
             fputs("  .docx      Word document (semantic content)\n", stdout);
@@ -4258,7 +4258,11 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
                 // Get file extension from Content-Type
                 effective_ext = content_type_to_extension(response->content_type);
-                if (zip_source_expected(filename, response->data, response->size)) effective_ext = ".zip";
+                ArchiveFormat archive_format = archive_source_format(filename, response->data, response->size);
+                if (archive_format != ARCHIVE_UNKNOWN) {
+                    static const char* extensions[] = {"", ".zip", ".7z", ".tar", ".rar", ".rar"};
+                    effective_ext = extensions[archive_format];
+                }
                 log_info("HTTP Content-Type: %s -> extension: %s",
                          response->content_type ? response->content_type : "(none)",
                          effective_ext ? effective_ext : "(none)");
@@ -4307,7 +4311,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 "browse", "lambda.doc.doc_viewer", "open_browser",
                 LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false
             };
-            log_info("VIEW_FILE_TREE: opening directory or ZIP archive: %s", filename);
+            log_info("VIEW_FILE_TREE: opening directory or archive: %s", filename);
             exit_code = view_lambda_document_transform_with_events(filename, &browser_transform,
                 nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump, launch.fullscreen);
         } else if (is_graph_file && graph_view_key) {

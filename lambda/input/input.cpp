@@ -2128,11 +2128,13 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
     // limiting detection to `auto` silently sent flavorless .dsl files to DOT.
     const char* detected_graph_flavor = flavor ? NULL
         : input_detect_graph_flavor(pathname, source, source_len);
+    ArchiveFormat detected_archive = archive_source_format(pathname, source, source_len);
     // Determine the effective type to use
     if (!type || strcmp(type->chars, "auto") == 0) {
         // in-memory auto inputs may omit a URL, so content detection must stay null-safe.
         if (eps_source_expected(pathname, source, source_len)) effective_type = "eps";
-        else if (zip_source_expected(pathname, source, source_len)) effective_type = "zip";
+        else if (detected_archive != ARCHIVE_UNKNOWN)
+            effective_type = archive_format_name(detected_archive);
         else if (detected_graph_flavor) effective_type = "graph";
         // Auto-detect MIME type
         MimeDetector* detector = effective_type ? NULL : mime_detector_init();
@@ -2157,10 +2159,11 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
     log_debug("input_from_source: effective_type='%s'", effective_type ? effective_type : "null");
 
     Input* input = NULL;
-    if (effective_type && (!strcmp(effective_type, "zip") || !strcmp(effective_type, "binary"))) {
+    ArchiveFormat archive_format = archive_format_parse(effective_type);
+    if (effective_type && (archive_format != ARCHIVE_UNKNOWN || !strcmp(effective_type, "binary"))) {
         input = InputManager::create_input_with_name_parent(abs_url, name_parent);
         if (!input) return nullptr;
-        if (!strcmp(effective_type, "zip")) input_zip(input, source, source_len);
+        if (archive_format != ARCHIVE_UNKNOWN) input_archive(input, source, source_len, archive_format);
         else {
             MarkBuilder builder(input);
             Binary* bytes = source_len ? builder.createBinary(source, source_len) : nullptr;

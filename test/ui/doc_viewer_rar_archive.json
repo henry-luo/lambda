@@ -1,0 +1,37 @@
+{
+  "name": "Captured rar member preview",
+  "html": "test/input/archive/legacy.rar",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".project-root .tree-label"
+      },
+      "equals": "legacy.rar"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='legacy.rar/test.txt'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "test.txt"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview"
+      },
+      "equals": "test text file\r\n"
+    }
+  ]
+}

@@ -192,7 +192,8 @@
       "name": "bzip2",
       "version": "1.0.8",
       "lib": "/opt/homebrew/opt/bzip2/lib/libbz2.a",
-      "link": "static"
+      "link": "static",
+      "include": "/opt/homebrew/opt/bzip2/include"
     },
     {
       "name": "brotlidec",
@@ -309,6 +310,34 @@
         "lib/image/giflib",
         "lib/image/libnsbmp/include"
       ]
+    },
+    {
+      "name": "lzma",
+      "description": "Native LZMA/LZMA2/XZ archive decoding",
+      "include": "/opt/homebrew/opt/xz/include",
+      "lib": "/opt/homebrew/opt/xz/lib/liblzma.a",
+      "link": "static"
+    },
+    {
+      "name": "zstd",
+      "description": "Native Zstandard archive decoding",
+      "include": "/opt/homebrew/opt/zstd/include",
+      "lib": "/opt/homebrew/opt/zstd/lib/libzstd.a",
+      "link": "static"
+    },
+    {
+      "name": "archive-readers",
+      "description": "Pinned native archive reader source closure",
+      "lib": "build/lib/liblambda-archive-readers.a",
+      "include": "lib/zip",
+      "link": "static",
+      "build_target": "lambda-archive-readers"
+    },
+    {
+      "name": "archive-iconv",
+      "description": "Character-set conversion for native archive names",
+      "lib": "-liconv",
+      "link": "dynamic"
     }
   ],
   "dev_libraries": [
@@ -407,6 +436,79 @@
     }
   ],
   "targets": [
+    {
+      "name": "lambda-archive-readers",
+      "description": "Libarchive memory readers with Lambda embedding and bounded codec hooks",
+      "lang": "c17",
+      "pic": true,
+      "single_project": true,
+      "source_files": [
+        "lib/zip/archive_acl.c",
+        "lib/zip/archive_blake2s_ref.c",
+        "lib/zip/archive_blake2sp_ref.c",
+        "lib/zip/archive_check_magic.c",
+        "lib/zip/archive_crc32.c",
+        "lib/zip/archive_entry.c",
+        "lib/zip/archive_entry_copy_stat.c",
+        "lib/zip/archive_entry_sparse.c",
+        "lib/zip/archive_entry_stat.c",
+        "lib/zip/archive_entry_strmode.c",
+        "lib/zip/archive_entry_xattr.c",
+        "lib/zip/archive_options.c",
+        "lib/zip/archive_pack_dev.c",
+        "lib/zip/archive_parse_date.c",
+        "lib/zip/archive_ppmd7.c",
+        "lib/zip/archive_random.c",
+        "lib/zip/archive_read.c",
+        "lib/zip/archive_read_open_memory.c",
+        "lib/zip/archive_read_set_options.c",
+        "lib/zip/archive_read_support_filter_bzip2.c",
+        "lib/zip/archive_read_support_filter_none.c",
+        "lib/zip/archive_read_support_filter_xz.c",
+        "lib/zip/archive_read_support_filter_zstd.c",
+        "lib/zip/archive_read_support_format_7zip.c",
+        "lib/zip/archive_read_support_format_rar.c",
+        "lib/zip/archive_read_support_format_rar5.c",
+        "lib/zip/archive_read_support_format_raw.c",
+        "lib/zip/archive_read_support_format_tar.c",
+        "lib/zip/archive_string.c",
+        "lib/zip/archive_string_sprintf.c",
+        "lib/zip/archive_time.c",
+        "lib/zip/archive_util.c",
+        "lib/zip/archive_virtual.c",
+        "lib/zip/archive_windows.c",
+        "lib/archive_codec/codec.c"
+      ],
+      "includes": [
+        "lib/zip",
+        "lib/archive_codec",
+        "build_temp/archive-config/include"
+      ],
+      "defines": [
+        "LIBARCHIVE_STATIC",
+        "PLATFORM_CONFIG_H=\\\"lambda_archive_config.h\\\""
+      ],
+      "libraries": [
+        "lambda-lib",
+        "zlib",
+        "lzma",
+        "bzip2",
+        "zstd",
+        "archive-iconv"
+      ],
+      "link": "static",
+      "file_rules": [
+        {
+          "files": [
+            "lib/zip/**.c",
+            "lib/archive_codec/**.c"
+          ],
+          "build_options": [
+            "-UDEBUG"
+          ]
+        }
+      ]
+    },
     {
       "name": "lambda-image-codecs",
       "description": "Explicit image I/O source closure; no upstream build system",
@@ -1548,6 +1650,8 @@
         "lambda/core/shape_builder.cpp",
         "lambda/core/lambda-data.cpp",
         "lambda/io/collection_io.cpp",
+        "lambda/io/archive.cpp",
+        "lambda/io/archive_native.cpp",
         "lambda/io/zip_archive.cpp",
         "lambda/io/target.cpp",
         "lambda/core/lambda-decimal.cpp",
@@ -1622,14 +1726,17 @@
         "psl",
         "wldap32",
         "secur32",
-        "iphlpapi"
+        "iphlpapi",
+        "archive-readers",
+        "lzma",
+        "bzip2",
+        "archive-iconv"
       ],
       "macos": {
         "exclude_libraries": [
           "ngtcp2_crypto_ossl",
           "ngtcp2",
           "nghttp3",
-          "zstd",
           "ssh2",
           "idn2",
           "ssl",
@@ -1643,7 +1750,6 @@
           "ngtcp2_crypto_ossl",
           "ngtcp2",
           "nghttp3",
-          "zstd",
           "ssh2",
           "idn2",
           "ssl",
@@ -2590,7 +2696,8 @@
           "name": "bzip2",
           "description": "BZip2 compression",
           "lib": "/clang64/lib/libbz2.a",
-          "link": "static"
+          "link": "static",
+          "include": "/clang64/include"
         },
         {
           "name": "dwrite",
@@ -2622,6 +2729,18 @@
           "name": "zlib",
           "description": "Compression library (used by image/font codecs)",
           "lib": "/clang64/lib/libz.a",
+          "link": "static"
+        },
+        {
+          "name": "lzma",
+          "include": "/clang64/include",
+          "lib": "/clang64/lib/liblzma.a",
+          "link": "static"
+        },
+        {
+          "name": "archive-iconv",
+          "lib": "/clang64/lib/libiconv.a",
+          "include": "/clang64/include",
           "link": "static"
         }
       ],
@@ -2778,7 +2897,8 @@
         {
           "name": "bzip2",
           "lib": "-lbz2",
-          "link": "dynamic"
+          "link": "dynamic",
+          "include": "/usr/include"
         },
         {
           "name": "ThorVG",
@@ -2879,6 +2999,24 @@
           "name": "zlib",
           "description": "Compression library",
           "lib": "-lz",
+          "link": "dynamic"
+        },
+        {
+          "name": "lzma",
+          "include": "/usr/include",
+          "lib": "-llzma",
+          "link": "dynamic"
+        },
+        {
+          "name": "zstd",
+          "include": "/usr/include",
+          "lib": "-lzstd",
+          "link": "dynamic"
+        },
+        {
+          "name": "archive-iconv",
+          "lib": "-lc",
+          "include": "/usr/include",
           "link": "dynamic"
         }
       ],
@@ -3152,6 +3290,7 @@
         "lambda/input/parse_error.cpp",
         "lambda/input/source_tracker.cpp",
         "lambda/io/collection_io.cpp",
+        "lambda/io/archive.cpp",
         "lambda/io/zip_archive.cpp",
         "lambda/io/mark_builder.cpp",
         "lambda/io/mark_editor.cpp",
@@ -8156,6 +8295,122 @@
           "--sym=av1_rtcd",
           "--config=build_temp/image-config/aom/generic/config/aom_config.h",
           "lib/image/libaom/av1/common/av1_rtcd_defs.pl"
+        ]
+      }
+    ]
+  },
+  "archive_codecs": {
+    "generated_files": [
+      {
+        "path": "build_temp/archive-config/include/lambda_archive_config.h",
+        "preamble": [
+          "#pragma once",
+          "/* native memory-only archive profile and Lambda-owned allocator hooks. */"
+        ],
+        "defines": {
+          "HAVE_ERRNO_H": "1",
+          "HAVE_STDINT_H": "1",
+          "HAVE_INTTYPES_H": "1",
+          "HAVE_STDLIB_H": "1",
+          "HAVE_STRING_H": "1",
+          "HAVE_LIMITS_H": "1",
+          "HAVE_WCHAR_H": "1",
+          "HAVE_WCTYPE_H": "1",
+          "HAVE_SYS_TYPES_H": "1",
+          "HAVE_SYS_STAT_H": "1",
+          "HAVE_SYS_TIME_H": "1",
+          "HAVE_TIME_H": "1",
+          "HAVE_LOCALE_H": "1",
+          "HAVE_ZLIB_H": "1",
+          "HAVE_LZMA_H": "1",
+          "HAVE_BZLIB_H": "1",
+          "HAVE_ZSTD_H": "1",
+          "HAVE_MEMMOVE": "1",
+          "HAVE_MBRTOWC": "1",
+          "HAVE_WCRTOMB": "1",
+          "HAVE_WCTOMB": "1",
+          "HAVE_WMEMCPY": "1",
+          "HAVE_WMEMMOVE": "1",
+          "HAVE_DECL_SIZE_MAX": "1",
+          "HAVE_DECL_SSIZE_MAX": "1",
+          "HAVE_DECL_UINT32_MAX": "1",
+          "HAVE_DECL_INT32_MAX": "1",
+          "HAVE_DECL_INT32_MIN": "1",
+          "HAVE_DECL_UINT64_MAX": "1",
+          "HAVE_DECL_INT64_MAX": "1",
+          "HAVE_DECL_INT64_MIN": "1",
+          "HAVE_DECL_UINTMAX_MAX": "1",
+          "HAVE_DECL_INTMAX_MAX": "1",
+          "HAVE_DECL_INTMAX_MIN": "1",
+          "HAVE_STRERROR_R": "1",
+          "HAVE_STRFTIME": "1",
+          "HAVE_FSTAT": "1",
+          "HAVE_STAT": "1",
+          "HAVE_EILSEQ": "1",
+          "HAVE_LIBLZMA": "1",
+          "HAVE_LIBZSTD": "1",
+          "HAVE_ICONV_H": "1",
+          "HAVE_ICONV": "1",
+          "ICONV_CONST": "",
+          "LIBARCHIVE_FATAL_HANDLER": "lambda_archive_fatal",
+          "LIBARCHIVE_7ZIP_CODEC_ALLOWED": "lambda_archive_7zip_codec",
+          "LIBARCHIVE_FORMAT_OUTPUT": "lambda_archive_format_output",
+          "LIBARCHIVE_SINGLE_VOLUME": "1",
+          "LIBARCHIVE_STRICT_NAMES": "1"
+        },
+        "lines": [
+          "#include \"codec.h\"",
+          "#include <stdlib.h>",
+          "#include <string.h>",
+          "#include <wchar.h>",
+          "#include <stdio.h>",
+          "#include <errno.h>",
+          "#include <limits.h>",
+          "#include <sys/types.h>",
+          "#include <sys/stat.h>",
+          "#if !defined(_WIN32)",
+          "#include <unistd.h>",
+          "#define HAVE_UNISTD_H 1",
+          "#define HAVE_FCNTL_H 1",
+          "#define HAVE_GETEUID 1",
+          "#define HAVE_GETEGID 1",
+          "#define HAVE_GETUID 1",
+          "#define HAVE_GETGID 1",
+          "#define HAVE_MKSTEMP 1",
+          "#define HAVE_MBRLEN 1",
+          "#define HAVE_LANGINFO_H 1",
+          "#define HAVE_NL_LANGINFO 1",
+          "#endif",
+          "#if defined(__APPLE__)",
+          "#define HAVE_STAT_ST_MTIMESPEC_TV_NSEC 1",
+          "#define HAVE_STAT_ST_ATIMESPEC_TV_NSEC 1",
+          "#define HAVE_STAT_ST_CTIMESPEC_TV_NSEC 1",
+          "#define HAVE_ARC4RANDOM_BUF 1",
+          "#elif !defined(_WIN32)",
+          "#define HAVE_STAT_ST_MTIM_TV_NSEC 1",
+          "#define HAVE_STAT_ST_ATIM_TV_NSEC 1",
+          "#define HAVE_STAT_ST_CTIM_TV_NSEC 1",
+          "#endif",
+          "#define malloc lambda_archive_malloc",
+          "#define calloc lambda_archive_calloc",
+          "#define realloc lambda_archive_realloc",
+          "#define free lambda_archive_free",
+          "#define strdup lambda_archive_strdup",
+          "#define inflateInit2_ lambda_archive_inflate_init",
+          "#define inflate lambda_archive_inflate",
+          "#define lzma_properties_decode lambda_archive_lzma_properties",
+          "#define lzma_raw_decoder lambda_archive_lzma_raw",
+          "#define lzma_stream_decoder lambda_archive_lzma_stream",
+          "#define lzma_alone_decoder lambda_archive_lzma_alone",
+          "#define lzma_code lambda_archive_lzma_code",
+          "#define BZ2_bzDecompressInit lambda_archive_bzip_init",
+          "#define BZ2_bzDecompress lambda_archive_bzip_decode",
+          "#define ZSTD_createDStream lambda_archive_zstd_create",
+          "#define ZSTD_decompressStream lambda_archive_zstd_decode",
+          "#undef iconv_open",
+          "#undef iconv_close",
+          "#define iconv_open lambda_archive_iconv_open",
+          "#define iconv_close lambda_archive_iconv_close"
         ]
       }
     ]

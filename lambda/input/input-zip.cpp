@@ -38,7 +38,7 @@ struct FsNode {
 };
 struct FsTree {
     Input* input;
-    ZipArchive* archive;
+    Archive* archive;
     FsNode* nodes;
     uint32_t* children;
     Item tag;
@@ -56,7 +56,7 @@ static Item fs_error(Input* input, const char* member, const char* message) {
     if (!text) return ItemError;
     const char* source = input->url && ((Url*)input->url)->href ? ((Url*)input->url)->href->chars : "<memory>";
     strbuf_append_format(text, "%s%s%s: %s", source, member && *member ? "!" : "",
-        member ? member : "", message ? message : "ZIP operation failed");
+        member ? member : "", message ? message : "Archive operation failed");
     error->message = (char*)arena_alloc(input->arena, text->length + 1);
     if (error->message) memcpy(error->message, text->str, text->length + 1);
     strbuf_free(text);
@@ -68,37 +68,38 @@ static FsNode* fs_node_data(Item node) {
         ? (FsNode*)virtual_host_data(node) : nullptr;
 }
 bool fs_node_is(Item item) { return fs_node_data(item) != nullptr; }
-ZipArchive* fs_node_archive(Item node) {
+Archive* fs_node_archive(Item node) {
     FsNode* fs = fs_node_data(node);
     return fs ? fs->tree->archive : nullptr;
 }
 
 static Item fs_parse_uncached(FsNode* node, String* type, String* flavor) {
     FsTree* tree = node->tree;
-    ZipEntry* entry = zip_archive_entry(tree->archive, node->index);
+    ArchiveEntry* entry = archive_entry(tree->archive, node->index);
     if (entry->directory || node->index == 0) {
         return fs_error(tree->input, entry->path, "input() requires a member file");
     }
     ByteSpan bytes = {};
     ZipError error = {};
-    if (!zip_entry_bytes(tree->archive, node->index, &bytes, &error)) {
+    if (!archive_member_bytes(tree->archive, node->index, &bytes, &error)) {
         return fs_error(tree->input, entry->path, error.message);
     }
     const char* data = (const char*)byte_span_data(&bytes);
     size_t size = bytes.length;
     MarkBuilder builder(tree->input);
     bool automatic = !type || strcmp(type->chars, "auto") == 0;
-    if (type && strcmp(type->chars, "zip") == 0) {
+    ArchiveFormat nested_format = archive_format_parse(type ? type->chars : nullptr);
+    if (nested_format != ARCHIVE_UNKNOWN) {
         Url* source_url = (Url*)tree->input->url;
         Input* nested = InputManager::create_input(source_url && source_url->href ? url_parse(source_url->href->chars) : nullptr);
         if (!nested) return ItemError;
         // Nested archives share the parent's expansion ledger and nesting depth.
-        input_zip(nested, data, size, tree->archive->budget, tree->archive->depth + 1);
+        input_archive(nested, data, size, nested_format, tree->archive->budget, tree->archive->depth + 1);
         return nested->parse_failed ? fs_error(tree->input, entry->path,
             nested->parse_error_message) : nested->root;
     }
     if ((type && strcmp(type->chars, "binary") == 0) ||
-            (automatic && (zip_source_expected(entry->path, data, size) ||
+            (automatic && (archive_source_format(entry->path, data, size) != ARCHIVE_UNKNOWN ||
                 memchr(data, 0, size) || !str_utf8_valid(data, size)))) {
         if (!size) return ItemNull;
         Binary* binary = builder.createBinary(data, size);
@@ -141,7 +142,7 @@ Item fs_node_input(Item node, String* type, String* flavor) {
 
 static VirtualOpStatus fs_prepare(void* data, Item* error) {
     FsNode* node = (FsNode*)data;
-    ZipEntry* entry = zip_archive_entry(node->tree->archive, node->index);
+    ArchiveEntry* entry = archive_entry(node->tree->archive, node->index);
     if (node->index == 0 || entry->directory) return VIRTUAL_OP_OK;
     if (!node->prepared) {
         node->prepared = true;
@@ -167,7 +168,7 @@ static VirtualOpStatus fs_get(void* data, int64_t index, Item* out) {
     FsNode* node = (FsNode*)data;
     if (fs_prepare(data, out) == VIRTUAL_OP_ERROR) return VIRTUAL_OP_ERROR;
     if (index < 0 || index >= node->count) return VIRTUAL_OP_MISSING;
-    ZipEntry* entry = zip_archive_entry(node->tree->archive, node->index);
+    ArchiveEntry* entry = archive_entry(node->tree->archive, node->index);
     if (node->index == 0 || entry->directory) {
         *out = fs_wrap(&node->tree->nodes[node->tree->children[node->child_start + index]]);
         if (get_type_id(*out) == LMD_TYPE_ERROR) return VIRTUAL_OP_ERROR;
@@ -209,15 +210,15 @@ static Item fs_wrap(FsNode* node) {
     if (node->element.item) return node->element;
     FsTree* tree = node->tree;
     Input* input = tree->input;
-    ZipArchive* archive = tree->archive;
+    Archive* archive = tree->archive;
     uint32_t i = node->index;
-    ZipEntry* entry = zip_archive_entry(archive, i);
+    ArchiveEntry* entry = archive_entry(archive, i);
     MarkBuilder builder(input);
     const char* pathname = input->url && ((Url*)input->url)->pathname ? ((Url*)input->url)->pathname->chars : "";
     Path* path = (Path*)input->path;
     Velmt* element = (Velmt*)arena_calloc(input->arena, sizeof(Velmt));
     VArray* view = (VArray*)arena_calloc(input->arena, sizeof(VArray));
-    if (!element || !view) return fs_error(input, entry->path, "ZIP filesystem allocation failed");
+    if (!element || !view) return fs_error(input, entry->path, "Archive filesystem allocation failed");
     element->type_id = LMD_TYPE_VELMT; element->data = node; element->vtable = &fs_element_vtable;
     element->host_type = &fs_backend_brand; element->host_data = node;
     view->type_id = LMD_TYPE_VARRAY; view->data = node; view->vtable = &fs_children_vtable;
@@ -233,7 +234,13 @@ static Item fs_wrap(FsNode* node) {
     node->attrs[6] = extension ? (Item){.item = s2it(builder.createString(extension + 1))} : ItemNull;
     node->attrs[7] = directory ? ItemNull : builder.createUInt64(i ? entry->size : archive->snapshot->capacity);
     node->attrs[8] = ItemNull;
-    if (i && entry->dos_time) {
+    if (i && entry->has_modified) {
+        DateTime* modified = datetime_from_unix(input->pool, entry->modified_seconds);
+        if (modified) {
+            modified->millisecond = entry->modified_nanoseconds / 1000000;
+            node->attrs[8] = builder.createDateTime(*modified);
+        }
+    } else if (i && entry->dos_time) {
         uint32_t date = entry->dos_time >> 16, time = entry->dos_time & 0xffff;
         char stamp[32];
         snprintf(stamp, sizeof(stamp), "%04u-%02u-%02uT%02u:%02u:%02u",
@@ -244,10 +251,10 @@ static Item fs_wrap(FsNode* node) {
     }
     node->attrs[9] = i && entry->mode ? builder.createInt(entry->mode & 07777) : ItemNull;
     node->attrs[10] = builder.createBool(false);
-    node->attrs[11] = i ? ItemNull : builder.createSymbolItem("zip");
-    node->attrs[12] = i && !directory ? builder.createUInt64(entry->compressed_size) : ItemNull;
-    node->attrs[13] = i && !directory ? builder.createSymbolItem(entry->method ? "deflate" : "stored") : ItemNull;
-    node->attrs[14] = i && !directory ? builder.createUInt64(entry->crc) : ItemNull;
+    node->attrs[11] = i ? ItemNull : builder.createSymbolItem(archive_format_name(archive->format));
+    node->attrs[12] = i && !directory && archive->format == ARCHIVE_ZIP ? builder.createUInt64(entry->compressed_size) : ItemNull;
+    node->attrs[13] = i && !directory && archive->format == ARCHIVE_ZIP ? builder.createSymbolItem(entry->method ? "deflate" : "stored") : ItemNull;
+    node->attrs[14] = i && !directory && archive->format == ARCHIVE_ZIP ? builder.createUInt64(entry->crc) : ItemNull;
     node->attrs[15] = i ? ItemNull : input_snapshot_identity(builder,
         archive->snapshot->data, archive->snapshot->capacity);
     return node->element;
@@ -259,7 +266,7 @@ Item fs_node_content(Item node) {
     if (!fs) return ItemError;
     return fs_prepare(fs, &error) == VIRTUAL_OP_ERROR ? error : fs->view;
 }
-static void fs_tree_release(void* data) { zip_archive_release((ZipArchive*)data); }
+static void fs_tree_release(void* data) { archive_release((Archive*)data); }
 
 static void fs_input_failure(Input* input, const char* message) {
     input->parse_failed = true;
@@ -268,10 +275,10 @@ static void fs_input_failure(Input* input, const char* message) {
     input->parse_error_message = error ? error->message : nullptr;
 }
 
-void input_zip(Input* input, const void* bytes, size_t length,
+void input_archive(Input* input, const void* bytes, size_t length, ArchiveFormat format,
         ZipBudget* parent_budget, uint32_t depth) {
     ZipError error = {};
-    ZipArchive* archive = zip_archive_open(bytes, length, input_zip_limits, parent_budget, depth, &error);
+    Archive* archive = archive_open(bytes, length, format, input_zip_limits, parent_budget, depth, &error);
     if (!archive) {
         fs_input_failure(input, error.message);
         return;
@@ -280,11 +287,11 @@ void input_zip(Input* input, const void* bytes, size_t length,
     for (int i = 0; i < archive->entries->length; i++) {
         // Include cached attribute scalars/names, not only virtual headers.
         metadata_bytes += sizeof(FsNode) + sizeof(Velmt) + sizeof(VArray) + sizeof(Item) + 256 +
-            3 * strlen(zip_archive_entry(archive, i)->path);
+            3 * strlen(archive_entry(archive, i)->path);
     }
     if (metadata_bytes > archive->budget->limits.index_bytes - archive->index_bytes) {
-        zip_archive_release(archive);
-        fs_input_failure(input, "ZIP filesystem index limit exceeded");
+        archive_release(archive);
+        fs_input_failure(input, "Archive filesystem index limit exceeded");
         return;
     }
     archive->index_bytes += metadata_bytes;
@@ -292,35 +299,35 @@ void input_zip(Input* input, const void* bytes, size_t length,
     // No cached Item points into a runtime heap; dropping the root cannot free members.
     pool_add_cleanup(input->pool, fs_tree_release, archive);
     FsTree* tree = (FsTree*)arena_calloc(input->arena, sizeof(FsTree));
-    if (!tree) { fs_input_failure(input, "ZIP filesystem allocation failed"); return; }
+    if (!tree) { fs_input_failure(input, "Archive filesystem allocation failed"); return; }
     tree->input = input; tree->archive = archive;
     tree->nodes = (FsNode*)arena_calloc(input->arena, sizeof(FsNode) * archive->entries->length);
     tree->children = (uint32_t*)arena_calloc(input->arena, sizeof(uint32_t) * archive->entries->length);
-    if (!tree->nodes || !tree->children) { fs_input_failure(input, "ZIP filesystem allocation failed"); return; }
+    if (!tree->nodes || !tree->children) { fs_input_failure(input, "Archive filesystem allocation failed"); return; }
     MarkBuilder builder(input);
     tree->tag = builder.createSymbolItem("fs");
     for (int i = 0; i < FS_ATTR_COUNT; i++) tree->keys[i] = builder.createSymbolItem(fs_attributes[i]);
     const char* pathname = input->url && ((Url*)input->url)->pathname ? ((Url*)input->url)->pathname->chars : "";
     Path* path = path_new(input->pool, input->url && ((Url*)input->url)->scheme == URL_SCHEME_HTTPS
         ? PATH_SCHEME_HTTPS : input->url && ((Url*)input->url)->scheme == URL_SCHEME_HTTP ? PATH_SCHEME_HTTP : PATH_SCHEME_FILE);
-    if (!path) { fs_input_failure(input, "ZIP source path allocation failed"); return; }
+    if (!path) { fs_input_failure(input, "Archive source path allocation failed"); return; }
     Url* source_url = (Url*)input->url;
     if (source_url && source_url->host && source_url->host->len) {
         path = path_new_authority(input->pool, path->root_scheme, source_url->host->chars);
-        if (!path) { fs_input_failure(input, "ZIP source path allocation failed"); return; }
+        if (!path) { fs_input_failure(input, "Archive source path allocation failed"); return; }
     }
     const char* start = pathname;
     for (const char* at = pathname; ; at++) {
         if (*at && *at != '/') continue;
         if (at != start) path = path_extend_len(input->pool, path, start, at - start);
-        if (!path) { fs_input_failure(input, "ZIP source path allocation failed"); return; }
+        if (!path) { fs_input_failure(input, "Archive source path allocation failed"); return; }
         if (!*at) break;
         start = at + 1;
     }
     input->path = path;
     for (int i = 0; i < archive->entries->length; i++) {
         FsNode* node = &tree->nodes[i];
-        ZipEntry* entry = zip_archive_entry(archive, i);
+        ArchiveEntry* entry = archive_entry(archive, i);
         node->tree = tree; node->index = i;
         node->count = entry->child_count;
 
@@ -329,14 +336,14 @@ void input_zip(Input* input, const void* bytes, size_t length,
     uint32_t next_child = 0;
     for (int i = 0; i < archive->entries->length; i++) {
         tree->nodes[i].child_start = next_child;
-        ZipEntry* entry = zip_archive_entry(archive, i);
+        ArchiveEntry* entry = archive_entry(archive, i);
         for (uint32_t child = entry->first_child; child != UINT32_MAX;
-                child = zip_archive_entry(archive, child)->next_sibling) {
+                child = archive_entry(archive, child)->next_sibling) {
             tree->children[next_child++] = child;
         }
     }
     input->root = fs_wrap(&tree->nodes[0]);
-    if (get_type_id(input->root) == LMD_TYPE_ERROR) fs_input_failure(input, "ZIP filesystem allocation failed");
+    if (get_type_id(input->root) == LMD_TYPE_ERROR) fs_input_failure(input, "Archive filesystem allocation failed");
 }
 
 #include "../format/format.h"
@@ -350,6 +357,23 @@ static Item fs_materialized_attr(Item node, const char* name) {
         ? (Item){.item = node.element->get_attr(name).item} : ItemNull;
 }
 struct FsOutputBudget { uint64_t expanded; uint64_t index; };
+static void fs_output_metadata(ZipOutputEntry* entry, FsNode* node, Pool* pool) {
+    ArchiveEntry* original = archive_entry(node->tree->archive, node->index);
+    entry->mode = original->mode;
+    entry->dos_time = original->dos_time;
+    if (!original->has_modified) return;
+    // ZIP stores UTC civil fields here, at two-second precision and within its year range.
+    int64_t seconds = original->modified_seconds;
+    if (seconds < datetime_days_from_civil(1980, 1, 1) * 86400 ||
+            seconds >= datetime_days_from_civil(2108, 1, 1) * 86400) return;
+    DateTime* date = datetime_from_unix(pool, seconds);
+    if (!date) return;
+    uint32_t day = ((DATETIME_GET_YEAR(date) - 1980) << 9) |
+        (DATETIME_GET_MONTH(date) << 5) | date->day;
+    uint32_t time = (date->hour << 11) | (date->minute << 5) | (date->second / 2);
+    entry->dos_time = (day << 16) | time;
+}
+
 static ZipOutputEntry* fs_output_entry(Pool* pool, const StrBuf* path,
         FsOutputBudget* budget, const ZipLimits& limits, ZipError* error) {
     uint64_t charge = sizeof(ZipOutputEntry) + sizeof(void*) + path->length + 32;
@@ -409,10 +433,7 @@ static bool fs_output_walk(Item node, const char* parent, bool root,
             ZipOutputEntry* entry = fs_output_entry(pool, path, budget, limits, error);
             if (!entry) { strbuf_free(path); return false; }
             entry->directory = true;
-            if (fs) {
-                ZipEntry* original = zip_archive_entry(fs->tree->archive, fs->index);
-                entry->mode = original->mode; entry->dos_time = original->dos_time;
-            }
+            if (fs) fs_output_metadata(entry, fs, pool);
             ok = arraylist_append(entries, entry);
         }
         int64_t count = fs ? fs->count : node.element->length;
@@ -430,13 +451,12 @@ static bool fs_output_walk(Item node, const char* parent, bool root,
         if (available > limits.member_bytes) available = limits.member_bytes;
         if (fs) {
             ByteSpan bytes = {};
-            if (zip_archive_entry(fs->tree->archive, fs->index)->size > available) {
+            if (archive_entry(fs->tree->archive, fs->index)->size > available) {
                 strbuf_free(path); return fs_output_error(error, "ZIP output expansion limit exceeded");
             }
-            ok = zip_entry_bytes(fs->tree->archive, fs->index, &bytes, error);
+            ok = archive_member_bytes(fs->tree->archive, fs->index, &bytes, error);
             entry->bytes = byte_span_data(&bytes); entry->length = bytes.length;
-            ZipEntry* original = zip_archive_entry(fs->tree->archive, fs->index);
-            entry->mode = original->mode; entry->dos_time = original->dos_time;
+            fs_output_metadata(entry, fs, pool);
         } else {
             Item format = fs_materialized_attr(node, "format");
             StrBuf* payload = strbuf_new();

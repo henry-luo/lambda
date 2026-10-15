@@ -2,23 +2,31 @@
 
 > **Status:** IMPLEMENTED (2026-10-08), Phase 1 and Phase 2. ZIP32/ZIP64
 > input captures an immutable archive and validated index; decompression,
-> CRC validation, and member parsing are lazy under **S12.4.1v2/S14.3.1v2**.
+> CRC validation, and member parsing are lazy under **S12.4.1v3/S14.3.1v3**.
 > ZIP output supports archive trees and constructed filesystem elements.
+> **Phase 3:** IMPLEMENTED (2026-10-15), native read-only 7zip, tar, RAR and RAR5 input (§10).
+> Upstream reader sources live directly in `lib/zip`, with the authorized
+> embedding delta recorded under `patches/`.
 > Implementation and verification: [`impl/Lambda_Impl_IO_Zip.md`](impl/Lambda_Impl_IO_Zip.md).
 >
 > **Scope:** standard ZIP containers, including ZIP-backed document/package
 > files. Phase 1 provides read-only `input()` support; Phase 2 provides `output()`.
-> Passwords and encryption are excluded from both phases. Other archive
-> formats, including 7z, are future work.
+> Phase 3 extends the shared archive tree to 7z, tar, RAR and RAR5 input,
+> including common compressed tar streams. Passwords and encryption are excluded
+> from all phases.
+> Other archive formats and non-ZIP output remain future work.
 >
 > **Spec linkage:** §3–§4 → **D7.4.5v2** (virtual element/array carriers),
 > **S8.1.2v2** (element iteration), **S2.5.7v4** (`content` returns an array),
 > **S2.2.4** and **S2.6.2–S2.6.4** (empty files and element content);
-> §5 → **S12.4.1v2**, **S14.3.1v2** (eager archive capture, lazy member
+> §5 → **S12.4.1v3**, **S14.3.1v3** (eager archive capture, lazy member
 > decompression, and resource closure);
 > §6 and Appendix A → **D7.1.2v2**, **D7.5.2** (I/O ownership and policy),
 > **D4.1.3**, **D4.2.4**, **D5.3.3** (memory ownership and precise roots);
-> §7 → **S10.1.4**, **S12.1.1v2** (explicit procedural output).
+> §7 → **S10.1.4**, **S12.1.1v2** (explicit procedural output);
+> §10 → **D7.4.5v2**, **D7.5.2**, **D4.1.3/D4.2.4/D5.3.3** (reuse of
+> archive carriers, I/O policy, and lifetime); the format-specific evaluation
+> boundaries are recorded in **S12.4.1v3/S14.3.1v3**.
 >
 > **Related design:** [`Lambda_IO_File.md`](Lambda_IO_File.md),
 > [`Module_IO_File.md`](Module_IO_File.md),
@@ -66,7 +74,7 @@ not claim that today's `input(directory)` already returns a `Velmt`.
 
 Phase 1 supports **single-disk ZIP32 and ZIP64**, with both Stored (method 0)
 and DEFLATE (method 8) members required. ZIP64 support is user-confirmed
-(2026-10-08; **S12.4.1v2**). Standard comments, bounded extra fields, and data
+(2026-10-08; **S12.4.1v3**). Standard comments, bounded extra fields, and data
 descriptors are supported; an archive with no entries is valid. ZIP support
 must not depend on a `.zip` extension. These choices refer to the container
 and method definitions in [PKWARE APPNOTE 6.3.10,
@@ -85,7 +93,8 @@ Encryption is explicitly unsupported: reject encrypted members or encrypted
 archive metadata with an unsupported-encryption error. There is no password
 option, password prompt, partial decrypted view, or external unzip fallback.
 Split/multi-disk and self-extracting archives are also deferred. 7z, RAR, tar,
-and standalone gzip streams do not enter this ZIP parser.
+and standalone gzip streams do not enter this ZIP parser. Phase 3 adds separate
+7z, tar, RAR and RAR5 readers behind the shared archive interface (§10).
 
 ZIP64 is part of the supported standard ZIP format. Resolve its end record,
 locator, and extended-information fields wherever ZIP32 fields use sentinel
@@ -252,8 +261,8 @@ recursively expands archives.
 
 ## 5. Input evaluation, snapshots, and lifetime
 
-**S12.4.1v2** requires `input()` to capture and index the complete archive,
-close its source within the call, and return a pure value. **S14.3.1v2** makes
+**S12.4.1v3** requires `input()` to capture and index the complete archive,
+close its source within the call, and return a pure value. **S14.3.1v3** makes
 member decompression lazy. The user-confirmed evaluation boundary is:
 
 1. Read the complete outer archive into an owned, immutable byte snapshot
@@ -283,7 +292,7 @@ value; it does not mutate an earlier archive.
 Eagerness here means acquiring and validating the complete container snapshot;
 it does not mean expanding member bodies. Decompression, payload integrity
 errors, and parsing occur only at member-content access. This boundary is
-recorded in **S12.4.1v2/S14.3.1v2**; eagerly decoding every member is
+recorded in **S12.4.1v3/S14.3.1v3**; eagerly decoding every member is
 superseded (§9 and Appendix B).
 
 The filesystem proposal follows ordinary element normalization: a parsed
@@ -321,7 +330,7 @@ Use the normal `T^E` error mechanism for unreadable input, malformed ZIP,
 unsupported features, integrity failure, decoding failure, and exceeded limits.
 Include the outer source and member name where applicable, without logging
 payloads. Container/index failures occur at `input()`; deferred payload failures
-occur at the selected member-content boundary under **S14.3.1v2**.
+occur at the selected member-content boundary under **S14.3.1v3**.
 An error is never an empty directory, missing child, `null`, or truncated file.
 
 Virtual dispatch must preserve these errors. `content(FsNode)` and member
@@ -412,19 +421,27 @@ options, failure cleanup, and rejection of append mode. Performance evaluation,
 if undertaken, uses a release build and measures index cost and accessed-member
 cost separately.
 
+Phase 3's format profile and acceptance criteria are in §10; its
+integration and verification are tracked in the implementation record.
+
 ## 9. Confirmed decisions and remaining proposal scope
 
 The user settled both initial questions on 2026-10-08:
 
-1. **Include ZIP64 in Phase 1**, alongside ZIP32 (**S12.4.1v2**).
+1. **Include ZIP64 in Phase 1**, alongside ZIP32 (**S12.4.1v3**).
 2. **Decompress lazily on member-content access** after capturing the complete
    archive and validating its index. Listing and metadata reads never force
-   payloads (**S12.4.1v2/S14.3.1v2**).
+   payloads (**S12.4.1v3/S14.3.1v3**).
 
 The implementation uses the shared `fs` node contract, `input(file_node,
 format)`, exact raw-binary selection, and compatible ordinary directory input.
 The general local `fs(path)` factory and live filesystem refresh are separate
 work in [`Lambda_IO_File.md`](Lambda_IO_File.md).
+
+On 2026-10-15, the user requested a new phase for 7zip and tar support and
+the related upstream input sources directly under `lib/zip`, then extended
+that request to RAR and RAR 5.0. §10 records the implemented native extension; Phase 1
+and Phase 2 remain the implemented ZIP profile.
 
 ### 9.1 Limits and output options
 
@@ -477,16 +494,201 @@ pn save_constructed_zip() {
 }
 ```
 
+## 10. Phase 3: 7zip, tar, and RAR input
+
+**Status:** IMPLEMENTED (2026-10-15); native reader integration and regression coverage.
+Add read-only `input()` backends for 7z, tar, legacy RAR and RAR 5.0 using the
+same filesystem `Velmt`/`VArray` contract (**D7.4.5v2**). Existing ZIP input/output retains its
+backend. Archive conversion to ZIP can reuse Phase 2's tree writer; 7z/tar/RAR
+writers, extraction, archive mutation, encryption, and password handling are
+outside this phase.
+
+### 10.1 Format profile and selection
+
+| Container | Required Phase 3 input profile |
+|---|---|
+| 7z (`'7z'`) | Single-volume archives; Copy, LZMA and LZMA2; supported BCJ/Delta filter chains; non-solid and solid blocks; plain and compressed headers; files, directories and empty entries. Reject encryption, self-extracting/multi-volume containers, and unadmitted coder chains explicitly. |
+| tar (`'tar'`) | V7, POSIX ustar/pax, and GNU long-name/long-link metadata records; regular files and directories; empty archives/members. Apply extended path/size metadata before validation. Reject actual symlinks, hard links, sparse files, devices, FIFOs and other special entries. |
+| Compressed tar (`'tar'`) | Native gzip (`.tar.gz`, `.tgz`), bzip2 (`.tar.bz2`, `.tbz2`), xz (`.tar.xz`, `.txz`) and zstd (`.tar.zst`, `.tzst`) wrappers around the supported tar profile. A compression stream containing non-tar data is not an archive tree. |
+| Legacy RAR (`'rar'`) | Single-volume, non-solid pre-RAR5 archives with Stored or upstream-supported compressed members; regular files/directories and empty entries. Reject legacy solid archives, encryption, split/multi-volume and self-extracting containers, unsupported unpack versions/filters and special/link entries. This is an admitted profile, not a promise to decode every historical RAR variant. |
+| RAR 5.0 (`'rar5'`, or family selector `'rar'`) | Single-volume RAR5 archives, Stored and admitted compressed profiles, non-solid and solid streams, regular files/directories and empty entries. Validate available CRC32 and BLAKE2sp member checksums. Reject encryption, split/multi-volume and self-extracting containers, unsupported algorithm versions/filters and special/link entries. Both RAR generations normally use `.rar`; distinguish their signatures, not their filename extension. |
+
+Explicit `'7z'`, `'tar'` and `'rar5'` select and validate their corresponding
+containers; `'rar'` accepts either supported RAR generation. A `'rar5'` request
+for a legacy archive is a format error. Explicit `'binary'` still returns the
+original outer bytes. Automatic detection validates the 7z/RAR/RAR5
+signature/header or tar headers/checksums and complete record structure,
+independently of the extension. A compressed-stream signature alone
+does not establish tar. An explicitly selected or extension-expected malformed
+archive reports an error instead of falling back to text. Recognize valid empty
+archives without treating arbitrary zero-filled data as automatic tar input.
+
+```lambda no-run
+// no-run: illustrative asset paths; see test/input/archive for runnable fixtures
+let seven = input("assets.7z", '7z')^
+let plain_tar = input("assets.tar", 'tar')^
+let compressed_tar = input("assets.tar.gz", 'tar')^
+let renamed = input("download.bin", {type: '7z'})^
+let legacy_rar = input("legacy.rar", 'rar')^
+let rar5 = input("modern.rar", 'rar5')^
+let either_rar = input("modern.rar", 'rar')^
+let original = input("assets.tar.gz", 'binary')^
+```
+
+The root keeps `kind: 'file'` and the outer byte `size`, with `format: '7z'`,
+`'tar'`, `'rar'` or `'rar5'` identifying the actual backend. Reuse `entry_path`,
+the outer `path`, uncompressed member `size`, available `modified`/`mode`,
+implicit parent directories and first-appearance
+child order from §4. ZIP-only metadata is absent when the new format cannot
+supply it; tar's header checksum must not become a fabricated payload CRC.
+Nested ZIP/7z/tar/RAR members stay binary by default and open only through
+explicit member input, inheriting the same nesting and expansion ledger (§9.1,
+**D7.5.2**).
+
+### 10.2 Snapshot, decoding, and validation boundaries
+
+Keep the pure-value ownership boundary of **S12.4.1v3**: acquire immutable
+outer bytes and validate/index the complete container inside `input()`, closing
+the source before returning. Retained members keep their snapshot alive under
+**D4.1.3/D4.2.4/D5.3.3**. The format-specific boundaries are:
+
+- **7z:** decode compressed archive headers during indexing, charging decoded
+  metadata to the index budget. Listing accepted regular-file/directory entries
+  must not decode member bodies. First member access may decode earlier data
+  in its solid block, or the entire block, to reach that member and verify
+  available checksums. Charge every byte actually expanded, including sibling
+  data and any repeated decoding; cache payloads/failures without counting
+  cached reads again. Do not claim ZIP's per-member decode isolation for solid
+  archives (**S14.3.1v3**).
+- **Plain tar:** scan and validate headers, extension records, padding and
+  checked member ranges at input time; retain byte spans into the snapshot.
+  Member parsing stays lazy. Tar provides header checksums, not a universal
+  member-payload integrity check.
+- **Compressed tar:** boundedly decode and validate the entire outer stream
+  into an immutable tar snapshot before indexing. This necessarily expands
+  member bytes at input time; parsing remains lazy. Charge outer expansion to
+  the shared aggregate budget once, and do not charge a subsequent view/read
+  of those already captured bytes as another decompression. Decoder, checksum,
+  truncation and expansion-limit failures occur at `input()`.
+- **Legacy non-solid RAR:** validate/index headers while skipping packed member
+  ranges without decoding them. Decompression and member CRC failures occur at
+  member access, with successful payloads and failures cached as for ZIP.
+- **RAR5:** initially read and retain all member bytes during `input()`, checking
+  declared/actual expansion and available CRC32/BLAKE2sp checksums before
+  returning. This accommodates the upstream solid reader, whose data-skip path
+  must decompress predecessor members to preserve its dictionary. Read bodies
+  explicitly through end-of-entry rather than trusting the skip path, which
+  normally omits their checksum verification. Charge expansion once; later
+  member parsing stays lazy and cached bytes do not consume the budget again.
+  Payload errors therefore occur at `input()` for this initial RAR5 backend.
+
+These boundaries are ratified in **S12.4.1v3/S14.3.1v3** (2026-10-15);
+ZIP retains its existing lazy payload behavior.
+
+Reuse §6's checked arithmetic, name/conflict validation, errors and quotas.
+For tar, accept conventional leading `./` components and a `.`/`./` directory
+record as root metadata; strip a directory's terminal `/` before indexing.
+Validate the final effective name after pax/GNU overrides, rejecting absolute,
+drive/UNC, NUL, traversal and backslash aliases. Detect collisions after these
+format-specific normalizations. Pin filename decoding rather than inheriting
+the host locale. Legacy RAR's Windows separators are normalized to `/` by its
+format reader before the shared path checks; validate absolute/drive/UNC and
+traversal forms after that normalization and reject resulting collisions.
+ZIP/tar keep their existing backslash rejection. Validate 7z/RAR
+coder/dictionary and decoded-header sizes before
+unbounded allocation; all decoder working memory and retained tar/block buffers
+must have an enforceable bound under **D7.5.2**.
+
+### 10.3 Upstream readers and acceptance
+
+Use the C input subset of [libarchive 3.8.10](https://github.com/libarchive/libarchive/releases/tag/v3.8.10),
+with the 7zip/tar/RAR/RAR5 readers, native compression-filter adapters, and
+required common sources/headers **directly under `lib/zip`**. The pinned import
+has an explicitly authorized embedding patch, with `COPYING`, pristine/applied
+checksum manifests, and provenance/re-sync instructions in
+[`lib/zip/VENDOR.md`](../lib/zip/VENDOR.md). Lambda-owned adapters remain outside
+the vendor sources. Build integration must supply native liblzma, zlib, bzip2
+and zstd; register only the admitted readers/filters and reject missing codecs.
+Never invoke external decompressor programs or filesystem extraction helpers
+(**D7.5.2**). The native subset is linked into Lambda; browser WASM keeps ZIP
+only. Filename conversion uses a per-reader UTF-8 charset without Unicode
+normalization. C allocation failures unwind to the Lambda boundary instead of
+exiting the host. Reader/parser allocations share the index limit; codec
+workspace is bounded by `max(max_index_bytes, max_member_bytes)`. Solid
+7z output is measured at the format boundary, including Copy predecessors.
+The admitted chains contain one data coder and at most one BCJ/Delta filter;
+BCJ2 and PPMd remain outside this initial profile.
+
+Acceptance adds independent 7-Zip/tar/RAR interoperability fixtures; all required
+tar variants/wrappers; solid/non-solid and compressed-header 7z; non-solid legacy
+RAR; solid/non-solid RAR5 with CRC32 and BLAKE2sp; empty entries,
+Unicode/long names, binary bytes and explicit member parsing. Cover corrupt
+headers/checksums/trailers, truncation, unsafe overridden names, duplicate and
+file/directory conflicts, unsupported coders/links/sparse entries, encryption,
+and declared/actual quota failures. Cover both RAR signatures under `'rar'`, strict
+`'rar5'` selection and rejection of legacy solid archives. Verify eager
+compressed-tar/RAR5 errors, lazy 7z/legacy-RAR payload errors, zero 7z/legacy-RAR
+body decodes during accepted-tree listing, solid-block
+accounting, cached reads, mixed-format nested budgets, source replacement,
+retained-member GC lifetime and interp/auto/jit parity. Extend the shared viewer
+dispatch to the same formats. Every new golden `.ls` requires its `.txt`, and
+the existing ZIP suite plus `make test-lambda-baseline` remain required gates.
+
+### 10.4 Codec dependencies and follow-on priorities
+
+Libarchive is an archive/container layer; its gzip/ZIP, xz/LZMA, bzip2 and zstd
+paths use their respective codec libraries, as documented in its
+[format/dependency matrix](https://github.com/libarchive/libarchive/wiki/LibarchiveFormats).
+Adding it does not remove zlib. Current Lambda consumers also include
+libpng, TIFF DEFLATE, PDF FlateDecode, WOFF1, Node's zlib APIs and npm tarballs.
+Those consumers operate on streams embedded in their own formats; they keep
+their native codec APIs. The shared build should supply consistent codec
+libraries across consumers rather than route each embedded stream through an
+archive reader.
+
+Integration with images and networking is at the Lambda-owned adapter boundary:
+capture an archive through the ordinary file/HTTP I/O door, read a member through
+the archive backend, then pass its bytes to the existing image/document decoder
+(**D7.5.2**, **D7.4.5v2**). No vendor image-library or curl source edits are needed.
+HTTP `Content-Encoding` remains curl's responsibility; an archive in the
+response body is a separate decoding step. Curl's
+[`CURLOPT_ACCEPT_ENCODING`](https://curl.se/libcurl/c/CURLOPT_ACCEPT_ENCODING.html)
+uses zlib for gzip/deflate, Brotli for `br` and libzstd for `zstd`, according to
+the codecs actually compiled into curl. Linking a codec elsewhere in Lambda
+does not enable it in curl.
+
+The local macOS curl 8.10.1 build's `curl-config` records `--without-brotli` and
+`--without-zstd`; its static archive references zlib inflate. Enabling HTTP
+`br`/`zstd` on that build requires rebuilding curl with the corresponding native
+codec dependencies, independently of archive integration.
+
+The following are proposed priorities beyond the explicitly requested archive
+containers; they do not silently expand Phase 3's required profile:
+
+| Codec / stream format | Priority and use |
+|---|---|
+| DEFLATE, zlib and gzip | Baseline: ZIP, `.gz`/tar.gz, PNG/PDF/WOFF1 and HTTP. These wrappers are distinct even though all can use zlib. Standalone `.gz` input needs its own single-payload contract; it is not a directory archive. |
+| [Zstandard](https://github.com/facebook/zstd) | First additional default: modern `.zst`/tar.zst archives and HTTP `zstd`; the tar wrapper is already in Phase 3. Admit ZIP method 93 separately if ZIP/Zstd interoperability is required. |
+| [XZ/LZMA/LZMA2](https://tukaani.org/xz/) | Required for the Phase 3 7z and tar.xz profiles; standalone `.xz`/`.lzma` streams remain a separate API decision. |
+| bzip2 | Compatibility baseline for existing `.bz2`/tar.bz2 archives; Phase 3 includes the tar wrapper. |
+| [LZ4](https://github.com/lz4/lz4) | Next archive/filter extension for fast `.lz4`/tar.lz4 and log/data workloads. Prefer the framed format with bounded native decoding; this import does not yet include its filter or codec. |
+| [Brotli](https://github.com/google/brotli) | Web/font priority: HTTP `br` and WOFF2. Keep native HTTP/font integration; libarchive is not the Brotli abstraction. A generic `.br` stream API is separate work. |
+| PPMd / Deflate64 | Targeted 7z/ZIP interoperability after the base profile. Staging a PPMd helper for a reader does not automatically admit all PPMd containers, and ZIP currently accepts only Stored/DEFLATE. |
+| Snappy, LZO and Unix compress (`.Z`) | Demand-driven compatibility for particular data formats or legacy corpora, rather than mandatory general archive support. |
+
 ## Appendix A. Implemented architecture
 
 - **Acquisition and dispatch:** `lambda/input/input.cpp` acquires exact bytes
-  with `lib/file.h`'s bounded reader and detects ZIP before MIME/text fallback.
+  with `lib/file.h`'s bounded reader and detects archives before MIME/text fallback.
   Explicit format selection remains authoritative. The same length-bearing
   dispatcher parses member payloads and preserves raw binary bytes.
-- **Archive backend:** `lambda/io/zip_archive.cpp` owns the immutable snapshot,
-  checked ZIP32/ZIP64 index, CP437/UTF-8/Unicode-extra name decoding, expansion
-  ledger, cached DEFLATE/Stored payloads and CRC errors, and ZIP writer. It
-  reuses zlib and shared endian/byte-storage/file helpers without vendor edits.
+- **Archive backend:** `lambda/io/archive.cpp` owns shared snapshots, name/tree
+  validation, quotas and payload/error caches. `zip_archive.cpp` retains the
+  checked ZIP32/ZIP64 index, name decoding, Stored/DEFLATE and ZIP writer.
+  `archive_native.cpp` adapts the selected libarchive readers, verified tar
+  wrappers and eager RAR5 capture. `lib/archive_codec/` bounds vendor/codec
+  allocations and output; the authorized vendor delta is recorded under
+  `patches/`. zlib remains the codec for ZIP/gzip and other existing consumers.
 - **Filesystem adapter:** `lambda/input/input-zip.cpp` implements the shared
   metadata contract and `Velmt`/`VArray` operations. Flat child-index spans
   provide O(1) indexed navigation; wrappers and attributes initialize on
@@ -510,7 +712,7 @@ pn save_constructed_zip() {
   DOCX/JAR and renamed ZIP sources) and `lambda view directory/` share the
   bundled `lambda.doc.doc_viewer` tree (**D7.2.4**). Its path-source entry
   captures the root once; rows retain member nodes for expansion and preview
-  (**S12.4.1v2/S14.3.1v2**). Structured/text/binary previews read those nodes;
+  (**S12.4.1v3/S14.3.1v3**). Structured/text/binary previews read those nodes;
   images use data URLs and HTML uses `srcdoc`, without extracting members or
   inventing host member Paths. Diagnostic printing treats virtual carriers as
   opaque, so UI logging does not force member content. Archive-relative linked
@@ -526,4 +728,12 @@ Superseded by the user's 2026-10-08 decisions (§9):
   and CRC-validates every member, with default parsing completed before
   `input()` returns.~~ The complete archive snapshot and index are eager;
   member decompression, CRC validation, and parsing occur only on access
-  (**S12.4.1v2/S14.3.1v2**).
+  (**S12.4.1v3/S14.3.1v3**).
+
+
+### Phase 3 formal ratification (2026-10-15)
+
+~~S12.4.1v2/S14.3.1v2 specified the archive snapshot and lazy member boundary
+for ZIP input only.~~ S12.4.1v3/S14.3.1v3 extend that contract to the Phase 3
+profile, with eager 7z metadata, lazy 7z/legacy-RAR payloads, and eager compressed
+tar/RAR5 capture. ZIP behavior is preserved.
