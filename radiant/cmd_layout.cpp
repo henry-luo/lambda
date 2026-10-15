@@ -31,6 +31,7 @@
 extern "C" {
 #include "../lib/mempool.h"
 #include "../lib/file.h"
+#include "../lib/mime-detect.h"
 #include "../lib/string.h"
 #include "../lib/str.h"
 #include "../lib/strbuf.h"
@@ -2281,6 +2282,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     int superseded_html_url_count = 0;
 
     char* html_filepath = url_to_local_path(html_url);
+    bool xhtml = !html_source && html_url->pathname && input_path_is_xhtml(html_url->pathname->chars);
 
     // Step 1: Parse HTML with Lambda parser
     // If html_source is provided, use it directly; otherwise read from file or download
@@ -2295,9 +2297,14 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         const char* url_str = url_get_href(html_url);
         char* eff_url = nullptr;
         char* response_language = nullptr;
+        char* response_type = nullptr;
         html_content = download_http_document_with_cookie_jar(url_str, &html_length,
-            top_level_cookie_jar, &eff_url, &response_language);
+            top_level_cookie_jar, &eff_url, &response_language, &response_type);
         protocol_language = lam::Temp<char>(response_language);
+        // response MIME selects XML syntax even when a URL ends in .html or has no extension.
+        const char* response_extension = mime_extension_from_content_type(response_type);
+        if (response_extension) xhtml = !strcmp(response_extension, ".xhtml");
+        mem_free(response_type);
         // Update document URL if redirected (e.g. google.com → www.google.com)
         if (eff_url) {
             Url* redirected_url = url_parse(eff_url);
@@ -2323,6 +2330,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
                 "the URL may be incorrect, or there may be a network connectivity issue.");
             if (!html_content) return nullptr;
             html_length = strlen(html_content);
+            xhtml = false;
         }
         html_content_owned = true;
     } else {
@@ -2336,7 +2344,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
 
     // Detect non-UTF-8 charset and convert if needed
     const char* detected_charset = nullptr;
-    if (html_content && html_content_owned) {
+    if (!xhtml && html_content && html_content_owned) {
         detected_charset = detect_html_charset(html_content, html_length);
         if (detected_charset) {
             char* utf8_content = convert_charset_to_utf8(html_content, html_length, detected_charset);
@@ -2352,40 +2360,23 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     auto t_read = time_now_ns();
     log_info("[TIMING] load: read file: %.1fms", time_elapsed_ms_f(t_start, t_read));
 
-    // Create type string for HTML.
-    String* type_str = string_from_strview_mem(strview_init("html", 4), MEM_CAT_LAYOUT);
-
-    Input* input = nullptr;
-    if (track_source_lines) {
-        // Use extended parser to record source line numbers on elements
-        input = Input::create(pool, html_url);
-        if (input) {
-            input->ui_mode = true;
-            Html5ParseOptions parse_opts = { .track_source_lines = true };
-            Element* doc = html5_parse_n(input, html_content, html_length, &parse_opts);
-            if (doc) {
-                input->root = (Item){.element = doc};
-            }
-        }
-    } else {
-        // Create Input first so we can set ui_mode before parsing
-        input = Input::create(pool, html_url);
-        if (input) {
-            input->ui_mode = true;
-            Element* doc = html5_parse_n(input, html_content, html_length, nullptr);
-            if (doc) {
-                input->root = (Item){.element = doc};
-            }
-        }
+    Input* input = Input::create(pool, html_url);
+    Element* parsed_document = nullptr;
+    if (input) {
+        input->ui_mode = true;
+        Html5ParseOptions parse_opts = { .track_source_lines = track_source_lines };
+        parsed_document = xhtml
+            ? parse_xhtml_document(input, html_content, html_length, track_source_lines)
+            : html5_parse_n(input, html_content, html_length, &parse_opts);
+        if (parsed_document) input->root = (Item){.element = parsed_document};
     }
-    mem_free(type_str);
     if (html_content_owned) mem_free(html_content);  // only free what we allocated
 
     auto t_parse = time_now_ns();
     log_info("[TIMING] load: parse HTML: %.1fms", time_elapsed_ms_f(t_read, t_parse));
     log_mem_stage("load_html: html_parsed");
 
-    if (!input) {
+    if (!input || !parsed_document) {
         log_error("Failed to create input for file: %s", html_filepath);
         mem_free(html_filepath);
         return nullptr;
@@ -2404,9 +2395,10 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
 
     // Detect HTML version from the original input tree (contains DOCTYPE)
     int detected_version = HTML4_01_TRANSITIONAL;  // Default to quirks mode
-    if (input) {
+    if (input && !xhtml) {
         detected_version = detect_html_version_from_lambda_element(nullptr, input);
     }
+    if (xhtml) detected_version = HTML5; // XML HTML documents never enter HTML quirks mode.
     log_root_item((Item){.element = html_root});
 
     // Step 2: Create DomDocument and build DomElement tree from Lambda Element tree
@@ -2422,6 +2414,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     }
     // parsed HTML: the only page kind that may host a JS DOM script realm.
     dom_doc->page_kind = DOM_PAGE_KIND_HTML;
+    dom_doc->xml_document = xhtml;
     dom_doc->resource_policy = g_css_resource_policy;
     // Scripts may call getClientRects() during load. Preserve the parsed mode
     // before that first layout so transient measurements use the same initial
@@ -2808,6 +2801,7 @@ static bool layout_path_has_known_extension(const char* path) {
     if (eps_source_expected(path, nullptr, 0)) return true;
     const char* extension = file_path_ext(path);
     return extension && (strcmp(extension, ".pdf") == 0 ||
+                         input_path_is_xhtml(path) ||
                          layout_find_format_route(extension));
 }
 
@@ -3483,6 +3477,8 @@ static DomDocument* create_layout_dom(Input* input, Element* root,
     // record provenance at construction; routing must never re-derive it from
     // which runtime pointer a document happens to hold.
     document->page_kind = page_kind;
+    // a parsed XHTML result keeps its syntax profile when returned by a Lambda script.
+    document->xml_document = ElementReader(root).get_attr("__lambda_xml_document").asBool();
     document->resource_policy = g_css_resource_policy;
     log_debug("[page-kind] %s document -> %s", document_kind,
               dom_page_kind_name(page_kind));
@@ -4275,9 +4271,11 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
         Element* result_elem = script_output->root.element;
         TypeElmt* elem_type = (TypeElmt*)result_elem->type;
 
-        if (elem_type && str_ieq_cstr(elem_type->name.str, "html")) {
-            is_html_document = true;
-            html_elem = result_elem;
+        if (elem_type && (str_ieq_cstr(elem_type->name.str, "html") ||
+                          strview_equal(&elem_type->name, "#document"))) {
+            // input/parse return an HTML document wrapper; its head must reach CSS discovery unchanged.
+            html_elem = get_html_root_element(script_output);
+            is_html_document = html_elem != nullptr;
         }
     }
 

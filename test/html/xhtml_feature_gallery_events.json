@@ -1,0 +1,22 @@
+{
+  "name": "XHTML feature gallery parsing and interaction",
+  "viewport": {"width": 1120, "height": 900},
+  "events": [
+    {"type": "wait", "ms": 20},
+    {"type": "assert_text", "target": {"selector": "#check-summary"}, "equals": "27 / 27 checks passed"},
+    {"type": "assert_attribute", "target": {"selector": "#check-summary"}, "attribute": "data-failures", "equals": "0"},
+    {"type": "assert_attribute", "target": {"selector": "#check-summary"}, "attribute": "data-failed-checks", "equals": ""},
+    {"type": "click", "target": {"selector": "#counter-button"}},
+    {"type": "assert_text", "target": {"selector": "#counter-value"}, "equals": "1"},
+    {"type": "click", "target": {"selector": "#rerun-checks"}},
+    {"type": "assert_text", "target": {"selector": "#check-summary"}, "equals": "27 / 27 checks passed"},
+    {"type": "assert_rect", "target": {"selector": "#external-style-probe"}, "width": 128},
+    {"type": "assert_rect", "target": {"selector": "#local-image"}, "width": 88, "height": 88},
+    {"type": "click", "target": {"selector": "#read-form"}, "scroll_into_view": true},
+    {"type": "assert_text", "target": {"selector": "#form-result"}, "equals": "Ada Lovelace · XHTML · Updates on"},
+    {"type": "set_editing_value", "target": {"selector": "#reader-name"}, "text": "Grace Hopper"},
+    {"type": "click", "target": {"selector": "#reader-updates"}, "scroll_into_view": true},
+    {"type": "click", "target": {"selector": "#read-form"}, "scroll_into_view": true},
+    {"type": "assert_text", "target": {"selector": "#form-result"}, "equals": "Grace Hopper · XHTML · Updates off"}
+  ]
+}

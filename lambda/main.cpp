@@ -201,7 +201,7 @@ static bool lambda_view_http_url_is_likely_html_document(const char* url) {
     bool is_likely_html = (last_slash && last_slash + 1 == end) ||
         !last_dot || (last_slash && last_dot < last_slash) ||
         ascii_case_ext_equals(last_dot, end, ".html") ||
-        ascii_case_ext_equals(last_dot, end, ".htm");
+        ascii_case_ext_equals(last_dot, end, ".htm") || input_path_is_xhtml(pathname);
     url_destroy(parsed_url);
     return is_likely_html;
 }
@@ -4296,7 +4296,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);
         } else if (is_docx_file || is_graph_file || eps_source_expected(filename, nullptr, 0) || (ext && (strcmp(ext, ".pdf") == 0 ||
-                    strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 ||
+                    strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 || input_path_is_xhtml(filename) ||
                     strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
                     strcmp(ext, ".pgf") == 0 ||
@@ -4317,7 +4317,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                                                        state_dump, nullptr, launch.fullscreen);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
-            printf("Supported formats: .docx, .pdf, .html, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
+            printf("Supported formats: .docx, .pdf, .html, .xhtml, .xht, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
             if (temp_file_path) {
                 if (temp_file_path_is_local) file_delete(temp_file_path);
                 mem_free(temp_file_path);

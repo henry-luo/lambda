@@ -1154,7 +1154,7 @@ Parse content from a file path or URL.
 `p#a.b` forces and then navigates. `input(p, format)` stays the
 explicit-format spelling, and `exists(p)` the probe that forces nothing.
 
-**Supported Input Formats**: `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `properties`, `csv`, `markdown`, `rst`, `asciidoc`, `wiki`, `org`, `textile`, `man`, `latex`, `typst`, `mark`, `rtf`, `pdf`, `eml`, `ics`, `vcf`, `css`, `math`, `graph`, `text`, `binary`, `zip` — see [Markup_Formats_Support.md](Markup_Formats_Support.md) for the tree each one produces and the `{type, flavor}` option form.
+**Supported Input Formats**: `json`, `xml`, `html`, `xhtml`, `yaml`, `toml`, `ini`, `properties`, `csv`, `markdown`, `rst`, `asciidoc`, `wiki`, `org`, `textile`, `man`, `latex`, `typst`, `mark`, `rtf`, `pdf`, `eml`, `ics`, `vcf`, `css`, `math`, `graph`, `text`, `binary`, `zip` — see [Markup_Formats_Support.md](Markup_Formats_Support.md) for the tree each one produces and the `{type, flavor}` option form.
 
 **ZIP32/ZIP64** input returns an archive-backed `fs` element, including for
 ZIP-backed `.docx` and other package files. It captures and closes the complete
@@ -1190,6 +1190,7 @@ accepts any filename regardless of its extension (D2.9.2).
 | JSON | JavaScript Object Notation | `input(/.'data.json', 'json')` |
 | XML | Extensible Markup Language | `input(/.'config.xml', 'xml')` |
 | HTML | HyperText Markup Language | `input(/.'page.html', 'html')` |
+| XHTML | XML syntax producing an HTML tree (D2.10.1) | `input("page.xhtml", 'xhtml')^` |
 | YAML | YAML Ain't Markup Language | `input(/.'config.yaml', 'yaml')` |
 | TOML | Tom's Obvious Minimal Language | `input(/.'config.toml', 'toml')` |
 | Markdown | Markdown markup | `input(/.'doc.md', 'markdown')` |
@@ -1243,7 +1244,15 @@ Parse a string into Lambda data structures. Like `input()` but operates on strin
 | `parse(str, g.rule)` | Parse from a rule given as a type | `parse("42", calc.number)` |
 | `parse(str, g, options)` | Options map: `rule` (a symbol) and `spans` (bool: `start`/`end` byte offsets on every element) | `parse(s, calc, {rule: 'expr', spans: true})` |
 
-**Supported Formats**: Same as `input()` — `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `css`, `ini`, `math`, `obj`, `mtl`, `gltf`, `a3d`
+**Supported Formats**: Same as `input()` — `json`, `xml`, `html`, `xhtml`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `css`, `ini`, `math`, `obj`, `mtl`, `gltf`, `a3d`
+
+`parse(text, 'xhtml')^` selects strict XML syntax and returns an HTML-compatible
+`<#document>` tree (**D2.10.1**). The root must be XHTML `html`; namespace
+identity, XML case sensitivity, whitespace and CDATA are preserved. For file
+input, `.xhtml`/`.xht` select this format automatically. See
+[XHTML input and limits](Markup_Formats_Support.md#xhtml-input--html-document-tree)
+for examples, Radiant commands and the feature gallery. Format the result
+with `'html'`; `'xhtml'` is an input format, not an output formatter.
 
 For XML, `{type:'xml', flavor:'strict', preserve_whitespace:true}` retains
 leading/trailing spaces and whitespace-only text nodes. The default remains

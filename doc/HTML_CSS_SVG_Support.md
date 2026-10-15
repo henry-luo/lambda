@@ -9,7 +9,7 @@ Radiant is Lambda's HTML/CSS/SVG layout, rendering and interaction engine. It tu
 | `lambda view page.html` | Opens the page in an interactive window. Page scripts run on LambdaJS; links, forms, scrolling, selection and animations are live. |
 | `lambda edit doc.md` | The viewer as an editor: rich text for Markdown and HTML, a drawing editor for SVG. |
 
-HTML is the browsing input. LaTeX, Markdown, XML, Lambda script results and diagram sources reach Radiant through document converters. Explicit paged rendering also accepts Markdown (through its browsing loader and GitHub-style stylesheet), XSL-FO (`.fo`, `.xslfo`), native Radiant page documents (`.rpd`) and fixed PDF pages. These paged inputs have a narrower formatting profile than the browsing engine; see [§8.1](#81-paged-media-and-formatting-inputs) and [Lambda_CLI.md](Lambda_CLI.md).
+HTML and XHTML are browsing inputs. XHTML (`.xhtml`, `.xht`, or `application/xhtml+xml`) uses strict XML parsing and emits the same HTML names for the DOM/CSS/layout pipeline (**D2.10.1**); XML case sensitivity, whitespace and foreign namespaces are preserved. LaTeX, Markdown, XML, Lambda script results and diagram sources reach Radiant through document converters. Explicit paged rendering also accepts Markdown (through its browsing loader and GitHub-style stylesheet), XSL-FO (`.fo`, `.xslfo`), native Radiant page documents (`.rpd`) and fixed PDF pages. These paged inputs have a narrower formatting profile than the browsing engine; see [§8.1](#81-paged-media-and-formatting-inputs) and [Lambda_CLI.md](Lambda_CLI.md).
 
 DocBook 5.x `.xml` documents can be opened directly with
 `lambda view test/input/docbook/showcase.xml`. Namespace-aware XML dispatch
@@ -132,7 +132,7 @@ Selectors are parsed in `lambda/input/css/css_parser.cpp` and matched in `lambda
 
 | Selector | Status | Notes |
 |---|---|---|
-| Type, universal `*`, class, ID | ✅ | Type names are case-insensitive for HTML; class and ID are case-sensitive, with the quirks-mode exception. |
+| Type, universal `*`, class, ID | ✅ | Type names are case-insensitive for HTML and case-sensitive in XML/XHTML documents (D2.10.1); class and ID are case-sensitive, with the quirks-mode exception. |
 | Attribute `[a]`, `[a=v]`, `[a~=v]`, `[a\|=v]`, `[a^=v]`, `[a$=v]`, `[a*=v]`, the `i` and `s` flags | ✅ | `s` forces a case-sensitive value comparison even when the matcher is in a case-insensitive mode. |
 | Namespaces `ns\|E`, `\|E`, `[ns\|a]`, `[\|a]`, `[*\|a]` | ✅ | `@namespace` resolves named and default type namespaces; attributes without a prefix stay in the null namespace. Qualified, null and wildcard attribute selectors match parsed attributes and live `setAttributeNS` state, including independent values for identical qualified names in different namespaces. DOM queries reject undeclared named prefixes but accept null and wildcard forms. |
 | Combinators: descendant, `>`, `+`, `~` | ✅ | |

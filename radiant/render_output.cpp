@@ -340,7 +340,7 @@ bool render_paged_input_supported(const char* path) {
     if (!extension) return false;
     size_t length = strcspn(extension, "?#");
     // Markdown reaches the compositor through the same document loader as its browsing view.
-    static const char* formats[] = {".html", ".htm", ".md", ".markdown", ".ls", ".fo", ".xslfo", ".rpd", ".pdf"};
+    static const char* formats[] = {".html", ".htm", ".xhtml", ".xht", ".md", ".markdown", ".ls", ".fo", ".xslfo", ".rpd", ".pdf"};
     for (const char* format : formats)
         if (strlen(format) == length && strncmp(extension, format, length) == 0) return true;
     return false;

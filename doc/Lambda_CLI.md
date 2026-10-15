@@ -135,7 +135,7 @@ lambda validate [-s <schema>] [-f <format>] [options] <file>
 | | `--allow-unknown` | Accepted, but has no effect: map types are open, so undeclared fields always pass | `false` |
 | `-h` | `--help` | Show help | |
 
-**Input formats.** Auto-detected from the extension: `.json`, `.csv`, `.ini`, `.toml`, `.yaml`/`.yml`, `.xml`, `.md`/`.markdown`, `.rst`, `.html`/`.htm`, `.wiki`, `.adoc`/`.asciidoc`, `.1`–`.9` (man pages), `.eml`, `.ics`, `.vcf`, `.textile`/`.txtl`, `.mark`. Formats without an auto-detected extension take `-f`: `latex`, `rtf`, `pdf`, `text`.
+**Input formats.** Auto-detected from the extension: `.json`, `.csv`, `.ini`, `.toml`, `.yaml`/`.yml`, `.xml`, `.md`/`.markdown`, `.rst`, `.html`/`.htm`, `.xhtml`/`.xht`, `.wiki`, `.adoc`/`.asciidoc`, `.1`–`.9` (man pages), `.eml`, `.ics`, `.vcf`, `.textile`/`.txtl`, `.mark`. Formats without an auto-detected extension take `-f`: `latex`, `rtf`, `pdf`, `text`.
 
 Mark auto-detection recognizes only `.mark` (D2.9.1); use `-f mark` for
 arbitrary filenames, including files without an extension (D2.9.2).
@@ -234,7 +234,7 @@ lambda layout <file> [more files...] [options]
 
 Batch mode (several inputs) needs `--output-dir` or `--stream-layout-results`. Unknown options are silently ignored.
 
-**Supported input formats:** `.html`/`.htm`, `.tex`/`.latex`, `.ls`
+**Supported input formats:** `.html`/`.htm`, `.xhtml`/`.xht`, `.tex`/`.latex`, `.ls`
 
 **Examples:**
 
@@ -273,6 +273,7 @@ lambda render <input> -o <output> [options]
 | Extension | Format |
 |-----------|--------|
 | `.html`, `.htm` | HTML |
+| `.xhtml`, `.xht` | XML syntax producing HTML names and a viewable HTML tree (D2.10.1) |
 | `.tex`, `.latex` | LaTeX |
 | `.ls` | Lambda Script |
 | `.pdf` | PDF (PDF to PDF is a copy; other targets go through the Lambda PDF package) |
@@ -388,9 +389,20 @@ See [DocBook support and limitations](Markup_Formats_Support.md#312-docbook).
 
 **Supported formats:**
 
-`.docx`, `.pdf`, `.html`/`.htm`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
+`.docx`, `.pdf`, `.html`/`.htm`, `.xhtml`/`.xht`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
 
-Also accepts **HTTP/HTTPS URLs**: an HTML page is loaded directly by the browsing shell (with its scripts and stylesheets); any other content is fetched to a temporary file, its type detected from the `Content-Type` header, and opened from there.
+XHTML uses strict XML parsing and the same HTML DOM/CSS/layout pipeline (**D2.10.1**).
+`.xhtml`/`.xht` files and HTTP `application/xhtml+xml` responses select it.
+XML names remain case-sensitive, and XML whitespace/CDATA are preserved.
+The input must have an XHTML `html` root; external DTDs are never fetched.
+See [XHTML input and limits](Markup_Formats_Support.md#xhtml-input--html-document-tree).
+
+```bash
+./lambda.exe view test/html/xhtml_feature_gallery.xhtml
+./lambda.exe convert page.xhtml -f xhtml -t html -o page.html
+```
+
+Also accepts **HTTP/HTTPS URLs**: an HTML or XHTML page is loaded directly by the browsing shell (with its scripts and stylesheets); any other content is fetched to a temporary file, its type detected from the `Content-Type` header, and opened from there.
 
 **Keyboard controls:**
 

@@ -54,6 +54,17 @@ UI automation uses a memory-weighted queue. Manifest suites and individual fixtu
 
 Headless assertion retries give pending native document and media work wall time to complete, including AVFoundation loading and playback transitions.
 
+**XHTML (D2.10.1):** `test/html/xhtml_feature_gallery.xhtml` is a viewable
+gallery with 27 live DOM/style checks and local CSS/JS/SVG assets.
+`RadiantViewTest.LoadsXhtmlFeatureGallery` replays nine assertions, including
+clicks, a text-field edit and a checkbox toggle. Run
+`./test/test_radiant_view_gtest.exe --gtest_filter='RadiantViewTest.*Xhtml*'`
+for gallery, HTML parity, HTTP MIME/redirect and Lambda-returned document
+coverage. `HtmlParserTest.Xhtml*` checks parser edge cases;
+`test/lambda/input_xhtml.ls` and its golden cover `input`/`parse`/HTML output
+across execution tiers. Static rendering currently reports one startup
+computed-border discrepancy in the gallery; interactive view checks pass.
+
 For performance measurements, select a release host with `make build-release-compile`, then run `make test-radiant-baseline RADIANT_TEST_CONFIG=release_native`. The normal native runner build remains `debug_native`. `make run-radiant-baseline ARGS=--sequential` provides a serialized comparison without rebuilding.
 
 | `--target` | Category | Binaries | Notable members |

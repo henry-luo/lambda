@@ -1902,6 +1902,7 @@ static const MimeParserMapping MIME_PARSER_MAPPINGS[] = {
     {"text/csv", "csv"},
     {"text/tab-separated-values", "tsv"},
     {"application/xml", "xml"},
+    {"application/xhtml+xml", "xhtml"},
     {"text/html", "html"},
     {"text/markdown", "markdown"},
     {"text/mdx", "mdx"},
@@ -2211,6 +2212,9 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         else if (strcmp(effective_type, "html") == 0 || strcmp(effective_type, "html5") == 0) {
             // HTML NULs are tokenizer input, so preserve the transport's byte count.
             input->root = (Item){.element = html5_parse_n(input, source, source_len, NULL)};
+        }
+        else if (strcmp(effective_type, "xhtml") == 0) {
+            parse_xhtml_document(input, source, source_len);
         }
         else if (strcmp(effective_type, "scene3d-asset") == 0)
             input_scene3d_asset(input, source, source_len, flavor ? flavor->chars : nullptr);

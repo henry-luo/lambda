@@ -43,6 +43,11 @@ typedef struct Name {
     Target* ns;         // namespace target (NULL for unqualified names)
 } Name;
 
+// namespace identity is carried internally and must not become a serialized HTML attribute.
+static inline bool element_attribute_is_internal(const char* name) {
+    return name && strncmp(name, "__lambda_", 9) == 0;
+}
+
 // name_equal: Check if two names are equal (by local name pointer and namespace hash)
 static inline bool name_equal(const Name* a, const Name* b) {
     if (a == b) return true;

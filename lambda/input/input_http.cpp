@@ -169,8 +169,9 @@ const char* content_type_to_extension(const char* content_type) {
 // Download HTTP/HTTPS resource and return content in memory
 static char* download_http_content_impl(const char* url, size_t* content_size,
     const HttpConfig* config, char** effective_url, char** content_language,
-    size_t max_bytes = HTTP_MAX_RESPONSE_SIZE) {
+    size_t max_bytes = HTTP_MAX_RESPONSE_SIZE, char** content_type = nullptr) {
     if (content_language) *content_language = NULL;
+    if (content_type) *content_type = NULL;
     if (!init_curl()) {
         return NULL;
     }
@@ -316,6 +317,11 @@ static char* download_http_content_impl(const char* url, size_t* content_size,
         log_error("HTTP: failed to persist response cookies");
     }
     curl_slist_free_all(document_headers);
+    if (content_type) {
+        char* value = nullptr;
+        curl_easy_getinfo(curl, CURLINFO_CONTENT_TYPE, &value);
+        if (value) *content_type = mem_strdup(value, MEM_CAT_TEMP);
+    }
     curl_easy_cleanup(curl);
     if (content_language) *content_language = response.content_language;
     return (char*)byte_builder_take(&response.body, NULL);
@@ -389,13 +395,14 @@ char* download_http_content_with_cookie_jar(const char* url, size_t* content_siz
 }
 
 char* download_http_document_with_cookie_jar(const char* url, size_t* content_size,
-    CookieJar* cookie_jar, char** effective_url, char** content_language) {
+    CookieJar* cookie_jar, char** effective_url, char** content_language, char** content_type) {
     HttpConfig config = default_http_config;
     // A document navigation owns the resource manager's 60-second page-load
     // budget, rather than the 30-second limit intended for each subresource.
     config.timeout_seconds = 60;
     config.cookie_jar = cookie_jar;
-    return download_http_content_impl(url, content_size, &config, effective_url, content_language);
+    return download_http_content_impl(url, content_size, &config, effective_url, content_language,
+        HTTP_MAX_RESPONSE_SIZE, content_type);
 }
 
 // Download HTTP/HTTPS resource to the native cache and optionally return its path.

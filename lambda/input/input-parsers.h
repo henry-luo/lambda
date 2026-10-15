@@ -35,8 +35,12 @@ struct XmlParseOptions {
     void (*element_span)(void* context, Element* element, size_t start, size_t end);
     bool require_namespaces = false;
     bool allow_inert_doctype = false; // external identifier only: no subset, entity declarations, or fetching.
+    bool xhtml = false; // emit HTML names/document nodes while retaining XML syntax and namespaces.
+    bool track_source_lines = false;
 };
 void parse_xml_with_options(Input* input, const char* xml_string, const XmlParseOptions* options);
+Element* parse_xhtml_document(Input* input, const char* source, size_t length,
+                              bool track_source_lines = false);
 void parse_css(Input* input, const char* css_string);
 
 // ── Relational database (C++ linkage) ──────────────────────────────

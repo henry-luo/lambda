@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head><title>XHTML names</title><link rel="stylesheet" href="xhtml_names.css"></head>
+<body>
+<div id="box" class="card" style="height:44px">XHTML box</div>
+<p id="status">pending</p>
+<svg width="80" height="30" viewBox="0 0 80 30"><foreignObject width="80" height="30"><div id="foreign">foreign HTML</div></foreignObject></svg>
+<script>
+const box = document.getElementById('box');
+const foreign = document.getElementById('foreign');
+const ready = box.localName === 'div' && box.namespaceURI === 'http://www.w3.org/1999/xhtml'
+    && box.getAttribute('class') === 'card' && foreign.localName === 'div'
+    && foreign.namespaceURI === 'http://www.w3.org/1999/xhtml' && document.compatMode === 'CSS1Compat';
+document.getElementById('status').textContent = ready ? 'XHTML ready' : 'XHTML failed';
+</script>
+</body></html>

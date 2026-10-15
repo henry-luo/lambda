@@ -96,6 +96,10 @@ static const RadiantViewCase g_radiant_view_cases[] = {
      "test/input/eps/raster-hex.eps", nullptr, true},
     {"RadiantViewTest.LoadsPlanarRasterEpsAsHeadlessView", "eps_raster_planar",
      "test/input/eps/raster-planar.eps", nullptr, true},
+    {"RadiantViewTest.LoadsXhtmlWithHtmlNames", "xhtml_names", "test/html/xhtml_names.xhtml",
+     "test/html/xhtml_names_events.json", true},
+    {"RadiantViewTest.LoadsHtmlWithMatchingXhtmlNames", "html_xhtml_names", "test/html/xhtml_names.html",
+     "test/html/xhtml_names_events.json", true},
 };
 
 static const size_t g_radiant_view_case_count =
@@ -870,6 +874,102 @@ TEST(RadiantViewTest, LoadsSvgAsHeadlessView) {
 
 TEST(RadiantViewTest, LoadsHtmlAsHeadlessView) {
     test_radiant_view_expect_case(4);
+}
+
+TEST(RadiantViewTest, LoadsXhtmlWithHtmlNames) {
+    test_radiant_view_expect_case(g_radiant_view_case_count - 2);
+}
+
+TEST(RadiantViewTest, LoadsHtmlWithMatchingXhtmlNames) {
+    test_radiant_view_expect_case(g_radiant_view_case_count - 1);
+}
+
+TEST(RadiantViewTest, LoadsXhtmlFeatureGallery) {
+    test_radiant_view_ensure_temp_dir();
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", "temp/xhtml-gallery-test.log"}, {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {NULL, NULL},
+    };
+    ShellResult result = test_radiant_view_run_logged_headless("test/html/xhtml_feature_gallery.xhtml",
+        "test/html/xhtml_feature_gallery_events.json", env);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "Assertions: 9 passed, 0 failed"), nullptr) << output;
+    EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+    shell_result_free(&result);
+}
+
+TEST(RadiantViewTest, SelectsXhtmlFromHttpMimeAndRedirects) {
+#ifdef _WIN32
+    GTEST_SKIP() << "local HTTP fixture uses POSIX sockets";
+#else
+    test_radiant_view_ensure_temp_dir();
+    char* page = read_text_file("test/html/xhtml_names.xhtml");
+    char* css = read_text_file("test/html/xhtml_names.css");
+    struct SourceScope {
+        char* page; char* css;
+        ~SourceScope() { mem_free(page); mem_free(css); }
+    } source_scope = {page, css};
+    ASSERT_NE(page, nullptr);
+    ASSERT_NE(css, nullptr);
+    const char* without_doctype = strstr(page, "<h:html");
+    ASSERT_NE(without_doctype, nullptr);
+    const RadiantViewHttpResource resources[] = {
+        {"GET /page.html ", "application/xhtml+xml; charset=UTF-8", page, strlen(page)},
+        {"GET /page ", "application/xhtml+xml", page, strlen(page)},
+        {"GET /no-doctype.html ", "application/xhtml+xml", without_doctype, strlen(without_doctype)},
+        {"GET /redirect.html ", "text/html", "", 0, "Location: /page.html\r\n", 302},
+        {"GET /xhtml_names.css ", "text/css", css, strlen(css)},
+    };
+    RadiantViewImageServer server = {};
+    ASSERT_TRUE(test_radiant_view_unsupported_image_server_start(&server, resources,
+        sizeof(resources) / sizeof(resources[0])));
+    struct ServerScope {
+        pid_t pid;
+        ~ServerScope() { kill(pid, SIGTERM); waitpid(pid, nullptr, 0); }
+    } server_scope = {server.pid};
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", "temp/xhtml-http-view.log"}, {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {NULL, NULL},
+    };
+    const char* paths[] = {"page.html", "page", "no-doctype.html", "redirect.html"};
+    for (const char* path : paths) {
+        SCOPED_TRACE(path);
+        char url[128];
+        snprintf(url, sizeof(url), "http://127.0.0.1:%d/%s", server.port, path);
+        ShellResult result = test_radiant_view_run_logged_headless(url,
+            "test/html/xhtml_names_events.json", env);
+        const char* output = result.stdout_buf ? result.stdout_buf : "";
+        EXPECT_EQ(result.exit_code, 0) << output;
+        EXPECT_NE(strstr(output, "Assertions: 3 passed, 0 failed"), nullptr) << output;
+        EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+        shell_result_free(&result);
+    }
+#endif
+}
+
+TEST(RadiantViewTest, ViewsParsedXhtmlReturnedByLambda) {
+    test_radiant_view_ensure_temp_dir();
+    const char* script_path = "temp/_xhtml_result.ls";
+    const char* event_path = "temp/xhtml_result_events.json";
+    const char* script = "parse(\"<h:html xmlns:h='http://www.w3.org/1999/xhtml'><h:head>"
+        "<h:style>.card{width:80px;height:44px}</h:style></h:head><h:body>"
+        "<h:div id='box' class='card'>parsed XHTML</h:div></h:body></h:html>\", 'xhtml')^";
+    const char* events = "{\"events\":[{\"type\":\"assert_rect\",\"target\":{\"selector\":\"#box\"},"
+        "\"width\":80,\"height\":44},{\"type\":\"assert_text\",\"target\":{\"selector\":\"#box\"},"
+        "\"equals\":\"parsed XHTML\"}]}";
+    write_text_file(script_path, script);
+    write_text_file(event_path, events);
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_LOG_FILE", "temp/xhtml-result-view.log"}, {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {"MEMTRACK_MODE", "STATS"}, {"VIEW_MEM_STAGES", "1"}, {NULL, NULL},
+    };
+    ShellResult result = test_radiant_view_run_logged_headless(script_path, event_path, env);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "Assertions: 2 passed, 0 failed"), nullptr) << output;
+    EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+    shell_result_free(&result);
 }
 
 TEST(RadiantViewTest, LoadsXmlAsHeadlessView) {

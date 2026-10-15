@@ -815,7 +815,7 @@ struct DomNamespacedAttribute {
 };
 
 static inline bool dom_attribute_is_internal(const char* name) {
-    return name && strncmp(name, "__lambda_", 9) == 0;
+    return element_attribute_is_internal(name);
 }
 
 // borrowed attribute fields; iteration preserves expanded identity and native null values.

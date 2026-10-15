@@ -305,7 +305,7 @@ static DocFormat detect_doc_format(const char* filename) {
     ext++; // skip the '.'
     ext_len--;
 
-    if (str_ieq_const(ext, ext_len, "html") || str_ieq_const(ext, ext_len, "htm")) {
+    if (str_ieq_const(ext, ext_len, "html") || str_ieq_const(ext, ext_len, "htm") || input_path_is_xhtml(filename)) {
         return DOC_FORMAT_HTML;
     } else if (str_ieq_const(ext, ext_len, "md") || str_ieq_const(ext, ext_len, "markdown")) {
         return DOC_FORMAT_MARKDOWN;

@@ -35,6 +35,7 @@ All lightweight markup flavors (Markdown, reStructuredText, AsciiDoc, …) parse
 | LaTeX | `latex` | see §3.1 — a `latex_document` tree, not Mark Doc |
 | Typst | `typst` | |
 | HTML5 | `html` / `html5` | passes the html5lib test suite; see §1.4 |
+| XHTML | `xhtml` | Strict XML syntax producing an HTML document tree (D2.10.1); see [XHTML input](#xhtml-input--html-document-tree) |
 | Mark | `mark` | Lambda's own notation, read back losslessly |
 
 In Lambda scripts all of these are loaded with `input()`:
@@ -314,6 +315,55 @@ well-formed XML validation. This profile accepts an external DOCTYPE
 identifier as inert metadata; it never fetches a DTD and rejects internal
 subsets and unknown entities. The ordinary `'xml'` data reader remains
 permissive. [MusicXML sheet music](Lambda_Music.md) uses the strict profile.
+
+#### XHTML input → HTML document tree
+
+The dedicated **`xhtml` input format** uses strict XML 1.0/UTF-8 parsing and
+returns the HTML-compatible `<#document>` tree for Radiant (**D2.10.1**).
+Filename detection recognizes `.xhtml` and `.xht`, case-insensitively;
+Radiant also selects this parser for HTTP `application/xhtml+xml` responses,
+including after redirects. Explicit format selection accepts any filename.
+
+```lambda
+let page = input("page.xhtml")^                  // filename detection
+let explicit = input("page.data", 'xhtml')^      // explicit format
+let inline = parse("<html xmlns=\"http://www.w3.org/1999/xhtml\"><head/><body><p>Hello</p></body></html>", 'xhtml')^
+let html_text = format(inline, 'html')^           // serialize the HTML tree
+```
+
+The document must have one `{http://www.w3.org/1999/xhtml}html` root.
+XHTML element prefixes resolve to plain HTML names (`h:div` → `div`);
+ordinary attribute names and string values match HTML input. Qualified
+attributes retain their namespace, and SVG/MathML names retain their exact
+case, including `viewBox` and `foreignObject`. XML name sensitivity, text
+whitespace, CDATA character data, and self-closing element boundaries are
+preserved. XML declarations are omitted from document children; comments
+and doctypes use the HTML parser's `#comment` and `#doctype` representations.
+
+Radiant uses the same HTML DOM/CSS/layout pipeline, always in standards
+mode, including without a doctype. XML structure remains as written:
+HTML tree repair and implied element insertion are not applied. Malformed
+XML, unbound prefixes, duplicate expanded attributes, and NUL bytes fail
+parsing. External doctype identifiers are inert; DTD fetching, internal
+subsets, and DTD-defined named entities are unsupported. Use `&#160;`
+instead of `&nbsp;`. The ordinary `xml` reader retains its `<document>`
+wrapper and source QNames. There is no dedicated `xhtml` output formatter;
+`format(page, 'html')^` produces HTML serialization.
+
+```bash
+./lambda.exe view page.xhtml
+./lambda.exe layout page.xhtml
+./lambda.exe render page.xhtml -o page.svg
+./lambda.exe convert page.xhtml -f xhtml -t html -o page.html
+```
+
+The [XHTML feature gallery](../test/html/xhtml_feature_gallery.xhtml) is a
+viewable local sample with 27 live checks, SVG/MathML, namespace examples,
+forms, tables and text preservation. Open it with
+`./lambda.exe view test/html/xhtml_feature_gallery.xhtml`.
+Its nine interaction assertions pass at desktop and narrow viewport widths.
+Static layout/render currently exposes a startup computed-border discrepancy
+in one gallery check; the failed check displays the observed values.
 
 ### 2.4 YAML → Lambda Map / Array
 

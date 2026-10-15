@@ -1,0 +1,2 @@
+html, body { margin: 0; padding: 0; }
+.card { box-sizing: border-box; width: 80px; height: 40px; padding: 4px; background: #cef; }
