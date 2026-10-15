@@ -50,6 +50,18 @@
   "test/input/docx/external-notes.docx": {
     "error_match": "error \\[7602\\]"
   },
+  "test/input/ebook/missing-spine.epub": {
+    "error_match": "error \\[7802\\]"
+  },
+  "test/input/ebook/escape.epub": {
+    "error_match": "error \\[7805\\]"
+  },
+  "test/input/ebook/protected.epub": {
+    "error_match": "error \\[7807\\]"
+  },
+  "test/input/ebook/css-cycle.epub": {
+    "error_match": "error \\[7808\\]"
+  },
   "test/html/paged_media_column_rule_styles.rpd": {
     "pages": 7
   }

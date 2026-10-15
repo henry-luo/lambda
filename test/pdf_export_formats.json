@@ -30,6 +30,11 @@
     "paged": false
   },
   {
+    "name": "epub",
+    "path": "test/input/ebook/minimal.epub",
+    "paged": false
+  },
+  {
     "name": "docbook",
     "path": "test/input/docbook/showcase.xml",
     "paged": false

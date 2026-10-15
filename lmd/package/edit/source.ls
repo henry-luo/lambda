@@ -1071,7 +1071,8 @@ on edit_dialog(req) {
   }
 }
 on keydown(evt) {
-  vw = mounted(vw, evt.target, rev)
+  // assigning unchanged state rebuilds the rows before the pending text input
+  if (vw.handle == null) { vw = mounted(vw, evt.target, rev) }
   let primary = evt.metaKey == true or evt.ctrlKey == true
   if (primary and lower(string(evt.key)) == "s") {
     if (evt.shiftKey == true) { dialog = {kind: 'save_as', path: session.path} }
