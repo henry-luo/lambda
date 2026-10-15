@@ -2058,6 +2058,15 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
         }
         DisplayValue child_display = child->is_element() ?
             resolve_display_value(child) : DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW};
+        // block children below take layout_block directly, so the page flow's
+        // out-of-flow material (footnote bodies, running elements, page controls)
+        // leaves here as it does in layout_flow_node
+        if (lycon->paged && child->is_element() && !layout_display_is_none(child_display) &&
+            layout_inline_child_is_block_split(child) && paged_flow_skips_element(lycon, child->as_element())) {
+            child->view_type = RDT_VIEW_NONE;
+            child = child->next_sibling;
+            continue;
+        }
         bool is_block_or_table_internal = layout_inline_child_is_block_split(child);
         if (is_block_or_table_internal) {
             // CSS 2.1 §9.2.1.1: Leading anonymous block strut.

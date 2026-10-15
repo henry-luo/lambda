@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "page_document.hpp"
 #include "view.hpp"
 #include "render.hpp"
 #include "event.hpp"
@@ -2238,6 +2239,8 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
 
     if (node && node->is_element()) {
         DomElement* dom_elem = node->as_element();
+        // a native page document declares its elements' r: traits as presentational hints
+        radiant_native_hints_declare(dom_elem);
         if (dom_elem && dom_elem->specified_style) {
             bool styles_current = dom_elem->styles_resolved() &&
                                   !dom_elem->needs_style_recompute();
@@ -2309,6 +2312,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             }
 
             resolve_css_styles(dom_elem, lycon);
+            radiant_native_resolved(lycon, dom_elem);
             // HTML Rendering sizes native meter/progress widgets in em units;
             // apply the computed font after the author cascade has resolved.
             layout_refresh_html_em_replaced_size(lycon, dom_elem);
@@ -4498,8 +4502,14 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     if (node->is_element()) {
         DomElement* elem = node->as_element();
 
-        if (lycon->paged && paged_flow_skips_element(lycon, elem)) {
-            // page masters, regions and static content feed the composition, not the flow.
+        PseudoStyleKind generated;
+        bool skipped = lycon->paged ? paged_flow_skips_element(lycon, elem) :
+            // footnote calls and markers a page flow left behind belong to it alone
+            layout_generated_pseudo(elem, nullptr, &generated) &&
+            (generated == PSEUDO_STYLE_FOOTNOTE_CALL || generated == PSEUDO_STYLE_FOOTNOTE_MARKER);
+        if (skipped) {
+            // page masters, regions, static content, running elements, footnotes and
+            // page floats feed the composition, not the flow.
             node->view_type = RDT_VIEW_NONE;
             lycon->depth--;
             return;

@@ -213,6 +213,9 @@ struct ViewTreeModel {
     lam::Own<ViewCssContext> css;
     lam::Own<ViewCssContainerState> containers;
     lam::Own<PagedComposition> composition;
+    // page-margin generated content as synthetic boxes in the document's node arena,
+    // reused by each layout of the page flow (layout_paged.cpp, paged_margin_element)
+    lam::Up<DomElement> margin_elements[CSS_PAGE_MARGIN_BOX_COUNT];
     lam::Own<hashmap> image_resources; // generation owns assets independently of browsing and other editions
     lam::Up<ViewNativeLease> native_leases;
     lam::Up<LayoutViewNode> root;

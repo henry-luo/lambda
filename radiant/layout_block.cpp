@@ -897,6 +897,26 @@ static void pseudo_append_text_child(DomElement* pseudo_elem, const char* text) 
     pseudo_append_child(pseudo_elem, static_cast<DomNode*>(text_node));
 }
 
+// the text of a synthetic box: its first text child takes `content`, added when missing
+static void pseudo_set_text(DomElement* pseudo_element, const char* content) {
+    DomNode* first = pseudo_element->first_child;
+    if (first && first->is_text()) {
+        DomText* text_node = lam::dom_as<DOM_NODE_TEXT>(first);
+        // unchanged generated text must not grow document-owned string storage on every layout.
+        if (text_node->text && strcmp(text_node->text, content) == 0) return;
+        size_t content_len = strlen(content);
+        String* text_string = dom_document_create_string(
+            pseudo_element->doc, content, content_len);
+        if (text_string) {
+            dom_text_adopt_document_string(
+                text_node, pseudo_element->doc, text_string);
+            text_node->rect = nullptr;
+        }
+    } else if (content[0]) {
+        pseudo_append_text_child(pseudo_element, content);
+    }
+}
+
 static DomElement* pseudo_create_image_child(LayoutContext* lycon, DomElement* pseudo_elem,
                                              const CssDeclaration* content_decl, const char* raw_url) {
     if (!lycon || !pseudo_elem || !raw_url || !raw_url[0]) return nullptr;
@@ -1296,6 +1316,57 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     }
     return pseudo_elem;
 }
+bool layout_generated_pseudo(const DomElement* element, uint8_t* pseudo, PseudoStyleKind* kind) {
+    static const struct { const char* tag; uint8_t pseudo; PseudoStyleKind kind; } generated[] = {
+        {"::before", PSEUDO_ELEMENT_BEFORE, PSEUDO_STYLE_BEFORE},
+        {"::after", PSEUDO_ELEMENT_AFTER, PSEUDO_STYLE_AFTER},
+        {"::footnote-call", PSEUDO_ELEMENT_FOOTNOTE_CALL, PSEUDO_STYLE_FOOTNOTE_CALL},
+        {"::footnote-marker", PSEUDO_ELEMENT_FOOTNOTE_MARKER, PSEUDO_STYLE_FOOTNOTE_MARKER},
+    };
+    const char* tag = element && element->is_synthetic() ? element->tag_name : nullptr;
+    if (!tag || tag[0] != ':' || tag[1] != ':') return false;
+    for (const auto& entry : generated) {
+        if (strcmp(tag, entry.tag) != 0) continue;
+        if (pseudo) *pseudo = entry.pseudo;
+        if (kind) *kind = entry.kind;
+        return true;
+    }
+    return false;
+}
+
+DomElement* layout_footnote_pseudo(LayoutContext* lycon, DomElement* note, bool call) {
+    if (!lycon || !note || !note->parent || !note->parent->is_element()) return nullptr;
+    PseudoStyleKind kind = call ? PSEUDO_STYLE_FOOTNOTE_CALL : PSEUDO_STYLE_FOOTNOTE_MARKER;
+    const char* tag = call ? "::footnote-call" : "::footnote-marker";
+    // a retained box from an earlier pass of the same layout epoch is reused
+    DomNode* slot = call ? note->prev_sibling.get() : note->first_child.get();
+    DomElement* pseudo = slot && slot->is_element() && slot->parent == (DomNode*)note &&
+        slot->as_element()->is_synthetic() && strcmp(slot->as_element()->tag_name, tag) == 0 ? slot->as_element() : nullptr;
+    if (!pseudo) {
+        pseudo = DomElement::create(note->doc, tag, nullptr);
+        if (!pseudo) return nullptr;
+        pseudo->display.outer = CSS_VALUE_INLINE; pseudo->display.inner = CSS_VALUE_FLOW;
+        if (call) {
+            // the call stands in the note's place in its parent's children, while the
+            // note stays its parent for inheritance, counters and publication
+            DomElement* parent = note->parent->as_element();
+            DomNode* previous = note->prev_sibling;
+            pseudo->next_sibling = lam::own((DomNode*)note);
+            pseudo->prev_sibling = lam::up(previous);
+            if (previous) previous->next_sibling = lam::own((DomNode*)pseudo);
+            else parent->first_child = lam::own((DomNode*)pseudo);
+            note->prev_sibling = lam::up((DomNode*)pseudo);
+            pseudo->parent = lam::up((DomNode*)note);
+        } else {
+            insert_pseudo_into_dom(note, pseudo, true);
+        }
+    }
+    // generated boxes keep their own font storage, refreshed from the note's
+    if (note->font && !pseudo->font) pseudo->font = lam::view_prop((FontProp*)alloc_prop(lycon, sizeof(FontProp)));
+    refresh_pseudo_element_style(note, pseudo, kind, note->font);
+    return pseudo;
+}
+
 // drifting while preserving that ordering invariant.
 static const char* resolve_pseudo_generated_content(LayoutContext* lycon,
                                                     DomElement* element,
@@ -1313,38 +1384,49 @@ void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
         !pseudo_element->parent || !pseudo_element->parent->is_element()) {
         return;
     }
-    bool is_before = pseudo_element->tag_name &&
-        strcmp(pseudo_element->tag_name, "::before") == 0;
-    bool is_after = pseudo_element->tag_name &&
-        strcmp(pseudo_element->tag_name, "::after") == 0;
-    if (!is_before && !is_after) return;
+    uint8_t pseudo;
+    PseudoStyleKind kind;
+    if (!layout_generated_pseudo(pseudo_element, &pseudo, &kind)) return;
 
     DomElement* origin = lam::dom_as<DOM_NODE_ELEMENT>(pseudo_element->parent);
-    PseudoElementType pseudo = is_before ? PSEUDO_ELEMENT_BEFORE : PSEUDO_ELEMENT_AFTER;
-    StyleTree* style = origin->pseudo_style(
-        is_before ? PSEUDO_STYLE_BEFORE : PSEUDO_STYLE_AFTER);
+    StyleTree* style = origin->pseudo_style(kind);
     if (apply_counters) apply_pseudo_counter_ops(lycon, style);
-    const char* content = dom_element_get_pseudo_element_content_with_counters(
+    const char* content = nullptr;
+    if (pseudo == PSEUDO_ELEMENT_FOOTNOTE_CALL || pseudo == PSEUDO_ELEMENT_FOOTNOTE_MARKER) {
+        // CSS GCPM 3 §2.3: a call or marker without content shows its note's footnote
+        // counter, the marker followed by a space as the item engine set it
+        const CssDeclaration* declaration = style ? style_tree_get_declaration(style, CSS_PROPERTY_CONTENT) : nullptr;
+        const CssValue* value = declaration ? declaration->value : nullptr;
+        if (!value || css_value_keyword_equals(value, CSS_VALUE_NORMAL) || css_value_is_initial(value) || css_value_is_unset(value)) {
+            char number[32];
+            int length = counter_format_value(counter_get_value(lycon->counter_context, "footnote"), CSS_VALUE_DECIMAL,
+                number, sizeof(number) - 1);
+            if (length < 0) length = 0;
+            if (pseudo == PSEUDO_ELEMENT_FOOTNOTE_MARKER) number[length++] = ' ';
+            number[length] = '\0';
+            content = arena_dup_n(lycon->pass_arena, number, (size_t)length);
+        }
+    }
+    if (!content) content = dom_element_get_pseudo_element_content_with_counters(
         origin, pseudo, lycon->counter_context, lycon->pass_arena,
         &lycon->counter_context->quote_depth, lycon->paged ? paged_content_function : nullptr, lycon);
     if (!content) content = dom_element_get_pseudo_element_content(origin, pseudo);
-    if (!content) content = "";
-    DomNode* first = pseudo_element->first_child;
-    if (first && first->is_text()) {
-        DomText* text_node = lam::dom_as<DOM_NODE_TEXT>(first);
-        // unchanged generated text must not grow document-owned string storage on every layout.
-        if (text_node->text && strcmp(text_node->text, content) == 0) return;
-        size_t content_len = strlen(content);
-        String* text_string = dom_document_create_string(
-            pseudo_element->doc, content, content_len);
-        if (text_string) {
-            dom_text_adopt_document_string(
-                text_node, pseudo_element->doc, text_string);
-            text_node->rect = nullptr;
-        }
-    } else if (content[0]) {
-        pseudo_append_text_child(pseudo_element, content);
+    pseudo_set_text(pseudo_element, content ? content : "");
+}
+
+DomElement* layout_generated_text(DomElement* owner, const char* text) {
+    if (!owner || !owner->doc) return nullptr;
+    DomNode* first = owner->first_child;
+    DomElement* box = first && first->is_element() && first->as_element()->is_synthetic() &&
+        first->as_element()->tag_name && strcmp(first->as_element()->tag_name, "::generated") == 0 ? first->as_element() : nullptr;
+    if (!box) {
+        box = DomElement::create(owner->doc, "::generated", nullptr);
+        if (!box) return nullptr;
+        box->display.outer = CSS_VALUE_INLINE; box->display.inner = CSS_VALUE_FLOW;
+        insert_pseudo_into_dom(owner, box, true);
     }
+    pseudo_set_text(box, text ? text : "");
+    return box;
 }
 
 PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* block) {
