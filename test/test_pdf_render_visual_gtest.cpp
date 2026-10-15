@@ -1156,6 +1156,7 @@ TEST(RenderOutputParity, PagedTablesRepeatGroupsAndSplitCellsInPdfAndPreview) {
     }
 }
 
+// every page keeps one body width: a flow run has a constant width (Radiant_Impl_Paged_Integration §4.2)
 TEST(RenderOutputParity, PagedCaptionsMatchBlockWrappersAcrossTableAndCaptionContinuations) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
@@ -1167,7 +1168,7 @@ TEST(RenderOutputParity, PagedCaptionsMatchBlockWrappersAcrossTableAndCaptionCon
         for (size_t variant = 0; variant < 2; variant++) {
             StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
             strbuf_append_format(html, "<!doctype html><style>@page{size:160px 112px;margin:10px}"
-                "@page :left{size:140px 112px}html,body{margin:0;font:10px/12px Arial}"
+                "html,body{margin:0;font:10px/12px Arial}"
                 "table{table-layout:%s;width:100%%;box-sizing:border-box;border:2px solid blue;"
                 "padding:1px;border-spacing:0;background:magenta}"
                 "caption,.cap{padding:1px;border:1px solid red;background:yellow;text-align:center;"
@@ -1240,6 +1241,7 @@ TEST(RenderOutputParity, PagedColumnLayersAndWidthsMatchExplicitCellsAcrossConti
     }
 }
 
+// every page keeps one body width: a flow run has a constant width (Radiant_Impl_Paged_Integration §4.2)
 TEST(RenderOutputParity, PagedRowSpansMatchExplicitStackedCellsAcrossRepeatedFurniture) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
@@ -1251,7 +1253,7 @@ TEST(RenderOutputParity, PagedRowSpansMatchExplicitStackedCellsAcrossRepeatedFur
         for (size_t variant = 0; variant < 2; variant++) {
             StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
             strbuf_append_format(html, "<!doctype html><style>@page{size:160px 112px;margin:10px}"
-                "@page :left{size:140px 112px}html,body{margin:0;font:10px/12px Arial}"
+                "html,body{margin:0;font:10px/12px Arial}"
                 "table{table-layout:%s;width:100%%;border-spacing:0;background:magenta}"
                 "caption{padding:0;text-align:left}td,th{padding:0;vertical-align:top}"
                 "col:first-child{width:40px;background:cyan}.span{vertical-align:%s;background:yellow}"
@@ -1636,6 +1638,7 @@ TEST(RenderOutputParity, ExplicitNativeColumnsRetainUnequalGeometryInPreviewSvgA
     }
 }
 
+// every page keeps one body width: a flow run has a constant width (Radiant_Impl_Paged_Integration §4.2)
 TEST(RenderOutputParity, PagedMissingCellsMatchExplicitEmptyCellsAcrossSpansAndContinuations) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
@@ -1646,7 +1649,7 @@ TEST(RenderOutputParity, PagedMissingCellsMatchExplicitEmptyCellsAcrossSpansAndC
         for (size_t variant = 0; variant < 2; variant++) {
             StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
             strbuf_append_format(html, "<!doctype html><style>@page{size:160px 150px;margin:10px}"
-                "@page :left{size:140px 150px}html,body{margin:0;font:10px/12px Arial}"
+                "html,body{margin:0;font:10px/12px Arial}"
                 "table{table-layout:%s;width:100%%;border-spacing:4px 2px;background:magenta}"
                 "caption{padding:0;text-align:left}col{width:20px;background:cyan}"
                 "col:last-child{background:blue}td,th{padding:0;vertical-align:top;white-space:pre;orphans:1;widows:1}"

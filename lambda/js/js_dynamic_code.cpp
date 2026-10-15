@@ -464,31 +464,14 @@ static bool js_eval_source_is_v8_native_probe(String* code_str, bool* result_val
 // Whitespace and comments alone complete with undefined. Recognizing them
 // here keeps eval-heavy loops from parsing and retaining a script per call;
 // an unterminated block comment still reaches the parser's SyntaxError.
-static bool js_eval_source_is_blank(String* code_str) {
-    const char* s = code_str->chars;
-    size_t len = code_str->len;
-    size_t pos = 0;
-    if (len >= 2 && s[0] == '#' && s[1] == '!') {
-        while (pos < len && !js_eval_at_line_terminator(s, len, pos, NULL)) pos++;
-    }
-    while (pos < len) {
-        size_t width = 0;
-        if (s[pos] == ' ' || s[pos] == '\t') { pos++; continue; }
-        if (js_eval_at_line_terminator(s, len, pos, &width)) { pos += width; continue; }
-        if (s[pos] == '/' && pos + 1 < len && s[pos + 1] == '/') {
-            while (pos < len && !js_eval_at_line_terminator(s, len, pos, NULL)) pos++;
-            continue;
-        }
-        if (s[pos] == '/' && pos + 1 < len && s[pos + 1] == '*') {
-            pos += 2;
-            while (pos + 1 < len && !(s[pos] == '*' && s[pos + 1] == '/')) pos++;
-            if (pos + 1 >= len) return false;
-            pos += 2;
-            continue;
-        }
-        return false;
-    }
-    return true;
+bool js_eval_source_is_blank(String* code_str) {
+    if (!code_str) return false;
+    JsLexer lexer;
+    js_lexer_init(&lexer, code_str->chars, code_str->len);
+    JsToken token = js_lexer_next(&lexer);
+    if (token.kind == JS_TOK_HASHBANG) token = js_lexer_next(&lexer);
+    // embedded NUL can produce EOF before the source's actual end.
+    return token.kind == JS_TOK_EOF && lexer.offset == code_str->len;
 }
 
 extern "C" Item js_create_regexp_from_source(const char* src, size_t len);

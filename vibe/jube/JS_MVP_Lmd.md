@@ -1682,15 +1682,39 @@ Report coverage, feature completion and performance acceptance separately.
 
 ### Current verification
 
+The integrated increment adds ordinary Array copying methods/`Array.of`,
+String HTML/Unicode methods and single-agent SharedArrayBuffer through shared
+algorithms and frontend policies (**D1.3v3**, **D5.2–D5.3**). It repairs computed
+String-method admission, contextual `of` declaration lookahead, multiple
+iteration declarations and lexical bindings named `let`. Numeric indexing
+proofs, existing method IDs and original failing fixtures are preserved.
+Atomics, agents, new realms and native Array subclass allocation remain outside
+this increment.
+
 Three coding workers deliver scoped patches; the integrating agent reviews and
-verifies immutable release builds. The latest candidate is `parallel38`, SHA-256
-`8747e0880ae733144dd4849b67ca8dc307ff92036b72345b2b7da7f2b36140c1`.
-It passes **565/565** MVP focused tests both normally and under forced/poisoned
-GC, **204/204** native JS tests, **51/51** backtracker tests and **5/5** affected
-native groups under forced GC. The shared LJS baseline passes **40,261/40,261**,
-with zero regressions or unstable outcomes. The final Lambda/Input aggregate is
-**7,224/7,225**: every JS/MVP suite passes, with the previously observed LaTeX
-corpus timeout remaining. The fresh whole required-mode audit is running.
+verifies immutable release builds. Pin `parallel45`, SHA-256
+`89dfb9fb90f5a1705796f9f20820e72147572cdd09b95ba7ecbe8c3fe053c8c4`,
+passes **647/647** focused tests normally and under forced/poisoned GC,
+**205/205** native JS tests, **51/51** backtracker tests, **6/6** affected
+native groups under forced GC and forty additional shared AST/MIR ownership/
+semantic checks. Its independently verified selected audit passes **616/616**
+cases in every required mode, including **594/594** additional strict variants,
+regaining the four archived selected controls. Shared LJS reports
+**40,261/40,261** passing after recovery, zero regressions and no slow cases.
+An initial batch abort remains explicit: crash-report review identifies unsafe
+cross-thread watchdog recovery; an owner-bound fix is integrated for final
+verification under **D5.3.6v2/D6.3.3v2**. Lambda/Input passes **7,395/7,395**,
+including the **313/313** GC sweep. These selected results are not
+whole-population coverage or a clean batch-stability claim.
+
+Implemented followups reuse shared `substr` coercion/UTF16/scalar ownership,
+planned Number prototypes for inherited properties and the shared scope walker
+for duplicate lexical iteration targets. Bounded property/cache emission reduces
+oversized reflective entries while retaining known shapes and closed/small
+paths (**D1.3v3**, **D8.4.1v2**). ImportCall validates arity/spread/bare-new grammar;
+the same compiler budget also bounds newly
+started guarded inlines in oversized reflective entries. It adds no helper and
+preserves direct inlining, active inline bodies and separate functions.
 
 The previous candidate's full native suite exposed an async-iterator helper ABI
 regression. The original raw-iterator API is restored, and the explicitly named
@@ -1700,13 +1724,24 @@ expectations were corrected against ECMA-262 and exact Node/LJS controls, with
 additional negative/identity checks. No Test262 harness, corpus, deadline or
 expected result was changed (**D1.3v3**, **D8.1.3v24**).
 
-The latest completed whole-population audit remains `typed_methods4` at
-**27,597/40,261 (68.5%)**, leaving **8,638** passes to the **36,235** target.
-Later selected audits and cancelled partial whole runs are retained as separate
-diagnostics; their gains are never added to this score. The earlier failed local JS fixtures are now covered by the green rerun.
+The latest completed whole-population audit is archived `parallel38`, SHA-256
+`8747e0880ae733144dd4849b67ca8dc307ff92036b72345b2b7da7f2b36140c1`:
+**37,445/40,261 (93.0%)** pass every required mode, **1,210** above the
+**36,235** target. Independent verification checks raw captures, exact isolated
+replays, required strict modes and immutable provenance. It loses no passes
+from the original `typed_methods4` whole audit; four later selected controls
+remain timeout losses on this archived build. Coverage therefore clears 90%
+for pin38 while the full phase remains open. Pin44's unfinished whole audit is
+superseded by the pin45 fixes, with its partial logs retained. The refreshed
+full audit follows the watchdog fix and final integration gates; selected gains
+are never added to pin38's score.
 
-Remaining work is driven by the same-build whole audit. Known boundaries include
+Remaining work verifies watchdog recovery and the current build's full coverage.
+Known boundaries include
 some with/module-eval contexts, realm and Unicode-sets support, library residuals
-and oversized compiler cases. Benchmark timing remains deferred at the user's
+and oversized compiler cases. The current increment reuses shared empty-eval
+recognition and guarded native RegExp replacement, retaining syntax/coercion/
+Unicode/ownership checks (**D1.3v3**, **D8.1.3v24**, **D8.4.1v2**).
+Benchmark timing remains deferred at the user's
 request; performance acceptance is open. Detailed implementation, evidence and
 residual inventories are in [the implementation plan](../impl/JS_MVP_Lmd_Test262_90.md).

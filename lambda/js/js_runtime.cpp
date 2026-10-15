@@ -1676,9 +1676,9 @@ enum JsArrayIterativeMethodKind {
 static Item js_array_generic_includes(Item object, Item* args, int argc);
 static Item js_array_generic_index_of(Item object, Item* args, int argc, bool from_right);
 static Item js_array_generic_to_reversed(Item object);
-static Item js_array_generic_to_sorted(Item object, Item* args, int argc);
-static Item js_array_generic_to_spliced(Item object, Item* args, int argc);
-static Item js_array_generic_with(Item object, Item* args, int argc);
+static Item js_array_generic_to_sorted(Item object, Item* args, int argc, const JsArrayOps* ops);
+static Item js_array_generic_to_spliced(Item object, Item* args, int argc, const JsArrayOps* ops);
+static Item js_array_generic_with(Item object, Item* args, int argc, const JsArrayOps* ops);
 static Item js_array_generic_sort(Item object, Item* args, int argc);
 static Item js_throw_not_callable(const char* method_name);
 
@@ -1816,56 +1816,6 @@ static Item js_array_intrinsic_algorithm(Item arr, Item operation_receiver,
 static Item js_array_intrinsic_algorithm_into(Item arr,
     Item operation_receiver, JsIndexedIntrinsicOp operation, Item* args, int argc,
     uint64_t* result_home);
-enum JsStringIntrinsicOp {
-    JS_STRING_INTRINSIC_CHAR_AT,
-    JS_STRING_INTRINSIC_CHAR_CODE_AT,
-    JS_STRING_INTRINSIC_INDEX_OF,
-    JS_STRING_INTRINSIC_INCLUDES,
-    JS_STRING_INTRINSIC_SLICE,
-    JS_STRING_INTRINSIC_SUBSTRING,
-    JS_STRING_INTRINSIC_TO_LOWER_CASE,
-    JS_STRING_INTRINSIC_TO_UPPER_CASE,
-    JS_STRING_INTRINSIC_TRIM,
-    JS_STRING_INTRINSIC_SPLIT,
-    JS_STRING_INTRINSIC_REPLACE,
-    JS_STRING_INTRINSIC_MATCH,
-    JS_STRING_INTRINSIC_SEARCH,
-    JS_STRING_INTRINSIC_STARTS_WITH,
-    JS_STRING_INTRINSIC_ENDS_WITH,
-    JS_STRING_INTRINSIC_REPEAT,
-    JS_STRING_INTRINSIC_PAD_START,
-    JS_STRING_INTRINSIC_PAD_END,
-    JS_STRING_INTRINSIC_TO_STRING,
-    JS_STRING_INTRINSIC_VALUE_OF,
-    JS_STRING_INTRINSIC_TRIM_START,
-    JS_STRING_INTRINSIC_TRIM_END,
-    JS_STRING_INTRINSIC_CODE_POINT_AT,
-    JS_STRING_INTRINSIC_NORMALIZE,
-    JS_STRING_INTRINSIC_CONCAT,
-    JS_STRING_INTRINSIC_AT,
-    JS_STRING_INTRINSIC_LAST_INDEX_OF,
-    JS_STRING_INTRINSIC_LOCALE_COMPARE,
-    JS_STRING_INTRINSIC_REPLACE_ALL,
-    JS_STRING_INTRINSIC_MATCH_ALL,
-    JS_STRING_INTRINSIC_IS_WELL_FORMED,
-    JS_STRING_INTRINSIC_TO_WELL_FORMED,
-    JS_STRING_INTRINSIC_ANCHOR,
-    JS_STRING_INTRINSIC_BIG,
-    JS_STRING_INTRINSIC_BLINK,
-    JS_STRING_INTRINSIC_BOLD,
-    JS_STRING_INTRINSIC_FIXED,
-    JS_STRING_INTRINSIC_FONTCOLOR,
-    JS_STRING_INTRINSIC_FONTSIZE,
-    JS_STRING_INTRINSIC_ITALICS,
-    JS_STRING_INTRINSIC_LINK,
-    JS_STRING_INTRINSIC_SMALL,
-    JS_STRING_INTRINSIC_STRIKE,
-    JS_STRING_INTRINSIC_SUB,
-    JS_STRING_INTRINSIC_SUP,
-    JS_STRING_INTRINSIC_SUBSTR,
-    JS_STRING_INTRINSIC_TO_LOCALE_LOWER_CASE,
-    JS_STRING_INTRINSIC_TO_LOCALE_UPPER_CASE,
-};
 static Item js_string_intrinsic_algorithm(Item str, JsStringIntrinsicOp op,
     Item* args, int argc);
 static Item js_array_generic_push(Item object, Item* args, int argc);
@@ -11046,7 +10996,7 @@ static Item js_array_like_to_array(Item obj) {
 }
 
 static Item js_array_generic_fill(Item object, Item* args, int argc);
-static Item js_array_generic_copy_within(Item object, Item* args, int argc);
+static Item js_array_generic_copy_within(Item object, Item* args, int argc, const JsArrayOps* ops);
 static Item js_array_generic_reverse(Item object);
 
 // Forward declarations for JSON functions (defined in js_globals.cpp)
@@ -11205,18 +11155,18 @@ static bool js_array_generic_dispatch(Item source, Item callback_object,
     case JS_ARRAY_INTRINSIC_TO_REVERSED:
         result = js_array_generic_to_reversed(source); break;
     case JS_ARRAY_INTRINSIC_TO_SORTED:
-        result = js_array_generic_to_sorted(source, args, arg_count); break;
+        result = js_array_method_with_ops(JS_BUILTIN_ARR_TO_SORTED, source, args, arg_count, NULL); break;
     case JS_ARRAY_INTRINSIC_TO_SPLICED:
-        result = js_array_generic_to_spliced(source, args, arg_count); break;
+        result = js_array_method_with_ops(JS_BUILTIN_ARR_TO_SPLICED, source, args, arg_count, NULL); break;
     case JS_ARRAY_INTRINSIC_WITH:
-        result = js_array_generic_with(source, args, arg_count); break;
+        result = js_array_method_with_ops(JS_BUILTIN_ARR_WITH, source, args, arg_count, NULL); break;
     case JS_ARRAY_INTRINSIC_SPLICE:
         if (mode != JS_ARRAY_GENERIC_MAP) return false;
         result = js_array_generic_splice(source, args, arg_count); break;
     case JS_ARRAY_INTRINSIC_FILL:
         result = js_array_generic_fill(source, args, arg_count); break;
     case JS_ARRAY_INTRINSIC_COPY_WITHIN:
-        result = js_array_generic_copy_within(source, args, arg_count); break;
+        result = js_array_method_with_ops(JS_BUILTIN_ARR_COPY_WITHIN, source, args, arg_count, NULL); break;
     case JS_ARRAY_INTRINSIC_REVERSE:
         result = js_array_generic_reverse(source); break;
     case JS_ARRAY_INTRINSIC_SORT:
@@ -11325,7 +11275,7 @@ static Item js_intrinsic_array_prototype(JsIndexedIntrinsicOp op,
                 return js_array_generic_fill(this_val, args, arg_count);
             }
             if (op == JS_ARRAY_INTRINSIC_COPY_WITHIN) {
-                return js_array_generic_copy_within(this_val, args, arg_count);
+                return js_array_method_with_ops(JS_BUILTIN_ARR_COPY_WITHIN, this_val, args, arg_count, NULL);
             }
             if (op == JS_ARRAY_INTRINSIC_REVERSE) {
                 return js_array_generic_reverse(this_val);
@@ -12668,25 +12618,7 @@ Item js_intrinsic_array_from_body(Item callee, Item this_value, Item* args,
 
 Item js_intrinsic_array_of_body(Item callee, Item this_value, Item* args,
         int argc, uint64_t* result_home) {
-    Item result = ItemNull;
-    if (js_is_constructor_internal(this_value)) {
-        Item length = (Item){.item = i2it(argc)};
-        result = js_construct_value(this_value, &length, 1, this_value, NULL,
-            false);
-        if (item_is_error(result)) return result;
-    } else {
-        result = js_array_new_sparse_length((int64_t)argc);
-    }
-    for (int i = 0; i < argc; i++) {
-        JS_ASSIGN_OR_RETURN(status,
-            js_create_data_property_or_throw(result, (int64_t)i, args[i]));
-    }
-    Item length_key = {
-        .item = s2it(heap_create_name("length", 6))
-    };
-    JS_ASSIGN_OR_RETURN(length_status, js_elements_set_length_throw_status(
-        result, length_key, (int64_t)argc));
-    return result;
+    return js_array_of_with_ops(this_value, args, argc, NULL);
 }
 
 Item js_intrinsic_array_iterator_next_body(Item callee, Item this_value,
@@ -15152,7 +15084,8 @@ DEFINE_JS_EXPORT_CALL_INTO(8, (Item a, Item b, Item c, Item d, Item e, Item f, I
 #undef DEFINE_JS_EXPORT_CALL_INTO
 #undef JS_EXPORT_CALL_PARAMS
 
-static Item js_array_to_length_status(Item value, int64_t* out);
+static Item js_array_to_length_status(Item value, int64_t* out,
+    const JsBufferViewOps* ops = &js_buffer_view_default_ops);
 
 static Item js_array_like_arg_count(Item args_array, int* argc) {
     *argc = 0;
@@ -20155,7 +20088,11 @@ static Item js_try_builtin_regexp_replace_bulk(Item regex, Item str,
     Rooted<Item> replacement_root(roots, replacement);
     String* input = it2s(str_root.get());
     String* repl = it2s(replacement_root.get());
-    if (!input || !input->is_ascii || !repl) return ItemNull;
+    if (!input || !repl) return ItemNull;
+    // quantified built-in classes are nonempty and keep surrogate pairs in one run;
+    // their byte spans support substitution without allocating UTF-16 match records.
+    if (!input->is_ascii && (rd->simple_class_kind == JS_REGEX_SIMPLE_CLASS_NONE ||
+            !rd->simple_class_one_or_more)) return ItemNull;
     if (out_admitted) *out_admitted = true;
     // A replacement with no '$' has no capture/template substitutions. Test
     // once for the whole guarded builtin loop rather than parsing each match.
@@ -20174,8 +20111,7 @@ static Item js_try_builtin_regexp_replace_bulk(Item regex, Item str,
     bool found_match = false;
     int last_start = -1;
     int last_length = 0;
-    for (int safety = 0; safety < 1000000 && position <= (int)input->len;
-            safety++) {
+    while (position <= (int)input->len) {
         re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START :
             re2::RE2::UNANCHORED;
         JsRegexMatchResult match = js_regex_match_internal(rd, input->chars,
@@ -20210,7 +20146,10 @@ static Item js_try_builtin_regexp_replace_bulk(Item regex, Item str,
         last_length = match_len;
         found_match = true;
         copy_position = start + match_len;
-        position = start + match_len + (match_len == 0 ? 1 : 0);
+        // matching never moves backward; an empty terminal match is processed once.
+        // stop before adding one past the representable subject length.
+        if (!match_len && copy_position == (int)input->len) break;
+        position = copy_position + (match_len == 0 ? 1 : 0);
     }
     if (!found_match) {
         strbuf_free(output);
@@ -21831,7 +21770,7 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
                     array_semantics, JS_TYPED_METHOD_REVERSE, NULL);
             }
             if (operation == JS_ARRAY_INTRINSIC_COPY_WITHIN) {
-                if (array_semantics) return js_array_generic_copy_within(obj, args, argc);
+                if (array_semantics) return js_array_method_with_ops(JS_BUILTIN_ARR_COPY_WITHIN, obj, args, argc, NULL);
                 return js_typed_array_method_with_ops(obj, args, argc,
                     array_semantics, JS_TYPED_METHOD_COPY_WITHIN, NULL);
             }
@@ -21865,7 +21804,7 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
             }
             // ES2023: TypedArray.prototype.with(index, value) — returns new copy with one element replaced
             if (operation == JS_ARRAY_INTRINSIC_WITH) {
-                if (array_semantics) return js_array_generic_with(obj, args, argc);
+                if (array_semantics) return js_array_method_with_ops(JS_BUILTIN_ARR_WITH, obj, args, argc, NULL);
                 return js_typed_array_method_with_ops(obj, args, argc,
                     array_semantics, JS_TYPED_METHOD_WITH, NULL);
             }
@@ -21877,7 +21816,7 @@ static Item js_indexed_intrinsic_algorithm(Item obj,
             }
             // ES2023: TypedArray.prototype.toSorted(comparefn?) — returns new sorted copy
             if (operation == JS_ARRAY_INTRINSIC_TO_SORTED) {
-                if (array_semantics) return js_array_generic_to_sorted(obj, args, argc);
+                if (array_semantics) return js_array_method_with_ops(JS_BUILTIN_ARR_TO_SORTED, obj, args, argc, NULL);
                 return js_typed_array_method_with_ops(obj, args, argc,
                     array_semantics, JS_TYPED_METHOD_TO_SORTED, NULL);
             }
@@ -22575,7 +22514,7 @@ typedef struct JsStringHtmlWrapper {
 } JsStringHtmlWrapper;
 
 static Item js_string_html_wrapper(Item str, JsStringIntrinsicOp operation,
-                                   Item* args, int argc,
+                                   Item argument, const JsStringTextOps* ops,
                                    bool* handled) {
     static const JsStringHtmlWrapper simple[] = {
         {JS_STRING_INTRINSIC_BIG, "<big>", 5, "</big>", 6},
@@ -22626,13 +22565,15 @@ static Item js_string_html_wrapper(Item str, JsStringIntrinsicOp operation,
     StrBuf* sb = strbuf_new();
     strbuf_append_str_n(sb, wrapper->prefix, wrapper->prefix_len);
     if (has_attribute) {
-        Item arg_str = js_to_string(argc >= 1 ? args[0] : make_js_undefined());
-        if (item_is_error(arg_str)) {
+        RootFrame roots(1);
+        if (!roots.valid()) { *handled = true; strbuf_free(sb); return ItemError; }
+        Rooted<Item> arg_str(roots, ops ? ops->to_string(argument) : js_to_string(argument));
+        if (item_is_error(arg_str.get())) {
             *handled = true;
             strbuf_free(sb);
-            return arg_str;
+            return arg_str.get();
         }
-        String* attr = get_type_id(arg_str) == LMD_TYPE_STRING ? it2s(arg_str) : NULL;
+        String* attr = get_type_id(arg_str.get()) == LMD_TYPE_STRING ? it2s(arg_str.get()) : NULL;
         if (attr) {
             for (int i = 0; i < (int)attr->len; i++) {
                 if (attr->chars[i] == '"') strbuf_append_str_n(sb, "&quot;", 6);
@@ -22762,6 +22703,165 @@ static int64_t js_string_find_position(Item str, Item search, int64_t position,
         needle->chars, needle->len);
     if (found == STR_NPOS) return -1;
     return source->is_ascii ? (int64_t)found : (int64_t)str_utf8_count(source->chars, found);
+}
+
+Item js_string_substr_with_ops(Item str, Item start_arg, Item length_arg,
+        const JsBufferViewOps* supplied_ops) {
+    const JsBufferViewOps* ops = supplied_ops ? supplied_ops : &js_buffer_view_default_ops;
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    uint64_t homes[2] = {};
+    Rooted<Item> source(roots, str), first(roots, lambda_item_adopt_scalar_home(start_arg, &homes[0])),
+        second(roots, lambda_item_adopt_scalar_home(length_arg, &homes[1]));
+    String* string = source.get().get_string();
+    js_profile_string_leaf(string, JS_OPT_STRING_SLICE_ASCII, JS_OPT_STRING_SLICE_UNICODE);
+    int64_t size = js_string_utf16_length(string), start = 0;
+    JS_ASSIGN_OR_RETURN(start_status, js_array_relative_index_status(first.get(), size, 0, &start, ops));
+    double count = (double)size;
+    // length conversion remains observable for empty strings and out-of-range starts.
+    if (get_type_id(second.get()) != LMD_TYPE_UNDEFINED) {
+        JS_ASSIGN_OR_RETURN(length_status, js_array_to_integer_or_infinity_status(second.get(), &count, ops));
+    }
+    int64_t length = js_string_clamp_integer(count, size - start);
+    if (!length) return ItemEmptyString;
+    if (!start && length == size) return source.get();
+    return js_str_substring_utf16(source.get(), start, start + length);
+}
+
+// the shared text kernels own callback-live strings; guest objects stay behind coercion policy.
+Item js_string_text_with_ops(Item str, JsStringIntrinsicOp operation,
+        Item argument, const JsStringTextOps* ops) {
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> source(roots, str), input(roots, argument), converted(roots, ItemNull);
+    // String.prototype.normalize(form?) — Unicode normalization (NFC/NFD/NFKC/NFKD)
+    if (operation == JS_STRING_INTRINSIC_NORMALIZE) {
+        String* s = it2s(str);
+        // determine requested form (default: NFC when undefined)
+        const char* form = "NFC";
+        int form_len = 3;
+        if (get_type_id(input.get()) != LMD_TYPE_UNDEFINED) {
+            converted.set(ops ? ops->to_string(input.get()) : js_to_string(input.get()));
+            if (item_is_error(converted.get())) return converted.get();
+            String* f = it2s(converted.get());
+            if (f) { form = f->chars; form_len = (int)f->len; }
+        }
+        // validate form name
+        bool valid_form = (form_len == 3 && strncmp(form, "NFC", 3) == 0) ||
+                          (form_len == 3 && strncmp(form, "NFD", 3) == 0) ||
+                          (form_len == 4 && strncmp(form, "NFKC", 4) == 0) ||
+                          (form_len == 4 && strncmp(form, "NFKD", 4) == 0);
+        if (!valid_form) {
+            const char* message = "The normalization form should be one of NFC, NFD, NFKC, NFKD";
+            return ops ? ops->range_error(message) : js_throw_range_error(message);
+        }
+        // form conversion and validation are observable even when the receiver is empty.
+        if (!s || s->len == 0) return str;
+        char* normalized = NULL;
+        int norm_len = 0;
+        if (form_len == 3 && form[2] == 'D')
+            normalized = normalize_utf8proc_nfd(s->chars, s->len, &norm_len);
+        else if (form_len == 4 && form[3] == 'C')
+            normalized = normalize_utf8proc_nfkc(s->chars, s->len, &norm_len);
+        else if (form_len == 4 && form[3] == 'D')
+            normalized = normalize_utf8proc_nfkd(s->chars, s->len, &norm_len);
+        else // NFC (default)
+            normalized = normalize_utf8proc_nfc(s->chars, s->len, &norm_len);
+        if (!normalized) return str;
+        String* result = heap_strcpy(normalized, norm_len);
+        free_utf8proc_result(normalized);
+        return (Item){.item = s2it(result)};
+    }
+    if (operation == JS_STRING_INTRINSIC_LOCALE_COMPARE) {
+        String* left = it2s(str);
+        converted.set(ops ? ops->to_string(input.get()) : js_to_string(input.get()));
+        if (item_is_error(converted.get())) return converted.get();
+        String* right = it2s(converted.get());
+        if (!left || !right) return ItemNull;
+
+        int left_norm_len = 0, right_norm_len = 0;
+        char* left_norm = normalize_utf8proc_nfc(left->chars, (int)left->len, &left_norm_len);
+        char* right_norm = normalize_utf8proc_nfc(right->chars, (int)right->len, &right_norm_len);
+        const char* left_chars = left_norm ? left_norm : left->chars;
+        const char* right_chars = right_norm ? right_norm : right->chars;
+        int left_len = left_norm ? left_norm_len : (int)left->len;
+        int right_len = right_norm ? right_norm_len : (int)right->len;
+
+        int min_len = left_len < right_len ? left_len : right_len;
+        int cmp = min_len > 0 ? memcmp(left_chars, right_chars, (size_t)min_len) : 0;
+        int result = 0;
+        if (cmp < 0) result = -1;
+        else if (cmp > 0) result = 1;
+        else if (left_len < right_len) result = -1;
+        else if (left_len > right_len) result = 1;
+
+        if (left_norm) free_utf8proc_result(left_norm);
+        if (right_norm) free_utf8proc_result(right_norm);
+        return (Item){.item = i2it(result)};
+    }
+    // isWellFormed() — returns false if string contains lone surrogates
+    if (operation == JS_STRING_INTRINSIC_IS_WELL_FORMED) {
+        String* s = it2s(str);
+        return (Item){.item = b2it(!js_string_has_lone_surrogate(s))};
+    }
+
+    // toWellFormed() — replaces lone surrogates with U+FFFD
+    if (operation == JS_STRING_INTRINSIC_TO_WELL_FORMED) {
+        String* s = it2s(str);
+        if (!s || s->len == 0) return str;
+        if (!js_string_has_lone_surrogate(s)) return str;
+        // rebuild with replacements
+        StrBuf* sb = strbuf_new_cap(s->len + 16);
+        int i = 0;
+        while (i < (int)s->len) {
+            unsigned char lead = (unsigned char)s->chars[i];
+            if (lead < 0xE0) {
+                int skip = (lead < 0x80) ? 1 : (lead < 0xC0) ? 1 : 2;
+                strbuf_append_str_n(sb, s->chars + i, skip);
+                i += skip; continue;
+            }
+            if (lead < 0xF0) {
+                if (lead == 0xED && i + 1 < (int)s->len) {
+                    unsigned char second = (unsigned char)s->chars[i + 1];
+                    if (second >= 0xA0 && second <= 0xAF) {
+                        int next = i + 3;
+                        if (next + 2 <= (int)s->len &&
+                            (unsigned char)s->chars[next] == 0xED) {
+                            unsigned char ns = (unsigned char)s->chars[next + 1];
+                            if (ns >= 0xB0 && ns <= 0xBF) {
+                                strbuf_append_str_n(sb, s->chars + i, 6);
+                                i += 6; continue;
+                            }
+                        }
+                        // lone high surrogate → U+FFFD (EF BF BD)
+                        strbuf_append_str_n(sb, "\xEF\xBF\xBD", 3);
+                        i += 3; continue;
+                    } else if (second >= 0xB0 && second <= 0xBF) {
+                        // lone low surrogate → U+FFFD
+                        strbuf_append_str_n(sb, "\xEF\xBF\xBD", 3);
+                        i += 3; continue;
+                    }
+                }
+                strbuf_append_str_n(sb, s->chars + i, 3);
+                i += 3; continue;
+            }
+            int skip = 4;
+            strbuf_append_str_n(sb, s->chars + i, skip);
+            i += skip; continue;
+        }
+        String* result = heap_create_name(sb->str, sb->length);
+        strbuf_free(sb);
+        return (Item){.item = s2it(result)};
+    }
+
+    // HTML wrapper methods (Annex B §B.2.3) share one table-driven renderer.
+    bool html_handled = false;
+    Item html_result = js_string_html_wrapper(
+        str, operation, input.get(), ops, &html_handled);
+    if (html_handled) return html_result;
+    log_error("string-intrinsic-algorithm: unknown operation %d",
+        (int)operation);
+    return ItemError;
 }
 
 static Item js_string_search_intrinsic(Item str, JsStringIntrinsicOp operation,
@@ -22911,67 +23011,8 @@ static Item js_string_intrinsic_algorithm(Item str,
     if (operation == JS_STRING_INTRINSIC_TO_UPPER_CASE) {
         return js_string_case_map(str, true);
     }
-    // String.prototype.normalize(form?) — Unicode normalization (NFC/NFD/NFKC/NFKD)
-    if (operation == JS_STRING_INTRINSIC_NORMALIZE) {
-        String* s = it2s(str);
-        if (!s || s->len == 0) return str;
-        // Determine requested form (default: NFC when undefined)
-        const char* form = "NFC";
-        int form_len = 3;
-        if (argc > 0 && get_type_id(args[0]) != LMD_TYPE_UNDEFINED) {
-            JS_ASSIGN_OR_RETURN(form_str, js_to_string(args[0]));
-            String* f = it2s(form_str);
-            if (f) { form = f->chars; form_len = (int)f->len; }
-        }
-        // Validate form name
-        bool valid_form = (form_len == 3 && strncmp(form, "NFC", 3) == 0) ||
-                          (form_len == 3 && strncmp(form, "NFD", 3) == 0) ||
-                          (form_len == 4 && strncmp(form, "NFKC", 4) == 0) ||
-                          (form_len == 4 && strncmp(form, "NFKD", 4) == 0);
-        if (!valid_form) {
-            return js_throw_range_error("The normalization form should be one of NFC, NFD, NFKC, NFKD");
-        }
-        char* normalized = NULL;
-        int norm_len = 0;
-        if (form_len == 3 && form[2] == 'D')
-            normalized = normalize_utf8proc_nfd(s->chars, s->len, &norm_len);
-        else if (form_len == 4 && form[3] == 'C')
-            normalized = normalize_utf8proc_nfkc(s->chars, s->len, &norm_len);
-        else if (form_len == 4 && form[3] == 'D')
-            normalized = normalize_utf8proc_nfkd(s->chars, s->len, &norm_len);
-        else // NFC (default)
-            normalized = normalize_utf8proc_nfc(s->chars, s->len, &norm_len);
-        if (!normalized) return str;
-        String* result = heap_strcpy(normalized, norm_len);
-        free_utf8proc_result(normalized);
-        return (Item){.item = s2it(result)};
-    }
-    if (operation == JS_STRING_INTRINSIC_LOCALE_COMPARE) {
-        String* left = it2s(str);
-        JS_ASSIGN_OR_RETURN(right_item, js_to_string((argc >= 1) ? args[0] : make_js_undefined()));
-        String* right = it2s(right_item);
-        if (!left || !right) return ItemNull;
-
-        int left_norm_len = 0, right_norm_len = 0;
-        char* left_norm = normalize_utf8proc_nfc(left->chars, (int)left->len, &left_norm_len);
-        char* right_norm = normalize_utf8proc_nfc(right->chars, (int)right->len, &right_norm_len);
-        const char* left_chars = left_norm ? left_norm : left->chars;
-        const char* right_chars = right_norm ? right_norm : right->chars;
-        int left_len = left_norm ? left_norm_len : (int)left->len;
-        int right_len = right_norm ? right_norm_len : (int)right->len;
-
-        int min_len = left_len < right_len ? left_len : right_len;
-        int cmp = min_len > 0 ? memcmp(left_chars, right_chars, (size_t)min_len) : 0;
-        int result = 0;
-        if (cmp < 0) result = -1;
-        else if (cmp > 0) result = 1;
-        else if (left_len < right_len) result = -1;
-        else if (left_len > right_len) result = 1;
-
-        if (left_norm) free_utf8proc_result(left_norm);
-        if (right_norm) free_utf8proc_result(right_norm);
-        return (Item){.item = i2it(result)};
-    }
+    if (operation == JS_STRING_INTRINSIC_NORMALIZE || operation == JS_STRING_INTRINSIC_LOCALE_COMPARE)
+        return js_string_text_with_ops(str, operation, argc ? args[0] : make_js_undefined(), NULL);
     if (operation == JS_STRING_INTRINSIC_SPLIT) {
         // ES spec §21.1.3.21: check [Symbol.split] on separator
         if (argc >= 1 && args[0].item != ItemNull.item && get_type_id(args[0]) != LMD_TYPE_UNDEFINED
@@ -23084,8 +23125,10 @@ static Item js_string_intrinsic_algorithm(Item str,
         }
         return result;
     }
+    if (operation == JS_STRING_INTRINSIC_SUBSTR)
+        return js_string_substr_with_ops(str, argc ? args[0] : make_js_undefined(),
+            argc > 1 ? args[1] : make_js_undefined(), NULL);
     if (operation == JS_STRING_INTRINSIC_SUBSTRING ||
-            operation == JS_STRING_INTRINSIC_SUBSTR ||
             operation == JS_STRING_INTRINSIC_SLICE) {
         if (argc < 1) return str;
         String* s = it2s(str);
@@ -23096,25 +23139,11 @@ static Item js_string_intrinsic_algorithm(Item str,
         double dstart = js_get_number(start_num);
         int64_t start = isnan(dstart) ? 0 : (int64_t)dstart;
         int64_t end = slen;
-        if (operation == JS_STRING_INTRINSIC_SUBSTR) {
-            if (start < 0) { start = slen + start; if (start < 0) start = 0; }
-            int64_t length = slen - start;
-            if (argc > 1 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
-                JS_ASSIGN_OR_RETURN(length_num, js_to_number(args[1]));
-                double dlength = js_get_number(length_num);
-                length = isnan(dlength) ? 0 :
-                    (isinf(dlength) && dlength > 0) ? slen : (int64_t)dlength;
-                if (length < 0) length = 0;
-            }
-            if (start >= slen || length <= 0) return js_name_item("");
-            end = start + length;
-            if (end > slen) end = slen;
-        } else {
-            if (argc > 1 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
-                JS_ASSIGN_OR_RETURN(end_num, js_to_number(args[1]));
-                double dend = js_get_number(end_num);
-                end = isnan(dend) ? 0 : (int64_t)dend;
-            }
+        if (argc > 1 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
+            JS_ASSIGN_OR_RETURN(end_num, js_to_number(args[1]));
+            double dend = js_get_number(end_num);
+            end = isnan(dend) ? 0 : (int64_t)dend;
+        }
         if (operation == JS_STRING_INTRINSIC_SUBSTRING) {
             if (start < 0) start = 0;
             if (end < 0) end = 0;
@@ -23126,7 +23155,6 @@ static Item js_string_intrinsic_algorithm(Item str,
         if (end > slen) end = slen;
         if (operation == JS_STRING_INTRINSIC_SUBSTRING && start > end) {
             int64_t tmp = start; start = end; end = tmp;
-        }
         }
         if (start >= end) return js_name_item("");
         return js_str_substring_utf16(str, start, end);
@@ -23467,60 +23495,8 @@ static Item js_string_intrinsic_algorithm(Item str,
         }
         return ItemNull;
     }
-    // isWellFormed() — returns false if string contains lone surrogates
-    if (operation == JS_STRING_INTRINSIC_IS_WELL_FORMED) {
-        String* s = it2s(str);
-        return (Item){.item = b2it(!js_string_has_lone_surrogate(s))};
-    }
-
-    // toWellFormed() — replaces lone surrogates with U+FFFD
-    if (operation == JS_STRING_INTRINSIC_TO_WELL_FORMED) {
-        String* s = it2s(str);
-        if (!s || s->len == 0) return str;
-        if (!js_string_has_lone_surrogate(s)) return str;
-        // rebuild with replacements
-        StrBuf* sb = strbuf_new_cap(s->len + 16);
-        int i = 0;
-        while (i < (int)s->len) {
-            unsigned char lead = (unsigned char)s->chars[i];
-            if (lead < 0xE0) {
-                int skip = (lead < 0x80) ? 1 : (lead < 0xC0) ? 1 : 2;
-                strbuf_append_str_n(sb, s->chars + i, skip);
-                i += skip; continue;
-            }
-            if (lead < 0xF0) {
-                if (lead == 0xED && i + 1 < (int)s->len) {
-                    unsigned char second = (unsigned char)s->chars[i + 1];
-                    if (second >= 0xA0 && second <= 0xAF) {
-                        int next = i + 3;
-                        if (next + 2 <= (int)s->len &&
-                            (unsigned char)s->chars[next] == 0xED) {
-                            unsigned char ns = (unsigned char)s->chars[next + 1];
-                            if (ns >= 0xB0 && ns <= 0xBF) {
-                                strbuf_append_str_n(sb, s->chars + i, 6);
-                                i += 6; continue;
-                            }
-                        }
-                        // lone high surrogate → U+FFFD (EF BF BD)
-                        strbuf_append_str_n(sb, "\xEF\xBF\xBD", 3);
-                        i += 3; continue;
-                    } else if (second >= 0xB0 && second <= 0xBF) {
-                        // lone low surrogate → U+FFFD
-                        strbuf_append_str_n(sb, "\xEF\xBF\xBD", 3);
-                        i += 3; continue;
-                    }
-                }
-                strbuf_append_str_n(sb, s->chars + i, 3);
-                i += 3; continue;
-            }
-            int skip = 4;
-            strbuf_append_str_n(sb, s->chars + i, skip);
-            i += skip; continue;
-        }
-        String* result = heap_create_name(sb->str, sb->length);
-        strbuf_free(sb);
-        return (Item){.item = s2it(result)};
-    }
+    if (operation == JS_STRING_INTRINSIC_IS_WELL_FORMED || operation == JS_STRING_INTRINSIC_TO_WELL_FORMED)
+        return js_string_text_with_ops(str, operation, make_js_undefined(), NULL);
 
     // toLocaleLowerCase / toLocaleUpperCase — delegates to toLowerCase/toUpperCase
     if (operation == JS_STRING_INTRINSIC_TO_LOCALE_LOWER_CASE) {
@@ -23532,14 +23508,7 @@ static Item js_string_intrinsic_algorithm(Item str,
             str, JS_STRING_INTRINSIC_TO_UPPER_CASE, args, argc);
     }
 
-    // HTML wrapper methods (Annex B §B.2.3) share one table-driven renderer.
-    bool html_handled = false;
-    Item html_result = js_string_html_wrapper(
-        str, operation, args, argc, &html_handled);
-    if (html_handled) return html_result;
-    log_error("string-intrinsic-algorithm: unknown operation %d",
-        (int)operation);
-    return ItemError;
+    return js_string_text_with_ops(str, operation, argc ? args[0] : make_js_undefined(), NULL);
 }
 
 // =============================================================================
@@ -23784,14 +23753,15 @@ static inline Item js_array_element(Item arr_item, int64_t idx) {
 // Unlike js_set_key_default, this redefines even non-writable (but configurable) properties.
 static Item js_create_data_property_or_throw(Item object, int64_t index, Item value) {
     TypeId type = get_type_id(object);
-    if (js_is_proxy(object)) {
-        Item desc = js_new_object();
-        js_set_prototype(desc, ItemNull);
-        JS_ASSIGN_OR_RETURN(set_result, js_set_key_cstr(desc, "value", value));
-        JS_ASSIGN_OR_RETURN_INTO(set_result, js_set_key_cstr(desc, "writable", (Item){.item = b2it(true)}));
-        JS_ASSIGN_OR_RETURN_INTO(set_result, js_set_key_cstr(desc, "enumerable", (Item){.item = b2it(true)}));
-        JS_ASSIGN_OR_RETURN_INTO(set_result, js_set_key_cstr(desc, "configurable", (Item){.item = b2it(true)}));
-        return js_object_define_property(object, js_array_index_key(index), desc);
+    if (type != LMD_TYPE_ARRAY) {
+        RootFrame roots(3);
+        if (!roots.valid()) return ItemError;
+        uint64_t home = 0;
+        Rooted<Item> owner(roots, object), argument(roots, lambda_item_adopt_scalar_home(value, &home));
+        Rooted<Item> key(roots, js_property_index_key(index));
+        if (item_is_error(key.get())) return key.get();
+        // the shared descriptor writer roots Proxy descriptors and accepts callable objects.
+        return js_create_data_property(owner.get(), key.get(), argument.get());
     }
     if (type == LMD_TYPE_ARRAY) {
         // for arrays, direct index write
@@ -23838,9 +23808,6 @@ static Item js_create_data_property_or_throw(Item object, int64_t index, Item va
             }
             js_array_store_owned(arr, index, value);
         }
-    } else if (type == LMD_TYPE_MAP) {
-        Item key = js_property_index_key(index);
-        return js_create_data_property(object, key, value);
     }
     return ItemNull;
 }
@@ -24322,22 +24289,24 @@ static Item js_array_to_integer_or_infinity_status(Item value, double* out, cons
     return ItemNull;
 }
 
-static Item js_array_to_length_status(Item value, int64_t* out) {
+static Item js_array_to_length_status(Item value, int64_t* out, const JsBufferViewOps* ops) {
     // property reads can return the Error lane directly; converting that lane
     // as an ordinary object would turn an abrupt length access into NaN.
     if (item_is_error(value)) return value;
     double n = 0;
-    JS_ASSIGN_OR_RETURN(status, js_array_to_integer_or_infinity_status(value, &n));
+    JS_ASSIGN_OR_RETURN(status, js_array_to_integer_or_infinity_status(value, &n, ops));
     if (out) *out = n <= 0.0 ? 0 : n >= 9007199254740991.0 ?
         9007199254740991LL : (int64_t)n;
     return ItemNull;
 }
 
 static Item js_array_get_length_status(Item object, Item* length_key,
-        int64_t* length) {
-    *length_key = js_name_item("length", 6);
-    return js_array_to_length_status(
-        js_get_key_default(object, *length_key), length);
+        int64_t* length, const JsArrayOps* ops = NULL) {
+    *length_key = ops ? ItemNull : js_name_item("length", 6);
+    return js_array_to_length_status(ops
+        ? ops->index(object, -1, ItemNull, JS_ARRAY_INDEX_GET)
+        : js_get_key_default(object, *length_key), length,
+        ops ? ops->values : &js_buffer_view_default_ops);
 }
 
 static bool js_same_value_zero(Item left, Item right) {
@@ -25013,21 +24982,21 @@ static Item js_array_generic_fill(Item object, Item* args, int argc) {
     return object;
 }
 
-static Item js_array_generic_copy_within(Item object, Item* args, int argc) {
+static Item js_array_generic_copy_within(Item object, Item* args, int argc, const JsArrayOps* ops) {
     int64_t len = 0;
     Item len_key;
-    JS_ASSIGN_OR_RETURN(length_status, js_array_get_length_status(object, &len_key, &len));
+    JS_ASSIGN_OR_RETURN(length_status, js_array_get_length_status(object, &len_key, &len, ops));
     int64_t to = 0;
     if (argc > 0) {
-        JS_ASSIGN_OR_RETURN(to_status, js_array_relative_index_status(args[0], len, 0, &to));
+        JS_ASSIGN_OR_RETURN(to_status, js_array_relative_index_status(args[0], len, 0, &to, ops->values));
     }
     int64_t from = 0;
     if (argc > 1) {
-        JS_ASSIGN_OR_RETURN(from_status, js_array_relative_index_status(args[1], len, 0, &from));
+        JS_ASSIGN_OR_RETURN(from_status, js_array_relative_index_status(args[1], len, 0, &from, ops->values));
     }
     int64_t final = len;
     if (argc > 2) {
-        JS_ASSIGN_OR_RETURN(final_status, js_array_relative_index_status(args[2], len, len, &final));
+        JS_ASSIGN_OR_RETURN(final_status, js_array_relative_index_status(args[2], len, len, &final, ops->values));
     }
     int64_t count = final - from;
     if (count > len - to) count = len - to;
@@ -25038,11 +25007,21 @@ static Item js_array_generic_copy_within(Item object, Item* args, int argc) {
         from += count - 1;
         to += count - 1;
     }
+    RootFrame roots(1);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> value(roots, ItemNull);
+    uint64_t home = 0;
     while (count > 0) {
-        Item from_key = js_array_method_property_key(from);
-        Item to_key = js_array_method_property_key(to);
-        JS_ASSIGN_OR_RETURN(move_result,
-            js_array_move_or_delete(object, from_key, to_key, false));
+        JS_ASSIGN_OR_RETURN(has, ops->index(object, from, ItemNull, JS_ARRAY_INDEX_HAS));
+        if (ops->values->truthy(has)) {
+            value.set(ops->index(object, from, ItemNull, JS_ARRAY_INDEX_GET));
+            if (item_is_error(value.get())) return value.get();
+            // set can invoke a setter that reallocates the source's scalar storage.
+            value.set(lambda_item_adopt_scalar_home(value.get(), &home));
+            JS_ASSIGN_OR_RETURN(stored, ops->index(object, to, value.get(), JS_ARRAY_INDEX_SET));
+        } else {
+            JS_ASSIGN_OR_RETURN(deleted, ops->index(object, to, ItemNull, JS_ARRAY_INDEX_DELETE));
+        }
         from += direction;
         to += direction;
         count--;
@@ -25423,41 +25402,33 @@ static Item js_array_generic_to_reversed(Item object) {
     return result;
 }
 
-static Item js_array_generic_to_sorted(Item object, Item* args, int argc) {
-    if (argc >= 1 && args[0].item != ITEM_JS_UNDEFINED &&
-        get_type_id(args[0]) != LMD_TYPE_UNDEFINED &&
-        !js_is_callable(args[0])) {
-        return js_throw_type_error("comparefn is not a function");
-    }
+static Item js_array_generic_to_sorted(Item object, Item* args, int argc, const JsArrayOps* ops) {
     int64_t len = 0;
     Item len_key;
-    JS_ASSIGN_OR_RETURN(length_status, js_array_get_length_status(object, &len_key, &len));
+    JS_ASSIGN_OR_RETURN(length_status, js_array_get_length_status(object, &len_key, &len, ops));
     // the fresh copy (and each value being copied) is reachable only from
     // this frame while property writes allocate
     JS_ROOTS(roots, result_root, ItemNull, value_root, ItemNull);
-    JS_ASSIGN_OR_RETURN(created, js_array_create_change_by_copy_result(len));
+    JS_ASSIGN_OR_RETURN(created, ops->create(len));
     result_root.set(created);
 
     for (int64_t k = 0; k < len; k++) {
-        Item key = js_array_method_property_key(k);
-        JS_ASSIGN_OR_RETURN(value, js_get_key_default(object, key));
-        value_root.set(value);
-        JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(result_root.get(),
-            k, value_root.get()));
+        value_root.set(ops->index(object, k, ItemNull, JS_ARRAY_INDEX_GET));
+        if (item_is_error(value_root.get())) return value_root.get();
+        JS_ASSIGN_OR_RETURN(create_result, ops->index(result_root.get(),
+            k, value_root.get(), JS_ARRAY_INDEX_CREATE));
     }
-    Item sort_args[1] = { argc >= 1 ? args[0] : make_js_undefined() };
-    return js_array_intrinsic_algorithm(result_root.get(), result_root.get(),
-        JS_ARRAY_INTRINSIC_SORT, sort_args, argc >= 1 ? 1 : 0);
+    return ops->sort(result_root.get(), argc ? args[0] : make_js_undefined());
 }
 
-static Item js_array_generic_to_spliced(Item object, Item* args, int argc) {
+static Item js_array_generic_to_spliced(Item object, Item* args, int argc, const JsArrayOps* ops) {
     int64_t len = 0;
     Item len_key;
-    JS_ASSIGN_OR_RETURN(length_status, js_array_get_length_status(object, &len_key, &len));
+    JS_ASSIGN_OR_RETURN(length_status, js_array_get_length_status(object, &len_key, &len, ops));
 
     double relative_start = 0.0;
     if (argc >= 1) {
-        JS_ASSIGN_OR_RETURN(start_status, js_array_to_integer_or_infinity_status(args[0], &relative_start));
+        JS_ASSIGN_OR_RETURN(start_status, js_array_to_integer_or_infinity_status(args[0], &relative_start, ops->values));
     }
     int64_t actual_start = 0;
     if (relative_start == -INFINITY) {
@@ -25477,7 +25448,7 @@ static Item js_array_generic_to_spliced(Item object, Item* args, int argc) {
         actual_delete_count = len - actual_start;
     } else {
         double dc = 0;
-        JS_ASSIGN_OR_RETURN(delete_status, js_array_to_integer_or_infinity_status(args[1], &dc));
+        JS_ASSIGN_OR_RETURN(delete_status, js_array_to_integer_or_infinity_status(args[1], &dc, ops->values));
         if (dc <= 0.0 || dc == -INFINITY) {
             actual_delete_count = 0;
         } else if (dc >= (double)(len - actual_start) || dc == INFINITY) {
@@ -25489,62 +25460,145 @@ static Item js_array_generic_to_spliced(Item object, Item* args, int argc) {
 
     const int64_t max_safe_len = 9007199254740991LL;
     if (insert_count > max_safe_len - (len - actual_delete_count)) {
-        return js_throw_type_error("Array.prototype.toSpliced: length exceeds 2^53 - 1");
+        return ops->values->error(false, "Array.prototype.toSpliced: length exceeds 2^53 - 1");
     }
     int64_t new_len = len - actual_delete_count + insert_count;
-    JS_ASSIGN_OR_RETURN(result, js_array_create_change_by_copy_result(new_len));
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> result(roots, ops->create(new_len)), value(roots, ItemNull);
+    if (item_is_error(result.get())) return result.get();
 
     int64_t i = 0;
     while (i < actual_start) {
-        Item key = js_array_method_property_key(i);
-        JS_ASSIGN_OR_RETURN(value, js_get_key_default(object, key));
-        JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(result, i, value));
+        value.set(ops->index(object, i, ItemNull, JS_ARRAY_INDEX_GET));
+        if (item_is_error(value.get())) return value.get();
+        JS_ASSIGN_OR_RETURN(create_result, ops->index(result.get(), i, value.get(), JS_ARRAY_INDEX_CREATE));
         i++;
     }
     for (int arg_i = 0; arg_i < insert_count; arg_i++) {
-        JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(result, i, args[2 + arg_i]));
+        JS_ASSIGN_OR_RETURN(create_result, ops->index(result.get(), i, args[2 + arg_i], JS_ARRAY_INDEX_CREATE));
         i++;
     }
     int64_t r = actual_start + actual_delete_count;
     while (i < new_len) {
-        Item key = js_array_method_property_key(r);
-        JS_ASSIGN_OR_RETURN(value, js_get_key_default(object, key));
-        JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(result, i, value));
+        value.set(ops->index(object, r, ItemNull, JS_ARRAY_INDEX_GET));
+        if (item_is_error(value.get())) return value.get();
+        JS_ASSIGN_OR_RETURN(create_result, ops->index(result.get(), i, value.get(), JS_ARRAY_INDEX_CREATE));
         i++;
         r++;
     }
-    return result;
+    return result.get();
 }
 
-static Item js_array_generic_with(Item object, Item* args, int argc) {
+static Item js_array_generic_with(Item object, Item* args, int argc, const JsArrayOps* ops) {
     int64_t len = 0;
     Item len_key;
-    JS_ASSIGN_OR_RETURN(length_status, js_array_get_length_status(object, &len_key, &len));
+    JS_ASSIGN_OR_RETURN(length_status, js_array_get_length_status(object, &len_key, &len, ops));
 
     Item index_arg = argc >= 1 ? args[0] : make_js_undefined();
     double relative_index = 0;
-    JS_ASSIGN_OR_RETURN(index_status, js_array_to_integer_or_infinity_status(index_arg, &relative_index));
-    int64_t actual_index = 0;
-    if (relative_index < 0.0) {
-        actual_index = (int64_t)((double)len + relative_index);
-    } else {
-        actual_index = (int64_t)relative_index;
-    }
-    if (actual_index < 0 || actual_index >= len) {
-        return js_throw_range_error("Invalid index");
-    }
-
-    JS_ASSIGN_OR_RETURN(result, js_array_create_change_by_copy_result(len));
-    Item value = argc >= 2 ? args[1] : make_js_undefined();
+    JS_ASSIGN_OR_RETURN(index_status, js_array_to_integer_or_infinity_status(index_arg, &relative_index, ops->values));
+    double selected = relative_index < 0.0 ? (double)len + relative_index : relative_index;
+    // reject infinities and out-of-range values before narrowing to an integer.
+    if (!(selected >= 0.0 && selected < (double)len))
+        return ops->values->error(true, "Invalid index");
+    int64_t actual_index = (int64_t)selected;
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> result(roots, ops->create(len)), value(roots, ItemNull);
+    if (item_is_error(result.get())) return result.get();
     for (int64_t k = 0; k < len; k++) {
-        Item from_value = value;
-        if (k != actual_index) {
-            Item key = js_array_method_property_key(k);
-            JS_ASSIGN_OR_RETURN_INTO(from_value, js_get_key_default(object, key));
-        }
-        JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(result, k, from_value));
+        value.set(k == actual_index ? (argc >= 2 ? args[1] : make_js_undefined()) :
+            ops->index(object, k, ItemNull, JS_ARRAY_INDEX_GET));
+        if (item_is_error(value.get())) return value.get();
+        JS_ASSIGN_OR_RETURN(create_result, ops->index(result.get(), k, value.get(), JS_ARRAY_INDEX_CREATE));
     }
-    return result;
+    return result.get();
+}
+
+const JsArrayOps js_array_default_ops = {
+    &js_buffer_view_default_ops,
+    js_to_object,
+    [](Item owner, int64_t index, Item value, JsArrayIndexOp operation) {
+        RootFrame roots(3);
+        if (!roots.valid()) return ItemError;
+        uint64_t home = 0;
+        Rooted<Item> object(roots, owner), argument(roots, lambda_item_adopt_scalar_home(value, &home));
+        if (operation == JS_ARRAY_INDEX_CREATE)
+            return js_create_data_property_or_throw(object.get(), index, argument.get());
+        Rooted<Item> key(roots, index < 0 ? js_name_item("length", 6) : js_array_method_property_key(index));
+        if (item_is_error(key.get())) return key.get();
+        switch (operation) {
+            case JS_ARRAY_INDEX_GET: return js_get_key_default(object.get(), key.get());
+            case JS_ARRAY_INDEX_HAS: return js_array_method_has_property_status(object.get(), key.get());
+            case JS_ARRAY_INDEX_DELETE: return js_delete_property_or_throw_status(object.get(), key.get());
+            case JS_ARRAY_INDEX_CREATE: break;
+            case JS_ARRAY_INDEX_SET:
+                return index < 0 ? js_elements_set_length_throw_status(object.get(), key.get(), it2i(argument.get())) :
+                    js_set_key_strict_policy(object.get(), key.get(), argument.get());
+        }
+        return ItemError;
+    },
+    js_array_create_change_by_copy_result,
+    js_is_callable,
+    js_is_constructor_internal,
+    [](Item constructor, Item* args, int argc) {
+        return js_construct_value(constructor, args, argc, constructor, NULL, false);
+    },
+    [](Item result, Item comparefn) {
+        return js_array_intrinsic_algorithm(result, result, JS_ARRAY_INTRINSIC_SORT, &comparefn, 1);
+    }
+};
+
+Item js_array_method_with_ops(int builtin_id, Item receiver, Item* args, int argc,
+        const JsArrayOps* supplied) {
+    const JsArrayOps* ops = supplied ? supplied : &js_array_default_ops;
+    RootFrame roots(1);
+    RootSpan arguments(argc > 0 ? (size_t)argc : 0);
+    if (!roots.valid() || (argc && !arguments.valid())) return ItemError;
+    uint64_t receiver_home = 0;
+    Rooted<Item> owner(roots, lambda_item_adopt_scalar_home(receiver, &receiver_home));
+    for (int i = 0; i < argc; i++) arguments.items()[i] = args[i];
+    for (int i = 0; i < argc; i++) {
+        arguments.items()[i] = js_retain_scalar(arguments.items()[i]);
+        if (item_is_error(arguments.items()[i])) return arguments.items()[i];
+    }
+    args = arguments.items();
+    // toSorted validates its comparator before ToObject or an observable length read.
+    if (builtin_id == JS_BUILTIN_ARR_TO_SORTED && argc &&
+            get_type_id(args[0]) != LMD_TYPE_UNDEFINED && !ops->callable(args[0]))
+        return ops->values->error(false, "comparefn is not a function");
+    owner.set(ops->object(owner.get()));
+    if (item_is_error(owner.get())) return owner.get();
+    switch (builtin_id) {
+        case JS_BUILTIN_ARR_COPY_WITHIN: return js_array_generic_copy_within(owner.get(), args, argc, ops);
+        case JS_BUILTIN_ARR_TO_SORTED: return js_array_generic_to_sorted(owner.get(), args, argc, ops);
+        case JS_BUILTIN_ARR_TO_SPLICED: return js_array_generic_to_spliced(owner.get(), args, argc, ops);
+        case JS_BUILTIN_ARR_WITH: return js_array_generic_with(owner.get(), args, argc, ops);
+    }
+    return ops->values->error(false, "Unsupported Array method");
+}
+
+Item js_array_of_with_ops(Item constructor, Item* args, int argc, const JsArrayOps* supplied) {
+    const JsArrayOps* ops = supplied ? supplied : &js_array_default_ops;
+    RootFrame roots(2);
+    RootSpan arguments(argc > 0 ? (size_t)argc : 0);
+    if (!roots.valid() || (argc && !arguments.valid())) return ItemError;
+    uint64_t constructor_home = 0;
+    Rooted<Item> target(roots, lambda_item_adopt_scalar_home(constructor, &constructor_home)), result(roots, ItemNull);
+    for (int i = 0; i < argc; i++) arguments.items()[i] = args[i];
+    for (int i = 0; i < argc; i++) {
+        arguments.items()[i] = js_retain_scalar(arguments.items()[i]);
+        if (item_is_error(arguments.items()[i])) return arguments.items()[i];
+    }
+    Item length = {.item = i2it(argc)};
+    result.set(ops->constructor(target.get()) ? ops->construct(target.get(), &length, 1) : ops->create(argc));
+    if (item_is_error(result.get())) return result.get();
+    for (int i = 0; i < argc; i++) {
+        JS_ASSIGN_OR_RETURN(status, ops->index(result.get(), i, arguments.items()[i], JS_ARRAY_INDEX_CREATE));
+    }
+    JS_ASSIGN_OR_RETURN(status, ops->index(result.get(), -1, length, JS_ARRAY_INDEX_SET));
+    return result.get();
 }
 
 static Item js_array_generic_iterative_callback_with_object(Item object, Item callback_object, Item* args, int argc, int method_kind) {

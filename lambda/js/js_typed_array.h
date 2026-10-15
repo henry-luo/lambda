@@ -117,16 +117,22 @@ typedef struct JsTypedArray {
 
 // Front ends share storage and operation order while retaining their own
 // coercion, error and prototype authorities (D1.3v3, D5.3).
+typedef enum JsBufferViewKind {
+    JS_BUFFER_VIEW_ARRAY_BUFFER,
+    JS_BUFFER_VIEW_DATA_VIEW,
+    JS_BUFFER_VIEW_SHARED_ARRAY_BUFFER,
+} JsBufferViewKind;
+
 typedef struct JsBufferViewOps {
     Item (*number)(Item);
     Item (*bigint)(Item, Item*);
     Item (*get)(Item, const char*);
-    Item (*prototype)(Item, bool);
+    Item (*prototype)(Item, JsBufferViewKind);
     Item (*link)(Item, Item);
     Item (*error)(bool, const char*);
     bool (*truthy)(Item);
     bool (*object)(Item);
-    struct TypeMap* (*shape)(bool, Item);
+    struct TypeMap* (*shape)(JsBufferViewKind, Item);
     Item (*species)(Item);
     Item (*construct)(Item, int, bool);
 } JsBufferViewOps;
@@ -183,11 +189,15 @@ Item js_typed_array_set_numeric_with_ops(Item owner, double index, bool negative
 
 Item js_arraybuffer_construct_with_ops(Item length, Item options, Item target,
     const JsBufferViewOps* ops);
+Item js_construct_arraybuffer_target(Item length, Item options, Item target,
+    bool shared, const JsBufferViewOps* ops);
 Item js_arraybuffer_resize_with_ops(Item buffer, Item length, const JsBufferViewOps* ops);
 Item js_arraybuffer_transfer_with_ops(Item buffer, Item length, int argc,
     bool fixed_length, const JsBufferViewOps* ops);
 Item js_arraybuffer_slice_with_ops(Item buffer, Item begin, Item end, int argc,
     const JsBufferViewOps* ops);
+Item js_arraybuffer_slice_kernel(Item buffer, Item begin, Item end, int argc,
+    bool shared, const JsBufferViewOps* ops);
 
 typedef enum JsAtomicsOp {
     JS_ATOMICS_OP_ADD,
@@ -289,6 +299,9 @@ Item js_sharedarraybuffer_construct_with_options_target(Item length_arg,
 bool js_is_sharedarraybuffer(Item val);
 Item js_sharedarraybuffer_operation(Item sab,
     JsSharedArrayBufferOperation operation, Item* args, int argc);
+Item js_sharedarraybuffer_operation_with_ops(Item sab,
+    JsSharedArrayBufferOperation operation, Item* args, int argc,
+    const JsBufferViewOps* ops);
 
 // Atomics operations on SharedArrayBuffer-backed integer typed arrays
 Item js_atomics_operation(int op, Item typed_array, Item index, Item value, Item replacement);

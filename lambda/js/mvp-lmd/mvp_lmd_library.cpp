@@ -215,6 +215,12 @@ static Item string_method(Context*, MvpLmdProgram*, Item* args, uint64_t count, 
     if (!roots.valid()) return ItemError;
     Rooted<Item> source(roots, receiver), first(roots, count ? args[0] : Item{.item = ITEM_JS_UNDEFINED});
     Rooted<Item> second(roots, count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}), value(roots, ItemNull);
+    uint64_t substr_homes[2] = {};
+    if (method == LMD_METHOD_STRING_SUBSTR) {
+        // receiver conversion can reenter before either numeric argument is consumed.
+        first.set(lambda_item_adopt_scalar_home(first.get(), &substr_homes[0]));
+        second.set(lambda_item_adopt_scalar_home(second.get(), &substr_homes[1]));
+    }
     if (method == LMD_METHOD_MATCH || method == LMD_METHOD_SEARCH || method == LMD_METHOD_REPLACE || method == LMD_METHOD_SPLIT || method == LMD_METHOD_MATCH_ALL)
         return mvp_lmd_regexp_string_method(mvp_lmd_program_library(), source.get(), first.get(), second.get(),
             method == LMD_METHOD_MATCH_ALL ? 4 : method == LMD_METHOD_SPLIT ? 3 : method == LMD_METHOD_SEARCH ? 2 : method == LMD_METHOD_REPLACE);
@@ -222,6 +228,22 @@ static Item string_method(Context*, MvpLmdProgram*, Item* args, uint64_t count, 
     if (item_is_error(source.get())) return source.get();
     if (method == LMD_METHOD_LOWER || method == LMD_METHOD_UPPER)
         return method == LMD_METHOD_LOWER ? fn_lower(source.get()) : fn_upper(source.get());
+    if (method == LMD_METHOD_STRING_SUBSTR)
+        return js_string_substr_with_ops(source.get(), first.get(), second.get(), &mvp_lmd_buffer_ops);
+    if (method >= LMD_METHOD_STRING_NORMALIZE && method <= LMD_METHOD_STRING_SUP) {
+        static const JsStringIntrinsicOp operations[] = {
+            JS_STRING_INTRINSIC_NORMALIZE, JS_STRING_INTRINSIC_LOCALE_COMPARE, JS_STRING_INTRINSIC_IS_WELL_FORMED, JS_STRING_INTRINSIC_TO_WELL_FORMED,
+            JS_STRING_INTRINSIC_ANCHOR, JS_STRING_INTRINSIC_BIG, JS_STRING_INTRINSIC_BLINK, JS_STRING_INTRINSIC_BOLD,
+            JS_STRING_INTRINSIC_FIXED, JS_STRING_INTRINSIC_FONTCOLOR, JS_STRING_INTRINSIC_FONTSIZE, JS_STRING_INTRINSIC_ITALICS,
+            JS_STRING_INTRINSIC_LINK, JS_STRING_INTRINSIC_SMALL, JS_STRING_INTRINSIC_STRIKE, JS_STRING_INTRINSIC_SUB,
+            JS_STRING_INTRINSIC_SUP,
+        };
+        static const JsStringTextOps ops = {
+            [](Item item) { return mvp_lmd_primitive_to_string(item); },
+            [](const char*) { return mvp_lmd_fail(LMD_MVP_RANGE, 0); }
+        };
+        return js_string_text_with_ops(source.get(), operations[method - LMD_METHOD_STRING_NORMALIZE], first.get(), &ops);
+    }
     if (method == LMD_METHOD_STRING_CONCAT) {
         for (uint64_t i = 0; i < count; i++) {
             value.set(mvp_lmd_primitive_to_string(args[i]));
@@ -1098,6 +1120,9 @@ static Item array_method(Context*, MvpLmdProgram*, Item* args, uint64_t count, I
     return mvp_lmd_array_visit_method(method) ? mvp_lmd_array_visit(receiver, args, count, method) :
         mvp_lmd_array_edit(receiver, args, count, method);
 }
+static Item array_of(Context*, MvpLmdProgram*, Item* args, uint64_t count, Item, Item receiver, Item) {
+    return js_array_of_with_ops(receiver, args, count, &mvp_lmd_array_ops);
+}
 static Item array_from(Context*, MvpLmdProgram* program, Item* args, uint64_t count, Item, Item receiver, Item) {
     Item absent = {.item = ITEM_JS_UNDEFINED};
     RootFrame roots(6);
@@ -1228,7 +1253,7 @@ static Item symbol_registry_method(Context*, MvpLmdProgram*, Item* args, uint64_
     return method->builtin_id == JS_BUILTIN_SYMBOL_FOR ? js_symbol_for_with_ops(argument.get(), &ops)
         : js_symbol_key_for_with_ops(argument.get(), &ops);
 }
-static const JsBufferViewOps buffer_ops = {
+const JsBufferViewOps mvp_lmd_buffer_ops = {
     [](Item value) { return mvp_lmd_primitive_to_number(value); },
     [](Item value, Item* output) {
         RootFrame roots(1);
@@ -1247,18 +1272,21 @@ static const JsBufferViewOps buffer_ops = {
         String* key = heap_create_name(name, strlen(name));
         return key ? mvp_lmd_property_with_receiver(owner, Item{.item = s2it(key)}, ItemNull, LMD_PROP_GET, owner) : ItemError;
     },
-    [](Item target, bool view) {
+    [](Item target, JsBufferViewKind kind) {
         Item prototype = mvp_lmd_property_with_receiver(target,
             Item{.item = s2it(heap_create_name("prototype", 9))}, ItemNull, LMD_PROP_GET, target);
         if (item_is_error(prototype)) return prototype;
-        return mvp_lmd_is_object(prototype) ? prototype : mvp_lmd_program_library()->buffers[view].values[1];
+        MvpLmdLibraryState* state = mvp_lmd_program_library();
+        MvpLmdClass* base = kind == JS_BUFFER_VIEW_SHARED_ARRAY_BUFFER ? state->shared_buffer : &state->buffers[kind];
+        return mvp_lmd_is_object(prototype) ? prototype : base->values[1];
     },
     [](Item owner, Item prototype) { return mvp_lmd_set_prototype(owner, prototype); },
     [](bool range, const char*) { return mvp_lmd_fail(range ? LMD_MVP_RANGE : LMD_MVP_TYPE, 0); },
     [](Item value) { return !!mvp_lmd_truthy(value); },
     mvp_lmd_is_object,
-    [](bool view, Item target) {
-        MvpLmdClass* base = &mvp_lmd_program_library()->buffers[view];
+    [](JsBufferViewKind kind, Item target) {
+        MvpLmdLibraryState* state = mvp_lmd_program_library();
+        MvpLmdClass* base = kind == JS_BUFFER_VIEW_SHARED_ARRAY_BUFFER ? state->shared_buffer : &state->buffers[kind];
         MvpLmdClass* actual = mvp_lmd_class_record(target);
         // a known declared subtype retains Lambda ancestry; the physical carrier supplies the JS brand.
         return actual && actual->ast && lambda_nominal_derives_from(&actual->nominal, &base->nominal)
@@ -1266,8 +1294,11 @@ static const JsBufferViewOps buffer_ops = {
     },
     [](Item owner) { return mvp_lmd_property_with_receiver(owner,
         Item{.item = s2it(well_known_name_ref(JS_SYMBOL_SPECIES))}, ItemNull, LMD_PROP_GET, owner); },
-    [](Item constructor, int length, bool) {
-        if (constructor.item == ITEM_JS_UNDEFINED) constructor = mvp_lmd_program_library()->buffers[0].values[0];
+    [](Item constructor, int length, bool shared) {
+        if (constructor.item == ITEM_JS_UNDEFINED) {
+            MvpLmdLibraryState* state = mvp_lmd_program_library();
+            constructor = shared ? state->shared_buffer->values[0] : state->buffers[0].values[0];
+        }
         if (!mvp_lmd_is_constructor(constructor)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
         Item argument = {.item = i2it(length)};
         return mvp_lmd_class_invoke(constructor, Item{.item = ITEM_JS_UNDEFINED}, &argument, 1, constructor);
@@ -1275,7 +1306,7 @@ static const JsBufferViewOps buffer_ops = {
 };
 
 static const JsTypedArrayOps typed_array_ops = {
-    &buffer_ops,
+    &mvp_lmd_buffer_ops,
     [](JsTypedArrayType type, Item target) {
         MvpLmdClass* base = &mvp_lmd_program_library()->typed_arrays[type];
         MvpLmdClass* actual = mvp_lmd_class_record(target);
@@ -1283,7 +1314,7 @@ static const JsTypedArrayOps typed_array_ops = {
             ? &actual->shape : &base->shape;
     },
     [](JsTypedArrayType type, Item target) {
-        Item prototype = buffer_ops.get(target, "prototype");
+        Item prototype = mvp_lmd_buffer_ops.get(target, "prototype");
         if (item_is_error(prototype)) return prototype;
         return mvp_lmd_is_object(prototype) ? prototype : mvp_lmd_program_library()->typed_arrays[type].values[1];
     },
@@ -1328,7 +1359,7 @@ static Item array_locale(Context*, MvpLmdProgram*, Item*, uint64_t, Item, Item r
     return js_array_like_join_kernel(owner.get(), false, it2i(length.get()), ",", 1, true, &typed_array_ops);
 }
 Item mvp_lmd_typed_array_store(Item owner, double index, Item value) {
-    return js_typed_array_set_numeric_with_ops(owner, index, index == 0 && signbit(index), value, &buffer_ops);
+    return js_typed_array_set_numeric_with_ops(owner, index, index == 0 && signbit(index), value, &mvp_lmd_buffer_ops);
 }
 static Item typed_array_construct(Context*, MvpLmdProgram*, Item* args, uint64_t count,
         Item self, Item, Item target) {
@@ -1430,7 +1461,7 @@ Item mvp_lmd_typed_array_initialize(MvpLmdProgram* program, MvpLmdLibraryState* 
         }
     }
     // the specification shares the exact Array toString function identity.
-    method.set(buffer_ops.get(state->values[LMD_LIBRARY_ARRAY_PROTOTYPE], "toString"));
+    method.set(mvp_lmd_buffer_ops.get(state->values[LMD_LIBRARY_ARRAY_PROTOTYPE], "toString"));
     if (item_is_error(method.get())) return method.get();
     status = mvp_lmd_named_set(base, "toString", method.get(), JSPD_NON_ENUMERABLE);
     if (item_is_error(status)) return status;
@@ -1450,14 +1481,18 @@ static Item buffer_construct(Context*, MvpLmdProgram*, Item* args, uint64_t coun
     if (target.item == ITEM_JS_UNDEFINED) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     Item absent = {.item = ITEM_JS_UNDEFINED};
     Item first = count ? args[0] : absent, second = count > 1 ? args[1] : absent;
-    return mvp_lmd_class_record(self) == &mvp_lmd_program_library()->buffers[1]
-        ? js_dataview_construct_with_ops(first, second, count > 2 ? args[2] : absent, target, &buffer_ops)
-        : js_arraybuffer_construct_with_ops(first, second, target, &buffer_ops);
+    JsBufferViewKind kind = (JsBufferViewKind)(intptr_t)((MvpLmdNativeCallable*)self.function)->state;
+    return kind == JS_BUFFER_VIEW_DATA_VIEW
+        ? js_dataview_construct_with_ops(first, second, count > 2 ? args[2] : absent, target, &mvp_lmd_buffer_ops)
+        : js_construct_arraybuffer_target(first, second, target,
+            kind == JS_BUFFER_VIEW_SHARED_ARRAY_BUFFER, &mvp_lmd_buffer_ops);
 }
 
 enum BufferMethod { BUFFER_BYTE_LENGTH = 32, BUFFER_MAX_LENGTH, BUFFER_RESIZABLE,
     BUFFER_DETACHED, BUFFER_RESIZE, BUFFER_TRANSFER, BUFFER_TRANSFER_FIXED, BUFFER_IS_VIEW, BUFFER_SLICE, BUFFER_DETACH_HOST,
-    VIEW_BUFFER, VIEW_BYTE_LENGTH, VIEW_BYTE_OFFSET, BUFFER_UNSUPPORTED_HOST };
+    VIEW_BUFFER, VIEW_BYTE_LENGTH, VIEW_BYTE_OFFSET, BUFFER_UNSUPPORTED_HOST,
+    SHARED_BUFFER_BYTE_LENGTH, SHARED_BUFFER_MAX_LENGTH, SHARED_BUFFER_GROWABLE,
+    SHARED_BUFFER_SLICE, SHARED_BUFFER_GROW };
 static Item buffer_method(Context*, MvpLmdProgram*, Item* args, uint64_t count,
         Item self, Item receiver, Item) {
     int operation = (intptr_t)((MvpLmdNativeCallable*)self.function)->state;
@@ -1475,8 +1510,19 @@ static Item buffer_method(Context*, MvpLmdProgram*, Item* args, uint64_t count,
             (value.map->map_kind == MAP_KIND_DATAVIEW || value.map->map_kind == MAP_KIND_TYPED_ARRAY)))};
     }
     if (operation < BUFFER_BYTE_LENGTH)
-        return js_dataview_operation_with_ops(receiver, (JsDataViewOperation)operation, args, count, &buffer_ops);
+        return js_dataview_operation_with_ops(receiver, (JsDataViewOperation)operation, args, count, &mvp_lmd_buffer_ops);
     if (operation >= VIEW_BUFFER) {
+        if (operation >= SHARED_BUFFER_BYTE_LENGTH) {
+            if (!js_is_sharedarraybuffer(receiver)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
+            if (operation == SHARED_BUFFER_SLICE || operation == SHARED_BUFFER_GROW)
+                return js_sharedarraybuffer_operation_with_ops(receiver,
+                    operation == SHARED_BUFFER_SLICE ? JS_SHARED_ARRAY_BUFFER_SLICE : JS_SHARED_ARRAY_BUFFER_GROW,
+                    args, count, &mvp_lmd_buffer_ops);
+            JsArrayBuffer* shared = js_get_arraybuffer_ptr(receiver.map);
+            if (operation == SHARED_BUFFER_GROWABLE) return Item{.item = b2it(js_arraybuffer_resizable(shared))};
+            return Item{.item = i2it(operation == SHARED_BUFFER_MAX_LENGTH
+                ? js_arraybuffer_max_length(shared) : js_arraybuffer_length(shared))};
+        }
         JsDataView* view = get_type_id(receiver) == LMD_TYPE_MAP ? js_get_dataview_ptr_from_map(receiver.map) : NULL;
         if (!view) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
         if (operation == VIEW_BUFFER) return Item{.item = view->buffer_item};
@@ -1486,10 +1532,10 @@ static Item buffer_method(Context*, MvpLmdProgram*, Item* args, uint64_t count,
     JsArrayBuffer* buffer = get_type_id(receiver) == LMD_TYPE_MAP ? js_get_arraybuffer_ptr(receiver.map) : NULL;
     if (!buffer || js_arraybuffer_shared(buffer)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     if (operation == BUFFER_SLICE) return js_arraybuffer_slice_with_ops(receiver, value,
-        count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}, count, &buffer_ops);
-    if (operation == BUFFER_RESIZE) return js_arraybuffer_resize_with_ops(receiver, value, &buffer_ops);
+        count > 1 ? args[1] : Item{.item = ITEM_JS_UNDEFINED}, count, &mvp_lmd_buffer_ops);
+    if (operation == BUFFER_RESIZE) return js_arraybuffer_resize_with_ops(receiver, value, &mvp_lmd_buffer_ops);
     if (operation == BUFFER_TRANSFER || operation == BUFFER_TRANSFER_FIXED)
-        return js_arraybuffer_transfer_with_ops(receiver, value, count, operation == BUFFER_TRANSFER_FIXED, &buffer_ops);
+        return js_arraybuffer_transfer_with_ops(receiver, value, count, operation == BUFFER_TRANSFER_FIXED, &mvp_lmd_buffer_ops);
     if (operation == BUFFER_RESIZABLE) return Item{.item = b2it(js_arraybuffer_resizable(buffer))};
     if (operation == BUFFER_DETACHED) return Item{.item = b2it(js_arraybuffer_detached(buffer))};
     return Item{.item = i2it(js_arraybuffer_detached(buffer) ? 0 : operation == BUFFER_MAX_LENGTH
@@ -1499,13 +1545,18 @@ static Item buffer_method(Context*, MvpLmdProgram*, Item* args, uint64_t count,
 Item mvp_lmd_buffer_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state) {
     if (!state->buffers) return ItemNull;
     Item result = ItemNull;
-    for (int i = 0; i < 2; i++) {
-        MvpLmdClass* cls = &state->buffers[i];
-        const char* name = i ? "DataView" : "ArrayBuffer";
+    MvpLmdClass* classes[] = {&state->buffers[0], &state->buffers[1], state->shared_buffer};
+    Item* values[] = {state->buffer_values, state->buffer_values + 3, state->shared_buffer_values};
+    const char* names[] = {"ArrayBuffer", "DataView", "SharedArrayBuffer"};
+    for (int i = 0; i < 3; i++) {
+        MvpLmdClass* cls = classes[i];
+        if (!cls) continue;
+        const char* name = names[i];
         result = mvp_lmd_library_class_initialize(program, state, cls,
-            (int)(state->buffer_values - state->values) + 3 * i, name, buffer_construct, 1);
+            (int)(values[i] - state->values), name, buffer_construct, 1);
         if (item_is_error(result)) return result;
         ((MvpLmdCallable*)cls->values[0].function)->custom_new_target = true;
+        ((MvpLmdNativeCallable*)cls->values[0].function)->state = (void*)(intptr_t)i;
         result = mvp_lmd_named_set(cls->values[1], "constructor", cls->values[0], JSPD_NON_ENUMERABLE);
         if (item_is_error(result)) return result;
         JsPropertyDescriptor descriptor = {};
@@ -1515,11 +1566,17 @@ Item mvp_lmd_buffer_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state
         result = mvp_lmd_define_own_property(cls->values[1],
             Item{.item = s2it(well_known_name_ref(JS_SYMBOL_TO_STRING_TAG))}, &descriptor);
         if (item_is_error(result)) return result;
+        if (i != JS_BUFFER_VIEW_DATA_VIEW) {
+            RootFrame roots(1);
+            if (!roots.valid()) return ItemError;
+            Rooted<Item> getter(roots, mvp_lmd_native_function(program, NULL,
+                mvp_lmd_receiver_identity, 0, "get [Symbol.species]"));
+            if (item_is_error(getter.get())) return getter.get();
+            result = mvp_lmd_define_accessor(cls->values[0],
+                Item{.item = s2it(well_known_name_ref(JS_SYMBOL_SPECIES))}, getter.get(), JSPD_NON_ENUMERABLE << 8);
+            if (item_is_error(result)) return result;
+        }
     }
-    result = mvp_lmd_define_accessor(state->buffers[0].values[0],
-        Item{.item = s2it(well_known_name_ref(JS_SYMBOL_SPECIES))},
-        mvp_lmd_native_function(program, NULL, mvp_lmd_receiver_identity, 0, "get [Symbol.species]"), JSPD_NON_ENUMERABLE << 8);
-    if (item_is_error(result)) return result;
     if (state->test262_host) {
         state->buffer_values[6] = mvp_lmd_object_new(state->object_shape, 0);
         if (item_is_error(state->buffer_values[6])) return state->buffer_values[6];
@@ -1554,18 +1611,24 @@ Item mvp_lmd_buffer_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state
         {"setInt16", JS_DATAVIEW_SET_INT16, 1, 2, false}, {"setUint16", JS_DATAVIEW_SET_UINT16, 1, 2, false},
         {"setInt32", JS_DATAVIEW_SET_INT32, 1, 2, false}, {"setUint32", JS_DATAVIEW_SET_UINT32, 1, 2, false},
         {"setFloat32", JS_DATAVIEW_SET_FLOAT32, 1, 2, false}, {"setFloat64", JS_DATAVIEW_SET_FLOAT64, 1, 2, false},
-        {"setBigInt64", JS_DATAVIEW_SET_BIGINT64, 1, 2, false}, {"setBigUint64", JS_DATAVIEW_SET_BIGUINT64, 1, 2, false}
+        {"setBigInt64", JS_DATAVIEW_SET_BIGINT64, 1, 2, false}, {"setBigUint64", JS_DATAVIEW_SET_BIGUINT64, 1, 2, false},
+        {"byteLength", SHARED_BUFFER_BYTE_LENGTH, 3, 0, true}, {"maxByteLength", SHARED_BUFFER_MAX_LENGTH, 3, 0, true},
+        {"growable", SHARED_BUFFER_GROWABLE, 3, 0, true}, {"slice", SHARED_BUFFER_SLICE, 3, 2, false},
+        {"grow", SHARED_BUFFER_GROW, 3, 1, false}
     };
     for (const auto& method : methods) {
+        if (method.owner == 3 && !state->shared_buffer) continue;
         char display[40];
         snprintf(display, sizeof(display), "%s%s", method.getter ? "get " : "", method.name);
-        Item owner = state->buffers[method.owner & 1].values[method.owner == 2 ? 0 : 1];
         RootFrame roots(1);
         if (!roots.valid()) return ItemError;
         Rooted<Item> callable(roots, mvp_lmd_native_function(program, (void*)(intptr_t)method.operation,
             buffer_method, method.arity, display));
         if (item_is_error(callable.get())) return callable.get();
         Item key = {.item = s2it(heap_create_name(method.name, strlen(method.name)))};
+        // reload the rooted prototype after allocating the native callable.
+        Item owner = method.owner == 3 ? state->shared_buffer->values[1]
+            : state->buffers[method.owner & 1].values[method.owner == 2 ? 0 : 1];
         result = method.getter ? mvp_lmd_define_accessor(owner, key, callable.get(), JSPD_NON_ENUMERABLE << 8)
             : mvp_lmd_named_set(owner, method.name, callable.get(), JSPD_NON_ENUMERABLE);
         if (item_is_error(result)) return result;
@@ -1691,7 +1754,8 @@ Item mvp_lmd_library_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
         {LMD_LIBRARY_OBJECT_STATICS, "getPrototypeOf", object_prototype, 1},
         {LMD_LIBRARY_OBJECT_STATICS, "setPrototypeOf", object_set_prototype, 2},
         {LMD_LIBRARY_ARRAY_STATICS, "isArray", array_is_array, 1},
-        {LMD_LIBRARY_ARRAY_STATICS, "from", array_from, 1}};
+        {LMD_LIBRARY_ARRAY_STATICS, "from", array_from, 1},
+        {LMD_LIBRARY_ARRAY_STATICS, "of", array_of, 0}};
     for (const Binding& binding : functions) {
         Item result = mvp_lmd_named_set(state->values[binding.owner], binding.key,
             mvp_lmd_native_function(program, state, binding.entry, binding.arity, binding.key));

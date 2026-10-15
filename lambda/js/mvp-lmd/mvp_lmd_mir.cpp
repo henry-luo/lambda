@@ -36,12 +36,12 @@ enum LmdIntrinsic { I_UNDEFINED = 1, I_NAN, I_INFINITY, I_MAP, I_OBJECT,
     I_NUMBER, I_PARSE_INT, I_IS_NAN, I_PERFORMANCE, I_CONSOLE, I_PROCESS, I_REQUIRE, I_JSON, I_DATE, I_REGEXP, I_GLOBAL_THIS, I_SYMBOL, I_SET, I_REFLECT, I_PROXY,
     I_EVAL_ERROR, I_RANGE_ERROR, I_REFERENCE_ERROR, I_SYNTAX_ERROR, I_TYPE_ERROR, I_URI_ERROR, I_AGGREGATE_ERROR,
     I_BOOLEAN, I_BIGINT, I_FUNCTION, I_ARRAYBUFFER, I_DATAVIEW, I_TEST262, I_INT8_ARRAY, I_INT16_ARRAY, I_UINT16_ARRAY,
-    I_UINT32_ARRAY, I_FLOAT32_ARRAY, I_UINT8_CLAMPED_ARRAY, I_BIGINT64_ARRAY, I_BIGUINT64_ARRAY, I_FLOAT16_ARRAY, I_PROMISE, I_EVAL, I_DECODE_URI, I_ENCODE_URI, I_DECODE_COMPONENT, I_ENCODE_COMPONENT, I_SET_TIMEOUT, I_CLEAR_TIMEOUT, I_SET_INTERVAL, I_CLEAR_INTERVAL, I_QUEUE_MICROTASK, I_WEAK_MAP, I_WEAK_SET, I_COUNT };
+    I_UINT32_ARRAY, I_FLOAT32_ARRAY, I_UINT8_CLAMPED_ARRAY, I_BIGINT64_ARRAY, I_BIGUINT64_ARRAY, I_FLOAT16_ARRAY, I_PROMISE, I_EVAL, I_DECODE_URI, I_ENCODE_URI, I_DECODE_COMPONENT, I_ENCODE_COMPONENT, I_SET_TIMEOUT, I_CLEAR_TIMEOUT, I_SET_INTERVAL, I_CLEAR_INTERVAL, I_QUEUE_MICROTASK, I_WEAK_MAP, I_WEAK_SET, I_SHARED_ARRAYBUFFER, I_COUNT };
 static const char* intrinsic_names[] = {"undefined", "NaN", "Infinity", "Map", "Object",
     "Math", "Int32Array", "Uint8Array", "Float64Array", "Array", "String", "Error",
     "Number", "parseInt", "isNaN", "performance", "console", "process", "require", "JSON", "Date", "RegExp", "globalThis", "Symbol", "Set", "Reflect", "Proxy",
     "EvalError", "RangeError", "ReferenceError", "SyntaxError", "TypeError", "URIError", "AggregateError", "Boolean", "BigInt", "Function", "ArrayBuffer", "DataView", "$262", "Int8Array", "Int16Array", "Uint16Array",
-    "Uint32Array", "Float32Array", "Uint8ClampedArray", "BigInt64Array", "BigUint64Array", "Float16Array", "Promise", "eval", "decodeURI", "encodeURI", "decodeURIComponent", "encodeURIComponent", "setTimeout", "clearTimeout", "setInterval", "clearInterval", "queueMicrotask", "WeakMap", "WeakSet"};
+    "Uint32Array", "Float32Array", "Uint8ClampedArray", "BigInt64Array", "BigUint64Array", "Float16Array", "Promise", "eval", "decodeURI", "encodeURI", "decodeURIComponent", "encodeURIComponent", "setTimeout", "clearTimeout", "setInterval", "clearInterval", "queueMicrotask", "WeakMap", "WeakSet", "SharedArrayBuffer"};
 // MIR needs ABI offsets for inherited callable and nominal class records, as in the Lambda emitter.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winvalid-offsetof"
@@ -250,6 +250,8 @@ struct MvpLmdProgram {
     bool weak_collections;
     uint32_t weak_slot;
     bool buffers;
+    bool shared_buffer;
+    uint32_t shared_buffer_slot;
     bool test262_host;
     uint32_t buffer_slot;
     bool typed_storage;
@@ -1084,8 +1086,9 @@ static void walk(AstNode* n, LmdWalk* state) {
                 } else if (i + 1 == I_TEST262) {
                     if (!p->test262_host) continue;
                     activate_library(p, n); p->buffers = p->primitives = p->property_callbacks = true;
-                } else if (i + 1 == I_ARRAYBUFFER || i + 1 == I_DATAVIEW) {
+                } else if (i + 1 == I_ARRAYBUFFER || i + 1 == I_DATAVIEW || i + 1 == I_SHARED_ARRAYBUFFER) {
                     activate_library(p, n); p->buffers = p->primitives = p->property_callbacks = true;
+                    if (i + 1 == I_SHARED_ARRAYBUFFER) p->shared_buffer = true;
                     p->intrinsics[i].kinds = K_FUNCTION;
                 } else if (i + 1 == I_FUNCTION) {
                     activate_library(p, n); p->property_callbacks = true;
@@ -1208,6 +1211,8 @@ static void walk(AstNode* n, LmdWalk* state) {
                 // computed calls observe the typed prototype even without a known method name.
                 (!spelling && method_call))
             p->typed_members = true;
+        if (!method_call && indexed_method >= LMD_METHOD_COPY_WITHIN && indexed_method <= LMD_METHOD_WITH)
+            activate_library(p, n);
         if (named(spelling, "groupBy")) { activate_library(p, n); p->iterators = true; }
         if (named(spelling, "matchAll")) {
             activate_library(p, n); p->iterators = true;
@@ -1218,7 +1223,8 @@ static void walk(AstNode* n, LmdWalk* state) {
         }
         AstNode* consumer = method_call ? ast_index_parent(&p->frontend->ast_index, state->parent) : NULL;
         AstIdentNode* receiver = field->object->node_type == AST_NODE_IDENT ? (AstIdentNode*)field->object : NULL;
-        if (receiver && !receiver->entry && named(receiver->name, "Object") && named(spelling, "is"))
+        if (receiver && !receiver->entry && ((named(receiver->name, "Object") && named(spelling, "is")) ||
+                (named(receiver->name, "Array") && named(spelling, "of"))))
             activate_library(p, n);
         // borrowed methods and Object reflection can box receivers without spelling a primitive constructor.
         if (named(spelling, "call") || named(spelling, "apply") || named(spelling, "bind") ||
@@ -1324,12 +1330,12 @@ static void walk(AstNode* n, LmdWalk* state) {
             if (named(method, "match") || named(method, "search") || named(method, "replace")) activate_library(p, n);
             if (named(method, "from") || named(method, "matchAll")) { activate_library(p, n); p->iterators = true; }
             if (named(method, "map")) p->array_holes = true;
-            if (named(method, "sort")) p->receiver_abi = true;
+            if (named(method, "sort") || named(method, "toSorted")) p->receiver_abi = true;
             if (method && mvp_lmd_builtin_method(method, LMD_TYPE_ARRAY) >= LMD_METHOD_EVERY)
                 activate_library(p, n);
             // method mutation invalidates the same closed-unit literal facts as indexed writes.
             if (!method || named(method, "push") || named(method, "pop") || named(method, "fill") ||
-                    named(method, "reverse") || named(method, "sort") || named(method, "splice") || named(method, "unshift") || named(method, "shift"))
+                    named(method, "reverse") || named(method, "sort") || named(method, "splice") || named(method, "unshift") || named(method, "shift") || named(method, "copyWithin"))
                 p->immutable_objects = false;
         }
         break;
@@ -3308,6 +3314,11 @@ static LmdScalarField* inline_slot(LmdCompiler* c, LmdBinding* binding) {
         for (int i = 0; i < frame->count; i++) if (frame->bindings[i] == binding) return &frame->slots[i];
     return NULL;
 }
+static bool compact_property_dispatch(LmdCompiler* c) {
+    // bound generic entry expansion by emitted cost; repeated loops are not assumed cold.
+    return c->program->dynamic_source && !c->function->id && !c->inlining &&
+        c->em.reg_counter >= 4096;
+}
 static bool repeated_execution(LmdCompiler* c) {
     if (c->function->id) return true;
     for (LmdControl* control = c->control; control; control = control->parent)
@@ -3325,7 +3336,7 @@ static MIR_reg_t global_binding_access(LmdCompiler* c, AstNode* site, bool write
         c->program->global_slot * sizeof(Item), MIR_T_I64, "global_binding_object");
     MIR_reg_t name = constant(c, s2it(spelling ? spelling : ((AstIdentNode*)target)->name));
     // straight-line script sites run once; duplicating the full cache decoder only inflates JIT work.
-    MvpLmdPropertyCache* cache = !write && repeated_execution(c) ?
+    MvpLmdPropertyCache* cache = !write && repeated_execution(c) && !compact_property_dispatch(c) ?
         (MvpLmdPropertyCache*)pool_calloc(c->program->frontend->pool, sizeof(MvpLmdPropertyCache)) : NULL;
     MIR_reg_t joined = 0;
     MIR_label_t done = NULL;
@@ -3781,7 +3792,7 @@ static MIR_reg_t property_access(LmdCompiler* c, int operation, MIR_reg_t owner,
             active->id == active->home->constructor_id;
         // one-shot script sites cannot hit their new cache; retain guards only where execution can repeat.
         MvpLmdPropertyCache* cache = shared_cache ? shared_cache :
-            spelling && operation <= LMD_PROP_SET && repeated_execution(c)
+            spelling && operation <= LMD_PROP_SET && repeated_execution(c) && !compact_property_dispatch(c)
             ? (MvpLmdPropertyCache*)pool_calloc(c->program->frontend->pool, sizeof(MvpLmdPropertyCache)) : NULL;
         // existing own-slot guards remain valid in mutable units; misses use semantic Set.
         MIR_reg_t joined = 0;
@@ -4304,6 +4315,11 @@ static LmdValue typed_array_reference(LmdCompiler* c, LmdReference ref, AstNode*
     if (ref.deferred_name.reg) {
         ref.key = property_key(c, ref.deferred_name, true);
         ref.key_known = false;
+    } else if (ref.spelling) {
+        // lexical and literal names already have an immutable typed-index classification.
+        ref.index = mvp_lmd_string_key(ref.spelling, true);
+        ref.key = constant(c, (uint64_t)ref.index);
+        ref.key_known = true;
     } else if (ref.name) {
         ref.key = property_key(c, boxed(c, ref.name, K_STRING), true);
         ref.key_known = false;
@@ -4461,9 +4477,10 @@ static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, 
     }
     bool consume = numeric && c->program->receiver_abi;
     if (c->program->library_active && c->program->primitives && c->program->receiver_abi &&
-            !repeated_execution(c) && (!k || (k & (k - 1))) && !ref.guarded && !ref.plan && !ref.shapes.count &&
+            (!repeated_execution(c) || compact_property_dispatch(c)) &&
+            (!k || (k & (k - 1))) && !ref.guarded && !ref.plan && !ref.shapes.count &&
             ref.name && !ref.deferred_name.reg && !ref.uncoerced_name) {
-        // one-shot unknown reads share runtime dispatch; hot and deferred-key paths keep their proofs.
+        // compact generic reads share runtime dispatch; specialized and deferred-key proofs stay intact.
         MIR_reg_t value = em_call_4(&c->em, "mvp_lmd_property_read", MIR_T_I64,
             MIR_T_P, reg(c, c->unit), MIR_T_I64, reg(c, ref.owner.reg),
             MIR_T_I64, reg(c, ref.name), MIR_T_I64, integer(c, callee), true);
@@ -4489,8 +4506,9 @@ static LmdValue read_reference(LmdCompiler* c, LmdReference ref, AstNode* site, 
         if (c->program->promises) branch(c, MIR_BEQ, object, reg(c, tid), integer(c, LMD_TYPE_VMAP));
         if (c->program->symbols) branch(c, MIR_BEQ, object, reg(c, tid), integer(c, LMD_TYPE_SYMBOL));
         if (c->program->receiver_abi) branch(c, MIR_BEQ, object, reg(c, tid), integer(c, LMD_TYPE_FUNC));
-        if (callee && (!ref.spelling || mvp_lmd_builtin_method(ref.spelling, LMD_TYPE_FLOAT) ||
-                named(ref.spelling, "toLocaleString"))) {
+        // planned Number prototypes can supply inherited names beyond the fixed native method catalog.
+        if (c->program->primitives || (callee && (!ref.spelling || mvp_lmd_builtin_method(ref.spelling, LMD_TYPE_FLOAT) ||
+                named(ref.spelling, "toLocaleString")))) {
             branch(c, MIR_BEQ, object, reg(c, tid), integer(c, LMD_TYPE_FLOAT));
             branch(c, MIR_BEQ, object, reg(c, tid), integer(c, LMD_TYPE_INT));
         }
@@ -5044,6 +5062,8 @@ static MIR_reg_t sequence_method_runtime(LmdCompiler* c, LmdValue owner, int met
 static LmdValue sequence_method_dense(LmdCompiler* c, LmdValue owner, int method,
         LmdValue* values, int count) {
     LmdValue absent = boxed(c, constant(c, ITEM_JS_UNDEFINED), K_UNDEFINED);
+    if (method >= LMD_METHOD_COPY_WITHIN && method <= LMD_METHOD_WITH)
+        return boxed(c, sequence_method_runtime(c, owner, method, values, count), K_ARRAY);
     if ((method >= LMD_METHOD_EVERY && method <= LMD_METHOD_LAST_INDEX_OF) ||
             method == LMD_METHOD_FLAT_MAP || method == LMD_METHOD_FIND_LAST || method == LMD_METHOD_FIND_LAST_INDEX)
         return stable_item(c, sequence_method_runtime(c, owner, method, values, count));
@@ -5318,6 +5338,9 @@ static LmdValue sequence_method_dense(LmdCompiler* c, LmdValue owner, int method
 }
 static LmdValue sequence_method_call(LmdCompiler* c, LmdValue owner, int method,
         LmdValue* values, int count, bool dense_storage = false) {
+    // these methods use the shared observable algorithm for both dense and sparse receivers.
+    if (method >= LMD_METHOD_COPY_WITHIN && method <= LMD_METHOD_WITH)
+        return sequence_method_dense(c, owner, method, values, count);
     int first = 0, end = 0;
     if (method == LMD_METHOD_JOIN || method == LMD_METHOD_FLAT) end = 1;
     else if (method == LMD_METHOD_FILL) { first = 1; end = 3; }
@@ -6182,7 +6205,8 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
         branch(c, MIR_BEQ, valid, reg(c, abi), integer(c, FN_ENTRY_ABI_MVP_LMD));
         fail(c, LMD_MVP_CAPABILITY, (AstNode*)n); put_label(c, valid);
         target = em_load_at(&c->em, callee.reg, offsetof(Function, ptr), MIR_T_I64, "entry");
-        if ((member && method.spelling) || callback) {
+        // source-node budgets miss generic dispatch growth; bound newly started entry inlines by emitted cost.
+        if (!compact_property_dispatch(c) && ((member && method.spelling) || callback)) {
             int method_targets = 0;
             if (member) for (int fi = 0; fi < c->program->functions->length; fi++) {
                 LmdFunction* candidate = (LmdFunction*)c->program->functions->data[fi];
@@ -6349,6 +6373,8 @@ static LmdValue call(LmdCompiler* c, AstCallNode* n, LmdCallCapture* captured = 
             put_label(c, map_method);
         }
         for (int operation = LMD_METHOD_FILL; operation < LMD_METHOD_COUNT; operation++) {
+            // planned text methods resolve live prototype functions, never the compiler's callee-only token.
+            if (c->program->primitives && operation >= LMD_METHOD_STRING_NORMALIZE && operation <= LMD_METHOD_STRING_SUBSTR) continue;
             TypeId owner_type = mvp_lmd_method_owner(operation);
             unsigned owner_kind = owner_type == LMD_TYPE_FLOAT ? K_NUMBER : owner_type == LMD_TYPE_STRING ? K_STRING :
                 owner_type == LMD_TYPE_DECIMAL ? K_BIGINT : K_ARRAY;
@@ -8987,7 +9013,7 @@ extern "C" Item mvp_lmd_class_new(MvpLmdClass* cls, Item base, Item constructor_
             MvpLmdLibraryState* library = mvp_lmd_program_library(cls->program);
             if (parent_callable->native_constructor && parent_callable->custom_new_target &&
                     parent != &library->object && parent != &library->symbol && parent != &library->date && parent != &library->map && parent != &library->set && parent != library->promise &&
-                    parent != library->async_generator && parent != library->async_function && parent != &library->generator && parent != &library->regexp &&
+                    parent != library->async_generator && parent != library->async_function && parent != &library->generator && parent != &library->regexp && parent != library->shared_buffer &&
                     (!library->weak_collections || (parent != &library->weak_collections[0] && parent != &library->weak_collections[1])) &&
                     (!library->typed_arrays || !lambda_nominal_derives_from(&parent->nominal, &library->typed_arrays[12].nominal)) && (!library->buffers ||
                     (parent != &library->buffers[0] && parent != &library->buffers[1])) &&
@@ -9153,6 +9179,7 @@ static void plan_library_shapes(MvpLmdProgram* p, bool metadata_only = false) {
             {&p->library->object.static_shape, "assign", LMD_TYPE_FUNC},
             {&p->library->object.static_shape, "getPrototypeOf", LMD_TYPE_FUNC},
             {&p->library->array.static_shape, "from", LMD_TYPE_FUNC},
+            {&p->library->array.static_shape, "of", LMD_TYPE_FUNC},
             {&p->library->generator.prototype_shape, "next", LMD_TYPE_FUNC},
             {&p->library->generator.prototype_shape, "return", LMD_TYPE_FUNC},
             {&p->library->generator.prototype_shape, "throw", LMD_TYPE_FUNC},
@@ -9381,6 +9408,16 @@ static void plan_library_shapes(MvpLmdProgram* p, bool metadata_only = false) {
             p->intrinsics[I_ARRAYBUFFER + i - 1].slot = p->buffer_slot + i * 3;
         }
     }
+    if (p->shared_buffer && !p->library->shared_buffer) {
+        MvpLmdClass* cls = (MvpLmdClass*)pool_calloc(p->frontend->pool, sizeof(MvpLmdClass));
+        if (!cls) { diagnostic(p, NULL, "shared buffer metadata allocation"); return; }
+        p->library->shared_buffer = cls;
+        p->shared_buffer_slot = p->slot_count; p->slot_count += 3;
+        plan_library_class(p, cls, "SharedArrayBuffer");
+        cls->nominal.base = &p->library->object.nominal;
+        p->intrinsics[I_SHARED_ARRAYBUFFER - 1].kinds = K_FUNCTION;
+        p->intrinsics[I_SHARED_ARRAYBUFFER - 1].slot = p->shared_buffer_slot;
+    }
     if (p->typed_storage && !p->library->typed_arrays) {
         p->library->typed_arrays = (MvpLmdClass*)pool_calloc(p->frontend->pool, 13 * sizeof(MvpLmdClass));
         if (!p->library->typed_arrays) { diagnostic(p, NULL, "typed array metadata allocation"); return; }
@@ -9461,6 +9498,7 @@ static Item mvp_lmd_global_initialize(MvpLmdProgram* p) {
     for (int i = 1; i < I_COUNT; i++) {
         if (typed_intrinsic(i) >= 0 && !p->typed_storage) continue;
         if (i >= I_ARRAYBUFFER && i <= I_FLOAT16_ARRAY && !p->buffers) continue;
+        if (i == I_SHARED_ARRAYBUFFER && !p->shared_buffer) continue;
         if (i == I_PROMISE && !p->promises) continue;
         if ((i == I_WEAK_MAP || i == I_WEAK_SET) && !p->weak_collections) continue;
         if (i == I_EVAL && !p->dynamic_source) continue;
@@ -9703,7 +9741,7 @@ static int admission_pass(void* opaque) {
     }
     if (p->global_reflection) {
         activate_library(p, p->frontend->ast_root);
-        p->primitives = p->errors = p->math_observed = p->buffers = p->date_observed = p->weak_collections = true;
+        p->primitives = p->errors = p->math_observed = p->buffers = p->shared_buffer = p->date_observed = p->weak_collections = true;
         p->primitive_method_overrides = true;
         if (p->host_enabled) p->timers = p->promises = true;
         if (p->host_enabled && !p->host_active) {
@@ -10655,6 +10693,9 @@ static bool primitive_property_key(MvpLmdProgram* p, AstNode* node, AstNode** pa
     if (!node) return true;
     unsigned known = kind(p, node);
     if (known && !(known & ~primitive)) return true;
+    // canonical numeric strings have the same hook-admission proof as numeric keys.
+    if (node->node_type == AST_NODE_LITERAL && ((AstLiteralNode*)node)->literal_type == AST_LITERAL_STRING &&
+            mvp_lmd_string_key(((AstLiteralNode*)node)->value.string_value) >= 0) return true;
     if (node->node_type == AST_NODE_INDEX_EXPR || node->node_type == AST_NODE_MEMBER_EXPR) {
         AstFieldNode* member = (AstFieldNode*)node;
         unsigned key = kind(p, member->property);
@@ -11259,6 +11300,15 @@ static int lower_pass(void* opaque) {
             // shared spellings such as Vector.at/Array.concat must not disable unrelated direct string calls.
             primitives = name && mvp_lmd_builtin_method(name, LMD_TYPE_STRING) >= LMD_METHOD_STRING_CONCAT &&
                 (kind(p, method->object) & K_STRING);
+            if (!p->primitives && !name && method->computed && (kind(p, method->object) & K_STRING)) {
+                AstNode* path[48];
+                if (!p->library && (kind(p, method->property) & (K_STRING | K_OBJECT | K_ARRAY | K_FUNCTION | K_MAP))) {
+                    // the existing numeric-affix proof needs the native property inventory, not runtime prototypes.
+                    plan_library_shapes(p, true);
+                    if (p->diagnostic[0]) return false;
+                }
+                primitives = !primitive_property_key(p, method->property, path);
+            }
         } else if (node->node_type == AST_NODE_CALL_EXPR) {
             AstCallNode* call = (AstCallNode*)node;
             if (call->callee->node_type != AST_NODE_MEMBER_EXPR) continue;
@@ -11563,6 +11613,7 @@ static Item mvp_lmd_instantiate_unit(MvpLmdExecution* e, MvpLmdProgram* p, const
         if (p->errors) p->library->error_values = p->slots + p->error_slot;
         if (p->primitives) p->library->primitive_values = p->slots + p->primitive_slot;
         if (p->buffers) p->library->buffer_values = p->slots + p->buffer_slot;
+        if (p->shared_buffer) p->library->shared_buffer_values = p->slots + p->shared_buffer_slot;
         if (p->weak_collections) p->library->weak_values = p->slots + p->weak_slot;
         if (p->typed_storage) p->library->typed_values = p->slots + p->typed_slot;
         if (p->promises) p->library->promise_values = p->slots + p->promise_slot;
