@@ -1,6 +1,6 @@
 # JS MVP: 90% of LJS Test262 coverage
 
-**Date:** 2026-10-15. **Status:** coverage milestone verified on archived `parallel38`: **37,445/40,261 IDs (93.0056%)** pass every required variant, **1,210** above the 90% target. No original whole-entry passes are lost; four later selected controls remain archived timeout losses. Pin45's eval/replacement followup passes **647/647** focused tests normally and under forced GC and **616/616** selected required-mode cases, regaining those controls. Watchdog recovery, final integration and a fresh whole audit remain open. Pin47 passes all **84** output contracts, but confirmed execution regressions block acceptance. Further testing is stopped at the user's request; the following repairs have no new execution measurements. All captures stay build-specific.
+**Date:** 2026-10-15. **Status:** coverage milestone verified on archived `parallel38`: **37,445/40,261 IDs (93.0056%)** pass every required variant, **1,210** above the 90% target. No original whole-entry passes are lost; four later selected controls remain archived timeout losses. Pin45's eval/replacement followup passes **647/647** focused tests normally and under forced GC and **616/616** selected required-mode cases, regaining those controls. Watchdog recovery, final integration and a fresh whole audit remain open. The latest post-repair release replay attempts **88 benchmarks**: **84** pass, four jq workloads terminate with **SIGBUS**, and **12 performance regressions** block acceptance. All captures stay build-specific.
 **Design:** [JS_MVP_Lmd §34](../jube/JS_MVP_Lmd.md#34-ninety-percent-of-ljs-test262-coverage).
 **Scope:** extend the implemented MVP toward 90% of the frozen LJS passing
 population, preserving ordinary benchmark performance. This plan stages the
@@ -21,7 +21,7 @@ includes, required variants, exclusions, negative phases/types and async policy.
 | Phase33 MVP required-mode audit | 21,747 IDs: 19,221 positive and 2,526 negative; candidate SHA-256 `e2804254cf893b003aa38397514bd93426227cdb8ac454fe049e17cf3cb2f95f` |
 | Gain required from that audit | 14,488 distinct fully passing IDs |
 | Navier follow-up | Compiler fix and shared/focused gates completed; the complete MVP required-mode audit was not repeated on that pin |
-| Benchmark population | 84 non-jq workloads with output/backend contracts; four jq workloads retain historical evidence only |
+| Archived entry benchmark population | 84 non-jq workloads with output/backend contracts; four jq workloads then retained historical evidence only |
 
 These are archived results, not a current-head conformance claim. Their detailed
 provenance is in the [phase33 record](JS_MVP_Lmd_Test262_5000.md#counting-and-comparison)
@@ -2084,3 +2084,135 @@ The concurrent merge since pin47 changes none of the repaired production files.
 Source snapshots, patch, build log and provenance are under
 `temp/mvp_test262_90/perf_fix50/`. No executable is run: neither prior correctness
 results nor prior timings certify this modified build.
+
+### Full benchmark replay after repairs (2026-10-15)
+
+Private optimized `release_native` HEAD
+`43ac706671b58dc2f7dc5852bbe70f94a91d7338`, executable SHA-256
+`1c5a3dd7ea2a08f91e15bc00d9d969ee171f30319771ed70e79ab44b67ceec17`.
+All **71 standard workloads and 17 microbenchmarks** are attempted, using the
+byte-identical archived sources, original self timers and exact output oracles.
+MIR is selected explicitly; initial compilation and process time are separate.
+
+**84/88 pass** their output checks. All four jq candidates (`jq_bf`, `jq_mix`,
+`jq_records`, `jq_tree`) terminate with **SIGBUS** after 59–64 seconds without
+emitting an execution time. The exact Result9 release passes all four checksum
+checks. These are correctness regressions and have no candidate speed ratios.
+
+The non-jq screen uses seven rounds with two identical controls. Twelve smaller
+or uncertain suspects receive 15 rounds; six further seven-round comparisons use
+the later phase-entry release to check recorded gains newer than Result9.
+Hyphen retains seven rounds because each process spends 30–50 seconds compiling;
+its control/peer variation prevents a confirmed slowdown. Large seven-round
+regressions require both ratios above 1.10 and both 95% lower bounds above 1.05.
+
+**12 performance regressions are confirmed.** Ten compare against Result9;
+Hashmap and Text Search compare against the later phase-entry release:
+
+| Workload | Slowdown | Previously in pin47's confirmed list |
+| --- | ---: | --- |
+| Splay | 3.07x | no |
+| Fast-diff | 3.02x | yes |
+| Triangl | 1.78x | yes |
+| Microdiff | +47.6% | no |
+| Text Search | +14.2% | no |
+| Brainfuck | +11.6% | yes |
+| DeltaBlue | +6.2% | no |
+| Prettier AST | +6.1% | no |
+| Object deletion | +4.1% | no |
+| Hashmap | +3.7% | yes |
+| NBody | +2.5% | no |
+| Formatted output | +2.2% | no |
+
+The earlier orders-of-magnitude typed-array losses disappear, but Triangl and
+Brainfuck retain smaller losses. Fannkuch, Spectralnorm, Deriv, FibFP and
+Three-way merge do not confirm their initial screen differences in the longer
+Result9 comparisons. Text Search is faster than Result9 in this capture, while
+the separate entry replay exposes its later regression; reference selection
+therefore matters.
+
+The saved-evidence audit verifies **2,740 successful launches, four failed
+launches and 310 successful backend artifacts**. Source, executable and module
+guards match; production inputs remain unchanged after the build. Published
+Results3–9 match their original Git blobs. Competing build activity is recorded,
+so individual intervals and identical-control variation remain part of the
+interpretation. No implementation or corpus change is made during this replay.
+
+Artifacts: `temp/mvp_perf_all_20261015/REPORT.md`, `REPORT.json`,
+`validation.json`, the four capture directories and private build provenance.
+Benchmark correctness and performance acceptance fail on this candidate. No
+fresh whole-Test262 audit is inferred from the benchmark output checks.
+
+Two initial release debugger replays of `jq_records`, excluded from benchmark
+counts and timings, reproduce an instruction-fetch protection fault in writable,
+non-executable memory. `crash-diagnosis.json` retains those observations.
+
+### Direct regression repairs (2026-10-15)
+
+Work continues without coding agents. Sources, self timers and published
+Results3–9 remain unchanged. Artifacts are under
+`temp/mvp_perf_repair_20261015/`.
+
+- **ARM64 jq crash:** generated `parse` spans 1,297,248 bytes. Its backward
+  conditional branch needs displacement -1,279,884; truncating the signed
+  19-bit instruction offset instead lands 2 MiB beyond the target, in
+  non-executable memory. The user-approved vendor repair widens overflowing
+  conditions to an inverted short branch and long unconditional branch,
+  re-emitting until offsets and switch-table alignment settle. Distant label
+  addresses use a rebased literal. Ordinary short instructions retain their
+  encodings. The delta is recorded in
+  `patches/mir-aarch64-long-branches.patch`; `make verify-mir-patches` passes.
+  All **248/248** MIR emission tests pass, including the new >1 MiB reproducer.
+- **Second jq crash:** after the branch repair, `tokenise` exposes an independent
+  inference error: bare lexical declarations omit their initial `undefined`
+  from a subsequently numeric domain. The existing transfer now includes that
+  initialization, including block re-entry. The reduced tokenizer passes;
+  complete jq replay remains pending. No interpreter fallback is introduced
+  (**D8.1.3v24**).
+- **Triangl:** align ordinary optional-index inference with its existing closed
+  array proof, then retain numeric payload/presence through raw typed-array
+  reads. Named typed attributes join their own integer ranges; fractional,
+  signed-zero, NaN and arbitrary named values preserve their representations
+  (**D2.2.5**, **D2.6.6v3**, **D3.4.3v5**). Seven paired release-MIR rounds give
+  **155.019 ms** repaired, **278.262 ms** pre-fix, **155.083 ms** Result9.
+  Brainfuck remains **48.310 ms** versus **42.967 ms** Result9. Pin `round2`
+  SHA-256 is `d4fc9ed3fa03e68d701a15c27f1c20b7a060667c081230407bb389e99e1b3d53`.
+- **Fixed-key literal experiment, withdrawn:** unknown value kinds discard the
+  entire allocation plan. A trial retained it with Lambda `TypedItem` slots and
+  the existing field reader/writer, preserving scalar snapshots and initializer
+  order (**D3.4.3v5**, **D5.2–D5.3**). The first seven-round capture reduced Splay
+  from 191.374 to 176.728 ms and Microdiff from 150.249 to 144.698 ms, but Fast-diff
+  increased from 633.260 to 674.119 ms. A follow-up with an identical-binary peer
+  recorded competing builds/tests and was cancelled. The experiment is removed
+  from the retained compiler; `round4/candidate.patch` preserves it for later
+  investigation. No performance acceptance is claimed from the cancelled run.
+
+No new runtime helper is added. The `round2` MVP suite passes **647/649**;
+the two failures require an obsolete capability error for missing typed-array
+named properties. Exact pre-fix, repaired and Node replays all return
+`undefined`; the assertions now check that value. The trial `round4` suite passes
+**650/650**, and five focused ownership/domain checks pass with collection forced
+on every allocation and freed memory poisoned. After withdrawing the literal
+experiment, all **1,452 production inputs** again match the `round2` build
+snapshot; its SHA-256 is
+`d4fc9ed3fa03e68d701a15c27f1c20b7a060667c081230407bb389e99e1b3d53`.
+The final MVP suite passes **650/650** with the updated assertions and new
+fixtures; the five focused checks also pass under forced collection and freed
+memory poisoning. Logs: `mvp-final-tests.log` and `final-forced-gc.log`.
+
+The broader Lambda baseline reports **7,429/7,430**: the LaTeX phase-3 corpus
+times out at 60 seconds during the loaded run, then passes unchanged in isolation
+in **29.055 seconds**. The Test262 baseline reports **40,259/40,261 fully passing**,
+with two slow Unicode identifier cases passing on its isolated retry and **zero
+functional regressions**. The harness retains those two as non-fully-passing;
+neither harness nor thresholds are changed.
+
+Records and mix finish with exact checksums on `round4`. Its unfinished bf/tree
+replay is cancelled when the optional experiment is withdrawn; cancellation is
+not a runtime failure. Records also passes on the retained `round2` binary with
+exact checksum **878885883**, preserving its MIR backend and original source.
+Final replay: `jq-final/comparison.json`; complete validation inventory:
+`validation.json`. Mix, bf and tree are not rerun on the final retained binary.
+Overlapping validation and explicitly recorded pauses exclude these jq runs
+from performance acceptance. Eleven previously confirmed non-jq regressions
+remain open; no full-population MVP Test262 score is refreshed.

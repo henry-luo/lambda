@@ -258,6 +258,8 @@ struct MvpLmdProgram {
     bool typed_storage;
     bool typed_explicit;
     unsigned typed_named_kinds;
+    LmdRange typed_named_range;
+    unsigned typed_named_range_changes;
     uint32_t typed_slot;
     bool promises;
     uint32_t promise_slot;
@@ -1703,8 +1705,11 @@ static unsigned kind(MvpLmdProgram* p, AstNode* n, LmdInlineFrame* facts = NULL)
         unsigned key_kind = member->computed && !spelling ? kind(p, member->property, facts) : 0;
         if ((owner == K_TYPED_ARRAY || owner == K_ARRAY) && member->computed && !spelling && !key_kind) return 0;
         // optional typed keys join named writes; their values need not fit a numeric lane.
+        // a closed dense array cannot acquire an "undefined" attribute; match the emitted optional-index path.
+        bool optional_index = owner == K_TYPED_ARRAY ||
+            (owner == K_ARRAY && !p->property_callbacks && !p->array_named_properties);
         bool indexed = spelling ? mvp_lmd_string_key(spelling) >= 0 :
-            member->computed && (key_kind == K_NUMBER || (owner == K_TYPED_ARRAY &&
+            member->computed && (key_kind == K_NUMBER || (optional_index &&
                 !(key_kind & ~(K_NUMBER | K_UNDEFINED))));
         if (indexed && (owner == K_TYPED_ARRAY ||
                 (owner == K_ARRAY && array_facts(p, member->object).lanes == LMD_ARRAY_ITEMS))) {
@@ -1975,6 +1980,9 @@ static void type_walk(AstNode* n, void* arg) {
     }
     if (target && target->node_type == AST_NODE_IDENT) {
         LmdBinding* b = identifier_binding(t->p, (AstIdentNode*)target);
+        // bare lexical declarations initialize to undefined, including on every block re-entry.
+        if (b && b->entry->is_lexical && n->node_type == AST_NODE_VARIABLE_DECLARATOR &&
+                !((AstDeclaratorNode*)n)->init) mask |= K_UNDEFINED;
         unsigned* destination = b && !t->facts ? &b->kinds : NULL;
         for (int i = 0; t->facts && i < t->facts->count; i++)
             if (t->facts->bindings[i] == b) destination = &t->facts->slots[i].kinds;
@@ -2077,6 +2085,15 @@ static LmdRange range(MvpLmdProgram* p, AstNode* n, bool scoped, bool present_on
             LmdRange index = range(p, member->property, true);
             if (!index.state || !facts.length.state) return {};
             unsigned key = kind(p, member->property);
+            if (present_only && owner == K_TYPED_ARRAY && key == (K_NUMBER | K_UNDEFINED) &&
+                    !(p->typed_named_kinds & ~(K_NUMBER | K_UNDEFINED)) && !(facts.lanes & ~3u)) {
+                // an absent key observes ordinary attributes; join their payload range with indexed storage.
+                LmdRange named = p->typed_named_range;
+                if (named.state == 2) return named;
+                double low = facts.lanes & 1 ? INT32_MIN : 0;
+                double high = facts.lanes & 1 ? INT32_MAX : UINT8_MAX;
+                return named.state ? finite_range(fmin(low, named.lower), fmax(high, named.upper)) : finite_range(low, high);
+            }
             bool numeric_key = owner == K_TYPED_ARRAY ? key == K_NUMBER : !(key & ~(K_NUMBER | K_UNDEFINED));
             if ((present_only && numeric_key) || ((owner != K_TYPED_ARRAY || numeric_key) &&
                     index.state == 1 && facts.length.state == 1 && index.lower >= 0 && index.upper < facts.length.lower)) {
@@ -2387,6 +2404,17 @@ static void range_walk(AstNode* n, void* opaque) {
         n->node_type == AST_NODE_ASSIGN ? ((AstAssignNode*)n)->left :
         n->node_type == AST_NODE_UNARY && (((AstUnaryNode*)n)->op == OPERATOR_JS_INCREMENT ||
             ((AstUnaryNode*)n)->op == OPERATOR_JS_DECREMENT) ? ((AstUnaryNode*)n)->operand : NULL;
+    if (target && !p->typed_storage && (target->node_type == AST_NODE_MEMBER_EXPR || target->node_type == AST_NODE_INDEX_EXPR)) {
+        AstFieldNode* member = (AstFieldNode*)target;
+        String* spelling = member_spelling(member);
+        unsigned key = spelling ? K_STRING : kind(p, member->property);
+        bool named_key = spelling ? mvp_lmd_string_key(spelling, true) == -2 : key && key != K_NUMBER;
+        if (named_key && (kind(p, member->object) & K_TYPED_ARRAY)) {
+            AstNode* value = n->node_type == AST_NODE_ASSIGN && ((AstAssignNode*)n)->op == OPERATOR_ASSIGN
+                ? ((AstAssignNode*)n)->right : n;
+            join_range(t, &p->typed_named_range, &p->typed_named_range_changes, range(p, value, false, true));
+        }
+    }
     if (target && target->node_type == AST_NODE_IDENT) {
         LmdBinding* b = identifier_binding(p, (AstIdentNode*)target);
         if (b && !b->intrinsic) {
@@ -4360,7 +4388,20 @@ static LmdValue typed_array_reference(LmdCompiler* c, LmdReference ref, AstNode*
         }
     }
     if (ref.key_present || (ref.key_known ? ref.index == -2 : !ref.numeric_key)) {
-        MIR_reg_t result = value ? 0 : em_new_reg(&c->em, "typed_property", numeric ? MIR_T_D : MIR_T_I64);
+        unsigned result_kind = !callee && site && (site->node_type == AST_NODE_MEMBER_EXPR || site->node_type == AST_NODE_INDEX_EXPR)
+            ? kind(c->program, site, c->inlining) : K_ANY;
+        bool scalar = !value && !callee && result_kind && !(result_kind & ~(K_NUMBER | K_UNDEFINED));
+        LmdRange bounds = scalar ? range(c->program, site, false, true) : LmdRange{};
+        bool integral = scalar && !numeric && bounds.state == 1;
+        bool floating = numeric || (scalar && !integral);
+        MIR_reg_t present = scalar && !numeric ? constant(c, 0) : 0;
+        MIR_reg_t result = value ? 0 : em_new_reg(&c->em, "typed_property", floating ? MIR_T_D : MIR_T_I64);
+        auto save = [&](LmdValue output) {
+            if (present) move(c, present, reg(c, output.number_present ? output.number_present :
+                op(c, MIR_NE, reg(c, tag(c, output)), integer(c, LMD_TYPE_UNDEFINED))));
+            move(c, result, reg(c, scalar ? scalar_reg(c, output, result_kind, integral) :
+                numeric ? to_number(c, output) : box(c, output).reg), floating);
+        };
         MIR_label_t named = label(c), done = label(c);
         if (!ref.key_known) {
             if (ref.key_present) branch_truth(c, named, ref.key_present, false);
@@ -4369,7 +4410,7 @@ static LmdValue typed_array_reference(LmdCompiler* c, LmdReference ref, AstNode*
             indexed.numeric_key = true; indexed.key_present = 0;
             indexed.name = 0; indexed.deferred_name = {};
             LmdValue fast = typed_array_reference(c, indexed, site, value, callee, numeric);
-            if (!value) move(c, result, reg(c, numeric ? to_number(c, fast) : box(c, fast).reg), numeric);
+            if (!value) save(fast);
             jump(c, done);
         }
         put_label(c, named);
@@ -4381,13 +4422,12 @@ static LmdValue typed_array_reference(LmdCompiler* c, LmdReference ref, AstNode*
             MIR_T_I64, value ? reg(c, stored) : integer(c, callee), true);
         check_error(c, property);
         if (!value) {
-            LmdValue owned = stable_item(c, property);
-            move(c, result, reg(c, numeric ? to_number(c, owned) : owned.reg), numeric);
+            // numeric payloads are consumed before another safepoint; general Items retain an owned home.
+            save(scalar ? boxed(c, property, result_kind) : stable_item(c, property));
         }
         put_label(c, done);
-        unsigned result_kind = !callee && site && (site->node_type == AST_NODE_MEMBER_EXPR || site->node_type == AST_NODE_INDEX_EXPR)
-            ? kind(c->program, site, c->inlining) : K_ANY;
-        return value ? *value : numeric ? LmdValue{result, K_NUMBER} : boxed(c, result, result_kind);
+        return value ? *value : numeric ? LmdValue{result, K_NUMBER} : scalar ?
+            LmdValue{result, result_kind, false, 0, integral, bounds, present} : boxed(c, result, result_kind);
     }
     bool native = !value && !callee;
     bool integral = native && ref.lanes && !(ref.lanes & ~3u) && (!numeric || ref.in_bounds);
@@ -9833,6 +9873,7 @@ static void reset_representation_facts(MvpLmdProgram* p) {
 static int representation_pass(void* opaque) {
     MvpLmdProgram* p = (MvpLmdProgram*)opaque;
     p->typed_named_kinds = K_UNDEFINED;
+    p->typed_named_range = {}; p->typed_named_range_changes = 0;
     for (int i = 0; i < p->functions->length; i++) {
         LmdFunction* f = (LmdFunction*)p->functions->data[i];
         f->array = {}; f->array_changes = 0;

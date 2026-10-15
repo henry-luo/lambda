@@ -1,0 +1,109 @@
+--- a/mir-gen-aarch64.c
++++ b/mir-gen-aarch64.c
+@@ -2165,7 +2165,7 @@
+ }
+ 
+ static void out_insn (gen_ctx_t gen_ctx, MIR_insn_t insn, const char *replacement,
+-                      void **jump_addrs) {
++                      void **jump_addrs, VARR (uint8_t) *long_branches) {
+   MIR_context_t ctx = gen_ctx->ctx;
+   size_t offset;
+   const char *p, *insn_str;
+@@ -2429,6 +2429,30 @@
+     if (label_ref_num >= 0) VARR_ADDR (label_ref_t, label_refs)
+     [label_ref_num].label_val_disp = VARR_LENGTH (uint8_t, result_code);
+ 
++    if (long_branches != NULL && label_ref_num >= 0
++        && (size_t) label_ref_num < VARR_LENGTH (uint8_t, long_branches)
++        && VARR_GET (uint8_t, long_branches, label_ref_num)) {
++      /* Only overflowing branches grow. Re-emission preserves switch-table alignment. */
++      gen_assert (lr.short_p && !lr.abs_addr_p);
++      if ((opcode & 0x9f000000) == 0x10000000) { /* adr: use a rebased label literal */
++        put_uint64 (gen_ctx, 0x58000040 | (opcode & 31), 4); /* ldr rd, .+8 */
++        put_uint64 (gen_ctx, 0x14000003, 4); /* skip the address */
++        VARR_ADDR (label_ref_t, label_refs)[label_ref_num].abs_addr_p = TRUE;
++        VARR_ADDR (label_ref_t, label_refs)[label_ref_num].short_p = FALSE;
++        VARR_ADDR (label_ref_t, label_refs)[label_ref_num].label_val_disp += 8;
++        put_uint64 (gen_ctx, 0, 8);
++        if (*p == 0) break;
++        continue;
++      }
++      gen_assert ((opcode & 0xff000010) == 0x54000000
++                  || (opcode & 0x7e000000) == 0x34000000);
++      opcode ^= (opcode & 0xff000010) == 0x54000000 ? 1 : (1u << 24); /* b.cond or cbz/cbnz */
++      put_uint64 (gen_ctx, opcode | (2 << 5), 4); /* invert and skip the long jump */
++      opcode = 0x14000000;
++      VARR_ADDR (label_ref_t, label_refs)[label_ref_num].short_p = FALSE;
++      VARR_ADDR (label_ref_t, label_refs)[label_ref_num].label_val_disp += 4;
++    }
++
+     if (switch_table_addr_p) switch_table_adr_insn_start = VARR_LENGTH (uint8_t, result_code);
+     put_uint64 (gen_ctx, opcode, 4); /* output the machine insn */
+ 
+@@ -2480,8 +2504,12 @@
+   size_t i;
+   MIR_insn_t insn;
+   const char *replacement;
+-
++  VARR (uint8_t) *long_branches;
++  int changed;
++
++  VARR_CREATE (uint8_t, long_branches, gen_alloc (gen_ctx), 0);
+   gen_assert (curr_func_item->item_type == MIR_func_item);
++retry:
+   VARR_TRUNC (uint8_t, result_code, 0);
+   VARR_TRUNC (label_ref_t, label_refs, 0);
+   VARR_TRUNC (uint64_t, abs_address_locs, 0);
+@@ -2497,10 +2525,27 @@
+         exit (1);
+       } else {
+         gen_assert (replacement != NULL);
+-        out_insn (gen_ctx, insn, replacement, NULL);
++        out_insn (gen_ctx, insn, replacement, NULL, long_branches);
+       }
+     }
+   }
++  /* Widen monotonically, then recompute every label and aligned table before relocation. */
++  changed = FALSE;
++  for (i = 0; i < VARR_LENGTH (label_ref_t, label_refs); i++) {
++    label_ref_t lr = VARR_GET (label_ref_t, label_refs, i);
++    if (!lr.abs_addr_p && lr.short_p) {
++      int64_t offset = (int64_t) get_label_disp (gen_ctx, lr.u.label)
++                       - (int64_t) lr.label_val_disp;
++      if (offset < -(1 << 20) || offset >= (1 << 20)) {
++        while (VARR_LENGTH (uint8_t, long_branches) <= i)
++          VARR_PUSH (uint8_t, long_branches, 0);
++        VARR_SET (uint8_t, long_branches, i, 1);
++        changed = TRUE;
++      }
++    }
++  }
++  if (changed) goto retry;
++  VARR_DESTROY (uint8_t, long_branches);
+   /* Setting up labels */
+   for (i = 0; i < VARR_LENGTH (label_ref_t, label_refs); i++) {
+     label_ref_t lr = VARR_GET (label_ref_t, label_refs, i);
+@@ -2509,6 +2554,8 @@
+       int64_t offset = (int64_t) get_label_disp (gen_ctx, lr.u.label)
+                        - (int64_t) lr.label_val_disp; /* pc offset */
+       gen_assert ((offset & 0x3) == 0);
++      if (!lr.short_p && (offset < -(1 << 27) || offset >= (1 << 27)))
++        (*MIR_get_error_func (ctx)) (MIR_wrong_lref_error, "aarch64 branch exceeds 26-bit displacement");
+       if (lr.short_p)
+         *(uint32_t *) (VARR_ADDR (uint8_t, result_code) + lr.label_val_disp)
+           |= ((offset / 4) & 0x7ffff) << 5; /* 19-bit */
+@@ -2564,12 +2611,12 @@
+   if (insn->code == MIR_LABEL) return;
+   replacement = find_insn_pattern_replacement (gen_ctx, insn);
+   gen_assert (replacement != NULL);
+-  out_insn (gen_ctx, insn, replacement, jump_addrs);
++  out_insn (gen_ctx, insn, replacement, jump_addrs, NULL);
+   if (MIR_branch_code_p (insn->code) && insn->code != MIR_JMP) short_bb_branch_p = TRUE;
+ }
+ 
+ static void target_output_jump (gen_ctx_t gen_ctx, void **jump_addrs) {
+-  out_insn (gen_ctx, temp_jump, temp_jump_replacement, jump_addrs);
++  out_insn (gen_ctx, temp_jump, temp_jump_replacement, jump_addrs, NULL);
+ }
+ 
+ static uint8_t *target_bb_translate_finish (gen_ctx_t gen_ctx, size_t *len) {
