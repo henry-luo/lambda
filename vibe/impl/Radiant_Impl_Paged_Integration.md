@@ -631,3 +631,52 @@ selection. UI automation passes **631/631**; the full layout baseline has
 whitespace checks pass. Aggregate evidence:
 `temp/fix-failed-radiant-gate.log` and `temp/fix-failed-radiant-summary.json`.
 This closes the merged regressions above; it does not complete P6/P7.
+
+### 2026-10-16: native paragraph metrics, folios and retained list counters
+
+**Milestone.** Repair the reported 338/490 selection through the shared layout
+engine, retaining every existing assertion. Acceptance covers native paragraph
+stacking, explicit nominal metrics and negative leading; formatted current and
+target folios in body, running, static and note areas; and CSS/list-attribute
+counter order across retained relayout. Ownership remains **D4.5.1v4 /
+D4.1.4v5**; the behavior follows paged-media design §§1.3 and 11.3, without a
+new semantic ruling.
+
+**Implemented.** Namespaced page hints and resolved native geometry also reach
+HTML paged flows. Native paragraph allocation feeds the shared line alignment
+pass, preserving signed baselines and font-height overflow. Root admission uses
+the same trait validator as other sources. Each condition pass restores its
+opening page master instead of creating an unintended initial sheet. Folio
+admission distinguishes authored children from retained generated text and
+rejects missing targets or continuous presentation. Running occurrences fill
+their folios before intrinsic measurement. Notes measure a real placeholder and
+converge against preceding page labels before final counters are available.
+Static target areas register independently of normal-flow counter scopes.
+
+Reversed list initialization uses the shared computed display resolver to
+exclude hidden descendants. Implicit list-item increments precede counter-set;
+author counter-set overrides the HTML value hint. Newly created and retained
+markers share content/advance computation, releasing replaced text so a changed
+start value cannot leave the preceding edition's numbering in the workspace.
+
+**Qualification.** The unchanged selection improves **338/490 → 351/490**,
+with thirteen repaired cases and no newly failing case. Its additional style,
+ownership and reuse selection passes **124/124**. Original paragraph-metric,
+body/running/static/note folio and reversed-list mutation cases now pass.
+Integer-cast lint and `git diff --check` pass.
+
+The rebuilt Radiant baseline completes with **5,711 pass / 154 accepted partial /
+139 fail / one skip** of 6,005. All failures belong to the remaining View Reuse
+selection. Layout is unchanged at **3,144 pass / 150 accepted partial / zero
+regressions**; native text/layout passes **129/129**, UI automation **631/631**,
+DOM UI **157/157**, application views **204/204** and native Scene3D **28/28**.
+Render visual passes its gate with 207 passes, four expected failures and one
+skip. The initial restricted run was stopped after local WPT socket-bind denials
+and native graphics hangs; rerunning the already built binaries with the required
+access clears those environment failures. The complete receipt is
+`temp/view_reuse_native_gate/test_summary.json`; remaining native diagnostics
+and the repaired-case inventory are in `temp/view_reuse_remaining.json`.
+
+Changed-width table continuations, remaining native whitespace/reference
+geometry, table-model migration and terminal-float fitting remain open; this
+milestone does not complete P6/P7.

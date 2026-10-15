@@ -2409,6 +2409,7 @@ typedef struct Linebox {
     float max_ascender;
     float max_descender;
     float max_css_baseline_ascender; // font-table baseline for replaced inline alignment
+    bool has_native_metrics; // native line stacking supplies the signed baseline and allocation
     float ruby_annotation_min_line_height; // block-side ruby annotation extent outside the base line
     float ruby_annotation_over_shift; // extra block-start space required by ruby annotations
     float initial_letter_origin_advance; // raised-cap displacement already applied to this line
@@ -4508,6 +4509,7 @@ void paged_block_after(LayoutContext* lycon, ViewBlock* block);
 // orphans); the hook adjusts lycon->block.advance_y when it shifts the line
 void paged_line_commit(LayoutContext* lycon, float used_line_height);
 void paged_line_start(LayoutContext* lycon, ViewBlock* block);
+void paged_line_metrics(LayoutContext* lycon);
 // native content dimensions size the object and only fill unspecified viewport axes.
 void paged_image_size(LayoutContext* lycon, ViewBlock* block, float natural_width, float natural_height);
 const CssValue* paged_resolve_css_value(LayoutContext* lycon, DomElement* element,

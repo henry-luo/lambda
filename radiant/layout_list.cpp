@@ -111,7 +111,9 @@ bool layout_sum_reversed_counter_incs(DomElement* parent, const char* counter_na
     for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(child);
-        if (query && !query->visible(query->context, elem)) continue;
+        // unreached descendants already have a cascade, but no used display yet.
+        if (query ? !query->visible(query->context, elem) :
+            resolve_display_value(elem).outer == CSS_VALUE_NONE) continue;
         // HTML list containers establish an implicit list-item scope even when
         // no authored counter-reset declaration is present.
         if (include_implicit_reversed_list_item &&
@@ -478,7 +480,61 @@ static void refresh_marker_image(LayoutContext* context, MarkerProp* marker,
         marker->loaded_image = lam::up(load_document_image(context->doc, context->ui_context, image->url));
 }
 
-// Create a ::marker element with the given properties
+// retained markers must re-evaluate counters as well as their font and image.
+static void refresh_marker_content(LayoutContext* lycon, DomElement* parent_elem,
+        MarkerProp* marker_prop, CssEnum marker_style, float font_size,
+        float image_default_size, float image_gap, float effective_zoom,
+        bool is_bullet_marker, bool is_outside, bool is_string_marker,
+        const char* string_marker, const char* marker_css_content, FontHandle* font_handle) {
+    lam::Own<char> previous = marker_prop->text_content;
+    marker_prop->text_content = nullptr;
+    marker_prop->trailing_space_width = 0.0f;
+    marker_prop->trailing_space_trimmed = false;
+    if (marker_css_content) {
+        // ::marker { content: ... } overrides list-style-type
+        radiant_retain_marker_text_content(marker_prop, lam::promote_to_pool(lycon->pool, marker_css_content));
+        marker_prop->marker_type = CSS_VALUE_DECIMAL;  // force text rendering
+    } else if (is_string_marker && !marker_prop->is_image_marker && !marker_prop->loaded_image) {
+        // CSS Lists 3 §4.1: use the string directly as marker content
+        radiant_retain_marker_text_content(marker_prop, lam::promote_to_pool(lycon->pool, string_marker));
+    } else if (!is_bullet_marker && !marker_prop->is_image_marker && !marker_prop->loaded_image) {
+        char marker_text[64];
+        int marker_len = counter_format(lycon->counter_context, "list-item", marker_style, marker_text, sizeof(marker_text));
+        if (marker_len > 0 && marker_len + 2 < (int)sizeof(marker_text)) {
+            marker_text[marker_len] = '.';
+            marker_text[marker_len + 1] = ' ';
+            marker_text[marker_len + 2] = '\0';
+            marker_len += 2;
+
+            radiant_retain_marker_text_content(marker_prop, lam::promote_to_pool(lycon->pool, marker_text));
+        }
+    }
+    lam::free_owned(lycon->pool, previous);
+    if (!marker_prop->has_explicit_content && !is_string_marker &&
+        marker_prop->text_content && font_handle) {
+        size_t marker_length = strlen(marker_prop->text_content);
+        if (marker_length > 0 && marker_prop->text_content[marker_length - 1] == ' ') {
+            TextExtents space = font_measure_text(font_handle, " ", 1);
+            marker_prop->trailing_space_width = space.width;
+        }
+    }
+    // CSS Lists 3 §4.2: compute marker width from content
+    // For text markers, measure actual text width; for bullets, use fixed bullet size + padding
+    if (!set_marker_image_geometry(parent_elem, marker_prop, image_default_size,
+                                   image_gap, effective_zoom) &&
+        marker_prop->text_content && font_handle) {
+        TextExtents extents = font_measure_text(font_handle, marker_prop->text_content,
+                                                 (int)strlen(marker_prop->text_content)); // INT_CAST_OK: string length
+        marker_prop->width = extents.width;
+    } else if (!marker_prop->loaded_image && is_bullet_marker) {
+        marker_prop->width = list_marker_bullet_inline_size(
+            font_size, is_outside, marker_prop->reserves_first_line);
+    } else if (!marker_prop->loaded_image && !marker_prop->is_image_marker) {
+        // fallback: use em-based estimate
+        marker_prop->width = font_size * 1.375f;
+    }
+}
+
 static DomElement* create_marker_element(LayoutContext* lycon, DomElement* parent_elem,
                                          CssEnum marker_style, float font_size,
                                          float image_default_size, float image_gap,
@@ -508,48 +564,9 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
         (!list_parent || !layout_is_html_list_container_tag(list_parent->tag_id));
     refresh_marker_image(lycon, marker_prop, image, marker_css_content != nullptr);
 
-    if (marker_css_content) {
-        // ::marker { content: ... } overrides list-style-type
-        radiant_retain_marker_text_content(marker_prop, lam::promote_to_pool(lycon->pool, marker_css_content));
-        marker_prop->marker_type = CSS_VALUE_DECIMAL;  // force text rendering
-    } else if (is_string_marker && !marker_prop->is_image_marker && !marker_prop->loaded_image) {
-        // CSS Lists 3 §4.1: use the string directly as marker content
-        radiant_retain_marker_text_content(marker_prop, lam::promote_to_pool(lycon->pool, string_marker));
-    } else if (!is_bullet_marker && !marker_prop->is_image_marker && !marker_prop->loaded_image) {
-        char marker_text[64];
-        int marker_len = counter_format(lycon->counter_context, "list-item", marker_style, marker_text, sizeof(marker_text));
-        if (marker_len > 0 && marker_len + 2 < (int)sizeof(marker_text)) {
-            marker_text[marker_len] = '.';
-            marker_text[marker_len + 1] = ' ';
-            marker_text[marker_len + 2] = '\0';
-            marker_len += 2;
-
-            radiant_retain_marker_text_content(marker_prop, lam::promote_to_pool(lycon->pool, marker_text));
-        }
-    }
-    if (!marker_prop->has_explicit_content && !is_string_marker &&
-        marker_prop->text_content && font_handle) {
-        size_t marker_length = strlen(marker_prop->text_content);
-        if (marker_length > 0 && marker_prop->text_content[marker_length - 1] == ' ') {
-            TextExtents space = font_measure_text(font_handle, " ", 1);
-            marker_prop->trailing_space_width = space.width;
-        }
-    }
-    // CSS Lists 3 §4.2: compute marker width from content
-    // For text markers, measure actual text width; for bullets, use fixed bullet size + padding
-    if (!set_marker_image_geometry(parent_elem, marker_prop, image_default_size,
-                                   image_gap, effective_zoom) &&
-        marker_prop->text_content && font_handle) {
-        TextExtents extents = font_measure_text(font_handle, marker_prop->text_content,
-                                                 (int)strlen(marker_prop->text_content)); // INT_CAST_OK: string length
-        marker_prop->width = extents.width;
-    } else if (!marker_prop->loaded_image && is_bullet_marker) {
-        marker_prop->width = list_marker_bullet_inline_size(
-            font_size, is_outside, marker_prop->reserves_first_line);
-    } else if (!marker_prop->loaded_image && !marker_prop->is_image_marker) {
-        // fallback: use em-based estimate
-        marker_prop->width = font_size * 1.375f;
-    }
+    refresh_marker_content(lycon, parent_elem, marker_prop, marker_style, font_size,
+        image_default_size, image_gap, effective_zoom, is_bullet_marker, is_outside,
+        is_string_marker, string_marker, marker_css_content, font_handle);
     marker_elem->view_type = RDT_VIEW_MARKER;
     marker_elem->set_marker_prop(marker_prop);
 
@@ -568,25 +585,20 @@ void layout_apply_list_item_counter(LayoutContext* lycon, ViewBlock* block,
             parent_reversed = true;
         }
     }
-    // Handle <li value="N"> attribute: sets counter to N before increment
-    if (dom_elem && dom_elem->tag_id == MARKUP_NAME_LI) {
-        const char* value_attr = dom_elem->get_attribute("value");
-        if (value_attr) {
-            int li_value = atoi(value_attr);
-            // CSS Lists 3: li[value] acts as counter-set: list-item <value>
-            // Set to value±1 so auto-increment brings it to value
-            int set_value = parent_reversed ? li_value + 1 : li_value - 1;
-            char set_spec[64];
-            snprintf(set_spec, sizeof(set_spec), "list-item %d", set_value);
-            counter_set(lycon->counter_context, set_spec);
-        }
-    }
-    // CSS Lists 3 §4.5: auto-increment list-item only if the element
-    // does NOT already have an explicit counter-increment for list-item
+    // CSS Lists 3 §4.5: implicit increments precede counter-set and the HTML value hint.
     bool explicit_list_item_inc = (block->blk && block->block_mut()->counter_increment &&
                                    strstr(block->block()->counter_increment, "list-item") != nullptr);
     if (!explicit_list_item_inc) {
         counter_increment(lycon->counter_context, parent_reversed ? "list-item -1" : "list-item 1");
+    }
+    if (dom_elem && dom_elem->tag_id == MARKUP_NAME_LI) {
+        const char* value_attr = dom_elem->get_attribute("value");
+        if (value_attr) {
+            int li_value = atoi(value_attr);
+            char set_spec[64];
+            snprintf(set_spec, sizeof(set_spec), "list-item %d", li_value);
+            counter_set(lycon->counter_context, set_spec);
+        }
     }
 }
 
@@ -729,15 +741,10 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
         marker_prop->has_explicit_content = marker_css_content != nullptr;
         refresh_marker_image(lycon, marker_prop, image, marker_css_content != nullptr);
         marker_prop->is_outside = is_outside_position;
-        if (!set_marker_image_geometry(parent_elem, marker_prop, image_default_size,
-                                       image_gap, effective_zoom) && is_bullet_marker) {
-            // Marker placement and its inline reservation form one retained
-            // invariant; switching inside/outside must refresh both values.
-            marker_prop->bullet_size = marker_font_size * 0.35f;
-            marker_prop->width = list_marker_bullet_inline_size(
-                marker_font_size, is_outside_position,
-                marker_prop->reserves_first_line);
-        }
+        marker_prop->bullet_size = marker_font_size * 0.35f;
+        refresh_marker_content(lycon, parent_elem, marker_prop, marker_style, marker_font_size,
+            image_default_size, image_gap, effective_zoom, is_bullet_marker, is_outside_position,
+            is_string_marker, string_marker, marker_css_content, marker_font_handle);
     }
 
     if (!block->pseudo->marker_generated) {
@@ -805,9 +812,10 @@ bool LayoutCounterScope::enter(LayoutContext* lycon, ViewSpan* span,
                 compute_reversed_counter_initial(lycon, element);
             }
             if (span->block()->counter_increment) counter_increment(context, span->block()->counter_increment);
-            if (span->block()->counter_set) counter_set(context, span->block()->counter_set);
         }
         if (list_item) layout_apply_list_item_counter(lycon, block, element);
+        // author counter-set overrides the HTML value presentational hint.
+        if (span->blk && span->block()->counter_set) counter_set(context, span->block()->counter_set);
         // named strings and target counters take the element's own operations
         if (lycon->paged && element) paged_element_enter(lycon, element);
     }

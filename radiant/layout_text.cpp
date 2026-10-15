@@ -2172,6 +2172,7 @@ static void apply_line_initial_letter_exclusions(
 }
 
 void line_reset(LayoutContext* lycon) {
+    lycon->line.has_native_metrics = false;
     lycon->line.max_ascender = lycon->line.max_descender =
         lycon->line.max_css_baseline_ascender = 0;
     lycon->line.ruby_annotation_min_line_height =
@@ -2591,8 +2592,10 @@ void line_break(LayoutContext* lycon, bool forced_break) {
         contribute_block_root_strut(lycon);
     }
     finalize_non_rendered_table_markers_for_line(lycon);
+    if (lycon->paged) paged_line_metrics(lycon);
     // CSS 2.1 §10.8.1: The strut is a zero-width inline box with the block's font
-    if (lycon->line.max_ascender > lycon->block.init_ascender ||
+    if (lycon->line.has_native_metrics ||
+        lycon->line.max_ascender > lycon->block.init_ascender ||
         lycon->line.max_descender > lycon->block.init_descender ||
         lycon->line.has_different_inline_font ||
         lycon->line.has_replaced_content ||
@@ -2810,6 +2813,8 @@ void line_break(LayoutContext* lycon, bool forced_break) {
         used_line_height = max(used_line_height, lycon->line.max_atomic_inline_height);
     }
 
+    if (lycon->line.has_native_metrics)
+        used_line_height = lycon->line.max_ascender + lycon->line.max_descender;
     layout_finalize_static_line_self_alignment(lycon, used_line_height);
 
     // a page flow moves a line that would cross its fragmentainer end to the next one

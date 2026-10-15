@@ -251,6 +251,8 @@ static TypesetStatus paged_style_traits_admit(PagedComposition* composition, con
         return paged_failure(composition, TYPESET_INVALID, style->source, 0, style->image_spec->reason);
     if (style->label_body && style->label_body->status != VIEW_MODEL_OK)
         return paged_failure(composition, TYPESET_INVALID, style->source, 0, style->label_body->reason);
+    if (style->page_query && style->page_query->status != VIEW_MODEL_OK)
+        return paged_failure(composition, TYPESET_INVALID, style->source, 0, style->page_query->reason);
     return TYPESET_OK;
 }
 
@@ -981,6 +983,12 @@ static TypesetStatus paged_flow_fail(PagedFlowState* state, TypesetStatus status
     if (state->status == TYPESET_OK) state->status = status;
     return paged_failure(state->composition, status, source,
         state->composer.page ? state->composer.page->page_number : 0, reason);
+}
+
+static TypesetStatus paged_source_traits_admit(PagedFlowState* state, DomElement* source) {
+    if (source->is_synthetic()) return TYPESET_OK;
+    const ViewCssStyle* style = view_css_resolve(state->tree, source);
+    return style ? paged_style_traits_admit(state->composition, style) : TYPESET_OUT_OF_MEMORY;
 }
 
 const CssValue* paged_resolve_css_value(LayoutContext* lycon, DomElement* element,
@@ -2553,15 +2561,21 @@ static void paged_table_after(PagedFlowState* state, LayoutContext* lycon, ViewB
 // the page of the first content after it, as the item engine bound a mark to
 // the page its first item reached (CSS GCPM 3 §1.1, §2.1).
 
-static PagedMarkSource* paged_flow_mark(PagedFlowState* state, DomNode* source, bool create) {
-    HashMap* sources = state->composition->mark_sources;
+static PagedMarkSource* paged_source_mark(PagedComposition* composition, DomNode* source, bool create) {
+    HashMap* sources = composition->mark_sources;
     PagedMarkSource key = {}; key.source = source;
     PagedMarkSource* mark = (PagedMarkSource*)hashmap_get(sources, &key);
     if (mark || !create) return mark;
     key.assigned_at = SIZE_MAX;
     hashmap_set(sources, &key);
-    if (hashmap_oom(sources)) { paged_flow_fail(state, TYPESET_OUT_OF_MEMORY, source, nullptr); return nullptr; }
+    if (hashmap_oom(sources)) return nullptr;
     return (PagedMarkSource*)hashmap_get(sources, &key);
+}
+
+static PagedMarkSource* paged_flow_mark(PagedFlowState* state, DomNode* source, bool create) {
+    PagedMarkSource* mark = paged_source_mark(state->composition, source, create);
+    if (!mark && create) paged_flow_fail(state, TYPESET_OUT_OF_MEMORY, source, nullptr);
+    return mark;
 }
 
 // a content function that failed stops the pass with its precise diagnostic
@@ -2748,9 +2762,18 @@ static void paged_flow_running(PagedFlowState* state, DomElement* element, const
 static const char* paged_folio_text(PagedFlowState* state, DomElement* folio, const ViewPageBox* page) {
     PagedComposition* composition = state->composition;
     PagedReferenceSession* references = composition->references;
+    TypesetStatus admitted = paged_source_traits_admit(state, folio);
+    if (admitted != TYPESET_OK) { state->status = admitted; return ""; }
+    if (state->tree->model->environment.presentation != VIEW_PRESENTATION_PAGED) {
+        paged_flow_fail(state, TYPESET_INVALID, folio, "folio queries require paged presentation"); return "";
+    }
     if (radiant_page_element(folio, "folio")) {
-        if (page) return page->label ? page->label.get() : "";
+        if (page && page->label) return page->label;
         composition->reference_used = true; composition->reference_source = dom_node_ref(folio);
+        // notes measure before the current pass's page counters; converge using
+        // the preceding label rather than measuring an empty query as zero height.
+        if (page && references && page->page_number <= references->page_label_count)
+            return references->page_labels[page->page_number - 1];
         for (size_t i = 0; references && i < references->folio_count; i++) {
             uint32_t number = references->folios[i].page;
             if (references->folios[i].folio == folio && number && number <= references->page_label_count)
@@ -2761,11 +2784,18 @@ static const char* paged_folio_text(PagedFlowState* state, DomElement* folio, co
     composition->reference_used = true; composition->reference_source = dom_node_ref(folio);
     const char* id = folio->get_attribute("ref-id");
     const TypesetTarget* target = id && references ? typeset_target_find(&references->targets, id) : nullptr;
+    if (!target) {
+        paged_flow_fail(state, TYPESET_INVALID, folio, "folio reference target has no page area"); return "";
+    }
     const PagedTargetValue* value = target ? (const PagedTargetValue*)target->binding.get() : nullptr;
     const char* edge = folio->get_attribute("edge");
     const char* area = folio->get_attribute("area");
     size_t areas = area && !strcmp(area, "normal") ? RADIANT_QUERY_NORMAL : area && !strcmp(area, "non-blank") ? RADIANT_QUERY_NON_BLANK : RADIANT_QUERY_ALL;
     const char* text = value ? value->labels[areas][edge && !strcmp(edge, "last")] : nullptr;
+    // repeated static regions have selected areas without a normal-flow page_number.
+    if (!text && references->pass > 1) {
+        paged_flow_fail(state, TYPESET_INVALID, folio, "folio reference target has no page area"); return "";
+    }
     return text ? text : "0";
 }
 
@@ -2947,6 +2977,7 @@ static void paged_flow_anchor(PagedFlowState* state, LayoutContext* lycon, DomEl
                 log_debug("[PAGED_FLOW] float-defer of %s is not applied; the float stays with its anchor", element->source_loc());
         }
         // a page float's containing block is its page area or column (CSS Page Floats 3 §4)
+        paged_folios_fill(state, element, state->fragmentainers[index].page);
         anchor.height = paged_detached_layout(state, lycon, element, anchor.width,
             kind == PAGED_ANCHOR_NOTE ? NAN : state->fragmentainers[index].rect.height);
         anchor.full_height = anchor.height;
@@ -3101,6 +3132,48 @@ void paged_line_start(LayoutContext* lycon, ViewBlock* block) {
     float content = fmaxf(0.0f, lycon->block.content_width + width->lines[line] - width->containing_width);
     lycon->line.right = lycon->line.align_right = lycon->line.left + content;
     lycon->line.effective_right = lycon->line.right;
+}
+
+void paged_line_metrics(LayoutContext* lycon) {
+    PagedFlowState* state = lycon->paged;
+    ViewBlock* block = lycon->line.start_view ? paged_flow_parent_block(lycon->line.start_view) : nullptr;
+    if (!block || state->status != TYPESET_OK) return;
+    const ViewCssStyle* style = view_css_resolve(state->tree, block);
+    const RadiantFlowTraits* traits = style ? style->flow_traits.get() : nullptr;
+    if (!traits || (!traits->line_stacking_set &&
+        !traits->text_metrics_set[0] && !traits->text_metrics_set[1])) return;
+    float altitude, depth;
+    if (!radiant_text_metrics(style, &altitude, &depth)) return;
+    // XSL stacking separates raw allocation from signed leading; font-height
+    // deliberately permits replaced content to overflow a zero-height line.
+    float leading = (lycon->block.strut_line_height - altitude - depth) * 0.5f;
+    bool expanded = traits->line_stacking == RADIANT_LINE_STACK_CSS;
+    float ascent = altitude + (expanded ? leading : 0.0f);
+    float descent = depth + (expanded ? leading : 0.0f);
+    if (traits->line_stacking != RADIANT_LINE_STACK_FONT) {
+        ascent = fmaxf(ascent, lycon->line.max_atomic_inline_height);
+        auto contribute = [&](View* view) {
+            if (view->view_type != RDT_VIEW_TEXT) return false;
+            ViewText* text = lam::view_require_text(view);
+            bool on_line = false;
+            for (TextRect* rect = text->rect; rect; rect = rect->next)
+                on_line |= rect->line_number == lycon->block.line_number && rect->width > 0.0f;
+            if (!on_line) return false;
+            const ViewCssStyle* owner = text->parent && text->parent->is_element()
+                ? view_css_resolve(state->tree, text->parent->as_element()) : nullptr;
+            float above, below;
+            if (radiant_text_metrics(owner, &above, &below)) {
+                float own_leading = expanded ? (owner->line_height - above - below) * 0.5f : 0.0f;
+                above += own_leading; below += own_leading;
+                ascent = fmaxf(ascent, above); descent = fmaxf(descent, below);
+            }
+            return false;
+        };
+        layout_walk_inline_views(block->first_placed_child(), contribute, [](View*) {});
+    }
+    lycon->line.has_native_metrics = true;
+    lycon->line.max_ascender = ascent + (expanded ? 0.0f : leading);
+    lycon->line.max_descender = descent + (expanded ? 0.0f : leading);
 }
 
 static TypesetStatus paged_flow_widths_capture(PagedFlowState* state) {
@@ -3334,12 +3407,8 @@ void paged_block_before(LayoutContext* lycon, ViewBlock* block, BlockContext* pa
     if (state->outside || state->status != TYPESET_OK || !paged_flow_block(block) || !paged_flow_fragmentable(lycon, block)) return;
     // reject invalid native traits before the CSS workspace approximates them as ordinary layout properties.
     // anonymous table fixups have no DOM identity or authored native traits to admit.
-    if (!block->is_synthetic()) {
-        const ViewCssStyle* style = view_css_resolve(state->tree, block);
-        if (!style) { paged_flow_fail(state, TYPESET_OUT_OF_MEMORY, block, nullptr); return; }
-        TypesetStatus admitted = paged_style_traits_admit(state->composition, style);
-        if (admitted != TYPESET_OK) { state->status = admitted; return; }
-    }
+    TypesetStatus admitted = paged_source_traits_admit(state, block);
+    if (admitted != TYPESET_OK) { state->status = admitted; return; }
     if (!lam::pool_grow_array(state->composition->pool, &state->open_struts, &state->open_capacity,
         (size_t)lycon->depth + 1, 32)) { paged_flow_fail(state, TYPESET_OUT_OF_MEMORY, block, nullptr); return; }
     state->open_struts[lycon->depth] = state->strut_count;
@@ -3545,6 +3614,19 @@ bool paged_flow_skips_element(LayoutContext* lycon, DomElement* element) {
     return true;
 }
 
+static void paged_flow_opening(PagedFlowState* state) {
+    PagedPageCursor* composer = &state->composer;
+    composer->page_name = nullptr; composer->sequence = nullptr;
+    const RadiantPageSequence* opening = state->tree->model->css->page_document->sequences;
+    if (opening && !opening->implicit) { composer->sequence = opening; composer->page_name = opening->master_reference; }
+    for (DomElement* element = state->tree->model->document->root; element && !composer->page_name; ) {
+        composer->page_name = paged_flow_page_name(state, element);
+        DomNode* child = element->first_child;
+        while (child && !child->is_element()) child = child->next_sibling;
+        element = child ? child->as_element() : nullptr;
+    }
+}
+
 bool paged_flow_pass_begin(LayoutContext* lycon) {
     PagedFlowState* state = lycon->paged;
     if (state->pass && state->composition->diagnostic.container_passes >= state->composition->options.max_container_passes) {
@@ -3566,7 +3648,9 @@ bool paged_flow_pass_begin(LayoutContext* lycon) {
     // the hooks record the pass's mark sources again
     hashmap_clear(state->composition->mark_sources, false);
     PagedPageCursor* composer = &state->composer;
-    composer->page = nullptr; composer->page_name = nullptr; composer->sequence = nullptr;
+    composer->page = nullptr;
+    // restarting a condition pass must retain the opening master chosen for the viewport.
+    paged_flow_opening(state);
     composer->requested_break = VIEW_BREAK_AUTO; composer->column_index = 0;
     state->pass = view_tree_model_checkpoint(state->tree);
     if (!state->pass) { state->status = TYPESET_OUT_OF_MEMORY; return false; }
@@ -4031,9 +4115,7 @@ static TypesetStatus paged_publish_children(PagedFlowState* state, ViewElement* 
         // inline/replaced and table-internal sources bypass the block admission hook.
         // validate them after layout has settled its DOM epoch, before publishing an edition.
         if (node->is_element() && !node->as_element()->is_synthetic()) {
-            const ViewCssStyle* style = view_css_resolve(state->tree, node->as_element());
-            if (!style) return TYPESET_OUT_OF_MEMORY;
-            TypesetStatus admitted = paged_style_traits_admit(state->composition, style);
+            TypesetStatus admitted = paged_source_traits_admit(state, node->as_element());
             if (admitted != TYPESET_OK) return admitted;
             // native documents require their graphic resource; a failed load must not publish an empty area.
             if (node->as_element()->tag() == MARKUP_NAME_IMG &&
@@ -4454,6 +4536,9 @@ static TypesetStatus paged_publish_fixed(PagedFlowState* state, LayoutContext* l
 static TypesetStatus paged_flow_publish(PagedFlowState* state, LayoutContext* lycon) {
     ViewBlock* root = paged_flow_root(state);
     if (!root) return paged_flow_fail(state, TYPESET_INVALID, nullptr, "the page flow produced no root box");
+    // the root does not pass through the child block or inline admission hooks.
+    TypesetStatus admitted = paged_source_traits_admit(state, root);
+    if (admitted != TYPESET_OK) return admitted;
     // the body ends above the footnotes and page floats placed on each
     // fragmentainer, and its top floats move it down (plan P5)
     for (size_t i = 0; i < state->fragmentainer_count; i++) {
@@ -4683,6 +4768,8 @@ static TypesetStatus paged_margin_layout(PagedFlowState* state, LayoutContext* l
             if (mark) {
                 if (!mark->value || mark->value->provider != tree->model->tree_id) return TYPESET_STALE;
                 elements[i] = ((const PagedRunningRecord*)mark->value.get())->element;
+                // each occurrence measures its own page label before intrinsic sizing.
+                paged_folios_fill(state, elements[i], page);
             }
             continue;
         }
@@ -5006,17 +5093,9 @@ static TypesetStatus paged_flow_pass(ViewTree* tree, PagedComposition* compositi
     ViewModelCheckpoint* edition = view_tree_model_checkpoint(tree);
     if (!edition) return TYPESET_OUT_OF_MEMORY;
     PagedPageCursor* composer = &state->composer;
-    // a native document opens with its first page sequence and that sequence's master
-    const RadiantPageSequence* opening = tree->model->css->page_document->sequences;
-    if (opening && !opening->implicit) { composer->sequence = opening; composer->page_name = opening->master_reference; }
     // the first page's body geometry is the flow's viewport; its page name comes
     // from the first flow content so an opening named page needs no restyle
-    for (DomElement* element = document->root; element && !composer->page_name; ) {
-        composer->page_name = paged_flow_page_name(state, element);
-        DomNode* child = element->first_child;
-        while (child && !child->is_element()) child = child->next_sibling;
-        element = child ? child->as_element() : nullptr;
-    }
+    paged_flow_opening(state);
     RdtLogicalRect first = {0.0f, 0.0f, tree->model->environment.viewport_width, tree->model->environment.viewport_height};
     TypesetStatus status = TYPESET_OK;
     if (tree->model->environment.presentation == VIEW_PRESENTATION_PAGED) {
@@ -5139,17 +5218,20 @@ static void paged_target_area_range(uint32_t (*pages)[2], uint32_t page, bool no
     }
 }
 
-static void paged_target_area_enter(PagedComposition* composition, DomNode* source,
+static bool paged_target_area_enter(PagedComposition* composition, DomNode* source,
         uint32_t page, bool normal, bool blank) {
     for (DomNode* node = source; node; node = node->parent) {
-        PagedMarkSource key = {}; key.source = node;
-        PagedMarkSource* mark = (PagedMarkSource*)hashmap_get(composition->mark_sources, &key);
+        // static/auxiliary layout need not execute a counter scope to own target areas.
+        bool target = node->is_element() && node->as_element()->id && *node->as_element()->id;
+        PagedMarkSource* mark = paged_source_mark(composition, node, target);
+        if (target && !mark) return false;
         if (!mark) continue;
         paged_target_area_range(mark->generated_pages, page, normal, blank);
     }
+    return true;
 }
 
-static void paged_target_areas_capture(ViewTree* tree) {
+static TypesetStatus paged_target_areas_capture(ViewTree* tree) {
     PagedComposition* composition = tree->model->composition;
     // aggregate committed occurrences once; descendants and repeated/out-of-line areas retain their source ancestry.
     for (size_t i = 0; i < tree->model->node_id_count; i++) {
@@ -5169,13 +5251,16 @@ static void paged_target_areas_capture(ViewTree* tree) {
             for (LayoutViewNode* owner = node->parent; owner && owner->kind != LAYOUT_VIEW_PAGE; owner = owner->parent)
                 if (owner->source.address) { area_source = owner->source.address; break; }
         }
-        paged_target_area_enter(composition, area_source, ((ViewPageBox*)parent)->page_number, normal, false);
+        if (!paged_target_area_enter(composition, area_source, ((ViewPageBox*)parent)->page_number, normal, false))
+            return TYPESET_OUT_OF_MEMORY;
     }
     for (size_t i = 0; i < tree->model->page_count; i++) {
         const ViewPageBox* page = tree->model->pages.get()[i];
-        if (page->blank && page->sequence)
-            paged_target_area_enter(composition, page->sequence->source.address, page->page_number, false, true);
+        if (page->blank && page->sequence &&
+            !paged_target_area_enter(composition, page->sequence->source.address, page->page_number, false, true))
+            return TYPESET_OUT_OF_MEMORY;
     }
+    return TYPESET_OK;
 }
 
 // the text a pseudo-element of the page flow generated in its layout
@@ -5188,7 +5273,8 @@ static const char* paged_flow_pseudo_text(Pool* pool, DomElement* element, bool 
 }
 
 static TypesetStatus paged_targets_capture(ViewTree* tree, PagedReferenceSession* session) {
-    paged_target_areas_capture(tree);
+    TypesetStatus captured = paged_target_areas_capture(tree);
+    if (captured != TYPESET_OK) return captured;
     session->page_label_count = tree->model->page_count;
     session->page_labels = (const char**)pool_calloc(session->pool, session->page_label_count * sizeof(const char*));
     if (session->page_label_count && !session->page_labels) return TYPESET_OUT_OF_MEMORY;

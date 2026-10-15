@@ -52,6 +52,7 @@ struct RadiantFlowTraits {
     lam::Up<const CssValue> indent_expressions[2]; // percentages retain their declaring reference area
     lam::Up<const ViewCssStyle> indent_owners[2];
     RadiantLineStacking line_stacking;
+    bool line_stacking_set;
     float text_metrics[2]; // altitude, depth
     bool text_metrics_set[2];
     ViewModelStatus status;
@@ -78,7 +79,7 @@ bool radiant_whitespace_trait_name(const char* name);
 // presentational hints, below the element's own CSS. XSL whitespace traits become
 // white-space, keeps break avoidance, spaces block margins and retained border or
 // padding at breaks box-decoration-break: clone
-void radiant_native_hints_declare(DomElement* element);
+void radiant_native_hints_declare(LayoutContext* lycon, DomElement* element);
 // native traits that act on an element's resolved box: a block with reference inline
 // geometry places its content edges at its start and end indents from the reference
 // area, its border and padding outside them (XSL 1.1 §5.3.2), so its margins become

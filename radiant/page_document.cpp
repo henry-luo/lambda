@@ -529,8 +529,9 @@ static const char* page_label_body_value(DomElement* table, bool separation) {
     return separation ? "6pt" : "24pt";
 }
 
-void radiant_native_hints_declare(DomElement* element) {
-    if (!element || !element->doc || !radiant_page_element(element->doc->root, "page-document")) return;
+void radiant_native_hints_declare(LayoutContext* lycon, DomElement* element) {
+    // HTML page flows admit the same namespaced traits as native page documents.
+    if (!element || !element->doc || (!lycon->paged && !radiant_page_element(element->doc->root, "page-document"))) return;
     const char* properties[8]; const char* values[8]; size_t count = 0;
     // XSL 1.1 §7.16: collapse, line feeds and wrapping combine into one white-space value
     bool declared = false;
@@ -615,7 +616,7 @@ static float page_native_length(LayoutContext* lycon, CssPropertyCode property, 
 }
 
 void radiant_native_resolved(LayoutContext* lycon, DomElement* element) {
-    if (!element || !element->doc || !radiant_page_element(element->doc->root, "page-document")) return;
+    if (!element || !element->doc || (!lycon->paged && !radiant_page_element(element->doc->root, "page-document"))) return;
     ViewBlock* block = lam::view_as_block((View*)element);
     if (!block) return;
     if (DomElement* table = lycon->paged ? nullptr : page_label_grid(element)) {
@@ -788,7 +789,7 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
         (space ? spaces[index][component] : keeps[index][component]) = value; return true;
     });
     const RadiantFlowTraits* inherited_traits = style->parent ? style->parent->flow_traits.get() : nullptr;
-    if (!any && (!inherited_traits || (inherited_traits->line_stacking == RADIANT_LINE_STACK_CSS &&
+    if (!any && (!inherited_traits || (!inherited_traits->line_stacking_set &&
         inherited_traits->indents[0] == 0.0f && inherited_traits->indents[1] == 0.0f &&
         !inherited_traits->indent_expressions[0] && !inherited_traits->indent_expressions[1]))) return true;
     RadiantFlowTraits* traits = (RadiantFlowTraits*)pool_calloc(tree->model->css->pool, sizeof(RadiantFlowTraits));
@@ -797,6 +798,7 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
     RadiantFlowTraits empty = {};
     const RadiantFlowTraits* parent = style->parent && style->parent->flow_traits ? style->parent->flow_traits.get() : &empty;
     traits->line_stacking = parent->line_stacking;
+    traits->line_stacking_set = line_stacking || parent->line_stacking_set;
     for (size_t i = 0; i < 2; i++) {
         traits->indents[i] = parent->indents[i];
         traits->indent_expressions[i] = parent->indent_expressions[i];
@@ -1532,7 +1534,9 @@ bool radiant_page_query_resolve(ViewTree* tree, ViewCssStyle* style) {
     if (!query) return false;
     style->page_query = lam::up(query);
     auto fail = [&](const char* reason) { query->status = VIEW_MODEL_INVALID_ARGUMENT; query->reason = reason; return true; };
-    if (style->source->first_child) return fail("page query must be empty");
+    // generated workspace text is retained between convergence passes.
+    for (DomNode* child = style->source->first_child; child; child = child->next_sibling)
+        if (!child->is_element() || !child->as_element()->is_synthetic()) return fail("page query must be empty");
     if (current) query->edge = RADIANT_QUERY_CURRENT;
     else {
         query->edge = RADIANT_QUERY_FIRST;
