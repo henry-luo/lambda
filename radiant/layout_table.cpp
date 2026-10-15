@@ -2282,6 +2282,10 @@ static int table_positive_span_attr(ViewElement* element) {
 static float table_resolve_fixed_explicit_size(LayoutContext* lycon, ViewTable* table,
                                                LayoutAxis axis) {
     if (!lycon || !table) return 0.0f;
+    // style resolution already used the containing block; table layout's available
+    // space has since lost this table's edges and cannot resolve its percentage again.
+    float given = table->blk ? layout_axis_given_size(table->block(), axis) : -1.0f;
+    if (given > 0.0f) return given;
     CssPropertyCode property = axis == LAYOUT_AXIS_X
         ? CSS_PROPERTY_WIDTH : CSS_PROPERTY_HEIGHT;
     float explicit_size = 0.0f;
@@ -2302,10 +2306,6 @@ static float table_resolve_fixed_explicit_size(LayoutContext* lycon, ViewTable* 
             explicit_size = resolve_length_value(lycon, property, value);
         }
     }
-    if (explicit_size <= 0.0f && table->blk) {
-        float given = layout_axis_given_size(table->block(), axis);
-        if (given > 0.0f) explicit_size = given;
-    }
     return explicit_size;
 }
 
@@ -2316,11 +2316,8 @@ static float table_fixed_content_width_for_columns(ViewTable* table,
     bool fixed_width_is_border_box = table->tb->border_collapse ||
         layout_uses_border_box(table);
     if (fixed_width_is_border_box) {
-        float table_border_h = 0.0f;
-        if (table->bound && table->boundary_mut()->border) {
-            table_border_h = layout_box_metrics(table).border_h;
-        }
-        content_width -= table_border_h;
+        BoxMetrics box = layout_box_metrics(table);
+        content_width -= table->tb->border_collapse ? box.border_h : box.pad_border_h;
     }
     // fixed-layout column percentages resolve against content tracks, not table border or spacing overhead.
     float column_spacing = table_inter_spacing(table, true);
@@ -4675,6 +4672,9 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
                 }
             }
             LayoutContextScope lscope(lycon);
+            LayoutCounterScope counter_scope;
+            if (!counter_scope.enter(lycon, caption, dom_elem, caption->display)) return;
+            layout_materialize_pseudo_content(lycon, caption);
             float caption_width = lycon->line.right - lycon->line.left;
             if (caption_width <= 0) caption_width = 600;
             float content_width = caption_width;
@@ -5015,6 +5015,19 @@ static bool table_caption_is_bottom(ViewBlock* caption) {
         return false;
     }
     return false;
+}
+
+RdtLogicalRect layout_table_grid_rect(const ViewTable* table) {
+    if (!table) return {};
+    float top = 0.0f, bottom = table->height;
+    for (DomNode* child = table->first_child; child; child = child->next_sibling) {
+        if (!child->is_element() || !child->view_type || !table_view_is_caption(lam::view_require_block((View*)child))) continue;
+        ViewBlock* caption = lam::view_require_block((View*)child);
+        if (table_caption_is_bottom(caption))
+            bottom = fminf(bottom, caption->y - table_caption_positive_margin(caption, false, true));
+        else top = fmaxf(top, caption->y + caption->height + table_caption_positive_margin(caption, false, false));
+    }
+    return {0.0f, top, table->width, fmaxf(0.0f, bottom - top)};
 }
 
 template <typename Fn>
@@ -6823,7 +6836,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (table_box.padding.bottom > 0) grid_height += table_box.padding.bottom;
             }
             float bottom_caption_height = table_position_caption_stack(
-                lycon, table, bottom_captions, grid_height, table_width, table_width,
+                lycon, table, bottom_captions, top_caption_height + grid_height, table_width, table_width,
                 TABLE_CAPTION_WIDTH_REFERENCE_WRAPPER);
             float total_height = top_caption_height + grid_height + bottom_caption_height;
             table->width = table_width;
@@ -7115,6 +7128,17 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (table->tb->table_layout == TableProp::TABLE_LAYOUT_FIXED) {
         float fixed_explicit_width = table_resolve_fixed_explicit_size(
             lycon, table, LAYOUT_AXIS_X);
+        // caption min-content constrains the wrapper even under fixed layout;
+        // convert its track contribution back to the table's authored sizing box.
+        if (fixed_explicit_width > 0.0f) {
+            float caption_minimum = 0.0f;
+            for_each_table_caption(captions, [&](ViewBlock* caption, int) {
+                caption_minimum = fmaxf(caption_minimum, table_measure_caption_width_contribution(lycon, table, caption));
+            });
+            if (table->tb->border_collapse || layout_uses_border_box(table))
+                caption_minimum += layout_box_metrics(table).pad_border_h;
+            fixed_explicit_width = fmaxf(fixed_explicit_width, caption_minimum);
+        }
         fixed_table_width = fixed_explicit_width;
       if (fixed_explicit_width > 0) {
         float content_width = table_fixed_content_width_for_columns(
@@ -7577,8 +7601,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
     // Position captions at bottom if caption-side is bottom (CSS 2.1 Section 17.4.1)
     if (bottom_captions->length > 0) {
+        // the grid's closing border precedes the bottom captions, outside their boxes (CSS 2.2 §17.4).
+        float closing_border = table->tb->border_collapse
+            ? max(meta->collapsed_border_bottom, table_box.border.bottom) * 0.5f : table_box.border.bottom;
         float total_bottom_caption_height = table_position_caption_stack(
-            lycon, table, bottom_captions, final_table_height, table_width, wrapper_content_width,
+            lycon, table, bottom_captions, final_table_height + closing_border, table_width, wrapper_content_width,
             TABLE_CAPTION_WIDTH_REFERENCE_WRAPPER);
         final_table_height += total_bottom_caption_height;
     }

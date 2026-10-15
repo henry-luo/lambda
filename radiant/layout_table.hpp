@@ -1,7 +1,10 @@
 #pragma once
 #include <stddef.h>
+#include "scale.hpp"
 struct DomElement;
 struct CollapsedBorder;
+struct ViewTable;
+RdtLogicalRect layout_table_grid_rect(const ViewTable* table);
 
 size_t layout_table_cell_colspan(DomElement* element);
 size_t layout_table_column_span(DomElement* element);

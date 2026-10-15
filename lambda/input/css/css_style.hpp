@@ -883,6 +883,11 @@ typedef enum CssPropertyCode {
     CSS_PROPERTY_WEBKIT_BOX_ORIENT,
     CSS_PROPERTY_HYPHENATE_LIMIT_CHARS,
 
+    // page-flow metadata must have distinct keys in the shared cascade.
+    CSS_PROPERTY_PAGE,
+    CSS_PROPERTY_STRING_SET,
+    CSS_PROPERTY_FOOTNOTE_POLICY,
+
     // Custom Properties (CSS Variables)
     CSS_PROPERTY_CUSTOM,
 

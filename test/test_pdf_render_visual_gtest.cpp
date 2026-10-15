@@ -1118,6 +1118,43 @@ static void expect_preview_pixel(const ImageData& image, int x, int y, uint8_t r
     EXPECT_EQ(pixel[0], r); EXPECT_EQ(pixel[1], g); EXPECT_EQ(pixel[2], b);
 }
 
+TEST(RenderOutputParity, PagedFlowRichBoundaryPaintMatchesContinuousOutputs) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    const char* html = "<!doctype html><style>@page{size:300px 160px;margin:0}"
+        "html,body,div{margin:0}div{width:100px;height:20px}"
+        "#gradient{background:linear-gradient(to right,red,blue)}"
+        "#image{background:url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAIAAADZF8uwAAAAFUlEQVR4nGP4z8BAEBFWMapoABQBAPuQj3FCf3VbAAAAAElFTkSuQmCC') 0 0/12px 12px repeat}"
+        "#layers{background:linear-gradient(to right,cyan,blue),linear-gradient(lime,yellow);"
+        "background-size:50px 10px,100px 20px;background-repeat:no-repeat}"
+        "#border{border:4px solid;border-image:linear-gradient(red,blue) 1}"
+        "table{width:100px;border:2px solid blue;padding:1px;border-spacing:0;background:magenta}"
+        "caption{height:8px;background:yellow}caption.bottom{caption-side:bottom;background:lime}"
+        "td{height:8px;padding:0}"
+        "</style><div id='gradient'></div><div id='image'></div><div id='layers'></div><div id='border'></div>"
+        "<table><caption></caption><caption class='bottom'></caption><tr><td></td></tr></table>";
+    const char* path = "temp/render_output_parity/paged_rich_paint.html";
+    const char* pngs[] = {"temp/render_output_parity/paged_rich_paint.png", "temp/render_output_parity/flat_rich_paint.png"};
+    ASSERT_TRUE(render_html_fixture(path, pngs[0], html, "--paged --page-grid 1x1"));
+    ASSERT_TRUE(render_document_fixture(path, pngs[1], "-vw 300 -vh 160"));
+    expect_pngs_exactly_equal(pngs[1], pngs[0]);
+    for (const char* format : {"svg", "pdf"}) {
+        char outputs[2][PATH_MAX], rasters[2][PATH_MAX];
+        for (size_t variant = 0; variant < 2; variant++) {
+            snprintf(outputs[variant], sizeof(outputs[variant]), "temp/render_output_parity/%s_rich_paint.%s", variant ? "flat" : "paged", format);
+            snprintf(rasters[variant], sizeof(rasters[variant]), "temp/render_output_parity/%s_rich_%s.png", variant ? "flat" : "paged", format);
+            ASSERT_TRUE(render_document_fixture(path, outputs[variant], variant ? "-vw 300 -vh 160" : "--paged --page-grid 1x1"));
+            if (!strcmp(format, "pdf")) ASSERT_TRUE(rasterize_fixture_pdf(outputs[variant], rasters[variant]));
+            else {
+                char command[PATH_MAX * 2 + 64];
+                // flat SVG adds export padding; compare the physical page at its original scale.
+                snprintf(command, sizeof(command), "rsvg-convert --page-width 300 --page-height 160 -o %s %s", rasters[variant], outputs[variant]);
+                ASSERT_EQ(run_command_capture(command).exit_code, 0);
+            }
+        }
+        expect_pngs_exactly_equal(rasters[1], rasters[0]);
+    }
+}
+
 TEST(RenderOutputParity, PagedTablesRepeatGroupsAndSplitCellsInPdfAndPreview) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const char* html_path = "temp/render_output_parity/paged_tables.html";

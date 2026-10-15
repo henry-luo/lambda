@@ -3148,6 +3148,7 @@ LAM_NODE_OF(LayoutFragmentBox, NodeViewTree);
 // The document's ViewTree shell lives in the document's pool; the document owns
 // it across retained layout resets.
 lam::Own<ViewTree> view_tree_shell_create(DomDocument* doc);
+void view_pool_reset_retained_subtree(ViewTree* tree, DomNode* root);
 // Destroys the tree's storage and releases the shell into `doc`'s pool; clears the field.
 void view_tree_shell_destroy(DomDocument* doc, lam::Own<ViewTree>& tree);
 LAM_NODE_OF(RadiantBorderSide, NodeStack);
