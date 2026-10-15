@@ -102,6 +102,7 @@ extern "C" bool radiant_eval_context_switch(EvalContext* target);
 // Re-apply selector-dependent style and schedule layout after a live pseudo
 // state changes outside the native pointer dispatcher (for example JS .checked).
 void radiant_sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set);
+void radiant_sync_focus_style(View* view, uint32_t changed_flags);
 
 // F8/ES19: the behavior init phase. Runs between layout and rendering, and is
 // positioned rather than gated on paint — a headless run that never renders

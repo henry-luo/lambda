@@ -129,6 +129,16 @@
     {
       "type": "click",
       "target": {
+        "selector": "[data-ebook-command=settings]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "click",
+      "target": {
         "selector": "[data-ebook-command=theme]"
       }
     },
@@ -169,6 +179,16 @@
         "selector": ".ebook-status"
       },
       "equals": "1 / 2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=find]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
     },
     {
       "type": "click",

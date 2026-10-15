@@ -1842,6 +1842,9 @@ external resources are excluded.
 Open a book with `lambda view book.epub`. The reader provides chapter/page
 controls, internal links, history, contents, bookmarks, search, font size and
 family, line spacing, margins, publisher-style selection and three themes.
+A compact toolbar opens search and the **Aa** reading-settings panel; chapter
+and page controls stay in the footer. Contents highlight the current chapter,
+and the sidebar can be toggled on narrow windows. Enter submits a book search.
 Reflowable chapters support scrolling and generated column pages. Fixed-layout
 XHTML/SVG pages retain a required source viewport and support fit/zoom.
 Selecting EPUB in the file browser opens the same reader; its Source tab shows

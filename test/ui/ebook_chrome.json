@@ -1,0 +1,216 @@
+{
+  "name": "EPUB chrome panels, current chapter and narrow viewport",
+  "html": "test/ui/ebook_reader.ls",
+  "viewport": {
+    "width": 1100,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".ebook-settings"
+      },
+      "visible": false
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".ebook-search-panel"
+      },
+      "visible": false
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".ebook-sidebar button[aria-current=location]"
+      },
+      "min": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=settings]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".ebook-settings"
+      },
+      "visible": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=settings]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".ebook-settings"
+      },
+      "visible": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=find]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": ".ebook-query"
+      }
+    },
+    {
+      "type": "assert_caret",
+      "visible": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": ".ebook-query"
+      },
+      "text": "passage"
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".ebook-results button"
+      },
+      "min": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=find]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=contents]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".ebook-sidebar"
+      },
+      "visible": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=contents]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".ebook-sidebar"
+      },
+      "visible": true
+    },
+    {
+      "type": "resize",
+      "width": 500,
+      "height": 700
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=contents]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".ebook-sidebar"
+      },
+      "visible": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=settings]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_visible",
+      "target": {
+        "selector": ".ebook-settings"
+      },
+      "visible": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=theme]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".ebook-reader"
+      },
+      "property": "background-color",
+      "equals": "rgb(238, 229, 212)"
+    }
+  ]
+}

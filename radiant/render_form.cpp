@@ -140,23 +140,6 @@ static void stroke_circle(RasterRenderContext* rdcon, float cx, float cy, float 
     rdt_path_free(p);
 }
 
-static void draw_rect_focus_ring(RasterRenderContext* rdcon, float x, float y,
-                                 float w, float h, float scale) {
-    float ring = 2.0f * scale;
-    Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
-    float rx = x - ring, ry = y - ring;
-    float rw = w + 2 * ring, rh = h + 2 * ring;
-    RdtPath* p = rdt_path_new();
-    rdt_path_move_to(p, rx, ry);
-    rdt_path_line_to(p, rx + rw, ry);
-    rdt_path_line_to(p, rx + rw, ry + rh);
-    rdt_path_line_to(p, rx, ry + rh);
-    rdt_path_close(p);
-    rc_stroke_path(rdcon, p, ring_color, ring,
-                   RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
-    rdt_path_free(p);
-}
-
 // Helper to draw a 3D border effect (inset or outset)
 static void draw_3d_border(RasterRenderContext* rdcon, float x, float y, float w, float h,
                            bool inset, float border_width) {
@@ -888,11 +871,6 @@ static void render_checkbox(RasterRenderContext* rdcon, ViewBlock* block, FormCo
         rdt_path_free(p);
     }
 
-    // Focus ring — a 2px outset blue rectangle (matches our text-input
-    // focus indicator and gives Tab navigation a visible target).
-    if (form_control_has_focus(&fc, block)) {
-        draw_rect_focus_ring(rdcon, x, y, size, size, s);
-    }
 
 }
 
@@ -934,12 +912,6 @@ static void render_radio(RasterRenderContext* rdcon, ViewBlock* block, FormContr
         fill_circle(rdcon, cx, cy, dot_radius, dot_color);
     }
 
-    // Focus ring (see render_checkbox).
-    if (form_control_has_focus(&fc, block)) {
-        float ring = 2.0f * s;
-        Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
-        stroke_circle(rdcon, cx, cy, radius + ring, ring_color, ring);
-    }
 
 }
 
@@ -993,10 +965,6 @@ static void render_button(RasterRenderContext* rdcon, ViewBlock* block, FormCont
         render_simple_string(rdcon, label_text, text_x, text_y, block->font, text_color);
     }
 
-    // Focus ring (Tab navigation indicator).
-    if (form_control_has_focus(&fc, block)) {
-        draw_rect_focus_ring(rdcon, x, y, w, h, s);
-    }
 
 }
 
@@ -1045,9 +1013,6 @@ static void render_file_input(RasterRenderContext* rdcon, ViewBlock* block,
             fc.x + button_width + 4.0f * fc.s,
             fc.y + (fc.h - block->font->font_size * fc.s) * 0.5f,
             block->font, form_text_color(block, form, false));
-    }
-    if (form_control_has_focus(&fc, block)) {
-        draw_rect_focus_ring(rdcon, fc.x, fc.y, fc.w, fc.h, fc.s);
     }
 }
 
@@ -1714,15 +1679,12 @@ void render_form_control(RasterRenderContext* rdcon, ViewBlock* block) {
 
     FormControlProp* form = block->form;
 
-    // Primitive controls keep their CSS box and focus indicator; native
-    // glyphs, tracks and thumbs must not cover author-painted contents.
+    // CSS paints focus outlines through the cascade, including appearance:none.
+    // Native glyphs, tracks and thumbs must not cover author-painted contents.
     if (form->appearance_none &&
         (form->control_type == FORM_CONTROL_CHECKBOX ||
          form->control_type == FORM_CONTROL_RADIO ||
          form->control_type == FORM_CONTROL_RANGE)) {
-        FormControlBox fc = form_control_box(rdcon, block);
-        if (form_control_has_focus(&fc, block))
-            draw_rect_focus_ring(rdcon, fc.x, fc.y, fc.w, fc.h, fc.s);
         return;
     }
 

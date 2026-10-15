@@ -51,6 +51,10 @@ void radiant_sync_pseudo_state(View*, uint32_t, bool) {
     // this standalone target has no cascade; native UI fixtures check popup restyling.
 }
 
+void radiant_sync_focus_style(View*, uint32_t) {
+    // this standalone target has no cascade; native UI fixtures check focus restyling.
+}
+
 extern "C" void heap_register_gc_root(uint64_t* slot) {
     (void)slot;
     // This pool-backed state-store target omits lambda-rt and never compacts;

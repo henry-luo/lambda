@@ -10005,6 +10005,9 @@ static bool css_rule_is_self_color_background_hover(CssRule* rule,
 static bool document_has_pseudo_state_rules(DomDocument* doc,
                                             uint32_t pseudo_state) {
     if (!doc) return false;
+    CssStylesheet* defaults = doc->services.ua_focus_stylesheet;
+    for (size_t i = 0; defaults && i < defaults->rule_count; i++)
+        if (css_rule_uses_pseudo_state(defaults->rules[i], pseudo_state)) return true;
     for (int i = 0; i < doc->stylesheet_count; i++) {
         CssStylesheet* stylesheet = doc->stylesheets ? doc->stylesheets[i] : NULL;
         if (!stylesheet || stylesheet->disabled) continue;
@@ -10289,6 +10292,17 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
 
 void radiant_sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
     sync_pseudo_state(view, pseudo_flag, set);
+}
+
+void radiant_sync_focus_style(View* view, uint32_t changed_flags) {
+    DomElement* element = view && view->is_element() ? view->as_element() : nullptr;
+    DomDocument* doc = element ? element->doc.get() : nullptr;
+    DocState* state = doc ? doc->state : nullptr;
+    // Recascade once after the canonical focus and its ancestry flags have settled.
+    pseudo_state_batch_begin(state);
+    const uint32_t flags[] = {PSEUDO_STATE_FOCUS, PSEUDO_STATE_FOCUS_VISIBLE, PSEUDO_STATE_FOCUS_WITHIN};
+    for (uint32_t flag : flags) if (changed_flags & flag) sync_pseudo_state(view, flag, true);
+    pseudo_state_batch_end(doc, state);
 }
 
 // Resolve the owning document from any view, including non-element views

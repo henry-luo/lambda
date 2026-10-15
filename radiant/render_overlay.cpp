@@ -16,41 +16,6 @@ typedef struct SelectionPaintCtx {
     float          iframe_offset_y;
 } SelectionPaintCtx;
 
-static void render_focus_outline(RasterRenderContext* rdcon, DocState* state) {
-    View* focused = focus_get_visible(state);
-    if (!focused) return;
-    if (focused->view_type != RDT_VIEW_BLOCK) return;
-
-    ViewBlock* block = lam::view_require_block(focused);
-    float s = rdcon->raster_scale;
-
-    RdtLogicalPoint origin = view_geometry_local_to_block_document(
-        static_cast<View*>(block), {block->x, block->y});
-    float x = origin.x;
-    float y = origin.y;
-    float width = block->width;
-    float height = block->height;
-
-    x *= s;  y *= s;
-    width *= s;  height *= s;
-
-    float outline_offset = 2.0f * s;
-    float outline_width = 2.0f * s;
-    float ox = x - outline_offset;
-    float oy = y - outline_offset;
-    float ow = width + outline_offset * 2;
-    float oh = height + outline_offset * 2;
-
-    RdtPath* path = rdt_path_new();
-    rdt_path_add_rect(path, ox, oy, ow, oh, 0, 0);
-    float dash_pattern[] = {4.0f * s, 2.0f * s};
-    Color focus_color = {0};
-    focus_color.r = 0x00; focus_color.g = 0x5F; focus_color.b = 0xCC; focus_color.a = 0xFF;
-    rc_stroke_path(rdcon, path, focus_color, outline_width, RDT_CAP_BUTT, RDT_JOIN_MITER,
-        dash_pattern, 2, nullptr);
-    rdt_path_free(path);
-}
-
 static void render_caret(RasterRenderContext* rdcon, DocState* state) {
     View* view = NULL;
     int caret_offset = 0;
@@ -296,5 +261,4 @@ void render_ui_overlays(RasterRenderContext* rdcon, DocState* state) {
     }
 
     render_caret(rdcon, state);
-    render_focus_outline(rdcon, state);
 }

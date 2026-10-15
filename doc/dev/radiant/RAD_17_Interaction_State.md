@@ -1,6 +1,6 @@
 # Radiant — Interaction State: DocState, State Machine & Schema
 
-> **Last verified against tree:** 2026-07-15 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-10-15 *(focus styling and caret presentation below; other sections retain their prior verification scope)*
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's per-document interaction/UI-state layer: the one big mutable `DocState` struct that holds every piece of live presentation state (focus/hover/active, selection/caret, IME, drag-drop, dropdown and context-menu overlays, form-control values, scroll, dirty/reflow tracking, and the Lambda reactive-template reconciliation maps); the `state_set` primitive that backs generic per-node flags; and the *stateless* state machine + declarative schema that wrap direct mutation with a validation/invariant/logging boundary. It is emphatically **not** a Redux/signals store and **not** a persistence/undo store — it models interaction, while selection rendering derives logical boundaries from canonical selection state.
 >
@@ -50,6 +50,26 @@ Beyond the reactive map, `DocState` embeds a large collection of typed sub-state
 `ViewState` (`event.hpp`) deserves emphasis: it is a bit-packed union, so a given view is *either* a scroll surface *or* a form control, never carrying both payloads — the `ViewStateKind` discriminant (`VIEW_STATE_SCROLL`/`VIEW_STATE_FORM_CONTROL`, `event.hpp`) selects the arm. This is what lets pseudo-class reads (`view_state_get_hovered`, `event.hpp`) and form-value reads stay allocation-free on the common path. `SelectionPresentation` stores only `float` caret/range geometry, blink state, iframe offsets, and the previous paint rectangle; anchor/focus nodes and offsets are always derived from `DomSelection` + `EditingSelection` ([RAD_18 — Editing, Selection & DOM Ranges](RAD_18_Editing_Selection_Ranges.md)).
 
 The interned pseudo-class and form state names, plus the `CHANGE_*` reflow-reason bitmask, are defined in `event.hpp`.
+
+**Focus and caret presentation (2026-10-15).** Once focus and its ancestry
+flags settle, `radiant_sync_focus_style` batches CSS recascading for `:focus`,
+`:focus-visible`, and `:focus-within`. Keyboard focus and text-entry surfaces
+indicate focus; ordinary pointer-focused controls do not acquire a forced
+outline. The UA `:focus-visible` rule participates at user-agent origin and is
+excluded from CSSOM's authored stylesheet list. Author outline declarations,
+including `outline:none`, override it through the ordinary cascade.
+
+`caret_is_visible` and the render/debug snapshot derive insertion-caret
+visibility from the canonical collapsed selection, the focused editing owner,
+and the shared editing-surface lookup (D7.2.5). Ordinary document text retains
+Selection boundaries for dragging/copying without painting a caret. Readonly
+or disabled controls, noneditable islands, and blurred editors suppress the
+insertion caret. The native `browser_focus_caret` UI fixture covers these
+cases, empty editing hosts, authored outlines, and keyboard navigation.
+`browser_inline_focus` checks actual outline pixels on links and suppression
+on keyboard-focused controls. The browser model follows
+[Selectors 4 §9.4](https://www.w3.org/TR/selectors-4/#the-focus-visible-pseudo)
+and [CSS UI outlines](https://www.w3.org/TR/css-ui-4/#outline).
 
 ---
 

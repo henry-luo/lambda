@@ -46,6 +46,16 @@
     {
       "type": "click",
       "target": {
+        "selector": "[data-ebook-command=settings]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "click",
+      "target": {
         "selector": "[data-ebook-command=zoom-in]"
       }
     },

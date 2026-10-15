@@ -201,6 +201,8 @@ struct SimEvent {
     bool expected_is_collapsed;  // for assertions
     bool check_dom_selection;    // for assert_selection: also verify DomSelection (renderer source)
     bool negate_view_type;       // for assert_caret: assert view_type != expected_view_type
+    bool check_caret_visible;    // optional assert_caret visibility, separate from Selection boundaries
+    bool expected_caret_visible;
     float scroll_dx, scroll_dy;  // scroll offsets
     float device_scale;          // set_device_scale target ratio
     char* message;               // for log events

@@ -261,6 +261,7 @@ struct ReconcileLog {
 struct DomDocumentServices {
     void* mem_ctx;
     void* cached_css_engine;
+    lam::Up<CssStylesheet> ua_focus_stylesheet; // document-pool UA rules, excluded from CSSOM styleSheets
     void* keyframe_registry;
     void* registered_property_set; // document-owned CSS.registerProperty definitions
     uint32_t element_count;
@@ -279,7 +280,7 @@ struct DomDocumentServices {
     lam::Own<char> protocol_language;  // document-owned single Content-Language response value
     bool svg_image_document; // SVG image processing forbids external subordinate resources
 
-    DomDocumentServices() : mem_ctx(nullptr), cached_css_engine(nullptr),
+    DomDocumentServices() : mem_ctx(nullptr), cached_css_engine(nullptr), ua_focus_stylesheet(nullptr),
         keyframe_registry(nullptr), registered_property_set(nullptr), element_count(0), ext_allocations(0),
         layout_cache_allocations(0), node_registry(nullptr),
         style_epoch_manager(nullptr), scene3d_registry(nullptr), canvas_registry(nullptr),

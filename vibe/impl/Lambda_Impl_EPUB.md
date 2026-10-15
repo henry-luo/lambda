@@ -73,6 +73,67 @@ Native integration fixes are shared with ordinary iframes:
   literal percent escapes survive navigation. Resolving an anchor updates the
   source locator before subsequent readiness/resize restores it.
 
+## Reader presentation revision
+
+The reader chrome now uses a compact icon toolbar, a scoped neutral palette,
+a book/contents sidebar with current-chapter indicators, a separate search
+panel and **Aa** reading settings, and footer navigation. Controls have labels
+and tooltips, unavailable chapter/history actions are disabled, and chrome
+follows the selected light/sepia/dark theme. Narrow windows collapse the sidebar;
+its contents toggle restores it. Search receives focus and Enter submits it.
+Settings remain ordinary view/handler policy (D7.2.4, D7.2.5, S12.1.3).
+
+Radiant focus is painted through CSS, including a UA `:focus-visible` rule
+that author outline declarations override. Focus transitions now refresh
+matching focus selectors. Native form rings and the unconditional focus overlay
+are removed. Only a collapsed selection in the focused, editable surface
+paints an insertion caret; ordinary reading text, readonly/disabled fields,
+noneditable islands and blurred editors do not. Drag selection/copying retains
+its canonical DOM boundaries (D7.2.5). `assert_caret` can now check visibility
+independently of those boundaries. Browser behavior references and the shared
+mechanism are documented in [RAD_17](../../doc/dev/radiant/RAD_17_Interaction_State.md#3-the-data-model).
+
+## Presentation follow-up verification (2026-10-15)
+
+The presentation revision builds in the main checkout. All **19 EPUB/DOCX
+package tests**, **81 focused reader/focus UI assertions** across nine fixtures,
+the three-process persistence workflow, and Radiant's dimension/cast lint pass.
+The new focus fixtures exercise ordinary text selection, editable inputs and
+textareas, readonly fields, noneditable islands, blur, empty editing hosts,
+author outlines, keyboard focus, and actual pixels for inline outlines and
+`outline:none`. Search-panel focus, Enter submission, settings/sidebar toggles,
+current-chapter indicators, and narrow-window chrome have native UI coverage.
+
+The full Radiant gate completed at **5,253 passing, 153 partial, 8 failures and
+1 skipped**. It passes 156/156 DOM UI, 201/201 native view, 109/109 page-load,
+116/116 CSS animation/ownership, the unchanged CSS cascade memory budgets,
+and all 32 selected WPT input-event baseline files (20 pass; 12 known skips).
+Log: `temp/epub-polish-radiant-qualified.log`. Focus restyles are batched after
+selection ownership settles and only for changed pseudo-states. UA focus rules
+are parsed alongside stylesheet inputs and cascaded together with author rules;
+nonfocusable blocks retain their clean-layout reuse. No WPT harness or memory
+budget was changed.
+
+The final inline-painter connection was then checked with the complete explicit
+UI baseline invocation (**494/498**, four existing editor preview failures),
+the render baseline (**206 passing, 4 partial, 1 failing, 1 skipped**), and the
+81 focused assertions. Logs: `temp/epub-polish-ui-last.log`,
+`temp/epub-polish-render-last.log`, and `temp/epub-polish-inline.log`.
+Three context-menu goldens change only the text-control `focus-visible` flag and
+its focus presentation field. Other expected results remain unchanged.
+
+Seven remaining full-gate failures were already reproduced on the clean
+pre-EPUB base: the view-reuse/table-caption crash, four editor previews, and
+the WPT text/Markdown layout groups. The eighth is `bg_image_01`: its inline
+PNG's compressed payload fails zlib checksum validation, and the current image
+pipeline paints no image. The earlier validation binary renders it and passes
+the reference check (`temp/epub-polish-bg-base.log`). This revision changes no
+image decoder. The previous Lambda forced-GC timeout below remains unresolved;
+this presentation-only follow-up does not rerun the full Lambda gate.
+
+Desktop, settings and narrow-window native captures are under
+`temp/epub-polish-{reader,settings,narrow}.png`.
+
 ## Verification
 
 Validation runs in `temp/epub-validation`, detached at `e7e133727` with the EPUB

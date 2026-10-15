@@ -2759,6 +2759,8 @@ bool layout_html_ua_element_default(NameId tag, HtmlUaElementDefault* result);
 bool layout_html_ua_list_nesting_ancestor(NameId tag);
 CssEnum layout_html_ua_list_marker(NameId tag, size_t unordered_ancestors);
 struct StrBuf;
+const char* layout_html_ua_focus_css();
+CssStylesheet* radiant_ua_focus_stylesheet(DomDocument* doc, CssEngine* engine);
 bool layout_html_ua_stylesheet(StrBuf* css);
 // Chromium CheckForGenericFamilyChange: a medium-lineage size that switches to monospace scales by 13/16.
 void layout_apply_monospace_medium_size(FontProp* font, const FontProp* parent);

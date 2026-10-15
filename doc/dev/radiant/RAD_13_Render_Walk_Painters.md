@@ -4,6 +4,7 @@
 > **PDF migration verified:** 2026-10-15 (Lambda generator and native save adapter; qualification evidence in `vibe/impl/Lambda_Impl_PDF_Output_Phase2.md` §14).
 
 > **Software Gaussian blur verified:** 2026-10-13 (§6 amendment).
+> **Focus presentation verified:** 2026-10-15 (§4 CSS outlines and editable-only carets).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers how a laid-out view tree becomes output. One shared tree walk (`render_walk.cpp`) traverses the tree exactly once and dispatches every drawing decision through a `RenderBackend` vtable; each output target (raster window/PNG/JPEG, PDF, SVG) supplies its own callback set. It describes the walker (z-order, effect groups, transforms), the raster record→lower→replay pipeline, the per-feature painters (`render_bound` and its background/border/shadow/text/image/clip/effect/filter/composite kin), the PDF backend, capability gating, output targets, and the profiler. The *IR machinery itself* — PaintIR shape, the DisplayList, record/replay internals — is [RAD_12](RAD_12_Paint_IR_Display_List.md)'s job; this doc is the walk, the painters, and the export seams.
 >
@@ -104,6 +105,13 @@ Positioned and positive-z children have their own raster entry points (`render_r
 6. `render_border` — or, for `border-collapse` table cells, resolved collapsed edges filled directly via `rc_fill_surface_rect` centered on cell edges per CSS 2.1 §17.6.2 (`render_block.cpp:240-292`, entry `render_border.cpp:533`).
 
 Outlines are painted **separately and later** by `render_outline_deferred` (`render_block.cpp:303`, entry `render_outline` at `render_border.cpp:837`), invoked after children so an outline is not overdrawn by descendants; `render_block_deferred_child_outlines` (`render_block.cpp:525`) walks child blocks for their deferred outlines.
+
+Focus indicators use this same CSS outline path. Native form painters and the
+UI overlay no longer add independent blue rings; inline links share the deferred
+outline painter. UA `:focus-visible` defaults
+and author rules share cascade, clipping, and export behavior. Insertion-caret
+paint reads the editable-only visibility projection described in
+[RAD_17](RAD_17_Interaction_State.md#3-the-data-model) (D7.2.5).
 
 <img alt="render_bound painter order for a box" src="diagram/rad13_render_bound_order.svg" width="490">
 

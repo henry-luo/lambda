@@ -34,7 +34,7 @@ def workflow():
             assert json.loads(result.read_text())['assertions']['failed'] == 0
         wait = {'type':'wait','ms':200}
         status = lambda text: {'type':'assert_text','target':{'selector':'.ebook-status'},'equals':text}
-        check('save',book,[click('next'),wait,click('bookmark'),click('larger'),wait,
+        check('save',book,[click('next'),wait,click('bookmark'),click('settings'),wait,click('larger'),wait,
             click('theme'),wait,click('mode'),wait,status('2 / 2')])
         state = work / 'state' / f'{identity}.json'
         saved = json.loads(state.read_text())

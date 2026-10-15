@@ -1,0 +1,71 @@
+{
+  "name": "CSS paints inline outlines and suppresses native focus rings",
+  "html": "test/ui/browser_inline_focus.html",
+  "viewport": {
+    "width": 500,
+    "height": 200
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#link"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#link"
+      },
+      "property": "outline-style",
+      "equals": "solid"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#link",
+        "offset_x": -5,
+        "offset_y": 8
+      },
+      "min_r": 35,
+      "max_r": 42,
+      "min_g": 108,
+      "max_g": 116,
+      "min_b": 88,
+      "max_b": 96
+    },
+    {
+      "type": "assert_caret",
+      "visible": false
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#suppressed"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#suppressed"
+      },
+      "property": "outline-style",
+      "equals": "none"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#suppressed",
+        "offset_x": -2,
+        "offset_y": 8
+      },
+      "min_r": 247,
+      "min_g": 247,
+      "min_b": 247
+    }
+  ]
+}

@@ -1681,10 +1681,11 @@ static bool serialize_outline(const CssPropAccessor* accessor, DomElement* eleme
     OutlineProp* outline = element->boundary() ? element->boundary()->outline : nullptr;
     if (!outline) {
         if (accessor->id == CSS_PROPERTY_OUTLINE_STYLE) return copy_text(out, "none");
-        if (accessor->id == CSS_PROPERTY_OUTLINE_WIDTH) return copy_text(out, "0px");
+        if (accessor->id == CSS_PROPERTY_OUTLINE_WIDTH || accessor->id == CSS_PROPERTY_OUTLINE_OFFSET) return copy_text(out, "0px");
         return copy_text(out, "rgba(0, 0, 0, 0)");
     }
     if (accessor->id == CSS_PROPERTY_OUTLINE_STYLE) {
+        if (outline->style == CSS_VALUE__UNDEF) return copy_text(out, "none");
         const CssEnumInfo* info = css_enum_info(outline->style);
         return copy_text(out, info && info->name ? info->name : "none");
     }
@@ -1694,6 +1695,7 @@ static bool serialize_outline(const CssPropAccessor* accessor, DomElement* eleme
     if (accessor->id == CSS_PROPERTY_OUTLINE_COLOR) {
         return format_color(out, outline->color);
     }
+    if (accessor->id == CSS_PROPERTY_OUTLINE_OFFSET) return format_number(out, outline->offset, "px");
     return false;
 }
 
@@ -1915,6 +1917,8 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DERIVED_ROW(CSS_PROPERTY_OUTLINE_WIDTH, serialize_outline,
                 CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_OUTLINE_COLOR, serialize_outline,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_OUTLINE_OFFSET, serialize_outline,
                 CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_COLOR, serialize_color_prop, 0),
     DIRECT_ROW(CSS_PROPERTY_OPACITY, PROP_GROUP_INLINE, InlineProp, opacity, CSS_PROP_VALUE_NUMBER, 0),

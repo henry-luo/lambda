@@ -1584,6 +1584,8 @@ CssStylesheet** extract_and_collect_css(Element* html_root, DomElement* dom_root
 
     DomDocument* document = dom_root ? dom_root->doc : nullptr;
     CssSourceScope source_scope(document);
+    // Parse UA rules with stylesheet inputs; cascade passes borrow the retained rule tree.
+    if (document) radiant_ua_focus_stylesheet(document, engine);
 
     // Start script transfer only after stylesheet bytes are ready. This lets
     // CSS parsing overlap script I/O without delaying the first cascade.

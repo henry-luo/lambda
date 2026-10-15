@@ -5,12 +5,49 @@ import chapters: .chapter
 import locations: .location
 import store: .state
 
-pub let stylesheet = ".ebook-reader{height:100vh;display:flex;flex-direction:column;font:15px system-ui,sans-serif;background:#f4f1eb;color:#202b37}.ebook-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px;background:#fff;border-bottom:1px solid #ccc}.ebook-toolbar button{padding:7px 12px}.ebook-workspace{display:flex;flex:1;min-height:0}.ebook-sidebar{width:220px;overflow:auto;padding:16px;border-right:1px solid #ccc}.ebook-sidebar button{display:block;text-align:left;border:0;background:transparent;padding:7px;color:#31526d;cursor:pointer}.ebook-sidebar ol{padding-left:18px}.ebook-content{flex:1;min-width:0;display:flex;flex-direction:column}.ebook-frame{width:100%;flex:1;min-height:200px;border:0;background:white}.ebook-status{padding:8px 16px;border-top:1px solid #ccc}.ebook-title{font-weight:600;margin-right:auto}.ebook-results{max-height:140px;overflow:auto}.ebook-results button{display:block;background:white;border:0;padding:8px;text-align:left}.ebook-notices{padding:6px 16px;color:#774522;font-size:13px}.ebook-query{width:160px}"
+// Scoped chrome keeps publication styles inside the chapter document.
+pub let stylesheet = "
+.ebook-reader{--ebook-bg:#f5f4f0;--ebook-panel:#ffffff;--ebook-text:#25332f;--ebook-muted:#77817b;--ebook-line:#e4e7e2;--ebook-hover:#eef2ee;--ebook-accent:#26705c;height:100vh;display:flex;flex-direction:column;overflow:hidden;font:14px system-ui,sans-serif;background:var(--ebook-bg);color:var(--ebook-text)}
+.ebook-reader[data-theme=sepia]{--ebook-bg:#eee5d4;--ebook-panel:#faf4e8;--ebook-text:#493f32;--ebook-muted:#887b67;--ebook-line:#e4d9c5;--ebook-hover:#eee5d4}
+.ebook-reader[data-theme=dark]{--ebook-bg:#161e1b;--ebook-panel:#202b26;--ebook-text:#e4eae5;--ebook-muted:#a0afa5;--ebook-line:#35433b;--ebook-hover:#303e36;--ebook-accent:#8ccbb0}
+.ebook-reader *{box-sizing:border-box}.ebook-reader button,.ebook-reader input{font:inherit;color:inherit}
+.ebook-reader button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;padding:7px 10px;border:1px solid transparent;border-radius:7px;background:transparent;line-height:1.2;cursor:pointer}
+.ebook-reader button:hover{background:var(--ebook-hover)}.ebook-reader button:disabled{opacity:.35;cursor:default}
+.ebook-reader button:focus-visible,.ebook-reader input:focus-visible{outline:2px solid var(--ebook-accent);outline-offset:2px}
+.ebook-reader button[aria-pressed=true]{background:var(--ebook-hover);color:var(--ebook-accent)}
+.ebook-icon{width:18px;height:18px;flex-shrink:0}.ebook-toolbar{display:flex;align-items:center;gap:10px;min-height:64px;padding:12px 20px;background:var(--ebook-panel);border-bottom:1px solid var(--ebook-line)}
+.ebook-history{display:flex;gap:2px;padding-right:12px;border-right:1px solid var(--ebook-line)}.ebook-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;font-weight:600}
+.ebook-toolbar .ebook-icon-button{width:36px;padding:8px}.ebook-settings-toggle{font-family:Georgia,serif!important;font-size:19px!important}
+.ebook-settings,.ebook-search-panel{display:none;flex-shrink:0;padding:18px 24px;background:var(--ebook-panel);border-bottom:1px solid var(--ebook-line)}
+.ebook-settings[data-open=true]{display:flex;flex-wrap:wrap;gap:20px 32px}.ebook-search-panel[data-open=true]{display:flex;align-items:center;gap:10px}
+.ebook-setting-group{display:flex;flex-direction:column;gap:8px}.ebook-setting-label{font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--ebook-muted)}.ebook-setting-controls{display:flex;align-items:center;gap:4px}.ebook-settings button{border-color:var(--ebook-line);background:var(--ebook-panel);font-size:13px}
+.ebook-query{flex:1;min-width:0;max-width:500px;height:36px;padding:8px 12px;border:1px solid var(--ebook-line);border-radius:7px;background:var(--ebook-bg)}.ebook-search-panel [data-ebook-command=search]{background:var(--ebook-accent);color:var(--ebook-panel)}
+.ebook-workspace{display:flex;flex:1;min-height:0}.ebook-sidebar{flex-shrink:0;width:244px;overflow:auto;padding:24px 16px;background:var(--ebook-panel);border-right:1px solid var(--ebook-line)}
+.ebook-reader[data-sidebar=closed] .ebook-sidebar{display:none}.ebook-book{display:flex;align-items:center;gap:12px;padding:0 8px 24px}.ebook-cover{width:44px;height:62px;object-fit:contain;background:var(--ebook-bg);border:1px solid var(--ebook-line);border-radius:4px}.ebook-book-title{font-size:14px;font-weight:600;line-height:1.4}.ebook-author{margin:5px 0 0;font-size:12px;color:var(--ebook-muted)}
+.ebook-sidebar h3{margin:20px 10px 10px;font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--ebook-muted)}.ebook-sidebar ol{list-style:none;margin:0;padding:0}.ebook-sidebar ol ol{padding-left:12px}.ebook-sidebar li{margin:3px 0}
+.ebook-sidebar button{display:flex;width:100%;justify-content:flex-start;text-align:left;padding:10px 12px;font-size:13px;line-height:1.4}.ebook-sidebar button[aria-current=location]{background:var(--ebook-hover);color:var(--ebook-accent);font-weight:600}.ebook-sidebar li>span{display:block;padding:10px 12px}
+.ebook-bookmarks:empty::after{content:'Your saved places appear here.';display:block;padding:4px 12px;color:var(--ebook-muted);font-size:12px;line-height:1.5}
+.ebook-content{flex:1;min-width:0;display:flex;flex-direction:column;margin:24px 28px;background:var(--ebook-panel);border:1px solid var(--ebook-line);border-radius:8px;overflow:hidden;box-shadow:0 3px 16px #20352908}
+.ebook-frame{display:block;width:100%;flex:1;min-height:120px;border:0;background:var(--ebook-panel)}.ebook-results{max-height:170px;overflow:auto}.ebook-results:empty{display:none}.ebook-results button{display:flex;width:100%;justify-content:flex-start;text-align:left;border-radius:0;padding:12px 20px;border-bottom:1px solid var(--ebook-line)}
+.ebook-notices{padding:10px 20px;color:var(--ebook-muted);font-size:12px;border-top:1px solid var(--ebook-line)}.ebook-notices:empty{display:none}
+.ebook-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:52px;padding:8px 20px;background:var(--ebook-panel);border-top:1px solid var(--ebook-line)}.ebook-chapter-controls,.ebook-page-controls{display:flex;align-items:center;gap:4px}.ebook-progress{display:flex;align-items:center;gap:16px;font-size:12px;color:var(--ebook-muted)}.ebook-footer button{font-size:12px;min-height:30px}.ebook-page-controls button{width:32px;padding:5px}
+@media(max-width:760px){.ebook-toolbar{padding:10px 12px;gap:6px}.ebook-history{padding-right:6px}.ebook-sidebar{width:200px;padding:16px 10px}.ebook-content{margin:12px}.ebook-footer{padding:8px 12px;gap:6px}.ebook-footer .ebook-chapter-controls button{font-size:0;gap:0;padding:5px}.ebook-progress{gap:8px}.ebook-settings{padding:14px 16px;gap:16px}.ebook-title{font-size:14px}}
+@media(max-width:540px){.ebook-sidebar{display:none}.ebook-reader[data-sidebar=open] .ebook-sidebar{display:block;width:180px}.ebook-history{display:none}.ebook-content{margin:8px}.ebook-progress{font-size:11px}}
+"
 
+let icons = {back:"M14 6l-6 6 6 6",forward:"M10 6l6 6-6 6",contents:"M4 5h16M4 12h16M4 19h16",
+    search:"M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",bookmark:"M6 3h12v18l-6-4-6 4z",
+    previous:"M5 5v14M18 6l-7 6 7 6",next:"M19 5v14M6 6l7 6-7 6"}
+fn button(command,label,icon = null) => <button type:"button",class:if (icon == null) "" else "ebook-icon-button",
+    title:label,["aria-label"]:label,["data-ebook-command"]:command,
+    if (icon == null) label else <svg class:"ebook-icon",viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",
+        ["stroke-width"]:"1.7",["stroke-linecap"]:"round",["stroke-linejoin"]:"round",["aria-hidden"]:"true",
+        <path d:icons[icon]>>>
 fn contents(nodes) => <ol *[for (node in nodes) <li
     if (node.target != null) <button type:"button",["data-ebook-command"]:"go",
         ["data-ebook-href"]:node.target.href,["data-ebook-fragment"]:c.value(node.target.fragment,""),node.label>
     else <span node.label> if (len(node.children) > 0) contents(node.children)>]>
+
 fn cycle(current,values) {
     let index = c.first([for (i,value in values where value == current) i]);
     values[(c.value(index,0)+1)%len(values)]
@@ -37,32 +74,36 @@ fn tree(book,saved,chapter) element^ {
     let index = chapter.occurrence
     let cover = if (book.metadata.cover == null) null else
         chapters.resource(book,book.metadata.cover.href) ^ { null };
-    <div class:"ebook-reader",tabindex:"0",role:"region",["aria-label"]:"eBook reader",
+    <div class:"ebook-reader",tabindex:"0",role:"region",["aria-label"]:"eBook reader",["data-theme"]:saved.preferences.theme,
         <header class:"ebook-toolbar",
+            button("contents","Toggle contents","contents");
+            <div class:"ebook-history",button("back","Go back","back"); button("forward","Go forward","forward")>
             <span class:"ebook-title",c.value(book.metadata.titles[0],"Untitled")>
-            <button type:"button",["data-ebook-command"]:"back","Back">
-            <button type:"button",["data-ebook-command"]:"forward","Forward">
-            <button type:"button",["data-ebook-command"]:"previous","Previous chapter">
-            <button type:"button",["data-ebook-command"]:"next","Next chapter">
-            <button type:"button",["data-ebook-command"]:"page-previous","Previous page">
-            <button type:"button",["data-ebook-command"]:"page-next","Next page">
-            <button type:"button",["data-ebook-command"]:"mode","Reading mode">
-            <button type:"button",["data-ebook-command"]:"smaller",["aria-label"]:"Smaller text","A−">
-            <button type:"button",["data-ebook-command"]:"larger",["aria-label"]:"Larger text","A+">
-            <button type:"button",["data-ebook-command"]:"font","Font">
-            <button type:"button",["data-ebook-command"]:"spacing","Line spacing">
-            <button type:"button",["data-ebook-command"]:"margin","Margins">
-            <button type:"button",["data-ebook-command"]:"theme","Theme">
-            <button type:"button",["data-ebook-command"]:"publisher","Publisher styles">
-            <button type:"button",["data-ebook-command"]:"zoom-out","Zoom−">
-            <button type:"button",["data-ebook-command"]:"zoom-in","Zoom+">
-            <button type:"button",["data-ebook-command"]:"bookmark","Bookmark">
-            <input class:"ebook-query",type:"search",placeholder:"Search book",["aria-label"]:"Search book">
-            <button type:"button",["data-ebook-command"]:"search","Search">>
+            button("find","Search book","search");
+            button("bookmark","Bookmark this place","bookmark");
+            <button type:"button",class:"ebook-settings-toggle",title:"Reading settings",["aria-label"]:"Reading settings",
+                ["aria-expanded"]:"false",["data-ebook-command"]:"settings","Aa">>
+        <div class:"ebook-search-panel",["data-open"]:"false",
+            <input class:"ebook-query",type:"search",placeholder:"Find a passage in this book…",["aria-label"]:"Search book">
+            button("search","Search")>
+        <section class:"ebook-settings",["aria-label"]:"Reading settings",["data-open"]:"false",
+            if (chapter.layout != "fixed") <div class:"ebook-setting-group",<span class:"ebook-setting-label","Text size & font">
+                <div class:"ebook-setting-controls",button("smaller","A−"); button("larger","A+"); button("font","Publisher font")>>;
+            if (chapter.layout != "fixed") <div class:"ebook-setting-group",<span class:"ebook-setting-label","Spacing & margins">
+                <div class:"ebook-setting-controls",button("spacing","Line spacing"); button("margin","Margins")>>;
+            <div class:"ebook-setting-group",<span class:"ebook-setting-label","Appearance">
+                <div class:"ebook-setting-controls",button("theme","Light theme"); button("publisher","Publisher styles")>>
+            <div class:"ebook-setting-group",<span class:"ebook-setting-label","Reading layout">
+                <div class:"ebook-setting-controls",if (chapter.layout == "fixed") {
+                    [button("zoom-out","Zoom −"),button("zoom-in","Zoom +")]
+                } else button("mode","Scrolling")>>>
         <div class:"ebook-workspace",
-            <nav class:"ebook-sidebar",["aria-label"]:"Table of contents",<h3 "Contents">
-                if (cover.value != null and cover.value != "") <img class:"ebook-cover",src:cover.value,alt:"Book cover",style:"max-width:100%;height:auto">;
-                if (len(book.metadata.creators) > 0) <p class:"ebook-author",join(book.metadata.creators,", ")>;
+            <nav class:"ebook-sidebar",["aria-label"]:"Table of contents",
+                <div class:"ebook-book",
+                    if (cover.value != null and cover.value != "") <img class:"ebook-cover",src:cover.value,alt:"Book cover">;
+                    <div <div class:"ebook-book-title",c.value(book.metadata.titles[0],"Untitled")>
+                        if (len(book.metadata.creators) > 0) <p class:"ebook-author",join(book.metadata.creators,", ")>>>
+                <h3 "Contents">
                 if (len(book.navigation.toc) > 0) contents(book.navigation.toc) else
                     contents([for (entry in book.reading_order) {label:"Chapter " ++ string(entry.occurrence+1),
                         target:{href:entry.href},children:[]}]);
@@ -71,9 +112,13 @@ fn tree(book,saved,chapter) element^ {
                 <h3 "Bookmarks"> <div class:"ebook-bookmarks">>
             <main class:"ebook-content",<div class:"ebook-results">
                 <iframe class:"ebook-frame",title:"Book content",sandbox:"allow-same-origin",["data-navigation-event"]:"ebook_link",srcdoc:srcdoc(chapter,saved.preferences)>
-                <div class:"ebook-notices",saved.message>
-                <footer <span class:"ebook-status",string(index+1) ++ " / " ++ string(len(book.reading_order))>
-                    <span class:"ebook-page-status"> >>>>
+                <div class:"ebook-notices",saved.message>>>
+        <footer class:"ebook-footer",
+            <div class:"ebook-chapter-controls",button("previous","Previous chapter","previous"); button("next","Next chapter","next")>
+            <div class:"ebook-progress",<span "Chapter " <span class:"ebook-status",string(index+1) ++ " / " ++ string(len(book.reading_order))>>
+                <span class:"ebook-page-status">>
+            <div class:"ebook-page-controls",button("page-previous","Previous page","back"); button("page-next","Next page","forward")>>>
+
 }
 fn owner(target) {
     let local = dom.closest(target,".ebook-reader")
@@ -114,6 +159,29 @@ pn restore(host,session) {
             dom.stylesheet_set_disabled(sheet,not session.preferences.publisher)
     }
 }
+pn chrome(host,book,session) {
+    dom.set_attribute(host,"data-theme",session.preferences.theme)
+    let labels = {mode:if (session.preferences.mode == "paged") "Paged" else "Scrolling",
+        theme:session.preferences.theme ++ " theme",font:session.preferences.font_family ++ " font",
+        spacing:"Spacing " ++ string(session.preferences.line_height),margin:"Margins " ++ string(session.preferences.margin),
+        publisher:if (session.preferences.publisher) "Publisher styles on" else "Publisher styles off"}
+    for (command,label in labels) {
+        let control = dom.query_selector(host,"[data-ebook-command='" ++ string(command) ++ "']")
+        if (control != null) dom.set_text_content(control,label)
+    }
+    for (item in dom.query_selector_all(dom.query_selector(host,".ebook-sidebar"),"[data-ebook-command=go]")) {
+        if (dom.get_attribute(item,"data-ebook-href") == session.chapter.href) dom.set_attribute(item,"aria-current","location")
+        else if (dom.has_attribute(item,"aria-current")) dom.remove_attribute(item,"aria-current")
+    }
+    for (command,disabled in {back:session.cursor <= 0,forward:session.cursor >= len(session.history)-1,
+        previous:not any([for (entry in book.reading_order) entry.linear and entry.occurrence < session.index]),
+        next:not any([for (entry in book.reading_order) entry.linear and entry.occurrence > session.index])}) {
+        let control = dom.query_selector(host,"[data-ebook-command='" ++ string(command) ++ "']")
+        if (disabled) dom.set_attribute(control,"disabled","") else if (dom.has_attribute(control,"disabled")) dom.remove_attribute(control,"disabled")
+    }
+    dom.set_attribute(dom.query_selector(host,"[data-ebook-command=bookmark]"),"aria-pressed",
+        string(any([for (bookmark in session.bookmarks) bookmark == session.location])))
+}
 pn page_status(host,book,session) {
     let frame = dom.query_selector(host,".ebook-frame")
     let metrics = dom.scroll_metrics(frame)
@@ -124,6 +192,7 @@ pn page_status(host,book,session) {
         else if (session.preferences.mode != "paged") "Scrolling" else
             "Page " ++ string(int(floor(scroll.x/max(1,width)))+1) ++ " / " ++ string(int(ceil(total/max(1,width))));
     dom.set_text_content(dom.query_selector(host,".ebook-page-status"),label)
+    chrome(host,book,session)
 }
 pn mount(host,book,session) map^ {
     let chapter = if (session.chapter.occurrence == session.index) session.chapter else chapters.load(book,session.index)^
@@ -154,9 +223,24 @@ pn chapter_step(host,book,session,step) map^ {
 pn bookmarks(host,session) {
     let nodes = [for (i,bookmark in session.bookmarks) <button type:"button",["data-ebook-command"]:"saved",
         ["data-ebook-index"]:string(i),"Chapter " ++ string(bookmark.spine_occurrence+1) ++ ": " ++ bookmark.quote>]
-    dom.set_inner_html(dom.query_selector(host,".ebook-bookmarks"),format(nodes,"html")^)
+    dom.set_inner_html(dom.query_selector(host,".ebook-bookmarks"),if (len(nodes) == 0) "" else format(nodes,"html")^)
 }
 pn action(host,book,session,command,target = null) map^ {
+    if (command == "settings" or command == "find") {
+        let panel = dom.query_selector(host,if (command == "settings") ".ebook-settings" else ".ebook-search-panel")
+        let opened = dom.get_attribute(panel,"data-open") != "true"
+        dom.set_attribute(panel,"data-open",string(opened))
+        dom.set_attribute(dom.query_selector(host,"[data-ebook-command='" ++ command ++ "']"),"aria-expanded",string(opened))
+        if (command == "find" and opened) dom.set_attribute(host,"data-search-focus","pending")
+        dom.request_frame(host,"ebook_ready")
+        return session
+    }
+    if (command == "contents") {
+        let current = c.value(dom.get_attribute(host,"data-sidebar"),if (dom.scroll_metrics(host).client_width > 540) "open" else "closed")
+        dom.set_attribute(host,"data-sidebar",if (current == "open") "closed" else "open")
+        dom.request_frame(host,"ebook_ready")
+        return session
+    }
     var next = {*:session,location:capture(host,book,session)^}
     if (command == "back" or command == "forward") {
         let cursor = session.cursor + (if (command == "back") -1 else 1)
@@ -213,6 +297,7 @@ pn action(host,book,session,command,target = null) map^ {
             <button type:"button",["data-ebook-command"]:"result",["data-ebook-index"]:string(i),result.snippet>],"html")^)
         notices(host,string(len(results)) ++ " search results")
     }
+    chrome(host,book,next)
     store.save(book,next)^ { notices(host,"Reading state could not be saved: " ++ ^.message) }
     return next
 }
@@ -265,6 +350,11 @@ on ebook_ready(evt) {
             history:[for (i,entry in session.history) if (i == session.cursor) location else entry]}
         store.save(~.book,session)^ { notices(host,"Reading state could not be saved: " ++ ^.message) }
     }
+    if (dom.get_attribute(host,"data-search-focus") == "pending") {
+        dom.remove_attribute(host,"data-search-focus")
+        if (dom.get_attribute(dom.query_selector(host,".ebook-search-panel"),"data-open") == "true")
+            dom.focus_set(dom.query_selector(host,".ebook-query"),false)
+    }
     page_status(host,~.book,session)
     return 'handled'
 }
@@ -300,6 +390,10 @@ on click(evt) {
 }
 on keydown(evt) {
     let host = owner(evt.target)
+    if (host != null and evt.key == "Enter" and dom.closest(evt.target,".ebook-query") != null) {
+        session = action(host,~.book,session,"search")^
+        return 'prevent-default'
+    }
     if (host == null or evt.ctrlKey or evt.altKey or evt.metaKey or
         dom.closest(evt.target,"input,textarea,select,button,[contenteditable]") != null) { return 'pass' }
     let command = if (evt.key == "ArrowRight" or evt.key == "PageDown") "page-next" else if (evt.key == "ArrowLeft" or evt.key == "PageUp") "page-previous" else null

@@ -1740,6 +1740,14 @@ static void dom_boundary_to_projection(const DomBoundary& boundary,
 // Canonical selection → presentation refresh. Boundaries are intentionally
 // absent from this cache: readers derive them from EditingSelection/DomSelection.
 // ---------------------------------------------------------------------------
+static bool caret_target_is_editable(DocState* state, View* view) {
+    EditingSurface surface;
+    // A collapsed document Selection is a drag anchor, not an insertion caret.
+    return state && editing_surface_from_target(view, &surface) &&
+        !surface.readonly && !surface.disabled && !surface.target_in_false_island &&
+        focus_get(state) == static_cast<View*>(surface.owner);
+}
+
 extern "C" void selection_refresh_presentation(DocState* state) {
     if (!state || !state_store_ensure_selection_presentation(state)) return;
     SelectionPresentation* presentation = state->selection_presentation;
@@ -1797,7 +1805,7 @@ extern "C" void selection_refresh_presentation(DocState* state) {
         View* view = static_cast<View*>(control);
         bool collapsed = start_u16 == end_u16;
         bool control_focused = state->focus && state->focus->current == view;
-        bool caret_visible = collapsed && control_focused;
+        bool caret_visible = collapsed && control_focused && caret_target_is_editable(state, view);
         bool visibility_changed = presentation->caret_visible != caret_visible;
         presentation->caret_visible = caret_visible;
         presentation->caret_blink_time = 0;
@@ -1842,8 +1850,7 @@ extern "C" void selection_refresh_presentation(DocState* state) {
             bool focus_at_end = ds->direction != DOM_SEL_DIR_BACKWARD;
             float abs_x = focus_at_end ? range->end_x : range->start_x;
             float abs_y = focus_at_end ? range->end_y : range->start_y;
-            bool caret_can_render = !focus_view->is_element() ||
-                tc_is_text_control(lam::dom_require_element(focus_view));
+            bool caret_can_render = caret_target_is_editable(state, focus_view);
             presentation->caret_visible = collapsed && caret_can_render;
             // Canonical boundaries must never follow the resolver's nearest
             // paint box; trailing atomic boxes are geometry, not selection truth.
@@ -7223,7 +7230,7 @@ static bool caret_read_snapshot_fields(DocState* state, CaretSnapshotFields* out
         out->height = presentation->caret_height;
         out->iframe_offset_x = presentation->iframe_offset_x;
         out->iframe_offset_y = presentation->iframe_offset_y;
-        out->visible = presentation->caret_visible;
+        out->visible = caret_is_visible(state);
     }
     return true;
 }
@@ -7301,8 +7308,11 @@ bool caret_has_projection(DocState* state) {
 }
 
 bool caret_is_visible(DocState* state) {
-    return state && state->selection_presentation &&
-        state->selection_presentation->caret_visible;
+    if (!state || !state->selection_presentation || !state->selection_presentation->caret_visible ||
+            !caret_target_is_editable(state, caret_get_view(state))) return false;
+    return state->sel.kind == EDIT_SEL_TEXT_CONTROL
+        ? state->sel.start_u16 == state->sel.end_u16
+        : dom_selection_is_collapsed(state->dom_selection);
 }
 
 void caret_project_previous_visual_rect(DocState* state, float x, float y, float height) {
@@ -7316,7 +7326,7 @@ void caret_toggle_blink(DocState* state) {
     if (!state || !state_store_ensure_selection_presentation(state)) return;
     SelectionPresentation* presentation = state->selection_presentation;
 
-    if (!caret_get_view(state)) {
+    if (!caret_target_is_editable(state, caret_get_view(state))) {
         if (presentation->caret_visible) {
             presentation->caret_visible = false;
             state->needs_repaint = true;
@@ -8151,6 +8161,7 @@ static void focus_set_internal(DocState* state, View* view, bool from_keyboard,
 
     FocusState* focus = state->focus;
     View* old_focus = focus->current;
+    bool old_visible = focus->focus_visible;
 
     if (old_focus && old_focus != view && old_focus->is_element() &&
         tc_is_text_control(lam::dom_require_element(old_focus))) {
@@ -8162,7 +8173,10 @@ static void focus_set_internal(DocState* state, View* view, bool from_keyboard,
     focus->current = view;
     focus->from_keyboard = from_keyboard;
     focus->from_mouse = !from_keyboard;
-    focus->focus_visible = from_keyboard;  // :focus-visible only for keyboard
+    EditingSurface surface;
+    // Keyboard entry surfaces indicate focus even after a pointer click (Selectors 4 §9.4).
+    focus->focus_visible = from_keyboard || (editing_surface_from_target(view, &surface) &&
+        !surface.disabled && !surface.target_in_false_island);
 
     View* old_root = view_geometry_tree_root(old_focus);
     View* new_root = view_geometry_tree_root(view);
@@ -8177,7 +8191,7 @@ static void focus_set_internal(DocState* state, View* view, bool from_keyboard,
     if (view) {
         focus_set_pseudo(state, view, STATE_FOCUS, PSEUDO_STATE_FOCUS, true);
         focus_set_pseudo(state, view, STATE_FOCUS_VISIBLE,
-                         PSEUDO_STATE_FOCUS_VISIBLE, from_keyboard);
+                         PSEUDO_STATE_FOCUS_VISIBLE, focus->focus_visible);
         focus_set_within_chain(state, view, true);
     }
 
@@ -8185,6 +8199,14 @@ static void focus_set_internal(DocState* state, View* view, bool from_keyboard,
         focus_sync_text_control_state(state, view);
         layout_content_visibility_invalidate(state);
     }
+
+    // Selection ownership must settle before a restyle schedules validated layout work.
+    uint32_t changed_flags = old_focus != view ? PSEUDO_STATE_FOCUS | PSEUDO_STATE_FOCUS_WITHIN : 0;
+    if (old_visible != focus->focus_visible || (old_focus != view && (old_visible || focus->focus_visible)))
+        changed_flags |= PSEUDO_STATE_FOCUS_VISIBLE;
+    radiant_sync_focus_style(view ? view : old_focus, changed_flags);
+    if (old_focus && view && old_focus->as_element()->doc != view->as_element()->doc)
+        radiant_sync_focus_style(old_focus, changed_flags);
 
     state->needs_repaint = true;
 
@@ -8237,6 +8259,7 @@ static void focus_clear_internal(DocState* state, bool preserve_selection) {
         selection_refresh_presentation(state);
     }
 
+    radiant_sync_focus_style(old_focus, PSEUDO_STATE_FOCUS | PSEUDO_STATE_FOCUS_VISIBLE | PSEUDO_STATE_FOCUS_WITHIN);
     state->needs_repaint = true;
 
     focus_log_transition(state, "blur_current", old_focus, NULL, false, false);

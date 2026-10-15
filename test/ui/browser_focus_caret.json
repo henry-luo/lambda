@@ -1,0 +1,228 @@
+{
+  "name": "CSS focus indicators and carets follow editable surfaces",
+  "html": "test/ui/browser_focus_caret.html",
+  "viewport": {
+    "width": 1000,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#plain"
+      }
+    },
+    {
+      "type": "assert_caret",
+      "visible": false
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#plain",
+        "offset_x": 8,
+        "offset_y": 12
+      },
+      "drag_dx": 200,
+      "drag_dy": 0
+    },
+    {
+      "type": "assert_selection",
+      "is_collapsed": false,
+      "check_dom": true
+    },
+    {
+      "type": "assert_caret",
+      "visible": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#mouse"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#mouse"
+      },
+      "property": "outline-style",
+      "equals": "none"
+    },
+    {
+      "type": "assert_caret",
+      "visible": false
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#keyboard"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#keyboard"
+      },
+      "property": "outline-style",
+      "equals": "solid"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#keyboard"
+      },
+      "property": "outline-width",
+      "equals": "2px"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#author"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#author"
+      },
+      "property": "outline-style",
+      "equals": "dashed"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#author"
+      },
+      "property": "outline-color",
+      "equals": "rgb(177, 71, 68)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#author"
+      },
+      "property": "outline-offset",
+      "equals": "4px"
+    },
+    {
+      "type": "assert_caret",
+      "visible": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#suppressed"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "Tab",
+      "mods_str": "shift"
+    },
+    {
+      "type": "key_press",
+      "key": "Tab"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#suppressed"
+      },
+      "property": "outline-style",
+      "equals": "none"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#editor",
+        "offset_x": 30,
+        "offset_y": 22
+      }
+    },
+    {
+      "type": "assert_caret",
+      "visible": true
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#editor"
+      },
+      "property": "outline-style",
+      "equals": "none"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#island"
+      }
+    },
+    {
+      "type": "assert_caret",
+      "visible": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#empty"
+      }
+    },
+    {
+      "type": "assert_caret",
+      "visible": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#input"
+      }
+    },
+    {
+      "type": "assert_caret",
+      "visible": true
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#input"
+      },
+      "property": "outline-style",
+      "equals": "solid"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#readonly"
+      }
+    },
+    {
+      "type": "assert_caret",
+      "visible": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#textarea"
+      }
+    },
+    {
+      "type": "assert_caret",
+      "visible": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#plain"
+      }
+    },
+    {
+      "type": "assert_caret",
+      "visible": false
+    }
+  ]
+}
