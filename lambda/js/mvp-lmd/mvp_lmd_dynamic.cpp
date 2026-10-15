@@ -577,6 +577,7 @@ static Item dynamic_eval(Context*, MvpLmdProgram*, Item* args, uint64_t count, I
     if (get_type_id(args[0]) != LMD_TYPE_STRING) return args[0];
     MvpLmdDynamic* state = (MvpLmdDynamic*)((MvpLmdNativeCallable*)self.function)->state;
     String* source = args[0].get_string();
+    if (js_eval_source_is_blank(source)) return make_js_undefined();
     return js_interp_execute_host_source(&state->ops, source->chars, source->len, "<eval>", true);
 }
 Item mvp_lmd_dynamic_initialize(MvpLmdProgram* program) {

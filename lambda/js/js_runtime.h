@@ -852,6 +852,26 @@ Item js_date_parse_text(String* text);
 Item js_date_method_with_ops(Item receiver, int method, const JsDateOps* ops);
 Item js_date_setter_with_ops(Item receiver, int method, Item arg0, Item arg1, Item arg2, Item arg3,
     const JsDateOps* ops);
+// generic Array operations share algorithms; the frontend supplies property and completion semantics.
+typedef enum JsArrayIndexOp {
+    JS_ARRAY_INDEX_GET, JS_ARRAY_INDEX_HAS, JS_ARRAY_INDEX_SET,
+    JS_ARRAY_INDEX_DELETE, JS_ARRAY_INDEX_CREATE
+} JsArrayIndexOp;
+typedef struct JsArrayOps {
+    const struct JsBufferViewOps* values;
+    Item (*object)(Item);
+    Item (*index)(Item, int64_t, Item, JsArrayIndexOp); // index -1 selects length
+    Item (*create)(int64_t);
+    bool (*callable)(Item);
+    bool (*constructor)(Item);
+    Item (*construct)(Item, Item*, int);
+    Item (*sort)(Item, Item);
+} JsArrayOps;
+extern const JsArrayOps js_array_default_ops;
+Item js_array_method_with_ops(int builtin_id, Item receiver, Item* args, int argc,
+    const JsArrayOps* ops);
+Item js_array_of_with_ops(Item constructor, Item* args, int argc, const JsArrayOps* ops);
+
 Item js_map_collection_new(void);
 Item js_map_collection_new_from(Item iterable);
 Item js_set_collection_new(void);
@@ -963,6 +983,66 @@ Item js_build_template_object_with_ops(Item* cooked, Item* raw, int count, const
 Item js_build_template_object_cached(Item* cooked, Item* raw, int count, int64_t site_id);
 Item js_build_template_object_cached_with_ops(Item* cooked, Item* raw, int count,
     int64_t site_id, const JsTemplateObjectOps* ops, const void* site_owner);
+typedef enum JsStringIntrinsicOp {
+    JS_STRING_INTRINSIC_CHAR_AT,
+    JS_STRING_INTRINSIC_CHAR_CODE_AT,
+    JS_STRING_INTRINSIC_INDEX_OF,
+    JS_STRING_INTRINSIC_INCLUDES,
+    JS_STRING_INTRINSIC_SLICE,
+    JS_STRING_INTRINSIC_SUBSTRING,
+    JS_STRING_INTRINSIC_TO_LOWER_CASE,
+    JS_STRING_INTRINSIC_TO_UPPER_CASE,
+    JS_STRING_INTRINSIC_TRIM,
+    JS_STRING_INTRINSIC_SPLIT,
+    JS_STRING_INTRINSIC_REPLACE,
+    JS_STRING_INTRINSIC_MATCH,
+    JS_STRING_INTRINSIC_SEARCH,
+    JS_STRING_INTRINSIC_STARTS_WITH,
+    JS_STRING_INTRINSIC_ENDS_WITH,
+    JS_STRING_INTRINSIC_REPEAT,
+    JS_STRING_INTRINSIC_PAD_START,
+    JS_STRING_INTRINSIC_PAD_END,
+    JS_STRING_INTRINSIC_TO_STRING,
+    JS_STRING_INTRINSIC_VALUE_OF,
+    JS_STRING_INTRINSIC_TRIM_START,
+    JS_STRING_INTRINSIC_TRIM_END,
+    JS_STRING_INTRINSIC_CODE_POINT_AT,
+    JS_STRING_INTRINSIC_NORMALIZE,
+    JS_STRING_INTRINSIC_CONCAT,
+    JS_STRING_INTRINSIC_AT,
+    JS_STRING_INTRINSIC_LAST_INDEX_OF,
+    JS_STRING_INTRINSIC_LOCALE_COMPARE,
+    JS_STRING_INTRINSIC_REPLACE_ALL,
+    JS_STRING_INTRINSIC_MATCH_ALL,
+    JS_STRING_INTRINSIC_IS_WELL_FORMED,
+    JS_STRING_INTRINSIC_TO_WELL_FORMED,
+    JS_STRING_INTRINSIC_ANCHOR,
+    JS_STRING_INTRINSIC_BIG,
+    JS_STRING_INTRINSIC_BLINK,
+    JS_STRING_INTRINSIC_BOLD,
+    JS_STRING_INTRINSIC_FIXED,
+    JS_STRING_INTRINSIC_FONTCOLOR,
+    JS_STRING_INTRINSIC_FONTSIZE,
+    JS_STRING_INTRINSIC_ITALICS,
+    JS_STRING_INTRINSIC_LINK,
+    JS_STRING_INTRINSIC_SMALL,
+    JS_STRING_INTRINSIC_STRIKE,
+    JS_STRING_INTRINSIC_SUB,
+    JS_STRING_INTRINSIC_SUP,
+    JS_STRING_INTRINSIC_SUBSTR,
+    JS_STRING_INTRINSIC_TO_LOCALE_LOWER_CASE,
+    JS_STRING_INTRINSIC_TO_LOCALE_UPPER_CASE,
+} JsStringIntrinsicOp;
+typedef struct JsStringTextOps {
+    Item (*to_string)(Item);
+    Item (*range_error)(const char*);
+} JsStringTextOps;
+// receiver is already a primitive string; object arguments use only the supplied guest policy.
+Item js_string_text_with_ops(Item string, JsStringIntrinsicOp operation,
+    Item argument, const JsStringTextOps* ops);
+Item js_string_substr_with_ops(Item primitive_string, Item start, Item length,
+    const struct JsBufferViewOps* ops);
+
 typedef struct JsStringRawOps {
     Item (*to_object)(Item);
     Item (*get)(Item, Item);

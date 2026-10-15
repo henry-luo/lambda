@@ -3206,7 +3206,8 @@ static Item js_interp_direct_eval(JsInterpFrame* frame, Item code) {
     if (js_interp_host) {
         if (get_type_id(code) != LMD_TYPE_STRING) return js_retain_scalar(code);
         String* source = code.get_string();
-        if (!source->len) return make_js_undefined();
+        // empty eval code has no declarations or captured state to retain.
+        if (js_eval_source_is_blank(source)) return make_js_undefined();
         bool function_context = frame->active_function &&
             !(frame->active_function->flags & JS_FUNC_FLAG_ARROW);
         for (JsInterpEnv* env = frame->env; env && !function_context; env = env->outer)

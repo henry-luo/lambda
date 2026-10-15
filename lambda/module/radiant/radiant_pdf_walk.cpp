@@ -8,9 +8,13 @@
 #include "../../core/mark_reader.hpp"
 #include "../../core/collection_storage.h"
 #include "../../io/mark_output_builder.hpp"
+#include "../../jube/jube_node_zlib_codec.hpp"
 #include "../../../radiant/render.hpp"
 #include "../../../radiant/view.hpp"
 #include "../../../radiant/layout.hpp"
+#include "../../../radiant/layout_paged.hpp"
+#include "../../../radiant/view_tree_model.hpp"
+#include "../../../radiant/view_tree_css.hpp"
 #include "../../../radiant/radiant.hpp"
 #include "../../../lib/mem.h"
 #include "../../../lib/mem_factory.h"
@@ -22,6 +26,12 @@
 extern "C" Item vmap_new();
 
 namespace {
+
+struct PdfBoundaryView {
+    float x, y, width, height;
+    const BoundaryProp* bound;
+    const FontProp* font;
+};
 
 struct PdfWalkFrame {
     float x, y, page_width, page_height, baseline, font_size, opacity;
@@ -37,6 +47,12 @@ struct PdfWalkFrame {
     bool clip_evenodd;
     int32_t sequence;
     ViewBlock* image_view;
+    const PaintImageBox* image_box;
+    const PaintGlyphRun* glyph_run;
+    const LayoutViewNode* fragment;
+    float width, height;
+    uint32_t page_number, page_count;
+    Item page_label;
 };
 #include "pdf_view_schema.inc"
 
@@ -49,11 +65,15 @@ struct PdfWalkContext : RenderContext {
     const BinarySchema* element;
     const BinarySchema* text_rect;
     const BinarySchema* frame_schema;
+    const BinarySchema* fragment_schema;
+    const BinarySchema* page_schema;
+    const BinarySchema* boundary_schema;
     PdfWalkFrame frame;
     MarkOutputBuilder* output;
     Rooted<Item>* callback;
     Rooted<Item>* error;
     Rooted<Item>* resources;
+    Rooted<Item>* pages;
 };
 
 Item pdf_walk_error(const char* message) {
@@ -118,27 +138,31 @@ void pdf_walk_dispatch(PdfWalkContext* ctx, const char* event,
     binary_schema_owner_release(local);
 }
 
-void pdf_walk_boundary(RenderContext* base, ViewBlock* view, float x, float y) {
-    PdfWalkContext* ctx = (PdfWalkContext*)base;
-    ctx->frame.x = x; ctx->frame.y = y;
-    const BoundaryProp* bound = view->boundary();
+bool pdf_walk_admit_boundary(PdfWalkContext* ctx, const BoundaryProp* bound) {
     if (bound && ((bound->background && (bound->background->image ||
             bound->background->gradient_type != GRADIENT_NONE || bound->background->layer_count)) ||
             (bound->border && (radiant_corner_has_radius(&bound->border->radius) ||
                 bound->border->border_image_type != GRADIENT_NONE || bound->border->border_image_url)) ||
             bound->outline || bound->box_shadow)) {
         pdf_walk_fail(ctx, "this PDF callback profile needs a helper for complex boundaries");
-        return;
+        return false;
     }
     if (bound && bound->border) {
         const BorderProp* border = bound->border;
         for (size_t edge = 0; edge < 4; edge++) {
             if (border->width.values[edge] > 0.0f && border->styles[edge] != CSS_VALUE_SOLID) {
                 pdf_walk_fail(ctx, "this PDF callback profile needs a helper for nonsolid borders");
-                return;
+                return false;
             }
         }
     }
+    return true;
+}
+
+void pdf_walk_boundary(RenderContext* base, ViewBlock* view, float x, float y) {
+    PdfWalkContext* ctx = (PdfWalkContext*)base;
+    ctx->frame.x = x; ctx->frame.y = y;
+    if (!pdf_walk_admit_boundary(ctx, view->boundary())) return;
     pdf_walk_dispatch(ctx, "boundary", ctx->element, view);
 }
 
@@ -304,25 +328,167 @@ Item pdf_walk_path_array(const RdtPath* path, const RdtMatrix* transform) {
     return commands.get();
 }
 
+bool pdf_walk_page_finish(PdfWalkContext* ctx) {
+    if (pdf_walk_aborted(ctx)) return false;
+    const char* bytes = nullptr;
+    size_t size = 0;
+    if (!ctx->output->ops->finish(ctx->output) ||
+            !ctx->output->ops->bytes(ctx->output, &bytes, &size) || size > INT64_MAX) {
+        pdf_walk_fail(ctx, "cannot finish PDF page byte content"); return false;
+    }
+    RootFrame roots(1);
+    Rooted<Item> page(roots, vmap_new());
+    Binary* content = heap_binary_from_bytes(bytes, size);
+    if (!content || get_type_id(page.get()) != LMD_TYPE_VMAP) {
+        pdf_walk_fail(ctx, "cannot retain PDF page content"); return false;
+    }
+    radiant_rooted_obj_set(page, "content", {.item = x2it(content)});
+    radiant_rooted_obj_set(page, "width", push_d(ctx->frame.page_width));
+    radiant_rooted_obj_set(page, "height", push_d(ctx->frame.page_height));
+    radiant_rooted_obj_set(page, "number", {.item = i2it(ctx->frame.page_number)});
+    radiant_rooted_obj_set(page, "label", ctx->frame.page_label);
+    radiant_rooted_obj_set(page, "resources", ctx->resources->get());
+    int64_t before = ctx->pages->get().array->length;
+    array_push(ctx->pages->get().array, page.get());
+    if (ctx->pages->get().array->length != before + 1) {
+        pdf_walk_fail(ctx, "cannot retain PDF page plan"); return false;
+    }
+    return true;
+}
+
+bool pdf_secondary_fragment(void* data, const LayoutViewNode* node, bool entering) {
+    PdfWalkContext* ctx = (PdfWalkContext*)data;
+    ctx->frame.fragment = node;
+    ctx->frame.x = node->rect.x; ctx->frame.y = node->rect.y;
+    pdf_walk_dispatch(ctx, entering ? "begin_fragment" : "end_fragment", ctx->fragment_schema, node);
+    if (!entering) ctx->frame.fragment = node->parent.get();
+    return !pdf_walk_aborted(ctx);
+}
+bool pdf_secondary_boundary(void* data, const BoundaryProp* bound, RdtLogicalRect rect) {
+    PdfWalkContext* ctx = (PdfWalkContext*)data;
+    // both view editions must reject drawing outside the callback's admitted profile.
+    if (!pdf_walk_admit_boundary(ctx, bound)) return false;
+    PdfBoundaryView view = {rect.x, rect.y, rect.width, rect.height, bound, nullptr};
+    ctx->frame.x = rect.x; ctx->frame.y = rect.y;
+    // page-body and column-rule boundaries may be native stack temporaries.
+    pdf_walk_dispatch(ctx, "boundary", ctx->boundary_schema, &view, true);
+    return !pdf_walk_aborted(ctx);
+}
+bool pdf_secondary_fill(void* data, Color color, RdtLogicalRect rect) {
+    PdfWalkContext* ctx = (PdfWalkContext*)data;
+    ctx->frame.color = color; ctx->frame.x = rect.x; ctx->frame.y = rect.y;
+    ctx->frame.width = rect.width; ctx->frame.height = rect.height;
+    pdf_walk_dispatch(ctx, "fill");
+    return !pdf_walk_aborted(ctx);
+}
+bool pdf_secondary_clip(void* data, const RdtLogicalRect* rect, const float* inset) {
+    PdfWalkContext* ctx = (PdfWalkContext*)data;
+    if (!rect) { pdf_walk_dispatch(ctx, "end_clip"); return !pdf_walk_aborted(ctx); }
+    RdtPath* path = rdt_path_new();
+    if (!path) { pdf_walk_fail(ctx, "cannot allocate page fragment clip"); return false; }
+    float top = inset ? inset[0] : 0.0f, right = inset ? inset[1] : 0.0f;
+    float bottom = inset ? inset[2] : 0.0f, left = inset ? inset[3] : 0.0f;
+    rdt_path_add_rect(path, rect->x + left, rect->y + top,
+        fmaxf(0.0f, rect->width - left - right), fmaxf(0.0f, rect->height - top - bottom), 0.0f, 0.0f);
+    ctx->frame.clip_path = path;
+    ctx->frame.clip_transform = rdt_matrix_identity(); ctx->frame.clip_evenodd = false;
+    pdf_walk_dispatch(ctx, "begin_clip");
+    ctx->frame.clip_path = nullptr;
+    rdt_path_free(path);
+    return !pdf_walk_aborted(ctx);
+}
+bool pdf_secondary_glyph(void* data, const LayoutViewNode* node, const PaintGlyphRun* run) {
+    PdfWalkContext* ctx = (PdfWalkContext*)data;
+    ctx->frame.fragment = node; ctx->frame.glyph_run = run;
+    ctx->frame.x = run->x; ctx->frame.baseline = run->baseline_y;
+    ctx->frame.font_size = run->font_size; ctx->frame.color = run->color;
+    ctx->frame.ui = ctx->ui_context.get();
+    pdf_walk_dispatch(ctx, "text", ctx->fragment_schema, node);
+    ctx->frame.glyph_run = nullptr;
+    return !pdf_walk_aborted(ctx);
+}
+bool pdf_secondary_image(void* data, const LayoutViewNode* node, const PaintImageBox* image) {
+    PdfWalkContext* ctx = (PdfWalkContext*)data;
+    ctx->frame.fragment = node; ctx->frame.image_box = image; ctx->frame.ui = ctx->ui_context.get();
+    pdf_walk_dispatch(ctx, "image", ctx->fragment_schema, node);
+    ctx->frame.image_box = nullptr;
+    return !pdf_walk_aborted(ctx);
+}
+bool pdf_secondary_page(ViewTree* tree, const ViewPageBox* selected, const ViewPagePlacement*, void* data) {
+    PdfWalkContext* ctx = (PdfWalkContext*)data;
+    const ViewPageBox* page = view_tree_page_material(tree, selected);
+    if (!page || pdf_walk_aborted(ctx)) return false;
+    // each page owns its byte destination and resource plan; sequence IDs remain document-wide.
+    ctx->output->ops->destroy(ctx->output);
+    ctx->output = pdf_builder_create();
+    ctx->resources->set({.array = array_plain()});
+    if (!ctx->output || !ctx->resources->get().array) {
+        pdf_walk_fail(ctx, "cannot allocate PDF page destination"); return false;
+    }
+    RootFrame roots(1);
+    Rooted<Item> label(roots, page->label ? Item{.item = s2it(heap_strcpy(page->label, strlen(page->label)))} : ItemNull);
+    ctx->frame.page_label = label.get(); ctx->frame.page_number = selected->page_number;
+    ctx->frame.page_width = page->node.rect.width; ctx->frame.page_height = page->node.rect.height;
+    ctx->frame.fragment = nullptr; ctx->frame.color = {};
+    pdf_walk_dispatch(ctx, "begin_page", ctx->page_schema, page);
+    SecondaryViewVisitor visitor = {ctx, pdf_secondary_fragment, pdf_secondary_boundary,
+        pdf_secondary_fill, pdf_secondary_clip, pdf_secondary_glyph, pdf_secondary_image};
+    if (!pdf_walk_aborted(ctx) && !layout_secondary_visit_page(tree, selected, &visitor))
+        pdf_walk_fail(ctx, "selected page fragment traversal failed");
+    ctx->frame.fragment = nullptr;
+    pdf_walk_dispatch(ctx, "end_page", ctx->page_schema, page);
+    return pdf_walk_page_finish(ctx);
+}
+
 } // namespace
+
+RADIANT_C_API Item fn_radiant_pdf_object(Item dictionary) {
+    RootFrame roots(1);
+    Rooted<Item> value(roots, dictionary);
+    if (item_semantic_type_id(get_type_id(value.get())) != LMD_TYPE_MAP)
+        return pdf_walk_error("PDF object helper requires a dictionary");
+    MarkOutputBuilder* builder = pdf_builder_create();
+    if (!builder) return pdf_walk_error("cannot allocate PDF object encoder");
+    struct Cleanup { MarkOutputBuilder* builder; ~Cleanup() { builder->ops->destroy(builder); } } cleanup = {builder};
+    // use the same dictionary encoder for object preparation, measuring and file emission.
+    builder->ops->append(builder, value.get());
+    if (!builder->ops->finish(builder)) return builder->ops->error(builder);
+    const char* bytes = nullptr; size_t size = 0;
+    if (!builder->ops->bytes(builder, &bytes, &size)) return pdf_walk_error("cannot read encoded PDF dictionary");
+    Binary* encoded = heap_binary_from_bytes(bytes, size);
+    return encoded ? Item{.item = x2it(encoded)} : pdf_walk_error("cannot retain encoded PDF dictionary");
+}
+
+RADIANT_C_API Item fn_radiant_pdf_deflate(Item bytes) {
+    RootFrame roots(1);
+    Rooted<Item> source(roots, bytes);
+    if (get_type_id(source.get()) != LMD_TYPE_BINARY || source.get().get_len() > INT_MAX)
+        return pdf_walk_error("PDF compression requires a supported binary extent");
+    NodeZlibBytes encoded = {};
+    struct Cleanup { NodeZlibBytes* bytes; ~Cleanup() { node_zlib_bytes_free(bytes); } } cleanup = {&encoded};
+    if (!node_zlib_deflate_encode((const uint8_t*)source.get().get_chars(), (int)source.get().get_len(), &encoded))
+        return pdf_walk_error("cannot compress PDF stream");
+    Binary* result = heap_binary_from_bytes((const char*)encoded.data, (size_t)encoded.length);
+    return result ? Item{.item = x2it(result)} : pdf_walk_error("cannot retain compressed PDF stream");
+}
 
 RADIANT_C_API Item fn_radiant_pdf_glyph_path(Item context_item) {
     RootFrame roots(2);
     Rooted<Item> context(roots, context_item), commands(roots, ItemNull);
     const PdfWalkFrame* frame = pdf_walk_frame(context.get());
-    if (!frame || !frame->ui || get_type_id(frame->text) != LMD_TYPE_STRING)
+    if (!frame || !frame->ui || (!frame->glyph_run && get_type_id(frame->text) != LMD_TYPE_STRING))
         return pdf_walk_error("glyph outlines require a live text callback context");
-    if (frame->text.get_len() > INT_MAX) return pdf_walk_error("text fragment exceeds supported shaping length");
     PaintGlyphRun run = {};
-    run.captured_font = frame->font;
-    run.has_captured_font = true;
-    run.font_size = frame->font_size;
-    run.text = lam::up(frame->text.get_chars());
-    run.text_len = frame->text.get_len();
-    run.x = frame->x; run.baseline_y = frame->baseline;
-    run.word_spacing = frame->word_spacing; run.cjk_spacing = frame->cjk_spacing;
-    run.justify_mode = frame->justify_mode;
-    RdtPath* path = render_path_create_paint_glyph_run(&run, frame->ui->font_ctx);
+    if (!frame->glyph_run) {
+        if (frame->text.get_len() > INT_MAX) return pdf_walk_error("text fragment exceeds supported shaping length");
+        run.captured_font = frame->font; run.has_captured_font = true;
+        run.font_size = frame->font_size;
+        run.text = lam::up(frame->text.get_chars()); run.text_len = frame->text.get_len();
+        run.x = frame->x; run.baseline_y = frame->baseline;
+        run.word_spacing = frame->word_spacing; run.cjk_spacing = frame->cjk_spacing;
+        run.justify_mode = frame->justify_mode;
+    }
+    RdtPath* path = render_path_create_paint_glyph_run(frame->glyph_run ? frame->glyph_run : &run, frame->ui->font_ctx);
     struct Cleanup {
         RdtPath* path;
         ~Cleanup() { if (path) rdt_path_free(path); }
@@ -344,16 +510,16 @@ RADIANT_C_API Item fn_radiant_pdf_image(Item context_item) {
     RootFrame roots(4);
     Rooted<Item> context(roots, context_item), result(roots, ItemNull), rgb(roots, ItemNull), alpha(roots, ItemNull);
     const PdfWalkFrame* frame = pdf_walk_frame(context.get());
-    if (!frame || !frame->image_view || !frame->ui)
+    if (!frame || (!frame->image_view && !frame->image_box) || !frame->ui)
         return pdf_walk_error("image helper needs the active image callback context");
     ViewBlock* view = frame->image_view;
     ImageSurfaceReadScope read_scope;
-    ImageSurface* image = render_media_image_surface(view);
+    ImageSurface* image = frame->image_box ? frame->image_box->image.get() : render_media_image_surface(view);
     if (!image) return ItemNull;
     BlockBlot origin = {};
-    origin.x = frame->x - view->x; origin.y = frame->y - view->y;
-    Rect content = render_geometry_block_content_rect(&origin, view, 1.0f);
-    Rect placement = render_media_image_rect(view, image, content, 1.0f);
+    if (view) { origin.x = frame->x - view->x; origin.y = frame->y - view->y; }
+    Rect content = frame->image_box ? frame->image_box->content_rect : render_geometry_block_content_rect(&origin, view, 1.0f);
+    Rect placement = frame->image_box ? frame->image_box->image_rect : render_media_image_rect(view, image, content, 1.0f);
     if (placement.width <= 0.0f || placement.height <= 0.0f) return ItemNull;
     if (!isfinite(placement.width) || !isfinite(placement.height) ||
             (double)placement.width > INT_MAX || (double)placement.height > INT_MAX)
@@ -407,17 +573,17 @@ RADIANT_C_API Item fn_radiant_pdf_image(Item context_item) {
 
 RADIANT_C_API Item fn_radiant_pdf_walk(Item path_item, Item options_item,
                                       Item callback_item, Item schemas_item) {
-    RootFrame roots(7);
+    RootFrame roots(8);
     Rooted<Item> path(roots, path_item), options(roots, options_item), callback(roots, callback_item),
         schemas(roots, schemas_item), error(roots, ItemNull), result(roots, ItemNull),
-        resources(roots, {.array = array_plain()});
+        resources(roots, {.array = array_plain()}), pages(roots, {.array = array_plain()});
     if (get_type_id(path.get()) != LMD_TYPE_STRING || item_semantic_type_id(get_type_id(options.get())) != LMD_TYPE_MAP ||
             get_type_id(callback.get()) != LMD_TYPE_FUNC || item_semantic_type_id(get_type_id(schemas.get())) != LMD_TYPE_MAP)
         return pdf_walk_error("pdf_walk requires a path, options map, function and schemas map");
     error.set(lambda_fn_colour_guard(callback.get().function, nullptr, 0, LAMBDA_COLOUR_GUARD_CALLEE));
     if (get_type_id(error.get()) == LMD_TYPE_ERROR) return error.get();
     double width = 800, height = 600;
-    const char* keys[] = {"width", "height"};
+    const char* keys[] = {"width", "height", "paged", "pages"};
     SymbolKeyList* option_keys = item_keys(options.get());
     struct KeyCleanup {
         SymbolKeyList* keys;
@@ -431,7 +597,7 @@ RADIANT_C_API Item fn_radiant_pdf_walk(Item path_item, Item options_item,
         for (const char* known : keys) {
             if (key && key->len == strlen(known) && memcmp(key->chars, known, key->len) == 0) admitted = true;
         }
-        if (!admitted) return pdf_walk_error("this PDF export profile accepts only width and height options");
+        if (!admitted) return pdf_walk_error("unknown PDF export option");
     }
     double* values[] = {&width, &height};
     for (size_t i = 0; i < 2; i++) {
@@ -441,42 +607,79 @@ RADIANT_C_API Item fn_radiant_pdf_walk(Item path_item, Item options_item,
                 !isfinite(*values[i]) || *values[i] <= 0 || *values[i] > INT_MAX || floor(*values[i]) != *values[i]))
             return pdf_walk_error("PDF viewport dimensions must be positive finite integers");
     }
+    Item paged_option = item_attr(options.get(), "paged");
+    if (get_type_id(paged_option) != LMD_TYPE_NULL && get_type_id(paged_option) != LMD_TYPE_BOOL)
+        return pdf_walk_error("PDF paged option must be boolean");
+    bool paged = get_type_id(paged_option) == LMD_TYPE_BOOL && it2b(paged_option);
+    RootFrame selection_roots(1);
+    Rooted<Item> selected_pages(selection_roots, item_attr(options.get(), "pages"));
+    if (get_type_id(selected_pages.get()) != LMD_TYPE_NULL && (!paged ||
+            get_type_id(selected_pages.get()) != LMD_TYPE_STRING ||
+            memchr(selected_pages.get().get_chars(), 0, selected_pages.get().get_len())))
+        return pdf_walk_error("PDF page selection requires paged output and a page-range string");
     BinarySchemaOwner* owner = binary_schema_owner_create();
     if (!owner) return pdf_walk_error("cannot allocate PDF export owner");
     RenderExportSession session = {};
     MarkOutputBuilder* output = pdf_builder_create();
+    PdfWalkContext ctx = {};
+    ctx.output = output;
+    Pool* selection_pool = pool_create();
     struct Cleanup {
         BinarySchemaOwner* owner;
         RenderExportSession* session;
-        MarkOutputBuilder* output;
+        PdfWalkContext* context;
+        Pool* selection_pool;
         ~Cleanup() {
             binary_schema_owner_invalidate(owner);
             render_export_session_end(session);
-            if (output) output->ops->destroy(output);
+            if (context->output) context->output->ops->destroy(context->output);
+            if (selection_pool) pool_destroy(selection_pool);
             binary_schema_owner_release(owner);
         }
-    } cleanup = {owner, &session, output};
-    if (!output) return pdf_walk_error("cannot allocate PDF callback byte destination");
-    PdfWalkContext ctx = {};
+    } cleanup = {owner, &session, &ctx, selection_pool};
+    if (!output || !selection_pool) return pdf_walk_error("cannot allocate PDF callback byte destination");
     ctx.owner = owner; ctx.output = output; ctx.callback = &callback; ctx.error = &error;
-    ctx.resources = &resources;
-    if (!resources.get().array) return pdf_walk_error("cannot allocate PDF resource plan");
+    ctx.resources = &resources; ctx.pages = &pages;
+    if (!resources.get().array || !pages.get().array) return pdf_walk_error("cannot allocate PDF resource plan");
     ctx.element = pdf_walk_bind(owner, schemas.get(), "element", &element_schema, error);
     ctx.text_rect = pdf_walk_bind(owner, schemas.get(), "text_rect", &text_rect_schema, error);
     ctx.frame_schema = pdf_walk_bind(owner, schemas.get(), "context", &frame_schema, error);
+    if (paged) {
+        ctx.fragment_schema = pdf_walk_bind(owner, schemas.get(), "fragment", &fragment_schema, error);
+        ctx.page_schema = pdf_walk_bind(owner, schemas.get(), "page", &page_schema, error);
+        ctx.boundary_schema = pdf_walk_bind(owner, schemas.get(), "boundary", &boundary_view_schema, error);
+    }
     if (get_type_id(error.get()) == LMD_TYPE_ERROR) return error.get();
     if (memchr(path.get().get_chars(), 0, path.get().get_len()))
         return pdf_walk_error("PDF source path contains an embedded NUL");
     lam::Temp<char> filename(mem_strdup(path.get().get_chars(), MEM_CAT_RENDER));
     if (!filename || !render_export_session_begin(&session, filename.get(),
-            (int)width, (int)height, (int)width, (int)height, 1.0f, true, false, 1.0f)) // INT_CAST_OK: validated integer viewport dimensions.
+            (int)width, (int)height, (int)width, (int)height, 1.0f, true, paged, 1.0f)) // INT_CAST_OK: validated integer viewport dimensions.
         return pdf_walk_error("cannot load and lay out PDF export source");
     ctx.ui_context = lam::up(session.ui_context.get());
     ctx.font.style = lam::up(&session.ui_context->default_font);
     ctx.color = {.r = 0, .g = 0, .b = 0, .a = 255};
+    ctx.frame.text = ItemNull; ctx.frame.page_label = ItemNull;
+    ctx.frame.matrix = rdt_matrix_identity();
+    if (paged) {
+        if (!session.paged_view || session.paged_view->model->page_count > UINT32_MAX)
+            return pdf_walk_error("PDF page count exceeds supported range");
+        ctx.frame.page_count = (uint32_t)session.paged_view->model->page_count;
+        ViewPageSelection selection = {};
+        const char* ranges = get_type_id(selected_pages.get()) == LMD_TYPE_STRING ? selected_pages.get().get_chars() : nullptr;
+        if (view_page_selection_parse(selection_pool, ranges, &selection) != VIEW_MODEL_OK)
+            return pdf_walk_error("invalid PDF page selection");
+        ViewModelStatus status = view_tree_pages_visit(session.paged_view, &selection, pdf_secondary_page, &ctx);
+        if (get_type_id(error.get()) == LMD_TYPE_ERROR) return error.get();
+        if (status != VIEW_MODEL_OK || !pages.get().array->length)
+            return pdf_walk_error("cannot export the selected physical pages");
+        result.set(vmap_new());
+        radiant_rooted_obj_set(result, "pages", pages.get());
+        return result.get();
+    }
     ctx.frame.page_width = session.has_page_geometry ? session.page_width : (float)session.content_width;
     ctx.frame.page_height = session.has_page_geometry ? session.page_height : (float)session.content_height;
-    ctx.frame.text = ItemNull;
+    ctx.frame.page_number = ctx.frame.page_count = 1;
     ctx.frame.color = render_document_output_background(session.document->view_tree->root);
     ctx.frame.matrix = rdt_matrix_scale(1.0f, 1.0f);
     pdf_walk_dispatch(&ctx, "begin_page");
@@ -502,19 +705,6 @@ RADIANT_C_API Item fn_radiant_pdf_walk(Item path_item, Item options_item,
     render_walk_view_one(&backend, &walk, session.document->view_tree->root);
     pdf_walk_dispatch(&ctx, "end_page");
     if (get_type_id(error.get()) == LMD_TYPE_ERROR) return error.get();
-    if (!output->ops->finish(output)) return pdf_walk_error("PDF callback returned unsupported byte content");
-    const char* bytes = nullptr;
-    size_t size = 0;
-    if (!output->ops->bytes(output, &bytes, &size) || size > INT64_MAX)
-        return pdf_walk_error("PDF callback output exceeds supported byte length");
-    result.set(vmap_new());
-    if (get_type_id(result.get()) != LMD_TYPE_VMAP)
-        return pdf_walk_error("cannot allocate PDF callback result");
-    Binary* content = heap_binary_from_bytes(bytes, size);
-    if (!content) return pdf_walk_error("cannot allocate PDF callback bytes");
-    radiant_rooted_obj_set(result, "content", {.item = x2it(content)});
-    radiant_rooted_obj_set(result, "width", push_d(ctx.frame.page_width));
-    radiant_rooted_obj_set(result, "height", push_d(ctx.frame.page_height));
-    radiant_rooted_obj_set(result, "resources", resources.get());
-    return result.get();
+    if (!pdf_walk_page_finish(&ctx)) return error.get();
+    return array_item_read(pages.get().array, 0);
 }

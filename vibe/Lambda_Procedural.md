@@ -1,5 +1,12 @@
 # Lambda Procedural Enhancement Proposal
 
+> **Current effect boundary (USER, 2026-10-15):** S12.1.1v3 / D6.1.1v2 require
+> element attributes and content to evaluate as pure functional expressions,
+> even when the literal is inside a procedure. Prepare a procedure result in
+> a preceding statement (`let parts = load_parts();`) and then construct the
+> element from that value (`let file = <file format:'pdf', parts>;`). A direct
+> `pn` call in the element is rejected statically or guarded dynamically.
+
 ## Implementation Status
 
 **Status: ✅ Core Features Implemented**

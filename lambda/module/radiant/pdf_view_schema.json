@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "revision": 1,
+  "revision": 2,
   "outputs": {
     "cpp": "lambda/module/radiant/pdf_view_schema.inc",
     "lambda": "lmd/package/pdf/view_schema.ls",
@@ -236,6 +236,192 @@
       ]
     },
     {
+      "name": "Rect",
+      "cpp_type": "RdtLogicalRect",
+      "binding": "radiant.RdtLogicalRect",
+      "symbol": "rect_schema",
+      "fields": [
+        {
+          "name": "x",
+          "type": "f32"
+        },
+        {
+          "name": "y",
+          "type": "f32"
+        },
+        {
+          "name": "width",
+          "type": "f32"
+        },
+        {
+          "name": "height",
+          "type": "f32"
+        }
+      ]
+    },
+    {
+      "name": "ViewRef",
+      "cpp_type": "LayoutViewRef",
+      "binding": "radiant.LayoutViewRef",
+      "symbol": "view_ref_schema",
+      "fields": [
+        {
+          "name": "tree_id",
+          "type": "u64"
+        },
+        {
+          "name": "generation",
+          "type": "u32"
+        },
+        {
+          "name": "node_id",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "ViewState",
+      "cpp_type": "ViewNodeState",
+      "binding": "radiant.ViewNodeState",
+      "symbol": "view_state_schema",
+      "fields": [
+        {
+          "name": "font",
+          "type": "Font?",
+          "pointer": true
+        },
+        {
+          "name": "boundary",
+          "type": "Boundary?",
+          "pointer": true
+        },
+        {
+          "name": "occurrence_count",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "Fragment",
+      "cpp_type": "LayoutViewNode",
+      "binding": "radiant.LayoutViewNode",
+      "symbol": "fragment_schema",
+      "fields": [
+        {
+          "name": "ref",
+          "type": "ViewRef"
+        },
+        {
+          "name": "rect",
+          "type": "Rect"
+        },
+        {
+          "name": "state",
+          "type": "ViewState?",
+          "pointer": true
+        },
+        {
+          "name": "computed_boundary",
+          "type": "Boundary?",
+          "pointer": true
+        },
+        {
+          "name": "text_start",
+          "type": "u64"
+        },
+        {
+          "name": "text_length",
+          "type": "u64"
+        },
+        {
+          "name": "generated",
+          "type": "bool"
+        },
+        {
+          "name": "clip_content",
+          "type": "bool"
+        },
+        {
+          "name": "first_fragment",
+          "type": "bool"
+        },
+        {
+          "name": "last_fragment",
+          "type": "bool"
+        },
+        {
+          "name": "paint_box",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "Page",
+      "cpp_type": "ViewPageBox",
+      "binding": "radiant.ViewPageBox",
+      "symbol": "page_schema",
+      "fields": [
+        {
+          "name": "node",
+          "type": "Fragment"
+        },
+        {
+          "name": "content_rect",
+          "type": "Rect"
+        },
+        {
+          "name": "page_number",
+          "type": "u32"
+        },
+        {
+          "name": "sequence_page",
+          "type": "u32"
+        },
+        {
+          "name": "folio",
+          "type": "u32"
+        },
+        {
+          "name": "blank",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "BoundaryView",
+      "cpp_type": "PdfBoundaryView",
+      "binding": "radiant.PdfBoundaryView",
+      "symbol": "boundary_view_schema",
+      "fields": [
+        {
+          "name": "x",
+          "type": "f32"
+        },
+        {
+          "name": "y",
+          "type": "f32"
+        },
+        {
+          "name": "width",
+          "type": "f32"
+        },
+        {
+          "name": "height",
+          "type": "f32"
+        },
+        {
+          "name": "bound",
+          "type": "Boundary?",
+          "pointer": true
+        },
+        {
+          "name": "font",
+          "type": "Font?",
+          "pointer": true
+        }
+      ]
+    },
+    {
       "name": "Context",
       "cpp_type": "PdfWalkFrame",
       "binding": "radiant.PdfWalkFrame",
@@ -288,6 +474,31 @@
         {
           "name": "sequence",
           "type": "i32"
+        },
+        {
+          "name": "fragment",
+          "type": "Fragment?",
+          "pointer": true
+        },
+        {
+          "name": "width",
+          "type": "f32"
+        },
+        {
+          "name": "height",
+          "type": "f32"
+        },
+        {
+          "name": "page_number",
+          "type": "u32"
+        },
+        {
+          "name": "page_count",
+          "type": "u32"
+        },
+        {
+          "name": "page_label",
+          "type": "string?"
         }
       ]
     }
@@ -297,7 +508,10 @@
     "schemas": {
       "element": "View",
       "text_rect": "TextRect",
-      "context": "Context"
+      "context": "Context",
+      "fragment": "Fragment",
+      "page": "Page",
+      "boundary": "BoundaryView"
     }
   }
 }

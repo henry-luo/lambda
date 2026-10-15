@@ -3976,6 +3976,10 @@ bool render_svg_filter_spend_work(const RdtSvgFilterRun* run, size_t work);
 bool render_memory_allow_allocation(MemContext* memory, size_t bytes);
 bool render_surface_allocation_size(float width, float height, size_t* bytes);
 ImageSurface* render_surface_create_budgeted(MemContext* memory, float width, float height);
+// owned raster helper result; the caller destroys the surface after copying/encoding it.
+bool render_paint_snapshot(const PaintList* paint, Bound bounds, float viewport_width,
+    float viewport_height, float density, ImageSurface** surface, Rect* placement,
+    DisplayList* backdrop = nullptr);
 
 // ===== render_background.hpp =====
 // Background rendering functions

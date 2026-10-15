@@ -1,6 +1,6 @@
 # JS MVP: 90% of LJS Test262 coverage
 
-**Date:** 2026-10-14. **Status:** in progress. The latest complete whole-population audit (`typed_methods4`) passes **27,597/40,261 IDs (68.5%)** after every required variant. Another **8,638** passes are needed for 90%. Newer interpreter, library and async increments are undergoing integrated verification; they are not included in that coverage figure. The shared Lambda/Input gate and performance acceptance remain open. Earlier captures remain build-specific evidence.
+**Date:** 2026-10-15. **Status:** coverage milestone verified on archived `parallel38`: **37,445/40,261 IDs (93.0056%)** pass every required variant, **1,210** above the 90% target. No original whole-entry passes are lost; four later selected controls remain archived timeout losses. Pin45's eval/replacement followup passes **647/647** focused tests normally and under forced GC and **616/616** selected required-mode cases, regaining those controls. Watchdog recovery, final integration, a fresh whole audit and deferred performance acceptance remain open. All captures stay build-specific.
 **Design:** [JS_MVP_Lmd §34](../jube/JS_MVP_Lmd.md#34-ninety-percent-of-ljs-test262-coverage).
 **Scope:** extend the implemented MVP toward 90% of the frozen LJS passing
 population, preserving ordinary benchmark performance. This plan stages the
@@ -1521,3 +1521,434 @@ Benchmark timing is still deferred. The historical residual inventory records
 1,664 older nonpasses superseded by selected canonical passes and 2,982 queued
 candidates; those bookkeeping figures are not current coverage or confirmed
 current failures. Only the fresh same-build whole audit can close the 90% gate.
+
+#### Parallel39–41: Array, String and shared-buffer residuals (2026-10-15)
+
+Three coding workers staged independent packages against merged HEAD
+`bb7f78bf05360be13d3559dfe5b53f1f27c7c8c8`; the integrating agent owns review,
+conflict resolution, builds and final verification. A private release control
+from that HEAD has SHA-256
+`ed415fb6afd84481da7bdbb5fd222398f5adbea03218f6b0f9d12e1c93799b41`.
+The older parallel38 whole audit remains attributable to its own archived build.
+
+- **Array:** parameterize the existing copyWithin/toSorted/toSpliced/with and
+  Array.of algorithms with immutable `JsArrayOps`/`JsArrayIndexOp`. Disclosed
+  boundaries are `js_array_method_with_ops`, `js_array_of_with_ops`,
+  `js_array_default_ops`, `mvp_lmd_array_ops`, and the promoted existing
+  `mvp_lmd_buffer_ops`. Reuse frontend property/constructor operations and
+  sorting. Preserve holes, strict writes/deletes, intrinsic copying results,
+  comparator/coercion order and scalar homes. Reuse the existing rooted
+  `js_create_data_property` for non-Array creation, including function-valued
+  custom constructor results and Proxy callbacks. Native Array subclass
+  allocation is a separate residual.
+- **String:** promote existing `JsStringIntrinsicOp`; extract the existing text
+  algorithms as `js_string_text_with_ops` with `JsStringTextOps`. Register the
+  thirteen Annex B HTML wrappers, normalize, localeCompare, isWellFormed,
+  toWellFormed and toLocaleUpperCase. Reuse existing normalization, WTF8, HTML
+  rendering and Lambda case conversion. Retain LJS's non-Intl locale policy.
+  Empty input still converts and validates normalize's form. replaceAll remains
+  a separate reuse audit.
+- **Shared buffer:** promote `js_construct_arraybuffer_target`; factor
+  `js_arraybuffer_slice_kernel` and parameterize
+  `js_sharedarraybuffer_operation_with_ops`. `JsBufferViewKind` selects the
+  existing ArrayBuffer/DataView/SAB families. Keep exported wrapper signatures,
+  existing carriers/backing storage, physical brands and precise roots. SAB
+  species rejects identical backing storage even through another carrier. Its
+  optional nominal class and three slots are planned only when observable.
+  Atomics, agents and additional realms are excluded.
+
+Reuse and ordinary-path separation follow **D1.3v3**, **D2.6.9v3**,
+**D5.2–D5.3**, and **D8.4.1v2**. Container/inline String addresses are nonmoving;
+Array/Map data buffers can compact (**D4.3.1**, **D4.3.2v2**). New ownership
+boundaries preserve callback-live inputs; they do not imply object relocation.
+All existing method IDs and successful lookup prefixes are retained. No new
+MIR import, container flag or backing-store representation is introduced.
+
+Before integration, fifteen sampled frozen Test262 IDs fail on parallel38.
+The merged control also reproduces missing Array.of indexed fields on a
+function result (AST/MIR, normal/forced GC), Proxy descriptor reentry failure
+under forced GC (AST/MIR), and empty-input normalization ordering failure in
+both backends. Exact source, binary and patch hashes are archived under
+`temp/mvp_test262_90/parallel39/`. These are measured controls, distinct from
+other source-audited ownership refinements.
+
+The feature union contains **500 frozen IDs**: Array126, String160 and SAB214.
+Require normal/forced-GC focused checks, all required modes for those IDs,
+complete native/shared LJS and Lambda gates on the integrated pin. Preserve
+all Test262 harness, corpus and deadline settings. The ongoing whole audit and
+the later candidate's selected results must not be added across builds.
+Benchmark timing and performance acceptance remain deferred/open.
+
+The first integrated pin (`parallel39`) passes **600/601** focused tests and
+all twelve AST/MIR normal/forced-and-poisoned-GC shared bug controls. Additional
+probes reproduce four computed String-method crashes, while numeric and
+canonical numeric-string indexing controls pass. The existing planner omitted
+primitive prototypes for computed method names, exposing unsupported internal
+method tokens. The correction reuses `primitive_property_key` only where a
+receiver can be String and the key-domain proof cannot exclude named hooks.
+Canonical numeric strings reuse `mvp_lmd_string_key`; optional-family assertions
+protect numeric/decimal-affix indexing. New text token arms are omitted only
+when planned live prototype functions make them unreachable. No new helper is
+introduced (**D1.3v3**, **D8.4.1v2**).
+
+The focused failure is the original metadata program's valid `let of` binding.
+Minimal probes fail on both MVP and LJS AST and pass in Node. Existing parser
+identifier predicates already admit contextual `of`; lexical-declaration
+lookahead incorrectly excluded it. Remove that exclusion, retain legacy `in`
+handling, and cover ordinary/strict bindings, references, parameters,
+destructuring and loop-head ambiguity with eleven positive and six negative
+programs. Keep the original metadata fixture unchanged. Eight frozen for-of
+controls enlarge final selection to **508 IDs**. This is an owned handwritten
+parser change, not generated or vendor code.
+
+Node22 agrees on all revised Boolean oracles except SAB invalid-maximum ordering.
+The current [AllocateSharedArrayBuffer algorithm](https://tc39.es/ecma262/multipage/structured-data.html#sec-allocatesharedarraybuffer)
+and frozen `options-maxbytelength-compared-before-object-creation.js` require
+RangeError before reading the prototype. Retain that expectation and its exact
+Node divergence. A separate small valid request checks prototype-getter abrupt
+identity without relying on a huge allocation request.
+
+A concurrent merge advanced HEAD to
+`e75979496d85bb9b33aa4cbde62516ef9db50131` during the intermediate build;
+its changes relative to the control touch CSS/Radiant, not JS. The final
+`parallel40` build records and guards all tracked C/C++/header/config inputs
+and HEAD, together with the complete dirty-source snapshot. Its integrated
+run passes **612/613** focused tests, **204/204** native JS tests,
+**51/51** backtracker tests, **5/5** affected native groups with forced GC,
+and twelve repaired computed String/index controls normally and with forced GC.
+
+The remaining new negative group exposes two general shared early-error gaps:
+multiple iteration declarators are silently truncated by the loop AST builder,
+and sloppy lexical bindings named `let` are accepted, including destructuring.
+Five minimal probes reproduce acceptance in both MVP and LJS AST; Node rejects
+them. The parser now rejects multiple declarators before `in`/`of`. The existing
+reserved-binding walker accepts a lexical policy, propagated through the same
+binding-child traversal, and validates declared loop patterns after their
+declaration wrapper is stripped. Property keys, default expressions, sloppy
+var/parameter names and C-style multiple declarations retain their existing
+meaning. These changes run only during validation; no new helper or runtime
+path is added (**D1.3v3**, **D8.1.3v24**). The original negative fixtures remain
+unchanged, with fourteen positive and twenty-two additional negative controls.
+
+Pin40's selected/forced-GC aggregate work was explicitly superseded after these
+defects were reproduced; partial captures remain diagnostic and are not coverage.
+Pin `parallel41` passes **616/616** focused checks both normally and with
+forced/poisoned GC, **204/204** native JS checks, **51/51** backtracker checks,
+**5/5** affected native groups with forced GC, **39/39** direct regression
+probes and twelve shared AST/MIR normal/forced-GC controls. Its **519-ID** frozen
+selection has **497** fully passing cases in all required modes: canonical
+497 PASS / 21 FAIL / 1 TIMEOUT after retained individual replays; all 485
+additional required strict variants pass. No prior passing ID within the
+selection is lost. Shared LJS records **40,260/40,261** fully passing, one
+RegExp character-class case passing only on retry and zero regressions. Lambda
+aggregate verification is deferred to the next integrated pin. Whole pin38
+continues independently; selected gains are never added to an older whole
+score. Benchmark timing remains deferred.
+
+#### Parallel42: selected residuals and bounded entry emission (2026-10-15)
+
+The selected failures drive three scoped followups, delivered by the same coding
+workers and integrated by the parent:
+
+- Extract existing Annex B `substr` as disclosed
+  `js_string_substr_with_ops(primitive_string, start, length, JsBufferViewOps*)`.
+  Reuse relative-index and ToIntegerOrInfinity coercion, UTF16 slicing and the
+  existing frontend numeric policy. Adopt both scalar arguments before
+  receiver/coercion callbacks; convert length even on empty/out-of-range input
+  and clamp infinities before integer narrowing. Append the method/catalog ID.
+  Reuse the planned Number prototype adapter for arbitrary inherited reads and
+  calls; closed numeric paths remain optional-family-free. Ten exact Node
+  oracles agree; pin41 reproduces the original Number capability errors.
+- Reuse `direct_define_pattern` before binding lexical iteration patterns.
+  Existing scope-definition checks reject repeated decoded bound names after
+  the parser strips the declaration wrapper. Property keys/default expressions
+  stay outside BoundNames; `var` duplicates and separate lexical scopes retain
+  their meaning. Thirteen positive and fourteen negative exact Node oracles
+  agree. No helper or runtime operation is added.
+- The remaining Array copyWithin/resizable-buffer timeout is compiler cost.
+  A retained sample of its exact canonical harness source shows every sampled
+  frame in MIR register allocation. Its main function has 60,525 MIR lines,
+  19,662 virtual registers and 1,941 calls. Thirty-nine generic read trees
+  contribute 12,232 lines; global cache decoders add more. The test operates on
+  buffers of at most six elements, so the measured cause is not element copying.
+  Add disclosed compiler-only `compact_property_dispatch`: after a deterministic
+  4,096-emitted-register budget in a dynamic-source entry, reuse existing
+  `mvp_lmd_property_read` for canonical, unknown, unshaped reads and omit new
+  local/global cache decoders. This is a compiler cost heuristic; repeated loops
+  are not assumed cold. Preserve explicit shared caches, known shape/sequence/
+  native/private/with/super and deferred-key exits. Separately compiled and
+  inlined functions and closed/small entries retain existing emission. Reuse
+  `mvp_lmd_string_key` to classify immutable literal/lexical typed-array keys at
+  compile time. Add no runtime helper, ABI, vendor patch or deadline change.
+  Disclosed test-only `mvp_compact_entry_source` shares synthetic size pressure
+  across semantic, ownership, MIR-growth and unaffected-path controls.
+
+Ownership and dispatch boundaries follow **D1.3v3**, **D4.3.1**,
+**D4.3.2v2**, **D5.2–D5.3**, **D8.1.3v24** and **D8.4.1v2**.
+The final frozen selection is **527 IDs**, including twelve duplicate-binding
+controls with overlaps. Require a guarded private release build, normal and
+forced/poisoned focused checks, exact compiler-timeout replay under the unchanged
+limit, all required selected modes, full native/shared LJS and Lambda gates.
+Record individual replays separately. Benchmark performance acceptance remains
+open while timing is deferred. Exact patches, source/binary hashes, Node oracles
+and compiler samples are retained under `temp/mvp_test262_90/parallel41/` and
+`parallel42/`; this selection does not replace the whole-population audit.
+
+Pin `parallel42` has guarded private release SHA-256
+`c007ab9c042557fcaf011e2113630a6d97d35a660bc2af0b19a0b2d10db87392`.
+All 1,445 tracked C/C++/header/config inputs and HEAD match its build record;
+the existing 58 enum entries and 69 catalog-prefix rows remain unchanged.
+It passes **635/635** focused checks normally and with forced/poisoned GC,
+**204/204** native JS, **51/51** backtracker, **5/5** affected native GC,
+**39/39** regression probes, twelve prior shared controls and forty additional
+AST/MIR normal/forced-GC followup controls. Parent Node oracles pass **57/57**.
+
+Selected canonical execution passes **527/527**. Additional strict execution
+initially records 501 PASS / 2 TIMEOUT / 10 missing-result FAIL; isolated replay
+recovers eleven of twelve unresolved cases. The assembled all-required record is
+**526/527**, with 512 strict PASS / 1 TIMEOUT and zero prior selected losses.
+The independent verifier reconstructs raw outcomes, unresolved populations,
+replays, strict-only metadata and binary/corpus provenance. A later exact strict
+copyWithin diagnostic passes at 7.8 seconds; it does not overwrite the retained
+timeout or increase this score. Normal MIR shrinks from 60,525 to **45,589** main
+lines and from 19,662 to **14,615** virtual registers; this is compiler-size
+evidence, not a benchmark measurement.
+
+Shared LJS remains **40,260/40,261** fully passing, with the same RegExp case
+passing only on retry and zero regressions. Its original issue is the unchanged
+three-second slow classification, distinct from the original case watchdog.
+Fresh isolated diagnostics show an older-build timeout and a current-build
+signal-11/abort near the watchdog; no candidate-only cause is established.
+Relevant RegExp algorithms are unchanged, and the crash diagnostic stays open.
+Lambda/Input verification is running; the newly merged music-layout GC stress
+fixture hit the baseline idle limit. Preserve that failure and compare the
+merged pre-increment release control before attribution.
+
+#### Parallel43: import early errors and guarded inline growth (integration)
+
+The whole pin38 canonical capture drives another grammar residual: **84** frozen
+ImportCall syntax negatives. Four minimal uncalled-body probes reproduce the
+wrong admission phase or acceptance on pin42; LJS AST/MIR also accepts them and
+Node rejects all four. Reuse the owned parser's argument count, spread flag,
+lookahead and error reporter to require one/two ImportCall arguments without
+spread and reject bare `new import(...)`. Preserve trailing commas, grouped
+sequence arguments, parenthesized constructor targets, `import.meta` member
+constructors and ordinary properties named `import`. This adds no helper or
+runtime/module behavior. Fourteen syntax positives and sixteen negatives agree
+with Node; valid two-argument parsing remains separate from MVP import-options
+execution admission (**D1.3v3**, **D8.1.3v24**).
+
+Remaining compiler analysis finds nine guarded `MayNeedBigInt` inlines occupying
+**16,855/45,589** entry lines and **477/1,558** calls. Method-token fanout is not
+the dominant cost. Reuse `compact_property_dispatch` at the existing guarded
+candidate loop to stop starting further guarded inlines after the emitted-cost
+budget. Preserve direct inlining, already-active inline bodies and separate
+functions. The first permitted body may cross the budget; this is not a strict
+whole-function line cap. Callee capture, argument snapshots, ABI validation,
+generic invocation and roots retain their existing paths (**D5.2–D5.3**,
+**D8.4.1v2**). Two new focused groups share the existing test source builder;
+ten exact Node oracles agree. No new helper, runtime ABI/import, vendor edit or
+deadline change is introduced. Both patches are staged for the next guarded
+integration, with compiler-size/required-mode replay and full shared gates still
+required. Timing and benchmark performance acceptance remain deferred/open.
+
+Pin42 Lambda/Input baseline records **7,067/7,069**, with all runtime/build-input
+guards matching its private build. Input is **2,112/2,112** and runtime is
+**4,955/4,957**; the stress executable's aggregate fallback is one failed gate,
+not a pass count for its unfinished corpus. Its last case is the merged
+`regression_music_layout`; the other failure is the previously observed LaTeX
+corpus timeout. A bounded release diagnostic on merged pre-increment control
+`parallel39-base` and pin42 passes music layout normally on both and reaches the
+60-second diagnostic bound under forced/poisoned GC on both. Preserve the full
+baseline idle failure and do not attribute it to the JS increment or call the
+broader gate green. This diagnostic does not alter any original deadline.
+
+Parent integration of the two parallel43 patches includes two more positive
+nested-spread parser controls (spread inside the specifier array or options
+object remains legal). All **42** exact Node controls agree. The frozen union is
+**611 IDs**. The next guarded build and all selected required-mode, focused/GC
+and shared gates are pending; no gain is added to an archived whole score.
+
+Pin43 runtime SHA-256 is
+`99dac6c11d1c67c2734f453573b347dfa8d958a915880b3a70eaf4cfa7080c0d`.
+It passes **611/611** selected canonical cases and **589/589** additional strict
+variants, with zero lost prior selected passes and no isolated replay needed.
+The independent raw/mode/provenance verifier confirms **611/611**. Native JS
+**204/204**, backtracker **51/51** and affected native GC **5/5** pass; shared LJS
+retains **40,260/40,261** fully passing, one retry-only RegExp result and zero
+regressions. Its normal focused run is **639/640** because a newly proposed MIR
+shape assertion has two invalid assumptions, while its semantic controls pass.
+
+Parent old/new probes find the original small source has one guarded inline on
+both pins (782 pre-generation registers/2,267 lines). Post-generation MIR moves
+the literal target into a temporary before `bne`; the test's line-only `bne`
+matcher therefore misses the guard. Count body-scoped function references,
+which handles the lowered form. Replace the unverified fixed 6,000-line growth
+allowance with the separately emitted callee size times added calls. On exact
+pre-generation controls, old four/twelve-call growth is 10,893 lines versus an
+8 * 1,128 = 9,024-line callee bound; new growth is 4,121. The corrected oracle
+rejects the old expansion and accepts the new policy. Original source programs
+and semantic assertions stay unchanged. This is a test-only correction, not
+a runtime change or Test262 expectation update. Pin43's partial broad baseline
+was explicitly superseded after its build completed; owned process-group proof
+and failed/partial captures are retained. No partial capture is published green.
+
+The next `parallel44` guarded build differs only in the corrected focused test
+and evidence docs. Require fresh normal/forced-GC focused checks, selected modes
+and shared gates. Pin43's normal compiler diagnostic now finishes in 3.1 seconds
+under its 10-second diagnostic bound; main MIR is **29,981** lines/**9,687**
+registers, versus 60,525/19,662 before these compiler changes. Retain this as
+compiler-size/deadline evidence, not benchmark performance or whole coverage.
+
+#### Parallel44 verification and archived whole-audit milestone
+
+Pin44 SHA-256 is
+`8dc4d7b70b645683c4307020f14d2762c9593bfd67d5434f9c46dafff8ad66d2`.
+All **1,445** tracked build inputs match the guarded build, and its runtime
+sources equal pin43's. The corrected focused MIR oracle now passes with the
+original semantic controls: **640/640** normally and **640/640** under forced/
+poisoned GC. Native JS **204/204**, backtracker **51/51**, affected native GC
+**5/5**, regression probes **39/39**, previous shared controls **12/12** and
+additional String/Number shared controls **40/40** pass. The independent raw/
+mode/provenance verifier confirms **611/611** selected all-required passes,
+including **589/589** additional strict variants, without isolated replay or
+lost prior selected passes (**D1.3v3**, **D5.2–D5.3**, **D8.4.1v2**).
+
+Shared LJS retains **40,260/40,261** fully passing plus the same retry-only
+non-whitespace RegExp case, zero regressions. Lambda/Input records
+**7,073/7,074**: Input **2,112/2,112**, runtime **4,961/4,962**. The merged
+music-layout forced-GC stress executable hits the existing idle limit; the
+unfinished executable is one failed aggregate gate, not a green corpus. The
+LaTeX corpus passes in this run. Runtime/test source and all tracked build-input
+guards remain true before and after the broad baseline. Its ordinary debug
+baseline binary is recorded separately from the pinned release executable.
+
+The archived pin38 whole audit has completed on its original executable,
+SHA-256 `8747e0880ae733144dd4849b67ca8dc307ff92036b72345b2b7da7f2b36140c1`.
+The independent verifier reports **37,445/40,261 (93.0056%)** all-required passes,
+**1,210** above the **36,235** target. Canonical results after exact isolated
+replay are **37,470 PASS / 2,767 FAIL / 2 CRASH / 22 TIMEOUT**; the **34,411**
+required additional strict modes give **34,386 PASS / 23 FAIL / 2 TIMEOUT**.
+The all-required pass set contains **34,241 positive / 3,204 negative** IDs;
+negative passes retain their expected phase/type. The resulting **2,816**
+nonpassing IDs stay explicit. Canonical replay reuses
+only the exact complete same-pin isolated prefetch; original logs, mode
+metadata, source/corpus/runner hashes and unresolved failures remain retained.
+Primary evidence is `temp/mvp_test262_90/parallel38/required-record.json` and
+`whole-record-verification.json`, not a sum of selected cohorts.
+
+Pin38 loses no pass from the **27,597**-pass `typed_methods4` whole entry audit
+or pin18's canonical controls. Four later selected all-required controls remain
+TIMEOUT losses: TypedArray `fill`/`includes` resizable-buffer cases and comment
+tests `S7.4_A5`/`S7.4_A6`. Do not broaden the zero-entry-loss claim to these
+controls or replace their original timeouts with partial/retry evidence. The
+parent replays those exact cases on pin44; workers inspect repeated eval and
+shared RegExp costs using existing kernels. No new helper is proposed at this
+checkpoint. The merged music stress issue remains diagnostic without a proven
+runtime cause.
+
+Pin44's fresh **40,261 canonical / 37,098 strict-eligible** whole audit started
+after its broad baseline finished. It retained unchanged cases, runner and
+deadlines, then was explicitly superseded by pin45's runtime fixes before
+completion; partial logs and owned process-group proof remain. Pin38 establishes the
+archived coverage milestone; current-build coverage, zero lost later controls,
+the shared baseline gate and benchmark performance acceptance remain separate.
+Benchmark timing is still deferred at the user's request, so the phase is not
+marked complete (**D8.1.3v24**, **D8.4.1v2**).
+
+#### Parallel45: close repeated-eval and native replacement costs
+
+The parent replays all four archived selected-control losses on pin44 with the
+unchanged runner/deadlines, separately in canonical and strict modes. Both
+TypedArray cases pass in both modes; both comment/eval cases still TIMEOUT.
+Their captures remain in `parallel44/control-regression-{canonical,strict}`.
+
+Source review identifies missing reuse: ordinary LJS recognizes comment-only
+eval before parsing, but the hosted MVP direct path only recognizes zero-length
+strings and the indirect path parses every String. Thus each empty Script
+allocates and retains a complete AST/pool/script. Reuse the existing
+`js_eval_source_is_blank(String*)`, promoted to `js_interp.hpp` after disclosure,
+in hosted direct/indirect eval. Replace its duplicated scanner with the shared
+JS lexer and require EOF at the actual source length, permitting only an initial
+hashbang token. Real tokens, four line terminators followed by code, malformed
+comments, misplaced hashbangs and non-string identity keep their proper paths.
+The borrowed String proof is allocation-free and adds no realm, cache or runtime
+helper (**D1.3v3**, **D8.1.3v24**, **D5.2–D5.3**).
+
+The shared retry-only non-whitespace RegExp case takes generic match-record
+construction for every wide subject. Reuse the existing guarded native bulk
+replacement loop for non-ASCII subjects only when compiled metadata proves one
+of the six built-in classes with `+`. Those nonempty runs cannot split an astral
+pair; matcher byte spans support the existing literal/template substitution.
+Native `exec`, coercion rechecking, writable `lastIndex`, no captures and the
+existing Unicode/indices/UTF16-subject exclusions remain. Callbacks retain their
+generic UTF16-index path. Precise roots retain immutable, nonmoving String bytes
+(**D4.3.1/D4.3.2v2**, **D5.2–D5.3**, **D8.4.1v2**).
+
+Independent source review finds an existing silent one-million-match cutoff in
+that bulk replacement loop. Remove it using the matcher's monotone byte-position
+contract; an empty ASCII match advances one byte, and a terminal empty match is
+processed once before stopping, avoiding end-plus-one overflow. A control with
+**1,000,003** wide and ASCII runs checks every replacement and final legacy match
+state. No matcher, helper, ABI, vendor, corpus or deadline change is introduced.
+
+Parent Node controls pass **6/6** eval programs and **17/17** replacement
+programs. The integrated tests add a shared 23-case byte proof, direct/indirect
+and hosted eval semantics, Unicode/templates/override/coercion/GC cases and an
+existing-counter optimization assertion. Pin45's guarded release build, SHA-256
+`89dfb9fb90f5a1705796f9f20820e72147572cdd09b95ba7ecbe8c3fe053c8c4`,
+passes **647/647** focused tests, **205/205** native JS tests, **51/51**
+backtracker tests and **6/6** affected native forced-GC groups. Forced/poisoned
+focused GC also passes **647/647**. The independently verified selected audit
+passes **616/616** all-required IDs, including **594/594** strict variants and
+all four archived selected-control losses. Its frozen population extends
+pin44's selection with the four archived losses and the official non-whitespace
+case. Both official comment/eval cases pass canonical and strict replays; the
+TypedArray `includes` case remains timeout-unstable in that replay. The exact
+ASCII million-match assertion fails on pin44 and passes pin45 AST/MIR, while
+Node agrees with the assertion. Pin44's unfinished audit is superseded with
+its original partial evidence retained; owned process-group checks precede
+termination. Pin45's waiting whole-audit queue is superseded before starting,
+pending the proven signal-ownership fix below; its selected and broad gates are
+left running, with their original evidence retained.
+Neither selected additions nor structural cost reductions alter pin38's
+**93.0056%** score. No new benchmark timing or performance acceptance is claimed.
+
+#### Batch watchdog ownership (integrated; final verification pending)
+
+Pin45's shared LJS baseline reports **40,261/40,261** passing and zero slow cases,
+but raw evidence records an initial **SIGABRT** after **516/600** cases.
+Eighty-four collateral cases recover and one original crash-point retry passes.
+Keep the initial abort explicit rather than describing the run as clean.
+The native report identifies a stack-canary failure at `js_strict_equal`'s return;
+two OS threads have stack pointers in the same 256 MB execution stack. The
+joining launcher and the execution worker both leave process-directed SIGALRM
+unmasked, while timeout/crash/MIR recovery records are process globals. A signal
+delivered to the launcher therefore jumps onto the still-running worker's stack.
+The engine's existing TLS recovery model already forbids this
+(**D5.3.6v2**, **D6.3.3v2**); no ruling changes.
+
+Reuse the existing batch handlers and jump records, making the records and
+armed flags thread-local. Register one immutable pthread owner before installing
+the alarm handler; a TLS signal-safe owner bit selects local recovery. Foreign
+alarm delivery forwards to that owner with `pthread_kill`, preserving errno;
+forwarding failure exits visibly with 124. Arm a timeout only after its checkpoint
+exists. This is one owned CLI-source fix, with no new helper, production API,
+vendor edit, case omission or deadline change. Native direct/foreign signal
+controls and unchanged Lambda/LJS/MVP batch gates remain required before a
+fresh whole audit. An earlier one-second diagnostic deliberately triggers the
+fault on pin45; raw AST stderr is corrupted. That diagnostic does not replace
+the ordinary Test262 deadlines or reclassify any original result.
+
+Pin45's broad Lambda/Input baseline completes **7,395/7,395**: runtime
+**5,283/5,283**, Input **2,112/2,112**, including the previously timeout-unstable
+**313/313** GC sweep, **92/92** JS optimization contracts and **1,527/1,527**
+core runtime cases. All tracked build-input and runtime/test source guards match
+its private build before/after the run. Its shared LJS initial abort remains
+qualified despite these green source-matched gates.
+
+The parent applies the one-file signal fix only after pin45's baseline finishes.
+Pin46 adds the original escaped-Unicode crash point to a **617-ID** frozen
+selection. New private release and deterministic native ownership checks,
+ordinary timeout/collateral controls, required-mode conformance and shared
+baselines are pending. No benchmark timing or phase-completion claim is added.

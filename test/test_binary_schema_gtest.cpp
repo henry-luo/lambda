@@ -550,23 +550,36 @@ TEST_F(BinarySchemaTest, MetadataDoesNotConsumePredicatesOrNestedIntersections) 
 }
 
 TEST_F(BinarySchemaTest, LambdaPdfOffsetsAndImageStreamsAreValidInBothTiers) {
+    const struct {
+        const char* script;
+        const char* file;
+        const char* page_count;
+        const char* expected;
+    } fixtures[] = {
+        {"test/lambda/pdf/output_resources.ls", "temp/pdf_lambda_resources.pdf", nullptr,
+            "[true, true, true, true, true, true, true, true]"},
+        {"test/lambda/pdf/output_pages.ls", "temp/pdf_lambda_pages.pdf", "3",
+            "[true, true, true, true, true, true, true, true, true]"},
+    };
     const char* tiers[] = {"interp", "jit"};
     for (const char* tier : tiers) {
         ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", tier}, {"LAMBDA_DISABLE_MIR_CACHE", "1"}, {nullptr, nullptr}};
         ShellOptions options = {};
         options.env = env;
         options.timeout_ms = 30000;
-        const char* arguments[] = {"./lambda.exe", "run", "test/lambda/pdf/output_resources.ls", nullptr};
-        ShellResult generated = shell_exec(arguments[0], arguments, &options);
-        EXPECT_FALSE(generated.timed_out) << tier;
-        EXPECT_EQ(generated.exit_code, 0) << tier << (generated.stderr_buf ? generated.stderr_buf : "");
-        EXPECT_NE(strstr(generated.stdout_buf ? generated.stdout_buf : "",
-            "[true, true, true, true, true, true, true, true]"), nullptr) << tier;
-        shell_result_free(&generated);
-        const char* check[] = {"python3", "test/pdf_output_check.py", "temp/pdf_lambda_resources.pdf", nullptr};
-        ShellResult checked = shell_exec(check[0], check, &options);
-        EXPECT_EQ(checked.exit_code, 0) << tier << (checked.stderr_buf ? checked.stderr_buf : "");
-        shell_result_free(&checked);
+        for (const auto& fixture : fixtures) {
+            const char* arguments[] = {"./lambda.exe", "run", fixture.script, nullptr};
+            ShellResult generated = shell_exec(arguments[0], arguments, &options);
+            EXPECT_FALSE(generated.timed_out) << tier;
+            EXPECT_EQ(generated.exit_code, 0) << tier << (generated.stderr_buf ? generated.stderr_buf : "");
+            EXPECT_NE(strstr(generated.stdout_buf ? generated.stdout_buf : "",
+                fixture.expected), nullptr) << tier << fixture.script;
+            shell_result_free(&generated);
+            const char* check[] = {"python3", "test/pdf_output_check.py", fixture.file, fixture.page_count, nullptr};
+            ShellResult checked = shell_exec(check[0], check, &options);
+            EXPECT_EQ(checked.exit_code, 0) << tier << (checked.stderr_buf ? checked.stderr_buf : "");
+            shell_result_free(&checked);
+        }
     }
 }
 

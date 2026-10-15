@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 63.0.0 (2026-10-15)
+**Spec version:** 64.0.0 (2026-10-15)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1837,11 +1837,15 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
 
 ### S12.1 The one-bit effect system
 
-- **S12.1.1v2** `fn`/`pn` is a declared, compiler-checked, one-bit effect
+- **S12.1.1v3** `fn`/`pn` is a declared, compiler-checked, one-bit effect
   system: `fn` is pure and deterministic under any schedule; `pn` may have
   effects; **`fn` can never call `pn`** — statically where the callee is
   known, and at run time where it arrives as a value (S12.1.4v3(6)). **A
   script's top level is `fn` context**: procedural code belongs in `main()`.
+  Element construction evaluates attributes and content in **`fn` context**,
+  including a literal inside a `pn`. A procedure call therefore cannot be
+  nested directly in `<elmt ...>`; execute it in a preceding procedural
+  statement and use its bound result in the element (USER, 2026-10-15).
   The run-time check is confined to the calls that need it — never the
   statically resolved ones. Accepted price: no reified effects — a `pn` call
   executes; there is no held, unexecuted effect value. [Features §3.6, C20.7]

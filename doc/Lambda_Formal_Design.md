@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 31.0.0 (2026-10-15)
+**Spec version:** 32.0.0 (2026-10-15)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1291,13 +1291,17 @@ that carries them.
 
 ### D6.1 The effect coloring
 
-- **D6.1.1** `fn`/`pn` is a one-bit, declared, compiler-checked effect
+- **D6.1.1v2** `fn`/`pn` is a one-bit, declared, compiler-checked effect
   system (semantics §S12.1), realized as **infrastructure, not
   documentation**: purity is a core AST flag (guest builders mark
   all-effectful), and every callable surface carries the bit — sys-func
   registry rows, Jube module signatures (the `fn`/`pn` prefix is
   mandatory — *purity is never accidental*), and the runtime-function
-  catalog. [U14, NM §6.2, Lang_Hosting §7.1]
+  catalog. The AST effect walk visits both attribute and content edges of
+  element literals and establishes their pure construction boundary even
+  inside a procedure. Unknown callable colours retain the runtime guard;
+  ordinary preceding procedure statements retain their procedural context.
+  [S12.1.1v3; U14, NM §6.2, Lang_Hosting §7.1]
 - **D6.1.2** The bit is load-bearing across the runtime: it is the
   const-folder's soundness gate, the stream-fusion and parallelization
   license (*Polars/DuckDB must trust their UDFs; Lambda verifies*), the

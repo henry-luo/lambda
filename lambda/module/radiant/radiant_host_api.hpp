@@ -16,3 +16,5 @@ extern "C" Item fn_radiant_pdf_walk(Item path, Item options, Item callback, Item
 extern "C" Item fn_radiant_pdf_glyph_path(Item context);
 extern "C" Item fn_radiant_pdf_clip_path(Item context);
 extern "C" Item fn_radiant_pdf_image(Item context);
+extern "C" Item fn_radiant_pdf_object(Item dictionary);
+extern "C" Item fn_radiant_pdf_deflate(Item bytes);

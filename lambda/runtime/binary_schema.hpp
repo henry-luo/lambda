@@ -102,17 +102,33 @@ template<class T> struct BinarySchemaPointer<T*> {
 
 template<class T> struct BinarySchemaScalarKind;
 template<class T> struct BinarySchemaScalarKind<const T> : BinarySchemaScalarKind<T> {};
+// native size_t and fixed-width typedefs may name different fundamental types.
+template<class T> struct BinarySchemaIntegerKind {
+    static_assert(sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8,
+        "native binary integer has unsupported width");
+    static constexpr bool signed_value = T(-1) < T(0);
+    static constexpr BinaryFieldKind kind = sizeof(T) == 1 ? (signed_value ? BINARY_FIELD_I8 : BINARY_FIELD_U8) :
+        sizeof(T) == 2 ? (signed_value ? BINARY_FIELD_I16 : BINARY_FIELD_U16) :
+        sizeof(T) == 4 ? (signed_value ? BINARY_FIELD_I32 : BINARY_FIELD_U32) :
+        (signed_value ? BINARY_FIELD_I64 : BINARY_FIELD_U64);
+};
+#define BINARY_SCHEMA_INTEGER_KIND(T) \
+    template<> struct BinarySchemaScalarKind<T> : BinarySchemaIntegerKind<T> {}
+BINARY_SCHEMA_INTEGER_KIND(char);
+BINARY_SCHEMA_INTEGER_KIND(signed char);
+BINARY_SCHEMA_INTEGER_KIND(unsigned char);
+BINARY_SCHEMA_INTEGER_KIND(short);
+BINARY_SCHEMA_INTEGER_KIND(unsigned short);
+BINARY_SCHEMA_INTEGER_KIND(int);
+BINARY_SCHEMA_INTEGER_KIND(unsigned int);
+BINARY_SCHEMA_INTEGER_KIND(long);
+BINARY_SCHEMA_INTEGER_KIND(unsigned long);
+BINARY_SCHEMA_INTEGER_KIND(long long);
+BINARY_SCHEMA_INTEGER_KIND(unsigned long long);
+#undef BINARY_SCHEMA_INTEGER_KIND
 #define BINARY_SCHEMA_SCALAR_KIND(T, Kind) \
     template<> struct BinarySchemaScalarKind<T> { static constexpr BinaryFieldKind kind = Kind; }
 BINARY_SCHEMA_SCALAR_KIND(bool, BINARY_FIELD_BOOL);
-BINARY_SCHEMA_SCALAR_KIND(int8_t, BINARY_FIELD_I8);
-BINARY_SCHEMA_SCALAR_KIND(uint8_t, BINARY_FIELD_U8);
-BINARY_SCHEMA_SCALAR_KIND(int16_t, BINARY_FIELD_I16);
-BINARY_SCHEMA_SCALAR_KIND(uint16_t, BINARY_FIELD_U16);
-BINARY_SCHEMA_SCALAR_KIND(int32_t, BINARY_FIELD_I32);
-BINARY_SCHEMA_SCALAR_KIND(uint32_t, BINARY_FIELD_U32);
-BINARY_SCHEMA_SCALAR_KIND(int64_t, BINARY_FIELD_I64);
-BINARY_SCHEMA_SCALAR_KIND(uint64_t, BINARY_FIELD_U64);
 BINARY_SCHEMA_SCALAR_KIND(float, BINARY_FIELD_F32);
 BINARY_SCHEMA_SCALAR_KIND(double, BINARY_FIELD_F64);
 #undef BINARY_SCHEMA_SCALAR_KIND

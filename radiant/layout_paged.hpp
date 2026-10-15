@@ -52,5 +52,17 @@ void paged_composition_destroy(ViewTree* tree);
 const TypesetTarget* layout_secondary_target(ViewTree* tree, const char* id);
 const TypesetMark* layout_secondary_mark(ViewTree* tree, TypesetMarkKind kind, const char* name,
     uint32_t page_number, TypesetMarkSelection selection);
+// one ordered fragment traversal serves native painting and schema-backed export.
+struct SecondaryViewVisitor {
+    void* context;
+    bool (*fragment)(void*, const LayoutViewNode*, bool entering);
+    bool (*boundary)(void*, const BoundaryProp*, RdtLogicalRect);
+    bool (*fill)(void*, Color, RdtLogicalRect);
+    bool (*clip)(void*, const RdtLogicalRect*, const float* inset); // null rect closes the scope
+    bool (*glyph)(void*, const LayoutViewNode*, const PaintGlyphRun*);
+    bool (*image)(void*, const LayoutViewNode*, const PaintImageBox*);
+};
+bool layout_secondary_visit_page(ViewTree* tree, const ViewPageBox* page,
+    const SecondaryViewVisitor* visitor);
 bool layout_secondary_paint_page(ViewTree* tree, const ViewPageBox* page, PaintList* paint);
 bool layout_secondary_paint_root(ViewTree* tree, PaintList* paint, const RdtLogicalRect* clip = nullptr);

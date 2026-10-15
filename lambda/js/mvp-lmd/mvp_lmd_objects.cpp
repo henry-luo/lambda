@@ -218,7 +218,30 @@ const MvpLmdBuiltinMethod mvp_lmd_builtin_methods[] = {
         {"lastIndexOf", LMD_TYPE_STRING, LMD_METHOD_STRING_LAST_INDEX_OF},
         {"toFixed", LMD_TYPE_FLOAT, LMD_METHOD_TO_FIXED},
         {"toString", LMD_TYPE_FLOAT, LMD_METHOD_NUMBER_STRING},
-        {"toString", LMD_TYPE_DECIMAL, LMD_METHOD_BIGINT_STRING}};
+        {"toString", LMD_TYPE_DECIMAL, LMD_METHOD_BIGINT_STRING},
+        {"copyWithin", LMD_TYPE_ARRAY, LMD_METHOD_COPY_WITHIN, 2},
+        {"toSorted", LMD_TYPE_ARRAY, LMD_METHOD_TO_SORTED, 1},
+        {"toSpliced", LMD_TYPE_ARRAY, LMD_METHOD_TO_SPLICED, 2},
+        {"with", LMD_TYPE_ARRAY, LMD_METHOD_WITH, 2},
+        {"normalize", LMD_TYPE_STRING, LMD_METHOD_STRING_NORMALIZE, 0},
+        {"localeCompare", LMD_TYPE_STRING, LMD_METHOD_STRING_LOCALE_COMPARE, 1},
+        {"isWellFormed", LMD_TYPE_STRING, LMD_METHOD_STRING_IS_WELL_FORMED, 0},
+        {"toWellFormed", LMD_TYPE_STRING, LMD_METHOD_STRING_TO_WELL_FORMED, 0},
+        {"anchor", LMD_TYPE_STRING, LMD_METHOD_STRING_ANCHOR, 1},
+        {"big", LMD_TYPE_STRING, LMD_METHOD_STRING_BIG, 0},
+        {"blink", LMD_TYPE_STRING, LMD_METHOD_STRING_BLINK, 0},
+        {"bold", LMD_TYPE_STRING, LMD_METHOD_STRING_BOLD, 0},
+        {"fixed", LMD_TYPE_STRING, LMD_METHOD_STRING_FIXED, 0},
+        {"fontcolor", LMD_TYPE_STRING, LMD_METHOD_STRING_FONTCOLOR, 1},
+        {"fontsize", LMD_TYPE_STRING, LMD_METHOD_STRING_FONTSIZE, 1},
+        {"italics", LMD_TYPE_STRING, LMD_METHOD_STRING_ITALICS, 0},
+        {"link", LMD_TYPE_STRING, LMD_METHOD_STRING_LINK, 1},
+        {"small", LMD_TYPE_STRING, LMD_METHOD_STRING_SMALL, 0},
+        {"strike", LMD_TYPE_STRING, LMD_METHOD_STRING_STRIKE, 0},
+        {"sub", LMD_TYPE_STRING, LMD_METHOD_STRING_SUB, 0},
+        {"sup", LMD_TYPE_STRING, LMD_METHOD_STRING_SUP, 0},
+        {"toLocaleUpperCase", LMD_TYPE_STRING, LMD_METHOD_UPPER, 0},
+        {"substr", LMD_TYPE_STRING, LMD_METHOD_STRING_SUBSTR, 2}};
 const int mvp_lmd_builtin_method_count = sizeof(mvp_lmd_builtin_methods) / sizeof(mvp_lmd_builtin_methods[0]);
 TypeId mvp_lmd_method_owner(int id) {
     for (const auto& method : mvp_lmd_builtin_methods) if (method.id == id) return method.owner;

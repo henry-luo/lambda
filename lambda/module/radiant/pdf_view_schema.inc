@@ -131,6 +131,108 @@ const BinarySchema matrix_schema = {"RdtMatrix", sizeof(RdtMatrix), matrix_schem
     sizeof(matrix_schema_fields) / sizeof(matrix_schema_fields[0]), BINARY_SCHEMA_NATIVE,
     "radiant.RdtMatrix", nullptr, BINARY_SCHEMA_BINDING_ABI, RADIANT_PDF_SCHEMA_VERSION};
 
+static_assert(BinarySchemaScalarKind<decltype(((RdtLogicalRect*)nullptr)->x)>::kind == BINARY_FIELD_F32, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((RdtLogicalRect*)nullptr)->y)>::kind == BINARY_FIELD_F32, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((RdtLogicalRect*)nullptr)->width)>::kind == BINARY_FIELD_F32, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((RdtLogicalRect*)nullptr)->height)>::kind == BINARY_FIELD_F32, "binary binding scalar representation changed");
+const BinarySchemaField rect_schema_fields[] = {
+    BINARY_SCHEMA_MEMBER(RdtLogicalRect, x, BINARY_FIELD_F32),
+    BINARY_SCHEMA_MEMBER(RdtLogicalRect, y, BINARY_FIELD_F32),
+    BINARY_SCHEMA_MEMBER(RdtLogicalRect, width, BINARY_FIELD_F32),
+    BINARY_SCHEMA_MEMBER(RdtLogicalRect, height, BINARY_FIELD_F32),
+};
+const BinarySchema rect_schema = {"RdtLogicalRect", sizeof(RdtLogicalRect), rect_schema_fields,
+    sizeof(rect_schema_fields) / sizeof(rect_schema_fields[0]), BINARY_SCHEMA_NATIVE,
+    "radiant.RdtLogicalRect", nullptr, BINARY_SCHEMA_BINDING_ABI, RADIANT_PDF_SCHEMA_VERSION};
+
+static_assert(BinarySchemaScalarKind<decltype(((LayoutViewRef*)nullptr)->tree_id)>::kind == BINARY_FIELD_U64, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((LayoutViewRef*)nullptr)->generation)>::kind == BINARY_FIELD_U32, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((LayoutViewRef*)nullptr)->node_id)>::kind == BINARY_FIELD_U32, "binary binding scalar representation changed");
+const BinarySchemaField view_ref_schema_fields[] = {
+    BINARY_SCHEMA_MEMBER(LayoutViewRef, tree_id, BINARY_FIELD_U64),
+    BINARY_SCHEMA_MEMBER(LayoutViewRef, generation, BINARY_FIELD_U32),
+    BINARY_SCHEMA_MEMBER(LayoutViewRef, node_id, BINARY_FIELD_U32),
+};
+const BinarySchema view_ref_schema = {"LayoutViewRef", sizeof(LayoutViewRef), view_ref_schema_fields,
+    sizeof(view_ref_schema_fields) / sizeof(view_ref_schema_fields[0]), BINARY_SCHEMA_NATIVE,
+    "radiant.LayoutViewRef", nullptr, BINARY_SCHEMA_BINDING_ABI, RADIANT_PDF_SCHEMA_VERSION};
+
+static_assert(BinarySchemaSameType<BinarySchemaPointer<decltype(((ViewNodeState*)nullptr)->font)>::Target, FontProp>::value, "binary binding target type changed");
+static_assert(BinarySchemaSameType<BinarySchemaPointer<decltype(((ViewNodeState*)nullptr)->boundary)>::Target, BoundaryProp>::value, "binary binding target type changed");
+static_assert(BinarySchemaScalarKind<decltype(((ViewNodeState*)nullptr)->occurrence_count)>::kind == BINARY_FIELD_U64, "binary binding scalar representation changed");
+const BinarySchemaField view_state_schema_fields[] = {
+    BINARY_SCHEMA_REFERENCE(ViewNodeState, font, &font_schema, true),
+    BINARY_SCHEMA_REFERENCE(ViewNodeState, boundary, &boundary_schema, true),
+    BINARY_SCHEMA_MEMBER(ViewNodeState, occurrence_count, BINARY_FIELD_U64),
+};
+const BinarySchema view_state_schema = {"ViewNodeState", sizeof(ViewNodeState), view_state_schema_fields,
+    sizeof(view_state_schema_fields) / sizeof(view_state_schema_fields[0]), BINARY_SCHEMA_NATIVE,
+    "radiant.ViewNodeState", nullptr, BINARY_SCHEMA_BINDING_ABI, RADIANT_PDF_SCHEMA_VERSION};
+
+static_assert(BinarySchemaSameType<decltype(((LayoutViewNode*)nullptr)->ref), LayoutViewRef>::value, "binary binding target type changed");
+static_assert(BinarySchemaSameType<decltype(((LayoutViewNode*)nullptr)->rect), RdtLogicalRect>::value, "binary binding target type changed");
+static_assert(BinarySchemaSameType<BinarySchemaPointer<decltype(((LayoutViewNode*)nullptr)->state)>::Target, ViewNodeState>::value, "binary binding target type changed");
+static_assert(BinarySchemaSameType<BinarySchemaPointer<decltype(((LayoutViewNode*)nullptr)->computed_boundary)>::Target, BoundaryProp>::value, "binary binding target type changed");
+static_assert(BinarySchemaScalarKind<decltype(((LayoutViewNode*)nullptr)->text_start)>::kind == BINARY_FIELD_U64, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((LayoutViewNode*)nullptr)->text_length)>::kind == BINARY_FIELD_U64, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((LayoutViewNode*)nullptr)->generated)>::kind == BINARY_FIELD_BOOL, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((LayoutViewNode*)nullptr)->clip_content)>::kind == BINARY_FIELD_BOOL, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((LayoutViewNode*)nullptr)->first_fragment)>::kind == BINARY_FIELD_BOOL, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((LayoutViewNode*)nullptr)->last_fragment)>::kind == BINARY_FIELD_BOOL, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((LayoutViewNode*)nullptr)->paint_box)>::kind == BINARY_FIELD_BOOL, "binary binding scalar representation changed");
+const BinarySchemaField fragment_schema_fields[] = {
+    BINARY_SCHEMA_RECORD(LayoutViewNode, ref, &view_ref_schema),
+    BINARY_SCHEMA_RECORD(LayoutViewNode, rect, &rect_schema),
+    BINARY_SCHEMA_REFERENCE(LayoutViewNode, state, &view_state_schema, true),
+    BINARY_SCHEMA_REFERENCE(LayoutViewNode, computed_boundary, &boundary_schema, true),
+    BINARY_SCHEMA_MEMBER(LayoutViewNode, text_start, BINARY_FIELD_U64),
+    BINARY_SCHEMA_MEMBER(LayoutViewNode, text_length, BINARY_FIELD_U64),
+    BINARY_SCHEMA_MEMBER(LayoutViewNode, generated, BINARY_FIELD_BOOL),
+    BINARY_SCHEMA_MEMBER(LayoutViewNode, clip_content, BINARY_FIELD_BOOL),
+    BINARY_SCHEMA_MEMBER(LayoutViewNode, first_fragment, BINARY_FIELD_BOOL),
+    BINARY_SCHEMA_MEMBER(LayoutViewNode, last_fragment, BINARY_FIELD_BOOL),
+    BINARY_SCHEMA_MEMBER(LayoutViewNode, paint_box, BINARY_FIELD_BOOL),
+};
+const BinarySchema fragment_schema = {"LayoutViewNode", sizeof(LayoutViewNode), fragment_schema_fields,
+    sizeof(fragment_schema_fields) / sizeof(fragment_schema_fields[0]), BINARY_SCHEMA_NATIVE,
+    "radiant.LayoutViewNode", nullptr, BINARY_SCHEMA_BINDING_ABI, RADIANT_PDF_SCHEMA_VERSION};
+
+static_assert(BinarySchemaSameType<decltype(((ViewPageBox*)nullptr)->node), LayoutViewNode>::value, "binary binding target type changed");
+static_assert(BinarySchemaSameType<decltype(((ViewPageBox*)nullptr)->content_rect), RdtLogicalRect>::value, "binary binding target type changed");
+static_assert(BinarySchemaScalarKind<decltype(((ViewPageBox*)nullptr)->page_number)>::kind == BINARY_FIELD_U32, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((ViewPageBox*)nullptr)->sequence_page)>::kind == BINARY_FIELD_U32, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((ViewPageBox*)nullptr)->folio)>::kind == BINARY_FIELD_U32, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((ViewPageBox*)nullptr)->blank)>::kind == BINARY_FIELD_BOOL, "binary binding scalar representation changed");
+const BinarySchemaField page_schema_fields[] = {
+    BINARY_SCHEMA_RECORD(ViewPageBox, node, &fragment_schema),
+    BINARY_SCHEMA_RECORD(ViewPageBox, content_rect, &rect_schema),
+    BINARY_SCHEMA_MEMBER(ViewPageBox, page_number, BINARY_FIELD_U32),
+    BINARY_SCHEMA_MEMBER(ViewPageBox, sequence_page, BINARY_FIELD_U32),
+    BINARY_SCHEMA_MEMBER(ViewPageBox, folio, BINARY_FIELD_U32),
+    BINARY_SCHEMA_MEMBER(ViewPageBox, blank, BINARY_FIELD_BOOL),
+};
+const BinarySchema page_schema = {"ViewPageBox", sizeof(ViewPageBox), page_schema_fields,
+    sizeof(page_schema_fields) / sizeof(page_schema_fields[0]), BINARY_SCHEMA_NATIVE,
+    "radiant.ViewPageBox", nullptr, BINARY_SCHEMA_BINDING_ABI, RADIANT_PDF_SCHEMA_VERSION};
+
+static_assert(BinarySchemaScalarKind<decltype(((PdfBoundaryView*)nullptr)->x)>::kind == BINARY_FIELD_F32, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((PdfBoundaryView*)nullptr)->y)>::kind == BINARY_FIELD_F32, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((PdfBoundaryView*)nullptr)->width)>::kind == BINARY_FIELD_F32, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((PdfBoundaryView*)nullptr)->height)>::kind == BINARY_FIELD_F32, "binary binding scalar representation changed");
+static_assert(BinarySchemaSameType<BinarySchemaPointer<decltype(((PdfBoundaryView*)nullptr)->bound)>::Target, BoundaryProp>::value, "binary binding target type changed");
+static_assert(BinarySchemaSameType<BinarySchemaPointer<decltype(((PdfBoundaryView*)nullptr)->font)>::Target, FontProp>::value, "binary binding target type changed");
+const BinarySchemaField boundary_view_schema_fields[] = {
+    BINARY_SCHEMA_MEMBER(PdfBoundaryView, x, BINARY_FIELD_F32),
+    BINARY_SCHEMA_MEMBER(PdfBoundaryView, y, BINARY_FIELD_F32),
+    BINARY_SCHEMA_MEMBER(PdfBoundaryView, width, BINARY_FIELD_F32),
+    BINARY_SCHEMA_MEMBER(PdfBoundaryView, height, BINARY_FIELD_F32),
+    BINARY_SCHEMA_REFERENCE(PdfBoundaryView, bound, &boundary_schema, true),
+    BINARY_SCHEMA_REFERENCE(PdfBoundaryView, font, &font_schema, true),
+};
+const BinarySchema boundary_view_schema = {"PdfBoundaryView", sizeof(PdfBoundaryView), boundary_view_schema_fields,
+    sizeof(boundary_view_schema_fields) / sizeof(boundary_view_schema_fields[0]), BINARY_SCHEMA_NATIVE,
+    "radiant.PdfBoundaryView", nullptr, BINARY_SCHEMA_BINDING_ABI, RADIANT_PDF_SCHEMA_VERSION};
+
 static_assert(BinarySchemaScalarKind<decltype(((PdfWalkFrame*)nullptr)->x)>::kind == BINARY_FIELD_F32, "binary binding scalar representation changed");
 static_assert(BinarySchemaScalarKind<decltype(((PdfWalkFrame*)nullptr)->y)>::kind == BINARY_FIELD_F32, "binary binding scalar representation changed");
 static_assert(BinarySchemaScalarKind<decltype(((PdfWalkFrame*)nullptr)->page_width)>::kind == BINARY_FIELD_F32, "binary binding scalar representation changed");
@@ -143,6 +245,12 @@ static_assert(BinarySchemaSameType<decltype(((PdfWalkFrame*)nullptr)->matrix), R
 static_assert(BinarySchemaSameType<decltype(((PdfWalkFrame*)nullptr)->text), Item>::value, "binary boxed field representation changed");
 static_assert(BinarySchemaScalarKind<decltype(((PdfWalkFrame*)nullptr)->clip_evenodd)>::kind == BINARY_FIELD_BOOL, "binary binding scalar representation changed");
 static_assert(BinarySchemaScalarKind<decltype(((PdfWalkFrame*)nullptr)->sequence)>::kind == BINARY_FIELD_I32, "binary binding scalar representation changed");
+static_assert(BinarySchemaSameType<BinarySchemaPointer<decltype(((PdfWalkFrame*)nullptr)->fragment)>::Target, LayoutViewNode>::value, "binary binding target type changed");
+static_assert(BinarySchemaScalarKind<decltype(((PdfWalkFrame*)nullptr)->width)>::kind == BINARY_FIELD_F32, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((PdfWalkFrame*)nullptr)->height)>::kind == BINARY_FIELD_F32, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((PdfWalkFrame*)nullptr)->page_number)>::kind == BINARY_FIELD_U32, "binary binding scalar representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((PdfWalkFrame*)nullptr)->page_count)>::kind == BINARY_FIELD_U32, "binary binding scalar representation changed");
+static_assert(BinarySchemaSameType<decltype(((PdfWalkFrame*)nullptr)->page_label), Item>::value, "binary boxed field representation changed");
 const BinarySchemaField frame_schema_fields[] = {
     BINARY_SCHEMA_MEMBER(PdfWalkFrame, x, BINARY_FIELD_F32),
     BINARY_SCHEMA_MEMBER(PdfWalkFrame, y, BINARY_FIELD_F32),
@@ -156,6 +264,12 @@ const BinarySchemaField frame_schema_fields[] = {
     BINARY_SCHEMA_ITEM(PdfWalkFrame, text, &TYPE_STRING, true),
     BINARY_SCHEMA_MEMBER(PdfWalkFrame, clip_evenodd, BINARY_FIELD_BOOL),
     BINARY_SCHEMA_MEMBER(PdfWalkFrame, sequence, BINARY_FIELD_I32),
+    BINARY_SCHEMA_REFERENCE(PdfWalkFrame, fragment, &fragment_schema, true),
+    BINARY_SCHEMA_MEMBER(PdfWalkFrame, width, BINARY_FIELD_F32),
+    BINARY_SCHEMA_MEMBER(PdfWalkFrame, height, BINARY_FIELD_F32),
+    BINARY_SCHEMA_MEMBER(PdfWalkFrame, page_number, BINARY_FIELD_U32),
+    BINARY_SCHEMA_MEMBER(PdfWalkFrame, page_count, BINARY_FIELD_U32),
+    BINARY_SCHEMA_ITEM(PdfWalkFrame, page_label, &TYPE_STRING, true),
 };
 const BinarySchema frame_schema = {"PdfWalkFrame", sizeof(PdfWalkFrame), frame_schema_fields,
     sizeof(frame_schema_fields) / sizeof(frame_schema_fields[0]), BINARY_SCHEMA_NATIVE,
