@@ -1,305 +1,464 @@
 # Radiant CSS Support — Remaining Implementation Plan
 
-**Status:** P0–P1 implementation resumed on `4e3ba541c` (2026-10-14), then stopped at the user's requested checkpoint on 2026-10-15. Shared computation, layout and snapshot repairs are applied; latest scoped checks and predecessor aggregate results are distinguished below and in §9. Inventory covers 411 names and thirty bounded partial families. P0–P1 are incomplete; full Radiant, export and core qualification of the final runtime remains pending.
+**Replanned and delivered:** 2026-10-15. Phases 0–6 are closed for their bounded
+scope. Failed aggregate checks and excluded contexts remain explicitly qualified.
 
-**Predecessor:** [CSS selector/property implementation record](<Radiant_Impl_CSS_Selector_Property_Support (retired).md>), closed and retired with unfinished scope transferred here.
+**Next action:** no active feature task remains in this schedule. Preserve the
+regression cases and [current failure register](Radiant_CSS_Qualification.md).
+Promote deferred work only for a named common-page need, finite acceptance cases
+and an agreed verification budget; the existing long tail does not reopen these
+milestones automatically.
 
-**Baseline:** [HTML, CSS and SVG Support](../../doc/HTML_CSS_SVG_Support.md), audited 2026-10-10; source checkpoint `eb75fe63b` plus the support-document update.
+**Authority:** This is an implementation schedule. Preserve style/view ownership
+(**D4.5.1v4 / D4.1.4v5**), property identity (**D4.6.1v4**), precise roots and
+evaluator lifetime (**D5.3.3 / D5.4.1**), and module boundaries
+(**D7.3.3–D7.3.4**) in [the formal design](../../doc/Lambda_Formal_Design.md).
+No formal ruling defines this priority order; this revision changes no ruling.
+Follow the [Radiant development workflow](../../radiant/README.md).
 
-**Scope:** Remaining CSS selector, cascade, value, layout, paint, motion and interaction consumers, including their CSSOM and export surfaces. This is the active CSS implementation backlog.
+## 1. Delivery scope and priorities
 
-**Latest runtime evidence (2026-10-15):** `f77ce37219bd…` rejects unsettled explicit layout snapshots while preserving batch cleanup and continuation. Scoped ASan over thirty-three production owners and four test units passes 135 computation /122 text /164 vector cases; two CLI recovery cases pass on each AST/MIR runtime. Boundary passes four strict DSOs with 137 deferred /zero unapproved imports against allowance 165; integer lint and inventory freshness pass. Full aggregates have not been rerun on this runtime. Its immediate predecessor `42f35d12d02c…` records Radiant 5,878 full /155 partial /one failed /one skipped over 6,035 inputs and ordinary export 288/293 groups, retaining the same thirty-nine raw assertions in five paint/PDF groups. The latest core/input run, on `d5006a31c061…`, records 6,963/6,964, including all 313 forced-GC and 2,112 input cases. The Markdown reference and six dashboard golden baselines are diagnosed stale expectations confirmed against Chromium; neither is changed. The preceding marker checkpoint remains the latest all-green core/Radiant aggregate. Exact configurations, raw failures and remaining limits are in §9.
+Core container queries, containment/visibility, grid computation, flex factors,
+horizontal ellipsis/clamping, layered backgrounds, selected images and basic
+scroll snapping already have implemented increments. Their bounded delivered
+scope belongs in [Appendix A](#appendix-a), with the dated evidence retained in
+[Appendix B](#appendix-b). They are regression coverage, not new feature tasks.
 
-**Authority:** An implementation plan, not a new semantics/design ruling. Ownership follows **D4.5.1v4 / D4.1.4v5**, property identity **D4.6.1v4**, native roots/context lifetime **D5.3.3 / D5.4.1**, and module boundaries **D7.1.3 / D7.5.3 / D7.3.3–D7.3.4** in [Lambda_Formal_Design.md](../../doc/Lambda_Formal_Design.md). No formal ruling defines this CSS priority order. New unresolved architectural choices require a working design record before implementation; this draft changes no ruling.
+The previous plan kept these families open for every remaining context. This
+schedule separates **core delivery** from **later extensions** and **deferred
+conformance residue**. A family may remain honestly partial after its selected
+core milestone is complete. Property-registration counts, test totals and the
+number of historical failures do not determine the next feature.
 
-## 1. Starting point and delivery contract
-
-The predecessor delivered substantial shared machinery: selector specificity and validation, namespace/relative/state selectors, cascade layers and nesting, custom-property substitution and bounded expansion, live CSSOM interfaces, typed math and grid lengths, logical borders/radii, animation/transition consumers, SVG presentation properties, scrolling, markers, selection and file-button paint. These are the starting implementation, not tasks to implement again.
-
-The refreshed registry has **411 unique property definitions** on the resumed 2026-10-14 source, including the appended legacy orientation entry with existing NameIds preserved. The older **342 / 244 effective / 43 partial / 55 parsed-only** classification is historical; it does not classify the current registry. HTML responsive images, PDF Unicode glyph outlines and the explicit paged compositor also now exist. Remaining work must be based on a current reproducer, not an earlier progress paragraph saying a feature was absent.
-
-Starting focused evidence was 523/523 native view/pagination tests, 112/112 vector tests, and 38 CSS Syntax files passing with six skips. The starting export audit recorded 171 passes, 29 failures requiring unavailable Poppler tools, and one Poppler-dependent skip; refreshed delivery results appear in §9. These checks do **not** establish full CSS conformance or a fresh all-green aggregate. See the support report for dated baseline inventories and output-specific limits.
-
-For each delivery:
-
-1. Reproduce a bounded missing behavior on the current source and identify its owning stage. If it already works, retain evidence and remove it from the active slice.
-2. Fix the shared cause, keeping parser validation, cascade, computation and consumer responsibilities distinct. Reuse existing grammar, substitution, logical mapping, style ownership and paint lowering.
-3. Demonstrate invalid-input/defaulting behavior, the visible or interactive effect, and live mutation where applicable. Compare browsing, raster, SVG, PDF and paged views only where the feature has a relevant consumer; keep their statuses separate.
-4. Record the remaining limits and update the support matrix. A registered name, a computed string, or a produced file alone does not close a support item.
-
-A priority is a delivery order, not a requirement to finish an entire tier before touching the next. Only the stated dependencies block a task. A reproduced crash, lifetime error or wrong cascade winner in any tier takes P0 priority. Do not turn an unlimited grammar/API audit into a prerequisite for every feature.
-
-## 2. Reprioritized order
-
-The order favors incorrect existing behavior and features used by common responsive pages, then text/paint/motion fidelity, then compatibility breadth that needs larger new models. Rare selector extensions and browser API reflection no longer drive the entire CSS schedule.
-
-| Priority | Work | Why this position | Dependencies |
+| Order | Phase | Priority and user outcome | Bound |
 |---|---|---|---|
-| P0.1 | Current evidence and bounded support inventory | Prevents repeating completed work or treating historical failures as current | None |
-| P0.2 | Shared cascade, substitution and computed-value correctness | A bad winner or wrong unit base affects many families | Current reproducer from P0.1 |
-| P0.3 | Live condition and mutation invalidation | Initial paint passing while edits/resizes are stale is a user-visible failure | Relevant P0.2 computation |
-| P1.1 | Containment, size container queries and container units | Largest missing responsive CSS consumer | P0.2–P0.3; container dependency design |
-| P1.2 | Grid/intrinsic sizing and logical geometry residue | Existing layout support still loses common sizing forms | Relevant P0.2–P0.3 paths |
-| P1.3 | Everyday text layout and decoration | Truncation, wrapping, ruby and underline defects affect ordinary documents | Existing inline/font pipeline |
-| P1.4 | Multilayer backgrounds and CSS image selection | Common authored backgrounds remain narrower than HTML images | P0.2; existing image selector/paint contracts |
-| P1.5 | Scroll/overflow and control-part fidelity | Required for usable panes, forms and editors | P0.3; existing input/scroll state |
-| P2.1 | Shaping, bidi, vertical text and font features | High visual impact, but requires a coherent text pipeline | Font/text design; P1.3 interfaces |
-| P2.2 | Existing CSS paint and export parity | Recovers effects already advertised in raster output | Relevant P1 work; shared paint IR |
-| P2.3 | Animation/transition and individual-transform completion | Completes the large existing motion investment | P0.2–P0.3; P2.1/P2.5 where needed |
-| P2.4 | Selector, language/direction and shadow-tree residue | Finish real invalidation/identity gaps before rare new selectors | P0.3; shared DOM identity/slot state |
-| P2.5 | CSSOM, registered values and SVG CSS computation | Finish observable semantics around existing consumers | Relevant P0.2, P1 and P2 consumers |
-| P2.6 | Remaining generated/control/top-layer parts | Each needs a separate layout/paint destination | P1.5; P2.4 for shadow parts |
-| P3.1 | Broader color, image and value functions | Adds compatibility breadth after common consumers are sound | P0.2; P2.2/P2.5 |
-| P3.2 | New exclusion, mask and positioning/layout models | Requires substantial geometry/state rather than registration | Focused design; P1.2/P2.2 |
-| P3.3 | Motion paths, scroll timelines and discrete transitions | Builds on a complete basic motion/scroll contract | P1.5/P2.3 |
-| P3.4 | Platform/state-dependent compatibility | Depends on browser/platform services or policy decisions | Explicit owner/model per feature |
+| 0 | [Qualification intake](#phase-0) | P0: trustworthy evidence for the merged source | The existing 18 layout failures, one paged runner crash and two stale-reference diagnoses |
+| 1 | [Modern theme colors](#phase-1) | P1: authored Oklab/Oklch colors and two-color theme mixes reach real paint | Absolute colors and `color-mix()` in sRGB/Oklab only |
+| 2 | [Input-capability media queries](#phase-2) | P1: hover/pointer conditions select usable controls | Four named media features and their live environment update |
+| 3 | [Usable panes and resize controls](#phase-3) | P1: scrolling survives common relayout and desktop resize input | One-axis resnapping, native keyboard chaining, four resize modes |
+| 4 | [Horizontal truncation completion](#phase-4) | P1: labels/cards truncate with atomic inlines and plain RTL text | Horizontal inline-block/image cases and a two-line RTL clamp |
+| 5 | [Basic motion syntax](#phase-5) | P2: calculated durations and piecewise linear easing run on existing motion consumers | Two time properties per motion family and numeric `linear()` stops |
+| 6 | [Visible gradient export differences](#phase-6) | P2: SVG/PDF preserve colors for stops outside the gradient interval | The existing non-repeating linear/radial fixtures |
 
-### First delivery slices
+Phases 0–4 are the next core delivery. Phases 5–6 follow after that delivery;
+they do not hold it open. Modern theme colors move ahead of the former P3 color
+bucket because they add an actual missing style consumer across text, borders
+and backgrounds. Exhaustive pseudo/owner-unit combinations and small reader
+edge differences have lower delivery value than these missing behaviors.
 
-Start with a small P0.1 inventory for the next slice, then reproduce the remaining fixed-length computed getter and owner-unit/defaulting cases in P0.2. Close the reproduced shared defect with a real consumer and memory check; do not attempt complete CSSOM reflection first.
+Each task below has a fixed input surface and acceptance cases. Reproduce a
+claimed gap before editing. If a bounded coverage task already passes on the
+current source, record it as delivered and remove it from the active checklist;
+do not expand the task until something fails.
 
-Next, define the size-container dependency contract and deliver named/unnamed size queries plus container-relative units as bounded P1.1 increments. In parallel in the schedule, P1.3 ellipsis/clamping and P1.4 multilayer background/image-set work can proceed once their specific shared-value dependencies pass. Each increment gets its own acceptance record; none requires complete shaping, every selector edge case, or a new animation model.
+<a id="phase-0"></a>
+## 2. Phase 0 — Bounded qualification intake
 
-<a id="p0"></a>
-## 3. P0 — Make existing behavior trustworthy
+**Complete (2026-10-15):** Q0.1–Q0.4 are classified in the
+[current failure register](Radiant_CSS_Qualification.md). The 17 empty readiness
+captures were reproduced on the merged runtime; all six bounded snapshot
+controls behave as required. The Markdown reference, chart golden and paged
+runner debt remain explicit failures with independent owners. There are no
+blockers to Phase 1. Completed intake work is retained in Appendix A.3.
 
-<a id="p0-1"></a>
-### P0.1 — Evidence, inventory and qualification
+<a id="phase-1"></a>
+## 3. Phase 1 — Modern theme colors
 
-- Build a reproducible inventory joining property definitions, generated names, validators, computed storage and actual consumers. Track aliases/shorthands without double-counting effective properties. Attach bounded evidence to partial/parsed-only/unrecognized families.
-- Start with the P1 families; extend the inventory with each delivery rather than postponing all implementation until every value is audited. Before final closeout, reconcile the complete 409-name checkpoint plus any additions.
-- Refresh the required Lambda/input and Radiant gates against a named source/binary configuration. Recheck old UI, view, math, table and memory failures before carrying them as defects; a dated predecessor failure is not a current failing test.
-- Make Poppler/reference-tool availability explicit for export qualification. Separate missing tools, corpus/platform gaps and known partial baselines from engine failures without masking raw runner failures.
-- Carry the predecessor's module-boundary debt as an explicit integration issue under **D7.1.3 / D7.5.3 / D7.3.3–D7.3.4**. The last archived checkpoint was 273 deferred imports against a 165 baseline, not a fresh measurement. Use the existing boundary audit and fix ownership/API placement; do not raise the allowlist to hide it. A focused unchanged-import result is not boundary closure.
+**Complete (2026-10-15):** C1.1–C1.3 deliver absolute Oklab/Oklch,
+two-color sRGB/Oklab mixing and a causal theme change through inherited text,
+`border-color` and backgrounds. Parser, native cascade, AST/MIR UI and independent
+PNG/SVG/PDF reference cases pass. Completed tasks and limitations are in A.4.
 
-**Acceptance:** Versioned inventory and current gate results, with exact source/build provenance and open failures assigned. Historical totals are labeled; passing-file floors cannot hide failed cases. CSS deliveries may proceed with proven pre-existing qualification debt, but the final plan cannot claim clean qualification while that debt remains.
+The required Radiant and input gates were run; their independent failures remain
+in the [current register](Radiant_CSS_Qualification.md). This is bounded feature
+delivery with explicit qualification debt, not an all-green aggregate.
 
-<a id="p0-2"></a>
-### P0.2 — Shared values, cascade and computed reads
+<a id="phase-2"></a>
+## 4. Phase 2 — Input-capability media queries
 
-- Finish the property-by-property residue for CSS-wide keywords, `all`, shorthand/longhand/logical competition, origin/layer rollback and keywords reached through substitution. Preserve the distinction between parse-time rejection and invalid-at-computed-value defaulting.
-- Complete owner-relative unit/math computation where demonstrated gaps remain: inherited values, percentages, fonts/leading, alternate views, SVG instances, non-length domains, nonfinite values and dimensionally invalid math. Validate quirks-mode lengths only in the proper document/property context.
-- Bound custom-property **dependency depth** as well as the existing byte/component and memoization limits. Audit lazy fallbacks, allocation failure and large/deep/shared graphs without changing established token-spelling behavior or copying the resolver.
-- Remove remaining fixed-length computed-value adapters where they truncate supported values; share full-length serialization with layout computation. Verify reads during dirty callbacks, recascade, adoption, teardown and independent view editions under **D4.5.1v4 / D4.1.4v5**.
+**Complete (2026-10-15):** M2.1–M2.3 deliver primary/aggregate pointer
+and hover environments, keyword/boolean query evaluation, frontend publication,
+selected-view copies and live style/`MediaQueryList` updates. Thirty-five causal
+assertions pass per AST/MIR, including payload values, no-op suppression and no
+invented resize event. Completed work is recorded in A.5.
 
-**Acceptance:** Each reproduced case has parser/cascade or native computation coverage and an actual consumer/CSSOM fixture. Earlier declarations, computed fallback, inherited bases and repeated reads behave correctly; no retained pool growth or lifetime regression. Full grammar/reflection breadth continues in P2.5/P3.1.
+Required Radiant and scoped CSS gates retain their independently owned failures
+in the [current register](Radiant_CSS_Qualification.md). Device hotplug services,
+new touch gestures and complete media-interface reflection remain excluded.
 
-<a id="p0-3"></a>
-### P0.3 — Mutation and condition dependencies
+<a id="phase-3"></a>
+## 5. Phase 3 — Usable panes and desktop resize controls
 
-- Audit live invalidation for relative/sibling/table selectors, attributes and control state, rule/declaration changes, adoption and shadow/slot changes. Preserve the existing conservative full-recascade fallback until a narrower dependency is proven correct.
-- Verify media conditions after viewport/DPR changes and linked/style/import media changes; update cached condition results and styles together. Add missing common media features, including hover/pointer, only with real environment state and invalidation.
-- Give container-dependent rules an explicit condition key and relayout dependency rather than reusing viewport-only condition caching. Keep print/secondary-view environments independent of browsing geometry.
+**Complete (2026-10-15):** S3.1–S3.3 deliver validated one-axis resnap,
+native keyboard chaining and desktop resize grips. The three fixtures pass
+20/28/15 assertions per AST/MIR; focused CLI ASan passes all 35 resnap/resize
+assertions with leak detection disabled. Completed task rows are in A.6.
 
-**Acceptance:** Mutating only the causal input updates matched sets, computed values, geometry and paint without a fabricated extra DOM mutation. Repeated resize/recascade does not accumulate style recipes. Broad invalidation optimization is separate from correctness.
+Radiant records 5,339 passed /155 partial /19 failed /one skipped; scoped CSS
+retains the same thirteen failures. The required Lambda alias records
+5,311/5,314, then stops on its failures before explicit tail gates; its DOM-node
+tail was run directly (40/40). Independent debt remains in the
+[current register](Radiant_CSS_Qualification.md). This is bounded delivery,
+with explicit qualification limits.
 
-<a id="p1"></a>
-## 4. P1 — Common responsive pages and documents
+<a id="phase-4"></a>
+## 6. Phase 4 — Horizontal truncation with atomic inlines and RTL
 
-<a id="p1-1"></a>
-### P1.1 — Containment and container-dependent styling
+**Complete (2026-10-15):** T4.1–T4.3 deliver horizontal LTR atomic-inline
+ellipsis and plain RTL two-line clamping. Source geometry survives scoped paint
+projection; native paint and hit testing agree. All 33 live assertions pass per
+AST/MIR, six atomic PNG/SVG/PDF references pass, and Hebrew raster references
+pass. Four strict Hebrew vector antialias assertions remain failed and deferred.
+Completed tasks and limits are in A.7.
 
-- Complete the tested containment modes and intrinsic-size interactions; extend `content-visibility` beyond `hidden` with explicit visibility, measurement and invalidation semantics.
-- Implement `container`/`container-name` and the required `container-type` behavior, then size `@container` conditions and named-container selection, including nested rules.
-- Resolve `cqw`/`cqh`/`cqi`/`cqb`/`cqmin`/`cqmax` against the correct eligible container and writing-mode axes. Specify no-container fallback and cycle handling in a focused design record before coding.
-- Keep style/scroll-state queries and broader container features out of the first size-query slice; retain them explicitly as later extensions.
+Radiant records 5,340 passed /155 partial /19 failed /one skipped, retaining
+the independently owned layout/paged failures in the
+[current register](Radiant_CSS_Qualification.md). Core Phases 0–4 are delivered
+with these explicit qualification limits; Phase 5 is now active.
 
-**Acceptance:** Named/unnamed/nested containers, axis changes, missing containers, container resize and font/content changes have minimal WPT/native cases plus live layout/paint fixtures. Query-induced relayout converges without stale results or silent cycles.
+<a id="phase-5"></a>
+## 7. Phase 5 — Basic motion syntax after core delivery
 
-<a id="p1-2"></a>
-### P1.2 — Existing grid and logical layout residue
+**Complete (2026-10-15):** A5.1–A5.3 deliver typed
+s/ms duration/delay math and numeric piecewise `linear()` through shared motion
+computation and sampling. All 145 native motion tests pass. The two fixed-clock
+UI fixtures pass 22/9 assertions per AST/MIR and 31 focused CLI ASan assertions.
+Completed task rows and limits are in A.8.
 
-- Complete existing grid math/track grammar, variable substitution, repeat/line-name forms and auto-fit gutter behavior; finish computed serialization and mutation coverage. Preserve the delivered full inner-box percentage base and computed inherited lengths.
-- Audit intrinsic measurement and flex/grid alignment approximations against current failures. Replace silent fixed-cap loss with an explicit checked policy or growable storage where appropriate; do not claim full grid support from a few math fixtures.
-- Finish vertical logical float/clear placement and remaining physical/logical geometry interactions. Coordinate new layout models with P3.2 rather than silently approximating them.
-- Paged fragmentation, page-float/table producers and independent columns stay owned by the [paged-media plan](Radiant_Impl_Paged_Media.md); CSS grammar/computation changes must retain its selected-view controls.
+Radiant records 5,348 passed /155 partial /19 failed /one skipped; scoped CSS
+retains the same thirteen failures. The required Lambda selection
+records 5,311/5,314, including the fresh five input corpora (2,112/2,112).
+Its same two MVP diagnostic failures and chart golden remain in the
+[current register](Radiant_CSS_Qualification.md).
 
-**Acceptance:** Current failing track/alignment/axis cases improve against browser references; resize/font/variable changes preserve the result. Cap behavior is tested explicitly. Browsing success does not imply paged support.
+<a id="phase-6"></a>
+## 8. Phase 6 — Visible SVG/PDF gradient range differences
 
-<a id="p1-3"></a>
-### P1.3 — Text visible on everyday pages
+**Bounded color requirement already implemented; qualified (2026-10-15):**
+E6.1/E6.2 use the existing shared linear/radial range normalization and owned
+paint payloads. No additional production change was warranted. Raster and SVG
+pairs pass at both densities, and all PDF pairs pass at 1×. Eleven strict 2× PDF
+perimeter comparisons remain failed, with zero differing interior pixels.
+Completed tasks, exact limits and the full exporter receipt are in A.9.
 
-- Paint ellipsis correctly for `text-overflow` and clamping, including fitting the final line, grapheme boundaries and RTL. Finish `text-wrap-style`, justification/inter-character placement and text-transform gaps that have current reproducers.
-- Finish multi-pair ruby layout, `ruby-align`, `hanging-punctuation`, `alignment-baseline`, `baseline-shift` and other unconsumed inline traits. Keep shaping/vertical prerequisites explicit where needed.
-- Complete decoration thickness/list/shorthand forms, mixed-unit underline offsets, skip-ink on non-solid strokes, multi-run uniformity and emphasis placement. Preserve delivered `tab-size`, text-indent flags and text-align-all behavior as regressions.
+The full exporter gate records 285/297 groups. Its prior eleven failed group IDs
+and assertion counts are unchanged; the additional failed group contains Phase
+4's four Hebrew vector antialias assertions. Keep all failures in the
+[current register](Radiant_CSS_Qualification.md). Reader-edge coverage stays
+under the explicit phase exclusion; it does not reopen interval-color work.
 
-**Acceptance:** Geometry and raster fixtures cover clipping versus visible ellipsis, multiple inline runs, inheritance and live changes. SVG/PDF status remains partial until their actual paint checks pass; vertical/shaping-dependent cases transfer to P2.1/P2.2 explicitly.
+## 9. Verification and completion rules
 
-<a id="p1-4"></a>
-### P1.4 — Background and image families
+- Each phase uses the focused cases above during implementation. Batch related
+  tasks before its required aggregate gate; run no engine tests for this plan edit.
+- Use [the test map](../../test/README.md) for required area gates. Radiant source
+  changes require the Radiant baseline; CSS/runtime/DOM changes can require
+  additional gates. Do not manually repeat every component already covered by
+  that aggregate. Existing failures and unexecuted cases remain visible.
+  For CSS-only query/environment work, select all CSS and HTML/CSS input
+  runners. The complete input alias also launches unrelated whole-exporter,
+  import and validator checks; repeat that broader scope for shared input/value/
+  storage or paint-producer changes, relevant failures or unresolved concerns.
+  Record the scope explicitly and never transfer an older full-gate claim.
+- Run layout integer-cast lint for layout edits; update/check the support
+  inventory when referenced wiring/evidence changes; check module boundaries
+  when imports or provider placement change. Prefer the supported ASan profile
+  when memory/lifetime work warrants it. Preserve **D4.5.1v4 / D5.3.3 / D5.4.1**.
+- Do not run full exporter/core/browser/ASan matrices for every small edit.
+  Reuse unchanged fixtures/reference captures and valid same-source evidence.
+  A second expensive run needs relevant code changes, a failure or an unresolved
+  concern. Keep builds separate from binaries/DSOs currently under test.
+- Finish a core milestone when its named acceptance cases pass, required gates
+  are recorded honestly, and any independent qualification debt has an exact
+  owner/disposition. A failed required gate prevents an all-green qualification
+  claim; it does not silently add every unrelated subsystem to the phase.
+- Close the next core delivery after Phases 0–4. Keep the support matrix partial
+  for excluded contexts. Move completed task rows to Appendix A with a concise
+  result/link, retain one current failure register, and start Phase 5 only after
+  that core delivery or explicit reprioritization.
 
-- Complete multilayer `background`/`background-image`, per-layer position/size/repeat/origin/clip/attachment and blend behavior. Resolve full positions, radial size keywords/ellipse geometry, length stops, repeating gradients and color hints through shared descriptors.
-- Complete CSS `image-set()` in broader border/list and independent/paged image consumers. Single background/generated URL images, URL markers and raster/linear-gradient borders now use shared density/type selection with native, live and export controls (§9). Retained marker mutation and border-payload ownership are qualified; broader source classes and geometry remain open. Reuse the shared selector and image/resource contracts; delivered HTML `srcset`/`sizes`/`picture` selection remains regression coverage.
-- Finish transformed/background-attachment cases and `image-rendering` for transformed/display-list images, markers and border images. Track rendered lazy `sizes="auto"` as an adjacent replaced-image dependency, not as absent responsive-image support.
+## 10. Deferred work — no active phase commitment
 
-**Acceptance:** At least one two-layer URL/gradient page, mixed attachment/scroll case, DPR/source-selection case and transformed sampling case reach real pixels and survive mutations. Cross-fade/element image functions continue in P3.1; vector parity is P2.2.
+Promotion from this table requires a user need or named common-page reproducer,
+a finite input/context list and a verification budget. These are dispositions,
+not instructions to conduct another exhaustive audit.
 
-<a id="p1-5"></a>
-### P1.5 — Scrolling, overflow and usable control parts
-
-- Finish logical/axis-specific overflow clipping and computed serialization; verify overflow-clip-margin boxes, rounded corners and paint/hit agreement.
-- Complete scroll-snap paired/oversized regions and resnapping, remaining scroll producers, scroll-margin/padding reads during dirty callbacks, keyboard/touch overscroll chaining and smooth-scroll/reduced-motion behavior.
-- Complete the existing file-button intrinsic sizing/style subset and other `appearance` gaps, keeping control-part declarations off their hosts. Add practical `resize` and missing cursor behavior through the existing event model; keep legacy spatial-navigation properties in P3.4.
-
-**Acceptance:** Nested panes, focus/selection scroll, programmatic and native input, relayout and control restyle have live tests. PNG/SVG/PDF limitations are recorded separately. No OS picker or full browser editing parity is implied by CSS control styling.
-
-<a id="p2"></a>
-## 5. P2 — Text, paint, motion and API fidelity
-
-<a id="p2-1"></a>
-### P2.1 — Shaping and font-dependent layout
-
-- Establish a coherent shaping/bidi/grapheme contract using the existing [font/text design](../radiant/Radiant_Design_Font_Text.md); preserve glyph clusters through measurement, layout, paint, hit testing and selection. Do not patch vendored font/raster dependencies.
-- Complete complex-script shaping, ligatures, mirrored/reordered bidi text, vertical/sideways glyph orientation and text-combine behavior. Expand language-sensitive line breaking and hyphenation only with corresponding language data and tests.
-- Connect `font-stretch`, `font-size-adjust`, GSUB/OpenType features, `font-variant-*`, `font-feature-settings`, `font-language-override`, `font-variation-settings` and `font-optical-sizing` to selection/shaping/metrics. Audit `font-display`, asynchronous font readiness and descriptor/weight-range handling rather than treating a loaded face as a complete loader contract.
-- Coordinate font caches, fallback, color-font/emoji sequences and cross-platform behavior with their existing owners. Advanced synthesis/palette/system-color work remains P3.4.
-
-**Acceptance:** Arabic/Indic, ligature, CJK/vertical, mixed bidi and emoji-cluster fixtures retain consistent advances, glyph placement and caret boundaries. Platform-specific implementations remain labeled until exercised; text export consumes the same glyph results.
-
-<a id="p2-2"></a>
-### P2.2 — Paint/compositing and export parity
-
-- Complete existing HTML SVG/PDF consumers for overflow/visibility, backgrounds, dashed/dotted borders, border-image slices, repeating/conic gradients and text decoration/emphasis. PDF font outlines already exist; do not reopen the obsolete built-in-font-only issue.
-- Finish filter/backdrop/blend/group-opacity/isolation behavior with correct stacking and backdrop inputs. Keep fallback density and alpha semantics explicit; an embedded image marker alone is insufficient pixel evidence.
-- Extend clip shapes beyond raw px/percent, geometry boxes and supported URL resources; finish existing mask-image approximations before adding the entire mask family. Share SVG resource semantics where appropriate without leaking external-image styles into the host page.
-- Finish 3D flattening/grouping, depth ordering, backface/SVG descendant scenes and coordinate-dependent projective export or an explicit fallback. Complete raster-image fitting/cropping and SVG resource embedding for relocatable output.
-- SVG CSS residue includes use-instance inheritance/effects, keyword/math/URL contexts and gradient/compositing color interpolation. New SVG geometry, filter primitives and SMIL timing remain owned by the [SVG implementation record](Lambda_Impl_SVG_Support.md).
-
-**Acceptance:** Raster references and independently rasterized SVG/PDF pages cover the actual effect/clip/composite result at 1×/2×. Run required reference tools; do not credit skipped/failed comparisons. Preserve shared paint IR and retained payload ownership under **D4.5.1v4**.
-
-<a id="p2-3"></a>
-### P2.3 — Complete existing motion consumers
-
-- Finish calculated time/count grammar, `linear()` easing, CSS keyframe selector-list/cap handling, conditional/layered named-rule lookup and complete phase/event behavior, including display-none cancellation.
-- Finish sparse/neutral endpoints, base restoration and concurrent replace/add/accumulate composition. Audit transition interruption/reversal, shorthand targets and broader property writers without redoing the delivered dynamic lists and physical-side writers.
-- Finish individual `translate`/`rotate`/`scale` math, sampling, dirty-callback serialization and SVG descendants. Carry planar shear/reflection, near-identity serialization and numerical conditioning into the shared transform path.
-- Complete supported Web Animation keyframe forms: shorthand/logical/custom properties, effect defaults, timing dictionary, autoplay/playback/lifecycle and live underlying refresh. Basic explicit multi-property sampling is already implemented; advanced timeline/range work is P3.3.
-- Connect registered-property interpolation and SVG CSS animation/transition sampling only after their computation and presentation contexts are shared with P2.5/P2.2.
-
-**Acceptance:** Midpoint and boundary samples verify computed values, geometry and paint; interruption, cancellation, teardown and repeated effects verify events and lifetime. Existing known transition-event failures must be reclassified by current reproducers, not skipped into a green claim.
-
-<a id="p2-4"></a>
-### P2.4 — Selectors, language/direction and shadow contexts
-
-- Finish full language-tag registry/extension validity, remaining language loader/mutation paths, manual slot assignment and slot API/event integration. Named-slot/host direction and document-language defaults are delivered regressions.
-- Complete shadow stylesheet scope/relational invalidation and query-versus-stylesheet context tests. Prioritize wrong matches/restyles; optimize broad fallback recascade only after correctness.
-- Audit complete QName/namespace validation, foreign-content identity after mutation/reparenting, expanded-attribute MutationObserver/SVG consumers and live-control state routes.
-- Coordinate remaining XML normalization, document/doctype/CDATA/PI/template serialization, raw-text escaping and void-element variants with [DOM implementation work](Radiant_Impl_DOM3.md). These are carried DOM dependencies where they change CSS identity or observability, not a second full DOM/serializer project.
-- Retain HTML table column matching as regression coverage; new non-HTML column associations stay in P3.4 until their host relationship is defined.
-
-**Acceptance:** Matching and specificity agree for equivalent stylesheet/query contexts; language/direction/namespace and assignment mutations update consumers. Native factory/serialization controls and real shadow fixtures verify identity across adoption and teardown.
-
-<a id="p2-5"></a>
-### P2.5 — CSSOM and registered-value completion
-
-- Complete shorthand expansion/compression, pending-value serialization and logical intermixing across inline, rule and computed declarations. Preserve delivered DOMString names, authored token spelling, wrapper identity and readonly computed objects.
-- Finish descriptor applicability/validation/recovery, canonical condition text/MediaList, import/keyframe/page-margin interfaces and cross-realm/extensibility/prototype semantics. Prioritize cases required by existing consumers before exhaustive reflective API breadth.
-- Finish `@property` relative-unit, color/image/URL/transform computation, nonlinear percentage/nonfinite edges, shadow/import contexts, registry interfaces and `CSS.registerProperty`. Share owner-context computation and interpolation with P0.2/P2.3.
-- Complete SVG computed getters for pseudo-elements, presentation/resource contexts, shorthand pending values and effect samples. Additional SVG CSS names require grammar, inherited presentation semantics and actual consumers, not registration alone.
-
-**Acceptance:** Native and JS/Lambda clients observe the same values/defaults and mutation effects. Forced-GC, cross-realm/detached/adopted ownership and repeated-read memory controls follow **D5.3.3 / D5.4.1 / D4.5.1v4**. Browser differences retain their standards rationale and explicit fixtures.
-
-<a id="p2-6"></a>
-### P2.6 — Generated/control/top-layer destinations
-
-- Finish allowed `::marker` and `::selection` properties and output paths; marker color/font and selection foreground/background already work. Finish file-button properties/vector consumers after P1.5 sizing.
-- Implement `::backdrop` through a real top-layer layout/paint destination and state transitions. Coordinate dialog/popover behavior through existing DOM ownership rather than styling the host as a substitute.
-- Complete `::slotted()` live assignment behavior and `::part()` exported-name traversal after shadow prerequisites. Keep part styles distinct through restyle, mutation and teardown.
-- Named highlights/media cues and new state pseudo-classes retain their model prerequisites in P3.4.
-
-**Acceptance:** Each pseudo-element has an independently observable target; styling/removing it never contaminates its originating host. Layering, hit behavior where applicable, live state and relevant export paths have fixtures.
-
-<a id="p3"></a>
-## 6. P3 — Broader CSS compatibility and new models
-
-These remain in scope as backlog, but are not prerequisites for closing the common-page P1 slices. Each family needs its own bounded delivery definition before coding.
-
-<a id="p3-1"></a>
-### P3.1 — Broader values and image/color computation
-
-Carry Lab/LCH/Oklab/Oklch and remaining `color()` spaces, relative colors, `color-mix()`, `light-dark()`/system-color contexts, missing-component interpolation, complete math/angle/non-length domains and infinity handling. Carry `env()` fallback semantics, typed `attr()` outside generated content, `cross-fade()` and CSS `element()` images. Container units belong to P1.1, existing typed math defects to P0.2. Every promoted function must reach its real property and output consumers, not just serialize successfully.
-
-<a id="p3-2"></a>
-### P3.2 — New layout, exclusion and mask families
-
-Carry `margin-trim`, `float-offset`, `wrap-flow`/`wrap-through`, `marker-offset`, `shape-outside`/`shape-*`, `mask`/remaining `mask-*`/`mask-type`, legacy `clip`, subgrid and anchor positioning. Masonry is a separately scoped extension, not assumed by grid support. Define exclusion geometry, resource ownership, dependency/cycle behavior and fallback/unsupported policy before registration. Reuse existing SVG mask/clip machinery where compatible; coordinate actual page producers with the paged plan.
-
-<a id="p3-3"></a>
-### P3.3 — Advanced motion and scheduling
-
-Carry `offset-*` motion paths, scroll-driven timelines/range offsets and `transition-behavior`. Build on the existing animation mixer and scroll state after P2.3/P1.5. `will-change` is deferred until there is a defined, measurable optimization effect; accepting its name alone is not support. Define invalidation, resource budgeting and lifecycle before advertising these families.
-
-<a id="p3-4"></a>
-### P3.4 — State/platform-dependent compatibility
-
-| Carried family | Required owner/contract before implementation |
+| Deferred scope | Disposition |
 |---|---|
-| `:visited` | Real history source and privacy-safe exposed styles/queries; no unconditional matching. |
-| `:fullscreen`, `:autofill`, `:playing`, `:paused` | Actual platform/media/control state, event transitions and invalidation. |
-| `::highlight()`, `::cue` | Highlight registry or media cue model and a distinct paint destination. |
-| `color-scheme`, `touch-action` | UA control/system-color environment or gesture dispatch and cancellation semantics. |
-| `font-synthesis`, `font-palette` and broader color-font control | Font selection/synthesis and palette-capable glyph paint, coordinated with P2.1. |
-| `nav-index`, `nav-up`, `nav-right`, `nav-down`, `nav-left` | An explicitly supported spatial-navigation model; keep parsed-only status until one exists. |
-| Additional media features, container style/scroll-state queries and non-HTML column relations | Real environment/container/host state plus dependency invalidation; no parser-only promotion. |
-| Broad `::-webkit-*` compatibility aliases | Named aliases to implemented parts only; no wildcard acceptance claim. |
+| Extra container/visibility contexts | Style/scroll-state queries, top-layer relevance, pseudo/shadow/table/ruby applicability and skipped-motion sampling beyond the delivered subset. |
+| Grid/flex/geometry residue | Pseudo used-track snapshots, indefinite/intrinsic mixed flex bases, reverse/vertical axes, logical side floats, unusual margin chains and full multicol balancing/spanning. |
+| Font/text expansion | Broader shaping/platform/font grammar, language case mapping/hyphenation, multi-pair ruby/vertical text, complex bidi clamp and fragmented decoration/emphasis. |
+| CSSOM/cascade long tail | Exhaustive shorthand/descriptor/registered-property reflection, cross-realm/owner-unit combinations, rare origin/layer interactions and complete shadow invalidation. Shared defects affecting selected phases still get an explicit blocker task. |
+| Paint/image refinements | URL/radial/conic text clips, full masks and border-image source types, projective sampling, image-set repaint-policy differences, outside/default-gradient marker geometry, PDF gradient image/clip perimeter coverage and minor SVG/PDF pattern/AA fringes. |
+| New layout/motion models | Subgrid, anchor positioning, shapes/exclusions, margin-trim, motion paths and scroll-driven timelines; each needs a separate bounded delivery plan before scheduling. |
+| Further color/value syntax | Lab/LCH, other color spaces, relative/missing-channel colors, `light-dark()`, typed `attr()`, `env()` extensions, cross-fade and element images. |
+| Platform/part features | History-dependent visited styles, autofill, highlights/cues, system-color/control theming, palettes/synthesis, spatial navigation and new gesture/platform services. Existing fullscreen/media state is not reclassified as absent. |
+| Paged output and PDF import | Owned by [paged integration](Radiant_Impl_Paged_Integration.md), [paged media](Radiant_Impl_Paged_Media.md) and [PDF output](../Lambda_Design_PDF_Output.md). Legacy secondary-view migration and Poppler import comparisons do not expand this CSS schedule. |
 
-The deferred model requirement is an explicit disposition of unfinished work, not a support claim. Runtime picker chrome, full browser editing policy, Canvas/WebGL expansion, complete PDF semantics, XSLT, a full TeX frontend and unrelated core-runtime defects are outside this CSS plan.
+<a id="appendix-a"></a>
+## Appendix A — Delivered increments and qualification limits
 
-## 7. Carry-forward coverage from the retired plan
+### A.1 Implemented core scope — regression coverage
 
-This mapping supersedes the old P0–P5 schedule. Historical progress remains in the retired file; only the outstanding residue below is active. A later fix in that history takes precedence over an earlier missing-feature note.
+This table removes delivered work from the active phases. Each row describes a
+bounded increment, not complete standards conformance. The qualified partial
+families in `test/css/support_qualification.json` retain their explicit limits;
+newly discovered residue is not automatically promoted into the active schedule.
 
-| Predecessor scope | Remaining disposition |
+| Delivered area | Implemented scope retained |
 |---|---|
-| P0 selector/cascade failures, keyword modes, `all`, invalid declarations | P0.2 for demonstrated residue; delivered specificity/validation/layer/nesting fixes remain regression coverage. |
-| P0 custom substitution, defaults, cycles, shared shorthands | P0.2 dependency depth, broader grammar/computation and failure edges; P2.5 CSSOM/shorthand/descriptor completion. Delivered expansion bounds/memoization and raw-token serialization are not restarted. |
-| P0 adjacent at-rules | P0.3 media/import/supports invalidation; P1.1 container conditions; P2.4 scope/shadow contexts; P2.5 registered values and interfaces. |
-| P1 structural, relative, state, namespace and column selectors | P0.3 wrong live invalidation; P2.4 remaining language/direction/identity/shadow/state routes; P3.4 new state sources and non-HTML associations. Delivered filtered-nth/has/default/validity/namespace/table cases stay covered. |
-| P2 marker, selection, file button, backdrop, slots/parts | P1.5 practical control sizing; P2.6 remaining part/paint consumers; P2.4 slot/shadow dependencies. |
-| P2 highlight/cue, visited/fullscreen/autofill/media and vendor aliases | P3.4, explicitly dependent on real models/policies. |
-| P3 backgrounds, border-image, gradients and image functions | P1.4 common backgrounds/selection; P2.2 border/effect/vector parity; P3.1 remaining image functions. |
-| P3 text and layout | P1.2 grid/logical/intrinsic residue; P1.3 common text/decoration; P2.1 shaping/vertical/font dependencies. Pagination is handed to its existing plan. |
-| P3 animation/containment | P1.1 containment/container/content visibility; P2.3 basic motion completion; P3.3 new motion/timeline families. |
-| P3 effects/UI/font variants | P1.5 control/scroll behavior; P2.1 font features; P2.2 effect/clip/mask/export completion; P3.2 full mask model. |
-| P4 box/overflow/scroll and UI/replaced inventory | P1.5 existing scroll/overflow/resize/cursor residue; P1.4 remaining sampling; P3.2 margin-trim; P3.4 spatial navigation. Already-consumed properties are not relabeled parsed-only. |
-| P4 floats/exclusions/marker geometry | P1.2 logical side floats; P3.2 float-offset/wrap/marker-offset; page float-reference/defer stay coordinated with the implemented paged profile. |
-| P4 text/ruby/font shaping and font-display | P1.3 inline/ruby traits; P2.1 shaping/features/loader; P2.2 export placement. |
-| P4 background attachment/border/isolation/clip/mask/backface | P1.4 attachment/layers; P2.2 existing effects/3D/export; P3.2 legacy clip/full masks. |
-| P4 animation/container shorthands | P1.1 container shorthand; P2.3 residual animation grammar/composition. Existing animation shorthand is implemented. |
-| P5 individual transforms and logical borders/radii | P2.3 individual transform residue; P0.2/P2.5 computed serialization; P2.2 output/3D gaps. Delivered logical mappings and corner math are regressions. |
-| P5 masks/shapes/anchors/motion/timelines/optimization | P3.2/P3.3; no name-only registration. |
-| P5 font/UI additions and SVG styling | P3.4 platform/font controls; P2.2/P2.3/P2.5 SVG presentation, effects, sampling and computed values. Root-only SVG styling is an obsolete description. |
-| Follow-up CSSOM/registered-property work | P0.2 critical computation/read defects; P2.5 broad interfaces/serialization/registration; P2.3 interpolation. |
-| Follow-up language, attribute identity and serialization work | P2.4, coordinated with the DOM owner; resolved named-slot/expanded-attribute/factory/adoption cases remain regressions. |
-| Consumer recount, lifecycle, platforms, strict boundary and aggregate qualification | P0.1 plus the delivery/final gates below; old red checkpoints do not automatically become current defects. |
+| Selector/cascade foundation | Specificity/validation, namespace/relative/state selectors, layers/nesting, custom-property substitution and expansion bounds, CSS-wide defaults and shared computed-value helpers from the predecessor and dated deliveries. |
+| Containers | Named/unnamed size queries, container shorthand/types/units, owner-relative computation, browsing mutation and bounded independent-view measurement/stabilization. |
+| Containment/visibility | Tested containment formatting/paint/hit behavior, style counter scope, visible/hidden/auto skipping, intrinsic fallbacks and remembered sizes, queued visibility events and post-scroll activation. |
+| Grid | Track math, auto-fit/gutter collapse, decoded named lines/areas, definition/placement shorthands, calculated repeats/lines, sparse/dense placement, growable storage/extent policy, computed snapshots and bounded live/pseudo consumers. |
+| Flex/item values | Calculated grow/shrink/order, typed shorthand components and inherited basis snapshots across flex/grid parent storage; causal native/UI/output cases. |
+| Text truncation | Horizontal single-line LTR/RTL ellipsis, multi-run/combining-cluster fitting, calculated clamp counts, legacy applicability and computed/inherited mutation controls. |
+| Font/line/margin geometry | Inside URL-marker baselines, nested-font normal leading/line struts, normal-leading nested-column break endpoints and adjoining empty-margin chains with immutable computed snapshots. |
+| Text paint | Bounded spacing/case transformation, decoration geometry/color/shorthand/shadows, emphasis and shared selected-font SVG/PDF outlines; explicit fringe/context limits remain. |
+| Background/image consumers | Ordered layers/component periods, URL/image-set selection, gradient math/centers/radii/stops, bounded text-clipped color/linear layers, border/list image selection and retained payloads. |
+| Sampling/effects | Image-rendering computation, affine pixelated device footprints, retained clips/effects, native group opacity, visibility/link suppression and bounded SVG/Canvas/WebGL capture consumers. |
+| Scrolling/overflow/controls | Physical/logical axis computation, open-axis and rounded clip/hit geometry, clip-margin reads/outsets, snap pairs/oversized areas/math, wheel chaining, focus/selection and bounded file-button paint. |
+| Motion | Existing animation shorthand and list writers, keyframes, transition sampling/lifecycle and individual transform consumers; the remaining scheduled syntax is isolated in Phase 5. |
+| Ownership/invalidation | Native DOM/CSS/style/event/state/control providers, pseudo identity/dirty dispatch, retained-fragment memory fixes and the shared Jube catalog activation lock. |
+| Snapshot/merge integration | Bounded explicit readiness drain, unresolved-layout rejection with batch continuation, calculated/inherited numeric-zero stacking identity and the incoming PDF callback's clip API adaptation. |
 
-## 8. Implementation seams and validation
+Use the dated record in Appendix B and the qualification manifest to find the
+actual fixtures and source/configuration for a row. Do not rerun or reimplement
+an entire delivered family merely because its remaining limits are broad.
 
-| Area | Existing implementation/test starting points |
-|---|---|
-| Grammar/values/registry | `lambda/input/css/css_parser.cpp`, `css_value_parser.cpp`, `css_properties.cpp`, generated name catalogs; `test/css/`. |
-| Selectors and dependency planning | `lambda/input/css/selector_matcher.cpp`, `radiant/css_cascade.cpp`; [cascade design §3.10](../radiant/Radiant_CSS_Cascade.md#310-use-one-style-invalidation-planner), `test/ui/` and native DOM integration controls. |
-| Computed/style ownership | `radiant/resolve_css_style.cpp`, `css_prop_table.cpp`, `view_tree_css.cpp`; `css_prop_serialize_computed()` and selected-view tests. |
-| Layout/text/fonts | `radiant/layout_inline.cpp`, grid/flex/block modules and `lib/font/`; current WPT layout baselines and font tests. |
-| Motion | `radiant/css_animation.cpp`, `animation_value.cpp`, `animation_mixer.hpp`; native CSS-animation and frame/UI fixtures. |
-| Paint/exports | `radiant/paint_ir.cpp`, `render_clip.cpp`, `render_svg.cpp`, `render_pdf.cpp`; `test/test_pdf_render_visual_gtest.cpp`, SVG export corpus. |
-| DOM/CSSOM/state | `lambda/dom/`, shared CSS rule/declaration metadata, JS adapter and document interaction state; native lifetime tests and `test/ui/cssom_*` fixtures. |
-| Cross-view/page/resource interaction | `test/test_view_tree_model_gtest.cpp` within `test_view_reuse_gtest.exe`; [paged-media implementation](Radiant_Impl_Paged_Media.md). |
+### A.2 Latest recorded qualification — distinct configurations
 
-Use [Developer_Guide §7](../../doc/dev/Developer_Guide.md#7-worktrees-and-agent-gotchas) before builds: match owner archives, test executables and host configurations, and keep external corpora/font/reference-tool prerequisites visible. Keep all logs/artifacts under `temp/`. Never weaken existing assertions, baselines, memory ceilings or skips to close a work item.
+- **Merged source:** the merge-resolution runtime (`0bcfb7f60170…`, recorded
+  before commit `dffad2ab1`) builds; 136 computation, 123 text, 164 vector and 601
+  baseline UI checks pass. The Radiant report records 5,331 passed /155 partial
+  /19 failed /one skipped over 5,506 reported entries. One failed entry represents
+  a paged runner SIGSEGV, so it does not count every unexecuted native case;
+  the other eighteen failures are layout inputs. Both PDF smoke outputs match
+  their existing goldens. See `temp/merge_css_conflicts/resolution_summary.json`.
+- **Pre-merge scoped readiness rejection:** runtime `f77ce37219bd…` and scoped
+  ASan `d41662cb4cca…` pass 135 computation /122 text /164 vector checks plus two
+  CLI controls per AST/MIR. Thirty-three production owners and four test units
+  are instrumented; other host/vendor objects and the CLI parent are ordinary
+  debug, with leak detection disabled. This is not merged-source ASan evidence.
+- **Pre-merge aggregate:** readiness runtime `42f35d12d02c…` records 5,878 full
+  /155 partial /one failed /one skipped Radiant results and 288/293 full exporter
+  groups, retaining 39 raw assertions in five groups. The latest recorded core
+  runtime `d5006a31c061…` records 6,963/6,964, including all 313 forced-GC and
+  2,112 input cases; its single golden failure is the six dashboard baselines.
 
-Per slice, run focused native grammar/computation tests and end-to-end layout/UI/paint checks relevant to its consumer. For lifecycle changes, run instrumented ASan and forced-GC/repeated read/recascade/adoption controls with no retained-growth regression. For raster/vector changes, compare actual pixels with reference tools; for performance claims use a release host and record the workload/configuration. Use existing suites rather than adding tests that merely mirror implementation.
+The historical marker checkpoint remains the older all-green core/Radiant
+configuration. No historical total is transferred to the merged source. The
+current qualification work is Q0.1–Q0.4; detailed historical hashes, experiments
+and raw failures remain below.
 
-Before marking a slice qualified, run the required applicable gates: `make test-radiant-baseline`, the unchanged `make test-css-cascade-memory` workloads, CSS Syntax, and `make lint ARGS='--rule ^no-int-cast-radiant$'` for layout changes. Run `make test-lambda-baseline` for shared runtime/input/DOM changes, `make test-svg-export` for affected SVG consumers, and `make check-module-boundary` for boundary-affecting work. Existing failures need a matching-source control and remain visible; unrun or unavailable gates remain unqualified.
+### A.3 Completed qualification intake (2026-10-15)
 
-### Final closeout criteria
+- **Q0.1:** identified all eighteen layout cases: seventeen empty readiness
+  captures and the retained Markdown geometry/reference difference. A bounded
+  38-input capture reproduces the seventeen failures on the merge runtime.
+- **Q0.2:** ordinary ticker, 12-/24-frame ready, cancelled-frame, unresolved
+  readiness and following-document controls preserve expected sampling,
+  rejection without payload and batch cleanup.
+- **Q0.3:** paged runner SIGSEGV remains failed and owned by the existing paged
+  migration; it prevents an all-green aggregate claim.
+- **Q0.4:** Markdown and six chart-baseline differences have reference-owner
+  dispositions. Preserve their raw failures; do not change goldens without
+  independently reproducible capture provenance.
 
-- The current registry and support matrix reconcile syntax, computation and consumer status, with backend/live/paged differences retained.
-- Every carried item has a completed acceptance record, an explicit remaining task, or a named deferred model/owner. Finishing P1 alone closes a bounded milestone, not the complete CSS backlog.
-- Required regression, ownership/memory, export/reference and strict-boundary qualification is recorded against the delivered source. Known debt is resolved or the plan remains partial.
-- Only measured support changes are promoted in the user report. Keep this plan as the active backlog and append brief delivery evidence here; preserve the retired predecessor as history.
+The [current failure register](Radiant_CSS_Qualification.md) gives exact case IDs,
+input dependencies, owners and evidence. No full gate was repeated for intake.
 
-## 9. Delivery evidence
+### A.4 Modern theme-color delivery (2026-10-15)
+
+- **C1.1:** shared computation parses the already retained generic Oklab/Oklch
+  function trees, computes channel percentages/angle units/alpha and retains
+  modern components for CSSOM. Invalid declarations cannot replace earlier
+  valid colors. No unused legacy parser adapter was treated as the production path.
+- **C1.2:** two operands mix in sRGB or Oklab with complementary/normalized
+  weights and premultiplied alpha. Deferred `currentColor` expressions clone
+  through the existing owned-tree helper; a destroyed source-pool control
+  protects ownership. Zero-total weights follow current CSS Color 5 as
+  transparent; captured Chromium 152 rejects that newer form.
+- **C1.3:** `css_theme_colors` changes only the theme variable and verifies
+  inherited text, mixed background and border-color. All ten assertions pass
+  per AST/MIR; native dirty reads and PNG/SVG/PDF literal-color pairs pass.
+
+Qualification: 137 computation /123 text /164 vector /602 UI checks pass.
+Radiant retains 19 independent failed entries; the complete input run retains
+34, including eight startup-crash sentinels. The exporter passes 284/295 groups;
+its eleven failed groups retain 216 raw assertions. See the current failure
+register and `temp/css_plan_delivery/phase1_result.json`. The frozen Phase 1
+source receipt predates the Phase 2 source-only preparation; no consumer binary
+was replaced while a gate ran. Boundary and layout integer lint pass.
+
+Limits: relative/missing-channel colors, other spaces, polar interpolation,
+wide-gamut output/gamut mapping, arbitrary channel-math extensions and new
+animation spaces remain deferred. Modern model serialization through the full
+`border` shorthand and secondary/paged color contexts are unqualified; the
+selected border-color path and ordinary PDF output are covered. Existing owned
+operand storage was reused, so no sanitizer expansion or fresh ASan claim was
+made for this increment.
+
+### A.5 Input-capability query delivery (2026-10-15)
+
+- **M2.1:** primary/aggregate pointer and hover capabilities have explicit
+  frontend state, including unknown and mixed-device states. Desktop GLFW
+  publishes mouse capabilities; headless tests publish explicit values. Loader
+  and selected-view environments copy the values without width-based inference.
+- **M2.2:** four features support boolean/keyword evaluation and existing
+  composition. The condition cache keys capability values; native table cases
+  cover no-pointer, coarse, fine/hover and mixed devices, including no-op and
+  invalid publication controls.
+- **M2.3:** native publication recascades through shared document condition
+  invalidation and the existing query notification bridge. The 35-assertion
+  fixture checks live geometry, pixels, event payloads, no-op listener counts and
+  absence of fabricated resize events per AST/MIR. Retained border edges reset
+  their values/priorities before recomputation, so a retired rule cannot defeat
+  the new winner. Owned border-image payloads retain their existing lifecycle.
+
+Evidence: `InputCapabilitiesKeepPrimaryAndAggregateQueriesDistinct`,
+`InputCapabilityMediaUsesEachSelectedEnvironment`, `css_input_capabilities`,
+resize/GC controls and `temp/css_plan_delivery/phase2_result.json`.
+Radiant records 5,335 passed /155 partial /19 failed /one skipped; scoped CSS
+records 950 passed /13 independently failing cases. Boundary, layout lint and
+inventory checks pass. This is bounded delivery with known qualification debt.
+New gesture/hotplug services, child-context update breadth and full media API
+reflection remain unqualified. No full input/export or sanitizer claim is
+transferred from a previous runtime.
+
+### A.6 Pane and resize delivery (2026-10-15)
+
+| Task | Work | Acceptance cases |
+|---|---|---|
+| S3.1 | Preserve the selected snap target through a committed relayout of a horizontal-writing, one-axis mandatory snap container. Recompute its position after a viewport/target size change; if it is removed or no longer eligible, select a valid remaining target using the existing search. Use validated native identity rather than a retained raw view pointer. | Resize the scrollport, resize an earlier item, remove the selected item and toggle its snap eligibility. Offset, visible target and hit location agree after the update; ordinary unsnapped scrolling stays unchanged. |
+| S3.2 | Apply the existing axis-specific scroll-chain policy to native Arrow/Page/Space scrolling in nested panes. Keep focus ownership and editing-key handling on their existing dispatch paths. | An overflowing inner pane consumes movement; at its boundary, `auto` can chain while `contain`/`none` stops the chain. An editing control retains its text/navigation keys. |
+| S3.3 | Implement `resize: none/horizontal/vertical/both` for desktop pointer interaction on a textarea and an overflow auto/scroll block. Respect min/max sizes, box sizing and containing layout; end or cancel a drag through the existing interaction state lifecycle. | Disabled handle; horizontal, vertical and both-axis drags; min/max clamp; relayout/hit agreement; removal or cancellation during a drag. Existing scrollbars remain operable. |
+
+Resnap retains a weak native node identity in the existing scroll state, validates
+it against the committed tree and reuses the existing search when the selected
+area is removed or ineligible. Explicit scrolling keeps its existing path.
+Arrow/Page/Space operations reuse the wheel axis-chain mechanism. Resize grips
+share paint/hit bounds and the document capture resource; native pixel writes
+reuse CSSOM declaration replacement and normal cascade/min/max/box sizing.
+Removal and cancellation do not retain raw view owners. No-realm mutations
+return before reading an absent observer capsule. Ownership follows
+**D4.5.1v4 / D4.6.1v4**; no new Item rooting contract is introduced.
+
+Evidence: `scroll_snap_relayout` (20 assertions), `scroll_keyboard_chain`
+(28), `css_resize` (15), typed keyword validation and native no-realm CSSOM
+replacement/ownership controls. All scripted acceptance assertions pass per
+AST/MIR. CLI ASan passes 35 resnap/resize assertions; native runners are not
+instrumented and leak detection is disabled. Existing snap/wheel, keyboard
+focus, iframe and native DOM-node controls remain covered. The additional
+editing-neighbor dump mismatch remains failed and separately owned.
+
+Receipt: `temp/css_plan_delivery/phase3_result.json`; Radiant 5,339/5,514
+with 155 partial /19 failed /one skipped, CSS 951/964 with identical prior
+thirteen failed cases, and Lambda 5,311/5,314. Layout lint, module-boundary
+validation (137 deferred, zero unapproved), inventory and diff checks pass.
+Two-dimensional/vertical resnap, touch chains, logical/hidden-overflow/replaced
+resize breadth and native platform visual fidelity remain excluded.
+
+### A.7 Horizontal truncation delivery (2026-10-15)
+
+| Task | Work | Acceptance cases |
+|---|---|---|
+| T4.1 | Fit an ellipsis around atomic inline-block and replaced-image contributions in a horizontal LTR single-line container. Preserve source/view geometry and hide or retain each atomic contribution consistently in paint and hit testing. | An atom before text, an atom at the clipped end, an atom wider than the available line, an image equivalent, and a content-fitting control. Include one width change that removes truncation. |
+| T4.2 | Apply a two-line clamp to a plain horizontal RTL paragraph, placing the final marker at the visual inline end. Keep the source order, retained line data and existing single-line RTL behavior. | One run that fits; one run that clamps; count/width change that removes the clamp; an inherited direction/font change that restores it. |
+| T4.3 | Check the resulting clipped contributions through the shared raster and SVG/PDF text/atomic-inline producers. Fix only discrepancies caused by T4.1/T4.2. | One visible reference per new geometry shape and one retained reflow control. Existing `OverflowEllipsisAndClampMatchExplicitTextAcrossOutputs` and RTL controls remain intact. |
+
+Atomic inline-block/image contributions use the shared scoped text paint
+projection for raster, SVG/PDF and hit testing. Uniform RTL letters/spaces reuse
+bidi classification and grapheme boundaries without modifying source line data.
+The native projection/teardown control preserves source rectangles and UTF-8;
+33 live assertions pass per AST/MIR, including width/font/direction/count changes.
+Six browser-qualified atomic output pairs pass, as do existing ellipsis/RTL
+controls. Hebrew raster references pass; four strict SVG/PDF antialias assertions
+remain failed under the minor precision exclusion, without changing tolerances.
+
+Receipt: `temp/css_plan_delivery/phase4_result.json`; Radiant 5,340/5,515,
+155 partial /19 failed /one skipped, including 607 passing UI cases. The layout
+and paged failures retain their prior owners. Layout lint and inventory checks
+pass. Mixed bidi, numeric/punctuated RTL combinations, contextual shaping,
+vertical text, pure-atom lines without a text host, RTL atomic inlines and modern
+clamp shorthand remain excluded. No new retained payload ownership is introduced
+(**D4.5.1v4 / D4.6.1v4**).
+
+### A.8 Basic motion syntax delivery (2026-10-15)
+
+| Task | Work | Acceptance cases |
+|---|---|---|
+| A5.1 | Compute typed time math for animation/transition duration and delay through one helper. Support `s`, `ms`, arithmetic producing time and variable substitution; apply each property's negative-value rule before sampling. | Equivalent seconds/milliseconds; positive calculated duration; permitted negative delay; rejected negative literal duration; calculated duration clamped to its nonnegative range; wrong-dimension rejection/defaulting; live variable change. |
+| A5.2 | Parse and sample numeric piecewise `linear()` easing with percentage input positions, omitted-position distribution and repeated-position jumps. Use the same timing representation for animations and transitions. | Two endpoints; an omitted middle position; an explicit plateau; a repeated-position jump; invalid argument ordering/form; exact endpoints and one interior sample per segment. |
+| A5.3 | Exercise both additions on opacity and `translateX` using the existing motion clock and interruption path. | One animation and one transition fixture, including a mid-run retarget and removal/teardown. Computed state and visible midpoint geometry/color agree. |
+
+Typed time conversion reuses the existing CSS math evaluator. One normalization
+path feeds computed values, animations and transitions, including calculated
+nonnegative-duration clamping and signed delays. Numeric `linear()` validation,
+input distribution, paired positions, decreasing-position fixup and jump
+sampling share one point representation. Computed lists serialize expanded
+positions. Configuration/keyframe pools own temporary points; retained scheduler
+and Web Animation effects copy them into their owners, with replaceable scheduler
+payloads freed on update/removal (**D4.5.1v4**). No new Item-rooting contract is
+introduced.
+
+Semantics: [CSS Values 4 range checking](https://www.w3.org/TR/css-values-4/#calc-range)
+and [CSS Easing 2 linear functions](https://www.w3.org/TR/css-easing-2/#linear-easing-function).
+Evidence: 145/145 native motion tests, including source-pool retirement and live
+allocation controls; `css_motion_math_animation` (22 assertions) and
+`css_motion_math_transition` (nine) per AST/MIR; 31 focused CLI ASan assertions
+(AST, leak detection disabled). Native parent runners are not instrumented.
+Fixed-clock fixtures set input latency explicitly and verify opacity/translateX
+pixels/hits, variables, curve replacement, retargeting and removal.
+
+Receipt: `temp/css_plan_delivery/phase5_result.json`; Radiant 5,348/5,523,
+155 partial /19 failed /one skipped, and scoped CSS 951/964 with the same thirteen
+failed case IDs/assertions after native address normalization. Lambda records
+5,311/5,314 with the same three failures; all 313 forced-GC and 2,112 input
+baseline cases pass. Layout lint, inventory and module boundaries
+pass (137 deferred, zero unapproved). Numeric literal stops are qualified;
+calculated stop components, transform-transition expansion, full Web Animations
+reflection, additive composition, timelines and motion paths remain excluded.
+
+### A.9 Gradient interval-color qualification (2026-10-15)
+
+| Task | Work | Acceptance cases |
+|---|---|---|
+| E6.1 | Preserve the visible colors and positions of non-repeating linear gradients with stops before zero or after the gradient extent in the existing SVG/PDF producers. Reuse the shared stop fixup and owned payload. | Existing negative, overshoot, both-outside, reversed/vertical, affine-transform, hard-stop and all-before/all-after cases from the named test. |
+| E6.2 | Apply the corresponding interval handling to the named radial negative/overshoot and constant outside-range cases. | Existing radial cases from the same test, with unchanged raster output and nonempty independent references. |
+| E6.3 | Qualify those output producers on the frozen phase source. | Focused range test and neighboring center/stop/ordered-layer controls; one full exporter run at the phase boundary because shared export paint changes. |
+
+Intake confirmed the existing `render_normalize_linear_gradient_range` and
+`render_normalize_radial_gradient_range` already satisfy the selected interval
+colors. Their shared owned paint payload reaches raster, SVG and PDF (**CI-18 /
+D4.5.1v4**). No production paint change or new mask experiment was needed.
+The named test covers 19 shapes /114 exact image comparisons: 103 pass and eleven
+2× PDF comparisons remain failed. All raster/SVG pairs and 1× PDF pairs pass.
+The failed shapes have zero differing interior pixels; differences occupy the
+box perimeter and can have channel deltas up to 255. These are retained strict
+failures, not relaxed comparisons or a uniformly small-byte-error claim.
+
+Receipt: `temp/css_plan_delivery/phase6_result.json`; the full exporter records
+285/297 groups with 220 assertions in twelve failed groups. The prior eleven
+group IDs/counts are unchanged; the additional group is Phase 4 Hebrew vector
+precision. Center/radius/stop neighbors pass. Ordered-layer, opacity, skip-ink,
+paged integration and PDF-import debt retain their existing owners. Exact PDF
+image/clip perimeter coverage, broader conic/repeating cases and reader
+conformance remain deferred. Production/test source and the runtime match the
+Phase 5 freeze, so Radiant/CSS gates were not repeated for documentation-only
+Phase 6 disposition.
+
+<a id="appendix-b"></a>
+<a id="9-delivery-evidence"></a>
+## Appendix B — Dated delivery evidence (historical)
+
+The original delivery records below are preserved verbatim. They include
+completed increments, failed trials and work that was only partly qualified at
+its checkpoint. Historical "next" tasks, old phase labels and open-family
+statements are not the current execution queue; Sections 2–8 and the deferred
+dispositions above govern the remaining work. No old result is promoted to
+fresh merged-source qualification by moving it here.
+
 
 ### 2026-10-10 — P0 inventory and bounded shared-value delivery
 
@@ -5522,3 +5681,36 @@ On resumption, qualify this exact runtime before selecting another repair.
 Delayed/virtual timer readiness, larger chains, other capture frontends,
 broader multi-document lifecycle and the other bounded family limits remain
 open. No P0–P1 tier is closed.
+
+<a id="7-carry-forward-coverage-from-the-retired-plan"></a>
+## Appendix C — Disposition of the former P0–P3 schedule
+
+This mapping replaces the earlier executable phase lists and preserves the
+retired predecessor's carry-forward destination. Only Sections 2–8 above are
+scheduled phases.
+
+| Former task family | Current disposition |
+|---|---|
+| P0.1 evidence / qualification | Phase 0 and the verification rules; delivered inventory/provider work is Appendix A. |
+| P0.2 shared values / computation | Delivered increments are Appendix A. New common color computation is Phase 1; rare property/context combinations are deferred. |
+| P0.3 live conditions / invalidation | Phase 2's four input features; shared defects blocking other phases get named prerequisite tasks. General selector/shadow audits are deferred. |
+| P1.1 containment / containers | Core delivered in Appendix A. Remaining applicability, visibility and new query models are deferred. |
+| P1.2 grid / intrinsic / logical geometry | Core delivered in Appendix A; the remaining axis, intrinsic and fragmentation contexts are deferred. |
+| P1.3 text / decorations | Core delivered in Appendix A; atomic-inline/RTL truncation is Phase 4. Font/ruby/decoration expansion and minor fringes are deferred. |
+| P1.4 backgrounds / images | Core delivered in Appendix A; the named visible vector-gradient range defect is Phase 6. Broader image functions/source classes are deferred. |
+| P1.5 scroll / controls | Delivered overflow/snap/focus/file-button scope is Appendix A. Resnap, keyboard chaining and CSS resize are Phase 3. |
+| P2.1 shaping / fonts | Preserve existing implementations and regressions; additional platform/shaping/font-feature coverage needs a separately scoped delivery. |
+| P2.2 paint / output parity | Phase 6's named gradient cases; other output work is delivered or deferred by the tables above. |
+| P2.3 motion / transforms | Phase 5's time math/easing; composition and new motion models are deferred. |
+| P2.4 selectors / language / shadow | Delivered selector/identity/direction work remains regression coverage; remaining models/interfaces are deferred. |
+| P2.5 CSSOM / registered values | Delivered computation/interfaces remain regression coverage; exhaustive reflection/registration contexts are deferred. |
+| P2.6 parts / generated content | Existing parts remain regression coverage; new highlights/cues/top-layer destinations are deferred. |
+| P3.1 color / value functions | The explicit Oklab/Oklch/two-space mix subset moves to Phase 1; the remaining named value families stay deferred. |
+| P3.2 new layout / masks | Deferred; each proposed model needs its own finite plan. |
+| P3.3 advanced motion | Deferred; it does not block Phase 5. |
+| P3.4 platform compatibility | Phase 2 promotes only four input-capability media features. The remaining platform/state families stay deferred or under their existing owner. |
+
+The [retired selector/property record](<Radiant_Impl_CSS_Selector_Property_Support (retired).md>)
+and [support matrix](../../doc/HTML_CSS_SVG_Support.md) remain reference sources.
+Older open-scope statements in the dated history describe their checkpoints;
+they do not override this schedule.

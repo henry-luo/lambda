@@ -363,7 +363,8 @@ static bool serialize_computed(DomElement* element, CssPropertyCode id,
 static bool format_decl_color(const CssValue* value, StringBuf* out) {
     CssComputedColor color;
     if (!css_color_compute(value, &color)) return false;
-    if (color.type == CSS_COLOR_COLOR || color.type == CSS_COLOR_CURRENTCOLOR || color.missing) return false;
+    if (color.type == CSS_COLOR_COLOR || color.type == CSS_COLOR_OKLAB || color.type == CSS_COLOR_OKLCH ||
+        color.type == CSS_COLOR_CURRENTCOLOR || color.missing) return false;
     Color rgba;
     return css_color_to_rgba(&color, &rgba.r, &rgba.g, &rgba.b, &rgba.a)
         ? format_color(out, rgba) : false;
@@ -589,10 +590,30 @@ static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
             value = nullptr;
         }
         if (background_shorthand) value = css_background_color_component(value);
+        CssComputedColor computed_color;
+        if (!native_value && css_color_compute(value, &computed_color) && computed_color.unresolved) {
+            int color_pseudo = id == CSS_PROPERTY_COLOR ? pseudo_type : receiver_pseudo;
+            DomElement* color_owner = id == CSS_PROPERTY_COLOR
+                ? cssom_inherited_source(element, &color_pseudo) : receiver;
+            CssComputedColor current = {CSS_COLOR_RGB, {0.0, 0.0, 0.0, 1.0}};
+            if (color_owner) {
+                StringBuf* text = stringbuf_new(scratch);
+                if (!text || !serialize_computed(color_owner, CSS_PROPERTY_COLOR, color_pseudo, text)) return false;
+                String* serialized = stringbuf_to_string(text);
+                CssDeclaration* source = serialized ? css_parse_property_declaration("color", 5,
+                    serialized->chars, serialized->len, scratch) : nullptr;
+                if (!source || !css_color_compute(source->value, &current)) return false;
+            }
+            if (!css_color_compute(value, &computed_color, &current)) return false;
+            // CSSOM's temporary tree belongs to this read; authored and registered expressions stay immutable.
+            value = css_value_create_computed_color(scratch, &computed_color);
+            if (!value) return false;
+        }
         if (!native_value && preserve_color_model) {
             CssComputedColor color;
             // A byte paint snapshot cannot serialize a predefined color space or missing channels.
-            if (!css_color_compute(value, &color) || (color.type != CSS_COLOR_COLOR && !color.missing)) return false;
+            if (!css_color_compute(value, &color) || (color.type != CSS_COLOR_COLOR &&
+                color.type != CSS_COLOR_OKLAB && color.type != CSS_COLOR_OKLCH && !color.missing)) return false;
         }
         const CssProperty* property = css_property_get_by_code(id);
         if (!native_value && id != CSS_PROPERTY_COLOR && property && property->type == PROP_TYPE_COLOR) {
@@ -2086,6 +2107,7 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DERIVED_ROW(CSS_PROPERTY_OVERFLOW_INLINE, serialize_scroll_axes, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_OVERFLOW_BLOCK, serialize_scroll_axes, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
     DIRECT_ROW(CSS_PROPERTY_SCROLL_BEHAVIOR, PROP_GROUP_SCROLL, ScrollProp, scroll_behavior, CSS_PROP_VALUE_ENUM, 0),
+    DIRECT_ROW(CSS_PROPERTY_RESIZE, PROP_GROUP_SCROLL, ScrollProp, resize, CSS_PROP_VALUE_ENUM, 0),
     DERIVED_ROW(CSS_PROPERTY_OVERSCROLL_BEHAVIOR_X, serialize_scroll_axes, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_OVERSCROLL_BEHAVIOR_Y, serialize_scroll_axes, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_OVERSCROLL_BEHAVIOR, serialize_scroll_axes, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),

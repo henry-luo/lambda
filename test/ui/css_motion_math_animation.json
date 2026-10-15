@@ -1,0 +1,233 @@
+{
+  "name": "Calculated animation times and piecewise easing reach opacity, transform paint and live mutation",
+  "html": "test/ui/css_motion_math_animation.html",
+  "viewport": {
+    "width": 240,
+    "height": 140
+  },
+  "events": [
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#box"
+      },
+      "property": "animation-duration",
+      "equals": "2s"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#box"
+      },
+      "property": "animation-delay",
+      "equals": "-1s"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#box"
+      },
+      "property": "animation-timing-function",
+      "equals": "linear(0 0%, 0.25 50%, 1 100%)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#box"
+      },
+      "property": "opacity",
+      "equals": "0.25",
+      "animated": true,
+      "tolerance": 0.001
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 70,
+      "min_r": 254,
+      "max_r": 255,
+      "min_g": 190,
+      "max_g": 192,
+      "min_b": 190,
+      "max_b": 192
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 40,
+      "y": 70,
+      "expected_selector": "#box"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#web"
+      },
+      "property": "opacity",
+      "equals": "0.25",
+      "animated": true,
+      "tolerance": 0.001
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 5
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#box"
+      },
+      "property": "opacity",
+      "equals": "0.25",
+      "animated": true,
+      "tolerance": 0.001
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#duration"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#box"
+      },
+      "property": "animation-duration",
+      "equals": "4s"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#box"
+      },
+      "property": "opacity",
+      "equals": "0.125",
+      "animated": true,
+      "tolerance": 0.001
+    },
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 70,
+      "min_r": 254,
+      "max_r": 255,
+      "min_g": 222,
+      "max_g": 224,
+      "min_b": 222,
+      "max_b": 224
+    },
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 70,
+      "min_r": 254,
+      "max_r": 255,
+      "min_g": 254,
+      "max_g": 255,
+      "min_b": 254,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 30,
+      "y": 70,
+      "expected_selector": "#box"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#curve"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#box"
+      },
+      "property": "opacity",
+      "equals": "0.5",
+      "animated": true,
+      "tolerance": 0.001
+    },
+    {
+      "type": "assert_pixel",
+      "x": 65,
+      "y": 70,
+      "min_r": 254,
+      "max_r": 255,
+      "min_g": 127,
+      "max_g": 129,
+      "min_b": 127,
+      "max_b": 129
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 65,
+      "y": 70,
+      "expected_selector": "#box"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 70,
+      "min_r": 254,
+      "max_r": 255,
+      "min_g": 254,
+      "max_g": 255,
+      "min_b": 254,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#remove"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#box"
+      },
+      "property": "animation-name",
+      "equals": "none"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#box"
+      },
+      "property": "opacity",
+      "equals": "1"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 70,
+      "min_r": 254,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 1,
+      "min_b": 0,
+      "max_b": 1
+    },
+    {
+      "type": "assert_pixel",
+      "x": 65,
+      "y": 70,
+      "min_r": 254,
+      "max_r": 255,
+      "min_g": 254,
+      "max_g": 255,
+      "min_b": 254,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 15,
+      "y": 70,
+      "expected_selector": "#box"
+    }
+  ],
+  "input_turn_ms": 0
+}

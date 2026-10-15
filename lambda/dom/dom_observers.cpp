@@ -694,6 +694,8 @@ static void observer_queue_child_record(JsObserverState* observer,
 extern "C" void dom_observers_mutation_notify(DomJsMutationKind kind,
     void* target_ptr, void* parent_ptr, const char* attribute_name, const char* old_value)
 {
+    // native CSSOM defaults can mutate a document before it has an observer realm.
+    if (!js_observer_runtime_state()) return;
     DomNode* target = (DomNode*)target_ptr;
     DomNode* parent = (DomNode*)parent_ptr;
     bool child = kind == DOM_JS_MUTATION_CHILD_INSERT ||

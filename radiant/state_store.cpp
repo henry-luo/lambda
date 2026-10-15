@@ -4684,6 +4684,21 @@ static void scroll_state_get_position(DocState* state, void* pane_ptr,
     if (out_v_max) *out_v_max = pane->v_max_scroll;
 }
 
+DomNodeRef scroll_state_get_snap_target_for_view(DocState* state, View* view) {
+    ViewState* entry = state && view
+        ? view_state_get_for_kind(state, view, VIEW_STATE_SCROLL) : nullptr;
+    return entry ? entry->data.scroll.snap_target : DomNodeRef{};
+}
+
+void scroll_state_set_snap_target_for_view(DocState* state, View* view,
+                                           void* pane, DomNodeRef target) {
+    // clearing an absent snap selection must not create state on ordinary pages.
+    ViewState* entry = target.address
+        ? scroll_view_state_get_or_create(state, view, (ScrollPane*)pane)
+        : state && view ? view_state_get_for_kind(state, view, VIEW_STATE_SCROLL) : nullptr;
+    if (entry) entry->data.scroll.snap_target = target;
+}
+
 void scroll_state_get_position_for_view(DocState* state, View* view, void* pane_ptr,
                                         float* out_h_pos, float* out_v_pos,
                                         float* out_h_max, float* out_v_max) {

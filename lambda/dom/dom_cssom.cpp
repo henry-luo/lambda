@@ -1859,7 +1859,12 @@ struct CssomDeclarationView {
             rule = unwrap_rule_decl(receiver);
             return;
         }
-        element = (DomElement*)virtual_host_data(receiver);
+        initialize_inline((DomElement*)virtual_host_data(receiver));
+    }
+    explicit CssomDeclarationView(DomElement* owner) { initialize_inline(owner); }
+    void initialize_inline(DomElement* owner) {
+        element = owner;
+        if (!element) return;
         scratch = pool_create();
         if (!scratch) return;
         inline_rule.pool = scratch;
@@ -2053,6 +2058,20 @@ static void cssom_decl_commit(CssomDeclarationView* view, StrView name) {
     dom_provider_call(dom_style_engine_ops(), &DomStyleEngineOps::capture_transition, view->element, property);
     if (dom_element_commit_inline_declarations(view->element, view->rule, text->chars))
         dom_notify_mutation(dom_style_mutation_kind(property), view->element, view->element->parent);
+}
+
+extern "C" bool dom_cssom_set_inline_property(void* element, const char* property, const char* value) {
+    if (!element || !property || !value) return false;
+    CssomDeclarationView view((DomElement*)element);
+    if (!view.rule) return false;
+    StrView name = strview_from_cstr(property);
+    if (!cssom_decl_supports(view.rule, name)) return false;
+    CssDeclaration* declaration = css_parse_property_value_declaration(property,
+        strlen(property), value, strlen(value), view.rule->pool);
+    if (!declaration) return false;
+    if (cssom_decl_store(view.rule, name, declaration, view.serialization_pool()))
+        cssom_decl_commit(&view, name);
+    return true;
 }
 
 static Item cssom_decl_set(Item receiver, Item property, Item value, Item priority, bool named) {

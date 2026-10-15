@@ -3325,6 +3325,28 @@ TEST(RenderOutputParity, RgbPercentageAlphaPaintsLikeNumericAlpha) {
     image_free(image.pixels);
 }
 
+TEST(RenderOutputParity, ModernThemeColorsReachTextBordersAndBackgroundsAcrossOutputs) {
+    const char* html =
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "body{color:oklab(.6 .1 .05);font:24px Arial}"
+        "div{position:absolute;width:40px;height:30px;top:10px}"
+        "#solid{left:10px;background:oklch(.6 .1 120)}"
+        "#border{left:60px;border:6px solid oklab(.6 .1 .05)}"
+        "#mix{left:125px;background:color-mix(in srgb,red,blue)}"
+        "#perceptual{left:175px;background:color-mix(in oklab,white,black)}"
+        "#alpha{left:225px;background:color-mix(in srgb,red,transparent)}"
+        "#nonneutral{left:225px;top:50px;background:color-mix(in oklab,red,blue)}"
+        "p{position:absolute;top:60px;left:10px;margin:0}"
+        "</style><div id=solid></div><div id=border></div><div id=mix></div>"
+        "<div id=perceptual></div><div id=alpha></div><div id=nonneutral></div><p><span>Theme color</span></p>";
+    // literal sRGB patches come from independent browser samples, not the color implementation.
+    expect_html_css_override_output_parity("modern_theme_colors", html,
+        "body{color:rgb(186,100,92)}#solid{background:rgb(121,137,64)}"
+        "#border{border-color:rgb(186,100,92)}#mix{background:rgb(128,0,128)}"
+        "#perceptual{background:rgb(99,99,99)}#alpha{background:rgba(255,0,0,.5)}"
+        "#nonneutral{background:rgb(140,83,162)}");
+}
+
 TEST(RenderOutputParity, HwbColorsNormalizeWhitenessBlacknessAndAlpha) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";
@@ -5545,6 +5567,55 @@ TEST(RenderOutputParity, OverflowEllipsisAndClampMatchExplicitTextAcrossOutputs)
             SCOPED_TRACE(name);
             expect_html_pair_output_parity(name,actual,reference,true,scale);
         }
+    }
+}
+
+TEST(RenderOutputParity, AtomicInlineEllipsisMatchesExplicitContributionsAcrossOutputs) {
+    const struct {const char* name; const char* actual; const char* reference;} cases[] = {
+        {"before", "<i style='width:20px'></i>ABCDEFGHIJ", "<i style='width:20px'></i>AB…"},
+        {"end", "AB<i style='width:40px'></i>CD", "AB…"},
+        {"wide_first", "<i style='width:90px'></i>AB", "<i style='width:90px'></i>"},
+        {"image_end", "ABCD<img width=20 height=20 src='atomic_ellipsis_red.svg'>", "ABCD…"},
+        {"image_before", "<img width=20 height=20 src='atomic_ellipsis_red.svg'>ABCDEFGHIJ", "<img width=20 height=20 src='atomic_ellipsis_red.svg'>AB…"},
+        {"fits", "<i style='width:20px'></i>AB", "<i style='width:20px'></i>AB"},
+    };
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char image[] = "<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><path fill='red' d='M0 0h20v20H0z'/></svg>";
+    ASSERT_TRUE(write_file_all("temp/render_output_parity/atomic_ellipsis_red.svg", image, sizeof(image) - 1));
+    const char* format = "<!doctype html><meta charset=utf-8><style>"
+        "@font-face{font-family:FixtureMono;src:url(../../test/layout/data/font/LiberationMono-Regular.ttf)}"
+        "html,body{margin:0;background:white}.box{font:20px/24px FixtureMono;color:black;"
+        "width:62px;height:24px;overflow:hidden;white-space:nowrap;%s}"
+        "i{display:inline-block;height:20px;background:red;vertical-align:top}img{vertical-align:top}"
+        "</style><div class=box>%s</div>";
+    for (const auto& item : cases) {
+        char name[96], actual[2048], reference[2048];
+        snprintf(name, sizeof(name), "atomic_ellipsis_%s", item.name);
+        snprintf(actual, sizeof(actual), format, "text-overflow:ellipsis", item.actual);
+        snprintf(reference, sizeof(reference), format, "", item.reference);
+        expect_html_pair_output_parity(name, actual, reference, true);
+    }
+}
+
+TEST(RenderOutputParity, RtlTwoLineClampMatchesExplicitVisualLinesAcrossOutputs) {
+    const struct {const char* name; const char* actual; const char* reference; const char* style;} cases[] = {
+        {"clamped", "ABCDEFGHIJKLMNOP", "<span dir=ltr>ABCDE<br>…<span>GHIJ</span></span>", ""},
+        {"fits", "ABCD", "ABCD", ""},
+        {"wide", "ABCDEFGHIJKLMNOP", "ABCDEFGHIJKLMNOP", "width:200px"},
+        // literal visual order keeps this reference independent of the RTL projection.
+        {"hebrew", "אבגדהוזחטיכלמנסע", "<bdo dir=ltr>הדגבא<br>…טחזו</bdo>", ""},
+        {"hebrew_fits", "אבגד", "<bdo dir=ltr>דגבא</bdo>", ""},
+    };
+    const char* format = "<!doctype html><meta charset=utf-8><style>"
+        "@font-face{font-family:FixtureMono;src:url(../../test/layout/data/font/LiberationMono-Regular.ttf)}"
+        "html,body{margin:0;background:white}.box{font:20px/24px FixtureMono;color:black;direction:rtl;"
+        "width:62px;overflow:hidden;word-break:break-all;%s;%s}</style><div class=box>%s</div>";
+    for (const auto& item : cases) {
+        char name[96], actual[2048], reference[2048];
+        snprintf(name, sizeof(name), "rtl_two_line_%s", item.name);
+        snprintf(actual, sizeof(actual), format, "display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2", item.style, item.actual);
+        snprintf(reference, sizeof(reference), format, "", item.style, item.reference);
+        expect_html_pair_output_parity(name, actual, reference, true);
     }
 }
 

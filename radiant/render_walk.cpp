@@ -410,6 +410,7 @@ void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan
 
 static void render_walk_view(RenderBackend* backend, RenderWalkState* state, View* view) {
     if (!backend || !state || !view) return;
+    if (render_text_paint_atomic_hidden(backend->ctx, view)) return;
     if (render_walk_aborted(backend)) return;
     if (view_backface_is_hidden(view, view->is_block() ? BACKFACE_SUBTREE : BACKFACE_SELF)) return;
 

@@ -1,0 +1,17 @@
+<!doctype html><style>
+html,body{margin:0}button{position:absolute;top:0;width:80px;height:24px}
+#port{left:80px}#grow{left:160px}#remove{left:240px}#toggle{left:320px}
+#pane,#free{position:absolute;top:60px;width:100px;height:100px;overflow:auto}
+#pane{scroll-snap-type:y mandatory}#free{left:130px;height:80px}
+.item{height:60px;scroll-snap-align:center}
+#first,#freefirst{background:red}#second{background:green}#third{background:blue}#fourth{background:yellow}
+</style><button id="select">Select</button><button id="port">Port</button><button id="grow">Grow</button><button id="remove">Remove</button><button id="toggle">Toggle</button>
+<div id="pane"><div id="first" class="item"></div><div id="second" class="item"></div><div id="third" class="item"></div><div id="fourth" class="item"></div><div class="item"></div></div>
+<div id="free"><div id="freefirst" class="item"></div><div class="item"></div><div class="item"></div><div class="item"></div><div class="item"></div></div>
+<script>
+document.getElementById('select').onclick=function(){document.getElementById('pane').scrollTop=40;document.getElementById('free').scrollTop=75;};
+document.getElementById('port').onclick=function(){document.getElementById('pane').style.height='80px';};
+document.getElementById('grow').onclick=function(){document.getElementById('first').style.height='140px';};
+document.getElementById('remove').onclick=function(){document.getElementById('second').remove();};
+document.getElementById('toggle').onclick=function(){document.getElementById('third').style.scrollSnapAlign='none';};
+</script>

@@ -4,6 +4,7 @@
 #include "typeset.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/input/css/css_paged_media.hpp"
+#include "../lambda/input/css/css_environment.hpp"
 #include "../lib/ownership.hpp"
 #include <stddef.h>
 #include <stdint.h>
@@ -45,6 +46,7 @@ struct ViewEnvironment {
     float page_width, page_height;
     uint64_t resource_generation;
     double sampled_time;
+    CssInputCapabilities input_capabilities;
     // the host whose fonts, image cache and layout services lay out the page
     // flow; borrowed for the edition's lifetime (null for model-only editions)
     lam::Up<struct UiContext> ui_context;

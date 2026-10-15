@@ -1,0 +1,269 @@
+{
+  "name": "CSS resize native grip axes constraints and cancellation",
+  "html": "test/ui/css_resize.html",
+  "viewport": {
+    "width": 640,
+    "height": 340
+  },
+  "events": [
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#none",
+        "offset_x": 94,
+        "offset_y": 54
+      },
+      "dx": 30,
+      "dy": 20
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#none"
+      },
+      "width": 100,
+      "height": 60,
+      "tolerance": 0.1
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#h",
+        "offset_x": 94,
+        "offset_y": 54
+      },
+      "dx": 40,
+      "dy": 25
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#h"
+      },
+      "width": 140,
+      "height": 60,
+      "tolerance": 0.1
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#v",
+        "offset_x": 94,
+        "offset_y": 54
+      },
+      "dx": 30,
+      "dy": 20
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#v"
+      },
+      "width": 100,
+      "height": 80,
+      "tolerance": 0.1
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#both",
+        "offset_x": 110,
+        "offset_y": 70
+      },
+      "dx": 200,
+      "dy": 100
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#both"
+      },
+      "width": 166,
+      "height": 106,
+      "tolerance": 0.1
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#both",
+        "offset_x": 160,
+        "offset_y": 100
+      },
+      "dx": -300,
+      "dy": -200
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#both"
+      },
+      "width": 106,
+      "height": 56,
+      "tolerance": 0.1
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#text",
+        "offset_x": 114,
+        "offset_y": 64
+      },
+      "dx": 30,
+      "dy": 20
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#text"
+      },
+      "width": 150,
+      "height": 90,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#text"
+      },
+      "equals": "one\ntwo\nthree"
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#flow",
+        "offset_x": 94,
+        "offset_y": 54
+      },
+      "dx": 40,
+      "dy": 20
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#flow"
+      },
+      "width": 140,
+      "height": 80,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#after"
+      },
+      "y": 260,
+      "height": 20,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 375,
+      "y": 250,
+      "expected_selector": "#flow"
+    },
+    {
+      "type": "mouse_down",
+      "target": {
+        "selector": "#h",
+        "offset_x": 134,
+        "offset_y": 54
+      }
+    },
+    {
+      "type": "mouse_move",
+      "x": 174,
+      "y": 94
+    },
+    {
+      "type": "key_press",
+      "key": "Escape"
+    },
+    {
+      "type": "mouse_move",
+      "x": 210,
+      "y": 100
+    },
+    {
+      "type": "mouse_up",
+      "x": 210,
+      "y": 100
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#h"
+      },
+      "width": 160,
+      "height": 60,
+      "tolerance": 0.1
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#v",
+        "offset_x": 94,
+        "offset_y": 74
+      },
+      "dx": 30,
+      "dy": 70
+    },
+    {
+      "type": "assert_count",
+      "count": 0,
+      "target": {
+        "selector": "#v"
+      }
+    },
+    {
+      "type": "scroll",
+      "target": {
+        "selector": "#h"
+      },
+      "dx": 0,
+      "dy": -1
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#h"
+      },
+      "view_state": true,
+      "kind": "scroll",
+      "view_scroll_y": 50,
+      "tolerance": 0.1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#disable"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#h"
+      },
+      "property": "resize",
+      "equals": "none"
+    },
+    {
+      "type": "mouse_drag",
+      "target": {
+        "selector": "#h",
+        "offset_x": 154,
+        "offset_y": 54
+      },
+      "dx": 30,
+      "dy": 20
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#h"
+      },
+      "width": 160,
+      "height": 60,
+      "tolerance": 0.1
+    }
+  ]
+}

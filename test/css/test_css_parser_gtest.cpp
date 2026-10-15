@@ -2302,6 +2302,152 @@ TEST_F(CssEngineParserTest, SharedColorComputationValidatesChannelsAndKeepsPreci
     }
 }
 
+TEST_F(CssEngineParserTest, AbsoluteOklabAndOklchKeepComponentsAndReachSrgbConsumers) {
+    struct Case {const char* source; const char* computed; uint8_t r, g, b, a;};
+    // opaque samples were independently captured with Chromium's sRGB canvas.
+    const Case cases[] = {
+        {"oklab(0 0 0)", "oklab(0 0 0)", 0, 0, 0, 255},
+        {"oklab(1 0 0)", "oklab(1 0 0)", 255, 255, 255, 255},
+        {"oklab(.6 .1 .05)", "oklab(0.6 0.1 0.05)", 186, 100, 92, 255},
+        {"oklab(60% 25% 12.5%)", "oklab(0.6 0.1 0.05)", 186, 100, 92, 255},
+        {"oklch(.6 .1 120deg)", "oklch(0.6 0.1 120)", 121, 137, 64, 255},
+        {"oklch(60% 25% .3333333333333333turn)", "oklch(0.6 0.1 120)", 121, 137, 64, 255},
+        {"oklch(.6 .1 133.3333333333333grad)", "oklch(0.6 0.1 120)", 121, 137, 64, 255},
+        {"oklch(.6 .1 2.0943951023931953rad)", "oklch(0.6 0.1 120)", 121, 137, 64, 255},
+        {"oklab(.6 .1 .05 / 50%)", "oklab(0.6 0.1 0.05 / 0.5)", 186, 100, 92, 128},
+        {"oklch(.6 .1 120 / 0)", "oklch(0.6 0.1 120 / 0)", 121, 137, 64, 0},
+        {"oklch(.6 -1 120)", "oklch(0.6 0 120)", 128, 128, 128, 255},
+        {"oklab(-1 0 0 / -1)", "oklab(0 0 0 / 0)", 0, 0, 0, 0},
+        {"oklab(2 0 0 / 200%)", "oklab(1 0 0)", 255, 255, 255, 255},
+    };
+    for (const Case& entry : cases) {
+        SCOPED_TRACE(entry.source);
+        CssDeclaration* declaration = css_parse_property_declaration(
+            "color", 5, entry.source, strlen(entry.source), pool);
+        ASSERT_NE(declaration, nullptr);
+        CssComputedColor color;
+        ASSERT_TRUE(css_color_compute(declaration->value, &color));
+        uint8_t r, g, b, a;
+        ASSERT_TRUE(css_color_to_rgba(&color, &r, &g, &b, &a));
+        EXPECT_EQ(r, entry.r); EXPECT_EQ(g, entry.g); EXPECT_EQ(b, entry.b); EXPECT_EQ(a, entry.a);
+        CssValue* retained = css_value_create_computed_color(pool, &color);
+        ASSERT_NE(retained, nullptr);
+        CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+        formatter->options.computed_colors = true;
+        css_format_value(formatter, retained);
+        EXPECT_STREQ(stringbuf_to_string(formatter->output)->chars, entry.computed);
+        CssComputedColor round_trip;
+        ASSERT_TRUE(css_color_compute(retained, &round_trip));
+        EXPECT_EQ(color.type, round_trip.type);
+        for (int i = 0; i < 4; i++) EXPECT_DOUBLE_EQ(color.components[i], round_trip.components[i]);
+    }
+}
+
+TEST_F(CssEngineParserTest, InvalidPerceptualColorsCannotReplaceAnEarlierDeclaration) {
+    const char* invalid[] = {"oklab(.6 .1)", "oklab(.6 .1 .05 .5)", "oklab(.6,.1,.05)",
+        "oklab(.6 1px .05)", "oklab(.6 .1 30deg)", "oklch(.6 .1 30%)", "oklch(1px .1 30)",
+        "oklch(.6 .1 30 / 1s)", "oklab(.6 .1 .05 / .5 .2)", "oklab(none .1 .05)",
+        "oklab(from red l a b)", "oklch(.6 none 30)"};
+    for (const char* source : invalid) {
+        SCOPED_TRACE(source);
+        EXPECT_EQ(css_parse_property_declaration("color", 5, source, strlen(source), pool), nullptr);
+        char rule[256];
+        snprintf(rule, sizeof(rule), "color: red; color: %s", source);
+        size_t count = 0;
+        CssDeclaration** declarations = css_parse_declaration_list_text(rule, strlen(rule), pool, &count);
+        ASSERT_NE(declarations, nullptr);
+        ASSERT_EQ(count, 1);
+        CssComputedColor color;
+        ASSERT_TRUE(css_color_compute(declarations[0]->value, &color));
+        EXPECT_DOUBLE_EQ(color.components[0], 1.0);
+        EXPECT_DOUBLE_EQ(color.components[1], 0.0);
+    }
+}
+
+TEST_F(CssEngineParserTest, TwoColorMixNormalizesWeightsAndPremultipliesAlpha) {
+    struct Case {const char* source; double r, g, b, a;};
+    const Case cases[] = {
+        {"color-mix(in srgb, red, blue)", .5, 0, .5, 1},
+        {"color-mix(in srgb, red 25%, blue)", .25, 0, .75, 1},
+        {"color-mix(in srgb, red, 25% blue)", .75, 0, .25, 1},
+        {"color-mix(in srgb, red 80%, blue 80%)", .5, 0, .5, 1},
+        {"color-mix(in srgb, red 20%, blue 20%)", .5, 0, .5, .4},
+        {"color-mix(in srgb, red, transparent)", 1, 0, 0, .5},
+        {"color-mix(in srgb, transparent, transparent)", 0, 0, 0, 0},
+        {"color-mix(in srgb, red 0%, blue 0%)", .5, 0, .5, 0},
+        {"color-mix(in srgb, rgb(255 0 0 / .7) 20%, rgb(0 255 0 / .2) 60%)",
+            7.0 / 13.0, 6.0 / 13.0, 0, .26},
+        {"color-mix(in srgb, color-mix(in srgb, red, blue), white)", .75, .5, .75, 1},
+    };
+    for (const Case& entry : cases) {
+        SCOPED_TRACE(entry.source);
+        CssDeclaration* declaration = css_parse_property_declaration("color", 5,
+            entry.source, strlen(entry.source), pool);
+        ASSERT_NE(declaration, nullptr);
+        CssComputedColor color;
+        ASSERT_TRUE(css_color_compute(declaration->value, &color));
+        EXPECT_EQ(color.type, CSS_COLOR_COLOR); EXPECT_EQ(color.unresolved, nullptr);
+        EXPECT_NEAR(color.components[0], entry.r, 1e-9); EXPECT_NEAR(color.components[1], entry.g, 1e-9);
+        EXPECT_NEAR(color.components[2], entry.b, 1e-9); EXPECT_NEAR(color.components[3], entry.a, 1e-9);
+    }
+    const char* text = "color-mix(in oklab, white, black)";
+    CssDeclaration* declaration = css_parse_property_declaration("color", 5, text, strlen(text), pool);
+    ASSERT_NE(declaration, nullptr);
+    CssComputedColor color;
+    ASSERT_TRUE(css_color_compute(declaration->value, &color));
+    EXPECT_EQ(color.type, CSS_COLOR_OKLAB);
+    EXPECT_NEAR(color.components[0], .5, 1e-7);
+    uint8_t r, g, b, a;
+    ASSERT_TRUE(css_color_to_rgba(&color, &r, &g, &b, &a));
+    EXPECT_EQ(r, 99); EXPECT_EQ(g, 99); EXPECT_EQ(b, 99); EXPECT_EQ(a, 255);
+    const char* invalid[] = {"color-mix(in srgb, red -1%, blue)", "color-mix(in srgb, red 101%, blue)",
+        "color-mix(in srgb, red 20% 30%, blue)", "color-mix(in srgb, red)",
+        "color-mix(in srgb, red, blue, green)", "color-mix(in oklch, red, blue)",
+        "color-mix(srgb, red, blue)", "color-mix(in srgb, 1px, blue)"};
+    for (const char* source : invalid)
+        EXPECT_EQ(css_parse_property_declaration("color", 5, source, strlen(source), pool), nullptr) << source;
+}
+
+TEST_F(CssEngineParserTest, CurrentColorMixSnapshotsOwnTheirDeferredOperands) {
+    Pool* source_pool = pool_create();
+    ASSERT_NE(source_pool, nullptr);
+    const char* text = "color-mix(in srgb, color-mix(in srgb, currentColor, blue), white)";
+    CssDeclaration* declaration = css_parse_property_declaration("color", 5, text, strlen(text), source_pool);
+    ASSERT_NE(declaration, nullptr);
+    CssComputedColor deferred;
+    ASSERT_TRUE(css_color_compute(declaration->value, &deferred));
+    ASSERT_EQ(deferred.unresolved, declaration->value);
+    CssValue* retained = css_value_create_computed_color(pool, &deferred);
+    ASSERT_NE(retained, nullptr);
+    pool_destroy(source_pool);
+    CssComputedColor current = {CSS_COLOR_RGB, {1, 0, 0, 1}}, result;
+    ASSERT_TRUE(css_color_compute(retained, &result, &current));
+    EXPECT_EQ(result.unresolved, nullptr);
+    EXPECT_DOUBLE_EQ(result.components[0], .75); EXPECT_DOUBLE_EQ(result.components[1], .5);
+    EXPECT_DOUBLE_EQ(result.components[2], .75); EXPECT_DOUBLE_EQ(result.components[3], 1);
+    current.components[0] = 0; current.components[1] = 1;
+    ASSERT_TRUE(css_color_compute(retained, &result, &current));
+    EXPECT_DOUBLE_EQ(result.components[0], .5); EXPECT_DOUBLE_EQ(result.components[1], .75);
+}
+
+TEST_F(CssEngineParserTest, ResizeKeywordsRetainTypedValuesAndRejectInvalidAxes) {
+    const struct {const char* text; CssEnum keyword;} valid[] = {
+        {"none", CSS_VALUE_NONE}, {"horizontal", CSS_VALUE_HORIZONTAL},
+        {"vertical", CSS_VALUE_VERTICAL}, {"both", CSS_VALUE_BOTH},
+        {"inherit", CSS_VALUE_INHERIT}, {"initial", CSS_VALUE_INITIAL},
+    };
+    for (const auto& entry : valid) {
+        CssDeclaration* declaration = css_parse_property_declaration("resize", 6,
+            entry.text, strlen(entry.text), pool);
+        ASSERT_NE(declaration, nullptr) << entry.text;
+        ASSERT_EQ(declaration->value->type, CSS_VALUE_TYPE_KEYWORD);
+        EXPECT_EQ(declaration->value->data.keyword, entry.keyword);
+        EXPECT_STREQ(css_enum_info(entry.keyword)->name, entry.text);
+    }
+    for (const char* text : {"diagonal", "horizontal vertical", "20px", "auto"})
+        EXPECT_EQ(css_parse_property_declaration("resize", 6, text, strlen(text), pool), nullptr) << text;
+}
+
 TEST_F(CssEngineParserTest, ComputedColorSerializationRetainsCurrentColorAndMissingChannels) {
     struct Case {const char* value; const char* computed;};
     const Case cases[] = {

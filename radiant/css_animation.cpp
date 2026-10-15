@@ -355,7 +355,7 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
             }
             if (str_icmp_cstr(prop_name, "animation-timing-function") == 0) {
                 TimingFunction timing = {};
-                if (css_animation_parse_timing_function_text(val_buf, &timing)) {
+                if (css_animation_parse_timing_function_text(val_buf, &timing, pool)) {
                     stop_timing = timing;
                     has_timing = true;
                 }
@@ -2043,7 +2043,7 @@ AnimationInstance* css_animation_create(AnimationScheduler* scheduler,
     inst->play_state = (anim_prop->play_state == ANIM_PLAY_PAUSED)
                        ? ANIM_PLAY_PAUSED : ANIM_PLAY_RUNNING;
     inst->pause_time = now;
-    inst->timing = anim_prop->timing;
+    timing_function_assign(scheduler->pool, &inst->timing, &anim_prop->timing);
     inst->tick = css_animation_tick;
     inst->on_finish = css_animation_finish;
     inst->on_cancel = css_animation_cancel;
@@ -2084,7 +2084,12 @@ CssWebAnimationState* css_web_animation_create(DomElement* element,
     state->duration_ms = duration_ms >= 0.0 ? duration_ms : 0.0;
     state->current_time_ms = 0.0;
     state->current_time_resolved = true;
-    if (timing) state->timing = *timing;
+    if (timing) {
+        if (!timing_function_assign(pool, &state->timing, timing)) {
+            pool_free(pool, state);
+            return nullptr;
+        }
+    }
     else state->timing.type = TIMING_LINEAR;
     state->sample.keyframes = keyframes;
     state->sample.element = element;
@@ -2174,42 +2179,51 @@ void css_web_animation_resolve(DomElement* element, LayoutContext* lycon) {
 // Style Resolution Integration
 // ============================================================================
 
-// Parse a timing function from a CssValue (keyword or cubic-bezier function)
-static void parse_timing_function_value(const CssValue* value, TimingFunction* out) {
+// timing points share the supplied configuration/keyframe owner pool.
+static bool parse_timing_function_value(const CssValue* value, TimingFunction* out, Pool* pool) {
     if (!css_value_is_timing_function(value)) {
         *out = TIMING_EASE;
-        return;
+        return false;
     }
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
         switch (value->data.keyword) {
-            case CSS_VALUE_EASE:        *out = TIMING_EASE; return;
-            case CSS_VALUE_EASE_IN:     *out = TIMING_EASE_IN; return;
-            case CSS_VALUE_EASE_OUT:    *out = TIMING_EASE_OUT; return;
-            case CSS_VALUE_EASE_IN_OUT: *out = TIMING_EASE_IN_OUT; return;
-            case CSS_VALUE_LINEAR:      out->type = TIMING_LINEAR; return;
+            case CSS_VALUE_EASE:        *out = TIMING_EASE; return true;
+            case CSS_VALUE_EASE_IN:     *out = TIMING_EASE_IN; return true;
+            case CSS_VALUE_EASE_OUT:    *out = TIMING_EASE_OUT; return true;
+            case CSS_VALUE_EASE_IN_OUT: *out = TIMING_EASE_IN_OUT; return true;
+            case CSS_VALUE_LINEAR:      out->type = TIMING_LINEAR; return true;
             case CSS_VALUE_STEP_START:
                 out->type = TIMING_STEPS;
                 out->steps.count = 1;
                 out->steps.position = STEP_JUMP_START;
-                return;
+                return true;
             case CSS_VALUE_STEP_END:
                 out->type = TIMING_STEPS;
                 out->steps.count = 1;
                 out->steps.position = STEP_JUMP_END;
-                return;
+                return true;
             default:
                 *out = TIMING_EASE; // default
-                return;
+                return true;
         }
     } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
         CssFunction* func = value->data.function;
-        if (str_ieq_cstr(func->name, "cubic-bezier")) {
+        if (str_ieq_cstr(func->name, "linear")) {
+            int count = css_linear_easing_points(value, nullptr);
+            auto* points = (CssLinearEasingPoint*)pool_alloc(pool, sizeof(CssLinearEasingPoint) * count);
+            if (!points) return false;
+            css_linear_easing_points(value, points);
+            out->type = TIMING_PIECEWISE_LINEAR;
+            out->piecewise.points = points;
+            out->piecewise.count = count;
+            return true;
+        } else if (str_ieq_cstr(func->name, "cubic-bezier")) {
             float x1 = (float)func->args[0]->data.number.value;
             float y1 = (float)func->args[1]->data.number.value;
             float x2 = (float)func->args[2]->data.number.value;
             float y2 = (float)func->args[3]->data.number.value;
             timing_cubic_bezier_init(out, x1, y1, x2, y2);
-            return;
+            return true;
         } else if (str_ieq_cstr(func->name, "steps")) {
             out->type = TIMING_STEPS;
             out->steps.count = func->args[0]->data.number.value;
@@ -2224,21 +2238,22 @@ static void parse_timing_function_value(const CssValue* value, TimingFunction* o
                 for (const auto& position : positions)
                     if (name && str_ieq_cstr(name, position.name)) out->steps.position = position.position;
             }
-            return;
+            return true;
         }
     }
     // default to ease
     *out = TIMING_EASE;
+    return false;
 }
 
-bool css_animation_parse_timing_function_text(const char* value, TimingFunction* out) {
-    if (!value || !out) return false;
+bool css_animation_parse_timing_function_text(const char* value, TimingFunction* out, Pool* pool) {
+    if (!value || !out || !pool) return false;
     Pool* scratch = pool_create();
     if (!scratch) return false;
     CssDeclaration* declaration = css_parse_property_declaration(
         "animation-timing-function", 25, value, strlen(value), scratch);
     bool valid = declaration && !declaration->important && css_value_is_timing_function(declaration->value);
-    if (valid) parse_timing_function_value(declaration->value, out);
+    if (valid) valid = parse_timing_function_value(declaration->value, out, pool);
     pool_destroy(scratch);
     return valid;
 }
@@ -2262,13 +2277,19 @@ static const CssValue* css_motion_normalize_value(Pool* pool, const CssValue* va
     CssPropertyCode property) {
     bool time = property == CSS_PROPERTY_ANIMATION_DURATION || property == CSS_PROPERTY_ANIMATION_DELAY ||
         property == CSS_PROPERTY_TRANSITION_DURATION || property == CSS_PROPERTY_TRANSITION_DELAY;
+    bool duration = property == CSS_PROPERTY_ANIMATION_DURATION || property == CSS_PROPERTY_TRANSITION_DURATION;
+    bool easing = property == CSS_PROPERTY_ANIMATION_TIMING_FUNCTION || property == CSS_PROPERTY_TRANSITION_TIMING_FUNCTION;
     int count = css_value_comma_count(value);
     CssValue* output = nullptr;
     for (int i = 0; i < count; i++) {
         const CssValue* item = css_value_comma_at(value, i);
         bool name = property == CSS_PROPERTY_ANIMATION_NAME && item &&
             item->type == CSS_VALUE_TYPE_KEYWORD && item->data.keyword != CSS_VALUE_NONE;
-        if (!item || (!name && (!time || item->data.length.unit != CSS_UNIT_MS))) continue;
+        double seconds = 0.0;
+        bool normalize_time = time && css_value_as_seconds(item, &seconds) &&
+            (item->type == CSS_VALUE_TYPE_FUNCTION || item->data.length.unit == CSS_UNIT_MS);
+        int linear_count = easing ? css_linear_easing_points(item, nullptr) : 0;
+        if (!item || (!name && !normalize_time && !linear_count)) continue;
         CssValue* normalized = (CssValue*)pool_alloc(pool, sizeof(CssValue));
         if (!normalized) return nullptr;
         *normalized = *item;
@@ -2277,9 +2298,25 @@ static const CssValue* css_motion_normalize_value(Pool* pool, const CssValue* va
             normalized->type = CSS_VALUE_TYPE_CUSTOM;
             normalized->data.custom_property.name = css_value_identifier_name(item);
             normalized->data.custom_property.fallback = nullptr;
-        } else {
-            normalized->data.length.value /= 1000.0;
+        } else if (normalize_time) {
+            // calculated durations clamp at computed-value time; signed delays survive.
+            normalized->type = CSS_VALUE_TYPE_LENGTH;
+            normalized->data.length.value = duration ? fmax(0.0, seconds) : seconds;
             normalized->data.length.unit = CSS_UNIT_S;
+        } else {
+            auto* points = (CssLinearEasingPoint*)pool_alloc(pool, sizeof(CssLinearEasingPoint) * linear_count);
+            auto** args = (CssValue**)pool_alloc(pool, sizeof(CssValue*) * linear_count);
+            if (!points || !args) return nullptr;
+            css_linear_easing_points(item, points);
+            for (int j = 0; j < linear_count; j++) {
+                CssValue* pair[] = {css_value_create_number(pool, points[j].output),
+                    css_value_create_percentage(pool, points[j].input * 100.0)};
+                if (!pair[0] || !pair[1] || !(args[j] = css_value_create_list(pool, pair, 2))) return nullptr;
+            }
+            CssValue* function = css_value_create_function(pool, "linear", args, linear_count);
+            if (!function) return nullptr;
+            *normalized = *function;
+            pool_free(pool, points);
         }
         if (value->type != CSS_VALUE_TYPE_LIST) return normalized;
         if (!output) {
@@ -2545,7 +2582,7 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
             config.play_state = ANIM_PLAY_PAUSED;
         }
         const CssValue* timing = css_animation_list_item(values[2], index);
-        if (timing) parse_timing_function_value(timing, &config.timing);
+        if (timing) parse_timing_function_value(timing, &config.timing, scratch.pool);
         AnimationInstance* instance = scheduler->last;
         while (instance) {
             CssAnimState* sample = instance->target == element && instance->type == ANIM_CSS_ANIMATION
@@ -2570,7 +2607,7 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
             instance->iteration_count = config.iteration_count;
             instance->direction = config.direction;
             instance->fill_mode = config.fill_mode;
-            instance->timing = config.timing;
+            timing_function_assign(scheduler->pool, &instance->timing, &config.timing);
             if (config.play_state == ANIM_PLAY_PAUSED) {
                 if (instance->play_state == ANIM_PLAY_FINISHED) {
                     instance->play_state = ANIM_PLAY_RUNNING;
@@ -2908,6 +2945,7 @@ static AnimationInstance* css_transition_find_running(AnimationScheduler* schedu
 // computed lists retain authored positions, including unknown property names.
 void css_transition_resolve_config(DomElement* element, Pool* pool, CssTransitionList* list) {
     if (!list) return;
+    list->pool = pool;
     for (int i = 0; i < 4; i++) list->values[i] = css_motion_computed_value(pool, element,
         (CssPropertyCode)(CSS_PROPERTY_TRANSITION_PROPERTY + i));
 }
@@ -2933,7 +2971,7 @@ bool css_transition_select_config(const CssTransitionList* list, CssPropertyCode
         if (delay) css_value_as_seconds(delay, &transition->delay);
         transition->timing = TIMING_EASE;
         const CssValue* timing = css_value_comma_at(list->values[2], index);
-        if (timing) parse_timing_function_value(timing, &transition->timing);
+        if (timing) parse_timing_function_value(timing, &transition->timing, list->pool);
         return transition->duration + transition->delay > 0.0f;
     }
     return false;
@@ -2996,7 +3034,7 @@ static void css_transition_start(AnimationScheduler* scheduler, DomElement* elem
     // snap back before the next style resolution re-applies it.
     inst->fill_mode = ANIM_FILL_BOTH;
     inst->play_state = ANIM_PLAY_RUNNING;
-    inst->timing = tp->timing;
+    timing_function_assign(scheduler->pool, &inst->timing, &tp->timing);
     inst->tick = css_transition_tick;
     inst->on_finish = css_transition_finish;
     inst->on_cancel = css_transition_cancel;

@@ -133,6 +133,10 @@ make test-radiant-baseline    # Radiant core functionalities (must pass 100%, wh
 
 **Test map**: [`test/README.md`](test/README.md) — which gate covers which source area, every harness with its fixture dirs and golden convention, and single-test commands. Every `.ls` in a golden-driven test directory needs its golden; name helper, module and playground scripts `_*` or `mod_*`.
 
+**Radiant workflow (required reading)**: read [`radiant/README.md`](radiant/README.md) before Radiant development. Plan finite feature milestones with explicit acceptance cases and a verification budget. Use focused checks during implementation and run required aggregate gates at milestone boundaries; repeat broad checks only for relevant new changes, failures or unresolved concerns. Batch related fixes before expensive qualification, keep unrelated debt in the backlog, and record completion by behavior rather than growing test counts. Documentation-only changes need document checks, not engine builds or regression suites.
+
+**Broad HTML/CSS priorities**: finish the highest-impact features used by common pages before less important features or detailed conformance residue. Rank work by user impact, usage frequency, dependency value and effort. Define a useful core milestone for each feature, finish it, and move on with remaining limitations recorded honestly as partial support. Keep rare combinations, exhaustive reflection and minor isolated fidelity differences in the long-tail backlog unless they block the selected milestone or expose a serious shared defect. Do not let an effectively unbounded standards tail prevent delivery of the important features.
+
 **Before building or testing in a worktree, or when a failure looks environmental** (stale objects, flaky baseline, debug vs release exe, renamed env knobs): read [`doc/dev/Developer_Guide.md` §7](doc/dev/Developer_Guide.md#7-worktrees-and-agent-gotchas). Never run `make release` in a worktree.
 
 **Running single test**: `./test/test_some_unit_test.exe --gtest_filter=TestSuite.TestCase`

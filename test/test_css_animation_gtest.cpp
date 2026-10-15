@@ -165,6 +165,31 @@ TEST(DomDocumentOwnership, LambdaOnlyEvaluatorClosesDocumentsAtResetAndTeardown)
     EXPECT_EQ(destroyed, 3u);
 }
 
+TEST(CssomIdentity, NativeResizeWritesReplaceInlinePriorityWithoutAScriptRealm) {
+    unsigned destroyed = 0;
+    DomDocument* document = cssom_create_owned_document(&destroyed);
+    ASSERT_NE(document, nullptr);
+    ASSERT_TRUE(css_property_system_init(document->document_pool));
+    DomElement* element = document->root;
+    ASSERT_NE(element, nullptr);
+    element->set_attribute("style", "width: 40px !important; height: 25px; --theme: red;");
+    EXPECT_FALSE(dom_document_has_js_realm(document));
+    ASSERT_TRUE(dom_cssom_set_inline_property(element, "width", "72px"));
+    CssRule* authored = dom_element_inline_declaration_block(element);
+    ASSERT_NE(authored, nullptr);
+    EXPECT_EQ(authored->data.style_rule.declaration_count, 3u);
+    CssDeclaration* width = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_WIDTH);
+    ASSERT_NE(width, nullptr);
+    EXPECT_FALSE(width->important);
+    EXPECT_DOUBLE_EQ(width->value->data.length.value, 72.0);
+    EXPECT_NE(strstr(element->get_attribute("style"), "height: 25px"), nullptr);
+    EXPECT_NE(strstr(element->get_attribute("style"), "--theme: red"), nullptr);
+    EXPECT_FALSE(dom_cssom_set_inline_property(element, "width", "invalid"));
+    EXPECT_FALSE(dom_document_has_js_realm(document));
+    free_document(document);
+    EXPECT_EQ(destroyed, 1u);
+}
+
 TEST(CssomIdentity, WeakWrappersKeepDeclarationParentsAcrossGcAndDetachSafely) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -523,6 +548,52 @@ protected:
         EXPECT_STREQ(computed, expected);
     }
 };
+
+TEST_F(MotionCascadeTest, InputCapabilitiesKeepPrimaryAndAggregateQueriesDistinct) {
+    const CssInputCapabilities environments[] = {
+        {CSS_POINTER_NONE, CSS_POINTER_NONE, false, false, true},
+        {CSS_POINTER_COARSE, CSS_POINTER_COARSE, false, false, true},
+        {CSS_POINTER_FINE, CSS_POINTER_FINE, true, true, true},
+        {CSS_POINTER_COARSE, CSS_POINTER_COARSE | CSS_POINTER_FINE, false, true, true},
+    };
+    const struct {const char* query; bool matches[4];} cases[] = {
+        {"(pointer:none)", {true, false, false, false}},
+        {"(pointer:coarse)", {false, true, false, true}},
+        {"(pointer:fine)", {false, false, true, false}},
+        {"(any-pointer:none)", {true, false, false, false}},
+        {"(any-pointer:coarse)", {false, true, false, true}},
+        {"(any-pointer:fine)", {false, false, true, true}},
+        {"(hover:none)", {true, true, false, true}},
+        {"(hover:hover)", {false, false, true, false}},
+        {"(any-hover:none)", {true, true, false, false}},
+        {"(any-hover:hover)", {false, false, true, true}},
+        {"(pointer)", {false, true, true, true}},
+        {"(any-pointer)", {false, true, true, true}},
+        {"(hover)", {false, false, true, false}},
+        {"(any-hover)", {false, false, true, true}},
+        {"not (pointer:fine)", {true, true, false, true}},
+        {"(pointer:coarse) and (any-hover:hover)", {false, false, false, true}},
+        {"(pointer:stylus)", {false, false, false, false}},
+    };
+    // an unknown frontend is distinct from a frontend explicitly reporting no pointer.
+    EXPECT_FALSE(css_evaluate_media_query(engine, "(pointer:none)"));
+    for (size_t i = 0; i < sizeof(environments) / sizeof(*environments); i++) {
+        ASSERT_TRUE(css_engine_set_input_capabilities(engine, &environments[i]));
+        EXPECT_FALSE(css_engine_set_input_capabilities(engine, &environments[i]));
+        // viewport changes never stand in for device capability publication.
+        css_engine_set_viewport(engine, i % 2 ? 320 : 1440, 800);
+        for (const auto& entry : cases)
+            EXPECT_EQ(css_evaluate_media_query(engine, entry.query), entry.matches[i]) << i << ": " << entry.query;
+    }
+    CssInputCapabilities invalid = {CSS_POINTER_FINE, CSS_POINTER_COARSE, true, true, true};
+    EXPECT_FALSE(css_engine_set_input_capabilities(engine, &invalid));
+    EXPECT_TRUE(css_evaluate_media_query(engine, "(pointer:coarse) and (any-pointer:fine)"));
+    CssEngine* copied = css_engine_create(pool);
+    ASSERT_NE(copied, nullptr);
+    copied->context = engine->context;
+    EXPECT_TRUE(css_evaluate_media_query(copied, "(pointer:coarse) and (any-pointer:fine)"));
+    css_engine_destroy(copied);
+}
 
 struct ContainerQueryProbe {
     CssContainerMetrics metrics;
@@ -975,6 +1046,33 @@ TEST_F(MotionCascadeTest, IntrinsicComputedInheritanceAndPseudosKeepOwnerLengths
     EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
     element.parent = nullptr;
     doc.root = lam::up(&element);
+}
+
+TEST_F(MotionCascadeTest, ThemeColorMixReadsFollowVariablesAndInheritedCurrentColorBeforeLayout) {
+    // these declaration-only mutations precede layout, so the committed byte color is stale.
+    doc.js.mutation_count = 1;
+    bool changed = false;
+    ASSERT_TRUE(dom_element_set_presentation_style(&element, "--accent", "oklab(.6 .1 .05)", &changed));
+    apply("color:var(--accent)");
+    apply("border-top-color:var(--accent)");
+    expect_computed(CSS_PROPERTY_COLOR, "oklab(0.6 0.1 0.05)");
+    expect_computed(CSS_PROPERTY_BORDER_TOP_COLOR, "oklab(0.6 0.1 0.05)");
+    ASSERT_TRUE(dom_element_set_presentation_style(&element, "--accent", "oklch(.6 .1 120)", &changed));
+    expect_computed(CSS_PROPERTY_COLOR, "oklch(0.6 0.1 120)");
+    expect_computed(CSS_PROPERTY_BORDER_TOP_COLOR, "oklch(0.6 0.1 120)");
+    DomElement parent = {};
+    parent.node_type = DOM_NODE_ELEMENT; parent.set_synthetic(true); parent.set_styles_resolved(true);
+    parent.doc = lam::up(&doc); parent.specified_style = lam::shared(style_tree_create(pool));
+    element.parent = lam::up<DomNode>(&parent); doc.root = lam::up(&parent);
+    apply("color:red", &parent);
+    apply("color:color-mix(in srgb,currentColor,blue)");
+    apply("background-color:color-mix(in srgb,currentColor,white)");
+    expect_computed(CSS_PROPERTY_COLOR, "color(srgb 0.5 0 0.5)");
+    expect_computed(CSS_PROPERTY_BACKGROUND_COLOR, "color(srgb 0.75 0.5 0.75)");
+    apply("color:rgb(0 255 0)", &parent);
+    expect_computed(CSS_PROPERTY_COLOR, "color(srgb 0 0.5 0.5)");
+    expect_computed(CSS_PROPERTY_BACKGROUND_COLOR, "color(srgb 0.5 0.75 0.75)");
+    element.parent = nullptr; doc.root = lam::up(&element);
 }
 
 TEST_F(MotionCascadeTest, PseudoCurrentColorUsesTheReceivingPseudoAfterInheritance) {
@@ -1901,6 +1999,52 @@ TEST_F(MotionCascadeTest, AnimationShorthandProjectsWinningLonghands) {
     apply("animation-name: EASE, Red, BLOCK");
     ASSERT_TRUE(css_prop_serialize_computed(&element, CSS_PROPERTY_ANIMATION_NAME, 0, name, sizeof(name)));
     EXPECT_STREQ(name, "EASE, Red, BLOCK");
+}
+
+TEST_F(MotionCascadeTest, CalculatedMotionTimesUseTypedSecondsAndPropertyRanges) {
+    const CssPropertyCode properties[] = {CSS_PROPERTY_ANIMATION_DURATION,
+        CSS_PROPERTY_TRANSITION_DURATION, CSS_PROPERTY_ANIMATION_DELAY,
+        CSS_PROPERTY_TRANSITION_DELAY};
+    const char* names[] = {"animation-duration", "transition-duration",
+        "animation-delay", "transition-delay"};
+    const char* values[] = {"250ms", "calc(1s + 500ms)", "calc(2 * 750ms)",
+        "min(2s, 3000ms)", "calc(1s - 1500ms)"};
+    for (unsigned p = 0; p < 4; p++) {
+        for (unsigned v = 0; v < 5; v++) {
+            StrBuf* declaration = strbuf_new();
+            strbuf_append_format(declaration, "%s:%s", names[p], values[v]);
+            apply(declaration->str);
+            strbuf_free(declaration);
+            const char* expected[] = {"0.25s", "1.5s", "1.5s", "2s", p < 2 ? "0s" : "-0.5s"};
+            expect_computed(properties[p], expected[v]);
+        }
+        StrBuf* invalid = strbuf_new();
+        strbuf_append_format(invalid, "%s:-1s", names[p]);
+        CssDeclaration* parsed = css_parse_declaration_text(invalid->str, invalid->length, pool);
+        EXPECT_EQ(parsed != nullptr, p >= 2);
+        strbuf_reset(invalid);
+        strbuf_append_format(invalid, "%s:calc(1px + 2px)", names[p]);
+        EXPECT_EQ(css_parse_declaration_text(invalid->str, invalid->length, pool), nullptr);
+        strbuf_free(invalid);
+    }
+    bool changed = false;
+    ASSERT_TRUE(dom_element_set_presentation_style(&element, "--time", "750ms", &changed));
+    apply("animation-duration:calc(var(--time) * 2)");
+    apply("transition-delay:calc(var(--time) - 1s)");
+    expect_computed(CSS_PROPERTY_ANIMATION_DURATION, "1.5s");
+    expect_computed(CSS_PROPERTY_TRANSITION_DELAY, "-0.25s");
+    ASSERT_TRUE(dom_element_set_presentation_style(&element, "--time", "2s", &changed));
+    expect_computed(CSS_PROPERTY_ANIMATION_DURATION, "4s");
+    expect_computed(CSS_PROPERTY_TRANSITION_DELAY, "1s");
+    ASSERT_TRUE(dom_element_set_presentation_style(&element, "--time", "2px", &changed));
+    expect_computed(CSS_PROPERTY_ANIMATION_DURATION, "0s");
+    expect_computed(CSS_PROPERTY_TRANSITION_DELAY, "0s");
+    apply("animation:fade calc(2s - 3s) linear calc(250ms - 1s)");
+    expect_computed(CSS_PROPERTY_ANIMATION_DURATION, "0s");
+    expect_computed(CSS_PROPERTY_ANIMATION_DELAY, "-0.75s");
+    apply("transition:opacity calc(500ms * 3) linear calc(-1s / 2)");
+    expect_computed(CSS_PROPERTY_TRANSITION_DURATION, "1.5s");
+    expect_computed(CSS_PROPERTY_TRANSITION_DELAY, "-0.5s");
 }
 
 TEST(CssPropTable, BorderColorCssomReadsLiveDeclarationsWithoutCommittingGeometry) {
@@ -3482,6 +3626,7 @@ TEST_F(AnimationTickTest, TransitionsRetainPriorityAboveImportantDeclarations) {
 }
 
 TEST(AnimationTiming, StepPositionsUseDefinedJumpBoundaries) {
+    Pool* pool = pool_create();
     TimingFunction timing = {};
     timing.type = TIMING_STEPS;
     timing.steps.count = 4;
@@ -3494,11 +3639,66 @@ TEST(AnimationTiming, StepPositionsUseDefinedJumpBoundaries) {
     timing.steps.position = STEP_JUMP_NONE;
     EXPECT_FLOAT_EQ(timing_function_eval(&timing, .25f), 1.0f / 3.0f);
     EXPECT_FLOAT_EQ(timing_function_eval(&timing, .75f), 1.0f);
-    EXPECT_TRUE(css_animation_parse_timing_function_text("steps(4,jump-none)", &timing));
+    EXPECT_TRUE(css_animation_parse_timing_function_text("steps(4,jump-none)", &timing, pool));
     EXPECT_EQ(timing.steps.position, STEP_JUMP_NONE);
-    EXPECT_FALSE(css_animation_parse_timing_function_text("steps(1,jump-none)", &timing));
-    EXPECT_FALSE(css_animation_parse_timing_function_text("cubic-bezier(-1,0,1,1)", &timing));
-    EXPECT_FALSE(css_animation_parse_timing_function_text("linear trailing", &timing));
+    EXPECT_FALSE(css_animation_parse_timing_function_text("steps(1,jump-none)", &timing, pool));
+    EXPECT_FALSE(css_animation_parse_timing_function_text("cubic-bezier(-1,0,1,1)", &timing, pool));
+    EXPECT_FALSE(css_animation_parse_timing_function_text("linear trailing", &timing, pool));
+    pool_destroy(pool);
+}
+
+TEST(AnimationTiming, PiecewiseLinearDistributesStopsPreservesJumpsAndOwnsCopies) {
+    Pool* scratch = pool_create();
+    Pool* retained = pool_create();
+    const struct { const char* text; float t, expected; } cases[] = {
+        {"linear(0,1)", 0, 0}, {"linear(0,1)", 1, 1},
+        {"linear(0,.25,1)", .25f, .125f}, {"linear(0,.25,1)", .75f, .625f},
+        {"linear(0,.25 25% 75%,1)", .125f, .125f},
+        {"linear(0,.25 25% 75%,1)", .5f, .25f},
+        {"linear(0,.25 25% 75%,1)", .875f, .625f},
+        {"linear(0,0 50%,1 50%,1)", .5f, 1},
+        {"linear(0,0 50%,1 50%,1)", .25f, 0},
+        {"linear(0,0 50%,1 50%,1)", .75f, 1},
+        {"linear(0 20%,.5 10%,1)", .2f, .5f},
+        {"linear(0,150% 2,3)", 1.5f, 3},
+        {"linear(0,25% 75% .5,1)", .5f, .5f},
+        {"linear(0,1)", -.5f, -.5f}, {"linear(0,1)", 1.5f, 1.5f}
+    };
+    TimingFunction owned = {};
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.text);
+        TimingFunction parsed = {};
+        ASSERT_TRUE(css_animation_parse_timing_function_text(c.text, &parsed, scratch));
+        ASSERT_EQ(parsed.type, TIMING_PIECEWISE_LINEAR);
+        EXPECT_FLOAT_EQ(timing_function_eval(&parsed, c.t), c.expected);
+        ASSERT_TRUE(timing_function_assign(retained, &owned, &parsed));
+        EXPECT_NE(owned.piecewise.points, parsed.piecewise.points);
+    }
+    const char* invalid[] = {"linear()", "linear(1)", "linear(0,)", "linear(,1)",
+        "linear(0,,1)", "linear(0 10% 20% 30%,1)", "linear(0 1,1)",
+        "linear(10% 0 20%,1)", "linear(0px,1)", "linear(0;1)", "linear(0,red)"};
+    for (const char* text : invalid) {
+        SCOPED_TRACE(text);
+        TimingFunction parsed = {};
+        EXPECT_FALSE(css_animation_parse_timing_function_text(text, &parsed, scratch));
+    }
+    pool_destroy(scratch);
+    EXPECT_FLOAT_EQ(timing_function_eval(&owned, .5f), .5f);
+    timing_function_clear(retained, &owned);
+    PoolStats stats = {};
+    pool_get_detailed_stats(retained, &stats);
+    EXPECT_EQ(stats.live_bytes, 0u);
+    EXPECT_EQ(stats.allocation_count, stats.free_count);
+    pool_destroy(retained);
+}
+
+TEST_F(MotionCascadeTest, PiecewiseLinearComputedListsExpandAndClampInputPositions) {
+    apply("animation-timing-function:linear(0,.25 25% 75%,1),linear(0 20%,.5 10%,1)");
+    expect_computed(CSS_PROPERTY_ANIMATION_TIMING_FUNCTION,
+        "linear(0 0%, 0.25 25%, 0.25 75%, 1 100%), linear(0 20%, 0.5 20%, 1 100%)");
+    apply("transition-timing-function:linear(0,.25,1)");
+    expect_computed(CSS_PROPERTY_TRANSITION_TIMING_FUNCTION,
+        "linear(0 0%, 0.25 50%, 1 100%)");
 }
 
 TEST_F(AnimationTickTest, TransitionListsUseLastMatchRepeatAndPreserveUnknownSlots) {
@@ -3557,6 +3757,65 @@ TEST_F(AnimationTickTest, TransitionRestyleRetargetsCancelsAndReleasesCompletedE
     css_transition_resolve(element, &layout);
     EXPECT_EQ(scheduler->count, 0);
     EXPECT_FLOAT_EQ(mock.in_line.opacity, 0.0f);
+}
+
+TEST_F(AnimationTickTest, CalculatedTimeAndPiecewiseAnimationRetainClockAcrossCurveChanges) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    TransformProp transform = {};
+    FontProp font = {};
+    font.font_size = 10.0f;
+    setTransformContext(element, &transform, &font);
+    ASSERT_NE(parsedKeyframes("motion{from{opacity:0;transform:translateX(0px)}"
+        "to{opacity:1;transform:translateX(100px)}}", "motion"), nullptr);
+    setAnimationStyle(element,
+        "--time:500ms;animation:motion calc(var(--time) * 4) linear(0,.25,1) both");
+    css_animation_resolve(element, &layout);
+    AnimationInstance* instance = scheduler->first;
+    ASSERT_NE(instance, nullptr);
+    animation_scheduler_tick(scheduler, .5, nullptr);
+    EXPECT_FLOAT_EQ(mock.in_line.opacity, .125f);
+    EXPECT_FLOAT_EQ(radiant::compute_transform_matrix(transform.functions, 40, 10, 0, 0).e13, 12.5f);
+    animation_scheduler_tick(scheduler, 1, nullptr);
+    EXPECT_FLOAT_EQ(mock.in_line.opacity, .25f);
+    setAnimationStyle(element,
+        "--time:1s;animation:motion calc(var(--time) * 4) linear(0,.5 25% 75%,1) both");
+    css_animation_resolve(element, &layout);
+    EXPECT_EQ(scheduler->first, instance);
+    EXPECT_DOUBLE_EQ(instance->start_time, 0);
+    EXPECT_FLOAT_EQ(mock.in_line.opacity, .5f);
+    animation_scheduler_tick(scheduler, 2, nullptr);
+    EXPECT_FLOAT_EQ(mock.in_line.opacity, .5f);
+    EXPECT_FLOAT_EQ(radiant::compute_transform_matrix(transform.functions, 40, 10, 0, 0).e13, 50);
+    setAnimationStyle(element, "animation:none");
+    css_animation_resolve(element, &layout);
+    EXPECT_EQ(scheduler->count, 0);
+}
+
+TEST_F(AnimationTickTest, CalculatedPiecewiseTransitionRetargetsFromItsVisibleSample) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    setAnimationStyle(element, "transition:opacity calc(500ms * 4) linear(0,.25,1)");
+    css_transition_resolve(element, &layout);
+    mock.in_line.opacity = 1;
+    css_transition_resolve(element, &layout);
+    animation_scheduler_tick(scheduler, .5, nullptr);
+    EXPECT_FLOAT_EQ(mock.in_line.opacity, .125f);
+    mock.in_line.opacity = .5f;
+    setAnimationStyle(element, "transition:opacity calc(250ms * 4) linear(0,.5 25% 75%,1)");
+    css_transition_resolve(element, &layout);
+    animation_scheduler_tick(scheduler, .75, nullptr);
+    EXPECT_FLOAT_EQ(mock.in_line.opacity, .3125f);
+    animation_scheduler_tick(scheduler, 1.5, nullptr);
+    EXPECT_FLOAT_EQ(mock.in_line.opacity, .5f);
+    EXPECT_EQ(scheduler->count, 0);
+    mock.in_line.opacity = 0;
+    css_transition_resolve(element, &layout);
+    ASSERT_EQ(scheduler->count, 1);
+    setAnimationStyle(element, "transition:none");
+    mock.in_line.opacity = 0;
+    css_transition_resolve(element, &layout);
+    EXPECT_EQ(scheduler->count, 0);
 }
 
 TEST_F(AnimationTickTest, TransitionComputedListsKeepAuthoredLengthsAndShorthandCascade) {
@@ -3991,6 +4250,24 @@ TEST_F(AnimationTickTest, WebEasingPrecedesPropertyIntervalSampling) {
     css_web_animation_set_current_time(effect, 500.0);
     css_web_animation_resolve(element, &layout);
     EXPECT_NEAR(mock.in_line.opacity, 1.6f * timing_function_eval(&TIMING_EASE_IN, .5f), .00001f);
+}
+
+TEST_F(AnimationTickTest, PiecewiseWebEasingSurvivesParserPoolRetirement) {
+    MockElement mock;
+    DomElement* element = createMockElement(&mock);
+    Pool* source = pool_create();
+    TimingFunction timing = {};
+    ASSERT_TRUE(css_animation_parse_timing_function_text("linear(0,.25,1)", &timing, source));
+    CssWebAnimationState* effect = css_web_animation_create(element,
+        opacityKeyframes(), 1000, &timing, pool);
+    ASSERT_NE(effect, nullptr);
+    EXPECT_NE(effect->timing.piecewise.points, timing.piecewise.points);
+    pool_destroy(source);
+    css_web_animation_set_current_time(effect, 500);
+    css_web_animation_resolve(element, &layout);
+    EXPECT_FLOAT_EQ(mock.in_line.opacity, .25f);
+    css_web_animation_cancel(effect);
+    EXPECT_FALSE(effect->current_time_resolved);
 }
 
 TEST_F(AnimationTickTest, NeutralTransformsCopyUnderlyingListsAndPadWithIdentity) {

@@ -1007,6 +1007,7 @@ static void reset_non_inherited_style_cache(LayoutContext* lycon, ViewSpan* view
         view->scroller->overscroll_x = SCROLL_PROP_DEFAULT.overscroll_x;
         view->scroller->overscroll_y = SCROLL_PROP_DEFAULT.overscroll_y;
         view->scroller->scroll_behavior = SCROLL_PROP_DEFAULT.scroll_behavior;
+        view->scroller->resize = SCROLL_PROP_DEFAULT.resize;
         view->scroller->overflow_clip_box = SCROLL_PROP_DEFAULT.overflow_clip_box;
         view->scroller->overflow_clip_margin = SCROLL_PROP_DEFAULT.overflow_clip_margin;
         view->scroller->snap_axis = SCROLL_PROP_DEFAULT.snap_axis;
@@ -1034,6 +1035,11 @@ static void reset_non_inherited_style_cache(LayoutContext* lycon, ViewSpan* view
     // margin collapsing changes the used boundary in place; discard that
     // layout state before a retained recascade rebuilds the computed style.
     BoundaryProp* boundary = view->boundary_mut();
+    if (boundary->border) {
+        // retired rules must not retain edge values/priority over a new winner;
+        // owned border-image payloads keep their existing replacement lifecycle.
+        memset(boundary->border.get(), 0, offsetof(BorderProp, radius));
+    }
     boundary->margin = BOUNDARY_PROP_DEFAULT.margin;
     boundary->flow_margin = BOUNDARY_PROP_DEFAULT.flow_margin;
     boundary->has_flow_margin = false;
@@ -5814,6 +5820,8 @@ static void layout_finish_scroll_positions(LayoutContext* lycon, DomDocument* do
     if (doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
         ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
         layout_finalize_static_positioned_abs_descendants(root_block);
+        // resnap only committed geometry; explicit scrollIntoView below takes precedence.
+        view_geometry_walk_elements(doc->view_tree->root, scroll_resnap_after_layout, nullptr);
         bool has_scroll_into_view_target = doc->pending_scroll_into_view_target.address != nullptr;
         // CSSOM View scrollIntoView uses the target's current bounding box;
         // viewport scroll requests must resolve first so sticky layout sees the
@@ -5929,6 +5937,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow, PagedFl
         float viewport_height = doc->viewport.height > 0 ? doc->viewport.height : uicon->viewport_height;
         bool environment_changed = engine->context.viewport_width != viewport_width ||
             engine->context.viewport_height != viewport_height;
+        environment_changed = css_engine_set_input_capabilities(engine, &uicon->input_capabilities) || environment_changed;
         css_engine_set_viewport(engine, viewport_width, viewport_height);
         if (environment_changed) {
             radiant_recascade_document_styles(doc, doc->root);

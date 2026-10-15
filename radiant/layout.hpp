@@ -4445,6 +4445,7 @@ void layout_place_bidi_static_inline(ViewBlock* block, float line_x, int level);
 int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir);
 int layout_find_last_strong_direction(DomNode* node, bool skip_explicit_dir);
 CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback);
+bool layout_text_run_has_uniform_rtl_order(const unsigned char* text, size_t length);
 CssEnum layout_resolve_line_base_direction(LayoutContext* lycon);
 void place_rtl_initial_letter_line(LayoutContext* lycon);
 void adjust_text_bounds(ViewText* text);
