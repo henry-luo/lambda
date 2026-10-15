@@ -1,0 +1,12 @@
+<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;background:white}
+#change{position:absolute;left:0;top:0;width:100px;height:26px}
+#theme{position:absolute;left:0;top:40px;width:160px;height:60px;padding:8px;
+  border:6px solid;border-color:var(--accent);--accent:oklab(.6 .1 .05);color:var(--accent);
+  background-color:color-mix(in srgb,currentColor,white);font:24px Arial}
+</style><button id="change">Change theme</button><div id="theme"><span id="label">Theme</span></div>
+<script>
+document.getElementById('change').onclick=function(){
+    document.getElementById('theme').style.setProperty('--accent','oklch(.6 .1 120)');
+};
+</script>

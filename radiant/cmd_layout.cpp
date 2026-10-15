@@ -2106,6 +2106,14 @@ static char* generate_error_page_html(const char* url, const char* error_title, 
     return mem_strdup(buf, MEM_CAT_LAYOUT);
 }
 
+static thread_local UiContext* s_layout_loader_host = nullptr;
+
+static void configure_css_input_environment(CssEngine* engine, DomDocument* document) {
+    UiContext* host = document && document->js.host_ui_context
+        ? (UiContext*)document->js.host_ui_context : s_layout_loader_host;
+    if (host) css_engine_set_input_capabilities(engine, &host->input_capabilities);
+}
+
 DocumentJsHostConfig document_js_host_config_inherit(UiContext* uicon,
                                                      const DomDocument* source) {
     DocumentJsHostConfig config = {};
@@ -2488,6 +2496,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     }
     // Cache for runtime re-cascade (e.g. on pseudo-state changes like :hover)
     dom_doc->services.cached_css_engine = css_engine;
+    configure_css_input_environment(css_engine, dom_doc);
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
     // media selection precedes linked-sheet discovery and the first cascade.
     css_engine->context.print_media = print_media;
@@ -3381,8 +3390,6 @@ static void release_layout_runtime(Runtime* runtime) {
     mem_free(runtime);
 }
 
-static thread_local UiContext* s_layout_loader_host = nullptr;
-
 LayoutLoaderHostScope::LayoutLoaderHostScope(UiContext* uicon)
     : saved(lam::up(s_layout_loader_host)) {
     s_layout_loader_host = uicon;
@@ -3536,6 +3543,7 @@ static DomDocument* create_layout_css_document(
     // the document keeps its engine so later recascades (viewport, print media,
     // container queries) see the same rules the loader cascaded with
     document->services.cached_css_engine = engine;
+    configure_css_input_environment(engine, document);
     if (out_engine) *out_engine = engine;
     return document;
 }
@@ -3874,6 +3882,7 @@ static DomDocument* load_page_xml_doc(Url* url, int width, int height, Pool* poo
     store_document_stylesheets(document, fallback, 1, authored, authored_count, pool);
     if (!document->stylesheets) { dom_document_destroy(document); return nullptr; }
     document->services.cached_css_engine = engine;
+    configure_css_input_environment(engine, document);
     layout_apply_css_stylesheets(document, original, document->stylesheets,
         document->stylesheet_count, pool, engine);
     populate_layout_document(document, original, root, HTML5, url, nullptr);
@@ -4034,6 +4043,7 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     store_document_stylesheets(dom_doc, xml_stylesheets, 1, nullptr, 0, pool);
     // Later CSSOM reads recascade XML nodes and need the loader's stylesheet engine.
     dom_doc->services.cached_css_engine = css_engine;
+    configure_css_input_environment(css_engine, dom_doc);
 
     layout_apply_css_stylesheets(dom_doc, html_elem, xml_stylesheets, 1, pool, css_engine);
 
@@ -4381,6 +4391,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
         dom_doc->cached_inline_sheet_count = inline_stylesheet_count;
     }
     dom_doc->services.cached_css_engine = css_engine;
+    configure_css_input_environment(css_engine, dom_doc);
 
     if (!stateless) {
         Item html_item_root = {.element = html_elem};
@@ -4819,6 +4830,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
             doc->cached_inline_sheets = lam::own_arr(inline_sheets);
             doc->cached_inline_sheet_count = inline_count;
             doc->services.cached_css_engine = css_engine;
+            configure_css_input_environment(css_engine, doc);
         }
     }
 

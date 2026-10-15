@@ -277,8 +277,10 @@ struct CssComputedColor {
     bool alpha_is_byte;
     CssEnum keyword;
     const char* color_space;
+    const CssValue* unresolved; // borrowed currentColor expression; owned snapshots clone this tree
 };
-bool css_color_compute(const CssValue* value, CssComputedColor* result);
+bool css_color_compute(const CssValue* value, CssComputedColor* result,
+                       const CssComputedColor* current_color = nullptr);
 const CssValue* css_background_color_component(const CssValue* value);
 bool css_color_to_rgba(const CssComputedColor* color, uint8_t* r, uint8_t* g,
                        uint8_t* b, uint8_t* a);
@@ -1913,6 +1915,9 @@ const CssValue* css_text_emphasis_shorthand_longhand(const CssValue* value,
     CssPropertyCode property, Pool* pool);
 bool css_display_legacy_keyword_supported(const char* name);
 bool css_value_as_seconds(const CssValue* value, double* seconds);
+struct CssLinearEasingPoint { double input, output; };
+// returns zero for invalid syntax; output, when supplied, holds the returned count.
+int css_linear_easing_points(const CssValue* value, CssLinearEasingPoint* output);
 bool css_value_is_timing_function(const CssValue* value);
 bool css_animation_property_is_longhand(CssPropertyCode property);
 CssPropertyCode css_timeline_shorthand_for(CssPropertyCode property);

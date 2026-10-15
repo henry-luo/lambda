@@ -362,6 +362,7 @@ static bool render_block_skip_paint(RasterRenderContext* rdcon, ViewBlock* block
     if (!rdcon || !block) {
         return true;
     }
+    if (render_text_paint_atomic_hidden(rdcon, block)) return true;
     if (view_backface_is_hidden(block, BACKFACE_SUBTREE)) return true;
     if (render_block_clip_empty(&rdcon->block.clip)) {
         return true;

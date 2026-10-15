@@ -2016,12 +2016,66 @@ bool css_split_border_image_shorthand(const CssValue* value,
 
 bool css_value_as_seconds(const CssValue* value, double* seconds) {
     if (!value || !seconds || (value->type != CSS_VALUE_TYPE_LENGTH &&
-        value->type != CSS_VALUE_TYPE_TIME)) return false;
-    double time = value->data.length.value;
-    CssUnit unit = value->data.length.unit;
-    if (!isfinite(time) || (unit != CSS_UNIT_S && unit != CSS_UNIT_MS)) return false;
-    *seconds = unit == CSS_UNIT_MS ? time / 1000.0 : time;
+        value->type != CSS_VALUE_TYPE_TIME && value->type != CSS_VALUE_TYPE_FUNCTION)) return false;
+    // absolute time math already canonicalizes mixed s/ms leaves to seconds.
+    CssMathEvaluationContext context = {};
+    CssMathResult result = css_math_evaluate(value, &context);
+    if (result.type != CSS_MATH_TIME || !result.resolved || !isfinite(result.value)) return false;
+    *seconds = result.value;
     return true;
+}
+
+int css_linear_easing_points(const CssValue* value, CssLinearEasingPoint* output) {
+    if (!value || value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function) return 0;
+    const CssFunction* function = value->data.function;
+    if (!function->name || !str_ieq_cstr(function->name, "linear") || !function->args ||
+        function->arg_count < 2 || function->arg_count > INT_MAX / 2) return 0;
+    int count = 0;
+    double largest = -INFINITY;
+    for (int i = 0; i < function->arg_count; i++) {
+        const CssValue* stop = function->args[i];
+        if (!stop) return 0;
+        bool list = stop->type == CSS_VALUE_TYPE_LIST;
+        int members = list ? stop->data.list.count : 1;
+        if (members < 1 || members > 3 || (list &&
+            (stop->data.list.comma_separated || !stop->data.list.values))) return 0;
+        double result = 0.0, positions[2] = {};
+        int number = -1, percentages = 0;
+        for (int j = 0; j < members; j++) {
+            const CssValue* member = list ? stop->data.list.values[j] : stop;
+            if (!member) return 0;
+            if (member->type == CSS_VALUE_TYPE_NUMBER && number < 0 && isfinite(member->data.number.value)) {
+                number = j;
+                result = member->data.number.value;
+            } else if (member->type == CSS_VALUE_TYPE_PERCENTAGE && percentages < 2 &&
+                       isfinite(member->data.percentage.value)) {
+                positions[percentages++] = member->data.percentage.value / 100.0;
+            } else return 0;
+        }
+        // the optional percentage pair is one contiguous grammar component.
+        if (number < 0 || (members == 3 && number == 1)) return 0;
+        int points = percentages ? percentages : 1;
+        for (int j = 0; j < points; j++) {
+            double input = NAN;
+            if (percentages) input = largest = fmax(largest, positions[j]);
+            else if (i == 0) input = largest = 0.0;
+            else if (i == function->arg_count - 1) input = fmax(1.0, largest);
+            if (output) output[count] = {input, result};
+            count++;
+        }
+    }
+    if (output) {
+        // first/last inputs are fixed above, so every omitted run is bounded.
+        for (int first = 0; first + 1 < count;) {
+            int last = first + 1;
+            while (last < count && isnan(output[last].input)) last++;
+            for (int i = first + 1; i < last; i++)
+                output[i].input = output[first].input + (output[last].input - output[first].input) *
+                    (double)(i - first) / (last - first);
+            first = last;
+        }
+    }
+    return count;
 }
 
 bool css_value_is_timing_function(const CssValue* value) {
@@ -2036,6 +2090,7 @@ bool css_value_is_timing_function(const CssValue* value) {
     if (value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function) return false;
     const CssFunction* function = value->data.function;
     if (!function->name || !function->args) return false;
+    if (str_ieq_cstr(function->name, "linear")) return css_linear_easing_points(value, nullptr) > 0;
     if (str_ieq_cstr(function->name, "cubic-bezier")) {
         if (function->arg_count != 4) return false;
         for (int i = 0; i < 4; i++) {
@@ -2099,7 +2154,8 @@ bool css_motion_longhand_accepts(CssPropertyCode property, const CssValue* value
         }
         case CSS_PROPERTY_ANIMATION_DURATION:
         case CSS_PROPERTY_TRANSITION_DURATION:
-            return css_value_as_seconds(value, &seconds) && seconds >= 0.0;
+            return css_value_as_seconds(value, &seconds) &&
+                (seconds >= 0.0 || value->type == CSS_VALUE_TYPE_FUNCTION);
         case CSS_PROPERTY_ANIMATION_DELAY:
         case CSS_PROPERTY_TRANSITION_DELAY:
             return css_value_as_seconds(value, &seconds);
@@ -2121,10 +2177,11 @@ bool css_motion_longhand_accepts(CssPropertyCode property, const CssValue* value
     }
 }
 
-static bool css_timeline_assign_time(const CssValue* value, double seconds,
+static bool css_timeline_assign_time(const CssValue* value,
                                      const CssValue** parts) {
-    // a negative time can only fill delay; a later nonnegative time fills duration.
-    int slot = !parts[1] && seconds >= 0.0 ? 1 : 3;
+    // negative literals fill delay; negative calculations are valid clamped durations.
+    int slot = !parts[1] && css_motion_longhand_accepts(
+        CSS_PROPERTY_ANIMATION_DURATION, value) ? 1 : 3;
     if (parts[slot]) return false;
     parts[slot] = value;
     return true;
@@ -2140,7 +2197,7 @@ static bool css_animation_split_group(const CssValue* group, const CssValue** pa
             ? group->data.list.values[i] : group;
         double seconds = 0.0;
         if (css_value_as_seconds(token, &seconds)) {
-            if (!css_timeline_assign_time(token, seconds, parts)) return false;
+            if (!css_timeline_assign_time(token, parts)) return false;
             continue;
         }
         bool assigned = false;
@@ -2171,7 +2228,7 @@ static bool css_transition_split_group(const CssValue* group, const CssValue** p
             ? group->data.list.values[i] : group;
         double seconds = 0.0;
         if (css_value_as_seconds(token, &seconds)) {
-            if (!css_timeline_assign_time(token, seconds, parts)) return false;
+            if (!css_timeline_assign_time(token, parts)) return false;
         } else if (!parts[2] && css_value_is_timing_function(token)) {
             parts[2] = token;
         } else if (!parts[0] && css_motion_longhand_accepts(
@@ -3853,6 +3910,13 @@ bool css_property_validate_value_mode(CssPropertyCode id,
                 css_value_is_supported_color(value);
         }
 
+        case CSS_PROPERTY_RESIZE: {
+            if (css_value_contains_pending_substitution(value) || css_value_is_global_keyword(value)) return true;
+            return css_value_keyword_equals(value, CSS_VALUE_NONE) ||
+                css_value_keyword_equals(value, CSS_VALUE_BOTH) ||
+                css_value_keyword_equals(value, CSS_VALUE_HORIZONTAL) ||
+                css_value_keyword_equals(value, CSS_VALUE_VERTICAL);
+        }
         case CSS_PROPERTY_SCROLL_BEHAVIOR: {
             if (css_value_contains_var_reference(value)) return true;
             if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;

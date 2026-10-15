@@ -204,7 +204,7 @@ static void format_color_channel(StringBuf* output, double value, bool missing, 
 
 static bool format_computed_color(CssFormatter* formatter, const CssValue* value) {
     CssComputedColor color;
-    if (!css_color_compute(value, &color)) return false;
+    if (!css_color_compute(value, &color) || color.unresolved) return false;
     if (color.type == CSS_COLOR_CURRENTCOLOR || color.type == CSS_COLOR_SYSTEM) {
         const CssEnumInfo* keyword = css_enum_info(color.keyword);
         if (!keyword || !keyword->name) return false;
@@ -213,16 +213,18 @@ static bool format_computed_color(CssFormatter* formatter, const CssValue* value
     }
     bool missing = color.missing != 0;
     bool rgb = color.type == CSS_COLOR_RGB;
-    bool modern = missing || color.type == CSS_COLOR_COLOR;
+    bool perceptual = color.type == CSS_COLOR_OKLAB || color.type == CSS_COLOR_OKLCH;
+    bool modern = missing || perceptual || color.type == CSS_COLOR_COLOR;
     bool alpha = color.components[3] != 1.0 || (color.missing & 8);
     if (color.type == CSS_COLOR_COLOR) stringbuf_append_all(formatter->output, 3, "color(", color.color_space, " ");
-    else stringbuf_append_str(formatter->output, rgb ? missing ? "color(srgb " : alpha ? "rgba(" : "rgb("
+    else stringbuf_append_str(formatter->output, perceptual ? color.type == CSS_COLOR_OKLAB ? "oklab(" : "oklch("
+        : rgb ? missing ? "color(srgb " : alpha ? "rgba(" : "rgb("
         : color.type == CSS_COLOR_HSL ? "hsl(" : "hwb(");
     for (int i = 0; i < 3; i++) {
         if (i) stringbuf_append_str(formatter->output, modern ? " " : ", ");
-        double scale = rgb ? missing ? 1.0 : 255.0 : color.type == CSS_COLOR_COLOR ? 1.0 : i ? 100.0 : 1.0;
+        double scale = rgb ? missing ? 1.0 : 255.0 : perceptual || color.type == CSS_COLOR_COLOR ? 1.0 : i ? 100.0 : 1.0;
         format_color_channel(formatter->output, color.components[i] * scale, color.missing & (1u << i),
-            !rgb && color.type != CSS_COLOR_COLOR && i ? "%" : "");
+            !rgb && !perceptual && color.type != CSS_COLOR_COLOR && i ? "%" : "");
     }
     if (alpha) {
         stringbuf_append_str(formatter->output, modern ? " / " : ", ");

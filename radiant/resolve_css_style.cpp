@@ -2582,15 +2582,21 @@ const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value
         ? lycon->css_value_scratch.get() : lycon->pool.get(), context, value);
 }
 
-Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
+static Color resolve_color_using_current(LayoutContext* lycon, const CssValue* value, Color current) {
     Color result = {0xFF000000};
     value = resolve_var_function(lycon, value);
+    CssComputedColor current_color = {CSS_COLOR_RGB,
+        {current.r / 255.0, current.g / 255.0, current.b / 255.0, current.a / 255.0}};
     CssComputedColor color;
-    if (!css_color_compute(value, &color)) return result;
+    if (!css_color_compute(value, &color, &current_color)) return result;
     // currentColor remains a keyword through registered inheritance (CSS Color 4 §15.5).
-    if (color.type == CSS_COLOR_CURRENTCOLOR) return get_current_color(lycon);
+    if (color.type == CSS_COLOR_CURRENTCOLOR) return current;
     css_color_to_rgba(&color, &result.r, &result.g, &result.b, &result.a);
     return result;
+}
+
+Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
+    return resolve_color_using_current(lycon, value, get_current_color(lycon));
 }
 
 // Get the CSS currentColor value for the element being styled.
@@ -2632,6 +2638,9 @@ static Color get_current_color(LayoutContext* lycon) {
 
 Color resolve_text_color_value(LayoutContext* lycon, const CssValue* value) {
     value = resolve_var_function(lycon, value);
+    DomElement* current = lycon ? lam::view_as_element(lycon->view) : nullptr;
+    DomElement* parent = current ? dom_parent_element(current) : nullptr;
+    Color parent_color = get_current_color_for_view(parent ? lam::view_require_element(parent) : nullptr);
     bool inherited = !value ||
         (value->type == CSS_VALUE_TYPE_KEYWORD &&
          (value->data.keyword == CSS_VALUE_INHERIT || value->data.keyword == CSS_VALUE_UNSET ||
@@ -2640,13 +2649,12 @@ Color resolve_text_color_value(LayoutContext* lycon, const CssValue* value) {
          value->data.color.type == CSS_COLOR_CURRENTCOLOR);
     if (inherited) {
         // currentColor on color itself uses the parent's resolved text color.
-        DomElement* current = lycon ? lam::view_as_element(lycon->view) : nullptr;
-        DomElement* parent = current ? dom_parent_element(current) : nullptr;
-        return get_current_color_for_view(parent ? lam::view_require_element(parent) : nullptr);
+        return parent_color;
     }
     if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_INITIAL)
         return Color{0xFF000000};
-    return resolve_color_value(lycon, value);
+    // color-mix(currentColor, ...) on color itself uses the inherited color too.
+    return resolve_color_using_current(lycon, value, parent_color);
 }
 
 float resolve_css_opacity_value(LayoutContext* lycon, const CssValue* value) {
@@ -5029,6 +5037,23 @@ static void resolve_scroll_behavior(DomElement* element, LayoutContext* lycon) {
     element->ensure_scroll(lycon)->scroll_behavior = keyword;
 }
 
+static void resolve_resize(DomElement* element, LayoutContext* lycon) {
+    if (!element || !element->specified_style) return;
+    CssDeclaration* declaration = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_RESIZE);
+    if (!declaration) return;
+    const CssValue* value = resolve_var_function(lycon, declaration->value);
+    if (!value || value->type != CSS_VALUE_TYPE_KEYWORD) return;
+    CssEnum keyword = value->data.keyword;
+    if (keyword == CSS_VALUE_INHERIT) {
+        DomElement* parent = dom_parent_element(element);
+        keyword = parent ? parent->scroll()->resize : CSS_VALUE_NONE;
+    } else if (keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_UNSET ||
+               declaration->property_code == CSS_PROPERTY_ALL) keyword = CSS_VALUE_NONE;
+    if (keyword == CSS_VALUE_NONE || keyword == CSS_VALUE_HORIZONTAL ||
+        keyword == CSS_VALUE_VERTICAL || keyword == CSS_VALUE_BOTH)
+        element->ensure_scroll(lycon)->resize = keyword;
+}
+
 static void resolve_overflow_clip_margin(DomElement* element,
                                          LayoutContext* lycon) {
     ViewBlock* block = lam::view_as_block(lycon->view);
@@ -5753,6 +5778,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     resolve_scroll_keyword_axes(dom_elem, lycon, false);
     resolve_scroll_keyword_axes(dom_elem, lycon, true);
     resolve_scroll_behavior(dom_elem, lycon);
+    resolve_resize(dom_elem, lycon);
     resolve_overflow_clip_margin(dom_elem, lycon);
     resolve_scroll_snap(dom_elem, lycon);
     resolve_scroll_spacing(dom_elem, lycon, false);
@@ -7168,6 +7194,7 @@ static bool css_property_is_ignored(CssPropertyCode property) {
         CSS_PROPERTY_OVERSCROLL_BEHAVIOR_X,
         CSS_PROPERTY_OVERSCROLL_BEHAVIOR_Y,
         CSS_PROPERTY_SCROLL_BEHAVIOR,
+        CSS_PROPERTY_RESIZE,
         CSS_PROPERTY_OVERFLOW_CLIP_MARGIN,
         CSS_PROPERTY_SCROLL_SNAP_TYPE, CSS_PROPERTY_SCROLL_SNAP_ALIGN,
         CSS_PROPERTY_SCROLL_MARGIN, CSS_PROPERTY_SCROLL_PADDING,

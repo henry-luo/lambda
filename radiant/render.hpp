@@ -4679,6 +4679,8 @@ void render_custom_svg_subscene(RasterRenderContext* rdcon, Element* svg_element
                                 float viewport_width, float viewport_height);
 
 // ===== render_text.hpp =====
+bool render_text_paint_atomic_hidden(RenderContext* context, View* view);
+bool render_text_overflow_atomic_hidden(UiContext* uicon, View* view);
 class RenderTextPaintScope {
     lam::Up<RenderContext> context;
     lam::Up<RenderTextPaintData> previous;
@@ -4707,6 +4709,8 @@ class RenderTextPaintIterator {
     lam::Up<RenderContext> context;
     lam::Up<TextRect> cursor;
     lam::Up<RenderTextPaintEntry> pending_marker;
+    lam::Up<TextRect> pending_source;
+    int pending_entry_index;
     TextRect projection;
     FontBox saved_font;
     Color saved_color;

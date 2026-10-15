@@ -123,6 +123,20 @@ static bool bidi_codepoint_is_format_control(uint32_t codepoint) {
 #endif
 }
 
+bool layout_text_run_has_uniform_rtl_order(const unsigned char* text, size_t length) {
+    const unsigned char* cursor = text;
+    const unsigned char* end = text + length;
+    bool found = false;
+    while (cursor < end) {
+        uint32_t codepoint = 0;
+        if (!layout_utf8_next_codepoint(&cursor, end, &codepoint) ||
+            bidi_codepoint_is_format_control(codepoint) || utf_bidi_strong_class(codepoint) < 0) return false;
+        if (bidi_codepoint_triggers_reorder(codepoint)) found = true;
+        else if (!is_space(codepoint) && !text_codepoint_has_zero_advance(codepoint)) return false;
+    }
+    return found;
+}
+
 static bool bidi_is_line_text_rect(ViewText* text, TextRect* rect, int line_number) {
     return text && rect && rect->line_number == line_number && rect->length > 0 &&
            text->text_data();

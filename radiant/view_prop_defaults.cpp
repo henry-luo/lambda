@@ -87,6 +87,7 @@ static InlineProp make_inline_prop_default() {
 
 static ScrollProp make_scroll_prop_default() {
     ScrollProp value = {};
+    value.resize = CSS_VALUE_NONE;
     value.overflow_x = value.overflow_y = CSS_VALUE_VISIBLE;
     value.default_overflow_x = value.default_overflow_y = CSS_VALUE_VISIBLE;
     value.overscroll_x = value.overscroll_y = CSS_VALUE_AUTO;

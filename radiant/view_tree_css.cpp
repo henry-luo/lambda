@@ -158,7 +158,10 @@ bool view_css_context_begin(ViewTree* tree) {
         css->engine->context.reduced_motion = source->context.reduced_motion;
         css->engine->context.high_contrast = source->context.high_contrast;
         css->engine->context.quirks_mode = source->context.quirks_mode;
+        if (!tree->model->environment.input_capabilities.known)
+            tree->model->environment.input_capabilities = source->context.input_capabilities;
     }
+    css->engine->context.input_capabilities = tree->model->environment.input_capabilities;
     css->page_document = lam::up(radiant_page_document_compile(tree, css->engine, css->pool));
     if (!css->page_document) { view_css_context_destroy(tree); return false; }
     return true;

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <math.h>
+#include "../lib/color.h"
 
 // shared pixel primitives use packed ABGR values; premultiplied variants state
 // their alpha contract explicitly so callers do not repeat channel arithmetic.
@@ -54,13 +55,11 @@ void render_pixel_unpremultiply_row(uint32_t* destination, const uint32_t* sourc
 }
 
 float render_color_srgb_to_linear(float channel) {
-    channel = clamp_unit(channel);
-    return channel <= .04045f ? channel / 12.92f : powf((channel + .055f) / 1.055f, 2.4f);
+    return (float)color_srgb_to_linear(clamp_unit(channel));
 }
 
 float render_color_linear_to_srgb(float channel) {
-    channel = clamp_unit(channel);
-    return channel <= .0031308f ? channel * 12.92f : 1.055f * powf(channel, 1.0f / 2.4f) - .055f;
+    return (float)color_linear_to_srgb(clamp_unit(channel));
 }
 
 uint32_t render_pixel_source_over_opaque(uint32_t destination, uint32_t source) {

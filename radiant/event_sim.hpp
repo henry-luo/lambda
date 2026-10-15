@@ -81,6 +81,7 @@
 #include <cstdio>
 #include <cstdint>
 #include "../lib/arraylist.h"
+#include "../lambda/input/css/css_environment.hpp"
 
 // Forward declarations
 struct GLFWwindow;
@@ -114,6 +115,7 @@ enum SimEventType {
     SIM_EVENT_SELECT_OPTION,   // select an option from a <select> dropdown
     SIM_EVENT_RESIZE,          // resize viewport and trigger relayout
     SIM_EVENT_SET_DEVICE_SCALE, // change raster scale without relayout
+    SIM_EVENT_SET_INPUT_CAPABILITIES, // native pointer/hover environment publication
     SIM_EVENT_DRAG_AND_DROP,   // HTML5 drag-and-drop from source to target
     SIM_EVENT_EDITING_TEXT_DRAG_DROP, // editing deleteByDrag/insertFromDrop
     SIM_EVENT_FUZZ_SCHEMA,     // deterministic legal input fuzz + schema assertion
@@ -203,6 +205,7 @@ struct SimEvent {
     bool negate_view_type;       // for assert_caret: assert view_type != expected_view_type
     float scroll_dx, scroll_dy;  // scroll offsets
     float device_scale;          // set_device_scale target ratio
+    CssInputCapabilities input_capabilities;
     char* message;               // for log events
     char* file_path;             // for render/dump_caret events
     char* target_text;           // for mouse events: find text and click on it

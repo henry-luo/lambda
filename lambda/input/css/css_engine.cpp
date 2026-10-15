@@ -331,6 +331,10 @@ static uint64_t css_condition_environment_key(const CssEngine* engine,
     key ^= engine->context.reduced_motion ? UINT64_C(0x9e3779b97f4a7c15) : 0;
     key ^= engine->context.high_contrast ? UINT64_C(0xbf58476d1ce4e5b9) : 0;
     key ^= engine->context.vertical_viewport ? UINT64_C(0x27d4eb2f165667c5) : 0;
+    const CssInputCapabilities& input = engine->context.input_capabilities;
+    uint64_t capabilities = input.pointer | ((uint64_t)input.any_pointer << 2u) |
+        ((uint64_t)input.hover << 4u) | ((uint64_t)input.any_hover << 5u) | ((uint64_t)input.known << 6u);
+    key = hash_combine_u64(key, capabilities);
     const char* scheme = engine->context.color_scheme ? engine->context.color_scheme : "";
     key ^= css_condition_hash_bytes(scheme, strlen(scheme));
     if (kind == CSS_CONDITION_SUPPORTS) {
@@ -651,6 +655,14 @@ void css_engine_set_viewport(CssEngine* engine, double width, double height) {
 
     engine->context.viewport_width = width;
     engine->context.viewport_height = height;
+}
+
+bool css_engine_set_input_capabilities(CssEngine* engine, const CssInputCapabilities* input) {
+    if (!engine || !css_input_capabilities_valid(input) ||
+        css_input_capabilities_equal(&engine->context.input_capabilities, input)) return false;
+    // the condition cache keys the complete value, so a no-op does not invalidate anything.
+    engine->context.input_capabilities = *input;
+    return true;
 }
 
 void css_engine_set_color_scheme(CssEngine* engine, const char* scheme) {
@@ -1109,6 +1121,24 @@ static bool evaluate_media_feature(CssEngine* engine, const char* feature, const
     double viewport_width = engine->context.viewport_width;
     double viewport_height = engine->context.viewport_height;
 
+    bool pointer = strcmp(feature, "pointer") == 0 || strcmp(feature, "any-pointer") == 0;
+    bool hover = strcmp(feature, "hover") == 0 || strcmp(feature, "any-hover") == 0;
+    if (pointer || hover) {
+        const CssInputCapabilities& input = engine->context.input_capabilities;
+        if (!input.known) return false;
+        bool aggregate = strncmp(feature, "any-", 4) == 0;
+        if (hover) {
+            bool available = aggregate ? input.any_hover : input.hover;
+            return !value ? available : strcmp(value, "hover") == 0 ? available
+                : strcmp(value, "none") == 0 && !available;
+        }
+        uint8_t devices = aggregate ? input.any_pointer : input.pointer;
+        return !value ? devices != CSS_POINTER_NONE
+            : strcmp(value, "none") == 0 ? devices == CSS_POINTER_NONE
+            : strcmp(value, "coarse") == 0 ? (devices & CSS_POINTER_COARSE) != 0
+            : strcmp(value, "fine") == 0 && (devices & CSS_POINTER_FINE) != 0;
+    }
+
     const char* numeric_name = feature;
     int numeric_comparison = 0;
     if (strncmp(feature, "min-", 4) == 0) {
@@ -1450,7 +1480,7 @@ static bool css_media_evaluate_atom(CssEngine* engine, CssConditionSpan span,
     if (strcmp(name, "color") == 0) return true;
     if (strcmp(name, "monochrome") == 0) return false;
     if (strcmp(name, "orientation") == 0) return true;
-    return false;
+    return evaluate_media_feature(engine, name, nullptr);
 }
 
 typedef int (*CssConditionAtomReader)(void*, CssConditionSpan, Pool*);

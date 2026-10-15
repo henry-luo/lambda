@@ -1,0 +1,23 @@
+<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;background:white}
+#control{position:absolute;left:8px;top:8px;box-sizing:border-box;width:80px;height:24px;
+  border:4px solid black;background:#ddd}
+#status{position:absolute;left:8px;top:80px}
+@media(pointer:coarse){#control{width:160px;height:48px}}
+@media(hover:hover){#control{background:green}}
+@media(any-pointer:fine){#control{border-color:blue}}
+</style><div id="control"></div><output id="status" data-count="0" data-resizes="0"></output>
+<script>
+var capabilityChanges=0,capabilityResizes=0;
+var capabilityStatus=document.getElementById('status');
+var capabilityQuery=matchMedia('(hover: hover)');
+capabilityQuery.addEventListener('change',function(event){
+    capabilityChanges++;
+    capabilityStatus.setAttribute('data-count',String(capabilityChanges));
+    capabilityStatus.setAttribute('data-matches',String(event.matches));
+});
+addEventListener('resize',function(){
+    capabilityResizes++;
+    capabilityStatus.setAttribute('data-resizes',String(capabilityResizes));
+});
+</script>

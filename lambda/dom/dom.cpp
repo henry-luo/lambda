@@ -18378,7 +18378,7 @@ static Item js_web_animation_parse_keyframes(DomDocument* document,
     for (int index = 0; index < builder.count; index++) {
         JsWebKeyframeStop* stop = &builder.stops[index];
         TimingFunction timing;
-        if (!css_animation_parse_timing_function_text(stop->easing ? stop->easing : "linear", &timing))
+        if (!css_animation_parse_timing_function_text(stop->easing ? stop->easing : "linear", &timing, pool))
             return dom_realm_throw_type_error("invalid keyframe easing");
         if (timing.type != TIMING_LINEAR) {
             stop->stop.timing = lam::own((TimingFunction*)pool_alloc(pool, sizeof(TimingFunction)));
@@ -18395,7 +18395,7 @@ static Item js_web_animation_parse_keyframes(DomDocument* document,
         for (int index = builder.count; index < count; index++) {
             TimingFunction timing;
             if (!css_animation_parse_timing_function_text(fn_to_cstr(
-                    js_elements_get_int(easings_root.get(), index)), &timing))
+                    js_elements_get_int(easings_root.get(), index)), &timing, pool))
                 return dom_realm_throw_type_error("invalid keyframe easing");
         }
     }
@@ -18460,7 +18460,7 @@ extern "C" Item dom_web_animation_cancel(void) {
 
 static Item js_web_animation_parse_timing_options(Item options,
                                                   double* duration_ms,
-                                                  TimingFunction* timing) {
+                                                  TimingFunction* timing, Pool* pool) {
     *duration_ms = 0.0;
     *timing = {};
     timing->type = TIMING_LINEAR;
@@ -18488,7 +18488,7 @@ static Item js_web_animation_parse_timing_options(Item options,
         if (!is_js_undefined(value_root.get())) {
             value_root.set(js_to_string(value_root.get()));
             if (item_is_error(value_root.get())) return value_root.get();
-            if (!css_animation_parse_timing_function_text(fn_to_cstr(value_root.get()), timing))
+            if (!css_animation_parse_timing_function_text(fn_to_cstr(value_root.get()), timing, pool))
                 return dom_realm_throw_type_error("invalid animation easing");
         }
     }
@@ -18509,7 +18509,7 @@ static Item js_web_animation_create(DomElement* element, Item keyframes_item,
     TimingFunction timing = snapshot ? snapshot->timing : TimingFunction{};
     if (!snapshot) {
         Item parsed = js_web_animation_parse_timing_options(options_root.get(),
-            &duration_ms, &timing);
+            &duration_ms, &timing, element->doc->document_pool);
         if (item_is_error(parsed)) return parsed;
         parsed = js_web_animation_parse_keyframes(element->doc, keyframes_root.get(), &keyframes);
         if (item_is_error(parsed)) return parsed;
@@ -18574,7 +18574,7 @@ extern "C" Item dom_keyframe_effect_ctor(Item target, Item keyframes,
         document->document_pool, sizeof(JsWebKeyframeEffectHost));
     if (!host) return ItemError;
     Item parsed = js_web_animation_parse_timing_options(options_root.get(),
-        &host->duration_ms, &host->timing);
+        &host->duration_ms, &host->timing, document->document_pool);
     if (item_is_error(parsed)) return parsed;
     parsed = js_web_animation_parse_keyframes(document, keyframes_root.get(), &host->keyframes);
     if (item_is_error(parsed)) return parsed;

@@ -125,8 +125,50 @@ float timing_function_eval(const TimingFunction* tf, float t, bool before) {
         case TIMING_LINEAR: return timing_eval_linear(t);
         case TIMING_CUBIC_BEZIER: return timing_eval_cubic_bezier(tf, t);
         case TIMING_STEPS: return timing_eval_steps(tf, t, before);
+        case TIMING_PIECEWISE_LINEAR: {
+            const auto* points = tf->piecewise.points;
+            int count = tf->piecewise.count;
+            if (!points || count < 2) return t;
+            // choose the last point at a repeated input, including exact jumps.
+            int low = 0, high = count;
+            while (low < high) {
+                int middle = low + (high - low) / 2;
+                if (points[middle].input <= t) low = middle + 1;
+                else high = middle;
+            }
+            int index = low > 0 ? low - 1 : 0;
+            if (index == count - 1) index--;
+            const auto& a = points[index];
+            const auto& b = points[index + 1];
+            if (a.input == b.input) return (float)b.output;
+            return (float)(a.output + (t - a.input) / (b.input - a.input) * (b.output - a.output));
+        }
     }
     return t;
+}
+
+void timing_function_clear(Pool* pool, TimingFunction* owned) {
+    if (owned->type == TIMING_PIECEWISE_LINEAR && owned->piecewise.points)
+        pool_free(pool, (void*)owned->piecewise.points);
+    *owned = {};
+}
+
+bool timing_function_assign(Pool* pool, TimingFunction* owned, const TimingFunction* source) {
+    if (owned == source) return true;
+    TimingFunction copy = *source;
+    if (source->type == TIMING_PIECEWISE_LINEAR) {
+        size_t bytes = sizeof(CssLinearEasingPoint) * source->piecewise.count;
+        if (owned->type == TIMING_PIECEWISE_LINEAR && owned->piecewise.count == source->piecewise.count &&
+            memcmp(owned->piecewise.points, source->piecewise.points, bytes) == 0) return true;
+        auto* points = (CssLinearEasingPoint*)pool_alloc(pool, bytes);
+        if (!points) return false;
+        memcpy(points, source->piecewise.points, bytes);
+        copy.piecewise.points = points;
+    }
+    // allocate first: an allocation failure keeps the previous retained curve valid.
+    timing_function_clear(pool, owned);
+    *owned = copy;
+    return true;
 }
 
 // ============================================================================
@@ -174,6 +216,7 @@ void animation_scheduler_destroy(AnimationScheduler* scheduler) {
         // must release state without dispatching into the dead document.
         anim->suppress_cancel_event = true;
         if (anim->on_cancel) anim->on_cancel(anim);
+        timing_function_clear(scheduler->pool, &anim->timing);
         pool_free(scheduler->pool, anim);
         anim = next;
     }
@@ -272,7 +315,10 @@ void animation_scheduler_remove(AnimationScheduler* scheduler, AnimationInstance
 
     // author callbacks can cancel this or a later driver; sampled-list nodes survive the current walk.
     if(scheduler->sampling_depth) {anim->retired_next=scheduler->retired;scheduler->retired=anim;}
-    else pool_free(scheduler->pool, anim);
+    else {
+        timing_function_clear(scheduler->pool, &anim->timing);
+        pool_free(scheduler->pool, anim);
+    }
 }
 
 void animation_scheduler_cancel(AnimationScheduler* scheduler, AnimationInstance* anim) {
@@ -544,7 +590,9 @@ bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
 
     scheduler->has_active_animations = any_active && scheduler->count > 0;
     if(!--scheduler->sampling_depth) while(scheduler->retired) {
-        auto* retired=scheduler->retired;scheduler->retired=retired->retired_next;pool_free(scheduler->pool,retired);
+        auto* retired=scheduler->retired;scheduler->retired=retired->retired_next;
+        timing_function_clear(scheduler->pool, &retired->timing);
+        pool_free(scheduler->pool,retired);
     }
     return scheduler->has_active_animations;
 }

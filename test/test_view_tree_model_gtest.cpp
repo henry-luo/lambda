@@ -8513,6 +8513,28 @@ TEST_F(SecondaryViewTest, ReplacedPercentageHeightsUseTheBlockContainerIncluding
     }
 }
 
+TEST_F(SecondaryViewTest, InputCapabilityMediaUsesEachSelectedEnvironment) {
+    stylesheet("p{width:80px;color:red} @media(pointer:coarse){p{width:120px}}"
+        "@media(hover:hover){p{color:blue}} @media(any-pointer:fine){p{margin-left:7px}}");
+    ViewEnvironment coarse_environment = view_environment_default(VIEW_PRESENTATION_CONTINUOUS);
+    coarse_environment.input_capabilities = {CSS_POINTER_COARSE,
+        CSS_POINTER_COARSE | CSS_POINTER_FINE, false, true, true};
+    ViewEnvironment fine_environment = coarse_environment;
+    fine_environment.input_capabilities = {CSS_POINTER_FINE, CSS_POINTER_FINE, true, true, true};
+    ViewTree* coarse = view_tree_secondary_create(&doc, &coarse_environment);
+    ViewTree* fine = view_tree_secondary_create(&doc, &fine_environment);
+    ASSERT_NE(coarse, nullptr); ASSERT_NE(fine, nullptr);
+    ViewCssStyle* a = view_css_resolve(coarse, source);
+    ViewCssStyle* b = view_css_resolve(fine, source);
+    ASSERT_NE(a, nullptr); ASSERT_NE(b, nullptr);
+    EXPECT_EQ(a->color.r, 255); EXPECT_EQ(b->color.b, 255);
+    EXPECT_FLOAT_EQ(view_css_length(coarse, a, a->width, CSS_PROPERTY_WIDTH, 200.0f, 100.0f), 120.0f);
+    EXPECT_FLOAT_EQ(view_css_length(fine, b, b->width, CSS_PROPERTY_WIDTH, 200.0f, 100.0f), 80.0f);
+    EXPECT_FLOAT_EQ(view_css_length(coarse, a, a->margin[3], CSS_PROPERTY_MARGIN_LEFT, 200.0f, 100.0f), 7.0f);
+    EXPECT_FLOAT_EQ(view_css_length(fine, b, b->margin[3], CSS_PROPERTY_MARGIN_LEFT, 200.0f, 100.0f), 7.0f);
+    EXPECT_FALSE(((CssEngine*)doc.services.cached_css_engine)->context.input_capabilities.known);
+}
+
 TEST_F(SecondaryViewTest, MediaCascadeAndLengthsBelongToEachView) {
     stylesheet("p { font-size: 18px; color: red; margin: 8px 12px; width: calc(50vw - 10px); "
         "line-height: 1.5; --space: 3px; padding: var(--space); break-before: page; } "

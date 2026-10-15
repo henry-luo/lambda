@@ -3,6 +3,7 @@
 
 #include "css_parser.hpp"
 #include "css_style.hpp"
+#include "css_environment.hpp"
 #include "../../../lib/mempool.h"
 #include <stdint.h>
 
@@ -135,6 +136,7 @@ typedef struct CssEngine {
         bool reduced_motion;
         bool high_contrast;
         bool vertical_viewport;
+        CssInputCapabilities input_capabilities;
     } context;
 
     CssContainerProvider container_provider;
@@ -236,6 +238,7 @@ void css_engine_set_options(CssEngine* engine, const CssProcessingOptions* optio
 void css_engine_set_substitution_limits(CssEngine* engine, size_t max_bytes, size_t max_tokens);
 void css_engine_set_substitution_depth_limit(CssEngine* engine, size_t max_depth);
 void css_engine_set_viewport(CssEngine* engine, double width, double height);
+bool css_engine_set_input_capabilities(CssEngine* engine, const CssInputCapabilities* input);
 void css_engine_set_color_scheme(CssEngine* engine, const char* scheme);
 void css_engine_set_root_font_size(CssEngine* engine, double size);
 

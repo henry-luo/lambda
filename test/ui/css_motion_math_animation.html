@@ -1,0 +1,20 @@
+<!doctype html>
+<style>
+body { margin:0; background:white; }
+button { position:absolute; top:5px; width:70px; height:25px; }
+#duration { left:5px; } #curve { left:80px; } #remove { left:155px; }
+.box { position:absolute; left:10px; top:60px; width:20px; height:20px; background:red; }
+@keyframes motion { from { opacity:0; transform:translateX(0px); } to { opacity:1; transform:translateX(100px); } }
+#box { --time:500ms; animation:motion calc(var(--time) * 4) linear(0,.25,1) calc(-2 * 500ms) both paused; }
+#web { top:100px; }
+</style>
+<button id="duration">duration</button><button id="curve">curve</button><button id="remove">remove</button>
+<div class="box" id="box"></div><div class="box" id="web"></div>
+<script>
+var box = document.getElementById('box');
+document.getElementById('duration').addEventListener('click', function() { box.style.setProperty('--time','1s'); });
+document.getElementById('curve').addEventListener('click', function() { box.style.animationTimingFunction='linear(0,.5 25% 75%,1)'; });
+document.getElementById('remove').addEventListener('click', function() { box.style.animation='none'; });
+var web = document.getElementById('web').animate([{opacity:0},{opacity:1}], {duration:1000,easing:'linear(0,.25,1)'});
+web.pause(); web.currentTime=500;
+</script>

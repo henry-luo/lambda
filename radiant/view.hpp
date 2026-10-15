@@ -17,6 +17,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_value.hpp"
 #include "../lambda/input/css/css_style.hpp"
+#include "../lambda/input/css/css_environment.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "scale.hpp"
 #include <stdbool.h>
@@ -198,6 +199,7 @@ typedef enum TimingFunctionType {
     TIMING_LINEAR = 0,
     TIMING_CUBIC_BEZIER,
     TIMING_STEPS,
+    TIMING_PIECEWISE_LINEAR,
 } TimingFunctionType;
 
 typedef enum StepPosition {
@@ -207,7 +209,8 @@ typedef enum StepPosition {
     STEP_JUMP_NONE,
 } StepPosition;
 
-// tier-2: view-pool, rebuilt each relayout
+// POD snapshot: piecewise points borrow the configuration/keyframe owner pool.
+// scheduler instances instead own a copy in their scheduler pool (D4.5.1v4).
 typedef struct TimingFunction {
     TimingFunctionType type;
     union {
@@ -219,11 +222,17 @@ typedef struct TimingFunction {
             double count;
             StepPosition position;
         } steps;
+        struct {
+            const CssLinearEasingPoint* points;
+            int count;
+        } piecewise;
     };
 } TimingFunction;
 
 void timing_cubic_bezier_init(TimingFunction* tf, float x1, float y1, float x2, float y2);
 float timing_function_eval(const TimingFunction* tf, float t, bool before = false);
+bool timing_function_assign(Pool* pool, TimingFunction* owned, const TimingFunction* source);
+void timing_function_clear(Pool* pool, TimingFunction* owned);
 bool animation_easing_before(const struct AnimationInstance* anim);
 
 extern TimingFunction TIMING_EASE;
@@ -2504,6 +2513,7 @@ typedef struct ScrollProp {
     CssEnum default_overflow_x, default_overflow_y; // HTML defaults before author cascade, for dirty CSSOM reads
     CssEnum overscroll_x, overscroll_y;
     CssEnum scroll_behavior;
+    CssEnum resize;
     CssEnum overflow_clip_box;
     float overflow_clip_margin;
     ScrollSpacingValue scroll_margin[4], scroll_padding[4];
@@ -3891,7 +3901,7 @@ CssKeyframes* keyframe_registry_find(KeyframeRegistry* registry, const char* nam
 // CSS Animation Configuration (per element, populated during style resolution)
 // ============================================================================
 
-// tier-2: view-pool, rebuilt each relayout
+// scratch configuration: timing points borrow the computation pool.
 typedef struct CssAnimProp {
     lam::Up<const char> name;           // animation-name (keyframes reference)
     double duration;            // animation-duration in seconds
@@ -3916,6 +3926,7 @@ typedef struct CssTransitionProp {
 
 typedef struct CssTransitionList {
     const CssValue* values[4];   // scratch computed lists, cycled against transition-property
+    Pool* pool;                 // owns parsed timing points alongside the computed lists
 } CssTransitionList;
 
 void css_transition_resolve_config(DomElement* element, Pool* pool, CssTransitionList* list);
@@ -3929,7 +3940,7 @@ bool css_animation_parse_property_value(CssPropertyCode property,
                                         CssAnimatedProp* out,
                                         Pool* pool);
 bool css_animation_parse_timing_function_text(const char* value,
-                                              TimingFunction* out);
+                                              TimingFunction* out, Pool* pool);
 
 // ============================================================================
 // CSS Animation Runtime State (attached to AnimationInstance.state)
@@ -4393,6 +4404,7 @@ typedef struct UiContext {
     float window_height;   // window pixel height (actual framebuffer size, physical pixels)
     float viewport_width;  // intended viewport width (CSS logical pixels, for vh/vw units)
     float viewport_height; // intended viewport height (CSS logical pixels, for vh/vw units)
+    CssInputCapabilities input_capabilities; // window-owned media environment, including explicit unknown
     lam::Up<ImageSurface> surface;  // the current render target: window_surface, or one an export pass swaps in
     lam::Own<ImageSurface> window_surface;  // the surface create_surface made; destroy releases it
     bool render_failed;             // sticky host failure; never present an invalid paint stream
