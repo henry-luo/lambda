@@ -7,7 +7,26 @@
 #include "../../../lib/utf.h"
 #include "../js_well_known_names.h"
 #include "../js_props.h"
+#include "../js_runtime.h"
+#include "../js_builtin_catalog.hpp"
 #include <math.h>
+
+const JsArrayOps mvp_lmd_array_ops = {
+    &mvp_lmd_buffer_ops,
+    [](Item value) { return mvp_lmd_box_primitive(value); },
+    [](Item owner, int64_t index, Item value, JsArrayIndexOp operation) {
+        const int operations[] = {LMD_PROP_GET, LMD_PROP_HAS, LMD_PROP_SET | LMD_PROP_STRICT,
+            LMD_PROP_DELETE | LMD_PROP_STRICT, LMD_PROP_CREATE_DATA};
+        return mvp_lmd_array_index_property(owner, index, value, operations[operation]);
+    },
+    mvp_lmd_array_new,
+    mvp_lmd_is_callable,
+    mvp_lmd_is_constructor,
+    [](Item constructor, Item* args, int argc) {
+        return mvp_lmd_class_invoke(constructor, Item{.item = ITEM_JS_UNDEFINED}, args, argc, constructor);
+    },
+    mvp_lmd_array_sort
+};
 
 struct MvpLmdSort {
     Rooted<Item>* comparator;
@@ -165,6 +184,11 @@ extern "C" Item mvp_lmd_array_visit(Item owner, Item* args, int64_t count, int64
         find_index ? Item{.item = i2it(-1)} : output.get();
 }
 extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_t method) {
+    if (method >= LMD_METHOD_COPY_WITHIN && method <= LMD_METHOD_WITH) {
+        const int methods[] = {JS_BUILTIN_ARR_COPY_WITHIN, JS_BUILTIN_ARR_TO_SORTED,
+            JS_BUILTIN_ARR_TO_SPLICED, JS_BUILTIN_ARR_WITH};
+        return js_array_method_with_ops(methods[method - LMD_METHOD_COPY_WITHIN], owner, args, count, &mvp_lmd_array_ops);
+    }
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
     // methods allocate an output only when their result needs one.

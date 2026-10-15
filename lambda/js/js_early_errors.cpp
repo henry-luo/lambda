@@ -515,21 +515,29 @@ static void check_duplicate_params(EarlyErrorCtx* ctx, JsFunctionNode* func) {
     }
 }
 
-static void check_binding_pattern_reserved(EarlyErrorCtx* ctx, JsAstNode* node);
+static void check_binding_pattern_reserved(EarlyErrorCtx* ctx, JsAstNode* node,
+    bool lexical_binding = false);
 
-static void check_binding_pattern_reserved_child(JsAstNode* child,
-        void* opaque) {
-    check_binding_pattern_reserved((EarlyErrorCtx*)opaque, child);
-}
-
-static void check_binding_pattern_reserved(EarlyErrorCtx* ctx, JsAstNode* node) {
+static void check_binding_pattern_reserved(EarlyErrorCtx* ctx, JsAstNode* node,
+        bool lexical_binding) {
     if (!node) return;
     if (node->node_type == AST_NODE_IDENT) {
-        check_identifier_reserved(ctx, node);
+        String* name = ((JsIdentifierNode*)node)->name;
+        if (lexical_binding && name && name->len == 3 &&
+                memcmp(name->chars, "let", 3) == 0) {
+            ee_error(ctx, node, "'let' cannot be used as a lexical binding name");
+        } else {
+            check_identifier_reserved(ctx, node);
+        }
         return;
     }
+    // only bound-name children inherit this policy, excluding keys and default expressions.
+    struct BindingContext { EarlyErrorCtx* errors; bool lexical; } state = {ctx, lexical_binding};
     js_ast_visit_binding_pattern_children(node,
-        check_binding_pattern_reserved_child, ctx);
+        [](JsAstNode* child, void* opaque) {
+            BindingContext* state = (BindingContext*)opaque;
+            check_binding_pattern_reserved(state->errors, child, state->lexical);
+        }, &state);
 }
 
 static void check_function_name_reserved(EarlyErrorCtx* ctx, JsFunctionNode* func) {
@@ -946,18 +954,10 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             for (JsAstNode* d = vd->declarations; d; d = d->next) {
                 if (d->node_type == AST_NODE_VARIABLE_DECLARATOR) {
                     JsVariableDeclaratorNode* vdecl = (JsVariableDeclaratorNode*)d;
-                    // check binding identifier
                     if (vdecl->id) {
-                        if (vdecl->id->node_type == AST_NODE_IDENT) {
-                            check_identifier_reserved(ctx, vdecl->id);
-                        } else {
-                            // Binding patterns carry identifiers in nested
-                            // property/value nodes; expression walking only
-                            // validates private references and therefore used
-                            // to miss strict `eval`/`arguments` declarations.
-                            check_binding_pattern_reserved(ctx, vdecl->id);
+                        check_binding_pattern_reserved(ctx, vdecl->id, vd->kind != JS_VAR_VAR);
+                        if (vdecl->id->node_type != AST_NODE_IDENT)
                             walk_expression(ctx, vdecl->id);
-                        }
                     }
                     walk_expression(ctx, vdecl->init);
                 }
@@ -1002,6 +1002,9 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                 ee_error(ctx, fo->init, "Invalid initializer in iteration declaration");
             walk_expression(ctx, fo->init);
             walk_statement(ctx, fo->left); // may be var decl
+            // iteration ASTs strip the declaration wrapper but retain its binding kind.
+            if (fo->declares_binding && fo->left && fo->left->node_type != AST_NODE_VAR_STAM)
+                check_binding_pattern_reserved(ctx, fo->left, fo->kind != JS_VAR_VAR);
             walk_expression(ctx, fo->left); // may be pattern
             if (fo->left && fo->left->node_type != AST_NODE_VAR_STAM) {
                 // a failed pattern parse can leave an array/object expression; it is not an assignment target.

@@ -1,10 +1,12 @@
 #include "lambda/js/js_runtime_state.hpp"
 #include "lambda/js/js_runtime.h"
+#include "lambda/js/js_interp.hpp"
 #include <gtest/gtest.h>
 #include "lambda/js/mvp-lmd/mvp_lmd.h"
 #include "lambda/js/mvp-lmd/mvp_lmd_runtime.h"
 #include "lambda/js/js_object_meta.h"
 #include "lambda/js/js_typed_array.h"
+#include "lambda/js/parser/js_parser.h"
 #include "lambda/runtime/runtime-state.h"
 #include "lambda/runtime/module_registry.h"
 #include "lambda/runtime/context_capsule.h"
@@ -8356,4 +8358,1459 @@ TEST_F(JsMvpLmd, RegExpEscapedNameNormalizationRetainsRootedResults) {
 
 TEST_F(JsMvpLmd, RegExpQuantifierBoundsComparedBeforeSaturation) {
     boolean("let ok=true;for(let flags of ['', 'u']){let caught=false;try{new RegExp('.{4294967297,4294967296}',flags)}catch(e){caught=e instanceof SyntaxError}ok=ok&&caught}ok;");
+}
+
+TEST_F(JsMvpLmd, StringHtmlAttributes) {
+    boolean(R"JS(
+let text='<&"x',arg='"a&\'"';
+if(text.anchor(arg)!=='<a name="&quot;a&\'&quot;"><&"x</a>')throw 1;
+if(text.link(arg)!=='<a href="&quot;a&\'&quot;"><&"x</a>')throw 2;
+if(text.fontcolor(arg)!=='<font color="&quot;a&\'&quot;"><&"x</font>')throw 3;
+if(text.fontsize(arg)!=='<font size="&quot;a&\'&quot;"><&"x</font>')throw 4;
+if(''.anchor()!=='<a name="undefined"></a>')throw 5;
+if('x'.fontsize(null)!=='<font size="null">x</font>')throw 6;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringHtmlCoercionOrder) {
+    boolean(R"JS(
+let order='',receiver={ [Symbol.toPrimitive](hint){order+='r'+hint;return 'body'} };
+let arg={ [Symbol.toPrimitive](hint){order+='a'+hint;return '"'} };
+let value=String.prototype.anchor.call(receiver,arg);
+if(value!=='<a name="&quot;">body</a>'||order!=='rstringastring')throw 1;
+let marker={},caught=false,reads=0;
+try{String.prototype.link.call(null,{toString(){reads++;return 'x'}})}catch(e){caught=e instanceof TypeError}
+if(!caught||reads!==0)throw 2;
+caught=false;
+try{String.prototype.anchor.call({toString(){throw marker}},arg)}catch(e){caught=e===marker}
+if(!caught||order!=='rstringastring')throw 3;
+caught=false;
+try{'x'.link({toString(){throw marker}})}catch(e){caught=e===marker}
+if(!caught)throw 4;
+caught=false;
+try{'x'.fontcolor(Symbol())}catch(e){caught=e instanceof TypeError}
+if(!caught)throw 5;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringHtmlSimpleWrappers) {
+    boolean(R"JS(
+let names=['big','blink','bold','fixed','italics','small','strike','sub','sup'];
+let tags=['big','blink','b','tt','i','small','strike','sub','sup'];
+let text='<&"x',ignored={toString(){throw 1}};
+for(let i=0;i<names.length;i++) {
+    if(String.prototype[names[i]].call(text,ignored)!=='<'+tags[i]+'>'+text+'</'+tags[i]+'>')throw 2;
+}
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringLocaleText) {
+    boolean(R"JS(
+if('ß\ufb01'.toLocaleUpperCase()!=='SSFI'||'\uD801\uDC28'.toLocaleUpperCase()!=='\uD801\uDC00')throw 1;
+if('é'.localeCompare('e\u0301')!==0||'abc'.localeCompare('abd')>=0||'abd'.localeCompare('abc')<=0)throw 2;
+if('undefined'.localeCompare()!==0)throw 3;
+let order='',receiver={toString(){order+='r';return 'abc'}},other={toString(){order+='a';return 'abc'}};
+if(String.prototype.localeCompare.call(receiver,other)!==0||order!=='ra')throw 4;
+let marker={},caught=false;
+try{'x'.localeCompare({toString(){throw marker}})}catch(e){caught=e===marker}if(!caught)throw 5;
+if(String.prototype.toLocaleUpperCase.call({toString(){return 'ß'}})!=='SS')throw 6;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringNormalizeEmptyFormOrder) {
+    boolean(R"JS(
+let order='',receiver={toString(){order+='r';return ''}},form={toString(){order+='f';return 'invalid'}};
+let caught=false;try{String.prototype.normalize.call(receiver,form)}catch(e){caught=e instanceof RangeError}
+if(!caught||order!=='rf')throw 1;
+let marker={};caught=false;
+try{''.normalize({toString(){throw marker}})}catch(e){caught=e===marker}if(!caught)throw 2;
+caught=false;try{''.normalize(Symbol())}catch(e){caught=e instanceof TypeError}if(!caught)throw 3;
+let calls=0;
+if(''.normalize({toString(){calls++;return 'NFC'}})!==''||calls!==1)throw 4;
+caught=false;calls=0;
+try{String.prototype.normalize.call(null,{toString(){calls++;return 'NFC'}})}catch(e){caught=e instanceof TypeError}
+if(!caught||calls!==0)throw 5;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringNormalizeForms) {
+    boolean(R"JS(
+if('e\u0301'.normalize()!=='\u00e9'||'e\u0301'.normalize(undefined)!=='\u00e9')throw 1;
+if('\u00e9'.normalize('NFD')!=='e\u0301')throw 2;
+if('\ufb01'.normalize('NFKC')!=='fi'||'\ufb01'.normalize('NFKD')!=='fi')throw 3;
+if('\ufb01'.normalize('NFC')!=='\ufb01')throw 4;
+let order='',receiver={toString(){order+='r';return '\u00e9'}},form={toString(){order+='f';return 'NFD'}};
+if(String.prototype.normalize.call(receiver,form)!=='e\u0301'||order!=='rf')throw 5;
+if('\uD800'.normalize('NFC')!=='\uD800')throw 6;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringTextMethodMetadata) {
+    boolean(R"JS(
+let names=['anchor','big','blink','bold','fixed','fontcolor','fontsize','italics','link','small','strike','sub','sup','normalize','isWellFormed','toWellFormed','localeCompare','toLocaleUpperCase'];
+let lengths=[1,0,0,0,0,1,1,0,1,0,0,0,0,0,0,0,1,0];
+for(let i=0;i<names.length;i++) {
+    let name=names[i],f=String.prototype[name],d=Object.getOwnPropertyDescriptor(String.prototype,name);
+    let n=Object.getOwnPropertyDescriptor(f,'name'),l=Object.getOwnPropertyDescriptor(f,'length');
+    if(f.name!==name||f.length!==lengths[i]||!d.writable||d.enumerable||!d.configurable)throw 1;
+    if(n.writable||n.enumerable||!n.configurable||l.writable||l.enumerable||!l.configurable)throw 2;
+    if(Object.hasOwn(f,'prototype'))throw 3;
+    let caught=false;try{Reflect.construct(f,[])}catch(e){caught=e instanceof TypeError}if(!caught)throw 4;
+}
+if(String.prototype.toLocaleUpperCase===String.prototype.toUpperCase)throw 5;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringTextCoercionRoots) {
+    boolean(R"JS(
+let order='',source={toString(){order+='r';return ['e','\u0301'].join('')}};
+let argument={toString(){order+='a';let garbage=[];for(let i=0;i<48;i++)garbage.push({text:'q'.repeat(i+1)});return 'NFC'}};
+if(String.prototype.normalize.call(source,argument)!=='é'||order!=='ra')throw 1;
+order='';argument.toString=function(){order+='a';let garbage=[];for(let i=0;i<48;i++)garbage.push([i,'x'.repeat(i+1)]);return '"';};
+if(String.prototype.link.call(source,argument)!=='<a href="&quot;">e\u0301</a>'||order!=='ra')throw 2;
+order='';argument.toString=function(){order+='a';let garbage=[];for(let i=0;i<48;i++)garbage.push({value:i});return 'é'};
+if(String.prototype.localeCompare.call(source,argument)!==0||order!=='ra')throw 3;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringWellFormedCoercion) {
+    boolean(R"JS(
+let count=0,receiver={toString(){count++;return '\uD800'}};
+if(String.prototype.isWellFormed.call(receiver)!==false||String.prototype.toWellFormed.call(receiver)!=='\uFFFD'||count!==2)throw 1;
+if(String.prototype.isWellFormed.call(42)!==true||String.prototype.toWellFormed.call(true)!=='true')throw 2;
+let marker={},caught=false;
+try{String.prototype.toWellFormed.call({toString(){throw marker}})}catch(e){caught=e===marker}if(!caught)throw 3;
+caught=false;try{String.prototype.isWellFormed.call(Symbol())}catch(e){caught=e instanceof TypeError}if(!caught)throw 4;
+caught=false;try{String.prototype.toWellFormed.call(undefined)}catch(e){caught=e instanceof TypeError}if(!caught)throw 5;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringWellFormedSurrogates) {
+    boolean(R"JS(
+let high='\uD83D',low='\uDCA9',pair=high+low,replacement='\uFFFD';
+if(!''.isWellFormed()||!'a💩c'.isWellFormed()||!pair.isWellFormed())throw 1;
+if(high.isWellFormed()||low.isWellFormed()||(low+high).isWellFormed())throw 2;
+if(('a'+high+'b'+low+'c').toWellFormed()!=='a'+replacement+'b'+replacement+'c')throw 3;
+if((low+high).toWellFormed()!==replacement+replacement)throw 4;
+if(pair.toWellFormed()!==pair||pair.slice(0,1).toWellFormed()!==replacement||pair.slice(1).toWellFormed()!==replacement)throw 5;
+if(('a\0'+high+low+'é').toWellFormed()!=='a\0💩é')throw 6;
+true;
+)JS");
+}
+
+// append to the existing JsMvpLmd fixture; parent owns normal and forced-GC execution.
+
+TEST_F(JsMvpLmd, ArrayCopyMethodsMetadataAndAdmission) {
+    {
+        SCOPED_TRACE("direct-and-escaped");
+        boolean(R"JS(let a = Array.of(3, 1, 2), copy = a.toSorted(), f = [].with;
+let replacement = f.call(a, 1, 9), splice = a.toSpliced(1, 1, 8);
+a.length === 3 && a[0] === 3 && copy.join(',') === '1,2,3' && replacement.join(',') === '3,9,2' && splice.join(',') === '3,8,2';)JS");
+    }
+    {
+        SCOPED_TRACE("metadata");
+        boolean(R"JS(let names = ['copyWithin', 'toSorted', 'toSpliced', 'with'], lengths = [2, 1, 2, 2], ok = true;
+for (let i = 0; i < names.length; i++) {
+  let name = names[i], f = Array.prototype[name], d = Object.getOwnPropertyDescriptor(Array.prototype, name);
+  ok = ok && typeof f === 'function' && f.name === name && f.length === lengths[i] && d.writable && d.configurable && !d.enumerable && !Object.hasOwn(f, 'prototype');
+  let threw = false; try { new f(); } catch (e) { threw = e instanceof TypeError; } ok = ok && threw;
+}
+let of = Object.getOwnPropertyDescriptor(Array, 'of');
+ok && Array.of.name === 'of' && Array.of.length === 0 && of.writable && of.configurable && !of.enumerable && !Object.hasOwn(Array.of, 'prototype');)JS");
+    }
+    {
+        SCOPED_TRACE("unscopables");
+        boolean(R"JS(let u = Array.prototype[Symbol.unscopables];
+u.copyWithin === true && u.toSorted === true && u.toSpliced === true;)JS");
+    }
+}
+
+TEST_F(JsMvpLmd, ArrayCopyWithinOverlapAndPresence) {
+    {
+        SCOPED_TRACE("overlap");
+        boolean(R"JS(let a = [1,2,3,4,5], b = [1,2,3,4,5];
+let same = a.copyWithin(1,0,4) === a && b.copyWithin(0,2) === b;
+same && a.join(',') === '1,1,2,3,4' && b.join(',') === '3,4,5,4,5';)JS");
+    }
+    {
+        SCOPED_TRACE("holes-and-inheritance");
+        boolean(R"JS(let a = [1,,3,4]; a.copyWithin(2,0,2);
+let p = {1:9}, o = Object.create(p); o.length = 3; o[0] = 1;
+let same = Array.prototype.copyWithin.call(o, 2, 1, 2) === o;
+same && a.length === 4 && a[2] === 1 && !Object.hasOwn(a,1) && !Object.hasOwn(a,3) && o[2] === 9 && Object.hasOwn(o,2);)JS");
+    }
+    {
+        SCOPED_TRACE("proxy-order");
+        boolean(R"JS(let trace = [], target = {length:3,1:7};
+let p = new Proxy(target, {
+  get(t,k,r) { trace.push('g'+k); return Reflect.get(t,k,r); },
+  has(t,k) { trace.push('h'+k); return Reflect.has(t,k); },
+  set(t,k,v,r) { trace.push('s'+k); return Reflect.set(t,k,v,r); },
+  deleteProperty(t,k) { trace.push('d'+k); return Reflect.deleteProperty(t,k); }
+});
+let result = Array.prototype.copyWithin.call(p,0,1,3);
+result === p && trace.join(',') === 'glength,h1,g1,s0,h2,d1' && target[0] === 7 && !Object.hasOwn(target,1);)JS");
+    }
+}
+
+TEST_F(JsMvpLmd, ArrayCopyWithinStrictWritesAndAbrupt) {
+    {
+        SCOPED_TRACE("readonly");
+        boolean(R"JS(let objects = [{length:2,1:9}, [1,9]], ok = true;
+for (let i=0;i<objects.length;i++) {
+  let o = objects[i]; Object.defineProperty(o,'0',{value:1,writable:false});
+  let threw=false; try { Array.prototype.copyWithin.call(o,0,1); } catch(e) { threw=e instanceof TypeError; }
+  ok = ok && threw && o[0] === 1;
+}
+ok;)JS");
+    }
+    {
+        SCOPED_TRACE("delete-and-proxy-false");
+        boolean(R"JS(let o = {length:2}; Object.defineProperty(o,'0',{value:1,configurable:false});
+let deleted=false; try { Array.prototype.copyWithin.call(o,0,1); } catch(e) { deleted=e instanceof TypeError; }
+let p = new Proxy({length:2,1:5},{set(){return false}}), set=false;
+try { Array.prototype.copyWithin.call(p,0,1); } catch(e) { set=e instanceof TypeError; }
+let q = new Proxy({length:2,0:5},{deleteProperty(){return false}}), erase=false;
+try { Array.prototype.copyWithin.call(q,0,1); } catch(e) { erase=e instanceof TypeError; }
+deleted && set && erase;)JS");
+    }
+    {
+        SCOPED_TRACE("thrown-identity");
+        boolean(R"JS(let marker = {}, source = {length:2,1:7}; Object.defineProperty(source,'0',{set(v){throw marker}});
+let caught; try { Array.prototype.copyWithin.call(source,0,1); } catch(e) { caught=e; }
+caught === marker;)JS");
+    }
+}
+
+TEST_F(JsMvpLmd, ArrayCopyWithinCoercionAndBoxing) {
+    {
+        SCOPED_TRACE("ordered-coercion");
+        boolean(R"JS(let order=[], o={0:1,1:2,2:3};
+Object.defineProperty(o,'length',{get(){order.push('length');return {valueOf(){order.push('len');return 3}}}});
+let to={valueOf(){order.push('target');return 1}}, start={valueOf(){order.push('start');o[0]=8;return 0}}, end={valueOf(){order.push('end');return 2}};
+Array.prototype.copyWithin.call(o,to,start,end);
+order.join(',') === 'length,len,target,start,end' && o[0] === 8 && o[1] === 8 && o[2] === 2;)JS");
+    }
+    {
+        SCOPED_TRACE("snapshot-and-boxing");
+        boolean(R"JS(let a=[1,2,3]; a.copyWithin({valueOf(){a.length=1;return 1}},0);
+let b=Array.prototype.copyWithin.call(true,0), empty=Array.prototype.copyWithin.call('',0);
+let threw=false;try{Array.prototype.copyWithin.call('ab',0,1)}catch(e){threw=e instanceof TypeError}
+a.length===2 && a[0]===1 && a[1]===1 && typeof b==='object' && b.valueOf()===true && empty.valueOf()==='' && threw;)JS");
+    }
+}
+
+TEST_F(JsMvpLmd, ArrayToSortedOrderingAndPresence) {
+    {
+        SCOPED_TRACE("stable-holes");
+        boolean(R"JS(let a=[3,,1,undefined,2], bad=false, calls=0;
+let r=a.toSorted((x,y)=>{calls++;bad=bad||x===undefined||y===undefined;return x-y});
+let items=[{k:1,id:'a'},{k:0,id:'b'},{k:1,id:'c'},{k:0,id:'d'}];
+let sorted=items.toSorted((x,y)=>x.k-y.k);
+r.length===5 && r[0]===1 && r[1]===2 && r[2]===3 && r[3]===undefined && r[4]===undefined && Object.hasOwn(r,3) && Object.hasOwn(r,4) && !Object.hasOwn(a,1) && calls>0 && !bad && sorted.map(x=>x.id).join('')==='bdac';)JS");
+    }
+    {
+        SCOPED_TRACE("utf16-default-and-boxing");
+        boolean(R"JS(let r=['\uE000','\uD83D\uDE00','a'].toSorted();
+let chars=Array.prototype.toSorted.call('cba'), empty=Array.prototype.toSorted.call(9);
+r[0]==='a' && r[1]==='\uD83D\uDE00' && r[2]==='\uE000' && chars.join('')==='abc' && empty.length===0;)JS");
+    }
+    {
+        SCOPED_TRACE("read-all-before-comparison");
+        boolean(R"JS(let trace=[], o={length:3};
+Object.defineProperty(o,'0',{get(){trace.push('g0');return 3}});
+Object.defineProperty(o,'1',{get(){trace.push('g1');return 1}});
+Object.defineProperty(o,'2',{get(){trace.push('g2');return 2}});
+let r=Array.prototype.toSorted.call(o,(a,b)=>{trace.push('c');return a-b});
+trace[0]==='g0' && trace[1]==='g1' && trace[2]==='g2' && trace[3]==='c' && r.join(',')==='1,2,3';)JS");
+    }
+}
+
+TEST_F(JsMvpLmd, ArrayCopyMethodsValidationAndIntrinsicResults) {
+    {
+        SCOPED_TRACE("comparator-first");
+        boolean(R"JS(let read=false, o={get length(){read=true;throw 17}}, caught;
+try{Array.prototype.toSorted.call(o,1)}catch(e){caught=e}
+caught instanceof TypeError && !read;)JS");
+    }
+    {
+        SCOPED_TRACE("ignore-species-and-constructors");
+        boolean(R"JS(let a=[3,1,2], touched=0;
+Object.defineProperty(a,'constructor',{get(){touched++;throw 1}});
+let b=a.toSorted(), c=a.toSpliced(1,1), d=a.with(0,8);
+touched===0 && Object.getPrototypeOf(b)===Array.prototype && Object.getPrototypeOf(c)===Array.prototype && Object.getPrototypeOf(d)===Array.prototype && b.join(',')==='1,2,3' && c.join(',')==='3,2' && d[0]===8;)JS");
+    }
+    {
+        SCOPED_TRACE("own-writes-bypass-prototype-setter");
+        boolean(R"JS(let a=[3,1,2], called=0, ok=false;
+Object.defineProperty(Array.prototype,'0',{get(){return 99},set(v){called++},configurable:true});
+try {
+  let b=a.toSorted(), c=a.toSpliced(1,1), d=a.with(0,8), e=Array.of(4);
+  ok=called===0 && Object.hasOwn(b,0) && b[0]===1 && c[0]===3 && d[0]===8 && e[0]===4;
+} finally { delete Array.prototype[0]; }
+ok;)JS");
+    }
+}
+
+TEST_F(JsMvpLmd, ArrayToSplicedArgumentAndReadOrder) {
+    {
+        SCOPED_TRACE("argument-count-and-holes");
+        boolean(R"JS(let a=[1,,3]; let b=a.toSpliced(), c=a.toSpliced(1), d=a.toSpliced(1,undefined,8), e=a.toSpliced(-1,Infinity,9,10);
+b.length===3 && Object.hasOwn(b,1) && b[1]===undefined && !Object.hasOwn(a,1) && c.join(',')==='1' && d.join(',')==='1,8,,3' && Object.hasOwn(d,2) && e.join(',')==='1,,9,10';)JS");
+    }
+    {
+        SCOPED_TRACE("skip-deleted-getters");
+        boolean(R"JS(let trace=[], o={length:3};
+Object.defineProperty(o,'0',{get(){trace.push('g0');return 1}});
+Object.defineProperty(o,'1',{get(){throw 29}});
+Object.defineProperty(o,'2',{get(){trace.push('g2');return 3}});
+let start={valueOf(){trace.push('start');return 1}}, count={valueOf(){trace.push('count');return 1}};
+let r=Array.prototype.toSpliced.call(o,start,count,8);
+trace.join(',')==='start,count,g0,g2' && r.join(',')==='1,8,3';)JS");
+    }
+    {
+        SCOPED_TRACE("coercion-abrupt-identity");
+        boolean(R"JS(let marker={}, countRead=false, caught;
+try{[1].toSpliced({valueOf(){throw marker}},{valueOf(){countRead=true;return 0}})}catch(e){caught=e}
+caught===marker && !countRead;)JS");
+    }
+}
+
+TEST_F(JsMvpLmd, ArrayWithBoundsAndReplacement) {
+    {
+        SCOPED_TRACE("skip-selected-getter");
+        boolean(R"JS(let reads=[], o={length:3};
+Object.defineProperty(o,'0',{get(){reads.push(0);return 1}});
+Object.defineProperty(o,'1',{get(){throw 71}});
+Object.defineProperty(o,'2',{get(){reads.push(2);return 3}});
+let r=Array.prototype.with.call(o,-2,8), chars=Array.prototype.with.call('abc',-1,'x');
+reads.join(',')==='0,2' && r.join(',')==='1,8,3' && chars.join('')==='abx';)JS");
+    }
+    {
+        SCOPED_TRACE("infinite-and-out-of-range");
+        boolean(R"JS(let bad=[Infinity,-Infinity,1e100,-1e100,3,-4], ok=true;
+for(let i=0;i<bad.length;i++){let threw=false;try{Array.prototype.with.call({length:3},bad[i],0)}catch(e){threw=e instanceof RangeError}ok=ok&&threw}
+let a=[1,,3].with(undefined,9);
+ok && a[0]===9 && a[1]===undefined && Object.hasOwn(a,1) && a[2]===3;)JS");
+    }
+}
+
+TEST_F(JsMvpLmd, ArrayCopyMethodsMaximumLengthFailures) {
+    {
+        SCOPED_TRACE("limits-before-element-reads");
+        boolean(R"JS(let read=false, huge={length:4294967296,get 0(){read=true;throw 42}}, sorted=false, spliced=false, replaced=false, overflow=false;
+try{Array.prototype.toSorted.call(huge)}catch(e){sorted=e instanceof RangeError}
+try{Array.prototype.toSpliced.call(huge,0,0)}catch(e){spliced=e instanceof RangeError}
+try{Array.prototype.with.call(huge,0,1)}catch(e){replaced=e instanceof RangeError}
+try{Array.prototype.toSpliced.call({length:9007199254740991},0,0,1)}catch(e){overflow=e instanceof TypeError}
+sorted && spliced && replaced && overflow && !read;)JS");
+    }
+    {
+        SCOPED_TRACE("bigint-and-symbol-coercion");
+        boolean(R"JS(let ok=true, inputs=[1n,Symbol('x')];
+for(let i=0;i<inputs.length;i++){
+ let a=false,b=false,c=false;try{[1].with(inputs[i],2)}catch(e){a=e instanceof TypeError}
+ try{[1].toSpliced(inputs[i],0)}catch(e){b=e instanceof TypeError}
+ try{[1].copyWithin(inputs[i],0)}catch(e){c=e instanceof TypeError}
+ ok=ok&&a&&b&&c;
+}
+ok;)JS");
+    }
+}
+
+TEST_F(JsMvpLmd, ArrayOfConstructorsAndPropertyCreation) {
+    {
+        SCOPED_TRACE("constructor-count-and-result");
+        boolean(R"JS(let seen=-1, argCount=-1;
+function C(n){seen=n;argCount=arguments.length;this.kind='custom'}
+let r=Array.of.call(C,4,5,6);
+r instanceof C && seen===3 && argCount===1 && r.length===3 && r[0]===4 && r[2]===6;)JS");
+    }
+    {
+        SCOPED_TRACE("create-data-then-set-length");
+        boolean(R"JS(let trace=[], p={set 0(v){throw 81},set length(n){trace.push('length'+n)}};
+function C(n){trace.push('ctor'+n);return Object.create(p)}
+let r=Array.of.call(C,4,5), d=Object.getOwnPropertyDescriptor(r,'0');
+trace.join(',')==='ctor2,length2' && Object.hasOwn(r,0) && r[0]===4 && r[1]===5 && !Object.hasOwn(r,'length') && d.writable && d.enumerable && d.configurable;)JS");
+    }
+    {
+        SCOPED_TRACE("nonconstructor-fallback");
+        boolean(R"JS(let plain=Array.of.call(null,4), arrow=Array.of.call(()=>{},7), empty=Array.of(), of=Array.of, detached=of(9);
+Array.isArray(plain) && plain[0]===4 && Array.isArray(arrow) && arrow[0]===7 && empty.length===0 && detached[0]===9;)JS");
+    }
+    {
+        SCOPED_TRACE("proxy-constructor-and-result");
+        boolean(R"JS(let trace=[], result={};
+let receiver=new Proxy(function(){},{construct(t,a,n){trace.push('construct'+a[0]);return new Proxy(result,{defineProperty(t,k,d){trace.push('define'+k);return Reflect.defineProperty(t,k,d)},set(t,k,v,r){trace.push('set'+k);return Reflect.set(t,k,v,r)}})}});
+let r=Array.of.call(receiver,4,5);
+trace.join(',')==='construct2,define0,define1,setlength,definelength' && r[0]===4 && result.length===2;)JS");
+    }
+}
+
+TEST_F(JsMvpLmd, ArrayOfAbruptCompletion) {
+    {
+        SCOPED_TRACE("constructor-and-define-throw");
+        boolean(R"JS(let marker={}, first,second;
+function C(){throw marker}
+try{Array.of.call(C,1)}catch(e){first=e}
+function D(){return new Proxy({},{defineProperty(){throw marker}})}
+try{Array.of.call(D,1)}catch(e){second=e}
+first===marker && second===marker;)JS");
+    }
+    {
+        SCOPED_TRACE("rejected-define-and-length");
+        boolean(R"JS(function C(){return new Proxy({},{defineProperty(){return false}})}
+let define=false;try{Array.of.call(C,1)}catch(e){define=e instanceof TypeError}
+function D(){return Object.defineProperty({},'length',{value:0,writable:false})}
+let length=false;try{Array.of.call(D,1)}catch(e){length=e instanceof TypeError}
+define && length;)JS");
+    }
+}
+
+TEST_F(JsMvpLmd, ArrayCopyMethodsScalarAndObjectOwnership) {
+    {
+        SCOPED_TRACE("callback-scalar-retention");
+        boolean(R"JS(let small=5e-324, precise=1.0000000000000002, output, source={length:2};
+Object.defineProperty(source,'0',{get(){return precise}});
+Object.defineProperty(source,'1',{set(v){source.extra=Array.of(small,small,small);output=v}});
+Array.prototype.copyWithin.call(source,1,0,1);
+let replacement={value:small}, o={length:2,get 0(){let waste=Array.of(precise,precise);return small},get 1(){return precise}};
+let a=Array.prototype.toSpliced.call(o,1,0,replacement), b=Array.prototype.with.call(o,1,replacement);
+Object.is(output,precise) && Object.is(a[0],small) && a[1]===replacement && Object.is(a[2],precise) && Object.is(b[0],small) && b[1]===replacement;)JS");
+    }
+    {
+        SCOPED_TRACE("constructor-argument-retention");
+        boolean(R"JS(let tiny=5e-324, precise=1.0000000000000002, object={tag:'kept'};
+function C(n){let waste=Array.of(9,8,7);this.count=n}
+let r=Array.of.call(C,tiny,precise,object), a=[object,{tag:'a'},{tag:'z'}];
+let sorted=a.toSorted((x,y)=>{let waste=Array.of(tiny,precise);return x.tag<y.tag?-1:x.tag>y.tag?1:0});
+Object.is(r[0],tiny) && Object.is(r[1],precise) && r[2]===object && r.count===3 && sorted[0].tag==='a' && sorted[1]===object && sorted[2].tag==='z';)JS");
+    }
+}
+
+TEST_F(JsMvpLmd, ArrayOfConstructorReturnRootAndFunction) {
+    {
+        SCOPED_TRACE("function-return");
+        boolean(R"JS(let result=function(){}; delete result.length; Object.setPrototypeOf(result,null);
+function C(n){return result}
+let r=Array.of.call(C,7,8), d=Object.getOwnPropertyDescriptor(r,'0');
+r===result && typeof r==='function' && r[0]===7 && r[1]===8 && r.length===2 && d.value===7 && d.writable && d.enumerable && d.configurable;)JS");
+    }
+    {
+        SCOPED_TRACE("proxy-descriptor-reentry");
+        boolean(R"JS(let descriptors=[], tiny=5e-324, target={}, marker={};
+function C(){return new Proxy(target,{defineProperty(t,k,d){
+  if(k!=='length') {descriptors.push(d);for(let i=0;i<24;i++){let waste=Array.of({i:i},tiny)} }
+  return Reflect.defineProperty(t,k,d);
+}})}
+let r=Array.of.call(C,tiny,marker);
+r.length===2 && Object.is(r[0],tiny) && r[1]===marker && descriptors.length===2 && Object.is(descriptors[0].value,tiny) && descriptors[1].value===marker && descriptors[0].writable && descriptors[0].enumerable && descriptors[0].configurable;)JS");
+    }
+}
+
+TEST_F(JsMvpLmd, SharedBufferConstructorAndMetadata) {
+    boolean(R"JS(
+let b=new SharedArrayBuffer(4),p=SharedArrayBuffer.prototype;
+let c=Object.getOwnPropertyDescriptor(SharedArrayBuffer,'prototype'),n=Object.getOwnPropertyDescriptor(SharedArrayBuffer,'name');
+let tag=Object.getOwnPropertyDescriptor(p,Symbol.toStringTag),s=Object.getOwnPropertyDescriptor(SharedArrayBuffer,Symbol.species);
+b.byteLength===4&&b.maxByteLength===4&&!b.growable&&b instanceof SharedArrayBuffer&&
+Object.getPrototypeOf(b)===p&&Object.getPrototypeOf(p)===Object.prototype&&Object.getPrototypeOf(SharedArrayBuffer)===Function.prototype&&
+SharedArrayBuffer.length===1&&SharedArrayBuffer.name==='SharedArrayBuffer'&&!c.writable&&!c.enumerable&&!c.configurable&&
+n.value==='SharedArrayBuffer'&&!n.writable&&!n.enumerable&&n.configurable&&
+tag.value==='SharedArrayBuffer'&&!tag.writable&&!tag.enumerable&&tag.configurable&&
+s.get.call(7)===7&&s.set===undefined&&!s.enumerable&&s.configurable&&Object.prototype.toString.call(b)==='[object SharedArrayBuffer]';
+    )JS");
+    boolean(R"JS(
+let p=SharedArrayBuffer.prototype,ok=true;
+for(let key of ['byteLength','maxByteLength','growable']){let d=Object.getOwnPropertyDescriptor(p,key);ok=ok&&typeof d.get==='function'&&d.get.length===0&&d.get.name==='get '+key&&!d.enumerable&&d.configurable&&d.set===undefined}
+for(let key of ['slice','grow']){let d=Object.getOwnPropertyDescriptor(p,key);ok=ok&&d.writable&&!d.enumerable&&d.configurable&&d.value.name===key;try{new d.value();ok=false}catch(e){ok=ok&&e instanceof TypeError}}
+ok&&p.slice.length===2&&p.grow.length===1&&p.constructor===SharedArrayBuffer;
+    )JS");
+    boolean(R"JS(
+let ok=true,coerced=0;for(let v of [undefined,null,false,NaN,-0.9])ok=ok&&new SharedArrayBuffer(v).byteLength===0;
+for(let v of [-1,Infinity,-Infinity,1e100])try{new SharedArrayBuffer(v);ok=false}catch(e){ok=ok&&e instanceof RangeError}
+try{SharedArrayBuffer({valueOf(){coerced++;return 0}});ok=false}catch(e){ok=ok&&e instanceof TypeError}
+for(let v of [1n,Symbol()])try{new SharedArrayBuffer(v);ok=false}catch(e){ok=ok&&e instanceof TypeError}
+ok&&coerced===0&&new SharedArrayBuffer('2.9').byteLength===2;
+    )JS");
+}
+TEST_F(JsMvpLmd, SharedBufferConstructorOrderAndNewTarget) {
+    boolean(R"JS(
+let order='',prototype={},F=(function(){}).bind(null);
+Object.defineProperty(F,'prototype',{get(){order+='p';return prototype}});
+let b=Reflect.construct(SharedArrayBuffer,[{valueOf(){order+='l';return 2}},{get maxByteLength(){order+='m';return {valueOf(){order+='x';return 6}}}}],F);
+let bytes=Object.getOwnPropertyDescriptor(SharedArrayBuffer.prototype,'byteLength').get;
+order==='lmxp'&&Object.getPrototypeOf(b)===prototype&&bytes.call(b)===2;
+    )JS");
+    boolean(R"JS(
+let called=0,marker={},F=(function(){}).bind(null),range=false;
+Object.defineProperty(F,'prototype',{get(){called++;throw marker}});
+try{Reflect.construct(SharedArrayBuffer,[4,{maxByteLength:2}],F)}catch(e){range=e instanceof RangeError}
+range&&called===0;
+    )JS");
+    boolean(R"JS(
+let F=(function(){}).bind(null);Object.defineProperty(F,'prototype',{value:7});
+let b=Reflect.construct(SharedArrayBuffer,[2],F),marker={},same=false;
+try{new SharedArrayBuffer(2,{get maxByteLength(){throw marker}})}catch(e){same=e===marker}
+Object.getPrototypeOf(b)===SharedArrayBuffer.prototype&&b.byteLength===2&&same&&
+!new SharedArrayBuffer(2,7).growable&&new SharedArrayBuffer(2,{maxByteLength:undefined}).maxByteLength===2;
+    )JS");
+}
+TEST_F(JsMvpLmd, SharedBufferBrandsRemainPhysical) {
+    boolean(R"JS(
+let a=new ArrayBuffer(8),s=new SharedArrayBuffer(8),errors=0;
+for(let key of ['byteLength','maxByteLength','resizable','detached']){let get=Object.getOwnPropertyDescriptor(ArrayBuffer.prototype,key).get;try{get.call(s)}catch(e){if(e instanceof TypeError)errors++}}
+for(let key of ['byteLength','maxByteLength','growable']){let get=Object.getOwnPropertyDescriptor(SharedArrayBuffer.prototype,key).get;for(let v of [a,SharedArrayBuffer.prototype,Object.create(SharedArrayBuffer.prototype),new Proxy(s,{})])try{get.call(v)}catch(e){if(e instanceof TypeError)errors++}}
+for(let key of ['slice','resize','transfer','transferToFixedLength'])try{ArrayBuffer.prototype[key].call(s)}catch(e){if(e instanceof TypeError)errors++}
+try{SharedArrayBuffer.prototype.slice.call(a)}catch(e){if(e instanceof TypeError)errors++}
+errors===21&&s.byteLength===8&&a.byteLength===8;
+    )JS");
+    boolean(R"JS(
+let b=new SharedArrayBuffer(8),d=new DataView(b),errors=0;
+d.setUint16(2,0x1234,true);for(let value of [SharedArrayBuffer.prototype,Object.create(SharedArrayBuffer.prototype),new Proxy(b,{})])try{new DataView(value)}catch(e){if(e instanceof TypeError)errors++}
+errors===3&&d.buffer===b&&d.getUint8(2)===0x34&&d.getUint16(2,true)===0x1234&&ArrayBuffer.isView(d)&&!ArrayBuffer.isView(b);
+    )JS");
+}
+TEST_F(JsMvpLmd, SharedBufferSliceBoundsAndCopies) {
+    boolean(R"JS(
+let b=new SharedArrayBuffer(6),a=new Uint8Array(b);for(let i=0;i<a.length;i++)a[i]=i+1;
+let x=b.slice(-4,-1),y=b.slice(-Infinity,Infinity);new Uint8Array(x)[0]=99;
+x.byteLength===3&&new Uint8Array(x)[1]===4&&a[2]===3&&y.byteLength===6&&new Uint8Array(y)[5]===6&&
+b.slice(Infinity).byteLength===0&&b.slice(1e100).byteLength===0&&b.slice(-1e100,2).byteLength===2&&
+b.slice(NaN,2.9).byteLength===2&&b.slice(4,1).byteLength===0;
+    )JS");
+    boolean(R"JS(
+let b=new SharedArrayBuffer(4,{maxByteLength:8}),a=new Uint8Array(b);a[1]=7;
+let copy=b.slice({valueOf(){b.grow(8);a[4]=9;return 1}});
+b.byteLength===8&&copy.byteLength===3&&copy.maxByteLength===3&&!copy.growable&&new Uint8Array(copy)[0]===7;
+    )JS");
+}
+TEST_F(JsMvpLmd, SharedBufferSliceSpeciesAndAbrupt) {
+    boolean(R"JS(
+let b=new SharedArrayBuffer(4),a=new Uint8Array(b),log='',out=new SharedArrayBuffer(6);a[1]=23;
+b.constructor={get [Symbol.species](){log+='s';return function(n){log+='c'+n;return out}}};
+let copy=b.slice({valueOf(){log+='b';return 1}},{valueOf(){log+='e';return 3}});
+copy===out&&log==='besc2'&&new Uint8Array(out)[0]===23&&new Uint8Array(out)[2]===0;
+    )JS");
+    boolean(R"JS(
+let b=new SharedArrayBuffer(4),errors=0;
+for(let v of [new ArrayBuffer(4),new SharedArrayBuffer(1),b,{},new Proxy(new SharedArrayBuffer(4),{})]){b.constructor={[Symbol.species]:function(){return v}};try{b.slice(0,2)}catch(e){if(e instanceof TypeError)errors++}}
+b.constructor={ [Symbol.species]:null };let copy=b.slice(1);
+b.constructor=undefined;let defaultCopy=b.slice(2);
+errors===5&&copy instanceof SharedArrayBuffer&&copy.byteLength===3&&defaultCopy.byteLength===2;
+    )JS");
+    boolean(R"JS(
+let marker={},b=new SharedArrayBuffer(2),errors=0;
+for(let mode of ['begin','end','constructor','species','construct']){let x=new SharedArrayBuffer(2),first=0,last=2;
+if(mode==='begin')first={valueOf(){throw marker}};if(mode==='end')last={valueOf(){throw marker}};
+if(mode==='constructor')Object.defineProperty(x,'constructor',{get(){throw marker}});
+if(mode==='species')x.constructor={get [Symbol.species](){throw marker}};
+if(mode==='construct')x.constructor={[Symbol.species]:function(){throw marker}};
+try{x.slice(first,last)}catch(e){if(e===marker)errors++}}
+errors===5;
+    )JS");
+}
+TEST_F(JsMvpLmd, SharedBufferGrowthReentryAndBounds) {
+    boolean(R"JS(
+let b=new SharedArrayBuffer(2,{maxByteLength:8}),a=new Uint8Array(b),called=0;a[0]=11;
+let empty=b.grow({valueOf(){called++;b.grow(4);return 6}}),same=b.grow(6),errors=0;
+for(let v of [5,9,-1,Infinity,1n,Symbol()])try{b.grow(v)}catch(e){if(e instanceof RangeError||e instanceof TypeError)errors++}
+empty===undefined&&same===undefined&&called===1&&errors===6&&b.growable&&b.byteLength===6&&b.maxByteLength===8&&a.length===6&&a[0]===11&&a[5]===0;
+    )JS");
+    boolean(R"JS(
+let b=new SharedArrayBuffer(2,{maxByteLength:10}),threw=false,called=0;
+try{b.grow({valueOf(){b.grow(8);return 4}})}catch(e){threw=e instanceof RangeError}
+try{new SharedArrayBuffer(2).grow({valueOf(){called++;return 2}})}catch(e){threw=threw&&e instanceof TypeError}
+let marker={},same=false;try{b.grow({valueOf(){throw marker}})}catch(e){same=e===marker}
+threw&&same&&called===0&&b.byteLength===8&&b.grow({valueOf(){b.grow(9);return 9}})===undefined&&b.byteLength===9;
+    )JS");
+}
+TEST_F(JsMvpLmd, SharedBufferViewsKeepOneHandle) {
+    boolean(R"JS(
+let b=new SharedArrayBuffer(8,{maxByteLength:24}),fixed=new Uint16Array(b,2,2),tracking=new Uint16Array(b,2),d=new DataView(b,2),fd=new DataView(b,2,2);
+let little=new Uint8Array(new Uint16Array([1]).buffer)[0]===1;fixed[0]=1234;b.grow(16);tracking[5]=4321;
+fixed.buffer===b&&tracking.buffer===b&&d.buffer===b&&fixed.length===2&&tracking.length===7&&d.byteLength===14&&fd.byteLength===2&&
+fixed[0]===1234&&d.getUint16(10,little)===4321&&new Uint8Array(b)[15]===0;
+    )JS");
+    boolean(R"JS(
+let b=new SharedArrayBuffer(8,{maxByteLength:16}),a=new BigInt64Array(b),u=new BigUint64Array(b),d=new DataView(b);
+let little=new Uint8Array(new Uint16Array([1]).buffer)[0]===1;a[0]=-2n;b.grow(16);d.setBigUint64(8,18446744073709551615n,little);
+a.length===2&&u[0]===18446744073709551614n&&a[1]===-1n&&d.byteLength===16&&d.getBigInt64(0,little)===-2n;
+    )JS");
+}
+TEST_F(JsMvpLmd, SharedBufferSubclassAndInterpretedConstruction) {
+    boolean(R"JS(
+class C extends SharedArrayBuffer{constructor(n){super(n);this.tag=7}}let b=new C(4),copy=b.slice(1);
+b instanceof C&&b instanceof SharedArrayBuffer&&b.byteLength===4&&b.tag===7&&Object.getPrototypeOf(b)===C.prototype&&
+Object.getPrototypeOf(C)===SharedArrayBuffer&&Object.getPrototypeOf(C.prototype)===SharedArrayBuffer.prototype&&copy instanceof C&&copy.byteLength===3;
+    )JS");
+    boolean(R"JS(
+let C=Function('return class C extends SharedArrayBuffer { constructor(n){super(n);this.tag=8} }')(),b=new C(3);
+b instanceof C&&b instanceof SharedArrayBuffer&&b.byteLength===3&&b.tag===8&&Function('return SharedArrayBuffer')()===SharedArrayBuffer;
+    )JS");
+}
+TEST_F(JsMvpLmd, SharedBufferCoercionRootsSurviveAllocation) {
+    boolean(R"JS(
+let b=new SharedArrayBuffer(6,{maxByteLength:12}),a=new Uint8Array(b);a[1]=17;
+function churn(){let sum=0;for(let i=0;i<40;i++){let x={text:'value'+i,nums:[i+0.125,i+0.25]};sum+=x.nums[0]}return sum}
+let first={valueOf(){churn();return 1}},end=3.9999999999;
+b.constructor={get [Symbol.species](){churn();return function(n){churn();b.grow(10);return new SharedArrayBuffer(n)}}};
+let copy=b.slice(first,end);copy.byteLength===2&&new Uint8Array(copy)[0]===17&&b.byteLength===10;
+    )JS");
+    boolean(R"JS(
+let prototype={marker:7},F=(function(){}).bind(null),order='';
+Object.defineProperty(F,'prototype',{get(){order+='p';for(let i=0;i<20;i++)new ArrayBuffer(i);return prototype}});
+let b=Reflect.construct(SharedArrayBuffer,[{valueOf(){order+='l';return 8}}],F);
+Object.getPrototypeOf(b)===prototype&&b.marker===7&&Object.getOwnPropertyDescriptor(SharedArrayBuffer.prototype,'byteLength').get.call(b)===8&&order==='lp';
+    )JS");
+}
+TEST_F(JsMvpLmd, SharedBufferHostDetachRejectsSharedStorage) {
+    MvpLmdHost host = {0, NULL, NULL, true};
+    Item result = run(R"JS(
+        let b=new SharedArrayBuffer(4),v=new Uint8Array(b),caught=false;v[0]=17;
+        try{$262.detachArrayBuffer(b)}catch(e){caught=e instanceof TypeError}
+        caught&&b.byteLength===4&&v.length===4&&v[0]===17;
+    )JS", &host);
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_BOOL);
+    EXPECT_EQ(result.item, ITEM_TRUE);
+}
+TEST_F(JsMvpLmd, SharedBufferSliceRejectsAliasedNativeDataBlock) {
+    Item pair = run(R"JS(
+        let source=new SharedArrayBuffer(4),alias=new SharedArrayBuffer(4);
+        source.constructor={[Symbol.species]:function(){return alias}};
+        [source,alias,function(){try{source.slice(0,0)}catch(e){return e instanceof TypeError}return false}];
+    )JS");
+    ASSERT_EQ(get_type_id(pair), LMD_TYPE_ARRAY);
+    RootFrame roots(2);
+    ASSERT_TRUE(roots.valid());
+    Rooted<Item> owners(roots, pair), result(roots, ItemNull);
+    JsArrayBuffer* source = js_get_arraybuffer_ptr_item(owners.get().array->items[0]);
+    JsArrayBuffer* alias = js_get_arraybuffer_ptr_item(owners.get().array->items[1]);
+    ASSERT_NE(source, nullptr);
+    ASSERT_NE(alias, nullptr);
+    ASSERT_NE(source, alias);
+    // model native interop aliases using the existing retained storage handle.
+    byte_buffer_destroy(alias);
+    ASSERT_TRUE(byte_buffer_init_storage(alias, source->storage, source->storage_offset,
+        source->byte_length, source->max_byte_length, BYTE_BUFFER_FLAG_SHARED, MEM_CAT_JS_RUNTIME));
+    ASSERT_EQ(source->storage, alias->storage);
+    result.set(mvp_lmd_class_invoke(owners.get().array->items[2],
+        Item{.item = ITEM_JS_UNDEFINED}, NULL, 0, Item{.item = ITEM_JS_UNDEFINED}));
+    ASSERT_EQ(get_type_id(result.get()), LMD_TYPE_BOOL);
+    EXPECT_EQ(result.get().item, ITEM_TRUE);
+}
+TEST_F(JsMvpLmd, SharedBufferFamilyPlanningIsOptional) {
+    numeric("let b=new ArrayBuffer(4);b.byteLength", 4);
+    MvpLmdLibraryState* library = mvp_lmd_program_library();
+    ASSERT_NE(library, nullptr);
+    EXPECT_EQ(library->shared_buffer, nullptr);
+    EXPECT_EQ(library->shared_buffer_values, nullptr);
+    numeric("let a=new Int32Array(8);a[0]=7;a[0]", 7);
+    library = mvp_lmd_program_library();
+    EXPECT_TRUE(!library || !library->shared_buffer);
+    numeric("new SharedArrayBuffer(6).byteLength", 6);
+    library = mvp_lmd_program_library();
+    ASSERT_NE(library, nullptr);
+    EXPECT_NE(library->shared_buffer, nullptr);
+    EXPECT_NE(library->shared_buffer_values, nullptr);
+}
+TEST_F(JsMvpLmd, SharedBufferPrototypeGetterAbruptPrecedesAllocation) {
+    boolean(R"JS(
+let called=0,marker={},F=(function(){}).bind(null),same=false;
+Object.defineProperty(F,'prototype',{get(){called++;throw marker}});
+try{Reflect.construct(SharedArrayBuffer,[4,{maxByteLength:8}],F)}catch(e){same=e===marker}
+same&&called===1;
+    )JS");
+}
+
+TEST_F(JsMvpLmd, StringComputedNormalize) {
+    boolean(R"JS(
+let key='nor'+'malize';
+'e\u0301'[key]()==='é';
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringComputedWellFormed) {
+    boolean(R"JS(
+let key='is'+'WellFormed';
+'x'[key]()===true&&'\uD800'[key]()===false;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringComputedHtml) {
+    boolean(R"JS(
+let key='an'+'chor';
+'x'[key]('"')==='<a name="&quot;">x</a>';
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringComputedExistingTextMethods) {
+    boolean(R"JS(
+let trim='tr'+'im',concat='con'+'cat';
+' x '[trim]()==='x'&&'a'[concat]('b')==='ab';
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringComputedLivePrototypeMethods) {
+    boolean(R"JS(
+let key='nor'+'malize',seen='';
+String.prototype.normalize=function(){'use strict';seen=typeof this;return 'changed:'+this};
+if('x'[key]()!=='changed:x'||seen!=='string')throw 1;
+delete String.prototype.normalize;
+Object.prototype.normalize=function(){'use strict';return 'inherited:'+this};
+if('y'[key]()!=='inherited:y')throw 2;
+delete Object.prototype.normalize;
+let calls=0;
+Object.defineProperty(String.prototype,key,{get(){calls++;return function(){'use strict';return this}},configurable:true});
+if('z'[key]()!=='z'||calls!==1)throw 3;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringComputedNumericIndices) {
+    boolean(R"JS(
+let text='abc',key='1',out='';
+for(let i=0;i<3;i++)out+=text[i];
+let decimal='';for(let i=0;i<3;i++)decimal+=text[''+i];
+out==='abc'&&decimal==='abc'&&text[key]==='b'&&text[1]==='b'&&text['1']==='b';
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringComputedAdmissionKeepsArrayMethods) {
+    boolean(R"JS(
+let key='copy'+'Within',a=[1,2,3];
+a[key](1,0,1)===a&&a[0]===1&&a[1]===1&&a[2]===3;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringComputedUnknownReceiver) {
+    boolean(R"JS(
+function f(s,k){return s[k]()}
+f('e\u0301','normalize')==='\u00e9';
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringComputedNumericFamilyPlanningIsOptional) {
+    boolean("let key=1;'abc'[key]==='b'");
+    MvpLmdLibraryState* library = mvp_lmd_program_library();
+    EXPECT_TRUE(!library || !library->primitives);
+    boolean("let key='1';'abc'[key]==='b'");
+    library = mvp_lmd_program_library();
+    EXPECT_TRUE(!library || !library->primitives);
+    boolean("let text='abc',out='';for(let i=0;i<3;i++)out+=text[''+i];out==='abc'");
+    library = mvp_lmd_program_library();
+    EXPECT_TRUE(!library || !library->primitives);
+    boolean(R"JS(let key='nor'+'malize';'e\u0301'[key]()==='\u00e9')JS");
+    library = mvp_lmd_program_library();
+    ASSERT_NE(library, nullptr);
+    EXPECT_NE(library->primitives, nullptr);
+}
+
+// contextual of uses the existing shared parser; keep the original Array metadata fixture unchanged.
+TEST_F(JsMvpLmd, ContextualOfBindingsAndReferences) {
+    { SCOPED_TRACE("let-var-and-reference"); boolean(R"JS(let of=1;of+=2;function local(){var of=4;return of}of===3&&local()===4;)JS"); }
+    { SCOPED_TRACE("strict-let-and-const"); boolean(R"JS('use strict';let of=3;{const of=7;if(of!==7)throw 1}of===3;)JS"); }
+    { SCOPED_TRACE("params-and-function-name"); boolean(R"JS(function of(of){return of+1}let f=(of)=>of*2;of(2)===3&&f(4)===8;)JS"); }
+    { SCOPED_TRACE("property-and-shorthand"); boolean(R"JS(let of=5;let a={of,method(of){return of+this.of}};a.of===5&&a['of']===5&&a.method(3)===8;)JS"); }
+    { SCOPED_TRACE("destructuring-bindings"); boolean(R"JS(let {of}={of:9};let [other]=[of];of===9&&other===9;)JS"); }
+}
+TEST_F(JsMvpLmd, ContextualOfForHeads) {
+    { SCOPED_TRACE("for-of-declaration"); boolean(R"JS(let total=0;for(let of of [1,2,3])total+=of;total===6;)JS"); }
+    { SCOPED_TRACE("for-of-var-and-reference"); boolean(R"JS(var of=0;for(of of [3,4]){}let total=0;for(var of of [1,2])total+=of;of===2&&total===3;)JS"); }
+    { SCOPED_TRACE("for-of-const"); boolean(R"JS(let total=0;for(const of of [2,3])total+=of;total===5;)JS"); }
+    { SCOPED_TRACE("for-c-style-and-in"); boolean(R"JS(let total=0;for(let of=0;of<3;of++)total+=of;let names='';for(let of in {a:1,b:2})names+=of;total===3&&names==='ab';)JS"); }
+    { SCOPED_TRACE("legacy-let-in"); boolean(R"JS(var let;let count=0;for(let in {a:1,b:2})count++;count===2;)JS"); }
+    { SCOPED_TRACE("ordinary-for-of-control"); boolean(R"JS(let of=[2,3],total=0;for(let value of of)total+=value;total===5;)JS"); }
+}
+TEST_F(JsMvpLmd, ContextualOfForHeadEarlyErrors) {
+    const char* sources[] = {
+        R"JS(for(let of []){})JS",
+        R"JS(for(let of values){})JS",
+        R"JS(for(let of=0 of []){})JS",
+        R"JS(for(let of,other of []){})JS",
+        R"JS(for(let let of []){})JS",
+        R"JS(for(const of=0 of []){})JS",
+    };
+    for (const char* source : sources) {
+        SCOPED_TRACE(source);
+        mvp_lmd_destroy(execution);
+        execution = mvp_lmd_execute(source, strlen(source));
+        MvpLmdFailurePhase phase; const char* type = nullptr;
+        EXPECT_NE(mvp_lmd_diagnostic(execution, &phase, &type), nullptr);
+        EXPECT_EQ(phase, MVP_LMD_PARSE_FAILURE);
+        EXPECT_STREQ(type, "SyntaxError");
+    }
+}
+
+// retain the existing ContextualOfForHeadEarlyErrors and Array metadata fixtures unchanged.
+TEST_F(JsMvpLmd, LexicalBindingLetContextControls) {
+    { SCOPED_TRACE("sloppy-var-and-function-let"); boolean(R"JS(var let=1;function f(let){return let+1}let===1&&f(2)===3;)JS"); }
+    { SCOPED_TRACE("sloppy-var-loop-let"); boolean(R"JS(var total=0;for(var let of [1,2])total+=let;var names='';for(var let in {a:1,b:2})names+=let;total===3&&names==='ab';)JS"); }
+    { SCOPED_TRACE("legacy-let-in-reference"); boolean(R"JS(var let;var n=0;for(let in {a:1,b:2})n++;n===2;)JS"); }
+    { SCOPED_TRACE("c-style-multiple-bindings"); boolean(R"JS(var sum=0;for(let a=0,b=2;a<2;a++,b++)sum+=a+b;sum===6;)JS"); }
+    { SCOPED_TRACE("ordinary-multiple-bindings"); boolean(R"JS(let of=1,other=2;const a=3,b=4;of+other+a+b===10;)JS"); }
+    { SCOPED_TRACE("let-property-key"); boolean(R"JS(let {let:value}={let:3};value===3;)JS"); }
+    { SCOPED_TRACE("let-loop-property-key"); boolean(R"JS(let total=0;for(let {let:value} of [{let:4},{let:5}])total+=value;total===9;)JS"); }
+    { SCOPED_TRACE("let-default-reference"); boolean(R"JS(var let=5;let [value=let]=[];value===5;)JS"); }
+    { SCOPED_TRACE("let-computed-key-and-default-reference"); boolean(R"JS(var let=7;let {[let]:value=let}={};value===7;)JS"); }
+    { SCOPED_TRACE("let-nested-default-function-param"); boolean(R"JS(let [f=function(let){return let}]=[];f(9)===9;)JS"); }
+    { SCOPED_TRACE("let-var-escaped-binding"); boolean(R"JS(var l\u0065t=3;let===3;)JS"); }
+    { SCOPED_TRACE("let-var-destructuring"); boolean(R"JS(var [let]=[4];let===4;)JS"); }
+    { SCOPED_TRACE("let-var-loop-destructuring"); boolean(R"JS(var total=0;for(var [let] of [[3],[4]])total+=let;total===7;)JS"); }
+    { SCOPED_TRACE("strict-property-key"); boolean(R"JS('use strict';let {let:value}={let:3};value===3;)JS"); }
+}
+TEST_F(JsMvpLmd, IterationDeclarationSingleBinding) {
+    const char* sources[] = {
+        R"JS(for(let a,b of []){})JS",
+        R"JS(for(const a,b of []){})JS",
+        R"JS(for(var a,b of []){})JS",
+        R"JS(for(let a,b in {}){})JS",
+        R"JS(for(const a,b in {}){})JS",
+        R"JS(for(var a,b in {}){})JS",
+        R"JS(for(let [a],{b} of []){})JS",
+    };
+    for (const char* source : sources) {
+        SCOPED_TRACE(source);
+        mvp_lmd_destroy(execution);
+        execution = mvp_lmd_execute(source, strlen(source));
+        MvpLmdFailurePhase phase = MVP_LMD_SUCCESS; const char* type = nullptr;
+        EXPECT_NE(mvp_lmd_diagnostic(execution, &phase, &type), nullptr);
+        EXPECT_EQ(phase, MVP_LMD_PARSE_FAILURE);
+        EXPECT_STREQ(type, "SyntaxError");
+    }
+}
+TEST_F(JsMvpLmd, LexicalLetBindingNames) {
+    const char* sources[] = {
+        R"JS(let let=1;)JS",
+        R"JS(let let;)JS",
+        R"JS(const let=1;)JS",
+        R"JS(for(let let in {}){})JS",
+        R"JS(for(const let of []){})JS",
+        R"JS(for(let {x:let} of []){})JS",
+        R"JS(let [let]=[];)JS",
+        R"JS(let {a:let}={};)JS",
+        R"JS(const {a:[{b:let}]}={a:[{}]};)JS",
+        R"JS(let {...let}={};)JS",
+        R"JS(for(let [...let] of []){})JS",
+        R"JS(let l\u0065t=1;)JS",
+        R"JS(for(let \u006cet of []){})JS",
+        R"JS(for(let let=0;false;){})JS",
+        R"JS('use strict';var let=1;)JS",
+    };
+    for (const char* source : sources) {
+        SCOPED_TRACE(source);
+        mvp_lmd_destroy(execution);
+        execution = mvp_lmd_execute(source, strlen(source));
+        MvpLmdFailurePhase phase = MVP_LMD_SUCCESS; const char* type = nullptr;
+        EXPECT_NE(mvp_lmd_diagnostic(execution, &phase, &type), nullptr);
+        EXPECT_EQ(phase, MVP_LMD_PARSE_FAILURE);
+        EXPECT_STREQ(type, "SyntaxError");
+    }
+}
+
+TEST_F(JsMvpLmd, StringSubstrBounds) {
+    boolean(R"JS(
+let s='abcdef';
+if(s.substr()!==s||s.substr(undefined)!==s||s.substr(2)!=='cdef'||s.substr(2,undefined)!=='cdef')throw 1;
+if(s.substr(-2)!=='ef'||s.substr(-20,3)!=='abc'||s.substr(1.9,2.9)!=='bc'||s.substr(-2.9,1.9)!=='e')throw 2;
+if(s.substr(Infinity)!==''||s.substr(-Infinity)!==s||s.substr(1,Infinity)!=='bcdef'||s.substr(1,-Infinity)!=='')throw 3;
+if(s.substr(1e100,2)!==''||s.substr(-1e100,1e100)!==s||s.substr(1,-1e100)!=='')throw 4;
+if(s.substr(NaN,2)!=='ab'||s.substr(2,NaN)!==''||s.substr(-0,1)!=='a')throw 5;
+if(s.substr(1,null)!==''||s.substr(1,false)!==''||s.substr(1,'')!==''||s.substr(1,-1)!=='')throw 6;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringSubstrUtf16) {
+    boolean(R"JS(
+let s='a\uD83D\uDCA9b';
+if(s.substr(1,1)!=='\uD83D'||s.substr(2,1)!=='\uDCA9'||s.substr(1,2)!=='\uD83D\uDCA9')throw 1;
+if(s.substr(-2,1)!=='\uDCA9'||'\uD800x\uDC00'.substr(0,2)!=='\uD800x')throw 2;
+if('é'.substr(0,1)!=='é'||'e\u0301'.substr(1,1)!=='\u0301')throw 3;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringSubstrConversionOrder) {
+    boolean(R"JS(
+let order='',receiver={toString(){order+='r';return 'abcdef'}},start={valueOf(){order+='s';return 1}},length={valueOf(){order+='l';return 2}};
+if(String.prototype.substr.call(receiver,start,length)!=='bc'||order!=='rsl')throw 1;
+order='';
+if(''.substr(start,length)!==''||order!=='sl')throw 2;
+order='';
+if('a'.substr(Infinity,length)!==''||order!=='l')throw 3;
+order='';
+if('a'.substr(start,0)!==''||order!=='s')throw 4;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringSubstrAbruptConversion) {
+    boolean(R"JS(
+let marker={},seen=0,caught=false;
+try{String.prototype.substr.call({toString(){throw marker}},{valueOf(){seen++;return 0}})}catch(e){caught=e===marker}
+if(!caught||seen)throw 1;
+caught=false;
+try{'abc'.substr({valueOf(){throw marker}},{valueOf(){seen++;return 1}})}catch(e){caught=e===marker}
+if(!caught||seen)throw 2;
+caught=false;try{''.substr(Infinity,{valueOf(){throw marker}})}catch(e){caught=e===marker}if(!caught)throw 3;
+caught=false;try{'abc'.substr(Symbol())}catch(e){caught=e instanceof TypeError}if(!caught)throw 4;
+caught=false;try{''.substr(0,Symbol())}catch(e){caught=e instanceof TypeError}if(!caught)throw 5;
+caught=false;try{'abc'.substr(1n)}catch(e){caught=e instanceof TypeError}if(!caught)throw 6;
+caught=false;try{String.prototype.substr.call(null,0)}catch(e){caught=e instanceof TypeError}if(!caught)throw 7;
+caught=false;try{String.prototype.substr.call(undefined,0)}catch(e){caught=e instanceof TypeError}if(!caught)throw 8;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringSubstrScalarRetention) {
+    boolean(R"JS(
+let start=1.25,length=2.25;
+let receiver={toString(){start=4.75;length=5.75;for(let i=0;i<90;i++){let a=[i,{i}]}return 'abcdef'}};
+if(String.prototype.substr.call(receiver,start,length)!=='bc')throw 1;
+length=2.25;
+let coercible={valueOf(){length=5.75;for(let i=0;i<90;i++){let a=[i,{i}]}return 1}};
+if('abcdef'.substr(coercible,length)!=='bc'||length!==5.75)throw 2;
+let tiny=5e-324;
+if('abc'.substr({valueOf(){tiny=2;return 1}},tiny)!=='')throw 3;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringSubstrMetadata) {
+    boolean(R"JS(
+let f=String.prototype.substr,d=Object.getOwnPropertyDescriptor(String.prototype,'substr'),n=Object.getOwnPropertyDescriptor(f,'name'),l=Object.getOwnPropertyDescriptor(f,'length');
+if(f.name!=='substr'||f.length!==2||!d.writable||d.enumerable||!d.configurable)throw 1;
+if(n.writable||n.enumerable||!n.configurable||l.writable||l.enumerable||!l.configurable)throw 2;
+let caught=false;try{new f()}catch(e){caught=e instanceof TypeError}if(!caught)throw 3;
+if(Object.prototype.hasOwnProperty.call(f,'prototype'))throw 4;
+if(String.prototype.substr!==f)throw 5;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, StringSubstrComputedAndBorrowed) {
+    boolean(R"JS(
+let key='sub'+'str';
+if('abcdef'[key](2,2)!=='cd')throw 1;
+if(String.prototype.substr.call(12345,1,3)!=='234')throw 2;
+function f(s,k,a,b){return s[k](a,b)}
+if(f('abcdef',key,-2,1)!=='e')throw 3;
+String.prototype.substr=function(){'use strict';return 'changed:'+this};
+if('x'[key]()!=='changed:x')throw 4;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, NumberInheritedStringLocaleUpper) {
+    boolean(R"JS(
+Number.prototype.toLocaleUpperCase=String.prototype.toLocaleUpperCase;
+if(NaN.toLocaleUpperCase()!=='NAN'||Infinity.toLocaleUpperCase()!=='INFINITY'||(3.5).toLocaleUpperCase()!=='3.5')throw 1;
+if((-Infinity).toLocaleUpperCase()!=='-INFINITY'||(7).toLocaleUpperCase()!=='7')throw 2;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, NumberInheritedGetterReceiverAndOrder) {
+    boolean(R"JS(
+let order='',getterReceiver,callReceiver;
+Object.defineProperty(Number.prototype,'upper',{get(){'use strict';order+='g';getterReceiver=this;return function(arg){'use strict';order+='c';callReceiver=this;return arg}},configurable:true});
+function argument(){order+='a';delete Number.prototype.upper;return 7}
+if((3.5).upper(argument())!==7||order!=='gac'||getterReceiver!==3.5||callReceiver!==3.5)throw 1;
+Object.defineProperty(Number.prototype,'upper',{get(){'use strict';getterReceiver=this;return String.prototype.toLocaleUpperCase},configurable:true});
+if(NaN.upper()!=='NAN'||!Number.isNaN(getterReceiver))throw 2;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, NumberInheritedDataReadAndReplacement) {
+    boolean(R"JS(
+Number.prototype.extra='value';
+if((3.5).extra!=='value'||NaN.extra!=='value')throw 1;
+Number.prototype.toLocaleUpperCase=String.prototype.toLocaleUpperCase;
+let saved=NaN.toLocaleUpperCase;
+Number.prototype.toLocaleUpperCase=function(){'use strict';return typeof this};
+if(Infinity.toLocaleUpperCase()!=='number'||saved.call(NaN)!=='NAN')throw 2;
+delete Number.prototype.toLocaleUpperCase;
+Object.prototype.toLocaleUpperCase=String.prototype.toLocaleUpperCase;
+if(Infinity.toLocaleUpperCase()!=='INFINITY')throw 3;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, NumberInheritedAdmissionKeepsClosedNumericFamilyOptional) {
+    numeric("let n=3.5;n+2", 5.5);
+    MvpLmdLibraryState* library = mvp_lmd_program_library();
+    EXPECT_TRUE(!library || !library->primitives);
+    boolean("(3.5).toFixed(1)==='3.5'");
+    library = mvp_lmd_program_library();
+    EXPECT_TRUE(!library || !library->primitives);
+    boolean("Number.prototype.toLocaleUpperCase=String.prototype.toLocaleUpperCase;NaN.toLocaleUpperCase()==='NAN'");
+    library = mvp_lmd_program_library();
+    ASSERT_NE(library, nullptr);
+    EXPECT_NE(library->primitives, nullptr);
+}
+
+TEST_F(JsMvpLmd, LexicalIterationPatternBindingControls) {
+    { SCOPED_TRACE("var-array-duplicates"); boolean(R"JS(var x;for(var [x,x] of [[1,2]]){}x===2;)JS"); }
+    { SCOPED_TRACE("strict-var-array-duplicates"); boolean(R"JS('use strict';var x;for(var [x,x] of [[1,2]]){}x===2;)JS"); }
+    { SCOPED_TRACE("var-object-duplicates"); boolean(R"JS(var x;for(var {a:x,b:x} of [{a:3,b:4}]){}x===4;)JS"); }
+    { SCOPED_TRACE("var-rest-duplicates"); boolean(R"JS(var x;for(var [x,...x] of [[1,2,3]]){}x.length===2&&x[0]===2&&x[1]===3;)JS"); }
+    { SCOPED_TRACE("var-in-duplicates"); boolean(R"JS(var x;for(var [x,x] in {'ab':1}){}x==='b';)JS"); }
+    { SCOPED_TRACE("nested-lexical-targets"); boolean(R"JS(let sum=0;for(let [x,{a:y},...rest] of [[1,{a:2},3,4]])sum=x+y+rest[0]+rest[1];sum===10;)JS"); }
+    { SCOPED_TRACE("same-property-keys-distinct-targets"); boolean(R"JS(let sum=0;for(const {x:a,x:b} of [{x:3}])sum=a+b;sum===6;)JS"); }
+    { SCOPED_TRACE("default-reference-excluded"); boolean(R"JS(let sum=0;for(let [x=1,y=x] of [[]])sum=x+y;sum===2;)JS"); }
+    { SCOPED_TRACE("computed-key-references-excluded"); boolean(R"JS(let x='a',sum=0;for(const {[x]:a,[x]:b} of [{a:3}])sum=a+b;sum===6;)JS"); }
+    { SCOPED_TRACE("computed-key-bound-name-excluded"); boolean(R"JS(for(let {[x]:x} of []){}true;)JS"); }
+    { SCOPED_TRACE("default-function-names-excluded"); boolean(R"JS(let value=0;for(let [x=function(x,x){return x}] of [[]])value=x(1,2);value===2;)JS"); }
+    { SCOPED_TRACE("separate-loop-scopes"); boolean(R"JS(let x=10,total=0;for(let [x] of [[1]])total+=x;for(let [x] of [[2]])total+=x;x===10&&total===3;)JS"); }
+    { SCOPED_TRACE("contextual-of-loop-binding"); boolean(R"JS(let total=0;for(let [of] of [[2],[3]])total+=of;total===5;)JS"); }
+}
+TEST_F(JsMvpLmd, LexicalIterationPatternDuplicateEarlyErrors) {
+    const char* sources[] = {
+        R"JS(for(let [x,x] of []){})JS",
+        R"JS(for(const [x,x] of []){})JS",
+        R"JS(for(let [x,x] in {}){})JS",
+        R"JS(for(const [x,x] in {}){})JS",
+        R"JS(for(let [x,{a:x}] of []){})JS",
+        R"JS(for(const {a:[x],b:{c:x}} of []){})JS",
+        R"JS(for(let [x,...x] of []){})JS",
+        R"JS(for(const {x,...x} of []){})JS",
+        R"JS(for(let [x=0,x] of []){})JS",
+        R"JS(for(const {[key]:x,other:x} of []){})JS",
+        R"JS(for(let [x,\u0078] of []){})JS",
+        R"JS(for(let [x,...[x]] of []){})JS",
+        R"JS(let [x,x]=[];)JS",
+        R"JS(for(let [x,x]=[];false;){})JS",
+    };
+    for (const char* source : sources) {
+        SCOPED_TRACE(source);
+        mvp_lmd_destroy(execution);
+        execution = mvp_lmd_execute(source, strlen(source));
+        MvpLmdFailurePhase phase = MVP_LMD_SUCCESS; const char* type = nullptr;
+        EXPECT_NE(mvp_lmd_diagnostic(execution, &phase, &type), nullptr);
+        EXPECT_EQ(phase, MVP_LMD_PARSE_FAILURE);
+        EXPECT_STREQ(type, "SyntaxError");
+    }
+}
+
+// synthetic size pressure exercises compiler policy without changing a corpus input.
+static StrBuf* mvp_compact_entry_source(const char* prefix, const char* body,
+        const char* suffix, int reads = 64, bool open = true) {
+    StrBuf* source = strbuf_new();
+    if (!source) return NULL;
+    strbuf_append_str(source, open
+        ? "const builder=Function;let sample=builder('return {padding:1}')(),scratch=0;"
+        : "const S=String;function unknown(v){return Object.create(v)}let sample=unknown({padding:1}),scratch=0;");
+    strbuf_append_str(source, prefix);
+    strbuf_append_str(source, "for(let trip=0;trip<2;trip++){");
+    for (int i = 0; i < reads; i++) strbuf_append_str(source, "scratch=sample.padding;");
+    strbuf_append_str(source, body);
+    strbuf_append_char(source, '}');
+    strbuf_append_str(source, suffix);
+    return source;
+}
+
+TEST_F(JsMvpLmd, CompactEntryPropertyDescriptorsAndCalls) {
+    const char* cases[][3] = {
+        {"let receiver=builder('return arguments[0]')({x:1}),sum=0;",
+         "sum+=receiver.x;Object.defineProperty(receiver,'x',{get(){return 3},configurable:true});",
+         "sum===4&&scratch===1"},
+        {"let events='',receiver=builder('return arguments[0]')({}),ok=true;Object.defineProperty(receiver,'run',{get(){events+='g';return function(v){return this===receiver&&v===3}}});",
+         "ok=ok&&receiver.run((events+='a',3));", "ok&&events==='gaga'"},
+        {"let events='',target={x:7},receiver=new Proxy(target,{get(t,k,r){events+=k;return r===receiver?Reflect.get(t,k,r):0}}),sum=0;",
+         "sum+=receiver.x;", "sum===14&&events==='xx'"},
+        {"let token={keep:17},receiver=builder('return arguments[0]')({get x(){let garbage=[];for(let k=0;k<12;k++)garbage.push({k});throw token}}),caught=0;",
+         "try{receiver.x}catch(e){if(e===token&&e.keep===17)caught++}", "caught===2"},
+    };
+    for (const auto& probe : cases) {
+        StrBuf* source = mvp_compact_entry_source(probe[0], probe[1], probe[2]);
+        ASSERT_NE(source, nullptr);
+        boolean(source->str); strbuf_free(source);
+    }
+}
+
+TEST_F(JsMvpLmd, CompactEntryScalarAndSequenceOwnership) {
+    const char* cases[][3] = {
+        {"let receiver=builder('return arguments[0]')({x:5e-324}),ok=true;",
+         "let saved=receiver.x;receiver.x=7;let garbage=[];for(let k=0;k<12;k++)garbage.push({k});ok=ok&&saved===5e-324;receiver.x=5e-324;",
+         "ok"},
+        {"Object.defineProperty(Number.prototype,'small',{get:function(){'use strict';return this},configurable:true});let ok=true;",
+         "let value=builder('return arguments[0]')(trip===0?5e-324:-0),saved=value.small;let garbage=[];for(let k=0;k<12;k++)garbage.push({k});ok=ok&&(trip===0?saved===5e-324:1/saved===-Infinity);",
+         "ok"},
+        {"let values=[['x'],'\\uD83D\\uDE00'],ok=true;",
+         "let value=builder('return arguments[0]')(values[trip]);ok=ok&&(trip===0?value.length===1&&value['0']==='x':value.length===2&&value['0']==='\\uD83D'&&value['1']==='\\uDE00');",
+         "ok"},
+    };
+    for (const auto& probe : cases) {
+        StrBuf* source = mvp_compact_entry_source(probe[0], probe[1], probe[2]);
+        ASSERT_NE(source, nullptr);
+        boolean(source->str); strbuf_free(source);
+    }
+}
+
+TEST_F(JsMvpLmd, CompactEntryGlobalsAndDeferredKeys) {
+    const char* cases[][3] = {
+        {"globalThis.compactGlobal=1;let total=0;",
+         "total+=compactGlobal;Object.defineProperty(globalThis,'compactGlobal',{get(){return 3},configurable:true});",
+         "total===4"},
+        {"let events='';Object.setPrototypeOf(globalThis,new Proxy({}, {has(t,k){if(k==='compactMissing'){events+='h';return true}return false},get(t,k){if(k==='compactMissing'){events+='g';return 9}}}));let total=0;",
+         "total+=compactMissing;", "total===18&&events==='hghg'"},
+        {"let events='',caught=0;function key(){events+='k';return 0.25}",
+         "let receiver=builder('return null')();try{receiver[key()]}catch(e){if(e instanceof TypeError)caught++}",
+         "caught===2&&events==='kk'"},
+        {"let events='',receiver=builder('return arguments[0]')({get x(){events+='g';return 9}}),key={toString(){events+='k';return'x'}},total=0;",
+         "total+=receiver[key];", "total===18&&events==='kgkg'"},
+    };
+    for (const auto& probe : cases) {
+        StrBuf* source = mvp_compact_entry_source(probe[0], probe[1], probe[2]);
+        ASSERT_NE(source, nullptr);
+        boolean(source->str); strbuf_free(source);
+    }
+}
+
+TEST_F(JsMvpLmd, CompactEntryBoundsGenericCodeGrowth) {
+    size_t lines[2] = {}, outlined[2] = {};
+    for (int i = 0; i < 2; i++) {
+        StrBuf* source = mvp_compact_entry_source("", "", "scratch===1", i ? 128 : 64);
+        ASSERT_NE(source, nullptr);
+        boolean(source->str); strbuf_free(source);
+        char* mir = dump("temp/mvp_lmd_compact_entry_size.mir");
+        ASSERT_NE(mir, nullptr);
+        const char* body = strstr(mir, "mvp_lmd_program:\tfunc");
+        ASSERT_NE(body, nullptr);
+        const char* end = strstr(body, "\tendfunc");
+        ASSERT_NE(end, nullptr);
+        for (const char* at = body; at < end; at++) if (*at == '\n') lines[i]++;
+        for (const char* at = body; (at = strstr(at, ", mvp_lmd_property_read,")) && at < end; at++) outlined[i]++;
+        mem_free(mir);
+    }
+    // further sites use one call instead of duplicating a full generic decoder.
+    EXPECT_GE(outlined[0], 16u);
+    EXPECT_GE(outlined[1], outlined[0] + 64u);
+    EXPECT_LT(lines[1], lines[0] + 10000u);
+}
+
+TEST_F(JsMvpLmd, CompactEntryRetainsClosedAndFunctionEmission) {
+    StrBuf* source = mvp_compact_entry_source("", "", "scratch===1", 64, false);
+    ASSERT_NE(source, nullptr);
+    boolean(source->str); strbuf_free(source);
+    char* mir = dump("temp/mvp_lmd_compact_closed_control.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_EQ(strstr(mir, "\timport\tmvp_lmd_property_read\n"), nullptr);
+    mem_free(mir);
+
+    source = mvp_compact_entry_source("function read(value){return value.x}let receiver=builder('return {x:7}')();",
+        "if(read(receiver)!==7)throw 1;", "true");
+    ASSERT_NE(source, nullptr);
+    boolean(source->str); strbuf_free(source);
+    mir = dump("temp/mvp_lmd_compact_function_control.mir");
+    ASSERT_NE(mir, nullptr);
+    const char* body = strstr(mir, "mvp_lmd_f1:\tfunc");
+    ASSERT_NE(body, nullptr);
+    const char* end = strstr(body, "\tendfunc");
+    ASSERT_NE(end, nullptr);
+    const char* outlined = strstr(body, ", mvp_lmd_property_read,");
+    EXPECT_TRUE(!outlined || outlined > end);
+    EXPECT_NE(strstr(mir, "\timport\tmvp_lmd_property_read\n"), nullptr);
+    mem_free(mir);
+
+    boolean("const F=Function;let sample=F('return {x:7}')(),total=0;for(let i=0;i<2;i++)total+=sample.x;total===14");
+    mir = dump("temp/mvp_lmd_compact_small_control.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_EQ(strstr(mir, "\timport\tmvp_lmd_property_read\n"), nullptr);
+    mem_free(mir);
+}
+
+TEST_F(JsMvpLmd, LegacyTypedConstantNamesReuseIndexClassification) {
+    boolean("const S=String;function choose(flag){return flag?new Int32Array(2):'ab'}let value=choose(true);value[0]=-2147483648;value[1]=2147483647;typeof value['0']==='number'&&value['0']===-2147483648&&value['1']===2147483647&&value.length===2");
+    boolean("const S=String;function choose(flag){return flag?new Uint8Array(2):'ab'}let value=choose(true);value.fill(7);value['0']===7&&value['1']===7&&value['2']===undefined&&value['-0']===undefined&&value['NaN']===undefined&&value['Infinity']===undefined&&value['4294967295']===undefined&&value['9007199254740991']===undefined&&value['9007199254740992']===undefined");
+    boolean("const S=String;function choose(flag){return flag?new Float64Array(2):'ab'}let value=choose(true);value[0]=5e-324;let saved=value['0'];value[0]=7;saved===5e-324&&value.length===2");
+    boolean("function choose(flag){return flag?new Int32Array(2):'ab'}let value=choose(true);value['length']===2");
+    char* mir = dump("temp/mvp_lmd_constant_legacy_key.mir");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "\timport\tarray_num_new\n"), nullptr);
+    EXPECT_EQ(strstr(mir, "\timport\tmvp_lmd_string_key\n"), nullptr);
+    mem_free(mir);
+}
+
+TEST_F(JsMvpLmd, ImportCallGrammarPositiveControls) {
+    const struct { const char* source; JsParseMode mode; } cases[] = {
+        {R"JS(let f=()=>import('./unused.js');)JS", JS_PARSE_SCRIPT},
+        {R"JS(let f=()=>import('./unused.js',);)JS", JS_PARSE_SCRIPT},
+        {R"JS(let f=()=>import('./unused.js',{});)JS", JS_PARSE_SCRIPT},
+        {R"JS(let f=()=>import('./unused.js',{},);)JS", JS_PARSE_SCRIPT},
+        {R"JS(let f=()=>import(('./a.js','./b.js'));)JS", JS_PARSE_SCRIPT},
+        {R"JS(let f=()=>import([...['./unused.js']]);)JS", JS_PARSE_SCRIPT},
+        {R"JS(let options={};let f=()=>import('./unused.js',{...options});)JS", JS_PARSE_SCRIPT},
+        {R"JS(let f=()=>new (import('./unused.js'));)JS", JS_PARSE_SCRIPT},
+        {R"JS(let f=()=>new (import('./unused.js'))();)JS", JS_PARSE_SCRIPT},
+        {R"JS(let f=()=>new ((import('./unused.js')))();)JS", JS_PARSE_SCRIPT},
+        {R"JS(let f=()=>new (function(){return import('./unused.js')});)JS", JS_PARSE_SCRIPT},
+        {R"JS(let f=()=>({import(){}}).import(...['x']);)JS", JS_PARSE_SCRIPT},
+        {R"JS(let f=()=>({import(){}}).import('x',{},'extra');)JS", JS_PARSE_SCRIPT},
+        {R"JS(let f=()=>new import.meta.C();)JS", JS_PARSE_MODULE},
+        {R"JS(let f=()=>new import.meta['C']();)JS", JS_PARSE_MODULE},
+        {R"JS(let f=()=>new (import.meta.C)();)JS", JS_PARSE_MODULE},
+    };
+    for (const auto& test : cases) {
+        SCOPED_TRACE(test.source);
+        JsParseError error = {};
+        EXPECT_EQ(js_parser_parse_source(test.source, strlen(test.source), test.mode,
+            NULL, NULL, NULL, &error), JS_PARSE_OK) << (error.message ? error.message : "");
+    }
+}
+
+TEST_F(JsMvpLmd, ImportCallGrammarRejectsMalformedFormsAtParse) {
+    const struct { const char* source; bool module; } cases[] = {
+        {R"JS(let f=()=>{import();};)JS", false},
+        {R"JS(let f=()=>{import(/*specifier missing*/);};)JS", false},
+        {R"JS(let f=()=>{import(...['./unused.js']);};)JS", false},
+        {R"JS(let f=()=>{import('./unused.js',...[]);};)JS", false},
+        {R"JS(let f=()=>{import('./unused.js',{},'extra');};)JS", false},
+        {R"JS(let f=()=>{import('./unused.js',{},'extra',);};)JS", false},
+        {R"JS(let f=()=>{new import('./unused.js');};)JS", false},
+        {R"JS(let f=()=>{new /*comment*/ import /*comment*/ ('./unused.js');};)JS", false},
+        {R"JS(let f=()=>{new import('./unused.js').C();};)JS", false},
+        {R"JS(let f=()=>{new new import('./unused.js');};)JS", false},
+        {R"JS(function f(a=import()){})JS", false},
+        {R"JS(class C{m(){import(...[]);}})JS", false},
+        {R"JS(async function f(){await import('./unused.js',{},'extra');})JS", false},
+        {R"JS(function* f(){yield import();})JS", false},
+        {R"JS(export default ()=>import(...[]);)JS", true},
+        {R"JS(export default ()=>new import('./unused.js');)JS", true},
+    };
+    for (const auto& test : cases) {
+        SCOPED_TRACE(test.source);
+        mvp_lmd_destroy(execution);
+        MvpLmdOptions options = {"temp/import-call-syntax.mjs", test.module};
+        execution = mvp_lmd_execute_with_options(test.source, strlen(test.source), NULL, NULL, &options);
+        MvpLmdFailurePhase phase = MVP_LMD_SUCCESS;
+        const char* type = nullptr;
+        EXPECT_NE(mvp_lmd_diagnostic(execution, &phase, &type), nullptr);
+        EXPECT_EQ(phase, MVP_LMD_PARSE_FAILURE);
+        EXPECT_STREQ(type, "SyntaxError");
+    }
+}
+
+TEST_F(JsMvpLmd, ImportCallGrammarKeepsUncalledValidBodies) {
+    boolean(R"JS(let f=()=>import('./unused.js');typeof f==='function';)JS");
+    boolean(R"JS(let f=()=>import('./unused.js',);typeof f==='function';)JS");
+    boolean(R"JS(let f=()=>new (import('./unused.js'));typeof f==='function';)JS");
+    boolean(R"JS(let f=()=>({import(){return 7}}).import(...['x']);f()===7;)JS");
+}
+
+
+TEST_F(JsMvpLmd, CompactEntryGuardedCallsPreserveSemantics) {
+    const char* cases[][3] = {
+        {"function read(value){return value.x}let receiver=builder('return arguments[0]')({x:1}),total=0;",
+         "total+=read(receiver);receiver.x=3;",
+         "total===4"},
+        {"function pick(value){return value}let events='',ok=true;",
+         "let value=pick((events+='a',builder('globalThis.pick=function(){return 99}')(),3));ok=ok&&(trip===0?value===3:value===99);",
+         "ok&&events==='aa'"},
+        {"class Reader{read(value){return this.x+value}}let receiver=builder('return arguments[0]')(new Reader()),total=0;receiver.x=4;",
+         "total+=receiver.read(3);",
+         "total===14"},
+        {"function read(value){return value.x}let receiver=builder('return arguments[0]')({x:5e-324}),ok=true;",
+         "let saved=read(receiver);receiver.x=7;let garbage=[];for(let k=0;k<12;k++)garbage.push({k});ok=ok&&saved===5e-324;receiver.x=5e-324;",
+         "ok"},
+        {"function read(value){return value.x}let token={keep:17},caught=0,receiver=builder('return arguments[0]')({get x(){let garbage=[];for(let k=0;k<12;k++)garbage.push({k});throw token}});",
+         "try{read(receiver)}catch(e){if(e===token&&e.keep===17)caught++}",
+         "caught===2"},
+        {"function pick(value){return value}let events='',caught=0;builder('globalThis.pick=1')();",
+         "try{pick((events+='a',3))}catch(e){if(e instanceof TypeError)caught++}",
+         "caught===2&&events==='aa'"},
+    };
+    for (const auto& probe : cases) {
+        StrBuf* source = mvp_compact_entry_source(probe[0], probe[1], probe[2]);
+        ASSERT_NE(source, nullptr);
+        boolean(source->str); strbuf_free(source);
+    }
+}
+
+TEST_F(JsMvpLmd, CompactEntryBoundsGuardedInlineGrowth) {
+    const char* prefix = "function classify(value,n){if((Int32Array!==undefined&&value instanceof Int32Array)||(Uint8Array!==undefined&&value instanceof Uint8Array))return n+1;return n}let receiver=builder('return new Int32Array(1)')(),total=0;";
+    const int calls[] = {1, 4, 12};
+    const char* expected[] = {"total===8", "total===32", "total===96"};
+    size_t lines[3] = {}, guards[3] = {}, callee_lines[3] = {};
+    for (int i = 0; i < 3; i++) {
+        StrBuf* body = strbuf_new();
+        ASSERT_NE(body, nullptr);
+        for (int j = 0; j < calls[i]; j++) strbuf_append_str(body, "total+=classify(receiver,3);");
+        StrBuf* source = mvp_compact_entry_source(prefix, body->str, expected[i], i ? 64 : 0);
+        strbuf_free(body);
+        ASSERT_NE(source, nullptr);
+        boolean(source->str); strbuf_free(source);
+        char* mir = dump("temp/mvp_lmd_guarded_inline_size.mir");
+        ASSERT_NE(mir, nullptr);
+        const char* entry = strstr(mir, "mvp_lmd_program:\tfunc");
+        ASSERT_NE(entry, nullptr);
+        const char* end = strstr(entry, "\tendfunc");
+        ASSERT_NE(end, nullptr);
+        for (const char* at = entry; at < end; at++) if (*at == '\n') lines[i]++;
+        // lowered MIR materializes the guard target with mov before bne.
+        for (const char* at = entry; (at = strstr(at, ", mvp_lmd_f1\n")) && at < end; at++) guards[i]++;
+        const char* callee = strstr(mir, "mvp_lmd_f1:\tfunc");
+        ASSERT_NE(callee, nullptr);
+        const char* callee_end = strstr(callee, "\tendfunc");
+        ASSERT_NE(callee_end, nullptr);
+        for (const char* at = callee; at < callee_end; at++) if (*at == '\n') callee_lines[i]++;
+        mem_free(mir);
+    }
+    EXPECT_GT(guards[0], 0u);
+    EXPECT_EQ(guards[1], 0u);
+    EXPECT_EQ(guards[2], 0u);
+    EXPECT_EQ(callee_lines[1], callee_lines[2]);
+    ASSERT_GE(lines[2], lines[1]);
+    // each later call must add less code than another complete callee body.
+    EXPECT_LT(lines[2] - lines[1], (calls[2] - calls[1]) * callee_lines[2]);
+
+    StrBuf* source = mvp_compact_entry_source(
+        "function read(value){return value.x}function outer(value){return read(value)}let receiver=builder('return {x:7}')(),total=0;",
+        "total+=outer(receiver);", "total===14");
+    ASSERT_NE(source, nullptr);
+    boolean(source->str); strbuf_free(source);
+    char* mir = dump("temp/mvp_lmd_guarded_inline_function_control.mir");
+    ASSERT_NE(mir, nullptr);
+    const char* body = strstr(mir, "mvp_lmd_f2:\tfunc");
+    ASSERT_NE(body, nullptr);
+    const char* end = strstr(body, "\tendfunc");
+    ASSERT_NE(end, nullptr);
+    const char* guard = strstr(body, ", mvp_lmd_f1\n");
+    EXPECT_TRUE(guard && guard < end);
+    mem_free(mir);
+}
+
+TEST_F(JsMvpLmd, EvalEmptySourceCompletions) {
+    boolean(R"JS(
+let texts=['',' \t\v\f\r\n\u00A0\u1680\u2000\u2007\u2028\u2029\u202F\u205F\u3000\uFEFF',
+  '// arguments new.target super() \uD800\0', '/* arguments new.target super() \uD800\0 */',
+  '#!/usr/bin/env lambda\n// tail', '<!-- ignored', '\n--> ignored', '/* first */ \t // second'];
+function check(text){let retained=7;const fixed=9;let before=()=>retained+fixed;
+  if(eval(text)!==undefined||retained!==7||fixed!==9||before()!==16)throw 1;
+  if((0,eval)(text)!==undefined)throw 2;
+}
+for(let text of texts)check(text);
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, EvalCommentLineTerminatorsExecute) {
+    boolean(R"JS(
+let endings=['\n','\r','\u2028','\u2029'];
+function direct(ending){let yy=0;if(eval('//var '+ending+'yy = -1')!==-1||yy!==-1)throw 1;}
+for(let ending of endings){
+  direct(ending);globalThis.commentEvalSlot=0;
+  if((0,eval)('//var '+ending+'commentEvalSlot = -1')!==-1||commentEvalSlot!==-1)throw 2;
+}
+delete globalThis.commentEvalSlot;
+let yy=0;if(eval('/*var \n yy = -1 */')!==undefined||yy!==0)throw 3;
+if(eval('// x\n17')!==17||(0,eval)('/* x */ 19')!==19)throw 4;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, EvalCommentErrorsRemainSyntax) {
+    boolean(R"JS(
+let texts=['/*','/*/','/* never closed\n','#!/ok\n/*',' #! misplaced','\n#! misplaced','/* prefix */#! misplaced'];
+for(let source of texts){
+  let direct=false,indirect=false;
+  try{eval(source)}catch(e){direct=e instanceof SyntaxError}
+  try{(0,eval)(source)}catch(e){indirect=e instanceof SyntaxError}
+  if(!direct||!indirect)throw source;
+}
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, EvalCommentsStrictAndHostedCaller) {
+    boolean(R"JS(
+function strict(){'use strict';let local=5;const held=7;
+  if(eval('/* arguments; new.target; super(); */')!==undefined||local+held!==12)throw 1;
+  if(eval('// comment\nlocal += 1')!==6||local!==6)throw 2;
+}
+strict();
+let hosted=Function('let x=3;const y=4;if(eval("/* comment */")!==undefined||x+y!==7)throw 3;return eval("// comment\\nx=8")===8&&x===8');
+if(!hosted())throw 4;
+class C{field=eval('/* arguments super() new.target */');read(){return eval('// arguments new.target super()')}}
+let c=new C;if(c.field!==undefined||c.read()!==undefined)throw 5;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, EvalCommentsArgumentAndCalleeEffects) {
+    boolean(R"JS(
+let order='',marker={toString(){order+='c';return '/* comment */'}};
+if(eval(marker)!==marker||(0,eval)(marker)!==marker||order!=='')throw 1;
+function argument(){order+='a';return '/* comment */'}
+if(eval(argument())!==undefined||order!=='a')throw 2;
+function shadow(eval){return eval('/* comment */')}
+if(shadow(function(text){order+='s';return text.length})!==13||order!=='as')throw 3;
+let other={eval:function(text){order+='m';return text.length}};
+if(other.eval('/* comment */')!==13||order!=='asm')throw 4;
+true;
+)JS");
+}
+
+TEST_F(JsMvpLmd, EvalCommentsRepeatedUnicode) {
+    boolean(R"JS(
+let seen=0;
+for(let i=0;i<256;i++){
+  let text=String.fromCharCode(i),yy=0;
+  let result=eval('//var '+text+'yy = -1');
+  if(i===10||i===13){if(result!==-1||yy!==-1)throw i;seen++}
+  else if(result!==undefined||yy!==0)throw i;
+  if(eval('/*var '+text+'yy = -1*/')!==undefined)throw i;
+}
+seen===2;
+)JS");
+}
+
+
+TEST(JsDynamicEvalSource, BlankProofConsumesAllBytes) {
+    struct Case { const char* source; size_t length; bool blank; };
+    const Case cases[] = {
+        {"", 0, true},
+        {"\v\f\xC2\xA0\xEF\xBB\xBF", 7, true},
+        {"/*x\0y*/", 7, true},
+        {"//x\0y", 5, true},
+        {"\0", 1, false},
+        {" \0 ", 3, false},
+        {"/*x*/\0", 6, false},
+        {"/*", 2, false},
+        {"/*/", 3, false},
+        {"//x\n42", 6, false},
+        {"//x\r42", 6, false},
+        {"//x\xE2\x80\xA8" "42", 8, false},
+        {"//x\xE2\x80\xA9" "42", 8, false},
+        {"#!x", 3, true},
+        {"#!x\n/*ok*/", 10, true},
+        {" #!x", 4, false},
+        {"\n#!x", 4, false},
+        {"/*x*/#!x", 8, false},
+        {"#!x\n#!y", 7, false},
+        {"<!--x", 5, true},
+        {"\n-->x", 5, true},
+        {";", 1, false},
+        {"'directive'", 11, false},
+    };
+    EXPECT_FALSE(js_eval_source_is_blank(NULL));
+    for (const Case& entry : cases) {
+        alignas(String) char storage[sizeof(String) + 64] = {};
+        ASSERT_LT(entry.length, 64u);
+        String* source = (String*)storage;
+        source->len = (uint32_t)entry.length;
+        memcpy(source->chars, entry.source, entry.length);
+        EXPECT_EQ(js_eval_source_is_blank(source), entry.blank) << entry.source;
+    }
 }

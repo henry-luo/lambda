@@ -26,6 +26,7 @@
 #include <cstring>
 #ifndef _WIN32
 #include <setjmp.h>
+#include <errno.h>
 #include <signal.h>
 #include <unistd.h>
 #include <sys/resource.h>
@@ -1937,14 +1938,17 @@ int exec_convert(int argc, char* argv[]) {
 
 #ifndef _WIN32
 // per-script timeout support for test-batch mode
-static sigjmp_buf batch_timeout_jmp;
-static volatile sig_atomic_t batch_timeout_active = 0;
+static __thread sigjmp_buf batch_timeout_jmp;
+static __thread volatile sig_atomic_t batch_timeout_active = 0;
+// the owner is registered before handlers are installed and never changes during a batch.
+static pthread_t batch_timeout_owner;
+static __thread volatile sig_atomic_t batch_timeout_owner_thread = 0;
 
 #ifndef LAMBDA_NO_JS
 // MIR error recovery for batch mode: longjmp instead of exit(1)
-static jmp_buf mir_error_jmp;
-static volatile sig_atomic_t mir_error_active = 0;
-static char mir_error_msg[256];
+static __thread jmp_buf mir_error_jmp;
+static __thread volatile sig_atomic_t mir_error_active = 0;
+static __thread char mir_error_msg[256];
 
 static void __attribute__((noreturn)) batch_mir_error_handler(MIR_error_type_t error_type, const char *format, ...) {
     va_list ap;
@@ -1961,8 +1965,8 @@ static void __attribute__((noreturn)) batch_mir_error_handler(MIR_error_type_t e
 }
 
 // SIGSEGV/SIGBUS recovery for batch mode: catch runtime crashes in JIT code
-static sigjmp_buf batch_crash_jmp;
-static volatile sig_atomic_t batch_crash_active = 0;
+static __thread sigjmp_buf batch_crash_jmp;
+static __thread volatile sig_atomic_t batch_crash_active = 0;
 
 static void batch_crash_handler(int sig) {
     if (batch_crash_active) {
@@ -1976,7 +1980,13 @@ static void batch_crash_handler(int sig) {
 #endif // LAMBDA_NO_JS
 
 static void batch_alarm_handler(int sig) {
-    (void)sig;
+    if (!batch_timeout_owner_thread) {
+        // D5.3.6v2/D6.3.3v2: a process alarm must not jump across threads or stacks.
+        int saved_errno = errno;
+        if (pthread_kill(batch_timeout_owner, sig) != 0) _exit(124);
+        errno = saved_errno;
+        return;
+    }
     if (batch_timeout_active) {
         batch_timeout_active = 0;
         siglongjmp(batch_timeout_jmp, 1);
@@ -4582,6 +4592,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
     // Handle test-batch command: run multiple scripts in one process for test performance
     if (argc >= 2 && strcmp(argv[1], "test-batch") == 0) {
+#ifndef _WIN32
+        batch_timeout_owner = pthread_self();
+        batch_timeout_owner_thread = 1;
+#endif
         log_debug("Entering test-batch command handler");
 
         int batch_timeout = 60; // default per-script timeout in seconds
@@ -4649,8 +4663,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 sigemptyset(&sa.sa_mask);
                 sa.sa_flags = 0;
                 sigaction(SIGALRM, &sa, &old_sa);
-                batch_timeout_active = 1;
                 if (sigsetjmp(batch_timeout_jmp, 1) == 0) {
+                    batch_timeout_active = 1;
                     alarm(batch_timeout);
                     result = run_script_file(&runtime, script_path, run_main);
                     alarm(0);
@@ -4732,6 +4746,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
 #ifndef LAMBDA_NO_JS
     // Handle js-test-batch command: run multiple JS scripts in one process for test performance
     if (argc >= 2 && strcmp(argv[1], "js-test-batch") == 0) {
+#ifndef _WIN32
+        batch_timeout_owner = pthread_self();
+        batch_timeout_owner_thread = 1;
+#endif
         // file-backed Node batches still need normal process exit hooks;
         // harness/inline test262 batches opt into lifecycle suppression per test.
         js_batch_execution_mode = 0;
@@ -5167,10 +5185,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 sigemptyset(&sa.sa_mask);
                 sa.sa_flags = 0;
                 sigaction(SIGALRM, &sa, &old_sa);
-                batch_timeout_active = 1;
                 mir_error_active = 1;
                 if (setjmp(mir_error_jmp) == 0) {
                     if (sigsetjmp(batch_timeout_jmp, 1) == 0) {
+                        batch_timeout_active = 1;
                         alarm(batch_timeout);
                         uint64_t result_home = 0;
                         Item res = js_test262_execute_batch_source(&runtime,

@@ -5672,3 +5672,69 @@ run();
         runtime_cleanup(&runtime);
     }
 }
+
+TEST(JsRegExp, BuiltinQuantifiedClassReplaceUsesWideSubjectSpans) {
+    const char* cases[] = {
+        // class families.
+        R"JS(let cases=[['\\d+','é12漢34😀','é#漢#😀'],['\\D+','é12漢34😀','#12#34#'],['\\w+','éAb_漢09😀','é#漢#😀'],['\\W+','éAb_漢09😀','#Ab_#09#'],['\\s+','é\t \u00a0漢\u3000😀','é#漢#😀'],['\\S+','é\t \u00a0漢\u3000😀','#\t \u00a0#\u3000#']];let ok=true;for(let row of cases){let r=new RegExp(row[0],'g');r.lastIndex=99;ok=ok&&row[1].replace(r,'#')===row[2]&&r.lastIndex===0}ok)JS",
+        // nul surrogates.
+        R"JS(let s='\0\ud800A \udc00😀\0';s.replace(new RegExp('\\S+','g'),'#')==='# #'&&s.replace(new RegExp('\\W+','g'),'#')==='#A#'&&'\u180e\uFEFF'.replace(new RegExp('\\S+','g'),'#')==='#\uFEFF')JS",
+        // substitution templates.
+        R"JS('é 12 漢'.replace(new RegExp('\\d+','g'),"[$$][$&][$`][$'][$1][$<x>]")==='é [$][12][é ][ 漢][$1][$<x>] 漢'&&'😀12😃'.replace(new RegExp('\\d+','g'),"$`|$&|$'")==='😀😀|12|😃😃')JS",
+        // sticky legacy state.
+        R"JS(new RegExp('(x)').exec('x');let r=new RegExp('\\S+','gy');r.lastIndex=99;let out='é 漢'.replace(r,'#');out==='# 漢'&&r.lastIndex===0&&RegExp.input==='é 漢'&&RegExp.lastMatch==='é'&&RegExp.leftContext===''&&RegExp.rightContext===' 漢'&&RegExp.$1==='')JS",
+        // no match state.
+        R"JS(new RegExp('a').exec('za');let before=RegExp.lastMatch,r=new RegExp('\\S+','g');r.lastIndex=99;let s='\u00a0\u3000';s.replace(r,'#')===s&&r.lastIndex===0&&RegExp.lastMatch===before)JS",
+        // flags and anchors.
+        R"JS('é12漢34'.replace(new RegExp('\\d+','gi'),'#')==='é#漢#'&&'é\u00a0漢'.replace(new RegExp('\\s+','gi'),'#')==='é#漢'&&'é 漢'.replace(new RegExp('^\\S+','g'),'#')==='# 漢'&&'é 漢'.replace(new RegExp('\\S+$','g'),'#')==='é #')JS",
+        // own exec fallback.
+        R"JS(let r=new RegExp('\\S+','g'),calls=0;r.exec=function(s){calls++;if(calls>1)return null;let value=['z'];value.index=0;value.input=s;return value};let out='é'.replace(r,'[$&]');out==='[z]'&&calls===2)JS",
+        // prototype exec fallback.
+        R"JS(let r=new RegExp('\\S+','g'),saved=RegExp.prototype.exec,calls=0,out;try{RegExp.prototype.exec=function(s){calls++;return saved.call(this,s)};out='é'.replace(r,'#')}finally{RegExp.prototype.exec=saved}out==='#'&&calls===2)JS",
+        // lastindex writable fallback.
+        R"JS(let r=new RegExp('\\S+','g'),caught=false,coercions=0;Object.defineProperty(r,'lastIndex',{writable:false});try{'é'.replace(r,{toString(){coercions++;return '#'}})}catch(e){caught=e instanceof TypeError}caught&&coercions===1)JS",
+        // coercion rechecks exec.
+        R"JS(let r=new RegExp('\\S+','g'),calls=0,converted=0;let replacement={toString(){converted++;r.exec=function(){calls++;return null};let garbage=[];for(let i=0;i<12;i++)garbage.push({i});return '#'}};'é'.replace(r,replacement)==='é'&&converted===1&&calls===1)JS",
+        // callback utf16 indices.
+        R"JS(let seen=[],input='😀12😃34',out=input.replace(new RegExp('\\d+','g'),function(match,index,original){seen.push(index);return original===input?'#':'bad'});out==='😀#😃#'&&seen.length===2&&seen[0]===2&&seen[1]===6)JS",
+        // retained results.
+        R"JS(let out=('é'+String.fromCharCode(0)+'😀 漢').replace(new RegExp('\\S+','g'),'['+'好'+']');let legacy=RegExp.lastMatch,garbage=[];for(let i=0;i<32;i++)garbage.push({i,text:'discard'+i});out==='[好] [好]'&&legacy==='漢'&&RegExp.input==='é\0😀 漢')JS",
+        // fallback modes.
+        R"JS('😀12漢'.replace(new RegExp('\\D+','gu'),'#')==='#12#'&&'é12漢'.replace(new RegExp('\\d+','gd'),'#')==='é#漢'&&'éAb_漢09'.replace(new RegExp('\\w+','gi'),'#')==='é#漢#'&&'é\n12\n漢\n34'.replace(new RegExp('^\\d+','gm'),'#')==='é\n#\n漢\n#')JS",
+        // coercion recompile.
+        R"JS(let first=new RegExp('\\S+','g'),second=new RegExp('\\S+','g'),calls=0;let subject={toString(){calls++;first.compile('\\d+','g');return 'é12漢'}};let replacement={toString(){calls++;second.compile('\\d+','g');return '#'}};let a=first[Symbol.replace](subject,'#'),b='é12漢'.replace(second,replacement);a==='é#漢'&&b==='é#漢'&&calls===2&&first.lastIndex===0&&second.lastIndex===0)JS",
+        // multiple context templates.
+        R"JS('é1 漢2'.replace(new RegExp('\\d+','g'),"[$`|$&|$']")==='é[é|1| 漢2] 漢[é1 漢|2|]')JS",
+        // terminal empty matches.
+        R"JS(let r=new RegExp('(?:)','g');let out='ab'.replace(r,'-'),last=RegExp.lastMatch,left=RegExp.leftContext,right=RegExp.rightContext;out==='-a-b-'&&r.lastIndex===0&&last===''&&left==='ab'&&right===''&&''.replace(new RegExp('(?:)','g'),'-')==='-'&&'b'.replace(new RegExp('a*','g'),'-')==='-b-')JS",
+        // more than million runs.
+        R"JS(let count=1000003,ok=true;for(let text of ['é','a']){let input=(text+' ').repeat(count),r=new RegExp('\\S+','g'),out=input.replace(r,'#');let last=RegExp.lastMatch,left=RegExp.leftContext,right=RegExp.rightContext,original=RegExp.input;ok=ok&&out==='# '.repeat(count)&&r.lastIndex===0&&last===text&&left===input.slice(0,-2)&&right===' '&&original===input}ok)JS",
+    };
+    const char* backends[] = {"ast", "mir"};
+    const bool collect_modes[] = {false, true};
+    for (const char* backend : backends) {
+        for (bool collect : collect_modes) {
+            for (const char* source : cases) {
+                SCOPED_TRACE(backend);
+                SCOPED_TRACE(collect);
+                SCOPED_TRACE(source);
+                JsExecutionBackendScope selected(backend);
+                Runtime runtime = {};
+                runtime_init(&runtime);
+                Item setup = transpile_js_to_mir(&runtime, "0;", "regexp-wide-setup.js", NULL);
+                EXPECT_FALSE(item_is_error(setup));
+                if (!item_is_error(setup)) {
+                    gc_heap_t* gc = runtime.eval_context->heap->gc;
+                    gc_set_force_collect_interval(gc, collect ? 1 : 0);
+                    gc_set_poison_freed(gc, collect ? 1 : 0);
+                    Item result = transpile_js_to_mir(&runtime, source, "regexp-wide-replace.js", NULL);
+                    EXPECT_FALSE(item_is_error(result));
+                    if (!item_is_error(result)) EXPECT_EQ(result.item, b2it(true));
+                    gc_set_force_collect_interval(gc, 0);
+                    gc_set_poison_freed(gc, 0);
+                }
+                runtime_cleanup(&runtime);
+            }
+        }
+    }
+}

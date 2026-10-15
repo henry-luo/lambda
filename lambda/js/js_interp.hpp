@@ -68,6 +68,8 @@ Item js_interp_execute_direct_eval_source(Runtime* runtime, const char* source,
 // completes without a script. Returns true when *result holds the completion
 // or the early error that was thrown.
 bool js_eval_source_shortcut(Item code_item, bool is_direct_eval, Item* result);
+// allocation-free shared lexer proof: an empty Script has undefined completion.
+bool js_eval_source_is_blank(String* code_str);
 // Execute source in a module-private slab. `strict` distinguishes the
 // CommonJS wrapper (sloppy) from an ES module (always strict).
 Item js_interp_execute_module_source(Runtime* runtime, const char* source,

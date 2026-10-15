@@ -72,8 +72,9 @@ static uint64_t js_dataview_bigint_to_uint64(Item value) {
 const JsBufferViewOps js_buffer_view_default_ops = {
     js_to_number, js_dataview_to_bigint_value,
     [](Item owner, const char* key) { return js_get_key_cstr(owner, key); },
-    [](Item target, bool view) { return js_get_prototype_from_constructor_default(
-        target, view ? JS_CLASS_DATA_VIEW : JS_CLASS_ARRAY_BUFFER, -1); },
+    [](Item target, JsBufferViewKind kind) { return js_get_prototype_from_constructor_default(
+        target, kind == JS_BUFFER_VIEW_DATA_VIEW ? JS_CLASS_DATA_VIEW :
+            kind == JS_BUFFER_VIEW_SHARED_ARRAY_BUFFER ? JS_CLASS_SHARED_ARRAY_BUFFER : JS_CLASS_ARRAY_BUFFER, -1); },
     [](Item owner, Item prototype) { js_set_prototype(owner, prototype); return owner; },
     [](bool range, const char* message) { return range ? js_throw_range_error(message) : js_throw_type_error(message); },
     js_is_truthy,
@@ -1297,15 +1298,16 @@ static Item js_arraybuffer_wrap_item_with_prototype(JsArrayBuffer* ab,
         const JsBufferViewOps* ops = &js_buffer_view_default_ops, Item target = ItemNull) {
     if (!ab) return (Item){.item = ITEM_NULL};
     bool shared = js_arraybuffer_shared(ab);
-    RootFrame roots(2);
-    Rooted<Item> prototype_root(roots, prototype);
+    RootFrame roots(3);
+    if (!roots.valid()) return ItemError;
+    Rooted<Item> prototype_root(roots, prototype), target_root(roots, target);
     JsArrayBufferMapCarrier* carrier = (JsArrayBufferMapCarrier*)heap_calloc(
         sizeof(JsArrayBufferMapCarrier), LMD_TYPE_MAP);
     if (!carrier) return ItemNull;
     Map* m = &carrier->base;
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_ARRAYBUFFER;
-    m->type = ops->shape ? ops->shape(false, target) : js_object_type_for_class(shared
+    m->type = ops->shape ? ops->shape(shared ? JS_BUFFER_VIEW_SHARED_ARRAY_BUFFER : JS_BUFFER_VIEW_ARRAY_BUFFER, target_root.get()) : js_object_type_for_class(shared
         ? JS_CLASS_SHARED_ARRAY_BUFFER : JS_CLASS_ARRAY_BUFFER);
     if (!m->type) m->type = js_empty_object_type_map();
     m->data = NULL;
@@ -1399,13 +1401,17 @@ static Item js_arraybuffer_allocate_constructed(
         return ops->error(true, shared
             ? "Invalid shared array buffer maxByteLength" : "Invalid array buffer maxByteLength");
     }
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    // keep constructor/prototype inputs owned across backing-store preflight.
+    Rooted<Item> prototype_root(roots, prototype), target_root(roots, target);
     uint32_t flags = shared ? BYTE_BUFFER_FLAG_SHARED : BYTE_BUFFER_FLAG_NONE;
     if (options->resizable) flags |= BYTE_BUFFER_FLAG_RESIZABLE;
     JsArrayBuffer* ab = js_arraybuffer_alloc_with_options((int)options->byte_length,
         (int)options->max_byte_length, flags);
     if (!ab) return ItemError;
     Item result = js_arraybuffer_wrap_item_with_prototype(
-        ab, prototype, use_provided_prototype, ops, target);
+        ab, prototype_root.get(), use_provided_prototype, ops, target_root.get());
     if (get_type_id(result) != LMD_TYPE_MAP || !js_get_arraybuffer_ptr(result.map)) js_arraybuffer_destroy(ab);
     return result;
 }
@@ -1424,8 +1430,8 @@ JS_FORWARD_ITEM(js_arraybuffer_construct_resizable, (Item length_arg, Item optio
 JS_FORWARD_ITEM(js_sharedarraybuffer_construct_with_options, (Item length_arg, Item options_arg),
     js_construct_arraybuffer_from_options, (length_arg, options_arg, true))
 
-static Item js_construct_arraybuffer_target(Item length_arg, Item options_arg,
-        Item new_target, bool shared, const JsBufferViewOps* ops = &js_buffer_view_default_ops) {
+extern "C" Item js_construct_arraybuffer_target(Item length_arg, Item options_arg,
+        Item new_target, bool shared, const JsBufferViewOps* ops) {
     JS_ROOTS(roots,
         length_root, length_arg,
         options_root, options_arg,
@@ -1439,18 +1445,18 @@ static Item js_construct_arraybuffer_target(Item length_arg, Item options_arg,
         shared ? "Invalid shared array buffer length" : "Invalid array buffer length",
         shared ? "Invalid shared array buffer maxByteLength" : "Invalid array buffer maxByteLength",
         &options, ops));
-    prototype_root.set(shared ? js_get_prototype_from_constructor_default(
-        target_root.get(), JS_CLASS_SHARED_ARRAY_BUFFER, -1) : ops->prototype(target_root.get(), false));
+    prototype_root.set(ops->prototype(target_root.get(),
+        shared ? JS_BUFFER_VIEW_SHARED_ARRAY_BUFFER : JS_BUFFER_VIEW_ARRAY_BUFFER));
     if (item_is_error(prototype_root.get())) return prototype_root.get();
     return js_arraybuffer_allocate_constructed(
         &options, prototype_root.get(), true, shared, ops, target_root.get());
 }
 JS_FORWARD_ITEM(js_arraybuffer_construct_resizable_target,
     (Item length_arg, Item options_arg, Item new_target),
-    js_construct_arraybuffer_target, (length_arg, options_arg, new_target, false))
+    js_construct_arraybuffer_target, (length_arg, options_arg, new_target, false, &js_buffer_view_default_ops))
 JS_FORWARD_ITEM(js_sharedarraybuffer_construct_with_options_target,
     (Item length_arg, Item options_arg, Item new_target),
-    js_construct_arraybuffer_target, (length_arg, options_arg, new_target, true))
+    js_construct_arraybuffer_target, (length_arg, options_arg, new_target, true, &js_buffer_view_default_ops))
 
 extern "C" Item js_arraybuffer_construct_with_ops(Item length, Item options,
         Item target, const JsBufferViewOps* ops) {
@@ -1642,7 +1648,10 @@ static Item js_arraybuffer_slice_species(Item source, JsArrayBuffer* source_buff
     JsArrayBuffer* destination = get_type_id(result.get()) == LMD_TYPE_MAP ? js_get_arraybuffer_ptr(result.get().map) : NULL;
     if (!destination || js_arraybuffer_shared(destination) != shared || js_arraybuffer_detached(destination))
         return ops->error(false, "ArrayBuffer species returned an invalid buffer");
-    if (result.get().item == owner.get().item) return ops->error(false, "ArrayBuffer species returned the same buffer");
+    source_buffer = js_get_arraybuffer_ptr(owner.get().map);
+    // shared species must allocate a distinct data block, even for another carrier.
+    if (result.get().item == owner.get().item || (shared && destination->storage == source_buffer->storage))
+        return ops->error(false, "ArrayBuffer species returned the same buffer");
     if (js_arraybuffer_length(destination) < new_len) return ops->error(false, "ArrayBuffer species returned a buffer that is too small");
     source_buffer = js_get_arraybuffer_ptr(owner.get().map);
     // species callbacks can detach or resize the source; acquire raw pointers only after revalidation.
@@ -1657,15 +1666,20 @@ static Item js_arraybuffer_slice_species(Item source, JsArrayBuffer* source_buff
     return result.get();
 }
 
-extern "C" Item js_arraybuffer_slice_with_ops(Item val, Item begin_item, Item end_item, int argc, const JsBufferViewOps* ops) {
+extern "C" Item js_arraybuffer_slice_kernel(Item val, Item begin_item, Item end_item,
+        int argc, bool shared, const JsBufferViewOps* ops) {
     if (get_type_id(val) != LMD_TYPE_MAP || !js_get_arraybuffer_ptr(val.map))
         return ops->error(false, "ArrayBuffer.prototype.slice requires an ArrayBuffer");
-    if (js_arraybuffer_shared(js_get_arraybuffer_ptr(val.map))) {
-        return ops->error(false, "ArrayBuffer.prototype.slice requires that |this| not be a SharedArrayBuffer");
+    if (js_arraybuffer_shared(js_get_arraybuffer_ptr(val.map)) != shared) {
+        return ops->error(false, shared ? "SharedArrayBuffer.prototype.slice requires a SharedArrayBuffer" :
+            "ArrayBuffer.prototype.slice requires that |this| not be a SharedArrayBuffer");
     }
     RootFrame roots(3);
     if (!roots.valid()) return ItemError;
-    Rooted<Item> owner(roots, val), first(roots, begin_item), last(roots, end_item);
+    uint64_t homes[2] = {};
+    // the first conversion can reenter and replace the second argument's scalar home.
+    Rooted<Item> owner(roots, val), first(roots, lambda_item_adopt_scalar_home(begin_item, &homes[0])),
+        last(roots, lambda_item_adopt_scalar_home(end_item, &homes[1]));
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     if (!ab) return (Item){.item = ITEM_NULL};
     if (js_arraybuffer_detached(ab)) {
@@ -1679,14 +1693,19 @@ extern "C" Item js_arraybuffer_slice_with_ops(Item val, Item begin_item, Item en
         Item converted = js_arraybuffer_slice_index(first.get(), source_length, &begin, ops);
         if (item_is_error(converted)) return converted;
     }
-    if (argc > 1 && get_type_id(end_item) != LMD_TYPE_UNDEFINED) {
+    if (argc > 1 && get_type_id(last.get()) != LMD_TYPE_UNDEFINED) {
         Item converted = js_arraybuffer_slice_index(last.get(), source_length, &end, ops);
         if (item_is_error(converted)) return converted;
     }
     if (end < begin) end = begin;
     int new_len = end - begin;
 
-    return js_arraybuffer_slice_species(owner.get(), ab, begin, new_len, false, ops);
+    return js_arraybuffer_slice_species(owner.get(), ab, begin, new_len, shared, ops);
+}
+
+extern "C" Item js_arraybuffer_slice_with_ops(Item val, Item begin, Item end,
+        int argc, const JsBufferViewOps* ops) {
+    return js_arraybuffer_slice_kernel(val, begin, end, argc, false, ops);
 }
 
 extern "C" Item js_arraybuffer_slice_items(Item val, Item begin, Item end, int argc) {
@@ -1722,65 +1741,41 @@ extern "C" bool js_arraybuffer_is_detached(Item val) {
 JS_FORWARD_ITEM(js_sharedarraybuffer_construct, (Item length_arg), js_sharedarraybuffer_construct_with_options, (length_arg, (Item){.item = ITEM_JS_UNDEFINED}))
 
 extern "C" bool js_is_sharedarraybuffer(Item val) {
-    if (!js_object_has_class(val, JS_CLASS_SHARED_ARRAY_BUFFER)) return false;
+    if (!js_is_arraybuffer(val)) return false;
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(val.map);
     return js_arraybuffer_shared(ab);
 }
 
-extern "C" Item js_sharedarraybuffer_operation(Item sab,
-        JsSharedArrayBufferOperation operation, Item* args, int argc) {
-    if (!js_is_sharedarraybuffer(sab)) return js_throw_type_error("SharedArrayBuffer method requires a SharedArrayBuffer receiver");
-    RootFrame roots(1);
-    Rooted<Item> buffer_root(roots, sab);
+extern "C" Item js_sharedarraybuffer_operation_with_ops(Item sab,
+        JsSharedArrayBufferOperation operation, Item* args, int argc, const JsBufferViewOps* ops) {
+    if (!js_is_sharedarraybuffer(sab)) return ops->error(false, "SharedArrayBuffer method requires a SharedArrayBuffer receiver");
+    if (operation == JS_SHARED_ARRAY_BUFFER_SLICE) return js_arraybuffer_slice_kernel(sab,
+        argc ? args[0] : make_js_undefined(), argc > 1 ? args[1] : make_js_undefined(), argc, true, ops);
+    RootFrame roots(2);
+    if (!roots.valid()) return ItemError;
+    uint64_t argument_home = 0;
+    Rooted<Item> buffer_root(roots, sab), argument(roots, lambda_item_adopt_scalar_home(
+        argc ? args[0] : make_js_undefined(), &argument_home));
     JsArrayBuffer* ab = js_get_arraybuffer_ptr(buffer_root.get().map);
     if (!ab) return ItemNull;
 
-    // slice(begin, end)
-    if (operation == JS_SHARED_ARRAY_BUFFER_SLICE) {
-        int source_length = js_arraybuffer_length(ab);
-        int begin = 0, end = source_length;
-        if (argc > 0) {
-            JS_ASSIGN_OR_RETURN(b, js_to_number(args[0]));
-            begin = (int)(get_type_id(b) == LMD_TYPE_FLOAT ? it2d(b) : (double)it2i(b));
-            if (begin < 0) begin = source_length + begin;
-            if (begin < 0) begin = 0;
-            if (begin > source_length) begin = source_length;
-        }
-        if (argc > 1 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) {
-            JS_ASSIGN_OR_RETURN(e, js_to_number(args[1]));
-            end = (int)(get_type_id(e) == LMD_TYPE_FLOAT ? it2d(e) : (double)it2i(e));
-            if (end < 0) end = source_length + end;
-            if (end < 0) end = 0;
-            if (end > source_length) end = source_length;
-        }
-        if (end < begin) end = begin;
-        int new_len = end - begin;
-
-        ab = js_get_arraybuffer_ptr(buffer_root.get().map);
-        if (!ab || js_arraybuffer_detached(ab)) {
-            return js_throw_type_error("SharedArrayBuffer is detached");
-        }
-        return js_arraybuffer_slice_species(buffer_root.get(), ab, begin, new_len, true);
-    }
-
     if (operation == JS_SHARED_ARRAY_BUFFER_GROW) {
-        if (!js_arraybuffer_resizable(ab)) return js_throw_type_error("SharedArrayBuffer is not growable");
-        Item new_length_item = argc > 0 ? args[0] : (Item){.item = ITEM_JS_UNDEFINED};
+        if (!js_arraybuffer_resizable(ab)) return ops->error(false, "SharedArrayBuffer is not growable");
         int new_length = 0;
-        JS_ASSIGN_OR_RETURN(validation, js_to_index_int(new_length_item, &new_length, "Invalid shared array buffer length"));
+        JS_ASSIGN_OR_RETURN(validation, js_to_index_int(argument.get(), &new_length, "Invalid shared array buffer length", ops));
         ab = js_get_arraybuffer_ptr(buffer_root.get().map);
         if (!ab || js_arraybuffer_detached(ab)) {
-            return js_throw_type_error("SharedArrayBuffer is detached");
+            return ops->error(false, "SharedArrayBuffer is detached");
         }
         int current_length = js_arraybuffer_length(ab);
         if (new_length < current_length || new_length > js_arraybuffer_max_length(ab)) {
-            return js_throw_range_error("Invalid shared array buffer length");
+            return ops->error(true, "Invalid shared array buffer length");
         }
         if (new_length != current_length) {
             void* external_owner = heap_gc_external_preflight((size_t)new_length,
                 HEAP_GC_EXTERNAL_ARRAYBUFFER);
             ab = js_get_arraybuffer_ptr(buffer_root.get().map);
-            if (!ab || js_arraybuffer_detached(ab)) return js_throw_type_error("SharedArrayBuffer is detached");
+            if (!ab || js_arraybuffer_detached(ab)) return ops->error(false, "SharedArrayBuffer is detached");
             ByteStorage* previous = ab->storage;
             if (!byte_buffer_resize(ab, (size_t)new_length)) return ItemError;
             if (ab->storage != previous) {
@@ -1793,6 +1788,11 @@ extern "C" Item js_sharedarraybuffer_operation(Item sab,
     log_error("shared-array-buffer-operation: unknown operation %d",
         (int)operation);
     return ItemError;
+}
+
+extern "C" Item js_sharedarraybuffer_operation(Item sab,
+        JsSharedArrayBufferOperation operation, Item* args, int argc) {
+    return js_sharedarraybuffer_operation_with_ops(sab, operation, args, argc, &js_buffer_view_default_ops);
 }
 
 // ============================================================================
@@ -2972,7 +2972,7 @@ extern "C" Item js_dataview_construct_with_ops(Item buffer, Item offset_item, It
         // OrdinaryCreateFromConstructor, then revalidates the buffer after the
         // observable prototype lookup. Fetching the prototype in the generic
         // constructor wrapper ran user code before byteOffset.valueOf.
-        prototype_root.set(ops->prototype(new_target_root.get(), true));
+        prototype_root.set(ops->prototype(new_target_root.get(), JS_BUFFER_VIEW_DATA_VIEW));
         if (item_is_error(prototype_root.get())) return prototype_root.get();
         buffer = buffer_root.get();
         ab = js_get_arraybuffer_ptr(buffer.map);
@@ -3013,7 +3013,7 @@ extern "C" Item js_dataview_construct_with_ops(Item buffer, Item offset_item, It
     Map* m = &carrier->base;
     m->type_id = LMD_TYPE_MAP;
     m->map_kind = MAP_KIND_DATAVIEW;
-    m->type = ops->shape ? ops->shape(true, new_target_root.get()) : js_object_type_for_class(JS_CLASS_DATA_VIEW);
+    m->type = ops->shape ? ops->shape(JS_BUFFER_VIEW_DATA_VIEW, new_target_root.get()) : js_object_type_for_class(JS_CLASS_DATA_VIEW);
     if (!m->type) m->type = js_empty_object_type_map();
     m->data = NULL;
     m->data_cap = 0;

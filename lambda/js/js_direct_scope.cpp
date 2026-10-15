@@ -615,6 +615,9 @@ static void direct_walk_for_of(JsTranspiler* tp, JsForOfNode* loop) {
     if (loop->left && loop->left->node_type == AST_NODE_VAR_STAM) {
         direct_walk_node(tp, loop->left);
     } else if (loop->declares_binding) {
+        // define lexical names before binding reuses entries, so duplicate targets are rejected.
+        if (loop->kind != JS_VAR_VAR)
+            direct_define_pattern(tp, loop->left, (JsVarKind)loop->kind, NULL, NULL, false);
         direct_bind_pattern(tp, loop->left, (JsVarKind)loop->kind, NULL,
             false, loop->node_type == AST_NODE_FOR_IN_STAM);
         direct_walk_pattern_defaults(tp, loop->left);

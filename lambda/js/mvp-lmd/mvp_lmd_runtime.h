@@ -3,6 +3,10 @@
 
 struct MvpLmdProgram;
 struct JsBuiltinMethodSpec;
+struct JsArrayOps;
+struct JsBufferViewOps;
+extern const JsArrayOps mvp_lmd_array_ops;
+extern const JsBufferViewOps mvp_lmd_buffer_ops;
 struct JsCollectionOps;
 struct JsCollectionStorageOps;
 extern const JsCollectionOps mvp_lmd_collection_ops;
@@ -163,6 +167,8 @@ struct MvpLmdLibraryState {
     Item* primitive_values;
     MvpLmdClass* buffers;       // optional ArrayBuffer/DataView carrier families
     Item* buffer_values;
+    MvpLmdClass* shared_buffer; // separately optional shared storage nominal family
+    Item* shared_buffer_values;
     MvpLmdClass* typed_arrays;  // twelve concrete families plus the abstract TypedArray constructor
     Item* typed_values;
     MvpLmdClass* promise;       // shared Promise carrier with optional MVP nominal metadata
@@ -291,7 +297,13 @@ enum MvpLmdMethod { LMD_METHOD_FILL = 9, LMD_METHOD_PUSH, LMD_METHOD_POP,
     LMD_METHOD_LAST_INDEX_OF, LMD_METHOD_STRING_CONCAT, LMD_METHOD_TRIM, LMD_METHOD_TRIM_START,
     LMD_METHOD_TRIM_END, LMD_METHOD_CODE_POINT_AT, LMD_METHOD_STRING_AT, LMD_METHOD_STRING_INCLUDES,
     LMD_METHOD_PAD_END, LMD_METHOD_STRING_LAST_INDEX_OF,
-    LMD_METHOD_FLAT_MAP, LMD_METHOD_FIND_LAST, LMD_METHOD_FIND_LAST_INDEX, LMD_METHOD_SEARCH, LMD_METHOD_MATCH_ALL, LMD_METHOD_COUNT };
+    LMD_METHOD_FLAT_MAP, LMD_METHOD_FIND_LAST, LMD_METHOD_FIND_LAST_INDEX, LMD_METHOD_SEARCH, LMD_METHOD_MATCH_ALL,
+    LMD_METHOD_COPY_WITHIN, LMD_METHOD_TO_SORTED, LMD_METHOD_TO_SPLICED, LMD_METHOD_WITH,
+    LMD_METHOD_STRING_NORMALIZE, LMD_METHOD_STRING_LOCALE_COMPARE, LMD_METHOD_STRING_IS_WELL_FORMED, LMD_METHOD_STRING_TO_WELL_FORMED,
+    LMD_METHOD_STRING_ANCHOR, LMD_METHOD_STRING_BIG, LMD_METHOD_STRING_BLINK, LMD_METHOD_STRING_BOLD,
+    LMD_METHOD_STRING_FIXED, LMD_METHOD_STRING_FONTCOLOR, LMD_METHOD_STRING_FONTSIZE, LMD_METHOD_STRING_ITALICS,
+    LMD_METHOD_STRING_LINK, LMD_METHOD_STRING_SMALL, LMD_METHOD_STRING_STRIKE, LMD_METHOD_STRING_SUB,
+    LMD_METHOD_STRING_SUP, LMD_METHOD_STRING_SUBSTR, LMD_METHOD_COUNT };
 static inline bool mvp_lmd_array_visit_method(int method) {
     return method == LMD_METHOD_FOREACH || method == LMD_METHOD_ARRAY_MAP || method == LMD_METHOD_FILTER ||
         method == LMD_METHOD_REDUCE || method == LMD_METHOD_SOME || method == LMD_METHOD_EVERY ||

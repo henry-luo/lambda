@@ -1396,9 +1396,9 @@ static bool js_parser_parser_has_for_head_pattern(JsParser* parser) {
 static bool js_parser_parser_starts_let_declaration(JsParser* parser,
         bool allow_line_terminator) {
     if (!parser || parser->current.kind != JS_TOK_LET) return false;
-    if (parser->next.kind == JS_TOK_IN || parser->next.kind == JS_TOK_OF) {
-        return false;
-    }
+    // `of` is a binding identifier, including `for (let of of iterable)`;
+    // only `in` selects the legacy expression head `for (let in object)`.
+    if (parser->next.kind == JS_TOK_IN) return false;
     // ExpressionStatement excludes `let [` even across a line terminator.
     if (!allow_line_terminator && parser->next.line_terminator_before &&
             parser->next.kind != JS_TOK_LBRACKET) {
@@ -1722,6 +1722,13 @@ static bool js_parser_parse_primary(JsParser* parser, SourceSpan* js_parser_span
                     JS_REDUCTION_TOKEN, span, first, target, 0, 0);
             }
         } else {
+            // an import call is not a constructor primary; parentheses and import.meta retain their own paths.
+            if (parser->current.kind == JS_TOK_IMPORT &&
+                    parser->next.kind == JS_TOK_LPAREN) {
+                ok = js_parser_parser_fail(parser, JS_PARSE_ERROR_CONTEXT,
+                    "new cannot directly construct an import call", JS_TOK_IDENTIFIER);
+                break;
+            }
             SourceSpan callee_span;
             ok = js_parser_parse_primary(parser, &callee_span);
             // Member access binds into a constructor target before the
@@ -1811,6 +1818,11 @@ static bool js_parser_parse_primary(JsParser* parser, SourceSpan* js_parser_span
             bool has_spread = false;
             if (ok) ok = js_parser_parse_arguments(parser, &argument_count,
                 &has_spread);
+            // import calls admit a specifier and optional options expression, never spread arguments.
+            if (ok && (argument_count < 1 || argument_count > 2 || has_spread)) {
+                ok = js_parser_parser_fail(parser, JS_PARSE_ERROR_CONTEXT,
+                    "import requires one or two arguments without spread", JS_TOK_RPAREN);
+            }
             if (ok) {
                 span = js_parser_span_from_start(first, parser->previous.span);
                 ok = js_parser_parser_reduce(parser, JS_REDUCE_EXPRESSION,
@@ -2695,6 +2707,12 @@ static bool js_parser_parse_variable_declaration(JsParser* parser, bool in_for) 
         }
         declarator_count++;
         if (!js_parser_parser_accept(parser, JS_TOK_COMMA)) break;
+    }
+    // iteration heads have one binding; the loop AST only retains that declarator.
+    if (in_for && declarator_count != 1 &&
+            (parser->current.kind == JS_TOK_IN || parser->current.kind == JS_TOK_OF)) {
+        return js_parser_parser_fail(parser, JS_PARSE_ERROR_CONTEXT,
+            "iteration declaration requires exactly one binding", JS_TOK_RPAREN);
     }
     if (!in_for && !js_parser_parse_semicolon(parser)) return false;
     SourceSpan declaration_span = js_parser_span_from_start(first, parser->previous.span);
