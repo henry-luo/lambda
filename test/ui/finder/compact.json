@@ -1,0 +1,16 @@
+{
+  "name": "Finder compact icon and list layouts",
+  "html": "test/demo/finder/finder.ls",
+  "viewport": {"width": 520, "height": 640},
+  "events": [
+    {"type":"advance_time","ms":70},
+    {"type":"assert_script","js":"document.getElementById('files').getBoundingClientRect().width>350 && document.getElementById('files').getBoundingClientRect().height>350"},
+    {"type":"click","target":{"selector":"[data-name='Welcome.md']"}},
+    {"type":"key_press","key":"space"},
+    {"type":"assert_text","target":{"selector":"#look-body pre"},"contains":"A place for everything."},
+    {"type":"key_press","key":"escape"},
+    {"type":"click","target":{"selector":"#list"}},
+    {"type":"assert_script","js":"Array.from(document.querySelectorAll('#files .file')).every(e=>e.getBoundingClientRect().width<=document.getElementById('files').getBoundingClientRect().width)"},
+    {"type":"capture_surface","source":"page","file":"temp/finder/compact.png"}
+  ]
+}
