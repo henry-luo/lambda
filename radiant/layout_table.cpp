@@ -713,6 +713,11 @@ static bool table_cell_has_baseline_line(ViewTableCell* cell) {
 static void table_note_cell_content_extent(TableCellContentExtent* extent,
                                            float top, float bottom) {
     if (!extent) return;
+    if (extent->windowed) {
+        if (bottom <= extent->window_top || top >= extent->window_bottom) return;
+        top = max(top, extent->window_top);
+        bottom = min(bottom, extent->window_bottom);
+    }
     if (!extent->has_content || top < extent->min_y) {
         extent->min_y = top;
     }
@@ -1711,9 +1716,15 @@ static void table_cell_alignment_line_metrics(LayoutContext* lycon,
 
 static TableCellContentExtent table_cell_vertical_bounds(LayoutContext* lycon,
                                                          ViewTableCell* tcell,
-                                                         bool include_margins = false) {
+                                                         bool include_margins = false,
+                                                         const TableCellContentExtent* window = nullptr) {
     TableCellContentExtent bounds = {};
     bounds.min_y = 1e9f;
+    if (window) {
+        bounds.windowed = true;
+        bounds.window_top = window->window_top;
+        bounds.window_bottom = window->window_bottom;
+    }
     if (!tcell) return bounds;
     float cell_line_height = 0.0f;
     bool cell_line_height_is_normal = false;
@@ -1748,6 +1759,9 @@ static TableCellContentExtent table_cell_vertical_bounds(LayoutContext* lycon,
                 return;
             }
             TableCellContentExtent inline_bounds = {};
+            inline_bounds.windowed = bounds.windowed;
+            inline_bounds.window_top = bounds.window_top;
+            inline_bounds.window_bottom = bounds.window_bottom;
             table_collect_inline_line_box_extent(
                 child, cell_line_height, cell_line_height_is_normal,
                 cell_font_size, tcell->font, &inline_bounds);
@@ -1775,6 +1789,24 @@ static TableCellContentExtent table_cell_vertical_bounds(LayoutContext* lycon,
     return bounds;
 }
 
+bool layout_table_cell_content_extent(LayoutContext* lycon, ViewTableCell* cell,
+        float window_top, float window_bottom, float* min_y, float* max_y) {
+    TableCellContentExtent window = {};
+    window.window_top = window_top;
+    window.window_bottom = window_bottom;
+    TableCellContentExtent bounds = table_cell_vertical_bounds(lycon, cell, true, &window);
+    if (!bounds.has_content) return false;
+    *min_y = bounds.min_y;
+    *max_y = bounds.max_y;
+    return true;
+}
+
+TableCellInsets layout_table_cell_alignment_insets(ViewTableCell* cell) {
+    ViewTable* table = get_parent_table(cell);
+    bool border_collapse = table && table->tb && table->tb->border_collapse;
+    return table_cell_content_insets(cell, border_collapse);
+}
+
 float layout_table_cell_vertical_align_target(int valign, float content_area_height,
                                               float content_height, float content_start_y,
                                               bool clamp_to_content) {
@@ -1800,9 +1832,7 @@ static void apply_cell_vertical_align(LayoutContext* lycon, ViewTableCell* tcell
     if (tcell->td->vertical_align == TableCellProp::CELL_VALIGN_BASELINE) {
         return;
     }
-    ViewTable* table = get_parent_table(tcell);
-    bool border_collapse = table && table->tb && table->tb->border_collapse;
-    TableCellInsets insets = table_cell_content_insets(tcell, border_collapse);
+    TableCellInsets insets = layout_table_cell_alignment_insets(tcell);
     float cell_content_area = cell_height - insets.border.top - insets.border.bottom -
                               insets.padding.top - insets.padding.bottom;
     float content_start_y = insets.border.top + insets.padding.top;
@@ -4878,6 +4908,19 @@ static int table_row_metadata_index_from_row(ViewTableRow* trow, int fallback_in
     return fallback_index;
 }
 
+// metadata numbers rows in source order (analyze_table_structure), while the
+// flow places them in visual order with the header group first and the footer
+// group last; a row's own index keeps a footer authored before the body from
+// taking another row's height
+static int table_row_source_index(ViewTable* table, ViewTableRow* trow) {
+    int index = table_row_metadata_index_from_row(trow, -1);
+    if (index >= 0) return index;
+    int current = 0;
+    for (ViewTableRow* row = table->first_row(); row; row = table->next_row(row), current++)
+        if (row == trow) return current;
+    return -1;
+}
+
 static int table_row_metadata_index(ViewBlock* row, int fallback_index) {
     if (!row || row->view_type != RDT_VIEW_TABLE_ROW) return fallback_index;
     return table_row_metadata_index_from_row(
@@ -5815,7 +5858,8 @@ static bool table_layout_flow_row(LayoutContext* lycon, ViewTable* table,
                                   int* global_row_index, float* current_y,
                                   float row_spacing, float* group_content_end_y) {
     if (!table || !meta || !trow || !row || !global_row_index || !current_y) return false;
-    int row_idx = *global_row_index;
+    int row_idx = table_row_source_index(table, trow);
+    if (row_idx < 0) row_idx = *global_row_index;
     bool is_collapsed = row_idx < meta->row_count && meta->row_collapsed[row_idx];
     if (is_collapsed) {
         table_place_collapsed_row(
@@ -7310,8 +7354,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 lycon, table, child, &group_has_percent_height);
             group->each_row_with_block( [&](ViewTableRow* trow, ViewBlock* row) {
                 // CSS 2.1 §17.5.3: If row group has percentage height, mark all its rows
-                if (group_has_percent_height && global_row_index < meta->row_count) {
-                    meta->row_has_percent_height[global_row_index] = true;
+                int source_row = table_row_source_index(table, trow);
+                if (group_has_percent_height && source_row >= 0 && source_row < meta->row_count) {
+                    meta->row_has_percent_height[source_row] = true;
                 }
                 table_layout_flow_row(
                     lycon, table, meta, trow, row, true, group_start_y, child->width,

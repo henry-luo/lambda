@@ -1165,6 +1165,20 @@ protected:
         }
         return table;
     }
+    // a table built under `parent` for the page flow gates: header and footer groups
+    // with one row each and `rows` body rows
+    DomElement* flow_table(DomElement* parent, size_t rows, DomElement** header_row, DomElement** footer_row,
+            DomElement** body) {
+        DomElement* table = block(nullptr, "table-layout: fixed; width: 100%; border-spacing: 0", "table", parent);
+        DomElement* head = table ? block(nullptr, "background-color: #cce0ff", "thead", table) : nullptr;
+        DomElement* foot = head ? block(nullptr, "background-color: #ddffdd", "tfoot", table) : nullptr;
+        *body = foot ? block(nullptr, nullptr, "tbody", table) : nullptr;
+        if (!*body || !table_rows(head, 1, "Head A", "Head B") || !table_rows(foot, 1, "Foot A", "Foot B") ||
+            !table_rows(*body, rows)) return nullptr;
+        *header_row = head->first_child->as_element();
+        *footer_row = foot->first_child->as_element();
+        return table;
+    }
     DomElement* rowspan_table(DomElement** spanning, DomElement** lower) {
         DomElement* table = block(nullptr, "table-layout: fixed; width: 100%; border-spacing: 0", "table");
         DomElement* group = table ? block(nullptr, nullptr, "tbody", table) : nullptr;
@@ -3758,7 +3772,8 @@ TEST_F(SecondaryViewTest, FixedTablesBreakBetweenRowsAndRepeatSourceGroupsWithou
         ASSERT_EQ(state->occurrence_count, 3u); size_t page = 0;
         for (LayoutViewNode* fragment = state->first_occurrence; fragment; fragment = fragment->next_occurrence) {
             EXPECT_EQ(occurrence_page(fragment), ++page);
-            EXPECT_EQ(fragment->role, page == 1 ? VIEW_FRAGMENT_BODY : VIEW_FRAGMENT_REPEATED_TABLE);
+            // the header's own row opens the table and the footer's own row ends it
+            EXPECT_EQ(fragment->role, page == (group == header ? 1u : 3u) ? VIEW_FRAGMENT_BODY : VIEW_FRAGMENT_REPEATED_TABLE);
             EXPECT_FLOAT_EQ(fragment->rect.height, 18.0f);
         }
     }
@@ -16682,6 +16697,180 @@ TEST_F(SecondaryViewTest, PagedFlowBreaksAreStrutsOverTheContinuousLayout) {
             };
             check(body, check);
         }
+    }
+}
+
+// the fragments of a source element on one page, in occurrence order
+static size_t page_occurrences(ViewTree* tree, DomNode* node, uint32_t page, LayoutViewNode** found, size_t capacity) {
+    ViewNodeState* state = view_tree_node_state(tree, node, false);
+    size_t count = 0;
+    for (LayoutViewNode* occurrence = state ? state->first_occurrence.get() : nullptr; occurrence; occurrence = occurrence->next_occurrence)
+        if (occurrence_page(occurrence) == page && count < capacity) found[count++] = occurrence;
+    return count;
+}
+
+// body rows of 18px: 10px/12px text, 2px padding, 1px border; the fixture root is a margin-free p
+static const char* paged_flow_table_css =
+    "p { margin: 0 } td { font: 10px/12px Arial; padding: 2px; border: 1px solid black; vertical-align: top }";
+
+// P3 gate: a table breaks between rows; its header group repeats at the top of
+// each continuation and its footer group closes each fragment right below the
+// last body row, the footer's own occurrence ending the table; body rows occur once
+TEST_F(SecondaryViewTest, PagedFlowBreaksTablesBetweenRowsAndRepeatsTheirGroups) {
+    StrBuf* css = strbuf_new(); ASSERT_NE(css, nullptr);
+    strbuf_append_format(css, "@page { size: 240px 140px; margin: 10px } %s", paged_flow_table_css);
+    stylesheet(css->str); strbuf_free(css);
+    DomElement* header = nullptr; DomElement* footer = nullptr; DomElement* body = nullptr;
+    ASSERT_NE(flow_table(source, 9, &header, &footer, &body), nullptr);
+    ViewTree* tree = secondary();
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 3u);
+    const size_t rows_on[] = {4, 4, 1};
+    DomNode* row = body->first_child;
+    for (uint32_t page = 1; page <= 3; page++) {
+        SCOPED_TRACE(::testing::Message() << "page " << page);
+        LayoutViewNode* found[4] = {};
+        // the header row opens the page: the body occurrence first, then its repeats
+        ASSERT_EQ(page_occurrences(tree, header, page, found, 4), 1u);
+        EXPECT_EQ(found[0]->role, page == 1 ? VIEW_FRAGMENT_BODY : VIEW_FRAGMENT_REPEATED_TABLE);
+        EXPECT_FLOAT_EQ(found[0]->rect.y, 10.0f); EXPECT_FLOAT_EQ(found[0]->rect.height, 18.0f);
+        float y = 28.0f;
+        for (size_t i = 0; i < rows_on[page - 1]; i++, row = row->next_sibling) {
+            ASSERT_NE(row, nullptr);
+            ViewNodeState* state = view_tree_node_state(tree, row, false); ASSERT_NE(state, nullptr);
+            ASSERT_EQ(state->occurrence_count, 1u);
+            EXPECT_EQ(occurrence_page(state->first_occurrence), page);
+            EXPECT_FLOAT_EQ(state->first_occurrence->rect.y, y);
+            y += 18.0f;
+        }
+        // the footer row follows the page's last body row; the last page holds its own occurrence
+        ASSERT_EQ(page_occurrences(tree, footer, page, found, 4), 1u);
+        EXPECT_EQ(found[0]->role, page == 3 ? VIEW_FRAGMENT_BODY : VIEW_FRAGMENT_REPEATED_TABLE);
+        EXPECT_FLOAT_EQ(found[0]->rect.y, y); EXPECT_FLOAT_EQ(found[0]->rect.height, 18.0f);
+    }
+    EXPECT_EQ(row, nullptr);
+    // the footer's occurrences follow the pages
+    ViewNodeState* state = view_tree_node_state(tree, footer, false); ASSERT_NE(state, nullptr);
+    uint32_t page = 0;
+    for (LayoutViewNode* occurrence = state->first_occurrence; occurrence; occurrence = occurrence->next_occurrence)
+        EXPECT_EQ(occurrence_page(occurrence), ++page);
+}
+
+// a row taller than the space a fresh page keeps for body rows continues inside
+// its cells: the lines past the break move below the repeated header, the row
+// grows by the continuation, and every byte of the cell text occurs once
+TEST_F(SecondaryViewTest, PagedFlowContinuesTallTableRowsInsideTheirCells) {
+    StrBuf* css = strbuf_new(); ASSERT_NE(css, nullptr);
+    strbuf_append_format(css, "@page { size: 240px 100px; margin: 10px } %s .tall { white-space: pre-wrap; orphans: 1; widows: 1 }",
+        paged_flow_table_css);
+    stylesheet(css->str); strbuf_free(css);
+    DomElement* header = nullptr; DomElement* footer = nullptr; DomElement* body = nullptr;
+    ASSERT_NE(flow_table(source, 0, &header, &footer, &body), nullptr);
+    DomElement* row = block(nullptr, nullptr, "tr", body); ASSERT_NE(row, nullptr);
+    DomElement* tall = block("A\nB\nC\nD\nE\nF", nullptr, "td", row); ASSERT_NE(tall, nullptr);
+    ASSERT_TRUE(tall->set_attribute("class", "tall"));
+    ASSERT_NE(block("Side", nullptr, "td", row), nullptr);
+    ViewTree* tree = secondary();
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    // the body keeps 80 - 18 (footer) below the header: three lines fit on each page
+    LayoutViewNode* cells[2] = {};
+    ASSERT_EQ(page_occurrences(tree, tall, 1, cells, 2), 1u);
+    ASSERT_EQ(page_occurrences(tree, tall, 2, cells + 1, 1), 1u);
+    EXPECT_TRUE(cells[0]->first_fragment); EXPECT_FALSE(cells[0]->last_fragment);
+    EXPECT_FALSE(cells[1]->first_fragment); EXPECT_TRUE(cells[1]->last_fragment);
+    EXPECT_FLOAT_EQ(cells[1]->rect.y, 28.0f);
+    DomText* text = tall->first_child->as_text();
+    ViewNodeState* state = view_tree_node_state(tree, text, false); ASSERT_NE(state, nullptr);
+    size_t bytes = 0, lines[2] = {};
+    for (LayoutViewNode* part = state->first_occurrence; part; part = part->next_occurrence) {
+        EXPECT_EQ(part->text_start, bytes); bytes += part->text_length;
+        uint32_t page = occurrence_page(part);
+        ASSERT_GE(page, 1u); ASSERT_LE(page, 2u);
+        if (part->text_length && part->text_length < 3) lines[page - 1]++;
+        // continued lines sit below the repeated header, inside their cell's slice
+        EXPECT_GE(part->rect.y, cells[page - 1]->rect.y - 0.01f);
+        EXPECT_LE(part->rect.y + part->rect.height, cells[page - 1]->rect.y + cells[page - 1]->rect.height + 0.01f);
+    }
+    EXPECT_EQ(bytes, text->length);
+    EXPECT_EQ(lines[0], 3u); EXPECT_EQ(lines[1], 3u);
+    // the repeated footer closes page 1 right below the cell slice; the footer's own row ends the table
+    LayoutViewNode* found[2] = {};
+    ASSERT_EQ(page_occurrences(tree, footer, 1, found, 2), 1u);
+    EXPECT_EQ(found[0]->role, VIEW_FRAGMENT_REPEATED_TABLE);
+    EXPECT_FLOAT_EQ(found[0]->rect.y, cells[0]->rect.y + cells[0]->rect.height);
+    ASSERT_EQ(page_occurrences(tree, header, 2, found, 2), 1u);
+    EXPECT_EQ(found[0]->role, VIEW_FRAGMENT_REPEATED_TABLE);
+}
+
+// row and group break properties: a forced break before a row starts a page with
+// the header repeated, and a row group under break-inside: avoid moves whole
+TEST_F(SecondaryViewTest, PagedFlowTableRowsHonorForcedBreaksAndGroupAvoidance) {
+    StrBuf* css = strbuf_new(); ASSERT_NE(css, nullptr);
+    strbuf_append_format(css, "@page { size: 240px 140px; margin: 10px } %s .forced { break-before: page } "
+        ".kept { break-inside: avoid }", paged_flow_table_css);
+    stylesheet(css->str); strbuf_free(css);
+    DomElement* header = nullptr; DomElement* footer = nullptr; DomElement* body = nullptr;
+    DomElement* table = flow_table(source, 2, &header, &footer, &body);
+    ASSERT_NE(table, nullptr);
+    ASSERT_TRUE(body->first_child->next_sibling->as_element()->set_attribute("class", "forced"));
+    DomElement* kept = block(nullptr, nullptr, "tbody", table); ASSERT_NE(kept, nullptr);
+    ASSERT_TRUE(kept->set_attribute("class", "kept"));
+    ASSERT_TRUE(table_rows(kept, 4, "Kept A", "Kept B"));
+    ViewTree* tree = secondary();
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 3u);
+    // page 1: the first body row; page 2: the forced row (the kept group cannot
+    // follow it whole); page 3: the kept group below the repeated header
+    ViewNodeState* first = view_tree_node_state(tree, body->first_child, false);
+    ViewNodeState* forced = view_tree_node_state(tree, body->first_child->next_sibling, false);
+    ASSERT_NE(first, nullptr); ASSERT_NE(forced, nullptr);
+    EXPECT_EQ(occurrence_page(first->first_occurrence), 1u);
+    EXPECT_EQ(occurrence_page(forced->first_occurrence), 2u);
+    EXPECT_FLOAT_EQ(forced->first_occurrence->rect.y, 28.0f);
+    float y = 28.0f;
+    for (DomNode* row = kept->first_child; row; row = row->next_sibling, y += 18.0f) {
+        ViewNodeState* state = view_tree_node_state(tree, row, false); ASSERT_NE(state, nullptr);
+        EXPECT_EQ(occurrence_page(state->first_occurrence), 3u);
+        EXPECT_FLOAT_EQ(state->first_occurrence->rect.y, y);
+    }
+    ViewNodeState* repeats = view_tree_node_state(tree, header, false); ASSERT_NE(repeats, nullptr);
+    EXPECT_EQ(repeats->occurrence_count, 3u);
+}
+
+// a table that broke inside a box which then moves whole (break-inside: avoid)
+// returns to the geometry layout_table gave it and breaks again at its new
+// place: on a fresh page it fits, with one occurrence per group and row
+TEST_F(SecondaryViewTest, PagedFlowRestoresATableBeforeBreakingItAgain) {
+    StrBuf* css = strbuf_new(); ASSERT_NE(css, nullptr);
+    strbuf_append_format(css, "@page { size: 240px 140px; margin: 10px } %s", paged_flow_table_css);
+    stylesheet(css->str); strbuf_free(css);
+    ASSERT_NE(block(nullptr, "height: 60px"), nullptr);
+    DomElement* keep = block(nullptr, "break-inside: avoid"); ASSERT_NE(keep, nullptr);
+    DomElement* header = nullptr; DomElement* footer = nullptr; DomElement* body = nullptr;
+    DomElement* table = flow_table(keep, 3, &header, &footer, &body);
+    ASSERT_NE(table, nullptr);
+    ViewTree* tree = secondary();
+    PagedLayoutOptions options = paged_layout_options_default(); PagedLayoutDiagnostic diagnostic = {};
+    ASSERT_EQ(layout_secondary_view(tree, &options, &diagnostic), TYPESET_OK) << diagnostic.reason;
+    ASSERT_EQ(tree->model->page_count, 2u);
+    EXPECT_FLOAT_EQ(table->height, 90.0f);
+    for (DomElement* group : {header, footer}) {
+        ViewNodeState* state = view_tree_node_state(tree, group, false); ASSERT_NE(state, nullptr);
+        EXPECT_EQ(state->occurrence_count, 1u);
+        EXPECT_EQ(occurrence_page(state->first_occurrence), 2u);
+    }
+    ViewNodeState* state = view_tree_node_state(tree, header, false);
+    EXPECT_FLOAT_EQ(state->first_occurrence->rect.y, 10.0f);
+    float y = 28.0f;
+    for (DomNode* row = body->first_child; row; row = row->next_sibling, y += 18.0f) {
+        ViewNodeState* rows = view_tree_node_state(tree, row, false); ASSERT_NE(rows, nullptr);
+        ASSERT_EQ(rows->occurrence_count, 1u);
+        EXPECT_EQ(occurrence_page(rows->first_occurrence), 2u);
+        EXPECT_FLOAT_EQ(rows->first_occurrence->rect.y, y);
     }
 }
 
