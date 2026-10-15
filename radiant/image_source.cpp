@@ -3,6 +3,7 @@
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lib/str.h"
 #include "../lib/strbuf.h"
+#include "../lib/image.h"
 #include <math.h>
 
 static bool image_source_space(char c) {
@@ -15,9 +16,13 @@ bool layout_image_type_supported(const char* type) {
     const char* end = type;
     while (*end && *end != ';') end++;
     while (end > type && image_source_space(end[-1])) end--;
-    const char* supported[] = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"};
-    for (const char* mime : supported)
-        if (strlen(mime) == (size_t)(end - type) && strncasecmp(type, mime, end - type) == 0) return true;
+    if ((size_t)(end - type) == strlen("image/svg+xml") && strncasecmp(type, "image/svg+xml", end - type) == 0) return true;
+    for (unsigned codec = IMAGE_CODEC_PNG; codec <= IMAGE_CODEC_ICO; codec++) {
+        const ImageCapabilities* capabilities = image_codec_capabilities((ImageCodecFormat)codec);
+        const char* mime = capabilities->mime;
+        if (capabilities->read && mime && strlen(mime) == (size_t)(end - type) &&
+            strncasecmp(type, mime, end - type) == 0) return true;
+    }
     return false;
 }
 

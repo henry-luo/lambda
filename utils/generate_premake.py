@@ -53,7 +53,8 @@ def glob_premake_paths(pattern: str) -> List[str]:
 class PremakeGenerator:
     def __init__(self, config_path: str = "build_lambda_config.json", explicit_platform: str = None, variant: str = None,
                  linux_multiarch_triplet: Optional[str] = None,
-                 linux_pkg_config_includes: Optional[List[str]] = None):
+                 linux_pkg_config_includes: Optional[List[str]] = None,
+                 target_architecture: Optional[str] = None):
         """Linux toolchain facts default to probing the host gcc/pkg-config;
         passing them in lets a non-Linux host generate the Linux config for validation."""
         with open(config_path, 'r', encoding='utf-8') as f:
@@ -112,6 +113,12 @@ class PremakeGenerator:
                                       'MINGW' in current_platform or
                                       self.config.get('platform') == 'Windows')
 
+        architecture = (target_architecture or platform.machine()).lower()
+        self.target_architecture = {
+            'aarch64': 'arm64', 'amd64': 'x86_64', 'x64': 'x86_64'
+        }.get(architecture, architecture)
+        self._resolve_source_sets()
+
         if self.use_macos_config:
             self._prepare_macos_archive_without_members()
 
@@ -127,6 +134,19 @@ class PremakeGenerator:
         if self.use_linux_config:
             self._resolve_linux_multiarch_paths(linux_multiarch_triplet)
         self.external_libraries = self._parse_external_libraries()
+
+    def _resolve_source_sets(self) -> None:
+        """Resolve JSON-owned source/flag groups for the selected native target."""
+        system = ('windows' if self.use_windows_config else
+                  'linux' if self.use_linux_config else 'macos')
+        for target in self.config.get('targets', []):
+            for group in target.get('source_sets', []):
+                if system not in group.get('platforms', [system]):
+                    continue
+                if self.target_architecture not in group.get('architectures', [self.target_architecture]):
+                    continue
+                for key in ('source_files', 'includes', 'defines', 'file_rules'):
+                    target.setdefault(key, []).extend(group.get(key, []))
 
     def _resolve_linux_multiarch_paths(self, triplet: Optional[str] = None) -> None:
         """Resolve Debian archive paths for the given triplet, else the native compiler target."""
@@ -276,9 +296,11 @@ class PremakeGenerator:
             if 'name' in lib:
                 libraries[lib['name']] = {
                     'include': lib.get('include', ''),
+                    'includes': lib.get('includes', []),
                     'lib': lib.get('lib', ''),
                     'optional': lib.get('optional', False),
-                    'link': lib.get('link', 'static')
+                    'link': lib.get('link', 'static'),
+                    'build_target': lib.get('build_target')
                 }
 
         # Parse global dev_libraries (development/test-only libraries)
@@ -600,6 +622,10 @@ class PremakeGenerator:
     def _get_consolidated_includes(self) -> List[str]:
         """Get consolidated include directories from global and platform-specific configurations"""
         includes = []
+
+        # Source providers expose the same headers in every executable variant.
+        for library in self.external_libraries.values():
+            includes.extend(library.get('includes', []))
 
         # Add global includes first
         global_includes = self.config.get('includes', [])
@@ -1358,6 +1384,17 @@ class PremakeGenerator:
         visit(target)
         return ordered
 
+    def _emit_library_build_dependencies(self, libraries: List[str]) -> None:
+        """Build configured source providers before consumers link their archives."""
+        providers = []
+        for name in libraries:
+            provider = self.external_libraries.get(name, {}).get('build_target')
+            if provider and provider not in providers:
+                providers.append(provider)
+        if providers:
+            self.premake_content.append(
+                '    dependson { ' + ', '.join(json.dumps(p) for p in providers) + ' }')
+
     def _generate_complex_library(self, lib: Dict[str, Any]) -> None:
         """Generate complex library with multiple source files and dependencies"""
         lib_name = lib['name']
@@ -1527,6 +1564,7 @@ class PremakeGenerator:
         # Add library-specific include if specified
         if 'include' in lib:
             all_includes.append(lib['include'])
+        all_includes.extend(lib.get('includes', []))
 
         # Add other external library includes
         for lib_name in dependencies:
@@ -2010,6 +2048,20 @@ class PremakeGenerator:
                 '    }',
                 '    '
             ])
+
+        if lib.get('optimize'):
+            self.premake_content.append(f'    optimize "{lib["optimize"]}"')
+        for rule in lib.get('file_rules', []):
+            for pattern in rule['files']:
+                self.premake_content.append(f'    filter {json.dumps("files:" + pattern)}')
+                for key, directive in (('defines', 'defines'), ('build_options', 'buildoptions'),
+                                       ('includes', 'includedirs')):
+                    values = rule.get(key, [])
+                    if values:
+                        self.premake_content.append(
+                            f'        {directive} {{ ' + ', '.join(json.dumps(v) for v in values) + ' }')
+        self.premake_content.append('    filter {}')
+        self._emit_library_build_dependencies(self._executable_external_dependencies(lib))
 
         # Add macOS frameworks for library projects
         if self.use_macos_config:
@@ -2629,7 +2681,6 @@ class PremakeGenerator:
         # Use custom target name if provided, otherwise use the project name
         if target_name:
             # Remove .exe extension and extract just the filename for targetname
-            import os
             clean_target_name = os.path.basename(target_name).replace('.exe', '')
             self.premake_content.append(f'    targetname "{clean_target_name}"')
 
@@ -2796,6 +2847,8 @@ class PremakeGenerator:
         for target_library in self._executable_external_dependencies(dependency_root):
             if target_library not in libraries:
                 libraries.append(target_library)
+
+        self._emit_library_build_dependencies(dependencies + libraries)
 
         # Add library dependencies
         self.premake_content.append('    links {')
@@ -3710,6 +3763,7 @@ class PremakeGenerator:
         ])
 
         # Add static library linkoptions
+        self._emit_library_build_dependencies(dependencies)
         static_libs = []
         debug_only_static_libs = []
         frameworks = []
@@ -4121,6 +4175,7 @@ def main():
     output_file = None  # Will be determined based on platform
     explicit_platform = None
     variant = None  # Build variant (e.g., 'cli' for headless build)
+    target_architecture = None
 
     # Parse command line arguments
     i = 1
@@ -4139,6 +4194,9 @@ def main():
             i += 2
         elif arg in ['--variant', '-v'] and i + 1 < len(sys.argv):
             variant = sys.argv[i + 1].lower()
+            i += 2
+        elif arg == '--architecture' and i + 1 < len(sys.argv):
+            target_architecture = sys.argv[i + 1].lower()
             i += 2
         elif arg.endswith('.json'):
             config_file = arg
@@ -4181,7 +4239,8 @@ def main():
     vlog(f"DEBUG: Final config_file={config_file}, output_file={output_file}, variant={variant}")
 
     # Generate Premake5 configuration
-    generator = PremakeGenerator(config_file, explicit_platform, variant)
+    generator = PremakeGenerator(config_file, explicit_platform, variant,
+                                 target_architecture=target_architecture)
     generator.parse_config()
 
     if not generator.validate_config():

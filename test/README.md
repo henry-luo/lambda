@@ -129,6 +129,12 @@ Focused targets agents commonly need (`make help` lists ~113; the Makefile has ~
 - **Packages and data:** `test-math-baseline`, `test-math-corpus`, `test-mathcmp` (Lambda PNG versus pdfLaTeX; `ARGS='--case Functions'`, see [math comparison instructions](lambda/math/README.md)), `test-graph-mermaid`, `test-graph-graphviz`, `test-graph-structurizr`, `test-rdb-drivers-local`.
 - **Other:** `test-wasm`, `test-coverage`, `lint`, `check-tutorial`, `check-doc-code`, `semantics-verify` (the semantics model as a second oracle over `test/lambda`, see §4; also the last step of `test-lambda-full`).
 
+The shared image codec suite is `./test/test_image_io_gtest.exe` (library
+baseline). It covers PNG/JPEG/GIF/WebP/AVIF/BMP/TIFF/ICO, thumbnail planning,
+structured errors, native ownership, and allocation-failure cleanup. The
+`image_io_formats.ls`/`.txt` pair exercises the Lambda `load`/`save` options;
+`test_gif_player_gtest.exe` retains the animation/disposal gate.
+
 ## 4. Script-driven harnesses
 
 | Harness | Fixture dirs | Discovery | Expected output | Adding a test |

@@ -1,3 +1,4 @@
+#include "../lambda/io/image_io.h"
 /**
  * GTest visual regression coverage for Radiant's SVG/PDF/PNG export backends.
  *

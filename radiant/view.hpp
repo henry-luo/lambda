@@ -691,6 +691,10 @@ typedef enum {
     IMAGE_FORMAT_JPEG,
     IMAGE_FORMAT_GIF,
     IMAGE_FORMAT_WEBP,
+    IMAGE_FORMAT_AVIF,
+    IMAGE_FORMAT_BMP,
+    IMAGE_FORMAT_TIFF,
+    IMAGE_FORMAT_ICO,
 } ImageFormat;
 
 typedef enum {

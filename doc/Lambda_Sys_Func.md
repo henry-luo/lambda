@@ -1845,21 +1845,51 @@ The existing `as_float()` conversion still produces float64.
 Finite, safely summable inputs use running sums; non-finite/overflow-risk inputs
 retain the local stencil evaluation so values do not contaminate distant windows.
 
-`load(string_path)` retains its existing raw-orientation behavior.
-`load(binary_bytes)` decodes an immutable encoded snapshot into an `(H,W,4)`
-ubyte RGBA array. The request form adds pre-decode limits and optional JPEG
-EXIF normalization:
+`load(string_path)` and `load(binary_bytes)` decode PNG, JPEG, GIF, WebP,
+AVIF, BMP, TIFF, and ICO into an `(H,W,4)` ubyte RGBA array. Plain calls retain
+raw orientation. Content determines the format, including for paths with a
+misleading extension. The request form accepts a path or binary in `data`:
 
 ```lambda
 let bytes = input("photo.jpg", 'binary')^
 let image = load({data:bytes, max_pixels:16000000, normalize_orientation:true})^
+let preview = load({data:bytes, thumbnail:{width:256, height:256}})^
 ```
 
-`max_pixels` must be a positive integer when supplied. Header dimensions are
-checked before decoding. `normalize_orientation` handles all eight JPEG EXIF
-orientations and requires binary `data`; PNG pixels need no orientation change.
-Malformed input and exceeded limits return errors. Acquisition remains in the
-existing I/O layer (**D7.1.2v2**); binary decoding introduces no Radiant dependency.
+`thumbnail:256` abbreviates a square bounding box. Thumbnails preserve aspect
+ratio, never enlarge, and normalize orientation by default. Explicit
+`normalize_orientation:false` retains encoded orientation. `max_pixels` is a
+positive **source** pixel limit, checked even when the output is small.
+`page_index` selects a TIFF page and `frame_index` selects a composited GIF
+frame; both are zero-based. Unknown options return errors (**S17.8.1**).
+
+`allow_full_decode:false` requires a verified thumbnail path avoiding
+source-size pixels or planes. JPEG baseline scaling, opaque lossy WebP scaling,
+PNG row reduction, TIFF strips/tiles or compatible reduced SubIFDs, and ICO
+resolution selection can provide such paths. AVIF, BMP, Adam7 PNG, progressive
+JPEG, and lossless/alpha WebP can require full-size storage; these cases report
+`fast_path_unavailable` when strict mode rules out their fallback. Native
+statuses and codec messages appear in the rich image error (**S7.4.4**).
+Allocation exhaustion remains a system fault (**S7.4.3**).
+
+`save(image, path)` retains PNG output regardless of the filename suffix.
+Use a destination map to choose PNG, JPEG, WebP, AVIF, BMP, TIFF, or ICO:
+
+```lambda
+save(image, {path:"preview.webp", format:'webp', quality:85, lossless:false})^
+save(image, {path:"preview.jpg", format:'jpeg', quality:90, background:[255,255,255]})^
+```
+
+`quality` is 0–100; `lossless` selects the WebP/AVIF mode. PNG, BMP, TIFF,
+and ICO use their declared lossless subsets; JPEG uses its quality setting.
+JPEG/BMP output with nonopaque alpha requires an explicit RGB byte background.
+GIF encoding, animated WebP/AVIF, HDR tone mapping, CMYK JPEG conversion, and
+ICC color conversion are outside this implementation. Decoding preserves
+supported SDR samples, with high-depth input reduced to RGBA8. TIFF writing is
+single-page DEFLATE; ICO writing uses one PNG entry.
+
+File acquisition and atomic output publication remain in `lambda-io`
+(**D7.1.2v2**, **D7.1.3**); the byte codec core has no Radiant dependency.
 
 In a Radiant event handler, `dom.set_canvas_pixels(canvas,image)^` synchronously
 copies a rank-three ubyte RGBA array into a document-owned retained canvas.

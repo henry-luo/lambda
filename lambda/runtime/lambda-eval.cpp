@@ -217,7 +217,7 @@ extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* mes
  * last_error plus a GC-heap payload carrying code, message, file and cause
  * (S7.4.4). Falls back to the payload-less sentinel only without a GC heap.
  */
-static Item runtime_error_item(LambdaErrorCode code, const char* message,
+Item runtime_error_item(LambdaErrorCode code, const char* message,
         LambdaError* cause) {
     set_runtime_error(code, "%s", message);
     if (context && context->heap && context->heap->gc) {

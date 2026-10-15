@@ -1,3 +1,4 @@
+#include "../io/image_io.h"
 // lambda-vector.cpp - Vectorized numeric operations for Lambda
 // Implements element-wise arithmetic between scalars, arrays, lists, and ranges
 
@@ -5,6 +6,7 @@
 #include "type_contract.hpp"
 #include "lambda-number-runtime.hpp"
 #include "lambda-error.h"
+#include "recovery_frame.h"
 #include "../../lib/math_checked.hpp"
 #include "../../lib/math_utils.h"
 #include "../../lib/log.h"
@@ -4736,98 +4738,174 @@ static Item array_num_convert(ArrayNum* in, ArrayNumElemType out_etype, double s
     return { .array_num = out };
 }
 
-// load(path|bytes|{data,max_pixels,normalize_orientation}) -> RGBA8 image.
-Item fn_load(Item path_item) {
-    RootFrame roots(3);
-    Rooted<Item> request(roots, path_item);
-    Rooted<Item> source(roots, path_item);
-    int64_t max_pixels = 0;
-    bool normalize = false;
-    if (get_type_id(path_item) == LMD_TYPE_MAP) {
-        MapReader options = MapReader::fromItem(request.get());
-        source.set(options.get("data").item());
-        ItemReader limit = options.get("max_pixels");
-        if (!limit.isNull() && (!limit.isInt() || limit.asInt() <= 0)) {
-            log_error("IMAGE_LOAD: invalid pixel limit"); return ItemError;
-        }
-        max_pixels = limit.asInt();
-        normalize = options.get("normalize_orientation").asBool();
-    }
-    int w = 0, h = 0, ch = 0;
-    int orientation = 1;
-    unsigned char* buf = nullptr;
-    if (get_type_id(source.get()) == LMD_TYPE_BINARY) {
-        Binary* bytes = source.get().get_binary();
-        const unsigned char* data = binary_data(bytes);
-        size_t size = binary_length(bytes);
-        // reject oversized headers before either the decoder or GC allocates pixels.
-        if (!image_get_dimensions_from_memory(data, size, &w, &h) ||
-            (max_pixels > 0 && (int64_t)w * h > max_pixels)) {
-            log_error("IMAGE_LOAD: malformed or oversized image header"); return ItemError;
-        }
-        if (normalize) orientation = image_jpeg_exif_orientation_from_memory(data, size);
-        buf = image_load_from_memory(data, size, &w, &h, &ch);
-    } else if (get_type_id(source.get()) == LMD_TYPE_STRING) {
-        if (normalize) {
-            log_error("IMAGE_LOAD: orientation normalization requires a binary snapshot"); return ItemError;
-        }
-        String* path = source.get().get_string();
-        if (max_pixels > 0 && (!image_get_dimensions(path->chars, &w, &h) || (int64_t)w * h > max_pixels)) {
-            log_error("IMAGE_LOAD: oversized image header"); return ItemError;
-        }
-        buf = image_load(path->chars, &w, &h, &ch, 0);
-    }
-    if (!buf) { log_error("IMAGE_LOAD: cannot decode source"); return ItemError; }
-    int64_t shape[3] = { h, w, 4 };
-    ArrayNum* out = alloc_ndim_arraynum(ELEM_UINT8, 3, shape);
-    if (!out) { image_free(buf); return ItemError; }
-    memcpy(out->data, buf, (size_t)h * (size_t)w * 4);
-    image_free(buf);
-    Rooted<Item> result(roots, (Item){.array_num = out});
-    if (orientation == 2 || orientation == 5 || orientation == 7) result.set(fn_flip(result.get(), {.item = i2it(1)}));
-    if (orientation == 3) result.set(fn_rot90(result.get(), {.item = i2it(2)}));
-    if (orientation == 4) result.set(fn_flip(result.get(), {.item = i2it(0)}));
-    if (orientation == 5 || orientation == 8) result.set(fn_rot90(result.get(), {.item = i2it(1)}));
-    if (orientation == 6 || orientation == 7) result.set(fn_rot90(result.get(), {.item = i2it(3)}));
-    return result.get();
+// native image errors retain their stable classification in the rich diagnostic.
+static Item image_runtime_error(const ImageError& error) {
+    if (error.code == IMAGE_OUT_OF_MEMORY)
+        return lambda_recovery_publish_fault_item((Context*)context, LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OUT_OF_MEMORY);
+    LambdaErrorCode code = error.code == IMAGE_IO_ERROR ? ERR_IO_ERROR
+        : error.code == IMAGE_CANCELLED ? ERR_CANCELLED
+        : error.code == IMAGE_INTERNAL_ERROR ? ERR_INTERNAL_ERROR
+        : error.code == IMAGE_INVALID_ARGUMENT || error.code == IMAGE_LIMIT_EXCEEDED ? ERR_INVALID_OPERATION
+        : ERR_PARSE_ERROR;
+    char message[384];
+    snprintf(message, sizeof(message), "IMAGE_IO: %s [%s]: %s", error.operation, image_status_name(error.code), error.message);
+    return runtime_error_item(code, message, NULL);
 }
 
-// save(img, path) -> writes a PNG; true on success.  Accepts 2-D (H,W) grayscale
-// or 3-D (H,W,C) with C in {1,3,4}; float images are taken as [0,1] and scaled to
-// [0,255], integer images are clamped directly.
+static bool image_argument_error(ImageError* error, const char* message) {
+    memset(error, 0, sizeof(*error)); error->code = IMAGE_INVALID_ARGUMENT;
+    snprintf(error->operation, sizeof(error->operation), "%s", "options");
+    snprintf(error->message, sizeof(error->message), "%s", message);
+    return false;
+}
+
+static bool image_option_keys(const MapReader& map, const char* const* allowed, size_t count, ImageError* error) {
+    auto entries = map.entries(); const char* key; ItemReader value;
+    while (entries.next(&key, &value)) {
+        bool found = false;
+        for (size_t i = 0; i < count; i++) if (strcmp(key, allowed[i]) == 0) { found = true; break; }
+        if (!found) {
+            char message[192]; snprintf(message, sizeof(message), "unknown image option: %s", key);
+            return image_argument_error(error, message);
+        }
+    }
+    return true;
+}
+
+static bool image_uint_option(const MapReader& map, const char* name, uint64_t maximum,
+    bool allow_zero, uint64_t* result, ImageError* error) {
+    ItemReader value = map.get(name);
+    if (value.isNull()) return true;
+    if (!value.isInt() || value.asInt() < (allow_zero ? 0 : 1) || (uint64_t)value.asInt() > maximum) {
+        char message[192]; snprintf(message, sizeof(message), "invalid image option: %s", name);
+        return image_argument_error(error, message);
+    }
+    *result = (uint64_t)value.asInt(); return true;
+}
+
+static bool image_bool_option(const MapReader& map, const char* name, bool* result, ImageError* error) {
+    ItemReader value = map.get(name);
+    if (value.isNull()) return true;
+    if (!value.isBool()) return image_argument_error(error, "image boolean option has the wrong type");
+    *result = value.asBool(); return true;
+}
+
+// load keeps the existing array result; thumbnail sizing is an explicit request option.
+Item fn_load(Item path_item) {
+    RootFrame roots(2);
+    Rooted<Item> request(roots, path_item), source(roots, path_item);
+    ImageContext image_context; image_context_init(&image_context);
+    ImageDecodeOptions options; image_decode_options_init(&options); options.normalize_orientation = false;
+    ImageError error = {};
+    if (get_type_id(request.get()) == LMD_TYPE_MAP) {
+        MapReader map = MapReader::fromItem(request.get());
+        const char* const keys[] = {"data", "max_pixels", "normalize_orientation", "thumbnail", "allow_full_decode", "page_index", "frame_index"};
+        if (!image_option_keys(map, keys, sizeof(keys)/sizeof(*keys), &error)) return image_runtime_error(error);
+        source.set(map.get("data").item());
+        uint64_t limit = image_context.limits.max_source_pixels, page = 0, frame = 0;
+        if (!image_uint_option(map, "max_pixels", INT64_MAX, false, &limit, &error) ||
+            !image_uint_option(map, "page_index", UINT32_MAX, true, &page, &error) ||
+            !image_uint_option(map, "frame_index", UINT32_MAX, true, &frame, &error) ||
+            !image_bool_option(map, "allow_full_decode", &options.allow_full_decode, &error)) return image_runtime_error(error);
+        if (limit < image_context.limits.max_source_pixels) image_context.limits.max_source_pixels = limit;
+        options.page_index = (uint32_t)page; options.frame_index = (uint32_t)frame;
+        ItemReader thumbnail = map.get("thumbnail");
+        if (!thumbnail.isNull()) {
+            uint64_t width = 0, height = 0;
+            if (thumbnail.isInt() && thumbnail.asInt() > 0 && (uint64_t)thumbnail.asInt() <= UINT32_MAX)
+                width = height = (uint64_t)thumbnail.asInt();
+            else if (thumbnail.isMap()) {
+                MapReader box = MapReader::fromItem(thumbnail.item());
+                const char* const dimensions[] = {"width", "height"};
+                if (!image_option_keys(box, dimensions, 2, &error) ||
+                    !image_uint_option(box, "width", UINT32_MAX, false, &width, &error) ||
+                    !image_uint_option(box, "height", UINT32_MAX, false, &height, &error)) return image_runtime_error(error);
+            }
+            if (!width || !height) { image_argument_error(&error, "thumbnail needs positive width and height"); return image_runtime_error(error); }
+            options.mode = IMAGE_DECODE_THUMBNAIL; options.target_width = (uint32_t)width; options.target_height = (uint32_t)height;
+            options.normalize_orientation = true;
+        }
+        if (!image_bool_option(map, "normalize_orientation", &options.normalize_orientation, &error)) return image_runtime_error(error);
+    }
+    ImageDecoded decoded = {};
+    ImageStatus status;
+    if (get_type_id(source.get()) == LMD_TYPE_BINARY) {
+        Binary* binary = source.get().get_binary();
+        ImageSource bytes = image_source_memory(binary_data(binary), binary_length(binary));
+        status = image_decode(&image_context, &bytes, &options, &decoded, &error);
+    } else if (get_type_id(source.get()) == LMD_TYPE_STRING)
+        status = image_io_decode_path(&image_context, source.get().get_string()->chars, &options, &decoded, &error);
+    else { image_argument_error(&error, "load expects an encoded binary or a file path"); return image_runtime_error(error); }
+    if (status != IMAGE_OK) return image_runtime_error(error);
+    int64_t shape[3] = {decoded.height, decoded.width, 4};
+    ArrayNum* out = alloc_ndim_arraynum(ELEM_UINT8, 3, shape);
+    if (!out) { image_decoded_dispose(&decoded); return ItemError; }
+    // native pixels stay stable across the GC allocation; no borrowed binary pointer is reused.
+    memcpy(out->data, decoded.pixels, decoded.size); image_decoded_dispose(&decoded);
+    return {.array_num = out};
+}
+
+// save's legacy string destination remains PNG; a request map selects another writer.
 Item fn_save(Item arr_item, Item path_item) {
-    // conversion allocates; keep the destination path and source live across GC.
     RootFrame roots(3);
-    Rooted<Item> source(roots, arr_item);
-    Rooted<Item> destination(roots, path_item);
-    if (get_type_id(arr_item) != LMD_TYPE_ARRAY_NUM) {
-        log_error("save: expects an image (typed numeric array)"); return ItemError;
+    Rooted<Item> source(roots, arr_item), destination(roots, path_item);
+    ImageEncodeOptions options; image_encode_options_init(&options, IMAGE_CODEC_PNG); ImageError error = {};
+    if (get_type_id(source.get()) != LMD_TYPE_ARRAY_NUM) {
+        image_argument_error(&error, "save expects a typed numeric image array"); return image_runtime_error(error);
     }
-    if (get_type_id(path_item) != LMD_TYPE_STRING) {
-        log_error("save: expects a string file path"); return ItemError;
+    if (get_type_id(destination.get()) == LMD_TYPE_MAP) {
+        MapReader map = MapReader::fromItem(destination.get());
+        const char* const keys[] = {"path", "format", "quality", "lossless", "background"};
+        if (!image_option_keys(map, keys, 5, &error)) return image_runtime_error(error);
+        ItemReader format = map.get("format");
+        if (!format.isNull()) {
+            const char* name = format.isSymbol() ? format.asSymbol()->chars : format.isString() ? format.asString()->chars : NULL;
+            options.format = IMAGE_CODEC_UNKNOWN;
+            if (name) for (unsigned i = IMAGE_CODEC_PNG; i <= IMAGE_CODEC_ICO; i++)
+                if (strcmp(name, image_codec_capabilities((ImageCodecFormat)i)->name) == 0) options.format = (ImageCodecFormat)i;
+            if (name && strcmp(name, "jpg") == 0) options.format = IMAGE_CODEC_JPEG;
+            if (name && strcmp(name, "tif") == 0) options.format = IMAGE_CODEC_TIFF;
+            if (options.format == IMAGE_CODEC_UNKNOWN) { image_argument_error(&error, "unknown image output format"); return image_runtime_error(error); }
+        }
+        uint64_t quality = (uint64_t)options.quality;
+        if (!image_uint_option(map, "quality", 100, true, &quality, &error) ||
+            !image_bool_option(map, "lossless", &options.lossless, &error)) return image_runtime_error(error);
+        options.quality = (int)quality;
+        ItemReader background = map.get("background");
+        if (!background.isNull()) {
+            ArrayReader rgb = ArrayReader::fromItem(background.item());
+            if (rgb.length() != 3) { image_argument_error(&error, "image background needs three RGB bytes"); return image_runtime_error(error); }
+            for (int i = 0; i < 3; i++) {
+                ItemReader value = rgb.get(i);
+                if (!value.isInt() || value.asInt() < 0 || value.asInt() > 255) { image_argument_error(&error, "image background needs three RGB bytes"); return image_runtime_error(error); }
+                options.background[i] = (uint8_t)value.asInt();
+            }
+            options.has_background = true;
+        }
+        destination.set(map.get("path").item());
     }
-    String* path = path_item.get_string();
-    if (!path || path->len == 0) { log_error("save: empty path"); return ItemError; }
-    ArrayNum* in = arr_item.array_num;
-    int64_t shp[LAMBDA_ARRAY_NUM_MAX_NDIM], str[LAMBDA_ARRAY_NUM_MAX_NDIM];
-    int ndim = array_num_get_shape_strides(in, shp, str);
-    if (ndim < 1) return ItemError;
-    int64_t H, W, C;
-    if (ndim == 2)      { H = shp[0]; W = shp[1]; C = 1; }
-    else if (ndim == 3) { H = shp[0]; W = shp[1]; C = shp[2]; }
-    else { log_error("save: image must be 2-D (H,W) or 3-D (H,W,C)"); return ItemError; }
-    if (C != 1 && C != 3 && C != 4) {
-        log_error("save: channel count must be 1, 3, or 4 (got %lld)", (long long)C); return ItemError;
+    if (get_type_id(destination.get()) != LMD_TYPE_STRING || destination.get().get_string()->len == 0) {
+        image_argument_error(&error, "save expects a nonempty destination path"); return image_runtime_error(error);
     }
-    // gather to a contiguous ubyte buffer (float [0,1] -> [0,255], int clamped)
-    bool src_float = !elem_is_int(in->get_elem_type());
-    Rooted<Item> ub(roots, array_num_convert(in, ELEM_UINT8, src_float ? 255.0 : 1.0, true, 0.0, 255.0));
-    if (get_type_id(ub.get()) != LMD_TYPE_ARRAY_NUM) return ItemError;
-    path = destination.get().get_string();
-    int ok = image_save_png(path->chars, (const unsigned char*)ub.get().array_num->data,
-                            (int)W, (int)H, (int)C);
-    if (!ok) { log_error("save: failed to write %s", path->chars); return ItemError; }
-    return { .item = b2it(BOOL_TRUE) };
+    ArrayNum* in = source.get().array_num;
+    int64_t shape[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
+    int ndim = array_num_get_shape_strides(in, shape, strides);
+    int64_t height = ndim >= 2 ? shape[0] : 0, width = ndim >= 2 ? shape[1] : 0;
+    int64_t channels = ndim == 2 ? 1 : ndim == 3 ? shape[2] : 0;
+    if (height <= 0 || width <= 0 || height > UINT32_MAX || width > UINT32_MAX ||
+        (channels != 1 && channels != 3 && channels != 4)) {
+        image_argument_error(&error, "save expects a positive (H,W) or (H,W,1|3|4) image"); return image_runtime_error(error);
+    }
+    bool floats = !elem_is_int(in->get_elem_type());
+    Rooted<Item> bytes(roots, array_num_convert(in, ELEM_UINT8, floats ? 255.0 : 1.0, true, 0.0, 255.0));
+    if (get_type_id(bytes.get()) != LMD_TYPE_ARRAY_NUM) return ItemError;
+    size_t stride = 0, size = 0;
+    if (!math_checked_mul((size_t)width, (size_t)channels, &stride) || !math_checked_mul(stride, (size_t)height, &size)) {
+        image_argument_error(&error, "image byte layout overflow"); return image_runtime_error(error);
+    }
+    ImagePixelView pixels = {(const uint8_t*)bytes.get().array_num->data, size, stride, (uint32_t)width, (uint32_t)height, (uint8_t)channels, false};
+    if (image_io_save_path(NULL, destination.get().get_string()->chars, &pixels, &options, &error) != IMAGE_OK) return image_runtime_error(error);
+    return {.item = b2it(BOOL_TRUE)};
 }
 
 // as_float(img): ubyte [0,255] -> float [0,1] (passthrough if already float).

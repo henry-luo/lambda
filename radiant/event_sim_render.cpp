@@ -1,3 +1,4 @@
+#include "../lambda/io/image_io.h"
 #include "event_sim_render.hpp"
 #include "event_sim.hpp"
 #include "event.hpp"

@@ -4163,6 +4163,10 @@ void draw_glyph(RasterRenderContext* rdcon, GlyphBitmap* bitmap, int x, int y);
 // ===== render_img.hpp =====
 // Function declarations for image rendering
 StrBuf* render_encode_surface_png(ImageSurface* surface);
+ImageStatus render_save_surface_image(ImageSurface* surface, const char* path,
+    const ImageEncodeOptions* options, ImageError* error);
+ImageFormat image_surface_format_from_codec(ImageCodecFormat format);
+void image_surface_apply_orientation_metadata(ImageSurface* surface, int orientation);
 StrBuf* render_encode_surface_data_uri(ImageSurface* surface);
 // requires the host's rdt_engine_init(); owned straight-alpha surfaces use image_surface_destroy().
 // display-list commands/bounds are physical; secondary snapshots apply density to logical paint input.

@@ -15,11 +15,28 @@
     "lambda/lambda-wasm-main.c"
   ],
   "code_generators": [
-    {"script": "utils/generate_binary_bindings.py", "args": ["lambda/module/radiant/pdf_view_schema.json"]},
-    {"script": "utils/generate_binary_bindings.py", "args": ["test/binary_schema_fixture.json"]}
+    {
+      "script": "utils/generate_binary_bindings.py",
+      "args": [
+        "lambda/module/radiant/pdf_view_schema.json"
+      ]
+    },
+    {
+      "script": "utils/generate_binary_bindings.py",
+      "args": [
+        "test/binary_schema_fixture.json"
+      ]
+    },
+    {
+      "script": "utils/generate_image_config.py",
+      "args": [
+        "build_lambda_config.json"
+      ]
+    }
   ],
   "source_dirs": [
     "lib",
+    "lib/image",
     "lib/font",
     "lib/font/woff2",
     "lib/grep",
@@ -172,13 +189,6 @@
       "link": "static"
     },
     {
-      "name": "zlib",
-      "version": "1.3.1",
-      "description": "Compression library",
-      "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
-      "link": "static"
-    },
-    {
       "name": "bzip2",
       "version": "1.0.8",
       "lib": "/opt/homebrew/opt/bzip2/lib/libbz2.a",
@@ -248,49 +258,6 @@
       "link": "static"
     },
     {
-      "name": "png",
-      "version": "1.6.55",
-      "lib": "/opt/homebrew/lib/libpng.a",
-      "link": "static"
-    },
-    {
-      "name": "turbojpeg",
-      "version": "3.1.2",
-      "lib": "build_temp/jpeg-turbo-nozlib/libturbojpeg.a",
-      "source_lib": "/opt/homebrew/lib/libturbojpeg.a",
-      "exclude_archive_members": [
-        "adler32.c.o",
-        "compress.c.o",
-        "crc32.c.o",
-        "deflate.c.o",
-        "inffast.c.o",
-        "inflate.c.o",
-        "inftrees.c.o",
-        "trees.c.o",
-        "zutil.c.o"
-      ],
-      "link": "static"
-    },
-    {
-      "name": "gif",
-      "version": "5.2.2",
-      "lib": "/opt/homebrew/lib/libgif.a",
-      "link": "static"
-    },
-    {
-      "name": "webp",
-      "version": "1.6.0",
-      "include": "/opt/homebrew/include",
-      "lib": "/opt/homebrew/lib/libwebp.a",
-      "link": "static"
-    },
-    {
-      "name": "sharpyuv",
-      "description": "SharpYUV companion required by static WebP encoders",
-      "lib": "/opt/homebrew/lib/libsharpyuv.a",
-      "link": "static"
-    },
-    {
       "name": "re2",
       "version": "2023-03-01",
       "description": "RE2 regular expression library for string pattern matching",
@@ -317,6 +284,31 @@
       "name": "iphlpapi",
       "description": "Windows IP Helper API (curl IPv6 scope ID dependency; no-op on non-Windows)",
       "link": "none"
+    },
+    {
+      "name": "zlib",
+      "version": "1.3.1",
+      "description": "Compression library",
+      "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
+      "link": "static"
+    },
+    {
+      "name": "image-codecs",
+      "description": "Image I/O codecs built by the Lambda source target",
+      "lib": "build/lib/liblambda-image-codecs.a",
+      "include": "build_temp/image-config/include",
+      "link": "static",
+      "build_target": "lambda-image-codecs",
+      "includes": [
+        "build_temp/image-config/include",
+        "lib/image/libpng",
+        "lib/image/libjpeg-turbo/src",
+        "lib/image/libwebp/src",
+        "lib/image/libavif/include",
+        "lib/image/libtiff/libtiff",
+        "lib/image/giflib",
+        "lib/image/libnsbmp/include"
+      ]
     }
   ],
   "dev_libraries": [
@@ -416,6 +408,1014 @@
   ],
   "targets": [
     {
+      "name": "lambda-image-codecs",
+      "description": "Explicit image I/O source closure; no upstream build system",
+      "lang": "c17",
+      "pic": true,
+      "single_project": true,
+      "optimize": "Speed",
+      "source_files": [
+        "build_temp/image-config/aom_build_config.c",
+        "lib/image/giflib/dgif_lib.c",
+        "lib/image/giflib/gif_err.c",
+        "lib/image/giflib/gifalloc.c",
+        "lib/image/giflib/openbsd-reallocarray.c",
+        "lib/image/libaom/aom/src/aom_codec.c",
+        "lib/image/libaom/aom/src/aom_decoder.c",
+        "lib/image/libaom/aom/src/aom_encoder.c",
+        "lib/image/libaom/aom/src/aom_image.c",
+        "lib/image/libaom/aom/src/aom_integer.c",
+        "lib/image/libaom/aom_dsp/aom_convolve.c",
+        "lib/image/libaom/aom_dsp/aom_dsp_rtcd.c",
+        "lib/image/libaom/aom_dsp/avg.c",
+        "lib/image/libaom/aom_dsp/binary_codes_reader.c",
+        "lib/image/libaom/aom_dsp/binary_codes_writer.c",
+        "lib/image/libaom/aom_dsp/bitreader.c",
+        "lib/image/libaom/aom_dsp/bitreader_buffer.c",
+        "lib/image/libaom/aom_dsp/bitwriter.c",
+        "lib/image/libaom/aom_dsp/bitwriter_buffer.c",
+        "lib/image/libaom/aom_dsp/blend_a64_hmask.c",
+        "lib/image/libaom/aom_dsp/blend_a64_mask.c",
+        "lib/image/libaom/aom_dsp/blend_a64_vmask.c",
+        "lib/image/libaom/aom_dsp/blk_sse_sum.c",
+        "lib/image/libaom/aom_dsp/entcode.c",
+        "lib/image/libaom/aom_dsp/entdec.c",
+        "lib/image/libaom/aom_dsp/entenc.c",
+        "lib/image/libaom/aom_dsp/fft.c",
+        "lib/image/libaom/aom_dsp/flow_estimation/corner_detect.c",
+        "lib/image/libaom/aom_dsp/flow_estimation/corner_match.c",
+        "lib/image/libaom/aom_dsp/flow_estimation/disflow.c",
+        "lib/image/libaom/aom_dsp/flow_estimation/flow_estimation.c",
+        "lib/image/libaom/aom_dsp/flow_estimation/ransac.c",
+        "lib/image/libaom/aom_dsp/fwd_txfm.c",
+        "lib/image/libaom/aom_dsp/grain_table.c",
+        "lib/image/libaom/aom_dsp/intrapred.c",
+        "lib/image/libaom/aom_dsp/loopfilter.c",
+        "lib/image/libaom/aom_dsp/noise_model.c",
+        "lib/image/libaom/aom_dsp/noise_util.c",
+        "lib/image/libaom/aom_dsp/odintrin.c",
+        "lib/image/libaom/aom_dsp/psnr.c",
+        "lib/image/libaom/aom_dsp/pyramid.c",
+        "lib/image/libaom/aom_dsp/quantize.c",
+        "lib/image/libaom/aom_dsp/sad.c",
+        "lib/image/libaom/aom_dsp/sad_av1.c",
+        "lib/image/libaom/aom_dsp/sse.c",
+        "lib/image/libaom/aom_dsp/ssim.c",
+        "lib/image/libaom/aom_dsp/subtract.c",
+        "lib/image/libaom/aom_dsp/sum_squares.c",
+        "lib/image/libaom/aom_dsp/variance.c",
+        "lib/image/libaom/aom_mem/aom_mem.c",
+        "lib/image/libaom/aom_scale/aom_scale_rtcd.c",
+        "lib/image/libaom/aom_scale/generic/yv12config.c",
+        "lib/image/libaom/aom_scale/generic/yv12extend.c",
+        "lib/image/libaom/aom_util/aom_thread.c",
+        "lib/image/libaom/av1/arg_defs.c",
+        "lib/image/libaom/av1/av1_cx_iface.c",
+        "lib/image/libaom/av1/av1_dx_iface.c",
+        "lib/image/libaom/av1/common/alloccommon.c",
+        "lib/image/libaom/av1/common/av1_inv_txfm1d.c",
+        "lib/image/libaom/av1/common/av1_inv_txfm2d.c",
+        "lib/image/libaom/av1/common/av1_loopfilter.c",
+        "lib/image/libaom/av1/common/av1_rtcd.c",
+        "lib/image/libaom/av1/common/av1_txfm.c",
+        "lib/image/libaom/av1/common/blockd.c",
+        "lib/image/libaom/av1/common/cdef.c",
+        "lib/image/libaom/av1/common/cdef_block.c",
+        "lib/image/libaom/av1/common/cfl.c",
+        "lib/image/libaom/av1/common/common_data.c",
+        "lib/image/libaom/av1/common/convolve.c",
+        "lib/image/libaom/av1/common/debugmodes.c",
+        "lib/image/libaom/av1/common/entropy.c",
+        "lib/image/libaom/av1/common/entropymode.c",
+        "lib/image/libaom/av1/common/entropymv.c",
+        "lib/image/libaom/av1/common/frame_buffers.c",
+        "lib/image/libaom/av1/common/idct.c",
+        "lib/image/libaom/av1/common/mvref_common.c",
+        "lib/image/libaom/av1/common/obu_util.c",
+        "lib/image/libaom/av1/common/pred_common.c",
+        "lib/image/libaom/av1/common/quant_common.c",
+        "lib/image/libaom/av1/common/reconinter.c",
+        "lib/image/libaom/av1/common/reconintra.c",
+        "lib/image/libaom/av1/common/resize.c",
+        "lib/image/libaom/av1/common/restoration.c",
+        "lib/image/libaom/av1/common/scale.c",
+        "lib/image/libaom/av1/common/scan.c",
+        "lib/image/libaom/av1/common/seg_common.c",
+        "lib/image/libaom/av1/common/thread_common.c",
+        "lib/image/libaom/av1/common/tile_common.c",
+        "lib/image/libaom/av1/common/timing.c",
+        "lib/image/libaom/av1/common/txb_common.c",
+        "lib/image/libaom/av1/common/warped_motion.c",
+        "lib/image/libaom/av1/decoder/decodeframe.c",
+        "lib/image/libaom/av1/decoder/decodemv.c",
+        "lib/image/libaom/av1/decoder/decoder.c",
+        "lib/image/libaom/av1/decoder/decodetxb.c",
+        "lib/image/libaom/av1/decoder/detokenize.c",
+        "lib/image/libaom/av1/decoder/grain_synthesis.c",
+        "lib/image/libaom/av1/decoder/obu.c",
+        "lib/image/libaom/av1/encoder/allintra_vis.c",
+        "lib/image/libaom/av1/encoder/aq_complexity.c",
+        "lib/image/libaom/av1/encoder/aq_cyclicrefresh.c",
+        "lib/image/libaom/av1/encoder/aq_variance.c",
+        "lib/image/libaom/av1/encoder/av1_fwd_txfm1d.c",
+        "lib/image/libaom/av1/encoder/av1_fwd_txfm2d.c",
+        "lib/image/libaom/av1/encoder/av1_noise_estimate.c",
+        "lib/image/libaom/av1/encoder/av1_quantize.c",
+        "lib/image/libaom/av1/encoder/bitstream.c",
+        "lib/image/libaom/av1/encoder/cnn.c",
+        "lib/image/libaom/av1/encoder/compound_type.c",
+        "lib/image/libaom/av1/encoder/context_tree.c",
+        "lib/image/libaom/av1/encoder/cost.c",
+        "lib/image/libaom/av1/encoder/dwt.c",
+        "lib/image/libaom/av1/encoder/encode_strategy.c",
+        "lib/image/libaom/av1/encoder/encodeframe.c",
+        "lib/image/libaom/av1/encoder/encodeframe_utils.c",
+        "lib/image/libaom/av1/encoder/encodemb.c",
+        "lib/image/libaom/av1/encoder/encodemv.c",
+        "lib/image/libaom/av1/encoder/encoder.c",
+        "lib/image/libaom/av1/encoder/encoder_utils.c",
+        "lib/image/libaom/av1/encoder/encodetxb.c",
+        "lib/image/libaom/av1/encoder/ethread.c",
+        "lib/image/libaom/av1/encoder/extend.c",
+        "lib/image/libaom/av1/encoder/external_partition.c",
+        "lib/image/libaom/av1/encoder/firstpass.c",
+        "lib/image/libaom/av1/encoder/global_motion.c",
+        "lib/image/libaom/av1/encoder/global_motion_facade.c",
+        "lib/image/libaom/av1/encoder/gop_structure.c",
+        "lib/image/libaom/av1/encoder/hash.c",
+        "lib/image/libaom/av1/encoder/hash_motion.c",
+        "lib/image/libaom/av1/encoder/hybrid_fwd_txfm.c",
+        "lib/image/libaom/av1/encoder/interp_search.c",
+        "lib/image/libaom/av1/encoder/intra_mode_search.c",
+        "lib/image/libaom/av1/encoder/level.c",
+        "lib/image/libaom/av1/encoder/lookahead.c",
+        "lib/image/libaom/av1/encoder/mcomp.c",
+        "lib/image/libaom/av1/encoder/ml.c",
+        "lib/image/libaom/av1/encoder/motion_search_facade.c",
+        "lib/image/libaom/av1/encoder/mv_prec.c",
+        "lib/image/libaom/av1/encoder/nonrd_opt.c",
+        "lib/image/libaom/av1/encoder/nonrd_pickmode.c",
+        "lib/image/libaom/av1/encoder/palette.c",
+        "lib/image/libaom/av1/encoder/partition_search.c",
+        "lib/image/libaom/av1/encoder/partition_strategy.c",
+        "lib/image/libaom/av1/encoder/pass2_strategy.c",
+        "lib/image/libaom/av1/encoder/pickcdef.c",
+        "lib/image/libaom/av1/encoder/picklpf.c",
+        "lib/image/libaom/av1/encoder/pickrst.c",
+        "lib/image/libaom/av1/encoder/ratectrl.c",
+        "lib/image/libaom/av1/encoder/rd.c",
+        "lib/image/libaom/av1/encoder/rdopt.c",
+        "lib/image/libaom/av1/encoder/reconinter_enc.c",
+        "lib/image/libaom/av1/encoder/segmentation.c",
+        "lib/image/libaom/av1/encoder/speed_features.c",
+        "lib/image/libaom/av1/encoder/superres_scale.c",
+        "lib/image/libaom/av1/encoder/svc_layercontext.c",
+        "lib/image/libaom/av1/encoder/temporal_filter.c",
+        "lib/image/libaom/av1/encoder/tokenize.c",
+        "lib/image/libaom/av1/encoder/tpl_model.c",
+        "lib/image/libaom/av1/encoder/tx_search.c",
+        "lib/image/libaom/av1/encoder/txb_rdopt.c",
+        "lib/image/libaom/av1/encoder/var_based_part.c",
+        "lib/image/libaom/av1/encoder/wedge_utils.c",
+        "lib/image/libaom/common/args_helper.c",
+        "lib/image/libaom/third_party/fastfeat/fast.c",
+        "lib/image/libaom/third_party/fastfeat/fast_9.c",
+        "lib/image/libaom/third_party/fastfeat/nonmax.c",
+        "lib/image/libaom/third_party/vector/vector.c",
+        "lib/image/libavif/src/alpha.c",
+        "lib/image/libavif/src/avif.c",
+        "lib/image/libavif/src/codec_aom.c",
+        "lib/image/libavif/src/colr.c",
+        "lib/image/libavif/src/colrconvert.c",
+        "lib/image/libavif/src/diag.c",
+        "lib/image/libavif/src/exif.c",
+        "lib/image/libavif/src/gainmap.c",
+        "lib/image/libavif/src/io.c",
+        "lib/image/libavif/src/mem.c",
+        "lib/image/libavif/src/obu.c",
+        "lib/image/libavif/src/properties.c",
+        "lib/image/libavif/src/rawdata.c",
+        "lib/image/libavif/src/read.c",
+        "lib/image/libavif/src/reformat.c",
+        "lib/image/libavif/src/reformat_libsharpyuv.c",
+        "lib/image/libavif/src/reformat_libyuv.c",
+        "lib/image/libavif/src/scale.c",
+        "lib/image/libavif/src/stream.c",
+        "lib/image/libavif/src/utils.c",
+        "lib/image/libavif/src/write.c",
+        "lib/image/libavif/third_party/libyuv/source/planar_functions.c",
+        "lib/image/libavif/third_party/libyuv/source/row_common.c",
+        "lib/image/libavif/third_party/libyuv/source/scale.c",
+        "lib/image/libavif/third_party/libyuv/source/scale_any.c",
+        "lib/image/libavif/third_party/libyuv/source/scale_common.c",
+        "lib/image/libjpeg-turbo/src/jaricom.c",
+        "lib/image/libjpeg-turbo/src/jcapimin.c",
+        "lib/image/libjpeg-turbo/src/jcarith.c",
+        "lib/image/libjpeg-turbo/src/jchuff.c",
+        "lib/image/libjpeg-turbo/src/jcicc.c",
+        "lib/image/libjpeg-turbo/src/jcinit.c",
+        "lib/image/libjpeg-turbo/src/jclhuff.c",
+        "lib/image/libjpeg-turbo/src/jcmarker.c",
+        "lib/image/libjpeg-turbo/src/jcmaster.c",
+        "lib/image/libjpeg-turbo/src/jcomapi.c",
+        "lib/image/libjpeg-turbo/src/jcparam.c",
+        "lib/image/libjpeg-turbo/src/jcphuff.c",
+        "lib/image/libjpeg-turbo/src/jdapimin.c",
+        "lib/image/libjpeg-turbo/src/jdarith.c",
+        "lib/image/libjpeg-turbo/src/jdatadst-tj.c",
+        "lib/image/libjpeg-turbo/src/jdatadst.c",
+        "lib/image/libjpeg-turbo/src/jdatasrc-tj.c",
+        "lib/image/libjpeg-turbo/src/jdatasrc.c",
+        "lib/image/libjpeg-turbo/src/jdhuff.c",
+        "lib/image/libjpeg-turbo/src/jdicc.c",
+        "lib/image/libjpeg-turbo/src/jdinput.c",
+        "lib/image/libjpeg-turbo/src/jdlhuff.c",
+        "lib/image/libjpeg-turbo/src/jdmarker.c",
+        "lib/image/libjpeg-turbo/src/jdmaster.c",
+        "lib/image/libjpeg-turbo/src/jdphuff.c",
+        "lib/image/libjpeg-turbo/src/jerror.c",
+        "lib/image/libjpeg-turbo/src/jfdctflt.c",
+        "lib/image/libjpeg-turbo/src/jmemmgr.c",
+        "lib/image/libjpeg-turbo/src/jmemnobs.c",
+        "lib/image/libjpeg-turbo/src/jpeg_nbits.c",
+        "lib/image/libjpeg-turbo/src/turbojpeg.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcapistd-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcapistd-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcapistd-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jccoefct-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jccoefct-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jccolor-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jccolor-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jccolor-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcdctmgr-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcdctmgr-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcdiffct-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcdiffct-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcdiffct-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jclossls-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jclossls-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jclossls-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcmainct-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcmainct-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcmainct-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcprepct-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcprepct-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcprepct-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcsample-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcsample-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jcsample-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdapistd-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdapistd-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdapistd-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdcoefct-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdcoefct-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdcolor-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdcolor-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdcolor-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jddctmgr-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jddctmgr-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jddiffct-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jddiffct-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jddiffct-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdlossls-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdlossls-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdlossls-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdmainct-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdmainct-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdmainct-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdmerge-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdmerge-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdpostct-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdpostct-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdpostct-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdsample-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdsample-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jdsample-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jfdctfst-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jfdctfst-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jfdctint-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jfdctint-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jidctflt-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jidctflt-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jidctfst-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jidctfst-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jidctint-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jidctint-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jidctred-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jidctred-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jquant1-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jquant1-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jquant2-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jquant2-8.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jutils-12.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jutils-16.c",
+        "lib/image/libjpeg-turbo/src/wrapper/jutils-8.c",
+        "lib/image/libnsbmp/src/libnsbmp.c",
+        "lib/image/libpng/png.c",
+        "lib/image/libpng/pngerror.c",
+        "lib/image/libpng/pngget.c",
+        "lib/image/libpng/pngmem.c",
+        "lib/image/libpng/pngpread.c",
+        "lib/image/libpng/pngread.c",
+        "lib/image/libpng/pngrio.c",
+        "lib/image/libpng/pngrtran.c",
+        "lib/image/libpng/pngrutil.c",
+        "lib/image/libpng/pngset.c",
+        "lib/image/libpng/pngtrans.c",
+        "lib/image/libpng/pngwio.c",
+        "lib/image/libpng/pngwrite.c",
+        "lib/image/libpng/pngwtran.c",
+        "lib/image/libpng/pngwutil.c",
+        "lib/image/libtiff/libtiff/tif_aux.c",
+        "lib/image/libtiff/libtiff/tif_close.c",
+        "lib/image/libtiff/libtiff/tif_codec.c",
+        "lib/image/libtiff/libtiff/tif_color.c",
+        "lib/image/libtiff/libtiff/tif_compress.c",
+        "lib/image/libtiff/libtiff/tif_dir.c",
+        "lib/image/libtiff/libtiff/tif_dirinfo.c",
+        "lib/image/libtiff/libtiff/tif_dirread.c",
+        "lib/image/libtiff/libtiff/tif_dirwrite.c",
+        "lib/image/libtiff/libtiff/tif_dumpmode.c",
+        "lib/image/libtiff/libtiff/tif_error.c",
+        "lib/image/libtiff/libtiff/tif_extension.c",
+        "lib/image/libtiff/libtiff/tif_fax3.c",
+        "lib/image/libtiff/libtiff/tif_fax3sm.c",
+        "lib/image/libtiff/libtiff/tif_flush.c",
+        "lib/image/libtiff/libtiff/tif_getimage.c",
+        "lib/image/libtiff/libtiff/tif_hash_set.c",
+        "lib/image/libtiff/libtiff/tif_jpeg.c",
+        "lib/image/libtiff/libtiff/tif_jpeg_12.c",
+        "lib/image/libtiff/libtiff/tif_luv.c",
+        "lib/image/libtiff/libtiff/tif_lzw.c",
+        "lib/image/libtiff/libtiff/tif_next.c",
+        "lib/image/libtiff/libtiff/tif_open.c",
+        "lib/image/libtiff/libtiff/tif_packbits.c",
+        "lib/image/libtiff/libtiff/tif_pixarlog.c",
+        "lib/image/libtiff/libtiff/tif_predict.c",
+        "lib/image/libtiff/libtiff/tif_print.c",
+        "lib/image/libtiff/libtiff/tif_read.c",
+        "lib/image/libtiff/libtiff/tif_strip.c",
+        "lib/image/libtiff/libtiff/tif_swab.c",
+        "lib/image/libtiff/libtiff/tif_thunder.c",
+        "lib/image/libtiff/libtiff/tif_tile.c",
+        "lib/image/libtiff/libtiff/tif_version.c",
+        "lib/image/libtiff/libtiff/tif_warning.c",
+        "lib/image/libtiff/libtiff/tif_write.c",
+        "lib/image/libtiff/libtiff/tif_zip.c",
+        "lib/image/libwebp/sharpyuv/sharpyuv.c",
+        "lib/image/libwebp/sharpyuv/sharpyuv_cpu.c",
+        "lib/image/libwebp/sharpyuv/sharpyuv_csp.c",
+        "lib/image/libwebp/sharpyuv/sharpyuv_dsp.c",
+        "lib/image/libwebp/sharpyuv/sharpyuv_gamma.c",
+        "lib/image/libwebp/src/dec/alpha_dec.c",
+        "lib/image/libwebp/src/dec/buffer_dec.c",
+        "lib/image/libwebp/src/dec/frame_dec.c",
+        "lib/image/libwebp/src/dec/idec_dec.c",
+        "lib/image/libwebp/src/dec/io_dec.c",
+        "lib/image/libwebp/src/dec/quant_dec.c",
+        "lib/image/libwebp/src/dec/tree_dec.c",
+        "lib/image/libwebp/src/dec/vp8_dec.c",
+        "lib/image/libwebp/src/dec/vp8l_dec.c",
+        "lib/image/libwebp/src/dec/webp_dec.c",
+        "lib/image/libwebp/src/dsp/alpha_processing.c",
+        "lib/image/libwebp/src/dsp/cost.c",
+        "lib/image/libwebp/src/dsp/cpu.c",
+        "lib/image/libwebp/src/dsp/dec.c",
+        "lib/image/libwebp/src/dsp/dec_clip_tables.c",
+        "lib/image/libwebp/src/dsp/enc.c",
+        "lib/image/libwebp/src/dsp/filters.c",
+        "lib/image/libwebp/src/dsp/lossless.c",
+        "lib/image/libwebp/src/dsp/lossless_enc.c",
+        "lib/image/libwebp/src/dsp/rescaler.c",
+        "lib/image/libwebp/src/dsp/ssim.c",
+        "lib/image/libwebp/src/dsp/upsampling.c",
+        "lib/image/libwebp/src/dsp/yuv.c",
+        "lib/image/libwebp/src/enc/alpha_enc.c",
+        "lib/image/libwebp/src/enc/analysis_enc.c",
+        "lib/image/libwebp/src/enc/backward_references_cost_enc.c",
+        "lib/image/libwebp/src/enc/backward_references_enc.c",
+        "lib/image/libwebp/src/enc/config_enc.c",
+        "lib/image/libwebp/src/enc/cost_enc.c",
+        "lib/image/libwebp/src/enc/filter_enc.c",
+        "lib/image/libwebp/src/enc/frame_enc.c",
+        "lib/image/libwebp/src/enc/histogram_enc.c",
+        "lib/image/libwebp/src/enc/iterator_enc.c",
+        "lib/image/libwebp/src/enc/near_lossless_enc.c",
+        "lib/image/libwebp/src/enc/picture_csp_enc.c",
+        "lib/image/libwebp/src/enc/picture_enc.c",
+        "lib/image/libwebp/src/enc/picture_psnr_enc.c",
+        "lib/image/libwebp/src/enc/picture_rescale_enc.c",
+        "lib/image/libwebp/src/enc/picture_tools_enc.c",
+        "lib/image/libwebp/src/enc/predictor_enc.c",
+        "lib/image/libwebp/src/enc/quant_enc.c",
+        "lib/image/libwebp/src/enc/syntax_enc.c",
+        "lib/image/libwebp/src/enc/token_enc.c",
+        "lib/image/libwebp/src/enc/tree_enc.c",
+        "lib/image/libwebp/src/enc/vp8l_enc.c",
+        "lib/image/libwebp/src/enc/webp_enc.c",
+        "lib/image/libwebp/src/utils/bit_reader_utils.c",
+        "lib/image/libwebp/src/utils/bit_writer_utils.c",
+        "lib/image/libwebp/src/utils/color_cache_utils.c",
+        "lib/image/libwebp/src/utils/filters_utils.c",
+        "lib/image/libwebp/src/utils/huffman_encode_utils.c",
+        "lib/image/libwebp/src/utils/huffman_utils.c",
+        "lib/image/libwebp/src/utils/palette.c",
+        "lib/image/libwebp/src/utils/quant_levels_dec_utils.c",
+        "lib/image/libwebp/src/utils/quant_levels_utils.c",
+        "lib/image/libwebp/src/utils/random_utils.c",
+        "lib/image/libwebp/src/utils/rescaler_utils.c",
+        "lib/image/libwebp/src/utils/thread_utils.c",
+        "lib/image/libwebp/src/utils/utils.c"
+      ],
+      "includes": [
+        "build_temp/image-config/include",
+        "lib/image/libpng",
+        "lib/image/libjpeg-turbo/src",
+        "lib/image/libwebp/src",
+        "lib/image/libavif/include",
+        "lib/image/libtiff/libtiff",
+        "lib/image/giflib",
+        "lib/image/libnsbmp/include",
+        "lib/image/libaom",
+        "lib/image/libavif/third_party/libyuv/include",
+        "lib/image/libnsbmp/src",
+        "lib/image/libwebp",
+        "build_temp/image-config/webp"
+      ],
+      "defines": [
+        "NDEBUG"
+      ],
+      "libraries": [
+        "zlib",
+        "pthread"
+      ],
+      "file_rules": [
+        {
+          "files": [
+            "lib/image/libjpeg-turbo/**.c"
+          ],
+          "defines": [
+            "LAMBDA_IMAGE_IO_ONLY"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libwebp/**.c"
+          ],
+          "defines": [
+            "HAVE_CONFIG_H"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libavif/**.c"
+          ],
+          "defines": [
+            "AVIF_CODEC_AOM=1",
+            "AVIF_STATIC",
+            "AVIF_CODEC_AOM_ENCODE=1",
+            "AVIF_CODEC_AOM_DECODE=1"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/aom_convolve8_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/aom_scaled_convolve8_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/sad_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/sadxd_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/sse_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/sum_squares_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/variance_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/highbd_variance_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/aom_convolve8_neon_i8mm.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/aom_scaled_convolve8_neon_i8mm.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/highbd_convolve8_sve.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm+sve"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/flow_estimation/arm/disflow_sve.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm+sve"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/avg_sve.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm+sve"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/blk_sse_sum_sve.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm+sve"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/sum_squares_sve.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm+sve"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/highbd_sse_sve.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm+sve"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/aom_dsp/arm/highbd_variance_sve.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm+sve"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/encoder/arm/hash_arm_crc32.c"
+          ],
+          "build_options": [
+            "-march=armv8-a+crc"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/av1_convolve_scale_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/compound_convolve_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/convolve_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/resize_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/encoder/arm/temporal_filter_neon_dotprod.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/av1_convolve_scale_neon_i8mm.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/compound_convolve_neon_i8mm.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/convolve_neon_i8mm.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/resize_neon_i8mm.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/warp_plane_neon_i8mm.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/highbd_warp_plane_sve.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm+sve"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/warp_plane_sve.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm+sve"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/encoder/arm/av1_error_sve.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm+sve"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/encoder/arm/pickrst_sve.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm+sve"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/encoder/arm/wedge_utils_sve.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm+sve"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/encoder/arm/highbd_pickrst_sve.c"
+          ],
+          "build_options": [
+            "-march=armv8.2-a+dotprod+i8mm+sve"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/convolve_sve2.c"
+          ],
+          "build_options": [
+            "-march=armv9-a+i8mm+sve2"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/highbd_compound_convolve_sve2.c"
+          ],
+          "build_options": [
+            "-march=armv9-a+i8mm+sve2"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libaom/av1/common/arm/highbd_convolve_sve2.c"
+          ],
+          "build_options": [
+            "-march=armv9-a+i8mm+sve2"
+          ]
+        },
+        {
+          "files": [
+            "lib/image/libwebp/**_sse41.c"
+          ],
+          "build_options": [
+            "-msse4.1"
+          ]
+        }
+      ],
+      "source_sets": [
+        {
+          "architectures": [
+            "arm64"
+          ],
+          "source_files": [
+            "lib/image/libaom/aom_dsp/arm/aom_convolve8_neon.c",
+            "lib/image/libaom/aom_dsp/arm/aom_convolve8_neon_dotprod.c",
+            "lib/image/libaom/aom_dsp/arm/aom_convolve8_neon_i8mm.c",
+            "lib/image/libaom/aom_dsp/arm/aom_convolve_copy_neon.c",
+            "lib/image/libaom/aom_dsp/arm/aom_scaled_convolve8_neon.c",
+            "lib/image/libaom/aom_dsp/arm/aom_scaled_convolve8_neon_dotprod.c",
+            "lib/image/libaom/aom_dsp/arm/aom_scaled_convolve8_neon_i8mm.c",
+            "lib/image/libaom/aom_dsp/arm/avg_neon.c",
+            "lib/image/libaom/aom_dsp/arm/avg_pred_neon.c",
+            "lib/image/libaom/aom_dsp/arm/avg_sve.c",
+            "lib/image/libaom/aom_dsp/arm/blend_a64_mask_neon.c",
+            "lib/image/libaom/aom_dsp/arm/blk_sse_sum_neon.c",
+            "lib/image/libaom/aom_dsp/arm/blk_sse_sum_sve.c",
+            "lib/image/libaom/aom_dsp/arm/fwd_txfm_neon.c",
+            "lib/image/libaom/aom_dsp/arm/hadamard_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_avg_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_avg_pred_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_blend_a64_hmask_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_blend_a64_mask_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_blend_a64_vmask_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_convolve8_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_convolve8_sve.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_hadamard_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_intrapred_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_loopfilter_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_masked_sad_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_obmc_sad_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_obmc_variance_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_quantize_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_sad_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_sadxd_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_sse_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_sse_sve.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_subpel_variance_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_variance_neon.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_variance_neon_dotprod.c",
+            "lib/image/libaom/aom_dsp/arm/highbd_variance_sve.c",
+            "lib/image/libaom/aom_dsp/arm/intrapred_neon.c",
+            "lib/image/libaom/aom_dsp/arm/loopfilter_neon.c",
+            "lib/image/libaom/aom_dsp/arm/masked_sad_neon.c",
+            "lib/image/libaom/aom_dsp/arm/obmc_sad_neon.c",
+            "lib/image/libaom/aom_dsp/arm/obmc_variance_neon.c",
+            "lib/image/libaom/aom_dsp/arm/sad_neon.c",
+            "lib/image/libaom/aom_dsp/arm/sad_neon_dotprod.c",
+            "lib/image/libaom/aom_dsp/arm/sadxd_neon.c",
+            "lib/image/libaom/aom_dsp/arm/sadxd_neon_dotprod.c",
+            "lib/image/libaom/aom_dsp/arm/sse_neon.c",
+            "lib/image/libaom/aom_dsp/arm/sse_neon_dotprod.c",
+            "lib/image/libaom/aom_dsp/arm/subpel_variance_neon.c",
+            "lib/image/libaom/aom_dsp/arm/subtract_neon.c",
+            "lib/image/libaom/aom_dsp/arm/sum_squares_neon.c",
+            "lib/image/libaom/aom_dsp/arm/sum_squares_neon_dotprod.c",
+            "lib/image/libaom/aom_dsp/arm/sum_squares_sve.c",
+            "lib/image/libaom/aom_dsp/arm/variance_neon.c",
+            "lib/image/libaom/aom_dsp/arm/variance_neon_dotprod.c",
+            "lib/image/libaom/aom_dsp/flow_estimation/arm/disflow_neon.c",
+            "lib/image/libaom/aom_dsp/flow_estimation/arm/disflow_sve.c",
+            "lib/image/libaom/aom_ports/aarch64_cpudetect.c",
+            "lib/image/libaom/av1/common/arm/av1_convolve_horiz_rs_neon.c",
+            "lib/image/libaom/av1/common/arm/av1_convolve_scale_neon.c",
+            "lib/image/libaom/av1/common/arm/av1_convolve_scale_neon_dotprod.c",
+            "lib/image/libaom/av1/common/arm/av1_convolve_scale_neon_i8mm.c",
+            "lib/image/libaom/av1/common/arm/av1_inv_txfm_neon.c",
+            "lib/image/libaom/av1/common/arm/av1_txfm_neon.c",
+            "lib/image/libaom/av1/common/arm/blend_a64_hmask_neon.c",
+            "lib/image/libaom/av1/common/arm/blend_a64_vmask_neon.c",
+            "lib/image/libaom/av1/common/arm/cdef_block_neon.c",
+            "lib/image/libaom/av1/common/arm/cfl_neon.c",
+            "lib/image/libaom/av1/common/arm/compound_convolve_neon.c",
+            "lib/image/libaom/av1/common/arm/compound_convolve_neon_dotprod.c",
+            "lib/image/libaom/av1/common/arm/compound_convolve_neon_i8mm.c",
+            "lib/image/libaom/av1/common/arm/convolve_neon.c",
+            "lib/image/libaom/av1/common/arm/convolve_neon_dotprod.c",
+            "lib/image/libaom/av1/common/arm/convolve_neon_i8mm.c",
+            "lib/image/libaom/av1/common/arm/convolve_sve2.c",
+            "lib/image/libaom/av1/common/arm/highbd_compound_convolve_neon.c",
+            "lib/image/libaom/av1/common/arm/highbd_compound_convolve_sve2.c",
+            "lib/image/libaom/av1/common/arm/highbd_convolve_horiz_rs_neon.c",
+            "lib/image/libaom/av1/common/arm/highbd_convolve_neon.c",
+            "lib/image/libaom/av1/common/arm/highbd_convolve_scale_neon.c",
+            "lib/image/libaom/av1/common/arm/highbd_convolve_sve2.c",
+            "lib/image/libaom/av1/common/arm/highbd_inv_txfm_neon.c",
+            "lib/image/libaom/av1/common/arm/highbd_reconinter_neon.c",
+            "lib/image/libaom/av1/common/arm/highbd_reconintra_neon.c",
+            "lib/image/libaom/av1/common/arm/highbd_warp_plane_neon.c",
+            "lib/image/libaom/av1/common/arm/highbd_warp_plane_sve.c",
+            "lib/image/libaom/av1/common/arm/highbd_wiener_convolve_neon.c",
+            "lib/image/libaom/av1/common/arm/reconinter_neon.c",
+            "lib/image/libaom/av1/common/arm/reconintra_neon.c",
+            "lib/image/libaom/av1/common/arm/resize_neon.c",
+            "lib/image/libaom/av1/common/arm/resize_neon_dotprod.c",
+            "lib/image/libaom/av1/common/arm/resize_neon_i8mm.c",
+            "lib/image/libaom/av1/common/arm/selfguided_neon.c",
+            "lib/image/libaom/av1/common/arm/warp_plane_neon.c",
+            "lib/image/libaom/av1/common/arm/warp_plane_neon_i8mm.c",
+            "lib/image/libaom/av1/common/arm/warp_plane_sve.c",
+            "lib/image/libaom/av1/common/arm/wiener_convolve_neon.c",
+            "lib/image/libaom/av1/encoder/arm/av1_error_neon.c",
+            "lib/image/libaom/av1/encoder/arm/av1_error_sve.c",
+            "lib/image/libaom/av1/encoder/arm/av1_fwd_txfm2d_neon.c",
+            "lib/image/libaom/av1/encoder/arm/av1_highbd_quantize_neon.c",
+            "lib/image/libaom/av1/encoder/arm/av1_k_means_neon.c",
+            "lib/image/libaom/av1/encoder/arm/cnn_neon.c",
+            "lib/image/libaom/av1/encoder/arm/encodetxb_neon.c",
+            "lib/image/libaom/av1/encoder/arm/hash_arm_crc32.c",
+            "lib/image/libaom/av1/encoder/arm/highbd_fwd_txfm_neon.c",
+            "lib/image/libaom/av1/encoder/arm/highbd_pickrst_neon.c",
+            "lib/image/libaom/av1/encoder/arm/highbd_pickrst_sve.c",
+            "lib/image/libaom/av1/encoder/arm/highbd_rdopt_neon.c",
+            "lib/image/libaom/av1/encoder/arm/highbd_temporal_filter_neon.c",
+            "lib/image/libaom/av1/encoder/arm/hybrid_fwd_txfm_neon.c",
+            "lib/image/libaom/av1/encoder/arm/ml_neon.c",
+            "lib/image/libaom/av1/encoder/arm/pickrst_neon.c",
+            "lib/image/libaom/av1/encoder/arm/pickrst_sve.c",
+            "lib/image/libaom/av1/encoder/arm/quantize_neon.c",
+            "lib/image/libaom/av1/encoder/arm/rdopt_neon.c",
+            "lib/image/libaom/av1/encoder/arm/reconinter_enc_neon.c",
+            "lib/image/libaom/av1/encoder/arm/temporal_filter_neon.c",
+            "lib/image/libaom/av1/encoder/arm/temporal_filter_neon_dotprod.c",
+            "lib/image/libaom/av1/encoder/arm/wedge_utils_neon.c",
+            "lib/image/libaom/av1/encoder/arm/wedge_utils_sve.c",
+            "lib/image/libjpeg-turbo/simd/arm/aarch64/jchuff-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/aarch64/jsimd.c",
+            "lib/image/libjpeg-turbo/simd/arm/jccolor-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jcgray-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jcphuff-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jcsample-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jdcolor-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jdmerge-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jdsample-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jfdctfst-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jfdctint-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jidctfst-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jidctint-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jidctred-neon.c",
+            "lib/image/libjpeg-turbo/simd/arm/jquanti-neon.c",
+            "lib/image/libpng/arm/arm_init.c",
+            "lib/image/libpng/arm/filter_neon_intrinsics.c",
+            "lib/image/libpng/arm/palette_neon_intrinsics.c",
+            "lib/image/libwebp/sharpyuv/sharpyuv_neon.c",
+            "lib/image/libwebp/src/dsp/alpha_processing_neon.c",
+            "lib/image/libwebp/src/dsp/cost_neon.c",
+            "lib/image/libwebp/src/dsp/dec_neon.c",
+            "lib/image/libwebp/src/dsp/enc_neon.c",
+            "lib/image/libwebp/src/dsp/filters_neon.c",
+            "lib/image/libwebp/src/dsp/lossless_enc_neon.c",
+            "lib/image/libwebp/src/dsp/lossless_neon.c",
+            "lib/image/libwebp/src/dsp/rescaler_neon.c",
+            "lib/image/libwebp/src/dsp/upsampling_neon.c",
+            "lib/image/libwebp/src/dsp/yuv_neon.c"
+          ],
+          "includes": [
+            "build_temp/image-config/aom/arm64",
+            "build_temp/image-config/jpeg-arm"
+          ],
+          "file_rules": [
+            {
+              "files": [
+                "lib/image/libjpeg-turbo/**.c"
+              ],
+              "defines": [
+                "NEON_INTRINSICS"
+              ]
+            }
+          ]
+        },
+        {
+          "architectures": [
+            "x86_64"
+          ],
+          "source_files": [
+            "lib/image/libpng/intel/filter_sse2_intrinsics.c",
+            "lib/image/libpng/intel/intel_init.c",
+            "lib/image/libwebp/sharpyuv/sharpyuv_sse2.c",
+            "lib/image/libwebp/src/dsp/alpha_processing_sse2.c",
+            "lib/image/libwebp/src/dsp/alpha_processing_sse41.c",
+            "lib/image/libwebp/src/dsp/cost_sse2.c",
+            "lib/image/libwebp/src/dsp/dec_sse2.c",
+            "lib/image/libwebp/src/dsp/dec_sse41.c",
+            "lib/image/libwebp/src/dsp/enc_sse2.c",
+            "lib/image/libwebp/src/dsp/enc_sse41.c",
+            "lib/image/libwebp/src/dsp/filters_sse2.c",
+            "lib/image/libwebp/src/dsp/lossless_enc_sse2.c",
+            "lib/image/libwebp/src/dsp/lossless_enc_sse41.c",
+            "lib/image/libwebp/src/dsp/lossless_sse2.c",
+            "lib/image/libwebp/src/dsp/lossless_sse41.c",
+            "lib/image/libwebp/src/dsp/rescaler_sse2.c",
+            "lib/image/libwebp/src/dsp/ssim_sse2.c",
+            "lib/image/libwebp/src/dsp/upsampling_sse2.c",
+            "lib/image/libwebp/src/dsp/upsampling_sse41.c",
+            "lib/image/libwebp/src/dsp/yuv_sse2.c",
+            "lib/image/libwebp/src/dsp/yuv_sse41.c"
+          ],
+          "includes": [
+            "build_temp/image-config/aom/generic"
+          ],
+          "file_rules": [
+            {
+              "files": [
+                "lib/image/libpng/**.c"
+              ],
+              "defines": [
+                "PNG_INTEL_SSE_OPT=1",
+                "PNG_INTEL_SSE_IMPLEMENTATION=1"
+              ]
+            }
+          ]
+        },
+        {
+          "platforms": [
+            "macos",
+            "linux"
+          ],
+          "source_files": [
+            "lib/image/libtiff/libtiff/tif_unix.c"
+          ]
+        },
+        {
+          "platforms": [
+            "windows"
+          ],
+          "source_files": [
+            "lib/image/libtiff/libtiff/tif_win32.c"
+          ]
+        }
+      ]
+    },
+    {
       "name": "rdb-drivers",
       "description": "External RDB driver Jube module: PostgreSQL + MySQL/MariaDB (vibe/Lambda_IO_RDB.md section 13)",
       "lang": "c++17",
@@ -461,7 +1461,8 @@
         "lib/font/woff2/*.cpp",
         "lib/grep/*.cpp",
         "lib/fts/*.cpp",
-        "lib/physics/*.c"
+        "lib/physics/*.c",
+        "lib/image/*.cpp"
       ],
       "exclude_patterns": [
         "lib/clock_compat.c",
@@ -478,15 +1479,12 @@
         "mbedx509",
         "mbedcrypto",
         "libuv",
-        "zlib",
         "brotlidec",
         "brotlicommon",
         "ThorVG",
-        "png",
-        "turbojpeg",
-        "webp",
-        "gif",
-        "pthread"
+        "pthread",
+        "image-codecs",
+        "zlib"
       ],
       "linux": {
         "additional_libraries": [
@@ -513,19 +1511,13 @@
           "rpcrt4",
           "wsock32",
           "secur32",
-          "wldap32",
-          "sharpyuv"
+          "wldap32"
         ]
       },
       "defines": [
         "UTF8PROC_STATIC",
         "MEMPOOL_RUNTIME_VM_PROVIDER"
-      ],
-      "macos": {
-        "additional_libraries": [
-          "sharpyuv"
-        ]
-      }
+      ]
     },
     {
       "name": "lambda-data",
@@ -599,7 +1591,8 @@
         "lambda/input/html5/html5_parser.cpp",
         "lambda/input/html5/html5_token.cpp",
         "lib/rdb_sqlite.c",
-        "lambda/core/physics_scene.cpp"
+        "lambda/core/physics_scene.cpp",
+        "lambda/io/image_io.cpp"
       ],
       "libraries": [
         "lambda-lib",
@@ -869,7 +1862,7 @@
         "lambda-data",
         "lambda-lib",
         "mir",
-        "gif",
+        "image-codecs",
         "re2",
         "mpdec",
         "utf8proc",
@@ -884,9 +1877,6 @@
         "libuv",
         "pthread",
         "ThorVG",
-        "png",
-        "turbojpeg",
-        "webp",
         "glfw"
       ],
       "target_name": "lambda-static",
@@ -895,17 +1885,7 @@
       "link_options_macos": [
         "-mmacosx-version-min=15.7"
       ],
-      "link": "executable",
-      "macos": {
-        "additional_libraries": [
-          "sharpyuv"
-        ]
-      },
-      "windows": {
-        "additional_libraries": [
-          "sharpyuv"
-        ]
-      }
+      "link": "executable"
     },
     {
       "name": "lambda-cst",
@@ -993,9 +1973,7 @@
         "fribidi",
         "ThorVG",
         "glfw",
-        "png",
-        "turbojpeg",
-        "webp",
+        "image-codecs",
         "pthread"
       ],
       "linux": {
@@ -1015,17 +1993,9 @@
       "windows": {
         "exclude_libraries": [
           "fribidi"
-        ],
-        "additional_libraries": [
-          "sharpyuv"
         ]
       },
-      "link": "static",
-      "macos": {
-        "additional_libraries": [
-          "sharpyuv"
-        ]
-      }
+      "link": "static"
     }
   ],
   "static_module_validation": {
@@ -1066,24 +2036,8 @@
       "lib": "-lbrotlicommon",
       "link": "dynamic"
     },
-    "png": {
-      "lib": "-lpng16",
-      "link": "dynamic"
-    },
-    "turbojpeg": {
-      "lib": "-lturbojpeg",
-      "link": "dynamic"
-    },
-    "gif": {
-      "lib": "-lgif",
-      "link": "dynamic"
-    },
     "nghttp2": {
       "lib": "-lnghttp2",
-      "link": "dynamic"
-    },
-    "webp": {
-      "lib": "-lwebp",
       "link": "dynamic"
     }
   },
@@ -1254,6 +2208,7 @@
       "output": "lambda-cli.exe",
       "source_dirs": [
         "lib",
+        "lib/image",
         "lib/physics",
         "lib/grep",
         "lib/fts",
@@ -1609,21 +2564,6 @@
           "link": "static"
         },
         {
-          "name": "png",
-          "lib": "/clang64/lib/libpng.a",
-          "link": "static"
-        },
-        {
-          "name": "turbojpeg",
-          "lib": "/clang64/lib/libturbojpeg.a",
-          "link": "static"
-        },
-        {
-          "name": "gif",
-          "lib": "/clang64/lib/libgif.a",
-          "link": "static"
-        },
-        {
           "name": "opengl32",
           "lib": "-lopengl32",
           "link": "dynamic"
@@ -1632,18 +2572,6 @@
           "name": "omp",
           "description": "LLVM OpenMP library (required by ThorVG)",
           "lib": "/clang64/lib/libomp.a",
-          "link": "static"
-        },
-        {
-          "name": "webp",
-          "description": "WebP image library (required by ThorVG)",
-          "lib": "/clang64/lib/libwebp.a",
-          "link": "static"
-        },
-        {
-          "name": "sharpyuv",
-          "description": "SharpYUV companion required by static WebP encoders",
-          "lib": "/clang64/lib/libsharpyuv.a",
           "link": "static"
         },
         {
@@ -1656,12 +2584,6 @@
           "name": "brotlicommon",
           "description": "Brotli common (WOFF2 dependency)",
           "lib": "/clang64/lib/libbrotlicommon.a",
-          "link": "static"
-        },
-        {
-          "name": "zlib",
-          "description": "Compression library (used by image/font codecs)",
-          "lib": "/clang64/lib/libz.a",
           "link": "static"
         },
         {
@@ -1695,6 +2617,12 @@
           "name": "userenv",
           "lib": "-luserenv",
           "link": "dynamic"
+        },
+        {
+          "name": "zlib",
+          "description": "Compression library (used by image/font codecs)",
+          "lib": "/clang64/lib/libz.a",
+          "link": "static"
         }
       ],
       "dev_libraries": [
@@ -1754,7 +2682,6 @@
       ],
       "includes": [
         "/usr/include",
-        "/usr/include/libpng16",
         "/usr/include/at-spi2-atk/2.0",
         "/usr/include/at-spi-2.0",
         "/usr/include/dbus-1.0",
@@ -1849,12 +2776,6 @@
           "link": "static"
         },
         {
-          "name": "zlib",
-          "description": "Compression library",
-          "lib": "-lz",
-          "link": "dynamic"
-        },
-        {
           "name": "bzip2",
           "lib": "-lbz2",
           "link": "dynamic"
@@ -1871,27 +2792,6 @@
           "include": "/usr/include",
           "lib": "-lglfw",
           "link": "dynamic"
-        },
-        {
-          "name": "png",
-          "lib": "/usr/lib/${multiarch}/libpng.a",
-          "link": "static"
-        },
-        {
-          "name": "turbojpeg",
-          "lib": "/usr/lib/${multiarch}/libturbojpeg.a",
-          "link": "static"
-        },
-        {
-          "name": "gif",
-          "lib": "/usr/lib/${multiarch}/libgif.a",
-          "link": "static"
-        },
-        {
-          "name": "webp",
-          "include": "/usr/include",
-          "lib": "/usr/lib/${multiarch}/libwebp.a",
-          "link": "static"
         },
         {
           "name": "libuv",
@@ -1974,6 +2874,12 @@
           "include": "/usr/include/webkitgtk-4.1",
           "lib": "-ljavascriptcoregtk-4.1",
           "link": "dynamic"
+        },
+        {
+          "name": "zlib",
+          "description": "Compression library",
+          "lib": "-lz",
+          "link": "dynamic"
         }
       ],
       "dev_libraries": [
@@ -2015,7 +2921,6 @@
       "additional_source_files": [],
       "includes": [
         "/opt/homebrew/include",
-        "/opt/homebrew/include/libpng16",
         "/usr/local/include"
       ],
       "flags": [
@@ -3381,6 +4286,18 @@
             ],
             "binary": "test_physics_gtest.exe",
             "icon": "\u2699\ufe0f"
+          },
+          {
+            "source": "test_image_io_gtest.cpp",
+            "name": "Common Image IO Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_image_io_gtest.exe"
           }
         ],
         "type": "library"
@@ -3783,10 +4700,7 @@
             "libraries": [
               "gtest",
               "gtest_main",
-              "gif",
-              "png",
-              "turbojpeg",
-              "webp",
+              "image-codecs",
               "zlib"
             ],
             "additional_sources": [
@@ -3794,7 +4708,6 @@
               "test/test_animation_host_stubs.cpp",
               "radiant/image_surface_generation.cpp",
               "radiant/gif_player.cpp",
-              "lib/image.c",
               "test/test_media_player_stubs.cpp"
             ],
             "binary": "test_gif_player_gtest.exe",
@@ -3855,21 +4768,19 @@
               "gtest",
               "gtest_main",
               "ThorVG",
-              "png",
-              "turbojpeg",
-              "webp",
+              "image-codecs",
               "zlib",
               "gomp"
             ],
             "macos": {
               "exclude_libraries": [
-                "webp",
+                "image-codecs",
                 "gomp"
               ]
             },
             "linux": {
               "exclude_libraries": [
-                "webp"
+                "image-codecs"
               ]
             },
             "additional_sources": [
@@ -4044,7 +4955,9 @@
             "category": "baseline",
             "parallel": true,
             "worker_slots": 2,
-            "worker_args": ["--jobs"],
+            "worker_args": [
+              "--jobs"
+            ],
             "dependencies": [],
             "binary": "test_wpt_input_events_gtest.exe",
             "libraries": [
@@ -4139,7 +5052,9 @@
             "source": "test/test_page_load_gtest.cpp",
             "name": "Page Load Tests",
             "worker_slots": 2,
-            "worker_args": ["--jobs"],
+            "worker_args": [
+              "--jobs"
+            ],
             "dependencies": [
               "lambda-lib"
             ],
@@ -4154,7 +5069,9 @@
           {
             "source": "test/test_radiant_view_gtest.cpp",
             "name": "Radiant View Tests",
-            "artifact_dirs": ["radiant_view"],
+            "artifact_dirs": [
+              "radiant_view"
+            ],
             "additional_sources": [
               "test/test_radiant_view_scene3d.cpp"
             ],
@@ -4181,7 +5098,9 @@
             "source": "test/test_layout_fuzzy_gtest.cpp",
             "name": "Layout Fuzzy Tests",
             "worker_slots": 2,
-            "worker_args": ["--jobs"],
+            "worker_args": [
+              "--jobs"
+            ],
             "dependencies": [
               "lambda-lib"
             ],
@@ -4493,8 +5412,13 @@
           {
             "source": "test_input_eps_gtest.cpp",
             "name": "Input EPS Parser Tests",
-            "dependencies": ["lambda-data"],
-            "libraries": ["gtest", "gtest_main"],
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
             "binary": "test_input_eps_gtest.exe"
           },
           {
@@ -4519,15 +5443,10 @@
             "libraries": [
               "gtest",
               "gtest_main",
-              "gif",
-              "png",
-              "turbojpeg",
-              "webp",
+              "image-codecs",
               "zlib"
             ],
-            "additional_sources": [
-              "lib/image.c"
-            ],
+            "additional_sources": [],
             "binary": "test_pdf_render_visual_gtest.exe",
             "icon": "\ud83d\udcd5"
           },
@@ -5512,7 +6431,7 @@
                 "WebKit"
               ]
             },
-            "icon": "⌨"
+            "icon": "\u2328"
           },
           {
             "source": "test/test_mir_gc_stress_gtest.cpp",
@@ -6334,6 +7253,901 @@
           "render"
         ],
         "parallel": false
+      }
+    ]
+  },
+  "image_codecs": {
+    "generated_files": [
+      {
+        "path": "build_temp/image-config/include/pnglibconf.h",
+        "preamble": [
+          "#pragma once",
+          "/* libpng feature profile; upstream notices remain in png.h and LICENSE. */"
+        ],
+        "defines": {
+          "PNG_16BIT_SUPPORTED": "",
+          "PNG_ALIGNED_MEMORY_SUPPORTED": "",
+          "PNG_BENIGN_ERRORS_SUPPORTED": "",
+          "PNG_BENIGN_READ_ERRORS_SUPPORTED": "",
+          "PNG_BUILD_GRAYSCALE_PALETTE_SUPPORTED": "",
+          "PNG_CHECK_FOR_INVALID_INDEX_SUPPORTED": "",
+          "PNG_COLORSPACE_SUPPORTED": "",
+          "PNG_CONSOLE_IO_SUPPORTED": "",
+          "PNG_CONVERT_tIME_SUPPORTED": "",
+          "PNG_EASY_ACCESS_SUPPORTED": "",
+          "PNG_ERROR_TEXT_SUPPORTED": "",
+          "PNG_FIXED_POINT_SUPPORTED": "",
+          "PNG_FLOATING_ARITHMETIC_SUPPORTED": "",
+          "PNG_FLOATING_POINT_SUPPORTED": "",
+          "PNG_FORMAT_AFIRST_SUPPORTED": "",
+          "PNG_FORMAT_BGR_SUPPORTED": "",
+          "PNG_GAMMA_SUPPORTED": "",
+          "PNG_GET_PALETTE_MAX_SUPPORTED": "",
+          "PNG_HANDLE_AS_UNKNOWN_SUPPORTED": "",
+          "PNG_INCH_CONVERSIONS_SUPPORTED": "",
+          "PNG_INFO_IMAGE_SUPPORTED": "",
+          "PNG_IO_STATE_SUPPORTED": "",
+          "PNG_MNG_FEATURES_SUPPORTED": "",
+          "PNG_POINTER_INDEXING_SUPPORTED": "",
+          "PNG_PROGRESSIVE_READ_SUPPORTED": "",
+          "PNG_READ_16BIT_SUPPORTED": "",
+          "PNG_READ_ALPHA_MODE_SUPPORTED": "",
+          "PNG_READ_ANCILLARY_CHUNKS_SUPPORTED": "",
+          "PNG_READ_BACKGROUND_SUPPORTED": "",
+          "PNG_READ_BGR_SUPPORTED": "",
+          "PNG_READ_CHECK_FOR_INVALID_INDEX_SUPPORTED": "",
+          "PNG_READ_COMPOSITE_NODIV_SUPPORTED": "",
+          "PNG_READ_COMPRESSED_TEXT_SUPPORTED": "",
+          "PNG_READ_EXPAND_16_SUPPORTED": "",
+          "PNG_READ_EXPAND_SUPPORTED": "",
+          "PNG_READ_FILLER_SUPPORTED": "",
+          "PNG_READ_GAMMA_SUPPORTED": "",
+          "PNG_READ_GET_PALETTE_MAX_SUPPORTED": "",
+          "PNG_READ_GRAY_TO_RGB_SUPPORTED": "",
+          "PNG_READ_INTERLACING_SUPPORTED": "",
+          "PNG_READ_INT_FUNCTIONS_SUPPORTED": "",
+          "PNG_READ_INVERT_ALPHA_SUPPORTED": "",
+          "PNG_READ_INVERT_SUPPORTED": "",
+          "PNG_READ_OPT_PLTE_SUPPORTED": "",
+          "PNG_READ_PACKSWAP_SUPPORTED": "",
+          "PNG_READ_PACK_SUPPORTED": "",
+          "PNG_READ_QUANTIZE_SUPPORTED": "",
+          "PNG_READ_RGB_TO_GRAY_SUPPORTED": "",
+          "PNG_READ_SCALE_16_TO_8_SUPPORTED": "",
+          "PNG_READ_SHIFT_SUPPORTED": "",
+          "PNG_READ_STRIP_16_TO_8_SUPPORTED": "",
+          "PNG_READ_STRIP_ALPHA_SUPPORTED": "",
+          "PNG_READ_SUPPORTED": "",
+          "PNG_READ_SWAP_ALPHA_SUPPORTED": "",
+          "PNG_READ_SWAP_SUPPORTED": "",
+          "PNG_READ_TEXT_SUPPORTED": "",
+          "PNG_READ_TRANSFORMS_SUPPORTED": "",
+          "PNG_READ_UNKNOWN_CHUNKS_SUPPORTED": "",
+          "PNG_READ_USER_CHUNKS_SUPPORTED": "",
+          "PNG_READ_USER_TRANSFORM_SUPPORTED": "",
+          "PNG_READ_bKGD_SUPPORTED": "",
+          "PNG_READ_cHRM_SUPPORTED": "",
+          "PNG_READ_cICP_SUPPORTED": "",
+          "PNG_READ_cLLI_SUPPORTED": "",
+          "PNG_READ_eXIf_SUPPORTED": "",
+          "PNG_READ_gAMA_SUPPORTED": "",
+          "PNG_READ_hIST_SUPPORTED": "",
+          "PNG_READ_iCCP_SUPPORTED": "",
+          "PNG_READ_iTXt_SUPPORTED": "",
+          "PNG_READ_mDCV_SUPPORTED": "",
+          "PNG_READ_oFFs_SUPPORTED": "",
+          "PNG_READ_pCAL_SUPPORTED": "",
+          "PNG_READ_pHYs_SUPPORTED": "",
+          "PNG_READ_sBIT_SUPPORTED": "",
+          "PNG_READ_sCAL_SUPPORTED": "",
+          "PNG_READ_sPLT_SUPPORTED": "",
+          "PNG_READ_sRGB_SUPPORTED": "",
+          "PNG_READ_tEXt_SUPPORTED": "",
+          "PNG_READ_tIME_SUPPORTED": "",
+          "PNG_READ_tRNS_SUPPORTED": "",
+          "PNG_READ_zTXt_SUPPORTED": "",
+          "PNG_SAVE_INT_32_SUPPORTED": "",
+          "PNG_SAVE_UNKNOWN_CHUNKS_SUPPORTED": "",
+          "PNG_SEQUENTIAL_READ_SUPPORTED": "",
+          "PNG_SETJMP_SUPPORTED": "",
+          "PNG_SET_OPTION_SUPPORTED": "",
+          "PNG_SET_UNKNOWN_CHUNKS_SUPPORTED": "",
+          "PNG_SET_USER_LIMITS_SUPPORTED": "",
+          "PNG_SIMPLIFIED_READ_AFIRST_SUPPORTED": "",
+          "PNG_SIMPLIFIED_READ_BGR_SUPPORTED": "",
+          "PNG_SIMPLIFIED_READ_SUPPORTED": "",
+          "PNG_SIMPLIFIED_WRITE_AFIRST_SUPPORTED": "",
+          "PNG_SIMPLIFIED_WRITE_BGR_SUPPORTED": "",
+          "PNG_SIMPLIFIED_WRITE_STDIO_SUPPORTED": "",
+          "PNG_SIMPLIFIED_WRITE_SUPPORTED": "",
+          "PNG_STDIO_SUPPORTED": "",
+          "PNG_STORE_UNKNOWN_CHUNKS_SUPPORTED": "",
+          "PNG_TEXT_SUPPORTED": "",
+          "PNG_TIME_RFC1123_SUPPORTED": "",
+          "PNG_UNKNOWN_CHUNKS_SUPPORTED": "",
+          "PNG_USER_CHUNKS_SUPPORTED": "",
+          "PNG_USER_LIMITS_SUPPORTED": "",
+          "PNG_USER_MEM_SUPPORTED": "",
+          "PNG_USER_TRANSFORM_INFO_SUPPORTED": "",
+          "PNG_USER_TRANSFORM_PTR_SUPPORTED": "",
+          "PNG_WARNINGS_SUPPORTED": "",
+          "PNG_WRITE_16BIT_SUPPORTED": "",
+          "PNG_WRITE_ANCILLARY_CHUNKS_SUPPORTED": "",
+          "PNG_WRITE_BGR_SUPPORTED": "",
+          "PNG_WRITE_CHECK_FOR_INVALID_INDEX_SUPPORTED": "",
+          "PNG_WRITE_COMPRESSED_TEXT_SUPPORTED": "",
+          "PNG_WRITE_CUSTOMIZE_COMPRESSION_SUPPORTED": "",
+          "PNG_WRITE_CUSTOMIZE_ZTXT_COMPRESSION_SUPPORTED": "",
+          "PNG_WRITE_FILLER_SUPPORTED": "",
+          "PNG_WRITE_FILTER_SUPPORTED": "",
+          "PNG_WRITE_FLUSH_SUPPORTED": "",
+          "PNG_WRITE_GET_PALETTE_MAX_SUPPORTED": "",
+          "PNG_WRITE_INTERLACING_SUPPORTED": "",
+          "PNG_WRITE_INT_FUNCTIONS_SUPPORTED": "",
+          "PNG_WRITE_INVERT_ALPHA_SUPPORTED": "",
+          "PNG_WRITE_INVERT_SUPPORTED": "",
+          "PNG_WRITE_OPTIMIZE_CMF_SUPPORTED": "",
+          "PNG_WRITE_PACKSWAP_SUPPORTED": "",
+          "PNG_WRITE_PACK_SUPPORTED": "",
+          "PNG_WRITE_SHIFT_SUPPORTED": "",
+          "PNG_WRITE_SUPPORTED": "",
+          "PNG_WRITE_SWAP_ALPHA_SUPPORTED": "",
+          "PNG_WRITE_SWAP_SUPPORTED": "",
+          "PNG_WRITE_TEXT_SUPPORTED": "",
+          "PNG_WRITE_TRANSFORMS_SUPPORTED": "",
+          "PNG_WRITE_UNKNOWN_CHUNKS_SUPPORTED": "",
+          "PNG_WRITE_USER_TRANSFORM_SUPPORTED": "",
+          "PNG_WRITE_WEIGHTED_FILTER_SUPPORTED": "",
+          "PNG_WRITE_bKGD_SUPPORTED": "",
+          "PNG_WRITE_cHRM_SUPPORTED": "",
+          "PNG_WRITE_cICP_SUPPORTED": "",
+          "PNG_WRITE_cLLI_SUPPORTED": "",
+          "PNG_WRITE_eXIf_SUPPORTED": "",
+          "PNG_WRITE_gAMA_SUPPORTED": "",
+          "PNG_WRITE_hIST_SUPPORTED": "",
+          "PNG_WRITE_iCCP_SUPPORTED": "",
+          "PNG_WRITE_iTXt_SUPPORTED": "",
+          "PNG_WRITE_mDCV_SUPPORTED": "",
+          "PNG_WRITE_oFFs_SUPPORTED": "",
+          "PNG_WRITE_pCAL_SUPPORTED": "",
+          "PNG_WRITE_pHYs_SUPPORTED": "",
+          "PNG_WRITE_sBIT_SUPPORTED": "",
+          "PNG_WRITE_sCAL_SUPPORTED": "",
+          "PNG_WRITE_sPLT_SUPPORTED": "",
+          "PNG_WRITE_sRGB_SUPPORTED": "",
+          "PNG_WRITE_tEXt_SUPPORTED": "",
+          "PNG_WRITE_tIME_SUPPORTED": "",
+          "PNG_WRITE_tRNS_SUPPORTED": "",
+          "PNG_WRITE_zTXt_SUPPORTED": "",
+          "PNG_bKGD_SUPPORTED": "",
+          "PNG_cHRM_SUPPORTED": "",
+          "PNG_cICP_SUPPORTED": "",
+          "PNG_cLLI_SUPPORTED": "",
+          "PNG_eXIf_SUPPORTED": "",
+          "PNG_gAMA_SUPPORTED": "",
+          "PNG_hIST_SUPPORTED": "",
+          "PNG_iCCP_SUPPORTED": "",
+          "PNG_iTXt_SUPPORTED": "",
+          "PNG_mDCV_SUPPORTED": "",
+          "PNG_oFFs_SUPPORTED": "",
+          "PNG_pCAL_SUPPORTED": "",
+          "PNG_pHYs_SUPPORTED": "",
+          "PNG_sBIT_SUPPORTED": "",
+          "PNG_sCAL_SUPPORTED": "",
+          "PNG_sPLT_SUPPORTED": "",
+          "PNG_sRGB_SUPPORTED": "",
+          "PNG_tEXt_SUPPORTED": "",
+          "PNG_tIME_SUPPORTED": "",
+          "PNG_tRNS_SUPPORTED": "",
+          "PNG_zTXt_SUPPORTED": "",
+          "PNG_API_RULE": "0",
+          "PNG_DEFAULT_READ_MACROS": "1",
+          "PNG_GAMMA_THRESHOLD_FIXED": "5000",
+          "PNG_IDAT_READ_SIZE": "PNG_ZBUF_SIZE",
+          "PNG_INFLATE_BUF_SIZE": "1024",
+          "PNG_LINKAGE_API": "extern",
+          "PNG_LINKAGE_CALLBACK": "extern",
+          "PNG_LINKAGE_DATA": "extern",
+          "PNG_LINKAGE_FUNCTION": "extern",
+          "PNG_MAX_GAMMA_8": "11",
+          "PNG_QUANTIZE_BLUE_BITS": "5",
+          "PNG_QUANTIZE_GREEN_BITS": "5",
+          "PNG_QUANTIZE_RED_BITS": "5",
+          "PNG_TEXT_Z_DEFAULT_COMPRESSION": "(-1)",
+          "PNG_TEXT_Z_DEFAULT_STRATEGY": "0",
+          "PNG_USER_CHUNK_CACHE_MAX": "1000",
+          "PNG_USER_CHUNK_MALLOC_MAX": "8000000",
+          "PNG_USER_HEIGHT_MAX": "1000000",
+          "PNG_USER_WIDTH_MAX": "1000000",
+          "PNG_ZBUF_SIZE": "8192",
+          "PNG_Z_DEFAULT_COMPRESSION": "(-1)",
+          "PNG_Z_DEFAULT_NOFILTER_STRATEGY": "0",
+          "PNG_Z_DEFAULT_STRATEGY": "1",
+          "PNG_sCAL_PRECISION": "5",
+          "PNG_sRGB_PROFILE_CHECKS": "2"
+        }
+      },
+      {
+        "path": "build_temp/image-config/include/jconfig.h",
+        "lines": [
+          "/* Version ID for the JPEG library.",
+          " * Might be useful for tests like \"#if JPEG_LIB_VERSION >= 60\".",
+          " */",
+          "#define JPEG_LIB_VERSION  62",
+          "",
+          "/* libjpeg-turbo version */",
+          "#define LIBJPEG_TURBO_VERSION  3.1.2",
+          "",
+          "/* libjpeg-turbo version in integer form */",
+          "#define LIBJPEG_TURBO_VERSION_NUMBER  3001002",
+          "",
+          "/* Support arithmetic encoding when using 8-bit samples */",
+          "#define C_ARITH_CODING_SUPPORTED 1",
+          "",
+          "/* Support arithmetic decoding when using 8-bit samples */",
+          "#define D_ARITH_CODING_SUPPORTED 1",
+          "",
+          "/* Support in-memory source/destination managers */",
+          "#define MEM_SRCDST_SUPPORTED  1",
+          "",
+          "/* Use accelerated SIMD routines when using 8-bit samples */",
+          "#if defined(__aarch64__) || defined(_M_ARM64)",
+          "#define WITH_SIMD 1",
+          "#endif",
+          "",
+          "/* This version of libjpeg-turbo supports run-time selection of data precision,",
+          " * so BITS_IN_JSAMPLE is no longer used to specify the data precision at build",
+          " * time.  However, some downstream software expects the macro to be defined.",
+          " * Since 12-bit data precision is an opt-in feature that requires explicitly",
+          " * calling 12-bit-specific libjpeg API functions and using 12-bit-specific data",
+          " * types, the unmodified portion of the libjpeg API still behaves as if it were",
+          " * built for 8-bit precision, and JSAMPLE is still literally an 8-bit data",
+          " * type.  Thus, it is correct to define BITS_IN_JSAMPLE to 8 here.",
+          " */",
+          "#ifndef BITS_IN_JSAMPLE",
+          "#define BITS_IN_JSAMPLE  8",
+          "#endif",
+          "",
+          "#ifdef _WIN32",
+          "",
+          "#undef RIGHT_SHIFT_IS_UNSIGNED",
+          "",
+          "/* Define \"boolean\" as unsigned char, not int, per Windows custom */",
+          "#ifndef __RPCNDR_H__            /* don't conflict if rpcndr.h already read */",
+          "typedef unsigned char boolean;",
+          "#endif",
+          "#define HAVE_BOOLEAN            /* prevent jmorecfg.h from redefining it */",
+          "",
+          "/* Define \"INT32\" as int, not long, per Windows custom */",
+          "#if !(defined(_BASETSD_H_) || defined(_BASETSD_H))   /* don't conflict if basetsd.h already read */",
+          "typedef short INT16;",
+          "typedef signed int INT32;",
+          "#endif",
+          "#define XMD_H                   /* prevent jmorecfg.h from redefining it */",
+          "",
+          "#else",
+          "",
+          "/* Define if your (broken) compiler shifts signed values as if they were",
+          "   unsigned. */",
+          "/* #undef RIGHT_SHIFT_IS_UNSIGNED */",
+          "",
+          "#endif"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/include/jconfigint.h",
+        "lines": [
+          "/* libjpeg-turbo build number */",
+          "#define BUILD  \"20261015\"",
+          "",
+          "/* How to hide global symbols. */",
+          "#define HIDDEN  __attribute__((visibility(\"hidden\")))",
+          "",
+          "/* Compiler's inline keyword */",
+          "#undef inline",
+          "",
+          "/* How to obtain function inlining. */",
+          "#define INLINE  __inline__ __attribute__((always_inline))",
+          "",
+          "/* How to obtain thread-local storage */",
+          "#define THREAD_LOCAL  __thread",
+          "",
+          "/* Define to the full name of this package. */",
+          "#define PACKAGE_NAME  \"libjpeg-turbo\"",
+          "",
+          "/* Version number of package */",
+          "#define VERSION  \"3.1.2\"",
+          "",
+          "/* The size of `size_t', as computed by sizeof. */",
+          "#define SIZEOF_SIZE_T  __SIZEOF_SIZE_T__",
+          "",
+          "/* Define if your compiler has __builtin_ctzl() and sizeof(unsigned long) == sizeof(size_t). */",
+          "#define HAVE_BUILTIN_CTZL",
+          "",
+          "/* Define to 1 if you have the <intrin.h> header file. */",
+          "/* #undef HAVE_INTRIN_H */",
+          "",
+          "#if defined(_MSC_VER) && defined(HAVE_INTRIN_H)",
+          "#if (SIZEOF_SIZE_T == 8)",
+          "#define HAVE_BITSCANFORWARD64",
+          "#elif (SIZEOF_SIZE_T == 4)",
+          "#define HAVE_BITSCANFORWARD",
+          "#endif",
+          "#endif",
+          "",
+          "#if defined(__has_attribute)",
+          "#if __has_attribute(fallthrough)",
+          "#define FALLTHROUGH  __attribute__((fallthrough));",
+          "#else",
+          "#define FALLTHROUGH",
+          "#endif",
+          "#else",
+          "#define FALLTHROUGH",
+          "#endif",
+          "",
+          "/*",
+          " * Define BITS_IN_JSAMPLE as either",
+          " *   8   for 8-bit sample values (the usual setting)",
+          " *   12  for 12-bit sample values",
+          " * Only 8 and 12 are legal data precisions for lossy JPEG according to the",
+          " * JPEG standard, and the IJG code does not support anything else!",
+          " */",
+          "",
+          "#ifndef BITS_IN_JSAMPLE",
+          "#define BITS_IN_JSAMPLE  8      /* use 8 or 12 */",
+          "#endif",
+          "",
+          "#undef C_ARITH_CODING_SUPPORTED",
+          "#undef D_ARITH_CODING_SUPPORTED",
+          "#undef WITH_SIMD",
+          "",
+          "#if BITS_IN_JSAMPLE == 8",
+          "",
+          "/* Support arithmetic encoding */",
+          "#define C_ARITH_CODING_SUPPORTED 1",
+          "",
+          "/* Support arithmetic decoding */",
+          "#define D_ARITH_CODING_SUPPORTED 1",
+          "",
+          "/* Use accelerated SIMD routines. */",
+          "#if defined(__aarch64__) || defined(_M_ARM64)",
+          "#define WITH_SIMD 1",
+          "#endif",
+          "",
+          "#endif"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/include/jversion.h",
+        "lines": [
+          "/*",
+          " * jversion.h",
+          " *",
+          " * This file was part of the Independent JPEG Group's software:",
+          " * Copyright (C) 1991-2020, Thomas G. Lane, Guido Vollbeding.",
+          " * libjpeg-turbo Modifications:",
+          " * Copyright (C) 2010, 2012-2024, D. R. Commander.",
+          " * For conditions of distribution and use, see the accompanying README.ijg",
+          " * file.",
+          " *",
+          " * This file contains software version identification.",
+          " */",
+          "",
+          "",
+          "#if JPEG_LIB_VERSION >= 80",
+          "",
+          "#define JVERSION        \"8d  15-Jan-2012\"",
+          "",
+          "#elif JPEG_LIB_VERSION >= 70",
+          "",
+          "#define JVERSION        \"7  27-Jun-2009\"",
+          "",
+          "#else",
+          "",
+          "#define JVERSION        \"6b  27-Mar-1998\"",
+          "",
+          "#endif",
+          "",
+          "/*",
+          " * NOTE: It is our convention to place the authors in the following order:",
+          " * - libjpeg-turbo authors (2009-) in descending order of the date of their",
+          " *   most recent contribution to the project, then in ascending order of the",
+          " *   date of their first contribution to the project, then in alphabetical",
+          " *   order",
+          " * - Upstream authors in descending order of the date of the first inclusion of",
+          " *   their code",
+          " */",
+          "",
+          "#define JCOPYRIGHT1 \\",
+          "  \"Copyright (C) 2009-2024 D. R. Commander\\n\" \\",
+          "  \"Copyright (C) 2015, 2020 Google, Inc.\\n\" \\",
+          "  \"Copyright (C) 2019-2020 Arm Limited\\n\" \\",
+          "  \"Copyright (C) 2015-2016, 2018 Matthieu Darbois\\n\" \\",
+          "  \"Copyright (C) 2011-2016 Siarhei Siamashka\\n\" \\",
+          "  \"Copyright (C) 2015 Intel Corporation\\n\"",
+          "#define JCOPYRIGHT2 \\",
+          "  \"Copyright (C) 2013-2014 Linaro Limited\\n\" \\",
+          "  \"Copyright (C) 2013-2014 MIPS Technologies, Inc.\\n\" \\",
+          "  \"Copyright (C) 2009, 2012 Pierre Ossman for Cendio AB\\n\" \\",
+          "  \"Copyright (C) 2009-2011 Nokia Corporation and/or its subsidiary(-ies)\\n\" \\",
+          "  \"Copyright (C) 1999-2006 MIYASAKA Masaru\\n\" \\",
+          "  \"Copyright (C) 1999 Ken Murchison\\n\" \\",
+          "  \"Copyright (C) 1991-2020 Thomas G. Lane, Guido Vollbeding\\n\"",
+          "",
+          "#define JCOPYRIGHT_SHORT \\",
+          "  \"Copyright (C) 1991-2025 The libjpeg-turbo Project and many others\""
+        ]
+      },
+      {
+        "path": "build_temp/image-config/jpeg-arm/neon-compat.h",
+        "lines": [
+          "/*",
+          " * Copyright (C) 2020, 2024, D. R. Commander.  All Rights Reserved.",
+          " * Copyright (C) 2020-2021, Arm Limited.  All Rights Reserved.",
+          " *",
+          " * This software is provided 'as-is', without any express or implied",
+          " * warranty.  In no event will the authors be held liable for any damages",
+          " * arising from the use of this software.",
+          " *",
+          " * Permission is granted to anyone to use this software for any purpose,",
+          " * including commercial applications, and to alter it and redistribute it",
+          " * freely, subject to the following restrictions:",
+          " *",
+          " * 1. The origin of this software must not be misrepresented; you must not",
+          " *    claim that you wrote the original software. If you use this software",
+          " *    in a product, an acknowledgment in the product documentation would be",
+          " *    appreciated but is not required.",
+          " * 2. Altered source versions must be plainly marked as such, and must not be",
+          " *    misrepresented as being the original software.",
+          " * 3. This notice may not be removed or altered from any source distribution.",
+          " */",
+          "",
+          "#define HAVE_VLD1_S16_X3",
+          "#define HAVE_VLD1_U16_X2",
+          "#define HAVE_VLD1Q_U8_X4",
+          "",
+          "/* Define compiler-independent count-leading-zeros and byte-swap macros */",
+          "#if defined(_MSC_VER) && !defined(__clang__)",
+          "#define BUILTIN_CLZ(x)  _CountLeadingZeros(x)",
+          "#define BUILTIN_CLZLL(x)  _CountLeadingZeros64(x)",
+          "#define BUILTIN_BSWAP64(x)  _byteswap_uint64(x)",
+          "#elif defined(__clang__) || defined(__GNUC__)",
+          "#define BUILTIN_CLZ(x)  __builtin_clz(x)",
+          "#define BUILTIN_CLZLL(x)  __builtin_clzll(x)",
+          "#define BUILTIN_BSWAP64(x)  __builtin_bswap64(x)",
+          "#else",
+          "#error \"Unknown compiler\"",
+          "#endif",
+          "",
+          "#if defined(__clang__)",
+          "#pragma clang diagnostic ignored \"-Wdeclaration-after-statement\"",
+          "#pragma clang diagnostic ignored \"-Wc99-extensions\"",
+          "#elif defined(__GNUC__)",
+          "#pragma GCC diagnostic ignored \"-Wdeclaration-after-statement\"",
+          "#pragma GCC diagnostic ignored \"-Wpedantic\"",
+          "#endif"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/webp/src/webp/config.h",
+        "preamble": [
+          "#pragma once"
+        ],
+        "defines": {
+          "HAVE_BUILTIN_BSWAP16": "1",
+          "HAVE_BUILTIN_BSWAP32": "1",
+          "HAVE_BUILTIN_BSWAP64": "1",
+          "WEBP_USE_THREAD": "1"
+        },
+        "lines": [
+          "#if defined(__aarch64__) || defined(_M_ARM64)",
+          "#define WEBP_HAVE_NEON",
+          "#elif defined(__x86_64__) || defined(_M_X64)",
+          "#define WEBP_HAVE_SSE2",
+          "#define WEBP_HAVE_SSE41",
+          "#endif"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/include/tiffconf.h",
+        "preamble": [
+          "#pragma once",
+          "#include <stddef.h>",
+          "#include <stdint.h>",
+          "#include <inttypes.h>"
+        ],
+        "defines": {
+          "TIFF_INT16_T": "int16_t",
+          "TIFF_INT32_T": "int32_t",
+          "TIFF_INT64_T": "int64_t",
+          "TIFF_INT8_T": "int8_t",
+          "TIFF_UINT16_T": "uint16_t",
+          "TIFF_UINT32_T": "uint32_t",
+          "TIFF_UINT64_T": "uint64_t",
+          "TIFF_UINT8_T": "uint8_t",
+          "TIFF_SSIZE_T": "ptrdiff_t",
+          "HAVE_IEEEFP": "1",
+          "HOST_FILLORDER": "FILLORDER_LSB2MSB",
+          "HOST_BIGENDIAN": "0",
+          "CCITT_SUPPORT": "1",
+          "JPEG_SUPPORT": "1",
+          "LOGLUV_SUPPORT": "1",
+          "LZW_SUPPORT": "1",
+          "NEXT_SUPPORT": "1",
+          "PACKBITS_SUPPORT": "1",
+          "PIXARLOG_SUPPORT": "1",
+          "THUNDER_SUPPORT": "1",
+          "ZIP_SUPPORT": "1",
+          "STRIPCHOP_DEFAULT": "TIFF_STRIPCHOP",
+          "SUBIFD_SUPPORT": "1",
+          "DEFAULT_EXTRASAMPLE_AS_ALPHA": "1",
+          "CHECK_JPEG_YCBCR_SUBSAMPLING": "1",
+          "MDI_SUPPORT": "1",
+          "COLORIMETRY_SUPPORT": "",
+          "YCBCR_SUPPORT": "",
+          "CMYK_SUPPORT": "",
+          "ICC_SUPPORT": "",
+          "PHOTOSHOP_SUPPORT": "",
+          "IPTC_SUPPORT": ""
+        }
+      },
+      {
+        "path": "build_temp/image-config/include/tif_config.h",
+        "preamble": [
+          "#pragma once",
+          "#include \"tiffconf.h\""
+        ],
+        "defines": {
+          "CCITT_SUPPORT": "1",
+          "CHECK_JPEG_YCBCR_SUBSAMPLING": "1",
+          "HAVE_ASSERT_H": "1",
+          "HAVE_FCNTL_H": "1",
+          "HAVE_SYS_TYPES_H": "1",
+          "HAVE_JPEGTURBO_DUAL_MODE_8_12": "1",
+          "LIBJPEG_12_PATH": "\"\"",
+          "PACKAGE": "\"LibTIFF Software\"",
+          "PACKAGE_BUGREPORT": "\"tiff@lists.osgeo.org\"",
+          "PACKAGE_NAME": "\"LibTIFF Software\"",
+          "PACKAGE_TARNAME": "\"tiff\"",
+          "PACKAGE_URL": "\"\"",
+          "SIZEOF_SIZE_T": "__SIZEOF_SIZE_T__",
+          "STRIP_SIZE_DEFAULT": "8192",
+          "TIFF_MAX_DIR_COUNT": "1048576",
+          "TIFF_SIZE_FORMAT": "\"zu\"",
+          "TIFF_SSIZE_FORMAT": "\"td\""
+        },
+        "lines": [
+          "#if defined(_WIN32)",
+          "#define USE_WIN32_FILEIO 1",
+          "#define HAVE_IO_H 1",
+          "#else",
+          "#define HAVE_UNISTD_H 1",
+          "#define HAVE_STRINGS_H 1",
+          "#define HAVE_MMAP 1",
+          "#define HAVE_FSEEKO 1",
+          "#endif"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/aom/arm64/config/aom_config.h",
+        "preamble": [
+          "#pragma once"
+        ],
+        "defines": {
+          "AOM_ARCH_AARCH64": "1",
+          "AOM_ARCH_ARM": "1",
+          "AOM_ARCH_PPC": "0",
+          "AOM_ARCH_RISCV": "0",
+          "AOM_ARCH_X86": "0",
+          "AOM_ARCH_X86_64": "0",
+          "CONFIG_ACCOUNTING": "0",
+          "CONFIG_ANALYZER": "0",
+          "CONFIG_AV1_DECODER": "1",
+          "CONFIG_AV1_ENCODER": "1",
+          "CONFIG_AV1_HIGHBITDEPTH": "1",
+          "CONFIG_AV1_TEMPORAL_DENOISING": "0",
+          "CONFIG_BIG_ENDIAN": "0",
+          "CONFIG_BITRATE_ACCURACY": "0",
+          "CONFIG_BITRATE_ACCURACY_BL": "0",
+          "CONFIG_BITSTREAM_DEBUG": "0",
+          "CONFIG_COEFFICIENT_RANGE_CHECKING": "0",
+          "CONFIG_COLLECT_COMPONENT_TIMING": "0",
+          "CONFIG_COLLECT_PARTITION_STATS": "0",
+          "CONFIG_COLLECT_RD_STATS": "0",
+          "CONFIG_CWG_C013": "0",
+          "CONFIG_CWG_E050": "0",
+          "CONFIG_DEBUG": "0",
+          "CONFIG_DENOISE": "1",
+          "CONFIG_DISABLE_FULL_PIXEL_SPLIT_8X8": "1",
+          "CONFIG_ENTROPY_STATS": "0",
+          "CONFIG_EXCLUDE_SIMD_MISMATCH": "0",
+          "CONFIG_FPMT_TEST": "0",
+          "CONFIG_GCC": "1",
+          "CONFIG_GCOV": "0",
+          "CONFIG_GPROF": "0",
+          "CONFIG_INSPECTION": "0",
+          "CONFIG_INTERNAL_STATS": "0",
+          "CONFIG_INTER_STATS_ONLY": "0",
+          "CONFIG_LIBVMAF_PSNR_PEAK": "1",
+          "CONFIG_LIBYUV": "0",
+          "CONFIG_MAX_DECODE_PROFILE": "2",
+          "CONFIG_MISMATCH_DEBUG": "0",
+          "CONFIG_MULTITHREAD": "1",
+          "CONFIG_NN_V2": "0",
+          "CONFIG_NORMAL_TILE_MODE": "0",
+          "CONFIG_OPTICAL_FLOW_API": "0",
+          "CONFIG_OS_SUPPORT": "1",
+          "CONFIG_OUTPUT_FRAME_SIZE": "0",
+          "CONFIG_PARTITION_SEARCH_ORDER": "0",
+          "CONFIG_PIC": "1",
+          "CONFIG_QUANT_MATRIX": "1",
+          "CONFIG_RATECTRL_LOG": "0",
+          "CONFIG_RD_COMMAND": "0",
+          "CONFIG_RD_DEBUG": "0",
+          "CONFIG_REALTIME_ONLY": "0",
+          "CONFIG_RT_ML_PARTITIONING": "0",
+          "CONFIG_RUNTIME_CPU_DETECT": "1",
+          "CONFIG_SALIENCY_MAP": "0",
+          "CONFIG_SHARED": "0",
+          "CONFIG_SIZE_LIMIT": "0",
+          "CONFIG_SPEED_STATS": "0",
+          "CONFIG_SVT_AV1": "0",
+          "CONFIG_TFLITE": "0",
+          "CONFIG_THREE_PASS": "0",
+          "CONFIG_TUNE_BUTTERAUGLI": "0",
+          "CONFIG_TUNE_VMAF": "0",
+          "CONFIG_WEBM_IO": "0",
+          "DECODE_HEIGHT_LIMIT": "0",
+          "DECODE_WIDTH_LIMIT": "0",
+          "FORCE_HIGHBITDEPTH_DECODING": "0",
+          "HAVE_ARM_CRC32": "1",
+          "HAVE_AVX": "0",
+          "HAVE_AVX2": "0",
+          "HAVE_FEXCEPT": "0",
+          "HAVE_MMX": "0",
+          "HAVE_NEON": "1",
+          "HAVE_NEON_DOTPROD": "1",
+          "HAVE_NEON_I8MM": "1",
+          "HAVE_PTHREAD_H": "1",
+          "HAVE_RVV": "0",
+          "HAVE_SSE": "0",
+          "HAVE_SSE2": "0",
+          "HAVE_SSE3": "0",
+          "HAVE_SSE4_1": "0",
+          "HAVE_SSE4_2": "0",
+          "HAVE_SSSE3": "0",
+          "HAVE_SVE": "1",
+          "HAVE_SVE2": "1",
+          "HAVE_UNISTD_H": "1",
+          "HAVE_VSX": "0",
+          "HAVE_WXWIDGETS": "0",
+          "STATIC_LINK_JXL": "0"
+        }
+      },
+      {
+        "path": "build_temp/image-config/aom/arm64/config/aom_version.h",
+        "lines": [
+          "/*",
+          " * Copyright (c) 2026, Alliance for Open Media. All rights reserved.",
+          " *",
+          " * This source code is subject to the terms of the BSD 2 Clause License and",
+          " * the Alliance for Open Media Patent License 1.0. If the BSD 2 Clause License",
+          " * was not distributed with this source code in the LICENSE file, you can",
+          " * obtain it at www.aomedia.org/license/software. If the Alliance for Open",
+          " * Media Patent License 1.0 was not distributed with this source code in the",
+          " * PATENTS file, you can obtain it at www.aomedia.org/license/patent.",
+          " */",
+          "",
+          "#ifndef AOM_VERSION_H_",
+          "#define AOM_VERSION_H_",
+          "#define VERSION_MAJOR 3",
+          "#define VERSION_MINOR 12",
+          "#define VERSION_PATCH 1",
+          "#define VERSION_EXTRA \"\"",
+          "#define VERSION_PACKED \\",
+          "  ((VERSION_MAJOR << 16) | (VERSION_MINOR << 8) | (VERSION_PATCH))",
+          "#define VERSION_STRING_NOSP \"v3.12.1\"",
+          "#define VERSION_STRING \" v3.12.1\"",
+          "#endif  // AOM_VERSION_H_"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/aom/generic/config/aom_config.h",
+        "preamble": [
+          "#pragma once"
+        ],
+        "defines": {
+          "AOM_ARCH_AARCH64": "0",
+          "AOM_ARCH_ARM": "0",
+          "AOM_ARCH_PPC": "0",
+          "AOM_ARCH_RISCV": "0",
+          "AOM_ARCH_X86": "0",
+          "AOM_ARCH_X86_64": "0",
+          "CONFIG_ACCOUNTING": "0",
+          "CONFIG_ANALYZER": "0",
+          "CONFIG_AV1_DECODER": "1",
+          "CONFIG_AV1_ENCODER": "1",
+          "CONFIG_AV1_HIGHBITDEPTH": "1",
+          "CONFIG_AV1_TEMPORAL_DENOISING": "0",
+          "CONFIG_BIG_ENDIAN": "0",
+          "CONFIG_BITRATE_ACCURACY": "0",
+          "CONFIG_BITRATE_ACCURACY_BL": "0",
+          "CONFIG_BITSTREAM_DEBUG": "0",
+          "CONFIG_COEFFICIENT_RANGE_CHECKING": "0",
+          "CONFIG_COLLECT_COMPONENT_TIMING": "0",
+          "CONFIG_COLLECT_PARTITION_STATS": "0",
+          "CONFIG_COLLECT_RD_STATS": "0",
+          "CONFIG_CWG_C013": "0",
+          "CONFIG_CWG_E050": "0",
+          "CONFIG_DEBUG": "0",
+          "CONFIG_DENOISE": "1",
+          "CONFIG_DISABLE_FULL_PIXEL_SPLIT_8X8": "1",
+          "CONFIG_ENTROPY_STATS": "0",
+          "CONFIG_EXCLUDE_SIMD_MISMATCH": "0",
+          "CONFIG_FPMT_TEST": "0",
+          "CONFIG_GCC": "1",
+          "CONFIG_GCOV": "0",
+          "CONFIG_GPROF": "0",
+          "CONFIG_INSPECTION": "0",
+          "CONFIG_INTERNAL_STATS": "0",
+          "CONFIG_INTER_STATS_ONLY": "0",
+          "CONFIG_LIBVMAF_PSNR_PEAK": "1",
+          "CONFIG_LIBYUV": "0",
+          "CONFIG_MAX_DECODE_PROFILE": "2",
+          "CONFIG_MISMATCH_DEBUG": "0",
+          "CONFIG_MULTITHREAD": "1",
+          "CONFIG_NN_V2": "0",
+          "CONFIG_NORMAL_TILE_MODE": "0",
+          "CONFIG_OPTICAL_FLOW_API": "0",
+          "CONFIG_OS_SUPPORT": "1",
+          "CONFIG_OUTPUT_FRAME_SIZE": "0",
+          "CONFIG_PARTITION_SEARCH_ORDER": "0",
+          "CONFIG_PIC": "1",
+          "CONFIG_QUANT_MATRIX": "1",
+          "CONFIG_RATECTRL_LOG": "0",
+          "CONFIG_RD_COMMAND": "0",
+          "CONFIG_RD_DEBUG": "0",
+          "CONFIG_REALTIME_ONLY": "0",
+          "CONFIG_RT_ML_PARTITIONING": "0",
+          "CONFIG_RUNTIME_CPU_DETECT": "0",
+          "CONFIG_SALIENCY_MAP": "0",
+          "CONFIG_SHARED": "0",
+          "CONFIG_SIZE_LIMIT": "0",
+          "CONFIG_SPEED_STATS": "0",
+          "CONFIG_SVT_AV1": "0",
+          "CONFIG_TFLITE": "0",
+          "CONFIG_THREE_PASS": "0",
+          "CONFIG_TUNE_BUTTERAUGLI": "0",
+          "CONFIG_TUNE_VMAF": "0",
+          "CONFIG_WEBM_IO": "0",
+          "DECODE_HEIGHT_LIMIT": "0",
+          "DECODE_WIDTH_LIMIT": "0",
+          "FORCE_HIGHBITDEPTH_DECODING": "0",
+          "HAVE_ARM_CRC32": "0",
+          "HAVE_AVX": "0",
+          "HAVE_AVX2": "0",
+          "HAVE_FEXCEPT": "0",
+          "HAVE_MMX": "0",
+          "HAVE_NEON": "0",
+          "HAVE_NEON_DOTPROD": "0",
+          "HAVE_NEON_I8MM": "0",
+          "HAVE_PTHREAD_H": "1",
+          "HAVE_RVV": "0",
+          "HAVE_SSE": "0",
+          "HAVE_SSE2": "0",
+          "HAVE_SSE3": "0",
+          "HAVE_SSE4_1": "0",
+          "HAVE_SSE4_2": "0",
+          "HAVE_SSSE3": "0",
+          "HAVE_SVE": "0",
+          "HAVE_SVE2": "0",
+          "HAVE_UNISTD_H": "1",
+          "HAVE_VSX": "0",
+          "HAVE_WXWIDGETS": "0",
+          "STATIC_LINK_JXL": "0"
+        }
+      },
+      {
+        "path": "build_temp/image-config/aom/generic/config/aom_version.h",
+        "lines": [
+          "/*",
+          " * Copyright (c) 2026, Alliance for Open Media. All rights reserved.",
+          " *",
+          " * This source code is subject to the terms of the BSD 2 Clause License and",
+          " * the Alliance for Open Media Patent License 1.0. If the BSD 2 Clause License",
+          " * was not distributed with this source code in the LICENSE file, you can",
+          " * obtain it at www.aomedia.org/license/software. If the Alliance for Open",
+          " * Media Patent License 1.0 was not distributed with this source code in the",
+          " * PATENTS file, you can obtain it at www.aomedia.org/license/patent.",
+          " */",
+          "",
+          "#ifndef AOM_VERSION_H_",
+          "#define AOM_VERSION_H_",
+          "#define VERSION_MAJOR 3",
+          "#define VERSION_MINOR 12",
+          "#define VERSION_PATCH 1",
+          "#define VERSION_EXTRA \"\"",
+          "#define VERSION_PACKED \\",
+          "  ((VERSION_MAJOR << 16) | (VERSION_MINOR << 8) | (VERSION_PATCH))",
+          "#define VERSION_STRING_NOSP \"v3.12.1\"",
+          "#define VERSION_STRING \" v3.12.1\"",
+          "#endif  // AOM_VERSION_H_"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/aom_build_config.c",
+        "lines": [
+          "#include \"aom/aom_codec.h\"",
+          "const char *aom_codec_build_config(void) { return \"Lambda build_lambda_config.json: still AV1 encode/decode\"; }"
+        ]
+      }
+    ],
+    "dispatch_generators": [
+      {
+        "path": "build_temp/image-config/aom/arm64/config/aom_dsp_rtcd.h",
+        "command": [
+          "perl",
+          "lib/image/libaom/rtcd.pl",
+          "--arch=arm64",
+          "--sym=aom_dsp_rtcd",
+          "--config=build_temp/image-config/aom/arm64/config/aom_config.h",
+          "lib/image/libaom/aom_dsp/aom_dsp_rtcd_defs.pl"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/aom/arm64/config/aom_scale_rtcd.h",
+        "command": [
+          "perl",
+          "lib/image/libaom/rtcd.pl",
+          "--arch=arm64",
+          "--sym=aom_scale_rtcd",
+          "--config=build_temp/image-config/aom/arm64/config/aom_config.h",
+          "lib/image/libaom/aom_scale/aom_scale_rtcd.pl"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/aom/arm64/config/av1_rtcd.h",
+        "command": [
+          "perl",
+          "lib/image/libaom/rtcd.pl",
+          "--arch=arm64",
+          "--sym=av1_rtcd",
+          "--config=build_temp/image-config/aom/arm64/config/aom_config.h",
+          "lib/image/libaom/av1/common/av1_rtcd_defs.pl"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/aom/generic/config/aom_dsp_rtcd.h",
+        "command": [
+          "perl",
+          "lib/image/libaom/rtcd.pl",
+          "--arch=generic",
+          "--sym=aom_dsp_rtcd",
+          "--config=build_temp/image-config/aom/generic/config/aom_config.h",
+          "lib/image/libaom/aom_dsp/aom_dsp_rtcd_defs.pl"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/aom/generic/config/aom_scale_rtcd.h",
+        "command": [
+          "perl",
+          "lib/image/libaom/rtcd.pl",
+          "--arch=generic",
+          "--sym=aom_scale_rtcd",
+          "--config=build_temp/image-config/aom/generic/config/aom_config.h",
+          "lib/image/libaom/aom_scale/aom_scale_rtcd.pl"
+        ]
+      },
+      {
+        "path": "build_temp/image-config/aom/generic/config/av1_rtcd.h",
+        "command": [
+          "perl",
+          "lib/image/libaom/rtcd.pl",
+          "--arch=generic",
+          "--sym=av1_rtcd",
+          "--config=build_temp/image-config/aom/generic/config/aom_config.h",
+          "lib/image/libaom/av1/common/av1_rtcd_defs.pl"
+        ]
       }
     ]
   }

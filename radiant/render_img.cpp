@@ -14,7 +14,6 @@ extern "C" {
 #include "../radiant/radiant.hpp"
 #include <stdio.h>
 #include <string.h>
-#include <turbojpeg.h>
 #ifndef _WIN32
 #include <sys/resource.h>
 #include <sys/time.h>
@@ -41,100 +40,19 @@ static inline int getrusage(int who, struct rusage* r) {
 #define RUSAGE_MAXRSS_TO_BYTES(v) ((size_t)(v) * 1024)
 #endif
 
-// Save surface to PNG using libpng
 void save_surface_to_png(ImageSurface* surface, const char* filename) {
-    StrBuf* png_bytes = render_encode_surface_png(surface);
-    if (!png_bytes) {
-        log_error("Failed to encode PNG surface");
-        return;
-    }
-    FILE* fp = fopen(filename, "wb");
-    if (!fp) {
-        log_error("Failed to open file for writing: %s", filename);
-        strbuf_free(png_bytes);
-        return;
-    }
-    size_t png_length = png_bytes->length;
-    size_t written = fwrite(png_bytes->str, 1, png_length, fp);
-    fclose(fp);
-    strbuf_free(png_bytes);
-    if (written == png_length) {
-        log_info("Successfully saved PNG: %s", filename);
-    } else {
-        log_error("Failed to write complete PNG: %s", filename);
-    }
+    ImageEncodeOptions options; image_encode_options_init(&options, IMAGE_CODEC_PNG); ImageError error = {};
+    if (render_save_surface_image(surface, filename, &options, &error) != IMAGE_OK)
+        log_error("IMAGE_IO: save PNG surface: %s", error.message);
 }
 
-// Save surface to JPEG using TurboJPEG
 bool save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quality) {
-    if (!surface || !surface->pixels || surface->width <= 0 || surface->height <= 0 || !filename) return false;
-    tjhandle tj_instance = tjInitCompress();
-    if (!tj_instance) {
-        log_error("Failed to initialize TurboJPEG compressor: %s", tjGetErrorStr());
-        return false;
-    }
-
-    // Convert RGBA to RGB (JPEG doesn't support alpha channel)
-    int width = surface->width;
-    int height = surface->height;
-    lam::Temp<unsigned char> rgb_buffer = lam::temp_array<unsigned char>(
-        (size_t)width * (size_t)height * 3, MEM_CAT_RENDER);
-    if (!rgb_buffer) {
-        log_error("Failed to allocate memory for RGB buffer");
-        tjDestroy(tj_instance);
-        return false;
-    }
-
-    // Convert RGBA pixels to RGB
-    uint8_t* src_pixels = (uint8_t*)surface->pixels;
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            // preview grids can exceed signed pixel-offset arithmetic even though each extent fits int.
-            size_t src_idx = (size_t)y * surface->pitch + (size_t)x * 4;
-            size_t dst_idx = ((size_t)y * width + x) * 3;
-
-            rgb_buffer[dst_idx + 0] = src_pixels[src_idx + 0]; // R
-            rgb_buffer[dst_idx + 1] = src_pixels[src_idx + 1]; // G
-            rgb_buffer[dst_idx + 2] = src_pixels[src_idx + 2]; // B
-            // Skip alpha channel
-        }
-    }
-
-    unsigned char* jpeg_buffer = NULL;
-    unsigned long jpeg_size = 0;
-
-    // Compress to JPEG
-    int result = tjCompress2(tj_instance, rgb_buffer.get(), width, 0, height, TJPF_RGB,
-                             &jpeg_buffer, &jpeg_size, TJSAMP_444, quality, TJFLAG_FASTDCT);
-
-    if (result != 0) {
-        log_error("TurboJPEG compression failed: %s", tjGetErrorStr());
-        if (jpeg_buffer) tjFree(jpeg_buffer);
-        tjDestroy(tj_instance);
-        return false;
-    }
-
-    // Write JPEG data to file
-    FILE* fp = fopen(filename, "wb");
-    if (!fp) {
-        log_error("Failed to open file for writing: %s", filename);
-        tjFree(jpeg_buffer);
-        tjDestroy(tj_instance);
-        return false;
-    }
-
-    size_t written = fwrite(jpeg_buffer, 1, jpeg_size, fp);
-    if (written != jpeg_size) {
-        log_error("Failed to write complete JPEG data to file: %s", filename);
-    } else {
-        log_info("Successfully saved JPEG: %s (quality: %d)", filename, quality);
-    }
-
-    // Clean up
-    bool closed = fclose(fp) == 0;
-    tjFree(jpeg_buffer);
-    tjDestroy(tj_instance);
-    return written == jpeg_size && closed;
+    ImageEncodeOptions options; image_encode_options_init(&options, IMAGE_CODEC_JPEG);
+    options.quality = quality; options.has_background = true; // retain the existing black alpha backdrop.
+    ImageError error = {};
+    ImageStatus status = render_save_surface_image(surface, filename, &options, &error);
+    if (status != IMAGE_OK) log_error("IMAGE_IO: save JPEG surface: %s", error.message);
+    return status == IMAGE_OK;
 }
 
 // Main function to layout HTML and render to PNG

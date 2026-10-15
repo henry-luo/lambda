@@ -1,3 +1,4 @@
+#include "../../io/image_io.h"
 #include "radiant_image_job.hpp"
 #include "radiant_dom_bridge.hpp"
 #include "../../runtime/image_process.hpp"

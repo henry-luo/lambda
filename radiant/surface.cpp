@@ -1,3 +1,4 @@
+#include "../lambda/io/image_io.h"
 #include "view.hpp"
 #include "render.hpp"
 #include "radiant.hpp"
@@ -154,42 +155,13 @@ static void image_surface_apply_svg_metadata(ImageSurface* surface,
     surface->generation = 1;
 }
 
-static int jpeg_exif_orientation_from_file(const char* file_path) {
-    if (!file_path) return 1;
-
-    FILE* fp = fopen(file_path, "rb");
-    if (!fp) return 1;
-
-    if (fseek(fp, 0, SEEK_END) != 0) {
-        fclose(fp);
-        return 1;
-    }
-    long file_size = ftell(fp);
-    if (file_size <= 0) {
-        fclose(fp);
-        return 1;
-    }
-    if (fseek(fp, 0, SEEK_SET) != 0) {
-        fclose(fp);
-        return 1;
-    }
-
-    lam::Temp<unsigned char> bytes = lam::temp_array<unsigned char>((size_t)file_size, MEM_CAT_IMAGE);
-    if (!bytes) {
-        fclose(fp);
-        return 1;
-    }
-    size_t read_count = fread(bytes.get(), 1, (size_t)file_size, fp);
-    fclose(fp);
-
-    int orientation = 1;
-    if (read_count == (size_t)file_size) {
-        orientation = image_jpeg_exif_orientation_from_memory(bytes.get(), (size_t)file_size);
-    }
-    return orientation;
+ImageFormat image_surface_format_from_codec(ImageCodecFormat format) {
+    static const ImageFormat formats[] = {IMAGE_FORMAT_UNKNOWN, IMAGE_FORMAT_PNG, IMAGE_FORMAT_JPEG,
+        IMAGE_FORMAT_GIF, IMAGE_FORMAT_WEBP, IMAGE_FORMAT_AVIF, IMAGE_FORMAT_BMP, IMAGE_FORMAT_TIFF, IMAGE_FORMAT_ICO};
+    return format >= IMAGE_CODEC_UNKNOWN && format <= IMAGE_CODEC_ICO ? formats[format] : IMAGE_FORMAT_UNKNOWN;
 }
 
-static void image_surface_apply_orientation_metadata(ImageSurface* surface, int orientation) {
+void image_surface_apply_orientation_metadata(ImageSurface* surface, int orientation) {
     if (!surface) return;
 
     surface->encoded_width = surface->width;
@@ -217,23 +189,27 @@ static void load_image_cleanup_failed(hashmap* cache, Url* abs_url, lam::Temp<ch
     image_cache_store_unavailable(cache, lam::Temp<char>(file_path.release()));
 }
 
+static ImageSurface* image_surface_from_decoded(ImageDecoded* decoded) {
+    if (!decoded->pixels) return nullptr;
+    ImageSurface* surface = image_surface_create_from((int)decoded->width, (int)decoded->height, decoded->pixels);
+    if (!surface) { image_decoded_dispose(decoded); return nullptr; }
+    surface->format = image_surface_format_from_codec(decoded->info.format);
+    decoded->pixels = nullptr; return surface;
+}
+
 ImageSurface* image_surface_decode_file(const char* path) {
-    if (!path || !*path) return nullptr;
-    int width = 0, height = 0, channels = 0;
-    unsigned char* pixels = image_load(path, &width, &height, &channels, 4);
-    if (!pixels) return nullptr;
-    ImageSurface* surface = image_surface_create_from(width, height, pixels);
-    if (!surface) image_free(pixels);
-    return surface;
+    ImageDecodeOptions options; image_decode_options_init(&options); options.normalize_orientation = false;
+    ImageDecoded decoded = {};
+    if (image_io_decode_path(nullptr, path, &options, &decoded, nullptr) != IMAGE_OK) return nullptr;
+    return image_surface_from_decoded(&decoded);
 }
 
 ImageSurface* image_surface_decode_data(const unsigned char* data, size_t length) {
-    int width = 0, height = 0, channels = 0;
-    unsigned char* pixels = image_load_from_memory(data, length, &width, &height, &channels);
-    if (!pixels) return nullptr;
-    ImageSurface* surface = image_surface_create_from(width, height, pixels);
-    if (!surface) image_free(pixels);
-    return surface;
+    ImageSource source = image_source_memory(data, length);
+    ImageDecodeOptions options; image_decode_options_init(&options); options.normalize_orientation = false;
+    ImageDecoded decoded = {};
+    if (image_decode(nullptr, &source, &options, &decoded, nullptr) != IMAGE_OK) return nullptr;
+    return image_surface_from_decoded(&decoded);
 }
 
 static bool image_path_has_declared_non_svg_extension(const char* file_path) {
@@ -395,13 +371,10 @@ static ImageSurface* load_image_resource(DomDocument* document, lam::Own<hashmap
             rdt_picture_get_size(surface->pic, &svg_w, &svg_h);
             image_surface_apply_svg_metadata(surface, svg_read_intrinsic_metadata(rdt_picture_get_svg_root(surface->pic)), svg_w, svg_h);
         } else {
-            int width, height;
-            int orientation = image_jpeg_exif_orientation_from_memory(decoded.get(), decoded_len);
-            if (!image_get_dimensions_from_memory(decoded.get(), decoded_len, &width, &height)) {
-                // Invalid inline payloads are common in scraped pages; probe
-                // before full decode so placeholders do not emit backend errors.
-                log_warn("image: unsupported data URI image, using placeholder");
-                return NULL;
+            ImageSource source = image_source_memory(decoded.get(), decoded_len);
+            ImageInfo info = {};
+            if (image_probe(nullptr, &source, &info, nullptr) != IMAGE_OK) {
+                log_warn("IMAGE_IO: unsupported inline image, using placeholder"); return NULL;
             }
             surface = image_surface_decode_data(decoded.get(), decoded_len);
             if (surface) inline_frames = gif_detect_animated_from_memory(decoded.get(), decoded_len);
@@ -410,17 +383,7 @@ static ImageSurface* load_image_resource(DomDocument* document, lam::Own<hashmap
                 log_warn("image: unsupported data URI image, using placeholder");
                 return NULL;
             }
-            // Detect format from MIME
-            if (strstr(img_url, "image/png")) surface->format = IMAGE_FORMAT_PNG;
-            else if (strstr(img_url, "image/jpeg") || strstr(img_url, "image/jpg")) surface->format = IMAGE_FORMAT_JPEG;
-            else if (strstr(img_url, "image/gif")) surface->format = IMAGE_FORMAT_GIF;
-            else if (strstr(img_url, "image/webp")) surface->format = IMAGE_FORMAT_WEBP;
-            else if (strstr(img_url, "image/svg")) surface->format = IMAGE_FORMAT_SVG;
-            if (surface->format == IMAGE_FORMAT_JPEG) {
-                image_surface_apply_orientation_metadata(surface, orientation);
-            } else {
-                image_surface_apply_orientation_metadata(surface, 1);
-            }
+            image_surface_apply_orientation_metadata(surface, info.orientation);
         }
         image_register_gif_animation(animation_ui, surface, inline_frames);
         char* cache_path = mem_strdup(img_url, MEM_CAT_RENDER);
@@ -655,79 +618,31 @@ static ImageSurface* load_image_resource(DomDocument* document, lam::Own<hashmap
         image_surface_apply_orientation_metadata(surface, 1);
     }
     else {
-        int width, height;
+        ImageInfo info = {}; ImageError error = {}; ImageStatus status;
         if (is_http && downloaded_data) {
-            // HTTP images: read dimensions from memory header, keep data for lazy decode
-            if (image_get_dimensions_from_memory(downloaded_data.get(), downloaded_size, &width, &height)) {
-                surface = image_surface_alloc();
-                surface->width = width;
-                surface->height = height;
-                {
-                    lam::SessionPtr<unsigned char> source_data(downloaded_data.release());
-                    radiant_take_image_source_data(surface, source_data, downloaded_size);
-                }
-                // pixels stays NULL — decoded on demand
-                log_debug("[image] Lazy load HTTP image: %dx%d (%zu bytes)", width, height, downloaded_size);
-            } else {
-                // Unsupported HTTP assets must enter the cached placeholder path
-                // instead of sending their opaque bytes to the raster decoder.
-                log_warn("image: unsupported HTTP image, using placeholder: %s", file_path.get());
-                downloaded_data.reset();
-                load_image_cleanup_failed(*cache, abs_url, file_path);
-                return NULL;
-            }
+            ImageSource source = image_source_memory(downloaded_data.get(), downloaded_size);
+            status = image_probe(nullptr, &source, &info, &error);
+        } else status = image_io_probe_path(nullptr, file_path.get(), &info, &error);
+        if (status != IMAGE_OK) {
+            log_warn("image: unsupported %s image, using placeholder: %s [%s]: %s",
+                is_http ? "HTTP" : "local", file_path.get(), image_status_name(status), error.message);
+            downloaded_data.reset(); load_image_cleanup_failed(*cache, abs_url, file_path); return NULL;
+        }
+        surface = image_surface_alloc();
+        surface->width = (int)info.width; surface->height = (int)info.height;
+        surface->format = image_surface_format_from_codec(info.format);
+        if (is_http && downloaded_data) {
+            lam::SessionPtr<unsigned char> source_data(downloaded_data.release());
+            radiant_take_image_source_data(surface, source_data, downloaded_size);
         } else {
-            // Local files: read dimensions from file header only
-            if (image_get_dimensions(file_path.get(), &width, &height)) {
-                surface = image_surface_alloc();
-                surface->width = width;
-                surface->height = height;
-                {
-                    lam::SessionPtr<char> source_path = lam::session_strdup(file_path.get(), MEM_CAT_IMAGE);
-                    radiant_take_image_source_path(surface, source_path);
-                }
-                // pixels stays NULL — decoded on demand
-                log_debug("[image] Lazy load local image: %dx%d from %s", width, height, file_path.get());
-            } else {
-                // Fallback: full decode if header read fails
-                surface = image_surface_decode_file(file_path.get());
-                if (!surface) {
-                    log_debug("failed to load image: %s", file_path.get());
-                    load_image_cleanup_failed(*cache, abs_url, file_path);
-                    return NULL;
-                }
-            }
+            lam::SessionPtr<char> source_path = lam::session_strdup(file_path.get(), MEM_CAT_IMAGE);
+            radiant_take_image_source_path(surface, source_path);
         }
-        if (slen > 5 && strcmp(file_path.get() + slen - 5, ".jpeg") == 0) {
-            surface->format = IMAGE_FORMAT_JPEG;
-        }
-        else if (slen > 4 && strcmp(file_path.get() + slen - 4, ".jpg") == 0) {
-            surface->format = IMAGE_FORMAT_JPEG;
-        }
-        else if (slen > 4 && strcmp(file_path.get() + slen - 4, ".png") == 0) {
-            surface->format = IMAGE_FORMAT_PNG;
-        }
-        else if (slen > 4 && strcmp(file_path.get() + slen - 4, ".gif") == 0) {
-            surface->format = IMAGE_FORMAT_GIF;
-        }
-        else if (slen > 5 && str_icmp_cstr(file_path.get() + slen - 5, ".webp") == 0) {
-            surface->format = IMAGE_FORMAT_WEBP;
-        }
-        if (surface->format == IMAGE_FORMAT_JPEG) {
-            int orientation = 1;
-            if (is_http && surface->source_data && surface->source_data_len > 0) {
-                orientation = image_jpeg_exif_orientation_from_memory(surface->source_data, surface->source_data_len);
-            } else {
-                orientation = jpeg_exif_orientation_from_file(file_path.get());
-            }
-            image_surface_apply_orientation_metadata(surface, orientation);
-            log_debug("[image] JPEG orientation: exif=%d encoded=%dx%d natural=%dx%d",
-                      surface->orientation, surface->encoded_width, surface->encoded_height,
-                      surface->width, surface->height);
-        } else {
-            image_surface_apply_orientation_metadata(surface, 1);
-        }
+        image_surface_apply_orientation_metadata(surface, info.orientation);
+        log_debug("IMAGE_IO: lazy image %ux%u, format %s", info.width, info.height,
+            image_codec_capabilities(info.format)->name);
     }
+
     surface->url = abs_url;
 
     // Detect animated GIF and register with animation scheduler

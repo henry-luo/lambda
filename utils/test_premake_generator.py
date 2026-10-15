@@ -32,12 +32,13 @@ def load_generator_module():
     return module
 
 
-def linux_validation_generator(module):
+def linux_validation_generator(module, architecture=None):
     # Supply the Linux toolchain facts instead of probing the host gcc/pkg-config,
     # so the Linux config validates on any host; these checks don't depend on their values.
     return module.PremakeGenerator(str(ROOT / "build_lambda_config.json"), "linux",
                                    linux_multiarch_triplet=TEST_MULTIARCH_TRIPLET,
-                                   linux_pkg_config_includes=[])
+                                   linux_pkg_config_includes=[],
+                                   target_architecture=architecture)
 
 
 def generate_validation_host(module, platform_name: str, dependencies=None) -> str:
@@ -161,8 +162,46 @@ def expect_host_export_list(module) -> None:
         fail("a host without the Jube loader still exports the allowlist")
 
 
+def expect_image_source_build(module) -> None:
+    for architecture in ('arm64', 'x86_64'):
+        generator = linux_validation_generator(module, architecture)
+        codec = next(t for t in generator.config['targets'] if t['name'] == 'lambda-image-codecs')
+        sources = codec['source_files']
+        if any('/mux/' in f or '/demux/' in f or f.endswith(('egif_lib.c', 'ratectrl_rtc.cc'))
+               for f in sources):
+            fail('image source target includes unused animation or standalone tool providers')
+        if not all((ROOT / f).is_file() for f in sources):
+            fail(f'{architecture} image target has missing sources')
+        arm_files = any('/arm/' in f or 'aarch64_cpudetect.c' in f for f in sources)
+        if arm_files != (architecture == 'arm64'):
+            fail(f'{architecture} image target selects the wrong SIMD source family')
+        generator._generate_complex_library(codec)
+        emitted = '\n'.join(generator.premake_content)
+        if architecture == 'arm64' and '-march=armv8.2-a+dotprod' not in emitted:
+            fail('AOM intrinsic sources lost their per-file ISA flags')
+        generator.premake_content = []
+        generator.generate_main_program()
+        emitted = '\n'.join(generator.premake_content)
+        if 'dependson { "lambda-image-codecs" }' not in emitted:
+            fail('host can link the image archive before its source target builds')
+        if 'build_temp/image-codecs' in emitted:
+            fail('host still consumes the retired CMake codec prefix')
+        generator.premake_content = []
+        generator._generate_single_test('test_image_provider', 'test/test_image_io_gtest.cpp',
+                                        ['lambda-data'], '', '', ['gtest', 'gtest_main'])
+        if 'dependson { "lambda-image-codecs" }' not in '\n'.join(generator.premake_content):
+            fail('image tests lost their transitive source-build dependency')
+    generator = module.PremakeGenerator(str(ROOT / 'build_lambda_config.json'), 'windows',
+                                        target_architecture='x86_64')
+    codec = next(t for t in generator.config['targets'] if t['name'] == 'lambda-image-codecs')
+    if not any(f.endswith('tif_win32.c') for f in codec['source_files']) or \
+            any(f.endswith('tif_unix.c') for f in codec['source_files']):
+        fail('Windows image target selects POSIX TIFF resource helpers')
+
+
 def main() -> int:
     module = load_generator_module()
+    expect_image_source_build(module)
     expect_node_core_provider(module, "macos")
     expect_node_core_provider(module, "linux")
     expect_archive_link_deps(module)
