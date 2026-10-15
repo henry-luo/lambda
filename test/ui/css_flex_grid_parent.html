@@ -1,0 +1,9 @@
+<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;background:white}button{height:24px}.outer{display:grid;width:120px;grid-template-columns:120px}
+.host{display:flex;height:20px;font-size:30px;flex-grow:calc(1em / 10px);flex-shrink:calc(1em / 10px)}
+.red,.blue{height:20px;min-width:0}.red{font-size:5px;background:red;flex-grow:inherit;flex-shrink:inherit}.blue{background:blue;flex-grow:1;flex-shrink:1}
+#growHost>div{flex-basis:0}#shrinkHost>div{flex-basis:120px}
+</style><button id="check">Check</button><button id="change">Change</button><output id="report"></output>
+<div class="outer"><div id="growHost" class="host"><div id="growRed" class="red"></div><div class="blue"></div></div></div>
+<div class="outer"><div id="shrinkHost" class="host"><div id="shrinkRed" class="red"></div><div class="blue"></div></div></div>
+<script>(function(){var a=document.getElementById('growHost'),b=document.getElementById('shrinkHost'),report=document.getElementById('report');function record(prefix){var grow=getComputedStyle(a).flexGrow+'|'+getComputedStyle(document.getElementById('growRed')).flexGrow;var shrink=getComputedStyle(b).flexShrink+'|'+getComputedStyle(document.getElementById('shrinkRed')).flexShrink;report.setAttribute('data-'+prefix+'grow',grow);report.setAttribute('data-'+prefix+'shrink',shrink);}document.getElementById('check').onclick=function(){record('');};document.getElementById('change').onclick=function(){a.style.fontSize='40px';b.style.fontSize='40px';record('dirty-');};})();</script>

@@ -18,6 +18,7 @@
 #include "dom_core.h"
 #include "realm/dom_realm.h"
 #include "dom_engine.h"
+#include "dom_host_engine.h"
 #include "dom.h"
 #include "dom_events.h"
 #include "../js/js_props.h"
@@ -518,7 +519,7 @@ static RangeClientRectCollector js_range_collect_client_rects(DomRange* r) {
             float y = 0.0f;
             float w = 0.0f;
             float h = 0.0f;
-            view_get_visual_bounds(static_cast<View*>(selected), &x, &y, &w, &h);
+            dom_engine_visual_bounds(static_cast<View*>(selected), &x, &y, &w, &h);
             js_range_collect_rect(x, y, w, h, &collector);
         }
         dom_range_for_each_rect(r, nullptr, js_range_collect_rect, &collector);

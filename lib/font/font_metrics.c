@@ -498,8 +498,8 @@ float font_calc_normal_line_height(FontHandle* handle) {
 
 /**
  * Get normal line-height split into ascender/descender following Chrome/Blink:
- *   - On macOS (CoreText): ascender = asc + desc, descender = leading
- *   - USE_TYPO_METRICS path: ascender = typo_asc + typo_desc, descender = typo_line_gap
+ *   - On macOS (CoreText): floor half-leading above, remainder below the baseline
+ *   - USE_TYPO_METRICS path: typographic ascent/descent plus split line gap
  *   - HHEA fallback: ascender = rounded hhea ascender, descender = remaining
  *     normal line-height below that baseline
  * Both *out_ascender and *out_descender are positive values (above/below baseline).
@@ -533,8 +533,10 @@ void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* ou
         float ra = roundf(m->typo_ascender);
         float rd = roundf(m->typo_descender);  // positive
         float rl = roundf(m->typo_line_gap);
-        *out_ascender = ra + rd;
-        *out_descender = rl;
+        // a typographic descender belongs below the baseline, not above it.
+        float ascent_leading = floorf(rl / 2.0f);
+        *out_ascender = ra + ascent_leading;
+        *out_descender = rd + rl - ascent_leading;
         if (font_metrics_trace_enabled()) {
             log_debug("font_get_normal_lh_split (typo): asc=%f desc=%f for %s@%.1f",
                       *out_ascender, *out_descender, family, font_size);
@@ -546,9 +548,10 @@ void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* ou
     float ascent, descent, line_height;
     if (font_get_handle_platform_metrics(handle, &ascent, &descent, &line_height)) {
         float leading = line_height - (ascent + descent);
-        float half_leading = leading / 2.0f;
-        *out_ascender = ascent + half_leading;
-        *out_descender = descent + half_leading;
+        // keep an odd leading pixel below the baseline, as for explicit leading.
+        float ascent_leading = floorf(leading / 2.0f);
+        *out_ascender = ascent + ascent_leading;
+        *out_descender = descent + leading - ascent_leading;
         if (*out_descender < 0) *out_descender = 0;
         if (font_metrics_trace_enabled()) {
             log_debug("font_get_normal_lh_split (platform, half-leading): asc=%f desc=%f lead=%f for %s@%.1f",

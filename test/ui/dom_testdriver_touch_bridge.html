@@ -1,0 +1,26 @@
+<!doctype html><style>
+html,body{margin:0}#pad{position:absolute;left:40px;top:60px;width:80px;height:50px;background:blue}
+</style><button id="send">Send</button><output id="report"></output><div id="pad"></div>
+<script>
+var events=[],targets=[],bubbles=0;
+var pad=document.getElementById('pad');
+['touchstart','touchmove','touchend'].forEach(function(type){
+    pad.addEventListener(type,function(event){
+        var point=event.changedTouches[0];
+        events.push(event.type+':'+event.touches.length+':'+event.changedTouches.length+':'+point.clientX+':'+point.clientY);
+        targets.push(event.target.id);
+    });
+    document.addEventListener(type,function(){bubbles++;});
+});
+document.getElementById('send').onclick=function(){
+    var sent=[__lambda_testdriver_touch(pad,'touchstart',52.5,90.25),
+        __lambda_testdriver_touch(pad,'touchmove',60.25,96.5),
+        __lambda_testdriver_touch(pad,'touchend',60.25,96.5),
+        __lambda_testdriver_touch(pad,'invalid',60.25,96.5)];
+    var report=document.getElementById('report');
+    report.setAttribute('data-sent',sent.join('|'));
+    report.setAttribute('data-events',events.join('|'));
+    report.setAttribute('data-targets',targets.join('|'));
+    report.setAttribute('data-bubbles',String(bubbles));
+};
+</script>

@@ -130,6 +130,13 @@ static void apply_html_background_color(LayoutContext* lycon, ViewBlock* block, 
     layout_ensure_background(lycon, block)->color = color;
 }
 
+static void apply_html_overflow(LayoutContext* lycon, ViewBlock* block, CssEnum value) {
+    ScrollProp* scroll = block->ensure_scroll(lycon);
+    // retain the UA fallback separately so removing author CSS cannot expose its old used value.
+    scroll->overflow_x = scroll->default_overflow_x = value;
+    scroll->overflow_y = scroll->default_overflow_y = value;
+}
+
 static void apply_html_font_weight(FontProp* font, CssEnum weight, int numeric) {
     if (!font) return;
     font->font_weight = weight;
@@ -1024,8 +1031,7 @@ static void apply_html_centered_popup_style(LayoutContext* lycon, ViewBlock* blo
     block->ensure_block(lycon);
     block->blk->given_width = block->blk->given_height = -1.0f;
     block->blk->given_width_type = block->blk->given_height_type = CSS_VALUE_FIT_CONTENT;
-    block->ensure_scroll(lycon);
-    block->scroller->overflow_x = block->scroller->overflow_y = CSS_VALUE_AUTO;
+    apply_html_overflow(lycon, block, CSS_VALUE_AUTO);
 }
 
 void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
@@ -1223,9 +1229,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 }
             }
         }
-        block->ensure_scroll(lycon);
-        block->scroller->overflow_x = CSS_VALUE_AUTO;
-        block->scroller->overflow_y = CSS_VALUE_AUTO;
+        apply_html_overflow(lycon, block, CSS_VALUE_AUTO);
         block->ensure_block(lycon);
         // Parse HTML width/height attributes; default 300x150 per HTML spec.
         HtmlDimensionPolicy policy = {
@@ -1880,8 +1884,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         apply_html_textarea_font(lycon, block);
         // html rendering defaults textarea overflow to auto; baseline synthesis
         // needs the used overflow state, not only the serialized computed value.
-        block->ensure_scroll(lycon);
-        block->scroller->overflow_x = block->scroller->overflow_y = CSS_VALUE_AUTO;
+        apply_html_overflow(lycon, block, CSS_VALUE_AUTO);
         // Note: textarea uses content-box (CSS default), same as Chrome UA
         // Intrinsic size: Chrome default 182x36 border-box (20 cols, 2 rows)
         block->form->intrinsic_width = 182.0f;

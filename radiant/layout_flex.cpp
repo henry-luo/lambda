@@ -736,9 +736,6 @@ static float flex_item_specified_size_suggestion(ViewElement* item,
     return specified_size;
 }
 
-static int flex_item_order(ViewElement* item) {
-    return has_flex_item_prop(item) ? item->fi->order : 0;
-}
 // CSS Flexbox §9.7: Get the effective flex base size for free space and growth calculations.
 // For border-box items, the flex base size cannot be less than padding+border on the main axis,
 // because the content-box size cannot be negative (CSS2 §10.2). The spec works in content-box
@@ -1562,16 +1559,16 @@ static void sort_flex_items_by_order(View** items, int count) {
 
     for (int i = 1; i < count; ++i) {
         ViewElement* key = lam::view_as_element(items[i]);
-        int key_order = flex_item_order(key);
+        int key_order = layout_item_order(key);
         int j = i - 1;
         ViewElement* item_j = lam::view_as_element(items[j]);
-        int item_j_order = flex_item_order(item_j);
+        int item_j_order = layout_item_order(item_j);
         while (j >= 0 && item_j_order > key_order) {
             items[j + 1] = items[j];
             j--;
             if (j >= 0) {
                 item_j = lam::view_as_element(items[j]);
-                item_j_order = flex_item_order(item_j);
+                item_j_order = layout_item_order(item_j);
             }
         }
         items[j + 1] = key;

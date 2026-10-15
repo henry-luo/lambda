@@ -2,7 +2,7 @@
 #include "../../lambda-data.hpp"
 
 struct MvpLmdProgram;
-struct JsBuiltinMethodSpec;
+struct MvpLmdRegExpAccessor;
 struct JsArrayOps;
 struct JsBufferViewOps;
 extern const JsArrayOps mvp_lmd_array_ops;
@@ -144,7 +144,8 @@ struct MvpLmdLibraryState {
     NameRef regexp_iterator_keys[5]; // private regexp/string/global/unicode/done state
     NameRef regexp_source_key;
     NameRef regexp_flags_key;
-    const JsBuiltinMethodSpec** regexp_accessors; // catalog metadata only, no GC values or mutable site cache
+    MvpLmdRegExpAccessor* regexp_accessors; // initial layout metadata; live descriptors are checked on every use
+    TypeMap* regexp_accessor_shape; // pool-owned initial prototype shape, never a successful-guard cache
     int regexp_accessor_count;
     bool regexp_protocol_unobserved; // final whole-program proof; native numeric/data checks remain runtime checks
     MvpLmdClass object;
@@ -263,7 +264,7 @@ static inline bool mvp_lmd_is_object(Item value) {
     return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ARRAY_NUM ||
         (type == LMD_TYPE_VMAP && (js_promise_is(value) || js_module_namespace_record(value)));
 }
-Map* mvp_lmd_property_map(Item object, bool writing = false);
+Map* mvp_lmd_property_map(Item object, bool writing = false, bool numeric_attributes = false);
 Item mvp_lmd_array_own_item(Array* array, int64_t index);
 Item mvp_lmd_array_property(Item owner, Item key, Item value, int64_t operation, Item receiver);
 extern "C" Item mvp_lmd_array_index_property(Item owner, int64_t index, Item value, int64_t operation);

@@ -1,6 +1,6 @@
 # JS MVP: 90% of LJS Test262 coverage
 
-**Date:** 2026-10-15. **Status:** coverage milestone verified on archived `parallel38`: **37,445/40,261 IDs (93.0056%)** pass every required variant, **1,210** above the 90% target. No original whole-entry passes are lost; four later selected controls remain archived timeout losses. Pin45's eval/replacement followup passes **647/647** focused tests normally and under forced GC and **616/616** selected required-mode cases, regaining those controls. Watchdog recovery, final integration, a fresh whole audit and deferred performance acceptance remain open. All captures stay build-specific.
+**Date:** 2026-10-15. **Status:** coverage milestone verified on archived `parallel38`: **37,445/40,261 IDs (93.0056%)** pass every required variant, **1,210** above the 90% target. No original whole-entry passes are lost; four later selected controls remain archived timeout losses. Pin45's eval/replacement followup passes **647/647** focused tests normally and under forced GC and **616/616** selected required-mode cases, regaining those controls. Watchdog recovery, final integration and a fresh whole audit remain open. Pin47 passes all **84** output contracts, but confirmed execution regressions block acceptance. Further testing is stopped at the user's request; the following repairs have no new execution measurements. All captures stay build-specific.
 **Design:** [JS_MVP_Lmd §34](../jube/JS_MVP_Lmd.md#34-ninety-percent-of-ljs-test262-coverage).
 **Scope:** extend the implemented MVP toward 90% of the frozen LJS passing
 population, preserving ordinary benchmark performance. This plan stages the
@@ -1952,3 +1952,135 @@ Pin46 adds the original escaped-Unicode crash point to a **617-ID** frozen
 selection. New private release and deterministic native ownership checks,
 ordinary timeout/collateral controls, required-mode conformance and shared
 baselines are pending. No benchmark timing or phase-completion claim is added.
+
+
+### Performance verification resumed (2026-10-15; gate failed)
+
+The user requests fresh benchmark verification. Queue46 is stopped while still
+waiting, before starting its whole audit; completed conformance evidence is
+preserved. A concurrent merge advances HEAD to
+`47cffd6163532ebba8764c11195afa0acc644ade`, changing 45 tracked shared build inputs
+relative to pin46. Pin47 therefore regenerates the build files and captures a
+fresh private `release_native` executable and archives, with all 1,445 production
+input hashes guarded. Its CLI SHA-256 is
+`47f21fd566c742634137b15f89b61d62cf1f0c14ea104df4d4456a067fa99d19`;
+focused checks pass **647/647**. These are current benchmark-source checks,
+not a refreshed whole-Test262 or shared-baseline claim.
+
+All **84/84 non-jq** output/backend contracts pass, with seven measured rounds
+per lane against the corrected ordinary-release phase-entry control
+`32a6174ad5e6769bdbe0df2b8e911b09ccd7770f084e7d5f4104be436aefb394`
+and an identical copy. Sources, workloads and oracles are unchanged. Fresh
+processes rotate through all six lane orders; script self-times and the original
+60 CLI entry self-timers exclude initial compilation. Wall times remain separate.
+No jq benchmark is executed or preflighted. The **31-round** followup selects
+31 suspects and completes **28** before further testing is stopped at the user's
+request. Hyphen retains partial longer samples; Microdiff and Text Search retain
+the seven-round screen only. None is presented as a completed confirmation.
+
+The completed confirmations establish eight large regressions:
+
+| Benchmark | Previous ms | Pin47 ms | Ratio |
+|---|---:|---:|---:|
+| Fannkuch | 0.271 | 46.189 | 170.44x |
+| Spectralnorm | 1.068 | 241.136 | 225.78x |
+| Base64 | 11.934 | 507.221 | 42.50x |
+| Brainfuck | 45.390 | 2401.849 | 52.92x |
+| Primes | 2.042 | 794.057 | 388.86x |
+| Triangl | 154.516 | 16745.468 | 108.37x |
+| Mandelbrot | 0.479 | 1.410 | 2.94x |
+| Nqueens | 0.942 | 14.474 | 15.37x |
+
+Hashmap also regresses **3.87%** (502.256/483.526 ms), with 95% ratio intervals
+**1.0324–1.0448** and **1.0335–1.0597** against the two controls. Navier–Stokes
+regresses **3.91%** (33.354/32.100 ms), with intervals **1.0312–1.0444** and
+**1.0328–1.0440**. Fast-diff regresses **5.04%** (603.016/574.100 ms), also
+confirmed against both controls. Hashmap and Navier's control/control intervals contain parity. Bounce and
+CD's large screen warnings disappear in the longer capture; the original noisy
+samples remain intact. An aggregate improvement cannot close this gate.
+
+Read-only source/MIR review establishes two typed-storage admission causes:
+constructor arguments are checked before parameter inference, and typed method
+names are collected without receiver kinds. The latter includes ordinary
+`output.join()` and typed `fill`, despite existing raw fill lowering. Both
+permanently promote the unit to generic typed storage, losing raw allocations
+and adding property/coercion dispatch to hot loops and other Array/String calls.
+Use solved receiver/argument facts and the existing monotone promotion/replay;
+reuse raw typed fill only with adequate semantic proofs. Unknown receivers,
+method escapes, nonprimitive coercions, buffer/view reflection, detach/resize,
+species and prototype observation retain shared full storage (**D8.4.1v2**).
+No new helper or normality flag is needed for this proposed repair.
+
+The separate text review identifies extra RegExp dispatch/rooting/exec lookup
+for Hyphen and extra protocol/accessor guards for Fast-diff. These are concrete
+additional paths, with unmeasured timing shares; Text Search and Microdiff's
+causes remain unresolved. Any repair must retain callback semantics, explicit
+completions and precise roots (**D8.4.3v2**, **D5.2–D5.3**).
+
+Captures and the verification report are under
+`temp/mvp_test262_90/parallel47/performance/`: `screen84/comparison.json`,
+`repeat31/comparison.json`, `verification.json`, `typed-array-root.json`,
+`text-review/DIAGNOSTIC.md`, `user-stop.json`, and `REPORT.md`/`REPORT.json`. Earlier phase-control
+gaps remain separate; no mixed release/profile timing comparison clears them.
+No production source was changed during the timing capture. Pin38's archived
+**93.0056%** coverage score remains unchanged.
+
+### Repairs after the timing stop (2026-10-15)
+
+The user directs implementation from the completed evidence, with no further
+tests. The repair retains shared Lambda representations and existing operations:
+
+- **Eight typed-array regressions:** choose raw versus full storage after solving
+  constructor arguments and receiver kinds. Ordinary Array/String methods no
+  longer promote unrelated typed allocations; primitive typed `fill` reuses the
+  existing raw lowering. Unproven native observations, inherited properties,
+  observable views and callbacks retain full storage. Extend the existing
+  property-key proof with a numeric/undefined domain option; no benchmark names
+  or workload-specific admission rules.
+- **Optional keys:** raw `array[undefined]` uses the existing `ArrayNum` Map
+  attribute face and shape transitions, separately from its numeric buffer
+  (**D2.6.6v3**, **D3.4.3v5**). An option on the existing property-map helper enables
+  that face only for named reads/writes; reflection still requires full storage.
+  Existing type inference joins possible named-store
+  value kinds so arbitrary attributes cannot acquire a numeric ABI. Named stores
+  keep the original RHS; only indexed stores convert it. Existing precise GC
+  tracing and compaction cover both faces (**D5.3**).
+- **Navier–Stokes:** proven primitive property keys retain the native Number to
+  String path even when Symbols are available. This removes added numeric boxing
+  and scalar homes; Symbol/object/unknown keys keep complete ToPropertyKey.
+- **Hashmap:** skip native-ancestry validation when the constructor already is
+  the caller's admitted ordinary allocation class. Different `new.target` values
+  retain the ancestry walk and live prototype lookup.
+- **Fast-diff:** reuse canonical names and initial RegExp accessor layout metadata
+  under a shape identity guard, checking live descriptors/getters on every use.
+  The related primitive-string `RegExp.test` path also avoids general protocol
+  dispatch after checking the live `exec`, prototype and `lastIndex` contracts.
+  No mutable per-site cache is added (**D8.4.1v2**).
+
+No new runtime helper or container normality flag is introduced. These changes
+remove identified extra work; its timing contribution and the amount recovered
+remain unmeasured. The 11 confirmed regressions remain the pin47 evidence, not
+new results for these repairs. A shared compiler-local predicate distinguishes
+possible typed-value exposure from the narrower numeric-index proof, retaining
+the existing string-index primitive proof used by Base64. Host timer return
+inference requires an unexposed direct `performance.now` call; mutation, aliases,
+callbacks and global reflection disable it.
+Implicit coercion, including template interpolation, retains full storage when
+the value could expose typed-array behavior.
+
+**Conservative residual:** standalone `test/benchmark/r7rs/mbrot2.js` can still
+select full storage when concatenating its unknown nested-matrix result for
+failure output. Proving that result numeric requires closed-call aggregate
+forwarding analysis. The frozen measured `prior_r7rs_mbrot.js` returns the result
+directly and lacks that branch, so this observation does not establish a
+remaining promotion in the measured workload. No source or oracle is changed.
+
+**Compile-only integration:** private `release_native` build `perf_fix50`
+compiles and links successfully on HEAD
+`7666ede5a8b2d27752d20f0e6ad9158601dc57af`, with all **1,451** tracked production
+input hashes and HEAD unchanged during the build. Executable SHA-256:
+`4bc998925aa055aacddc2a2d4269cbf323d005fe76d589f582521a8a39c9471c`.
+The concurrent merge since pin47 changes none of the repaired production files.
+Source snapshots, patch, build log and provenance are under
+`temp/mvp_test262_90/perf_fix50/`. No executable is run: neither prior correctness
+results nor prior timings certify this modified build.

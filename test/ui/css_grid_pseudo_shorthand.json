@@ -1,0 +1,27 @@
+{
+  "name":"Pseudo grid shorthands retain computed member fonts during edits and inheritance",
+  "html":"test/ui/css_grid_pseudo_shorthand.html",
+  "viewport":{"width":480,"height":240},
+  "events":[
+    {"type":"click","target":{"selector":"#check"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-template","equals":"10px / 15px"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-grid","equals":"10px / 15px / none / row / auto / auto"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-placement","equals":"2 / span 3|4 / 6|4 / 2 / 6 / span 3"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-after","equals":"32px / 40px"},
+    {"type":"assert_rect","target":{"selector":"#patch"},"width":15,"height":12},
+    {"type":"assert_pixel","target":{"selector":"#patch","offset_x":10,"offset_y":5},"min_r":255,"max_r":255,"min_g":0,"max_g":0,"min_b":0,"max_b":0},
+    {"type":"click","target":{"selector":"#change"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-dirty-template","equals":"14px / 21px"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-dirty-grid","equals":"14px / 21px / none / row / auto / auto"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-dirty-placement","equals":"2 / span 3|4 / 6|4 / 2 / 6 / span 3"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-dirty-after","equals":"32px / 40px"},
+    {"type":"assert_rect","target":{"selector":"#patch"},"width":21,"height":12},
+    {"type":"assert_pixel","target":{"selector":"#patch","offset_x":19,"offset_y":5},"min_r":255,"max_r":255,"min_g":0,"max_g":0,"min_b":0,"max_b":0},
+    {"type":"click","target":{"selector":"#inherit"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-inherited-template","equals":"30px / 60px"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-inherited-grid","equals":"30px / 60px / none / row / auto / auto"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-inherited-placement","equals":"2 / span 3|4 / 6|4 / 2 / 6 / span 3"},
+    {"type":"assert_rect","target":{"selector":"#patch"},"width":60,"height":12},
+    {"type":"assert_pixel","target":{"selector":"#patch","offset_x":50,"offset_y":5},"min_r":255,"max_r":255,"min_g":0,"max_g":0,"min_b":0,"max_b":0}
+  ]
+}

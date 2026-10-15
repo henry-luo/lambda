@@ -11,6 +11,7 @@
 #include "../radiant/page_fo_expression.hpp"
 #include "../radiant/layout.hpp"
 #include "../radiant/render.hpp"
+#include "../radiant/radiant.hpp"
 #include "../lambda/input/css/css_paged_media.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/dom/dom.h"
@@ -503,6 +504,7 @@ protected:
     bool vector_engine = false;
 
     void SetUp() override {
+        ASSERT_TRUE(radiant_register_dom_engine_providers());
         input_pool = pool_create();
         ASSERT_NE(input_pool, nullptr);
         input = Input::create(input_pool);

@@ -365,6 +365,26 @@ needs the same completion discipline. One async model, host-owned, for every
 kind — and the substrate (libuv today) stays swappable without touching any
 module.
 
+### JA7.1 Interface catalog publication (2026-10-15 correction)
+
+The Radiant aggregate exposed an abort in `s_type_records.reserve()` while
+different modules activated on parallel AST workers. Per-module activation
+states prevent duplicate activation of one descriptor; they do not serialize
+the shared type array or its hash index. A separate eight-thread regression
+compiles 512 branded types and checks lookups while other modules publish.
+The saved predecessor loses lookups, independently of the intermittent scene
+crash.
+
+One host-private recursive catalog lock spans complete interface compilation,
+rollback/removal, cleanup and catalog/index reads. Recursive acquisition permits
+the compiler's base/result-type lookups without holding the registry's session
+lock across parsing or module callbacks. Published record addresses remain
+stable until the existing module teardown boundary; this does not change
+runtime cache ownership or claim general concurrent heap dispatch. The lock is
+internal to the declared-interface owner (**D7.4.4 / D7.3.3**); no synchronization
+handle crosses the Jube ABI. Qualification and raw scene failures are tracked
+in `vibe/impl/Radiant_Impl_CSS_Support.md` §9.
+
 ## JA8. Dependency direction and layering
 
 **Decision.**

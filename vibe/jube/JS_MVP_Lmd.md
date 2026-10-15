@@ -1742,6 +1742,17 @@ some with/module-eval contexts, realm and Unicode-sets support, library residual
 and oversized compiler cases. The current increment reuses shared empty-eval
 recognition and guarded native RegExp replacement, retaining syntax/coercion/
 Unicode/ownership checks (**D1.3v3**, **D8.1.3v24**, **D8.4.1v2**).
-Benchmark timing remains deferred at the user's
-request; performance acceptance is open. Detailed implementation, evidence and
+Performance verification resumed on 2026-10-15. The current merged checkout's
+private release pin47 passes **647/647** focused checks and all **84/84** non-jq
+benchmark output/backend contracts. Its seven-round screen and longer repeats
+find substantial typed-array regressions, plus smaller Hashmap, Navier–Stokes
+and Fast-diff regressions. **28/31** longer confirmations complete before the
+user stops further testing and requests repairs; the incomplete captures remain
+explicit. Performance acceptance fails on pin47. Repairs reuse solved storage
+proofs, Lambda's array attribute face and existing primitive/constructor/RegExp
+operations (**D2.6.6v3**, **D3.4.3v5**, **D8.4.1v2**); no new helper or normality
+flag is introduced. The private release repair build compiles and links;
+post-repair correctness and speed remain unmeasured. The standalone Mandelbrot
+output path retains a conservative full-storage fallback, documented in the plan.
+Detailed implementation, evidence and
 residual inventories are in [the implementation plan](../impl/JS_MVP_Lmd_Test262_90.md).

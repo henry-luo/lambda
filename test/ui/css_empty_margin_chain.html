@@ -1,0 +1,27 @@
+<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;background:white;font:16px Arial}
+#wrap{--empty:16px;--child:18.72px;--expected:18.72px}
+.frame{position:absolute;top:80px;width:100px;height:120px}.actualFrame{left:20px}.referenceFrame{left:160px}
+.parent{width:100px;margin:8px 0;background:rgb(240,240,240);font:16px/24px Arial}
+.empty{height:0;margin:var(--empty) 0}.second{display:none;margin:20px 0}#wrap.two .second{display:block}
+h3{font:18.72px/22px Arial;margin:var(--child) 0}.reference h3{margin-top:var(--expected)}
+</style><button id="large">Larger empty margin</button><button id="negative">Negative margin</button><button id="child">Larger child margin</button><button id="two">Two empty children</button><button id="relative">Relative margin</button><button id="percentage">Percentage margin</button><button id="inherit">Inherit margin</button><button id="clear">Clear empty margins</button><button id="restore">Restore</button><button id="read">Read</button><output id="report"></output>
+<div id="wrap"><div id="actualFrame" class="frame actualFrame"><div id="actual" class="parent"><div id="empty" class="empty"></div><div class="empty second"></div><h3 id="actualHeading">X</h3></div></div><div id="referenceFrame" class="frame referenceFrame"><div id="reference" class="parent reference"><h3 id="referenceHeading">X</h3></div></div></div>
+<script>(function(){
+var wrap=document.getElementById('wrap');
+function set(name,value){wrap.style.setProperty(name,value+'px');}
+document.getElementById('large').onclick=function(){set('--empty',24);set('--expected',24);};
+document.getElementById('negative').onclick=function(){set('--empty',-10);set('--expected',8.72);};
+document.getElementById('child').onclick=function(){set('--child',32);set('--expected',22);};
+document.getElementById('two').onclick=function(){wrap.classList.add('two');};
+document.getElementById('relative').onclick=function(){wrap.style.setProperty('--child','2em');set('--expected',27.44);};
+document.getElementById('percentage').onclick=function(){wrap.style.setProperty('--child','20%');set('--expected',10);};
+document.getElementById('inherit').onclick=function(){document.getElementById('actualHeading').style.marginTop='inherit';};
+document.getElementById('clear').onclick=function(){wrap.classList.remove('two');set('--empty',0);set('--expected',8);};
+document.getElementById('restore').onclick=function(){document.getElementById('actualHeading').style.removeProperty('margin-top');wrap.classList.remove('two');set('--empty',16);set('--child',18.72);set('--expected',18.72);};
+document.getElementById('read').onclick=function(){
+ var actual=document.getElementById('actual'),empty=document.getElementById('empty'),heading=document.getElementById('actualHeading');
+ var value=getComputedStyle(actual).marginTop+'|'+getComputedStyle(empty).marginTop+'|'+getComputedStyle(heading).marginTop;
+ document.getElementById('report').setAttribute('data-values',value);
+};
+})();</script>

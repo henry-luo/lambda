@@ -807,3 +807,65 @@ the same dispatcher.
 * `make test-radiant-baseline` (Radiant interactive baseline) is
   unchanged after each U-step.
 * `make test-lambda-baseline` (2744/2764) is unchanged.
+## SN1 — Explicit snapshot readiness (2026-10-15, bounded implementation under qualification)
+
+One-shot CSS reference capture must distinguish an ordinary page's bounded
+post-load sampling from a page that explicitly declares `reftest-wait` on its
+document element. A queued finite animation-frame chain must be able to remove
+that readiness marker before capture. Ordinary recurring animation remains
+pending work at the existing sampling boundary; draining every rAF queue to
+emptiness would change that policy and can never finish for a ticker.
+
+The reproduced twelve-frame page stops after four callbacks with its readiness
+marker still present and its box at 14px rather than the declared final 22px.
+The otherwise identical ordinary page also stops at 14px, as expected for its
+bounded sample. The existing six-step list display-change WPT has the same
+explicit readiness contract and loses its last two mutations when run alone.
+
+Implement readiness at the existing post-load snapshot boundary, using the
+canonical active document's native facts and the existing drain watchdog.
+Preserve frame callback/microtask/layout ordering, precise queue roots and the
+document's evaluator ownership (**D5.3.3 / D5.4.1**, EO5v2). Do not create a
+second evaluator or retain a JS wrapper to inspect readiness. Unsettled capture
+must remain explicit at its bound. Keep virtual capture-time, delayed timers,
+native request completion and teardown controls separate from ordinary ticker
+sampling. No formal semantics or ownership ruling changes.
+
+Qualification requires finite chains longer than four frames, the original
+async list mutation, ordinary recurring animation, cancellation/load ordering
+and repeated-document teardown. The reproducer and unchanged predecessor
+records are under `temp/css_support_p0_p1_resume/snapshot_ready_probe/`.
+
+The initial slice reuses `js_await_bounded_drain` after ordinary auto-close
+settlement, only while the active native document still declares the marker.
+It uses the existing page watchdog and shared defaults (64 turns, three idle
+polls); no new queue, evaluator, wrapper or per-fixture count is added. A
+`RuntimeExecutionScope` keeps callbacks on that document's evaluator. Failure
+retains the marker, emits a distinct diagnostic and sets the script result to
+an error. The native predicate is declared in `radiant.hpp` and reused at the
+layout command's serialization boundary (**D7.3.3–D7.3.4**). An auto-close
+document still declaring readiness pending follows ordinary unsuccessful-layout
+cleanup and publishes no partial geometry. The existing batch protocol emits a
+failed terminal frame without payload, continues to the next document when
+requested and returns failure. No early-return teardown path is added.
+Delayed/virtual timer readiness, larger chains, other capture frontends and
+broader multi-document lifecycle remain open; this does not close the full
+snapshot-readiness contract.
+
+The two native twelve-/twenty-four-frame controls improve from failures to
+passes, preserving a cancelled callback. An ordinary recurring-animation
+control passes on both configurations. Chromium agrees with the final 22px and
+34px widths after the declared marker is removed. The standalone lists category
+records 52 full /eight partial /zero failed, retaining the original six-step
+async mutation source. A 120-frame unresolved control fails on the predecessor
+and now verifies command failure, absent output and successful following-document
+capture. It and the existing timed-out-load recovery control pass on both
+AST/MIR using a private ASan child. The fresh scoped build instruments 33
+production owners and four regression units; 135 computation, 122 text and 164
+vector tests pass. Other host/vendor objects and the CLI parent remain ordinary
+debug, with leak detection disabled. The preceding readiness runtime records
+6,035 Radiant inputs with one stale-reference failure and 288/293 ordinary
+export groups with the same 39 raw assertions. Full aggregates and core have
+not been rerun on the final rejection runtime. Work stops at the user's request;
+exact provenance, failures and pending gates are recorded in the implementation
+ledger's 2026-10-15 stopping checkpoint.

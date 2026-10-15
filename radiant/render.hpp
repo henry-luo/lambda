@@ -13,6 +13,7 @@
 #include "event.hpp"
 #include "rdt_video.h"
 #include "../lambda/input/css/dom_node.hpp"
+#include "../lambda/dom/dom_svg_context.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/arena.h"
 #include "../lib/arraylist.h"
@@ -146,11 +147,6 @@ typedef enum {
 } RdtStrokeJoin;
 
 typedef enum {
-    RDT_FILL_WINDING  = 0,
-    RDT_FILL_EVEN_ODD = 1,
-} RdtFillRule;
-
-typedef enum {
     RDT_PATH_MOVE,
     RDT_PATH_LINE,
     RDT_PATH_QUAD,
@@ -210,9 +206,6 @@ inline bool rdt_gradient_options_valid(const RdtGradientOptions* options) {
         if (!isfinite(options->dash_array[index]) || options->dash_array[index] < 0.0f) return false;
     return true;
 }
-
-// opaque path handle — each backend defines the concrete type
-typedef struct RdtPath RdtPath;
 
 // opaque backend handle
 typedef struct RdtVectorImpl RdtVectorImpl;
@@ -415,9 +408,6 @@ struct SvgDomStyleScope {
     float viewport_height;
     bool has_viewport;
 };
-struct RdtLogicalPoint;
-// a clip hit query asks whether the logical point lies inside a clip path
-typedef bool (*SvgPathContainsFn)(const RdtPath*, const RdtMatrix*, RdtFillRule, const struct RdtLogicalPoint*);
 struct SvgClipHitQuery {
     SvgPathContainsFn contains;
     lam::Up<const struct RdtLogicalPoint> point;
@@ -2032,6 +2022,8 @@ struct RenderContext {
     Color color;
     lam::Up<UiContext> ui_context;
     lam::Up<RenderTextPaintData> text_paint; // borrowed from the current block paint scope
+    RdtMatrix overflow_clip_transform;
+    bool has_overflow_clip_transform;
 };
 
 struct Css3dPaintContext;
@@ -2299,6 +2291,8 @@ float render_geometry_filter_effect_expand(const FilterProp* filter, float densi
 float render_geometry_block_visual_overflow(const ViewBlock* block, float density = 1.0f);
 Rect render_geometry_outer_shadow_rect(Rect border_box, float offset_x,
                                        float offset_y, float spread);
+Corner render_geometry_outset_corners(const Corner* radius, float width, float height,
+    float top, float right, float bottom, float left);
 bool render_geometry_transform_matrix(const TransformProp* transform,
                                       float x, float y, float width, float height,
                                       RdtMatrix* out_matrix);
@@ -3785,8 +3779,11 @@ RenderClipScope render_clip_push_css_scope(RasterRenderContext* rdcon, ViewBlock
 bool render_clip_push_vector_css(PaintList* paint, ViewElement* element,
                                  float abs_x, float abs_y);
 bool render_clip_overflow_geometry(ViewBlock* block, Bound* clip, Corner* radius);
+bool render_clip_overflow_bounds(ViewBlock* block, float origin_x, float origin_y,
+    float scale, Bound visible, const RdtMatrix* transform, Bound* clip, Corner* radius);
 bool render_clip_push_vector(PaintList* paint, ViewElement* element,
-    float abs_x, float abs_y, RenderClipKind kind);
+    float abs_x, float abs_y, RenderClipKind kind, Bound visible,
+    const RdtMatrix* transform);
 RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bound* clip);
 RenderClipScope render_clip_push_overflow_scope(RasterRenderContext* rdcon, ViewBlock* block,
                                                float origin_x, float origin_y);
@@ -3829,7 +3826,7 @@ uint32_t render_pixel_source_over_straight(uint32_t destination, uint32_t source
 uint32_t render_pixel_source_over_premultiplied(uint32_t destination, uint32_t source);
 uint32_t render_pixel_source_over_premultiplied_pair(uint32_t destination, uint32_t source);
 uint32_t render_pixel_destination_over_premultiplied(uint32_t destination, uint32_t source);
-ScaleMode render_image_scale_mode(const ViewSpan* view, bool repeating);
+ScaleMode render_image_scale_mode(const DomElement* element, bool repeating);
 uint32_t render_pixel_sample_bilinear(const uint8_t* pixels, int width, int height,
                                       int pitch, float x, float y, bool wrap,
                                       bool round_channels, bool premultiply_samples = false);

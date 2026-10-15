@@ -72,17 +72,6 @@ extern "C" float dom_range_glyph_x_for_byte_offset(UiContext* uicon,
     return view_geometry_interpolate_text_x(text, rect, byte_offset, false);
 }
 
-extern "C" DomNode* dom_range_child_at_boundary_offset(DomElement* elem,
-                                                        uint32_t offset) {
-    if (!elem) return NULL;
-    uint32_t i = 0;
-    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-        if (i == offset) return child;
-        i++;
-    }
-    return NULL;
-}
-
 static DomNode* child_before_boundary_offset(DomElement* elem, uint32_t offset) {
     if (!elem || offset == 0) return NULL;
     DomNode* previous = NULL;

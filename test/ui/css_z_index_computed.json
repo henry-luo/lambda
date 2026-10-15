@@ -1,0 +1,230 @@
+{
+  "name": "Calculated z-index owner fonts and live stacking",
+  "html": "test/ui/css_z_index_computed.html",
+  "viewport": {
+    "width": 480,
+    "height": 200
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "2|3|5|4|5|0|auto"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "blue"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#change"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-dirty-values",
+      "equals": "4|3|7|4|5|0|auto"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "red"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#invalid"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid-values",
+      "equals": "auto|3|7|4|5|0|auto"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "blue"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inherit"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-inherited-values",
+      "equals": "5|3|7|4|5|0|auto"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "red"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restore"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-restored-values",
+      "equals": "4|3|7|4|5|0|auto"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#stage",
+        "offset_x": 10,
+        "offset_y": 10
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "red"
+    }
+  ]
+}

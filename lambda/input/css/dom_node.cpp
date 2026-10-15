@@ -14,6 +14,17 @@
 #include "../../../lib/str.h"
 #include "../../core/well_known_markup_names.h"
 
+// boundary offsets count DOM children independently of layout or view publication.
+extern "C" DomNode* dom_range_child_at_boundary_offset(DomElement* element, uint32_t offset) {
+    if (!element) return nullptr;
+    uint32_t index = 0;
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (index == offset) return child;
+        index++;
+    }
+    return nullptr;
+}
+
 // The generated records are the one source of tag identity. This runs only at
 // the DOM construction boundary, so custom/foreign tags can retain byte names
 // without a second semantic tag hashmap.

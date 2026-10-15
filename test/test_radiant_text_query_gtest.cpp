@@ -194,8 +194,10 @@ protected:
             EXPECT_FLOAT_EQ(piece->height, wanted[index].height) << id;
         }
     }
-    DomElement* load(const char* path) {
+    DomElement* load(const char* path, bool auto_close = false) {
         DocumentJsHostConfig host = {}; host.ui_context = &ui; host.resource_policy = INPUT_RESOURCE_LOCAL_ONLY;
+        host.auto_close_event_loop = auto_close;
+        host.virtual_clock_enabled = auto_close;
         Url* base = get_current_dir();
         if (!base) return nullptr;
         document = load_html_doc(base, (char*)path, 320, 200, &host);
@@ -1117,6 +1119,76 @@ TEST_F(RadiantTextQuery, TerminalSoftHyphensRetainTheirSourceStyleAndCompletedLi
         ASSERT_NE(tail, nullptr);
         ASSERT_NE(tail->rect, nullptr);
         EXPECT_FLOAT_EQ(tail->rect->y, 48.0f) << id;
+    }
+}
+
+TEST_F(RadiantTextQuery, AxisRollbackExcludesSameLayerShorthands) {
+    ASSERT_NE(load("test/html/layout_overflow_component_rollback.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    DomElement* overflow = dom_find_element_by_id(document->root->as_element(), "overflow");
+    DomElement* overscroll = dom_find_element_by_id(document->root->as_element(), "overscroll");
+    ASSERT_NE(overflow, nullptr); ASSERT_NE(overscroll, nullptr);
+    EXPECT_EQ(overflow->scroll()->overflow_x, CSS_VALUE_VISIBLE);
+    EXPECT_EQ(overflow->scroll()->overflow_y, CSS_VALUE_CLIP);
+    EXPECT_EQ(overscroll->scroll()->overscroll_x, CSS_VALUE_AUTO);
+    EXPECT_EQ(overscroll->scroll()->overscroll_y, CSS_VALUE_NONE);
+}
+
+TEST_F(RadiantTextQuery, BrokenImageAlternativesKeepTextBaselinesInsideExplicitBoxes) {
+    ASSERT_NE(load("test/html/layout_broken_image_baseline.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    const struct { const char* id; float link_y; float image_height; } cases[] = {
+        {"fallback", 3.0f, 24.0f}, {"leading", 11.0f, 40.0f},
+        {"loaded", 9.0f, 24.0f}, {"sized", 3.0f, 24.0f},
+        {"tall", 3.0f, 60.0f}, {"empty", 9.0f, 24.0f}
+    };
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.id);
+        char link_id[64], image_id[64];
+        snprintf(link_id, sizeof(link_id), "%s-link", item.id);
+        snprintf(image_id, sizeof(image_id), "%s-image", item.id);
+        DomElement* parent = dom_find_element_by_id(document->root->as_element(), item.id);
+        DomElement* link = dom_find_element_by_id(document->root->as_element(), link_id);
+        DomElement* image = dom_find_element_by_id(document->root->as_element(), image_id);
+        ASSERT_NE(parent, nullptr); ASSERT_NE(link, nullptr); ASSERT_NE(image, nullptr);
+        float parent_y = 0.0f, link_y = 0.0f, image_y = 0.0f;
+        view_get_visual_bounds(parent, nullptr, &parent_y, nullptr, nullptr);
+        view_get_visual_bounds(link, nullptr, &link_y, nullptr, nullptr);
+        view_get_visual_bounds(image, nullptr, &image_y, nullptr, nullptr);
+        EXPECT_NEAR(link_y - parent_y, item.link_y, 0.1f);
+        EXPECT_NEAR(image_y - parent_y, 0.0f, 0.1f);
+        EXPECT_NEAR(link->height, 18.0f, 0.1f);
+        EXPECT_NEAR(image->height, item.image_height, 0.1f);
+    }
+}
+
+TEST_F(RadiantTextQuery, LtrIsolatesKeepLeadingNeutralsBeforeLatinRunsInRtlBlocks) {
+    ASSERT_NE(load("test/html/layout_bidi_ltr_neutral_isolate.html"), nullptr);
+    layout_html_doc(&ui, document, false);
+    for (const char* id : {"html", "css"}) {
+        DomElement* span = dom_find_element_by_id(document->root->as_element(), id);
+        ASSERT_NE(span, nullptr);
+        EXPECT_EQ(span->block()->direction, CSS_VALUE_LTR) << id;
+        EXPECT_EQ(span->block()->unicode_bidi, CSS_VALUE_ISOLATE) << id;
+    }
+    const struct {const char* id; CssEnum direction;} wide[] = {
+        {"inherit", CSS_VALUE_RTL}, {"initial", CSS_VALUE_LTR}, {"unset", CSS_VALUE_RTL}
+    };
+    for (const auto& item : wide) {
+        DomElement* span = dom_find_element_by_id(document->root->as_element(), item.id);
+        ASSERT_NE(span, nullptr);
+        EXPECT_EQ(span->block()->direction, item.direction) << item.id;
+    }
+    const char* markers[] = {"html-marker", "css-marker"};
+    const char* tails[] = {"html-tail", "css-tail"};
+    for (size_t i = 0; i < 2; i++) {
+        DomElement* marker = dom_find_element_by_id(document->root->as_element(), markers[i]);
+        DomElement* tail = dom_find_element_by_id(document->root->as_element(), tails[i]);
+        ASSERT_NE(marker, nullptr); ASSERT_NE(tail, nullptr);
+        float marker_x = 0.0f, tail_x = 0.0f;
+        view_get_visual_bounds(marker, &marker_x, nullptr, nullptr, nullptr);
+        view_get_visual_bounds(tail, &tail_x, nullptr, nullptr, nullptr);
+        EXPECT_LT(marker_x, tail_x) << markers[i];
     }
 }
 
@@ -2746,6 +2818,42 @@ TEST_F(RadiantFormControls, RetainedStyleResetPreservesOpenSelectUntilControlRel
 
 class RadiantTextLayout : public RadiantTextQuery {
 protected:
+    void expect_snapshot_capture(const char* path, float final_width) {
+        DomElement* box = load(path, true);
+        ASSERT_NE(box, nullptr);
+        layout_html_doc(&ui, document, false);
+        EXPECT_FALSE(document->root->has_class("reftest-wait"));
+        EXPECT_STREQ(box->get_attribute("data-cancelled"), "safe");
+        if (final_width > 0.0f) EXPECT_FLOAT_EQ(box->width, final_width);
+        else {
+            // an ordinary ticker keeps a bounded sample before a full finite chain.
+            EXPECT_GT(box->width, 10.0f);
+            EXPECT_LT(box->width, 22.0f);
+        }
+    }
+    void expect_inline_strut_pair(const char* actual_id, const char* reference_id,
+                                  float height, bool image, float image_y = NAN) {
+        SCOPED_TRACE(actual_id);
+        DomElement* actual = dom_find_element_by_id(document->root->as_element(), actual_id);
+        DomElement* reference = dom_find_element_by_id(document->root->as_element(), reference_id);
+        ASSERT_NE(actual, nullptr); ASSERT_NE(reference, nullptr);
+        EXPECT_FLOAT_EQ(actual->height, height);
+        EXPECT_FLOAT_EQ(reference->height, height);
+        if (!image) return;
+        DomElement* actual_image = actual->first_child->as_element()->first_child->as_element();
+        DomElement* reference_image = reference->first_child->as_element()->first_child->as_element();
+        ASSERT_NE(actual_image, nullptr); ASSERT_NE(reference_image, nullptr);
+        float actual_y = 0.0f, reference_y = 0.0f;
+        view_get_visual_bounds(actual_image, nullptr, &actual_y, nullptr, nullptr);
+        view_get_visual_bounds(reference_image, nullptr, &reference_y, nullptr, nullptr);
+        EXPECT_FLOAT_EQ(actual_y, reference_y);
+        EXPECT_FLOAT_EQ(actual_image->height, 2.0f);
+        if (!isnan(image_y)) {
+            float block_y = 0.0f;
+            view_get_visual_bounds(actual, nullptr, &block_y, nullptr, nullptr);
+            EXPECT_FLOAT_EQ(actual_y - block_y, image_y);
+        }
+    }
     void expect_centered_button_text(DomElement* button) {
         ASSERT_NE(button, nullptr);
         DomElement* label = button->first_child->as_element();
@@ -2938,6 +3046,133 @@ TEST_F(RadiantTextLayout, AnonymousFlexTextRetainsInheritedLineHeightAndLeading)
             EXPECT_NEAR(direct_origin.y, wrapped_origin.y, 0.1f);
             EXPECT_NEAR(direct_text->rect->height, wrapped_text->rect->height, 0.1f);
         }
+        if (pass == 0) layout_html_doc(&ui, document, true);
+    }
+}
+
+TEST_F(RadiantTextLayout, NestedInlineFontsKeepTheirOwnLeadingAcrossReflow) {
+    ASSERT_NE(load("test/html/nested_font_strut.html"), nullptr);
+    ui.viewport_width = 240;
+    ui.viewport_height = 2816;
+    layout_html_doc(&ui, document, false);
+    struct FontMetrics { float size; float normal_height; };
+    const FontMetrics fonts[] = {{24.0f, 28.0f}, {32.0f, 37.0f}, {48.0f, 55.0f}};
+    for (unsigned pass = 0; pass < 2; pass++) {
+        unsigned index = 0;
+        for (const FontMetrics& font : fonts) for (bool normal : {true, false})
+            for (bool image : {false, true}) for (bool outside_text : {false, true}) {
+                SCOPED_TRACE(outside_text ? "outside text" : "inside text");
+                char actual_id[32], reference_id[32];
+                str_fmt(actual_id, sizeof(actual_id), "actual%u", index);
+                str_fmt(reference_id, sizeof(reference_id), "reference%u", index++);
+                float expected_height = normal ? font.normal_height : font.size;
+                expect_inline_strut_pair(actual_id, reference_id, expected_height, image);
+            }
+        expect_inline_strut_pair("wrapped-normal", "wrapped-normal-reference", 220.0f, true, 42.0f);
+        expect_inline_strut_pair("wrapped-unitless", "wrapped-unitless-reference", 192.0f, true, 38.0f);
+        // recompute metrics when retained descendants re-enter their parent context.
+        if (pass == 0) layout_html_doc(&ui, document, true);
+    }
+}
+
+TEST_F(RadiantTextLayout, ExplicitSnapshotReadinessSettlesLongFrameChains) {
+    expect_snapshot_capture("test/html/layout_snapshot_ready.html", 22.0f);
+}
+
+TEST_F(RadiantTextLayout, SnapshotReadinessPreservesFrameCancellation) {
+    expect_snapshot_capture("test/html/layout_snapshot_cancelled.html", 34.0f);
+}
+
+TEST_F(RadiantTextLayout, OrdinarySnapshotKeepsBoundedRecurringAnimation) {
+    expect_snapshot_capture("test/html/layout_snapshot_ordinary.html", 0.0f);
+}
+
+TEST_F(RadiantTextLayout, NormalLeadingBaselinesRetainFontCellRoundingAcrossReflow) {
+    ASSERT_NE(load("test/html/layout_normal_leading_baselines.html"), nullptr);
+    ui.viewport_width = 320;
+    ui.viewport_height = 200;
+    layout_html_doc(&ui, document, false);
+    struct Metrics { float height; float baseline; };
+    const Metrics expected[] = {{32, 25}, {28, 22}, {26, 20}, {22, 17}, {21, 16}, {19, 15}};
+    for (unsigned pass = 0; pass < 2; pass++) {
+        for (unsigned index = 0; index < 6; index++) {
+            char id[16];
+            str_fmt(id, sizeof(id), "word%u", index);
+            DomElement* word = dom_find_element_by_id(document->root->as_element(), id);
+            ASSERT_NE(word, nullptr); ASSERT_NE(word->blk, nullptr);
+            EXPECT_FLOAT_EQ(word->height, expected[index].height) << id;
+            EXPECT_FLOAT_EQ(word->block()->first_line_baseline, expected[index].baseline) << id;
+        }
+        // measure_html exposes these same per-box baselines to SVG chart placement.
+        if (pass == 0) layout_html_doc(&ui, document, true);
+    }
+}
+
+TEST_F(RadiantTextLayout, NestedMulticolBreaksRetainTheirLineEndpointsAcrossReflow) {
+    ASSERT_NE(load("test/html/layout_nested_multicol_break_endpoints.html"), nullptr);
+    ui.viewport_width = 240;
+    ui.viewport_height = 960;
+    layout_html_doc(&ui, document, false);
+    const float font_heights[] = {14.0f, 17.0f, 26.0f};
+    for (unsigned pass = 0; pass < 2; pass++) {
+        for (unsigned index = 0; index < 6; index++) {
+            float gap = index % 2 ? 2.0f : 0.0f;
+            float width = (50.0f - 4.0f * gap) / 5.0f;
+            float pitch = width + gap;
+            float y = index * 150.0f + 70.0f;
+            for (unsigned line = 0; line < 3; line++) {
+                char id[32];
+                str_fmt(id, sizeof(id), "case%u-br%u", index, line);
+                expect_box(id, 16.0f + 2.0f * pitch + width, y,
+                    0.0f, font_heights[index / 2]);
+                str_fmt(id, sizeof(id), "case%u-ib%u", index, line);
+                expect_box(id, 16.0f + (line + 2.0f) * pitch, y, width, 30.0f);
+            }
+        }
+        // retained reflow must reconstruct source cursors before projecting again.
+        if (pass == 0) layout_html_doc(&ui, document, true);
+    }
+}
+
+TEST_F(RadiantTextLayout, AdjoiningEmptyChildrenPreserveMarginChainsAndComputedEdges) {
+    ASSERT_NE(load("test/html/layout_adjoining_empty_margins.html"), nullptr);
+    ui.viewport_width = 240;
+    ui.viewport_height = 896;
+    layout_html_doc(&ui, document, false);
+    struct MarginPair { const char* name; float y; float height; const char* child_margin; };
+    const MarginPair pairs[] = {
+        {"larger-heading", 18.72f, 22.0f, "18.72px"}, {"two-positive", 152.0f, 22.0f, "24px"},
+        {"negative", 270.0f, 22.0f, "24px"}, {"nested", 424.0f, 22.0f, "10px"},
+        {"bfc", 520.0f, 70.0f, "24px"}, {"border", 648.0f, 47.0f, "24px"},
+        {"padding", 776.0f, 47.0f, "24px"},
+    };
+    for (unsigned pass = 0; pass < 2; pass++) {
+        for (const MarginPair& pair : pairs) {
+            char actual_id[48], reference_id[48];
+            str_fmt(actual_id, sizeof(actual_id), "%s-0", pair.name);
+            str_fmt(reference_id, sizeof(reference_id), "%s-1", pair.name);
+            expect_box(actual_id, 16.0f, pair.y, 100.0f, pair.height);
+            expect_box(reference_id, 128.0f, pair.y, 100.0f, pair.height);
+            DomElement* actual = dom_find_element_by_id(document->root->as_element(), actual_id);
+            ASSERT_NE(actual, nullptr);
+            DomElement* child = actual->last_child->as_element();
+            ASSERT_NE(child, nullptr);
+            size_t before_bytes = 0, before_count = 0;
+            pool_get_stats(document->document_pool, &before_bytes, &before_count);
+            char value[64];
+            for (unsigned repeat = 0; repeat < 128; repeat++) {
+                for (CssPropertyCode side : {CSS_PROPERTY_MARGIN_TOP, CSS_PROPERTY_MARGIN_BOTTOM}) {
+                    ASSERT_TRUE(css_prop_serialize_computed(actual, side, 0, value, sizeof(value)));
+                    EXPECT_STREQ(value, "8px");
+                    ASSERT_TRUE(css_prop_serialize_computed(child, side, 0, value, sizeof(value)));
+                    EXPECT_STREQ(value, pair.child_margin);
+                }
+            }
+            size_t after_bytes = 0, after_count = 0;
+            pool_get_stats(document->document_pool, &after_bytes, &after_count);
+            EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
+        }
+        // consumed margins must be reconstructed from resolved values during reflow.
         if (pass == 0) layout_html_doc(&ui, document, true);
     }
 }

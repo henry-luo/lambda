@@ -1,0 +1,22 @@
+{
+  "name": "Pseudo grid computed tracks use the pseudo font and inherited declaration owner",
+  "html": "test/ui/css_grid_pseudo_computed.html",
+  "viewport": {"width": 480, "height": 240},
+  "events": [
+    {"type":"click","target":{"selector":"#check"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-before","equals":"10px|[start] 13px [end]|repeat(2, [a] 5px [b])"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-after","equals":"24px"},
+    {"type":"assert_rect","target":{"selector":"#patch"},"width":10,"height":12},
+    {"type":"assert_pixel","target":{"selector":"#patch","offset_x":5,"offset_y":5},"min_r":255,"max_r":255,"min_g":0,"max_g":0,"min_b":0,"max_b":0},
+    {"type":"click","target":{"selector":"#change"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-dirty-before","equals":"14px|[start] 17px [end]|repeat(2, [a] 7px [b])"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-dirty-after","equals":"24px"},
+    {"type":"assert_rect","target":{"selector":"#patch"},"width":14,"height":12},
+    {"type":"assert_pixel","target":{"selector":"#patch","offset_x":12,"offset_y":5},"min_r":255,"max_r":255,"min_g":0,"max_g":0,"min_b":0,"max_b":0},
+    {"type":"click","target":{"selector":"#inherit"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-inherited-before","equals":"90px|[start] 33px [end]|repeat(2, [a] 7px [b])"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-inherited-after","equals":"24px"},
+    {"type":"assert_rect","target":{"selector":"#patch"},"width":90,"height":12},
+    {"type":"assert_pixel","target":{"selector":"#patch","offset_x":80,"offset_y":5},"min_r":255,"max_r":255,"min_g":0,"max_g":0,"min_b":0,"max_b":0}
+  ]
+}

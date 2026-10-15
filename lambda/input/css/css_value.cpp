@@ -21,8 +21,10 @@ extern "C" {
 #include "../../../lib/math_checked.hpp"
 #include <math.h>
 
-static double css_color_clamp(double value, double maximum = 1.0) {
-    return isnan(value) ? 0.0 : fmax(0.0, fmin(maximum, value));
+double css_clamp_numeric_value(double value, double minimum, double maximum) {
+    double result = fmax(minimum, fmin(maximum, isnan(value) ? 0.0 : value));
+    // computed scalar serialization has a single zero, including narrowed numeric domains.
+    return result == 0.0 ? 0.0 : result;
 }
 
 static bool css_visit_list_items(const CssValue* value, CssListItemVisitor visitor,
@@ -62,7 +64,7 @@ static bool css_color_component(const CssValue* value, bool hue, bool percentage
         if (*type != CSS_MATH_PERCENT && (*type != CSS_MATH_NUMBER || percentage_only)) return false;
         double amount = *type == CSS_MATH_PERCENT
             ? computed.percentage * percentage_scale : computed.value * number_scale;
-        *result = clamp_component ? css_color_clamp(amount) : amount;
+        *result = clamp_component ? css_clamp_numeric_value(amount) : amount;
     }
     return true;
 }
@@ -160,7 +162,7 @@ bool css_color_compute(const CssValue* value, CssComputedColor* result) {
                 components->component3, &result->components[0], &result->components[1], &result->components[2]);
             else color_hwb_to_rgb(components->component1, components->component2,
                 components->component3, &result->components[0], &result->components[1], &result->components[2]);
-            result->components[3] = css_color_clamp(components->component4);
+            result->components[3] = css_clamp_numeric_value(components->component4);
             return true;
         } else return false;
     } else return false;
@@ -198,10 +200,10 @@ bool css_color_to_rgba(const CssComputedColor* color, uint8_t* r, uint8_t* g, ui
     else if (color->type == CSS_COLOR_HWB) color_hwb_to_rgb(red, green, blue, &red, &green, &blue);
     else if (color->type != CSS_COLOR_RGB && !(color->type == CSS_COLOR_COLOR &&
         color->color_space && strcmp(color->color_space, "srgb") == 0)) return false;
-    *r = (uint8_t)floor(css_color_clamp(red) * 255.0 + 0.5);
-    *g = (uint8_t)floor(css_color_clamp(green) * 255.0 + 0.5);
-    *b = (uint8_t)floor(css_color_clamp(blue) * 255.0 + 0.5);
-    *a = (uint8_t)floor(css_color_clamp(color->components[3]) * 255.0 + 0.5);
+    *r = (uint8_t)floor(css_clamp_numeric_value(red) * 255.0 + 0.5);
+    *g = (uint8_t)floor(css_clamp_numeric_value(green) * 255.0 + 0.5);
+    *b = (uint8_t)floor(css_clamp_numeric_value(blue) * 255.0 + 0.5);
+    *a = (uint8_t)floor(css_clamp_numeric_value(color->components[3]) * 255.0 + 0.5);
     return true;
 }
 

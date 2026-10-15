@@ -123,12 +123,13 @@ extern "C" Item mvp_lmd_object_new(TypeMap* shape, int64_t collection) {
     map->index = hashmap_new(sizeof(MapBucket), 0, 0, 0, bucket_hash, bucket_compare, NULL, NULL);
     return map->index ? Item{.map = map} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
-Map* mvp_lmd_property_map(Item owner, bool writing) {
+Map* mvp_lmd_property_map(Item owner, bool writing, bool numeric_attributes) {
     if (get_type_id(owner) == LMD_TYPE_VMAP && js_promise_is(owner)) {
         Item storage = js_promise_property_storage(owner, writing);
         return get_type_id(storage) == LMD_TYPE_MAP ? storage.map : NULL;
     }
-    if (writing && (get_type_id(owner) == LMD_TYPE_MAP || get_type_id(owner) == LMD_TYPE_ARRAY)) {
+    if (writing && (get_type_id(owner) == LMD_TYPE_MAP || get_type_id(owner) == LMD_TYPE_ARRAY ||
+            get_type_id(owner) == LMD_TYPE_ARRAY_NUM)) {
         TypeMap* shape = (TypeMap*)owner.map->type;
         // D3.2.4v4: guest descriptor operations cannot rewrite a foreign declared prefix.
         if (shape && (shape->is_trusted_contract || shape->nominal) && (!shape->nominal ||
@@ -140,7 +141,10 @@ Map* mvp_lmd_property_map(Item owner, bool writing) {
         return cls ? mvp_lmd_class_values(cls)[2].map : NULL;
     }
     if (get_type_id(owner) == LMD_TYPE_ARRAY) return js_array_has_props(owner.array) ? js_array_props(owner.array) : (Map*)owner.array;
-    if (get_type_id(owner) != LMD_TYPE_MAP) return NULL;
+    if (get_type_id(owner) != LMD_TYPE_MAP) {
+        // only raw named reads/writes use this face; reflection still requires full typed storage.
+        return numeric_attributes && get_type_id(owner) == LMD_TYPE_ARRAY_NUM ? owner.map : NULL;
+    }
     Map* map = owner.map;
     TypeMap* type = (TypeMap*)map->type;
     return type && type->nominal && !type->js_meta &&
@@ -422,13 +426,13 @@ extern "C" Item mvp_lmd_property_get(Item owner, Item name, int64_t callee) {
         if (method) return callee ? Item{.item = mvp_lmd_method_token(method)} : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
         return tid == LMD_TYPE_ARRAY ? Item{.item = ITEM_JS_UNDEFINED} : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     }
-    Map* map = mvp_lmd_property_map(owner);
+    Map* map = mvp_lmd_property_map(owner, false, true);
     if (!map) return mvp_lmd_fail(get_type_id(owner) == LMD_TYPE_NULL ||
         get_type_id(owner) == LMD_TYPE_UNDEFINED ? LMD_MVP_TYPE : LMD_MVP_CAPABILITY, 0);
     String* key = name.get_string();
     ShapeEntry* field = own_field(map, key);
     if (field) return field->flags & JSPD_IS_ACCESSOR ? mvp_lmd_accessor_call(owner, field, ItemNull, LMD_PROP_GET) : map_shape_field_to_item(map->data, field);
-    if (map->map_kind == MAP_KIND_ORDERED) {
+    if (tid == LMD_TYPE_MAP && map->map_kind == MAP_KIND_ORDERED) {
         if (text_is(key, "size")) return {.item = i2it(((OrderedMap*)map)->size)};
         // library collections have actual prototype functions; Set must not acquire Map-only methods.
         if (mvp_lmd_class_record(owner)) return Item{.item = ITEM_JS_UNDEFINED};
@@ -444,16 +448,17 @@ extern "C" Item mvp_lmd_property_get(Item owner, Item name, int64_t callee) {
 }
 extern "C" Item mvp_lmd_property_set(Item owner, Item name, Item value) {
     // audited MIR callers retain all arguments and scalar homes across this non-reentrant helper.
-    Map* map = mvp_lmd_property_map(owner, true);
+    Map* map = mvp_lmd_property_map(owner, true, true);
     if (!map) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    if (get_type_id(owner) == LMD_TYPE_ARRAY && !map->type) {
+    TypeId tid = get_type_id(owner);
+    if ((tid == LMD_TYPE_ARRAY || tid == LMD_TYPE_ARRAY_NUM) && !map->type) {
         // D2.6.6v3: the existing array attribute face owns and traces these packed fields.
         Input* tree = runtime_shape_tree();
         map->type = tree ? type_tree_map_root(tree) : NULL;
         if (!map->type) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     }
     ShapeEntry* field = own_field(map, name.get_string());
-    if (map->map_kind == MAP_KIND_ORDERED && !field &&
+    if (tid == LMD_TYPE_MAP && map->map_kind == MAP_KIND_ORDERED && !field &&
             (text_is(name.get_string(), "size") || (!mvp_lmd_class_record(owner) && mvp_lmd_builtin_method(name.get_string()))))
         return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     if (field && (field->flags & (JSPD_IS_ACCESSOR | JSPD_NON_WRITABLE)))

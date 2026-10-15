@@ -288,8 +288,10 @@ bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* 
             continue;
         }
 
-        float shadow_radii[4];
-        for (int i = 0; i < 4; i++) shadow_radii[i] = fmaxf(0.0f, radii[i] + spread);
+        Corner radius = render_path_uniform_corner(radii[0], radii[1], radii[2], radii[3]);
+        Corner shadow_radius = render_geometry_outset_corners(&radius, width, height,
+            spread, spread, spread, spread);
+        const float* shadow_radii = shadow_radius.horizontal;
 
         float exclude_params[RDT_CLIP_PARAM_COUNT] = {
             x, y, width, height,

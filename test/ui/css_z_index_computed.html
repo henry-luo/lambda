@@ -1,0 +1,22 @@
+<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;background:white}button{height:24px}
+#stage{position:relative;width:100px;height:30px;font-size:50px;z-index:calc(1em / 10px)}
+#red,#blue{position:absolute;left:0;top:0;width:50px;height:30px}
+#red{font-size:20px;background:red;--level:calc(1em / 10px);z-index:var(--level)}
+#blue{background:blue;z-index:3}#red.inherit{z-index:inherit}
+#owner{font-size:20px}#owner::before{content:"A";font-size:var(--pseudo-font,5px);z-index:calc(1em / 1px)}
+#owner::after{content:"B";font-size:8px;z-index:calc(.5em / 1px)}
+#static{z-index:0}#auto{position:relative;z-index:auto}
+</style><button id="check">Check</button><button id="change">Change</button><button id="invalid">Invalid</button><button id="inherit">Inherit</button><button id="restore">Restore</button>
+<output id="report"></output><div id="stage"><div id="red"></div><div id="blue"></div></div><div id="owner"></div><div id="static"></div><div id="auto"></div>
+<script>
+(function(){
+var red=document.getElementById('red'),blue=document.getElementById('blue'),owner=document.getElementById('owner'),report=document.getElementById('report');
+red.onclick=function(){report.setAttribute('data-hit','red');};blue.onclick=function(){report.setAttribute('data-hit','blue');};
+function record(prefix){var values=[getComputedStyle(red).zIndex,getComputedStyle(document.getElementById('blue')).zIndex,getComputedStyle(owner,'::before').zIndex,getComputedStyle(owner,'::after').zIndex,getComputedStyle(document.getElementById('stage')).zIndex,getComputedStyle(document.getElementById('static')).zIndex,getComputedStyle(document.getElementById('auto')).zIndex];report.setAttribute('data-'+prefix+'values',values.join('|'));}
+document.getElementById('check').onclick=function(){record('');};
+document.getElementById('change').onclick=function(){red.style.fontSize='40px';owner.style.setProperty('--pseudo-font','7px');record('dirty-');};
+document.getElementById('invalid').onclick=function(){red.style.setProperty('--level','3px');record('invalid-');};
+document.getElementById('inherit').onclick=function(){red.className='inherit';record('inherited-');};
+document.getElementById('restore').onclick=function(){red.className='';red.style.setProperty('--level','calc(1em / 10px)');record('restored-');};
+})();</script>

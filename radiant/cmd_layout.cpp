@@ -5749,7 +5749,11 @@ static bool layout_single_file(
 
     bool success = !memory_profile_output_file || view_memory_profile_write(
         doc, input_file, memory_profile_output_file);
-    if (!doc->view_tree || !doc->view_tree->root) {
+    if (auto_close && !document_snapshot_is_ready(doc)) {
+        // an exhausted readiness drain cannot publish a successful partial snapshot.
+        log_error("Layout snapshot readiness: refusing to serialize unfinished document %s", input_file);
+        success = false;
+    } else if (!doc->view_tree || !doc->view_tree->root) {
         log_warn("Layout computation did not produce view tree for %s", input_file);
         success = false;
     } else {

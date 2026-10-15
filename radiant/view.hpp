@@ -7,6 +7,7 @@
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/math_utils.h"
+#include "../lib/rdt_geometry_types.h"
 #include "../lib/memtrack.h"
 #include "../lib/mem_kind.hpp"
 #include "../lib/font/font.h"
@@ -105,6 +106,9 @@ String* css_prop_serialize_computed_value(Pool* pool, DomElement* element,
 bool css_prop_serialize_cascaded_value(DomElement* element, CssPropertyCode id,
     int pseudo_type, StringBuf* out, bool preserve_color_model = false);
 bool css_prop_compute_numeric_value(DomElement* element, const CssValue* value, CssMathResult* result);
+// declaration computation supplies factors when the applied item record is absent.
+bool css_prop_compute_declared_flex_factor(DomElement* element, CssPropertyCode id, float* result);
+bool css_prop_compute_declared_flex_basis(DomElement* element, CssFlexBasisValue* result);
 String* css_prop_serialize_svg_value(Pool* pool, DomElement* declaring,
     CssPropertyCode id, const CssValue* value);
 String* css_prop_serialize_custom_property(Pool* pool, DomElement* element,
@@ -312,15 +316,6 @@ double animation_clock_time(const AnimationScheduler* scheduler, const Animation
 void animation_instance_pause(AnimationInstance* anim, double now);
 void animation_instance_sample(AnimationInstance* anim, double now, bool preserve_timeline = false);
 void animation_instance_resume(AnimationInstance* anim, double now);
-
-// 3x3 affine transform matrix shared by view transforms and render backends.
-// The layout matches ThorVG's Tvg_Matrix, but the type itself is Radiant-owned.
-// tier-2: view-pool, rebuilt each relayout
-typedef struct {
-    float e11, e12, e13;   // row 1: scale-x, shear-x, translate-x
-    float e21, e22, e23;   // row 2: shear-y, scale-y, translate-y
-    float e31, e32, e33;   // row 3: 0, 0, 1
-} RdtMatrix;
 
 // 4x4 homogeneous matrix used while a preserve-3d subtree is accumulated.
 // The 2D RdtMatrix remains the backend representation after projection.
@@ -1894,6 +1889,11 @@ typedef struct BoundaryProp {
     float margin_chain_negative;  // most negative margin in the pending collapse chain
 } BoundaryProp;
 
+inline const Margin* view_boundary_flow_margin(const BoundaryProp* boundary) {
+    if (!boundary) return nullptr;
+    return boundary->has_flow_margin ? &boundary->flow_margin : &boundary->margin;
+}
+
 // shared lazy border allocation for style resolution and animation sampling.
 BorderProp* radiant_ensure_border_prop(BoundaryProp* boundary, Pool* pool);
 
@@ -2501,6 +2501,7 @@ typedef enum ScrollSnapAxis {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct ScrollProp {
     CssEnum overflow_x, overflow_y;
+    CssEnum default_overflow_x, default_overflow_y; // HTML defaults before author cascade, for dirty CSSOM reads
     CssEnum overscroll_x, overscroll_y;
     CssEnum scroll_behavior;
     CssEnum overflow_clip_box;

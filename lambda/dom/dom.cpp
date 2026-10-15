@@ -13,7 +13,6 @@
 #include "dom_style.h"
 #include "dom_collection_types.h"
 #include "dom_host_engine.h"
-#include "../../radiant/svg_animation.hpp"
 #include "dom_core.h"
 #include "realm/dom_realm.h"
 #include "dom_engine.h"
@@ -1138,7 +1137,7 @@ extern "C" Item dom_testdriver_touch(Item target_item, Item type_item,
                      strcmp(type, "touchcancel") != 0;
     float x = dom_item_to_float(x_root.get());
     float y = dom_item_to_float(y_root.get());
-    radiant_dispatch_event_sim_touch(_js_current_ui_context,
+    dom_engine_dispatch_touch(_js_current_ui_context,
         static_cast<View*>(target), type, x, y, 0, is_active, -1.0);
     return (Item){.item = ITEM_TRUE};
 }
@@ -3617,13 +3616,13 @@ static bool dom_prepare_cross_document_insertion(DomNode* node,
             ? destination->state
             : dom_engine_document_ensure_state(destination, "dom_adopt_range");
         if (!destination_state) return false;
-        dom_range_adopt_subtree(source->state, destination_state, node);
-        dom_range_refresh_lifecycle_pins(source);
+        dom_engine_range_adopt_subtree(source->state, destination_state, node);
+        dom_engine_range_refresh_lifecycle_pins(source);
     }
     if (cross_document &&
         !dom_rebind_subtree_document(node, source, destination)) return false;
     if (cross_document && source->state) {
-        dom_range_refresh_lifecycle_pins(destination);
+        dom_engine_range_refresh_lifecycle_pins(destination);
     }
     return true;
 }
@@ -4553,15 +4552,15 @@ extern "C" Item dom_get_computed_style(Item elem_item, Item pseudo_item) {
         return ItemNull;
     }
 
-    // determine pseudo-element type: 0=none, 1=before, 2=after
+    // selector parsing and computed wrappers share the canonical pseudo identities.
     int pseudo_type = 0;
     if (get_type_id(pseudo_item) == LMD_TYPE_STRING || get_type_id(pseudo_item) == LMD_TYPE_SYMBOL) {
         const char* pseudo_str = fn_to_cstr(pseudo_item);
         if (pseudo_str) {
             // handle both "before" and "::before" or ":before"
             while (*pseudo_str == ':') pseudo_str++;
-            if (strcmp(pseudo_str, "before") == 0) pseudo_type = 1;
-            else if (strcmp(pseudo_str, "after") == 0) pseudo_type = 2;
+            const CssPseudoElementName* pseudo = css_pseudo_element_lookup(pseudo_str);
+            if (pseudo) pseudo_type = pseudo->type;
         }
     }
 
@@ -6122,7 +6121,7 @@ extern "C" bool dom_exec_insert_html(DomDocument* doc, const char* html_str) {
     if (inserted->length > 0) {
         DomNode* last = (DomNode*)inserted->data[inserted->length - 1];
         uint32_t end = dom_node_boundary_length(last);
-        if (!dom_selection_collapse(selection, last, end, &exception)) {
+        if (!dom_engine_selection_collapse(selection, last, end, &exception)) {
             arraylist_free(inserted);
             return false;
         }
@@ -7573,7 +7572,7 @@ static Item dom_text_split_method(DomText* text_node, Item offset_arg) {
 
     DomNode* parent = text_node->parent;
     DocState* state = dom_state_for_nodes((DomNode*)text_node, parent);
-    DomText* right = dom_text_split_at(state, text_node, (uint32_t)offset);
+    DomText* right = dom_engine_text_split_at(state, text_node, (uint32_t)offset);
     if (!right) {
         return dom_throw_index_size_error("The text node cannot be split.");
     }
@@ -12506,7 +12505,7 @@ static DomSvgHitGeometry* dom_svg_hit_geometry(DomElement* element, bool create 
     auto* scope = g_dom_svg_hit_geometry;
     // a use instance supplies a different font/viewport ancestry for the same source.
     if (!element || !scope || !scope->entries || scope->document != element->doc ||
-        g_dom_svg_style_scope || svg_animation_is_sampling(element->doc)) return nullptr;
+        g_dom_svg_style_scope || dom_engine_svg_animation_is_sampling(element->doc)) return nullptr;
     DomSvgHitGeometry key = {}; key.element = element;
     DomSvgHitGeometry* entry = DomSvgHitGeometryMap::get(scope->entries, key);
     if (!entry && create) {
@@ -12523,7 +12522,7 @@ SvgLengthContext dom_svg_length_context(DomElement* elem) {
     if (cached && cached->has_lengths) return cached->lengths;
     DomElement* chain[64];
     int count = 0;
-    for (DomNode* node = elem; node && count < 64; node = svg_dom_style_parent(node, g_dom_svg_style_scope)) {
+    for (DomNode* node = elem; node && count < 64; node = dom_engine_svg_style_parent(node, g_dom_svg_style_scope)) {
         if (node->is_element()) chain[count++] = node->as_element();
     }
     UiContext* ui = elem->doc ? (UiContext*)elem->doc->js.host_ui_context : nullptr;
@@ -12537,7 +12536,7 @@ SvgLengthContext dom_svg_length_context(DomElement* elem) {
         if (svg) in_svg = true;
         char buffer[64];
         if (in_svg) {
-            const char* size = svg_get_dom_presentation_property(current, "font-size", false,
+            const char* size = dom_engine_svg_property(current, "font-size", false,
                 buffer, sizeof(buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
             if (size) lengths.font_size = svg_font_size_value(size, lengths.font_size, svg_font_x_height(fonts, &font));
             font.size_px = lengths.font_size;
@@ -12548,11 +12547,11 @@ SvgLengthContext dom_svg_length_context(DomElement* elem) {
         }
         if (in_svg) {
             char own_family[256];
-            const char* value = svg_get_dom_presentation_property(current, "font-family", false, own_family, sizeof(own_family), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
+            const char* value = dom_engine_svg_property(current, "font-family", false, own_family, sizeof(own_family), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
             if (value) str_copy(family, sizeof(family), value, strlen(value));
-            value = svg_get_dom_presentation_property(current, "font-weight", false, buffer, sizeof(buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
+            value = dom_engine_svg_property(current, "font-weight", false, buffer, sizeof(buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
             if (value) font.weight = (FontWeight)svg_font_weight_value(value, font.weight);
-            value = svg_get_dom_presentation_property(current, "font-style", false, buffer, sizeof(buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
+            value = dom_engine_svg_property(current, "font-style", false, buffer, sizeof(buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
             if (value) font.slant = strcmp(value, "italic") == 0 ? FONT_SLANT_ITALIC
                 : strcmp(value, "oblique") == 0 ? FONT_SLANT_OBLIQUE : FONT_SLANT_NORMAL;
         }
@@ -12564,15 +12563,15 @@ SvgLengthContext dom_svg_length_context(DomElement* elem) {
             continue;
         }
         if (!svg || current == elem) continue;
-        const char* viewbox = svg_animation_attribute(current, "viewBox");
-        if (!viewbox) viewbox = svg_animation_attribute(current, "viewbox");
+        const char* viewbox = dom_engine_svg_animation_attribute(current, "viewBox");
+        if (!viewbox) viewbox = dom_engine_svg_animation_attribute(current, "viewbox");
         SvgViewBox box = svg_parse_viewbox(viewbox);
         if (box.has_viewbox && box.width > 0.0f && box.height > 0.0f) {
             lengths.viewport_width = box.width; lengths.viewport_height = box.height;
         } else {
-            float width = svg_resolve_length(svg_animation_attribute(current, "width"), &lengths, SVG_LENGTH_X,
+            float width = svg_resolve_length(dom_engine_svg_animation_attribute(current, "width"), &lengths, SVG_LENGTH_X,
                 current->width > 0.0f ? current->width : lengths.viewport_width);
-            float height = svg_resolve_length(svg_animation_attribute(current, "height"), &lengths, SVG_LENGTH_Y,
+            float height = svg_resolve_length(dom_engine_svg_animation_attribute(current, "height"), &lengths, SVG_LENGTH_Y,
                 current->height > 0.0f ? current->height : lengths.viewport_height);
             dom_svg_apply_css_viewport_size(current, &width, &height);
             lengths.viewport_width = width; lengths.viewport_height = height;
@@ -12595,7 +12594,7 @@ SvgLengthAxis dom_svg_length_axis(const char* name) {
 static float dom_svg_attribute_number(DomElement* elem, const char* name, float fallback) {
     if (!elem || !name) return fallback;
     SvgLengthContext lengths = dom_svg_length_context(elem);
-    return svg_resolve_length(svg_animation_attribute(elem, name), &lengths, dom_svg_length_axis(name), fallback);
+    return svg_resolve_length(dom_engine_svg_animation_attribute(elem, name), &lengths, dom_svg_length_axis(name), fallback);
 }
 
 extern "C" bool dom_svg_foreign_object_rectangle(void* element, float* x, float* y, float* width, float* height) {
@@ -12607,11 +12606,11 @@ extern "C" bool dom_svg_foreign_object_rectangle(void* element, float* x, float*
     Element* backing = dom_element_to_element(elem);
     for (unsigned index = 0; index < 4; index++) {
         char buffer[256] = {}; bool from_css = false;
-        const char* value = svg_get_dom_presentation_property(elem, names[index], false,
+        const char* value = dom_engine_svg_property(elem, names[index], false,
             buffer, sizeof(buffer), &from_css, nullptr, nullptr, g_dom_svg_style_scope);
         double number = 0.0;
         Item attribute = backing ? Item{.item = backing->get_attr(names[index]).item} : ItemNull;
-        *values[index] = !from_css && !svg_animation_value(elem, names[index]) && item_try_to_double(attribute, &number) ? (float)number :
+        *values[index] = !from_css && !dom_engine_svg_animation_value(elem, names[index], false) && item_try_to_double(attribute, &number) ? (float)number :
             svg_resolve_length(value, &lengths, index % 2 ? SVG_LENGTH_Y : SVG_LENGTH_X, 0.0f);
         if (!isfinite(*values[index])) return false;
     }
@@ -12621,7 +12620,7 @@ extern "C" bool dom_svg_foreign_object_rectangle(void* element, float* x, float*
 extern "C" bool dom_svg_foreign_object_clips(void* element) {
     DomElement* elem = (DomElement*)element; if (!elem) return true;
     char buffer[64] = {}; bool from_css = false;
-    const char* overflow = svg_get_dom_presentation_property(elem, "overflow", false,
+    const char* overflow = dom_engine_svg_property(elem, "overflow", false,
         buffer, sizeof(buffer), &from_css, nullptr, nullptr, g_dom_svg_style_scope);
     // SVG's UA overflow:hidden applies unless the author supplies an overflow value.
     return (!from_css && !elem->has_attribute("overflow")) || !overflow || str_icmp_cstr(overflow, "visible") != 0;
@@ -12634,7 +12633,7 @@ static RdtMatrix dom_svg_transform_from_element(DomElement* elem) {
     if (cached && cached->has_local) return cached->local;
     char value_buffer[512];
     bool from_css = false;
-    const char* value = svg_get_dom_presentation_property(elem, "transform", false,
+    const char* value = dom_engine_svg_property(elem, "transform", false,
         value_buffer, sizeof(value_buffer), &from_css, nullptr, nullptr, g_dom_svg_style_scope);
     bool nested_viewport = dom_svg_tag_is(elem, "svg") &&
         elem->parent && elem->parent->is_element() && dom_element_is_svg(elem->parent->as_element());
@@ -12642,11 +12641,11 @@ static RdtMatrix dom_svg_transform_from_element(DomElement* elem) {
     if ((!value || strcmp(value, "none") == 0) && !nested_viewport) return transform;
     SvgLengthContext lengths = dom_svg_length_context(elem);
     Bound box = {0.0f, 0.0f, lengths.viewport_width, lengths.viewport_height};
-    for (DomNode* node = svg_dom_style_parent(elem, g_dom_svg_style_scope); node && node->is_element(); node = svg_dom_style_parent(node, g_dom_svg_style_scope)) {
+    for (DomNode* node = dom_engine_svg_style_parent(elem, g_dom_svg_style_scope); node && node->is_element(); node = dom_engine_svg_style_parent(node, g_dom_svg_style_scope)) {
         DomElement* parent = node->as_element();
         if (!dom_svg_tag_is(parent, "svg")) continue;
-        const char* viewbox = svg_animation_attribute(parent, "viewBox");
-        if (!viewbox) viewbox = svg_animation_attribute(parent, "viewbox");
+        const char* viewbox = dom_engine_svg_animation_attribute(parent, "viewBox");
+        if (!viewbox) viewbox = dom_engine_svg_animation_attribute(parent, "viewbox");
         SvgViewBox parent_box = svg_parse_viewbox(viewbox);
         if (parent_box.has_viewbox) {
             box = {parent_box.min_x, parent_box.min_y, parent_box.min_x + parent_box.width,
@@ -12655,13 +12654,13 @@ static RdtMatrix dom_svg_transform_from_element(DomElement* elem) {
         break;
     }
     char box_buffer[64];
-    const char* reference = svg_get_dom_presentation_property(elem, "transform-box", false,
+    const char* reference = dom_engine_svg_property(elem, "transform-box", false,
         box_buffer, sizeof(box_buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
     if (reference && (strcmp(reference, "fill-box") == 0 || strcmp(reference, "stroke-box") == 0)) {
         dom_svg_element_geometry_bounds(elem, &box.left, &box.top, &box.right, &box.bottom);
     }
     char origin_buffer[128];
-    const char* origin = svg_get_dom_presentation_property(elem, "transform-origin", false,
+    const char* origin = dom_engine_svg_property(elem, "transform-origin", false,
         origin_buffer, sizeof(origin_buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
     transform = svg_resolve_local_transform(value, from_css, origin, &box, &lengths);
     if (nested_viewport) {
@@ -12683,7 +12682,7 @@ extern "C" bool dom_svg_is_text(void* element) {
 static RdtPath* dom_svg_text_geometry_path(DomElement* elem) {
     SvgLengthContext lengths = dom_svg_length_context(elem);
     UiContext* ui = elem->doc ? (UiContext*)elem->doc->js.host_ui_context : nullptr;
-    return svg_text_geometry_path(elem, &lengths, ui ? ui->font_ctx : nullptr);
+    return dom_engine_svg_text_path(elem, &lengths, ui ? ui->font_ctx : nullptr);
 }
 
 static RdtPath* dom_svg_basic_shape_path(DomElement* elem);
@@ -12692,7 +12691,7 @@ static bool dom_svg_is_basic_shape(DomElement* elem);
 static DomElement* dom_svg_use_reference(DomElement* elem);
 
 static JsDomSvgBounds dom_svg_bounds_for_element(DomElement* elem, int depth = 0) {
-    SvgAnimationSourceScope animation_sources(elem ? elem->doc : nullptr);
+    DomSvgSourceScope animation_sources(elem ? elem->doc : nullptr);
     JsDomSvgBounds bounds = {};
     if (!dom_element_is_svg(elem) || depth >= SVG_USE_DEPTH_MAX) return bounds;
     const char* tag = elem->local_name();
@@ -12718,7 +12717,7 @@ static JsDomSvgBounds dom_svg_bounds_for_element(DomElement* elem, int depth = 0
         }
     } else if (str_icmp_cstr(tag, "use") == 0) {
         DomElement* reference = dom_svg_use_reference(elem);
-        SvgAnimationSourceScope animation_scope(elem->doc, reference, elem);
+        DomSvgSourceScope animation_scope(elem->doc, reference, elem);
         bounds = dom_svg_bounds_for_element(reference, depth + 1);
         RdtMatrix reference_transform = reference ? dom_svg_transform_from_element(reference) : rdt_matrix_identity();
         dom_svg_bounds_apply_transform(&bounds, &reference_transform);
@@ -12743,7 +12742,7 @@ static JsDomSvgBounds dom_svg_bounds_for_element(DomElement* elem, int depth = 0
 
 bool dom_svg_element_geometry_bounds(void* element, float* left, float* top, float* right, float* bottom) {
     if (!element || !left || !top || !right || !bottom) return false;
-    SvgAnimationSourceScope animation_sources(((DomElement*)element)->doc);
+    DomSvgSourceScope animation_sources(((DomElement*)element)->doc);
     JsDomSvgBounds bounds = dom_svg_bounds_for_element((DomElement*)element);
     if (!bounds.valid) return false;
     *left = bounds.left; *top = bounds.top; *right = bounds.right; *bottom = bounds.bottom;
@@ -12751,7 +12750,7 @@ bool dom_svg_element_geometry_bounds(void* element, float* left, float* top, flo
 }
 
 static Item dom_svg_get_bbox_for_element(DomElement* elem) {
-    SvgAnimationSourceScope animation_sources(elem ? elem->doc : nullptr);
+    DomSvgSourceScope animation_sources(elem ? elem->doc : nullptr);
     JsDomSvgBounds bounds = dom_svg_bounds_for_element(elem);
     if (!bounds.valid) return dom_make_rect_object(0.0f, 0.0f, 0.0f, 0.0f);
     return dom_make_rect_object(bounds.left, bounds.top,
@@ -12775,8 +12774,8 @@ static RdtMatrix dom_svg_viewbox_transform(DomElement* elem) {
     float min_y = 0.0f;
     float viewbox_width = 0.0f;
     float viewbox_height = 0.0f;
-    const char* viewbox = svg_animation_attribute(elem, "viewBox");
-    if (!viewbox) viewbox = svg_animation_attribute(elem, "viewbox");
+    const char* viewbox = dom_engine_svg_animation_attribute(elem, "viewBox");
+    if (!viewbox) viewbox = dom_engine_svg_animation_attribute(elem, "viewbox");
     if (!dom_svg_parse_viewbox(viewbox, &min_x, &min_y, &viewbox_width, &viewbox_height)) {
         return transform;
     }
@@ -12800,7 +12799,7 @@ static RdtMatrix dom_svg_viewbox_transform(DomElement* elem) {
     if (viewport_width <= 0.0f || viewport_height <= 0.0f) return transform;
     SvgViewBox box = {min_x, min_y, viewbox_width, viewbox_height, true};
     return svg_viewbox_transform(&box, viewport_width, viewport_height,
-        svg_animation_attribute(elem, "preserveAspectRatio"));
+        dom_engine_svg_animation_attribute(elem, "preserveAspectRatio"));
 }
 
 static RdtMatrix dom_svg_ctm(DomElement* elem, bool screen_space) {
@@ -12840,7 +12839,7 @@ static RdtMatrix dom_svg_ctm(DomElement* elem, bool screen_space) {
     }
     if (screen_space && outermost_svg) {
         RdtMatrix layout_transform;
-        if (!view_get_foreign_object_matrix(static_cast<View*>(outermost_svg), &layout_transform, false)) {
+        if (!dom_engine_foreign_object_matrix(static_cast<View*>(outermost_svg), &layout_transform, false)) {
             RdtLogicalPoint origin = {};
             dom_engine_element_viewport_origin(outermost_svg, &origin.x, &origin.y);
             layout_transform = rdt_matrix_translate(origin.x, origin.y);
@@ -13297,10 +13296,10 @@ static bool dom_svg_is_basic_shape(DomElement* elem) {
 
 static RdtPath* dom_svg_basic_shape_path(DomElement* elem) {
     if (!dom_svg_is_basic_shape(elem)) return nullptr;
-    if (str_icmp_cstr(elem->local_name(), "path") == 0) return svg_parse_path_d(svg_animation_attribute(elem, "d"));
+    if (str_icmp_cstr(elem->local_name(), "path") == 0) return svg_parse_path_d(dom_engine_svg_animation_attribute(elem, "d"));
     RdtPath* path = rdt_path_new();
     SvgLengthContext lengths = dom_svg_length_context(elem);
-    if (!path || !svg_append_basic_shape_path(elem, path, &lengths)) {
+    if (!path || !dom_engine_svg_append_shape(elem, path, &lengths)) {
         if (path) rdt_path_free(path);
         return nullptr;
     }
@@ -13407,7 +13406,7 @@ extern "C" bool dom_geometry_path_query(const void* opaque_path, float left,floa
 
 static const char* dom_svg_presentation_value(DomElement* elem, const char* name,
     bool inherits, char* buffer, size_t buffer_size) {
-    return svg_get_dom_presentation_property(elem, name, inherits, buffer, buffer_size,
+    return dom_engine_svg_property(elem, name, inherits, buffer, buffer_size,
         nullptr, nullptr, nullptr, g_dom_svg_style_scope);
 }
 
@@ -13415,7 +13414,7 @@ static float dom_svg_presentation_number(DomElement* elem, const char* name,
     float fallback, bool inherits) {
     char value_buffer[64];
     DomElement* declaration = nullptr;
-    const char* value = svg_get_dom_presentation_property(elem, name, inherits, value_buffer,
+    const char* value = dom_engine_svg_property(elem, name, inherits, value_buffer,
         sizeof(value_buffer), nullptr, nullptr, &declaration, g_dom_svg_style_scope);
     SvgLengthContext lengths = dom_svg_length_context(declaration ? declaration : elem);
     SvgLengthContext used = dom_svg_length_context(elem);
@@ -13471,7 +13470,7 @@ static void dom_svg_configure_stroke_hit(DomElement* elem, JsDomSvgPathHitContex
         "stroke-dashoffset", 0.0f, true);
     char* dasharray = nullptr;
     DomElement* declaration = nullptr;
-    svg_get_dom_presentation_property(elem, "stroke-dasharray", true, nullptr, 0,
+    dom_engine_svg_property(elem, "stroke-dasharray", true, nullptr, 0,
         nullptr, &dasharray, &declaration, g_dom_svg_style_scope);
     SvgLengthContext lengths = dom_svg_length_context(declaration ? declaration : elem);
     SvgLengthContext used = dom_svg_length_context(elem);
@@ -13581,8 +13580,8 @@ static bool dom_svg_viewport_local_bounds(DomElement* elem, float* left, float* 
     float min_y = 0.0f;
     float width = 0.0f;
     float height = 0.0f;
-    const char* viewbox = svg_animation_attribute(elem, "viewBox");
-    if (!viewbox) viewbox = svg_animation_attribute(elem, "viewbox");
+    const char* viewbox = dom_engine_svg_animation_attribute(elem, "viewBox");
+    if (!viewbox) viewbox = dom_engine_svg_animation_attribute(elem, "viewbox");
     if (dom_svg_parse_viewbox(viewbox, &min_x, &min_y, &width, &height)) {
         *left = min_x;
         *top = min_y;
@@ -13642,7 +13641,7 @@ static DomElement* dom_svg_use_reference(DomElement* elem) {
     const char* href = elem->get_attribute("href");
     if (!href) href = dom_element_attribute_ns(elem, "http://www.w3.org/1999/xlink", "href");
     if (!href || !*href) return nullptr;
-    if (href[0] != '#') return svg_animation_use_source(elem);
+    if (href[0] != '#') return dom_engine_svg_animation_use_source(elem);
     if (!href[1]) return nullptr;
     return dom_find_element_by_id(elem->doc->root, href + 1);
 }
@@ -13676,7 +13675,7 @@ static bool dom_svg_clip_contains(DomElement* elem, const RdtMatrix* frame, floa
     SvgLengthContext lengths = dom_svg_length_context(elem);
     UiContext* ui = elem->doc ? (UiContext*)elem->doc->js.host_ui_context : nullptr;
     RdtLogicalPoint point = {x, y};
-    return svg_dom_clip_contains_point(elem, &lengths, ui ? ui->font_ctx : nullptr, frame,
+    return dom_engine_svg_clip_contains(elem, &lengths, ui ? ui->font_ctx : nullptr, frame,
         dom_svg_clip_path_contains, &point, g_dom_svg_style_scope);
 }
 
@@ -13733,17 +13732,17 @@ static JsDomSvgShapeHit dom_svg_use_instance_hit(DomElement* elem,
         dom_svg_attribute_number(elem, "y", 0.0f));
     RdtMatrix frame = rdt_matrix_multiply(instance_ctm, &offset);
     SvgDomStyleScope scope = {lam::up(reference), lam::up(elem), lam::up(g_dom_svg_style_scope), 0.0f, 0.0f, false};
-    SvgAnimationSourceScope animation_scope(reference->doc, reference, elem);
+    DomSvgSourceScope animation_scope(reference->doc, reference, elem);
     const SvgDomStyleScope* saved_scope = g_dom_svg_style_scope;
     g_dom_svg_style_scope = &scope;
     RdtMatrix local = dom_svg_transform_from_element(reference);
     frame = rdt_matrix_multiply(&frame, &local);
     if (dom_svg_tag_is(reference, "symbol")) {
-        SvgViewBox box = svg_parse_viewbox(svg_animation_attribute(reference, "viewBox"));
-        float width = svg_resolve_length(svg_animation_attribute(elem, "width"), &lengths, SVG_LENGTH_X, lengths.viewport_width);
-        float height = svg_resolve_length(svg_animation_attribute(elem, "height"), &lengths, SVG_LENGTH_Y, lengths.viewport_height);
+        SvgViewBox box = svg_parse_viewbox(dom_engine_svg_animation_attribute(reference, "viewBox"));
+        float width = svg_resolve_length(dom_engine_svg_animation_attribute(elem, "width"), &lengths, SVG_LENGTH_X, lengths.viewport_width);
+        float height = svg_resolve_length(dom_engine_svg_animation_attribute(elem, "height"), &lengths, SVG_LENGTH_Y, lengths.viewport_height);
         if (box.has_viewbox && box.width > 0.0f && box.height > 0.0f && width > 0.0f && height > 0.0f) {
-            RdtMatrix mapping = svg_viewbox_transform(&box, width, height, svg_animation_attribute(reference, "preserveAspectRatio"));
+            RdtMatrix mapping = svg_viewbox_transform(&box, width, height, dom_engine_svg_animation_attribute(reference, "preserveAspectRatio"));
             frame = rdt_matrix_multiply(&frame, &mapping);
             scope.has_viewport = true; scope.viewport_width = box.width; scope.viewport_height = box.height;
         }
@@ -13770,13 +13769,13 @@ static void dom_svg_dispatch_use_timing_hit(const JsDomSvgShapeHit* hit, unsigne
     if (!depth) return;
     DomElement* host = hit->instance_hosts[depth - 1];
     if (depth == 1) {
-        svg_animation_use_event(host, hit->instance_source, type, bubbles, detail);
+        dom_engine_svg_animation_use_event(host, hit->instance_source, type, bubbles, detail);
         return;
     }
     DomElement* reference = dom_svg_use_reference(host);
     if (!reference) return;
     // replay the hit's instance chain so identical nested source nodes retain distinct timing owners.
-    SvgAnimationSourceScope scope(reference->doc, reference, host);
+    DomSvgSourceScope scope(reference->doc, reference, host);
     dom_svg_dispatch_use_timing_hit(hit, depth - 1, type, bubbles, detail);
 }
 
@@ -13958,7 +13957,7 @@ static bool dom_svg_element_contains_viewport_point(DomElement* elem,
 static DomElement* dom_svg_element_from_point_walk(DomElement* elem,
                                                        float x, float y) {
     DomSvgHitGeometryScope geometry(elem);
-    SvgAnimationSourceScope animation_sources(elem ? elem->doc : nullptr);
+    DomSvgSourceScope animation_sources(elem ? elem->doc : nullptr);
     if (!elem || dom_svg_element_skips_hit_test(elem) ||
         !dom_svg_point_is_within_viewports(elem, x, y)) return nullptr;
     if (dom_svg_tag_is(elem, "foreignObject")) {
@@ -14031,9 +14030,15 @@ static DomElement* dom_offset_parent_element(DomElement* elem) {
     return nullptr;
 }
 
+static RdtLogicalPoint dom_node_document_origin(DomNode* node) {
+    RdtLogicalPoint point = {};
+    dom_engine_node_document_origin(node, &point.x, &point.y);
+    return point;
+}
+
 static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis) {
     if (!elem) return 0;
-    RdtLogicalPoint origin = view_geometry_node_document_origin(
+    RdtLogicalPoint origin = dom_node_document_origin(
         static_cast<View*>(elem));
     float value = x_axis ? origin.x : origin.y;
 
@@ -14041,7 +14046,7 @@ static int64_t dom_offset_coordinate(DomElement* elem, bool x_axis) {
     if (offset_parent) {
         if (!offset_parent->tag_name ||
             str_icmp_cstr(offset_parent->tag_name, "body") != 0) {
-            RdtLogicalPoint parent_origin = view_geometry_node_document_origin(
+            RdtLogicalPoint parent_origin = dom_node_document_origin(
                 static_cast<View*>(offset_parent));
             value -= x_axis ? parent_origin.x : parent_origin.y;
         }
@@ -14136,9 +14141,7 @@ static DomElement* dom_element_from_point_walk(DomNode* node,
     float node_y = abs_y + node->y;
 
     if (node->is_text()) {
-        ViewGeometryTextHit hit = {};
-        return view_geometry_find_text_at(
-            static_cast<View*>(node), {px, py}, {abs_x, abs_y}, false, &hit) &&
+        return dom_engine_text_contains_point(node, px, py, abs_x, abs_y) &&
             node->parent && node->parent->is_element()
             ? node->parent->as_element() : nullptr;
     }
@@ -14157,8 +14160,8 @@ static DomElement* dom_element_from_point_walk(DomNode* node,
         if (shadow_hit) return shadow_hit;
     }
 
-    RdtLogicalPoint child_origin = view_geometry_child_content_origin(
-        static_cast<View*>(node), {abs_x, abs_y});
+    RdtLogicalPoint child_origin = {};
+    dom_engine_child_content_origin(node, abs_x, abs_y, &child_origin.x, &child_origin.y);
 
     for (DomNode* child = elem->last_child; child; child = child->prev_sibling) {
         DomElement* hit = dom_element_from_point_walk(
@@ -14415,7 +14418,7 @@ extern "C" Item dom_get_bounding_client_rect_bridge(void* dom_elem) {
     float width = 0.0f;
     float height = 0.0f;
     // CSSOM View §6 returns the visual border-box after CSS transforms.
-    view_get_visual_bounds(static_cast<View*>(elem), &x, &y, &width, &height);
+    dom_engine_visual_bounds(static_cast<View*>(elem), &x, &y, &width, &height);
     // a collapsed transform has real zero visual dimensions, independent of its layout size.
     return dom_make_rect_object_in(elem->doc, x, y, width, height);
 }
@@ -14432,7 +14435,7 @@ extern "C" Item dom_get_client_rects_bridge(void* dom_elem) {
     float y = 0.0f;
     float w = 0.0f;
     float h = 0.0f;
-    view_get_visual_bounds(static_cast<View*>(elem), &x, &y, &w, &h);
+    dom_engine_visual_bounds(static_cast<View*>(elem), &x, &y, &w, &h);
 
     // This built the same eight fields by hand, which is why it kept crashing
     // after dom_make_rect learned a realm-free path: one rect, one builder.
@@ -17224,37 +17227,37 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
     }
     if (elem->tag() == MARKUP_NAME_SVG) {
         if (operation == JUBE_DOM_PAUSE_ANIMATIONS || operation == JUBE_DOM_UNPAUSE_ANIMATIONS) {
-            svg_animation_pause(elem, operation == JUBE_DOM_PAUSE_ANIMATIONS);
+            dom_engine_svg_animation_pause(elem, operation == JUBE_DOM_PAUSE_ANIMATIONS);
             return make_js_undefined();
         }
-        if (operation == JUBE_DOM_ANIMATIONS_PAUSED) return Item{.item = svg_animation_paused(elem) ? ITEM_TRUE : ITEM_FALSE};
-        if (operation == JUBE_DOM_GET_CURRENT_TIME) return push_d(svg_animation_current_time(elem));
+        if (operation == JUBE_DOM_ANIMATIONS_PAUSED) return Item{.item = dom_engine_svg_animation_paused(elem) ? ITEM_TRUE : ITEM_FALSE};
+        if (operation == JUBE_DOM_GET_CURRENT_TIME) return push_d(dom_engine_svg_animation_current_time(elem));
         if (operation == JUBE_DOM_SET_CURRENT_TIME) {
             double seconds = 0.0;
             if (!argc) return dom_raise_type_error("setCurrentTime requires one argument");
             JS_ASSIGN_OR_RETURN(numeric, js_to_number(args[0]));
             if (!item_try_to_double(numeric, &seconds) || !isfinite(seconds) || fabs(seconds) > FLT_MAX)
                 return dom_raise_type_error("setCurrentTime requires a finite time");
-            svg_animation_set_time(elem, (float)seconds);
+            dom_engine_svg_animation_set_time(elem, (float)seconds);
             return make_js_undefined();
         }
     }
     if (dom_element_is_svg(elem)) {
         if (operation == JUBE_DOM_GET_TARGET_ELEMENT) {
-            DomElement* target = svg_animation_target_element(elem);
+            DomElement* target = dom_engine_svg_animation_target_element(elem);
             return target ? dom_wrap_element(target) : ItemNull;
         }
         if (operation == JUBE_DOM_GET_START_TIME) {
             double seconds;
-            return svg_animation_start_time(elem, &seconds) ? push_d(seconds) :
+            return dom_engine_svg_animation_start_time(elem, &seconds) ? push_d(seconds) :
                 dom_raise_exception("InvalidStateError", "The animation has no current interval");
         }
         if (operation == JUBE_DOM_GET_SIMPLE_DURATION) {
-            double seconds = svg_animation_simple_duration(elem);
+            double seconds = dom_engine_svg_animation_simple_duration(elem);
             return isfinite(seconds) ? push_d(seconds) :
                 dom_raise_exception("NotSupportedError", "The animation has no finite simple duration");
         }
-        if (operation == JUBE_DOM_GET_CURRENT_TIME) return push_d(svg_animation_current_time(elem));
+        if (operation == JUBE_DOM_GET_CURRENT_TIME) return push_d(dom_engine_svg_animation_current_time(elem));
     }
     if (dom_element_is_svg(elem) && (operation == JUBE_DOM_BEGIN_ELEMENT ||
         operation == JUBE_DOM_BEGIN_ELEMENT_AT || operation == JUBE_DOM_END_ELEMENT ||
@@ -17267,7 +17270,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
                 return dom_raise_type_error("Animation timing requires a finite offset");
             offset = (float)offset;
         }
-        svg_animation_begin_end(elem, operation == JUBE_DOM_END_ELEMENT ||
+        dom_engine_svg_animation_begin_end(elem, operation == JUBE_DOM_END_ELEMENT ||
             operation == JUBE_DOM_END_ELEMENT_AT, offset);
         // the shared DOM publication boundary maps JS void to Lambda null.
         return make_js_undefined();
@@ -18513,7 +18516,7 @@ static Item js_web_animation_create(DomElement* element, Item keyframes_item,
     }
     if (!keyframes) return ItemNull;
 
-    CssWebAnimationState* state = css_web_animation_create(
+    CssWebAnimationState* state = (CssWebAnimationState*)dom_engine_web_animation_create(
         element, keyframes, duration_ms, &timing, element->doc->document_pool);
     if (!state) return ItemNull;
 

@@ -487,5 +487,6 @@ bool dom_comment_is_backed(DomComment* comment_node);
  */
 const char* dom_comment_get_content(DomComment* comment_node);
 
+extern "C" DomNode* dom_range_child_at_boundary_offset(DomElement* element, uint32_t offset);
 
 #endif // DOM_NODE_HPP

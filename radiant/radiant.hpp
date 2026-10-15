@@ -198,6 +198,7 @@ typedef struct DocumentScriptPhaseTiming {
 void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* pool, Url* base_url);
 void execute_document_scripts_profiled(Element* html_root, DomDocument* dom_doc, Pool* pool,
                                        Url* base_url, DocumentScriptPhaseTiming* timing);
+bool document_snapshot_is_ready(const DomDocument* document);
 void script_runner_set_retain_js_state(bool retain);
 void script_runner_set_static_headless_snapshot(bool snapshot);
 // Pump callbacks against the retained document runtime between host input turns.
@@ -355,6 +356,8 @@ void radiant_window_focus_changed(UiContext* uicon, bool focused);
 // session decides (it received a `closerequest` event).
 bool radiant_window_platform_close(UiContext* uicon);
 int view_doc_in_window(const char* doc_file);
+// standalone native embedders install DOM services without starting the Jube registry.
+bool radiant_register_dom_engine_providers();
 int ui_context_init(UiContext* uicon, bool headless, float requested_device_scale);
 bool ui_context_enable_native_graphics(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
