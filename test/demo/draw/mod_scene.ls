@@ -1,8 +1,16 @@
+import dom
 import model: .mod_model
 import geom: lambda.editor.mod_geom
 import router: lambda.editor.mod_router
 import shapes: .mod_shapes
 import paint: .mod_paint
+
+// scroll does not bubble; synchronize the camera after native scrolling settles.
+view <canvas_scrollport> { ~.rendered }
+on scroll(evt) {
+    dom.request_frame(dom.closest(evt.target,"#draw"),"canvas_scrolled")
+    return 'handled'
+}
 
 fn rotation(node) {
     let c = geom.rect_center(model.box(node));
@@ -109,6 +117,22 @@ fn field(key,label,kind="text") => <label class:"field",'for':"prop-" ++ key,<sp
 fn select_field(key,label,values) => <label class:"field",'for':"prop-" ++ key,<span label>
     <select id:"prop-" ++ key,'data-property':key,*[for (value in values) <option value:if (value is map) value.id else value,
         (if (value is map) value.label else upper(slice(value,0,1)) ++ replace(slice(value,1),"-"," "))>]>>
+fn arrow_field(key,label,side) {
+    let selected = if (side == "start") "none" else "triangle";
+    <div class:"field arrow-picker",'data-arrow-key':key,<span id:key ++ "-label",label>
+        <button id:"prop-" ++ key,class:"arrow-trigger",type:"button",value:selected,'data-label':label,
+            'data-action':"arrow-open-" ++ key,'aria-label':label ++ ": " ++ selected,title:label ++ ": " ++ selected,
+            'aria-haspopup':"listbox",'aria-expanded':"false",'aria-controls':key ++ "-options",
+            <span id:key ++ "-preview",class:"arrow-current",(paint.arrow_preview(selected,side,"preview-" ++ key))>
+            <svg class:"arrow-chevron",width:10,height:10,viewBox:"0 0 10 10",'aria-hidden':"true",<path d:"M 2 3 L 5 6 L 8 3",fill:"none",stroke:"currentColor",'stroke-width':1.3>>
+        >
+    >
+}
+// keep the popup outside the scrolling inspector so every option stays visible.
+fn arrow_options(key) => <div id:key ++ "-options",class:"arrow-options",'data-arrow-key':key,role:"listbox",'aria-labelledby':key ++ "-label",style:"display:none",
+    *[for (kind in model.arrows) <button id:key ++ "-option-" ++ kind,type:"button",role:"option",tabindex:"-1",
+        'data-action':"arrow-set-" ++ key ++ "/" ++ kind,'data-arrow-value':kind,'aria-label':kind,title:kind,'aria-selected':"false",
+        (paint.arrow_preview(kind,if (key == "start-arrow") "start" else "end","preview-" ++ key ++ "-" ++ kind))>]>
 pub fn tree() => <main id:"draw",'data-error':"",
     <header class:"topbar",
         <div class:"brand",<div class:"brand-mark",(icon("connect"))><h1 "Draw"><span class:"native-badge","LAMBDA">>
@@ -139,9 +163,9 @@ pub fn tree() => <main id:"draw",'data-error':"",
         >
         <section class:"canvas-column",
             <div class:"canvas-caption",<span "DIAGRAM 01"><span "1120 × 760">>
-            <div id:"stage",tabindex:"0",role:"region",'aria-label':"Diagram canvas. Arrow keys move the selected shape.",
-                <div id:"paper">>
-            <div class:"canvas-help",<span id:"tool-hint","Drag shapes to move · Drag the bottom-right handle to resize"><span "Esc cancels · Delete removes">>
+            ; (apply(<canvas_scrollport rendered:<div id:"stage",tabindex:"0",role:"region",'aria-label':"Diagram canvas. Arrow keys move the selection; scrollbars navigate the page.",
+                <div id:"canvas-space",<div id:"paper">>>>))
+            ; <div class:"canvas-help",<span id:"tool-hint","Drag shapes to move · Drag the bottom-right handle to resize"><span "Esc cancels · Delete removes">>
         >
         <aside class:"inspector",
             <p class:"eyebrow","INSPECTOR"><h2 id:"selection-title","The big picture">
@@ -173,7 +197,7 @@ pub fn tree() => <main id:"draw",'data-error':"",
                 >
                 <div id:"edge-properties",style:"display:none",
                     (select_field("routing","Connector style",model.routings));
-                    <div class:"geometry-fields",(select_field("start-arrow","Start arrowhead",model.arrows));(select_field("end-arrow","End arrowhead",model.arrows))>
+                    <div class:"geometry-fields",(arrow_field("start-arrow","Start arrowhead","start"));(arrow_field("end-arrow","End arrowhead","end"))>
                     ;
                     (select_field("from-shape","From shape",[]));(select_field("from-port","Source attachment",model.ports));
                     (select_field("to-shape","To shape",[]));(select_field("to-port","Destination attachment",model.ports));
@@ -192,7 +216,8 @@ pub fn tree() => <main id:"draw",'data-error':"",
         >
     >
     <footer <span class:"status-dot"><span id:"status",role:"status",'aria-live':"polite","Ready"><span id:"history-label","0 edits">>
-    <div id:"file-dialog",class:"dialog-backdrop",style:"display:none",
+    ; *[for (key in ["start-arrow","end-arrow"]) arrow_options(key)]
+    ; <div id:"file-dialog",class:"dialog-backdrop",style:"display:none",
         <section class:"file-dialog",role:"dialog",'aria-modal':"true",'aria-labelledby':"dialog-title",
             <p class:"eyebrow","YOUR DIAGRAM"><h2 id:"dialog-title","Save diagram">
             <p id:"dialog-copy","Save an editable diagram to a JSON file.">

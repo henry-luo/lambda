@@ -424,6 +424,10 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "fn_binary", FPTR(fn_binary), NULL, NULL, false, 0,
      false, &TYPE_BINARY, true},
 
+    {SYSFUNC_BINARY_DECODE, "binary_decode", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "fn_binary_decode", FPTR(fn_binary_decode), NULL, NULL, false, 0,
+     false, NULL, true},
+
     {SYSFUNC_NUMBER, "number", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_number", NULL, NULL, NULL, false, 0},  // unimplemented
 

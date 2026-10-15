@@ -7,6 +7,7 @@ pub let A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 pub let WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
 pub let MC = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 pub let CH = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+pub let WPS = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
 let codes = ["invalid-source", "invalid-options", "invalid-package", "missing-part",
     "invalid-xml", "invalid-target", "unsupported", "style-cycle"]
 
@@ -58,6 +59,9 @@ pub fn text(node) => if (node is string) node else if (node is array) join([for 
 pub fn descendants(node, tag, ns) => [for (child in children(node,null,null),
     found in (if (child.tag == tag and child.uri == ns) [child] else []) ++ descendants(child,tag,ns)) found]
 pub fn collect(results, field) => [for (result in results, value in result[field]) value]
+// shared traversal includes table cells, links and annotation blocks in reading order.
+pub fn model_nodes(nodes) => [for (node in nodes, found in [node] ++ model_nodes(
+    get(node,"children",[]) ++ get(node,"blocks",[]) ++ get(node,"rows",[]) ++ get(node,"cells",[]))) found]
 pub fn on(node) => node != null and not contains(["0","false","off","none"],attr(node,"val"))
 pub fn as_int(value, fallback = 0) => if (value == null) fallback else int(value) ^ { fallback }
 pub fn pixels(value, units = 9525.0) => as_int(value,0)/units

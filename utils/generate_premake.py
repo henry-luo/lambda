@@ -58,6 +58,9 @@ class PremakeGenerator:
         passing them in lets a non-Linux host generate the Linux config for validation."""
         with open(config_path, 'r', encoding='utf-8') as f:
             self.config = json.load(f)
+        # Generated contracts must exist before any project consumes their headers.
+        for generator in self.config.get('code_generators', []):
+            subprocess.run([sys.executable, generator['script'], *generator.get('args', [])], check=True)
         configurable_defines = self.config.get('configurable_defines', {})
         if configurable_defines:
             resolved_defines = self.config.setdefault('defines', [])

@@ -117,12 +117,79 @@ package("lists.docx", body, rels=relationship("numbers","numbering","numbering.x
 table = '<w:tbl><w:tr><w:trPr><w:tblHeader/></w:trPr>' + cell("Heading A") + cell("Heading B") + '</w:tr>'
 table += '<w:tr>' + cell("Merged", '<w:gridSpan w:val="2"/><w:vMerge w:val="restart"/>') + '</w:tr><w:tr>' + cell("", '<w:gridSpan w:val="2"/><w:vMerge/>') + '</w:tr></w:tbl>'
 package("tables.docx", table)
+# Omitted columns are grid slots, not source cells or merged-cell continuations.
+grid = '<w:tblGrid>' + '<w:gridCol w:w="1200"/>' * 4 + '</w:tblGrid>'
+gap_row = '<w:tr><w:trPr><w:gridBefore w:val="1"/><w:gridAfter w:val="2"/></w:trPr>' + cell("Offset") + '</w:tr>'
+package("table-gaps.docx", '<w:tbl>' + grid + '<w:tr>' + ''.join(cell(t) for t in ["A","B","C","D"]) + '</w:tr>' + gap_row + '</w:tbl>')
+# Cached nested fields can cross paragraphs; instruction text is never display text or executable input.
+def field_char(kind):
+    return f'<w:r><w:fldChar w:fldCharType="{kind}"/></w:r>'
+
+
+def field_code(text):
+    return f'<w:r><w:instrText xml:space="preserve">{text}</w:instrText></w:r>'
+
+
+body = '<w:p>' + field_char("begin") + field_code(' TOC \\h ') + field_char("separate") + '</w:p>'
+body += '<w:p><w:hyperlink w:anchor="entry"><w:r><w:t>Summary</w:t></w:r></w:hyperlink><w:r><w:tab/></w:r>'
+body += field_char("begin") + field_code(' PAGEREF entry \\h ') + field_char("separate") + '<w:r><w:rPr><w:b/></w:rPr><w:t>3</w:t></w:r>' + field_char("end") + '</w:p>'
+body += '<w:p>' + field_char("end") + '<w:fldSimple w:instr="INCLUDETEXT &quot;https://example.invalid/secret&quot;"><w:r><w:t>Saved result</w:t></w:r></w:fldSimple></w:p>'
+body += '<w:p><w:bookmarkStart w:id="1" w:name="entry"/><w:r><w:t>Summary body</w:t></w:r><w:bookmarkEnd w:id="1"/></w:p>'
+package("cached-fields.docx",body)
 image = '<w:r><w:drawing><wp:inline><wp:extent cx="914400" cy="457200"/><wp:docPr id="1" name="pixel" descr="Pixel &amp; alt"/><a:graphic><a:graphicData><a:blip r:embed="image"/></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>'
 links = '<w:hyperlink r:id="link"><w:r><w:t>Example</w:t></w:r></w:hyperlink><w:hyperlink w:anchor="mark"><w:r><w:t>Jump</w:t></w:r></w:hyperlink>'
 body = '<w:p><w:bookmarkStart w:id="1" w:name="mark"/>' + links + image + '</w:p>'
 props = '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Example document</dc:title><dc:creator>Lambda</dc:creator></cp:coreProperties>'
 root_rels = relationship("main", "officeDocument", "word/document.xml") + '<Relationship Id="props" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>'
 package("media.docx", body, rels=relationship("image","image","media/%C3%A9%20pixel.png") + relationship("link","hyperlink","https://example.com/?a=1&amp;b=2",True), root_rels=root_rels, extras={"word/media/é pixel.png":PNG,"docProps/core.xml":props})
+
+# Layer order is independent of source order and includes the full unsigned OOXML range.
+WPS = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
+MC = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+
+
+def anchor(graphic, x, y, layer, behind=True, relative="column"):
+    return (f'<w:drawing><wp:anchor simplePos="0" behindDoc="{int(behind)}" relativeHeight="{layer}">'
+            f'<wp:positionH relativeFrom="{relative}"><wp:posOffset>{x}</wp:posOffset></wp:positionH>'
+            f'<wp:positionV relativeFrom="paragraph"><wp:posOffset>{y}</wp:posOffset></wp:positionV>'
+            '<wp:extent cx="1905000" cy="952500"/><wp:wrapNone/>'
+            '<a:graphic><a:graphicData>' + graphic + '</a:graphicData></a:graphic></wp:anchor></w:drawing>')
+
+
+def rectangle(fill='', style='', geometry='rect', rotation=0):
+    return (f'<wps:wsp xmlns:wps="{WPS}"><wps:spPr><a:xfrm rot="{rotation}">'
+            '<a:off x="0" y="0"/><a:ext cx="1905000" cy="952500"/></a:xfrm>'
+            f'<a:prstGeom prst="{geometry}"/>{fill}<a:ln><a:noFill/></a:ln>'
+            f'</wps:spPr><wps:style>{style}</wps:style><wps:bodyPr/></wps:wsp>')
+
+
+def alternate(choice):
+    return (f'<mc:AlternateContent xmlns:mc="{MC}"><mc:Choice Requires="wps" xmlns:wps="{WPS}">'
+            + choice + '</mc:Choice><mc:Fallback><w:r><w:t>Fallback</w:t></w:r></mc:Fallback></mc:AlternateContent>')
+
+
+theme = (f'<a:theme xmlns:a="{A}"><a:themeElements><a:clrScheme><a:accent1><a:srgbClr val="123456"/>'
+         '</a:accent1></a:clrScheme><a:fmtScheme><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/>'
+         '</a:solidFill><a:gradFill/></a:fillStyleLst></a:fmtScheme></a:themeElements></a:theme>')
+theme_ref = '<a:fillRef idx="1"><a:schemeClr val="accent1"/></a:fillRef>'
+flat_fill = '<a:solidFill><a:srgbClr val="00AA11"/></a:solidFill>'
+cropped_image = ('<a:blipFill><a:blip r:embed="image"/><a:srcRect l="25000" r="25000" t="10000" b="10000"/>'
+                 '<a:stretch><a:fillRect/></a:stretch></a:blipFill>')
+layer_rels = relationship("image","image","media/pixel.png") + relationship("theme","theme","theme.xml")
+layer_parts = {"word/media/pixel.png":PNG,"word/theme.xml":theme}
+body = '<w:p><w:r>' + alternate(anchor(rectangle(style=theme_ref),0,952500,4294967295))
+body += anchor(cropped_image,-228600,-114300,0) + '</w:r></w:p>'
+body += '<w:p><w:pPr><w:ind w:left="300"/></w:pPr><w:r>' + anchor(rectangle(flat_fill),457200,228600,4294967295,False)
+body += '<w:t>Foreground</w:t></w:r></w:p>'
+package("drawing-layers.docx",body,rels=layer_rels,extras=layer_parts)
+body = '<w:p><w:r>' + alternate(anchor(rectangle(flat_fill,geometry='ellipse'),0,0,1))
+body += anchor(rectangle(flat_fill,rotation=5400000),0,0,1)
+body += anchor(rectangle(style=theme_ref.replace('idx="1"','idx="2"')),0,0,1)
+body += anchor(cropped_image.replace('l="25000"','l="90000"'),0,0,1)
+body += anchor(cropped_image,0,0,1,relative='page') + '</w:r></w:p>'
+package("drawing-unsupported.docx",body,rels=layer_rels,extras=layer_parts)
+
 unsupported = '<w:p><w:r><w:drawing/></w:r><w:hyperlink r:id="evil"><w:r><w:t>Unsafe</w:t></w:r></w:hyperlink><w:r><w:footnoteReference w:id="2"/></w:r></w:p>'
 package("unsupported.docx", unsupported, rels=relationship("evil","hyperlink","javascript:alert(1)",True))
 package("external-image.docx", '<w:p>' + image + '</w:p>', rels=relationship("image","image","https://example.invalid/pixel.png",True))

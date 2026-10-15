@@ -291,6 +291,8 @@ static String* format_data_impl(Item item, String* type, String* flavor, Pool* p
 }
 
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool* pool) {
+    // formatters that only inspect the carrier tag still owe native validity.
+    if (get_type_id(virtual_content_error(item)) == LMD_TYPE_ERROR) return nullptr;
     uint64_t before = virtual_failure_version;
     String* result = format_data_impl(item, type, flavor, pool);
     return virtual_failure_version == before ? result : nullptr;

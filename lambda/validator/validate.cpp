@@ -1,6 +1,7 @@
 #include "validator_internal.hpp"
 #include "../core/mark_reader.hpp"  // MarkReader API for type-safe traversal
 #include "../runtime/re2_wrapper.hpp"  // for pattern_full_match
+#include "../runtime/binary_schema.hpp"
 #include "../core/lambda-decimal.hpp"  // for decimal literal comparison
 
 static bool validator_is_map_kind(ConstItem item) {
@@ -11,6 +12,17 @@ static bool validator_is_map_kind(ConstItem item) {
 static bool validator_is_element_kind(ConstItem item) {
     // D7.4.5v2: archive-backed elements have the element contract despite their virtual storage tag.
     return item.type_id() == LMD_TYPE_ELEMENT || item.type_id() == LMD_TYPE_VELMT;
+}
+
+static ValidationResult* validate_schema_record(SchemaValidator* validator, ConstItem item,
+        const BinarySchema* schema) {
+    Item value = {.item = item.item};
+    bool valid = get_type_id(virtual_content_error(value)) != LMD_TYPE_ERROR && binary_schema_matches(value, schema);
+    if (validator->is_fast_mode()) return validation_verdict(valid);
+    ValidationResult* result = create_validation_result(validator->get_pool());
+    result->valid = valid;
+    if (!valid) add_constraint_error(result, validator, "value is not a live instance of the binary schema");
+    return result;
 }
 
 // Note: Helper functions (should_stop_for_timeout, should_stop_for_max_errors,
@@ -173,7 +185,7 @@ static bool array_pattern_runs_match(SchemaValidator* validator,
     int64_t most = bounds.max < 0 ? available : bounds.max;
     if (most > available) most = available;
     Type* operand = unwrap_type(run->operand);
-    TypeType wrapper;
+    TypeType wrapper = {};
     wrapper.type_id = LMD_TYPE_TYPE;
     wrapper.type = operand;
     for (int64_t taken = 0; taken <= most; taken++) {
@@ -481,6 +493,8 @@ static ValidationResult* validate_against_base_payload(SchemaValidator* validato
 }
 
 ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstItem item, TypeType* type) {
+    if (const BinarySchema* schema = binary_schema_from_type((Type*)type))
+        return validate_schema_record(validator, item, schema);
     // A compact global meta-type (`number`, `integer`, `type`) carries ONLY the
     // two-byte Type prefix -- there is no TypeType payload, so reading
     // `type->type` runs off the end of the global. ASAN caught it as a
@@ -580,6 +594,7 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
 }
 
 ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstItem item, TypeArray* array_type) {
+    if (ValidationResult* failure = prepare_virtual_validation(validator, item)) return failure;
     log_debug("[VALIDATOR] Validating array type");
     ValidationResult* result = create_validation_result(validator->get_pool());
 
@@ -966,6 +981,8 @@ ValidationResult* validate_against_type(SchemaValidator* validator, ConstItem it
         add_constraint_error(result, validator, "Invalid validation parameters");
         return result;
     }
+    if (const BinarySchema* schema = binary_schema_from_type(type))
+        return validate_schema_record(validator, item, schema);
 
     // Check for timeout
     if (should_stop_for_timeout(validator)) {

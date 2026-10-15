@@ -1444,6 +1444,19 @@ calls `parse_type_pattern_text_span`, but `lambda-runtime-full` omitted
 null reduction target. Including that translation unit restores the call, and
 the enabled `test_validator_gtest` cases complete without a crash.
 
+**2026-10-15 recheck (PDF P2):** `make build-test` succeeds, but
+`test_validator_gtest.exe` and `test_validator_input_gtest.exe` now abort at
+startup with `dyld: symbol not found in flat namespace '_LIT_BOOL'`.
+The validation DSO imports `LIT_BOOL` and other private compiler globals;
+the host contains them as local symbols after the **D7.3.6** export allowlist
+is applied. Both the import in `build_ast.cpp` and that export policy are
+present in HEAD `5fd9e797e`, before the P2 changes. P2's schema helper imports
+also require a valid internal link boundary. This run obtains no verdicts
+from either standalone suite. The earlier statement that all validator
+executables load is historical; the current DSO/host closure remains open.
+The ordinary statically linked Lambda host exercises schema validation in
+the P2 native and interpreter/MIR regression tests.
+
 The selected-root lookup is also repaired. The loader still expected a retired
 `AST_NODE_ASSIGN`, while the direct parser canonically emits an
 `AST_NODE_VARIABLE_DECLARATOR` marked `is_type_definition`; it now registers

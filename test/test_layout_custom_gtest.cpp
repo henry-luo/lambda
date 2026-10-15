@@ -11,6 +11,16 @@ static void* g_layout_pass_test_resource = nullptr;
 static int g_layout_pass_test_init_count = 0;
 static int g_layout_pass_test_cleanup_count = 0;
 
+// this isolated runner exercises custom paint lists, never the CSS stacking-context host.
+const char* render_clip_css_value(ViewElement*) {
+    ADD_FAILURE() << "unexpected CSS clip query in isolated custom-layout test";
+    return nullptr;
+}
+bool view_contents_are_skipped(const View*) {
+    ADD_FAILURE() << "unexpected visibility query in isolated custom-layout test";
+    return false;
+}
+
 void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     (void)lycon;
     (void)doc;

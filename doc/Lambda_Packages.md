@@ -1059,6 +1059,31 @@ pn main() {
 | `pdf_to_fixed_pages(pdf, opts)` | Returns native `r:fixed-pages` with HTML/SVG image content, source geometry and complete/ranged imports; returns an error for unsupported geometry/resources or exhausted page budgets |
 | `pdf_page_count(pdf)` | The number of pages |
 | `pdf_metadata(pdf)` | The document information dictionary (`Title`, `Author`, `Subject`, `Keywords`, `Creator`, `Producer`, `CreationDate`, `ModDate`) as a map, best effort |
+| `render_source(path, options)` | Lays out a source and constructs a PDF `<file>` using Lambda callbacks over schema-backed views; `options.width`/`height` set the integer CSS viewport (defaults 800×600) |
+| `export_source(path, destination, options)` | Constructs the same PDF and writes it atomically after successful completion; returns the byte count |
+
+The experimental output path is also available directly as
+`lambda.pdf.output.render` / `.export`:
+
+```lambda
+import pdf: lambda.pdf.output
+pn main() {
+    return pdf.export("page.html", "page.pdf", {width: 800, height: 600})^
+}
+```
+
+This first output profile supports one continuous page, solid rectangular
+backgrounds and borders, positioned glyph outlines, image pixels with alpha
+masks, translucent fills/text, transforms and shared native clip geometry.
+The native walker owns traversal; the Lambda schema exposes properties and
+typed nullable references, without sibling/parent links (**S11.5 / D3.5**).
+Lambda writes drawing operators, resources, stream lengths and cross-reference
+offsets. Text outlines preserve appearance but provide no searchable text.
+Paged/secondary views, rounded or decorated boundaries, decorated text,
+gradients, inline vector scenes, markers, effects, links and document metadata
+are not yet supported by this route. Unsupported drawing callbacks return
+errors before the destination is written. The production `lambda render`
+PDF route remains the native writer while migration continues.
 
 Fixed intake accepts `import_pages` (`"all"` or positive source ordinals/ranges such as `"2,49-53"`) and `max_pages` (a positive admitted-page budget, default 10,000). It validates original media/crop/bleed/trim/art boxes and signed quarter-turn rotation, retains the original one-based source ordinal, and embeds self-contained SVG vector resources. Native commands use `lambda view file.pdf --paged` and `lambda render file.pdf --paged -o result.pdf`; `--import-pages` and `--import-page-limit` select source pages and set the import budget. Preview `--pages` and output `--export-pages` address the resulting physical sequence independently. Failed imports preserve an existing output file. This adapter uses the configured package bridge under **D7.5.3**, dependency policy under **D7.1.2v2**, and the common selected-page lifetime under **D4.5.1v4 / D4.1.4v5**. Reversed/empty boxes, non-default `UserUnit` and unresolved image/form handles currently receive explicit profile errors. PDF page-label number trees retain decimal/Roman/repeated-letter styles, prefixes, starts, Unicode and empty labels through source selection and PDF export. Invalid label trees fail paged intake. Text selection and complete content-stream conformance remain outstanding.
 
@@ -1512,6 +1537,12 @@ Paragraph-relative column anchors support left/right square wrapping,
 centered largest-side wrapping, and top/bottom wrapping at paragraph top.
 Signed column-start and paragraph offsets with square wrapping on both sides
 use CSS float margins (D7.2.4); this remains a flowing approximation of Word.
+No-wrap column/paragraph anchors with explicit offsets retain their extents
+and front/behind-text layer order. Inset raster crops keep their saved frames.
+Flat DrawingML rectangles support validated solid RGB/theme fills with no
+outline; a supported modern compatibility branch takes precedence over its
+fallback. Decorative rectangles are hidden from accessibility text (S1.8,
+D7.2.4).
 The viewer also reads the document theme, inherited and direct run properties
 (font family, size, color, tracking and capitalization), paragraph spacing,
 table grid widths, cell shading and borders, row heights, and page size/margins.
@@ -1533,6 +1564,10 @@ cell boundaries, preserving surrounding formatting and reading order. Control
 properties are editing metadata; bindings and placeholder definitions are not
 evaluated. Footnote/endnote parts containing only separator definitions do not
 represent document notes and are excluded from annotation content.
+Simple and complex fields display their saved text and links, including cached
+TOC/page-reference results. Instructions are never executed or refreshed
+(S1.8). Table rows retain omitted leading/trailing grid columns as empty HTML
+slots, preserving the alignment of financial tables (D7.2.4).
 
 | Option | Default | Meaning |
 |--------|---------|---------|
@@ -1546,7 +1581,7 @@ represent document notes and are excluded from annotation content.
 Diagnostics have `{severity, code, part, message}`. Unsupported visible
 constructs are reported. Headers/footers, comment ranges/author metadata, custom
 note numbering, revision semantics,
-field execution, other chart types, shapes, equations, page-relative floating
+field execution, other chart types, shapes beyond flat rectangles, equations, page-relative floating
 placement, DOCX writing,
 encrypted documents, and `.docm` are outside this profile. External resources
 are never fetched; emitted hyperlink schemes are validated. XML parts use

@@ -333,5 +333,117 @@ that idle window. A stack sample shows string construction and precise
 collection rather than DOCX/ZIP work. The aggregate timeout is not counted
 as a pass, and no runner limits or test expectations were weakened.
 
+## Business-plan loading follow-up
+
+The checkout contains `biz-plan1.docx` and `biz-plan2.docx`. Both already
+converted all main-document text and both embedded images. The larger plan
+exposed two import defects: its 48 field delimiters and 16 instruction runs
+generated unsupported-content warnings despite their saved TOC results being
+present, and its 51 `gridAfter` declarations did not reserve HTML grid slots.
+The native preview consequently opened on a warning list instead of content,
+and shortened financial-table rows did not preserve their source columns.
+
+`model.ls` now recognizes cached simple/complex fields, interpreting only
+their saved result runs and links; no instruction is evaluated (S1.8).
+It retains `gridBefore`/`gridAfter` counts, and `render.ls` uses one shared
+empty-cell constructor to reserve those slots (D7.2.4). This follows
+[OOXML complex fields](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.fieldchar?view=openxml-3.0.1),
+[simple fields](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.simplefield?view=openxml-3.0.1)
+and [omitted trailing grid columns](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.gridafter?view=openxml-3.0.1).
+These extend the package's saved-content flow profile without formal ruling
+changes or changes to the source documents.
+
+Independent `.body.txt` oracles were derived from every main-part `w:t` node,
+and the business-plan golden verifies complete body text, images, table
+counts, TOC anchors and all 51 grid gaps. Two generated controls separately
+cover cached nested fields across paragraph boundaries, inert external
+instructions, and leading/trailing multi-column gaps. All **15/15** DOCX
+goldens pass on `auto`, `interp` and `jit`. Both native 1100 × 1600 PNGs were
+rendered and inspected under `temp/biz-plan/`; the larger plan's document is
+visible after removing the 64 metadata warnings. The remaining 18 diagnostics
+describe unsupported header/footer stories, drawing placement and VML shape
+content. Word pagination and those features remain outside the flow profile.
+
+The final `LAMBDA_TEST_IDLE_TIMEOUT=360 make test-lambda-baseline` passes
+**6,971/6,971** checks: **2,112** input checks and **4,859** Lambda/runtime
+checks, including all **313** GC stress cases. The documented idle allowance
+lets the music-layout stress case finish in **228.3 seconds**. The complete
+run log is `temp/biz-plan/lambda-baseline.log`.
+
 The existing unrelated dirty worktree edits are outside this change; no files
 were staged or committed.
+
+## Business Plan 2 drawing placement and decorative shapes
+
+All three drawings in `biz-plan2.docx` use no-wrap, behind-text anchors with
+horizontal coordinates relative to the column and vertical coordinates relative
+to their paragraph. The cover photo starts at (-96,-96) CSS pixels; the flat
+rectangle starts at (-96,671.2), with size 816 × 288.96 and theme fill `DCDDD7`.
+The second photo starts at (-96,0) in its own anchor paragraph. These are
+paragraph anchors, rather than page-relative placement. Both photographs also
+declare `a:srcRect` insets. The old float-only profile dropped these positions
+and crops, and fallback-first compatibility selection discarded the supported
+modern rectangle in favor of unsupported VML.
+
+`drawing.ls` now lowers this bounded no-wrap profile into absolute boxes.
+`render.ls` ranks unsigned source layer order into small CSS integers, keeps
+behind-text layers inside the article's stacking context, compensates source
+paragraph indentation and preserves empty anchor paragraph marks. Crops use
+clipped frames and calculated image offsets. `theme.ls` resolves rectangle
+fills through the actual theme fill-style matrix, including placeholder colors.
+Only flat preset rectangles without text, transforms, outlines or effects
+enter the shape profile. Unsupported compatibility choices keep their fallback;
+unsupported shapes/crops/placements retain diagnostics (S1.8, D7.2.4).
+
+Native rendering exposed a separate Radiant defect: negative layers painted
+after ordinary text, hiding the cover title even though Chromium displayed the
+same HTML correctly. `stacking_order.cpp` now collects negative positioned
+blocks at their nearest stacking context, preserving numeric zero versus auto
+z-index. Raster/vector walks replay intervening geometry and overflow scopes,
+then paint those layers before flow content. Hit testing consumes the same
+list in reverse, after flow content. The shared UI fixture tests signed layer
+order, an auto paragraph anchor, an explicit zero context and ancestor clipping;
+an independent flat-color reference verifies PNG/SVG/PDF output parity.
+
+The [OOXML anchor](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.wordprocessing.anchor?view=openxml-3.0.1),
+[relative height](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.wordprocessing.anchor.relativeheight?view=openxml-3.0.1)
+and [source rectangle](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.sourcerectangle?view=openxml-3.0.1)
+definitions govern the saved placement, order and crop data.
+
+The business-plan regression now requires exactly three anchors, two cropped
+JPEGs, one rectangle and only the 12 unsupported header/footer stories. It still
+checks the complete independent body-text oracle, cached links and all tables.
+Native and Chromium previews under `temp/biz-plan/` show the title over the
+cover photo and decorative band, and the tall second photo beside the TOC.
+The source DOCX files remain unchanged; full Word pagination remains deferred.
+
+All **16/16** DOCX goldens pass on `auto`, `interp` and `jit`, including the new
+generated drawing controls. The Lambda baseline passes **6,972/6,972** checks
+(2,112 input and 4,860 runtime), with the documented 360-second idle allowance.
+The final negative-layer output-parity regression passes for PNG/SVG/PDF,
+including font/color inheritance through an inline ancestor. The Radiant
+dimension-cast lint and `git diff --check` pass.
+
+The render baseline exposed a missing `isolation:isolate` boundary in the new
+negative-layer collector. Isolation now uses the shared validated CSS keyword
+resolver and computed-property accessor, and stops layer lifting at its owner,
+as required by [CSS Compositing §3.4.2](https://www.w3.org/TR/compositing-1/#isolation).
+The independent output reference covers both isolation and explicit-zero
+contexts; the existing `enhance5_negative_zindex_isolation_01` browser reference
+remains the visual regression gate. Blend-group isolation beyond stacking
+boundaries remains outside this change.
+
+The final native Radiant sweep (`temp/biz-plan/drawings-radiant-final.log`)
+passes all **211** scored render baseline entries, the **194/194** native view
+checks, **51/51** page snapshots and **28/28** Scene3D checks. The new UI case
+passes all **13** pixel/hit assertions. The aggregate remains non-green because
+of five existing failures: `md_nuxt-readme`, `doc_editor_dct_image_pdf`,
+`doc_editor_eml_html_preview`, `doc_editor_eml_preview`, and `doc_editor_tsv_table`.
+A cached host built before this work (2026-10-14 21:49,
+`temp/draw/arrow-picker/lambda-host.exe`, SHA-256
+`b4d7151f47e69d6fa22b428bc0ce4a085006628e53891984edb3264aa221ac27`)
+reproduces the same Markdown metric and all four editor assertion counts.
+Evidence is in `temp/biz-plan/prechange-markdown-native.json` and
+`temp/biz-plan/prechange-ui.log`; baseline expectations were not changed.
+The initial sandbox run blocked macOS window services; rerunning with native
+graphics access completed those checks and removed the page-snapshot failure.

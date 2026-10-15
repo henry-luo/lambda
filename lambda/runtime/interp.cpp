@@ -5716,13 +5716,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         }
         if (decl && decl->node_type == AST_NODE_OBJECT_TYPE) {
             AstObjectTypeNode* object = (AstObjectTypeNode*)decl;
-            TypeType* type = object->type && object->type->type_id == LMD_TYPE_TYPE
-                ? (TypeType*)object->type : NULL;
-            TypeObject* object_type = type && type->type_id == LMD_TYPE_TYPE
-                ? (TypeObject*)type->type : NULL;
-            return interp_ptr_item(object_type
-                ? const_type_with_tl(object_type->type_index, f->module->type_list)
-                : &LIT_TYPE_ERROR);
+            // Import registration can change a shared descriptor's index; its
+            // declaration-owned Type value retains identity across module lists.
+            return interp_ptr_item(object->type ? object->type : &LIT_TYPE_ERROR);
         }
         if (decl && (decl->node_type == AST_NODE_STRING_PATTERN ||
                 decl->node_type == AST_NODE_SYMBOL_PATTERN)) {
@@ -6284,13 +6280,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     }
     case AST_NODE_OBJECT_TYPE: {
         AstObjectTypeNode* object = (AstObjectTypeNode*)node;
-        TypeType* type = object->type && object->type->type_id == LMD_TYPE_TYPE
-            ? (TypeType*)object->type : NULL;
-        TypeObject* object_type = type && type->type_id == LMD_TYPE_TYPE
-            ? (TypeObject*)type->type : NULL;
-        return interp_ptr_item(object_type
-            ? const_type_with_tl(object_type->type_index, f->module->type_list)
-            : &LIT_TYPE_ERROR);
+        return interp_ptr_item(object->type ? object->type : &LIT_TYPE_ERROR);
     }
     case AST_NODE_PATTERN_ISLAND: {
         AstPatternIslandNode* island = (AstPatternIslandNode*)node;

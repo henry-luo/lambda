@@ -10,6 +10,7 @@ struct MarkOutputBuilderOps {
     bool (*finish)(MarkOutputBuilder* builder);
     bool (*bytes)(const MarkOutputBuilder* builder, const char** data, size_t* size);
     void (*destroy)(MarkOutputBuilder* builder);
+    Item (*error)(const MarkOutputBuilder* builder) = nullptr;
 };
 
 struct MarkOutputBuilder {

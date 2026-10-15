@@ -1001,6 +1001,13 @@ static void flex_apply_content_height_after_layout(
 
 static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_item);
 
+static void flex_update_item_scroller(ViewBlock* item) {
+    if (!item->scroller) return;
+    // content_height excludes the content origin; scrollers compare against the border box.
+    float scroll_height = layout_border_size_from_content_box(item, item->content_height, false);
+    update_scroller(item, item->content_width, scroll_height);
+}
+
 void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     if (!flex_item) return;
     // every content pass of an item comes through here, so a replay always
@@ -1244,6 +1251,10 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
         }
     }
 
+    if (flex_item->display.inner == CSS_VALUE_FLEX && flex_item->scroller) {
+        // nested flex bypasses block finalization; measure its laid-out children for scroll overflow.
+        update_multipass_advance_y(lycon, flex_item);
+    }
     if (flex_item->display.inner != RDT_DISPLAY_REPLACED &&
         !use_multicol_flex_path) {
         flex_item->content_width = lycon->block.max_width;
@@ -1289,12 +1300,6 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
     // CRITICAL FIX: For column flex items without explicit height,
     FlexContainerLayout* parent_flex = saved_context.flex_container;
     flex_apply_content_height_after_layout(lycon, flex_item, parent_flex);
-    if (flex_item->scroller) {
-        // content_height excludes the content origin; scrollers compare against the border box.
-        float scroll_height = layout_border_size_from_content_box(
-            flex_item, flex_item->content_height, false);
-        update_scroller(flex_item, flex_item->content_width, scroll_height);
-    }
     // flex items bypass block finalization; center native labels after their used height settles.
     layout_center_button_text(flex_item);
 
@@ -1857,6 +1862,8 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
             ViewBlock* block = lam::view_require_block(item);
             if (!layout_view_is_abs_or_fixed(block)) {
                 re_resolve_abs_children_vertical(lycon, block);
+                // cross-axis stretch can restore a smaller viewport after content measured its overflow.
+                flex_update_item_scroller(block);
             }
         });
 

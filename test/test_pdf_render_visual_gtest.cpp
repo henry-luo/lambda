@@ -1156,6 +1156,7 @@ TEST(RenderOutputParity, PagedTablesRepeatGroupsAndSplitCellsInPdfAndPreview) {
     }
 }
 
+// every page keeps one body width: a flow run has a constant width (Radiant_Impl_Paged_Integration §4.2)
 TEST(RenderOutputParity, PagedCaptionsMatchBlockWrappersAcrossTableAndCaptionContinuations) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
@@ -1167,7 +1168,7 @@ TEST(RenderOutputParity, PagedCaptionsMatchBlockWrappersAcrossTableAndCaptionCon
         for (size_t variant = 0; variant < 2; variant++) {
             StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
             strbuf_append_format(html, "<!doctype html><style>@page{size:160px 112px;margin:10px}"
-                "@page :left{size:140px 112px}html,body{margin:0;font:10px/12px Arial}"
+                "html,body{margin:0;font:10px/12px Arial}"
                 "table{table-layout:%s;width:100%%;box-sizing:border-box;border:2px solid blue;"
                 "padding:1px;border-spacing:0;background:magenta}"
                 "caption,.cap{padding:1px;border:1px solid red;background:yellow;text-align:center;"
@@ -1240,6 +1241,7 @@ TEST(RenderOutputParity, PagedColumnLayersAndWidthsMatchExplicitCellsAcrossConti
     }
 }
 
+// every page keeps one body width: a flow run has a constant width (Radiant_Impl_Paged_Integration §4.2)
 TEST(RenderOutputParity, PagedRowSpansMatchExplicitStackedCellsAcrossRepeatedFurniture) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
@@ -1251,7 +1253,7 @@ TEST(RenderOutputParity, PagedRowSpansMatchExplicitStackedCellsAcrossRepeatedFur
         for (size_t variant = 0; variant < 2; variant++) {
             StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
             strbuf_append_format(html, "<!doctype html><style>@page{size:160px 112px;margin:10px}"
-                "@page :left{size:140px 112px}html,body{margin:0;font:10px/12px Arial}"
+                "html,body{margin:0;font:10px/12px Arial}"
                 "table{table-layout:%s;width:100%%;border-spacing:0;background:magenta}"
                 "caption{padding:0;text-align:left}td,th{padding:0;vertical-align:top}"
                 "col:first-child{width:40px;background:cyan}.span{vertical-align:%s;background:yellow}"
@@ -1636,6 +1638,7 @@ TEST(RenderOutputParity, ExplicitNativeColumnsRetainUnequalGeometryInPreviewSvgA
     }
 }
 
+// every page keeps one body width: a flow run has a constant width (Radiant_Impl_Paged_Integration §4.2)
 TEST(RenderOutputParity, PagedMissingCellsMatchExplicitEmptyCellsAcrossSpansAndContinuations) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     ASSERT_TRUE(ensure_dir(PDF_REF_DIR)); ASSERT_TRUE(command_exists("pdftoppm"));
@@ -1646,7 +1649,7 @@ TEST(RenderOutputParity, PagedMissingCellsMatchExplicitEmptyCellsAcrossSpansAndC
         for (size_t variant = 0; variant < 2; variant++) {
             StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
             strbuf_append_format(html, "<!doctype html><style>@page{size:160px 150px;margin:10px}"
-                "@page :left{size:140px 150px}html,body{margin:0;font:10px/12px Arial}"
+                "html,body{margin:0;font:10px/12px Arial}"
                 "table{table-layout:%s;width:100%%;border-spacing:4px 2px;background:magenta}"
                 "caption{padding:0;text-align:left}col{width:20px;background:cyan}"
                 "col:last-child{background:blue}td,th{padding:0;vertical-align:top;white-space:pre;orphans:1;widows:1}"
@@ -10833,6 +10836,29 @@ TEST(RenderOutputParity, DecorationsRespectGlyphPaintOrderAcrossOutputs) {
         EXPECT_GT(intersections, 10u);
         for (ImageData& image : images) image_free(image.pixels);
     }
+}
+
+TEST(RenderOutputParity, NegativeLayersRespectContextFlowAndAncestorClips) {
+    char* actual = nullptr;
+    ASSERT_TRUE(file_read_all("test/ui/negative_stacking.html", MEM_CAT_TEMP, &actual, nullptr));
+    // an independently positioned reference fixes the expected colors without relying on negative z.
+    const char* reference = "<!doctype html><style>body{margin:0;width:320px;height:300px;background:white}"
+        "div{position:absolute}</style>"
+        "<div style='left:20px;top:20px;width:180px;height:60px;background:red'></div>"
+        "<div style='left:40px;top:40px;width:180px;height:60px;background:blue'></div>"
+        "<div style='left:240px;top:20px;width:40px;height:40px;background:orange'></div>"
+        "<div style='left:80px;top:50px;width:80px;height:30px;background:lime'></div>"
+        "<div style='left:20px;top:150px;width:100px;height:80px;background:yellow'></div>"
+        "<div style='left:30px;top:160px;width:70px;height:50px;background:magenta'></div>"
+        "<div style='left:50px;top:175px;width:30px;height:20px;background:lime'></div>"
+        "<div style='left:160px;top:160px;font:20px monospace;color:teal'>Layer</div>";
+    expect_html_pair_output_parity("negative_stacking", actual, reference, true);
+    StrBuf* zero_context = strbuf_new(); ASSERT_NE(zero_context, nullptr);
+    strbuf_append_str(zero_context, actual);
+    strbuf_append_str(zero_context, "<style>#isolated{isolation:auto;z-index:0}</style>");
+    expect_html_pair_output_parity("negative_stacking_zero_context", zero_context->str, reference, true);
+    strbuf_free(zero_context);
+    mem_free(actual);
 }
 
 

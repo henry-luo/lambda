@@ -530,6 +530,7 @@ static void render_block_walk_children_phase(RasterRenderContext* rdcon, ViewBlo
                                              RenderBlockChildrenPhase* phase) {
     if (!rdcon || !block || !phase || !phase->has_children) return;
 
+    render_raster_negative_z_descendants(rdcon, block);
     bool custom_painted = render_raster_custom_layout_children(rdcon, block);
     if (!custom_painted) {
         render_children(rdcon, block->first_child);
@@ -540,6 +541,51 @@ static void render_block_walk_children_phase(RasterRenderContext* rdcon, ViewBlo
     if (!custom_painted) {
         render_raster_positive_z_descendants(rdcon, block->first_child);
     }
+}
+
+// negative layers are lifted to their stacking owner, retaining intervening scroll/overflow scopes.
+static void render_raster_negative_path(RasterRenderContext* rdcon, View* owner, View* target) {
+    View* child = radiant_stack_path_child(owner, target);
+    if (!child) return;
+    if (child == target) {
+        render_raster_positioned_view(rdcon, lam::view_require_block(child));
+        return;
+    }
+    ViewBlock* block = lam::view_as_block(child);
+    if (!block) {
+        FontBox font = rdcon->font;
+        Color color = rdcon->color;
+        ViewElement* span = lam::view_as_element(child);
+        if (span && span->font) setup_font(rdcon->ui_context, &rdcon->font, span->font);
+        if (span && span->in_line && span->inl()->has_color) rdcon->color = span->inl()->color;
+        render_raster_negative_path(rdcon, child, target);
+        rdcon->font = font; rdcon->color = color;
+        return;
+    }
+    BlockBlot saved = rdcon->block;
+    FontBox font = rdcon->font;
+    Color color = rdcon->color;
+    RenderClipScope css_clip = render_clip_push_css_scope(rdcon, block, saved.x, saved.y, rdcon->raster_scale);
+    rdcon->block.x += block->x * rdcon->raster_scale;
+    rdcon->block.y += block->y * rdcon->raster_scale;
+    render_block_setup_font(rdcon, block);
+    render_block_apply_inherited_color(rdcon, block);
+    float origin_x = rdcon->block.x, origin_y = rdcon->block.y;
+    if (block->scroller) setup_scroller(rdcon, block);
+    RenderClipScope overflow = render_clip_push_overflow_scope(rdcon, block, origin_x, origin_y);
+    render_raster_negative_path(rdcon, child, target);
+    if (overflow.active) render_clip_pop_scope(rdcon, &overflow);
+    if (css_clip.active) render_clip_pop_scope(rdcon, &css_clip);
+    rdcon->block = saved; rdcon->font = font; rdcon->color = color;
+}
+
+static bool render_raster_negative_layer(void* context, View* owner, View* layer) {
+    render_raster_negative_path((RasterRenderContext*)context, owner, layer);
+    return true;
+}
+
+void render_raster_negative_z_descendants(RasterRenderContext* rdcon, ViewBlock* block) {
+    radiant_stack_visit_negative_z_descendants(block, false, rdcon, render_raster_negative_layer);
 }
 
 static double render_block_finish_children_phase(RasterRenderContext* rdcon, ViewBlock* block,

@@ -2123,6 +2123,8 @@ void render_bound(RasterRenderContext* rdcon, ViewBlock* view);
 void render_outline_deferred(RasterRenderContext* rdcon, ViewBlock* view);
 void render_children(RasterRenderContext* rdcon, View* view);
 void render_raster_positioned_children(RasterRenderContext* rdcon, ViewBlock* block);
+void render_raster_positioned_view(RasterRenderContext* rdcon, ViewBlock* block);
+void render_raster_negative_z_descendants(RasterRenderContext* rdcon, ViewBlock* block);
 void render_raster_positive_z_descendants(RasterRenderContext* rdcon, View* view);
 bool render_raster_custom_layout_children(RasterRenderContext* rdcon, ViewBlock* block);
 void render_raster_view_tree(RasterRenderContext* rdcon, ViewTree* view_tree);
@@ -2254,6 +2256,8 @@ struct RenderBackend {
     // Called when a view node specifies a font. Backend can update its
     // font state (e.g. PDF needs to call HPDF_Page_SetFontAndSize).
     void (*on_font_change)(RenderContext* ctx, FontProp* font_prop);
+    // fallible script backends stop new visits while native scope cleanup unwinds.
+    bool (*should_abort)(RenderContext* ctx) = nullptr;
 };
 
 // Shared tree-walk state (managed by render_walk.cpp, passed to callbacks via ctx).
@@ -2271,6 +2275,7 @@ void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan
 void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* first_child);
 void render_walk_positioned_children(RenderBackend* backend, RenderWalkState* state, ViewBlock* block);
 void render_walk_positive_z_descendants(RenderBackend* backend, RenderWalkState* state, View* first_child);
+void render_walk_negative_z_descendants(RenderBackend* backend, RenderWalkState* state, ViewBlock* block);
 void render_walk_view_one(RenderBackend* backend, RenderWalkState* state, View* view);
 
 RadiantStackPaintList radiant_stack_collect_custom_layout_paint(ViewBlock* block);
@@ -3019,6 +3024,11 @@ bool radiant_video_events_pending(DocState* state);
 
 // ===== stacking_order.hpp =====
 bool radiant_stack_is_positive_z_positioned(View* view);
+bool radiant_stack_is_negative_z_block(View* view);
+bool radiant_stack_is_context(View* view);
+View* radiant_stack_path_child(View* ancestor, View* descendant);
+void radiant_stack_visit_negative_z_descendants(View* owner, bool reverse, void* context,
+    bool (*visit)(void* context, View* owner, View* layer));
 bool radiant_stack_is_out_of_flow_positioned(View* view);
 bool radiant_stack_is_deferred_from_normal_flow(View* view);
 // zero-level positioned/containment contexts paint after ordinary siblings (CSS 2.1 E step 8).
@@ -3769,6 +3779,7 @@ typedef struct RenderClipScope {
     ScratchMark mem;  // owns the shape when owns_shape; ended on pop
 } RenderClipScope;
 
+const char* render_clip_css_value(ViewElement* view);
 RenderClipScope render_clip_push_css_scope(RasterRenderContext* rdcon, ViewBlock* block,
                                            float parent_x, float parent_y, float scale);
 bool render_clip_push_vector_css(PaintList* paint, ViewElement* element,

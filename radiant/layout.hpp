@@ -3325,6 +3325,7 @@ void init_flex_item_view(LayoutContext* lycon, DomNode* node);
 
 void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* flex_container);
 void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container);
+void update_multipass_advance_y(LayoutContext* lycon, ViewBlock* block);
 // Grid Layout
 
 #ifdef min
@@ -3969,9 +3970,21 @@ struct TableCellContentExtent {
     float last_line_y;
     float max_line_height;
     float max_line_gap;
+    // a fragment window: content outside [window_top, window_bottom) is skipped
+    // and content crossing an edge is clipped to it
+    bool windowed;
+    float window_top;
+    float window_bottom;
 };
 
 TableCellInsets table_cell_insets(ViewTableCell* cell);
+// the insets around a cell's alignment area: padding and border, half a collapsed border
+TableCellInsets layout_table_cell_alignment_insets(ViewTableCell* cell);
+// the extent of a cell's in-flow content in its frame, measured as cell
+// alignment measures it (line boxes, boxes with their margins), within
+// [window_top, window_bottom); false when the window holds none
+bool layout_table_cell_content_extent(LayoutContext* lycon, ViewTableCell* cell,
+    float window_top, float window_bottom, float* min_y, float* max_y);
 bool layout_table_has_collapsed_borders(LayoutContext* lycon, DomElement* element);
 void layout_table_content(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 struct ViewTable* build_table_tree(LayoutContext* lycon, DomNode* elmt);

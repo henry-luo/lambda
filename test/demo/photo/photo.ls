@@ -323,8 +323,11 @@ on wheel(evt) {
 }
 on keydown(evt) {
     let owner = owner_of(evt)
-    let editing = dom.closest(evt.target,"input,textarea,select") != null
+    let control = dom.closest(evt.target,"input,textarea,select")
+    let editing = control != null
     if (evt.key == "Escape") {
+        // the select behavior dismisses its popup before editor-level Escape actions.
+        if (editing and dom.matches(control,"select") and dom.dropdown_open(control)) { return 'pass' }
         present.dialog(owner,"")
         session = present.schedule(owner,{*:session,hist:model.discard(session.hist),tool:if (session.tool == "crop") "adjust" else session.tool,
             drag:null,compare:false,dirty:true})

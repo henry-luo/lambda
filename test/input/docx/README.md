@@ -55,3 +55,33 @@ relocated parts, repeated references, independent numbering, references in
 table cells, duplicate/missing IDs, invalid roots, nested references, unsafe
 note links and external annotation parts. Each part resolves its own
 relationships; note diagnostics retain that part's path.
+
+## Business-plan documents
+
+The user-supplied `biz-plan1.docx` and `biz-plan2.docx` are covered by
+`docx_business_plans.ls`. Their `.body.txt` sidecars independently concatenate
+the main WordprocessingML part's `w:t` nodes in document order; the golden
+compares every non-layout character with extracted text. It also checks both
+embedded images per document, all one/six tables, the larger plan's cached TOC
+links and its 51 omitted trailing grid slots. The documents remain unchanged.
+
+The one-page proposal imports without diagnostics. The larger plan retains
+main-body text, saved field results, links, photographs and financial tables;
+its two cropped photographs and decorative theme-colored rectangle now retain
+their signed column/paragraph offsets and behind-text order. Only its 12
+header/footer-story warnings remain. The supported DrawingML rectangle is
+selected instead of its legacy VML fallback. This is the converter's flow
+representation (D7.2.4), without Word's 21-page pagination. Native and Chromium
+previews were inspected at 1100 × 2200.
+
+`cached-fields.docx` exercises nested TOC/page-reference fields spanning
+paragraphs and a simple field with an inert external instruction. Field codes
+and delimiters are metadata; only saved display runs are rendered, with no
+field execution or external access (S1.8). `table-gaps.docx` independently
+checks leading/trailing omitted columns and multi-column grid gaps.
+
+`drawing-layers.docx` independently covers front/behind layers, full unsigned
+source order, signed offsets, paragraph indentation, inset image cropping and
+literal/theme rectangle fills. `drawing-unsupported.docx` retains diagnostics
+for rotated/gradient shapes, invalid crops and page-relative placement, while
+an unsupported modern shape keeps its compatibility fallback.

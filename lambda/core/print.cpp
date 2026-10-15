@@ -583,6 +583,8 @@ struct PrintItemVisitor {
 
     void operator()(lam::ItemOf<LMD_TYPE_VARRAY> item) const {
         VArray* array = item.ptr();
+        Item error = virtual_content_error({.varray = array});
+        if (get_type_id(error) == LMD_TYPE_ERROR) { print_item(strbuf, error, depth + 1, indent); return; }
         int64_t count = varray_count(array);
         strbuf_append_char(strbuf, '[');
         for (int64_t i = 0; i < count; i++) {
@@ -680,6 +682,11 @@ struct PrintItemVisitor {
         // TypeType wrapper read below (whose kind is SIMPLE); reading its
         // `type` field crashed. It prints as its canonical source.
         Type* value = (Type*)item.ptr();
+        if (value->kind == TYPE_KIND_BINARY_SCHEMA) {
+            const StrView& name = ((TypeObject*)value)->type_name;
+            strbuf_append_str_n(strbuf, name.str, name.length);
+            return;
+        }
         if (value->kind == TYPE_KIND_PATTERN) {
             String* source = ((TypePattern*)value)->source;
             if (source) strbuf_append_str_n(strbuf, source->chars, source->len);
@@ -698,6 +705,11 @@ struct PrintItemVisitor {
             return;
         }
         TypeType* type = (TypeType*)value;
+        if (type->type && type->type->kind == TYPE_KIND_BINARY_SCHEMA) {
+            const StrView& name = ((TypeObject*)type->type)->type_name;
+            strbuf_append_str_n(strbuf, name.str, name.length);
+            return;
+        }
         if (const char* alias = type_alias_name(type->type)) {
             strbuf_append_str(strbuf, alias);
             return;

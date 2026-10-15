@@ -206,13 +206,16 @@ void-element implementations.
 | Hyperlink relationship | `<a href="…">`; external targets remain inert until the caller activates a link |
 | Footnotes, endnotes and comments | Numbered superscript links with referenced content appended in separate ordered sections; each kind numbers independently in first-reference order, deduplicating repeated references |
 | Text-box content | Preserve paragraphs/tables after the containing paragraph, selecting one compatibility representation; diagnose omitted floating geometry |
+| Cached simple/complex fields | Display saved result runs and links; field instructions/delimiters are metadata and never execute (S1.8) |
 | Simple ordered/unordered lists | `<ol>` / `<ul>` and nested `<li>`, derived from numbering definitions and paragraph level |
 | Lists with `numFmt="none"` | Nested lists with hidden markers and numbering-level indentation/hanging indent |
-| Tables | `<table>`, row and cell elements; preserve text, nested paragraphs, and supported row/column spans |
+| Tables | `<table>`, row and cell elements; preserve text, nested paragraphs, supported row/column spans, and empty grid slots declared by `gridBefore`/`gridAfter` |
 | Content controls (`w:sdt`) | Display saved `sdtContent` in its inline/block/row/cell context; retain source order and inherited formatting, without executing bindings or editing behavior |
 | Package-internal raster images | `<img>` with a data URI by default, or omit with a diagnostic |
 | Cached clustered column charts | SVG through `lambda.chart.chart`, preserving indexed cached values, series order, labels and RGB colors; a data table in plain text |
 | Paragraph-relative anchored drawings | CSS alignment/wrapping for supported column-relative left/right/center anchors and signed column-start/paragraph offsets with square wrapping on both sides |
+| No-wrap drawings | Explicit signed column/paragraph offsets, saved extents and source front/behind-text order; raster inset crops preserve their frames |
+| Decorative rectangles | Flat DrawingML preset rectangles with solid RGB/theme fills and no stroke/effects; select a supported modern compatibility branch once |
 | Source presentation | Resolve theme fonts/colors, inherited run size and tracking, paragraph spacing, table grid widths, cell shading/borders, row heights, and page dimensions into validated CSS |
 | Page/section break | Stable semantic break marker; no claim of Word pagination |
 
@@ -222,7 +225,11 @@ before lowering. Full visual properties such as font metrics, exact spacing,
 columns, borders, and page-relative floating placement are not part of the
 semantic v1 contract. The supported paragraph-anchor subset uses CSS floats,
 distance/effect extents, and signed offsets for column-start square wrapping
-at a paragraph anchor (D7.2.4). Arbitrary positions that need text on both
+at a paragraph anchor (D7.2.4). Explicit no-wrap offsets use absolutely positioned
+boxes anchored to their paragraph, with compact CSS layer ranks on either side
+of body text. The root owns their stacking context; empty anchor paragraphs
+retain their source line height. Shape properties and colors are validated data,
+never copied VML CSS (S1.8). Arbitrary positions that need text on both
 sides of an interior image still retain diagnostics.
 Footnote/endnote separator and continuation-separator definitions are metadata,
 not document notes. Annotation parts resolve IDs and relationships in their
@@ -378,7 +385,7 @@ relevant Radiant baseline only for this viewer integration.
 - Headers and footers as section-aware semantic content.
 - Comment ranges/author metadata, tracked-change policy, bookmarks beyond simple main-story anchors,
   and additional field types.
-- More complete table borders/styles, column layout, and shape-to-SVG subset.
+- More complete table borders/styles, column layout, and shapes beyond flat rectangles.
 - Equations, chart types beyond cached clustered columns, SmartArt, embedded
   OLE, drawing canvas, and page-relative anchored placement.
 - Faithful page layout or PDF rendering from DOCX.
