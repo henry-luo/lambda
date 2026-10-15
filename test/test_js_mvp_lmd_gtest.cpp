@@ -9815,6 +9815,205 @@ TEST(JsDynamicEvalSource, BlankProofConsumesAllBytes) {
     }
 }
 
+TEST_F(JsMvpLmd, ReflectedFunctionIdentityAndMutation) {
+    boolean(R"JS(
+        globalThis.self=globalThis;
+        function tree(n) { return n ? {left:tree(n-1), right:tree(n-1)} : {value:3}; }
+        tree(3).left.right.left.value===3 && self.tree===tree;
+    )JS");
+    boolean("globalThis.self=globalThis;function f(){return 1}let a=f();self.f=function(){return 'changed'};a===1&&f()==='changed'");
+    boolean("function f(){return 1}let g=globalThis;let key=['f'][0];g[key]=function(){return 4};f()===4");
+    boolean("function f(){return 1}let a=f();Object.assign(globalThis,{f:function(){return 5}});a===1&&f()===5");
+    boolean("function f(){return 1}Object.defineProperty(globalThis,'f',{value:function(){return 6}});f()===6");
+    boolean("function f(){return 1}let g=globalThis;for(g.f of [function(){return 7}]){}f()===7");
+    boolean("function f(){return 1}globalThis.f=2;globalThis.f++;f===3");
+    boolean("function f(){return 1}globalThis.self=globalThis;f=function(){return 8};f()===8");
+    boolean("function f(){return 1}globalThis.self=globalThis;eval('f=function(){return 9}');f()===9");
+    boolean("globalThis.self=globalThis;function length(){return 1}Array.prototype.push.call(self,4);typeof length==='number'");
+}
+
+TEST_F(JsMvpLmd, ReflectedIntrinsicFactsRequireClosedMutations) {
+    boolean("globalThis.self=globalThis;function f(n){let a=new Array(Math.ceil(n));a[0]=String(n);return a.length===3&&a[0]==='2.5'}f(2.5)");
+    boolean("globalThis.self=globalThis;Math={ceil:function(){return 'changed'}};Math.ceil(2)==='changed'");
+    boolean("globalThis.self=globalThis;let alias=Math;alias.ceil=function(){return 'alias'};Math.ceil(2)==='alias'");
+    boolean("globalThis.self=globalThis;String.fromCharCode=function(){return 7};String.fromCharCode(65)===7");
+    boolean("globalThis.self=globalThis;Number.parseInt=function(){return 'number'};Number.parseInt('1')==='number'");
+    boolean("globalThis.self=globalThis;String.prototype.substring=function(){return 8};'abc'.substring(1)===8");
+    boolean("globalThis.self=globalThis;let key=['Math'][0];self[key]={ceil:function(){return 9}};Math.ceil(2)===9");
+    boolean("globalThis.self=globalThis;Object.defineProperty(self,'String',{get:function(){return function(){return 10}}});String(1)===10");
+    boolean("globalThis.self=globalThis;let C=Function;self.Function('String=function(){return 11}')();String(1)===11");
+}
+
+TEST_F(JsMvpLmd, ReflectedGlobalDomainsAndEscapedCalls) {
+    boolean("globalThis.self=globalThis;function f(){return 1}let first=f();for(self.f of [()=>2]){}first===1&&f()===2");
+    boolean("globalThis.self=globalThis;var x=1;for(self.x in {text:2}){}x==='text'");
+    boolean("globalThis.self=globalThis;for(Math.abs of [()=>7]){}Math.abs(-1)===7");
+    boolean("globalThis.self=globalThis;function read(){return x}let before=read();var x=3;before===undefined&&read()===3");
+    boolean("globalThis.self=globalThis;var x=1;function change(){x='text'}let before=x;change();before===1&&x==='text'");
+    boolean("globalThis.self=globalThis;var x=1;self.x='changed';x==='changed'");
+    boolean("globalThis.self=globalThis;function f(x){return x}let first=f(1);self.f('text')==='text'&&first===1");
+    boolean("globalThis.self=globalThis;function f(x){return x}let values=Object.values(self);let ok=false;for(let v of values){if(v===f)ok=v('text')==='text'}ok");
+    boolean("globalThis.self=globalThis;function f(x){return x}function g(){return f}let first=f(1);g()('text')==='text'&&first===1");
+    boolean("globalThis.self=globalThis;function tree(n,tag){return n?{left:tree(n-1,tag),right:tree(n-1,tag)}:{tag:tag}}var depth=3;tree(depth,String(4)).left.right.left.tag==='4'");
+}
+
+TEST_F(JsMvpLmd, ForInKeysJoinOtherBindingWrites) {
+    boolean("let keys='';for(const key in {a:1,b:2})keys+=key;keys==='ab'");
+    boolean("let result=0;for(let key in {a:1,b:2}){result+=typeof key==='string';key=1.25;result+=key}result===4.5");
+    boolean("let key=2.5;let initial=key;for(key in {a:1}){}initial===2.5&&key==='a'");
+    boolean("let key;for(key of [1.25]){}let initial=key;for(key in {a:1}){}initial===1.25&&key==='a'");
+    boolean("let key;for(key in {a:1}){}for(key of [1.25]){}key===1.25");
+    boolean("function f(key){let initial=key;for(key in {a:1}){}return initial}f(1.25)===1.25&&f({a:2}).a===2");
+    boolean("let read;for(let key in {a:1}){read=()=>key;key=1.25}read()===1.25");
+}
+
+TEST_F(JsMvpLmd, ReflectedPrototypeSetupAndEscapes) {
+    boolean("function C(x){this.x=x}C.prototype.read=function(){return this.x};globalThis.self=globalThis;let c=new C(3);c.read()===3&&self.C===C");
+    boolean("globalThis.self=globalThis;function C(x){this.x=x}C.prototype.read=function(){return this.x};let c=new C(3);c.read()===3");
+    boolean("function C(){}C.prototype.x=1;globalThis.self=globalThis;let c=new C();let before=c.x;self.C.prototype.x='later';before===1&&c.x==='later'");
+    boolean("function C(){}C.prototype.x=1;globalThis.self=globalThis;let c=new C();let before=c.x;let p=C.prototype;p.x=2;before===1&&c.x===2");
+    boolean("function C(){}C.prototype.x=1;globalThis.self=globalThis;let c=new C();let before=c.x;Object.defineProperty(C.prototype,'x',{get:function(){return 4}});before===1&&c.x===4");
+    boolean("function C(){}C.prototype.x=1;globalThis.self=globalThis;let c=new C();let before=c.x;eval('C.prototype.x=5');before===1&&c.x===5");
+    boolean("function C(x){this.x=x}C.prototype.read=function(){return this.x};globalThis.self=globalThis;let first=new C(1);self.C=function(x){this.x=x+'!'};first.read()===1&&new C('text').x==='text!'");
+}
+
+TEST_F(JsMvpLmd, OwnPresenceRetainsAccessorsAndMappedArguments) {
+    boolean("let calls=0,o={get x(){calls++;return 3}};let found='x' in o&&Object.hasOwn(o,'x');found&&calls===0&&o.x===3&&calls===1");
+    boolean("function f(a){let first=arguments[0];a=4;return first===3&&arguments[0]===4&&'0' in arguments&&Object.hasOwn(arguments,'0')}f(3)");
+    boolean("let p={get x(){return this.y}},o=Object.create(p);o.y=5;('x' in o)&&!Object.hasOwn(o,'x')&&o.x===5");
+    boolean("let calls=0,p=new Proxy({x:3},{has(t,k){calls++;return false},get(t,k){return 7}});!('x' in p)&&calls===1&&p.x===7");
+    boolean("let key=Symbol('x'),o={[key]:1.25};Object.hasOwn(o,key)&&key in o&&o[key]===1.25");
+}
+
+TEST_F(JsMvpLmd, OptionalNumericEqualityWithoutBoxing) {
+    boolean(R"JS(
+        function compare(a,b,i,j) { return [a[i]===b[j],a[i]==b[j],a[i]!==b[j]]; }
+        let a=new Float64Array(4),b=new Int32Array(2);
+        a[0]=1.25;a[1]=NaN;a[2]=-0;a[3]=2;b[1]=2;
+        let missing=compare(a,b,8,8),nan=compare(a,a,1,1),zero=compare(a,b,2,0);
+        let different=compare(a,b,0,1),oneMissing=compare(a,b,3,8),same=compare(a,b,3,1);
+        missing[0]&&missing[1]&&!missing[2]&&!nan[0]&&!nan[1]&&nan[2]&&
+        zero[0]&&zero[1]&&!zero[2]&&!different[0]&&!oneMissing[0]&&same[0];
+    )JS");
+    boolean("let a=new Float64Array(2);a[0]=1.25;a[1]=NaN;let ok=true;for(let i=0;i<4;i++){let x=a[i];ok=ok&&(x===1.25)===(i===0)&&(x==2)===false}ok");
+}
+
+TEST_F(JsMvpLmd, OrderedLoopNumericFactsEndAtWrites) {
+    boolean("function f(){let a=new Int32Array(2);a[0]=1;let i=0,count=0;while(i<3){count++;i=a[i];i++;}return count===2&&Number.isNaN(i)}f()");
+    boolean("function f(){let a=new Int32Array(1);a.undefined=7;let i=0;while(i<2){let before=typeof i;i=a[8];return before==='number'&&typeof i==='undefined'&&a[i]===7}return false}f()");
+    boolean("function f(){let a=new Int32Array(1);let i=0;while(i<2){while(i<1){i=a[8];break}return typeof i==='undefined'}return false}f()");
+    boolean("function f(){let a=new Int32Array(1);let i=0;while(i<(i=a[8],2)){return typeof i==='undefined'}return false}f()");
+    boolean("function f(){let a=new Int32Array(1);let i=0;function change(){i=a[8]}while(i<2){change();return typeof i==='undefined'}return false}f()");
+    boolean("function f(){let a=new Int32Array(1);let i=a[8],count=0;do{count+=typeof i==='undefined';i=1}while(i<1);return count===1}f()");
+    boolean("function f(){let a=new Int32Array(1);a.undefined=7;let i=0,j=0,k=0;while(i<2){while(j<2){k+=a[i];i=a[8];j++}break}return k===7}f()");
+    boolean("function f(){let a=new Int32Array(1);a.undefined=7;let i=0,k=0;while(i<2){again:for(let j of [0,1]){k+=a[i];i=a[8]}break}return k===7}f()");
+    boolean("function f(flag){let a=new Int32Array(1);a.undefined=7;let i=0;while(i<2){if(flag){i=a[9]}else{i=a[8]}return a[i]===7}return false}f(true)&&f(false)");
+    boolean("function f(flag){let a=new Int32Array(1);a.undefined=7;let i=0;while(i<2){if(flag){i=a[9]}else{if(a[i]!==0)return false}return a[i]===(flag?7:0)}return false}f(true)&&f(false)");
+}
+
+TEST_F(JsMvpLmd, OrderedLoopIntegerFactsPreserveNumberEdges) {
+    boolean("function f(){let a=new Int32Array([1,2]);let i=0,n=0;while(i<3){n++;i=a[i];i++}return n===2&&Number.isNaN(i)}f()");
+    boolean("function f(){let a=new Float64Array([1.25]);let i=0,n=0;while(i<2){if(n++)return i===1.25;i=a[0]}return false}f()");
+    boolean("function f(){let a=new Float64Array([-0]);let i=0,n=0;while(i<1){if(n++)return Object.is(i,-0);i=a[0]}return false}f()");
+    boolean("function f(){let a=new Int32Array(1);let i=9007199254740990,n=0;while(i<9007199254740991){n++;if(n>2)i=a[8];i+=9007199254740991}return n===1&&i===18014398509481980}f()");
+    boolean("function f(){let a=new Int32Array(1);let i=0,n=0;while(i<1){if(n++)return i===-1;if(n>2)i=a[8];i--}return false}f()");
+    boolean("function f(){let a=new Int32Array([0]);let i=Infinity,n=0;while(i<2){n++;i=a[0]}return n===0&&i===Infinity}f()");
+    boolean("function f(){let a=new Int32Array([-2147483648]);let i=0,n=0;while(i<2){n++;if(n===2)return i===-2147483648&&a[i]===undefined;i=a[0]}return false}f()");
+    boolean("function f(){let a=new Int32Array(1);a.undefined=1.25;let i=0,n=0;while(i<2){if(n++)return i===1.25;i=a[a[8]]}return false}f()");
+    boolean("function f(){let a=[5];a[-1]=7;let i=0,n=0,s=0;while(n<2){s+=a[i];i--;n++}return s===12}f()");
+    boolean("function f(){let a=[5];a[0.5]=7;let i=0,n=0,s=0;while(n<2){s+=a[i];i+=0.5;n++}return s===12}f()");
+    boolean("function f(){let a=[];a[9007199254740991]=7;a[9007199254740992]=9;let i=9007199254740991,n=0,s=0;while(n<2){s+=a[i];i++;n++}return s===16}f()");
+    boolean("function f(){let a=[7];let i=-0,n=0;while(n<1){if(a[i]!==7||!Object.is(i,-0))return false;i++;n++}return true}f()");
+    boolean("function f(){let jumps=new Int32Array([1]);let i=0,n=0,s=0;while(i<3){s+='abc'.charCodeAt(i);n++;i=jumps[i];i++}return n===2&&s===196&&Number.isNaN(i)}f()");
+    boolean("function f(){let jumps=new Int32Array(1);let i=-1;while(i<2){let code='abc'.charCodeAt(i),bits=(i+1)|0;i=jumps[4];return Number.isNaN(code)&&bits===0&&'abc'.charCodeAt(i)===97}return false}f()");
+    boolean("function f(){let i=4294967297,n=0;while(i<4294967298){n=(i|0);i++}return n===1&&Number.isNaN('abc'.charCodeAt(i))}f()");
+}
+
+TEST_F(JsMvpLmd, IntrinsicArrayResultsRetainSpeciesAndOwnership) {
+    boolean(R"JS(
+        let hits=0,a=[1,2],r=a.map(x=>{
+            Object.defineProperty(Array.prototype,'0',{get(){return 99},set(v){hits++},configurable:true});
+            return x*2;
+        });
+        delete Array.prototype[0];r[0]===2&&r[1]===4&&hits===0;
+    )JS");
+    boolean(R"JS(
+        let keys='',a=[1,2];
+        function Species(){return new Proxy({}, {defineProperty(t,k,d){keys+=k;return Reflect.defineProperty(t,k,d)}})}
+        a.constructor={[Symbol.species]:Species};let r=a.map(x=>x+1);
+        keys==='01'&&r[0]===2&&r[1]===3&&!Array.isArray(r);
+    )JS");
+    boolean(R"JS(
+        let target=[],a=[1],caught=false;
+        a.constructor={[Symbol.species]:function(){return target}};
+        try{a.map(x=>{Object.defineProperty(target,'0',{value:9,writable:false,configurable:false});return x})}
+        catch(e){caught=e instanceof TypeError}caught&&target[0]===9;
+    )JS");
+    boolean(R"JS(
+        let a=[5e-324,-0,NaN,1.25],b=a.map(x=>x),c=a.filter(()=>true),d=a.slice(),e=a.concat([]),f=a.splice(0,4);
+        let ok=true;for(let r of [b,c,d,e,f])ok=ok&&r[0]===5e-324&&Object.is(r[1],-0)&&Number.isNaN(r[2])&&r[3]===1.25;
+        ok;
+    )JS");
+}
+
+TEST_F(JsMvpLmd, ArrayEditsObserveNumericPrototypeShapeChanges) {
+    boolean("let p={},a=[];Object.setPrototypeOf(a,p);Array.prototype.push.call(a,1);let hits=0;Object.defineProperty(p,'1',{set(v){hits+=v},configurable:true});Array.prototype.push.call(a,3);hits===3&&a.length===2&&!Object.hasOwn(a,'1')");
+    boolean("let p={},a=[];Object.setPrototypeOf(a,p);Array.prototype.push.call(a,1);Object.defineProperty(p,'1',{value:7,writable:false});let caught=false;try{Array.prototype.push.call(a,3)}catch(e){caught=e instanceof TypeError}caught&&a.length===1&&a[1]===7");
+    boolean("let p={},a=[1,2];Object.setPrototypeOf(a,p);Array.prototype.unshift.call(a,0);p[3]=8;delete a[2];let r=Array.prototype.pop.call(a);r===undefined&&a.length===2&&p[3]===8");
+    boolean("let p={foo:1},q={foo:1};p.bar=2;q[0]=9;let a=[],b=[];Object.setPrototypeOf(a,p);Object.setPrototypeOf(b,q);Array.prototype.push.call(a,3);Array.prototype.push.call(b,4);a[0]===3&&b[0]===4&&p[0]===undefined&&q[0]===9");
+    boolean("let p={'01':8},a=[];p[Symbol('0')]=9;Object.setPrototypeOf(a,p);Array.prototype.push.call(a,3);delete p['01'];Array.prototype.unshift.call(a,4);a.length===2&&a[0]===4&&a[1]===3");
+    boolean("let p={},a=[1];Object.setPrototypeOf(a,p);Array.prototype.push.call(a,2);Object.setPrototypeOf(p,{2:9});a.length=3;Array.prototype.unshift.call(a,0);a.length===4&&a[3]===9");
+    for (const char* source : {"({first:1,last:2})", "({'0':1,last:2})"}) {
+        Item object = run(source);
+        ASSERT_EQ(get_type_id(object), LMD_TYPE_MAP);
+        TypeMap* shape = (TypeMap*)object.map->type;
+        EXPECT_EQ((int64_t)shape->digit_key_length, shape->length + 1);
+        EXPECT_EQ(shape->has_digit_key, source[2] == '\'');
+    }
+}
+
+TEST_F(JsMvpLmd, ReflectedCompatibleFieldStorage) {
+    boolean("globalThis.self=globalThis;var x=1.25;Object.defineProperty(self,'x',{enumerable:true});let ok=true;for(let v of [0,2,5e-324,-0,NaN,Infinity,3]){x=v;let d=Object.getOwnPropertyDescriptor(self,'x');ok=ok&&Object.is(d.value,v)&&Object.is(x,v)&&d.writable&&d.enumerable}ok");
+    boolean("globalThis.self=globalThis;var x={a:1};let old=x;Object.defineProperty(self,'x',{writable:true});x=null;let empty=x===null;x={b:2};empty&&old.a===1&&x.b===2");
+    boolean("let o={x:1.25};Object.defineProperty(o,'x',{writable:false});!Reflect.set(o,'x',2)&&o.x===1.25");
+    boolean("let hits=0,o={set x(v){hits+=v}};Object.defineProperty(o,'x',{configurable:true});o.x=2;hits===2");
+    Item result = run("globalThis.self=globalThis;var x=1.25;Object.defineProperty(self,'x',{writable:true});x=2;self");
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_MAP);
+    ShapeEntry* field = typemap_hash_lookup((TypeMap*)result.map->type, "x", 1);
+    ASSERT_NE(field, nullptr);
+    EXPECT_EQ(field->type, &TYPE_FLOAT);
+}
+
+TEST_F(JsMvpLmd, FreshFlatteningRetainsSpeciesAndSourceEffects) {
+    boolean("let calls=0,a=[[1],[2]];Object.defineProperty(a,'0',{get(){calls++;delete a[1];return [3]}});let r=a.flat();calls===1&&r.length===1&&r[0]===3");
+    boolean("let keys='',a=[[1],[2]];a.constructor={[Symbol.species]:function(){return new Proxy({}, {defineProperty(t,k,d){keys+=k;return Reflect.defineProperty(t,k,d)}})}};let r=a.flat();keys==='01'&&r[0]===1&&r[1]===2&&!Array.isArray(r)");
+    boolean("let a=[[1],[2]];a.constructor={[Symbol.species]:function(){return a}};let r=a.flat();r===a&&a.length===2&&a[0]===1&&a[1]===2");
+    boolean("let hits=0,a=[1,2];let r=a.flatMap(x=>{Object.defineProperty(Array.prototype,'0',{set(v){hits++},configurable:true});return [x,x+1]});delete Array.prototype[0];hits===0&&r.join(',')==='1,2,2,3'");
+    boolean("let a=[5e-324,-0,NaN,1.25],b=[a].flat(),c=a.flatMap(x=>[x]);let ok=true;for(let r of [b,c])ok=ok&&r[0]===5e-324&&Object.is(r[1],-0)&&Number.isNaN(r[2])&&r[3]===1.25;ok");
+}
+
+TEST_F(JsMvpLmd, CheckedGlobalReadRetainsResolutionOrder) {
+    boolean("globalThis.self=globalThis;let calls=0;Object.defineProperty(self,'checkedValue',{get(){calls++;return 7},configurable:true});checkedValue===7&&calls===1");
+    boolean("globalThis.self=globalThis;let caught=false;try{missingCheckedName}catch(e){caught=e instanceof ReferenceError}caught&&typeof missingCheckedName==='undefined'");
+    boolean(R"JS(
+        let log='';
+        Object.setPrototypeOf(globalThis,new Proxy({}, {
+            has(t,k){if(k==='checkedInherited'){log+='h';return true}return false},
+            get(t,k){if(k==='checkedInherited'){log+='g';return 8}}
+        }));
+        checkedInherited===8&&log==='hg';
+    )JS");
+    boolean(R"JS(
+        let log='';
+        Object.setPrototypeOf(globalThis,new Proxy({}, {
+            has(t,k){if(k==='checkedShadow'){log+='h';Object.defineProperty(globalThis,k,{value:9});return true}return false},
+            get(t,k){log+='g';return 8}
+        }));
+        checkedShadow===9&&log==='h';
+    )JS");
+    boolean("let caught=false;Object.setPrototypeOf(globalThis,new Proxy({},{has(){throw 17}}));try{missingCheckedName}catch(e){caught=e===17}caught");
+}
+
 TEST_F(JsMvpLmd, BareLexicalInitializationRemainsInNumericDomain) {
     boolean(R"JS(
         function scan(s) {

@@ -240,8 +240,9 @@ Item mvp_lmd_reflect_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
 Item mvp_lmd_arguments_list(Item source, bool property_keys = false);
 Item mvp_lmd_own_keys(Item owner);
 Item mvp_lmd_sequence_length(Item source);
+Item mvp_lmd_get_prototype_with_library(Item object, MvpLmdLibraryState* library);
 Item mvp_lmd_array_is_array(Item source);
-Item mvp_lmd_array_species_create(Item source, int64_t length);
+Item mvp_lmd_array_species_create(Item source, int64_t length, bool* fresh = NULL);
 bool mvp_lmd_is_callable(Item value);
 bool mvp_lmd_is_constructor(Item value);
 static inline bool mvp_lmd_is_proxy(Item value) {
@@ -314,7 +315,9 @@ static inline bool mvp_lmd_array_visit_method(int method) {
 enum MvpLmdStringRead { LMD_STRING_INDEX, LMD_STRING_CHAR, LMD_STRING_CODE, LMD_STRING_FROM_CODE, LMD_STRING_FROM_POINT };
 enum MvpLmdProperty { LMD_PROP_GET, LMD_PROP_CALLEE, LMD_PROP_SET, LMD_PROP_DELETE,
     LMD_PROP_OWN, LMD_PROP_HAS, LMD_PROP_KEYS, LMD_PROP_VALUES, LMD_PROP_ENTRIES,
-    LMD_PROP_INITIALIZE, LMD_PROP_CREATE_DATA, LMD_PROP_PRESENT, LMD_PROP_STRICT = 256,
+    LMD_PROP_INITIALIZE, LMD_PROP_CREATE_DATA, LMD_PROP_PRESENT,
+    LMD_PROP_GET_BINDING, // GetBindingValue: absent properties raise ReferenceError.
+    LMD_PROP_STRICT = 256,
     // operation-local proof: no indexed descriptors or inherited indices; writable length/extensible for edits.
     LMD_PROP_OWN_STORAGE = 512, LMD_PROP_NON_ENUMERABLE = 1024 };
 int mvp_lmd_builtin_method(String* key, TypeId owner = LMD_TYPE_MAP);

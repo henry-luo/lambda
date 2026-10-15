@@ -1049,6 +1049,8 @@ static TypeMap* transition_target_via(TypeMap* parent, TypeMapTransition** edges
         child->field_index = parent->field_index;
         child->field_capacity = parent->field_capacity;
         child->field_count = parent->field_count;
+        child->digit_key_length = parent->digit_key_length;
+        child->has_digit_key = parent->has_digit_key;
         typemap_hash_insert(child, added);
     } else {
         typemap_hash_build_in(child, tree);

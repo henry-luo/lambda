@@ -2216,3 +2216,123 @@ Final replay: `jq-final/comparison.json`; complete validation inventory:
 Overlapping validation and explicitly recorded pauses exclude these jq runs
 from performance acceptance. Eleven previously confirmed non-jq regressions
 remain open; no full-population MVP Test262 score is refreshed.
+
+### Eleven-regression follow-up (2026-10-15)
+
+The next direct repair pass uses immutable release-MIR executables, archived
+benchmark sources/oracles and their original self timers. Published Results3–9
+remain unchanged. Evidence is under `temp/mvp_perf_eleven_20261015/`.
+
+Implemented repairs follow **D8.4.1v2**, **D3.4.3v5** and **D5.2–D5.3**:
+
+- Recover function identity, scalar domains and fixed prototype setup only when
+  the source proves that reflection cannot mutate or escape the relevant global
+  bindings. Dynamic code, reflective writers, computed names without a proof,
+  intrinsic aliases and property iteration targets keep conservative dispatch.
+  The new compiler helper is `plan_fixed_global_bindings`; it reuses the existing
+  representation solver, key proof and builtin catalog. Published functions
+  retain their boxed entry ABI (**D8.1.3v24**).
+- Give `for…in` targets their string domain while joining other writes. Skip
+  scalar-home work for proven nonnumeric bindings and closed nonnumeric returns.
+  Optional numeric equality and immediate-integer equality retain undefined,
+  NaN and signed-zero behavior (**D2.2.5**, **D5.2–D5.3**).
+- True, passive ordered loop conditions establish local numeric presence until
+  a write. Nested backedges discard enclosing facts; alternative branches start
+  from the same facts and intersect them on exit. This removes named-property
+  fallback from Brainfuck's guarded typed-array reads without conflating NaN
+  and undefined (**D2.2.5**, **D8.4.1v2**).
+- Extend that proof to integral local writes: `integer_binding_writes` checks
+  every source write, and `ordered_integer_range` proves a bounded integer range
+  inside a true ordered loop condition. Fractional, captured and unsupported
+  writes keep the original Number path. The existing property-key conversion
+  can omit a redundant integer roundtrip for a proven integral domain while
+  retaining bounds, NaN/infinity and named-property fallbacks. Integer values
+  are materialized at index consumers; arithmetic keeps the binding's physical
+  lane. An intermediate eager conversion regressed Triangl by introducing
+  float-to-integer/add/integer-to-float on every counter increment.
+  The shared compiler helper `materialize_integer_operand` applies the proof
+  at array/property indices, character indices and bitwise consumers, reusing
+  `scalar_reg`. Optional, fractional and nonfinite operands retain their
+  existing conversions.
+- Own presence checks return without reading a getter or consulting prototypes.
+  Prototype walks reuse the active library through the promoted existing
+  `mvp_lmd_get_prototype_with_library` function. Checked global reads resolve an
+  own descriptor once; inherited/exotic misses preserve observable Has/Get
+  order and restart Get after a trap. The existing property dispatcher uses
+  an internal `LMD_PROP_GET_BINDING` operation, with precisely rooted misses.
+- The existing species allocator reports whether its result is a private
+  intrinsic array. Map/filter, slice/concat/splice, copying reversal and recursive
+  flat/flatMap reuse the existing physical array store for those results. Custom
+  species, proxies, aliased output and source-side getter effects retain full
+  property semantics. The proof is local to the operation; no container flag
+  or cache is added.
+- Add a `preserve_storage` option to Lambda's existing resolved map setter.
+  JS assignment/descriptor paths can retain compatible float, nullable Map and
+  generic Item storage, using the existing field writers. This prevents repeated
+  whole-global-object reshaping when a counter alternates between integer and
+  float encodings. Other callers explicitly keep their previous policy.
+- The shared TypeMap field index also records whether any string key begins
+  with a digit. A length certificate distinguishes complete summaries from
+  unknown or incompletely maintained ones; those retain the original scan.
+  Array edit checks can skip scanning every named prototype method, while
+  still reading live links, descriptors and extensibility. This is ordinary
+  shape metadata, with no per-site cache (**D3.4.3v5**, **D8.4.1v2**).
+
+The retained `integer-consumers` release has SHA-256
+`7edac2ef51b9341c5dd810978c216c69bc2015ac9d7926f22b644e7b388fdedc`.
+Its rebuilt candidate archives pass **664/664** MVP tests and
+**16/16** focused forced-GC/poisoning checks. The same CLI passes **1,957/1,957**
+selected canonical Test262 cases and **1,716/1,716** additional strict variants,
+without isolated retries. `integer-consumers-test-artifacts.json` records the
+actual executable and archive hashes. Earlier private GTest links to a stale
+archive are superseded; their counts are not candidate evidence.
+
+The preceding shared-runtime pin additionally passes **4,912 canonical + 4,632
+strict** selected cases, after isolated replay of contended watchdog losses.
+The full LJS baseline passes **40,261/40,261**. The integrated Lambda baseline
+records **7,130/7,132** checks: the pre-existing chart dashboard half-pixel
+wordcloud mismatch and an outer GC-suite watchdog remain in that raw aggregate.
+The GC timeout collapses 313 cases into one failed row; a separate pinned release
+replay passes **313/313**. The LaTeX corpus passes in this aggregate. These broad
+gates precede only the final MVP compiler adjustment; shared runtime sources are
+unchanged. No golden or harness was changed, and selected variants do not refresh
+the archived whole-population MVP coverage score.
+
+Final performance capture: `temp/mvp_perf_eleven_20261015/final-retained/`.
+All **15/15** workload outputs pass. Each seven-round comparison rotates the
+retained candidate, the pre-repair pin and the historical release, excludes
+warmup, preserves the original timing contract and checks source/binary hashes.
+Timing uses script self timers or the CLI execution-only timer where that is
+the archived contract; process wall time is excluded.
+Historical controls use Result9 except Text Search and Hashmap, which use the
+Phase34 entry release. Process activity and overlapping background work are
+recorded separately; the report retains the raw samples and paired intervals.
+
+| Workload | Retained ms | Pre-repair ms | Historical ms | Historical difference |
+|---|---:|---:|---:|---:|
+| awfy/deltablue | 53.794 | 54.400 | 50.825 | +5.84% |
+| awfy/nbody | 45.728 | 45.886 | 44.015 | +3.89% |
+| jetstream/splay | 62.227 | 182.943 | 59.622 | +4.37% |
+| js_mvp_lmd/object_delete | 0.873 | 0.866 | 0.819 | +6.59% |
+| julia/formatted_output | 103.992 | 104.052 | 103.218 | +0.75% |
+| kostya/brainfuck | 42.445 | 47.124 | 41.775 | +1.60% |
+| text/fast_diff | 183.222 | 607.139 | 198.428 | -7.66% |
+| text/microdiff | 108.575 | 149.557 | 100.604 | +7.92% |
+| text/prettier_ast | 512.706 | 550.592 | 515.232 | -0.49% |
+| text/text_search | 4222.180 | 5771.065 | 5063.201 | -16.61% |
+| jetstream/hashmap | 482.459 | 489.496 | 465.744 | +3.59% |
+
+No competing build/test activity was observed in the final sweep. Busy
+system/editor processes overlap some rounds; whole-round sensitivity results
+are retained. Every final Text Search round overlaps background CPU activity,
+so that row is indicative; earlier quiet captures independently establish its
+improvement.
+
+The four controls are retained in the same capture, including Triangl at
+121.223 vs 154.481 ms. An intermediate eager integer conversion regressed
+Triangl to 209 ms and was rejected; the retained consumer-only conversion
+removes that recurrence. Microdiff, Splay, DeltaBlue, NBody, Hashmap and
+object-delete still need further tuning against their historical controls.
+Brainfuck is near parity (+1.6% with an interval including parity); the small
+formatted-output difference varies across captures. Performance acceptance
+remains open; this is not a new complete 88-workload replay.

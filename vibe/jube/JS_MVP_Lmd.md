@@ -1762,19 +1762,32 @@ Text Search is **14.2%** slower than the later phase-entry release. Hyphen remai
 inconclusive because identical controls vary. Results3–9 remain unchanged;
 the new capture is `temp/mvp_perf_all_20261015/REPORT.md`. Benchmark acceptance
 remains open; this replay does not refresh the archived Test262 score.
-Direct repairs identify and fix an ARM64 long-branch overflow in jq (approved
-vendor patch, **248/248** MIR emission checks), then repair a separate bare-`let`
-inference error exposed by the tokenizer. Records and mix pass on the trial
-build; records also passes on the retained build. Full jq replay is pending.
-Triangl recovers to **155.019 ms**, versus **278.262 ms** pre-fix and
-**155.083 ms** Result9 in seven paired release-MIR rounds. Optional index
-payloads reuse existing Lambda storage and ownership rules (**D2.2.5**,
-**D3.4.3v5**, **D5.2–D5.3**). An additional fixed-key literal allocation experiment
-was withdrawn: Splay and Microdiff improved in the first capture, but Fast-diff
-slowed and competing builds invalidated its confirmation. Eleven other confirmed
-regressions remain open. The final focused suite passes **650/650**, with **5/5**
-forced-GC checks. Details, broader gate caveats and immutable captures are
-recorded in the implementation plan.
+Direct repairs fix the approved ARM64 long-branch defect in jq and the separate
+bare-`let` inference error. Triangl regains historical performance; complete jq
+replay remains pending. The next pass recovers statically proven global facts,
+reduces scalar ownership and property lookup work, and reuses Lambda storage
+for private intrinsic array results and compatible map writes (**D2.2.5**,
+**D3.4.3v5**, **D5.2–D5.3**, **D8.4.1v2**). Accessors, proxies, custom species,
+NaN/undefined and live global mutation retain their semantics; no new container
+flag or cache is introduced.
+
+The retained release passes **664/664** MVP checks, **16/16** focused GC checks,
+and **1,957 canonical + 1,716 strict** selected Test262 variants. The shared-runtime
+integration also passes the **40,261-case LJS baseline** and a separate **313-case
+GC sweep**; its Lambda aggregate retains the pre-existing chart mismatch and a
+contended GC watchdog, with the latter resolved by isolated replay.
+
+The final **15-workload** paired capture preserves native release MIR, original
+timing contracts and exact output checks. Integer proofs are materialized at index,
+character and bitwise consumers while arithmetic retains its physical lane;
+this fixes an intermediate Triangl regression. A numeric-key summary in the shared
+TypeMap index removes repeated prototype-field scans (**D3.4.3v5**, **D8.4.1v2**).
+Triangl is 121.223 vs 154.481 ms and Microdiff is 108.575 vs 100.604 ms against
+their historical controls. Splay, Microdiff, DeltaBlue, NBody, Hashmap and
+object-delete retain gaps, so performance acceptance remains open. Details,
+intervals, contention and provenance are in
+`temp/mvp_perf_eleven_20261015/REPORT.md` and the implementation plan. Results3–9
+and the archived whole-population coverage score remain unchanged.
 The standalone Mandelbrot
 output path retains a conservative full-storage fallback, documented in the plan.
 Detailed implementation, evidence and

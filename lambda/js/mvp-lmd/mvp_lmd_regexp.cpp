@@ -145,7 +145,7 @@ static const JsRegExpOps regexp_ops = {
         MvpLmdRegExp* native = regexp_record(object, mvp_lmd_program_library());
         ShapeEntry* field = native ? typemap_hash_lookup((TypeMap*)native->type, "lastIndex", 9) : NULL;
         if (field && !(field->flags & (JSPD_IS_ACCESSOR | JSPD_NON_WRITABLE)))
-            return map_shape_set_resolved(native, key, field, value) ? ItemNull : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            return map_shape_set_resolved(native, key, field, value, false) ? ItemNull : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
         return mvp_lmd_property_with_receiver(object, Item{.item = s2it(key)}, value,
             LMD_PROP_SET | LMD_PROP_STRICT, object);
     },
@@ -296,7 +296,7 @@ static const JsRegExpIteratorOps regexp_iterator_ops = {
     [](Item iterator) {
         NameRef key = mvp_lmd_program_library()->regexp_iterator_keys[4];
         ShapeEntry* field = typemap_hash_lookup_key((TypeMap*)iterator.map->type, key);
-        return map_shape_set_resolved(iterator.map, key, field, Item{.item = ITEM_TRUE})
+        return map_shape_set_resolved(iterator.map, key, field, Item{.item = ITEM_TRUE}, false)
             ? ItemNull : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     },
     [](Item value, bool done) { return mvp_lmd_iterator_result(NULL, value, done); }

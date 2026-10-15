@@ -451,6 +451,10 @@ typedef struct TypeMap : Type {
     ShapeEntry** field_index;  // field_capacity slots (NULL = empty slot)
     uint32_t field_count;  // number of hash slots used (0 = not populated)
     uint32_t field_capacity;  // slots in field_index (0 while it is NULL)
+    // length + 1 certifies the numeric-looking key summary; zero means unknown.
+    // this describes names in the shape, never a receiver or a prototype chain.
+    uint32_t digit_key_length;
+    bool has_digit_key;
     // Optional fixed-slot index used by ordinary transition shapes.
     ShapeEntry** slot_entries;  // NULL if not populated; else array of slot_count pointers
     int slot_count;             // number of slot_entries (0 = not populated)
@@ -963,6 +967,12 @@ static inline int typemap_hash_probe_slot(TypeMap* tm, ShapeEntry* entry) {
 // Uses last-writer-wins: if a name already exists, the slot is overwritten.
 static inline void typemap_hash_insert(TypeMap* tm, ShapeEntry* entry) {
     if (!tm || !entry || !entry->name) return;
+    if (entry->key_kind == NAME_KEY_STRING && entry->name->length &&
+            entry->name->str[0] >= '0' && entry->name->str[0] <= '9') tm->has_digit_key = true;
+    // an append extends a complete summary; skipped writers leave a length mismatch.
+    if (tm->digit_key_length && entry == tm->last && !tm->has_spread &&
+            tm->length == tm->digit_key_length && tm->length < UINT32_MAX)
+        tm->digit_key_length++;
     int slot = typemap_hash_probe_slot(tm, entry);
     // table full — callers fall back to the authoritative shape chain.
     if (slot < 0) return;
@@ -985,10 +995,14 @@ static inline bool typemap_hash_holds_equal(TypeMap* tm, ShapeEntry* entry) {
 
 static inline void typemap_hash_build_in(TypeMap* tm, TypeAlloc alloc) {
     if (!tm) return;
+    tm->digit_key_length = 0;
+    tm->has_digit_key = false;
     typemap_hash_prepare_in(tm, alloc, tm->length);
     FOR_EACH_MAP_FIELD(tm, e) {
         typemap_hash_insert(tm, e);
     }
+    if (!tm->has_spread && tm->length >= 0 && tm->length < UINT32_MAX)
+        tm->digit_key_length = (uint32_t)tm->length + 1;
 }
 
 static inline void typemap_hash_build(TypeMap* tm, Pool* pool) {

@@ -27,7 +27,7 @@ MvpLmdClass* mvp_lmd_class_record(Item owner) {
     return nominal && nominal->extension == &mvp_lmd_class_extension
         ? (MvpLmdClass*)nominal->extension_data : NULL;
 }
-static Item get_prototype_with_library(Item object, MvpLmdLibraryState* library) {
+Item mvp_lmd_get_prototype_with_library(Item object, MvpLmdLibraryState* library) {
     if (get_type_id(object) == LMD_TYPE_VMAP && js_module_namespace_record(object)) return ItemNull;
     if (get_type_id(object) == LMD_TYPE_VMAP && js_promise_is(object)) return js_get_prototype(object);
     if (mvp_lmd_is_proxy(object)) return mvp_lmd_proxy_property(object, ItemNull, ItemNull, object, LMD_PROXY_PROTOTYPE);
@@ -38,7 +38,7 @@ static Item get_prototype_with_library(Item object, MvpLmdLibraryState* library)
         Rooted<Item> held(roots, object);
         Item ready = mvp_lmd_function_prepare(held.get());
         if (item_is_error(ready)) return ready;
-        return get_prototype_with_library(held.get(), library);
+        return mvp_lmd_get_prototype_with_library(held.get(), library);
     }
     Map* map = mvp_lmd_property_map(object);
     if (!map) return mvp_lmd_fail(kind == LMD_TYPE_NULL || kind == LMD_TYPE_UNDEFINED ? LMD_MVP_TYPE : LMD_MVP_CAPABILITY, 0);
@@ -83,7 +83,7 @@ static Item get_prototype_with_library(Item object, MvpLmdLibraryState* library)
     return library->values[LMD_LIBRARY_OBJECT_PROTOTYPE];
 }
 extern "C" Item mvp_lmd_get_prototype(Item object) {
-    return get_prototype_with_library(object, mvp_lmd_program_library());
+    return mvp_lmd_get_prototype_with_library(object, mvp_lmd_program_library());
 }
 extern "C" Item mvp_lmd_object_extensible(Item object, int64_t prevent) {
     if (get_type_id(object) == LMD_TYPE_VMAP && js_module_namespace_record(object))
@@ -108,7 +108,7 @@ extern "C" Item mvp_lmd_object_extensible(Item object, int64_t prevent) {
     if (field) return Item{.item = prevent ? ITEM_TRUE : ITEM_FALSE};
     if (!prevent) return Item{.item = ITEM_TRUE};
     if (!map->type) map->type = type_tree_map_root(runtime_shape_tree());
-    return map_shape_set_resolved(map, library->extensibility_key, NULL, Item{.item = ITEM_FALSE})
+    return map_shape_set_resolved(map, library->extensibility_key, NULL, Item{.item = ITEM_FALSE}, false)
         ? Item{.item = ITEM_TRUE} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
 extern "C" Item mvp_lmd_set_prototype(Item object, Item prototype) {
@@ -203,7 +203,7 @@ static Item mvp_lmd_inherited_member_flags(Item owner, const char* key, size_t l
     }
     // ordinary chain traversal cannot reenter; preserve the active library across its links.
     MvpLmdLibraryState* traversal_library = mvp_lmd_program_library();
-    Item cursor = get_prototype_with_library(owner, traversal_library);
+    Item cursor = mvp_lmd_get_prototype_with_library(owner, traversal_library);
     while (cursor.item != ITEM_NULL) {
         if (item_is_error(cursor)) return cursor;
         if (semantic && (get_type_id(cursor) != LMD_TYPE_MAP || mvp_lmd_is_proxy(cursor) ||
@@ -226,7 +226,7 @@ static Item mvp_lmd_inherited_member_flags(Item owner, const char* key, size_t l
         // ordinary Map traversal cannot collect; an accessor roots its receiver/callable and returns immediately.
         Item result = resolve(properties);
         if (*found || item_is_error(result)) return result;
-        cursor = get_prototype_with_library(cursor, traversal_library);
+        cursor = mvp_lmd_get_prototype_with_library(cursor, traversal_library);
     }
     return Item{.item = ITEM_JS_UNDEFINED};
 }
@@ -289,9 +289,23 @@ static bool mvp_lmd_class_widen_allocation(MvpLmdClass* cls, String* key, TypeId
     return false;
 }
 
-template<bool fixed>
+template<bool fixed, bool binding = false>
 static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64_t operation,
         MvpLmdPropertyCache* cache, Item receiver) {
+    auto inherited_binding = [&]() -> Item {
+        RootFrame roots(3);
+        if (!roots.valid()) return ItemError;
+        Rooted<Item> object(roots, owner), key(roots, name), target(roots, receiver);
+        Item found = mvp_lmd_class_property_impl<fixed>(object.get(), key.get(), ItemNull,
+            LMD_PROP_HAS, NULL, target.get());
+        if (item_is_error(found)) return found;
+        if (found.item == ITEM_FALSE) return mvp_lmd_fail(LMD_MVP_REFERENCE, 0);
+        // a proxy Has trap can install an own property; restart Get from the original owner.
+        return mvp_lmd_class_property_impl<fixed>(object.get(), key.get(), ItemNull,
+            LMD_PROP_GET, cache, target.get());
+    };
+    if (binding && (get_type_id(owner) != LMD_TYPE_MAP || owner.map->map_kind != MAP_KIND_PLAIN))
+        return inherited_binding();
     if (!fixed && (operation & ~LMD_PROP_STRICT) == LMD_PROP_SET &&
             mvp_lmd_program_library() && mvp_lmd_program_library()->mutable_prototypes) {
         RootFrame roots(1);
@@ -374,8 +388,12 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
     if (cls) {
         bool constructor = get_type_id(owner) == LMD_TYPE_FUNC;
         Map* map = constructor ? mvp_lmd_class_values(cls)[2].map : owner.map;
-        bool metadata = constructor || map == mvp_lmd_class_values(cls)[1].map || map == mvp_lmd_class_values(cls)[2].map;
-        if (metadata && operation >= LMD_PROP_KEYS) {
+        auto is_metadata = [&]() {
+            if (constructor) return true;
+            Item* values = mvp_lmd_class_values(cls);
+            return map == values[1].map || map == values[2].map;
+        };
+        if (operation >= LMD_PROP_KEYS && is_metadata()) {
             return mvp_lmd_object_project(Item{.map = map}, operation - LMD_PROP_KEYS);
         }
         if (operation == LMD_PROP_GET || operation == LMD_PROP_CALLEE ||
@@ -383,12 +401,17 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
             String* key = name.get_string();
             ShapeEntry* field = typemap_hash_lookup_key((TypeMap*)map->type, key);
             bool found = field != NULL;
+            if (binding && !found) return inherited_binding();
+            bool presence = operation == LMD_PROP_OWN || operation == LMD_PROP_HAS;
+            // an own descriptor proves presence without reading its value or consulting prototypes.
+            if (found && presence) return Item{.item = ITEM_TRUE};
             if (field && (field->flags & JSPD_IS_ACCESSOR) &&
                     (operation == LMD_PROP_GET || operation == LMD_PROP_CALLEE))
                 return mvp_lmd_accessor_call(receiver, field, ItemNull, LMD_PROP_GET);
-            bool presence = operation == LMD_PROP_OWN || operation == LMD_PROP_HAS;
-            MvpLmdLibraryState* library = fixed ? NULL : mvp_lmd_program_library(cls->program);
-            if (library && library->arguments_key && found && !presence) {
+            bool indexed = key->len && key->chars[0] >= '0' && key->chars[0] <= '9';
+            // only indexed own names can alias a mapped parameter; misses still need the full prototype policy.
+            MvpLmdLibraryState* library = fixed || (found && !indexed) ? NULL : mvp_lmd_program_library(cls->program);
+            if (library && library->arguments_key && found && indexed) {
                 Item cell = mvp_lmd_arguments_cell(owner, key);
                 // a mapped value belongs to its cell, never to a cached Map byte offset.
                 if (get_type_id(cell) == LMD_TYPE_ARRAY) return cell.array->items[0];
@@ -409,7 +432,7 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
             if (cache && !presence && !cls->owner && !constructor && found &&
                     (typemap_is_shared_shape(shape) || shape == &cls->shape) &&
                     (field || ((!library || !library->mutable_prototypes) && get_type_id(result) == LMD_TYPE_FUNC))) {
-                mvp_lmd_cache_property(cache, shape, field, result, !metadata);
+                mvp_lmd_cache_property(cache, shape, field, result, !is_metadata());
             }
             if (operation == LMD_PROP_OWN) return Item{.item = b2it(found)};
             if (found) return operation == LMD_PROP_HAS ? Item{.item = ITEM_TRUE} : result;
@@ -418,6 +441,7 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
                 return Item{.item = operation == LMD_PROP_HAS ? ITEM_FALSE : ITEM_JS_UNDEFINED};
         }
         if (operation == LMD_PROP_SET) {
+            bool metadata = is_metadata();
             ShapeEntry* field = typemap_hash_lookup_key((TypeMap*)map->type, name.get_string());
             ShapeEntry* descriptor = field;
             uint8_t flags = field ? field->flags : 0;
@@ -454,22 +478,14 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
             if (field && cache && !cls->owner && !metadata && typemap_is_shared_shape((TypeMap*)map->type)) {
                 mvp_lmd_cache_property(cache, (TypeMap*)map->type, field, ItemNull, true, nullable_initializer);
             }
-            // Lambda's Map pointer lane already represents null; preserve its immutable shape as fn_map_set does.
-            if (field && (!initializing || nullable_initializer) && field->type == &TYPE_MAP && get_type_id(value) == LMD_TYPE_NULL)
-                return map_field_store((char*)map->data + field->byte_offset, value, LMD_TYPE_NULL)
-                    ? value : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-            if (field && field->type == &TYPE_FLOAT && get_type_id(value) == LMD_TYPE_INT) {
-                // Lambda widens compatible integer writes in place instead of alternating numeric shapes.
-                map_field_store_int_as_float((char*)map->data + field->byte_offset, value);
-                return value;
-            }
             // the nominal lookup and descriptor checks also serve the physical shape write.
             if (map->map_kind != MAP_KIND_ORDERED)
-                return map_shape_set_resolved(map, name.get_string(), field, value)
+                return map_shape_set_resolved(map, name.get_string(), field, value, !initializing || nullable_initializer)
                     ? value : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
         }
         owner = Item{.map = map};
     }
+    if (binding) return inherited_binding();
     switch (operation) {
     case LMD_PROP_GET: case LMD_PROP_CALLEE:
         return mvp_lmd_property_get(owner, name, operation == LMD_PROP_CALLEE);
@@ -492,14 +508,20 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
 
 extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation,
         MvpLmdPropertyCache* cache) {
+    if (operation == LMD_PROP_GET_BINDING)
+        return mvp_lmd_class_property_impl<false, true>(owner, name, value, LMD_PROP_GET, cache, owner);
     return mvp_lmd_class_property_impl<false>(owner, name, value, operation, cache, owner);
 }
 extern "C" Item mvp_lmd_class_property_fixed(Item owner, Item name, Item value, int64_t operation,
         MvpLmdPropertyCache* cache) {
     // the compiler's closed-unit proof excludes proxies and reflective mutation before selecting this import.
+    if (operation == LMD_PROP_GET_BINDING)
+        return mvp_lmd_class_property_impl<true, true>(owner, name, value, LMD_PROP_GET, cache, owner);
     return mvp_lmd_class_property_impl<true>(owner, name, value, operation, cache, owner);
 }
 extern "C" Item mvp_lmd_property_with_receiver(Item owner, Item name, Item value, int64_t operation, Item receiver) {
+    if (operation == LMD_PROP_GET_BINDING)
+        return mvp_lmd_class_property_impl<false, true>(owner, name, value, LMD_PROP_GET, NULL, receiver);
     return mvp_lmd_class_property_impl<false>(owner, name, value, operation, NULL, receiver);
 }
 
