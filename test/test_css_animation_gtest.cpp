@@ -10,6 +10,7 @@
 #include <cstring>
 #include "../lib/strbuf.h"
 #include "../lib/tagged.hpp"
+#include "../lib/uv_loop.h"
 
 #include "../radiant/view.hpp"
 #include "../radiant/layout.hpp"
@@ -108,6 +109,49 @@ TEST(DomDocumentOwnership, HeaplessSupportContextCanResetBeforeTeardown) {
         EXPECT_EQ(root_vector_count(&js_runtime_state.realm_slots.values), 0);
     }
     runtime_cleanup(&runtime);
+}
+
+TEST(DomDocumentOwnership, CrossRuntimeTimerKeepsItsOwningDocument) {
+    struct Cleanup {
+        Runtime runtimes[2] = {};
+        DomDocument* documents[2] = {};
+        unsigned destroyed = 0;
+        ~Cleanup() {
+            for (int i = 1; i >= 0; --i) {
+                if (!runtimes[i].eval_context) continue;
+                js_runtime_context_enter_turn(&runtimes[i], runtimes[i].eval_context);
+                dom_set_document(nullptr);
+                if (documents[i]) free_document(documents[i]);
+                runtime_cleanup(&runtimes[i]);
+            }
+        }
+    } cleanup;
+    static unsigned fired;
+    fired = 0;
+    for (int i = 0; i < 2; ++i) {
+        Runtime* runtime = &cleanup.runtimes[i];
+        runtime_init(runtime);
+        ASSERT_TRUE(eval_context_transfer_thread(runtime_get_eval_context(runtime)));
+        ASSERT_FALSE(item_is_error(js_interp_execute_source(runtime, "null;", 5,
+            "timer-document-owner.js", nullptr)));
+        cleanup.documents[i] = cssom_create_owned_document(&cleanup.destroyed);
+        ASSERT_NE(cleanup.documents[i], nullptr);
+        dom_set_document(cleanup.documents[i]);
+        if (i == 0) {
+            RootFrame roots(1);
+            Rooted<Item> callback(roots, js_new_native_function([]() -> Item {
+                ++fired;
+                return ItemNull;
+            }));
+            ASSERT_FALSE(item_is_error(js_setTimeout(callback.get(), {.item = i2it(0)})));
+        }
+    }
+    // a retiring iframe's scheduler pumps timers while a different document is bound.
+    uv_sleep(2);
+    uv_run(lambda_uv_loop(), UV_RUN_NOWAIT);
+    ASSERT_EQ(fired, 1u);
+    EXPECT_EQ(context, cleanup.runtimes[0].eval_context);
+    EXPECT_EQ(dom_get_document(), cleanup.documents[0]);
 }
 
 TEST(DomDocumentOwnership, LambdaOnlyEvaluatorClosesDocumentsAtResetAndTeardown) {

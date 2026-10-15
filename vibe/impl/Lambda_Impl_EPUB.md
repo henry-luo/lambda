@@ -1,6 +1,6 @@
 # EPUB package implementation
 
-**Updated:** 2026-10-15. **Status:** initial reader implemented; broader acceptance incomplete.
+**Updated:** 2026-10-16. **Status:** initial reader implemented; broader acceptance incomplete.
 
 The public package is `lambda.doc.ebook` (D7.2.4). It loads EPUB 2/3 and
 presents chapters through Radiant. The supported profile is horizontal LTR
@@ -133,6 +133,47 @@ this presentation-only follow-up does not rerun the full Lambda gate.
 
 Desktop, settings and narrow-window native captures are under
 `temp/epub-polish-{reader,settings,narrow}.png`.
+
+## Native-window crash correction (2026-10-16)
+
+Chapter replacement reproduced a segmentation fault in
+`register_named_elements_recursive`, reached through `timer_runtime_exit`
+while `free_document` retired the previous iframe's runtime. Scheduler
+teardown pumps the shared libuv loop, which can fire a timer owned by another
+document. Timer entry captured the retiring document before switching runtime;
+exit then installed that pointer in the timer's realm after its DOM had been
+destroyed. The fix captures the restoration document after the callback's
+retained owner is bound, preserving the quiescent-handoff contract (D5.4.1).
+The CoreText font-name message also appears in passing runs.
+
+The new native `CrossRuntimeTimerKeepsItsOwningDocument` regression detects
+the wrong document binding in the earlier implementation and passes with the
+fix. All 117 CSS animation/ownership tests and six existing JS timer tests pass.
+Native-window reader navigation, search/settings, paged chapters and fixed
+layout each pass three repeated runs: 12 processes, 126 assertions, no crashes.
+The pre-fix headless reader workflow passed, so the visible-window event loop
+is necessary reproduction coverage. Evidence is in `temp/epub-crash/`:
+`reader-lldb-2.log`, `unit-before-output.log`, `unit-fixed-output.log`,
+`css-animation-tests.log`, `js-timer-tests.log`, and `native-summary.json`.
+
+`make test-lambda-baseline` now passes **7,492/7,492**, including **2,112/2,112
+input cases** and **313/313 forced-GC cases**. The earlier music-layout stress
+timeout completes successfully in this run; this does not classify its earlier
+timeout or attribute that improvement to the timer fix. The log is
+`temp/epub-crash/lambda-baseline.log`.
+
+The isolated-report Radiant rerun completes at **5,266 passing, 153 partial,
+10 failures and 1 skipped**. It passes all EPUB/focus fixtures, persistence,
+**203/203 native view cases**, **109/109 page loads**, **156/156 DOM UI cases**,
+and unchanged CSS cascade memory budgets. The failures comprise the eight
+previously recorded cases/groups above plus `timeline_navigation` and
+`timeline_resources`. Both timeline crashes reproduce three times on the
+saved pre-fix executable and three times with the fix; no timeline code or
+expectation changes are included. Reports: `radiant-baseline-isolated.log`,
+`radiant-results/test_summary.json`, and `timeline-comparison.json`, all under
+`temp/epub-crash/`. The first full Radiant attempt was invalidated by a
+concurrent build removing `lambda.exe` and shared result files; its launch
+failures are not used as qualification evidence.
 
 ## Verification
 

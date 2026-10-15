@@ -457,7 +457,6 @@ static void timer_capture_runtime(JsTimerHandle* th, const char* resource_name, 
 static bool timer_runtime_enter(JsTimerHandle* th, JsTimerRuntimeScope* scope) {
     if (!th || !scope) return false;
     memset(scope, 0, sizeof(JsTimerRuntimeScope));
-    scope->saved_doc = dom_get_document();
     if (!th->runtime_context || !th->runtime_heap || !th->runtime_name_pool ||
             ((!eval_context_matches(th->runtime_context) ||
               !js_runtime_state_thread_matches(th->runtime_context)) &&
@@ -468,6 +467,8 @@ static bool timer_runtime_enter(JsTimerHandle* th, JsTimerRuntimeScope* scope) {
         log_error("js-timer-runtime: could not bind callback owner");
         return false;
     }
+    // a quiescent handoff leaves this owner bound; never restore a foreign, possibly retiring document.
+    scope->saved_doc = dom_get_document();
     if (th->runtime_doc) {
         dom_set_document(th->runtime_doc);
         scope->doc_active = true;
