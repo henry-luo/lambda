@@ -4,6 +4,7 @@
 #include "../core/print.h"
 #include "lambda-error.h"
 #include "lambda-number-runtime.hpp"
+#include "heap_api.h"
 #include "../../lib/arraylist.hpp"
 #include "../../lib/escape.h"
 #include "../../lib/hashmap.h"
@@ -247,6 +248,24 @@ static void pdf_dictionary(PDFBuilder* builder, Map* map, int depth) {
     pdf_text(builder, " >>");
 }
 
+static void pdf_virtual_dictionary(PDFBuilder* builder, Item map, int depth) {
+    RootFrame roots(3);
+    Rooted<Item> source(roots, map), key(roots, ItemNull), value(roots, ItemNull);
+    int64_t count = source.get().vmap->vtable->count(source.get().vmap->data);
+    pdf_text(builder, "<<");
+    for (int64_t i = 0; i < count && !builder->failure; i++) {
+        key.set(source.get().vmap->vtable->key_at(source.get().vmap->data, i));
+        value.set(source.get().vmap->vtable->value_at(source.get().vmap->data, i));
+        if (get_type_id(key.get()) != LMD_TYPE_STRING &&
+                !(get_type_id(key.get()) == LMD_TYPE_SYMBOL && symbol_is_lambda_name(key.get().get_safe_symbol()))) {
+            pdf_fail(builder, "PDF dictionary keys require unqualified text names"); break;
+        }
+        pdf_text(builder, " "); pdf_name(builder, key.get().get_chars(), key.get().get_len());
+        pdf_text(builder, " "); pdf_object(builder, ItemReader(value.get().to_const()), depth + 1);
+    }
+    pdf_text(builder, " >>");
+}
+
 static void pdf_object(PDFBuilder* builder, const ItemReader& reader, int depth) {
     if (builder->failure) return;
     if (depth >= PDF_MAX_NESTING) { pdf_fail(builder, "PDF object nesting limit exceeded"); return; }
@@ -261,6 +280,7 @@ static void pdf_object(PDFBuilder* builder, const ItemReader& reader, int depth)
         }
         pdf_text(builder, "]");
     } else if (type == LMD_TYPE_MAP) pdf_dictionary(builder, item.map, depth);
+    else if (type == LMD_TYPE_VMAP) pdf_virtual_dictionary(builder, item, depth);
     else if (type == LMD_TYPE_NULL) pdf_text(builder, "null");
     else if (type == LMD_TYPE_BOOL) pdf_text(builder, item.bool_val ? "true" : "false");
     else if (type == LMD_TYPE_STRING) pdf_string(builder, item.get_safe_string());
@@ -274,6 +294,19 @@ static void pdf_object(PDFBuilder* builder, const ItemReader& reader, int depth)
         pdf_name(builder, symbol->chars, symbol->len);
     } else if (IS_NUMERIC_ID(type) && type != LMD_TYPE_COMPLEX) pdf_number(builder, item);
     else pdf_fail(builder, "Unsupported PDF object value");
+}
+
+Item pdf_encode_object(Item value) {
+    RootFrame roots(1); Rooted<Item> source(roots, value);
+    MarkOutputBuilder* base = pdf_builder_create();
+    if (!base) return err2it_or_error(err_create_heap(ERR_OUT_OF_MEMORY, "cannot allocate PDF object encoder", nullptr));
+    struct Cleanup { MarkOutputBuilder* value; ~Cleanup() { value->ops->destroy(value); } } cleanup = {base};
+    pdf_object(static_cast<PDFBuilder*>(base), ItemReader(source.get().to_const()), 0);
+    if (!base->ops->finish(base)) return base->ops->error(base);
+    const char* bytes = nullptr; size_t size = 0;
+    if (!base->ops->bytes(base, &bytes, &size)) return ItemError;
+    Binary* result = heap_binary_from_bytes(bytes, size);
+    return result ? Item{.item = x2it(result)} : ItemError;
 }
 
 static void pdf_builder_append(MarkOutputBuilder* base, Item item) {
@@ -294,7 +327,7 @@ static void pdf_builder_append(MarkOutputBuilder* base, Item item) {
         return;
     }
 
-    if (type == LMD_TYPE_MAP) {
+    if (type == LMD_TYPE_MAP || type == LMD_TYPE_VMAP) {
         pdf_text(builder, " ");
         pdf_object(builder, ItemReader(item.to_const()), 0);
         pdf_text(builder, " ");

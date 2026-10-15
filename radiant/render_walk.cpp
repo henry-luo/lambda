@@ -299,6 +299,9 @@ static void render_walk_block_finish(RenderPaintBlockDriver* ctx, ViewBlock* blo
         }
     }
 
+    if (!render_walk_aborted(backend) && backend->render_outline && !view_visibility_is_hidden(block) && !view_backface_is_hidden(block))
+        backend->render_outline(backend->ctx, block, state->x, state->y);
+
     if (p->opened_effect_group) {
         backend->end_effect_group(backend->ctx);
     }

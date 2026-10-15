@@ -3678,19 +3678,6 @@
             "icon": "\ud83e\udde0"
           },
           {
-            "source": "lib/test_pdf_writer_gtest.cpp",
-            "name": "PDF Writer Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "binary": "test_pdf_writer_gtest.exe",
-            "icon": "\ud83d\udcc4"
-          },
-          {
             "source": "test_animation_gtest.cpp",
             "name": "Animation Scheduler Tests",
             "dependencies": [

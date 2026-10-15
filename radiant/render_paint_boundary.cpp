@@ -29,7 +29,7 @@ static bool boundary_uniform_circular_radius(const BorderProp* border,
     return true;
 }
 
-static bool boundary_background_simple(const BackgroundProp* bg) {
+bool render_paint_background_is_simple(const BackgroundProp* bg) {
     if (!bg) return true;
     // other clip boxes need their shared background destination instead of a full border-box fill.
     if (bg->bg_clip && bg->bg_clip != CSS_VALUE_BORDER_BOX) return false;
@@ -124,7 +124,7 @@ static void boundary_emit_border_side(PaintList* paint_list, float x, float y,
     paint_fill_rect(paint_list, x, y, w, h, color);
 }
 
-static bool boundary_emit_styled_path(void* context, RdtPath* path, Color color, const RenderBorderStroke* stroke) {
+bool render_paint_boundary_path(void* context, RdtPath* path, Color color, const RenderBorderStroke* stroke) {
     PaintList* paint = (PaintList*)context;
     int index = paint_list_count(paint);
     if (stroke) paint_stroke_path(paint, path, color, stroke->width, stroke->cap, RDT_JOIN_MITER,
@@ -151,7 +151,7 @@ bool render_paint_boundary_emit_fragmented_simple(PaintList* paint_list, ViewBlo
     LayoutFragmentBox* first = view->layout_fragment_list();
     if (!first || !first->next) return false;
     const BoundaryProp* bound = view->boundary();
-    if (!boundary_background_simple(bound->background) ||
+    if (!render_paint_background_is_simple(bound->background) ||
         boundary_border_has_visible_side(bound->border) || boundary_has_radius(bound->border) ||
         bound->box_shadow || bound->outline ||
         (bound->border && (bound->border->border_image_url ||
@@ -184,7 +184,7 @@ bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* bound, 
         constrain_corner_radii(&bound->border->radius, width, height);
     }
     if (bound->box_shadow || bound->outline) return false;
-    if (!boundary_background_simple(bound->background)) return false;
+    if (!render_paint_background_is_simple(bound->background)) return false;
     float radius = 0.0f;
     if (!boundary_uniform_circular_radius(bound->border, width, height, &radius)) {
         return false;
@@ -242,7 +242,7 @@ bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* bound, 
         if (boundary_border_side_visible(widths[i], border->styles[i], border->colors[i])) {
             if (uniform_color && border->styles[i] == CSS_VALUE_SOLID) {
                 boundary_emit_border_side(paint_list, side_x[i], side_y[i], side_w[i], side_h[i], border->colors[i]);
-            } else if (!render_border_emit_side(rect, border, i, false, boundary_emit_styled_path, paint_list)) return false;
+            } else if (!render_border_emit_side(rect, border, i, false, render_paint_boundary_path, paint_list)) return false;
         }
     }
     return true;

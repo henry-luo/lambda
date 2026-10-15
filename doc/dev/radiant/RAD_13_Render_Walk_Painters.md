@@ -1,11 +1,13 @@
 # Radiant — Render Walk, Painters & Export
 
 > **Last verified against tree:** 2026-10-11 *(§11 text projection, selected-font SVG outlines and computed spacing; §12 selected background/marker/border images, retained marker fonts and export density; other sections retain their prior verification scope)*
+> **PDF migration verified:** 2026-10-15 (Lambda generator and native save adapter; qualification evidence in `vibe/impl/Lambda_Impl_PDF_Output_Phase2.md` §14).
+
 > **Software Gaussian blur verified:** 2026-10-13 (§6 amendment).
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers how a laid-out view tree becomes output. One shared tree walk (`render_walk.cpp`) traverses the tree exactly once and dispatches every drawing decision through a `RenderBackend` vtable; each output target (raster window/PNG/JPEG, PDF, SVG) supplies its own callback set. It describes the walker (z-order, effect groups, transforms), the raster record→lower→replay pipeline, the per-feature painters (`render_bound` and its background/border/shadow/text/image/clip/effect/filter/composite kin), the PDF backend, capability gating, output targets, and the profiler. The *IR machinery itself* — PaintIR shape, the DisplayList, record/replay internals — is [RAD_12](RAD_12_Paint_IR_Display_List.md)'s job; this doc is the walk, the painters, and the export seams.
 >
-> **Primary sources:** `radiant/render.hpp` (the `RenderBackend` vtable, `RenderWalkState`, the `RenderContext` base and `RasterRenderContext`, backend capabilities, profiling, and the `rc_*` seam), `radiant/render_walk.cpp` (the shared walker), `radiant/render_raster_walk.cpp` (raster backend + dispatcher), `radiant/render.cpp` (iframe embed), `radiant/render_block.cpp` (block paint pipeline), the per-feature painter `.cpp` files, `radiant/render_output.cpp` (targets, tiled/strip/selective/retained), `radiant/render_pdf.cpp` (`PdfRenderContext`), `radiant/render_backend_caps.cpp`, `radiant/render_profiler.cpp`, and `radiant/render_painter.cpp`.
+> **Primary sources:** `radiant/render.hpp` (the `RenderBackend` vtable, `RenderWalkState`, the `RenderContext` base and `RasterRenderContext`, backend capabilities, profiling, and the `rc_*` seam), `radiant/render_walk.cpp` (the shared walker), `radiant/render_raster_walk.cpp` (raster backend + dispatcher), `radiant/render.cpp` (iframe embed), `radiant/render_block.cpp` (block paint pipeline), the per-feature painter `.cpp` files, `radiant/render_output.cpp` (targets, tiled/strip/selective/retained), `radiant/render_pdf.cpp` (Lambda export/save adapter), `lambda/module/radiant/radiant_pdf_walk.cpp` (schema-backed callbacks), `lmd/package/pdf/output.ls` (PDF generation), `radiant/render_backend_caps.cpp`, `radiant/render_profiler.cpp`, and `radiant/render_painter.cpp`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -17,11 +19,21 @@ Radiant renders the *same* view tree that layout tagged in place ([RAD_01](RAD_0
 There are two lowering strategies behind that one walk:
 
 - **Raster** (screen, PNG, JPEG, tiled/strip PNG) records a **semantic paint IR** (`PaintList`), lowers each fragment into a **DisplayList**, then replays that list to pixels in an `ImageSurface`. The painters never touch the surface directly — they emit through the `rc_*` gateway ([§5](#5-the-rc_-paint-ir-seam)).
-- **Vector export** (PDF, SVG) walks the same tree through backend callbacks that record the *same* PaintIR and lower it **directly** to backend primitives (HPDF ops, SVG markup), bypassing the DisplayList entirely.
+- **SVG export** records PaintIR and lowers it directly to SVG markup. **PDF export** invokes pure Lambda callbacks with schema-backed view records; Lambda emits PDF operators and objects. Native helpers resolve bounded geometry, glyphs and images, and replay complex graphics/effect groups when necessary (S2.6.6v3, D7.4.4).
 
-The load-bearing seam is therefore: **the DisplayList is the raster-only intermediate; PaintIR is the shared semantic layer.** That is what keeps a PDF background rectangle and a screen background rectangle semantically the same object. SVG export is a sibling of the PDF path and is documented in [RAD_14](RAD_14_SVG_Vector_Graph.md); this doc treats it as one more backend on the same walker.
+PaintIR remains private native machinery for shared raster/SVG helpers; the PDF callback ABI exposes declared views and owned resource values rather than a document paint-command stream. SVG export is a sibling of the PDF path and is documented in [RAD_14](RAD_14_SVG_Vector_Graph.md); this doc treats it as one more backend on the same walker.
 
-<img alt="Single render walk dispatching to raster, PDF, and SVG backends" src="diagram/rad13_walk_backends.svg" width="720">
+```mermaid
+flowchart TD
+    V[Committed view edition] --> W[Shared native tree or page walker]
+    W --> R[Raster callbacks and PaintIR]
+    R --> DL[DisplayList replay]
+    W --> S[SVG callbacks and lowering]
+    W --> P[Schema-backed Lambda callbacks]
+    P --> F[Functional PDF file generation]
+    P --> H[Native geometry, image and effect helpers]
+    F --> IO[Final atomic save]
+```
 
 ---
 
@@ -29,7 +41,7 @@ The load-bearing seam is therefore: **the DisplayList is the raster-only interme
 
 ### 2.1 The vtable
 
-`struct RenderBackend` (`render.hpp`) carries `ctx`, a `RenderContext*` that points at the backend's own context — `RasterRenderContext` for raster, `SvgRenderContext` for SVG, `PdfRenderContext` for PDF. All three derive from the `RenderContext` base, which holds the state every backend's walk carries (`font`, `block`, `color`, `ui_context`); callbacks take that base and cast down to their own context. Beside `ctx` sit two tiers of callbacks. The **full-node overrides** `render_block`/`render_inline` (`render.hpp`) let a backend take over an entire node; when null, the walker recurses through the generic path. The **per-feature callbacks** are the finer-grained ones the generic walker calls itself: `render_bound`, `render_text`, `render_image`, `render_inline_svg`, `render_marker`, `render_column_rules`, the `begin/end_block_children` and `begin/end_inline_children` container wrappers, the `begin/end_effect_group` and `begin/end_transform` stacking wrappers, and `on_font_change` (`render.hpp`). All coordinates passed to callbacks are CSS logical pixels; HiDPI scaling is a raster-side concern applied later.
+`struct RenderBackend` (`render.hpp`) carries `ctx`, a `RenderContext*` that points at the backend's own context — `RasterRenderContext` for raster, `SvgRenderContext` for SVG, `PdfWalkContext` for PDF. All three derive from the `RenderContext` base, which holds the state every backend's walk carries (`font`, `block`, `color`, `ui_context`); callbacks take that base and cast down to their own context. Beside `ctx` sit two tiers of callbacks. The **full-node overrides** `render_block`/`render_inline` (`render.hpp`) let a backend take over an entire node; when null, the walker recurses through the generic path. The **per-feature callbacks** are the finer-grained ones the generic walker calls itself: `render_bound`, `render_text`, `render_image`, `render_inline_svg`, `render_marker`, `render_column_rules`, the `begin/end_block_children` and `begin/end_inline_children` container wrappers, the `begin/end_effect_group` and `begin/end_transform` stacking wrappers, and `on_font_change` (`render.hpp`). All coordinates passed to callbacks are CSS logical pixels; HiDPI scaling is a raster-side concern applied later.
 
 The walker carries `struct RenderWalkState` (`render.hpp`): the accumulated absolute `x,y`, the inherited `FontBox font` and `Color color`, and the `UiContext*`. This is the walk's cursor — position is accumulated as `state->x += block->x` on entry and restored on exit (`render_walk.cpp:138`, `:247`).
 
@@ -156,17 +168,39 @@ in `RdtVectorTest.GaussianFlatRunsPreserveEdgesChannelsAndPitches`.
 
 ## 8. PDF export
 
-PDF is a full second backend, not a raster post-process. `render_html_to_pdf` (`render_pdf.cpp:2262`) builds a headless `UiContext`, loads and lays out the HTML afresh, auto-sizes the page from `calculate_content_bounds`, then calls `render_view_tree_to_pdf` (`:2116`). That builds a `PdfRenderContext` (`:60`) — HPDF doc/page/font, page dims, an owned `PaintList`, a `PdfEffectRasterFallback` (nested effect fallback with its *own* paint list, `:53`), a `PdfPaintLoweringState` (transform/opacity stacks plus command/emitted/fallback/unsupported counters, `:37`), and a page-backdrop pool/arena/DisplayList for backdrop-filter flattening — and wires a `RenderBackend` of `pdf_cb_*` callbacks via `pdf_make_backend` (`:2095`). Crucially it then drives the **same** `render_walk_block`/`render_walk_children`.
+PDF generation is functional through the completed file value (S2.6.6v3,
+D2.6.12v3, D8.2.6v2). `render_pdf.cpp` lends an already committed
+`RenderExportSession` to the bundled `lambda.pdf.output.render_view` function
+and saves its result atomically. It reuses an active runtime, or owns a runtime
+at a quiescent host boundary; it never replaces an active evaluator (D5.4.1).
+The old HPDF renderer and `lib/pdf_writer.{c,h}` have been retired.
 
-Each PDF callback (`pdf_cb_render_bound` `:1709`, `pdf_cb_render_text` `:1820`, `pdf_cb_render_image` `:1830`, `pdf_cb_render_inline_svg` `:1842`, `pdf_cb_render_column_rules` `:1927`, the transform/effect-group wrappers `:2013-2085`, `pdf_cb_on_font_change` `:2085`) records paint IR into `ctx.paint_list` and lowers it directly to HPDF ops. Anything PDF cannot do vector-natively — gradients, effect groups, SVG subscenes — routes through `pdf_raster_fallback_*` (`:829`, `:871`, `:912`): rasterize to an ABGR surface and embed as an image. `HPDF_SaveToFile` writes the file; on success `render_html_to_pdf` logs and returns 0 (`:2354`).
+`radiant_pdf_walk.cpp` supplies the shared `RenderBackend` and secondary-page
+visitor. Pure Lambda callbacks read schema-backed properties without tree links.
+`output.ls` chooses PDF operators, allocates resource/object numbers, compresses
+streams once, measures the frozen chunks, and emits the cross-reference table,
+metadata, links, destinations, outline hierarchy and page labels. Fixed pages
+carry source boxes, rotation and placement through the same adapter.
+
+`radiant_pdf_graphic.cpp` supplies bounded geometric resources, including SVG
+fills/strokes, and owned RGB/alpha snapshots for unsupported resource geometry.
+Whole effect groups capture descendants once and use the shared native replay
+with page backdrop history. Semantic visits continue while captured child paint
+callbacks are suppressed. `PaintList` scope destruction releases owned payloads;
+backdrop recordings retain temporary image resources until their page retires.
+Glyph outlines preserve selected font appearance; searchable embedded-font text
+and ToUnicode output remain separate work.
 
 ### 8.1 Capability gating
 
 Two capability structures decide native-vs-fallback. **Runtime** `RenderBackendCaps` (`== RdtVectorCaps`, `render.hpp`), queried via `render_backend_get_caps` (`render_backend_caps.cpp:5`), reports what the *live* vector rasterizer can do (vector_paths, gradients, nested_clips, gaussian_blur, color_matrix_filters, native_text_runs, tile_offsets…). `render_backend_supports_filter_chain` (`render_backend_caps.cpp:17`) walks a `FilterProp` chain against those caps and always rejects `DROP_SHADOW`/`URL`. **Static** `RenderExportTargetCaps` (`render.hpp`) is a compile-time feature matrix for SVG vs PDF; both mark `blend_modes`/`filters`/`shadows` as false (`:49-51`, `:67-69`), which is what deterministically forces the PDF/SVG lowering into raster fallback rather than dropping the effect.
 
-### 8.2 Procedural in-memory document export
+### 8.2 Procedural export boundary
 
-`radiant.export_document(html, destination, options)` is a procedural native
+Pure `lambda.pdf.output.render(source, options)` returns the completed PDF file;
+only `output(file, destination)` performs file I/O (S2.6.6v3).
+
+`radiant.export_document(html, destination, options)` remains a procedural native
 module operation (D7.5.3/S12.1.1v2). Its required `format` selects `png`, `jpeg`,
 `svg`, or `pdf`; optional positive integral `width`/`height`, `scale`,
 `device_scale`, JPEG `quality`, `pagination`, `base_url`, and `local_resources`

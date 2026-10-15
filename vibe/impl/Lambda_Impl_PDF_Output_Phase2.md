@@ -1,9 +1,9 @@
 # PDF output phase 2 — schema-backed Radiant views
 
-> **Status:** implementation in progress, 2026-10-15. Native schema bindings and experimental continuous/paged exports are implemented. Generation is functional through the final file value; explicit output alone saves it. Pure-result demand, shared counting and expression rollback are implemented. The complete production migration is not qualified. See §10–§13 for verified scope and remaining gates.
+> **Status:** implementation in progress, 2026-10-15. Native schema bindings and continuous/paged exports are implemented. Production export now calls the Lambda generator; the HPDF-compatible writer has been retired at the user’s request. Generation is functional through the final file value; explicit output alone saves it. Pure-result demand, shared counting and expression rollback are implemented. The complete production migration is not qualified. See §10–§14 for verified scope and remaining gates.
 > **Confirmed direction:** retain shared native tree walking; pass schema-backed views and traversal context to Lambda callbacks in rendering order; Lambda reads view properties and emits PDF directly. Native helpers supply glyph outlines, image bytes and effect rasterization as needed (USER, 2026-10-14). Traversal links stay native; schema pointer access serves property/resource references.
 > **Design basis:** [PDF Output](../Lambda_Design_PDF_Output.md), [Binary Schema](../Lambda_Type_Binary_Schema.md), [Virtual Containers](../Lambda_Design_Type_Virtual.md).
-> **Formal linkage:** S11.5.1v2–S11.5.4 / D3.5.1v2–D3.5.2v2 (binary records/native references and counted spans); S2.6.6v2 / D2.6.12v2 (PDF byte destination); D3.1.1v5 (type descriptors); D7.4.1v2 / D7.4.4 / D7.4.5v2 (host boundary and virtual carriers); D2.6.8 (node identity); D4.1.4v5 / D4.5.1v4 (native storage lifetime); D5.3.3–D5.3.4 (precise roots); S12.1.1v3 (effects). PDF follow-ups remain SO48 / DO32.
+> **Formal linkage:** S11.5.1v2–S11.5.4 / D3.5.1v2–D3.5.2v2 (binary records/native references and counted spans); S2.6.6v3 / D2.6.12v3, D8.2.6v2 (functional PDF generation and byte destination); D3.1.1v5 (type descriptors); D7.4.1v2 / D7.4.4 / D7.4.5v2 (host boundary and virtual carriers); D2.6.8 (node identity); D4.1.4v5 / D4.5.1v4 (native storage lifetime); D5.3.3–D5.3.4 (precise roots); S12.1.1v3 (effects). PDF follow-ups remain SO48 / DO32.
 > **Scope:** the next implementation after the [PDF byte-output MVP](Lambda_Impl_PDF_Output_MVP.md), including the unfinished export bridge from the earlier design's phase 1 and the resource/helper work assigned there to phase 2. This numbering is independent of the binary-schema proposal's own phases.
 
 ## 1. Outcome and current starting point
@@ -957,3 +957,112 @@ so the output/ordinary-file selection obeys the C ABI on every architecture.
 The final focused rerun includes error-payload reads after allocation under
 forced GC; the aggregate Lambda result above predates this isolated ABI
 widening and final added assertion.
+
+## 14. P6 coverage and native writer retirement — 2026-10-15
+
+The user requested P6 implementation and retirement of the C++ writer. The
+production CLI, transformed-document and committed-session entry points now
+lend their selected edition to `lambda.pdf.output.render_view`; PDF generation
+remains functional through the completed file (S2.6.6v3, D2.6.12v3,
+D8.2.6v2). Only the final atomic save is procedural. This supersedes the
+production-dispatch status in §13; it does not erase that section’s failed or
+unverified qualification gates.
+
+### 14.1 Implemented coverage
+
+- Rounded and asymmetric boundaries, standard border styles, background
+  gradients/images, outlines, outer/inset shadows, text decorations, text
+  shadows and emphasis use shared native geometry/resource helpers. Deferred
+  outlines follow descendants inside their transform/effect scopes.
+- Inline and image-backed SVG retain supported path fills/strokes and clips;
+  gradients and other unsupported resource geometry use a bounded native
+  raster capture. Geomap and scene3d content use the existing native painters.
+  The Lambda ABI receives independent owned geometric/resource values, never
+  PaintCmd opcodes or a document paint stream (D7.4.4, D7.4.5v2).
+- Whole effect groups capture descendant paint once while semantic visits
+  and paired begin/end effect observations continue. Pure callbacks emit the resulting owned RGB/alpha resource; child
+  paint callbacks do not emit a second copy. Only groups that require backdrop
+  sampling receive page history. Transformed backdrop captures sample in page
+  coordinates and cancel the enclosing PDF placement when drawing the result.
+- Native snapshots retain alpha; Lambda writes Flate-compressed image streams,
+  soft masks and graphics states. Selected-font outlines preserve Unicode
+  appearance. Searchable embedded-font text/ToUnicode remains separate scope.
+- Owned document plans carry title/author/subject/keywords, links, named
+  destinations, nested outlines, labels and fixed-page boxes/rotation/placement.
+  Lambda writes their dictionaries and references. Invalid outline attributes,
+  unresolved internal destinations and forged session capabilities fail before
+  saving a completed file.
+- Manifest revision 3 adds the point scale to callback context. Traversal and
+  native helper pointers remain private. The opaque committed-session
+  capability expires after its synchronous call; active evaluators keep their
+  canonical identity (D5.4.1).
+
+Stack `PaintList` destruction now releases owned paths/images as well as its
+command storage (D4.5.1v4). Decorated shadow captures exposed the missing payload
+cleanup: the phase-6 fixture originally leaked four allocations, and passes the
+memory tracker after the ownership fix. Page backdrop recordings retain
+snapshot image owners until page retirement; callback scratch and source
+sessions retire after those native recordings (D4.1.4v5, D5.3.3–D5.3.4).
+
+### 14.2 Retirement and caller audit
+
+`radiant/render_pdf.cpp` is now a session/capability/runtime/save adapter;
+`lib/pdf_writer.c`, `lib/pdf_writer.h` and the obsolete HPDF API test target have
+been removed. Continuous, paged, selected-page and document-transform callers
+keep their entry points and use the Lambda generator, without a legacy fallback.
+The input parser’s generated-font fixture was replaced with an independent
+static three-page PDF; input tests no longer link the retired writer. Existing
+export tests now inspect compressed content, numeric page boxes and isolated
+alpha rather than requiring the old writer’s whitespace, inline-image spelling
+or graphics-state names.
+
+### 14.3 Qualification evidence
+
+Verification ran in `temp/pdf_p6_verify`, a HEAD snapshot overlaid with only
+this PDF change, because concurrent DocBook/Wiki edits temporarily left the
+shared input archive with unresolved Wiki symbols. Dependency-identical objects
+were reused after checking source/header contents; native archives were rebuilt.
+The working checkout also builds successfully. No unrelated edits were reverted.
+
+- Lambda/input baseline: **7,428/7,428** (2,112 input; 5,316 runtime, including
+  1,542 script/tier cases and 313 MIR forced-GC cases). The first aggregate
+  stopped at its 180-second idle limit in the music layout case; that case
+  independently passed in 224 seconds. The unchanged suite then passed with
+  the documented `LAMBDA_TEST_IDLE_TIMEOUT=600` setting.
+- Native schema/PDF-builder gate: **19/19**; PDF input parser: **26/26**;
+  focused paint/ownership checks: **11/11**. The Radiant aggregate’s full
+  display-list component also passed **84/84**.
+- All six PDF output fixtures passed under forced collection, poisoned freed
+  memory and disabled MIR caching in interpreter/JIT/auto modes: **18/18**.
+  The phase-6 memory-tracker run reports no leaks.
+- Independent PDF checks validate classic xref offsets, compressed stream
+  extents, Unicode metadata, outline parent/child links, URI/internal links,
+  vector SVG strokes and fourteen Poppler raster samples. Nested effect event
+  pairs retain their group opacity and restore the enclosing value.
+- Focused CLI/export gate: **15/16**. CSS sheets, fixed source boxes/quarter
+  turns/vector preservation, 53-page import/selection/failure preservation,
+  source labels, glyph outlines, SVG vectors, filter/alpha/shadow/backdrop/blend
+  resources, gradients, isolated opacity and link visibility pass.
+  `PatternedBodyColumnRulesRemainVectorAndMatchIndependentPdfRasters` fails:
+  the native RPD model already has one physical page before the Lambda package
+  runs, where the fixture expects seven. This pre-export layout failure remains
+  visible; its assertion was retained.
+- Full Radiant remains **unqualified**: layout 3,143/3,294, snapshots 51/52,
+  UI automation 576/580; view-reuse and cascade-memory runners also fail.
+  Scene/view workers repeatedly reach their 120-second idle limit with the
+  system-font-service errors also seen in §13. The aggregate was stopped at
+  480 seconds. These failures were not masked or routed to the retired writer.
+- The position/dimension cast lint and `git diff --check` pass. Production
+  source/caller audit and executable symbol audit find no HPDF writer calls
+  or symbols.
+
+The new golden fixtures cover functional generation, metadata/resources, invalid semantics,
+unforgeable native handles and preservation of an existing destination. The
+independent checker validates object offsets and compressed stream extents,
+Unicode metadata and nested outlines, URI/internal links, SVG stroke geometry,
+and fourteen Poppler pixel samples, including overlapping opacity, inset
+shadows, deferred outlines and transformed backdrop blending.
+
+Broader platform/release and full Radiant qualification remain explicit P7
+work. A failing layout or import fixture is not repaired by falling back to the
+retired writer or by weakening its geometry/visual assertion.

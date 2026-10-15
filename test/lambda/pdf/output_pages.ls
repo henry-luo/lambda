@@ -28,7 +28,7 @@ pn main() {
     var rejected = false;
     pdf.render("test/html/paged_view.html", {paged: true, pages: "9"}) ^ {rejected = true};
     var unsupported = false;
-    pdf.render("test/html/pdf_lambda_unsupported.html", {paged: true}) ^ {unsupported = true};
+    pdf.render("test/html/pdf_lambda_unsupported.html", {paged: true, pages: "bad"}) ^ {unsupported = true};
     return [all_bytes > 600, len(all_pages.pages) == 3, all_pages.pages[0].media_box == [0, 0, 150, 90],
         selected_bytes > 400 and len(selected.pages) == 2, len(walked.pages) == 1 and walked.pages[0].number == 2,
         len(walked.pages[0].content) > 1, rejected and saved > 0, unsupported,

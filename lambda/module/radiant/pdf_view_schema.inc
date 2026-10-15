@@ -251,6 +251,7 @@ static_assert(BinarySchemaScalarKind<decltype(((PdfWalkFrame*)nullptr)->height)>
 static_assert(BinarySchemaScalarKind<decltype(((PdfWalkFrame*)nullptr)->page_number)>::kind == BINARY_FIELD_U32, "binary binding scalar representation changed");
 static_assert(BinarySchemaScalarKind<decltype(((PdfWalkFrame*)nullptr)->page_count)>::kind == BINARY_FIELD_U32, "binary binding scalar representation changed");
 static_assert(BinarySchemaSameType<decltype(((PdfWalkFrame*)nullptr)->page_label), Item>::value, "binary boxed field representation changed");
+static_assert(BinarySchemaScalarKind<decltype(((PdfWalkFrame*)nullptr)->point_scale)>::kind == BINARY_FIELD_F32, "binary binding scalar representation changed");
 const BinarySchemaField frame_schema_fields[] = {
     BINARY_SCHEMA_MEMBER(PdfWalkFrame, x, BINARY_FIELD_F32),
     BINARY_SCHEMA_MEMBER(PdfWalkFrame, y, BINARY_FIELD_F32),
@@ -270,6 +271,7 @@ const BinarySchemaField frame_schema_fields[] = {
     BINARY_SCHEMA_MEMBER(PdfWalkFrame, page_number, BINARY_FIELD_U32),
     BINARY_SCHEMA_MEMBER(PdfWalkFrame, page_count, BINARY_FIELD_U32),
     BINARY_SCHEMA_ITEM(PdfWalkFrame, page_label, &TYPE_STRING, true),
+    BINARY_SCHEMA_MEMBER(PdfWalkFrame, point_scale, BINARY_FIELD_F32),
 };
 const BinarySchema frame_schema = {"PdfWalkFrame", sizeof(PdfWalkFrame), frame_schema_fields,
     sizeof(frame_schema_fields) / sizeof(frame_schema_fields[0]), BINARY_SCHEMA_NATIVE,

@@ -1764,6 +1764,7 @@ typedef struct PaintCmd {
 
 struct PaintList : lam::ArrayList<PaintCmd> {
     PaintList() : ArrayList(MEM_CAT_RENDER, 0) {}
+    ~PaintList();
 #ifdef __cplusplus
     void init(Arena* backing_arena);
     void clear();
@@ -2252,9 +2253,12 @@ struct RenderBackend {
     // ── Column rules ───────────────────────────────────────────────────
     void (*render_column_rules)(RenderContext* ctx, ViewBlock* block, float abs_x, float abs_y);
 
+    // deferred outlines follow descendants while remaining inside the box effect/transform scope.
+    void (*render_outline)(RenderContext*, ViewBlock*, float, float);
+
     // ── Font setup ─────────────────────────────────────────────────────
     // Called when a view node specifies a font. Backend can update its
-    // font state (e.g. PDF needs to call HPDF_Page_SetFontAndSize).
+    // font state for an exporter that caches resolved faces.
     void (*on_font_change)(RenderContext* ctx, FontProp* font_prop);
     // fallible script backends stop new visits while native scope cleanup unwinds.
     bool (*should_abort)(RenderContext* ctx) = nullptr;
@@ -3067,6 +3071,8 @@ bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
                                        float x, float y);
 bool render_paint_boundary_emit_fragmented_simple(PaintList* paint_list, ViewBlock* view, Rect rect);
 bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* boundary, Rect rect);
+bool render_paint_background_is_simple(const BackgroundProp*);
+bool render_paint_boundary_emit_full(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect);
 bool render_border_is_uniform_solid(const BorderProp* border);
 bool render_paint_boundary_emit_solid_border(PaintList* paint_list, BorderProp* border, Rect rect);
 bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* view,
@@ -3977,9 +3983,13 @@ bool render_memory_allow_allocation(MemContext* memory, size_t bytes);
 bool render_surface_allocation_size(float width, float height, size_t* bytes);
 ImageSurface* render_surface_create_budgeted(MemContext* memory, float width, float height);
 // owned raster helper result; the caller destroys the surface after copying/encoding it.
+// Capture one existing raster painter as an owned, logically placed resource.
+bool render_paint_raster_resource(PaintList*, UiContext*, const RenderContext*,
+    void (*painter)(RasterRenderContext*, void*), void* source);
+bool render_paint_inset_shadows(PaintList*, UiContext*, ViewBlock*, Rect);
 bool render_paint_snapshot(const PaintList* paint, Bound bounds, float viewport_width,
     float viewport_height, float density, ImageSurface** surface, Rect* placement,
-    DisplayList* backdrop = nullptr);
+    DisplayList* backdrop = nullptr, const RdtMatrix* transform = nullptr);
 
 // ===== render_background.hpp =====
 // Background rendering functions
@@ -4051,6 +4061,7 @@ struct RenderBorderStroke {
     int dash_count;
 };
 // the callback takes ownership of path, including on failure (D4.5.1v4).
+bool render_paint_boundary_path(void*, RdtPath*, Color, const RenderBorderStroke*);
 using RenderBorderPathCallback = bool (*)(void* context, RdtPath* path, Color color, const RenderBorderStroke* stroke);
 bool render_border_style_supported(CssEnum style);
 bool render_border_emit_side(Rect rect, const BorderProp* border, size_t side, bool rounded,
@@ -4064,6 +4075,8 @@ void resolve_border_radius_percentages(Corner* radius, float width, float height
 
 // Outline rendering
 void render_outline(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
+bool render_outline_emit(Rect rect, const OutlineProp* outline, const BorderProp* border,
+    RenderBorderPathCallback emit, void* context);
 
 // ===== render_columns.hpp =====
 struct RasterRenderContext;

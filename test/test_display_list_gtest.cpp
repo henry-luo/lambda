@@ -137,6 +137,23 @@ TEST(PaintListTest, OwnershipPayloadsAreReleasedByClearAndDestroy) {
     EXPECT_EQ(destroy_list.capacity(), 0u);
 }
 
+TEST(PaintListTest, StackScopeReleasesOwnedSnapshotsExactlyOnce) {
+    ImageSurface surface = {};
+    auto release = [](ImageSurface* image) { image->width++; };
+    {
+        PaintList recording;
+        paint_draw_image_resource(&recording, &surface, 0, 0, 10, 10, 255, nullptr, release);
+        ASSERT_EQ(recording.size(), 1u);
+    }
+    EXPECT_EQ(surface.width, 1);
+    {
+        PaintList recording;
+        paint_draw_image_resource(&recording, &surface, 0, 0, 10, 10, 255, nullptr, release);
+        paint_list_destroy(&recording);
+    }
+    EXPECT_EQ(surface.width, 2);
+}
+
 TEST_F(DisplayListTest, BoundsIntersectorPreservesReplayStateCommands) {
     DisplayItem* clip = dl_alloc_item(&dl);
     ASSERT_NE(clip, nullptr);

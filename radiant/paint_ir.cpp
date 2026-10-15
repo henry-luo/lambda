@@ -18,6 +18,9 @@
 
 #define PAINT_LIST_INITIAL_CAPACITY 1024
 
+// Stack recordings own path/image payloads as well as their command storage.
+PaintList::~PaintList() { paint_list_clear(this); }
+
 void paint_svg_append_cjk_dx(StrBuf* out, const char* text, int text_len,
                              float cjk_spacing, CssEnum mode) {
     if (!out || !text || text_len <= 0 || cjk_spacing <= 0.0f) return;

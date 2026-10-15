@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "revision": 2,
+  "revision": 3,
   "outputs": {
     "cpp": "lambda/module/radiant/pdf_view_schema.inc",
     "lambda": "lmd/package/pdf/view_schema.ls",
@@ -499,6 +499,10 @@
         {
           "name": "page_label",
           "type": "string?"
+        },
+        {
+          "name": "point_scale",
+          "type": "f32"
         }
       ]
     }

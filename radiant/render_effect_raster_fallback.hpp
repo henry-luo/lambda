@@ -92,7 +92,8 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
                                                       bool opaque_background,
                                                       float density,
                                                       RenderEffectRasterImage* out,
-                                                      const char* log_prefix) {
+                                                      const char* log_prefix,
+                                                      const RdtMatrix* placement = nullptr) {
     if (!paint_list || !out) return false;
     memset(out, 0, sizeof(RenderEffectRasterImage));
 
@@ -100,6 +101,8 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
     Bound capture = bounds ? *bounds : Bound{0.0f, 0.0f, viewport_width, viewport_height};
     if (capture.right <= capture.left || capture.bottom <= capture.top)
         capture = Bound{0.0f, 0.0f, viewport_width, viewport_height};
+    if (placement && !rdt_matrix_project_rect_bounds(placement, capture.left, capture.top,
+            capture.right, capture.bottom, &capture.left, &capture.top, &capture.right, &capture.bottom)) return false;
     capture = Bound{floorf(capture.left * density), floorf(capture.top * density),
         ceilf(capture.right * density), ceilf(capture.bottom * density)};
     OffscreenRenderArenas arenas;
@@ -111,6 +114,7 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
     DisplayList dl = {};
     dl_init(&dl, arenas.list_arena);
     RdtMatrix scale = rdt_matrix_scale(density, density);
+    if (placement) scale = rdt_matrix_multiply(&scale, placement);
     // export PaintIR is logical; replay and filter regions use the page's physical density once.
     paint_ir_lower_raster_transformed(paint_list, &dl, &scale);
     Bound ink = dl_content_bounds(&dl);

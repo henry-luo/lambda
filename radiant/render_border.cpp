@@ -634,66 +634,64 @@ static void render_rounded_border(RasterRenderContext* rdcon, ViewBlock* view, R
  * Outline is drawn outside the border-box, offset by outline-offset.
  * Does not affect layout. Uses border-radius if present.
  */
+bool render_outline_emit(Rect rect, const OutlineProp* outline, const BorderProp* border,
+        RenderBorderPathCallback emit, void* context) {
+    if (!outline || outline->width <= 0 || !outline->color.a ||
+            outline->style == CSS_VALUE_NONE || outline->style == CSS_VALUE_HIDDEN) return true;
+    float width = outline->width;
+    float expand = width * 0.5f + outline->offset;
+    Rect outside = {rect.x - expand, rect.y - expand, rect.width + expand * 2, rect.height + expand * 2};
+    RdtPath* path;
+    if (border && corner_has_radius(&border->radius)) {
+        Corner radius = radiant_corner_expand(&border->radius, expand, expand);
+        constrain_corner_radii(&radius, outside.width, outside.height);
+        path = render_path_create_rounded_rect(outside, &radius);
+    } else {
+        path = rdt_path_new();
+        if (path) rdt_path_add_rect(path, outside.x, outside.y, outside.width, outside.height, 0, 0);
+    }
+    if (!path) return false;
+    RenderBorderStroke stroke = {};
+    stroke.width = width;
+    stroke.dash_count = render_border_dash_pattern(outline->style, width, stroke.dashes, &stroke.cap);
+    if (stroke.dash_count > 0 && outline->style == CSS_VALUE_DASHED) {
+        stroke.dashes[0] = width * 2.5f; stroke.dashes[1] = width * 2;
+    }
+    stroke.phase = stroke.dash_count > 0 ? width * 0.75f : 0;
+    return emit(context, path, outline->color, &stroke);
+}
+
 void render_outline(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->boundary()->outline) return;
+    OutlineProp outline = *view->boundary()->outline;
+    outline.width *= rdcon->raster_scale; outline.offset *= rdcon->raster_scale;
+    BorderProp border = {};
+    const BorderProp* input = view->boundary()->border;
+    if (input) { border = *input; border.radius = radiant_corner_scaled(&input->radius, rdcon->raster_scale); }
+    // all export backends use the raster painter's original outline geometry.
+    render_outline_emit(rect, &outline, input ? &border : nullptr, border_raster_emit_path, rdcon);
+}
 
-    OutlineProp* outline = view->boundary()->outline;
-    if (outline->width <= 0 || outline->style == CSS_VALUE_NONE || outline->style == CSS_VALUE_HIDDEN) return;
-    if (outline->color.a == 0) return;
-
-    float s = rdcon->raster_scale;
-    float w = outline->width * s;
-    float offset = outline->offset * s;
-
-    // Outline rect is expanded outward from border-box by (outline-width/2 + outline-offset)
-    float expand = w * 0.5f + offset;
-    Rect outline_rect;
-    outline_rect.x = rect.x - expand;
-    outline_rect.y = rect.y - expand;
-    outline_rect.width = rect.width + expand * 2;
-    outline_rect.height = rect.height + expand * 2;
-
-    const RdtMatrix* xform = render_state_current_transform(rdcon);
-    RdtPath* p = nullptr;
-
-    // If border-radius exists, use rounded outline path
-    bool has_radius = view->boundary_mut()->border && corner_has_radius(&view->boundary_mut()->border->radius);
-
-    if (has_radius) {
-        BorderProp* border = view->boundary()->border;
-        Corner scaled_radius = radiant_corner_scaled(&border->radius, s);
-        Corner outline_radius = radiant_corner_expand(&scaled_radius, expand, expand);
-        constrain_corner_radii(&outline_radius, outline_rect.width, outline_rect.height);
-        p = render_path_create_rounded_rect(outline_rect, &outline_radius);
-    } else {
-        p = rdt_path_new();
-        rdt_path_add_rect(p, outline_rect.x, outline_rect.y,
-            outline_rect.width, outline_rect.height, 0, 0);
+bool render_paint_boundary_emit_full(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect) {
+    if (!paint || !view) return false;
+    if (!view->bound) return true;
+    if (render_paint_boundary_emit_simple(paint, view, rect.x, rect.y)) return true;
+    const BoundaryProp* boundary = view->boundary();
+    if (boundary->box_shadow) render_paint_boundary_emit_outer_shadows(paint, view, rect.x, rect.y);
+    if (boundary->background) render_paint_background(paint, ui, view, rect, RENDER_EXPORT_TARGET_PDF);
+    if (!render_paint_inset_shadows(paint, ui, view, rect)) return false;
+    BorderProp* border = boundary->border;
+    bool image = border && render_paint_border_image(paint, ui, border, rect);
+    if (border && !image) {
+        BorderProp normalized = *border;
+        resolve_border_radius_percentages(&normalized.radius, rect.width, rect.height);
+        constrain_corner_radii(&normalized.radius, rect.width, rect.height);
+        for (size_t side = 0; side < 4; side++) {
+            if (normalized.width.values[side] <= 0 || !normalized.colors[side].a ||
+                normalized.styles[side] == CSS_VALUE_NONE || normalized.styles[side] == CSS_VALUE_HIDDEN) continue;
+            if (!render_border_emit_side(rect, &normalized, side, radiant_corner_has_radius(&normalized.radius),
+                    render_paint_boundary_path, paint)) return false;
+        }
     }
-
-    float dash[2];
-    RdtStrokeCap cap;
-    int dash_count = render_border_dash_pattern(outline->style, w, dash, &cap);
-
-    // For outlines, adjust dash/gap to match browser proportions.
-    // Browser uses approximately dash=2.5w, gap=2w for dashed outlines.
-    // (Borders use per-side rendering with adjusted gaps, but outlines stroke
-    // the full perimeter as a single path.)
-    if (dash_count > 0 && outline->style == CSS_VALUE_DASHED) {
-        dash[0] = w * 2.5f;
-        dash[1] = w * 2;
-    }
-
-    RdtPath* clip = render_path_create_clip_path(rdcon);
-    rc_push_clip(rdcon, clip, NULL);
-    float phase = (dash_count > 0) ? w * 0.75f : 0;
-    rc_stroke_path(rdcon, p, outline->color, w, cap, RDT_JOIN_MITER,
-                    dash_count > 0 ? dash : NULL, dash_count, xform, phase);
-    rc_pop_clip(rdcon);
-    rdt_path_free(clip);
-    rdt_path_free(p);
-
-    log_debug("[OUTLINE] Rendered outline: width=%.1f offset=%.1f style=%d color=#%02x%02x%02x%02x",
-              outline->width, outline->offset, outline->style,
-              outline->color.r, outline->color.g, outline->color.b, outline->color.a);
+    return true;
 }

@@ -29,16 +29,50 @@
 static RenderPool* g_render_pool = nullptr;
 static pthread_mutex_t g_render_pool_lock = PTHREAD_MUTEX_INITIALIZER;
 
+bool render_paint_raster_resource(PaintList* destination, UiContext* ui, const RenderContext* source,
+        void (*painter)(RasterRenderContext*, void*), void* data) {
+    if (!destination || !ui || !source || !painter) return false;
+    OffscreenRenderArenas arenas;
+    if (!arenas.init("render.resource", "render.resource.list", "render.resource.scratch")) return false;
+    DisplayList display = {}; dl_init(&display, arenas.list_arena);
+    PaintList paint;
+    RasterRenderContext raster = {};
+    static_cast<RenderContext&>(raster) = *source;
+    raster.ui_context = lam::up(ui);
+    float density = ui_context_raster_scale(ui);
+    raster.raster_scale = density;
+    raster.block.x *= density; raster.block.y *= density;
+    raster.block.clip = {source->block.clip.left * density, source->block.clip.top * density,
+        source->block.clip.right * density, source->block.clip.bottom * density};
+    raster.dl = lam::up(&display); raster.paint_list = lam::up(&paint);
+    scratch_init(&raster.scratch, arenas.scratch_arena);
+    painter(&raster, data);
+    Bound ink = dl_content_bounds(&display);
+    bool ok = !raster.paint_failed && dl_validate_or_log(&display, "bounded raster resource");
+    ImageSurface* image = ok && ink.right > ink.left && ink.bottom > ink.top
+        ? render_display_list_snapshot(&display, mem_context_process(MEM_ROLE_RENDER), ink, density, Color{}) : nullptr;
+    if (image) {
+        size_t before = destination->size();
+        paint_draw_image_resource(destination, image, ink.left / density, ink.top / density,
+            (ink.right - ink.left) / density, (ink.bottom - ink.top) / density,
+            255, nullptr, image_surface_destroy);
+        ok = destination->size() == before + 1;
+        if (!ok) image_surface_destroy(image);
+    } else if (display.item_count()) ok = false;
+    scratch_release(&raster.scratch); dl_destroy(&display); arenas.destroy();
+    return ok;
+}
+
 bool render_paint_snapshot(const PaintList* paint, Bound bounds, float viewport_width,
         float viewport_height, float density, ImageSurface** surface, Rect* placement,
-        DisplayList* backdrop) {
+        DisplayList* backdrop, const RdtMatrix* transform) {
     if (!surface || !placement) return false;
     *surface = nullptr;
     render_svg_inline_register_paint_ir_lowerers();
     paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
     RenderEffectRasterImage image = {};
     if (!render_effect_rasterize_paint_list(paint, backdrop, &bounds, viewport_width,
-            viewport_height, false, density, &image, "PDF_SCHEMA_RASTER")) return false;
+            viewport_height, false, density, &image, "PDF_SCHEMA_RASTER", transform)) return false;
     *surface = image.surface;
     *placement = {image.x, image.y, image.width, image.height};
     return true;

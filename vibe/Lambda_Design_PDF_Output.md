@@ -130,18 +130,19 @@ in §5.3; the draft must not infer that contract from buffer storage alone.
 
 ## 3. Current implementation and migration boundary
 
-The current file export dispatch calls `render_html_to_pdf()` or its document
-transform counterpart. A `RenderExportSession` loads and lays out the
-document; `render_pdf.cpp` walks the view tree through the shared
-`RenderBackend`, lowers PaintIR to `HPDF_*` calls, and saves the document.
-Those calls are implemented by Lambda's own `lib/pdf_writer.c`, whose
-header describes a libharu-compatible subset.
+The production file dispatch retains `render_html_to_pdf()` and its document
+transform counterpart as native session/save adapters. They lend the committed
+view to `lambda.pdf.output.render_view`, which generates a completed PDF file
+functionally (S2.6.6v3, D2.6.12v3, D8.2.6v2). `radiant_pdf_walk.cpp` invokes
+Lambda callbacks through the shared walker and ordered page visitor. Native
+helpers return bounded geometry or owned image/alpha resources; PaintCmd is
+not a Lambda document ABI (D7.4.4, D7.4.5v2).
 
-The existing exporter supports continuous-view and explicit paged output.
-It writes text with standard PDF fonts and uses raster fallbacks for gradients, SVG subscenes,
-and effects. The writer emits PDF 1.4 and currently records compression
-settings without compressing streams. These are implementation observations,
-not language rulings or a target specification for future PDF features.
+`render_pdf.cpp` now contains no PDF operator/object writer. The retired
+`lib/pdf_writer.c` and its HPDF-compatible API/header have been removed after
+caller migration. Streams use real Flate compression; Lambda writes metadata,
+links, destinations, outlines and page labels. Glyph outlines preserve selected
+font appearance; searchable font embedding/ToUnicode is separate scope.
 
 | Responsibility | Proposed owner |
 |---|---|
@@ -156,10 +157,10 @@ not language rulings or a target specification for future PDF features.
 | Append length-delimited bytes and finalize the file value | PDFBuilder through a reusable virtual-list builder interface |
 | Write completed bytes to a destination | Existing procedural I/O or CLI boundary |
 
-The eventual migration succeeds when the production PDF export path no longer
-calls `HPDF_*` or depends on `lib/pdf_writer.c`. Phase 1 proves the new path on
-its declared subset. Phase 2 decides helper-dependent cases before full
-replacement; their absence is not a reason to silently omit rendered content.
+The native writer retirement is implemented. Phase 2 qualification remains
+recorded in `Lambda_Impl_PDF_Output_Phase2.md` §14; known layout failures and
+unverified platform/release gates remain visible. Helper failures abort before
+the final atomic save; rendered content is not silently omitted.
 
 ## 4. Exporting the view tree through Velmt
 

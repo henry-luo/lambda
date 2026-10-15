@@ -17,7 +17,7 @@
  * Test data sources:
  *   - Static fixtures under test/input/   (pre-existing PDFs that
  *     already exercise indirect-object refs and multi-page kid lists)
- *   - Generated multi-page PDF written via libharu into temp/ in SetUp,
+ *   - Static three-page PDF with a standard Helvetica resource,
  *     giving the test a fully deterministic page count + media-box assertion
  *     even if the static fixtures change.
  */
@@ -42,9 +42,6 @@
 #include "../lib/url.h"
 #include "../lib/strbuf.h"
 
-extern "C" {
-#include "../lib/pdf_writer.h"
-}
 
 /* ══════════════════════════════════════════════════════════════════════
  * Helpers
@@ -59,8 +56,8 @@ static const char* PDF_FIXTURE_SIMPLE   = "test/input/test.pdf";
 static const char* PDF_FIXTURE_ADVANCED = "test/input/advanced_test.pdf";
 static const char* PDF_FIXTURE_INVOICE  = "test/input/invoice.pdf";
 
-// Generated fixture path (3-page PDF written in SetUp).
-static const char* PDF_GEN_3PAGE        = "temp/test_input_pdf_3page.pdf";
+// Independent three-page fixture with distinct sheet geometry and font resources.
+static const char* PDF_FIXTURE_THREEPAGE        = "test/input/pdf_three_pages.pdf";
 
 /** Read a file fully into a malloc'd buffer. Returns NULL on failure.
  *  Sets *out_len. The buffer is null-terminated for safety, but the parser
@@ -120,33 +117,6 @@ static MapReader find_indirect_object(ArrayReader objs, int64_t object_num) {
     return MapReader();
 }
 
-/** Build a 3-page PDF with text on each page using libharu. The text
- *  forces libharu to emit a /Font dict on each page's resources. */
-static void generate_3page_pdf(const char* path) {
-    HPDF_Doc doc = HPDF_New(NULL, NULL);
-    if (!doc) return;
-    HPDF_SetCompressionMode(doc, HPDF_COMP_NONE);  // keep parser happy
-
-    HPDF_Font font = HPDF_GetFont(doc, "Helvetica", NULL);
-
-    for (int i = 1; i <= 3; i++) {
-        HPDF_Page page = HPDF_AddPage(doc);
-        // Use distinct dimensions per page so we can assert per-page
-        // media_box propagation through the postprocess.
-        HPDF_Page_SetWidth(page,  500.0f + (float)i * 10.0f);
-        HPDF_Page_SetHeight(page, 700.0f + (float)i * 10.0f);
-        HPDF_Page_SetFontAndSize(page, font, 12.0f);
-        HPDF_Page_BeginText(page);
-        char label[64];
-        snprintf(label, sizeof(label), "Page %d body text", i);
-        HPDF_Page_TextOut(page, 100.0f, 600.0f, label);
-        HPDF_Page_EndText(page);
-    }
-
-    HPDF_SaveToFile(doc, path);
-    HPDF_Free(doc);
-}
-
 /* ══════════════════════════════════════════════════════════════════════
  * Fixture
  * ══════════════════════════════════════════════════════════════════════ */
@@ -156,12 +126,8 @@ protected:
     static void SetUpTestSuite() {
         log_init(NULL);
         ensure_temp_dir();
-        generate_3page_pdf(PDF_GEN_3PAGE);
     }
 
-    static void TearDownTestSuite() {
-        unlink(PDF_GEN_3PAGE);
-    }
 };
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -337,17 +303,17 @@ TEST_F(InputPdfTest, MultiPageFixtureFlattensToTwoPages) {
 }
 
 TEST_F(InputPdfTest, GeneratedPdfFlattensToThreePages) {
-    Input* input = parse_pdf_file(PDF_GEN_3PAGE);
+    Input* input = parse_pdf_file(PDF_FIXTURE_THREEPAGE);
     ASSERT_NE(input, nullptr);
     MapReader root = MapReader::fromItem(input->root);
     ASSERT_TRUE(root.has("pages"));
     ArrayReader pages = root.get("pages").asArray();
-    EXPECT_EQ(pages.length(), 3) << "libharu emitted 3 /Page kids; flatten "
+    EXPECT_EQ(pages.length(), 3) << "the fixture contains 3 /Page kids; flatten "
                                     "should expose all of them";
 }
 
 TEST_F(InputPdfTest, FlattenedPageCarriesType) {
-    Input* input = parse_pdf_file(PDF_GEN_3PAGE);
+    Input* input = parse_pdf_file(PDF_FIXTURE_THREEPAGE);
     ASSERT_NE(input, nullptr);
     MapReader root = MapReader::fromItem(input->root);
     ArrayReader pages = root.get("pages").asArray();
@@ -415,12 +381,12 @@ TEST_F(InputPdfTest, InvalidPageLabelTreesDiagnoseBeforePublishingAnyLabelSet) {
 }
 
 TEST_F(InputPdfTest, FlattenedPageInheritsMediaBox) {
-    Input* input = parse_pdf_file(PDF_GEN_3PAGE);
+    Input* input = parse_pdf_file(PDF_FIXTURE_THREEPAGE);
     ASSERT_NE(input, nullptr);
     MapReader root = MapReader::fromItem(input->root);
     ArrayReader pages = root.get("pages").asArray();
     ASSERT_EQ(pages.length(), 3);
-    // libharu sets MediaBox on each /Page directly, not inherited from /Pages,
+    // the fixture sets MediaBox on each /Page directly, not inherited from /Pages,
     // but either way the flattener must surface it on each entry.
     for (int64_t i = 0; i < pages.length(); i++) {
         MapReader p = pages.get(i).asMap();
@@ -430,7 +396,7 @@ TEST_F(InputPdfTest, FlattenedPageInheritsMediaBox) {
 }
 
 TEST_F(InputPdfTest, FlattenedPageInheritsResources) {
-    Input* input = parse_pdf_file(PDF_GEN_3PAGE);
+    Input* input = parse_pdf_file(PDF_FIXTURE_THREEPAGE);
     ASSERT_NE(input, nullptr);
     MapReader root = MapReader::fromItem(input->root);
     ArrayReader pages = root.get("pages").asArray();
@@ -446,7 +412,7 @@ TEST_F(InputPdfTest, FlattenedPageInheritsResources) {
 }
 
 TEST_F(InputPdfTest, FlattenedPageRetainsOriginalDict) {
-    Input* input = parse_pdf_file(PDF_GEN_3PAGE);
+    Input* input = parse_pdf_file(PDF_FIXTURE_THREEPAGE);
     ASSERT_NE(input, nullptr);
     MapReader root = MapReader::fromItem(input->root);
     ArrayReader pages = root.get("pages").asArray();
