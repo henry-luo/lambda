@@ -1,5 +1,6 @@
 #include "css_style_node.hpp"
 #include "css_style.hpp"
+#include "css_parser.hpp"
 #include "../../../lib/string.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -992,6 +993,21 @@ CssDeclaration* style_tree_get_component_declaration(StyleTree* style_tree,
     const CssPropertyCode* sources, size_t source_count) {
     if (!style_tree || !style_tree->tree || !sources || !source_count) return NULL;
     return style_tree_best_property_candidate(style_tree, sources, source_count, NULL, NULL);
+}
+
+CssDeclaration* style_tree_get_property_declaration(StyleTree* tree, CssPropertyCode property) {
+    if (!tree || property <= 0 || property >= CSS_PROPERTY_CUSTOM) return NULL;
+    CssPropertyCode sources[CSS_PROPERTY_COUNT];
+    size_t count = 0;
+    CssPropertyCode primary = css_property_cascade_shorthand(property);
+    const char* name = css_property_spelling_from_code(property);
+    for (int index = 1; index < CSS_PROPERTY_CUSTOM; index++) {
+        CssPropertyCode source = (CssPropertyCode)index;
+        bool all = source == CSS_PROPERTY_ALL && property != CSS_PROPERTY_DIRECTION && property != CSS_PROPERTY_UNICODE_BIDI;
+        if (source == property || source == primary || all || css_property_shorthand_contains(source, property) ||
+            (source == CSS_PROPERTY_FONT && css_font_shorthand_contains_property(name))) sources[count++] = source;
+    }
+    return style_tree_get_component_declaration(tree, sources, count);
 }
 
 // a conservative filter rejects absent properties in immutable canonical trees;

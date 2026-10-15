@@ -5154,6 +5154,8 @@ void recompute_span_bounding_box_after_line_layout(
 void layout_apply_simple_ruby_column_geometry(ViewSpan* ruby);
 bool ruby_has_text_box_trim_ancestor(const ViewSpan* ruby, uint8_t trim);
 bool inline_span_has_multiple_line_fragments(ViewSpan* span);
+typedef bool (*LayoutInlineFragmentFn)(void*, RdtLogicalRect, bool first, bool last, float offset, float extent);
+bool layout_inline_visit_fragments(ViewSpan* span, LayoutInlineFragmentFn visitor, void* context);
 bool layout_inline_span_has_in_flow_block_child(ViewSpan* span,
                                                 bool include_inline_table = false);
 bool layout_inline_child_is_block_split(DomNode* node);

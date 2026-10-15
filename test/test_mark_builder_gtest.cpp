@@ -2077,6 +2077,8 @@ TEST(TransitionTreeKeyIdentityTest, PooledUnpooledAndCharsTakeOneEdge) {
     EXPECT_EQ(t2, t1);
     EXPECT_EQ(t3, t1);
     EXPECT_EQ(edge_count(f.input->shape_transition_root), 1);
+    EXPECT_EQ(typemap_hash_lookup_key(t1, pooled), e1);
+    EXPECT_EQ(typemap_hash_lookup_key(t1, unpooled), e1);
 
     // the other order: the first edge is minted id-less, then a pooled key finds it
     String* unpooled_b = builder.createString("beta");
@@ -2131,6 +2133,10 @@ TEST(TransitionTreeKeyIdentityTest, JsSymbolsMatchByRecordNotDescription) {
     EXPECT_NE(t_name, t_priv);
     EXPECT_EQ(t_chars, t_name);
     EXPECT_EQ(edge_count(f.input->shape_transition_root), 4);
+    EXPECT_EQ(typemap_hash_lookup_key(t_sym1, sym1), e_sym1);
+    EXPECT_EQ(typemap_hash_lookup_key(t_sym1, sym2), nullptr);
+    EXPECT_EQ(typemap_hash_lookup_key(t_sym1, priv), nullptr);
+    EXPECT_EQ(typemap_hash_lookup_key(t_sym1, name), nullptr);
 }
 
 TEST(TransitionTreeKeyIdentityTest, EntriesOfOneSpellingAreEqual) {
@@ -2155,6 +2161,12 @@ TEST(TransitionTreeKeyIdentityTest, EntriesOfOneSpellingAreEqual) {
     EXPECT_FALSE(typemap_shape_entries_equal(pooled, symbol));
     EXPECT_FALSE(typemap_shape_entries_equal(symbol, unpooled));
     EXPECT_TRUE(typemap_shape_entries_equal(symbol, symbol));
+    // same-pointer probes still obey ordinary-key and length checks.
+    uint32_t hash = typemap_shape_entry_name_hash(pooled);
+    EXPECT_TRUE(typemap_shape_name_equals_hash(pooled, pooled->name->str, 5, hash));
+    EXPECT_FALSE(typemap_shape_name_equals_hash(pooled, pooled->name->str, 4, hash));
+    EXPECT_FALSE(typemap_shape_name_equals_hash(symbol, symbol->name->str, 5,
+        typemap_shape_entry_name_hash(symbol)));
 }
 
 // ============================================================================

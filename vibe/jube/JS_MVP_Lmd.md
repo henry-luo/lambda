@@ -1762,20 +1762,74 @@ Text Search is **14.2%** slower than the later phase-entry release. Hyphen remai
 inconclusive because identical controls vary. Results3–9 remain unchanged;
 the new capture is `temp/mvp_perf_all_20261015/REPORT.md`. Benchmark acceptance
 remains open; this replay does not refresh the archived Test262 score.
-Direct repairs identify and fix an ARM64 long-branch overflow in jq (approved
-vendor patch, **248/248** MIR emission checks), then repair a separate bare-`let`
-inference error exposed by the tokenizer. Records and mix pass on the trial
-build; records also passes on the retained build. Full jq replay is pending.
-Triangl recovers to **155.019 ms**, versus **278.262 ms** pre-fix and
-**155.083 ms** Result9 in seven paired release-MIR rounds. Optional index
-payloads reuse existing Lambda storage and ownership rules (**D2.2.5**,
-**D3.4.3v5**, **D5.2–D5.3**). An additional fixed-key literal allocation experiment
-was withdrawn: Splay and Microdiff improved in the first capture, but Fast-diff
-slowed and competing builds invalidated its confirmation. Eleven other confirmed
-regressions remain open. The final focused suite passes **650/650**, with **5/5**
-forced-GC checks. Details, broader gate caveats and immutable captures are
-recorded in the implementation plan.
+Direct repairs fix the approved ARM64 long-branch defect in jq and the separate
+bare-`let` inference error. Triangl regains historical performance; complete jq
+replay remains pending. The next pass recovers statically proven global facts,
+reduces scalar ownership and property lookup work, and reuses Lambda storage
+for private intrinsic array results and compatible map writes (**D2.2.5**,
+**D3.4.3v5**, **D5.2–D5.3**, **D8.4.1v2**). Accessors, proxies, custom species,
+NaN/undefined and live global mutation retain their semantics; no new container
+flag or cache is introduced.
+
+The retained release passes **664/664** MVP checks, **16/16** focused GC checks,
+and **1,957 canonical + 1,716 strict** selected Test262 variants. The shared-runtime
+integration also passes the **40,261-case LJS baseline** and a separate **313-case
+GC sweep**; its Lambda aggregate retains the pre-existing chart mismatch and a
+contended GC watchdog, with the latter resolved by isolated replay.
+
+The final **15-workload** paired capture preserves native release MIR, original
+timing contracts and exact output checks. Integer proofs are materialized at index,
+character and bitwise consumers while arithmetic retains its physical lane;
+this fixes an intermediate Triangl regression. A numeric-key summary in the shared
+TypeMap index removes repeated prototype-field scans (**D3.4.3v5**, **D8.4.1v2**).
+Triangl is 121.223 vs 154.481 ms and Microdiff is 108.575 vs 100.604 ms against
+their historical controls. Splay, Microdiff, DeltaBlue, NBody, Hashmap and
+object-delete retain gaps, so performance acceptance remains open. Details,
+intervals, contention and provenance are in
+`temp/mvp_perf_eleven_20261015/REPORT.md` and the implementation plan. Results3–9
+and the archived whole-population coverage score remain unchanged.
 The standalone Mandelbrot
 output path retains a conservative full-storage fallback, documented in the plan.
 Detailed implementation, evidence and
 residual inventories are in [the implementation plan](../impl/JS_MVP_Lmd_Test262_90.md).
+
+The remaining-case pass reuses pooled key hashes and Lambda's ordinary NameId
+equality proof, selects numeric property lanes earlier, and specializes the
+existing fixed-property reader (**D3.4.4v4**, **D4.6.1v4**, **D8.4.1v2**).
+It adds no helper or runtime cache. The final 15-workload paired release-MIR
+capture improves NBody **5.0%** and Splay **5.3%** against the clean merged
+pre-change build, returning both to historical parity. All outputs pass, with
+no new statistically clear regression in this capture. Historical gaps remain
+for Microdiff **8.4%**, object-delete **5.9%**, DeltaBlue **5.5%** and Hashmap
+**5.0%**. Busy background activity is recorded; this is not a whole-benchmark
+replay. The candidate passes **665/665** MVP tests, **13/13** focused GC checks,
+**94/94** shared map-building tests and **23/23** name-pool tests. It also passes
+**1,957 canonical + 1,716 strict** selected Test262 variants, the **40,261-case
+LJS baseline**, and all **313** GC stress cases. Lambda's aggregate is
+**7,441/7,445**: the PDF page-walker and chart wordcloud failures reproduce on
+the clean pre-change pin (three checks and one check respectively). No expected
+output or harness was changed. Details and rejected experiments are in
+`temp/mvp_perf_remaining_20261015/REPORT.md`; published results remain unchanged.
+
+The ownership/projection continuation removes unused empty-array buffers,
+redundant outer roots, repeated key-descriptor checks and shaped-field descriptor
+copies. It also specializes the existing callee reader and avoids retaining a
+value during deletion (**D3.4.5–D3.4.6**, **D4.3.1**, **D5.3.2–D5.3.3**).
+No new helper, public ABI or runtime cache is added (**D8.4.1v2**).
+The paired 15-workload release-MIR capture improves object-delete **3.6%**,
+Hashmap **2.5%**, Microdiff **1.6%**, and Splay **2.4%** against the clean
+pre-change pin, with all outputs passing and no new statistically clear
+regression. Object-delete is consistent with historical parity; Microdiff **6.8%**,
+DeltaBlue **4.1%**, and Hashmap **2.2%** remain open. DeltaBlue's **0.9%**
+pre-change reduction is within measurement noise. This focused capture records
+background contention and leaves published Results3–9 unchanged.
+Validation passes **667/667** MVP tests, **94/94** shared map-building and
+**23/23** name-pool tests, **17/17** focused GC checks, **3/3** checks collecting
+every allocation, and **1,957 canonical + 1,716 strict** selected Test262
+variants without retries. The full LJS baseline passes **40,261/40,261** and
+the integrated GC stress sweep passes **313/313**. Lambda's aggregate is
+**7,443/7,447**: the same three PDF page-walker checks and one chart wordcloud
+check fail on both pins; PDF replays cover interpreter/JIT/auto and chart output
+is byte-identical. No expected output, harness or deadline changed.
+Evidence, controls and remaining gaps are recorded in
+`temp/mvp_perf_remaining2_20261015/REPORT.md` and the implementation plan.

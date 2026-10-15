@@ -66,7 +66,7 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
                 text_view->rect = nullptr;
                 text_view->width = 0;
                 text_view->height = 0;
-            }
+            } else if (child->is_element()) view_pool_reset_retained_subtree(lycon->doc->view_tree, child->as_element());
         }
     }
 

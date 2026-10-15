@@ -3,7 +3,7 @@
 #include "layout_table.hpp"
 #include "layout.hpp"
 #include "render.hpp"
-#include "../lambda/input/css/selector_matcher.hpp"
+#include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lib/font/font.h"
@@ -33,89 +33,6 @@ struct ViewCssPageContext {
 };
 static bool view_css_select_page(ViewTree* tree, const ViewCssPageContext* context,
     const char* name, CssDeclaration* result);
-static bool view_css_container_provider(void* context, DomElement* target,
-    const char* name, uint8_t axes, CssContainerMetrics* result);
-
-struct ViewCssContainerEntry {
-    DomNodeRef source;
-    float width, height;
-};
-struct ViewCssContainerState {
-    hashmap* previous;
-    hashmap* current;
-    uint64_t generation;
-};
-static uint64_t view_css_container_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const ViewCssContainerEntry* entry = (const ViewCssContainerEntry*)item;
-    return dom_node_ref_identity_hash(entry->source, seed0, seed1);
-}
-static int view_css_container_compare(const void* left, const void* right, void*) {
-    return dom_node_ref_identity_compare(((const ViewCssContainerEntry*)left)->source,
-        ((const ViewCssContainerEntry*)right)->source);
-}
-
-void view_css_container_state_destroy(ViewTree* tree) {
-    ViewCssContainerState* state = tree && tree->model ? tree->model->containers.get() : nullptr;
-    if (!state) return;
-    if (state->previous) hashmap_free(state->previous);
-    if (state->current) hashmap_free(state->current);
-    pool_free(tree->prop_pool, state);
-    tree->model->containers = nullptr;
-}
-
-bool view_css_container_pass_begin(ViewTree* tree) {
-    if (!view_tree_model_source_valid(tree) || tree->model->committed) return false;
-    ViewCssContainerState* state = tree->model->containers;
-    if (state) hashmap_clear(state->current, false);
-    return true;
-}
-
-bool view_css_container_pass_end(ViewTree* tree, bool* settled) {
-    if (!settled || !tree->model->css) return false;
-    ViewCssContainerState* state = tree->model->containers;
-    bool dependencies = tree->model->css->engine->container_dependencies;
-    if (!state && !dependencies) { *settled = true; return true; }
-    if (!state) {
-        state = (ViewCssContainerState*)pool_calloc(tree->prop_pool, sizeof(ViewCssContainerState));
-        if (!state) return false;
-        tree->model->containers = lam::own(state);
-        state->previous = hashmap_new(sizeof(ViewCssContainerEntry), 16, 0, 0,
-            view_css_container_hash, view_css_container_compare, nullptr, nullptr);
-        state->current = hashmap_new(sizeof(ViewCssContainerEntry), 16, 0, 0,
-            view_css_container_hash, view_css_container_compare, nullptr, nullptr);
-        if (!state->previous || !state->current) { view_css_container_state_destroy(tree); return false; }
-    }
-    bool equal = true;
-    for (size_t i = 0; i < tree->model->node_id_count; i++) {
-        LayoutViewNode* node = tree->model->nodes.get()[i];
-        ViewNodeState* owner = node ? node->state.get() : nullptr;
-        if (!owner || !owner->container_measured) continue;
-        ViewCssContainerEntry entry = {owner->source, owner->container_width, owner->container_height};
-        const ViewCssContainerEntry* old = (const ViewCssContainerEntry*)hashmap_get(state->previous, &entry);
-        if (!old || old->source.address != entry.source.address || old->width != entry.width || old->height != entry.height)
-            equal = false;
-        hashmap_set(state->current, &entry);
-        if (hashmap_oom(state->current)) return false;
-    }
-    equal = equal && hashmap_count(state->previous) == hashmap_count(state->current);
-    hashmap* previous = state->previous;
-    state->previous = state->current; state->current = previous;
-    ++state->generation;
-    *settled = !dependencies || equal;
-    return true;
-}
-
-bool view_css_container_pass_reset(ViewTree* tree) {
-    // only uncommitted internal passes carry measured inputs across scratch reset (D4.5.1v4).
-    if (!tree || !tree->model || tree->model->committed) return false;
-    lam::Own<ViewCssContainerState> retained = tree->model->containers;
-    tree->model->containers = nullptr;
-    uint32_t generation = tree->layout_generation;
-    tree->reset_retained();
-    tree->model->containers = retained;
-    return tree->layout_generation != generation && tree->model->node_count == 1;
-}
-
 bool view_css_context_begin(ViewTree* tree) {
     if (!view_tree_model_source_valid(tree)) return false;
     if (tree->model->css) return true;
@@ -126,33 +43,15 @@ bool view_css_context_begin(ViewTree* tree) {
                                        MEM_ROLE_VIEW, "view_tree.secondary.css"));
     if (!css->pool) { view_css_context_destroy(tree); return false; }
     css->engine = lam::up(css_engine_create(css->pool));
-    css->matcher = lam::up(selector_matcher_create(css->pool));
     css->root_font_size = 16.0f;
-    if (!css->engine || !css->matcher) { view_css_context_destroy(tree); return false; }
+    if (!css->engine) { view_css_context_destroy(tree); return false; }
     const ViewEnvironment& environment = tree->model->environment;
     css_engine_set_viewport(css->engine, environment.viewport_width, environment.viewport_height);
     css->engine->context.device_pixel_ratio = environment.device_scale;
     css->engine->context.print_media = environment.print_media;
-    css->engine->container_provider = view_css_container_provider;
-    css->engine->container_context = tree;
     DomDocument* doc = tree->model->document;
-    // HTML element defaults come from the default view's shared table; they and the GCPM
-    // Appendix B fallback stay at UA origin so author resets can override them.
-    StrBuf* ua = strbuf_new();
-    if (ua) strbuf_append_str(ua, "::footnote-call { font-size: 65%; vertical-align: super }");
-    const char* ua_text = ua && layout_html_ua_stylesheet(ua) ? pool_strdup(css->pool, ua->str) : nullptr;
-    if (ua) strbuf_free(ua);
-    CssStylesheet* defaults = ua_text ? css_parse_stylesheet(css->engine, ua_text, nullptr) : nullptr;
-    css->stylesheet_count = (size_t)doc->stylesheet_count + 1;
-    css->stylesheets = lam::up((CssStylesheet**)pool_calloc(css->pool,
-        css->stylesheet_count * sizeof(CssStylesheet*)));
-    if (!defaults || !css->stylesheets) { view_css_context_destroy(tree); return false; }
-    for (size_t i = 0; i < defaults->rule_count; i++) defaults->rules[i]->origin = CSS_ORIGIN_USER_AGENT;
-    css->stylesheets.get()[0] = defaults;
-    if (doc->stylesheet_count) memcpy(css->stylesheets.get() + 1, doc->stylesheets.get(),
-        (size_t)doc->stylesheet_count * sizeof(CssStylesheet*));
-    if (doc->services.cached_css_engine) {
-        CssEngine* source = (CssEngine*)doc->services.cached_css_engine;
+    CssEngine* source = (CssEngine*)doc->services.cached_css_engine;
+    if (source) {
         css->engine->features = source->features;
         css->engine->context.color_scheme = source->context.color_scheme;
         css->engine->context.reduced_motion = source->context.reduced_motion;
@@ -161,7 +60,15 @@ bool view_css_context_begin(ViewTree* tree) {
         if (!tree->model->environment.input_capabilities.known)
             tree->model->environment.input_capabilities = source->context.input_capabilities;
     }
+    // selected input capabilities must reach the shared cascade before it resolves media rules.
     css->engine->context.input_capabilities = tree->model->environment.input_capabilities;
+    if (source) {
+        // source contexts query the shared cascade, never rematch a second set of stylesheets.
+        auto saved = source->context;
+        source->context = css->engine->context;
+        radiant_recascade_document_styles(doc, doc->root);
+        source->context = saved;
+    }
     css->page_document = lam::up(radiant_page_document_compile(tree, css->engine, css->pool));
     if (!css->page_document) { view_css_context_destroy(tree); return false; }
     return true;
@@ -174,7 +81,6 @@ void view_css_context_destroy(ViewTree* tree) {
         if (style->font.font_handle) font_handle_release(style->font.font_handle);
     }
     if (css->fonts) font_context_destroy(css->fonts);
-    if (css->matcher) selector_matcher_destroy(css->matcher);
     if (css->engine) css_engine_destroy(css->engine);
     if (css->pool) mem_pool_destroy(css->pool);
     pool_free(tree->prop_pool, css);
@@ -185,19 +91,31 @@ void view_css_context_rebind(ViewTree* tree) {
     ViewCssContext* css = tree && tree->model ? tree->model->css.get() : nullptr;
     if (!css) return;
     // a leased generation moves to a reserved shell without moving its styles or metrics.
-    css->engine->container_context = tree;
     for (ViewCssStyle* style = css->styles; style; style = style->next) style->view = lam::up(tree);
 }
 
 static bool view_css_select(ViewTree* tree, ViewCssStyle* style, const char* name,
                             CssDeclaration* result) {
     if (style->page_context) return view_css_select_page(tree, style->page_context, name, result);
-    // anonymous boxes inherit computed values but never match element selectors.
     if (!style->source) return false;
-    ViewCssContext* css = tree->model->css;
-    return css_select_element_declaration(css->engine, css->matcher, style->source,
-        css->stylesheets, css->stylesheet_count,
-        style->inline_declarations, style->inline_count, name, result, style->pseudo_element);
+    CssDeclaration custom = {};
+    const CssDeclaration* selected = nullptr;
+    if (name[0] == '-' && name[1] == '-') {
+        custom.value = const_cast<CssValue*>(dom_element_lookup_own_custom_property(style->source, name));
+        if (!custom.value) return false;
+        custom.property_name = name; custom.property_code = CSS_PROPERTY_CUSTOM; custom.valid = true;
+        selected = &custom;
+    } else {
+        StyleTree* declarations = style->pseudo_element
+            ? dom_element_get_pseudo_style(style->source, style->pseudo_element)
+            : style->source->specified_style.get();
+        selected = style_tree_get_property_declaration(declarations, css_property_code_from_name(name));
+    }
+    // D4.5.1v4: page/native query metadata survives the next shared cascade epoch.
+    CssDeclaration* copy = selected ? css_declaration_snapshot(selected, tree->model->css->pool) : nullptr;
+    if (!copy) return false;
+    *result = *copy;
+    return true;
 }
 
 enum ViewComputedPropertyKind { VIEW_COMPUTED_FONT_SIZE, VIEW_COMPUTED_FONT_WEIGHT, VIEW_COMPUTED_FONT_VALUE, VIEW_COMPUTED_COLOR,
@@ -502,7 +420,7 @@ static const CssValue* view_css_project(ViewTree* tree, const CssDeclaration& de
             strcmp(component, "width") == 0 ? "medium" : strcmp(component, "style") == 0 ? "none" : "currentcolor");
     }
     if (strcmp(property, "all") == 0) return value;
-    // The break alias is a value alias; `always` is normalized by view_css_break.
+    // legacy page-break aliases share the browsing cascade's declaration winner.
     if (strncmp(property, "page-break-", 11) == 0) return value;
     if (strcmp(property, "background") == 0 && strcmp(name, "background-color") == 0) {
         int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
@@ -579,89 +497,7 @@ static LayoutContext view_css_length_context(ViewTree* tree, const ViewCssStyle*
     return context;
 }
 
-float view_css_contained_intrinsic_size(ViewTree* tree, const ViewCssStyle* style,
-                                        bool horizontal) {
-    size_t axis = horizontal ? 0 : 1;
-    LayoutContext context = view_css_length_context(tree, style, NAN, NAN);
-    float size = style->contain_intrinsic_size[axis];
-    if (style->contain_intrinsic_auto[axis] && view_css_contents_skipped(style))
-        layout_get_last_remembered_size(&context, style->source, horizontal, &size);
-    return fmaxf(0.0f, size);
-}
 
-struct ViewRememberedSizeCommit {
-    ViewTree* tree;
-    LayoutContext* staged;
-};
-
-static bool view_css_commit_remembered_node(DomNode* node, void* context) {
-    if (!node->is_element()) return true;
-    auto* commit = (ViewRememberedSizeCommit*)context;
-    ViewNodeState* state = view_tree_node_state(commit->tree, node, false);
-    ViewCssStyle* style = state ? state->computed_style.get() : nullptr;
-    if (!style || !state->container_measured || style->pseudo_element ||
-        !view_size_containment_applies(style->display)) return true;
-    bool contained = (style->computed_containment & CSS_CONTAIN_SIZE) != 0 ||
-        (style->container_axes & CSS_CONTAINER_BLOCK) != 0 || view_css_contents_skipped(style);
-    LayoutAxisPair<float> size = {state->container_width, state->container_height};
-    for (LayoutAxis axis : layout_axes()) {
-        bool automatic = style->contain_intrinsic_auto[axis];
-        if (automatic && contained) continue;
-        if (!layout_set_last_remembered_size(commit->staged, node->as_element(),
-                axis == LAYOUT_AXIS_X, size[axis], automatic)) return false;
-    }
-    return true;
-}
-
-bool view_css_commit_remembered_sizes(ViewTree* tree) {
-    if (tree->model->page_instances) return true;
-    ViewTree staged = {};
-    if (!layout_content_visibility_clone(&staged, tree, tree->model->document)) return false;
-    LayoutContext context = {};
-    context.doc = tree->model->document;
-    context.selected_view_tree = lam::up(&staged);
-    ViewRememberedSizeCommit commit = {tree, &context};
-    if (!view_geometry_walk_dom_tree(tree->model->document->root, view_css_commit_remembered_node, &commit)) {
-        layout_content_visibility_destroy(&staged);
-        return false;
-    }
-    // publish only after every completed principal measurement has been retained.
-    layout_content_visibility_destroy(tree);
-    tree->content_visibility_state = staged.content_visibility_state;
-    staged.content_visibility_state = nullptr;
-    return true;
-}
-
-static bool view_css_container_value(void* context, const CssValue* value, CssMathResult* result) {
-    ViewCssStyle* style = (ViewCssStyle*)context;
-    ViewTree* tree = style->view;
-    const CssValue* resolved = view_css_resolve_value(tree, style, value);
-    if (!resolved) return false;
-    LayoutContext layout = view_css_length_context(tree, style, NAN, NAN);
-    *result = layout_evaluate_css_math(&layout, CSS_PROPERTY_WIDTH, resolved, true, true);
-    return result->type != CSS_MATH_INVALID && result->resolved && isfinite(result->value);
-}
-
-static bool view_css_container_provider(void* context, DomElement* target,
-        const char* name, uint8_t axes, CssContainerMetrics* result) {
-    ViewTree* tree = (ViewTree*)context;
-    ViewCssContainerState* containers = tree->model->containers;
-    for (DomElement* ancestor = dom_flat_tree_parent(target); ancestor; ancestor = dom_flat_tree_parent(ancestor)) {
-        ViewCssStyle* style = view_css_resolve(tree, ancestor);
-        if (!style || style->display.outer == CSS_VALUE_NONE || style->display.outer == CSS_VALUE_CONTENTS ||
-            (style->display.outer == CSS_VALUE_INLINE && style->display.inner == CSS_VALUE_FLOW)) continue;
-        if (!css_container_matches(style->container_names, style->container_axes, style->vertical, name, axes)) continue;
-        // unavailable geometry on the nearest eligible ancestor cannot select a farther ancestor.
-        ViewCssContainerEntry key = {dom_node_ref(ancestor), 0.0f, 0.0f};
-        const ViewCssContainerEntry* entry = containers
-            ? (const ViewCssContainerEntry*)hashmap_get(containers->previous, &key) : nullptr;
-        if (!entry || dom_node_ref_validate(tree->model->document, entry->source) != ancestor) return false;
-        *result = {ancestor, containers->generation, entry->width, entry->height, style->vertical,
-            view_css_container_value, style};
-        return true;
-    }
-    return false;
-}
 
 float view_css_length(ViewTree* tree, const ViewCssStyle* style, const CssValue* value,
                      CssPropertyCode property, float inline_size, float block_size) {
@@ -677,40 +513,7 @@ float view_css_length(ViewTree* tree, const ViewCssStyle* style, const CssValue*
     return resolve_length_value(&context, property, value);
 }
 
-bool view_css_border_spacing(ViewTree* tree, ViewCssStyle* style, float* horizontal, float* vertical) {
-    *horizontal = *vertical = 0.0f;
-    for (ViewCssStyle* owner = style; owner; owner = owner->parent) {
-        const CssValue* value = view_css_property(tree, owner, "border-spacing");
-        LayoutContext context = view_css_length_context(tree, owner, 0.0f, 0.0f);
-        LayoutBorderSpacingValue spacing = layout_resolve_border_spacing_value(&context, value);
-        if (spacing.resolved) {
-            *horizontal = spacing.horizontal; *vertical = spacing.vertical;
-            return isfinite(*horizontal) && isfinite(*vertical) && *horizontal >= 0.0f && *vertical >= 0.0f;
-        }
-        if (value && !spacing.keep_inheriting) return false;
-        if (!value && owner->source && owner->source->tag_id == MARKUP_NAME_TABLE) {
-            // HTML's UA spacing is computed at its owner, without borrowing default-view table geometry.
-            *horizontal = *vertical = layout_html_table_border_spacing(owner->source);
-            return true;
-        }
-    }
-    return true;
-}
 
-ViewBreak view_css_break(const CssValue* value) {
-    const char* name = css_value_identifier_name(value);
-    if (!name) return VIEW_BREAK_AUTO;
-    if (strcmp(name, "page") == 0 || strcmp(name, "always") == 0 || strcmp(name, "all") == 0) return VIEW_BREAK_PAGE;
-    if (strcmp(name, "column") == 0) return VIEW_BREAK_COLUMN;
-    if (strcmp(name, "avoid") == 0) return VIEW_BREAK_AVOID;
-    if (strcmp(name, "avoid-column") == 0) return VIEW_BREAK_AVOID_COLUMN;
-    if (strcmp(name, "avoid-page") == 0) return VIEW_BREAK_AVOID_PAGE;
-    if (strcmp(name, "left") == 0) return VIEW_BREAK_LEFT;
-    if (strcmp(name, "right") == 0) return VIEW_BREAK_RIGHT;
-    if (strcmp(name, "recto") == 0) return VIEW_BREAK_RECTO;
-    if (strcmp(name, "verso") == 0) return VIEW_BREAK_VERSO;
-    return VIEW_BREAK_AUTO;
-}
 
 static CssEnum view_css_keyword(ViewTree* tree, ViewCssStyle* style, const char* name,
                                CssEnum initial, CssEnum inherited, bool inherits = false) {
@@ -721,55 +524,9 @@ static CssEnum view_css_keyword(ViewTree* tree, ViewCssStyle* style, const char*
         ? value->data.keyword : initial;
 }
 
-bool view_css_contents_skipped(const ViewCssStyle* style) {
-    return style && style->content_visibility == CSS_VALUE_HIDDEN &&
-        view_size_containment_applies(style->display);
-}
 
-static void view_css_intrinsic_sizes(ViewTree* tree, ViewCssStyle* style) {
-    CssDeclaration winners[2] = {};
-    style->contain_intrinsic_size[0] = style->contain_intrinsic_size[1] = -1.0f;
-    const CssPropertyCode candidates[] = {
-        CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH,
-        CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT, CSS_PROPERTY_CONTAIN_INTRINSIC_INLINE_SIZE,
-        CSS_PROPERTY_CONTAIN_INTRINSIC_BLOCK_SIZE
-    };
-    for (CssPropertyCode candidate : candidates) {
-        uint8_t candidate_axes = css_intrinsic_size_axes(candidate, style->vertical);
-        const CssProperty* property = css_property_get_by_code(candidate);
-        CssDeclaration declaration = {};
-        const CssValue* value = view_css_property(tree, style, property->name, &declaration);
-        if (!declaration.value) continue;
-        CssIntrinsicSizeAxis components[2] = {};
-        bool parsed = css_intrinsic_size_components(value,
-            candidate == CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, components);
-        for (size_t axis = 0; axis < 2; axis++) {
-            if (!(candidate_axes & (1u << axis)) || (winners[axis].value &&
-                css_declaration_cascade_compare(&declaration, &winners[axis]) <= 0)) continue;
-            winners[axis] = declaration;
-            float size = -1.0f;
-            bool automatic = false;
-            if (css_value_is_inherit(value) && style->parent) {
-                uint8_t parent_axes = css_intrinsic_size_axes(candidate, style->parent->vertical);
-                size_t parent_axis = parent_axes == 3 ? axis : parent_axes == 1 ? 0 : 1;
-                size = style->parent->contain_intrinsic_size[parent_axis];
-                automatic = style->parent->contain_intrinsic_auto[parent_axis];
-            } else if (parsed) {
-                const CssIntrinsicSizeAxis& component = components[
-                    candidate == CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE ? axis : 0];
-                automatic = component.automatic;
-                if (!css_value_is_none(component.size)) {
-                    float resolved = view_css_length(tree, style, component.size,
-                        candidate, NAN, NAN);
-                    if (isfinite(resolved)) size = fmaxf(0.0f, resolved);
-                }
-            }
-            // inherited lengths are computed at their declaration owner, before this edition's children.
-            style->contain_intrinsic_size[axis] = size;
-            style->contain_intrinsic_auto[axis] = automatic;
-        }
-    }
-}
+
+
 
 double view_css_number(const CssValue* value, ViewTree* tree, const ViewCssStyle* style) {
     CssMathResult result = {};
@@ -1042,7 +799,7 @@ static void view_css_box_style(ViewTree* tree, ViewCssStyle* style) {
         parent ? parent->column_rule_color : Color{});
 }
 
-static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
+static ViewCssStyle* view_css_source_context(ViewTree* tree, DomElement* element,
         ViewCssStyle* parent, uint8_t pseudo_element) {
     ViewCssContext* css = tree->model->css;
     ViewCssStyle* style = (ViewCssStyle*)pool_calloc(css->pool, sizeof(ViewCssStyle));
@@ -1053,22 +810,6 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
     style->parent = lam::up(parent);
     style->next = css->styles;
     css->styles = lam::up(style);
-    const char* inline_text = pseudo_element || !element ? nullptr : dom_element_get_inline_style(element);
-    CssRule* authored = pseudo_element || !element ? nullptr : dom_element_inline_declaration_block(element);
-    if (authored) {
-        size_t count = authored->data.style_rule.declaration_count;
-        CssDeclaration** declarations = (CssDeclaration**)pool_calloc(css->pool, count * sizeof(CssDeclaration*));
-        if (declarations) {
-            for (size_t i = 0; i < count; i++) {
-                CssDeclaration* copy = css_declaration_snapshot(authored->data.style_rule.declarations[i], css->pool);
-                if (copy) declarations[style->inline_count++] = copy;
-            }
-            style->inline_declarations = lam::up(declarations);
-        }
-    } else if (inline_text && *inline_text) {
-        style->inline_declarations = lam::up(css_parse_declaration_list_text(inline_text,
-            strlen(inline_text), css->pool, &style->inline_count));
-    }
     view_css_bind_properties(tree, style);
     style->display = pseudo_element || !element ? DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW} : css_default_display_for_element(element, element);
     if (!pseudo_element && element) radiant_page_control_display(element, &style->display);
@@ -1078,26 +819,10 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
         else if (css_value_is_initial(value) || css_value_is_unset(value)) style->display = {CSS_VALUE_INLINE, CSS_VALUE_FLOW};
         else css_resolve_display_css_value(element, value, &style->display);
     }
-    // the default adapter retains the legacy outer token; independent flows use the principal block plus marker flag.
-    if (style->display.outer == CSS_VALUE_LIST_ITEM) {
-        style->display.outer = CSS_VALUE_BLOCK; style->display.list_item = true;
-    }
-    value = view_css_property(tree, style, "container-type");
-    style->container_axes = css_value_is_inherit(value) && parent
-        ? parent->container_axes : css_container_type_axes(value);
-    value = view_css_property(tree, style, "contain");
-    style->computed_containment = css_value_is_inherit(value) && parent
-        ? parent->computed_containment : css_value_containment_flags(value);
-    style->content_visibility = view_css_keyword(tree, style, "content-visibility", CSS_VALUE_VISIBLE,
-        parent ? parent->content_visibility : CSS_VALUE_VISIBLE);
-    value = view_css_property(tree, style, "container-name");
-    style->container_names = css_value_is_inherit(value) && parent ? parent->container_names
-        : css_value_is_initial(value) || css_value_is_unset(value) ? nullptr : lam::up(value);
     CssEnum writing_mode = view_css_keyword(tree, style, "writing-mode", CSS_VALUE_HORIZONTAL_TB,
         parent && parent->vertical ? CSS_VALUE_VERTICAL_RL : CSS_VALUE_HORIZONTAL_TB, true);
     style->vertical = writing_mode != CSS_VALUE_HORIZONTAL_TB;
     if (!view_css_font_style(tree, style, parent)) return nullptr;
-    view_css_intrinsic_sizes(tree, style);
     if (!view_css_column_style(tree, style, parent)) return nullptr;
     view_css_box_style(tree, style);
     const char* lengths[] = {"width", "height", "min-width", "max-width", "min-height", "max-height"};
@@ -1108,54 +833,12 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
         parent ? parent->text_align : CSS_VALUE_START, true);
     style->white_space = view_css_keyword(tree, style, "white-space", CSS_VALUE_NORMAL,
         parent ? parent->white_space : CSS_VALUE_NORMAL, true);
-    style->caption_side = view_css_keyword(tree, style, "caption-side", CSS_VALUE_TOP,
-        parent ? parent->caption_side : CSS_VALUE_TOP, true);
-    style->border_collapse = view_css_keyword(tree, style, "border-collapse", CSS_VALUE_SEPARATE,
-        parent ? parent->border_collapse : CSS_VALUE_SEPARATE, true);
-    style->list_style_type = parent ? parent->list_style_type : CSS_VALUE_DISC;
-    style->list_style_string = parent ? parent->list_style_string : nullptr;
-    value = view_css_property(tree, style, "list-style-type");
-    if (value && (css_value_is_inherit(value) || css_value_is_unset(value))) {
-        style->list_style_type = parent ? parent->list_style_type : CSS_VALUE_DISC;
-        style->list_style_string = parent ? parent->list_style_string : nullptr;
-    } else if (value) {
-        style->list_style_string = nullptr;
-        if (value->type == CSS_VALUE_TYPE_STRING) style->list_style_string = lam::up(value->data.string);
-        else style->list_style_type = css_value_is_initial(value) ? CSS_VALUE_DISC :
-            value->type == CSS_VALUE_TYPE_KEYWORD ? value->data.keyword : (CssEnum)0;
-    }
-    value = view_css_property(tree, style, "list-style-position");
-    style->list_marker_inside = !value || css_value_is_inherit(value) || css_value_is_unset(value)
-        ? parent && parent->list_marker_inside
-        : css_value_identifier_name(value) && strcmp(css_value_identifier_name(value), "inside") == 0;
-    value = view_css_property(tree, style, "list-style-image");
-    style->list_style_image = !value || css_value_is_inherit(value) || css_value_is_unset(value)
-        ? (parent ? parent->list_style_image : nullptr) : lam::up(value);
-    style->float_spec = lam::up(view_css_property(tree, style, "float"));
-    style->float_value = view_css_keyword(tree, style, "float",
-        element && !pseudo_element && radiant_page_element(element, "note") ? CSS_VALUE_FOOTNOTE : CSS_VALUE_NONE, CSS_VALUE_NONE);
-    style->clear_value = view_css_keyword(tree, style, "clear", CSS_VALUE_NONE, CSS_VALUE_NONE);
-    style->position = view_css_keyword(tree, style, "position", CSS_VALUE_STATIC, CSS_VALUE_STATIC);
     style->box_sizing = view_css_keyword(tree, style, "box-sizing", CSS_VALUE_CONTENT_BOX, CSS_VALUE_CONTENT_BOX);
-    style->running_position = lam::up(view_css_property(tree, style, "position"));
-    style->break_before = view_css_break(view_css_property(tree, style, "break-before"));
-    style->break_after = view_css_break(view_css_property(tree, style, "break-after"));
-    style->break_inside = view_css_break(view_css_property(tree, style, "break-inside"));
     style->orphans = view_css_line_limit(tree, style, "orphans", parent ? parent->orphans : 2);
     style->widows = view_css_line_limit(tree, style, "widows", parent ? parent->widows : 2);
     value = view_css_property(tree, style, "box-decoration-break");
     const char* keyword = css_value_identifier_name(value);
     style->decoration_clone = keyword && strcmp(keyword, "clone") == 0;
-    value = view_css_property(tree, style, "page");
-    if (css_value_is_inherit(value) || css_value_is_unset(value)) style->page_name = parent ? parent->page_name : nullptr;
-    else { const char* name = css_value_identifier_name(value); if (name && strcmp(name, "auto") != 0) style->page_name = lam::up(name); }
-    if (!pseudo_element) {
-        const RadiantPageSequence* sequence = radiant_page_sequence_for(css->page_document, element);
-        if (sequence) {
-            style->page_name = lam::up(sequence->master_reference);
-            style->break_before = VIEW_BREAK_PAGE;
-        }
-    }
     value = view_css_property(tree, style, "content");
     style->content = css_value_is_inherit(value) ? (parent ? parent->content : nullptr) :
         css_value_is_initial(value) || css_value_is_unset(value) ? nullptr : lam::up(value);
@@ -1165,17 +848,7 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
     value = view_css_property(tree, style, "quotes");
     style->quotes = !value || css_value_is_inherit(value) || css_value_is_unset(value)
         ? (parent ? parent->quotes : nullptr) : lam::up(value);
-    value = view_css_property(tree, style, "string-set");
-    style->string_set = css_value_is_inherit(value) ? (parent ? parent->string_set : nullptr) :
-        css_value_is_initial(value) || css_value_is_unset(value) ? nullptr : lam::up(value);
     view_css_counter_style(tree, style, parent);
-    style->list_reversed = parent && parent->list_reversed;
-    if (element && !pseudo_element && layout_is_html_list_container_tag(element->tag_id))
-        style->list_reversed = element->tag_id == MARKUP_NAME_OL && element->has_attribute("reversed") && !style->counter_reset;
-    else { int ignored = 0; if (layout_counter_named_value(style->counter_reset, "list-item", 0, &ignored)) style->list_reversed = false; }
-    style->float_reference = lam::up(view_css_property(tree, style, "float-reference"));
-    style->float_defer = lam::up(view_css_property(tree, style, "float-defer"));
-    style->footnote_policy = lam::up(view_css_property(tree, style, "footnote-policy"));
     if (element && !pseudo_element && !radiant_flow_traits_resolve(tree, style)) return nullptr;
     if (element && !pseudo_element && !radiant_page_query_resolve(tree, style)) return nullptr;
     if (element && !pseudo_element && !radiant_note_resolve(tree, style)) return nullptr;
@@ -1185,23 +858,9 @@ static ViewCssStyle* view_css_build_style(ViewTree* tree, DomElement* element,
     return style;
 }
 
-ViewCssStyle* view_css_anonymous_style(ViewTree* tree, ViewCssStyle* parent, DisplayValue display) {
-    if (!parent || !view_css_context_begin(tree)) return nullptr;
-    // use the ordinary initial/inherited computation without a synthetic DOM node (CSS 2.2 §17.2.1).
-    ViewCssStyle* style = view_css_build_style(tree, nullptr, parent, PSEUDO_ELEMENT_NONE);
-    if (style) { style->display = display; style->counters = parent->counters; }
-    return style;
-}
 
-const ViewCssStyle* view_css_common_ancestor(const ViewCssStyle* left, const ViewCssStyle* right) {
-    size_t left_depth = 0, right_depth = 0;
-    for (const ViewCssStyle* style = left; style; style = style->parent) left_depth++;
-    for (const ViewCssStyle* style = right; style; style = style->parent) right_depth++;
-    while (left_depth > right_depth) { left = left->parent; left_depth--; }
-    while (right_depth > left_depth) { right = right->parent; right_depth--; }
-    while (left != right) { left = left->parent; right = right->parent; }
-    return left;
-}
+
+
 
 ViewCssStyle* view_css_resolve(ViewTree* tree, DomElement* element) {
     if (!element || !view_css_context_begin(tree)) return nullptr;
@@ -1211,7 +870,7 @@ ViewCssStyle* view_css_resolve(ViewTree* tree, DomElement* element) {
     DomElement* parent_element = radiant_page_style_parent(element);
     ViewCssStyle* parent = parent_element ? view_css_resolve(tree, parent_element) : nullptr;
     if (parent_element && !parent) return nullptr;
-    ViewCssStyle* style = view_css_build_style(tree, element, parent, PSEUDO_ELEMENT_NONE);
+    ViewCssStyle* style = view_css_source_context(tree, element, parent, PSEUDO_ELEMENT_NONE);
     state->computed_style = lam::up(style);
     return style;
 }
@@ -1223,40 +882,10 @@ ViewCssStyle* view_css_resolve_pseudo(ViewTree* tree, DomElement* element, uint8
     for (ViewCssStyle* style = tree->model->css->styles; style; style = style->next)
         if (style->source == element && style->pseudo_element == pseudo_element) return style;
     // A pseudo occurrence borrows its semantic origin and owns its own computed style.
-    return view_css_build_style(tree, element, parent, pseudo_element);
+    return view_css_source_context(tree, element, parent, pseudo_element);
 }
 
-ViewCssStyle* view_css_generated_style(ViewTree* tree, ViewCssStyle* base,
-        const CssValue* font_size, const CssValue* color, CssEnum align) {
-    if (!base || !view_css_context_begin(tree)) return nullptr;
-    ViewCssContext* css = tree->model->css;
-    ViewCssStyle* style = (ViewCssStyle*)pool_calloc(css->pool, sizeof(ViewCssStyle));
-    if (!style) return nullptr;
-    style->view = lam::up(tree);
-    style->source = base->source; style->parent = lam::up(base);
-    style->next = css->styles; css->styles = lam::up(style);
-    style->font = base->font; style->font.font_handle = nullptr;
-    // generated text's copied font must retain the same typed query values.
-    for (size_t i = 0; i < 3; i++) style->font_values[i] = base->font_values[i];
-    style->font_box = {lam::up(&style->font), style->font.font_size};
-    style->color = base->color; style->text_align = align; style->white_space = base->white_space;
-    style->orphans = style->widows = 1;
-    font_size = view_css_resolve_value(tree, base, font_size);
-    if (font_size && !css_value_is_inherit(font_size) && !css_value_is_unset(font_size)) {
-        float size = view_css_length(tree, style, font_size, CSS_PROPERTY_FONT_SIZE,
-            tree->model->environment.viewport_width, tree->model->environment.viewport_height);
-        if (isfinite(size) && size > 0.0f) style->font.font_size = size;
-    }
-    const FontMetrics* metrics = view_css_finish_font(tree, style);
-    if (!metrics) return nullptr;
-    if (!view_css_line_height(tree, style, base->line_height_value)) return nullptr;
-    color = view_css_resolve_value(tree, base, color);
-    if (color && !css_value_is_inherit(color) && !css_value_is_unset(color)) {
-        LayoutContext context = view_css_length_context(tree, style, 0.0f, 0.0f);
-        style->color = resolve_color_value(&context, color);
-    }
-    return style;
-}
+
 
 struct PageDeclarationWinner {
     CssDeclaration declaration;

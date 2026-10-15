@@ -1389,26 +1389,20 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
 
 static void pdf_cb_render_bound(RenderContext* vctx, ViewBlock* view, float abs_x, float abs_y) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
-    if (render_paint_boundary_emit_simple(pdf_active_paint_list(ctx), view, abs_x, abs_y)) {
+    Rect grid = render_geometry_boundary_rect(view, {abs_x, abs_y, view->width, view->height});
+    abs_x = grid.x; abs_y = grid.y;
+    if (render_paint_boundary_emit_simple(pdf_active_paint_list(ctx), view, grid)) {
         pdf_lower_paint_list(ctx);
         return;
     }
 
-    float width = view->width;
-    float height = view->height;
+    float width = grid.width;
+    float height = grid.height;
 
-    if (ctx->effect_fallback.active && view->boundary_mut()->box_shadow) {
-        render_paint_boundary_emit_outer_shadows(pdf_active_paint_list(ctx), view, abs_x, abs_y);
-    }
-
-    if (render_paint_background(pdf_active_paint_list(ctx), ctx->ui_context, view,
-            {abs_x, abs_y, width, height}, RENDER_EXPORT_TARGET_PDF)) pdf_lower_paint_list(ctx);
-
-    if (render_paint_border_image(pdf_active_paint_list(ctx), ctx->ui_context,
-            view->boundary()->border, {abs_x, abs_y, width, height})) {
-        pdf_lower_paint_list(ctx);
-        return;
-    }
+    bool image_border = render_paint_boundary_layers(pdf_active_paint_list(ctx), ctx->ui_context,
+        view, {abs_x, abs_y, width, height}, RENDER_EXPORT_TARGET_PDF, ctx->effect_fallback.active);
+    pdf_lower_paint_list(ctx);
+    if (image_border) return;
 
     // Borders
     if (view->boundary()->border) {
@@ -1892,7 +1886,7 @@ static bool pdf_secondary_page(ViewTree* tree, const ViewPageBox* page,
         if (HPDF_Page_SetRotate(ctx->current_page, geometry.rotation) != HPDF_OK ||
             HPDF_Page_Concat(ctx->current_page, matrix.e11, matrix.e21, matrix.e12, matrix.e22, matrix.e13, matrix.e23) != HPDF_OK) return false;
     }
-    if (!layout_secondary_paint_page(tree, page, &ctx->paint_list) ||
+    if (!layout_secondary_paint_page(tree, page, &ctx->paint_list, true) ||
         !paint_ir_validate_or_log(&ctx->paint_list, "pdf secondary page")) return false;
     for (LayoutViewNode* child = page->node.first_child; child; child = child->next_sibling)
         pdf_record_fragment_semantics(ctx, tree->model->document, child);

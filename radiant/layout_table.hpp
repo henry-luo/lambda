@@ -1,11 +1,12 @@
 #pragma once
 #include <stddef.h>
+#include "scale.hpp"
 struct DomElement;
 struct CollapsedBorder;
 struct ViewTable;
 
 // captions belong to the transparent wrapper, outside the grid's border box.
-bool layout_table_grid_block_bounds(ViewTable* table, float* top, float* bottom);
+RdtLogicalRect layout_table_grid_rect(const ViewTable* table);
 
 size_t layout_table_cell_colspan(DomElement* element);
 size_t layout_table_column_span(DomElement* element);

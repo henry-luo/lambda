@@ -611,5 +611,8 @@ const WellKnownNameRecord g_well_known_markup_names[] = {
     { { 0xE6F5F12Cu, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x0000025Fu }, 6u, 0x05u, "geomap" },
     { { 0x750F8754u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000260u }, 18u, 0x05u, "-webkit-box-orient" },
     { { 0xDEA00619u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000261u }, 21u, 0x05u, "hyphenate-limit-chars" },
+    { { 0x815DFA76u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000262u }, 4u, 0x05u, "page" },
+    { { 0xA5D6CCD5u, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000263u }, 10u, 0x05u, "string-set" },
+    { { 0x41A2492Eu, UINT32_MAX, 0, NAME_KEY_STRING, 0, 0x00000264u }, 15u, 0x05u, "footnote-policy" },
 };
 const size_t g_well_known_markup_name_count = sizeof(g_well_known_markup_names) / sizeof(g_well_known_markup_names[0]);

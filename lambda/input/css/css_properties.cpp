@@ -498,6 +498,11 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_OUTLINE_COLOR, "outline-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "invert", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_OUTLINE_OFFSET, "outline-offset", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
 
+    // page-flow metadata is cascaded with ordinary element declarations.
+    {CSS_PROPERTY_PAGE, "page", PROP_TYPE_STRING, PROP_INHERIT_YES, "auto", false, false, NULL, 0, NULL, NULL},
+    {CSS_PROPERTY_STRING_SET, "string-set", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, NULL, NULL},
+    {CSS_PROPERTY_FOOTNOTE_POLICY, "footnote-policy", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+
     // Page Break Properties
     {CSS_PROPERTY_BREAK_BEFORE, "break-before", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_BREAK_AFTER, "break-after", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},

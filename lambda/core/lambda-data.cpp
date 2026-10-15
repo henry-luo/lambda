@@ -1206,8 +1206,9 @@ Item map_shape_field_to_item(void* map_data, const ShapeEntry* field) {
         Map* nested = map_shape_field_to_map(map_data, field);
         return nested ? (Item){.map = nested} : ItemNull;
     }
-    LaneStorageDesc lane = {};
-    if (shape_entry_uses_native_lane(field, &lane)) {
+    // one immutable descriptor serves nullable admission and the ordinary storage projection (D3.4.6).
+    const LaneStorageDesc& lane = *shape_entry_storage(field);
+    if (field->type && lane_desc_is_nullable_native(&lane)) {
         if (lane.kind == LANE_STORAGE_INT) {
             return {.item = lambda_int_box_lane(*(int64_t*)field_ptr)};
         }
@@ -1242,7 +1243,7 @@ Item map_shape_field_to_item(void* map_data, const ShapeEntry* field) {
         log_error("map native lane: invalid nullable bool payload %u", stored);
         return ItemError;
     }
-    return map_field_to_item(field_ptr, shape_entry_storage_type_id(field));
+    return map_field_to_item(field_ptr, (TypeId)lane.value_domain);
 }
 
 bool map_shape_field_store_native_lane(void* field_ptr, const ShapeEntry* field,

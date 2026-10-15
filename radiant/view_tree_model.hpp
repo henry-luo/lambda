@@ -20,11 +20,11 @@ struct BlockProp;
 struct StyleTree;
 struct ViewCssStyle;
 struct ViewCssContext;
-struct ViewCssContainerState;
 struct PagedComposition;
 struct ViewPageStyle;
 struct PaintGlyphRun;
 struct PaintImageBox;
+struct PaintList;
 struct ViewModelCheckpoint;
 struct ViewPageGeneration;
 struct ViewNativeLease;
@@ -100,6 +100,8 @@ struct LayoutViewNode {
     size_t text_start, text_length;
     lam::Up<PaintGlyphRun> glyph_run;
     lam::Up<PaintImageBox> image_box;
+    lam::Up<const PaintList> paint_before, paint_after;
+    lam::Up<const PaintList> paint_before_pdf;
     lam::Up<ViewCssStyle> computed_style;
     lam::Up<BoundaryProp> computed_boundary;
     lam::Up<const ViewTableRange> table_range;
@@ -112,6 +114,8 @@ struct LayoutViewNode {
     float border_outset[4];
     bool first_fragment, last_fragment;
     bool paint_box;
+    CssEnum display_inner;
+    bool hidden;
 };
 
 struct ViewNodeState {
@@ -126,8 +130,6 @@ struct ViewNodeState {
     lam::Up<LayoutViewNode> first_occurrence;
     lam::Up<LayoutViewNode> last_occurrence;
     size_t occurrence_count;
-    float container_width, container_height;
-    bool container_measured;
     lam::Up<const char> grid_used_rows, grid_used_columns; // generation arena owns resolved track text
 };
 
@@ -213,7 +215,6 @@ struct ViewTreeModel {
     lam::Own<Arena> arena;
     lam::Own<hashmap> source_states;
     lam::Own<ViewCssContext> css;
-    lam::Own<ViewCssContainerState> containers;
     lam::Own<PagedComposition> composition;
     // page-margin generated content as synthetic boxes in the document's node arena,
     // reused by each layout of the page flow (layout_paged.cpp, paged_margin_element)

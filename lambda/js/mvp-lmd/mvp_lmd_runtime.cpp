@@ -392,22 +392,23 @@ Item mvp_lmd_array_own_item(Array* array, int64_t index) {
 }
 extern "C" Item mvp_lmd_array_new(int64_t length) {
     if (length < 0 || length > UINT32_MAX) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
-    RootFrame roots(1);
-    if (!roots.valid()) return ItemError;
-    Rooted<Array*> result(roots, array());
-    if (!result.get()) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    if (js_array_should_keep_length_sparse(result.get(), length)) {
-        if (!mvp_lmd_array_prepare_sparse(result.get())) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-        result.get()->length = length;
-        return Item{.array = result.get()};
+    Array* result = array();
+    if (!result) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    // empty arrays need no handoff buffer; both growth helpers own precise roots during allocation.
+    if (!length) return Item{.array = result};
+    if (js_array_should_keep_length_sparse(result, length)) {
+        if (!mvp_lmd_array_prepare_sparse(result)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        result->length = length;
+        return Item{.array = result};
     }
-    if (!array_reserve_append_slots(result.get(), length))
+    if (!array_reserve_append_slots(result, length))
         return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     // reuse the shared non-value sentinel; explicit undefined remains an own element.
-    for (int64_t i = 0; i < length; i++) result.get()->items[i].item = ITEM_JS_DELETED_SENTINEL;
-    result.get()->length = length;
-    return Item{.array = result.get()};
+    for (int64_t i = 0; i < length; i++) result->items[i].item = ITEM_JS_DELETED_SENTINEL;
+    result->length = length;
+    return Item{.array = result};
 }
+
 extern "C" Item mvp_lmd_array_resize(Item owner, int64_t length) {
     if (length < 0 || length > UINT32_MAX) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
     RootFrame roots(1);
@@ -443,7 +444,7 @@ extern "C" Item mvp_lmd_array_resize(Item owner, int64_t length) {
 
 template<bool Mapping = false>
 static Item flatten_into(Item output, Item source, double depth, int nesting, int64_t* destination,
-        int64_t length = -1, Item* mapping = nullptr) {
+        bool fresh, int64_t length = -1, Item* mapping = nullptr) {
     // nested arrays remain roots across destination growth; holes have no flattened element.
     if (nesting > 512) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
     RootFrame roots(3);
@@ -470,10 +471,11 @@ static Item flatten_into(Item output, Item source, double depth, int nesting, in
         if (item_is_error(nested)) return nested;
         Item result;
         if (nested.item == ITEM_TRUE)
-            result = flatten_into(target.get(), element.get(), depth - 1, nesting + 1, destination);
+            result = flatten_into(target.get(), element.get(), depth - 1, nesting + 1, destination, fresh);
         else {
             if (*destination >= 9007199254740991LL) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-            result = mvp_lmd_array_index_property(target.get(), (*destination)++, element.get(), LMD_PROP_CREATE_DATA);
+            result = mvp_lmd_array_index_property(target.get(), (*destination)++, element.get(),
+                LMD_PROP_CREATE_DATA | (fresh ? LMD_PROP_OWN_STORAGE : 0));
         }
         if (item_is_error(result)) return result;
     }
@@ -488,11 +490,13 @@ extern "C" Item mvp_lmd_array_flatten(Item source, double depth, int64_t length,
         if (item_is_error(extent)) return extent;
         length = it2i(extent);
     }
-    Item output = mvp_lmd_array_species_create(input.get(), 0);
+    // intrinsic targets stay private throughout recursion; user species retain full definition semantics.
+    bool fresh = false;
+    Item output = mvp_lmd_array_species_create(input.get(), 0, &fresh);
     if (item_is_error(output)) return output;
     int64_t destination = 0;
-    if (mapping) return flatten_into<true>(output, input.get(), depth, 0, &destination, length, mapping);
-    return flatten_into(output, input.get(), isnan(depth) ? 0 : fmax(0, trunc(depth)), 0, &destination, length);
+    if (mapping) return flatten_into<true>(output, input.get(), depth, 0, &destination, fresh, length, mapping);
+    return flatten_into(output, input.get(), isnan(depth) ? 0 : fmax(0, trunc(depth)), 0, &destination, fresh, length);
 }
 
 extern "C" double mvp_lmd_number_pow(double base, double exponent) {

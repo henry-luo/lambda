@@ -137,6 +137,29 @@ TEST(PaintListTest, OwnershipPayloadsAreReleasedByClearAndDestroy) {
     EXPECT_EQ(destroy_list.capacity(), 0u);
 }
 
+static size_t borrowed_paint_image_releases;
+static void release_borrowed_paint_test_image(ImageSurface*) { borrowed_paint_image_releases++; }
+
+TEST(PaintListTest, BorrowedEditionCommandsKeepPayloadsUntilTheirOwnerLeavesScope) {
+    borrowed_paint_image_releases = 0;
+    ImageSurface image = {};
+    {
+        PaintList edition;
+        PaintGlyphRun run = {};
+        run.text = lam::up((const char*)mem_strdup("retained edition", MEM_CAT_RENDER));
+        ASSERT_NE(run.text, nullptr);
+        run.owned_text = lam::own((const char*)run.text);
+        paint_glyph_run(&edition, &run);
+        paint_draw_image_resource(&edition, &image, 0, 0, 10, 10, 255, nullptr, release_borrowed_paint_test_image);
+        for (size_t pass = 0; pass < 2; pass++) {
+            { PaintList transient; ASSERT_TRUE(paint_list_borrow_commands(&transient, &edition)); }
+            EXPECT_EQ(borrowed_paint_image_releases, 0u);
+            EXPECT_STREQ(edition.data()[0].glyph_run.text, "retained edition");
+        }
+    }
+    EXPECT_EQ(borrowed_paint_image_releases, 1u);
+}
+
 TEST_F(DisplayListTest, BoundsIntersectorPreservesReplayStateCommands) {
     DisplayItem* clip = dl_alloc_item(&dl);
     ASSERT_NE(clip, nullptr);

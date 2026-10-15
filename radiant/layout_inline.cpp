@@ -999,6 +999,64 @@ static void inline_text_line_range(View* view, ViewSpan* whitespace_context, boo
     }
 }
 
+struct InlinePaintLine { int line; RdtLogicalRect rect; };
+struct InlinePaintLines {
+    ViewSpan* span;
+    lam::ArrayList<InlinePaintLine> lines{MEM_CAT_LAYOUT, 0};
+};
+
+static bool inline_paint_line_collect(DomNode* node, void* context) {
+    auto* collected = (InlinePaintLines*)context;
+    if (node->view_type != RDT_VIEW_TEXT || view_is_collapsed_whitespace_text((View*)node)) return true;
+    for (DomNode* parent = node->parent; parent && parent != collected->span; parent = parent->parent)
+        if (parent->view_type != RDT_VIEW_INLINE) return true;
+    for (TextRect* rect = node->as_text()->rect; rect; rect = rect->next) {
+        if (rect->width <= 0.0f || rect->height <= 0.0f) continue;
+        InlinePaintLine* line = nullptr;
+        for (InlinePaintLine& candidate : collected->lines)
+            if (candidate.line == rect->line_number) { line = &candidate; break; }
+        if (!line) {
+            if (!collected->lines.append({rect->line_number, {rect->x, rect->y, rect->width, rect->height}})) return false;
+        } else {
+            float right = fmaxf(line->rect.x + line->rect.width, rect->x + rect->width);
+            float bottom = fmaxf(line->rect.y + line->rect.height, rect->y + rect->height);
+            line->rect.x = fminf(line->rect.x, rect->x); line->rect.y = fminf(line->rect.y, rect->y);
+            line->rect.width = right - line->rect.x; line->rect.height = bottom - line->rect.y;
+        }
+    }
+    return true;
+}
+
+bool layout_inline_visit_fragments(ViewSpan* span, LayoutInlineFragmentFn visitor, void* context) {
+    if (!span || !visitor) return false;
+    InlinePaintLines collected = {span};
+    if (!view_geometry_walk_dom_tree(span, inline_paint_line_collect, &collected)) return false;
+    if (collected.lines.empty()) return visitor(context, {span->x, span->y, span->width, span->height}, true, true, 0.0f, span->width);
+    const BoundaryProp* boundary = span->boundary();
+    bool clone = span->blk && span->block()->box_decoration_break == CSS_VALUE_CLONE;
+    float extent = 0.0f;
+    for (size_t index = 0; index < collected.lines.size(); index++) {
+        bool first = index == 0, last = index + 1 == collected.lines.size();
+        RdtLogicalRect& rect = collected.lines[index].rect;
+        if (boundary) {
+            const BorderProp* border = boundary->border;
+            float left = first || clone ? boundary->padding.left + (border ? border->width.left : 0.0f) : 0.0f;
+            float right = last || clone ? boundary->padding.right + (border ? border->width.right : 0.0f) : 0.0f;
+            float top = boundary->padding.top + (border ? border->width.top : 0.0f);
+            float bottom = boundary->padding.bottom + (border ? border->width.bottom : 0.0f);
+            rect.x -= left; rect.y -= top; rect.width += left + right; rect.height += top + bottom;
+        }
+        extent += rect.width;
+    }
+    float offset = 0.0f;
+    for (size_t index = 0; index < collected.lines.size(); index++) {
+        RdtLogicalRect rect = collected.lines[index].rect;
+        if (!visitor(context, rect, index == 0, index + 1 == collected.lines.size(), offset, extent)) return false;
+        offset += rect.width;
+    }
+    return true;
+}
+
 static bool inline_view_text_differs_from_y(View* view, float y) {
     for (View* child = view; child; child = child->next()) {
         if (child->view_type == RDT_VIEW_TEXT) {

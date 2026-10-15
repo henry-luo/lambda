@@ -2216,3 +2216,252 @@ Final replay: `jq-final/comparison.json`; complete validation inventory:
 Overlapping validation and explicitly recorded pauses exclude these jq runs
 from performance acceptance. Eleven previously confirmed non-jq regressions
 remain open; no full-population MVP Test262 score is refreshed.
+
+### Eleven-regression follow-up (2026-10-15)
+
+The next direct repair pass uses immutable release-MIR executables, archived
+benchmark sources/oracles and their original self timers. Published Results3–9
+remain unchanged. Evidence is under `temp/mvp_perf_eleven_20261015/`.
+
+Implemented repairs follow **D8.4.1v2**, **D3.4.3v5** and **D5.2–D5.3**:
+
+- Recover function identity, scalar domains and fixed prototype setup only when
+  the source proves that reflection cannot mutate or escape the relevant global
+  bindings. Dynamic code, reflective writers, computed names without a proof,
+  intrinsic aliases and property iteration targets keep conservative dispatch.
+  The new compiler helper is `plan_fixed_global_bindings`; it reuses the existing
+  representation solver, key proof and builtin catalog. Published functions
+  retain their boxed entry ABI (**D8.1.3v24**).
+- Give `for…in` targets their string domain while joining other writes. Skip
+  scalar-home work for proven nonnumeric bindings and closed nonnumeric returns.
+  Optional numeric equality and immediate-integer equality retain undefined,
+  NaN and signed-zero behavior (**D2.2.5**, **D5.2–D5.3**).
+- True, passive ordered loop conditions establish local numeric presence until
+  a write. Nested backedges discard enclosing facts; alternative branches start
+  from the same facts and intersect them on exit. This removes named-property
+  fallback from Brainfuck's guarded typed-array reads without conflating NaN
+  and undefined (**D2.2.5**, **D8.4.1v2**).
+- Extend that proof to integral local writes: `integer_binding_writes` checks
+  every source write, and `ordered_integer_range` proves a bounded integer range
+  inside a true ordered loop condition. Fractional, captured and unsupported
+  writes keep the original Number path. The existing property-key conversion
+  can omit a redundant integer roundtrip for a proven integral domain while
+  retaining bounds, NaN/infinity and named-property fallbacks. Integer values
+  are materialized at index consumers; arithmetic keeps the binding's physical
+  lane. An intermediate eager conversion regressed Triangl by introducing
+  float-to-integer/add/integer-to-float on every counter increment.
+  The shared compiler helper `materialize_integer_operand` applies the proof
+  at array/property indices, character indices and bitwise consumers, reusing
+  `scalar_reg`. Optional, fractional and nonfinite operands retain their
+  existing conversions.
+- Own presence checks return without reading a getter or consulting prototypes.
+  Prototype walks reuse the active library through the promoted existing
+  `mvp_lmd_get_prototype_with_library` function. Checked global reads resolve an
+  own descriptor once; inherited/exotic misses preserve observable Has/Get
+  order and restart Get after a trap. The existing property dispatcher uses
+  an internal `LMD_PROP_GET_BINDING` operation, with precisely rooted misses.
+- The existing species allocator reports whether its result is a private
+  intrinsic array. Map/filter, slice/concat/splice, copying reversal and recursive
+  flat/flatMap reuse the existing physical array store for those results. Custom
+  species, proxies, aliased output and source-side getter effects retain full
+  property semantics. The proof is local to the operation; no container flag
+  or cache is added.
+- Add a `preserve_storage` option to Lambda's existing resolved map setter.
+  JS assignment/descriptor paths can retain compatible float, nullable Map and
+  generic Item storage, using the existing field writers. This prevents repeated
+  whole-global-object reshaping when a counter alternates between integer and
+  float encodings. Other callers explicitly keep their previous policy.
+- The shared TypeMap field index also records whether any string key begins
+  with a digit. A length certificate distinguishes complete summaries from
+  unknown or incompletely maintained ones; those retain the original scan.
+  Array edit checks can skip scanning every named prototype method, while
+  still reading live links, descriptors and extensibility. This is ordinary
+  shape metadata, with no per-site cache (**D3.4.3v5**, **D8.4.1v2**).
+
+The retained `integer-consumers` release has SHA-256
+`7edac2ef51b9341c5dd810978c216c69bc2015ac9d7926f22b644e7b388fdedc`.
+Its rebuilt candidate archives pass **664/664** MVP tests and
+**16/16** focused forced-GC/poisoning checks. The same CLI passes **1,957/1,957**
+selected canonical Test262 cases and **1,716/1,716** additional strict variants,
+without isolated retries. `integer-consumers-test-artifacts.json` records the
+actual executable and archive hashes. Earlier private GTest links to a stale
+archive are superseded; their counts are not candidate evidence.
+
+The preceding shared-runtime pin additionally passes **4,912 canonical + 4,632
+strict** selected cases, after isolated replay of contended watchdog losses.
+The full LJS baseline passes **40,261/40,261**. The integrated Lambda baseline
+records **7,130/7,132** checks: the pre-existing chart dashboard half-pixel
+wordcloud mismatch and an outer GC-suite watchdog remain in that raw aggregate.
+The GC timeout collapses 313 cases into one failed row; a separate pinned release
+replay passes **313/313**. The LaTeX corpus passes in this aggregate. These broad
+gates precede only the final MVP compiler adjustment; shared runtime sources are
+unchanged. No golden or harness was changed, and selected variants do not refresh
+the archived whole-population MVP coverage score.
+
+Final performance capture: `temp/mvp_perf_eleven_20261015/final-retained/`.
+All **15/15** workload outputs pass. Each seven-round comparison rotates the
+retained candidate, the pre-repair pin and the historical release, excludes
+warmup, preserves the original timing contract and checks source/binary hashes.
+Timing uses script self timers or the CLI execution-only timer where that is
+the archived contract; process wall time is excluded.
+Historical controls use Result9 except Text Search and Hashmap, which use the
+Phase34 entry release. Process activity and overlapping background work are
+recorded separately; the report retains the raw samples and paired intervals.
+
+| Workload | Retained ms | Pre-repair ms | Historical ms | Historical difference |
+|---|---:|---:|---:|---:|
+| awfy/deltablue | 53.794 | 54.400 | 50.825 | +5.84% |
+| awfy/nbody | 45.728 | 45.886 | 44.015 | +3.89% |
+| jetstream/splay | 62.227 | 182.943 | 59.622 | +4.37% |
+| js_mvp_lmd/object_delete | 0.873 | 0.866 | 0.819 | +6.59% |
+| julia/formatted_output | 103.992 | 104.052 | 103.218 | +0.75% |
+| kostya/brainfuck | 42.445 | 47.124 | 41.775 | +1.60% |
+| text/fast_diff | 183.222 | 607.139 | 198.428 | -7.66% |
+| text/microdiff | 108.575 | 149.557 | 100.604 | +7.92% |
+| text/prettier_ast | 512.706 | 550.592 | 515.232 | -0.49% |
+| text/text_search | 4222.180 | 5771.065 | 5063.201 | -16.61% |
+| jetstream/hashmap | 482.459 | 489.496 | 465.744 | +3.59% |
+
+No competing build/test activity was observed in the final sweep. Busy
+system/editor processes overlap some rounds; whole-round sensitivity results
+are retained. Every final Text Search round overlaps background CPU activity,
+so that row is indicative; earlier quiet captures independently establish its
+improvement.
+
+The four controls are retained in the same capture, including Triangl at
+121.223 vs 154.481 ms. An intermediate eager integer conversion regressed
+Triangl to 209 ms and was rejected; the retained consumer-only conversion
+removes that recurrence. Microdiff, Splay, DeltaBlue, NBody, Hashmap and
+object-delete still need further tuning against their historical controls.
+Brainfuck is near parity (+1.6% with an interval including parity); the small
+formatted-output difference varies across captures. Performance acceptance
+remains open; this is not a new complete 88-workload replay.
+
+### Remaining-case tuning (2026-10-15)
+
+This continuation compares private release-MIR builds against the clean merged
+checkout `1f25b6c53` and the same historical controls. Evidence lives under
+`temp/mvp_perf_remaining_20261015/`; Results3–9 and the archived coverage score
+are unchanged.
+
+The retained candidate changes existing routes, adding no helper or per-site
+cache (**D8.4.1v2**):
+
+- Numeric consumers test the existing property's scalar storage lane before
+  loading pointer metadata. Optional, nonnumeric and legacy pointer cases keep
+  shared coercion/readers (**D3.4.5**, **D5.2–D5.3**).
+- Shared shape lookup accepts a nonzero matching ordinary `NameId` as a proof
+  of equality, retaining byte comparison for absent or differing IDs. Shape
+  transitions reuse the pooled record's hash; canonicalization, Symbol/private
+  identity and chain ownership checks are unchanged (**D3.4.4v4**,
+  **D4.6.1v4**, **D3.4.3v5**).
+- The fixed-property dispatcher specializes its existing implementation for
+  `Get` and callee reads. The compiler's existing closed-unit proof selects
+  that route; reflective units keep general dispatch. Both variants share
+  the same source for prototype, descriptor and ownership semantics.
+
+Rejected experiments remain captured: resolved prototype-face reuse, inline
+null-container reads, pointer-based spelling shortcuts, planned-name allocation/
+lexical setter changes, and specializing the reflective `Get` dispatcher.
+The last made Microdiff slower despite improving Splay, so only the fixed
+dispatcher specialization proceeds. Scaled sampling workloads are diagnostic
+only; acceptance uses original benchmark work and self-timing contracts.
+
+The retained `fixed-reads` release has SHA-256
+`2c266e7ac7bddb251a8f6afdf623a18c074a1863b38881ee0c22b2f5d6bd7697`.
+All **15/15** benchmark outputs pass in the final seven-round rotating comparison;
+all source/binary guards match. No new slowdown versus the clean pre-change
+control has a 95% paired interval wholly above parity. NBody improves **5.0%**
+and Splay **5.3%**, with both historical intervals including parity.
+
+| Workload | Candidate ms | Pre-change ms | Historical ms | Historical difference |
+|---|---:|---:|---:|---:|
+| NBody | 44.101 | 46.419 | 44.000 | +0.23% |
+| Splay | 61.207 | 64.619 | 61.830 | -1.01% |
+| DeltaBlue | 53.423 | 53.610 | 50.624 | +5.53% |
+| object-delete | 0.862 | 0.858 | 0.814 | +5.90% |
+| Microdiff | 110.337 | 110.208 | 101.780 | +8.41% |
+| Hashmap | 489.146 | 489.909 | 465.907 | +4.99% |
+
+The historical control is Result9 except Hashmap/Text Search, which retain the
+Phase34-entry control. Monitoring records zero competing build/test observations
+and busy background processes in **60/96** observations. Raw intervals and
+samples remain in `final-retained/comparison.json`; this is a focused comparison,
+not a new 88-workload sweep. Four historical gaps therefore remain open.
+
+Freshly rebuilt release archives pass **665/665** MVP tests, **13/13** focused
+forced-GC/poisoning checks, **94/94** shared map-building and **23/23** name-pool
+tests. The private CLI passes **1,957/1,957** selected canonical Test262 cases
+and **1,716/1,716** strict variants without retries. The full LJS baseline passes
+**40,261/40,261**, also without retries; the integrated GC stress sweep passes
+**313/313**.
+
+The Lambda aggregate records **7,441/7,445**. Three checks fail through
+`test/lambda/pdf/output_pages.ls`; the clean pre-change pin and candidate both
+produce the same page-fragment traversal failure in interpreter, JIT and auto
+tiers. The fourth is the chart dashboard's existing half-pixel wordcloud golden
+mismatch: both pins produce byte-identical output. Their separate replays,
+untouched baseline failures and provenance are retained in `validation.json`,
+`pdf-control-replay.json`, `chart-control-replay.json` and `baseline-results/`.
+No golden, test deadline or Test262 harness was changed.
+
+
+### Remaining-case ownership and projection tuning (2026-10-15)
+
+This continuation starts at `33c0e9c0e` and retains the prior final executable as
+its clean control: all 1,454 production input hashes match. It adds no helper,
+container flag, public ABI or per-site cache (**D8.4.1v2**).
+
+- Empty JS arrays reuse Lambda's empty `array()` without allocating an unused
+  handoff buffer. Nonempty construction delegates rooting to the existing dense
+  reserve and sparse preparation helpers. Object headers stay fixed, each
+  collecting helper retains its owner, and publication has no intervening
+  safepoint (**D4.3.1**, **D5.3.2–D5.3.3**). Root reservation failure transfers
+  control through the existing recovery frame; it cannot continue unrooted.
+- Key-only projections do not invoke getters, so they keep their descriptor
+  snapshot. Value/entry projections retain live rechecks after callbacks.
+  New cases cover array holes, sparse and typed indices, mapped arguments,
+  hidden/accessor properties, key ordering and mutation during `Object.values`.
+- Shared shaped-field reads resolve `LaneStorageDesc` once and reuse it for
+  nullable admission and ordinary decoding (**D3.4.6**).
+- The existing reflective property template specializes callee reads; ordinary
+  Get and other operations retain general dispatch. Shared in-place deletion
+  no longer retains a scalar when it only publishes a new layout (**D3.4.5**).
+
+Receiver-kind reuse and earlier hash-mismatch rejection were measured and
+removed for lack of a consistent benefit. Benchmark sources, output contracts,
+historical controls and published Results3–9 are unchanged. The final paired release-MIR
+capture uses nine measured rounds plus an excluded warmup, rotating candidate,
+clean pre-change and historical controls. All **15/15** output/backend contracts
+pass; no paired 95% interval shows a new regression against the pre-change pin.
+
+| Workload | Candidate ms | Pre-change ms | Historical ms | vs pre-change | vs historical |
+|---|---:|---:|---:|---:|---:|
+| Object-delete | 0.836 | 0.867 | 0.827 | -3.6% | +1.1% |
+| Hashmap | 479.313 | 491.490 | 469.153 | -2.5% | +2.2% |
+| Microdiff | 108.190 | 109.905 | 101.336 | -1.6% | +6.8% |
+| DeltaBlue | 52.616 | 53.108 | 50.548 | -0.9% | +4.1% |
+| Splay | 57.834 | 59.240 | 59.892 | -2.4% | -3.4% |
+
+Object-delete's historical ratio interval is **0.989–1.024**, consistent with
+parity. DeltaBlue's small pre-change improvement is inconclusive. Microdiff,
+DeltaBlue and Hashmap retain statistically clear historical gaps; performance
+acceptance remains open. Historical controls are Result9 except Hashmap/Text
+Search, which use Phase34 entry. Monitoring records **0/117** competing build/test
+observations and **17/117** with busy background activity. This focused capture
+does not refresh the whole-benchmark results or the whole-population MVP score.
+
+Fresh release archives pass **667/667** MVP tests, **94/94** shared map-building
+and **23/23** name-pool tests. Forced GC with freed-memory poisoning passes
+**17/17** focused checks every five allocations and **3/3** ownership checks
+every allocation. The private CLI passes **1,957/1,957** canonical cases and
+**1,716/1,716** strict variants without retries. The full LJS baseline passes
+**40,261/40,261** with zero regressions and no isolated retries; the integrated
+MIR GC stress sweep passes **313/313**. Lambda's combined aggregate records
+**7,443/7,447** (runtime **5,331/5,335**, input **2,112/2,112**). The four
+failures retain the same two pre-existing causes: three PDF page-walker checks
+and the chart dashboard's half-pixel wordcloud golden mismatch. Fresh control
+replays confirm PDF fails identically in interpreter/JIT/auto on both pins and
+chart output is byte-identical. No expected output, harness or deadline changed.
+Raw samples, confidence intervals, provenance, rejected experiments and commands
+are under `temp/mvp_perf_remaining2_20261015/REPORT.md`.

@@ -13648,10 +13648,13 @@ static bool container_move_to_type(void** type_slot, void** data_slot, int* cap_
              storage == LMD_TYPE_BOOL || storage == LMD_TYPE_UNDEFINED || storage == LMD_TYPE_STRING ||
              storage == LMD_TYPE_ARRAY || storage == LMD_TYPE_MAP));
         if (compatible && immediate_store && (!changed_entry || replacement)) {
-            uint64_t value_home = 0;
-            Item held = lambda_item_adopt_scalar_home(new_value, &value_home);
-            if (replacement && !map_field_store((char*)*data_slot + replacement->byte_offset, held, storage))
-                return false;
+            // deletion publishes only the new layout; it has no scalar value to retain.
+            if (replacement) {
+                uint64_t value_home = 0;
+                Item held = lambda_item_adopt_scalar_home(new_value, &value_home);
+                if (!map_field_store((char*)*data_slot + replacement->byte_offset, held, storage))
+                    return false;
+            }
             *type_slot = new_type;
             return true;
         }
@@ -13908,7 +13911,8 @@ static bool container_retype_field(Container* owner, TypeId kind, void** type_sl
 // D3.4.3/D3.4.5: share mutation without repeating admission around the resolved-field entry.
 enum MapShapeKeyMode { MAP_SHAPE_RESOLVED, MAP_SHAPE_KEY, MAP_SHAPE_TEXT };
 template<MapShapeKeyMode key_mode>
-static inline bool map_shape_set_impl(Map* map, String* key, Item value, ShapeEntry* field) {
+static inline bool map_shape_set_impl(Map* map, String* key, Item value, ShapeEntry* field,
+        bool preserve_storage = false) {
     TypeMap* type = (TypeMap*)map->type;
     if (!type || type->js_meta || !key) return false;
     // lookup cannot change the value's type; retain its admission result across the lookup call.
@@ -13919,6 +13923,19 @@ static inline bool map_shape_set_impl(Map* map, String* key, Item value, ShapeEn
     if (!field) return map_extend_open_shape(Item{.map = map}, Item{.item = s2it(key)}, value);
     if (field->byte_offset >= 0 && field->type->type_id == tid)
         return map_field_store((char*)map->data + field->byte_offset, value, tid);
+    if (preserve_storage && field->byte_offset >= 0) {
+        // JS Number writes and generic slots need no physical shape change (D3.4.3v5).
+        void* destination = (char*)map->data + field->byte_offset;
+        const LaneStorageDesc* storage = shape_entry_storage(field);
+        if (storage->kind == LANE_STORAGE_TYPED_ITEM && storage->value_domain == LMD_TYPE_ANY)
+            return map_field_store(destination, value, LMD_TYPE_ANY);
+        if (field->type == &TYPE_FLOAT && tid == LMD_TYPE_INT) {
+            map_field_store_int_as_float(destination, value);
+            return true;
+        }
+        if (field->type == &TYPE_MAP && tid == LMD_TYPE_NULL)
+            return map_field_store(destination, value, LMD_TYPE_NULL);
+    }
     return container_retype_field(map, LMD_TYPE_MAP, &map->type, &map->data,
         &map->data_cap, field, value);
 }
@@ -13931,8 +13948,8 @@ bool map_shape_set_text(Map* map, String* key, Item value) {
     return map_shape_set_impl<MAP_SHAPE_TEXT>(map, key, value, NULL);
 }
 
-bool map_shape_set_resolved(Map* map, String* key, ShapeEntry* field, Item value) {
-    return map_shape_set_impl<MAP_SHAPE_RESOLVED>(map, key, value, field);
+bool map_shape_set_resolved(Map* map, String* key, ShapeEntry* field, Item value, bool preserve_storage) {
+    return map_shape_set_impl<MAP_SHAPE_RESOLVED>(map, key, value, field, preserve_storage);
 }
 
 template<MapShapeKeyMode key_mode>
