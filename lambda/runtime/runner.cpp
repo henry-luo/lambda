@@ -342,8 +342,8 @@ void lambda_home_init(void) {
     const char* env = shell_getenv("LAMBDA_HOME");
     if (env && env[0]) g_lambda_home = env;
 #ifndef LAMBDA_NO_LATEX
-    // the TeX engine's bundled resources ship in the package tree (Lambda_Design_TeX_Engine §4)
-    char* tex_dir = lambda_home_path("package/latex/tex");
+    // bundled TeX resources follow the document package namespace (D7.2.4v3, D7.2.7v2).
+    char* tex_dir = lambda_home_path("package/doc/latex/tex");
     tex::set_resource_dir(tex_dir);
     if (tex_dir) mem_free(tex_dir);
 #endif

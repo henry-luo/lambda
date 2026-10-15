@@ -1,6 +1,6 @@
 // Static tags follow S2.4.3v3; one constructor registry prevents source-controlled HTML.
 import c: .common
-import html: lambda.latex.to_html
+import html: lambda.doc.latex.to_html
 import presentation: .presentation
 
 let tags = {

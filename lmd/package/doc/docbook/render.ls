@@ -4,7 +4,7 @@ import h: .html
 import tables: .tables
 import gentext: .gentext
 import inlines: .inlines
-import strings: lambda.latex.util
+import strings: lambda.doc.latex.util
 
 let suppressed = ["info","title","subtitle","titleabbrev","colspec","spanspec","textobject","alt","indexterm"]
 let divisions = ["set","book","part","reference","partintro"]

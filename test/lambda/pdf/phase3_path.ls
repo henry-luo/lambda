@@ -10,8 +10,8 @@
 //   - curve: c               (cubic Bezier as part of a stroked path)
 //   - h:     close subpath
 
-import path:  lambda.pdf.path
-import color: lambda.pdf.color
+import path:  lambda.doc.pdf.path
+import color: lambda.doc.pdf.color
 
 // helper to build an operand record matching pdf_parse_content_stream's shape
 fn name(s)     { { kind: "name",   value: s } }

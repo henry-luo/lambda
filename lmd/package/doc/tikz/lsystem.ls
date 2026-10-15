@@ -1,5 +1,5 @@
 // Bounded anonymous L-system turtle; rewriting and geometry are script policy.
-import util: lambda.latex.util
+import util: lambda.doc.latex.util
 import opts: .options
 
 fn rule_pair(raw) map^ {

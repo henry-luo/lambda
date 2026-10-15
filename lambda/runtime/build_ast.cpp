@@ -13156,16 +13156,9 @@ static void direct_complete_function(Transpiler* tp, SourceSpan span,
 }
 
 static bool append_shipped_package_module_path(StrBuf* path, StrView module) {
-    const char* namespace_prefix = NULL;
-    const char* source_prefix = "";
-    if (strview_starts_with(&module, "lambda.doc.math.")) {
-        namespace_prefix = "lambda.doc.math.";
-        source_prefix = "math/";
-    } else if (strview_starts_with(&module, "lambda.") &&
-            !strview_starts_with(&module, "lambda.math.") &&
-            !strview_starts_with(&module, "lambda.sys.")) {
-        namespace_prefix = "lambda.";
-    } else {
+    if (!strview_starts_with(&module, "lambda.") ||
+            strview_starts_with(&module, "lambda.math.") ||
+            strview_starts_with(&module, "lambda.sys.")) {
         return false;
     }
 
@@ -13183,11 +13176,10 @@ static bool append_shipped_package_module_path(StrBuf* path, StrView module) {
         }
     }
 
-    // D7.2.4 separates the public lambda.* namespace from the packaged
-    // source layout, so logical package names never depend on source moves.
-    size_t prefix_len = strlen(namespace_prefix);
+    // D7.2.4v2: shipped source mirrors every component below lambda.*.
+    size_t prefix_len = strlen("lambda.");
     StrView physical = {module.str + prefix_len, module.length - prefix_len};
-    strbuf_append_format(path, "%s/package/%s", g_lambda_home, source_prefix);
+    strbuf_append_format(path, "%s/package/", g_lambda_home);
     strbuf_append_replace_char_n(path, physical.str, physical.length, '.', '/');
     return true;
 }
@@ -13199,7 +13191,7 @@ bool lambda_import_is_relative(StrView module) {
 
 // S16.9.8: `.a.b` resolves beside the importer, and each leading `~~` is one
 // parent step (S2.4.1v2), so `~~.~~.a` is `../../a`. A bare root names a
-// package: only `lambda.*` resolves to source today (D7.2.4); every other root
+// package: only `lambda.*` resolves to source today (D7.2.4v2); every other root
 // is reserved for the package registry and yields NULL, never a cwd file.
 char* lambda_resolve_import_module_path(const char* base_directory,
         StrView module) {

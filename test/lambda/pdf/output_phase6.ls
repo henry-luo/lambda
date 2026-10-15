@@ -1,7 +1,7 @@
-import pdf: lambda.pdf.output
-import resolve: lambda.pdf.resolve
+import pdf: lambda.doc.pdf.output
+import resolve: lambda.doc.pdf.resolve
 import radiant
-import schema: lambda.pdf.view_schema
+import schema: lambda.doc.pdf.view_schema
 
 fn make_pdf() element^ => pdf.render("test/html/pdf_lambda_phase6.html", {width: 300, height: 260})^
 

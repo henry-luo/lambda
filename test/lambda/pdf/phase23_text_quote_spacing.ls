@@ -1,7 +1,7 @@
 // Phase 23 — text showing advances and double-quote spacing operands.
 
-import text: lambda.pdf.text
-import util: lambda.pdf.util
+import text: lambda.doc.pdf.text
+import util: lambda.doc.pdf.util
 
 fn name(s) { { kind: "name", value: s } }
 fn str(s)  { { kind: "string", value: s } }

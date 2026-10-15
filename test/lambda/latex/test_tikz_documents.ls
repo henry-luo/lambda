@@ -1,5 +1,5 @@
 // Full-document fixtures exercise LaTeX source preservation and plot rendering.
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 import tikz: lambda.doc.tikz.tikz
 
 fn children_named(node, tag) => [for (child in node

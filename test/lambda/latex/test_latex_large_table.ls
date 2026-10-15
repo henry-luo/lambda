@@ -1,4 +1,4 @@
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 let rows = [for (i in 1 to 400) "left" ++ string(i) ++ " & right" ++ string(i) ++ "\\\\\n"] |> join("")
 let source = "\\documentclass{article}\\begin{document}\\begin{tabular}{lr}" ++ rows ++

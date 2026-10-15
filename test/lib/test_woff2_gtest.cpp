@@ -146,7 +146,7 @@ TEST_F(Woff2Test, DetectFormatExt_Null) {
 // WPT valid WOFF2 file (small, ~980 bytes)
 static const char* WOFF2_WPT_VALID = "ref/wpt/css/WOFF2/support/valid-001.woff2";
 // KaTeX WOFF2 file (larger, ~26KB)
-static const char* WOFF2_KATEX     = "lmd/package/math/fonts/KaTeX_AMS-Regular.woff2";
+static const char* WOFF2_KATEX     = "lmd/package/doc/math/fonts/KaTeX_AMS-Regular.woff2";
 
 TEST_F(Woff2Test, DecompressWoff2_WPT) {
     size_t len = 0;

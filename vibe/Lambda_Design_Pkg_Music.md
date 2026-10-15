@@ -28,7 +28,7 @@ without revising the formal specifications:
 
 | Topic | Governing rulings | Application here |
 |---|---|---|
-| Source packages and namespace | [D7.2.1–D7.2.4, D7.2.6](../doc/Lambda_Formal_Design.md#d72-script-packages), S16.9.8 | Explicit `lambda.music` entry module; source distribution and ordinary imports |
+| Source packages and namespace | [D7.2.1–D7.2.4v2, D7.2.6](../doc/Lambda_Formal_Design.md#d72-script-packages), S16.9.8 | Explicit `lambda.music` entry module; source distribution and ordinary imports |
 | Pure computation and effects | [S12.1.1v2, S12.1.3](../doc/Lambda_Formal_Semantics.md#s121-the-one-bit-effect-system) | Score/layout transformations are `fn`; transport commands are `pn` |
 | Input snapshots and errors | S12.4.1v2, S14.3.1v2, [S7.4.2–S7.4.4](../doc/Lambda_Formal_Semantics.md#s74-the-three-failure-channels) | Reuse input/ZIP ownership; public fallible operations declare raised errors |
 | Host boundaries and IO | D7.1.1–D7.1.2v2, D7.4.6, D7.5.2–D7.5.3 | Central resource acquisition; fonts, UI, and audio through the Radiant host interface |
@@ -140,7 +140,7 @@ Phase 3 adds `score-timewise` through the same part/measure reader, composite
 meters with different denominators, and inference of omitted graphical note
 types using exact duration, dots and tuplet ratios. Existing strict XML and
 namespace rules remain in force. These are package policies (D7.2.5), with
-ordinary immutable score values (D7.2.4) and raised validation errors (S7.4.2).
+ordinary immutable score values (D7.2.4v2) and raised validation errors (S7.4.2).
 
 Lyrics preserve ordered text/elision fragments, verse identity, placement,
 visibility and extension endpoints. Verse lanes stay consistent across notes;
@@ -156,7 +156,7 @@ Otherwise, trimming each text-only fragment independently would concatenate
 adjacent words. This generic parse option exposes the parser's existing
 whitespace mechanism; its default remains unchanged. `from_xml` consumes the
 supplied tree without reconstructing text that its caller already discarded
-(D7.2.4/S8.1.2v2).
+(D7.2.4v2/S8.1.2v2).
 
 Lyric groups retain stable written IDs and member note IDs, while layout
 assigns verse lanes per staff/placement and measures text with the existing
@@ -176,7 +176,7 @@ and [extensions](https://www.w3.org/2021/06/musicxml40/musicxml-reference/elemen
 `import music: lambda.music` resolves to the explicit public entry module
 `lmd/package/music.ls`, with implementation modules under
 `lmd/package/music/`. There is no implicit directory index, following
-D7.2.4/D7.2.6 and the [package import conventions](../doc/Lambda_Packages.md#21-how-paths-resolve).
+D7.2.4v2/D7.2.6 and the [package import conventions](../doc/Lambda_Packages.md#21-how-paths-resolve).
 The package introduces neither a language keyword nor a new core `TypeId`.
 
 The listed public APIs exist for the bounded profile. `Score`, `Layout`, and `Performance` are
@@ -641,7 +641,7 @@ The following are integration points in the 2026-10-13 implementation:
 | [`input-xml.cpp`](../lambda/input/input-xml.cpp), `parse_xml_with_options` | XML parsing and strict/namespace validation; expose missing general options if needed |
 | [`input-zip.cpp`](../lambda/input/input-zip.cpp), [`Lambda_IO_Zip.md`](Lambda_IO_Zip.md) | Archive snapshot, member navigation, limits, and CRC checks for MXL |
 | [`chart/text.ls`](../lmd/package/chart/text.ls), `radiant.measure_text` | Batched shaping/measurement precedent; share generic primitives |
-| [`math/font.ls`](../lmd/package/math/font.ls), `radiant.math_metrics` | Font snapshot/geometry precedent; avoid copying math-specific policy |
+| [`math/font.ls`](../lmd/package/doc/math/font.ls), `radiant.math_metrics` | Font snapshot/geometry precedent; avoid copying math-specific policy |
 | [`RAD_14_SVG_Vector_Graph.md`](../doc/dev/radiant/RAD_14_SVG_Vector_Graph.md) | Existing SVG/vector rendering pipeline |
 | [`audio.cpp`](../radiant/audio.cpp), [`midi_player.cpp`](../radiant/midi_player.cpp) | Shared document-owned slots; encoded-audio service plus copied MIDI buffers and streaming PCM |
 | [`dom_api.def`](../lambda/dom/dom_api.def), `audio_*` / `midi_*` operations | Shared host surface and effect declarations |

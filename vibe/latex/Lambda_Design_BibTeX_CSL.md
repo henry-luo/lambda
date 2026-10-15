@@ -1,20 +1,20 @@
-# BibTeX and CSL citation processing in `lambda.latex`
+# BibTeX and CSL citation processing in `lambda.doc.latex`
 
-**Status:** Design proposal with an initial bounded implementation, 2026-10-10. The user authorized implementation in `lambda.latex`. Full conformance and the remaining completion gates are tracked in the [implementation record](../impl/Lambda_Impl_BibTeX_CSL.md); this document does not change a formal ruling.
+**Status:** Design proposal with an initial bounded implementation, 2026-10-10. The user authorized implementation in `lambda.doc.latex`. Full conformance and the remaining completion gates are tracked in the [implementation record](../impl/Lambda_Impl_BibTeX_CSL.md); this document does not change a formal ruling.
 
 **Consolidation:** On 2026-10-12, §2.1 absorbed the built-in biblatex profile from the retired `Lambda_Pkg_Latex3.md`, and §4.1 was checked against the implemented API. The overall package design is [Lambda_Pkg_Latex.md](../Lambda_Pkg_Latex.md); the TeX engine, including the deferred biblatex style-file path, is [Lambda_Design_TeX_Engine.md](Lambda_Design_TeX_Engine.md).
 
 **Ruling (USER, 2026-10-12):** Phase IV M4, running biblatex style files on the TeX engine, is dropped. Documents that name a guide-level biblatex style reach the matching CSL style through the alias table in §7.4. That mapping is implemented and its four aliases are admitted against pinned biblatex output (§7.4).
 
-**Confirmed direction:** Use a CSL + citeproc pipeline comparable to Pandoc's. Implement the processor in **Lambda script**, as part of **`lambda.latex`**. Existing libraries may inform the implementation and supply reference results; they are not production runtime dependencies.
+**Confirmed direction:** Use a CSL + citeproc pipeline comparable to Pandoc's. Implement the processor in **Lambda script**, as part of **`lambda.doc.latex`**. Existing libraries may inform the implementation and supply reference results; they are not production runtime dependencies.
 
 **Scope:** Bibliography data, citation processing, and bibliography rendering through the existing LaTeX package and HTML/Radiant output path. Target standard CSL 1.0.2 in stages, with explicit coverage and limitations at every stage.
 
-**Formal linkage:** **D7.2.1–D7.2.4** cover source packages, immutable module bindings, and package resolution; **D7.1.2v2, D7.5.2** cover resource acquisition; **S1.8** keeps source and style data separate from executable programs; **S12.1.1v2, S12.4.1v2** cover pure processing and eager input values; **S7.4.1–S7.4.4** cover failures and located errors; **D4.5.1v4, D4.5.2** cover retaining output in Radiant. See the [formal design](../../doc/Lambda_Formal_Design.md), [formal semantics](../../doc/Lambda_Formal_Semantics.md), and [documentation convention](../../doc/Doc_Convention.md).
+**Formal linkage:** **D7.2.1–D7.2.4v3** cover source packages, immutable module bindings, and package resolution; **D7.1.2v2, D7.5.2** cover resource acquisition; **S1.8** keeps source and style data separate from executable programs; **S12.1.1v2, S12.4.1v2** cover pure processing and eager input values; **S7.4.1–S7.4.4** cover failures and located errors; **D4.5.1v4, D4.5.2** cover retaining output in Radiant. See the [formal design](../../doc/Lambda_Formal_Design.md), [formal semantics](../../doc/Lambda_Formal_Semantics.md), and [documentation convention](../../doc/Doc_Convention.md).
 
 ## 1. Proposal
 
-Extend `lambda.latex` with a reusable Lambda-script citeproc engine:
+Extend `lambda.doc.latex` with a reusable Lambda-script citeproc engine:
 
 > BibTeX/BibLaTeX or CSL JSON → normalized references + document citation requests → CSL style and locale evaluation → structured citations and bibliography → existing HTML/Radiant rendering.
 
@@ -22,7 +22,7 @@ BibTeX supplies bibliographic data. CSL supplies formatting policy. Citeproc eva
 
 Pandoc provides the architectural comparison: a citation pass consumes bibliography data and CSL, then supplies formatted content to document writers. Its current `citeproc` library is written in Haskell; copying this architecture does not require embedding that implementation or the retired `pandoc-citeproc` executable. [Pandoc citation documentation](https://pandoc.org/MANUAL.html#citations), [jgm/citeproc](https://github.com/jgm/citeproc).
 
-The implementation belongs under `lmd/package/latex/citeproc/`, imported as `lambda.latex.citeproc.*`. It remains part of the existing package, per the selected scope. Package behavior follows **D7.2.1–D7.2.4**.
+The implementation belongs under `lmd/package/doc/latex/citeproc/`, imported as `lambda.doc.latex.citeproc.*`. It remains part of the existing package, per the selected scope. Package behavior follows **D7.2.1–D7.2.4v3**.
 
 The first useful milestone is a general CSL evaluator working with checked numeric and author–year styles. It must evaluate style files, rather than add another collection of named formatting functions. Broader style support follows through additional CSL semantics and fixtures.
 
@@ -32,14 +32,14 @@ Pre-implementation source snapshot: **2026-10-10, commit `30bb984ff`**. The obse
 
 | Existing component | Current responsibility | Proposed treatment |
 |---|---|---|
-| [`latex.ls`](../../lmd/package/latex/latex.ls), `render_result` | Package activation, bibliography preparation, analysis, rendering, diagnostics and assets | Insert CSL processing between citation collection and rendering |
-| [`packages/bib_data.ls`](../../lmd/package/latex/packages/bib_data.ls), `load` | Local resources and `filecontents`, BibTeX strings/concatenation, raw fields, duplicates and inheritance | Reuse the parser and provenance; expose a data-only parsing entry point |
-| [`packages/bib_names.ls`](../../lmd/package/latex/packages/bib_names.ls), `parse` | Personal/corporate names and display helpers | Reuse name parsing; normalize its result to CSL names |
-| [`packages/bib_model.ls`](../../lmd/package/latex/packages/bib_model.ls), `prepare` | Source-order requests, sections/segments, selections, labels and targets | Separate collection/selection from the existing style-dependent label pass |
-| [`packages/bib_style.ls`](../../lmd/package/latex/packages/bib_style.ls) | Six built-in styles, sorting, labels and language strings | Retain for the existing profile while CSL becomes available explicitly |
-| [`packages/biblatex.ls`](../../lmd/package/latex/packages/biblatex.ls) and [`natbib.ls`](../../lmd/package/latex/packages/natbib.ls) | Command compatibility, formatted citations, bibliography elements and links | Adapt command requests and consume citeproc output |
-| [`packages/registry.ls`](../../lmd/package/latex/packages/registry.ls) | Package/option validation and located diagnostics | Validate selection of the citation pipeline and conflicting options |
-| [`to_html.ls`](../../lmd/package/latex/to_html.ls) | Escaped serialization of Lambda elements | Reuse as the HTML serialization boundary |
+| [`latex.ls`](../../lmd/package/doc/latex/latex.ls), `render_result` | Package activation, bibliography preparation, analysis, rendering, diagnostics and assets | Insert CSL processing between citation collection and rendering |
+| [`packages/bib_data.ls`](../../lmd/package/doc/latex/packages/bib_data.ls), `load` | Local resources and `filecontents`, BibTeX strings/concatenation, raw fields, duplicates and inheritance | Reuse the parser and provenance; expose a data-only parsing entry point |
+| [`packages/bib_names.ls`](../../lmd/package/doc/latex/packages/bib_names.ls), `parse` | Personal/corporate names and display helpers | Reuse name parsing; normalize its result to CSL names |
+| [`packages/bib_model.ls`](../../lmd/package/doc/latex/packages/bib_model.ls), `prepare` | Source-order requests, sections/segments, selections, labels and targets | Separate collection/selection from the existing style-dependent label pass |
+| [`packages/bib_style.ls`](../../lmd/package/doc/latex/packages/bib_style.ls) | Six built-in styles, sorting, labels and language strings | Retain for the existing profile while CSL becomes available explicitly |
+| [`packages/biblatex.ls`](../../lmd/package/doc/latex/packages/biblatex.ls) and [`natbib.ls`](../../lmd/package/doc/latex/packages/natbib.ls) | Command compatibility, formatted citations, bibliography elements and links | Adapt command requests and consume citeproc output |
+| [`packages/registry.ls`](../../lmd/package/doc/latex/packages/registry.ls) | Package/option validation and located diagnostics | Validate selection of the citation pipeline and conflicting options |
+| [`to_html.ls`](../../lmd/package/doc/latex/to_html.ls) | Escaped serialization of Lambda elements | Reuse as the HTML serialization boundary |
 
 The current bounded profile is summarized in §2.1. Its documented limits include arbitrary styles and exact locale collation. The natbib adapter explicitly emits `bibtex-style-approximation`.
 
@@ -78,7 +78,7 @@ Representative output for all six styles is pinned to BibLaTeX 3.20 with Biber 2
 
 Executing `.bst`, `.bbx`, `.cbx`, `.lbx`, or `.dbx` files; invoking BibTeX/Biber to produce the result; arbitrary Biber data models; CSL-M extensions; remote metadata lookup; reference-manager synchronization; and TeX-identical pagination or page-number backreferences.
 
-CSL JSON is included because it exposes the processor's data boundary directly. CSL YAML and RIS are later input adapters, not prerequisites for the engine. Markdown citation syntax is a possible later consumer of the same internal modules, without moving them out of `lambda.latex`.
+CSL JSON is included because it exposes the processor's data boundary directly. CSL YAML and RIS are later input adapters, not prerequisites for the engine. Markdown citation syntax is a possible later consumer of the same internal modules, without moving them out of `lambda.doc.latex`.
 
 No JavaScript, Lua, Haskell, or external citeproc process is required at runtime. The processor should work wherever the existing LaTeX package is admitted. **D7.1.7v6** explicitly excludes the LaTeX package from `lambda-wasm`; this proposal does not change that profile.
 
@@ -115,7 +115,7 @@ The implemented surface differs in names from the original proposal (`bibtex_to_
 | `citeproc.compile(style_xml, locales, options)` | Validate XML vocabulary, resolve macros, locales and supplied parent styles, return immutable compiled style data or a raised error |
 | `citeproc.process(compiled, references, requests, options)` | Process the complete request sequence; return `citations` and `bibliography` (each with plain `text` and rich `content`), resolved `references`, `diagnostics`, `style_id` and `locale` |
 | `resources.load(ast, base, options, language)` | Capture local bibliography, style, locale and parent files as assets at the input boundary |
-| `adapter.prepare`, `render_citation`, `render_bibliography` | Map LaTeX citation commands, scopes, notes and print filters to requests, and project results into the package's linked HTML elements; serialization goes through `lambda.latex.to_html` |
+| `adapter.prepare`, `render_citation`, `render_bibliography` | Map LaTeX citation commands, scopes, notes and print filters to requests, and project results into the package's linked HTML elements; serialization goes through `lambda.doc.latex.to_html` |
 
 Invalid styles and unusable reference sets use explicit raised errors at the package boundary (**S7.4.2**). A preview adapter may engage that error and display unsupported output with diagnostics; a strict export engages it and fails. Recoverable field issues are structured diagnostics. System faults retain their existing channel (**S7.4.3**).
 
@@ -253,7 +253,7 @@ Prefer shared Unicode services or pinned data interpreted in Lambda script if ri
 
 Accept an explicit abbreviation map as input, with no online journal lookup. Treat absent short-title data according to the style and documented adapter policy. Exact Biber/CLDR equivalence is outside the claim.
 
-## 7. Integration with `lambda.latex`
+## 7. Integration with `lambda.doc.latex`
 
 ### 7.1 Explicit selection and compatibility
 
@@ -261,7 +261,7 @@ Add an opt-in `citeproc` render option. Existing documents keep their checked bu
 
 ```lambda no-run
 // Select the script processor explicitly; custom filenames resolve against base_uri.
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 let ast = latex.parse_file("paper.tex")
 latex.render_result(ast, {
     base_uri: ".",
@@ -371,7 +371,7 @@ Acceptance of the proposal should settle those choices before implementation com
 
 ## Appendix A. Implementation plan
 
-Implementation detail is collected here so the design body describes responsibilities and contracts. All new processor modules are Lambda source in `lmd/package/latex/citeproc/`.
+Implementation detail is collected here so the design body describes responsibilities and contracts. All new processor modules are Lambda source in `lmd/package/doc/latex/citeproc/`.
 
 ### A.1 Suggested module map
 

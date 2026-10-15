@@ -413,8 +413,8 @@ This phase consumes existing pagination; it does not add a second paginator.
 
 ### 6.2 Lambda document construction and byte accounting
 
-Extend `lmd/package/pdf/` with output modules and expose them through the
-existing package facade under D7.2.4. Reuse matching coordinate/color helpers
+Extend `lmd/package/doc/pdf/` with output modules and expose them through the
+existing package facade under D7.2.4v3. Reuse matching coordinate/color helpers
 and the MVP's dictionary encoder rather than writing another encoder for the
 same admitted values. Keep PDF object/reference/stream construction and
 cross-reference/trailer policy in Lambda.
@@ -508,7 +508,7 @@ back to the old exporter and make the new path appear complete.
 | Host binding | `lambda/module/radiant/radiant_module.cpp`, `radiant_dom_bridge.{hpp,cpp}`, Jube interface records; proposed schema declarations under `lmd/package/` and one build-generated binding manifest. |
 | Native data | Read layouts from `lambda/input/css/dom_node.hpp`, `dom_element.hpp`, `radiant/view.hpp`, `view_tree_model.hpp` and `render.hpp`; extend only for a demonstrated missing export contract. |
 | Export | `radiant/render_output.cpp`, `render_walk.cpp`, `layout_paged.cpp`, `render.hpp` and `render_pdf.cpp`; add the callback backend and share ordered fragment traversal, selected-page and resource lifecycle APIs. |
-| PDF package/builder | `lmd/package/pdf/`, `lambda/runtime/pdf_builder.cpp`, `lambda/io/mark_output_builder.hpp`; share encoders and add the agreed accounting/producer integration. |
+| PDF package/builder | `lmd/package/doc/pdf/`, `lambda/runtime/pdf_builder.cpp`, `lambda/io/mark_output_builder.hpp`; share encoders and add the agreed accounting/producer integration. |
 | Build and tests | `build_lambda_config.json`, existing test harnesses, and matching script goldens. Never hand-edit generated Lua or Tree-sitter parser output. |
 
 ## 9. Verification and completion criteria
@@ -582,8 +582,8 @@ Until then, report the completed milestones and exact remaining rows.
 
 ## 10. Implementation progress (2026-10-15)
 
-The experimental route is executable through pure `lambda.pdf.output.render`
-and `lambda.pdf.pdf.render_source`; only explicit `output(file, path, options)`
+The experimental route is executable through pure `lambda.doc.pdf.output.render`
+and `lambda.doc.pdf.pdf.render_source`; only explicit `output(file, path, options)`
 is procedural (S2.6.6v3 / S12.1.1v3). It loads a private script-free print-media `RenderExportSession`, keeps the shared native
 walker, and invokes a rooted pure callback with `(event, record, context)`.
 It does not change the production CLI PDF writer.
@@ -621,7 +621,7 @@ It does not change the production CLI PDF writer.
   Lambda stable resource names. Glyph and clip helpers return normalized
   path coordinates; images return owned RGB/alpha bytes plus placement.
   These results are capabilities, not a general PaintCmd stream.
-- `lmd/package/pdf/output.ls` owns page drawing and classic PDF object/xref
+- `lmd/package/doc/pdf/output.ls` owns page drawing and classic PDF object/xref
   construction. The initial profile has one continuous page; §12 adds
   physical pages. Object/resource counts are dynamic. Numeric formatting rejects
   nonfinite values and expands exponent notation without rounding away
@@ -865,7 +865,7 @@ file uses a procedure. This is recorded in S2.6.6v3, D2.6.12v3 and D8.2.6v2.
 The earlier procedural preparation example in §12 is historical and does not
 describe the PDF API. General `pn` restrictions under S12.1.1v3 remain intact.
 
-`lambda.pdf.output.render(source, options)` and the facade's `render_source`
+`lambda.doc.pdf.output.render(source, options)` and the facade's `render_source`
 are functions accepting an HTML element or source path. The native module's
 `pdf_walk` and `pdf_walk_source` build independent script-free print snapshots.
 The procedural PDF `export` / `export_source` wrappers are removed; call
@@ -962,7 +962,7 @@ widening and final added assertion.
 
 The user requested P6 implementation and retirement of the C++ writer. The
 production CLI, transformed-document and committed-session entry points now
-lend their selected edition to `lambda.pdf.output.render_view`; PDF generation
+lend their selected edition to `lambda.doc.pdf.output.render_view`; PDF generation
 remains functional through the completed file (S2.6.6v3, D2.6.12v3,
 D8.2.6v2). Only the final atomic save is procedural. This supersedes the
 production-dispatch status in §13; it does not erase that section’s failed or

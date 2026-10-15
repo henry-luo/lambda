@@ -2,7 +2,7 @@
 // packages: xspace, soul, ulem, setspace, parskip, ragged2e, lipsum, blindtext,
 // paralist, fancyvrb, minted, framed, mdframed, fancybox, boxedminipage,
 // footmisc and appendix.
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 fn doc(preamble, body, docclass = "article") =>
     "\\documentclass{" ++ docclass ++ "}\n" ++ preamble ++ "\n\\begin{document}\n" ++ body ++ "\n\\end{document}\n"

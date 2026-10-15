@@ -28,7 +28,7 @@ static bool render_lambda_pdf(RenderExportSession* session, const char* filename
     } runtime_cleanup_scope = {runtime, own_runtime};
     if (own_runtime) {
         Script* package = nullptr;
-        if (!run_lambda_package_module(runtime, "lambda.pdf.output", &package) || !package) {
+        if (!run_lambda_package_module(runtime, "lambda.doc.pdf.output", &package) || !package) {
             log_error("PDF_LAMBDA_EXPORT: cannot initialize PDF package"); return false;
         }
     }
@@ -46,7 +46,7 @@ static bool render_lambda_pdf(RenderExportSession* session, const char* filename
     RadiantPdfSource native = {session, selection};
     source.set(radiant_pdf_source_view(&native, lifetime));
     Item args[] = {source.get(), options.get()};
-    file.set(interp_call_package_export(runtime, "lambda.pdf.output", "render_view", args, 2));
+    file.set(interp_call_package_export(runtime, "lambda.doc.pdf.output", "render_view", args, 2));
     const char* bytes = nullptr; size_t size = 0;
     if (!virtual_output_bytes(file.get(), &bytes, &size)) {
         log_error("PDF_LAMBDA_EXPORT: functional PDF generation failed"); return false;

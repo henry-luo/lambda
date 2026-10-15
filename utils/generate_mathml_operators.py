@@ -33,5 +33,5 @@ lines.extend([
     '    exact or (if (explicit) null else entries[text++" infix"] or entries[text++" postfix"] or entries[text++" prefix"]) or {}',
     "}", "",
 ])
-(ROOT / "lmd/package/math/mathml_operators.ls").write_text("\n".join(lines))
-(ROOT / "lmd/package/math/LICENSE.WPT").write_bytes((ROOT / "ref/wpt/LICENSE.md").read_bytes())
+(ROOT / "lmd/package/doc/math/mathml_operators.ls").write_text("\n".join(lines))
+(ROOT / "lmd/package/doc/math/LICENSE.WPT").write_bytes((ROOT / "ref/wpt/LICENSE.md").read_bytes())

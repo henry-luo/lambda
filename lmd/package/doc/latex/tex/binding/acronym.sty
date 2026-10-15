@@ -1,0 +1,15 @@
+% acronym.sty -- Lambda-owned binding of acronym (CTAN), written from its manual
+% rather than copied.
+%
+% Like the other declaration bindings (vibe/latex/Lambda_Design_TeX_Engine.md §4),
+% it defines the font macros a document redefines (\acsfont, \acffont, \acfsfont)
+% with acronym's defaults, so \renewcommand is legal and the echoed definition
+% reaches the script adapter (lmd/package/doc/latex/packages/terms.ls).
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{acronym}[2026/10/13 Lambda binding]
+\DeclareOption*{}
+\ProcessOptions\relax
+
+\providecommand\acsfont[1]{#1}
+\providecommand\acffont[1]{#1}
+\providecommand\acfsfont[1]{#1}

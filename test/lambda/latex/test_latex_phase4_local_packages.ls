@@ -1,7 +1,7 @@
 // Phase IV (Lambda_Design_TeX_Engine §5): a class and a package beside the
 // document run on the TeX engine; adapters still answer what they require.
-import latex: lambda.latex.latex
-import html: lambda.latex.to_html
+import latex: lambda.doc.latex.latex
+import html: lambda.doc.latex.to_html
 
 let path = "test/lambda/latex/fixtures/local_packages/document.tex";
 let ast = latex.parse_file(path);

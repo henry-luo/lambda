@@ -1,7 +1,7 @@
 // PGFPlots plot-type geometry: bars, stacking, error bars, closed areas and
 // fill between. Data points are {x, y, errors}; screen geometry is axis px.
 import opts: .options
-import util: lambda.latex.util
+import util: lambda.doc.latex.util
 import scale: lambda.chart.scale
 
 let PT_PX = 96.0 / 72.27

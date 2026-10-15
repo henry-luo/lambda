@@ -1,6 +1,6 @@
 // Phase 22 — unfiltered raw Image XObjects render as pixels like native C++.
 
-import interp: lambda.pdf.interp
+import interp: lambda.doc.pdf.interp
 
 fn ref(n) { { type: "indirect_ref", object_num: n } }
 

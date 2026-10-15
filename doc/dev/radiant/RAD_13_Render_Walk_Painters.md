@@ -8,7 +8,7 @@
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers how a laid-out view tree becomes output. One shared tree walk (`render_walk.cpp`) traverses the tree exactly once and dispatches every drawing decision through a `RenderBackend` vtable; each output target (raster window/PNG/JPEG, PDF, SVG) supplies its own callback set. It describes the walker (z-order, effect groups, transforms), the raster record→lower→replay pipeline, the per-feature painters (`render_bound` and its background/border/shadow/text/image/clip/effect/filter/composite kin), the PDF backend, capability gating, output targets, and the profiler. The *IR machinery itself* — PaintIR shape, the DisplayList, record/replay internals — is [RAD_12](RAD_12_Paint_IR_Display_List.md)'s job; this doc is the walk, the painters, and the export seams.
 >
-> **Primary sources:** `radiant/render.hpp` (the `RenderBackend` vtable, `RenderWalkState`, the `RenderContext` base and `RasterRenderContext`, backend capabilities, profiling, and the `rc_*` seam), `radiant/render_walk.cpp` (the shared walker), `radiant/render_raster_walk.cpp` (raster backend + dispatcher), `radiant/render.cpp` (iframe embed), `radiant/render_block.cpp` (block paint pipeline), the per-feature painter `.cpp` files, `radiant/render_output.cpp` (targets, tiled/strip/selective/retained), `radiant/render_pdf.cpp` (Lambda export/save adapter), `lambda/module/radiant/radiant_pdf_walk.cpp` (schema-backed callbacks), `lmd/package/pdf/output.ls` (PDF generation), `radiant/render_backend_caps.cpp`, `radiant/render_profiler.cpp`, and `radiant/render_painter.cpp`.
+> **Primary sources:** `radiant/render.hpp` (the `RenderBackend` vtable, `RenderWalkState`, the `RenderContext` base and `RasterRenderContext`, backend capabilities, profiling, and the `rc_*` seam), `radiant/render_walk.cpp` (the shared walker), `radiant/render_raster_walk.cpp` (raster backend + dispatcher), `radiant/render.cpp` (iframe embed), `radiant/render_block.cpp` (block paint pipeline), the per-feature painter `.cpp` files, `radiant/render_output.cpp` (targets, tiled/strip/selective/retained), `radiant/render_pdf.cpp` (Lambda export/save adapter), `lambda/module/radiant/radiant_pdf_walk.cpp` (schema-backed callbacks), `lmd/package/doc/pdf/output.ls` (PDF generation), `radiant/render_backend_caps.cpp`, `radiant/render_profiler.cpp`, and `radiant/render_painter.cpp`.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name.
 
 ---
@@ -178,7 +178,7 @@ in `RdtVectorTest.GaussianFlatRunsPreserveEdgesChannelsAndPitches`.
 
 PDF generation is functional through the completed file value (S2.6.6v3,
 D2.6.12v3, D8.2.6v2). `render_pdf.cpp` lends an already committed
-`RenderExportSession` to the bundled `lambda.pdf.output.render_view` function
+`RenderExportSession` to the bundled `lambda.doc.pdf.output.render_view` function
 and saves its result atomically. It reuses an active runtime, or owns a runtime
 at a quiescent host boundary; it never replaces an active evaluator (D5.4.1).
 The old HPDF renderer and `lib/pdf_writer.{c,h}` have been retired.
@@ -205,7 +205,7 @@ Two capability structures decide native-vs-fallback. **Runtime** `RenderBackendC
 
 ### 8.2 Procedural export boundary
 
-Pure `lambda.pdf.output.render(source, options)` returns the completed PDF file;
+Pure `lambda.doc.pdf.output.render(source, options)` returns the completed PDF file;
 only `output(file, destination)` performs file I/O (S2.6.6v3).
 
 `radiant.export_document(html, destination, options)` remains a procedural native

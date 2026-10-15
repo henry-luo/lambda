@@ -5,7 +5,7 @@ import plots: .pgfplots
 import lsystem: .lsystem
 import named: .named
 import svg: lambda.chart.svg
-import latex_util: lambda.latex.util
+import latex_util: lambda.doc.latex.util
 import pgfmath: .pgfmath
 import people: .people
 import arrows: .arrows

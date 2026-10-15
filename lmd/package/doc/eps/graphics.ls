@@ -1,7 +1,7 @@
 import obj: .objects
-import util: lambda.pdf.util
-import path: lambda.pdf.path
-import color: lambda.pdf.color
+import util: lambda.doc.pdf.util
+import path: lambda.doc.pdf.path
+import color: lambda.doc.pdf.color
 
 pub let SIGNATURES = {
     'newpath': "", 'gsave': "", 'grestore': "", 'grestoreall': "", 'initmatrix': "",

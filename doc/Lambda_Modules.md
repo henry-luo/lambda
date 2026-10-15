@@ -103,8 +103,8 @@ The first token of an import path decides where it looks (S16.9.8): a **name** s
 |---|---|
 | `import .a.b` | `a/b.ls` beside the importing file (after following symlinks), else `a/b.js` |
 | `import ~~.a` | `../a.ls`, one directory up from the importing file; each further leading `~~.` goes up one more (`import ~~.~~.lib.util` is `../../lib/util.ls`) |
-| `import lambda.<package>.m` | `<LAMBDA_HOME>/package/<package>/m.ls` — a shipped package (D7.2.4) |
-| `import lambda.doc.math.m` | `<LAMBDA_HOME>/package/math/m.ls` — document-processing packages live under `lambda.doc` |
+| `import lambda.<package>.m` | `<LAMBDA_HOME>/package/<package>/m.ls` — a shipped package (D7.2.4v2) |
+| `import lambda.doc.<package>.m` | `<LAMBDA_HOME>/package/doc/<package>/m.ls` — includes `math`, `pdf`, and `latex` (D7.2.4v3) |
 | `import math`, `import io` | The built-in modules; `import lambda.math` and `import lambda.io` are the same modules |
 | `import p: 'uri'` | A namespace prefix for markup, not a module ([Namespaces](Lambda_Syntax.md#namespaces)) |
 | `import a`, `import a.b` (any other name) | Error E216: bare names are reserved for packages, and there is no package `a`. The name never refers to a file in the working directory |
@@ -143,7 +143,7 @@ The functions of both modules are listed in [Lambda_Sys_Func.md](Lambda_Sys_Func
 
 ## Qualified System Names
 
-Everything Lambda ships lives under one reserved root, `lambda` (D7.2.4, S17.2.1). `lambda.sys.*` names the system functions, `lambda.math.*` and `lambda.io.*` the built-in modules. The qualified spelling reaches a built-in even where a local name shadows it:
+Everything Lambda ships lives under one reserved root, `lambda` (D7.2.4v2, S17.2.1). `lambda.sys.*` names the system functions, `lambda.math.*` and `lambda.io.*` the built-in modules. The qualified spelling reaches a built-in even where a local name shadows it:
 
 ```lambda
 let sum = 10;

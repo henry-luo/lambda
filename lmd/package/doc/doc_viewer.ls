@@ -7,11 +7,11 @@
 // With the startup splash: ./lambda.exe demo
 // Headless smoke: ./lambda.exe view --headless --no-log
 
-import pdf: lambda.pdf.pdf
+import pdf: lambda.doc.pdf.pdf
 import dom
-import pdf_html: lambda.pdf.html
-import latex: lambda.latex.latex
-import latex_css: lambda.latex.css
+import pdf_html: lambda.doc.pdf.html
+import latex: lambda.doc.latex.latex
+import latex_css: lambda.doc.latex.css
 import math_renderer: lambda.doc.math.math
 import graph_doc: lambda.graph.document
 import tikz: lambda.doc.tikz.tikz

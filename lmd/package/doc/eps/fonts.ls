@@ -1,7 +1,7 @@
 import obj: .objects
 import matrices: .matrices
-import pdf_font: lambda.pdf.font
-import util: lambda.pdf.util
+import pdf_font: lambda.doc.pdf.font
+import util: lambda.doc.pdf.util
 
 pub let SIGNATURES = {'findfont': "x", 'scalefont': "dn", 'makefont': "da",
     'setfont': "d", 'currentfont': "", 'selectfont': "xx"}

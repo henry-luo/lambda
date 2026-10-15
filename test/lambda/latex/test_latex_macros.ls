@@ -1,7 +1,7 @@
 // test_latex_macros.ls — Test macro definition collection
 // Coverage: macros.ls — get_defs, find_macro (substitution retired with D7.2.7)
 
-import macros: lambda.latex.macros
+import macros: lambda.doc.latex.macros
 
 "===== LATEX MACROS TESTS ====="
 

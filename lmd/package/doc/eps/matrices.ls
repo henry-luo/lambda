@@ -1,6 +1,6 @@
 import obj: .objects
 import gfx: .graphics
-import util: lambda.pdf.util
+import util: lambda.doc.pdf.util
 
 pub let SIGNATURES = {'matrix': "", 'currentmatrix': "a", 'defaultmatrix': "a", 'setmatrix': "a", 'concat': "a",
     'concatmatrix': "aaa", 'invertmatrix': "aa", 'translate': "*", 'scale': "*", 'rotate': "*",

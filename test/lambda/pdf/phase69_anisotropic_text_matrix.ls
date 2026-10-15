@@ -1,7 +1,7 @@
 // Phase 69 - anisotropic and sheared PDF text matrices preserve glyph scale.
 
-import text: lambda.pdf.text
-import util: lambda.pdf.util
+import text: lambda.doc.pdf.text
+import util: lambda.doc.pdf.util
 
 fn name(s) { { kind: "name", value: s } }
 fn str(s)  { { kind: "string", value: s } }

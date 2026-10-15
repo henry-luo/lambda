@@ -4,6 +4,10 @@
 >
 > **Removed (2026-10-12).** The LaTeX.js-era `lmd/package/latex/css/` (`base.css`, `article.css`, `book.css`) and `lmd/package/latex/js/base.js` were deleted because nothing loaded them; LaTeX output styling comes from `lmd/package/latex/css.ls` and `fonts/cmu-combined.css`. The `lmd/package/math/katex.css` named below no longer exists either. Rows below that name these files are historical.
 
+> **Math package moved (2026-10-15).** Document math source and bundled fonts now live in `lmd/package/doc/math/`, matching `lambda.doc.math.*` through the generic resolver (**D7.2.4v2**). Release preparation already copies the whole `lmd/` tree. Earlier paths below are historical.
+
+> **PDF and LaTeX packages moved (2026-10-15).** Their source and resources now live in `lmd/package/doc/pdf/` and `lmd/package/doc/latex/`, imported as `lambda.doc.pdf.*` and `lambda.doc.latex.*` (**D7.2.4v3**). Native document loading, PDF export and the bundled TeX resource directory follow these paths. Release preparation copies them in the existing `lmd/` tree.
+
 ## 1. Overview
 
 This proposal covers the changes needed to package Lambda for distribution. There are five

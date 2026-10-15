@@ -2,7 +2,7 @@
 // gives a numbering base, an option schema and the commands it owns: KOMA-Script,
 // the AMS classes and memoir; the journal classes IEEEtran, llncs, elsarticle,
 // revtex and acmart; letter and exam with their own document models.
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 fn run(src) {
     let ast = latex.parse_source(src, ".") ^ { null }

@@ -48,7 +48,7 @@ ink. In Chrome itself, converting CMU italic SVG text to paths loses 20.84%
 of ink at 1× and 23.84% at 2×. Thus the path conversion reproduces the
 faintness even with the same font and the Chrome rasterizer.
 
-**Root cause.** [`svg_box.ls:glyph`](../../lmd/package/math/svg_box.ls) emits
+**Root cause.** [`svg_box.ls:glyph`](../../lmd/package/doc/math/svg_box.ls) emits
 the measured glyph as `<path>`, losing its font/glyph identity. Separately,
 [`svg_text_run_path`](../../radiant/render_svg_inline.cpp) converts ordinary
 SVG text to paths. `svg_text_prepare_paint_geometry` supplies those paths to
@@ -132,7 +132,7 @@ defect [RAD07-L1](#rad07-l1).
 “made LaTeX and Graphs loading config driven”) replaced the dedicated LaTeX
 loader with the shared document-transform loader and removed its explicit CMU
 and KaTeX font-stylesheet loading. The replacement
-[`wrap_standalone`](../../lmd/package/latex/latex.ls) embedded layout/math CSS but
+[`wrap_standalone`](../../lmd/package/doc/latex/latex.ls) embedded layout/math CSS but
 no font declarations or stylesheet links. The shared loader in
 [`load_lambda_document_doc`](../../radiant/cmd_layout.cpp) collects the
 generated HTML's CSS without adding those package assets.
@@ -147,7 +147,7 @@ faces depend on the platform and installed fonts.
 
 **Verification.** A 64px HTML probe with identical content and font-family
 rules was laid out twice. Adding only links to
-[`cmu-combined.css`](../../lmd/package/latex/fonts/cmu-combined.css) and
+[`cmu-combined.css`](../../lmd/package/doc/latex/fonts/cmu-combined.css) and
 [`katex.css`](../../lmd/package/math/katex.css) changed the actual loaded faces:
 
 | Probe | Without bundled CSS | With bundled CSS |
@@ -163,7 +163,7 @@ stylesheet links. Local reproduction files and font-loading logs are in
 **Fix.** The shared
 [`font_stylesheets`](../../lmd/package/math/css.ls) helper emits links to both
 bundled stylesheets, resolving the installation through `sys.lambda.home`
-and the existing path helper, per **D7.2.4**. LaTeX, standalone math, TikZ,
+and the existing path helper, per **D7.2.4v3**. LaTeX, standalone math, TikZ,
 the document viewer and the edit shell use it. The stylesheets retain their
 own source URLs, so their relative WOFF2 URLs resolve beside the CSS assets.
 Fragment renderers continue to leave stylesheet ownership to their host.

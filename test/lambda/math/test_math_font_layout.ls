@@ -10,7 +10,7 @@ fn descendants(el, tag) {
 }
 
 let enhanced_bytes = input("test/lambda/math/fonts/NotoSansMath-Regular.ttf", 'binary')^
-let plain_bytes = input("lmd/package/latex/fonts/Serif/cmunrm.woff2", 'binary')^
+let plain_bytes = input("lmd/package/doc/latex/fonts/Serif/cmunrm.woff2", 'binary')^
 let enhanced = {font_family: "FormulaMath", fonts: [{font_family: "FormulaMath", data: enhanced_bytes}], display: true}
 let plain = {font_family: "FormulaOrdinary", fonts: [{font_family: "FormulaOrdinary", data: plain_bytes}], display: true}
 let native = radiant.math_metrics({font_family: enhanced.font_family, font_size: 1000}, [ord("𝑥"), ord("𝑎"), ord("𝑏")], enhanced.fonts)

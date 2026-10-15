@@ -79,7 +79,7 @@ static const LatexPrim LATEX_PRIMS[] = {
     {"IfValueTF", P_IFNOVALUE, 3}, {"IfValueT", P_IFNOVALUE, 4}, {"IfValueF", P_IFNOVALUE, 5},
     {"IfBooleanTF", P_IFBOOLEAN, 0}, {"IfBooleanT", P_IFBOOLEAN, 1}, {"IfBooleanF", P_IFBOOLEAN, 2},
     {"AddToHook", P_ADDTOHOOK, 0}, {"IfFormatAtLeastTF", P_IFFORMATATLEAST, 0},
-    // the xspace binding's test (lmd/package/latex/tex/binding/xspace.sty)
+    // the xspace binding's test (lmd/package/doc/latex/tex/binding/xspace.sty)
     {"lambda@xspace", P_XSPACE, 0},
 };
 

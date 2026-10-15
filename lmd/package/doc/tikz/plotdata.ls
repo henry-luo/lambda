@@ -1,7 +1,7 @@
 // PGFPlots data sources: inline and document-local tables, symbolic
 // coordinates and explicit error offsets. Files load only beside the document.
 import opts: .options
-import util: lambda.latex.util
+import util: lambda.doc.latex.util
 import paths: lambda.edit.session
 
 let TABLE_KEYS = ["x", "y", "x index", "y index", "col sep", "row sep", "header",

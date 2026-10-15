@@ -1634,12 +1634,12 @@ static const char* kSharedModuleStressChartLine =
     "len(format(chart.render_spec(spec), 'xml'))\n";
 
 static const char* kSharedModuleStressPdfPageCount =
-    "import pdf: lambda.pdf.pdf\n"
+    "import pdf: lambda.doc.pdf.pdf\n"
     "let doc = input('test/input/test.pdf', 'pdf') ^ { null }\n"
     "pdf.pdf_page_count(doc)\n";
 
 static const char* kSharedModuleStressPdfContent =
-    "import resolve: lambda.pdf.resolve\n"
+    "import resolve: lambda.doc.pdf.resolve\n"
     "let doc = input('test/input/test.pdf', 'pdf') ^ { null }\n"
     "let page = resolve.page_at(doc, 0)\n"
     "len(resolve.page_content_bytes(doc, page))\n";
@@ -1966,7 +1966,7 @@ protected:
         Script* chart_package = load_script_mir_direct(&shared_module_stress_runtime,
         "lmd/package/chart/chart.ls", NULL, true);
         Script* pdf_package = load_script_mir_direct(&shared_module_stress_runtime,
-        "lmd/package/pdf/pdf.ls", NULL, true);
+        "lmd/package/doc/pdf/pdf.ls", NULL, true);
         ASSERT_NE(chart_package, nullptr);
         ASSERT_NE(pdf_package, nullptr);
         for (int i = 0; i < shared_module_stress_case_count; i++) {

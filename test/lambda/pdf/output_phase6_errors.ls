@@ -1,6 +1,6 @@
-import pdf: lambda.pdf.output
+import pdf: lambda.doc.pdf.output
 import radiant
-import schema: lambda.pdf.view_schema
+import schema: lambda.doc.pdf.view_schema
 
 fn discard(event, node, ctx) => ""
 fn rejected(source) => pdf.render(source, {}) ^ {true}

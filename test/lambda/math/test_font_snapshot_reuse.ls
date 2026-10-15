@@ -1,15 +1,15 @@
 // D5.4.2, D7.1.2v2: native query reuse owns bytes and respects snapshot identity.
 import radiant
 
-let regular = input("lmd/package/latex/fonts/Serif/cmunrm.woff2", 'binary')^
-let italic = input("lmd/package/latex/fonts/Serif/cmunti.woff2", 'binary')^
+let regular = input("lmd/package/doc/latex/fonts/Serif/cmunrm.woff2", 'binary')^
+let italic = input("lmd/package/doc/latex/fonts/Serif/cmunti.woff2", 'binary')^
 let style = {font_family: "SnapshotSerif", font_size: 1000}
 fn faces(data, slant = "normal") => [{font_family: "SnapshotSerif", font_style: slant, data: data}]
 fn metrics(data) => radiant.math_metrics(style, [ord("x"), ord("(")], faces(data))
 
 let first = metrics(regular)
 // Reconstructed arrays and independent binary reads must reuse equivalent facts.
-let repeated = [for (i in 1 to 12) metrics(input("lmd/package/latex/fonts/Serif/cmunrm.woff2", 'binary')^)]
+let repeated = [for (i in 1 to 12) metrics(input("lmd/package/doc/latex/fonts/Serif/cmunrm.woff2", 'binary')^)]
 let changed_bytes = metrics(italic)
 let changed_style = radiant.math_metrics({*:style, font_style: "italic"}, [ord("x")], faces(italic, "italic"))
 let invalid = metrics(b'00010203')

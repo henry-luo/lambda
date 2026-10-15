@@ -1,5 +1,5 @@
-import pdf: lambda.pdf.output
-import util: lambda.pdf.util
+import pdf: lambda.doc.pdf.output
+import util: lambda.doc.pdf.util
 
 pn main() {
     let written = output(pdf.render("test/html/pdf_lambda_resources.html", {width: 300, height: 160})^, "temp/pdf_lambda_resources.pdf", {atomic: true})^;

@@ -1,7 +1,7 @@
 // Phase V M4 (vibe/impl/Lambda_Impl_Latex_Packages.md §8): float kinds from
 // packages and \newfloat, algorithms (algpseudocode, algorithmic, algorithm2e),
 // subfig, wrapfig, rotating and landscape.
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 fn doc(preamble, body) =>
     "\\documentclass{article}\n" ++ preamble ++ "\n\\begin{document}\n" ++ body ++ "\n\\end{document}\n"

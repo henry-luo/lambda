@@ -1,5 +1,5 @@
-import pdf: lambda.pdf.pdf
-import fixed: lambda.pdf.fixed
+import pdf: lambda.doc.pdf.pdf
+import fixed: lambda.doc.pdf.fixed
 
 pn main() {
     let page = {label: "Front", media_box: [0, 0, 100, 60], dict: {Resources: {}}}

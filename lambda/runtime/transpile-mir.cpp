@@ -49119,10 +49119,10 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
 
 // Document loaders select this fixed native contract instead of generated code.
 static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
-    {"pdf", "lambda.pdf.pdf", "pdf_to_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
+    {"pdf", "lambda.doc.pdf.pdf", "pdf_to_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     {"eps", "lambda.doc.eps.eps", "eps_to_svg", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     // the package parses its own source so the engine sees the adapter registry (D7.2.7)
-    {"latex", "lambda.latex.latex", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
+    {"latex", "lambda.doc.latex.latex", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
     {"docx", "lambda.doc.docx.view", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
     // Reader controls and publication resources retain a runtime per document (S12.1.3).
     {"ebook", "lambda.doc.ebook.view", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false},

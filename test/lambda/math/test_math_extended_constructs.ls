@@ -1,6 +1,6 @@
 // exercise parsed commands whose fallback previously painted their names literally.
 import math: lambda.doc.math.math
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 fn box(source, options = null) => math.render_box(parse(source, 'math')^, options)^
 fn paints(result) {

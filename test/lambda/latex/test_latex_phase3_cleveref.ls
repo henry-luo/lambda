@@ -1,4 +1,4 @@
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 let ast = input("test/lambda/latex/fixtures/cleveref_profile.tex", {type: "latex"})^
 let result = latex.render_result(ast, null)

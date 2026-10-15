@@ -2,8 +2,8 @@ import radiant
 import obj: .objects
 import fonts: .fonts
 import gfx: .graphics
-import svg: lambda.pdf.svg
-import util: lambda.pdf.util
+import svg: lambda.doc.pdf.svg
+import util: lambda.doc.pdf.util
 
 pub let SIGNATURES = {'show': "s", 'stringwidth': "s", 'ashow': "nns", 'widthshow': "nnis", 'awidthshow': "nninns"}
 

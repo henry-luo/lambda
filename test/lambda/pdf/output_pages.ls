@@ -1,6 +1,6 @@
-import pdf: lambda.pdf.output
+import pdf: lambda.doc.pdf.output
 import radiant
-import schema: lambda.pdf.view_schema
+import schema: lambda.doc.pdf.view_schema
 
 fn inspect(event, node, ctx) string^ {
     if (event == "begin_page") {

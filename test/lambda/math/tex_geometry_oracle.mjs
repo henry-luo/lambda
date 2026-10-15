@@ -83,15 +83,15 @@ format([for (item in cases) (
     return { name, path:file, sha256:hash(file) };
   });
   const resources = ['cmr10','cmsy10','cmsy7','cmsy5','cmex10'].map((name) =>
-    `lmd/package/math/fonts/tex/${name}.tfm`).concat(['Main','Size1','Size2','Size3','Size4'].map((name) =>
-    `lmd/package/math/fonts/KaTeX_${name}-Regular.woff2`));
+    `lmd/package/doc/math/fonts/tex/${name}.tfm`).concat(['Main','Size1','Size2','Size3','Size4'].map((name) =>
+    `lmd/package/doc/math/fonts/KaTeX_${name}-Regular.woff2`));
   fs.writeFileSync(path.join(dir, 'evidence.json'), JSON.stringify({ cases, lambda,
     tex: [...dimensions], pages: dvi.pages, referenceVersion: texRun.stdout.split('\n').slice(0, 6),
     tfm: dvi.fonts.map(({ tfm, ...f }) => ({ ...f, sha256: hash(f.tfmPath) })),
     referencePackages, resources:Object.fromEntries(resources.map((file) => [file,hash(path.join(ROOT,file))])),
-    sources: Object.fromEntries(['lambda.exe', 'lmd/package/math/font.ls', 'lmd/package/math/typeset.ls',
-      'lmd/package/math/tex_metrics.ls', 'lmd/package/math/stretch.ls', 'lmd/package/math/svg_box.ls',
-      'lmd/package/math/util.ls', 'lmd/package/math/symbols.ls',
+    sources: Object.fromEntries(['lambda.exe', 'lmd/package/doc/math/font.ls', 'lmd/package/doc/math/typeset.ls',
+      'lmd/package/doc/math/tex_metrics.ls', 'lmd/package/doc/math/stretch.ls', 'lmd/package/doc/math/svg_box.ls',
+      'lmd/package/doc/math/util.ls', 'lmd/package/doc/math/symbols.ls',
       'test/lambda/math/tex_geometry_oracle.mjs', 'test/lambda/math/tex_dvi.mjs', ...sourceFiles]
       .map((file) => [file, hash(path.join(ROOT, file))])),
   }, null, 2));

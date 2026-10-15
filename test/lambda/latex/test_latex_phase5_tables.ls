@@ -1,7 +1,7 @@
 // Phase V M5 (vibe/impl/Lambda_Impl_Latex_Packages.md §9): tables and page inserts:
 // vertical rules and \newcolumntype, colortbl, hhline, dcolumn, threeparttable,
 // adjustbox, pdfpages and the csvsimple engine binding.
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 let BASE = "test/lambda/latex/fixtures"
 

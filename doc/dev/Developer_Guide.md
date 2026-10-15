@@ -535,7 +535,7 @@ View Tree
 | `radiant/resolve_css_style.cpp` | CSS property resolution and cascade |
 | `radiant/render.cpp` | Render dispatch |
 | `radiant/render_svg.cpp` | SVG output renderer |
-| `radiant/render_pdf.cpp` | Lambda PDF session/save adapter; generation in `lmd/package/pdf/output.ls` |
+| `radiant/render_pdf.cpp` | Lambda PDF session/save adapter; generation in `lmd/package/doc/pdf/output.ls` |
 | `radiant/window.cpp` | GLFW interactive viewer window |
 | `lambda/input/css/css_engine.cpp` | CSS parser and cascade engine |
 | `lambda/input/css/selector_matcher.cpp` | CSS selector matching |

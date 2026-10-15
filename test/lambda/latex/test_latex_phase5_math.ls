@@ -1,7 +1,7 @@
 // Phase V M8 (vibe/impl/Lambda_Impl_Latex_Packages.md §12): math packages. physics
 // and mathtools' macro layer are engine bindings; bm, cancel, nicefrac, xfrac and
 // mhchem are math constructs; mathtools tag forms are equation numbering.
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 fn doc(preamble, body) =>
     "\\documentclass{article}\n" ++ preamble ++ "\n\\begin{document}\n" ++ body ++ "\n\\end{document}\n"

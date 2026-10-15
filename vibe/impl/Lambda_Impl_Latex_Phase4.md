@@ -53,7 +53,7 @@ Acceptance needs a pinned BibLaTeX/Biber reference run, which requires installin
 - 2026-10-07: worktree created from `origin/master` 95e3e4922; plan written.
 - 2026-10-07, M1:
   - **Engine.** `lambda/input/input-tex-{engine,scan,prims,main,latex,kernel}.cpp` plus `input-tex.hpp` (API) and `input-tex-internal.hpp`.
-  - **Entry points.** `parse(src, {type: "tex", ini, base, packages, raw})` returns `{text, messages, diagnostics, packages}`. `parse(src, {type: "latex", expand: true, ...})` feeds the direct parser, and `lambda.latex.latex.parse_file`/`parse_source` request it.
+  - **Entry points.** `parse(src, {type: "tex", ini, base, packages, raw})` returns `{text, messages, diagnostics, packages}`. `parse(src, {type: "latex", expand: true, ...})` feeds the direct parser, and `lambda.doc.latex.latex.parse_file`/`parse_source` request it.
   - **Parity knob.** `LAMBDA_TEX_EXPAND=1` forces expansion for every LaTeX parse.
   - **Argument mode.** The groups after a passed-through command expand macros but do not execute assignments. Registry-declared `RAW_ARGUMENT_COMMANDS` (bussproofs, `semantic`) get token-for-token arguments.
   - **Echo rule.** Covers the `\newcommand`, `\def`, counter and length families.
@@ -64,7 +64,7 @@ Acceptance needs a pinned BibLaTeX/Biber reference run, which requires installin
   - With the knob forced on, `test_latex_phase3_boundaries` expects `\course \H o` to keep the space after `\course`. TeX does not (a control word swallows following spaces), so that expectation changes once expansion is the default.
 - 2026-10-07, M2: `test/lambda/latex/test_tex_engine_conformance.ls` compares 121 `\immediate\write16` records over the expansion, conditional, register/arithmetic and e-TeX fixtures with `pdftex -ini -etex` (TeX Live 2025). Every record matches; `test/latex/fixtures/tex_engine/make_reference.py` regenerates the expectations.
 - 2026-10-07, M3 (bundled packages):
-  - **Files.** `lmd/package/latex/tex/` holds 18 unmodified LPPL files from TeX Live 2025. `VENDOR.md` records version and hash for each. Resolution order is adapter, then bundled, then beside-document file.
+  - **Files.** `lmd/package/doc/latex/tex/` holds 18 unmodified LPPL files from TeX Live 2025. `VENDOR.md` records version and hash for each. Resolution order is adapter, then bundled, then beside-document file.
   - **Kernel.** The Lambda-owned kernel (`input-tex-kernel.cpp`) gained the LaTeX internals these packages assume:
     - plain-style register allocation (`\alloc@`, `\count10`–`\count19`), so `etex.sty` can extend it;
     - `\@star@or@long`/`\new@command`/`\@argdef` with a native `\@yargdef`;

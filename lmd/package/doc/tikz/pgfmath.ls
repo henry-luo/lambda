@@ -1,7 +1,7 @@
 // Bounded PGFPlots math declarations and numeric foreach accumulators.
 import expression: .expression
 import opts: .options
-import util: lambda.latex.util
+import util: lambda.doc.latex.util
 
 pub fn expression_tree(source) any^ {
     let parsed = parse("\\addplot{" ++ trim(source) ++ "};", {type: "tikz"})^

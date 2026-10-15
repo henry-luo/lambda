@@ -1,6 +1,6 @@
 // Phase 50 - CalRGB Gamma only applies numeric entries from an array.
 
-import interp: lambda.pdf.interp
+import interp: lambda.doc.pdf.interp
 
 fn name(s) { { kind: "name", value: s } }
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }

@@ -1,6 +1,6 @@
 // Phase 24 — Lab color spaces use the native C++ approximate RGB fallback.
 
-import interp: lambda.pdf.interp
+import interp: lambda.doc.pdf.interp
 
 fn name(s) { { kind: "name", value: s } }
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }

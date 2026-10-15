@@ -1,4 +1,4 @@
-import resolve: lambda.pdf.resolve
+import resolve: lambda.doc.pdf.resolve
 pn main() {
     let doc = input("test/input/invoice.pdf", 'pdf') ^ { null }
     let page = doc.pages[0]

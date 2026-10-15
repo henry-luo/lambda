@@ -16,8 +16,8 @@ and its reasoning; where a point has no formal ruling it says so (§10).
 | §1 Model | D7 terminology, D7.2.1, D8.2.1, D1.7 |
 | §2 Exports | S16.9.1, S9.1.7, D7.2.1, D7.2.2, D8.3.4v4, S12.3.7 |
 | §3 Imports | S16.9.6, S16.10.1v3, S12.3.3v2 |
-| §4 Resolution | S16.9.8, D7.2.6, D7.2.4, D7.2.3 |
-| §5 The `lambda.*` namespace | D7.2.4, S17.2.1, S17.2.2, S16.10.1v3 |
+| §4 Resolution | S16.9.8, D7.2.6, D7.2.4v3, D7.2.3 |
+| §5 The `lambda.*` namespace | D7.2.4v3, S17.2.1, S17.2.2, S16.10.1v3 |
 | §6 Instantiation | D7.2.1–D7.2.3, S7.7.6, D5.4.3, D8.5.1 |
 | §7 Type identity | S2.1.4 |
 | §8 Cross-language packages | D8.2.1, D7.2.6, D7.1.6 |
@@ -229,15 +229,17 @@ packages.
 ### 4.5 The Lambda home
 
 `<lambda-home>` is the runtime's asset directory (`LAMBDA_HOME`). Shipped
-source maps beneath `<lambda-home>/package/`: `lambda.<package>.*` maps
-beneath that package's directory, and `lambda.doc.math.*` maps to
-`package/math/` (D7.2.4).
+source maps beneath `<lambda-home>/package/`, preserving every component
+below `lambda`: document math, PDF and LaTeX use `lambda.doc.{math,pdf,latex}.*`
+and live in `package/doc/{math,pdf,latex}/` (D7.2.4v3). The source tree and import
+namespace align without special mappings; `lambda.math` remains the separate
+built-in numerical module.
 
 ---
 
 ## 5. The `lambda.*` namespace
 
-Ratified as S17.2.1/S17.2.2 and D7.2.4 (2026-08-27), closing SO37.
+Ratified as S17.2.1/S17.2.2 and D7.2.4v3 (2026-08-27); source layout aligned by D7.2.4v3 (2026-10-15), closing SO37.
 
 **The question.** S12.3.7 made system-function shadowing user-first, which
 left no way to reach a shadowed builtin. The direction was fixed when SO37
@@ -274,7 +276,7 @@ names arrive, not a parallel table (S17.2.1).
 **A path names exactly one thing.** Shortening the shipped math typesetting
 package to `lambda.math` collided with the built-in `math` module
 (`sqrt`/`pi`). The typesetting package moved to `lambda.doc.math`, leaving
-`lambda.math` for the built-in. Hence D7.2.4's rule: no path may be both a
+`lambda.math` for the built-in. Hence D7.2.4v3's rule: no path may be both a
 built-in module and a shipped package.
 
 **The root is reserved.** `lambda` may not name a binding (S16.10.1v3), so
@@ -502,7 +504,9 @@ On E216/E217, suggest a near spelling when a similar file or package exists
 | ~~`import "./utils/x.ls"` quoted paths; `/` and `\` separators~~ | dotted paths only (S16.9.6) |
 | ~~`import 'chart'` symbol import of built-in modules~~ | `import lambda.chart`; a symbol tail is a markup namespace (§3.1) |
 | ~~`std.*` standard-library tree and a separate `std/prelude.ls`~~ | the `lambda.*` root and the `lambda.sys` prelude (§5) |
-| ~~`lambda.package.<name>`; math typesetting at `lambda.package.math`~~ | `lambda.<name>`; `lambda.doc.math` (D7.2.4) |
+| ~~`lambda.package.<name>`; math typesetting at `lambda.package.math`~~ | `lambda.<name>`; `lambda.doc.math` (D7.2.4v3) |
+| ~~`lambda.doc.math.*` mapped specially to `package/math/`~~ | source and resources moved to `package/doc/math/`, mirroring imports (D7.2.4v3, 2026-10-15) |
+| ~~`lambda.pdf.*` and `lambda.latex.*` under `package/{pdf,latex}/`~~ | `lambda.doc.pdf.*` and `lambda.doc.latex.*` under `package/doc/{pdf,latex}/` (D7.2.4v3, 2026-10-15) |
 | ~~`pub x = 1` bare export~~ | `pub let x = 1` (S16.9.1) |
 | ~~`pub string p = …` / `pub symbol p = …` pattern exports~~ | patterns are types: `pub type P = \(…)` (§2) |
 | ~~module-scope `let a^err = e` error destructuring~~ | retired language-wide (S7.6.5v2); handle with `e ^ { … }` (§6) |

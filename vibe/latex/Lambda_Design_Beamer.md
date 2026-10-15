@@ -1,8 +1,8 @@
-# beamer in `lambda.latex`: frames as `lambda.slide` decks
+# beamer in `lambda.doc.latex`: frames as `lambda.slide` decks
 
 **Status:** Design proposal, 2026-10-13. The user chose this direction over keeping beamer out of scope ([Phase V plan](../impl/Lambda_Impl_Latex_Packages.md) §17.5). Nothing is implemented; until it is, `\documentclass{beamer}` reports `unknown-package` and renders with the article profile.
 
-**Formal linkage:** **D7.2.7v2** (expansion only: `beamer.cls` never runs on the engine, and its semantics live in a class profile), **D7.2.1–D7.2.4** (script adapters in the static registry), **S1.8** (no document text becomes Lambda code), **S12.1.1v2** (the lowering is pure and deterministic), **D7.5.3** (the Lambda/Radiant boundary the slide player keeps), **S7.4.1–S7.4.4** (located diagnostics). Within the slide package: SLD1–SLD4 ([Lambda_Pkg_Slides.md](../Lambda_Pkg_Slides.md) §0).
+**Formal linkage:** **D7.2.7v2** (expansion only: `beamer.cls` never runs on the engine, and its semantics live in a class profile), **D7.2.1–D7.2.4v3** (script adapters in the static registry), **S1.8** (no document text becomes Lambda code), **S12.1.1v2** (the lowering is pure and deterministic), **D7.5.3** (the Lambda/Radiant boundary the slide player keeps), **S7.4.1–S7.4.4** (located diagnostics). Within the slide package: SLD1–SLD4 ([Lambda_Pkg_Slides.md](../Lambda_Pkg_Slides.md) §0).
 
 **Scope:** a beamer document's frames, overlays, blocks, columns, notes, outline and themes, lowered onto the `<presentation>` deck that `lambda.slide` already plays. Out of scope: running beamer's templates as TeX, pixel-exact theme artwork, `beamerarticle`'s article mode beyond §6, and PPTX.
 
@@ -21,7 +21,7 @@ Why this shape:
 1. **Class profile.** `beamer` joins `registry.CLASSES` with base `article`, its options (`aspectratio`, `handout`, `t`/`c`/`b`, `10pt`–`20pt`, `xcolor=…`, `hyperref=…`) and its commands, and `implies` the packages beamer loads (graphicx, xcolor, hyperref, amsmath, amsthm). Its profile names a **deck** output, so `render_result` returns `{deck, diagnostics, …}` beside or instead of `elements`.
 2. **Engine.** Overlay specifications `<…>` after a command or `\begin{env}` must reach the adapter. The engine gains an overlay argument kind for a registry list of overlay-aware commands (`\item`, `\only`, `\uncover`, `\visible`, `\invisible`, `\onslide`, `\alt`, `\temporal`, `\alert`, `\textbf`, `\textit`, `\color`, `\includegraphics`, `\pause[n]`, `frame`, `block` and the list environments' `[<+->]`), recorded in `argument_groups` with kind `overlay`. `\pause` becomes a constructor. This is the only engine work.
 3. **Analysis.** Frames are counted and labelled (`label=`), sections and subsections form the outline, `\AtBeginSection`/`\AtBeginSubsection` bodies are recorded raw, and each overlay-carrying element gets a deterministic ID.
-4. **Lowering** (`lmd/package/latex/beamer/`): `deck.ls` builds `<presentation>` and the slides, `overlay.ls` parses and resolves specifications, `themes.ls` maps themes and `\setbeamer…` settings.
+4. **Lowering** (`lmd/package/doc/latex/beamer/`): `deck.ls` builds `<presentation>` and the slides, `overlay.ls` parses and resolves specifications, `themes.ls` maps themes and `\setbeamer…` settings.
 5. **Viewing.** `lambda view talk.tex` presents the deck through `lambda.slide.present` (SLD2) when the result has one; `convert` writes the deck as Mark or, through `slide.handout`, static slides.
 
 ## 3. Overlays

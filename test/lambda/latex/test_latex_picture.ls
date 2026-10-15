@@ -2,8 +2,8 @@
 // Tests Phase 2G: \begin{picture}(w,h)...\end{picture} → SVG, parsed by the
 // direct parser, which keeps each command's arguments on the command itself
 
-import picture: lambda.latex.elements.picture
-import util: lambda.latex.util
+import picture: lambda.doc.latex.elements.picture
+import util: lambda.doc.latex.util
 
 fn pic(body) {
     let ast = parse("\\begin{picture}" ++ body ++ "\\end{picture}", "latex") ^ { null }
