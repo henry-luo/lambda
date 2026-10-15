@@ -4,7 +4,7 @@ import dom
 // native scroll does not bubble; notify the retained Finder owner directly.
 view <finder_scrollport> { ~.rendered }
 on scroll(evt) {
-    dom.request_frame(dom.get_element_by_id(dom.root_node(evt.target),"finder"),"finder_thumbnails")
+    dom.request_frame(dom.get_element_by_id(dom.root_node(evt.target),"finder"),"finder_viewport")
     return 'handled'
 }
 
@@ -52,7 +52,7 @@ pub fn files(st) {
         <p if (trim(st.query)!="") "Try another name or clear your search." else "There’s room for something new.">>
     else <div class:if (st.mode == "icons") "icon-grid" else "file-list",
         *[for (i,e in rows) <button id:"file-" ++ string(i),class:"file",type:"button",role:"option",tabindex:"-1",
-            'data-path':e.path,'data-name':e.name,'aria-selected':"false",title:e.name,
+            'data-path':e.path,'data-name':e.name,'aria-selected':string(contains(st.selected,e.path)),'data-focused':string(e.path == st.focus),title:e.name,
             graphic(e);<span class:"file-name",e.name><span class:"file-date",e.modified>
             <span class:"file-size",if (e.dir) "—" else model.size_label(e.size)><span class:"file-kind",e.kind>>]>
 }

@@ -72,6 +72,13 @@ Offscreen canvases release their pixels, and retired regions are cleared before
 replacement. Folder generations and native job tokens reject stale completions;
 window closure cancels and joins workers.
 
+Large listings use CSS size/layout containment on the flex-sized scrollport, so
+ancestor sizing does not repeatedly measure every file. New markup includes
+selection/focus attributes; later selection and dialog updates reuse the published
+listing (**S12.1.3**). Thumbnail polling reuses measured slot geometry until
+publication, scrolling or resizing invalidates it. The full folder remains
+searchable and accessible through keyboard navigation.
+
 The document owns a 128-entry LRU cache, including negative results. Its
 32 MiB retained-pixel budget reserves the app's canvas pixels and the pending
 upload before admitting cached pixels.
@@ -100,3 +107,24 @@ and poisoning, and covers file replacement, invalidation, errors, cancellation
 and closure. The Python replay creates a real scrolling folder under `temp/`
 and checks offscreen release, Unicode/fragment-like filenames, EXIF rotation and
 refresh. Captures are written under `temp/finder/`.
+
+`large_directory.json` opens `./test`, checks that navigation avoids per-row
+attribute writes, and exercises retained selection, sorting, filtering,
+Home/End scrolling and resizing. Six UI replays pass 102 assertions; the real
+image-folder replay passes another 14. The thumbnail UI also passes under forced
+GC and freed-memory poisoning.
+
+Measure directory navigation through the next animation-frame callback with a
+release host, optionally comparing the previous implementation:
+
+```sh
+make build-release-compile
+python3 test/demo/finder/benchmark.py --reference 476e9075f --repetitions 3
+```
+
+The benchmark rejects debug hosts, alternates reference/current runs, and writes
+its generated scripts, logs and JSON results under `temp/finder/performance/benchmark/`.
+On macOS with 463 visible entries in `./test`, median opening latency fell from
+2,944 ms to 558 ms (5.3×); selection fell from 1,579 ms to 722 ms. These are three
+release runs per version on this checkout, including script and layout work;
+viewer startup is excluded and timings vary with host load.

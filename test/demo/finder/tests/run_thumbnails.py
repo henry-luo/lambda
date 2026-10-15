@@ -1,5 +1,6 @@
 """Replay real image folders with scrolling, EXIF rotation and unusual filenames."""
 import json
+import os
 from pathlib import Path
 import shutil
 import struct
@@ -53,7 +54,8 @@ fixture = SCRATCH / "events.json"
 result = SCRATCH / "result.json"
 fixture.write_text(json.dumps({"name": "Finder scrolling and image admission", "viewport": {"width": 1000, "height": 520}, "events": events}, ensure_ascii=False))
 with (SCRATCH / "replay.log").open("w") as log:
-    completed = subprocess.run([str(ROOT / "lambda.exe"), "view", "test/demo/finder/finder.ls", "--headless", "--event-file", str(fixture), "--event-result", str(result)], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=120)
+    executable = os.environ.get("RADIANT_TEST_EXECUTABLE", str(ROOT / "lambda.exe"))
+    completed = subprocess.run([executable, "view", "test/demo/finder/finder.ls", "--headless", "--event-file", str(fixture), "--event-result", str(result)], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=120)
 outcome = json.loads(result.read_text()) if result.exists() else {}
 if completed.returncode or outcome.get("result") != "PASS":
     raise SystemExit(f"Finder thumbnail replay failed: {SCRATCH / 'replay.log'}")

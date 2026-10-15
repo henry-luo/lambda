@@ -50,7 +50,8 @@ h1 { font-size: 20px; letter-spacing: -.6px; font-weight: 600; margin: 0 0 5px; 
 .text-tool:hover { background: #edf2f7; color: #367bb8; }
 .content { display: flex; flex: 1; min-height: 0; }
 .browser { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
-#files { flex: 1; min-height: 0; overflow: auto; outline-offset: -3px; }
+/* flex sizes the viewport; parent measurement need not traverse the file grid. */
+#files { contain: size layout; flex: 1; min-height: 0; overflow: auto; outline-offset: -3px; }
 .icon-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(120px,1fr)); gap: 22px 10px; align-content: start; padding: 30px 22px; }
 .file { min-width: 0; border-radius: 7px; font-size: 12px; }
 .icon-grid .file { display: flex; flex-direction: column; align-items: center; padding: 12px 5px 10px; gap: 8px; }

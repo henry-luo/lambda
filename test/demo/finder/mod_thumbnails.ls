@@ -30,22 +30,24 @@ pub pn cancel_jobs(owner,st,invalidate=false) {
     radiant.image_job(owner,{action:if (invalidate) "invalidate" else "cancel",channel:"thumbnail"})^
     return {frame:0,job:0,request:null,generation:st.generation+1}
 }
-pub pn schedule(owner,st) {
-    return if (st.frame>0) st else {*:st,frame:dom.request_frame(owner,"finder_thumbnails")}
+pub pn schedule(owner,st,measure=true) {
+    return {*:st,dirty:st.dirty or measure,frame:if (st.frame>0) st.frame else dom.request_frame(owner,"finder_thumbnails")}
 }
-pub pn tick(owner,st) {
+pub pn tick(owner,st,reflow=false) {
     var next = {*:st,frame:0}
-    let viewport = dom.bounding_box(dom.get_element_by_id(owner,"files"))
-    // read all geometry before uploading or releasing pixels, avoiding layout between each tile.
-    let slots = [for (slot in dom.query_selector_all(owner,".thumbnail-slot")) measure(owner,slot,viewport)]
+    let changed = reflow or next.dirty or next.slots == null
+    let viewport = if (changed) dom.bounding_box(dom.get_element_by_id(owner,"files")) else null
+    // upload does not resize fixed graphic slots; poll frames reuse their geometry until the viewport changes.
+    let slots = if (changed) [for (slot in dom.query_selector_all(owner,".thumbnail-slot")) measure(owner,slot,viewport)] else next.slots
     let targets = [for (item in slots where item.visible order by if (item.role == "look") 0 else if (item.role == "preview") 1 else 2) item]
-    for (item in slots) {
+    next = {*:next,dirty:false,slots:slots}
+    if (changed) for (item in slots) {
         if ((not item.visible and item.status == "ready") or
             (item.status == "ready" and dom.get_attribute(item.slot,"data-thumb-box") != box_key(item.box))) reset_slot(item.slot)
     }
     if (next.job>0) {
         let request = next.request
-        let current = [for (item in targets where item.slot == request.slot) item][0]
+        let current = [for (item in targets where dom.same_node(item.slot,request.slot)) item][0]
         if (current == null or request.generation != next.generation or request.box != box_key(current.box)) {
             next = cancel_jobs(owner,next)
             if (dom.contains(owner,request.slot)) reset_slot(request.slot)
@@ -82,5 +84,5 @@ pub pn tick(owner,st) {
         }
     }
     updates.attr(owner,"data-thumbnail-loading",next.job>0)
-    return if (next.job>0) schedule(owner,next) else next
+    return if (next.job>0) schedule(owner,next,false) else next
 }

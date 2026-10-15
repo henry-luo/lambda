@@ -52,14 +52,17 @@ pn publish(owner,st) {
     if (dom.get_attribute(owner,"data-path") != st.path) { next = {*:next,thumbnails:thumbs.cancel_jobs(owner,next.thumbnails)} }
     if (st.preview_data == null and st.focus != "" and (st.preview or st.look)) {
         let data = files.preview(model.focused(st)) ^ { {kind:"error",message:^.message} }
-        next = {*:st,preview_data:data}
+        next = {*:next,preview_data:data}
     }
     for (key,value in {path:next.path,mode:next.mode,selected:len(next.selected),hidden:next.hidden,dialog:next.dialog,look:next.look}) attr(owner,"data-" ++ string(key),value)
     text(owner,"folder-title",if (next.path == START) "Demo Files" else model.basename(next.path))
     text(owner,"status",model.status(next))
     region(owner,"breadcrumbs",format(ui.breadcrumb(next),'html'))
-    region(owner,"files",format(ui.files(next),'html'))
-    for (row in dom.query_selector_all(node(owner,"files"),"[data-path]")) {
+    let listing = {entries:next.entries,path:next.path,mode:next.mode,query:next.query,sort:next.sort,descending:next.descending,hidden:next.hidden}
+    // selection and dialogs reuse the published listing instead of rebuilding every SVG and row.
+    let replaced = next.published == null or next.published != listing
+    if (replaced) region(owner,"files",format(ui.files(next),'html'))
+    else for (row in dom.query_selector_all(node(owner,"files"),"[data-path]")) {
         let path = dom.get_attribute(row,"data-path")
         attr(row,"aria-selected",contains(next.selected,path))
         attr(row,"data-focused",path == next.focus)
@@ -87,7 +90,7 @@ pn publish(owner,st) {
         region(owner,"look-body",format(ui.preview(next,true),'html'))
     }
     if (dom.get_state(node(owner,"search"),"value") != next.query) dom.set_state(node(owner,"search"),"value",next.query)
-    return {*:next,thumbnails:thumbs.schedule(owner,next.thumbnails)}
+    return {*:next,published:listing,thumbnails:thumbs.schedule(owner,next.thumbnails)}
 }
 fn navigate(st,path,cursor=-1) map^ {
     if (not (path is string) or trim(path)=="") raise error("Enter a folder path.")
@@ -150,6 +153,12 @@ on finder_thumbnails(evt) {
     if (evt.event_phase != 2) { return 'pass' }
     if (session.thumbnails.frame>0 and evt.detail != session.thumbnails.frame) dom.cancel_frame(evt.target,session.thumbnails.frame)
     session = {*:session,thumbnails:thumbs.tick(evt.target,session.thumbnails)}
+    return 'handled'
+}
+on finder_viewport(evt) {
+    if (evt.event_phase != 2) { return 'pass' }
+    if (session.thumbnails.frame>0) dom.cancel_frame(evt.target,session.thumbnails.frame)
+    session = {*:session,thumbnails:thumbs.tick(evt.target,session.thumbnails,true)}
     return 'handled'
 }
 on resize(evt) {

@@ -140,6 +140,22 @@ background-image render is byte-identical. The view-reuse caption crash remains
 unresolved. Diagnostic reports are under `temp/finder/` and `test_output/`;
 successful-run verbose logs were removed after the run exhausted disk space.
 
+The large-directory follow-up isolates the flex-sized file scrollport with CSS
+size/layout containment, initializes selection/focus in markup, and compares
+listing inputs before formatting it again (**S12.1.3**). Thumbnail polling retains
+geometry until publication, scroll or resize; node matches use explicit
+`dom.same_node` identity (**S5.1.4**). All 102 assertions across six Finder UI
+fixtures and the 14-assertion image scrolling replay pass; the thumbnail UI also
+passes with forced GC and poisoning. The large-directory fixture checks that
+opening a folder does not publish individual row-attribute mutations.
+
+Three paired release runs against `476e9075f`, with 463 visible `./test` entries,
+measure median navigation-through-next-frame latency of 2,944 ms before and
+558 ms after (5.3×). Selection falls from 1,579 ms to 722 ms. Viewer startup is
+excluded. `test/demo/finder/benchmark.py` reproduces the comparison, rejects debug
+hosts and records raw runs under `temp/finder/performance/benchmark/`.
+Host load affects these timings; no timing threshold is imposed on UI tests.
+
 ## Supported subsets and thumbnail behavior
 
 | Format | Reading/writing | Thumbnail path |
