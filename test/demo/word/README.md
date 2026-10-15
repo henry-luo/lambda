@@ -111,18 +111,32 @@ the existing non-retired instance, preserving execution-local state ownership
 (**D7.2.1**, **D8.5.1v7**). The native regression is
 `InputScriptCacheTest.CachedDiamondKeepsSharedPromotionSlab`.
 
+Native selection restoration chooses the most specific recorded source owner
+before an ancestor's structural fallback (**D7.2.5**). Generated table wrappers
+change DOM child indices; accepting the document-root guess first moved clicks
+to other cells or paragraphs. The pointer regression clicks empty and populated
+cells, types without resetting selection, and repeats after zooming.
+
+Caret and selection geometry use viewport coordinates throughout (**D7.2.5**).
+The pointer's block origin already includes scrolling; saving that scroll again
+as an iframe translation shifted the caret above the clicked line. The scroll
+regression verifies the caret's painted pixels as well as focus and typing.
+
 ## Verification
 
 ```sh
 python3 test/demo/word/run_tests.py
 python3 test/demo/word/run_tests.py --model-only
 ./test/test_input_script_cache_gtest.exe --gtest_filter='InputScriptCacheTest.CachedDiamondKeepsSharedPromotionSlab'
+./test/test_source_pos_bridge_gtest.exe --gtest_filter='SourcePosBridgeRoundTrip.*'
+./test/test_state_store_gtest.exe --gtest_filter='StateStoreDomMutationTest.CaretFrameOffsetExcludesAncestorScroll'
 ```
 
 The runner checks model, snapshot, and HTML/Markdown/text/DOCX import goldens on
-interpreter, auto, and JIT tiers; then replays typing/history/save, formatting/search/table, and
-open/export/dirty-guard/focus workflows in headless Radiant. It checks the
-result records and exported file contents, and writes its report and logs
+interpreter, auto, and JIT tiers; then replays typing/history/save,
+formatting/search/table, open/export/dirty-guard/focus, table-caret, and scrolled-caret workflows
+in headless Radiant. It checks the result records and exported file contents,
+and writes its report and logs
 under `temp/word/tests/`. The initial and edited screenshots are
 `temp/word-initial.png` and `temp/word-edited.png`. Test reruns replace only
 their own named files under `temp/word/`.

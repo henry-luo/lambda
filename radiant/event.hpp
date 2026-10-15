@@ -3154,7 +3154,7 @@ void state_store_caret_clear(DocState* state);
 void caret_project_visual(DocState* state, float x, float y, float height);
 
 /**
- * Project visual caret geometry and iframe/document offset from a block origin.
+ * Project visual caret geometry and embedding viewport offset from a hit block origin.
  */
 void caret_project_visual_from_block(DocState* state, View* view,
                                      float x, float y, float height,

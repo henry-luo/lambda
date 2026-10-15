@@ -1,0 +1,98 @@
+{
+  "name": "Word scrolled document clicks keep focus and leave the ribbon inactive",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "scroll",
+      "x": 900,
+      "y": 600,
+      "dx": 0,
+      "dy": -6
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#stage"
+      },
+      "view_scroll_y": 300,
+      "tolerance": 1
+    },
+    {
+      "type": "assert_scroll",
+      "x": 0,
+      "y": 0,
+      "tolerance": 1
+    },
+    {
+      "type": "render",
+      "file": "temp/word-scroll-before.png"
+    },
+    {
+      "type": "click",
+      "x": 650,
+      "y": 295
+    },
+    {
+      "type": "script",
+      "js": "document.getElementById(\"edit-surface\").style.caretColor = \"rgb(255, 0, 255)\";"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 650,
+      "y": 295,
+      "search_radius": 10,
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#edit-surface"
+      }
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#edit-surface h2"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#word"
+      },
+      "attribute": "data-tab",
+      "equals": "Home"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog"
+      },
+      "count": 0
+    },
+    {
+      "type": "type",
+      "text": " SCROLLED "
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface h2"
+      },
+      "contains": "SCROLLED"
+    },
+    {
+      "type": "render",
+      "file": "temp/word-scroll-after.png"
+    }
+  ]
+}

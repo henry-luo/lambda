@@ -7037,8 +7037,9 @@ void caret_project_visual_from_block(DocState* state, View* view,
                                      float block_x, float block_y) {
     if (!state || !state_store_ensure_selection_presentation(state)) return;
     caret_project_visual(state, x, y, height);
-    RdtLogicalPoint chain = view_geometry_local_to_block_document(
-        view, {0.0f, 0.0f});
+    // the hit origin already includes ancestor scrolling; retain only the embedding frame translation.
+    RdtLogicalPoint chain = view_geometry_local_to_block_viewport(
+        view, {0.0f, 0.0f}, scroll_state_resolve_view_geometry);
     state->selection_presentation->iframe_offset_x = block_x - chain.x;
     state->selection_presentation->iframe_offset_y = block_y - chain.y;
 }

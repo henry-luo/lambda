@@ -14,8 +14,6 @@ typedef struct SelectionPaintCtx {
     float          scale;
     float          iframe_offset_x;
     float          iframe_offset_y;
-    float          root_scroll_x;
-    float          root_scroll_y;
 } SelectionPaintCtx;
 
 static void render_focus_outline(RasterRenderContext* rdcon, DocState* state) {
@@ -73,13 +71,8 @@ static void render_caret(RasterRenderContext* rdcon, DocState* state) {
     }
 
     float s = rdcon->raster_scale;
-    DomDocument* doc = rdcon && rdcon->ui_context ? rdcon->ui_context->document : nullptr;
-    ViewBlock* root_block = nullptr;
-    if (doc && doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
-        root_block = lam::view_require_block(doc->view_tree->root);
-    }
     RdtLogicalPoint point = view_geometry_local_to_window(
-        view, {caret_x, caret_y}, root_block,
+        view, {caret_x, caret_y},
         {iframe_offset_x, iframe_offset_y}, scroll_state_resolve_view_geometry);
     float x = point.x;
     float y = point.y;
@@ -104,11 +97,9 @@ static void render_caret(RasterRenderContext* rdcon, DocState* state) {
 static RdtLogicalPoint selection_paint_to_canvas(const SelectionPaintCtx* ctx,
                                                  RdtLogicalPoint point) {
     if (!ctx) return point;
-    // Range rects are viewport-relative, while the stored iframe offset was
-    // captured from document coordinates. Restore this root scroll once when
-    // joining those coordinate spaces.
-    point.x += ctx->iframe_offset_x + ctx->root_scroll_x;
-    point.y += ctx->iframe_offset_y + ctx->root_scroll_y;
+    // range rects and the embedding frame origin are both viewport-relative.
+    point.x += ctx->iframe_offset_x;
+    point.y += ctx->iframe_offset_y;
     return point;
 }
 
@@ -227,14 +218,6 @@ void render_text_selection_rect(RasterRenderContext* rdcon, ViewText* text_view,
     ctx.rdcon = rdcon;
     ctx.scale = rdcon->raster_scale;
     selection_get_iframe_offset(state, &ctx.iframe_offset_x, &ctx.iframe_offset_y);
-    ctx.root_scroll_x = 0.0f;
-    ctx.root_scroll_y = 0.0f;
-    DomDocument* doc = rdcon && rdcon->ui_context ? rdcon->ui_context->document : nullptr;
-    ViewBlock* root = doc && doc->view_tree && doc->view_tree->root &&
-        doc->view_tree->root->view_type == RDT_VIEW_BLOCK
-        ? lam::view_require_block(doc->view_tree->root) : nullptr;
-    scroll_state_resolve_view_geometry(root, &ctx.root_scroll_x, &ctx.root_scroll_y,
-                                       nullptr);
     ctx.color.r = 0x00; ctx.color.g = 0x78; ctx.color.b = 0xD7; ctx.color.a = 0x80;
     DomElement* paint_parent = text_view->parent && text_view->parent->is_element()
         ? text_view->parent->as_element() : nullptr;

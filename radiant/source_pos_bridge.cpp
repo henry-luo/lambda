@@ -432,9 +432,9 @@ static DomNode* source_descendant_at(DomElement* root,
 }
 
 // Resolve a SourcePos against a single DomElement candidate. Reads its
-// recorded source path; on a match, fills `*out` and returns true.
+// recorded source path; on a match, fills the boundary and source-path depth.
 static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
-                                   DomBoundary* out) {
+                                   DomBoundary* out, int* out_depth) {
     if (!de || de->is_synthetic()) return false;
     Item result_item;
     result_item.element = dom_element_render_source(de);
@@ -480,22 +480,30 @@ static bool try_resolve_at_element(DomElement* de, const SourcePosC* pos,
             }
         }
     }
+    if (matched) *out_depth = recorded.depth;
     source_path_free(&recorded);
     return matched;
 }
 
-// Recursive DFS through the DOM subtree.
-static bool resolve_walk(DomNode* node, const SourcePosC* pos,
-                         DomBoundary* out) {
-    if (!node) return false;
+// Generated wrappers can change DOM child indices. Prefer the deepest mapped
+// source owner over an ancestor's structural fallback before restoring a caret.
+static void resolve_walk(DomNode* node, const SourcePosC* pos,
+                         DomBoundary* out, int* best_depth) {
+    if (!node) return;
     if (node->node_type == DOM_NODE_ELEMENT) {
         DomElement* de = lam::dom_require_element(node);
-        if (try_resolve_at_element(de, pos, out)) return true;
+        DomBoundary candidate{nullptr, 0};
+        int depth = -1;
+        if (try_resolve_at_element(de, pos, &candidate, &depth) && depth > *best_depth) {
+            *out = candidate;
+            *best_depth = depth;
+        }
+        if (*best_depth == pos->path.depth) return;
         for (DomNode* c = de->first_child; c; c = c->next_sibling) {
-            if (resolve_walk(c, pos, out)) return true;
+            resolve_walk(c, pos, out, best_depth);
+            if (*best_depth == pos->path.depth) return;
         }
     }
-    return false;
 }
 
 bool dom_boundary_from_source_pos(DomNode* dom_root,
@@ -504,7 +512,9 @@ bool dom_boundary_from_source_pos(DomNode* dom_root,
     if (!dom_root || !pos || !out) return false;
     out->node = NULL;
     out->offset = 0;
-    return resolve_walk(dom_root, pos, out);
+    int best_depth = -1;
+    resolve_walk(dom_root, pos, out, &best_depth);
+    return best_depth >= 0;
 }
 
 } // extern "C"

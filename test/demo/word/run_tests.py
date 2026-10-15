@@ -57,7 +57,7 @@ def main():
         # These are this harness's generated files, never the default user document.
         for filename in ("smoke.word.json", "workflow.word.json", "workflow.html", "workflow.pdf"):
             (ROOT / "temp/word" / filename).unlink(missing_ok=True)
-        for fixture in ("smoke", "editing", "files"):
+        for fixture in ("smoke", "editing", "files", "table_caret", "scroll_hit"):
             result_path = ARTIFACTS / f"{fixture}.json"
             result_path.unlink(missing_ok=True)
             result = run(fixture, [executable, "view", "test/demo/word/word.ls", "--headless",

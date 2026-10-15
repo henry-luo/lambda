@@ -13649,9 +13649,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Calculate the correct block position for the drag target view
                 // by walking up ITS parent chain
                 RdtLogicalPoint selection_origin =
-                    view_geometry_local_to_block_document(
+                    view_geometry_local_to_window(
                         static_cast<View*>(text),
-                        {selection_iframe_offset_x, selection_iframe_offset_y});
+                        {0.0f, 0.0f},
+                        {selection_iframe_offset_x, selection_iframe_offset_y},
+                        scroll_state_resolve_view_geometry);
 
                 // Save evcon.block and temporarily set it to the selection view's block position
                 BlockBlot saved_block = evcon.block;
@@ -14156,10 +14158,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         caret_x, caret_y, caret_height,
                         caret_iframe_offset_x, caret_iframe_offset_y);
                     RdtLogicalPoint render_point =
-                        view_geometry_local_to_block_document(
+                        view_geometry_local_to_window(
                             static_cast<View*>(text),
-                            {caret_x + caret_iframe_offset_x,
-                             caret_y + caret_iframe_offset_y});
+                            {caret_x, caret_y},
+                            {caret_iframe_offset_x, caret_iframe_offset_y},
+                            scroll_state_resolve_view_geometry);
                     log_info("[CARET FINAL] mouse=(%.1f,%.1f) local=(%.1f,%.1f) render=(%.1f,%.1f) offset=%d block=(%.1f,%.1f) rect=(%.1f,%.1f %.1fx%.1f)",
                         btn_event->x, btn_event->y, caret_x, caret_y,
                         render_point.x, render_point.y, char_offset,
