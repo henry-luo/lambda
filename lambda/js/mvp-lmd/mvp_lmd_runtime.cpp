@@ -392,22 +392,23 @@ Item mvp_lmd_array_own_item(Array* array, int64_t index) {
 }
 extern "C" Item mvp_lmd_array_new(int64_t length) {
     if (length < 0 || length > UINT32_MAX) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
-    RootFrame roots(1);
-    if (!roots.valid()) return ItemError;
-    Rooted<Array*> result(roots, array());
-    if (!result.get()) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-    if (js_array_should_keep_length_sparse(result.get(), length)) {
-        if (!mvp_lmd_array_prepare_sparse(result.get())) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
-        result.get()->length = length;
-        return Item{.array = result.get()};
+    Array* result = array();
+    if (!result) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    // empty arrays need no handoff buffer; both growth helpers own precise roots during allocation.
+    if (!length) return Item{.array = result};
+    if (js_array_should_keep_length_sparse(result, length)) {
+        if (!mvp_lmd_array_prepare_sparse(result)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+        result->length = length;
+        return Item{.array = result};
     }
-    if (!array_reserve_append_slots(result.get(), length))
+    if (!array_reserve_append_slots(result, length))
         return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     // reuse the shared non-value sentinel; explicit undefined remains an own element.
-    for (int64_t i = 0; i < length; i++) result.get()->items[i].item = ITEM_JS_DELETED_SENTINEL;
-    result.get()->length = length;
-    return Item{.array = result.get()};
+    for (int64_t i = 0; i < length; i++) result->items[i].item = ITEM_JS_DELETED_SENTINEL;
+    result->length = length;
+    return Item{.array = result};
 }
+
 extern "C" Item mvp_lmd_array_resize(Item owner, int64_t length) {
     if (length < 0 || length > UINT32_MAX) return mvp_lmd_fail(LMD_MVP_RANGE, 0);
     RootFrame roots(1);

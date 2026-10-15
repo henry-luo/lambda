@@ -2404,3 +2404,64 @@ mismatch: both pins produce byte-identical output. Their separate replays,
 untouched baseline failures and provenance are retained in `validation.json`,
 `pdf-control-replay.json`, `chart-control-replay.json` and `baseline-results/`.
 No golden, test deadline or Test262 harness was changed.
+
+
+### Remaining-case ownership and projection tuning (2026-10-15)
+
+This continuation starts at `33c0e9c0e` and retains the prior final executable as
+its clean control: all 1,454 production input hashes match. It adds no helper,
+container flag, public ABI or per-site cache (**D8.4.1v2**).
+
+- Empty JS arrays reuse Lambda's empty `array()` without allocating an unused
+  handoff buffer. Nonempty construction delegates rooting to the existing dense
+  reserve and sparse preparation helpers. Object headers stay fixed, each
+  collecting helper retains its owner, and publication has no intervening
+  safepoint (**D4.3.1**, **D5.3.2–D5.3.3**). Root reservation failure transfers
+  control through the existing recovery frame; it cannot continue unrooted.
+- Key-only projections do not invoke getters, so they keep their descriptor
+  snapshot. Value/entry projections retain live rechecks after callbacks.
+  New cases cover array holes, sparse and typed indices, mapped arguments,
+  hidden/accessor properties, key ordering and mutation during `Object.values`.
+- Shared shaped-field reads resolve `LaneStorageDesc` once and reuse it for
+  nullable admission and ordinary decoding (**D3.4.6**).
+- The existing reflective property template specializes callee reads; ordinary
+  Get and other operations retain general dispatch. Shared in-place deletion
+  no longer retains a scalar when it only publishes a new layout (**D3.4.5**).
+
+Receiver-kind reuse and earlier hash-mismatch rejection were measured and
+removed for lack of a consistent benefit. Benchmark sources, output contracts,
+historical controls and published Results3–9 are unchanged. The final paired release-MIR
+capture uses nine measured rounds plus an excluded warmup, rotating candidate,
+clean pre-change and historical controls. All **15/15** output/backend contracts
+pass; no paired 95% interval shows a new regression against the pre-change pin.
+
+| Workload | Candidate ms | Pre-change ms | Historical ms | vs pre-change | vs historical |
+|---|---:|---:|---:|---:|---:|
+| Object-delete | 0.836 | 0.867 | 0.827 | -3.6% | +1.1% |
+| Hashmap | 479.313 | 491.490 | 469.153 | -2.5% | +2.2% |
+| Microdiff | 108.190 | 109.905 | 101.336 | -1.6% | +6.8% |
+| DeltaBlue | 52.616 | 53.108 | 50.548 | -0.9% | +4.1% |
+| Splay | 57.834 | 59.240 | 59.892 | -2.4% | -3.4% |
+
+Object-delete's historical ratio interval is **0.989–1.024**, consistent with
+parity. DeltaBlue's small pre-change improvement is inconclusive. Microdiff,
+DeltaBlue and Hashmap retain statistically clear historical gaps; performance
+acceptance remains open. Historical controls are Result9 except Hashmap/Text
+Search, which use Phase34 entry. Monitoring records **0/117** competing build/test
+observations and **17/117** with busy background activity. This focused capture
+does not refresh the whole-benchmark results or the whole-population MVP score.
+
+Fresh release archives pass **667/667** MVP tests, **94/94** shared map-building
+and **23/23** name-pool tests. Forced GC with freed-memory poisoning passes
+**17/17** focused checks every five allocations and **3/3** ownership checks
+every allocation. The private CLI passes **1,957/1,957** canonical cases and
+**1,716/1,716** strict variants without retries. The full LJS baseline passes
+**40,261/40,261** with zero regressions and no isolated retries; the integrated
+MIR GC stress sweep passes **313/313**. Lambda's combined aggregate records
+**7,443/7,447** (runtime **5,331/5,335**, input **2,112/2,112**). The four
+failures retain the same two pre-existing causes: three PDF page-walker checks
+and the chart dashboard's half-pixel wordcloud golden mismatch. Fresh control
+replays confirm PDF fails identically in interpreter/JIT/auto on both pins and
+chart output is byte-identical. No expected output, harness or deadline changed.
+Raw samples, confidence intervals, provenance, rejected experiments and commands
+are under `temp/mvp_perf_remaining2_20261015/REPORT.md`.

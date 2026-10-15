@@ -1810,3 +1810,26 @@ LJS baseline**, and all **313** GC stress cases. Lambda's aggregate is
 the clean pre-change pin (three checks and one check respectively). No expected
 output or harness was changed. Details and rejected experiments are in
 `temp/mvp_perf_remaining_20261015/REPORT.md`; published results remain unchanged.
+
+The ownership/projection continuation removes unused empty-array buffers,
+redundant outer roots, repeated key-descriptor checks and shaped-field descriptor
+copies. It also specializes the existing callee reader and avoids retaining a
+value during deletion (**D3.4.5–D3.4.6**, **D4.3.1**, **D5.3.2–D5.3.3**).
+No new helper, public ABI or runtime cache is added (**D8.4.1v2**).
+The paired 15-workload release-MIR capture improves object-delete **3.6%**,
+Hashmap **2.5%**, Microdiff **1.6%**, and Splay **2.4%** against the clean
+pre-change pin, with all outputs passing and no new statistically clear
+regression. Object-delete is consistent with historical parity; Microdiff **6.8%**,
+DeltaBlue **4.1%**, and Hashmap **2.2%** remain open. DeltaBlue's **0.9%**
+pre-change reduction is within measurement noise. This focused capture records
+background contention and leaves published Results3–9 unchanged.
+Validation passes **667/667** MVP tests, **94/94** shared map-building and
+**23/23** name-pool tests, **17/17** focused GC checks, **3/3** checks collecting
+every allocation, and **1,957 canonical + 1,716 strict** selected Test262
+variants without retries. The full LJS baseline passes **40,261/40,261** and
+the integrated GC stress sweep passes **313/313**. Lambda's aggregate is
+**7,443/7,447**: the same three PDF page-walker checks and one chart wordcloud
+check fail on both pins; PDF replays cover interpreter/JIT/auto and chart output
+is byte-identical. No expected output, harness or deadline changed.
+Evidence, controls and remaining gaps are recorded in
+`temp/mvp_perf_remaining2_20261015/REPORT.md` and the implementation plan.

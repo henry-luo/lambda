@@ -1424,7 +1424,9 @@ extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
     ProjectionField* fields = capacity ? (ProjectionField*)pool_calloc(context->pool, capacity * sizeof(ProjectionField)) : NULL;
     if (capacity && !fields) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     int64_t count = 0;
-    bool callbacks = indexed || typed || arguments;
+    // keys-only projection never invokes getters; its own-descriptor snapshot stays valid across GC.
+    bool reads_values = projection == 1 || projection == 2;
+    bool callbacks = reads_values && (indexed || typed || arguments);
     if (indexed || typed) {
         // descriptor entries replace storage entries in the ordered own-key list.
         for (int64_t i = 0; i < dense_count; i++) {
@@ -1442,7 +1444,7 @@ extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
         FOR_EACH_MAP_FIELD(type, field) {
             if (field->key_kind == NAME_KEY_PRIVATE || (field->key_kind != NAME_KEY_STRING && projection != 4 && projection != 5) ||
                     ((projection == 0 || projection == 4) && (field->flags & JSPD_NON_ENUMERABLE))) continue;
-            callbacks |= (field->flags & JSPD_IS_ACCESSOR) != 0;
+            callbacks |= reads_values && (field->flags & JSPD_IS_ACCESSOR) != 0;
             NameRef name = field->name_id ? name_pool_resolve_id(context->name_pool, field->name_id) :
                 heap_create_name(field->name->str, field->name->length);
             if (!name) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);

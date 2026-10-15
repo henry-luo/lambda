@@ -3164,6 +3164,57 @@ TEST_F(JsMvpLmd, LiveMapIteration) {
     boolean("let m=new Map();m.set('a',1).set('b',2);let a=[];for(let pair of m){a[a.length]=pair}a[0]!==a[1] && a[0][0]==='a' && a[1][0]==='b'");
     numeric("let m=new Map();m.set(1,1).set(2,2).set(3,3);let s=0;outer:for(let v of m.values()){if(v===1)continue outer;s+=v;if(v===2)break outer}s", 2);
 }
+TEST_F(JsMvpLmd, ArrayConstructionDelegatesPreciseOwnership) {
+    Item empty = run("new Array()");
+    ASSERT_EQ(get_type_id(empty), LMD_TYPE_ARRAY);
+    EXPECT_EQ(empty.array->length, 0);
+    EXPECT_EQ(empty.array->capacity, 0);
+    EXPECT_EQ(empty.array->items, nullptr);
+    boolean(R"JS(
+        let ok=true, keep=[];
+        for(let i=0;i<32;i++) {
+            let empty=[], dense=new Array(3), sparse=new Array(1000000);
+            ok=ok && empty.length===0 && !Object.hasOwn(dense,'0') && !Object.hasOwn(sparse,'999999');
+            empty.push(5e-324,-0,{i}); dense[2]=empty; sparse[999999]=dense;
+            keep.push(sparse);
+        }
+        for(let i=0;i<keep.length;i++) {
+            let dense=keep[i][999999], empty=dense[2];
+            ok=ok && !Object.hasOwn(dense,'0') && empty[0]===5e-324 &&
+                Object.is(empty[1],-0) && empty[2].i===i;
+        }
+        ok;
+    )JS");
+}
+TEST_F(JsMvpLmd, KeyProjectionAvoidsGettersAndRetainsDescriptorOrder) {
+    boolean(R"JS(
+        let hits=0, symbol=Symbol('key'), a=[1,,3];
+        Object.defineProperty(a,'0',{enumerable:false});
+        Object.defineProperty(a,'1',{get(){hits++;return 2},enumerable:true});
+        a.named=4; a[symbol]=5;
+        Object.defineProperty(a,'hidden',{get(){hits++;return 6}});
+        let keys=Object.keys(a), names=Object.getOwnPropertyNames(a), all=Reflect.ownKeys(a);
+        let seen='';for(let k in a)seen+=k+',';
+        keys.join(',')==='1,2,named' && names.join(',')==='0,1,2,length,named,hidden' &&
+        all[all.length-1]===symbol && Object.getOwnPropertySymbols(a)[0]===symbol &&
+        seen==='1,2,named,' && hits===0;
+    )JS");
+    boolean(R"JS(
+        let a=[1,2,3], hits=0;
+        Object.defineProperty(a,'0',{get(){hits++;Object.defineProperty(a,'1',{enumerable:false});return 7},enumerable:true});
+        let keys=Object.keys(a), values=Object.values(a);
+        keys.join(',')==='0,1,2' && values.join(',')==='7,3' && hits===1;
+    )JS");
+    boolean(R"JS(
+        let sparse=[];sparse[1000000]=7;sparse.extra=8;
+        Object.defineProperty(sparse,'3',{value:9,enumerable:false});
+        let typed=new Uint16Array([4,5]);typed.extra=6;
+        function keys(a,b){Object.defineProperty(arguments,'1',{enumerable:false});return Object.keys(arguments).join(',')}
+        Object.keys(sparse).join(',')==='1000000,extra' &&
+        Object.getOwnPropertyNames(sparse).join(',')==='3,1000000,length,extra' &&
+        Object.keys(typed).join(',')==='0,1,extra' && keys(1,2)==='0';
+    )JS");
+}
 TEST_F(JsMvpLmd, ObjectAndMapScopeBoundary) {
     numeric("({get x(){return 1}}).x", 1);
     boolean("Object.getPrototypeOf({__proto__:null})===null");

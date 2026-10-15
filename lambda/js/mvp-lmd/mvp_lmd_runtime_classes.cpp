@@ -510,6 +510,8 @@ static Item mvp_lmd_class_property_impl(Item owner, Item name, Item value, int64
 
 extern "C" Item mvp_lmd_class_property(Item owner, Item name, Item value, int64_t operation,
         MvpLmdPropertyCache* cache) {
+    if (operation == LMD_PROP_CALLEE)
+        return mvp_lmd_class_property_impl<false, false, LMD_PROP_CALLEE>(owner, name, value, operation, cache, owner);
     if (operation == LMD_PROP_GET_BINDING)
         return mvp_lmd_class_property_impl<false, true>(owner, name, value, LMD_PROP_GET, cache, owner);
     return mvp_lmd_class_property_impl<false>(owner, name, value, operation, cache, owner);

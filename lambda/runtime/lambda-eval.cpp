@@ -13648,10 +13648,13 @@ static bool container_move_to_type(void** type_slot, void** data_slot, int* cap_
              storage == LMD_TYPE_BOOL || storage == LMD_TYPE_UNDEFINED || storage == LMD_TYPE_STRING ||
              storage == LMD_TYPE_ARRAY || storage == LMD_TYPE_MAP));
         if (compatible && immediate_store && (!changed_entry || replacement)) {
-            uint64_t value_home = 0;
-            Item held = lambda_item_adopt_scalar_home(new_value, &value_home);
-            if (replacement && !map_field_store((char*)*data_slot + replacement->byte_offset, held, storage))
-                return false;
+            // deletion publishes only the new layout; it has no scalar value to retain.
+            if (replacement) {
+                uint64_t value_home = 0;
+                Item held = lambda_item_adopt_scalar_home(new_value, &value_home);
+                if (!map_field_store((char*)*data_slot + replacement->byte_offset, held, storage))
+                    return false;
+            }
             *type_slot = new_type;
             return true;
         }
