@@ -3,6 +3,7 @@
 import lambda.editor.mod_doc
 import lambda.editor.mod_step
 import model: .mod_model
+import page: .mod_page
 
 let factories = {
     p:(a,k)=><p *:a, *k>, h1:(a,k)=><h1 *:a, *k>, h2:(a,k)=><h2 *:a, *k>,
@@ -25,8 +26,8 @@ fn make(tag,attrs,kids) {
 // Image resources remain visible; anchor targets become inert tooltips.
 // Imported event handlers never reach the live DOM.
 fn projected_attrs(attrs) => {*:map([for (a in attrs where contains(['style','align','start','colspan','rowspan','data-word-style',
-    'src','alt','width','height','href','title'],a.name))
-    (string(a.name),a.value)])}
+    'src','alt','width','height','href','title','data-word-table-style','data-word-page-break','data-word-comment'],a.name))
+    (string(a.name),string(a.value))])}
 fn wrap_marks(marks,i,child) => if (i >= len(marks)) child else {
     let m = marks[i]
     let attrs = if (m.value is array) projected_attrs(m.value) else {}
@@ -35,13 +36,15 @@ fn wrap_marks(marks,i,child) => if (i >= len(marks)) child else {
 view map {
     if (~.kind == 'text') wrap_marks(~.marks,0,if (~.text == "") "\u200B" else ~.text)
     else if (~.kind == 'node') make(if (~.tag == 'doc') 'div' else ~.tag,
-        projected_attrs(~.attrs),[for (child in ~.content) apply(child)])
+        // split/delete can leave an empty block: its node-position caret still needs a line box.
+        projected_attrs(~.attrs),if (len(~.content)==0 and len(model.blocks(~))>0) ["\u200B"]
+        else [for (child in ~.content) apply(child)])
     else ""
 }
 pub fn surface(editor,zoom,read_only=false) =>
     <div id:"edit-surface", class:"word-content", contenteditable:if (read_only) "false" else "true", tabindex:"0",
         ["aria-label"]:"Document", ["aria-multiline"]:"true", role:"textbox",
-        style:"transform:scale(" ++ string(zoom) ++ "); transform-origin:top left;",
+        style:"transform:scale(" ++ string(zoom) ++ "); transform-origin:top left; " ++ page.editor_style(editor.doc),
         apply(editor.doc)>
 
 // The same document typography serves the editor, HTML export, and paged PDF.
@@ -66,10 +69,17 @@ pub let document_css = "
  .word-content table { border-collapse:collapse; width:100%; margin:15px 0 18px; font-size:10pt; }
  .word-content td,.word-content th { border:1px solid #d6e0e7; padding:9px 12px; text-align:left; }
  .word-content th { font-family:Arial,sans-serif; font-weight:600; color:#294f70; background:#edf3f6; }
+ .word-content table[data-word-table-style=soft] tr:nth-child(even) td { background:#f0f6fa; }
+ .word-content table[data-word-table-style=contrast] th { background:#294f70; color:#fff; border-color:#294f70; }
+ .word-content table[data-word-table-style=plain] td,.word-content table[data-word-table-style=plain] th {
+   border-left:0; border-right:0; background:transparent; }
  .word-content hr { border:0; border-top:1px solid #bfced9; margin:22px 0; }
  .word-content a,.word-link { color:#2864ad; text-decoration:underline; }
  .word-content pre,.word-content code { font-family:'Courier New',monospace; }
- .word-content img { max-width:100%; }
+ .word-content img { max-width:100%; vertical-align:middle; }
+ .word-content [data-word-page-break=true] { break-before:page; }
+ .word-content [data-word-comment] { background-color:#fff3c4; border-bottom:2px solid #d6aa39; }
+ @media screen { .word-content [data-word-page-break=true] { border-top:1px dashed #bfced9; margin-top:28px; padding-top:16px; } }
  @page { size:A4; margin:17mm 19mm; }
  @media print { .word-content { width:auto; min-height:0; padding:0; }
    h1,h2,h3 { break-after:avoid; } tr { break-inside:avoid; } }

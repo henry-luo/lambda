@@ -10,6 +10,8 @@ import model: .mod_model
 import ui: .mod_ui
 import surface: .mod_surface
 import app: .mod_app
+import page: .mod_page
+import review: .mod_review
 
 let BASE = url_resolve(resources.entry_uri()^,".")
 let CSS = input(url_resolve(BASE,"word.css"),'text')^
@@ -17,8 +19,13 @@ let CSS = input(url_resolve(BASE,"word.css"),'text')^
 edit <word_app> state st:app.initial() {
     let dirty = session.is_dirty(st.file_state,st.editor.doc)
     let words = model.word_count(st.editor.doc);
+    let in_table = model.table_context(st.editor) != null
+    let tab = if (st.tab=="Table" and not in_table) "Home" else st.tab;
+    let paper = page.settings(st.editor.doc)
+    let geometry = page.geometry(st.editor.doc);
     <body id:"word", class:if (st.focused) "focus-mode" else "", ["data-dirty"]:string(dirty),
-        ["data-revision"]:string(st.editor.model_revision), ["data-tab"]:st.tab, ["data-readonly"]:string(st.read_only),
+        ["data-revision"]:string(st.editor.model_revision), ["data-tab"]:tab, ["data-readonly"]:string(st.read_only),
+        <style review.css(st.editor.doc)>
         <header class:"titlebar",
             <div class:"brand", <span class:"brand-mark", "W"> <span "Word"> <span class:"brand-divider"> <span class:"brand-detail", "A LAMBDA WORKSPACE">>
             <div class:"document-title", st.file_state.envelope.title; <span class:"save-indicator", if (dirty) "  •  Unsaved" else "  •  Saved">>
@@ -28,28 +35,29 @@ edit <word_app> state st:app.initial() {
             <nav class:"tabs", ["aria-label"]:"Ribbon tabs",
                 ui.button("new","file.new","New"); ui.button("open","file.open","Open");
                 <span class:"tab-divider">;
-                *[for (name in ["Home","Insert","View"]) ui.button("tab-" ++ lower(name),"ui.tab",name,null,{tab:name},st.tab==name,false,"tab")];
+                *[for (name in ["Home","Insert","Layout","Review","View",*if (in_table) ["Table"] else []]) ui.button("tab-" ++ lower(name),"ui.tab",name,null,{tab:name},tab==name,false,"tab")];
                 <div class:"tab-spacer">
                 ui.button("sample","file.sample","Studio example")>
-            ui.ribbon(st.editor,st.tab,st.nav,st.read_only)
+            ui.ribbon(st.editor,tab,st.nav,st.read_only)
         >
         <main class:"workspace",
             <div class:"navigation-slot", style:if (st.nav and not st.focused) "display:block" else "display:none",
-                ui.navigation(st.editor,st.query,st.match_index)>
+                ui.navigation(st.editor,st.query,st.match_index,st.match_case,st.replace_text)>
             <section id:"stage", class:"stage", ["aria-label"]:"Document workspace",
-                <div class:"canvas-heading", <span "DRAFT / " ++ (if (st.read_only) "READING" else "WRITING")> <span "A4 · Continuous canvas">>
-                <div class:"ruler", style:"width:" ++ string(794*st.zoom) ++ "px",
+                <div class:"canvas-heading", <span "DRAFT / " ++ (if (st.read_only) "READING" else "WRITING")> <span paper.paper ++ " · " ++ paper.orientation ++ " · Continuous editing">>
+                <div class:"ruler", style:"width:" ++ string(geometry.width*st.zoom) ++ "px",
                     *[for (n in 0 to 16) <span string(n)>]>
-                <div id:"paper-wrap", class:"paper-wrap", style:"width:" ++ string(794*st.zoom) ++ "px; min-height:" ++ string(1123*st.zoom) ++ "px;",
+                <div id:"paper-wrap", class:"paper-wrap", style:"width:" ++ string(geometry.width*st.zoom) ++ "px; min-height:" ++ string(geometry.height*st.zoom) ++ "px;",
                     surface.surface(st.editor,st.zoom,st.read_only)>
                 <div class:"canvas-footer", "A little room for your next idea.">
             >
+            if (st.review and not st.focused) ui.comments(st.editor,st.show_resolved,st.read_only) else null
         >
         <footer class:"statusbar",
             <div class:"status-left", <span class:"status-dot"> <span id:"status", role:"status", st.status> <span class:"status-divider"> <span id:"word-count", string(words) ++ " words">>
             <div class:"status-right",
                 ui.button("exit-focus","view.focusMode",if (st.focused) "Exit focus" else "Focus");
-                <span "A4"> ui.button("status-zoom-out","view.zoomOut","−");
+                <span id:"paper-label",paper.paper> ui.button("status-zoom-out","view.zoomOut","−");
                 <span id:"zoom-label", string(round(st.zoom*100)) ++ "%"> ui.button("status-zoom-in","view.zoomIn","+")>
         >
         ui.dialog(st.dialog,st.file_state)
@@ -66,13 +74,17 @@ on editaction(evt) {
     return run.result
 }
 on selectionchange(evt) {
-    if (app.is_control(evt.target) or (evt.source_selection==null and evt.source_pos==null)) { return }
-    let editor = app.mounted(st.editor,evt.target)
-    let accepted = edit_accept_dom_selection(editor,evt)
-    if (accepted.changed) {
-        st = {*:st,editor:model.clean(accepted.editor)}
+    let adopted = app.adopt(st,evt,true)
+    if (adopted.editor!=st.editor) {
+        st = {*:adopted,editor:model.clean(adopted.editor)}
         edit_restore_selection(st.editor)
+        dom.request_frame(dom.get_element_by_id(dom.root_node(evt.target),"word"),"word_controls")
     }
+}
+on word_controls(evt) {
+    // selected attributes describe defaults; update the live selectedness after projection.
+    for (option in dom.query_selector_all(dom.root_node(evt.target),".ribbon-select option[selected]"))
+        dom.set_state(option,"selected",true)
 }
 on word_command(req) {
     st = app.adopt(st,req.event)
@@ -89,7 +101,8 @@ on change(evt) {
     if (id != null) {
         let key = dom.get_attribute(evt.target,"data-param")
         let raw = dom.get_state(evt.target,"value")
-        let value = if (contains(["size","value"],key)) float(raw) else raw
+        // only numeric formatting commands parse numbers; table alignments are named values.
+        let value = if (contains(["font-size","line-height"],model.spec(id).property)) float(raw) else raw
         st = app.command(app.adopt(st,evt),id,{[key]:value},evt.target)
         app.finish(st,evt.target)
     }
@@ -98,16 +111,26 @@ on input(evt) {
     if (dom.node_type(evt.target)==1 and dom.get_attribute(evt.target,"id")=="find-query") {
         st = {*:st,query:string(dom.get_state(evt.target,"value") or ""),match_index:-1}
     }
+    if (dom.node_type(evt.target)==1 and dom.get_attribute(evt.target,"id")=="replace-text") {
+        st = {*:st,replace_text:string(dom.get_state(evt.target,"value") or "")}
+    }
 }
 on keydown(evt) {
     let key = lower(string(evt.key))
+    let adopted = app.adopt(st,evt)
     let id = if (evt.key=="Escape") "ui.escape"
         else if (app.primary(evt) and key=="s") (if (evt.shiftKey) "file.saveAs" else "file.save")
         else if (app.primary(evt) and key=="f") "ui.find"
+        else if (app.primary(evt) and key=="k" and st.dialog==null and not app.is_control(evt.target)) "ui.link"
+        else if (app.primary(evt) and evt.altKey and key=="m" and st.dialog==null and not app.is_control(evt.target)) "ui.comment"
+        else if (app.primary(evt) and evt.key=="Enter" and st.dialog==null and not app.is_control(evt.target)) "insert.pageBreak"
+        else if (evt.key=="Tab" and st.dialog==null and not st.read_only and not app.is_control(evt.target) and model.table_context(adopted.editor)!=null)
+            (if (evt.shiftKey) "table.previousCell" else "table.nextCell")
+        else if (app.primary(evt) and key==" " and st.dialog==null and not app.is_control(evt.target)) "format.clear"
         else if (app.primary(evt) and st.dialog==null and not app.is_control(evt.target)) model.shortcut(key,evt.shiftKey==true)
         else null
     if (id==null) { return 'pass' }
-    st = app.command(app.adopt(st,evt),id,{},evt.target)
+    st = app.command(adopted,id,{},evt.target)
     app.finish(st,evt.target)
     return 'prevent-default'
 }

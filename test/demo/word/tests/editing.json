@@ -149,6 +149,12 @@
       }
     },
     {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-insert_table"
+      }
+    },
+    {
       "type": "assert_count",
       "target": {
         "selector": "#edit-surface table"

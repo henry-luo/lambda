@@ -7,6 +7,7 @@
     {"type":"type","target":{"selector":"#edit-surface p"},"text":"Before the table"},
     {"type":"click","target":{"selector":"#tab-insert"}},
     {"type":"click","target":{"selector":"[id=\"insert.table\"]"}},
+    {"type":"click","target":{"selector":".edit-dialog-insert_table"}},
     {"type":"click","target":{"selector":"#edit-surface tr:first-child th:nth-child(2)"}},
     {"type":"assert_caret","target":{"selector":"#edit-surface tr:first-child th:nth-child(2)"}},
     {"type":"type","text":"Owner"},

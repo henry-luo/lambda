@@ -52,6 +52,11 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .paragraph-tools .tool-label,.alignment-tools .tool-label { display:none; }
 .paragraph-tools .tool,.alignment-tools .tool { height:24px; min-width:30px; padding:2px 5px; }
 .spacing { width:125px; font-size:10px; margin-top:5px; }
+.paragraph-settings-row { display:flex; gap:3px; align-items:center; }
+.paragraph-dialog { width:24px; padding:2px; margin-top:5px; }
+.paragraph-dialog .tool-label { display:none; }
+.group-pictures .group-tools,.group-rows .group-tools,.group-columns .group-tools { display:flex; flex-direction:column; gap:3px; }
+.group-table-style .ribbon-select,.group-cell-alignment .ribbon-select { min-width:150px; margin-bottom:8px; }
 .style-gallery { display:flex; gap:6px; }.style-card { width:67px; height:51px; display:flex; align-items:flex-end;
   justify-content:flex-start; padding:8px; background:#fff; border:1px solid #e1e8e2; font-family:Georgia,serif; }
 .style-Title { font-size:18px; }.style-Subtitle { font-size:10px; color:#87958c; }.style-Heading1 { font-size:12px; color:#32624e; }
@@ -94,6 +99,24 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline:2px soli
 .edit-dialog-title { font-family:Georgia,serif; font-size:25px; color:#284a39; margin-bottom:12px; }
 .edit-dialog-text { font-size:12px; line-height:1.6; color:#7d8e82; margin-bottom:20px; }
 .edit-dialog-field { width:100%; height:35px; border:1px solid #cbd8ce; padding:7px 10px; border-radius:4px; margin-bottom:10px; }
+.dialog-grid { display:grid; grid-template-columns:1fr 1fr; column-gap:16px; }
+.dialog-field { display:block; min-width:0; }
+.dialog-field>span { display:block; font-size:11px; margin-bottom:6px; color:#536b61; }
+#dialog-error { color:#a6383e; background:#fff0ee; border:1px solid #efc9c7; padding:9px; margin:0 0 14px; font-size:12px; }
+.comment-input { height:120px; resize:vertical; padding:10px; }
+.review-pane { width:278px; flex-shrink:0; padding:20px 16px; overflow:auto; background:#f6f9f6; border-left:1px solid #d6dfdb; }
+.review-heading { display:flex; justify-content:space-between; align-items:center; font-family:Georgia,serif; font-size:18px; }
+.review-heading .tool-label { display:none; }
+.review-summary,.review-empty { color:#7c8d83; font-size:11px; line-height:1.6; }
+.comment-card { border:1px solid #d8e1db; background:#fff; border-radius:6px; padding:13px; margin-top:14px; }
+.comment-card.resolved { opacity:0.65; }
+.comment-author { display:flex; justify-content:space-between; font-size:11px; color:#345e4b; font-weight:600; }
+.comment-author>span { color:#899b90; font-size:9px; font-weight:400; }
+.comment-quote { margin:11px 0; border-left:2px solid #d6aa39; padding:3px 0 3px 9px; color:#78827a; font-family:Georgia,serif; font-size:12px; }
+.comment-text { font-size:12px; line-height:1.5; white-space:pre-wrap; }
+.comment-actions { display:flex; flex-wrap:wrap; gap:2px; border-top:1px solid #e4eae5; padding-top:7px; }
+.comment-actions .tool { padding:2px 5px; height:24px; }
+.comment-actions .tool-icon { font-size:10px; }
 .edit-dialog-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
 .edit-dialog-btn { height:32px; border:1px solid #cbd8ce; border-radius:4px; background:#fff; color:#567261; padding:0 13px; }
 .edit-dialog-btn.primary { background:#285b43; color:#fff; border-color:#285b43; }

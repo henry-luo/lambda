@@ -7,6 +7,11 @@
   },
   "events": [
     {
+      "type": "resize",
+      "width": 1440,
+      "height": 1000
+    },
+    {
       "type": "scroll",
       "x": 900,
       "y": 600,

@@ -2960,6 +2960,17 @@ TEST(RadiantViewTest, LambdaSelectValueReadsLiveOptionSelectedness) {
     shell_result_free(&result);
 }
 
+TEST(RadiantViewTest, LambdaReactiveStylesheetRestylesSiblings) {
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_GC_FORCE_EVERY", "1"}, {"LAMBDA_GC_POISON_FREED", "1"},
+        {"LAMBDA_FUNC_JIT_THRESHOLD", "1"}, {nullptr, nullptr},
+    };
+    ShellResult result = test_radiant_view_run_logged_headless(
+        "test/lambda/ui/_reactive_stylesheet.ls", "test/ui/reactive_stylesheet.json", env);
+    EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+    shell_result_free(&result);
+}
+
 static void test_radiant_view_expect_replay(const char* page, const char* replay,
         const ShellEnvEntry* env, bool clean_memtrack = false,
         int timeout_ms = RADIANT_VIEW_REPLAY_TIMEOUT_MS) {

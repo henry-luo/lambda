@@ -51,6 +51,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/dom/dom.h"      // dom_find_element_by_id for focus restore
+#include "../lambda/dom/dom_cssom.h"
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
@@ -1613,6 +1614,16 @@ static bool clear_load_stylesheet_cascade_visitor(DomNode* node, void*) {
         // Keep pseudo declarations in the same cascade epoch as element styles.
         dom_element_clear_pseudo_styles(elem);
         elem->set_styles_resolved(false);
+    }
+    return true;
+}
+
+static bool sync_rebuilt_stylesheet_visitor(DomNode* node, void* changed) {
+    if (node->is_element()) {
+        DomElement* element = node->as_element();
+        if (element->tag_name && str_icmp_cstr(element->tag_name, "style") == 0) {
+            if (dom_cssom_sync_inline_style_element(element)) *(bool*)changed = true;
+        }
     }
     return true;
 }
@@ -4809,8 +4820,14 @@ void rebuild_lambda_doc(UiContext* uicon) {
     }
     doc->root = lam::up(new_root);
 
-    CssStylesheet** inline_sheets = doc->cached_inline_sheets;
-    int inline_count = doc->cached_inline_sheet_count;
+    bool stylesheet_changed = false;
+    if (old_root != new_root) {
+        view_geometry_walk_dom_tree(old_root, sync_rebuilt_stylesheet_visitor, &stylesheet_changed);
+    }
+    view_geometry_walk_dom_tree(new_root, sync_rebuilt_stylesheet_visitor, &stylesheet_changed);
+    if (stylesheet_changed) style_epoch_mark_global_change(doc);
+    CssStylesheet** inline_sheets = doc->stylesheets;
+    int inline_count = doc->stylesheet_count;
     CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
 
     if (!inline_sheets) {
@@ -4912,9 +4929,10 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 
     css_property_system_init(doc->document_pool);
 
-    CssStylesheet** inline_sheets = doc->cached_inline_sheets;
-    int inline_count = doc->cached_inline_sheet_count;
+    CssStylesheet** inline_sheets = doc->stylesheets;
+    int inline_count = doc->stylesheet_count;
     CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
+    bool stylesheet_changed = false;
 
     struct { float x, y, w, h; } old_bounds[16] = {};
     for (int i = 0; i < result_count && i < 16; i++) {
@@ -4996,6 +5014,12 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             doc->input->root = {.element = html_elem};
         }
 
+        // template splices bypass DOM mutation records; retire detached sheets and publish replacements.
+        if (old_dom != new_dom) {
+            view_geometry_walk_dom_tree(old_dom, sync_rebuilt_stylesheet_visitor, &stylesheet_changed);
+        }
+        view_geometry_walk_dom_tree(new_dom, sync_rebuilt_stylesheet_visitor, &stylesheet_changed);
+
         set_layout_dirty_subtree(static_cast<DomNode*>(new_dom), true);
 
         DomNode* ancestor = static_cast<DomNode*>(parent_dom);
@@ -5007,7 +5031,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             ancestor = ancestor->parent;
         }
 
-        if (incremental_matcher) {
+        if (incremental_matcher && !stylesheet_changed) {
             radiant_apply_css_stylesheets_to_tree(
                 doc, new_dom, inline_sheets, inline_count, doc->document_pool,
                 css_engine, incremental_matcher);
@@ -5016,6 +5040,14 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         apply_inline_styles_to_tree(new_dom, doc->document_pool);
         // each committed subtree owns its next frame; unrelated components stay idle.
         radiant_queue_template_render_events(doc, new_dom);
+    }
+    if (stylesheet_changed) {
+        // stylesheet selectors can affect siblings outside the replaced template subtree.
+        style_epoch_mark_global_change(doc);
+        view_geometry_walk_dom_tree(doc->root, clear_load_stylesheet_cascade_visitor, nullptr);
+        layout_apply_css_stylesheets(doc, doc->root, doc->stylesheets, doc->stylesheet_count,
+                                    doc->document_pool, css_engine);
+        set_layout_dirty_subtree(doc->root, true);
     }
     auto t_dom_css = time_now_ns();
 

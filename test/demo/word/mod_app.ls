@@ -1,16 +1,19 @@
 // One controller serves child-widget events and root keyboard handlers.
 // emit() targets ancestors, so root handlers call this controller directly.
 import dom
+import lambda.editor.mod_doc
+import lambda.editor.mod_step
 import lambda.editor.mod_editor
 import session: lambda.edit.session
 import fields: lambda.edit.files
 import document: .mod_document
 import model: .mod_model
 import storage: .mod_io
+import page: .mod_page
 
 pub fn initial() => {editor:model.initial(),file_state:storage.new_session(document.sample(),"The Open Studio Handbook"),
-    tab:"Home",dialog:null,pending:"",status:"Ready to write",query:"",match_index:-1,
-    zoom:1.0,nav:true,read_only:false,focused:false}
+    tab:"Home",dialog:null,pending:"",status:"Ready to write",query:"",replace_text:"",match_case:false,match_index:-1,
+    zoom:1.0,nav:true,read_only:false,focused:false,review:false,show_resolved:false}
 pub pn mounted(editor,node) {
     if (editor.mounted) editor else edit_mount(editor,dom.get_element_by_id(dom.root_node(node),"edit-surface"),"html5_subset")
 }
@@ -18,10 +21,19 @@ pub pn field(node,id) { fields.field_value(node,id) }
 pub pn focus_document(node) { fields.focus_surface(node) }
 pub pn is_control(node) { dom.node_type(node)==1 and dom.matches(node,"input,textarea,select") }
 pub fn primary(evt) => evt.metaKey == true or evt.ctrlKey == true
-// A click can move the native caret without selectionchange. Adopt the action's
-// source snapshot before a toolbar/keyboard command consumes the selection.
-pub fn adopt(st,evt) => if (evt.source_selection==null and evt.source_pos==null) st
-    else {*:st,editor:edit_accept_dom_selection(st.editor,evt).editor}
+// Toolbar clicks carry both the document selection and their hit position.
+// Only use the hit position when the event itself comes from the document.
+pub pn adopt(st,evt,changes_only=false) {
+    let selection = evt.source_selection or null
+    let position = if (dom.closest(evt.target,"#edit-surface")==null) null else evt.source_pos or null
+    if (is_control(evt.target) or (selection==null and position==null)) { return st }
+    // the first pointer selection must bind the surface before projection replaces its DOM.
+    let editor = mounted(st.editor,evt.target)
+    let accepted = edit_accept_dom_selection(editor,{*:evt,source_selection:selection,source_pos:position})
+    // a completion echo can advance the native revision without moving the logical selection.
+    if (changes_only and not accepted.changed and st.editor.mounted==editor.mounted) { return st }
+    return {*:st,editor:accepted.editor}
+}
 pn replaced_editor(previous,next) {
     // Files share one logical surface. Keep its handle and monotone revision
     // so completion resolves the new DOM rather than retaining the old host.
@@ -35,6 +47,7 @@ pub pn finish(st,node) {
     let dirty = session.is_dirty(st.file_state,st.editor.doc)
     dom.set_close_guard(node,dirty)
     dom.set_window_title(node,(if (dirty) "● " else "") ++ st.file_state.envelope.title ++ " — Word")
+    dom.request_frame(dom.get_element_by_id(dom.root_node(node),"word"),"word_controls")
 }
 pn continued(st,id,node) {
     if (id == "file.open") { return {*:st,pending:"",dialog:{kind:"open",path:""}} }
@@ -58,21 +71,55 @@ pn saved(st,path,node,overwrite=false) {
 }
 pn model_command(st,id,params,node) {
     let editor = mounted(st.editor,node)
-    let next = model.execute(editor,id,params) ^ { return {*:st,editor:editor,status:^.message} }
+    let next = model.execute(editor,id,params) ^ { return {*:st,editor:editor,status:^.message,
+        dialog:if (st.dialog==null) null else {*:st.dialog,error:^.message}} }
     focus_document(node)
-    return {*:st,editor:model.clean(next),status:model.spec(id).label}
+    return {*:st,editor:model.clean(next),dialog:null,status:model.spec(id).label,
+        review:st.review or starts_with(id,"review.")}
+}
+pn dialog_model(st,id,values,params,node) {
+    return model_command({*:st,dialog:{*:st.dialog,values:values}},id,params,node)
 }
 pn dialog_command(st,action,node) {
     if (action == "cancel") { focus_document(node); return {*:st,dialog:null,pending:""} }
     if (action == "discard") { return continued(st,st.pending,node) }
     if (action == "save") { return command({*:st,dialog:null},"file.save",{},node) }
+    if (action == "insert_table") {
+        let values = {rows:field(node,"table-rows"),cols:field(node,"table-columns"),header:field(node,"table-header")}
+        return dialog_model(st,"insert.table",values,{rows:float(values.rows),cols:float(values.cols),header:values.header=="true"},node)
+    }
+    if (action == "page_setup") {
+        let values = {paper:field(node,"page-paper"),orientation:field(node,"page-orientation"),top:field(node,"page-top"),
+            right:field(node,"page-right"),bottom:field(node,"page-bottom"),left:field(node,"page-left")}
+        return dialog_model(st,"layout.pageSetup",values,{*:values,top:float(values.top),right:float(values.right),
+            bottom:float(values.bottom),left:float(values.left)},node)
+    }
+    if (action == "comment") {
+        let values = {author:field(node,"comment-author"),text:field(node,"comment-text")}
+        return dialog_model(st,"review.addComment",values,values,node)
+    }
+    if (action == "paragraph") {
+        let values = {align:field(node,"paragraph-align"),lines:field(node,"paragraph-lines"),before:field(node,"paragraph-before"),
+            after:field(node,"paragraph-after"),indent:field(node,"paragraph-indent"),first:field(node,"paragraph-first")}
+        return dialog_model(st,"para.set",values,{align:values.align,lines:float(values.lines),before:float(values.before),
+            after:float(values.after),indent:float(values.indent),first:float(values.first)},node)
+    }
+    if (action == "picture") {
+        let values = {path:field(node,"picture-path"),alt:field(node,"picture-alt"),width:field(node,"picture-width"),height:field(node,"picture-height")}
+        let editing = st.dialog.kind=="picture_settings"
+        let source = if (editing) "" else storage.picture_source(trim(values.path)) ^ {
+            return {*:st,dialog:{*:st.dialog,values:values,error:^.message},status:^.message}
+        }
+        return dialog_model(st,if (editing) "picture.size" else "insert.picture",values,
+            {src:source,alt:values.alt,width:float(values.width),height:if (trim(values.height)=="") 0 else float(values.height)},node)
+    }
     if (action == "link") {
         let href = trim(field(node,"link-address"))
         let label = field(node,"link-label")
         if (not (starts_with(href,"https://") or starts_with(href,"http://") or starts_with(href,"mailto:") or starts_with(href,"#"))) {
-            return {*:st,status:"Enter an http, https, mailto, or fragment address."}
+            return {*:st,dialog:{*:st.dialog,values:{href:href,label:label},error:"Enter an http, https, mailto, or fragment address."}}
         }
-        return model_command({*:st,dialog:null},"insert.link",{href:href,title:"",label:if (label=="") href else label},node)
+        return dialog_model(st,"insert.link",{href:href,label:label},{href:href,title:"",label:label},node)
     }
     let path = if (action == "overwrite") st.dialog.path else trim(field(node,"word-file-path"))
     let kind = if (action == "overwrite") st.dialog.action else st.dialog.kind
@@ -94,7 +141,25 @@ pn dialog_command(st,action,node) {
 }
 pub pn command(st,id,params,node) {
     if (starts_with(id,"dialog.")) { return dialog_command(st,slice(id,7),node) }
-    if (id == "ui.tab") { return {*:st,tab:params.tab} }
+    if (id == "ui.tab") { return {*:st,tab:params.tab,review:st.review or params.tab=="Review"} }
+    if (id == "ui.comments") { return {*:st,review:not st.review} }
+    if (id == "ui.resolvedComments") { return {*:st,show_resolved:not st.show_resolved} }
+    if (id == "ui.comment") {
+        if (st.read_only) { return st }
+        if (not model.can_comment(st.editor)) { return {*:st,status:"Select the text you want to comment on."} }
+        return {*:st,dialog:{kind:"comment",values:{author:"Me",text:""}}}
+    }
+    if (id == "ui.commentText" or id == "ui.nextComment" or id == "ui.previousComment") {
+        let target_id = if (id=="ui.commentText") params.id else model.next_comment_id(st.editor,st.show_resolved,id=="ui.nextComment")
+        let selection = model.comment_selection(st.editor,target_id)
+        if (selection==null) { return {*:st,review:true,status:"The commented text is no longer in the document."} }
+        focus_document(node)
+        let anchor = dom.query_selector(dom.root_node(node),"#edit-surface [data-word-comment~=\"" ++ target_id ++ "\"]")
+        if (anchor!=null) dom.scroll_into_view(anchor)
+        return {*:st,review:true,editor:edit_set_selection(mounted(st.editor,node),selection)}
+    }
+    if (id == "ui.matchCase") { return {*:st,match_case:not st.match_case,match_index:-1} }
+    if (id == "ui.clearFind") { return {*:st,query:"",match_index:-1} }
     if (id == "ui.escape") {
         if (st.dialog!=null) { return dialog_command(st,"cancel",node) }
         return {*:st,focused:false}
@@ -112,7 +177,20 @@ pub pn command(st,id,params,node) {
         focus_document(node)
         return {*:st,editor:model.select_heading(mounted(st.editor,node),params.path)}
     }
-    if (id == "ui.link") { return {*:st,dialog:{kind:"link"}} }
+    if (contains(["ui.link","ui.table","ui.picture","ui.pictureSettings","ui.paragraph","ui.pageSetup"],id)) {
+        if (st.read_only) { return st }
+        if (id == "ui.link") {
+            let link = model.current_node(st.editor,'a')
+            return {*:st,dialog:{kind:"link",editing:link!=null,values:{href:attrs_get(link.node.attrs,'href') or "",label:doc_text(link.node) or ""}}}
+        }
+        if (id == "ui.table") { return {*:st,dialog:{kind:"table",values:{rows:3,cols:3,header:"true"}}} }
+        if (id == "ui.paragraph") { return {*:st,dialog:{kind:"paragraph",values:model.paragraph_settings(st.editor)}} }
+        if (id == "ui.pageSetup") { return {*:st,dialog:{kind:"page_setup",values:page.settings(st.editor.doc)}} }
+        let image = model.current_node(st.editor,'img')
+        return {*:st,dialog:{kind:if (id == "ui.pictureSettings") "picture_settings" else "picture",
+            values:{path:"",alt:attrs_get(image.node.attrs,'alt') or "",width:attrs_get(image.node.attrs,'width') or 320,
+                height:attrs_get(image.node.attrs,'height') or ""}}}
+    }
     if (id == "file.save" or id == "file.saveAs") {
         if (st.file_state.path=="" or id == "file.saveAs") { return {*:st,dialog:{kind:"save",
             path:if (st.file_state.path=="") "temp/word/document.word.json" else st.file_state.path}} }
@@ -124,7 +202,7 @@ pub pn command(st,id,params,node) {
         return continued(st,id,node)
     }
     if (id == "edit.findNext" or id == "edit.findPrevious") {
-        let hits = model.search(st.editor.doc,st.query)
+        let hits = model.search(st.editor.doc,st.query,st.match_case)
         if (len(hits)==0) { return {*:st,status:"No matching text"} }
         let index = (st.match_index + (if (id == "edit.findNext") 1 else -1) + len(hits)) % len(hits)
         focus_document(node)
@@ -133,11 +211,11 @@ pub pn command(st,id,params,node) {
     }
     if (st.read_only) { return st }
     if (id == "edit.replace") {
-        let hits = model.search(st.editor.doc,st.query)
+        let hits = model.search(st.editor.doc,st.query,st.match_case)
         if (len(hits)==0) { return {*:st,status:"No matching text"} }
         let selected = [for (hit in hits where hit == st.editor.selection) hit][0]
         return model_command({*:st,editor:edit_set_selection(st.editor,selected or hits[0])},"text.insert",{data:field(node,"replace-text")},node)
     }
-    let payload = if (id == "edit.replaceAll") {find:st.query,replace:field(node,"replace-text")} else params
+    let payload = if (id == "edit.replaceAll") {find:st.query,replace:st.replace_text,match_case:st.match_case} else params
     return model_command(st,id,payload,node)
 }

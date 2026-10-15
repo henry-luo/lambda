@@ -7,10 +7,13 @@ import markdown: lambda.edit.markdown
 import helpers: lambda.edit.model
 import session: lambda.edit.session
 import docx: lambda.doc.docx
+import media: lambda.doc.media
 import radiant
 import document: .mod_document
 import model: .mod_model
 import surface: .mod_surface
+import page: .mod_page
+import review: .mod_review
 
 let tags = ['doc','p','h1','h2','h3','h4','h5','h6','blockquote','ul','ol','li',
     'table','thead','tbody','tfoot','tr','td','th','pre','code','span','strong','em','u','b','i','del','s','sub','sup','a','img','br','hr','div',
@@ -44,7 +47,7 @@ pub fn restore(value) map^ {
         raise error("Word: unsupported editable file; expected lambda-word version 1")
     else {
         let doc = restored(value.document)^
-        if (doc.tag != 'doc' or len(doc.content)==0 or len(model.leaves(doc))==0)
+        if (doc.tag != 'doc' or len(doc.content)==0 or (len(model.leaves(doc))==0 and len(model.blocks(doc))==0))
             raise error("Word: document must contain editable text")
         else {doc:doc,title:value.title}
     }
@@ -53,7 +56,11 @@ pub fn import_text(source) map^ {
     let restored_doc = restore(parse(source,'json')^)^;
     {doc:restored_doc.doc,envelope:{title:restored_doc.title}}
 }
-pub fn export_text(doc,envelope) string^ => format(archive(doc,envelope.title),'json')^
+pub fn export_text(doc,envelope) string^ {
+    let source = format(archive(doc,envelope.title),'json')^
+    // apply the reader's size limit before saving, including embedded picture data.
+    if (len(source)>4000000) raise error("Word: editable files are limited to 4 MB; reduce picture sizes") else source
+}
 fn check_roundtrip(doc,envelope) {
     let loaded = import_text(export_text(doc,envelope)^) ^ { null }
     if (loaded == null or loaded.doc != doc) "the editable snapshot would change the document" else null
@@ -62,6 +69,14 @@ pub let descriptor = {name:"Lambda Word",suffixes:[".word.json"],surface:'rich_t
     import_text:import_text,export_text:export_text,check_roundtrip:check_roundtrip}
 pub fn new_session(doc,title="Untitled document") =>
     session.new_session("",descriptor,null,{doc:doc,envelope:{title:title}})
+
+// embedded pictures survive moving the editable snapshot or exporting its HTML.
+pub fn picture_source(path) string^ {
+    let ext = lower(split(path,".")[last])
+    let mime = {png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",gif:"image/gif",webp:"image/webp",svg:"image/svg+xml"}[ext]
+    if (mime == null) raise error("Word: choose a PNG, JPEG, GIF, WebP, or SVG picture")
+    else media.data_uri(input(path,'binary')^,mime)^
+}
 
 pub fn read_document(path) map^ {
     if (not (path is string) or trim(path)=="") raise error("Word: enter a file path")
@@ -75,25 +90,44 @@ pub fn read_document(path) map^ {
     else {
         let extension = lower(split(path,".")[last])
         let source = if (extension == "docx") docx.to_html(path,{unsupported:"error"})^ else input(path,'text')^
-        let loaded = if (contains(["html","htm","docx"],extension)) html.import_text(source)^
+        let loaded = if (contains(["html","htm"],extension)) {doc:import_html_document(source)^}
+            else if (extension=="docx") html.import_text(source)^
             else if (contains(["md","markdown"],extension)) markdown.import_text(source)^
             else if (extension == "txt") {doc:node('doc',[for (line in split(source,"\n")) document.paragraph(line)])}
             else raise error("Word: open .word.json, .html, .md, .txt, or .docx")
-        let doc = if (len(loaded.doc.content)==0) document.blank() else restored(loaded.doc)^;
+        let imported = if (len(loaded.doc.content)==0) document.blank() else restored(loaded.doc)^
+        let doc = imported;
         {editor:model.open_editor(doc),session:new_session(doc,session.basename(path)),
             status:"Imported " ++ session.basename(path) ++ "; save an editable copy."}
     }
 }
-pub fn html_document(doc,title) => "<!doctype html><html><head><meta charset=\"utf-8\"><title>" ++
-    helpers.escape_text(title) ++ "</title><style>" ++ surface.document_css ++
+let metadata_names = ['data-word-page','data-word-comments','data-word-comment-seq']
+pub fn import_html_document(source) map^ {
+    let loaded = html.import_text(source)^
+    import_metadata(restored(loaded.doc)^,loaded.envelope.head)^
+}
+fn import_metadata(doc,head) map^ {
+    let encoded = [for (m in head where type(m)==element and name(m)=='meta' and m["name"]=="lambda-word-metadata") m["content"]][0]
+    if (encoded==null) doc else {
+        let attrs = parse(encoded,'json')^
+        if (not valid_attrs(attrs) or not all([for (a in attrs) contains(metadata_names,symbol(a.name))]))
+            raise error("Word: invalid document metadata")
+        else {*:doc,attrs:unpack_attrs(attrs)}
+    }
+}
+pub fn html_document(doc,title) string^ => "<!doctype html><html><head><meta charset=\"utf-8\"><title>" ++
+    helpers.escape_text(title) ++ "</title><meta name=\"lambda-word-metadata\" content=\"" ++
+    helpers.escape_attr(format(pack_attrs([for (a in doc.attrs where contains(metadata_names,a.name)) a]),'json')^) ++
+    "\"><style>" ++ surface.document_css ++ page.export_css(doc) ++ review.css(doc) ++
     "</style></head><body class=\"word-content\">" ++ html.export_text(doc,{document:false,head:<head>}) ++ "</body></html>"
 pub pn export_document(doc,title,path) any^ {
     let extension = lower(split(path,".")[last])
-    if (extension == "html") { output(html_document(doc,title),path,{format:'text',atomic:true})^ }
+    if (extension == "html") { output(html_document(doc,title)^,path,{format:'text',atomic:true})^ }
     else if (extension == "txt") { output(model.plain_text(doc) ++ "\n",path,{format:'text',atomic:true})^ }
     else if (extension == "pdf") {
         let pending = path ++ ".word-" ++ string(int(clock()*1000000)) ++ ".pdf"
-        let result = radiant.export_document(html_document(doc,title),pending,{format:"pdf",width:794,height:1123,pagination:true})
+        let geometry = page.geometry(doc)
+        let result = radiant.export_document(html_document(doc,title)^,pending,{format:"pdf",width:geometry.width,height:geometry.height,pagination:true})
         if (result != true) {
             io.delete(pending) ^ { null }
             raise error("Word: " ++ string(result))

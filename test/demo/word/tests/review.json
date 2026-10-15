@@ -1,0 +1,324 @@
+{
+  "name": "Word review",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Review this sentence",
+      "clear": false
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 6
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-review"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new-comment"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#comment-author"
+      },
+      "text": "Alice",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#comment-text"
+      },
+      "text": "Please make this clearer.",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-comment .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#comment-c1"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#comment-c1"
+      },
+      "contains": "Please make this clearer."
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#comment-c1"
+      },
+      "contains": "Alice"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface span"
+      },
+      "attribute": "data-word-comment",
+      "equals": "c1"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface [data-word-comment]"
+      },
+      "property": "background-color",
+      "equals": "rgb(255, 243, 196)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#comment-go-c1"
+      }
+    },
+    {
+      "type": "assert_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 6
+    },
+    {
+      "type": "render",
+      "file": "temp/word-comments.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#comment-resolve-c1"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface [data-word-comment]"
+      },
+      "property": "background-color",
+      "equals": "rgba(0, 0, 0, 0)"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#comment-c1"
+      },
+      "count": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#show-resolved"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#comment-c1"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#comment-c1"
+      },
+      "contains": "Resolved"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#comment-resolve-c1"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface [data-word-comment]"
+      },
+      "property": "background-color",
+      "equals": "rgb(255, 243, 196)"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#comment-c1"
+      },
+      "contains": "Open"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/comments.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Exported"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/comments.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/comments.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#comment-c1"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface span"
+      },
+      "attribute": "data-word-comment",
+      "equals": "c1"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface [data-word-comment]"
+      },
+      "property": "background-color",
+      "equals": "rgb(255, 243, 196)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#comment-go-c1"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#comment-delete-c1"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#comment-c1"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-comment]"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#comment-c1"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface [data-word-comment]"
+      },
+      "count": 1
+    }
+  ]
+}

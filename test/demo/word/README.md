@@ -23,15 +23,28 @@ at a caret sets the marks for subsequent typing.
 
 - Home ribbon: undo/redo; bold, italic, underline, strike, subscript and
   superscript; font family and size; text color and highlighting; paragraph
-  alignment and line spacing; six paragraph styles; bullets, numbering, and
-  list indent/outdent.
-- Insert ribbon: a 3 × 3 table, row/column insertion and deletion, links, and
-  horizontal rules. Table cells contain editable text.
-- Navigation: document headings, literal case-sensitive search across
-  formatting runs within a paragraph, previous/next match, replacement, and
-  one-step undo for Replace all.
+  alignment and line spacing; clear character formatting; six paragraph styles;
+  bullets, numbering, and list indent/outdent. Paragraph settings apply spacing
+  before/after, left indentation, and first-line indentation in one undo step.
+- Insert ribbon: configurable tables (1–32 rows, 1–12 columns, optional header),
+  embedded local pictures with dimensions and alternative text, editable links,
+  link removal, and horizontal rules. Picture settings resize existing images.
+- Contextual Table ribbon: rows above/below, columns left/right, row/column/table
+  deletion, four table styles, and nine cell alignments. Tab/Shift+Tab move
+  between cells; Tab at the final cell adds a row.
+- Layout: A4, Letter, and A5 paper; portrait/landscape; preset or custom margins
+  in millimetres; explicit page breaks. Paper geometry changes the editing
+  canvas and exported PDF pages. Invalid margins keep the dialog open.
+- Review: comments anchored to selected text, author and quoted context, a
+  sidebar, previous/next and Go to text, resolve/reopen, and delete. Overlapping
+  anchors survive character formatting and editing; comment changes support undo.
+  Comments and page settings survive editable snapshots and exported HTML imports.
+- Navigation: document headings, Unicode-aware case-insensitive search with a
+  Match case toggle, previous/next match, replacement, and one-step undo for
+  Replace all across formatting runs within a paragraph.
 - View: navigation pane, read mode, focus mode, and 50–150% zoom. The editor
-  uses a continuous A4-width canvas; PDF export paginates on A4 paper.
+  uses a continuous canvas at the chosen paper width; PDF export paginates using
+  that document's paper, orientation, margins, and explicit page breaks.
 - Native typing, paragraph splitting/joining, selection, deletion, composition,
   and clipboard actions use the existing `lambda.editor` protocol.
 - Open editable `.word.json` snapshots, HTML, Markdown, text, and supported
@@ -49,13 +62,19 @@ at a caret sets the marks for subsequent typing.
 | Cmd/Ctrl + Shift + Z, Cmd/Ctrl + Y | Redo |
 | Cmd/Ctrl + S / Shift + S | Save / Save as |
 | Cmd/Ctrl + F | Find |
+| Cmd/Ctrl + K | Insert or edit a link |
+| Cmd/Ctrl + Enter | Page break |
+| Cmd/Ctrl + Alt + M | Comment on selected text |
+| Cmd/Ctrl + Space | Clear character formatting, preserving comment anchors |
+| Tab / Shift + Tab in a table | Next / previous cell |
 | Escape | Cancel a dialog or leave focus mode |
 
 Save and export default to `temp/word/`. Other destinations must have an
-existing parent directory. `.word.json` is the editable format; DOCX writing,
-RTF/ODT, spell/grammar checking, tracked changes, comments, collaboration,
+existing parent directory. Editable snapshots are limited to 4 MB, including
+embedded pictures. `.word.json` is the editable format; DOCX writing,
+RTF/ODT, spell/grammar checking, tracked changes, comment replies, collaboration,
 mail merge, equations, section/header/footer editing, and Word-compatible
-pagination are outside this demo. Font substitution follows the installed
+pagination in the editing canvas are outside this demo. Font substitution follows the installed
 fonts available to Radiant. Search does not span paragraph boundaries.
 PDF text is currently painted as glyph outlines rather than selectable text.
 DOCX bookmarks and retained raw HTML are rejected as unsupported nodes; source
@@ -86,6 +105,8 @@ policy in Lambda packages, with Radiant providing the native mechanisms.
 | `crates/engine/src/session.rs` (`Session::run`, history) | `mod_app.ls` controller plus `lambda.editor` transaction/history facade |
 | `crates/engine/src/cmd/{format,para,text,table,edit}.rs` | Existing editor commands plus range formatting, paragraph attributes, style application, and cross-run replacement |
 | `crates/engine/src/cmd/find_pattern.rs` | Literal paragraph search mapped back to source positions; wildcard/regex language is not ported |
+| `crates/engine/src/cmd/{table,table_style,insert,para}.rs` | Reused structural commands plus table presentation, embedded pictures, link editing, and paragraph settings in `mod_model.ls` |
+| `crates/engine/src/cmd/{page,review}.rs` | `mod_page.ls` document-owned paper settings and `mod_review.ls` comment metadata with text-mark anchors |
 | `crates/ui-egui/src/{ribbon,canvas}.rs` | `mod_ui.ls`, `mod_surface.ls`, `word.css`; native HTML/CSS layout and caret geometry |
 | `crates/engine/src/sample.rs` | Adapted studio handbook in `mod_document.ls` |
 | `crates/{docx,formats,pdf}` and `engine/src/io.rs` | Existing Lambda format adapters, conflict-aware `lambda.edit.session`, and Radiant PDF export through `mod_io.ls` |
@@ -97,6 +118,26 @@ Replace all applies existing insertion transactions from the final match
 backwards and composes their steps into one history item. View changes and
 selection movement never change the saved document checkpoint (**S1.4**,
 **D7.2.1**).
+
+Page settings and comment metadata are document attributes, so the same editor
+history restores them atomically with text marks (**S1.4**, **D7.2.5**). HTML
+exports carry this metadata in a named meta element. Comments use IDs on span
+marks, allowing overlapping anchors without a second offset-mapping system.
+Case-insensitive search maps folded Unicode characters back to original UTF-8
+byte positions, including lowercase expansions (**S17.7.2**).
+
+Toolbar pointer events carry a hit position for the button as well as an
+optional document selection. The controller accepts document selections but
+uses hit-position fallback only inside the editing surface (**D7.2.5**).
+Form-control positions never replace the document selection. Empty paragraphs
+receive a projected zero-width space so their node-position carets have a line
+box; this placeholder is absent from saved documents.
+
+Reactive subtree replacement now retires detached inline stylesheets and
+publishes their replacements through the existing CSSOM collector. A changed
+sheet invalidates the style epoch and recascades the whole document, since its
+selectors may affect siblings outside the template (**D7.2.5**). The Review
+workflow verifies that resolve/reopen changes the anchor's computed highlight.
 
 Two integration details matter when extending the demo: `file` is a reserved
 absolute-path scheme (**S2.4.5v2**), so file-session state uses `file_state`;
@@ -134,9 +175,10 @@ python3 test/demo/word/run_tests.py --model-only
 
 The runner checks model, snapshot, and HTML/Markdown/text/DOCX import goldens on
 interpreter, auto, and JIT tiers; then replays typing/history/save,
-formatting/search/table, open/export/dirty-guard/focus, table-caret, and scrolled-caret workflows
+formatting/search/table, open/export/dirty-guard/focus, table-caret, scrolled-caret,
+table navigation/settings, pictures/links, paragraph/search, page setup, and comments
 in headless Radiant. It checks the result records and exported file contents,
-and writes its report and logs
+including a two-page landscape Letter PDF check, and writes its report and logs
 under `temp/word/tests/`. The initial and edited screenshots are
 `temp/word-initial.png` and `temp/word-edited.png`. Test reruns replace only
 their own named files under `temp/word/`.

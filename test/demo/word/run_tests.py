@@ -4,6 +4,7 @@ import argparse
 import difflib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -16,7 +17,9 @@ ARTIFACTS = ROOT / "temp/word/tests"
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lambda-exe", default=str(ROOT / "lambda.exe"))
-    parser.add_argument("--model-only", action="store_true")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--model-only", action="store_true")
+    modes.add_argument("--ui-only", action="store_true")
     parser.add_argument("--report")
     args = parser.parse_args()
     executable = str(Path(args.lambda_exe).resolve())
@@ -37,7 +40,7 @@ def main():
         results.append({"name": name, "passed": passed, "detail": detail})
         print(f"{'PASS' if passed else 'FAIL'} {name}" + (f": {detail}" if detail else ""), flush=True)
 
-    for tier in ("interp", "auto", "jit"):
+    for tier in (() if args.ui_only else ("interp", "auto", "jit")):
         for script in sorted((DEMO / "tests").glob("*_test.ls")):
             name = f"{script.stem}-{tier}"
             env = {**os.environ, "LAMBDA_EXEC_BACKEND": tier}
@@ -55,9 +58,11 @@ def main():
 
     if not args.model_only:
         # These are this harness's generated files, never the default user document.
-        for filename in ("smoke.word.json", "workflow.word.json", "workflow.html", "workflow.pdf"):
+        for filename in ("smoke.word.json", "workflow.word.json", "workflow.html", "workflow.pdf",
+                         "layout.word.json", "layout.html", "layout.pdf", "comments.word.json", "comments.html"):
             (ROOT / "temp/word" / filename).unlink(missing_ok=True)
-        for fixture in ("smoke", "editing", "files", "table_caret", "scroll_hit"):
+        for fixture in ("smoke", "editing", "files", "table_caret", "scroll_hit", "tables",
+                        "pictures_links", "paragraph_search", "layout", "review"):
             result_path = ARTIFACTS / f"{fixture}.json"
             result_path.unlink(missing_ok=True)
             result = run(fixture, [executable, "view", "test/demo/word/word.ls", "--headless",
@@ -75,6 +80,17 @@ def main():
         record("exported-files", pdf.exists() and pdf.read_bytes().startswith(b"%PDF-") and
                html.exists() and "A document worth keeping." in html.read_text() and
                snapshot.exists() and json.loads(snapshot.read_text()).get("format") == "lambda-word")
+        pages = ROOT / "temp/word/layout.pdf"
+        pdf_data = pages.read_bytes() if pages.exists() else b""
+        boxes = re.findall(rb"/MediaBox\s*\[([^]]+)\]", pdf_data)
+        record("page-setup-pdf", len(boxes) == 2 and
+               all([float(n) for n in box.split()] == [0, 0, 792, 612] for box in boxes) and
+               re.search(rb"/Count\s+2\b", pdf_data) is not None,
+               "two landscape Letter pages with an explicit page break")
+        comments = ROOT / "temp/word/comments.html"
+        record("comment-html", comments.exists() and
+               all(value in comments.read_text() for value in
+                   ("lambda-word-metadata", "data-word-comment=", "Please make this clearer.")))
 
     passed = sum(entry["passed"] for entry in results)
     report = {"summary": {"passed": passed, "failed": len(results)-passed, "total": len(results)}, "results": results}
