@@ -7,7 +7,7 @@ fn numbers(values) string^ => [for (value in values) util.pdf_num(value)^] |> jo
 fn fragment(bytes_value) => {content: bytes_value, resources: []}
 
 fn combine(parts) => {
-    content: [for (part in parts) part.content] |> join(""),
+    content: <file format:'pdf', for (part in parts) part.content>,
     resources: [for (part in parts) for (resource in part.resources) resource]
 }
 
@@ -17,8 +17,9 @@ fn colored(color, resource_name, commands) map^ {
         let translucent = color.a != 255;
         let graphics_state = if (translucent) "/" ++ resource_name ++ " gs\n" else "";
         let resources = if (translucent) [{name: resource_name, category: "ExtGState", alpha: float(color.a) / 255.0}] else [];
-        {content: "q\n" ++ graphics_state ++ numbers([float(color.r) / 255.0, float(color.g) / 255.0, float(color.b) / 255.0])^ ++
-            " rg\n" ++ commands ++ "Q\n", resources: resources}
+        {content: <file format:'pdf', "q\n" graphics_state
+            numbers([float(color.r) / 255.0, float(color.g) / 255.0, float(color.b) / 255.0])^ " rg\n" commands "Q\n">,
+            resources: resources}
     }
 }
 
@@ -82,7 +83,7 @@ fn draw(event, node, ctx) any^ {
     else if (event == "text") {
         let outline = radiant.pdf_glyph_path(ctx)^;
         colored(ctx.color, "R" ++ string(ctx.sequence),
-            ([for (command in outline) path_command(command)^] |> join("")) ++ "f\n")^
+            <file format:'pdf', for (command in outline) path_command(command)^ "f\n">)^
     }
     else if (event == "image") image_fragment(ctx)^
     else if (event == "begin_transform") {
@@ -92,8 +93,8 @@ fn draw(event, node, ctx) any^ {
     else if (event == "end_transform") "Q\n"
     else if (event == "begin_clip") {
         let outline = radiant.pdf_clip_path(ctx)^;
-        "q\n" ++ ([for (command in outline) path_command(command)^] |> join("")) ++
-            if (ctx.clip_evenodd) "W* n\n" else "W n\n"
+        <file format:'pdf', "q\n" for (command in outline) path_command(command)^
+            if (ctx.clip_evenodd) "W* n\n" else "W n\n">
     }
     else if (event == "end_clip") "Q\n"
     else raise error("PDF output: unsupported callback " ++ event)
@@ -110,21 +111,21 @@ fn reference(resources, resource_name, first_resource) string^ {
     else string(matches[0]) ++ " 0 R"
 }
 
-fn resource_object(resource, resources, object_number, first_resource) array^ {
+fn resource_object(resource, resources, object_number, first_resource) any^ {
     let begin = string(object_number) ++ " 0 obj\n";
-    if (resource.category == "ExtGState") [begin, "<< /Type /ExtGState /ca " ++ util.pdf_num(resource.alpha)^ ++
-        " /CA " ++ util.pdf_num(resource.alpha)^ ++ " >>\nendobj\n"]
+    if (resource.category == "ExtGState") (begin, "<< /Type /ExtGState /ca " ++ util.pdf_num(resource.alpha)^ ++
+        " /CA " ++ util.pdf_num(resource.alpha)^ ++ " >>\nendobj\n")
     else if (resource.category == "XObject") {
         let mask = if (resource.mask == null) "" else " /SMask " ++ reference(resources, resource.mask, first_resource)^;
         let dictionary = "<< /Type /XObject /Subtype /Image /Width " ++ string(resource.width) ++
             " /Height " ++ string(resource.height) ++ " /ColorSpace " ++ (if (resource.gray) "/DeviceGray" else "/DeviceRGB") ++
             " /BitsPerComponent 8 /Filter /FlateDecode" ++ mask ++ " /Length " ++ string(len(resource.bytes)) ++ " >>\nstream\n";
-        [begin, dictionary, resource.bytes, "\nendstream\nendobj\n"]
+        (begin, dictionary, resource.bytes, "\nendstream\nendobj\n")
     }
     else raise error("PDF output: unknown resource category")
 }
 
-fn page_objects(page, index, resources, first_resource) array^ {
+fn page_object(page, index, resources, first_resource, stream_object) any^ {
     let sheet_number = 3 + index * 2;
     let resource_entries = [for (category in ["ExtGState", "XObject"]) "/" ++ category ++ " << " ++
         ([for (resource in page.resources where resource.category == category)
@@ -133,7 +134,18 @@ fn page_objects(page, index, resources, first_resource) array^ {
         util.pdf_num(page.width * 0.75)^ ++ " " ++ util.pdf_num(page.height * 0.75)^ ++
         "] /Resources << " ++ resource_entries ++ " >> /Contents " ++ string(sheet_number + 1) ++ " 0 R >>\nendobj\n";
     let stream = string(sheet_number + 1) ++ " 0 obj\n<< /Filter /FlateDecode /Length " ++ string(len(page.content)) ++ " >>\nstream\n";
-    [[sheet], [stream, page.content, "\nendstream\nendobj\n"]]
+    if (stream_object) (stream, page.content, "\nendstream\nendobj\n") else sheet
+}
+
+// Object numbers and the frozen resource bytes are identical in both passes.
+fn object_parts(index, pages, resources, first_resource, catalog, page_tree) any^ {
+    if (index == 0) catalog
+    else if (index == 1) page_tree
+    else if (index < first_resource - 1) {
+        let page_index = int(floor(float(index - 2) / 2.0));
+        page_object(pages[page_index], page_index, resources, first_resource, (index - 2) % 2 == 1)^
+    }
+    else resource_object(resources[index - first_resource + 1], resources, index + 1, first_resource)^
 }
 
 // Resource preparation happens once; measuring and final emission use these exact bytes.
@@ -153,27 +165,23 @@ fn document(plan) element^ {
     let page_tree = "2 0 obj\n<< /Type /Pages /Kids [" ++
         ([for (index in range(0, len(pages), 1)) string(3 + 2 * index) ++ " 0 R"] |> join(" ")) ++
         "] /Count " ++ string(len(pages)) ++ " >>\nendobj\n";
-    let objects = [[catalog], [page_tree]] ++
-        [for (index, page in pages) for (entry in page_objects(page, index, resources, first_resource)^) entry] ++
-        [for (index, resource in resources) resource_object(resource, resources, index + first_resource, first_resource)^];
-    let lengths = [for (entry in objects) sum([for (part in entry) len(binary(part))])];
+    let object_count = first_resource - 1 + len(resources);
+    let lengths = [for (index in range(0, object_count, 1))
+        radiant.pdf_measure(object_parts(index, pages, resources, first_resource, catalog, page_tree)^)^];
     let ends = math.cumsum(lengths);
-    let offsets = [for (index in range(0, len(objects), 1)) len(header) + if (index == 0) 0 else ends[index - 1]];
+    let offsets = [for (index in range(0, object_count, 1)) len(header) + if (index == 0) 0 else ends[index - 1]];
     let xref = len(header) + sum(lengths);
     if (len(pages) == 0 or xref > 9999999999) raise error("PDF output has no pages or exceeds classic cross-reference offset range")
     else <file format:'pdf', header
-        for (entry in objects) for (part in entry) part
-        "xref\n0 " string(len(objects) + 1) "\n0000000000 65535 f \n"
+        for (index in range(0, object_count, 1)) object_parts(index, pages, resources, first_resource, catalog, page_tree)^
+        "xref\n0 " string(object_count + 1) "\n0000000000 65535 f \n"
         for (offset in offsets) xref_entry(offset)
-        "trailer\n<< /Size " string(len(objects) + 1) " /Root 1 0 R >>\nstartxref\n" string(int(xref)) "\n%%EOF\n">
+        "trailer\n<< /Size " string(object_count + 1) " /Root 1 0 R >>\nstartxref\n" string(int(xref)) "\n%%EOF\n">
 }
 
-pub pn render(path: string, options: map) element^ {
-    let page = radiant.pdf_walk(path, options, draw, schema.schemas())^;
-    return document(page)^
-}
-
-pub pn export(path: string, destination: string, options: map) int^ {
-    let file = render(path, options)^;
-    return output(file, destination, {atomic: true})^
+pub fn render(source, options: map) element^ {
+    let page = if (source is element)
+        radiant.pdf_walk_source(format(source, 'html')^, options, draw, schema.schemas())^
+        else radiant.pdf_walk(source, options, draw, schema.schemas())^;
+    document(page)^
 }

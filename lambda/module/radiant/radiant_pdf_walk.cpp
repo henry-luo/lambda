@@ -472,6 +472,20 @@ RADIANT_C_API Item fn_radiant_pdf_deflate(Item bytes) {
     return result ? Item{.item = x2it(result)} : pdf_walk_error("cannot retain compressed PDF stream");
 }
 
+RADIANT_C_API Item fn_radiant_pdf_measure(Item content) {
+    RootFrame roots(1);
+    Rooted<Item> source(roots, content);
+    MarkOutputBuilder* builder = pdf_builder_create(true);
+    if (!builder) return pdf_walk_error("cannot allocate PDF measuring destination");
+    struct Cleanup { MarkOutputBuilder* builder; ~Cleanup() { builder->ops->destroy(builder); } } cleanup = {builder};
+    builder->ops->append(builder, source.get());
+    Item failure = builder->ops->error(builder);
+    if (get_type_id(failure) == LMD_TYPE_ERROR) return failure;
+    if (!builder->ops->finish(builder) || builder->ops->size(builder) > INT64_MAX)
+        return pdf_walk_error("PDF measured length exceeds supported range");
+    return box_int64_value((int64_t)builder->ops->size(builder));
+}
+
 RADIANT_C_API Item fn_radiant_pdf_glyph_path(Item context_item) {
     RootFrame roots(2);
     Rooted<Item> context(roots, context_item), commands(roots, ItemNull);
@@ -571,8 +585,8 @@ RADIANT_C_API Item fn_radiant_pdf_image(Item context_item) {
     return result.get();
 }
 
-RADIANT_C_API Item fn_radiant_pdf_walk(Item path_item, Item options_item,
-                                      Item callback_item, Item schemas_item) {
+static Item pdf_walk(Item path_item, Item options_item,
+        Item callback_item, Item schemas_item, bool source_html) {
     RootFrame roots(8);
     Rooted<Item> path(roots, path_item), options(roots, options_item), callback(roots, callback_item),
         schemas(roots, schemas_item), error(roots, ItemNull), result(roots, ItemNull),
@@ -653,8 +667,11 @@ RADIANT_C_API Item fn_radiant_pdf_walk(Item path_item, Item options_item,
     if (memchr(path.get().get_chars(), 0, path.get().get_len()))
         return pdf_walk_error("PDF source path contains an embedded NUL");
     lam::Temp<char> filename(mem_strdup(path.get().get_chars(), MEM_CAT_RENDER));
-    if (!filename || !render_export_session_begin(&session, filename.get(),
-            (int)width, (int)height, (int)width, (int)height, 1.0f, true, paged, 1.0f)) // INT_CAST_OK: validated integer viewport dimensions.
+    bool begun = filename && (source_html
+        ? render_export_session_begin_source(&session, filename.get(), (int)width, (int)height, paged)
+        : render_export_session_begin(&session, filename.get(),
+            (int)width, (int)height, (int)width, (int)height, 1.0f, true, paged, 1.0f, false)); // INT_CAST_OK: validated integer viewport dimensions.
+    if (!begun)
         return pdf_walk_error("cannot load and lay out PDF export source");
     ctx.ui_context = lam::up(session.ui_context.get());
     ctx.font.style = lam::up(&session.ui_context->default_font);
@@ -707,4 +724,12 @@ RADIANT_C_API Item fn_radiant_pdf_walk(Item path_item, Item options_item,
     if (get_type_id(error.get()) == LMD_TYPE_ERROR) return error.get();
     if (!pdf_walk_page_finish(&ctx)) return error.get();
     return array_item_read(pages.get().array, 0);
+}
+
+RADIANT_C_API Item fn_radiant_pdf_walk(Item path, Item options, Item callback, Item schemas) {
+    return pdf_walk(path, options, callback, schemas, false);
+}
+
+RADIANT_C_API Item fn_radiant_pdf_walk_source(Item source, Item options, Item callback, Item schemas) {
+    return pdf_walk(source, options, callback, schemas, true);
 }

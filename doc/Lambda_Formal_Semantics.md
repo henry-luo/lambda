@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 64.0.0 (2026-10-15)
+**Spec version:** 65.0.0 (2026-10-15)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -453,13 +453,24 @@ harnesses.
   place, a string or binary written beside one of its kind merges with it,
   and removing an item that kept two strings apart merges them. Positions
   after the write may therefore shift.
-- **S2.6.6v2*** **An explicitly PDF-formatted file selects a byte-output
+- **S2.6.6v3*** **An explicitly PDF-formatted file selects a byte-output
   destination.** In an evaluated `<file format:'pdf', …>` (also accepting
   string `"pdf"`), strings contribute UTF-8 bytes and binaries contribute
   their exact bytes, in evaluation order; null and empty text contribute
   nothing, and lists spread. Selection follows evaluated attributes and
   leaves ordinary files and script top level unchanged. Construction builds
-  an in-memory value; `output(file, path)` writes its payload under S12.1.1v2.
+  an in-memory value; `output(file, path)` writes its payload under S12.1.1v3.
+  PDF generation, source snapshot/layout, callbacks and resource preparation
+  are functional; only saving the completed file is procedural. Source loading
+  uses a private read-only document snapshot with scripts disabled. This does
+  not reclassify general `input`/`fetch` (S7.4.5).
+  A completed PDF file contributes its immutable bytes to another PDF file;
+  `binary(file)` copies those bytes into an owned binary. This grants no
+  retained-child indexing or mutation contract. Pure result producers may
+  receive an explicit output destination through their sequence/control-flow
+  paths. Bound values and explicit arrays keep their ordinary meaning.
+  Appends check errors immediately. A destination-aware error handler rewinds
+  its operand's partial bytes before emitting the selected replacement.
   Map contributions encode as PDF dictionaries with surrounding ASCII spaces;
   nested maps/arrays preserve object slots, including null and empty text.
   Dictionary entry order follows S2.3.1.
@@ -2833,6 +2844,13 @@ virtual sources, direct array/scalar contributions, and retained-content
 behavior remain SO48. Fixtures: `proc/proc_pdf_file.ls`, `proc/proc_pdf_maps.ls`,
 `pdf/pdf_file_mvp.ls`. [Implementation record](../vibe/impl/Lambda_Impl_PDF_Output_MVP.md).
 
+**S2.6.6v3 — functional generation, 2026-10-15.** Pure source/layout/render
+APIs, script-free private snapshots, completed-file composition, owned
+`binary(file)` snapshots, checked output demand and expression rollback are
+implemented on interpreter and MIR. General call shapes may materialize;
+retained children and production-export qualification remain open. Focused
+evidence: [phase 2 §13](../vibe/impl/Lambda_Impl_PDF_Output_Phase2.md#13-functional-generation-and-p3p5-continuation--2026-10-15).
+
 ## Appendix B — Open Design Issues
 
 Numbered `SO#` (semantics-open) for stable reference; each links to its
@@ -2939,7 +2957,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO46** How an element pattern spells *content must be empty*. S11.1.6v3 leaves content unconstrained when a pattern has no content section; a present-but-empty content pattern would mean *no children*, but no spelling is ruled — `<div ()>` and `<div null>` are candidates. The former `<div;>` is not one: S16.9.3 leaves `;` no role inside `<…>`, so it is a syntax error. [Shape_Transitions §7]
 - **SO48** PDF file content: remaining object kinds, decimal encoding, virtual
   source containers, direct array/scalar contributions, readable retained
-  children, indexing/equality/copy/mutation, nested-file contribution, and a
+  children, indexing/equality/copy/mutation, and a
   single-pass byte-position API. The raw-fragment/dictionary subset does not
   settle these contracts. [PDF Output §5.6](../vibe/Lambda_Design_PDF_Output.md#56-what-the-virtual-list-resolves-and-what-remains)
 

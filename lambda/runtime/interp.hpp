@@ -30,6 +30,7 @@ typedef enum LambdaTier {
 // policy, while `jit` explicitly selects eager whole-module compilation.
 // Safe to call before any parse.
 LambdaTier lambda_tier_selected(void);
+Item interp_call_emit(Function* fn, const Item* args, int argc, List* destination);
 void lambda_tier_set(LambdaTier tier);
 // Default AUTO function-entry promotion threshold (5); LAMBDA_FUNC_JIT_THRESHOLD
 // overrides it. A `jit` REPL session sets 1 (D8.1.1v17).

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "../lambda/runtime/binary_schema.hpp"
+#include "../lambda/io/mark_output_builder.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/heap_api.h"
 #include "../lambda/runtime/gc/gc_heap.h"
@@ -10,6 +11,7 @@
 #include "../lambda/runtime/lambda-error.h"
 #include "../lib/shell.h"
 #include "../lib/file.h"
+#include "../lib/arraylist.h"
 #include "../lambda/runtime/ast_build.hpp"
 #include "../lambda/validator/validator.hpp"
 
@@ -70,6 +72,9 @@ struct WalkProbe {
     Rooted<Item>* escaped;
     Rooted<Item>* failure;
     size_t calls;
+    ArrayList* scopes;
+    size_t clips;
+    size_t transforms;
 };
 static WalkProbe* active_walk_probe;
 
@@ -77,6 +82,25 @@ static Item probe_walk_callback(Context*, Item event, Item, Item frame) {
     WalkProbe* probe = active_walk_probe;
     probe->calls++;
     probe->escaped->set(frame);
+    EXPECT_EQ(item_attr(frame, "sequence").get_num_sized_as_int64(), (int64_t)probe->calls);
+    const char* name = event.get_chars();
+    const char* scope = nullptr;
+    bool entering = event.get_len() > 6 && strncmp(name, "begin_", 6) == 0;
+    bool leaving = event.get_len() > 4 && strncmp(name, "end_", 4) == 0;
+    if (entering || leaving) scope = name + (entering ? 6 : 4);
+    if (scope && probe->scopes) {
+        // compare the actual native callback nesting, including mixed scopes.
+        uintptr_t kind = strcmp(scope, "page") == 0 ? 1 : strcmp(scope, "clip") == 0 ? 2 :
+            strcmp(scope, "transform") == 0 ? 3 : 4;
+        if (entering) {
+            EXPECT_TRUE(arraylist_append(probe->scopes, (void*)kind));
+            if (kind == 2) probe->clips++;
+            if (kind == 3) probe->transforms++;
+        } else {
+            EXPECT_GT(probe->scopes->length, 0);
+            EXPECT_EQ((uintptr_t)arraylist_pop(probe->scopes), kind);
+        }
+    }
     if (probe->failure && event.get_len() == 8 &&
             memcmp(event.get_chars(), "boundary", 8) == 0) return probe->failure->get();
     return ItemNull;
@@ -469,9 +493,10 @@ TEST_F(BinarySchemaTest, WalkerInvalidatesEscapedContextAndPreservesCallbackErro
     }
     const BinarySchemaField context_fields[] = {
         {"x", BINARY_FIELD_F32, 0, 4, nullptr, false, nullptr, nullptr},
+        {"sequence", BINARY_FIELD_I32, 0, 4, nullptr, false, nullptr, nullptr},
     };
     context_type.layout.fields = context_fields;
-    context_type.layout.field_count = 1;
+    context_type.layout.field_count = 2;
     RootFrame roots(7);
     const char* source_path = "test/html/pdf_lambda_views.html";
     Rooted<Item> schemas(roots, vmap_new()), options(roots, vmap_new()),
@@ -491,15 +516,28 @@ TEST_F(BinarySchemaTest, WalkerInvalidatesEscapedContextAndPreservesCallbackErro
     lambda_function_mark_mir_context_abi(callback.get().function);
     lambda_function_mark_mir_public_return_shape(callback.get().function, LAMBDA_MIR_PUBLIC_RETURN_ITEM);
     lambda_function_set_type(callback.get().function, &signature);
-    WalkProbe probe = {&escaped, nullptr, 0};
-    struct ProbeScope { ~ProbeScope() { active_walk_probe = nullptr; } } scope;
+    WalkProbe probe = {&escaped, nullptr, 0, arraylist_new(8), 0, 0};
+    ASSERT_NE(probe.scopes, nullptr);
+    struct ProbeScope {
+        ArrayList* scopes;
+        ~ProbeScope() { arraylist_free(scopes); active_walk_probe = nullptr; }
+    } scope = {probe.scopes};
     active_walk_probe = &probe;
     result.set(fn_radiant_pdf_walk(path.get(), options.get(), callback.get(), schemas.get()));
     ASSERT_NE(get_type_id(result.get()), LMD_TYPE_ERROR);
     EXPECT_GT(probe.calls, 2u);
+    EXPECT_EQ(probe.scopes->length, 0);
     heap_gc_collect();
     EXPECT_EQ(get_type_id(field(escaped.get(), "x")), LMD_TYPE_ERROR);
     EXPECT_EQ(get_type_id(fn_radiant_pdf_glyph_path(escaped.get())), LMD_TYPE_ERROR);
+    source_path = "test/html/pdf_lambda_resources.html";
+    path.set({.item = s2it(heap_create_name(source_path, strlen(source_path)))});
+    probe.calls = 0;
+    result.set(fn_radiant_pdf_walk(path.get(), options.get(), callback.get(), schemas.get()));
+    ASSERT_NE(get_type_id(result.get()), LMD_TYPE_ERROR);
+    EXPECT_EQ(probe.scopes->length, 0);
+    EXPECT_GT(probe.clips, 0u);
+    EXPECT_GT(probe.transforms, 0u);
     failure.set(err2it_or_error(err_create_heap(ERR_INVALID_OPERATION, "callback probe failed", nullptr)));
     probe.failure = &failure;
     probe.calls = 0;
@@ -546,6 +584,31 @@ TEST_F(BinarySchemaTest, MetadataDoesNotConsumePredicatesOrNestedIntersections) 
         EXPECT_TRUE(strstr(out, probe.diagnostic) || strstr(err, probe.diagnostic))
             << probe.source << "\n" << out << err;
         shell_result_free(&result);
+    }
+}
+
+TEST_F(BinarySchemaTest, PdfDestinationRecoveryClearsFailureInBothModes) {
+    for (bool measuring : {false, true}) {
+        MarkOutputBuilder* output = pdf_builder_create(measuring);
+        ASSERT_NE(output, nullptr);
+        Pool* pool = pool_create();
+        Input* input = Input::create(pool, nullptr);
+        ASSERT_NE(input, nullptr);
+        {
+            MarkBuilder source(input);
+            output->ops->append(output, source.createStringItem("before"));
+            size_t checkpoint = output->ops->size(output);
+            output->ops->append(output, source.createStringItem("discarded"));
+            output->ops->append(output, {.item = i2it(42)});
+            EXPECT_EQ(get_type_id(output->ops->error(output)), LMD_TYPE_ERROR);
+            ASSERT_TRUE(output->ops->rewind(output, checkpoint));
+            EXPECT_EQ(get_type_id(output->ops->error(output)), LMD_TYPE_NULL);
+            output->ops->append(output, source.createStringItem("replacement"));
+            EXPECT_TRUE(output->ops->finish(output));
+            EXPECT_EQ(output->ops->size(output), strlen("beforereplacement"));
+        }
+        pool_destroy(pool);
+        output->ops->destroy(output);
     }
 }
 

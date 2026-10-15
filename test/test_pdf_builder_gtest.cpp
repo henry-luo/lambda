@@ -90,6 +90,41 @@ TEST(PdfFileBuilder, CopiesInputOwnedDictionaryBeforeItsInputIsDestroyed) {
     output->ops->destroy(output);
 }
 
+TEST(PdfFileBuilder, CountingDestinationSharesEncodingAndRetainsNoBytes) {
+    MarkOutputBuilder* output = pdf_builder_create();
+    MarkOutputBuilder* count = pdf_builder_create(true);
+    ASSERT_NE(output, nullptr);
+    ASSERT_NE(count, nullptr);
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    {
+        MarkBuilder source(input);
+        const uint8_t bytes[] = {0, 0xff, 0x41};
+        Item dictionary = source.map()
+            .put("Text", source.createStringItem("a(b)\\\n\t"))
+            .put("Unicode", source.createStringItem("λ😀"))
+            .put("Bytes", {.item = x2it(source.createBinary(bytes, sizeof(bytes)))})
+            .put("Wide", (int64_t)INT64_MAX)
+            .put("Small", 1e-12)
+            .final();
+        output->ops->append(output, dictionary);
+        count->ops->append(count, dictionary);
+    }
+    pool_destroy(pool);
+    ASSERT_TRUE(output->ops->finish(output));
+    ASSERT_TRUE(count->ops->finish(count));
+    const char* data = nullptr;
+    size_t size = 0;
+    ASSERT_TRUE(output->ops->bytes(output, &data, &size));
+    EXPECT_EQ(count->ops->size(count), size);
+    EXPECT_FALSE(count->ops->bytes(count, &data, &size));
+    output->ops->destroy(output);
+    count->ops->destroy(count);
+}
+
+
 TEST(PdfFileBuilder, RejectsCyclicDictionariesWithoutPublishingPartialBytes) {
     Map map = {};
     Map* self = &map;

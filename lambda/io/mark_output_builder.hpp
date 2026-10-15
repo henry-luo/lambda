@@ -11,6 +11,8 @@ struct MarkOutputBuilderOps {
     bool (*bytes)(const MarkOutputBuilder* builder, const char** data, size_t* size);
     void (*destroy)(MarkOutputBuilder* builder);
     Item (*error)(const MarkOutputBuilder* builder) = nullptr;
+    size_t (*size)(const MarkOutputBuilder* builder) = nullptr;
+    bool (*rewind)(MarkOutputBuilder* builder, size_t size) = nullptr;
 };
 
 struct MarkOutputBuilder {
@@ -38,5 +40,5 @@ inline bool virtual_output_bytes(Item value, const char** data, size_t* size) {
     return builder && builder->ops->bytes(builder, data, size);
 }
 
-MarkOutputBuilder* pdf_builder_create();
+MarkOutputBuilder* pdf_builder_create(bool measuring = false);
 

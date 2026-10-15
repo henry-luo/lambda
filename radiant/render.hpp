@@ -4327,7 +4327,10 @@ void render_output_target_apply_session(RenderOutputTarget* target,
 bool render_export_session_begin(RenderExportSession* session, const char* html_file,
                                  int viewport_width, int viewport_height,
                                  int fallback_width, int fallback_height, float output_scale,
-                                 bool print_media = false, bool paged = false, float device_scale = 1.0f);
+                                 bool print_media = false, bool paged = false, float device_scale = 1.0f,
+                                 bool execute_scripts = true);
+bool render_export_session_begin_source(RenderExportSession* session, const char* source,
+    int viewport_width, int viewport_height, bool paged);
 bool render_export_session_begin_raster(RenderExportSession* session, const char* html_file,
                                         int viewport_width, int viewport_height,
                                         float output_scale, float device_scale);
