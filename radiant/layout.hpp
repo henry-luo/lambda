@@ -4274,7 +4274,10 @@ DomDocument* layout_load_iframe_src_doc(LayoutContext* lycon, const char* src,
 bool iframe_navigation_must_not_run_in_layout(LayoutContext* lycon,
                                               const char* src);
 void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
-                                int iframe_width, int iframe_height);
+                                float iframe_width, float iframe_height);
+bool layout_iframe_content_size(DomDocument* doc, float* width, float* height);
+DomDocument* layout_ensure_iframe_document(LayoutContext* lycon, ViewBlock* block,
+    float viewport_width, float viewport_height);
 View* set_view(LayoutContext* lycon, ViewType type, DomNode* node);
 // Keyword Mapping: Lambda CSS strings → Lexbor enum values
 

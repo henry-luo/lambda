@@ -2770,6 +2770,7 @@ static const LayoutFormatRoute layout_format_routes[] = {
     {".ls", load_lambda_script_doc},
     {".slides", load_slides_doc},
     {".docx", nullptr, "docx"},
+    {".epub", nullptr, "ebook"},
     {".tex", load_latex_doc}, {".latex", load_latex_doc},
     {".pgf", load_tikz_doc},
     {".md", load_markdown_doc}, {".markdown", load_markdown_doc},

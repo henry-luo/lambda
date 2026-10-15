@@ -42,6 +42,7 @@ void parse_xml_with_options(Input* input, const char* xml_string, const XmlParse
 Element* parse_xhtml_document(Input* input, const char* source, size_t length,
                               bool track_source_lines = false);
 void parse_css(Input* input, const char* css_string);
+void input_css_tokens(Input* input, const char* source, size_t length);
 
 // ── Relational database (C++ linkage) ──────────────────────────────
 

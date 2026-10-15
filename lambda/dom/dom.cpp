@@ -3954,7 +3954,7 @@ extern "C" Item dom_iframe_get_content_document(DomElement* iframe) {
         DomDocument* embedded_doc = iframe->embed ? iframe->embedp()->doc : nullptr;
         if (embedded_doc) {
             dom_doc_mark_has_browsing_context(embedded_doc);
-            replace_iframe_srcdoc_document(iframe, embedded_doc);
+            // A renderer-loaded srcdoc is already a full document; observing it must not reparse its body.
             if (s_iframe_cache_count < IFRAME_CACHE_SIZE) {
                 s_iframe_cache[s_iframe_cache_count].iframe = iframe;
                 s_iframe_cache[s_iframe_cache_count].doc = embedded_doc;
@@ -4210,7 +4210,9 @@ extern "C" void dom_after_srcdoc_set(void* dom_elem) {
     IframeContentEntry* entry = lookup_iframe_entry(iframe);
     DomDocument* doc = entry ? entry->doc
         : (iframe && iframe->embed ? iframe->embedp()->doc : nullptr);
-    if (doc) replace_iframe_srcdoc_document(iframe, doc);
+    // Rendered iframes navigate as full documents during layout; only detached
+    // browsing contexts need the fragment hydration fallback.
+    if (doc && !doc->view_tree) replace_iframe_srcdoc_document(iframe, doc);
     _schedule_iframe_load(iframe);
 }
 
@@ -5517,7 +5519,8 @@ static float dom_scrollable_descendant_extent(DomNode* node, bool width_axis,
     return max(end, 0.0f);
 }
 
-static float dom_scrollable_extent(DomElement* elem, bool width_axis) {
+extern "C" float dom_scrollable_extent(void* element, bool width_axis) {
+    DomElement* elem = static_cast<DomElement*>(element);
     if (!elem) return 0.0f;
     float extent = max(width_axis ? elem->content_width : elem->content_height,
                        width_axis ? elem->width : elem->height);

@@ -1,5 +1,6 @@
 {
   "name": "Original DocBook source opens as a styled document",
+  "html": "test/input/docbook/showcase.xml",
   "viewport": {"width": 1100, "height": 900},
   "events": [
     {"type": "assert_text", "target": {"selector": "article.book > header h1"}, "equals": "The Riverside Notebook"},

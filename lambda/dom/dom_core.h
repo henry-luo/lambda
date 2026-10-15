@@ -104,6 +104,7 @@ Item dom_core_serialize(Item n, Item outer);
 Item dom_core_bounding_box(Item n);
 Item dom_core_client_rects(Item n);
 Item dom_core_scroll_state(Item n);
+Item dom_core_scroll_metrics(Item n);
 Item dom_core_set_scroll_state(Item n, Item x, Item y);
 Item dom_core_element_from_point(Item doc, Item x, Item y);
 // --- core: range / selection composite reads

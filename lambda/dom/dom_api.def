@@ -783,6 +783,10 @@ DOM_OP(CORE, set_window_fullscreen, window, 2, "pn(n: any, enabled: bool) -> boo
 DOM_OP(CORE, window_fullscreen, window, 1, "fn(n: any) -> bool", dom_engine_window_fullscreen, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, window_fullscreen_enabled, window, 1, "fn(n: any) -> bool", dom_engine_window_fullscreen_enabled, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
 
+// Append geometry reads to preserve the existing host catalog offsets.
+DOM_OP(CORE, scroll_metrics,   geometry, 1, "fn(n: any) -> map",                            dom_core_scroll_metrics,   DOM_F_NEUTRAL, "", none, "", "")
+DOM_RAW(scrollable_extent, geometry, float, (void* element, bool width_axis), dom_scrollable_extent, DOM_F_NATIVE)
+
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP
 #undef DOM_API_DEF_CLEAR_OP

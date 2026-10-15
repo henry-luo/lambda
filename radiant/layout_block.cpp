@@ -4701,7 +4701,7 @@ static DomDocument* load_iframe_srcdoc_doc(LayoutContext* lycon,
                                            const char* srcdoc,
                                            int viewport_width,
                                            int viewport_height) {
-    if (!srcdoc || !*srcdoc) return nullptr;
+    if (!srcdoc) return nullptr;
     // The embedding element owns this document, so its loader pool sits under
     // the embedding document's context. Teardown releases embedded documents
     // before the view tree, and the context is released second to last, so a
@@ -4776,11 +4776,11 @@ bool iframe_navigation_must_not_run_in_layout(LayoutContext* lycon,
 }
 
 void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
-                                int iframe_width, int iframe_height) {
+                                float iframe_width, float iframe_height) {
     if (!lycon || !lycon->ui_context || !doc || !doc->html_root) return;
     DomDocument* parent_doc = lycon->ui_context->document;
-    int saved_viewport_width = lycon->ui_context->viewport_width;
-    int saved_viewport_height = lycon->ui_context->viewport_height;
+    float saved_viewport_width = lycon->ui_context->viewport_width;
+    float saved_viewport_height = lycon->ui_context->viewport_height;
     lycon->ui_context->document = lam::up(doc);
     lycon->ui_context->viewport_width = iframe_width;
     lycon->ui_context->viewport_height = iframe_height;
@@ -4792,94 +4792,134 @@ void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
     lycon->ui_context->viewport_height = saved_viewport_height;
 }
 
-void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
-    // SVG image documents do not create nested browsing contexts, including srcdoc/data frames.
-    if (lycon->doc && lycon->doc->services.svg_image_document) return;
-    DomDocument* doc = NULL;
-    if (lycon->ui_context->iframe_depth >= MAX_IFRAME_DEPTH) {
-        log_warn("iframe: maximum nesting depth (%d) exceeded, skipping", MAX_IFRAME_DEPTH);
-        return;
+struct IframeSourceSnapshot : DomDocumentResourceData {
+    lam::Own<char> text;
+    float width, height;
+};
+static void iframe_source_destroy(DomDocumentResourceData* data) {
+    IframeSourceSnapshot* source = static_cast<IframeSourceSnapshot*>(data);
+    mem_free(source->text);
+    mem_free(source);
+}
+static IframeSourceSnapshot* iframe_source(DomDocument* doc) {
+    for (DomDocumentResource* resource = doc ? doc->resources.get() : nullptr;
+            resource; resource = resource->next)
+        if (resource->destroy == iframe_source_destroy)
+            return static_cast<IframeSourceSnapshot*>(resource->data.get());
+    return nullptr;
+}
+struct IframeContextScope {
+    UiContext* ui;
+    DomDocument* parent;
+    EvalContext* owner;
+    IframeContextScope(LayoutContext* lycon) : ui(lycon->ui_context), parent(lycon->doc) {
+        Runtime* runtime = dom_document_script_runtime(parent);
+        owner = runtime ? runtime_get_eval_context(runtime) : nullptr;
     }
-    EvalContext* active_context = (EvalContext*)eval_context_tls_runtime();
-    bool evaluation_active = active_context && active_context->execution_depth != 0;
-    if (!(block->embed && block->embedp()->doc) && !evaluation_active) {
-        const char* srcdoc = block->get_attribute("srcdoc");
-        const char* src = block->get_attribute("src");
-        if ((srcdoc && *srcdoc) || (src && *src)) {
-            if (!srcdoc && iframe_navigation_must_not_run_in_layout(lycon, src)) {
-                // D5.4.1: a cross-origin frame needs a separate evaluator, so
-                // never construct it recursively while the parent lays out.
-                log_debug("iframe: deferring cross-origin navigation: %s", src);
-                return;
+    ~IframeContextScope() {
+        // Child load/teardown transfers the evaluator at a quiescent layout boundary (D5.4.1).
+        if (owner && (!radiant_eval_context_switch(owner) ||
+                !radiant_bind_document_script_host(ui, parent)))
+            log_error("iframe context: could not restore the embedding document evaluator");
+    }
+};
+DomDocument* layout_ensure_iframe_document(LayoutContext* lycon, ViewBlock* block,
+        float viewport_width, float viewport_height) {
+    if (!lycon || !lycon->ui_context ||
+            (lycon->doc && lycon->doc->services.svg_image_document)) return nullptr;
+    IframeContextScope enclosing(lycon);
+    DomDocument* previous = block->embed ? block->embedp()->doc.get() : nullptr;
+    const char* srcdoc = block->get_attribute("srcdoc");
+    const char* src = block->get_attribute("src");
+    const char* source_text = srcdoc ? srcdoc : src;
+    if (!source_text || (!srcdoc && !*source_text)) return previous;
+    IframeSourceSnapshot* snapshot = iframe_source(previous);
+    if (previous && (!snapshot || !strcmp(snapshot->text, source_text))) {
+        if (snapshot && (snapshot->width != viewport_width || snapshot->height != viewport_height)) {
+            snapshot->width = viewport_width;
+            snapshot->height = viewport_height;
+            layout_iframe_embedded_doc(lycon, previous,
+                viewport_width, viewport_height);
+        }
+        return previous;
+    }
+    EvalContext* active = (EvalContext*)eval_context_tls_runtime();
+    if ((active && active->execution_depth != 0) || lycon->ui_context->iframe_depth >= MAX_IFRAME_DEPTH)
+        return previous;
+    if (!srcdoc && iframe_navigation_must_not_run_in_layout(lycon, src)) return previous;
+    if (!srcdoc && radiant_schedule_async_iframe_load(lycon->ui_context, block->as_element(), src,
+            (int)viewport_width, (int)viewport_height)) return previous; // INT_CAST_OK: loader viewport API uses integer CSS pixels
+    lycon->ui_context->iframe_depth++;
+    DomDocument* doc = srcdoc ? load_iframe_srcdoc_doc(lycon, srcdoc,
+        (int)viewport_width, (int)viewport_height) : // INT_CAST_OK: loader viewport API uses integer CSS pixels
+        layout_load_iframe_src_doc(lycon, src,
+            (int)viewport_width, (int)viewport_height); // INT_CAST_OK: loader viewport API uses integer CSS pixels
+    if (doc) {
+        snapshot = (IframeSourceSnapshot*)mem_calloc(1, sizeof(*snapshot), MEM_CAT_DOM);
+        if (snapshot) snapshot->text = lam::own(mem_strdup(source_text, MEM_CAT_DOM));
+        if (!snapshot || !snapshot->text || !dom_document_add_resource(doc, snapshot, iframe_source_destroy)) {
+            if (snapshot) iframe_source_destroy(snapshot);
+            free_document(doc);
+            doc = nullptr;
+        } else {
+            snapshot->width = viewport_width;
+            snapshot->height = viewport_height;
+            if (previous) {
+                // Retire the old generation only after its replacement has loaded successfully.
+                clear_document_interaction_state_before_detach(previous);
+                if (lycon->ui_context->font_ctx) font_context_reset_glyph_caches(lycon->ui_context->font_ctx);
+                dom_document_clear_embedding(previous);
             }
-            LayoutContentBox iframe_content = layout_content_box(block);
-            // The embedded viewport is the iframe content box; using the outer
-            // border box creates false overflow and an inner scrollbar.
-            int iframe_width = block->width > 0 ?
-                (int)iframe_content.width : (int)lycon->ui_context->viewport_width; // INT_CAST_OK: iframe viewport expects integer logical pixels
-            int iframe_height = block->height > 0 ?
-                (int)iframe_content.height : (int)lycon->ui_context->viewport_height; // INT_CAST_OK: iframe viewport expects integer logical pixels
-            if (!srcdoc && radiant_schedule_async_iframe_load(lycon->ui_context,
-                    (DomElement*)block, src, iframe_width, iframe_height)) {
-                // The parent can finish layout and paint while the child loads.
-                return;
-            }
-            lycon->ui_context->iframe_depth++;
-            if (srcdoc && *srcdoc) {
-                doc = load_iframe_srcdoc_doc(lycon, srcdoc,
-                    iframe_width, iframe_height);
-            } else {
-                doc = layout_load_iframe_src_doc(lycon, src,
-                    iframe_width, iframe_height);
-            }
-            if (!doc) {
-                lycon->ui_context->iframe_depth--;
-            } else {
-                radiant_document_ensure_state(doc, "layout_iframe");
-                if (!(block->embed)) block->ensure_embed(lycon);
-                block->embed->doc = lam::own(doc); // assign loaded document to embed property
-                dom_document_set_embedding(doc, lycon->ui_context->document,
-                                           (DomElement*)block);
-                layout_iframe_embedded_doc(lycon, doc, iframe_width, iframe_height);
-                lycon->ui_context->iframe_depth--;
-                DomDocument* parent_doc = lycon->ui_context->document;
-                if (doc->page_kind == DOM_PAGE_KIND_LAMBDA_SCRIPT &&
-                    dom_document_has_js_realm(parent_doc)) {
-                    // Navigation finished on the child's evaluator. Queue load
-                    // in the parent's realm at this quiescent layout boundary.
-                    EvalContext* parent_owner = runtime_get_eval_context(parent_doc->js.runtime);
-                    if (parent_owner && radiant_eval_context_switch(parent_owner) &&
-                        js_runtime_state_init(parent_owner)) {
-                        dom_set_document(parent_doc);
-                        dom_iframe_navigation_complete(block);
-                    }
+            if (!block->embed) block->ensure_embed(lycon);
+            block->embed->doc = lam::own(doc);
+            dom_document_set_embedding(doc, lycon->ui_context->document, block->as_element());
+            radiant_document_ensure_state(doc, "iframe source snapshot");
+            layout_iframe_embedded_doc(lycon, doc,
+                viewport_width, viewport_height);
+            if (previous) free_document(previous);
+            DomDocument* parent = lycon->ui_context->document;
+            if (doc->page_kind == DOM_PAGE_KIND_LAMBDA_SCRIPT && dom_document_has_js_realm(parent)) {
+                EvalContext* owner = runtime_get_eval_context(parent->js.runtime);
+                if (owner && radiant_eval_context_switch(owner) && js_runtime_state_init(owner)) {
+                    dom_set_document(parent);
+                    dom_iframe_navigation_complete(block);
                 }
             }
         }
-    } else if (evaluation_active && !(block->embed && block->embedp()->doc)) {
-        // D5.4.1: lazy iframe navigation waits for post-script layout because
-        // switching isolates here would invalidate the parent's live JS frames.
-        log_debug("iframe: deferring navigation until evaluator quiescence");
-    } else {
-        doc = block->embedp()->doc;
     }
+    lycon->ui_context->iframe_depth--;
+    return doc ? doc : previous;
+}
+
+bool layout_iframe_content_size(DomDocument* doc, float* width, float* height) {
+    ViewBlock* root = doc && doc->view_tree ? lam::view_as_block(doc->view_tree->root) : nullptr;
+    if (!root) return false;
+    // Fragmented columns may overflow the root's in-flow size; CSSOM and the iframe must share the range.
+    *width = dom_scrollable_extent(root->as_element(), true);
+    *height = dom_scrollable_extent(root->as_element(), false);
+    if (root->scroller) {
+        root->height = max(root->height, root->content_height);
+        root->scroller = nullptr;
+    }
+    return true;
+}
+
+void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
+    LayoutContentBox content = layout_content_box(block);
+    DomDocument* doc = layout_ensure_iframe_document(lycon, block,
+        block->width > 0.0f ? content.width : lycon->ui_context->viewport_width,
+        block->height > 0.0f ? content.height : lycon->ui_context->viewport_height);
     if (!doc || !doc->view_tree || !doc->view_tree->root) {
         // A non-navigated iframe has no inner flow; finalizing an empty flow
         // would overwrite the replaced box dimensions selected by outer sizing.
         return;
     }
-    ViewBlock* root = lam::view_require_block(doc->view_tree->root);
-    float iframe_width = root->content_width > 0 ? root->content_width : root->width;
-    float iframe_height = root->content_height > 0 ? root->content_height : root->height;
+    float iframe_width, iframe_height;
+    if (!layout_iframe_content_size(doc, &iframe_width, &iframe_height)) return;
     lycon->block.max_width = iframe_width;
     lycon->block.advance_y = iframe_height;
-    if (root->scroller) {
-        if (root->content_height > root->height) {
-            root->height = root->content_height;  // restore full content height
-        }
-        root->scroller = NULL;
-    }
     block->ensure_scroll(lycon);
+    block->scroller->overflow_x = CSS_VALUE_AUTO;
     block->scroller->overflow_y = CSS_VALUE_AUTO;
     finalize_block_flow(lycon, block, display.outer);
     if (block->scroller && block->scroll_mut()->pane) {

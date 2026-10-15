@@ -81,6 +81,7 @@ Item dom_make_rect_in(struct DomDocument* doc,
  */
 bool dom_has_committed_geometry_snapshot(void* dom_doc);
 bool dom_ensure_geometry_snapshot(struct DomDocument* dom_doc);
+float dom_scrollable_extent(void* element, bool width_axis);
 
 /**
  * Return the topmost painted SVG element at viewport coordinates, or NULL.

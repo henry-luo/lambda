@@ -635,6 +635,14 @@ extern "C" Item dom_core_scroll_state(Item n) {
     Item vals[] = { dom_prop_get(n, "scrollLeft"), dom_prop_get(n, "scrollTop") };  // DOM_NAME_DISPATCH_OK: DSO8
     return dom_result_map(doc, keys, vals, 2);
 }
+extern "C" Item dom_core_scroll_metrics(Item n) {
+    DomDocument* doc = (DomDocument*)dom_document_from_item(n);
+    // Use the shared CSSOM reads so callers see committed viewport and overflow geometry.
+    static const char* const keys[] = { "client_width", "client_height", "scroll_width", "scroll_height" };
+    Item vals[] = { dom_prop_get(n, "clientWidth"), dom_prop_get(n, "clientHeight"),
+        dom_prop_get(n, "scrollWidth"), dom_prop_get(n, "scrollHeight") }; // DOM_NAME_DISPATCH_OK: one named composite CSSOM read
+    return dom_result_map(doc, keys, vals, 4);
+}
 extern "C" Item dom_core_element_from_point(Item doc, Item x, Item y) {
     DomDocument* document = dom_document_of(doc);
     if (!document) return ItemNull;

@@ -6463,16 +6463,26 @@ Item fn_parse2(Item str_item, Item type) {
         return fn_parse_highlight_spans(html, str_item, window_item, prescan_item);
     }
 
-    // first arg must be a string
+    str_item = parse_source_root.get();
+    // captured ZIP members are values: parsing them never reacquires their source (S12.4.1v2).
+    if (fs_node_is(str_item)) {
+        Item result = fs_node_input(str_item, type_str, flavor_str);
+        arraylist_free(adapter_names);
+        arraylist_free(raw_names);
+        arraylist_free(chaptered_names);
+        return result;
+    }
+
     TypeId str_type = get_type_id(str_item);
-    if (str_type != LMD_TYPE_STRING) {
+    if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_BINARY) {
         set_runtime_error(ERR_TYPE_MISMATCH,
-            "parse: 1st argument must be a string, got type: %s",
+            "parse: 1st argument must be text, immutable bytes, or a captured ZIP member, got type: %s",
             get_type_name(str_type));
         return ItemError;
     }
-    String* str = str_item.get_safe_string();
-    if (!str) {
+    String* str = str_type == LMD_TYPE_STRING ? str_item.get_safe_string() : nullptr;
+    Binary* binary = str_type == LMD_TYPE_BINARY ? str_item.get_safe_binary() : nullptr;
+    if (!str && !binary) {
         set_runtime_error(ERR_INVALID_STATE, "parse: string value is unavailable");
         return ItemError;
     }
@@ -6489,7 +6499,8 @@ Item fn_parse2(Item str_item, Item type) {
 
     parse_options.source_positions = source_positions;
     // preserve the Item's byte count so document XML cannot accept a NUL-truncated prefix.
-    Input* input = input_from_source_n_with_name_parent(str->chars, str->len, dummy_url,
+    Input* input = input_from_source_n_with_name_parent(str ? str->chars : (const char*)binary_data(binary),
+        str ? str->len : binary_length(binary), dummy_url,
         type_str, flavor_str, NULL,
         (source_positions || has_tex_options || parse_options.xml_preserve_whitespace) ? &parse_options : NULL);
     arraylist_free(adapter_names);

@@ -750,7 +750,7 @@ static bool process_event_target_document_reflow(EventContext* evcon) {
     return true;
 }
 
-static void clear_document_interaction_state_before_detach(DomDocument* doc) {
+void clear_document_interaction_state_before_detach(DomDocument* doc) {
     if (!doc || !doc->state) return;
 
     DocState* state = doc->state;
@@ -3768,10 +3768,6 @@ static bool radiant_target_is_link(View* target) {
 
 static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr) {
     if (!doc) return false;
-    if (doc->dom_package_loaded) {
-        return context && template_registry_has_behavior(g_template_registry);
-    }
-
     // No event can run after a one-shot render, and its JS evaluator has
     // already been destroyed. Do not let an ambient stale context resurrect it.
     if (doc->js_realm_released_after_load) return false;
@@ -3868,24 +3864,19 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
     // No heap check here: a freshly created runtime gets its heap when the first
     // script runs, so requiring one up front would block the very load that
     // establishes it.
-    // mark before running: a failed load must not be retried on every event
-    doc->dom_package_loaded = true;
-
     // Bind before touching the registry: it is EvalContext-scoped, and on a
     // script-less page nothing has bound an evaluator to this thread yet.
     //
-    // Never *change* an existing binding. The thread's evaluator is also what
-    // js_active_runtime_state is derived from, so rebinding it here strands JS
-    // state for whatever owns the thread — which crashed an iframe page inside
-    // js_observer_runtime_state. If another evaluator owns the thread, package
-    // behavior remains unavailable for this document.
+    // Child dispatch can finish with its parent bound. Admit the policy owner
+    // only at a quiescent native boundary; live guest frames still defer (D5.4.1).
     EvalContext* ctx = runtime_get_eval_context(rt);
     if (!ctx) {
         log_error("dom-package: runtime has no eval context");
         return false;
     }
-    if (context && context != ctx) {
-        log_debug("dom-package: another evaluator owns this thread; package unavailable");
+    if (context && context != ctx &&
+            (context->execution_depth != 0 || !radiant_eval_context_switch(ctx))) {
+        log_debug("dom-package: active evaluator defers package admission");
         return false;
     }
     if (!eval_context_init(ctx)) {
@@ -3900,8 +3891,11 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
         log_error("dom-package: cannot initialize the document support capsule");
         return false;
     }
+    if (doc->dom_package_loaded) return template_registry_has_behavior(g_template_registry);
     if (!g_template_registry) g_template_registry = template_registry_new();
 
+    // A different evaluator defers admission; mark only a real package load attempt.
+    doc->dom_package_loaded = true;
     // behavior mode spans only this load, so the page's own templates keep
     // registering as author templates
     template_registry_set_behavior_mode(g_template_registry, true);
@@ -12122,14 +12116,7 @@ static bool navigation_commit_iframe_document(UiContext* uicon,
         uicon->viewport_width = saved_viewport_width;
         uicon->viewport_height = saved_viewport_height;
     }
-    if (new_doc->view_tree && new_doc->view_tree->root) {
-        ViewBlock* root = lam::view_require_block(new_doc->view_tree->root);
-        if (root->scroller) {
-            if (root->content_height > root->height) root->height = root->content_height;
-            root->scroller = nullptr;
-        }
-        block->content_width = root->content_width > 0.0f ? root->content_width : root->width;
-        block->content_height = root->content_height > 0.0f ? root->content_height : root->height;
+    if (layout_iframe_content_size(new_doc, &block->content_width, &block->content_height)) {
         update_scroller(block, block->content_width, block->content_height);
     }
     if (old_doc) {

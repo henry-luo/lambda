@@ -2110,6 +2110,10 @@ static const char* mime_to_parser_type(const char* mime_type) {
     return "text";
 }
 
+bool input_path_is_ebook(const char* path) {
+    return file_path_has_ext_ci(path, "epub");
+}
+
 extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         size_t source_len, Url* abs_url, String* type, String* flavor,
         NamePool* name_parent, const InputParseOptions* options) {
@@ -2196,6 +2200,9 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         const char* wiki_flavor = wiki_format_flavor(effective_type, flavor ? flavor->chars : nullptr);
         if (wiki_flavor) {
             input->root = input_markup_wiki(input, source, wiki_flavor);
+        }
+        else if (strcmp(effective_type, "css") == 0 && flavor && !strcmp(flavor->chars, "tokens")) {
+            input_css_tokens(input, source, source_len);
         }
         else if (strcmp(effective_type, "markup") == 0) {
             // Generic markup type - use flavor to select format

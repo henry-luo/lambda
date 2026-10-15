@@ -1,0 +1,134 @@
+{
+  "name": "EPUB long chapter paginates with typography and resize",
+  "html": "test/ui/ebook_paged.ls",
+  "viewport": {
+    "width": 1100,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "contains": "Page 1 / "
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=page-next]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "contains": "Page 2 / "
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=page-previous]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "contains": "Page 1 / "
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=larger]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=font]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=spacing]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=margin]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=page-next]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "contains": "Page 2 / "
+    },
+    {
+      "type": "resize",
+      "width": 720,
+      "height": 680
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=page-previous]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "contains": "Page 1 / "
+    }
+  ]
+}

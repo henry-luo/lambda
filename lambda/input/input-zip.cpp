@@ -1,5 +1,6 @@
 #include "input.hpp"
 #include "../io/fs_node.hpp"
+#include "../io/snapshot_identity.hpp"
 #include "../core/lambda-error-data.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/str.h"
@@ -10,7 +11,7 @@ thread_local const ZipLimits* input_zip_limits = nullptr;
 static const char fs_backend_brand = 0;
 static const char* const fs_attributes[] = {
     "name", "kind", "is_file", "is_dir", "path", "entry_path", "extension",
-    "size", "modified", "mode", "is_link", "format", "compressed_size", "compression", "crc32"
+    "size", "modified", "mode", "is_link", "format", "compressed_size", "compression", "crc32", "sha256"
 };
 static constexpr int FS_ATTR_COUNT = sizeof(fs_attributes) / sizeof(fs_attributes[0]);
 
@@ -247,6 +248,8 @@ static Item fs_wrap(FsNode* node) {
     node->attrs[12] = i && !directory ? builder.createUInt64(entry->compressed_size) : ItemNull;
     node->attrs[13] = i && !directory ? builder.createSymbolItem(entry->method ? "deflate" : "stored") : ItemNull;
     node->attrs[14] = i && !directory ? builder.createUInt64(entry->crc) : ItemNull;
+    node->attrs[15] = i ? ItemNull : input_snapshot_identity(builder,
+        archive->snapshot->data, archive->snapshot->capacity);
     return node->element;
 }
 

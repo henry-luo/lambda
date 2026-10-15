@@ -399,6 +399,14 @@ its Source tab shows the converted HTML. Unsupported content is reported above
 the document. The preview uses flowing pages rather than reproducing Word's
 pagination, headers, or footers.
 
+**EPUB books:** `lambda view book.epub` opens the `lambda.doc.ebook` reader
+(D7.2.4), with chapter/contents navigation, source anchors, generated pages,
+search, bookmarks, reading preferences and local resume. Fixed-layout
+XHTML/SVG uses the authored viewport with fit/zoom. The file browser previews
+selected EPUBs and exposes their OPF source. Use `--archive` to inspect package
+parts. See [the supported EPUB profile](Lambda_Packages.md#19-docebook--epub-reader)
+for limitations.
+
 **DocBook documents:** `lambda view test/input/docbook/showcase.xml` opens the
 original DocBook 5.x `.xml` through `lambda.doc.docbook` (D7.2.4). The covered
 roots (`article`, `book`, `set`, `part`, `reference`) are recognized by their
@@ -409,7 +417,7 @@ See [DocBook support and limitations](Markup_Formats_Support.md#312-docbook).
 
 **Supported formats:**
 
-`.docx`, `.pdf`, `.html`/`.htm`, `.xhtml`/`.xht`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
+`.epub`, `.docx`, `.pdf`, `.html`/`.htm`, `.xhtml`/`.xht`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
 
 XHTML uses strict XML parsing and the same HTML DOM/CSS/layout pipeline (**D2.10.1**).
 `.xhtml`/`.xht` files and HTTP `application/xhtml+xml` responses select it.
@@ -440,6 +448,7 @@ lambda view https://example.com
 lambda view diagram.mmd
 lambda view documents/
 lambda view assets.zip
+lambda view book.epub
 lambda view report.docx
 lambda view report.docx --archive
 lambda view test/input/docbook/showcase.xml

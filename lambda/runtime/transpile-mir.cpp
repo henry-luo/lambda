@@ -49124,6 +49124,8 @@ static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
     // the package parses its own source so the engine sees the adapter registry (D7.2.7)
     {"latex", "lambda.latex.latex", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
     {"docx", "lambda.doc.docx.view", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
+    // Reader controls and publication resources retain a runtime per document (S12.1.3).
+    {"ebook", "lambda.doc.ebook.view", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false},
     {"docbook", "lambda.doc.docbook.view", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
     {"tikz", "lambda.doc.tikz.tikz", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     {"graph", "lambda.graph.document", "to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},

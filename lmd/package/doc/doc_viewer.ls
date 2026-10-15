@@ -19,6 +19,8 @@ import media: .media
 import docx: .docx
 import docx_view: .docx.view
 import docx_css: .docx.css
+import ebook: .ebook
+import ebook_reader: .ebook.reader
 import xml: .xml
 
 let PROJECT_ROOT = "."
@@ -30,7 +32,7 @@ let ICON_FONT = media.data_uri(input(sys.lambda.home# ++ "/package/doc/icons/set
 // --------------------------------------------------------------------------
 
 fn archive_extension(extension) => contains(
-  ["zip", "xlsx", "pptx", "epub", "jar", "war", "odt", "ods", "odp"], lower(extension)) or false
+  ["zip", "xlsx", "pptx", "jar", "war", "odt", "ods", "odp"], lower(extension)) or false
 fn entry_is_container(entry) => entry.is_dir == true or (archive_extension(entry.extension) or false)
 fn directory_entries(source) {
   let loaded = if (type(source) == element) {
@@ -163,6 +165,7 @@ fn is_latex_document(extension) {
 
 fn is_pdf_document(extension) => lower(extension) == "pdf"
 fn is_docx_document(extension) => lower(extension) == "docx"
+fn is_epub_document(extension) => lower(extension) == "epub"
 fn is_eml_document(extension) => lower(extension) == "eml"
 fn is_pgf_document(extension) => lower(extension) == "pgf"
 fn is_image_document(extension) => contains(["png", "jpg", "jpeg", "gif", "svg"], lower(extension)) or false
@@ -216,7 +219,7 @@ fn properties_tree(flat) {
 
 fn is_renderable_document(extension) =>
   document_format(extension) != null or is_latex_document(extension) or
-    is_pdf_document(extension) or is_docx_document(extension) or is_eml_document(extension) or
+    is_pdf_document(extension) or is_docx_document(extension) or is_epub_document(extension) or is_eml_document(extension) or
     is_pgf_document(extension) or is_image_document(extension) or
     graph_flavor(extension) != null or property_format(extension) != null or is_table_document(extension)
 
@@ -308,6 +311,11 @@ fn selected_docx(file) map^ {
   let document = if (type(source) != element) file["file_path"]
     else if (source.entry_path == "") source else input(source, 'zip')^;
   docx.convert(document,{include_empty_paragraphs:true,presentation:"source"})^
+}
+
+pn selected_epub(file) map^ {
+  let snapshot = input(file["source"], 'zip')^;
+  return ebook.parse(snapshot)^
 }
 
 fn xml_has_stylesheet(parsed) {
@@ -885,7 +893,7 @@ view <document_pane> state preview_mode: "view", property_filter: "", property_o
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "CSV and TSV open as resizable tables. JSON, YAML, TOML, INI, ICS, and VCF open as property trees. XML opens as a node tree or with its declared stylesheet. Email shows its headers and body. Word DOCX, Markdown, HTML, RTF, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
+        <p class:"empty-preview-note", "CSV and TSV open as resizable tables. JSON, YAML, TOML, INI, ICS, and VCF open as property trees. XML opens as a node tree or with its declared stylesheet. Email shows its headers and body. EPUB books, Word DOCX, Markdown, HTML, RTF, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
@@ -919,6 +927,10 @@ view <document_pane> state preview_mode: "view", property_filter: "", property_o
         } else if (is_docx_document(~.file["extension"])) {
           <section id:"docx-preview", class:"rendered-preview docx-preview",
             apply(docx_view.preview(~.docx_data))>
+        } else if (is_epub_document(~.file["extension"])) {
+          <section id:"epub-preview", class:"epub-preview",
+            if (~.file.ebook.error != null) <p class:"preview-error", ~.file.ebook.error>
+            else ebook_reader.reader(~.file.ebook)^>
         } else if (is_pdf_document(~.file["extension"])) {
           let preview = selected_preview(~.file);
           <section id:"pdf-preview", class:"rendered-preview pdf-preview",
@@ -944,6 +956,8 @@ view <document_pane> state preview_mode: "view", property_filter: "", property_o
         // ZIP bytes are not document source; expose the converter's escaped HTML instead.
         let source = if (is_docx_document(~.file["extension"])) {
           if (~.docx_data.error != null) ~.docx_data.error else ~.docx_data.html
+        } else if (is_epub_document(~.file["extension"])) {
+          if (~.file.ebook.error != null) ~.file.ebook.error else parse(~.file.ebook.resources[~.file.ebook.package], 'text')^
         } else selected_source(~.file);
         <section class:"source-tab-panel"
         , <pre id:"source-preview", class:"source-preview", source>
@@ -1131,8 +1145,18 @@ on document_select(entry) {
   let format = property_format(entry["extension"])
   // Retain the parsed tree while the user edits the filter or expands nodes.
   let parsed = if (format == null) null else input(entry["source"], format) ^ { null }
+  // Procedure handlers assign the captured publication in their success arm.
+  var publication = null
+  if (is_epub_document(entry["extension"])) {
+    selected_epub(entry) ^ {
+      publication = {error:^.message}
+    } ~ {
+      publication = ~
+    }
+  }
   let file = {file_path: entry["file_path"], source:entry["source"], name: entry["name"],
     extension: entry["extension"], text_width_px: entry["text_width_px"],
+    ebook:publication,
     xml_rendered: (if (format == "xml" and type(entry.source) != element)
       xml_has_stylesheet(parsed) or xml_is_docbook(parsed) else false)}
   let properties = if (format == "properties") properties_tree(parsed) else parsed
@@ -1194,6 +1218,7 @@ fn viewer_document(tree_model) {
     <style pdf_html.DEFAULT_CSS>
     <style latex_css.STYLESHEET>
     <style docx_css.STYLESHEET>
+    <style (ebook_reader.stylesheet ++ ".epub-preview .ebook-reader{height:calc(100vh - 180px);min-height:400px}")>
     <style ("@font-face { font-family: 'Seti Icons'; src: url('" ++ ICON_FONT ++ "') format('woff'); }")>
     <style "
       * { box-sizing: border-box; }

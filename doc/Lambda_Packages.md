@@ -32,6 +32,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 16. [docbook — DocBook to HTML/CSS](#16-docbook--docbook-to-htmlcss)
 17. [doc.wiki — Wiki writers](#17-docwiki--wiki-writers)
 18. [doc.misc — Source format writers](#18-docmisc--source-format-writers)
+19. [doc.ebook — EPUB reader](#19-docebook--epub-reader)
 
 ---
 
@@ -41,6 +42,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 |---------|-------------|--------|--------------|-----------------|
 | `doc.wiki` | `lambda.doc.wiki` | Initial static profiles | Wiki-family writers, shared tasks, and loss reports | `lambda convert -t wiki:<flavor>` |
 | `doc.misc` | `lambda.doc.misc` | Initial source profiles | AsciiDoc, man, Typst, EML, vCard, and iCalendar writers | `lambda convert -t asciidoc` / `man` / `typst` / `eml` / `vcf` / `ics` |
+| `doc.ebook` | `lambda.doc.ebook` | Initial horizontal LTR EPUB profile | EPUB 2/3 publications, chapters, navigation, search and an interactive reader | `lambda view book.epub`; also `layout`, `render`, and file-browser preview |
 | `ui.dtna` | `lambda.ui.dtna` | Experimental, partial native catalog | Ant-inspired components, collections, scoped tokens and native interaction; see [Lambda UI](Lambda_UI.md) | `lambda view test/ui/dtna_gallery.ls` |
 | `ui.bold` | `lambda.ui.bold` | Experimental, initial native subset | Neobrutalist components with thick borders, hard shadows, scoped tokens and shared native controls; see [bold UI](Lambda_UI_Bold.md) | `lambda view test/ui/bold_gallery.ls` |
 | `ui.wired` | `lambda.ui.wired` | Experimental, initial native subset | Hand-drawn SVG pencil outlines, paper surfaces, hatched progress, scoped tokens and native controls; see [wired UI](Lambda_UI_Wired.md) | `lambda view test/ui/wired_gallery.ls` |
@@ -1799,3 +1801,67 @@ repeated values. EML retains ordered `header_entries` and authoritative
 shapes, MIME authoring, limits, and verification results. EML/VCF/ICS round
 trips pass; structural readback tests expose gaps in the three prose readers.
 Native tool conformance remains unverified.
+
+## 19. doc.ebook — EPUB reader
+
+`lambda.doc.ebook` loads EPUB 2/3 publications and displays their XHTML/SVG
+chapters in Radiant. Publication parsing and chapter projection are pure;
+`read` captures a local file procedurally (S12.1.1v3, S12.1.3, D7.1.2v2).
+ZIP members retain their captured source and decode lazily
+(S12.4.1v2, S14.3.1v2). No ebook decoder dependency is required.
+
+```lambda
+import ebook: lambda.doc.ebook
+let book = ebook.parse(input("book.epub", "zip")^)^
+let first = ebook.chapter(book, 0)^;
+{title:book.metadata.titles, chapters:len(book.reading_order), text:first.text}
+```
+
+| Export | Result |
+|---|---|
+| `parse(snapshot, options = null)` | Publication map from immutable ZIP bytes or a captured ZIP root |
+| `read(path, options = null)` | Procedural local-file acquisition and publication parsing |
+| `chapter(book, target, options = null)` | Sanitized HTML/document, source text/map, diagnostics and fixed-layout viewport; target is a spine index or canonical href |
+| `locator(book, chapter, offset)` | Versioned source locator; offsets count Unicode scalars |
+| `locate(book, locator)` | Validated locator for the same captured publication and source passage |
+| `search(book, query, options = null)` | Exact, case-sensitive whole-book matches with snippets and locators; `limit` defaults to 100, maximum 1,000 |
+| `reader(book, options = null)` | Interactive reader element for embedding; persistence is off by default |
+
+When embedding `reader`, include `lambda.doc.ebook.reader.stylesheet` in the
+host document's style element. Native viewing and browser preview include it
+automatically.
+
+Load options are `rendition` (zero-based OCF package index) and
+`unsupported:"error"`. Unknown options are rejected; chapter options are currently reserved. The publication
+includes metadata/cover, manifest, occurrence-preserving reading order,
+contents/landmarks/publisher page links, resources, protection diagnostics,
+and a SHA-256 snapshot identity. Chapters resolve packaged CSS imports,
+images, SVG and unprotected fonts without extraction. Active content and
+external resources are excluded.
+
+Open a book with `lambda view book.epub`. The reader provides chapter/page
+controls, internal links, history, contents, bookmarks, search, font size and
+family, line spacing, margins, publisher-style selection and three themes.
+Reflowable chapters support scrolling and generated column pages. Fixed-layout
+XHTML/SVG pages retain a required source viewport and support fit/zoom.
+Selecting EPUB in the file browser opens the same reader; its Source tab shows
+the OPF package. `layout` and `render` project the initial reader viewport,
+rather than exporting an entire book.
+
+Standalone viewing saves preferences, bookmarks and the last source location
+atomically under `LAMBDA_EBOOK_STATE_DIR`, or the host's XDG/LOCALAPPDATA state
+directory (HOME fallback). State is keyed by snapshot fingerprint, so moving
+an unchanged book preserves its position. Saved passages are validated before
+resume. The embedded browser preview does not save state.
+
+This is an initial horizontal LTR profile. Continuous scrolling between
+chapters, two-page spreads, RTL/vertical pagination, CFI interchange, obfuscated
+fonts, scripted content, media overlays and DRM decoding remain unsupported.
+Protected required spine content raises a package error; protected optional
+resources use a diagnostic and fallback. EPUB package errors occupy
+7800–7809; underlying ZIP/XML errors retain their codes (S7.4.2, S7.4.4).
+MOBI and Kindle AZW/AZW3 are outside this package's scope.
+
+See the [proposal](../vibe/Lambda_Pkg_EPUB.md),
+[implementation and verification record](../vibe/impl/Lambda_Impl_EPUB.md), and
+[authored fixture inventory](../test/input/ebook/README.md).

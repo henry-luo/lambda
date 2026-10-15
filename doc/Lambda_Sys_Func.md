@@ -1238,18 +1238,28 @@ let auto_data = input(/.'document.md')^  // Automatically detects Markdown
 
 #### parse(str) / parse(str, format)
 
-Parse a string into Lambda data structures. Like `input()` but operates on string content instead of file paths/URLs.
+Parse captured content into Lambda data structures. Strings and immutable
+binary values are accepted by format parsers. Captured ZIP members can also be
+parsed directly; this decodes only retained bytes and performs no live file or
+network acquisition (S12.1.1v3, S12.4.1v2, S14.3.1v2).
 
 | Function | Description | Example |
 |----------|-------------|--------|
 | `parse(str)` | Parse string (auto-detect format) | `parse("{\"x\": 1}")` |
 | `parse(str, format)` | Parse string with specified format | `parse(str, 'json')` |
+| `parse(bytes, format)` | Parse immutable binary bytes | `parse(bytes, 'zip')` |
+| `parse(member, format)` | Parse a captured ZIP member | `parse(member, 'xml')` |
 | `parse(str, g)` | Parse with grammar `g` from its first rule | `parse("1 + 2", calc)` |
 | `parse(str, g, 'rule')` | Parse with grammar `g` from the named rule | `parse("(1)", calc, 'primary')` |
 | `parse(str, g.rule)` | Parse from a rule given as a type | `parse("42", calc.number)` |
 | `parse(str, g, options)` | Options map: `rule` (a symbol) and `spans` (bool: `start`/`end` byte offsets on every element) | `parse(s, calc, {rule: 'expr', spans: true})` |
 
 **Supported Formats**: Same as `input()` — `json`, `xml`, `html`, `xhtml`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `css`, `ini`, `math`, `obj`, `mtl`, `gltf`, `a3d`
+
+`parse(css, {type:"css", flavor:"tokens"})^` returns an ordered array of
+`{kind, raw, value}` CSS tokens. Values decode CSS escapes; raw slices retain
+authored spelling. Malformed strings/URLs and the 4 MiB / 262,144-token limits
+raise parse errors. This projection supports publication resource rewriting.
 
 `parse(text, 'xhtml')^` selects strict XML syntax and returns an HTML-compatible
 `<#document>` tree (**D2.10.1**). The root must be XHTML `html`; namespace

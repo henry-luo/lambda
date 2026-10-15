@@ -7201,6 +7201,15 @@
     ],
     "script_tests": [
       {
+        "runner_name": "test_epub_reader_state",
+        "name": "EPUB Reader Persistence",
+        "suite": "radiant",
+        "category": "baseline",
+        "script": "test/run_epub_reader.js",
+        "args": [],
+        "parallel": true
+      },
+      {
         "runner_name": "test_script_format_roundtrip",
         "name": "Lambda Script Format Round Trips",
         "suite": "input",

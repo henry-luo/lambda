@@ -66,6 +66,7 @@ void input_release_auxiliary_resources(Input* input);
 
 // shared document admission policy for XML-serialized HTML paths (query/fragment safe).
 bool input_path_is_xhtml(const char* path);
+bool input_path_is_ebook(const char* path);
 
 // Release an Input's owned allocators (its context, arena and registries).
 // Idempotent. The pool the Input lives in calls it when the pool is destroyed

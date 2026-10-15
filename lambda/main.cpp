@@ -4113,6 +4113,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("\nSupported Formats:\n");
             printf("  .pdf       Portable Document Format\n");
             fputs("  .docx      Word document (semantic content)\n", stdout);
+            fputs("  .epub      EPUB 2/3 eBook reader\n", stdout); // PRINTF_OK: CLI help.
             printf("  .html      HyperText Markup Language\n");
             printf("  .htm       HyperText Markup Language (alternative extension)\n");
             printf("  .md        Markdown (with GitHub-like styling)\n");
@@ -4298,8 +4299,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
         // A document format takes precedence over its ZIP storage; --archive exposes the parts.
         bool is_docx_file = ext && str_ieq_cstr(ext, ".docx");
+        bool is_ebook_file = input_path_is_ebook(filename);
         bool browse_tree = file_is_dir(filename) || launch.browse_archive ||
-            (!is_docx_file && lambda_view_path_is_archive(filename));
+            (!is_docx_file && !is_ebook_file && lambda_view_path_is_archive(filename));
         if (browse_tree) {
             static const LambdaDocumentTransformConfig browser_transform = {
                 "browse", "lambda.doc.doc_viewer", "open_browser",
@@ -4325,7 +4327,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
             lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);
-        } else if (is_docx_file || is_graph_file || eps_source_expected(filename, nullptr, 0) || (ext && (strcmp(ext, ".pdf") == 0 ||
+        } else if (is_docx_file || is_ebook_file || is_graph_file || eps_source_expected(filename, nullptr, 0) || (ext && (strcmp(ext, ".pdf") == 0 ||
                     strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 || input_path_is_xhtml(filename) ||
                     strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
@@ -4347,7 +4349,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                                                        state_dump, nullptr, launch.fullscreen);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
-            printf("Supported formats: .docx, .pdf, .html, .xhtml, .xht, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
+            printf("Supported formats: .epub, .docx, .pdf, .html, .xhtml, .xht, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
             if (temp_file_path) {
                 if (temp_file_path_is_local) file_delete(temp_file_path);
                 mem_free(temp_file_path);

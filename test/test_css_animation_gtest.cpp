@@ -94,6 +94,22 @@ static DomDocument* cssom_create_owned_document(unsigned* destroyed) {
     return document;
 }
 
+TEST(DomDocumentOwnership, HeaplessSupportContextCanResetBeforeTeardown) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    EvalContext* owner = runtime_get_eval_context(&runtime);
+    bool bound = owner && eval_context_init(owner) && js_runtime_state_init(owner);
+    EXPECT_TRUE(bound);
+    if (bound) {
+        EXPECT_EQ(owner->heap, nullptr);
+        // A DOM policy support capsule is valid before any JS heap values exist.
+        js_batch_reset();
+        EXPECT_EQ(owner->heap, nullptr);
+        EXPECT_EQ(root_vector_count(&js_runtime_state.realm_slots.values), 0);
+    }
+    runtime_cleanup(&runtime);
+}
+
 TEST(DomDocumentOwnership, LambdaOnlyEvaluatorClosesDocumentsAtResetAndTeardown) {
     unsigned destroyed = 0;
     Runtime runtime = {};

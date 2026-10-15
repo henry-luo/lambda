@@ -1487,7 +1487,9 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
 extern "C" void js_batch_reset() {
     // A host can finish a document after its context-owned JS state was
     // released.  Do not manufacture a replacement capsule just to reset it.
-    if (!js_active_runtime_state) return;
+    // DOM policy can bind JS support before its evaluator owns a heap. There
+    // are no heap caches to reset then, and precise root slots need a heap (D5.3.3).
+    if (!js_active_runtime_state || !context || !context->heap || !context->heap->gc) return;
     // increment epoch to invalidate cached heap objects
     js_heap_epoch++;
     // A full heap reset invalidates every retained harness/test relationship.

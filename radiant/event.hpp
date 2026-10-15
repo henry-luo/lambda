@@ -58,6 +58,7 @@ bool radiant_execute_location_navigation(UiContext* uicon, DomDocument* source,
 bool radiant_schedule_async_iframe_load(UiContext* uicon, DomElement* iframe,
                                         const char* url, int viewport_width,
                                         int viewport_height);
+void clear_document_interaction_state_before_detach(DomDocument* doc);
 void radiant_cancel_async_document_loads(DomDocument* doc);
 bool radiant_commit_async_document_loads(UiContext* uicon);
 bool radiant_async_document_loads_pending(UiContext* uicon);
