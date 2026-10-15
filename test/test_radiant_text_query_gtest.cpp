@@ -3079,6 +3079,17 @@ TEST_F(RadiantTextLayout, ExplicitSnapshotReadinessSettlesLongFrameChains) {
     expect_snapshot_capture("test/html/layout_snapshot_ready.html", 22.0f);
 }
 
+TEST_F(RadiantTextLayout, PositionedTableDescendantsSkipStaticTableOffsetParents) {
+    DomElement* result = load("test/html/layout_offset_parent_table.html", true);
+    ASSERT_NE(result, nullptr);
+    EXPECT_STREQ(result->get_attribute("data-sticky"), "host");
+    EXPECT_STREQ(result->get_attribute("data-relative"), "host");
+    EXPECT_STREQ(result->get_attribute("data-absolute"), "host");
+    EXPECT_STREQ(result->get_attribute("data-static"), "table");
+    EXPECT_STREQ(result->get_attribute("data-static-child"), "sticky");
+    EXPECT_STREQ(result->get_attribute("data-left"), "100");
+}
+
 TEST_F(RadiantTextLayout, RelativeInlineOffsetsSurviveFinalLineAlignmentAndReflow) {
     ASSERT_NE(load("test/html/layout_relative_inline_break.html"), nullptr);
     layout_html_doc(&ui, document, false);

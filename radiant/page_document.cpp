@@ -66,6 +66,8 @@ DomElement* radiant_page_style_parent(DomElement* source) {
     // structural wrappers may own layout boxes without becoming a new computed inheritance context.
     // the document root remains the initial font and inheritance anchor.
     while (parent && parent->parent_element()) {
+        // anonymous table wrappers have no authored style or registered source identity.
+        if (parent->is_synthetic()) { parent = parent->parent_element(); continue; }
         const char* transparent = dom_element_attribute_ns(parent, RADIANT_PAGE_NAMESPACE, "style-transparent");
         if (!transparent || strcmp(transparent, "true")) break;
         parent = parent->parent_element();

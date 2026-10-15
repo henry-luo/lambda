@@ -3956,6 +3956,14 @@ static TypesetStatus paged_publish_children(PagedFlowState* state, ViewElement* 
         // a display:none subtree or a running element binds its assignments where the walk passes it
         if (!child->view_type && node->is_element()) paged_publish_mark(state, node, true);
         if (!child->view_type || child == state->publish_skip) continue;
+        // inline/replaced and table-internal sources bypass the block admission hook.
+        // validate them after layout has settled its DOM epoch, before publishing an edition.
+        if (node->is_element() && !node->as_element()->is_synthetic()) {
+            const ViewCssStyle* style = view_css_resolve(state->tree, node->as_element());
+            if (!style) return TYPESET_OUT_OF_MEMORY;
+            TypesetStatus admitted = paged_style_traits_admit(state->composition, style);
+            if (admitted != TYPESET_OK) return admitted;
+        }
         if (!state->publishing_fixed && child->is_block()) {
             ViewBlock* block = lam::view_require_block(child);
             if (block->position && block->positionp()->position == CSS_VALUE_FIXED &&
