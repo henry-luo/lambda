@@ -1126,6 +1126,11 @@ static Script* lambda_ast_template_clone_graph(Runtime* runtime,
         const Script* cached, LambdaAstCloneGraph* graph) {
     Script* existing = lambda_ast_clone_graph_find(graph, cached);
     if (existing) return existing;
+    // A cached diamond dependency already has a slab in this runtime. A
+    // second shell would rebind its logical unit to an uninitialized slab
+    // while promoted functions still execute through the first import.
+    existing = runtime_script_instance(runtime, cached);
+    if (existing && !existing->is_retired) return existing;
     Script* instance = lambda_script_template_clone(runtime, cached, NULL);
     if (!instance || !arraylist_append(graph->templates, (void*)cached) ||
             !arraylist_append(graph->instances, instance)) {
