@@ -5,18 +5,20 @@
 //
 // A parse first builds scratch nodes in an arena that dies with the parse, so
 // a failed branch costs only arena bytes; the successful tree is then
-// converted to Lambda elements in the caller's Input (GM4, D4.2.6).
+// converted to Input-owned or GC-owned elements (GM4/GM14, D4.2.6/D5.3.3).
 
 #include "grammar.hpp"
 #include "../parser/lambda_rd_parser.h"
 #include "../re2_wrapper.hpp"
 #include "../lambda-stack.h"
+#include "../transpiler.hpp"
 #include "../../io/mark_builder.hpp"
 #include "../../../lib/arena.h"
 #include "../../../lib/arraylist.h"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/strbuf.h"
 #include "../../../lib/str.h"
+#include "../../../lib/escape.h"
 #include "../../../lib/log.h"
 
 #include <string.h>
@@ -78,6 +80,8 @@ struct ParseState {
     ArrayList* stack;           // PNode* under construction
     struct hashmap* memo;
     bool spans;                 // GM11: elements carry start/end offsets
+    bool bytes;
+    void** byte_matchers;
 };
 
 // the Lambda lexer's identifier bytes decide what a "word" is
@@ -180,12 +184,25 @@ void note_failure(ParseState* S, String* text, bool quote) {
     }
 }
 
+bool match_pattern(ParseState* S, uint32_t index, size_t pos, size_t* end) {
+    TypePattern* pattern = S->g->rules[index]->pattern;
+    if (!S->bytes) return pattern_match_prefix_at(pattern, S->src, S->len, pos, end);
+    if (!S->byte_matchers[index]) {
+        S->byte_matchers[index] = pattern_byte_matcher_create(S->g->rules[index]->pattern_body);
+        if (!S->byte_matchers[index]) {
+            S->abort_reason = "token cannot be compiled for byte input";
+            S->abort_pos = pos;
+            return false;
+        }
+    }
+    return pattern_byte_matcher_match(S->byte_matchers[index], S->src, S->len, pos, end);
+}
+
 void skip_space(ParseState* S) {
     if (S->nospace || S->g->space_rule == GRAMMAR_NO_RULE) return;
-    TypePattern* space = S->g->rules[S->g->space_rule]->pattern;
     for (;;) {
         size_t end = S->pos;
-        if (!pattern_match_prefix_at(space, S->src, S->len, S->pos, &end) || end == S->pos) return;
+        if (!match_pattern(S, S->g->space_rule, S->pos, &end) || end == S->pos) return;
         S->pos = end;
     }
 }
@@ -220,7 +237,7 @@ bool match_token(ParseState* S, uint32_t index, bool emit, bool immediate) {
     if (!rule->is_space && !immediate) skip_space(S);
     size_t end = S->pos;
     // a keyword token (`for := 'for'`) matches whole words, as a literal does
-    if (rule->pattern && pattern_match_prefix_at(rule->pattern, S->src, S->len, S->pos, &end) &&
+    if (rule->pattern && match_pattern(S, index, S->pos, &end) &&
             !(rule->word_boundary && end < S->len && word_char(S->src[end]))) {
         if (emit) push(S, new_text(S, S->pos, end, index));
         S->pos = end;
@@ -509,11 +526,11 @@ bool run(ParseState* S, uint32_t entry) {
     return ok;
 }
 
-void append_location(StrBuf* out, const char* src, size_t pos) {
+void append_location(StrBuf* out, const char* src, size_t pos, bool bytes) {
     uint32_t line = 1, column = 1;
     for (size_t i = 0; i < pos; i++) {
         if (src[i] == '\n') { line++; column = 1; }
-        else if (((unsigned char)src[i] & 0xC0) != 0x80) column++;
+        else if (bytes || ((unsigned char)src[i] & 0xC0) != 0x80) column++;
     }
     strbuf_append_format(out, "%u:%u", line, column);
 }
@@ -529,9 +546,8 @@ void append_found(StrBuf* out, ParseState* S) {
         if (c == '\n' || c == '\r' || ((c == ' ' || c == '\t') && n > 0)) break;
         n++;
     }
-    strbuf_append_str(out, ", found \"");
-    strbuf_append_str_n(out, S->src + S->furthest, n);
-    strbuf_append_char(out, '"');
+    strbuf_append_str(out, ", found ");
+    escape_append_json_string(out, S->src + S->furthest, n, true, false);
 }
 
 // `grammar 'calc': expected ")" or "+" at 1:7, found "]"` (GM12)
@@ -541,7 +557,7 @@ char* failure_message(ParseState* S, Pool* pool) {
     if (S->abort_reason) {
         strbuf_append_str(out, S->abort_reason);
         strbuf_append_str(out, " at ");
-        append_location(out, S->src, S->abort_pos);
+        append_location(out, S->src, S->abort_pos, S->bytes);
     } else {
         uint32_t total = S->expected_count + (S->expect_end ? 1 : 0);
         if (total) {
@@ -550,15 +566,15 @@ char* failure_message(ParseState* S, Pool* pool) {
                 if (i) strbuf_append_str(out, i + 1 == total ? " or " : ", ");
                 if (i == S->expected_count) { strbuf_append_str(out, "end of input"); continue; }
                 Expected* e = &S->expected[i];
-                if (e->quote) strbuf_append_char(out, '"');
-                strbuf_append_str_n(out, e->text->chars, e->text->len);
-                if (e->quote) strbuf_append_char(out, '"');
+                // byte grammars can expect NUL; diagnostics must remain C-string safe.
+                if (e->quote) escape_append_json_string(out, e->text->chars, e->text->len, true, false);
+                else escape_append(out, e->text->chars, e->text->len, NULL, 0, ESCAPE_CTRL_JSON_UNICODE);
             }
         } else {
             strbuf_append_str(out, "no match");
         }
         strbuf_append_str(out, " at ");
-        append_location(out, S->src, S->furthest);
+        append_location(out, S->src, S->furthest, S->bytes);
         append_found(out, S);
     }
     char* message = (char*)pool_calloc(pool, out->length + 1);
@@ -569,7 +585,13 @@ char* failure_message(ParseState* S, Pool* pool) {
 
 // Scratch tree → Lambda elements, post-order with an explicit stack: a long
 // left-associative chain grows a deep tree without deep parse recursion.
-Item convert(ParseState* S, MarkBuilder& builder, PNode* root) {
+Item convert(ParseState* S, MarkBuilder& builder, PNode* root, bool heap_result) {
+    RootFrame roots(3);
+    Rooted<Array*> retained(roots, (Array*)NULL);
+    Rooted<Element*> heap_element(roots, (Element*)NULL);
+    Rooted<Array*> repeated_values(roots, (Array*)NULL);
+    // scratch nodes are not GC roots; retain every converted child until its parent owns it.
+    if (heap_result) retained.set(array_plain());
     ArrayList* work = arraylist_new(64);
     arraylist_append(work, root);
     while (work->length) {
@@ -580,9 +602,16 @@ Item convert(ParseState* S, MarkBuilder& builder, PNode* root) {
             GrammarRule* rule = node->rule == GRAMMAR_NO_RULE ? NULL : S->g->rules[node->rule];
             const char* text = S->src + node->start;
             size_t len = node->end - node->start;
-            node->item = rule && rule->pattern && rule->pattern->is_symbol
-                ? (Item){.item = y2it(builder.createSymbol(text, len))}
-                : builder.createStringItem(text, len);
+            bool symbol = rule && rule->pattern && rule->pattern->is_symbol;
+            node->item = heap_result && S->bytes && !symbol && len == 0 ? ItemNull
+                : heap_result && S->bytes && !symbol
+                ? (Item){.item = x2it(heap_binary_from_bytes(text, len))}
+                : heap_result
+                ? (symbol ? (Item){.item = y2it(heap_create_symbol(text, len))}
+                          : (Item){.item = s2it(heap_strcpy(text, len))})
+                : (symbol ? (Item){.item = y2it(builder.createSymbol(text, len))}
+                          : builder.createStringItem(text, len));
+            if (heap_result) array_push_verbatim(retained.get(), node->item);
             node->built = true;
             work->length--;
             continue;
@@ -596,9 +625,24 @@ Item convert(ParseState* S, MarkBuilder& builder, PNode* root) {
         }
         if (!ready) continue;
         ElementBuilder element = builder.element(S->g->rules[node->rule]->name->chars);
+        if (heap_result) {
+            TypeElmt* type = runtime_element_type(S->g->rules[node->rule]->name->chars,
+                S->g->rules[node->rule]->name->len);
+            heap_element.set((Element*)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT));
+            heap_element.get()->type_id = LMD_TYPE_ELEMENT;
+            heap_element.get()->type = type;
+        }
+        auto attribute = [&](String* key, Item value) {
+            if (heap_result) runtime_element_put(heap_element.get(), key, value);
+            else element.attr(key, value);
+        };
         for (uint32_t i = 0; i < node->count; i++) {
             PNode* child = node->children[i];
-            if (!child->label) { element.child(child->item); continue; }
+            if (!child->label) {
+                if (heap_result) list_push((List*)heap_element.get(), child->item);
+                else element.child(child->item);
+                continue;
+            }
             // children sharing a label become one attribute: a value, or an array
             bool first = true, repeated = false;
             for (uint32_t k = 0; k < node->count; k++) {
@@ -607,18 +651,24 @@ Item convert(ParseState* S, MarkBuilder& builder, PNode* root) {
                 repeated = true;
             }
             if (!first) continue;
-            if (!repeated) { element.attr(child->label, child->item); continue; }
+            if (!repeated) { attribute(child->label, child->item); continue; }
             ArrayBuilder values = builder.array();
+            if (heap_result) repeated_values.set(array_plain());
             for (uint32_t k = i; k < node->count; k++) {
-                if (node->children[k]->label == child->label) values.append(node->children[k]->item);
+                if (node->children[k]->label != child->label) continue;
+                if (heap_result) array_push_verbatim(repeated_values.get(), node->children[k]->item);
+                else values.append(node->children[k]->item);
             }
-            element.attr(child->label, values.final());
+            attribute(child->label, heap_result ? (Item){.array = repeated_values.get()} : values.final());
         }
         if (S->spans) {
-            element.attr("start", (int64_t)node->start);
-            element.attr("end", (int64_t)node->end);
+            attribute(heap_result ? heap_create_name("start") : builder.createName("start"),
+                (Item){.item = i2it(node->start)});
+            attribute(heap_result ? heap_create_name("end") : builder.createName("end"),
+                (Item){.item = i2it(node->end)});
         }
-        node->item = element.final();
+        node->item = heap_result ? (Item){.element = heap_element.get()} : element.final();
+        if (heap_result) array_push_verbatim(retained.get(), node->item);
         node->built = true;
         work->length--;
     }
@@ -636,6 +686,10 @@ void state_init(ParseState* S, TypeGrammar* grammar, const char* src, size_t len
 }
 
 void state_release(ParseState* S) {
+    if (S->byte_matchers) {
+        for (uint32_t i = 0; i < S->g->rule_count; i++)
+            pattern_byte_matcher_free(S->byte_matchers[i]);
+    }
     if (S->memo) hashmap_free(S->memo);
     arraylist_free(S->stack);
     arena_destroy(S->arena);
@@ -644,15 +698,25 @@ void state_release(ParseState* S) {
 }  // namespace
 
 bool grammar_parse(TypeGrammar* grammar, uint32_t entry, Input* input,
-        const char* src, size_t len, bool spans) {
+        const char* src, size_t len, bool spans, bool heap_result, bool bytes) {
     if (!grammar || !input || entry >= grammar->rule_count) return false;
+    if (len > UINT32_MAX) {
+        input->parse_failed = true;
+        const char* message = "grammar input exceeds the 32-bit span limit";
+        input->parse_error_message = (char*)pool_alloc(input->pool, strlen(message) + 1);
+        if (input->parse_error_message) strcpy(input->parse_error_message, message);
+        return false;
+    }
     ParseState S;
     state_init(&S, grammar, src, len);
     S.spans = spans;
+    S.bytes = bytes;
+    if (bytes) S.byte_matchers = (void**)arena_calloc(S.arena,
+        sizeof(void*) * grammar->rule_count);
     bool ok = run(&S, entry);
     if (ok) {
         MarkBuilder builder(input);
-        input->root = convert(&S, builder, (PNode*)S.stack->data[S.stack->length - 1]);
+        input->root = convert(&S, builder, (PNode*)S.stack->data[S.stack->length - 1], heap_result);
     } else {
         input->parse_failed = true;
         input->parse_error_message = failure_message(&S, input->pool);

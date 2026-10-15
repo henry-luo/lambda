@@ -100,6 +100,11 @@ re2::RE2* pattern_get_unanchored(TypePattern* pattern);
 // anchored source "^<regex>$" without its anchors. False when the pattern has
 // no usable source. (io.grep hands this text to lib/grep, GRP26.)
 bool pattern_unanchored_source(TypePattern* pattern, const char** out, size_t* out_len);
+// grammar binary input matches byte characters; the caller owns this cached matcher.
+void* pattern_byte_matcher_create(AstNode* pattern);
+bool pattern_byte_matcher_match(void* matcher, const char* text, size_t len,
+    size_t pos, size_t* end);
+void pattern_byte_matcher_free(void* matcher);
 
 // A pattern operand of find/replace/split/io.grep: a compiled pattern, or a
 // literal type a pattern is compiled from (defined in lambda-eval.cpp).

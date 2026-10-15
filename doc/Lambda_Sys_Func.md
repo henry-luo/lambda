@@ -127,7 +127,9 @@ len(b'\x00FF00')   // 3 (byte count)
 ```
 
 `binary(x)` preserves a binary input, encodes string and symbol inputs as UTF-8,
-and encodes numeric inputs from their decimal text. A LambdaJS `Uint8Array`,
+and encodes numeric inputs from their decimal text. An array of integers in
+`[0,255]` becomes those exact bytes; invalid items raise a type error and an empty
+array produces `null` (S2.2.2v2). A LambdaJS `Uint8Array`,
 `Uint8ClampedArray`, Node `Buffer`, or `DataView` is copied into an immutable
 binary. In the other direction, `new Uint8Array(binary_value)`,
 `Uint8Array.from(binary_value)`, and `Buffer.from(binary_value)` copy the bytes;
@@ -1329,6 +1331,13 @@ rule `word`. Bundled grammars live in the `grammar` package
 
 Design: `vibe/Lambda_Design_Grammar_Parser.md`.
 
+`parse(bytes, g[, rule_or_options])` also accepts binary input. Lexical patterns
+match over the byte alphabet; ordinary token values are binary, while symbol
+tokens retain their symbol domain. Spans remain byte offsets. An empty binary
+token is `null` (S2.2.2v2). Text input retains Unicode/string behavior. Grammar
+results are GC-owned and temporary parse storage is released after each call
+(GM14, D5.3.3); captured bytes need no text decoding before parsing.
+
 **Source positions** (`parse()` only): with `sourcepos: true` in the options
 map, each top-level block of a markup document (Markdown and the other
 lightweight markup formats) carries a `sourcepos` attribute naming the source
@@ -1427,6 +1436,7 @@ Functions that have side effects (I/O, state changes). These are only available 
 | `io.cell_width(codepoint)` | Terminal cell width from Unicode metadata; `null` for an invalid scalar | `io.cell_width(ord("界"))` |
 | `io.unicode_category(codepoint)` | Two-letter Unicode general category; `null` for an invalid scalar | `io.unicode_category(ord("界"))` |
 | `io.text_search(source, query, options?)` | Ranked full-text search over files | `io.text_search(/.doc, "memory -draft", {limit: 10})` |
+| `io.exec(program, args, options?)` | Cancellable process capture with an argument array | `io.exec("git", ["status", "--porcelain=v1", "-z"])` |
 | `cmd(command, args?)` | Execute a shell command; `args` is one array (or string) | `cmd("ls", ["-la"])` |
 | `clock()` | Monotonic clock in seconds | `clock()` |
 
@@ -1708,6 +1718,24 @@ Matching is **line-oriented**: a match never spans a line terminator, so a patte
 `io.grep` is a procedure: its result depends on the file system. It runs on `lib/grep`, a line-oriented search library on RE2 (`vibe/Lambda_Lib_Grep.md`).
 
 `io.grep` only searches. Like `grep` and ripgrep, it never changes a file and has no replace option (ripgrep's `--replace` changes only what ripgrep prints). To change text in a file, read it with `input()`, apply `replace()`, and write the result back with `output()`.
+
+##### io.exec(program, args, options?)
+
+Runs a local program without a shell and parks the calling task while capturing
+both streams (S12.1.1v3, S13.1.1v2). `program` and arguments are text or binary,
+with no embedded NUL. The result is `{stdout, stderr, exit_code, timed_out,
+cancelled, truncated}`. Streams are exact binary, including NUL and trailing
+newlines; empty streams are `null` (S2.2.2v2). A nonzero exit is a result, not a
+Lambda error. Invalid arguments/options raise errors.
+
+Options are `cwd` (local path or raw path bytes), `env` (map of string/byte values,
+with `null` removing a variable), `timeout_ms` (default 30000; zero disables the
+deadline), and positive `max_output_bytes` (default 16777216 per stream). The
+child receives closed/empty standard input. Output exceeding the capture bound
+is drained and marked `truncated`; it does not become a partial success silently.
+Timeout terminates the process group and returns `timed_out: true`. Task
+cancellation terminates it, waits for capture cleanup, then raises error 319,
+`task cancelled`. No worker thread receives managed Lambda values (D5.3.3).
 
 ##### io.text_search(source, query, options?)
 
@@ -2110,6 +2138,7 @@ channels continue to process pixel-array input. See the
 | `io.chmod` | 2 | Change permissions |
 | `io.rename` | 2 | Rename file/directory |
 | `io.read` | 1 | Asynchronously read a local file (proc) |
+| `io.exec` | 2-3 | Capture a local process with argument arrays (proc) |
 | `io.fetch` | 1-2 | HTTP request (`fetch` is the bare spelling) |
 | `cmd` | 1-2 | Shell command; arguments as one array |
 | `clock` | 0 | Monotonic clock (seconds) |

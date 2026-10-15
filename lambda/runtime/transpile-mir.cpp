@@ -10360,18 +10360,19 @@ static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident) {
         AstNode* entry_node = ident->entry->node;
         TypeId entry_tid = entry_node && entry_node->type
             ? entry_node->type->type_id : LMD_TYPE_ANY;
-        MIR_reg_t t0_import = load_interp_import_var(mt, ident->entry, entry_tid);
-        if (t0_import) {
-            return mir_value_from_reg(mt, (AstNode*)ident, t0_import,
-                lambda_canonical_rep_for_type_id(entry_tid),
-                entry_node ? entry_node->type : NULL, entry_tid);
-        }
         if (mir_is_type_definition_binding(entry_node) && entry_node->type) {
             // Named types are compile-time symbols, not module variables; emit
             // their type-list value so nested option maps can carry the contract.
             return mir_value_from_reg(mt, (AstNode*)ident,
                 mir_emit_declared_type_value(mt, entry_node->type),
                 VALUE_REP_RAW_NON_GC_POINTER, &TYPE_TYPE, LMD_TYPE_TYPE);
+        }
+        // imported type/grammar declarations have no T0 slab slot (D7.2.2); resolve them before value imports.
+        MIR_reg_t t0_import = load_interp_import_var(mt, ident->entry, entry_tid);
+        if (t0_import) {
+            return mir_value_from_reg(mt, (AstNode*)ident, t0_import,
+                lambda_canonical_rep_for_type_id(entry_tid),
+                entry_node ? entry_node->type : NULL, entry_tid);
         }
         // Imported pub variables
         if (entry_node && (entry_node->node_type == AST_NODE_VARIABLE_DECLARATOR ||
@@ -49126,6 +49127,7 @@ static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
     {"docx", "lambda.doc.docx.view", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
     // Reader controls and publication resources retain a runtime per document (S12.1.3).
     {"ebook", "lambda.doc.ebook.view", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false},
+    {"diff", "lambda.doc.diff.view", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false},
     {"docbook", "lambda.doc.docbook.view", "render_document_file", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true},
     {"tikz", "lambda.doc.tikz.tikz", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},
     {"graph", "lambda.graph.document", "to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED, true},

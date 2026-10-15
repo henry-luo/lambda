@@ -1,0 +1,13 @@
+{
+  "name":"Saved patch route uses the diff package and treats payload markup as text",
+  "html":"test/input/diff/review.patch",
+  "events":[
+    {"type":"assert_text","target":{"selector":".diff-title"},"equals":"Diff review"},
+    {"type":"assert_text","target":{"selector":".diff-file-header"},"contains":"example.txt"},
+    {"type":"assert_text","target":{"selector":".diff-surface"},"contains":"<script>alert(\"patch\")</script>"},
+    {"type":"assert_count","target":{"selector":"script"},"count":0},
+    {"type":"assert_text","target":{"selector":".diff-surface"},"contains":"No newline at end of file"},
+    {"type":"click","target":{"selector":"[data-diff-id='1']"}},
+    {"type":"assert_text","target":{"selector":".diff-file-header"},"contains":"old-name → new-name"}
+  ]
+}

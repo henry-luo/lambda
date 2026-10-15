@@ -6317,22 +6317,34 @@ static Item fn_parse_grammar(Item str_item, Type* type, Item rule_item) {
             return ItemError;
         }
     }
-    if (get_type_id(str_item) != LMD_TYPE_STRING) {
-        set_runtime_error(ERR_TYPE_MISMATCH, "parse: 1st argument must be a string, got type: %s",
+    bool byte_input = get_type_id(str_item) == LMD_TYPE_BINARY;
+    if (get_type_id(str_item) != LMD_TYPE_STRING && !byte_input) {
+        set_runtime_error(ERR_TYPE_MISMATCH, "parse: 1st argument must be a string or binary, got type: %s",
             get_type_name(get_type_id(str_item)));
         return ItemError;
     }
-    Url* dummy_url = url_parse("parse://grammar");
-    Input* input = dummy_url ? InputManager::create_input(dummy_url) : NULL;
+    RootFrame roots(2);
+    Rooted<Item> source(roots, str_item);
+    Rooted<Item> result(roots, ItemNull);
+    // grammar results are runtime values; a private parse region must not accumulate on refresh.
+    Pool* parse_pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "grammar.parse");
+    Input* input = parse_pool ? Input::create(parse_pool) : NULL;
     if (!input) {
+        if (parse_pool) mem_pool_destroy(parse_pool);
         set_runtime_error(ERR_OUT_OF_MEMORY, "parse: failed to allocate grammar parser input");
         return ItemError;
     }
-    if (!grammar_parse(grammar, entry, input, str_item.get_chars(), str_item.get_len(), spans)) {
+    Binary* binary = byte_input ? source.get().get_safe_binary() : NULL;
+    const char* chars = binary ? (const char*)binary_data(binary) : source.get().get_chars();
+    size_t length = binary ? binary_length(binary) : source.get().get_len();
+    if (!grammar_parse(grammar, entry, input, chars, length, spans, true, byte_input)) {
         set_input_parse_error("parse", input, NULL);
+        mem_pool_destroy(parse_pool);
         return ItemError;
     }
-    return input->root;
+    result.set(input->root);
+    mem_pool_destroy(parse_pool);
+    return result.get();
 }
 
 Item fn_parse3(Item str_item, Item grammar_item, Item rule_item) {
@@ -6485,6 +6497,17 @@ Item fn_parse2(Item str_item, Item type) {
     if (!str && !binary) {
         set_runtime_error(ERR_INVALID_STATE, "parse: string value is unavailable");
         return ItemError;
+    }
+    // plain text has no parser state or Input-owned objects to retain.
+    if (type_str && strcmp(type_str->chars, "text") == 0) {
+        RootFrame roots(1);
+        Rooted<Item> source(roots, str_item);
+        arraylist_free(adapter_names);
+        arraylist_free(raw_names);
+        arraylist_free(chaptered_names);
+        String* text = heap_strcpy(str ? str->chars : (const char*)binary_data(binary),
+            str ? str->len : binary_length(binary));
+        return text ? (Item){.item = s2it(text)} : ItemError;
     }
 
     // create a dummy URL for the parser infrastructure (no actual file)

@@ -39,6 +39,7 @@
 extern __thread EvalContext* context;
 
 extern "C" Item vmap_new(void);
+extern "C" void vmap_gc_destroy(void* object, void* data);
 extern const JubeTypeBinding radiant_dom_type_bindings[];
 extern const int32_t radiant_dom_type_binding_count;
 
@@ -1327,6 +1328,41 @@ TEST_F(LambdaConcurrencyRuntime, ParkedFramesAndMailboxesSurviveCollection) {
     ASSERT_TRUE(lambda_task_mailbox_receive(task, &message));
     EXPECT_EQ(message.vmap, message_value);
     EXPECT_TRUE(gc_is_managed(concurrency_test_gc, message.vmap));
+}
+
+static Item completed_managed_result(Activation*, Item) {
+    VMap* value = (VMap*)heap_calloc(sizeof(VMap), LMD_TYPE_VMAP);
+    if (!value) return ItemError;
+    value->type_id = LMD_TYPE_VMAP;
+    return (Item){.vmap = value};
+}
+
+static void* completed_result_expected;
+static bool completed_result_destroyed;
+static void observe_completed_result_destroy(void* object, void* data) {
+    if (object == completed_result_expected) completed_result_destroyed = true;
+    vmap_gc_destroy(object, data);
+}
+
+TEST_F(LambdaConcurrencyRuntime, CompletedResultFollowsHandleReachability) {
+    // this minimal fixture supplies the lifecycle callback normally installed by heap_init.
+    concurrency_test_gc->vmap_destroy = observe_completed_result_destroy;
+    completed_result_destroyed = false;
+    RootFrame roots(1);
+    Rooted<Item> handle(roots, ItemNull);
+    LambdaTask* task = lambda_task_create(scheduler, completed_managed_result, ItemNull);
+    ASSERT_NE(task, nullptr);
+    handle.set(lambda_task_handle(task));
+    ASSERT_EQ(lambda_scheduler_run_one(scheduler), 1);
+    VMap* result = lambda_task_result(task).vmap;
+    ASSERT_NE(result, nullptr);
+    completed_result_expected = result;
+    gc_collect(concurrency_test_gc, eval.side_root_base, eval.side_root_top - eval.side_root_base);
+    EXPECT_FALSE(completed_result_destroyed);
+    handle.set(ItemNull);
+    gc_collect(concurrency_test_gc, eval.side_root_base, eval.side_root_top - eval.side_root_base);
+    EXPECT_TRUE(completed_result_destroyed);
+    EXPECT_EQ(get_type_id(lambda_task_result(task)), LMD_TYPE_NULL);
 }
 
 // ---------------------------------------------------------------------------

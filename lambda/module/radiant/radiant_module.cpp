@@ -3028,6 +3028,15 @@ RADIANT_C_API Item fn_radiant_clipboard_text() {
     return radiant_string_item(clip);
 }
 
+RADIANT_C_API Item fn_radiant_clipboard_write(Item text) {
+    if (get_type_id(text) != LMD_TYPE_STRING) return (Item){.item = b2it(0)};
+    // the platform clipboard consumes terminated text; reject embedded NUL instead of truncating.
+    String* value = text.get_string();
+    if (memchr(value->chars, 0, value->len)) return (Item){.item = b2it(0)};
+    clipboard_copy_text(value->chars);
+    return (Item){.item = b2it(1)};
+}
+
 // The package chooses whether a selection is copied, cut, or represented as
 // rich/plain text.  These capability-scoped helpers only serialize the live
 // DOM Selection and reach the platform clipboard mechanism (D7.2.5).
@@ -5400,6 +5409,7 @@ RADIANT_PROVIDE_ENGINE_3(caret_operation, fn_radiant_caret_operation)
 RADIANT_PROVIDE_ENGINE_2(pointer_selection, fn_radiant_pointer_selection)
 RADIANT_PROVIDE_ENGINE_1(clear_ime_preedit, fn_radiant_clear_ime_preedit)
 RADIANT_PROVIDE_ENGINE_0(clipboard_text, fn_radiant_clipboard_text)
+RADIANT_PROVIDE_ENGINE_1(clipboard_write, fn_radiant_clipboard_write)
 RADIANT_PROVIDE_ENGINE_2(edit_selection_text, fn_radiant_dom_edit_selection_text)
 RADIANT_PROVIDE_ENGINE_2(edit_selection_html, fn_radiant_dom_edit_selection_html)
 RADIANT_PROVIDE_ENGINE_4(edit_clipboard_write, fn_radiant_dom_edit_clipboard_write)

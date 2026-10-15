@@ -2200,7 +2200,7 @@ static int group_compare_entry(const void* a, const void* b, void* udata) {
 // tree, so elements with the same attributes share one type instead of each
 // minting its own. Without a tree it keeps a private type; its tag is a
 // literal, never a raw chars pointer into an otherwise unowned GC String.
-static TypeElmt* runtime_element_type(const char* tag, size_t length) {
+TypeElmt* runtime_element_type(const char* tag, size_t length) {
     if (TypeElmt* root = runtime_shape_tree_element_root(tag, length, NULL)) return root;
     TypeElmt* type = (TypeElmt*)alloc_type(active_runtime->pool, LMD_TYPE_ELEMENT,
         sizeof(TypeElmt));
@@ -2213,7 +2213,7 @@ static TypeElmt* runtime_element_type(const char* tag, size_t length) {
 // One attribute through fn_map_set's growth path, which follows the runtime
 // tree from a tree-owned type, updates a name the element already holds, and
 // stores a list as its array image (S2.5.6), as every attribute write does.
-static void runtime_element_put(Element* element, String* key, Item value) {
+void runtime_element_put(Element* element, String* key, Item value) {
     if (!element || !key) return;
     fn_map_set((Item){.element = element}, (Item){.item = s2it(key)}, value);
 }

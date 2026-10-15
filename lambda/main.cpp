@@ -4114,6 +4114,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  .pdf       Portable Document Format\n");
             fputs("  .docx      Word document (semantic content)\n", stdout);
             fputs("  .epub      EPUB 2/3 eBook reader\n", stdout); // PRINTF_OK: CLI help.
+            fputs("  .diff/.patch  Unified diff review\n", stdout); // PRINTF_OK: CLI help.
             printf("  .html      HyperText Markup Language\n");
             printf("  .htm       HyperText Markup Language (alternative extension)\n");
             printf("  .md        Markdown (with GitHub-like styling)\n");
@@ -4337,6 +4338,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
                     strcmp(ext, ".pgf") == 0 ||
                     strcmp(ext, ".ls") == 0 || strcmp(ext, ".slides") == 0 ||
+                    str_ieq_cstr(ext, ".diff") || str_ieq_cstr(ext, ".patch") ||
                     strcmp(ext, ".xml") == 0 || strcmp(ext, ".rst") == 0 ||
                     strcmp(ext, ".wiki") == 0 || strcmp(ext, ".svg") == 0 ||
                     strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 ||

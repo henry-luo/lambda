@@ -94,7 +94,7 @@ static void js_ambient_load(const void* storage) {
 }
 
 static const ActivationAmbientHook js_ambient_hook = {
-    sizeof(JsAmbient), js_ambient_init, js_ambient_save, js_ambient_load,
+    sizeof(JsAmbient), js_ambient_init, js_ambient_save, js_ambient_load, NULL,
 };
 [[maybe_unused]] static const bool js_ambient_registered =
     activation_register_ambient_hook(&js_ambient_hook);

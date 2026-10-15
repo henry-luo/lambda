@@ -43,6 +43,7 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `doc.wiki` | `lambda.doc.wiki` | Initial static profiles | Wiki-family writers, shared tasks, and loss reports | `lambda convert -t wiki:<flavor>` |
 | `doc.misc` | `lambda.doc.misc` | Initial source profiles | AsciiDoc, man, Typst, EML, vCard, and iCalendar writers | `lambda convert -t asciidoc` / `man` / `typst` / `eml` / `vcf` / `ics` |
 | `doc.ebook` | `lambda.doc.ebook` | Initial horizontal LTR EPUB profile | EPUB 2/3 publications, chapters, navigation, search and an interactive reader | `lambda view book.epub`; also `layout`, `render`, and file-browser preview |
+| `doc.diff` | `lambda.doc.diff` | Initial unified review profile | Grammar-based patch parsing, local Git comparisons, virtual review and complete static HTML | `lambda view change.patch`; also `.diff`, `layout` and `render` |
 | `ui.dtna` | `lambda.ui.dtna` | Experimental, partial native catalog | Ant-inspired components, collections, scoped tokens and native interaction; see [Lambda UI](Lambda_UI.md) | `lambda view test/ui/dtna_gallery.ls` |
 | `ui.bold` | `lambda.ui.bold` | Experimental, initial native subset | Neobrutalist components with thick borders, hard shadows, scoped tokens and shared native controls; see [bold UI](Lambda_UI_Bold.md) | `lambda view test/ui/bold_gallery.ls` |
 | `ui.wired` | `lambda.ui.wired` | Experimental, initial native subset | Hand-drawn SVG pencil outlines, paper surfaces, hatched progress, scoped tokens and native controls; see [wired UI](Lambda_UI_Wired.md) | `lambda view test/ui/wired_gallery.ls` |
@@ -1868,3 +1869,21 @@ MOBI and Kindle AZW/AZW3 are outside this package's scope.
 See the [proposal](../vibe/Lambda_Pkg_EPUB.md),
 [implementation and verification record](../vibe/impl/Lambda_Impl_EPUB.md), and
 [authored fixture inventory](../test/input/ebook/README.md).
+
+## 20. doc.diff — Git and patch review
+
+`lambda.doc.diff` parses Git two-way and conventional unified patches and
+reviews staged, unstaged, HEAD-to-worktree and two-revision comparisons. It
+offers a virtual changed-file list and unified surface, hunk navigation, search,
+selection/copy, lazy file loading and refresh. `to_html` exports every loaded
+file and row. Binary, mode, rename, symlink, submodule and conflict changes keep
+their own metadata and summaries. Repository access is procedural; parsing and
+presentation are pure (S12.1.1v3/S12.1.3, D7.2.4v3/D7.2.6).
+
+```lambda no-run
+import diff: lambda.doc.diff
+diff.repository(".", {mode: "unstaged"})^
+```
+
+Open that script with `lambda view review.ls`, or open `.patch`/`.diff` directly.
+See [Git and patch review](Lambda_Diff.md) for the API, options, model and limits.

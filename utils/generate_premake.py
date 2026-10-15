@@ -1376,6 +1376,10 @@ class PremakeGenerator:
                     if dependency not in seen_external:
                         ordered.append(dependency)
                         seen_external.add(dependency)
+                    # source-built external archives also own link requirements (e.g. archive codecs).
+                    provider = configured_targets.get(self.external_libraries[dependency].get('build_target'))
+                    if provider:
+                        visit(provider)
                     continue
                 child = configured_targets.get(dependency)
                 if child:

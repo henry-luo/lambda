@@ -514,7 +514,7 @@ DOM_OP(CORE, attach_shadow,       tree, 2, "pn(n: any, init: any) -> any", dom_c
 DOM_OP(CORE, compare_document_position, node, 2, "fn(a: any, b: any) -> int", dom_core_compare_document_position, 0, "", dom_node, "", "compareDocumentPosition")
 
 // no member: the engine boundary hit-test has no JS spelling on an element
-DOM_OP(CORE, boundary_from_point, geometry, 4, "fn(n: any, x: int, y: int, behavior: any) -> any", dom_core_boundary_from_point, 0, "", none, "", "")
+DOM_OP(CORE, boundary_from_point, geometry, 4, "fn(n: any, x: int, y: int, behavior: any) -> any", dom_core_boundary_from_point, DOM_F_NEUTRAL, "", none, "", "")
 
 DOM_OP(CORE, focus,  focus, 2, "pn(n: any, options: any) -> null", dom_core_focus, DOM_F_MUTATES, "", html_element, "", "")
 DOM_OP(CORE, blur,   focus, 1, "pn(n: any) -> null", dom_core_blur, DOM_F_MUTATES, "", html_element, "", "")
@@ -786,6 +786,9 @@ DOM_OP(CORE, window_fullscreen_enabled, window, 1, "fn(n: any) -> bool", dom_eng
 // Append geometry reads to preserve the existing host catalog offsets.
 DOM_OP(CORE, scroll_metrics,   geometry, 1, "fn(n: any) -> map",                            dom_core_scroll_metrics,   DOM_F_NEUTRAL, "", none, "", "")
 DOM_RAW(scrollable_extent, geometry, float, (void* element, bool width_axis), dom_scrollable_extent, DOM_F_NATIVE)
+
+// read-only virtual surfaces copy their model selection through this transport.
+DOM_OP(CORE, clipboard_write, input, 1, "pn(text: string) -> bool", dom_engine_clipboard_write, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP

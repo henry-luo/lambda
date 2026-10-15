@@ -182,14 +182,14 @@ def expect_image_source_build(module) -> None:
         generator.premake_content = []
         generator.generate_main_program()
         emitted = '\n'.join(generator.premake_content)
-        if 'dependson { "lambda-image-codecs" }' not in emitted:
+        if not re.search(r'dependson \{[^}]*"lambda-image-codecs"', emitted):
             fail('host can link the image archive before its source target builds')
         if 'build_temp/image-codecs' in emitted:
             fail('host still consumes the retired CMake codec prefix')
         generator.premake_content = []
         generator._generate_single_test('test_image_provider', 'test/test_image_io_gtest.cpp',
                                         ['lambda-data'], '', '', ['gtest', 'gtest_main'])
-        if 'dependson { "lambda-image-codecs" }' not in '\n'.join(generator.premake_content):
+        if not re.search(r'dependson \{[^}]*"lambda-image-codecs"', '\n'.join(generator.premake_content)):
             fail('image tests lost their transitive source-build dependency')
     generator = module.PremakeGenerator(str(ROOT / 'build_lambda_config.json'), 'windows',
                                         target_architecture='x86_64')
@@ -201,6 +201,10 @@ def expect_image_source_build(module) -> None:
 
 def main() -> int:
     module = load_generator_module()
+    generator = linux_validation_generator(module)
+    closure = generator._executable_external_dependencies({'libraries': ['archive-readers']})
+    if not {'archive-readers', 'archive-iconv', 'lzma', 'zstd', 'bzip2'}.issubset(closure):
+        fail('source-built archive consumers lost their codec/charset link requirements')
     expect_image_source_build(module)
     expect_node_core_provider(module, "macos")
     expect_node_core_provider(module, "linux")

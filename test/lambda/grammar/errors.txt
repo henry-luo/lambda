@@ -4,7 +4,7 @@ parse: grammar 'calc': expected number or "(" at 1:4, found end of input
 parse: grammar 'calc': expected number or "(" at 2:3, found "x"
 parse: grammar 'calc': expected number or "(" at 1:1, found end of input
 parse: grammar 'calc' has no rule 'nope'
-parse: 1st argument must be a string, got type: int
+parse: 1st argument must be a string or binary, got type: int
 parse: the rule is named by a symbol, after a grammar: parse(text, g, 'rule') or parse(text, g, {rule: 'rule'})
 parse: grammar 'calc': maximum grammar nesting exceeded at 1:501
 "

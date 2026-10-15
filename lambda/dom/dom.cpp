@@ -14223,31 +14223,34 @@ JS_FORWARD_STATIC_ITEM(dom_float_item, (float value), js_make_number, ((double)v
 
 static Item dom_make_plain_boundary_object(DomBoundary boundary) {
     if (!boundary.node) return ItemNull;
-    Item out = js_new_object();
-    dom_realm_set_cstr(out, "node", dom_wrap_element(boundary.node));
-    dom_realm_set_cstr(out, "offset", (Item){.item = i2it((int64_t)boundary.offset)});
-    return out;
+    RootFrame roots(1);
+    Rooted<Item> node(roots, dom_wrap_element(boundary.node));
+    static const char* const keys[] = { "node", "offset" };
+    Item values[] = { node.get(), (Item){.item = i2it((int64_t)boundary.offset)} };
+    return dom_result_map((DomDocument*)dom_document_from_item(node.get()), keys, values, 2);
 }
 
 static Item dom_make_boundary_object(DomBoundary boundary) {
-    Item out = dom_make_plain_boundary_object(boundary);
-    if (get_type_id(out) != LMD_TYPE_MAP) return out;
+    RootFrame roots(1);
+    Rooted<Item> out(roots, dom_make_plain_boundary_object(boundary));
+    // Lambda hit tests need plain boundaries; JS adds its click-selection hints.
+    if (get_type_id(out.get()) != LMD_TYPE_MAP || !dom_realm_active()) return out.get();
 
     DomBoundary all_start;
     DomBoundary all_end;
     if (dom_selection_user_select_all_range_for_node(boundary.node,
             &all_start, &all_end)) {
-        dom_realm_set_cstr(out, "selectAllStart", dom_make_plain_boundary_object(all_start));
-        dom_realm_set_cstr(out, "selectAllEnd", dom_make_plain_boundary_object(all_end));
+        dom_realm_set_cstr(out.get(), "selectAllStart", dom_make_plain_boundary_object(all_start));
+        dom_realm_set_cstr(out.get(), "selectAllEnd", dom_make_plain_boundary_object(all_end));
     }
     DomBoundary triple_start;
     DomBoundary triple_end;
     if (dom_selection_triple_click_range_for_node(boundary.node,
             &triple_start, &triple_end)) {
-        dom_realm_set_cstr(out, "tripleClickStart", dom_make_plain_boundary_object(triple_start));
-        dom_realm_set_cstr(out, "tripleClickEnd", dom_make_plain_boundary_object(triple_end));
+        dom_realm_set_cstr(out.get(), "tripleClickStart", dom_make_plain_boundary_object(triple_start));
+        dom_realm_set_cstr(out.get(), "tripleClickEnd", dom_make_plain_boundary_object(triple_end));
     }
-    return out;
+    return out.get();
 }
 
 static bool dom_boundary_inside_text_control(DomBoundary boundary) {

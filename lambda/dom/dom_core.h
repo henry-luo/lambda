@@ -16,9 +16,14 @@
 
 #include "../lambda.h"
 
+struct DomDocument;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// geometry and selection results share the same realm-neutral map builder.
+Item dom_result_map(struct DomDocument* doc, const char* const* keys, const Item* vals, int count);
 
 // Flags carried by every catalog row (see dom_api.def header).
 enum DomOpFlags {
@@ -211,6 +216,7 @@ Item dom_engine_pointer_selection(Item a, Item b);
 Item dom_engine_clear_ime_preedit(Item a);
 Item dom_engine_clipboard_text(void);
 Item dom_engine_clipboard_copy_event(void);
+Item dom_engine_clipboard_write(Item text);
 Item dom_engine_edit_selection_text(Item a, Item b);
 Item dom_engine_edit_selection_html(Item a, Item b);
 Item dom_engine_edit_clipboard_write(Item a, Item b, Item c, Item d);

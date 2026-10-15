@@ -29,7 +29,7 @@
 // exceeds the warm window and pays nothing.
 #define ACTIVATION_WARM_MAX 16
 #define ACTIVATION_COMPACT_MAX_BYTES (16u * 1024u)
-#define ACTIVATION_AMBIENT_EXT_BYTES 128
+#define ACTIVATION_AMBIENT_EXT_BYTES 256
 #define ACTIVATION_AMBIENT_HOOK_MAX 4
 
 // Root-segment slots reserved below the entry's own frames.
@@ -738,6 +738,11 @@ extern "C" void activation_destroy(Activation* activation) {
         strong_unlink(activation);
         stacks_release(activation->stacks);
         activation->stacks = NULL;
+    }
+    for (int i = 0; i < ambient_hook_count; i++) {
+        if (ambient_hooks[i].destroy) {
+            ambient_hooks[i].destroy(activation->ambient.ext + ambient_hook_offsets[i]);
+        }
     }
     mem_free(activation);
 }

@@ -2784,6 +2784,7 @@ static const LayoutFormatRoute layout_format_routes[] = {
     {".slides", load_slides_doc},
     {".docx", nullptr, "docx"},
     {".epub", nullptr, "ebook"},
+    {".diff", nullptr, "diff"}, {".patch", nullptr, "diff"},
     {".tex", load_latex_doc}, {".latex", load_latex_doc},
     {".pgf", load_tikz_doc},
     {".md", load_markdown_doc}, {".markdown", load_markdown_doc},
@@ -2844,7 +2845,8 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
                                               bool include_text,
                                               bool* handled,
                                               const DocumentJsHostConfig* host_config = nullptr,
-                                              bool defer_html_scripts = false) {
+                                              bool defer_html_scripts = false,
+                                              bool interactive = true) {
     if (handled) *handled = false;
     if (!url || !path || !pool) return nullptr;
     const RenderPagedOptions* paged = host_config ? host_config->paged_media : nullptr;
@@ -2881,8 +2883,13 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
         if (handled) *handled = true;
         log_info("[Layout] Detected %s file, using format loader", ext);
         // Script document formats share the configured transform boundary (D7.2.4).
+        // a saved diff exports all rows for layout/render and a virtual surface for review.
+        LambdaDocumentTransformOption diff_surface = {"interactive", LAMBDA_DOCUMENT_TRANSFORM_OPTION_BOOL,
+            nullptr, interactive};
+        bool diff_route = route->transform_type && strcmp(route->transform_type, "diff") == 0;
         DomDocument* document = route->transform_type
-            ? load_input_type_transform_doc(route->transform_type, url, nullptr, 0, width, height, pool)
+            ? load_input_type_transform_doc(route->transform_type, url, diff_route ? &diff_surface : nullptr,
+                diff_route ? 1 : 0, width, height, pool)
             : route->loader(url, width, height, pool);
         if (document && document->page_kind == DOM_PAGE_KIND_LAMBDA_SCRIPT) {
             // generated HTML needs the same script lifecycle, after its host is bound.
@@ -2931,7 +2938,8 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     if ((full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS) && http_page_input) {
         bool handled = false;
         doc = load_layout_special_file(full_url, url_get_pathname(full_url), viewport_width,
-            viewport_height, pool, true, &handled, js_host_config, defer_html_scripts);
+            viewport_height, pool, true, &handled, js_host_config, defer_html_scripts,
+            js_host_config && js_host_config->host_driven_loop);
         document_apply_js_host_config(doc, js_host_config);
     } else if (full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS) {
         log_info("[load_html_doc] HTTP/HTTPS URL detected, using HTML pipeline: %s", doc_url);
@@ -2944,7 +2952,7 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     // Use the parsed pathname so a query does not hide the file extension.
     doc = load_layout_special_file(full_url, url_get_pathname(full_url),
                                    viewport_width, viewport_height, pool, true, &handled, js_host_config,
-                                   defer_html_scripts);
+                                   defer_html_scripts, js_host_config && js_host_config->host_driven_loop);
     // non-HTML documents still dispatch callbacks through their owning viewer.
     if (handled) document_apply_js_host_config(doc, js_host_config);
     if (!handled) {
@@ -5653,7 +5661,7 @@ static bool layout_single_file(
         // the batch's documents share one loader runtime, as a window's do
         LayoutLoaderHostScope loader_host(ui_context);
         doc = load_layout_special_file(input_url, route_path, viewport_width, viewport_height,
-                                       pool, false, &special_handled, &js_host_config);
+                                       pool, false, &special_handled, &js_host_config, false, false);
     }
     if (!special_handled) {
         const int max_redirects = 8;
