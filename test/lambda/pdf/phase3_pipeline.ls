@@ -8,7 +8,7 @@
 //     <text/> ...                 <!-- text in SVG space -->
 //   </svg>
 
-import pdf: lambda.pdf.pdf
+import pdf: lambda.doc.pdf.pdf
 
 pn main() {
     let doc = input("test/input/simple_test.pdf", 'pdf') ^ { null }

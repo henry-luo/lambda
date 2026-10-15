@@ -95,6 +95,7 @@ typedef struct ActivationAmbientHook {
     void (*init)(void* storage);
     void (*save)(void* storage);
     void (*load)(const void* storage);
+    void (*destroy)(void* storage); // release activation-owned subsystem data, including abandoned stacks
 } ActivationAmbientHook;
 bool activation_register_ambient_hook(const ActivationAmbientHook* hook);
 

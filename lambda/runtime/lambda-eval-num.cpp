@@ -2,6 +2,7 @@
 #include "transpiler.hpp"
 #include "../core/lambda-decimal.hpp"
 #include "lambda-number-runtime.hpp"
+#include "lambda-error.h"
 #include "../io/mark_output_builder.hpp"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
@@ -1729,6 +1730,28 @@ Item fn_binary(Item item) {
     }
     if (js_is_dataview(item)) {
         return binary_from_dataview(js_get_dataview_ptr(item));
+    }
+    if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_NUM) {
+        RootFrame roots(1);
+        Rooted<Item> source(roots, item);
+        int64_t length = fn_len(item);
+        if (length == 0) return ItemNull; // S2.2.2v2: binary is a solid type.
+        char* bytes = (char*)mem_alloc(length > 0 ? (size_t)length : 1, MEM_CAT_TEMP);
+        if (!bytes) return ItemError;
+        for (int64_t i = 0; i < length; i++) {
+            Item value = item_at(source.get(), i);
+            int64_t byte = -1;
+            if (!lambda_item_to_int64_exact(value, &byte) || byte < 0 || byte > 255) {
+                mem_free(bytes);
+                set_runtime_error(ERR_TYPE_MISMATCH, "binary: array items must be integers in [0,255]");
+                return ItemError;
+            }
+            bytes[i] = (char)(uint8_t)byte;
+        }
+        // copy once after validation; byte arrays never pass through a text encoding.
+        Binary* result = heap_binary_from_bytes(bytes, length);
+        mem_free(bytes);
+        return result ? (Item){.item = x2it(result)} : ItemError;
     }
     log_debug("fn_binary: cannot convert type %d", type_id);
     return ItemError;

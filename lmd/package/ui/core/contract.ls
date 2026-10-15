@@ -1,14 +1,15 @@
 import c: .component
+import binding: .binding
 
 pub let fields = {
     page:["tokens","locale","direction"], 'config-provider':["tokens","direction","disabled"],
     button:["variant","size","disabled","block","type","href","target","rel"],
-    input:["size","disabled","status","type","value","default_value","placeholder","name","readonly","required","maxlength","autocomplete"],
-    'text-area':["size","disabled","status","value","default_value","placeholder","name","readonly","required","maxlength","rows"],
-    select:["size","disabled","status","options","value","default_value","name","required"],
-    checkbox:["disabled","name","value","checked","default_checked"],
-    radio:["disabled","name","value","checked","default_checked"],
-    switch:["disabled","checked","default_checked"],
+    input:["size","disabled","status","type","value","default_value","placeholder","name","readonly","required","maxlength","autocomplete","on_change"],
+    'text-area':["size","disabled","status","value","default_value","placeholder","name","readonly","required","maxlength","rows","on_change"],
+    select:["size","disabled","status","options","value","default_value","name","required","on_change"],
+    checkbox:["disabled","name","value","checked","default_checked","on_change"],
+    radio:["disabled","name","value","checked","default_checked","on_change"],
+    switch:["disabled","checked","default_checked","on_change"],
     title:["level"], text:[], paragraph:[], link:["href","target","rel"],
     card:["description","footer"], badge:["variant"], alert:["status"],
     divider:[], flex:["direction","gap","align","justify","wrap"], space:["direction","gap","align","justify","wrap"],
@@ -19,6 +20,7 @@ pub fn validate(kind, props, fields, family, variants, badge_variants) bool^ {
     let known = if (not (kind at fields)) raise c.fail(kind,"component is not implemented",family) else true
     let names = c.properties(props,[*c.common_props,*fields[kind]],kind,true,family)^
     let flags = c.boolean_props(props,["disabled","block","readonly","required","checked","default_checked","wrap","show_info"],kind,family)^
+    let action = binding.validate(props.on_change)^
     let strings = [for (key in ["id","class","style","label","name","placeholder","autocomplete","href","target","rel","for","help","locale"]
         where c.has(props,key) and not (props[key] is string)) key];
     if (len(strings) > 0) raise c.fail(kind,strings[0] ++ " must be a string",family)

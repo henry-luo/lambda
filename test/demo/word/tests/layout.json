@@ -1,0 +1,323 @@
+{
+  "name": "Word layout",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "First page",
+      "clear": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-layout"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#page-setup"
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#page-paper"
+      },
+      "value": "A5"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#page-left"
+      },
+      "text": "80",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#page-right"
+      },
+      "text": "80",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-page_setup .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "contains": "20 mm"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#page-paper"
+      },
+      "value": "Letter"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#page-orientation"
+      },
+      "value": "landscape"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#page-top"
+      },
+      "text": "12.7",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#page-right"
+      },
+      "text": "12.7",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#page-bottom"
+      },
+      "text": "12.7",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#page-left"
+      },
+      "text": "12.7",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-page_setup .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#paper-label"
+      },
+      "contains": "Letter"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.getElementById(\"paper-size\").value === \"Letter\""
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "attribute": "style",
+      "equals": "transform:scale(1); transform-origin:top left; width:1056px; min-height:816px; padding:48px 48px 48px 48px;"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 10,
+      "end": 10
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"insert.pageBreak\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "count": 2
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface p:nth-child(2)"
+      },
+      "attribute": "data-word-page-break",
+      "equals": "true"
+    },
+    {
+      "type": "type",
+      "text": "Second page"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p:nth-child(2)"
+      },
+      "contains": "Second page"
+    },
+    {
+      "type": "render",
+      "file": "temp/word-layout.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/layout.pdf",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Exported"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#export"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/layout.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#status"
+      },
+      "contains": "Exported"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#save"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/layout.word.json",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#open"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#word-file-path"
+      },
+      "text": "temp/word/layout.html",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#paper-label"
+      },
+      "contains": "Letter"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface p:nth-child(2)"
+      },
+      "attribute": "data-word-page-break",
+      "equals": "true"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "Second page"
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+#include "../lambda/io/image_io.h"
 #include <gtest/gtest.h>
 #include "../radiant/geomap.hpp"
 #include "../radiant/radiant.hpp"

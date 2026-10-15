@@ -1,6 +1,6 @@
 // Phase 20 — inline ICCBased images use the stream N component count.
 
-import image: lambda.pdf.image
+import image: lambda.doc.pdf.image
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 

@@ -17,6 +17,27 @@
 #include "../../lib/stringbuf.h"
 #include "../../lib/arraylist.h"
 
+// RFC 6350/5545 unfold the entire content line before names or parameters are read.
+static inline const char* rfc_unfold_content_lines(Input* input, const char* source) {
+    size_t length = strlen(source);
+    char* logical = (char*)pool_alloc(input->pool, length + 1);
+    if (!logical) return NULL;
+    size_t written = 0;
+    for (size_t i = 0; i < length;) {
+        if (source[i] == '\r' || source[i] == '\n') {
+            size_t next = i + 1;
+            if (source[i] == '\r' && next < length && source[next] == '\n') next++;
+            if (next < length && (source[next] == ' ' || source[next] == '\t')) {
+                i = next + 1;
+                continue;
+            }
+        }
+        logical[written++] = source[i++];
+    }
+    logical[written] = '\0';
+    return logical;
+}
+
 /**
  * Parse an RFC-style property name: the text before the first ':' or ';'.
  * Stops at ':', ';', '\n', '\r', or NUL.
@@ -35,7 +56,8 @@ static inline size_t parse_rfc_property_name(StringBuf* sb, const char** pos) {
 
 static inline size_t parse_rfc_value_after_colon(StringBuf* sb, const char** pos,
                                                   bool skip_initial_ws,
-                                                  bool trim_trailing_ws) {
+                                                  bool trim_trailing_ws,
+                                                  bool content_line) {
     if (**pos != ':') return 0;
     (*pos)++; // skip ':'
     if (skip_initial_ws) {
@@ -52,10 +74,8 @@ static inline size_t parse_rfc_value_after_colon(StringBuf* sb, const char** pos
             else next++;
 
             if (is_folded_line(next)) {
-                // continuation line — replace line break with space
-                stringbuf_append_char(sb, ' ');
-                p = next;
-                skip_line_whitespace(&p);
+                // VCF/ICS remove one folding space; mail removes only CRLF.
+                p = next + (content_line ? 1 : 0);
             } else {
                 // end of value
                 p = next;
@@ -89,7 +109,7 @@ static inline size_t parse_rfc_value_after_colon(StringBuf* sb, const char** pos
  * Returns the length written to @p sb (0 = nothing read / no colon found).
  */
 static inline size_t parse_rfc_property_value(StringBuf* sb, const char** pos) {
-    return parse_rfc_value_after_colon(sb, pos, false, false);
+    return parse_rfc_value_after_colon(sb, pos, false, false, true);
 }
 
 /**
@@ -97,7 +117,7 @@ static inline size_t parse_rfc_property_value(StringBuf* sb, const char** pos) {
  * unfold continuation lines, and trim trailing horizontal whitespace.
  */
 static inline size_t parse_rfc_header_value(StringBuf* sb, const char** pos) {
-    return parse_rfc_value_after_colon(sb, pos, true, true);
+    return parse_rfc_value_after_colon(sb, pos, true, true, false);
 }
 
 /**
@@ -174,7 +194,8 @@ static inline List* rfc_new_entry_list(Input* input) {
 }
 
 static inline void rfc_append_entry(InputContext& ctx, List* entries,
-                                    String* name, Item value, Map* parameters = NULL) {
+                                    String* name, Item value, Map* parameters = NULL,
+                                    String* parameter_source = NULL) {
     if (!entries || !name) return;
     Input* input = ctx.input();
     Map* entry = map_pooled(input->pool);
@@ -185,6 +206,11 @@ static inline void rfc_append_entry(InputContext& ctx, List* entries,
     if (parameters) {
         builder.putToMap(lam::gc_borrow(entry), builder.createName("parameters"),
                          {.item = (uint64_t)parameters});
+    }
+    // A convenience map cannot distinguish quoted commas or repeated parameter names.
+    if (parameter_source) {
+        builder.putToMap(lam::gc_borrow(entry), builder.createName("parameter_source"),
+                         {.item = s2it(parameter_source)});
     }
     array_append((Array*)entries, {.item = (uint64_t)entry}, input->pool);
 }

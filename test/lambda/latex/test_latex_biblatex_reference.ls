@@ -1,6 +1,6 @@
 // Reference text captured with BibLaTeX 3.20 and Biber 2.20; see Lambda_Design_BibTeX_CSL §2.1.
-import latex: lambda.latex.latex
-import html_ser: lambda.latex.to_html
+import latex: lambda.doc.latex.latex
+import html_ser: lambda.doc.latex.to_html
 
 let source = input("test/lambda/latex/fixtures/biblatex_reference_320.tex", "text") ^ { "" }
 let base = "test/lambda/latex/fixtures"

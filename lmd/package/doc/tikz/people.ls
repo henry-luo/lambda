@@ -1,7 +1,7 @@
 // Reusable vector silhouettes for the named tikzpeople node profile.
 import opts: .options
 import labels: .labels
-import util: lambda.latex.util
+import util: lambda.doc.latex.util
 
 let PX_PER_CM = 96.0 / 2.54
 let PROFILES = [

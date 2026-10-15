@@ -3,7 +3,7 @@
 import tikz: lambda.doc.tikz.tikz
 import plots: lambda.doc.tikz.pgfplots
 import plotdata: lambda.doc.tikz.plotdata
-import bridge: lambda.latex.tikz_bridge
+import bridge: lambda.doc.latex.tikz_bridge
 
 let BASE = "test/latex/fixtures/tikz_phase4"
 

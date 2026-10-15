@@ -1,0 +1,14 @@
+<html
+  <head
+    <style
+      "#outside { color:#112233; }">>
+  <body
+    <p id: "outside",
+      "Outside template">
+    <section id: "style-host",
+      <style id: "live-sheet",
+        "#outside { color:red; background-color:yellow; } #inside { color:red; }">
+      <p id: "inside",
+        "Inside template">
+      <button id: "toggle",
+        "Change stylesheet">>>>

@@ -1,6 +1,6 @@
 // The opt-in CSL path uses the existing LaTeX scopes, footnotes and HTML serializer.
-import latex: lambda.latex.latex
-import html: lambda.latex.to_html
+import latex: lambda.doc.latex.latex
+import html: lambda.doc.latex.to_html
 let source = input("test/lambda/latex/fixtures/citeproc/document.tex", "text")^
 let ast = latex.parse_source(source, "test/lambda/latex/fixtures/citeproc/document.tex")
 let styles = ["ieee", "apa", "chicago-author-date", "chicago-fullnote-bibliography"];

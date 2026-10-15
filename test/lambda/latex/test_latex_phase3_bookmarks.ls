@@ -1,5 +1,5 @@
-import latex: lambda.latex.latex
-import html: lambda.latex.to_html
+import latex: lambda.doc.latex.latex
+import html: lambda.doc.latex.to_html
 
 let ast = input("test/lambda/latex/fixtures/hyperref_bookmarks.tex", "latex") ^ { null }
 let result = latex.render_result(ast, {standalone: true, target: "pdf"})

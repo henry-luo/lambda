@@ -1,0 +1,22 @@
+# Lambda image source: libpng
+
+Upstream: https://github.com/pnggroup/libpng
+
+Imported release: 1.6.55
+
+Archive SHA-256: `71a2c5b1218f60c4c6d2f1954c7eb20132156cae90bdb90b566c24db002782a6`
+
+Official source imported for the common image library (2026-10-15).
+Local adaptations are made directly in this directory and reviewed through Git.
+No separate patch files are required, per the user-approved source policy in
+`vibe/Lib_Image.md`. License notices are retained. Unneeded test corpora, tools,
+and application directories are omitted; only library targets are built.
+
+
+Build integration (2026-10-15): upstream build systems, templates, and
+repository metadata are removed. `build_lambda_config.json` owns the
+explicit image I/O source lists, feature definitions, platform/CPU
+selection, and generated headers. Premake builds these sources into
+`build/lib/liblambda-image-codecs.a` with the ordinary Lambda targets.
+No CMake configuration, staging tree, or separately built codec prefix
+is used. Licenses, patent notices, and copyright attributions remain.

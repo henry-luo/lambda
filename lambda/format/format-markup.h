@@ -10,7 +10,7 @@
 
 // Format a Lambda data item into lightweight markup syntax using the given rules.
 // Replaces the per-format functions: format_markdown, format_rst, format_org,
-// format_wiki, format_textile.
+// format_textile.
 void format_markup(StringBuf* sb, Item root_item, const MarkupOutputRules* rules);
 
 // Format into a newly allocated String*.
@@ -74,7 +74,6 @@ private:
 
 void emit_table_pipe(StringBuf* sb, const ElementReader& elem, void* emitter_ctx);
 void emit_table_rst(StringBuf* sb, const ElementReader& elem, void* emitter_ctx);
-void emit_table_wiki(StringBuf* sb, const ElementReader& elem, void* emitter_ctx);
 void emit_table_textile(StringBuf* sb, const ElementReader& elem, void* emitter_ctx);
 void emit_table_org(StringBuf* sb, const ElementReader& elem, void* emitter_ctx);
 
@@ -83,7 +82,6 @@ void emit_table_org(StringBuf* sb, const ElementReader& elem, void* emitter_ctx)
 // ==============================================================================
 
 bool org_custom_handler(void* ctx, StringBuf* sb, const ElementReader& elem);
-bool wiki_custom_handler(void* ctx, StringBuf* sb, const ElementReader& elem);
 bool textile_custom_handler(void* ctx, StringBuf* sb, const ElementReader& elem);
 // CommonMark block layer and inline overrides (format-md.cpp).
 bool markdown_custom_handler(void* ctx, StringBuf* sb, const ElementReader& elem);

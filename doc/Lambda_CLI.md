@@ -135,7 +135,7 @@ lambda validate [-s <schema>] [-f <format>] [options] <file>
 | | `--allow-unknown` | Accepted, but has no effect: map types are open, so undeclared fields always pass | `false` |
 | `-h` | `--help` | Show help | |
 
-**Input formats.** Auto-detected from the extension: `.json`, `.csv`, `.ini`, `.toml`, `.yaml`/`.yml`, `.xml`, `.md`/`.markdown`, `.rst`, `.html`/`.htm`, `.wiki`, `.adoc`/`.asciidoc`, `.1`–`.9` (man pages), `.eml`, `.ics`, `.vcf`, `.textile`/`.txtl`, `.mark`. Formats without an auto-detected extension take `-f`: `latex`, `rtf`, `pdf`, `text`.
+**Input formats.** Auto-detected from the extension: `.json`, `.csv`, `.ini`, `.toml`, `.yaml`/`.yml`, `.xml`, `.md`/`.markdown`, `.rst`, `.html`/`.htm`, `.xhtml`/`.xht`, `.wiki`, `.adoc`/`.asciidoc`, `.1`–`.9` (man pages), `.eml`, `.ics`, `.vcf`, `.textile`/`.txtl`, `.mark`. Formats without an auto-detected extension take `-f`: `latex`, `rtf`, `pdf`, `text`.
 
 Mark auto-detection recognizes only `.mark` (D2.9.1); use `-f mark` for
 arbitrary filenames, including files without an extension (D2.9.2).
@@ -148,7 +148,7 @@ arbitrary filenames, including files without an extension (D2.9.2).
 | `eml` | `eml_schema.ls` |
 | `ics` | `ics_schema.ls` |
 | `vcf` | `vcf_schema.ls` |
-| `asciidoc`, `man`, `markdown`, `rst`, `textile`, `wiki` | `doc_schema.ls` |
+| `asciidoc`, `man`, `markdown`, `rst`, `textile`, `wiki` / `wiki:<flavor>` | `doc_schema.ls` |
 | `.ls` files | Built-in AST validation |
 
 Formats such as `json`, `xml`, `yaml`, `csv`, `ini`, `toml`, `latex`, `rtf`, `pdf`, and `text` require an explicit schema via `-s`. With a custom schema the **root type** is the type named `Document` if the schema defines one, otherwise the last type defined in the file. See [Lambda_Validator.md](Lambda_Validator.md).
@@ -158,6 +158,7 @@ Formats such as `json`, `xml`, `yaml`, `csv`, `ini`, `toml`, `latex`, `rtf`, `pd
 ```bash
 lambda validate data.json -s schema.ls
 lambda validate page.html
+lambda validate notes.txt -f wiki:zimwiki
 lambda validate --strict config.yaml -s config_schema.ls --max-errors 50
 ```
 
@@ -182,13 +183,27 @@ lambda convert <input> [-f <from>] -t <to> -o <output> [options]
 | | `--view-key <key>` | Select a named view when the source defines several | |
 | | `--font-option default\|katex` | Math font set for LaTeX→HTML output | `default` |
 | | `--pipeline legacy\|unified` | Accepted for compatibility; currently has no effect | |
+| | `--loss error\|allow` | Wiki and `doc.misc` output: reject or allow diagnosed losses | `error` |
 | `-h` | `--help` | Show help | |
 
 **Supported output formats:**
 
-`mark`, `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `css`, `jsx`, `mdx`, `latex`, `rst`, `org`, `wiki`, `textile`, `text`, `markdown`/`md`, `math-ascii`, `math-latex`, `math-typst`, `math-mathml`, `properties`
+`mark`, `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `css`, `jsx`, `mdx`, `latex`, `rst`, `org`, `wiki`/`wiki:<flavor>`, `asciidoc`/`adoc`, `man`/`troff`, `typst`, `eml`, `vcf`/`vcard`, `ics`/`ical`/`icalendar`, `textile`, `text`, `markdown`/`md`, `math-ascii`, `math-latex`, `math-typst`, `math-mathml`, `properties`
 
 The input format flag `-f` supports colon-separated `type:flavor` syntax (e.g., `graph:mermaid`).
+
+Wiki input and output accept `wiki:mediawiki`, `wiki:dokuwiki`,
+`wiki:tikiwiki`, `wiki:twiki`, `wiki:vimwiki`, `wiki:xwiki` (Syntax 2.1),
+`wiki:zimwiki`, `wiki:creole` (1.0), `wiki:jira`, and `wiki:confluence`.
+Unqualified `wiki` and auto-detected `.wiki` input mean MediaWiki; specify
+`-f` for other dialects even when they use `.wiki` or `.txt` filenames.
+All wiki output runs through the `lambda.doc.wiki` Lambda Script package
+(D7.2.4). It fails on conversion diagnostics by default. `--loss allow`
+permits degraded output. The same policy applies to the six
+`lambda.doc.misc` targets: `asciidoc`, `man`, `typst`, `eml`, `vcf`, and `ics`.
+The option is rejected for other output families. See the
+[source formatter APIs and limits](Script_Formats_Support.md).
+See [wiki coverage and loss reports](Markup_Formats_Support.md#15-wiki-dialect-coverage).
 
 **Examples:**
 
@@ -197,6 +212,11 @@ lambda convert input.json -t yaml -o output.yaml
 lambda convert doc.md -t html -o doc.html
 lambda convert formula.tex -t html -o formula.html --full-document
 lambda convert data.xml -f xml -t json -o data.json
+lambda convert page.wiki -f wiki:creole -t wiki:jira -o page.jira
+lambda convert notes.txt -f wiki:zimwiki -t wiki:creole --loss allow -o notes.creole
+lambda convert guide.md -t asciidoc -o guide.adoc
+lambda convert guide.md -t typst -o guide.typ
+lambda convert contacts.vcf -f vcf -t vcf -o exported.vcf
 ```
 
 ---
@@ -234,7 +254,7 @@ lambda layout <file> [more files...] [options]
 
 Batch mode (several inputs) needs `--output-dir` or `--stream-layout-results`. Unknown options are silently ignored.
 
-**Supported input formats:** `.html`/`.htm`, `.tex`/`.latex`, `.ls`
+**Supported input formats:** `.html`/`.htm`, `.xhtml`/`.xht`, `.tex`/`.latex`, `.ls`
 
 **Examples:**
 
@@ -273,6 +293,7 @@ lambda render <input> -o <output> [options]
 | Extension | Format |
 |-----------|--------|
 | `.html`, `.htm` | HTML |
+| `.xhtml`, `.xht` | XML syntax producing HTML names and a viewable HTML tree (D2.10.1) |
 | `.tex`, `.latex` | LaTeX |
 | `.ls` | Lambda Script |
 | `.pdf` | PDF (PDF to PDF is a copy; other targets go through the Lambda PDF package) |
@@ -316,7 +337,7 @@ With no name, opens the bundled `lambda.doc` viewer with its startup splash from
 `view`: `lambda demo tetris` is equivalent to
 `lambda view test/demo/tetris/tetris.ls`.
 
-Names include `tetris`, `superlambda`, `doom`, `cellscope`, `scene3d` (also `ringworld`),
+Names include `tetris`, `superlambda`, `doom`, `photo`, `draw`, `word`, `cellscope`, `scene3d` (also `ringworld`),
 `observatory`, `three-gallery`, `asset-gallery`, `shared-animation`, `slides`
 and `wordcloud`. Run named demos from the checkout or unpacked release root;
 their relative paths and local assets are under `test/demo/`.
@@ -378,11 +399,38 @@ its Source tab shows the converted HTML. Unsupported content is reported above
 the document. The preview uses flowing pages rather than reproducing Word's
 pagination, headers, or footers.
 
+**EPUB books:** `lambda view book.epub` opens the `lambda.doc.ebook` reader
+(D7.2.4), with chapter/contents navigation, source anchors, generated pages,
+search, bookmarks, reading preferences and local resume. Fixed-layout
+XHTML/SVG uses the authored viewport with fit/zoom. The file browser previews
+selected EPUBs and exposes their OPF source. Use `--archive` to inspect package
+parts. See [the supported EPUB profile](Lambda_Packages.md#19-docebook--epub-reader)
+for limitations.
+
+**DocBook documents:** `lambda view test/input/docbook/showcase.xml` opens the
+original DocBook 5.x `.xml` through `lambda.doc.docbook` (D7.2.4). The covered
+roots (`article`, `book`, `set`, `part`, `reference`) are recognized by their
+namespace, including prefixed names. The viewer
+loads bundled xslTNG CSS and captured images directly; no export step is
+required. The file browser retains the original XML in its Source tab.
+See [DocBook support and limitations](Markup_Formats_Support.md#312-docbook).
+
 **Supported formats:**
 
-`.docx`, `.pdf`, `.html`/`.htm`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
+`.epub`, `.docx`, `.pdf`, `.html`/`.htm`, `.xhtml`/`.xht`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
 
-Also accepts **HTTP/HTTPS URLs**: an HTML page is loaded directly by the browsing shell (with its scripts and stylesheets); any other content is fetched to a temporary file, its type detected from the `Content-Type` header, and opened from there.
+XHTML uses strict XML parsing and the same HTML DOM/CSS/layout pipeline (**D2.10.1**).
+`.xhtml`/`.xht` files and HTTP `application/xhtml+xml` responses select it.
+XML names remain case-sensitive, and XML whitespace/CDATA are preserved.
+The input must have an XHTML `html` root; external DTDs are never fetched.
+See [XHTML input and limits](Markup_Formats_Support.md#xhtml-input--html-document-tree).
+
+```bash
+./lambda.exe view test/html/xhtml_feature_gallery.xhtml
+./lambda.exe convert page.xhtml -f xhtml -t html -o page.html
+```
+
+Also accepts **HTTP/HTTPS URLs**: an HTML or XHTML page is loaded directly by the browsing shell (with its scripts and stylesheets); any other content is fetched to a temporary file, its type detected from the `Content-Type` header, and opened from there.
 
 **Keyboard controls:**
 
@@ -400,8 +448,10 @@ lambda view https://example.com
 lambda view diagram.mmd
 lambda view documents/
 lambda view assets.zip
+lambda view book.epub
 lambda view report.docx
 lambda view report.docx --archive
+lambda view test/input/docbook/showcase.xml
 lambda view application.jar
 ```
 

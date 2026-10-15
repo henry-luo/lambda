@@ -1,7 +1,7 @@
 // Text and math labels share one positioned HTML representation.
 import math: lambda.doc.math.math
 import opts: .options
-import util: lambda.latex.util
+import util: lambda.doc.latex.util
 
 fn plain_text(source) {
     // Common TeX accent commands in figure labels have plain Unicode equivalents.

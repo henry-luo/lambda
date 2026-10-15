@@ -1,6 +1,6 @@
-import latex: lambda.latex.latex
-import util: lambda.latex.util
-import html: lambda.latex.to_html
+import latex: lambda.doc.latex.latex
+import util: lambda.doc.latex.util
+import html: lambda.doc.latex.to_html
 
 let ast = input("test/lambda/latex/fixtures/caption_profile.tex", "latex") ^ { null }
 let result = latex.render_result(ast, {standalone: true})

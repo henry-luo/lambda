@@ -1,0 +1,37 @@
+{
+  "name": "Captured rar5 member preview",
+  "html": "test/input/archive/rar5-stored.rar",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".project-root .tree-label"
+      },
+      "equals": "rar5-stored.rar"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='rar5-stored.rar/helloworld.txt'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "helloworld.txt"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview"
+      },
+      "equals": "hello libarchive test suite!\n"
+    }
+  ]
+}

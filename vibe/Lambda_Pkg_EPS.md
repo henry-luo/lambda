@@ -16,7 +16,7 @@
 > `lambda.doc.eps.eps`.
 >
 > **Precedent:** the existing parser in `lambda/input/input-pdf.cpp` and
-> renderer in `lmd/package/pdf/`; their implementation was inspected for this
+> renderer in `lmd/package/doc/pdf/`; their implementation was inspected for this
 > proposal. Historical paths in `Lambda_Pkg_PDF.md` are not the current tree.
 
 ## 1. Goal and governing constraints
@@ -45,7 +45,7 @@ implementation:
 | Formal ruling | Application here |
 |---|---|
 | **D7.2.1**, **D7.2.3** | Ship ordinary Lambda source modules with explicit exports and existing import caching. |
-| **D7.2.4** | Place the new document package under `lambda.doc.eps.*`, resolving to `lmd/package/doc/eps/`. Reuse existing `lambda.pdf.*` modules at their current paths. |
+| **D7.2.4v3** | Place the new document package under `lambda.doc.eps.*`, resolving to `lmd/package/doc/eps/`. Reuse existing `lambda.doc.pdf.*` modules at their current paths. |
 | **D4.1.1v2**, **D4.1.2**, **D4.1.3** | Parsed source and objects belong to the Input arena/pool; runtime state has a separate lifetime. |
 | **D1.5v2**, **D5.1.1v3** | Any native runtime bridge retaining GC Items uses precise roots; the native stack is not a GC root source. |
 | **S1.4**, **S12.2.1** | Represent PostScript object sharing explicitly inside the guest machine; do not assume Lambda values alias. |
@@ -215,14 +215,14 @@ existing PDF wrappers, and never patch zlib or other vendor sources in place.
 
 | Existing module | Proposed use |
 |---|---|
-| `lambda.pdf.util` | Reuse `fmt_num`, `fmt_matrix` and `matrix_mul`; verify multiplication order with noncommuting transforms. |
-| `lambda.pdf.color` | Reuse `gray`, `rgb`, `cmyk` and compatible conversion helpers; separate approximations from color-managed output. |
-| `lambda.pdf.svg` | Reuse `svg_root`, `group`, `path` and `text_run` where their contracts fit. EPS uses the portable root, not `svg_pdf_root` and its PDF image-resolver registry. |
-| `lambda.pdf.path` | Reuse segment serialization and line-style emission. `current_path_d` and the extracted `paint` primitive are public; EPS retains separate path and graphics-state transitions. |
-| `lambda.pdf.font` | Reuse base-font family/style mapping and compatible encoding data. EPS resource lookup and font dictionaries are new script logic. |
-| `lambda.pdf.text` | Extract useful metrics/glyph-placement helpers. Its PDF text-state dispatcher and default-width fallback are not an implementation of PostScript `show`/`stringwidth`. |
-| `lambda.pdf.image` | Reuse portable image emission after separating PDF object/resource lookup and native-only image references. |
-| `lambda.pdf.interp`, `.resolve`, `.coords` | Reference and selective primitive reuse only. EPS has its own execution machine, resource environment and bounding-box policy. |
+| `lambda.doc.pdf.util` | Reuse `fmt_num`, `fmt_matrix` and `matrix_mul`; verify multiplication order with noncommuting transforms. |
+| `lambda.doc.pdf.color` | Reuse `gray`, `rgb`, `cmyk` and compatible conversion helpers; separate approximations from color-managed output. |
+| `lambda.doc.pdf.svg` | Reuse `svg_root`, `group`, `path` and `text_run` where their contracts fit. EPS uses the portable root, not `svg_pdf_root` and its PDF image-resolver registry. |
+| `lambda.doc.pdf.path` | Reuse segment serialization and line-style emission. `current_path_d` and the extracted `paint` primitive are public; EPS retains separate path and graphics-state transitions. |
+| `lambda.doc.pdf.font` | Reuse base-font family/style mapping and compatible encoding data. EPS resource lookup and font dictionaries are new script logic. |
+| `lambda.doc.pdf.text` | Extract useful metrics/glyph-placement helpers. Its PDF text-state dispatcher and default-width fallback are not an implementation of PostScript `show`/`stringwidth`. |
+| `lambda.doc.pdf.image` | Reuse portable image emission after separating PDF object/resource lookup and native-only image references. |
+| `lambda.doc.pdf.interp`, `.resolve`, `.coords` | Reference and selective primitive reuse only. EPS has its own execution machine, resource environment and bounding-box policy. |
 
 Initially import compatible public helpers directly. Extract a neutral shared
 module only when both packages actually need an incompatible or private

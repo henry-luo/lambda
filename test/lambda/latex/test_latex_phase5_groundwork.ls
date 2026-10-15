@@ -2,10 +2,10 @@
 // command ownership and dispatch, conflicts and fonts as catalogue data, unknown
 // classes, general counters, float kinds and lists, label scoping, and the
 // unmapped math command diagnostic.
-import latex: lambda.latex.latex
-import registry: lambda.latex.packages.registry
-import render: lambda.latex.render
-import analyze: lambda.latex.analyze
+import latex: lambda.doc.latex.latex
+import registry: lambda.doc.latex.packages.registry
+import render: lambda.doc.latex.render
+import analyze: lambda.doc.latex.analyze
 
 fn doc(preamble, body) =>
     "\\documentclass{article}\n" ++ preamble ++ "\n\\begin{document}\n" ++ body ++ "\n\\end{document}\n"

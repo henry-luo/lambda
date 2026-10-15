@@ -18,6 +18,9 @@
 
 #define PAINT_LIST_INITIAL_CAPACITY 1024
 
+// Stack recordings own path/image payloads as well as their command storage.
+PaintList::~PaintList() { paint_list_clear(this); }
+
 void paint_svg_append_cjk_dx(StrBuf* out, const char* text, int text_len,
                              float cjk_spacing, CssEnum mode) {
     if (!out || !text || text_len <= 0 || cjk_spacing <= 0.0f) return;
@@ -1228,6 +1231,23 @@ static bool paint_ir_lower_raster_effect_stack_command(const PaintCmd* cmd, Disp
         frame->group.bounds = dl_effect_capture_bounds(dl, frame->source_start, dl->item_count(),
             frame->group.bounds, padding);
         dl_resize_saved_backdrops(dl, frame->recording_start, frame->source_start, &frame->group.bounds);
+    }
+    if (frame->recording_start == frame->source_start) {
+        // zero-height parents can acquire ink from a spanner; prepend their deferred backdrop save.
+        Arena* arena = mem_arena_create(mem_context_process(MEM_ROLE_RENDER), MEM_ROLE_RENDER,
+            "paint.effect.deferred");
+        if (arena) {
+            DisplayList staged;
+            dl_init(&staged, arena);
+            paint_ir_lower_raster_effect_begin(&frame->group, &staged);
+            if (staged.item_count() &&
+                    (frame->source_start == dl->item_count() ||
+                     dl_copy_range(&staged, dl, frame->source_start, dl->item_count() - 1))) {
+                if (!dl_replace_tail(dl, frame->recording_start, &staged, 0, staged.item_count() - 1))
+                    log_error("PAINT_EFFECT_DEFERRED: cannot publish measured group prefix");
+            }
+            dl_destroy(&staged); mem_arena_destroy(arena);
+        }
     }
     paint_ir_lower_raster_effect_finish(&frame->group, dl);
     return true;

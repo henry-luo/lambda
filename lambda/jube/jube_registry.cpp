@@ -481,6 +481,7 @@ static int jube_script_class_id(Item value) {
 extern "C" void* dom_get_document(void);
 extern "C" void* dom_get_ui_context(void);
 extern "C" bool dom_has_committed_geometry_snapshot(void* doc);
+extern "C" float dom_scrollable_extent(void* element, bool width_axis);
 extern "C" Item js_get_document_object_value(void);
 extern "C" void* dom_get_or_create_doc_node(void* doc);
 extern "C" Item dom_document_proxy_for_doc_bridge(void* doc);

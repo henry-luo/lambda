@@ -7453,70 +7453,56 @@ extern "C" Item interp_call_borrowed(Function* fn, const Item* args, int argc) {
 
 static __thread InterpState* g_interp_state = NULL;
 static InterpState* interp_current_state(void) { return g_interp_state; }
+static uint32_t interp_depth_budget(void);
 
 // The frame chain and every other LIFO list of the walker belong to the
 // native stack they were pushed on; an activation switch carries them (RA5).
 #ifndef LAMBDA_NO_TASKS
 typedef struct InterpAmbient {
     InterpState* st;
-    InterpFrame* top;
-    InterpContext* contexts;
-    InterpErrorContext* errors;
-    InterpViewBinding* view_bindings;
-    uint64_t* last_index_item;
-    AstNode* list_item_producer;
-    uint32_t depth;
-    bool depth_exhausted;
+    InterpState owned;
 } InterpAmbient;
 
 static void interp_ambient_init(void* storage) {
     InterpAmbient* ambient = (InterpAmbient*)storage;
     memset(ambient, 0, sizeof(*ambient));
-    ambient->st = g_interp_state;
-    // a fresh native stack starts with the whole recursion budget
-    ambient->depth = ambient->st ? ambient->st->depth_limit : 0;
+    // escaped tasks can outlive a retained callback's stack-local InterpStateGuard (D5.3.3).
+    ambient->st = &ambient->owned;
+    ambient->owned.ctx = context;
+    ambient->owned.runtime = context ? context->runtime : NULL;
+    ambient->owned.mode = EvalMode::RUNTIME;
+    ambient->owned.depth_limit = g_interp_state ? g_interp_state->depth_limit : interp_depth_budget();
+    ambient->owned.depth = ambient->owned.depth_limit;
 }
 
 static void interp_ambient_save(void* storage) {
     InterpAmbient* ambient = (InterpAmbient*)storage;
-    InterpState* st = g_interp_state;
-    ambient->st = st;
-    if (!st) return;
-    ambient->top = st->top;
-    ambient->contexts = st->contexts;
-    ambient->errors = st->errors;
-    ambient->view_bindings = st->view_bindings;
-    ambient->last_index_item = st->last_index_item;
-    ambient->list_item_producer = st->list_item_producer;
-    ambient->depth = st->depth;
-    ambient->depth_exhausted = st->depth_exhausted;
+    ambient->st = g_interp_state;
 }
 
 static void interp_ambient_load(const void* storage) {
     const InterpAmbient* ambient = (const InterpAmbient*)storage;
-    InterpState* st = ambient->st;
-    g_interp_state = st;
-    if (!st) return;
-    st->top = ambient->top;
-    st->contexts = ambient->contexts;
-    st->errors = ambient->errors;
-    st->view_bindings = ambient->view_bindings;
-    st->last_index_item = ambient->last_index_item;
-    st->list_item_producer = ambient->list_item_producer;
-    st->depth = ambient->depth;
-    st->depth_exhausted = ambient->depth_exhausted;
+    g_interp_state = ambient->st;
+}
+
+static void interp_ambient_destroy(void* storage) {
+    InterpAmbient* ambient = (InterpAmbient*)storage;
+    if (g_interp_state && g_interp_state != &ambient->owned &&
+            g_interp_state->ctx == ambient->owned.ctx) {
+        g_interp_state->node_count += ambient->owned.node_count;
+    }
+    interp_static_member_names_destroy(&ambient->owned);
 }
 
 static const ActivationAmbientHook interp_ambient_hook = {
     sizeof(InterpAmbient), interp_ambient_init, interp_ambient_save,
-    interp_ambient_load,
+    interp_ambient_load, interp_ambient_destroy,
 };
 [[maybe_unused]] static const bool interp_ambient_registered =
     activation_register_ambient_hook(&interp_ambient_hook);
 
 #endif
 bool interp_has_active_state(void) { return interp_current_state() != NULL; }
-static uint32_t interp_depth_budget(void);
 
 // Retained DOM events execute after the script runner has unwound its T0
 // state. Borrow the event's EvalContext for one activation instead of treating

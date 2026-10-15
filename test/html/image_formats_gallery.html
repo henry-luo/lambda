@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lambda · Image format gallery</title>
+  <style>
+    * { box-sizing: border-box; }
+    html { background: #f4f6f8; color: #20364b; font-family: Arial, sans-serif; }
+    body { max-width: 1120px; margin: 0 auto; padding: 48px 28px 36px; }
+    .eyebrow { margin: 0 0 12px; color: #287b91; font-size: 12px; font-weight: bold; letter-spacing: 2px; text-transform: uppercase; }
+    h1 { margin: 0 0 14px; font-size: 40px; font-weight: 700; letter-spacing: -1px; line-height: 1.15; }
+    .intro { max-width: 720px; margin: 0 0 22px; color: #526579; font-size: 16px; line-height: 1.65; }
+    .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 30px; }
+    .legend span { padding: 7px 12px; background: #e4edf0; color: #2e6172; border-radius: 20px; font-size: 12px; }
+    main { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+    .card { min-width: 0; padding: 18px; background: #fff; border: 1px solid #dce3e9; border-radius: 14px; }
+    .card-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+    h2 { margin: 0; font-size: 18px; font-weight: 700; }
+    .extension { color: #6a7b8c; font: 12px monospace; }
+    .preview { display: flex; align-items: center; justify-content: center; min-height: 204px; overflow: hidden; border-radius: 8px;
+      background-color: #f8f5ec;
+      background-image: linear-gradient(45deg, #e7e9e8 25%, transparent 25%, transparent 75%, #e7e9e8 75%), linear-gradient(45deg, #e7e9e8 25%, transparent 25%, transparent 75%, #e7e9e8 75%);
+      background-size: 16px 16px; background-position: 0 0, 8px 8px; }
+    .preview img { display: block; width: 256px; max-width: 100%; height: auto; }
+    .description { min-height: 40px; margin: 15px 0 14px; color: #526579; font-size: 13px; line-height: 1.55; }
+    .file-info { display: flex; justify-content: space-between; padding-top: 12px; border-top: 1px solid #e9edf1; color: #7b8996; font-size: 12px; }
+    a { color: #216d84; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    a:focus-visible { outline: 3px solid #e6a35c; outline-offset: 3px; }
+    footer { margin-top: 28px; color: #66788b; font-size: 13px; line-height: 1.65; }
+    code { font: 12px monospace; }
+    @media (max-width: 880px) { main { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 580px) { body { padding: 28px 18px; } h1 { font-size: 32px; } main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <p class="eyebrow">Lambda / Visual samples</p>
+    <h1>One scene. Every image format.</h1>
+    <p class="intro">The same twilight illustration in all eight raster formats supported by Lambda, plus an SVG vector reference. Compare color, edges, and transparency, then open any sample to inspect the original file.</p>
+    <div class="legend"><span>8 raster formats + SVG</span><span>256 × 192 pixels</span><span>Checkerboard shows transparency</span></div>
+  </header>
+  <main aria-label="Supported image formats">
+    <article class="card" id="format-png">
+      <div class="card-heading"><h2>PNG</h2><span class="extension">.png</span></div>
+      <a class="preview" href="../input/image/sample.png" aria-label="Open PNG sample">
+        <img src="../input/image/sample.png" width="256" height="192" alt="Twilight mountains in PNG, with color and opacity swatches">
+      </a>
+      <p class="description">Lossless color and full alpha.</p>
+      <div class="file-info"><span>256 × 192</span><a href="../input/image/sample.png">16.5 KiB ↗</a></div>
+    </article>
+    <article class="card" id="format-jpg">
+      <div class="card-heading"><h2>JPEG</h2><span class="extension">.jpg</span></div>
+      <a class="preview" href="../input/image/sample.jpg" aria-label="Open JPEG sample">
+        <img src="../input/image/sample.jpg" width="256" height="192" alt="Twilight mountains in JPEG, with color and opacity swatches">
+      </a>
+      <p class="description">Quality 92; transparency flattened onto cream.</p>
+      <div class="file-info"><span>256 × 192</span><a href="../input/image/sample.jpg">11.7 KiB ↗</a></div>
+    </article>
+    <article class="card" id="format-gif">
+      <div class="card-heading"><h2>GIF</h2><span class="extension">.gif</span></div>
+      <a class="preview" href="../input/image/sample.gif" aria-label="Open GIF sample">
+        <img src="../input/image/sample.gif" width="256" height="192" alt="Twilight mountains in GIF, with color and opacity swatches">
+      </a>
+      <p class="description">255-color palette and one-bit transparency.</p>
+      <div class="file-info"><span>256 × 192</span><a href="../input/image/sample.gif">8.0 KiB ↗</a></div>
+    </article>
+    <article class="card" id="format-webp">
+      <div class="card-heading"><h2>WebP</h2><span class="extension">.webp</span></div>
+      <a class="preview" href="../input/image/sample.webp" aria-label="Open WebP sample">
+        <img src="../input/image/sample.webp" width="256" height="192" alt="Twilight mountains in WebP, with color and opacity swatches">
+      </a>
+      <p class="description">Lossless color and full alpha.</p>
+      <div class="file-info"><span>256 × 192</span><a href="../input/image/sample.webp">10.6 KiB ↗</a></div>
+    </article>
+    <article class="card" id="format-avif">
+      <div class="card-heading"><h2>AVIF</h2><span class="extension">.avif</span></div>
+      <a class="preview" href="../input/image/sample.avif" aria-label="Open AVIF sample">
+        <img src="../input/image/sample.avif" width="256" height="192" alt="Twilight mountains in AVIF, with color and opacity swatches">
+      </a>
+      <p class="description">AV1 color at quality 80 with full alpha.</p>
+      <div class="file-info"><span>256 × 192</span><a href="../input/image/sample.avif">8.7 KiB ↗</a></div>
+    </article>
+    <article class="card" id="format-bmp">
+      <div class="card-heading"><h2>BMP</h2><span class="extension">.bmp</span></div>
+      <a class="preview" href="../input/image/sample.bmp" aria-label="Open BMP sample">
+        <img src="../input/image/sample.bmp" width="256" height="192" alt="Twilight mountains in BMP, with color and opacity swatches">
+      </a>
+      <p class="description">24-bit RGB; transparency flattened onto cream.</p>
+      <div class="file-info"><span>256 × 192</span><a href="../input/image/sample.bmp">144.1 KiB ↗</a></div>
+    </article>
+    <article class="card" id="format-tiff">
+      <div class="card-heading"><h2>TIFF</h2><span class="extension">.tiff</span></div>
+      <a class="preview" href="../input/image/sample.tiff" aria-label="Open TIFF sample">
+        <img src="../input/image/sample.tiff" width="256" height="192" alt="Twilight mountains in TIFF, with color and opacity swatches">
+      </a>
+      <p class="description">Single-page DEFLATE with full alpha.</p>
+      <div class="file-info"><span>256 × 192</span><a href="../input/image/sample.tiff">15.8 KiB ↗</a></div>
+    </article>
+    <article class="card" id="format-ico">
+      <div class="card-heading"><h2>ICO</h2><span class="extension">.ico</span></div>
+      <a class="preview" href="../input/image/sample.ico" aria-label="Open ICO sample">
+        <img src="../input/image/sample.ico" width="256" height="192" alt="Twilight mountains in ICO, with color and opacity swatches">
+      </a>
+      <p class="description">One 256 × 192 PNG representation with full alpha.</p>
+      <div class="file-info"><span>256 × 192</span><a href="../input/image/sample.ico">16.5 KiB ↗</a></div>
+    </article>
+    <article class="card" id="format-svg">
+      <div class="card-heading"><h2>SVG</h2><span class="extension">.svg</span></div>
+      <a class="preview" href="../input/image/sample.svg" aria-label="Open SVG sample">
+        <img src="../input/image/sample.svg" width="256" height="192" alt="Twilight mountains in SVG, with color and opacity swatches">
+      </a>
+      <p class="description">Scalable vector reference for the same illustration.</p>
+      <div class="file-info"><span>256 × 192</span><a href="../input/image/sample.svg">1.6 KiB ↗</a></div>
+    </article>
+  </main>
+  <footer>
+    <p>View the complete gallery with <code>./lambda.exe view test/html/image_formats_gallery.html</code>.<br>
+    Original sample artwork and regeneration instructions: <a href="../input/image/README.md">test/input/image</a>.</p>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "Iframe navigation delegates to its embedding Lambda owner",
+  "html": "test/ui/iframe_navigation_delegate.ls",
+  "viewport": {"width": 800, "height": 600},
+  "events": [
+    {"type": "switch_frame", "selector": "#frame"},
+    {"type": "click", "target": {"selector": "a"}},
+    {"type": "wait", "ms": 200},
+    {"type": "switch_frame"},
+    {"type": "assert_text", "target": {"selector": "#chosen"}, "equals": "chapter.xhtml#note"},
+    {"type": "switch_frame", "selector": "#frame"},
+    {"type": "assert_text", "target": {"selector": "a"}, "equals": "Chapter link"}
+  ]
+}

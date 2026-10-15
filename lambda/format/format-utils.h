@@ -39,7 +39,6 @@ void format_element_children_with_processors(
 // predefined escape configs
 extern const TextEscapeConfig MARKDOWN_ESCAPE_CONFIG;
 extern const TextEscapeConfig RST_ESCAPE_CONFIG;
-extern const TextEscapeConfig WIKI_ESCAPE_CONFIG;
 
 // ==============================================================================
 // Heading Level Extraction
@@ -271,7 +270,6 @@ typedef struct MarkupOutputRules {
 extern const MarkupOutputRules MARKDOWN_RULES;
 extern const MarkupOutputRules RST_RULES;
 extern const MarkupOutputRules ORG_RULES;
-extern const MarkupOutputRules WIKI_RULES;
 extern const MarkupOutputRules TEXTILE_RULES;
 
 // Lookup rules by format name (returns NULL if unknown)

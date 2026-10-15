@@ -1,8 +1,8 @@
 // test_latex_m7.ls — Milestone 7: LaTeXML Features
 // Tests: \newtheorem, booktabs, \newcommand optional args, \autoref, \nameref
 
-import latex: lambda.latex.latex
-import macros: lambda.latex.macros
+import latex: lambda.doc.latex.latex
+import macros: lambda.doc.latex.macros
 
 "===== MILESTONE 7 TESTS ====="
 

@@ -1,7 +1,7 @@
 // TikZ coordinates beyond literals: named anchors, calc expressions and
 // positioning-library placement. Values are picture units (cm, y up).
 import opts: .options
-import util: lambda.latex.util
+import util: lambda.doc.latex.util
 import pgfmath: .pgfmath
 import shapes: .shapes
 

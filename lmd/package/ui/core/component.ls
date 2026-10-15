@@ -1,5 +1,6 @@
 import elements: lambda.ui.dtna.elements
 import presentation: .presentation
+import binding: .binding
 
 // UI descriptors retain source identity; presentation never owns application data (S12.1.3).
 pub let common_props = ["id", "class", "style", "label", "title", "role", "tabindex"]
@@ -96,8 +97,10 @@ pub fn boolean_props(props, keys, owner, family = "dtna") bool^ {
 pub fn select_options(props, family = "dtna") bool^ {
     if (not (props.options is array)) raise fail("select","options must be an array",family)
     else (
+        // native values are text; requests retain finite numbers such as line spacing.
         let bad = [for (option in props.options where not (option is map) or
-            not (option.value is string or option.value is symbol or option.value is int or option.value is bool) or
+            not (option.value is string or option.value is symbol or
+                finite(option.value) or option.value is bool) or
             (option.disabled != null and not (option.disabled is bool))) option],
         let names = [for (option in props.options) text(option.value)],
         if (len(bad) > 0) raise fail("select","options need scalar values and boolean disabled flags",family)
@@ -106,6 +109,7 @@ pub fn select_options(props, family = "dtna") bool^ {
     )
 }
 pub fn validate(kind, props) bool^ {
+    let action = binding.validate(props.on_change)^;
     // button owns its bool-or-delay loading contract; the other components use bool.
     let booleans = ["disabled", "readonly", "required", "checked", "default_checked", "wrap", "closable", "dot", "show_info", "danger", "block",
         *(if (kind == 'button') [] else ["loading"])]

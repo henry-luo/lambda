@@ -1,0 +1,68 @@
+{
+  "test/input/docx/no-main.docx": {
+    "error_match": "error \\[7602\\]"
+  },
+  "test/input/docx/escape.docx": {
+    "error_match": "error \\[7605\\]"
+  },
+  "test/input/docx/encoded-escape.docx": {
+    "error_match": "error \\[7605\\]"
+  },
+  "test/input/docx/macro.docx": {
+    "error_match": "error \\[7602\\]"
+  },
+  "test/input/docx/malformed.docx": {
+    "error_match": "error \\[7604\\]"
+  },
+  "test/input/docx/unbound-prefix.docx": {
+    "error_match": "error \\[7604\\]"
+  },
+  "test/input/docx/dtd.docx": {
+    "error_match": "error \\[7604\\]"
+  },
+  "test/input/docx/nul.docx": {
+    "error_match": "error \\[7604\\]"
+  },
+  "test/input/docx/style-cycle.docx": {
+    "error_match": "error \\[7607\\]"
+  },
+  "test/input/docx/missing-main-part.docx": {
+    "error_match": "error \\[7603\\]"
+  },
+  "test/input/docx/duplicate-rel.docx": {
+    "error_match": "error \\[7602\\]"
+  },
+  "test/input/docx/duplicate-types.docx": {
+    "error_match": "error \\[7602\\]"
+  },
+  "test/input/docx/corrupt-member.docx": {
+    "error_match": "ZIP member CRC mismatch"
+  },
+  "test/input/docx/duplicate-note.docx": {
+    "error_match": "error \\[7602\\]"
+  },
+  "test/input/docx/missing-note-id.docx": {
+    "error_match": "error \\[7602\\]"
+  },
+  "test/input/docx/invalid-notes-root.docx": {
+    "error_match": "error \\[7602\\]"
+  },
+  "test/input/docx/external-notes.docx": {
+    "error_match": "error \\[7602\\]"
+  },
+  "test/input/ebook/missing-spine.epub": {
+    "error_match": "error \\[7802\\]"
+  },
+  "test/input/ebook/escape.epub": {
+    "error_match": "error \\[7805\\]"
+  },
+  "test/input/ebook/protected.epub": {
+    "error_match": "error \\[7807\\]"
+  },
+  "test/input/ebook/css-cycle.epub": {
+    "error_match": "error \\[7808\\]"
+  },
+  "test/html/paged_media_column_rule_styles.rpd": {
+    "pages": 7
+  }
+}

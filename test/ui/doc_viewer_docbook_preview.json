@@ -1,0 +1,20 @@
+{
+  "name": "Document browser previews original DocBook XML and retains source",
+  "html": "lmd/package/doc/doc_viewer.ls",
+  "viewport": {"width": 1280, "height": 1000},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_docbook .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_docbook_showcase_xml .tree-label"}},
+    {"type": "assert_count", "target": {"selector": "#xml-preview"}, "count": 1},
+    {"type": "switch_frame", "selector": "#xml-preview"},
+    {"type": "assert_text", "target": {"selector": "article.book > header h1"}, "equals": "The Riverside Notebook"},
+    {"type": "assert_style", "target": {"selector": "html"}, "property": "background-color", "equals": "rgb(255, 255, 248)"},
+    {"type": "switch_frame"},
+    {"type": "click", "target": {"selector": ".tab-source"}},
+    {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": "<book xmlns=\"http://docbook.org/ns/docbook\""},
+    {"type": "click", "target": {"selector": ".tab-view"}},
+    {"type": "assert_count", "target": {"selector": "#xml-preview"}, "count": 1}
+  ]
+}

@@ -41,4 +41,6 @@ inline bool virtual_output_bytes(Item value, const char** data, size_t* size) {
 }
 
 MarkOutputBuilder* pdf_builder_create(bool measuring = false);
+// Encode one structured value with the same PDF object encoder used by dictionaries.
+Item pdf_encode_object(Item value);
 

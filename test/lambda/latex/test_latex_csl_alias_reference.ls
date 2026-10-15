@@ -4,8 +4,8 @@
 // biblatex-chicago 3.18b on TeX Live 2025 (test/latex/reference/csl_alias/).
 // Every item prints "same" or the reference and Lambda texts, so this golden is
 // the record of the differences explained in the reference README.
-import latex: lambda.latex.latex
-import util: lambda.latex.util
+import latex: lambda.doc.latex.latex
+import util: lambda.doc.latex.util
 
 let dir = "test/lambda/latex/fixtures/csl_alias/"
 

@@ -1,0 +1,7 @@
+<article xmlns="http://docbook.org/ns/docbook" version="5.2" xml:id="notes">
+  <info><title>Notes and examples</title></info>
+  <para>A note<footnote xml:id="fn"><para>Footnote body.</para></footnote> and again<footnoteref linkend="fn"/>.</para>
+  <note><para>Remember this.</para></note>
+  <warning><title>Careful</title><para>Use care.</para></warning>
+  <example xml:id="example"><title>A formal example</title><para>Example body.</para></example>
+</article>

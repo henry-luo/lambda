@@ -206,12 +206,6 @@ static bool fallback_family_is_color_emoji(const char* family) {
     return family && strstr(family, "Emoji") != NULL;
 }
 
-static bool font_handle_is_fixed_pitch(FontHandle* handle) {
-    if (!handle || !handle->tables) return false;
-    PostTable* post = font_tables_get_post(handle->tables);
-    return post && post->is_fixed_pitch != 0;
-}
-
 static FontHandle* resolve_exact_fallback_family(FontContext* ctx,
                                                   const FontStyleDesc* style,
                                                   const char* family,
@@ -412,7 +406,8 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
     // platform-specific codepoint lookup (macOS: CoreText CTFontCreateForString)
     // Check the platform fallback handle cache first — most codepoints from
     // the same Unicode block resolve to the same font file.
-    if (!font_handle_is_fixed_pitch(source_handle)) {
+    // fixed-pitch faces need platform fallback too when their cmap lacks a character.
+    {
         int face_index = 0;
         void* platform_font_ref = NULL;
         void* base_font_ref = NULL;

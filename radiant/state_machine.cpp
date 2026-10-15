@@ -949,16 +949,15 @@ static void validate_caret_projection_state(DocState* state,
     if ((uint32_t)offset > projection_view_offset_limit(view)) {
         report_fail(report, "caret offset exceeds target length");
     }
-    bool composition_active = state->editing.composition.active;
-    if (!composition_active && visible && view->is_element() &&
-        state->focus && state->focus->current &&
-        view != state->focus->current) {
-        report_fail(report, "caret target differs from focus target");
-    }
-    if (view->is_element()) {
-        DomElement* elem = lam::dom_require_element(view);
-        if (!tc_is_text_control(elem) && visible) {
-            report_fail(report, "visible element caret target is not editable");
+    if (visible) {
+        EditingSurface surface;
+        // A rich caret can sit on an element boundary, including an empty editing host.
+        if (!editing_surface_from_target(view, &surface) || surface.readonly ||
+                surface.disabled || surface.target_in_false_island) {
+            report_fail(report, "visible caret target is not editable");
+        } else if (!state->editing.composition.active &&
+                static_cast<View*>(surface.owner) != focus_get(state)) {
+            report_fail(report, "caret editing owner differs from focus target");
         }
     }
 }

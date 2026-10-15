@@ -1,3 +1,4 @@
+#include "../lambda/io/image_io.h"
 /**
  * GIF Animation Unit Tests
  *

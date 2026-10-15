@@ -1,5 +1,6 @@
 // Shipped facade (D7.2.4); imported views retain their defining module.
 import c: lambda.ui.core.component
+import native: lambda.ui.core.contract
 import theme: .dtna.tokens
 import styles: .dtna.style
 import general: .dtna.general
@@ -56,14 +57,14 @@ view dtna_page: <dtna.page> {
 }
 pub fn button(props = {}, child = null) element^ => button_parts.descriptor(props,child)^
 pub fn button_group(props = {}, child = null) element^ => layout_parts.compact('button-group',props,child)^
-pub fn input(props = {}) element^ => component('input', props, null, ["type", "value", "default_value", "placeholder", "name", "readonly", "required", "maxlength", "autocomplete"])^
-pub fn text_area(props = {}) element^ => component('text-area', props, null, ["value", "default_value", "placeholder", "name", "readonly", "required", "maxlength", "rows"])^
+pub fn input(props = {}) element^ => component('input', props, null, native.fields.input)^
+pub fn text_area(props = {}) element^ => component('text-area', props, null, native.fields['text-area'])^
 pub fn password(props = {}) element^ => input({*:props, type:"password"})^
 pub fn search(props = {}) element^ => input({*:props, type:"search"})^
-pub fn select(props = {}) element^ => component('select', props, null, ["options", "value", "default_value", "name", "required"])^
-pub fn checkbox(props = {}, child = null) element^ => component('checkbox', props, child, ["name", "value", "checked", "default_checked"])^
-pub fn radio(props = {}, child = null) element^ => component('radio', props, child, ["name", "value", "checked", "default_checked"])^
-pub fn switch(props = {}) element^ => component('switch', props, null, ["checked", "default_checked"])^
+pub fn select(props = {}) element^ => component('select', props, null, native.fields.select)^
+pub fn checkbox(props = {}, child = null) element^ => component('checkbox', props, child, native.fields.checkbox)^
+pub fn radio(props = {}, child = null) element^ => component('radio', props, child, native.fields.radio)^
+pub fn switch(props = {}) element^ => component('switch', props, null, native.fields.switch)^
 pub fn icon(props = {}) element^ => icon_parts.descriptor(props)^
 pub fn icon_names() array => icon_parts.names()
 pub fn title(props = {}, child = null) element^ => typography.descriptor('title',props,child)^

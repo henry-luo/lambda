@@ -1,7 +1,7 @@
 // Standalone documents must declare bundled faces independently of the source directory.
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 import math: lambda.doc.math.math
-import amssymb: lambda.latex.packages.amssymb
+import amssymb: lambda.doc.latex.packages.amssymb
 
 fn stylesheet_links(node) {
     if (node is array or node is list)
@@ -14,8 +14,8 @@ fn stylesheet_links(node) {
 
 fn bundled_faces(node) {
     let links = stylesheet_links(node)
-    {cmu: any([for (link in links) ends_with(link.href, "/package/latex/fonts/cmu-combined.css")]) or false,
-     katex: any([for (link in links) ends_with(link.href, "/package/math/katex.css")]) or false,
+    {cmu: any([for (link in links) ends_with(link.href, "/package/doc/latex/fonts/cmu-combined.css")]) or false,
+     katex: any([for (link in links) ends_with(link.href, "/package/doc/math/katex.css")]) or false,
      absolute: len(links) == 1 and all([for (link in links) starts_with(link.href, "/") or
         (len(link.href) > 2 and slice(link.href, 1, 2) == ":")]),
      readable: len(links) == 1 and all([for (link in links) exists(link.href)])}

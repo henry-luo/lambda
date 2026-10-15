@@ -1,4 +1,4 @@
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 let ast = input("test/lambda/latex/fixtures/package_diagnostics.tex", {type: "latex"}) ^ { null }
 let result = latex.render_result(ast, {base_uri: "test/lambda/latex/fixtures"})

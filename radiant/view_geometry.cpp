@@ -235,41 +235,15 @@ RdtLogicalPoint view_geometry_child_node_origin(
         resolve_scroll, context);
 }
 
-RdtLogicalPoint view_geometry_apply_external_viewport(
-        RdtLogicalPoint point, ViewBlock* viewport_root,
-        RdtLogicalPoint document_offset,
-        ViewGeometryScrollResolver resolve_scroll, void* context) {
-    float scroll_x = 0.0f;
-    float scroll_y = 0.0f;
-    view_geometry_resolve_scroll(viewport_root, resolve_scroll, context,
-                                 &scroll_x, &scroll_y);
-    if (fabsf(document_offset.x + scroll_x) >= 0.5f) point.x -= scroll_x;
-    if (fabsf(document_offset.y + scroll_y) >= 0.5f) point.y -= scroll_y;
-    point.x += document_offset.x;
-    point.y += document_offset.y;
-    return point;
-}
-
 RdtLogicalPoint view_geometry_local_to_window(
-        View* view, RdtLogicalPoint local, ViewBlock* viewport_root,
-        RdtLogicalPoint document_offset,
+        View* view, RdtLogicalPoint local, RdtLogicalPoint document_offset,
         ViewGeometryScrollResolver resolve_scroll, void* context) {
     RdtLogicalPoint point = view_geometry_local_to_block_viewport(
         view, local, resolve_scroll, context);
-    bool root_scroll_applied = view_geometry_is_descendant(
-        view ? view->parent : nullptr, static_cast<View*>(viewport_root));
-    if (root_scroll_applied) {
-        // Undo the in-chain root scroll before the common viewport step. That
-        // step reapplies it only when the external document offset omits it.
-        float scroll_x = 0.0f;
-        float scroll_y = 0.0f;
-        view_geometry_resolve_scroll(viewport_root, resolve_scroll, context,
-                                     &scroll_x, &scroll_y);
-        point.x += scroll_x;
-        point.y += scroll_y;
-    }
-    return view_geometry_apply_external_viewport(
-        point, viewport_root, document_offset, resolve_scroll, context);
+    // document_offset joins viewport spaces; each document's scroll was already applied in its chain.
+    point.x += document_offset.x;
+    point.y += document_offset.y;
+    return point;
 }
 
 static bool view_geometry_find_document_offset(

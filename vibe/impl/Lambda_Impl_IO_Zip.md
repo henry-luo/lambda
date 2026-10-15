@@ -1,14 +1,16 @@
 # ZIP I/O implementation
 
 > **Status:** DONE (2026-10-08), Phase 1 input and Phase 2 output.
+> **Phase 3:** DONE (2026-10-15), native 7zip/tar/RAR/RAR5 input, with upstream
+> sources and the authorized embedding delta directly under `lib/zip`.
 > **Design:** [Lambda_IO_Zip.md](../Lambda_IO_Zip.md).
-> **Formal anchors:** **S12.4.1v2/S14.3.1v2** (captured ZIP32/ZIP64 input and
+> **Formal anchors:** **S12.4.1v3/S14.3.1v3** (captured ZIP32/ZIP64 input and
 > lazy member decoding), **D7.4.5v2** (virtual carriers), **D7.1.2v2/D7.5.2**
 > (I/O layering), **D4.1.3/D4.2.4/D5.3.3** (ownership and rooting).
 
 ## Delivered behavior
 
-**Phase 1 — input (S12.4.1v2/S14.3.1v2).** `input()` recognizes standard
+**Phase 1 — input (S12.4.1v3/S14.3.1v3).** `input()` recognizes standard
 single-disk ZIP32/ZIP64 by content, including renamed, extensionless and
 ZIP-backed Office/package files. Explicit formats remain authoritative.
 Acquisition preserves exact binary lengths for local and HTTP sources, applies
@@ -42,9 +44,9 @@ valid DOS date, 1980-01-01. Append is rejected. The complete bounded archive is
 encoded before the shared checked atomic writer publishes its replacement.
 Formatting, payload, quota or encoding failure leaves an existing target intact.
 
-Both phases are complete within the proposal's profile. Other archive formats,
-encryption, extraction, semantic Word import and the general local `fs(path)`
-factory remain outside this work's scope.
+Both phases are complete within the proposal's ZIP profile. Phase 3 adds native
+7zip/tar/RAR/RAR5 input, described below. Encryption, extraction, semantic Word import
+and the general local `fs(path)` factory remain outside this work's scope.
 
 ## Implementation and compatibility
 
@@ -68,7 +70,7 @@ and Jube ABI to 9 (**D7.4.5v2**). All five bundled native modules were rebuilt
 with matching manifests. Deferred failures remain visible through content,
 indexing, iteration, query and formatting. `len` retains its `int` contract;
 lazy host failures use the existing defect channel and compiler `may_defect`
-fact (**S7.4.3/S14.3.1v2/D6.1.3v2**). Concrete string/array length paths retain
+fact (**S7.4.3/S14.3.1v3/D6.1.3v2**). Concrete string/array length paths retain
 their native treatment, with physical virtual-array dispatch checked first.
 Ordinary file and directory input results are preserved.
 
@@ -124,7 +126,7 @@ scratch files under `temp/`; ordinary regression runs need no Java install.
 
 The native regression verifies zero decodes while indexing/reading metadata,
 individual member decoding and cached class reads
-(**S12.4.1v2/S14.3.1v2**). Two new goldens cover automatic/explicit ZIP input,
+(**S12.4.1v3/S14.3.1v3**). Two new goldens cover automatic/explicit ZIP input,
 filesystem navigation, manifest text, class-file bytes, resources and explicit
 ZIP output to a `.jar` target. Both join the existing tier-parity gate.
 
@@ -144,13 +146,13 @@ contents are documented in `test/input/zip/README.md`.
 `lambda view <path>` routes directories and ZIP32/ZIP64 archives through the
 bundled `lambda.doc.doc_viewer.open_browser` path transform (**D7.2.4**).
 Routing uses the shared extension/signature detector; `input()` still performs
-validation and immutable capture (**S12.4.1v2**). DOCX, JAR, renamed and
+validation and immutable capture (**S12.4.1v3**). DOCX, JAR, renamed and
 extensionless archives open the same tree. The existing HTTP probe recognizes
 ZIP bytes before staging its local input.
 
 Tree rows retain the actual host Path or archive `fs` node, with display paths
 kept separately. Expanding directories enumerates child metadata; selecting a
-member requests its content (**S14.3.1v2/D7.4.5v2**). Nested archive rows open
+member requests its content (**S14.3.1v3/D7.4.5v2**). Nested archive rows open
 explicitly as ZIP. Member dotfiles remain visible, parse errors preserve raw
 source access, and deferred CRC failures appear at the affected row/preview.
 Images use existing binary-to-base64 formatting for data URLs; HTML previews
@@ -161,7 +163,7 @@ as filesystem resources or a new URL scheme.
 Debug element logging previously traversed embedded virtual nodes and decoded
 unopened members while building tree rows. Diagnostic printing now describes
 virtual carriers without invoking callbacks, preserving laziness and expansion
-budgets (**S14.3.1v2**); explicit value printing still accesses content. A
+budgets (**S14.3.1v3**); explicit value printing still accesses content. A
 native regression verifies both behaviors.
 
 Validation:
@@ -177,3 +179,62 @@ Validation:
 | Loopback HTTP DOCX viewer | Passed Office MIME acquisition, ZIP tree dispatch and **9/9** member preview assertions. |
 
 Commands, event fixtures and logs are retained under `test/ui/` and `temp/`.
+
+## Phase 3 — 7zip, tar, and RAR input (2026-10-15)
+
+Design and acceptance: [Phase 3](../Lambda_IO_Zip.md#10-phase-3-7zip-tar-and-rar-input).
+Native `input()` now accepts 7z, V7/ustar/pax/GNU tar, gzip/bzip2/xz/zstd tar,
+non-solid legacy RAR and RAR5. `'rar'` accepts either signature; `'rar5'` is
+strict. ZIP input/output retains its format parser/writer, and the common
+filesystem adapter also converts the new trees to ZIP. Browser WASM retains
+ZIP input; the native backends return an unavailable-format error there.
+
+| Step | Status / delivered work |
+|---|---|
+| Upstream import | **DONE:** libarchive 3.8.10, 58 C/header files plus upstream `COPYING`, flat in `lib/zip`. Release hash, pristine/applied manifests and patch reproduction verified. |
+| Evaluation contract | **DONE:** **S12.4.1v3/S14.3.1v3** ratify eager snapshots/indexes, compressed 7z metadata, lazy 7z/legacy-RAR bodies, and eager compressed-tar/RAR5 capture. |
+| Native build | **DONE:** selected C sources and generated platform header configured in JSON; native zlib/liblzma/bzip2/zstd/iconv; no external-program filters (**D7.5.2**). |
+| Shared archive layer | **DONE:** `archive.cpp` owns snapshot/index/name validation, quotas and payload/error caches; ZIP retains its decoder/writer; `archive_native.cpp` supplies native readers. Existing `fs` carriers, parse caches and precise lifetime ownership are reused (**D7.4.5v2/D4.1.3/D4.2.4/D5.3.3**). |
+| Embedding controls | **DONE:** the user authorized direct edits under `lib/zip`. The recorded patch fixes per-reader charset/Unicode preservation and entry reuse, recoverable fatal allocation errors, 7z method/output policy, split/solid-RAR rejection, RAR5 Stored/zero-CRC finalization, and strict overridden names. See `lib/zip/VENDOR.md`. |
+| Decoder accounting | **DONE:** native parser allocations and partial-reader cleanup are tracked; codec workspace is bounded. Actual solid 7z predecessor/repeated output is charged, including Copy; terminal failures and cached reads cannot reset the ledger. gzip uses zlib's verified gzip wrapper rather than upstream's unchecked trailer adapter. |
+| Public dispatch | **DONE:** explicit/automatic format selection, raw binary reads, explicit mixed-format nesting, shared limits and archive viewer routing. Image/HTTP embedded streams keep native codec APIs; acquisition/member/image composition stays at Lambda's I/O boundary (**D7.5.2**). |
+| Regression fixtures | **DONE:** pinned upstream independent 7z/RAR fixtures plus reproducible Python tar/wrappers, corrupt/unsafe/unsupported cases, four new `.ls`/`.txt` pairs in tier parity, and viewer fixtures. |
+
+Verification on macOS:
+
+- `make build`: passed.
+- Native archive suite: **29/29 passed**, including existing ZIP32/ZIP64/JAR
+  regressions, zero body decodes while indexing, solid predecessor/repeated
+  accounting, eager RAR5 CRC32/BLAKE2sp, tar variants/wrapper integrity,
+  Unicode spelling, empty Stored RAR5 checksums, conversion metadata and
+  allocation-cutoff cleanup.
+- Four new Lambda goldens on interp/auto/jit, ordinary and forced/poisoned GC:
+  **24/24 passed**. The standard GTest golden runner also passed **4/4**.
+- Input baseline: **2112/2112 passed**.
+- Project-policy pattern/structural lint pass (`make lint ARGS='--no-structural'`):
+  no archive adapter findings; existing unused-function warnings remain.
+- Source manifests and pristine-plus-patch byte comparison: passed.
+- Headless viewer replays: **9/9 passed**, **27/27 assertions**, covering each
+  native container with ordinary/forced-GC reads and mixed 7z/RAR5 nesting.
+- Premake generator self-test: passed.
+- Documentation code check: **59 clean**, three failures in unchanged examples
+  (wiki option rejection E7801, missing `photo.jpg` E400, and a standalone
+  `save(image, ...)` example without a typed image E312); archive documentation introduces no failing unit.
+- `make test-lambda-baseline`: input **2112/2112**, runtime **5375/5377**.
+  The two failures were `JsMvpLmd.PropertyExpansionFixedPropertyDispatch` and
+  `PropertyExpansionLocalDenseStorage`: their temporary MIR dump reads returned
+  null during the parallel run. Both passed immediately on an isolated rerun
+  (**2/2**); no JS code, expectations or test exclusions were changed. The
+  baseline's archive binary passed **28/28** before the final metadata test;
+  the final focused archive binary passed **29/29**. A later full JS MVP rerun encountered additional dump-file failures and
+  stopped with `Error opening file: No space left on device`. The filesystem
+  had only 225 MiB free at the final check. This environmental gate remains
+  unclean; unrelated artifacts were left untouched.
+
+The admitted 7z profile has one Copy/LZMA/LZMA2 data coder with at most one
+supported BCJ/Delta filter. BCJ2 and PPMd are rejected at indexing. Legacy solid
+RAR, encryption, split/self-extracting archives, links/special files and
+standalone compressed streams remain outside the profile. No image-library or
+curl vendor changes were made. zlib remains required by archive codecs and
+existing PNG/PDF/font/network consumers. Linux/Windows configurations are
+provided; execution verification in this change is macOS-only.

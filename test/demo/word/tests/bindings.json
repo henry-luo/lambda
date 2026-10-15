@@ -1,0 +1,33 @@
+{
+  "name": "Word bindings follow document selection and preserve search-field caret ownership",
+  "html": "test/demo/word/word.ls",
+  "viewport": {"width": 1440, "height": 1000},
+  "events": [
+    {"type":"click","target":{"selector":"#new"}},
+    {"type":"type","target":{"selector":"#edit-surface p"},"text":"one two","clear":false},
+    {"type":"set_editing_selection","target":{"selector":"#edit-surface p"},"start":0,"end":3},
+    {"type":"select_option","target":{"selector":"#font-size"},"value":"18"},
+    {"type":"assert_value","target":{"selector":"#font-size"},"equals":"18"},
+    {"type":"assert_style","target":{"selector":"#edit-surface span"},"property":"font-size","equals":"24px"},
+    {"type":"click","target":{"text":"two"}},
+    {"type":"assert_value","target":{"selector":"#font-size"},"equals":"11"},
+    {"type":"assert_count","target":{"selector":"#edit-surface span"},"count":1},
+    {"type":"assert_text","target":{"selector":"#edit-surface p"},"equals":"one two"},
+    {"type":"select_option","target":{"selector":"#line-spacing"},"value":"1.15"},
+    {"type":"assert_value","target":{"selector":"#line-spacing"},"equals":"1.15"},
+    {"type":"assert_attribute","target":{"selector":"#edit-surface p"},"attribute":"style","contains":"line-height: 1.15"},
+    {"type":"type","target":{"selector":"#find-query"},"text":"two","clear":true},
+    {"type":"assert_value","target":{"selector":"#find-query"},"equals":"two"},
+    {"type":"assert_form_selection","target":{"selector":"#find-query"},"start":3,"end":3},
+    {"type":"assert_focus","target":{"selector":"#find-query"}},
+    {"type":"key_press","key":"Home"},
+    {"type":"type","target":{"selector":"#find-query"},"text":"x","clear":false},
+    {"type":"assert_value","target":{"selector":"#find-query"},"equals":"xtwo"},
+    {"type":"assert_form_selection","target":{"selector":"#find-query"},"start":1,"end":1},
+    {"type":"assert_text","target":{"selector":"#search-summary"},"equals":"0 matches"},
+    {"type":"click","target":{"selector":"#find-clear"}},
+    {"type":"assert_value","target":{"selector":"#find-query"},"equals":""},
+    {"type":"assert_text","target":{"selector":"#edit-surface p"},"equals":"one two"},
+    {"type":"assert_count","target":{"selector":"#edit-surface span"},"count":1}
+  ]
+}

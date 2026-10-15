@@ -562,6 +562,35 @@ TEST_F(StateStoreDomMutationTest, RetiredBlurredTextControlReleasesCanonicalSele
     state_end_batch(state());
 }
 
+TEST_F(StateStoreDomMutationTest, CaretFrameOffsetExcludesAncestorScroll) {
+    ASSERT_TRUE(root->remove_child(orphan));
+    ASSERT_TRUE(live->append_child(orphan));
+    live->x = 40.0f;
+    live->y = 214.0f;
+    ScrollPane pane = {};
+    pane.v_max_scroll = 1000.0f;
+    pane.h_max_scroll = 1000.0f;
+    ScrollProp scroll = {};
+    scroll.pane = lam::own(&pane);
+    live->scroller = lam::view_prop(&scroll);
+    scroll_state_set_position_for_view(state(), live, &pane, 20.0f, 300.0f, false);
+
+    // a top-level pane has no iframe translation; an embedded pane retains only its frame offset.
+    for (float frame_y : {0.0f, 180.0f}) {
+        caret_project_visual_from_block(state(), orphan, 7.0f, 11.0f, 16.0f,
+                                        20.0f, -86.0f + frame_y);
+        ASSERT_NE(state()->selection_presentation, nullptr);
+        EXPECT_FLOAT_EQ(state()->selection_presentation->iframe_offset_x, 0.0f);
+        EXPECT_FLOAT_EQ(state()->selection_presentation->iframe_offset_y, frame_y);
+        RdtLogicalPoint point = view_geometry_local_to_window(orphan, {7.0f, 11.0f},
+            {state()->selection_presentation->iframe_offset_x,
+             state()->selection_presentation->iframe_offset_y}, scroll_state_resolve_view_geometry);
+        EXPECT_FLOAT_EQ(point.x, 27.0f);
+        EXPECT_FLOAT_EQ(point.y, -75.0f + frame_y);
+    }
+    live->scroller = nullptr;
+}
+
 TEST_F(StateStoreDomMutationTest, DetachedTextControlRetainsValueAcrossReflow) {
     DocState* doc_state = state();
     ASSERT_NE(doc_state, nullptr);

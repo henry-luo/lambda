@@ -1,7 +1,7 @@
 // Corpus records separate script semantics from actual exporter success (S7.4.1–S7.4.4).
-import latex: lambda.latex.latex
-import util: lambda.latex.util
-import html: lambda.latex.to_html
+import latex: lambda.doc.latex.latex
+import util: lambda.doc.latex.util
+import html: lambda.doc.latex.to_html
 
 pub let SAMPLES = ["algebra", "arithmetic_lualatex", "biblatex_biber", "booktabs",
     "bungee_model", "complex_numbers", "diagonal_table_cells", "dragon_curve",

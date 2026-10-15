@@ -1,0 +1,32 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>PDF phase 6 Ω</title>
+<meta name="author" content="Lambda"><meta name="description" content="Functional graphics">
+<style>
+html,body {margin:0;padding:0;background:white;font:16px Arial}
+.box {position:absolute;width:60px;height:50px;top:10px}
+#rounded {left:10px;background:#2040e0;border:4px solid #e03020;border-radius:16px;outline:2px dashed #208020;outline-offset:3px}
+#gradient {left:90px;background:linear-gradient(to right,red,blue)}
+#group {position:absolute;left:170px;top:10px;width:100px;height:60px;opacity:.5}
+.red {position:absolute;width:60px;height:50px;background:red}
+.blue {position:absolute;left:30px;width:60px;height:50px;background:blue}
+#shadow {position:absolute;left:10px;top:80px;width:60px;height:40px;background:#20b060;box-shadow:6px 6px 4px #555}
+#decorated {position:absolute;left:90px;top:80px;text-decoration:underline wavy red;text-shadow:2px 2px 1px #aaa}
+svg {position:absolute;left:10px;top:140px}
+ul {position:absolute;left:120px;top:120px;margin:0}
+#inset {position:absolute;left:200px;top:85px;width:65px;height:30px;background:#ffd000;box-shadow:inset 8px 8px 6px rgba(0,0,0,.5)}
+#outlineorder {position:absolute;left:200px;top:145px;width:60px;height:35px;outline:4px solid red}
+#outlineorder div {position:absolute;left:-5px;top:-5px;width:70px;height:45px;background:blue}
+#blend {position:absolute;left:200px;top:190px;width:60px;height:16px;background:linear-gradient(to right,red 50%,blue 50%)}
+#blend div {position:absolute;left:0;top:0;width:25px;height:16px;background:red;mix-blend-mode:multiply;transform:translateX(30px)}
+#links {position:absolute;left:10px;top:210px}
+</style></head><body>
+<div id="rounded" class="box" data-pdf-outline-title="Chapter Ω"></div>
+<div id="gradient" class="box" data-pdf-outline-title="Section 中😀" data-pdf-outline-level="2"></div>
+<div id="group"><div class="red"></div><div class="blue"></div></div>
+<div id="shadow"></div><div id="decorated">Decorated Ω</div>
+<svg width="90" height="50" viewBox="0 0 90 50"><path d="M 5 5 L 80 5 L 45 45 Z" fill="#00a040" stroke="#2030e0" stroke-width="3"/></svg>
+<ul><li>First</li><li>Second</li></ul>
+<div id="inset"></div><div id="outlineorder"><div></div></div>
+<div id="blend"><div></div></div>
+<div id="links"><a href="#gradient">internal</a> <a href="https://example.com/?a=1&amp;b=2">external</a></div>
+</body></html>

@@ -1,0 +1,161 @@
+[
+  {
+    "name": "html",
+    "path": "test/html/pdf_lambda_phase6.html",
+    "paged": false
+  },
+  {
+    "name": "xhtml",
+    "path": "test/html/xhtml_feature_gallery.xhtml",
+    "paged": false
+  },
+  {
+    "name": "markdown",
+    "path": "test/input/sample.md",
+    "paged": false
+  },
+  {
+    "name": "wiki",
+    "path": "test/input/simple.wiki",
+    "paged": false
+  },
+  {
+    "name": "docx",
+    "path": "test/input/docx/minimal.docx",
+    "paged": false
+  },
+  {
+    "name": "docx_media",
+    "path": "test/input/docx/media.docx",
+    "paged": false
+  },
+  {
+    "name": "epub",
+    "path": "test/input/ebook/minimal.epub",
+    "paged": false
+  },
+  {
+    "name": "docbook",
+    "path": "test/input/docbook/showcase.xml",
+    "paged": false
+  },
+  {
+    "name": "xml",
+    "path": "test/input/test.xml",
+    "paged": false
+  },
+  {
+    "name": "latex",
+    "path": "test/input/test_input.tex",
+    "paged": false
+  },
+  {
+    "name": "tikz",
+    "path": "test/input/tikz/diagrama_venn2.pgf",
+    "paged": false
+  },
+  {
+    "name": "slides",
+    "path": "test/demo/slides/slide_presentation.slides",
+    "paged": false
+  },
+  {
+    "name": "svg",
+    "path": "test/html/xhtml_feature_gallery_mark.svg",
+    "paged": false
+  },
+  {
+    "name": "jpeg",
+    "path": "test/input/sample1.jpg",
+    "paged": false
+  },
+  {
+    "name": "gif",
+    "path": "test/html/animation_two_frame.gif",
+    "paged": false
+  },
+  {
+    "name": "mermaid",
+    "path": "test/input/simple_flowchart.mmd",
+    "paged": false
+  },
+  {
+    "name": "graphviz",
+    "path": "test/input/fsm.dot",
+    "paged": false
+  },
+  {
+    "name": "d2",
+    "path": "test/input/system_design.d2",
+    "paged": false
+  },
+  {
+    "name": "structurizr",
+    "path": "test/lambda/graph/structurizr/basic.dsl",
+    "paged": false
+  },
+  {
+    "name": "eps",
+    "path": "test/input/eps/vector.eps",
+    "paged": false
+  },
+  {
+    "name": "json",
+    "path": "test/input/test.json",
+    "paged": false
+  },
+  {
+    "name": "yaml",
+    "path": "test/input/test.yaml",
+    "paged": false
+  },
+  {
+    "name": "toml",
+    "path": "test/input/test.toml",
+    "paged": false
+  },
+  {
+    "name": "ini",
+    "path": "test/input/test.ini",
+    "paged": false
+  },
+  {
+    "name": "csv",
+    "path": "test/input/test.csv",
+    "paged": false
+  },
+  {
+    "name": "text",
+    "path": "test/input/test.txt",
+    "paged": false
+  },
+  {
+    "name": "lambda",
+    "path": "test/html/ui_script_content_gc.ls",
+    "paged": false
+  },
+  {
+    "name": "pdf",
+    "path": "test/input/pdf_three_pages.pdf",
+    "paged": false
+  },
+  {
+    "name": "fixed_pdf",
+    "path": "test/input/pdf_three_pages.pdf",
+    "paged": true
+  },
+  {
+    "name": "rpd",
+    "path": "test/html/paged_media_column_rule_styles.rpd",
+    "paged": true
+  },
+  {
+    "name": "fo",
+    "path": "test/html/paged_media_basic.fo",
+    "paged": true
+  },
+  {
+    "name": "png",
+    "path": "test/render/reference/object_position_01.png"
+  }
+]

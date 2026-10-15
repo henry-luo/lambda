@@ -92,7 +92,9 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
                                                       bool opaque_background,
                                                       float density,
                                                       RenderEffectRasterImage* out,
-                                                      const char* log_prefix) {
+                                                      const char* log_prefix,
+                                                      const RdtMatrix* placement = nullptr,
+                                                      const Bound* capture_clip = nullptr) {
     if (!paint_list || !out) return false;
     memset(out, 0, sizeof(RenderEffectRasterImage));
 
@@ -100,6 +102,8 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
     Bound capture = bounds ? *bounds : Bound{0.0f, 0.0f, viewport_width, viewport_height};
     if (capture.right <= capture.left || capture.bottom <= capture.top)
         capture = Bound{0.0f, 0.0f, viewport_width, viewport_height};
+    if (placement && !rdt_matrix_project_rect_bounds(placement, capture.left, capture.top,
+            capture.right, capture.bottom, &capture.left, &capture.top, &capture.right, &capture.bottom)) return false;
     capture = Bound{floorf(capture.left * density), floorf(capture.top * density),
         ceilf(capture.right * density), ceilf(capture.bottom * density)};
     OffscreenRenderArenas arenas;
@@ -111,15 +115,32 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
     DisplayList dl = {};
     dl_init(&dl, arenas.list_arena);
     RdtMatrix scale = rdt_matrix_scale(density, density);
+    if (placement) scale = rdt_matrix_multiply(&scale, placement);
     // export PaintIR is logical; replay and filter regions use the page's physical density once.
     paint_ir_lower_raster_transformed(paint_list, &dl, &scale);
     Bound ink = dl_content_bounds(&dl);
-    if (ink.right > ink.left && ink.bottom > ink.top)
+    if (capture_clip && !opaque_background) {
+        // a PDF resource needs painted ink, not transparent space in its owner's layout box.
+        capture = {floorf(ink.left), floorf(ink.top), ceilf(ink.right), ceilf(ink.bottom)};
+    } else if (ink.right > ink.left && ink.bottom > ink.top)
         capture = {floorf(min(capture.left, ink.left)), floorf(min(capture.top, ink.top)),
             ceilf(max(capture.right, ink.right)), ceilf(max(capture.bottom, ink.bottom))};
-    size_t bytes = 0;
     if (!isfinite(capture.left) || !isfinite(capture.top) ||
-        !render_surface_allocation_size(capture.right - capture.left, capture.bottom - capture.top, &bytes)) {
+        !isfinite(capture.right) || !isfinite(capture.bottom)) {
+        log_error("%s nonfinite raster fallback bounds", log_prefix ? log_prefix : "[EFFECT_RASTER]");
+        dl_destroy(&dl); arenas.destroy(); return false;
+    }
+    if (capture_clip) {
+        // PDF captures page coordinates, including transformed resources outside the sheet.
+        capture = {max(capture.left, capture_clip->left), max(capture.top, capture_clip->top),
+            min(capture.right, capture_clip->right), min(capture.bottom, capture_clip->bottom)};
+        if (capture.right <= capture.left || capture.bottom <= capture.top) {
+            bool valid = dl_validate_or_log(&dl, "empty raster resource");
+            dl_destroy(&dl); arenas.destroy(); return valid;
+        }
+    }
+    size_t bytes = 0;
+    if (!render_surface_allocation_size(capture.right - capture.left, capture.bottom - capture.top, &bytes)) {
         log_error("%s invalid raster fallback bounds", log_prefix ? log_prefix : "[EFFECT_RASTER]");
         dl_destroy(&dl); arenas.destroy(); return false;
     }
@@ -133,7 +154,11 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
     dl_destroy(&dl);
     arenas.destroy();
 
-    if (!surface) return false;
+    if (!surface) {
+        log_error("%s cannot capture raster region [%g %g %g %g]", log_prefix ? log_prefix : "[EFFECT_RASTER]",
+            capture.left, capture.top, capture.right, capture.bottom);
+        return false;
+    }
     float offset_x = 0.0f, offset_y = 0.0f;
     // conservative recording bounds must not add transparent reader-sampled image borders.
     image_surface_trim_transparent_margin(surface, &offset_x, &offset_y);

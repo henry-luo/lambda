@@ -1134,70 +1134,20 @@ static void layout_flex_item_content_pass(LayoutContext* lycon, ViewBlock* flex_
             // replaced SVG sizing still needs to lay out its foreignObject formatting contexts.
             layout_svg_foreign_objects(lycon, flex_item->as_element());
         } else if (elmt_name == MARKUP_NAME_IFRAME) {
-            if (lycon->ui_context->iframe_depth >= MAX_IFRAME_DEPTH) {
-                log_warn("flex iframe: maximum nesting depth (%d) exceeded, skipping", MAX_IFRAME_DEPTH);
-                return;
-            }
-
             float flex_border_width = flex_item->width;
             float flex_border_height = flex_item->height;
             LayoutContentBox iframe_content = layout_content_box(flex_item);
+            // Flex and block flow share source admission, srcdoc replacement, and resource ownership.
+            layout_ensure_iframe_document(lycon, flex_item, iframe_content.width, iframe_content.height);
 
-            if (!(flex_item->embed && flex_item->embedp()->doc)) {
-                const char *src_value = flex_item->get_attribute("src");
-                if (src_value) {
-                    if (iframe_navigation_must_not_run_in_layout(lycon, src_value)) {
-                        // D5.4.1: flex layout cannot recursively claim a remote
-                        // iframe's evaluator while it owns the parent isolate.
-                        log_debug("flex iframe: deferring cross-origin navigation: %s", src_value);
-                        return;
-                    }
-                    lycon->ui_context->iframe_depth++;
-
-                    DomDocument* doc = layout_load_iframe_src_doc(lycon, src_value,
-                        // The embedded viewport excludes the flex item's border and padding.
-                        (int)iframe_content.width, // INT_CAST_OK: viewport API expects int
-                        (int)iframe_content.height); // INT_CAST_OK: viewport API expects int
-                    if (doc) {
-                        radiant_document_ensure_state(doc, "layout_flex_iframe");
-                        if (!flex_item->embed) {
-                            flex_item->ensure_embed(lycon);
-                        }
-                        flex_item->embed->doc = lam::own(doc);
-                        dom_document_set_embedding(doc, lycon->ui_context->document,
-                                                   (DomElement*)flex_item);
-                        if (doc->html_root) {
-                            layout_iframe_embedded_doc(lycon, doc,
-                                (int)iframe_content.width, // INT_CAST_OK: iframe viewport expects int
-                                (int)iframe_content.height); // INT_CAST_OK: iframe viewport expects int
-                        }
-                        lycon->ui_context->iframe_depth--;
-                    } else {
-                        lycon->ui_context->iframe_depth--;
-                    }
+            if (flex_item->embed && layout_iframe_content_size(flex_item->embedp()->doc,
+                    &flex_item->content_width, &flex_item->content_height)) {
+                if (!flex_item->scroller) {
+                    flex_item->ensure_scroll(lycon);
+                    flex_item->scroller->overflow_x = CSS_VALUE_AUTO;
+                    flex_item->scroller->overflow_y = CSS_VALUE_AUTO;
                 }
-            }
-
-            if (flex_item->embed && flex_item->embedp()->doc && flex_item->embedp()->doc->view_tree) {
-                ViewBlock* doc_root = lam::view_as_block(flex_item->embedp()->doc->view_tree->root);
-                if (doc_root) {
-                    if (doc_root->scroller) {
-                        if (doc_root->content_height > doc_root->height) {
-                            doc_root->height = doc_root->content_height;
-                        }
-                        doc_root->scroller = NULL;
-                    }
-                    flex_item->content_width = doc_root->content_width > 0 ? doc_root->content_width : doc_root->width;
-                    flex_item->content_height = doc_root->content_height > 0 ? doc_root->content_height : doc_root->height;
-
-                    if (!flex_item->scroller) {
-                        flex_item->ensure_scroll(lycon);
-                        flex_item->scroller->overflow_x = CSS_VALUE_AUTO;
-                        flex_item->scroller->overflow_y = CSS_VALUE_AUTO;
-                    }
-
-                    update_scroller(flex_item, flex_item->content_width, flex_item->content_height);
-                }
+                update_scroller(flex_item, flex_item->content_width, flex_item->content_height);
             }
             // CRITICAL: Restore the flex-determined dimensions
             flex_item->width = flex_border_width;

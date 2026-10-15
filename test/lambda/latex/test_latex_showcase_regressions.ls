@@ -1,8 +1,8 @@
 // Regressions found in test/input/latex-showcase.tex: calc's \setlength under
 // the TeX engine, the multicols preface, \/ and \slash, framed pictures, and
 // textgreek/textcomp/gensymb symbols.
-import latex: lambda.latex.latex
-import html: lambda.latex.to_html
+import latex: lambda.doc.latex.latex
+import html: lambda.doc.latex.to_html
 
 fn render(body) {
     let doc = "\\documentclass{article}\n\\usepackage{calc,multicol,textgreek,textcomp,gensymb}\n" ++

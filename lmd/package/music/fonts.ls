@@ -7,7 +7,7 @@ pub let TEXT_FAMILY = "LambdaMusicText"
 pub fn prepare() map^ {
     let base = sys.lambda.home# ++ "/package/"
     let faces = [{font_family: "LambdaMusicSymbols", data: input(base ++ "music/fonts/Bravura.otf", 'binary')^},
-        {font_family: TEXT_FAMILY, data: input(base ++ "latex/fonts/Serif/cmunrm.woff2", 'binary')^}]
+        {font_family: TEXT_FAMILY, data: input(base ++ "doc/latex/fonts/Serif/cmunrm.woff2", 'binary')^}]
     let names = [for (k,v in symbols.codepoints) string(k)]
     let metrics = radiant.math_metrics({font_family: "LambdaMusicSymbols", font_size: 4.0},
         [for (n in names) symbols.codepoints[n]], faces)

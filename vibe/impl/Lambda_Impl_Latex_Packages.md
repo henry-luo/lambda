@@ -2,8 +2,8 @@
 
 **Design:** [Lambda_Pkg_Latex.md](../Lambda_Pkg_Latex.md) (§6 package model, §9 compatibility matrix, §10 verification rules, §11 outstanding work); [TeX engine design](../latex/Lambda_Design_TeX_Engine.md) §5 and §10; [Lambda_Pkg_Math.md](../Lambda_Pkg_Math.md) §3, §7 and §10.2; [Lambda_Pkg_Slides.md](../Lambda_Pkg_Slides.md) for beamer.
 **Status:** In progress. Proposed 2026-10-12; the user approved the §17 recommendations on 2026-10-13. All eleven milestones (M0, M1, M2, M4, M8, M3, M5, M6, M7, M9 and M10) were implemented on 2026-10-13 in worktree `latex-phase5-m0`. §17.1 was ratified as **D7.2.7v2** when the first binding (physics) landed.
-**Formal linkage:** **D7.2.7v2** (expansion only, never typesetting; bundled packages are upstream programming packages or Lambda-owned bindings; resolution order bundled → adapter → beside-document file → located `unknown-package`), **D7.2.1–D7.2.4** (script adapters in a static registry), **S1.8** (no document text becomes Lambda code), **S12.1.1v2** (rendering stays pure and deterministic), **D7.1.2v2** and **D7.5.2** (resources through the one IO door, path-gated), **S7.4.1–S7.4.4** (located diagnostics).
-**Scope:** the commonly used LaTeX packages and classes that `lambda.latex` does not support, plus the kernel, `hyperref` and `graphicx` gaps those packages build on. Diagrams (`tikz-cd`, `circuitikz`, `forest`, `chemfig`, `xy`) belong to the TikZ design (§15).
+**Formal linkage:** **D7.2.7v2** (expansion only, never typesetting; bundled packages are upstream programming packages or Lambda-owned bindings; resolution order bundled → adapter → beside-document file → located `unknown-package`), **D7.2.1–D7.2.4v3** (script adapters in a static registry), **S1.8** (no document text becomes Lambda code), **S12.1.1v2** (rendering stays pure and deterministic), **D7.1.2v2** and **D7.5.2** (resources through the one IO door, path-gated), **S7.4.1–S7.4.4** (located diagnostics).
+**Scope:** the commonly used LaTeX packages and classes that `lambda.doc.latex` does not support, plus the kernel, `hyperref` and `graphicx` gaps those packages build on. Diagrams (`tikz-cd`, `circuitikz`, `forest`, `chemfig`, `xy`) belong to the TikZ design (§15).
 
 ## 1. Baseline
 
@@ -31,7 +31,7 @@ The 31-sample corpus (`test/latex/samples/`) declares 21 unknown packages. `wrap
 
 **Text commands of unknown packages** become `latex-unsupported` placeholders: `\hl`, `\sout`, `\uline`, `\ce` and `\onehalfspacing`. The `algorithm` and `wrapfigure` environments are replaced as whole blocks.
 
-**Math commands fall through silently.** The math typesetter paints an unmapped command's name as upright text, followed by its arguments, and reports nothing ([typeset.ls:209](../../lmd/package/math/typeset.ls) `command`, final branch; [typeset.ls:266](../../lmd/package/math/typeset.ls) `command_node`). Pkg_Math §3.1 and §10.2 already record this as outstanding.
+**Math commands fall through silently.** The math typesetter paints an unmapped command's name as upright text, followed by its arguments, and reports nothing ([typeset.ls:209](../../lmd/package/doc/math/typeset.ls) `command`, final branch; [typeset.ls:266](../../lmd/package/doc/math/typeset.ls) `command_node`). Pkg_Math §3.1 and §10.2 already record this as outstanding.
 
 - **Recognized:** `\cancel`, `\bcancel`, `\xcancel`, `\mathclap`, `\xrightarrow`, `\boldsymbol`, `\mathscr`, `dcases`, `pmatrix*`, `\iint`, `\oiint`, `\degree` and the CD environment.
 - **Painted as names:** `\bm`, `\coloneqq`, `\abs`, `\norm`, `\dv`, `\pdv`, `\bra`, `\ket`, `\braket`, `\qty`, `\eval`, `\vb`, `\grad`, `\Tr`, `\mqty`, `\cancelto`, `\mathbbm`, `\mathds`, `\upalpha`, `\nicefrac`, `\sfrac`, `\ce`, `\llbracket` and `\shortrightarrow`.
@@ -47,11 +47,11 @@ The 31-sample corpus (`test/latex/samples/`) declares 21 unknown packages. `wrap
 | `hyperref` (supported) | `\hyperlink`, `\hypertarget`, `\phantomsection`, `\texorpdfstring` |
 | `graphicx` (supported) | `\resizebox`, `\scalebox`, `\rotatebox`, `\reflectbox` |
 
-**Classes.** Profiles exist for `article`, `report`, `book`, `amsart` and `standalone` ([registry.ls:88](../../lmd/package/latex/packages/registry.ls)). Any other class without a beside-document `.cls` (`scrartcl`, `memoir`, `IEEEtran`, `beamer`, …) renders as `article` with no diagnostic. D7.2.7 resolves a class name like a package name and ends in the located `unknown-package` diagnostic, so this is a conformance gap.
+**Classes.** Profiles exist for `article`, `report`, `book`, `amsart` and `standalone` ([registry.ls:88](../../lmd/package/doc/latex/packages/registry.ls)). Any other class without a beside-document `.cls` (`scrartcl`, `memoir`, `IEEEtran`, `beamer`, …) renders as `article` with no diagnostic. D7.2.7 resolves a class name like a package name and ends in the located `unknown-package` diagnostic, so this is a conformance gap.
 
 **Already in place.** Some missing pieces are smaller than they look:
 
-- The textcomp symbols already render without the package, from `EXTENDED_SYMBOLS` in [symbols.ls:175](../../lmd/package/latex/symbols.ls).
+- The textcomp symbols already render without the package, from `EXTENDED_SYMBOLS` in [symbols.ls:175](../../lmd/package/doc/latex/symbols.ls).
 - `\NewDocumentCommand` is native to the kernel, so `xparse` only needs its name answered (engine design §10).
 - The parser already keeps `Verbatim`, `BVerbatim`, `minted` and `alltt` bodies raw (`lambda/input/input-latex-tables.cpp:90`).
 - The math CD environment exists for `amscd`, although its dimensions are uncertified (Pkg_Math §7).
@@ -98,7 +98,7 @@ Sizes are relative: S is about a day, M a few days, and L one to two weeks.
 
 ### M0.1 Adapter hook tables
 
-[render.ls](../../lmd/package/latex/render.ls) carries 57 `registry.active(info.packages, …)` gates and [analyze.ls](../../lmd/package/latex/analyze.ls) carries 10. Most share one shape: `case 'x': if (registry.active(info.packages, "p")) handler(...) else render_generic_default(el, info)`. [registry.ls:119](../../lmd/package/latex/packages/registry.ls) `package_for_command` is a hand-written if-chain naming each package's commands. Sixty more packages in these chains would multiply both.
+[render.ls](../../lmd/package/doc/latex/render.ls) carries 57 `registry.active(info.packages, …)` gates and [analyze.ls](../../lmd/package/doc/latex/analyze.ls) carries 10. Most share one shape: `case 'x': if (registry.active(info.packages, "p")) handler(...) else render_generic_default(el, info)`. [registry.ls:119](../../lmd/package/doc/latex/packages/registry.ls) `package_for_command` is a hand-written if-chain naming each package's commands. Sixty more packages in these chains would multiply both.
 
 As built on 2026-10-13:
 
@@ -111,11 +111,11 @@ As built on 2026-10-13:
 
 ### M0.2 Float kinds, counters and list-of
 
-Analysis hard-codes the `figure`, `table` and listing counters and caption names ([analyze.ls:341](../../lmd/package/latex/analyze.ls) `walk_figure`, [analyze.ls:356](../../lmd/package/latex/analyze.ls) `walk_table`), and nothing renders a list of figures. These packages all need the same three things: `float` (`\newfloat`), `algorithm`, `algorithm2e`, minted's `listing`, `subfig`, `wrapfig`, `rotating` and tocloft's `\newlistof`.
+Analysis hard-codes the `figure`, `table` and listing counters and caption names ([analyze.ls:341](../../lmd/package/doc/latex/analyze.ls) `walk_figure`, [analyze.ls:356](../../lmd/package/doc/latex/analyze.ls) `walk_table`), and nothing renders a list of figures. These packages all need the same three things: `float` (`\newfloat`), `algorithm`, `algorithm2e`, minted's `listing`, `subfig`, `wrapfig`, `rotating` and tocloft's `\newlistof`.
 
 As built on 2026-10-13:
 
-- **One float-kind table.** [floats.ls](../../lmd/package/latex/floats.ls) holds `KINDS`, with `figure` and `table`. Each kind names its counter, caption label, list command and list title. Analysis, caption labels and lists all read it. M4 extends it for `float`'s `\newfloat` and the algorithm floats. Listings keep their own numbering. No localized strings exist yet, so the names are English, like the ToC's "Contents".
+- **One float-kind table.** [floats.ls](../../lmd/package/doc/latex/floats.ls) holds `KINDS`, with `figure` and `table`. Each kind names its counter, caption label, list command and list title. Analysis, caption labels and lists all read it. M4 extends it for `float`'s `\newfloat` and the algorithm floats. Listings keep their own numbering. No localized strings exist yet, so the names are English, like the ToC's "Contents".
 - **One float walk.** `walk_float` replaces `walk_figure` and `walk_table`. Each float records its kind, number, caption list text (the short form when given; starred captions are not listed) and the id of its own label. Analysis outputs one `floats` list instead of `figures` and `tables`, and render looks numbers up with `get_float_num`.
 - **List-of rendering.** `\listoffigures` and `\listoftables` render like the ToC. An entry links to the float's label when there is one, and is plain text otherwise. Adding ids to every float would change existing output.
 - **General counters.** Built-in and declared counters share one map, and `step_counter` follows LaTeX's reset chain plus the resets that `\newcounter{c}[p]` declares. `\newcounter`, `\setcounter`, `\addtocounter`, `\stepcounter` and `\refstepcounter` now work; the last one makes the counter the target of a following `\label`. The separate custom-counter list and its per-counter match arms are gone. This closes the counter item of Pkg_Latex §11.2.
@@ -311,10 +311,10 @@ As built on 2026-10-13:
   - `render_float` serves figure, package and `\newfloat` floats. Captions take their name from the document's kinds, and a non-plain style adds a class; tables take it too. `\listof{type}{title}` and `\listofalgorithms` reuse the list-of rendering.
 - **Placement leak fixed.** The parser kept an environment's `[option]` out of the body only for `table`, so `\begin{figure}[htbp]` printed "[htbp]". `util.leading_option` now strips it for every float and reads `algorithmic`'s `[n]`. The parser cannot know package or `\newfloat` environments, so the fix is in script.
 - **Preamble commands as data.** A `preamble` field on `CATALOG` entries lists owned commands that belong in the preamble, so they are not reported there as unsupported.
-- **algorithmic.** [algorithmic.ls](../../lmd/package/latex/packages/algorithmic.ls) folds the keyword commands of algpseudocode and the older capitalised algorithmic into lines with depth, numbers and labels. Analysis binds `\label` to line numbers, and render draws the lines. `util.flatten_paragraphs` was promoted from render.ls for this.
+- **algorithmic.** [algorithmic.ls](../../lmd/package/doc/latex/packages/algorithmic.ls) folds the keyword commands of algpseudocode and the older capitalised algorithmic into lines with depth, numbers and labels. Analysis binds `\label` to line numbers, and render draws the lines. `util.flatten_paragraphs` was promoted from render.ls for this.
   - Keyword labels come from the document's `\algorithmic<word>` definitions. `\algrenewcommand` leaves the new label as the macro's argument, and `\renewcommand` is collected as a macro.
   - **Limitation:** with `\renewcommand`, the engine still reports the label macro as undefined, because no algorithmic.sty runs. Defining the label macros needs the §17.1 binding.
-- **algorithm2e.** [algorithm2e.ls](../../lmd/package/latex/packages/algorithm2e.ls) folds the float body:
+- **algorithm2e.** [algorithm2e.ls](../../lmd/package/doc/latex/packages/algorithm2e.ls) folds the float body:
   - `\;` ends a statement.
   - Block commands (`\If`, `\uIf`, `\eIf`, `\ElseIf`, `\Else`, `\For`, `\ForEach`, `\ForAll`, `\While`, `\Repeat`) re-parse each brace argument from its raw source, because the parser flattens argument groups. User macros defined in the document are therefore not expanded inside those bodies.
   - `\KwIn`/`\KwOut`/`\KwData`/`\KwResult` lines, `\KwRet`, `\KwTo`, `\tcp` and `\tcc` render. Numbering, semicolons and end lines follow the options and the settings commands, which apply to every algorithm rather than one.
@@ -483,7 +483,7 @@ This is `lambda.doc.math` work, after M0.3. Every addition updates Pkg_Math §7.
 
 As built on 2026-10-13, with route (a) chosen by the user and **D7.2.7v2** ratified the same day:
 
-- **Bindings.** The engine searches `lmd/package/latex/tex/binding/` after the upstream files. Bindings are written from the package manuals, so the vendor rule does not apply; each is also a `CATALOG` row, so options are validated and the declaration reaches the script.
+- **Bindings.** The engine searches `lmd/package/doc/latex/tex/binding/` after the upstream files. Bindings are written from the package manuals, so the vendor rule does not apply; each is also a `CATALOG` row, so options are validated and the declaration reaches the script.
   - Upstream `physics.sty` is not installed locally and leans on xparse embellishments the kernel diagnoses, so `physics.sty` is a Lambda-owned binding of the physics 1.3 manual. It covers every group above plus `\dd`, `\var`, the quick-quad words, `\Pmqty`/`\smqty` forms and `\zmat`/`\pmat`/`\admat`, and the `arrowdel`, `italicdiff` and `notrig` options.
   - Every binding command expands with no assignment at use time. The engine expands constructor arguments without executing assignments, so this keeps the commands working inside `\section`, `\caption` and `\footnote`.
   - Names math already has (`\sin`, `\div`, `\Re`) reach their plain meaning through `\noexpand`, since the engine passes an undefined math command through.
@@ -639,7 +639,7 @@ As built on 2026-10-13, profiles first (§17.4):
 
 - 2026-10-12: plan written from the §1 probes at `2665b0c81`; not started.
 - 2026-10-13: the user approved the §17 recommendations and asked for M0 in a worktree, `latex-phase5-m0`, branched from `origin/master` `836c0a773`. M0.1 to M0.6 were built as recorded in §4.
-  - New module `lmd/package/latex/floats.ls`; the math package gained `maps_command` and `unmapped_commands`.
+  - New module `lmd/package/doc/latex/floats.ls`; the math package gained `maps_command` and `unmapped_commands`.
   - New test `test/lambda/latex/test_latex_phase5_groundwork.ls` with its golden. The other 61 LaTeX scripts and the 32 math scripts match their goldens unchanged.
   - Removed: the custom-counter list and its per-counter match arms, `get_figure_num`/`get_table_num` and their text-matching duplicates, two copies of the amsmath environment condition (now `amsmath.handles`), and the duplicated `alltikzpeople` arms.
 - 2026-10-13: M0 committed on the worktree branch (547f9d76e). M1 was built as recorded in §5, except `alltt`.
@@ -647,41 +647,41 @@ As built on 2026-10-13, profiles first (§17.4):
   - `test_latex_font_decl` passes declaration elements to `wrap_font_decl`; its expected output is unchanged. `test_latex_pdf_graphics` asserts the corrected rotation sign.
   - `render_document` and `render_body` share one article builder.
 - 2026-10-13: M1 committed (0ee19211f). M2 was built as recorded in §6, except `amsxtra`.
-  - New module `lmd/package/latex/packages/dingbats.ls`.
+  - New module `lmd/package/doc/latex/packages/dingbats.ls`.
   - New test `test/lambda/latex/test_latex_phase5_declarations.ls` with its golden. The other 63 LaTeX scripts and the 32 math scripts match their goldens.
   - The parser change (`\cal` as a math font switch) is one name in `input-latex-c.cpp`.
 - 2026-10-13: M2 committed (1ec9a2aa8). M4 was built as recorded in §8.
   - New modules: `packages/algorithmic.ls` and `packages/algorithm2e.ls`.
   - New test `test/lambda/latex/test_latex_phase5_floats.ls` with its golden. The other 64 LaTeX scripts and the 32 math scripts match their goldens.
 - 2026-10-13: M4 committed (1e7ca8a77). The user chose route (a) for physics. M8 was built as recorded in §12, and **D7.2.7v2** was ratified.
-  - New files: the bindings `lmd/package/latex/tex/binding/physics.sty` and `mathtools.sty`, and `lmd/package/math/mhchem.ls`.
+  - New files: the bindings `lmd/package/doc/latex/tex/binding/physics.sty` and `mathtools.sty`, and `lmd/package/doc/math/mhchem.ls`.
   - New tests: `test/lambda/latex/test_latex_phase5_math.ls` and `test/lambda/math/test_math_phase5_packages.ls`, with goldens. The other 65 LaTeX scripts and 32 math scripts match their goldens, and `make test-lambda-baseline` passes 6807/6807.
   - The parser changes are in `input-latex-c.cpp`: environment names, `ignored_begin` names, starred-cases text columns, `\cancelto`, slanted fractions and `chemistry` nodes. The engine change is the `binding/` search in `bundled_path`.
   - `strip_backslash` was promoted from `macros.ls` to `util.ls`.
   - The math test failed on the JIT tier alone, which exposed a transpiler defect, [LR07-47](../Lambda_Issue_Ledger%20(fixed).md#lr07-47). The new `chemistry` branch made `unmapped_commands` tail-recursive, and TCO then turned the self call inside its `for` comprehension into a jump. It is fixed in `emit_for_result` and pinned on every tier by `test/lambda/tail_call_in_comprehension.ls`.
 - 2026-10-13: the user asked for the cdot and bold-symbol fix (a2fb3c633), then for M3. M3 was built as recorded in §7.
-  - New modules in `lmd/package/latex/packages/`: `decorations.ls`, `paragraph.ls`, `filler.ls`, `paralist.ls`, `codeblocks.ls`, `frames.ls`, `footmisc.ls` and `appendix.ls`; the binding `tex/binding/xspace.sty` and the engine primitive `\lambda@xspace`.
+  - New modules in `lmd/package/doc/latex/packages/`: `decorations.ls`, `paragraph.ls`, `filler.ls`, `paralist.ls`, `codeblocks.ls`, `frames.ls`, `footmisc.ls` and `appendix.ls`; the binding `tex/binding/xspace.sty` and the engine primitive `\lambda@xspace`.
   - New test `test/lambda/latex/test_latex_phase5_text.ls` with its golden, identical on every tier. The other 66 LaTeX scripts and the math scripts match their goldens, except `test_latex_argument_arrays`: `\textbf` now carries `source_offset`, and `len` counts attributes (S8.3.1v2).
   - `make test-lambda-baseline` passed 6790 of 6811 under `LAMBDA_LOG_LEVEL=error`, which kept `log.txt` small on a nearly full disk. The other 21 are the MIR ratchet and two lint tests, which read warnings that the error level suppresses; each passes when rerun without the override.
   - The interpreter defects LR01-19 and LR01-20 were found by soul's settings table and fixed (§7).
 - 2026-10-13: M3 committed (bf2714af6). M5 was built as recorded in §9.
-  - New modules in `lmd/package/latex/packages/`: `array.ls`, `hhline.ls`, `adjustbox.ls` and `pdfpages.ls`; the binding `tex/binding/csvsimple.sty`.
+  - New modules in `lmd/package/doc/latex/packages/`: `array.ls`, `hhline.ls`, `adjustbox.ls` and `pdfpages.ls`; the binding `tex/binding/csvsimple.sty`.
   - New test `test/lambda/latex/test_latex_phase5_tables.ls` with its golden and two CSV fixtures, identical on every tier. The other LaTeX and math scripts match their goldens, except two expectations that follow from vertical rules: `test_latex_tables` checks the cells of a `|l|c|r|` table, now bordered, and `test_latex_css` finds `latex-table` in the stylesheet, now true through `.latex-tablenotes`.
   - `make test-lambda-baseline` passed 6790 of 6812 under `LAMBDA_LOG_LEVEL=error` (1.1 GB of disk left). The MIR ratchet and the two lint tests pass without the override, as in M3, and `UiDtnaTests.PackageContractsAgreeAcrossTiers`, whose JIT run of `dtna_contracts` printed nothing in the loaded run, passes alone; M5 does not touch that package.
 - 2026-10-13: M5 committed (f19242ca8). M6 was built as recorded in §10.
-  - New modules in `lmd/package/latex/packages/`: `titles.ls`, `contents.ls`, `frontmatter.ls` and `varioref.ls`; the bindings `tex/binding/{tocloft,authblk,titling,minitoc}.sty`.
+  - New modules in `lmd/package/doc/latex/packages/`: `titles.ls`, `contents.ls`, `frontmatter.ls` and `varioref.ls`; the bindings `tex/binding/{tocloft,authblk,titling,minitoc}.sty`.
   - New test `test/lambda/latex/test_latex_phase5_front.ls` with its golden, identical on every tier. The other LaTeX, math and TeX tests match their goldens.
   - `make test-lambda-baseline` passed 6792 of 6813 under `LAMBDA_LOG_LEVEL=error`; the other 21 are the MIR ratchet and the two lint tests, which pass without the override.
 - 2026-10-13: M6 committed (d7fdba0fe). M7 was built as recorded in §11.
-  - New module `lmd/package/latex/packages/terms.ls`; the bindings `tex/binding/{glossaries,nomencl,acronym}.sty`; the kernel's class name constructors.
+  - New module `lmd/package/doc/latex/packages/terms.ls`; the bindings `tex/binding/{glossaries,nomencl,acronym}.sty`; the kernel's class name constructors.
   - New test `test/lambda/latex/test_latex_phase5_terms.ls` with its golden and a glossary file, identical on every tier. The other LaTeX, math and TeX tests match their goldens.
   - `make test-lambda-baseline` passed 6792 of 6814 under `LAMBDA_LOG_LEVEL=error`: the 21 warning-reading tests pass without the override, and `test_latex_phase3_corpus` timed out under the baseline's parallel load. Alone it passes in about 37 s, and an interleaved A/B against M6's package tree shows no slowdown once the registry was nested (§11).
 - 2026-10-13: M7 committed (86cc5393e). M9 was built as recorded in §13.
-  - New modules in `lmd/package/latex/packages/`: `fontspec.ls` and `icons.ls`; the binding `tex/binding/unicode-math.sty`.
+  - New modules in `lmd/package/doc/latex/packages/`: `fontspec.ls` and `icons.ls`; the binding `tex/binding/unicode-math.sty`.
   - New test `test/lambda/latex/test_latex_phase5_fonts.ls` with its golden, identical on every tier. `test_latex_font_decl`'s golden and four phase5 expectations now read the family variables, and the groundwork ownership check skips the `"*"` catch-all. The other LaTeX, math and TeX tests match their goldens.
   - `make test-lambda-baseline` passed 6794 of 6815 under `LAMBDA_LOG_LEVEL=error`; the other 21 are the warning-reading tests, which pass without the override.
 - 2026-10-13: M9 committed (bab9188b1). M10 was built as recorded in §14, and the beamer sub-design was written (§17.5).
-  - New modules: `lmd/package/latex/docclass/profiles.ls` and `docclass/ieee.ls`; the design `vibe/latex/Lambda_Design_Beamer.md`.
+  - New modules: `lmd/package/doc/latex/docclass/profiles.ls` and `docclass/ieee.ls`; the design `vibe/latex/Lambda_Design_Beamer.md`.
   - The engine change is the `chaptered` parse option (`registry.chaptered_classes()`), which replaced five class names in `input-tex-latex.cpp`.
   - New test `test/lambda/latex/test_latex_phase5_classes.ls` with its golden, identical on every tier. The groundwork test now resolves class-family handler owners, and its unknown class is moderncv, since scrartcl has a profile. The other LaTeX, math and TeX tests match their goldens.
   - `make test-lambda-baseline` passed 6791 of 6816 under `LAMBDA_LOG_LEVEL=error`. The 21 warning-reading tests pass without the override, the three REPL tests with `LANG=en_US.UTF-8`, and `test_latex_phase3_corpus`, which reached the 60-second limit under a load average above 20, passes alone in 53 s. Interleaved runs against M9's package tree showed no consistent difference.

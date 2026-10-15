@@ -179,7 +179,7 @@ under `test/lambda/math/fonts`, with its own SIL OFL notice.
 OpenType MATH is optional. The default bundled CMU profile uses the original
 Computer Modern symbol/extension TFM parameters as an explicit math companion,
 with TeX 10/7/5 script sizes and display/text/cramped placement.
-[Resource provenance and hashes](../lmd/package/math/fonts/tex/PROVENANCE.md)
+[Resource provenance and hashes](../lmd/package/doc/math/fonts/tex/PROVENANCE.md)
 record the upstream files; actual glyph advances and ink bounds still come
 from the painted CMU/KaTeX faces. Explicit supplied or installed fonts do not
 inherit this companion. Without MATH, those fonts use measured advances/outlines,

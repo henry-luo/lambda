@@ -1,0 +1,24 @@
+{
+  "name":"Reactive stylesheets replace rules and recascade sibling nodes",
+  "html":"test/lambda/ui/_reactive_stylesheet.ls",
+  "viewport":{"width":800,"height":600},
+  "events":[
+    {"type":"script","js":"globalThis.sheetCount = document.styleSheets.length;"},
+    {"type":"assert_style","target":{"selector":"#outside"},"property":"color","equals":"rgb(255, 0, 0)"},
+    {"type":"assert_style","target":{"selector":"#outside"},"property":"background-color","equals":"rgb(255, 255, 0)"},
+    {"type":"click","target":{"selector":"#toggle"}},
+    {"type":"assert_style","target":{"selector":"#outside"},"property":"color","equals":"rgb(0, 0, 255)"},
+    {"type":"assert_style","target":{"selector":"#inside"},"property":"color","equals":"rgb(0, 0, 255)"},
+    {"type":"assert_style","target":{"selector":"#outside"},"property":"background-color","equals":"rgba(0, 0, 0, 0)"},
+    {"type":"assert_script","js":"document.styleSheets.length === globalThis.sheetCount"},
+    {"type":"click","target":{"selector":"#toggle"}},
+    {"type":"assert_style","target":{"selector":"#outside"},"property":"color","equals":"rgb(0, 0, 255)"},
+    {"type":"assert_script","js":"document.styleSheets.length === globalThis.sheetCount"},
+    {"type":"click","target":{"selector":"#toggle"}},
+    {"type":"assert_style","target":{"selector":"#outside"},"property":"color","equals":"rgb(17, 34, 51)"},
+    {"type":"assert_script","js":"document.styleSheets.length === globalThis.sheetCount - 1"},
+    {"type":"click","target":{"selector":"#toggle"}},
+    {"type":"assert_style","target":{"selector":"#outside"},"property":"color","equals":"rgb(0, 128, 0)"},
+    {"type":"assert_script","js":"document.styleSheets.length === globalThis.sheetCount"}
+  ]
+}

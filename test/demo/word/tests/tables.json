@@ -1,0 +1,295 @@
+{
+  "name": "Word tables",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Table notes",
+      "clear": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"insert.table\"]"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#table-rows"
+      },
+      "text": "0",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#table-columns"
+      },
+      "text": "2",
+      "clear": true
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#table-header"
+      },
+      "value": "false"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-insert_table"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".edit-dialog"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#dialog-error"
+      },
+      "contains": "1\u201332"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#table-columns"
+      },
+      "attribute": "value",
+      "equals": "2"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#table-rows"
+      },
+      "text": "2",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-insert_table"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface td"
+      },
+      "count": 4
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface th"
+      },
+      "count": 0
+    },
+    {
+      "type": "type",
+      "text": "First"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface tr:first-child td:first-child"
+      },
+      "contains": "First"
+    },
+    {
+      "type": "key_combo",
+      "key": "tab",
+      "mods_str": ""
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#edit-surface tr:first-child td:nth-child(2)"
+      }
+    },
+    {
+      "type": "type",
+      "text": "Second"
+    },
+    {
+      "type": "key_combo",
+      "key": "tab",
+      "mods_str": "shift"
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#edit-surface tr:first-child td:first-child"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "tab",
+      "mods_str": ""
+    },
+    {
+      "type": "key_combo",
+      "key": "tab",
+      "mods_str": ""
+    },
+    {
+      "type": "key_combo",
+      "key": "tab",
+      "mods_str": ""
+    },
+    {
+      "type": "key_combo",
+      "key": "tab",
+      "mods_str": ""
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface tr"
+      },
+      "count": 3
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(3) td:first-child"
+      }
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface tr"
+      },
+      "count": 2
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-table"
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#table-style"
+      },
+      "value": "soft"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "attribute": "data-word-table-style",
+      "equals": "soft"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.insertRowAbove\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface tr"
+      },
+      "count": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.insertColumnLeft\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface td"
+      },
+      "count": 9
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#cell-alignment"
+      },
+      "value": "bottomRight"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface tr:nth-child(2) td:first-child"
+      },
+      "property": "text-align",
+      "equals": "right"
+    },
+    {
+      "type": "render",
+      "file": "temp/word-enhanced-tables.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.deleteTable\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "count": 0
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "contains": "First"
+    }
+  ]
+}

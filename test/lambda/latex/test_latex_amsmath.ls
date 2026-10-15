@@ -1,5 +1,5 @@
 // Source-order math rows retain tags, labels and numbering suppression.
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 let ast = input("test/lambda/latex/fixtures/amsmath_annotations.tex", {type: "latex"}) ^ { null }
 let result = latex.render_result(ast, null)

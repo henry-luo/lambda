@@ -279,7 +279,7 @@ static void format_element_reader(HtmlContext& ctx, const ElementReader& elem, i
         const char* field_name;
         ItemReader value;
         while (attrs.next(&field_name, &value)) {
-            if (!field_name) continue;
+            if (!field_name || element_attribute_is_internal(field_name)) continue;
             int field_name_len = (int)strlen(field_name);
 
             // skip the "_" field (children)

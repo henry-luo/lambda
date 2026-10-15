@@ -24,6 +24,7 @@ typedef struct {
     char* stderr_buf;       // captured stderr (caller frees via shell_result_free)
     size_t stderr_len;      // length of stderr
     bool timed_out;         // true if killed by timeout
+    bool cancelled;         // true if the caller's atomic cancellation flag was set
     bool output_limit_exceeded; // true when captured output was truncated
 } ShellResult;
 
@@ -51,6 +52,7 @@ typedef struct {
     ShellLineCallback on_stderr;    // streaming stderr callback (NULL = buffer all)
     void* user_data;                // passed to callbacks
     size_t max_output_bytes;        // per stream; 0 uses SHELL_DEFAULT_MAX_OUTPUT_BYTES
+    const int* cancel_flag;         // caller-owned until completion; read/set with atomic operations
 } ShellOptions;
 
 #define SHELL_DEFAULT_MAX_OUTPUT_BYTES ((size_t)16 * 1024 * 1024)

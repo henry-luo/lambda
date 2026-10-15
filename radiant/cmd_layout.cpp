@@ -31,6 +31,7 @@
 extern "C" {
 #include "../lib/mempool.h"
 #include "../lib/file.h"
+#include "../lib/mime-detect.h"
 #include "../lib/string.h"
 #include "../lib/str.h"
 #include "../lib/strbuf.h"
@@ -50,6 +51,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/dom/dom.h"      // dom_find_element_by_id for focus restore
+#include "../lambda/dom/dom_cssom.h"
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
@@ -1583,6 +1585,8 @@ CssStylesheet** extract_and_collect_css(Element* html_root, DomElement* dom_root
 
     DomDocument* document = dom_root ? dom_root->doc : nullptr;
     CssSourceScope source_scope(document);
+    // Parse UA rules with stylesheet inputs; cascade passes borrow the retained rule tree.
+    if (document) radiant_ua_focus_stylesheet(document, engine);
 
     // Start script transfer only after stylesheet bytes are ready. This lets
     // CSS parsing overlap script I/O without delaying the first cascade.
@@ -1610,6 +1614,16 @@ static bool clear_load_stylesheet_cascade_visitor(DomNode* node, void*) {
         // Keep pseudo declarations in the same cascade epoch as element styles.
         dom_element_clear_pseudo_styles(elem);
         elem->set_styles_resolved(false);
+    }
+    return true;
+}
+
+static bool sync_rebuilt_stylesheet_visitor(DomNode* node, void* changed) {
+    if (node->is_element()) {
+        DomElement* element = node->as_element();
+        if (element->tag_name && str_icmp_cstr(element->tag_name, "style") == 0) {
+            if (dom_cssom_sync_inline_style_element(element)) *(bool*)changed = true;
+        }
     }
     return true;
 }
@@ -2289,6 +2303,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     int superseded_html_url_count = 0;
 
     char* html_filepath = url_to_local_path(html_url);
+    bool xhtml = !html_source && html_url->pathname && input_path_is_xhtml(html_url->pathname->chars);
 
     // Step 1: Parse HTML with Lambda parser
     // If html_source is provided, use it directly; otherwise read from file or download
@@ -2303,9 +2318,14 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         const char* url_str = url_get_href(html_url);
         char* eff_url = nullptr;
         char* response_language = nullptr;
+        char* response_type = nullptr;
         html_content = download_http_document_with_cookie_jar(url_str, &html_length,
-            top_level_cookie_jar, &eff_url, &response_language);
+            top_level_cookie_jar, &eff_url, &response_language, &response_type);
         protocol_language = lam::Temp<char>(response_language);
+        // response MIME selects XML syntax even when a URL ends in .html or has no extension.
+        const char* response_extension = mime_extension_from_content_type(response_type);
+        if (response_extension) xhtml = !strcmp(response_extension, ".xhtml");
+        mem_free(response_type);
         // Update document URL if redirected (e.g. google.com → www.google.com)
         if (eff_url) {
             Url* redirected_url = url_parse(eff_url);
@@ -2331,6 +2351,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
                 "the URL may be incorrect, or there may be a network connectivity issue.");
             if (!html_content) return nullptr;
             html_length = strlen(html_content);
+            xhtml = false;
         }
         html_content_owned = true;
     } else {
@@ -2344,7 +2365,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
 
     // Detect non-UTF-8 charset and convert if needed
     const char* detected_charset = nullptr;
-    if (html_content && html_content_owned) {
+    if (!xhtml && html_content && html_content_owned) {
         detected_charset = detect_html_charset(html_content, html_length);
         if (detected_charset) {
             char* utf8_content = convert_charset_to_utf8(html_content, html_length, detected_charset);
@@ -2360,40 +2381,23 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     auto t_read = time_now_ns();
     log_info("[TIMING] load: read file: %.1fms", time_elapsed_ms_f(t_start, t_read));
 
-    // Create type string for HTML.
-    String* type_str = string_from_strview_mem(strview_init("html", 4), MEM_CAT_LAYOUT);
-
-    Input* input = nullptr;
-    if (track_source_lines) {
-        // Use extended parser to record source line numbers on elements
-        input = Input::create(pool, html_url);
-        if (input) {
-            input->ui_mode = true;
-            Html5ParseOptions parse_opts = { .track_source_lines = true };
-            Element* doc = html5_parse_n(input, html_content, html_length, &parse_opts);
-            if (doc) {
-                input->root = (Item){.element = doc};
-            }
-        }
-    } else {
-        // Create Input first so we can set ui_mode before parsing
-        input = Input::create(pool, html_url);
-        if (input) {
-            input->ui_mode = true;
-            Element* doc = html5_parse_n(input, html_content, html_length, nullptr);
-            if (doc) {
-                input->root = (Item){.element = doc};
-            }
-        }
+    Input* input = Input::create(pool, html_url);
+    Element* parsed_document = nullptr;
+    if (input) {
+        input->ui_mode = true;
+        Html5ParseOptions parse_opts = { .track_source_lines = track_source_lines };
+        parsed_document = xhtml
+            ? parse_xhtml_document(input, html_content, html_length, track_source_lines)
+            : html5_parse_n(input, html_content, html_length, &parse_opts);
+        if (parsed_document) input->root = (Item){.element = parsed_document};
     }
-    mem_free(type_str);
     if (html_content_owned) mem_free(html_content);  // only free what we allocated
 
     auto t_parse = time_now_ns();
     log_info("[TIMING] load: parse HTML: %.1fms", time_elapsed_ms_f(t_read, t_parse));
     log_mem_stage("load_html: html_parsed");
 
-    if (!input) {
+    if (!input || !parsed_document) {
         log_error("Failed to create input for file: %s", html_filepath);
         mem_free(html_filepath);
         return nullptr;
@@ -2412,9 +2416,10 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
 
     // Detect HTML version from the original input tree (contains DOCTYPE)
     int detected_version = HTML4_01_TRANSITIONAL;  // Default to quirks mode
-    if (input) {
+    if (input && !xhtml) {
         detected_version = detect_html_version_from_lambda_element(nullptr, input);
     }
+    if (xhtml) detected_version = HTML5; // XML HTML documents never enter HTML quirks mode.
     log_root_item((Item){.element = html_root});
 
     // Step 2: Create DomDocument and build DomElement tree from Lambda Element tree
@@ -2430,6 +2435,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     }
     // parsed HTML: the only page kind that may host a JS DOM script realm.
     dom_doc->page_kind = DOM_PAGE_KIND_HTML;
+    dom_doc->xml_document = xhtml;
     dom_doc->resource_policy = g_css_resource_policy;
     // Scripts may call getClientRects() during load. Preserve the parsed mode
     // before that first layout so transient measurements use the same initial
@@ -2786,6 +2792,8 @@ static const LayoutFormatRoute layout_format_routes[] = {
     {".ls", load_lambda_script_doc},
     {".slides", load_slides_doc},
     {".docx", nullptr, "docx"},
+    {".epub", nullptr, "ebook"},
+    {".diff", nullptr, "diff"}, {".patch", nullptr, "diff"},
     {".tex", load_latex_doc}, {".latex", load_latex_doc},
     {".pgf", load_tikz_doc},
     {".md", load_markdown_doc}, {".markdown", load_markdown_doc},
@@ -2817,6 +2825,7 @@ static bool layout_path_has_known_extension(const char* path) {
     if (eps_source_expected(path, nullptr, 0)) return true;
     const char* extension = file_path_ext(path);
     return extension && (strcmp(extension, ".pdf") == 0 ||
+                         input_path_is_xhtml(path) ||
                          layout_find_format_route(extension));
 }
 
@@ -2845,7 +2854,8 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
                                               bool include_text,
                                               bool* handled,
                                               const DocumentJsHostConfig* host_config = nullptr,
-                                              bool defer_html_scripts = false) {
+                                              bool defer_html_scripts = false,
+                                              bool interactive = true) {
     if (handled) *handled = false;
     if (!url || !path || !pool) return nullptr;
     const RenderPagedOptions* paged = host_config ? host_config->paged_media : nullptr;
@@ -2882,8 +2892,13 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
         if (handled) *handled = true;
         log_info("[Layout] Detected %s file, using format loader", ext);
         // Script document formats share the configured transform boundary (D7.2.4).
+        // a saved diff exports all rows for layout/render and a virtual surface for review.
+        LambdaDocumentTransformOption diff_surface = {"interactive", LAMBDA_DOCUMENT_TRANSFORM_OPTION_BOOL,
+            nullptr, interactive};
+        bool diff_route = route->transform_type && strcmp(route->transform_type, "diff") == 0;
         DomDocument* document = route->transform_type
-            ? load_input_type_transform_doc(route->transform_type, url, nullptr, 0, width, height, pool)
+            ? load_input_type_transform_doc(route->transform_type, url, diff_route ? &diff_surface : nullptr,
+                diff_route ? 1 : 0, width, height, pool)
             : route->loader(url, width, height, pool);
         if (document && document->page_kind == DOM_PAGE_KIND_LAMBDA_SCRIPT) {
             // generated HTML needs the same script lifecycle, after its host is bound.
@@ -2941,7 +2956,8 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     if ((full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS) && http_page_input) {
         bool handled = false;
         doc = load_layout_special_file(full_url, url_get_pathname(full_url), viewport_width,
-            viewport_height, pool, true, &handled, js_host_config, defer_html_scripts);
+            viewport_height, pool, true, &handled, js_host_config, defer_html_scripts,
+            js_host_config && js_host_config->host_driven_loop);
         document_apply_js_host_config(doc, js_host_config);
     } else if (full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS) {
         log_info("[load_html_doc] HTTP/HTTPS URL detected, using HTML pipeline: %s", doc_url);
@@ -2954,7 +2970,7 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     // Use the parsed pathname so a query does not hide the file extension.
     doc = load_layout_special_file(full_url, url_get_pathname(full_url),
                                    viewport_width, viewport_height, pool, true, &handled, js_host_config,
-                                   defer_html_scripts);
+                                   defer_html_scripts, js_host_config && js_host_config->host_driven_loop);
     // non-HTML documents still dispatch callbacks through their owning viewer.
     if (handled) document_apply_js_host_config(doc, js_host_config);
     if (!handled) {
@@ -3507,6 +3523,8 @@ static DomDocument* create_layout_dom(Input* input, Element* root,
     // record provenance at construction; routing must never re-derive it from
     // which runtime pointer a document happens to hold.
     document->page_kind = page_kind;
+    // a parsed XHTML result keeps its syntax profile when returned by a Lambda script.
+    document->xml_document = ElementReader(root).get_attr("__lambda_xml_document").asBool();
     document->resource_policy = g_css_resource_policy;
     log_debug("[page-kind] %s document -> %s", document_kind,
               dom_page_kind_name(page_kind));
@@ -3535,6 +3553,8 @@ static DomDocument* create_layout_dom(Input* input, Element* root,
         release_layout_runtime(owned_runtime);
         return nullptr;
     }
+    // :root selectors and inherited variables need the root before the initial cascade.
+    document->root = lam::up(dom_root);
     if (out_root) *out_root = dom_root;
     return document;
 }
@@ -3762,21 +3782,11 @@ static DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width,
     log_info("[TIMING] Step 3 - CSS parse: %.1fms",
         time_elapsed_ms_f(step3_start, step3_end));
 
-    // Step 4.5: Load math CSS and KaTeX font CSS for math rendering
-    CssStylesheet* math_stylesheet = nullptr;
-    CssStylesheet* katex_stylesheet = nullptr;
-    {
-        math_stylesheet = load_home_stylesheet(
-            css_engine, pool, "package/math/math.css", "Lambda Markdown", "math stylesheet", false);
-        katex_stylesheet = load_home_stylesheet(
-            css_engine, pool, "package/math/katex.css", "Lambda Markdown", "KaTeX font stylesheet", false);
-    }
-
     // Step 5: Apply CSS cascade to DOM tree
     auto step4_start = time_now_ns();
-    CssStylesheet* markdown_stylesheets[3] = {
-        markdown_stylesheet, math_stylesheet, katex_stylesheet};
-    layout_apply_css_stylesheets(dom_doc, dom_root, markdown_stylesheets, 3, pool, css_engine);
+    // math renders self-contained SVG; the retired KaTeX stylesheets are not dependencies.
+    CssStylesheet* markdown_stylesheets[1] = {markdown_stylesheet};
+    layout_apply_css_stylesheets(dom_doc, dom_root, markdown_stylesheets, 1, pool, css_engine);
     auto step4_end = time_now_ns();
     log_info("[TIMING] Step 4 - CSS cascade: %.1fms",
         time_elapsed_ms_f(step4_start, step4_end));
@@ -3955,16 +3965,6 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         return nullptr;
     }
 
-    if (!xml_input->xml_stylesheet_href) {
-        log_info("[Lambda XML] No <?xml-stylesheet?> directive found, showing as source text");
-        return load_text_doc(xml_url, viewport_width, viewport_height, pool);
-    }
-
-    log_info("[Lambda XML] Found stylesheet: %s", xml_input->xml_stylesheet_href);
-    auto t_css_parse = time_now_ns();
-    log_info("[TIMING] load: parse XML: %.1fms",
-             time_elapsed_ms_f(t_parse, t_css_parse));
-
     Element* document_wrapper = (Element*)xml_input->root.item;
     Element* xml_root = nullptr;
 
@@ -3988,6 +3988,27 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
             }
         }
     }
+
+    // DocBook owns its presentation; recognize expanded names before generic XML fallback.
+    const char* docbook_roots[] = {"article", "book", "set", "part", "reference"};
+    for (const char* local_name : docbook_roots) {
+        if (xml_document_element_matches(pool, xml_root, local_name,
+                "http://docbook.org/ns/docbook")) {
+            log_info("[DocBook XML] Rendering through lambda.doc.docbook");
+            return load_input_type_transform_doc("docbook", xml_url, nullptr, 0,
+                viewport_width, viewport_height, pool);
+        }
+    }
+
+    if (!xml_input->xml_stylesheet_href) {
+        log_info("[Lambda XML] No <?xml-stylesheet?> directive found, showing as source text");
+        return load_text_doc(xml_url, viewport_width, viewport_height, pool);
+    }
+
+    log_info("[Lambda XML] Found stylesheet: %s", xml_input->xml_stylesheet_href);
+    auto t_css_parse = time_now_ns();
+    log_info("[TIMING] load: parse XML: %.1fms",
+             time_elapsed_ms_f(t_parse, t_css_parse));
 
     if (!xml_root) {
         log_error("[Lambda XML] Could not find XML root element");
@@ -4289,9 +4310,11 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
         Element* result_elem = script_output->root.element;
         TypeElmt* elem_type = (TypeElmt*)result_elem->type;
 
-        if (elem_type && str_ieq_cstr(elem_type->name.str, "html")) {
-            is_html_document = true;
-            html_elem = result_elem;
+        if (elem_type && (str_ieq_cstr(elem_type->name.str, "html") ||
+                          strview_equal(&elem_type->name, "#document"))) {
+            // input/parse return an HTML document wrapper; its head must reach CSS discovery unchanged.
+            html_elem = get_html_root_element(script_output);
+            is_html_document = html_elem != nullptr;
         }
     }
 
@@ -4833,8 +4856,14 @@ void rebuild_lambda_doc(UiContext* uicon) {
     }
     doc->root = lam::up(new_root);
 
-    CssStylesheet** inline_sheets = doc->cached_inline_sheets;
-    int inline_count = doc->cached_inline_sheet_count;
+    bool stylesheet_changed = false;
+    if (old_root != new_root) {
+        view_geometry_walk_dom_tree(old_root, sync_rebuilt_stylesheet_visitor, &stylesheet_changed);
+    }
+    view_geometry_walk_dom_tree(new_root, sync_rebuilt_stylesheet_visitor, &stylesheet_changed);
+    if (stylesheet_changed) style_epoch_mark_global_change(doc);
+    CssStylesheet** inline_sheets = doc->stylesheets;
+    int inline_count = doc->stylesheet_count;
     CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
 
     if (!inline_sheets) {
@@ -4937,9 +4966,10 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 
     css_property_system_init(doc->document_pool);
 
-    CssStylesheet** inline_sheets = doc->cached_inline_sheets;
-    int inline_count = doc->cached_inline_sheet_count;
+    CssStylesheet** inline_sheets = doc->stylesheets;
+    int inline_count = doc->stylesheet_count;
     CssEngine* css_engine = (CssEngine*)doc->services.cached_css_engine;
+    bool stylesheet_changed = false;
 
     struct { float x, y, w, h; } old_bounds[16] = {};
     for (int i = 0; i < result_count && i < 16; i++) {
@@ -5021,6 +5051,12 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             doc->input->root = {.element = html_elem};
         }
 
+        // template splices bypass DOM mutation records; retire detached sheets and publish replacements.
+        if (old_dom != new_dom) {
+            view_geometry_walk_dom_tree(old_dom, sync_rebuilt_stylesheet_visitor, &stylesheet_changed);
+        }
+        view_geometry_walk_dom_tree(new_dom, sync_rebuilt_stylesheet_visitor, &stylesheet_changed);
+
         set_layout_dirty_subtree(static_cast<DomNode*>(new_dom), true);
 
         DomNode* ancestor = static_cast<DomNode*>(parent_dom);
@@ -5032,7 +5068,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             ancestor = ancestor->parent;
         }
 
-        if (incremental_matcher) {
+        if (incremental_matcher && !stylesheet_changed) {
             radiant_apply_css_stylesheets_to_tree(
                 doc, new_dom, inline_sheets, inline_count, doc->document_pool,
                 css_engine, incremental_matcher);
@@ -5041,6 +5077,14 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         apply_inline_styles_to_tree(new_dom, doc->document_pool);
         // each committed subtree owns its next frame; unrelated components stay idle.
         radiant_queue_template_render_events(doc, new_dom);
+    }
+    if (stylesheet_changed) {
+        // stylesheet selectors can affect siblings outside the replaced template subtree.
+        style_epoch_mark_global_change(doc);
+        view_geometry_walk_dom_tree(doc->root, clear_load_stylesheet_cascade_visitor, nullptr);
+        layout_apply_css_stylesheets(doc, doc->root, doc->stylesheets, doc->stylesheet_count,
+                                    doc->document_pool, css_engine);
+        set_layout_dirty_subtree(doc->root, true);
     }
     auto t_dom_css = time_now_ns();
 
@@ -5646,7 +5690,7 @@ static bool layout_single_file(
         // the batch's documents share one loader runtime, as a window's do
         LayoutLoaderHostScope loader_host(ui_context);
         doc = load_layout_special_file(input_url, route_path, viewport_width, viewport_height,
-                                       pool, false, &special_handled, &js_host_config);
+                                       pool, false, &special_handled, &js_host_config, false, false);
     }
     if (!special_handled) {
         const int max_redirects = 8;

@@ -1,6 +1,6 @@
 // Invalid declarative inputs use the raised error channel (S7.4.1-S7.4.4).
-import style: lambda.latex.citeproc.style
-import c: lambda.latex.citeproc.common
+import style: lambda.doc.latex.citeproc.style
+import c: lambda.doc.latex.citeproc.common
 let prefix = "<style xmlns=\"http://purl.org/net/xbiblio/csl\" version=\"1.0\" class=\"in-text\">"
 let suffix = "<citation><layout><text variable=\"title\"/></layout></citation></style>"
 let minimal = prefix ++ suffix

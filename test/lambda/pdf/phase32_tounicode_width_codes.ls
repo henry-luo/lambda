@@ -1,6 +1,6 @@
 // Phase 32 — ToUnicode text advances by source glyph code widths.
 
-import interp: lambda.pdf.interp
+import interp: lambda.doc.pdf.interp
 
 fn name(s) { { kind: "name", value: s } }
 fn hex(s) { { kind: "hex", value: s } }

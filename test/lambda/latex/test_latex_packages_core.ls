@@ -1,5 +1,5 @@
 // Exercise package activation and the structured LaTeX result together.
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 let ast = input("test/lambda/latex/fixtures/common_packages.tex", {type: "latex"}) ^ { null }
 let result = latex.render_result(ast, {base_uri: "test/lambda/latex/fixtures"})

@@ -1,6 +1,6 @@
 # Lambda Grammar Module — Design
 
-**Revision:** 4 (2026-10-12)
+**Revision:** 5 (2026-10-15)
 **Status:** GM1–GM4, GM4.1, GM4.2, GM5v2, GM5.1, GM5.2 ruled by USER on
 2026-10-11 (see §0); GM6–GM12 proposed. **Implemented 2026-10-11** (P0–P3 of
 [the plan](impl/Lambda_Impl_Grammar_Parser.md)): declaration, loader, lint,
@@ -52,6 +52,7 @@ string patterns, U = unified AST).
 | **P5 scope** | **A guest grammar only parses**: `lambda.grammar.xpath` turns XPath into a Lambda element tree; evaluating it, and lowering to `lm.` (whose `compile`, S15.3, is unimplemented), are out of this phase. The XPath grammar is written **Tree-sitter style** — one directly left-recursive `Expr` with a precedence ladder and labels — rather than as a line-by-line EBNF transcription, which would make every precedence level a node. |
 | **GM13** (2026-10-12) | **`~x` matches `x` where the previous token ended**: no `space` is skipped before it — Tree-sitter's `token.immediate`. It marks one literal or `:=` rule reference (`~(a \| b)` and `~rule` on a `=` rule are errors), so `~x*` is `(~x)*`. It is how a space-sensitive position is written inside spaced text: jq's string text after an interpolation, XQuery's element content and attribute values around `{ … }`. Ruled over an exit from `nospace` regions (a `spaced` modifier) and over per-rule `nospace`, after comparing with Tree-sitter, which has no regions: whether space may precede something belongs to that token. `nospace` stays for whole space-free regions. |
 | **GM5.2** | **Diagnostics align with the existing parsers**: compile-time grammar errors use the script parser's E-code scheme and reporters; a failed `parse` is the same `ERR_PARSE_ERROR` every input parser raises, with the furthest-failure message as its `parse_error_message`; lint warnings go through the warning channel the script compiler already uses. No new catalog, no new tags. |
+| **GM14** (extension implemented 2026-10-15 for the authorized diff package) | `parse(binary, g[, rule/options])` reuses the grammar over a byte alphabet. Ordinary lexical captures are binary (empty captures are `null`, S2.2.2v2); symbol captures remain symbols. Text input keeps Unicode/string behavior. Script-facing grammar results are GC-owned, with private parse storage released per call (D4.2.6/D5.3.3). Byte spans are checked before narrowing to 32 bits. |
 
 USER also asked whether Tree-sitter-style precedence rules (`prec.left(n, …)`
 on directly left-recursive alternatives) can be supported. Yes — §5 gives the
@@ -580,13 +581,32 @@ function from one element tree (the guest's) to another (`lm.`), ending in
 `compile` (S15.3). This is what D1.1's "grammar + AST builder" means when
 both halves are written in Lambda.
 
-Ownership follows the existing parsers: the tree is built with
-`MarkBuilder` into an `Input` (D4.2.6), so it is owned by the pool the
-caller chose and released with it. The grammar itself is a type (GM5v2):
+Script-facing `parse` builds precisely rooted GC-owned values, then releases
+its private parse Input and scratch arena (GM14, D5.3.3). The native engine also
+supports a caller-owned Input/MarkBuilder result (D4.2.6). Neither mode retains
+scratch nodes in the returned tree. The grammar itself is a type (GM5v2):
 compiled rules and token matchers live in the module's type list with every
 other declared type, immutable, shared by every execution of the module, and
 released with it (D4.1.1v2, D7.2.1). A script never holds a run-time object
 for a grammar — only the `Type*`, exactly as for `type T = …`.
+
+### 7.1 Byte grammar input (GM14)
+
+ASCII syntax can recognize byte-oriented documents without decoding their
+payload: unified patches and NUL-delimited Git records are examples. Literal
+text matches its encoded bytes; character sets/ranges are restricted to byte
+ordinals 0–255 and complements use that alphabet. Byte matchers lower the
+original pattern AST with a byte limit and use RE2's Latin-1 mode. Unicode
+pattern compilation remains unchanged (S11.1.2v4). Matchers are cached per rule
+for a parse and released with its scratch state.
+
+Ordinary tokens become immutable binary; symbols retain GM4.2's symbol domain.
+Spans are half-open byte offsets. Inputs larger than `UINT32_MAX` are rejected
+before narrowing. Failure descriptions escape control bytes, so an expected NUL
+does not truncate the message. Numeric syntax offsets are not a separate public
+error field; the message carries its line/column, while packages can attach
+byte spans to their semantic diagnostics. See the diff package's
+[implementation record](impl/Lambda_Impl_Diff.md) for the motivating fixtures.
 
 ## 8. Errors (GM12)
 

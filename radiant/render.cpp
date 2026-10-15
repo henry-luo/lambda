@@ -240,5 +240,7 @@ void render_inline_view(RasterRenderContext* rdcon, ViewSpan* view_span) {
     }
     else {
     }
+    // Inline links use the same deferred CSS outline path as block controls.
+    render_outline_deferred(rdcon, lam::unsafe_view_block_api_span(view_span));
     rdcon->font = pa_font;  rdcon->color = pa_color;
 }

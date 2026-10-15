@@ -1,0 +1,29 @@
+<article xmlns="http://docbook.org/ns/docbook" version="5.2">
+  <title>Verbatim text</title>
+  <programlisting xml:id="long-code">one
+two
+
+four
+five
+six
+seven
+eight
+nine
+ten
+eleven
+twelve</programlisting>
+  <programlisting startinglinenumber="8" linenumbering="numbered">eight
+nine
+ten
+eleven
+twelve</programlisting>
+  <screen>output
+result</screen>
+  <screen linenumbering="numbered">numbered output</screen>
+  <literallayout>  aligned
+
+  text</literallayout>
+  <address>Example Street
+Example City</address>
+  <funcsynopsisinfo>type declarations</funcsynopsisinfo>
+</article>

@@ -1,6 +1,6 @@
 import c: .common
 import ease: .easing
-import hex: lambda.pdf.util
+import hex: lambda.doc.pdf.util
 
 fn byte(text, offset, short) {
     let a = hex.hex_digit_value(text[offset]);

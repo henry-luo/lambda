@@ -171,6 +171,7 @@ DOM_ENGINE_SEAM_2(pointer_selection)
 DOM_ENGINE_SEAM_1(clear_ime_preedit)
 DOM_ENGINE_SEAM_0(clipboard_text)
 DOM_ENGINE_SEAM_0(clipboard_copy_event)
+DOM_ENGINE_SEAM_1(clipboard_write)
 DOM_ENGINE_SEAM_2(edit_selection_text)
 DOM_ENGINE_SEAM_2(edit_selection_html)
 DOM_ENGINE_SEAM_4(edit_clipboard_write)
@@ -612,7 +613,7 @@ extern "C" Item dom_core_serialize(Item n, Item outer) {
 // realm the same fields are built as a plain Lambda map out of the document's
 // own Input, as dom_make_rect_in does for rects; a JS caller still gets the JS
 // object. One helper, so the three rows that need it do not each carry a copy.
-static Item dom_result_map(DomDocument* doc, const char* const* keys, const Item* vals, int n) {
+extern "C" Item dom_result_map(DomDocument* doc, const char* const* keys, const Item* vals, int n) {
     if (!dom_realm_active()) {
         if (!doc || !doc->input) return ItemNull;   // nothing to build it from
         MarkBuilder builder(doc->input);
@@ -634,6 +635,14 @@ extern "C" Item dom_core_scroll_state(Item n) {
     // which properties need layout; DS16 moves the commit onto the row instead.
     Item vals[] = { dom_prop_get(n, "scrollLeft"), dom_prop_get(n, "scrollTop") };  // DOM_NAME_DISPATCH_OK: DSO8
     return dom_result_map(doc, keys, vals, 2);
+}
+extern "C" Item dom_core_scroll_metrics(Item n) {
+    DomDocument* doc = (DomDocument*)dom_document_from_item(n);
+    // Use the shared CSSOM reads so callers see committed viewport and overflow geometry.
+    static const char* const keys[] = { "client_width", "client_height", "scroll_width", "scroll_height" };
+    Item vals[] = { dom_prop_get(n, "clientWidth"), dom_prop_get(n, "clientHeight"),
+        dom_prop_get(n, "scrollWidth"), dom_prop_get(n, "scrollHeight") }; // DOM_NAME_DISPATCH_OK: one named composite CSSOM read
+    return dom_result_map(doc, keys, vals, 4);
 }
 extern "C" Item dom_core_element_from_point(Item doc, Item x, Item y) {
     DomDocument* document = dom_document_of(doc);

@@ -1,0 +1,16 @@
+diff --git a/example.txt b/example.txt
+index 1234567..abcdef0 100644
+--- a/example.txt
++++ b/example.txt
+@@ -1,2 +1,2 @@ first
+ context
+-old <script>alert("patch")</script>
++new <script>alert("patch")</script>
+@@ -50 +50 @@ final
+-old tail
++new tail
+\ No newline at end of file
+diff --git a/old-name b/new-name
+similarity index 100%
+rename from old-name
+rename to new-name

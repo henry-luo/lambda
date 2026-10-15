@@ -77,7 +77,7 @@ function build_lambda_math_script(formula, display, base_uri, font_size) {
   const formula_literal = JSON.stringify(formula);
   const render_options = `{display: ${display}, base_uri: ${JSON.stringify(base_uri ?? null)}, font_size: ${JSON.stringify(font_size ?? null)}}`;
   return `import math_pkg: lambda.doc.math.math
-import html_ser: lambda.latex.to_html
+import html_ser: lambda.doc.latex.to_html
 
 let formula = ${formula_literal}
 let parsed = parse(formula, {type: "math", flavor: "latex"}) ^ { ^ }

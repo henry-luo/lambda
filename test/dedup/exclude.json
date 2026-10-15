@@ -529,23 +529,6 @@
       ]
     },
     {
-      "id": "independent_vector_export_lifecycles",
-      "modules": ["radiant"],
-      "reason": "SVG and PDF exports own different backend contexts and resources; Lizard matches their required paint-boundary setup and capability-trace bookkeeping, but cleanup and output objects are backend-specific.",
-      "regions": [
-        {
-          "file": "radiant/render_svg.cpp",
-          "start": "char* render_view_tree_to_svg(",
-          "end": "bool save_svg_to_file("
-        },
-        {
-          "file": "radiant/render_pdf.cpp",
-          "start": "static HPDF_Doc render_view_tree_to_pdf(",
-          "end": "static bool save_pdf_to_file("
-        }
-      ]
-    },
-    {
       "id": "short_text_content_predicate_guards",
       "modules": ["radiant"],
       "reason": "Lizard matches only the common DomNode text-kind guard and text-data load; each predicate then enforces a different whitespace, suppression, or table-content policy.",

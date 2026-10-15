@@ -6,6 +6,8 @@
 #include "lambda-error.h"
 #include "recovery_frame.h"
 #include "transpiler.hpp"
+#include "io_file_search.hpp"
+#include "re2_wrapper.hpp"
 #include "../js/js_runtime_state.hpp"
 #include "lambda/runtime/gc/gc_heap.h"
 #include "../../lib/log.h"
@@ -13,6 +15,7 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/queue.h"
 #include "../../lib/uv_loop.h"
+#include "../../lib/shell.h"
 
 #include <assert.h>
 #include <fcntl.h>
@@ -28,6 +31,7 @@ extern "C" void heap_unregister_gc_root(uint64_t* slot);
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count);
 extern "C" void heap_unregister_gc_root_range(uint64_t* base);
 extern "C" StrBuf* lambda_get_local_path_from_item(Item item);
+Item _map_get(TypeMap* type, void* data, const char* key, bool* found);
 
 typedef enum LambdaParkKind {
     LAMBDA_PARK_NONE = 0,
@@ -36,6 +40,7 @@ typedef enum LambdaParkKind {
     LAMBDA_PARK_SELECT,
     LAMBDA_PARK_SLEEP,
     LAMBDA_PARK_FILE_READ,
+    LAMBDA_PARK_PROCESS,
 } LambdaParkKind;
 
 typedef struct LambdaMailbox {
@@ -79,6 +84,20 @@ typedef struct LambdaTaskObserver {
     struct LambdaTaskObserver* next;
 } LambdaTaskObserver;
 
+struct LambdaProcess {
+    uv_work_t work;
+    LambdaTask* task;
+    char** args;
+    int arg_count;
+    ShellEnvEntry* env;
+    int env_count;
+    char* cwd;
+    ShellOptions options;
+    ShellResult result;
+    int cancel_flag;
+    bool done;
+};
+
 struct LambdaTaskScope {
     LambdaTask* owner;
     LambdaTask* children;
@@ -120,6 +139,8 @@ struct LambdaTask {
     bool cleanup_masked;
     bool started;
     bool queued;
+    bool handle_rooted;
+    bool values_rooted;
     uint64_t last_send_sequence;
     uint64_t completion_sequence;
     LambdaMailbox mailbox;
@@ -127,6 +148,7 @@ struct LambdaTask {
     LambdaWaitGroup* wait_group;
     LambdaTaskTimer* timer;
     LambdaFileRead* file_read;
+    LambdaProcess* process;
     LambdaTaskScope* scope_top;
     LambdaTaskScope* owner_scope;
     LambdaTask* next_scope_child;
@@ -175,6 +197,7 @@ static void task_handle_invalidate(LambdaTask* task) {
     // reaction may run in the final microtask checkpoint after scheduler
     // teardown; clear this non-managed edge before releasing the task.
     task->handle.vmap->host_data = NULL;
+    task->handle.vmap->data = NULL;
 }
 
 extern "C" void lambda_concurrency_set_promise_bridge(
@@ -215,18 +238,41 @@ static Item task_handle_at(void* data, int64_t index) {
 }
 
 static void task_handle_destroy(void* data) {
-    (void)data;
+    LambdaTask* task = (LambdaTask*)data;
+    if (!task) return;
+    // completed handles own their result graph; scheduler bookkeeping keeps only scalar/fault homes.
+    task->handle = ItemNull;
+    task->result = ItemNull;
+    task->resume_value = ItemNull;
+    mem_free(task->mailbox.items);
+    task->mailbox.items = NULL;
+    task->mailbox.count = 0;
 }
 
 static void task_handle_trace(void* data, gc_heap_t* gc) {
-    (void)data;
-    (void)gc;
+    LambdaTask* task = (LambdaTask*)data;
+    if (!task) return;
+    gc_mark_item(gc, task->result.item);
+    gc_mark_item(gc, task->resume_value.item);
+    for (int i = 0; task->mailbox.items && i < task->mailbox.capacity; i++)
+        gc_mark_item(gc, task->mailbox.items[i].item);
+}
+
+static void task_release_handle_root(LambdaTask* task) {
+    if (task && task->handle_rooted) {
+        heap_unregister_gc_root(&task->handle.item);
+        task->handle_rooted = false;
+    }
 }
 
 static void task_scopes_destroy(LambdaTask* task) {
     LambdaTaskScope* scope = task ? task->scope_top : NULL;
     while (scope) {
         LambdaTaskScope* parent = scope->parent;
+        for (LambdaTask* child = scope->children; child; child = child->next_scope_child) {
+            child->owner_scope = NULL;
+            if (child->state == LAMBDA_TASK_DONE) task_release_handle_root(child);
+        }
         mem_free(scope);
         scope = parent;
     }
@@ -349,6 +395,26 @@ static void task_resume_with(LambdaTask* task, Item value) {
     owned_item_slot_store(&task->resume_value, 1, 0, value);
     task->park_kind = LAMBDA_PARK_NONE;
     scheduler_enqueue(task);
+}
+
+static void process_cancel(LambdaProcess* process) {
+    if (!process || process->done) return;
+    __atomic_store_n(&process->cancel_flag, 1, __ATOMIC_RELEASE);
+    uv_cancel((uv_req_t*)&process->work);
+}
+
+static void process_release(LambdaProcess* process) {
+    if (!process) return;
+    for (int i = 0; process->args && i < process->arg_count; i++) mem_free(process->args[i]);
+    for (int i = 0; process->env && i < process->env_count; i++) {
+        mem_free((void*)process->env[i].key);
+        mem_free((void*)process->env[i].value);
+    }
+    mem_free(process->args);
+    mem_free(process->env);
+    mem_free(process->cwd);
+    shell_result_free(&process->result);
+    mem_free(process);
 }
 
 static void file_read_release(LambdaFileRead* read) {
@@ -621,6 +687,7 @@ extern "C" void lambda_scheduler_destroy(LambdaScheduler* scheduler) {
         if (task->file_read && !task->file_read->done) {
             uv_cancel((uv_req_t*)&task->file_read->request);
         }
+        process_cancel(task->process);
     }
     // File-system requests retain their task pointer through the libuv
     // callback. Finish cancellation before releasing task records.
@@ -628,7 +695,8 @@ extern "C" void lambda_scheduler_destroy(LambdaScheduler* scheduler) {
     while (pending_file_read) {
         pending_file_read = false;
         for (LambdaTask* pending = scheduler->all_tasks; pending; pending = pending->next_all) {
-            if (pending->file_read && !pending->file_read->done) {
+            if ((pending->file_read && !pending->file_read->done) ||
+                    (pending->process && !pending->process->done)) {
                 pending_file_read = true;
                 break;
             }
@@ -643,10 +711,12 @@ extern "C" void lambda_scheduler_destroy(LambdaScheduler* scheduler) {
         // rather than dereferencing the task after this record is released.
         task_handle_invalidate(task);
         if (scheduler_has_heap()) {
-            heap_unregister_gc_root(&task->handle.item);
-            heap_unregister_gc_root(&task->result.item);
-            heap_unregister_gc_root(&task->resume_value.item);
-            heap_unregister_gc_root_range((uint64_t*)task->mailbox.items);
+            task_release_handle_root(task);
+            if (task->values_rooted) {
+                heap_unregister_gc_root(&task->result.item);
+                heap_unregister_gc_root(&task->resume_value.item);
+                heap_unregister_gc_root_range((uint64_t*)task->mailbox.items);
+            }
         }
         activation_destroy(task->activation);
         task->activation = NULL;
@@ -659,6 +729,7 @@ extern "C" void lambda_scheduler_destroy(LambdaScheduler* scheduler) {
             observer = next_observer;
         }
         file_read_release(task->file_read);
+        process_release(task->process);
         mem_free(task->mailbox.items);
         mem_free(task);
         task = next;
@@ -698,6 +769,7 @@ static LambdaTask* task_record_create(LambdaScheduler* scheduler, bool is_root) 
     handle->vtable = &task_handle_vtable;
     handle->host_type = &task_handle_brand;
     handle->host_data = task;
+    handle->data = task;
 
     task->scheduler = scheduler;
     task->id = scheduler->next_task_id++;
@@ -719,6 +791,7 @@ static LambdaTask* task_record_create(LambdaScheduler* scheduler, bool is_root) 
     heap_register_gc_root(&task->result.item);
     heap_register_gc_root(&task->resume_value.item);
     heap_register_gc_root_range((uint64_t*)task->mailbox.items, task->mailbox.capacity);
+    task->handle_rooted = task->values_rooted = true;
     log_debug("concurrency task: created id=%llu%s", (unsigned long long)task->id,
         is_root ? " (root)" : "");
     return task;
@@ -1045,6 +1118,8 @@ extern "C" void lambda_task_resume_external(LambdaTask* task, Item result) {
 
 extern "C" void lambda_task_complete(LambdaTask* task, Item result) {
     if (!task || task->state == LAMBDA_TASK_DONE) return;
+    RootFrame roots(1);
+    Rooted<Item> handle(roots, task->handle);
     task_timer_close(task);
     // Completion is published after the task frame can unwind, so retain any
     // wide scalar in the task-owned companion word before waking observers.
@@ -1069,6 +1144,14 @@ extern "C" void lambda_task_complete(LambdaTask* task, Item result) {
     log_debug("concurrency task: completed id=%llu sequence=%llu",
         (unsigned long long)task->id,
         (unsigned long long)task->completion_sequence);
+    // D5.3.3: once complete, reachability through the handle retains the result, not the scheduler.
+    if (task->values_rooted) {
+        heap_unregister_gc_root(&task->result.item);
+        heap_unregister_gc_root(&task->resume_value.item);
+        heap_unregister_gc_root_range((uint64_t*)task->mailbox.items);
+        task->values_rooted = false;
+    }
+    if (!task->owner_scope) task_release_handle_root(task);
 }
 
 extern "C" bool lambda_task_on_complete(LambdaTask* task,
@@ -1261,6 +1344,10 @@ extern "C" Item lambda_task_scope_leave(LambdaTaskScope* scope, bool error_exit)
     }
 
     task->scope_top = scope->parent;
+    for (LambdaTask* child = scope->children; child; child = child->next_scope_child) {
+        child->owner_scope = NULL;
+        task_release_handle_root(child);
+    }
     if (scope->masked_cleanup) lambda_task_set_cleanup_masked(task, false);
     log_debug("concurrency scope: leave task=%llu", (unsigned long long)task->id);
     mem_free(scope);
@@ -1468,6 +1555,162 @@ extern "C" Item pn_io_read(Item target) {
         }
     }
     return file_read_result(task, read);
+}
+
+static char* process_argument(Item value) {
+    TypeId type = get_type_id(value);
+    const char* chars = NULL;
+    size_t length = 0;
+    if (is_text_type_id(type)) {
+        chars = value.get_chars();
+        length = value.get_len();
+    } else if (type == LMD_TYPE_BINARY) {
+        Binary* bytes = value.get_safe_binary();
+        chars = bytes ? (const char*)binary_data(bytes) : NULL;
+        length = bytes ? binary_length(bytes) : 0;
+    } else return NULL;
+    if ((!chars && length) || (chars && memchr(chars, 0, length))) return NULL;
+    return mem_dup_n(chars ? chars : "", length, MEM_CAT_EVAL);
+}
+
+static LambdaProcess* process_create(Item program, Item arguments, Item options, Item* error) {
+    *error = ItemError;
+    if (get_type_id(arguments) != LMD_TYPE_ARRAY || arguments.array->length > INT_MAX - 2) {
+        *error = io_fs_error(ERR_TYPE_MISMATCH, "io.exec: args must be an array of text or byte arguments");
+        return NULL;
+    }
+    IoFsOptionMap opts;
+    if (!io_fs_options_open(options, "io.exec", SYSPROC_IO_EXEC, &opts, error)) return NULL;
+    int64_t timeout = 30000, limit = SHELL_DEFAULT_MAX_OUTPUT_BYTES;
+    if (!io_fs_option_count(&opts, "timeout_ms", &timeout, error) ||
+            !io_fs_option_count(&opts, "max_output_bytes", &limit, error)) return NULL;
+    if (timeout > INT_MAX || limit <= 0 || (uint64_t)limit > SIZE_MAX) {
+        *error = io_fs_error(ERR_TYPE_MISMATCH, "io.exec: timeout_ms is too large or max_output_bytes is not positive");
+        return NULL;
+    }
+    LambdaProcess* process = (LambdaProcess*)mem_calloc(1, sizeof(LambdaProcess), MEM_CAT_EVAL);
+    if (!process) return NULL;
+    process->result.exit_code = -1;
+    process->arg_count = (int)arguments.array->length + 1;
+    process->args = (char**)mem_calloc((size_t)process->arg_count + 1, sizeof(char*), MEM_CAT_EVAL);
+    if (!process->args) { process_release(process); return NULL; }
+    process->args[0] = process_argument(program);
+    bool valid = process->args[0] && process->args[0][0];
+    for (int i = 1; valid && i < process->arg_count; i++) {
+        process->args[i] = process_argument(arguments.array->items[i - 1]);
+        valid = process->args[i] != NULL;
+    }
+    Item cwd = io_fs_option_get(&opts, "cwd");
+    if (get_type_id(cwd) != LMD_TYPE_NULL) {
+        if (get_type_id(cwd) == LMD_TYPE_BINARY) process->cwd = process_argument(cwd);
+        else {
+            StrBuf* path = lambda_get_local_path_from_item(cwd);
+            if (path) { process->cwd = mem_dup_n(path->str, path->length, MEM_CAT_EVAL); strbuf_free(path); }
+        }
+        valid = valid && process->cwd;
+    }
+    Item env = io_fs_option_get(&opts, "env");
+    if (get_type_id(env) != LMD_TYPE_NULL) {
+        if (get_type_id(env) != LMD_TYPE_MAP) valid = false;
+        else {
+            TypeMap* shape = lambda_attr_shape(LMD_TYPE_MAP, env.map);
+            process->env_count = (int)fn_len(env);
+            process->env = (ShellEnvEntry*)mem_calloc((size_t)process->env_count + 1,
+                sizeof(ShellEnvEntry), MEM_CAT_EVAL);
+            if (!process->env) valid = false;
+            int index = 0;
+            if (valid) FOR_EACH_MAP_FIELD(shape, field) {
+                if (!field->name || index >= process->env_count) continue;
+                char* key = mem_dup_n(field->name->str, field->name->length, MEM_CAT_EVAL);
+                bool found = false;
+                Item value = _map_get(shape, env.map->data, key, &found);
+                char* text = get_type_id(value) == LMD_TYPE_NULL ? NULL : process_argument(value);
+                if (!key || !key[0] || strchr(key, '=') ||
+                        (get_type_id(value) != LMD_TYPE_NULL && !text)) valid = false;
+                process->env[index++] = {key, text};
+            }
+        }
+    }
+    if (!valid) {
+        *error = io_fs_error(ERR_TYPE_MISMATCH, "io.exec: invalid program, argument, cwd, or environment entry");
+        process_release(process);
+        return NULL;
+    }
+    process->options.cwd = process->cwd;
+    process->options.env = process->env;
+    process->options.timeout_ms = (int)timeout;
+    process->options.max_output_bytes = (size_t)limit;
+    process->options.cancel_flag = &process->cancel_flag;
+#ifdef _WIN32
+    process->options.stdin_path = "NUL";
+#else
+    process->options.stdin_path = "/dev/null";
+#endif
+    return process;
+}
+
+static Item process_result(LambdaProcess* process) {
+    RootFrame roots(3);
+    Rooted<Item> output(roots, ItemNull), errors(roots, ItemNull);
+    Rooted<Map*> result(roots, (Map*)NULL);
+    // S2.2.2v2: an empty captured byte stream is absent binary, represented by null.
+    if (process->result.stdout_len) output.set((Item){.item = x2it(heap_binary_from_bytes(
+        process->result.stdout_buf, process->result.stdout_len))});
+    if (process->result.stderr_len) errors.set((Item){.item = x2it(heap_binary_from_bytes(
+        process->result.stderr_buf, process->result.stderr_len))});
+    static const char* names[] = {"stdout", "stderr", "exit_code", "timed_out", "cancelled", "truncated"};
+    static const TypeId types[] = {LMD_TYPE_ANY, LMD_TYPE_ANY, LMD_TYPE_INT,
+        LMD_TYPE_BOOL, LMD_TYPE_BOOL, LMD_TYPE_BOOL};
+    result.set(map_alloc_for_type(runtime_result_shape(names, types, 6), NULL, 0));
+    Item values[] = {output.get(), errors.get(), (Item){.item = i2it(process->result.exit_code)},
+        (Item){.item = b2it(process->result.timed_out)}, (Item){.item = b2it(process->result.cancelled)},
+        (Item){.item = b2it(process->result.output_limit_exceeded)}};
+    map_fill_items(result.get(), values, 6);
+    return (Item){.map = result.get()};
+}
+
+extern "C" Item pn_io_exec3(Item program, Item arguments, Item options) {
+    GUARD_ERROR3(program, arguments, options);
+    if (g_dry_run) {
+        LambdaProcess fabricated = {};
+        return process_result(&fabricated);
+    }
+    RootFrame roots(3);
+    Rooted<Item> rooted_program(roots, program), rooted_arguments(roots, arguments), rooted_options(roots, options);
+    LambdaTask* task = lambda_current_task();
+    if (!task) return task_error(ERR_INVALID_OPERATION, "io.exec requires a running procedure");
+    if (task_cancel_pending(task)) return task_cancelled_error();
+    Item error = ItemError;
+    LambdaProcess* process = process_create(program, arguments, options, &error);
+    if (!process) return error;
+    process->task = task;
+    process->work.data = process;
+    if (!lambda_uv_loop() && lambda_uv_init() != 0) { process_release(process); return ItemError; }
+    int status = uv_queue_work(lambda_uv_loop(), &process->work, [](uv_work_t* request) {
+        LambdaProcess* process = (LambdaProcess*)request->data;
+        process->result = shell_exec(process->args[0], (const char**)process->args, &process->options);
+    }, [](uv_work_t* request, int status) {
+        LambdaProcess* process = (LambdaProcess*)request->data;
+        process->done = true;
+        if (status == UV_ECANCELED) process->result.cancelled = true;
+        if (process->task && process->task->state != LAMBDA_TASK_DONE) lambda_task_resume(process->task);
+    });
+    if (status < 0) { process_release(process); return task_error(ERR_INVALID_STATE, uv_strerror(status)); }
+    task->process = process;
+    while (!process->done) {
+        task->park_kind = LAMBDA_PARK_PROCESS;
+        (void)lambda_task_suspend(task);
+        if (task_cancel_pending(task)) process_cancel(process);
+    }
+    task->process = NULL;
+    // cancellation waits for the worker/pipe owners before releasing their request memory.
+    Item result = task_cancel_pending(task) ? task_cancelled_error() : process_result(process);
+    process_release(process);
+    return result;
+}
+
+extern "C" Item pn_io_exec2(Item program, Item arguments) {
+    return pn_io_exec3(program, arguments, ItemNull);
 }
 
 extern "C" Item pn_self(void) {

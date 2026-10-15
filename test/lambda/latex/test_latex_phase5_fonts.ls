@@ -1,7 +1,7 @@
 // Phase V M9 (vibe/impl/Lambda_Impl_Latex_Packages.md §13): fonts: the text font
 // packages, fontspec, unicode-math and fontawesome5. No face beyond Computer and
 // Latin Modern is bundled (§17.3), so every other face is a reported substitution.
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 fn doc(preamble, body) =>
     "\\documentclass{article}\n" ++ preamble ++ "\n\\begin{document}\n" ++ body ++ "\n\\end{document}\n"

@@ -1,6 +1,6 @@
 // Phase V M1 (vibe/impl/Lambda_Impl_Latex_Packages.md §5): kernel, hyperref and
 // graphicx commands that were unsupported although no package is missing.
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 fn doc(preamble, body) =>
     "\\documentclass{article}\n" ++ preamble ++ "\n\\begin{document}\n" ++ body ++ "\n\\end{document}\n"

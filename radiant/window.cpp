@@ -288,6 +288,8 @@ typedef enum {
     DOC_FORMAT_PDF,
     DOC_FORMAT_EPS,
     DOC_FORMAT_DOCX,
+    DOC_FORMAT_EBOOK,
+    DOC_FORMAT_DIFF,
     DOC_FORMAT_SVG,
     DOC_FORMAT_IMAGE,  // PNG, JPG, JPEG, GIF
     DOC_FORMAT_TEXT    // JSON, YAML, TOML, TXT, etc.
@@ -305,7 +307,7 @@ static DocFormat detect_doc_format(const char* filename) {
     ext++; // skip the '.'
     ext_len--;
 
-    if (str_ieq_const(ext, ext_len, "html") || str_ieq_const(ext, ext_len, "htm")) {
+    if (str_ieq_const(ext, ext_len, "html") || str_ieq_const(ext, ext_len, "htm") || input_path_is_xhtml(filename)) {
         return DOC_FORMAT_HTML;
     } else if (str_ieq_const(ext, ext_len, "md") || str_ieq_const(ext, ext_len, "markdown")) {
         return DOC_FORMAT_MARKDOWN;
@@ -327,6 +329,10 @@ static DocFormat detect_doc_format(const char* filename) {
         return DOC_FORMAT_PDF;
     } else if (str_ieq_const(ext, ext_len, "docx")) {
         return DOC_FORMAT_DOCX;
+    } else if (input_path_is_ebook(filename)) {
+        return DOC_FORMAT_EBOOK;
+    } else if (str_ieq_const(ext, ext_len, "diff") || str_ieq_const(ext, ext_len, "patch")) {
+        return DOC_FORMAT_DIFF;
     } else if (str_ieq_const(ext, ext_len, "svg")) {
         return DOC_FORMAT_SVG;
     } else if (str_ieq_const(ext, ext_len, "png") || str_ieq_const(ext, ext_len, "jpg") ||
@@ -368,7 +374,7 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
         // paged formats share the export loader's admission before reaching the common document router.
         if (format == DOC_FORMAT_UNKNOWN && !(print_media && render_paged_input_supported(filename))) {
             log_error("Unsupported document format for file: %s", filename);
-            log_error("Supported formats: .html, .htm, .md, .markdown, .tex, .latex, .pgf, .ls, .slides, .xml, .pdf, .eps, .epsi, .svg, .png, .jpg, .jpeg, .gif, .json, .yaml, .yml, .toml, .txt, .csv, .ini, .conf, .cfg, .log");
+            log_error("Supported formats: .html, .htm, .md, .markdown, .tex, .latex, .pgf, .ls, .slides, .diff, .patch, .xml, .pdf, .eps, .epsi, .svg, .png, .jpg, .jpeg, .gif, .json, .yaml, .yml, .toml, .txt, .csv, .ini, .conf, .cfg, .log");
             return NULL;
         }
         // a source-text view takes no page host settings
@@ -395,6 +401,8 @@ static const char* get_format_name(const char* filename) {
         case DOC_FORMAT_PDF: return "PDF";
         case DOC_FORMAT_EPS: return "EPS";
         case DOC_FORMAT_DOCX: return "Word";
+        case DOC_FORMAT_EBOOK: return "eBook";
+        case DOC_FORMAT_DIFF: return "Diff";
         case DOC_FORMAT_SVG: return "SVG";
         case DOC_FORMAT_IMAGE: return "Image";
         case DOC_FORMAT_TEXT: return "Text";

@@ -1,0 +1,276 @@
+{
+  "name": "Word paragraph search",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Cat cat CAT",
+      "clear": false
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#paragraph-settings"
+      }
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#paragraph-align"
+      },
+      "value": "center"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#paragraph-lines"
+      },
+      "value": "2"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#paragraph-before"
+      },
+      "text": "6",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#paragraph-after"
+      },
+      "text": "12",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#paragraph-indent"
+      },
+      "text": "18",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#paragraph-first"
+      },
+      "text": "4",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-paragraph .primary"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "property": "text-align",
+      "equals": "center"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "property": "line-height",
+      "equals": "29.3333px"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "attribute": "style",
+      "contains": "margin-top: 6pt"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "attribute": "style",
+      "contains": "margin-left: 18pt"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 3
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"format.bold\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface strong"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"format.clear\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface strong"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "contains": "Cat cat CAT"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface strong"
+      },
+      "count": 1
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#find-query"
+      },
+      "text": "cat",
+      "clear": true
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#search-summary"
+      },
+      "contains": "3 matches"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#replace-text"
+      },
+      "text": "Dog",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#find-match-case"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#search-summary"
+      },
+      "contains": "1 matches"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#replace-all"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "contains": "Cat Dog CAT"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "contains": "Cat cat CAT"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#find-match-case"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#search-summary"
+      },
+      "contains": "3 matches"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#replace-all"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "contains": "Dog Dog Dog"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#find-clear"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#search-summary"
+      },
+      "contains": "A map for your ideas"
+    },
+    {
+      "type": "render",
+      "file": "temp/word-enhanced-paragraphs.png"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Browser focus and insertion caret</title>
+<style>
+body { margin: 32px; font: 16px/1.6 system-ui, sans-serif; color: #26332f; }
+button, input, textarea { font: inherit; margin: 8px; }
+p { margin: 12px 0; }
+#author:focus { outline: 3px dashed #b14744; outline-offset: 4px; }
+#suppressed { outline: none; }
+#editor { padding: 12px; border: 1px solid #aab8ae; outline: none; }
+#island { display: block; }
+</style>
+<p id="plain">Ordinary reading text can be selected without an insertion caret.</p>
+<button id="mouse">Pointer button</button>
+<button id="keyboard">Keyboard button</button>
+<button id="author">Author outline</button>
+<button id="suppressed">No outline</button>
+<div id="editor" contenteditable="true">Editable passage<span id="island" contenteditable="false">Noneditable island</span></div>
+<div id="empty" contenteditable="true" style="min-height:40px;border:1px solid #aab8ae" aria-label="Empty editor"></div>
+<input id="input" aria-label="Editable input" value="Editable input">
+<input id="readonly" aria-label="Readonly input" value="Readonly input" readonly>
+<textarea id="textarea" aria-label="Editable textarea">Editable textarea</textarea>
+</html>

@@ -1,6 +1,6 @@
 // Phase 35 — map color spaces with /N behave like native ICCBased fallback.
 
-import interp: lambda.pdf.interp
+import interp: lambda.doc.pdf.interp
 
 fn name(s) { { kind: "name", value: s } }
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }

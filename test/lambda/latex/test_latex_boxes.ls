@@ -1,7 +1,7 @@
 // test_latex_boxes.ls — Test box commands rendering
 // Tests Phase 2B: \fbox, \mbox, \makebox, \framebox, \parbox, \raisebox, \llap, etc.
 
-import boxes: lambda.latex.elements.boxes
+import boxes: lambda.doc.latex.elements.boxes
 
 "===== BOX COMMAND TESTS ====="
 

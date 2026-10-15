@@ -1,5 +1,6 @@
 <doc focus: {
     target: "#name",
+    visible: true,
     from_mouse: true
   }, caret: {
     target: "#name",
@@ -23,7 +24,7 @@
     <body index: 2, flags: ['hover', 'focus-within'],
       <form index: 3, id: "the-form", flags: ['hover', 'focus-within'],
         <div index: 1, flags: ['hover', 'focus-within'],
-          <input index: 3, id: "name", flags: ['hover', 'focus', 'focus-within', 'valid'], form: {
+          <input index: 3, id: "name", flags: ['hover', 'focus', 'focus-visible', 'focus-within', 'valid'], form: {
               value: "ctx",
               sel: [0, 3]
             }>>

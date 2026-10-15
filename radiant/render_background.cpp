@@ -1226,6 +1226,26 @@ void render_box_shadow_inset(RasterRenderContext* rdcon, ViewBlock* view, Rect r
     }
 }
 
+struct InsetShadowResource { ViewBlock* view; Rect rect; };
+static void render_inset_shadow_resource(RasterRenderContext* raster, void* pointer) {
+    InsetShadowResource* source = (InsetShadowResource*)pointer;
+    float scale = raster->raster_scale;
+    const Rect& box = source->rect;
+    render_box_shadow_inset(raster, source->view,
+        {box.x * scale, box.y * scale, box.width * scale, box.height * scale});
+}
+
+bool render_paint_inset_shadows(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect) {
+    bool inset = false;
+    for (BoxShadow* shadow = view && view->bound ? view->boundary()->box_shadow.get() : nullptr;
+            shadow; shadow = shadow->next) if (shadow->inset && shadow->color.a) inset = true;
+    if (!inset) return true;
+    RenderContext context = {}; context.ui_context = lam::up(ui);
+    context.block.clip = {rect.x, rect.y, rect.x + rect.width, rect.y + rect.height};
+    InsetShadowResource source = {view, rect};
+    return render_paint_raster_resource(paint, ui, &context, render_inset_shadow_resource, &source);
+}
+
 /**
  * Compute background image dimensions based on background-size property.
  * Returns the computed width and height of the background image in physical pixels.

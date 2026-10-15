@@ -161,7 +161,7 @@ format(results, 'json')
     cases, lambda, tex: [...dimensions], positions: [...positions], checks,
     referenceVersion: texRun.stdout.split('\n').slice(0, 6),
     amsmath: { path: amsFile, sha256: hash(amsFile) },
-    sources: Object.fromEntries(['lambda.exe', 'lmd/package/math/typeset.ls', 'lmd/package/math/font.ls',
+    sources: Object.fromEntries(['lambda.exe', 'lmd/package/doc/math/typeset.ls', 'lmd/package/doc/math/font.ls',
       'test/lambda/math/tex_conformance.test.mjs'].map((file) => [file, hash(path.join(ROOT, file))])),
   }, null, 2));
 });

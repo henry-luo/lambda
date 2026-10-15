@@ -1,0 +1,11 @@
+<book xmlns="http://docbook.org/ns/docbook" version="5.2" xml:id="book-notes">
+  <info><title>Numbered notes and examples</title></info>
+  <chapter xml:id="one"><title>One</title>
+    <para>First<footnote xml:id="note-one"><para>First note.</para></footnote>.</para>
+    <example xml:id="example-one"><title>First example</title><para>First body.</para></example>
+  </chapter>
+  <chapter xml:id="two"><title>Two</title>
+    <para>Second<footnote xml:id="note-two"><para>Second note.</para></footnote>.</para>
+    <example xml:id="example-two"><title>Second example</title><para>Second body.</para></example>
+  </chapter>
+</book>

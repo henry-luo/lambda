@@ -1,6 +1,6 @@
 // Phase 31 — font /Widths metrics affect text advance.
 
-import interp: lambda.pdf.interp
+import interp: lambda.doc.pdf.interp
 
 fn name(s) { { kind: "name", value: s } }
 fn str(s) { { kind: "string", value: s } }

@@ -25,5 +25,13 @@ test/input/grep_tree/crlf.txt -text
 test/input/grep_tree/eol.txt -text
 test/input/fts_tree/crlf.txt -text
 
+# RFC round-trip fixtures require their exact CRLF wire representation.
+test/input/script_formats/*.eml -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+test/input/script_formats/*.vcf -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+test/input/script_formats/*.ics -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+
 # preserve the pinned upstream SoundFont header and its recorded checksum
 lib/tinysoundfont/tsf.h -text
+
+# preserve archive-reader upstream bytes, including the Android header's CRLF
+lib/zip/*.[ch] -text

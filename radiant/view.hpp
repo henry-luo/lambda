@@ -696,6 +696,10 @@ typedef enum {
     IMAGE_FORMAT_JPEG,
     IMAGE_FORMAT_GIF,
     IMAGE_FORMAT_WEBP,
+    IMAGE_FORMAT_AVIF,
+    IMAGE_FORMAT_BMP,
+    IMAGE_FORMAT_TIFF,
+    IMAGE_FORMAT_ICO,
 } ImageFormat;
 
 typedef enum {
@@ -2699,14 +2703,8 @@ RdtLogicalPoint view_geometry_child_node_origin(
     View* view, RdtLogicalPoint parent_origin,
     ViewGeometryScrollResolver resolve_scroll = nullptr,
     void* context = nullptr);
-RdtLogicalPoint view_geometry_apply_external_viewport(
-    RdtLogicalPoint point, ViewBlock* viewport_root,
-    RdtLogicalPoint document_offset,
-    ViewGeometryScrollResolver resolve_scroll = nullptr,
-    void* context = nullptr);
 RdtLogicalPoint view_geometry_local_to_window(
-    View* view, RdtLogicalPoint local, ViewBlock* viewport_root,
-    RdtLogicalPoint document_offset,
+    View* view, RdtLogicalPoint local, RdtLogicalPoint document_offset,
     ViewGeometryScrollResolver resolve_scroll = nullptr,
     void* context = nullptr);
 RdtLogicalPoint view_geometry_document_viewport_offset(

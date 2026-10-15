@@ -1,7 +1,7 @@
 // Theme references are package data; only validated colors and quoted font names reach CSS (S1.8).
 import c: .common
 import package: .package
-import hex: lambda.pdf.util
+import hex: lambda.doc.pdf.util
 
 pub fn valid_hex(value, count = 6) => value is string and len(value) == count and
     all([for (ch in split(value,"")) hex.is_hex_digit(ch)])

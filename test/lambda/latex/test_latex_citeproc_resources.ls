@@ -1,6 +1,6 @@
 // Local styles, locales and CSL JSON share the package resource boundary (D7.1.2v2).
-import latex: lambda.latex.latex
-import html: lambda.latex.to_html
+import latex: lambda.doc.latex.latex
+import html: lambda.doc.latex.to_html
 let base = "test/lambda/latex/fixtures/citeproc"
 let source = "\\documentclass{article}\\usepackage{biblatex}\\addbibresource{references.json}\\begin{document}\\cite{json-book}\\printbibliography\\end{document}"
 let ast = latex.parse_source(source, base ++ "/resources.tex")

@@ -125,7 +125,9 @@ TEST_F(MimeDetectTest, InputProfileMappings) {
     EXPECT_EQ(detect_mime_from_filename(detector, "app.mjs"), nullptr);
     EXPECT_STREQ(detect_mime_from_content(detector, "OggS", 4), "text/plain");
     EXPECT_STREQ(mime_extension_from_content_type("text/xml; charset=utf-8"), ".xml");
-    EXPECT_STREQ(mime_extension_from_content_type("application/xhtml+xml"), ".html");
+    EXPECT_STREQ(mime_extension_from_content_type("application/xhtml+xml; charset=UTF-8"), ".xhtml");
+    EXPECT_STREQ(detect_mime_from_filename(detector, "page.xhtml"), "application/xhtml+xml");
+    EXPECT_STREQ(detect_mime_from_filename(detector, "page.XHT"), "application/xhtml+xml");
 }
 
 // Test content-based detection without filename

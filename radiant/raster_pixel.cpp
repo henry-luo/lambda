@@ -21,10 +21,7 @@ uint8_t render_pixel_premultiply_channel(uint8_t channel, uint8_t alpha) {
 }
 
 uint8_t render_pixel_unpremultiply_channel(uint8_t channel, uint8_t alpha) {
-    if (alpha == 0) return 0;
-    if (alpha == 255) return channel;
-    uint32_t value = ((uint32_t)channel * 255u + alpha / 2u) / alpha;
-    return (uint8_t)(value > 255u ? 255u : value);
+    return image_unpremultiply_channel(channel, alpha);
 }
 
 uint32_t render_pixel_premultiply_abgr(uint32_t pixel) {

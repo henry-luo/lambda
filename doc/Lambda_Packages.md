@@ -1,6 +1,6 @@
 # Lambda Packages
 
-Lambda ships a set of **packages**: libraries written in Lambda Script itself, distributed as source with the runtime and imported under the reserved `lambda.*` namespace (D7.2.4). Some are libraries you call from your own scripts: charts, graph layout and diagram rendering, math and LaTeX typesetting, PDF rendering and OpenAPI tools. Others are parts of the engine that happen to be written in Lambda: the `lambda edit` application, its editor model, and the browser behaviour behind HTML forms, links and editing in Radiant. This page lists them all, explains how their import paths resolve, and documents the public API of each library.
+Lambda ships a set of **packages**: libraries written in Lambda Script itself, distributed as source with the runtime and imported under the reserved `lambda.*` namespace (D7.2.4v3). Some are libraries you call from your own scripts: charts, graph layout and diagram rendering, math and LaTeX typesetting, PDF rendering and OpenAPI tools. Others are parts of the engine that happen to be written in Lambda: the `lambda edit` application, its editor model, and the browser behaviour behind HTML forms, links and editing in Radiant. This page lists them all, explains how their import paths resolve, and documents the public API of each library.
 
 > **Related Documentation**:
 > - [Lambda Modules](Lambda_Modules.md) — `import` syntax, `pub` exports and module resolution
@@ -29,6 +29,10 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 13. [Tests](#13-tests)
 14. [eps — EPS Rendering](#14-eps--eps-rendering)
 15. [docx — Word DOCX Import](#15-docx--word-docx-import)
+16. [docbook — DocBook to HTML/CSS](#16-docbook--docbook-to-htmlcss)
+17. [doc.wiki — Wiki writers](#17-docwiki--wiki-writers)
+18. [doc.misc — Source format writers](#18-docmisc--source-format-writers)
+19. [doc.ebook — EPUB reader](#19-docebook--epub-reader)
 
 ---
 
@@ -36,6 +40,10 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 
 | Package | Import path | Status | What it does | Used by the CLI |
 |---------|-------------|--------|--------------|-----------------|
+| `doc.wiki` | `lambda.doc.wiki` | Initial static profiles | Wiki-family writers, shared tasks, and loss reports | `lambda convert -t wiki:<flavor>` |
+| `doc.misc` | `lambda.doc.misc` | Initial source profiles | AsciiDoc, man, Typst, EML, vCard, and iCalendar writers | `lambda convert -t asciidoc` / `man` / `typst` / `eml` / `vcf` / `ics` |
+| `doc.ebook` | `lambda.doc.ebook` | Initial horizontal LTR EPUB profile | EPUB 2/3 publications, chapters, navigation, search and an interactive reader | `lambda view book.epub`; also `layout`, `render`, and file-browser preview |
+| `doc.diff` | `lambda.doc.diff` | Initial unified review profile | Grammar-based patch parsing, local Git comparisons, virtual review and complete static HTML | `lambda view change.patch`; also `.diff`, `layout` and `render` |
 | `ui.dtna` | `lambda.ui.dtna` | Experimental, partial native catalog | Ant-inspired components, collections, scoped tokens and native interaction; see [Lambda UI](Lambda_UI.md) | `lambda view test/ui/dtna_gallery.ls` |
 | `ui.bold` | `lambda.ui.bold` | Experimental, initial native subset | Neobrutalist components with thick borders, hard shadows, scoped tokens and shared native controls; see [bold UI](Lambda_UI_Bold.md) | `lambda view test/ui/bold_gallery.ls` |
 | `ui.wired` | `lambda.ui.wired` | Experimental, initial native subset | Hand-drawn SVG pencil outlines, paper surfaces, hatched progress, scoped tokens and native controls; see [wired UI](Lambda_UI_Wired.md) | `lambda view test/ui/wired_gallery.ls` |
@@ -47,9 +55,10 @@ Lambda ships a set of **packages**: libraries written in Lambda Script itself, d
 | `music` | `lambda.music` | Experimental notation and MIDI profile | Native MusicXML/MXL, SVG sheet music, SMF import/export and SoundFont playback; see [MusicXML and MIDI](Lambda_Music.md) | `lambda view test/music/_player.ls` |
 | `graph` | `lambda.graph.layout`, `lambda.graph.transform`, `lambda.graph.structurizr.structurizr` | Library | Layered graph layout, and diagram rendering for Mermaid, Graphviz DOT, D2 and Structurizr sources | `lambda render`, `view`, `layout` and `convert -t html` on `.mmd`, `.dot`/`.gv`, `.d2`, `.dsl`/`.structurizr` |
 | `math` | `lambda.doc.math.math` | Library | Typesets LaTeX math as HTML | Markdown math in `lambda view`, `layout` and `render`; math inside LaTeX documents |
-| `latex` | `lambda.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
+| `latex` | `lambda.doc.latex.latex` | Library | Renders LaTeX documents as HTML | `lambda convert x.tex -t html`; `lambda view`, `layout` and `render` on `.tex`/`.latex` |
 | `docx` | `lambda.doc.docx` | Library, initial semantic import profile | Reads Word DOCX into elements, HTML fragments, text, metadata and diagnostics (§14) | Import from a Lambda script; direct DOCX viewing remains archive browsing |
-| `pdf` | `lambda.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
+| `docbook` | `lambda.doc.docbook` | Library, initial core HTML profile | Native port of xslTNG 2.8.5 for DocBook 5.x HTML/CSS, including chunked publications (§16) | `lambda view file.xml` recognizes DocBook roots; scripts export HTML publications |
+| `pdf` | `lambda.doc.pdf.pdf` | Library, experimental | Renders PDF pages as SVG, and whole documents as HTML | `lambda view`, `layout` and `render` on `.pdf` |
 | `eps` | `lambda.doc.eps.eps` | Library, initial vector profile | Interprets EPS PostScript and produces standalone SVG | `convert -t svg`, `view`, `layout` and `render` on `.eps`/`.epsi` |
 | `grammar` | `lambda.grammar.xpath`, `lambda.grammar.xquery`, `lambda.grammar.jq`, `lambda.grammar.rnc` | Library, experimental | Grammars for other languages, written as Lambda `grammar` declarations: XPath 3.1, XQuery 3.1, jq 1.7.1 and RELAX NG compact parse to Lambda element trees | None |
 | `openapi` | `lambda.openapi.openapi`, `lambda.openapi.server` | Experimental | Route listing, Lambda type generation, validation and Swagger UI pages for OpenAPI specs | None |
@@ -86,7 +95,7 @@ r.nodes |> ~.id          // ["a", "b"]
 
 ### 2.1 How paths resolve
 
-The `lambda.*` root is reserved for everything Lambda ships (D7.2.4). Shipped package paths map onto the `package/` directory of the Lambda home:
+The `lambda.*` root is reserved for everything Lambda ships (D7.2.4v3). Shipped package paths map onto the `package/` directory of the Lambda home:
 
 | Import path | Loads |
 |-------------|-------|
@@ -101,12 +110,12 @@ The `lambda.*` root is reserved for everything Lambda ships (D7.2.4). Shipped pa
 | `lambda.physics` | `<LAMBDA_HOME>/package/physics.ls` (explicit public module) |
 | `lambda.music` | `<LAMBDA_HOME>/package/music.ls` (explicit public module) |
 | `lambda.<package>.<dir>.<module>` | `<LAMBDA_HOME>/package/<package>/<dir>/<module>.ls` |
-| `lambda.doc.math.<module>` | `<LAMBDA_HOME>/package/math/<module>.ls` |
+| `lambda.doc.<package>.<module>` | `<LAMBDA_HOME>/package/doc/<package>/<module>.ls` (including `math`, `pdf`, and `latex`) |
 | `lambda.math`, `lambda.io` | The built-in `math` and `io` modules, which are not packages |
 | `lambda.sys.<name>` | A system function, reachable even when a script shadows its name (S17.2.1, S17.2.2) |
 
 - **Name an existing module.** There is no implicit directory index, so `import chart: lambda.chart` fails with E217; write `lambda.chart.chart`. `lambda.slide` has an explicit `package/slide.ls` entry file.
-- **`lambda.doc.*` groups document packages and the bundled viewer.** The viewer and its resources live in `package/doc/`; math typesetting maps to `package/math/` so that `lambda.math` can stay the built-in math module (D7.2.4). The LaTeX package is `lambda.latex`, not `lambda.doc.latex`.
+- **`lambda.doc.*` groups document packages and the bundled viewer.** Math, PDF and LaTeX live in `package/doc/{math,pdf,latex}/`, matching their `lambda.doc.*` imports (D7.2.4v3). The viewer and its resources live in `package/doc/`. `lambda.math` remains the built-in math module.
 - **An alias is a binding name**, so it can be neither a keyword nor `lambda` itself (S16.10.1v2). Choose another alias for the `edit` package:
 
 ```lambda error=E100
@@ -152,7 +161,7 @@ stats.mean(xs)                  // 6
 stats.spread(xs)                // 7
 ```
 
-Keep your packages next to the scripts that use them. The `lambda.*` namespace is reserved for what Lambda ships (D7.2.4), and there is no package manager, registry or search path for third-party packages: share a package by sharing its source files. See [Lambda_Modules.md](Lambda_Modules.md) for the full import rules.
+Keep your packages next to the scripts that use them. The `lambda.*` namespace is reserved for what Lambda ships (D7.2.4v3), and there is no package manager, registry or search path for third-party packages: share a package by sharing its source files. See [Lambda_Modules.md](Lambda_Modules.md) for the full import rules.
 
 ---
 
@@ -583,7 +592,7 @@ Chart entry points return value errors on invalid data or options, while the
 direct wordcloud APIs below raise errors (S7.4.1–S7.4.2).
 
 `lambda.chart.wordcloud` lays out weighted words and renders an SVG element.
-It ships as Lambda source under the same package namespace (D7.2.1–D7.2.4).
+It ships as Lambda source under the same package namespace (D7.2.1–D7.2.4v3).
 Each input record has a nonempty, single-line `text`, a finite positive
 `weight` (`int`, `i64` or `float`), and an optional `color` string. Phrases and
 Unicode text are supported. Records can also override `font_size`,
@@ -673,7 +682,7 @@ The viewable gallery at `test/demo/wordcloud.ls` compares four configurations:
 
 `lambda.chart.timeline` presents historical events as chronological cards, a
 time axis, or an active story. It uses the ordinary source-package and view
-mechanisms (**D7.2.1–D7.2.4/D7.2.6, S2.4.3v3/S12.1.3**).
+mechanisms (**D7.2.1–D7.2.4v3/D7.2.6, S2.4.3v3/S12.1.3**).
 Implementation is in progress against the
 [timeline proposal](../vibe/Lambda_Pkg_Chart_Timeline.md); the
 [acceptance inventory](../test/timeline/reference_inventory.json) records open
@@ -981,20 +990,20 @@ have been removed; use `lambda.doc.math.math`.
 
 The latex package renders a parsed LaTeX document as HTML. Parse with `latex.parse_file(path)` or `latex.parse_source(text, base)`. Every LaTeX parse first runs Lambda's TeX expansion engine (**D7.2.7v2**): document macros, `.sty`/`.cls` files beside the document, bundled programming packages such as `etoolbox`, `xkeyval` and expl3, and Lambda's own bindings for `physics`, the `mathtools` macros, `xspace`, `csvsimple`, `unicode-math`'s alphabets and the configuration macros of `tocloft`, `authblk`, `titling`, `minitoc`, `glossaries`, `nomencl` and `acronym` run as TeX, while Radiant keeps layout. A bare `input(path, 'latex')` also expands, but without the package's adapter registry, so parse through the package when you render. The package covers the `article`, `book` and `report` document classes and profiles of the common others (KOMA-Script, memoir, the AMS classes, IEEEtran, llncs, elsarticle, revtex, acmart, `letter` and `exam`), sectioning with numbering, lists, tables, footnotes, boxes, colour, spacing, the `picture` environment, `\newcommand` macros, and math through the `math` package.
 
-Common `\usepackage` declarations select the shipped script adapters for `amsmath`, `amssymb`, `graphicx`, `hyperref`, `geometry`, `xcolor`, `booktabs`, `biblatex`, `babel`, `enumitem`, `microtype`, `siunitx`, and TikZ. Package names select static source modules under **D7.2.1–D7.2.4**; TeX source runs only as TeX inside the engine's sandbox and never becomes Lambda code (**S1.8, D7.2.7v2**). The [package compatibility matrix](../vibe/Lambda_Pkg_Latex.md#9-compatibility-matrix) lists supported commands and output limits.
+Common `\usepackage` declarations select the shipped script adapters for `amsmath`, `amssymb`, `graphicx`, `hyperref`, `geometry`, `xcolor`, `booktabs`, `biblatex`, `babel`, `enumitem`, `microtype`, `siunitx`, and TikZ. Package names select static source modules under **D7.2.1–D7.2.4v3**; TeX source runs only as TeX inside the engine's sandbox and never becomes Lambda code (**S1.8, D7.2.7v2**). The [package compatibility matrix](../vibe/Lambda_Pkg_Latex.md#9-compatibility-matrix) lists supported commands and output limits.
 
 The bounded `biblatex` profile reads multiple local `.bib` resources, supports ten common entry types, six built-in citation/bibliography styles, source-order citation commands, `\nocite`, filtered and scoped `\printbibliography`, and English/German/French strings. It handles common BibTeX strings and inheritance, creates internal citation links, and reports missing or unsupported requests with source locations (**D7.1.2v2, S12.4.1, S7.4.1–S7.4.4**). `backend=biber` selects this local profile; no Biber process or arbitrary style file is run. See [Phase 2 behavior and boundaries](../vibe/latex/Lambda_Design_BibTeX_CSL.md#21-the-built-in-biblatex-and-natbib-profile).
 
-A document that declares `\usepackage[style=apa]{biblatex}`, `style=ieee`, or `\usepackage[authordate]{biblatex-chicago}` (or its default notes style) is formatted by the matching bundled CSL style automatically. The `csl-style-alias` diagnostic names the CSL style used, and biblatex options or style customizations that CSL cannot follow are reported rather than applied. An experimental CSL processor is also available directly through `render_result(ast, {base_uri: ".", citeproc: {style: "apa", locale: "en-US"}})`. It is implemented entirely in Lambda script within `lambda.latex` (**D7.2.1–D7.2.4, S1.8, S12.4.1v2**). It accepts local BibTeX/BibLaTeX or CSL JSON resources, evaluates custom CSL XML, and bundles `ieee`, `apa`, `chicago-author-date`, and `chicago-fullnote-bibliography` styles plus English/German/French locales. It preserves citation links, scoped prints, and note-style footnotes. CSL mode rejects conflicting legacy style/sorting options and reports unsupported constructs. Locale collation and complete CSL conformance remain outstanding. See the [CSL API, resource options and coverage](../lmd/package/latex/citeproc/README.md).
+A document that declares `\usepackage[style=apa]{biblatex}`, `style=ieee`, or `\usepackage[authordate]{biblatex-chicago}` (or its default notes style) is formatted by the matching bundled CSL style automatically. The `csl-style-alias` diagnostic names the CSL style used, and biblatex options or style customizations that CSL cannot follow are reported rather than applied. An experimental CSL processor is also available directly through `render_result(ast, {base_uri: ".", citeproc: {style: "apa", locale: "en-US"}})`. It is implemented entirely in Lambda script within `lambda.doc.latex` (**D7.2.1–D7.2.4v3, S1.8, S12.4.1v2**). It accepts local BibTeX/BibLaTeX or CSL JSON resources, evaluates custom CSL XML, and bundles `ieee`, `apa`, `chicago-author-date`, and `chicago-fullnote-bibliography` styles plus English/German/French locales. It preserves citation links, scoped prints, and note-style footnotes. CSL mode rejects conflicting legacy style/sorting options and reports unsupported constructs. Locale collation and complete CSL conformance remain outstanding. See the [CSL API, resource options and coverage](../lmd/package/doc/latex/citeproc/README.md).
 
-For PDF export, `hyperref` links and anchors become link annotations and destinations, and its title, author, subject and keywords become PDF Info metadata. `geometry` supplies fixed `@page` paper size and margins for a one-page export; automatic page breaking still requires the separate paged path. `graphicx` trim/clip uses the same supported CSS `clip-path` shapes in SVG and PDF. These remain Lambda-script package policies under **D7.2.1–D7.2.4**; unsupported options and commands follow **S7.4.1–S7.4.4** diagnostics.
+For PDF export, `hyperref` links and anchors become link annotations and destinations, and its title, author, subject and keywords become PDF Info metadata. `geometry` supplies fixed `@page` paper size and margins for a one-page export; automatic page breaking still requires the separate paged path. `graphicx` trim/clip uses the same supported CSS `clip-path` shapes in SVG and PDF. These remain Lambda-script package policies under **D7.2.1–D7.2.4v3**; unsupported options and commands follow **S7.4.1–S7.4.4** diagnostics.
 
 Phase III adds bounded theorem/proof, table, language, TikZ/PGFPlots, `natbib`, `caption`/`subcaption`, English `cleveref`, and unhighlighted `listings` profiles. Raw code and document-local `filecontents` bibliographies are preserved. `hyperref` headings and plain-text `\pdfbookmark` titles become hierarchical PDF outlines. `render_result.assets` records image/bibliography paths, origin, availability and source offsets; availability checks local existence, not successful decoding or remote fetching. See the [sample compatibility report](../test/latex/samples/COMPATIBILITY.md).
 
 For the shared paged PDF path, pass `{target: "pdf", paged: true}` while generating the standalone HTML, then export it with `lambda render --paged`. The bounded `fancyhdr`/`lastpage` profile supplies text, running marks and page counters. Continuous output diagnoses unresolved page counters. Paged tables and columns, native Thai shaping/line breaking, exact font substitutions, and TeX typography remain explicit limits (**S7.4.1–S7.4.4**). Unicode PDF glyphs use font outlines and are not searchable text; full ToUnicode font embedding is a separate host capability. Lua, biblatex style files, and package files from a TeX installation are excluded (**S1.8, D7.2.7**).
 
 ```lambda
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 let src = "\\documentclass{article}\n\\begin{document}\n\\section{Intro}\nHello \\textbf{world}.\n\\end{document}"
 let ast = latex.parse_source(src, null)
@@ -1029,7 +1038,7 @@ name(page)                               // 'html'
 The pdf package renders the object tree that `input(path, 'pdf')` produces. Each page's content stream is interpreted into SVG: text (embedded fonts become `@font-face` rules), vector paths, images and shadings. A whole document becomes an HTML page with one SVG per page plus a selectable text layer. The example reads a sample file from the Lambda source tree:
 
 ```lambda
-import pdf: lambda.pdf.pdf
+import pdf: lambda.doc.pdf.pdf
 
 let doc = input("test/input/test.pdf", 'pdf')^
 pdf.pdf_metadata(doc).Title              // "Test PDF Document"
@@ -1043,7 +1052,7 @@ name(html)                               // 'html'
 To save the HTML, `output` it from a procedure:
 
 ```lambda
-import pdf: lambda.pdf.pdf
+import pdf: lambda.doc.pdf.pdf
 
 pn main() {
     let doc = input("test/input/test.pdf", 'pdf')^
@@ -1063,16 +1072,16 @@ pn main() {
 
 Generation uses `fn` throughout (S2.6.6v3). Save the completed value with
 `output(file, destination, {atomic: true})^` in a procedure. The output module
-also exposes `lambda.pdf.output.render(source, options)`; the procedural
+also exposes `lambda.doc.pdf.output.render(source, options)`; the procedural
 `export` / `export_source` wrappers have been removed. `binary(file)` returns
 owned PDF bytes, and completed PDF files can be composed inside another PDF
 file without retaining their original child values.
 
 The experimental output path is also available directly as
-`lambda.pdf.output.render`:
+`lambda.doc.pdf.output.render`:
 
 ```lambda
-import pdf: lambda.pdf.output
+import pdf: lambda.doc.pdf.output
 pn main() {
     let file = pdf.render("page.html", {width: 800, height: 600})^;
     return output(file, "page.pdf", {atomic: true})^
@@ -1218,15 +1227,15 @@ Bare `lambda view` loads `package/doc/doc_viewer.ls` from Lambda home;
 `lambda demo` with no name opens the adjacent `doc_viewer.html` startup splash.
 Named demos use `lambda demo <name>`; see the [demo catalog](../test/demo/README.md).
 The viewer browses the current working directory and loads documents on selection. Its
-Seti icon font and license ship in `package/doc/icons/`, and its KaTeX stylesheet
-comes from `package/math/`. These application resources belong to the shipped
-`lambda.doc` package (D7.2.4); UI event fixtures remain under `test/ui/`.
+Seti icon font and license ship in `package/doc/icons/`, and its bundled math fonts
+come from `package/doc/math/fonts/`. These application resources belong to the shipped
+`lambda.doc` package (D7.2.4v3); UI event fixtures remain under `test/ui/`.
 
 ---
 
 ## 11. `map` — Geographic Maps
 
-`lambda.map` is an explicit public package entry under D7.2.4. It produces a
+`lambda.map` is an explicit public package entry under D7.2.4v3. It produces a
 native Radiant `<geomap>` viewport. The initial implementation accepts inline,
 typed GeoJSON and a bounded subset of MapLibre Style Specification version 8:
 ordered `background`, `fill`, `line` and `circle` layers with hex/transparent
@@ -1435,6 +1444,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 | `music` | `test/lambda/music/`; score fixtures and viewer example in `test/music/` |
 | `latex` | `test/lambda/latex/` |
 | `docx` | `test/lambda/docx/`; synthetic and pinned reference documents in `test/input/docx/` |
+| `docbook` | `test/lambda/docbook/`; original XML and pinned xslTNG bodies in `test/input/docbook/`; direct/source-tab viewing in `test/ui/docbook_source.json` and `test/ui/doc_viewer_docbook_preview.json` |
 | `grammar` | `test/lambda/grammar/xpath.ls` (the grammar module itself: `test/lambda/grammar/`) |
 | `pdf` | `test/lambda/pdf/` |
 | `eps` | `test/lambda/eps/`; native parsing/scanning in `test/test_input_eps_gtest.cpp` |
@@ -1448,7 +1458,7 @@ A `.ls` script in these directories runs in the Lambda runtime test suite (`test
 
 ## 14. `eps` — EPS Rendering
 
-The EPS package lives under the document namespace (**D7.2.4**). A C+ parser
+The EPS package lives under the document namespace (**D7.2.4v3**). A C+ parser
 reads the EPS envelope and scans source objects; Lambda Script executes the
 PostScript machine and emits portable SVG. The initial profile supports vector
 paths, colors, strokes, transforms, clipping, procedures, common stack/control
@@ -1511,7 +1521,7 @@ budgets, tests and remaining resource/font/image work.
 
 ## 15. `docx` — Word DOCX Import
 
-`lambda.doc.docx` is a shipped script module under D7.2.1/D7.2.4. It reads a
+`lambda.doc.docx` is a shipped script module under D7.2.1/D7.2.4v3. It reads a
 local `.docx` path or a captured ZIP file tree and converts the document's main
 story to semantic HTML elements. The source package is read through Lambda's
 bounded ZIP input (S12.4.1v2/S14.3.1v2); conversion follows relationships and
@@ -1539,18 +1549,18 @@ subscript; tabs and breaks; simple lists with numbering starts, continuation
 and nesting, including lists with hidden markers; tables with grid spans and
 vertical merges; hyperlinks and simple bookmarks; embedded raster images;
 and clustered column charts rendered from their cached category/series values.
-Charts reuse `lambda.chart.chart` for SVG layout (D7.2.4), retain explicit RGB
+Charts reuse `lambda.chart.chart` for SVG layout (D7.2.4v3), retain explicit RGB
 series colors and titles, and contribute a data table to extracted text.
 Paragraph-relative column anchors support left/right square wrapping,
 centered largest-side wrapping, and top/bottom wrapping at paragraph top.
 Signed column-start and paragraph offsets with square wrapping on both sides
-use CSS float margins (D7.2.4); this remains a flowing approximation of Word.
+use CSS float margins (D7.2.4v3); this remains a flowing approximation of Word.
 No-wrap column/paragraph anchors with explicit offsets retain their extents
 and front/behind-text layer order. Inset raster crops keep their saved frames.
 Flat DrawingML rectangles support validated solid RGB/theme fills with no
 outline; a supported modern compatibility branch takes precedence over its
 fallback. Decorative rectangles are hidden from accessibility text (S1.8,
-D7.2.4).
+D7.2.4v3).
 The viewer also reads the document theme, inherited and direct run properties
 (font family, size, color, tracking and capitalization), paragraph spacing,
 table grid widths, cell shading and borders, row heights, and page size/margins.
@@ -1559,7 +1569,7 @@ available to the host font resolver for a matching face. CSS remains a flow
 preview and does not reproduce Word's full layout engine.
 Footnotes, endnotes and comments become numbered links and appended ordered
 sections, with each kind numbered in first-reference order and repeated
-references sharing one entry (D7.2.4). Links in annotations resolve against
+references sharing one entry (D7.2.4v3). Links in annotations resolve against
 that annotation part's relationships. Extracted text includes reference marks
 and labelled annotation text after the main body. Text-box paragraphs/tables
 are retained after their containing paragraph, with a placement diagnostic.
@@ -1575,7 +1585,7 @@ represent document notes and are excluded from annotation content.
 Simple and complex fields display their saved text and links, including cached
 TOC/page-reference results. Instructions are never executed or refreshed
 (S1.8). Table rows retain omitted leading/trailing grid columns as empty HTML
-slots, preserving the alignment of financial tables (D7.2.4).
+slots, preserving the alignment of financial tables (D7.2.4v3).
 
 | Option | Default | Meaning |
 |--------|---------|---------|
@@ -1603,12 +1613,277 @@ Underlying source/ZIP errors keep their existing codes. All 17 pinned Mammoth
 DOCX reference documents import; the external-image and floating-text-box
 fixtures report their unsupported resources/geometry. Mammoth's embedded
 style-map extension does not override Lambda's explicit `style_map` option
-(S1.8, D7.2.4). See the [fixture inventory](../test/input/docx/README.md).
+(S1.8, D7.2.4v3). See the [fixture inventory](../test/input/docx/README.md).
 
 Design and phased scope: [DOCX package](../vibe/Lambda_Pkg_Docx.md).
 
 `lambda view report.docx` presents the imported Word document with the shared
-`lambda.doc.docx.view` presentation module (D7.2.4). The bundled file browser
+`lambda.doc.docx.view` presentation module (D7.2.4v3). The bundled file browser
 also previews DOCX and exposes its converted HTML on the Source tab. Use
 `lambda view report.docx --archive` for the underlying ZIP tree. Unsupported
 content is listed above the preview; Word pagination is outside this profile.
+
+## 16. docbook — DocBook to HTML/CSS
+
+Open the original sample directly with
+`./lambda.exe view test/input/docbook/showcase.xml`. The XML viewer recognizes
+DocBook namespaces and uses the package's HTML/CSS presentation (D7.2.4v3);
+the document browser keeps the original XML in its Source tab.
+The usual extension is `.xml`; the namespace
+`http://docbook.org/ns/docbook` identifies DocBook. The current direct-view
+roots are `article`, `book`, `set`, `part`, and `reference`.
+
+`lambda.doc.docbook` is an initial native Lambda port of the official DocBook
+xslTNG 2.8.5 HTML/CSS transformation (D7.2.4v3). Java and XSLT are used only to
+regenerate reference fixtures; package execution has no Java dependency.
+
+```lambda
+import docbook: lambda.doc.docbook
+let xml = "<article xmlns='http://docbook.org/ns/docbook' version='5.2'><info><title>Hello</title></info><para>DocBook in Lambda.</para></article>"
+let source = parse(xml, {type:"xml", flavor:"document"})^
+let publication = docbook.convert(source)^
+publication.document
+```
+
+| API | Contract |
+|-----|----------|
+| `convert(source, options = null)` | Pure conversion of a parsed XML tree or source snapshot into a publication. |
+| `to_html(source, options = null)` | Pure conversion/serialization to one complete HTML string; rejects chunked mode. |
+| `read(path, options = null)` | Procedure acquiring strict XML and referenced local media into an immutable snapshot. |
+| `write(publication, destination)` | Procedure writing all HTML pages and captured assets into a local directory. |
+
+Pure conversion receives all resources as data; it never fetches missing input
+(S12.1.1v3). Parse strings explicitly, preserving significant XML whitespace;
+`flavor:"document"` retains it and rejects DTDs. A snapshot has `document`,
+`source_uri`, `base_uri`, and a `resources` map keyed by resolved URI with
+`{bytes, media_type}` entries. Unavailable media produces a diagnostic.
+
+```lambda
+import docbook: lambda.doc.docbook
+pn main() {
+    let source = docbook.read("test/input/docbook/book.xml")^
+    let publication = docbook.convert(source, {output:"chunked"})^
+    docbook.write(publication, "temp/docbook-example")^
+}
+```
+
+A publication contains `document` (the entry page), `entry`, ordered `pages`
+(`{path, document}`), `assets`, `toc`, `metadata`, `diagnostics`, and
+`compatibility`. The latter identifies the upstream commit, support profile
+and intentional differences. `external_stylesheets` lists the original CSS's
+external Google Fonts imports; those font bytes are not bundled or fetched
+by conversion.
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `output` | `"single"` | `"chunked"` computes page ownership, navigation, and cross-file links. |
+| `target` | `"browser"` | `"radiant"` currently returns the same HTML/CSS; renderer support is separate. |
+| `unsupported` | `"warn"` | `"error"` rejects diagnosed unsupported content. |
+| `parameters` | `{}` | Native values keyed by supported original xslTNG parameter names. |
+| `customization` | `{}` | Pure handlers keyed by DocBook local name; each receives `(node, context, next)`. |
+
+Supported parameter groups include TOC controls, component/section numbering,
+generated-ID root/separator, CSS use/resource prefix, verbatim presentation and
+trimming/line numbering, chunk section depth/navigation/note renumbering, and ID-based chunk
+filenames. Boolean parameters take `bool` values. `resource-base-uri` is a
+relative publication directory ending in `/` (or empty). Unknown parameters
+and invalid types fail validation. Syntax highlighting currently accepts only
+`"none"`; this is an explicit difference from upstream's default.
+`verbatim-number-every-nth` and `verbatim-number-minlines` take positive
+integers; `verbatim-number-first-line` is boolean, and
+`verbatim-number-separator` is a string. Upstream's explicit element styles
+take precedence over `verbatim-style-default` for the covered vocabulary.
+
+The current profile covers core article/book structures, common prose and
+inlines, basic/compact/nested/variable lists, ordinary footnotes, admonitions,
+formal objects, HTML tables and CALS row/column spans, generated English
+headings/TOCs/references, text verbatim blocks, captured images and multi-page
+export. Extended vocabulary, full localization, bibliography/glossary/index
+generation, inclusion/transclusion/profiling, advanced CALS/media layout,
+table-specific footnotes, foreign inline SVG/MathML and optional browser scripts
+remain incomplete. Unsupported content and selected unsupported attributes
+are diagnosed. Full xslTNG or DocBook schema coverage is not claimed.
+
+Errors use package codes 7700–7707 for invalid source, options, namespace,
+duplicate ID, strict unsupported content, invalid table, missing resource, and
+invalid path. Underlying input/parse errors retain their original codes.
+Recoverable diagnostics include severity, code, message, source URI and
+occurrence path; line/column are nullable (S7.4.2, S7.4.4).
+
+See the [design](../vibe/Lambda_Pkg_Docbook.md),
+[implementation record](../vibe/impl/Lambda_Impl_Docbook.md), and
+[upstream/support record](../lmd/package/doc/docbook/UPSTREAM.md). The registered
+Lambda tests include the offline single-page and chunked official-body parity
+gate; expected bodies are refreshed separately using the pinned processor.
+
+## 17. doc.wiki — Wiki writers
+
+`lambda.doc.wiki` serializes Mark Doc to MediaWiki, DokuWiki, TikiWiki, TWiki,
+Vimwiki, XWiki 2.1, ZimWiki, Creole 1.0, Jira, and Confluence wiki markup.
+A shared Lambda Script traversal uses declarative syntax profiles; native code
+routes calls and owns package invocation (D7.1.1, D7.2.4v3).
+
+```lambda
+import wiki: lambda.doc.wiki
+let document = parse("= Title =\n\n**Text**", "wiki:creole")^
+wiki.format_report(document, {flavor:"jira"})^
+```
+
+| Export | Result |
+|---|---|
+| `format_report(document, options = null)` | `{text, diagnostics}`; returns a report even when there are losses |
+| `format(document, options = null)` | Serialized string; errors on losses by default |
+| `format_file(path, options = null)` | Reads with `input_type` / `input_flavor`, then formats |
+
+Options are `flavor` (default `mediawiki`) and `loss` (`error` or `allow`).
+`format_file` additionally accepts `input_type` (default `auto`) and
+`input_flavor` (default empty). Unknown options and flavors are errors.
+`format_report` reports unsupported nodes, attributes, task states/progress,
+source dialect mismatches, and delimiter collisions. Saved TODO markers are
+reused only if they still match the current task. It preserves native coarse
+progress ranges rather than inventing exact percentages.
+
+Diagnostics have `code`, `severity`, `element`, and `message` fields.
+`format` defaults to `loss:"error"` and raises on the first diagnostic;
+`loss:"allow"` returns the text. `format_report` returns diagnostics in
+either mode. Malformed task attributes produce `invalid-task` diagnostics.
+
+```lambda
+import wiki: lambda.doc.wiki
+wiki.format_file("notes.txt", {
+    input_type:"wiki", input_flavor:"zimwiki", flavor:"creole", loss:"allow"
+})^
+```
+
+The same writer is selected by `format(document,"wiki:creole")`, formatted
+`output`, and `lambda convert -t wiki:creole`. The native MediaWiki formatter
+has been retired. These are initial static profiles; builds and package/schema
+compilation passed, while conformance and regression suites remain pending.
+See [dialect coverage and limits](Markup_Formats_Support.md#15-wiki-dialect-coverage)
+and the [working design](../vibe/input/Input_Wiki.md).
+
+## 18. doc.misc — Source format writers
+
+`lambda.doc.misc` writes Mark Doc as **AsciiDoc**, **troff/man**, or **Typst**,
+and serializes email/contact/calendar maps as **EML**, **vCard**, or
+**iCalendar**. All six writers are Lambda Script source modules (D7.2.4v3).
+
+```lambda
+import writers: lambda.doc.misc
+let document = parse("# Title\n\nSome **text**.", "markdown")^
+writers.format_report(document, {type:"asciidoc"})^
+writers.man(document, {title:"LAMBDA", section:"1"})^
+writers.typst(document)^
+```
+
+| Export | Result |
+|---|---|
+| `format_report(value, options = null)` | `{text, diagnostics}`, including reported losses |
+| `format(value, options = null)` | Source string; rejects losses by default |
+| `format_file(path, options = null)` | Reads with `input_type` / `input_flavor`, then formats |
+| `asciidoc`, `man`, `typst`, `eml`, `vcf`, `ics` | Convenience functions accepting `(value, options = null)` |
+
+Options are `type` (default `asciidoc`) and `loss` (`error`, default, or
+`allow`). Man additionally accepts `title`, `section`, `date`, `source`, and
+`manual`. File conversion adds `input_type` and `input_flavor`. Diagnostics
+have `code`, `severity`, `element`, and `message`. Invalid data and unsupported
+encodings remain errors even with `loss:"allow"`.
+
+The same writers handle built-in `format(value, "asciidoc")`, formatted file
+`output`, and CLI conversion. `--loss error|allow` applies to these six targets
+as well as wiki output. Default file output is strict; to permit losses,
+format with package options first, then write the resulting text.
+
+For VCF/ICS, retained `entries` take precedence over `properties`, which take
+precedence over convenience fields. Edit entries to retain parameters and
+repeated values. EML retains ordered `header_entries` and authoritative
+`raw_body`; remove `raw_body` to rebuild MIME content. See
+[source format support and examples](Script_Formats_Support.md) for record
+shapes, MIME authoring, limits, and verification results. EML/VCF/ICS round
+trips pass; structural readback tests expose gaps in the three prose readers.
+Native tool conformance remains unverified.
+
+## 19. doc.ebook — EPUB reader
+
+`lambda.doc.ebook` loads EPUB 2/3 publications and displays their XHTML/SVG
+chapters in Radiant. Publication parsing and chapter projection are pure;
+`read` captures a local file procedurally (S12.1.1v3, S12.1.3, D7.1.2v2).
+ZIP members retain their captured source and decode lazily
+(S12.4.1v2, S14.3.1v2). No ebook decoder dependency is required.
+
+```lambda
+import ebook: lambda.doc.ebook
+let book = ebook.parse(input("book.epub", "zip")^)^
+let first = ebook.chapter(book, 0)^;
+{title:book.metadata.titles, chapters:len(book.reading_order), text:first.text}
+```
+
+| Export | Result |
+|---|---|
+| `parse(snapshot, options = null)` | Publication map from immutable ZIP bytes or a captured ZIP root |
+| `read(path, options = null)` | Procedural local-file acquisition and publication parsing |
+| `chapter(book, target, options = null)` | Sanitized HTML/document, source text/map, diagnostics and fixed-layout viewport; target is a spine index or canonical href |
+| `locator(book, chapter, offset)` | Versioned source locator; offsets count Unicode scalars |
+| `locate(book, locator)` | Validated locator for the same captured publication and source passage |
+| `search(book, query, options = null)` | Exact, case-sensitive whole-book matches with snippets and locators; `limit` defaults to 100, maximum 1,000 |
+| `reader(book, options = null)` | Interactive reader element for embedding; persistence is off by default |
+
+When embedding `reader`, include `lambda.doc.ebook.reader.stylesheet` in the
+host document's style element. Native viewing and browser preview include it
+automatically.
+
+Load options are `rendition` (zero-based OCF package index) and
+`unsupported:"error"`. Unknown options are rejected; chapter options are currently reserved. The publication
+includes metadata/cover, manifest, occurrence-preserving reading order,
+contents/landmarks/publisher page links, resources, protection diagnostics,
+and a SHA-256 snapshot identity. Chapters resolve packaged CSS imports,
+images, SVG and unprotected fonts without extraction. Active content and
+external resources are excluded.
+
+Open a book with `lambda view book.epub`. The reader provides chapter/page
+controls, internal links, history, contents, bookmarks, search, font size and
+family, line spacing, margins, publisher-style selection and three themes.
+A compact toolbar opens search and the **Aa** reading-settings panel; chapter
+and page controls stay in the footer. Contents highlight the current chapter,
+and the sidebar can be toggled on narrow windows. Enter submits a book search.
+Reflowable chapters support scrolling and generated column pages. Fixed-layout
+XHTML/SVG pages retain a required source viewport and support fit/zoom.
+Selecting EPUB in the file browser opens the same reader; its Source tab shows
+the OPF package. `layout` and `render` project the initial reader viewport,
+rather than exporting an entire book.
+
+Standalone viewing saves preferences, bookmarks and the last source location
+atomically under `LAMBDA_EBOOK_STATE_DIR`, or the host's XDG/LOCALAPPDATA state
+directory (HOME fallback). State is keyed by snapshot fingerprint, so moving
+an unchanged book preserves its position. Saved passages are validated before
+resume. The embedded browser preview does not save state.
+
+This is an initial horizontal LTR profile. Continuous scrolling between
+chapters, two-page spreads, RTL/vertical pagination, CFI interchange, obfuscated
+fonts, scripted content, media overlays and DRM decoding remain unsupported.
+Protected required spine content raises a package error; protected optional
+resources use a diagnostic and fallback. EPUB package errors occupy
+7800–7809; underlying ZIP/XML errors retain their codes (S7.4.2, S7.4.4).
+MOBI and Kindle AZW/AZW3 are outside this package's scope.
+
+See the [proposal](../vibe/Lambda_Pkg_EPUB.md),
+[implementation and verification record](../vibe/impl/Lambda_Impl_EPUB.md), and
+[authored fixture inventory](../test/input/ebook/README.md).
+
+## 20. doc.diff — Git and patch review
+
+`lambda.doc.diff` parses Git two-way and conventional unified patches and
+reviews staged, unstaged, HEAD-to-worktree and two-revision comparisons. It
+offers a virtual changed-file list and unified surface, hunk navigation, search,
+selection/copy, lazy file loading and refresh. `to_html` exports every loaded
+file and row. Binary, mode, rename, symlink, submodule and conflict changes keep
+their own metadata and summaries. Repository access is procedural; parsing and
+presentation are pure (S12.1.1v3/S12.1.3, D7.2.4v3/D7.2.6).
+
+```lambda no-run
+import diff: lambda.doc.diff
+diff.repository(".", {mode: "unstaged"})^
+```
+
+Open that script with `lambda view review.ls`, or open `.patch`/`.diff` directly.
+See [Git and patch review](Lambda_Diff.md) for the API, options, model and limits.

@@ -12,11 +12,67 @@ The `<document>` element is a **virtual container** that:
 - Is transparent during XML formatting (not output in final XML text)
 - Provides a consistent root for schema validation
 
+## XHTML admission
+
+**Adopted 2026-10-15 — D2.10.1**, with name identity governed by
+**S8.2.2v6** and **D3.4.4v4**. The dedicated `xhtml` format reuses strict XML
+parsing and emits the HTML parser's tree representation for direct Radiant
+consumption. `.xhtml`/`.xht` and `application/xhtml+xml` select it; an explicit
+format overrides the filename.
+
+The XML parser collects an element's ordered attributes before constructing
+its output element. This makes every namespace declaration on the start tag
+available when selecting the element's emitted name. XHTML, SVG and MathML
+names use their exact local spelling; the source QName remains available for
+matching closing tags. Qualified attributes and namespace declarations remain
+intact. Existing DOM namespace metadata carries resolved element identity,
+including default-namespace resets and XHTML inside SVG `foreignObject`.
+All names are created through `MarkBuilder`, sharing the HTML parser's
+interning path without mutating shared element types (D3.4.3v5).
+
+XHTML produces `#document`, `#doctype` and `#comment` nodes and omits the XML
+declaration from document children. Text whitespace and decoded CDATA survive.
+It neither applies HTML tree repair nor serializes and reparses the tree.
+The root must be XHTML `html`; malformed XML, unbound prefixes, duplicate
+expanded attributes and embedded NUL bytes fail parsing. External doctype
+identifiers are retained without fetching their DTDs; internal subsets and
+unknown named entities remain errors.
+
+Radiant selects this profile from the local extension or final HTTP response
+MIME and shares the existing HTML loader after parsing. XHTML stays in
+standards mode without a doctype, and its DOM retains XML name sensitivity.
+The Lambda script loader also unwraps parsed `#document` results before CSS
+discovery, so a script returning `input(path, 'xhtml')^` preserves its head.
+The ordinary `xml` profile continues to return `document` and keep source QNames.
+
+Regression coverage: `HtmlParserTest.Xhtml*`, `test/lambda/input_xhtml.ls`
+and its golden, paired `test/html/xhtml_names.{html,xhtml}` with shared CSS
+and event assertions, and the MIME detector's input mappings.
+
+The viewable `test/html/xhtml_feature_gallery.xhtml` expands this into ten
+sections covering entities/UTF-8, CDATA, whitespace, self-closing elements,
+default/scoped/custom/reset namespaces, qualified and case-sensitive names,
+external/inline CSS, SVG/XLink/foreignObject, MathML, tables/lists, forms and
+local assets. Its external script displays 27 DOM/style checks and exposes
+their failures without hiding them; checks begin after page load and the
+first animation frame. `RadiantViewTest.LoadsXhtmlFeatureGallery` verifies
+the checklist and click/rerun behavior. The gallery also exposed and covers
+the type selector's XML document check: the XHTML namespace alone must not
+enable HTML case-insensitive matching (D2.10.1, S8.2.2v6).
+
+The gallery's 27 checks and nine replay assertions pass in interactive views
+at 1120 px and 480 px widths. Static layout/render currently exposes a
+separate CSSOM startup gap: the uppercase element's computed border width
+can still read `0px` before its view geometry is committed, although its
+selector matches and its final border paints correctly. The gallery keeps
+that failed check visible with the observed values; it does not suppress it.
+
 ## Component Behavior
 
 ### XML Parser (`input-xml.cpp`)
 
-The XML parser **always** creates a virtual `<document>` wrapper element:
+The ordinary `xml` profile creates a virtual `<document>` wrapper element;
+the `xhtml` profile uses `#document` under D2.10.1:
 
 ```cpp
 // Create a document root element to contain all top-level elements

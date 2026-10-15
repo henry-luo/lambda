@@ -1,8 +1,8 @@
 // Phase IV (Lambda_Design_TeX_Engine §4): bundled LPPL programming packages
 // (kvoptions, etoolbox, ifthen, xkeyval, calc) run unmodified on the TeX
 // engine. Expected values were checked against pdflatex (TeX Live 2025).
-import latex: lambda.latex.latex
-import html: lambda.latex.to_html
+import latex: lambda.doc.latex.latex
+import html: lambda.doc.latex.to_html
 
 let path = "test/lambda/latex/fixtures/local_packages/bundled.tex";
 let ast = latex.parse_file(path);

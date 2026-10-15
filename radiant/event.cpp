@@ -751,7 +751,7 @@ static bool process_event_target_document_reflow(EventContext* evcon) {
     return true;
 }
 
-static void clear_document_interaction_state_before_detach(DomDocument* doc) {
+void clear_document_interaction_state_before_detach(DomDocument* doc) {
     if (!doc || !doc->state) return;
 
     DocState* state = doc->state;
@@ -3775,10 +3775,6 @@ static bool radiant_target_is_link(View* target) {
 
 static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr) {
     if (!doc) return false;
-    if (doc->dom_package_loaded) {
-        return context && template_registry_has_behavior(g_template_registry);
-    }
-
     // No event can run after a one-shot render, and its JS evaluator has
     // already been destroyed. Do not let an ambient stale context resurrect it.
     if (doc->js_realm_released_after_load) return false;
@@ -3875,24 +3871,19 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
     // No heap check here: a freshly created runtime gets its heap when the first
     // script runs, so requiring one up front would block the very load that
     // establishes it.
-    // mark before running: a failed load must not be retried on every event
-    doc->dom_package_loaded = true;
-
     // Bind before touching the registry: it is EvalContext-scoped, and on a
     // script-less page nothing has bound an evaluator to this thread yet.
     //
-    // Never *change* an existing binding. The thread's evaluator is also what
-    // js_active_runtime_state is derived from, so rebinding it here strands JS
-    // state for whatever owns the thread — which crashed an iframe page inside
-    // js_observer_runtime_state. If another evaluator owns the thread, package
-    // behavior remains unavailable for this document.
+    // Child dispatch can finish with its parent bound. Admit the policy owner
+    // only at a quiescent native boundary; live guest frames still defer (D5.4.1).
     EvalContext* ctx = runtime_get_eval_context(rt);
     if (!ctx) {
         log_error("dom-package: runtime has no eval context");
         return false;
     }
-    if (context && context != ctx) {
-        log_debug("dom-package: another evaluator owns this thread; package unavailable");
+    if (context && context != ctx &&
+            (context->execution_depth != 0 || !radiant_eval_context_switch(ctx))) {
+        log_debug("dom-package: active evaluator defers package admission");
         return false;
     }
     if (!eval_context_init(ctx)) {
@@ -3907,8 +3898,11 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
         log_error("dom-package: cannot initialize the document support capsule");
         return false;
     }
+    if (doc->dom_package_loaded) return template_registry_has_behavior(g_template_registry);
     if (!g_template_registry) g_template_registry = template_registry_new();
 
+    // A different evaluator defers admission; mark only a real package load attempt.
+    doc->dom_package_loaded = true;
     // behavior mode spans only this load, so the page's own templates keep
     // registering as author templates
     template_registry_set_behavior_mode(g_template_registry, true);
@@ -10136,6 +10130,9 @@ static bool css_rule_is_self_color_background_hover(CssRule* rule,
 static bool document_has_pseudo_state_rules(DomDocument* doc,
                                             uint32_t pseudo_state) {
     if (!doc) return false;
+    CssStylesheet* defaults = doc->services.ua_focus_stylesheet;
+    for (size_t i = 0; defaults && i < defaults->rule_count; i++)
+        if (css_rule_uses_pseudo_state(defaults->rules[i], pseudo_state)) return true;
     for (int i = 0; i < doc->stylesheet_count; i++) {
         CssStylesheet* stylesheet = doc->stylesheets ? doc->stylesheets[i] : NULL;
         if (!stylesheet || stylesheet->disabled) continue;
@@ -10421,6 +10418,17 @@ static void sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
 
 void radiant_sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set) {
     sync_pseudo_state(view, pseudo_flag, set);
+}
+
+void radiant_sync_focus_style(View* view, uint32_t changed_flags) {
+    DomElement* element = view && view->is_element() ? view->as_element() : nullptr;
+    DomDocument* doc = element ? element->doc.get() : nullptr;
+    DocState* state = doc ? doc->state : nullptr;
+    // Recascade once after the canonical focus and its ancestry flags have settled.
+    pseudo_state_batch_begin(state);
+    const uint32_t flags[] = {PSEUDO_STATE_FOCUS, PSEUDO_STATE_FOCUS_VISIBLE, PSEUDO_STATE_FOCUS_WITHIN};
+    for (uint32_t flag : flags) if (changed_flags & flag) sync_pseudo_state(view, flag, true);
+    pseudo_state_batch_end(doc, state);
 }
 
 // Resolve the owning document from any view, including non-element views
@@ -12248,14 +12256,7 @@ static bool navigation_commit_iframe_document(UiContext* uicon,
         uicon->viewport_width = saved_viewport_width;
         uicon->viewport_height = saved_viewport_height;
     }
-    if (new_doc->view_tree && new_doc->view_tree->root) {
-        ViewBlock* root = lam::view_require_block(new_doc->view_tree->root);
-        if (root->scroller) {
-            if (root->content_height > root->height) root->height = root->content_height;
-            root->scroller = nullptr;
-        }
-        block->content_width = root->content_width > 0.0f ? root->content_width : root->width;
-        block->content_height = root->content_height > 0.0f ? root->content_height : root->height;
+    if (layout_iframe_content_size(new_doc, &block->content_width, &block->content_height)) {
         update_scroller(block, block->content_width, block->content_height);
     }
     if (old_doc) {
@@ -13797,9 +13798,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Calculate the correct block position for the drag target view
                 // by walking up ITS parent chain
                 RdtLogicalPoint selection_origin =
-                    view_geometry_local_to_block_document(
+                    view_geometry_local_to_window(
                         static_cast<View*>(text),
-                        {selection_iframe_offset_x, selection_iframe_offset_y});
+                        {0.0f, 0.0f},
+                        {selection_iframe_offset_x, selection_iframe_offset_y},
+                        scroll_state_resolve_view_geometry);
 
                 // Save evcon.block and temporarily set it to the selection view's block position
                 BlockBlot saved_block = evcon.block;
@@ -14307,10 +14310,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         caret_x, caret_y, caret_height,
                         caret_iframe_offset_x, caret_iframe_offset_y);
                     RdtLogicalPoint render_point =
-                        view_geometry_local_to_block_document(
+                        view_geometry_local_to_window(
                             static_cast<View*>(text),
-                            {caret_x + caret_iframe_offset_x,
-                             caret_y + caret_iframe_offset_y});
+                            {caret_x, caret_y},
+                            {caret_iframe_offset_x, caret_iframe_offset_y},
+                            scroll_state_resolve_view_geometry);
                     log_info("[CARET FINAL] mouse=(%.1f,%.1f) local=(%.1f,%.1f) render=(%.1f,%.1f) offset=%d block=(%.1f,%.1f) rect=(%.1f,%.1f %.1fx%.1f)",
                         btn_event->x, btn_event->y, caret_x, caret_y,
                         render_point.x, render_point.y, char_offset,

@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 65.0.0 (2026-10-15)
+**Spec version:** 66.0.0 (2026-10-15)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -2015,13 +2015,17 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
 *Auto-close is `with` without the `with`. Close is not just release — it is
 the last write.* [Features R1–R5]
 
-- **S12.4.1v2*** `open()` is resource acquisition and is `pn`-only. The
+- **S12.4.1v3*** `open()` is resource acquisition and is `pn`-only. The
   source quartet: `input()` eager value; `stream()` lazy plan; `open()`
-  scoped resource. `input()` is not a resource — it closes inside the call
-  and returns a pure value. ZIP input supports single-disk ZIP32 and ZIP64:
-  capture the complete immutable archive bytes and validate/index the archive
-  before returning; retained members own that snapshot, never an open source
-  handle. [IO ZIP §2, §5]
+  scoped resource. `input()` closes inside the call and returns a pure value.
+  Archive input captures complete immutable bytes and validates/indexes the
+  container before returning; retained members own that snapshot, never an
+  open source handle. The read profile includes single-disk ZIP32/ZIP64,
+  single-volume 7z, regular-file/directory tar (V7/ustar/pax/GNU and native
+  gzip/bzip2/xz/zstd wrappers), non-solid legacy RAR, and single-volume RAR5.
+  Encryption, archive links/special entries, split volumes and self-extracting
+  containers are rejected; shared quotas bound capture, indexing, decoder
+  memory, expansion and explicit nesting. [IO ZIP §2, §5, §10]
 - **S12.4.2*** A resource auto-closes at the end of its enclosing **block**;
   ownership escapes only by `return`, and the escape must be visible in the
   declared return type — any other escape is a compile error.
@@ -2148,15 +2152,20 @@ ordinary call surface.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/La
 
 ### S14.3 Streams and laziness*
 
-- **S14.3.1v2*** `input()` is eager, `stream()` lazy — symmetric over the same
-  source specifiers. ZIP input eagerly captures the archive snapshot under
-  S12.4.1v2; member decompression, payload CRC validation, and parsing are **lazy on
-  member-content access**. Listing children or reading metadata never
-  decompresses a member; payload errors surface as `T^E` at content access.
-  **Laziness is carried by the data, never by the
-  operator**: `|>` and `for` are unchanged; stream in → the stage is
-  recorded onto a plan; terminals force. Plan construction never performs
-  I/O and never errors. [PD9, PD10; IO ZIP §5]
+- **S14.3.1v3*** `input()` is eager, `stream()` lazy — symmetric over the
+  same source specifiers. Archive snapshots/indexes are eager under S12.4.1v3.
+  ZIP, 7z and non-solid legacy-RAR member decoding/integrity checks are lazy
+  on content access; accepted-tree listing never decodes their member bodies.
+  Compressed 7z headers decode at indexing; a 7z member may require solid-block
+  predecessor decoding, charged to the shared expansion ledger. Compressed
+  tar expands its whole outer stream, and RAR5 captures/verifies its members,
+  inside `input()`; their payload failures surface there. Member parsing stays
+  lazy for every archive kind; other deferred payload failures surface as `T^E`
+  at content access. Nested archives open only by explicit member input.
+  **Laziness is carried by the data, never by the operator**: `|>` and `for`
+  are unchanged; stream in → the stage is recorded onto a plan; terminals
+  force. Plan construction never performs I/O and never errors.
+  [PD9, PD10; IO ZIP §5, §10.2]
 - **S14.3.2*** Two stream kinds: value-backed streams are true values
   (re-forcible, usable in `fn`); live-I/O streams are one-shot resources,
   `pn`-only. `fn` stages are fusible by verified purity; `pn` stages are
@@ -2803,8 +2812,8 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S11.4.10 | Ruled 2026-09-17 (user). The boundary check and error-value surfacing exist; the "valid while unchanged" half is not exploited: the typed lane re-verifies presence and layout on every access (D3.2.6, D3.2.4v4 footnotes). |
 | S11.4.11 | **Conformant 2026-09-26 on both tiers.** The colour walk enters every constraint body, so a statically `pn` callee is E224 and a dynamic one is colour-guarded. Each `that` body is compiled as an `fn` of its own over its written scope, `that(~)`: the names it binds are its locals and the outer locals it reads are its captures. `is` and a match arm call it per layer, with the captures read where the type is named, so the whole body runs on every tier with no step budget, a body naming its own type recurses as an `fn` does, and an imported type's body runs in its declaring module, which exports the function to its importers (JIT) as T0 runs it there (AI17v3). The function's return contract admits an error, which fails the test, so a body whose value may be an error is not E208. The candidate starts a fresh context: `~~` is null and the root is the candidate. Before, T0 evaluated only an allow-list under a step budget ([LR03-24](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-24>)) and read an imported predicate's constants in the importer ([LR03-25](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-25>)); then both tiers expanded the body where `is` named the type, so a self-naming body crashed compilation ([LR03-28](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-28>)) and the JIT read an imported body's names in the importer ([LR03-27](<../vibe/Lambda_Issue_Ledger (fixed).md#lr03-27>)). Fixtures `constrained_type_predicate.ls` (pinned in `kTune27TierParity`), `constrained_type_recursive.ls` and `negative/semantic/predicate_calls_pn.ls`. Verified: `make test-lambda-baseline` 5967/5967; every golden 1008/1008 with the tier pinned to `jit` and to `interp`. Design record: TE-20. |
 | S12.1.4v3 | **Largely conformant as of 2026-09-18**, with S12.1.1v2 enforced statically in every `fn` context (module top level included) and dynamically at colour-guarded call sites only: an `fn`-context dynamic call whose callee is not statically `fn` checks it before dispatch (JIT: `lambda_fn_colour_guard_args`/`_list`; T0: the same rule in `eval_call`), while static calls, `pn`-context calls and `lambda_dynamic_call` itself carry no colour work. `function` declarations parse in both front ends (C parser; Tree-sitter `fn_stam`/`fn_expr_stam`); bodies are checked as `fn`; a post-build pass resolves each `fn`-context call's colour, rejecting a statically `pn` one (E224) and marking the rest with `LAMBDA_COLOUR_GUARD_*` bits; run-time checks ride the parameter-error short-circuit on direct calls and a consumed `Context::fn_colour_guard` word on dynamic dispatch, identically on both tiers. Fixtures `test/lambda/proc/function_colour_poly.ls`, `negative/semantic/function_colour_static.ls`, `function_body_is_fn.ls`, `function_body_var.ls`. **Residue:** (4) is conservative — a closure inside a `function` calling a captured polymorphic parameter is checked as plain `fn`, so it refuses a `pn` even when called from `pn` context; pipe-to-callable (`x \|> f`) and system-HOF callbacks (`map(f, xs)`) are not yet guarded; `function` object-type methods are not parsed. Since 2026-09-22, every system-function procedure is rejected statically in `fn` context. That covers built-in rows (`print`, `output`, `cmd`, `today`) and host-module `pn(...)` Jube signatures such as every DOM effect (D7.4.6) ([LR12-30](../vibe/Lambda_Issue_Ledger.md), fixed). |
-| S12.4.1v2, S12.4.2–S12.4.3 | Resource model R1–R5 designed, not implemented. |
-| S12.4.1v2, S14.3.1v2 (ZIP input) | Implemented 2026-10-08: ZIP32/ZIP64 input captures immutable bytes and the validated index; member decompression, CRC checking, and parsing occur only on content access. Filesystem Velmt/VArray views retain Input-owned snapshots, parse/error caches, and shared nested budgets. Phase 2 ZIP output is also implemented. Working record: `vibe/Lambda_IO_Zip.md`; verification: `vibe/impl/Lambda_Impl_IO_Zip.md`. |
+| S12.4.1v3, S12.4.2–S12.4.3 | Resource model R1–R5 designed, not implemented. |
+| S12.4.1v3, S14.3.1v3 (archive input) | Implemented 2026-10-08: ZIP32/ZIP64 input captures immutable bytes and the validated index; member decompression, CRC checking, and parsing occur only on content access. Filesystem Velmt/VArray views retain Input-owned snapshots, parse/error caches, and shared nested budgets. Phase 2 ZIP output is also implemented. Phase 3 native 7z/tar/RAR/RAR5 input is implemented (2026-10-15), with 29/29 native archive regressions and 24/24 new tier/forced-GC goldens verified. Working record: `vibe/Lambda_IO_Zip.md`; verification: `vibe/impl/Lambda_Impl_IO_Zip.md`. |
 | S13.1.3v2 | Task mode and the ordinary `start(target, args, options)` call surface are implemented (2026-08-19). Thread/process modes are recognized and rejected as not implemented; process remains first, thread gated on the isolate-state audit and open item O-D. |
 | S13.4.1, S13.4.2 | Pairwise reductions decided, not implemented (sequenced before concurrency work); stream parallelism pending with streams. |
 | S14.2, S14.3 | Group-by and joins (S14.1) are implemented; verbs, `over(...)`, DataFrame, and the whole stream/plan system are pending (phases P3–P8). |

@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-10. **Status:** Initial opt-in implementation delivered; full CSL conformance and the later gates below remain open.
 
-**Design:** [BibTeX and CSL citation processing in `lambda.latex`](../latex/Lambda_Design_BibTeX_CSL.md). The user selected Lambda script as the implementation language and `lambda.latex` as the package, then authorized implementation. No formal ruling changes are required: source modules follow **D7.2.1–D7.2.4**, resource capture follows **D7.1.2v2 / D7.5.2**, inert style/reference data follows **S1.8**, pure batch processing follows **S12.1.1v2 / S12.4.1v2**, and errors/diagnostics follow **S7.4.1–S7.4.4**.
+**Design:** [BibTeX and CSL citation processing in `lambda.doc.latex`](../latex/Lambda_Design_BibTeX_CSL.md). The user selected Lambda script as the implementation language and `lambda.doc.latex` as the package, then authorized implementation. No formal ruling changes are required: source modules follow **D7.2.1–D7.2.4v3**, resource capture follows **D7.1.2v2 / D7.5.2**, inert style/reference data follows **S1.8**, pure batch processing follows **S12.1.1v2 / S12.4.1v2**, and errors/diagnostics follow **S7.4.1–S7.4.4**.
 
 ## Delivered behavior
 
@@ -10,11 +10,11 @@
 
 The processor reads and evaluates actual independent or supplied dependent CSL styles. The bundled style set is IEEE, APA, Chicago author–date, and Chicago full-note bibliography, with English/German/French locales. The implementation does not select handwritten per-style formatting functions or require an external citeproc process. Custom styles have the same evaluator and validation boundary as the bundled styles.
 
-Resource acquisition is isolated in `resources.ls`. Style/locale strings and references are immutable inputs to the engine. Local override and parent files are assets; unavailable resources remain registered with `available: false`, a diagnostic, and visible unsupported output. No network dependency is introduced into document rendering. The bundled resources are unmodified, pinned and attributed in [VENDOR.md](../../lmd/package/latex/citeproc/VENDOR.md) and [resources.json](../../lmd/package/latex/citeproc/resources.json).
+Resource acquisition is isolated in `resources.ls`. Style/locale strings and references are immutable inputs to the engine. Local override and parent files are assets; unavailable resources remain registered with `available: false`, a diagnostic, and visible unsupported output. No network dependency is introduced into document rendering. The bundled resources are unmodified, pinned and attributed in [VENDOR.md](../../lmd/package/doc/latex/citeproc/VENDOR.md) and [resources.json](../../lmd/package/doc/latex/citeproc/resources.json).
 
 ## Code map
 
-All new processor modules live under [`lmd/package/latex/citeproc/`](../../lmd/package/latex/citeproc/README.md).
+All new processor modules live under [`lmd/package/doc/latex/citeproc/`](../../lmd/package/doc/latex/citeproc/README.md).
 
 | Module | Responsibility |
 |---|---|
@@ -34,7 +34,7 @@ Shared code changes are narrow:
 - `packages/bib_model.ls` exposes collection, selection and print planning independently of style-dependent legacy labels.
 - `latex.ls`, `analyze.ls`, `render.ls`, and `packages/biblatex.ls` select the opt-in path, plan note-style citations, and project its results.
 
-The [package README](../../lmd/package/latex/citeproc/README.md) documents resource options, the pure API, supported request modes and limits. [Lambda_Packages.md](../../doc/Lambda_Packages.md#7-latex--latex-to-html) describes public selection. No native runtime, renderer, generated parser, vendor code, or build configuration was changed.
+The [package README](../../lmd/package/doc/latex/citeproc/README.md) documents resource options, the pure API, supported request modes and limits. [Lambda_Packages.md](../../doc/Lambda_Packages.md#7-latex--latex-to-html) describes public selection. No native runtime, renderer, generated parser, vendor code, or build configuration was changed.
 
 ## Phase accounting
 
@@ -114,7 +114,7 @@ These are outstanding compatibility and production-readiness work. No default mi
 
 ## 2026-10-12: biblatex style aliases (design §7.4)
 
-- **Delivered.** `lmd/package/latex/citeproc/aliases.ls` maps `apa`, `ieee`, `chicago-authordate` and `chicago-notes` to the bundled `apa`, `ieee`, `chicago-author-date` and `chicago-fullnote-bibliography` styles. `latex.render_result` uses the alias as the CSL request when the caller passes no `citeproc` option. `packages/registry.ls` gains `biblatex-chicago`, which implies `biblatex` with the Chicago style named by its option (default `notes`).
+- **Delivered.** `lmd/package/doc/latex/citeproc/aliases.ls` maps `apa`, `ieee`, `chicago-authordate` and `chicago-notes` to the bundled `apa`, `ieee`, `chicago-author-date` and `chicago-fullnote-bibliography` styles. `latex.render_result` uses the alias as the CSL request when the caller passes no `citeproc` option. `packages/registry.ls` gains `biblatex-chicago`, which implies `biblatex` with the Chicago style named by its option (default `notes`).
 - **Diagnostics.** `csl-style-alias` names the substitution; `csl-alias-option-ignored` and `csl-alias-customization` report what CSL cannot follow; the aliased name's `unsupported-bib-style` report is dropped. `result.metadata.bibliography.biblatex_style` records the biblatex name.
 - **Tests.** New `test_latex_csl_alias` (ten cases). `test_latex_biblatex_negative` used `style=apa` as its unsupported style; its fixture now uses the unmapped `style=mla`, so its golden is unchanged. All 59 `test/lambda/latex` scripts and the two LaTeX UI fixtures pass.
 - **Admission (same day).** The toolchain was installed into a private TeX Live user tree under `temp/` from the frozen TeX Live 2025 repository: biblatex 3.21, biblatex-apa 9.20, biblatex-ieee 1.4f, biblatex-chicago 3.18b, logreq and xstring. biber 2.21 is a binary package that user mode cannot install, so its archive was downloaded and checked against the repository's recorded SHA-512. The current TeX Live repository is the 2026 release, which a 2025 installation refuses, and one mirror served archives that failed their checksums; both were avoided by using the frozen repository. Four fixture documents in `fixtures/csl_alias/` were compiled with pdflatex, biber and pdflatex twice. The pinned PDFs, extracted text and manifest are in `test/latex/reference/csl_alias/`, and the new `test_latex_csl_alias_reference` compares every citation, entry and note. Its golden records the remaining differences, all explained in the reference README. The capture exposed one defect, now fixed in `render.ls`: a note-style `\autocite` mark now follows the punctuation after it (`autopunct`). All 60 `test/lambda/latex` scripts pass.

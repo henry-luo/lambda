@@ -352,6 +352,12 @@ format(report, 'json')      // the script's result is its output
 
 ### Document Processing
 
+XHTML input produces an HTML-compatible element tree using strict XML syntax
+(**D2.10.1**): `input("page.xhtml", 'xhtml')^` or `parse(source, 'xhtml')^`.
+`.xhtml` and `.xht` are detected automatically. Namespace identity, XML case
+sensitivity, whitespace and CDATA are preserved; the tree can be viewed in
+Radiant or formatted as `'html'`. See [XHTML support and examples](Markup_Formats_Support.md#xhtml-input--html-document-tree).
+
 ```lambda
 // Parse Markdown document
 let doc = input("article.md", 'markdown')^;

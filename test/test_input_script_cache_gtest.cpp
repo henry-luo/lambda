@@ -329,6 +329,54 @@ TEST(InputScriptCacheTest, PrebuiltImportsPromoteThroughExecutionOverlay) {
     unlink(leaf_path);
 }
 
+TEST(InputScriptCacheTest, CachedDiamondKeepsSharedPromotionSlab) {
+    ASSERT_EQ(file_ensure_dir("temp"), 0);
+    int generation = (int)getpid();
+    const char* stems[] = {"root", "left", "right", "shared"};
+    char paths[4][160];
+    char sources[4][512];
+    for (int i = 0; i < 4; i++) {
+        snprintf(paths[i], sizeof(paths[i]), "temp/cache_diamond_%s_%d.ls",
+            stems[i], generation);
+    }
+    snprintf(sources[0], sizeof(sources[0]),
+        "import left: .cache_diamond_left_%d\n"
+        "import right: .cache_diamond_right_%d\n"
+        "left.result\nright.result\n", generation, generation);
+    for (int i = 1; i < 3; i++) {
+        snprintf(sources[i], sizeof(sources[i]),
+            "import shared: .cache_diamond_shared_%d\n"
+            "pub let result = shared.verify()\n", generation);
+    }
+    const char shared_source[] =
+        "fn matches(row, word) => row.name == word or any([for (alias in row.aliases) alias == word])\n"
+        "fn hits(words, row) => any([for (word in words) matches(row, word)])\n"
+        "pub fn verify() => all([for (i in 1 to 60) hits([\"x\",\"y\"], {name:\"x\",aliases:[\"z\"]})])\n";
+    memcpy(sources[3], shared_source, sizeof(shared_source));
+    for (int i = 0; i < 4; i++) {
+        ASSERT_EQ(write_binary_file(paths[i], sources[i], strlen(sources[i])), 0);
+    }
+    const char* args[] = {"./lambda.exe", paths[0], NULL};
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_EXEC_BACKEND", "auto"},
+        {"LAMBDA_MODULE_AST_THREADS", "2"},
+        {"LAMBDA_SATELLITE_SYNC", "1"},
+        {NULL, NULL},
+    };
+    ShellOptions options = {};
+    options.env = env;
+    options.timeout_ms = 10000;
+    options.merge_stderr = true;
+    ShellResult result = shell_exec(args[0], args, &options);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_FALSE(result.timed_out);
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "true\ntrue"), nullptr) << output;
+    EXPECT_EQ(strstr(output, "cannot call non-function"), nullptr) << output;
+    shell_result_free(&result);
+    for (int i = 0; i < 4; i++) unlink(paths[i]);
+}
+
 TEST(InputScriptCacheTest, PrebuildQueuesNestedImportsWithoutDepthBarrier) {
     ASSERT_EQ(file_ensure_dir("temp"), 0);
     CacheQueuePrebuildState state = {};

@@ -133,7 +133,7 @@ static void boundary_emit_border_side(PaintList* paint_list, float x, float y,
     paint_fill_rect(paint_list, x, y, w, h, color);
 }
 
-static bool boundary_emit_styled_path(void* context, RdtPath* path, Color color, const RenderBorderStroke* stroke) {
+bool render_paint_boundary_path(void* context, RdtPath* path, Color color, const RenderBorderStroke* stroke) {
     PaintList* paint = (PaintList*)context;
     int index = paint_list_count(paint);
     if (stroke) paint_stroke_path(paint, path, color, stroke->width, stroke->cap, RDT_JOIN_MITER,
@@ -145,7 +145,7 @@ static bool boundary_emit_styled_path(void* context, RdtPath* path, Color color,
 }
 
 bool render_paint_boundary_emit_border_side(PaintList* paint, const BorderProp* border, Rect rect, size_t side) {
-    return render_border_emit_side(rect, border, side, false, boundary_emit_styled_path, paint);
+    return render_border_emit_side(rect, border, side, false, render_paint_boundary_path, paint);
 }
 
 bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view, Rect rect) {

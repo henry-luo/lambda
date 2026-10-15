@@ -28,7 +28,7 @@ class TypstAdapter;
 // Declared as FormatAdapter* to avoid incomplete type issues
 extern FormatAdapter* getMarkdownAdapter();
 extern FormatAdapter* getRstAdapter();
-extern FormatAdapter* getWikiAdapter();
+extern FormatAdapter* getWikiAdapter(Flavor flavor = Flavor::DEFAULT);
 extern FormatAdapter* getOrgAdapter();
 extern FormatAdapter* getManAdapter();
 extern FormatAdapter* getAsciidocAdapter();
@@ -66,8 +66,9 @@ static void ensureInitialized() {
     s_initialized = true;
 }
 
-FormatAdapter* FormatRegistry::getAdapter(Format format) {
+FormatAdapter* FormatRegistry::getAdapter(Format format, Flavor flavor) {
     ensureInitialized();
+    if (format == Format::WIKI) return getWikiAdapter(flavor);
 
     if (format == Format::AUTO_DETECT) {
         // Default to Markdown

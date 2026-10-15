@@ -2,8 +2,8 @@
 // expl3. The request for expl3 restarts the run from the engine's expl3 format
 // (bundled, unmodified expl3-code.tex). Expected text checked against pdflatex
 // (TeX Live 2025).
-import latex: lambda.latex.latex
-import html: lambda.latex.to_html
+import latex: lambda.doc.latex.latex
+import html: lambda.doc.latex.to_html
 
 let path = "test/lambda/latex/fixtures/local_packages/expl3.tex";
 let ast = latex.parse_file(path);

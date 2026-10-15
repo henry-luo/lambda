@@ -94,7 +94,7 @@ static void js_ambient_load(const void* storage) {
 }
 
 static const ActivationAmbientHook js_ambient_hook = {
-    sizeof(JsAmbient), js_ambient_init, js_ambient_save, js_ambient_load,
+    sizeof(JsAmbient), js_ambient_init, js_ambient_save, js_ambient_load, NULL,
 };
 [[maybe_unused]] static const bool js_ambient_registered =
     activation_register_ambient_hook(&js_ambient_hook);
@@ -1487,7 +1487,9 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
 extern "C" void js_batch_reset() {
     // A host can finish a document after its context-owned JS state was
     // released.  Do not manufacture a replacement capsule just to reset it.
-    if (!js_active_runtime_state) return;
+    // DOM policy can bind JS support before its evaluator owns a heap. There
+    // are no heap caches to reset then, and precise root slots need a heap (D5.3.3).
+    if (!js_active_runtime_state || !context || !context->heap || !context->heap->gc) return;
     // increment epoch to invalidate cached heap objects
     js_heap_epoch++;
     // A full heap reset invalidates every retained harness/test relationship.

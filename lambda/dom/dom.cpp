@@ -2661,10 +2661,11 @@ static DomElement* dom_collection_varray_find_rec(DomNode* node,
                 (*seen)++;
             }
             DomElement* found = dom_collection_varray_find_rec(
-                elem->first_child, collection, target, seen);
+                dom_first_script_visible_child(elem), collection, target, seen);
             if (found) return found;
         }
-        node = node->next_sibling;
+        // layout pseudo nodes have no script identity or lifecycle wrapper pin.
+        node = dom_next_script_visible_sibling(node);
     }
     return nullptr;
 }
@@ -2830,7 +2831,7 @@ static DomNode* dom_collection_varray_walk(void* data, int64_t target,
         return found;
     }
     DomNode* first = collection->include_root
-        ? (DomNode*)owner : owner->first_child;
+        ? (DomNode*)owner : dom_first_script_visible_child(owner);
     DomNode* found = (DomNode*)dom_collection_varray_find_rec(
         first, collection, target, &seen);
     if (out_count) *out_count = seen;
@@ -4007,7 +4008,7 @@ extern "C" Item dom_iframe_get_content_document(DomElement* iframe) {
         DomDocument* embedded_doc = iframe->embed ? iframe->embedp()->doc : nullptr;
         if (embedded_doc) {
             dom_doc_mark_has_browsing_context(embedded_doc);
-            replace_iframe_srcdoc_document(iframe, embedded_doc);
+            // A renderer-loaded srcdoc is already a full document; observing it must not reparse its body.
             if (s_iframe_cache_count < IFRAME_CACHE_SIZE) {
                 s_iframe_cache[s_iframe_cache_count].iframe = iframe;
                 s_iframe_cache[s_iframe_cache_count].doc = embedded_doc;
@@ -4269,7 +4270,9 @@ extern "C" void dom_after_srcdoc_set(void* dom_elem) {
     IframeContentEntry* entry = lookup_iframe_entry(iframe);
     DomDocument* doc = entry ? entry->doc
         : (iframe && iframe->embed ? iframe->embedp()->doc : nullptr);
-    if (doc) replace_iframe_srcdoc_document(iframe, doc);
+    // Rendered iframes navigate as full documents during layout; only detached
+    // browsing contexts need the fragment hydration fallback.
+    if (doc && !doc->view_tree) replace_iframe_srcdoc_document(iframe, doc);
     _schedule_iframe_load(iframe);
 }
 
@@ -5576,7 +5579,8 @@ static float dom_scrollable_descendant_extent(DomNode* node, bool width_axis,
     return max(end, 0.0f);
 }
 
-static float dom_scrollable_extent(DomElement* elem, bool width_axis) {
+extern "C" float dom_scrollable_extent(void* element, bool width_axis) {
+    DomElement* elem = static_cast<DomElement*>(element);
     if (!elem) return 0.0f;
     float extent = max(width_axis ? elem->content_width : elem->content_height,
                        width_axis ? elem->width : elem->height);
@@ -14298,31 +14302,34 @@ JS_FORWARD_STATIC_ITEM(dom_float_item, (float value), js_make_number, ((double)v
 
 static Item dom_make_plain_boundary_object(DomBoundary boundary) {
     if (!boundary.node) return ItemNull;
-    Item out = js_new_object();
-    dom_realm_set_cstr(out, "node", dom_wrap_element(boundary.node));
-    dom_realm_set_cstr(out, "offset", (Item){.item = i2it((int64_t)boundary.offset)});
-    return out;
+    RootFrame roots(1);
+    Rooted<Item> node(roots, dom_wrap_element(boundary.node));
+    static const char* const keys[] = { "node", "offset" };
+    Item values[] = { node.get(), (Item){.item = i2it((int64_t)boundary.offset)} };
+    return dom_result_map((DomDocument*)dom_document_from_item(node.get()), keys, values, 2);
 }
 
 static Item dom_make_boundary_object(DomBoundary boundary) {
-    Item out = dom_make_plain_boundary_object(boundary);
-    if (get_type_id(out) != LMD_TYPE_MAP) return out;
+    RootFrame roots(1);
+    Rooted<Item> out(roots, dom_make_plain_boundary_object(boundary));
+    // Lambda hit tests need plain boundaries; JS adds its click-selection hints.
+    if (get_type_id(out.get()) != LMD_TYPE_MAP || !dom_realm_active()) return out.get();
 
     DomBoundary all_start;
     DomBoundary all_end;
     if (dom_selection_user_select_all_range_for_node(boundary.node,
             &all_start, &all_end)) {
-        dom_realm_set_cstr(out, "selectAllStart", dom_make_plain_boundary_object(all_start));
-        dom_realm_set_cstr(out, "selectAllEnd", dom_make_plain_boundary_object(all_end));
+        dom_realm_set_cstr(out.get(), "selectAllStart", dom_make_plain_boundary_object(all_start));
+        dom_realm_set_cstr(out.get(), "selectAllEnd", dom_make_plain_boundary_object(all_end));
     }
     DomBoundary triple_start;
     DomBoundary triple_end;
     if (dom_selection_triple_click_range_for_node(boundary.node,
             &triple_start, &triple_end)) {
-        dom_realm_set_cstr(out, "tripleClickStart", dom_make_plain_boundary_object(triple_start));
-        dom_realm_set_cstr(out, "tripleClickEnd", dom_make_plain_boundary_object(triple_end));
+        dom_realm_set_cstr(out.get(), "tripleClickStart", dom_make_plain_boundary_object(triple_start));
+        dom_realm_set_cstr(out.get(), "tripleClickEnd", dom_make_plain_boundary_object(triple_end));
     }
-    return out;
+    return out.get();
 }
 
 static bool dom_boundary_inside_text_control(DomBoundary boundary) {

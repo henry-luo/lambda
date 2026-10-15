@@ -1,7 +1,7 @@
 // Phase IV (Lambda_Pkg_Tikz §12): parameterized styles (.style with #1, .style 2 args, .default,
 // .append style) and pic definitions (\tikzset{name/.pic={...}}, \pic {name}).
 import tikz: lambda.doc.tikz.tikz
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 fn children_named(node, tag) => [for (child in node
     where child is element and string(name(child)) == tag) child]

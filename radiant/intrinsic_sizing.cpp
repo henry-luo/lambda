@@ -483,14 +483,22 @@ static bool intrinsic_pseudo_style_is_inline(StyleTree* pseudo_style) {
 }
 
 static int intrinsic_grid_template_column_count(DomElement* element, ViewBlock* view,
-                                                int fallback_count) {
+                                                int fallback_count, float content_width) {
     int column_count = fallback_count;
     GridProp* grid_prop = (view && view->embed) ? view->embedp()->grid : nullptr;
     if (grid_prop && grid_prop->grid_template_columns &&
             grid_prop->grid_template_columns->track_count > 0) {
-        // resolved tracks already account for line names and repeat expansion;
-        // counting authored tokens can exceed this array's actual length.
-        return grid_prop->grid_template_columns->track_count;
+        GridTrackList* tracks = grid_prop->grid_template_columns;
+        int total = tracks->track_count;
+        for (int index = 0; index < tracks->track_count; index++) {
+            GridTrackSize* track = tracks->tracks[index];
+            if (track && track->type == GRID_TRACK_SIZE_REPEAT && (track->is_auto_fill || track->is_auto_fit)) {
+                // measuring an auto-repeat as one column made the scroll extent sum every tile.
+                int repeats = layout_grid_auto_repeat_count(tracks,index,content_width,grid_prop->column_gap,content_width>0.0f);
+                total += repeats * track->repeat_track_count - 1;
+            }
+        }
+        return total;
     }
 
     int unresolved_threshold = fallback_count > 0 ? fallback_count : 0;
@@ -6216,6 +6224,7 @@ static float intrinsic_text_br_content_height(LayoutContext* lycon, DomElement* 
     float height = compute_text_height_at_width(
         lycon, text->str, text->length, width, line_height,
         get_element_text_transform(element), get_element_font_variant(element), true);
+    height = layout_line_clamp_intrinsic_height(view, height, line_height);
     strbuf_free(text);
     return height;
 }
@@ -6591,7 +6600,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 
     if (is_grid_container) {
         grid_column_count = intrinsic_grid_template_column_count(
-            element, view, grid_column_count);
+            element, view, grid_column_count, width);
         // Get row gap
         if (view->embed && view->embedp()->grid) {
             grid_row_gap = view->embedp()->grid->row_gap;
@@ -6682,7 +6691,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     }
 
     if (!is_grid_container && !is_flex_row &&
-        (display_inner == CSS_VALUE_FLOW || display_inner == CSS_VALUE_CONTENTS)) {
+        (display_inner == CSS_VALUE_FLOW || display_inner == CSS_VALUE_CONTENTS ||
+         (display_inner == CSS_VALUE_FLOW_ROOT && layout_line_clamp_count(view) > 0))) {
         // Flow and contents boxes expose their inline descendants to this formatting context.
         has_only_inline_content = true;
         for (DomNode* c = element->first_child; c; c = c->next_sibling) {
@@ -6710,6 +6720,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     // Track previous margin-bottom for block-flow margin collapse (used in else branch below,
     // declared here so the last-child-margin fix after padding/border resolution can access them)
     float prev_margin_bottom = 0;
+    // flex children form items even when every source child is an inline element.
+    if (is_flex_container) has_only_inline_content = false;
     bool is_block_flow = !is_grid_container && !is_flex_container && !has_only_inline_content;
     bool block_flow_has_prior_content = false;
 
@@ -6919,6 +6931,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
         }
 
+        int height_item_count = 0;
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
             if (is_vertical_fieldset_legend(child)) continue;
             // Skip display:none elements — they generate no boxes (CSS 2.1 §9.2.4)
@@ -6930,6 +6943,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 }
                 if (intrinsic_should_skip_height_child(child_elem)) continue;
             }
+            if (child->is_text() && text_node_is_ascii_whitespace(child)) continue;
+            height_item_count++;
             // CSS 2.1 §10.3.3: The available width for a child element's content
             // is the parent's content width minus the child's own padding and border.
             // Pass the child's content-box width so its descendants wrap correctly.
@@ -7032,6 +7047,11 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             } else if (block_flow_margin_handled) {
                 block_flow_has_prior_content = true;
             }
+        }
+        // grid auto tracks must include the same main-axis gaps as final flex layout.
+        if (is_flex_container && !is_flex_row && height_item_count > 1) {
+            float gap = layout_block_inline_axis_is_vertical(view) ? flex_column_gap : flex_row_gap;
+            height += gap * (height_item_count - 1);
         }
         }
     }

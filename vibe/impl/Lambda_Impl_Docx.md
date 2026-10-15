@@ -2,14 +2,14 @@
 
 **Date:** 2026-10-14. **Scope:** Phases 0–4 of
 [Lambda_Pkg_Docx.md](../Lambda_Pkg_Docx.md), including document preview routing.
-Package authority: D7.2.1/D7.2.4; virtual element
+Package authority: D7.2.1/D7.2.4v3; virtual element
 behavior: D7.4.5v2. No formal ruling changes.
 
 ## Phase 4: document viewer integration
 
 `lambda view file.docx` now selects the document format before ZIP signature
 routing. The shared document-transform registry calls
-`lambda.doc.docx.view.render_document_file` with the source path (D7.2.4).
+`lambda.doc.docx.view.render_document_file` with the source path (D7.2.4v3).
 The existing Radiant format router also makes the same presentation available
 to layout and render commands. Its route table can select a script transform
 without a duplicate native loader function; extension matching is case
@@ -62,7 +62,7 @@ identified three missing supported interpretations:
    resolves its chart relationship and reads indexed category/name/value
    caches or literal points. It validates indexes and numeric values, keeps
    series order and RGB colors, and passes a data-only spec to the existing
-   `lambda.chart.chart` SVG renderer (D7.2.4, S1.8). Cached values are used
+   `lambda.chart.chart` SVG renderer (D7.2.4v3, S1.8). Cached values are used
    directly; formulas and workbook/external-data references are not executed
    or fetched. Sparse points keep their category-axis positions. Missing or
    unsupported chart data continues to produce diagnostics. Plain text
@@ -105,7 +105,7 @@ nested control order, surrounding run formatting, paragraph boundaries and
 list grouping. It excludes control properties and end-marker formatting from
 content traversal. Malformed controls take the existing unsupported-element
 diagnostic path. It displays the saved cache without evaluating XML data
-bindings or looking up placeholder text in the glossary (S1.8, D7.2.4).
+bindings or looking up placeholder text in the glossary (S1.8, D7.2.4v3).
 
 Both note parts contain only separator and continuation-separator definitions.
 `package.ls` now reads internal footnote/endnote parts and checks their roots
@@ -155,7 +155,7 @@ The public converter uses `presentation:"semantic"` by default, preserving
 the existing HTML contract. The viewer selects `presentation:"source"`;
 callers can opt into that representation without changing text extraction.
 The source text remains data and never becomes executable styling (S1.8,
-D7.2.4).
+D7.2.4v3).
 
 The 1100 x 2400 native PNG in `temp/docx/meeting-formatted.png` was inspected
 against the supplied Word screenshot. The title is two large blue lines;
@@ -190,7 +190,7 @@ warning banner and run-under-image layout.
 subset with float margins, adjusting for the separate wrapping distances so
 the picture remains at its source offset. The existing aligned-anchor path is
 unchanged. Interior positive horizontal offsets still receive diagnostics:
-a single CSS float cannot reproduce Word's text on both sides (D7.2.4).
+a single CSS float cannot reproduce Word's text on both sides (D7.2.4v3).
 This flow preview does not claim exact Word wrap geometry or pagination.
 
 The sample now converts with **zero DOCX diagnostics**; the native 1100 × 1800
@@ -209,7 +209,7 @@ defines the bounding rectangle used for text wrapping.
 contain semantic elements, an HTML fragment, reading-order text, metadata, and
 ordered diagnostics. Helpers separate OPC loading, namespace/URI handling,
 style and numbering resolution, private model construction, and HTML lowering.
-Serialization reuses `lambda.latex.to_html`; raster data URIs share
+Serialization reuses `lambda.doc.latex.to_html`; raster data URIs share
 `lambda.doc.media` with the existing archive viewer.
 
 The profile covers inherited paragraph/character styles, direct run marks,
@@ -306,7 +306,7 @@ versions in both local and central headers.
 
 The package now retains referenced footnote, endnote and comment content,
 including part-local hyperlinks, through shared model/render helpers under
-D7.2.4. Annotation IDs are validated, repeated references share one appended
+D7.2.4v3. Annotation IDs are validated, repeated references share one appended
 entry, and numbering follows reference order independently for each kind.
 Text boxes reuse block lowering and move after their containing paragraph;
 their floating geometry remains diagnosed. External images are never loaded,
@@ -346,7 +346,7 @@ and shortened financial-table rows did not preserve their source columns.
 `model.ls` now recognizes cached simple/complex fields, interpreting only
 their saved result runs and links; no instruction is evaluated (S1.8).
 It retains `gridBefore`/`gridAfter` counts, and `render.ls` uses one shared
-empty-cell constructor to reserve those slots (D7.2.4). This follows
+empty-cell constructor to reserve those slots (D7.2.4v3). This follows
 [OOXML complex fields](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.fieldchar?view=openxml-3.0.1),
 [simple fields](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.simplefield?view=openxml-3.0.1)
 and [omitted trailing grid columns](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.gridafter?view=openxml-3.0.1).
@@ -393,7 +393,7 @@ clipped frames and calculated image offsets. `theme.ls` resolves rectangle
 fills through the actual theme fill-style matrix, including placeholder colors.
 Only flat preset rectangles without text, transforms, outlines or effects
 enter the shape profile. Unsupported compatibility choices keep their fallback;
-unsupported shapes/crops/placements retain diagnostics (S1.8, D7.2.4).
+unsupported shapes/crops/placements retain diagnostics (S1.8, D7.2.4v3).
 
 Native rendering exposed a separate Radiant defect: negative layers painted
 after ordinary text, hiding the cover title even though Chromium displayed the

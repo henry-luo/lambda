@@ -1,8 +1,8 @@
 // Embedded Type 1 painting uses PDF character codes; Unicode remains copy text.
-import font: lambda.pdf.font
-import text: lambda.pdf.text
-import util: lambda.pdf.util
-import html: lambda.pdf.html
+import font: lambda.doc.pdf.font
+import text: lambda.doc.pdf.text
+import util: lambda.doc.pdf.util
+import html: lambda.doc.pdf.html
 
 let pdf = input("test/input/math_intensive_test.pdf", 'pdf')^
 let outlined = [for (obj in pdf.objects

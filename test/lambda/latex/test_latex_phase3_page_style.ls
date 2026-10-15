@@ -1,5 +1,5 @@
-import latex: lambda.latex.latex
-import util: lambda.latex.util
+import latex: lambda.doc.latex.latex
+import util: lambda.doc.latex.util
 
 let ast = input("test/lambda/latex/fixtures/page_style_profile.tex", "latex") ^ { null }
 let result = latex.render_result(ast, {target: "pdf", paged: true})

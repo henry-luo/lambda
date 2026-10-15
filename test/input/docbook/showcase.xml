@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<book xmlns="http://docbook.org/ns/docbook" version="5.2" xml:id="riverside-notebook">
+  <info>
+    <title>The Riverside Notebook</title>
+    <subtitle>A small field journal</subtitle>
+  </info>
+  <preface xml:id="about"><title>About this notebook</title>
+    <para>A familiar path can hold a new story every morning. This little
+      notebook follows two imaginary visits to a riverside garden, with room
+      for observations, sketches, and questions.</para>
+    <para>The observations and measurements are fictional. The document is an
+      original DocBook sample: headings, contents, lists, tables, code-style
+      notes, and footnotes all come from this XML file.</para>
+  </preface>
+  <chapter xml:id="first-walk"><title>A morning by the river</title>
+    <para>At the footbridge, the path divides. One branch follows the water;
+      the other disappears between tall grasses. We take the riverside path
+      and begin with a simple question: <emphasis>what has changed since
+      yesterday?</emphasis></para>
+    <section xml:id="packing"><title>Pack light</title>
+      <para>A small kit makes it easy to stop and look closely.</para>
+      <itemizedlist>
+        <listitem><para>A notebook and a pencil</para></listitem>
+        <listitem><para>A bottle of water</para></listitem>
+        <listitem><para>A map with the footbridge marked</para></listitem>
+      </itemizedlist>
+      <tip><para>Leave an empty page after each visit for questions that
+        occur to you later.</para></tip>
+    </section>
+    <section xml:id="first-entry"><title>Make the first entry</title>
+      <orderedlist>
+        <listitem><para>Write the date, time, and starting point.</para></listitem>
+        <listitem><para>Choose one detail to describe carefully.</para></listitem>
+        <listitem><para>Separate what you saw from what you inferred.</para></listitem>
+      </orderedlist>
+      <para>A short entry can capture the shape of a whole morning.
+        <footnote xml:id="journal-note"><para>A field note can be a sentence,
+          a sketch, or a question. Consistency matters more than length.</para></footnote></para>
+      <example xml:id="morning-entry"><title>A pocket-sized entry</title>
+        <programlisting linenumbering="unnumbered">08:10  Footbridge — a thin mist above the water.
+08:25  Garden gate — three yellow flowers open.
+08:40  Old bench — a feather caught in the grass.
+
+Question: did the flowers open before the mist lifted?</programlisting>
+      </example>
+      <para>Compare this entry with <xref linkend="second-walk"/>.</para>
+    </section>
+  </chapter>
+  <chapter xml:id="second-walk"><title>Return to the same place</title>
+    <para>On the second visit, the sun reaches the garden before we do.
+      Familiar landmarks give the observations a frame, while the details
+      change from one visit to the next.</para>
+    <section xml:id="observations"><title>Compare observations</title>
+      <table xml:id="visit-table"><title>Two imaginary visits</title>
+        <tgroup cols="3">
+          <colspec colname="place"/><colspec colname="first"/><colspec colname="second"/>
+          <thead><row><entry>Landmark</entry><entry>First visit</entry><entry>Second visit</entry></row></thead>
+          <tbody>
+            <row><entry>Footbridge</entry><entry>Mist over the water</entry><entry>Clear reflections</entry></row>
+            <row><entry>Garden gate</entry><entry>Three open flowers</entry><entry>Five open flowers</entry></row>
+            <row><entry>Old bench</entry><entry>A feather in the grass</entry><entry>The feather is gone</entry></row>
+          </tbody>
+        </tgroup>
+      </table>
+      <note><para>A table makes differences easy to scan. Keep the longer
+        descriptions in the journal so the numbers retain their context.</para></note>
+    </section>
+    <section xml:id="vocabulary"><title>A few useful words</title>
+      <variablelist>
+        <varlistentry><term>Observation</term><listitem><para>Something recorded
+          directly: a shape, a sound, a count, or a color.</para></listitem></varlistentry>
+        <varlistentry><term>Inference</term><listitem><para>An explanation that
+          might account for an observation.</para></listitem></varlistentry>
+        <varlistentry><term>Question</term><listitem><para>A reason to return and
+          look again.</para></listitem></varlistentry>
+      </variablelist>
+      <blockquote><para>Take home a question as well as a memory.</para></blockquote>
+    </section>
+  </chapter>
+  <appendix xml:id="next-visit"><title>Before the next visit</title>
+    <para>Begin again at <xref linkend="packing"/>, then revisit the landmarks
+      in <xref linkend="visit-table"/>. Add a new page without rewriting the
+      old one; yesterday's uncertainty is part of the story.</para>
+    <para>The document format used for this notebook is described on the
+      <link xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="https://docbook.org/">DocBook website</link>.</para>
+  </appendix>
+</book>

@@ -1,6 +1,6 @@
 // Phase 55 - inline images without ColorSpace default to DeviceRGB.
 
-import image: lambda.pdf.image
+import image: lambda.doc.pdf.image
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 

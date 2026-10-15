@@ -2779,6 +2779,8 @@ bool layout_html_ua_element_default(NameId tag, HtmlUaElementDefault* result);
 bool layout_html_ua_list_nesting_ancestor(NameId tag);
 CssEnum layout_html_ua_list_marker(NameId tag, size_t unordered_ancestors);
 struct StrBuf;
+const char* layout_html_ua_focus_css();
+CssStylesheet* radiant_ua_focus_stylesheet(DomDocument* doc, CssEngine* engine);
 bool layout_html_ua_stylesheet(StrBuf* css);
 // Chromium CheckForGenericFamilyChange: a medium-lineage size that switches to monospace scales by 13/16.
 void layout_apply_monospace_medium_size(FontProp* font, const FontProp* parent);
@@ -3611,6 +3613,9 @@ typedef struct GridContainerLayout : GridProp {
     ScratchMark scratch_mark;
 } GridContainerLayout;
 
+int layout_grid_auto_repeat_count(GridTrackList* tracks, int repeat_index,
+                                  float available_size, float gap, bool definite_size);
+
 void init_grid_container(LayoutContext* lycon, struct ViewBlock* container);
 void cleanup_grid_container(LayoutContext* lycon);
 float layout_grid_row_border_box_extent(struct ViewBlock* container,
@@ -4310,7 +4315,10 @@ DomDocument* layout_load_iframe_src_doc(LayoutContext* lycon, const char* src,
 bool iframe_navigation_must_not_run_in_layout(LayoutContext* lycon,
                                               const char* src);
 void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
-                                int iframe_width, int iframe_height);
+                                float iframe_width, float iframe_height);
+bool layout_iframe_content_size(DomDocument* doc, float* width, float* height);
+DomDocument* layout_ensure_iframe_document(LayoutContext* lycon, ViewBlock* block,
+    float viewport_width, float viewport_height);
 View* set_view(LayoutContext* lycon, ViewType type, DomNode* node);
 // Keyword Mapping: Lambda CSS strings → Lexbor enum values
 
@@ -5146,6 +5154,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block);
 void layout_setup_text_indent(LayoutContext* lycon, ViewBlock* block, float content_width);
 void layout_intrinsic_apply_first_line_indent(float text_indent, float first_segment_min,
     float remaining_min_content, float* max_content, float* min_content);
+int layout_line_clamp_count(const ViewBlock* block);
+float layout_line_clamp_intrinsic_height(ViewBlock* block, float height, float line_height);
 void layout_setup_line_clamp(LayoutContext* lycon, ViewBlock* block,
                               const BlockContext* parent);
 void layout_finalize_line_clamp(LayoutContext* lycon, ViewBlock* block);

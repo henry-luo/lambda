@@ -1,0 +1,18 @@
+{
+  "name": "Clamped auto-height flex labels contribute only visible lines to grid rows",
+  "html": "test/ui/css_text_clamp_intrinsic.html",
+  "viewport": {"width": 500, "height": 300},
+  "events": [
+    {"type":"assert_script","js":"['long','breaks'].every(id=>Math.abs(document.getElementById(id).getBoundingClientRect().height-40)<0.5)"},
+    {"type":"assert_script","js":"Math.abs(document.getElementById('short').getBoundingClientRect().height-20)<0.5"},
+    {"type":"assert_script","js":"Math.abs(document.getElementById('meta').getBoundingClientRect().top-54)<0.5 && Math.abs(document.getElementById('next').getBoundingClientRect().top-82)<0.5"},
+    {"type":"script","js":"document.getElementById('long').style.webkitLineClamp='3'"},
+    {"type":"assert_script","js":"Math.abs(document.getElementById('long').getBoundingClientRect().height-60)<0.5 && Math.abs(document.getElementById('next').getBoundingClientRect().top-102)<0.5"},
+    {"type":"script","js":"document.getElementById('long').style.webkitLineClamp='none'"},
+    {"type":"assert_script","js":"document.getElementById('long').getBoundingClientRect().height>60 && document.getElementById('next').getBoundingClientRect().top>102"},
+    {"type":"script","js":"document.getElementById('long').style.removeProperty('-webkit-line-clamp')"},
+    {"type":"assert_script","js":"Math.abs(document.getElementById('long').getBoundingClientRect().height-40)<0.5 && Math.abs(document.getElementById('next').getBoundingClientRect().top-82)<0.5"},
+    {"type":"window_close"},
+    {"type":"assert_window_closed","closed":true}
+  ]
+}

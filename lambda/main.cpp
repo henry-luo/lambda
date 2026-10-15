@@ -3,6 +3,7 @@
 #include "core/mark_reader.hpp"
 #include "io/zip_archive.hpp"
 #include "format/format.h"
+#include "io/script_format.hpp"
 #include "format/format-markup.h"
 #include "../lib/mime-detect.h"
 #include "../lib/mempool.h"
@@ -201,7 +202,7 @@ static bool lambda_view_http_url_is_likely_html_document(const char* url) {
     bool is_likely_html = (last_slash && last_slash + 1 == end) ||
         !last_dot || (last_slash && last_dot < last_slash) ||
         ascii_case_ext_equals(last_dot, end, ".html") ||
-        ascii_case_ext_equals(last_dot, end, ".htm");
+        ascii_case_ext_equals(last_dot, end, ".htm") || input_path_is_xhtml(pathname);
     url_destroy(parsed_url);
     return is_likely_html;
 }
@@ -886,14 +887,14 @@ struct DocWindowLaunchOptions {
 };
 
 static bool lambda_view_path_is_archive(const char* path) {
-    if (zip_source_expected(path, nullptr, 0)) return true;
+    if (archive_source_format(path, nullptr, 0) != ARCHIVE_UNKNOWN) return true;
     FILE* stream = file_open_regular_read(path);
     if (!stream) return false;
-    uint8_t signature[4];
+    uint8_t signature[512];
     size_t size = fread(signature, 1, sizeof(signature), stream);
     fclose(stream);
     // only route by the signature here; input() validates and captures the archive.
-    return zip_source_expected(path, signature, size);
+    return archive_source_format(path, signature, size) != ARCHIVE_UNKNOWN;
 }
 
 // Parse argv[2..] for a document-window command. `--view-key` belongs to the
@@ -1543,7 +1544,7 @@ int exec_convert(int argc, char* argv[]) {
 
     if (argc < 2) {
         printf("Error: convert command requires input file\n");
-        printf("Usage: lambda convert <input> [-f <from>] -t <to> -o <output> [--view-key <key>] [--full-document] [--font-option default|katex]\n");
+        printf("Usage: lambda convert <input> [-f <from>] -t <to> -o <output> [--loss error|allow] [--view-key <key>] [--full-document] [--font-option default|katex]\n");
         printf("Use 'lambda convert --help' for more information\n");
         return 1;
     }
@@ -1557,6 +1558,7 @@ int exec_convert(int argc, char* argv[]) {
     const char* pipeline = NULL;     // Pipeline selection: "legacy" or "unified"
     const char* font_option = NULL;  // LaTeX math fonts: default or katex
     const char* graph_view_key = NULL; // Structurizr view key for graph-to-HTML conversion
+    const char* format_loss = nullptr; // shared policy for shipped source writers
 
     // Skip "convert" and parse remaining arguments
     for (int i = 1; i < argc; i++) {
@@ -1580,6 +1582,12 @@ int exec_convert(int argc, char* argv[]) {
             } else {
                 printf("Error: -o option requires an output file argument\n");
                 return 1;
+            }
+        } else if (strcmp(argv[i], "--loss") == 0) {
+            if (i + 1 >= argc) { fputs("Error: --loss requires error or allow\n", stderr); return 1; }
+            format_loss = argv[++i];
+            if (strcmp(format_loss, "error") && strcmp(format_loss, "allow")) {
+                fputs("Error: --loss requires error or allow\n", stderr); return 1;
             }
         } else if (strcmp(argv[i], "--full-document") == 0) {
             full_document = true;
@@ -1656,6 +1664,10 @@ int exec_convert(int argc, char* argv[]) {
     if (!output_file) {
         printf("Error: Output file (-o) is required\n");
         return 1;
+    }
+
+    if (format_loss && !script_format_route(to_format).target) {
+        fputs("Error: --loss is supported for script document output formats\n", stderr); return 1;
     }
 
     // Check if input file exists (skip check for HTTP/HTTPS URLs)
@@ -1869,8 +1881,22 @@ int exec_convert(int argc, char* argv[]) {
             formatted_output = format_markup_string(input->pool, input->root, &RST_RULES);
         } else if (strcmp(to_format, "org") == 0) {
             formatted_output = format_markup_string(input->pool, input->root, &ORG_RULES);
-        } else if (strcmp(to_format, "wiki") == 0) {
-            formatted_output = format_markup_string(input->pool, input->root, &WIKI_RULES);
+        } else if (ScriptFormatRoute route = script_format_route(to_format); route.target) {
+            const LambdaDocumentTransformConfig transform = {
+                route.target, route.package, "format_file",
+                LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, true};
+            LambdaDocumentTransformOption options[] = {
+                {"input_type", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, type_string->chars, false},
+                {"input_flavor", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING,
+                    flavor_string ? flavor_string->chars : "", false},
+                {route.option, LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, route.target, false},
+                {"loss", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, format_loss ? format_loss : "error", false},
+            };
+            full_doc_output = run_document_transform_markup(input_file, &transform, options, 4);
+            if (!full_doc_output) {
+                LambdaError* last_error = get_persistent_last_error();
+                if (last_error) { err_print(last_error); clear_persistent_last_error(); }
+            }
         } else if (strcmp(to_format, "textile") == 0) {
             formatted_output = format_markup_string(input->pool, input->root, &TEXTILE_RULES);
         } else if (strcmp(to_format, "text") == 0) {
@@ -1906,7 +1932,7 @@ int exec_convert(int argc, char* argv[]) {
             strbuf_free(sb);
         } else {
             printf("Error: Unsupported output format '%s'\n", to_format);
-            printf("Supported formats: mark, json, xml, html, yaml, toml, ini, css, jsx, mdx, latex, rst, org, wiki, textile, text, markdown, math-ascii, math-latex, math-typst, math-mathml\n");
+            printf("Supported formats: mark, json, xml, html, yaml, toml, ini, css, jsx, mdx, latex, rst, org, wiki, asciidoc, man, typst, eml, vcf, ics, textile, text, markdown, math-ascii, math-latex, math-typst, math-mathml\n");
             mem_pool_destroy(temp_pool);
             return 1;
         }
@@ -2435,6 +2461,8 @@ static const LambdaDemo LAMBDA_DEMOS[] = {
     {"doom", "test/demo/doom/doom.ls"},
     {"photo", "test/demo/photo/photo.ls"},
     {"draw", "test/demo/draw/draw.ls"},
+    {"word", "test/demo/word/word.ls"},
+    {"finder", "test/demo/finder/finder.ls"},
     {"cellscope", "test/demo/cellscope/cellscope.ls"},
     {"scene3d", "test/demo/scene3d/ringworld.ls"},
     {"ringworld", "test/demo/scene3d/ringworld.ls"},
@@ -2678,7 +2706,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  markdown       - doc_schema.ls\n");
             printf("  rst            - doc_schema.ls\n");
             printf("  textile        - doc_schema.ls\n");
-            printf("  wiki           - doc_schema.ls\n");
+            printf("  wiki[:flavor]  - doc_schema.ls (mediawiki, dokuwiki, tikiwiki, twiki, vimwiki, xwiki, zimwiki, creole, jira, confluence)\n");
             printf("  lambda         - doc_schema.ls\n");
             printf("\nRequire Explicit Schema (-s option):\n");
             printf("  json, xml, yaml, csv, ini, toml, latex, rtf, pdf, text\n");
@@ -3518,7 +3546,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Format Converter v1.0\n\n");
-            printf("Usage: %s convert <input> [-f <from>] -t <to> -o <output> [--view-key <key>] [--full-document] [--font-option default|katex]\n", argv[0]);
+            printf("Usage: %s convert <input> [-f <from>] -t <to> -o <output> [--loss error|allow] [--view-key <key>] [--full-document] [--font-option default|katex]\n", argv[0]);
             printf("\nOptions:\n");
             printf("  -f <from>            Input format (auto-detect if omitted)\n");
             printf("  -t <to>              Output format (required)\n");
@@ -3526,12 +3554,14 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  --full-document      For LaTeX to HTML, generate complete HTML with CSS\n");
             printf("  --view-key <key>     Structurizr view key (default: first declared view)\n");
             printf("  --font-option <opt>  LaTeX math fonts: default or katex\n");
+            printf("  --loss error|allow  Script document writers: reject or allow diagnosed losses\n");
             printf("  -h, --help           Show this help message\n");
             printf("Supported Formats:\n");
             printf("  Text formats:    markdown, html, xml, json, yaml, toml, ini, csv, latex, rst, org, text\n");
             printf("  Math formats:    math-ascii, math-latex, math-typst, math-mathml\n");
             printf("  Document formats: pdf, rtf\n");
-            printf("  Markup formats:  asciidoc, textile, wiki, man, mark\n");
+            printf("  Markup formats:  asciidoc, textile, wiki[:flavor], man, typst, mark\n");
+            printf("  Record formats:  eml, vcf, ics\n");
             printf("  Data formats:    json, xml, yaml, csv, ini, properties, toml\n");
             printf("\nCommon Conversions:\n");
             printf("  markdown → html:   %s convert doc.md -t html -o doc.html\n", argv[0]);
@@ -4079,10 +4109,12 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  The 'view' command opens a document in an interactive window.\n");
             printf("  Supports multiple document formats with full rendering and styling.\n");
             printf("  If no file is specified, opens the bundled lambda.doc document viewer.\n");
-            printf("  Directories and ZIP archives open as browsable file trees.\n"); // PRINTF_OK: user-facing CLI help.
+            printf("  Directories and ZIP/7z/tar/RAR archives open as browsable file trees.\n"); // PRINTF_OK: user-facing CLI help.
             printf("\nSupported Formats:\n");
             printf("  .pdf       Portable Document Format\n");
             fputs("  .docx      Word document (semantic content)\n", stdout);
+            fputs("  .epub      EPUB 2/3 eBook reader\n", stdout); // PRINTF_OK: CLI help.
+            fputs("  .diff/.patch  Unified diff review\n", stdout); // PRINTF_OK: CLI help.
             printf("  .html      HyperText Markup Language\n");
             printf("  .htm       HyperText Markup Language (alternative extension)\n");
             printf("  .md        Markdown (with GitHub-like styling)\n");
@@ -4227,7 +4259,11 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
                 // Get file extension from Content-Type
                 effective_ext = content_type_to_extension(response->content_type);
-                if (zip_source_expected(filename, response->data, response->size)) effective_ext = ".zip";
+                ArchiveFormat archive_format = archive_source_format(filename, response->data, response->size);
+                if (archive_format != ARCHIVE_UNKNOWN) {
+                    static const char* extensions[] = {"", ".zip", ".7z", ".tar", ".rar", ".rar"};
+                    effective_ext = extensions[archive_format];
+                }
                 log_info("HTTP Content-Type: %s -> extension: %s",
                          response->content_type ? response->content_type : "(none)",
                          effective_ext ? effective_ext : "(none)");
@@ -4268,14 +4304,15 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
         // A document format takes precedence over its ZIP storage; --archive exposes the parts.
         bool is_docx_file = ext && str_ieq_cstr(ext, ".docx");
+        bool is_ebook_file = input_path_is_ebook(filename);
         bool browse_tree = file_is_dir(filename) || launch.browse_archive ||
-            (!is_docx_file && lambda_view_path_is_archive(filename));
+            (!is_docx_file && !is_ebook_file && lambda_view_path_is_archive(filename));
         if (browse_tree) {
             static const LambdaDocumentTransformConfig browser_transform = {
                 "browse", "lambda.doc.doc_viewer", "open_browser",
                 LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PATH, false
             };
-            log_info("VIEW_FILE_TREE: opening directory or ZIP archive: %s", filename);
+            log_info("VIEW_FILE_TREE: opening directory or archive: %s", filename);
             exit_code = view_lambda_document_transform_with_events(filename, &browser_transform,
                 nullptr, 0, event_file, headless, font_dirs, font_dir_count, event_log, state_dump, launch.fullscreen);
         } else if (is_graph_file && graph_view_key) {
@@ -4295,12 +4332,13 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
             lambda_view_log_completion(exit_code);
             return lambda_main_finish(exit_code);
-        } else if (is_docx_file || is_graph_file || eps_source_expected(filename, nullptr, 0) || (ext && (strcmp(ext, ".pdf") == 0 ||
-                    strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 ||
+        } else if (is_docx_file || is_ebook_file || is_graph_file || eps_source_expected(filename, nullptr, 0) || (ext && (strcmp(ext, ".pdf") == 0 ||
+                    strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 || input_path_is_xhtml(filename) ||
                     strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
                     strcmp(ext, ".pgf") == 0 ||
                     strcmp(ext, ".ls") == 0 || strcmp(ext, ".slides") == 0 ||
+                    str_ieq_cstr(ext, ".diff") || str_ieq_cstr(ext, ".patch") ||
                     strcmp(ext, ".xml") == 0 || strcmp(ext, ".rst") == 0 ||
                     strcmp(ext, ".wiki") == 0 || strcmp(ext, ".svg") == 0 ||
                     strcmp(ext, ".png") == 0 || strcmp(ext, ".jpg") == 0 ||
@@ -4317,7 +4355,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                                                        state_dump, nullptr, launch.fullscreen);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
-            printf("Supported formats: .docx, .pdf, .html, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
+            printf("Supported formats: .epub, .docx, .pdf, .html, .xhtml, .xht, .md, .tex, .pgf, .ls, .slides, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
             if (temp_file_path) {
                 if (temp_file_path_is_local) file_delete(temp_file_path);
                 mem_free(temp_file_path);

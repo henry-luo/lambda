@@ -1,10 +1,44 @@
 # Mark Doc Schema
 
-This document describes the unified element vocabulary — the **Mark Doc schema** — that Lambda's prose parsers produce for Markdown, reStructuredText, AsciiDoc, MediaWiki/DokuWiki, Org-mode, Textile and man pages, and that `lambda validate` checks those documents against. It is modelled on Pandoc's Abstract Syntax Tree ([Pandoc API documentation](https://pandoc.org/using-the-pandoc-api.html)): HTML element names are used wherever HTML has one (`<p>`, `<h1>`, `<a>`), and custom elements cover what HTML lacks (`<math>`, `<citation>`, `<footnote>`).
+This document describes the unified element vocabulary — the **Mark Doc schema** — that Lambda's prose parsers produce for Markdown, reStructuredText, AsciiDoc, MediaWiki/DokuWiki and the wiki-family profiles, Org-mode, Textile and man pages, and that `lambda validate` checks those documents against. It is modelled on Pandoc's Abstract Syntax Tree ([Pandoc API documentation](https://pandoc.org/using-the-pandoc-api.html)): HTML element names are used wherever HTML has one (`<p>`, `<h1>`, `<a>`), and custom elements cover what HTML lacks (`<math>`, `<citation>`, `<footnote>`).
 
 > **Where it lives.** The schema is `lmd/package/doc/doc_schema.ls`, shipped with the runtime and used as the default validator schema for the formats above (`lambda validate README.md`). See [Markup_Formats_Support.md](Markup_Formats_Support.md) for what each parser emits and [Lambda_Validator.md](Lambda_Validator.md) for running the validator.
 >
-> **What the parsers emit today.** The tree is `<doc version: "1.0", <body …>>`. A `<meta>` element is part of the schema but not yet produced — Markdown front matter currently parses as a thematic break and a heading. Inline runs inside `<p>` are wrapped in a `<span>`; headings carry `level` as a string (`level: "1"`); code carries `type: "inline"` or `type: "block"` and math `type: "inline"` or `type: "block"`; strikethrough is `<del>`; Markdown footnotes use `<footnote-ref ref: "label", number: "1">` with a `<sup><a href="#fn-1">1</a></sup>` child, and definitions are collected in a `<footnotes>` section of `<footnote label: "label", id: "fn-1", number: "1">` blocks; citations are `<citation key: …>`. The sample and element list below show the schema's target shape, and note these differences where they matter. See [Markdown dialect](../vibe/input/Input_Markdown.md) for resolution and formatting behavior.
+> **What the parsers emit today.** The tree is `<doc version: "1.0", <body …>>`. Vimwiki page tags and Zim tags/creation metadata can produce `<meta>`; Markdown front matter currently parses as a thematic break and a heading. Inline runs inside `<p>` are wrapped in a `<span>`; headings carry `level` as a string (`level: "1"`); code carries `type: "inline"` or `type: "block"` and math `type: "inline"` or `type: "block"`; strikethrough is `<del>`; Markdown footnotes use `<footnote-ref ref: "label", number: "1">` with a `<sup><a href="#fn-1">1</a></sup>` child, and definitions are collected in a `<footnotes>` section of `<footnote label: "label", id: "fn-1", number: "1">` blocks; citations are `<citation key: …>`. The sample and element list below show the schema's target shape, and note these differences where they matter. See [Markdown dialect](../vibe/input/Input_Markdown.md) for resolution and formatting behavior.
+
+## Tasks and tags
+
+The schema uses element contracts for the actual `doc`/`body` tree. Duplicate
+legacy record examples have been removed so the file compiles; metadata arrays
+use homogeneous `T[]` contracts (S11.1.1v3).
+
+The shared `TaskAttrs` group applies to list items and can describe task-bearing
+headings. Markdown/Org binary tasks retain `class="task-list-item"`,
+`data-checked="true|false"`, and a disabled checkbox child. Wiki readers add:
+
+| Attribute | Meaning |
+|---|---|
+| `data-task-state` | `todo`, `in-progress`, `done`, `waiting`, `blocked`, `cancelled`, `rejected`, `migrated`, or `custom` |
+| `data-task-label` | Original/custom label; required and nonempty for `custom` |
+| `data-task-progress-min`, `data-task-progress-max` | Paired canonical integer percentage strings, `0 <= min <= max <= 100`; equal bounds mean exact progress |
+| `data-task-marker`, `data-task-flavor` | Paired original token and dialect; reusable only while its meaning matches the current state and progress |
+
+For a rich task, `data-checked` is true exactly when its state is `done`.
+`lambda.doc.wiki.tasks` checks conditional invariants when writing. Vimwiki's
+three partial progress markers keep their documented ranges; they do not imply
+an exact percentage. Zim's `[x]` is labelled `not-completed`, while moved and
+moved-out markers remain distinct labels on `migrated` tasks.
+
+Page tags use the existing `meta.tags` string array. Zim inline tags retain
+`data-tag` spans. Vimwiki tags in the first two lines are page tags; local tags
+stay source-preserved raw content with diagnostics because their association
+with a heading or line is contextual. Wiki raw nodes carry the source dialect
+in `format` and unsupported-construct metadata in `data-kind` and
+`data-diagnostic`.
+
+See the [wiki design](../vibe/input/Input_Wiki.md) for syntax mappings and losses.
+The same normalized content rules apply (S2.6.1v2, S2.6.2–S2.6.5), and parser
+construction remains in MarkBuilder (D7.1.5).
 
 ## Mark Schema
 

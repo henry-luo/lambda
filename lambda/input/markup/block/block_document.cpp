@@ -5,6 +5,7 @@
  * coordinate the overall document structure parsing.
  */
 #include "block_common.hpp"
+#include "../wiki.hpp"
 #include "../markup_highlight.hpp"
 #include "../../../../lib/mem.h"
 #include "lib/hashmap_typed.hpp"
@@ -221,6 +222,8 @@ Item parse_block_element(MarkupParser* parser) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
+    if (parser->config.format == Format::WIKI) return parse_wiki_block(parser);
+
     if (parse_definition_block(parser, line)) return Item{.item = ITEM_UNDEFINED};
 
     // An RST overline belongs to its title, not to a horizontal rule.
@@ -377,6 +380,8 @@ Item parse_document(MarkupParser* parser) {
     }
 
     parser->resolveFootnotes(body);
+
+    if (parser->wiki_metadata_) list_push((List*)doc, Item{.element = parser->wiki_metadata_});
 
     // Add body to document
     list_push((List*)doc, Item{.item = (uint64_t)body});

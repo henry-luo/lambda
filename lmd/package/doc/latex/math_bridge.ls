@@ -1,0 +1,108 @@
+// latex/math_bridge.ls - Bridge to the math package
+// Delegates math AST rendering to lmd/package/doc/math/math.ls
+
+import math: lambda.doc.math.math
+import util: .util
+import registry: .packages.registry
+import amsmath: .packages.amsmath
+import semantic: .packages.semantic
+
+// ============================================================
+// Unmapped math commands
+// ============================================================
+
+// The math typesetter paints a command it cannot map as its name, which reads as
+// success, so each one is reported (Lambda_Pkg_Math §3.1, §10.2). Declared
+// operators are rendered by name on purpose, and Lua is reported as unsupported-lua.
+pub fn issues(node, operators, packages) {
+    if (not (node is element)) []
+    else {
+        let tag = string(name(node))
+        // amsmath renders its environments from row sources, not the pre-parsed ast
+        let ensured = if (tag == "ensuremath") ensuremath_ast(node) else null
+        let asts = if (adapter_math(node, tag, packages)) []
+            else if (amsmath.handles(tag, packages)) amsmath.cell_asts(node, operators)
+            else if (node.ast != null) [node.ast]
+            else if (ensured != null) [ensured]
+            else null
+        if (asts == null) [for (child in node, issue in issues(child, operators, packages)) issue]
+        else [for (ast in asts, key in math.unmapped_commands(ast)
+                where key != "directlua" and util.lookup(operators, "\\" ++ key) == null)
+            util.diagnostic("unsupported-math-command", "math", key,
+                "Unsupported math command \\" ++ key, node.source_offset)] ++
+            [for (ast in asts, let regular = math.regular_bold_symbols(ast) or [] where len(regular) > 0)
+                util.diagnostic("math-bold-symbol-approximation", "amsmath", join(regular, ""),
+                    "\\boldsymbol draws " ++ join(regular, " ") ++
+                    " at regular weight: no bundled face has them in bold", node.source_offset)]
+    }
+}
+
+// \ensuremath{…} typesets its raw argument as inline math in any mode
+pub fn ensuremath_ast(node) {
+    let raw = util.raw_argument(node, "required", 0)
+    if (raw == null) null else parse(raw, {type: "math", flavor: "latex"}) ^ { null }
+}
+
+// a math command written in text (\nicefrac, \ce): the command rebuilt from its raw
+// argument groups and parsed as inline math
+pub fn command_ast(node) {
+    let groups = if (node.argument_groups == null) [] else node.argument_groups
+    let source = "\\" ++ string(name(node)) ++ join([for (group in groups)
+        if (group.kind == "optional") "[" ++ group.raw ++ "]"
+        else if (group.kind == "required") "{" ++ group.raw ++ "}"
+        else "(" ++ group.raw ++ ")"], "")
+    parse(source, {type: "math", flavor: "latex"}) ^ { null }
+}
+
+// math an adapter typesets itself: bussproofs sequents and semantic inference rules
+fn adapter_math(node, tag, packages) =>
+    (tag == "prooftree" and registry.active(packages, "bussproofs")) or
+    (tag == "display_math" and registry.active(packages, "semantic") and
+        semantic.contains_inference(node))
+
+// ============================================================
+// Inline math
+// ============================================================
+
+pub fn render_inline_el(node) {
+    let math_ast = node.ast
+    let src = if (node.source != null) node.source else ""
+    if (math_ast != null) math.render_inline(math_ast)
+    else <span class: "math-inline", src>
+}
+
+// ============================================================
+// Display math
+// ============================================================
+
+pub fn render_display_el(node) {
+    let math_ast = node.ast
+    let src = if (node.source != null) node.source else ""
+    let math_html = if (math_ast != null) math.render_display(math_ast) else <span class: "math-display", src>;
+    <div class: "math-display-container", math_html>
+}
+
+// ============================================================
+// Numbered equation environment
+// ============================================================
+
+pub fn render_equation_el(node) {
+    <div class: "latex-equation", render_equation_math(node)>
+}
+
+pub fn render_equation_math(node) {
+    let math_ast = node.ast
+    let src = if (node.source != null) node.source else ""
+    if (math_ast != null) math.render_display(math_ast) else <span class: "math-display", src>
+}
+
+// ============================================================
+// Align/gather/multline environments
+// ============================================================
+
+pub fn render_math_env_el(node, env_name) {
+    let math_ast = node.ast
+    let src = if (node.source != null) node.source else ""
+    let math_html = if (math_ast != null) math.render_display(math_ast) else <span class: "math-display", src>;
+    <div class: "math-display-container", math_html>
+}

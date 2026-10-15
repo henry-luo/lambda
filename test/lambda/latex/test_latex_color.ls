@@ -2,7 +2,7 @@
 // Tests Phase 2F: \textcolor, \colorbox, \fcolorbox, \definecolor, \color, color resolution
 // Tests Phase 2H: nested list CSS classes, custom item labels
 
-import color: lambda.latex.elements.color
+import color: lambda.doc.latex.elements.color
 
 "===== COLOR COMMAND TESTS ====="
 

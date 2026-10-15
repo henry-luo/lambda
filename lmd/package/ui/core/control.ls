@@ -2,6 +2,7 @@
 import dom
 import tree: lambda.dom.tree
 import c: lambda.ui.core.component
+import binding: .binding
 
 pub fn attrs(node, family = "dtna") {
     let p = c.props(node);
@@ -26,24 +27,45 @@ pub pn notify_change(node, evt, action, requested, family = "dtna") {
     if (c.has(p,"value") or c.has(p,"checked") or c.kind(node) == 'radio') {
         dom.request_frame(evt.target,family ++ "_control_sync")
     }
-    emit("ui_change", c.action(node,action,requested))
+    if (p.on_change == null) { emit("ui_change", c.action(node,action,requested)) }
+    else {
+        emit("control_change", {*:binding.request(p.on_change,p.id,requested),node:evt.target,event:evt})
+    }
 }
 pub pn sync(node, target) {
     let p = c.props(node);
+    // render events can target a checkbox label or a skin's wrapper.
+    let field = if (dom.matches(target,"input,textarea,select")) target
+                else dom.query_selector(target,"input,textarea,select")
+    if (field == null) { return }
+    // preedit belongs to the native composition session, including an empty
+    // active composition. Reassert the accepted value only after it commits.
+    if (dom.ime_preedit(field) != null) { return }
     if (c.kind(node) == 'radio') {
         // UA owns exclusivity; reassert only application-controlled peers in that same native group.
-        for (peer in tree.radio_group(target) where dom.has_attribute(peer,"data-ui-controlled-checked")) {
-            dom.set_state(peer,"checked",dom.get_attribute(peer,"data-ui-controlled-checked") == "true")
+        for (peer in tree.radio_group(field) where dom.has_attribute(peer,"data-ui-controlled-checked")) {
+            let checked = dom.get_attribute(peer,"data-ui-controlled-checked") == "true"
+            if (dom.get_state(peer,"checked") != checked) dom.set_state(peer,"checked",checked)
         }
-    } else if (c.has(p,"checked")) { dom.set_state(target,"checked",p.checked) }
-    else if (c.has(p,"value") and c.kind(node) == 'select') {
-        let matches = [for (index,option in p.options where option.value == p.value) index]
-        let fallback = [for (index,option in p.options where not option.disabled) index]
-        dom.set_selected_index(target,if (len(matches) > 0) matches[0] else if (len(fallback) > 0) fallback[0] else -1)
-    } else if (c.has(p,"value") and dom.get_state(target,"value") != c.text(p.value)) {
-        // an accepted edit already has the right native value and selection; leave both intact.
-        dom.set_state(target,"value",c.text(p.value))
+    } else if (c.has(p,"checked")) {
+        if (dom.get_state(field,"checked") != p.checked) dom.set_state(field,"checked",p.checked)
     }
+    else if (c.has(p,"value") and c.kind(node) == 'select') {
+        let matches = [for (index,option in p.options where c.text(option.value) == c.text(p.value)) index]
+        let fallback = [for (index,option in p.options where not option.disabled) index]
+        let selected = if (len(matches) > 0) matches[0] else if (len(fallback) > 0) fallback[0] else -1
+        if (dom.selected_index(field) != selected) dom.set_selected_index(field,selected)
+    } else if (c.has(p,"value") and dom.get_state(field,"value") != c.text(p.value)) {
+        // an accepted edit already has the right native value and selection; leave both intact.
+        dom.set_state(field,"value",c.text(p.value))
+    }
+}
+
+pub pn rendered(node, evt) {
+    let p = c.props(node)
+    // a parent may change the controlled value without a native input event.
+    if (evt.event_phase == 2 and (c.has(p,"value") or c.has(p,"checked"))) sync(node,evt.target)
+    'pass'
 }
 
 pub fn text_area(node, family = "dtna") {
@@ -59,7 +81,7 @@ pub fn select(node, family = "dtna") {
     let chosen = c.option(p, "value", p.default_value);
     <select *:attrs(node,family), name:p.name, *:c.boolean_attr("required", p.required),
         *[for (option in p.options) <option value:c.text(option.value),
-            *:c.boolean_attr("disabled", option.disabled), *:c.boolean_attr("selected", option.value == chosen), c.text(option.label)>]>
+            *:c.boolean_attr("disabled", option.disabled), *:c.boolean_attr("selected", c.text(option.value) == c.text(chosen)), c.text(option.label)>]>
 }
 
 pub fn check(node, control_kind, family = "dtna") {
@@ -97,6 +119,7 @@ pub fn present(node, family = "dtna") {
     else check(node,c.text(kind),family)
 }
 pub pn edited(node, evt, family = "dtna") {
+    if (evt.isComposing == true) { return }
     if (c.kind(node) == 'input' or c.kind(node) == 'text-area') {
         notify_change(node,evt,'input',dom.get_state(evt.target,"value"),family)
     }

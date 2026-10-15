@@ -1,6 +1,6 @@
 // Phase 57 - raw Image XObject ICCBased unsupported N renders black.
 
-import interp: lambda.pdf.interp
+import interp: lambda.doc.pdf.interp
 
 fn ref(n) { { type: "indirect_ref", object_num: n } }
 fn name(s) { { kind: "name", value: s } }

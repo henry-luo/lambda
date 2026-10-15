@@ -1,0 +1,42 @@
+% tocloft.sty -- Lambda-owned binding of tocloft (CTAN), written from its manual
+% rather than copied.
+%
+% tocloft is configured by redefining its macros (\renewcommand{\cftsecfont}{...}),
+% so this binding defines each with an empty default, which makes the document's
+% \renewcommand legal; the echoed definition reaches the script adapter, which
+% reads it as the entry's style (lmd/package/doc/latex/packages/contents.ls). Commands
+% (\cftsetindents, \cftpagenumbersoff, \listof...) stay undefined and reach the
+% adapter as constructors. \newlistof makes its entry's macros here and then
+% passes through to the adapter, which lists the entries.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{tocloft}[2026/10/13 Lambda binding]
+% the options adjust page layout and title placement, which have no effect here
+\DeclareOption*{}
+\ProcessOptions\relax
+
+\def\cft@hooks#1{%
+  \expandafter\providecommand\csname cft#1font\endcsname{}%
+  \expandafter\providecommand\csname cft#1pagefont\endcsname{}%
+  \expandafter\providecommand\csname cft#1presnum\endcsname{}%
+  \expandafter\providecommand\csname cft#1aftersnum\endcsname{}%
+  \expandafter\providecommand\csname cft#1aftersnumb\endcsname{}%
+  \expandafter\providecommand\csname cft#1leader\endcsname{}%
+  \expandafter\providecommand\csname cft#1afterpnum\endcsname{}%
+  \expandafter\providecommand\csname cft#1dotsep\endcsname{4.5}}
+\cft@hooks{part}\cft@hooks{chap}\cft@hooks{sec}\cft@hooks{subsec}\cft@hooks{subsubsec}
+\cft@hooks{para}\cft@hooks{subpara}\cft@hooks{fig}\cft@hooks{subfig}\cft@hooks{tab}\cft@hooks{subtab}
+\def\cft@titlehooks#1{%
+  \expandafter\providecommand\csname cft#1titlefont\endcsname{}%
+  \expandafter\providecommand\csname cftafter#1title\endcsname{}}
+\cft@titlehooks{toc}\cft@titlehooks{lof}\cft@titlehooks{lot}
+\providecommand\cftdotsep{4.5}
+\providecommand\cftdot{.}
+\providecommand\cftnodots{5000}
+
+% \newlistof[within]{entry}{ext}{title}
+\def\newlistof{\@ifnextchar[\cft@newlistof{\cft@newlistof[]}}
+% the entry's counter, numbered within #1 when given, so \the<entry> prints in
+% \addcontentsline
+\def\cft@newlistof[#1]#2#3#4{%
+  \if\relax\detokenize{#1}\relax\newcounter{#2}\else\newcounter{#2}[#1]\fi
+  \cft@hooks{#2}\cft@titlehooks{#3}\noexpand\newlistof[#1]{#2}{#3}{#4}}

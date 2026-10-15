@@ -58,6 +58,7 @@ bool radiant_execute_location_navigation(UiContext* uicon, DomDocument* source,
 bool radiant_schedule_async_iframe_load(UiContext* uicon, DomElement* iframe,
                                         const char* url, int viewport_width,
                                         int viewport_height);
+void clear_document_interaction_state_before_detach(DomDocument* doc);
 void radiant_cancel_async_document_loads(DomDocument* doc);
 bool radiant_commit_async_document_loads(UiContext* uicon);
 bool radiant_async_document_loads_pending(UiContext* uicon);
@@ -102,6 +103,7 @@ extern "C" bool radiant_eval_context_switch(EvalContext* target);
 // Re-apply selector-dependent style and schedule layout after a live pseudo
 // state changes outside the native pointer dispatcher (for example JS .checked).
 void radiant_sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set);
+void radiant_sync_focus_style(View* view, uint32_t changed_flags);
 
 // F8/ES19: the behavior init phase. Runs between layout and rendering, and is
 // positioned rather than gated on paint — a headless run that never renders
@@ -3156,7 +3158,7 @@ void state_store_caret_clear(DocState* state);
 void caret_project_visual(DocState* state, float x, float y, float height);
 
 /**
- * Project visual caret geometry and iframe/document offset from a block origin.
+ * Project visual caret geometry and embedding viewport offset from a hit block origin.
  */
 void caret_project_visual_from_block(DocState* state, View* view,
                                      float x, float y, float height,

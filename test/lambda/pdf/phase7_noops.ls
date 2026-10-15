@@ -4,8 +4,8 @@
 // silently accepted (no fallthrough to the text catch-all and no
 // effect on rendering output).
 
-import interp:  lambda.pdf.interp
-import resolve: lambda.pdf.resolve
+import interp:  lambda.doc.pdf.interp
+import resolve: lambda.doc.pdf.resolve
 
 pn main() {
     let doc = input("test/input/test.pdf", 'pdf') ^ { null }

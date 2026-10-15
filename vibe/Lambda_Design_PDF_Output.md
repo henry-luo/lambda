@@ -21,7 +21,7 @@
 > Lambda. See the [phase 2 plan](impl/Lambda_Impl_PDF_Output_Phase2.md).
 > **Implementation increment, 2026-10-15:** fixed/native binary schemas
 > (S11.5 / D3.5) and experimental continuous-page Lambda output are available
-> through `lambda.pdf.output`; solid boxes, glyph outlines, images with alpha,
+> through `lambda.doc.pdf.output`; solid boxes, glyph outlines, images with alpha,
 > transforms and clips are implemented. Full migration gates remain open in
 > the phase 2 progress record.
 > **Scope:** PDF export, the view projection it needs, and a reusable file
@@ -33,7 +33,7 @@
 ## 1. Proposed outcome
 
 Move PDF document construction and serialization into the shipped
-`lambda.pdf` package. Radiant continues to load documents, resolve CSS, and
+`lambda.doc.pdf` package. Radiant continues to load documents, resolve CSS, and
 lay out views. Its shared native walker invokes Lambda callbacks with
 schema-backed `Velmt` records for the current view and its properties,
 allowing Lambda code to inspect final geometry, text, styles and resources
@@ -130,18 +130,19 @@ in §5.3; the draft must not infer that contract from buffer storage alone.
 
 ## 3. Current implementation and migration boundary
 
-The current file export dispatch calls `render_html_to_pdf()` or its document
-transform counterpart. A `RenderExportSession` loads and lays out the
-document; `render_pdf.cpp` walks the view tree through the shared
-`RenderBackend`, lowers PaintIR to `HPDF_*` calls, and saves the document.
-Those calls are implemented by Lambda's own `lib/pdf_writer.c`, whose
-header describes a libharu-compatible subset.
+The production file dispatch retains `render_html_to_pdf()` and its document
+transform counterpart as native session/save adapters. They lend the committed
+view to `lambda.doc.pdf.output.render_view`, which generates a completed PDF file
+functionally (S2.6.6v3, D2.6.12v3, D8.2.6v2). `radiant_pdf_walk.cpp` invokes
+Lambda callbacks through the shared walker and ordered page visitor. Native
+helpers return bounded geometry or owned image/alpha resources; PaintCmd is
+not a Lambda document ABI (D7.4.4, D7.4.5v2).
 
-The existing exporter supports continuous-view and explicit paged output.
-It writes text with standard PDF fonts and uses raster fallbacks for gradients, SVG subscenes,
-and effects. The writer emits PDF 1.4 and currently records compression
-settings without compressing streams. These are implementation observations,
-not language rulings or a target specification for future PDF features.
+`render_pdf.cpp` now contains no PDF operator/object writer. The retired
+`lib/pdf_writer.c` and its HPDF-compatible API/header have been removed after
+caller migration. Streams use real Flate compression; Lambda writes metadata,
+links, destinations, outlines and page labels. Glyph outlines preserve selected
+font appearance; searchable font embedding/ToUnicode is separate scope.
 
 | Responsibility | Proposed owner |
 |---|---|
@@ -156,10 +157,10 @@ not language rulings or a target specification for future PDF features.
 | Append length-delimited bytes and finalize the file value | PDFBuilder through a reusable virtual-list builder interface |
 | Write completed bytes to a destination | Existing procedural I/O or CLI boundary |
 
-The eventual migration succeeds when the production PDF export path no longer
-calls `HPDF_*` or depends on `lib/pdf_writer.c`. Phase 1 proves the new path on
-its declared subset. Phase 2 decides helper-dependent cases before full
-replacement; their absence is not a reason to silently omit rendered content.
+The native writer retirement is implemented. Phase 2 qualification remains
+recorded in `Lambda_Impl_PDF_Output_Phase2.md` §14; known layout failures and
+unverified platform/release gates remain visible. Helper failures abort before
+the final atomic save; rendered content is not silently omitted.
 
 ## 4. Exporting the view tree through Velmt
 
@@ -555,12 +556,12 @@ implement a readable virtual list. Representation details are in Appendix B.
 D8.2.6v2).** The PDF pipeline, including source snapshots, private print
 layout, callbacks, resource conversion, measurement and document construction,
 uses `fn`. Loading a source never executes its scripts or mutates a caller's
-live document. `lambda.pdf.output.render(source, options)` and the facade's
+live document. `lambda.doc.pdf.output.render(source, options)` and the facade's
 `render_source` accept an HTML element or source path and return the completed
 file. There is no PDF-specific procedural export scope:
 
 ```lambda
-import pdf: lambda.pdf.output
+import pdf: lambda.doc.pdf.output
 fn make_pdf(source) element^ => pdf.render(source, {})^
 pn main() {
     let file = make_pdf(<html <body "Hello">>)^;
@@ -666,8 +667,8 @@ the extension and dispatch interface. These remaining contracts are deferred und
 
 ## 6. PDF construction in Lambda
 
-Extend `lmd/package/pdf/` with output modules and export an entry through its
-existing package facade, following **D7.2.4**. Keep shared coordinate/color
+Extend `lmd/package/doc/pdf/` with output modules and export an entry through its
+existing package facade, following **D7.2.4v3**. Keep shared coordinate/color
 helpers where their contracts match; input interpretation and output
 serialization have different responsibilities.
 
@@ -842,7 +843,7 @@ symbol names identify the intended code.
 | Runtime element construction | `lambda/runtime/transpile-mir.cpp:25527`, `emit_element_storage`; `lambda/runtime/interp.cpp:3849`, `eval_element` |
 | Shared container layout | `lambda/lambda.hpp:436`, `List`; `:910`, `Element`; `lambda/lambda.h:1031`, `Container` |
 | Content append and finish | `lambda/runtime/collection_runtime.cpp:433`, `list_push`; `:559`, `list_push_spread`; `lambda/runtime/lambda-data-runtime.cpp:1527`, `list_end`; `:2567`, `list_fill` |
-| Existing PDF package facade | `lmd/package/pdf/pdf.ls`, `pdf_to_svg`, `pdf_to_html` |
+| Existing PDF package facade | `lmd/package/doc/pdf/pdf.ls`, `pdf_to_svg`, `pdf_to_html` |
 | Input/parse/format selectors | `lambda/runtime/lambda-eval.cpp`, `fn_input2`, `fn_parse2`, `fn_format2` |
 | Output selector and raw byte writing | `lambda/runtime/lambda-proc.cpp:468`, `pn_output3`; `:169`, `pn_output_internal` |
 
@@ -937,3 +938,16 @@ migration boundary remains DO32:
 ~~The recommendation is that PDFBuilder handles byte storage and invokes a
 Lambda PDF encoder for structured values. A native object encoder inside the
 specialized builder is an alternative requiring an explicit boundary choice.~~
+
+
+### PDF-LINK-1 — ordinary source fragment links (2026-10-15)
+
+The user ruled that a missing ordinary `#fragment` target does not abort PDF
+export. Preserve its painted content and omit its annotation. Resolve links
+against destinations in the selected emitted pages before allocating annotation
+object numbers, so page selection and viewport clipping cannot create dangling
+references. URI links and resolved internal links retain annotations. Explicit
+PDF outline attributes still require valid emitted destinations and remain
+errors when unresolved. Functional generation and final saving retain
+S2.6.6v3, D2.6.12v3 and D8.2.6v2; this changes the presentation package’s link
+policy, not element/file content semantics.
