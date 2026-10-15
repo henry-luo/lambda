@@ -1653,11 +1653,8 @@ static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, 
     return recorded;
 }
 
-bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
-                             RenderExportTargetKind target) {
-    if (!paint || !ui || !view || !view->bound || !view->boundary()->background) return false;
-    const BackgroundProp* background = view->boundary()->background;
-    float density = ui_context_raster_scale(ui);
+bool render_paint_background_requires_composite(const BackgroundProp* background, RenderExportTargetKind target) {
+    if (!background) return false;
     bool composite = background_has_blend(background);
     if (target == RENDER_EXPORT_TARGET_PDF && background->layer_count > 0) {
         for (int index = 0; index < background->layer_count; index++) {
@@ -1667,6 +1664,15 @@ bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, R
                 gradient_image_needs_sampling(layer.conic_gradient.get());
         }
     }
+    return composite;
+}
+
+bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
+                             RenderExportTargetKind target) {
+    if (!paint || !ui || !view || !view->bound || !view->boundary()->background) return false;
+    const BackgroundProp* background = view->boundary()->background;
+    float density = ui_context_raster_scale(ui);
+    bool composite = render_paint_background_requires_composite(background, target);
     if (!composite) return record_background(paint, ui, view, rect, density, nullptr, nullptr);
     PaintList layers;
     if (!record_background(&layers, ui, view, rect, density, nullptr, nullptr)) return false;
@@ -1679,6 +1685,61 @@ bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, R
     paint_draw_image_resource(paint, image.surface, image.x, image.y, image.width, image.height,
         255, nullptr, image_surface_destroy);
     return paint_list_count(paint) == index + 1;
+}
+
+bool render_paint_boundary_layers(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
+        RenderExportTargetKind target, bool outer_shadows, const Rect* background_area) {
+    if (outer_shadows) render_paint_boundary_emit_outer_shadows(paint, view, rect.x, rect.y);
+    // slice only the image positioning area; border edges retain their single coverage operation.
+    bool sliced = background_area && !render_paint_background_is_simple(view->boundary()->background);
+    if (sliced) {
+        RdtPath* clip = background_rect_path(rect);
+        if (!clip) return false;
+        paint_push_clip(paint, clip, nullptr); rdt_path_free(clip);
+    }
+    render_paint_background(paint, ui, view, sliced ? *background_area : rect, target);
+    if (sliced) paint_pop_clip(paint);
+    return render_paint_border_image(paint, ui, view->boundary()->border, rect);
+}
+
+bool render_paint_boundary_box(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
+        RenderExportTargetKind target, const Rect* background_area) {
+    if (!paint || !view || !view->bound) return false;
+    BoundaryProp boundary = *view->boundary();
+    BorderProp border = {};
+    if (boundary.border) { border = *boundary.border; boundary.border = lam::own(&border); }
+    if (render_paint_boundary_emit_box(paint, &boundary, rect)) return true;
+    ViewBlock box = *view;
+    box.bound = lam::view_prop(&boundary);
+    box.width = rect.width; box.height = rect.height;
+    if (boundary.border) {
+        resolve_border_radius_percentages(&border.radius, rect.width, rect.height);
+        constrain_corner_radii(&border.radius, rect.width, rect.height);
+    }
+    bool image = render_paint_boundary_layers(paint, ui, &box, rect, target, true, background_area);
+    if (!image && boundary.border) {
+        bool rounded = radiant_corner_has_radius(&border.radius);
+        if (!rounded || !render_paint_boundary_emit_solid_border(paint, &border, rect)) {
+            RdtPath* clip = rounded ? render_path_create_rounded_rect(rect, &border.radius) : nullptr;
+            if (clip) { paint_push_clip(paint, clip, nullptr); rdt_path_free(clip); }
+            for (size_t side = 0; side < 4; side++)
+                if (!render_paint_boundary_emit_border_side(paint, &border, rect, side)) return false;
+            if (clip) paint_pop_clip(paint);
+        }
+    }
+    const OutlineProp* outline = boundary.outline;
+    if (outline && outline->width > 0.0f && outline->color.a) {
+        BorderProp ring = {};
+        for (size_t side = 0; side < 4; side++) {
+            ring.width.values[side] = outline->width;
+            ring.styles[side] = outline->style; ring.colors[side] = outline->color;
+        }
+        float outset = outline->offset + outline->width;
+        Rect outer = {rect.x - outset, rect.y - outset, rect.width + 2.0f * outset, rect.height + 2.0f * outset};
+        for (size_t side = 0; side < 4; side++)
+            if (!render_paint_boundary_emit_border_side(paint, &ring, outer, side)) return false;
+    }
+    return true;
 }
 
 /**

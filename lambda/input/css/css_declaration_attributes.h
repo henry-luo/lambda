@@ -415,6 +415,9 @@
     X(color_interpolation_filters) \
     X(text_anchor) \
     X(_webkit_box_orient) \
+    X(page) \
+    X(string_set) \
+    X(footnote_policy) \
     X(css_float)
 
 #define CSS_STYLE_PROPERTIES_ATTRIBUTES(X) \
@@ -1189,6 +1192,11 @@
     X(_webkit_box_orient, "WebkitBoxOrient", "-webkit-box-orient") \
     X(_webkit_box_orient, "-webkit-box-orient", "-webkit-box-orient") \
     X(_webkit_box_orient, "webkitBoxOrient", "-webkit-box-orient") \
+    X(page, "page", "page") \
+    X(string_set, "stringSet", "string-set") \
+    X(string_set, "string-set", "string-set") \
+    X(footnote_policy, "footnotePolicy", "footnote-policy") \
+    X(footnote_policy, "footnote-policy", "footnote-policy") \
     X(css_float, "cssFloat", "float")
 
 #define CSS_FONT_FACE_DESCRIPTORS_FIELDS(X) \

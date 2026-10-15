@@ -387,28 +387,18 @@ static void svg_emit_border_side(SvgRenderContext* ctx, CssEnum style, Color c,
 static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
     if (!view->bound) return;
 
-    float x = ctx->block.x + view->x;
-    float y = ctx->block.y + view->y;
-    float width = view->width;
-    float height = view->height;
+    Rect grid = render_geometry_boundary_rect(view, render_geometry_block_border_rect(&ctx->block, view, 1.0f));
+    float x = grid.x, y = grid.y, width = grid.width, height = grid.height;
 
-    if (render_paint_boundary_emit_simple(svg_active_paint_list(ctx), view, x, y)) {
+    if (render_paint_boundary_emit_simple(svg_active_paint_list(ctx), view, grid)) {
         svg_lower_paint_list(ctx);
         return;
     }
 
-    if (ctx->effect_fallback.active && view->boundary_mut()->box_shadow) {
-        render_paint_boundary_emit_outer_shadows(svg_active_paint_list(ctx), view, x, y);
-    }
-
-    if (render_paint_background(svg_active_paint_list(ctx), ctx->ui_context, view,
-            {x, y, width, height}, RENDER_EXPORT_TARGET_SVG)) svg_lower_paint_list(ctx);
-
-    if (render_paint_border_image(svg_active_paint_list(ctx), ctx->ui_context,
-            view->boundary()->border, {x, y, width, height})) {
-        svg_lower_paint_list(ctx);
-        return;
-    }
+    bool image_border = render_paint_boundary_layers(svg_active_paint_list(ctx), ctx->ui_context,
+        view, {x, y, width, height}, RENDER_EXPORT_TARGET_SVG, ctx->effect_fallback.active);
+    svg_lower_paint_list(ctx);
+    if (image_border) return;
 
     // Render borders with style-aware per-side SVG polygons
     if (view->boundary()->border) {

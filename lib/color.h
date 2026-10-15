@@ -104,6 +104,43 @@ static inline void color_hwb_to_rgb(double h, double w, double black,
     }
 }
 
+// extended sRGB channels stay unclipped while converting/interpolating CSS colors.
+static inline double color_srgb_to_linear(double channel) {
+    double magnitude = fabs(channel);
+    return magnitude <= 0.04045 ? channel / 12.92
+        : copysign(pow((magnitude + 0.055) / 1.055, 2.4), channel);
+}
+
+static inline double color_linear_to_srgb(double channel) {
+    double magnitude = fabs(channel);
+    return magnitude <= 0.0031308 ? channel * 12.92
+        : copysign(1.055 * pow(magnitude, 1.0 / 2.4) - 0.055, channel);
+}
+
+// CSS Color 4 §19: Oklab's D65 LMS transform composed with linear sRGB.
+static inline void color_oklab_to_rgb(double lightness, double a, double b,
+                                      double* red, double* green, double* blue) {
+    double l = lightness + 0.3963377773761749 * a + 0.2158037573099136 * b;
+    double m = lightness - 0.1055613458156586 * a - 0.0638541728258133 * b;
+    double s = lightness - 0.0894841775298119 * a - 1.2914855480194092 * b;
+    l = l * l * l; m = m * m * m; s = s * s * s;
+    *red = color_linear_to_srgb(4.076741661347994 * l - 3.3077115913 * m + 0.230969929981 * s);
+    *green = color_linear_to_srgb(-1.2684380046 * l + 2.6097574007 * m - 0.3413193961 * s);
+    *blue = color_linear_to_srgb(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s);
+}
+
+static inline void color_rgb_to_oklab(double red, double green, double blue,
+                                      double* lightness, double* a, double* b) {
+    red = color_srgb_to_linear(red); green = color_srgb_to_linear(green);
+    blue = color_srgb_to_linear(blue);
+    double l = cbrt(0.4122214708 * red + 0.5363325363 * green + 0.0514459929 * blue);
+    double m = cbrt(0.2119034982 * red + 0.6806995451 * green + 0.1073969566 * blue);
+    double s = cbrt(0.0883024619 * red + 0.2817188376 * green + 0.6299787005 * blue);
+    *lightness = 0.2104542683093140 * l + 0.7936177747023054 * m - 0.0040720430116193 * s;
+    *a = 1.9779985324311684 * l - 2.4285922420485799 * m + 0.4505937096174110 * s;
+    *b = 0.0259040424655478 * l + 0.7827717124575296 * m - 0.8086757549230774 * s;
+}
+
 static inline void color_hsl_to_rgba(float h, float s, float l, float a,
                                       uint8_t* r, uint8_t* g, uint8_t* b, uint8_t* alpha) {
     double red, green, blue;

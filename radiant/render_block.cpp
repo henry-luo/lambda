@@ -2,6 +2,7 @@
 #include "render_css3d.hpp"
 #include "event.hpp"
 #include "layout.hpp"
+#include "layout_table.hpp"
 
 #include "../lib/tagged.hpp"
 #include "../lib/log.h"
@@ -10,6 +11,16 @@
 #include "../lambda/input/css/dom_element.hpp"
 
 #include <stdlib.h>
+
+// CSS 2.2 §17.4: captions extend the wrapper outside the painted table grid.
+Rect render_geometry_boundary_rect(const ViewBlock* view, Rect wrapper) {
+    if (!view || view->view_type != RDT_VIEW_TABLE) return wrapper;
+    RdtLogicalRect grid = layout_table_grid_rect(static_cast<const ViewTable*>(view));
+    float scale = view->width > 0.0f ? wrapper.width / view->width : 1.0f;
+    return {wrapper.x + grid.x * scale, wrapper.y + grid.y * scale,
+        grid.width * scale, grid.height * scale};
+}
+
 
 #define DEBUG_RENDER_BLOCK 0
 
@@ -197,9 +208,7 @@ void render_element_marker_end(RasterRenderContext* rdcon, RenderElementMarkerSc
 
 void render_bound(RasterRenderContext* rdcon, ViewBlock* view) {
     float s = rdcon->raster_scale;
-    Rect rect;
-    rect.x = rdcon->block.x + view->x * s;  rect.y = rdcon->block.y + view->y * s;
-    rect.width = view->width * s;  rect.height = view->height * s;
+    Rect rect = render_geometry_boundary_rect(view, render_geometry_block_border_rect(&rdcon->block, view, s));
     if (render_paint_boundary_emit_fragmented_simple(rdcon->paint_list, view, rect)) {
         paint_ir_lower_raster_fragment(rdcon->paint_list, rdcon->dl);
         return;
@@ -362,6 +371,7 @@ static bool render_block_skip_paint(RasterRenderContext* rdcon, ViewBlock* block
     if (!rdcon || !block) {
         return true;
     }
+    if (render_text_paint_atomic_hidden(rdcon, block)) return true;
     if (view_backface_is_hidden(block, BACKFACE_SUBTREE)) return true;
     if (render_block_clip_empty(&rdcon->block.clip)) {
         return true;

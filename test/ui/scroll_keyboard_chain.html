@@ -1,0 +1,17 @@
+<!doctype html><style>
+html,body{margin:0}.outer{position:absolute;top:40px;width:190px;height:120px;overflow:auto}
+#co{left:210px}#no{left:420px}.inner{width:150px;height:60px;overflow:auto}
+.content{width:300px;height:300px;background:linear-gradient(red,blue)}.tail{height:240px;width:320px}
+#contained{overscroll-behavior:contain}#none{overscroll-behavior:none}
+#eo{top:190px;left:10px;height:80px}#edit{width:140px;height:40px}
+</style><button id="end">Set boundary</button>
+<div class="outer" id="ao"><div class="inner" id="auto" tabindex="0"><div class="content"></div></div><div class="tail"></div></div>
+<div class="outer" id="co"><div class="inner" id="contained" tabindex="0"><div class="content"></div></div><div class="tail"></div></div>
+<div class="outer" id="no"><div class="inner" id="none" tabindex="0"><div class="content"></div></div><div class="tail"></div></div>
+<div class="outer" id="eo"><div class="inner" id="ei"><textarea id="edit">one
+two
+three</textarea></div><div class="tail"></div></div>
+<script>document.getElementById('end').onclick=function(){
+var ids=['auto','contained','none']; for(var i=0;i<ids.length;i++){
+var p=document.getElementById(ids[i]);p.scrollTop=240;p.scrollLeft=150;p.parentNode.scrollTop=0;p.parentNode.scrollLeft=0;}
+};</script>

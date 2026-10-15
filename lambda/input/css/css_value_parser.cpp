@@ -1,4 +1,5 @@
 #include "css_value_parser.hpp"
+#include "css_style_node.hpp"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -259,6 +260,7 @@ CssValue* css_value_create_color_hex(Pool* pool, const char* hex) {
 
 CssValue* css_value_create_computed_color(Pool* pool, const CssComputedColor* color) {
     if (!pool || !color) return nullptr;
+    if (color->unresolved) return css_value_clone_owned(color->unresolved, pool);
     if (color->type == CSS_COLOR_CURRENTCOLOR || color->type == CSS_COLOR_SYSTEM) {
         const CssEnumInfo* keyword = css_enum_info(color->keyword);
         return keyword ? css_value_create_keyword(pool, keyword->name) : nullptr;
@@ -275,13 +277,14 @@ CssValue* css_value_create_computed_color(Pool* pool, const CssComputedColor* co
     }
     bool rgb = color->type == CSS_COLOR_RGB;
     bool polar = color->type == CSS_COLOR_HSL || color->type == CSS_COLOR_HWB;
+    bool perceptual = color->type == CSS_COLOR_OKLAB || color->type == CSS_COLOR_OKLCH;
     bool predefined = color->type == CSS_COLOR_COLOR;
-    if (!rgb && !polar && !predefined) return nullptr;
+    if (!rgb && !polar && !perceptual && !predefined) return nullptr;
     // Canonical function trees retain floating channels and `none` under D4.5.1v4.
     CssValue** channels = (CssValue**)pool_alloc(pool, sizeof(CssValue*) * 6);
     CssValue** args = (CssValue**)pool_alloc(pool, sizeof(CssValue*) * 4);
     if (!channels || !args) return nullptr;
-    bool modern = color->missing || polar || predefined;
+    bool modern = color->missing || polar || perceptual || predefined;
     int offset = predefined ? 1 : 0;
     if (predefined) {
         channels[0] = css_value_create_keyword(pool, color->color_space);
@@ -302,7 +305,9 @@ CssValue* css_value_create_computed_color(Pool* pool, const CssComputedColor* co
         if (!channels[3 + offset] || !args[0]) return nullptr;
         count = 1;
     }
-    return css_value_create_function(pool, predefined ? "color" : rgb ? "rgba" : color->type == CSS_COLOR_HSL ? "hsl" : "hwb",
+    return css_value_create_function(pool, predefined ? "color" : rgb ? "rgba"
+        : color->type == CSS_COLOR_OKLAB ? "oklab" : color->type == CSS_COLOR_OKLCH ? "oklch"
+        : color->type == CSS_COLOR_HSL ? "hsl" : "hwb",
         args, count);
 }
 

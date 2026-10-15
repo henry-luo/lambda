@@ -29,14 +29,23 @@ static bool boundary_uniform_circular_radius(const BorderProp* border,
     return true;
 }
 
-static bool boundary_background_simple(const BackgroundProp* bg) {
+bool render_paint_background_is_simple(const BackgroundProp* bg) {
     if (!bg) return true;
     // other clip boxes need their shared background destination instead of a full border-box fill.
     if (bg->bg_clip && bg->bg_clip != CSS_VALUE_BORDER_BOX) return false;
     if (bg->image) return false;
     if (bg->gradient_type != GRADIENT_NONE) return false;
     if (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient) return false;
-    if (bg->layer_count > 0) return false;
+    if (bg->layer_count > 0) {
+        if (!bg->layers) return false;
+        const BackgroundLayer& bottom = bg->layers[bg->layer_count - 1];
+        if (bottom.bg_clip && bottom.bg_clip != CSS_VALUE_BORDER_BOX) return false;
+        for (int index = 0; index < bg->layer_count; index++) {
+            const BackgroundLayer& layer = bg->layers[index];
+            if (layer.image || layer.gradient_type != GRADIENT_NONE ||
+                layer.linear_gradient || layer.radial_gradient || layer.conic_gradient) return false;
+        }
+    }
     if (bg->blend_mode && bg->blend_mode != CSS_VALUE_NORMAL) return false;
     return true;
 }
@@ -135,10 +144,12 @@ static bool boundary_emit_styled_path(void* context, RdtPath* path, Color color,
     rdt_path_free(path); return false;
 }
 
-bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
-                                       float x, float y) {
+bool render_paint_boundary_emit_border_side(PaintList* paint, const BorderProp* border, Rect rect, size_t side) {
+    return render_border_emit_side(rect, border, side, false, boundary_emit_styled_path, paint);
+}
+
+bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view, Rect rect) {
     if (!paint_list || !view || !view->bound) return false;
-    Rect rect = {x, y, view->width, view->height};
     if (render_paint_boundary_emit_fragmented_simple(paint_list, view, rect)) return true;
     // continuous SVG/PDF retain their direct per-side painter beyond the uniform-color fast path.
     if (view->bound->border && !boundary_border_uniform_color(view->bound->border)) return false;
@@ -151,7 +162,7 @@ bool render_paint_boundary_emit_fragmented_simple(PaintList* paint_list, ViewBlo
     LayoutFragmentBox* first = view->layout_fragment_list();
     if (!first || !first->next) return false;
     const BoundaryProp* bound = view->boundary();
-    if (!boundary_background_simple(bound->background) ||
+    if (!render_paint_background_is_simple(bound->background) ||
         boundary_border_has_visible_side(bound->border) || boundary_has_radius(bound->border) ||
         bound->box_shadow || bound->outline ||
         (bound->border && (bound->border->border_image_url ||
@@ -184,7 +195,7 @@ bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* bound, 
         constrain_corner_radii(&bound->border->radius, width, height);
     }
     if (bound->box_shadow || bound->outline) return false;
-    if (!boundary_background_simple(bound->background)) return false;
+    if (!render_paint_background_is_simple(bound->background)) return false;
     float radius = 0.0f;
     if (!boundary_uniform_circular_radius(bound->border, width, height, &radius)) {
         return false;
@@ -242,7 +253,7 @@ bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* bound, 
         if (boundary_border_side_visible(widths[i], border->styles[i], border->colors[i])) {
             if (uniform_color && border->styles[i] == CSS_VALUE_SOLID) {
                 boundary_emit_border_side(paint_list, side_x[i], side_y[i], side_w[i], side_h[i], border->colors[i]);
-            } else if (!render_border_emit_side(rect, border, i, false, boundary_emit_styled_path, paint_list)) return false;
+            } else if (!render_paint_boundary_emit_border_side(paint_list, border, rect, i)) return false;
         }
     }
     return true;

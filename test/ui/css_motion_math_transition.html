@@ -1,0 +1,18 @@
+<!doctype html>
+<style>
+body { margin:0; background:white; }
+button { position:absolute; top:5px; width:70px; height:25px; }
+#start { left:5px; } #retarget { left:80px; } #remove { left:155px; }
+#box { position:absolute; left:10px; top:60px; width:40px; height:20px; background:red; opacity:0;
+ --time:500ms; transition:opacity calc(var(--time) * 4) linear(0,.25,1); }
+</style>
+<button id="start">start</button><button id="retarget">retarget</button><button id="remove">remove</button>
+<div id="box"></div>
+<script>
+var box=document.getElementById('box');
+document.getElementById('start').addEventListener('click',function(){box.style.opacity='1';});
+document.getElementById('retarget').addEventListener('click',function(){
+ box.style.setProperty('--time','250ms'); box.style.transitionTimingFunction='linear(0,.5 25% 75%,1)'; box.style.opacity='.5';
+});
+document.getElementById('remove').addEventListener('click',function(){box.remove();});
+</script>

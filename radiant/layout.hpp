@@ -4445,6 +4445,7 @@ void layout_place_bidi_static_inline(ViewBlock* block, float line_x, int level);
 int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir);
 int layout_find_last_strong_direction(DomNode* node, bool skip_explicit_dir);
 CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback);
+bool layout_text_run_has_uniform_rtl_order(const unsigned char* text, size_t length);
 CssEnum layout_resolve_line_base_direction(LayoutContext* lycon);
 void place_rtl_initial_letter_line(LayoutContext* lycon);
 void adjust_text_bounds(ViewText* text);
@@ -5147,6 +5148,8 @@ void recompute_span_bounding_box_after_line_layout(
 void layout_apply_simple_ruby_column_geometry(ViewSpan* ruby);
 bool ruby_has_text_box_trim_ancestor(const ViewSpan* ruby, uint8_t trim);
 bool inline_span_has_multiple_line_fragments(ViewSpan* span);
+typedef bool (*LayoutInlineFragmentFn)(void*, RdtLogicalRect, bool first, bool last, float offset, float extent);
+bool layout_inline_visit_fragments(ViewSpan* span, LayoutInlineFragmentFn visitor, void* context);
 bool layout_inline_span_has_in_flow_block_child(ViewSpan* span,
                                                 bool include_inline_table = false);
 bool layout_inline_child_is_block_split(DomNode* node);

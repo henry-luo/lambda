@@ -25,6 +25,7 @@
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_parser.hpp"
+#include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/runtime/template_registry.h"
 #include "../lambda/runtime/render_map.h"
 #include "../lambda/runtime/edit_bridge.h"
@@ -1179,6 +1180,7 @@ static bool event_block_is_top_level_viewport(ViewBlock* block) {
 
 void target_block_view(EventContext* evcon, ViewBlock* block) {
     if (dom_node_is_inert(block)) return;
+    if (render_text_overflow_atomic_hidden(evcon->ui_context, block)) return;
     log_enter();
     if (view_backface_is_hidden(block, BACKFACE_HIT_TEST)) {
         log_leave();
@@ -1617,11 +1619,11 @@ static void radiant_notify_scrolled_view(EventContext* evcon, ViewBlock* block,
 
 // The package selects `wheel`; this helper retains the live pane walk,
 // clamped mutation, scroll notification, and repaint mechanism.
-static bool apply_wheel_scroll_to_stack(EventContext* evcon, ArrayList* stack,
+static bool apply_scroll_delta_to_stack(EventContext* evcon, ArrayList* stack,
                                         float* remaining_x, float* remaining_y) {
     if (!evcon || !stack || !remaining_x || !remaining_y) return false;
     bool changed = false;
-    // The view stack is root-first; a wheel gesture starts at the nearest pane.
+    // the root-first stack is consumed from the nearest pane for wheel and keys.
     for (int i = stack->length - 1; i >= 0; i--) {
         if (*remaining_x == 0.0f && *remaining_y == 0.0f) break;
         View* view = static_cast<View*>(stack->data[i]);
@@ -1667,14 +1669,14 @@ static bool apply_wheel_scroll_operation(EventContext* evcon, View* target) {
     float remaining_x = -evcon->event.scroll.xoffset * RDT_WHEEL_PIXEL_STEP;
     float remaining_y = -evcon->event.scroll.yoffset * RDT_WHEEL_PIXEL_STEP;
     ArrayList* target_list = build_view_stack(evcon, target);
-    bool changed = apply_wheel_scroll_to_stack(evcon, target_list,
+    bool changed = apply_scroll_delta_to_stack(evcon, target_list,
                                                &remaining_x, &remaining_y);
     arraylist_free(target_list);
 
     // An embedded document's wheel chain continues at its iframe container.
     if (evcon->iframe_container) {
         ArrayList* parent_list = build_view_stack(evcon, evcon->iframe_container);
-        if (apply_wheel_scroll_to_stack(evcon, parent_list,
+        if (apply_scroll_delta_to_stack(evcon, parent_list,
                                         &remaining_x, &remaining_y)) changed = true;
         arraylist_free(parent_list);
     }
@@ -4769,6 +4771,24 @@ static bool apply_keyboard_scroll_operation(EventContext* evcon, View* origin,
         next_y = max_y;
     } else {
         return false;
+    }
+
+    bool document_boundary = strcmp(operation, "documentStart") == 0 ||
+        strcmp(operation, "documentEnd") == 0;
+    if (!document_boundary) {
+        float remaining_x = next_x - x, remaining_y = next_y - y;
+        ArrayList* stack = build_view_stack(evcon, origin);
+        bool changed = apply_scroll_delta_to_stack(evcon, stack,
+            &remaining_x, &remaining_y);
+        arraylist_free(stack);
+        if (evcon->iframe_container) {
+            stack = build_view_stack(evcon, evcon->iframe_container);
+            changed |= apply_scroll_delta_to_stack(evcon, stack,
+                &remaining_x, &remaining_y);
+            arraylist_free(stack);
+        }
+        if (changed) dom_observers_post_layout();
+        return changed;
     }
 
     scroll_state_set_position_for_view(state, static_cast<View*>(block),
@@ -8707,6 +8727,27 @@ static void dispatch_window_notification(UiContext* uicon, DomDocument* doc, con
     }
 }
 
+static void apply_document_condition_restyle(DomDocument* doc, DocState* state, uint32_t reason);
+
+bool radiant_set_input_capabilities(UiContext* uicon, const CssInputCapabilities* input) {
+    if (!uicon || !css_input_capabilities_valid(input) ||
+        css_input_capabilities_equal(&uicon->input_capabilities, input)) return false;
+    uicon->input_capabilities = *input;
+    DomDocument* doc = uicon->document;
+    CssEngine* engine = doc ? (CssEngine*)doc->services.cached_css_engine : nullptr;
+    if (!engine || !css_engine_set_input_capabilities(engine, input)) return true;
+    // publish query/style state before listener delivery, without inventing a viewport resize.
+    DocState* state = (DocState*)doc->state;
+    apply_document_condition_restyle(doc, state, CHANGE_MEDIA_ENVIRONMENT);
+    if (dom_document_has_js_realm(doc)) {
+        EventContext context = {};
+        context.ui_context = uicon; context.target_document = doc;
+        JsDispatchScope scope(&context);
+        if (scope.active) dom_match_media_notify_resize();
+    }
+    return true;
+}
+
 static Item window_subscriber_event(void* userdata) {
     Item original = *static_cast<Item*>(userdata);
     RootFrame roots(1);
@@ -9069,6 +9110,11 @@ struct NativePointerCapture : DomDocumentResourceData {
     NativePointerCapture* next;
     DomDocument* document;
     DomNodeRef current,pending;
+    DomNodeRef resize_target;
+    float resize_start_x, resize_start_y;
+    float resize_width, resize_height;
+    CssEnum resize_axes;
+    bool resize_active;
     int buttons;
     bool active;
 };
@@ -9092,6 +9138,74 @@ static View* native_pointer_capture_target(DomDocument* doc) {
     DomNode* target = dom_node_ref_validate(doc, capture->pending);
     if (!target) target = dom_node_ref_validate(doc, capture->current);
     return target && dom_is_connected(target) ? (View*)target : nullptr;
+}
+
+static DomElement* native_resize_target(NativePointerCapture* capture) {
+    if (!capture) return nullptr;
+    DomNode* node = dom_node_ref_validate(capture->document, capture->resize_target);
+    if (node && node->is_block() && dom_is_connected(node)) return node->as_element();
+    capture->resize_target = {};
+    return nullptr;
+}
+
+static bool native_resize_end(NativePointerCapture* capture) {
+    if (!capture || !capture->resize_active) return false;
+    capture->resize_active = false;
+    capture->resize_target = capture->pending = {};
+    return true;
+}
+
+static bool native_resize_begin(EventContext* evcon, View* target, float x, float y) {
+    for (DomNode* node = target; node; node = node->parent) {
+        ViewBlock* block = lam::view_as_block(static_cast<View*>(node));
+        Rect rect;
+        if (!block || !scroll_resize_handle_rect(block, &rect)) continue;
+        RdtLogicalPoint local = view_geometry_block_viewport_to_local(block, {x, y},
+            scroll_state_resolve_view_geometry, nullptr);
+        local.x -= block->x;
+        local.y -= block->y;
+        if (!view_geometry_rect_contains_point(rect, local)) continue;
+        NativePointerCapture* capture = native_pointer_capture(block->doc, true);
+        if (!capture) return false;
+        capture->resize_target = capture->pending = dom_node_ref(block);
+        capture->resize_active = true;
+        capture->resize_start_x = x; capture->resize_start_y = y;
+        bool border_box = block->block()->box_sizing == CSS_VALUE_BORDER_BOX;
+        capture->resize_width = border_box ? block->width
+            : layout_content_size_from_border_box(block, block->width, true);
+        capture->resize_height = border_box ? block->height
+            : layout_content_size_from_border_box(block, block->height, false);
+        capture->resize_axes = block->scroll()->resize;
+        return true;
+    }
+    return false;
+}
+
+static bool native_resize_move(EventContext* evcon, float x, float y) {
+    NativePointerCapture* capture = native_pointer_capture(event_context_target_document(evcon), false);
+    if (!capture || !capture->resize_active) return false;
+    DomElement* target = native_resize_target(capture);
+    // a retired owner consumes the rest of this press without dereferencing it.
+    if (!target) return true;
+    Rect handle;
+    if (!scroll_resize_handle_rect(lam::view_require_block(target), &handle)) {
+        capture->resize_target = capture->pending = {};
+        return true;
+    }
+    const char* properties[] = {"width", "height"};
+    float sizes[] = {max(0.0f, capture->resize_width + x - capture->resize_start_x),
+                     max(0.0f, capture->resize_height + y - capture->resize_start_y)};
+    uint64_t started = time_now_ns();
+    for (int axis = 0; axis < 2; axis++) {
+        if (capture->resize_axes == (axis ? CSS_VALUE_HORIZONTAL : CSS_VALUE_VERTICAL)) continue;
+        char value[64];
+        snprintf(value, sizeof(value), "%.6gpx", sizes[axis]);
+        dom_cssom_set_inline_property(target, properties[axis], value);
+    }
+    // inline writes use normal cascade, min/max sizing and mutation reconciliation.
+    post_html_handler_rebuild(evcon, started, time_now_ns());
+    evcon->need_repaint = true;
+    return true;
 }
 void radiant_pointer_capture_follow_rebuild(DomDocument* doc, DomNode* old_root,
                                             DomNode* new_root) {
@@ -9149,7 +9263,10 @@ static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
     bool prevented=radiant_dispatch_built_event(evcon,target,build_pointer_event_item,&args,true,dispatched,true,type);
     if(capture&&(!strcmp(type,"pointerup")||!strcmp(type,"pointercancel"))) {
         capture->pending={};native_pointer_process_capture(evcon,capture,&args);
-        if(!strcmp(type,"pointercancel")) capture->active=false;
+        if(!strcmp(type,"pointercancel")) {
+            capture->active=false;
+            native_resize_end(capture);
+        }
     }
     return prevented;
 }
@@ -10239,24 +10356,25 @@ static void refresh_hover_color_background_paths(DocState* state,
     refresh_hover_color_background_path(state, doc, &lycon, new_target);
 }
 
-static void apply_pseudo_state_restyle(DomDocument* doc, DocState* state) {
-    if (!doc || !state || !doc->root) return;
+static void apply_document_condition_restyle(DomDocument* doc, DocState* state, uint32_t reason) {
+    if (!doc || !doc->root) return;
 
     radiant_recascade_document(doc);
 
-    // Selector combinators can make a pseudo-state change affect siblings
-    // and ancestors, so a subtree-only request leaves `:checked + label`
-    // with stale computed style after a JS IDL write.
-    // The mutation reconciler may run an incremental layout before the
-    // queued reflow. Marking the retained tree prevents its clean subtree
-    // fast path from reusing styles resolved before this state transition.
+    // conditional selectors/rules affect the whole tree; retained clean subtrees
+    // must not reuse styles from before a pseudo-state or environment change.
     view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
                                 mark_layout_dirty_visitor, nullptr);
-    reflow_schedule(state, doc->root, REFLOW_SUBTREE, CHANGE_PSEUDO_STATE);
+    if (!state) return;
+    reflow_schedule(state, doc->root, REFLOW_SUBTREE, reason);
 
     // Always mark for repaint.
     dirty_mark_element(state, doc->root);
     doc_state_mark_dirty(state);
+}
+
+static void apply_pseudo_state_restyle(DomDocument* doc, DocState* state) {
+    if (state) apply_document_condition_restyle(doc, state, CHANGE_PSEUDO_STATE);
 }
 
 static void pseudo_state_batch_begin(DocState* state) {
@@ -13409,6 +13527,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             log_debug("No target view found at position (%.1f, %.1f)", mouse_x, mouse_y);
         }
 
+        if (native_resize_move(&evcon, mouse_x, mouse_y)) break;
+
         // fire drag event if dragging in progress
         DocState* state = event_context_target_state(&evcon);
 
@@ -13939,6 +14059,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (prevented) evcon.default_prevented = true;
             }
 
+            if (!evcon.default_prevented && btn_event->button == GLFW_MOUSE_BUTTON_LEFT &&
+                native_resize_begin(&evcon, evcon.target, mouse_x, mouse_y)) break;
+
             // A scrollbar hit has its own package-selected default. It never
             // enters mousepress: clicking browser chrome must not clear focus
             // or begin a document selection behind the scrollbar.
@@ -14422,6 +14545,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     &evcon, evcon.target, "mouseup", btn_event->x,
                     btn_event->y, btn_event, 1 << btn_event->button, 1);
                 if (up_prevented) evcon.default_prevented = true;
+            }
+
+            NativePointerCapture* resize_capture = native_pointer_capture(doc, false);
+            if (native_resize_end(resize_capture)) {
+                update_active_state(&evcon, evcon.target, false);
+                evcon.need_repaint = true;
+                break;
             }
 
             // Stage 4C: JS drop + dragend for script editors, gated on the
@@ -14919,6 +15049,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         KeyEvent* key_event = &event->key;
         DocState* state = event_context_target_state(&evcon);
         if (!state) break;
+
+        if (key_event->key == RDT_KEY_ESCAPE) {
+            NativePointerCapture* capture = native_pointer_capture(doc, false);
+            if (native_resize_end(capture)) {
+                evcon.need_repaint = true;
+                break;
+            }
+        }
 
         // ES34: Esc remains modal-overlay precedence, but the package now
         // owns the teardown rather than native event code.

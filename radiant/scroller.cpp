@@ -182,6 +182,18 @@ void setup_scroller(RasterRenderContext* rdcon, ViewBlock* block) {
     }
 }
 
+bool scroll_resize_handle_rect(ViewBlock* block, Rect* rect) {
+    if (!block || !rect || block->scroll()->resize == CSS_VALUE_NONE ||
+        (!scroll_axis_accepts_wheel(block->scroll()->overflow_x) &&
+         !scroll_axis_accepts_wheel(block->scroll()->overflow_y))) return false;
+    const BorderProp* border = block->boundary()->border;
+    float right = block->width - (border ? border->width.right : 0.0f);
+    float bottom = block->height - (border ? border->width.bottom : 0.0f);
+    float size = min(sc.SCROLLBAR_SIZE, min(right, bottom));
+    *rect = {right - size, bottom - size, size, size};
+    return size > 0.0f;
+}
+
 void render_scroller(RasterRenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block) {
     log_debug("render scrollbars");
     // need to reset block.x and y, which was changed by the scroller
@@ -222,6 +234,18 @@ void render_scroller(RasterRenderContext* rdcon, ViewBlock* block, BlockBlot* pa
                 show_hz_scroll, show_vt_scroll);
         } else {
             log_error("scroller has no scroll pane");
+        }
+    }
+    Rect handle;
+    if (scroll_resize_handle_rect(block, &handle)) {
+        // the native grip shares its local rectangle with pointer hit testing.
+        float x = rdcon->block.x + handle.x * s, y = rdcon->block.y + handle.y * s;
+        rc_fill_rect(rdcon, x, y, handle.width * s, handle.height * s, {0xfff6f6f6});
+        for (float inset = 3.0f; inset < handle.width - 1.0f; inset += 3.0f) {
+            rc_fill_rect(rdcon, x + (handle.width - inset) * s,
+                y + (handle.height - 3.0f) * s, 1.0f * s, 1.0f * s, {0xff666666});
+            rc_fill_rect(rdcon, x + (handle.width - 3.0f) * s,
+                y + (handle.height - inset) * s, 1.0f * s, 1.0f * s, {0xff666666});
         }
     }
 }
@@ -305,6 +329,10 @@ struct ScrollSnapSearch {
     float previous_x, following_x, previous_y, following_y;
     bool oversized_x, oversized_y;
     bool use_x, use_y, found_x, found_y;
+    DomElement* best_target_x;
+    DomElement* best_target_y;
+    DomElement* retained_target;
+    bool retained_found;
 };
 
 static bool scroll_snap_axis_enabled(ScrollSnapAxis axis, bool horizontal,
@@ -384,10 +412,13 @@ static void scroll_snap_consider_axis(ScrollSnapSearch* search,
     float distance = fabsf(position - (horizontal
         ? search->desired_x : search->desired_y));
     float* best_distance = horizontal ? &search->distance_x : &search->distance_y;
-    if (distance < *best_distance) {
+    bool retained = target == search->retained_target;
+    if (retained || (!search->retained_found && distance < *best_distance)) {
         *best_distance = distance;
         *(horizontal ? &search->best_x : &search->best_y) = position;
         *(horizontal ? &search->found_x : &search->found_y) = true;
+        *(horizontal ? &search->best_target_x : &search->best_target_y) = target;
+        search->retained_found |= retained;
     }
 }
 
@@ -409,7 +440,7 @@ static void scroll_snap_consider_pair(ScrollSnapSearch* search,
 }
 
 void scroll_snap_adjust_position(ViewBlock* block, float* x, float* y,
-                                 bool explicit_target) {
+                                 bool explicit_target, bool preserve_target) {
     if (!block || !block->scroller || !block->scroll()->pane || !x || !y) return;
     bool inline_vertical = layout_element_inline_axis_is_vertical(block);
     ScrollSnapAxis axis = block->scroll()->snap_axis;
@@ -417,7 +448,20 @@ void scroll_snap_adjust_position(ViewBlock* block, float* x, float* y,
     search.container = block;
     search.use_x = scroll_snap_axis_enabled(axis, true, inline_vertical);
     search.use_y = scroll_snap_axis_enabled(axis, false, inline_vertical);
+    DocState* state = block->doc ? block->doc->state : nullptr;
+    bool retain_one_axis = !inline_vertical && block->scroll()->snap_mandatory &&
+        search.use_x != search.use_y;
+    if (!retain_one_axis) {
+        scroll_state_set_snap_target_for_view(state, block, block->scroll()->pane, {});
+        if (preserve_target) return;
+    }
     if (!search.use_x && !search.use_y) return;
+    if (preserve_target) {
+        DomNodeRef retained = scroll_state_get_snap_target_for_view(state, block);
+        if (!retained.address) return;
+        DomNode* target = dom_node_ref_validate(block->doc, retained);
+        if (target && target->is_element()) search.retained_target = target->as_element();
+    }
     search.desired_x = *x;
     search.desired_y = *y;
     search.distance_x = search.distance_y = search.distance_pair = INFINITY;
@@ -443,7 +487,6 @@ void scroll_snap_adjust_position(ViewBlock* block, float* x, float* y,
         search.padding_used[side] = layout_scroll_spacing_used(
             &length_context, block, block->scroll()->scroll_padding[side], base);
     }
-    DocState* state = block->doc ? block->doc->state : nullptr;
     scroll_state_get_range_for_view(state, static_cast<View*>(block),
         block->scroll()->pane, &search.min_x, &search.max_x,
         &search.min_y, &search.max_y);
@@ -501,16 +544,43 @@ void scroll_snap_adjust_position(ViewBlock* block, float* x, float* y,
     float snapport_height = max(0.0f, search.port_height -
         search.padding_used[CSS_BOX_SIDE_TOP] -
         search.padding_used[CSS_BOX_SIDE_BOTTOM]);
-    if (!explicit_target && search.oversized_x &&
+    if (!explicit_target && !search.retained_found && search.oversized_x &&
         search.following_x - search.previous_x > snapport_width)
         search.found_x = false;
-    if (!explicit_target && search.oversized_y &&
+    if (!explicit_target && !search.retained_found && search.oversized_y &&
         search.following_y - search.previous_y > snapport_height)
         search.found_y = false;
     if (search.found_x && (block->scroll()->snap_mandatory ||
         search.distance_x <= proximity_x)) *x = search.best_x;
     if (search.found_y && (block->scroll()->snap_mandatory ||
         search.distance_y <= proximity_y)) *y = search.best_y;
+    if (retain_one_axis) {
+        DomElement* selected = search.use_x
+            ? (search.found_x ? search.best_target_x : nullptr)
+            : (search.found_y ? search.best_target_y : nullptr);
+        scroll_state_set_snap_target_for_view(state, block, block->scroll()->pane,
+            dom_node_ref(selected));
+    }
+}
+
+bool scroll_resnap_after_layout(View* view, void*) {
+    ViewBlock* block = lam::view_as_block(view);
+    if (!block || !block->scroller || !block->scroll()->pane) return true;
+    DomDocument* doc = block->doc;
+    DocState* state = doc ? doc->state : nullptr;
+    if (!scroll_state_get_snap_target_for_view(state, view).address) return true;
+    float old_x = 0.0f, old_y = 0.0f;
+    scroll_state_get_position_for_view(state, view, block->scroll()->pane,
+        &old_x, &old_y, nullptr, nullptr);
+    float x = old_x, y = old_y;
+    scroll_snap_adjust_position(block, &x, &y, false, true);
+    if (x != old_x || y != old_y) {
+        bool viewport = doc->view_tree && view == doc->view_tree->root;
+        scroll_state_set_position_for_view(state, view, block->scroll()->pane, x, y, viewport);
+        if (viewport) doc_state_sync_viewport_scroll(state, doc, x, y);
+        dom_notify_scroll_position_change(view, old_x, old_y);
+    }
+    return true;
 }
 
 bool scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp,

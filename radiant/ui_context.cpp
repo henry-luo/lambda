@@ -233,6 +233,8 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
     click_count = 1;
     active_click_count = 1;
     headless = next_headless;
+    // the desktop GLFW frontend provides mouse motion/hover; headless hosts publish explicit test values.
+    if (!next_headless) input_capabilities = {CSS_POINTER_FINE, CSS_POINTER_FINE, true, true, true};
     // inital window width and height - match browser test viewport
     int window_width = 1200, window_height = 800;
 

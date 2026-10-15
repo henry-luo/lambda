@@ -1,0 +1,30 @@
+<!doctype html><meta charset=utf-8><style>
+@font-face{font-family:FixtureMono;src:url(../layout/data/font/LiberationMono-Regular.ttf)}
+html,body{margin:0;background:white}button{position:absolute;top:0;width:90px;height:24px}
+#small{left:90px}#restore{left:180px}#count{left:270px}
+.single{position:absolute;left:10px;width:62px;height:24px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font:20px/24px FixtureMono}
+#atoms{top:40px}#image{top:80px}#wide{top:120px}#fits{top:160px}
+i{display:inline-block;height:20px;background:red;vertical-align:top}img{vertical-align:top}
+#host{position:absolute;left:150px;top:60px;font:20px/24px FixtureMono;direction:rtl}
+.clamp{width:62px;overflow:hidden;word-break:break-all;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+</style><button id="width">Widen</button><button id="small">Small font</button><button id="restore">Restore</button><button id="count">Four lines</button>
+<div id="atoms" class="single">AB<i id="endatom" style="width:40px"></i>CD</div>
+<div id="image" class="single">ABCD<img id="endimage" width="20" height="20" src="css_text_overflow_atoms_rtl.svg"></div>
+<div id="wide" class="single"><i id="wideatom" style="width:90px"></i>AB</div>
+<div id="fits" class="single"><i id="fitatom" style="width:20px"></i>AB</div>
+<div id="host"><div id="rtl" class="clamp">ABCDEFGHIJKLMNOP</div><div id="rtlfit" class="clamp">ABCD</div><div id="hebrew" class="clamp">אבגדהוזחטיכלמנסע</div><div id="hebrewfit" class="clamp">אבגד</div></div>
+<script>
+var paragraph=document.getElementById('rtl'),host=document.getElementById('host');
+document.getElementById('width').onclick=function(){
+ var boxes=document.querySelectorAll('.single');for(var i=0;i<boxes.length;i++)boxes[i].style.width='130px';
+ paragraph.style.width='200px';
+};
+document.getElementById('small').onclick=function(){
+ var boxes=document.querySelectorAll('.single');for(var i=0;i<boxes.length;i++)boxes[i].style.width='62px';
+ paragraph.style.width='62px';host.style.fontSize='10px';host.style.direction='ltr';
+};
+document.getElementById('restore').onclick=function(){
+ host.style.fontSize='20px';host.style.direction='rtl';paragraph.style.webkitLineClamp='2';
+};
+document.getElementById('count').onclick=function(){paragraph.style.webkitLineClamp='4';};
+</script>

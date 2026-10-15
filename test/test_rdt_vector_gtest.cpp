@@ -470,6 +470,55 @@ TEST(TextOverflowPaint, ScopedProjectionPreservesSourceAndRestoresNestedState) {
             EXPECT_EQ(source.next, nullptr);
         }
     }
+    DomElement atom = {};
+    atom.node_type = DOM_NODE_ELEMENT; atom.set_synthetic(true);
+    atom.view_type = RDT_VIEW_INLINE_BLOCK;
+    atom.display = {CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW_ROOT};
+    atom.parent = lam::up(&owner); atom.x = advance * 4; atom.width = 20; atom.height = 20;
+    text.next_sibling = lam::own<DomNode>(&atom);
+    properties.direction = CSS_VALUE_LTR; properties.white_space = CSS_VALUE_NOWRAP;
+    text.text = lam::up("ABCD"); text.length = 4;
+    source.x = 0; source.length = 4; source.width = advance * 4;
+    for (float width : {62.0f, 100.0f}) {
+        owner.width = width;
+        RenderTextPaintScope paint(&context, lam::view_as_block(&owner), &box, &context.color);
+        EXPECT_EQ(render_text_paint_atomic_hidden(&context, &atom), width == 62.0f);
+        RenderTextPaintIterator iterator(&context, lam::view_require_text(&text));
+        TextRect* projected = iterator.next();
+        ASSERT_NE(projected, nullptr);
+        EXPECT_EQ(projected->length, 4);
+        EXPECT_EQ(projected->has_trailing_ellipsis, width == 62.0f);
+        EXPECT_EQ(source.length, 4);
+        EXPECT_FALSE(source.has_trailing_ellipsis);
+        EXPECT_FLOAT_EQ(atom.x, advance * 4); EXPECT_FLOAT_EQ(atom.width, 20);
+    }
+    text.next_sibling = nullptr; atom.parent = nullptr;
+    properties.direction = CSS_VALUE_RTL;
+    text.text = lam::up("אבגדהו"); text.length = strlen(text.text);
+    source.length = (int)text.length; // INT_CAST_OK: bounded fixture UTF-8 byte count
+    source.width = advance * 6;
+    owner.width = advance * 4.25f + font_measure_char(handle, 0x2026);
+    source.x = owner.width - source.width;
+    ASSERT_TRUE(layout_inherited_direction_is_rtl(&text));
+    ASSERT_TRUE(layout_text_run_has_uniform_rtl_order(text.text_data(), text.length));
+    {
+        RenderTextPaintScope paint(&context, lam::view_as_block(&owner), &box, &context.color);
+        RenderTextPaintIterator iterator(&context, lam::view_require_text(&text));
+        int glyphs = 0, markers = 0;
+        while (TextRect* projected = iterator.next()) {
+            if (projected->has_trailing_ellipsis) {
+                EXPECT_EQ(projected->length, 0); markers++;
+            } else {
+                EXPECT_EQ(projected->start_index, glyphs * 2);
+                EXPECT_EQ(projected->length, 2);
+                EXPECT_NEAR(projected->x, owner.width - advance * (float)(glyphs + 1), 0.01f);
+                glyphs++;
+            }
+        }
+        EXPECT_EQ(glyphs, 4); EXPECT_EQ(markers, 1);
+        EXPECT_EQ(source.start_index, 0); EXPECT_EQ(source.length, 12);
+        EXPECT_FALSE(source.has_trailing_ellipsis);
+    }
     text.rect = nullptr; owner.first_child = nullptr; text.parent = nullptr;
     owner.blk = nullptr; owner.scroller = nullptr;
     font_handle_release(handle); font_context_destroy(fonts);

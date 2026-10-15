@@ -178,6 +178,8 @@ bool style_tree_remove_presentation_declarations(StyleTree* style_tree, CssPrope
 // declarations sharing a computed component compete in one rollback-aware cascade.
 CssDeclaration* style_tree_get_component_declaration(StyleTree* style_tree,
     const CssPropertyCode* sources, size_t source_count);
+// include every shorthand and alias that can supply this property's component.
+CssDeclaration* style_tree_get_property_declaration(StyleTree* style_tree, CssPropertyCode property);
 
 /**
  * Get the computed value for a property

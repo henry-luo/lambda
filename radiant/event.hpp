@@ -65,6 +65,7 @@ void radiant_drain_async_document_loads(UiContext* uicon);
 bool radiant_urls_match_without_fragment(const Url* first, const Url* second);
 
 void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type);
+bool radiant_set_input_capabilities(UiContext* uicon, const CssInputCapabilities* input);
 void radiant_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc);
 void* radiant_document_element_from_point(DomDocument* doc, float x, float y);
 void* radiant_subtree_element_from_point(DomElement* root, float x, float y);
@@ -2232,10 +2233,13 @@ void scrollpane_render(RasterRenderContext* rdcon, ScrollPane* sp, Rect* block_b
 
 void setup_scroller(RasterRenderContext* rdcon, ViewBlock* block);
 void render_scroller(RasterRenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block);
+bool scroll_resize_handle_rect(ViewBlock* block, Rect* rect);
 void update_scroller(ViewBlock* block, float content_width, float content_height);
 void scroll_apply_pending_element_scroll(ViewBlock* block);
 void scroll_snap_adjust_position(ViewBlock* block, float* x, float* y,
-                                 bool explicit_target = false);
+                                 bool explicit_target = false,
+                                 bool preserve_target = false);
+bool scroll_resnap_after_layout(View* view, void* context);
 bool scroll_smooth_tick_document(DomDocument* document, double now);
 
 inline bool scroll_axis_accepts_wheel(CssEnum overflow) {
@@ -2447,6 +2451,7 @@ typedef struct ViewState {
             double smooth_start_time;
             uint8_t smooth_active : 1;
             uint8_t smooth_started : 1;
+            DomNodeRef snap_target; // weak identity; validate against the committed tree
         } scroll;
         struct {
             uint8_t disabled : 1;
@@ -3501,6 +3506,9 @@ void scroll_state_set_position_for_view(DocState* state, View* view, void* pane,
 void scroll_state_get_position_for_view(DocState* state, View* view, void* pane,
                                         float* out_h_pos, float* out_v_pos,
                                         float* out_h_max, float* out_v_max);
+DomNodeRef scroll_state_get_snap_target_for_view(DocState* state, View* view);
+void scroll_state_set_snap_target_for_view(DocState* state, View* view,
+                                           void* pane, DomNodeRef target);
 void scroll_state_resolve_view_geometry(ViewBlock* block,
                                         float* out_x, float* out_y,
                                         void* context);
@@ -3912,6 +3920,7 @@ void visited_links_add(VisitedLinks* visited, const char* url);
 #define CHANGE_COLOR          (1 << 10)
 #define CHANGE_BACKGROUND     (1 << 11)
 #define CHANGE_PSEUDO_STATE   (1 << 12)
+#define CHANGE_MEDIA_ENVIRONMENT (1 << 13)
 
 
 // ===== state machine =====

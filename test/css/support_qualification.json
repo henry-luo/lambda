@@ -213,7 +213,7 @@
         "-webkit-box-orient"
       ],
       "qualification": "partial",
-      "scope": "horizontal LTR text paint preserves source rectangles; shared fitting across inline runs, block-styled markers, combining clusters, first-cluster clipping, full case expansion, fitting content and one/two-line clamps; computed reads and live inherited font/color changes, disabling and stylesheet restoration; 14 independent pixel references in Chromium and PNG/SVG/PDF at 1x/2x, including mixed-font opacity/filter fallback; scoped scratch and captured glyph-run font selection survive repeated painting and command-buffer growth; positive-integer clamp grammar rejects decimal/exponent/dimension tokens before cascade, shares typed integer rounding and owner-font computation, copies computed inheritance, defaults invalid substitution and CSS-wide resets, and keeps ancestor counters within their formatting context; 320 live assertions and 16 further independent PNG/SVG/PDF count references at 1x/2x; legacy clamp applies only to a vertical legacy box, with canonical orientation/display computation, explicit inheritance/defaulting and live display/orientation/count changes; unclamped legacy boxes use their orientation without overwriting computed flex-direction; break-all min-content reaches blockified flex/grid spans while unwrapped max-content retains whole-run shaping, and flex-item clamp setup/finalization and overflow refresh share the block-flow contract; 380 live checks and 22 independent visible references at both output scales; horizontal RTL overflow projects retained suffix offsets and marker positions, preserves source capitalization boundaries and supports causal inherited direction/font/color changes, disabling and restoration; 114 live checks include 98 Chromium attributes and 16 paint checks, with 14 additional Chromium and PNG/SVG/PDF visible references at 1x/2x; native SVG plain text shares selected-font outlines with PDF to prevent receiving-viewer font substitution; modern/legacy calculated clamp counts preserve pseudo font bases through dimensional cancellation, integer rounding and explicit inheritance; dirty pseudo custom-property/font changes reach companion geometry and paint, with bounded repeated-read source ownership",
+      "scope": "horizontal LTR text paint preserves source rectangles; shared fitting across inline runs, block-styled markers, combining clusters, first-cluster clipping, full case expansion, fitting content and one/two-line clamps; computed reads and live inherited font/color changes, disabling and stylesheet restoration; 14 independent pixel references in Chromium and PNG/SVG/PDF at 1x/2x, including mixed-font opacity/filter fallback; scoped scratch and captured glyph-run font selection survive repeated painting and command-buffer growth; positive-integer clamp grammar rejects decimal/exponent/dimension tokens before cascade, shares typed integer rounding and owner-font computation, copies computed inheritance, defaults invalid substitution and CSS-wide resets, and keeps ancestor counters within their formatting context; 320 live assertions and 16 further independent PNG/SVG/PDF count references at 1x/2x; legacy clamp applies only to a vertical legacy box, with canonical orientation/display computation, explicit inheritance/defaulting and live display/orientation/count changes; unclamped legacy boxes use their orientation without overwriting computed flex-direction; break-all min-content reaches blockified flex/grid spans while unwrapped max-content retains whole-run shaping, and flex-item clamp setup/finalization and overflow refresh share the block-flow contract; 380 live checks and 22 independent visible references at both output scales; horizontal RTL overflow projects retained suffix offsets and marker positions, preserves source capitalization boundaries and supports causal inherited direction/font/color changes, disabling and restoration; 114 live checks include 98 Chromium attributes and 16 paint checks, with 14 additional Chromium and PNG/SVG/PDF visible references at 1x/2x; native SVG plain text shares selected-font outlines with PDF to prevent receiving-viewer font substitution; modern/legacy calculated clamp counts preserve pseudo font bases through dimensional cancellation, integer rounding and explicit inheritance; dirty pseudo custom-property/font changes reach companion geometry and paint, with bounded repeated-read source ownership; horizontal LTR nowrap atomic inline-block/image contributions share ellipsis visibility in raster/vector paint and hit tests without changing source geometry; first-wide-atom clipping and fitting controls; width changes restore hidden atoms; two-line Latin and uniform strong RTL letters/spaces (Hebrew reference) preserve logical source ranges while projecting visible clusters; inherited font/direction, width and count mutations; 33 AST/MIR causal assertions, native projection/teardown checks and independent literal references",
       "evidence": [
         "test/ui/css_text_overflow_paint.json",
         "test/test_rdt_vector_gtest.cpp#ScopedProjectionPreservesSourceAndRestoresNestedState",
@@ -234,9 +234,12 @@
         "test/test_pdf_render_visual_gtest.cpp#RtlOverflowMatchesVisibleSuffixesAcrossOutputs",
         "test/test_pdf_render_visual_gtest.cpp#OutlinedHtmlTextRetainsAccessibleNamesWithoutViewerFonts",
         "test/ui/css_pseudo_calculated_counts.json",
-        "test/test_css_animation_gtest.cpp#PseudoCalculatedCountsUseTheirDeclarationFonts"
+        "test/test_css_animation_gtest.cpp#PseudoCalculatedCountsUseTheirDeclarationFonts",
+        "test/ui/css_text_overflow_atoms_rtl.json",
+        "test/test_pdf_render_visual_gtest.cpp#AtomicInlineEllipsisMatchesExplicitContributionsAcrossOutputs",
+        "test/test_pdf_render_visual_gtest.cpp#RtlTwoLineClampMatchesExplicitVisualLinesAcrossOutputs"
       ],
-      "limits": "mixed-bidi/vertical and RTL clamp, atomic inlines, scrolling and transformed/decorated inline contexts remain unqualified; full grapheme/shaping, modern clamp shorthand/longhands, broader legacy flex mappings and writing-mode applicability, alias component cascade and broader owner-unit/pseudo contexts remain open; the bounded horizontal cases do not complete P1.3 or P2.1"
+      "limits": "mixed-bidi/vertical clamp, forced-break/RTL atomic lines, pure-atom lines without a text host, numeric/punctuated RTL run combinations, scrolling and transformed/decorated inline contexts remain unqualified; contextual shaping and the broader grapheme/font tail, modern clamp shorthand/longhands, legacy mappings and exhaustive owner/pseudo contexts remain open; strict Hebrew SVG/PDF raster comparisons retain 1\u20132-level glyph AA fringe differences while native raster matches, recorded in Radiant_CSS_Qualification.md"
     },
     {
       "properties": [
@@ -282,7 +285,7 @@
         "background-color"
       ],
       "qualification": "partial",
-      "scope": "single image-set URL/string selection uses the selected view device scale, supported MIME filtering before equal-density source order, shared responsive-image density preference, default/dpi/dpcm/dppx/x and typed math descriptors; invalid descriptors reject before cascade; raster natural sizes divide by selected density; source changes revalidate admission before warm reuse; inherited background gradients and stop/layer arrays retain independent ownership; 44 causal live assertions, 20 selected-image references at two device scales through PNG/SVG/PDF, and logical glyph bitmap/advance conversion in vector effects; background-specific ordered URL/selected-image/linear/radial/conic/none layers, independent component periods and computed inheritance, owner-unit position/size/radius/center/stop math, shared used-line color-stop fixup, full component getter strings, typed shorthand/longhand rejection and computed fallback, native clone/retirement and stable-pool controls, sharp tile/overflow intersections and causal font/box/scroll/DPR mutations through actual PNG/SVG/PDF paint (CI-18 / D4.5.1v4 / D4.1.4v5); single linear-gradient text uses per-pixel glyph coverage and the owner positioning box while retaining foreground paint; selected-font SVG/PDF contours handle opaque constant intervals in canonical owner order, exact cardinal axes, repeats and two-glyph runs; 42 exact output comparisons at 1x/2x and 40 causal live size/direction/indent/clip/foreground/content assertions qualify the bounded consumer (CI-18 / D4.5.1v4); text-clipped color and linear layers share authored tile size/position/repetition/no-repeat and apply coverage before layer composition; native CPU blits preserve foreground source-over and captured clips, immutable publications retain deferred replay; 84 exact PNG/SVG/PDF references at 1x/2x, 24 further tile/color/rounded-ancestor live assertions, 32 replays after cache/style mutation and all coverage-byte source-over pairs qualify this increment (CI-18 / D4.5.1v4); affine linear native fills sample shared premultiplied colors at pixel centers with bounded path/clip coverage, fractional tile origins, logarithmic stop lookup and scanline reuse; range aliases and 1024-stop hard boundaries have native/scoped sanitizer controls; eight marker/border range byte discrepancies are fixed in PNG/PDF controls; pseudo currentColor computed reads retain the receiving pseudo through initial/explicit/inherited values and dirty callbacks, reaching companion background/border paint in PNG/SVG/PDF at 1x/2x",
+      "scope": "single image-set URL/string selection uses the selected view device scale, supported MIME filtering before equal-density source order, shared responsive-image density preference, default/dpi/dpcm/dppx/x and typed math descriptors; invalid descriptors reject before cascade; raster natural sizes divide by selected density; source changes revalidate admission before warm reuse; inherited background gradients and stop/layer arrays retain independent ownership; 44 causal live assertions, 20 selected-image references at two device scales through PNG/SVG/PDF, and logical glyph bitmap/advance conversion in vector effects; background-specific ordered URL/selected-image/linear/radial/conic/none layers, independent component periods and computed inheritance, owner-unit position/size/radius/center/stop math, shared used-line color-stop fixup, full component getter strings, typed shorthand/longhand rejection and computed fallback, native clone/retirement and stable-pool controls, sharp tile/overflow intersections and causal font/box/scroll/DPR mutations through actual PNG/SVG/PDF paint (CI-18 / D4.5.1v4 / D4.1.4v5); single linear-gradient text uses per-pixel glyph coverage and the owner positioning box while retaining foreground paint; selected-font SVG/PDF contours handle opaque constant intervals in canonical owner order, exact cardinal axes, repeats and two-glyph runs; 42 exact output comparisons at 1x/2x and 40 causal live size/direction/indent/clip/foreground/content assertions qualify the bounded consumer (CI-18 / D4.5.1v4); text-clipped color and linear layers share authored tile size/position/repetition/no-repeat and apply coverage before layer composition; native CPU blits preserve foreground source-over and captured clips, immutable publications retain deferred replay; 84 exact PNG/SVG/PDF references at 1x/2x, 24 further tile/color/rounded-ancestor live assertions, 32 replays after cache/style mutation and all coverage-byte source-over pairs qualify this increment (CI-18 / D4.5.1v4); affine linear native fills sample shared premultiplied colors at pixel centers with bounded path/clip coverage, fractional tile origins, logarithmic stop lookup and scanline reuse; range aliases and 1024-stop hard boundaries have native/scoped sanitizer controls; eight marker/border range byte discrepancies are fixed in PNG/PDF controls; pseudo currentColor computed reads retain the receiving pseudo through initial/explicit/inherited values and dirty callbacks, reaching companion background/border paint in PNG/SVG/PDF at 1x/2x; Phase 1 modern Oklab/Oklch and sRGB/Oklab two-color theme mixes share the ordinary background-color consumer; Phase 6 intake confirms existing non-repeating outside-range linear/radial colors in raster/SVG at both densities and PDF at 1x; eleven remaining 2x PDF differences have zero differing interior pixels",
       "evidence": [
         "test/ui/css_image_set_selection.json",
         "test/test_view_tree_model_gtest.cpp#CssImageSetsSelectDensityAfterTypeFilteringAndPreserveSourceOrder",
@@ -319,9 +322,11 @@
         "test/test_pdf_render_visual_gtest.cpp#OutsideGradientStopsPreserveColorsAcrossOutputs",
         "test/ui/css_pseudo_current_color.json",
         "test/test_css_animation_gtest.cpp#PseudoCurrentColorUsesTheReceivingPseudoAfterInheritance",
-        "test/test_pdf_render_visual_gtest.cpp#PseudoComputedCurrentColorsReachPaintAcrossOutputs"
+        "test/test_pdf_render_visual_gtest.cpp#PseudoComputedCurrentColorsReachPaintAcrossOutputs",
+        "test/ui/css_theme_colors.json",
+        "test/test_pdf_render_visual_gtest.cpp#ModernThemeColorsReachTextBordersAndBackgroundsAcrossOutputs"
       ],
-      "limits": "full image/prelude/angle-percentage grammar and transition hints, outside-range vector stop positions, computed image/effect serialization, broad transformed/attachment/independent/paged consumers, generated-gradient replacement and the complete image family remain open; two ordered 2x PDF reader-edge assertions are preserved; selected generated-image controls retain the CI-17 CSS Content draft versus historical inline-baseline compatibility difference; text clipping remains bounded to tested linear/color/tile/layer consumers: URL/radial/conic, ancestor-owner/fragment/shaping/color-font coverage, transformed layer antialiasing, continuous/transparent vector edges, shadows/decoration/emphasis and independent/paged producers remain open; eleven range PDF-reader comparisons remain, alongside ordered/blurred-shadow PDF edges; stroke/projective/degenerate linear paths retain backend sampling"
+      "limits": "full image/prelude/angle-percentage grammar and transition hints, computed image/effect serialization, broad transformed/attachment/independent/paged consumers, generated-gradient replacement and the complete image family remain open; two ordered 2x PDF reader-edge assertions are preserved; selected generated-image controls retain the CI-17 CSS Content draft versus historical inline-baseline compatibility difference; text clipping remains bounded to tested linear/color/tile/layer consumers: URL/radial/conic, ancestor-owner/fragment/shaping/color-font coverage, transformed layer antialiasing, continuous/transparent vector edges, shadows/decoration/emphasis and independent/paged producers remain open; eleven range PDF-reader perimeter comparisons remain failed (channel deltas up to 255, zero differing interior pixels), alongside ordered/blurred-shadow PDF edges; stroke/projective/degenerate linear paths retain backend sampling"
     },
     {
       "properties": [
@@ -392,7 +397,7 @@
         "overflow-clip-margin"
       ],
       "qualification": "partial",
-      "scope": "bounded hidden-overflow paint uses owning-box coordinates for translated, scaled, reflected, rounded and nested clips; programmatic scroll and width/transform/radius mutations survive1x/2x; 40 Chromium/native causal pixel assertions and18 PNG/SVG/PDF transformed comparisons plus36 sharp rectangular intersection controls; common SVG path serialization preserves fractional contour coordinates (CI-18 / D4.5.1v4 / D4.1.4v5); physical/logical/shorthand overflow and physical/shorthand overscroll share component layer rollback, substitution/defaulting, explicit inheritance and dirty computed reads, including pseudo reads without retained pool growth; visible axes retain open-strip paint and hits while clip/visible pairs keep straight corners, paint containment and ancestor clips still apply; 25 browser/native live checks, with separate UA fallback and textarea author-hidden/removal reads, 24 byte-exact axis-aligned PNG/SVG/PDF comparisons and 72 transformed interior/open-end/clipped-edge checks at 1x/2x qualify the bounded consumer (CI-18 / RSC1 / RSC7 / D4.5.1v4); overflow-clip-margin shares validated optional box/length components across layout and computed reads; canonical default/zero components, inherited declaration-owner and pseudo font-relative lengths, dirty font/variable reads and invalid-substitution/default resets reach live geometry, overflow paint and external-box hit targets; repeated reads retain no source-pool allocations; existing negative clip offsets remain supported under CSS Overflow 4; shared outset-adjusted corner geometry preserves square and small radii, including edge coverage and stable near-zero evaluation; grow/reset mutations retain painted and hittable expanded corners, with ordinary rounded controls; existing native/raster and shared-paint outer-shadow producers reuse the same shape rule; thirty exact solid/interior/excluded-corner samples across PNG/SVG/PDF at 1x/2x use physical page coordinates and an unchanged interior color control for reader profiles",
+      "scope": "bounded hidden-overflow paint uses owning-box coordinates for translated, scaled, reflected, rounded and nested clips; programmatic scroll and width/transform/radius mutations survive1x/2x; 40 Chromium/native causal pixel assertions and18 PNG/SVG/PDF transformed comparisons plus36 sharp rectangular intersection controls; common SVG path serialization preserves fractional contour coordinates (CI-18 / D4.5.1v4 / D4.1.4v5); physical/logical/shorthand overflow and physical/shorthand overscroll share component layer rollback, substitution/defaulting, explicit inheritance and dirty computed reads, including pseudo reads without retained pool growth; visible axes retain open-strip paint and hits while clip/visible pairs keep straight corners, paint containment and ancestor clips still apply; 25 browser/native live checks, with separate UA fallback and textarea author-hidden/removal reads, 24 byte-exact axis-aligned PNG/SVG/PDF comparisons and 72 transformed interior/open-end/clipped-edge checks at 1x/2x qualify the bounded consumer (CI-18 / RSC1 / RSC7 / D4.5.1v4); overflow-clip-margin shares validated optional box/length components across layout and computed reads; canonical default/zero components, inherited declaration-owner and pseudo font-relative lengths, dirty font/variable reads and invalid-substitution/default resets reach live geometry, overflow paint and external-box hit targets; repeated reads retain no source-pool allocations; existing negative clip offsets remain supported under CSS Overflow 4; shared outset-adjusted corner geometry preserves square and small radii, including edge coverage and stable near-zero evaluation; grow/reset mutations retain painted and hittable expanded corners, with ordinary rounded controls; existing native/raster and shared-paint outer-shadow producers reuse the same shape rule; thirty exact solid/interior/excluded-corner samples across PNG/SVG/PDF at 1x/2x use physical page coordinates and an unchanged interior color control for reader profiles; native Arrow/Page/Space operations share the wheel axis-specific chain and retain nested textarea selection ownership (S3.2)",
       "evidence": [
         "test/ui/css_transformed_overflow.json",
         "test/test_pdf_render_visual_gtest.cpp#TransformedOverflowClipsFollowOwningBoxesAcrossOutputs",
@@ -409,9 +414,10 @@
         "test/test_css_animation_gtest.cpp#OverflowClipMarginComputedValuesUseTheirDeclarationOwner",
         "test/ui/css_overflow_clip_margin_corners.json",
         "test/test_rdt_vector_gtest.cpp#ClipMarginOutsetsPreserveSquareAndSmallCorners",
-        "test/test_pdf_render_visual_gtest.cpp#ClipMarginOutsetsPreserveSquareAndSmallCornersAcrossOutputs"
+        "test/test_pdf_render_visual_gtest.cpp#ClipMarginOutsetsPreserveSquareAndSmallCornersAcrossOutputs",
+        "test/ui/scroll_keyboard_chain.json"
       ],
-      "limits": "byte-exact transformed antialias fringes; projective-horizon open strips; broader overflow-clip-margin elliptical/asymmetric/replaced/independent geometry and computed contexts; gradient/image boundary parity; independent/paged/effect/3D consumers; rounded transformed hit tests; keyboard/touch overscroll chaining and broader scroll state remain unqualified; input/select UA CSSOM breadth and Chromium textarea visible normalization"
+      "limits": "byte-exact transformed antialias fringes; projective-horizon open strips; broader overflow-clip-margin elliptical/asymmetric/replaced/independent geometry and computed contexts; gradient/image boundary parity; independent/paged/effect/3D consumers; rounded transformed hit tests; touch overscroll chaining and broader scroll state remain unqualified; input/select UA CSSOM breadth and Chromium textarea visible normalization"
     },
     {
       "properties": [
@@ -656,7 +662,12 @@
       "limits": "broader border/padding/BFC/clearance/float and quirky-margin chains; logical/vertical/paged contexts; percentage inheritance across different containing bases, horizontal auto serialization and broader mutation/effect contexts"
     },
     {
-      "properties": ["column-count", "column-width", "column-gap", "column-fill"],
+      "properties": [
+        "column-count",
+        "column-width",
+        "column-gap",
+        "column-fill"
+      ],
       "qualification": "partial",
       "scope": "horizontal nested auto-filled columns retain forced-break line endpoints at positive column seams; normal leading at 12/16/24px and zero/2px inner gaps agree with browser geometry within subpixel rounding; initial and retained reflow preserve break and atomic-inline bounds (MC1)",
       "evidence": [
@@ -665,6 +676,78 @@
         "test/layout/data/wpt-css-multicol/multicol-nested-015.html"
       ],
       "limits": "explicit line-height break geometry still loses leading and may choose the preceding fragment with negative leading; broader balancing, spanning, mixed/nested fragmentation, vertical/bidi and paged contexts remain unqualified"
+    },
+    {
+      "properties": [
+        "color",
+        "border-color",
+        "border-top-color"
+      ],
+      "qualification": "partial",
+      "scope": "absolute Oklab/Oklch number/percentage channels, angle units, clamped lightness/chroma/alpha and model-preserving computed values; two-color sRGB/Oklab mixes with complementary/normalized weights and premultiplied alpha; currentColor uses the receiving text color, deferred snapshots clone their operands; a theme-variable edit repaints inherited text, border-color and background with independent sRGB PNG/SVG/PDF patches (D4.5.1v4 / D4.1.4v5); bounded feature acceptance complete; required aggregates retain independently owned failures",
+      "evidence": [
+        "test/css/test_css_parser_gtest.cpp#AbsoluteOklabAndOklchKeepComponentsAndReachSrgbConsumers",
+        "test/css/test_css_parser_gtest.cpp#TwoColorMixNormalizesWeightsAndPremultipliesAlpha",
+        "test/css/test_css_parser_gtest.cpp#CurrentColorMixSnapshotsOwnTheirDeferredOperands",
+        "test/test_css_animation_gtest.cpp#ThemeColorMixReadsFollowVariablesAndInheritedCurrentColorBeforeLayout",
+        "test/ui/css_theme_colors.json",
+        "test/test_pdf_render_visual_gtest.cpp#ModernThemeColorsReachTextBordersAndBackgroundsAcrossOutputs"
+      ],
+      "limits": "relative/missing-channel colors, other spaces and polar interpolation, wide-gamut output/gamut mapping, channel math extensions and new animation spaces; modern-color model serialization through the full border shorthand remains unqualified; zero-total explicit weights follow CSS Color 5 as transparent, while the captured Chromium 152 rejects that newer form; secondary/paged modern-color contexts remain unqualified"
+    },
+    {
+      "properties": [
+        "scroll-snap-type",
+        "scroll-snap-align"
+      ],
+      "qualification": "partial",
+      "scope": "existing wheel/programmatic paired and oversized-area selection; horizontal-writing one-axis mandatory resnap preserves weak validated target identity across committed scrollport/item relayout, removal and eligibility changes",
+      "evidence": [
+        "test/ui/scroll_snap_relayout.json",
+        "test/ui/scroll_snap_wheel.json",
+        "test/ui/scroll_snap_math.json",
+        "test/ui/scroll_snap_pair.json",
+        "test/ui/scroll_snap_oversized.json"
+      ],
+      "limits": "two-dimensional resnap policy, vertical-writing resnap, touch physics and the remaining snap conformance tail"
+    },
+    {
+      "properties": [
+        "resize"
+      ],
+      "qualification": "partial",
+      "scope": "none/horizontal/vertical/both desktop grips on an overflow auto/scroll block and textarea; shared painted/hit bounds, inline pixel writes, normal min/max and box sizing, containing flow, retained disabling, Escape/pointer cancellation and removal during capture",
+      "evidence": [
+        "test/ui/css_resize.json",
+        "test/css/test_css_parser_gtest.cpp#ResizeKeywordsRetainTypedValuesAndRejectInvalidAxes",
+        "test/test_css_animation_gtest.cpp#NativeResizeWritesReplaceInlinePriorityWithoutAScriptRealm"
+      ],
+      "limits": "logical-axis values, hidden-overflow/replaced/vertical-writing/transformed resizers, platform touch resizing and native platform visual fidelity"
+    },
+    {
+      "properties": [
+        "animation",
+        "animation-duration",
+        "animation-delay",
+        "animation-timing-function",
+        "transition",
+        "transition-duration",
+        "transition-delay",
+        "transition-timing-function"
+      ],
+      "qualification": "partial",
+      "scope": "absolute typed s/ms math and variables for durations/delays, negative calculated duration clamping with literal rejection, signed delays and invalid-dimension defaults; numeric piecewise linear easing with omitted/distributed inputs, paired positions, decreasing-position fixup, repeated-input jumps and endpoint extrapolation; canonical computed lists, shared animation/transition sampling, retained clock changes, visible opacity/translateX animation and opacity transition retarget/removal; point payloads belong to configuration/keyframe pools and are copied into retained scheduler/effect owners",
+      "evidence": [
+        "test/test_css_animation_gtest.cpp#CalculatedMotionTimesUseTypedSecondsAndPropertyRanges",
+        "test/test_css_animation_gtest.cpp#PiecewiseLinearComputedListsExpandAndClampInputPositions",
+        "test/test_css_animation_gtest.cpp#PiecewiseLinearDistributesStopsPreservesJumpsAndOwnsCopies",
+        "test/test_css_animation_gtest.cpp#CalculatedTimeAndPiecewiseAnimationRetainClockAcrossCurveChanges",
+        "test/test_css_animation_gtest.cpp#CalculatedPiecewiseTransitionRetargetsFromItsVisibleSample",
+        "test/test_css_animation_gtest.cpp#PiecewiseWebEasingSurvivesParserPoolRetirement",
+        "test/ui/css_motion_math_animation.json",
+        "test/ui/css_motion_math_transition.json"
+      ],
+      "limits": "numeric literal linear stops are qualified; broader calculated stop grammar, additive/accumulative composition, timelines/ranges, motion paths, discrete transitions, complete Web Animations reflection and transform-transition expansion remain outside this increment; aggregate Radiant/CSS/Lambda failures retain their independently recorded owners"
     }
   ]
 }

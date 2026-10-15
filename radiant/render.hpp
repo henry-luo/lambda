@@ -1715,6 +1715,7 @@ void paint_ir_register_glyph_run_raster_lowerer(PaintGlyphRunRasterLowerFn lower
 
 typedef struct PaintCmd {
     PaintOp op;
+    bool borrowed_payload; // an immutable edition owns payloads borrowed by a transient lowering list
     union {
         PaintFillRect           fill_rect;
         PaintFillRoundedRect    fill_rounded_rect;
@@ -1754,6 +1755,7 @@ typedef struct PaintCmd {
 
 struct PaintList : lam::ArrayList<PaintCmd> {
     PaintList() : ArrayList(MEM_CAT_RENDER, 0) {}
+    ~PaintList() { destroy(); }
 #ifdef __cplusplus
     void init(Arena* backing_arena);
     void clear();
@@ -1781,6 +1783,8 @@ void paint_list_init(PaintList* pl, Arena* backing_arena);
 void paint_list_clear(PaintList* pl);   // rewind count and release owned command payloads
 void paint_list_destroy(PaintList* pl);
 int  paint_list_count(const PaintList* pl);
+// source and its resource owner must outlive lowering and destruction of destination.
+bool paint_list_borrow_commands(PaintList* destination, const PaintList* source);
 // transfer a newly appended path payload to a deferred list; false leaves ownership with the caller.
 bool paint_list_take_path_payload(PaintList* pl, int index, PaintOp expected_op,
                                   RdtGradientStop* stops = nullptr);
@@ -2284,6 +2288,7 @@ bool render_geometry_pixel_bounds_empty(IRect bounds);
 Rect render_geometry_block_border_rect(const BlockBlot* parent_block,
                                        const ViewBlock* block,
                                        float scale);
+Rect render_geometry_boundary_rect(const ViewBlock* view, Rect wrapper);
 Rect render_geometry_block_content_rect(const BlockBlot* parent_block,
                                         const ViewBlock* block,
                                         float scale);
@@ -3057,10 +3062,18 @@ RenderPaintBlockResult render_paint_block_run(RenderPaintBlockOps* ops,
 // ===== render_paint_boundary.hpp =====
 // Emits a complete simple CSS boundary into PaintIR.
 // Returns false when the boundary needs a richer backend-specific fallback.
-bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
-                                       float x, float y);
+bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view, Rect rect);
+inline bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view, float x, float y) {
+    return view && render_paint_boundary_emit_simple(paint_list, view, {x, y, view->width, view->height});
+}
 bool render_paint_boundary_emit_fragmented_simple(PaintList* paint_list, ViewBlock* view, Rect rect);
 bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* boundary, Rect rect);
+bool render_paint_boundary_emit_border_side(PaintList* paint, const BorderProp* border, Rect rect, size_t side);
+bool render_paint_background_is_simple(const BackgroundProp* background);
+bool render_paint_boundary_box(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
+    RenderExportTargetKind target, const Rect* background_area = nullptr);
+bool render_paint_boundary_layers(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
+    RenderExportTargetKind target, bool outer_shadows, const Rect* background_area = nullptr);
 bool render_border_is_uniform_solid(const BorderProp* border);
 bool render_paint_boundary_emit_solid_border(PaintList* paint_list, BorderProp* border, Rect rect);
 bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* view,
@@ -3983,6 +3996,7 @@ bool render_paint_snapshot(const PaintList* paint, Bound bounds, float viewport_
 void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
 bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
                              RenderExportTargetKind target);
+bool render_paint_background_requires_composite(const BackgroundProp* background, RenderExportTargetKind target);
 bool render_paint_gradient_image(PaintList* paint, const ListStyleImage* image, Rect rect,
                                 float pixel_ratio, const RdtMatrix* transform = nullptr);
 bool render_paint_gradient_shape(PaintList* paint, const ListStyleImage* image, Rect rect,
@@ -4124,7 +4138,6 @@ void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow,
                      struct PagedFlowState* paged = nullptr);
 void view_pool_destroy(ViewTree* tree);
 void view_pool_reset_retained(ViewTree* tree);
-void view_pool_reset_retained_subtree(ViewTree* tree, DomNode* root);
 void view_pool_release_detached_subtree(DomNode* root);
 void image_cache_cleanup(UiContext* uicon);
 
@@ -4679,6 +4692,8 @@ void render_custom_svg_subscene(RasterRenderContext* rdcon, Element* svg_element
                                 float viewport_width, float viewport_height);
 
 // ===== render_text.hpp =====
+bool render_text_paint_atomic_hidden(RenderContext* context, View* view);
+bool render_text_overflow_atomic_hidden(UiContext* uicon, View* view);
 class RenderTextPaintScope {
     lam::Up<RenderContext> context;
     lam::Up<RenderTextPaintData> previous;
@@ -4707,6 +4722,8 @@ class RenderTextPaintIterator {
     lam::Up<RenderContext> context;
     lam::Up<TextRect> cursor;
     lam::Up<RenderTextPaintEntry> pending_marker;
+    lam::Up<TextRect> pending_source;
+    int pending_entry_index;
     TextRect projection;
     FontBox saved_font;
     Color saved_color;

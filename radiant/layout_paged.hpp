@@ -7,7 +7,7 @@ struct PaintList;
 struct RadiantSourceOrigin;
 struct PagedLayoutOptions {
     uint32_t max_pages, max_depth;
-    size_t max_nodes, max_items;
+    size_t max_nodes;
     uint32_t max_reference_passes;
     uint32_t max_container_passes;
     bool right_binding;
@@ -39,8 +39,10 @@ struct SecondaryViewVisitor {
     bool (*clip)(void*, const RdtLogicalRect*, const float* inset); // null rect closes the scope
     bool (*glyph)(void*, const LayoutViewNode*, const PaintGlyphRun*);
     bool (*image)(void*, const LayoutViewNode*, const PaintImageBox*);
+    bool (*paint)(void*, const PaintList*);
+    bool pdf;
 };
 bool layout_secondary_visit_page(ViewTree* tree, const ViewPageBox* page,
     const SecondaryViewVisitor* visitor);
-bool layout_secondary_paint_page(ViewTree* tree, const ViewPageBox* page, PaintList* paint);
+bool layout_secondary_paint_page(ViewTree* tree, const ViewPageBox* page, PaintList* paint, bool pdf = false);
 bool layout_secondary_paint_root(ViewTree* tree, PaintList* paint, const RdtLogicalRect* clip = nullptr);

@@ -41,6 +41,8 @@ MARKUP_TRAILING_ENTRIES = [
     ("SCENE3D", "scene3d"), ("GEOMAP", "geomap"),
     ("CSS_WEBKIT_BOX_ORIENT", "-webkit-box-orient"),
     ("CSS_HYPHENATE_LIMIT_CHARS", "hyphenate-limit-chars"),
+    ("CSS_PAGE", "page"), ("CSS_STRING_SET", "string-set"),
+    ("CSS_FOOTNOTE_POLICY", "footnote-policy"),
 ]
 MARKUP_ENTRY_SYMBOLS = {
     spelling: symbol for symbol, spelling in MARKUP_TAG_ENTRIES + MARKUP_EXTRA_ENTRIES + MARKUP_TRAILING_ENTRIES
@@ -112,6 +114,7 @@ translate rotate scale
 fill-opacity stroke-opacity stroke-dasharray stroke-dashoffset stroke-linecap stroke-linejoin stroke-miterlimit fill-rule clip-rule paint-order stop-color stop-opacity flood-color flood-opacity lighting-color
 marker-start marker-mid marker-end marker vector-effect color-interpolation color-interpolation-filters text-anchor
 -webkit-box-orient
+page string-set footnote-policy
 """.split()
 
 CSS_PROPERTY_ENTRIES = [

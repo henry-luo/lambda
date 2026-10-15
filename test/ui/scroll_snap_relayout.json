@@ -1,0 +1,240 @@
+{
+  "name": "Snap target survives bounded relayout",
+  "html": "test/ui/scroll_snap_relayout.html",
+  "viewport": {
+    "width": 440,
+    "height": 200
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#select"
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#pane"
+      },
+      "view_state": true,
+      "kind": "scroll",
+      "view_scroll_y": 40,
+      "tolerance": 0.01
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#free"
+      },
+      "view_state": true,
+      "kind": "scroll",
+      "view_scroll_y": 75,
+      "tolerance": 0.01
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 40,
+      "y": 100,
+      "expected_selector": "#second"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#pane",
+        "offset_x": 40,
+        "offset_y": 40
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 128,
+      "max_g": 128,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#port"
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#pane"
+      },
+      "view_state": true,
+      "kind": "scroll",
+      "view_scroll_y": 50,
+      "tolerance": 0.01
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#free"
+      },
+      "view_state": true,
+      "kind": "scroll",
+      "view_scroll_y": 75,
+      "tolerance": 0.01
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 40,
+      "y": 100,
+      "expected_selector": "#second"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#pane",
+        "offset_x": 40,
+        "offset_y": 40
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 128,
+      "max_g": 128,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#grow"
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#pane"
+      },
+      "view_state": true,
+      "kind": "scroll",
+      "view_scroll_y": 130,
+      "tolerance": 0.01
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#free"
+      },
+      "view_state": true,
+      "kind": "scroll",
+      "view_scroll_y": 75,
+      "tolerance": 0.01
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 40,
+      "y": 100,
+      "expected_selector": "#second"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#pane",
+        "offset_x": 40,
+        "offset_y": 40
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 128,
+      "max_g": 128,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#remove"
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#pane"
+      },
+      "view_state": true,
+      "kind": "scroll",
+      "view_scroll_y": 130,
+      "tolerance": 0.01
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#free"
+      },
+      "view_state": true,
+      "kind": "scroll",
+      "view_scroll_y": 75,
+      "tolerance": 0.01
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 40,
+      "y": 100,
+      "expected_selector": "#third"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#pane",
+        "offset_x": 40,
+        "offset_y": 40
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#toggle"
+      }
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#pane"
+      },
+      "view_state": true,
+      "kind": "scroll",
+      "view_scroll_y": 190,
+      "tolerance": 0.01
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": "#free"
+      },
+      "view_state": true,
+      "kind": "scroll",
+      "view_scroll_y": 75,
+      "tolerance": 0.01
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 40,
+      "y": 100,
+      "expected_selector": "#fourth"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#pane",
+        "offset_x": 40,
+        "offset_y": 40
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    }
+  ]
+}

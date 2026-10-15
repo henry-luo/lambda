@@ -1,0 +1,332 @@
+{
+  "name": "Atomic ellipsis and inherited RTL clamp survive retained changes",
+  "html": "test/ui/css_text_overflow_atoms_rtl.html",
+  "viewport": {
+    "width": 440,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#hebrew"
+      },
+      "height": 48,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#hebrewfit"
+      },
+      "height": 24,
+      "tolerance": 0.1
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#endatom"
+      },
+      "tolerance": 0.1,
+      "width": 40
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#endimage"
+      },
+      "tolerance": 0.1,
+      "width": 20
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#atoms",
+        "offset_x": 35,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 45,
+      "y": 45,
+      "expected_selector": "#atoms"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#image",
+        "offset_x": 55,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 65,
+      "y": 85,
+      "expected_selector": "#image"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#wide",
+        "offset_x": 45,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 55,
+      "y": 125,
+      "expected_selector": "#wideatom"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#fits",
+        "offset_x": 10,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rtl"
+      },
+      "tolerance": 0.1,
+      "height": 48
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rtlfit"
+      },
+      "tolerance": 0.1,
+      "height": 24
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#width"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#atoms",
+        "offset_x": 35,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 45,
+      "y": 45,
+      "expected_selector": "#endatom"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#image",
+        "offset_x": 55,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 65,
+      "y": 85,
+      "expected_selector": "#endimage"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#endatom"
+      },
+      "tolerance": 0.1,
+      "width": 40
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#endimage"
+      },
+      "tolerance": 0.1,
+      "width": 20
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rtl"
+      },
+      "tolerance": 0.1,
+      "height": 24
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#small"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#atoms",
+        "offset_x": 35,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 45,
+      "y": 45,
+      "expected_selector": "#atoms"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#rtl"
+      },
+      "property": "font-size",
+      "equals": "10px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#rtl"
+      },
+      "property": "direction",
+      "equals": "ltr"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rtl"
+      },
+      "tolerance": 0.1,
+      "height": 48
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restore"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#rtl"
+      },
+      "property": "font-size",
+      "equals": "20px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#rtl"
+      },
+      "property": "direction",
+      "equals": "rtl"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rtl"
+      },
+      "tolerance": 0.1,
+      "height": 48
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#count"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rtl"
+      },
+      "tolerance": 0.1,
+      "height": 96
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restore"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#rtl"
+      },
+      "tolerance": 0.1,
+      "height": 48
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#rtl"
+      },
+      "equals": "ABCDEFGHIJKLMNOP"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#hebrew"
+      },
+      "equals": "\u05d0\u05d1\u05d2\u05d3\u05d4\u05d5\u05d6\u05d7\u05d8\u05d9\u05db\u05dc\u05de\u05e0\u05e1\u05e2"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#hebrew"
+      },
+      "height": 48,
+      "tolerance": 0.1
+    }
+  ]
+}
