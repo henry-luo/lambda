@@ -172,10 +172,11 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
 
     RenderTextPaintIterator paint_iterator(ctx, text);
     TextRect* text_rect;
-    while ((text_rect = paint_iterator.next())) {
+    while ((text_rect = paint_iterator.next(true))) {
     PaintGlyphRun run = {};
+    const char* logical_text = nullptr;
     lam::Temp<char> text_content(render_text_rect_glyph_run(text, text_rect, &ctx->font, ctx->color,
-        ctx->block.x, ctx->block.y, &run));
+        ctx->block.x, ctx->block.y, &run, paint_iterator.reverses_clusters(), &logical_text));
     if (!text_content.get()) continue;
     if (!run.font_family) run.font_family = lam::up("Arial");
 
@@ -217,7 +218,7 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         : nullptr;
     if (outline) {
         // outlines retain accessible text without asking the viewer to paint a replacement font.
-        RenderSemanticGroup label = {}; label.title = run.text;
+        RenderSemanticGroup label = {}; label.title = lam::up(logical_text);
         paint_begin_semantic_group(svg_active_paint_list(ctx), &label);
         int index = paint_list_count(svg_active_paint_list(ctx));
         paint_fill_path(svg_active_paint_list(ctx), outline, run.color, RDT_FILL_WINDING, nullptr);
@@ -387,28 +388,18 @@ static void svg_emit_border_side(SvgRenderContext* ctx, CssEnum style, Color c,
 static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
     if (!view->bound) return;
 
-    float x = ctx->block.x + view->x;
-    float y = ctx->block.y + view->y;
-    float width = view->width;
-    float height = view->height;
+    Rect grid = render_geometry_boundary_rect(view, render_geometry_block_border_rect(&ctx->block, view, 1.0f));
+    float x = grid.x, y = grid.y, width = grid.width, height = grid.height;
 
-    if (render_paint_boundary_emit_simple(svg_active_paint_list(ctx), view, x, y)) {
+    if (render_paint_boundary_emit_simple(svg_active_paint_list(ctx), view, grid)) {
         svg_lower_paint_list(ctx);
         return;
     }
 
-    if (ctx->effect_fallback.active && view->boundary_mut()->box_shadow) {
-        render_paint_boundary_emit_outer_shadows(svg_active_paint_list(ctx), view, x, y);
-    }
-
-    if (render_paint_background(svg_active_paint_list(ctx), ctx->ui_context, view,
-            {x, y, width, height}, RENDER_EXPORT_TARGET_SVG)) svg_lower_paint_list(ctx);
-
-    if (render_paint_border_image(svg_active_paint_list(ctx), ctx->ui_context,
-            view->boundary()->border, {x, y, width, height})) {
-        svg_lower_paint_list(ctx);
-        return;
-    }
+    bool image_border = render_paint_boundary_layers(svg_active_paint_list(ctx), ctx->ui_context,
+        view, {x, y, width, height}, RENDER_EXPORT_TARGET_SVG, ctx->effect_fallback.active);
+    svg_lower_paint_list(ctx);
+    if (image_border) return;
 
     // Render borders with style-aware per-side SVG polygons
     if (view->boundary()->border) {
@@ -807,7 +798,8 @@ static bool svg_cb_begin_clip(RenderContext* vctx, ViewElement* element,
                               float abs_x, float abs_y, RenderClipKind kind) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     if (!ctx || !render_clip_push_vector(svg_active_paint_list(ctx), element,
-            abs_x, abs_y, kind)) return false;
+            abs_x, abs_y, kind, {0.0f, 0.0f, ctx->viewport_width, ctx->viewport_height},
+            ctx->has_overflow_clip_transform ? &ctx->overflow_clip_transform : nullptr)) return false;
     svg_lower_paint_list(ctx);
     return true;
 }
@@ -971,7 +963,7 @@ static RenderBackend svg_make_backend(SvgRenderContext* ctx) {
 // export extents follow the same accumulated transforms and overflow clips as painting.
 static void calculate_visible_content_bounds(View* view, Bound clip,
                                                RdtMatrix transform,
-                                               float* max_x, float* max_y) {
+                                               bool apply_clips, Bound* extent) {
     if (!view) return;
     RdtLogicalPoint origin = view_geometry_node_document_origin(view);
     ViewBlock* block = lam::view_as_block(view);
@@ -990,19 +982,18 @@ static void calculate_visible_content_bounds(View* view, Bound clip,
         {projected.left, projected.top, projected.right - projected.left,
          projected.bottom - projected.top});
     if (visible.right > visible.left && visible.bottom > visible.top) {
-        *max_x = fmaxf(*max_x, visible.right);
-        *max_y = fmaxf(*max_y, visible.bottom);
+        extent->left = fminf(extent->left, visible.left);
+        extent->top = fminf(extent->top, visible.top);
+        extent->right = fmaxf(extent->right, visible.right);
+        extent->bottom = fmaxf(extent->bottom, visible.bottom);
     }
     if (!view->is_element()) return;
     ViewElement* element = lam::view_require_element(view);
     if (block) {
         if (view_contents_are_skipped(block)) return;
-        Bound overflow;
-        if (layout_block_overflow_clip(block, &overflow)) {
-            overflow.left += origin.x;
-            overflow.right += origin.x;
-            overflow.top += origin.y;
-            overflow.bottom += origin.y;
+        Bound overflow; Corner radius;
+        if (apply_clips && render_clip_overflow_bounds(block, origin.x, origin.y,
+                1.0f, clip, &transform, &overflow, &radius)) {
             rdt_matrix_project_rect_bounds(&transform, overflow.left, overflow.top,
                 overflow.right, overflow.bottom, &overflow.left, &overflow.top,
                 &overflow.right, &overflow.bottom);
@@ -1012,15 +1003,17 @@ static void calculate_visible_content_bounds(View* view, Bound clip,
         }
     }
     for (View* child = element->first_child; child; child = child->next())
-        calculate_visible_content_bounds(child, clip, transform, max_x, max_y);
+        calculate_visible_content_bounds(child, clip, transform, apply_clips, extent);
 }
 
 void calculate_content_bounds(View* view, int* max_x, int* max_y) {
-    float right = (float)*max_x, bottom = (float)*max_y;
+    Bound initial = {0.0f, 0.0f, (float)*max_x, (float)*max_y}, uncut = initial, visible = initial;
+    // first bound open axes by actual descendant geometry, then apply the owner-space strips.
     calculate_visible_content_bounds(view,
-        {-INFINITY, -INFINITY, INFINITY, INFINITY}, rdt_matrix_identity(), &right, &bottom);
-    *max_x = (int)ceilf(right); // INT_CAST_OK: the legacy export API uses integral surface extents.
-    *max_y = (int)ceilf(bottom); // INT_CAST_OK: the legacy export API uses integral surface extents.
+        {-INFINITY, -INFINITY, INFINITY, INFINITY}, rdt_matrix_identity(), false, &uncut);
+    calculate_visible_content_bounds(view, uncut, rdt_matrix_identity(), true, &visible);
+    *max_x = (int)ceilf(visible.right); // INT_CAST_OK: the legacy export API uses integral surface extents.
+    *max_y = (int)ceilf(visible.bottom); // INT_CAST_OK: the legacy export API uses integral surface extents.
 }
 
 // Render caret to SVG

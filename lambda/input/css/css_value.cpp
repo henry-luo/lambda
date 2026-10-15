@@ -19,10 +19,13 @@ extern "C" {
 #include "../../../lib/arraylist.hpp"
 #include "../../../lib/hashmap_typed.hpp"
 #include "../../../lib/math_checked.hpp"
+#include "../../../lib/recursion_guard.hpp"
 #include <math.h>
 
-static double css_color_clamp(double value, double maximum = 1.0) {
-    return isnan(value) ? 0.0 : fmax(0.0, fmin(maximum, value));
+double css_clamp_numeric_value(double value, double minimum, double maximum) {
+    double result = fmax(minimum, fmin(maximum, isnan(value) ? 0.0 : value));
+    // computed scalar serialization has a single zero, including narrowed numeric domains.
+    return result == 0.0 ? 0.0 : result;
 }
 
 static bool css_visit_list_items(const CssValue* value, CssListItemVisitor visitor,
@@ -62,18 +65,98 @@ static bool css_color_component(const CssValue* value, bool hue, bool percentage
         if (*type != CSS_MATH_PERCENT && (*type != CSS_MATH_NUMBER || percentage_only)) return false;
         double amount = *type == CSS_MATH_PERCENT
             ? computed.percentage * percentage_scale : computed.value * number_scale;
-        *result = clamp_component ? css_color_clamp(amount) : amount;
+        *result = clamp_component ? css_clamp_numeric_value(amount) : amount;
     }
     return true;
 }
 
-static bool css_color_function_compute(const CssFunction* function, CssComputedColor* result) {
+static bool css_color_rgb_components(const CssComputedColor* color, double* red, double* green, double* blue);
+
+static bool css_color_mix_operand(const CssValue* argument, const CssValue** operand, double* weight) {
+    *operand = argument;
+    *weight = -1.0;
+    if (!argument) return false;
+    if (argument->type != CSS_VALUE_TYPE_LIST) return true;
+    const auto& list = argument->data.list;
+    if (list.comma_separated || list.count != 2 || !list.values) return false;
+    for (int i = 0; i < 2; i++) {
+        const CssValue* value = list.values[i];
+        if (!value || value->type != CSS_VALUE_TYPE_PERCENTAGE) continue;
+        *weight = value->data.percentage.value;
+        *operand = list.values[1 - i];
+        return isfinite(*weight) && *weight >= 0.0 && *weight <= 100.0;
+    }
+    return false;
+}
+
+static bool css_color_mix_compute(const CssValue* expression, CssComputedColor* result,
+    const CssComputedColor* current_color) {
+    const CssFunction* function = expression->data.function;
+    if (function->arg_count != 3 || !function->args) return false;
+    const CssValue* method = function->args[0];
+    if (!method || method->type != CSS_VALUE_TYPE_LIST || method->data.list.comma_separated ||
+        method->data.list.count != 2 || !method->data.list.values) return false;
+    const char* in = css_value_identifier_name(method->data.list.values[0]);
+    const char* space = css_value_identifier_name(method->data.list.values[1]);
+    if (!in || !str_ieq_cstr(in, "in") || !space) return false;
+    bool oklab = str_ieq_cstr(space, "oklab");
+    if (!oklab && !str_ieq_cstr(space, "srgb")) return false;
+    double weights[2];
+    CssComputedColor colors[2];
+    bool unresolved = false;
+    for (int i = 0; i < 2; i++) {
+        const CssValue* operand = nullptr;
+        if (!css_color_mix_operand(function->args[i + 1], &operand, &weights[i]) ||
+            !css_color_compute(operand, &colors[i], current_color) || colors[i].missing) return false;
+        unresolved |= colors[i].unresolved != nullptr;
+        if (colors[i].type == CSS_COLOR_CURRENTCOLOR) {
+            if (current_color) colors[i] = *current_color;
+            else {
+                // validation retains the expression; only the used-color consumer supplies currentColor.
+                colors[i] = {}; colors[i].type = CSS_COLOR_RGB; colors[i].components[3] = 1.0;
+                unresolved = true;
+            }
+        }
+        if (oklab && colors[i].type == CSS_COLOR_OKLAB) continue;
+        double r, g, b;
+        if (!css_color_rgb_components(&colors[i], &r, &g, &b)) return false;
+        if (oklab) color_rgb_to_oklab(r, g, b, &colors[i].components[0],
+            &colors[i].components[1], &colors[i].components[2]);
+        else {colors[i].components[0] = r; colors[i].components[1] = g; colors[i].components[2] = b;}
+    }
+    if (weights[0] < 0.0 && weights[1] < 0.0) weights[0] = weights[1] = 50.0;
+    else if (weights[0] < 0.0) weights[0] = 100.0 - weights[1];
+    else if (weights[1] < 0.0) weights[1] = 100.0 - weights[0];
+    double sum = weights[0] + weights[1];
+    double multiplier = fmin(sum / 100.0, 1.0);
+    // CSS Color 5 §3.2 gives a zero-total mix zero alpha and equal channel weights.
+    double first = sum == 0.0 ? 0.5 : weights[0] / sum;
+    double alpha0 = first * colors[0].components[3];
+    double alpha1 = (1.0 - first) * colors[1].components[3];
+    double alpha = alpha0 + alpha1;
+    result->type = oklab ? CSS_COLOR_OKLAB : CSS_COLOR_COLOR;
+    result->color_space = oklab ? nullptr : "srgb";
+    for (int i = 0; i < 3; i++) result->components[i] = alpha == 0.0 ? 0.0
+        : (colors[0].components[i] * alpha0 + colors[1].components[i] * alpha1) / alpha;
+    result->components[3] = alpha * multiplier;
+    if (unresolved) result->unresolved = expression;
+    return true;
+}
+
+static bool css_color_function_compute(const CssValue* expression, CssComputedColor* result,
+    const CssComputedColor* current_color) {
+    const CssFunction* function = expression->data.function;
     if (!function || !function->name || !function->args) return false;
+    if (str_ieq_cstr(function->name, "color-mix"))
+        return css_color_mix_compute(expression, result, current_color);
     bool rgb = str_ieq_cstr(function->name, "rgb") || str_ieq_cstr(function->name, "rgba");
     bool hsl = str_ieq_cstr(function->name, "hsl") || str_ieq_cstr(function->name, "hsla");
     bool hwb = str_ieq_cstr(function->name, "hwb");
+    bool oklab = str_ieq_cstr(function->name, "oklab");
+    bool oklch = str_ieq_cstr(function->name, "oklch");
+    bool perceptual = oklab || oklch;
     bool predefined = str_ieq_cstr(function->name, "color");
-    if (!rgb && !hsl && !hwb && !predefined) return false;
+    if (!rgb && !hsl && !hwb && !perceptual && !predefined) return false;
     const CssValue* channels[4] = {};
     bool modern = function->arg_count == 1;
     int count = function->arg_count;
@@ -98,21 +181,24 @@ static bool css_color_function_compute(const CssFunction* function, CssComputedC
             channels[3] = list->data.list.values[4 + offset];
         }
     } else {
-        if (hwb || predefined || count < 3 || count > 4) return false;
+        if (hwb || perceptual || predefined || count < 3 || count > 4) return false;
         for (int i = 0; i < count; i++) channels[i] = function->args[i];
     }
-    result->type = predefined ? CSS_COLOR_COLOR : rgb ? CSS_COLOR_RGB : hsl ? CSS_COLOR_HSL : CSS_COLOR_HWB;
+    result->type = predefined ? CSS_COLOR_COLOR : rgb ? CSS_COLOR_RGB : hsl ? CSS_COLOR_HSL
+        : hwb ? CSS_COLOR_HWB : oklab ? CSS_COLOR_OKLAB : CSS_COLOR_OKLCH;
     result->components[3] = 1.0;
     CssMathType first_type = CSS_MATH_INVALID;
     for (int i = 0; i < 4; i++) {
         if (i == 3 && !channels[i]) continue;
         bool missing = false;
         CssMathType type;
-        bool hue = (hsl || hwb) && i == 0;
+        bool hue = ((hsl || hwb) && i == 0) || (oklch && i == 2);
         if (!css_color_component(channels[i], hue, !modern && !rgb && i > 0 && i < 3,
-            modern, !predefined || i == 3, 0.01,
+            modern && !perceptual, perceptual ? i == 0 || i == 3 : !predefined || i == 3,
+            perceptual && i > 0 && i < 3 ? 0.004 : 0.01,
             rgb && i < 3 ? 1.0 / 255.0 : (hsl || hwb) && i > 0 && i < 3 ? 0.01 : 1.0,
             &result->components[i], &missing, &type)) return false;
+        if (oklch && i == 1) result->components[i] = fmax(0.0, result->components[i]);
         if (missing) result->missing |= (uint8_t)(1u << i);
         if (rgb && !modern && i < 3) {
             if (i == 0) first_type = type;
@@ -132,11 +218,15 @@ static bool css_color_function_compute(const CssFunction* function, CssComputedC
     return true;
 }
 
-bool css_color_compute(const CssValue* value, CssComputedColor* result) {
+bool css_color_compute(const CssValue* value, CssComputedColor* result,
+    const CssComputedColor* current_color) {
     if (!value || !result) return false;
+    static thread_local int color_depth = 0;
+    lam::RecursionGuard depth_guard(&color_depth, 64);
+    if (!depth_guard) return false;
     *result = {};
     if (value->type == CSS_VALUE_TYPE_FUNCTION)
-        return css_color_function_compute(value->data.function, result);
+        return css_color_function_compute(value, result, current_color);
     CssEnum keyword = CSS_VALUE__UNDEF;
     if (value->type == CSS_VALUE_TYPE_KEYWORD) keyword = value->data.keyword;
     else if (value->type == CSS_VALUE_TYPE_COLOR) {
@@ -160,7 +250,7 @@ bool css_color_compute(const CssValue* value, CssComputedColor* result) {
                 components->component3, &result->components[0], &result->components[1], &result->components[2]);
             else color_hwb_to_rgb(components->component1, components->component2,
                 components->component3, &result->components[0], &result->components[1], &result->components[2]);
-            result->components[3] = css_color_clamp(components->component4);
+            result->components[3] = css_clamp_numeric_value(components->component4);
             return true;
         } else return false;
     } else return false;
@@ -191,17 +281,31 @@ double css_color_legacy_alpha(uint8_t alpha) {
         : floor(alpha / 0.255 + 0.5) / 1000.0;
 }
 
-bool css_color_to_rgba(const CssComputedColor* color, uint8_t* r, uint8_t* g, uint8_t* b, uint8_t* a) {
-    if (!color || !r || !g || !b || !a) return false;
+static bool css_color_rgb_components(const CssComputedColor* color, double* r, double* g, double* b) {
     double red = color->components[0], green = color->components[1], blue = color->components[2];
     if (color->type == CSS_COLOR_HSL) color_hsl_to_rgb(red, green, blue, &red, &green, &blue);
     else if (color->type == CSS_COLOR_HWB) color_hwb_to_rgb(red, green, blue, &red, &green, &blue);
+    else if (color->type == CSS_COLOR_OKLAB || color->type == CSS_COLOR_OKLCH) {
+        if (color->type == CSS_COLOR_OKLCH) {
+            double hue = blue * M_PI / 180.0;
+            blue = green * sin(hue); green *= cos(hue);
+        }
+        color_oklab_to_rgb(red, green, blue, &red, &green, &blue);
+    }
     else if (color->type != CSS_COLOR_RGB && !(color->type == CSS_COLOR_COLOR &&
         color->color_space && strcmp(color->color_space, "srgb") == 0)) return false;
-    *r = (uint8_t)floor(css_color_clamp(red) * 255.0 + 0.5);
-    *g = (uint8_t)floor(css_color_clamp(green) * 255.0 + 0.5);
-    *b = (uint8_t)floor(css_color_clamp(blue) * 255.0 + 0.5);
-    *a = (uint8_t)floor(css_color_clamp(color->components[3]) * 255.0 + 0.5);
+    *r = red; *g = green; *b = blue;
+    return true;
+}
+
+bool css_color_to_rgba(const CssComputedColor* color, uint8_t* r, uint8_t* g, uint8_t* b, uint8_t* a) {
+    if (!color || !r || !g || !b || !a || color->unresolved) return false;
+    double red, green, blue;
+    if (!css_color_rgb_components(color, &red, &green, &blue)) return false;
+    *r = (uint8_t)floor(css_clamp_numeric_value(red) * 255.0 + 0.5);
+    *g = (uint8_t)floor(css_clamp_numeric_value(green) * 255.0 + 0.5);
+    *b = (uint8_t)floor(css_clamp_numeric_value(blue) * 255.0 + 0.5);
+    *a = (uint8_t)floor(css_clamp_numeric_value(color->components[3]) * 255.0 + 0.5);
     return true;
 }
 
@@ -1940,6 +2044,8 @@ static const CssEnumInfo css_value_definitions[] = {
     {"non-scaling-stroke", 18, CSS_VALUE_NON_SCALING_STROKE, CSS_VALUE_GROUP_SVG_PAINT},
     {"srgb", 4, CSS_VALUE_SRGB, CSS_VALUE_GROUP_SVG_PAINT},
     {"linearrgb", 9, CSS_VALUE_LINEARRGB, CSS_VALUE_GROUP_SVG_PAINT},
+    {"horizontal", 10, CSS_VALUE_HORIZONTAL, CSS_VALUE_GROUP_DIRECTION},
+    {"vertical", 8, CSS_VALUE_VERTICAL, CSS_VALUE_GROUP_DIRECTION},
 };
 
 static const size_t css_value_definitions_count = sizeof(css_value_definitions) / sizeof(css_value_definitions[0]);

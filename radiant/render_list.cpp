@@ -30,7 +30,7 @@ bool render_paint_marker_image(PaintList* paint, UiContext* ui, ViewSpan* marker
         : font && font->style ? font_prop_used_size(font->style) : 16.0f;
     Rect rect = marker_image_rect(marker, prop, origin_x, origin_y, font_size, 1.0f);
     if (prop->is_image_marker)
-        return render_paint_gradient_image(paint, &prop->image, rect, ui_context_raster_scale(ui));
+        return render_paint_gradient_image(paint, &prop->image, rect, ui_context_raster_scale(ui), nullptr, true);
     if (!prop->image.url || strcmp(prop->image.url, "none") == 0) return false;
     ImageSurface* image = load_document_image(ui->document, ui, prop->image.url);
     if (!image) return false;
@@ -75,7 +75,7 @@ void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
         rc_push_clip(rdcon, clip, nullptr);
         // all backends record the same gradient image; retained effects own its payloads.
         bool painted = render_paint_gradient_image(rdcon->paint_list, &marker_prop->image,
-            image_rect, scale, &transform);
+            image_rect, scale, &transform, true);
         if (painted) {
             paint_ir_lower_raster_fragment(rdcon->paint_list, rdcon->dl);
             paint_list_clear(rdcon->paint_list);
@@ -113,13 +113,10 @@ void render_marker_view(RasterRenderContext* rdcon, ViewSpan* marker) {
             // would leave intrinsic images unzoomed after layout scales them.
             Rect rect = marker_image_rect(marker, marker_prop, rdcon->block.x, rdcon->block.y,
                 marker_font_size, scale);
-            // display-list image replay expects decoded dimensions and uint32_t row stride.
-            int src_w = img->decoded_width > 0 ? img->decoded_width : img->width;
-            int src_h = img->decoded_height > 0 ? img->decoded_height : img->height;
-            // image markers follow the active transform of their originating list item.
-            rc_draw_image(rdcon, (uint32_t*)img->pixels, src_w, src_h,
-                          img->pitch / 4, rect.x, rect.y, rect.width, rect.height, 255,
-                          render_state_current_transform(rdcon), img);
+            // list-style images use the originating item's inherited sampling policy.
+            ScaleMode mode = render_image_scale_mode(elem->parent_element(), false);
+            render_painter_blit_surface_scaled(rdcon, img, nullptr, rdcon->ui_context->surface,
+                &rect, &rdcon->block.clip, mode, rdcon->clip_shapes, rdcon->clip_shape_depth);
             return;
         }
     }

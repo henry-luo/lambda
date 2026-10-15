@@ -3653,8 +3653,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         sizes = {intrinsic_width + padding_border, intrinsic_width + padding_border};
         return sizes;
     }
-    if (contain_intrinsic_width >= 0.0f && !contain_intrinsic_width_auto &&
-        !has_definite_width) {
+    // auto uses its explicit fallback when the remembered-size branch above has no usable memory.
+    if (contain_intrinsic_width >= 0.0f && !has_definite_width) {
         float padding_border = layout_intrinsic_padding_border_axis(
             lycon, element, true, lycon->block.content_width);
         float intrinsic_width = contain_intrinsic_width + padding_border;
@@ -3665,7 +3665,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     }
     bool has_empty_size_containment =
         layout_block_has_size_containment_in_axis(resolved_width_view, true) &&
-        !contain_intrinsic_width_auto &&
         contain_intrinsic_width < 0.0f && !has_definite_width &&
         (resolved_width_view->display.inner != CSS_VALUE_GRID ||
          resolved_width_view->block()->content_visibility_skipped) &&
@@ -6447,7 +6446,6 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     layout_resolve_contain_intrinsic_size(lycon, element, &contain_intrinsic_width,
                                           &contain_intrinsic_height);
     bool has_contain_intrinsic_height = contain_intrinsic_height >= 0.0f &&
-        !contain_intrinsic_height_auto &&
         !intrinsic_has_definite_css_height(lycon, element, view);
     float remembered_height = 0.0f;
     if (view->blk && view->block()->content_visibility_skipped &&
@@ -6461,7 +6459,6 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     }
     bool has_empty_size_containment =
         layout_block_has_size_containment_in_axis(view, false) &&
-        !contain_intrinsic_height_auto &&
         contain_intrinsic_height < 0.0f &&
         (!view->form || view->block()->content_visibility_skipped) &&
         (view->display.inner != CSS_VALUE_GRID ||

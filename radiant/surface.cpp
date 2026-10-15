@@ -17,6 +17,7 @@
 #include "../lib/endian.h"
 #include "../lambda/input/input.hpp"  // for download_http_content
 #include "../lambda/network/network_resource_manager.h"
+#include "../lambda/dom/dom_platform.h"
 
 #include <stdlib.h>
 #include <limits.h>
@@ -285,14 +286,13 @@ bool document_dependency_admits(const DomDocument* document, const char* source)
     return resolved && input_resource_policy_admits(document->resource_policy, resolved.get());
 }
 
-ImageSurface* load_document_image(DomDocument* document, UiContext* uicon, const char* source) {
-    if (!document_dependency_admits(document, source)) return nullptr;
-    return load_image(uicon, source);
-}
-
 static ImageSurface* load_image_resource(DomDocument* document, lam::Own<hashmap>* cache,
         UiContext* animation_ui, const char* img_url) {
     if (!document || !cache || !img_url) return nullptr;
+    if (strncmp(img_url, "blob:", 5) == 0) {
+        img_url = dom_blob_url_data_uri(document, img_url);
+        if (!img_url) return nullptr;
+    }
     bool data_uri = strncmp(img_url, "data:", 5) == 0;
     // SVG2 §2.2: image documents can embed data resources but cannot fetch external content.
     if (document->services.svg_image_document && !data_uri) return nullptr;
@@ -664,6 +664,16 @@ static ImageSurface* load_image_resource(DomDocument* document, lam::Own<hashmap
 
 ImageSurface* load_image(UiContext* uicon, const char* source) {
     return uicon ? load_image_resource(uicon->document, &uicon->image_cache, uicon, source) : nullptr;
+}
+
+ImageSurface* load_document_image(DomDocument* document, UiContext* uicon, const char* source) {
+    if (!uicon || !document_dependency_admits(document, source)) return nullptr;
+    // embedded and secondary layouts load against their document, even when the host shows another
+    DomDocument* previous = uicon->document;
+    uicon->document = lam::up(document);
+    ImageSurface* image = load_image_resource(document, &uicon->image_cache, uicon, source);
+    uicon->document = lam::up(previous);
+    return image;
 }
 
 ImageSurface* load_document_image_resource(DomDocument* document, lam::Own<hashmap>* cache,

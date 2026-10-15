@@ -36,7 +36,16 @@ bool render_paint_background_is_simple(const BackgroundProp* bg) {
     if (bg->image) return false;
     if (bg->gradient_type != GRADIENT_NONE) return false;
     if (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient) return false;
-    if (bg->layer_count > 0) return false;
+    if (bg->layer_count > 0) {
+        if (!bg->layers) return false;
+        const BackgroundLayer& bottom = bg->layers[bg->layer_count - 1];
+        if (bottom.bg_clip && bottom.bg_clip != CSS_VALUE_BORDER_BOX) return false;
+        for (int index = 0; index < bg->layer_count; index++) {
+            const BackgroundLayer& layer = bg->layers[index];
+            if (layer.image || layer.gradient_type != GRADIENT_NONE ||
+                layer.linear_gradient || layer.radial_gradient || layer.conic_gradient) return false;
+        }
+    }
     if (bg->blend_mode && bg->blend_mode != CSS_VALUE_NORMAL) return false;
     return true;
 }
@@ -135,10 +144,12 @@ bool render_paint_boundary_path(void* context, RdtPath* path, Color color, const
     rdt_path_free(path); return false;
 }
 
-bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
-                                       float x, float y) {
+bool render_paint_boundary_emit_border_side(PaintList* paint, const BorderProp* border, Rect rect, size_t side) {
+    return render_border_emit_side(rect, border, side, false, render_paint_boundary_path, paint);
+}
+
+bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view, Rect rect) {
     if (!paint_list || !view || !view->bound) return false;
-    Rect rect = {x, y, view->width, view->height};
     if (render_paint_boundary_emit_fragmented_simple(paint_list, view, rect)) return true;
     // continuous SVG/PDF retain their direct per-side painter beyond the uniform-color fast path.
     if (view->bound->border && !boundary_border_uniform_color(view->bound->border)) return false;
@@ -242,7 +253,7 @@ bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* bound, 
         if (boundary_border_side_visible(widths[i], border->styles[i], border->colors[i])) {
             if (uniform_color && border->styles[i] == CSS_VALUE_SOLID) {
                 boundary_emit_border_side(paint_list, side_x[i], side_y[i], side_w[i], side_h[i], border->colors[i]);
-            } else if (!render_border_emit_side(rect, border, i, false, render_paint_boundary_path, paint_list)) return false;
+            } else if (!render_paint_boundary_emit_border_side(paint_list, border, rect, i)) return false;
         }
     }
     return true;
@@ -288,8 +299,10 @@ bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* 
             continue;
         }
 
-        float shadow_radii[4];
-        for (int i = 0; i < 4; i++) shadow_radii[i] = fmaxf(0.0f, radii[i] + spread);
+        Corner radius = render_path_uniform_corner(radii[0], radii[1], radii[2], radii[3]);
+        Corner shadow_radius = render_geometry_outset_corners(&radius, width, height,
+            spread, spread, spread, spread);
+        const float* shadow_radii = shadow_radius.horizontal;
 
         float exclude_params[RDT_CLIP_PARAM_COUNT] = {
             x, y, width, height,

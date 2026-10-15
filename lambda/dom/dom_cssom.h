@@ -124,6 +124,8 @@ Item dom_cssom_rule_decl_get_property(Item decl_item, Item prop_name);
  * @return The value that was set
  */
 Item dom_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value);
+// native UI defaults use the same declaration replacement and notification path.
+bool dom_cssom_set_inline_property(void* element, const char* property, const char* value);
 
 /**
  * Call method on a CSSStyleDeclaration wrapper.

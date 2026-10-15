@@ -647,12 +647,10 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
         // Simple insertion sort (stable, good for small arrays)
         for (int i = 1; i < count; i++) {
             ViewBlock* key = grid_layout->grid_items[i];
-            GridItemProp* key_gi = grid_item_prop(key);
-            int key_order = key_gi ? key_gi->order : 0;
+            int key_order = layout_item_order(key);
             int j = i - 1;
             while (j >= 0) {
-                GridItemProp* j_gi = grid_item_prop(grid_layout->grid_items[j]);
-                int j_order = j_gi ? j_gi->order : 0;
+                int j_order = layout_item_order(grid_layout->grid_items[j]);
                 if (j_order > key_order) {
                     grid_layout->grid_items[j + 1] = grid_layout->grid_items[j];
                     j--;

@@ -679,7 +679,7 @@ void render_outline(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
 bool render_paint_boundary_emit_full(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect) {
     if (!paint || !view) return false;
     if (!view->bound) return true;
-    if (render_paint_boundary_emit_simple(paint, view, rect.x, rect.y)) return true;
+    if (render_paint_boundary_emit_simple(paint, view, rect)) return true;
     const BoundaryProp* boundary = view->boundary();
     if (boundary->box_shadow) render_paint_boundary_emit_outer_shadows(paint, view, rect.x, rect.y);
     if (boundary->background) render_paint_background(paint, ui, view, rect, RENDER_EXPORT_TARGET_PDF);

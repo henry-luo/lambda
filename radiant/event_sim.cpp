@@ -1283,6 +1283,33 @@ static SimEvent* parse_sim_event_fail(SimEvent* ev) {
     return NULL;
 }
 
+static bool sim_parse_pointer_capability(ItemReader value, uint8_t* result) {
+    const char* text = value.cstring();
+    if (!text) return false;
+    const struct {const char* name; uint8_t flag;} entries[] = {
+        {"none", CSS_POINTER_NONE}, {"coarse", CSS_POINTER_COARSE}, {"fine", CSS_POINTER_FINE}};
+    for (const auto& entry : entries) if (strcmp(text, entry.name) == 0) {
+        *result = entry.flag; return true;
+    }
+    return false;
+}
+
+static bool sim_parse_input_capabilities(MapReader& reader, CssInputCapabilities* input) {
+    input->known = true;
+    ItemReader pointers = reader.get("any_pointer");
+    ItemReader hover = reader.get("hover"), any_hover = reader.get("any_hover");
+    if (!sim_parse_pointer_capability(reader.get("pointer"), &input->pointer) ||
+        (!pointers.isArray() && !pointers.isList()) || !hover.isBool() || !any_hover.isBool()) return false;
+    input->hover = hover.asBool(); input->any_hover = any_hover.asBool();
+    ArrayReader values = pointers.asArray();
+    for (size_t i = 0; i < values.length(); i++) {
+        uint8_t flag = 0;
+        if (!sim_parse_pointer_capability(values.get(i), &flag) || flag == CSS_POINTER_NONE) return false;
+        input->any_pointer |= flag;
+    }
+    return css_input_capabilities_valid(input);
+}
+
 // Parse a single event from MapReader
 static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     SimEvent* ev = event_sim_alloc_event(ctx);
@@ -1549,6 +1576,13 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         ev->y = sim_number_as_float(reader.get("height"));
         if (ev->x <= 0 || ev->y <= 0) {
             log_error("event_sim: resize requires positive width and height");
+            return parse_sim_event_fail(ev);
+        }
+    }
+    else if (strcmp(type_str, "input_capabilities") == 0) {
+        ev->type = SIM_EVENT_SET_INPUT_CAPABILITIES;
+        if (!sim_parse_input_capabilities(reader, &ev->input_capabilities)) {
+            log_error("event_sim: input_capabilities requires consistent pointer, any_pointer, hover and any_hover values");
             return parse_sim_event_fail(ev);
         }
     }
@@ -4112,6 +4146,15 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                                                      match_index);
             if (state) doc_state_request_repaint(state);
             log_info("event_sim: select_option - selected index %d", match_index);
+            break;
+        }
+
+        case SIM_EVENT_SET_INPUT_CAPABILITIES: {
+            bool changed = radiant_set_input_capabilities(uicon, &ev->input_capabilities);
+            log_info("event_sim: input capabilities %s", changed ? "changed" : "unchanged");
+            DomDocument* doc = uicon->document;
+            sim_reflow_if_pending(doc, doc ? (DocState*)doc->state : nullptr);
+            event_sim_render_surface(uicon);
             break;
         }
 

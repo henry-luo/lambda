@@ -83,12 +83,13 @@ TEST_F(GraphParserTest, ParserLocBudget) {
     ASSERT_GT(shared, 0u);
     ASSERT_GT(header, 0u);
     EXPECT_LE(dot, 471u);
-    EXPECT_LE(mermaid, 2696u);
-    EXPECT_LE(structurizr, 800u);
-    EXPECT_LE(structurizr_resolver, 400u);
-    EXPECT_LE(shared, 254u);
-    EXPECT_LE(header, 109u);
-    EXPECT_LE(dot + mermaid + structurizr + structurizr_resolver + shared + header, 4232u);
+    EXPECT_LE(mermaid, 2902u);
+    EXPECT_LE(structurizr, 429u);
+    EXPECT_LE(structurizr_resolver, 273u);
+    EXPECT_LE(shared, 227u);
+    EXPECT_LE(header, 107u);
+    // the sequence-family audit and exact six-unit ceilings are recorded in §19.3.5.
+    EXPECT_LE(dot + mermaid + structurizr + structurizr_resolver + shared + header, 4409u);
 }
 
 // Test DOT graph parsing

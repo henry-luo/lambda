@@ -1585,32 +1585,18 @@ TEST_F(HtmlCssIntegrationTest, AVLTreePerformance_MultipleProperties) {
 
     // Apply many properties to test AVL tree performance
     const int num_properties = 50;
-    CssPropertyCode properties[] = {
-        CSS_PROPERTY_COLOR,
-        CSS_PROPERTY_BACKGROUND_COLOR,
-        CSS_PROPERTY_WIDTH,
-        CSS_PROPERTY_HEIGHT,
-        CSS_PROPERTY_MARGIN,
-        CSS_PROPERTY_PADDING,
-        CSS_PROPERTY_BORDER,
-        CSS_PROPERTY_FONT_SIZE,
-        CSS_PROPERTY_FONT_FAMILY,
-        CSS_PROPERTY_DISPLAY
-    };
+    const char* declarations[] = {"color:red", "background-color:blue", "width:10px",
+        "height:20px", "margin:1px", "padding:2px", "border:1px solid black",
+        "font-size:12px", "font-family:Arial", "display:block"};
 
-    // Apply declarations
+    // exercise storage with valid declarations; invalid placeholder keywords are rejected.
     for (int i = 0; i < num_properties; i++) {
-        CssPropertyCode prop_id = properties[i % 10];
-
-        CssDeclaration* decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
-        decl->property_code = prop_id;
-        decl->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
-        decl->value->type = CSS_VALUE_TYPE_KEYWORD;
-        decl->value->data.keyword = css_enum_by_name("value");
+        const char* text = declarations[i % 10];
+        CssDeclaration* decl = css_parse_declaration_text(text, strlen(text), pool);
+        ASSERT_NE(decl, nullptr);
         decl->specificity = css_specificity_create(0, 0, 1, 0, false);
         decl->origin = CSS_ORIGIN_AUTHOR;
-
-        dom_element_apply_declaration(div, decl);
+        ASSERT_TRUE(dom_element_apply_declaration(div, decl));
     }
 
     // Verify O(log n) lookups work

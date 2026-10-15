@@ -66,12 +66,15 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
                 text_view->rect = nullptr;
                 text_view->width = 0;
                 text_view->height = 0;
-            }
+            } else if (child->is_element()) view_pool_reset_retained_subtree(lycon->doc->view_tree, child->as_element());
         }
     }
 
     LayoutContextScope lscope(lycon);
     View* saved_view = lycon->view;
+    // width refinement reuses the generated text resolved during the source-order pass.
+    CounterContext* saved_counters = lycon->counter_context;
+    lycon->counter_context = nullptr;
 
     float content_width = cap->width;
     BoxMetrics cap_box = layout_box_metrics(cap);
@@ -88,6 +91,7 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
     }
 
     layout_table_caption_content_finish(lycon, cap, cap_box.pad_border_v);
+    lycon->counter_context = lam::up(saved_counters);
 
     log_debug("Caption re-layout complete: width=%.1f, height=%.1f", cap->width, cap->height);
 

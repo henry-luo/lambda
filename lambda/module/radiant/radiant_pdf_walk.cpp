@@ -263,12 +263,16 @@ bool pdf_walk_simple_boundary(const BoundaryProp* bound) {
 
 void pdf_walk_boundary(RenderContext* base, ViewBlock* view, float x, float y) {
     PdfWalkContext* ctx = (PdfWalkContext*)base;
+    // table captions and fragmented boundaries share the export paint rectangle.
+    Rect rect = render_geometry_boundary_rect(view, {x, y, view->width, view->height});
+    x = rect.x; y = rect.y;
     ctx->frame.x = x; ctx->frame.y = y;
-    bool direct = !ctx->effect.active && pdf_walk_simple_boundary(view->boundary());
+    bool direct = !ctx->effect.active && rect.width == view->width && rect.height == view->height &&
+        pdf_walk_simple_boundary(view->boundary());
     if (direct) pdf_walk_dispatch(ctx, "boundary", ctx->element, view);
-    PdfPaintBatch batch(ctx, {x, y, view->width, view->height});
-    if (!render_paint_boundary_emit_full(batch.paint, ctx->ui_context, view,
-            {x, y, view->width, view->height})) pdf_walk_fail(ctx, "cannot record boundary geometry");
+    PdfPaintBatch batch(ctx, rect);
+    if (!render_paint_boundary_emit_full(batch.paint, ctx->ui_context, view, rect))
+        pdf_walk_fail(ctx, "cannot record boundary geometry");
     batch.finish(!direct);
 }
 void pdf_walk_outline(RenderContext* base, ViewBlock* view, float x, float y) {
@@ -291,10 +295,11 @@ void pdf_walk_text(RenderContext* base, ViewText* view, float x, float y, FontBo
         (style->text_deco && style->text_deco != CSS_VALUE_NONE));
     RenderTextPaintIterator fragments(ctx, view);
     while (!pdf_walk_aborted(ctx)) {
-        TextRect* rect = fragments.next();
+        TextRect* rect = fragments.next(true);
         if (!rect) break;
         PaintGlyphRun run = {};
-        lam::Temp<char> segment(render_text_rect_glyph_run(view, rect, font, color, x, y, &run));
+        lam::Temp<char> segment(render_text_rect_glyph_run(view, rect, font, color, x, y, &run,
+            fragments.reverses_clusters()));
         if (!segment) { pdf_walk_fail(ctx, "cannot prepare text fragment"); break; }
         if (!segment.get()[0]) continue;
         radiant_pdf_link(*ctx->links, view, {x + rect->x, y + rect->y, rect->width, rect->height});
@@ -416,7 +421,10 @@ void pdf_walk_end_transform(RenderContext* base) {
 bool pdf_walk_begin_clip(RenderContext* base, ViewElement* view, float x, float y, RenderClipKind kind) {
     PdfWalkContext* ctx = (PdfWalkContext*)base;
     PdfPaintBatch batch(ctx, {});
-    bool clipped = render_clip_push_vector(batch.paint, view, x, y, kind);
+    // open overflow axes use the page bounds projected through the shared walk transform.
+    bool clipped = render_clip_push_vector(batch.paint, view, x, y, kind,
+        {0.0f, 0.0f, ctx->frame.page_width, ctx->frame.page_height},
+        ctx->has_overflow_clip_transform ? &ctx->overflow_clip_transform : nullptr);
     if (clipped && !ctx->effect.active) {
         const PaintPushClip& clip = batch.paint->data()[0].push_clip;
         ctx->frame.clip_path = clip.clip_path;
@@ -572,7 +580,8 @@ bool pdf_secondary_fragment(void* data, const LayoutViewNode* node, bool enterin
     }
     ctx->frame.x = node->rect.x; ctx->frame.y = node->rect.y;
     if (!entering) {
-        if (node->paint_box && node->computed_boundary && node->computed_boundary->outline) {
+        // retained box paint already includes its outline.
+        if (node->paint_box && !node->paint_before && node->computed_boundary && node->computed_boundary->outline) {
             const float* outset = node->border_outset;
             Rect rect = {node->rect.x - outset[3], node->rect.y - outset[0],
                 node->rect.width + outset[1] + outset[3], node->rect.height + outset[0] + outset[2]};
@@ -652,6 +661,19 @@ bool pdf_secondary_image(void* data, const LayoutViewNode* node, const PaintImag
     ctx->frame.image_box = nullptr;
     return !pdf_walk_aborted(ctx);
 }
+bool pdf_secondary_paint(void* data, const PaintList* source) {
+    PdfWalkContext* ctx = (PdfWalkContext*)data;
+    const LayoutViewNode* node = ctx->frame.fragment;
+    Rect rect = node ? Rect{node->rect.x, node->rect.y, node->rect.width, node->rect.height} :
+        Rect{0, 0, ctx->frame.page_width, ctx->frame.page_height};
+    PdfPaintBatch batch(ctx, rect);
+    // the committed edition owns retained payloads across repeated PDF visits.
+    if (!paint_list_borrow_commands(batch.paint, source)) {
+        pdf_walk_fail(ctx, "cannot borrow selected page paint"); return false;
+    }
+    batch.finish();
+    return !pdf_walk_aborted(ctx);
+}
 bool pdf_secondary_page(ViewTree* tree, const ViewPageBox* selected, const ViewPagePlacement*, void* data) {
     PdfWalkContext* ctx = (PdfWalkContext*)data;
     const ViewPageBox* page = view_tree_page_material(tree, selected);
@@ -684,7 +706,8 @@ bool pdf_secondary_page(ViewTree* tree, const ViewPageBox* selected, const ViewP
     ctx->frame.matrix = rdt_matrix_multiply(&scale, &flip);
     pdf_walk_dispatch(ctx, "begin_page", ctx->page_schema, page);
     SecondaryViewVisitor visitor = {ctx, pdf_secondary_fragment, pdf_secondary_boundary,
-        pdf_secondary_fill, pdf_secondary_clip, pdf_secondary_glyph, pdf_secondary_image};
+        pdf_secondary_fill, pdf_secondary_clip, pdf_secondary_glyph, pdf_secondary_image,
+        pdf_secondary_paint, true};
     if (!pdf_walk_aborted(ctx) && !layout_secondary_visit_page(tree, selected, &visitor))
         pdf_walk_fail(ctx, "selected page fragment traversal failed");
     ctx->frame.fragment = nullptr;

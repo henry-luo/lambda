@@ -266,6 +266,7 @@ JS_FORWARD_EXPRESSION(int, js_animation_frame_has_pending, (void),
     js_active_runtime_state && runtime_job_queue_size(&animation_frame_queue) > 0 ? 1 : 0)
 
 static void js_event_loop_render_checkpoint(void) {
+    js_fetch_dispatch_pending();
     if (!dom_get_ui_context() || dom_is_host_driven_loop()) {
         js_microtask_flush();
         return;

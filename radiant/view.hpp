@@ -7,6 +7,7 @@
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/math_utils.h"
+#include "../lib/rdt_geometry_types.h"
 #include "../lib/memtrack.h"
 #include "../lib/mem_kind.hpp"
 #include "../lib/font/font.h"
@@ -16,6 +17,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_value.hpp"
 #include "../lambda/input/css/css_style.hpp"
+#include "../lambda/input/css/css_environment.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "scale.hpp"
 #include <stdbool.h>
@@ -64,6 +66,7 @@ struct CssRule;
 struct SelectorMatcher;
 struct CssEngine;
 struct CssStylesheet;
+struct LayoutContext;
 
 constexpr int MAX_RADIANT_CSS_TREE_DEPTH = 512;
 void state_configure_selector_matcher(struct DocState* state, SelectorMatcher* matcher);
@@ -90,7 +93,7 @@ struct CssBackgroundWinner {
 };
 // layout and CSSOM share cascade competition, substitution and shorthand decoding.
 CssBackgroundWinner background_component_winner(DomElement* element, Pool* scratch,
-    CssPropertyCode property, int pseudo_type = 0);
+    CssPropertyCode property, int pseudo_type = 0, LayoutContext* context = nullptr);
 int background_list_count(const CssValue* value);
 const CssValue* background_winner_component(Pool* scratch, const CssBackgroundWinner& winner,
     CssPropertyCode property, int index);
@@ -105,6 +108,9 @@ String* css_prop_serialize_computed_value(Pool* pool, DomElement* element,
 bool css_prop_serialize_cascaded_value(DomElement* element, CssPropertyCode id,
     int pseudo_type, StringBuf* out, bool preserve_color_model = false);
 bool css_prop_compute_numeric_value(DomElement* element, const CssValue* value, CssMathResult* result);
+// declaration computation supplies factors when the applied item record is absent.
+bool css_prop_compute_declared_flex_factor(DomElement* element, CssPropertyCode id, float* result);
+bool css_prop_compute_declared_flex_basis(DomElement* element, CssFlexBasisValue* result);
 String* css_prop_serialize_svg_value(Pool* pool, DomElement* declaring,
     CssPropertyCode id, const CssValue* value);
 String* css_prop_serialize_custom_property(Pool* pool, DomElement* element,
@@ -194,6 +200,7 @@ typedef enum TimingFunctionType {
     TIMING_LINEAR = 0,
     TIMING_CUBIC_BEZIER,
     TIMING_STEPS,
+    TIMING_PIECEWISE_LINEAR,
 } TimingFunctionType;
 
 typedef enum StepPosition {
@@ -203,7 +210,8 @@ typedef enum StepPosition {
     STEP_JUMP_NONE,
 } StepPosition;
 
-// tier-2: view-pool, rebuilt each relayout
+// POD snapshot: piecewise points borrow the configuration/keyframe owner pool.
+// scheduler instances instead own a copy in their scheduler pool (D4.5.1v4).
 typedef struct TimingFunction {
     TimingFunctionType type;
     union {
@@ -215,11 +223,17 @@ typedef struct TimingFunction {
             double count;
             StepPosition position;
         } steps;
+        struct {
+            const CssLinearEasingPoint* points;
+            int count;
+        } piecewise;
     };
 } TimingFunction;
 
 void timing_cubic_bezier_init(TimingFunction* tf, float x1, float y1, float x2, float y2);
 float timing_function_eval(const TimingFunction* tf, float t, bool before = false);
+bool timing_function_assign(Pool* pool, TimingFunction* owned, const TimingFunction* source);
+void timing_function_clear(Pool* pool, TimingFunction* owned);
 bool animation_easing_before(const struct AnimationInstance* anim);
 
 extern TimingFunction TIMING_EASE;
@@ -312,15 +326,6 @@ double animation_clock_time(const AnimationScheduler* scheduler, const Animation
 void animation_instance_pause(AnimationInstance* anim, double now);
 void animation_instance_sample(AnimationInstance* anim, double now, bool preserve_timeline = false);
 void animation_instance_resume(AnimationInstance* anim, double now);
-
-// 3x3 affine transform matrix shared by view transforms and render backends.
-// The layout matches ThorVG's Tvg_Matrix, but the type itself is Radiant-owned.
-// tier-2: view-pool, rebuilt each relayout
-typedef struct {
-    float e11, e12, e13;   // row 1: scale-x, shear-x, translate-x
-    float e21, e22, e23;   // row 2: shear-y, scale-y, translate-y
-    float e31, e32, e33;   // row 3: 0, 0, 1
-} RdtMatrix;
 
 // 4x4 homogeneous matrix used while a preserve-3d subtree is accumulated.
 // The 2D RdtMatrix remains the backend representation after projection.
@@ -1898,6 +1903,11 @@ typedef struct BoundaryProp {
     float margin_chain_negative;  // most negative margin in the pending collapse chain
 } BoundaryProp;
 
+inline const Margin* view_boundary_flow_margin(const BoundaryProp* boundary) {
+    if (!boundary) return nullptr;
+    return boundary->has_flow_margin ? &boundary->flow_margin : &boundary->margin;
+}
+
 // shared lazy border allocation for style resolution and animation sampling.
 BorderProp* radiant_ensure_border_prop(BoundaryProp* boundary, Pool* pool);
 
@@ -1943,6 +1953,7 @@ typedef struct PositionProp {
         bool inset_present[4];
     };  // which offsets are set
     bool has_custom_layout_z_index;
+    float inline_relative_y; // applied inline block-axis offset retained across final line alignment
     CssEnum clear;        // clear property for floats
     CssEnum float_prop;   // float property (left, right, none)
     lam::Up<ViewBlock> first_abs_child;   // first child absolute/fixed positioned view
@@ -2505,8 +2516,10 @@ typedef enum ScrollSnapAxis {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct ScrollProp {
     CssEnum overflow_x, overflow_y;
+    CssEnum default_overflow_x, default_overflow_y; // HTML defaults before author cascade, for dirty CSSOM reads
     CssEnum overscroll_x, overscroll_y;
     CssEnum scroll_behavior;
+    CssEnum resize;
     CssEnum overflow_clip_box;
     float overflow_clip_margin;
     ScrollSpacingValue scroll_margin[4], scroll_padding[4];
@@ -3145,6 +3158,7 @@ LAM_NODE_OF(LayoutFragmentBox, NodeViewTree);
 // The document's ViewTree shell lives in the document's pool; the document owns
 // it across retained layout resets.
 lam::Own<ViewTree> view_tree_shell_create(DomDocument* doc);
+void view_pool_reset_retained_subtree(ViewTree* tree, DomNode* root);
 // Destroys the tree's storage and releases the shell into `doc`'s pool; clears the field.
 void view_tree_shell_destroy(DomDocument* doc, lam::Own<ViewTree>& tree);
 LAM_NODE_OF(RadiantBorderSide, NodeStack);
@@ -3888,7 +3902,7 @@ CssKeyframes* keyframe_registry_find(KeyframeRegistry* registry, const char* nam
 // CSS Animation Configuration (per element, populated during style resolution)
 // ============================================================================
 
-// tier-2: view-pool, rebuilt each relayout
+// scratch configuration: timing points borrow the computation pool.
 typedef struct CssAnimProp {
     lam::Up<const char> name;           // animation-name (keyframes reference)
     double duration;            // animation-duration in seconds
@@ -3913,6 +3927,7 @@ typedef struct CssTransitionProp {
 
 typedef struct CssTransitionList {
     const CssValue* values[4];   // scratch computed lists, cycled against transition-property
+    Pool* pool;                 // owns parsed timing points alongside the computed lists
 } CssTransitionList;
 
 void css_transition_resolve_config(DomElement* element, Pool* pool, CssTransitionList* list);
@@ -3926,7 +3941,7 @@ bool css_animation_parse_property_value(CssPropertyCode property,
                                         CssAnimatedProp* out,
                                         Pool* pool);
 bool css_animation_parse_timing_function_text(const char* value,
-                                              TimingFunction* out);
+                                              TimingFunction* out, Pool* pool);
 
 // ============================================================================
 // CSS Animation Runtime State (attached to AnimationInstance.state)
@@ -4390,6 +4405,7 @@ typedef struct UiContext {
     float window_height;   // window pixel height (actual framebuffer size, physical pixels)
     float viewport_width;  // intended viewport width (CSS logical pixels, for vh/vw units)
     float viewport_height; // intended viewport height (CSS logical pixels, for vh/vw units)
+    CssInputCapabilities input_capabilities; // window-owned media environment, including explicit unknown
     lam::Up<ImageSurface> surface;  // the current render target: window_surface, or one an export pass swaps in
     lam::Own<ImageSurface> window_surface;  // the surface create_surface made; destroy releases it
     bool render_failed;             // sticky host failure; never present an invalid paint stream

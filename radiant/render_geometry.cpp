@@ -140,6 +140,32 @@ Rect render_geometry_outer_shadow_rect(Rect border_box, float offset_x,
             max(0.0f, border_box.height + 2.0f * spread)};
 }
 
+static float render_geometry_outset_radius(float radius, float outset, float coverage) {
+    if (outset <= 0.0f || radius >= outset || coverage >= 1.0f)
+        return max(0.0f, radius + outset);
+    // expand the polynomial so very small radii do not disappear through cancellation.
+    float ratio = radius / outset;
+    float coverage_cube = coverage * coverage * coverage;
+    float reduced_spread = radius * (3.0f - ratio * (3.0f - ratio));
+    return radius + reduced_spread * (1.0f - coverage_cube) + outset * coverage_cube;
+}
+
+Corner render_geometry_outset_corners(const Corner* radius, float width, float height,
+        float top, float right, float bottom, float left) {
+    Corner result = radius ? *radius : Corner{};
+    result.expressions = nullptr;
+    float horizontal[4] = {left, right, right, left};
+    float vertical[4] = {top, top, bottom, bottom};
+    for (size_t corner = 0; corner < 4; corner++) {
+        // CSS Backgrounds 3 section 4.2 preserves sharp corners and accounts for elliptical edge coverage.
+        float coverage = width > 0.0f && height > 0.0f
+            ? 2.0f * min(result.horizontal[corner] / width, result.vertical[corner] / height) : 0.0f;
+        result.horizontal[corner] = render_geometry_outset_radius(result.horizontal[corner], horizontal[corner], coverage);
+        result.vertical[corner] = render_geometry_outset_radius(result.vertical[corner], vertical[corner], coverage);
+    }
+    return result;
+}
+
 float render_geometry_filter_effect_expand(const FilterProp* filter, float density) {
     if (!filter || !filter->functions) return 0.0f;
     if (!(density > 0.0f) || !isfinite(density)) density = 1.0f;

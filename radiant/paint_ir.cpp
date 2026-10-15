@@ -92,7 +92,7 @@ static void paint_free_owned_glyph_run_text(PaintGlyphRun* run) {
 }
 
 static void paint_cmd_free_owned_payload(PaintCmd* cmd) {
-    if (!cmd) return;
+    if (!cmd || cmd->borrowed_payload) return;
     // deferred lowerers can transfer heap payloads into PaintList commands; central cleanup prevents backend-specific ownership switches from drifting.
     switch (cmd->op) {
     case PAINT_PUSH_CLIP:
@@ -176,6 +176,19 @@ void paint_list_destroy(PaintList* pl) {
 
 int paint_list_count(const PaintList* pl) {
     return pl ? pl->item_count() : 0;
+}
+
+bool paint_list_borrow_commands(PaintList* destination, const PaintList* source) {
+    if (!destination || !source || destination == source) return false;
+    size_t start = destination->size();
+    for (const PaintCmd& original : *source) {
+        PaintCmd copy = original;
+        copy.borrowed_payload = true;
+        // a deferred image remains owned by the edition across repeated lowerings.
+        if (copy.op == PAINT_DRAW_IMAGE_RESOURCE) copy.draw_image_resource.release_image = nullptr;
+        if (!destination->append(copy)) { destination->rewind(start); return false; }
+    }
+    return true;
 }
 
 bool paint_list_take_path_payload(PaintList* pl, int index, PaintOp expected_op,

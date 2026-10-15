@@ -1,0 +1,28 @@
+<!doctype html><meta charset="utf-8">
+<style>
+html,body{margin:0}button{height:24px}
+#owner{font-size:20px;grid-auto-columns:3em;grid-template-rows:[start] calc(1em + 3px) [end]}
+#owner::before{content:"A";display:block;font-size:var(--pseudo-font,5px);grid-auto-columns:2em;
+    grid-template-rows:[start] calc(2em + 3px) [end];grid-template-columns:repeat(2,[a] 1em [b])}
+#owner::after{content:"B";display:block;font-size:8px;grid-auto-columns:3em}
+#owner.inherit::before{grid-auto-columns:inherit;grid-template-rows:inherit}
+#patch{height:12px;background:red}
+</style>
+<button id="check">Check</button><button id="change">Change fonts</button><button id="inherit">Inherit tracks</button>
+<output id="report"></output><div id="owner"></div><div id="patch"></div>
+<script>
+(function(){
+    var owner=document.getElementById('owner'),report=document.getElementById('report');
+    function record(prefix){
+        var before=getComputedStyle(owner,'::before'),after=getComputedStyle(owner,'::after');
+        report.setAttribute('data-'+prefix+'before',[before.gridAutoColumns,before.gridTemplateRows,before.gridTemplateColumns].join('|'));
+        report.setAttribute('data-'+prefix+'after',after.gridAutoColumns);
+        document.getElementById('patch').style.width=before.gridAutoColumns;
+    }
+    document.getElementById('check').onclick=function(){record('');};
+    document.getElementById('change').onclick=function(){
+        owner.style.setProperty('--pseudo-font','7px');owner.style.fontSize='30px';record('dirty-');
+    };
+    document.getElementById('inherit').onclick=function(){owner.className='inherit';record('inherited-');};
+})();
+</script>

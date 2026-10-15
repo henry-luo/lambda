@@ -24,6 +24,11 @@ struct MvpLmdRegExp : Map {
     uint32_t original_source_len;
     uint32_t original_flags_len;
 };
+struct MvpLmdRegExpAccessor {
+    const JsBuiltinMethodSpec* spec;
+    NameRef key;
+    ShapeEntry* field;
+};
 
 static MvpLmdRegExp* regexp_record(Item value, MvpLmdLibraryState* state) {
     return state && get_type_id(value) == LMD_TYPE_MAP &&
@@ -84,7 +89,8 @@ static NameId regexp_symbol_id(int operation) {
         default: return 0;
     }
 }
-static bool regexp_ordinary(MvpLmdLibraryState* state, Item value, int symbol_operation = 0) {
+static bool regexp_ordinary(MvpLmdLibraryState* state, Item value, int symbol_operation = 0,
+        bool check_flags = true) {
     MvpLmdRegExp* object = regexp_record(value, state);
     if (!object) return false;
     TypeMap* shape = (TypeMap*)object->type;
@@ -93,10 +99,16 @@ static bool regexp_ordinary(MvpLmdLibraryState* state, Item value, int symbol_op
     ShapeEntry* link = typemap_hash_lookup_key(shape, state->prototype_key);
     if (link && map_shape_field_to_item(object->data, link).item != state->regexp.values[1].item) return false;
     Map* prototype = state->regexp.values[1].map;
+    TypeMap* prototype_shape = (TypeMap*)prototype->type;
     // accessor shapes are private and may mutate in place: prove each getter from raw descriptor storage.
-    for (int i = 0; !state->regexp_protocol_unobserved && i < state->regexp_accessor_count; i++) {
-        const JsBuiltinMethodSpec* spec = state->regexp_accessors[i];
-        ShapeEntry* field = typemap_hash_lookup((TypeMap*)prototype->type, spec->name, spec->len);
+    for (int i = 0; check_flags && !state->regexp_protocol_unobserved && i < state->regexp_accessor_count; i++) {
+        const MvpLmdRegExpAccessor& accessor = state->regexp_accessors[i];
+        const JsBuiltinMethodSpec* spec = accessor.spec;
+        // match/replace observe flags, but never the pattern's public source getter.
+        if (spec->builtin_id == JS_BUILTIN_REGEXP_GET_SOURCE) continue;
+        // initial entries remain owned by the rooted prototype only while its shape matches.
+        ShapeEntry* field = prototype_shape == state->regexp_accessor_shape ? accessor.field :
+            typemap_hash_lookup_key(prototype_shape, accessor.key);
         JsAccessorCell* cell = js_shape_entry_accessor_pair(field);
         if (!cell || (field->flags & JSPD_DELETED) || get_type_id(cell->getter) != LMD_TYPE_FUNC ||
                 cell->getter.function->ptr != (fn_ptr)regexp_protocol ||
@@ -133,7 +145,7 @@ static const JsRegExpOps regexp_ops = {
         MvpLmdRegExp* native = regexp_record(object, mvp_lmd_program_library());
         ShapeEntry* field = native ? typemap_hash_lookup((TypeMap*)native->type, "lastIndex", 9) : NULL;
         if (field && !(field->flags & (JSPD_IS_ACCESSOR | JSPD_NON_WRITABLE)))
-            return map_shape_set_resolved(native, key, field, value) ? ItemNull : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            return map_shape_set_resolved(native, key, field, value, false) ? ItemNull : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
         return mvp_lmd_property_with_receiver(object, Item{.item = s2it(key)}, value,
             LMD_PROP_SET | LMD_PROP_STRICT, object);
     },
@@ -284,7 +296,7 @@ static const JsRegExpIteratorOps regexp_iterator_ops = {
     [](Item iterator) {
         NameRef key = mvp_lmd_program_library()->regexp_iterator_keys[4];
         ShapeEntry* field = typemap_hash_lookup_key((TypeMap*)iterator.map->type, key);
-        return map_shape_set_resolved(iterator.map, key, field, Item{.item = ITEM_TRUE})
+        return map_shape_set_resolved(iterator.map, key, field, Item{.item = ITEM_TRUE}, false)
             ? ItemNull : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     },
     [](Item value, bool done) { return mvp_lmd_iterator_result(NULL, value, done); }
@@ -300,8 +312,9 @@ static Item regexp_protocol(Context*, MvpLmdProgram*, Item* args, uint64_t count
         return js_regexp_match_all_with_ops(receiver, count ? args[0] : Item{.item = ITEM_JS_UNDEFINED}, &regexp_ops, &regexp_iterator_ops);
     if (operation == JS_BUILTIN_REGEXP_MATCHALL_ITER_NEXT)
         return js_regexp_match_all_next_with_ops(receiver, &regexp_ops, &regexp_iterator_ops);
-    if (operation == JS_BUILTIN_REGEXP_TEST && state->regexp_protocol_unobserved && count &&
-            get_type_id(args[0]) == LMD_TYPE_STRING && regexp_ordinary(state, receiver))
+    // primitive strings cannot reenter before Get(exec); test reads no public flag getters.
+    if (operation == JS_BUILTIN_REGEXP_TEST && count &&
+            get_type_id(args[0]) == LMD_TYPE_STRING && regexp_ordinary(state, receiver, 0, false))
         return regexp_exec(state, receiver, args[0], true);
     return js_regexp_protocol_with_ops(operation, receiver, args, count, &regexp_ops);
 }
@@ -511,8 +524,8 @@ Item mvp_lmd_regexp_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state
         if (!method) break;
         if (method->owner == JS_BUILTIN_OWNER_REGEXP_ACCESSOR_INTERNAL) state->regexp_accessor_count++;
     }
-    state->regexp_accessors = (const JsBuiltinMethodSpec**)pool_calloc(context->pool,
-        state->regexp_accessor_count * sizeof(const JsBuiltinMethodSpec*));
+    state->regexp_accessors = (MvpLmdRegExpAccessor*)pool_calloc(context->pool,
+        state->regexp_accessor_count * sizeof(MvpLmdRegExpAccessor));
     if (!state->regexp_accessors) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     if (state->regexp_iterator) {
         MvpLmdClass* cls = state->regexp_iterator;
@@ -542,9 +555,9 @@ Item mvp_lmd_regexp_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state
         if (item_is_error(function.get())) return function.get();
         if (method->builtin_id == JS_BUILTIN_REGEXP_EXEC) state->values[LMD_LIBRARY_REGEXP_EXEC] = function.get();
         if (method->property_kind == JS_BUILTIN_PROPERTY_ACCESSOR) {
-            state->regexp_accessors[accessor++] = method;
             String* key = heap_create_name(method->name, method->len);
             if (!key) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+            state->regexp_accessors[accessor++] = {method, key, NULL};
             result = mvp_lmd_define_accessor(state->regexp.values[1], Item{.item = s2it(key)},
                 function.get(), JSPD_NON_ENUMERABLE << 8);
         } else if (symbol) {
@@ -560,8 +573,16 @@ Item mvp_lmd_regexp_initialize(MvpLmdProgram* program, MvpLmdLibraryState* state
     }
     function.set(mvp_lmd_native_function(program, NULL, mvp_lmd_receiver_identity, 0, "get [Symbol.species]"));
     if (item_is_error(function.get())) return function.get();
-    return mvp_lmd_define_accessor(state->regexp.values[0], Item{.item = s2it(well_known_name_ref(JS_SYMBOL_SPECIES))},
+    result = mvp_lmd_define_accessor(state->regexp.values[0], Item{.item = s2it(well_known_name_ref(JS_SYMBOL_SPECIES))},
         function.get(), JSPD_NON_ENUMERABLE << 8);
+    if (item_is_error(result)) return result;
+    // pool-owned layout metadata borrows no Map data buffer or getter Item across GC.
+    state->regexp_accessor_shape = (TypeMap*)state->regexp.values[1].map->type;
+    for (int i = 0; i < state->regexp_accessor_count; i++) {
+        MvpLmdRegExpAccessor& entry = state->regexp_accessors[i];
+        entry.field = typemap_hash_lookup_key(state->regexp_accessor_shape, entry.key);
+    }
+    return result;
 }
 
 static Item regexp_property(Item owner, const char* key) {

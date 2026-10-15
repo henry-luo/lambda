@@ -1196,3 +1196,147 @@ control; the official SVG matrix passes 126 formats /2,466 assertions. These
 results qualify the horizontal/output-density profile, not broader FT-17
 shaping, fragmentation, ruby or vertical contexts. Deferred resources retain
 owned payloads under **D4.5.1v4 / D4.1.4v5**.
+
+## 18. Inside image-marker baseline contract (2026-10-15)
+
+**FT-18 — Horizontal inside marker images use the inline replaced baseline.** The separate
+`marker_baseline_probe/` compares natural 2px markers with equivalent inline
+images across three font sizes, normal/explicit line heights and empty/nonempty
+contents. Chromium aligns all twelve pairs; the protected affine checkpoint
+aligns none. Native markers remain at the line top. Their layout creates an
+image-sized fragment, but the final vertical-alignment dispatcher has no marker
+case. Small image markers also bypass the replaced-content flag and contribute
+only the font strut.
+
+[CSS Lists 3 §3.2/§3.5](https://www.w3.org/TR/css-lists-3/#marker-content)
+places an anonymous inline replaced image followed by a space inside the marker;
+an inside marker participates at the start of the inline contents.
+[CSS 2.2 §10.8.1](https://www.w3.org/TR/CSS22/visudet.html#propdef-vertical-align)
+aligns a baselineless inline box through its bottom margin edge. Preserve the
+marker font/space strut while contributing the image's bottom-edge ascent and
+replaced-content state. Final placement uses the existing baseline calculator
+and vertical-alignment helper, rather than a font-size-dependent paint offset.
+
+Qualify natural/density-adjusted image sizes, larger images, marker font struts,
+normal/explicit line heights, empty/text contents and causal font/source changes.
+Compare real pixels with independent inline-image references and keep the
+existing image-sampling/resource controls. No new declaration or image lifetime
+owner is needed (**D4.5.1v4 / D4.1.4v5**). Outside placement, default-sized
+gradients, wrapping, bidi/vertical and fragmented contexts need separate
+acceptance evidence; the current outside-marker policy must not be silently
+replaced by the inside-inline rule. This bounded P1.3 increment builds on the affine checkpoint, whose core gate
+passes all 6,964 core/input cases. Its implementation is under matching-source
+qualification. The expanded exploratory probe contains 64 rows:
+all 52 URL/density-image references agree in Chromium, against 20/52 image
+positions and 34/52 line boxes natively. Its twelve gradient references expose
+a separate default-object-size difference in Chromium; retain those records
+without treating them as acceptance controls for the intrinsic-image repair.
+
+
+FT-18 qualification draft: marker generation can precede the list item's line
+context. Refresh metrics from the current marker face on every reflow, resolve
+non-normal leading from the owner's computed value, and share
+`font_get_content_area_split` / `layout_apply_line_height_leading` with inline
+layout. This replaces a raw half-leading calculation that could add a fractional
+ascent/descent mismatch and an extra pixel. Image height also contributes to
+the existing atomic-extent bound. Native URL image positions now agree in
+52/52 exploratory pairs; 50/52 line pairs agree. In the two remaining normal
+large-font controls, the marker's 37px box agrees with Chromium while the
+nested-inline reference is 43px. Preserve that separate P1.3 strut defect.
+
+The 95-check live fixture includes zero leading and causal font, pseudo-font,
+image-density and suppression/restoration changes. Native passes all 95 against
+53/95 on the affine predecessor. Chromium passes 87/95: eight assertions differ
+because changing the resolution of a same-URL image-set retains the previous
+2px marker size despite correct computed CSS, even after 500ms settling. Static
+URL-density controls agree in Chromium. Keep all live assertions and the
+original 81-check records; do not change native sizing to match that cache
+behavior. The independent 48-case exporter supplies 96 pairs and 288 exact
+PNG/SVG/PDF comparisons at both densities, all passing with positive color
+coverage. The earlier sampling fixture's containing block moves from 24px to
+128px so baseline-aligned quarter turns remain visible; its comparisons and
+positive-color thresholds stay unchanged. Broader matching-source gates follow.
+
+
+The refreshed browser exporter check retains all exact comparisons: 112/160
+whole images match (64 sampling and 48 empty baseline pairs). In the 48
+nonempty baseline pairs, Chromium's marker-to-text spacing differs from the
+inline-image reference. Image bounds and line-box bounds agree in **96/96**
+baseline pairs at both densities. Keep the full-image failures alongside those
+geometry measurements; they do not establish matching marker text spacing.
+The single-space native marker model remains as specified by CSS Lists 3 §3.2.
+
+## 19. Nested inline font and block strut contract (2026-10-15)
+
+**FT-19 — Keep the block strut's font metrics and leading paired.** A marker-free
+24-row probe compares a 16px block containing 24/32/48px inline text with an
+equivalent large-font block. It varies normal/unitless leading, a small replaced
+image and text inside/outside the large span. Chromium agrees in all 24 line
+boxes; both the protected affine and marker-baseline checkpoints agree in 12.
+Normal lines with images are too tall; explicit-leading text-only lines lose
+one pixel. Original images and measurements remain under
+`temp/css_support_p0_p1_resume/nested_font_strut_probe/`.
+
+[CSS 2.2 §10.8.1](https://www.w3.org/TR/CSS22/visudet.html#leading) gives the
+block's zero-width strut its own font and line-height, while each inline box
+contributes its own leading-adjusted metrics. Snapshot block leading alongside
+the existing initial font metrics when establishing a formatting context.
+Entering a styled inline may change active leading but must not change that
+pair. Replaced-image descent, root-strut contribution, baseline placement and
+line finalization must read the block pair when they mean the block strut.
+Preserve valid zero leading. Reuse the existing block-metric initializer across
+formatting contexts instead of adding another font-metric implementation.
+
+Normalize each inline's metrics before taking the line union. Do not subtract
+the block font's rounding excess from an already normalized descendant union.
+Qualify the reproduced matrix, larger/smaller descendants, explicit lengths,
+zero leading, wrapping and causal font/leading changes with browser geometry
+and native pixels. Keep the marker regression and existing mixed-font controls.
+This adds layout-local scalar state, with no new declaration, font or image
+lifetime owner (**D4.5.1v4 / D4.1.4v5**). Vertical, bidi, shaping, ruby and
+fragmented layout remain separately qualified profiles.
+
+The first draft fixes all 24 line boxes and 126 live geometry/pixel checks, but
+unchanged full-image comparisons expose a second metric split: macOS normal
+leading divides an odd leading pixel equally, while unaligned single-font text
+keeps its original origin. A large descendant is finalized through the baseline
+and moves by half a pixel. Chromium matches all 24 text/image reference pairs.
+Apply the same floor-to-ascent/remainder-to-descent policy already used for
+explicit leading to platform normal leading. Initialize baseline text from its
+own normalized metrics, so the plain and mixed-font paths agree before and
+after final alignment. Preserve raw failed exports and browser controls.
+
+The narrow wrapping probe separately shows an image-only first fragment losing
+the enclosing large-font strut when its following word moves to the next line.
+An inline contributes its font/leading to every occupied line fragment, even
+when that fragment contains only replaced content. Publish that contribution
+before a child can close the line; do not invent a taller image or change the
+line-break opportunity. Empty/out-of-flow-only fragments retain their existing
+line-generation rules and need regression coverage.
+
+The broader draft exposed two applicability errors: initial letters and
+non-baseline alignment already own their line contributions. Preserve those
+paths. Publish the ordinary baseline strut ahead of replaced/forced-break
+children; text publishes its normalized metrics when it actually occupies a
+line, so collapsed trailing whitespace cannot create an extra contribution.
+USE_TYPO_METRICS normal splitting also placed the font's descent above the
+baseline (`ascent + descent`, zero descent for a zero line gap). Keep the
+typographic ascent and descent on their own sides, splitting only the line gap.
+The existing Hasubi Mono end-of-line controls retain this regression evidence.
+
+The existing 24-check styled skip-ink fixture now declares 78px leading for its
+70px Arial face. All assertions, pattern phases and density controls remain
+unchanged; explicit leading isolates its ink-gap contract from the corrected
+normal-leading placement. The original source, ten failed draft checks and the
+passing explicit-leading diagnostic remain protected alongside the new
+independent normal-leading browser comparisons. No layout baseline scores or
+browser reference files are changed.
+
+The required core gate later exposes six word-cloud SVG baselines that used the
+old half-pixel split through `radiant.measure_html`. Arial weight 600 at
+28/24.5623/22.0247/19.2178/17.682/16.4566px now reports height/baseline pairs
+32/25, 28/22, 26/20, 22/17, 21/16 and 19/15. Current Chromium agrees in all six;
+the previous native baselines are each 0.5px larger. The unchanged dashboard
+golden therefore remains a raw core failure. A native retained-reflow control
+protects the browser-confirmed cell rounding; no chart-specific compensation
+or golden/reference change is applied.

@@ -15,6 +15,7 @@
 #include "../lambda/dom/dom.h"
 
 #include <assert.h>
+#include <float.h>
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
@@ -213,7 +214,8 @@ static bool format_color_text(const char* text, StringBuf* out) {
         format_color(out, rgba_color(color.r, color.g, color.b, color.a));
 }
 
-static const void* prop_group_base(const DomElement* element, PropGroupKind group) {
+static const void* prop_group_base(const DomElement* element, PropGroupKind group,
+        bool include_item_defaults = true) {
     if (!element) return nullptr;
     switch (group) {
         case PROP_GROUP_BLOCK: return element->block();
@@ -224,9 +226,11 @@ static const void* prop_group_base(const DomElement* element, PropGroupKind grou
         case PROP_GROUP_POSITION: return element->positionp();
         case PROP_GROUP_TRANSFORM: return element->transformp();
         case PROP_GROUP_FLEX_ITEM:
-            return element->flex_item() ? element->flex_item() : &FLEX_ITEM_PROP_DEFAULT;
+            return element->flex_item() ? element->flex_item()
+                : include_item_defaults ? &FLEX_ITEM_PROP_DEFAULT : nullptr;
         case PROP_GROUP_GRID_ITEM:
-            return element->grid_item() ? element->grid_item() : &GRID_ITEM_PROP_DEFAULT;
+            return element->grid_item() ? element->grid_item()
+                : include_item_defaults ? &GRID_ITEM_PROP_DEFAULT : nullptr;
         case PROP_GROUP_OUTLINE:
             return element->boundary() ? element->boundary()->outline : nullptr;
         case PROP_GROUP_NONE:
@@ -272,11 +276,18 @@ static bool serialize_direct(const CssPropAccessor* accessor, DomElement* elemen
 
 static CssDeclaration* computed_decl(DomElement* element, CssPropertyCode id, int pseudo_type) {
     if (!element) return nullptr;
-    if (pseudo_type == 1 || pseudo_type == 2) {
+    unsigned grid = css_grid_property_mask(id);
+    if (grid > 15 && !(grid & (grid - 1))) {
+        if (pseudo_type != 0) {
+            // grid component winners are axis-independent and include retained pseudo shorthands.
+            return layout_cascaded_style_declaration(
+                dom_element_get_pseudo_style(element, pseudo_type), id, {});
+        }
+        return layout_cascaded_physical_declaration(element, id);
+    }
+    if (pseudo_type != 0) {
         return dom_element_get_pseudo_element_value(element, id, pseudo_type);
     }
-    unsigned grid = css_grid_property_mask(id);
-    if (grid > 15 && !(grid & (grid - 1))) return layout_cascaded_physical_declaration(element, id);
     CssDeclaration* declaration = dom_element_get_specified_value(element, id);
     if (!declaration && (id == CSS_PROPERTY_OVERFLOW_X || id == CSS_PROPERTY_OVERFLOW_Y)) {
         declaration = dom_element_get_specified_value(element, CSS_PROPERTY_OVERFLOW);
@@ -349,13 +360,11 @@ static const CssValue* computed_box_side_value(DomElement* element,
 static bool serialize_computed(DomElement* element, CssPropertyCode id,
                                int pseudo_type, StringBuf* out);
 
-static bool format_decl_color(DomElement* element, const CssValue* value,
-                              StringBuf* out) {
+static bool format_decl_color(const CssValue* value, StringBuf* out) {
     CssComputedColor color;
     if (!css_color_compute(value, &color)) return false;
-    if (color.type == CSS_COLOR_COLOR || color.missing) return false;
-    if (color.type == CSS_COLOR_CURRENTCOLOR)
-        return serialize_computed(element, CSS_PROPERTY_COLOR, 0, out);
+    if (color.type == CSS_COLOR_COLOR || color.type == CSS_COLOR_OKLAB || color.type == CSS_COLOR_OKLCH ||
+        color.type == CSS_COLOR_CURRENTCOLOR || color.missing) return false;
     Color rgba;
     return css_color_to_rgba(&color, &rgba.r, &rgba.g, &rgba.b, &rgba.a)
         ? format_color(out, rgba) : false;
@@ -374,12 +383,31 @@ static bool format_keyword_set(const CssValue* value, StringBuf* out,
 }
 
 static bool format_grid_computed_value(DomElement* element, const CssValue* value, StringBuf* output,
-    CssPropertyCode property = CSS_PROPERTY_UNKNOWN);
-static bool format_clamp_computed_value(DomElement* element, const CssValue* value, StringBuf* output);
+    CssPropertyCode property, int pseudo_type);
+static bool format_overflow_clip_margin_computed_value(DomElement* element,
+    const CssValue* value, StringBuf* output, int pseudo_type);
+static bool format_clamp_computed_value(DomElement* element, const CssValue* value,
+    StringBuf* output, int pseudo_type);
+static bool cssom_compute_numeric_value(DomElement* element, const CssValue* value,
+    CssMathResult* result, int pseudo_type, bool preserve_percentages = false);
+static bool cssom_compute_integer_value(DomElement* element, const CssValue* value,
+    int pseudo_type, double minimum, double maximum, double* result);
+typedef bool (*CssomScalarPolicy)(const CssMathResult*, float*);
+// native sinks consume a transient stack target and return an independently owned value.
+struct CssomValueTarget {
+    bool (*consume)(DomElement*, const CssValue*, int, void*);
+    void* result;
+};
+static bool cssom_compute_scalar_value(DomElement* element, const CssValue* value,
+    int pseudo_type, CssomScalarPolicy compute, float* result);
+static bool format_cssom_scalar_value(DomElement* element, const CssValue* value,
+    StringBuf* output, int pseudo_type, CssomScalarPolicy compute);
+static bool format_cssom_length_value(DomElement* element, const CssValue* value,
+    StringBuf* output, int pseudo_type);
 
 static bool format_css_value(DomElement* element, CssPropertyCode id,
                              const CssValue* value, StringBuf* out,
-                             Pool* scratch = nullptr) {
+                             Pool* scratch = nullptr, int pseudo_type = 0) {
     // word-spacing normal computes to zero even before a pending style obtains a font snapshot.
     if (id == CSS_PROPERTY_WORD_SPACING && (!value || css_value_has_identifier(value, "normal")))
         return copy_text(out, "0px");
@@ -387,27 +415,31 @@ static bool format_css_value(DomElement* element, CssPropertyCode id,
         // initial color names still serialize as computed colors after a rule stops matching.
         const CssProperty* property = css_property_get_by_code(id);
         if (property && property->type == PROP_TYPE_COLOR &&
-            str_icmp_cstr(property_initial(id), "currentColor") == 0)
-            return serialize_computed(element, CSS_PROPERTY_COLOR, 0, out);
-        if (property && property->type == PROP_TYPE_COLOR &&
             format_color_text(property_initial(id), out)) return true;
         return copy_text(out, property_initial(id));
     }
     if (id == CSS_PROPERTY_GRID_TEMPLATE_COLUMNS || id == CSS_PROPERTY_GRID_TEMPLATE_ROWS ||
         id == CSS_PROPERTY_GRID_AUTO_COLUMNS || id == CSS_PROPERTY_GRID_AUTO_ROWS)
-        return format_grid_computed_value(element, value, out);
+        return format_grid_computed_value(element, value, out, id, pseudo_type);
+    if (id == CSS_PROPERTY_OVERFLOW_CLIP_MARGIN)
+        return format_overflow_clip_margin_computed_value(element, value, out, pseudo_type);
     if (id == CSS_PROPERTY_LINE_CLAMP || id == CSS_PROPERTY_WEBKIT_LINE_CLAMP)
-        return format_clamp_computed_value(element, value, out);
+        return format_clamp_computed_value(element, value, out, pseudo_type);
+    if ((id == CSS_PROPERTY_Z_INDEX || id == CSS_PROPERTY_ORDER) && value->type != CSS_VALUE_TYPE_KEYWORD) {
+        double level = 0.0;
+        if (!cssom_compute_integer_value(element, value, pseudo_type,
+                (double)INT_MIN, (double)INT_MAX, &level)) return false;
+        return format_text(out, "%d", (int)level); // INT_CAST_OK: bounded integer stacking/item order
+    }
     if (id == CSS_PROPERTY_HYPHENATE_LIMIT_CHARS) {
         const CssValue* components[3];
         if (!css_hyphenate_limit_components(value, components)) return false;
         int limits[3] = {-1, -1, -1};
         for (size_t i = 0; i < 3; i++) {
             if (!components[i] || css_value_keyword_equals(components[i], CSS_VALUE_AUTO)) continue;
-            CssMathResult math;
             double count = 0.0;
-            if (!css_prop_compute_numeric_value(element, components[i], &math) ||
-                !css_compute_integer_result(components[i], &math, 0.0, (double)INT_MAX, &count)) return false;
+            if (!cssom_compute_integer_value(element, components[i], pseudo_type,
+                    0.0, (double)INT_MAX, &count)) return false;
             limits[i] = (int)count; // INT_CAST_OK: computed character-count limit
         }
         // CSSOM omits a repeated suffix and a remaining auto prefix.
@@ -432,7 +464,7 @@ static bool format_css_value(DomElement* element, CssPropertyCode id,
     }
     if (id == CSS_PROPERTY_GRID_COLUMN_START || id == CSS_PROPERTY_GRID_COLUMN_END ||
         id == CSS_PROPERTY_GRID_ROW_START || id == CSS_PROPERTY_GRID_ROW_END) {
-        return format_grid_computed_value(element,value,out,id);
+        return format_grid_computed_value(element, value, out, id, pseudo_type);
     }
     // computed keyword sets use grammar order and canonical case, while names retain case.
     if (id == CSS_PROPERTY_CONTAIN) {
@@ -443,20 +475,17 @@ static bool format_css_value(DomElement* element, CssPropertyCode id,
         const char* keywords[] = {"normal", "size", "inline-size", "scroll-state"};
         return format_keyword_set(value, out, keywords, sizeof(keywords) / sizeof(*keywords));
     }
-    if (id == CSS_PROPERTY_OPACITY) {
-        // numeric opacity math needs a value context, without consuming pending geometry.
-        Pool* scratch = pool_create();
-        if (!scratch) return false;
-        LayoutContext context = cssom_value_context(element, scratch);
-        bool result = format_number(out, resolve_css_opacity_value(&context, value), "");
-        pool_destroy(scratch);
-        return result;
-    }
+    if (id == CSS_PROPERTY_OPACITY)
+        return format_cssom_scalar_value(element, value, out, pseudo_type, css_compute_opacity_result);
+    if (id == CSS_PROPERTY_FLEX_GROW || id == CSS_PROPERTY_FLEX_SHRINK)
+        return format_cssom_scalar_value(element, value, out, pseudo_type, css_compute_nonnegative_number_result);
+    if (id == CSS_PROPERTY_FLEX_BASIS && value->type != CSS_VALUE_TYPE_KEYWORD)
+        return format_cssom_length_value(element, value, out, pseudo_type);
     if (id == CSS_PROPERTY_COLOR || id == CSS_PROPERTY_BACKGROUND_COLOR ||
         id == CSS_PROPERTY_BORDER_TOP_COLOR || id == CSS_PROPERTY_BORDER_RIGHT_COLOR ||
         id == CSS_PROPERTY_BORDER_BOTTOM_COLOR || id == CSS_PROPERTY_BORDER_LEFT_COLOR) {
         // declaration colors use live CSSOM color resolution without committing geometry.
-        if (format_decl_color(element, value, out)) return true;
+        if (format_decl_color(value, out)) return true;
     }
     Pool* pool = scratch ? scratch : element && element->doc ? element->doc->document_pool : nullptr;
     if (!pool) return false;
@@ -480,10 +509,13 @@ static bool format_legacy_font_color(DomElement* element, CssPropertyCode id,
     return format_color_text(element->get_attribute("color"), out);
 }
 
-static bool serialize_inherited_decl(DomElement* element, CssPropertyCode id,
+static bool consume_inherited_decl(DomElement* element, CssPropertyCode id,
                                      int pseudo_type, StringBuf* out,
-                                     Pool* scratch, bool preserve_color_model = false) {
+                                     Pool* scratch, bool preserve_color_model,
+                                     const CssomValueTarget* native_value) {
     if (!element) return false;
+    DomElement* receiver = element;
+    int receiver_pseudo = pseudo_type;
     // walk the complete CSS ancestry without consuming native stack frames.
     while (element) {
         CssDeclaration* declaration = computed_decl(element, id, pseudo_type);
@@ -501,16 +533,17 @@ static bool serialize_inherited_decl(DomElement* element, CssPropertyCode id,
         bool grid_shorthand = grid_mask && declaration && declaration->property_code != id;
         if (pseudo_type == 0 && (css_animation_longhand_index(id) >= 0 ||
             css_transition_longhand_index(id) >= 0)) {
+            if (native_value) return false;
             const CssValue* animation_value = css_motion_computed_value(scratch, element, id);
             return format_css_value(element, id, animation_value, out, scratch);
         }
         // Legacy presentational attributes participate before inherited color is
         // consulted, including for dynamic computed-style reads without layout.
-        if (!value && format_legacy_font_color(element, id, pseudo_type, out)) {
+        if (!native_value && !value && format_legacy_font_color(element, id, pseudo_type, out)) {
             if (preserve_color_model) return false;
             return true;
         }
-        if (!value && id == CSS_PROPERTY_DIRECTION && pseudo_type == 0 &&
+        if (!native_value && !value && id == CSS_PROPERTY_DIRECTION && pseudo_type == 0 &&
             dom_element_has_directionality_hint(element)) {
             // live HTML hints apply even when CSSOM reads precede the next layout pass.
             return copy_text(out, dom_css_element_directionality(element) > 0 ? "rtl" : "ltr");
@@ -521,6 +554,7 @@ static bool serialize_inherited_decl(DomElement* element, CssPropertyCode id,
             element, id, pseudo_type, &declaration);
         if (shorthand_value) value = shorthand_value;
         bool container_shorthand = declaration && declaration->property_code == CSS_PROPERTY_CONTAINER;
+        bool flex_shorthand = declaration && declaration->property_code == CSS_PROPERTY_FLEX && id != CSS_PROPERTY_FLEX;
         bool background_shorthand = false;
         if (id == CSS_PROPERTY_BACKGROUND_COLOR) {
             CssDeclaration* background = computed_decl(element, CSS_PROPERTY_BACKGROUND, pseudo_type);
@@ -533,16 +567,17 @@ static bool serialize_inherited_decl(DomElement* element, CssPropertyCode id,
             // A live declaration read can precede layout; use the same substitution and validation as layout.
             CssPropertyCode value_property = declaration && declaration->pending_shorthand_code > 0
                 ? declaration->pending_shorthand_code : grid_shorthand ? declaration->property_code
-                : container_shorthand ? CSS_PROPERTY_CONTAINER : background_shorthand ? CSS_PROPERTY_BACKGROUND : id;
+                : container_shorthand || flex_shorthand ? declaration->property_code
+                : background_shorthand ? CSS_PROPERTY_BACKGROUND : id;
             value = css_resolve_element_var_value(scratch, element, value,
                 value_property);
             if (!value || !css_property_validate_value(value_property, value))
                 value = nullptr;
         }
-        if (declaration && declaration->pending_shorthand_code > 0)
-            value = css_grid_shorthand_longhand(scratch, value, declaration->pending_shorthand_code, id);
-        if (grid_shorthand) value = css_grid_shorthand_longhand(scratch, value, declaration->property_code, id);
-        if (container_shorthand) value = css_container_shorthand_longhand(value, id, scratch);
+        CssPropertyCode projection = declaration && declaration->pending_shorthand_code > 0
+            ? declaration->pending_shorthand_code
+            : grid_shorthand || container_shorthand || flex_shorthand ? declaration->property_code : id;
+        value = css_project_shorthand_longhand(scratch, value, projection, id);
         if (cssom_value_inherits(value, id)) {
             DomElement* parent = cssom_inherited_source(element, &pseudo_type);
             if (parent) {
@@ -555,30 +590,97 @@ static bool serialize_inherited_decl(DomElement* element, CssPropertyCode id,
             value = nullptr;
         }
         if (background_shorthand) value = css_background_color_component(value);
-        if (preserve_color_model) {
+        CssComputedColor computed_color;
+        if (!native_value && css_color_compute(value, &computed_color) && computed_color.unresolved) {
+            int color_pseudo = id == CSS_PROPERTY_COLOR ? pseudo_type : receiver_pseudo;
+            DomElement* color_owner = id == CSS_PROPERTY_COLOR
+                ? cssom_inherited_source(element, &color_pseudo) : receiver;
+            CssComputedColor current = {CSS_COLOR_RGB, {0.0, 0.0, 0.0, 1.0}};
+            if (color_owner) {
+                StringBuf* text = stringbuf_new(scratch);
+                if (!text || !serialize_computed(color_owner, CSS_PROPERTY_COLOR, color_pseudo, text)) return false;
+                String* serialized = stringbuf_to_string(text);
+                CssDeclaration* source = serialized ? css_parse_property_declaration("color", 5,
+                    serialized->chars, serialized->len, scratch) : nullptr;
+                if (!source || !css_color_compute(source->value, &current)) return false;
+            }
+            if (!css_color_compute(value, &computed_color, &current)) return false;
+            // CSSOM's temporary tree belongs to this read; authored and registered expressions stay immutable.
+            value = css_value_create_computed_color(scratch, &computed_color);
+            if (!value) return false;
+        }
+        if (!native_value && preserve_color_model) {
             CssComputedColor color;
             // A byte paint snapshot cannot serialize a predefined color space or missing channels.
-            if (!css_color_compute(value, &color) || (color.type != CSS_COLOR_COLOR && !color.missing)) return false;
+            if (!css_color_compute(value, &color) || (color.type != CSS_COLOR_COLOR &&
+                color.type != CSS_COLOR_OKLAB && color.type != CSS_COLOR_OKLCH && !color.missing)) return false;
         }
-        if (id == CSS_PROPERTY_CONTENT && pseudo_type != 0 &&
+        const CssProperty* property = css_property_get_by_code(id);
+        if (!native_value && id != CSS_PROPERTY_COLOR && property && property->type == PROP_TYPE_COLOR) {
+            CssComputedColor color;
+            bool current = value ? css_color_compute(value, &color) && color.type == CSS_COLOR_CURRENTCOLOR
+                : str_icmp_cstr(property_initial(id), "currentColor") == 0;
+            // inherited currentColor stays a keyword until it uses the receiving element or pseudo's color.
+            if (current) return serialize_computed(receiver, CSS_PROPERTY_COLOR, receiver_pseudo, out);
+        }
+        if (!native_value && id == CSS_PROPERTY_CONTENT && pseudo_type != 0 &&
             (!value || (value->type == CSS_VALUE_TYPE_KEYWORD &&
                         value->data.keyword == CSS_VALUE_NORMAL))) {
             return copy_text(out, "none");
         }
-        return value ? format_css_value(element, id, value, out, scratch)
-                     : !preserve_color_model && format_css_value(element, id, nullptr, out, scratch);
+        if (native_value) {
+            if (!value && property) {
+                CssDeclaration* initial = css_parse_property_value_declaration(property->name,
+                    strlen(property->name), property->initial_value, strlen(property->initial_value), scratch);
+                value = initial ? initial->value : nullptr;
+            }
+            return native_value->consume(element, value, pseudo_type, native_value->result);
+        }
+        return value ? format_css_value(element, id, value, out, scratch, pseudo_type)
+                     : !preserve_color_model && format_css_value(element, id, nullptr, out, scratch, pseudo_type);
     }
     return false;
 }
 
-bool css_prop_serialize_cascaded_value(DomElement* element, CssPropertyCode id,
+static bool consume_cascaded_value(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, StringBuf* out,
-                                 bool preserve_color_model) {
+                                 bool preserve_color_model, const CssomValueTarget* native_value) {
     Pool* scratch = pool_create();
     if (!scratch) return false;
-    bool result = serialize_inherited_decl(element, id, pseudo_type, out, scratch, preserve_color_model);
+    bool result = consume_inherited_decl(element, id, pseudo_type, out, scratch, preserve_color_model, native_value);
     pool_destroy(scratch);
     return result;
+}
+
+bool css_prop_serialize_cascaded_value(DomElement* element, CssPropertyCode id,
+        int pseudo_type, StringBuf* out, bool preserve_color_model) {
+    return consume_cascaded_value(element, id, pseudo_type, out, preserve_color_model, nullptr);
+}
+
+static bool cssom_consume_flex_factor(DomElement* element, const CssValue* value,
+        int pseudo_type, void* result) {
+    return cssom_compute_scalar_value(element, value, pseudo_type,
+        css_compute_nonnegative_number_result, (float*)result);
+}
+
+static bool cssom_consume_flex_basis(DomElement* element, const CssValue* value,
+        int pseudo_type, void* result) {
+    CssMathResult math = {};
+    if (value && value->type != CSS_VALUE_TYPE_KEYWORD &&
+        !cssom_compute_numeric_value(element, value, &math, pseudo_type, true)) return false;
+    return css_compute_flex_basis_result(value, &math, (CssFlexBasisValue*)result);
+}
+
+bool css_prop_compute_declared_flex_factor(DomElement* element, CssPropertyCode id, float* result) {
+    if (!element || !result || (id != CSS_PROPERTY_FLEX_GROW && id != CSS_PROPERTY_FLEX_SHRINK)) return false;
+    CssomValueTarget target = {cssom_consume_flex_factor, result};
+    return consume_cascaded_value(element, id, 0, nullptr, false, &target);
+}
+
+bool css_prop_compute_declared_flex_basis(DomElement* element, CssFlexBasisValue* result) {
+    if (!element || !result) return false;
+    CssomValueTarget target = {cssom_consume_flex_basis, result};
+    return consume_cascaded_value(element, CSS_PROPERTY_FLEX_BASIS, 0, nullptr, false, &target);
 }
 
 static bool serialize_decl(const CssPropAccessor* accessor, DomElement* element,
@@ -711,6 +813,15 @@ static bool cssom_resolve_font_size_value(CssomFontMathContext* context,
     return true;
 }
 
+static void cssom_apply_writing_mode(const CssValue* writing, CssomFontState* state) {
+    if (!writing || cssom_value_inherits(writing, CSS_PROPERTY_WRITING_MODE)) return;
+    CssEnum mode = writing->type == CSS_VALUE_TYPE_KEYWORD
+        ? writing->data.keyword : CSS_VALUE_HORIZONTAL_TB;
+    // sideways boxes retain vertical viewport axes while their glyph metrics stay horizontal.
+    state->sideways = mode == CSS_VALUE_SIDEWAYS_RL || mode == CSS_VALUE_SIDEWAYS_LR;
+    state->vertical = layout_writing_mode_from_css(mode) != WM_HORIZONTAL_TB;
+}
+
 static void cssom_compute_font_state(Pool* scratch, DomElement* element, int pseudo_type,
     const CssomFontState* parent, const CssomFontState* root, CssomFontState* state,
     const CssValue* size, bool compute_leading) {
@@ -746,13 +857,7 @@ static void cssom_compute_font_state(Pool* scratch, DomElement* element, int pse
             : name && str_icmp_cstr(name, "oblique") == 0 ? FONT_SLANT_OBLIQUE : FONT_SLANT_NORMAL;
     }
     const CssValue* writing = cssom_declared_font_value(scratch, element, CSS_PROPERTY_WRITING_MODE, pseudo_type);
-    if (writing && !cssom_value_inherits(writing, CSS_PROPERTY_WRITING_MODE)) {
-        CssEnum mode = writing->type == CSS_VALUE_TYPE_KEYWORD
-            ? writing->data.keyword : CSS_VALUE_HORIZONTAL_TB;
-        // sideways boxes retain vertical viewport axes while their glyph metrics stay horizontal.
-        state->sideways = mode == CSS_VALUE_SIDEWAYS_RL || mode == CSS_VALUE_SIDEWAYS_LR;
-        state->vertical = layout_writing_mode_from_css(mode) != WM_HORIZONTAL_TB;
-    }
+    cssom_apply_writing_mode(writing, state);
     const CssValue* orientation = cssom_declared_font_value(scratch, element, CSS_PROPERTY_TEXT_ORIENTATION, pseudo_type);
     if (orientation && !cssom_value_inherits(orientation, CSS_PROPERTY_TEXT_ORIENTATION)) {
         const char* name = css_value_identifier_name(orientation);
@@ -816,36 +921,75 @@ static bool cssom_resolve_font_state(Pool* scratch, DomElement* element, int pse
     return true;
 }
 
-bool css_prop_compute_numeric_value(DomElement* element, const CssValue* value, CssMathResult* result) {
+static bool cssom_compute_numeric_value(DomElement* element, const CssValue* value,
+        CssMathResult* result, int pseudo_type, bool preserve_percentages) {
     if (!element || !value || !result) return false;
     Pool* scratch = mem_pool_create(nullptr, MEM_ROLE_TEMP, "css.computed_length.scratch");
     if (!scratch) return false;
     CssomFontState root = {}, state = {};
-    bool valid = cssom_resolve_font_state(scratch, element, 0, &root, &state, true);
+    bool valid = cssom_resolve_font_state(scratch, element, pseudo_type, &root, &state, true);
     CssomFontMathContext lengths = {element, state.font.size_px, root.font.size_px,
         &state, &state, &root, state.vertical};
     value = css_resolve_element_var_value(scratch, element, value, CSS_PROPERTY_WIDTH);
-    CssMathEvaluationContext math = {cssom_font_math_leaf, &lengths, 1.0, false};
+    CssMathEvaluationContext math = {cssom_font_math_leaf, &lengths, 1.0, preserve_percentages};
     *result = css_math_evaluate(value, &math);
     valid = valid && result->resolved;
     mem_pool_destroy(scratch);
     return valid;
 }
 
-static bool format_clamp_computed_value(DomElement* element, const CssValue* value, StringBuf* output) {
+bool css_prop_compute_numeric_value(DomElement* element, const CssValue* value, CssMathResult* result) {
+    return cssom_compute_numeric_value(element, value, result, 0);
+}
+
+static bool cssom_compute_integer_value(DomElement* element, const CssValue* value,
+        int pseudo_type, double minimum, double maximum, double* result) {
+    CssMathResult math;
+    return cssom_compute_numeric_value(element, value, &math, pseudo_type) &&
+        css_compute_integer_result(value, &math, minimum, maximum, result);
+}
+
+static bool cssom_compute_scalar_value(DomElement* element, const CssValue* value,
+        int pseudo_type, CssomScalarPolicy compute, float* result) {
+    CssMathResult math;
+    return cssom_compute_numeric_value(element, value, &math, pseudo_type, true) &&
+        compute(&math, result);
+}
+
+static bool format_cssom_scalar_value(DomElement* element, const CssValue* value,
+        StringBuf* output, int pseudo_type, CssomScalarPolicy compute) {
+    float number = 0.0f;
+    // dirty and pseudo reads use declaration font state, with the same range policy as layout.
+    return cssom_compute_scalar_value(element, value, pseudo_type, compute, &number) &&
+        format_number(output, number, "");
+}
+
+static bool format_overflow_clip_margin_computed_value(DomElement* element,
+        const CssValue* value, StringBuf* output, int pseudo_type) {
+    CssEnum box;
+    const CssValue* component;
+    if (!css_overflow_clip_margin_components(value, &box, &component)) return copy_text(output, "0px");
+    double length = 0.0;
+    if (component) {
+        CssMathResult math;
+        if (!cssom_compute_numeric_value(element, component, &math, pseudo_type)) return false;
+        if (math.type != CSS_MATH_LENGTH && !(math.type == CSS_MATH_NUMBER && math.value == 0.0))
+            return copy_text(output, "0px");
+        length = isnan(math.value) || math.value == 0.0 ? 0.0 : math.value;
+        if (!isfinite(length) || fabs(length) > FLT_MAX) return copy_text(output, "0px");
+    }
+    // omit default components while preserving the declaration owner's computed length.
+    if (box == CSS_VALUE_PADDING_BOX) return format_number(output, length, "px");
+    const char* name = css_enum_info(box)->name;
+    return length == 0.0 ? copy_text(output, name) : format_text(output, "%s %.6gpx", name, length);
+}
+
+static bool format_clamp_computed_value(DomElement* element, const CssValue* value,
+        StringBuf* output, int pseudo_type) {
     if (!value || value->type == CSS_VALUE_TYPE_KEYWORD) return copy_text(output, "none");
-    Pool* scratch = pool_create();
-    if (!scratch) return false;
-    CssomFontState root = {}, state = {};
-    bool valid = cssom_resolve_font_state(scratch, element, 0, &root, &state, true);
-    CssomFontMathContext lengths = {element, state.font.size_px, root.font.size_px,
-        &state, &state, &root, state.vertical};
-    CssMathEvaluationContext math = {cssom_font_math_leaf, &lengths, 1.0, false};
     double count;
-    bool computed = valid && css_compute_integer_value(value, &math, 1.0, (double)INT_MAX, &count);
-    bool result = computed ? stringbuf_append_format(output, "%.0f", count) : copy_text(output, "none");
-    pool_destroy(scratch);
-    return result;
+    bool computed = cssom_compute_integer_value(element, value, pseudo_type, 1.0, (double)INT_MAX, &count);
+    return computed ? stringbuf_append_format(output, "%.0f", count) : copy_text(output, "none");
 }
 
 bool css_compute_cascaded_font_size(DomElement* element, float* font_size) {
@@ -907,9 +1051,8 @@ struct CssomSvgScalarWriter {
     bool written;
 };
 
-static bool cssom_append_computed_math(CssFormatter* formatter, const CssValue* value,
-        const CssMathEvaluationContext* context, bool nonnegative) {
-    CssMathResult math = css_math_evaluate(value, context);
+static bool cssom_append_math_result(CssFormatter* formatter, const CssValue* value,
+        const CssMathResult& math, bool nonnegative) {
     double scalar = isnan(math.value) ? 0.0 : math.value;
     if (nonnegative) scalar = fmax(0.0, scalar);
     if (math.resolved && (math.type == CSS_MATH_NUMBER || math.type == CSS_MATH_LENGTH))
@@ -922,6 +1065,20 @@ static bool cssom_append_computed_math(CssFormatter* formatter, const CssValue* 
             math.percentage, math.value < 0.0 ? '-' : '+', fabs(math.value));
     css_format_value(formatter, (CssValue*)value);
     return true;
+}
+
+static bool cssom_append_computed_math(CssFormatter* formatter, const CssValue* value,
+        const CssMathEvaluationContext* context, bool nonnegative) {
+    return cssom_append_math_result(formatter, value, css_math_evaluate(value, context), nonnegative);
+}
+
+static bool format_cssom_length_value(DomElement* element, const CssValue* value,
+        StringBuf* output, int pseudo_type) {
+    CssMathResult math;
+    if (!cssom_compute_numeric_value(element, value, &math, pseudo_type, true)) return false;
+    CssFormatter* formatter = css_formatter_create(output->pool, CSS_FORMAT_COMPACT);
+    return formatter && cssom_append_math_result(formatter, value, math, true) &&
+        copy_text(output, formatter->output->str->chars);
 }
 
 static CssValue* cssom_clone_computed_length(CssFormatter* formatter, const CssValue* input,
@@ -1106,13 +1263,14 @@ static bool cssom_append_grid_leaf(CssFormatter* formatter, CssValue* value,
 }
 
 static bool format_grid_computed_value(DomElement* element, const CssValue* value, StringBuf* output,
-    CssPropertyCode property) {
+    CssPropertyCode property, int pseudo_type) {
     Pool* scratch = pool_create();
     if (!scratch) return false;
     CssomFontState root = {}, state = {};
     CssFormatter* formatter = css_formatter_create(scratch, CSS_FORMAT_COMPACT);
     CssValue* copy = css_value_clone_owned(value, scratch);
-    bool valid = formatter && copy && cssom_resolve_font_state(scratch, element, 0, &root, &state, true);
+    // generated tracks compute relative lengths in their own font before inheritance changes the owner.
+    bool valid = formatter && copy && cssom_resolve_font_state(scratch, element, pseudo_type, &root, &state, true);
     if (valid) {
         CssomFontMathContext lengths = {element, state.font.size_px, root.font.size_px,
             &state, &state, &root, state.vertical};
@@ -1216,8 +1374,7 @@ String* css_prop_serialize_svg_value(Pool* pool, DomElement* declaring,
             if (!css_value_visit_list_items(value, cssom_append_svg_length, &writer)) return nullptr;
         } else if (!cssom_append_svg_length(value, &writer)) return nullptr;
     } else if (css_property_is_svg_opacity(id)) {
-        LayoutContext context = cssom_value_context(declaring, pool);
-        stringbuf_append_format(formatter->output, "%.6g", resolve_css_opacity_value(&context, value));
+        if (!format_cssom_scalar_value(declaring, value, formatter->output, 0, css_compute_opacity_result)) return nullptr;
     } else if (id == CSS_PROPERTY_STROKE_MITERLIMIT) {
         CssMathEvaluationContext context = {};
         CssMathResult math = css_math_evaluate(value, &context);
@@ -1535,12 +1692,15 @@ static bool serialize_edge(const CssPropAccessor* accessor, DomElement* element,
                            int pseudo_type, StringBuf* out) {
     if (!accessor || !element || pseudo_type != 0) return false;
     const BoundaryProp* boundary = element->boundary();
+    // normal-flow collapse consumes vertical margins after their used lengths
+    // are resolved; CSSOM reflects the owned value captured before that step.
+    const Margin& flow_margin = *view_boundary_flow_margin(boundary);
     float value = 0.0f;
     CssEnum type = CSS_VALUE__UNDEF;
     switch (accessor->id) {
-        case CSS_PROPERTY_MARGIN_TOP: value = boundary->margin.top; type = boundary->margin.top_type; break;
+        case CSS_PROPERTY_MARGIN_TOP: value = flow_margin.top; type = flow_margin.top_type; break;
         case CSS_PROPERTY_MARGIN_RIGHT: value = boundary->margin.right; type = boundary->margin.right_type; break;
-        case CSS_PROPERTY_MARGIN_BOTTOM: value = boundary->margin.bottom; type = boundary->margin.bottom_type; break;
+        case CSS_PROPERTY_MARGIN_BOTTOM: value = flow_margin.bottom; type = flow_margin.bottom_type; break;
         case CSS_PROPERTY_MARGIN_LEFT: value = boundary->margin.left; type = boundary->margin.left_type; break;
         case CSS_PROPERTY_PADDING_TOP: value = boundary->padding.top; break;
         case CSS_PROPERTY_PADDING_RIGHT: value = boundary->padding.right; break;
@@ -1665,16 +1825,6 @@ static bool serialize_minmax(const CssPropAccessor* accessor, DomElement* elemen
     return format_number(out, value, "px");
 }
 
-static bool serialize_z_index(const CssPropAccessor*, DomElement* element, int pseudo_type,
-                              StringBuf* out) {
-    if (!element || pseudo_type != 0) return false;
-    const PositionProp* position = element->positionp();
-    if (!position->has_z_index && position->z_index == 0) {
-        return copy_text(out, "auto");
-    }
-    return format_text(out, "%d", position->z_index);
-}
-
 static bool serialize_outline(const CssPropAccessor* accessor, DomElement* element,
                               int pseudo_type, StringBuf* out) {
     if (!accessor || !element || pseudo_type != 0) return false;
@@ -1783,17 +1933,45 @@ static bool serialize_scroll_snap(const CssPropAccessor* accessor,
              inline_axis && inline_axis->name ? inline_axis->name : "none");
 }
 
-static bool serialize_overscroll_behavior(const CssPropAccessor* accessor,
-                                          DomElement* element, int pseudo_type,
-                                          StringBuf* out) {
-    if (!accessor || !element || pseudo_type != 0) return false;
-    const ScrollProp* scroll = element->scroll();
-    const CssEnumInfo* x = css_enum_info(scroll->overscroll_x);
-    const CssEnumInfo* y = css_enum_info(scroll->overscroll_y);
-    const char* x_name = x && x->name ? x->name : "auto";
-    const char* y_name = y && y->name ? y->name : "auto";
-    if (strcmp(x_name, y_name) == 0) return copy_text(out, x_name);
-    return format_text(out, "%s %s", x_name, y_name);
+static bool serialize_scroll_axes(const CssPropAccessor* accessor, DomElement* element,
+        int pseudo_type, StringBuf* out) {
+    if (!accessor || !element) return false;
+    bool overscroll = accessor->id == CSS_PROPERTY_OVERSCROLL_BEHAVIOR ||
+        accessor->id == CSS_PROPERTY_OVERSCROLL_BEHAVIOR_X ||
+        accessor->id == CSS_PROPERTY_OVERSCROLL_BEHAVIOR_Y;
+    ArrayList* ancestors = cssom_collect_style_ancestors(element);
+    if (!ancestors) return false;
+    CssEnum x = overscroll ? CSS_VALUE_AUTO : CSS_VALUE_VISIBLE, y = x;
+    CssomFontState axes = {};
+    // compute ancestors before their child so dirty reads inherit current axes without layout snapshots.
+    for (int index = ancestors->length - 1; index >= (pseudo_type ? -1 : 0); index--) {
+        DomElement* owner = index < 0 ? element : (DomElement*)ancestors->data[index];
+        int pseudo = index < 0 ? pseudo_type : 0;
+        cssom_apply_writing_mode(cssom_declared_font_value(out->pool, owner,
+            CSS_PROPERTY_WRITING_MODE, pseudo), &axes);
+        StyleTree* style = pseudo ? dom_element_get_pseudo_style(owner, pseudo)
+            : owner->specified_style.get();
+        LayoutContext context = cssom_value_context(owner, out->pool);
+        CssEnum inherited_x = x, inherited_y = y;
+        x = y = overscroll ? CSS_VALUE_AUTO : CSS_VALUE_VISIBLE;
+        if (!overscroll && !pseudo) {
+            x = owner->scroll()->default_overflow_x;
+            y = owner->scroll()->default_overflow_y;
+        }
+        layout_compute_scroll_keyword_axes(&context, style, axes.vertical, overscroll,
+            inherited_x, inherited_y, &x, &y);
+    }
+    arraylist_free(ancestors);
+    CssEnum value = x;
+    if (accessor->id == CSS_PROPERTY_OVERFLOW_Y || accessor->id == CSS_PROPERTY_OVERSCROLL_BEHAVIOR_Y ||
+        (accessor->id == CSS_PROPERTY_OVERFLOW_INLINE && axes.vertical) ||
+        (accessor->id == CSS_PROPERTY_OVERFLOW_BLOCK && !axes.vertical)) value = y;
+    const CssEnumInfo* first = css_enum_info(value);
+    if (!first || !first->name) return false;
+    bool shorthand = accessor->id == CSS_PROPERTY_OVERFLOW || accessor->id == CSS_PROPERTY_OVERSCROLL_BEHAVIOR;
+    if (!shorthand || x == y) return copy_text(out, first->name);
+    const CssEnumInfo* second = css_enum_info(y);
+    return second && second->name && format_text(out, "%s %s", first->name, second->name);
 }
 
 static bool serialize_line_clamp(const CssPropAccessor* accessor, DomElement* element,
@@ -1802,28 +1980,93 @@ static bool serialize_line_clamp(const CssPropAccessor* accessor, DomElement* el
     return accessor && element && css_prop_serialize_cascaded_value(element, accessor->id, pseudo_type, out);
 }
 
+static bool serialize_contain_intrinsic_axis(DomElement* element, CssPropertyCode property,
+        size_t axis, int pseudo_type, StringBuf* out) {
+    while (element) {
+        CssomFontState root = {}, font = {};
+        if (!cssom_resolve_font_state(out->pool, element, pseudo_type, &root, &font, true)) return false;
+        uint8_t axes = css_intrinsic_size_axes(property, font.vertical);
+        if (axes != 3) axis = axes == 1 ? 0 : 1;
+        CssPropertyCode physical = axis == 0 ? CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH
+            : CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT;
+        StyleTree* style = pseudo_type ? dom_element_get_pseudo_style(element, pseudo_type)
+            : element->specified_style.get();
+        CssDeclaration* declaration = layout_cascaded_style_declaration(style, physical,
+            layout_logical_sides(font.vertical, false));
+        CssPropertyCode source = declaration && declaration->property_code != CSS_PROPERTY_ALL
+            ? declaration->property_code : physical;
+        const CssValue* value = declaration ? css_resolve_element_var_value(out->pool,
+            element, declaration->value, source) : nullptr;
+        if (value && !css_property_validate_value(source, value)) value = nullptr;
+        if (css_value_keyword_equals(value, CSS_VALUE_INHERIT)) {
+            // logical inheritance follows the parent's axis; lengths retain their declaration owner.
+            property = source == CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE ? physical : source;
+            element = cssom_inherited_source(element, &pseudo_type);
+            continue;
+        }
+        if (!value || css_value_is_global_keyword(value)) return copy_text(out, "none");
+        CssIntrinsicSizeAxis components[2] = {};
+        if (!css_intrinsic_size_components(value, source == CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE,
+                components)) return false;
+        const CssIntrinsicSizeAxis& component = components[source == CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE ? axis : 0];
+        const char* mode = component.automatic ? "auto " : "";
+        if (css_value_keyword_equals(component.size, CSS_VALUE_NONE)) return format_text(out, "%snone", mode);
+        CssomFontMathContext lengths = {element, font.font.size_px, root.font.size_px,
+            &font, &font, &root, font.vertical};
+        CssMathEvaluationContext context = {cssom_font_math_leaf, &lengths, 1.0, false};
+        CssMathResult math = css_math_evaluate(component.size, &context);
+        if (!math.resolved || (math.type != CSS_MATH_LENGTH &&
+            !(math.type == CSS_MATH_NUMBER && math.value == 0.0))) return copy_text(out, "none");
+        return format_text(out, "%s%.6gpx", mode, layout_clamp_dimension(isnan(math.value)
+            ? 0.0f : (float)fmax(0.0, math.value)));
+    }
+    return copy_text(out, "none");
+}
+
+static bool serialize_contain_intrinsic(const CssPropAccessor* accessor, DomElement* element,
+        int pseudo_type, StringBuf* out) {
+    if (!accessor || !element) return false;
+    if (accessor->id != CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE)
+        return serialize_contain_intrinsic_axis(element, accessor->id, 0, pseudo_type, out);
+    StringBuf* height = stringbuf_new(out->pool);
+    if (!height || !serialize_contain_intrinsic_axis(element, accessor->id, 0, pseudo_type, out) ||
+        !serialize_contain_intrinsic_axis(element, accessor->id, 1, pseudo_type, height)) return false;
+    // shorthand compression compares complete computed axes, preserving independent auto modes.
+    if (strcmp(out->str->chars, height->str->chars) == 0) return true;
+    return stringbuf_append_format(out, " %s", height->str->chars);
+}
+
+#define DIRECT_ROW_DERIVE(prop_id, group, type, field, kind, row_flags, derived) \
+    {prop_id, group, (uint16_t)offsetof(type, field), kind, row_flags, serialize_direct, derived}
 #define DIRECT_ROW(prop_id, group, type, field, kind, row_flags) \
-    {prop_id, group, (uint16_t)offsetof(type, field), kind, row_flags, serialize_direct, nullptr}
+    DIRECT_ROW_DERIVE(prop_id, group, type, field, kind, row_flags, nullptr)
 #define DERIVED_ROW(prop_id, fn, row_flags) \
     {prop_id, PROP_GROUP_NONE, 0, CSS_PROP_VALUE_SPECIAL, row_flags, fn, fn}
 #define DECL_ROW(prop_id) DERIVED_ROW(prop_id, serialize_decl, 0)
 
 static const CssPropAccessor CSS_PROP_ROWS[] = {
+    DERIVED_ROW(CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, serialize_contain_intrinsic, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH, serialize_contain_intrinsic, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT, serialize_contain_intrinsic, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_CONTAIN_INTRINSIC_INLINE_SIZE, serialize_contain_intrinsic, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_CONTAIN_INTRINSIC_BLOCK_SIZE, serialize_contain_intrinsic, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DECL_ROW(CSS_PROPERTY_OVERFLOW_CLIP_MARGIN),
     DERIVED_ROW(CSS_PROPERTY_GRID_TEMPLATE_COLUMNS, serialize_grid_tracks, CSS_PROP_ACCESSOR_USED_VALUE | CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_GRID_TEMPLATE_ROWS, serialize_grid_tracks, CSS_PROP_ACCESSOR_USED_VALUE | CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DECL_ROW(CSS_PROPERTY_GRID_AUTO_COLUMNS),
     DECL_ROW(CSS_PROPERTY_GRID_AUTO_ROWS),
-    DERIVED_ROW(CSS_PROPERTY_GRID_TEMPLATE, serialize_grid_shorthand, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
-    DERIVED_ROW(CSS_PROPERTY_GRID, serialize_grid_shorthand, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    // shorthand serializers already resolve pseudo members; declaration fallback loses their computed values.
+    DERIVED_ROW(CSS_PROPERTY_GRID_TEMPLATE, serialize_grid_shorthand, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_GRID, serialize_grid_shorthand, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
     DECL_ROW(CSS_PROPERTY_GRID_TEMPLATE_AREAS),
     DECL_ROW(CSS_PROPERTY_GRID_AUTO_FLOW),
     DECL_ROW(CSS_PROPERTY_GRID_COLUMN_START),
     DECL_ROW(CSS_PROPERTY_GRID_COLUMN_END),
     DECL_ROW(CSS_PROPERTY_GRID_ROW_START),
     DECL_ROW(CSS_PROPERTY_GRID_ROW_END),
-    DERIVED_ROW(CSS_PROPERTY_GRID_COLUMN, serialize_grid_shorthand, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
-    DERIVED_ROW(CSS_PROPERTY_GRID_ROW, serialize_grid_shorthand, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
-    DERIVED_ROW(CSS_PROPERTY_GRID_AREA, serialize_grid_shorthand, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_GRID_COLUMN, serialize_grid_shorthand, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_GRID_ROW, serialize_grid_shorthand, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_GRID_AREA, serialize_grid_shorthand, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_FILL, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_STROKE, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_STROKE_WIDTH, serialize_svg_paint, CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
@@ -1856,15 +2099,20 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DERIVED_ROW(CSS_PROPERTY_RIGHT, serialize_inset, CSS_PROP_ACCESSOR_USED_VALUE),
     DERIVED_ROW(CSS_PROPERTY_BOTTOM, serialize_inset, CSS_PROP_ACCESSOR_USED_VALUE),
     DERIVED_ROW(CSS_PROPERTY_LEFT, serialize_inset, CSS_PROP_ACCESSOR_USED_VALUE),
-    DERIVED_ROW(CSS_PROPERTY_Z_INDEX, serialize_z_index, 0),
+    DERIVED_ROW(CSS_PROPERTY_Z_INDEX, serialize_decl,
+        CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
     DIRECT_ROW(CSS_PROPERTY_FLOAT, PROP_GROUP_POSITION, PositionProp, float_prop, CSS_PROP_VALUE_ENUM, 0),
     DIRECT_ROW(CSS_PROPERTY_CLEAR, PROP_GROUP_POSITION, PositionProp, clear, CSS_PROP_VALUE_ENUM, 0),
-    DIRECT_ROW(CSS_PROPERTY_OVERFLOW_X, PROP_GROUP_SCROLL, ScrollProp, overflow_x, CSS_PROP_VALUE_ENUM, 0),
-    DIRECT_ROW(CSS_PROPERTY_OVERFLOW_Y, PROP_GROUP_SCROLL, ScrollProp, overflow_y, CSS_PROP_VALUE_ENUM, 0),
+    DERIVED_ROW(CSS_PROPERTY_OVERFLOW, serialize_scroll_axes, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_OVERFLOW_X, serialize_scroll_axes, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_OVERFLOW_Y, serialize_scroll_axes, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_OVERFLOW_INLINE, serialize_scroll_axes, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_OVERFLOW_BLOCK, serialize_scroll_axes, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
     DIRECT_ROW(CSS_PROPERTY_SCROLL_BEHAVIOR, PROP_GROUP_SCROLL, ScrollProp, scroll_behavior, CSS_PROP_VALUE_ENUM, 0),
-    DIRECT_ROW(CSS_PROPERTY_OVERSCROLL_BEHAVIOR_X, PROP_GROUP_SCROLL, ScrollProp, overscroll_x, CSS_PROP_VALUE_ENUM, 0),
-    DIRECT_ROW(CSS_PROPERTY_OVERSCROLL_BEHAVIOR_Y, PROP_GROUP_SCROLL, ScrollProp, overscroll_y, CSS_PROP_VALUE_ENUM, 0),
-    DERIVED_ROW(CSS_PROPERTY_OVERSCROLL_BEHAVIOR, serialize_overscroll_behavior, 0),
+    DIRECT_ROW(CSS_PROPERTY_RESIZE, PROP_GROUP_SCROLL, ScrollProp, resize, CSS_PROP_VALUE_ENUM, 0),
+    DERIVED_ROW(CSS_PROPERTY_OVERSCROLL_BEHAVIOR_X, serialize_scroll_axes, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_OVERSCROLL_BEHAVIOR_Y, serialize_scroll_axes, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_OVERSCROLL_BEHAVIOR, serialize_scroll_axes, CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_SCROLL_SNAP_TYPE, serialize_scroll_snap, 0),
     DERIVED_ROW(CSS_PROPERTY_SCROLL_SNAP_ALIGN, serialize_scroll_snap, 0),
     DERIVED_ROW(CSS_PROPERTY_VISIBILITY, serialize_visibility, 0),
@@ -1896,7 +2144,7 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DIRECT_ROW(CSS_PROPERTY_FONT_STYLE, PROP_GROUP_FONT, FontProp, font_style, CSS_PROP_VALUE_ENUM, 0),
     DIRECT_ROW(CSS_PROPERTY_FONT_VARIANT, PROP_GROUP_FONT, FontProp, font_variant, CSS_PROP_VALUE_ENUM, 0),
     DERIVED_ROW(CSS_PROPERTY_LINE_HEIGHT, serialize_line_height,
-                CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
     DIRECT_ROW(CSS_PROPERTY_LETTER_SPACING, PROP_GROUP_FONT, FontProp, letter_spacing, CSS_PROP_VALUE_PX, 0),
     DIRECT_ROW(CSS_PROPERTY_WORD_SPACING, PROP_GROUP_FONT, FontProp, word_spacing, CSS_PROP_VALUE_PX, 0),
     DIRECT_ROW(CSS_PROPERTY_TEXT_ALIGN, PROP_GROUP_BLOCK, BlockProp, text_align, CSS_PROP_VALUE_ENUM, 0),
@@ -1924,14 +2172,18 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DIRECT_ROW(CSS_PROPERTY_OPACITY, PROP_GROUP_INLINE, InlineProp, opacity, CSS_PROP_VALUE_NUMBER, 0),
     DIRECT_ROW(CSS_PROPERTY_ISOLATION, PROP_GROUP_INLINE, InlineProp, isolation, CSS_PROP_VALUE_ENUM, 0),
     DERIVED_ROW(CSS_PROPERTY_CURSOR, serialize_cursor, 0),
+    DERIVED_ROW(CSS_PROPERTY_IMAGE_RENDERING, serialize_decl,
+                CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
     DECL_ROW(CSS_PROPERTY_ALIGN_SELF),
     // CSS Align modifiers such as safe/unsafe are retained in the declaration tree.
     DECL_ROW(CSS_PROPERTY_JUSTIFY_SELF),
     DERIVED_ROW(CSS_PROPERTY_PLACE_SELF, serialize_place_self, 0),
-    DIRECT_ROW(CSS_PROPERTY_FLEX_GROW, PROP_GROUP_FLEX_ITEM, FlexItemProp, flex_grow, CSS_PROP_VALUE_NUMBER, 0),
-    DIRECT_ROW(CSS_PROPERTY_FLEX_SHRINK, PROP_GROUP_FLEX_ITEM, FlexItemProp, flex_shrink, CSS_PROP_VALUE_NUMBER, 0),
-    DIRECT_ROW(CSS_PROPERTY_FLEX_BASIS, PROP_GROUP_FLEX_ITEM, FlexItemProp, flex_basis, CSS_PROP_VALUE_PX, 0),
-    DIRECT_ROW(CSS_PROPERTY_ORDER, PROP_GROUP_FLEX_ITEM, FlexItemProp, order, CSS_PROP_VALUE_INTEGER, 0),
+    DIRECT_ROW_DERIVE(CSS_PROPERTY_FLEX_GROW, PROP_GROUP_FLEX_ITEM, FlexItemProp, flex_grow, CSS_PROP_VALUE_NUMBER, 0, serialize_decl),
+    DIRECT_ROW_DERIVE(CSS_PROPERTY_FLEX_SHRINK, PROP_GROUP_FLEX_ITEM, FlexItemProp, flex_shrink, CSS_PROP_VALUE_NUMBER, 0, serialize_decl),
+    DERIVED_ROW(CSS_PROPERTY_FLEX_BASIS, serialize_decl,
+        CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
+    DERIVED_ROW(CSS_PROPERTY_ORDER, serialize_decl,
+        CSS_PROP_ACCESSOR_CASCADE_RESOLVED | CSS_PROP_ACCESSOR_PSEUDO_RESOLVED),
     DECL_ROW(CSS_PROPERTY_FLEX_DIRECTION),
     DECL_ROW(CSS_PROPERTY_FLEX_WRAP),
     DECL_ROW(CSS_PROPERTY_JUSTIFY_CONTENT),
@@ -2018,6 +2270,7 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
 #undef DECL_ROW
 #undef DERIVED_ROW
 #undef DIRECT_ROW
+#undef DIRECT_ROW_DERIVE
 
 struct CssPropIndex {
     const CssPropAccessor* rows[CSS_PROPERTY_COUNT];
@@ -2159,6 +2412,9 @@ static bool serialize_computed(DomElement* element, CssPropertyCode id,
         !css_animation_needs_computed_sample(element, id) &&
         css_prop_serialize_cascaded_value(element, id, pseudo_type, out, true)) return true;
 
+    // dirty and committed pseudo reads must choose the same declaration fallback.
+    if (pseudo_type != 0 && !(accessor->flags & CSS_PROP_ACCESSOR_PSEUDO_RESOLVED))
+        return serialize_decl(accessor, element, pseudo_type, out);
     if (!computed) {
         // Before the first UiContext exists, loader scripts can only observe
         // the already-cascaded declaration tree; keep this compatibility seam
@@ -2171,8 +2427,10 @@ static bool serialize_computed(DomElement* element, CssPropertyCode id,
         }
         return serialize_decl(accessor, element, pseudo_type, out);
     }
-    if (pseudo_type != 0 && !(accessor->flags & CSS_PROP_ACCESSOR_PSEUDO_RESOLVED))
-        return serialize_decl(accessor, element, pseudo_type, out);
+    // optional item groups derive their computed value when no applied record exists.
+    if (accessor->derive && accessor->group_kind != PROP_GROUP_NONE &&
+        !prop_group_base(element, accessor->group_kind, false))
+        return accessor->derive(accessor, element, pseudo_type, out);
     return accessor->serialize && accessor->serialize(accessor, element, pseudo_type,
                                                       out);
 }

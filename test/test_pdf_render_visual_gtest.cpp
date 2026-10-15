@@ -39,6 +39,7 @@
 #include <gtest/gtest.h>
 #include "../lib/file.h"
 #include "../lib/mem.h"
+#include "../lib/ownership.hpp"
 #include "../lib/windows_compat.h"
 
 #include <ctype.h>
@@ -293,7 +294,12 @@ static bool rasterize_fixture_pdf(const char* pdf_path, const char* png_path, fl
     shell_quote(pdf_path, qpdf, sizeof(qpdf));
     shell_quote(png_path, qpng, sizeof(qpng));
     if (pixel_ratio == 1.0f && command_exists("sips")) {
-        snprintf(command, sizeof(command), "sips -s format png %s --out %s >/dev/null 2>&1", qpdf, qpng);
+        const char* srgb_profile = "/System/Library/ColorSync/Profiles/sRGB Profile.icc";
+        if (!file_exists(srgb_profile)) return false;
+        char qprofile[PATH_MAX + 8]; shell_quote(srgb_profile, qprofile, sizeof(qprofile));
+        // convert Quartz's profiled samples to the sRGB byte coordinates used by comparisons.
+        snprintf(command, sizeof(command), "sips --matchTo %s -s format png %s --out %s >/dev/null 2>&1",
+            qprofile, qpdf, qpng);
     } else if (command_exists("pdftoppm")) {
         char prefix[PATH_MAX], qprefix[PATH_MAX + 8];
         str_copy(prefix, sizeof(prefix), png_path, strlen(png_path));
@@ -873,6 +879,17 @@ static void expect_html_pair_output_parity(const char* name, const char* actual,
     mem_free(svg[1]);
 }
 
+static void expect_colored_html_pair_output_parity(const char* name, const char* actual,
+        const char* reference, unsigned channel, int density) {
+    expect_html_pair_output_parity(name, actual, reference, true, density);
+    const char* suffixes[] = {".png", "_0_svg.png", "_pdf.png"};
+    for (const char* suffix : suffixes) {
+        if (!strcmp(suffix, "_pdf.png") && !command_exists("sips") && !command_exists("pdftoppm")) continue;
+        char path[PATH_MAX]; str_fmt(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
+        expect_png_channel_coverage(path, channel, 7u & ~(1u << channel), 1);
+    }
+}
+
 static void expect_html_css_override_output_parity(const char* name, const char* actual,
         const char* literal_css) {
     StrBuf* reference = strbuf_new(); ASSERT_NE(reference, nullptr);
@@ -1136,6 +1153,43 @@ static void expect_preview_pixel(const ImageData& image, int x, int y, uint8_t r
     ASSERT_GE(x, 0); ASSERT_GE(y, 0); ASSERT_LT(x, image.width); ASSERT_LT(y, image.height);
     const uint8_t* pixel = image.pixels + ((size_t)y * image.width + x) * 4;
     EXPECT_EQ(pixel[0], r); EXPECT_EQ(pixel[1], g); EXPECT_EQ(pixel[2], b);
+}
+
+TEST(RenderOutputParity, PagedFlowRichBoundaryPaintMatchesContinuousOutputs) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
+    const char* html = "<!doctype html><style>@page{size:300px 160px;margin:0}"
+        "html,body,div{margin:0}div{width:100px;height:20px}"
+        "#gradient{background:linear-gradient(to right,red,blue)}"
+        "#image{background:url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAMCAIAAADZF8uwAAAAFUlEQVR4nGP4z8BAEBFWMapoABQBAPuQj3FCf3VbAAAAAElFTkSuQmCC') 0 0/12px 12px repeat}"
+        "#layers{background:linear-gradient(to right,cyan,blue),linear-gradient(lime,yellow);"
+        "background-size:50px 10px,100px 20px;background-repeat:no-repeat}"
+        "#border{border:4px solid;border-image:linear-gradient(red,blue) 1}"
+        "table{width:100px;border:2px solid blue;padding:1px;border-spacing:0;background:magenta}"
+        "caption{height:8px;background:yellow}caption.bottom{caption-side:bottom;background:lime}"
+        "td{height:8px;padding:0}"
+        "</style><div id='gradient'></div><div id='image'></div><div id='layers'></div><div id='border'></div>"
+        "<table><caption></caption><caption class='bottom'></caption><tr><td></td></tr></table>";
+    const char* path = "temp/render_output_parity/paged_rich_paint.html";
+    const char* pngs[] = {"temp/render_output_parity/paged_rich_paint.png", "temp/render_output_parity/flat_rich_paint.png"};
+    ASSERT_TRUE(render_html_fixture(path, pngs[0], html, "--paged --page-grid 1x1"));
+    ASSERT_TRUE(render_document_fixture(path, pngs[1], "-vw 300 -vh 160"));
+    expect_pngs_exactly_equal(pngs[1], pngs[0]);
+    for (const char* format : {"svg", "pdf"}) {
+        char outputs[2][PATH_MAX], rasters[2][PATH_MAX];
+        for (size_t variant = 0; variant < 2; variant++) {
+            snprintf(outputs[variant], sizeof(outputs[variant]), "temp/render_output_parity/%s_rich_paint.%s", variant ? "flat" : "paged", format);
+            snprintf(rasters[variant], sizeof(rasters[variant]), "temp/render_output_parity/%s_rich_%s.png", variant ? "flat" : "paged", format);
+            ASSERT_TRUE(render_document_fixture(path, outputs[variant], variant ? "-vw 300 -vh 160" : "--paged --page-grid 1x1"));
+            if (!strcmp(format, "pdf")) ASSERT_TRUE(rasterize_fixture_pdf(outputs[variant], rasters[variant]));
+            else {
+                char command[PATH_MAX * 2 + 64];
+                // flat SVG adds export padding; compare the physical page at its original scale.
+                snprintf(command, sizeof(command), "rsvg-convert --page-width 300 --page-height 160 -o %s %s", rasters[variant], outputs[variant]);
+                ASSERT_EQ(run_command_capture(command).exit_code, 0);
+            }
+        }
+        expect_pngs_exactly_equal(rasters[1], rasters[0]);
+    }
 }
 
 TEST(RenderOutputParity, PagedTablesRepeatGroupsAndSplitCellsInPdfAndPreview) {
@@ -2273,6 +2327,56 @@ TEST(RenderOutputParity, SizeContainersMatchExplicitGeometryInFlatAndFragmentedE
         "--paged --block-remote-resources --page-grid 1x3");
 }
 
+TEST(RenderOutputParity, IntrinsicAutoFallbackMatchesExplicitContainedGeometryAcrossOutputs) {
+    const char* common = "<!doctype html><style>html,body{margin:0;width:160px;height:120px;background:white}"
+        "#owner{font-size:10px;contain-intrinsic-size:auto 3em auto 4em}"
+        ".box{contain:size;width:max-content;height:max-content;font-size:30px;"
+        "background:red;border:4px solid blue;padding:3px}";
+    const struct {const char* name; const char* actual; const char* reference;} cases[] = {
+        {"inherited", ".box{contain-intrinsic-size:inherit}", ".box{width:30px;height:40px}"},
+        {"none", ".box{contain-intrinsic-size:auto none}", ".box{width:0;height:0}"}
+    };
+    const char* body = "</style><div id=owner><div class=box><div style='width:99px;height:88px'></div></div></div>";
+    for (const auto& item : cases) for (int density : {1, 2}) {
+        StrBuf* actual = strbuf_new(); StrBuf* reference = strbuf_new();
+        ASSERT_NE(actual, nullptr); ASSERT_NE(reference, nullptr);
+        strbuf_append_all(actual, 3, common, item.actual, body);
+        strbuf_append_all(reference, 3, common, item.reference, body);
+        char name[128]; snprintf(name, sizeof(name), "intrinsic_auto_fallback_%s_%dx", item.name, density);
+        SCOPED_TRACE(name);
+        expect_html_pair_output_parity(name, actual->str, reference->str, true, density);
+        strbuf_free(actual); strbuf_free(reference);
+    }
+}
+
+static const char* overflow_open_axis_css =
+    "<!doctype html><style>html,body{margin:0;width:240px;height:180px;background:white}"
+        ".box{position:absolute;left:45px;top:45px;width:80px;height:40px;border-radius:20px}"
+        ".ink{position:absolute;left:-15px;top:-10px;width:140px;height:70px;background:red}";
+static const char* overflow_open_axis_body =
+    "</style><div class=outer><div class=box><div class=ink></div></div></div>";
+
+TEST(RenderOutputParity, VisibleOverflowAxesPreserveOpenStripsAcrossOutputs) {
+    const struct {const char* name; const char* actual; const char* reference;} cases[] = {
+        {"horizontal", ".box{overflow:visible clip}", ".ink{top:0;height:40px}"},
+        {"vertical", ".box{overflow:clip visible}", ".ink{left:0;width:80px}"},
+        {"logical", ".box{writing-mode:vertical-rl;overflow-inline:clip;overflow-block:visible}",
+            ".box{writing-mode:vertical-rl}.ink{top:0;height:40px}"},
+        {"rollback", "@layer low,high;@layer low{.box{overflow:visible}}"
+            "@layer high{.box{overflow:clip;overflow-x:revert-layer}}", ".ink{top:0;height:40px}"}
+    };
+    for (const auto& item : cases) for (int density : {1, 2}) {
+        StrBuf* actual = strbuf_new(); StrBuf* reference = strbuf_new();
+        ASSERT_NE(actual, nullptr); ASSERT_NE(reference, nullptr);
+        strbuf_append_all(actual, 3, overflow_open_axis_css, item.actual, overflow_open_axis_body);
+        strbuf_append_all(reference, 3, overflow_open_axis_css, item.reference, overflow_open_axis_body);
+        char name[128]; snprintf(name, sizeof(name), "overflow_open_axis_%s_%dx", item.name, density);
+        SCOPED_TRACE(name);
+        expect_html_pair_output_parity(name, actual->str, reference->str, true, density);
+        strbuf_free(actual); strbuf_free(reference);
+    }
+}
+
 TEST(RenderOutputParity, StyleContainedGeneratedTextMatchesLiteralPseudosAcrossOutputs) {
     const char* common = "<!doctype html><style>@page{size:180px 40px;margin:0}"
         "html,body,div{margin:0;padding:0;font:14px/20px monospace}body{counter-reset:N 7}"
@@ -3058,6 +3162,36 @@ static bool render_fixture_output_image(const char* html_path, const char* png_p
     return load_png_rgba(png_path, image);
 }
 
+TEST(RenderOutputParity, ClipMarginOutsetsPreserveSquareAndSmallCornersAcrossOutputs) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    char* source = nullptr;
+    ASSERT_TRUE(file_read_all("test/ui/css_overflow_clip_margin_corners.html",
+        MEM_CAT_TEMP, &source, nullptr));
+    lam::Temp<char> html(source);
+    const struct { int x, y; bool white; } points[] = {
+        {31, 61, false}, {205, 55, false}, {391, 61, true}, {405, 75, false}, {550, 190, true}
+    };
+    for (int density : {1, 2}) for (const char* format : {"png", "svg", "pdf"}) {
+        SCOPED_TRACE(format);
+        SCOPED_TRACE(density);
+        char png[PATH_MAX], options[64];
+        str_fmt(png, sizeof(png), "temp/render_output_parity/clip_margin_corners_%dx_%s.png", density, format);
+        str_fmt(options, sizeof(options), "--pixel-ratio %d", density);
+        ImageData image = {};
+        ASSERT_TRUE(render_fixture_output_image("temp/render_output_parity/clip_margin_corners.html",
+            png, html.get(), format, options, density, &image));
+        // @page uses 72 PDF points per 96 CSS px; raster/SVG canvases may add trailing padding.
+        float scale = density * (strcmp(format, "pdf") == 0 ? 72.0f / 96.0f : 1.0f);
+        int calibration_x = (int)(450 * scale), calibration_y = (int)(100 * scale); // INT_CAST_OK: physical raster sample indices
+        const uint8_t* red = image.pixels + ((size_t)calibration_y * image.width + calibration_x) * 4;
+        EXPECT_GT(red[0], 180); EXPECT_LT(red[1], 80); EXPECT_LT(red[2], 80);
+        for (const auto& point : points) expect_preview_pixel(image,
+            (int)(point.x * scale), (int)(point.y * scale), // INT_CAST_OK: physical raster sample indices
+            point.white ? 255 : red[0], point.white ? 255 : red[1], point.white ? 255 : red[2]);
+        image_free(image.pixels);
+    }
+}
+
 TEST(RenderOutputParity, TextDecorationListPaintsBothLines) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";
@@ -3439,6 +3573,28 @@ TEST(RenderOutputParity, RgbPercentageAlphaPaintsLikeNumericAlpha) {
         EXPECT_EQ(pixel[3], 255);
     }
     image_free(image.pixels);
+}
+
+TEST(RenderOutputParity, ModernThemeColorsReachTextBordersAndBackgroundsAcrossOutputs) {
+    const char* html =
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "body{color:oklab(.6 .1 .05);font:24px Arial}"
+        "div{position:absolute;width:40px;height:30px;top:10px}"
+        "#solid{left:10px;background:oklch(.6 .1 120)}"
+        "#border{left:60px;border:6px solid oklab(.6 .1 .05)}"
+        "#mix{left:125px;background:color-mix(in srgb,red,blue)}"
+        "#perceptual{left:175px;background:color-mix(in oklab,white,black)}"
+        "#alpha{left:225px;background:color-mix(in srgb,red,transparent)}"
+        "#nonneutral{left:225px;top:50px;background:color-mix(in oklab,red,blue)}"
+        "p{position:absolute;top:60px;left:10px;margin:0}"
+        "</style><div id=solid></div><div id=border></div><div id=mix></div>"
+        "<div id=perceptual></div><div id=alpha></div><div id=nonneutral></div><p><span>Theme color</span></p>";
+    // literal sRGB patches come from independent browser samples, not the color implementation.
+    expect_html_css_override_output_parity("modern_theme_colors", html,
+        "body{color:rgb(186,100,92)}#solid{background:rgb(121,137,64)}"
+        "#border{border-color:rgb(186,100,92)}#mix{background:rgb(128,0,128)}"
+        "#perceptual{background:rgb(99,99,99)}#alpha{background:rgba(255,0,0,.5)}"
+        "#nonneutral{background:rgb(140,83,162)}");
 }
 
 TEST(RenderOutputParity, HwbColorsNormalizeWhitenessBlacknessAndAlpha) {
@@ -4943,6 +5099,15 @@ TEST(RenderOutputParity, FileSelectorButtonPaintsSeparateFromHostAfterRestyle) {
     EXPECT_GT(host_black, 15);
 }
 
+static const unsigned char IMAGE_RENDERING_SOURCE_PIXELS[] = {
+    255, 0, 0, 255, 0, 0, 255, 255,
+    0, 255, 0, 255, 255, 255, 255, 255
+};
+
+static bool write_image_rendering_source_png(const char* path) {
+    return write_png_rgba(path, IMAGE_RENDERING_SOURCE_PIXELS, 2, 2);
+}
+
 TEST(RenderOutputParity, ImageRenderingCrispEdgesUsesSourcePixels) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";
@@ -4951,11 +5116,7 @@ TEST(RenderOutputParity, ImageRenderingCrispEdgesUsesSourcePixels) {
     const char* source_path = "temp/render_output_parity/image_rendering_source.png";
     const char* html_path = "temp/render_output_parity/image_rendering.html";
     const char* png_path = "temp/render_output_parity/image_rendering.png";
-    const unsigned char source_pixels[] = {
-        255, 0, 0, 255,   0, 0, 255, 255,
-        0, 255, 0, 255,   255, 255, 255, 255
-    };
-    ASSERT_TRUE(write_png_rgba(source_path, source_pixels, 2, 2));
+    ASSERT_TRUE(write_image_rendering_source_png(source_path));
     const char* html =
         "<!doctype html><style>html,body{margin:0}"
         "img{position:absolute;top:0;width:8px;height:8px}"
@@ -4988,6 +5149,98 @@ TEST(RenderOutputParity, ImageRenderingCrispEdgesUsesSourcePixels) {
     image_free(image.pixels);
 }
 
+static void expect_image_rendering_sampling_outputs(bool affine_pixelated) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const unsigned char* source = IMAGE_RENDERING_SOURCE_PIXELS;
+    ASSERT_TRUE(write_image_rendering_source_png("temp/render_output_parity/marker_sampling_source.png"));
+    const struct { const char* name; const char* mode; bool inherited;
+        const char* transform; bool affine = false; unsigned quadrant_area = 16; } cases[] = {
+        {"crisp", "crisp-edges", false, ""},
+        {"inherited", "crisp-edges", true, ""},
+        {"pixelated", "pixelated", false, ""},
+        {"transformed", "crisp-edges", false, "scale(4)"},
+        {"speed", "optimizespeed", true, "scale(4)"},
+        {"pixel_scale", "pixelated", false, "scale(4)", true},
+        {"pixel_anisotropic", "pixelated", true, "scale(4,3)", true, 12},
+        {"pixel_flip", "pixelated", false, "scale(-4,4)", true},
+        {"pixel_rotate", "pixelated", true, "rotate(90deg) scale(4)", true}
+    };
+    for (int density = 1; density <= 2; density++) {
+        // the independent reference contains literal device-sized color quadrants.
+        int side = 8 * density;
+        unsigned char expanded[16 * 16 * 4];
+        for (int y = 0; y < side; y++) for (int x = 0; x < side; x++)
+            memcpy(expanded + (y * side + x) * 4,
+                source + ((y >= side / 2 ? 2 : 0) + (x >= side / 2 ? 1 : 0)) * 4, 4);
+        char expanded_path[PATH_MAX], options[64];
+        str_fmt(expanded_path, sizeof(expanded_path),
+            "temp/render_output_parity/marker_sampling_expanded_%dx.png", density);
+        ASSERT_TRUE(write_png_rgba(expanded_path, expanded, side, side));
+        str_fmt(options, sizeof(options), "--pixel-ratio %d", density);
+        for (const auto& item : cases) for (bool retained : {false, true})
+            for (unsigned consumer = 0; consumer < (affine_pixelated ? 3u : 1u); consumer++) {
+            if (item.affine != affine_pixelated) continue;
+            char name[128], paths[2][PATH_MAX];
+            const char* consumers[] = {"marker", "image", "background"};
+            str_fmt(name, sizeof(name), "%s_sampling_%s_%s_%dx", consumers[consumer], item.name,
+                retained ? "retained" : "plain", density);
+            SCOPED_TRACE(name);
+            for (unsigned reference = 0; reference < 2; reference++) {
+                char html_path[PATH_MAX], html[2048], image[256], image_url[128];
+                str_fmt(html_path, sizeof(html_path), "temp/render_output_parity/%s%s.html",
+                    name, reference ? "_reference" : "");
+                str_fmt(paths[reference], sizeof(paths[reference]), "temp/render_output_parity/%s%s.png",
+                    name, reference ? "_reference" : "");
+                bool transformed = item.transform[0] != '\0';
+                float resolution = transformed ? 1.0f : 0.25f;
+                if (reference) {
+                    str_fmt(image, sizeof(image), "image-set(url(marker_sampling_expanded_%dx.png) %gx)",
+                        density, resolution * side / 2.0f);
+                    str_fmt(image_url, sizeof(image_url), "marker_sampling_expanded_%dx.png", density);
+                } else {
+                    str_fmt(image, sizeof(image), "image-set(url(marker_sampling_source.png) %gx)", resolution);
+                    str_fmt(image_url, sizeof(image_url), "marker_sampling_source.png");
+                }
+                const char* mode = reference ? "auto" : item.mode;
+                // baseline-aligned quarter turns need inline-start space to remain visible.
+                if (consumer == 0) str_fmt(html, sizeof(html), "<!doctype html><style>html,body{margin:0;background:white}"
+                    "ul{position:absolute;left:128px;top:24px;margin:0;padding:0;image-rendering:%s}"
+                    "li{font:16px/24px Arial;width:24px;height:24px;list-style-position:inside;"
+                    "list-style-image:%s;image-rendering:%s;transform:%s;transform-origin:0 0;%s}</style><ul><li></li></ul>",
+                    item.inherited ? mode : "auto", image, item.inherited ? "inherit" : mode,
+                    transformed ? item.transform : "none",
+                    retained ? "filter:brightness(1);" : "");
+                else str_fmt(html, sizeof(html), "<!doctype html><style>html,body{margin:0;background:white}"
+                    "body{image-rendering:%s}.sample{position:absolute;left:128px;top:24px;width:2px;height:2px;"
+                    "image-rendering:%s;transform:%s;transform-origin:0 0;%sbackground-size:100%% 100%%;"
+                    "background-repeat:no-repeat}</style>",
+                    item.inherited ? mode : "auto", item.inherited ? "inherit" : mode,
+                    item.transform, retained ? "filter:brightness(1);" : "");
+                if (consumer != 0) {
+                    size_t used = strlen(html);
+                    if (consumer == 1) str_fmt(html + used, sizeof(html) - used,
+                        "<img class=sample src='%s'>", image_url);
+                    else str_fmt(html + used, sizeof(html) - used,
+                        "<div class=sample style='background-image:%s'></div>", image);
+                }
+                ASSERT_TRUE(render_html_fixture(html_path, paths[reference], html, options));
+            }
+            expect_pngs_exactly_equal(paths[1], paths[0]);
+            expect_png_channel_coverage(paths[0], 0, 6, item.quadrant_area * density * density);
+            expect_png_channel_coverage(paths[0], 1, 5, item.quadrant_area * density * density);
+            expect_png_channel_coverage(paths[0], 2, 3, item.quadrant_area * density * density);
+        }
+    }
+}
+
+TEST(RenderOutputParity, ImageRenderingMarkersUseOriginatingItemSampling) {
+    expect_image_rendering_sampling_outputs(false);
+}
+
+TEST(RenderOutputParity, ImageRenderingPixelatedUsesAffineDeviceFootprints) {
+    expect_image_rendering_sampling_outputs(true);
+}
+
 TEST(RenderOutputParity, ImageRenderingPixelatedBlendsAtNonintegerScale) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";
@@ -4996,11 +5249,7 @@ TEST(RenderOutputParity, ImageRenderingPixelatedBlendsAtNonintegerScale) {
     const char* source_path = "temp/render_output_parity/image_pixelated_source.png";
     const char* html_path = "temp/render_output_parity/image_pixelated.html";
     const char* png_path = "temp/render_output_parity/image_pixelated.png";
-    const unsigned char source_pixels[] = {
-        255, 0, 0, 255,   0, 0, 255, 255,
-        0, 255, 0, 255,   255, 255, 255, 255
-    };
-    ASSERT_TRUE(write_png_rgba(source_path, source_pixels, 2, 2));
+    ASSERT_TRUE(write_image_rendering_source_png(source_path));
     const char* html =
         "<!doctype html><style>html,body{margin:0;background:white}"
         "img{position:absolute;top:0;width:5px;height:5px}"
@@ -5029,6 +5278,120 @@ TEST(RenderOutputParity, ImageRenderingPixelatedBlendsAtNonintegerScale) {
     EXPECT_GT(pixel(22, 1)[0], 90);
     EXPECT_GT(pixel(22, 1)[2], 90);
     image_free(image.pixels);
+}
+
+TEST(RenderOutputParity, InsideImageMarkersShareInlineBaselineAndStrutAcrossOutputs) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(write_image_rendering_source_png("temp/render_output_parity/marker_baseline_source.png"));
+    for (int density = 1; density <= 2; density++) for (unsigned font : {12u, 16u, 24u})
+        for (const char* leading : {"normal", "1"}) for (unsigned size : {2u, 8u, 16u, 32u})
+            for (bool text : {false, true}) {
+                char name[128], actual[2048], reference[2048], prefix[1024];
+                str_fmt(name, sizeof(name), "marker_baseline_%u_%s_%u_%s_%dx", font, leading,
+                    size, text ? "text" : "empty", density);
+                SCOPED_TRACE(name);
+                str_fmt(prefix, sizeof(prefix), "<!doctype html><style>html,body{margin:0;background:white}"
+                    "ul{margin:0;padding:0}li{width:100px;font:%upx/%s Arial;image-rendering:crisp-edges;"
+                    "background:rgb(240,240,240)}</style>", font, leading);
+                str_fmt(actual, sizeof(actual), "%s<ul><li style='list-style:none inside;"
+                    "list-style-image:image-set(url(marker_baseline_source.png) %gx)'>%s</li></ul>",
+                    prefix, 2.0 / size, text ? "X" : "");
+                str_fmt(reference, sizeof(reference), "%s<ul><li style='list-style:none'>"
+                    "<img src=marker_baseline_source.png style='width:%upx;height:%upx;vertical-align:baseline'> %s"
+                    "</li></ul>", prefix, size, size, text ? "X" : "");
+                expect_html_pair_output_parity(name, actual, reference, true, density);
+                for (const char* suffix : {".png", "_0_svg.png", "_pdf.png"}) {
+                    if (strcmp(suffix, "_pdf.png") == 0 &&
+                        !command_exists("sips") && !command_exists("pdftoppm")) continue;
+                    char path[PATH_MAX];
+                    str_fmt(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
+                    // a positive source-color sample rejects two omitted images.
+                    expect_png_channel_coverage(path, 0, 6, 1);
+                }
+            }
+}
+
+TEST(RenderOutputParity, NestedInlineFontStrutsKeepLeadingAcrossOutputs) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(write_image_rendering_source_png("temp/render_output_parity/nested_font_source.png"));
+    for (int density = 1; density <= 2; density++) for (unsigned font : {24u, 32u, 48u})
+        for (const char* leading : {"normal", "1"}) for (bool image : {false, true})
+            for (bool outside_text : {false, true}) {
+                char name[128], actual[2048], reference[2048];
+                str_fmt(name, sizeof(name), "nested_font_%u_%s_%s_%s_%dx", font, leading,
+                    image ? "image" : "text", outside_text ? "outside" : "inside", density);
+                SCOPED_TRACE(name);
+                char* pages[] = {actual, reference};
+                for (unsigned side = 0; side < 2; side++) {
+                    str_fmt(pages[side], sizeof(actual), "<!doctype html><style>html,body{margin:0;background:white}"
+                        "div{width:100px;background:rgb(240,240,240);font:%upx/%s Arial}"
+                        "img{width:2px;height:2px;vertical-align:baseline;image-rendering:crisp-edges}</style>"
+                        "<div><span style='font-size:%upx;white-space:pre'>%s%s</span>%s</div>",
+                        side ? font : 16u, leading, font,
+                        image ? "<img src=nested_font_source.png> " : "",
+                        outside_text ? " " : "X", outside_text ? "<span style='font-size:16px'>X</span>" : "");
+                }
+                expect_html_pair_output_parity(name, actual, reference, true, density);
+                if (image) for (const char* suffix : {".png", "_0_svg.png", "_pdf.png"}) {
+                    if (strcmp(suffix, "_pdf.png") == 0 &&
+                        !command_exists("sips") && !command_exists("pdftoppm")) continue;
+                    char path[PATH_MAX];
+                    str_fmt(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
+                    expect_png_channel_coverage(path, 0, 6, 1);
+                }
+            }
+}
+
+TEST(RenderOutputParity, AdjoiningEmptyMarginChainsAgreeAcrossOutputs) {
+    struct MarginCase {
+        const char* name;
+        const char* empty;
+        double margin;
+        double reference_margin;
+        const char* content;
+        const char* parent_css;
+        int sample_y;
+    };
+    const char* empty = "<div class=empty style='margin:16px 0'></div>";
+    const char* text = "<h3>X</h3>";
+    const char* solid = "<div style='height:22px;margin:24px 0'></div>";
+    const MarginCase cases[] = {
+        {"heading", empty, 18.72, 18.72, text, "", 40},
+        {"two", "<div class=empty style='margin:16px 0'></div><div class=empty style='margin:20px 0'></div>",
+            24, 24, text, "", 40},
+        {"negative", "<div class=empty style='margin:-10px 0'></div>", 24, 14, text, "", 32},
+        {"nested", empty, 40, 40, "<section><h3>X</h3></section>", "", 56},
+        {"bfc", empty, 24, 24, solid, ";overflow:hidden", 40},
+        {"border", empty, 24, 24, solid, ";border-top:1px solid transparent", 40},
+        {"padding", empty, 24, 24, solid, ";padding-top:1px", 40},
+    };
+    for (int density = 1; density <= 2; density++) for (const MarginCase& item : cases) {
+        char name[128], actual[3072], reference[3072];
+        str_fmt(name, sizeof(name), "empty_margin_%s_%dx", item.name, density);
+        SCOPED_TRACE(name);
+        char* pages[] = {actual, reference};
+        for (unsigned side = 0; side < 2; side++) {
+            str_fmt(pages[side], sizeof(actual), "<!doctype html><style>html,body{margin:0;background:white;"
+                "width:120px;height:120px}.frame{position:absolute;left:8px;top:8px;width:100px;height:100px}"
+                ".parent{width:100px;margin:8px 0;background:rgb(240,240,240);font:16px/24px Arial%s}"
+                ".empty{height:0}h3{font:18.72px/22px Arial;margin:%gpx 0}section{margin:10px 0}</style>"
+                "<div class=frame><div class=parent>%s%s</div></div>",
+                item.parent_css, side ? item.reference_margin : item.margin,
+                side ? "" : item.empty, item.content);
+        }
+        expect_html_pair_output_parity(name, actual, reference, true, density);
+        for (const char* suffix : {".png", "_0_svg.png", "_pdf.png"}) {
+            if (strcmp(suffix, "_pdf.png") == 0 &&
+                !command_exists("sips") && !command_exists("pdftoppm")) continue;
+            char path[PATH_MAX];
+            str_fmt(path, sizeof(path), "temp/render_output_parity/%s%s", name, suffix);
+            ImageData image = {};
+            ASSERT_TRUE(load_png_rgba(path, &image));
+            // reject two empty outputs as well as unequal parent border edges.
+            expect_preview_pixel(image, 98 * density, item.sample_y * density, 240, 240, 240);
+            image_free(image.pixels);
+        }
+    }
 }
 
 TEST(RenderOutputParity, BackgroundShorthandUrlPaintsImage) {
@@ -5457,6 +5820,55 @@ TEST(RenderOutputParity, OverflowEllipsisAndClampMatchExplicitTextAcrossOutputs)
     }
 }
 
+TEST(RenderOutputParity, AtomicInlineEllipsisMatchesExplicitContributionsAcrossOutputs) {
+    const struct {const char* name; const char* actual; const char* reference;} cases[] = {
+        {"before", "<i style='width:20px'></i>ABCDEFGHIJ", "<i style='width:20px'></i>AB…"},
+        {"end", "AB<i style='width:40px'></i>CD", "AB…"},
+        {"wide_first", "<i style='width:90px'></i>AB", "<i style='width:90px'></i>"},
+        {"image_end", "ABCD<img width=20 height=20 src='atomic_ellipsis_red.svg'>", "ABCD…"},
+        {"image_before", "<img width=20 height=20 src='atomic_ellipsis_red.svg'>ABCDEFGHIJ", "<img width=20 height=20 src='atomic_ellipsis_red.svg'>AB…"},
+        {"fits", "<i style='width:20px'></i>AB", "<i style='width:20px'></i>AB"},
+    };
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char image[] = "<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><path fill='red' d='M0 0h20v20H0z'/></svg>";
+    ASSERT_TRUE(write_file_all("temp/render_output_parity/atomic_ellipsis_red.svg", image, sizeof(image) - 1));
+    const char* format = "<!doctype html><meta charset=utf-8><style>"
+        "@font-face{font-family:FixtureMono;src:url(../../test/layout/data/font/LiberationMono-Regular.ttf)}"
+        "html,body{margin:0;background:white}.box{font:20px/24px FixtureMono;color:black;"
+        "width:62px;height:24px;overflow:hidden;white-space:nowrap;%s}"
+        "i{display:inline-block;height:20px;background:red;vertical-align:top}img{vertical-align:top}"
+        "</style><div class=box>%s</div>";
+    for (const auto& item : cases) {
+        char name[96], actual[2048], reference[2048];
+        snprintf(name, sizeof(name), "atomic_ellipsis_%s", item.name);
+        snprintf(actual, sizeof(actual), format, "text-overflow:ellipsis", item.actual);
+        snprintf(reference, sizeof(reference), format, "", item.reference);
+        expect_html_pair_output_parity(name, actual, reference, true);
+    }
+}
+
+TEST(RenderOutputParity, RtlTwoLineClampMatchesExplicitVisualLinesAcrossOutputs) {
+    const struct {const char* name; const char* actual; const char* reference; const char* style;} cases[] = {
+        {"clamped", "ABCDEFGHIJKLMNOP", "<span dir=ltr>ABCDE<br>…<span>GHIJ</span></span>", ""},
+        {"fits", "ABCD", "ABCD", ""},
+        {"wide", "ABCDEFGHIJKLMNOP", "ABCDEFGHIJKLMNOP", "width:200px"},
+        // literal visual order keeps this reference independent of the RTL projection.
+        {"hebrew", "אבגדהוזחטיכלמנסע", "<bdo dir=ltr>הדגבא<br>…טחזו</bdo>", ""},
+        {"hebrew_fits", "אבגד", "<bdo dir=ltr>דגבא</bdo>", ""},
+    };
+    const char* format = "<!doctype html><meta charset=utf-8><style>"
+        "@font-face{font-family:FixtureMono;src:url(../../test/layout/data/font/LiberationMono-Regular.ttf)}"
+        "html,body{margin:0;background:white}.box{font:20px/24px FixtureMono;color:black;direction:rtl;"
+        "width:62px;overflow:hidden;word-break:break-all;%s;%s}</style><div class=box>%s</div>";
+    for (const auto& item : cases) {
+        char name[96], actual[2048], reference[2048];
+        snprintf(name, sizeof(name), "rtl_two_line_%s", item.name);
+        snprintf(actual, sizeof(actual), format, "display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2", item.style, item.actual);
+        snprintf(reference, sizeof(reference), format, "", item.style, item.reference);
+        expect_html_pair_output_parity(name, actual, reference, true);
+    }
+}
+
 TEST(RenderOutputParity, OutlinedHtmlTextRetainsAccessibleNamesWithoutViewerFonts) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
     const char* html_path = "temp/render_output_parity/outlined_html_label.html";
@@ -5469,6 +5881,166 @@ TEST(RenderOutputParity, OutlinedHtmlTextRetainsAccessibleNamesWithoutViewerFont
     EXPECT_TRUE(file_contains_text(svg_path, "<path d=\""));
     EXPECT_FALSE(file_contains_text(svg_path, "<text "));
     EXPECT_FALSE(file_contains_text(svg_path, "font-family="));
+}
+
+static void expect_flex_factor_outputs(const char* stem, bool grid_parent) {
+    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white}"
+        ".outer{width:120px;grid-template-columns:120px;font-size:50px}"
+        ".host{display:flex;width:120px;height:20px}.red,.blue{min-width:0;height:20px}"
+        ".red{background:red}.blue{background:blue;flex-grow:1;flex-shrink:1}"
+        ".grow>div{flex-basis:0}.shrink>div{flex-basis:120px}</style>";
+    const struct { const char* name; const char* value; const char* computed; float font_size;
+        bool zero_shrink_box = false; const char* grid_computed = nullptr; } cases[] = {
+        {"lower", "calc(1em / 10px)", "2", 20.0f},
+        {"higher", "calc(1em / 10px)", "4", 40.0f},
+        {"inherit", "inherit", "3", 3.0f, false, "5"},
+        {"invalid_var", "var(--bad)", nullptr, 20.0f},
+        {"negative_math", "calc(-2)", "0", 20.0f},
+        {"fraction", "calc(.5)", "0.5", 20.0f},
+        {"rejected_negative", "-1", "2", 20.0f},
+        {"infinity", "calc(infinity)", "3.40282e38", 20.0f, true}
+    };
+    const struct { const char* name; const char* property; bool shrink; } modes[] = {
+        {"grow", "flex-grow", false}, {"shrink", "flex-shrink", true}
+    };
+    for (const auto& mode : modes) for (const auto& item : cases)
+        for (int density = 1; density <= 2; density++) {
+            char name[128], actual[4096], reference[4096], host_style[512], child_style[512];
+            str_fmt(name, sizeof(name), "%s_%s_%s_%dx", stem, mode.name, item.name, density);
+            SCOPED_TRACE(name);
+            const char* value = grid_parent && item.grid_computed ? item.grid_computed : item.computed;
+            const char* computed = value ? value : mode.shrink ? "1" : "0";
+            const char* display = grid_parent ? "grid" : "block";
+            char* specified = grid_parent ? host_style : child_style;
+            str_fmt(specified, sizeof(host_style), "font-size:%gpx;--bad:2px;%s:2;%s:%s",
+                item.font_size, mode.property, mode.property, item.value);
+            if (grid_parent) str_fmt(child_style, sizeof(child_style), "font-size:5px;%s:inherit", mode.property);
+            else str_fmt(host_style, sizeof(host_style), "font-size:30px;%s:3", mode.property);
+            str_fmt(actual, sizeof(actual), "%s<div class=outer style='display:%s;%s:calc(1em / 10px)'>"
+                "<div class='host %s' style='%s'><div class=red style='%s'></div><div class=blue></div></div></div>",
+                prefix, display, mode.property, mode.name, host_style, child_style);
+            str_fmt(reference, sizeof(reference), "%s<div class=outer style='display:%s;%s:5'>"
+                "<div class='host %s' style='font-size:30px;%s:3'><div class=red style='%s:%s'></div>"
+                "<div class=blue></div></div></div>", prefix, display, mode.property,
+                mode.name, mode.property, mode.property, computed);
+            bool red_visible = mode.shrink ? !item.zero_shrink_box : strcmp(computed, "0") != 0;
+            expect_colored_html_pair_output_parity(name, actual, reference, red_visible ? 0u : 2u, density);
+        }
+}
+
+TEST(RenderOutputParity, InheritedFlexFactorsKeepGridParentComputationAcrossOutputs) {
+    expect_flex_factor_outputs("inherited_flex_grid", true);
+}
+
+TEST(RenderOutputParity, CalculatedFlexFactorsReachDistributionAcrossOutputs) {
+    expect_flex_factor_outputs("calculated_flex", false);
+}
+
+static void expect_flex_shorthand_outputs(bool grid_parent) {
+    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white}"
+        ".outer{width:120px;grid-template-columns:120px}.stage{display:flex;width:120px;height:20px}"
+        ".red,.blue{min-width:0;height:20px}"
+        ".red{font-size:20px;background:red}.blue{background:blue;flex:1 1 0%}"
+        ".shrink>.blue{flex-basis:120px}</style>";
+    const struct { const char* name; const char* actual; const char* reference;
+        bool shrink = false; bool zero_red = false; const char* parent = ""; } cases[] = {
+        {"math", "flex:calc(1em / 10px) 1 0%", "flex-grow:2;flex-shrink:1;flex-basis:0%"},
+        {"higher", "font-size:40px;--factor:calc(1em / 10px);flex:var(--factor) 1 0%",
+            "flex-grow:4;flex-shrink:1;flex-basis:0%"},
+        {"basis_first", "flex:calc(1em + 10px) 2 1", "flex-grow:2;flex-shrink:1;flex-basis:30px"},
+        {"shrink", "flex:1 calc(1em / 10px) 120px", "flex-grow:1;flex-shrink:2;flex-basis:120px", true},
+        {"invalid_var", "flex:2 1 0%;--bad:garbage;flex:var(--bad) 1 0%",
+            "flex-grow:0;flex-shrink:1;flex-basis:auto", false, true},
+        {"negative_math", "flex:calc(-2) 1 0%", "flex-grow:0;flex-shrink:1;flex-basis:0%", false, true},
+        {"rejected_negative", "flex:2 1 0%;flex:-1 1 0%", "flex-grow:2;flex-shrink:1;flex-basis:0%"},
+        {"important", "flex-grow:4!important;flex:2 1 0%", "flex-grow:4;flex-shrink:1;flex-basis:0%"},
+        {"before", "flex-grow:4;flex:2 1 0%", "flex-grow:2;flex-shrink:1;flex-basis:0%"},
+        {"after", "flex:2 1 0%;flex-grow:4", "flex-grow:4;flex-shrink:1;flex-basis:0%"},
+        {"inherit", "font-size:5px;flex:inherit", "flex-grow:3;flex-shrink:2;flex-basis:60px",
+            false, false, "font-size:30px;flex:calc(1em / 10px) 2 2em"},
+        {"none", "flex:none", "flex-grow:0;flex-shrink:0;flex-basis:auto", false, true},
+        {"inherit_percent", "font-size:5px;flex:inherit", "flex-grow:3;flex-shrink:2;flex-basis:25%",
+            false, false, "font-size:30px;flex:calc(1em / 10px) 2 calc(25%)"},
+        {"inherit_longhand", "font-size:5px;flex:inherit", "flex-grow:3;flex-shrink:2;flex-basis:60px",
+            false, false, "font-size:30px;flex-grow:calc(1em / 10px);flex-shrink:2;flex-basis:2em"},
+        {"inherit_invalid", "font-size:5px;flex:inherit", "flex-grow:0;flex-shrink:1;flex-basis:auto",
+            false, true, "font-size:30px;--bad:garbage;flex:calc(1em / 10px) 2 var(--bad)"}
+    };
+    for (const auto& item : cases) for (int density = 1; density <= 2; density++) {
+        char name[128], actual[4096], reference[4096];
+        str_fmt(name, sizeof(name), "%s_flex_components_%s_%dx",
+            grid_parent ? "grid_parent" : "direct", item.name, density);
+        SCOPED_TRACE(name);
+        const char* mode = item.shrink ? "shrink" : "grow";
+        const char* display = grid_parent ? "grid" : "block";
+        const char* page = "%s<div class=outer style='display:%s'><div class='stage %s' style='%s'>"
+            "<div class=red style='%s'></div><div class=blue></div></div></div>";
+        str_fmt(actual, sizeof(actual), page, prefix, display, mode, item.parent, item.actual);
+        str_fmt(reference, sizeof(reference), page, prefix, display, mode, "", item.reference);
+        expect_colored_html_pair_output_parity(name, actual, reference, item.zero_red ? 2u : 0u, density);
+    }
+}
+
+TEST(RenderOutputParity, FlexShorthandComponentsReachDistributionAcrossOutputs) {
+    expect_flex_shorthand_outputs(false);
+}
+
+TEST(RenderOutputParity, InheritedFlexBasisKeepsGridParentUnitsAcrossOutputs) {
+    expect_flex_shorthand_outputs(true);
+}
+
+TEST(RenderOutputParity, CalculatedItemOrderValuesReachFlexAndGridAcrossOutputs) {
+    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white}"
+        ".stage{width:60px;height:20px;order:5;grid-template-columns:20px 20px 20px}"
+        ".red,.blue,.green{width:20px;height:20px}"
+        ".red{background:red}.blue{background:blue;order:3}.green{background:green;order:1}</style>";
+    const struct { const char* name; const char* declaration; const char* computed; } cases[] = {
+        {"lower", "font-size:20px;order:calc(1em / 10px)", "2"},
+        {"higher", "font-size:40px;--level:calc(1em / 10px);order:var(--level)", "4"},
+        {"inherit", "font-size:3px;order:inherit", "5"},
+        {"invalid_var", "--level:2px;order:var(--level)", "0"},
+        {"rounded", "order:calc(1.5)", "2"},
+        {"rejected_literal", "order:4;order:1.5", "4"}
+    };
+    const char* layouts[] = {"flex", "grid"};
+    for (const char* layout : layouts) for (const auto& item : cases)
+        for (int density = 1; density <= 2; density++) {
+            char name[128], actual[2048], reference[2048];
+            str_fmt(name, sizeof(name), "calculated_order_%s_%s_%dx", layout, item.name, density);
+            SCOPED_TRACE(name);
+            str_fmt(actual, sizeof(actual), "%s<div class=stage style='display:%s'>"
+                "<div class=red style='%s'></div><div class=blue></div><div class=green></div></div>",
+                prefix, layout, item.declaration);
+            str_fmt(reference, sizeof(reference), "%s<div class=stage style='display:%s'>"
+                "<div class=red style='order:%s'></div><div class=blue></div><div class=green></div></div>",
+                prefix, layout, item.computed);
+            expect_colored_html_pair_output_parity(name, actual, reference, 0u, density);
+        }
+}
+
+TEST(RenderOutputParity, CalculatedZIndexValuesReachStackingAcrossOutputs) {
+    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white}"
+        ".stage{position:relative;width:48px;height:32px}"
+        ".red,.blue{position:absolute;left:0;top:0;width:48px;height:32px}"
+        ".red{background:red}.blue{background:blue;z-index:3}</style>";
+    const struct { const char* name; const char* declaration; const char* computed; bool red; } cases[] = {
+        {"lower", "font-size:20px;z-index:calc(1em / 10px)", "2", false},
+        {"higher", "font-size:40px;--level:calc(1em / 10px);z-index:var(--level)", "4", true},
+        {"inherit", "font-size:3px;z-index:inherit", "5", true},
+        {"invalid_var", "--level:2px;z-index:var(--level)", "auto", false},
+        {"rounded", "z-index:calc(3.5)", "4", true},
+        {"rejected_literal", "z-index:4;z-index:1.5", "4", true}
+    };
+    for (const auto& item : cases) for (int density = 1; density <= 2; density++) {
+        char name[128], actual[2048], reference[2048];
+        str_fmt(name, sizeof(name), "calculated_z_index_%s_%dx", item.name, density);
+        SCOPED_TRACE(name);
+        str_fmt(actual, sizeof(actual), "%s<div class=stage style='font-size:50px;z-index:calc(1em / 10px)'>"
+            "<div class=red style='%s'></div><div class=blue></div></div>", prefix, item.declaration);
+        str_fmt(reference, sizeof(reference), "%s<div class=stage style='z-index:5'>"
+            "<div class=red style='z-index:%s'></div><div class=blue></div></div>", prefix, item.computed);
+        expect_colored_html_pair_output_parity(name, actual, reference, item.red ? 0u : 2u, density);
+    }
 }
 
 TEST(RenderOutputParity, OrderedBackgroundLayersAndComponentsAcrossOutputs) {
@@ -5683,6 +6255,32 @@ TEST(RenderOutputParity, BackgroundComputedComponentReadsReachAuthoredPaintAcros
             prefix, item.source, item.script);
         snprintf(reference, sizeof(reference), "%s<div class=box>%s</div>", prefix, item.patches);
         expect_html_pair_output_parity(name, actual, reference, true, scale);
+    }
+}
+
+TEST(RenderOutputParity, PseudoComputedCurrentColorsReachPaintAcrossOutputs) {
+    const char* prefix = "<!doctype html><style>html,body{margin:0;background:white}"
+        "#source{display:none;color:red;border-top-color:currentColor}"
+        "#source::before{color:var(--before-color,blue);background-color:currentColor}"
+        "#source::after{color:var(--after-color,green);border-top-color:inherit}"
+        ".box{width:48px;height:28px;border-top:4px solid}</style>";
+    const struct Case { const char* name; const char* mutation; const char* background; const char* border; } cases[] = {
+        {"initial", "", "blue", "green"},
+        {"dirty", "source.style.color='black';source.style.setProperty('--before-color','purple');"
+            "source.style.setProperty('--after-color','blue');", "purple", "blue"},
+        {"literal", "source.style.setProperty('--before-color','purple');source.style.borderTopColor='red';", "purple", "red"}
+    };
+    for (const Case& item : cases) for (int density = 1; density <= 2; density++) {
+        char name[128], actual[2048], reference[1024];
+        snprintf(name, sizeof(name), "pseudo_current_color_%s_%dx", item.name, density);
+        SCOPED_TRACE(name);
+        snprintf(actual, sizeof(actual), "%s<div id=source></div><div id=box class=box></div>"
+            "<script>var source=document.getElementById('source'),box=document.getElementById('box');%s"
+            "box.style.backgroundColor=getComputedStyle(source,'::before').backgroundColor;"
+            "box.style.borderTopColor=getComputedStyle(source,'::after').borderTopColor;</script>", prefix, item.mutation);
+        snprintf(reference, sizeof(reference), "%s<div class=box style='background:%s;border-top-color:%s'></div>",
+            prefix, item.background, item.border);
+        expect_html_pair_output_parity(name, actual, reference, true, density);
     }
 }
 
@@ -6425,6 +7023,46 @@ static int count_png_region_red(const ImageData& image, int left, int top, int r
             if (pixel[3] >= 200 && pixel[0] > 180 && pixel[1] < 90 && pixel[2] < 90) count++;
         }
     return count;
+}
+
+TEST(RenderOutputParity, TransformedVisibleOverflowAxesKeepPaintInsideOwnerStrips) {
+    const struct {const char* name; const char* css; float points[3][2];} cases[] = {
+        {"quarter_turn", ".box{overflow:visible clip;transform:rotate(90deg)}",
+            {{95.0f,125.0f},{95.0f,15.0f},{55.0f,35.0f}}},
+        {"scale", ".box{overflow:visible clip}.outer{position:absolute;left:20px;top:10px;"
+            "width:210px;height:140px;overflow:hidden;transform:scale(1.25)}",
+            {{175.0f,61.25f},{37.5f,61.25f},{62.5f,111.25f}}},
+        {"rotated", ".box{overflow:visible clip;transform:rotate(20deg)}",
+            {{144.8f,76.12f},{41.44f,38.5f},{46.55f,82.93f}}},
+        {"nested_rotation", ".box{overflow:visible clip}.outer{position:absolute;left:20px;top:10px;"
+            "width:210px;height:140px;overflow:hidden;transform:rotate(-10deg)}",
+            {{161.79f,58.28f},{53.45f,77.38f},{80.1f,113.3f}}}
+    };
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    for (const auto& item : cases) for (const char* format : {"png", "svg", "pdf"})
+        for (int density : {1, 2}) {
+        SCOPED_TRACE(item.name);
+        SCOPED_TRACE(format);
+        SCOPED_TRACE(density);
+        StrBuf* html = strbuf_new(); ASSERT_NE(html, nullptr);
+        strbuf_append_all(html, 3, overflow_open_axis_css, item.css, overflow_open_axis_body);
+        char source[PATH_MAX], png[PATH_MAX], options[64];
+        snprintf(source, sizeof(source), "temp/render_output_parity/overflow_strip_%s.html", item.name);
+        snprintf(png, sizeof(png), "temp/render_output_parity/overflow_strip_%s_%s_%dx.png", item.name, format, density);
+        snprintf(options, sizeof(options), "--pixel-ratio %d", density);
+        ImageData image = {};
+        ASSERT_TRUE(render_fixture_output_image(source, png, html->str, format, options, density, &image));
+        strbuf_free(html);
+        // independent owner-space points test both open ends and the clipped edge without antialias fringes.
+        for (unsigned point = 0; point < 3; point++) {
+            int x = (int)floorf(item.points[point][0] * density);
+            int y = (int)floorf(item.points[point][1] * density);
+            ASSERT_GE(x, 0); ASSERT_GE(y, 0); ASSERT_LT(x, image.width); ASSERT_LT(y, image.height);
+            if (point < 2) EXPECT_EQ(count_png_region_red(image, x, y, x + 1, y + 1), 1);
+            else expect_preview_pixel(image, x, y, 255, 255, 255);
+        }
+        image_free(image.pixels);
+    }
 }
 
 TEST(RenderOutputParity, TextDecorationSkipInkControlsRasterGapsAndSvgStyle) {
@@ -10452,7 +11090,8 @@ TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {
                 continue;
             }
 
-            if (!render_lambda_png_page(&files[i], page - 1, ref_height, lambda_png, sizeof(lambda_png))) {
+            // Poppler rounds the raster height up; retain the PDF aspect ratio instead of centering in that rounded height.
+            if (!render_lambda_png_page(&files[i], page - 1, ref_height, lambda_png, sizeof(lambda_png), true)) {
                 add_pdf_page_result(results, &result_count, test_id, &files[i], page, diff_png,
                                     100.0, 255.0, "Lambda render failed");
                 continue;

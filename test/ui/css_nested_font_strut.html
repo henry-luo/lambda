@@ -1,0 +1,24 @@
+<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;background:white}
+#wrap{position:absolute;top:80px;left:0;--font:32px;--leading:normal}
+.row{position:absolute;width:100px;font:16px/var(--leading) Arial;background:rgb(240,240,240)}
+.actual{left:20px}.reference{left:160px;font-size:var(--font)}
+.large{font-size:var(--font);white-space:pre}.reference .large{font-size:inherit}
+.text{top:100px}img{width:2px;height:2px;vertical-align:baseline;image-rendering:crisp-edges}
+</style>
+<button id="font24">Font 24</button><button id="font32">Font 32</button><button id="font48">Font 48</button>
+<button id="unitless">Unitless leading</button><button id="normal">Normal leading</button>
+<div id="wrap">
+<div id="actualImage" class="row actual"><span class="large"><img id="actualIcon" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVQImWP4z8Dwn4Hh/38WRgiLAQA+/wYAKNOoDAAAAABJRU5ErkJggg=="> X</span></div>
+<div id="actualText" class="row actual text"><span class="large">X</span></div>
+<div id="referenceImage" class="row reference"><span class="large"><img id="referenceIcon" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVQImWP4z8Dwn4Hh/38WRgiLAQA+/wYAKNOoDAAAAABJRU5ErkJggg=="> X</span></div>
+<div id="referenceText" class="row reference text"><span class="large">X</span></div>
+</div><script>(function(){
+var wrap=document.getElementById('wrap');
+function font(value){wrap.style.setProperty('--font',value+'px');}
+document.getElementById('font24').onclick=function(){font(24);};
+document.getElementById('font32').onclick=function(){font(32);};
+document.getElementById('font48').onclick=function(){font(48);};
+document.getElementById('unitless').onclick=function(){wrap.style.setProperty('--leading','1');};
+document.getElementById('normal').onclick=function(){wrap.style.setProperty('--leading','normal');};
+})();</script>

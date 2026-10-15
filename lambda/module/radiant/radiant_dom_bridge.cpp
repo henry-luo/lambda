@@ -3337,7 +3337,9 @@ RADIANT_C_API int radiant_dom_window_get_property(Item object, Item key, Item* o
         return 1;
     }
 
-    DomDocument* doc = uicon->document;
+    // the document can execute before its loader publishes it as the window's current document.
+    DomDocument* doc = dom_get_document ? (DomDocument*)dom_get_document() : nullptr;
+    if (!doc) doc = uicon->document;
     float scroll_x = doc && doc->state ? doc->state->scroll_x
         : (doc ? doc->pending_viewport_scroll_x : 0.0f);
     float scroll_y = doc && doc->state ? doc->state->scroll_y

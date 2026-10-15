@@ -5,35 +5,13 @@
 
 struct PaintList;
 struct RadiantSourceOrigin;
-struct TypesetRegionPlacement;
-// bindings and policy are borrowed for layout; immutable material owners move with the retained generation.
-struct PagedNativeFlowBinding {
-    DomNodeRef control; // body flow or repeated static content; absent for a nested-only provider
-    TypesetFlowProvider provider;
-    TypesetResume start;
-    ViewNativeOwner owner;
-    void* context;
-    // fill paint/owner and box source intervals; the compositor preserves provider source/metrics and item intervals.
-    TypesetStatus (*material)(void* context, const TypesetContribution* contribution,
-        const TypesetItem* item, const TypesetLineCandidate* alternative, ViewNativeMaterial* material);
-    const TypesetTarget* targets; // declared names seed forward references; target contributions place their anchors
-    size_t target_count;
-    // enumerate selected region paint in region-local coordinates; TYPESET_DONE ends the owned slice.
-    TypesetStatus (*region_item)(void* context, const TypesetRegionPlacement* placement, size_t index,
-        ViewNativeMaterial* material, RdtLogicalRect* rect);
-};
 struct PagedLayoutOptions {
     uint32_t max_pages, max_depth;
-    size_t max_nodes, max_items;
-    size_t max_block_trials;
+    size_t max_nodes;
     uint32_t max_reference_passes;
     uint32_t max_container_passes;
     bool right_binding;
     ViewPageSide first_side;
-    const PagedNativeFlowBinding* native_flows;
-    size_t native_flow_count;
-    const TypesetPagePolicy* page_policy;
-    size_t max_page_transitions;
 };
 struct PagedLayoutDiagnostic {
     TypesetStatus status;
@@ -61,8 +39,10 @@ struct SecondaryViewVisitor {
     bool (*clip)(void*, const RdtLogicalRect*, const float* inset); // null rect closes the scope
     bool (*glyph)(void*, const LayoutViewNode*, const PaintGlyphRun*);
     bool (*image)(void*, const LayoutViewNode*, const PaintImageBox*);
+    bool (*paint)(void*, const PaintList*);
+    bool pdf;
 };
 bool layout_secondary_visit_page(ViewTree* tree, const ViewPageBox* page,
     const SecondaryViewVisitor* visitor);
-bool layout_secondary_paint_page(ViewTree* tree, const ViewPageBox* page, PaintList* paint);
+bool layout_secondary_paint_page(ViewTree* tree, const ViewPageBox* page, PaintList* paint, bool pdf = false);
 bool layout_secondary_paint_root(ViewTree* tree, PaintList* paint, const RdtLogicalRect* clip = nullptr);

@@ -58,20 +58,6 @@ typedef struct SelectorEntry {
 /**
  * Pseudo-element type for match results
  */
-typedef enum PseudoElementType {
-    PSEUDO_ELEMENT_NONE = 0,      // No pseudo-element
-    PSEUDO_ELEMENT_BEFORE,        // ::before
-    PSEUDO_ELEMENT_AFTER,         // ::after
-    PSEUDO_ELEMENT_FIRST_LINE,    // ::first-line
-    PSEUDO_ELEMENT_FIRST_LETTER,  // ::first-letter
-    PSEUDO_ELEMENT_SELECTION,     // ::selection
-    PSEUDO_ELEMENT_MARKER,        // ::marker
-    PSEUDO_ELEMENT_PLACEHOLDER,   // ::placeholder
-    // keep existing numeric values stable because cascade routing uses them
-    PSEUDO_ELEMENT_BACKDROP,      // ::backdrop
-    PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON, // ::file-selector-button
-    PSEUDO_ELEMENT_FOOTNOTE_CALL, PSEUDO_ELEMENT_FOOTNOTE_MARKER
-} PseudoElementType;
 
 /**
  * MatchResult - Result of selector matching

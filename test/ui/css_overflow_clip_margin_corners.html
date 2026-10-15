@@ -1,0 +1,24 @@
+<!doctype html><meta charset="utf-8"><style>
+@page{size:560px 200px;margin:0}html,body{margin:0;width:560px;height:200px;background:white}button{height:24px}
+.box{position:absolute;top:70px;width:80px;height:50px;border:4px solid transparent;overflow:clip}
+.ink{position:absolute;left:-30px;top:-30px;width:170px;height:140px;background:red}
+#square{left:40px;border-radius:0;overflow-clip-margin:border-box 10px}
+#small{left:220px;border-radius:4px;overflow-clip-margin:border-box 20px}
+#round{left:400px;border-radius:24px;overflow-clip-margin:border-box 10px}
+</style><button id="grow">Grow corner</button><button id="reset">Reset corner</button><output id="report" data-hit="none"></output>
+<div id="square" class="box"><div class="ink"></div></div>
+<div id="small" class="box"><div class="ink"></div></div>
+<div id="round" class="box"><div class="ink"></div></div>
+<script>
+function change(radius,margin){
+    var square=document.getElementById('square'),report=document.getElementById('report');
+    square.style.borderRadius=radius;square.style.overflowClipMargin=margin;
+    report.setAttribute('data-hit','none');
+    report.setAttribute('data-margin',getComputedStyle(square).overflowClipMargin);
+}
+document.getElementById('grow').onclick=function(){change('4px','border-box 20px');};
+document.getElementById('reset').onclick=function(){change('0px','border-box 10px');};
+['square','small','round'].forEach(function(id){
+    document.querySelector('#'+id+' .ink').onclick=function(){document.getElementById('report').setAttribute('data-hit',id);};
+});
+</script>

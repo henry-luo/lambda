@@ -159,6 +159,7 @@ TEST(RdtVectorTest, RectangleClipBoundsRejectCurvesCompoundPathsAndRotation) {
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lambda/dom/dom_engine.h"
+#include "../lambda/dom/dom_host_engine.h"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/network/network_resource_manager.h"
 #include "../lambda/network/enhanced_file_cache.h"
@@ -167,6 +168,14 @@ TEST(RdtVectorTest, RectangleClipBoundsRejectCurvesCompoundPathsAndRotation) {
 #include "../lib/file.h"
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
+
+TEST(RadiantProviderInit, NativeEmbeddingRegistrationIsIdempotent) {
+    ASSERT_TRUE(radiant_register_dom_engine_providers());
+    const DomHostEngineOps* operations = dom_host_engine_ops();
+    ASSERT_NE(operations, nullptr);
+    EXPECT_TRUE(radiant_register_dom_engine_providers());
+    EXPECT_EQ(dom_host_engine_ops(), operations);
+}
 
 TEST(RdtVectorTest, GaussianFlatRunsPreserveEdgesChannelsAndPitches) {
     // independent Gaussian step-response samples (sigma=1.25, support=4).
@@ -225,6 +234,44 @@ TEST(ClipGeometry, EllipticalCornersRetainTheSamePaintAndHitRegion) {
     EXPECT_TRUE(clip_point_in_rounded_rect(60, 50, rect, &radius));
     EXPECT_FALSE(clip_point_in_rounded_rect(9, 50, rect, &radius));
     EXPECT_FALSE(clip_point_in_rounded_rect(10, 20, {10, 20, 0, 0}, &radius));
+}
+
+TEST(ClipGeometry, ClipMarginOutsetsPreserveSquareAndSmallCorners) {
+    DomElement element = {};
+    element.node_type = DOM_NODE_ELEMENT; element.set_synthetic(true);
+    element.view_type = RDT_VIEW_BLOCK;
+    ViewBlock* block = lam::view_as_block(&element);
+    ASSERT_NE(block, nullptr);
+    BoundaryProp boundary = {}; BorderProp border = {};
+    ScrollProp scroll = SCROLL_PROP_DEFAULT;
+    block->bound = lam::view_prop(&boundary); block->scroller = lam::view_prop(&scroll);
+    boundary.border = lam::own(&border);
+    block->width = block->height = 100.0f;
+    scroll.has_clip = true; scroll.overflow_x = scroll.overflow_y = CSS_VALUE_CLIP;
+    scroll.overflow_clip_box = CSS_VALUE_BORDER_BOX;
+    scroll.clip = {0.0f, 0.0f, 100.0f, 100.0f};
+    const struct { float radius, margin, expected, inside; } cases[] = {
+        {0.0f, 10.0f, 0.0f, 1.0f},
+        // CSS Backgrounds 3 section 4.2 includes the original corner's edge coverage.
+        {4.0f, 20.0f, 13.765243f, 5.0f},
+        {0.000001f, 20.0f, 0.000004f, 1.0f},
+        {25.0f, 10.0f, 35.0f, 12.0f}
+    };
+    for (const auto& item : cases) {
+        for (size_t corner = 0; corner < 4; corner++) {
+            border.radius.horizontal[corner] = border.radius.vertical[corner] = item.radius;
+        }
+        scroll.overflow_clip_margin = item.margin;
+        Bound clip; Corner radius;
+        ASSERT_TRUE(render_clip_overflow_geometry(block, &clip, &radius));
+        EXPECT_FLOAT_EQ(clip.left, -item.margin); EXPECT_FLOAT_EQ(clip.top, -item.margin);
+        EXPECT_FLOAT_EQ(radius.top_left, item.expected);
+        EXPECT_FLOAT_EQ(radius.top_left_y, item.expected);
+        Rect rect = {clip.left, clip.top, clip.right - clip.left, clip.bottom - clip.top};
+        EXPECT_TRUE(clip_point_in_rounded_rect(clip.left + item.inside,
+            clip.top + item.inside, rect, &radius));
+    }
+    boundary.border = nullptr; block->bound = nullptr; block->scroller = nullptr;
 }
 
 TEST(RdtVectorTest, SharpRectangleAffineExpansionProducesClosedContours) {
@@ -423,6 +470,55 @@ TEST(TextOverflowPaint, ScopedProjectionPreservesSourceAndRestoresNestedState) {
             EXPECT_FALSE(source.has_trailing_ellipsis);
             EXPECT_EQ(source.next, nullptr);
         }
+    }
+    DomElement atom = {};
+    atom.node_type = DOM_NODE_ELEMENT; atom.set_synthetic(true);
+    atom.view_type = RDT_VIEW_INLINE_BLOCK;
+    atom.display = {CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW_ROOT};
+    atom.parent = lam::up(&owner); atom.x = advance * 4; atom.width = 20; atom.height = 20;
+    text.next_sibling = lam::own<DomNode>(&atom);
+    properties.direction = CSS_VALUE_LTR; properties.white_space = CSS_VALUE_NOWRAP;
+    text.text = lam::up("ABCD"); text.length = 4;
+    source.x = 0; source.length = 4; source.width = advance * 4;
+    for (float width : {62.0f, 100.0f}) {
+        owner.width = width;
+        RenderTextPaintScope paint(&context, lam::view_as_block(&owner), &box, &context.color);
+        EXPECT_EQ(render_text_paint_atomic_hidden(&context, &atom), width == 62.0f);
+        RenderTextPaintIterator iterator(&context, lam::view_require_text(&text));
+        TextRect* projected = iterator.next();
+        ASSERT_NE(projected, nullptr);
+        EXPECT_EQ(projected->length, 4);
+        EXPECT_EQ(projected->has_trailing_ellipsis, width == 62.0f);
+        EXPECT_EQ(source.length, 4);
+        EXPECT_FALSE(source.has_trailing_ellipsis);
+        EXPECT_FLOAT_EQ(atom.x, advance * 4); EXPECT_FLOAT_EQ(atom.width, 20);
+    }
+    text.next_sibling = nullptr; atom.parent = nullptr;
+    properties.direction = CSS_VALUE_RTL;
+    text.text = lam::up("אבגדהו"); text.length = strlen(text.text);
+    source.length = (int)text.length; // INT_CAST_OK: bounded fixture UTF-8 byte count
+    source.width = advance * 6;
+    owner.width = advance * 4.25f + font_measure_char(handle, 0x2026);
+    source.x = owner.width - source.width;
+    ASSERT_TRUE(layout_inherited_direction_is_rtl(&text));
+    ASSERT_TRUE(layout_text_run_has_uniform_rtl_order(text.text_data(), text.length));
+    {
+        RenderTextPaintScope paint(&context, lam::view_as_block(&owner), &box, &context.color);
+        RenderTextPaintIterator iterator(&context, lam::view_require_text(&text));
+        int glyphs = 0, markers = 0;
+        while (TextRect* projected = iterator.next()) {
+            if (projected->has_trailing_ellipsis) {
+                EXPECT_EQ(projected->length, 0); markers++;
+            } else {
+                EXPECT_EQ(projected->start_index, glyphs * 2);
+                EXPECT_EQ(projected->length, 2);
+                EXPECT_NEAR(projected->x, owner.width - advance * (float)(glyphs + 1), 0.01f);
+                glyphs++;
+            }
+        }
+        EXPECT_EQ(glyphs, 4); EXPECT_EQ(markers, 1);
+        EXPECT_EQ(source.start_index, 0); EXPECT_EQ(source.length, 12);
+        EXPECT_FALSE(source.has_trailing_ellipsis);
     }
     text.rect = nullptr; owner.first_child = nullptr; text.parent = nullptr;
     owner.blk = nullptr; owner.scroller = nullptr;
@@ -654,6 +750,7 @@ protected:
     }
 
     void SetUp() override {
+        ASSERT_TRUE(radiant_register_dom_engine_providers());
         Input* owner = authored_input(); ASSERT_NE(owner, nullptr);
         ASSERT_TRUE(doc.init(owner));
         root = element("div"); ASSERT_NE(root, nullptr); doc.root = lam::up(root);
@@ -1373,6 +1470,71 @@ TEST(RasterPaintTest, TranslucentFillPreservesAnIsolatedSourceAlpha) {
     }
 }
 
+TEST(SvgExportTest, SmallRetainedFragmentsLeaveRoomForPngEncoding) {
+    bool owns_tracking = memtrack_get_mode() == MEMTRACK_MODE_OFF;
+    if (owns_tracking) ASSERT_TRUE(memtrack_init(MEMTRACK_MODE_DEBUG));
+    Pool* pool = pool_create();
+    Arena* arena = arena_create_default();
+    Arena* replay_arena = arena_create_default();
+    DisplayList source = {}; dl_init(&source, arena);
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    for (uint32_t view_id = 1; view_id <= 64; view_id++) {
+        int begin = dl_begin_element(&source, view_id, 0.0f, 0.0f, 1.0f, 1.0f);
+        DisplayItem* rect = dl_alloc_item(&source);
+        ASSERT_NE(rect, nullptr);
+        rect->op = DL_FILL_RECT;
+        rect->bounds[2] = rect->bounds[3] = 1.0f;
+        rect->fill_rect.w = rect->fill_rect.h = 1.0f;
+        rect->fill_rect.color.c = 0x80000080u;
+        dl_end_element(&source, begin);
+    }
+    uint32_t pixel = 0x80000080u;
+    ImageSurface surface = {};
+    surface.width = surface.height = 1; surface.pitch = sizeof(pixel);
+    surface.pixels = &pixel; surface.alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
+    size_t soft, hard, critical;
+    memtrack_get_limits(&soft, &hard, &critical);
+    size_t usage = memtrack_get_current_usage();
+    // small retained ranges must not consume a full frame's reserve per element.
+    memtrack_set_limits(usage, usage, usage + 16 * 1024 * 1024);
+    retained_dl_cache_capture(cache, &source);
+    StrBuf* encoded = render_encode_surface_png(&surface);
+    memtrack_set_limits(soft, hard, critical);
+    EXPECT_NE(encoded, nullptr);
+    if (encoded) {
+        const unsigned char signature[] = {137, 80, 78, 71, 13, 10, 26, 10};
+        EXPECT_GE(encoded->length, sizeof(signature));
+        if (encoded->length >= sizeof(signature))
+            EXPECT_EQ(memcmp(encoded->str, signature, sizeof(signature)), 0);
+        strbuf_free(encoded);
+    }
+    EXPECT_EQ(pixel, 0x80000080u);
+    EXPECT_EQ(retained_dl_cache_stats(cache).captured, 64);
+    DisplayList replay = {}; dl_init(&replay, replay_arena);
+    for (uint32_t view_id = 1; view_id <= 64; view_id++) {
+        const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, view_id);
+        EXPECT_NE(fragment, nullptr);
+        if (!fragment) continue;
+        EXPECT_EQ(retained_dl_fragment_item_count(fragment), 3);
+        dl_clear(&replay);
+        bool appended = retained_dl_append_fragment(&replay, fragment);
+        EXPECT_TRUE(appended);
+        EXPECT_EQ(replay.size(), 3u);
+        if (!appended || replay.size() != 3) continue;
+        EXPECT_EQ(replay.data()[0].op, DL_BEGIN_ELEMENT);
+        EXPECT_EQ(replay.data()[0].element_marker.view_id, view_id);
+        EXPECT_EQ(replay.data()[0].element_marker.matching_index, 2);
+        EXPECT_EQ(replay.data()[1].op, DL_FILL_RECT);
+        EXPECT_EQ(replay.data()[1].fill_rect.color.c, 0x80000080u);
+        EXPECT_EQ(replay.data()[2].op, DL_END_ELEMENT);
+        EXPECT_EQ(replay.data()[2].element_marker.matching_index, 0);
+    }
+    dl_destroy(&replay); retained_dl_cache_destroy(cache);
+    dl_destroy(&source); arena_destroy(arena); arena_destroy(replay_arena); pool_destroy(pool);
+    if (owns_tracking) EXPECT_EQ(memtrack_shutdown(), 0u);
+}
+
 TEST(SvgExportTest, EncodingRowRespectsMemoryBudgetAndRecovers) {
     uint32_t pixels[64 * 64] = {};
     ImageSurface surface = {};
@@ -1616,6 +1778,7 @@ TEST(SvgExportTest, SemanticSnapshotsOwnValuesAndDoNotChangeRasterPaint) {
 }
 
 TEST(SvgExportTest, RasterFallbackRetainsSemanticGroupsAndTitles) {
+    ASSERT_TRUE(radiant_register_dom_engine_providers());
     rdt_engine_init(0);
     const char* effects[] = {"opacity='.5'", "filter='url(#blur)'"};
     for (const char* effect : effects) {
@@ -2192,7 +2355,11 @@ TEST(GradientImagePaintTest, SourceReplacementAndRecordingReleasePreserveDeferre
                 PaintSvgLoweringStats stats = {};
                 paint_ir_lower_svg(&paint, svg, nullptr, &stats);
                 EXPECT_EQ(stats.unsupported_count, 0);
-                EXPECT_EQ(stats.emitted_count, 1);
+                // opaque constant images now use a solid rectangle inside the retained transform pair.
+                bool solid = strstr(svg->str, "<rect ") != nullptr;
+                EXPECT_EQ(stats.emitted_count, solid ? 3 : 1);
+                EXPECT_EQ(stats.command_count, solid ? 3 : 1);
+                if (solid) EXPECT_NE(strstr(svg->str, "<g transform="), nullptr);
                 EXPECT_GT(svg->length, 0u);
                 strbuf_free(svg);
                 uint32_t pixels[16 * 16] = {};
@@ -2335,6 +2502,83 @@ TEST(ImagePaintTest, RasterBlitsRespectAlphaModesOpacityAndTransparentTargets) {
                         EXPECT_EQ(source_pixels[0], source_pixel);
                         EXPECT_EQ(source_pixels[1], source_pixel);
                     }
+}
+
+TEST(ImagePaintTest, PixelatedAffineFootprintsPreserveDevicePixelBlocks) {
+    const struct { float xx, xy, yx, yy, weight; unsigned quadrants[4]; } cases[] = {
+        {4, 0, 0, 4, 1, {0, 1, 2, 3}},
+        {4, 0, 0, 3, 1, {0, 1, 2, 3}},
+        {-4, 0, 0, 4, 1, {1, 0, 3, 2}},
+        {4, 0, 0, -4, 1, {2, 3, 0, 1}},
+        {0, -4, 4, 0, 1, {2, 0, 3, 1}},
+        {8, 0, 0, 8, 2, {0, 1, 2, 3}}
+    };
+    for (float density : {1.0f, 2.0f}) for (const auto& item : cases)
+        for (bool straight : {false, true}) for (unsigned alpha : {128u, 255u}) {
+            uint32_t source[] = {
+                render_pixel_pack_abgr(255, 0, 0, alpha),
+                render_pixel_pack_abgr(0, 0, 255, alpha),
+                render_pixel_pack_abgr(0, 255, 0, alpha),
+                render_pixel_pack_abgr(255, 255, 255, alpha)
+            };
+            uint32_t expected[4];
+            for (unsigned index = 0; index < 4; index++) {
+                expected[index] = render_pixel_premultiply_abgr(source[index]);
+                if (!straight) source[index] = expected[index];
+            }
+            RdtMatrix transform = {item.xx * density, item.xy * density, 16 * density * item.weight,
+                item.yx * density, item.yy * density, 16 * density * item.weight, 0, 0, item.weight};
+            Rect bounds = {};
+            uint32_t* pixels = nullptr;
+            ASSERT_TRUE(render_image_project_pixels(source, 2, 2, 2, {0, 0, 2, 2},
+                &transform, {0, 0, 64 * density, 64 * density}, SCALE_MODE_PIXELATED,
+                straight, &pixels, &bounds));
+            ASSERT_NE(pixels, nullptr);
+            unsigned width = (unsigned)bounds.width, height = (unsigned)bounds.height;
+            EXPECT_FLOAT_EQ(bounds.width, 2 * density * (fabsf(item.xx) + fabsf(item.xy)) / item.weight);
+            EXPECT_FLOAT_EQ(bounds.height, 2 * density * (fabsf(item.yx) + fabsf(item.yy)) / item.weight);
+            for (unsigned y = 0; y < height; y++) for (unsigned x = 0; x < width; x++) {
+                unsigned quadrant = (y >= height / 2 ? 2 : 0) + (x >= width / 2 ? 1 : 0);
+                EXPECT_EQ(pixels[y * width + x], expected[item.quadrants[quadrant]]) << x << "," << y;
+            }
+            mem_free(pixels);
+        }
+}
+
+TEST(ImagePaintTest, AffineMinificationAveragesTheSourceFootprint) {
+    for (bool straight : {false, true}) for (bool translucent : {false, true})
+        for (bool flipped : {false, true}) {
+            uint32_t source[9];
+            for (unsigned i = 0; i < 9; i++) {
+                source[i] = translucent ? (i == 4 ? 0u : 0x80ffffffu) : (i == 4 ? 0xff000000u : 0xffffffffu);
+                if (!straight) source[i] = render_pixel_premultiply_abgr(source[i]);
+            }
+            RdtMatrix transform = rdt_matrix_scale(flipped ? -1.0f / 3.0f : 1.0f / 3.0f, 1.0f / 3.0f);
+            if (flipped) transform.e13 = 1.0f;
+            uint32_t* pixels = nullptr; Rect bounds = {};
+            ASSERT_TRUE(render_image_project_pixels(source, 3, 3, 3, {0, 0, 3, 3},
+                &transform, {0, 0, 1, 1}, SCALE_MODE_LINEAR, straight, &pixels, &bounds));
+            ASSERT_NE(pixels, nullptr);
+            EXPECT_EQ(pixels[0], translucent ? 0x72727272u : 0xffe3e3e3u);
+            mem_free(pixels);
+        }
+}
+
+TEST(ImagePaintTest, PixelatedProjectionChoosesClosestPositiveIntegerMultiple) {
+    const uint32_t source[] = {0xff0000ffu, 0xff00ff00u, 0xffff0000u};
+    // 3 source pixels become 6 nearest pixels, then smooth to 7 device pixels.
+    const uint32_t expected[] = {0xff0000ffu, 0xff0000ffu, 0xff00a45bu,
+        0xff00ff00u, 0xff5ba400u, 0xffff0000u, 0xffff0000u};
+    RdtMatrix transform = rdt_matrix_scale(7.0f / 3.0f, 3.0f);
+    uint32_t* pixels = nullptr;
+    Rect bounds = {};
+    ASSERT_TRUE(render_image_project_pixels(source, 3, 1, 3, {0, 0, 3, 1},
+        &transform, {0, 0, 7, 3}, SCALE_MODE_PIXELATED, false, &pixels, &bounds));
+    ASSERT_NE(pixels, nullptr);
+    ASSERT_FLOAT_EQ(bounds.width, 7); ASSERT_FLOAT_EQ(bounds.height, 3);
+    for (unsigned y = 0; y < 3; y++) for (unsigned x = 0; x < 7; x++)
+        EXPECT_EQ(pixels[y * 7 + x], expected[x]) << x << "," << y;
+    mem_free(pixels);
 }
 
 TEST(ImagePaintTest, ProjectedImagesPreserveSourceOverClipsTilesAndBatchOrder) {

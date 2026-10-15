@@ -1,0 +1,11 @@
+<!doctype html><style>
+body { margin:0; font:16px/24px Arial }
+p { margin:0 }
+sup { font-size:12px; line-height:0; vertical-align:baseline }
+.relative { position:relative; top:-6px }
+.outer { position:relative; top:-3px }
+</style><body id=result>
+<p><sup id=normal>First line<br>Second line</sup></p>
+<p><sup id=relative class=relative>First line<br>Second line</sup></p>
+<p><span class=outer><sup id=nested class=relative>First line<br>Second line</sup></span></p>
+</body>

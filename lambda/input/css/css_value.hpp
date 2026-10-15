@@ -610,6 +610,8 @@ typedef enum CssEnum : int16_t {
     CSS_VALUE_NON_SCALING_STROKE,
     CSS_VALUE_SRGB,
     CSS_VALUE_LINEARRGB,
+    CSS_VALUE_HORIZONTAL,
+    CSS_VALUE_VERTICAL,
     CSS_VALUE__LAST_ENTRY
 } CssEnum;
 
@@ -636,6 +638,8 @@ struct CssIntrinsicSizeAxis {
 };
 bool css_intrinsic_size_components(const CssValue* value, bool shorthand,
                                     CssIntrinsicSizeAxis axes[2]);
+bool css_overflow_clip_margin_components(const CssValue* value,
+    CssEnum* box, const CssValue** length);
 bool css_value_keyword_equals(const struct CssValue* value, CssEnum keyword);
 struct CssFunction;
 bool css_function_name_is(const CssFunction* function, const char* name);

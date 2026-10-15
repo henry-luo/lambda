@@ -1594,6 +1594,11 @@ int main(int argc, char** argv) {
                 selected_indices.push_back(idx);
             }
         }
+        // an explicit fixture request cannot qualify a scheduler-only run after suite/tag filtering.
+        if (!g_ui_test_filter.empty() && selected_indices.empty()) {
+            fputs("UI --test selector selects no runnable fixture in the requested suites, tags or GTest filter\n", stderr);
+            return 2;
+        }
         // prior subprocess durations include compilation and rendering, which explicit waits miss.
         ui_load_previous_timings();
         int smallest_mb = 65536;

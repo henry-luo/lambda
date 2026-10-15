@@ -1315,7 +1315,8 @@ static bool measure_shaped_simple_latin_run(LayoutContext* lycon, const unsigned
                                             float* out_width,
                                             uint32_t* out_first_codepoint,
                                             uint32_t* out_last_codepoint,
-                                            DomNode* text_node = nullptr) {
+                                            DomNode* text_node = nullptr,
+                                            bool* following_context = nullptr) {
     if (!str || !text_end || str >= text_end || !out_bytes || !out_width ||
         !out_first_codepoint || !out_last_codepoint) {
         return false;
@@ -1335,7 +1336,7 @@ static bool measure_shaped_simple_latin_run(LayoutContext* lycon, const unsigned
     }
     if (text_node) {
         layout_measure_inline_text_context(lycon, text_node, str, result.bytes, false,
-                                           &result.width);
+                                           &result.width, nullptr, nullptr, following_context);
     }
     *out_bytes = (int)result.bytes; // INT_CAST_OK: text byte count
     *out_width = result.width;
@@ -2192,6 +2193,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.prev_text_spacing_codepoint = 0;
     lycon->line.prev_text_autospace_codepoint = 0;
     lycon->line.prev_kerning_font_style = nullptr;
+    lycon->line.prev_kerning_has_following_context = false;
     // IMPORTANT: Reset effective bounds to container bounds before float adjustment
     lycon->line.effective_left = lycon->line.left;
     lycon->line.effective_right = lycon->line.right;
@@ -2493,7 +2495,7 @@ static void finalize_non_rendered_table_markers_for_line(LayoutContext* lycon) {
 static void contribute_block_root_strut(LayoutContext* lycon) {
     if (!lycon || lycon->line.has_expanded_inline_lh) return;
     // a zero-height replaced inline has no ascent and cannot replace the root strut.
-    if (lycon->block.line_height_is_normal &&
+    if (lycon->block.strut_line_height_is_normal &&
         (lycon->line.max_ascender > 0.0f ||
          !lycon->line.has_replaced_content)) {
         return;
@@ -2504,7 +2506,7 @@ static void contribute_block_root_strut(LayoutContext* lycon) {
     float content_height = ascender + descender;
     if (content_height <= 0.0f) return;
     // CSS Inline 3: the block container generates a root inline box whose
-    layout_apply_line_height_leading(lycon->block.line_height, &ascender, &descender);
+    layout_apply_line_height_leading(lycon->block.strut_line_height, &ascender, &descender);
 
     if (ascender > 0.0f) {
         lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
@@ -2685,9 +2687,9 @@ void line_break(LayoutContext* lycon, bool forced_break) {
         lycon->line.max_descender = lycon->line.max_text_descender;
     }
     float font_line_height = lycon->line.max_ascender + lycon->line.max_descender;
-    float css_line_height = lycon->block.line_height;
+    float css_line_height = lycon->block.strut_line_height;
     // CSS 2.1: line-height: 0 is a valid explicit value (not a fallback case)
-    if (lycon->block.line_height_is_normal && css_line_height <= 0) {
+    if (lycon->block.strut_line_height_is_normal && css_line_height <= 0) {
         css_line_height = font_line_height;
     }
     // CSS 2.1 10.8.1 half-leading model:
@@ -2695,7 +2697,7 @@ void line_break(LayoutContext* lycon, bool forced_break) {
     bool has_mixed_fonts;
     // normal leading includes the actual mixed-face union, even when its
     // increase is smaller than the explicit-line-height rounding tolerance.
-    float mixed_font_tolerance = lycon->block.line_height_is_normal
+    float mixed_font_tolerance = lycon->block.strut_line_height_is_normal
         ? kTextLayoutSubpixelEpsilon : 2.0f;
     if (lycon->line.has_replaced_content && font_line_height > css_line_height) {
         has_mixed_fonts = true;
@@ -2703,30 +2705,25 @@ void line_break(LayoutContext* lycon, bool forced_break) {
         has_mixed_fonts = (font_line_height > css_line_height + mixed_font_tolerance);
     }
     float used_line_height;
-    // CSS 2.1 §10.8.1: font backends may round ascender/descender metrics to integer
-    float base_metric_excess = (lycon->block.init_ascender + lycon->block.init_descender) - css_line_height;
-    if (base_metric_excess > 0 && base_metric_excess <= 2 && !lycon->line.has_replaced_content &&
-        font_line_height > css_line_height + 2) {
-        font_line_height -= base_metric_excess;
-        has_mixed_fonts = (font_line_height > css_line_height + mixed_font_tolerance);
-    }
+    // each inline already applies its own leading; parent rounding cannot
+    // be subtracted from the normalized union of larger descendant fonts.
 
     if (has_mixed_fonts) {
         // CSS 2.1 §10.8.1: The line box height is the distance between the
         float explicit_inline_height = css_line_height;
-        if (!lycon->block.line_height_is_normal &&
+        if (!lycon->block.strut_line_height_is_normal &&
             lycon->line.max_inline_line_height > explicit_inline_height) {
             explicit_inline_height = lycon->line.max_inline_line_height;
         }
-        bool atomic_expands_line = !lycon->block.line_height_is_normal &&
+        bool atomic_expands_line = !lycon->block.strut_line_height_is_normal &&
             lycon->line.max_atomic_inline_height > explicit_inline_height + 0.5f;
-        if (!lycon->block.line_height_is_normal &&
+        if (!lycon->block.strut_line_height_is_normal &&
             lycon->line.has_replaced_content &&
             lycon->line.max_inline_line_height > css_line_height &&
             !atomic_expands_line) {
             // CSS 2.1 §10.8.1: an inline box's line-height, not its glyph
             used_line_height = explicit_inline_height;
-        } else if (lycon->line.has_replaced_content || lycon->block.line_height_is_normal ||
+        } else if (lycon->line.has_replaced_content || lycon->block.strut_line_height_is_normal ||
                    lycon->line.has_expanded_inline_lh ||
                    lycon->line.has_inline_font_size_difference ||
                    lycon->line.has_different_inline_font) {
@@ -2734,7 +2731,7 @@ void line_break(LayoutContext* lycon, bool forced_break) {
             // leading splits when nested faces use different vertical metrics.
             used_line_height = max(css_line_height, font_line_height);
             // CSS 2.1 §10.8.1: For normal line-height with mixed fonts, each inline box
-            if (lycon->block.line_height_is_normal && lycon->line.max_normal_line_height > used_line_height) {
+            if (lycon->block.strut_line_height_is_normal && lycon->line.max_normal_line_height > used_line_height) {
                 used_line_height = lycon->line.max_normal_line_height;
             }
         } else {
@@ -2742,7 +2739,7 @@ void line_break(LayoutContext* lycon, bool forced_break) {
         }
     } else {
         used_line_height = css_line_height;
-        if (lycon->block.line_height_is_normal &&
+        if (lycon->block.strut_line_height_is_normal &&
             lycon->line.max_normal_line_height > used_line_height) {
             // CSS 2.1 §10.8.1: fallback glyphs use their own normal inline-box
             // metrics even when their rounded glyph extrema do not exceed the strut.
@@ -2750,7 +2747,7 @@ void line_break(LayoutContext* lycon, bool forced_break) {
         }
     }
 
-    if (lycon->block.line_height_is_normal &&
+    if (lycon->block.strut_line_height_is_normal &&
         lycon->line.has_c1_control_text && !lycon->line.has_non_c1_text &&
         lycon->line.c1_control_line_height > 0 && !lycon->line.has_replaced_content) {
         used_line_height = max(css_line_height, lycon->line.c1_control_line_height);
@@ -2776,7 +2773,7 @@ void line_break(LayoutContext* lycon, bool forced_break) {
 
     if (layout_quirks_block_ignores_line_height(lycon, nullptr)) {
         used_line_height = font_line_height;
-        if (lycon->block.line_height_is_normal &&
+        if (lycon->block.strut_line_height_is_normal &&
             lycon->line.max_normal_line_height > used_line_height) {
             used_line_height = lycon->line.max_normal_line_height;
         }
@@ -2842,7 +2839,7 @@ void line_break(LayoutContext* lycon, bool forced_break) {
     float trim_max_descender = lycon->line.max_descender;
     if (used_line_height > 0.0f &&
         trim_max_ascender + trim_max_descender > used_line_height &&
-        !lycon->block.line_height_is_normal &&
+        !lycon->block.strut_line_height_is_normal &&
         !lycon->line.has_replaced_content) {
         if (trim_max_ascender < used_line_height) {
             trim_max_descender = used_line_height - trim_max_ascender;
@@ -2889,6 +2886,7 @@ void line_break(LayoutContext* lycon, bool forced_break) {
         lycon->line.parent_font_size = block_font->font_size;
         lycon->line.parent_font_style = lam::up(block_font);
     }
+    if (lycon->paged) paged_line_start(lycon, line_block);
 }
 // CSS Text 3 §5.2: Measure the width of the first word starting from `str`.
 static float measure_first_word_width(LayoutContext* lycon, const unsigned char* str,
@@ -3005,6 +3003,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
     bool break_all = get_text_wrap_mode_value(text_node, lycon) != CSS_VALUE_NOWRAP &&
         (word_break == CSS_VALUE_BREAK_ALL || line_break == CSS_VALUE_ANYWHERE);
     uint32_t prev_codepoint =
+        !lycon->line.prev_kerning_has_following_context &&
         lycon->line.prev_kerning_font_style == lycon->font.style
             ? lycon->line.prev_codepoint : 0;
 
@@ -3395,6 +3394,7 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
         lycon->line.prev_text_autospace_codepoint = 0;
         lycon->line.prev_codepoint = 0;
         lycon->line.prev_kerning_font_style = nullptr;
+        lycon->line.prev_kerning_has_following_context = false;
     }
     if (is_initial_letter && font_box_handle(&lycon->font)) {
         initial_letter_avoid_bfc_floats(lycon, rect, initial_insets);
@@ -3477,22 +3477,13 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     }
     // CSS 2.1 10.8.1: Half-leading model for text inline boxes
     float ascender = 0, descender = 0;
-    if (lycon->block.line_height_is_normal && font_box_handle(&lycon->font)) {
-        font_get_normal_lh_split(font_box_handle(&lycon->font), &ascender, &descender);
-    } else {
-        if (font_box_handle(&lycon->font)) {
-            font_get_content_area_split(font_box_handle(&lycon->font), &ascender, &descender);
-        }
-    }
+    float half_leading = layout_inline_font_metrics(font_box_handle(&lycon->font),
+        lycon->block.line_height, lycon->block.line_height_is_normal, &ascender, &descender);
     // CSS Inline 3 §7.5/§7.6: an initial letter occupies inline space but
     // its requested line span must not enlarge its originating line box.
     if (!is_initial_letter && (ascender > 0 || descender > 0)) {
-        float half_leading = 0.0f;
         float css_baseline_ascender = ascender;
         if (!lycon->block.line_height_is_normal) {
-            half_leading = layout_apply_line_height_leading(
-                lycon->block.line_height, &ascender, &descender);
-            css_baseline_ascender = ascender;
             const FontMetrics* m = font_box_handle(&lycon->font) ? font_get_metrics(font_box_handle(&lycon->font)) : NULL;
             if (m) {
                 float table_ascender = (m->use_typo_metrics &&
@@ -4368,8 +4359,14 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         rect->y = lycon->block.advance_y;
     }
     else { // baseline - use half-leading model
-        // Allow negative half-leading only when line-height is explicitly less than font height
-        if (lycon->block.line_height < font_height) {
+        FontHandle* face = font_box_handle(&lycon->font);
+        if (face) {
+            float ascender = 0.0f, descender = 0.0f;
+            layout_inline_font_metrics(face, lycon->block.line_height,
+                lycon->block.line_height_is_normal, &ascender, &descender);
+            // plain and mixed-font text use the same normalized baseline.
+            rect->y = lycon->block.advance_y + ascender - font_get_rendering_ascender(face);
+        } else if (lycon->block.line_height < font_height) {
             float half_leading = (lycon->block.line_height - font_height) / 2;
             rect->y = lycon->block.advance_y + half_leading;
         } else {
@@ -4425,6 +4422,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         uint32_t shaped_run_first_codepoint = 0;
         bool measured_grapheme_cluster = false;
         bool contextual_unit = false;
+        bool following_context = false;
         float grapheme_cluster_width = 0.0f;
 
         if (!collapse_newlines && (*str == '\n' || *str == '\r')) {
@@ -4486,7 +4484,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 measure_shaped_simple_latin_run(
                     lycon, str, text_end, text_transform, trim_cjk_spacing,
                     break_all, break_word, auto_hyphenation, &shaped_bytes,
-                    &shaped_width, &shaped_first_cp, &shaped_last_cp, text_node)) {
+                    &shaped_width, &shaped_first_cp, &shaped_last_cp, text_node, &following_context)) {
                 // a shaped advance still carries the selected fallback face's normal line metrics.
                 contribute_shaped_run_line_metrics(lycon, str, (size_t)shaped_bytes);
                 wd = shaped_width;
@@ -4715,6 +4713,15 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     contextual_unit = true;
                 }
             }
+            if (!measured_grapheme_cluster && text_transform == CSS_VALUE_NONE &&
+                !has_small_caps(lycon) && lycon->font.style->has_kerning &&
+                codepoint >= 0x21 && codepoint <= 0x7E && next_ch == text_end) {
+                // wrapping modes can require per-character layout; retain the final glyph's outgoing pair.
+                float contextual_width = 0.0f;
+                if (layout_measure_inline_text_context(lycon, text_node, str,
+                        (size_t)(next_ch - str), false, &contextual_width,
+                        nullptr, nullptr, &following_context)) wd = contextual_width;
+            }
             if (!text_autospace_bidi_unsupported && layout_text_autospace_pair(
                     text_autospace, lycon->line.prev_text_autospace_codepoint,
                     codepoint)) {
@@ -4782,6 +4789,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         if (lycon->font.style->has_kerning && !contextual_unit) {
             // fallback or styled inline cannot form a pair in the next font.
             if (lycon->line.prev_codepoint &&
+                !lycon->line.prev_kerning_has_following_context &&
                 lycon->line.prev_kerning_font_style == lycon->font.style) {
                 float kerning_css = text_kerning_adjustment(
                     lycon, lycon->line.prev_codepoint, incoming_kerning_codepoint);
@@ -4797,6 +4805,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.prev_codepoint = outgoing_kerning_codepoint;
             lycon->line.prev_kerning_font_style = lycon->font.style;
         }
+        lycon->line.prev_kerning_has_following_context = following_context;
 #ifdef RADIANT_TRACE_TEXT_LAYOUT
         // debugging; keeping it always-on makes long pages non-interactive.
 #endif

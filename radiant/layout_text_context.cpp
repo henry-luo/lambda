@@ -106,8 +106,8 @@ static bool text_shaping_codepoint(uint32_t codepoint, bool cursive) {
     if (cursive) return utf_requires_contextual_shaping(codepoint) ||
         utf_bidi_strong_class(codepoint) == 1 || codepoint == 0x00AD ||
         codepoint == 0x200C || codepoint == 0x200D;
-    return (codepoint >= 'A' && codepoint <= 'Z') ||
-        (codepoint >= 'a' && codepoint <= 'z');
+    // punctuation participates in pairs such as r-comma across an undecorated inline edge.
+    return codepoint >= 0x21 && codepoint <= 0x7E;
 }
 
 bool layout_measure_shaping_text(LayoutContext* lycon, const char* text, size_t length,
@@ -162,7 +162,8 @@ static void text_shaping_context_slice(const char* source, size_t length,
 
 bool layout_measure_inline_text_context(LayoutContext* lycon, DomNode* text_node,
         const unsigned char* start, size_t length, bool cursive, float* width,
-        const unsigned char* text_start, const unsigned char* text_end) {
+        const unsigned char* text_start, const unsigned char* text_end, bool* following_context) {
+    if (following_context) *following_context = false;
     if (!lycon || !start || !length || !width ||
         (text_node && !text_node->is_text()) ||
         !font_box_handle(&lycon->font)) return false;
@@ -227,5 +228,6 @@ bool layout_measure_inline_text_context(LayoutContext* lycon, DomNode* text_node
     for (Piece* piece = after; piece; piece = piece->next) append(piece->text, piece->length);
     if (!layout_measure_shaping_text(lycon, context, total_length,
             before_length, length, width)) return false;
+    if (following_context) *following_context = after_length != 0;
     return true;
 }

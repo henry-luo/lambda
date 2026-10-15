@@ -1,0 +1,30 @@
+<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;background:white}button{height:24px}
+#owner{font-size:20px;opacity:calc(1em / 100px)}
+#owner::before,#owner::after{content:"";display:block;width:20px;height:12px;background:red}
+#owner::before{font-size:var(--pseudo-font,5px);opacity:calc(1em / 10px)}
+#owner::after{font-size:8px;opacity:calc(1em / 10px)}
+#owner.inherit::before{opacity:inherit}
+#owner.invalid::before{opacity:var(--alpha)}
+#owner.percent::before{opacity:calc(var(--alpha) * 2)}
+#patch{height:12px;background:red}
+</style><button id="check">Check</button><button id="change">Change</button><button id="inherit">Inherit</button>
+<button id="invalid">Invalid</button><button id="percent">Percent</button><button id="restore">Restore</button>
+<output id="report"></output><div id="owner"></div><div id="patch"></div>
+<script>
+(function(){
+    var owner=document.getElementById('owner'),report=document.getElementById('report');
+    function record(prefix){
+        var before=getComputedStyle(owner,'::before'),after=getComputedStyle(owner,'::after');
+        var opacity=before.getPropertyValue('opacity');
+        report.setAttribute('data-'+prefix+'values',[opacity,after.getPropertyValue('opacity'),getComputedStyle(owner).getPropertyValue('opacity')].join('|'));
+        var patch=document.getElementById('patch');patch.style.width=Number(opacity)*100+'px';patch.style.opacity=opacity;
+    }
+    document.getElementById('check').onclick=function(){record('');};
+    document.getElementById('change').onclick=function(){owner.style.fontSize='30px';owner.style.setProperty('--pseudo-font','7px');record('dirty-');};
+    document.getElementById('inherit').onclick=function(){owner.className='inherit';record('inherited-');};
+    document.getElementById('invalid').onclick=function(){owner.className='invalid';owner.style.setProperty('--alpha','3px');record('invalid-');};
+    document.getElementById('percent').onclick=function(){owner.className='percent';owner.style.setProperty('--alpha','25%');record('percent-');};
+    document.getElementById('restore').onclick=function(){owner.className='';record('restored-');};
+})();
+</script>

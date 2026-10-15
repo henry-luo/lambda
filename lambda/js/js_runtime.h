@@ -1078,6 +1078,7 @@ Item js_delete_property(Item obj, Item key);
 // v15: fetch() API
 Item js_fetch(Item url, Item options);
 void js_fetch_reset(void);
+void js_fetch_dispatch_pending(void);
 // Set base directory for resolving relative fetch() URLs to local files
 // (used by `lambda.exe js --document <html>` so tests can fetch sibling
 // resources from disk without an HTTP server).

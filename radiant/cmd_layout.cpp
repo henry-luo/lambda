@@ -2120,6 +2120,14 @@ static char* generate_error_page_html(const char* url, const char* error_title, 
     return mem_strdup(buf, MEM_CAT_LAYOUT);
 }
 
+static thread_local UiContext* s_layout_loader_host = nullptr;
+
+static void configure_css_input_environment(CssEngine* engine, DomDocument* document) {
+    UiContext* host = document && document->js.host_ui_context
+        ? (UiContext*)document->js.host_ui_context : s_layout_loader_host;
+    if (host) css_engine_set_input_capabilities(engine, &host->input_capabilities);
+}
+
 DocumentJsHostConfig document_js_host_config_inherit(UiContext* uicon,
                                                      const DomDocument* source) {
     DocumentJsHostConfig config = {};
@@ -2494,6 +2502,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     }
     // Cache for runtime re-cascade (e.g. on pseudo-state changes like :hover)
     dom_doc->services.cached_css_engine = css_engine;
+    configure_css_input_environment(css_engine, dom_doc);
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
     // media selection precedes linked-sheet discovery and the first cascade.
     css_engine->context.print_media = print_media;
@@ -2928,6 +2937,15 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
         log_error("Failed to parse URL: %s, with base: %p", doc_url, base);
         pool_destroy(pool);
         return NULL;
+    }
+
+    char mirrored_resource[PATH_MAX];
+    if (base && full_url->scheme == URL_SCHEME_FILE &&
+        radiant_resolve_layout_relative_resource_path(url_get_pathname(full_url),
+            url_get_href(base), mirrored_resource, sizeof(mirrored_resource))) {
+        // mirrored fixtures share their missing embedded documents with the pinned WPT tree.
+        Url* canonical = url_parse_path_or_url(mirrored_resource, nullptr);
+        if (canonical) { url_destroy(full_url); full_url = canonical; }
     }
 
     DomDocument* doc = nullptr;
@@ -3397,8 +3415,6 @@ static void release_layout_runtime(Runtime* runtime) {
     mem_free(runtime);
 }
 
-static thread_local UiContext* s_layout_loader_host = nullptr;
-
 LayoutLoaderHostScope::LayoutLoaderHostScope(UiContext* uicon)
     : saved(lam::up(s_layout_loader_host)) {
     s_layout_loader_host = uicon;
@@ -3465,7 +3481,14 @@ static void layout_adopt_loader_runtime(DomDocument* doc, Runtime* loader) {
 Runtime* layout_document_package_runtime(DomDocument* document, const char* package_module) {
     if (!document) return nullptr;
     Runtime* runtime = dom_document_loader_runtime(document);
-    if (runtime) return runtime;
+    if (runtime) {
+        // package paint roots and callbacks outlive JS realm teardown; the document retains their evaluator (D5.3.3).
+        if (!document->loader_runtime && !document->lambda_runtime && runtime == document->js.runtime) {
+            document->lambda_runtime = runtime;
+            document->owns_script_runtime = true;
+        }
+        return runtime;
+    }
     // A synchronous render inside Lambda shares its live evaluator; it cannot
     // transfer that thread to a second runtime while caller roots are active.
     if (context && context->execution_depth != 0) return context->runtime;
@@ -3481,6 +3504,7 @@ Runtime* layout_document_package_runtime(DomDocument* document, const char* pack
         return nullptr;
     }
     document->lambda_runtime = runtime;
+    document->owns_script_runtime = true;
     return runtime;
 }
 
@@ -3556,6 +3580,7 @@ static DomDocument* create_layout_css_document(
     // the document keeps its engine so later recascades (viewport, print media,
     // container queries) see the same rules the loader cascaded with
     document->services.cached_css_engine = engine;
+    configure_css_input_environment(engine, document);
     if (out_engine) *out_engine = engine;
     return document;
 }
@@ -3884,6 +3909,7 @@ static DomDocument* load_page_xml_doc(Url* url, int width, int height, Pool* poo
     store_document_stylesheets(document, fallback, 1, authored, authored_count, pool);
     if (!document->stylesheets) { dom_document_destroy(document); return nullptr; }
     document->services.cached_css_engine = engine;
+    configure_css_input_environment(engine, document);
     layout_apply_css_stylesheets(document, original, document->stylesheets,
         document->stylesheet_count, pool, engine);
     populate_layout_document(document, original, root, HTML5, url, nullptr);
@@ -4055,6 +4081,7 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     store_document_stylesheets(dom_doc, xml_stylesheets, 1, nullptr, 0, pool);
     // Later CSSOM reads recascade XML nodes and need the loader's stylesheet engine.
     dom_doc->services.cached_css_engine = css_engine;
+    configure_css_input_environment(css_engine, dom_doc);
 
     layout_apply_css_stylesheets(dom_doc, html_elem, xml_stylesheets, 1, pool, css_engine);
 
@@ -4404,6 +4431,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
         dom_doc->cached_inline_sheet_count = inline_stylesheet_count;
     }
     dom_doc->services.cached_css_engine = css_engine;
+    configure_css_input_environment(css_engine, dom_doc);
 
     if (!stateless) {
         Item html_item_root = {.element = html_elem};
@@ -4848,6 +4876,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
             doc->cached_inline_sheets = lam::own_arr(inline_sheets);
             doc->cached_inline_sheet_count = inline_count;
             doc->services.cached_css_engine = css_engine;
+            configure_css_input_environment(css_engine, doc);
         }
     }
 
@@ -5793,7 +5822,11 @@ static bool layout_single_file(
 
     bool success = !memory_profile_output_file || view_memory_profile_write(
         doc, input_file, memory_profile_output_file);
-    if (!doc->view_tree || !doc->view_tree->root) {
+    if (auto_close && !document_snapshot_is_ready(doc)) {
+        // an exhausted readiness drain cannot publish a successful partial snapshot.
+        log_error("Layout snapshot readiness: refusing to serialize unfinished document %s", input_file);
+        success = false;
+    } else if (!doc->view_tree || !doc->view_tree->root) {
         log_warn("Layout computation did not produce view tree for %s", input_file);
         success = false;
     } else {

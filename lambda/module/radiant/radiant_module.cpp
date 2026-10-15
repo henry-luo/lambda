@@ -17,6 +17,7 @@
 #include "../../../lib/tagged.hpp"
 #include "../../../radiant/layout.hpp"
 #include "../../../radiant/render.hpp"
+#include "../../../radiant/svg_animation.hpp"
 #include "../../../radiant/geomap.hpp"
 #include "../../../radiant/geomap_style.hpp"
 #include "../../../lib/color.h"
@@ -5312,6 +5313,50 @@ static bool radiant_host_document_tick_animation(void* document, double now, voi
     return radiant_tick_document_animation_scheduler((DomDocument*)document, now, (DirtyTracker*)dirty_tracker);
 }
 
+static void radiant_host_store_point(RdtLogicalPoint point, float* x, float* y) {
+    if (x) *x = point.x;
+    if (y) *y = point.y;
+}
+static void radiant_host_node_document_origin(DomNode* node, float* x, float* y) {
+    radiant_host_store_point(view_geometry_node_document_origin(node), x, y);
+}
+static void radiant_host_child_content_origin(DomNode* node, float parent_x, float parent_y, float* x, float* y) {
+    radiant_host_store_point(view_geometry_child_content_origin(node, {parent_x, parent_y}), x, y);
+}
+static bool radiant_host_text_contains_point(DomNode* node, float x, float y, float parent_x, float parent_y) {
+    // DOM hit callers need only containment; the transient text rectangle stays inside its native owner.
+    ViewGeometryTextHit hit = {};
+    return view_geometry_find_text_at(node, {x, y}, {parent_x, parent_y}, false, &hit);
+}
+static bool radiant_host_foreign_object_matrix(DomNode* node, void* matrix, bool include_self) {
+    return view_get_foreign_object_matrix(node, (RdtMatrix*)matrix, include_self);
+}
+
+static DomNode* radiant_host_svg_style_parent(DomNode* node, const void* scope) {
+    return svg_dom_style_parent(node, (const SvgDomStyleScope*)scope);
+}
+static const char* radiant_host_svg_property(DomElement* element, const char* name, bool inherits,
+        char* buffer, size_t capacity, bool* from_css, char** owned, DomElement** declaring, const void* scope) {
+    return svg_get_dom_presentation_property(element, name, inherits, buffer, capacity,
+        from_css, owned, declaring, (const SvgDomStyleScope*)scope);
+}
+static bool radiant_host_svg_append_shape(DomElement* element, RdtPath* path, const void* lengths) {
+    return svg_append_basic_shape_path(element, path, (const SvgLengthContext*)lengths);
+}
+static RdtPath* radiant_host_svg_text_path(DomElement* element, const void* lengths, void* fonts) {
+    return svg_text_geometry_path(element, (const SvgLengthContext*)lengths, (FontContext*)fonts);
+}
+static bool radiant_host_svg_clip_contains(DomElement* element, const void* lengths, void* fonts,
+        const RdtMatrix* frame, SvgPathContainsFn contains, const RdtLogicalPoint* point, const void* scope) {
+    return svg_dom_clip_contains_point(element, (const SvgLengthContext*)lengths, (FontContext*)fonts,
+        frame, contains, point, (const SvgDomStyleScope*)scope);
+}
+static void* radiant_host_web_animation_create(DomElement* element, void* keyframes,
+        double duration, const void* timing, Pool* pool) {
+    return css_web_animation_create(element, (CssKeyframes*)keyframes, duration,
+        (const TimingFunction*)timing, pool);
+}
+
 static const DomHostEngineOps radiant_host_operations = {
     fn_radiant_request_frame,
     fn_radiant_cancel_frame,
@@ -5340,7 +5385,38 @@ static const DomHostEngineOps radiant_host_operations = {
     radiant_host_scroll_begin_smooth,
     radiant_host_scroll_cancel_smooth,
     radiant_host_document_tick_smooth_scroll,
-    radiant_host_document_tick_animation
+    radiant_host_document_tick_animation,
+    svg_animation_pause,
+    svg_animation_value,
+    svg_animation_paused,
+    svg_animation_set_time,
+    svg_animation_attribute,
+    svg_animation_begin_end,
+    svg_animation_use_event,
+    svg_animation_start_time,
+    svg_animation_use_source,
+    svg_animation_is_sampling,
+    svg_animation_current_time,
+    svg_animation_target_element,
+    svg_animation_simple_duration,
+    radiant_dispatch_event_sim_touch,
+    svg_animation_source_enter,
+    svg_animation_source_leave,
+    radiant_host_node_document_origin,
+    radiant_host_child_content_origin,
+    radiant_host_text_contains_point,
+    radiant_host_foreign_object_matrix,
+    view_get_visual_bounds,
+    radiant_host_svg_style_parent,
+    radiant_host_svg_property,
+    radiant_host_svg_append_shape,
+    radiant_host_svg_text_path,
+    radiant_host_svg_clip_contains,
+    radiant_host_web_animation_create,
+    dom_range_adopt_subtree,
+    dom_range_refresh_lifecycle_pins,
+    dom_selection_collapse,
+    dom_text_split_at
 };
 
 static const DomCollectionHostTypes radiant_collection_types = {
@@ -5359,16 +5435,21 @@ static const DomEventHostOps radiant_event_host_operations = {
     radiant_author_template_dispatch_end
 };
 
-RADIANT_C_API void radiant_jube_register_static(void) {
+bool radiant_register_dom_engine_providers() {
     if (!dom_canvas_register_engine(&radiant_canvas_operations) ||
         !dom_webgl_register_engine(&radiant_webgl_operations) ||
         !dom_style_register_engine(&radiant_style_operations) ||
         !dom_host_register_engine(&radiant_host_operations) ||
         !dom_collection_register_types(&radiant_collection_types) ||
         !dom_event_register_host(&radiant_event_host_operations)) {
-        log_error("DOM provider registration rejected a conflicting native provider");
-        return;
+        log_error("[DOM_ENGINE_INIT] registration rejected a conflicting native provider");
+        return false;
     }
+    return true;
+}
+
+RADIANT_C_API void radiant_jube_register_static(void) {
+    if (!radiant_register_dom_engine_providers()) return;
     dom_webgl_register_static();
     radiant_animation_register_static();
     jube_register_static_module(&radiant_module);

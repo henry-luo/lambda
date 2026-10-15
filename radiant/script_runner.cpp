@@ -15,6 +15,7 @@
 #include "../lib/memtrack.h"
 
 #include "radiant.hpp"
+#include "network_integration.h"
 #include "script_timeout.hpp"
 #include <assert.h>
 #include "../lambda/lambda-data.hpp"
@@ -603,14 +604,8 @@ static char* resolve_wpt_absolute_script_path(const char* src, Url* base_url) {
     if (strcmp(src, "/resources/testharnessreport.js") == 0) {
         return mem_strdup("builtin:wpt-testharnessreport.js", MEM_CAT_JS_RUNTIME);
     }
-    if (strcmp(src, "/common/rendering-utils.js") == 0) {
-        return mem_strdup("builtin:wpt-rendering-utils.js", MEM_CAT_JS_RUNTIME);
-    }
     if (strcmp(src, "/css/support/interpolation-testcommon.js") == 0) {
         return mem_strdup("builtin:wpt-interpolation-testcommon.js", MEM_CAT_JS_RUNTIME);
-    }
-    if (strcmp(src, "/resources/testdriver.js") == 0) {
-        return mem_strdup("builtin:wpt-testdriver.js", MEM_CAT_JS_RUNTIME);
     }
     if (strcmp(src, "/resources/testdriver-vendor.js") == 0) {
         return mem_strdup("builtin:wpt-testdriver-vendor.js", MEM_CAT_JS_RUNTIME);
@@ -639,6 +634,14 @@ static char* resolve_script_url(const char* src, Url* base_url, bool* out_is_htt
     char* resolved = radiant_resolve_resource_path(
         src, base_href, false, MEM_CAT_JS_RUNTIME);
     if (!resolved) return mem_strdup(src, MEM_CAT_JS_RUNTIME);
+    char fixture_path[4096];
+    // mirrored WPT pages retain relative support scripts in the canonical source tree.
+    if (base_href && radiant_resolve_layout_relative_resource_path(
+            resolved, base_href, fixture_path, sizeof(fixture_path))) {
+        mem_free(resolved);
+        resolved = mem_strdup(fixture_path, MEM_CAT_JS_RUNTIME);
+        if (!resolved) return nullptr;
+    }
     *out_is_http = radiant_url_is_http(resolved);
     return resolved;
 }
@@ -678,16 +681,6 @@ static char* load_script_content(const char* resolved_path, bool is_http,
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharnessreport.js") == 0) {
         return mem_strdup("", MEM_CAT_JS_RUNTIME);
     }
-    if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-rendering-utils.js") == 0) {
-        // Rendering-utils waits stage paint-invalidation mutations; layout JSON baselines capture geometry before those paint-only callbacks run.
-        return mem_strdup(
-            "(function(){\n"
-            "function pending(){ return { then:function(){ return this; }, catch:function(){ return this; }, finally:function(){ return this; } }; }\n"
-            "window.waitForAtLeastOneFrame = function(){ return pending(); };\n"
-            "window.waitForAnimationFrames = function(){ return pending(); };\n"
-            "})();\n",
-            MEM_CAT_JS_RUNTIME);
-    }
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-interpolation-testcommon.js") == 0) {
         // The upstream helper spends most of its source budget on assertions;
         // layout needs its generic fixture/effect construction, not harness I/O.
@@ -720,17 +713,69 @@ static char* load_script_content(const char* resolved_path, bool is_http,
             "})();\n",
             MEM_CAT_JS_RUNTIME);
     }
-    if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testdriver.js") == 0) {
-        return mem_strdup(
-            "(function(){\n"
-            "function resolved(){ return { then:function(resolve){ if (resolve) resolve(); return this; }, catch:function(){ return this; } }; }\n"
-            "function Actions(){ this.pointerMove=function(){return this;}; this.pointerDown=function(){return this;}; this.pointerUp=function(){return this;}; this.keyDown=function(){return this;}; this.keyUp=function(){return this;}; this.send=function(){return resolved();}; }\n"
-            "window.test_driver = window.test_driver || { send_keys:function(){return resolved();}, click:function(){return resolved();}, bless:function(name, fn){ if (fn) fn(); return resolved(); }, Actions:Actions };\n"
-            "})();\n",
-            MEM_CAT_JS_RUNTIME);
-    }
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testdriver-vendor.js") == 0) {
-        return mem_strdup("", MEM_CAT_JS_RUNTIME);
+        // keep WPT's public action builder; its vendor bridge delivers real platform input.
+        return mem_strdup(R"JS((function() {
+const driver = window.test_driver_internal;
+driver.in_automation = true;
+driver.action_sequence = async function(sources, context) {
+    if (context && context !== window) throw new Error('Cross-context actions are unavailable');
+    let ticks = 0;
+    const states = sources.map(source => {
+        ticks = Math.max(ticks, source.actions.length);
+        if (source.type === 'pointer' && source.parameters.pointerType !== 'mouse')
+            throw new Error('This action bridge requires a mouse pointer');
+        return {x: 0, y: 0};
+    });
+    const modifiers = {shift: false, ctrl: false, alt: false, meta: false};
+    for (let tick = 0; tick < ticks; tick++) {
+        let duration = 0;
+        for (let index = 0; index < sources.length; index++) {
+            const source = sources[index], state = states[index], action = source.actions[tick];
+            if (!action) continue;
+            duration = Math.max(duration, action.duration || 0);
+            if (action.type === 'pause') continue;
+            let accepted = false;
+            if (source.type === 'key') {
+                const code = action.value.codePointAt(0), down = action.type === 'keyDown';
+                if (action.type !== 'keyDown' && action.type !== 'keyUp') throw new Error('Invalid key action');
+                const modifier = code === 0xE008 ? 'shift' : code === 0xE009 ? 'ctrl' :
+                    code === 0xE00A ? 'alt' : code === 0xE03D ? 'meta' : '';
+                if (modifier) modifiers[modifier] = down;
+                accepted = (down ? __lambda_testdriver_key : __lambda_testdriver_key_up)(
+                    code, modifiers.shift, modifiers.ctrl, modifiers.alt, modifiers.meta);
+            } else if (source.type === 'pointer') {
+                if (action.type === 'pointerMove') {
+                    let x = action.x || 0, y = action.y || 0;
+                    if (action.origin === 'pointer') { x += state.x; y += state.y; }
+                    else if (action.origin && action.origin !== 'viewport') {
+                        const rect = action.origin.getBoundingClientRect();
+                        x += (Math.max(0, rect.left) + Math.min(innerWidth, rect.right)) / 2;
+                        y += (Math.max(0, rect.top) + Math.min(innerHeight, rect.bottom)) / 2;
+                    }
+                    state.x = x; state.y = y;
+                }
+                accepted = __lambda_testdriver_pointer(action.type, state.x, state.y, action.button || 0);
+            } else if (source.type === 'wheel' && action.type === 'scroll') {
+                accepted = __lambda_testdriver_scroll(action.x, action.y, action.deltaX, action.deltaY);
+            }
+            if (!accepted) throw new Error('Unsupported native input action');
+        }
+        if (duration > 0) await new Promise(resolve => setTimeout(resolve, duration));
+    }
+};
+driver.click = async function(element) {
+    await driver.action_sequence([{type:'pointer', parameters:{pointerType:'mouse'}, actions:[
+        {type:'pointerMove', origin:element, x:0, y:0},
+        {type:'pointerDown', button:0}, {type:'pointerUp', button:0}]}]);
+};
+driver.send_keys = async function(element, keys) {
+    element.focus();
+    const actions = [];
+    for (const value of keys) actions.push({type:'keyDown', value}, {type:'keyUp', value});
+    await driver.action_sequence([{type:'key', actions}]);
+};
+})();)JS", MEM_CAT_JS_RUNTIME);
     }
     if (is_http && resource_manager) {
         NetworkResource* resource = network_resource;
@@ -1333,13 +1378,11 @@ static void append_browser_document_preamble(StrBuf* script_buf, const DomDocume
         "  window.pageYOffset = y;\n"
         "  window.scrollX = x;\n"
         "  window.scrollY = y;\n"
-        "  if (document.documentElement) {\n"
-        "    document.documentElement.scrollLeft = x;\n"
-        "    document.documentElement.scrollTop = y;\n"
-        "  }\n"
-        "  if (document.body) {\n"
-        "    document.body.scrollLeft = x;\n"
-        "    document.body.scrollTop = y;\n"
+        // the viewport has one scrolling element; writing both root and body scrolls descendants twice.
+        "  var scrollTarget = document.scrollingElement || document.documentElement || document.body;\n"
+        "  if (scrollTarget) {\n"
+        "    scrollTarget.scrollLeft = x;\n"
+        "    scrollTarget.scrollTop = y;\n"
         "  }\n"
         "  // A no-op scroll must not turn page initialization into a scroll event.\n"
         "  if (oldX !== x || oldY !== y) window.dispatchEvent(new Event('scroll'));\n"
@@ -2116,10 +2159,40 @@ static int script_runner_load_block_timeout_ms() {
     return 250;
 }
 
+static bool script_runner_find_embedded_navigation(DomNode* node, void* context) {
+    if (!node->is_element()) return true;
+    DomElement* element = node->as_element();
+    if (element->tag() == MARKUP_NAME_IFRAME ||
+        (element->tag() == MARKUP_NAME_OBJECT && element->get_attribute("data")))
+        *(bool*)context = true;
+    return true;
+}
+
 static bool script_runner_wait_for_load_blockers(Runtime* runtime,
                                                  JsScriptTaskCollection* collection) {
     DomDocument* doc = runtime ? (DomDocument*)runtime->dom_doc : nullptr;
     if (!doc) return true;
+
+    bool has_embedded_navigation = false;
+    view_geometry_walk_dom_tree(doc->root, script_runner_find_embedded_navigation,
+        &has_embedded_navigation);
+    if (has_embedded_navigation && runtime->dom_ui_context) {
+        EvalContext* owner = runtime_get_eval_context(runtime);
+        // D5.4.1: child evaluators may switch only after the parent's script frames returned.
+        if (!owner || owner->execution_depth) return false;
+        UiContext* ui = (UiContext*)runtime->dom_ui_context;
+        DomDocument* previous_document = ui->document;
+        ui->document = lam::up(doc);
+        script_runner_suspend_js_watchdog();
+        layout_html_doc(ui, doc, false);
+        script_runner_resume_js_watchdog();
+        ui->document = lam::up(previous_document);
+        if (!radiant_eval_context_switch(owner) || !js_runtime_state_init(owner)) return false;
+        dom_set_document(doc);
+        RuntimeExecutionScope execution_scope(owner);
+        dom_dispatch_pending_resource_loads();
+        js_microtask_flush();
+    }
 
     if (!doc->resource_manager) {
         doc->fully_loaded = true;
@@ -2131,8 +2204,10 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime,
     }
 
     NetworkResourceManager* mgr = doc->resource_manager;
+    // source mutations admitted during scripts participate in the ordinary load boundary.
+    radiant_discover_document_resources(doc);
     resource_manager_flush_layout_updates(mgr);
-    if (resource_manager_is_fully_loaded(mgr)) {
+    if (resource_manager_is_fully_loaded(mgr) && !dom_document_has_pending_work(doc)) {
         doc->fully_loaded = true;
         return true;
     }
@@ -2142,7 +2217,7 @@ static bool script_runner_wait_for_load_blockers(Runtime* runtime,
     const int poll_ms = 10;
     while (timeout_ms > 0 && waited_ms < timeout_ms) {
         resource_manager_flush_layout_updates(mgr);
-        if (resource_manager_is_fully_loaded(mgr)) {
+        if (resource_manager_is_fully_loaded(mgr) && !dom_document_has_pending_work(doc)) {
             doc->fully_loaded = true;
             return true;
         }
@@ -2279,6 +2354,10 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
         log_error("execute_document_scripts: failed to initialize preamble consumer");
         return ItemError;
     }
+    // D5.4.1: load-time layout and native input resolve this same live realm, including child loads.
+    DomDocument* executing_document = (DomDocument*)runtime->dom_doc;
+    executing_document->js.runtime = runtime;
+    executing_document->js_has_dom_realm = true;
 
 #ifndef _WIN32
     // The preamble and its Lambda-owned module graph are trusted realm setup.
@@ -2402,6 +2481,14 @@ static void collect_document_import_maps(Element* element,Input* input,ArrayBuil
     for (int64_t i=0;i<element->length;i++) {
         Item child=element->items[i];if (get_type_id(child)==LMD_TYPE_ELEMENT) collect_document_import_maps(child.element,input,maps,depth+1);
     }
+}
+
+bool document_snapshot_is_ready(const DomDocument* document) {
+    return !document || !document->root || !document->root->has_class("reftest-wait");
+}
+
+static int document_snapshot_ready_predicate(void* user) {
+    return document_snapshot_is_ready((const DomDocument*)user);
 }
 
 extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocument* dom_doc,
@@ -2700,6 +2787,23 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
             // Static one-shot render (make layout, headless smoke): no host loop
             // will pump later, so drain everything now with the 5s watchdog.
             js_event_loop_drain();
+            if (dom_doc->js.auto_close_event_loop && !document_snapshot_is_ready(dom_doc)) {
+                // explicit readiness can require more frames than the ordinary snapshot sample.
+                RuntimeExecutionScope execution_scope(document_context);
+                // the WPT capture protocol signals the first committed frame before awaiting readiness.
+                if (dom_ensure_geometry_snapshot(dom_doc)) {
+                    RootFrame roots(2);
+                    Rooted<Item> target(roots, dom_wrap_element(dom_doc->root));
+                    Rooted<Item> event(roots, js_create_event("TestRendered", true, false));
+                    dom_dispatch_event(target.get(), event.get());
+                }
+                int settled = js_await_bounded_drain(document_snapshot_ready_predicate, dom_doc,
+                    radiant_script_exec_timeout_seconds(watchdog_source_len) * 1000, 0, 0);
+                if (settled < 0) {
+                    log_error("script snapshot readiness: explicit wait remains pending after bounded drain");
+                    result = ItemError;
+                }
+            }
             log_mem_stage("js: after event loop drain");
             log_info("execute_document_scripts: timer queue drained");
         }

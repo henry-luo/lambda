@@ -35,6 +35,8 @@
 #include "../lib/file.h"
 #include "../lib/uv_loop.h"
 #include "../lib/url.h"
+#include "../lib/str.h"
+#include "../lib/strbuf.h"
 
 extern __thread EvalContext* context;
 
@@ -228,6 +230,91 @@ struct CallableRealmSnapshot {
     bool stable_lookup = false;
     bool iterator_alias = false;
 };
+
+enum { JUBE_CATALOG_TEST_TYPES = 64, JUBE_CATALOG_TEST_WORKERS = 8 };
+
+struct JubeCatalogWorker {
+    uv_sem_t* start;
+    JubeModuleDef module;
+    JubeTypeDef types[JUBE_CATALOG_TEST_TYPES];
+    JubeTypeBinding bindings[JUBE_CATALOG_TEST_TYPES];
+    char names[JUBE_CATALOG_TEST_TYPES][40];
+    StrBuf* source;
+    int status;
+    bool lookups_valid;
+};
+
+static int jube_catalog_test_get(Item, Item* out) { *out = ItemNull; return 1; }
+
+static void jube_catalog_compile_worker(void* data) {
+    JubeCatalogWorker* worker = (JubeCatalogWorker*)data;
+    uv_sem_wait(worker->start);
+    worker->status = jube_compile_module_interface(&worker->module);
+    worker->lookups_valid = worker->status == 0;
+    for (unsigned i = 0; i < JUBE_CATALOG_TEST_TYPES && worker->lookups_valid; i++) {
+        const JubeTypeDef* type = &worker->types[i];
+        // other modules may still be growing the shared catalog during these reads.
+        worker->lookups_valid = jube_iface_type_by_name(type->name, strlen(type->name)) == type &&
+            jube_member_count(type) == 1 && jube_member_ordinal(type, "value", 5) == 0;
+        (void)jube_interface_registry_digest();
+    }
+}
+
+TEST(JubeDom4, ConcurrentInterfacePublicationKeepsAllModuleRecords) {
+    uint64_t before = jube_interface_registry_digest();
+    uv_sem_t start;
+    ASSERT_EQ(uv_sem_init(&start, 0), 0);
+    JubeCatalogWorker workers[JUBE_CATALOG_TEST_WORKERS] = {};
+    uv_thread_t threads[JUBE_CATALOG_TEST_WORKERS];
+    static const JubeMemberBind member = {"value", nullptr, jube_catalog_test_get};
+    unsigned created = 0;
+    for (unsigned i = 0; i < JUBE_CATALOG_TEST_WORKERS; i++) {
+        JubeCatalogWorker* worker = &workers[i];
+        worker->start = &start;
+        worker->source = strbuf_new();
+        ASSERT_NE(worker->source, nullptr);
+        for (unsigned j = 0; j < JUBE_CATALOG_TEST_TYPES; j++) {
+            str_fmt(worker->names[j], sizeof(worker->names[j]), "catalog_race_%u_%u", i, j);
+            worker->types[j].name = worker->names[j];
+            worker->bindings[j].type_name = worker->names[j];
+            worker->bindings[j].host_brand = &worker->types[j];
+            worker->bindings[j].members = &member;
+            worker->bindings[j].member_count = 1;
+            strbuf_append_format(worker->source, "type %s { value: int }\n", worker->names[j]);
+        }
+        worker->module.abi_version = JUBE_ABI_VERSION;
+        worker->module.struct_size = sizeof(JubeModuleDef);
+        worker->module.name = worker->names[0];
+        worker->module.types = worker->types;
+        worker->module.type_count = JUBE_CATALOG_TEST_TYPES;
+        worker->module.interface_decl = worker->source->str;
+        worker->module.type_bindings = worker->bindings;
+        worker->module.type_binding_count = JUBE_CATALOG_TEST_TYPES;
+    }
+    for (unsigned i = 0; i < JUBE_CATALOG_TEST_WORKERS; i++) {
+        int rc = uv_thread_create(&threads[i], jube_catalog_compile_worker, &workers[i]);
+        EXPECT_EQ(rc, 0);
+        if (rc != 0) break;
+        created++;
+    }
+    for (unsigned i = 0; i < created; i++) uv_sem_post(&start);
+    for (unsigned i = 0; i < created; i++) ASSERT_EQ(uv_thread_join(&threads[i]), 0);
+    EXPECT_EQ(created, JUBE_CATALOG_TEST_WORKERS);
+    for (unsigned i = 0; i < created; i++) {
+        EXPECT_EQ(workers[i].status, 0);
+        EXPECT_TRUE(workers[i].lookups_valid);
+        for (const JubeTypeDef& type : workers[i].types)
+            EXPECT_EQ(jube_iface_type_by_name(type.name, strlen(type.name)), &type);
+    }
+    for (unsigned i = 0; i < JUBE_CATALOG_TEST_WORKERS; i++) {
+        if (workers[i].source) {
+            jube_interface_remove_module(&workers[i].module);
+            strbuf_free(workers[i].source);
+        }
+    }
+    uv_sem_destroy(&start);
+    EXPECT_EQ(jube_interface_registry_digest(), before);
+}
 
 TEST(JubeDom4, OrdinalParityCoversDeclaredMembersAndHusks) {
     Runtime runtime = {};

@@ -314,6 +314,7 @@ struct JsClipboardState : RootVector {
     Item data_transfer_prototype = {};
     Item file_list_prototype = {};
     Item drag_data_transfer = {};
+    Item file_reader_prototype = {};
     int64_t generation = 1;
     int64_t next_object_url_id = 1;
 };

@@ -205,6 +205,11 @@ static bool span_has_in_flow_text_descendant(ViewSpan* span) {
     return false;
 }
 
+static bool inline_span_uses_baseline_strut(ViewSpan* span) {
+    return !span->in_line || !span->inl()->vertical_align ||
+        span->inl()->vertical_align == CSS_VALUE_BASELINE;
+}
+
 static bool inline_span_single_replaced_baseline_y(ViewSpan* span, float* baseline_y) {
     if (!span || !baseline_y) return false;
     bool found_replaced_child = false;
@@ -219,8 +224,12 @@ static bool inline_span_single_replaced_baseline_y(ViewSpan* span, float* baseli
         ViewBlock* block = lam::view_as_block(child);
         if (block && block->display.inner == RDT_DISPLAY_REPLACED) {
             if (found_replaced_child) return false;
-            // CSS 2.1 §10.8.1: a replaced inline's baseline is its bottom content edge.
-            *baseline_y = child->y + child->height;
+            float offset = child->height;
+            if (radiant::layout_image_uses_alt_text_baseline(block)) {
+                if (!block->blk || block->block()->last_line_max_ascender <= 0.0f) return false;
+                offset = radiant::layout_inline_baseline_for_source(block, block->block()->last_line_max_ascender);
+            }
+            *baseline_y = child->y + offset;
             found_replaced_child = true;
             continue;
         }
@@ -990,6 +999,64 @@ static void inline_text_line_range(View* view, ViewSpan* whitespace_context, boo
     }
 }
 
+struct InlinePaintLine { int line; RdtLogicalRect rect; };
+struct InlinePaintLines {
+    ViewSpan* span;
+    lam::ArrayList<InlinePaintLine> lines{MEM_CAT_LAYOUT, 0};
+};
+
+static bool inline_paint_line_collect(DomNode* node, void* context) {
+    auto* collected = (InlinePaintLines*)context;
+    if (node->view_type != RDT_VIEW_TEXT || view_is_collapsed_whitespace_text((View*)node)) return true;
+    for (DomNode* parent = node->parent; parent && parent != collected->span; parent = parent->parent)
+        if (parent->view_type != RDT_VIEW_INLINE) return true;
+    for (TextRect* rect = node->as_text()->rect; rect; rect = rect->next) {
+        if (rect->width <= 0.0f || rect->height <= 0.0f) continue;
+        InlinePaintLine* line = nullptr;
+        for (InlinePaintLine& candidate : collected->lines)
+            if (candidate.line == rect->line_number) { line = &candidate; break; }
+        if (!line) {
+            if (!collected->lines.append({rect->line_number, {rect->x, rect->y, rect->width, rect->height}})) return false;
+        } else {
+            float right = fmaxf(line->rect.x + line->rect.width, rect->x + rect->width);
+            float bottom = fmaxf(line->rect.y + line->rect.height, rect->y + rect->height);
+            line->rect.x = fminf(line->rect.x, rect->x); line->rect.y = fminf(line->rect.y, rect->y);
+            line->rect.width = right - line->rect.x; line->rect.height = bottom - line->rect.y;
+        }
+    }
+    return true;
+}
+
+bool layout_inline_visit_fragments(ViewSpan* span, LayoutInlineFragmentFn visitor, void* context) {
+    if (!span || !visitor) return false;
+    InlinePaintLines collected = {span};
+    if (!view_geometry_walk_dom_tree(span, inline_paint_line_collect, &collected)) return false;
+    if (collected.lines.empty()) return visitor(context, {span->x, span->y, span->width, span->height}, true, true, 0.0f, span->width);
+    const BoundaryProp* boundary = span->boundary();
+    bool clone = span->blk && span->block()->box_decoration_break == CSS_VALUE_CLONE;
+    float extent = 0.0f;
+    for (size_t index = 0; index < collected.lines.size(); index++) {
+        bool first = index == 0, last = index + 1 == collected.lines.size();
+        RdtLogicalRect& rect = collected.lines[index].rect;
+        if (boundary) {
+            const BorderProp* border = boundary->border;
+            float left = first || clone ? boundary->padding.left + (border ? border->width.left : 0.0f) : 0.0f;
+            float right = last || clone ? boundary->padding.right + (border ? border->width.right : 0.0f) : 0.0f;
+            float top = boundary->padding.top + (border ? border->width.top : 0.0f);
+            float bottom = boundary->padding.bottom + (border ? border->width.bottom : 0.0f);
+            rect.x -= left; rect.y -= top; rect.width += left + right; rect.height += top + bottom;
+        }
+        extent += rect.width;
+    }
+    float offset = 0.0f;
+    for (size_t index = 0; index < collected.lines.size(); index++) {
+        RdtLogicalRect rect = collected.lines[index].rect;
+        if (!visitor(context, rect, index == 0, index + 1 == collected.lines.size(), offset, extent)) return false;
+        offset += rect.width;
+    }
+    return true;
+}
+
 static bool inline_view_text_differs_from_y(View* view, float y) {
     for (View* child = view; child; child = child->next()) {
         if (child->view_type == RDT_VIEW_TEXT) {
@@ -1359,14 +1426,8 @@ bool inline_span_float_continuation_x(
 void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewSpan* span) {
     if (!lycon || !span || !font_box_handle(&lycon->font)) return;
     float ascender = 0.0f, descender = 0.0f;
-    if (lycon->block.line_height_is_normal) {
-        font_get_normal_lh_split(font_box_handle(&lycon->font), &ascender, &descender);
-    } else {
-        // CSS 2.1 §10.8.1: explicit leading surrounds the font content area,
-        // not the font's normal-line-height distribution.
-        font_get_content_area_split(font_box_handle(&lycon->font), &ascender, &descender);
-        layout_apply_line_height_leading(lycon->block.line_height, &ascender, &descender);
-    }
+    layout_inline_font_metrics(font_box_handle(&lycon->font), lycon->block.line_height,
+        lycon->block.line_height_is_normal, &ascender, &descender);
     if (ascender > 0.0f || descender > 0.0f) {
         layout_apply_baseline_shift(lycon, &ascender, &descender);
         lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
@@ -2058,6 +2119,15 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
         }
         DisplayValue child_display = child->is_element() ?
             resolve_display_value(child) : DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_FLOW};
+        // block children below take layout_block directly, so the page flow's
+        // out-of-flow material (footnote bodies, running elements, page controls)
+        // leaves here as it does in layout_flow_node
+        if (lycon->paged && child->is_element() && !layout_display_is_none(child_display) &&
+            layout_inline_child_is_block_split(child) && paged_flow_skips_element(lycon, child->as_element())) {
+            child->view_type = RDT_VIEW_NONE;
+            child = child->next_sibling;
+            continue;
+        }
         bool is_block_or_table_internal = layout_inline_child_is_block_split(child);
         if (is_block_or_table_internal) {
             // CSS 2.1 §9.2.1.1: Leading anonymous block strut.
@@ -2456,6 +2526,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     span->x = lycon->line.advance_x;  span->y = lycon->block.advance_y;
     span->width = 0;  span->height = 0;
     span->display = display;
+    if (span->position) span->position->inline_relative_y = 0.0f;
     // CSS Position 3 §4.1: preserve the first inline box origin separately
     // because the visible DOM rectangle may start on a later line fragment.
     FragmentUnion* inline_cb = span->ensure_fragment_union(FRAGMENT_UNION_INLINE_CB);
@@ -2878,12 +2949,15 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     } else if (child) {
         do {
             bool child_can_close_inline_line = child->is_text();
+            bool child_has_replaced_fragment = false;
             if (child->is_element()) {
                 DomElement* child_element = child->as_element();
                 DisplayValue child_display = resolve_display_value(child_element);
                 child_can_close_inline_line =
                     !layout_element_is_abs_or_fixed(child_element) &&
                     layout_display_is_inline_level(child_display.outer);
+                child_has_replaced_fragment = child_can_close_inline_line &&
+                    (child_display.inner == RDT_DISPLAY_REPLACED || child->tag() == MARKUP_NAME_BR);
             }
             float saved_span_content_height = span->content_height;
             int line_number_before_child = lycon->block.line_number;
@@ -2891,16 +2965,17 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // CSS 2.1 §10.8.1: publish this strut while a child can finalize
                 // its fragment; unclosed inline content must not affect later lines.
                 span->content_height = span_resolved_line_height;
-            }
-            if (child->is_element() && child->tag() == MARKUP_NAME_BR &&
-                span->in_line && span->inl() &&
-                vertical_align_baseline_shift(
-                    lycon, span->inl()->vertical_align,
-                    span->inl()->vertical_align_offset) != 0.0f &&
-                inline_span_has_only_forced_break_content(span)) {
-                // CSS 2.1 §10.8.1: apply a shifted inline strut before each
-                // forced break so every fragment participates in line height.
-                contribute_inline_strut(lycon, elmt, span);
+                bool shifted_forced_break = child->is_element() && child->tag() == MARKUP_NAME_BR &&
+                    span->in_line && span->inl() &&
+                    vertical_align_baseline_shift(lycon, span->inl()->vertical_align,
+                        span->inl()->vertical_align_offset) != 0.0f &&
+                    inline_span_has_only_forced_break_content(span);
+                if (!is_initial_letter && child_has_replaced_fragment &&
+                    (inline_span_uses_baseline_strut(span) || shifted_forced_break)) {
+                    // an image-only fragment carries its enclosing strut when the
+                    // following word wraps; initials and other alignments own theirs.
+                    contribute_inline_strut(lycon, elmt, span);
+                }
             }
             layout_flow_node(lycon, child);
             if (child_can_close_inline_line &&
@@ -3012,8 +3087,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (!ended_at_new_line_start && !is_initial_letter && had_children &&
         span_has_in_flow_text_descendant(span) &&
         span->content_height > 0.0f &&
-        (!span->in_line || !span->inl()->vertical_align ||
-         span->inl()->vertical_align == CSS_VALUE_BASELINE)) {
+        inline_span_uses_baseline_strut(span)) {
         float max_ascender_before = lycon->line.max_ascender;
         float max_descender_before = lycon->line.max_descender;
         contribute_inline_strut(lycon, elmt, span);

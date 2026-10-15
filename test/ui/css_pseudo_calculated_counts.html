@@ -1,0 +1,26 @@
+<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;background:white}button{height:24px}
+#owner{font-size:20px;-webkit-line-clamp:calc(2em / 1px);hyphenate-limit-chars:calc(3em / 1px)}
+#owner::before{content:"A";display:block;font-size:var(--pseudo-font,5px);
+    -webkit-line-clamp:calc(1em / 1px);hyphenate-limit-chars:calc(1em / 1px)}
+#owner::after{content:"B";display:block;font-size:8px;
+    -webkit-line-clamp:calc(1em / 1px);hyphenate-limit-chars:calc(1em / 1px)}
+#owner.inherit::before{-webkit-line-clamp:inherit;hyphenate-limit-chars:inherit}
+#patch{height:12px;background:red}
+</style><button id="check">Check</button><button id="change">Change</button><button id="inherit">Inherit</button>
+<output id="report"></output><div id="owner"></div><div id="patch"></div>
+<script>
+(function(){
+    var owner=document.getElementById('owner'),report=document.getElementById('report');
+    function record(prefix){
+        var before=getComputedStyle(owner,'::before'),after=getComputedStyle(owner,'::after');
+        var count=before.getPropertyValue('-webkit-line-clamp');
+        report.setAttribute('data-'+prefix+'values',[count,before.getPropertyValue('hyphenate-limit-chars'),
+            after.getPropertyValue('-webkit-line-clamp'),after.getPropertyValue('hyphenate-limit-chars')].join('|'));
+        document.getElementById('patch').style.width=Number(count)*4+'px';
+    }
+    document.getElementById('check').onclick=function(){record('');};
+    document.getElementById('change').onclick=function(){owner.style.fontSize='30px';owner.style.setProperty('--pseudo-font','7px');record('dirty-');};
+    document.getElementById('inherit').onclick=function(){owner.className='inherit';record('inherited-');};
+})();
+</script>

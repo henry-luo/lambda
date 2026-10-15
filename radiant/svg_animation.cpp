@@ -191,17 +191,27 @@ static thread_local SvgAnimationRegistry* svg_animation_instance_registry = null
 static thread_local bool svg_animation_event_broadcast = true;
 static SvgAnimationRegistry* svg_animation_use_registry(DomElement* host, DomElement* source);
 
-SvgAnimationSourceScope::SvgAnimationSourceScope(DomDocument* document, DomElement* instance, DomElement* host)
-    : previous(svg_animation_source_document), previous_instance(svg_animation_source_instance),
-      previous_registry(svg_animation_instance_registry) {
+void svg_animation_source_enter(DomDocument* document, DomElement* instance, DomElement* host,
+        DomSvgSourceContext* previous) {
+    if (!previous) return;
+    *previous = {svg_animation_source_document, svg_animation_source_instance, svg_animation_instance_registry};
+    // same-document scopes retain the current instance; another document starts a fresh source context.
     svg_animation_source_document = document;
-    svg_animation_source_instance = instance ? instance : document == previous ? previous_instance : nullptr;
+    svg_animation_source_instance = instance ? instance : document == previous->document ? previous->instance : nullptr;
     svg_animation_instance_registry = host && instance ? svg_animation_use_registry(host, instance) :
-        document == previous ? previous_registry : nullptr;
+        document == previous->document ? (SvgAnimationRegistry*)previous->registry : nullptr;
+}
+void svg_animation_source_leave(const DomSvgSourceContext* previous) {
+    if (!previous) return;
+    svg_animation_source_document = previous->document;
+    svg_animation_source_instance = previous->instance;
+    svg_animation_instance_registry = (SvgAnimationRegistry*)previous->registry;
+}
+SvgAnimationSourceScope::SvgAnimationSourceScope(DomDocument* document, DomElement* instance, DomElement* host) {
+    svg_animation_source_enter(document, instance, host, &previous);
 }
 SvgAnimationSourceScope::~SvgAnimationSourceScope() {
-    svg_animation_source_document = previous; svg_animation_source_instance = previous_instance;
-    svg_animation_instance_registry = previous_registry;
+    svg_animation_source_leave(&previous);
 }
 
 double svg_animation_clock_value(const char* value, double fallback) {

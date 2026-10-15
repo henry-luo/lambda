@@ -968,32 +968,8 @@ static PseudoElementType get_pseudo_element_from_compound(CssCompoundSelector* c
         CssSimpleSelector* simple = compound->simple_selectors[i];
         if (!simple) continue;
 
-        switch (simple->type) {
-            case CSS_SELECTOR_PSEUDO_ELEMENT_BEFORE:
-                return PSEUDO_ELEMENT_BEFORE;
-            case CSS_SELECTOR_PSEUDO_ELEMENT_AFTER:
-                return PSEUDO_ELEMENT_AFTER;
-            case CSS_SELECTOR_PSEUDO_ELEMENT_FIRST_LINE:
-                return PSEUDO_ELEMENT_FIRST_LINE;
-            case CSS_SELECTOR_PSEUDO_ELEMENT_FIRST_LETTER:
-                return PSEUDO_ELEMENT_FIRST_LETTER;
-            case CSS_SELECTOR_PSEUDO_ELEMENT_SELECTION:
-                return PSEUDO_ELEMENT_SELECTION;
-            case CSS_SELECTOR_PSEUDO_ELEMENT_BACKDROP:
-                return PSEUDO_ELEMENT_BACKDROP;
-            case CSS_SELECTOR_PSEUDO_ELEMENT_MARKER:
-                return PSEUDO_ELEMENT_MARKER;
-            case CSS_SELECTOR_PSEUDO_ELEMENT_PLACEHOLDER:
-                return PSEUDO_ELEMENT_PLACEHOLDER;
-            case CSS_SELECTOR_PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON:
-                return PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON;
-            case CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_CALL:
-                return PSEUDO_ELEMENT_FOOTNOTE_CALL;
-            case CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_MARKER:
-                return PSEUDO_ELEMENT_FOOTNOTE_MARKER;
-            default:
-                break;
-        }
+        PseudoElementType type = css_pseudo_from_selector_type(simple->type);
+        if (type != PSEUDO_ELEMENT_NONE) return type;
     }
 
     return PSEUDO_ELEMENT_NONE;

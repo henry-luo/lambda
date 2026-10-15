@@ -2,6 +2,7 @@
 #define CSS_PARSER_H
 
 #include "css_style.hpp"
+#include "css_pseudo_element.hpp"
 #include "../../../lib/mempool.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -302,6 +303,24 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_NESTING_PARENT,             // & (parent selector)
     CSS_SELECTOR_NESTING_DESCENDANT          // & (descendant context)
 } CssSelectorType;
+
+static inline CssSelectorType css_selector_type_for_pseudo(PseudoElementType type) {
+    switch (type) {
+#define CSS_PSEUDO_SELECTOR(kind, name, legacy) case PSEUDO_ELEMENT_##kind: return CSS_SELECTOR_PSEUDO_ELEMENT_##kind;
+        CSS_PSEUDO_ELEMENT_IDENTITIES(CSS_PSEUDO_SELECTOR)
+#undef CSS_PSEUDO_SELECTOR
+        default: return CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC;
+    }
+}
+
+static inline PseudoElementType css_pseudo_from_selector_type(CssSelectorType type) {
+    switch (type) {
+#define CSS_SELECTOR_PSEUDO(kind, name, legacy) case CSS_SELECTOR_PSEUDO_ELEMENT_##kind: return PSEUDO_ELEMENT_##kind;
+        CSS_PSEUDO_ELEMENT_IDENTITIES(CSS_SELECTOR_PSEUDO)
+#undef CSS_SELECTOR_PSEUDO
+        default: return PSEUDO_ELEMENT_NONE;
+    }
+}
 
 // Combinator types
 typedef enum CssCombinator {

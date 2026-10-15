@@ -13,6 +13,7 @@
 #include "event.hpp"
 #include "rdt_video.h"
 #include "../lambda/input/css/dom_node.hpp"
+#include "../lambda/dom/dom_svg_context.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/arena.h"
 #include "../lib/arraylist.h"
@@ -146,11 +147,6 @@ typedef enum {
 } RdtStrokeJoin;
 
 typedef enum {
-    RDT_FILL_WINDING  = 0,
-    RDT_FILL_EVEN_ODD = 1,
-} RdtFillRule;
-
-typedef enum {
     RDT_PATH_MOVE,
     RDT_PATH_LINE,
     RDT_PATH_QUAD,
@@ -210,9 +206,6 @@ inline bool rdt_gradient_options_valid(const RdtGradientOptions* options) {
         if (!isfinite(options->dash_array[index]) || options->dash_array[index] < 0.0f) return false;
     return true;
 }
-
-// opaque path handle — each backend defines the concrete type
-typedef struct RdtPath RdtPath;
 
 // opaque backend handle
 typedef struct RdtVectorImpl RdtVectorImpl;
@@ -417,9 +410,6 @@ struct SvgDomStyleScope {
     float viewport_height;
     bool has_viewport;
 };
-struct RdtLogicalPoint;
-// a clip hit query asks whether the logical point lies inside a clip path
-typedef bool (*SvgPathContainsFn)(const RdtPath*, const RdtMatrix*, RdtFillRule, const struct RdtLogicalPoint*);
 struct SvgClipHitQuery {
     SvgPathContainsFn contains;
     lam::Up<const struct RdtLogicalPoint> point;
@@ -1415,6 +1405,7 @@ typedef struct {
     lam::Up<RdtPath> path;  // the path drawn: borrowed, or owned_path
     lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     float x1, y1, x2, y2;
+    bool image_sampling; // a replaced CSS image retains image-edge sampling in vector fallbacks
     lam::Up<const RdtGradientStop> stops;  // the stops drawn: borrowed, or owned_stops
     lam::OwnArr<RdtGradientStop> owned_stops;  // set when this command took the stop array
     int stop_count;
@@ -1431,6 +1422,7 @@ typedef struct {
     lam::Up<RdtPath> path;  // the path drawn: borrowed, or owned_path
     lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     float cx, cy, r;
+    bool image_sampling;
     lam::Up<const RdtGradientStop> stops;  // the stops drawn: borrowed, or owned_stops
     lam::OwnArr<RdtGradientStop> owned_stops;  // set when this command took the stop array
     int stop_count;
@@ -1727,6 +1719,7 @@ void paint_ir_register_glyph_run_raster_lowerer(PaintGlyphRunRasterLowerFn lower
 
 typedef struct PaintCmd {
     PaintOp op;
+    bool borrowed_payload; // an immutable edition owns payloads borrowed by a transient lowering list
     union {
         PaintFillRect           fill_rect;
         PaintFillRoundedRect    fill_rounded_rect;
@@ -1794,6 +1787,8 @@ void paint_list_init(PaintList* pl, Arena* backing_arena);
 void paint_list_clear(PaintList* pl);   // rewind count and release owned command payloads
 void paint_list_destroy(PaintList* pl);
 int  paint_list_count(const PaintList* pl);
+// source and its resource owner must outlive lowering and destruction of destination.
+bool paint_list_borrow_commands(PaintList* destination, const PaintList* source);
 // transfer a newly appended path payload to a deferred list; false leaves ownership with the caller.
 bool paint_list_take_path_payload(PaintList* pl, int index, PaintOp expected_op,
                                   RdtGradientStop* stops = nullptr);
@@ -2035,6 +2030,8 @@ struct RenderContext {
     Color color;
     lam::Up<UiContext> ui_context;
     lam::Up<RenderTextPaintData> text_paint; // borrowed from the current block paint scope
+    RdtMatrix overflow_clip_transform;
+    bool has_overflow_clip_transform;
 };
 
 struct Css3dPaintContext;
@@ -2298,6 +2295,7 @@ bool render_geometry_pixel_bounds_empty(IRect bounds);
 Rect render_geometry_block_border_rect(const BlockBlot* parent_block,
                                        const ViewBlock* block,
                                        float scale);
+Rect render_geometry_boundary_rect(const ViewBlock* view, Rect wrapper);
 Rect render_geometry_block_content_rect(const BlockBlot* parent_block,
                                         const ViewBlock* block,
                                         float scale);
@@ -2305,6 +2303,8 @@ float render_geometry_filter_effect_expand(const FilterProp* filter, float densi
 float render_geometry_block_visual_overflow(const ViewBlock* block, float density = 1.0f);
 Rect render_geometry_outer_shadow_rect(Rect border_box, float offset_x,
                                        float offset_y, float spread);
+Corner render_geometry_outset_corners(const Corner* radius, float width, float height,
+    float top, float right, float bottom, float left);
 bool render_geometry_transform_matrix(const TransformProp* transform,
                                       float x, float y, float width, float height,
                                       RdtMatrix* out_matrix);
@@ -3069,12 +3069,19 @@ RenderPaintBlockResult render_paint_block_run(RenderPaintBlockOps* ops,
 // ===== render_paint_boundary.hpp =====
 // Emits a complete simple CSS boundary into PaintIR.
 // Returns false when the boundary needs a richer backend-specific fallback.
-bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
-                                       float x, float y);
+bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view, Rect rect);
+inline bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view, float x, float y) {
+    return view && render_paint_boundary_emit_simple(paint_list, view, {x, y, view->width, view->height});
+}
 bool render_paint_boundary_emit_fragmented_simple(PaintList* paint_list, ViewBlock* view, Rect rect);
 bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* boundary, Rect rect);
 bool render_paint_background_is_simple(const BackgroundProp*);
 bool render_paint_boundary_emit_full(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect);
+bool render_paint_boundary_emit_border_side(PaintList* paint, const BorderProp* border, Rect rect, size_t side);
+bool render_paint_boundary_box(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
+    RenderExportTargetKind target, const Rect* background_area = nullptr);
+bool render_paint_boundary_layers(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
+    RenderExportTargetKind target, bool outer_shadows, const Rect* background_area = nullptr);
 bool render_border_is_uniform_solid(const BorderProp* border);
 bool render_paint_boundary_emit_solid_border(PaintList* paint_list, BorderProp* border, Rect rect);
 bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* view,
@@ -3793,8 +3800,11 @@ RenderClipScope render_clip_push_css_scope(RasterRenderContext* rdcon, ViewBlock
 bool render_clip_push_vector_css(PaintList* paint, ViewElement* element,
                                  float abs_x, float abs_y);
 bool render_clip_overflow_geometry(ViewBlock* block, Bound* clip, Corner* radius);
+bool render_clip_overflow_bounds(ViewBlock* block, float origin_x, float origin_y,
+    float scale, Bound visible, const RdtMatrix* transform, Bound* clip, Corner* radius);
 bool render_clip_push_vector(PaintList* paint, ViewElement* element,
-    float abs_x, float abs_y, RenderClipKind kind);
+    float abs_x, float abs_y, RenderClipKind kind, Bound visible,
+    const RdtMatrix* transform);
 RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bound* clip);
 RenderClipScope render_clip_push_overflow_scope(RasterRenderContext* rdcon, ViewBlock* block,
                                                float origin_x, float origin_y);
@@ -3837,7 +3847,7 @@ uint32_t render_pixel_source_over_straight(uint32_t destination, uint32_t source
 uint32_t render_pixel_source_over_premultiplied(uint32_t destination, uint32_t source);
 uint32_t render_pixel_source_over_premultiplied_pair(uint32_t destination, uint32_t source);
 uint32_t render_pixel_destination_over_premultiplied(uint32_t destination, uint32_t source);
-ScaleMode render_image_scale_mode(const ViewSpan* view, bool repeating);
+ScaleMode render_image_scale_mode(const DomElement* element, bool repeating);
 uint32_t render_pixel_sample_bilinear(const uint8_t* pixels, int width, int height,
                                       int pitch, float x, float y, bool wrap,
                                       bool round_channels, bool premultiply_samples = false);
@@ -3998,8 +4008,10 @@ bool render_paint_snapshot(const PaintList* paint, Bound bounds, float viewport_
 void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
 bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
                              RenderExportTargetKind target);
+bool render_paint_background_requires_composite(const BackgroundProp* background, RenderExportTargetKind target);
 bool render_paint_gradient_image(PaintList* paint, const ListStyleImage* image, Rect rect,
-                                float pixel_ratio, const RdtMatrix* transform = nullptr);
+                                float pixel_ratio, const RdtMatrix* transform = nullptr,
+                                bool image_sampling = false);
 bool render_paint_gradient_shape(PaintList* paint, const ListStyleImage* image, Rect rect,
     float pixel_ratio, const RdtMatrix* transform, RdtPath* shape);
 
@@ -4142,7 +4154,6 @@ void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow,
                      struct PagedFlowState* paged = nullptr);
 void view_pool_destroy(ViewTree* tree);
 void view_pool_reset_retained(ViewTree* tree);
-void view_pool_reset_retained_subtree(ViewTree* tree, DomNode* root);
 void view_pool_release_detached_subtree(DomNode* root);
 void image_cache_cleanup(UiContext* uicon);
 
@@ -4701,6 +4712,8 @@ void render_custom_svg_subscene(RasterRenderContext* rdcon, Element* svg_element
                                 float viewport_width, float viewport_height);
 
 // ===== render_text.hpp =====
+bool render_text_paint_atomic_hidden(RenderContext* context, View* view);
+bool render_text_overflow_atomic_hidden(UiContext* uicon, View* view);
 class RenderTextPaintScope {
     lam::Up<RenderContext> context;
     lam::Up<RenderTextPaintData> previous;
@@ -4729,13 +4742,17 @@ class RenderTextPaintIterator {
     lam::Up<RenderContext> context;
     lam::Up<TextRect> cursor;
     lam::Up<RenderTextPaintEntry> pending_marker;
+    lam::Up<TextRect> pending_source;
+    int pending_entry_index;
     TextRect projection;
     FontBox saved_font;
     Color saved_color;
+    bool reverse_visual_clusters = false;
 public:
     RenderTextPaintIterator(RenderContext* context, ViewText* text);
     ~RenderTextPaintIterator();
-    TextRect* next();
+    TextRect* next(bool combine_visual_rtl = false);
+    bool reverses_clusters() const { return reverse_visual_clusters; }
     RenderTextPaintIterator(const RenderTextPaintIterator&) = delete;
     RenderTextPaintIterator& operator=(const RenderTextPaintIterator&) = delete;
 };
@@ -4754,7 +4771,8 @@ char* render_text_create_export_segment(const unsigned char* text,
 // borrows (caller owns it; null when the rect paints nothing)
 char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
                                  const FontBox* font, Color color,
-                                 float block_x, float block_y, PaintGlyphRun* run);
+                                 float block_x, float block_y, PaintGlyphRun* run,
+                                 bool reverse_clusters = false, const char** logical_text = nullptr);
 
 // ===== render_vector_path.hpp =====
 struct RasterRenderContext;

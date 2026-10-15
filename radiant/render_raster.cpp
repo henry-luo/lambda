@@ -4,9 +4,9 @@
 #include <algorithm>
 #include <math.h>
 
-ScaleMode render_image_scale_mode(const ViewSpan* view, bool repeating) {
-    CssEnum rendering = view && view->in_line
-        ? view->inl()->image_rendering : CSS_VALUE_AUTO;
+ScaleMode render_image_scale_mode(const DomElement* element, bool repeating) {
+    CssEnum rendering = element && element->in_line
+        ? element->inl()->image_rendering : CSS_VALUE_AUTO;
     if (rendering == CSS_VALUE_PIXELATED) return SCALE_MODE_PIXELATED;
     if (rendering == CSS_VALUE_CRISP_EDGES ||
         rendering == CSS_VALUE_OPTIMIZE_SPEED) return SCALE_MODE_NEAREST;
@@ -119,28 +119,33 @@ static uint32_t raster_area_average(ImageSurface* src, float x0, float y0, float
     return r | (g << 8) | (b << 16) | (a << 24);
 }
 
-static int raster_pixelated_source_index(float intermediate_index, float multiple,
+static double raster_pixelated_multiple(double ratio) {
+    return fmax(1.0, floor(ratio + 0.5));
+}
+
+static int raster_pixelated_source_index(double intermediate_index, double multiple,
                                          float source_origin, float source_extent,
                                          int source_limit) {
-    float source_index = source_origin + floorf(intermediate_index / multiple);
-    float first = std::max(0.0f, floorf(source_origin));
-    float last = std::min((float)(source_limit - 1),
-                          ceilf(source_origin + source_extent) - 1.0f);
-    return (int)std::max(first, std::min(source_index, last)); // INT_CAST_OK: image sample index
+    double source_index = source_origin + floor(intermediate_index / multiple);
+    double first = fmax(0.0, floor(source_origin));
+    double last = fmin((double)(source_limit - 1),
+                       ceil((double)source_origin + source_extent) - 1.0);
+    return (int)fmax(first, fmin(source_index, last)); // INT_CAST_OK: bounded image sample index
 }
 
 static uint32_t raster_pixelated_sample(ImageSurface* src, const Rect* src_rect,
                                         const Rect* dst_rect, float dst_x, float dst_y,
                                         int src_w, int src_h,
-                                        float x_multiple, float y_multiple, bool premultiply = false) {
+                                        double x_multiple, double y_multiple, bool premultiply = false) {
     // Sample the virtual nearest-neighbor integer-multiple image through the
     // shared bilinear mixer, so noninteger final scales blend only at pixel edges.
-    float ix = (dst_x - dst_rect->x + 0.5f) *
-        (src_rect->width * x_multiple / dst_rect->width) - 0.5f;
-    float iy = (dst_y - dst_rect->y + 0.5f) *
-        (src_rect->height * y_multiple / dst_rect->height) - 0.5f;
-    float ix0 = floorf(ix);
-    float iy0 = floorf(iy);
+    // virtual integer-sized images need no allocation or float-sized pixel index.
+    double ix = ((double)dst_x - dst_rect->x + 0.5) / dst_rect->width *
+        src_rect->width * x_multiple - 0.5;
+    double iy = ((double)dst_y - dst_rect->y + 0.5) / dst_rect->height *
+        src_rect->height * y_multiple - 0.5;
+    double ix0 = floor(ix);
+    double iy0 = floor(iy);
     int sx0 = raster_pixelated_source_index(ix0, x_multiple,
         src_rect->x, src_rect->width, src_w);
     int sx1 = raster_pixelated_source_index(ix0 + 1.0f, x_multiple,
@@ -205,8 +210,21 @@ bool render_image_project_pixels(const uint32_t* pixels, int width, int height, 
     source.width = width; source.height = height; source.pitch = stride * 4; source.pixels = (void*)pixels;
     Rect source_rect = {0, 0, (float)width, (float)height};
     Rect sampling_rect = repeated_tile ? *repeated_tile : destination;
-    float multiple_x = fmaxf(1, ceilf(sampling_rect.width / width));
-    float multiple_y = fmaxf(1, ceilf(sampling_rect.height / height));
+    // affine axis-aligned minification has the same pixel footprint as an ordinary CPU blit.
+    float footprint_x = fabsf(inverse.e11 / inverse.e33) * width / sampling_rect.width;
+    float footprint_y = fabsf(inverse.e22 / inverse.e33) * height / sampling_rect.height;
+    bool area_sample = mode == SCALE_MODE_LINEAR && !repeated_tile &&
+        inverse.e12 == 0.0f && inverse.e21 == 0.0f && inverse.e31 == 0.0f && inverse.e32 == 0.0f &&
+        (footprint_x > 1.0f || footprint_y > 1.0f);
+    double x_scale = 1.0, y_scale = 1.0;
+    if (mode == SCALE_MODE_PIXELATED && matrix.e31 == 0.0f &&
+        matrix.e32 == 0.0f && matrix.e33 != 0.0f) {
+        // affine pixelation follows device-space axis lengths, including raster density.
+        x_scale = hypot((double)matrix.e11, matrix.e21) / fabs((double)matrix.e33);
+        y_scale = hypot((double)matrix.e12, matrix.e22) / fabs((double)matrix.e33);
+    }
+    double multiple_x = raster_pixelated_multiple((double)sampling_rect.width / width * x_scale);
+    double multiple_y = raster_pixelated_multiple((double)sampling_rect.height / height * y_scale);
     auto project_rows = [&](int row_begin, int row_end) {
         for (int row = row_begin; row < row_end; row++) {
             for (int column = 0; column < out_w; column++) {
@@ -237,6 +255,9 @@ bool render_image_project_pixels(const uint32_t* pixels, int width, int height, 
                 } else if (mode == SCALE_MODE_PIXELATED) {
                     sample = raster_pixelated_sample(&source, &source_rect, &sampling_rect, u - 0.5f, v - 0.5f,
                         width, height, multiple_x, multiple_y, straight_alpha);
+                } else if (area_sample) {
+                    sample = raster_area_average(&source, sx - footprint_x * 0.5f, sy - footprint_y * 0.5f,
+                        sx + footprint_x * 0.5f, sy + footprint_y * 0.5f, straight_alpha);
                 } else {
                     sample = render_pixel_sample_bilinear((const uint8_t*)pixels, width, height, stride * 4,
                         sx - 0.5f, sy - 0.5f, mode == SCALE_MODE_LINEAR_WRAP, true, straight_alpha);
@@ -313,10 +334,8 @@ void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect
 
     float x_ratio = (float)src_rect->width / dst_rect->width;
     float y_ratio = (float)src_rect->height / dst_rect->height;
-    float pixelated_x_multiple = std::max(1.0f,
-        floorf(dst_rect->width / src_rect->width + 0.5f));
-    float pixelated_y_multiple = std::max(1.0f,
-        floorf(dst_rect->height / src_rect->height + 0.5f));
+    double pixelated_x_multiple = raster_pixelated_multiple((double)dst_rect->width / src_rect->width);
+    double pixelated_y_multiple = raster_pixelated_multiple((double)dst_rect->height / src_rect->height);
     bool downscaling = (x_ratio > 1.5f || y_ratio > 1.5f);
     int left = (int)std::max(clip->left, dst_rect->x);
     int right = (int)std::min(clip->right, dst_rect->x + dst_rect->width);

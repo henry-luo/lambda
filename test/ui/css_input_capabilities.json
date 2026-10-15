@@ -1,0 +1,414 @@
+{
+  "name": "Input capability queries update controls and notify once without a resize",
+  "html": "test/ui/css_input_capabilities.html",
+  "viewport": {
+    "width": 240,
+    "height": 140
+  },
+  "events": [
+    {
+      "type": "input_capabilities",
+      "pointer": "none",
+      "any_pointer": [],
+      "hover": false,
+      "any_hover": false
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#control",
+        "offset_x": 1,
+        "offset_y": 1
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#control",
+        "offset_x": 10,
+        "offset_y": 10
+      },
+      "min_r": 221,
+      "max_r": 221,
+      "min_g": 221,
+      "max_g": 221,
+      "min_b": 221,
+      "max_b": 221
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#control"
+      },
+      "width": 80,
+      "height": 24
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-count",
+      "equals": "0"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-resizes",
+      "equals": "0"
+    },
+    {
+      "type": "input_capabilities",
+      "pointer": "fine",
+      "any_pointer": [
+        "fine"
+      ],
+      "hover": true,
+      "any_hover": true
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#control",
+        "offset_x": 1,
+        "offset_y": 1
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#control",
+        "offset_x": 10,
+        "offset_y": 10
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 128,
+      "max_g": 128,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#control"
+      },
+      "width": 80,
+      "height": 24
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-count",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-matches",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-resizes",
+      "equals": "0"
+    },
+    {
+      "type": "input_capabilities",
+      "pointer": "fine",
+      "any_pointer": [
+        "fine"
+      ],
+      "hover": true,
+      "any_hover": true
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#control",
+        "offset_x": 1,
+        "offset_y": 1
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#control",
+        "offset_x": 10,
+        "offset_y": 10
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 128,
+      "max_g": 128,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#control"
+      },
+      "width": 80,
+      "height": 24
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-count",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-matches",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-resizes",
+      "equals": "0"
+    },
+    {
+      "type": "input_capabilities",
+      "pointer": "coarse",
+      "any_pointer": [
+        "coarse",
+        "fine"
+      ],
+      "hover": false,
+      "any_hover": true
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#control",
+        "offset_x": 1,
+        "offset_y": 1
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#control",
+        "offset_x": 10,
+        "offset_y": 10
+      },
+      "min_r": 221,
+      "max_r": 221,
+      "min_g": 221,
+      "max_g": 221,
+      "min_b": 221,
+      "max_b": 221
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#control"
+      },
+      "width": 160,
+      "height": 48
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-count",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-matches",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-resizes",
+      "equals": "0"
+    },
+    {
+      "type": "input_capabilities",
+      "pointer": "coarse",
+      "any_pointer": [
+        "coarse",
+        "fine"
+      ],
+      "hover": false,
+      "any_hover": true
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#control",
+        "offset_x": 1,
+        "offset_y": 1
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#control",
+        "offset_x": 10,
+        "offset_y": 10
+      },
+      "min_r": 221,
+      "max_r": 221,
+      "min_g": 221,
+      "max_g": 221,
+      "min_b": 221,
+      "max_b": 221
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#control"
+      },
+      "width": 160,
+      "height": 48
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-count",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-matches",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-resizes",
+      "equals": "0"
+    },
+    {
+      "type": "input_capabilities",
+      "pointer": "none",
+      "any_pointer": [],
+      "hover": false,
+      "any_hover": false
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#control",
+        "offset_x": 1,
+        "offset_y": 1
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#control",
+        "offset_x": 10,
+        "offset_y": 10
+      },
+      "min_r": 221,
+      "max_r": 221,
+      "min_g": 221,
+      "max_g": 221,
+      "min_b": 221,
+      "max_b": 221
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#control"
+      },
+      "width": 80,
+      "height": 24
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-count",
+      "equals": "2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-matches",
+      "equals": "false"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#status"
+      },
+      "attribute": "data-resizes",
+      "equals": "0"
+    }
+  ]
+}

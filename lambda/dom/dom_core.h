@@ -163,6 +163,7 @@ Item dom_core_blur(Item n);
 Item dom_core_show_popover(Item n);
 Item dom_core_hide_popover(Item n);
 Item dom_core_show_modal(Item n);
+Item dom_core_close_dialog(Item n, Item value);
 Item dom_core_set_custom_validity(Item n, Item message);
 Item dom_core_set_selection_range(Item n, Item start, Item end, Item dir);
 Item dom_core_set_range_text(Item n, Item replacement, Item start, Item end, Item mode);

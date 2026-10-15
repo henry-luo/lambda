@@ -451,6 +451,10 @@ typedef struct TypeMap : Type {
     ShapeEntry** field_index;  // field_capacity slots (NULL = empty slot)
     uint32_t field_count;  // number of hash slots used (0 = not populated)
     uint32_t field_capacity;  // slots in field_index (0 while it is NULL)
+    // length + 1 certifies the numeric-looking key summary; zero means unknown.
+    // this describes names in the shape, never a receiver or a prototype chain.
+    uint32_t digit_key_length;
+    bool has_digit_key;
     // Optional fixed-slot index used by ordinary transition shapes.
     ShapeEntry** slot_entries;  // NULL if not populated; else array of slot_count pointers
     int slot_count;             // number of slot_entries (0 = not populated)
@@ -963,6 +967,12 @@ static inline int typemap_hash_probe_slot(TypeMap* tm, ShapeEntry* entry) {
 // Uses last-writer-wins: if a name already exists, the slot is overwritten.
 static inline void typemap_hash_insert(TypeMap* tm, ShapeEntry* entry) {
     if (!tm || !entry || !entry->name) return;
+    if (entry->key_kind == NAME_KEY_STRING && entry->name->length &&
+            entry->name->str[0] >= '0' && entry->name->str[0] <= '9') tm->has_digit_key = true;
+    // an append extends a complete summary; skipped writers leave a length mismatch.
+    if (tm->digit_key_length && entry == tm->last && !tm->has_spread &&
+            tm->length == tm->digit_key_length && tm->length < UINT32_MAX)
+        tm->digit_key_length++;
     int slot = typemap_hash_probe_slot(tm, entry);
     // table full — callers fall back to the authoritative shape chain.
     if (slot < 0) return;
@@ -985,10 +995,14 @@ static inline bool typemap_hash_holds_equal(TypeMap* tm, ShapeEntry* entry) {
 
 static inline void typemap_hash_build_in(TypeMap* tm, TypeAlloc alloc) {
     if (!tm) return;
+    tm->digit_key_length = 0;
+    tm->has_digit_key = false;
     typemap_hash_prepare_in(tm, alloc, tm->length);
     FOR_EACH_MAP_FIELD(tm, e) {
         typemap_hash_insert(tm, e);
     }
+    if (!tm->has_spread && tm->length >= 0 && tm->length < UINT32_MAX)
+        tm->digit_key_length = (uint32_t)tm->length + 1;
 }
 
 static inline void typemap_hash_build(TypeMap* tm, Pool* pool) {
@@ -1016,10 +1030,9 @@ static inline bool typemap_hash_is_usable(TypeMap* tm) {
 
 // A1: Lookup a ShapeEntry by name through the hash table.
 // Returns the ShapeEntry or NULL if not found.
-// A6: Uses pointer comparison first (interned strings via name pool share
-// the same char* pointer), falling back to memcmp only on pointer mismatch.
+// a pooled text key can prove equality by NameId; other spellings use the byte fallback.
 static inline ShapeEntry* typemap_hash_lookup_by_hash(TypeMap* tm, const char* key,
-        int key_len, uint32_t key_hash) {
+        int key_len, uint32_t key_hash, NameId name_id = NAME_ID_NONE) {
     if (!tm || !key || key_len < 0) return NULL;
     if (key_hash == 0) key_hash = typemap_name_hash(key, key_len);
     int capacity = typemap_hash_capacity(tm);
@@ -1032,7 +1045,9 @@ static inline ShapeEntry* typemap_hash_lookup_by_hash(TypeMap* tm, const char* k
         uint32_t slot = (idx + (uint32_t)probe) & ((uint32_t)capacity - 1);
         ShapeEntry* e = slots[slot];
         if (!e) return NULL;  // empty slot → not found
-        if (typemap_shape_name_equals_hash(e, key, key_len, key_hash)) {
+        // D3.4.4v4: owned shape copies retain the record id even when their bytes move.
+        if ((name_id != NAME_ID_NONE && e->key_kind == NAME_KEY_STRING && e->name_id == name_id) ||
+                typemap_shape_name_equals_hash(e, key, key_len, key_hash)) {
             return typemap_hash_entry_is_own(tm, e) ? e : NULL;
         }
     }
@@ -1050,7 +1065,8 @@ static inline ShapeEntry* typemap_hash_lookup_key(TypeMap* tm, String* key) {
     if (meta && meta->key_kind != NAME_KEY_STRING)
         return typemap_hash_lookup_by_name_id(tm, meta->name_id, meta->hash);
     // canonical pooled names already carry the shared FNV hash; unpooled text uses the byte fallback.
-    return typemap_hash_lookup_by_hash(tm, key->chars, key->len, meta ? meta->hash : 0);
+    return typemap_hash_lookup_by_hash(tm, key->chars, key->len, meta ? meta->hash : 0,
+        meta ? meta->name_id : NAME_ID_NONE);
 }
 
 static inline ShapeEntry* typemap_hash_lookup_idless(TypeMap* tm,

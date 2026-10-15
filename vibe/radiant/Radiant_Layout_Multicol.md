@@ -486,3 +486,16 @@ The redesign is succeeding when:
 Proceed with a real multicol fragmentation architecture, not incremental coordinate patching.
 
 The current implementation was a reasonable bootstrap, but the WPT result shows it has reached its ceiling. The remaining failures are exactly the class of problems that fragmentainers, column groups, and fragment-aware containing block resolution are meant to solve.
+
+## MC1 — Preserve forced-break line endpoints during projection (2026-10-15)
+
+CSS 2.1 §10.8.1 places a forced break on the line it terminates. When its
+inline position equals a fragment's positive upper edge, normalization must
+retain that edge rather than wrap it to zero. Nested projection then preserves
+that local cursor; it must not infer an extra column from half-leading. In
+`multicol-nested-015`, the original 10px cursor became zero and a 0.5px leading
+test happened to compensate until FT-19 corrected font metrics. This change
+uses the existing closed-end fragment remainder calculation and removes that
+font-dependent compensation. It changes no ownership or module boundary
+(D4.5.1v4, D4.1.4v5). Qualification and remaining limits follow in the CSS
+implementation ledger.

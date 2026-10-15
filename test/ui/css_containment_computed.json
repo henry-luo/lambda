@@ -1,0 +1,23 @@
+{
+  "name": "Intrinsic containment computed reads retain fallback modes and causal owner changes",
+  "html": "test/ui/css_containment_computed.html",
+  "viewport": {"width": 320, "height": 240},
+  "events": [
+    {"type":"click","target":{"selector":"#check"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-owner","equals":"auto 30px auto 40px|auto 30px|auto 40px|auto 30px|auto 40px"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-inherited","equals":"auto 30px auto 40px|auto 30px|auto 40px|auto 30px|auto 40px"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-logical","equals":"80px 40px|80px|40px|80px|40px"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-none","equals":"auto none|auto none|auto none|auto none|auto none"},
+    {"type":"assert_rect","target":{"selector":"#inherited"},"width":30,"height":40},
+    {"type":"assert_rect","target":{"selector":"#auto-empty"},"width":0,"height":0},
+    {"type":"click","target":{"selector":"#change"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-dirty-owner","equals":"auto 60px auto 80px|auto 60px|auto 80px|auto 60px|auto 80px"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-dirty-inherited","equals":"auto 60px auto 80px|auto 60px|auto 80px|auto 60px|auto 80px"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-dirty-logical","equals":"80px 60px|80px|60px|60px|80px"},
+    {"type":"assert_rect","target":{"selector":"#inherited"},"width":60,"height":80},
+    {"type":"click","target":{"selector":"#reset"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-reset-inherited","equals":"none|none|none|none|none"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-reset-logical","equals":"none|none|none|none|none"},
+    {"type":"assert_rect","target":{"selector":"#inherited"},"width":0,"height":0}
+  ]
+}

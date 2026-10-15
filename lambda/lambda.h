@@ -2729,7 +2729,8 @@ extern "C" {
     // compiler-proven ordinary string keys bypass Symbol/private-name admission.
     bool map_shape_set_text(Map* map, String* key, Item value);
     // field must be resolved against the current shape; NULL means an absent own field.
-    bool map_shape_set_resolved(Map* map, String* key, struct ShapeEntry* field, Item value);
+    bool map_shape_set_resolved(Map* map, String* key, struct ShapeEntry* field, Item value,
+        bool preserve_storage);
     bool map_shape_delete(Map* map, String* key);
     bool map_shape_delete_text(Map* map, String* key);
     bool map_shape_delete_resolved(Map* map, struct ShapeEntry* field);

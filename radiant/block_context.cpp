@@ -59,6 +59,7 @@ static bool float_intersects_y_range(FloatBox* box, float y_top, float y_bottom,
 void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool) {
     // Initialize layout state
     ctx->content_width = 0;
+    ctx->paged_reference_width = 0.0f;
     ctx->content_height = 0;
     ctx->advance_y = 0;
     ctx->max_width = 0;

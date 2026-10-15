@@ -302,7 +302,8 @@ bool layout_measure_script_run(LayoutContext* lycon,
                              size_t source_offset = 0);
 bool layout_measure_inline_text_context(LayoutContext* lycon, DomNode* text_node,
     const unsigned char* start, size_t length, bool cursive, float* width,
-    const unsigned char* text_start = nullptr, const unsigned char* text_end = nullptr);
+    const unsigned char* text_start = nullptr, const unsigned char* text_end = nullptr,
+    bool* following_context = nullptr);
 bool layout_measure_shaping_text(LayoutContext* lycon, const char* text, size_t length,
     size_t range_start, size_t range_length, float* width);
 // Intrinsic measurements may temporarily replace the active font and allocate
@@ -917,6 +918,14 @@ inline BoxEdges layout_boundary_border_edges(const BoundaryProp* bound) {
 // border-box coordinates and adjusted here to the authored overflow clip edge.
 // Paint, the selection overlay and hit-testing share it so they clip alike. False
 // when the block does not clip its content.
+inline bool layout_block_clips_overflow_axis(const ViewBlock* block, bool horizontal) {
+    if (!block) return false;
+    if (block->blk && block->block()->contain_paint) return true;
+    if (!block->scroller || !block->scroll()->has_clip) return false;
+    return (horizontal ? block->scroll()->overflow_x : block->scroll()->overflow_y)
+        != CSS_VALUE_VISIBLE;
+}
+
 inline bool layout_block_overflow_clip(const ViewBlock* block, Bound* out) {
     if (!block) return false;
     bool paint_containment = block->blk && block->block()->contain_paint;
@@ -1612,10 +1621,16 @@ inline bool layout_uses_explicit_baseline_source(const ViewBlock* block) {
     return baseline_source == CSS_VALUE_FIRST || baseline_source == CSS_VALUE_LAST;
 }
 
+inline bool layout_image_uses_alt_text_baseline(const ViewBlock* block) {
+    return block && block->tag() == MARKUP_NAME_IMG && block->embed &&
+        block->embedp()->broken_alt_fallback;
+}
+
 inline bool layout_exports_content_baseline(const ViewBlock* block,
                                             bool overflow_visible) {
     if (!block) return false;
-    if (overflow_visible || layout_uses_explicit_baseline_source(block)) {
+    if (layout_image_uses_alt_text_baseline(block) || overflow_visible ||
+        layout_uses_explicit_baseline_source(block)) {
         return true;
     }
     // CSS Align 3 §9.1 gives a scrolling block container an end-margin
@@ -2210,12 +2225,16 @@ typedef struct FloatAvailableSpace {
 // tier-3: layout-transient, valid within pass
 typedef struct BlockContext {
     float content_width;
+    float paged_reference_width; // the fragmentainer width represented by this context's inline geometry
     float content_height;
     float advance_y;
     float max_width;
     float max_height;
     float line_height;
     bool  line_height_is_normal;
+    // inline descendants change active leading, not the block strut's leading.
+    float strut_line_height;
+    bool strut_line_height_is_normal;
     float init_ascender;
     float init_descender;
     float lead_y;
@@ -2473,6 +2492,7 @@ typedef struct Linebox {
     uint32_t prev_text_spacing_codepoint = 0; // previous character for CSS text-spacing pairs
     uint32_t prev_text_autospace_codepoint = 0; // previous typographic unit for CSS text-autospace
     lam::Up<FontProp> prev_kerning_font_style = nullptr;
+    bool prev_kerning_has_following_context = false; // the prior advance already owns its outgoing pair
     float max_top_bottom_height = 0; // CSS 2.1 §10.8.1: max height of vertical-align:top/bottom elements
                                      // (used in second pass to expand line box if needed)
     float max_top_height = 0;        // CSS 2.1 §10.8.1: max height of vertical-align:top elements
@@ -3142,8 +3162,15 @@ inline float flex_line_max_axis_extent(FlexLineInfo* line, LayoutAxis axis) {
     return extent;
 }
 
-inline bool has_flex_item_prop(ViewElement* item) {
+inline bool has_flex_item_prop(const DomElement* item) {
     return item && item->flex_item();
+}
+
+inline int layout_item_order(const DomElement* item) {
+    if (!item) return 0;
+    if (const GridItemProp* grid = item->grid_item()) return grid->order;
+    const FlexItemProp* flex = item->flex_item();
+    return flex ? flex->order : 0;
 }
 
 inline int flex_item_resolved_align_self(ViewElement* item, int align_items) {
@@ -3206,11 +3233,11 @@ inline bool is_main_axis_horizontal(FlexProp* flex) {
     return layout_axis_is_horizontal(flex_main_axis_from_props(flex));
 }
 
-inline float get_item_flex_grow(ViewElement* item) {
+inline float get_item_flex_grow(const DomElement* item) {
     return has_flex_item_prop(item) ? item->fi->flex_grow : 0.0f;
 }
 
-inline float get_item_flex_shrink(ViewElement* item) {
+inline float get_item_flex_shrink(const DomElement* item) {
     return has_flex_item_prop(item) ? item->fi->flex_shrink : 1.0f;
 }
 
@@ -4272,6 +4299,15 @@ void layout_detach_first_letter_pseudo_content_for_layout_reset(struct DomElemen
 void layout_detach_materialized_pseudo_content_for_layout_reset(struct DomElement* root);
 void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
                                                 DomElement* pseudo_element, bool apply_counters = true);
+// a generated box whose `content` the counter scope evaluates: ::before, ::after
+// and the page flow's footnote call and marker; reports its pseudo-element and slot
+bool layout_generated_pseudo(const DomElement* element, uint8_t* pseudo, PseudoStyleKind* kind);
+// the page flow's footnote call (in the note's place among its parent's children,
+// the note staying its parent) or marker (the note's first child), CSS GCPM 3 §2.3
+DomElement* layout_footnote_pseudo(LayoutContext* lycon, DomElement* note, bool call);
+// generated text shown inside `owner` (a page document's folio): a synthetic
+// "::generated" first child holding `text`, refreshed in place
+DomElement* layout_generated_text(DomElement* owner, const char* text);
 // Cross-origin document navigation needs its own host turn.  The synchronous
 // layout paths use this guard to retain the iframe's replaced-element box.
 DomDocument* layout_load_iframe_src_doc(LayoutContext* lycon, const char* src,
@@ -4344,7 +4380,9 @@ inline LayoutFontSizeResult layout_resolve_font_size_value(
     } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
         CssEnum keyword = value->data.keyword;
         result.from_medium = true;
-        if (keyword == CSS_VALUE_INHERIT) {
+        // font-size is inherited, so unset inherits (CSS Cascade 4 §7.3.3); generated
+        // pseudo-elements reach this with the keyword still unresolved
+        if (keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET) {
             result.value = parent_font_size;
             result.from_medium = parent_from_medium;
         } else if (keyword == CSS_VALUE_LARGER || keyword == CSS_VALUE_SMALLER) {
@@ -4418,6 +4456,7 @@ void layout_place_bidi_static_inline(ViewBlock* block, float line_x, int level);
 int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir);
 int layout_find_last_strong_direction(DomNode* node, bool skip_explicit_dir);
 CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback);
+bool layout_text_run_has_uniform_rtl_order(const unsigned char* text, size_t length);
 CssEnum layout_resolve_line_base_direction(LayoutContext* lycon);
 void place_rtl_initial_letter_line(LayoutContext* lycon);
 void adjust_text_bounds(ViewText* text);
@@ -4468,6 +4507,9 @@ void paged_block_after(LayoutContext* lycon, ViewBlock* block);
 // a line that crosses the fragmentainer end moves to the next one (with its
 // orphans); the hook adjusts lycon->block.advance_y when it shifts the line
 void paged_line_commit(LayoutContext* lycon, float used_line_height);
+void paged_line_start(LayoutContext* lycon, ViewBlock* block);
+const CssValue* paged_resolve_css_value(LayoutContext* lycon, DomElement* element,
+    const CssValue* value, bool* handled);
 // after a post-hoc margin adjustment moved a finished block by delta: the
 // content after the first strut inside it is re-anchored to its page top
 void paged_block_moved(LayoutContext* lycon, ViewBlock* block, float delta);
@@ -4595,6 +4637,12 @@ struct LayoutLogicalSides {
     CssBoxSide block_pair_start;
     CssBoxSide block_pair_end;
 };
+
+CssDeclaration* layout_cascaded_style_declaration(StyleTree* style, CssPropertyCode property,
+    const LayoutLogicalSides& sides);
+bool layout_compute_scroll_keyword_axes(LayoutContext* context, StyleTree* style,
+    bool vertical, bool overscroll, CssEnum inherited_x, CssEnum inherited_y,
+    CssEnum* x, CssEnum* y);
 
 struct LayoutLogicalProperty {
     bool valid;
@@ -4959,6 +5007,8 @@ void line_init(LayoutContext* lycon, float left, float right);
 void line_reset(LayoutContext* lycon);
 float layout_apply_line_height_leading(float line_height,
                                        float* ascender, float* descender);
+float layout_inline_font_metrics(FontHandle* font, float line_height,
+                                bool normal, float* ascender, float* descender);
 float vertical_align_baseline_shift(LayoutContext* lycon, CssEnum align,
                                     float valign_offset = 0);
 float layout_apply_baseline_shift(LayoutContext* lycon,
@@ -5114,6 +5164,8 @@ void recompute_span_bounding_box_after_line_layout(
 void layout_apply_simple_ruby_column_geometry(ViewSpan* ruby);
 bool ruby_has_text_box_trim_ancestor(const ViewSpan* ruby, uint8_t trim);
 bool inline_span_has_multiple_line_fragments(ViewSpan* span);
+typedef bool (*LayoutInlineFragmentFn)(void*, RdtLogicalRect, bool first, bool last, float offset, float extent);
+bool layout_inline_visit_fragments(ViewSpan* span, LayoutInlineFragmentFn visitor, void* context);
 bool layout_inline_span_has_in_flow_block_child(ViewSpan* span,
                                                 bool include_inline_table = false);
 bool layout_inline_child_is_block_split(DomNode* node);

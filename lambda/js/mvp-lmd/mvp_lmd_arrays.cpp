@@ -50,13 +50,16 @@ extern "C" int64_t mvp_lmd_array_indices_use_own_storage(Item owner) {
             ShapeEntry* length = typemap_hash_lookup(shape, "length", 6);
             if (length && (length->flags & JSPD_NON_WRITABLE)) return false;
         }
-        if (shape) FOR_EACH_MAP_FIELD(shape, field) {
+        // D8.4.1v2: the field index summarizes names only; links and policy stay live.
+        if (shape && shape->digit_key_length && (int64_t)shape->digit_key_length == shape->length + 1) {
+            if (shape->has_digit_key) return false;
+        } else if (shape) FOR_EACH_MAP_FIELD(shape, field) {
             // a digit prefix conservatively rejects every canonical array index without interning keys.
             if (field->key_kind == NAME_KEY_STRING && field->name && field->name->length &&
                     field->name->str[0] >= '0' && field->name->str[0] <= '9') return false;
         }
         if (!library && !mvp_lmd_class_record(owner)) return true;
-        owner = mvp_lmd_get_prototype(owner);
+        owner = mvp_lmd_get_prototype_with_library(owner, library);
         if (owner.item == ITEM_NULL) return true;
         if (item_is_error(owner)) return false;
     }
@@ -79,7 +82,9 @@ Item mvp_lmd_sequence_length(Item source) {
     // LengthOfArrayLike uses ToLength; only actual Array allocation is limited to uint32.
     return Item{.item = i2it(isnan(length) || length < 0 ? 0 : (int64_t)fmin(trunc(length), 9007199254740991.0))};
 }
-Item mvp_lmd_array_species_create(Item source, int64_t length) {
+Item mvp_lmd_array_species_create(Item source, int64_t length, bool* fresh) {
+    // an intrinsic result is private until return; user species can publish or reuse their result.
+    if (fresh) *fresh = true;
     MvpLmdLibraryState* state = mvp_lmd_program_library();
     if (!state || !state->mutable_prototypes) return mvp_lmd_array_new(length);
     if (get_type_id(source) == LMD_TYPE_ARRAY &&
@@ -117,6 +122,7 @@ Item mvp_lmd_array_species_create(Item source, int64_t length) {
         if (constructor.get().item != ITEM_JS_UNDEFINED && constructor.get().item != state->values[LMD_LIBRARY_ARRAY].item) {
             if (!mvp_lmd_is_constructor(constructor.get())) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
             Item argument = {.item = i2it(length)};
+            if (fresh) *fresh = false;
             return mvp_lmd_class_invoke(constructor.get(), Item{.item = ITEM_JS_UNDEFINED}, &argument, 1, constructor.get());
         }
     }
@@ -147,7 +153,8 @@ extern "C" Item mvp_lmd_array_visit(Item owner, Item* args, int64_t count, int64
         Item mapping[] = {callback.get(), self.get()};
         return mvp_lmd_array_flatten(source.get(), 1, length, mapping);
     }
-    if (map || filter) output.set(mvp_lmd_array_species_create(source.get(), map ? length : 0));
+    bool fresh = false;
+    if (map || filter) output.set(mvp_lmd_array_species_create(source.get(), map ? length : 0, &fresh));
     if (item_is_error(output.get())) return output.get();
     bool initialized = count > 1;
     uint64_t value_home = 0, result_home = 0;
@@ -174,7 +181,7 @@ extern "C" Item mvp_lmd_array_visit(Item owner, Item* args, int64_t count, int64
         if (map || (filter && mvp_lmd_truthy(mapped.get()))) {
             // species may return an ordinary object or a proxy; create an own data property.
             Item stored = mvp_lmd_array_index_property(output.get(), map ? index : destination++,
-                map ? mapped.get() : value.get(), LMD_PROP_CREATE_DATA);
+                map ? mapped.get() : value.get(), LMD_PROP_CREATE_DATA | (fresh ? LMD_PROP_OWN_STORAGE : 0));
             if (item_is_error(stored)) return stored;
         }
     }
@@ -193,6 +200,7 @@ extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_
     if (!roots.valid()) return ItemError;
     // methods allocate an output only when their result needs one.
     Rooted<Item> target(roots, owner), result(roots, ItemNull), current(roots, ItemNull);
+    bool fresh = false;
     if (!mvp_lmd_is_object(target.get())) target.set(mvp_lmd_box_primitive(target.get()));
     if (item_is_error(target.get())) return target.get();
     if (method == LMD_METHOD_ARRAY_STRING) {
@@ -251,7 +259,7 @@ extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_
             if (i) last = relative; else first = relative;
         }
         if (method == LMD_METHOD_SLICE) {
-            result.set(mvp_lmd_array_species_create(target.get(), last > first ? last - first : 0));
+            result.set(mvp_lmd_array_species_create(target.get(), last > first ? last - first : 0, &fresh));
             if (item_is_error(result.get())) return result.get();
         }
         // only writes need a chain proof; reads use the existing present-element fast path.
@@ -267,7 +275,8 @@ extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_
             if (item_is_error(current.get())) return current.get();
             if (current.get().item == ITEM_JS_DELETED_SENTINEL) continue;
             if (method == LMD_METHOD_SLICE) {
-                Item stored = mvp_lmd_array_index_property(result.get(), i - first, current.get(), LMD_PROP_CREATE_DATA);
+                Item stored = mvp_lmd_array_index_property(result.get(), i - first, current.get(),
+                    LMD_PROP_CREATE_DATA | (fresh ? LMD_PROP_OWN_STORAGE : 0));
                 if (item_is_error(stored)) return stored;
             } else {
                 Item sought = count ? args[0] : Item{.item = ITEM_JS_UNDEFINED};
@@ -325,7 +334,8 @@ extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_
             lambda_item_uses_scalar_home(value) ? push_d(it2d(value)) : value;
     }
     if (method == LMD_METHOD_CONCAT || method == LMD_METHOD_TO_REVERSED) {
-        result.set(method == LMD_METHOD_CONCAT ? mvp_lmd_array_species_create(target.get(), 0) : mvp_lmd_array_new(length));
+        fresh = method == LMD_METHOD_TO_REVERSED;
+        result.set(method == LMD_METHOD_CONCAT ? mvp_lmd_array_species_create(target.get(), 0, &fresh) : mvp_lmd_array_new(length));
         if (item_is_error(result.get())) return result.get();
         if (method == LMD_METHOD_TO_REVERSED) count = 0;
         int64_t destination = 0;
@@ -354,13 +364,15 @@ extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_
                 if (method == LMD_METHOD_TO_REVERSED && value.item == ITEM_JS_DELETED_SENTINEL)
                     value.item = ITEM_JS_UNDEFINED;
                 Item stored = value.item == ITEM_JS_DELETED_SENTINEL ? ItemNull :
-                    mvp_lmd_array_index_property(result.get(), destination, value, LMD_PROP_CREATE_DATA);
+                    mvp_lmd_array_index_property(result.get(), destination, value,
+                        LMD_PROP_CREATE_DATA | (fresh ? LMD_PROP_OWN_STORAGE : 0));
                 if (item_is_error(stored)) return stored;
                 destination++;
             }
         }
         if (method == LMD_METHOD_CONCAT) {
-            Item resized = mvp_lmd_array_index_property(result.get(), -1, Item{.item = i2it(destination)}, LMD_PROP_SET | LMD_PROP_STRICT);
+            Item resized = mvp_lmd_array_index_property(result.get(), -1, Item{.item = i2it(destination)},
+                LMD_PROP_SET | LMD_PROP_STRICT | (fresh ? LMD_PROP_OWN_STORAGE : 0));
             if (item_is_error(resized)) return resized;
         }
         return result.get();
@@ -383,9 +395,10 @@ extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_
     }
     if (inserted > 9007199254740991LL - (length - removed)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
     if (method == LMD_METHOD_SPLICE) {
-        result.set(mvp_lmd_array_species_create(target.get(), removed));
+        result.set(mvp_lmd_array_species_create(target.get(), removed, &fresh));
         if (item_is_error(result.get())) return result.get();
     } else if (method == LMD_METHOD_SHIFT && removed) {
+        fresh = true;
         result.set(mvp_lmd_array_new(removed));
         if (item_is_error(result.get())) return result.get();
     }
@@ -396,11 +409,12 @@ extern "C" Item mvp_lmd_array_edit(Item owner, Item* args, int64_t count, int64_
             method == LMD_METHOD_SHIFT ? LMD_PROP_GET : LMD_PROP_PRESENT);
         if (item_is_error(value)) return value;
         Item stored = value.item == ITEM_JS_DELETED_SENTINEL ? ItemNull :
-            mvp_lmd_array_index_property(result.get(), i, value, LMD_PROP_CREATE_DATA);
+            mvp_lmd_array_index_property(result.get(), i, value, LMD_PROP_CREATE_DATA | (fresh ? LMD_PROP_OWN_STORAGE : 0));
         if (item_is_error(stored)) return stored;
     }
     if (method == LMD_METHOD_SPLICE) {
-        Item resized = mvp_lmd_array_index_property(result.get(), -1, Item{.item = i2it(removed)}, LMD_PROP_SET | LMD_PROP_STRICT);
+        Item resized = mvp_lmd_array_index_property(result.get(), -1, Item{.item = i2it(removed)},
+            LMD_PROP_SET | LMD_PROP_STRICT | (fresh ? LMD_PROP_OWN_STORAGE : 0));
         if (item_is_error(resized)) return resized;
     }
     if (inserted > removed) {

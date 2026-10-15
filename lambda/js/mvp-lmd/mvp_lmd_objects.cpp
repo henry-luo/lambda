@@ -123,12 +123,13 @@ extern "C" Item mvp_lmd_object_new(TypeMap* shape, int64_t collection) {
     map->index = hashmap_new(sizeof(MapBucket), 0, 0, 0, bucket_hash, bucket_compare, NULL, NULL);
     return map->index ? Item{.map = map} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
-Map* mvp_lmd_property_map(Item owner, bool writing) {
+Map* mvp_lmd_property_map(Item owner, bool writing, bool numeric_attributes) {
     if (get_type_id(owner) == LMD_TYPE_VMAP && js_promise_is(owner)) {
         Item storage = js_promise_property_storage(owner, writing);
         return get_type_id(storage) == LMD_TYPE_MAP ? storage.map : NULL;
     }
-    if (writing && (get_type_id(owner) == LMD_TYPE_MAP || get_type_id(owner) == LMD_TYPE_ARRAY)) {
+    if (writing && (get_type_id(owner) == LMD_TYPE_MAP || get_type_id(owner) == LMD_TYPE_ARRAY ||
+            get_type_id(owner) == LMD_TYPE_ARRAY_NUM)) {
         TypeMap* shape = (TypeMap*)owner.map->type;
         // D3.2.4v4: guest descriptor operations cannot rewrite a foreign declared prefix.
         if (shape && (shape->is_trusted_contract || shape->nominal) && (!shape->nominal ||
@@ -140,7 +141,10 @@ Map* mvp_lmd_property_map(Item owner, bool writing) {
         return cls ? mvp_lmd_class_values(cls)[2].map : NULL;
     }
     if (get_type_id(owner) == LMD_TYPE_ARRAY) return js_array_has_props(owner.array) ? js_array_props(owner.array) : (Map*)owner.array;
-    if (get_type_id(owner) != LMD_TYPE_MAP) return NULL;
+    if (get_type_id(owner) != LMD_TYPE_MAP) {
+        // only raw named reads/writes use this face; reflection still requires full typed storage.
+        return numeric_attributes && get_type_id(owner) == LMD_TYPE_ARRAY_NUM ? owner.map : NULL;
+    }
     Map* map = owner.map;
     TypeMap* type = (TypeMap*)map->type;
     return type && type->nominal && !type->js_meta &&
@@ -341,7 +345,7 @@ Item mvp_lmd_array_property(Item owner, Item name, Item value, int64_t operation
         return item_is_error(status) ? status : assignment_value();
     }
     if (!map->type) map->type = type_tree_map_root(runtime_shape_tree());
-    if (!map_shape_set_resolved(map, key.get().get_string(), field, argument.get())) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    if (!map_shape_set_resolved(map, key.get().get_string(), field, argument.get(), false)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     if (index >= object.get().array->length) object.get().array->length = index + 1;
     return lambda_item_uses_scalar_home(argument.get()) ? push_d(it2d(argument.get())) : argument.get();
 }
@@ -365,6 +369,11 @@ extern "C" Item mvp_lmd_array_index_property(Item owner, int64_t index, Item val
                 return op == LMD_PROP_GET ? Item{.item = ITEM_JS_UNDEFINED} : element;
             }
         } else {
+            if (own_storage && op == LMD_PROP_CREATE_DATA && index >= 0) {
+                // intrinsic result arrays have no exposed aliases or indexed descriptors.
+                Item stored = mvp_lmd_array_store(owner, (uint32_t)index, value);
+                return item_is_error(stored) ? stored : Item{.item = ITEM_TRUE};
+            }
             MvpLmdLibraryState* state = own_storage ? NULL : mvp_lmd_program_library();
             bool fixed_prototypes = !state || !state->mutable_prototypes;
             if (op == LMD_PROP_SET && index >= 0 && (fixed_prototypes ||
@@ -422,13 +431,13 @@ extern "C" Item mvp_lmd_property_get(Item owner, Item name, int64_t callee) {
         if (method) return callee ? Item{.item = mvp_lmd_method_token(method)} : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
         return tid == LMD_TYPE_ARRAY ? Item{.item = ITEM_JS_UNDEFINED} : mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     }
-    Map* map = mvp_lmd_property_map(owner);
+    Map* map = mvp_lmd_property_map(owner, false, true);
     if (!map) return mvp_lmd_fail(get_type_id(owner) == LMD_TYPE_NULL ||
         get_type_id(owner) == LMD_TYPE_UNDEFINED ? LMD_MVP_TYPE : LMD_MVP_CAPABILITY, 0);
     String* key = name.get_string();
     ShapeEntry* field = own_field(map, key);
     if (field) return field->flags & JSPD_IS_ACCESSOR ? mvp_lmd_accessor_call(owner, field, ItemNull, LMD_PROP_GET) : map_shape_field_to_item(map->data, field);
-    if (map->map_kind == MAP_KIND_ORDERED) {
+    if (tid == LMD_TYPE_MAP && map->map_kind == MAP_KIND_ORDERED) {
         if (text_is(key, "size")) return {.item = i2it(((OrderedMap*)map)->size)};
         // library collections have actual prototype functions; Set must not acquire Map-only methods.
         if (mvp_lmd_class_record(owner)) return Item{.item = ITEM_JS_UNDEFINED};
@@ -444,22 +453,23 @@ extern "C" Item mvp_lmd_property_get(Item owner, Item name, int64_t callee) {
 }
 extern "C" Item mvp_lmd_property_set(Item owner, Item name, Item value) {
     // audited MIR callers retain all arguments and scalar homes across this non-reentrant helper.
-    Map* map = mvp_lmd_property_map(owner, true);
+    Map* map = mvp_lmd_property_map(owner, true, true);
     if (!map) return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
-    if (get_type_id(owner) == LMD_TYPE_ARRAY && !map->type) {
+    TypeId tid = get_type_id(owner);
+    if ((tid == LMD_TYPE_ARRAY || tid == LMD_TYPE_ARRAY_NUM) && !map->type) {
         // D2.6.6v3: the existing array attribute face owns and traces these packed fields.
         Input* tree = runtime_shape_tree();
         map->type = tree ? type_tree_map_root(tree) : NULL;
         if (!map->type) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     }
     ShapeEntry* field = own_field(map, name.get_string());
-    if (map->map_kind == MAP_KIND_ORDERED && !field &&
+    if (tid == LMD_TYPE_MAP && map->map_kind == MAP_KIND_ORDERED && !field &&
             (text_is(name.get_string(), "size") || (!mvp_lmd_class_record(owner) && mvp_lmd_builtin_method(name.get_string()))))
         return mvp_lmd_fail(LMD_MVP_CAPABILITY, 0);
     if (field && (field->flags & (JSPD_IS_ACCESSOR | JSPD_NON_WRITABLE)))
         return field->flags & JSPD_IS_ACCESSOR ? mvp_lmd_accessor_call(owner, field, value, LMD_PROP_SET) : value;
     // descriptor admission already resolved this immutable field; reuse it for the physical write.
-    return map_shape_set_resolved(map, name.get_string(), field, value) ? value : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    return map_shape_set_resolved(map, name.get_string(), field, value, false) ? value : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
 }
 extern "C" Item mvp_lmd_property_delete(Item owner, Item name) {
     Map* face = mvp_lmd_property_map(owner, true);
@@ -557,7 +567,7 @@ extern "C" Item mvp_lmd_private_element(Item owner, Item key, Item input, int64_
     }
     if (operation == LMD_PRIVATE_GET) return map_shape_field_to_item(map->data, field);
     if (field && (field->flags & JSPD_NON_WRITABLE)) return mvp_lmd_fail(LMD_MVP_TYPE, 0);
-    if (!map_shape_set_resolved(map, name.get().get_string(), field, value.get())) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
+    if (!map_shape_set_resolved(map, name.get().get_string(), field, value.get(), false)) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     if (operation == LMD_PRIVATE_METHOD) {
         field = own_field(map, name.get().get_string());
         // the descriptor is shared immutable shape metadata; use its existing transition kernel.
@@ -789,7 +799,7 @@ Item mvp_lmd_define_own_property(Item owner, Item name, const JsPropertyDescript
     }
     if (present[2] || !old || conversion) {
         // A fresh Array acquires its attribute face through the shared property writer.
-        bool stored = map->type ? map_shape_set_resolved(map, key.get().get_string(), old, value) :
+        bool stored = map->type ? map_shape_set_resolved(map, key.get().get_string(), old, value, true) :
             !item_is_error(mvp_lmd_property_set(object.get(), key.get(), value));
         if (!stored) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
         map = mvp_lmd_property_map(object.get()); old = own_field(map, key.get().get_string());
@@ -961,7 +971,7 @@ Item mvp_lmd_set_completion(Item owner, Item name, Item value, Item receiver, Mv
                     mvp_lmd_cache_property(cache, (TypeMap*)map->type, field, ItemNull, true);
             }
             // an existing own data slot needs no prototype/extensibility walk or descriptor construction.
-            return map_shape_set_resolved(map, name.get_string(), field, value)
+            return map_shape_set_resolved(map, name.get_string(), field, value, true)
                 ? Item{.item = ITEM_TRUE} : mvp_lmd_fail(LMD_MVP_MEMORY, 0);
         }
     }
@@ -1317,7 +1327,7 @@ static bool for_in_own_keys_suffice(Item owner) {
         }
         if (!library && !mvp_lmd_class_record(owner)) return true;
         // ordinary map/array prototype lookup neither allocates nor executes guest code.
-        owner = mvp_lmd_get_prototype(owner);
+        owner = mvp_lmd_get_prototype_with_library(owner, library);
         if (owner.item == ITEM_NULL) return true;
         if (item_is_error(owner)) return false;
     }
@@ -1414,7 +1424,9 @@ extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
     ProjectionField* fields = capacity ? (ProjectionField*)pool_calloc(context->pool, capacity * sizeof(ProjectionField)) : NULL;
     if (capacity && !fields) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);
     int64_t count = 0;
-    bool callbacks = indexed || typed || arguments;
+    // keys-only projection never invokes getters; its own-descriptor snapshot stays valid across GC.
+    bool reads_values = projection == 1 || projection == 2;
+    bool callbacks = reads_values && (indexed || typed || arguments);
     if (indexed || typed) {
         // descriptor entries replace storage entries in the ordered own-key list.
         for (int64_t i = 0; i < dense_count; i++) {
@@ -1432,7 +1444,7 @@ extern "C" Item mvp_lmd_object_project(Item owner, int64_t projection) {
         FOR_EACH_MAP_FIELD(type, field) {
             if (field->key_kind == NAME_KEY_PRIVATE || (field->key_kind != NAME_KEY_STRING && projection != 4 && projection != 5) ||
                     ((projection == 0 || projection == 4) && (field->flags & JSPD_NON_ENUMERABLE))) continue;
-            callbacks |= (field->flags & JSPD_IS_ACCESSOR) != 0;
+            callbacks |= reads_values && (field->flags & JSPD_IS_ACCESSOR) != 0;
             NameRef name = field->name_id ? name_pool_resolve_id(context->name_pool, field->name_id) :
                 heap_create_name(field->name->str, field->name->length);
             if (!name) return mvp_lmd_fail(LMD_MVP_MEMORY, 0);

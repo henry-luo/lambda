@@ -1,0 +1,37 @@
+<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;background:white}button{height:24px}.outer{display:grid;width:120px;grid-template-columns:120px}
+.host{display:flex;width:120px;height:20px;font-size:30px;flex:calc(1em / 10px) 2 var(--basis)}
+.red,.blue{min-width:0;height:20px}.red{font-size:5px;background:red;flex:inherit}.blue{background:blue;flex:1 1 0%}
+</style><button id="check">Check</button><button id="change">Fonts</button><button id="invalid">Invalid</button><button id="zero">Zero</button><button id="restore">Restore</button><button id="raw">Font only</button><output id="report"></output>
+<div class="outer"><div class="host" id="lengthHost" style="--basis:2em"><div class="red" id="lengthRed"></div><div class="blue"></div></div></div>
+<div class="outer"><div class="host" id="percentHost" style="--basis:calc(25%)"><div class="red" id="percentRed"></div><div class="blue"></div></div></div>
+<script>(function(){
+var names=['length','percent'];
+function record(){
+  var values=[];
+  for(var i=0;i<names.length;i++){
+    var parent=getComputedStyle(document.getElementById(names[i]+'Host'));
+    var child=getComputedStyle(document.getElementById(names[i]+'Red'));
+    values.push(parent.flexGrow+'|'+parent.flexShrink+'|'+parent.flexBasis+'|'+child.flexBasis);
+  }
+  for(var j=0;j<names.length;j++)document.getElementById('report').setAttribute('data-'+names[j],values[j]);
+}
+function bases(a,b){
+  document.getElementById('lengthHost').style.setProperty('--basis',a);
+  document.getElementById('percentHost').style.setProperty('--basis',b);
+  record();
+}
+document.getElementById('check').onclick=record;
+document.getElementById('change').onclick=function(){
+  document.getElementById('lengthHost').style.fontSize='40px';
+  document.getElementById('percentHost').style.fontSize='40px';
+  record();
+};
+document.getElementById('invalid').onclick=function(){bases('garbage','garbage');};
+document.getElementById('zero').onclick=function(){bases('calc(-2px)','calc(-2px)');};
+document.getElementById('restore').onclick=function(){bases('2em','calc(25%)');};
+document.getElementById('raw').onclick=function(){
+  document.getElementById('lengthHost').style.fontSize='10px';
+  document.getElementById('percentHost').style.fontSize='10px';
+};
+})();</script>

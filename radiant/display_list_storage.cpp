@@ -919,6 +919,11 @@ bool dl_copy_range(DisplayList* dst, const DisplayList* src,
     if (!dst || !src || start < 0 || end < start || end >= src->item_count()) return false;
 
     int dest_start = dst->item_count();
+    size_t required_count = 0;
+    // copied fragments know their size; a frame-sized reserve per element exhausts paint budgets.
+    if (!math_checked_add(dst->size(), (size_t)(end - start) + 1, &required_count) ||
+        required_count > (size_t)INT_MAX ||
+        (dst->capacity() == 0 && !dst->reserve(required_count))) return false;
     for (int i = start; i <= end; i++) {
         DisplayItem* out = dl_alloc_item(dst);
         if (!out) {

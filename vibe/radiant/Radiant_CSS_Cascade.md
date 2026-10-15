@@ -663,6 +663,23 @@ reports exhaustion without committing provisional material.
 
 ### 3.14 Containment consumers
 
+Intrinsic containment CSSOM reads preserve each axis's `auto` mode and `none`
+fallback while computing lengths in the declaration owner's font/unit context.
+Physical and logical longhands, the shorthand, and generated pseudo styles use
+layout's shared component cascade, including `all` and layer rollback. Explicit
+inheritance follows the parent's corresponding logical property; a pseudo
+inherits from its originating element. Equal computed axes compress to one
+shorthand component. Computed reads never substitute remembered used dimensions
+for the authored fallback (**CI-18 / D4.5.1v4 / D4.1.4v5**).
+
+For intrinsic measurement, `auto <length>` uses its explicit length when no
+usable remembered size exists; `auto none` retains empty size-containment
+contributions. The remembered-size branch keeps precedence. These are existing
+[CSS Sizing 4 §5.2](https://drafts.csswg.org/css-sizing-4/#intrinsic-size-override)
+consumer requirements, not a new Lambda ruling. Cross-realm/independent CSSOM,
+full memory lifecycle, and table/ruby/replaced/fragmentation breadth remain
+separate qualification work.
+
 Layout and paint containment establish an independent formatting context.
 Paint containment clips descendants at the overflow clip edge, with corner
 clipping and `overflow-clip-margin`; computed overflow keywords remain authored.
@@ -2136,3 +2153,444 @@ and 49,112 copied exports. Support inventory remains 410 names and
 twenty bounded partial families. Broader decorating-box/fragment, emphasis,
 shaping/vertical, effect-ordering and independent/paged contexts remain open.
 No P0–P2 tier is closed; the native state/layout provider is the next slice.
+
+### 3.25 Overflow component computation and open axes (bounded implementation)
+
+Overflow and overscroll resolve each physical axis through one component
+cascade over shorthand, physical/logical declarations and `all`; rollback
+filters all overlapping sources together. Shared keyword computation performs
+substitution, defaulting and physical-axis inheritance. Overflow alone applies
+opposite-axis `visible`/`clip` coupling. Computed shorthand/longhand/logical reads
+use the same decoder and current ancestor declarations during dirty callbacks,
+with iterative owner traversal and scratch-owned formatting (**CI-18 /
+D4.5.1v4 / D4.1.4v5**).
+
+An absent authored axis keeps the UA/control fallback supplied by HTML style
+setup. Store that fallback separately from author-computed scroll values and
+reset both during retained recascade; dirty declaration removal must not expose
+the previous author value. Explicit initial/unset use the CSS property's initial
+value. Existing dialog/iframe/textarea defaults share the same producer. Broader
+control UA CSSOM and browser-specific textarea visible normalization remain open.
+
+A `visible` axis supplies no box edge to descendant paint or pointer rejection.
+The shared clipping geometry bounds the open strip using the destination extent
+projected into owner coordinates, then retains the authored edge on the clipped
+axis. Native, SVG/PDF and export-extent consumers use this contract. A
+clip/visible pair has straight edges even with `border-radius`, per
+[CSS Overflow 3 §3.1.2](https://www.w3.org/TR/css-overflow-3/#corner-clipping).
+Paint containment still constrains both axes. Clip state precedes the owner's
+scroll offset; accumulated transforms preserve owner-space edges (**RSC1 /
+RSC7 / D4.5.1v4**).
+
+Axis-aligned exact pixels and transformed open-end/interior/clipped-edge points
+are separate acceptance controls. Bit-identical transformed antialias fringes,
+open strips crossing a projective horizon, broader clip-margin boxes and
+independent/paged/effect contexts remain separate qualification work.
+
+### 3.26 DOM native host ownership and borrowed SVG contexts
+
+Runtime DOM calls use the lower-owned immutable host provider for native SVG
+timing, property/shape queries, geometry/hit testing, touch input, animation
+creation and range/selection lifecycle operations. Radiant publishes native
+adapters from its module; pure child-boundary traversal belongs to the DOM node
+owner. Shared POD geometry and a typed path-containment callback cross the
+boundary without importing native constructor or method symbols (**D7.1.3 /
+D7.5.3 / D7.3.3–D7.3.4**).
+
+SVG source scopes borrow document/instance/registry state synchronously. A
+scope captures the provider once and restores through that same provider;
+absence before registration is harmless. Native and lower scopes call one TLS
+entry/restoration producer, retaining nested same-document source inheritance
+and cross-document isolation. Scalar geometry outputs copy native values;
+private text-hit records remain native. Provider publication has process
+lifetime, while borrowed objects retain existing document pins and precise
+Item roots (**D4.5.1v4 / D4.1.4v5 / D5.3.3 / D5.4.1**).
+
+Native hosts call `radiant_register_dom_engine_providers()` before using DOM
+engine services. `UiContext::init` and Jube static registration share that
+idempotent entry point; standalone embedders can install services without
+initializing the Jube registry. Initializing only the vector backend does not
+install DOM host services. Lower-provider absence remains observable, including
+unchanged output records (**D7.1.3 / D7.5.3**).
+
+### 3.27 Pseudo grid computed-value font owners
+
+Grid track computation carries the pseudo selector through declaration
+formatting into the shared font/math resolver. A pseudo's relative lengths use
+its own computed font, including pending font/custom-property edits; walking an
+explicit inherited value changes to the originating declaration owner before
+length computation. Formatting clones and normalizes values in temporary
+storage without retaining source-pool allocations (**CI-18 / D4.5.1v4 /
+D4.1.4v5**).
+
+This qualifies computed track functions and lengths on generated pseudos. Used
+track snapshots and pseudo shorthand serialization retain separate limits;
+computed lengths reaching a companion's geometry/paint do not qualify every
+generated grid layout or independent paged context.
+
+Grid definition and placement shorthands reconstruct their computed members on
+pseudos through the same serializer as ordinary elements. Grid component lookup
+must select retained shorthand/longhand winners in the pseudo style tree before
+projecting a member; a direct property lookup loses declarations supplied by
+`grid-template` or `grid`. That component competition is axis-independent, while
+the existing font resolver retains the pseudo or explicit inherited declaration
+owner. Used pseudo track snapshots and broader shorthand forms remain separate
+qualification limits (**CI-18 / D4.5.1v4 / D4.1.4v5**).
+
+### 3.28 Receiving currentColor and pseudo dispatch
+
+Color-typed properties preserve `currentColor` through declaration inheritance
+and resolve it against the receiving element or pseudo's color, including the
+property's initial value. A literal inherited color still uses the declaration's
+value. Retaining the receiver does not change the declaration owner used for
+relative-length or variable computation (**D4.5.1v4 / D4.1.4v5; CI-18**).
+
+Computed dispatch selects an accessor's declared pseudo capability before
+choosing dirty versus committed execution. Element-only accessors use the
+common pseudo declaration path consistently. Accessors that already compute
+pseudos, including line-height's font/leading resolver, explicitly declare that
+capability; a missing flag must not expose specified tokens in dirty reads.
+
+### 3.29 Failed-image alternative baselines
+
+An image with no admitted image payload and a nonempty alternative uses its
+fallback text line's content baseline, including its actual leading. Explicit
+width or height changes the replaced box without changing that classification.
+The baseline producer and the initial/completed inline-alignment paths share
+this state; loaded images, empty alternatives and other replaced types retain
+their existing baseline rules (**FT-17 / CI-18**).
+
+### 3.30 Retained fragment copy allocation
+
+An empty display list receiving a known copied range reserves that range's
+checked item count before appending. It must not inherit the recording list's
+full-frame initial reserve for each tiny retained element. Subsequent growth
+remains amortized, and cloning retains its existing independent payload owners
+and rollback behavior (**D4.5.1v4 / D4.1.4v5**). Encoding still respects the shared
+critical memory budget; reducing retained allocation does not bypass it.
+
+### 3.31 Overflow clip margin computation
+
+The optional visual-box and length components share one validated decomposition
+across the parser, layout and computed-value serializer. Computed reads omit the
+default padding box and zero offset when a nondefault box alone suffices; lengths
+use the declaring element or pseudo's font context, including explicit
+inheritance and reads before layout has caught up with a mutation. Temporary
+numeric evaluation does not retain source-pool allocations
+(**CI-18 / D4.5.1v4 / D4.1.4v5**).
+
+The existing negative-offset geometry follows the working
+[CSS Overflow 4 §3.2](https://drafts.csswg.org/css-overflow-4/#overflow-clip-margin)
+model, which allows shrinking the clip edge. It is preserved independently of
+the positive computed-value/browser controls. New per-edge longhands and broader
+replaced/rounded/independent-view applicability are not qualified by this slice.
+
+### 3.32 Overflow and outer-shadow corner outsets
+
+Overflow clip margins and both outer-shadow producers use one outset-adjusted
+corner calculation. Positive outsets preserve square corners and reduce the
+expansion of small radii according to the original two-dimensional edge
+coverage; negative outsets keep the existing inset-and-floor behavior. The
+small-radius polynomial is evaluated without subtracting nearly equal floats.
+Clipping constrains the resulting used radii and shares that geometry with hit
+testing (**CI-18 / RSC1 / RSC7 / D4.5.1v4**).
+
+The rule follows the working
+[CSS Backgrounds 3 §4.2](https://drafts.csswg.org/css-backgrounds-3/#corner-shaping)
+outset adjustment, including its edge-coverage term; the older spread-only
+formula is insufficient for nearly elliptical boxes. Reusing this geometry
+does not qualify complete elliptical shadow payloads, projective/fragmented
+contexts or arbitrary filter/mask ordering.
+
+### 3.33 Pseudo computed integer counts
+
+Calculated clamp and hyphenation counts retain the pseudo selector through
+owner-font numeric evaluation. Dimensional cancellation can turn relative
+lengths into integers, so these domains still depend on the correct font.
+Explicit inheritance changes to the declaring element before evaluation;
+integer rounding and canonical component compression retain their existing
+shared helpers (**CI-18 / D4.5.1v4 / D4.1.4v5**). Computed counts reaching a
+companion's geometry/paint do not qualify complete pseudo clamping, shaping or
+language-dependent hyphenation.
+
+### 3.34 Opacity numeric declaration contexts
+
+Computed opacity reads use the shared owner-font evaluator, retaining the
+pseudo selector and fresh declaration state during dirty callbacks. Relative
+lengths inside dimensionally cancelling math therefore use the same declaring
+font as other numeric domains. Percentages remain coefficients until the
+opacity range is applied. Layout, CSSOM and SVG scalar serialization share the
+same number/percentage, nonfinite and range policy; this does not require a
+layout trial or retain temporary font recipes (**D4.5.1v4 / D4.1.4v5; CI-18**).
+
+Explicit inheritance changes the declaration owner before evaluation, while
+invalid substituted dimensions default through the existing cascade path.
+The bounded live fixture includes direct generated-box paint and companion
+geometry/paint after font, variable and class changes. Percentage quotient or
+nonlinear product cancellation still needs a representation beyond the
+current affine percentage terms; it is not qualified by this increment.
+
+### 3.35 Integer stack-level computation
+
+`z-index` validates through the existing typed-integer grammar and computes
+through the common integer result policy. Clamp counts, hyphenation limits and
+stack levels share the CSSOM owner-font adapter, with each consumer's range
+kept explicit. Layout evaluates the same numeric recipe, applies integer
+rounding/bounds before storage, and copies a parent's computed level for
+explicit inheritance. It never reinterprets an inherited recipe against the
+child's font (**D4.5.1v4 / D4.1.4v5; CI-18**).
+
+Computed reads retain `auto` separately from integer zero even when the element
+is static, and retain pseudo declaration fonts. Dirty font, variable and class
+changes reach positive positioned paint order and pointer targets. This
+bounded consumer repair does not provide complete negative/zero/auto stacking
+context identity, nested depth ordering, flex/grid applicability, pseudo used
+stacking or independent/paged fragmentation.
+
+### 3.36 Integer flex/grid item order
+
+`order` uses the same typed-integer grammar and CSSOM owner-font adapter as
+stack levels, with its own initial value and no `auto` keyword. Layout computes
+integer math before assigning either flex or grid item storage. Explicit
+inheritance copies the parent's computed order. The former flex-only accessor
+now lives in the layout header and reads the tagged flex/grid item kind;
+sorting and inheritance share it instead of duplicating field selection
+(**D4.5.1v4 / D4.1.4v5; CI-18**).
+
+Font, variable and class changes update computed values, exact item offsets
+and painted positions in both layout systems. Invalid literal fractions or
+dimensions preserve an earlier declaration, while invalid substituted values
+default to zero. This does not qualify complete ordering/applicability,
+reverse/vertical/fragmented axes, animation, focus/accessibility source order,
+pseudo used item order or independent/paged contexts.
+
+### 3.37 Numeric flex factors and scalar ranges
+
+Numeric `flex-grow` and `flex-shrink` longhands use typed math and their
+nonnegative number range before conversion to finite float item storage.
+Their initial values remain distinct during invalid computed-value defaulting;
+a valid negative calculated number computes to zero. The existing color clamp
+is promoted to the CSS module header with explicit minimum/maximum arguments,
+so color, integer, opacity and flex consumers share NaN/range/zero handling.
+Owner-font scalar evaluation is shared by formatting and native policy helpers;
+committed field access keeps its published numeric snapshot (**D4.5.1v4 /
+D4.1.4v5; CI-18**).
+
+The numeric grammar follows [CSS Flexbox §7.2](https://drafts.csswg.org/css-flexbox/#flex-components)
+and [CSS Values range checking](https://drafts.csswg.org/css-values-4/#calc-range).
+Chromium controls cover fractional, negative, NaN, infinite and overflowed
+numbers. Shared clamping canonicalizes opacity's computed signed zero as well.
+Shorthand/member competition, absent flex-item storage, alternate view contexts
+and complete axis/animation behavior remain separate qualification limits.
+
+### 3.38 Flex factors across item-storage kinds
+
+Computed flex factors use CSS declaration computation across formatting-context
+boundaries. A populated flex-item record supplies its published value; a grid
+item keeps its grid record while computed reads and explicit inheritance use
+the shared owner-aware declaration query. The query returns a copied scalar
+within its scratch lifetime. The existing accessor derivation slot supplies a
+value when its direct property group is absent; a populated group retains its
+published sample (**D4.5.1v4 / D4.1.4v5; CI-18**).
+
+The implementation extends the existing inherited-declaration traversal with a
+typed scalar consumer. CSSOM formatting and native inheritance use the same
+cascade, substitution, initial-value parsing and owner-font evaluation. Numeric
+results are consumed directly, and the grid parent retains its item properties.
+This bounded longhand contract still leaves flex shorthand projection and
+selected/paged or animated contexts beyond the tested snapshots open.
+
+### 3.39 Flex shorthand component computation (P0.2 / P1.2)
+
+The separate ten-row probe passes 20/20 in Chromium and 5/20 on the
+storage-qualified runtime. The legacy `flex` handler consumes literal numbers,
+sets all three fields together and has no registered members. CSSOM therefore
+cannot project its components, and a later shorthand can overwrite an important
+longhand. Numeric math, basis-first forms and invalid substituted components
+must follow the same component cascade as longhands (**CI-18**).
+
+Register grow/shrink/basis as the shorthand's members. Parse one shared borrowed
+component descriptor in the lower CSS owner; validate the complete grammar
+before accepting the declaration. Project only the winning member after
+substitution, preserving invalid-at-computed-value defaulting. Share dispatch
+for grid/container/flex projections instead of adding a third independent
+consumer branch. Layout applies each winning member after the owner's font is
+computed; CSSOM/native inheritance use the same projection and owner traversal.
+Borrowed immutable grammar defaults avoid per-view declaration allocations.
+Complex projected values remain owned by the caller's pool (**D4.5.1v4 / D4.1.4v5**).
+
+This increment targets explicit zero/length/percentage bases, numeric math,
+member priority/order, substitution, inheritance and live edits. Omitted basis
+is zero length under [Flexbox §7.1](https://www.w3.org/TR/css-flexbox-1/#flex-property);
+Chromium's observed `0%` default remains a separately recorded compatibility
+difference. Mixed length/percentage used bases, intrinsic basis keywords,
+indefinite/reverse/vertical/fragmented contexts, motion and alternate views
+remain bounded follow-ups, without a full-flex support claim.
+
+The shorthand fixture now has 55 browser assertions against 19/55 before this
+increment. A separate inherited-basis probe from a grid-item parent passes 4/4
+in Chromium and 2/4 under the shorthand ASan runtime: CSSOM correctly computes
+`60px`, while the used basis falls back to auto without parent flex-item
+storage. Its `flex_grid_basis_*` records define the next bounded owner-context
+follow-up; the factor-only grid-parent repair does not qualify this basis path.
+
+### 3.40 Inherited flex basis without parent flex storage (P0.2 / P1.2)
+
+The separate `flex_grid_basis_*` probe passes 4/4 in Chromium and 2/4 under the
+shorthand runtime. A grid item's `flex-basis:2em` computes to `60px` in CSSOM,
+but its child's native `inherit` branch has no parent flex record to copy and
+uses auto. This is a used-value storage defect, distinct from the shorthand
+winner repair (**CI-18**).
+
+Promote the existing small basis snapshot to the lower CSS header and give
+numeric/keyword basis results one typed policy. Layout and declaration-owner
+computation supply their existing math contexts to that policy. Extend the
+shared inherited-declaration walker with a transient native consumer callback
+instead of adding a second ancestry/substitution traversal or formatting then
+reparsing computed text. Native inheritance keeps published parent snapshots
+when present and requests the computed declaration when that optional storage
+is absent. No view tag changes or borrowed value pointers enter the result
+(**D4.5.1v4 / D4.1.4v5**).
+
+Qualify relative lengths and preserved percentages, shorthand and longhand
+sources, explicit inheritance, causal font/variable changes, initial/invalid
+fallbacks and repeated reads. Mixed length/percentage used bases, full intrinsic
+basis algorithms, animations, alternate/paged contexts and broader axes remain
+separate limits. The earlier zero-length versus Chromium `0%` compatibility
+record is unchanged by this storage repair.
+
+### 3.41 Image-rendering reads and raster marker sampling (P0.2 / P1.4)
+
+The `marker_sampling_values_*` probe passes 3/3 in Chromium and 0/3 on the
+basis checkpoint: the inherited keyword has a native consumer but no computed
+accessor. The same frozen raster shows 32 mixed-color interior pixels in an
+integer-enlarged crisp marker, against zero in its ordinary-image control and
+Chromium marker. The marker calls the default linear image recorder directly,
+bypassing the shared image sampling policy (**CI-18**).
+
+[CSS Images 3 §5.2](https://www.w3.org/TR/css-images-3/#the-image-rendering)
+applies the inherited specified keyword to images in all properties.
+[CSS Lists 3 §3.2](https://www.w3.org/TR/css-lists-3/#image-markers) takes
+`list-style-image` from the originating list item. Add a cascade/pseudo computed
+accessor using the existing declaration consumer; retain pending substitution
+until the shared validator can check the resulting keyword. Raster URL markers
+use their originating item's applied image-rendering value and the existing
+resource-owning transformed/scaled painter. No separate sampling algorithm or
+borrowed declaration storage is needed (**D4.5.1v4 / D4.1.4v5; RSC1 / RSC7**).
+
+Qualify keyword/default/inheritance/invalid substitution reads, causal edits,
+source-pixel preservation and retained transformed markers at both densities.
+The exploratory empty-marker baseline offset, transformed pixelated footprint,
+and vector image sampling without an explicit PaintIR sampling field remain
+separate limits. Chromium 152 does not accept `smooth`; native support for that
+existing keyword is not browser-qualified by this increment.
+
+### 3.42 Pixelated sampling in an affine device footprint (P1.4)
+
+The protected marker checkpoint's `pixelated_affine_probe/` reproduces blended
+interior colors for integer scaling, anisotropic scaling and quarter turns.
+Chromium matches each independent device-sized literal reference exactly;
+Radiant differs in 112, 72 and 112 channels respectively. Projection chooses
+its virtual nearest-neighbor multiple from the untransformed box, so a 2px
+image transformed to 8px is first treated as a 1x image. Projection also uses
+ceiling while the ordinary raster blitter already uses the closest positive
+integer multiple required by [CSS Images 3 §5.2](https://www.w3.org/TR/css-images-3/#the-image-rendering).
+
+Share the existing closest-multiple policy between both raster paths. For an
+affine matrix, derive each axis's device magnification from its matrix column
+length, including homogeneous normalization; keep inverse coordinate mapping,
+clipping, alpha conversion and resource ownership unchanged. Virtual sample
+coordinates use double intermediates so a large composed magnification does
+not require an allocated intermediate image or overflow a float pixel index
+(**CI-18; RSC1 / RSC7; D4.5.1v4**).
+
+Qualify transformed replaced images, backgrounds and markers at both densities,
+including flips, quarter turns, anisotropic scaling and retained effects.
+Keep projective footprint selection, skew/noninteger browser filtering and
+vector/paged sampling open. The noninteger exploratory browser pairs differ
+from literal bilinear references and remain recorded; they are not acceptance
+controls for the integer affine repair.
+
+### 3.43 Shared pseudo declaration lookup beyond generated content (P0.2)
+
+The marker-baseline live fixture renders 32px and 48px marker fonts but reads
+24px from `getComputedStyle(item, '::marker').fontSize`. The shared declaration
+entry point selects pseudo declarations only for before/after; other supported
+pseudos silently consult the originating element. The DOM already owns the
+canonical pseudo-style mapping, including marker and control parts (**CI-18**).
+
+Route every nonzero pseudo identity through that existing DOM lookup, including
+the grid-component winner path. Reuse the existing substitution, font-state,
+inheritance/default and serialization consumers. No additional pseudo mapping
+or borrowed-style lifetime is introduced (**D4.5.1v4 / D4.1.4v5**). Qualify marker
+font variables, inherited/default values, repeated reads and the live used-font
+consumer; broader allowed-property and paint support remains separately bounded.
+
+The direct native getter passes after that change, but the live wrapper still
+reads the host font: `dom_get_computed_style` independently recognizes only
+before/after names. Extract a single immutable pseudo-name/identity registry
+from the parser's mapping and the matcher's type switch before adding a third
+mapping. Parser, matcher and DOM wrapper reuse its name, selector-type and
+legacy-colon policy. Keep every existing numeric identity and alias behavior;
+header-owned immutable metadata avoids a new core-to-input module import
+(**D4.6.1v4; D7.3.3 / D7.3.4; CI-18**).
+
+### 3.44 Adjoining block-start margins across empty children (P1.2)
+
+The nested-font qualification exposes `input-width` crossing its stored layout
+floor. Its body keeps the first empty paragraph's 16px collapsed top margin,
+while the following heading's 18.72px margin is consumed only as a sibling
+offset. The heading reaches the expected position; the body's border edge and
+content height retain the wrong chain origin. A separate three-case probe varies
+one/two positive empty-child margins and a negative margin. Current Chromium
+matches all three independent references; native matches none. Original pixels
+and geometry remain in `temp/css_support_p0_p1_resume/empty_margin_chain_probe/`.
+
+Under **CI-18** and [CSS 2.2 §8.3.1](https://www.w3.org/TR/CSS22/box.html#collapsing-margins), self-collapsing empty children do not end the
+parent/first-content margin adjacency. Carry the chain's greatest positive and
+most negative components when seeking the first substantive child. Merge the
+following child's authored margin with that chain; a sibling-consumed used
+margin cannot replace the authored contribution. Reuse the existing chain,
+self-collapse, clearance and float-shift helpers. Preserve BFC, border/padding,
+clearance, quirky-margin, writing-mode and stretch exclusions. Retained reflow
+must reconstruct the chain from resolved/owned state, without retaining new
+declaration or view borrows (**D4.5.1v4 / D4.1.4v5**).
+
+Qualify positive/negative/transitive chains, blockers, adjacent floats and causal
+margin/font/content edits against browser geometry and native pixels. Keep the
+existing failing floors, references and raw results unchanged during diagnosis.
+This is a separate used-geometry repair, not a normal-leading adjustment.
+
+The four-row extension includes a first-content descendant whose own child
+propagates a larger margin. Preserve the exact amount consumed by the early
+sibling-collapse step and restore it to the current margin; restoring only the
+initial authored margin loses that descendant contribution. The first draft
+passes the original three rows but fails this extension; the revised draft
+matches all four browser pairs.
+
+The corrected 54-assertion live fixture passes in Chromium. Native geometry and
+pixels pass 48/48, while six computed reads expose consumed margin values.
+Vertical physical margin reflection must use the existing owned `flow_margin`
+snapshot of resolved values before normal-flow collapse, with the applied
+boundary as fallback before a snapshot exists. Keep layout-dependent percentage
+resolution and the existing horizontal/auto policy bounded separately; do not
+serialize unresolved declaration percentages as used pixels. This follows the
+[CSSOM resolved-value contract](https://www.w3.org/TR/cssom-1/#resolved-values)
+and adds no new retained owner (**CI-18; D4.5.1v4 / D4.1.4v5**).
+
+The 81-check extension adds owner-relative lengths, percentages and explicit
+inheritance. Chromium passes all 81; the snapshot getter passes 80 natively.
+Physical/logical spacing inheritance still copies the parent's consumed boundary
+and inherits 10px instead of its resolved 8px. The longhand, shorthand, getter
+and existing multicol consumers share one immutable snapshot accessor. Preserve
+the existing resolved-spacing inheritance profile; percentage inheritance across
+different bases, horizontal auto serialization and broader contexts remain
+separate acceptance work.
+
+The first broad gate catches three boundary regressions: a root/shadow case,
+anonymous table cells and an overflow BFC with empty list children. Skipping
+nonzero empty margins before confirming that the parent can adjoin also skips
+the ordinary sibling-collapse branch when that parent is blocked. Share the
+existing parent boundary test with the first-content search and retain the
+sibling path at root/BFC/border/padding/clearance boundaries. The failed gate and
+its individual reports remain evidence; no floors or references are changed.

@@ -370,8 +370,10 @@ static bool gradient_shape_record_constant_intervals(PaintList* paint, RdtPath* 
     return true;
 }
 
+static bool background_record_solid_rect(PaintList* paint, Rect rect, Color color, const RdtMatrix* transform);
+
 static bool gradient_image_record_shape(PaintList* paint, const ListStyleImage* image, Rect rect,
-    float pixel_ratio, const RdtMatrix* transform, RdtPath* shape) {
+    float pixel_ratio, const RdtMatrix* transform, RdtPath* shape, bool image_sampling = false) {
     if (!paint || !image || !isfinite(rect.x) || !isfinite(rect.y) ||
         !isfinite(rect.width) || !isfinite(rect.height) || rect.width <= 0.0f || rect.height <= 0.0f ||
         !isfinite(pixel_ratio) || pixel_ratio <= 0.0f) return false;
@@ -409,9 +411,13 @@ static bool gradient_image_record_shape(PaintList* paint, const ListStyleImage* 
         uniform_image = gradient_interval_is_uniform(stops.get(), count, 0.0f, last, &uniform_color);
     }
     if (uniform_image) {
-        // retain gradient alpha lowering; a solid path uses different edge/blend quantization.
+        // transparent gradients retain their alpha lowering below.
         render_set_uniform_gradient_stops(stops.get(), uniform_color);
         count = 2;
+    }
+    if (uniform_image && uniform_color.a == 255 && !image_sampling && !shape) {
+        // out-of-range stops can resolve to the same solid image as equal authored colors.
+        return background_record_solid_rect(paint, rect, uniform_color, transform);
     }
     RdtPath* path = shape ? rdt_path_clone(shape) : background_rect_path(rect);
     if (!path) return false;
@@ -449,6 +455,10 @@ static bool gradient_image_record_shape(PaintList* paint, const ListStyleImage* 
         paint_fill_radial_gradient(paint, path, geometry.cx, geometry.cy, geometry.rx,
             stops.get(), count, RDT_FILL_WINDING, transform, &ellipse);
     }
+    if (paint_list_count(paint) == index + 1) {
+        if (op == PAINT_FILL_LINEAR_GRADIENT) paint->data()[index].fill_linear_gradient.image_sampling = image_sampling;
+        else if (op == PAINT_FILL_RADIAL_GRADIENT) paint->data()[index].fill_radial_gradient.image_sampling = image_sampling;
+    }
     if (paint_list_take_path_payload(paint, index, op, op == PAINT_FILL_PATH ? nullptr : stops.get())) {
         if (op != PAINT_FILL_PATH) stops.release();
         return true;
@@ -458,8 +468,8 @@ static bool gradient_image_record_shape(PaintList* paint, const ListStyleImage* 
 }
 
 bool render_paint_gradient_image(PaintList* paint, const ListStyleImage* image, Rect rect,
-    float pixel_ratio, const RdtMatrix* transform) {
-    return gradient_image_record_shape(paint, image, rect, pixel_ratio, transform, nullptr);
+    float pixel_ratio, const RdtMatrix* transform, bool image_sampling) {
+    return gradient_image_record_shape(paint, image, rect, pixel_ratio, transform, nullptr, image_sampling);
 }
 
 bool render_paint_gradient_shape(PaintList* paint, const ListStyleImage* image, Rect rect,
@@ -1065,12 +1075,11 @@ void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
         float shadow_x = shadow_rect.x, shadow_y = shadow_rect.y;
         float shadow_w = shadow_rect.width, shadow_h = shadow_rect.height;
 
-        // Adjust border radius for spread
-        float spread_factor = (s_spread >= 0) ? 1.0f : 1.0f;
-        float sr_tl = max(0.0f, r_tl + s_spread * spread_factor);
-        float sr_tr = max(0.0f, r_tr + s_spread * spread_factor);
-        float sr_br = max(0.0f, r_br + s_spread * spread_factor);
-        float sr_bl = max(0.0f, r_bl + s_spread * spread_factor);
+        Corner radius = render_path_uniform_corner(r_tl, r_tr, r_br, r_bl);
+        Corner shadow_radius = render_geometry_outset_corners(&radius, rect.width, rect.height,
+            s_spread, s_spread, s_spread, s_spread);
+        float sr_tl = shadow_radius.top_left, sr_tr = shadow_radius.top_right;
+        float sr_br = shadow_radius.bottom_right, sr_bl = shadow_radius.bottom_left;
 
 
         // Serialize CSS clip-path shape (if active) for masking the shadow
@@ -1674,11 +1683,20 @@ static bool record_background(PaintList* paint, UiContext* ui, ViewBlock* view, 
     return recorded;
 }
 
-bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
-                             RenderExportTargetKind target) {
-    if (!paint || !ui || !view || !view->bound || !view->boundary()->background) return false;
-    const BackgroundProp* background = view->boundary()->background;
-    float density = ui_context_raster_scale(ui);
+static bool background_surface_opaque_color(const ImageSurface* surface, Color* color) {
+    if (!surface || !surface->pixels || surface->width <= 0 || surface->height <= 0) return false;
+    uint32_t pixel = *(const uint32_t*)surface->pixels;
+    if ((pixel >> 24) != 255) return false;
+    for (int row = 0; row < surface->height; row++) {
+        const uint32_t* pixels = (const uint32_t*)((const uint8_t*)surface->pixels + (size_t)row * surface->pitch);
+        for (int column = 0; column < surface->width; column++) if (pixels[column] != pixel) return false;
+    }
+    color->c = pixel;
+    return true;
+}
+
+bool render_paint_background_requires_composite(const BackgroundProp* background, RenderExportTargetKind target) {
+    if (!background) return false;
     bool composite = background_has_blend(background);
     if (target == RENDER_EXPORT_TARGET_PDF && background->layer_count > 0) {
         for (int index = 0; index < background->layer_count; index++) {
@@ -1688,6 +1706,15 @@ bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, R
                 gradient_image_needs_sampling(layer.conic_gradient.get());
         }
     }
+    return composite;
+}
+
+bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
+                             RenderExportTargetKind target) {
+    if (!paint || !ui || !view || !view->bound || !view->boundary()->background) return false;
+    const BackgroundProp* background = view->boundary()->background;
+    float density = ui_context_raster_scale(ui);
+    bool composite = render_paint_background_requires_composite(background, target);
     if (!composite) return record_background(paint, ui, view, rect, density, nullptr, nullptr);
     PaintList layers;
     if (!record_background(&layers, ui, view, rect, density, nullptr, nullptr)) return false;
@@ -1696,10 +1723,80 @@ bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, R
     // PDF gradient fallbacks must composite the layers before the viewer reconstructs edge coverage.
     if (!render_effect_rasterize_paint_list(&layers, nullptr, &bounds, rect.width, rect.height,
             false, density, &image, "[BACKGROUND_COMPOSITE]") || !image.surface) return false;
+    Color uniform = {};
+    if (target == RENDER_EXPORT_TARGET_PDF && background_surface_opaque_color(image.surface, &uniform)) {
+        // an opaque constant composite is a fill, with the same geometric edge as an authored solid color.
+        bool recorded = background_record_solid_rect(paint,
+            {image.x, image.y, image.width, image.height}, uniform, nullptr);
+        image_surface_destroy(image.surface);
+        return recorded;
+    }
+    RdtPath* extent = target == RENDER_EXPORT_TARGET_PDF
+        ? background_rect_path({image.x, image.y, image.width, image.height}) : nullptr;
+    if (target == RENDER_EXPORT_TARGET_PDF && !extent) { image_surface_destroy(image.surface); return false; }
+    // a captured fill ends at its coverage extent; PDF image sampling otherwise extends its last texel.
+    if (extent) paint_push_clip(paint, extent, nullptr);
     int index = paint_list_count(paint);
     paint_draw_image_resource(paint, image.surface, image.x, image.y, image.width, image.height,
         255, nullptr, image_surface_destroy);
-    return paint_list_count(paint) == index + 1;
+    bool recorded = paint_list_count(paint) == index + 1;
+    if (extent) { paint_pop_clip(paint); rdt_path_free(extent); }
+    return recorded;
+}
+
+bool render_paint_boundary_layers(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
+        RenderExportTargetKind target, bool outer_shadows, const Rect* background_area) {
+    if (outer_shadows) render_paint_boundary_emit_outer_shadows(paint, view, rect.x, rect.y);
+    // slice only the image positioning area; border edges retain their single coverage operation.
+    bool sliced = background_area && !render_paint_background_is_simple(view->boundary()->background);
+    if (sliced) {
+        RdtPath* clip = background_rect_path(rect);
+        if (!clip) return false;
+        paint_push_clip(paint, clip, nullptr); rdt_path_free(clip);
+    }
+    render_paint_background(paint, ui, view, sliced ? *background_area : rect, target);
+    if (sliced) paint_pop_clip(paint);
+    return render_paint_border_image(paint, ui, view->boundary()->border, rect);
+}
+
+bool render_paint_boundary_box(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
+        RenderExportTargetKind target, const Rect* background_area) {
+    if (!paint || !view || !view->bound) return false;
+    BoundaryProp boundary = *view->boundary();
+    BorderProp border = {};
+    if (boundary.border) { border = *boundary.border; boundary.border = lam::own(&border); }
+    if (render_paint_boundary_emit_box(paint, &boundary, rect)) return true;
+    ViewBlock box = *view;
+    box.bound = lam::view_prop(&boundary);
+    box.width = rect.width; box.height = rect.height;
+    if (boundary.border) {
+        resolve_border_radius_percentages(&border.radius, rect.width, rect.height);
+        constrain_corner_radii(&border.radius, rect.width, rect.height);
+    }
+    bool image = render_paint_boundary_layers(paint, ui, &box, rect, target, true, background_area);
+    if (!image && boundary.border) {
+        bool rounded = radiant_corner_has_radius(&border.radius);
+        if (!rounded || !render_paint_boundary_emit_solid_border(paint, &border, rect)) {
+            RdtPath* clip = rounded ? render_path_create_rounded_rect(rect, &border.radius) : nullptr;
+            if (clip) { paint_push_clip(paint, clip, nullptr); rdt_path_free(clip); }
+            for (size_t side = 0; side < 4; side++)
+                if (!render_paint_boundary_emit_border_side(paint, &border, rect, side)) return false;
+            if (clip) paint_pop_clip(paint);
+        }
+    }
+    const OutlineProp* outline = boundary.outline;
+    if (outline && outline->width > 0.0f && outline->color.a) {
+        BorderProp ring = {};
+        for (size_t side = 0; side < 4; side++) {
+            ring.width.values[side] = outline->width;
+            ring.styles[side] = outline->style; ring.colors[side] = outline->color;
+        }
+        float outset = outline->offset + outline->width;
+        Rect outer = {rect.x - outset, rect.y - outset, rect.width + 2.0f * outset, rect.height + 2.0f * outset};
+        for (size_t side = 0; side < 4; side++)
+            if (!render_paint_boundary_emit_border_side(paint, &ring, outer, side)) return false;
+    }
+    return true;
 }
 
 /**

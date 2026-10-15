@@ -52,6 +52,7 @@ struct DomCanvasStateSnapshot {
     OP(bool, fill_rect, (void* canvas_element, float x, float y, float width, float height)) \
     OP(bool, stroke_rect, (void* canvas_element, float x, float y, float width, float height)) \
     OP(bool, clear_rect, (void* canvas_element, float x, float y, float width, float height)) \
+    OP(bool, draw_image, (void* canvas_element, void* source_element, const float* coordinates, size_t coordinate_count)) \
     OP(bool, fill_text, (void* canvas_element, void* font_handle, const char* text, int text_len, float x, float y, float max_width))
 
 struct DomCanvasEngineOps {

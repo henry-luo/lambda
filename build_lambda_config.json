@@ -2022,17 +2022,8 @@
     },
     {
       "name": "lambda-runtime-full",
-      "description": "Active runtime validation and schema front-end support",
+      "description": "Static runtime validation and schema front-end support",
       "lang": "c++17",
-      "link_options_macos": [
-        "-Wl,-undefined,dynamic_lookup"
-      ],
-      "link_options_linux": [
-        "-Wl,--allow-shlib-undefined"
-      ],
-      "link_options_windows": [
-        "-Wl,/force:unresolved"
-      ],
       "source_files": [
         "lambda/runtime/parser/source_parser.c",
         "lambda/runtime/parser/lambda_lexer.c",
@@ -2055,7 +2046,7 @@
       "defines": [
         "UTF8PROC_STATIC"
       ],
-      "link": "dynamic"
+      "link": "static"
     },
     {
       "name": "radiant",

@@ -1,0 +1,28 @@
+<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;font:20px/24px Arial}
+.box{direction:rtl;width:100px;height:24px}
+#css{direction:ltr;unicode-bidi:isolate}
+</style>
+<button id="check">Check</button><button id="change">Change direction</button><button id="restore">Restore direction</button><output id="report"></output>
+<div id="result"><div class="box"><span id="html" dir="ltr"><span id="html-marker">…</span><span id="html-tail">GHIJ</span></span></div>
+<div class="box"><span id="css"><span id="css-marker">…</span><span id="css-tail">GHIJ</span></span></div>
+<div class="box"><span id="inherit" dir="ltr" style="direction:inherit">…GHIJ</span></div>
+<div class="box"><span id="initial" dir="rtl" style="direction:initial">…GHIJ</span></div>
+<div class="box"><span id="unset" dir="ltr" style="direction:unset">…GHIJ</span></div>
+</div>
+<script>
+(function(){
+    var report=document.getElementById('report');
+    document.getElementById('check').onclick=function(){
+        var values=['html','css','inherit','initial','unset'].map(function(id){return getComputedStyle(document.getElementById(id)).direction;});
+        var htmlMarker=document.getElementById('html-marker').getBoundingClientRect();
+        var htmlTail=document.getElementById('html-tail').getBoundingClientRect();
+        var cssMarker=document.getElementById('css-marker').getBoundingClientRect();
+        var cssTail=document.getElementById('css-tail').getBoundingClientRect();
+        report.setAttribute('data-direction',values.join('|'));
+        report.setAttribute('data-order',String(htmlMarker.left<htmlTail.left)+'|'+String(cssMarker.left<cssTail.left));
+    };
+    document.getElementById('change').onclick=function(){document.getElementById('html').setAttribute('dir','rtl');};
+    document.getElementById('restore').onclick=function(){document.getElementById('html').setAttribute('dir','ltr');};
+})();
+</script>

@@ -225,12 +225,16 @@ int ui_context_init(UiContext* uicon, bool headless, float requested_device_scal
 }
 
 int UiContext::init(bool next_headless, float requested_device_scale) {
+    // native-only hosts need the same DOM services as hosts that initialize Jube first.
+    if (!radiant_register_dom_engine_providers()) return EXIT_FAILURE;
     memset(this, 0, sizeof(UiContext));
     last_click_time = -1.0;
     last_click_button = -1;
     click_count = 1;
     active_click_count = 1;
     headless = next_headless;
+    // the desktop GLFW frontend provides mouse motion/hover; headless hosts publish explicit test values.
+    if (!next_headless) input_capabilities = {CSS_POINTER_FINE, CSS_POINTER_FINE, true, true, true};
     // inital window width and height - match browser test viewport
     int window_width = 1200, window_height = 800;
 
@@ -509,6 +513,12 @@ void free_document(DomDocument* doc) {
     // Free DomDocument via dom_document_destroy (handles arena and pool)
     dom_document_destroy(doc);
     if (owned_runtime) {
+        // embedded teardown may leave another evaluator bound; reclaim this owner's heap at a quiescent boundary (D5.4.1).
+        if (!radiant_eval_context_switch(runtime_get_eval_context(owned_runtime.get()))) {
+            log_error("free_document: could not rebind owned runtime for cleanup; runtime retained");
+            owned_runtime.release();
+            return;
+        }
         runtime_cleanup(owned_runtime.get());
         log_debug("free_document: released the document-owned script runtime");
     }

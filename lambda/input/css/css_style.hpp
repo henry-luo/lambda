@@ -228,6 +228,17 @@ bool css_compute_integer_value(const CssValue* value, const CssMathEvaluationCon
     double minimum, double maximum, double* result);
 bool css_compute_integer_result(const CssValue* value, const CssMathResult* math,
     double minimum, double maximum, double* result);
+double css_clamp_numeric_value(double value, double minimum = 0.0, double maximum = 1.0);
+bool css_compute_opacity_result(const CssMathResult* math, float* result);
+bool css_compute_nonnegative_number_result(const CssMathResult* math, float* result);
+struct CssFlexBasisValue {
+    float value = -1.0f;
+    bool is_percent = false;
+    bool is_content = false;
+    bool is_stretch = false;
+};
+bool css_compute_flex_basis_result(const CssValue* value, const CssMathResult* math,
+    CssFlexBasisValue* result);
 bool css_hyphenate_limit_components(const CssValue* value, const CssValue* components[3]);
 CssValue* css_simplify_math_value(Pool* pool, const CssValue* value);
 
@@ -266,8 +277,10 @@ struct CssComputedColor {
     bool alpha_is_byte;
     CssEnum keyword;
     const char* color_space;
+    const CssValue* unresolved; // borrowed currentColor expression; owned snapshots clone this tree
 };
-bool css_color_compute(const CssValue* value, CssComputedColor* result);
+bool css_color_compute(const CssValue* value, CssComputedColor* result,
+                       const CssComputedColor* current_color = nullptr);
 const CssValue* css_background_color_component(const CssValue* value);
 bool css_color_to_rgba(const CssComputedColor* color, uint8_t* r, uint8_t* g,
                        uint8_t* b, uint8_t* a);
@@ -872,6 +885,11 @@ typedef enum CssPropertyCode {
     CSS_PROPERTY_WEBKIT_BOX_ORIENT,
     CSS_PROPERTY_HYPHENATE_LIMIT_CHARS,
 
+    // page-flow metadata must have distinct keys in the shared cascade.
+    CSS_PROPERTY_PAGE,
+    CSS_PROPERTY_STRING_SET,
+    CSS_PROPERTY_FOOTNOTE_POLICY,
+
     // Custom Properties (CSS Variables)
     CSS_PROPERTY_CUSTOM,
 
@@ -903,6 +921,10 @@ CssValue* css_grid_project_resolved_template_tracks(Pool* pool, const CssValue* 
 
 const CssValue* css_container_shorthand_longhand(const CssValue* value,
     CssPropertyCode property, Pool* pool);
+
+// project borrowed components or pool-owned defaults after the shared cascade and substitution.
+const CssValue* css_project_shorthand_longhand(Pool* pool, const CssValue* value,
+    CssPropertyCode shorthand, CssPropertyCode longhand);
 
 
 // individual transforms compose in this order, independently of declaration order.
@@ -1898,6 +1920,9 @@ const CssValue* css_text_emphasis_shorthand_longhand(const CssValue* value,
     CssPropertyCode property, Pool* pool);
 bool css_display_legacy_keyword_supported(const char* name);
 bool css_value_as_seconds(const CssValue* value, double* seconds);
+struct CssLinearEasingPoint { double input, output; };
+// returns zero for invalid syntax; output, when supplied, holds the returned count.
+int css_linear_easing_points(const CssValue* value, CssLinearEasingPoint* output);
 bool css_value_is_timing_function(const CssValue* value);
 bool css_animation_property_is_longhand(CssPropertyCode property);
 CssPropertyCode css_timeline_shorthand_for(CssPropertyCode property);

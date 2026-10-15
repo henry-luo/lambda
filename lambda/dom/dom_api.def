@@ -790,6 +790,8 @@ DOM_RAW(scrollable_extent, geometry, float, (void* element, bool width_axis), do
 // read-only virtual surfaces copy their model selection through this transport.
 DOM_OP(CORE, clipboard_write, input, 1, "pn(text: string) -> bool", dom_engine_clipboard_write, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 
+DOM_OP(CORE, close_dialog, forms, 2, "pn(n: any, value: any) -> null", dom_core_close_dialog, DOM_F_MUTATES, "", html_element, "", "close")
+
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP
 #undef DOM_API_DEF_CLEAR_OP

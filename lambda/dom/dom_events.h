@@ -111,6 +111,7 @@ Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable
  * is the storage key.
  */
 Item js_create_event_target(void);
+void js_event_target_install_methods(Item target);
 
 // ============================================================================
 // Event subclass constructors (called by JsCtor wrappers in js_globals.cpp).

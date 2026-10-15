@@ -11,6 +11,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <float.h>
 #include "../../../lib/math_utils.h"
 #include "../../../lib/str.h"
 
@@ -87,6 +88,9 @@ static CssPropertyCode column_rule_longhands[] = {
 };
 
 static CssPropertyCode container_longhands[] = {CSS_PROPERTY_CONTAINER_NAME, CSS_PROPERTY_CONTAINER_TYPE};
+static CssPropertyCode flex_longhands[] = {
+    CSS_PROPERTY_FLEX_GROW, CSS_PROPERTY_FLEX_SHRINK, CSS_PROPERTY_FLEX_BASIS
+};
 
 static CssProperty property_definitions[] = {
     // Layout Properties
@@ -373,7 +377,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_MARGIN, "margin", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, margin_longhands, 4, validate_length, NULL},
     {CSS_PROPERTY_PADDING, "padding", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, padding_longhands, 4, validate_length, NULL},
     {CSS_PROPERTY_BORDER, "border", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, border_longhands, 12, validate_keyword, NULL},
-    {CSS_PROPERTY_FLEX, "flex", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "0 1 auto", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_FLEX, "flex", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "0 1 auto", false, true, flex_longhands, 3, validate_keyword, NULL},
     {CSS_PROPERTY_GRID, "grid", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, css_grid_property_members + 4, 6, validate_keyword, NULL},
 
     // Multi-column Layout Properties
@@ -493,6 +497,11 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_OUTLINE_WIDTH, "outline-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_OUTLINE_COLOR, "outline-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "invert", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_OUTLINE_OFFSET, "outline-offset", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+
+    // page-flow metadata is cascaded with ordinary element declarations.
+    {CSS_PROPERTY_PAGE, "page", PROP_TYPE_STRING, PROP_INHERIT_YES, "auto", false, false, NULL, 0, NULL, NULL},
+    {CSS_PROPERTY_STRING_SET, "string-set", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, NULL, NULL},
+    {CSS_PROPERTY_FOOTNOTE_POLICY, "footnote-policy", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
 
     // Page Break Properties
     {CSS_PROPERTY_BREAK_BEFORE, "break-before", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
@@ -966,7 +975,48 @@ bool css_compute_integer_result(const CssValue* value, const CssMathResult* math
         !math->resolved || math->type != CSS_MATH_NUMBER) return false;
     // math rounds ties toward positive infinity before the property's range is applied.
     double number = value->type == CSS_VALUE_TYPE_FUNCTION ? floor(math->value + 0.5) : math->value;
-    *result = fmax(minimum, fmin(maximum, isnan(number) ? 0.0 : number));
+    *result = css_clamp_numeric_value(number, minimum, maximum);
+    return true;
+}
+
+bool css_compute_opacity_result(const CssMathResult* math, float* result) {
+    if (!math || !result || !math->resolved ||
+        (math->type != CSS_MATH_NUMBER && math->type != CSS_MATH_PERCENT)) return false;
+    // percentage preservation keeps opacity independent of any font or containing-block base.
+    double number = math->type == CSS_MATH_PERCENT ? math->percentage / 100.0 : math->value;
+    *result = (float)css_clamp_numeric_value(number);
+    return true;
+}
+
+bool css_compute_nonnegative_number_result(const CssMathResult* math, float* result) {
+    if (!math || !result || !math->resolved || math->type != CSS_MATH_NUMBER) return false;
+    // range clipping precedes conversion to the flex fields' finite float storage.
+    *result = (float)css_clamp_numeric_value(math->value, 0.0, (double)FLT_MAX);
+    return true;
+}
+
+bool css_compute_flex_basis_result(const CssValue* value, const CssMathResult* math,
+        CssFlexBasisValue* result) {
+    if (!value || !result) return false;
+    CssFlexBasisValue computed = {};
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        switch (value->data.keyword) {
+            case CSS_VALUE_AUTO: case CSS_VALUE_INITIAL: case CSS_VALUE_UNSET: break;
+            case CSS_VALUE_CONTENT: computed.is_content = true; break;
+            case CSS_VALUE_STRETCH: computed.is_stretch = true; break;
+            default: return false;
+        }
+    } else {
+        bool zero = value->type == CSS_VALUE_TYPE_NUMBER && math &&
+            math->type == CSS_MATH_NUMBER && math->value == 0.0;
+        if (!math || !math->resolved ||
+            (math->type != CSS_MATH_LENGTH && math->type != CSS_MATH_PERCENT && !zero)) return false;
+        computed.is_percent = math->type == CSS_MATH_PERCENT;
+        computed.value = (float)css_clamp_numeric_value(
+            computed.is_percent ? math->percentage : math->value, 0.0, (double)FLT_MAX);
+    }
+    // the snapshot carries only numbers and modes, never a declaration-owner pointer.
+    *result = computed;
     return true;
 }
 
@@ -1749,13 +1799,11 @@ static bool css_value_is_scroll_spacing(CssPropertyCode property,
     return true;
 }
 
-static bool css_value_is_overflow_clip_margin(const CssValue* value) {
-    if (!value) return false;
-    if (css_value_contains_var_reference(value)) return true;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        const CssEnumInfo* info = css_enum_info(value->data.keyword);
-        if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return true;
-    }
+bool css_overflow_clip_margin_components(const CssValue* value,
+        CssEnum* box, const CssValue** length) {
+    if (!value || !box || !length) return false;
+    *box = CSS_VALUE_PADDING_BOX;
+    *length = nullptr;
     int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
     if (count < 1 || count > 2 ||
         (value->type == CSS_VALUE_TYPE_LIST &&
@@ -1771,6 +1819,7 @@ static bool css_value_is_overflow_clip_margin(const CssValue* value) {
              item->data.keyword == CSS_VALUE_BORDER_BOX)) {
             if (saw_box) return false;
             saw_box = true;
+            *box = item->data.keyword;
         } else if ((item->type == CSS_VALUE_TYPE_LENGTH &&
                     css_unit_is_length(item->data.length.unit)) ||
                    (item->type == CSS_VALUE_TYPE_NUMBER &&
@@ -1778,6 +1827,7 @@ static bool css_value_is_overflow_clip_margin(const CssValue* value) {
                    css_value_is_length_expression(item, false, false)) {
             if (saw_length) return false;
             saw_length = true;
+            *length = item;
         } else return false;
     }
     return saw_box || saw_length;
@@ -1971,12 +2021,66 @@ bool css_split_border_image_shorthand(const CssValue* value,
 
 bool css_value_as_seconds(const CssValue* value, double* seconds) {
     if (!value || !seconds || (value->type != CSS_VALUE_TYPE_LENGTH &&
-        value->type != CSS_VALUE_TYPE_TIME)) return false;
-    double time = value->data.length.value;
-    CssUnit unit = value->data.length.unit;
-    if (!isfinite(time) || (unit != CSS_UNIT_S && unit != CSS_UNIT_MS)) return false;
-    *seconds = unit == CSS_UNIT_MS ? time / 1000.0 : time;
+        value->type != CSS_VALUE_TYPE_TIME && value->type != CSS_VALUE_TYPE_FUNCTION)) return false;
+    // absolute time math already canonicalizes mixed s/ms leaves to seconds.
+    CssMathEvaluationContext context = {};
+    CssMathResult result = css_math_evaluate(value, &context);
+    if (result.type != CSS_MATH_TIME || !result.resolved || !isfinite(result.value)) return false;
+    *seconds = result.value;
     return true;
+}
+
+int css_linear_easing_points(const CssValue* value, CssLinearEasingPoint* output) {
+    if (!value || value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function) return 0;
+    const CssFunction* function = value->data.function;
+    if (!function->name || !str_ieq_cstr(function->name, "linear") || !function->args ||
+        function->arg_count < 2 || function->arg_count > INT_MAX / 2) return 0;
+    int count = 0;
+    double largest = -INFINITY;
+    for (int i = 0; i < function->arg_count; i++) {
+        const CssValue* stop = function->args[i];
+        if (!stop) return 0;
+        bool list = stop->type == CSS_VALUE_TYPE_LIST;
+        int members = list ? stop->data.list.count : 1;
+        if (members < 1 || members > 3 || (list &&
+            (stop->data.list.comma_separated || !stop->data.list.values))) return 0;
+        double result = 0.0, positions[2] = {};
+        int number = -1, percentages = 0;
+        for (int j = 0; j < members; j++) {
+            const CssValue* member = list ? stop->data.list.values[j] : stop;
+            if (!member) return 0;
+            if (member->type == CSS_VALUE_TYPE_NUMBER && number < 0 && isfinite(member->data.number.value)) {
+                number = j;
+                result = member->data.number.value;
+            } else if (member->type == CSS_VALUE_TYPE_PERCENTAGE && percentages < 2 &&
+                       isfinite(member->data.percentage.value)) {
+                positions[percentages++] = member->data.percentage.value / 100.0;
+            } else return 0;
+        }
+        // the optional percentage pair is one contiguous grammar component.
+        if (number < 0 || (members == 3 && number == 1)) return 0;
+        int points = percentages ? percentages : 1;
+        for (int j = 0; j < points; j++) {
+            double input = NAN;
+            if (percentages) input = largest = fmax(largest, positions[j]);
+            else if (i == 0) input = largest = 0.0;
+            else if (i == function->arg_count - 1) input = fmax(1.0, largest);
+            if (output) output[count] = {input, result};
+            count++;
+        }
+    }
+    if (output) {
+        // first/last inputs are fixed above, so every omitted run is bounded.
+        for (int first = 0; first + 1 < count;) {
+            int last = first + 1;
+            while (last < count && isnan(output[last].input)) last++;
+            for (int i = first + 1; i < last; i++)
+                output[i].input = output[first].input + (output[last].input - output[first].input) *
+                    (double)(i - first) / (last - first);
+            first = last;
+        }
+    }
+    return count;
 }
 
 bool css_value_is_timing_function(const CssValue* value) {
@@ -1991,6 +2095,7 @@ bool css_value_is_timing_function(const CssValue* value) {
     if (value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function) return false;
     const CssFunction* function = value->data.function;
     if (!function->name || !function->args) return false;
+    if (str_ieq_cstr(function->name, "linear")) return css_linear_easing_points(value, nullptr) > 0;
     if (str_ieq_cstr(function->name, "cubic-bezier")) {
         if (function->arg_count != 4) return false;
         for (int i = 0; i < 4; i++) {
@@ -2054,7 +2159,8 @@ bool css_motion_longhand_accepts(CssPropertyCode property, const CssValue* value
         }
         case CSS_PROPERTY_ANIMATION_DURATION:
         case CSS_PROPERTY_TRANSITION_DURATION:
-            return css_value_as_seconds(value, &seconds) && seconds >= 0.0;
+            return css_value_as_seconds(value, &seconds) &&
+                (seconds >= 0.0 || value->type == CSS_VALUE_TYPE_FUNCTION);
         case CSS_PROPERTY_ANIMATION_DELAY:
         case CSS_PROPERTY_TRANSITION_DELAY:
             return css_value_as_seconds(value, &seconds);
@@ -2076,10 +2182,11 @@ bool css_motion_longhand_accepts(CssPropertyCode property, const CssValue* value
     }
 }
 
-static bool css_timeline_assign_time(const CssValue* value, double seconds,
+static bool css_timeline_assign_time(const CssValue* value,
                                      const CssValue** parts) {
-    // a negative time can only fill delay; a later nonnegative time fills duration.
-    int slot = !parts[1] && seconds >= 0.0 ? 1 : 3;
+    // negative literals fill delay; negative calculations are valid clamped durations.
+    int slot = !parts[1] && css_motion_longhand_accepts(
+        CSS_PROPERTY_ANIMATION_DURATION, value) ? 1 : 3;
     if (parts[slot]) return false;
     parts[slot] = value;
     return true;
@@ -2095,7 +2202,7 @@ static bool css_animation_split_group(const CssValue* group, const CssValue** pa
             ? group->data.list.values[i] : group;
         double seconds = 0.0;
         if (css_value_as_seconds(token, &seconds)) {
-            if (!css_timeline_assign_time(token, seconds, parts)) return false;
+            if (!css_timeline_assign_time(token, parts)) return false;
             continue;
         }
         bool assigned = false;
@@ -2126,7 +2233,7 @@ static bool css_transition_split_group(const CssValue* group, const CssValue** p
             ? group->data.list.values[i] : group;
         double seconds = 0.0;
         if (css_value_as_seconds(token, &seconds)) {
-            if (!css_timeline_assign_time(token, seconds, parts)) return false;
+            if (!css_timeline_assign_time(token, parts)) return false;
         } else if (!parts[2] && css_value_is_timing_function(token)) {
             parts[2] = token;
         } else if (!parts[0] && css_motion_longhand_accepts(
@@ -2329,6 +2436,74 @@ static const CssValue* css_space_list_item(const CssValue* value, size_t index) 
 static size_t css_space_list_count(const CssValue* value) {
     return !value ? 0 : value->type == CSS_VALUE_TYPE_LIST
         ? value->data.list.comma_separated ? 0 : (size_t)value->data.list.count : 1;
+}
+
+static bool css_flex_factor_valid(const CssValue* value) {
+    return value && ((value->type == CSS_VALUE_TYPE_NUMBER && value->data.number.value >= 0.0) ||
+        (value->type == CSS_VALUE_TYPE_FUNCTION && css_math_value_type(value) == CSS_MATH_NUMBER));
+}
+
+static bool css_flex_basis_valid(const CssValue* value) {
+    // basis shares width's grammar; CSS-wide keywords apply only to the complete shorthand.
+    return value && !css_value_is_global_keyword(value) &&
+        (css_value_keyword_equals(value, CSS_VALUE_CONTENT) ||
+         css_property_validate_value_mode(CSS_PROPERTY_WIDTH, value, false));
+}
+
+static bool css_flex_components(const CssValue* value, const CssValue* members[3]) {
+    memset(members, 0, 3 * sizeof(*members));
+    if (css_value_is_global_keyword(value) || css_value_keyword_equals(value, CSS_VALUE_NONE) ||
+        css_value_keyword_equals(value, CSS_VALUE_AUTO)) return true;
+    size_t count = css_space_list_count(value), factors = 0;
+    bool factors_ended = false;
+    if (!count || count > 3) return false;
+    for (size_t i = 0; i < count; i++) {
+        const CssValue* item = css_space_list_item(value, i);
+        if (factors < 2 && css_flex_factor_valid(item)) {
+            // the grow/shrink pair stays adjacent even when the basis appears first.
+            if (factors_ended) return false;
+            members[factors++] = item;
+        } else {
+            if (members[2] || !css_flex_basis_valid(item)) return false;
+            members[2] = item;
+            factors_ended = factors != 0;
+        }
+    }
+    return true;
+}
+
+const CssValue* css_project_shorthand_longhand(Pool* pool, const CssValue* value,
+        CssPropertyCode shorthand, CssPropertyCode longhand) {
+    if (!value || shorthand == longhand || css_value_is_global_keyword(value)) return value;
+    if (css_grid_property_mask(shorthand))
+        return css_grid_shorthand_longhand(pool, value, shorthand, longhand);
+    if (shorthand == CSS_PROPERTY_CONTAINER)
+        return css_container_shorthand_longhand(value, longhand, pool);
+    if (shorthand != CSS_PROPERTY_FLEX) return value;
+    const CssValue* members[3];
+    if (!css_flex_components(value, members)) return nullptr;
+    size_t index = 0;
+    while (index < 3 && flex_longhands[index] != longhand) index++;
+    if (index == 3) return nullptr;
+    if (members[index]) return members[index];
+    bool none = css_value_keyword_equals(value, CSS_VALUE_NONE);
+    struct Defaults { CssValue factors[2], zero_basis, auto_basis; };
+    static const Defaults defaults = [] {
+        Defaults result = {};
+        for (unsigned i = 0; i < 2; i++) {
+            result.factors[i].type = CSS_VALUE_TYPE_NUMBER;
+            result.factors[i].data.number.value = i;
+            result.factors[i].data.number.is_integer = true;
+        }
+        result.zero_basis.type = CSS_VALUE_TYPE_LENGTH;
+        result.zero_basis.data.length.unit = CSS_UNIT_PX;
+        result.auto_basis.type = CSS_VALUE_TYPE_KEYWORD;
+        result.auto_basis.data.keyword = CSS_VALUE_AUTO;
+        return result;
+    }();
+    // immutable grammar defaults avoid allocating declarations in each receiving view pool.
+    return index < 2 ? &defaults.factors[none ? 0 : 1]
+        : none || css_value_keyword_equals(value, CSS_VALUE_AUTO) ? &defaults.auto_basis : &defaults.zero_basis;
 }
 
 bool css_hyphenate_limit_components(const CssValue* value, const CssValue* components[3]) {
@@ -2997,6 +3172,23 @@ bool css_property_validate_value_mode(CssPropertyCode id,
         return css_keyword_set_valid(value, 0, css_space_list_count(value),
             set->options, set->count, set->exclusive);
     }
+    if (id == CSS_PROPERTY_Z_INDEX || id == CSS_PROPERTY_ORDER) {
+        return css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value) ||
+            (id == CSS_PROPERTY_Z_INDEX && css_value_keyword_equals(value, CSS_VALUE_AUTO)) ||
+            css_integer_value_valid(value);
+    }
+    if (id == CSS_PROPERTY_FLEX_GROW || id == CSS_PROPERTY_FLEX_SHRINK) {
+        if (css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value)) return true;
+        return css_flex_factor_valid(value);
+    }
+    if (id == CSS_PROPERTY_FLEX) {
+        const CssValue* members[3];
+        return css_value_contains_pending_substitution(value) || css_flex_components(value, members);
+    }
+    if (id == CSS_PROPERTY_FLEX_BASIS) {
+        return css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value) ||
+            css_flex_basis_valid(value);
+    }
     if (id == CSS_PROPERTY_LINE_CLAMP || id == CSS_PROPERTY_WEBKIT_LINE_CLAMP) {
         return css_value_is_global_keyword(value) || css_value_contains_pending_substitution(value) ||
             (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) ||
@@ -3142,8 +3334,12 @@ bool css_property_validate_value_mode(CssPropertyCode id,
         case CSS_PROPERTY_SCROLL_SNAP_TYPE:
         case CSS_PROPERTY_SCROLL_SNAP_ALIGN:
             return css_value_is_scroll_snap(id, value);
-        case CSS_PROPERTY_OVERFLOW_CLIP_MARGIN:
-            return css_value_is_overflow_clip_margin(value);
+        case CSS_PROPERTY_OVERFLOW_CLIP_MARGIN: {
+            if (css_value_is_global_keyword(value) || css_value_contains_var_reference(value)) return true;
+            CssEnum box;
+            const CssValue* length;
+            return css_overflow_clip_margin_components(value, &box, &length);
+        }
         case CSS_PROPERTY_SCROLL_MARGIN:
         case CSS_PROPERTY_SCROLL_PADDING:
         case CSS_PROPERTY_SCROLL_MARGIN_TOP:
@@ -3719,6 +3915,13 @@ bool css_property_validate_value_mode(CssPropertyCode id,
                 css_value_is_supported_color(value);
         }
 
+        case CSS_PROPERTY_RESIZE: {
+            if (css_value_contains_pending_substitution(value) || css_value_is_global_keyword(value)) return true;
+            return css_value_keyword_equals(value, CSS_VALUE_NONE) ||
+                css_value_keyword_equals(value, CSS_VALUE_BOTH) ||
+                css_value_keyword_equals(value, CSS_VALUE_HORIZONTAL) ||
+                css_value_keyword_equals(value, CSS_VALUE_VERTICAL);
+        }
         case CSS_PROPERTY_SCROLL_BEHAVIOR: {
             if (css_value_contains_var_reference(value)) return true;
             if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
@@ -3729,6 +3932,8 @@ bool css_property_validate_value_mode(CssPropertyCode id,
         }
 
         case CSS_PROPERTY_IMAGE_RENDERING: {
+            // validate the substituted keyword rather than discarding a pending declaration.
+            if (css_value_contains_pending_substitution(value)) return true;
             if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
             CssEnum keyword = value->data.keyword;
             const CssEnumInfo* info = css_enum_info(keyword);
@@ -4157,6 +4362,7 @@ CssPropertyCode css_property_cascade_shorthand(CssPropertyCode property) {
         {CSS_PROPERTY_BORDER_IMAGE, border_image_longhands, sizeof(border_image_longhands) / sizeof(*border_image_longhands)},
         {CSS_PROPERTY_MARKER, marker_longhands, sizeof(marker_longhands) / sizeof(*marker_longhands)},
         {CSS_PROPERTY_CONTAINER, container_longhands, sizeof(container_longhands) / sizeof(*container_longhands)},
+        {CSS_PROPERTY_FLEX, flex_longhands, sizeof(flex_longhands) / sizeof(*flex_longhands)},
         {CSS_PROPERTY_TEXT_EMPHASIS, text_emphasis_longhands, sizeof(text_emphasis_longhands) / sizeof(*text_emphasis_longhands)},
     };
     for (const Group& group : groups)

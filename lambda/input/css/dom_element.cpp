@@ -2839,6 +2839,29 @@ static int dom_element_apply_selection_rule(DomElement* element, CssRule* rule,
     return applied_count;
 }
 
+// the style slot and selector name of a cascaded pseudo-element (selection keeps its own store)
+static bool dom_pseudo_style_kind(int pseudo_element, PseudoStyleKind* kind, const char** name) {
+    static const struct { int pseudo; PseudoStyleKind kind; const char* name; } slots[] = {
+        {PSEUDO_ELEMENT_BEFORE, PSEUDO_STYLE_BEFORE, "::before"},
+        {PSEUDO_ELEMENT_AFTER, PSEUDO_STYLE_AFTER, "::after"},
+        {PSEUDO_ELEMENT_FIRST_LINE, PSEUDO_STYLE_FIRST_LINE, "::first-line"},
+        {PSEUDO_ELEMENT_FIRST_LETTER, PSEUDO_STYLE_FIRST_LETTER, "::first-letter"},
+        {PSEUDO_ELEMENT_MARKER, PSEUDO_STYLE_MARKER, "::marker"},
+        {PSEUDO_ELEMENT_PLACEHOLDER, PSEUDO_STYLE_PLACEHOLDER, "::placeholder"},
+        {PSEUDO_ELEMENT_BACKDROP, PSEUDO_STYLE_BACKDROP, "::backdrop"},
+        {PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON, PSEUDO_STYLE_FILE_SELECTOR_BUTTON, "::file-selector-button"},
+        {PSEUDO_ELEMENT_FOOTNOTE_CALL, PSEUDO_STYLE_FOOTNOTE_CALL, "::footnote-call"},
+        {PSEUDO_ELEMENT_FOOTNOTE_MARKER, PSEUDO_STYLE_FOOTNOTE_MARKER, "::footnote-marker"},
+    };
+    for (const auto& slot : slots) {
+        if (slot.pseudo != pseudo_element) continue;
+        *kind = slot.kind;
+        if (name) *name = slot.name;
+        return true;
+    }
+    return false;
+}
+
 int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
                                           CssSpecificity specificity, int pseudo_element,
                                           uint32_t scope_proximity) {
@@ -2854,37 +2877,13 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
     }
 
     // Get the appropriate style tree for the pseudo-element
-    lam::Own<StyleTree>* target_style = nullptr;
+    PseudoStyleKind kind;
     const char* pseudo_name = nullptr;
-
-    if (pseudo_element == 1) {  // PSEUDO_ELEMENT_BEFORE
-        target_style = element->pseudo_style_slot(PSEUDO_STYLE_BEFORE);
-        pseudo_name = "::before";
-    } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
-        target_style = element->pseudo_style_slot(PSEUDO_STYLE_AFTER);
-        pseudo_name = "::after";
-    } else if (pseudo_element == 3) {  // PSEUDO_ELEMENT_FIRST_LINE
-        target_style = element->pseudo_style_slot(PSEUDO_STYLE_FIRST_LINE);
-        pseudo_name = "::first-line";
-    } else if (pseudo_element == 4) {  // PSEUDO_ELEMENT_FIRST_LETTER
-        target_style = element->pseudo_style_slot(PSEUDO_STYLE_FIRST_LETTER);
-        pseudo_name = "::first-letter";
-    } else if (pseudo_element == 6) {  // PSEUDO_ELEMENT_MARKER
-        target_style = element->pseudo_style_slot(PSEUDO_STYLE_MARKER);
-        pseudo_name = "::marker";
-    } else if (pseudo_element == 7) {  // PSEUDO_ELEMENT_PLACEHOLDER
-        target_style = element->pseudo_style_slot(PSEUDO_STYLE_PLACEHOLDER);
-        pseudo_name = "::placeholder";
-    } else if (pseudo_element == 8) {  // PSEUDO_ELEMENT_BACKDROP
-        target_style = element->pseudo_style_slot(PSEUDO_STYLE_BACKDROP);
-        pseudo_name = "::backdrop";
-    } else if (pseudo_element == 9) {  // PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON
-        target_style = element->pseudo_style_slot(PSEUDO_STYLE_FILE_SELECTOR_BUTTON);
-        pseudo_name = "::file-selector-button";
-    } else {
+    if (!dom_pseudo_style_kind(pseudo_element, &kind, &pseudo_name)) {
         log_debug("[CSS] Unknown pseudo-element type: %d", pseudo_element);
         return 0;
     }
+    lam::Own<StyleTree>* target_style = element->pseudo_style_slot(kind);
 
     // Create style tree if needed
     if (!*target_style) {
@@ -2927,27 +2926,17 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
 
 StyleTree* dom_element_get_pseudo_style(DomElement* element, int pseudo_element) {
     if (!element) return nullptr;
-    StyleTree* style = nullptr;
+    PseudoStyleKind kind;
+    return dom_pseudo_style_kind(pseudo_element, &kind, nullptr) ? element->pseudo_style(kind) : nullptr;
+}
 
-    if (pseudo_element == 1) {  // PSEUDO_ELEMENT_BEFORE
-        style = element->pseudo_style(PSEUDO_STYLE_BEFORE);
-    } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
-        style = element->pseudo_style(PSEUDO_STYLE_AFTER);
-    } else if (pseudo_element == 3) {  // PSEUDO_ELEMENT_FIRST_LINE
-        style = element->pseudo_style(PSEUDO_STYLE_FIRST_LINE);
-    } else if (pseudo_element == 4) {  // PSEUDO_ELEMENT_FIRST_LETTER
-        style = element->pseudo_style(PSEUDO_STYLE_FIRST_LETTER);
-    } else if (pseudo_element == 6) {  // PSEUDO_ELEMENT_MARKER
-        style = element->pseudo_style(PSEUDO_STYLE_MARKER);
-    } else if (pseudo_element == 7) {  // PSEUDO_ELEMENT_PLACEHOLDER
-        style = element->pseudo_style(PSEUDO_STYLE_PLACEHOLDER);
-    } else if (pseudo_element == 8) {  // PSEUDO_ELEMENT_BACKDROP
-        style = element->pseudo_style(PSEUDO_STYLE_BACKDROP);
-    } else if (pseudo_element == 9) {  // PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON
-        style = element->pseudo_style(PSEUDO_STYLE_FILE_SELECTOR_BUTTON);
-    }
-
-    return style;
+// the pseudo-elements whose `content` generates boxes: ::before, ::after, ::marker
+// and the page flow's footnote call and marker (CSS GCPM 3 §2.3)
+static StyleTree* dom_generated_content_style(DomElement* element, int pseudo_element) {
+    bool generated = pseudo_element == PSEUDO_ELEMENT_BEFORE || pseudo_element == PSEUDO_ELEMENT_AFTER ||
+        pseudo_element == PSEUDO_ELEMENT_MARKER || pseudo_element == PSEUDO_ELEMENT_FOOTNOTE_CALL ||
+        pseudo_element == PSEUDO_ELEMENT_FOOTNOTE_MARKER;
+    return generated ? dom_element_get_pseudo_style(element, pseudo_element) : nullptr;
 }
 
 CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
@@ -3054,15 +3043,7 @@ const char* dom_element_get_pseudo_element_content(DomElement* element, int pseu
         return NULL;
     }
 
-    StyleTree* style = nullptr;
-
-    if (pseudo_element == 1) {  // PSEUDO_ELEMENT_BEFORE
-        style = element->pseudo_style(PSEUDO_STYLE_BEFORE);
-    } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
-        style = element->pseudo_style(PSEUDO_STYLE_AFTER);
-    } else if (pseudo_element == 6) {  // PSEUDO_ELEMENT_MARKER
-        style = element->pseudo_style(PSEUDO_STYLE_MARKER);
-    }
+    StyleTree* style = dom_generated_content_style(element, pseudo_element);
     if (!style) {
         return NULL;
     }
@@ -3186,9 +3167,7 @@ const char* dom_element_get_pseudo_element_content_with_counters(
         DomElement* element, int pseudo_element, void* counter_context, Arena* arena,
         int* quote_depth, DomContentFunctionHook hook, void* hook_context) {
     if (!element || !arena) return nullptr;
-    PseudoStyleKind kind = pseudo_element == 1 ? PSEUDO_STYLE_BEFORE : pseudo_element == 2 ? PSEUDO_STYLE_AFTER : PSEUDO_STYLE_MARKER;
-    if (pseudo_element != 1 && pseudo_element != 2 && pseudo_element != 6) return nullptr;
-    StyleTree* style = element->pseudo_style(kind);
+    StyleTree* style = dom_generated_content_style(element, pseudo_element);
     const CssDeclaration* declaration = style ? style_tree_get_declaration(style, CSS_PROPERTY_CONTENT) : nullptr;
     if (!declaration || !declaration->value) return nullptr;
     StrBuf* text = strbuf_new();

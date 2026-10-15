@@ -2,7 +2,7 @@
 #include "../../lambda-data.hpp"
 
 struct MvpLmdProgram;
-struct JsBuiltinMethodSpec;
+struct MvpLmdRegExpAccessor;
 struct JsArrayOps;
 struct JsBufferViewOps;
 extern const JsArrayOps mvp_lmd_array_ops;
@@ -144,7 +144,8 @@ struct MvpLmdLibraryState {
     NameRef regexp_iterator_keys[5]; // private regexp/string/global/unicode/done state
     NameRef regexp_source_key;
     NameRef regexp_flags_key;
-    const JsBuiltinMethodSpec** regexp_accessors; // catalog metadata only, no GC values or mutable site cache
+    MvpLmdRegExpAccessor* regexp_accessors; // initial layout metadata; live descriptors are checked on every use
+    TypeMap* regexp_accessor_shape; // pool-owned initial prototype shape, never a successful-guard cache
     int regexp_accessor_count;
     bool regexp_protocol_unobserved; // final whole-program proof; native numeric/data checks remain runtime checks
     MvpLmdClass object;
@@ -239,8 +240,9 @@ Item mvp_lmd_reflect_initialize(MvpLmdProgram* program, MvpLmdLibraryState* stat
 Item mvp_lmd_arguments_list(Item source, bool property_keys = false);
 Item mvp_lmd_own_keys(Item owner);
 Item mvp_lmd_sequence_length(Item source);
+Item mvp_lmd_get_prototype_with_library(Item object, MvpLmdLibraryState* library);
 Item mvp_lmd_array_is_array(Item source);
-Item mvp_lmd_array_species_create(Item source, int64_t length);
+Item mvp_lmd_array_species_create(Item source, int64_t length, bool* fresh = NULL);
 bool mvp_lmd_is_callable(Item value);
 bool mvp_lmd_is_constructor(Item value);
 static inline bool mvp_lmd_is_proxy(Item value) {
@@ -263,7 +265,7 @@ static inline bool mvp_lmd_is_object(Item value) {
     return type == LMD_TYPE_MAP || type == LMD_TYPE_ARRAY || type == LMD_TYPE_FUNC || type == LMD_TYPE_ARRAY_NUM ||
         (type == LMD_TYPE_VMAP && (js_promise_is(value) || js_module_namespace_record(value)));
 }
-Map* mvp_lmd_property_map(Item object, bool writing = false);
+Map* mvp_lmd_property_map(Item object, bool writing = false, bool numeric_attributes = false);
 Item mvp_lmd_array_own_item(Array* array, int64_t index);
 Item mvp_lmd_array_property(Item owner, Item key, Item value, int64_t operation, Item receiver);
 extern "C" Item mvp_lmd_array_index_property(Item owner, int64_t index, Item value, int64_t operation);
@@ -313,7 +315,9 @@ static inline bool mvp_lmd_array_visit_method(int method) {
 enum MvpLmdStringRead { LMD_STRING_INDEX, LMD_STRING_CHAR, LMD_STRING_CODE, LMD_STRING_FROM_CODE, LMD_STRING_FROM_POINT };
 enum MvpLmdProperty { LMD_PROP_GET, LMD_PROP_CALLEE, LMD_PROP_SET, LMD_PROP_DELETE,
     LMD_PROP_OWN, LMD_PROP_HAS, LMD_PROP_KEYS, LMD_PROP_VALUES, LMD_PROP_ENTRIES,
-    LMD_PROP_INITIALIZE, LMD_PROP_CREATE_DATA, LMD_PROP_PRESENT, LMD_PROP_STRICT = 256,
+    LMD_PROP_INITIALIZE, LMD_PROP_CREATE_DATA, LMD_PROP_PRESENT,
+    LMD_PROP_GET_BINDING, // GetBindingValue: absent properties raise ReferenceError.
+    LMD_PROP_STRICT = 256,
     // operation-local proof: no indexed descriptors or inherited indices; writable length/extensible for edits.
     LMD_PROP_OWN_STORAGE = 512, LMD_PROP_NON_ENUMERABLE = 1024 };
 int mvp_lmd_builtin_method(String* key, TypeId owner = LMD_TYPE_MAP);

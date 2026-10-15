@@ -1,0 +1,480 @@
+{
+  "name": "Calculated flex factors use owning fonts and live inheritance",
+  "html": "test/ui/css_flex_factors_computed.html",
+  "viewport": {
+    "width": 480,
+    "height": 160
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "2|2"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#growRed"
+      },
+      "relative_to": "#grow",
+      "x": 0,
+      "y": 0,
+      "width": 80,
+      "height": 20,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#grow",
+        "offset_x": 75,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#grow",
+        "offset_x": 85,
+        "offset_y": 5
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#shrinkRed"
+      },
+      "relative_to": "#shrink",
+      "x": 0,
+      "y": 0,
+      "width": 40,
+      "height": 20,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#shrink",
+        "offset_x": 35,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#shrink",
+        "offset_x": 45,
+        "offset_y": 5
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#change"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-dirty-values",
+      "equals": "4|4"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#growRed"
+      },
+      "relative_to": "#grow",
+      "x": 0,
+      "y": 0,
+      "width": 96,
+      "height": 20,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#grow",
+        "offset_x": 91,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#grow",
+        "offset_x": 101,
+        "offset_y": 5
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#shrinkRed"
+      },
+      "relative_to": "#shrink",
+      "x": 0,
+      "y": 0,
+      "width": 24,
+      "height": 20,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#shrink",
+        "offset_x": 19,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#shrink",
+        "offset_x": 29,
+        "offset_y": 5
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#invalid"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-invalid-values",
+      "equals": "0|1"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#growRed"
+      },
+      "relative_to": "#grow",
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 20,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#grow",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#grow",
+        "offset_x": 110,
+        "offset_y": 5
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#shrinkRed"
+      },
+      "relative_to": "#shrink",
+      "x": 0,
+      "y": 0,
+      "width": 60,
+      "height": 20,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#shrink",
+        "offset_x": 55,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#shrink",
+        "offset_x": 65,
+        "offset_y": 5
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inherit"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-inherited-values",
+      "equals": "3|3"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#growRed"
+      },
+      "relative_to": "#grow",
+      "x": 0,
+      "y": 0,
+      "width": 90,
+      "height": 20,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#grow",
+        "offset_x": 85,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#grow",
+        "offset_x": 95,
+        "offset_y": 5
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#shrinkRed"
+      },
+      "relative_to": "#shrink",
+      "x": 0,
+      "y": 0,
+      "width": 30,
+      "height": 20,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#shrink",
+        "offset_x": 25,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#shrink",
+        "offset_x": 35,
+        "offset_y": 5
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#negative"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-negative-values",
+      "equals": "0|0"
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#growRed"
+      },
+      "relative_to": "#grow",
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 20,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#grow",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#grow",
+        "offset_x": 110,
+        "offset_y": 5
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#shrinkRed"
+      },
+      "relative_to": "#shrink",
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 20,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#shrink",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#shrink",
+        "offset_x": 110,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    }
+  ]
+}
