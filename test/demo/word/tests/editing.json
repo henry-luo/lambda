@@ -1,0 +1,217 @@
+{
+  "name": "Word selection, formatting, search and tables",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Hello studio. Write together."
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 5
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"format.bold\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface strong"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface strong"
+      },
+      "equals": "Hello"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": "#font-size"
+      },
+      "value": "18"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface strong"
+      },
+      "property": "font-size",
+      "equals": "24px"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#style-Heading1"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface h2"
+      },
+      "count": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"para.alignCenter\"]"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#edit-surface h2"
+      },
+      "property": "text-align",
+      "equals": "center"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#find-query"
+      },
+      "text": "studio"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#search-summary"
+      },
+      "contains": "1 matches"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#replace-text"
+      },
+      "text": "community"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#replace-all"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "Hello community. Write together."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"edit.undo\"]"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface"
+      },
+      "contains": "Hello studio. Write together."
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"insert.table\"]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-insert_table"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "count": 1
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface th"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface th"
+      },
+      "text": "Project"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface table"
+      },
+      "contains": "Project"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.insertRowBelow\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface tr"
+      },
+      "count": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"table.insertColumnRight\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface tr:first-child th"
+      },
+      "count": 4
+    },
+    {
+      "type": "render",
+      "file": "temp/word-edited.png"
+    }
+  ]
+}

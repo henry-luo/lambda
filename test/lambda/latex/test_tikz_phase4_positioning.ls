@@ -4,7 +4,7 @@
 import tikz: lambda.doc.tikz.tikz
 import named: lambda.doc.tikz.named
 import coords: lambda.doc.tikz.coords
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 fn children_named(node, tag) => [for (child in node
     where child is element and string(name(child)) == tag) child]

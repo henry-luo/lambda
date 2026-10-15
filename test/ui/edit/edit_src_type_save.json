@@ -10,7 +10,7 @@
     {"type": "assert_text", "target": {"selector": ".src-gutter"}, "contains": "10"},
     {"type": "click", "target": {"text": "second line"}},
     {"type": "key_press", "key": "End"},
-    {"type": "type", "text": " XYZ"},
+    {"type": "type_physical", "text": " XYZ"},
     {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "second line XYZ"},
     {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
     {"type": "assert_text", "target": {"selector": ".edit-status"}, "contains": "Ln 2, Col 16"},

@@ -97,20 +97,25 @@ fn resolve_target(source, raw_target) {
 
 pub pn activate(anchor) {
     let href = dom.get_attribute(anchor, "href");
-    if (href == null) { 'pass' }
-    else {
-        let resolved = resolve_target(anchor, dom.get_attribute(anchor, "target"));
-        let destination = if (resolved.target_root == null) null
-            else dom.navigation_destination(anchor, href, resolved.target_root);
-        let fragment = if (destination == null or destination.kind != "fragment") null
-            else fragment_target(resolved.target_root, destination.fragment);
-        if (dom.request_navigation({
-            source: anchor, url: href,
-            target: resolved.target, target_kind: resolved.target_kind,
-            target_name: resolved.target_name, fragment_target: fragment
-        })) { 'prevent-default' }
-        else { 'pass' }
+    if (href == null) { return 'pass' }
+    let frame = dom.embedding_element(anchor);
+    let delegated = if (frame == null) null else dom.get_attribute(frame, "data-navigation-event");
+    if (delegated != null and delegated != "") {
+        // Queue in the embedding document; a nested evaluator must not call its parent inline.
+        dom.set_attribute(frame, "data-navigation-href", href)
+        dom.request_frame(frame, delegated)
+        return 'prevent-default'
     }
+    let resolved = resolve_target(anchor, dom.get_attribute(anchor, "target"));
+    let destination = if (resolved.target_root == null) null
+        else dom.navigation_destination(anchor, href, resolved.target_root);
+    let fragment = if (destination == null or destination.kind != "fragment") null
+        else fragment_target(resolved.target_root, destination.fragment);
+    return if (dom.request_navigation({
+        source: anchor, url: href,
+        target: resolved.target, target_kind: resolved.target_kind,
+        target_name: resolved.target_name, fragment_target: fragment
+    })) 'prevent-default' else 'pass'
 }
 
 // `linkactivation` is behavior-only. The ordinary click remains the author

@@ -1,0 +1,39 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Lambda round-trip tests//EN
+CALSCALE:GREGORIAN
+X-EMPTY:
+BEGIN:VTIMEZONE
+TZID:Asia/Singapore
+BEGIN:STANDARD
+DTSTART:19700101T000000
+TZOFFSETFROM:+0800
+TZOFFSETTO:+0800
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:planning@example.com
+DTSTAMP:20261015T000000Z
+DTSTART;TZID=Asia/Singapore:20261016T090000
+DURATION:PT1H30M
+SUMMARY:Planning\, café 中文 😀
+DESCRIPTION:Repeated Unicode café 中文 😀\; Repeated Unicode café 中文 😀\; Repeated Unicode café 中文 😀\; Repeated Unicode café 中文 😀\; Repeated Unicode café 中文 😀\; Repeated Unicode café 中文 😀\; Repeated Unicode café 中文 😀\; Repeated Unicode café 中文 😀\; Repeated Unicode café 中文 😀\; Repeated Unicode café 中文 😀\; Repeated Unicode café 中文 😀\; Repeated Unicode café 中文 😀\; Repeated Unicode café 中文 😀\; Repeated Unicode café 中文 😀\; Repeated Unicode café 中文 😀\; Repeated Unicode café 中文 😀\; Repeated Unicode café 中文 😀\; Repeated Unicode café 中文 😀\; end.
+ATTENDEE;CN="Example, Ada";ROLE=REQ-PARTICIPANT:mailto:ada@example.com
+ATTENDEE;CN="Example, Bob":mailto:bob@example.com
+RRULE:FREQ=WEEKLY;COUNT=3
+X-EMPTY:
+BEGIN:VALARM
+ACTION:DISPLAY
+TRIGGER:-PT15M
+DESCRIPTION:Reminder
+END:VALARM
+END:VEVENT
+BEGIN:VTODO
+UID:todo@example.com
+DTSTAMP:20261015T000000Z
+DUE;VALUE=DATE:20261020
+STATUS:IN-PROCESS
+PERCENT-COMPLETE:50
+SUMMARY:Ship the tests
+END:VTODO
+END:VCALENDAR

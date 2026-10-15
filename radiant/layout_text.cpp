@@ -1315,7 +1315,8 @@ static bool measure_shaped_simple_latin_run(LayoutContext* lycon, const unsigned
                                             float* out_width,
                                             uint32_t* out_first_codepoint,
                                             uint32_t* out_last_codepoint,
-                                            DomNode* text_node = nullptr) {
+                                            DomNode* text_node = nullptr,
+                                            bool* following_context = nullptr) {
     if (!str || !text_end || str >= text_end || !out_bytes || !out_width ||
         !out_first_codepoint || !out_last_codepoint) {
         return false;
@@ -1335,7 +1336,7 @@ static bool measure_shaped_simple_latin_run(LayoutContext* lycon, const unsigned
     }
     if (text_node) {
         layout_measure_inline_text_context(lycon, text_node, str, result.bytes, false,
-                                           &result.width);
+                                           &result.width, nullptr, nullptr, following_context);
     }
     *out_bytes = (int)result.bytes; // INT_CAST_OK: text byte count
     *out_width = result.width;
@@ -2171,6 +2172,7 @@ static void apply_line_initial_letter_exclusions(
 }
 
 void line_reset(LayoutContext* lycon) {
+    lycon->line.has_native_metrics = false;
     lycon->line.max_ascender = lycon->line.max_descender =
         lycon->line.max_css_baseline_ascender = 0;
     lycon->line.ruby_annotation_min_line_height =
@@ -2192,6 +2194,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.prev_text_spacing_codepoint = 0;
     lycon->line.prev_text_autospace_codepoint = 0;
     lycon->line.prev_kerning_font_style = nullptr;
+    lycon->line.prev_kerning_has_following_context = false;
     // IMPORTANT: Reset effective bounds to container bounds before float adjustment
     lycon->line.effective_left = lycon->line.left;
     lycon->line.effective_right = lycon->line.right;
@@ -2589,8 +2592,10 @@ void line_break(LayoutContext* lycon, bool forced_break) {
         contribute_block_root_strut(lycon);
     }
     finalize_non_rendered_table_markers_for_line(lycon);
+    if (lycon->paged) paged_line_metrics(lycon);
     // CSS 2.1 §10.8.1: The strut is a zero-width inline box with the block's font
-    if (lycon->line.max_ascender > lycon->block.init_ascender ||
+    if (lycon->line.has_native_metrics ||
+        lycon->line.max_ascender > lycon->block.init_ascender ||
         lycon->line.max_descender > lycon->block.init_descender ||
         lycon->line.has_different_inline_font ||
         lycon->line.has_replaced_content ||
@@ -2808,6 +2813,8 @@ void line_break(LayoutContext* lycon, bool forced_break) {
         used_line_height = max(used_line_height, lycon->line.max_atomic_inline_height);
     }
 
+    if (lycon->line.has_native_metrics)
+        used_line_height = lycon->line.max_ascender + lycon->line.max_descender;
     layout_finalize_static_line_self_alignment(lycon, used_line_height);
 
     // a page flow moves a line that would cross its fragmentainer end to the next one
@@ -2884,6 +2891,7 @@ void line_break(LayoutContext* lycon, bool forced_break) {
         lycon->line.parent_font_size = block_font->font_size;
         lycon->line.parent_font_style = lam::up(block_font);
     }
+    if (lycon->paged) paged_line_start(lycon, line_block);
 }
 // CSS Text 3 §5.2: Measure the width of the first word starting from `str`.
 static float measure_first_word_width(LayoutContext* lycon, const unsigned char* str,
@@ -3000,6 +3008,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
     bool break_all = get_text_wrap_mode_value(text_node, lycon) != CSS_VALUE_NOWRAP &&
         (word_break == CSS_VALUE_BREAK_ALL || line_break == CSS_VALUE_ANYWHERE);
     uint32_t prev_codepoint =
+        !lycon->line.prev_kerning_has_following_context &&
         lycon->line.prev_kerning_font_style == lycon->font.style
             ? lycon->line.prev_codepoint : 0;
 
@@ -3390,6 +3399,7 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
         lycon->line.prev_text_autospace_codepoint = 0;
         lycon->line.prev_codepoint = 0;
         lycon->line.prev_kerning_font_style = nullptr;
+        lycon->line.prev_kerning_has_following_context = false;
     }
     if (is_initial_letter && font_box_handle(&lycon->font)) {
         initial_letter_avoid_bfc_floats(lycon, rect, initial_insets);
@@ -4417,6 +4427,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         uint32_t shaped_run_first_codepoint = 0;
         bool measured_grapheme_cluster = false;
         bool contextual_unit = false;
+        bool following_context = false;
         float grapheme_cluster_width = 0.0f;
 
         if (!collapse_newlines && (*str == '\n' || *str == '\r')) {
@@ -4478,7 +4489,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 measure_shaped_simple_latin_run(
                     lycon, str, text_end, text_transform, trim_cjk_spacing,
                     break_all, break_word, auto_hyphenation, &shaped_bytes,
-                    &shaped_width, &shaped_first_cp, &shaped_last_cp, text_node)) {
+                    &shaped_width, &shaped_first_cp, &shaped_last_cp, text_node, &following_context)) {
                 // a shaped advance still carries the selected fallback face's normal line metrics.
                 contribute_shaped_run_line_metrics(lycon, str, (size_t)shaped_bytes);
                 wd = shaped_width;
@@ -4707,6 +4718,15 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     contextual_unit = true;
                 }
             }
+            if (!measured_grapheme_cluster && text_transform == CSS_VALUE_NONE &&
+                !has_small_caps(lycon) && lycon->font.style->has_kerning &&
+                codepoint >= 0x21 && codepoint <= 0x7E && next_ch == text_end) {
+                // wrapping modes can require per-character layout; retain the final glyph's outgoing pair.
+                float contextual_width = 0.0f;
+                if (layout_measure_inline_text_context(lycon, text_node, str,
+                        (size_t)(next_ch - str), false, &contextual_width,
+                        nullptr, nullptr, &following_context)) wd = contextual_width;
+            }
             if (!text_autospace_bidi_unsupported && layout_text_autospace_pair(
                     text_autospace, lycon->line.prev_text_autospace_codepoint,
                     codepoint)) {
@@ -4774,6 +4794,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         if (lycon->font.style->has_kerning && !contextual_unit) {
             // fallback or styled inline cannot form a pair in the next font.
             if (lycon->line.prev_codepoint &&
+                !lycon->line.prev_kerning_has_following_context &&
                 lycon->line.prev_kerning_font_style == lycon->font.style) {
                 float kerning_css = text_kerning_adjustment(
                     lycon, lycon->line.prev_codepoint, incoming_kerning_codepoint);
@@ -4789,6 +4810,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.prev_codepoint = outgoing_kerning_codepoint;
             lycon->line.prev_kerning_font_style = lycon->font.style;
         }
+        lycon->line.prev_kerning_has_following_context = following_context;
 #ifdef RADIANT_TRACE_TEXT_LAYOUT
         // debugging; keeping it always-on makes long pages non-interactive.
 #endif

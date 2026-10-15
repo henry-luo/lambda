@@ -1,7 +1,7 @@
 # Radiant Source Editor — Implementation Plan and Record
 
 **Date:** 2026-10-06
-**Status:** P0 (`9007c54b3`), P1 Markdown highlighting (`8c477c3a8`), P2 HTML highlighting (`1ca09a3d5`, §6) and P3 parity and polish (`c9adc7199`, §7) are on master. P4, the outstanding items, is on branch `worktree-source-editor-p4` (§8). OQ15 and OQ16 were decided by the user on 2026-10-07 (§5.5); in P4 the user decided OQ17 (soft wrap stays character wrap) and left OQ18 open (design §14.3).
+**Status:** P0 (`9007c54b3`), P1 Markdown highlighting (`8c477c3a8`), P2 HTML highlighting (`1ca09a3d5`, §6), P3 parity and polish (`c9adc7199`, §7), and P4 (§8, final record `4f7668cb6`) are on master. The physical-keyboard typing repair is recorded in §9 (2026-10-15). OQ15 and OQ16 were decided by the user on 2026-10-07 (§5.5); in P4 the user decided OQ17 (soft wrap stays character wrap) and left OQ18 open (design §14.3).
 **Design:** [Radiant Source Editor](../radiant/Radiant_Design_Source_Editor.md) (CED11–CED22, CED14v2, CED15v2, CED16v4, CED18v2, CED19v2).
 
 ## 1. What P0 has built
@@ -264,3 +264,35 @@ Corpus fidelity (GTest (b), `test/markdown`, 40-line windows every 17 lines): 1,
 
 - Refusing files with NUL bytes (OQ18) is left open by the user; word-boundary wrapping is not built by decision (OQ17).
 - Side findings filed as separate tasks: the `edit_md_view_only_keys` crash, a diagnostic for a module-level `let` read before its definition, `parse()` retaining every `Input`, lazy `dom` package loading riding on `mousewheel`, nested template state identity (needs a ruling), and E208 on expression-bodied functions.
+
+## 9. Physical keyboard typing repair (2026-10-15)
+
+Opening `./lambda.exe edit --source test/html/index.html` allowed text selection
+but physical typing inserted nothing. The first statement of `on keydown`
+assigned `vw = mounted(...)` even after the surface was mounted. Although
+`mounted` returned the same record, a state assignment marks the template dirty
+and rebuilds its rows. That discarded the DOM selection before the following
+text-input event could reach `editaction`; restoring focus did not restore that
+selection. The handler now assigns the mount result only while its handle is
+null, preserving the ordinary printable key's pending edit target (S12.1.3,
+CED19v2).
+
+The previous `type` fixtures sent only text-input events and skipped the failing
+keydown. `edit_src_html_highlight`, `edit_src_type_save`, and `edit_src_keys` now
+use `type_physical`, covering highlighted HTML, plain text, selection replacement,
+save, and undo/redo through the platform key sequence.
+
+Validation used the current executable and an alternate `LAMBDA_HOME` containing
+the original source module for comparison:
+
+- A disposable copy of the reported `index.html`: 0/3 assertions before the fix,
+  3/3 after it (inserted text, unsaved state, saved bytes).
+- The three physical-typing fixtures: HTML 8/10 → 10/10, plain-text save
+  7/11 → 11/11, editing keys 3/10 → 10/10.
+- Source UI fixtures: 21/22 pass. The clipboard fixture retains two cut failures
+  (12/14 assertions); the original module fails more assertions in that fixture
+  (6/14). The other edit UI fixtures pass 17/21; the four failures
+  (`edit_md_clipboard`, `edit_md_math_scroll`, `edit_md_view_only`,
+  `edit_md_view_only_keys`) have identical assertion counts with the original
+  module.
+- Source buffer and highlighting Lambda unit fixtures: 4/4 pass.

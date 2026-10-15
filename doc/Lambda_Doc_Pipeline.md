@@ -149,7 +149,18 @@ The unifying property of the pipeline is that the Mark tree is never translated.
 
 For this family of inputs, parser in `lambda/input/` follows one rule: **preserve structure, not presentation, and emit HTML wherever applicable.** Where a format has a concept HTML lacks, the parser introduces a small custom element rather than flattening the concept into text. The payoff is that a document parsed from any prose format can be handed straight to Radiant for layout, straight to a schema for validation, or straight to a formatter for a different syntax, with no per-format translation step in between.
 
-Markdown, HTML5, reStructuredText, AsciiDoc, MediaWiki and DokuWiki markup, Org-mode, Textile, troff man pages, MDX and LaTeX all parse into the same element tree, the [Mark Doc schema](Doc_Schema.md). The schema is rooted at `<doc>`, carries metadata in a `<meta>` element, uses HTML element names for everything HTML can express (`<h1>`…`<h6>`, `<p>`, `<ul>`, `<table>`, `<a>`, `<img>`, `<pre><code>`), and adds custom elements for what HTML cannot: `<math>`, `<cite>`, `<footnote>` and a `<raw>` pass-through. Its block and inline vocabulary is modelled on Pandoc's abstract syntax tree, so anyone who knows Pandoc's model already knows the shape of a Lambda document. Because a Markdown file, a wiki page and an HTML page all produce the same unified element tree, `lambda view` treats them as the same.
+Markdown, reStructuredText, AsciiDoc, Org-mode, Textile, troff man pages, and
+the [ten wiki dialect profiles](Markup_Formats_Support.md#15-wiki-dialect-coverage)
+parse into the [Mark Doc schema](Doc_Schema.md). This includes MediaWiki,
+DokuWiki, TikiWiki, TWiki, Vimwiki, XWiki 2.1, ZimWiki, Creole 1.0, Jira, and
+Confluence wiki markup. The root is `<doc>` with optional `<meta>` followed by
+`<body>`. Shared structure uses HTML element names; code uses
+`<code type:"block">` or `<code type:"inline">`. Custom elements cover math,
+citations, footnotes, and inert raw source. All wiki readers use the common
+normalization and MarkBuilder construction path (S2.6.1v2, S2.6.2–S2.6.5;
+D7.1.5). Vimwiki page tags and Zim tags/creation metadata can populate `<meta>`;
+native task markers retain states and progress bounds. HTML5, LaTeX, and MDX
+have their own parser tree shapes; see [format-specific trees](Markup_Formats_Support.md).
 
 ```markdown
 # Hello
@@ -161,12 +172,12 @@ Some **bold** text with a [link](https://example.com).
 ```
 
 ```mark
-<doc
-  <meta>
-  <h1 "Hello">
-  <p "Some " <strong "bold"> " text with a " <a href:"https://example.com" "link"> ".">
-  <ul <li "one"> <li "two">>
->
+<doc version: "1.0",
+  <body
+    <h1 level: "1", "Hello">
+    <p <span "Some " <strong "bold"> " text with a "
+      <a href: "https://example.com", "link"> ".">>
+    <ul <li "one"> <li "two">>>>
 ```
 
 The parsers are held to the official conformance suites: the Markdown parser passes the full CommonMark test suite and the HTML5 parser passes the html5lib suite.
@@ -196,6 +207,14 @@ And a Lambda script can be seen as a functional mapping from its input sources, 
 ### 2.4 Formatting Output
 
 Formatters run the pipeline backwards. Mark itself is the lossless serialization of the tree; JSON, YAML, TOML, INI, XML, HTML, Markdown, reStructuredText, Org-mode, wiki, Textile, JSX/MDX, LaTeX and plain text each write the parts of the tree they can express, and math trees can be emitted as LaTeX, Typst, AsciiMath or MathML. Where a target lacks a concept the conversion is deliberately predictable rather than silently lossy: a `binary` value, for instance, becomes a standard base64 string in JSON and YAML. Because every parser and every formatter meets in the middle, adding one parser adds a route to every existing output, and adding one formatter adds a route from every existing input.
+
+All wiki writers, including MediaWiki, live in the shipped `lambda.doc.wiki`
+Lambda Script package (D7.2.4); the native MediaWiki formatter is retired.
+Select a target with `wiki:<flavor>`. Unsupported constructs produce loss
+diagnostics, and plain formatting fails on them by default. Use
+`wiki.format_report` to inspect the text and diagnostics, then `loss:"allow"`
+or CLI `--loss allow` when degraded output is acceptable. See
+[wiki writers and current limits](Markup_Formats_Support.md#51-wiki-output).
 
 ---
 

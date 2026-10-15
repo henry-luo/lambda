@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE h:html>
+<h:html xmlns:h="http://www.w3.org/1999/xhtml" xml:lang="en">
+<h:head><h:title>XHTML names</h:title><h:link rel="stylesheet" href="xhtml_names.css"/></h:head>
+<h:body>
+<h:div id="box" class="card" style="height:44px">XHTML box</h:div>
+<h:p id="status">pending</h:p>
+<s:svg xmlns:s="http://www.w3.org/2000/svg" width="80" height="30" viewBox="0 0 80 30"><s:foreignObject width="80" height="30"><h:div id="foreign">foreign HTML</h:div></s:foreignObject></s:svg>
+<h:script><![CDATA[
+const box = document.getElementById('box');
+const foreign = document.getElementById('foreign');
+const ready = box.localName === 'div' && box.namespaceURI === 'http://www.w3.org/1999/xhtml'
+    && box.getAttribute('class') === 'card' && foreign.localName === 'div'
+    && foreign.namespaceURI === 'http://www.w3.org/1999/xhtml' && document.compatMode === 'CSS1Compat';
+document.getElementById('status').textContent = ready ? 'XHTML ready' : 'XHTML failed';
+]]></h:script>
+</h:body></h:html>

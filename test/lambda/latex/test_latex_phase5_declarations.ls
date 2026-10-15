@@ -1,7 +1,7 @@
 // Phase V M2 (vibe/impl/Lambda_Impl_Latex_Packages.md §6): packages whose
 // commands already render, math symbol and alphabet tables, and the small
 // pifont, marvosym, placeins, indentfirst and bookmark adapters.
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 fn doc(preamble, body) =>
     "\\documentclass{article}\n" ++ preamble ++ "\n\\begin{document}\n" ++ body ++ "\n\\end{document}\n"

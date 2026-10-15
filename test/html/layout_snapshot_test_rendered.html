@@ -1,0 +1,13 @@
+<!doctype html><html class="reftest-wait"><body>
+<div id="result" data-cancelled="safe" style="width:10px;height:10px"></div>
+<script>
+addEventListener('load', () => {
+    const box = document.getElementById('result');
+    document.documentElement.addEventListener('TestRendered', event => {
+        if (box.getBoundingClientRect().width !== 10 || !event.bubbles) return;
+        box.style.width = '37px';
+        box.setAttribute('data-rendered', 'yes');
+        document.documentElement.classList.remove('reftest-wait');
+    }, {once: true});
+});
+</script></body></html>

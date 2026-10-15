@@ -111,6 +111,9 @@ fi
 RAW=""
 if (( ! STRUCTURAL_ONLY )); then
   sg_args=(scan -c "$SGCONFIG" --include-metadata --json=stream)
+  # imported codec/archive sources keep upstream conventions; scan Lambda's adapters normally.
+  sg_args+=(--globs '!lib/image/lib*/**' --globs '!lib/image/giflib/**')
+  sg_args+=(--globs '!lib/zip/**')
   [[ -n "$RULE_FILTER" ]] && sg_args+=(--filter "$RULE_FILTER")
   sg_args+=("${SCAN_ROOTS[@]}")
   # ast-grep exits non-zero when it finds diagnostics; that's expected.

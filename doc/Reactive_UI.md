@@ -104,6 +104,14 @@ on delete_item(evt) {
 
 ## The Reactive Loop
 
+For native controls with application-owned values, `lambda.ui.controls` provides
+`value`/`checked` props and declarative `on_change` actions. The package synchronizes
+live control state after projection while preserving accepted text selections and
+IME preedit. Custom model editors can reuse `lambda.edit.controller` for surface
+binding, document-selection adoption, input routing, replacement, and completion.
+See [Shared editor coordination and control bindings](dev/Shared_Editing.md)
+for the API and examples (**S12.1.3**, **D7.2.5**).
+
 1. An input event is hit-tested to an element, which maps back to the template instance that rendered it, and that instance's handler runs.
 2. The handler changes state (`view`) or the model (`edit`); every change marks the affected template instances dirty.
 3. Only dirty template bodies are re-executed. A body whose result is unchanged is skipped; changed results are swapped into the document in place, and only the affected subtree is re-cascaded and re-laid out. A full document rebuild is the fallback, not the normal path.

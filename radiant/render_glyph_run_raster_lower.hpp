@@ -25,6 +25,7 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
     FontHandle* font_handle = font ? font_box_handle(font) : nullptr;
     float metric_scale = render_font_pixel_to_css(font_handle);
     FontProp* style = font ? font->style : nullptr;
+    if (style && style->font_size <= 0.0f) return;
     FontStyleDesc style_desc = {};
     if (style) {
         style_desc = font_style_desc_from_prop(style);
@@ -52,7 +53,8 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
 
         bool character_gap = text_justify_character_gap(&justify_context, codepoint, run->justify_mode);
         if (codepoint == 0xFE0F || codepoint == 0x00AD ||
-            utf8proc_category(codepoint) == UTF8PROC_CATEGORY_CF) {
+            utf8proc_category(codepoint) == UTF8PROC_CATEGORY_CF ||
+            utf8proc_category(codepoint) == UTF8PROC_CATEGORY_CC) {
             continue;
         }
         if (run->cjk_spacing > 0.0f && character_gap)
@@ -84,6 +86,14 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
                 : font_load_glyph(font_handle, &style_desc, codepoint, true);
         }
         if (!glyph) {
+            Rect rect = render_text_missing_glyph_rect(font, x,
+                run->baseline_y - font_get_rendering_ascender(font_handle), space_width);
+            RdtPath* path = rdt_path_new();
+            if (!path) return;
+            rdt_path_add_rect(path, rect.x, rect.y, rect.width, rect.height, 0.0f, 0.0f);
+            dl_fill_path(dl, path, Color{0xFF0000FF}, RDT_FILL_WINDING,
+                run->has_transform ? &run->transform : nullptr);
+            rdt_path_free(path);
             x += space_width;
             continue;
         }

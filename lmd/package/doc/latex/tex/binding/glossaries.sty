@@ -1,0 +1,25 @@
+% glossaries.sty -- Lambda-owned binding of glossaries (CTAN), written from its
+% manual rather than copied.
+%
+% Like the other declaration bindings (vibe/latex/Lambda_Design_TeX_Engine.md §4),
+% it defines the macros a document redefines (\glossaryname, \acronymname,
+% \glspostdescription) with glossaries' defaults, so \renewcommand is legal and the
+% echoed definition reaches the script adapter (lmd/package/doc/latex/packages/terms.ls).
+% \loadglsentries reads a file of definitions beside the document through the
+% engine's path-gated \input. Every other command stays a constructor.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{glossaries}[2026/10/13 Lambda binding]
+\DeclareOption*{}
+\ProcessOptions\relax
+
+\providecommand\glossaryname{Glossary}
+\providecommand\acronymname{Acronyms}
+\providecommand\glspostdescription{.}
+\providecommand\entryname{Notation}
+\providecommand\descriptionname{Description}
+\providecommand\symbolname{Symbol}
+\providecommand\pagelistname{Page List}
+
+% \loadglsentries[type]{file}: the entries' type option is not applied
+\def\loadglsentries{\@ifnextchar[\gls@loadentries{\gls@loadentries[]}}
+\def\gls@loadentries[#1]#2{\input{#2}}

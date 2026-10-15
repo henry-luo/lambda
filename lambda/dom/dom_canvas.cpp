@@ -23,6 +23,7 @@
 #include "../lambda.hpp"
 #include "../runtime/heap_api.h"
 #include "../input/css/css_style.hpp"
+#include "../core/well_known_markup_names.h"
 #include "dom_observers.h"
 #include "../../lib/font/font.h"
 #include "../../lib/log.h"
@@ -375,6 +376,33 @@ static Item js_canvas_context_rect(Item callee, Item this_value,
     return make_js_undefined();
 }
 
+static Item js_canvas_context_draw_image(Item callee, Item this_value,
+        Item* args, int argc, uint64_t* result_home) {
+    (void)callee; (void)result_home;
+    if (argc < 3 || (argc != 3 && argc != 5 && argc < 9))
+        return dom_realm_throw_type_error("drawImage requires 3, 5 or 9 arguments");
+    RootFrame roots(2);
+    Rooted<Item> context(roots, this_value);
+    Rooted<Item> source(roots, args[0]);
+    void* element = js_canvas_context_element(context.get());
+    DomElement* image = (DomElement*)dom_unwrap_element(source.get());
+    if (!element) return dom_realm_throw_type_error("CanvasRenderingContext2D receiver required");
+    bool svg_image = image && image->tag() == MARKUP_NAME_IMAGE && dom_element_is_svg(image);
+    if (!image || (image->tag() != MARKUP_NAME_IMG && image->tag() != MARKUP_NAME_CANVAS && !svg_image))
+        return dom_realm_throw_type_error("drawImage requires an image or canvas source");
+    int count = argc >= 9 ? 8 : argc - 1;
+    float values[8] = {};
+    for (int index = 0; index < count; index++) {
+        Item error = js_canvas_number_arg(args, argc, index + 1, &values[index]);
+        if (item_is_error(error)) return error;
+    }
+    if (!js_canvas_numbers_are_finite(values, count)) return make_js_undefined();
+    if (!dom_provider_call(dom_canvas_engine_ops(), &DomCanvasEngineOps::draw_image,
+            element, image, values, (size_t)count)) return js_canvas_draw_failed();
+    js_canvas_note_paint(element);
+    return make_js_undefined();
+}
+
 static Item js_canvas_context_fill_rect(Item callee, Item this_value,
                                         Item* args, int argc, uint64_t* result_home) {
     return js_canvas_context_rect(callee, this_value, args, argc, result_home, false, false);
@@ -488,6 +516,7 @@ static void js_canvas_install_context_methods(Item context) {
         {"fillRect", js_canvas_context_fill_rect, 4},
         {"strokeRect", js_canvas_context_stroke_rect, 4},
         {"clearRect", js_canvas_context_clear_rect, 4},
+        {"drawImage", js_canvas_context_draw_image, 3},
         {"fillText", js_canvas_context_fill_text, 3},
         {"measureText", js_canvas_measure_text, 1},
     };

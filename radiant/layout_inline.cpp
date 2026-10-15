@@ -2526,6 +2526,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     span->x = lycon->line.advance_x;  span->y = lycon->block.advance_y;
     span->width = 0;  span->height = 0;
     span->display = display;
+    if (span->position) span->position->inline_relative_y = 0.0f;
     // CSS Position 3 §4.1: preserve the first inline box origin separately
     // because the visible DOM rectangle may start on a later line fragment.
     FragmentUnion* inline_cb = span->ensure_fragment_union(FRAGMENT_UNION_INLINE_CB);

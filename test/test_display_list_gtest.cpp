@@ -137,6 +137,23 @@ TEST(PaintListTest, OwnershipPayloadsAreReleasedByClearAndDestroy) {
     EXPECT_EQ(destroy_list.capacity(), 0u);
 }
 
+TEST(PaintListTest, StackScopeReleasesOwnedSnapshotsExactlyOnce) {
+    ImageSurface surface = {};
+    auto release = [](ImageSurface* image) { image->width++; };
+    {
+        PaintList recording;
+        paint_draw_image_resource(&recording, &surface, 0, 0, 10, 10, 255, nullptr, release);
+        ASSERT_EQ(recording.size(), 1u);
+    }
+    EXPECT_EQ(surface.width, 1);
+    {
+        PaintList recording;
+        paint_draw_image_resource(&recording, &surface, 0, 0, 10, 10, 255, nullptr, release);
+        paint_list_destroy(&recording);
+    }
+    EXPECT_EQ(surface.width, 2);
+}
+
 static size_t borrowed_paint_image_releases;
 static void release_borrowed_paint_test_image(ImageSurface*) { borrowed_paint_image_releases++; }
 
@@ -1151,6 +1168,23 @@ TEST_F(PaintIrParityTest, RasterEffectFragmentsMatchDirect) {
     dl_save_backdrop(&direct, 2, 3, 20, 30);
     dl_composite_opacity(&direct, 2, 3, 20, 30, 0.5f, true);
     expect_lists_equal(lowered, direct);
+}
+
+TEST_F(PaintIrParityTest, ZeroHeightEffectAcquiresItsDescendantsBackdropRegion) {
+    PaintEffectGroup group = {};
+    group.bounds = {0.0f, 0.0f, 100.0f, 0.0f};
+    group.opacity = 0.5f;
+    paint_begin_effect_group(&pl, &group);
+    paint_fill_rect(&pl, 0.0f, 0.0f, 100.0f, 100.0f, test_color(0xff0000ff));
+    paint_end_effect_group(&pl);
+    lower();
+    DisplayListValidationResult result = {};
+    ASSERT_TRUE(dl_validate(&lowered, &result)) << result.message;
+    ASSERT_EQ(lowered.item_count(), 3);
+    EXPECT_EQ(lowered.data()[0].op, DL_SAVE_BACKDROP);
+    EXPECT_EQ(lowered.data()[1].op, DL_FILL_RECT);
+    EXPECT_EQ(lowered.data()[2].op, DL_COMPOSITE_OPACITY);
+    EXPECT_EQ(lowered.data()[0].save_backdrop.h, 100);
 }
 
 TEST_F(PaintIrParityTest, RasterClipFragmentsMatchDirect) {

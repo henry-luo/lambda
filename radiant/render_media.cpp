@@ -85,6 +85,10 @@ bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
 }
 
 Rect render_media_object_rect(const EmbedProp* embed, ImageSurface* img, Rect rect, float s) {
+    // native content sizing keeps its own object dimensions inside the CSS viewport.
+    if (embed && embed->native_image_sized)
+        return render_media_positioned_rect(embed, rect, embed->native_image_width * s,
+            embed->native_image_height * s, s);
     if (!embed || !img || img->width <= 0 || img->height <= 0 ||
         rect.width <= 0.0f || rect.height <= 0.0f || s <= 0.0f) return rect;
     // Apply object-fit: compute actual image render rect

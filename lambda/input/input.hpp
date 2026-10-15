@@ -64,6 +64,10 @@ public:
 // Idempotent. Callers only need it to free them before the pool dies.
 void input_release_auxiliary_resources(Input* input);
 
+// shared document admission policy for XML-serialized HTML paths (query/fragment safe).
+bool input_path_is_xhtml(const char* path);
+bool input_path_is_ebook(const char* path);
+
 // Release an Input's owned allocators (its context, arena and registries).
 // Idempotent. The pool the Input lives in calls it when the pool is destroyed
 // or reset (D4.2.6); call it directly only to release earlier. The caller
@@ -182,6 +186,7 @@ extern "C" {
 // Unified markup parsing functions (from input-markup.cpp)
 Item input_markup(Input *input, const char* content);
 Item input_markup_with_format(Input *input, const char* content, MarkupFormat format);
+Item input_markup_wiki(Input* input, const char* source, const char* flavor);
 Item input_markup_commonmark(Input *input, const char* content);  // Strict CommonMark (no GFM extensions)
 
 // JSX parsing functions (from input-jsx.cpp)
@@ -238,7 +243,8 @@ char* download_http_content_with_cookie_jar(const char* url, size_t* content_siz
                                             char** effective_url = nullptr);
 // document response metadata is caller-owned and reflects only the final response.
 char* download_http_document_with_cookie_jar(const char* url, size_t* content_size,
-    struct CookieJar* cookie_jar, char** effective_url, char** content_language);
+    struct CookieJar* cookie_jar, char** effective_url, char** content_language,
+    char** content_type = nullptr);
 char* download_to_cache(const char* url, const char* cache_dir, char** out_cache_path);
 
 // Cache-aware synchronous download. Checks disk cache first; downloads on miss.

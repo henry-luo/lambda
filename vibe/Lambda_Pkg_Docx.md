@@ -7,7 +7,7 @@
 > **Scope:** Read `.docx` files and convert their supported WordprocessingML
 > content into a semantic Lambda element tree, an HTML fragment, plain text,
 > and structured diagnostics.
-> **Formal linkage:** D7.2.1 governs package/module behavior; D7.2.4 governs
+> **Formal linkage:** D7.2.1 governs package/module behavior; D7.2.4v3 governs
 > the shipped `lambda.*` namespace and document-package paths. This proposal
 > does not revise either ruling.
 
@@ -34,7 +34,7 @@ provide an HTML fragment, extracted text, metadata, and diagnostics.
 ```
 
 The import path is `lambda.doc.docx`, backed by
-`lmd/package/doc/docx.ls`, consistent with D7.2.4's document package layout.
+`lmd/package/doc/docx.ls`, consistent with D7.2.4v3's document package layout.
 The package has no native runtime dependency and adds no third-party runtime
 library.
 
@@ -225,7 +225,7 @@ before lowering. Full visual properties such as font metrics, exact spacing,
 columns, borders, and page-relative floating placement are not part of the
 semantic v1 contract. The supported paragraph-anchor subset uses CSS floats,
 distance/effect extents, and signed offsets for column-start square wrapping
-at a paragraph anchor (D7.2.4). Explicit no-wrap offsets use absolutely positioned
+at a paragraph anchor (D7.2.4v3). Explicit no-wrap offsets use absolutely positioned
 boxes anchored to their paragraph, with compact CSS layer ranks on either side
 of body text. The root owns their stacking context; empty anchor paragraphs
 retain their source line height. Shape properties and colors are validated data,
@@ -234,7 +234,7 @@ sides of an interior image still retain diagnostics.
 Footnote/endnote separator and continuation-separator definitions are metadata,
 not document notes. Annotation parts resolve IDs and relationships in their
 own part context; referenced content shares the paragraph/table/style lowering
-used by the main body (D7.2.4). Repeated references point to one annotation,
+used by the main body (D7.2.4v3). Repeated references point to one annotation,
 and source numeric IDs do not determine display numbering. Plain text retains
 reference markers and appends labelled annotation text after the body, grouped
 as footnotes, endnotes and comments. Significant source whitespace is retained.
@@ -310,7 +310,7 @@ main part from package relationships. Support paths and pre-opened ZIP trees.
 
 **Dependencies:** Existing `input(..., "zip")`, `input(..., "xml")`,
 `lambda/input/input-zip.cpp`, `lambda/input/input-xml.cpp`, and Lambda package
-resolution governed by D7.2.4.
+resolution governed by D7.2.4v3.
 
 **Acceptance:** Minimal valid documents load even with a nonstandard main-part
 path and optional parts absent. Corrupt ZIP, invalid required XML, missing
@@ -326,8 +326,8 @@ numbering definitions before emitting elements. Add the result diagnostics
 contract and deterministic HTML serialization.
 
 **Dependencies:** Phase 1, existing Lambda element construction and HTML
-formatting conventions; use `lmd/package/latex/latex.ls` and
-`lmd/package/latex/to_html.ls` as package-structure references, not as code to
+formatting conventions; use `lmd/package/doc/latex/latex.ls` and
+`lmd/package/doc/latex/to_html.ls` as package-structure references, not as code to
 duplicate.
 
 **Acceptance:** Script fixtures produce stable element, HTML, text, and
@@ -414,7 +414,7 @@ documentation convention.
 - [docx2html: DOCX model to HTML](https://github.com/lalalic/docx2html)
 - [ECMA-376, Office Open XML](https://ecma-international.org/publications-and-standards/standards/ecma-376/)
 - [Microsoft Learn: Structure of a WordprocessingML document](https://learn.microsoft.com/en-us/office/open-xml/word/structure-of-a-wordprocessingml-document)
-- Lambda package namespace and package module rules: D7.2.1 and D7.2.4 in
+- Lambda package namespace and package module rules: D7.2.1 and D7.2.4v3 in
   `doc/Lambda_Formal_Design.md`.
 - Existing package directory and import guide: `doc/Lambda_Packages.md`.
 - Existing ZIP and XML input implementations: `lambda/input/input-zip.cpp`
@@ -426,7 +426,7 @@ The public entry module is `lmd/package/doc/docx.ls`. Its helpers separate
 namespace/path handling (`common.ls`), source/part capture (`package.ls`), style
 and numbering resolution (`styles.ls`), the private document model (`model.ls`)
 and static HTML element lowering (`render.ls`). HTML serialization reuses
-`lambda.latex.to_html`; data-URI construction is shared with archive preview
+`lambda.doc.latex.to_html`; data-URI construction is shared with archive preview
 through `lambda.doc.media`. Phase 4 adds the shared `docx.view`/`docx.css`
 presentation modules: direct `view file.docx` uses the existing native document
 transform registry; file-tree selection retains the converted result and shows

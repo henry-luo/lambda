@@ -2,7 +2,7 @@ import obj: .objects
 import files: .files
 import gfx: .graphics
 import matrices: .matrices
-import util: lambda.pdf.util
+import util: lambda.doc.pdf.util
 
 pub let SIGNATURES = {'image': "*", 'colorimage': "*"}
 

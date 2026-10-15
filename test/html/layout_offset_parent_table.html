@@ -1,0 +1,26 @@
+<!doctype html>
+<style>
+body { margin: 0 }
+#host { position: relative; width: 300px }
+table { margin-left: 100px; border-collapse: collapse }
+td, th { padding: 0; width: 50px; height: 50px }
+#sticky { position: sticky; left: 25px }
+#relative { position: relative }
+#absolute { position: absolute; left: 200px; top: 0 }
+</style>
+<div id="host">
+  <table id="table"><tr>
+    <th id="sticky"><div id="static-child"></div></th>
+    <td id="relative"></td><td id="static"></td>
+  </tr></table>
+  <table><tr><td id="absolute"></td></tr></table>
+</div>
+<div id="result"></div>
+<script>
+const result = document.getElementById('result');
+for (const id of ['sticky', 'relative', 'absolute', 'static', 'static-child']) {
+  const element = document.getElementById(id);
+  result.setAttribute('data-' + id, element.offsetParent.id);
+}
+result.setAttribute('data-left', document.getElementById('sticky').offsetLeft);
+</script>

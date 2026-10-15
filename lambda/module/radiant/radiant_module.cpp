@@ -135,7 +135,7 @@ static THREAD_LOCAL uint64_t g_radiant_velmt_active_pass_id = 0;
 
 RADIANT_C_API const void* radiant_velmt_host_type(void);
 
-static Item radiant_string_item(const char* value) {
+Item radiant_string_item(const char* value) {
     return value ? (Item){.item = s2it(heap_create_name(value))} : ItemNull;
 }
 
@@ -3029,6 +3029,15 @@ RADIANT_C_API Item fn_radiant_clipboard_text() {
     return radiant_string_item(clip);
 }
 
+RADIANT_C_API Item fn_radiant_clipboard_write(Item text) {
+    if (get_type_id(text) != LMD_TYPE_STRING) return (Item){.item = b2it(0)};
+    // the platform clipboard consumes terminated text; reject embedded NUL instead of truncating.
+    String* value = text.get_string();
+    if (memchr(value->chars, 0, value->len)) return (Item){.item = b2it(0)};
+    clipboard_copy_text(value->chars);
+    return (Item){.item = b2it(1)};
+}
+
 // The package chooses whether a selection is copied, cut, or represented as
 // rich/plain text.  These capability-scoped helpers only serialize the live
 // DOM Selection and reach the platform clipboard mechanism (D7.2.5).
@@ -5071,14 +5080,20 @@ static Item fn_radiant_physics(Item node,Item request) {
 static const JubeFuncDef radiant_functions[] = {
     {"pdf_walk", "fn(path: string, options: map, callback: fn, schemas: map) -> any", (fn_ptr)fn_radiant_pdf_walk, JUBE_FN_NONE,
      "Item fn_radiant_pdf_walk(Item path, Item options, Item callback, Item schemas)", (fn_ptr)fn_radiant_pdf_walk},
+    {"pdf_walk_view", "fn(source: element, options: map, callback: fn, schemas: map) -> any", (fn_ptr)fn_radiant_pdf_walk_view, JUBE_FN_NONE,
+     "Item fn_radiant_pdf_walk_view(Item source, Item options, Item callback, Item schemas)", (fn_ptr)fn_radiant_pdf_walk_view},
     {"pdf_walk_source", "fn(source: string, options: map, callback: fn, schemas: map) -> any", (fn_ptr)fn_radiant_pdf_walk_source, JUBE_FN_NONE,
      "Item fn_radiant_pdf_walk_source(Item source, Item options, Item callback, Item schemas)", (fn_ptr)fn_radiant_pdf_walk_source},
     {"pdf_glyph_path", "fn(context: element) -> any", (fn_ptr)fn_radiant_pdf_glyph_path, JUBE_FN_NONE,
      "Item fn_radiant_pdf_glyph_path(Item context)", (fn_ptr)fn_radiant_pdf_glyph_path},
     {"pdf_clip_path", "fn(context: element) -> any", (fn_ptr)fn_radiant_pdf_clip_path, JUBE_FN_NONE,
      "Item fn_radiant_pdf_clip_path(Item context)", (fn_ptr)fn_radiant_pdf_clip_path},
+    {"pdf_graphic", "fn(context: element) -> any", (fn_ptr)fn_radiant_pdf_graphic, JUBE_FN_NONE,
+     "Item fn_radiant_pdf_graphic(Item context)", (fn_ptr)fn_radiant_pdf_graphic},
     {"pdf_image", "fn(context: element) -> any", (fn_ptr)fn_radiant_pdf_image, JUBE_FN_NONE,
      "Item fn_radiant_pdf_image(Item context)", (fn_ptr)fn_radiant_pdf_image},
+    {"pdf_value", "fn(value: any) -> any", (fn_ptr)fn_radiant_pdf_value, JUBE_FN_NONE,
+     "Item fn_radiant_pdf_value(Item value)", (fn_ptr)fn_radiant_pdf_value},
     {"pdf_object", "fn(dictionary: map) -> any", (fn_ptr)fn_radiant_pdf_object, JUBE_FN_NONE,
      "Item fn_radiant_pdf_object(Item dictionary)", (fn_ptr)fn_radiant_pdf_object},
     {"pdf_deflate", "fn(bytes: binary) -> any", (fn_ptr)fn_radiant_pdf_deflate, JUBE_FN_NONE,
@@ -5475,6 +5490,7 @@ RADIANT_PROVIDE_ENGINE_3(caret_operation, fn_radiant_caret_operation)
 RADIANT_PROVIDE_ENGINE_2(pointer_selection, fn_radiant_pointer_selection)
 RADIANT_PROVIDE_ENGINE_1(clear_ime_preedit, fn_radiant_clear_ime_preedit)
 RADIANT_PROVIDE_ENGINE_0(clipboard_text, fn_radiant_clipboard_text)
+RADIANT_PROVIDE_ENGINE_1(clipboard_write, fn_radiant_clipboard_write)
 RADIANT_PROVIDE_ENGINE_2(edit_selection_text, fn_radiant_dom_edit_selection_text)
 RADIANT_PROVIDE_ENGINE_2(edit_selection_html, fn_radiant_dom_edit_selection_html)
 RADIANT_PROVIDE_ENGINE_4(edit_clipboard_write, fn_radiant_dom_edit_clipboard_write)

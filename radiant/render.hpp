@@ -351,6 +351,8 @@ bool render_path_metrics_project(const RdtPathMetrics* metrics, float x, float y
 // shared decoration geometry; wavy_fill closes a ribbon for SVG fill/stroke paint.
 RdtPath* render_path_create_decoration(const Rect* rect, CssEnum style, bool wavy_fill = false);
 float render_font_pixel_to_css(FontHandle* font, const GlyphBitmap* bitmap = nullptr);
+// logical coordinates retain the raster painter's one-device-pixel inset.
+Rect render_text_missing_glyph_rect(const FontBox* font, float x, float top, float space_width);
 bool render_path_append_font_glyph(RdtPath* path, FontHandle* font, uint32_t codepoint,
     float x, float y, float scale_x, Arena* arena, bool* color_bitmap = nullptr);
 bool render_path_append_font_glyph_index(RdtPath* path, FontHandle* font, uint32_t glyph,
@@ -1403,6 +1405,7 @@ typedef struct {
     lam::Up<RdtPath> path;  // the path drawn: borrowed, or owned_path
     lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     float x1, y1, x2, y2;
+    bool image_sampling; // a replaced CSS image retains image-edge sampling in vector fallbacks
     lam::Up<const RdtGradientStop> stops;  // the stops drawn: borrowed, or owned_stops
     lam::OwnArr<RdtGradientStop> owned_stops;  // set when this command took the stop array
     int stop_count;
@@ -1419,6 +1422,7 @@ typedef struct {
     lam::Up<RdtPath> path;  // the path drawn: borrowed, or owned_path
     lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     float cx, cy, r;
+    bool image_sampling;
     lam::Up<const RdtGradientStop> stops;  // the stops drawn: borrowed, or owned_stops
     lam::OwnArr<RdtGradientStop> owned_stops;  // set when this command took the stop array
     int stop_count;
@@ -1755,7 +1759,7 @@ typedef struct PaintCmd {
 
 struct PaintList : lam::ArrayList<PaintCmd> {
     PaintList() : ArrayList(MEM_CAT_RENDER, 0) {}
-    ~PaintList() { destroy(); }
+    ~PaintList();
 #ifdef __cplusplus
     void init(Arena* backing_arena);
     void clear();
@@ -2248,9 +2252,12 @@ struct RenderBackend {
     // ── Column rules ───────────────────────────────────────────────────
     void (*render_column_rules)(RenderContext* ctx, ViewBlock* block, float abs_x, float abs_y);
 
+    // deferred outlines follow descendants while remaining inside the box effect/transform scope.
+    void (*render_outline)(RenderContext*, ViewBlock*, float, float);
+
     // ── Font setup ─────────────────────────────────────────────────────
     // Called when a view node specifies a font. Backend can update its
-    // font state (e.g. PDF needs to call HPDF_Page_SetFontAndSize).
+    // font state for an exporter that caches resolved faces.
     void (*on_font_change)(RenderContext* ctx, FontProp* font_prop);
     // fallible script backends stop new visits while native scope cleanup unwinds.
     bool (*should_abort)(RenderContext* ctx) = nullptr;
@@ -3068,8 +3075,9 @@ inline bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* 
 }
 bool render_paint_boundary_emit_fragmented_simple(PaintList* paint_list, ViewBlock* view, Rect rect);
 bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* boundary, Rect rect);
+bool render_paint_background_is_simple(const BackgroundProp*);
+bool render_paint_boundary_emit_full(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect);
 bool render_paint_boundary_emit_border_side(PaintList* paint, const BorderProp* border, Rect rect, size_t side);
-bool render_paint_background_is_simple(const BackgroundProp* background);
 bool render_paint_boundary_box(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
     RenderExportTargetKind target, const Rect* background_area = nullptr);
 bool render_paint_boundary_layers(PaintList* paint, UiContext* ui, ViewBlock* view, Rect rect,
@@ -3987,9 +3995,13 @@ bool render_memory_allow_allocation(MemContext* memory, size_t bytes);
 bool render_surface_allocation_size(float width, float height, size_t* bytes);
 ImageSurface* render_surface_create_budgeted(MemContext* memory, float width, float height);
 // owned raster helper result; the caller destroys the surface after copying/encoding it.
+// Capture one existing raster painter as an owned, logically placed resource.
+bool render_paint_raster_resource(PaintList*, UiContext*, const RenderContext*,
+    void (*painter)(RasterRenderContext*, void*), void* source);
+bool render_paint_inset_shadows(PaintList*, UiContext*, ViewBlock*, Rect);
 bool render_paint_snapshot(const PaintList* paint, Bound bounds, float viewport_width,
     float viewport_height, float density, ImageSurface** surface, Rect* placement,
-    DisplayList* backdrop = nullptr);
+    DisplayList* backdrop = nullptr, const RdtMatrix* transform = nullptr);
 
 // ===== render_background.hpp =====
 // Background rendering functions
@@ -3998,7 +4010,8 @@ bool render_paint_background(PaintList* paint, UiContext* ui, ViewBlock* view, R
                              RenderExportTargetKind target);
 bool render_paint_background_requires_composite(const BackgroundProp* background, RenderExportTargetKind target);
 bool render_paint_gradient_image(PaintList* paint, const ListStyleImage* image, Rect rect,
-                                float pixel_ratio, const RdtMatrix* transform = nullptr);
+                                float pixel_ratio, const RdtMatrix* transform = nullptr,
+                                bool image_sampling = false);
 bool render_paint_gradient_shape(PaintList* paint, const ListStyleImage* image, Rect rect,
     float pixel_ratio, const RdtMatrix* transform, RdtPath* shape);
 
@@ -4062,6 +4075,7 @@ struct RenderBorderStroke {
     int dash_count;
 };
 // the callback takes ownership of path, including on failure (D4.5.1v4).
+bool render_paint_boundary_path(void*, RdtPath*, Color, const RenderBorderStroke*);
 using RenderBorderPathCallback = bool (*)(void* context, RdtPath* path, Color color, const RenderBorderStroke* stroke);
 bool render_border_style_supported(CssEnum style);
 bool render_border_emit_side(Rect rect, const BorderProp* border, size_t side, bool rounded,
@@ -4075,6 +4089,8 @@ void resolve_border_radius_percentages(Corner* radius, float width, float height
 
 // Outline rendering
 void render_outline(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
+bool render_outline_emit(Rect rect, const OutlineProp* outline, const BorderProp* border,
+    RenderBorderPathCallback emit, void* context);
 
 // ===== render_columns.hpp =====
 struct RasterRenderContext;
@@ -4158,6 +4174,10 @@ void draw_glyph(RasterRenderContext* rdcon, GlyphBitmap* bitmap, int x, int y);
 // ===== render_img.hpp =====
 // Function declarations for image rendering
 StrBuf* render_encode_surface_png(ImageSurface* surface);
+ImageStatus render_save_surface_image(ImageSurface* surface, const char* path,
+    const ImageEncodeOptions* options, ImageError* error);
+ImageFormat image_surface_format_from_codec(ImageCodecFormat format);
+void image_surface_apply_orientation_metadata(ImageSurface* surface, int orientation);
 StrBuf* render_encode_surface_data_uri(ImageSurface* surface);
 // requires the host's rdt_engine_init(); owned straight-alpha surfaces use image_surface_destroy().
 // display-list commands/bounds are physical; secondary snapshots apply density to logical paint input.
@@ -4727,10 +4747,12 @@ class RenderTextPaintIterator {
     TextRect projection;
     FontBox saved_font;
     Color saved_color;
+    bool reverse_visual_clusters = false;
 public:
     RenderTextPaintIterator(RenderContext* context, ViewText* text);
     ~RenderTextPaintIterator();
-    TextRect* next();
+    TextRect* next(bool combine_visual_rtl = false);
+    bool reverses_clusters() const { return reverse_visual_clusters; }
     RenderTextPaintIterator(const RenderTextPaintIterator&) = delete;
     RenderTextPaintIterator& operator=(const RenderTextPaintIterator&) = delete;
 };
@@ -4749,7 +4771,8 @@ char* render_text_create_export_segment(const unsigned char* text,
 // borrows (caller owns it; null when the rect paints nothing)
 char* render_text_rect_glyph_run(ViewText* text, const TextRect* text_rect,
                                  const FontBox* font, Color color,
-                                 float block_x, float block_y, PaintGlyphRun* run);
+                                 float block_x, float block_y, PaintGlyphRun* run,
+                                 bool reverse_clusters = false, const char** logical_text = nullptr);
 
 // ===== render_vector_path.hpp =====
 struct RasterRenderContext;

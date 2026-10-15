@@ -847,40 +847,60 @@ bool file_is_executable(const char* path) {
 #endif
 }
 
-FileStat file_stat(const char* path) {
-    FileStat fs;
-    memset(&fs, 0, sizeof(fs));
-    fs.size = -1;
+FileRevision file_revision(const char* path) {
+    FileRevision revision;
+    memset(&revision, 0, sizeof(revision));
+    FileStat* fs = &revision.stat;
+    fs->size = -1;
 
-    if (!path) return fs;
+    if (!path) return revision;
 
     struct stat st;
-    if (stat(path, &st) != 0) return fs;
+    if (stat(path, &st) != 0) return revision;
 
-    fs.exists = true;
-    fs.size = (int64_t)st.st_size;
-    fs.modified = st.st_mtime;
-    fs.is_file = S_ISREG(st.st_mode);
-    fs.is_dir = S_ISDIR(st.st_mode);
+    fs->exists = true;
+    fs->size = (int64_t)st.st_size;
+    fs->modified = st.st_mtime;
+    fs->is_file = S_ISREG(st.st_mode);
+    fs->is_dir = S_ISDIR(st.st_mode);
 
 #ifdef _WIN32
-    fs.created = st.st_ctime; // on Windows, st_ctime is creation time
-    fs.mode = 0;
-    fs.is_symlink = false;
+    fs->created = st.st_ctime; // on Windows, st_ctime is creation time
+    WIN32_FILE_ATTRIBUTE_DATA attributes;
+    if (GetFileAttributesExA(path, GetFileExInfoStandard, &attributes)) {
+        ULARGE_INTEGER ticks;
+        ticks.LowPart = attributes.ftLastWriteTime.dwLowDateTime;
+        ticks.HighPart = attributes.ftLastWriteTime.dwHighDateTime;
+        fs->modified = (time_t)(ticks.QuadPart / 10000000ULL - 11644473600ULL);
+        revision.modified_nsec = (uint32_t)((ticks.QuadPart % 10000000ULL) * 100);
+    }
+    fs->mode = 0;
+    fs->is_symlink = false;
     DWORD attrs = GetFileAttributesA(path);
     if (attrs != INVALID_FILE_ATTRIBUTES)
-        fs.is_symlink = (attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+        fs->is_symlink = (attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
 #else
-    fs.created = st.st_ctime; // best approximation on POSIX (status change)
-    fs.mode = (uint16_t)(st.st_mode & 07777);
+    fs->created = st.st_ctime; // best approximation on POSIX (status change)
+    revision.device = (uint64_t)st.st_dev;
+    revision.inode = (uint64_t)st.st_ino;
+#ifdef __APPLE__
+    revision.modified_nsec = (uint32_t)st.st_mtimespec.tv_nsec;
+#else
+    revision.modified_nsec = (uint32_t)st.st_mtim.tv_nsec;
+#endif
+    fs->mode = (uint16_t)(st.st_mode & 07777);
     // check symlink via lstat
     struct stat lst;
     if (lstat(path, &lst) == 0) {
-        fs.is_symlink = S_ISLNK(lst.st_mode);
+        fs->is_symlink = S_ISLNK(lst.st_mode);
     }
 #endif
 
-    return fs;
+    return revision;
+}
+
+FileStat file_stat(const char* path) {
+    return file_revision(path).stat;
 }
 
 int64_t file_size(const char* path) {

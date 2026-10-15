@@ -17,6 +17,7 @@ import tools: lambda.edit.toolbar
 import rich: lambda.edit.rich_text
 import dr: lambda.edit.drawing
 import src: lambda.edit.source
+import controller: lambda.edit.controller
 import .model
 
 // ---------------------------------------------------------------------------
@@ -94,18 +95,13 @@ fn doc_root(node) => dom.root_node(node)
 // surface a toolbar or dialog completion could not restore the selection.
 pn mounted(editor, node, format) {
   if (editor.mounted or format.surface != 'rich_text') { return editor }
-  let surface = dom.get_element_by_id(doc_root(node), "edit-surface")
-  if (surface == null) editor else edit_mount(editor, surface, format.schema_preset)
+  controller.mount(editor,node,format.schema_preset)
 }
 
 // Run one editing request through the model path and complete it on the
 // surface — the descriptor/request route every toolbar command and dialog
 // insert takes (Lambda DOM Editable §8.3). Returns the adapter's run record.
-pn run_request(editor, input_type, payload) {
-  let run = edit_handle_request(editor, edit_request_from_toolbar(input_type, payload))
-  if (run.editor.surface_handle != null) { dom.finish_model_edit(run.editor.surface_handle, run.result) }
-  run
-}
+let run_request = controller.request
 
 // A view-only part is kept as written (proposal §2): an edit may remove it as
 // a unit, but never write into it or replace it. A click in a part puts the
@@ -247,7 +243,7 @@ on editaction(evt) {
   // selection. Claim it as a no-op without writing state: a render would
   // replace the selected nodes, and the editor has no copy command to run.
   if (evt.input_type == "copy") {
-    return edit_result.applied(true, true, false, false, false, 0, "", false, "", null)
+    return controller.handle(editor,evt).result
   }
   editor = mounted(editor, evt.target, session.format)
   // A command the format cannot write is declined, not applied and lost later.
@@ -259,14 +255,15 @@ on editaction(evt) {
   if (writes_view_only(session, editor.doc, target, evt.input_type)) {
     status = view_only_status
     // The status redraw replaces the caret's DOM node even though no edit ran.
-    edit_restore_selection(editor)
+    controller.restore(editor)
     return edit_result.decline(true, false, "view-only", 0)
   }
   // The caret decides (a deletion's target range runs past the part). The
   // part's deletion runs as a model request on the part: the event's input
   // fields are host-backed, so a copy of the event would lose them.
   let part = deleted_part(session, editor.doc, evt.source_selection or target, evt.input_type)
-  let run = if (part == null) edit_handle_dom_action(editor, evt)
+  let run = if (part == null) controller.handle(editor, evt, false,
+                if (session.format.surface == 'rich_text') session.format.schema_preset else null)
             else edit_handle_request(edit_set_selection(editor, part), edit_request_from_toolbar(evt.input_type, {}))
   editor = run.editor
   if (run.result.failure != null) { status = "Could not apply " ++ evt.input_type ++ "." }
@@ -274,17 +271,10 @@ on editaction(evt) {
   return run.result
 }
 on selectionchange(evt) {
-  // A selection inside a dialog's text field is the field's own: adopting it
-  // would re-render the dialog and reset the field's typed value.
-  if (dom.node_type(evt.target) == 1 and dom.matches(evt.target, "input, textarea")) { return }
-  if (evt.source_selection != null or evt.source_pos != null) {
-    editor = mounted(editor, evt.target, session.format)
-    let accepted = edit_accept_dom_selection(editor, evt)
-    if (accepted.changed) {
-      editor = accepted.editor
-      // Reactive projection replaces selected nodes after this handler settles.
-      edit_restore_selection(editor)
-    }
+  let accepted = controller.adopt(editor,evt,session.format.schema_preset)
+  if (accepted.changed) {
+    editor = accepted.editor
+    controller.restore(editor)
   }
 }
 on edit_cmd(req) {
@@ -365,7 +355,7 @@ on edit_dialog(req) {
     dialog = filed.dialog
     after_save = filed.after_save
     if (filed.reloaded != null) {
-      editor = edit_open(filed.reloaded, session.format.schema, null)
+      editor = controller.replace(editor,edit_open(filed.reloaded, session.format.schema, null))
       ds = {*: ds, picked: [], gesture: null}
     }
   }
@@ -424,7 +414,7 @@ on edit_dialog(req) {
     files.focus_surface(req.node)
     // an insert completed through the surface already; otherwise put the
     // caret back where the model has it (proposal §5 selection bookmark)
-    if (not edited) { edit_restore_selection(editor) }
+    if (not edited) { controller.restore(editor) }
   }
 }
 on keydown(evt) {
@@ -497,7 +487,7 @@ on mousedown(evt) {
       if (part != null) {
         // Native caret placement skips false islands; select their model node.
         editor = edit_set_selection(editor, node_selection(part))
-        edit_restore_selection(editor)
+        controller.restore(editor)
       }
     }
   }

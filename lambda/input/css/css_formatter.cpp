@@ -3,6 +3,8 @@
 #include "css_style.hpp"
 #include "../../../lib/str.h"
 #include "../../../lib/stringbuf.h"
+#include "../../../lib/strview.h"
+#include "../../../lib/escape.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -108,6 +110,22 @@ void css_append_identifier(StringBuf* output, const char* text, size_t length) {
 
 static void append_css_ident(CssFormatter* formatter, const char* ident) {
     if (ident) css_append_identifier(formatter->output, ident, strlen(ident));
+}
+
+static void append_css_string(CssFormatter* formatter, const char* text) {
+    static const EscapeRule rules[] = {
+        {'\\', "\\\\"}, {'\"', "\\\""}, {'\n', "\\a "}, {'\r', "\\d "}, {'\f', "\\c "}
+    };
+    stringbuf_append_char(formatter->output, '"');
+    escape_append_stringbuf(formatter->output, text, strlen(text), rules,
+        sizeof(rules) / sizeof(*rules), ESCAPE_CTRL_NONE);
+    stringbuf_append_char(formatter->output, '"');
+}
+
+static void append_css_trimmed(CssFormatter* formatter, const char* text) {
+    StrView view = strview_from_cstr(text);
+    strview_trim(&view);
+    stringbuf_append_str_n(formatter->output, view.str, view.length);
 }
 
 const char* css_format_page_selector_tokens(const CssToken* tokens, int start, int end, Pool* pool) {
@@ -494,8 +512,7 @@ void css_format_value_with_property(CssFormatter* formatter, CssValue* value, Cs
 
         case CSS_VALUE_TYPE_STRING:
             if (value->data.string) {
-                stringbuf_append_all(formatter->output, 2, "\"", value->data.string);
-                stringbuf_append_str(formatter->output, "\"");
+                append_css_string(formatter, value->data.string);
             }
             break;
 
@@ -725,6 +742,29 @@ static void css_format_anb_canonical(StringBuf* output, const CssNthFormula* f) 
 // Selector Formatting
 // ============================================================================
 
+static void css_format_pseudo_selector(CssFormatter* formatter, const CssSimpleSelector* simple) {
+    bool element = simple->type == CSS_SELECTOR_PSEUDO_SLOTTED ||
+        (simple->type >= CSS_SELECTOR_PSEUDO_ELEMENT_BEFORE &&
+         simple->type <= CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC);
+    stringbuf_append_all(formatter->output, 2, element ? "::" : ":", simple->value);
+    bool nth = false;
+    switch (simple->type) {
+    case CSS_SELECTOR_PSEUDO_NTH_CHILD:
+    case CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD:
+    case CSS_SELECTOR_PSEUDO_NTH_OF_TYPE:
+    case CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE: nth = true; break;
+    default: break;
+    }
+    if (!simple->argument && !nth) return;
+    stringbuf_append_str(formatter->output, "(");
+    // An+B alone cannot serialize an nth-child selector's `of` filter.
+    if (nth && simple->function_selector_count == 0)
+        css_format_anb_canonical(formatter->output, &simple->nth_formula);
+    else if (simple->argument)
+        stringbuf_append_str(formatter->output, simple->argument);
+    stringbuf_append_str(formatter->output, ")");
+}
+
 const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup* selector_group) {
     if (!formatter || !selector_group) return NULL;
 
@@ -856,77 +896,8 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
                         }
                         stringbuf_append_str(formatter->output, "]");
                         break;
-                    case CSS_SELECTOR_PSEUDO_ELEMENT_BEFORE:
-                        stringbuf_append_str(formatter->output, "::before");
-                        break;
-                    case CSS_SELECTOR_PSEUDO_ELEMENT_AFTER:
-                        stringbuf_append_str(formatter->output, "::after");
-                        break;
-                    case CSS_SELECTOR_PSEUDO_HOVER:
-                        stringbuf_append_str(formatter->output, ":hover");
-                        break;
-                    case CSS_SELECTOR_PSEUDO_FOCUS:
-                        stringbuf_append_str(formatter->output, ":focus");
-                        break;
-                    case CSS_SELECTOR_PSEUDO_ACTIVE:
-                        stringbuf_append_str(formatter->output, ":active");
-                        break;
-                    case CSS_SELECTOR_PSEUDO_FIRST_CHILD:
-                        stringbuf_append_str(formatter->output, ":first-child");
-                        break;
-                    case CSS_SELECTOR_PSEUDO_LAST_CHILD:
-                        stringbuf_append_str(formatter->output, ":last-child");
-                        break;
-                    case CSS_SELECTOR_PSEUDO_NTH_CHILD:
-                        stringbuf_append_str(formatter->output, ":nth-child(");
-                        css_format_anb_canonical(formatter->output, &simple->nth_formula);
-                        stringbuf_append_str(formatter->output, ")");
-                        break;
-                    case CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD:
-                        stringbuf_append_str(formatter->output, ":nth-last-child(");
-                        css_format_anb_canonical(formatter->output, &simple->nth_formula);
-                        stringbuf_append_str(formatter->output, ")");
-                        break;
-                    case CSS_SELECTOR_PSEUDO_NTH_OF_TYPE:
-                        stringbuf_append_str(formatter->output, ":nth-of-type(");
-                        css_format_anb_canonical(formatter->output, &simple->nth_formula);
-                        stringbuf_append_str(formatter->output, ")");
-                        break;
-                    case CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE:
-                        stringbuf_append_str(formatter->output, ":nth-last-of-type(");
-                        css_format_anb_canonical(formatter->output, &simple->nth_formula);
-                        stringbuf_append_str(formatter->output, ")");
-                        break;
-                    case CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_CALL:
-                    case CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_MARKER:
-                    case CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC:
-                        // Generic pseudo-element - use stored name with ::
-                        stringbuf_append_str(formatter->output, "::");
-                        if (simple->value) {
-                            stringbuf_append_str(formatter->output, simple->value);
-                        }
-                        if (simple->argument) {
-                            stringbuf_append_all(formatter->output, 2, "(", simple->argument);
-                            stringbuf_append_str(formatter->output, ")");
-                        }
-                        break;
-                    case CSS_SELECTOR_PSEUDO_GENERIC:
-                        // Generic pseudo-class - use stored name with :
-                        stringbuf_append_str(formatter->output, ":");
-                        if (simple->value) {
-                            stringbuf_append_str(formatter->output, simple->value);
-                        }
-                        break;
                     default:
-                        // For other pseudo-classes/elements with values
-                        if (simple->value) {
-                            stringbuf_append_all(formatter->output, 2, ":", simple->value);
-                            // Include argument for functional pseudo-classes like :where(), :not(), :is(), :has()
-                            if (simple->argument) {
-                                stringbuf_append_all(formatter->output, 2, "(", simple->argument);
-                                stringbuf_append_str(formatter->output, ")");
-                            }
-                        }
+                        if (simple->value) css_format_pseudo_selector(formatter, simple);
                         break;
                 }
             }
@@ -1034,7 +1005,7 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
 
         if (rule->data.conditional_rule.condition) {
             append_space(formatter);
-            stringbuf_append_str(formatter->output, rule->data.conditional_rule.condition);
+            append_css_trimmed(formatter, rule->data.conditional_rule.condition);
         }
 
         if (formatter->options.space_before_brace) {
@@ -1094,8 +1065,7 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
         // Format @charset rule
         stringbuf_append_str(formatter->output, "@charset ");
         if (rule->data.charset_rule.charset) {
-            stringbuf_append_all(formatter->output, 2, "\"", rule->data.charset_rule.charset);
-            stringbuf_append_str(formatter->output, "\"");
+            append_css_string(formatter, rule->data.charset_rule.charset);
         }
         stringbuf_append_str(formatter->output, ";");
 
@@ -1122,7 +1092,7 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
         if (rule->data.generic_rule.content) {
             log_debug("[CSS Formatter] Content: '%s'", rule->data.generic_rule.content);
             append_space(formatter);
-            stringbuf_append_str(formatter->output, rule->data.generic_rule.content);
+            append_css_trimmed(formatter, rule->data.generic_rule.content);
         }
 
         if (formatter->options.newline_after_brace) {

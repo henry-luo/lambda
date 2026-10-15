@@ -386,6 +386,13 @@ static void html_ua_length(StrBuf* css, const char* property, float value, const
     if (paired) strbuf_append_format(css, "%s:%g%s;", paired, value, unit);
 }
 
+const char* layout_html_ua_focus_css() {
+    // Match HTML focus candidates before querying state; ordinary blocks have no focus dependency.
+    return "a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,"
+        "textarea:focus-visible,[tabindex]:focus-visible,[contenteditable]:focus-visible,"
+        "body:focus-visible{outline:2px solid #1a73e8;outline-offset:2px}";
+}
+
 bool layout_html_ua_stylesheet(StrBuf* css) {
     if (!css) return false;
     // physical sides follow the default view's left-to-right element defaults.
@@ -412,6 +419,8 @@ bool layout_html_ua_stylesheet(StrBuf* css) {
         html_ua_length(css, "padding-left", value.padding_inline_start_px, "px");
         strbuf_append_char(css, '}');
     }
+    // UA focus indicators participate in the cascade; author outline rules can replace or suppress them.
+    strbuf_append_str(css, layout_html_ua_focus_css());
     // nested lists drop their outer margins and step unordered markers by unordered depth.
     for (size_t outer = 0; outer < g_well_known_markup_name_count; outer++) {
         const WellKnownNameRecord& ancestor = g_well_known_markup_names[outer];

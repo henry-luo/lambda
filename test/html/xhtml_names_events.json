@@ -1,0 +1,10 @@
+{
+  "name": "XHTML and HTML names share CSS and DOM behavior",
+  "viewport": {"width": 320, "height": 240},
+  "events": [
+    {"type": "wait", "ms": 1},
+    {"type": "assert_rect", "target": {"selector": "#box"}, "width": 80, "height": 44},
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "XHTML ready"},
+    {"type": "assert_text", "target": {"selector": "#foreign"}, "equals": "foreign HTML"}
+  ]
+}

@@ -970,6 +970,14 @@ export references and repeated-read lifetime controls. Full legacy flex property
 mappings, modern clamp shorthand/longhands and shaping contexts remain distinct
 tasks; registering orientation alone does not qualify those features.
 
+Auto-height intrinsic measurement now shares the active clamp count with final
+layout. It limits text and `<br>` runs to the visible line contribution, including
+the single-text flex path. Count computation uses shared element storage before a
+block view tag exists, so grid rows do not reserve space for discarded lines.
+`css_text_clamp_intrinsic` covers long and fitting labels, forced breaks, grid row
+spacing, and live count changes/removal/restoration. This does not change the
+bounded applicability contract above.
+
 The added catalog entry preserves every existing NameId (**D4.6.1v4**). Intrinsic
 min-content measurement keeps break-all letters separate while retaining
 punctuation and grapheme restrictions; flex's text fast path passes inherited

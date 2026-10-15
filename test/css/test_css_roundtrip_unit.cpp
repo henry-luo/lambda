@@ -356,6 +356,32 @@ TEST_F(CssRoundtripTest, ComplexSelectors) {
     EXPECT_TRUE(TestRoundtrip(css));
 }
 
+TEST_F(CssRoundtripTest, PseudoElementAndFunctionalSelectorIdentity) {
+    const char* selectors[] = {"::selection", "::first-line", "::first-letter",
+        "::marker", "::placeholder", "::slotted(.item)", "::part(ready)",
+        ":nth-child(2n+1 of .ready, .done)", ":nth-last-child(odd of .ready)"};
+    for (const char* selector : selectors) {
+        StringBuf* input = stringbuf_new(pool.get());
+        stringbuf_append_all(input, 2, selector, " { color: red; }");
+        CssStylesheet* original = ParseCSS(input->str->chars);
+        ASSERT_NE(original, nullptr) << selector;
+        ASSERT_EQ(original->rule_count, 1u) << selector;
+        const char* formatted = FormatStylesheet(original);
+        ASSERT_NE(formatted, nullptr) << selector;
+        CssStylesheet* reparsed = ParseCSS(formatted);
+        ASSERT_NE(reparsed, nullptr) << formatted;
+        ASSERT_EQ(reparsed->rule_count, 1u) << formatted;
+        CssSimpleSelector* before = original->rules[0]->data.style_rule.selector_group
+            ->selectors[0]->compound_selectors[0]->simple_selectors[0];
+        CssSimpleSelector* after = reparsed->rules[0]->data.style_rule.selector_group
+            ->selectors[0]->compound_selectors[0]->simple_selectors[0];
+        EXPECT_EQ(after->type, before->type) << formatted;
+        EXPECT_STREQ(after->value, before->value) << formatted;
+        EXPECT_EQ(after->function_selector_count, before->function_selector_count) << formatted;
+        if (before->argument) EXPECT_STREQ(after->argument, before->argument) << formatted;
+    }
+}
+
 TEST_F(CssRoundtripTest, MultipleDeclarations) {
     const char* css =
         "body {\n"

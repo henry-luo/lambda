@@ -1,3 +1,4 @@
+#include "../lambda/io/image_io.h"
 /**
  * Event Simulation Implementation
  */
@@ -1468,6 +1469,8 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     }
     else if (strcmp(type_str, "assert_caret") == 0) {
         ev->type = SIM_EVENT_ASSERT_CARET;
+        ev->check_caret_visible = reader.has("visible");
+        ev->expected_caret_visible = reader.get("visible").asBool();
         // raw enum ordinals drift when ViewType grows; symbolic names keep caret fixtures tied to rendering intent.
         ev->expected_view_type = parse_view_type_value(reader.get("view_type"));
         ev->expected_char_offset = reader.get("char_offset").asInt32();
@@ -2975,6 +2978,11 @@ static bool assert_caret(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
     bool passed = true;
     View* caret_view = caret_get_view(state);
 
+    if (ev->check_caret_visible && caret_is_visible(state) != ev->expected_caret_visible) {
+        log_error("event_sim: assert_caret - visibility mismatch: expected %d, got %d",
+            ev->expected_caret_visible, caret_is_visible(state));
+        passed = false;
+    }
     if (ev->expected_view_type >= 0) {
         if (ev->negate_view_type) {
             // pass if there is no caret, or caret view type is not the rejected type

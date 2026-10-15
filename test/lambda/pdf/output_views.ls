@@ -1,4 +1,4 @@
-import pdf: lambda.pdf.pdf
+import pdf: lambda.doc.pdf.pdf
 
 pn main() {
     let written = output(pdf.render_source("test/html/pdf_lambda_views.html", {width: 200, height: 120})^, "temp/pdf_lambda_views.pdf", {atomic: true})^;

@@ -1,0 +1,442 @@
+--- a/lib/zip/archive.h
++++ b/lib/zip/archive.h
+@@ -425,6 +425,9 @@
+  *   5) Call archive_read_free to end processing.
+  */
+ __LA_DECL struct archive	*archive_read_new(void);
++/* Select the application charset independently of the process locale. */
++__LA_DECL int archive_read_set_charset(struct archive *, const char *,
++    int preserve_unicode);
+ 
+ /*
+  * The archive_read_support_XXX calls enable auto-detect for this
+--- a/lib/zip/archive_entry.c
++++ b/lib/zip/archive_entry.c
+@@ -144,8 +144,10 @@
+ struct archive_entry *
+ archive_entry_clear(struct archive_entry *entry)
+ {
++	struct archive *owner;
+ 	if (entry == NULL)
+ 		return (NULL);
++	owner = entry->archive;
+ 	archive_mstring_clean(&entry->ae_fflags_text);
+ 	archive_mstring_clean(&entry->ae_gname);
+ 	archive_mstring_clean(&entry->ae_linkname);
+@@ -159,6 +161,8 @@
+ 	free(entry->stat);
+ 	entry->ae_symlink_type = AE_SYMLINK_TYPE_UNDEFINED;
+ 	memset(entry, 0, sizeof(*entry));
++	/* Keep the reader charset context across header reuse. */
++	entry->archive = owner;
+ 	return entry;
+ }
+ 
+--- a/lib/zip/archive_private.h
++++ b/lib/zip/archive_private.h
+@@ -150,6 +150,7 @@
+ 	struct archive_string	error_string;
+ 
+ 	char *current_code;
++	int			preserve_unicode;
+ 	unsigned current_codepage; /* Current ACP(ANSI CodePage). */
+ 	unsigned current_oemcp; /* Current OEMCP(OEM CodePage). */
+ 	struct archive_string_conv *sconv;
+--- a/lib/zip/archive_read.c
++++ b/lib/zip/archive_read.c
+@@ -92,6 +92,34 @@
+ /*
+  * Allocate, initialize and return a struct archive object.
+  */
++int
++archive_read_set_charset(struct archive *_a, const char *charset,
++    int preserve_unicode)
++{
++    char *copy;
++
++    archive_check_magic(_a, ARCHIVE_READ_MAGIC, ARCHIVE_STATE_NEW,
++        "archive_read_set_charset");
++    if (charset == NULL || charset[0] == '\0') {
++        archive_set_error(_a, EINVAL, "An application charset is required");
++        return ARCHIVE_FAILED;
++    }
++    copy = strdup(charset);
++    if (copy == NULL) {
++        archive_set_error(_a, ENOMEM, "Cannot allocate application charset");
++        return ARCHIVE_FATAL;
++    }
++    free(_a->current_code);
++    _a->current_code = copy;
++#if defined(_WIN32) && !defined(__CYGWIN__)
++    if (strcmp(charset, "UTF-8") == 0)
++        _a->current_codepage = CP_UTF8;
++#endif
++
++    _a->preserve_unicode = preserve_unicode != 0;
++    return ARCHIVE_OK;
++}
++
+ struct archive *
+ archive_read_new(void)
+ {
+--- a/lib/zip/archive_read_support_format_7zip.c
++++ b/lib/zip/archive_read_support_format_7zip.c
+@@ -1044,6 +1044,12 @@
+ 		zip->end_of_entry = 1;
+ 
+ 	if ((zip_entry->mode & AE_IFMT) == AE_IFLNK) {
++#ifdef LIBARCHIVE_STRICT_NAMES
++        archive_set_error(&a->archive, ARCHIVE_ERRNO_FILE_FORMAT,
++            "7-Zip symbolic links are outside the reader profile");
++        return ARCHIVE_FATAL;
++#endif
++
+ 		unsigned char *symname = NULL;
+ 		size_t symsize = 0;
+ 
+@@ -1771,6 +1777,7 @@
+ 		    t_avail_out == 0) {
+ 			*used = o_avail_in - t_avail_in;
+ 			*outbytes = o_avail_out - t_avail_out;
++
+ 			if (o_avail_in == 0)
+ 				ret = ARCHIVE_EOF;
+ 			return (ret);
+@@ -2028,6 +2035,12 @@
+ 	else
+ 		*used = o_avail_in - t_avail_in;
+ 	*outbytes = o_avail_out - t_avail_out;
++#ifdef LIBARCHIVE_FORMAT_OUTPUT
++    /* Include bytes decoded only to reach a later solid member. */
++    if (!LIBARCHIVE_FORMAT_OUTPUT(*outbytes))
++        return (ARCHIVE_FATAL);
++#endif
++
+ 
+ 	/*
+ 	 * Decode BCJ.
+@@ -2422,6 +2435,15 @@
+ 
+ 		if (decode_codec_id(p, codec_size, &f->coders[i].codec) < 0)
+ 			return (-1);
++#ifdef LIBARCHIVE_7ZIP_CODEC_ALLOWED
++        /* Embedders may restrict methods before any member is opened. */
++        if (!LIBARCHIVE_7ZIP_CODEC_ALLOWED(f->coders[i].codec)) {
++            archive_set_error(&a->archive, ARCHIVE_ERRNO_FILE_FORMAT,
++                "7-Zip method is outside the configured reader profile");
++            return (-1);
++        }
++#endif
++
+ 
+ 		if (simple) {
+ 			f->coders[i].numInStreams = 1;
+@@ -2456,6 +2478,20 @@
+ 		    numOutStreamsTotal, f->coders[i].numOutStreams))
+ 			return (-1);
+ 	}
++
++#ifdef LIBARCHIVE_7ZIP_CODEC_ALLOWED
++    /* This embedding admits one data coder followed by at most one filter. */
++    if (f->numCoders == 0 || f->numCoders > 2 ||
++        numInStreamsTotal != f->numCoders || numOutStreamsTotal != f->numCoders ||
++        (f->coders[0].codec != _7Z_COPY && f->coders[0].codec != _7Z_LZMA &&
++         f->coders[0].codec != _7Z_LZMA2) ||
++        (f->numCoders == 2 && (f->coders[1].codec == _7Z_COPY ||
++         f->coders[1].codec == _7Z_LZMA || f->coders[1].codec == _7Z_LZMA2))) {
++        archive_set_error(&a->archive, ARCHIVE_ERRNO_FILE_FORMAT,
++            "7-Zip coder chain is outside the configured reader profile");
++        return (-1);
++    }
++#endif
+ 
+ 	if (numOutStreamsTotal == 0 ||
+ 	    numInStreamsTotal < numOutStreamsTotal-1)
+@@ -3596,6 +3632,10 @@
+ 		if ((size_t)bytes_avail > size)
+ 			bytes_avail = (ssize_t)size;
+ 
++#ifdef LIBARCHIVE_FORMAT_OUTPUT
++        if (!LIBARCHIVE_FORMAT_OUTPUT((size_t)bytes_avail))
++            return (ARCHIVE_FATAL);
++#endif
+ 		zip->pack_stream_bytes_unconsumed = bytes_avail;
+ 	} else if (zip->uncompressed_buffer_pointer == NULL) {
+ 		/* Decompression has failed. */
+--- a/lib/zip/archive_read_support_format_rar.c
++++ b/lib/zip/archive_read_support_format_rar.c
+@@ -971,6 +971,14 @@
+ 
+     case MAIN_HEAD:
+       rar->main_flags = archive_le16dec(p + 3);
++#ifdef LIBARCHIVE_SINGLE_VOLUME
++      if (rar->main_flags & (MHD_VOLUME | MHD_SOLID)) {
++        archive_set_error(&a->archive, ARCHIVE_ERRNO_FILE_FORMAT,
++          "Solid or multi-volume legacy RAR is outside the reader profile");
++        return (ARCHIVE_FATAL);
++      }
++#endif
++
+       skip = archive_le16dec(p + 5);
+       if ((size_t)skip < 7 + sizeof(rar->reserved1) + sizeof(rar->reserved2)) {
+         archive_set_error(&a->archive, ARCHIVE_ERRNO_FILE_FORMAT,
+@@ -1398,6 +1406,14 @@
+   p = h;
+   memcpy(&rar_header, p, sizeof(rar_header));
+   rar->file_flags = archive_le16dec(rar_header.flags);
++#ifdef LIBARCHIVE_SINGLE_VOLUME
++  if (rar->file_flags & (FHD_SPLIT_BEFORE | FHD_SPLIT_AFTER | FHD_SOLID)) {
++    archive_set_error(&a->archive, ARCHIVE_ERRNO_FILE_FORMAT,
++      "Split or solid legacy RAR member is outside the reader profile");
++    return (ARCHIVE_FATAL);
++  }
++#endif
++
+   header_size = archive_le16dec(rar_header.size);
+   if (header_size < (int64_t)sizeof(file_header) + 7) {
+     archive_set_error(&a->archive, ARCHIVE_ERRNO_FILE_FORMAT,
+@@ -1552,6 +1568,13 @@
+   filename = rar->filename;
+   memcpy(filename, p, filename_size);
+   filename[filename_size] = '\0';
++#ifdef LIBARCHIVE_STRICT_NAMES
++  if (!(rar->file_flags & FHD_UNICODE) && memchr(filename, '\0', filename_size)) {
++    archive_set_error(&a->archive, ARCHIVE_ERRNO_FILE_FORMAT,
++      "NUL in RAR pathname");
++    return (ARCHIVE_FATAL);
++  }
++#endif
+   if (rar->file_flags & FHD_UNICODE)
+   {
+     if (filename_size != strlen(filename))
+@@ -1630,6 +1653,16 @@
+           "Invalid filename");
+         return (ARCHIVE_FATAL);
+       }
++#ifdef LIBARCHIVE_STRICT_NAMES
++      /* The encoded ANSI/Unicode separator is valid; decoded NUL codepoints are not. */
++      for (unsigned i = 0; i + 1 < filename_size; i += 2) {
++        if (filename[i] == '\0' && filename[i + 1] == '\0') {
++          archive_set_error(&a->archive, ARCHIVE_ERRNO_FILE_FORMAT,
++            "NUL in decoded RAR pathname");
++          return (ARCHIVE_FATAL);
++        }
++      }
++#endif
+       filename[filename_size++] = '\0';
+       /*
+        * Do not increment filename_size here as the computations below
+--- a/lib/zip/archive_read_support_format_rar5.c
++++ b/lib/zip/archive_read_support_format_rar5.c
+@@ -124,6 +124,7 @@
+ 
+ 	/* Optional hash fields. */
+ 	uint32_t stored_crc32;
++	uint8_t has_crc32;
+ 	uint32_t calculated_crc32;
+ 	uint8_t blake2sp[32];
+ 	blake2sp_state b2state;
+@@ -2113,6 +2114,13 @@
+ 		return ARCHIVE_EOF;
+ 
+ 	memcpy(name_utf8_buf, p, name_size);
++#ifdef LIBARCHIVE_STRICT_NAMES
++    if (memchr(p, '\0', name_size)) {
++        archive_set_error(&a->archive, ARCHIVE_ERRNO_FILE_FORMAT,
++            "NUL in RAR5 pathname");
++        return ARCHIVE_FATAL;
++    }
++#endif
+ 	name_utf8_buf[name_size] = 0;
+ 	if(ARCHIVE_OK != consume(a, name_size)) {
+ 		return ARCHIVE_EOF;
+@@ -2151,6 +2159,7 @@
+ 
+ 	if(file_flags & CRC32) {
+ 		rar5->file.stored_crc32 = crc;
++		rar5->file.has_crc32 = 1;
+ 	}
+ 
+ 	if(!rar5->cstate.switch_multivolume) {
+@@ -2234,6 +2243,13 @@
+ 		return ret;
+ 	}
+ 
++#ifdef LIBARCHIVE_SINGLE_VOLUME
++    if (archive_flags & (VOLUME | VOLUME_NUMBER)) {
++        archive_set_error(&a->archive, ARCHIVE_ERRNO_FILE_FORMAT,
++            "Multi-volume RAR5 is outside the reader profile");
++        return ARCHIVE_FATAL;
++    }
++#endif
+ 	rar5->main.volume = (archive_flags & VOLUME) > 0;
+ 	rar5->main.solid = (archive_flags & SOLID) > 0;
+ 
+@@ -2444,6 +2460,11 @@
+ 
+ 	/* Read the expected CRC32 checksum. */
+ 	if(!read_u32(a, &hdr_crc)) {
++#ifdef LIBARCHIVE_SINGLE_VOLUME
++        archive_set_error(&a->archive, ARCHIVE_ERRNO_FILE_FORMAT,
++            "RAR5 end record is missing or truncated");
++        return ARCHIVE_FATAL;
++#endif
+ 		return ARCHIVE_EOF;
+ 	}
+ 
+@@ -2510,6 +2531,13 @@
+ 	if(ret != ARCHIVE_OK)
+ 		return ret;
+ 
++#ifdef LIBARCHIVE_SINGLE_VOLUME
++    if (header_flags & (HFL_SPLIT_BEFORE | HFL_SPLIT_AFTER)) {
++        archive_set_error(&a->archive, ARCHIVE_ERRNO_FILE_FORMAT,
++            "Split RAR5 member is outside the reader profile");
++        return ARCHIVE_FATAL;
++    }
++#endif
+ 	rar5->generic.split_after = (header_flags & HFL_SPLIT_AFTER) > 0;
+ 	rar5->generic.split_before = (header_flags & HFL_SPLIT_BEFORE) > 0;
+ 	rar5->generic.size = (int)hdr_size;
+@@ -2770,7 +2798,7 @@
+ 	if(verify_crc) {
+ 		/* Don't update CRC32 if the file doesn't have the
+ 		 * `stored_crc32` info filled in. */
+-		if(rar5->file.stored_crc32 > 0) {
++		if(rar5->file.has_crc32) {
+ 			rar5->file.calculated_crc32 =
+ 				__archive_crc32(rar5->file.calculated_crc32, p,
+ 				    (unsigned int)to_read);
+@@ -4008,6 +4036,12 @@
+     const uint8_t* buf, size_t size, int64_t offset)
+ {
+ 	int i;
++
++#ifdef LIBARCHIVE_FORMAT_OUTPUT
++    /* Account for produced blocks even when the caller discards them. */
++    if (!LIBARCHIVE_FORMAT_OUTPUT(size))
++        return ARCHIVE_FATAL;
++#endif
+ 
+ 	/* Don't push if we're in skip mode. This is needed because solid
+ 	 * streams need full processing even if we're skipping data. After
+@@ -4264,7 +4298,13 @@
+ 
+ 	to_read = rar5_min(rar5->file.bytes_remaining, 64 * 1024);
+ 	if(to_read == 0) {
+-		return ARCHIVE_EOF;
++        /* Empty Stored entries also pass through the common checksum finalizer. */
++        if (rar5->cstate.last_write_ptr != rar5->file.unpacked_size) {
++            archive_set_error(&a->archive, ARCHIVE_ERRNO_FILE_FORMAT,
++                "Stored RAR5 member size mismatch");
++            return ARCHIVE_FATAL;
++        }
++		return ARCHIVE_OK;
+ 	}
+ 
+ 	if(!read_ahead(a, to_read, &p)) {
+@@ -4283,6 +4323,8 @@
+ 
+ 	rar5->file.bytes_remaining -= to_read;
+ 	rar5->cstate.last_unstore_ptr += to_read;
++	/* Stored entries must reach the same checksum finalization as compressed ones. */
++	rar5->cstate.last_write_ptr = rar5->cstate.last_unstore_ptr;
+ 
+ 	update_crc(rar5, p, to_read);
+ 	return ARCHIVE_OK;
+@@ -4369,7 +4411,7 @@
+ 		 * process is already over and we can check if calculated
+ 		 * checksum (CRC32 or BLAKE2sp) is the same as what is stored
+ 		 * in the archive. */
+-		if(rar5->file.stored_crc32 > 0) {
++		if(rar5->file.has_crc32) {
+ 			/* Check CRC32 only when the file contains a CRC32
+ 			 * value for this file. */
+ 
+--- a/lib/zip/archive_read_support_format_tar.c
++++ b/lib/zip/archive_read_support_format_tar.c
+@@ -1223,6 +1223,17 @@
+ 	archive_string_init(&longname);
+ 	err = read_body_to_string(a, tar, &longname, h, unconsumed);
+ 	if (err == ARCHIVE_OK) {
++#ifdef LIBARCHIVE_STRICT_NAMES
++        /* GNU long names may terminate once, but cannot hide a second name. */
++        size_t length = archive_strlen(&longname);
++        if (length && longname.s[length - 1] == '\0') length--;
++        if (memchr(longname.s, '\0', length)) {
++            archive_string_free(&longname);
++            archive_set_error(&a->archive, ARCHIVE_ERRNO_FILE_FORMAT,
++                "NUL in GNU long pathname");
++            return ARCHIVE_FATAL;
++        }
++#endif
+ 		if (archive_entry_copy_pathname_l(entry, longname.s,
+ 		    archive_strlen(&longname), tar->sconv) != 0)
+ 			err = set_conversion_failed_error(a, tar->sconv, "Pathname");
+@@ -2211,6 +2222,13 @@
+ 		pas = &(tar->entry_pathname);
+ 	}
+ 	if (pas != NULL) {
++#ifdef LIBARCHIVE_STRICT_NAMES
++        if (memchr(pas->s, '\0', archive_strlen(pas))) {
++            archive_set_error(&a->archive, ARCHIVE_ERRNO_FILE_FORMAT,
++                "NUL in pax pathname");
++            return ARCHIVE_FATAL;
++        }
++#endif
+ 		if (archive_entry_copy_pathname_l(entry, pas->s,
+ 		    archive_strlen(pas), sconv) != 0) {
+ 			err = set_conversion_failed_error(a, sconv, "Pathname");
+--- a/lib/zip/archive_string.c
++++ b/lib/zip/archive_string.c
+@@ -140,7 +140,7 @@
+ 	const char *, const char *);
+ static void add_sconv_object(struct archive *, struct archive_string_conv *);
+ static struct archive_string_conv *create_sconv_object(const char *,
+-	const char *, unsigned, int);
++	const char *, unsigned, int, int);
+ static void free_sconv_object(struct archive_string_conv *);
+ static struct archive_string_conv *get_sconv_object(struct archive *,
+ 	const char *, const char *, int);
+@@ -1169,7 +1169,7 @@
+  */
+ static struct archive_string_conv *
+ create_sconv_object(const char *fc, const char *tc,
+-    unsigned current_codepage, int flag)
++    unsigned current_codepage, int flag, int preserve_unicode)
+ {
+ 	struct archive_string_conv *sc; 
+ 
+@@ -1296,6 +1296,10 @@
+ 	    (flag & SCONV_TO_UTF8))
+ 		flag |= SCONV_NORMALIZATION_D;
+ #endif
++
++/* Archive-local names need not use host-filesystem normalization. */
++	if (preserve_unicode)
++		flag &= ~(SCONV_NORMALIZATION_C | SCONV_NORMALIZATION_D);
+ 
+ #if defined(HAVE_ICONV)
+ 	sc->cd_w = (iconv_t)-1;
+@@ -1714,7 +1718,7 @@
+ 		current_codepage = a->current_codepage;
+ 
+ 	sc = create_sconv_object(canonical_charset_name(fc),
+-	    canonical_charset_name(tc), current_codepage, flag);
++	    canonical_charset_name(tc), current_codepage, flag, a != NULL && a->preserve_unicode);
+ 	if (sc == NULL) {
+ 		if (a != NULL)
+ 			archive_set_error(a, ENOMEM,
+--- a/lib/zip/archive_util.c
++++ b/lib/zip/archive_util.c
+@@ -190,6 +190,10 @@
+ void
+ __archive_errx(int retvalue, const char *msg)
+ {
++#ifdef LIBARCHIVE_FATAL_HANDLER
++	/* A configured embedding handler must not return. */
++	LIBARCHIVE_FATAL_HANDLER(retvalue, msg);
++#endif
+ 	static const char msg1[] = "Fatal Internal Error in libarchive: ";
+ 	size_t s;
+ 

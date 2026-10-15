@@ -2393,8 +2393,65 @@ TEST_F(NegativeScriptTest, SemanticError_TypeMismatch) {
 }
 
 TEST_F(NegativeScriptTest, SemanticError_ImplicitFnReturnMustContainError) {
-    ExpectErrorMessage("test/lambda/negative/semantic/implicit_fn_error_return.ls",
-        "may return error from call to 'may_fail'");
+    ScriptResult result = run_lambda_script(
+        "test/lambda/negative/semantic/implicit_fn_error_return.ls");
+    EXPECT_NE(result.exit_code, 0) << result.output;
+    EXPECT_NE(strstr(result.output.c_str(),
+        ":9:3: error[E208]: function 'leaks_error' may return error from call to 'may_fail': "
+        "callee declares a raised error channel (`^`)"), nullptr) << result.output;
+    EXPECT_NE(strstr(result.output.c_str(),
+        "help: The implicit return contract `any \\ error` excludes error."), nullptr) << result.output;
+    EXPECT_NE(strstr(result.output.c_str(),
+        "declare `T^` and propagate with `call(...)^`"), nullptr) << result.output;
+    EXPECT_EQ(strstr(result.output.c_str(), "Narrow the argument"), nullptr) << result.output;
+}
+
+TEST_F(NegativeScriptTest, SemanticError_ReturnErrorExplainsArgumentContract) {
+    ScriptResult result = run_lambda_script(
+        "test/lambda/negative/semantic/implicit_fn_error_argument.ls");
+    EXPECT_NE(result.exit_code, 0) << result.output;
+    // named arguments are reported in parameter order; a pipe's receiver is slot one.
+    static const char* const expected[] = {
+        ":3:41: error[E208]: function 'positional' may return error from call to 'render': argument 2 ('title')",
+        ":4:39: error[E208]: function 'named' may return error from call to 'render': argument 2 ('title')",
+        ":5:25: error[E208]: function 'piped' may return error from call to 'render': argument 1 ('prefix')",
+        "has type any, which may contain error; parameter requires string",
+        "function 'implicit' may return error from call to 'consume': argument 1 ('value') has type any, "
+        "which may contain error; parameter requires any \\ error",
+        "help: The declared return contract `string` excludes error.",
+        "Narrow the argument to an error-free type or handle its error before this call."
+    };
+    for (const char* message : expected) {
+        EXPECT_NE(strstr(result.output.c_str(), message), nullptr) << message << "\n" << result.output;
+    }
+}
+
+TEST_F(NegativeScriptTest, SemanticError_ReturnErrorHelpSurvivesWarningMode) {
+    const char* args[] = {LAMBDA_EXE, "--no-log", "--static-warning",
+        "test/lambda/negative/semantic/implicit_fn_error_argument.ls", NULL};
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    EXPECT_EQ(result.exit_code, 0);
+    ASSERT_NE(result.stdout_buf, nullptr);
+    EXPECT_NE(strstr(result.stdout_buf, "warning[E208]"), nullptr) << result.stdout_buf;
+    EXPECT_NE(strstr(result.stdout_buf,
+        "help: The implicit return contract `any \\ error` excludes error."), nullptr) << result.stdout_buf;
+    shell_result_free(&result);
+}
+
+TEST_F(NegativeScriptTest, SemanticError_ReturnErrorIdentifiesUncontainedOrigin) {
+    ScriptResult result = run_lambda_script(
+        "test/lambda/negative/semantic/implicit_fn_error_origin.ls");
+    EXPECT_NE(result.exit_code, 0) << result.output;
+    EXPECT_NE(strstr(result.output.c_str(),
+        ":5:58: error[E208]: function 'branches' may return error from call to 'first': "
+        "call result has type int | error"), nullptr) << result.output;
+    EXPECT_EQ(strstr(result.output.c_str(), "may return error from call to 'handled'"), nullptr) << result.output;
+    EXPECT_EQ(strstr(result.output.c_str(), "may return error from call to 'second'"), nullptr) << result.output;
+    EXPECT_NE(strstr(result.output.c_str(),
+        "function 'builtin' may return error from call to 'int': call result has type number | error"),
+        nullptr) << result.output;
 }
 
 TEST_F(NegativeScriptTest, SemanticError_EnforcingCallNeedsImmediateAcknowledgment) {

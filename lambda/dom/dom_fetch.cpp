@@ -91,6 +91,9 @@ typedef struct JsFetchWork {
     void* owner_document;
     uint32_t resource_id;
     bool queued;
+    bool deferred;
+    int completion_status;
+    JsFetchWork* completed_next;
     atomic_int32 cancelled;
 } JsFetchWork;
 
@@ -100,6 +103,9 @@ typedef struct JsFetchWork {
 struct JsFetchRuntimeState {
     char* base_dir = NULL;
     JsFetchWork* pending_work = NULL;
+    JsFetchWork* completed_head = NULL;
+    JsFetchWork* completed_tail = NULL;
+    bool dispatching = false;
 };
 
 static char* js_fetch_base_dir_from_path(const char* dir_path) {
@@ -250,9 +256,28 @@ struct FetchWorkOwner {
     ~FetchWorkOwner() { fetch_work_destroy(work); }
 };
 
+static void fetch_completed_remove(JsFetchWork* fw) {
+    JsFetchRuntimeState* state = (JsFetchRuntimeState*)context_capsule(
+        fw->owner_context, CONTEXT_CAPSULE_DOM_FETCH);
+    JsFetchWork* previous = nullptr;
+    for (JsFetchWork* current = state->completed_head; current; current = current->completed_next) {
+        if (current == fw) {
+            if (previous) previous->completed_next = current->completed_next;
+            else state->completed_head = current->completed_next;
+            if (state->completed_tail == current) state->completed_tail = previous;
+            break;
+        }
+        previous = current;
+    }
+    fw->completed_next = nullptr;
+    fw->deferred = false;
+}
+
 static void fetch_resource_close(void* user) {
     JsFetchWork* fw = (JsFetchWork*)user;
     if (!fw) return;
+    bool completed = fw->deferred;
+    if (completed) fetch_completed_remove(fw);
     // The table releases script roots before cancellation; libuv retains the
     // native work record until it delivers the completion callback.
     fw->resource_id = 0;
@@ -261,6 +286,7 @@ static void fetch_resource_close(void* user) {
     fw->owner_document = NULL;
     atomic_store32(&fw->cancelled, 1);
     if (fw->queued) (void)uv_cancel((uv_req_t*)&fw->work);
+    else if (completed) fetch_work_destroy(fw);
 }
 
 // =============================================================================
@@ -390,6 +416,18 @@ static void fetch_after_work_cb(uv_work_t* req, int status) {
         fetch_work_destroy(fw);
         return;
     }
+    if (context && context != fw->owner_context && context->execution_depth) {
+        // a child may pump the shared loop while its parent is suspended; retain
+        // completion roots until the parent's own host checkpoint (D5.4.1).
+        JsFetchRuntimeState* state = (JsFetchRuntimeState*)context_capsule(
+            fw->owner_context, CONTEXT_CAPSULE_DOM_FETCH);
+        fw->completion_status = status;
+        fw->deferred = true;
+        if (state->completed_tail) state->completed_tail->completed_next = fw;
+        else state->completed_head = fw;
+        state->completed_tail = fw;
+        return;
+    }
     if (!js_runtime_context_enter_turn(fw->owner_runtime, fw->owner_context)) {
         log_error("fetch: could not enter the originating document runtime");
         fetch_work_destroy(fw);
@@ -434,6 +472,18 @@ static void fetch_after_work_cb(uv_work_t* req, int status) {
     runtime_resource_table_remove_owned(js_runtime_resource_table(),
         fw->owner_context, resource_id);
     fetch_work_destroy(fw);
+}
+
+extern "C" void js_fetch_dispatch_pending(void) {
+    JsFetchRuntimeState* state = js_fetch_runtime_state_get();
+    if (!state || state->dispatching) return;
+    state->dispatching = true;
+    while (state->completed_head) {
+        JsFetchWork* fw = state->completed_head;
+        fetch_completed_remove(fw);
+        fetch_after_work_cb(&fw->work, fw->completion_status);
+    }
+    state->dispatching = false;
 }
 
 // =============================================================================

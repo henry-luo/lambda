@@ -1168,10 +1168,9 @@ HOMEBREW_DEPS=(
 # Note: libcurl will be rebuilt with mbedTLS support (see build_curl_with_http2_for_mac)
 
 # Radiant project dependencies - for HTML/CSS/SVG rendering engine
+# image codecs are built from lib/image by the Lambda build.
 RADIANT_DEPS=(
     "glfw"       # OpenGL window and context management
-    "libpng"     # PNG image format support
-    "webp"       # shared raster WebP decoder
     "zlib"       # Compression library
     "bzip2"      # Alternative compression library
 )
@@ -1271,13 +1270,13 @@ if command -v brew >/dev/null 2>&1; then
     echo "Radiant project dependencies:"
     echo "- ThorVG: $([ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- GLFW: $(brew list glfw >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
-    echo "- libpng: $(brew list libpng >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo "- zlib: $(brew list zlib >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo "- bzip2: $(brew list bzip2 >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 else
     echo "- Homebrew not available for dependency checks"
 fi
 
+echo "- Image codecs: built from lib/image by Lambda"
 echo "- MIR: vendored at lambda/mir (built by 'make build-mir')"
 echo "- ThorVG: $([ -f "mac-deps/thorvg/build-mac/src/libthorvg.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- Google Test: $([ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] && echo "✓ Built" || echo "✗ Missing")"

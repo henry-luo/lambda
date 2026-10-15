@@ -479,6 +479,8 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
                     !bidi_rect_contains_segment_break(text, rect);
                 bool rect_use_visual_metrics = use_fallback_metrics &&
                     layout_text_autospace_flags(lycon, text) == 0 &&
+                    // tab-stop advances cannot be redistributed in proportion to fallback glyph ink.
+                    !memchr(text->text_data() + rect->start_index, '\t', rect->length) &&
                     text->font && text->font->letter_spacing == 0.0f &&
                     // document-font ranges retain the primary font's CSS advance
                     // when fallback only supplies missing glyphs.

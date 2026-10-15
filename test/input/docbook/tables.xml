@@ -1,0 +1,9 @@
+<article xmlns="http://docbook.org/ns/docbook" version="5.2" xml:id="tables">
+  <info><title>Table examples</title></info>
+  <informaltable xml:id="html-table"><thead><tr><th>Name</th><th>Value</th></tr></thead><tbody><tr><td>A</td><td>1</td></tr></tbody></informaltable>
+  <table xml:id="cals"><title>Spanning cells</title><tgroup cols="3">
+    <colspec colname="left"/><colspec colname="middle"/><colspec colname="right"/>
+    <thead><row><entry namest="left" nameend="right">Heading</entry></row></thead>
+    <tbody><row><entry morerows="1">A</entry><entry>B</entry><entry>C</entry></row><row><entry namest="middle" nameend="right">D</entry></row></tbody>
+  </tgroup></table>
+</article>

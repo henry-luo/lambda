@@ -2254,8 +2254,8 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
 
     if (node && node->is_element()) {
         DomElement* dom_elem = node->as_element();
-        // a native page document declares its elements' r: traits as presentational hints
-        radiant_native_hints_declare(dom_elem);
+        // namespaced page traits enter the shared cascade as presentational hints.
+        radiant_native_hints_declare(lycon, dom_elem);
         if (dom_elem && dom_elem->specified_style) {
             bool styles_current = dom_elem->styles_resolved() &&
                                   !dom_elem->needs_style_recompute();
@@ -2893,6 +2893,10 @@ bool layout_quirks_block_ignores_line_height(LayoutContext* lycon, ViewBlock* bl
 }
 
 float line_baseline_position(LayoutContext* lycon, float* out_line_height) {
+    if (lycon->line.has_native_metrics) {
+        if (out_line_height) *out_line_height = lycon->line.max_ascender + lycon->line.max_descender;
+        return lycon->line.max_ascender;
+    }
     float line_height = max(lycon->block.strut_line_height,
                             lycon->line.max_ascender + lycon->line.max_descender);
     // CSS 2.1 §10.8.1: The strut is an invisible zero-width inline box with the
@@ -3013,6 +3017,15 @@ static bool layout_inline_span_has_content_on_line(View* view, int line_number) 
     return view->inline_line_number == line_number;
 }
 
+static float layout_applied_inline_relative_y(View* view) {
+    float offset = 0.0f;
+    for (View* parent = view->parent; parent && parent->view_type == RDT_VIEW_INLINE; parent = parent->parent) {
+        ViewElement* span = lam::view_require_element(parent);
+        if (span->position) offset += span->positionp()->inline_relative_y;
+    }
+    return offset;
+}
+
 void view_vertical_align(LayoutContext* lycon, View* view) {
     // CSS 2.1 §10.8.1: The line box height is determined by baseline-aligned content
     float baseline_line_height = 0.0f;
@@ -3021,7 +3034,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         max(lycon->line.max_top_height, lycon->line.max_bottom_height));
     float line_height = max(baseline_line_height, max_tb);
     float replaced_baseline_pos = baseline_pos;
-    if (lycon->line.has_replaced_content &&
+    if (!lycon->line.has_native_metrics && lycon->line.has_replaced_content &&
         lycon->line.max_css_baseline_ascender > replaced_baseline_pos) {
         replaced_baseline_pos = lycon->line.max_css_baseline_ascender;
     }
@@ -3095,6 +3108,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             } else {
                 rect->y = lycon->block.advance_y + vertical_offset;
             }
+            // a closed relative inline already shifted earlier lines; rebasing its last line must retain that shift.
+            rect->y += layout_applied_inline_relative_y(view);
             rect = rect->next;
         }
         adjust_text_bounds(text_view);
@@ -3115,7 +3130,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         float vertical_offset = calculate_vertical_align_offset(
             lycon, lycon->line.vertical_align, item_height, line_height,
             baseline_pos, item_baseline, lycon->line.vertical_align_offset);
-        view->y = lycon->block.advance_y + vertical_offset;
+        view->y = lycon->block.advance_y + vertical_offset + layout_applied_inline_relative_y(view);
     }
     else if (view->view_type == RDT_VIEW_MARKER) {
         ViewMarker* marker = lam::view_require<RDT_VIEW_MARKER>(view);
@@ -3290,7 +3305,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             !vertical_inline_parent && parent_uses_text_top_baseline) {
             block->y = lycon->block.advance_y;
         } else if (!vertical_inline_parent || baseline_source_context) {
-            block->y = lycon->block.advance_y + max(vertical_offset, 0) +
+            // native font-height and negative leading allow ink above the line's allocation.
+            block->y = lycon->block.advance_y + (lycon->line.has_native_metrics ? vertical_offset : max(vertical_offset, 0.0f)) +
                 (block->bound ? block->boundary()->margin.top : 0);
         } else {
             // horizontal baseline alignment must not replace it with a line
@@ -5729,6 +5745,10 @@ extern "C" bool dom_engine_layout_active(DomDocument* doc) {
         if (s_layout_active_documents[index] == doc) return true;
     }
     return false;
+}
+
+extern "C" void dom_engine_resolve_scrolled_geometry(DomDocument* doc) {
+    if (doc && !dom_engine_layout_active(doc)) layout_resolve_scrolled_sticky(doc->view_tree);
 }
 
 static bool layout_container_compute_value(void* context, const CssValue* value, CssMathResult* result) {

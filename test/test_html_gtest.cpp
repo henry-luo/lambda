@@ -8,6 +8,8 @@
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/input/html5/html5_parser.h"
+#include "../lambda/input/input-parsers.h"
+#include "../lib/mime-detect.h"
 #include "../lib/arena.h"
 #include "../lib/strbuf.h"
 
@@ -69,6 +71,13 @@ protected:
         }
 
         return input->root;
+    }
+
+    Input* parse_document_as(const char* source, const char* format = "xhtml", const char* url = nullptr) {
+        String* type = format ? create_lambda_string(format) : nullptr;
+        Input* input = input_from_source(source, url ? url_parse(url) : nullptr, type, nullptr);
+        free(type);
+        return input;
     }
 
     Item parseHtml5Document(const char* html) {
@@ -1019,4 +1028,112 @@ TEST_F(HtmlParserTest, WhitespacePreservation) {
     // Just verify parsing succeeded
     TypeElmt* type = (TypeElmt*)pre_elem->type;
     EXPECT_TRUE(strview_equal(&type->name, "pre"));
+}
+
+
+TEST_F(HtmlParserTest, XhtmlUsesHtmlDocumentAndInternedNames) {
+    const char* source = "<?xml version=\"1.0\"?><!DOCTYPE h:html>"
+        "<!--note--><h:html xmlns:h=\"http://www.w3.org/1999/xhtml\">"
+        "<h:head/><h:body><h:div id=\"box\" class=\"card\" style=\"width:80px\">text</h:div>"
+        "</h:body></h:html>";
+    Input* input = parse_document_as(source);
+    ASSERT_NE(input, nullptr);
+    ASSERT_FALSE(input->parse_failed);
+    EXPECT_TRUE(ElementReader(input->root).hasTag("#document"));
+    EXPECT_EQ(findElementByTag(input->root, "?xml"), nullptr);
+    Element* doctype = findElementByTag(input->root, "#doctype");
+    ASSERT_NE(doctype, nullptr);
+    EXPECT_STREQ(doctype->get_attr("name").string()->chars, "html");
+    Element* comment = findElementByTag(input->root, "#comment");
+    ASSERT_NE(comment, nullptr);
+    EXPECT_STREQ(comment->get_attr("data").string()->chars, "note");
+    Element* div = findElementByTag(input->root, "div");
+    ASSERT_NE(div, nullptr);
+    Input* html = parse_document_as("<!doctype html><html><head></head><body>"
+        "<div id=\"box\" class=\"card\" style=\"width:80px\">text</div></body></html>", "html");
+    ASSERT_NE(html, nullptr);
+    Element* html_div = findElementByTag(html->root, "div");
+    ASSERT_NE(html_div, nullptr);
+    EXPECT_EQ(ElementReader(div).tagId(), ElementReader(html_div).tagId());
+    const char* attributes[] = {"id", "class", "style"};
+    for (const char* key : attributes) {
+        EXPECT_STREQ(div->get_attr(key).string()->chars, html_div->get_attr(key).string()->chars);
+    }
+    EXPECT_EQ(findElementByTag(input->root, "h:div"), nullptr);
+}
+
+TEST_F(HtmlParserTest, XhtmlPreservesXmlContentAndForeignNamespaces) {
+    Input* input = parse_document_as("<html xmlns=\"http://www.w3.org/1999/xhtml\"><head/><body>"
+        "<div/><p> a <![CDATA[<b>&]]> z </p><pre>  a\n b  </pre>"
+        "<s:svg xmlns:s=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 20 30\">"
+        "<s:foreignObject><div>inside</div></s:foreignObject></s:svg>"
+        "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><mi>x</mi></math>"
+        "<div xmlns=\"\">foreign</div><DIV>case-sensitive</DIV></body></html>");
+    ASSERT_NE(input, nullptr);
+    ASSERT_FALSE(input->parse_failed);
+    Element* body = findElementByTag(input->root, "body");
+    ASSERT_NE(body, nullptr);
+    ASSERT_EQ(body->length, 7);
+    EXPECT_EQ(body->items[0].element->length, 0);
+    Element* paragraph = body->items[1].element;
+    ASSERT_EQ(paragraph->length, 1);
+    EXPECT_STREQ(paragraph->items[0].get_string()->chars, " a <b>& z ");
+    Element* pre = findElementByTag(input->root, "pre");
+    ASSERT_NE(pre, nullptr);
+    EXPECT_STREQ(pre->items[0].get_string()->chars, "  a\n b  ");
+    Element* svg = findElementByTag(input->root, "svg");
+    ASSERT_NE(svg, nullptr);
+    EXPECT_STREQ(svg->get_attr("viewBox").string()->chars, "0 0 20 30");
+    EXPECT_STREQ(svg->get_attr("__lambda_ns_uri").string()->chars, "http://www.w3.org/2000/svg");
+    Element* object = findElementByTag(input->root, "foreignObject");
+    ASSERT_NE(object, nullptr);
+    EXPECT_STREQ(object->items[0].element->get_attr("__lambda_ns_uri").string()->chars,
+        "http://www.w3.org/1999/xhtml");
+    EXPECT_STREQ(body->items[5].element->get_attr("__lambda_ns_uri").string()->chars, "");
+    EXPECT_NE(findElementByTag(input->root, "DIV"), nullptr);
+}
+
+TEST_F(HtmlParserTest, XhtmlRejectsMalformedXmlAndWrongRoots) {
+    const char* invalid[] = {
+        "", "<html/>", "<html xmlns=\"urn:wrong\"/>",
+        "<body xmlns=\"http://www.w3.org/1999/xhtml\"/>",
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><p></P></html>",
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><div></html>",
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><h:div/></html>",
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\" id=\"a\" id=\"b\"/>",
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:a=\"urn:a\" xmlns:b=\"urn:a\" a:id=\"a\" b:id=\"b\"/>",
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\">&nbsp;</html>",
+        "<!DOCTYPE html [<!ENTITY e 'x'>]><html xmlns=\"http://www.w3.org/1999/xhtml\"/>",
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"/><html xmlns=\"http://www.w3.org/1999/xhtml\"/>"
+    };
+    for (const char* source : invalid) {
+        SCOPED_TRACE(source);
+        Input* input = parse_document_as(source);
+        ASSERT_NE(input, nullptr);
+        EXPECT_TRUE(input->parse_failed);
+    }
+}
+
+TEST_F(HtmlParserTest, XhtmlDetectsExtensionsAndMime) {
+    const char* urls[] = {"file:///page.xhtml", "file:///page.XHT"};
+    for (const char* url : urls) {
+        Input* input = parse_document_as("<html xmlns=\"http://www.w3.org/1999/xhtml\"><head/><body/></html>", nullptr, url);
+        ASSERT_NE(input, nullptr);
+        ASSERT_FALSE(input->parse_failed);
+        EXPECT_TRUE(ElementReader(input->root).hasTag("#document"));
+    }
+    EXPECT_STREQ(mime_extension_from_content_type("application/xhtml+xml; charset=UTF-8"), ".xhtml");
+}
+
+TEST_F(HtmlParserTest, XhtmlRejectsTransportNulAndTracksSourceLines) {
+    Input* input = parse_document_as("<html xmlns=\"http://www.w3.org/1999/xhtml\"/>");
+    ASSERT_NE(input, nullptr);
+    const char* source = "<html xmlns=\"http://www.w3.org/1999/xhtml\">\n<head/>\n<body><p/></body></html>";
+    ASSERT_NE(parse_xhtml_document(input, source, strlen(source), true), nullptr);
+    Element* paragraph = findElementByTag(input->root, "p");
+    ASSERT_NE(paragraph, nullptr);
+    EXPECT_EQ(ElementReader(paragraph).get_attr("__source_line").asInt(), 3);
+    const char truncated[] = "<html xmlns=\"http://www.w3.org/1999/xhtml\"/>\0<broken>";
+    EXPECT_EQ(parse_xhtml_document(input, truncated, sizeof(truncated) - 1), nullptr);
+    EXPECT_TRUE(input->parse_failed);
 }

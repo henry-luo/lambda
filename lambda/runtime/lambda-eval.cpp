@@ -51,6 +51,7 @@
 #endif
 #include "../validator/validator.hpp"
 #include "../input/input.hpp"
+#include "../io/script_format.hpp"
 #include "../io/fs_node.hpp"
 #include "io_file_search.hpp"
 #include "../input/html5/html5_parser.h"
@@ -216,7 +217,7 @@ extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* mes
  * last_error plus a GC-heap payload carrying code, message, file and cause
  * (S7.4.4). Falls back to the payload-less sentinel only without a GC heap.
  */
-static Item runtime_error_item(LambdaErrorCode code, const char* message,
+Item runtime_error_item(LambdaErrorCode code, const char* message,
         LambdaError* cause) {
     set_runtime_error(code, "%s", message);
     if (context && context->heap && context->heap->gc) {
@@ -6316,22 +6317,34 @@ static Item fn_parse_grammar(Item str_item, Type* type, Item rule_item) {
             return ItemError;
         }
     }
-    if (get_type_id(str_item) != LMD_TYPE_STRING) {
-        set_runtime_error(ERR_TYPE_MISMATCH, "parse: 1st argument must be a string, got type: %s",
+    bool byte_input = get_type_id(str_item) == LMD_TYPE_BINARY;
+    if (get_type_id(str_item) != LMD_TYPE_STRING && !byte_input) {
+        set_runtime_error(ERR_TYPE_MISMATCH, "parse: 1st argument must be a string or binary, got type: %s",
             get_type_name(get_type_id(str_item)));
         return ItemError;
     }
-    Url* dummy_url = url_parse("parse://grammar");
-    Input* input = dummy_url ? InputManager::create_input(dummy_url) : NULL;
+    RootFrame roots(2);
+    Rooted<Item> source(roots, str_item);
+    Rooted<Item> result(roots, ItemNull);
+    // grammar results are runtime values; a private parse region must not accumulate on refresh.
+    Pool* parse_pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "grammar.parse");
+    Input* input = parse_pool ? Input::create(parse_pool) : NULL;
     if (!input) {
+        if (parse_pool) mem_pool_destroy(parse_pool);
         set_runtime_error(ERR_OUT_OF_MEMORY, "parse: failed to allocate grammar parser input");
         return ItemError;
     }
-    if (!grammar_parse(grammar, entry, input, str_item.get_chars(), str_item.get_len(), spans)) {
+    Binary* binary = byte_input ? source.get().get_safe_binary() : NULL;
+    const char* chars = binary ? (const char*)binary_data(binary) : source.get().get_chars();
+    size_t length = binary ? binary_length(binary) : source.get().get_len();
+    if (!grammar_parse(grammar, entry, input, chars, length, spans, true, byte_input)) {
         set_input_parse_error("parse", input, NULL);
+        mem_pool_destroy(parse_pool);
         return ItemError;
     }
-    return input->root;
+    result.set(input->root);
+    mem_pool_destroy(parse_pool);
+    return result.get();
 }
 
 Item fn_parse3(Item str_item, Item grammar_item, Item rule_item) {
@@ -6462,18 +6475,39 @@ Item fn_parse2(Item str_item, Item type) {
         return fn_parse_highlight_spans(html, str_item, window_item, prescan_item);
     }
 
-    // first arg must be a string
+    str_item = parse_source_root.get();
+    // captured ZIP members are values: parsing them never reacquires their source (S12.4.1v2).
+    if (fs_node_is(str_item)) {
+        Item result = fs_node_input(str_item, type_str, flavor_str);
+        arraylist_free(adapter_names);
+        arraylist_free(raw_names);
+        arraylist_free(chaptered_names);
+        return result;
+    }
+
     TypeId str_type = get_type_id(str_item);
-    if (str_type != LMD_TYPE_STRING) {
+    if (str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_BINARY) {
         set_runtime_error(ERR_TYPE_MISMATCH,
-            "parse: 1st argument must be a string, got type: %s",
+            "parse: 1st argument must be text, immutable bytes, or a captured ZIP member, got type: %s",
             get_type_name(str_type));
         return ItemError;
     }
-    String* str = str_item.get_safe_string();
-    if (!str) {
+    String* str = str_type == LMD_TYPE_STRING ? str_item.get_safe_string() : nullptr;
+    Binary* binary = str_type == LMD_TYPE_BINARY ? str_item.get_safe_binary() : nullptr;
+    if (!str && !binary) {
         set_runtime_error(ERR_INVALID_STATE, "parse: string value is unavailable");
         return ItemError;
+    }
+    // plain text has no parser state or Input-owned objects to retain.
+    if (type_str && strcmp(type_str->chars, "text") == 0) {
+        RootFrame roots(1);
+        Rooted<Item> source(roots, str_item);
+        arraylist_free(adapter_names);
+        arraylist_free(raw_names);
+        arraylist_free(chaptered_names);
+        String* text = heap_strcpy(str ? str->chars : (const char*)binary_data(binary),
+            str ? str->len : binary_length(binary));
+        return text ? (Item){.item = s2it(text)} : ItemError;
     }
 
     // create a dummy URL for the parser infrastructure (no actual file)
@@ -6488,7 +6522,8 @@ Item fn_parse2(Item str_item, Item type) {
 
     parse_options.source_positions = source_positions;
     // preserve the Item's byte count so document XML cannot accept a NUL-truncated prefix.
-    Input* input = input_from_source_n_with_name_parent(str->chars, str->len, dummy_url,
+    Input* input = input_from_source_n_with_name_parent(str ? str->chars : (const char*)binary_data(binary),
+        str ? str->len : binary_length(binary), dummy_url,
         type_str, flavor_str, NULL,
         (source_positions || has_tex_options || parse_options.xml_preserve_whitespace) ? &parse_options : NULL);
     arraylist_free(adapter_names);
@@ -6676,11 +6711,23 @@ Item fn_format2(Item item, Item type) {
     }
 
     log_debug("format item type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
-    RootFrame format_roots(4);
+    RootFrame format_roots(6);
     Rooted<Item> source(format_roots, item);
     Rooted<Item> converted(format_roots, ItemNull);
     Rooted<String*> rooted_type(format_roots, type_str);
     Rooted<String*> rooted_flavor(format_roots, flavor_str);
+    Rooted<Item> rooted_options(format_roots, type);
+    Rooted<Item> script_target(format_roots, ItemNull);
+    ScriptFormatRoute route = script_format_route(type_str ? type_str->chars : nullptr,
+        flavor_str ? flavor_str->chars : nullptr);
+    if (route.target) {
+        // Package evaluation can allocate; keep all arguments precisely rooted (D5.3.3).
+        script_target.set(Item{.item = s2it(heap_strcpy(route.target, strlen(route.target)))});
+        Item args[3] = {source.get(), script_target.get(),
+            type_id == LMD_TYPE_MAP ? rooted_options.get() : ItemNull};
+        return interp_call_package_export(context->runtime,
+            route.package, "format_native", args, 3);
+    }
 #ifndef LAMBDA_NO_MATH_FORMAT
     if (type_str && ((strcmp(type_str->chars, "math") == 0 && flavor_str &&
             strcmp(flavor_str->chars, "mathml") == 0) ||

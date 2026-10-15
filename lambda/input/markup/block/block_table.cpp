@@ -9,6 +9,8 @@
  * - Textile: |_. headers and | cells
  */
 #include "block_common.hpp"
+#include "../wiki.hpp"
+#include "../../../core/mark_reader.hpp"
 #include "../../../../lib/mem.h"
 #include "lib/arraylist.h"
 
@@ -611,41 +613,39 @@ static Element* parse_wiki_cell_line(MarkupParser* parser, Element* row, const c
     const char* cell_start = line + 1;
     const char* tag = (*line == '!') ? "th" : "td";
     Element* last_cell = nullptr;
-    int link_depth = 0;
-    int template_depth = 0;
-    for (const char* pos = cell_start; ; pos++) {
-        if (!*pos) {
-            last_cell = append_wiki_cell(parser, row, tag, cell_start, pos);
-            break;
-        }
-        if (pos[0] == '[' && pos[1] == '[') { link_depth++; pos++; continue; }
-        if (pos[0] == ']' && pos[1] == ']' && link_depth) { link_depth--; pos++; continue; }
-        if (pos[0] == '{' && pos[1] == '{') { template_depth++; pos++; continue; }
-        if (pos[0] == '}' && pos[1] == '}' && template_depth) { template_depth--; pos++; continue; }
-        if (!link_depth && !template_depth &&
-            ((pos[0] == '|' && pos[1] == '|') || (pos[0] == '!' && pos[1] == '!')) &&
-            (pos == cell_start || pos[-1] != '\\')) {
-            last_cell = append_wiki_cell(parser, row, tag, cell_start, pos);
-            tag = (*pos == '!') ? "th" : "td";
-            pos++;
-            cell_start = pos + 1;
-        }
+    const char* end = line + strlen(line);
+    const char* position = cell_start;
+    while (position < end) {
+        position = wiki_cell_boundary(position, end, '|', Flavor::MEDIAWIKI);
+        bool boundary = position + 1 < end &&
+            ((position[0] == '|' && position[1] == '|') || (position[0] == '!' && position[1] == '!'));
+        if (boundary) {
+            last_cell = append_wiki_cell(parser, row, tag, cell_start, position);
+            tag = *position == '!' ? "th" : "td";
+            position += 2; cell_start = position;
+        } else if (position < end) position++;
     }
+    last_cell = append_wiki_cell(parser, row, tag, cell_start, end);
     return last_cell;
 }
 
-static void append_wiki_row(Element* table, Element* row) {
-    if (row && ((List*)row)->length > 0)
-        list_push((List*)table, Item{.item = (uint64_t)row});
+static void append_wiki_row(MarkupParser* parser, Element* head, Element* body, Element* row) {
+    if (!row || !row->length) return;
+    bool header = true;
+    for (int64_t i = 0; i < row->length; i++)
+        header = header && !strcmp(ElementReader(row->items[i].element).tagName(), "th");
+    wiki_append_table_row(parser, head, body, row, header);
 }
 
-static Item parse_wiki_table(MarkupParser* parser, const char* line) {
+Item parse_mediawiki_table(MarkupParser* parser, const char* line) {
     Element* table = create_element(parser, "table");
     if (!table) return Item{.item = ITEM_ERROR};
     const char* opening = str_skip_line_space(line);
     parse_wiki_attributes(parser, table, opening + 2, opening + strlen(opening));
     parser->current_line++;
 
+    Element* head = create_element(parser, "thead");
+    Element* body = create_element(parser, "tbody");
     Element* row = nullptr;
     Element* last_cell = nullptr;
     while (parser->current_line < parser->line_count) {
@@ -655,7 +655,7 @@ static Item parse_wiki_table(MarkupParser* parser, const char* line) {
             break;
         }
         if (strncmp(current, "|-", 2) == 0) {
-            append_wiki_row(table, row);
+            append_wiki_row(parser, head, body, row);
             row = create_element(parser, "tr");
             if (row) parse_wiki_attributes(parser, row, current + 2, current + strlen(current));
             last_cell = nullptr;
@@ -688,7 +688,9 @@ static Item parse_wiki_table(MarkupParser* parser, const char* line) {
         }
         parser->current_line++;
     }
-    append_wiki_row(table, row);
+    append_wiki_row(parser, head, body, row);
+    if (head->length) list_push((List*)table, Item{.element = head});
+    if (body->length) list_push((List*)table, Item{.element = body});
     return Item{.item = (uint64_t)table};
 }
 
@@ -705,7 +707,7 @@ Item parse_table(MarkupParser* parser, const char* line) {
     }
 
     if (parser->config.format == Format::WIKI)
-        return parse_wiki_table(parser, line);
+        return parse_mediawiki_table(parser, line);
 
     if (parser->config.format == Format::RST && is_rst_grid_table_border(line)) {
         return parse_rst_grid_table(parser, line);

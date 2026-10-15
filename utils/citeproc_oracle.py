@@ -12,7 +12,7 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 WORK = ROOT / 'temp/citeproc/oracle'
-PACKAGE = ROOT / 'lmd/package/latex/citeproc'
+PACKAGE = ROOT / 'lmd/package/doc/latex/citeproc'
 REFERENCE_COMMIT = 'cc9153c45293af878de08cafddbefe6ea150c380'
 REFERENCE_SHA256 = 'db98d3341d39eb7a9f166231b6c51118ed499f79821daa3e41f1ea8d7f8d0cbb'
 SUITE_COMMIT = '6eefc5b07c6969ab8999e48542acbcc131cba864'

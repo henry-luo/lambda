@@ -699,6 +699,7 @@ typedef enum SysFunc {
     SYSFUNC_EXCEPT,
     SYSPROC_IO_GREP,         // io.grep(source, pattern, options?) - line-oriented file search (lib/grep, GRP26)
     SYSPROC_IO_TEXT_SEARCH,       // io.text_search(source, query, options?) - ranked full-text file search (lib/fts, FTX11)
+    SYSPROC_IO_EXEC,              // io.exec(program, args, options?) - cancellable byte-exact process capture
     SYSFUNC_PARSE3,         // parse(str, grammar, 'rule') - run a grammar from a named rule (GM5.1)
     SYSFUNC_ERF,
     SYSFUNC_ERFC,
@@ -3496,6 +3497,8 @@ extern "C" {
     // io module functions (procedural)
     Item pn_io_copy(Item src, Item dst);
     Item pn_io_read(Item target);
+    Item pn_io_exec2(Item program, Item args);
+    Item pn_io_exec3(Item program, Item args, Item options);
     Item pn_io_move(Item src, Item dst);
     Item pn_io_delete(Item path);
     Item pn_io_mkdir(Item path);

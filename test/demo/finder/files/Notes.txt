@@ -1,0 +1,18 @@
+Little things, nicely organized.
+
+Ideas
+  • Keep the useful things close.
+  • Give every project a home.
+  • Leave some room for the next idea.
+
+Finder shortcuts
+  Enter / Cmd+Down    Open a folder or Quick Look a file
+  Space               Quick Look
+  Cmd+Up / Alt+Up     Parent folder
+  Cmd+[ / Alt+Left    Back
+  Cmd+] / Alt+Right   Forward
+  Cmd+F               Search this folder
+  Cmd+Shift+G         Go to Folder
+  Cmd+Shift+.         Show hidden files
+  Cmd+A               Select all visible items
+  Cmd+R               Refresh

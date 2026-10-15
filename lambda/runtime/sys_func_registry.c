@@ -1230,6 +1230,10 @@ SysFuncInfo sys_func_defs[] = {
 
     {SYSPROC_IO_READ, "io_read", 1, &TYPE_STRING, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_read", PROFILE_FILE_IO_FPTR(pn_io_read), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_EXEC, "io_exec", 2, &TYPE_MAP, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_exec2", PROFILE_FILE_IO_FPTR(pn_io_exec2), NULL, NULL, false, 0, true},
+    {SYSPROC_IO_EXEC, "io_exec", 3, &TYPE_MAP, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_exec3", PROFILE_FILE_IO_FPTR(pn_io_exec3), NULL, NULL, false, 0, true},
 
     {SYSPROC_IO_MOVE, "io_move", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_move", PROFILE_FILE_IO_FPTR(pn_io_move), NULL, NULL, false, 0},
@@ -4174,8 +4178,12 @@ static const char* const output_option_names[] = {
     "max_entries", "max_name_bytes", "max_path_depth", "max_nesting_depth", NULL
 };
 const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
+    static const char* const exec_options[] = {"cwd", "env", "timeout_ms", "max_output_bytes", NULL};
     static const char* const physics_options[] = {"steps", "sample_every", "bodies", "commands", NULL};
     switch (fn) {
+    case SYSPROC_IO_EXEC:
+        if (options_arg_index) *options_arg_index = 2;
+        return exec_options;
     case SYSFUNC_PHYSICS_SIMULATE:
         if (options_arg_index) *options_arg_index = 1;
         return physics_options;

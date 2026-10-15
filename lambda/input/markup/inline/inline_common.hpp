@@ -215,27 +215,6 @@ Item parse_extended_autolink(MarkupParser* parser, const char** text);
 // ============================================================================
 
 /**
- * parse_wiki_link - Parse MediaWiki-style links
- *
- * Handles: [[Page]], [[Page|display]], [[File:image.png]]
- */
-Item parse_wiki_link(MarkupParser* parser, const char** text);
-
-/**
- * parse_wiki_external_link - Parse MediaWiki external links
- *
- * Handles: [http://example.com text]
- */
-Item parse_wiki_external_link(MarkupParser* parser, const char** text);
-
-/**
- * parse_wiki_bold_italic - Parse MediaWiki-style emphasis
- *
- * Handles: ''italic'', '''bold''', '''''bolditalic'''''
- */
-Item parse_wiki_bold_italic(MarkupParser* parser, const char** text);
-
-/**
  * parse_wiki_template - Parse MediaWiki templates
  *
  * Handles: {{template}}, {{template|arg}}

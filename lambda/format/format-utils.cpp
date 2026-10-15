@@ -27,12 +27,6 @@ const TextEscapeConfig MARKDOWN_ESCAPE_CONFIG = {
     .escape_fn = NULL
 };
 
-const TextEscapeConfig WIKI_ESCAPE_CONFIG = {
-    .chars_to_escape = "[]{}|",
-    .use_backslash_escape = true,
-    .escape_fn = NULL
-};
-
 const TextEscapeConfig RST_ESCAPE_CONFIG = {
     .chars_to_escape = "*`_\\[]|",
     .use_backslash_escape = true,
@@ -505,23 +499,6 @@ static void emit_link_org(StringBuf* sb, const char* url, const char* text, cons
     stringbuf_append_str(sb, "]]");
 }
 
-// Wiki: [url text]  (external) or  [[text]]  (internal/no-href)
-static void emit_link_wiki(StringBuf* sb, const char* url, const char* text, const char* title) {
-    if (url && url[0] != '\0') {
-        // external link
-        stringbuf_append_format(sb, "[%s", url);
-        if (text && text[0] != '\0') {
-            stringbuf_append_format(sb, " %s", text);
-        } else if (title && title[0] != '\0') {
-            stringbuf_append_format(sb, " %s", title);
-        }
-        stringbuf_append_char(sb, ']');
-    } else {
-        // internal wiki link
-        stringbuf_append_format(sb, "[[%s]]", text ? text : "");
-    }
-}
-
 // Textile: "text(title)":url  or  "text":url
 static void emit_link_textile(StringBuf* sb, const char* url, const char* text, const char* title) {
     stringbuf_append_char(sb, '"');
@@ -765,75 +742,6 @@ const MarkupOutputRules ORG_RULES = {
     .link_tag = "link",
 };
 
-const MarkupOutputRules WIKI_RULES = {
-    // heading
-    .heading = {
-        .type = MarkupOutputRules::HeadingStyle::SURROUND,
-        .repeated_char = '=',
-        .prefix = {NULL, NULL, NULL, NULL, NULL, NULL},
-        .underline_chars = {0, 0, 0, 0, 0, 0},
-    },
-    // inline markup
-    .inline_markup = {
-        .bold_open   = "'''",  .bold_close   = "'''",
-        .italic_open = "''",   .italic_close = "''",
-        .code_open   = "<code>", .code_close = "</code>",
-        .strikethrough_open  = "<s>",    .strikethrough_close = "</s>",
-        .underline_open      = "<u>",    .underline_close     = "</u>",
-        .superscript_open    = "<sup>",  .superscript_close   = "</sup>",
-        .subscript_open      = "<sub>",  .subscript_close     = "</sub>",
-        .verbatim_open       = NULL,     .verbatim_close      = NULL,
-    },
-    // tag names
-    .tag_names = {
-        .bold_tags      = {"strong", "b", NULL, NULL},
-        .italic_tags    = {"em", "i", NULL, NULL},
-        .code_tag       = "code",
-        .strike_tags    = {"s", "del", "strike", NULL},
-        .underline_tags = {"u", "ins", NULL, NULL},
-        .sup_tag        = "sup",
-        .sub_tag        = "sub",
-        .verbatim_tag   = NULL,
-    },
-    // links and images
-    .emit_link  = emit_link_wiki,
-    .emit_image = NULL,
-    // lists
-    .list = {
-        .unordered_marker      = NULL,
-        .ordered_format        = NULL,
-        .ordered_repeat_char   = '#',
-        .unordered_repeat_char = '*',
-        .use_depth_repetition  = true,
-        .indent_spaces         = 0,
-    },
-    // code block
-    .code_block = {
-        .type          = MarkupOutputRules::CodeBlockStyle::TAG,
-        .open_prefix   = "<pre>",
-        .close_text    = "</pre>\n\n",
-        .lang_after_open = false,
-        .lang_in_parens  = false,
-    },
-    // block-level
-    .hr                         = "----\n\n",
-    .paragraph_suffix           = "\n\n",
-    .blockquote_open            = NULL,
-    .blockquote_close           = NULL,
-    .blockquote_prefix_each_line = false,
-    // table
-    .emit_table = emit_table_wiki,
-    // escaping
-    .escape_config = &WIKI_ESCAPE_CONFIG,
-    // custom handler
-    .custom_element_handler = wiki_custom_handler,
-    // container tags
-    .container_tags = {"doc", "document", "body", "span", NULL, NULL, NULL, NULL},
-    .skip_tags      = {"meta", NULL, NULL, NULL},
-    // link tag
-    .link_tag = "a",
-};
-
 const MarkupOutputRules TEXTILE_RULES = {
     // heading
     .heading = {
@@ -909,7 +817,6 @@ const MarkupOutputRules* get_markup_rules(const char* format_name) {
     if (strcmp(format_name, "markdown") == 0 || strcmp(format_name, "md") == 0) return &MARKDOWN_RULES;
     if (strcmp(format_name, "rst") == 0 || strcmp(format_name, "restructuredtext") == 0) return &RST_RULES;
     if (strcmp(format_name, "org") == 0 || strcmp(format_name, "orgmode") == 0) return &ORG_RULES;
-    if (strcmp(format_name, "wiki") == 0 || strcmp(format_name, "mediawiki") == 0) return &WIKI_RULES;
     if (strcmp(format_name, "textile") == 0) return &TEXTILE_RULES;
     return NULL;
 }

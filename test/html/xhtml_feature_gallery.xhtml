@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html SYSTEM "about:legacy-compat">
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:h="http://www.w3.org/1999/xhtml"
+      xmlns:s="http://www.w3.org/2000/svg"
+      xmlns:xlink="http://www.w3.org/1999/xlink"
+      xmlns:probe="urn:lambda:xhtml:probe"
+      xml:lang="en" lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>XHTML feature gallery</title>
+  <link rel="stylesheet" type="text/css" href="xhtml_feature_gallery.css"/>
+  <style type="text/css"><![CDATA[
+    #inline-style-probe { border-bottom: 3px solid #0f766e; }
+    DIV.case-probe { border-left: 4px solid #b45309; }
+  ]]></style>
+</head>
+<body>
+  <header class="hero" id="top">
+    <div class="page-width">
+      <p class="eyebrow">Lambda / Radiant / XHTML</p>
+      <h1>One document. Many namespaces.</h1>
+      <p class="intro">A local feature gallery for XML syntax, HTML content, CSS, vector graphics,
+        mathematics, and live DOM interaction.</p>
+      <div class="hero-controls">
+        <span id="check-summary" class="status" role="status">Checks waiting for JavaScript</span>
+        <button id="rerun-checks" type="button">Run checks again</button>
+        <button id="counter-button" type="button">Clicks: <span id="counter-value">0</span></button>
+      </div>
+      <nav aria-label="Gallery sections">
+        <a href="#syntax">XML syntax</a><a href="#namespaces">Namespaces</a>
+        <a href="#graphics">SVG</a><a href="#mathematics">MathML</a>
+        <a href="#forms">Forms</a><a href="#checks">Live checks</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page-width gallery">
+    <section class="card" id="syntax">
+      <p class="section-number">01 / Syntax and characters</p>
+      <h2>XML rules, familiar HTML</h2>
+      <p>The source has an XML declaration, a DOCTYPE, quoted attributes, explicit closing tags,
+        and self-closing empty elements. Its DOCTYPE identifier is inert.</p>
+      <p id="entities" class="specimen">5 &lt; 7 &amp; 9 &gt; 3; &quot;quoted&quot; &apos;single&apos;</p>
+      <p id="numeric-entities" class="specimen">A&#160;B &#x1F331;</p>
+      <p class="muted">Named XML entities, decimal/hexadecimal references, and UTF-8 text:</p>
+      <p id="unicode">Café · Ελληνικά · 日本語 · 中文 · العربية</p>
+      <!-- This comment must stay a comment, never visible page content. -->
+      <p>Line one<br/>Line two after a self-closing <code>&lt;br/&gt;</code>.</p>
+      <hr/>
+      <p><span id="empty-node"/><span id="empty-next">A self-closing non-void span stays empty;
+        this text belongs to its following sibling.</span></p>
+    </section>
+
+    <h:section class="card" id="namespaces">
+      <h:p class="section-number">02 / Name identity</h:p>
+      <h:h2>Default, prefixed, and scoped names</h:h2>
+      <h:p id="prefixed-child" class="sample-inline" style="font-weight:700"
+           probe:flag="preserved">This paragraph is written as &lt;h:p&gt;.</h:p>
+      <alt:div xmlns:alt="http://www.w3.org/1999/xhtml" class="specimen">
+        <alt:span id="scoped-prefix">A locally declared prefix also resolves to an HTML span.</alt:span>
+      </alt:div>
+      <probe:note id="custom-namespace" class="namespace-note">A custom XML namespace keeps its
+        own identity, even when displayed alongside HTML.</probe:note>
+      <div xmlns="" id="no-namespace" class="namespace-note">This div explicitly clears the default namespace.
+        <h:span id="namespace-reentry">The prefixed span inside it re-enters XHTML.</h:span>
+      </div>
+      <h:p class="muted">The qualified <code>probe:flag</code> attribute retains its namespace and value.</h:p>
+    </h:section>
+
+    <section class="card" id="whitespace">
+      <p class="section-number">03 / Text boundaries</p>
+      <h2>Whitespace and CDATA survive</h2>
+      <p>The first block preserves its exact indentation. The second displays literal markup.</p>
+      <pre id="preserved-space" xml:space="preserve">alpha
+  beta
+    gamma</pre>
+      <pre id="cdata-text"><![CDATA[<strong>CDATA is text & not markup</strong>]]></pre>
+      <p>The inline CSS and inline JavaScript also use CDATA, including real
+        <code>&lt;</code>, <code>&gt;</code>, and <code>&amp;&amp;</code> characters.</p>
+    </section>
+
+    <section class="card" id="styling">
+      <p class="section-number">04 / CSS and case</p>
+      <h2>Three sources of style</h2>
+      <div id="external-style-probe" class="external-style-probe">External CSS</div>
+      <p id="inline-style-probe">A CDATA style element adds this teal underline.</p>
+      <p id="attribute-style-probe" style="color:#7c3aed;font-weight:700">An inline style attribute makes this purple.</p>
+      <div id="case-lower" class="case-probe">Lowercase &lt;div&gt; is an HTML div.</div>
+      <DIV id="case-upper" class="case-probe" CaseAttr="Preserved">Uppercase &lt;DIV&gt; stays uppercase in XML.</DIV>
+      <p class="muted">The amber edge comes from a case-sensitive <code>DIV</code> selector.
+        Attribute names keep their spelling too.</p>
+    </section>
+
+    <section class="card" id="graphics">
+      <p class="section-number">05 / Embedded SVG</p>
+      <h2>Vector shapes meet HTML</h2>
+      <s:svg id="svg-example" width="380" height="190" viewBox="0 0 380 190" role="img"
+             aria-label="Gradient SVG diagram with an embedded HTML panel">
+        <s:defs>
+          <s:linearGradient id="gallery-gradient" x1="0" y1="0" x2="1" y2="1">
+            <s:stop offset="0" stop-color="#0f766e"/><s:stop offset="1" stop-color="#38bdf8"/>
+          </s:linearGradient>
+          <s:g id="gallery-symbol"><s:circle cx="0" cy="0" r="22" fill="#fde68a"/>
+            <s:path d="M-10 0 L-2 8 L12 -10" fill="none" stroke="#854d0e" stroke-width="4"/></s:g>
+        </s:defs>
+        <s:rect x="0" y="0" width="380" height="190" rx="14" fill="url(#gallery-gradient)"/>
+        <s:text x="22" y="34" fill="white" font-family="Arial" font-size="15">SVG + XHTML</s:text>
+        <s:use id="svg-use" xlink:href="#gallery-symbol" x="52" y="104"/>
+        <s:foreignObject id="foreign-object" x="94" y="58" width="264" height="104">
+          <h:div id="embedded-html" class="foreign-panel">
+            <h:strong>HTML inside SVG</h:strong>
+            <h:p>Namespace-aware text and CSS, with enough room to read both lines.</h:p>
+          </h:div>
+        </s:foreignObject>
+      </s:svg>
+      <p class="muted"><code>viewBox</code>, <code>linearGradient</code>, and
+        <code>foreignObject</code> keep their exact spelling. The check mark uses <code>xlink:href</code>.</p>
+    </section>
+
+    <section class="card" id="mathematics">
+      <p class="section-number">06 / Embedded MathML</p>
+      <h2>Mathematics in its own namespace</h2>
+      <p>Inline mathematics:
+        <math xmlns="http://www.w3.org/1998/Math/MathML" id="inline-math">
+          <mrow><msup><mi>a</mi><mn>2</mn></msup><mo>+</mo>
+            <msup><mi>b</mi><mn>2</mn></msup><mo>=</mo><msup><mi>c</mi><mn>2</mn></msup></mrow>
+        </math>.
+      </p>
+      <div class="math-panel">
+        <math xmlns="http://www.w3.org/1998/Math/MathML" id="display-math" display="block">
+          <mrow><mi>x</mi><mo>=</mo><mfrac>
+            <mrow><mo>−</mo><mi>b</mi><mo>±</mo><msqrt><mrow>
+              <msup><mi>b</mi><mn>2</mn></msup><mo>−</mo><mn>4</mn><mi>a</mi><mi>c</mi>
+            </mrow></msqrt></mrow><mrow><mn>2</mn><mi>a</mi></mrow>
+          </mfrac></mrow>
+        </math>
+      </div>
+      <p class="muted">Fractions, superscripts, radicals, and inline/display layout share the surrounding page.</p>
+    </section>
+
+    <section class="card" id="structured-content">
+      <p class="section-number">07 / Structured content</p>
+      <h2>Tables, lists, and semantic sections</h2>
+      <table>
+        <caption>What this document exercises</caption>
+        <thead><tr><th scope="col">Vocabulary</th><th scope="col">Namespace</th><th scope="col">Example</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">HTML</th><td>XHTML</td><td>Text, tables, forms</td></tr>
+          <tr><th scope="row">SVG</th><td>SVG</td><td>Shapes and foreignObject</td></tr>
+          <tr><th scope="row">MathML</th><td>MathML</td><td>Quadratic formula</td></tr>
+        </tbody>
+        <tfoot><tr><td colspan="3">One XML document, three rendering vocabularies.</td></tr></tfoot>
+      </table>
+      <div class="list-columns">
+        <ol><li>Parse XML syntax.</li><li>Resolve names.<ul><li>Keep namespace identity.</li><li>Preserve case.</li></ul></li><li>Render the page.</li></ol>
+        <dl><dt>Empty element</dt><dd>Closed with <code>/&gt;</code>.</dd><dt>CDATA</dt><dd>Literal character data.</dd></dl>
+      </div>
+      <details open="open"><summary>Source and resource notes</summary>
+        <p>The stylesheet, external script, and image are local sibling files. No network connection is needed.</p>
+      </details>
+    </section>
+
+    <section class="card" id="forms">
+      <p class="section-number">08 / Native controls</p>
+      <h2>A form you can interact with</h2>
+      <form id="profile-form" action="#forms" method="get">
+        <fieldset><legend>Reader profile</legend>
+          <label for="reader-name">Name</label><input id="reader-name" name="reader" type="text" value="Ada Lovelace" required="required"/>
+          <label for="reader-email">Email</label><input id="reader-email" name="email" type="email" value="ada@example.com"/>
+          <label for="reader-format">Favourite vocabulary</label>
+          <select id="reader-format" name="format"><option value="XHTML" selected="selected">XHTML</option><option value="SVG">SVG</option><option value="MathML">MathML</option></select>
+          <label for="reader-note">Note</label><textarea id="reader-note" name="note" rows="2" cols="28">XML syntax, HTML presentation.</textarea>
+          <p class="checkbox-line"><input id="reader-updates" name="updates" type="checkbox" checked="checked"/><label for="reader-updates">Enable updates</label></p>
+          <button id="read-form" type="button">Read form values</button>
+          <output id="form-result" for="reader-name reader-format reader-updates">Press the button to read the controls.</output>
+        </fieldset>
+      </form>
+    </section>
+
+    <section class="card" id="resources">
+      <p class="section-number">09 / Resources and language</p>
+      <h2>Local assets, links, and direction</h2>
+      <div class="resource-row"><img id="local-image" src="xhtml_feature_gallery_mark.svg" alt="Teal XHTML document badge" width="88" height="88"/>
+        <p>A self-closing image loads an external SVG through a relative URL.</p></div>
+      <p xml:lang="fr" lang="fr">Bonjour, le document est en français ici.</p>
+      <p xml:lang="ar" lang="ar" dir="rtl" class="rtl-sample">مرحبا بالعالم — XHTML</p>
+      <p><a href="#top">Back to the top</a> · <a href="xhtml_names.xhtml">Open the minimal XHTML sample</a></p>
+    </section>
+
+    <section class="card" id="checks">
+      <p class="section-number">10 / Live verification</p>
+      <h2>Inspect the result</h2>
+      <p>The external script checks the parsed DOM, namespace bindings, text boundaries, CSS,
+        and dynamically created nodes. Failed checks stay visible.</p>
+      <div id="dynamic-holder"/>
+      <ol id="check-list" class="check-list"><li>Waiting for the external script.</li></ol>
+      <p class="muted">This gallery covers the supported XHTML profile (D2.10.1). DTD loading,
+        custom entities, and malformed XML recovery are outside that profile.</p>
+    </section>
+  </main>
+  <footer class="page-width footer">XHTML feature gallery · All assets stay local · <a href="#top">Back to top</a></footer>
+  <script type="text/javascript"><![CDATA[
+    window.xhtmlInlineReady = 2 < 3 && 3 > 2;
+  ]]></script>
+  <script type="text/javascript" src="xhtml_feature_gallery.js"></script>
+</body>
+</html>

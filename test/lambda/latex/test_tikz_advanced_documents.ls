@@ -1,5 +1,5 @@
 // Render complete documents that combine several TikZ paths or PGFPlots series.
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 fn rendered_ok(html, title, graphic_class, label) bool^ =>
     contains(html, title)^ and contains(html, graphic_class)^ and

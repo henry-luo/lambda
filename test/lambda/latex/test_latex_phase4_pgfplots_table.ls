@@ -1,7 +1,7 @@
 // Phase IV (Lambda_Pkg_Tikz §12): a LaTeX document reads PGFPlots tables
 // from files beside it; the render passes the document base to the TikZ bridge.
-import latex: lambda.latex.latex
-import html: lambda.latex.to_html
+import latex: lambda.doc.latex.latex
+import html: lambda.doc.latex.to_html
 
 let path = "test/latex/fixtures/tikz_phase4/table_plot.tex";
 let ast = latex.parse_file(path);

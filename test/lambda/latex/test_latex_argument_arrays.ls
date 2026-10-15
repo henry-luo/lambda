@@ -1,7 +1,7 @@
 // S2.6.1v2/S2.6.4: command arrays preserve positions; S8.3.1v2 counts attributes in len.
-import util: lambda.latex.util
-import analyze: lambda.latex.analyze
-import latex: lambda.latex.latex
+import util: lambda.doc.latex.util
+import analyze: lambda.doc.latex.analyze
+import latex: lambda.doc.latex.latex
 
 let ast = parse("\\definecolor{accent}{HTML}{FF8000}\\setcounter{secnumdepth}{2}\\newtheorem{claim}{Claim}", 'latex')^;
 let color = util.find_descendant(ast, 'definecolor');

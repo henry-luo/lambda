@@ -1,0 +1,17 @@
+% titling.sty -- Lambda-owned binding of titling (CTAN), written from its manual
+% rather than copied.
+%
+% The \maketitle hooks are macros a document redefines; this binding defines them
+% empty so \renewcommand is legal, and the echoed definitions reach the script
+% adapter (lmd/package/doc/latex/packages/frontmatter.ls). \pretitle, \posttitle and
+% the other title commands stay constructors, as do \thetitle, \theauthor and
+% \thedate, which the adapter fills from \title, \author and \date.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{titling}[2026/10/13 Lambda binding]
+\DeclareOption*{}
+\ProcessOptions\relax
+
+\providecommand\maketitlehooka{}
+\providecommand\maketitlehookb{}
+\providecommand\maketitlehookc{}
+\providecommand\maketitlehookd{}

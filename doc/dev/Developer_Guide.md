@@ -92,7 +92,10 @@ These libraries and tools are required on every platform.
 | **libcurl** | Built from source with mbedTLS | HTTP/HTTPS client library |
 | **mbedTLS** | System package | TLS/SSL for libcurl |
 | **zlib** | System package | Gzip compression (HTTP, PDF, etc.) |
-| **bzip2** | System package | Alternative compression format |
+| **bzip2** | System package | bzip2-compressed tar input |
+| **liblzma (xz)** | System package | Native 7z LZMA/LZMA2 and xz-compressed tar input |
+| **zstd** | System package | Zstandard-compressed tar input |
+| **libarchive** | Selected sources in `lib/zip/`, provenance in `lib/zip/VENDOR.md` | Memory-only 7z/tar/RAR/RAR5 input; bounded embedding under **D7.5.2** |
 
 #### Radiant Engine Libraries
 
@@ -532,7 +535,7 @@ View Tree
 | `radiant/resolve_css_style.cpp` | CSS property resolution and cascade |
 | `radiant/render.cpp` | Render dispatch |
 | `radiant/render_svg.cpp` | SVG output renderer |
-| `radiant/render_pdf.cpp` | PDF output renderer |
+| `radiant/render_pdf.cpp` | Lambda PDF session/save adapter; generation in `lmd/package/doc/pdf/output.ls` |
 | `radiant/window.cpp` | GLFW interactive viewer window |
 | `lambda/input/css/css_engine.cpp` | CSS parser and cascade engine |
 | `lambda/input/css/selector_matcher.cpp` | CSS selector matching |

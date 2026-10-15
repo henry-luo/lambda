@@ -93,6 +93,14 @@ enum class Flavor {
     MEDIAWIKI,
     DOKUWIKI,
     TIDDLYWIKI,
+    TIKIWIKI,
+    TWIKI,
+    VIMWIKI,
+    XWIKI,
+    ZIMWIKI,
+    CREOLE,
+    JIRA,
+    CONFLUENCE,
     // RST flavors
     SPHINX,
     // Org flavors
@@ -210,6 +218,15 @@ struct ListItemInfo {
     bool is_ordered;        // Ordered vs unordered
     bool is_task;           // Task list item [ ] or [x]
     bool task_checked;      // If task, whether checked
+    const char* task_state = nullptr;
+    const char* task_label = nullptr;
+    const char* task_marker = nullptr;
+    size_t task_marker_length = 0;
+    const char* task_flavor = nullptr;
+    int progress_min = -1;
+    int progress_max = -1;
+    const char* markers = nullptr; // repeated wiki markers retain mixed list kinds
+    size_t marker_count = 0;
     bool valid;             // Whether detection succeeded
 
     ListItemInfo() : marker(0), indent(0), number(0), text_start(nullptr),
@@ -226,6 +243,7 @@ struct CodeFenceInfo {
     int indent;             // Leading indentation
     const char* info_string; // Language identifier
     size_t info_length;     // Length of info string
+    const char* close = nullptr; // exact closer for dialect-specific fences
     bool valid;             // Whether detection succeeded
 
     CodeFenceInfo() : fence_char(0), fence_length(0), indent(0),

@@ -1,0 +1,553 @@
+{
+  "version": "2.8.5",
+  "commit": "b26a7c42445b5aae1e3e6cda866513427b2b061c",
+  "profile": "core-html",
+  "modules": [
+    {
+      "upstream": "xslt/modules/components.xsl",
+      "sha256": "7d18552f7af3bce49d92f1bbe2e49209b0c02a0e07788f6b296f25493ad8052a",
+      "lambda": [
+        "render.ls",
+        "model.ls"
+      ],
+      "modes": [
+        "m:docbook",
+        "m:attributes"
+      ],
+      "status": "partial",
+      "scope": "article/book components and pre-section wrappers",
+      "tests": [
+        "article",
+        "book"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/divisions.xsl",
+      "sha256": "e0b324c06e448c081a16d915e0799f8140e0c9660a6128810dcb06cbf11d777d",
+      "lambda": [
+        "render.ls"
+      ],
+      "modes": [
+        "m:docbook"
+      ],
+      "status": "partial",
+      "scope": "division wrappers; extended division numbering remains partial",
+      "tests": [
+        "book"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/sections.xsl",
+      "sha256": "8de4c7173e35502cbe0bcd1b8be8af6f2a6792c5f4ce02c5b4949f4e276e783a",
+      "lambda": [
+        "render.ls",
+        "model.ls"
+      ],
+      "modes": [
+        "m:docbook"
+      ],
+      "status": "partial",
+      "scope": "section headings and nested numbers",
+      "tests": [
+        "article",
+        "book"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/attributes.xsl",
+      "sha256": "9d150c8b5d32d6549f2cbc68a019a3685c5fe672c288a28ecbb52256d11815b6",
+      "lambda": [
+        "html.ls"
+      ],
+      "modes": [
+        "m:attributes"
+      ],
+      "status": "partial",
+      "scope": "common ID, role, language and direction attributes",
+      "tests": [
+        "article",
+        "namespaces"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/inlines.xsl",
+      "sha256": "644abc7c5746c216d0cb2de8b9ab7972d935744d4f36c4242454bd78632f08ea",
+      "lambda": [
+        "render.ls",
+        "inlines.ls"
+      ],
+      "modes": [
+        "m:docbook",
+        "t:inline"
+      ],
+      "status": "partial",
+      "scope": "generated finite t:inline wrapper forms and native emphasis; specialized templates remain partial",
+      "tests": [
+        "article",
+        "inlines",
+        "customization"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/blocks.xsl",
+      "sha256": "3cc2a96f341e57d63c4eaeea5d85a4a0a3b46016ba0f657171784dddbd96c4e1",
+      "lambda": [
+        "render.ls"
+      ],
+      "modes": [
+        "m:docbook"
+      ],
+      "status": "partial",
+      "scope": "paragraphs, verbatim and formal-object wrappers",
+      "tests": [
+        "article",
+        "notes"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/lists.xsl",
+      "sha256": "8a5065f60eb279e6eae3ca2975406163742f07a6698af6a596d97f03f8ff4c93",
+      "lambda": [
+        "render.ls",
+        "gentext.ls"
+      ],
+      "modes": [
+        "m:docbook",
+        "m:gentext-list"
+      ],
+      "status": "partial",
+      "scope": "basic/compact/nested and variable lists; advanced presentation remains partial",
+      "tests": [
+        "lists"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/admonitions.xsl",
+      "sha256": "52826749732f040933f8748927af6010933f5f236cd09869588da9eeb8243261",
+      "lambda": [
+        "render.ls"
+      ],
+      "modes": [
+        "m:docbook"
+      ],
+      "status": "partial",
+      "scope": "default icon/body/title structure",
+      "tests": [
+        "notes"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/titles.xsl",
+      "sha256": "8fa29633fd7d878304f80fdedb03784ee8cb9a72b556b3d0f647c47bb5c34bd7",
+      "lambda": [
+        "render.ls",
+        "model.ls"
+      ],
+      "modes": [
+        "m:headline"
+      ],
+      "status": "partial",
+      "scope": "English default title/number profile",
+      "tests": [
+        "article",
+        "book",
+        "notes"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/templates.xsl",
+      "sha256": "5eac8e66148c093c28a5dc9a75b9ca638abb04438cd366a6ca4cfbf075681bfc",
+      "lambda": [
+        "render.ls"
+      ],
+      "modes": [
+        "m:generate-titlepage"
+      ],
+      "status": "partial",
+      "scope": "bounded native title-page constructors; general template customization remains deferred",
+      "tests": [
+        "book"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/toc.xsl",
+      "sha256": "22384c9fc4cf18590253e2c208a430e80a5ae57a9c4347d470209dad2e406708",
+      "lambda": [
+        "render.ls"
+      ],
+      "modes": [
+        "m:toc"
+      ],
+      "status": "partial",
+      "scope": "automatic table of contents and nested structural entries",
+      "tests": [
+        "article",
+        "book"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/links.xsl",
+      "sha256": "56faf053bcb5b6bd60bde4bbafee446f38e841cc92ec2a03c75171400cb0a034",
+      "lambda": [
+        "render.ls"
+      ],
+      "modes": [
+        "m:docbook"
+      ],
+      "status": "partial",
+      "scope": "linkend/xlink:href and default English cross-references",
+      "tests": [
+        "article",
+        "chunks"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/footnotes.xsl",
+      "sha256": "1c3e4f10adbcd5bca9c9f1715f8f866073d7a4ca22146f3fc46fcc97437c3d68",
+      "lambda": [
+        "render.ls",
+        "model.ls"
+      ],
+      "modes": [
+        "m:docbook",
+        "m:footnotes"
+      ],
+      "status": "partial",
+      "scope": "ordinary notes and repeated references; table-specific notes deferred",
+      "tests": [
+        "notes"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/tablecals.xsl",
+      "sha256": "218e812d9619e1fa0c3f30d89bf23cfbdd6d400d667cb5856c82bff48ad6af3b",
+      "lambda": [
+        "tables.ls"
+      ],
+      "modes": [
+        "m:docbook"
+      ],
+      "status": "partial",
+      "scope": "CALS columns/spans/row occupancy; advanced style and notes deferred",
+      "tests": [
+        "tables",
+        "errors"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/tablehtml.xsl",
+      "sha256": "5e83dca7cc8ad23dfdfcba0819381af24ce978152e6e076bebf587f351d94426",
+      "lambda": [
+        "tables.ls",
+        "render.ls"
+      ],
+      "modes": [
+        "m:htmltable"
+      ],
+      "status": "partial",
+      "scope": "basic table/row/cell lowering",
+      "tests": [
+        "tables"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/objects.xsl",
+      "sha256": "e4b1d620c97bc0fa2281444798fb825e66716ac8abb5c5f928624a8658cb3c09",
+      "lambda": [
+        "media.ls",
+        "render.ls"
+      ],
+      "modes": [
+        "m:docbook"
+      ],
+      "status": "partial",
+      "scope": "partial captured-image semantic output; full viewport/scaling selection deferred",
+      "tests": [
+        "media"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/verbatim.xsl",
+      "sha256": "b100f6366a3b79b161d7d13d10e4c314f5864a41d072a0ddea93450a9d33e687",
+      "lambda": [
+        "render.ls"
+      ],
+      "modes": [
+        "m:docbook"
+      ],
+      "status": "partial",
+      "scope": "text, element-specific styles, line wrappers, sparse padded numbering; no highlighting or callouts",
+      "tests": [
+        "article",
+        "verbatim"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/chunk.xsl",
+      "sha256": "194f593f81c9c56f1a8b7fb7c5d487db87e04ee7547f69b8c9c3f1447f626bca",
+      "lambda": [
+        "chunks.ls"
+      ],
+      "modes": [
+        "m:chunk-filename"
+      ],
+      "status": "partial",
+      "scope": "default covered chunk predicates and filenames",
+      "tests": [
+        "chunks"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/chunk-cleanup.xsl",
+      "sha256": "783421d7428a27ad4b786a158b923d263aa8b9ed211fa73fd322630fdc89f1d2",
+      "lambda": [
+        "render.ls",
+        "publication.ls"
+      ],
+      "modes": [
+        "t:top-nav",
+        "t:bottom-nav"
+      ],
+      "status": "partial",
+      "scope": "body assembly, static navigation, cross-file links and note distribution",
+      "tests": [
+        "chunks",
+        "chunk_export"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/l10n.xsl",
+      "sha256": "e55565deb3bcbf1f9d2cbf18ec0d49aacb57514f87094aa21f59891e553786ff",
+      "lambda": [
+        "gentext.ls",
+        "locale.ls"
+      ],
+      "modes": [
+        "m:gentext-list"
+      ],
+      "status": "partial",
+      "scope": "English tokens and finite list templates; XPath-dependent rules deferred",
+      "tests": [
+        "lists"
+      ]
+    },
+    {
+      "upstream": "xslt/modules/functions.xsl",
+      "sha256": "45c8029cd54a3af07a24d74ba06bcb32635c206fd793c4433514e30219c174e0",
+      "lambda": [
+        "model.ls",
+        "ids.ls"
+      ],
+      "modes": [
+        "f:generate-id"
+      ],
+      "status": "partial",
+      "scope": "Default generated-ID scheme plus explicit-ID collision checks",
+      "tests": [
+        "article",
+        "errors",
+        "options",
+        "namespaces"
+      ]
+    },
+    {
+      "upstream": "xslt/param.xsl",
+      "sha256": "6addd40045637206b17be218e07d1c03d5f497ac80ece050f4f43781cb7ee9ef",
+      "lambda": [
+        "options.ls"
+      ],
+      "modes": [],
+      "status": "partial",
+      "scope": "Typed supported parameter subset and explicit none-highlighter default",
+      "tests": [
+        "article",
+        "errors",
+        "options",
+        "namespaces"
+      ]
+    },
+    {
+      "upstream": "xslt/docbook.xsl",
+      "sha256": "80351f450d5df45867de8a4d044666056990ec0fb62c9bae543621de10766c9d",
+      "lambda": [
+        "../docbook.ls",
+        "model.ls",
+        "publication.ls"
+      ],
+      "modes": [
+        "t:docbook"
+      ],
+      "status": "partial",
+      "scope": "Native source boundary and output artifacts; optional source transforms deferred",
+      "tests": [
+        "article",
+        "errors",
+        "options",
+        "namespaces"
+      ]
+    }
+  ],
+  "deferred": [
+    "DocBook 4 conversion",
+    "inclusion/transclusion/profiling",
+    "full locale/title/reference predicates",
+    "bibliography/glossary/index generation",
+    "reference pages",
+    "optional browser scripts",
+    "print/EPUB packaging",
+    "fully offline fonts"
+  ],
+  "differences": [
+    "static HTML head",
+    "none syntax-highlighter default",
+    "stable db-id occurrence metadata",
+    "generated-ID collision checks",
+    "external upstream font imports retained"
+  ],
+  "parameters": [
+    {
+      "name": "auto-toc",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "generate-trivial-toc",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "component-numbers",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "component-numbers-inherit",
+      "lambda": "options.ls",
+      "status": "ported",
+      "note": "Upstream 2.8.5 declares but does not use this legacy parameter."
+    },
+    {
+      "name": "section-numbers",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "section-numbers-inherit",
+      "lambda": "options.ls",
+      "status": "ported",
+      "note": "Upstream 2.8.5 declares but does not use this legacy parameter."
+    },
+    {
+      "name": "use-docbook-css",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "resource-base-uri",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "verbatim-style-default",
+      "lambda": "options.ls",
+      "status": "ported",
+      "note": "Explicit upstream element styles take precedence for covered elements."
+    },
+    {
+      "name": "generated-id-root",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "generated-id-sep",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "chunk-section-depth",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "verbatim-syntax-highlighter",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "chunk-nav",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "chunk-renumber-footnotes",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "use-id-as-filename",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "lists-of-figures",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "lists-of-tables",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "lists-of-examples",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "lists-of-equations",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "lists-of-procedures",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "sections-inherit-from",
+      "lambda": "options.ls",
+      "status": "partial",
+      "note": "Supported values are section and empty."
+    },
+    {
+      "name": "verbatim-number-every-nth",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "verbatim-number-minlines",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "verbatim-number-first-line",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "verbatim-number-separator",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "verbatim-trim-leading-blank-lines",
+      "lambda": "options.ls",
+      "status": "ported"
+    },
+    {
+      "name": "verbatim-trim-trailing-blank-lines",
+      "lambda": "options.ls",
+      "status": "ported"
+    }
+  ]
+}

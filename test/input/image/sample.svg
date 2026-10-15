@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="192" viewBox="0 0 256 192">
+<title>Twilight mountains</title>
+<desc>A warm sun, mountain peaks, water, and five color and opacity swatches.</desc>
+<defs><clipPath id="landscape"><rect x="8" y="8" width="240" height="152" rx="18"/></clipPath></defs>
+<g clip-path="url(#landscape)">
+<rect x="8" y="8" width="240" height="152" fill="#233c66"/>
+<circle cx="195" cy="53" r="30" fill="#fbbf77" opacity="0.15"/>
+<circle cx="195" cy="53" r="22" fill="#ffd392"/>
+<circle cx="37" cy="30" r="1.5" fill="#f5ecd9"/>
+<circle cx="79" cy="23" r="1" fill="#f5ecd9"/>
+<circle cx="123" cy="38" r="1.5" fill="#f5ecd9"/>
+<circle cx="227" cy="25" r="1" fill="#f5ecd9"/>
+<polygon points="8,132 67,62 127,129 174,91 248,139 248,160 8,160" fill="#8785ac"/>
+<polygon points="67,62 88,87 68,80 53,88" fill="#e8e4ed"/>
+<polygon points="8,146 109,83 173,138 220,111 248,133 248,160 8,160" fill="#286474"/>
+<polygon points="109,83 133,104 111,99 96,106" fill="#b5d9db"/>
+<rect x="8" y="136" width="240" height="24" fill="#4c929e"/>
+<rect x="24" y="144" width="68" height="2" fill="#90c8ca" opacity="0.6"/>
+<rect x="122" y="150" width="91" height="2" fill="#90c8ca" opacity="0.6"/>
+<rect x="175" y="140" width="56" height="2" fill="#90c8ca" opacity="0.6"/>
+</g>
+<circle cx="56" cy="178" r="8" fill="#ec936b" opacity="1"/>
+<circle cx="92" cy="178" r="8" fill="#287b91" opacity="1"/>
+<circle cx="128" cy="178" r="8" fill="#287b91" opacity="0.75"/>
+<circle cx="164" cy="178" r="8" fill="#287b91" opacity="0.5"/>
+<circle cx="200" cy="178" r="8" fill="#287b91" opacity="0.25"/>
+</svg>

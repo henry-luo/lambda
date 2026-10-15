@@ -392,6 +392,37 @@ is a language rule, not a warning. An ordinary `T | error` union has no such
 obligation; it flows as data until the program chooses a boundary at which to
 inspect, default, validate, or destructure it.
 
+### Understanding “function may return error” (E208)
+
+An unannotated `fn` has an implicit `any \ error` return contract. If a call's
+result is known to include error, returning it requires containment or an
+error-admitting return declaration (S11.4.3, D3.3.2v2).
+
+The diagnostic points at the call, or at an argument that may supply its error.
+For example:
+
+```lambda error=E208
+fn render(title: string) string => title
+fn wrapper(title: any) => render(title)
+```
+
+Here `render` itself returns `string`. However, `any` includes error, and
+`render`'s parameter excludes it. An incoming error becomes the call's value
+before `render` runs (S7.7.3). E208 explains this boundary:
+
+```text
+function 'wrapper' may return error from call to 'render': argument 1 ('title') has type any, which may contain error; parameter requires string
+```
+
+Use `title: string` when the wrapper accepts strings, or handle the argument's
+error before calling. Alternatively, recover with `render(title) or "fallback"`,
+declare `string | error` to return errors as data, or declare `string^` and
+propagate with `render(title)^` (S7.4.1–S7.4.2, S7.5.3, S7.6).
+
+For a callee with a raised channel, E208 identifies its `^` declaration instead.
+For other error-producing calls, it shows the call's result type. The help text
+also names the enclosing function's declared or implicit return contract.
+
 ### Why?
 
 Go's lack of enforcement is widely criticized — ignored errors cause production bugs. Rust's `#[must_use]` is a warning that can be suppressed. Lambda and Zig take the strongest stance: the compiler enforces it.

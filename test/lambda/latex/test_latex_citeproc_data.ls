@@ -1,8 +1,8 @@
 // Canonical data and inert markup are independent of citation style (S1.8).
-import c: lambda.latex.citeproc.common
-import data: lambda.latex.citeproc.data
-import markup: lambda.latex.citeproc.markup
-import html: lambda.latex.to_html
+import c: lambda.doc.latex.citeproc.common
+import data: lambda.doc.latex.citeproc.data
+import markup: lambda.doc.latex.citeproc.markup
+import html: lambda.doc.latex.to_html
 let source = "@string{pub={Example} # { Press}}\n@proceedings{parent,title={Collected Papers},publisher=pub,year=2024}\n@inproceedings{child,author={de la Cruz, Jr, Jos{\\'e} and {Research and Development}},title={A {CSL} Study},crossref={parent},pages={101--109}}\n@phdthesis{thesis,author={Doe, Jane},title={A thesis},year=2020}\n@misc{child,title={Duplicate}}"
 let loaded = data.bibtex(source, "references.bib")
 let ref = loaded.references[1];

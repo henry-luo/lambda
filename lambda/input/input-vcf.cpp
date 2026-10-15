@@ -28,10 +28,9 @@ static void parse_property_parameters(InputContext& ctx, const char **vcf, Map* 
 
 // Helper function to parse property value (after the colon, handling folded lines)
 static String* parse_property_value(InputContext& ctx, const char **vcf) {
-    if (parse_rfc_property_value(ctx.sb, vcf) > 0) {
-        return ctx.builder.createString(ctx.sb->str->chars, ctx.sb->length);
-    }
-    return NULL;
+    if (**vcf != ':') return NULL;
+    size_t length = parse_rfc_property_value(ctx.sb, vcf);
+    return ctx.builder.createString(length ? ctx.sb->str->chars : "", length);
 }
 
 // Helper function to normalize property name to lowercase
@@ -116,6 +115,8 @@ static void finish_vcf_contact(InputContext& ctx, List* contacts,
 // Main vCard parsing function
 void parse_vcf(Input* input, const char* vcf_string) {
     if (!vcf_string || !input) return;
+    vcf_string = rfc_unfold_content_lines(input, vcf_string);
+    if (!vcf_string) return;
 
     // create error tracking context with source tracking
     InputContext ctx(input, vcf_string, strlen(vcf_string));
@@ -161,10 +162,13 @@ void parse_vcf(Input* input, const char* vcf_string) {
 
         // Parse property parameters
         bool has_parameters = *vcf == ';';
+        const char* parameter_start = vcf;
         Map* params_map = map_pooled(input->pool);
         if (params_map) {
             parse_property_parameters(ctx, &vcf, params_map);
         }
+        String* parameter_source = has_parameters
+            ? ctx.builder.createString(parameter_start, vcf - parameter_start) : NULL;
 
         // Parse property value
         String* property_value = parse_property_value(ctx, &vcf);
@@ -208,7 +212,7 @@ void parse_vcf(Input* input, const char* vcf_string) {
         Item prop_value = {.item = s2it(property_value)};
         ctx.builder.putToMap(lam::gc_borrow(properties_map), property_name, prop_value);
         rfc_append_entry(ctx, entries, property_name, prop_value,
-                         has_parameters ? params_map : NULL);
+                         has_parameters ? params_map : NULL, parameter_source);
 
         // Handle common properties with special processing
         if (strcmp(property_name->chars, "fn") == 0) {

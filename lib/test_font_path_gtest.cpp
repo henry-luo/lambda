@@ -11,9 +11,9 @@
 
 TEST(FontMetricTest, RasterPreservesNativeGrayscaleCoverage) {
     const struct { const char* path; FontSlant slant; } faces[] = {
-        {"lmd/package/latex/fonts/Serif/cmunrm.woff2", FONT_SLANT_NORMAL},
-        {"lmd/package/latex/fonts/Serif/cmunti.woff2", FONT_SLANT_ITALIC},
-        {"lmd/package/latex/fonts/Serif/cmunbi.woff2", FONT_SLANT_ITALIC},
+        {"lmd/package/doc/latex/fonts/Serif/cmunrm.woff2", FONT_SLANT_NORMAL},
+        {"lmd/package/doc/latex/fonts/Serif/cmunti.woff2", FONT_SLANT_ITALIC},
+        {"lmd/package/doc/latex/fonts/Serif/cmunbi.woff2", FONT_SLANT_ITALIC},
         {nullptr, FONT_SLANT_ITALIC}, // the sample's system Times math fallback
     };
     for (float ratio : {1.0f, 2.0f}) {

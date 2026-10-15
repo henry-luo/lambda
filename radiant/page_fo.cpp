@@ -187,6 +187,13 @@ static bool fo_compound_query(FoTranslationContext* context, DomElement* source,
         query->reference != FO_PROPERTY_NONE && query->whole && !strcmp(query->name, property);
 }
 
+static const struct { const char* name; const char* initial; } fo_initial_properties[] = {
+    {"line-stacking-strategy", "max-height"}, {"text-altitude", "use-font-metrics"}, {"text-depth", "use-font-metrics"},
+    {"linefeed-treatment", "treat-as-space"}, {"white-space-treatment", "ignore-if-surrounding-linefeed"},
+    {"white-space-collapse", "true"}, {"wrap-option", "wrap"}, {"border-collapse", "collapse"},
+    {"letter-spacing", "normal"}, {"word-spacing", "normal"}
+};
+
 static const char* fo_parent_value(FoTranslationContext* context, DomElement* source,
         const char* property, const char* value, bool nominal_context) {
     if (!value) return nullptr;
@@ -202,13 +209,7 @@ static const char* fo_parent_value(FoTranslationContext* context, DomElement* so
             return fo_reference_binding(context, source, property, query, reference);
         if (fo_element(source, "root") || !source->parent_element()) {
             if (fo_decoration_condition_name(property)) return "discard";
-            static const struct { const char* name; const char* initial; } initials[] = {
-                {"line-stacking-strategy", "max-height"}, {"text-altitude", "use-font-metrics"}, {"text-depth", "use-font-metrics"},
-                {"linefeed-treatment", "treat-as-space"}, {"white-space-treatment", "ignore-if-surrounding-linefeed"},
-                {"white-space-collapse", "true"}, {"wrap-option", "wrap"}, {"border-collapse", "collapse"},
-                {"letter-spacing", "normal"}, {"word-spacing", "normal"}
-            };
-            for (const auto& initial : initials) if (!strcmp(initial.name, property)) return initial.initial;
+            for (const auto& initial : fo_initial_properties) if (!strcmp(initial.name, property)) return initial.initial;
             if (view_css_computed_property_supported(fo_computed_property_name(query)))
                 return fo_reference_binding(context, source, property, query, reference);
         }
@@ -1132,9 +1133,14 @@ static Item fo_translate_element(FoTranslationContext* context, DomElement* sour
     if (fo_element(source, "root")) {
         output.attr("xmlns:r", RADIANT_PAGE_NAMESPACE);
         if (!source->get_attribute("line-stacking-strategy")) output.attr("r:line-stacking-strategy", "max-height");
-        output.attr("r:linefeed-treatment", "treat-as-space").attr("r:white-space-treatment", "ignore-if-surrounding-linefeed")
-            .attr("r:white-space-collapse", "true").attr("r:wrap-option", "wrap");
-        strbuf_append_str(style, "margin:0; font-family:serif; font-size:12pt; line-height:normal; color:black; white-space:normal;");
+        // defaults must not precede duplicate authored attributes: Mark preserves the first occurrence.
+        for (const auto& initial : fo_initial_properties) {
+            if (!radiant_whitespace_trait_name(initial.name) || source->get_attribute(initial.name)) continue;
+            char name[64]; snprintf(name, sizeof(name), "r:%s", initial.name);
+            output.attr(name, initial.initial);
+        }
+        // native whitespace traits supply the FO initial and inherited values without an overriding CSS default.
+        strbuf_append_str(style, "margin:0; font-family:serif; font-size:12pt; line-height:normal; color:black;");
     }
     if (!fo_style(context, source, style, proportional_column, property_column)) return ItemNull;
     if (column_base) fo_style_append(style, "width", column_base);

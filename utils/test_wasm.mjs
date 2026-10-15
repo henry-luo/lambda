@@ -68,7 +68,7 @@ async function checkSession(create, wasmBinary) {
   equal(diagnostics.length, 0, 'successful evaluations produce no diagnostic dumps');
   for (const source of ['datetime()', 'date()', 'justnow()',
     'load("a.png")', 'input("file:///etc/passwd")^',
-    'import "https://example.com/a.ls"', 'import lambda.latex',
+    'import "https://example.com/a.ls"', 'import lambda.doc.latex',
     'parse("x", "pdf")^', 'parse("x", "latex")^',
     'parse("p { color: red }", "css")^', 'parse("p { color: red }", {type: "css"})^',
     'parse("digraph { a -> b }", "graph")^',

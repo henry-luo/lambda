@@ -1,5 +1,5 @@
-import latex: lambda.latex.latex
-import util: lambda.latex.util
+import latex: lambda.doc.latex.latex
+import util: lambda.doc.latex.util
 
 fn result(options, chosen) {
     let source = "\\documentclass{article}\\usepackage[" ++ options ++ "]{natbib}" ++

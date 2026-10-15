@@ -127,7 +127,9 @@ len(b'\x00FF00')   // 3 (byte count)
 ```
 
 `binary(x)` preserves a binary input, encodes string and symbol inputs as UTF-8,
-and encodes numeric inputs from their decimal text. A LambdaJS `Uint8Array`,
+and encodes numeric inputs from their decimal text. An array of integers in
+`[0,255]` becomes those exact bytes; invalid items raise a type error and an empty
+array produces `null` (S2.2.2v2). A LambdaJS `Uint8Array`,
 `Uint8ClampedArray`, Node `Buffer`, or `DataView` is copied into an immutable
 binary. In the other direction, `new Uint8Array(binary_value)`,
 `Uint8Array.from(binary_value)`, and `Buffer.from(binary_value)` copy the bytes;
@@ -1154,20 +1156,36 @@ Parse content from a file path or URL.
 `p#a.b` forces and then navigates. `input(p, format)` stays the
 explicit-format spelling, and `exists(p)` the probe that forces nothing.
 
-**Supported Input Formats**: `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `properties`, `csv`, `markdown`, `rst`, `asciidoc`, `wiki`, `org`, `textile`, `man`, `latex`, `typst`, `mark`, `rtf`, `pdf`, `eml`, `ics`, `vcf`, `css`, `math`, `graph`, `text`, `binary`, `zip` — see [Markup_Formats_Support.md](Markup_Formats_Support.md) for the tree each one produces and the `{type, flavor}` option form.
+**Supported Input Formats**: `json`, `xml`, `html`, `xhtml`, `yaml`, `toml`, `ini`, `properties`, `csv`, `markdown`, `rst`, `asciidoc`, `wiki`, `org`, `textile`, `man`, `latex`, `typst`, `mark`, `rtf`, `pdf`, `eml`, `ics`, `vcf`, `css`, `math`, `graph`, `text`, `binary`, `zip`, `7z`, `tar`, `rar`, `rar5` — see [Markup_Formats_Support.md](Markup_Formats_Support.md) for the tree each one produces and the `{type, flavor}` option form.
 
-**ZIP32/ZIP64** input returns an archive-backed `fs` element, including for
-ZIP-backed `.docx` and other package files. It captures and closes the complete
-source during `input()` (**S12.4.1v2**); listing children and reading metadata
-never decompress payloads. `content(file)^` and `input(member, format)^` force
-only that member, validate its CRC, and cache bytes/results/errors
-(**S14.3.1v2**). Ordinary directory input still returns child Paths.
+Wiki dialects use `"wiki:<flavor>"` or `{type:"wiki", flavor:"zimwiki"}`.
+Unqualified `wiki` and `.wiki` input default to MediaWiki; other dialects
+require explicit selection. See the [ten wiki profiles](Markup_Formats_Support.md#15-wiki-dialect-coverage)
+for supported syntax, task/tag mappings, and current limits.
 
-Use `input(path, 'binary')^` or `input(member, 'binary')^` for exact bytes;
-explicit formats override ZIP auto-detection. An empty binary source returns
-`null` (**S2.2.2v2**). Nested ZIP members remain binary by default and open
-only with explicit `'zip'`. Stored and DEFLATE are supported; encryption,
-split archives and other compression/container formats are rejected.
+**Archive input** returns a captured `fs` tree. Supported native formats are
+ZIP32/ZIP64 (including ZIP-backed `.docx`/JAR packages), 7z, tar, legacy RAR,
+and RAR 5.0. `input()` captures and closes the source, then validates its
+index (**S12.4.1v3**). Ordinary directory input still returns child Paths.
+
+ZIP, 7z and non-solid legacy-RAR member bytes decode on first content access;
+listing children never decodes their bodies. Solid 7z access can also decode
+predecessors, charged to the same expansion budget. Compressed tar and RAR5
+capture/check their payloads eagerly; member parsing stays lazy for every
+format (**S14.3.1v3**). Bytes, parse results and failures are cached.
+
+7z admits Copy/LZMA/LZMA2 with supported BCJ/Delta filters. Tar admits
+V7/ustar/pax/GNU files/directories and gzip/bzip2/xz/zstd wrappers (`.tgz`,
+`.tbz2`, `.txz`, `.tzst` aliases included). `'rar'` accepts either RAR signature;
+`'rar5'` requires RAR 5.0. Legacy solid RAR, encryption, split volumes,
+self-extracting archives, links/special entries and unadmitted methods are
+rejected. Native tar/RAR/7z input is unavailable in the browser WASM build.
+Archive writing remains ZIP-only; captured trees can be converted to ZIP.
+
+Use `input(path, 'binary')^` or `input(member, 'binary')^` for exact bytes.
+Explicit formats override auto-detection. An empty binary source returns
+`null` (**S2.2.2v2**). Nested archive members remain binary by default; open
+one explicitly with `'zip'`, `'7z'`, `'tar'`, `'rar'` or `'rar5'`.
 
 Input maps accept the bounded quota options listed in
 [ZIP I/O §9.1](../vibe/Lambda_IO_Zip.md#91-limits-and-output-options).
@@ -1190,6 +1208,7 @@ accepts any filename regardless of its extension (D2.9.2).
 | JSON | JavaScript Object Notation | `input(/.'data.json', 'json')` |
 | XML | Extensible Markup Language | `input(/.'config.xml', 'xml')` |
 | HTML | HyperText Markup Language | `input(/.'page.html', 'html')` |
+| XHTML | XML syntax producing an HTML tree (D2.10.1) | `input("page.xhtml", 'xhtml')^` |
 | YAML | YAML Ain't Markup Language | `input(/.'config.yaml', 'yaml')` |
 | TOML | Tom's Obvious Minimal Language | `input(/.'config.toml', 'toml')` |
 | Markdown | Markdown markup | `input(/.'doc.md', 'markdown')` |
@@ -1232,18 +1251,36 @@ let auto_data = input(/.'document.md')^  // Automatically detects Markdown
 
 #### parse(str) / parse(str, format)
 
-Parse a string into Lambda data structures. Like `input()` but operates on string content instead of file paths/URLs.
+Parse captured content into Lambda data structures. Strings and immutable
+binary values are accepted by format parsers. Captured ZIP members can also be
+parsed directly; this decodes only retained bytes and performs no live file or
+network acquisition (S12.1.1v3, S12.4.1v2, S14.3.1v2).
 
 | Function | Description | Example |
 |----------|-------------|--------|
 | `parse(str)` | Parse string (auto-detect format) | `parse("{\"x\": 1}")` |
 | `parse(str, format)` | Parse string with specified format | `parse(str, 'json')` |
+| `parse(bytes, format)` | Parse immutable binary bytes | `parse(bytes, 'zip')` |
+| `parse(member, format)` | Parse a captured ZIP member | `parse(member, 'xml')` |
 | `parse(str, g)` | Parse with grammar `g` from its first rule | `parse("1 + 2", calc)` |
 | `parse(str, g, 'rule')` | Parse with grammar `g` from the named rule | `parse("(1)", calc, 'primary')` |
 | `parse(str, g.rule)` | Parse from a rule given as a type | `parse("42", calc.number)` |
 | `parse(str, g, options)` | Options map: `rule` (a symbol) and `spans` (bool: `start`/`end` byte offsets on every element) | `parse(s, calc, {rule: 'expr', spans: true})` |
 
-**Supported Formats**: Same as `input()` — `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `css`, `ini`, `math`, `obj`, `mtl`, `gltf`, `a3d`
+**Supported Formats**: Same as `input()` — `json`, `xml`, `html`, `xhtml`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `css`, `ini`, `math`, `obj`, `mtl`, `gltf`, `a3d`
+
+`parse(css, {type:"css", flavor:"tokens"})^` returns an ordered array of
+`{kind, raw, value}` CSS tokens. Values decode CSS escapes; raw slices retain
+authored spelling. Malformed strings/URLs and the 4 MiB / 262,144-token limits
+raise parse errors. This projection supports publication resource rewriting.
+
+`parse(text, 'xhtml')^` selects strict XML syntax and returns an HTML-compatible
+`<#document>` tree (**D2.10.1**). The root must be XHTML `html`; namespace
+identity, XML case sensitivity, whitespace and CDATA are preserved. For file
+input, `.xhtml`/`.xht` select this format automatically. See
+[XHTML input and limits](Markup_Formats_Support.md#xhtml-input--html-document-tree)
+for examples, Radiant commands and the feature gallery. Format the result
+with `'html'`; `'xhtml'` is an input format, not an output formatter.
 
 For XML, `{type:'xml', flavor:'strict', preserve_whitespace:true}` retains
 leading/trailing spaces and whitespace-only text nodes. The default remains
@@ -1293,6 +1330,13 @@ rule `word`. Bundled grammars live in the `grammar` package
 ([Lambda_Packages.md](Lambda_Packages.md) §12).
 
 Design: `vibe/Lambda_Design_Grammar_Parser.md`.
+
+`parse(bytes, g[, rule_or_options])` also accepts binary input. Lexical patterns
+match over the byte alphabet; ordinary token values are binary, while symbol
+tokens retain their symbol domain. Spans remain byte offsets. An empty binary
+token is `null` (S2.2.2v2). Text input retains Unicode/string behavior. Grammar
+results are GC-owned and temporary parse storage is released after each call
+(GM14, D5.3.3); captured bytes need no text decoding before parsing.
 
 **Source positions** (`parse()` only): with `sourcepos: true` in the options
 map, each top-level block of a markup document (Markdown and the other
@@ -1349,6 +1393,25 @@ let pretty_json = format(data, {type: 'json', indent: 2})
 let compact_json = format(data, {type: 'json', compact: true})
 ```
 
+Wiki targets accept `"wiki:<flavor>"` or
+`{type:"wiki", flavor:"jira", loss:"error"}` and invoke the shipped
+`lambda.doc.wiki` Lambda Script writers (D7.2.4). The default flavor is
+`mediawiki`; the default loss policy is `error`. `loss:"allow"` permits
+diagnosed losses. Use `wiki.format_report` to inspect `{text, diagnostics}`
+before allowing them. See [wiki output](Markup_Formats_Support.md#51-wiki-output).
+
+```lambda
+let document = parse("= Title =\n\n**Text**", "wiki:creole")^
+format(document, {type:"wiki", flavor:"jira"})^
+```
+
+`asciidoc`/`adoc`, `man`/`troff`, `typst`, `eml`, `vcf`/`vcard`, and
+`ics`/`ical`/`icalendar` use the shipped `lambda.doc.misc` package (D7.2.4).
+They accept `{type, loss}` options with strict `loss:"error"` defaults.
+`format_report` in that package exposes losses before serialization is
+accepted. See [source formatters](Script_Formats_Support.md) for record
+precedence, man title options, and MIME support.
+
 ### Procedural I/O Functions
 
 Functions that have side effects (I/O, state changes). These are only available in procedural functions (`pn`).
@@ -1373,6 +1436,7 @@ Functions that have side effects (I/O, state changes). These are only available 
 | `io.cell_width(codepoint)` | Terminal cell width from Unicode metadata; `null` for an invalid scalar | `io.cell_width(ord("界"))` |
 | `io.unicode_category(codepoint)` | Two-letter Unicode general category; `null` for an invalid scalar | `io.unicode_category(ord("界"))` |
 | `io.text_search(source, query, options?)` | Ranked full-text search over files | `io.text_search(/.doc, "memory -draft", {limit: 10})` |
+| `io.exec(program, args, options?)` | Cancellable process capture with an argument array | `io.exec("git", ["status", "--porcelain=v1", "-z"])` |
 | `cmd(command, args?)` | Execute a shell command; `args` is one array (or string) | `cmd("ls", ["-la"])` |
 | `clock()` | Monotonic clock in seconds | `clock()` |
 
@@ -1440,6 +1504,9 @@ for defaults and constructed-tree examples.
 | `xml` | `.xml` | XML format |
 | `html` | `.html`, `.htm` | HTML format |
 | `markdown` | `.md` | Markdown format |
+| `wiki` / `wiki:<flavor>` | `.wiki`, `.mediawiki` default to MediaWiki | Lambda Script wiki writers; explicit selector for other dialects |
+| `asciidoc`, `man`, `typst` | `.adoc`, `.asciidoc`, `.asc`; `.man`, `.1`–`.9`; `.typ`, `.typst` | Mark Doc source writers in `lambda.doc.misc` |
+| `eml`, `vcf`, `ics` | `.eml`; `.vcf`, `.vcard`; `.ics`, `.ical` | Email, vCard, and iCalendar source writers |
 | `mark` | `.mark` | Mark Notation (D2.9.1) |
 | `text` | `.txt` | Plain text |
 | `toml` | `.toml` | TOML format |
@@ -1652,6 +1719,24 @@ Matching is **line-oriented**: a match never spans a line terminator, so a patte
 
 `io.grep` only searches. Like `grep` and ripgrep, it never changes a file and has no replace option (ripgrep's `--replace` changes only what ripgrep prints). To change text in a file, read it with `input()`, apply `replace()`, and write the result back with `output()`.
 
+##### io.exec(program, args, options?)
+
+Runs a local program without a shell and parks the calling task while capturing
+both streams (S12.1.1v3, S13.1.1v2). `program` and arguments are text or binary,
+with no embedded NUL. The result is `{stdout, stderr, exit_code, timed_out,
+cancelled, truncated}`. Streams are exact binary, including NUL and trailing
+newlines; empty streams are `null` (S2.2.2v2). A nonzero exit is a result, not a
+Lambda error. Invalid arguments/options raise errors.
+
+Options are `cwd` (local path or raw path bytes), `env` (map of string/byte values,
+with `null` removing a variable), `timeout_ms` (default 30000; zero disables the
+deadline), and positive `max_output_bytes` (default 16777216 per stream). The
+child receives closed/empty standard input. Output exceeding the capture bound
+is drained and marked `truncated`; it does not become a partial success silently.
+Timeout terminates the process group and returns `timed_out: true`. Task
+cancellation terminates it, waits for capture cleanup, then raises error 319,
+`task cancelled`. No worker thread receives managed Lambda values (D5.3.3).
+
 ##### io.text_search(source, query, options?)
 
 Full-text search over files: find the documents that contain the query's words, best first, as a database's full-text search does, but with no index to build — every call reads the files, so results are always current. `source` is what `io.grep` takes: a file, a directory, a path ending in `*` or `**`, a string naming a local path, or an array of these. A document is a file by default, or each paragraph or line of a file with `unit`.
@@ -1809,21 +1894,51 @@ The existing `as_float()` conversion still produces float64.
 Finite, safely summable inputs use running sums; non-finite/overflow-risk inputs
 retain the local stencil evaluation so values do not contaminate distant windows.
 
-`load(string_path)` retains its existing raw-orientation behavior.
-`load(binary_bytes)` decodes an immutable encoded snapshot into an `(H,W,4)`
-ubyte RGBA array. The request form adds pre-decode limits and optional JPEG
-EXIF normalization:
+`load(string_path)` and `load(binary_bytes)` decode PNG, JPEG, GIF, WebP,
+AVIF, BMP, TIFF, and ICO into an `(H,W,4)` ubyte RGBA array. Plain calls retain
+raw orientation. Content determines the format, including for paths with a
+misleading extension. The request form accepts a path or binary in `data`:
 
 ```lambda
 let bytes = input("photo.jpg", 'binary')^
 let image = load({data:bytes, max_pixels:16000000, normalize_orientation:true})^
+let preview = load({data:bytes, thumbnail:{width:256, height:256}})^
 ```
 
-`max_pixels` must be a positive integer when supplied. Header dimensions are
-checked before decoding. `normalize_orientation` handles all eight JPEG EXIF
-orientations and requires binary `data`; PNG pixels need no orientation change.
-Malformed input and exceeded limits return errors. Acquisition remains in the
-existing I/O layer (**D7.1.2v2**); binary decoding introduces no Radiant dependency.
+`thumbnail:256` abbreviates a square bounding box. Thumbnails preserve aspect
+ratio, never enlarge, and normalize orientation by default. Explicit
+`normalize_orientation:false` retains encoded orientation. `max_pixels` is a
+positive **source** pixel limit, checked even when the output is small.
+`page_index` selects a TIFF page and `frame_index` selects a composited GIF
+frame; both are zero-based. Unknown options return errors (**S17.8.1**).
+
+`allow_full_decode:false` requires a verified thumbnail path avoiding
+source-size pixels or planes. JPEG baseline scaling, opaque lossy WebP scaling,
+PNG row reduction, TIFF strips/tiles or compatible reduced SubIFDs, and ICO
+resolution selection can provide such paths. AVIF, BMP, Adam7 PNG, progressive
+JPEG, and lossless/alpha WebP can require full-size storage; these cases report
+`fast_path_unavailable` when strict mode rules out their fallback. Native
+statuses and codec messages appear in the rich image error (**S7.4.4**).
+Allocation exhaustion remains a system fault (**S7.4.3**).
+
+`save(image, path)` retains PNG output regardless of the filename suffix.
+Use a destination map to choose PNG, JPEG, WebP, AVIF, BMP, TIFF, or ICO:
+
+```lambda
+save(image, {path:"preview.webp", format:'webp', quality:85, lossless:false})^
+save(image, {path:"preview.jpg", format:'jpeg', quality:90, background:[255,255,255]})^
+```
+
+`quality` is 0–100; `lossless` selects the WebP/AVIF mode. PNG, BMP, TIFF,
+and ICO use their declared lossless subsets; JPEG uses its quality setting.
+JPEG/BMP output with nonopaque alpha requires an explicit RGB byte background.
+GIF encoding, animated WebP/AVIF, HDR tone mapping, CMYK JPEG conversion, and
+ICC color conversion are outside this implementation. Decoding preserves
+supported SDR samples, with high-depth input reduced to RGBA8. TIFF writing is
+single-page DEFLATE; ICO writing uses one PNG entry.
+
+File acquisition and atomic output publication remain in `lambda-io`
+(**D7.1.2v2**, **D7.1.3**); the byte codec core has no Radiant dependency.
 
 In a Radiant event handler, `dom.set_canvas_pixels(canvas,image)^` synchronously
 copies a rank-three ubyte RGBA array into a document-owned retained canvas.
@@ -1833,6 +1948,30 @@ straight-alpha array data, and premultiplies the native surface. Uploads are
 limited to 4096 pixels per dimension and 4,194,304 pixels, and reject an existing
 WebGL context. No borrowed array pointer survives the call (**D4.5.2**).
 The [Photo Studio demo](../test/demo/photo/README.md) uses this bridge.
+
+`radiant.image_job(owner, request)^` also accepts `channel:"thumbnail"` for
+asynchronous file decoding. Import `radiant`, then submit
+`{action:"start", channel:"thumbnail", path:"photo.jpg", width:76, height:68}`.
+Width and height are CSS bounds; the document's device scale converts them to
+physical thumbnail bounds. Poll with `{action:"poll", channel:"thumbnail", token}`:
+`null` means pending; a completion reports `success`, `cache_hit`, an
+`error:{status,message}` record, and, on success, RGBA `pixels`, `width`, `height`
+and cache metrics. Upload pixels with the canvas bridge above. Native jobs retain
+copied paths and native buffers, never borrowed GC pointers (**D4.5.2**).
+
+An optional nonnegative integer `canvas_bytes` reports the consumer's retained
+canvas pixels. The cache's 32 MiB pixel budget reserves those bytes and the
+pending output bounds before caching decoded pixels. This budget is separate
+from the decoder's source/scratch admission limits and transient result arrays.
+
+Each channel keeps only its latest request. `action:"cancel"` discards that
+request; `action:"invalidate"` on the thumbnail channel also clears its
+document-owned 32 MiB / 128-entry LRU cache. Cache revisions include subsecond
+modification time and file identity. Thumbnail loading normalizes orientation,
+uses GIF frame/TIFF page zero and permits budgeted full-decode fallback. Paths
+use the shared IO adapter (**D7.1.2v2**). The existing `preview` and `export`
+channels continue to process pixel-array input. See the
+[Finder demo](../test/demo/finder/README.md) for a viewport-driven consumer.
 
 ## Quick Reference Table
 
@@ -1999,6 +2138,7 @@ The [Photo Studio demo](../test/demo/photo/README.md) uses this bridge.
 | `io.chmod` | 2 | Change permissions |
 | `io.rename` | 2 | Rename file/directory |
 | `io.read` | 1 | Asynchronously read a local file (proc) |
+| `io.exec` | 2-3 | Capture a local process with argument arrays (proc) |
 | `io.fetch` | 1-2 | HTTP request (`fetch` is the bare spelling) |
 | `cmd` | 1-2 | Shell command; arguments as one array |
 | `clock` | 0 | Monotonic clock (seconds) |

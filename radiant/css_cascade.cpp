@@ -756,11 +756,22 @@ void radiant_apply_css_stylesheet_to_tree(DomElement* root,
     if (epoch_scope) style_epoch_cascade_end(root->doc);
 }
 
+CssStylesheet* radiant_ua_focus_stylesheet(DomDocument* doc, CssEngine* engine) {
+    if (!doc || !engine) return nullptr;
+    if (!doc->services.ua_focus_stylesheet) {
+        CssStylesheet* sheet = css_parse_stylesheet(engine, layout_html_ua_focus_css(), nullptr);
+        if (!sheet) return nullptr;
+        for (size_t i = 0; i < sheet->rule_count; i++) sheet->rules[i]->origin = CSS_ORIGIN_USER_AGENT;
+        doc->services.ua_focus_stylesheet = lam::up(sheet);
+    }
+    return doc->services.ua_focus_stylesheet;
+}
+
 void radiant_apply_css_stylesheets_to_tree(DomDocument* doc, DomElement* root,
                                            CssStylesheet** stylesheets, int count,
                                            Pool* pool, CssEngine* engine,
                                            SelectorMatcher* matcher) {
-    if (!doc || !root || !stylesheets || count <= 0 || !pool || !engine) return;
+    if (!doc || !root || !pool || !engine) return;
     // a caller-owned fallback keeps each full cascade from retaining a matcher
     SelectorMatcher matcher_storage;
     if (!matcher) {
@@ -769,9 +780,16 @@ void radiant_apply_css_stylesheets_to_tree(DomDocument* doc, DomElement* root,
         state_configure_selector_matcher((DocState*)doc->state, matcher);
     }
 
-    css_layer_rank_stylesheets(doc, stylesheets, count, engine);
+    CssStylesheet* defaults = radiant_ua_focus_stylesheet(doc, engine);
+    lam::Temp<CssStylesheet*> combined((CssStylesheet**)mem_alloc(
+        ((size_t)count + 1) * sizeof(CssStylesheet*), MEM_CAT_LAYOUT));
+    if (!combined) { log_error("focus cascade: could not allocate stylesheet inputs"); return; }
+    combined.get()[0] = defaults;
+    if (count > 0) memcpy(combined.get() + 1, stylesheets, (size_t)count * sizeof(CssStylesheet*));
+    css_layer_rank_stylesheets(doc, combined.get(), count + 1, engine);
     bool epoch_scope = style_epoch_cascade_begin_replace(doc, root, engine);
-    apply_stylesheets_to_tree(root, stylesheets, count, matcher, pool, engine, 0);
+    // Finish UA and author rules together before descendants cache inherited variables.
+    apply_stylesheets_to_tree(root, combined.get(), count + 1, matcher, pool, engine, 0);
     if (epoch_scope) style_epoch_cascade_end(doc);
 }
 
@@ -815,10 +833,14 @@ void radiant_cascade_styles_for_element_with_matcher(DomElement* element,
     dom_element_clear_pseudo_styles(element);
 
     CssEngine* engine = (CssEngine*)doc->services.cached_css_engine;
-    if (!engine || doc->stylesheet_count <= 0) return;
+    if (!engine) return;
     css_layer_rank_stylesheets(doc, doc->stylesheets, doc->stylesheet_count, engine);
     // CSSOM reads must see the same live form and interaction state as layout.
     state_configure_selector_matcher((DocState*)doc->state, matcher);
+
+    CssStylesheet* defaults = radiant_ua_focus_stylesheet(doc, engine);
+    for (size_t i = 0; defaults && i < defaults->rule_count; i++)
+        apply_rule_to_element(element, defaults->rules[i], matcher, pool, engine);
 
     for (int i = 0; i < doc->stylesheet_count; i++) {
         CssStylesheet* stylesheet = doc->stylesheets[i];

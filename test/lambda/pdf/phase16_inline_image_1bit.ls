@@ -1,6 +1,6 @@
 // Phase 16 — inline 1-bit DeviceGray images render as pixels.
 
-import image: lambda.pdf.image
+import image: lambda.doc.pdf.image
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 

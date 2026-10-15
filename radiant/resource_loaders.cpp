@@ -1,3 +1,4 @@
+#include "../lambda/io/image_io.h"
 // resource_loaders.cpp
 // Implementation of resource type handlers for network-loaded resources
 // Integrates with CSS parser, image loader, native font system, and SVG parser
@@ -217,8 +218,7 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
     int img_height = 0;
     ImageSurface* img_surface = NULL;
     bool source_is_svg = url_text_path_has_ext_ci(res->url, "svg");
-    bool source_is_webp = url_text_path_has_ext_ci(res->url, "webp");
-    bool cached_file_is_svg = !source_is_svg && !source_is_webp &&
+    bool cached_file_is_svg = !source_is_svg &&
         resource_file_looks_like_svg(res->local_path);
 
     if ((source_is_svg || cached_file_is_svg) && res->manager && res->manager->ui_context) {
@@ -230,22 +230,16 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
         }
     }
 
-    if (!img_surface && source_is_webp) {
-        // WebP decoding is not available in the current image backend. Treat it
-        // as a graceful placeholder instead of reporting a runtime load error.
-        log_warn("network: unsupported WebP image, using placeholder: %s", res->url);
-        if (res->manager) {
-            resource_manager_schedule_repaint(res->manager, img_element);
-        }
-        return;
-    }
-
-    if (!img_surface && image_get_dimensions(res->local_path, &img_width, &img_height)) {
+    ImageInfo image_info = {};
+    if (!img_surface && image_io_probe_path(nullptr, res->local_path, &image_info, nullptr) == IMAGE_OK) {
+        img_width = (int)image_info.width; img_height = (int)image_info.height;
         img_surface = image_surface_alloc();
         if (img_surface) {
             img_surface->width = img_width;
             img_surface->height = img_height;
             img_surface->source_path = lam::own(mem_strdup(res->local_path, MEM_CAT_IMAGE));
+            img_surface->format = image_surface_format_from_codec(image_info.format);
+            image_surface_apply_orientation_metadata(img_surface, image_info.orientation);
             log_debug("network: image metadata loaded lazily: %dx%d from %s",
                       img_width, img_height, res->local_path);
         }
@@ -292,21 +286,6 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
     if (!img_surface) {
         log_error("network: failed to create image surface: %s", res->url);
         return;
-    }
-
-    // Preserve content-detected formats such as extensionless SVG cache files;
-    // only raster fallback surfaces need URL-extension format inference.
-    if (img_surface->format != IMAGE_FORMAT_SVG) {
-        img_surface->format = IMAGE_FORMAT_PNG;  // default
-        const char* ext = file_path_ext(res->url);
-        if (ext) {
-            if (str_ieq_cstr(ext, ".jpg") || str_ieq_cstr(ext, ".jpeg")) {
-                img_surface->format = IMAGE_FORMAT_JPEG;
-            } else if (str_ieq_cstr(ext, ".gif")) {
-                img_surface->format = IMAGE_FORMAT_GIF;
-            }
-            // PNG is the default, WEBP not yet supported in ImageFormat enum
-        }
     }
 
     // O2: the UI image cache owns decoded images; this resource and the

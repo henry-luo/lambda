@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420" viewBox="0 0 640 420">
+  <rect width="640" height="420" rx="24" fill="#f3f0ea"/>
+  <circle cx="230" cy="190" r="114" fill="#65b6ef"/>
+  <circle cx="385" cy="190" r="114" fill="#c1c8ef"/>
+  <circle cx="307" cy="264" r="100" fill="#8ca99d"/>
+  <text x="32" y="45" font-family="Helvetica,Arial,sans-serif" font-size="16" fill="#465161">A LITTLE COLOR STUDY</text>
+</svg>

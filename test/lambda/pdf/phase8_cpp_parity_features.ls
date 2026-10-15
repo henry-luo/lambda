@@ -4,7 +4,7 @@
 // Lambda PDF package: named ColorSpace lookup for Indexed/DeviceGray and
 // SVG emission of line cap/join/miter/dash stroke state.
 
-import pdf: lambda.pdf.pdf
+import pdf: lambda.doc.pdf.pdf
 
 fn has(s: string, needle: string) { (index_of(s, needle) != null) }
 

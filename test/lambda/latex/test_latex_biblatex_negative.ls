@@ -1,6 +1,6 @@
 // Unsupported and malformed bibliography requests remain visible and located.
-import latex: lambda.latex.latex
-import html_ser: lambda.latex.to_html
+import latex: lambda.doc.latex.latex
+import html_ser: lambda.doc.latex.to_html
 
 let base = "test/lambda/latex/fixtures"
 let ast = input("test/lambda/latex/fixtures/biblatex_negative.tex", {type: "latex"}) ^ { null }

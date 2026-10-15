@@ -335,7 +335,7 @@ static const char* mime_extension_lookup(const char* content_type, int serve_pro
     // lookup table — ordered roughly by frequency
     static const struct { const char* mime; const char* ext; int input_only; } table[] = {
         {"text/html",                ".html"},
-        {"application/xhtml+xml",    ".html", 1},
+        {"application/xhtml+xml",    ".xhtml", 1},
         {"text/plain",               ".txt"},
         {"text/css",                 ".css"},
         {"text/javascript",          ".js", 1},

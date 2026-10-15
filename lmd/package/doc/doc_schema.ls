@@ -4,21 +4,22 @@
 
 // Core attribute types used throughout the schema
 type Identifier = string?
-type CssClass = string | [string*]
+type CssClass = string | string[]
 type DataAttrs = {string: string}
 
 // Base attributes used by most elements
 type BaseAttrs = {
     id: Identifier,
-    class: CssClass,
-    'data-*': DataAttrs
+    class: CssClass?,
+    sourcepos: string?,
+    'data-*': string?
 }
 
 // Mark data type mappings for metadata
 type MetaString = string
 type MetaInlines = string  // text with inline markup
 type MetaBlocks = element  // block content
-type MetaList = [string*]
+type MetaList = string[]
 type MetaMap = {string: string}
 type MetaBool = bool
 type MetaValue = string
@@ -29,7 +30,7 @@ type Author = {
     orcid: string?,
     email: string?,
     affiliation: MetaInlines?,
-    roles: [string*]?,
+    roles: string[]?,
     address: MetaInlines?,
     website: string?,
     identifier: string?,
@@ -59,7 +60,7 @@ type Reference = {
     id: string,
     type: string?,
     title: string?,
-    author: [string*]?,
+    author: string[]?,
     publisher: string?,
     year: int?,
     isbn: string?,
@@ -71,11 +72,11 @@ type Reference = {
 }
 
 // Complete metadata schema
-type Meta = {
+type MetaAttrs = {
     // Core document metadata
     title: MetaInlines?,
     subtitle: MetaInlines?,
-    author: [Author*]?,
+    author: Author[]?,
     
     // Date and version fields
     created: string?,
@@ -91,9 +92,9 @@ type Meta = {
     
     // Content description
     description: MetaInlines?,
-    keywords: [string*]?,
-    subject: [string*]?,
-    tags: [string*]?,
+    keywords: string[]?,
+    subject: string[]?,
+    tags: string[]?,
     abstract: MetaBlocks?,
     
     // Rights and legal
@@ -103,16 +104,16 @@ type Meta = {
     source: string?,
     
     // Bibliography and citations
-    bibliography: [string*]?,
+    bibliography: string[]?,
     csl: string?,
     'link-citations': bool?,
-    references: [Reference*]?,
+    references: Reference[]?,
     
     // Document structure
     toc: bool?,
     'toc-depth': string?,
     'document-class': string?,
-    'class-option': [string*]?,
+    'class-option': string[]?,
     geometry: string?,
     
     // Publication metadata
@@ -132,37 +133,46 @@ type Meta = {
     custom: {string: MetaValue}?
 }
 
-// Inline element types - restricted to safe inline elements
-type InlineContent = string | em | strong | code | a | span | br | img
-
-// Block element base type
-type BlockContent = element
-
 // Text alignment
-type Alignment = left | center | right | justify
+type Alignment = "left" | "center" | "right" | "justify"
 
 // Citation modes
-type CitationMode = NormalCitation | AuthorInText | SuppressAuthor
+type CitationMode = "NormalCitation" | "AuthorInText" | "SuppressAuthor"
 
 // List numbering styles
-type ListStyle = decimal | 'lower-alpha' | 'upper-alpha' | 'lower-roman' | 'upper-roman'
-type ListDelimiter = period | paren | 'two-paren'
+type ListStyle = "decimal" | "lower-alpha" | "upper-alpha" | "lower-roman" | "upper-roman"
+type ListDelimiter = "period" | "paren" | "two-paren"
 
 // Math display types
-type MathType = inline | display
+type MathType = "inline" | "block" | "display"
 
 // Quote types
-type QuoteType = single | double
+type QuoteType = "single" | "double"
 
 // Raw content formats
-type RawFormat = html | latex | tex | markdown | rst | docx
+type RawFormat = "html" | "latex" | "tex" | "markdown" | "rst" | "docx" | "wiki" |
+    "mediawiki" | "dokuwiki" | "tikiwiki" | "twiki" | "vimwiki" | "xwiki" | "zimwiki" |
+    "creole" | "jira" | "confluence"
 
 // Occurrence modifiers for types
 type Occurrence = '?' | '+' | '*'
 
+// Shared task projection and richer workflow state; conditional invariants are
+// checked by lambda.doc.wiki.tasks (Input_Wiki section 4.1).
+type TaskState = "todo" | "in-progress" | "done" | "waiting" | "blocked" |
+    "cancelled" | "rejected" | "migrated" | "custom"
+type TaskAttrs = {
+    'data-checked': "true" | "false"?,
+    'data-task-state': TaskState?,
+    'data-task-label': string?,
+    'data-task-progress-min': string?,
+    'data-task-progress-max': string?,
+    'data-task-marker': string?,
+    'data-task-flavor': string?
+}
 // Element-specific attribute types
-type HeaderAttrs = BaseAttrs & {
-    level: int  // 1-6
+type HeaderAttrs = BaseAttrs & TaskAttrs & {
+    level: string | int?  // parser projection is a string from 1 to 6
 }
 
 type LinkAttrs = BaseAttrs & {
@@ -179,6 +189,7 @@ type ImageAttrs = BaseAttrs & {
 }
 
 type CodeAttrs = BaseAttrs & {
+    type: "inline" | "block"?,
     language: string?,
     'data-executable': bool?
 }
@@ -192,20 +203,20 @@ type QuoteAttrs = BaseAttrs & {
 }
 
 type SpanAttrs = BaseAttrs & {
-    style: {string: string}?
+    style: string | {string: string}?
 }
 
 type ListAttrs = BaseAttrs & {
-    start: int?,
+    start: string | int?,
     type: string?,
     delim: ListDelimiter?,
     style: ListStyle?
 }
 
-type TableCellAttrs = {
+type TableCellAttrs = BaseAttrs & {
     align: Alignment?,
-    rowspan: int?,
-    colspan: int?
+    rowspan: string | int?,
+    colspan: string | int?
 }
 
 type ColAttrs = {
@@ -237,76 +248,83 @@ type AttrType = {
     as: string
 }
 
-// Core document structure types
-type Document {
-    version: string,
-    <meta Meta>?,
-    <body>
-}
+// Element declarations describe the actual Mark Doc tree, not {tag,content} records.
+// Child runs remain extensible for document transformations (S2.6.1v2).
+type InlineRun = string | element
 
-type Meta {
-    // All metadata fields as defined above
-}
+type Emphasis = <em BaseAttrs, InlineRun*>
+type Strong = <strong BaseAttrs, InlineRun*>
+type Strikeout = <del BaseAttrs, InlineRun*>
+type Superscript = <sup BaseAttrs, InlineRun*>
+type Subscript = <sub BaseAttrs, InlineRun*>
+type Underline = <u BaseAttrs, InlineRun*>
+type SmallCaps = <span SpanAttrs, InlineRun*>
+type Quoted = <q QuoteAttrs, InlineRun*>
+type Link = <a LinkAttrs, InlineRun*>
+type Image = <img ImageAttrs>
+type Code = <code CodeAttrs, string?>
+type RawInline = <raw RawAttrs, string?>
+type RawBlock = RawInline
+type LineBreak = <br BaseAttrs>
+type Space = <space BaseAttrs>
+type SoftBreak = <softbreak BaseAttrs>
+type Cite = <cite BaseAttrs, InlineRun*>
+type Citation = <citation BaseAttrs & {key: string?}, InlineRun*>
+type Note = <note BaseAttrs, InlineRun*>
+type Math = <math MathAttrs, string?>
+type TaskCheckbox = <input type: "checkbox", disabled: "disabled", checked: "checked"?>
+type WikiVariable = <var BaseAttrs & {source: string?, name: string?, args: string?, default: string?}, InlineRun*>
 
-type Body { BlockContent* }
+type InlineContent = string | Emphasis | Strong | Strikeout | Superscript |
+    Subscript | Underline | SmallCaps | Quoted | Link | Image | Code | RawInline |
+    LineBreak | Space | SoftBreak | Cite | Citation | Note | Math | WikiVariable |
+    <b InlineRun*> | <i InlineRun*> | <s InlineRun*> | <ins InlineRun*> | <'footnote-ref' InlineRun*>
 
-// Block-level elements
-type Para { id: string?, class: CssClass?, 'data-*': DataAttrs?, InlineContent* }
-type LineBlock { BaseAttrs, <line InlineContent*>* }
-type CodeBlock { CodeAttrs, string }
-type RawBlock { RawAttrs, string }
-type BlockQuote { BaseAttrs, BlockContent* }
-type Header { HeaderAttrs, InlineContent* }
-type HorizontalRule { BaseAttrs }
-type Div { BaseAttrs, BlockContent* }
-type Figure { BaseAttrs, <img>, <figcaption InlineContent*>? }
+type Para = <p BaseAttrs, InlineContent*>
+type Header = <h1 HeaderAttrs, InlineContent*> | <h2 HeaderAttrs, InlineContent*> |
+    <h3 HeaderAttrs, InlineContent*> | <h4 HeaderAttrs, InlineContent*> |
+    <h5 HeaderAttrs, InlineContent*> | <h6 HeaderAttrs, InlineContent*>
+type LineBlock = <line_block BaseAttrs, <line InlineContent*>*>
+type CodeBlock = Code | <pre CodeAttrs, string?>
+type BlockQuote = <blockquote BaseAttrs, InlineRun*>
+type HorizontalRule = <hr BaseAttrs>
+type Div = <div BaseAttrs, InlineRun*>
+type Figure = <figure BaseAttrs, Image, <figcaption InlineContent*>?>
 
-// List elements
-type OrderedList { ListAttrs, <li BlockContent*>* }
-type BulletList { BaseAttrs, <li BlockContent*>* }
-type DefinitionList {
-    BaseAttrs,
-    (<dt InlineContent*>, <dd BlockContent*>)*
-}
+// Lists keep the existing disabled checkbox projection alongside task attributes.
+type TaskListItem = <li BaseAttrs & TaskAttrs, (TaskCheckbox | InlineRun)*>
+type ListItem = TaskListItem
+type OrderedList = <ol ListAttrs, ListItem*>
+type BulletList = <ul BaseAttrs, ListItem*>
+type List = OrderedList | BulletList
+type DefinitionList = <dl BaseAttrs, (<dt InlineContent*> | <dd InlineRun*>)*>
 
-// Table elements
-type Table {
-    BaseAttrs,
-    <caption InlineContent*>?,
+type TableCell = <th TableCellAttrs, InlineRun*> | <td TableCellAttrs, InlineRun*>
+type TableRow = <tr BaseAttrs, TableCell*>
+type Table = <table BaseAttrs,
+    <caption BaseAttrs, InlineContent*>?,
     <colgroup <col ColAttrs>*>?,
-    <thead <tr (<th TableCellAttrs, BlockContent*> | <td TableCellAttrs, BlockContent*>)*>*>?,
-    <tbody <tr (<th TableCellAttrs, BlockContent*> | <td TableCellAttrs, BlockContent*>)*>*>?
-}
+    (<thead TableRow*> | <tbody TableRow*> | TableRow)*
+>
+type Footnotes = <footnotes BaseAttrs, <footnote BaseAttrs, InlineRun*>*>
 
-// Inline elements
-type Emphasis { BaseAttrs, InlineContent* }
-type Strong { BaseAttrs, InlineContent* }
-type Strikeout { BaseAttrs, InlineContent* }
-type Superscript { BaseAttrs, InlineContent* }
-type Subscript { BaseAttrs, InlineContent* }
-type SmallCaps { SpanAttrs, InlineContent* }
-type Quoted { QuoteAttrs, InlineContent* }
-type Link { LinkAttrs, InlineContent* }
-type Image { ImageAttrs }
-type Code { CodeAttrs, string }
-type RawInline { RawAttrs, string }
-type LineBreak { BaseAttrs }
-type Space { BaseAttrs }
-type SoftBreak { BaseAttrs }
+type BlockContent = Para | Header | LineBlock | CodeBlock | BlockQuote | List |
+    DefinitionList | Table | HorizontalRule | Div | Figure | RawBlock | Math |
+    Footnotes | SmallCaps | <'html-dom' InlineRun*>
+type BlockElement = BlockContent
+type InlineElement = InlineContent
+type SafeInline = string | Emphasis | Strong | Code | Link
+type StrictPara = <p BaseAttrs, SafeInline+>
+type StrictBlock = StrictPara | Header | CodeBlock
 
-// Citation elements
-type Cite { BaseAttrs, <citation CitationAttrs>* }
-type Note { BaseAttrs, BlockContent* }
-type Math { MathAttrs, string }
-
-// HTML element aliases for common elements
+// Common HTML names remain available as schema aliases.
 type p = Para
-type h1 = Header
-type h2 = Header  
-type h3 = Header
-type h4 = Header
-type h5 = Header
-type h6 = Header
+type h1 = <h1 HeaderAttrs, InlineContent*>
+type h2 = <h2 HeaderAttrs, InlineContent*>
+type h3 = <h3 HeaderAttrs, InlineContent*>
+type h4 = <h4 HeaderAttrs, InlineContent*>
+type h5 = <h5 HeaderAttrs, InlineContent*>
+type h6 = <h6 HeaderAttrs, InlineContent*>
 type em = Emphasis
 type strong = Strong
 type s = Strikeout
@@ -317,7 +335,7 @@ type q = Quoted
 type a = Link
 type img = Image
 type code = Code
-type raw = RawInline | RawBlock
+type raw = RawInline
 type br = LineBreak
 type hr = HorizontalRule
 type blockquote = BlockQuote
@@ -332,95 +350,7 @@ type note = Note
 type math = Math
 type line_block = LineBlock
 
-// Complete document type - more restrictive structure
-type Document = {
-    meta?: {                         // Only allow specific metadata  
-        title: string?
-    },
-    body: [StrictBlock+]             // Require at least one block, and be strict about content
-}
-
-// Allowed block elements - iframe is NOT included
-type BlockElement = Para | Header | CodeBlock | BlockQuote | List | HorizontalRule | Div
-
-// Strict block content - only allow safe elements
-type StrictBlock = StrictPara | Header | CodeBlock
-
-// Strict paragraph that only allows safe inline content
-type StrictPara = {
-    tag: "p",
-    content: [SafeInline+]           // Must have content, only safe inline elements
-}
-
-// Safe inline content - no HTML elements like iframe, script, etc.
-type SafeInline = string | em | strong | code | a
-
-// Simple content definitions
-type Para = {
-    tag: "p",
-    content: [InlineElement*]
-}
-
-type Header = {
-    tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6", 
-    content: [InlineElement*]
-}
-
-type CodeBlock = {
-    tag: "pre",
-    content: string
-}
-
-type BlockQuote = {
-    tag: "blockquote",
-    content: [BlockElement*]
-}
-
-type List = {
-    tag: "ul" | "ol",
-    content: [ListItem*]
-}
-
-type ListItem = {
-    tag: "li",
-    content: [BlockElement*]
-}
-
-type HorizontalRule = {
-    tag: "hr"
-}
-
-type Div = {
-    tag: "div",
-    content: [BlockElement*]
-}
-
-// Allowed inline elements
-type InlineElement = string | Link | Image | Code | Strong | Emphasis
-
-type Link = {
-    tag: "a",
-    href: string,
-    content: [InlineElement*]
-}
-
-type Image = {
-    tag: "img", 
-    src: string,
-    alt?: string
-}
-
-type Code = {
-    tag: "code",
-    content: string
-}
-
-type Strong = {
-    tag: "strong",
-    content: [InlineElement*]
-}
-
-type Emphasis = {
-    tag: "em",
-    content: [InlineElement*]
-}
+type Meta = <meta MetaAttrs>
+type Body = <body BlockContent*>
+// Keep Document last: the CLI chooses the last declaration as the default root.
+type Document = <doc version: string?, Meta?, Body>

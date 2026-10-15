@@ -1,0 +1,37 @@
+{
+  "name": "Captured tar member preview",
+  "html": "test/input/archive/sample.tar.xz",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".project-root .tree-label"
+      },
+      "equals": "sample.tar.xz"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$='sample.tar.xz/hello.txt'] > .tree-row .tree-label"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "hello.txt"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview"
+      },
+      "equals": "hello archive\n"
+    }
+  ]
+}

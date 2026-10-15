@@ -1,3 +1,4 @@
+#include "../lambda/io/image_io.h"
 /**
  * GTest visual regression coverage for Radiant's SVG/PDF/PNG export backends.
  *
@@ -15,7 +16,7 @@
  *        blend-mode/gradient -> raster fallback (SVG `effect-raster`, PDF inline
  *        image or `/XObject`); alpha effects -> PDF soft mask (`/SMask`);
  *        backdrop-filter -> opaque flattened raster (no `/SMask`); plain
- *        opacity -> native PDF `ExtGState` rather than rasterizing.
+ *        opacity -> isolated alpha, including overlap behavior.
  *
  * 2. PdfRenderVisual.CompareLambdaPagesAgainstPopplerReference — end-to-end
  *    fidelity of Lambda's own PDF import-and-render path. For every `*.pdf`
@@ -361,6 +362,42 @@ static bool file_contains_text(const char* path, const char* needle) {
     return false;
 }
 
+static bool pdf_contains_content(const char* path, const char* operators) {
+    char quoted_path[PATH_MAX + 8], quoted_operators[256], command[PATH_MAX + 512];
+    shell_quote(path, quoted_path, sizeof(quoted_path));
+    shell_quote(operators, quoted_operators, sizeof(quoted_operators));
+    snprintf(command, sizeof(command), "python3 test/pdf_output_check.py %s content %s",
+        quoted_path, quoted_operators);
+    return run_command_capture(command).exit_code == 0;
+}
+
+// Page boxes are numeric geometry; exporter number formatting is not their contract.
+static bool pdf_contains_box(const char* path, const char* expected) {
+    char* bytes = nullptr; size_t size = 0;
+    if (!file_read_all_limit(path, MEM_CAT_TEMP, 64 * 1024 * 1024, &bytes, &size)) return false;
+    char name[40]; const char* opening = strchr(expected, '[');
+    size_t prefix = opening ? (size_t)(opening - expected) : 0;
+    if (!prefix || prefix >= sizeof(name)) { mem_free(bytes); return false; }
+    memcpy(name, expected, prefix); name[prefix] = 0;
+    double wanted[4]; const char* next = opening + 1;
+    for (size_t i = 0; i < 4; i++) { char* end = nullptr; wanted[i] = strtod(next, &end); next = end; }
+    bool found = false;
+    for (size_t i = 0; i + prefix < size && !found; i++) {
+        if (memcmp(bytes + i, name, prefix)) continue;
+        const char* actual = bytes + i + prefix;
+        while (*actual && isspace((unsigned char)*actual)) actual++;
+        if (*actual++ != '[') continue;
+        bool matches = true;
+        for (size_t coordinate = 0; coordinate < 4; coordinate++) {
+            char* end = nullptr; double value = strtod(actual, &end);
+            if (end == actual || !isfinite(value) || fabs(value - wanted[coordinate]) > 0.001) matches = false;
+            actual = end;
+        }
+        found = matches;
+    }
+    mem_free(bytes); return found;
+}
+
 static bool view_text_x(const char* path, const char* content, float* x) {
     FILE* fp = fopen(path, "rb");
     if (!fp || !content || !x) {
@@ -552,7 +589,7 @@ static bool write_lambda_page_script(const PdfFileInfo* pdf, int page_index, int
 
     lambda_string_escape(pdf->path, pdf_path_escaped, sizeof(pdf_path_escaped));
     snprintf(script, sizeof(script),
-             "import pdf: lambda.pdf.pdf\n"
+             "import pdf: lambda.doc.pdf.pdf\n"
              "\n"
              "let doc = input(\"%s\", 'pdf') ^ { null }\n"
              "let page = pdf.pdf_to_svg(doc, %d, {show_label: false});\n"
@@ -1412,7 +1449,7 @@ TEST(RenderOutputParity, FixedPdfPagesPreserveSourceBoxesQuarterTurnsAndCommonVe
     ASSERT_TRUE(write_fixed_pdf_fixture(source.path, 4));
     ASSERT_TRUE(render_document_fixture(source.path, exported.path, "--paged --pages 1 --block-remote-resources"));
     EXPECT_EQ(pdf_page_count(exported.path), 4); EXPECT_TRUE(file_contains_text(exported.path, "/Rotate -90"));
-    EXPECT_TRUE(file_contains_text(exported.path, "/MediaBox [-10 -20 100 80]"));
+    EXPECT_TRUE(pdf_contains_box(exported.path, "/MediaBox [-10 -20 100 80]"));
     EXPECT_TRUE(file_contains_text(exported.path, "/CropBox [-15 -10 90 90]"));
     EXPECT_TRUE(file_contains_text(exported.path, "/BleedBox [20 30 150 100]"));
     EXPECT_TRUE(file_contains_text(exported.path, "/TrimBox [20 30 150 100]"));
@@ -1470,7 +1507,7 @@ TEST(RenderOutputParity, BodyColumnRulesSharePreviewSvgAndPhysicalPdfGeometry) {
     snprintf(pdf.base, sizeof(pdf.base), "body_column_rules");
     ASSERT_TRUE(render_document_fixture(source, pdf.path, "--paged"));
     ASSERT_EQ(pdf_page_count(pdf.path), 3);
-    EXPECT_TRUE(file_contains_text(pdf.path, "/MediaBox [0 0 240.00 75.00]"));
+    EXPECT_TRUE(pdf_contains_box(pdf.path, "/MediaBox [0 0 240.00 75.00]"));
     EXPECT_FALSE(file_contains_text(pdf.path, "/Subtype /Image"));
     ASSERT_TRUE(render_document_fixture(source, preview_path, "--paged --page-grid 1x3"));
     ImageData preview = {}; ASSERT_TRUE(load_png_rgba(preview_path, &preview));
@@ -1499,6 +1536,219 @@ TEST(RenderOutputParity, BodyColumnRulesSharePreviewSvgAndPhysicalPdfGeometry) {
     image_free(preview.pixels);
 }
 
+TEST(RenderOutputParity, PdfExportMonospaceUnicodeTextUsesFontFallback) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* source = "temp/render_output_parity/pdf_unicode_text.txt";
+    const char* pdf = "temp/render_output_parity/pdf_unicode_text.pdf";
+    const char* png = "temp/render_output_parity/pdf_unicode_text.png";
+    const char* text = "中文\n";
+    ASSERT_TRUE(write_file_all(source, text, strlen(text)));
+    ASSERT_TRUE(render_document_fixture(source, pdf));
+    ASSERT_EQ(pdf_page_count(pdf), 1);
+    ASSERT_TRUE(rasterize_fixture_pdf(pdf, png, 2.0f));
+    ImageData image = {};
+    ASSERT_TRUE(load_png_rgba(png, &image));
+    // The source-text viewer uses monospace; missing CJK glyphs must still paint.
+    size_t ink = 0;
+    for (size_t i = 0; i < (size_t)image.width * image.height; i++) {
+        const uint8_t* pixel = image.pixels + i * 4;
+        ink += pixel[0] < 128 && pixel[1] < 128 && pixel[2] < 128;
+    }
+    EXPECT_GT(ink, (size_t)30);
+    image_free(image.pixels);
+}
+
+TEST(RenderOutputParity, PdfExportOmitsBrokenLinksAndKeepsResolvedAnnotations) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* source = "temp/render_output_parity/pdf_broken_links.html";
+    const char* pdf = "temp/render_output_parity/pdf_broken_links.pdf";
+    const char* html = "<!doctype html><html><body>"
+        "<a href='#missing'>Broken</a><a href='#target'>Internal</a>"
+        "<a href='https://example.com/'>External</a><p id='target'>Destination</p>"
+        "</body></html>";
+    ASSERT_TRUE(render_html_fixture(source, pdf, html));
+    EXPECT_EQ(pdf_page_count(pdf), 1);
+    EXPECT_FALSE(file_contains_text(pdf, "/Dest (missing)"));
+    EXPECT_TRUE(file_contains_text(pdf, "/Dest (target)"));
+    EXPECT_TRUE(file_contains_text(pdf, "/URI (https://example.com/)"));
+}
+
+TEST(RenderOutputParity, PdfExportInitialFontMatchesLegacyAndHtml5Documents) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* doctypes[] = {"", "<!doctype html>",
+        "<!DOCTYPE html PUBLIC '-//W3C//DTD HTML 4.01//EN' "
+        "'http://www.w3.org/TR/html4/strict.dtd'>"};
+    for (size_t i = 0; i < sizeof(doctypes) / sizeof(doctypes[0]); i++) {
+        SCOPED_TRACE(i);
+        char source[PATH_MAX], pdf[PATH_MAX], html[1024];
+        snprintf(source, sizeof(source), "temp/render_output_parity/pdf_initial_font_%zu.html", i);
+        snprintf(pdf, sizeof(pdf), "temp/render_output_parity/pdf_initial_font_%zu.pdf", i);
+        snprintf(html, sizeof(html), "%s<html><body>Inherited initial font</body></html>", doctypes[i]);
+        ASSERT_TRUE(render_html_fixture(source, pdf, html));
+        EXPECT_EQ(pdf_page_count(pdf), 1);
+        EXPECT_TRUE(pdf_contains_content(pdf, "f\n"));
+    }
+}
+
+TEST(RenderOutputParity, PdfExportMissingGlyphKeepsNativeReplacementAndZeroSizeStaysEmpty) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* source = "temp/render_output_parity/pdf_missing_glyph.html";
+    const char* pdf = "temp/render_output_parity/pdf_missing_glyph.pdf";
+    const char* png = "temp/render_output_parity/pdf_missing_glyph.png";
+    const char* html = "<!doctype html><html><head><style>@page{size:100px 60px;margin:0}"
+        "body{margin:0;background:white}p{margin:0;padding-left:20px;font:20px/30px Arial}.zero{font-size:0}"
+        "</style></head><body><p>A&#x378;B</p><p class='zero'>Invisible&#x378;</p></body></html>";
+    for (bool paged : {false, true}) {
+        SCOPED_TRACE(paged);
+        ASSERT_TRUE(render_html_fixture(source, pdf, html, paged ? "--paged" : ""));
+        ASSERT_TRUE(rasterize_fixture_pdf(pdf, png, 2.0f));
+        ImageData image = {};
+        ASSERT_TRUE(load_png_rgba(png, &image));
+        size_t red = 0, black = 0;
+        for (int y = 0; y < image.height; y++) for (int x = 0; x < image.width; x++) {
+            const uint8_t* pixel = image.pixels + ((size_t)y * image.width + x) * 4;
+            red += pixel[0] > 200 && pixel[1] < 30 && pixel[2] < 30;
+            black += pixel[0] < 30 && pixel[1] < 30 && pixel[2] < 30;
+            if (y > 60) EXPECT_TRUE(pixel[0] == 255 && pixel[1] == 255 && pixel[2] == 255);
+        }
+        EXPECT_GT(red, (size_t)5); EXPECT_GT(black, (size_t)10);
+        image_free(image.pixels);
+    }
+}
+
+TEST(RenderOutputParity, PdfExportBackdropInsideNestedClipsKeepsScopes) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* source = "temp/render_output_parity/pdf_clipped_backdrop.html";
+    const char* pdf = "temp/render_output_parity/pdf_clipped_backdrop.pdf";
+    const char* png = "temp/render_output_parity/pdf_clipped_backdrop.png";
+    const char* html = "<!doctype html><html><head><style>body{margin:0;background:white}"
+        ".outer{width:80px;height:80px;overflow:hidden;background:red}"
+        ".inner{width:60px;height:60px;overflow:hidden}"
+        ".effect{width:100px;height:40px;backdrop-filter:brightness(.5)}"
+        "</style></head><body><div class='outer'><div class='inner'><div class='effect'>"
+        "</div></div></div><div style='width:100px;height:20px;background:blue'></div>"
+        "</body></html>";
+    ASSERT_TRUE(render_html_fixture(source, pdf, html));
+    ASSERT_TRUE(rasterize_fixture_pdf(pdf, png, 2.0f));
+    ImageData image = {};
+    ASSERT_TRUE(load_png_rgba(png, &image));
+    // Both the sampled prefix and subsequent siblings retain their own clip scopes.
+    expect_preview_pixel(image, 40, 40, 128, 0, 0);
+    expect_preview_pixel(image, 140, 40, 255, 0, 0);
+    expect_preview_pixel(image, 180, 40, 255, 255, 255);
+    expect_preview_pixel(image, 180, 180, 0, 0, 255);
+    image_free(image.pixels);
+}
+
+TEST(RenderOutputParity, PdfExportLargeLatexTableKeepsNativeStackBounded) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* source = "temp/render_output_parity/pdf_large_table.tex";
+    const char* pdf = "temp/render_output_parity/pdf_large_table.pdf";
+    StrBuf* text = strbuf_new();
+    ASSERT_NE(text, nullptr);
+    strbuf_append_str(text, "\\documentclass{article}\\begin{document}\\begin{tabular}{lr}\n");
+    for (int row = 1; row <= 400; row++)
+        strbuf_append_format(text, "left%d & right%d\\\\\n", row, row);
+    strbuf_append_str(text, "\\end{tabular}\\end{document}\n");
+    bool written = write_file_all(source, text->str, text->length);
+    strbuf_free(text);
+    ASSERT_TRUE(written);
+    ASSERT_TRUE(render_document_fixture(source, pdf, "-vw 640 -vh 400"));
+    EXPECT_EQ(pdf_page_count(pdf), 1);
+    EXPECT_TRUE(pdf_contains_content(pdf, "f\n"));
+}
+
+TEST(RenderOutputParity, PdfExportTransformedAndOffPageRasterResourcesStayBounded) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* source = "temp/render_output_parity/pdf_bounded_effects.html";
+    const char* pdf = "temp/render_output_parity/pdf_bounded_effects.pdf";
+    const char* png = "temp/render_output_parity/pdf_bounded_effects.png";
+    const char* html = "<!doctype html><style>@page{size:160px 120px;margin:0}"
+        "body{margin:0;background:white}.effect{width:30px;height:20px;background:red;opacity:.5}"
+        ".placed{transform:translate(60px,20px)}.off{position:absolute;left:99999px;top:99999px;filter:blur(2px)}"
+        "</style><div class='placed'><div class='effect'></div></div><div class='effect off'></div>";
+    ASSERT_TRUE(render_html_fixture(source, pdf, html));
+    ASSERT_TRUE(rasterize_fixture_pdf(pdf, png, 2.0f));
+    ImageData image = {};
+    ASSERT_TRUE(load_png_rgba(png, &image));
+    expect_preview_pixel(image, 15, 15, 255, 255, 255);
+    expect_preview_pixel(image, 105, 45, 255, 127, 127);
+    image_free(image.pixels);
+}
+
+TEST(RenderOutputParity, PdfExportNegativeOutlineOffsetsKeepFiniteMinimumExtents) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* source = "temp/render_output_parity/pdf_negative_outline.html";
+    const char* pdf = "temp/render_output_parity/pdf_negative_outline.pdf";
+    const char* html = "<!doctype html><style>div{width:100px;height:10px;border-radius:10px;"
+        "outline:20px solid green;outline-offset:-200px}</style><div></div>";
+    ASSERT_TRUE(render_html_fixture(source, pdf, html));
+    EXPECT_EQ(pdf_page_count(pdf), 1);
+    EXPECT_TRUE(pdf_contains_content(pdf, "S\n"));
+    EXPECT_FALSE(file_contains_text(pdf, "/Subtype /Image"));
+}
+
+TEST(RenderOutputParity, PdfExportLiveCollectionsExcludeLayoutOnlyNodes) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* source = "temp/render_output_parity/pdf_live_collection.html";
+    const char* pdf = "temp/render_output_parity/pdf_live_collection.pdf";
+    const char* html = "<!doctype html><style>#mix{display:table}#mix::before{content:'generated'}"
+        "#result{width:30px;height:20px;background:red}</style>"
+        "<div id='mix'><span id='authored'>text</span></div><div id='result'></div><script>"
+        "var mix=document.getElementById('mix');var measured=mix.offsetWidth;"
+        "var list=mix.getElementsByTagName('*');"
+        "if(list.length===1 && list[0].id==='authored')"
+        "document.getElementById('result').setAttribute('style','background:#00ff00;width:30px;height:20px');"
+        "</script>";
+    ASSERT_TRUE(render_html_fixture(source, pdf, html));
+    EXPECT_TRUE(pdf_contains_content(pdf, "0 1 0 rg"));
+}
+
+TEST(RenderOutputParity, PdfExportAfterDocumentScriptsKeepsByteDestinations) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    ASSERT_TRUE(command_exists("pdftoppm"));
+    const char* source = "temp/render_output_parity/pdf_script_runtime.html";
+    const char* html = "<!doctype html><html><head><style>"
+        "@page{size:160px 120px;margin:0}body{margin:0;background:white}"
+        "</style></head><body><div id='paint' style='width:30px;height:20px;background:red'></div>"
+        "<script>document.getElementById('paint').setAttribute('style',"
+        "'width:30px;height:20px;background:#00ff00');</script></body></html>";
+    for (bool paged : {false, true}) {
+        SCOPED_TRACE(paged);
+        char pdf[PATH_MAX], png[PATH_MAX];
+        snprintf(pdf, sizeof(pdf), "temp/render_output_parity/pdf_script_runtime_%d.pdf", paged);
+        snprintf(png, sizeof(png), "temp/render_output_parity/pdf_script_runtime_%d.png", paged);
+        ASSERT_TRUE(render_html_fixture(source, pdf, html, paged ? "--paged" : ""));
+        ASSERT_EQ(pdf_page_count(pdf), 1);
+        // The script must run, and its retained UI evaluator must still construct PDF bytes.
+        EXPECT_TRUE(pdf_contains_content(pdf, "0 1 0 rg"));
+        ASSERT_TRUE(rasterize_fixture_pdf(pdf, png, 2.0f));
+        ImageData image = {};
+        ASSERT_TRUE(load_png_rgba(png, &image));
+        expect_preview_pixel(image, 10, 10, 0, 255, 0);
+        expect_preview_pixel(image, 80, 60, 255, 255, 255);
+        image_free(image.pixels);
+    }
+}
+
+TEST(RenderOutputParity, PdfExportAcceptsFullyClippedMarkerResources) {
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* source = "temp/render_output_parity/pdf_clipped_markers.html";
+    const char* pdf = "temp/render_output_parity/pdf_clipped_markers.pdf";
+    const char* html = "<!doctype html><html><head><style>"
+        "body{margin:0;background:white}ol{margin:0;padding-left:24px;list-style-type:decimal}"
+        "</style></head><body><ol><li>Visible marker</li></ol><div style='height:2000px'></div>"
+        "<ol><li>Clipped marker</li></ol></body></html>";
+    ASSERT_TRUE(render_html_fixture(source, pdf, html, "-vw 160 -vh 120"));
+    EXPECT_EQ(pdf_page_count(pdf), 1);
+    // Empty off-page captures succeed while the visible marker keeps its image resource.
+    EXPECT_TRUE(file_contains_text(pdf, "/Subtype /Image"));
+}
+
 TEST(RenderOutputParity, PatternedBodyColumnRulesRemainVectorAndMatchIndependentPdfRasters) {
     ASSERT_TRUE(ensure_dir("temp/render_output_parity")); ASSERT_TRUE(ensure_dir(PDF_REF_DIR));
     ASSERT_TRUE(command_exists("pdftoppm"));
@@ -1507,7 +1757,7 @@ TEST(RenderOutputParity, PatternedBodyColumnRulesRemainVectorAndMatchIndependent
     snprintf(pdf.path, sizeof(pdf.path), "temp/render_output_parity/column_rule_styles.pdf");
     snprintf(pdf.base, sizeof(pdf.base), "column_rule_styles");
     ASSERT_TRUE(render_document_fixture(source, pdf.path, "--paged")); ASSERT_EQ(pdf_page_count(pdf.path), 7);
-    EXPECT_TRUE(file_contains_text(pdf.path, "/MediaBox [0 0 150.00 90.00]"));
+    EXPECT_TRUE(pdf_contains_box(pdf.path, "/MediaBox [0 0 150.00 90.00]"));
     EXPECT_FALSE(file_contains_text(pdf.path, "/Subtype /Image"));
     const char* png = "temp/render_output_parity/column_rule_styles.png";
     ASSERT_TRUE(render_document_fixture(source, png, "--paged --page-grid 1x7"));
@@ -1657,7 +1907,7 @@ TEST(RenderOutputParity, FoAndNativePageControlsSharePreviewAndPhysicalPdfPages)
             snprintf(pdfs[i].base, sizeof(pdfs[i].base), "fo_native_%s_%zu", fixture.name, i);
             ASSERT_TRUE(render_document_fixture(source, previews[i], "--paged --block-remote-resources --page-grid 1x3"));
             ASSERT_TRUE(render_document_fixture(source, pdfs[i].path, "--paged --block-remote-resources"));
-            EXPECT_TRUE(file_contains_text(pdfs[i].path, fixture.media_box));
+            EXPECT_TRUE(pdf_contains_box(pdfs[i].path, fixture.media_box));
         }
         expect_paged_pair_output_parity(previews, pdfs, 2, fixture.pages);
     }
@@ -1671,7 +1921,7 @@ TEST(RenderOutputParity, ExplicitNativeColumnsRetainUnequalGeometryInPreviewSvgA
     snprintf(pdf.path, sizeof(pdf.path), "temp/render_output_parity/explicit_columns.pdf");
     snprintf(pdf.base, sizeof(pdf.base), "explicit_columns");
     ASSERT_TRUE(render_document_fixture(source, pdf.path, "--paged --block-remote-resources"));
-    ASSERT_EQ(pdf_page_count(pdf.path), 2); EXPECT_TRUE(file_contains_text(pdf.path, "/MediaBox [0 0 165.00 90.00]"));
+    ASSERT_EQ(pdf_page_count(pdf.path), 2); EXPECT_TRUE(pdf_contains_box(pdf.path, "/MediaBox [0 0 165.00 90.00]"));
     const uint8_t colors[2][3][3] = {{{255,0,0},{0,255,0},{0,0,255}}, {{255,255,0},{255,0,255},{0,255,255}}};
     for (int page = 1; page <= 2; page++) {
         SCOPED_TRACE(page); char preview[PATH_MAX], svg[PATH_MAX], reference[PATH_MAX], arguments[128];
@@ -10354,9 +10604,9 @@ TEST(RenderOutputParity, PdfUnicodeTextUsesFontOutlines) {
     int status = system(cmd);
     ASSERT_TRUE(WIFEXITED(status));
     ASSERT_EQ(WEXITSTATUS(status), 0);
-    EXPECT_TRUE(file_contains_text(pdf_path, " c\n"));
-    EXPECT_TRUE(file_contains_text(pdf_path, "f\n"));
-    EXPECT_FALSE(file_contains_text(pdf_path, " Tj\n"));
+    EXPECT_TRUE(pdf_contains_content(pdf_path, " c\n"));
+    EXPECT_TRUE(pdf_contains_content(pdf_path, "f\n"));
+    EXPECT_FALSE(pdf_contains_content(pdf_path, " Tj\n"));
     EXPECT_FALSE(file_contains_text(pdf_path, "Café"));
 }
 
@@ -10394,7 +10644,7 @@ TEST(RenderOutputParity, PdfExportCssFilterUsesRasterFallbackImage) {
     ASSERT_TRUE(WIFEXITED(status));
     ASSERT_EQ(WEXITSTATUS(status), 0);
     ASSERT_TRUE(file_exists(pdf_path));
-    EXPECT_TRUE(file_contains_text(pdf_path, "BI\n/W 40\n/H 30"))
+    EXPECT_TRUE(file_contains_text(pdf_path, "/Subtype /Image /Width 40 /Height 30"))
         << "PDF export should embed a raster fallback image for unsupported CSS filters";
 }
 
@@ -10540,7 +10790,7 @@ TEST(RenderOutputParity, SvgAndPdfExportBackdropFilterUseRasterFallbackImage) {
     EXPECT_TRUE(file_contains_text(svg_path, "data-radiant-fallback=\"effect-raster\""))
         << "SVG export should route backdrop-filter through raster fallback";
     ASSERT_TRUE(file_exists(pdf_path));
-    EXPECT_TRUE(file_contains_text(pdf_path, "BI\n/W 42\n/H 30"))
+    EXPECT_TRUE(file_contains_text(pdf_path, "/Subtype /Image /Width 42 /Height 30"))
         << "PDF export should route backdrop-filter through an opaque raster fallback image";
     EXPECT_FALSE(file_contains_text(pdf_path, "/SMask"))
         << "PDF backdrop-filter fallback should capture the prior page backdrop and flatten to an opaque image";
@@ -10595,7 +10845,7 @@ TEST(RenderOutputParity, SvgAndPdfExportBlendModeUseRasterFallbackImage) {
     ASSERT_TRUE(WIFEXITED(status));
     ASSERT_EQ(WEXITSTATUS(status), 0);
     ASSERT_TRUE(file_exists(pdf_path));
-    EXPECT_TRUE(file_contains_text(pdf_path, "BI\n/W 32\n/H 24"))
+    EXPECT_TRUE(file_contains_text(pdf_path, "/Subtype /Image /Width 32 /Height 24"))
         << "PDF export should rasterize unsupported blend-mode groups";
 }
 
@@ -10633,11 +10883,11 @@ TEST(RenderOutputParity, PdfGradientBackgroundUsesRasterFallbackImage) {
     ASSERT_TRUE(WIFEXITED(status));
     ASSERT_EQ(WEXITSTATUS(status), 0);
     ASSERT_TRUE(file_exists(pdf_path));
-    EXPECT_TRUE(file_contains_text(pdf_path, "BI\n/W 40\n/H 30"))
-        << "PDF gradient fallback should emit an inline image";
+    EXPECT_TRUE(file_contains_text(pdf_path, "/Subtype /Image /Width 40 /Height 30"))
+        << "PDF gradient fallback should emit an image resource";
 }
 
-TEST(RenderOutputParity, PdfOpacityGroupUsesPaintIrExtGState) {
+TEST(RenderOutputParity, PdfOpacityGroupPreservesIsolatedAlpha) {
     if (!file_exists(LAMBDA_EXE)) {
         GTEST_SKIP() << "lambda.exe not found; run make build first";
     }
@@ -10670,12 +10920,14 @@ TEST(RenderOutputParity, PdfOpacityGroupUsesPaintIrExtGState) {
     ASSERT_TRUE(WIFEXITED(status));
     ASSERT_EQ(WEXITSTATUS(status), 0);
     ASSERT_TRUE(file_exists(pdf_path));
-    EXPECT_TRUE(file_contains_text(pdf_path, "/Type /ExtGState"))
-        << "PDF opacity group should allocate an ExtGState";
-    EXPECT_TRUE(file_contains_text(pdf_path, "/ca 0.5"))
-        << "PDF opacity group should set non-stroking alpha";
-    EXPECT_TRUE(file_contains_text(pdf_path, "/GS1 gs"))
-        << "PDF opacity group should apply the ExtGState through PaintIR";
+    EXPECT_TRUE(file_contains_text(pdf_path, "/Subtype /Image"));
+    EXPECT_TRUE(file_contains_text(pdf_path, "/SMask"));
+    const char* raster_path = "temp/render_output_parity/pdf_opacity_check.png";
+    ASSERT_TRUE(rasterize_fixture_pdf(pdf_path, raster_path, 2.0f));
+    ImageData image = {}; ASSERT_TRUE(load_png_rgba(raster_path, &image));
+    expect_preview_pixel(image, 20, 20, 255, 127, 127);
+    image_free(image.pixels);
+
 }
 
 static void apply_pdf_baseline(BaselineData* baseline, PdfPageResult* results, int result_count) {
@@ -10838,7 +11090,8 @@ TEST(PdfRenderVisual, CompareLambdaPagesAgainstPopplerReference) {
                 continue;
             }
 
-            if (!render_lambda_png_page(&files[i], page - 1, ref_height, lambda_png, sizeof(lambda_png))) {
+            // Poppler rounds the raster height up; retain the PDF aspect ratio instead of centering in that rounded height.
+            if (!render_lambda_png_page(&files[i], page - 1, ref_height, lambda_png, sizeof(lambda_png), true)) {
                 add_pdf_page_result(results, &result_count, test_id, &files[i], page, diff_png,
                                     100.0, 255.0, "Lambda render failed");
                 continue;

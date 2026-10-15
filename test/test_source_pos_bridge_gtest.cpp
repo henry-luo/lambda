@@ -540,6 +540,28 @@ TEST_F(SourcePosBridgeRoundTrip, SourcePosToDomTextUsesRecordedAncestor) {
     source_pos_free(&pos);
 }
 
+TEST_F(SourcePosBridgeRoundTrip, SourcePosToDomPrefersMappedDescendantOverAncestorShape) {
+    // Generated wrappers (such as a table's implicit tbody) change DOM child
+    // indices. An ancestor's positional guess must not beat a mapped owner.
+    DomElement* wrapper = make_element();
+    DomText* wrong = make_text("wrong", 5);
+    ASSERT_TRUE(root->remove_child(para));
+    ASSERT_TRUE(root->insert_before(wrapper, hr));
+    ASSERT_TRUE(wrapper->append_child(wrong));
+    ASSERT_TRUE(wrapper->append_child(para));
+
+    DomBoundary original{hello, 3};
+    SourcePosC pos;
+    ASSERT_TRUE(source_pos_from_dom_boundary(&original, &pos));
+    DomBoundary restored{nullptr, 0};
+    ASSERT_TRUE(dom_boundary_from_source_pos(root, &pos, &restored));
+    EXPECT_EQ(restored.node, original.node);
+    EXPECT_EQ(restored.offset, original.offset);
+    source_pos_free(&pos);
+    delete wrong;
+    delete wrapper;
+}
+
 TEST_F(SourcePosBridgeRoundTrip, SourcePosToDomElementBoundary) {
     SourcePosC pos;
     source_path_init(&pos.path);

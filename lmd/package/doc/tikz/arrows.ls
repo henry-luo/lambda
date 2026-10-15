@@ -1,7 +1,7 @@
 // Arrow tip specifications (arrows.meta and the legacy tips) for TikZ paths.
 // One parser serves both renderers; tips are drawn in px along the path direction.
 import opts: .options
-import util: lambda.latex.util
+import util: lambda.doc.latex.util
 import svg: lambda.chart.svg
 
 let PT_PX = 96.0 / 72.27

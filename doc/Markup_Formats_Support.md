@@ -8,11 +8,11 @@ Lambda parses a wide variety of text and binary formats into a single, uniform i
 
 Every tree shown below is the real output of `lambda convert <file> -t mark` on the current build; where a parser's output differs from the shape it is heading for, the difference is stated. This document covers:
 
-1. [Lightweight markup languages](#1-lightweight-markup-languages) — human-authored prose that maps to the **Mark Doc** element schema
+1. [Lightweight markup languages](#1-lightweight-markup-languages) — human-authored prose that maps to the **Mark Doc** element schema, including [wiki dialect coverage](#15-wiki-dialect-coverage)
 2. [Data-interchange formats](#2-data-interchange-formats) — structured data that maps to Lambda **maps, arrays and elements**
-3. [Other formats](#3-other-formats) — LaTeX, PDF, email, contacts, calendars, diagrams, CSS, MDX and directories
+3. [Other formats](#3-other-formats) — LaTeX, PDF, email, contacts, calendars, diagrams, CSS, MDX, directories and [DocBook](#312-docbook)
 4. [Reading and writing](#4-reading-and-writing) — `input()`, `parse()`, `format()` and `lambda convert`
-5. [Output formats](#5-output-formats)
+5. [Output formats](#5-output-formats), including [wiki writers and loss handling](#51-wiki-output)
 
 ---
 
@@ -26,7 +26,8 @@ All lightweight markup flavors (Markdown, reStructuredText, AsciiDoc, …) parse
 |--------|:-----------------:|-------|
 | CommonMark / GitHub Flavored Markdown | `markdown` (`md`) | CommonMark plus GFM tables, tasks, strikethrough and bare autolinks; math, Mermaid, footnotes and all aliases in the versioned GitHub emoji catalog; embedded HTML without GFM tag filtering. See [Markdown dialect](../vibe/input/Input_Markdown.md). `{type: 'markup', flavor: 'commonmark'}` selects strict CommonMark. |
 | reStructuredText | `rst` | |
-| MediaWiki / DokuWiki markup | `wiki` | |
+| MediaWiki / DokuWiki markup | `wiki`, `wiki:mediawiki`, `wiki:dokuwiki` | Unqualified `wiki` means MediaWiki |
+| Wiki-family markup | `wiki:<flavor>` | `tikiwiki`, `twiki`, `vimwiki`, `xwiki` (2.1), `zimwiki`, `creole` (1.0), `jira`, `confluence` |
 | AsciiDoc | `asciidoc` / `adoc` | |
 | Emacs Org-mode | `org` | |
 | Textile | `textile` | |
@@ -35,6 +36,7 @@ All lightweight markup flavors (Markdown, reStructuredText, AsciiDoc, …) parse
 | LaTeX | `latex` | see §3.1 — a `latex_document` tree, not Mark Doc |
 | Typst | `typst` | |
 | HTML5 | `html` / `html5` | passes the html5lib test suite; see §1.4 |
+| XHTML | `xhtml` | Strict XML syntax producing an HTML document tree (D2.10.1); see [XHTML input](#xhtml-input--html-document-tree) |
 | Mark | `mark` | Lambda's own notation, read back losslessly |
 
 In Lambda scripts all of these are loaded with `input()`:
@@ -47,13 +49,26 @@ let adoc = input("guide.adoc",   'asciidoc')^
 let html = input("index.html",   'html')^
 ```
 
+Wiki dialects require explicit selection when the filename is ambiguous:
+
+```lambda
+let notebook = input("notes.txt", {type:"wiki",flavor:"zimwiki"})^
+let document = parse("= Heading =\n\n**bold**", "wiki:creole")^
+```
+
+These readers extend the shared MediaWiki parser and construct normalized
+Mark Doc (S2.6.1v2, S2.6.2–S2.6.5; D7.1.5). They preserve dynamic macros and
+unsupported source features as inert raw nodes with diagnostics. Rich task
+states retain progress ranges and source markers; tags use existing metadata
+where their scope is defined. See [wiki coverage and limits](../vibe/input/Input_Wiki.md).
+
 ### 1.2 Unified Mark Doc Schema
 
 Every prose parser produces the same element-tree shape. Element names are aligned with HTML so the tree passes straight to the Radiant layout engine.
 
 | Category | Mark element(s) | Notes |
 |----------|-----------------|-------|
-| Document root | `<doc version: "1.0", <body …>>` | the `<meta>` element is part of the schema but not produced yet; Markdown front matter currently parses as a thematic break and a heading |
+| Document root | `<doc version: "1.0", <meta …>?, <body …>>` | Wiki page tags and Zim creation metadata can produce the optional `<meta>`; Markdown front matter currently parses as a thematic break and a heading |
 | Headings | `<h1 level: "1">` … `<h6 level: "6">` | `level` is emitted as a string |
 | Paragraph | `<p <span …>>` | the inline run is wrapped in one `<span>` |
 | Block quote | `<blockquote>` | |
@@ -170,6 +185,65 @@ HTML5 is a first-class input format and is preserved verbatim, whitespace text n
 </tr>
 </tbody>
 </table>
+
+---
+
+### 1.5 Wiki Dialect Coverage
+
+Ten explicit profiles have readers and writers. Readers extend the shared
+native wiki parser; all writers live in the shipped **`lambda.doc.wiki`**
+Lambda Script package. Each reader constructs the same normalized Mark Doc
+vocabulary (S2.6.1v2, S2.6.2–S2.6.5; D7.1.5), with no dialect-specific root.
+
+The common static profile covers headings, paragraphs, emphasis, code,
+nested lists, links, images, rules, and tables. Dialect-specific mappings and
+limits include:
+
+| Dialect | Input and output selector | Additional mappings and limits |
+|---|---|---|
+| MediaWiki | `wiki:mediawiki` or `wiki` | Native table captions and supported table/row/cell attributes; templates remain inert source constructs. |
+| DokuWiki | `wiki:dokuwiki` | Inverse-level equals headings, literal regions, indented lists, and quoted blocks; image option queries remain raw. |
+| TikiWiki | `wiki:tikiwiki` | Bang headings, page links, multiline tables, no-parse regions, and selected static macros; other plugins remain raw. |
+| TWiki | `wiki:twiki` | `---+` headings, WikiWord links, literal/verbatim regions, and explicit anchors; variables and includes remain raw. |
+| Vimwiki | `wiki:vimwiki` | Native Vimwiki syntax, TODO progress ranges, automatic heading/bold anchors, and page tags; local tag scope, explicit invisible anchors, and hard breaks have writer limits. Markdown-mode notebooks should use `markdown`. |
+| XWiki Syntax 2.1 | `wiki:xwiki` | Explicit IDs/classes on supported blocks, code and ID macros; unimplemented link/image parameters and other macros remain raw. |
+| ZimWiki | `wiki:zimwiki` | TODO/migration markers, inline tags and page tag metadata, anchors, and creation metadata; image option queries remain raw. |
+| Creole 1.0 | `wiki:creole` | Standard prose syntax, escapes, hard breaks, and nowiki; extension placeholders remain raw. |
+| Jira / Atlassian | `wiki:jira` | Shared Atlassian static syntax and supported `code`, `noformat`, `quote`, `panel`, `color`, and `anchor` macros; host-dependent macros remain raw. |
+| Confluence wiki markup | `wiki:confluence` | The shared Atlassian profile; page, space, and attachment targets stay symbolic. This is wiki markup, not Confluence storage XML or Atlassian Document Format (ADF). |
+
+`wiki` and `.wiki` retain the MediaWiki default. Select the dialect explicitly
+for `.txt`, Vimwiki `.wiki`, and other ambiguous filenames; the reader does
+not guess a dialect from page content. Both string selectors and
+`{type:"wiki", flavor:"zimwiki"}` options are accepted by `input` and `parse`.
+CLI validation selects the common `doc_schema.ls` for these wiki selectors.
+
+**Tasks and tags.** Vimwiki and ZimWiki readers add `data-task-state`, optional
+labels and progress bounds, and original marker/flavor attributes to the
+existing task-list representation. Page tags use `meta.tags`; Zim inline tags
+also retain their position. See the [task and tag schema](Doc_Schema.md#tasks-and-tags)
+for field names and invariants. A target without a matching workflow state or
+progress range produces a writer diagnostic.
+
+**Conversion limits.** Plugins, scripts, variables, includes, searches, and
+extension placeholders are preserved as inert, flavor-labelled `<raw>` nodes
+with parser diagnostics. Matching-dialect source can be re-emitted; conversion
+to another dialect reports a loss. Site databases, permissions, page history,
+notebook operations, and resource resolution require context outside one
+document. Symbolic links remain symbolic.
+
+Some static content is representable in Mark Doc but still lacks a writer
+mapping: blockquotes outside DokuWiki/XWiki/Atlassian, Vimwiki hard breaks,
+some text effects and anchors, and captions/table attributes/spans outside the
+supported MediaWiki mapping. These also produce diagnostics; see
+[wiki output](#51-wiki-output) for strict and permissive handling.
+
+**Implementation status (2026-10-15):** initial static profiles. Native builds
+and package/schema compilation succeeded. Dialect conformance, regression,
+and round-trip suites have not been run for this implementation; the table is
+an implementation summary, not a full conformance claim. The
+[working design and implementation notes](../vibe/input/Input_Wiki.md#implementation-notes-2026-10-15)
+record the remaining gaps.
 
 ---
 
@@ -314,6 +388,55 @@ well-formed XML validation. This profile accepts an external DOCTYPE
 identifier as inert metadata; it never fetches a DTD and rejects internal
 subsets and unknown entities. The ordinary `'xml'` data reader remains
 permissive. [MusicXML sheet music](Lambda_Music.md) uses the strict profile.
+
+#### XHTML input → HTML document tree
+
+The dedicated **`xhtml` input format** uses strict XML 1.0/UTF-8 parsing and
+returns the HTML-compatible `<#document>` tree for Radiant (**D2.10.1**).
+Filename detection recognizes `.xhtml` and `.xht`, case-insensitively;
+Radiant also selects this parser for HTTP `application/xhtml+xml` responses,
+including after redirects. Explicit format selection accepts any filename.
+
+```lambda
+let page = input("page.xhtml")^                  // filename detection
+let explicit = input("page.data", 'xhtml')^      // explicit format
+let inline = parse("<html xmlns=\"http://www.w3.org/1999/xhtml\"><head/><body><p>Hello</p></body></html>", 'xhtml')^
+let html_text = format(inline, 'html')^           // serialize the HTML tree
+```
+
+The document must have one `{http://www.w3.org/1999/xhtml}html` root.
+XHTML element prefixes resolve to plain HTML names (`h:div` → `div`);
+ordinary attribute names and string values match HTML input. Qualified
+attributes retain their namespace, and SVG/MathML names retain their exact
+case, including `viewBox` and `foreignObject`. XML name sensitivity, text
+whitespace, CDATA character data, and self-closing element boundaries are
+preserved. XML declarations are omitted from document children; comments
+and doctypes use the HTML parser's `#comment` and `#doctype` representations.
+
+Radiant uses the same HTML DOM/CSS/layout pipeline, always in standards
+mode, including without a doctype. XML structure remains as written:
+HTML tree repair and implied element insertion are not applied. Malformed
+XML, unbound prefixes, duplicate expanded attributes, and NUL bytes fail
+parsing. External doctype identifiers are inert; DTD fetching, internal
+subsets, and DTD-defined named entities are unsupported. Use `&#160;`
+instead of `&nbsp;`. The ordinary `xml` reader retains its `<document>`
+wrapper and source QNames. There is no dedicated `xhtml` output formatter;
+`format(page, 'html')^` produces HTML serialization.
+
+```bash
+./lambda.exe view page.xhtml
+./lambda.exe layout page.xhtml
+./lambda.exe render page.xhtml -o page.svg
+./lambda.exe convert page.xhtml -f xhtml -t html -o page.html
+```
+
+The [XHTML feature gallery](../test/html/xhtml_feature_gallery.xhtml) is a
+viewable local sample with 27 live checks, SVG/MathML, namespace examples,
+forms, tables and text preservation. Open it with
+`./lambda.exe view test/html/xhtml_feature_gallery.xhtml`.
+Its nine interaction assertions pass at desktop and narrow viewport widths.
+Static layout/render currently exposes a startup computed-border discrepancy
+in one gallery check; the failed check displays the observed values.
 
 ### 2.4 YAML → Lambda Map / Array
 
@@ -549,7 +672,9 @@ lambda convert data.csv  -t yaml -o data.yaml
 lambda convert page.md   -t html -o page.html
 ```
 
-Not every direction exists: there is no CSV writer, so a CSV can be read and converted to any other format but nothing converts *to* CSV, and the prose formats AsciiDoc, man and Typst are read-only as well.
+Not every direction exists: CSV and TSV have readers but no writers.
+AsciiDoc, man, Typst, EML, vCard, and iCalendar now have Lambda Script writers
+in [lambda.doc.misc](Script_Formats_Support.md).
 
 ---
 
@@ -591,6 +716,11 @@ The RTF parser is **experimental**: it currently yields the document's control g
 ### 3.4 Email (EML / RFC 822)
 
 E-mail files parse into a map of the well-known headers plus a `headers` map with every header as written; `date` is kept as the header string. A plain message keeps its source text in `body`. For a `text/html` MIME body, including an HTML part nested in a multipart message, `body` is the document element tree produced by Lambda's HTML parser. Standard `base64` and `quoted-printable` transfer encodings are decoded before HTML parsing; `7bit`, `8bit`, and `binary` pass through unchanged. HTML attachments are not selected as the message body. `.eml` is not auto-detected by `lambda convert`, so give the type explicitly.
+
+The reader also retains ordered `header_entries` and authoritative `raw_body`
+for [EML export](Script_Formats_Support.md#eml-and-mime), preserving repeated
+headers and MIME attachments. Those additional source views are omitted from
+the short example below.
 
 <table>
 <thead>
@@ -643,6 +773,10 @@ mail.subject
 ### 3.5 vCard (VCF)
 
 One card parses into a map with descriptive keys: `version`, `full_name`, a structured `name` (`family`, `given`, `additional`, `prefix`, `suffix`), `email`, `phone`, `organization`, `title`, structured `address` maps, `url`, `birthday`, and `note`. Its `entries` array preserves every property in source order, including repeated fields, with `name`, `value`, and optional `parameters` fields. Use `entries` to inspect repeated values and parameter types; the `properties` map remains a convenience view. A file with several cards returns `{contacts: [...]}`, with one map per card. The ordered entry and contact arrays use the sequence append of **D2.6.5v3**.
+
+Parameterized VCF/ICS entries also retain `parameter_source`, preserving
+quoted commas and repeated parameter names for serialization. Both formats
+have [Lambda Script writers](Script_Formats_Support.md#vcard).
 
 ```lambda
 let contact = input("alice.vcf", 'vcf')^
@@ -727,6 +861,57 @@ let files = input("./src")^
 files |: ends_with(~.name, ".cpp") |> ~.name       // all .cpp file names
 ```
 
+### 3.12 DocBook
+
+`lambda.doc.docbook` provides an initial native Lambda port of official
+DocBook xslTNG 2.8.5, whose source stylesheets use XSLT 3.0 (D7.2.4). It
+transforms DocBook 5.x XML into HTML/CSS publications without Java at runtime.
+The usual filename extension is `.xml`; document identity comes from the
+`http://docbook.org/ns/docbook` namespace, including prefixed root names.
+
+Open the original sample directly:
+
+```bash
+./lambda.exe view test/input/docbook/showcase.xml
+```
+
+The viewer recognizes `article`, `book`, `set`, `part`, and `reference` roots
+in that namespace, resolves the bundled CSS and captured local images, and
+displays the document. The file browser also previews it and retains its
+original XML in the Source tab.
+
+| Area | Current support |
+|------|-----------------|
+| Structure and navigation | Core article/book structures, numbered headings, stable IDs, English TOCs and references |
+| Content | Common prose/inlines, lists, admonitions, formal objects, ordinary footnotes and text verbatim blocks |
+| Tables | HTML-style tables and CALS column/row spans, named columns and occupancy validation |
+| Publications | Single-page and chunked HTML, navigation, cross-file links, CSS and captured local media |
+| Diagnostics | Unsupported content produces warnings; `unsupported:"error"` rejects diagnosed content |
+
+Use the package for conversion and export:
+
+```lambda
+import docbook: lambda.doc.docbook
+pn main() {
+    let source = docbook.read("test/input/docbook/showcase.xml")^
+    let publication = docbook.convert(source, {output:"chunked"})^
+    docbook.write(publication, "temp/docbook-publication")^
+}
+```
+
+`convert` and `to_html` are pure; `read` and `write` acquire/export resources
+(S12.1.1v3). Generic `input(path,"xml")` reads an XML tree; generic XML-to-HTML
+serialization does not invoke the DocBook transformation. There is no
+dedicated `docbook` input type or `lambda convert` format flag.
+
+This is a partial HTML profile. DocBook 4 preprocessing, full localization,
+bibliography/index generation, advanced CALS/media layout, table-specific
+footnotes and optional browser scripts remain incomplete. Upstream CSS
+retains external Google Fonts imports; those fonts are not bundled.
+See the [package API](Lambda_Packages.md#16-docbook--docbook-to-htmlcss) and
+[support/provenance record](../lmd/package/doc/docbook/UPSTREAM.md) for the
+parameter profile, deliberate differences and reference checks.
+
 ---
 
 ## 4. Reading and Writing
@@ -770,12 +955,73 @@ lambda convert arch.mmd    -f graph:mermaid -t mark -o arch.mark
 | Category | Output formats |
 |----------|----------------|
 | **Data** | `mark` (lossless), `json`, `yaml`, `toml`, `ini`, `properties`, `xml` |
-| **Documents** | `html`, `markdown`/`md`, `rst`, `org`, `wiki`, `textile`, `latex`, `jsx`, `mdx`, `text` |
+| **Documents** | `html`, `markdown`/`md`, `rst`, `org`, `wiki`/`wiki:<flavor>`, `asciidoc`/`adoc`, `man`/`troff`, `typst`, `textile`, `latex`, `jsx`, `mdx`, `text` |
+| **Personal data** | `eml`, `vcf`/`vcard`, `ics`/`ical`/`icalendar` |
 | **Styles** | `css` |
 | **Math** | `math-latex`, `math-ascii` (`math-typst` and `math-mathml` are stubs) |
 | **Diagrams** | graph as `dot`, `mermaid` or `d2` |
 
 Where a target lacks a concept the conversion is predictable rather than silently lossy: a `binary` value becomes a base64 string in JSON and YAML, and an element written to a data format becomes its map-and-array projection. There is no CSV writer.
+
+### 5.1 Wiki Output
+
+All wiki output uses the shipped **`lambda.doc.wiki`** Lambda Script package
+(D7.2.4), including MediaWiki. Runtime `format()`, formatted file `output()`, and
+CLI conversion invoke it above the IO boundary (D7.1.1). The native MediaWiki
+formatter has been retired. Use any selector in the [coverage table](#15-wiki-dialect-coverage).
+
+```lambda
+import wiki: lambda.doc.wiki
+let document = parse("= Title =\n\n**bold**", "wiki:creole")^
+let report = wiki.format_report(document, {flavor:"jira"})^
+let text = wiki.format(document, {flavor:"jira"})^
+let via_builtin = format(document, {type:"wiki", flavor:"jira"})^
+```
+
+`format_report` returns `{text, diagnostics}` even when conversion loses
+information. Each diagnostic has `code`, `severity`, `element`, and `message`
+fields. `format` defaults to `loss:"error"` and raises on the first diagnostic;
+`loss:"allow"` returns the serialized text despite reported losses. Inspect a
+report before choosing permissive output. Both package functions default to
+`flavor:"mediawiki"`. See the [package API](Lambda_Packages.md#17-docwiki--wiki-writers)
+for file conversion and options.
+
+```bash
+./lambda.exe convert page.wiki -f wiki:creole -t wiki:jira -o page.jira
+./lambda.exe convert notes.txt -f wiki:zimwiki -t mark -o notes.mark
+./lambda.exe convert notes.mark -f mark -t wiki:creole --loss allow -o notes.creole
+```
+
+`--loss error|allow` applies to wiki output and the six `lambda.doc.misc`
+targets below, and defaults to `error`.
+Native hosts must use the runtime format API or package export; the
+runtime-free `format_data` API refuses wiki output.
+
+### 5.2 AsciiDoc, Man, Typst, and Personal Data Output
+
+The shipped **`lambda.doc.misc`** source package (D7.2.4) implements
+`asciidoc`, `man`, `typst`, `eml`, `vcf`, and `ics`. The prose writers consume
+normalized Mark Doc; record writers consume their existing parser maps.
+Runtime `format`, file `output`, and CLI conversion invoke the same package
+above the IO boundary (D7.1.1).
+
+```bash
+./lambda.exe convert guide.md -t asciidoc -o guide.adoc
+./lambda.exe convert guide.md -t man -o guide.1
+./lambda.exe convert guide.md -t typst -o guide.typ
+./lambda.exe convert contacts.vcf -f vcf -t vcf -o contacts-export.vcf
+./lambda.exe convert calendar.ics -f ics -t ics -o calendar-export.ics
+./lambda.exe convert message.eml -f eml -t eml -o message-export.eml
+```
+
+Writers default to rejecting diagnosed losses. Use `format_report` to inspect
+them, or CLI `--loss allow` to permit degraded output. VCF/ICS retain ordered
+entries, repeats, parameters, and nested calendar components. EML retains
+ordered headers and raw MIME source, and can author new multipart messages.
+These are initial profiles: builds and package compilation pass. Dedicated
+round-trip tests pass for EML/VCF/ICS and expose structural readback gaps in
+the prose readers. Native tool conformance remains unverified. See
+[APIs, record precedence, limits, and verification](Script_Formats_Support.md).
 
 ---
 
@@ -783,9 +1029,9 @@ Where a target lacks a concept the conversion is predictable rather than silentl
 
 | Category | Formats |
 |----------|---------|
-| **Lightweight markup** | Markdown (GFM/CommonMark), HTML5, reStructuredText, AsciiDoc, Wiki, Org-mode, Textile, troff/man, MDX, LaTeX, Typst, Mark |
+| **Lightweight markup** | Markdown (GFM/CommonMark), HTML5, reStructuredText, AsciiDoc, [ten wiki profiles](#15-wiki-dialect-coverage), Org-mode, Textile, troff/man, MDX, LaTeX, Typst, Mark |
 | **Data interchange** | JSON, XML, YAML 1.2, TOML, CSV, INI, Java .properties, SQLite |
-| **Document / rich text** | PDF, LaTeX (.tex); RTF experimental |
+| **Document / rich text** | PDF, LaTeX (.tex), DocBook 5.x (.xml, partial HTML/CSS profile); RTF experimental |
 | **Personal data** | vCard (VCF), iCalendar (ICS), Email (EML / RFC 822) |
 | **Diagrams / graphs** | Graphviz DOT, D2, Mermaid, Structurizr |
 | **Web / code** | CSS (for Radiant), JSX, Math (LaTeX math, ASCII math) |

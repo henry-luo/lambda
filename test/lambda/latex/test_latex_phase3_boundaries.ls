@@ -1,6 +1,6 @@
-import latex: lambda.latex.latex
-import util: lambda.latex.util
-import html: lambda.latex.to_html
+import latex: lambda.doc.latex.latex
+import util: lambda.doc.latex.util
+import html: lambda.doc.latex.to_html
 
 fn render(source, options = null) => latex.render_result(parse(source, "latex") ^ { null }, options)
 fn issue(result, code) => any([for (entry in result.diagnostics) entry.code == code])

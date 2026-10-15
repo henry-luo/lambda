@@ -161,6 +161,8 @@ MimeGlob glob_patterns[] = {
     {"*.tsv", "text/tab-separated-values"},
     {"*.html", "text/html", "text/html"},
     {"*.htm", "text/html", "text/html"},
+    {"*.xhtml", "application/xhtml+xml", "application/xhtml+xml"},
+    {"*.xht", "application/xhtml+xml", "application/xhtml+xml"},
     {"*.xml", "application/xml", "application/xml"},
     {"*.json", "application/json", "application/json"},
     {"*.yaml", "application/x-yaml", "text/yaml"},

@@ -11,6 +11,7 @@
 #include "../../lambda/input/css/css_tokenizer.hpp"
 #include "../../lambda/input/css/css_value_parser.hpp"
 #include "../../lambda/input/css/css_parser.hpp"
+#include "../../lambda/input/css/css_engine.hpp"
 #include "../../lambda/input/css/css_style.hpp"
 #include "../../lambda/input/input.hpp"
 #include "../../lambda/format/format.h"
@@ -744,254 +745,34 @@ protected:
         }
     }
 
-    // Validate CSS round-trip using actual CSS parser and formatter
+    // CSS error recovery discards invalid rules; require every accepted rule to survive formatting.
     void validateCssRoundTrip(const char* file_path, const char* file_name) {
-        printf("=== CSS Round-trip Validation: %s ===\n", file_name);
-
-        // Read the original CSS
-        char* original_css = readFileContent(file_path);
-        if (!original_css) {
-            FAIL() << "Failed to read CSS file: " << file_name;
-            return;
-        }
-
-        size_t original_length = strlen(original_css);
-        printf("Original CSS content (%zu chars):\n", original_length);
-        printf("%.200s%s\n", original_css, original_length > 200 ? "..." : "");
-
-        // Initialize CSS parser
-        Pool* css_pool = pool_create();
-        if (!css_pool) {
-            free(original_css);
-            FAIL() << "Failed to create memory pool for: " << file_name;
-            return;
-        }
-
-        bool roundTripSuccess = false;
-
-        try {
-            // Step 1: Parse the original CSS using the input system
-            printf("🔄 Parsing CSS...\n");
-            String* css_type = create_lambda_string("css");
-            Input* parsed_input = input_from_source(original_css, nullptr, css_type, nullptr);
-
-            if (!parsed_input || parsed_input->root.item == ITEM_ERROR || parsed_input->root.item == ITEM_NULL) {
-                printf("❌ CSS parsing failed for: %s\n", file_name);
-                if (css_type) free(css_type);
-            } else {
-                printf("✅ CSS parsing succeeded for: %s\n", file_name);
-
-                // Step 2: Format the parsed CSS back to string
-                printf("🔄 Formatting parsed CSS...\n");
-                String* formatted_css = format_data(parsed_input->root, css_type, nullptr, css_pool);
-
-                if (!formatted_css) {
-                    printf("❌ CSS formatting failed for: %s\n", file_name);
-                } else {
-                    printf("✅ CSS formatting succeeded for: %s (formatted length: %u)\n",
-                           file_name, formatted_css->len);
-
-                    // Show first part of formatted CSS
-                    printf("Formatted CSS content (%u chars):\n", formatted_css->len);
-                    printf("%.200s%s\n", formatted_css->chars,
-                           formatted_css->len > 200 ? "..." : "");
-
-                    // Step 3: Enhanced rule-by-rule round-trip validation
-                    printf("🔄 Performing detailed rule-by-rule comparison...\n");
-
-                    // Split both original and formatted CSS into rules
-                    std::vector<CssRule> original_rules = splitCssIntoRules(std::string(original_css));
-                    std::vector<CssRule> formatted_rules = splitCssIntoRules(std::string(formatted_css->chars, formatted_css->len));
-
-                    printf("📊 Original CSS: %zu rules, Formatted CSS: %zu rules\n",
-                           original_rules.size(), formatted_rules.size());
-
-                    // Compare rules one by one
-                    int matching_rules = 0;
-                    int mismatched_rules = 0;
-                    std::vector<std::pair<size_t, size_t>> rule_mismatches; // (original_idx, formatted_idx)
-
-                    // Create maps for faster lookup
-                    std::map<std::string, std::vector<size_t>> original_selector_map;
-                    for (size_t i = 0; i < original_rules.size(); i++) {
-                        original_selector_map[original_rules[i].selector].push_back(i);
-                    }
-
-                    std::map<std::string, std::vector<size_t>> formatted_selector_map;
-                    for (size_t i = 0; i < formatted_rules.size(); i++) {
-                        formatted_selector_map[formatted_rules[i].selector].push_back(i);
-                    }
-
-                    // Track which formatted rules have been matched
-                    std::vector<bool> formatted_matched(formatted_rules.size(), false);
-
-                    // Match rules by selector and compare declarations
-                    for (size_t orig_idx = 0; orig_idx < original_rules.size(); orig_idx++) {
-                        const CssRule& orig_rule = original_rules[orig_idx];
-                        bool found_match = false;
-
-                        // Look for matching selector in formatted rules
-                        auto it = formatted_selector_map.find(orig_rule.selector);
-                        if (it != formatted_selector_map.end()) {
-                            for (size_t fmt_idx : it->second) {
-                                if (formatted_matched[fmt_idx]) continue; // Already matched
-
-                                const CssRule& fmt_rule = formatted_rules[fmt_idx];
-
-                                // Compare declarations
-                                if (orig_rule.declarations == fmt_rule.declarations) {
-                                    matching_rules++;
-                                    formatted_matched[fmt_idx] = true;
-                                    found_match = true;
-                                    break;
-                                }
-                            }
-                        }
-
-                        if (!found_match) {
-                            mismatched_rules++;
-                            // Find closest match for reporting
-                            size_t closest_fmt_idx = 0;
-                            bool found_selector_match = false;
-
-                            if (it != formatted_selector_map.end() && !it->second.empty()) {
-                                closest_fmt_idx = it->second[0]; // Use first unmatched rule with same selector
-                                found_selector_match = true;
-                            }
-
-                            rule_mismatches.emplace_back(orig_idx, found_selector_match ? closest_fmt_idx : SIZE_MAX);
-                        }
-                    }
-
-                    // Count unmatched formatted rules (new rules)
-                    int new_rules = 0;
-                    for (size_t i = 0; i < formatted_rules.size(); i++) {
-                        if (!formatted_matched[i]) {
-                            new_rules++;
-                        }
-                    }
-
-                    printf("📈 Rule comparison results:\n");
-                    printf("   ✅ Matching rules: %d\n", matching_rules);
-                    printf("   ❌ Mismatched rules: %d\n", mismatched_rules);
-                    printf("   ➕ New rules in formatted: %d\n", new_rules);
-
-                    // Report mismatched rules in detail
-                    if (mismatched_rules > 0 || new_rules > 0) {
-                        printf("\n🔍 DETAILED MISMATCH REPORT for %s:\n", file_name);
-                        printf("============================================\n");
-
-                        for (const auto& mismatch : rule_mismatches) {
-                            size_t orig_idx = mismatch.first;
-                            size_t fmt_idx = mismatch.second;
-
-                            printf("\n❌ MISMATCH #%zu:\n", orig_idx + 1);
-                            printf("📝 Original rule:\n");
-                            printf("   Selector: '%s'\n", original_rules[orig_idx].selector.c_str());
-                            printf("   Declarations: '%s'\n", original_rules[orig_idx].declarations.c_str());
-                            printf("   Full rule: '%.200s%s'\n",
-                                   original_rules[orig_idx].full_rule.c_str(),
-                                   original_rules[orig_idx].full_rule.length() > 200 ? "..." : "");
-
-                            if (fmt_idx != SIZE_MAX) {
-                                printf("🔄 Formatted rule:\n");
-                                printf("   Selector: '%s'\n", formatted_rules[fmt_idx].selector.c_str());
-                                printf("   Declarations: '%s'\n", formatted_rules[fmt_idx].declarations.c_str());
-                                printf("   Full rule: '%.200s%s'\n",
-                                       formatted_rules[fmt_idx].full_rule.c_str(),
-                                       formatted_rules[fmt_idx].full_rule.length() > 200 ? "..." : "");
-                            } else {
-                                printf("🔄 No matching formatted rule found\n");
-                            }
-                            printf("---\n");
-                        }
-
-                        // Report new rules in formatted CSS
-                        if (new_rules > 0) {
-                            printf("\n➕ NEW RULES in formatted CSS:\n");
-                            for (size_t i = 0; i < formatted_rules.size(); i++) {
-                                if (!formatted_matched[i]) {
-                                    printf("   New rule #%zu:\n", i + 1);
-                                    printf("     Selector: '%s'\n", formatted_rules[i].selector.c_str());
-                                    printf("     Declarations: '%s'\n", formatted_rules[i].declarations.c_str());
-                                    printf("     Full rule: '%.200s%s'\n",
-                                           formatted_rules[i].full_rule.c_str(),
-                                           formatted_rules[i].full_rule.length() > 200 ? "..." : "");
-                                }
-                            }
-                        }
-                        printf("============================================\n");
-                    }
-
-                    // Determine success criteria
-                    double match_percentage = original_rules.size() > 0 ?
-                        (double)matching_rules / original_rules.size() * 100.0 : 100.0;
-
-                    printf("📊 Match percentage: %.1f%% (%d/%zu rules)\n",
-                           match_percentage, matching_rules, original_rules.size());
-
-                    // Consider round-trip successful if:
-                    // 1. At least threshold% of rules match exactly, OR
-                    // 2. All rules match and there are only minor formatting differences
-                    // 3. Special cases with lower thresholds:
-                    //    - animate.css: @keyframes complexity
-                    double threshold = 80.0;  // Default threshold accounts for formatting differences
-                    bool is_animate_css = (strstr(file_name, "animate.css") != nullptr);
-
-                    if (is_animate_css) {
-                        threshold = 5.0; // animate.css has 80+ @keyframes rules with complex multi-selector blocks
-                                         // The roundtrip preserves semantic correctness but formatting differs
-                    }
-
-                    if (match_percentage >= threshold) {
-                        printf("✅ Round-trip validation PASSED (%.1f%% match rate)\n", match_percentage);
-                        roundTripSuccess = true;
-                    } else if (mismatched_rules <= 2 && original_rules.size() <= 5) {
-                        // Be more lenient for small CSS files
-                        printf("✅ Round-trip validation PASSED (small file with minor differences)\n");
-                        roundTripSuccess = true;
-                    } else {
-                        printf("❌ Round-trip validation FAILED (%.1f%% match rate, threshold: %.0f%%)\n",
-                               match_percentage, threshold);
-                    }
-
-                        // Optional: Test parse stability (parse formatted CSS again)
-                        printf("🔄 Testing parse stability...\n");
-                        char* formatted_copy = (char*)malloc(formatted_css->len + 1);
-                        if (formatted_copy) {
-                            strncpy(formatted_copy, formatted_css->chars, formatted_css->len);
-                            formatted_copy[formatted_css->len] = '\0';
-
-                            Input* stability_input = input_from_source(formatted_copy, nullptr, css_type, nullptr);
-
-                            if (stability_input && stability_input->root.item != ITEM_ERROR &&
-                                stability_input->root.item != ITEM_NULL) {
-                                printf("✅ Parse stability test passed for: %s\n", file_name);
-                            } else {
-                                printf("⚠️  Parse stability test failed for: %s (formatted CSS not re-parseable)\n", file_name);
-                                // Don't fail the main test for stability issues
-                            }
-
-                            free(formatted_copy);
-                        }
-
-                        // Optional: Test parse stability (parse formatted CSS again)
-                }
-
-                // Cleanup
-                if (css_type) free(css_type);
-            }
-
-        } catch (...) {
-            printf("❌ Exception during round-trip test for: %s\n", file_name);
-        }
-
-        // Clean up
-        pool_destroy(css_pool);
-        free(original_css);
-
-        // Use EXPECT instead of FAIL to continue testing other files
-        EXPECT_TRUE(roundTripSuccess) << "Round-trip validation failed for: " << file_name;
+        SCOPED_TRACE(file_name);
+        char* source = readFileContent(file_path);
+        ASSERT_NE(source, nullptr);
+        CssEngine* engine = css_engine_create(pool);
+        ASSERT_NE(engine, nullptr);
+        CssStylesheet* accepted = css_parse_stylesheet(engine, source, nullptr);
+        ASSERT_NE(accepted, nullptr);
+        String* type = create_lambda_string("css");
+        ASSERT_NE(type, nullptr);
+        Input* input = input_from_source(source, nullptr, type, nullptr);
+        ASSERT_NE(input, nullptr);
+        ASSERT_NE(input->root.item, ITEM_ERROR);
+        String* formatted = format_data(input->root, type, nullptr, pool);
+        ASSERT_NE(formatted, nullptr);
+        CssStylesheet* reparsed = css_parse_stylesheet(engine, formatted->chars, nullptr);
+        ASSERT_NE(reparsed, nullptr);
+        EXPECT_EQ(reparsed->rule_count, accepted->rule_count);
+        Input* second = input_from_source(formatted->chars, nullptr, type, nullptr);
+        ASSERT_NE(second, nullptr);
+        ASSERT_NE(second->root.item, ITEM_ERROR);
+        String* repeated = format_data(second->root, type, nullptr, pool);
+        ASSERT_NE(repeated, nullptr);
+        // Canonical output must stabilize exactly, without per-framework match thresholds.
+        EXPECT_STREQ(repeated->chars, formatted->chars);
+        free(type);
+        free(source);
     }
 
     // Test CSS parsing for complex constructs

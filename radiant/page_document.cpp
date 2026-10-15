@@ -66,6 +66,8 @@ DomElement* radiant_page_style_parent(DomElement* source) {
     // structural wrappers may own layout boxes without becoming a new computed inheritance context.
     // the document root remains the initial font and inheritance anchor.
     while (parent && parent->parent_element()) {
+        // anonymous table wrappers have no authored style or registered source identity.
+        if (parent->is_synthetic()) { parent = parent->parent_element(); continue; }
         const char* transparent = dom_element_attribute_ns(parent, RADIANT_PAGE_NAMESPACE, "style-transparent");
         if (!transparent || strcmp(transparent, "true")) break;
         parent = parent->parent_element();
@@ -527,8 +529,9 @@ static const char* page_label_body_value(DomElement* table, bool separation) {
     return separation ? "6pt" : "24pt";
 }
 
-void radiant_native_hints_declare(DomElement* element) {
-    if (!element || !element->doc || !radiant_page_element(element->doc->root, "page-document")) return;
+void radiant_native_hints_declare(LayoutContext* lycon, DomElement* element) {
+    // HTML page flows admit the same namespaced traits as native page documents.
+    if (!element || !element->doc || (!lycon->paged && !radiant_page_element(element->doc->root, "page-document"))) return;
     const char* properties[8]; const char* values[8]; size_t count = 0;
     // XSL 1.1 §7.16: collapse, line feeds and wrapping combine into one white-space value
     bool declared = false;
@@ -613,10 +616,10 @@ static float page_native_length(LayoutContext* lycon, CssPropertyCode property, 
 }
 
 void radiant_native_resolved(LayoutContext* lycon, DomElement* element) {
-    if (!element || !element->doc || !radiant_page_element(element->doc->root, "page-document")) return;
+    if (!element || !element->doc || (!lycon->paged && !radiant_page_element(element->doc->root, "page-document"))) return;
     ViewBlock* block = lam::view_as_block((View*)element);
     if (!block) return;
-    if (DomElement* table = page_label_grid(element)) {
+    if (DomElement* table = lycon->paged ? nullptr : page_label_grid(element)) {
         // the label's content ends a label separation before the body starts (XSL 1.1 §7.30.12)
         block->ensure_boundary(lycon);
         if (block->boundary_mut())
@@ -786,7 +789,7 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
         (space ? spaces[index][component] : keeps[index][component]) = value; return true;
     });
     const RadiantFlowTraits* inherited_traits = style->parent ? style->parent->flow_traits.get() : nullptr;
-    if (!any && (!inherited_traits || (inherited_traits->line_stacking == RADIANT_LINE_STACK_CSS &&
+    if (!any && (!inherited_traits || (!inherited_traits->line_stacking_set &&
         inherited_traits->indents[0] == 0.0f && inherited_traits->indents[1] == 0.0f &&
         !inherited_traits->indent_expressions[0] && !inherited_traits->indent_expressions[1]))) return true;
     RadiantFlowTraits* traits = (RadiantFlowTraits*)pool_calloc(tree->model->css->pool, sizeof(RadiantFlowTraits));
@@ -795,6 +798,7 @@ bool radiant_flow_traits_resolve(ViewTree* tree, ViewCssStyle* style) {
     RadiantFlowTraits empty = {};
     const RadiantFlowTraits* parent = style->parent && style->parent->flow_traits ? style->parent->flow_traits.get() : &empty;
     traits->line_stacking = parent->line_stacking;
+    traits->line_stacking_set = line_stacking || parent->line_stacking_set;
     for (size_t i = 0; i < 2; i++) {
         traits->indents[i] = parent->indents[i];
         traits->indent_expressions[i] = parent->indent_expressions[i];
@@ -1176,6 +1180,29 @@ static bool page_fixed_scan(RadiantPageDocument* program, DomElement* source, Po
     return true;
 }
 
+static bool page_fixed_validate_surroundings(RadiantPageDocument* program, DomElement* root) {
+    // fixed-page composition bypasses flow layout, so reject material it would silently omit.
+    DomElement* container = program->fixed_source.address->as_element();
+    for (DomElement* branch = container; branch && branch != root; branch = branch->parent_element()) {
+        DomElement* parent = branch->parent_element();
+        for (DomNode* sibling = parent ? parent->first_child.get() : nullptr; sibling; sibling = sibling->next_sibling) {
+            if (sibling == branch) continue;
+            if (sibling->is_text()) {
+                if (!radiant_page_whitespace(sibling->as_text()))
+                    return page_document_fail(program, VIEW_MODEL_INVALID_ARGUMENT, parent, "fixed pages cannot mix with flow content");
+            } else if (sibling->is_element()) {
+                DomElement* element = sibling->as_element();
+                if (radiant_page_control_hidden(element) ||
+                    css_default_display_for_element(element, element).outer == CSS_VALUE_NONE) continue;
+                return page_document_fail(program, VIEW_MODEL_INVALID_ARGUMENT, element,
+                    radiant_page_element(element, "page-sequence") ? "fixed pages cannot mix with flow page sequences" :
+                    "fixed pages cannot mix with flow content");
+            }
+        }
+    }
+    return true;
+}
+
 static CssDeclaration** page_declarations_snapshot(CssDeclaration** declarations, size_t count, Pool* pool) {
     if (!count) return nullptr;
     CssDeclaration** result = (CssDeclaration**)pool_calloc(pool, count * sizeof(CssDeclaration*));
@@ -1507,7 +1534,9 @@ bool radiant_page_query_resolve(ViewTree* tree, ViewCssStyle* style) {
     if (!query) return false;
     style->page_query = lam::up(query);
     auto fail = [&](const char* reason) { query->status = VIEW_MODEL_INVALID_ARGUMENT; query->reason = reason; return true; };
-    if (style->source->first_child) return fail("page query must be empty");
+    // generated workspace text is retained between convergence passes.
+    for (DomNode* child = style->source->first_child; child; child = child->next_sibling)
+        if (!child->is_element() || !child->as_element()->is_synthetic()) return fail("page query must be empty");
     if (current) query->edge = RADIANT_QUERY_CURRENT;
     else {
         query->edge = RADIANT_QUERY_FIRST;
@@ -1603,6 +1632,7 @@ RadiantPageDocument* radiant_page_document_compile(ViewTree* tree, CssEngine* en
     if (!program) return nullptr;
     DomDocument* doc = tree->model->document;
     if (!page_fixed_scan(program, doc->root, pool, 0)) return program;
+    if (program->fixed_count && !page_fixed_validate_surroundings(program, doc->root)) return program;
     for (int i = 0; i < doc->stylesheet_count; i++)
         if (!page_css_sheet_compile(program, doc->stylesheets.get()[i], engine, pool, 0)) return program;
     if (!page_native_compile(program, doc->root, pool, 0)) return program;

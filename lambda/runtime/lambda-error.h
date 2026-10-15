@@ -149,4 +149,8 @@ void set_runtime_error(LambdaErrorCode code, const char* format, ...)
 
 #ifdef __cplusplus
 }
+
+struct Item;
+// shared rich value-error construction, preserving S7.4.4's diagnostic payload.
+Item runtime_error_item(LambdaErrorCode code, const char* message, LambdaError* cause);
 #endif

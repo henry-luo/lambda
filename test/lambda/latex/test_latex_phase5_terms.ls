@@ -1,6 +1,6 @@
 // Phase V M7 (vibe/impl/Lambda_Impl_Latex_Packages.md §11): the term registry:
 // glossaries, acronym, nomencl, makeidx and imakeidx.
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 fn doc(docclass, preamble, body) =>
     "\\documentclass{" ++ docclass ++ "}\n" ++ preamble ++ "\n\\begin{document}\n" ++ body ++ "\n\\end{document}\n"

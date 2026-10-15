@@ -513,6 +513,12 @@ void free_document(DomDocument* doc) {
     // Free DomDocument via dom_document_destroy (handles arena and pool)
     dom_document_destroy(doc);
     if (owned_runtime) {
+        // embedded teardown may leave another evaluator bound; reclaim this owner's heap at a quiescent boundary (D5.4.1).
+        if (!radiant_eval_context_switch(runtime_get_eval_context(owned_runtime.get()))) {
+            log_error("free_document: could not rebind owned runtime for cleanup; runtime retained");
+            owned_runtime.release();
+            return;
+        }
         runtime_cleanup(owned_runtime.get());
         log_debug("free_document: released the document-owned script runtime");
     }

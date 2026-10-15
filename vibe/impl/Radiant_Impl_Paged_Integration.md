@@ -400,3 +400,283 @@ The full PDF visual binary completed **278 pass / 17 fail** of 295 before the fi
 **Aggregate evidence.** The final `make test-radiant-baseline` completes with **5,562 pass / 153 partial / 225 fail / 1 skip** of 5,941. Its filtered native suite now reports **285/487 pass**, with 202 failures instead of aborting; the separate complete native run above includes 123 additional passing cases. UI automation passes **601/601**, native scene3d **28/28**, and the view UI suite **15/15**. Residuals are those native/FO and unmigrated-flow assertions, the same 19 layout residuals, CSS memory, page snapshots and two iframe viewer scenarios. Direct pinned-executable replay reproduces the LaTeX navigation failure on both frozen and current implementations; the second iframe evaluator scenario passes on both in isolation. The frozen executable also fails the CSS memory gate. Exact aggregate results are in `temp/paged-retirement/radiant-done.log`. No failed score was reclassified or baseline updated. Scratch artifacts, frozen/current executables and source/binary SHA-256 provenance are under `temp/paged-retirement/`. Current subsystem sizes are **5,139 lines** in `layout_paged.cpp`, **1,326** in `view_tree_css.cpp` and **253** in `typeset.cpp`; the §3.5 size target and release timing gate are not claimed complete.
 
 **Remaining.** Full paint fidelity is not claimed: inset shadows, masks, transforms/effect ordering, mixed atomic inline decoration and other fragment combinations still need qualification. P2 link/destination, page-instance/snapshot, corpus-raster and P3 complete rewritten-table/FO pair gates stay open wherever their tests fail. P4 leaders, page-dependent body/named-string bindings and counter compatibility; P5 anchor/refit/width reservations; P6 native-provider/break-candidate integration and FO refinements; P7 remaining test migration, aggregate qualification and release timing/size gates remain outstanding. No release performance claim is made from debug runs.
+
+### 2026-10-15 CSS qualification repairs
+
+The [CSS failure register](Radiant_CSS_Qualification.md#active-repair-request--2026-10-15)
+records this bounded repair request. All 53 FO/native export pairs now pass
+exact preview pixels and their physical PDF page comparisons
+(`temp/css_debt_repair/fo_computed_edges.json`). The caption, column-rule,
+explicit-column, fixed-PDF import and definite-height tail export groups also
+have focused passing receipts in that register.
+
+Flow blocks replay discovered containing and line widths over the existing
+bounded convergence passes; they are laid out again at those widths. Half-open
+page lookup applies its closing-edge bias once. Sequence terminal extents are
+updated once per sequence, retaining a real last-sheet body tail to settle
+narrower terminal masters. Explicitly nested named-page width transitions are
+still diagnosed as unsupported.
+
+Tall note bodies use source block/text break edges and reserve independent
+same-width continuation pieces before a following sequence. Changed-width note
+continuations remain unsupported. Published pieces retain their own fragment
+windows and first/last identity under **D4.5.1v4 / D4.1.4v5**; this does not
+complete the separate legacy paged migration or qualify every multi-note case.
+
+Native computed-property bindings now reach the live CSS workspace, including
+its final background recomputation. Decoration conditionality drives individual
+padding/border break reservations and published edges. FO root whitespace
+defaults no longer precede duplicate authored attributes or override them with
+an inline CSS reset. Invalid native traits are admitted through the common
+source-preserving diagnostic path before layout. The focused flow, FO color,
+whitespace and original caption controls pass 22/22
+(`temp/css_debt_repair/flow_fo_final.json`); aggregate qualification remains open.
+
+### Merge reconciliation — 2026-10-15
+
+The CSS repairs and retained-paint retirement now share `layout_table_grid_rect`.
+Independent native border/padding policies feed both fragment metadata and
+edition-owned paint (**D4.5.1v4 / D4.1.4v5**); sliced image backgrounds keep their
+complete positioning area. Caption counter initialization runs once, and the
+definite-height tail repair retains the bounded fragmentainer lookup.
+
+The merged CLI and three affected native targets build; layout integer-cast lint
+and whitespace checks pass. Focused paint-list checks pass **58/58**, and the
+selected PNG/SVG/PDF exporter groups pass **9/9**, including the original Hebrew
+and gradient-edge comparisons. Native checks pass **28/30**: caption minimums,
+source-order counters, retained paint, unequal columns and note continuations
+pass. `TableCaptionsUseATransparentWrapperOutsideGridDecorations` and
+`IndependentDecorationConditionalityReservesAndPaintsBodyAndCellContinuations`
+still fail geometry assertions; their checks remain unchanged. This is focused
+merge verification, not an all-green aggregate or attribution of both failures
+to a particular parent. Receipts: `temp/merge_css_paged/{native,paint,export}.json`.
+
+### 2026-10-16: reported view-reuse and WPT failures
+
+**Bounded repair.** Reproduced the reported 186/490 native failures and the
+six image/thirteen position layout regressions before editing. Native trait
+admission previously ran only for fragmentable blocks, allowing invalid inline
+image traits to publish successfully. Publication now checks visible authored
+sources after the layout workspace has settled its mutation epoch. Anonymous
+table wrappers are skipped when finding an authored style parent: their
+unregistered identities cannot serve as source metadata contexts. This keeps
+edition metadata on registered sources under **D4.5.1v4 / D4.1.4v5** and uses
+the existing shared trait validators.
+
+The unchanged native suite improves to **310/490** in the baseline selection
+and **433/613** in the complete binary, with no previously passing case failing.
+The six repaired cases cover invalid image scales, FO inheritance, percentage
+indent diagnostics, intrinsic fixed-table sizing, split-table baselines and
+independent split-cell cursors. The remaining **180** cases retain their
+assertions; this repair does not complete P6/P7 or the changed-width and native
+formatting extensions. Exact remaining failures and first assertions are in
+`temp/failed_tests_remaining.json`.
+
+**WPT inputs and DOM geometry.** Independent Chromium 152 captures show that
+the six object-view-box references omitted the fixture support script, and
+the thirteen sticky references omitted its generated indicator elements.
+The companion corpus extractor now canonicalizes symlinked fixture/category
+paths, resolves its checkout from the caller's root, and reuses the existing
+reference-name helper. Nineteen independently captured Darwin references
+retain the scripts' complete DOM; baseline scores and comparison thresholds
+are unchanged. Source/reference hashes and browser identity are recorded in
+`temp/wpt-reference-provenance.json`.
+
+Eight sticky-table cases also exposed an engine defect: `offsetParent`
+incorrectly selected a static table ancestor for a positioned descendant.
+Table ancestry now applies only to static descendants, as specified by
+[CSSOM View §7](https://drafts.csswg.org/cssom-view/#dom-htmlelement-offsetparent).
+`PositionedTableDescendantsSkipStaticTableOffsetParents` checks sticky,
+relative, absolute and static controls. The WPT suites pass **56/56 images**
+and **139/139 position**; the text/layout native suite passes **128/128**.
+Receipts are under `temp/failed_tests_*`, `temp/wpt_repaired.log` and
+`temp/view_reuse_final_all.json`.
+
+**Radiant gate.** `make test-radiant-baseline` completes with **5,683 pass,
+155 accepted partial, 180 fail and one skip** of 6,019. Every failure belongs
+to the remaining native paged selection above. UI automation passes 609/609,
+DOM UI 157/157, page-load 111/111, page snapshots 51/51, and the full layout
+baseline has zero regressions. The new offset-parent regression also passes
+with forced AST and MIR execution. Aggregate report:
+`temp/failed_tests_radiant_summary.json`.
+
+**Lambda gate.** `make test-lambda-baseline` completes with **7,447/7,450**
+combined runtime/input checks passing, including 313/313 forced-GC checks.
+All three failures exercise `test/lambda/pdf/output_pages.ls`: its golden,
+the tier-parity case and the binary-schema PDF case. The PDF callback visitor
+has no `paint` consumer for retained page paint commands, so traversal fails.
+An isolated CLI relinked with the HEAD versions of the three changed production
+files reproduces the same failure on interpreter and JIT; the working CLI and
+sources are not replaced. This existing callback-integration gap remains open.
+Evidence: `temp/failed_tests_lambda_gate.log` and
+`temp/head-pdf-comparison/result.json` (revision and binary checksum).
+
+### 2026-10-16: image sizing and label/body track integration
+
+**Bounded repair.** Native image and label/body values survived in source
+metadata but never reached the browsing engine's used geometry. The common
+image path now calls `radiant_image_size`, copies the resulting object dimensions
+into the workspace embed, and uses the shared object-position painter. Publication
+retains those dimensions, the selected resource and native overflow policy under
+**D4.5.1v4 / D4.1.4v5**. Removing a native override restores CSS image sizing.
+Native graphic URLs resolve inherited XML Base before resource admission; denied
+or missing native graphics fail without publishing an empty edition. An invalid
+scale grammar remains invalid, while incompatible valid scale sets are
+unplaceable.
+
+The ordinary table algorithm now accepts the computed label/body tracks and an
+unpainted separation gap, retaining inherited declaration-owner lengths and list
+contexts. Unsupported grid shapes and overlapping geometry use the existing
+native diagnostics. A run restart also recomputes percentage widths against its
+new containing block: style resolution ran before that restart and otherwise
+left each table using the preceding page's width. The host UI and CSS image
+selection both use the edition's device scale during composition, then restore
+their previous values.
+
+**Shared sizing defect.** Sequential natural-image constraints could enlarge an
+axis for its minimum, then shrink it below that minimum when the opposite axis
+hit its maximum. `layout_apply_image_natural_ratio_constraints` now uses the
+existing joint `layout_replaced_content_size` solver; incompatible intervals
+prevent later ratio transfer from undoing their independent bounds. The existing
+image-sizing case additionally checks the opposite axis and border-box edges.
+
+**Test migration.** Five image cases still asserted that layout left DOM embeds
+empty or source geometry untouched. Those assertions contradicted §1.3.5 of
+`Radiant_Layout_Paged_Media` and this plan's §3.4. They now assert independently
+owned workspace/edition image resources. Existing geometry, pixel, retained
+preview and resource-release checks remain; responsive selection additionally
+checks restoration of the host density settings. No remaining failing case is
+excluded or has its expected geometry relaxed.
+
+**Focused verification.** The complete binary passes **452/613**, versus
+433/613 before this repair; its baseline selection improves **310/490 →
+329/490**, with no previously passing case failing. The integer-cast lint and
+`git diff --check` pass. The remaining **161** failures include table continuations
+at changing widths, native flow/whitespace/folio integration and additional
+legacy-model expectations. In particular,
+`NativeLabelBodyContinuationRetainsEverySourceByteOnceAcrossChangingWidths`
+still needs per-continuation track remeasurement and folio binding; this repair
+does not claim P6/P7 completion. Current native evidence:
+`temp/view_reuse_final_all.{json,log}`; first assertions for the remaining cases
+are in `temp/view_reuse_remaining.json`.
+
+**Aggregate qualification.** The rebuilt Radiant gate completes with **5,702
+pass, 155 accepted partial, 161 fail and one skip** of 6,019. All failures belong
+to the remaining View Reuse selection. The layout baseline has **3,143 pass /
+151 accepted partial / zero regressions** of 3,294; UI automation passes 609/609,
+DOM UI 157/157, native text/layout 128/128, application views 195/195 and native
+Scene3D 28/28. Render visual passes its gate with 207 passes, four expected
+failures and one skip. The initial restricted run was interrupted after local
+HTTP socket-bind denials and macOS graphics XPC hangs; rerunning the already
+built binaries with native graphics and local HTTP access resolves those
+environment failures. Final aggregate log:
+`temp/view_reuse_radiant_gate_native.log`. The gate remains red solely on the
+161 recorded paged cases; broader native/FO integration and legacy test
+migration remain open.
+
+### 2026-10-16: merged baseline regression repair
+
+**Implemented behavior.** Single font-family names and single-part shorthands
+now use the existing tree-owned canonical string store, as family lists already
+did. The timeline fixtures exposed retained `FontProp::family` pointers into
+`CssComputedValueScratch` after substitution; hit testing dereferenced the
+released pool. Longhand and pseudo fonts share the same selector and ownership
+path (**D4.5.1v4 / D4.1.4v5**). Both original timeline fixtures pass with the
+supported ASan CLI, with leak detection disabled.
+
+PDF export uses the edition environment's host when its optional explicit host
+is absent; the functional package still owns generation under **S2.6.6v3**.
+Fixed-page admission rejects surrounding flow content before composition can
+silently discard it. Existing fixed-page geometry, metadata, budget and retained
+generation checks pass.
+
+The bidi pass retains advance-based bounds for text rectangles containing tabs.
+Fallback glyph ink cannot proportionally redistribute a tab-stop advance
+([CSS Text 3 §4.1.2](https://drafts.csswg.org/css-text-3/#white-space-phase-2)).
+The original `tab-bidi-001` reproducer matches all element, span and text bounds;
+the native regression covers Latin/Hebrew, LTR/RTL, nested directions and
+overrides. The native text/layout suite passes **129/129**.
+
+**Reference repair.** The companion corpus's `render/page/bg_image_01.html`
+contained a complete PNG container whose deflate payload supplied only 14 of
+the 52 scanline bytes required by its 4×4 RGB header. Its old browser reference
+showed partially decoded pixels. The fixture now contains a complete red/blue
+checkerboard, matching its stated purpose, and its reference was independently
+captured with Chromium headless shell 152.0.7977.42. Radiant matches exactly.
+The codec's error policy and render comparison floors are unchanged. Fixture
+and reference hashes, CRC/row validation and the capture command are in
+`temp/fix-failed-bg-provenance.json`; both changed artifacts belong to the
+sibling `lambda-test` repository.
+
+**Test migration.** The picture-source control now uses an unsupported media
+type; AVIF is supported by the shared codec registry. Workspace assertions
+follow paged-media §1.3.5, retaining exact geometry, retained pixel and ownership
+checks (**D4.5.1v4 / D4.1.4v5**). Three PDF media-box checks parse numeric
+coordinates instead of requiring the retired writer's decimal padding
+(**S2.6.6v3**). All nine focused migrated cases pass.
+
+**Qualification and open behavior.** The baseline View Reuse selection improves
+**292/490 → 338/490**, with no new failing case. Its **152 remaining failures**
+cover native/FO integration, changed-width table continuations, whitespace and
+folio behavior, and additional legacy-model expectations. Their assertions and
+suite selection remain active; exact diagnostics are in
+`temp/fix-failed-remaining-views.json`.
+
+`make test-radiant-baseline` completes with **5,698 pass, 154 accepted partial,
+152 fail and one skip** of 6,005. All failures belong to that View Reuse
+selection. UI automation passes **631/631**; the full layout baseline has
+**3,144 pass / 150 accepted partial / zero regressions**, including
+**890 pass / 90 partial / zero failed** for CSS text. Render visual passes with
+**207 passes, four expected failures and one skip**. Integer-cast lint and
+whitespace checks pass. Aggregate evidence:
+`temp/fix-failed-radiant-gate.log` and `temp/fix-failed-radiant-summary.json`.
+This closes the merged regressions above; it does not complete P6/P7.
+
+### 2026-10-16: native paragraph metrics, folios and retained list counters
+
+**Milestone.** Repair the reported 338/490 selection through the shared layout
+engine, retaining every existing assertion. Acceptance covers native paragraph
+stacking, explicit nominal metrics and negative leading; formatted current and
+target folios in body, running, static and note areas; and CSS/list-attribute
+counter order across retained relayout. Ownership remains **D4.5.1v4 /
+D4.1.4v5**; the behavior follows paged-media design §§1.3 and 11.3, without a
+new semantic ruling.
+
+**Implemented.** Namespaced page hints and resolved native geometry also reach
+HTML paged flows. Native paragraph allocation feeds the shared line alignment
+pass, preserving signed baselines and font-height overflow. Root admission uses
+the same trait validator as other sources. Each condition pass restores its
+opening page master instead of creating an unintended initial sheet. Folio
+admission distinguishes authored children from retained generated text and
+rejects missing targets or continuous presentation. Running occurrences fill
+their folios before intrinsic measurement. Notes measure a real placeholder and
+converge against preceding page labels before final counters are available.
+Static target areas register independently of normal-flow counter scopes.
+
+Reversed list initialization uses the shared computed display resolver to
+exclude hidden descendants. Implicit list-item increments precede counter-set;
+author counter-set overrides the HTML value hint. Newly created and retained
+markers share content/advance computation, releasing replaced text so a changed
+start value cannot leave the preceding edition's numbering in the workspace.
+
+**Qualification.** The unchanged selection improves **338/490 → 351/490**,
+with thirteen repaired cases and no newly failing case. Its additional style,
+ownership and reuse selection passes **124/124**. Original paragraph-metric,
+body/running/static/note folio and reversed-list mutation cases now pass.
+Integer-cast lint and `git diff --check` pass.
+
+The rebuilt Radiant baseline completes with **5,711 pass / 154 accepted partial /
+139 fail / one skip** of 6,005. All failures belong to the remaining View Reuse
+selection. Layout is unchanged at **3,144 pass / 150 accepted partial / zero
+regressions**; native text/layout passes **129/129**, UI automation **631/631**,
+DOM UI **157/157**, application views **204/204** and native Scene3D **28/28**.
+Render visual passes its gate with 207 passes, four expected failures and one
+skip. The initial restricted run was stopped after local WPT socket-bind denials
+and native graphics hangs; rerunning the already built binaries with the required
+access clears those environment failures. The complete receipt is
+`temp/view_reuse_native_gate/test_summary.json`; remaining native diagnostics
+and the repaired-case inventory are in `temp/view_reuse_remaining.json`.
+
+Changed-width table continuations, remaining native whitespace/reference
+geometry, table-model migration and terminal-float fitting remain open; this
+milestone does not complete P6/P7.

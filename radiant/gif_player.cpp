@@ -1,3 +1,4 @@
+#include "../lambda/io/image_io.h"
 #include "render.hpp"
 #include "view.hpp"
 #include "event.hpp"

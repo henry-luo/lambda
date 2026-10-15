@@ -1,0 +1,123 @@
+{
+  "name": "Finder raster thumbnails, retained tiles, previews and cache reuse",
+  "html": "test/demo/finder/finder.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#go"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#folder-path"
+      },
+      "text": "../../../../test/input/image",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#go-confirm"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#folder-title"
+      },
+      "equals": "image"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#files .thumbnail-slot[data-thumb-state=ready]').length===8"
+    },
+    {
+      "type": "assert_script",
+      "js": "['png','jpg','gif','webp','avif','bmp','tiff','ico'].every(ext=>document.querySelector('[data-name=\"sample.'+ext+'\"] canvas').width>1)"
+    },
+    {
+      "type": "script",
+      "js": "globalThis.thumbnailRow=document.querySelector('[data-name=\"sample.png\"]'); globalThis.thumbnailCanvas=thumbnailRow.querySelector('canvas')"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-name='sample.png']"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#preview-body .thumbnail-slot').getAttribute('data-thumb-state')==='ready'"
+    },
+    {
+      "type": "assert_script",
+      "js": "thumbnailRow===document.querySelector('[data-name=\"sample.png\"]') && thumbnailCanvas===thumbnailRow.querySelector('canvas')"
+    },
+    {
+      "type": "key_press",
+      "key": "space"
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelector('#look-body .thumbnail-slot').getAttribute('data-thumb-state')==='ready'"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/finder/raster-quick-look.png"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#list"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#files .thumbnail-slot[data-thumb-state=ready]').length===8 && Array.from(document.querySelectorAll('#files canvas')).every(c=>c.width<=50&&c.height<=48)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#icons"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#files .thumbnail-slot[data-thumb-state=ready][data-thumb-cache-hit=true]').length===8"
+    },
+    {
+      "type": "assert_script",
+      "js": "Number(document.getElementById('finder').getAttribute('data-thumbnail-cache-bytes'))<=33554432"
+    },
+    {
+      "type": "assert_script",
+      "js": "Array.from(document.querySelectorAll('#files .file')).every(e=>{const b=e.getBoundingClientRect();return Array.from(e.children).every(c=>c.getBoundingClientRect().bottom<=b.bottom+1)})"
+    },
+    {
+      "type": "capture_surface",
+      "source": "page",
+      "file": "temp/finder/thumbnails.png"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#place-demo"
+      }
+    },
+    {
+      "type": "assert_script",
+      "js": "document.querySelectorAll('#files .thumbnail-slot').length===0 && document.getElementById('finder').getAttribute('data-thumbnail-loading')==='false'"
+    }
+  ]
+}

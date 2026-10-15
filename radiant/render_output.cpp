@@ -19,8 +19,7 @@
 #include "../lib/str.h"
 #include "../lib/time_util.h"
 #include <pthread.h>
-#include <png.h>
-#include <setjmp.h>
+#include "../lambda/io/image_io.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -29,16 +28,53 @@
 static RenderPool* g_render_pool = nullptr;
 static pthread_mutex_t g_render_pool_lock = PTHREAD_MUTEX_INITIALIZER;
 
+bool render_paint_raster_resource(PaintList* destination, UiContext* ui, const RenderContext* source,
+        void (*painter)(RasterRenderContext*, void*), void* data) {
+    if (!destination || !ui || !source || !painter) return false;
+    OffscreenRenderArenas arenas;
+    if (!arenas.init("render.resource", "render.resource.list", "render.resource.scratch")) return false;
+    DisplayList display = {}; dl_init(&display, arenas.list_arena);
+    PaintList paint;
+    RasterRenderContext raster = {};
+    static_cast<RenderContext&>(raster) = *source;
+    raster.ui_context = lam::up(ui);
+    float density = ui_context_raster_scale(ui);
+    raster.raster_scale = density;
+    raster.block.x *= density; raster.block.y *= density;
+    raster.block.clip = {source->block.clip.left * density, source->block.clip.top * density,
+        source->block.clip.right * density, source->block.clip.bottom * density};
+    raster.dl = lam::up(&display); raster.paint_list = lam::up(&paint);
+    scratch_init(&raster.scratch, arenas.scratch_arena);
+    painter(&raster, data);
+    Bound ink = dl_content_bounds(&display);
+    bool ok = !raster.paint_failed && dl_validate_or_log(&display, "bounded raster resource");
+    // A fully clipped painter can retain balanced clip commands without any ink.
+    bool has_ink = ink.right > ink.left && ink.bottom > ink.top;
+    ImageSurface* image = ok && has_ink
+        ? render_display_list_snapshot(&display, mem_context_process(MEM_ROLE_RENDER), ink, density, Color{}) : nullptr;
+    if (image) {
+        size_t before = destination->size();
+        paint_draw_image_resource(destination, image, ink.left / density, ink.top / density,
+            (ink.right - ink.left) / density, (ink.bottom - ink.top) / density,
+            255, nullptr, image_surface_destroy);
+        ok = destination->size() == before + 1;
+        if (!ok) image_surface_destroy(image);
+    } else if (has_ink) ok = false;
+    scratch_release(&raster.scratch); dl_destroy(&display); arenas.destroy();
+    return ok;
+}
+
 bool render_paint_snapshot(const PaintList* paint, Bound bounds, float viewport_width,
         float viewport_height, float density, ImageSurface** surface, Rect* placement,
-        DisplayList* backdrop) {
+        DisplayList* backdrop, const RdtMatrix* transform) {
     if (!surface || !placement) return false;
     *surface = nullptr;
     render_svg_inline_register_paint_ir_lowerers();
     paint_ir_register_glyph_run_raster_lowerer(render_glyph_run_raster_lower);
     RenderEffectRasterImage image = {};
+    Bound page_clip = {0.0f, 0.0f, viewport_width * density, viewport_height * density};
     if (!render_effect_rasterize_paint_list(paint, backdrop, &bounds, viewport_width,
-            viewport_height, false, density, &image, "PDF_SCHEMA_RASTER")) return false;
+            viewport_height, false, density, &image, "PDF_SCHEMA_RASTER", transform, &page_clip)) return false;
     *surface = image.surface;
     *placement = {image.x, image.y, image.width, image.height};
     return true;
@@ -306,7 +342,7 @@ bool render_paged_input_supported(const char* path) {
     if (!extension) return false;
     size_t length = strcspn(extension, "?#");
     // Markdown reaches the compositor through the same document loader as its browsing view.
-    static const char* formats[] = {".html", ".htm", ".md", ".markdown", ".ls", ".fo", ".xslfo", ".rpd", ".pdf"};
+    static const char* formats[] = {".html", ".htm", ".xhtml", ".xht", ".md", ".markdown", ".ls", ".fo", ".xslfo", ".rpd", ".pdf"};
     for (const char* format : formats)
         if (strlen(format) == length && strncmp(extension, format, length) == 0) return true;
     return false;
@@ -1564,9 +1600,46 @@ static void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree,
  * normal raster output and threaded tiled replay, so strip output matches
  * screen/PNG output instead of diverging through a separate per-strip walk.
  *
- * Streaming rows into libpng keeps peak pixel memory bounded by the strip
+ * Streaming rows through the common encoder keeps pixel memory bounded by the strip
  * height rather than the full page height.
  */
+struct RenderStripRows {
+    DisplayList* display;
+    RasterRenderContext* context;
+    ImageSurface* recording;
+    ImageSurface* tile;
+    int width, height, strip_height, tile_y, tile_height;
+    uint32_t background;
+};
+
+static ImageStatus render_output_strip_row(void* user, uint32_t row_index, uint8_t* row, size_t size) {
+    RenderStripRows* strips = (RenderStripRows*)user;
+    // each strip is replayed once; the common encoder requests rows in ascending order.
+    int y = (int)row_index; // INT_CAST_OK: raster row index fits the admitted image dimensions.
+    if (!strips->tile || y >= strips->tile_y + strips->tile_height) {
+        if (strips->tile && strips->tile != strips->recording) image_surface_destroy(strips->tile);
+        strips->tile_y = y;
+        strips->tile_height = strips->height - y < strips->strip_height
+            ? strips->height - y : strips->strip_height;
+        strips->tile = y == 0 ? strips->recording : image_surface_create(strips->width, strips->tile_height);
+        if (!strips->tile) return IMAGE_OUT_OF_MEMORY;
+        Bound clip = {0, 0, (float)strips->width, (float)strips->tile_height};
+        RasterPaintContext raster = raster_paint_context(strips->tile, &clip, nullptr, 0);
+        raster_fill_rect(&raster, NULL, strips->background);
+        strips->tile->tile_offset_y = 0;
+        rdt_vector_set_target(&strips->context->vec, (uint32_t*)strips->tile->pixels,
+            strips->width, strips->tile_height, strips->width);
+        dl_replay_tile(strips->display, &strips->context->vec, strips->tile, &strips->context->scratch,
+            0.0f, (float)y, (float)strips->width, (float)strips->tile_height, strips->context->raster_scale);
+    }
+    const uint8_t* source = (const uint8_t*)strips->tile->pixels + (size_t)(y - strips->tile_y) * strips->tile->pitch;
+    if (strips->tile->alpha_mode == IMAGE_ALPHA_STRAIGHT) memcpy(row, source, size);
+    else image_unpremultiply_rgba_row(row, source, (size_t)strips->width);
+    if (y + 1 == strips->tile_y + strips->tile_height)
+        log_info("IMAGE_EXPORT: tile y=%d..%d done", strips->tile_y, y + 1);
+    return IMAGE_OK;
+}
+
 static bool render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree,
                                            const char* output_file,
                                            int total_width, int total_height,
@@ -1584,25 +1657,6 @@ static bool render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
         total_width, total_height, output_file,
         tile_count, TILE_H);
 
-    FILE* fp = fopen(output_file, "wb");
-    if (!fp) {
-        log_error("render_output_render_tiled_png: cannot open output file: %s", output_file);
-        return false;
-    }
-    png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-    if (!png) { fclose(fp); return false; }
-    png_infop info = png_create_info_struct(png);
-    if (!info) { png_destroy_write_struct(&png, NULL); fclose(fp); return false; }
-    if (setjmp(png_jmpbuf(png))) {
-        log_error("render_output_render_tiled_png: PNG error during write");
-        png_destroy_write_struct(&png, &info); fclose(fp); return false;
-    }
-    png_init_io(png, fp);
-    png_set_IHDR(png, info, total_width, total_height,
-                 8, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,
-                 PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
-    png_write_info(png, info);
-
     uint32_t canvas_bg = transparent_background
         ? render_document_canvas_background(view_tree->root).c
         : render_output_canvas_background(view_tree->root);
@@ -1619,8 +1673,6 @@ static bool render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
     if (!rec_surf) {
         log_error("render_output_render_tiled_png: failed to allocate recording surface %dx%d",
             total_width, first_h);
-        png_destroy_write_struct(&png, &info);
-        fclose(fp);
         return false;
     }
 
@@ -1649,53 +1701,19 @@ static bool render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
         image_surface_destroy(rec_surf);
         uicon->surface = lam::up(saved_surface);
         uicon->window_height = saved_window_height;
-        png_destroy_write_struct(&png, &info);
-        fclose(fp);
         return false;
     }
 
-    bool complete = true;
-    for (int tile_y = 0; tile_y < total_height; tile_y += TILE_H) {
-        int tile_h = (tile_y + TILE_H <= total_height) ? TILE_H : (total_height - tile_y);
-
-        ImageSurface* tile_surf = (tile_y == 0) ? rec_surf
-                                                : image_surface_create(total_width, tile_h);
-        if (!tile_surf) {
-            log_error("render_output_render_tiled_png: failed to allocate tile surface %dx%d at y=%d",
-                total_width, tile_h, tile_y);
-            complete = false;
-            break;
-        }
-
-        {
-            Bound tile_clip = {0, 0, (float)total_width, (float)tile_h};
-            RasterPaintContext raster = raster_paint_context(tile_surf, &tile_clip, nullptr, 0);
-            raster_fill_rect(&raster, NULL, canvas_bg);
-        }
-        // dl_replay_tile uses tile-local coordinates and translates via tile_y,
-        // so the strip surface itself starts at local origin 0.
-        tile_surf->tile_offset_y = 0;
-
-        // Rebind the vector backend to this strip's pixel buffer.
-        rdt_vector_set_target(&rdcon.vec, (uint32_t*)tile_surf->pixels,
-                              total_width, tile_h, total_width);
-
-        dl_replay_tile(&display_list, &rdcon.vec, tile_surf, &rdcon.scratch,
-                       0.0f, (float)tile_y, (float)total_width, (float)tile_h,
-                       rdcon.raster_scale);
-
-        for (int y = 0; y < tile_h; y++) {
-            uint8_t* row = (uint8_t*)tile_surf->pixels + y * tile_surf->pitch;
-            if (tile_surf->alpha_mode != IMAGE_ALPHA_STRAIGHT)
-                render_pixel_unpremultiply_row((uint32_t*)row, (const uint32_t*)row, total_width);
-            png_write_row(png, row);
-        }
-
-        if (tile_surf != rec_surf) {
-            image_surface_destroy(tile_surf);
-        }
-        log_info("render_output_render_tiled_png: tile y=%d..%d done", tile_y, tile_y + tile_h);
-    }
+    RenderStripRows strips = {&display_list, &rdcon, rec_surf, nullptr,
+        total_width, total_height, TILE_H, 0, 0, canvas_bg};
+    ImageRowSource rows = {render_output_strip_row, &strips, (uint32_t)total_width,
+        (uint32_t)total_height, 4, false};
+    ImageEncodeOptions options;
+    image_encode_options_init(&options, IMAGE_CODEC_PNG);
+    ImageError error = {};
+    bool complete = image_io_save_rows_path(nullptr, output_file, &rows, &options, &error) == IMAGE_OK;
+    if (!complete) log_error("IMAGE_EXPORT: tiled PNG %s: %s", image_status_name(error.code), error.message);
+    if (strips.tile && strips.tile != rec_surf) image_surface_destroy(strips.tile);
 
     DocState* rstate = uicon->document ? uicon->document->state : nullptr;
     RenderPathTrace trace = {};
@@ -1719,10 +1737,6 @@ static bool render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
 
     uicon->surface = lam::up(saved_surface);
     uicon->window_height = saved_window_height;
-
-    if (complete) png_write_end(png, NULL);
-    png_destroy_write_struct(&png, &info);
-    complete = fclose(fp) == 0 && complete;
 
     uint64_t t_end = time_now_ns();
     log_info("[TIMING] render_output_render_tiled_png total: %.1fms (%dx%d)",

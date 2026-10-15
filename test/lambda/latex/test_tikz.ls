@@ -1,7 +1,7 @@
 // Native TikZ source, bounded syntax, drawing, plotting, and LaTeX handoff.
 import tikz: lambda.doc.tikz.tikz
 import expr: lambda.doc.tikz.expression
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 let source = "\\begin{tikzpicture}\n" ++
     "  \\draw[blue] (0,0) -- (1,1);\n" ++

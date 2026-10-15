@@ -1,7 +1,7 @@
 // Phase 2 bibliography profiles, selections, scopes and diagnostics.
-import latex: lambda.latex.latex
-import html_ser: lambda.latex.to_html
-import bib_style: lambda.latex.packages.bib_style
+import latex: lambda.doc.latex.latex
+import html_ser: lambda.doc.latex.to_html
+import bib_style: lambda.doc.latex.packages.bib_style
 
 let source = input("test/lambda/latex/fixtures/biblatex_phase2.tex", "text") ^ { "" }
 let base = "test/lambda/latex/fixtures"

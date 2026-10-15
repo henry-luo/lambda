@@ -108,7 +108,8 @@ Type* grammar_rule_type(TypeGrammar* grammar, const char* name, size_t len);
 // and `end` byte offsets (GM11). On failure returns false and leaves the
 // furthest-failure message in `input->parse_error_message` (GM5.2).
 bool grammar_parse(TypeGrammar* grammar, uint32_t entry, Input* input,
-    const char* src, size_t len, bool spans);
+        const char* src, size_t len, bool spans, bool heap_result = false,
+        bool bytes = false);
 
 // Membership for `text is g` / `text is g.rule` (GM5.3): the rule parses the
 // whole text. No tree is built.

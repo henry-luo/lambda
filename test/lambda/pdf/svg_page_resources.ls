@@ -1,6 +1,6 @@
 // document-wide SVG references must retain the page and embedding namespaces.
-import pdf: lambda.pdf.pdf
-import interp: lambda.pdf.interp
+import pdf: lambda.doc.pdf.pdf
+import interp: lambda.doc.pdf.interp
 
 fn has(s: string, needle: string) => index_of(s, needle) != null
 

@@ -1,6 +1,6 @@
 // Shared validation for the native TikZ subset. Unknown keys fail visibly.
-import latex_color: lambda.latex.elements.color
-import latex_util: lambda.latex.util
+import latex_color: lambda.doc.latex.elements.color
+import latex_util: lambda.doc.latex.util
 
 let COLOR_NAMES = ["black", "blue", "red", "green", "darkgreen", "orange",
     "purple", "gray", "white", "yellow", "lightgray", "Silver", "Goldenrod",

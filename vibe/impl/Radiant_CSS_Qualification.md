@@ -6,7 +6,305 @@ runner. A bounded capture of 38 readiness-bearing inputs reproduces exactly
 17 failed, empty result frames; the other failure has a retained geometry tree.
 No engine change, assertion relaxation or reference update was made.
 
+
+## Active repair request — 2026-10-15
+
+The user's follow-up explicitly promotes this register's precision residue and
+regression debt into implementation scope. Earlier “independent backlog” and
+“deferred” dispositions below describe the completed feature schedule, not the
+current repair request. The active goal covers the named failures; it does not
+silently acquire all 498 cases of the separate legacy paged migration.
+
+Repair order and finite acceptance:
+
+1. Remove the registered paged crash, retaining caption-side ordering, inherited
+   alignment and all three source-order generated-counter assertions. Preserve
+   selected-view ownership (**D4.5.1v4**) and UI copy boundaries (**D4.5.3v2**).
+2. Close all thirteen registered CSS failures: seven framework rule-count
+   roundtrips, the two framework input comparisons, two parser expectations,
+   two DOM occurrence cases and the HTML/CSS storage case (the two framework
+   input mismatches are assertions within one native case).
+3. Close the four Hebrew and eleven gradient-edge comparisons with their exact
+   existing pixel assertions and literal references; check shared glyph,
+   gradient-marker, transform and alpha neighbors once the fixes stabilize.
+4. Capture all seventeen readiness inputs after their intended mutations;
+   investigate missing methods/resources and event delivery by family. Validate
+   the Markdown and chart references against independently captured Chromium
+   output before changing either golden.
+5. Repair the remaining named paged/export groups and input startup failures;
+   run the required Radiant, scoped CSS/input and affected Lambda gates on the
+   final frozen source. Report any remaining failure explicitly.
+
+### Wrap-up checkpoint — work stopped at the user's request
+
+Changes are uncommitted. The latest CLI build succeeds. The four original Hebrew
+and eleven gradient-edge assertions, all thirteen registered CSS failures, all
+eighteen original layout rows and all three named Lambda failures have focused
+passing evidence. This does **not** make the broader gates green.
+
+| Gate | Last full run | Follow-up evidence |
+|---|---|---|
+| CSS scope | **965/965** | nineteen executables, `css_scope_result.json` |
+| Lambda baseline | **5,319/5,321** | object-URL fixture passes after its origin-contract correction; isolated LaTeX timeout replay passes in 37.3 seconds; `js_dom_final.json`, `latex_corpus_isolated.json` |
+| Input baseline | **4,308/4,318** | all 4,033 non-export cases pass; exporter **287/297**, with three subsequently repaired groups passing in `wrapup_paged.json` |
+| Radiant baseline | **5,348 pass /24 fail /155 partial /one skip** | UI **609/609**; two DOM subprocess terminations pass isolated replay; kitchen-sink teardown and fetch admission have focused repairs; nineteen additional layout failures remain in the raw aggregate |
+
+The last paged repair admits native traits only on source-backed boxes: generated
+anonymous table fixups have no DOM identity and were incorrectly reported as an
+allocation failure. Fragment edge policy reads the source's computed style,
+rather than optional occurrence metadata. Paged Markdown and both split-cell
+border/alignment groups now pass **3/3** (`wrapup_paged.json`). Parent fetches that
+complete while a child pumps the shared loop retain their existing precise roots
+until the parent's checkpoint (**D5.3.3 / D5.4.1**); the unchanged cold/warm
+admission control passes (`wrapup_fetch.json`). These latest changes have not had
+another full aggregate or sanitizer run.
+
+Remaining work is bounded and recorded:
+
+- **Seven exporter groups:** five text/decoration-shadow groups have strict
+  2× PDF fringe differences; `TransformedDecorationsMatchPlacedGeometry` has
+  one SVG wavy-stroke difference; the imported-PDF group retains the Prince
+  cover mismatch below. Raw full result:
+  `input_final/test_pdf_render_visual_gtest_results.json`. Keep thresholds and
+  baselines unchanged.
+- **Nineteen additional layout rows:** fresh independent Chromium captures
+  reveal a symlink/canonical-path mismatch in the browser resource resolver.
+  With its prepared correction, six object-view-box and five sticky cases pass;
+  eight sticky-table cases retain real geometry differences. The corrected
+  resolver and these new references are **temporary artifacts, not installed**.
+  Receipts: `browser_layout_realpaths_capture.log`,
+  `new_capture_realpath_comparisons.log`, `new_capture_comparisons.json`.
+- **Lifetime qualification:** kitchen-sink no longer crashes, but memory tracking
+  still reports **9,447,755 bytes /14,723 allocations** after cleanup
+  (`kitchen_sink_cleanup_rebound.log`). Retaining its custom-paint evaluator
+  through document-resource teardown fixes the stale precise-root owner; the
+  retained allocations remain unresolved. Do not describe this as leak-free.
+- **Legacy paged runner:** the original source-order caption case passes. The
+  last full runner reaches another old caption-minimum crash. After replacing
+  its obsolete fragment-child dereference, focused replay exits normally with
+  two assertions still failing: fixed-grid width is 60 rather than 134, and the
+  source-specific row occurrence is absent (`wrapup_caption.json`). The original
+  caption case passes in the same rebuilt runner. The full legacy runner has
+  not been replayed; its separate 498-case migration stays open.
+- **Final qualification:** preserve the raw aggregate results above; focused
+  replays are separate evidence. Do not rerun the whole core/forced-GC gate
+  alongside render sweeps. The two terminated DOM cases passed isolated
+  (`dom_terminated_replay.json`); the full Lambda timeout likewise passed alone.
+
+All evidence paths in this checkpoint are under `temp/css_debt_repair/`.
+Layout integer-cast lint and the regenerated 411-record CSS inventory pass;
+all four qualification columns are unchanged. Diff whitespace checks pass
+excluding the inventory's existing trailing empty TSV fields. The last boundary
+audit passed at 137 deferred imports against 165; it predates the final fetch
+checkpoint change and was not rerun for this wrap-up.
+The already-installed Chromium/reference changes also require the sibling
+`lambda-test` checkout; the main repository alone does not contain those files.
+
+Current focused evidence is under `temp/css_debt_repair/`. Both newer MVP cases
+already pass on rebuilt HEAD without JS changes (`mvp_current.log`). The paged
+caption regression now passes (`caption_final.log`): its old computed-style
+pointer assertion was obsolete, and caption layout also omitted its counter
+scope/generated-content materialization. Width refinement now reuses the
+source-order generated text. Both UI occurrence regressions pass under
+**D4.5.3v2** (`dom_migrated_final.log`).
+
+The selector formatter preserves pseudo-element identity and nth-child `of`
+filters. Native CSS roundtrip passes 55/55, parser 90/90 and formatter 45/45.
+The framework input runner passes 11/11 using accepted-rule preservation and
+exact canonical stability rather than a raw-source percentage that counted
+rejected vendor selectors. This stronger check also exposed and fixed accumulating
+at-rule whitespace, unescaped CSS strings and charset whitespace consumption.
+See `css_{roundtrip,input,parser,formatter}_qualified.log`. The complete nineteen
+CSS executables now pass **965/965**, with zero failed runners
+(`css_scope_result.json`). Required broader aggregate gates remain pending.
+
+The original Hebrew and gradient comparisons plus marker/transform neighbors
+pass in `precision_final.json` (four groups; the marker group covers its full
+existing matrix). The broader frozen exporter run records **280/297** with
+17 failed groups (`export_current.json`): the global per-glyph strategy also
+changes shadow and text-background fringes. That strategy was removed. Combining
+the existing uniform-RTL projection into visual source-line runs now passes the
+original Hebrew group and text-background neighbor (`rtl_grouped_final.log`);
+shadow, emphasis and hard-gradient text controls also pass. Keep both receipts
+rather than transferring the earlier four-group result to the full suite.
+
+The remaining Lambda chart golden changes exactly six SVG `y` attributes.
+Current Chromium 152.0.7977.42 independently confirms all six font-cell metrics
+(`chart_browser_metrics.json`, `chart_golden_receipt.json`), and the real golden
+runner passes (`chart_final.log`). No font offset was added to production code.
+Together with the two current MVP controls, all three named Lambda failures
+are repaired or confirmed passing; the final required Lambda gate is pending.
+
+Replacing the never-settling local WPT frame-helper stub, delivering the committed
+`TestRendered` frame, implementing dialog close, dispatching WPT actions through
+native input, adding canvas bitmap drawing, and completing embedded navigation
+before parent load now produce fifteen of the seventeen formerly empty captures
+(`readiness_families2.log`, `iframe_cache_final.log`, `readiness_current.log`).
+Dialog and canvas behavioral controls pass in AST and MIR. The two remaining
+image-orientation cases require HTTP origin/CORS setup; a pinned local wptserve
+probe exposes missing Blob URL resource loading and FileReader, rather than a
+frame-settlement defect. A successful capture alone is not an asserted browser
+geometry pass. Fresh Chromium capture of the Markdown input removes the large
+stale-reference discrepancy. Preserving relative inline offsets through final
+line alignment and retained reflow clears the superscript differences
+(`relative_inline_final.json`). One code element and two text records still
+wrap differently because of accumulated font advances
+(`md_ky_relative_comparison.json`); the stored reference is unchanged.
+
+Fixed-PDF export passes all three named groups (`fixed_pdf_final.json`): the
+flow hooks had created a spurious unlabeled shell page before the fixed sheets.
+Publishing occupied body columns restores patterned rules; the solid-rule
+fixture now scopes `white-space:pre` to its paragraphs, preserving its intended
+line counts without turning XML indentation into content. Both rule groups
+pass (`column_rules_final.json`, `body_columns_qualified.json`). Definite-height
+box tails now allocate their remaining fragmentainers, clearing the size-container
+export (`paged_tail.json`), and PDF opaque rectangle unions retain one edge
+coverage before group alpha (`pdf_union_extent.json`). Opaque constant background
+composites use the solid-fill contour and the layered-background group passes
+(`background_solid_final.json`). Broader final exporter qualification is pending.
+
+The caption exporter now passes fixed/automatic grids and table/caption
+continuations (`caption_grid.json`). Percentage table sizing retains its already
+resolved containing-block width, border-box padding is counted once, and the
+transparent caption wrapper publishes a separate grid decoration box. Bottom
+captions begin after the grid's bottom border.
+
+All eight formerly aborting validation runners now pass **124/124**
+(`{validator,null_missing,enhanced_errors,format_validation,validator_features,
+validation_options,validator_integration,type_references}_fixed.json`). The
+internal validation library now links statically with its runtime; a dynamic
+library had referenced hundreds of private host symbols and aborted on
+`LIT_BOOL`. This preserves the module boundary (**D7.3.3–D7.3.4**) without
+exporting runtime internals. The source-position suite passes **5/5**
+(`sourcepos_fixed.json`): its exact source-range matcher now recognizes the
+[GFM §6.9 email autolink grammar](https://github.github.io/gfm/#autolinks-extension-),
+including numeric domain labels. The parser output was already correct.
+
+The graph parser suite passes **20/20** (`graph_audited.json`). The footprint
+review in `vibe/Lambda_Pkg_Graph.md` §19.3.5 accounts for the existing sequence
+family, shares repeated line-label normalization across families and tightens
+all six source-unit ceilings to their audited sizes. The rebuilt
+Mermaid corpus also passes **40/40** (`graph_corpus_qualified.json`).
+
+The final narrow RTL strategy and gradient contour changes pass all eight
+selected exporter groups (`precision_scoped_qualified.json`), including the
+original four Hebrew and eleven 2× gradient-edge assertions, the complete
+gradient-marker matrix, transformed overflow, shadow, emphasis, hard-gradient
+text and text-background controls. Wavy skip-ink now tessellates its cubic once
+before applying interval clips, removing backend clip-dependent subdivision;
+both raster and SVG/PDF pattern groups pass (`skip_ink_tessellated.json`).
+The full final exporter gate remains pending.
+
+Markdown now matches the independently captured current Chromium tree at the
+existing tolerances: **1,100/1,100 elements, 2,153/2,153 text records and 2/2
+spans** (`md_context_comparison.json`). The remaining cause was outgoing
+punctuation kerning across inline boundaries: `r` before the link's following
+comma lost its contextual advance under per-character wrapping. Context
+measurement includes ASCII punctuation and records advance ownership so the
+next glyph does not apply the same pair twice. Native controls retain padding
+boundaries, contextual script shaping and retained reflow
+(`punctuation_context_native.json`). The sibling `lambda-test` corpus gains
+macOS-specific full/compact references, independently captured by Chromium
+152.0.7977.42; generic/Linux references stay intact. Source hashes, original and
+new reference digests are in `md_ky_reference_receipt.json`.
+
+The rebuilt native text/layout target now passes **126/126**
+(`text_qualification.json`). Current captures of the fifteen repaired readiness
+inputs plus Markdown complete **16/16**, but only eight initially match their
+stored browser references (`readiness_qualification.json`). Several remaining
+references visibly describe the pre-mutation state (for example block versus
+inline flow-root, original flex order and the old column span). They require
+independent browser captures that honor `reftest-wait` and `TestRendered`, not
+further native changes made to match the wrong state. Fresh comparisons are
+being prepared under `browser_readiness/`; no readiness reference has been
+replaced yet.
+
+All **16 local layout cases now pass** through the ordinary reference resolver
+(`local_readiness_qualified.json`): the fifteen non-HTTP readiness fixtures plus
+Markdown. Eight macOS full/compact reference pairs now capture the intended
+mutation, with input hashes and Chromium version preserved. The sibling
+`lambda-test/layout/extract_browser_references.js` dispatches `TestRendered`
+for pending explicit reftests and rejects a readiness timeout before writing a
+reference. The two HTTP image-orientation fixtures remain outstanding.
+
+The final local sticky case required real native repairs in addition to its
+reference refresh: fixed-ancestor constraints use viewport coordinates; initial
+script geometry acquires its document state owner; scroll-dependent offsets
+synchronize on CSSOM reads without advancing pending DOM commits; window scroll
+getters use the active document before loader publication; and `window.scrollTo`
+writes the single `document.scrollingElement` instead of scrolling root and body
+twice. The original case matches all eleven element and two text records
+(`sticky_qualified_comparison.json`). A causal native frame test checks the
+immediate post-scroll offset, single viewport translation, fixed positioning
+and reset, alongside existing scheduling/cancellation controls
+(`sticky_snapshot_native.json`). Ownership and commit boundaries preserve
+**D4.5.1v4 / D5.4.1**.
+
 ## Layout failures
+
+**Repair checkpoint:** all eighteen original rows pass focused comparisons.
+The sixteen local cases use the ordinary platform reference resolver; the two
+HTTP cases pass all **43 element and seven text** records against independently
+captured Chromium 152.0.7977.42 references. The sibling corpus now launches the
+pinned WPT HTTP server for mirrored fixtures declaring `get-host-info.sub.js`,
+verifies identical pinned HTML, retains real localhost/127.0.0.1 origins and
+uses the same environment for Chromium, single-file and streamed native runs.
+Receipts: `http_qualification/receipt.json`, `http_reference_manifest.json` and
+`local_readiness_qualified.json` under `temp/css_debt_repair/`.
+
+Image writes retain pending network requests until native load/error completion.
+Blob URL bytes have a document resource owner (**D4.5.1v4**); revoke removes that
+resource. This bounded implementation does not claim cross-document Blob URL
+sharing. FileReader supports asynchronous `readAsDataURL`, state/result/error,
+load/progress/end events and abort cancellation; other read methods and the
+ProgressEvent class remain outside this repair. FileReader and bitmap-source
+controls pass in AST/MIR, and the rebuilt native JS runner passes all three new
+FileReader/canvas/dialog fixtures (`js_image_readiness.json`). The text/scroll
+native checkpoint passes **127/127** (`text_scroll_qualified.json`).
+
+Unequal native columns now reflow their containing widths and line widths over
+the existing bounded convergence passes; finished boxes are not stretched to
+fake wrapping. The original unequal-column export group passes with its exact
+PNG/SVG/PDF geometry and color assertions (`paged_half_open.json`). Undoing an
+internal text strut preserves the block's definite used height. Half-open page
+lookup no longer applies the closing-edge epsilon twice, removing an empty
+trailing page. Terminal extent updates happen once per sequence and reserve a
+real body tail when a narrower last master would otherwise oscillate. The
+paired FO/native exporter now passes all **53 fixture pairs**, including exact preview
+pixels and every physical PDF page (`fo_computed_edges.json`). Tall notes retain
+legal same-width continuation pieces before the next sequence; changed-width
+note continuations and nested named-page width changes remain unsupported.
+Selected native property bindings reach the live CSS workspace and its final
+background pass, and independently retained padding/border edges drive both
+break reservations and paint. FO root defaults no longer mask authored whitespace.
+The bounded flow, color, inherited-whitespace and original caption controls pass
+**22/22** (`flow_fo_final.json`). Native trait admission rejects invalid values
+before the CSS workspace can approximate them, preserving original FO diagnostics.
+
+The transformed-image sampler now shares the existing area filter used by
+ordinary CPU minification, including premultiplied/straight alpha and flips.
+All six image-paint controls pass (`image_projection_native.json`). This clears
+three of six imported-PDF regressions. Calibrated SVG text keeps vector coverage,
+and the PDF comparison retains its natural aspect ratio instead of centering
+within Poppler's rounded bitmap height. The latter is independently checked with
+a literal PDF bar (`pdf_scale_control.pdf`). **43/44 imported pages** now meet
+the unchanged baselines; `PrinceCatalogue_page_01` remains at **2.968104%**
+against **2.30256065%** (`pdf_natural_calibration.json`). Its JPEG payload is
+byte-identical to the independently extracted source. An accurate-DCT experiment
+changed the result only to 2.927224% and was reverted. Neither PDF baselines
+nor pixel thresholds changed.
+
+The first aggregate replay exposed an outer-turn mutation loss after the JS
+realm became available during load: nested lifecycle/synthetic dispatch cleared
+records belonging to the loading script. Nested dispatch now preserves that
+ledger and defers its rebuild until the outer turn (**D5.4.1 / D5.3.3**). The
+unchanged load-cascade, dynamic auto-fit grid, jQuery tabs and noUiSlider drag
+controls pass (`{cascade,grid,tabs,slider}_nested_fixed.json`). The object-URL compatibility fixture now checks the document origin rather than
+the retired `blob:lambda/` mock prefix; its expected output is unchanged. Aggregate replay
+is required; the interrupted layout batch and earlier failing UI totals are
+not transferred to the repaired source. The full legacy paged runner also
+reaches a different, previously recorded caption-minimum crash; the named
+source-order caption crash remains passing. Its separate migration stays open.
 
 Paths below are relative to `test/layout/data/`. All seventeen capture failures
 retain `reftest-wait` at the existing bounded deadline. The dependency column

@@ -261,6 +261,7 @@ struct ReconcileLog {
 struct DomDocumentServices {
     void* mem_ctx;
     void* cached_css_engine;
+    lam::Up<CssStylesheet> ua_focus_stylesheet; // document-pool UA rules, excluded from CSSOM styleSheets
     void* keyframe_registry;
     void* registered_property_set; // document-owned CSS.registerProperty definitions
     uint32_t element_count;
@@ -279,7 +280,7 @@ struct DomDocumentServices {
     lam::Own<char> protocol_language;  // document-owned single Content-Language response value
     bool svg_image_document; // SVG image processing forbids external subordinate resources
 
-    DomDocumentServices() : mem_ctx(nullptr), cached_css_engine(nullptr),
+    DomDocumentServices() : mem_ctx(nullptr), cached_css_engine(nullptr), ua_focus_stylesheet(nullptr),
         keyframe_registry(nullptr), registered_property_set(nullptr), element_count(0), ext_allocations(0),
         layout_cache_allocations(0), node_registry(nullptr),
         style_epoch_manager(nullptr), scene3d_registry(nullptr), canvas_registry(nullptr),
@@ -818,7 +819,7 @@ struct DomNamespacedAttribute {
 };
 
 static inline bool dom_attribute_is_internal(const char* name) {
-    return name && strncmp(name, "__lambda_", 9) == 0;
+    return element_attribute_is_internal(name);
 }
 
 // borrowed attribute fields; iteration preserves expanded identity and native null values.
@@ -929,6 +930,7 @@ struct DomElementExt {
     bool has_empty_ruby_base;
     bool popover_open;
     bool dialog_modal;
+    lam::Own<const char> dialog_return_value; // document-pooled WebIDL state, independent of JS expandos
     // Deferred text-control events are DOM task state, so their queue links
     // outlive layout-property teardown while a control is detached.
     uint8_t selectionchange_event_pending;

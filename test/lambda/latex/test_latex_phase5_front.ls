@@ -1,6 +1,6 @@
 // Phase V M6 (vibe/impl/Lambda_Impl_Latex_Packages.md §10): front matter, headings
 // and contents: titlesec, sectsty, tocloft, minitoc, titling, authblk and varioref.
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 fn doc(docclass, preamble, body) =>
     "\\documentclass{" ++ docclass ++ "}\n" ++ preamble ++ "\n\\begin{document}\n" ++ body ++ "\n\\end{document}\n"

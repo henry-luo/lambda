@@ -760,6 +760,15 @@ fn factorial(n: int) int {
 }
 ```
 
+**XHTML input (D2.10.1):**
+```lambda
+let page = input("page.xhtml", 'xhtml')^
+let doc = parse("<html xmlns=\"http://www.w3.org/1999/xhtml\"><head/><body/></html>", 'xhtml')^
+format(doc, 'html')^
+```
+`.xhtml`/`.xht` are detected automatically; `lambda view page.xhtml` opens
+the HTML-compatible tree. See [support and limits](Markup_Formats_Support.md#xhtml-input--html-document-tree).
+
 **Element Creation:**
 ```lambda
 let article = <article title: "My Article",

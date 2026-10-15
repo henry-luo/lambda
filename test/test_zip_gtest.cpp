@@ -12,10 +12,12 @@ class ZipTest : public ::testing::Test {
 protected:
     ZipError error = {};
     void SetUp() override { log_init(nullptr); }
-    ZipArchive* open(const char* file, const ZipLimits* limits = nullptr) {
+    ZipArchive* open(const char* file, const ZipLimits* limits = nullptr,
+            ArchiveFormat format = ARCHIVE_ZIP) {
         char* bytes = nullptr; size_t length = 0;
         if (!file_read_all(file, MEM_CAT_TEMP, &bytes, &length)) return nullptr;
-        ZipArchive* archive = zip_archive_open(bytes, length, limits, nullptr, 0, &error);
+        if (format == ARCHIVE_UNKNOWN) format = archive_source_format(file, bytes, length);
+        ZipArchive* archive = archive_open(bytes, length, format, limits, nullptr, 0, &error);
         mem_free(bytes);
         return archive;
     }
@@ -324,4 +326,271 @@ TEST_F(ZipTest, Zip64EntryCountBoundary) {
     EXPECT_TRUE(archive->zip64); EXPECT_EQ(archive->entries->length, count + 1);
     EXPECT_EQ(zip_archive_entry(archive, find(archive, "f000000"))->dos_time, 0x00210000u);
     zip_archive_release(archive); strbuf_free(bytes); arraylist_free(entries); pool_destroy(pool);
+}
+
+
+TEST_F(ZipTest, NativeSevenZipIndexesWithoutBodyDecoding) {
+    const char* files[] = {"7z-copy.7z", "7z-lzma.7z", "7z-lzma2.7z", "7z-delta.7z", "7z-bcj.7z"};
+    for (const char* file : files) {
+        char pathname[160];
+        snprintf(pathname, sizeof(pathname), "test/input/archive/%s", file);
+        Archive* archive = open(pathname, nullptr, ARCHIVE_7Z);
+        ASSERT_NE(archive, nullptr) << file << ": " << error.message;
+        EXPECT_EQ(archive->format, ARCHIVE_7Z);
+        EXPECT_EQ(archive->decompressions, 0u);
+        EXPECT_EQ(archive->budget->expanded_bytes, 0u);
+        ByteSpan bytes = {};
+        ASSERT_TRUE(archive_member_bytes(archive, 1, &bytes, &error)) << error.message;
+        EXPECT_EQ(bytes.length, archive_entry(archive, 1)->size);
+        uint64_t charged = archive->budget->expanded_bytes;
+        uint64_t decoded = archive->decompressions;
+        EXPECT_GE(charged, bytes.length);
+        ASSERT_TRUE(archive_member_bytes(archive, 1, &bytes, &error));
+        EXPECT_EQ(archive->budget->expanded_bytes, charged);
+        EXPECT_EQ(archive->decompressions, decoded);
+        archive_release(archive);
+    }
+}
+
+TEST_F(ZipTest, NativeSevenZipSolidAccountsForPredecessors) {
+    const char* files[] = {"test/input/archive/7z-solid.7z", "test/input/archive/7z-solid-copy.7z"};
+    for (const char* file : files) {
+        Archive* archive = open(file, nullptr, ARCHIVE_7Z);
+        ASSERT_NE(archive, nullptr) << error.message;
+        EXPECT_EQ(archive->decompressions, 0u);
+        ByteSpan bytes = {};
+        ASSERT_TRUE(archive_member_bytes(archive, find(archive, "file4"), &bytes, &error)) << error.message;
+        EXPECT_EQ(bytes.length, 52u);
+        EXPECT_GE(archive->budget->expanded_bytes, 13u + 26u + 39u + 52u);
+        archive_release(archive);
+    }
+}
+
+TEST_F(ZipTest, NativeSevenZipCachesLazyIntegrityFailures) {
+    char* data = nullptr;
+    size_t length = 0;
+    ASSERT_TRUE(file_read_all("test/input/archive/7z-copy.7z", MEM_CAT_TEMP, &data, &length));
+    ASSERT_GT(length, 32u);
+    // the 7z Copy stream follows the fixed 32-byte signature/start header.
+    data[32] ^= 1;
+    Archive* archive = archive_open(data, length, ARCHIVE_7Z, nullptr, nullptr, 0, &error);
+    mem_free(data);
+    ASSERT_NE(archive, nullptr) << error.message;
+    EXPECT_EQ(archive->decompressions, 0u);
+    ByteSpan bytes = {};
+    EXPECT_FALSE(archive_member_bytes(archive, 1, &bytes, &error));
+    uint64_t charged = archive->budget->expanded_bytes;
+    EXPECT_FALSE(archive_member_bytes(archive, 1, &bytes, &error));
+    EXPECT_EQ(archive->decompressions, 1u);
+    EXPECT_EQ(archive->budget->expanded_bytes, charged);
+    archive_release(archive);
+}
+
+TEST_F(ZipTest, NativeRarFiveCapturesAndChecksAllPayloads) {
+    const char* files[] = {"rar5-stored.rar", "rar5-compressed.rar", "rar5-solid.rar", "rar5-blake2.rar"};
+    for (const char* file : files) {
+        char pathname[160];
+        snprintf(pathname, sizeof(pathname), "test/input/archive/%s", file);
+        Archive* archive = open(pathname, nullptr, ARCHIVE_RAR);
+        ASSERT_NE(archive, nullptr) << file << ": " << error.message;
+        EXPECT_EQ(archive->format, ARCHIVE_RAR5);
+        uint64_t charged = archive->budget->expanded_bytes;
+        EXPECT_GT(charged, 0u);
+        for (int index = 1; index < archive->entries->length; index++) {
+            ArchiveEntry* entry = archive_entry(archive, index);
+            if (entry->directory) continue;
+            ASSERT_TRUE(entry->decoded);
+            ASSERT_NE(entry->payload, nullptr);
+            ByteSpan bytes = {};
+            EXPECT_TRUE(archive_member_bytes(archive, index, &bytes, &error));
+            EXPECT_EQ(bytes.length, entry->size);
+        }
+        EXPECT_EQ(archive->budget->expanded_bytes, charged);
+        archive_release(archive);
+    }
+}
+
+TEST_F(ZipTest, NativeRarFiveRejectsCorruptPayloadAtInput) {
+    char* data = nullptr;
+    size_t length = 0;
+    ASSERT_TRUE(file_read_all("test/input/archive/rar5-stored.rar", MEM_CAT_TEMP, &data, &length));
+    const char* payload = "hello libarchive test suite!\n";
+    bool changed = false;
+    for (size_t i = 0; i + strlen(payload) <= length; i++) {
+        if (memcmp(data + i, payload, strlen(payload))) continue;
+        data[i] ^= 1;
+        changed = true;
+        break;
+    }
+    ASSERT_TRUE(changed);
+    EXPECT_EQ(archive_open(data, length, ARCHIVE_RAR5, nullptr, nullptr, 0, &error), nullptr);
+    mem_free(data);
+}
+
+TEST_F(ZipTest, NativeEmptySevenZipAndRejectedSpecialProfiles) {
+    Archive* archive = open("test/input/archive/7z-empty.7z", nullptr, ARCHIVE_7Z);
+    ASSERT_NE(archive, nullptr) << error.message;
+    EXPECT_EQ(archive->entries->length, 1);
+    archive_release(archive);
+    const char* files[] = {"7z-encrypted.7z", "rar5-encrypted.rar", "rar5-links.rar", "rar5-unicode.rar"};
+    for (const char* file : files) {
+        char pathname[160];
+        snprintf(pathname, sizeof(pathname), "test/input/archive/%s", file);
+        EXPECT_EQ(open(pathname, nullptr, ARCHIVE_UNKNOWN), nullptr) << file;
+    }
+    ArchiveLimits limits = archive_default_limits();
+    limits.index_bytes = 32;
+    EXPECT_EQ(open("test/input/archive/7z-lzma2.7z", &limits, ARCHIVE_7Z), nullptr);
+    limits = archive_default_limits();
+    limits.member_bytes = 1;
+    EXPECT_EQ(open("test/input/archive/rar5-solid.rar", &limits, ARCHIVE_RAR5), nullptr);
+}
+
+
+TEST_F(ZipTest, NativeTarVariantsCaptureExactBytesAndNames) {
+    const char* files[] = {"sample.tar", "sample.tar.gz", "sample.tar.bz2", "sample.tar.xz", "sample.tar.zst", "concat.tar.gz"};
+    for (const char* file : files) {
+        char path[160]; snprintf(path, sizeof(path), "test/input/archive/%s", file);
+        Archive* archive = open(path, nullptr, ARCHIVE_UNKNOWN);
+        ASSERT_NE(archive, nullptr) << file << ": " << error.message;
+        EXPECT_EQ(archive->format, ARCHIVE_TAR);
+        EXPECT_EQ(archive->decompressions, 0u);
+        EXPECT_EQ(archive_entry(archive, 0)->child_count, 6u);
+        EXPECT_EQ(archive_entry(archive, find(archive, "hello.txt"))->modified_seconds, 1700000000);
+        EXPECT_EQ(archive_entry(archive, find(archive, "hello.txt"))->mode, 0100640u);
+        uint64_t expanded = archive->budget->expanded_bytes;
+        EXPECT_EQ(expanded, !strcmp(file, "sample.tar") ? 0u : 10240u);
+        ByteSpan bytes = {};
+        ASSERT_TRUE(archive_member_bytes(archive, find(archive, "docs/data.json"), &bytes, &error)) << error.message;
+        EXPECT_EQ(bytes.length, 13u);
+        EXPECT_EQ(memcmp(byte_span_data(&bytes), "{\"answer\":42}", 13), 0);
+        ASSERT_TRUE(archive_member_bytes(archive, find(archive, "caf\xc3\xa9/\xe4\xb8\xad\xe6\x96\x87.txt"), &bytes, &error));
+        EXPECT_EQ(bytes.length, 7u);
+        ASSERT_TRUE(archive_member_bytes(archive, find(archive, "opaque.bin"), &bytes, &error));
+        const uint8_t opaque[] = {0, 255, 'A', 0};
+        EXPECT_EQ(bytes.length, sizeof(opaque));
+        EXPECT_EQ(memcmp(byte_span_data(&bytes), opaque, sizeof(opaque)), 0);
+        EXPECT_EQ(archive->budget->expanded_bytes, expanded ? expanded : 24u);
+        archive_release(archive);
+    }
+    const char* variants[] = {"ustar.tar", "gnu.tar", "v7.tar", "empty.tar"};
+    for (const char* file : variants) {
+        char path[160]; snprintf(path, sizeof(path), "test/input/archive/%s", file);
+        Archive* archive = open(path, nullptr, ARCHIVE_TAR);
+        ASSERT_NE(archive, nullptr) << file << ": " << error.message;
+        for (int i = 1; i < archive->entries->length; i++) {
+            if (archive_entry(archive, i)->directory) continue;
+            ByteSpan bytes = {};
+            ASSERT_TRUE(archive_member_bytes(archive, i, &bytes, &error)) << error.message;
+        }
+        archive_release(archive);
+    }
+}
+
+TEST_F(ZipTest, NativeTarRejectsInvalidRecordsAndFilterIntegrity) {
+    const char* files[] = {"unsafe.tar", "unsafe-pax.tar", "unsafe-gnu.tar", "nul-pax.tar",
+        "duplicate.tar", "conflict.tar", "bad-header.tar", "truncated.tar", "missing-end.tar", "trailing.tar",
+        "symlink.tar", "hardlink.tar", "fifo.tar", "device.tar", "sparse.tar", "bad-crc.tar.gz", "truncated.tar.gz",
+        "bad-crc.tar.bz2", "bad-crc.tar.xz", "bad-crc.tar.zst", "not-tar.gz"};
+    for (const char* file : files) {
+        char path[160]; snprintf(path, sizeof(path), "test/input/archive/%s", file);
+        Archive* archive = open(path, nullptr, ARCHIVE_TAR);
+        EXPECT_EQ(archive, nullptr) << file;
+        archive_release(archive);
+    }
+    ArchiveLimits limits = archive_default_limits(); limits.expanded_bytes = 10239;
+    EXPECT_EQ(open("test/input/archive/sample.tar.gz", &limits, ARCHIVE_TAR), nullptr);
+    limits = archive_default_limits(); limits.entries = 2;
+    EXPECT_EQ(open("test/input/archive/sample.tar", &limits, ARCHIVE_TAR), nullptr);
+    limits = archive_default_limits(); limits.name_bytes = 4;
+    EXPECT_EQ(open("test/input/archive/sample.tar", &limits, ARCHIVE_TAR), nullptr);
+}
+
+TEST_F(ZipTest, NativeNamesPreserveDistinctUnicodeSpellings) {
+    Archive* archive = open("test/input/archive/unicode.tar", nullptr, ARCHIVE_TAR);
+    ASSERT_NE(archive, nullptr) << error.message;
+    EXPECT_NE(find(archive, "caf\xc3\xa9.txt"), ARCHIVE_NO_ENTRY);
+    EXPECT_NE(find(archive, "cafe\xcc\x81.txt"), ARCHIVE_NO_ENTRY);
+    EXPECT_EQ(archive->entries->length, 3);
+    archive_release(archive);
+}
+
+TEST_F(ZipTest, NativeLegacyRarSkipsBodiesAndRejectsUnsupportedProfiles) {
+    Archive* archive = open("test/input/archive/legacy.rar", nullptr, ARCHIVE_RAR);
+    ASSERT_NE(archive, nullptr) << error.message;
+    EXPECT_EQ(archive->decompressions, 0u);
+    EXPECT_EQ(archive->budget->expanded_bytes, 0u);
+    ByteSpan bytes = {};
+    ASSERT_TRUE(archive_member_bytes(archive, find(archive, "test.txt"), &bytes, &error)) << error.message;
+    EXPECT_EQ(bytes.length, 16u);
+    EXPECT_EQ(memcmp(byte_span_data(&bytes), "test text file\r\n", 16), 0);
+    EXPECT_EQ(archive->decompressions, 1u);
+    archive_release(archive);
+    const char* files[] = {"rar-solid.rar", "rar-links.rar", "rar-encrypted.rar", "rar5-volume.rar",
+        "7z-ppmd.7z", "7z-bcj2.7z"};
+    for (const char* file : files) {
+        char path[160]; snprintf(path, sizeof(path), "test/input/archive/%s", file);
+        EXPECT_EQ(open(path, nullptr, ARCHIVE_UNKNOWN), nullptr) << file;
+    }
+    EXPECT_EQ(open("test/input/archive/legacy.rar", nullptr, ARCHIVE_RAR5), nullptr);
+    EXPECT_EQ(open("test/input/archive/sample.tar", nullptr, ARCHIVE_7Z), nullptr);
+}
+
+TEST_F(ZipTest, NativeSolidRepeatedDecodingAndQuotaFailuresAreBounded) {
+    ArchiveLimits limits = archive_default_limits(); limits.expanded_bytes = 130;
+    Archive* archive = open("test/input/archive/7z-solid.7z", &limits, ARCHIVE_7Z);
+    ASSERT_NE(archive, nullptr) << error.message;
+    ByteSpan bytes = {};
+    ASSERT_TRUE(archive_member_bytes(archive, find(archive, "file4"), &bytes, &error)) << error.message;
+    EXPECT_EQ(archive->budget->expanded_bytes, 130u);
+    ASSERT_TRUE(archive_member_bytes(archive, find(archive, "file4"), &bytes, &error));
+    EXPECT_FALSE(archive_member_bytes(archive, find(archive, "file2"), &bytes, &error));
+    uint64_t failed_charge = archive->budget->expanded_bytes;
+    EXPECT_FALSE(archive_member_bytes(archive, find(archive, "file2"), &bytes, &error));
+    EXPECT_GT(failed_charge, 130u);
+    EXPECT_EQ(archive->budget->expanded_bytes, failed_charge);
+    archive_release(archive);
+    // Sweep allocation cutoffs through reader setup/header conversion and clean up every partial reader.
+    MemtrackStats before = {}, after = {};
+    memtrack_get_stats(&before);
+    for (uint64_t cutoff = 128; cutoff <= (1u << 20); cutoff *= 2) {
+        limits = archive_default_limits(); limits.index_bytes = cutoff;
+        Archive* candidate = open("test/input/archive/sample.tar.gz", &limits, ARCHIVE_TAR);
+        archive_release(candidate);
+        candidate = open("test/input/archive/7z-lzma2.7z", &limits, ARCHIVE_7Z);
+        archive_release(candidate);
+    }
+    memtrack_get_stats(&after);
+    EXPECT_EQ(after.current_bytes, before.current_bytes);
+}
+
+
+TEST_F(ZipTest, NativeRarFiveChecksEmptyStoredMembers) {
+    Archive* archive = open("test/input/archive/rar5-empty.rar", nullptr, ARCHIVE_RAR5);
+    ASSERT_NE(archive, nullptr) << error.message;
+    ByteSpan bytes = {};
+    ASSERT_TRUE(archive_member_bytes(archive, find(archive, "empty"), &bytes, &error));
+    EXPECT_EQ(bytes.length, 0u);
+    archive_release(archive);
+    EXPECT_EQ(open("test/input/archive/rar5-empty-bad-crc.rar", nullptr, ARCHIVE_RAR5), nullptr);
+}
+
+
+TEST_F(ZipTest, NativeTreeZipConversionPreservesModeAndRepresentableTime) {
+    char* data = nullptr; size_t length = 0;
+    ASSERT_TRUE(file_read_all("test/input/archive/sample.tar", MEM_CAT_TEMP, &data, &length));
+    Input* input = input_from_source_n(data, length, nullptr, nullptr, nullptr);
+    mem_free(data);
+    ASSERT_NE(input, nullptr); ASSERT_FALSE(input->parse_failed);
+    StrBuf* output = strbuf_new();
+    ASSERT_TRUE(fs_zip_encode(input->root, nullptr, output, &error)) << error.message;
+    Archive* zip = zip_archive_open(output->str, output->length, nullptr, nullptr, 0, &error);
+    ASSERT_NE(zip, nullptr) << error.message;
+    ArchiveEntry* entry = archive_entry(zip, find(zip, "hello.txt"));
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ(entry->mode, 0100640u);
+    uint32_t date = ((2023u - 1980) << 9) | (11u << 5) | 14u;
+    uint32_t time = (22u << 11) | (13u << 5) | 10u;
+    EXPECT_EQ(entry->dos_time, (date << 16) | time);
+    archive_release(zip); strbuf_free(output);
 }

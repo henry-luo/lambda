@@ -362,9 +362,8 @@ TEST_F(CssParserUnitTest, Declaration_LineHeight_RejectsUnknownDimension) {
     auto parser = CreateParser();
     auto decl = parser.ParseDeclaration("line-height: 1x");
 
-    ASSERT_NE(decl, nullptr);
-    ASSERT_NE(decl->value, nullptr);
-    EXPECT_FALSE(css_property_validate_value(decl->property_code, decl->value));
+    // declaration parsing rejects an invalid typed dimension before cascade insertion.
+    EXPECT_EQ(decl, nullptr);
 }
 
 // =============================================================================
@@ -556,7 +555,7 @@ TEST_F(CssParserUnitTest, Declaration_Display_CustomLayoutDeclarationParser) {
     EXPECT_EQ(decl->value->type, CSS_VALUE_TYPE_FUNCTION);
     CssFunction* fn = decl->value->data.function;
     ASSERT_NE(fn, nullptr);
-    EXPECT_STREQ(fn->name, "LaYoUt");
+    EXPECT_STREQ(fn->name, "layout");
     ASSERT_EQ(fn->arg_count, 1);
     ASSERT_NE(fn->args, nullptr);
     ASSERT_NE(fn->args[0], nullptr);

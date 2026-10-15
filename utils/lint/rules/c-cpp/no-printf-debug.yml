@@ -72,5 +72,3 @@ ignores:
   - "lib/test_utils_runtime.cpp"           # test fixture setup
   # Lambda's own AST dumper.
   - "lambda/runtime/emit_ast_dump.cpp"
-  # PDF byte writer is by definition I/O-producing.
-  - "lib/pdf_writer.c"

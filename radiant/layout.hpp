@@ -302,7 +302,8 @@ bool layout_measure_script_run(LayoutContext* lycon,
                              size_t source_offset = 0);
 bool layout_measure_inline_text_context(LayoutContext* lycon, DomNode* text_node,
     const unsigned char* start, size_t length, bool cursive, float* width,
-    const unsigned char* text_start = nullptr, const unsigned char* text_end = nullptr);
+    const unsigned char* text_start = nullptr, const unsigned char* text_end = nullptr,
+    bool* following_context = nullptr);
 bool layout_measure_shaping_text(LayoutContext* lycon, const char* text, size_t length,
     size_t range_start, size_t range_length, float* width);
 // Intrinsic measurements may temporarily replace the active font and allocate
@@ -2224,6 +2225,7 @@ typedef struct FloatAvailableSpace {
 // tier-3: layout-transient, valid within pass
 typedef struct BlockContext {
     float content_width;
+    float paged_reference_width; // the fragmentainer width represented by this context's inline geometry
     float content_height;
     float advance_y;
     float max_width;
@@ -2407,6 +2409,7 @@ typedef struct Linebox {
     float max_ascender;
     float max_descender;
     float max_css_baseline_ascender; // font-table baseline for replaced inline alignment
+    bool has_native_metrics; // native line stacking supplies the signed baseline and allocation
     float ruby_annotation_min_line_height; // block-side ruby annotation extent outside the base line
     float ruby_annotation_over_shift; // extra block-start space required by ruby annotations
     float initial_letter_origin_advance; // raised-cap displacement already applied to this line
@@ -2490,6 +2493,7 @@ typedef struct Linebox {
     uint32_t prev_text_spacing_codepoint = 0; // previous character for CSS text-spacing pairs
     uint32_t prev_text_autospace_codepoint = 0; // previous typographic unit for CSS text-autospace
     lam::Up<FontProp> prev_kerning_font_style = nullptr;
+    bool prev_kerning_has_following_context = false; // the prior advance already owns its outgoing pair
     float max_top_bottom_height = 0; // CSS 2.1 §10.8.1: max height of vertical-align:top/bottom elements
                                      // (used in second pass to expand line box if needed)
     float max_top_height = 0;        // CSS 2.1 §10.8.1: max height of vertical-align:top elements
@@ -2776,6 +2780,8 @@ bool layout_html_ua_element_default(NameId tag, HtmlUaElementDefault* result);
 bool layout_html_ua_list_nesting_ancestor(NameId tag);
 CssEnum layout_html_ua_list_marker(NameId tag, size_t unordered_ancestors);
 struct StrBuf;
+const char* layout_html_ua_focus_css();
+CssStylesheet* radiant_ua_focus_stylesheet(DomDocument* doc, CssEngine* engine);
 bool layout_html_ua_stylesheet(StrBuf* css);
 // Chromium CheckForGenericFamilyChange: a medium-lineage size that switches to monospace scales by 13/16.
 void layout_apply_monospace_medium_size(FontProp* font, const FontProp* parent);
@@ -3608,6 +3614,9 @@ typedef struct GridContainerLayout : GridProp {
     ScratchMark scratch_mark;
 } GridContainerLayout;
 
+int layout_grid_auto_repeat_count(GridTrackList* tracks, int repeat_index,
+                                  float available_size, float gap, bool definite_size);
+
 void init_grid_container(LayoutContext* lycon, struct ViewBlock* container);
 void cleanup_grid_container(LayoutContext* lycon);
 float layout_grid_row_border_box_extent(struct ViewBlock* container,
@@ -4307,7 +4316,10 @@ DomDocument* layout_load_iframe_src_doc(LayoutContext* lycon, const char* src,
 bool iframe_navigation_must_not_run_in_layout(LayoutContext* lycon,
                                               const char* src);
 void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
-                                int iframe_width, int iframe_height);
+                                float iframe_width, float iframe_height);
+bool layout_iframe_content_size(DomDocument* doc, float* width, float* height);
+DomDocument* layout_ensure_iframe_document(LayoutContext* lycon, ViewBlock* block,
+    float viewport_width, float viewport_height);
 View* set_view(LayoutContext* lycon, ViewType type, DomNode* node);
 // Keyword Mapping: Lambda CSS strings → Lexbor enum values
 
@@ -4496,6 +4508,12 @@ void paged_block_after(LayoutContext* lycon, ViewBlock* block);
 // a line that crosses the fragmentainer end moves to the next one (with its
 // orphans); the hook adjusts lycon->block.advance_y when it shifts the line
 void paged_line_commit(LayoutContext* lycon, float used_line_height);
+void paged_line_start(LayoutContext* lycon, ViewBlock* block);
+void paged_line_metrics(LayoutContext* lycon);
+// native content dimensions size the object and only fill unspecified viewport axes.
+void paged_image_size(LayoutContext* lycon, ViewBlock* block, float natural_width, float natural_height);
+const CssValue* paged_resolve_css_value(LayoutContext* lycon, DomElement* element,
+    const CssValue* value, bool* handled);
 // after a post-hoc margin adjustment moved a finished block by delta: the
 // content after the first strut inside it is re-anchored to its page top
 void paged_block_moved(LayoutContext* lycon, ViewBlock* block, float delta);
@@ -5138,6 +5156,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block);
 void layout_setup_text_indent(LayoutContext* lycon, ViewBlock* block, float content_width);
 void layout_intrinsic_apply_first_line_indent(float text_indent, float first_segment_min,
     float remaining_min_content, float* max_content, float* min_content);
+int layout_line_clamp_count(const ViewBlock* block);
+float layout_line_clamp_intrinsic_height(ViewBlock* block, float height, float line_height);
 void layout_setup_line_clamp(LayoutContext* lycon, ViewBlock* block,
                               const BlockContext* parent);
 void layout_finalize_line_clamp(LayoutContext* lycon, ViewBlock* block);

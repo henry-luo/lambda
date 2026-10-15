@@ -1,5 +1,5 @@
-import util: lambda.pdf.util
-import svg: lambda.pdf.svg
+import util: lambda.doc.pdf.util
+import svg: lambda.doc.pdf.svg
 
 fn clip_id(prefix, id) => prefix ++ "-clip-" ++ string(id)
 

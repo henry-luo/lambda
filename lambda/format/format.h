@@ -35,7 +35,6 @@ String* format_latex(Pool* pool, Item root_item);
 String* format_markdown_string(Pool* pool, Item root_item);
 String* format_rst_string(Pool* pool, Item root_item);
 String* format_org_string(Pool* pool, Item root_item);
-String* format_wiki_string(Pool* pool, Item root_item);
 String* format_textile_string(Pool* pool, Item root_item);
 String* format_text_string(Pool* pool, Item root_item);
 String* format_mark(Pool* pool, Item root_item);
@@ -45,7 +44,6 @@ void format_json_to_strbuf(StringBuf* sb, Item root_item);
 void format_markdown(StringBuf* sb, Item root_item);
 void format_rst(StringBuf* sb, Item root_item);
 void format_org(StringBuf* sb, Item root_item);
-void format_wiki(StringBuf* sb, Item root_item);
 void format_textile(StringBuf* sb, Item root_item);
 void format_text(StringBuf* sb, Item root_item);
 

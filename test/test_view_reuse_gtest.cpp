@@ -955,6 +955,24 @@ TEST_F(ViewReuseTest, ComputedFamilyListsShareOneTreeLifetimeString) {
     EXPECT_EQ(tree.canonical_stats.font_family_misses, 2u);
 }
 
+TEST_F(ViewReuseTest, SingleFontFamiliesOutliveComputedValueScratch) {
+    LayoutContext lycon = {};
+    lycon.selected_view_tree = lam::up(&tree);
+    Pool* scratch = pool_create();
+    ASSERT_NE(scratch, nullptr);
+    CssValue* family = css_value_create_string(scratch, "Arial");
+    ASSERT_NE(family, nullptr);
+    CssValue* parts[] = {family};
+    CssValue* list = css_value_create_list(scratch, parts, 1);
+    ASSERT_NE(list, nullptr);
+    const char* selected = css_select_font_family(&lycon, family);
+    ASSERT_NE(selected, nullptr);
+    EXPECT_NE(selected, family->data.string);
+    EXPECT_EQ(css_select_font_family(&lycon, list), selected);
+    pool_destroy(scratch);
+    EXPECT_STREQ(selected, "Arial");
+}
+
 TEST_F(ViewReuseTest, CanonicalCapFallsBackToOwnedStorage) {
     tree.canonical_prop_cap_bytes = 0;
     DomElement* parent = element();

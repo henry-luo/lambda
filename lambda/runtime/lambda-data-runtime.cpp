@@ -2200,7 +2200,7 @@ static int group_compare_entry(const void* a, const void* b, void* udata) {
 // tree, so elements with the same attributes share one type instead of each
 // minting its own. Without a tree it keeps a private type; its tag is a
 // literal, never a raw chars pointer into an otherwise unowned GC String.
-static TypeElmt* runtime_element_type(const char* tag, size_t length) {
+TypeElmt* runtime_element_type(const char* tag, size_t length) {
     if (TypeElmt* root = runtime_shape_tree_element_root(tag, length, NULL)) return root;
     TypeElmt* type = (TypeElmt*)alloc_type(active_runtime->pool, LMD_TYPE_ELEMENT,
         sizeof(TypeElmt));
@@ -2213,7 +2213,7 @@ static TypeElmt* runtime_element_type(const char* tag, size_t length) {
 // One attribute through fn_map_set's growth path, which follows the runtime
 // tree from a tree-owned type, updates a name the element already holds, and
 // stores a list as its array image (S2.5.6), as every attribute write does.
-static void runtime_element_put(Element* element, String* key, Item value) {
+void runtime_element_put(Element* element, String* key, Item value) {
     if (!element || !key) return;
     fn_map_set((Item){.element = element}, (Item){.item = s2it(key)}, value);
 }
@@ -3053,7 +3053,10 @@ Item map_get_by_name_id(Container* owner, TypeMap* map_type, void* map_data,
 // a computed-key literal (elmt_literal_begin) already holds the TypeElmt* and
 // must not re-resolve its index against whichever module's list is active
 Element* elmt_with_type(TypeElmt* elmt_type) {
-    if (context->ui_mode && context->arena) {
+    // File selectors run after allocation; their output extension must be
+    // GC-owned even when a retained document binds its UI arena (D2.6.12v3).
+    bool file_candidate = is_file_element_type(elmt_type);
+    if (!file_candidate && context->ui_mode && context->arena) {
         // ui_mode: allocate fat DomElement on result arena
         DomElement* dom = DomElement::create_in(context->arena);
         if (!dom) return nullptr;
@@ -3063,10 +3066,10 @@ Element* elmt_with_type(TypeElmt* elmt_type) {
         return e;
     }
 
-    // non-UI: allocate plain Element on GC heap
+    // runtime values and file candidates use the GC heap.
     // File attributes may compute the format; reserve the extension before
     // they run, and activate it only at the body boundary.
-    size_t size = is_file_element_type(elmt_type) ? sizeof(VirtualOutputElement) : sizeof(Element);
+    size_t size = file_candidate ? sizeof(VirtualOutputElement) : sizeof(Element);
     Element *e = (Element *)heap_calloc(size, LMD_TYPE_ELEMENT);
     e->type_id = LMD_TYPE_ELEMENT;
     e->type = elmt_type;
@@ -3376,9 +3379,11 @@ static bool ui_set_element_fields(Element* elmt, Item* values, int count) {
 
 Element* elmt_fill(Element* elmt, ...) {
     TypeElmt *elmt_type = (TypeElmt*)elmt->type;
+    // Attribute storage follows the element owner, including UI-time files.
+    bool ui_element = !elmt->is_heap && context->ui_mode && context->arena;
     // skip data allocation if already set (combined allocation via elmt_with_data)
     if (!elmt->data) {
-        if (context->ui_mode && context->arena) {
+        if (ui_element) {
             elmt->data = arena_calloc(context->arena, elmt_type->byte_size);
         } else {
             elmt->data = heap_data_calloc(elmt_type->byte_size);
@@ -3387,7 +3392,7 @@ Element* elmt_fill(Element* elmt, ...) {
     // set attributes
     va_list args;
     va_start(args, elmt);
-    if (context->ui_mode && context->arena) {
+    if (ui_element) {
         int count = (int)elmt_type->length;
         RootSpan values((size_t)(count > 0 ? count : 1));
         for (int i = 0; i < count; i++) values.words()[i] = va_arg(args, uint64_t);
@@ -3408,14 +3413,15 @@ Element* elmt_fill(Element* elmt, ...) {
 Element* elmt_fill_items(Element* elmt, const Item* values, int value_count) {
     if (!elmt) return NULL;
     TypeElmt *elmt_type = (TypeElmt*)elmt->type;
+    bool ui_element = !elmt->is_heap && context->ui_mode && context->arena;
     if (!elmt->data && elmt_type->byte_size) {
-        if (context->ui_mode && context->arena) {
+        if (ui_element) {
             elmt->data = arena_calloc(context->arena, elmt_type->byte_size);
         } else {
             elmt->data = heap_data_calloc(elmt_type->byte_size);
         }
     }
-    if (context->ui_mode && context->arena) {
+    if (ui_element) {
         int count = (int)elmt_type->length;
         RootSpan rooted_values((size_t)(count > 0 ? count : 1));
         for (int i = 0; i < count; i++) {

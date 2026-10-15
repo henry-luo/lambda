@@ -1,0 +1,96 @@
+{
+  "name": "EPUB fixed source viewport survives fit zoom and resize",
+  "html": "test/ui/ebook_fixed.ls",
+  "viewport": {
+    "width": 1100,
+    "height": 800
+  },
+  "events": [
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".ebook-page-status"
+      },
+      "contains": "Fixed layout"
+    },
+    {
+      "type": "switch_frame",
+      "selector": "iframe"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "h1"
+      },
+      "equals": "Fixed page"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "body"
+      },
+      "property": "width",
+      "equals": "600px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "body"
+      },
+      "property": "transform",
+      "contains": "scale("
+    },
+    {
+      "type": "switch_frame"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=settings]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[data-ebook-command=zoom-in]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "resize",
+      "width": 720,
+      "height": 680
+    },
+    {
+      "type": "wait",
+      "ms": 150
+    },
+    {
+      "type": "switch_frame",
+      "selector": "iframe"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "body"
+      },
+      "property": "width",
+      "equals": "600px"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "body"
+      },
+      "property": "transform",
+      "contains": "scale("
+    }
+  ]
+}

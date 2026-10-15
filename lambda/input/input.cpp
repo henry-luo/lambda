@@ -1,5 +1,6 @@
 #include "../../lib/utf.h"
 #include "input.hpp"
+#include "../io/wiki_format.hpp"
 #include "../io/fs_node.hpp"
 #include "input-parsers.h"
 #include "input-postscript.hpp"
@@ -1905,6 +1906,7 @@ static const MimeParserMapping MIME_PARSER_MAPPINGS[] = {
     {"text/csv", "csv"},
     {"text/tab-separated-values", "tsv"},
     {"application/xml", "xml"},
+    {"application/xhtml+xml", "xhtml"},
     {"text/html", "html"},
     {"text/markdown", "markdown"},
     {"text/mdx", "mdx"},
@@ -2111,6 +2113,10 @@ static const char* mime_to_parser_type(const char* mime_type) {
     return "text";
 }
 
+bool input_path_is_ebook(const char* path) {
+    return file_path_has_ext_ci(path, "epub");
+}
+
 extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         size_t source_len, Url* abs_url, String* type, String* flavor,
         NamePool* name_parent, const InputParseOptions* options) {
@@ -2125,11 +2131,13 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
     // limiting detection to `auto` silently sent flavorless .dsl files to DOT.
     const char* detected_graph_flavor = flavor ? NULL
         : input_detect_graph_flavor(pathname, source, source_len);
+    ArchiveFormat detected_archive = archive_source_format(pathname, source, source_len);
     // Determine the effective type to use
     if (!type || strcmp(type->chars, "auto") == 0) {
         // in-memory auto inputs may omit a URL, so content detection must stay null-safe.
         if (eps_source_expected(pathname, source, source_len)) effective_type = "eps";
-        else if (zip_source_expected(pathname, source, source_len)) effective_type = "zip";
+        else if (detected_archive != ARCHIVE_UNKNOWN)
+            effective_type = archive_format_name(detected_archive);
         else if (detected_graph_flavor) effective_type = "graph";
         // Auto-detect MIME type
         MimeDetector* detector = effective_type ? NULL : mime_detector_init();
@@ -2154,10 +2162,11 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
     log_debug("input_from_source: effective_type='%s'", effective_type ? effective_type : "null");
 
     Input* input = NULL;
-    if (effective_type && (!strcmp(effective_type, "zip") || !strcmp(effective_type, "binary"))) {
+    ArchiveFormat archive_format = archive_format_parse(effective_type);
+    if (effective_type && (archive_format != ARCHIVE_UNKNOWN || !strcmp(effective_type, "binary"))) {
         input = InputManager::create_input_with_name_parent(abs_url, name_parent);
         if (!input) return nullptr;
-        if (!strcmp(effective_type, "zip")) input_zip(input, source, source_len);
+        if (archive_format != ARCHIVE_UNKNOWN) input_archive(input, source, source_len, archive_format);
         else {
             MarkBuilder builder(input);
             Binary* bytes = source_len ? builder.createBinary(source, source_len) : nullptr;
@@ -2194,7 +2203,14 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         allocation_context.input = input;
         input_allocation_context = &allocation_context;
 
-        if (strcmp(effective_type, "markup") == 0) {
+        const char* wiki_flavor = wiki_format_flavor(effective_type, flavor ? flavor->chars : nullptr);
+        if (wiki_flavor) {
+            input->root = input_markup_wiki(input, source, wiki_flavor);
+        }
+        else if (strcmp(effective_type, "css") == 0 && flavor && !strcmp(flavor->chars, "tokens")) {
+            input_css_tokens(input, source, source_len);
+        }
+        else if (strcmp(effective_type, "markup") == 0) {
             // Generic markup type - use flavor to select format
             const char* markup_flavor = (flavor) ? flavor->chars : "markdown";
             log_debug("input_from_source markup: flavor='%s'", markup_flavor);
@@ -2214,6 +2230,9 @@ extern "C" Input* input_from_source_n_with_name_parent(const char* source,
         else if (strcmp(effective_type, "html") == 0 || strcmp(effective_type, "html5") == 0) {
             // HTML NULs are tokenizer input, so preserve the transport's byte count.
             input->root = (Item){.element = html5_parse_n(input, source, source_len, NULL)};
+        }
+        else if (strcmp(effective_type, "xhtml") == 0) {
+            parse_xhtml_document(input, source, source_len);
         }
         else if (strcmp(effective_type, "scene3d-asset") == 0)
             input_scene3d_asset(input, source, source_len, flavor ? flavor->chars : nullptr);

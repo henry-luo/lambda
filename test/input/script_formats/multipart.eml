@@ -1,0 +1,29 @@
+From: ada@example.com
+Date: Thu, 15 Oct 2026 00:00:00 +0000
+Subject: MIME source fidelity
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outer"
+
+Preamble remains source data.
+--outer
+Content-Type: multipart/alternative; boundary="inner"
+
+--inner
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+Plain=20text.
+--inner
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: base64
+
+PHA+SGVsbG8gPHN0cm9uZz53b3JsZDwvc3Ryb25nPi48L3A+
+--inner--
+--outer
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="sample.bin"
+Content-Transfer-Encoding: base64
+
+AAECA/7/
+--outer--
+Epilogue remains source data.

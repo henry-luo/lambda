@@ -3,7 +3,7 @@ import opts: .options
 import labels: .labels
 import expression: .expression
 import pgfmath: .pgfmath
-import util: lambda.latex.util
+import util: lambda.doc.latex.util
 import scale: lambda.chart.scale
 import chart_axis: lambda.chart.axis
 import svg: lambda.chart.svg

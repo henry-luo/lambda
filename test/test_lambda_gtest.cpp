@@ -21,6 +21,8 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda",
     "test/lambda/chart",
     "test/lambda/docx",
+    "test/lambda/ebook",
+    "test/lambda/docbook",
     "test/lambda/latex",
     "test/lambda/math",
     "test/lambda/music",
@@ -37,17 +39,33 @@ static const char* FUNCTIONAL_TEST_DIRECTORIES[] = {
     "test/lambda/ui_blade",
     "test/lambda/map",
     "test/lambda/grammar",
+    "test/lambda/diff",
     "test/lambda/sem",
     "test/demo/doom/tests",
     "test/demo/photo/tests",
     "test/demo/cellscope/tests",
     "test/demo/draw/tests",
+    "test/demo/word/tests",
+    "test/demo/finder/tests",
     "test/lambda/graph/mermaid",
     "test/lambda/graph/graphviz",
     "test/lambda/graph/structurizr",
     // Add more functional test directories here as needed
 };
 static const size_t NUM_FUNCTIONAL_TEST_DIRECTORIES = sizeof(FUNCTIONAL_TEST_DIRECTORIES) / sizeof(FUNCTIONAL_TEST_DIRECTORIES[0]);
+
+TEST(DocBookTests, PinnedXslTngBodiesAgree) {
+    const char* modes[] = {NULL, "--chunked"};
+    for (const char* mode : modes) {
+        const char* args[] = {"python3", "test/docbook_reference_check.py", mode, NULL};
+        ShellOptions options = {};
+        options.timeout_ms = 60000;
+        options.merge_stderr = true;
+        ShellResult result = shell_exec("python3", args, &options);
+        EXPECT_EQ(result.exit_code, 0) << (result.stdout_buf ? result.stdout_buf : "");
+        shell_result_free(&result);
+    }
+}
 
 TEST(UiDtnaTests, PackageContractsAgreeAcrossTiers) {
     const char* tiers[] = {"interp", "auto", "jit"};
@@ -117,6 +135,7 @@ TEST(DoomDemoTests, GeometryInputAndResourceContractsAgreeAcrossTiers) {
 // Procedural scripts (executed with ./lambda.exe run <script>)
 static const char* PROCEDURAL_TEST_DIRECTORIES[] = {
     "test/lambda/proc",
+    "test/lambda/docbook/proc",
     "test/demo/photo/tests/proc",
     "test/lambda/conc",
     "test/lambda/pdf",
@@ -363,6 +382,10 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/pdf/output_pages.ls", "test/lambda/pdf/output_pages.txt"},
     {"test/lambda/pdf/output_functional.ls", "test/lambda/pdf/output_functional.txt"},
     {"test/lambda/pdf/output_streaming.ls", "test/lambda/pdf/output_streaming.txt"},
+    {"test/lambda/archive_input.ls", "test/lambda/archive_input.txt"},
+    {"test/lambda/archive_errors.ls", "test/lambda/archive_errors.txt"},
+    {"test/lambda/archive_retained_member.ls", "test/lambda/archive_retained_member.txt"},
+    {"test/lambda/proc/archive_output.ls", "test/lambda/proc/archive_output.txt"},
     {"test/lambda/zip_input.ls", "test/lambda/zip_input.txt"},
     {"test/lambda/zip_jar.ls", "test/lambda/zip_jar.txt"},
     {"test/lambda/zip_errors.ls", "test/lambda/zip_errors.txt"},

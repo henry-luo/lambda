@@ -1,0 +1,288 @@
+{
+  "name": "Word pictures links",
+  "html": "test/demo/word/word.ls",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#new"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "text": "Studio notes",
+      "clear": false
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 12,
+      "end": 12
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#tab-insert"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-picture"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#picture-path"
+      },
+      "text": "test/demo/word/tests/picture.svg",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#picture-alt"
+      },
+      "text": "Studio sketch",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#picture-width"
+      },
+      "text": "240",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-picture .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "alt",
+      "equals": "Studio sketch"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "width",
+      "equals": "240"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#picture-settings"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#picture-width"
+      },
+      "text": "160",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#picture-height"
+      },
+      "text": "80",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-picture_settings .primary"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "width",
+      "equals": "160"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "height",
+      "equals": "80"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface img"
+      },
+      "attribute": "width",
+      "equals": "240"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "start": 0,
+      "end": 6
+    },
+    {
+      "type": "key_combo",
+      "key": "k",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#link-address"
+      },
+      "text": "https://example.com",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-link .primary"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-link"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-link"
+      },
+      "contains": "Studio"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#edit-surface .word-link"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-link"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#link-address"
+      },
+      "attribute": "value",
+      "equals": "https://example.com"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#link-address"
+      },
+      "text": "https://lambda.example",
+      "clear": true
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#link-label"
+      },
+      "text": "Community",
+      "clear": true
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".edit-dialog-link .primary"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface .word-link"
+      },
+      "contains": "Community"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#edit-surface .word-link"
+      },
+      "attribute": "title",
+      "equals": "https://lambda.example"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "[id=\"insert.removeLink\"]"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-link"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#edit-surface p"
+      },
+      "contains": "Community notes"
+    },
+    {
+      "type": "key_combo",
+      "key": "z",
+      "mods_str": "ctrl"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#edit-surface .word-link"
+      },
+      "count": 1
+    },
+    {
+      "type": "render",
+      "file": "temp/word-enhanced-pictures.png"
+    }
+  ]
+}

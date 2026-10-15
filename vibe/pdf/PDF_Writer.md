@@ -1,3 +1,9 @@
+> **Retired 2026-10-15.** This document describes the former HPDF-compatible
+> C writer. Production PDF generation now uses the pure Lambda package
+> (`lmd/package/doc/pdf/output.ls`, S2.6.6v3); `radiant/render_pdf.cpp` only adapts
+> committed sessions and saves completed bytes. See
+> [phase 2 implementation](../impl/Lambda_Impl_PDF_Output_Phase2.md#14-p6-coverage-and-native-writer-retirement--2026-10-15).
+
 # Lambda PDF Writer Library
 
 ## Overview

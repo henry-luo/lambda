@@ -44,6 +44,8 @@ void* dom_get_document(void);
 
 // Queue the iframe's load event after its navigated document is ready.
 void dom_iframe_navigation_complete(void* iframe);
+void dom_dispatch_pending_resource_loads();
+void dom_queue_image_completion(void* image, bool loaded);
 
 /**
  * Set the current Radiant UiContext for JS DOM layout/geometry queries.
@@ -81,6 +83,7 @@ Item dom_make_rect_in(struct DomDocument* doc,
  */
 bool dom_has_committed_geometry_snapshot(void* dom_doc);
 bool dom_ensure_geometry_snapshot(struct DomDocument* dom_doc);
+float dom_scrollable_extent(void* element, bool width_axis);
 
 /**
  * Return the topmost painted SVG element at viewport coordinates, or NULL.

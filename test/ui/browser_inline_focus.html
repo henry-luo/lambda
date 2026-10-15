@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>CSS outlines on inline links and controls</title>
+<style>
+body { margin:32px; font:16px/24px sans-serif; }
+p { margin:0 0 24px; }
+a:focus { outline:3px solid #26705c; outline-offset:3px; }
+#suppressed { outline:none; }
+</style>
+<p><a id="link" href="#link">An inline link</a></p>
+<button id="suppressed">CSS suppresses this outline</button>
+</html>

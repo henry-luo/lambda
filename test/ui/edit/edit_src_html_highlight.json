@@ -1,5 +1,5 @@
 {
-  "name": "HTML source is highlighted from the tokenizer's lexical spans, and editing an attribute keeps the colors",
+  "name": "HTML source is highlighted from the tokenizer's lexical spans, and physical typing in an attribute keeps the colors",
   "command": "edit",
   "source": true,
   "html": "test/ui/edit/sample.html",
@@ -14,7 +14,7 @@
     {"type": "assert_text", "target": {"selector": ".tok-entity"}, "equals": "&amp;"},
     {"type": "assert_text", "target": {"selector": ".tok-raw"}, "equals": "Edit sample"},
     {"type": "click", "target": {"text": "ight\""}},
-    {"type": "type", "text": "X"},
+    {"type": "type_physical", "text": "X"},
     {"type": "assert_text", "target": {"selector": ".tok-attr-value", "index": 5}, "contains": "X"},
     {"type": "key_combo", "key": "s", "mods_str": "super"},
     {"type": "assert_file", "path": "temp/edit-ui/edit_src_html_highlight.html", "contains": "data-theme=\"lXight\""},

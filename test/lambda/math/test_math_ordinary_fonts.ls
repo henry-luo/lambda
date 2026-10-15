@@ -12,11 +12,11 @@ fn descendants(el, tag) {
     else [*if (name(el) == tag) [el] else [], *[for (child in content(el), found in descendants(child, tag)) found]]
 }
 let faces = [
-    {font_family: "OrdinarySerif", data: input("lmd/package/latex/fonts/Serif/cmunrm.woff2", 'binary')^},
-    {font_family: "OrdinarySerif", font_style: "italic", data: input("lmd/package/latex/fonts/Serif/cmunti.woff2", 'binary')^},
-    {font_family: "OrdinarySerif", font_weight: 700, data: input("lmd/package/latex/fonts/Serif/cmunbx.woff2", 'binary')^},
-    {font_family: "OrdinarySerif", font_weight: 700, font_style: "italic", data: input("lmd/package/latex/fonts/Serif/cmunbi.woff2", 'binary')^},
-    {font_family: "OrdinarySans", data: input("lmd/package/latex/fonts/Sans/cmunss.woff2", 'binary')^}
+    {font_family: "OrdinarySerif", data: input("lmd/package/doc/latex/fonts/Serif/cmunrm.woff2", 'binary')^},
+    {font_family: "OrdinarySerif", font_style: "italic", data: input("lmd/package/doc/latex/fonts/Serif/cmunti.woff2", 'binary')^},
+    {font_family: "OrdinarySerif", font_weight: 700, data: input("lmd/package/doc/latex/fonts/Serif/cmunbx.woff2", 'binary')^},
+    {font_family: "OrdinarySerif", font_weight: 700, font_style: "italic", data: input("lmd/package/doc/latex/fonts/Serif/cmunbi.woff2", 'binary')^},
+    {font_family: "OrdinarySans", data: input("lmd/package/doc/latex/fonts/Sans/cmunss.woff2", 'binary')^}
 ]
 let options = {font_family: "OrdinarySerif", fonts: faces, display: true}
 let native = radiant.math_metrics({font_family: options.font_family, font_size: 1000}, [ord("x"), ord("(")], faces)

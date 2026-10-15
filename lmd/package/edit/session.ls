@@ -9,44 +9,19 @@
 // (S12.1.1v2, S12.1.3); everything else here is pure.
 
 import .model
+import paths: lambda.io.path
 
-pub fn basename(path) {
-  let parts = split(path, "/")
-  parts[len(parts) - 1]
-}
-
-pub fn dirname(path) {
-  let parts = split(path, "/")
-  let folder = join(take(parts, len(parts) - 1), "/")
-  if (len(parts) <= 1) "." else if (folder == "") "/" else folder
-}
+pub let basename = paths.basename
+pub let dirname = paths.dirname
 
 // A path with "." and ".." folded, so one file compares equal however it was
 // spelled. A relative path keeps the ".." it cannot fold; a rooted one drops
 // any ".." above the root.
-pub fn normal_path(path) {
-  let rooted = starts_with(path, "/")
-  let folded = join(fold_segments(split(path, "/"), 0, [], rooted), "/")
-  if (rooted) "/" ++ folded else if (folded == "") "." else folded
-}
-
-fn fold_segments(segs, i, acc, rooted) {
-  if (i >= len(segs)) acc
-  else {
-    let s = segs[i]
-    let can_pop = len(acc) > 0 and acc[len(acc) - 1] != ".."
-    let next = if (s == "" or s == ".") acc
-               else if (s == ".." and can_pop) take(acc, len(acc) - 1)
-               else if (s == ".." and rooted) acc
-               else [*acc, s]
-    fold_segments(segs, i + 1, next, rooted)
-  }
-}
+pub let normal_path = paths.normal_path
 
 // A typed Save As path: absolute, or relative to the document's folder (where
 // a native save panel opens).
-pub fn resolve_path(base_dir, typed) =>
-  normal_path(if (starts_with(typed, "/")) typed else base_dir ++ "/" ++ typed)
+pub let resolve_path = paths.resolve_path
 
 fn same_path(a, b) => normal_path(a) == normal_path(b)
 

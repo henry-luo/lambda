@@ -1,8 +1,8 @@
 // Phase 2 entry families, name forms, field inheritance and plural citations.
-import latex: lambda.latex.latex
-import html_ser: lambda.latex.to_html
-import bib_data: lambda.latex.packages.bib_data
-import bib_names: lambda.latex.packages.bib_names
+import latex: lambda.doc.latex.latex
+import html_ser: lambda.doc.latex.to_html
+import bib_data: lambda.doc.latex.packages.bib_data
+import bib_names: lambda.doc.latex.packages.bib_names
 
 let base = "test/lambda/latex/fixtures"
 let ast = input("test/lambda/latex/fixtures/biblatex_types.tex", {type: "latex"}) ^ { null }

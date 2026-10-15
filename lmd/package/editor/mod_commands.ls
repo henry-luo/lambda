@@ -1125,7 +1125,7 @@ fn ancestor_tag_at(doc, path, tag, depth) {
   }
 }
 
-fn ancestor_tag(doc, path, tag) => ancestor_tag_at(doc, path, tag, len(path))
+pub fn ancestor_tag(doc, path, tag) => ancestor_tag_at(doc, path, tag, len(path))
 
 fn state_list_item_tag(st) =>
   if (state_schema(st).li != null and state_schema(st).list_item == null) { 'li' } else { 'list_item' }
@@ -1900,7 +1900,7 @@ fn selected_table_cell_path(st) {
   }
 }
 
-fn selected_table_context(st) {
+pub fn selected_table_context(st) {
   let cell_path = selected_table_cell_path(st)
   if (cell_path == null) { null }
   else {
@@ -1923,11 +1923,12 @@ fn empty_cell_like(cell) =>
   if (cell != null and is_node(cell) and cell.tag == 'th') { node('th', [text("")]) }
   else { node('td', [text("")]) }
 
-pub fn cmd_add_table_row(st) {
+// both insertion directions share the cell context and history shape.
+pub fn cmd_add_table_row(st, before=false) {
   let ctx = selected_table_context(st)
   if (ctx == null) { null }
   else {
-    let insert_at = ctx.row_index + 1
+    let insert_at = ctx.row_index + if (before) 0 else 1
     let cols = len(ctx.row.content)
     let tx0 = tx_begin(st.doc, st.selection)
     let tx1 = tx_step(tx0, step_replace(ctx.row_container_path, insert_at, insert_at, [make_table_row(cols, false)]))
@@ -1946,39 +1947,40 @@ pub fn cmd_delete_table_row(st) {
   }
 }
 
-fn collect_add_col_steps_rows(rows_path, rows, col_index, row_i, row_count, acc) {
+fn collect_add_col_steps_rows(rows_path, rows, col_index, insert_at, row_i, row_count, acc) {
   if (row_i >= row_count) { acc }
   else {
     let row = rows.content[row_i]
     let next = if (row != null and is_node(row) and row.tag == 'tr') {
       let ref_cell = if (col_index < len(row.content)) { row.content[col_index] } else { null };
-      [*acc, step_replace([*rows_path, row_i], col_index + 1, col_index + 1, [empty_cell_like(ref_cell)])]
+      [*acc, step_replace([*rows_path, row_i], insert_at, insert_at, [empty_cell_like(ref_cell)])]
     } else { acc }
-    collect_add_col_steps_rows(rows_path, rows, col_index, row_i + 1, row_count, next)
+    collect_add_col_steps_rows(rows_path, rows, col_index, insert_at, row_i + 1, row_count, next)
   }
 }
 
-fn collect_add_col_steps_table(table_path, table, col_index, i, n, acc) {
+fn collect_add_col_steps_table(table_path, table, col_index, insert_at, i, n, acc) {
   if (i >= n) { acc }
   else {
     let child = table.content[i]
     let next = if (child != null and is_node(child) and child.tag == 'tr') {
       let ref_cell = if (col_index < len(child.content)) { child.content[col_index] } else { null };
-      [*acc, step_replace([*table_path, i], col_index + 1, col_index + 1, [empty_cell_like(ref_cell)])]
+      [*acc, step_replace([*table_path, i], insert_at, insert_at, [empty_cell_like(ref_cell)])]
     } else if (child != null and is_node(child) and (child.tag == 'thead' or child.tag == 'tbody' or child.tag == 'tfoot')) {
-      collect_add_col_steps_rows([*table_path, i], child, col_index, 0, len(child.content), acc)
+      collect_add_col_steps_rows([*table_path, i], child, col_index, insert_at, 0, len(child.content), acc)
     } else { acc }
-    collect_add_col_steps_table(table_path, table, col_index, i + 1, n, next)
+    collect_add_col_steps_table(table_path, table, col_index, insert_at, i + 1, n, next)
   }
 }
 
-pub fn cmd_add_table_column(st) {
+pub fn cmd_add_table_column(st, before=false) {
   let ctx = selected_table_context(st)
   if (ctx == null) { null }
   else {
-    let steps = collect_add_col_steps_table(ctx.table_path, ctx.table, ctx.col_index, 0, len(ctx.table.content), [])
+    let insert_at = ctx.col_index + if (before) 0 else 1
+    let steps = collect_add_col_steps_table(ctx.table_path, ctx.table, ctx.col_index, insert_at, 0, len(ctx.table.content), [])
     let tx1 = tx_apply_steps(tx_begin(st.doc, st.selection), steps, 0, len(steps))
-    tx_set_selection(tx1, node_selection([*ctx.row_path, ctx.col_index + 1]))
+    tx_set_selection(tx1, node_selection([*ctx.row_path, insert_at]))
   }
 }
 

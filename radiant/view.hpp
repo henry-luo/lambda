@@ -66,6 +66,7 @@ struct CssRule;
 struct SelectorMatcher;
 struct CssEngine;
 struct CssStylesheet;
+struct LayoutContext;
 
 constexpr int MAX_RADIANT_CSS_TREE_DEPTH = 512;
 void state_configure_selector_matcher(struct DocState* state, SelectorMatcher* matcher);
@@ -92,7 +93,7 @@ struct CssBackgroundWinner {
 };
 // layout and CSSOM share cascade competition, substitution and shorthand decoding.
 CssBackgroundWinner background_component_winner(DomElement* element, Pool* scratch,
-    CssPropertyCode property, int pseudo_type = 0);
+    CssPropertyCode property, int pseudo_type = 0, LayoutContext* context = nullptr);
 int background_list_count(const CssValue* value);
 const CssValue* background_winner_component(Pool* scratch, const CssBackgroundWinner& winner,
     CssPropertyCode property, int index);
@@ -695,6 +696,10 @@ typedef enum {
     IMAGE_FORMAT_JPEG,
     IMAGE_FORMAT_GIF,
     IMAGE_FORMAT_WEBP,
+    IMAGE_FORMAT_AVIF,
+    IMAGE_FORMAT_BMP,
+    IMAGE_FORMAT_TIFF,
+    IMAGE_FORMAT_ICO,
 } ImageFormat;
 
 typedef enum {
@@ -1948,6 +1953,7 @@ typedef struct PositionProp {
         bool inset_present[4];
     };  // which offsets are set
     bool has_custom_layout_z_index;
+    float inline_relative_y; // applied inline block-axis offset retained across final line alignment
     CssEnum clear;        // clear property for floats
     CssEnum float_prop;   // float property (left, right, none)
     lam::Up<ViewBlock> first_abs_child;   // first child absolute/fixed positioned view
@@ -2596,6 +2602,7 @@ typedef struct GridProp {
 typedef struct EmbedProp {
     lam::Up<ImageSurface> img;  // borrowed: the image cache or a network resource owns it (O2)
     float content_image_resolution; // selected srcset/image-set density; 0 means 1x
+    float native_image_width, native_image_height; // computed object size, independent of its CSS viewport
     lam::Own<char> selected_image_source; // view-property pool owns the selected URL
     lam::Own<DomDocument> doc;   // iframe document
     struct WebViewProp* webview;  // native OS web view (WKWebView/WebView2/WebKitGTK)
@@ -2611,6 +2618,7 @@ typedef struct EmbedProp {
     bool object_position_y_is_percent;
     bool has_controls;       // true if <video controls> attribute present
     bool broken_alt_fallback; // true when an unloaded <img> is rendered as alt text
+    bool native_image_sized;
 } EmbedProp;
 
 // tier-2: view-pool, rebuilt each relayout
@@ -2695,14 +2703,8 @@ RdtLogicalPoint view_geometry_child_node_origin(
     View* view, RdtLogicalPoint parent_origin,
     ViewGeometryScrollResolver resolve_scroll = nullptr,
     void* context = nullptr);
-RdtLogicalPoint view_geometry_apply_external_viewport(
-    RdtLogicalPoint point, ViewBlock* viewport_root,
-    RdtLogicalPoint document_offset,
-    ViewGeometryScrollResolver resolve_scroll = nullptr,
-    void* context = nullptr);
 RdtLogicalPoint view_geometry_local_to_window(
-    View* view, RdtLogicalPoint local, ViewBlock* viewport_root,
-    RdtLogicalPoint document_offset,
+    View* view, RdtLogicalPoint local, RdtLogicalPoint document_offset,
     ViewGeometryScrollResolver resolve_scroll = nullptr,
     void* context = nullptr);
 RdtLogicalPoint view_geometry_document_viewport_offset(

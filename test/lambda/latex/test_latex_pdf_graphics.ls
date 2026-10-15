@@ -1,5 +1,5 @@
 // Check PDF page inclusion, TeX trim conversion and vector-export diagnostics.
-import latex: lambda.latex.latex
+import latex: lambda.doc.latex.latex
 
 let ast = input("test/lambda/latex/fixtures/pdf_graphics.tex", {type: "latex"}) ^ { null }
 let opts = {base_uri: "test/lambda/latex/fixtures"}

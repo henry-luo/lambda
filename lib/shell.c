@@ -17,6 +17,11 @@
 #include <string.h>
 #include <errno.h>
 
+static bool shell_cancel_requested(const ShellOptions* options) {
+    return options && options->cancel_flag &&
+        __atomic_load_n(options->cancel_flag, __ATOMIC_ACQUIRE) != 0;
+}
+
 #ifdef _WIN32
   #define WIN32_LEAN_AND_MEAN
   #include <windows.h>
@@ -613,14 +618,21 @@ static ShellResult shell_exec_win32(const char* program, const char** args,
     // Reader threads drain both streams while waiting so neither child pipe can fill.
     DWORD wait_ms = INFINITE;
     if (opts && opts->timeout_ms > 0) wait_ms = (DWORD)opts->timeout_ms;
-    DWORD wait_result = WaitForSingleObject(pi.hProcess, wait_ms);
+    DWORD wait_result;
+    ULONGLONG wait_started = GetTickCount64();
+    do {
+        DWORD interval = opts && opts->cancel_flag ? 50 : wait_ms;
+        wait_result = WaitForSingleObject(pi.hProcess, interval);
+        result.cancelled = shell_cancel_requested(opts);
+    } while (wait_result == WAIT_TIMEOUT && !result.cancelled &&
+        (wait_ms == INFINITE || GetTickCount64() - wait_started < wait_ms));
 
-    if (wait_result == WAIT_TIMEOUT) {
+    if (wait_result == WAIT_TIMEOUT || result.cancelled) {
         // The job owns descendants, preventing timed-out grandchildren from leaking.
         if (job) TerminateJobObject(job, 1);
         else TerminateProcess(pi.hProcess, 1);
         WaitForSingleObject(pi.hProcess, 1000);
-        result.timed_out = true;
+        result.timed_out = !result.cancelled;
     } else if (wait_result == WAIT_FAILED) {
         log_error("SHELL-WAIT-WIN32: process wait failed: %lu", GetLastError());
         if (job) TerminateJobObject(job, 1);
@@ -846,10 +858,12 @@ static ShellResult shell_exec_posix(const char* program, const char** args,
                 ? &stdout_capture : &stderr_capture;
             bool* open_flag = fds[i].fd == stdout_pipe[0]
                 ? &stdout_open : &stderr_open;
-            for (;;) {
+            // bound one pipe's turn so a continuous writer cannot starve cancellation or stderr.
+            for (size_t drained = 0; drained < 64 * 1024;) {
                 char buffer[4096];
                 ssize_t count = read(fds[i].fd, buffer, sizeof(buffer));
                 if (count > 0) {
+                    drained += (size_t)count;
                     if (!shell_capture_append(capture, buffer, (size_t)count)) {
                         log_error("shell: capture buffer allocation failed while reading output");
                         *open_flag = false;
@@ -880,18 +894,20 @@ static ShellResult shell_exec_posix(const char* program, const char** args,
         bool pipes_open = stdout_open || stderr_open;
         bool timed_out = opts && opts->timeout_ms > 0 &&
                          elapsed_ms >= opts->timeout_ms;
-        if ((timed_out || (child_done && pipes_open)) && !terminate_sent) {
+        bool cancelled = shell_cancel_requested(opts);
+        if ((timed_out || cancelled || (child_done && pipes_open)) && !terminate_sent) {
             // The private group owns descendants that could otherwise keep a
             // capture pipe open after the launched process has completed.
             shell_signal_process(pid, private_group, SIGTERM);
             terminate_sent = true;
             termination_started_ms = elapsed_ms;
         }
-        if (terminate_sent && pipes_open &&
+        if (terminate_sent && (!child_done || pipes_open) &&
             elapsed_ms >= termination_started_ms + SHELL_PROCESS_GROUP_GRACE_MS) {
             shell_signal_process(pid, private_group, SIGKILL);
         }
         if (timed_out) result.timed_out = true;
+        if (cancelled) result.cancelled = true;
     }
 
     if (!child_done) {
@@ -923,6 +939,10 @@ ShellResult shell_exec(const char* program, const char** args,
     ShellResult result = {0};
     result.exit_code = -1;
 
+    if (shell_cancel_requested(opts)) {
+        result.cancelled = true;
+        return result;
+    }
     if (!program) {
         log_error("shell_exec: program is NULL");
         return result;

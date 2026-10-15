@@ -1,0 +1,14 @@
+From: Ada <ada@example.com>
+Date: Thu, 15 Oct 2026 00:00:00 +0000
+To: team@example.com
+Subject: =?UTF-8?B?Q2Fmw6k=?=
+X-Trace: first
+X-Empty:
+X-Trace: second
+Comments: an already
+	folded header
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The body starts after a blank line.
+Unicode café 中文 😀 and a colon: remain body text.

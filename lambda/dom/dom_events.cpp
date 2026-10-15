@@ -696,7 +696,7 @@ static bool event_handler_target_supported(Item target) {
     if (dom_event_is_document_target(target)) return true;
     if (dom_unwrap_element(target)) return true;
     return get_type_id(target) == LMD_TYPE_MAP &&
-           js_class_id(target) == JS_CLASS_EVENT_TARGET;
+           (js_class_id(target) == JS_CLASS_EVENT_TARGET || js_class_id(target) == JS_CLASS_FILE_READER);
 }
 
 static void event_handler_property_set_for_key(void* key, Item target,
@@ -1327,10 +1327,10 @@ extern "C" Item js_eventtarget_dispatch(Item event_item) {
     return dom_dispatch_event(self, event_item);
 }
 
-Item js_create_event_target(void) {
+void js_event_target_install_methods(Item target) {
     // method allocation can collect the new target and earlier method keys.
     RootFrame roots(3);
-    Rooted<Item> target_root(roots, dom_realm_new_object_of_class(JS_CLASS_EVENT_TARGET));
+    Rooted<Item> target_root(roots, target);
     Rooted<Item> key_root(roots, ItemNull);
     Rooted<Item> function_root(roots, ItemNull);
 #define JS_EVENT_TARGET_METHODS(M) \
@@ -1343,7 +1343,13 @@ Item js_create_event_target(void) {
     JS_EVENT_TARGET_METHODS(JS_EVENT_TARGET_INSTALL_METHOD)
 #undef JS_EVENT_TARGET_INSTALL_METHOD
 #undef JS_EVENT_TARGET_METHODS
-    return target_root.get();
+}
+
+Item js_create_event_target(void) {
+    RootFrame roots(1);
+    Rooted<Item> target(roots, dom_realm_new_object_of_class(JS_CLASS_EVENT_TARGET));
+    js_event_target_install_methods(target.get());
+    return target.get();
 }
 
 // ============================================================================

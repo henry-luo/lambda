@@ -1,0 +1,85 @@
+{
+  "name": "File browser opens EPUB in its reader and exposes OPF source",
+  "html": "test/input/ebook",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-entry[data-tree-path$=\"minimal.epub\"] .tree-label"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 250
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#epub-preview .ebook-reader"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#epub-preview .ebook-title"
+      },
+      "equals": "A Small Book"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#epub-preview .ebook-page-status"
+      },
+      "equals": "Scrolling"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#epub-preview [data-ebook-command=next]"
+      }
+    },
+    {
+      "type": "wait",
+      "ms": 200
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#epub-preview .ebook-status"
+      },
+      "equals": "2 / 2"
+    },
+    {
+      "type": "switch_frame",
+      "selector": "#epub-preview iframe"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "h1"
+      },
+      "equals": "Next chapter"
+    },
+    {
+      "type": "switch_frame"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tab-source"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#source-preview"
+      },
+      "contains": "<package"
+    }
+  ]
+}

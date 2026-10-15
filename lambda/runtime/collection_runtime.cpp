@@ -18,14 +18,14 @@ extern "C" bool js_array_immortal_props_store(Array* owner, Map* props);
 // lambda-data; this resolves the document Input that owns a UI arena.
 Input* ui_result_input(Arena* arena);
 
-static Arena* ui_collection_arena() {
+static Arena* ui_collection_arena(const List* owner) {
     // UI-mode elements are arena-owned and therefore cannot keep a GC data
     // buffer alive. Every buffer reachable from one must use the same arena.
-    if (context && context->ui_mode && context->arena) {
+    if (context && context->ui_mode && context->arena && arena_owns(context->arena, owner)) {
         return context->arena;
     }
     if (input_allocation_context && input_allocation_context->ui_mode &&
-            input_allocation_context->arena) {
+            input_allocation_context->arena && arena_owns(input_allocation_context->arena, owner)) {
         return input_allocation_context->arena;
     }
     return nullptr;
@@ -49,9 +49,9 @@ static bool list_reserve_capacity(List* list, int64_t required_capacity,
     // Arena-owned UI elements are not GC roots. Keep their child buffers in
     // the result arena so a collection cannot reclaim a live DOM child list.
     if (!arena) {
-        Arena* ui_arena = ui_collection_arena();
+        Arena* ui_arena = ui_collection_arena(list);
         // UI mode does not change ownership of temporary runtime arrays.
-        if (ui_arena && arena_owns(ui_arena, list)) arena = ui_arena;
+        if (ui_arena) arena = ui_arena;
     }
     // Markup parsers build Input-owned lists outside an EvalContext.
     if (!arena && input_allocation_context) {
@@ -469,7 +469,7 @@ void list_push(List* list, Item item) {
         String* text = item.get_safe_string();
         if (text && text->len == 0) return;
 
-        Arena* ui_arena = ui_collection_arena();
+        Arena* ui_arena = ui_collection_arena(list);
         // UI element content is arena-owned even though elements are not
         // spreadable lists. A GC string here would outlive its traced owner.
         bool is_ui_content = ui_arena && list->type_id == LMD_TYPE_ELEMENT;
@@ -538,7 +538,7 @@ void list_push(List* list, Item item) {
     // D4.5.2: UI element content lives in the untraced result arena, so every
     // non-string value not already there is copied in (strings were above).
     Arena* ui_content_arena = type_id != LMD_TYPE_STRING && list->type_id == LMD_TYPE_ELEMENT
-        ? ui_collection_arena() : nullptr;
+        ? ui_collection_arena(list) : nullptr;
     Input* ui_content_input = ui_content_arena ? ui_result_input(ui_content_arena) : nullptr;
     if (ui_content_input) item = ui_copy_content_to_input(ui_content_input, item);
 

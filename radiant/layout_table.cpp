@@ -1,6 +1,7 @@
 #include "layout.hpp"
 #include "page_document.hpp"
 #include "layout_table.hpp"
+#include "layout_paged.hpp"
 #include "view.hpp"  // For FormDefaults (radio/checkbox margin constants)
 #include "render.hpp"
 #include "../lib/log.h"
@@ -2295,6 +2296,8 @@ static float table_resolve_fixed_explicit_size(LayoutContext* lycon, ViewTable* 
             ? style_tree_get_declaration(element->specified_style, property) : nullptr;
         CssValue* value = declaration ? declaration->value : nullptr;
         if (value && value->type == CSS_VALUE_TYPE_PERCENTAGE && axis == LAYOUT_AXIS_X) {
+            // block sizing already resolved this percentage against the containing block, before table decorations narrowed available space.
+            if (table->blk && table->block()->given_width >= 0.0f) return table->block()->given_width;
             float container_width = lycon->available_space.width.is_definite()
                 ? lycon->available_space.width.value : lycon->block.content_width;
             if (container_width <= 0.0f) container_width = lycon->line.right - lycon->line.left;
@@ -2317,6 +2320,7 @@ static float table_fixed_content_width_for_columns(ViewTable* table,
         layout_uses_border_box(table);
     if (fixed_width_is_border_box) {
         BoxMetrics box = layout_box_metrics(table);
+        // separate fixed tracks exclude padding as well as borders; publication adds the padding once.
         content_width -= table->tb->border_collapse ? box.border_h : box.pad_border_h;
     }
     // fixed-layout column percentages resolve against content tracks, not table border or spacing overhead.
@@ -3784,7 +3788,7 @@ static void parse_cell_attributes(LayoutContext* lycon, DomNode* cellNode, ViewT
     }
 }
 
-static bool table_view_is_caption(ViewBlock* child) {
+bool table_view_is_caption(ViewBlock* child) {
     if (!child) return false;
     DisplayValue child_display = resolve_display_value((void*)child);
     return child->tag() == MARKUP_NAME_CAPTION ||
@@ -4672,6 +4676,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
                 }
             }
             LayoutContextScope lscope(lycon);
+            // captions participate in source-order counters before visual caption-side reordering.
             LayoutCounterScope counter_scope;
             if (!counter_scope.enter(lycon, caption, dom_elem, caption->display)) return;
             layout_materialize_pseudo_content(lycon, caption);
@@ -7318,6 +7323,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             table, meta, col_widths, columns, &table_width, table_padding_horizontal);
     }
     float* col_x_positions = scope.array_zero<float>((size_t)columns + 1);
+    float label_separation = lycon->paged
+        ? paged_label_body_columns(lycon, table, meta, table_width) : 0.0f;
     BoxMetrics table_box = layout_box_metrics(table);
     float table_padding_left = table->tb->border_collapse
         ? 0.0f : max(table_box.padding.left, 0.0f);
@@ -7332,6 +7339,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     for (int i = 1; i <= columns; i++) {
         col_x_positions[i] = i <= effective_columns
             ? col_x_positions[i-1] + col_widths[i-1] : col_x_positions[0];
+        if (i == 1) col_x_positions[i] += label_separation;
         if (!table->tb->border_collapse && column_spacing > 0.0f &&
             i <= effective_columns) {
             // CSS 2.1: Separate borders add spacing between columns.

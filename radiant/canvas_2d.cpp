@@ -8,6 +8,7 @@
 #include "../lib/tagged.hpp"
 #include "../lib/font/font.h"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/dom/dom.h"
 #include "../lambda/module/radiant/radiant_dom_bridge.hpp"
 #include "../lib/log.h"
 #include "../lib/mem.h"
@@ -84,6 +85,7 @@ static uint64_t next_webgl_canvas=1;
 // context; per-entry drawing stacks (saved states, clips) stay Temp-managed.
 struct CanvasRegistry : DomDocumentResourceData {
     CanvasEntry* entries;
+    lam::Own<hashmap> image_resources;
     lam::Own<Pool> pool;  // holds this registry and its entries
     lam::Up<DomDocument> document;
 };
@@ -204,6 +206,7 @@ static void canvas_registry_destroy(DomDocumentResourceData* data) {
     for (CanvasEntry* entry = registry->entries; entry; entry = entry->next) {
         canvas_entry_release(entry);
     }
+    image_resource_cache_cleanup(&registry->image_resources, nullptr);
     // later resource destructors must not reach the freed registry (teardown audit F5)
     registry->document->services.canvas_registry = nullptr;
     // the registry itself lives in this pool
@@ -1020,20 +1023,96 @@ extern "C" bool radiant_webgl_call(uint64_t canvas,const WebGlCommand* command,W
     }
     return success;
 }
+static ImageSurface* canvas_image_source(DomElement* element, bool* owned) {
+    ImageSurface* image = nullptr;
+    *owned = false;
+    if(element->tag()==MARKUP_NAME_CANVAS) {
+        CanvasEntry* entry=canvas_entry_for_element(element,true);
+        if(entry&&entry->mode==2) { image=native_gl_webgl_snapshot(entry->graphics);*owned=true; }
+        else if(entry) image=entry->surface;
+    } else if(element->tag()==MARKUP_NAME_IMG) {
+        image=image_element_surface(element);
+    } else if (element->tag() == MARKUP_NAME_IMAGE && dom_element_is_svg(element) && element->doc) {
+        const char* source = element->get_attribute("href");
+        if (!source) source = element->get_attribute("xlink:href");
+        auto* ui = (UiContext*)element->doc->js.host_ui_context;
+        // SVGImageElement shares the document resource cache with HTML images.
+        if (source && ui) image = load_document_image(element->doc, ui, source);
+        else if (source) {
+            // standalone DOM canvases have a document owner but no window resource cache.
+            CanvasRegistry* registry = canvas_registry_for_document(element->doc, true);
+            if (registry) image = load_document_image_resource(element->doc,
+                &registry->image_resources, source);
+        }
+    }
+    if (image && element->tag() != MARKUP_NAME_CANVAS && image->format != IMAGE_FORMAT_SVG)
+        image_surface_ensure_decoded(image, image->width, image->height);
+    return image;
+}
+
+extern "C" bool radiant_canvas_draw_image(void* canvas_element, void* source_element,
+        const float* coordinates, size_t coordinate_count) {
+    CanvasEntry* entry = canvas_entry_for_element((DomElement*)canvas_element, true);
+    if (!entry || !source_element || !coordinates ||
+        (coordinate_count != 2 && coordinate_count != 4 && coordinate_count != 8)) return false;
+    ImageSurfaceReadScope read_scope;
+    bool owned = false;
+    ImageSurface* image = canvas_image_source((DomElement*)source_element, &owned);
+    if (!image || !image->pixels || !entry->surface) {
+        if (owned) image_surface_destroy(image);
+        return true;
+    }
+    float image_width = (float)(image->decoded_width > 0 ? image->decoded_width : image->width);
+    float image_height = (float)(image->decoded_height > 0 ? image->decoded_height : image->height);
+    Rect source = {0.0f, 0.0f, image_width, image_height};
+    const float* destination = coordinates;
+    if (coordinate_count == 8) {
+        source = {coordinates[0], coordinates[1], coordinates[2], coordinates[3]};
+        destination += 4;
+    }
+    Rect target = {destination[0], destination[1],
+        coordinate_count == 2 ? image_width : destination[2],
+        coordinate_count == 2 ? image_height : destination[3]};
+    // negative extents grow toward the other edge without reversing the source pixels.
+    if (source.width < 0.0f) { source.x += source.width; source.width = -source.width; }
+    if (source.height < 0.0f) { source.y += source.height; source.height = -source.height; }
+    if (target.width < 0.0f) { target.x += target.width; target.width = -target.width; }
+    if (target.height < 0.0f) { target.y += target.height; target.height = -target.height; }
+    if (source.width > 0.0f && source.height > 0.0f && target.width > 0.0f && target.height > 0.0f) {
+        float scale_x = target.width / source.width, scale_y = target.height / source.height;
+        RdtPath* crop = rdt_path_new();
+        if (!crop) { if (owned) image_surface_destroy(image); return false; }
+        rdt_path_add_rect(crop, target.x, target.y, target.width, target.height, 0.0f, 0.0f);
+        RdtVector vector = {};
+        rdt_vector_init(&vector, (uint32_t*)entry->surface->pixels, entry->surface->width,
+            entry->surface->height, entry->surface->pitch / 4);
+        int saved_clip_depth = 0;
+        int clips = canvas_push_clips(entry, &vector, &saved_clip_depth);
+        rdt_push_clip(&vector, crop, &entry->state.transform);
+        // affine projection snapshots the source before blending, including self-draws.
+        rdt_draw_image(&vector, (const uint32_t*)image->pixels,
+            (int)image_width, (int)image_height, image->pitch / 4, // INT_CAST_OK: decoded raster dimensions
+            target.x - source.x * scale_x, target.y - source.y * scale_y,
+            image_width * scale_x, image_height * scale_y,
+            clamp_byte_round(entry->state.global_alpha * 255.0f), &entry->state.transform,
+            0, image->alpha_mode != IMAGE_ALPHA_PREMULTIPLIED);
+        rdt_pop_clip(&vector);
+        canvas_pop_clips(&vector, clips, saved_clip_depth);
+        rdt_vector_destroy(&vector);
+        rdt_path_free(crop);
+        canvas_note_pixels_changed(entry);
+    }
+    if (owned) image_surface_destroy(image);
+    return true;
+}
+
 extern "C" bool radiant_webgl_image(uint64_t canvas,const WebGlCommand* command,void* source,WebGlReply* reply) {
     CanvasEntry* destination=webgl_canvas(canvas);
     DomElement* element=(DomElement*)source;
     if(!destination||!command||!element||!reply) return false;
     ImageSurfaceReadScope read_scope;
-    ImageSurface* image=nullptr;bool owned=false;
-    if(element->tag()==MARKUP_NAME_CANVAS) {
-        CanvasEntry* entry=canvas_entry_for_element(element,true);
-        if(entry&&entry->mode==2) { image=native_gl_webgl_snapshot(entry->graphics);owned=true; }
-        else if(entry) image=entry->surface;
-    } else if(element->tag()==MARKUP_NAME_IMG) {
-        image=image_element_surface(element);
-        if(image&&image->format!=IMAGE_FORMAT_SVG) image_surface_ensure_decoded(image,image->width,image->height);
-    }
+    bool owned = false;
+    ImageSurface* image = canvas_image_source(element, &owned);
     bool valid=image&&image->pixels&&image->width>0&&image->height>0&&image->width<=4096&&image->height<=4096;
     if(!valid) { if(owned) image_surface_destroy(image);radiant_webgl_error(canvas,0x0501);return true; }
     unsigned format=command->n[6],type=command->n[7];

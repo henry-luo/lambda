@@ -1,7 +1,7 @@
 // Guide-level biblatex styles reach their CSL style without a render option, and
 // the substitution is reported (Lambda_Design_BibTeX_CSL §7.4).
-import latex: lambda.latex.latex
-import util: lambda.latex.util
+import latex: lambda.doc.latex.latex
+import util: lambda.doc.latex.util
 
 let path = "test/lambda/latex/fixtures/citeproc/document.tex"
 let source = input(path, "text")^

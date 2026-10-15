@@ -5,7 +5,7 @@
 > changes. MathML's first delivery stage was added on 2026-10-14 in §11.
 > Remaining gaps are recorded in §10 and §11.
 > **Scope:** static mathematical typesetting through `lambda.doc.math`.
-> **Formal linkage:** **D7.2.4 / D7.2.8** — package namespace, distribution and source-specific math policy;
+> **Formal linkage:** **D7.2.4v3 / D7.2.8** — package namespace, distribution and source-specific math policy;
 > **D7.1.1 / D7.1.2v2** — layering and resource acquisition;
 > **D7.4.6 / S12.1.1v2** — declared host-function effects;
 > **D4.2.3 / D4.5.2 / D5.4.2–D5.4.4** — context ownership and retention;
@@ -55,7 +55,7 @@ providing a renderable box, and conforming to its TeX layout definition.
 The first two do not establish the third. §7 describes the bounded command
 surface; §10 identifies incomplete constructions.
 
-Full LaTeX document processing belongs to `lambda.latex`. Arbitrary package
+Full LaTeX document processing belongs to `lambda.doc.latex`. Arbitrary package
 execution, paragraph/page layout, automatic equation numbering, an interactive
 math editor, Content MathML, and speech generation are outside the renderer's
 contract. Presentation MathML extends the contract as specified in §11.
@@ -64,9 +64,9 @@ corpus pass does not establish complete AsciiMath or serialization parity.
 
 ## 2. Architecture and ownership
 
-**D7.2.4** places document math at `lambda.doc.math`; `lambda.math` remains
+**D7.2.4v3** places document math at `lambda.doc.math`; `lambda.math` remains
 the built-in numerical module. The distributed source lives under
-`<lambda-home>/package/math/`, currently `lmd/package/math/` in this checkout.
+`<lambda-home>/package/doc/math/`, currently `lmd/package/doc/math/` in this checkout.
 The public renderer is `lambda.doc.math.math`.
 
 ```mermaid
@@ -130,7 +130,7 @@ commands also require care: current fallback paths can paint a command name or
 its children. Successful SVG emission alone cannot identify an unsupported
 command. Since 2026-10-13, `maps_command(key)` says whether a generic command
 has a rendering, and `unmapped_commands(ast)` lists the ones that do not. The
-painter and the predicate share the same name lists, and `lambda.latex`
+painter and the predicate share the same name lists, and `lambda.doc.latex`
 reports each unmapped command as `unsupported-math-command`. An environment
 the parser does not know is reported too, as `begin{name}`. Recovery-parse
 fallbacks and other unavailable constructions are not yet reported.
@@ -290,8 +290,8 @@ does not assert that CMU outline bounds equal original CM glyph boxes.
 Matched logical metrics are used only for the explicitly identified CM
 constructions. Supplied or installed fonts never inherit this companion.
 Resource identity, licenses and hashes are recorded in
-[font provenance](../lmd/package/math/fonts/SOURCES.md) and
-[companion provenance](../lmd/package/math/fonts/tex/PROVENANCE.md).
+[font provenance](../lmd/package/doc/math/fonts/SOURCES.md) and
+[companion provenance](../lmd/package/doc/math/fonts/tex/PROVENANCE.md).
 
 ### 5.3 Stretching contract
 
@@ -481,7 +481,7 @@ authored encoding and baseline translations are font facts; reversing those
 translations preserves the original CMEX logical coordinates. TeX defines
 selection, dimensions, assembly and axis centering. Null delimiters retain
 their space and an axis-centered empty box. No font is added to the bundle
-(**D7.2.4 / D7.1.2v2**, Rule 2).
+(**D7.2.4v3 / D7.1.2v2**, Rule 2).
 
 All left, right and middle delimiters share the enclosing group's first-pass
 demand, which excludes the delimiters themselves. Under
@@ -584,7 +584,7 @@ script attachment and leader boundaries. Separate under-arrow cases cover
 the nonlinear clearance at 19 physical text sizes with matched scaled fonts.
 This does not certify hooks, maps-to,
 harpoons, paired reactions, other profiles or named-size combinations (§10).
-All constructions remain in the package layer (**D7.2.4**), and font/metric
+All constructions remain in the package layer (**D7.2.4v3**), and font/metric
 resources remain acquired through Lambda IO (**D7.1.2v2**).
 
 ## 7. Content and extension surface
@@ -846,7 +846,7 @@ current code, not permission to adopt their present behavior as a new rule.
 | Text and quotes | Complete literal paired-quote/font-encoding behavior and text/typewriter selection with supplied MATH fonts. Preserve text/math scoping and escapes while adding typography coverage. Bundled verbatim typewriter selection is independently covered by content/font and native-paint checks. |
 | Negation | `\not` currently centres an upright `/` over the following relation's advance and keeps that relation's width and class (`negated` in `typeset.ls`). Plain TeX defines `\not` as a zero-width relation glyph from the symbol font (`\mathchar"3236`) that overstrikes the next relation at its natural position. The centring is fitted geometry under Rule 1; replace it with the TeX definition and verify it independently. Existing negated-relation tests check content, advance and roundtrip, not geometry. |
 | Logos, color and images | Complete standalone `\TeX` / `\LaTeX`; audit xcolor expressions/scoping and graphicx natural-size semantics. Keep the current bounded image convention explicit. |
-| Bold symbols without a bundled bold glyph | Under Rule 2 no bundled face draws ∇, ⋅, ∞, ∂, the relations or most other symbols in bold (CMU bold carries Latin, Greek, digits and a few operators: + − × ÷ ± = √ ∗ ⋆ and six arrows). `\boldsymbol` keeps their regular glyph, as amsbsy does without a bold font, and `lambda.latex` reports `math-bold-symbol-approximation`; so physics' `\grad` and `\vdot` are not bold. `\bm` uses poor man's bold for them, which is bm.sty's own fallback. |
+| Bold symbols without a bundled bold glyph | Under Rule 2 no bundled face draws ∇, ⋅, ∞, ∂, the relations or most other symbols in bold (CMU bold carries Latin, Greek, digits and a few operators: + − × ÷ ± = √ ∗ ⋆ and six arrows). `\boldsymbol` keeps their regular glyph, as amsbsy does without a bold font, and `lambda.doc.latex` reports `math-bold-symbol-approximation`; so physics' `\grad` and `\vdot` are not bold. `\bm` uses poor man's bold for them, which is bm.sty's own fallback. |
 | Phase V package constructs | `\cancelto`, slanted fractions and the mathtools environments follow their package definitions in shape, but arrow overshoot, slash kerns and the mhchem profile's spacing have no independent TeX evidence yet. |
 
 For each family, establish its command definition and available font data,
@@ -902,7 +902,7 @@ prominent rules.
 **Status:** proposal accepted for implementation on 2026-10-14; delivery is
 incremental and the supported subset must be reported separately from the
 planned surface. **Authority:** D7.2.8; package and IO boundaries remain
-D7.2.4 / D7.1.1 / D7.1.2v2. This section revises Rule 1 as Rule 1v2:
+D7.2.4v3 / D7.1.1 / D7.1.2v2. This section revises Rule 1 as Rule 1v2:
 TeX remains governed by TeX; MathML gains its own source-specific policy.
 
 ### 11.1 Scope and representation

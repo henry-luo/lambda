@@ -342,8 +342,8 @@ void lambda_home_init(void) {
     const char* env = shell_getenv("LAMBDA_HOME");
     if (env && env[0]) g_lambda_home = env;
 #ifndef LAMBDA_NO_LATEX
-    // the TeX engine's bundled resources ship in the package tree (Lambda_Design_TeX_Engine §4)
-    char* tex_dir = lambda_home_path("package/latex/tex");
+    // bundled TeX resources follow the document package namespace (D7.2.4v3, D7.2.7v2).
+    char* tex_dir = lambda_home_path("package/doc/latex/tex");
     tex::set_resource_dir(tex_dir);
     if (tex_dir) mem_free(tex_dir);
 #endif
@@ -1126,6 +1126,11 @@ static Script* lambda_ast_template_clone_graph(Runtime* runtime,
         const Script* cached, LambdaAstCloneGraph* graph) {
     Script* existing = lambda_ast_clone_graph_find(graph, cached);
     if (existing) return existing;
+    // A cached diamond dependency already has a slab in this runtime. A
+    // second shell would rebind its logical unit to an uninitialized slab
+    // while promoted functions still execute through the first import.
+    existing = runtime_script_instance(runtime, cached);
+    if (existing && !existing->is_retired) return existing;
     Script* instance = lambda_script_template_clone(runtime, cached, NULL);
     if (!instance || !arraylist_append(graph->templates, (void*)cached) ||
             !arraylist_append(graph->instances, instance)) {

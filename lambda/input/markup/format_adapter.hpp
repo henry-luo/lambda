@@ -251,7 +251,7 @@ public:
      * @param format The format type
      * @return Pointer to adapter (never null for valid formats)
      */
-    static FormatAdapter* getAdapter(Format format);
+    static FormatAdapter* getAdapter(Format format, Flavor flavor = Flavor::DEFAULT);
 
     /**
      * Detect format from content and/or filename

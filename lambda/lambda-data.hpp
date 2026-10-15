@@ -1750,6 +1750,9 @@ Input* runtime_shape_tree(void);
 void runtime_shape_tree_release(EvalContext* owner);
 // Impl_Map_Transition_Coverage P3: that tree's root for elements of one tag.
 TypeElmt* runtime_shape_tree_element_root(const char* tag, size_t length, Target* ns);
+// runtime-built element values share the context's tag/attribute shape tree.
+TypeElmt* runtime_element_type(const char* tag, size_t length);
+void runtime_element_put(Element* element, String* key, Item value);
 
 #ifdef __cplusplus
 extern "C" {

@@ -2,9 +2,9 @@
 
 **Status:** Active design. Consolidated on 2026-10-12 from `Lambda_Pkg_Latex.md` (original proposal), `Lambda_Pkg_Latex2.md` (Phase 2) and `Lambda_Pkg_Latex3.md` (package compatibility, Phases I–IV), plus the retired notes under `vibe/latex/`, and checked against HEAD `1df04d4e4`. Implemented behavior and the bounded profiles are current; §11 lists the decisions and work still open. No formal ruling is changed by this document.
 
-**Scope:** The `lambda.latex` package: turning a LaTeX document into semantic HTML elements, package support, and the HTML, SVG and PDF outputs reached through Radiant. Math typesetting is out of scope here and has its own design.
+**Scope:** The `lambda.doc.latex` package: turning a LaTeX document into semantic HTML elements, package support, and the HTML, SVG and PDF outputs reached through Radiant. Math typesetting is out of scope here and has its own design.
 
-**Formal linkage:** **D7.2.7v2** rules the TeX expansion front end: expansion without typesetting, the S1.8 reading, the file gate, package resolution and the single front end. **D7.2.1–D7.2.4** place shipped packages in source modules with immutable bindings under the `lambda.*` namespace and make package selection a static registry. **S16.9.8** governs imports. **S1.8** forbids executing a runtime string as Lambda code. **S12.1.1v2** and **S12.4.1** make rendering a pure transform over eagerly acquired input. **D7.1.2v2** and **D7.5.2** govern resource acquisition. **S7.4.1–S7.4.4** govern diagnostics. **S2.6.3–S2.6.5** and **D2.6.5v4** govern the command-argument content contract recorded in [Input_Latex.md](input/Input_Latex.md).
+**Formal linkage:** **D7.2.7v2** rules the TeX expansion front end: expansion without typesetting, the S1.8 reading, the file gate, package resolution and the single front end. **D7.2.1–D7.2.4v3** place shipped packages in source modules with immutable bindings under the `lambda.*` namespace and make package selection a static registry. **S16.9.8** governs imports. **S1.8** forbids executing a runtime string as Lambda code. **S12.1.1v2** and **S12.4.1** make rendering a pure transform over eagerly acquired input. **D7.1.2v2** and **D7.5.2** govern resource acquisition. **S7.4.1–S7.4.4** govern diagnostics. **S2.6.3–S2.6.5** and **D2.6.5v4** govern the command-argument content contract recorded in [Input_Latex.md](input/Input_Latex.md).
 
 **Detailed designs:**
 
@@ -22,7 +22,7 @@ Implementation records: [Lambda_Impl_Latex_Packages.md](impl/Lambda_Impl_Latex_P
 
 ## 1. Purpose and scope
 
-`lambda.latex` converts LaTeX documents into semantic HTML element trees that Radiant lays out and paints, and that serialize to HTML strings. It aims at comprehensive support for real documents, including their packages, without becoming a second TeX typesetter.
+`lambda.doc.latex` converts LaTeX documents into semantic HTML element trees that Radiant lays out and paints, and that serialize to HTML strings. It aims at comprehensive support for real documents, including their packages, without becoming a second TeX typesetter.
 
 **What support means.** A package or command is *supported* when its documented bounded profile works after the corresponding `\usepackage` and has a checked output path. *Partial* means the behavior is available with a stated limit or substitution. Anything else is *unsupported* and produces a located diagnostic or a visible unsupported element. Recognizing a command, or being able to render its arguments, is never counted as support. Support never means byte-identical TeX output.
 
@@ -30,7 +30,7 @@ Implementation records: [Lambda_Impl_Latex_Packages.md](impl/Lambda_Impl_Latex_P
 
 ## 2. Design decisions
 
-**Parse natively, transform in Lambda script.** Syntax is recovered by Lambda-owned native code at the input boundary. Every decision about what a construct means lives in editable, user-extensible Lambda script modules. This keeps the edit-test cycle fast, lets users import and override handlers, and follows **D7.2.1–D7.2.4**. Native code changes are limited to neutral syntax preservation and neutral host capabilities; package policy never moves into C/C++.
+**Parse natively, transform in Lambda script.** Syntax is recovered by Lambda-owned native code at the input boundary. Every decision about what a construct means lives in editable, user-extensible Lambda script modules. This keeps the edit-test cycle fast, lets users import and override handlers, and follows **D7.2.1–D7.2.4v3**. Native code changes are limited to neutral syntax preservation and neutral host capabilities; package policy never moves into C/C++.
 
 **Expand like TeX, never typeset like TeX.** Real package code runs on a Lambda-owned TeX expansion engine, so document-local classes and packages and the programming packages they need work as written. Typesetting stops there: Radiant owns line breaking, pagination and painting, and emitting semantic elements is the point of the package. The [engine design](latex/Lambda_Design_TeX_Engine.md) gives the full argument and the LaTeXML lineage.
 
@@ -65,11 +65,11 @@ flowchart TD
 |---|---|
 | TeX engine (`lambda/input/input-tex-*.cpp`) | Catcodes, expansion and TeX state; the LaTeX2e programming kernel; bundled programming packages; local `.sty`/`.cls` files; reconstructed source with an offset map |
 | Digester (`DirectLatexParser`, `lambda/input/input-latex-c.cpp`) | The AST: commands and environments with stars, raw argument groups, offsets, raw islands, pre-parsed math |
-| Script package (`lmd/package/latex/`) | Package activation, analysis, rendering, bibliography, diagnostics, stylesheet assembly |
+| Script package (`lmd/package/doc/latex/`) | Package activation, analysis, rendering, bibliography, diagnostics, stylesheet assembly |
 | Math and TikZ packages | Math boxes and SVG; drawing scenes and SVG |
 | Radiant | DOM, CSS cascade, layout, painting, SVG and PDF export, links, outlines and metadata |
 
-The package source lives under `lmd/package/latex/` and is imported as `lambda.latex.*`. Its parts:
+The package source lives under `lmd/package/doc/latex/` and is imported as `lambda.doc.latex.*`. Its parts:
 
 - `latex.ls`: public API, activation, result assembly.
 - `analyze.ls`: the analysis pass.
@@ -101,7 +101,7 @@ The engine always runs first (**D7.2.7v2**). Definitions, local packages and bun
 Every LaTeX parse expands; there is no unexpanded front end (**D7.2.7**). What differs between entry points is only whether the engine receives the adapter registry:
 
 - `latex.parse_source(src, base)` and `latex.parse_file(path)` pass the registry's adapter names and raw commands. Every `render_file*` and `render_string*` entry uses them, and so do the native document transform behind `lambda convert` and Radiant's LaTeX loader (`render_document_file`, a path-source transform) and the doc viewer.
-- A bare `input(path, "latex")` or `parse(src, "latex")` also expands, but without the registry. A local file that shares an adapter's name then runs, and adapter commands such as bussproofs' inference rules receive argument-mode rather than raw arguments. The input layer cannot consult the script registry without calling upward (**D7.1.1**), so callers that render with `lambda.latex` parse through it.
+- A bare `input(path, "latex")` or `parse(src, "latex")` also expands, but without the registry. A local file that shares an adapter's name then runs, and adapter commands such as bussproofs' inference rules receive argument-mode rather than raw arguments. The input layer cannot consult the script registry without calling upward (**D7.1.1**), so callers that render with `lambda.doc.latex` parse through it.
 
 ## 5. Document pipeline
 
@@ -152,7 +152,7 @@ The unmapped-math scan exists because the math typesetter paints a command it ca
 
 ### 6.1 The registry
 
-`packages/registry.ls` holds the static `CATALOG` of script adapters, the class profiles (`CLASSES`, §6.4) and three aliases (`pgf` to `tikz`, `amsfonts` to `amssymb`, `color` to `xcolor`). The registry also tells the engine which names are adapters (`adapter_names`), so it remains the single list (**D7.2.4**).
+`packages/registry.ls` holds the static `CATALOG` of script adapters, the class profiles (`CLASSES`, §6.4) and three aliases (`pgf` to `tikz`, `amsfonts` to `amssymb`, `color` to `xcolor`). The registry also tells the engine which names are adapters (`adapter_names`), so it remains the single list (**D7.2.4v3**).
 
 Each entry records:
 
@@ -180,7 +180,7 @@ The right mechanism depends on what a package does.
 
 - **Programming packages** emit no typeset output: `etoolbox`, `xkeyval`, `kvoptions`, `calc`, `ifthen`, expl3 and the like. The original, unmodified source runs on the engine. Widening this set is vendor and test work, not design work.
 - **Semantic packages** define what document constructs mean: theorems, tables, citations, graphics, references, languages. They get script adapters, because their meaning must become HTML elements. Most of the catalogue is of this kind.
-- **Thin bindings** suit packages whose user commands are mostly option handling and argument parsing over a few output points. Such a package is bound by a small Lambda-owned `.sty` in `lmd/package/latex/tex/binding/`, which runs on the engine and expands the commands into constructs the digester and adapters already own, while a registry row keeps options and any semantics in script (**D7.2.7v2**, engine design §4). physics, the mathtools macro layer, xspace, csvsimple and unicode-math's alphabet commands are bound this way, and tocloft, authblk, titling, minitoc, glossaries, nomencl and acronym have bindings that only declare the macros a document redefines, so its `\renewcommand` reaches the adapter; xspace's binding calls `\lambda@xspace`, an engine lookahead primitive, because a `\futurelet` definition would need an assignment inside arguments, and csvsimple's reads its CSV file through the engine's path-gated `\openin`. This is the direction for growth.
+- **Thin bindings** suit packages whose user commands are mostly option handling and argument parsing over a few output points. Such a package is bound by a small Lambda-owned `.sty` in `lmd/package/doc/latex/tex/binding/`, which runs on the engine and expands the commands into constructs the digester and adapters already own, while a registry row keeps options and any semantics in script (**D7.2.7v2**, engine design §4). physics, the mathtools macro layer, xspace, csvsimple and unicode-math's alphabet commands are bound this way, and tocloft, authblk, titling, minitoc, glossaries, nomencl and acronym have bindings that only declare the macros a document redefines, so its `\renewcommand` reaches the adapter; xspace's binding calls `\lambda@xspace`, an engine lookahead primitive, because a `\futurelet` definition would need an assignment inside arguments, and csvsimple's reads its CSV file through the engine's path-gated `\openin`. This is the direction for growth.
 - **Native and script subsystems** cover what Lambda owns outright: math rendering (`lambda.doc.math`), PGF/TikZ drawing (`lambda.doc.tikz`), document-class semantics (sectioning, title blocks, floats and numbering in script), and everything that touches fonts, microtype or page layout (Radiant). Their upstream TeX implementations (`amsmath`, `pgf`, `microtype`, the standard classes and so on) are never run: those names are script adapters or built-in class profiles, so a bundled or local file with the same name is skipped, and their commands reach the owning subsystem as constructors. Running them would make the engine a second typesetter (§2) and give drawing or math two owners.
 
 Real-world classes also redefine document commands through LaTeX kernel internals such as `\@startsection`, `\@maketitle`, `\@float` and `\@makecaption`. Exposing those internals as constructors in the engine's kernel lets such classes still produce semantic headings and floats (engine design §10).
@@ -250,7 +250,7 @@ All vector graphics become inline SVG.
 
 - **`picture`.** The environment is rendered in script: Y is flipped, `\unitlength` sets the scale, and `\line`, `\vector`, `\circle`, `\oval`, `\qbezier`, `\multiput` and line thickness are supported.
 - **TikZ and PGFPlots.** The `tikz`, `pgfplots` and `tikzpeople` adapters hand `tikzpicture` and `axis` islands to `lambda.doc.tikz` and expand the document's TikZ styles and macros first. The LaTeX package owns the figure context; the TikZ package owns drawing and its bounded profile ([Lambda_Pkg_Tikz.md](Lambda_Pkg_Tikz.md)).
-- **`graphicx`.** Document-relative raster images and PDF pages are supported. A `.pdf` is read through `lambda.pdf.pdf`, and the selected page is embedded with its CropBox and rotation. Width, height, scale, angle, `keepaspectratio`, and `trim` with `clip` map to CSS.
+- **`graphicx`.** Document-relative raster images and PDF pages are supported. A `.pdf` is read through `lambda.doc.pdf.pdf`, and the selected page is embedded with its CropBox and rotation. Width, height, scale, angle, `keepaspectratio`, and `trim` with `clip` map to CSS.
 - **EPS.** It is diagnosed (§11.4).
 
 ### 8.4 Tables

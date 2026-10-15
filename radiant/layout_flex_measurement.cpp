@@ -1002,9 +1002,11 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                     // content width; a one-line intrinsic height lets column flex
                     // shrink below the text's automatic minimum.
                     CssEnum font_variant = get_element_font_variant(item);
-                    min_height = max_height = compute_text_height_at_width(
+                    float text_height = compute_text_height_at_width(
                         lycon, run.text, run.length, available_width, min_height,
                         text_transform, font_variant);
+                    min_height = max_height = layout_line_clamp_intrinsic_height(
+                        item_block, text_height, min_height);
                 }
             } else {
                 // Fallback: rough estimation when no layout context

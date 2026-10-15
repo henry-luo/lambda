@@ -16,9 +16,14 @@
 
 #include "../lambda.h"
 
+struct DomDocument;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// geometry and selection results share the same realm-neutral map builder.
+Item dom_result_map(struct DomDocument* doc, const char* const* keys, const Item* vals, int count);
 
 // Flags carried by every catalog row (see dom_api.def header).
 enum DomOpFlags {
@@ -104,6 +109,7 @@ Item dom_core_serialize(Item n, Item outer);
 Item dom_core_bounding_box(Item n);
 Item dom_core_client_rects(Item n);
 Item dom_core_scroll_state(Item n);
+Item dom_core_scroll_metrics(Item n);
 Item dom_core_set_scroll_state(Item n, Item x, Item y);
 Item dom_core_element_from_point(Item doc, Item x, Item y);
 // --- core: range / selection composite reads
@@ -157,6 +163,7 @@ Item dom_core_blur(Item n);
 Item dom_core_show_popover(Item n);
 Item dom_core_hide_popover(Item n);
 Item dom_core_show_modal(Item n);
+Item dom_core_close_dialog(Item n, Item value);
 Item dom_core_set_custom_validity(Item n, Item message);
 Item dom_core_set_selection_range(Item n, Item start, Item end, Item dir);
 Item dom_core_set_range_text(Item n, Item replacement, Item start, Item end, Item mode);
@@ -210,6 +217,7 @@ Item dom_engine_pointer_selection(Item a, Item b);
 Item dom_engine_clear_ime_preedit(Item a);
 Item dom_engine_clipboard_text(void);
 Item dom_engine_clipboard_copy_event(void);
+Item dom_engine_clipboard_write(Item text);
 Item dom_engine_edit_selection_text(Item a, Item b);
 Item dom_engine_edit_selection_html(Item a, Item b);
 Item dom_engine_edit_clipboard_write(Item a, Item b, Item c, Item d);

@@ -1184,3 +1184,14 @@ int32_t memtrack_get_pool_count(void) {
 int32_t memtrack_get_arena_count(void) {
     return g_memtrack.arena_count;
 }
+
+// image codecs and raster surfaces share the existing pressure/reclaim policy.
+bool memtrack_allow_allocation(MemContext* memory, size_t bytes) {
+    size_t limit = 0; memtrack_get_limits(NULL, NULL, &limit);
+    if (!limit) return true;
+    size_t usage = memtrack_get_current_usage();
+    if (usage < limit && bytes <= limit - usage) return true;
+    mem_context_request_reclaim(memory, MEM_PRESSURE_HIGH, bytes);
+    usage = memtrack_get_current_usage();
+    return usage < limit && bytes <= limit - usage;
+}

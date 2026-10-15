@@ -10,6 +10,7 @@
  */
 #include "markup_parser.hpp"
 #include "format_adapter.hpp"
+#include "wiki.hpp"
 #include "block/block_common.hpp"
 #include "../html5/html5_parser.h"
 #include "../line_counter.hpp"
@@ -54,7 +55,7 @@ MarkupParser::MarkupParser(Input* input, const ParseConfig& cfg)
         // Will be set during parseContent based on content/filename
         adapter_ = FormatRegistry::getAdapter(Format::MARKDOWN);
     } else {
-        adapter_ = FormatRegistry::getAdapter(config.format);
+        adapter_ = FormatRegistry::getAdapter(config.format, config.flavor);
     }
 
     resetState();
@@ -88,6 +89,10 @@ void markup_parser_destroy(MarkupParser* parser) {
 
 void MarkupParser::resetState() {
     state.reset();
+    wiki_tags_ = nullptr;
+    wiki_metadata_ = nullptr;
+    wiki_inline_depth_ = 0;
+    wiki_header_ = true;
     if (footnote_defs_) hashmap_free(footnote_defs_);
     footnote_defs_ = nullptr;
     footnotes_ = nullptr;
@@ -214,6 +219,7 @@ Item MarkupParser::parseContent(const char* content) {
 
     if (line_count == 0) {
         log_debug("markup_parser: empty content");
+        if (config.format == Format::WIKI) return parse_document(this);
         // Return empty document
         Element* doc = builder.element("doc").final().element;
         return Item{.item = (uint64_t)doc};
@@ -775,6 +781,22 @@ extern "C" Item input_markup_with_format(Input* input, const char* content, Mark
         log_error("input_markup_with_format: parsing failed");
     }
 
+    markup_parser_destroy(parser);
+    return result;
+}
+
+extern "C" Item input_markup_wiki(Input* input, const char* source, const char* flavor) {
+    const WikiSyntax* syntax = wiki_syntax(flavor);
+    if (!syntax) {
+        input->parse_failed = true;
+        input->parse_error_message = pool_strdup(input->pool, "Unsupported wiki flavor");
+        return ItemError;
+    }
+    ParseConfig config;
+    config.format = Format::WIKI; config.flavor = syntax->flavor;
+    MarkupParser* parser = markup_parser_create(input, config);
+    if (!parser) return ItemError;
+    Item result = parser->parseContent(source);
     markup_parser_destroy(parser);
     return result;
 }
