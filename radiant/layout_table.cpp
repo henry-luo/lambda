@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "page_document.hpp"
 #include "layout_table.hpp"
 #include "view.hpp"  // For FormDefaults (radio/checkbox margin constants)
 #include "render.hpp"
@@ -2346,7 +2347,9 @@ static int table_apply_fixed_column_css_width(LayoutContext* lycon, ViewElement*
     int span = table_positive_span_attr(column);
     float col_width = table_resolve_fixed_column_css_width(lycon, column, content_width);
     if (col_width > 0.0f) {
-        float per_col = col_width / span;
+        // a col element is each column it spans, so each takes its width (HTML §4.9.4,
+        // as the auto algorithm resolves it); a column group shares its width
+        float per_col = column->view_type == RDT_VIEW_TABLE_COLUMN ? col_width : col_width / span;
         table_assign_span_columns(explicit_col_widths, col_idx, span,
                                   columns, per_col, total_explicit);
     }
@@ -2430,6 +2433,11 @@ void layout_table_distribute_fixed_columns(float* explicit_col_widths, size_t co
         } else if (remaining_width < 0.0f) {
             // CSS 2.1 §17.5.2.1: if explicit columns exceed table width, the table widens.
             *content_width = total_explicit;
+        } else if (remaining_width > 0.0f && unspecified_cols == 0) {
+            // CSS 2.1 §17.5.2.1: a table wider than its columns distributes the extra over
+            // them; with no auto column it goes in proportion to their widths, as in Blink
+            for (size_t i = 0; i < columns; i++)
+                explicit_col_widths[i] += remaining_width * explicit_col_widths[i] / total_explicit;
         }
     } else {
         float width_per_col = *content_width / columns;
@@ -7113,22 +7121,33 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             table, fixed_explicit_width, columns);
         ScratchScope explicit_scope(&lycon->scratch);
         float* explicit_col_widths = explicit_scope.array_zero<float>(columns);
+        float* shares = explicit_scope.array_zero<float>(columns);
+        bool shared = false;
         float total_explicit = 0.0f;  int unspecified_cols = 0;
         {
             int col_idx = 0;
+            // a page document's proportional columns share the width the others leave (XSL 1.1 §5.11)
+            auto share = [&](ViewElement* col, int start, int span) {
+                float weight = radiant_table_column_share(col->as_element());
+                for (int c = start; weight > 0.0f && c < start + span && c < columns; c++) { shares[c] = weight; shared = true; }
+            };
             table->each_column_source( [&](ViewElement* child) {
                 if (col_idx >= columns) return;
                 if (child->view_type == RDT_VIEW_TABLE_COLUMN_GROUP) {
                     radiant_each_table_colgroup_column(child, [&](ViewElement* col) {
                         if (col_idx >= columns) return;
+                        int start = col_idx;
                         col_idx += table_apply_fixed_column_css_width(
                             lycon, col, explicit_col_widths, col_idx, columns,
                             content_width, &total_explicit);
+                        share(col, start, col_idx - start);
                     });
                 } else if (child->view_type == RDT_VIEW_TABLE_COLUMN) {
+                    int start = col_idx;
                     col_idx += table_apply_fixed_column_css_width(
                         lycon, child, explicit_col_widths, col_idx, columns,
                         content_width, &total_explicit);
+                    share(child, start, col_idx - start);
                 }
             });
         }
@@ -7143,7 +7162,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             });
         }
         layout_table_distribute_fixed_columns(
-            explicit_col_widths, columns, &content_width, total_explicit, unspecified_cols);
+            explicit_col_widths, columns, &content_width, total_explicit, unspecified_cols, shared ? shares : nullptr);
         memcpy(col_widths, explicit_col_widths, columns * sizeof(float));
         table_apply_fixed_height_distribution(lycon, table, rows);
       } // end if (fixed_explicit_width > 0)

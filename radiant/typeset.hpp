@@ -123,7 +123,6 @@ enum TypesetRegionEdge : uint8_t { TYPESET_REGION_START, TYPESET_REGION_END };
 struct TypesetFlowProvider;
 struct TypesetMark;
 struct TypesetTarget;
-struct TypesetRegionMaterial;
 struct TypesetContribution {
     TypesetContributionKind kind;
     TypesetSource source;
@@ -138,7 +137,6 @@ struct TypesetContribution {
     union {
         const TypesetMark* mark;
         const TypesetTarget* target;
-        const TypesetRegionMaterial* region_material;
     };
     TypesetRegionEdge region_edge;
 };
@@ -151,103 +149,15 @@ struct TypesetFlowProvider {
     TypesetStatus (*restore)(void* context, const TypesetResume* saved, TypesetResume* restored);
 };
 
-enum TypesetAssemblyAction : uint8_t { TYPESET_ASSEMBLY_FINALIZE, TYPESET_ASSEMBLY_HOLD, TYPESET_ASSEMBLY_REINSERT };
-enum TypesetPageKind : uint8_t { TYPESET_PAGE_FLOW, TYPESET_PAGE_REGION, TYPESET_PAGE_BLANK, TYPESET_PAGE_FIXED, TYPESET_PAGE_EMPTY };
-struct TypesetRegionPlacement;
-struct TypesetRegionSelection {
-    TypesetRegionKind kind;
-    TypesetRegionEdge edge;
-    const TypesetRegionPlacement* placements;
-    size_t count;
-};
-struct TypesetFragmentainerCandidate {
-    RdtLogicalRect rect;
-    TypesetResume start, end;
-    float body_height, note_height, float_height;
-    TypesetBreak boundary;
-    const TypesetRegionSelection* auxiliary;
-    size_t auxiliary_count;
-};
-struct TypesetPageCandidate {
-    TypesetResume start, end;
-    float body_height, note_height, float_height, available_height;
-    TypesetBreak boundary;
-    double cost;
-    const void* trial;
-    TypesetPageKind kind;
-    uint32_t page_number;
-    // multi-region metrics sum physical capacities; unused trailing regions have equal start/end cursors.
-    const TypesetFragmentainerCandidate* fragmentainers;
-    size_t fragmentainer_count;
-};
-struct TypesetPolicyCheckpoint { uint64_t state[4]; }; // policy-owned stable values, never rewound scratch pointers
-struct TypesetPagePlan;
-struct TypesetPagePolicy {
-    void* context;
-    size_t (*choose)(void* context, const TypesetPageCandidate* candidates, size_t count);
-    TypesetAssemblyAction (*assemble)(void* context, const TypesetPageCandidate* candidate);
-    TypesetStatus (*committed)(void* context, const TypesetPageCandidate* candidate);
-    // provisional page effects participate in the compositor's nested and edition journals.
-    TypesetStatus (*checkpoint)(void* context, TypesetPolicyCheckpoint* saved);
-    TypesetStatus (*restore)(void* context, const TypesetPolicyCheckpoint* saved);
-    // the held plan remains borrowed and immutable through this journaled policy transition.
-    TypesetStatus (*transition)(void* context, TypesetAssemblyAction action, const TypesetPagePlan* plan);
-};
-TypesetStatus typeset_policy_checkpoint(const TypesetPagePolicy* policy, TypesetPolicyCheckpoint* saved);
-TypesetStatus typeset_policy_restore(const TypesetPagePolicy* policy, const TypesetPolicyCheckpoint* saved);
 TypesetStatus typeset_flow_checkpoint(const TypesetFlowProvider* provider,
                                       const TypesetResume* cursor, TypesetResume* saved);
 TypesetStatus typeset_flow_restore(const TypesetFlowProvider* provider,
                                    const TypesetResume* saved, TypesetResume* restored);
 TypesetStatus typeset_flow_next(const TypesetFlowProvider* provider, const TypesetResume* cursor,
                                 TypesetContribution* contribution, TypesetResume* next);
-TypesetStatus typeset_page_select(const TypesetPagePolicy* policy,
-    const TypesetPageCandidate* candidates, size_t count, size_t* selected, TypesetAssemblyAction* action);
-TypesetStatus typeset_page_assemble(const TypesetPagePolicy* policy,
-    const TypesetPageCandidate* candidate, TypesetAssemblyAction* action);
 
 struct Pool;
 struct hashmap;
-struct TypesetPageConstraints {
-    float available_height;
-    size_t max_contributions, max_candidates;
-};
-// the producer measures nested contexts and auxiliary regions without publishing fragments.
-struct TypesetPageProbe {
-    void* context;
-    TypesetStatus (*measure)(void* context, const TypesetContribution* contributions,
-        size_t count, TypesetPageCandidate* candidate, bool* stop);
-};
-struct TypesetPagePlan {
-    Pool* scratch; // borrowed; the caller retains scratch, provider and policy until commitment or abandonment
-    const TypesetFlowProvider* provider; // null for an already selected physical-page plan; its host owns replay
-    const TypesetPagePolicy* policy;
-    TypesetPageCandidate candidate;
-    TypesetContribution* contributions;
-    size_t count;
-    TypesetAssemblyAction action;
-    bool complete, committed;
-};
-// every exit restores the provider's start checkpoint; commitment is a separate operation.
-// held/reinserted plans remain provisional; the caller may continue or replace them without shipout.
-TypesetStatus typeset_page_plan(const TypesetFlowProvider* provider, const TypesetResume* cursor,
-    const TypesetPageConstraints* constraints, const TypesetPageProbe* probe,
-    const TypesetPagePolicy* policy, Pool* scratch, TypesetPagePlan* result);
-TypesetStatus typeset_page_commit(TypesetPagePlan* plan, TypesetResume* next);
-
-struct TypesetAssemblyCheckpoint {
-    TypesetPolicyCheckpoint policy;
-    TypesetResume end;
-    TypesetAssemblyAction action;
-};
-struct TypesetPageAssembly {
-    Pool* pool;
-    TypesetAssemblyCheckpoint* history;
-    size_t count, capacity, transitions, limit;
-};
-// hold keeps the selected plan; reinsert asks the host to restore its input and replan without shipout.
-TypesetStatus typeset_page_transition(TypesetPagePlan* plan, TypesetPageAssembly* assembly, bool* reinsert);
-
 struct TypesetTarget {
     const char* name;
     TypesetSource source;

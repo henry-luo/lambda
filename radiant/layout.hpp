@@ -4291,6 +4291,15 @@ void layout_detach_first_letter_pseudo_content_for_layout_reset(struct DomElemen
 void layout_detach_materialized_pseudo_content_for_layout_reset(struct DomElement* root);
 void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
                                                 DomElement* pseudo_element, bool apply_counters = true);
+// a generated box whose `content` the counter scope evaluates: ::before, ::after
+// and the page flow's footnote call and marker; reports its pseudo-element and slot
+bool layout_generated_pseudo(const DomElement* element, uint8_t* pseudo, PseudoStyleKind* kind);
+// the page flow's footnote call (in the note's place among its parent's children,
+// the note staying its parent) or marker (the note's first child), CSS GCPM 3 §2.3
+DomElement* layout_footnote_pseudo(LayoutContext* lycon, DomElement* note, bool call);
+// generated text shown inside `owner` (a page document's folio): a synthetic
+// "::generated" first child holding `text`, refreshed in place
+DomElement* layout_generated_text(DomElement* owner, const char* text);
 // Cross-origin document navigation needs its own host turn.  The synchronous
 // layout paths use this guard to retain the iframe's replaced-element box.
 DomDocument* layout_load_iframe_src_doc(LayoutContext* lycon, const char* src,
@@ -4360,7 +4369,9 @@ inline LayoutFontSizeResult layout_resolve_font_size_value(
     } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
         CssEnum keyword = value->data.keyword;
         result.from_medium = true;
-        if (keyword == CSS_VALUE_INHERIT) {
+        // font-size is inherited, so unset inherits (CSS Cascade 4 §7.3.3); generated
+        // pseudo-elements reach this with the keyword still unresolved
+        if (keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET) {
             result.value = parent_font_size;
             result.from_medium = parent_from_medium;
         } else if (keyword == CSS_VALUE_LARGER || keyword == CSS_VALUE_SMALLER) {

@@ -3,10 +3,13 @@
 #include "layout.hpp"
 #include "layout_table.hpp"
 #include "../lambda/input/css/css_engine.hpp"
+#include "../lambda/input/css/css_style_node.hpp"
+#include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/dom/dom.h"
 #include "../lib/memtrack.h"
 #include "../lib/hashmap_helpers.h"
 #include "../lib/str.h"
+#include "../lib/tagged.hpp"
 #include "../lib/sort.h"
 #include "../lib/arraylist.h"
 #include "../lib/url.h"
@@ -73,6 +76,7 @@ DomElement* radiant_page_style_parent(DomElement* source) {
 static const char* whitespace_names[] = {"linefeed-treatment", "white-space-treatment", "white-space-collapse", "wrap-option"};
 
 static const char* image_trait_names[] = {"content-width", "content-height", "scaling", "allowed-width-scale", "allowed-height-scale"};
+
 
 static const CssValue* page_computed_value(ViewTree* tree, ViewCssStyle* style, const char* text) {
     // native traits validate their own domains after untyped CSS parsing and binding substitution.
@@ -478,6 +482,179 @@ bool radiant_decoration_trait_key(const char* name, size_t* family, size_t* edge
     return false;
 }
 
+// the nearest declaration of a native trait on `element` or its ancestors (XSL inherits the whitespace traits)
+static const char* page_inherited_native(DomElement* element, const char* name) {
+    for (DomElement* owner = element; owner; owner = owner->parent_element()) {
+        const char* value = dom_element_attribute_ns(owner, RADIANT_PAGE_NAMESPACE, name);
+        if (value && strcmp(value, "inherit")) return value;
+    }
+    return nullptr;
+}
+
+// a keep trait, compound or per scope, that keeps within a page or column
+static bool page_native_keep(DomElement* element, const char* name) {
+    char key[64];
+    const char* scopes[] = {"", ".within-page", ".within-column"};
+    for (const char* scope : scopes) {
+        snprintf(key, sizeof(key), "%s%s", name, scope);
+        const char* value = dom_element_attribute_ns(element, RADIANT_PAGE_NAMESPACE, key);
+        if (value && strcmp(value, "auto") && strcmp(value, "inherit")) return true;
+    }
+    return false;
+}
+
+// the label cell of a label/body grid: the first cell of the first row of a table
+// declaring r:label-body-grid (XSL 1.1 §6.8: a list item's label and body)
+static DomElement* page_label_grid(DomElement* cell) {
+    if (!cell || (cell->tag() != MARKUP_NAME_TD && cell->tag() != MARKUP_NAME_TH) || cell->prev_sibling_element()) return nullptr;
+    DomElement* row = cell->parent_element();
+    if (!row || row->tag() != MARKUP_NAME_TR || row->prev_sibling_element()) return nullptr;
+    DomElement* table = row->parent_element();
+    if (table && table->tag() != MARKUP_NAME_TABLE) table = table->prev_sibling_element() ? nullptr : table->parent_element();
+    const char* grid = table && table->tag() == MARKUP_NAME_TABLE ?
+        dom_element_attribute_ns(table, RADIANT_PAGE_NAMESPACE, "label-body-grid") : nullptr;
+    return grid && !strcmp(grid, "true") ? table : nullptr;
+}
+
+// a list's distance between starts or label separation, from the nearest declaration
+// (XSL 1.1 §7.30.11–12: inherited, 24pt and 6pt initially)
+static const char* page_label_body_value(DomElement* table, bool separation) {
+    const char* name = separation ? "provisional-label-separation" : "provisional-distance-between-starts";
+    for (DomElement* owner = table; owner; owner = owner->parent_element()) {
+        const char* value = dom_element_attribute_ns(owner, RADIANT_PAGE_NAMESPACE, name);
+        if (value && strcmp(value, "inherit")) return value;
+    }
+    return separation ? "6pt" : "24pt";
+}
+
+void radiant_native_hints_declare(DomElement* element) {
+    if (!element || !element->doc || !radiant_page_element(element->doc->root, "page-document")) return;
+    const char* properties[8]; const char* values[8]; size_t count = 0;
+    // XSL 1.1 §7.16: collapse, line feeds and wrapping combine into one white-space value
+    bool declared = false;
+    for (const char* name : whitespace_names) declared |= dom_element_attribute_ns(element, RADIANT_PAGE_NAMESPACE, name) != nullptr;
+    if (declared) {
+        const char* linefeed = page_inherited_native(element, "linefeed-treatment");
+        const char* collapse = page_inherited_native(element, "white-space-collapse");
+        const char* wrap = page_inherited_native(element, "wrap-option");
+        bool lines = linefeed && !strcmp(linefeed, "preserve");
+        bool spaces = collapse && !strcmp(collapse, "false");
+        bool wrapping = !wrap || strcmp(wrap, "no-wrap");
+        properties[count] = "white-space";
+        values[count++] = spaces ? (wrapping ? "pre-wrap" : "pre") : lines ? (wrapping ? "pre-line" : "pre") : wrapping ? "normal" : "nowrap";
+    }
+    const char* keeps[][2] = {{"keep-with-next", "break-after"}, {"keep-with-previous", "break-before"}, {"keep-together", "break-inside"}};
+    for (const auto& keep : keeps) if (page_native_keep(element, keep[0])) { properties[count] = keep[1]; values[count++] = "avoid"; }
+    const char* margins[] = {"margin-top", "margin-bottom"};
+    for (size_t i = 0; i < 2; i++) {
+        char key[64];
+        snprintf(key, sizeof(key), "%s.optimum", flow_space_names[i]);
+        const char* value = dom_element_attribute_ns(element, RADIANT_PAGE_NAMESPACE, key);
+        if (!value) value = dom_element_attribute_ns(element, RADIANT_PAGE_NAMESPACE, flow_space_names[i]);
+        if (value && strcmp(value, "inherit")) { properties[count] = margins[i]; values[count++] = value; }
+    }
+    bool retain = false;
+    for (size_t i = 0; i < 2; i++) for (size_t j = 0; j < 2; j++) {
+        const char* value = dom_element_attribute_ns(element, RADIANT_PAGE_NAMESPACE, flow_decoration_names[i][j]);
+        retain |= value && !strcmp(value, "retain");
+    }
+    if (retain) { properties[count] = "box-decoration-break"; values[count++] = "clone"; }
+    // the label column ends a separation before the body's start (its padding adds the separation)
+    char label_width[160];
+    if (DomElement* table = page_label_grid(element)) {
+        snprintf(label_width, sizeof(label_width), "calc(%s - %s)", page_label_body_value(table, false), page_label_body_value(table, true));
+        properties[count] = "width"; values[count++] = label_width;
+    }
+    if (!count) return;
+    Pool* pool = element->storage_pool();
+    for (size_t i = 0; i < count; i++) {
+        CssDeclaration* declaration = css_parse_property_value_declaration(properties[i], strlen(properties[i]),
+            values[i], strlen(values[i]), pool);
+        if (!declaration || !declaration->valid) continue;
+        // the element's own CSS wins, and a hint declared by an earlier layout stays
+        if (element->specified_style && style_tree_get_declaration(element->specified_style, declaration->property_code)) continue;
+        if (!element->specified_style || element->specified_style_shared() || element->specified_style_borrowed()) {
+            if (!style_epoch_ensure_owned(element)) return;
+        }
+        declaration->origin = CSS_ORIGIN_AUTHOR; declaration->specificity = {};
+        style_tree_apply_declaration(element->specified_style, declaration);
+    }
+}
+
+// does `element` lay its inline edges out against its reference area (XSL indents)?
+static bool page_reference_geometry(DomElement* element) {
+    for (DomElement* owner = element; owner; owner = owner->parent_element()) {
+        const char* value = dom_element_attribute_ns(owner, RADIANT_PAGE_NAMESPACE, "block-inline-geometry");
+        if (value && strcmp(value, "inherit")) return !strcmp(value, "reference");
+        if (!value) return false;
+    }
+    return false;
+}
+
+// the start or end indent standing at `element`: its own declaration or the nearest
+// ancestor's, inside its reference area (a table cell or the page region holds a new one)
+static const char* page_reference_indent(DomElement* element, size_t side) {
+    const char* name = side ? "end-indent" : "start-indent";
+    for (DomElement* owner = element; owner; owner = owner->parent_element()) {
+        const char* value = dom_element_attribute_ns(owner, RADIANT_PAGE_NAMESPACE, name);
+        if (value && strcmp(value, "inherit")) return value;
+        if (owner->tag() == MARKUP_NAME_TD || owner->tag() == MARKUP_NAME_TH || radiant_page_element(owner, "flow") ||
+            radiant_page_element(owner, "static-content")) return nullptr;
+    }
+    return nullptr;
+}
+
+// resolve a native length text in the element's context (var() substituted); 0 when it does not resolve
+static float page_native_length(LayoutContext* lycon, CssPropertyCode property, const char* text) {
+    CssDeclaration* declaration = css_parse_property_value_declaration("margin-left", 11, text, strlen(text), lycon->pool);
+    const CssValue* value = declaration && declaration->valid ? resolve_var_function(lycon, declaration->value) : nullptr;
+    float length = value ? resolve_length_value(lycon, property, value) : 0.0f;
+    return isfinite(length) ? length : 0.0f;
+}
+
+void radiant_native_resolved(LayoutContext* lycon, DomElement* element) {
+    if (!element || !element->doc || !radiant_page_element(element->doc->root, "page-document")) return;
+    ViewBlock* block = lam::view_as_block((View*)element);
+    if (!block) return;
+    if (DomElement* table = page_label_grid(element)) {
+        // the label's content ends a label separation before the body starts (XSL 1.1 §7.30.12)
+        block->ensure_boundary(lycon);
+        if (block->boundary_mut())
+            block->boundary_mut()->padding.right = page_native_length(lycon, CSS_PROPERTY_PADDING_RIGHT, page_label_body_value(table, true));
+    }
+    if (!page_reference_geometry(element)) return;
+    BoundaryProp* boundary = block->boundary_mut() ? block->boundary_mut() : (block->ensure_boundary(lycon), block->boundary_mut());
+    if (!boundary) return;
+    const CssPropertyCode margins[] = {CSS_PROPERTY_MARGIN_LEFT, CSS_PROPERTY_MARGIN_RIGHT};
+    for (size_t side = 0; side < 2; side++) {
+        // the element's own CSS margin wins
+        if (element->specified_style && style_tree_get_declaration(element->specified_style, margins[side])) continue;
+        float indents[2] = {};
+        const char* texts[2] = {page_reference_indent(element, side),
+            element->parent_element() ? page_reference_indent(element->parent_element(), side) : nullptr};
+        if (texts[1] && element->parent_element() && (element->parent_element()->tag() == MARKUP_NAME_TD ||
+            element->parent_element()->tag() == MARKUP_NAME_TH)) texts[1] = nullptr;
+        for (size_t i = 0; i < 2; i++) if (texts[i]) indents[i] = page_native_length(lycon, margins[side], texts[i]);
+        // the content edge stands at the indent: the border and padding lie outside it (XSL 1.1 §5.3.2)
+        float edge = (side ? boundary->padding.right : boundary->padding.left) +
+            (boundary->border ? (side ? boundary->border->width.right : boundary->border->width.left) : 0.0f);
+        (side ? boundary->margin.right : boundary->margin.left) = indents[0] - indents[1] - edge;
+    }
+}
+
+bool radiant_table_omits_repeat(DomElement* table, bool footer) {
+    const char* value = table ? dom_element_attribute_ns(table, RADIANT_PAGE_NAMESPACE, flow_table_omit_names[footer]) : nullptr;
+    return value && !strcmp(value, "true");
+}
+
+float radiant_table_column_share(DomElement* column) {
+    const char* value = column ? dom_element_attribute_ns(column, RADIANT_PAGE_NAMESPACE, "column-proportion") : nullptr;
+    if (!value || !strcmp(value, "none")) return 0.0f;
+    char* end = nullptr;
+    double share = strtod(value, &end);
+    return end != value && isfinite(share) && share > 0.0 && share <= FLT_MAX ? (float)share : 0.0f;
+}
+
 bool radiant_table_column_proportion(const CssValue* value, float* result) {
     if (!value || value->type != CSS_VALUE_TYPE_NUMBER || !isfinite(value->data.number.value) ||
         value->data.number.value <= 0.0 || value->data.number.value > FLT_MAX) return false;
@@ -847,6 +1024,18 @@ bool radiant_page_control_hidden(DomElement* element) {
     return radiant_page_element(element, "master-set") || radiant_page_element(element, "page-master") ||
         radiant_page_element(element, "region") || radiant_page_element(element, "column") || radiant_page_element(element, "master-rule") ||
         radiant_page_element(element, "sequence-master") || radiant_page_element(element, "master-run");
+}
+
+bool radiant_page_control_display(DomElement* element, DisplayValue* display) {
+    if (radiant_page_control_hidden(element)) { *display = {CSS_VALUE_NONE, CSS_VALUE_FLOW}; return true; }
+    static const char* blocks[] = {"page-document", "page-sequence", "flow", "static-content", "note-body",
+        "fixed-pages", "fixed-page"};
+    for (const char* name : blocks) {
+        if (!radiant_page_element(element, name)) continue;
+        *display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
+        return true;
+    }
+    return false;
 }
 
 const RadiantPageSequence* radiant_page_sequence_for(const RadiantPageDocument* document, DomElement* element) {

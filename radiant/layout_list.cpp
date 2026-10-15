@@ -787,17 +787,16 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
 bool LayoutCounterScope::enter(LayoutContext* lycon, ViewSpan* span,
                                DomElement* element, DisplayValue display) {
     if (!lycon || !lycon->counter_context) return true;
-    bool before = element && element->tag_name && strcmp(element->tag_name, "::before") == 0;
-    bool after = element && element->tag_name && strcmp(element->tag_name, "::after") == 0;
-    if (!counter_push_scope(lycon->counter_context, before || after)) return false;
+    PseudoStyleKind kind = PSEUDO_STYLE_BEFORE;
+    bool generated = layout_generated_pseudo(element, nullptr, &kind);
+    if (!counter_push_scope(lycon->counter_context, generated)) return false;
     context = lycon->counter_context;
     ViewBlock* block = lam::unsafe_view_block_api_span(span);
     bool list_item = display.outer == CSS_VALUE_LIST_ITEM || display.list_item;
-    if (before || after) {
+    if (generated) {
         DomElement* origin = element->parent && element->parent->is_element()
             ? element->parent->as_element() : nullptr;
-        if (origin) apply_pseudo_counter_ops(lycon,
-            origin->pseudo_style(before ? PSEUDO_STYLE_BEFORE : PSEUDO_STYLE_AFTER));
+        if (origin) apply_pseudo_counter_ops(lycon, origin->pseudo_style(kind));
     } else {
         setup_list_container_counters(lycon, block, element);
         if (span->blk) {
@@ -814,7 +813,7 @@ bool LayoutCounterScope::enter(LayoutContext* lycon, ViewSpan* span,
     }
     // the element's own operations precede the boundary; generated children follow it.
     if (!style.enter(context, layout_has_style_containment(span))) { close(); return false; }
-    if (before || after) layout_update_pseudo_content_with_counters(lycon, element, false);
+    if (generated) layout_update_pseudo_content_with_counters(lycon, element, false);
     else if (list_item) {
         process_list_item(lycon, block, element, element, display);
         if (!span->bound) span->ensure_boundary(lycon);

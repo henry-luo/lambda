@@ -101,6 +101,7 @@ The set is organized in five parts. Read RAD_01–RAD_03 first for the foundatio
 | [RAD_20 — Application Shell, Browsing & Document Loading](RAD_20_Application_Shell_Browsing.md) | The global `UiContext`, the main loop, the browsing session, and the DOM-backed per-format document-loading architecture. |
 | [RAD_21 — JS Scripting Integration](RAD_21_JS_Scripting_Integration.md) | The `script_runner` driver: script extraction, the browser-global preamble, the transpile-and-run scheduler under a signal watchdog, inline handlers. |
 | [RAD_22 — Media & Embedded Webview](RAD_22_Media_Webview.md) | The external-content-into-surface pattern: GIF/Lottie/video players and native WKWebView/WebKitGTK embedding, with the frame-ready wake loop. |
+| [RAD_23 — Paged Composition](RAD_23_Paged_Composition.md) | Browsing-layout fragmentation hooks, page composition, edition-owned publication, fixed furniture and validation pointers. |
 
 ---
 

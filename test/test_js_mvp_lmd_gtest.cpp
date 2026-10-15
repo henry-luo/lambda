@@ -2523,8 +2523,8 @@ TEST_F(JsMvpLmd, OptionalIntegerElementsPreserveUndefined) {
     // native optional indices must not round-trip through a boxed property-key join.
     EXPECT_EQ(strstr(mir, "index_key"), nullptr);
     mem_free(mir);
-    error("function f(){const keys=[0,1];const a=new Uint8Array(2);let i=Math.sqrt(9);"
-        "return a[keys[i]]} f()", "capability");
+    boolean("function f(){const keys=[0,1];const a=new Uint8Array(2);let i=Math.sqrt(9);"
+        "return a[keys[i]]===undefined} f()");
 }
 TEST_F(JsMvpLmd, ConditionShortCircuitOrder) {
     numeric("var n=0;function hit(x){n=n*10+x;return x}"
@@ -4772,8 +4772,8 @@ TEST_F(JsMvpLmd, PropertyExpansionOptionalNumericKeys) {
     boolean("let indices=new Int32Array(1);Object.defineProperty(Array.prototype,'undefined',{get(){return 'inherited'},configurable:true});let key=indices[9],value=[2,3][key];delete Array.prototype.undefined;value==='inherited'");
     boolean("let a=[1,2],key=0;for(let i=0;i<2;i++)key=a[key];typeof key==='number'&&key===2");
     boolean("let a=[1,2],key=0;for(let i=0;i<3;i++)key=a[key];key===undefined");
-    // the typed-array adapter still rejects named keys; inference must retain that capability check.
-    error(R"JS(let a=new Int32Array(1),index=a[9];a[index])JS", "capability");
+    // an absent numeric key reads the ordinary named attribute, which is missing here.
+    boolean(R"JS(let a=new Int32Array(1),index=a[9];a[index]===undefined)JS");
 }
 
 TEST_F(JsMvpLmd, PropertyExpansionOwnMapRead) {
@@ -9813,4 +9813,60 @@ TEST(JsDynamicEvalSource, BlankProofConsumesAllBytes) {
         memcpy(source->chars, entry.source, entry.length);
         EXPECT_EQ(js_eval_source_is_blank(source), entry.blank) << entry.source;
     }
+}
+
+TEST_F(JsMvpLmd, BareLexicalInitializationRemainsInNumericDomain) {
+    boolean(R"JS(
+        function scan(s) {
+            let out='';
+            for(let i=0;i<s.length;i++) {
+                let remaining;
+                for(i++;i<s.length;i++) {
+                    if(remaining) { remaining--; }
+                    else if(s[i]==='u') { remaining=2; }
+                    else out+=s[i];
+                }
+            }
+            return out;
+        }
+        scan('Xhello')==='hello' && scan('Xu12z')==='z';
+    )JS");
+    boolean("let result=0;for(let i=0;i<3;i++){let x;result+=x===undefined?1:100;x=i+1;if(x)result+=x;}result===9");
+    boolean("function f(){let x;let read=()=>x;let absent=read()===undefined;x=4;return absent&&read()===4}f()");
+    boolean("function f(){var x=3;var x;return x}f()===3");
+}
+TEST_F(JsMvpLmd, FixedLiteralGenericSlotsRetainValuesAndOrder) {
+    boolean(R"JS(
+        function make(value) { return {flag:true, value:value, tail:7}; }
+        let values=[undefined,null,true,9,1.25,-0,5e-324,NaN,'text',{},[],function(){},4n,Symbol('x')];
+        let ok=true;
+        for(let value of values) {
+            let object=make(value), read=object.value;
+            object.value='changed';
+            ok=ok&&Object.is(read,value)&&object.flag&&object.tail===7&&object.value==='changed';
+        }
+        ok;
+    )JS");
+    boolean(R"JS(
+        let order='';
+        function value(n) { order+=n; return n===1?5e-324:{n:n}; }
+        function make() { return {first:value(1), second:value(2)}; }
+        let a=make(),b=make();
+        a.first=7;
+        order==='1212'&&b.first===5e-324&&a.second.n===2&&b.second.n===2&&a.second!==b.second;
+    )JS");
+    boolean("function f(x){return {value:x,method(){return super.toString.call(this)}}}let o=f(3);o.method()==='[object Object]'&&o.value===3");
+    boolean("function f(x){let o={value:x};return [o.value,(o.value=7),o.value]}let a=f(5e-324);a[0]===5e-324&&a[1]===7&&a[2]===7");
+}
+TEST_F(JsMvpLmd, RawTypedOptionalKeysPreserveNumericPayloads) {
+    boolean("function f(){let a=new Int32Array(2),keys=[0,1];a[0]=7;a[keys[9]]=1.25;"
+        "let x=a[keys[9]],y=a[keys[0]],z=a[8];return x===1.25&&y===7&&z===undefined}f()");
+    boolean("function f(){let a=new Uint8Array(2),keys=[0];a[keys[3]]=NaN;let x=a[keys[3]];"
+        "return x!==x&&a[9]===undefined&&a[keys[0]]===0}f()");
+    boolean("function f(){let a=new Int32Array(2),keys=[0];a[keys[3]]=-0;let x=a[keys[3]];"
+        "return 1/x===-Infinity&&a[keys[0]]===0}f()");
+    boolean("function f(){let a=new Int32Array(2),keys=[0];a[keys[3]]=5e-324;let x=a[keys[3]];"
+        "a[keys[3]]=7;return x===5e-324&&a[keys[3]]===7}f()");
+    boolean("function f(){let a=new Int32Array(2),keys=[0];a[keys[3]]='value';"
+        "let x=a[keys[3]];return x==='value'&&a[keys[0]]===0}f()");
 }

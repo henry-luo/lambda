@@ -1,6 +1,7 @@
 #include "layout.hpp"
 #include "view.hpp"
 #include "view_tree_css.hpp"
+#include "page_document.hpp"
 #include "render.hpp"
 #include "radiant.hpp"
 #include "../lib/font/font.h"
@@ -2860,6 +2861,8 @@ DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNode* node
     if (dom_elem && dom_elem->is_parser_inserted_table_form()) {
         return {CSS_VALUE_NONE, CSS_VALUE_NONE};
     }
+    DisplayValue control;
+    if (tag_id == NAME_ID_NONE && radiant_page_control_display(dom_elem, &control)) return control;
     if (css_is_mathml_element(dom_elem)) {
         if (strcmp(dom_elem->tag_name, "math") == 0) {
             const char* mode = dom_elem->get_attribute("display");
@@ -5378,12 +5381,13 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             lycon->font.current_font_size = span->fontp()->font_size;
         }
     }
-    if (all_reset_keyword == CSS_VALUE_INHERIT) {
+    if (all_reset_keyword == CSS_VALUE_INHERIT || all_reset_keyword == CSS_VALUE_UNSET) {
         CssDeclaration* font_all = style_tree_get_declaration(
             style_tree, CSS_PROPERTY_FONT);
         if (font_all && font_all->property_code == CSS_PROPERTY_ALL) {
             // Font shorthand inheritance copies the parent's computed face and
-            // size before explicit font declarations resolve relative units.
+            // size before explicit font declarations resolve relative units;
+            // all: unset inherits the font as well, its longhands being inherited.
             resolve_css_property(CSS_PROPERTY_FONT, font_all, lycon);
         }
     }
@@ -8686,8 +8690,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         }
         case CSS_PROPERTY_FONT: {
             span->ensure_font(lycon);
+            // every font longhand is inherited, so unset inherits them (CSS Cascade 4 §7.3.3)
             if (value->type == CSS_VALUE_TYPE_KEYWORD &&
-                value->data.keyword == CSS_VALUE_INHERIT) {
+                (value->data.keyword == CSS_VALUE_INHERIT || value->data.keyword == CSS_VALUE_UNSET)) {
                 inherit_font_shorthand(lycon, span);
                 break;
             }

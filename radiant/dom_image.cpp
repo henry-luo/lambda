@@ -50,9 +50,7 @@ extern "C" bool dom_engine_set_image_source(DomElement* element,const char* name
     DomImageSource* source=image_source_for(element,true);if(!source) return false;
     source->surface={};if(element->embed) element->embed->img=nullptr;
     auto* ui=(UiContext*)element->doc->js.host_ui_context;if(!ui) return false;
-    // the existing loader resolves against its UI document; detached images still belong to this document.
-    DomDocument* previous=ui->document;ui->document=element->doc;
-    ImageSurface* image=load_document_image(element->doc,ui,name);ui->document=lam::up(previous);
+    ImageSurface* image=load_document_image(element->doc,ui,name);
     if(!image) return false;
     source->surface=image->self;if(element->embed) element->embed->img=lam::up(image);
     return true;
