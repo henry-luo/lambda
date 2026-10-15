@@ -7003,6 +7003,7 @@ enum CssSimpleKeywordRule : uint8_t {
     CSS_SIMPLE_KEYWORD_BASELINE_SOURCE,
     CSS_SIMPLE_KEYWORD_TRANSFORM_STYLE,
     CSS_SIMPLE_KEYWORD_BACKFACE_VISIBILITY,
+    CSS_SIMPLE_KEYWORD_ISOLATION,
 };
 
 struct CssSimpleKeywordSpec {
@@ -7032,6 +7033,8 @@ static const CssSimpleKeywordSpec* css_simple_keyword_spec(CssPropertyCode prope
          CSS_SIMPLE_KEYWORD_ANY, offsetof(BlockProp, dominant_baseline)},
         {CSS_PROPERTY_MIX_BLEND_MODE, CSS_SIMPLE_KEYWORD_INLINE,
          CSS_SIMPLE_KEYWORD_POSITIVE, offsetof(InlineProp, mix_blend_mode)},
+        {CSS_PROPERTY_ISOLATION, CSS_SIMPLE_KEYWORD_INLINE,
+         CSS_SIMPLE_KEYWORD_ISOLATION, offsetof(InlineProp, isolation)},
         {CSS_PROPERTY_TEXT_TRANSFORM, CSS_SIMPLE_KEYWORD_BLOCK,
          CSS_SIMPLE_KEYWORD_POSITIVE, offsetof(BlockProp, text_transform)},
         {CSS_PROPERTY_TEXT_WRAP_STYLE, CSS_SIMPLE_KEYWORD_BLOCK,
@@ -7083,6 +7086,8 @@ static bool css_simple_keyword_is_valid(CssEnum keyword, CssSimpleKeywordRule ru
                 keyword == CSS_VALUE_LAST;
         case CSS_SIMPLE_KEYWORD_POSITIVE:
             return keyword > 0;
+        case CSS_SIMPLE_KEYWORD_ISOLATION:
+            return keyword == CSS_VALUE_AUTO || keyword == CSS_VALUE_ISOLATE;
         case CSS_SIMPLE_KEYWORD_NO_INHERIT:
             return keyword > 0 && keyword != CSS_VALUE_INHERIT;
     }
@@ -9651,8 +9656,10 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             if (value->type == CSS_VALUE_TYPE_NUMBER) {
                 int z = (int)value->data.number.value;
                 span->position->z_index = z;
+                span->position->has_z_index = true;
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-            span->position->z_index = 0;
+                span->position->z_index = 0;
+                span->position->has_z_index = false;
             }
             break;
         }

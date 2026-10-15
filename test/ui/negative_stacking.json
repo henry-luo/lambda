@@ -1,0 +1,20 @@
+{
+  "name": "Negative layers paint before flow content in their enclosing stacking context",
+  "html": "test/ui/negative_stacking.html",
+  "viewport": {"width":320,"height":300},
+  "events": [
+    {"type":"assert_pixel","x":30,"y":30,"min_r":255,"max_r":255,"min_g":0,"max_g":0,"min_b":0,"max_b":0},
+    {"type":"assert_hit_test","x":30,"y":30,"expected_selector":"#low"},
+    {"type":"assert_pixel","x":50,"y":50,"min_r":0,"max_r":0,"min_g":0,"max_g":0,"min_b":255,"max_b":255},
+    {"type":"assert_hit_test","x":50,"y":50,"expected_selector":"#high"},
+    {"type":"assert_pixel","x":100,"y":60,"min_r":0,"max_r":0,"min_g":255,"max_g":255,"min_b":0,"max_b":0},
+    {"type":"assert_hit_test","x":100,"y":60,"expected_selector":"#ink"},
+    {"type":"assert_pixel","x":250,"y":30,"min_r":255,"max_r":255,"min_g":165,"max_g":165,"min_b":0,"max_b":0},
+    {"type":"assert_pixel","x":290,"y":30,"min_r":255,"max_r":255,"min_g":255,"max_g":255,"min_b":255,"max_b":255},
+    {"type":"assert_hit_test","x":290,"y":30,"expected_selector":"#owner"},
+    {"type":"assert_pixel","x":35,"y":165,"min_r":255,"max_r":255,"min_g":0,"max_g":0,"min_b":255,"max_b":255},
+    {"type":"assert_hit_test","x":35,"y":165,"expected_selector":"#local"},
+    {"type":"assert_pixel","x":60,"y":180,"min_r":0,"max_r":0,"min_g":255,"max_g":255,"min_b":0,"max_b":0},
+    {"type":"assert_hit_test","x":60,"y":180,"expected_selector":"#inside"}
+  ]
+}

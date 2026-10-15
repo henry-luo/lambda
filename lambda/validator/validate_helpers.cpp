@@ -211,7 +211,7 @@ CountConstraint get_container_count_constraint(TypeUnary* type_unary) {
 }
 
 bool check_count_constraint(
-    int count,
+    int64_t count,
     CountConstraint constraint,
     ValidationResult* result,
     SchemaValidator* validator,
@@ -219,17 +219,26 @@ bool check_count_constraint(
 ) {
     if (count < constraint.min) {
         add_constraint_error_fmt(result, validator,
-            "%s has %d elements, but minimum required is %d",
-            container_type, count, constraint.min);
+            "%s has %lld elements, but minimum required is %d",
+            container_type, (long long)count, constraint.min);
         return false;
     }
     
     if (constraint.max != -1 && count > constraint.max) {
         add_constraint_error_fmt(result, validator,
-            "%s has %d elements, but maximum allowed is %d",
-            container_type, count, constraint.max);
+            "%s has %lld elements, but maximum allowed is %d",
+            container_type, (long long)count, constraint.max);
         return false;
     }
     
     return true;
+}
+
+ValidationResult* prepare_virtual_validation(SchemaValidator* validator, ConstItem item) {
+    if (get_type_id(virtual_content_error({.item = item.item})) != LMD_TYPE_ERROR) return nullptr;
+    // a failed virtual count must not validate as an empty sequence.
+    ValidationResult* result = create_validation_result(validator->get_pool());
+    result->valid = false;
+    add_constraint_error(result, validator, "virtual content is unavailable");
+    return result;
 }

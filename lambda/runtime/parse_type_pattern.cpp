@@ -5,6 +5,7 @@
 #include "type_contract.hpp"
 #include "re2_wrapper.hpp"
 #include "lambda-error.h"
+#include "binary_schema.hpp"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
 #include "../../lib/strview.h"
@@ -12,6 +13,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <limits.h>
 
 // Recursive-descent parser for the type-pattern sub-language. Tier order
 // mirrors grammar-lambda.js:
@@ -70,6 +72,7 @@ struct Lexer {
     SourceSpan origin;
     bool failed;
     TypePatternFailure failure;
+    bool binary_field = false;
 };
 
 bool is_ident_start(char c) {
@@ -1035,6 +1038,20 @@ AstNode* apply_occurrence(Lexer* lx, AstNode* operand) {
     }
     ast_node->op_str.str = op_start;
     ast_node->op_str.length = (size_t)(lx->p - op_start);
+    if (ast_node->op == OPERATOR_ARRAY) {
+        uint64_t count = 0;
+        StrView field = {};
+        bool empty = type_pattern_skip_space(op_start + 1, lx->p - 1) == lx->p - 1;
+        bool valid = binary_schema_parse_count(ast_node->op_str, &count, &field);
+        if (lx->binary_field && !valid) {
+            fail_code(lx, ERR_INVALID_LITERAL, "binary span count must be a nonnegative integer or field name");
+            return NULL;
+        }
+        if (!lx->binary_field && !empty && (!valid || field.length || count > INT_MAX)) {
+            fail_code(lx, ERR_INVALID_LITERAL, "array counts outside binary schemas must be fixed integers within the supported count range");
+            return NULL;
+        }
+    }
 
     // The chains above. Any bracket suffix may follow an array suffix -- a
     // retired `T[n+]` or `T[n, m]` still fails in the recursive call, and a
@@ -1377,9 +1394,10 @@ void resolve_occurrence(Transpiler* tp, AstUnaryNode* ast_node) {
         parse_occurrence_count(ast_node->op_str, &type->min_count, &type->max_count);
         break;
     default:  // OPERATOR_ARRAY: `T[]` stays open, `T[n]` fixes the length
-        if (ast_node->op_str.length > 2) {
-            parse_occurrence_count(ast_node->op_str, &type->min_count, &type->max_count);
-        }
+        uint64_t count = 0;
+        StrView field = {};
+        if (binary_schema_parse_count(ast_node->op_str, &count, &field) && !field.length && count <= INT_MAX)
+            type->min_count = type->max_count = (int)count;
         break;
     }
     type->op = ast_node->op;
@@ -1697,6 +1715,10 @@ AstNode* parse_type_pattern_syntax(Transpiler* tp, const char* begin,
     AstNode* node = NULL;
     const char* trailing = NULL;
     switch (mode) {
+    case TYPE_PATTERN_BINARY_FIELD:
+        lx.binary_field = true;
+        // binary spans retain their count dependency on the physical field descriptor.
+        [[fallthrough]];
     case TYPE_PATTERN_FULL:
         node = parse_binder(&lx);
         trailing = "trailing input";

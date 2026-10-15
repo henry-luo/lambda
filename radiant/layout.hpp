@@ -3325,6 +3325,7 @@ void init_flex_item_view(LayoutContext* lycon, DomNode* node);
 
 void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* flex_container);
 void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container);
+void update_multipass_advance_y(LayoutContext* lycon, ViewBlock* block);
 // Grid Layout
 
 #ifdef min

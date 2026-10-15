@@ -714,6 +714,7 @@ typedef enum SysFunc {
     SYSFUNC_PHYSICS_SIMULATE,
     SYSFUNC_PHYSICS_VALIDATE,
     SYSFUNC_PHYSICS_QUERY,
+    SYSFUNC_BINARY_DECODE,
 } SysFunc;
 
 typedef struct Type {
@@ -2882,6 +2883,7 @@ extern "C" {
     Item fn_float(Item a);
     Item fn_decimal(Item a);
     Item fn_binary(Item a);
+    Item fn_binary_decode(Item binary, Item schema);
     Item fn_complex1(Item a);
     Item fn_complex2(Item real, Item imag);
     Item fn_real(Item a);

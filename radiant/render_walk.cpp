@@ -34,6 +34,10 @@ typedef struct RenderWalkBlockDriver : RenderPaintBlockDriver {
 
 static void render_walk_view(RenderBackend* backend, RenderWalkState* state, View* view);
 
+static bool render_walk_aborted(RenderBackend* backend) {
+    return backend && backend->should_abort && backend->should_abort(backend->ctx);
+}
+
 static float render_walk_css_opacity(const InlineProp* in_line) {
     if (!in_line) return 1.0f;
     float opacity = in_line->opacity;
@@ -114,6 +118,7 @@ static bool render_walk_block_begin(RenderPaintBlockDriver* ctx, ViewBlock* bloc
     if (!driver || !driver->backend || !driver->state || !block || !phase) return false;
 
     RenderBackend* backend = driver->backend;
+    if (render_walk_aborted(backend)) return false;
     RenderWalkState* state = driver->state;
     RenderWalkBlockPhase* p = &driver->phase;
     *p = {};
@@ -233,6 +238,8 @@ static double render_walk_block_paint_children(RenderPaintBlockDriver* ctx, View
             backend->begin_block_children(backend->ctx, block);
         }
 
+        render_walk_negative_z_descendants(backend, state, block);
+
         if (block->custom_layout_paint_prop()) {
             RadiantStackPaintList paint = radiant_stack_collect_custom_layout_paint(block);
             for (int i = 0; i < paint.count; i++) {
@@ -312,6 +319,7 @@ static void render_walk_block_finish(RenderPaintBlockDriver* ctx, ViewBlock* blo
 
 void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock* block) {
     if (!backend || !state || !block) return;
+    if (render_walk_aborted(backend)) return;
     if (view_backface_is_hidden(block, BACKFACE_SUBTREE)) return;
 
     RenderWalkBlockDriver driver = {};
@@ -329,6 +337,7 @@ void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock
 
 void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan* span) {
     if (!span) return;
+    if (render_walk_aborted(backend)) return;
 
     FontBox pa_font = state->font;
     Color pa_color = state->color;
@@ -387,6 +396,7 @@ void render_walk_inline(RenderBackend* backend, RenderWalkState* state, ViewSpan
 
 static void render_walk_view(RenderBackend* backend, RenderWalkState* state, View* view) {
     if (!backend || !state || !view) return;
+    if (render_walk_aborted(backend)) return;
     if (view_backface_is_hidden(view, view->is_block() ? BACKFACE_SUBTREE : BACKFACE_SELF)) return;
 
     switch (view->view_type) {
@@ -439,9 +449,63 @@ void render_walk_view_one(RenderBackend* backend, RenderWalkState* state, View* 
     render_walk_view(backend, state, view);
 }
 
+// replay only the ancestry scopes, so lifted layers keep their local geometry and clipping.
+static void render_walk_negative_path(RenderBackend* backend, RenderWalkState* state,
+                                      View* owner, View* target) {
+    View* child = radiant_stack_path_child(owner, target);
+    if (!child) return;
+    if (child == target) {
+        render_walk_view(backend, state, child);
+        return;
+    }
+    ViewBlock* block = lam::view_as_block(child);
+    if (!block) {
+        RenderWalkState saved = *state;
+        ViewElement* span = lam::view_as_element(child);
+        if (span && span->font) {
+            setup_font(state->ui_context, &state->font, span->font);
+            if (backend->on_font_change) backend->on_font_change(backend->ctx, span->font);
+        }
+        if (span && span->in_line && span->inl()->has_color) state->color = span->inl()->color;
+        render_walk_negative_path(backend, state, child, target);
+        *state = saved;
+        return;
+    }
+    RenderWalkState saved = *state;
+    state->x += block->x; state->y += block->y;
+    if (block->font) {
+        setup_font(state->ui_context, &state->font, block->font);
+        if (backend->on_font_change) backend->on_font_change(backend->ctx, block->font);
+    }
+    if (block->in_line && block->inl()->has_color) state->color = block->inl()->color;
+    bool shape_clip = backend->begin_clip && backend->end_clip &&
+        backend->begin_clip(backend->ctx, block, state->x, state->y, RENDER_CLIP_SHAPE);
+    bool content_clip = backend->begin_clip && backend->end_clip &&
+        backend->begin_clip(backend->ctx, block, state->x, state->y, RENDER_CLIP_CONTENTS);
+    if (backend->begin_block_children) backend->begin_block_children(backend->ctx, block);
+    render_walk_negative_path(backend, state, child, target);
+    if (backend->end_block_children) backend->end_block_children(backend->ctx, block);
+    if (content_clip) backend->end_clip(backend->ctx);
+    if (shape_clip) backend->end_clip(backend->ctx);
+    *state = saved;
+}
+
+static bool render_walk_negative_layer(void* context, View* owner, View* layer) {
+    RenderWalkBlockDriver* driver = (RenderWalkBlockDriver*)context;
+    render_walk_negative_path(driver->backend, driver->state, owner, layer);
+    return true;
+}
+
+void render_walk_negative_z_descendants(RenderBackend* backend, RenderWalkState* state, ViewBlock* block) {
+    RenderWalkBlockDriver driver = {};
+    driver.backend = backend; driver.state = state;
+    radiant_stack_visit_negative_z_descendants(block, false, &driver, render_walk_negative_layer);
+}
+
 void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* view) {
     bool has_step8 = false;
     for (View* child = view; child; child = child->next()) {
+        if (render_walk_aborted(backend)) break;
         if (radiant_stack_is_deferred_from_normal_flow(child)) continue;
         if (radiant_stack_is_in_flow_positioned_step8(child)) {
             has_step8 = true;
@@ -453,6 +517,7 @@ void render_walk_children(RenderBackend* backend, RenderWalkState* state, View* 
     // others, in tree order; target_children hit-tests them in reverse.
     if (!has_step8) return;
     for (View* child = view; child; child = child->next()) {
+        if (render_walk_aborted(backend)) break;
         if (!radiant_stack_is_deferred_from_normal_flow(child) &&
             radiant_stack_is_in_flow_positioned_step8(child)) {
             render_walk_view(backend, state, child);
@@ -469,6 +534,7 @@ void render_walk_positive_z_descendants(RenderBackend* backend, RenderWalkState*
     radiant_stack_sort_in_paint_order(positive_views);
 
     for (int i = 0; i < positive_views->length; i++) {
+        if (render_walk_aborted(backend)) break;
         render_walk_view(backend, state, (View*)positive_views->data[i]);
     }
     arraylist_free(positive_views);
@@ -483,6 +549,7 @@ void render_walk_positioned_children(RenderBackend* backend, RenderWalkState* st
     radiant_stack_sort_in_paint_order(abs_children);
 
     for (int i = 0; i < abs_children->length; i++) {
+        if (render_walk_aborted(backend)) break;
         ViewBlock* abs_child = (ViewBlock*)abs_children->data[i];
         if (view_backface_is_hidden(abs_child, BACKFACE_SUBTREE)) continue;
         if (backend->render_block) {

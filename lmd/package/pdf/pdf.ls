@@ -20,6 +20,16 @@ import resolve: .resolve
 import interp:  .interp
 import font:    .font
 import fixed:   .fixed
+import writer:  .output
+
+// Export a laid-out source through schema-backed native visits (S11.5, D7.4.5v2).
+pub pn render_source(path: string, options: map) element^ {
+    return writer.render(path, options)^
+}
+
+pub pn export_source(path: string, destination: string, options: map) int^ {
+    return writer.export(path, destination, options)^
+}
 
 // ============================================================
 // Phase 2 page rendering

@@ -1669,7 +1669,7 @@ static bool serialize_z_index(const CssPropAccessor*, DomElement* element, int p
                               StringBuf* out) {
     if (!element || pseudo_type != 0) return false;
     const PositionProp* position = element->positionp();
-    if (position->position == CSS_VALUE_STATIC && position->z_index == 0) {
+    if (!position->has_z_index && position->z_index == 0) {
         return copy_text(out, "auto");
     }
     return format_text(out, "%d", position->z_index);
@@ -1918,6 +1918,7 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
                 CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
     DERIVED_ROW(CSS_PROPERTY_COLOR, serialize_color_prop, 0),
     DIRECT_ROW(CSS_PROPERTY_OPACITY, PROP_GROUP_INLINE, InlineProp, opacity, CSS_PROP_VALUE_NUMBER, 0),
+    DIRECT_ROW(CSS_PROPERTY_ISOLATION, PROP_GROUP_INLINE, InlineProp, isolation, CSS_PROP_VALUE_ENUM, 0),
     DERIVED_ROW(CSS_PROPERTY_CURSOR, serialize_cursor, 0),
     DECL_ROW(CSS_PROPERTY_ALIGN_SELF),
     // CSS Align modifiers such as safe/unsafe are retained in the declaration tree.

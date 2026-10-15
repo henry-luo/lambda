@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Nested flex scroll overflow</title>
+<style>
+* { box-sizing: border-box; }
+body { margin: 24px; }
+#outer { display: flex; flex-direction: column; width: 440px; height: 180px; }
+#row { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+#pane {
+  display: flex;
+  flex-direction: column;
+  width: 220px;
+  min-height: 0;
+  padding: 10px;
+  overflow: scroll;
+}
+#content { flex-shrink: 0; width: 600px; height: 640px; background: #eef; }
+#late { display: block; margin-top: 540px; width: 160px; height: 30px; }
+</style>
+</head>
+<body>
+<div id="outer"><div id="row"><div id="pane"><div id="content"><input id="late"></div></div></div></div>
+</body>
+</html>

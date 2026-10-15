@@ -10403,7 +10403,7 @@ static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident) {
                 log_debug("mir: resolving imported object type '%.*s' via const_type(%d)",
                     (int)obj_node->name->len, obj_node->name->chars, ot->type_index);
                 return mir_value_from_reg(mt, (AstNode*)ident,
-                    transpile_const_type(mt, ot->type_index),
+                    mir_emit_declared_type_value(mt, obj_node->type),
                     VALUE_REP_RAW_NON_GC_POINTER, &TYPE_TYPE, LMD_TYPE_TYPE);
             }
         }
@@ -10516,7 +10516,7 @@ static MirValue transpile_ident_value(MirTranspiler* mt, AstIdentNode* ident) {
                 log_debug("mir: resolving local object type '%s' via const_type(%d)",
                     name_buf, ot->type_index);
                 return mir_value_from_reg(mt, (AstNode*)ident,
-                    transpile_const_type(mt, ot->type_index),
+                    mir_emit_declared_type_value(mt, obj_node->type),
                     VALUE_REP_RAW_NON_GC_POINTER, &TYPE_TYPE, LMD_TYPE_TYPE);
             }
         }
@@ -37910,7 +37910,9 @@ static MirValue transpile_object_type_value(MirTranspiler* mt,
         TypeType* type = (TypeType*)object_type_node->type;
         if (type->type) {
             TypeObject* object_type = (TypeObject*)type->type;
-            result = transpile_const_type(mt, object_type->type_index);
+            // Resolve the declaration in this module's list, not the index
+            // last assigned when another module imported the shared type.
+            result = mir_emit_declared_type_value(mt, object_type_node->type);
             // Registering a method is part of materializing the object type;
             // it does not alter the raw Type* carrier published below.
             for (AstNode* method_node = object_type_node->methods; method_node;

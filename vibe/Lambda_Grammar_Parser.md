@@ -5,7 +5,7 @@
 - **Status:** **PRODUCTION CUTOVER COMPLETE FOR NORMAL LAMBDA FILES/MODULES.** P2.1 source spans, P2.2 shared construction seams, P2.3 direct AST reduction, and the normal-runner P2.4 selector are landed. With `LAMBDA_PARSER` unset (or `c`), the first-party C hybrid recursive-descent + Pratt parser builds the existing typed AST directly. `LAMBDA_PARSER=tree`/`tree-sitter` is an explicit reference/rollback mode; `compare` records Tree-sitter syntax acceptance after the C AST is built and routes disagreements to D8.1.2v3 review. The REPL and a few legacy inspection paths still retain Tree-sitter fragment trees because their append-only source/span transaction is separate from the file cutover.
 - **Formal authority:** **D8.1.1v10** (first-party C parser → shared typed AST pipeline), **D8.1.2v3** (`grammar.js` as the best first-cut structural reference, C as the final production implementation, disagreements manually reviewed), **D8.2.1–D8.2.5** (one core AST, no tree rewriting, indexed compilation unit, typed pass schedule), and **D4.1.1v2** (AST/const-pool ownership). The accepted language and S2.4.3v3/S7.6.3v2 syntax rulings are unchanged.
 - **Surface-syntax authority:** the formal syntax rulings win. `lambda/tree-sitter-lambda/grammar.js` is the best structural reference and first-cut verifier, but it misses reviewed corner cases; the production C parser is the shipped implementation and can also be wrong. A disagreement is therefore a manual-review case, not an automatic verdict for either parser. S2.4.3v3 governs greedy namespace-qualified names, and S7.6.3v2 governs query at the postfix/member tier.
-- **Related:** `vibe/Lambda_Grammar_Reduce5.md` (grammar seams and Tree-sitter reference size), `doc/dev/lambda/LR_02_Parsing_AST.md` (C parser and reference builder), `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/build_ast.cpp`, `lambda/runtime/ast-core.hpp`, `lambda/runtime/parse_type_pattern.cpp` (and, until 2026-09-21, `lambda/runtime/parse_path_expr.cpp`).
+- **Related:** [grammar-reduction reference](Lambda_Grammar_Reduce.md) (historical techniques and Tree-sitter size measurements), `doc/dev/lambda/LR_02_Parsing_AST.md` (C parser and reference builder), `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/build_ast.cpp`, `lambda/runtime/ast-core.hpp`, `lambda/runtime/parse_type_pattern.cpp` (and, until 2026-09-21, `lambda/runtime/parse_path_expr.cpp`).
 - **Proposal IDs:** CGP1–CGP21.
 
 ## 1. Proposal
@@ -27,7 +27,7 @@ This separation prevents a large AST migration from obscuring the first question
 
 ## 2. Motivation and measured baseline
 
-Grammar Reduction5 has already reduced the generated Lambda parser substantially, including removal of all declared GLR conflicts. The remaining object is still large because grammar-dependent tables dominate it:
+The historical grammar-reduction campaigns reduced the generated Lambda parser substantially, including removal of all declared GLR conflicts. The remaining object is still large because grammar-dependent tables dominate it:
 
 | Current Lambda parser artifact | Size |
 |---|---:|
@@ -38,7 +38,7 @@ Grammar Reduction5 has already reduced the generated Lambda parser substantially
 | states / large states / symbols | 4,124 / 699 / 218 |
 | declared GLR conflicts | 0 |
 
-The v0.26.11 Tree-sitter POC did not improve this result: ABI 14 produced an 800,704-byte object and ABI 15 produced an 808,984-byte object. Roughly 704 KB of the size-optimized object is the dense table, sparse table, sparse-state map, and parse actions. Tree-sitter's compatible-state merging is already active; disabling it grows the parser object to 3.32 MB. `-Oz` reduces the current parser-plus-scanner archive only 3.64%, to 788,248 bytes. `vibe/Lambda_Grammar_Reduce5.md` records the full measurements and the 921-file CST differential check.
+The v0.26.11 Tree-sitter POC did not improve this result: ABI 14 produced an 800,704-byte object and ABI 15 produced an 808,984-byte object. Roughly 704 KB of the size-optimized object is the dense table, sparse table, sparse-state map, and parse actions. Tree-sitter's compatible-state merging is already active; disabling it grows the parser object to 3.32 MB. `-Oz` reduces the current parser-plus-scanner archive only 3.64%, to 788,248 bytes. The [grammar-reduction reference §5](Lambda_Grammar_Reduce.md#5-generator-upgrades-compiler-flags-and-compression) records the measurements and the 921-file CST differential check.
 
 The remaining size is therefore architectural rather than a missed compiler or generator flag. A hand parser replaces thousands of generated states and table rows with code proportional to the grammar rules and operator table.
 
@@ -246,7 +246,7 @@ The current grammar has zero declared GLR conflicts, but several prefixes still 
 | expression `if` versus statement `if` | Parse through one unified control routine, then produce the same current AST form based on the syntactic context and required `else` contract. No CST distinction may leak downstream. |
 | assignment versus expression | Statement lookahead recognizes the assignable target followed by `=`; Pratt otherwise parses equality/member/index normally. |
 | named argument/map item versus ordinary expression | Only argument/map contexts recognize `name:` as a keyed form. |
-| dotted name versus relative path | S2.4.3v3 makes namespace `dotted_name` maximal in element/attribute-name position. A relative-path child is spelled `<svg \.rect>` (S16.9.4) and needs no boundary delimiter; the `;` boundary recorded by Grammar Reduction5 is retired. |
+| dotted name versus relative path | S2.4.3v3 makes namespace `dotted_name` maximal in element/attribute-name position. A relative-path child is spelled `<svg \.rect>` (S16.9.4) and needs no boundary delimiter; the historical `;` boundary is retired. |
 | newline versus continuation | Delimiter depth, pending prefix/infix operator, and content context determine continuation; the decision is centralized, not copied into every rule. |
 | `start(...)` | `start` is an ordinary identifier/call and receives no lexer or parser special case. The AST/system-`pn` recognition remains semantic. |
 
@@ -1024,9 +1024,9 @@ updated together:
 1. `doc/Lambda_Formal_Design.md`: D8.1.1v10, D8.1.2v3, semver, implementation status.
 2. `doc/dev/lambda/LR_01_Compilation_Pipeline.md`: production source→AST pipeline and explicit reference selector.
 3. `doc/dev/lambda/LR_02_Parsing_AST.md`: C lexer/Pratt/RD parser and direct AST sink, with the reference CST adapter retained.
-4. `vibe/Lambda_Grammar_Reduce5.md`: grammar seams use Tree-sitter as the
-   first-cut structural reference; the C parser is the normal runtime front end,
-   and disagreements require review.
+4. [Grammar-reduction reference](Lambda_Grammar_Reduce.md): preserves historical
+   tuning results; Tree-sitter is a structural reference and the C parser is the
+   production front end under D8.1.1v18 / D8.1.2v3.
 5. `vibe/Lambda_Repl.md`: explicitly records its transitional retained Tree-sitter fragment transaction.
 6. Build/developer documentation: identifies `grammar.js` as the best first-cut
    structural reference/editor grammar and the C files as the final production

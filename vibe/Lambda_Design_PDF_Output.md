@@ -13,6 +13,17 @@
 > decimals remain deferred (USER, 2026-10-02). The raw/dictionary subset and
 > virtual-list mechanism are recorded in S2.6.6v2/D2.6.12v2; SO48/DO32 retain
 > the remaining mappings and API issues.
+> **Export direction selected 2026-10-14 (USER):** keep shared native tree
+> walking, invoke Lambda callbacks with schema-backed views and traversal
+> context, and emit PDF directly from view properties. Native helpers provide
+> glyph outlines, image bytes and effect rasterization. The callback interface
+> consumes no general PaintCmd stream and requires no tree-link fields in
+> Lambda. See the [phase 2 plan](impl/Lambda_Impl_PDF_Output_Phase2.md).
+> **Implementation increment, 2026-10-15:** fixed/native binary schemas
+> (S11.5 / D3.5) and experimental continuous-page Lambda output are available
+> through `lambda.pdf.output`; solid boxes, glyph outlines, images with alpha,
+> transforms and clips are implemented. Full migration gates remain open in
+> the phase 2 progress record.
 > **Scope:** PDF export, the view projection it needs, and a reusable file
 > content builder. PDF input and CSS layout remain separate subsystems.
 > **Spec linkage:** S2.2.2v2/S2.2.4, S2.6.1v2–S2.6.5, S12.1.1v2,
@@ -23,10 +34,12 @@
 
 Move PDF document construction and serialization into the shipped
 `lambda.pdf` package. Radiant continues to load documents, resolve CSS, and
-lay out views. An export session exposes the resulting tree as Lambda
-elements through `Velmt`, allowing Lambda code to inspect final geometry,
-text, styles, and resources without copying the complete view tree into
-materialized elements.
+lay out views. Its shared native walker invokes Lambda callbacks with
+schema-backed `Velmt` records for the current view and its properties,
+allowing Lambda code to inspect final geometry, text, styles and resources
+without copying the complete view tree into materialized elements. The
+binary-schema accessor follows admitted property references; tree navigation
+remains native.
 
 Lambda functions produce PDF syntax as strings and stream payloads as binary
 values. A specialized MarkBuilder consumes that content while it is
@@ -36,7 +49,8 @@ the entire output as an Item array and serialize it afterwards.
 ```text
 Document loading and CSS layout in Radiant
     → export session with a stable view tree
-    → Velmt root and virtual children
+    → shared native walker and ordered Lambda callbacks
+    → schema-backed view records and traversal context
     → Lambda PDF resource planning and drawing emission
     → virtual content list → PDFBuilder
     → completed output buffer for the file
@@ -50,8 +64,8 @@ The requested source shape is:
 ```
 
 Here `pdf_output()` represents a producer of strings and binaries. It does
-not return an HPDF handle. The final API will also pass the view root and
-export options. This is a design sketch, not an executable example or a
+not return an HPDF handle. The final API will also pass the export session and
+options. This is a design sketch, not an executable example or a
 promise that the new constructor semantics already exist.
 
 ## 2. Confirmed direction and format naming
@@ -61,6 +75,7 @@ promise that the new constructor semantics already exist.
 | File content | An ordered sequence of contributions, principally strings and binaries, written in order. Null and empty text contribute no bytes. Logical content and serialized buffer storage are distinct. |
 | Activation | Only an explicit PDF file constructor. Ordinary `<file>` elements and script top-level content retain their current behavior. |
 | Output destination | Allocate an extended content list with `is_virtual` set and a pointer to its PDFBuilder. `list_push` dispatches through that pointer; ordinary lists retain their array storage. No output context is installed or changed. |
+| Traversal and drawing | The native walker owns visit order and balanced scopes; Lambda callbacks read schema-backed view properties and emit PDF directly. Tree and fragment-chain links need no script-visible fields. |
 | Native helpers | Do not design or require font/image/codec/raster-fallback helpers in phase 1; define their treatment in phase 2. |
 
 ### 2.1 The existing I/O APIs use both names
@@ -90,7 +105,7 @@ output operation and the user's spelling:
 ```text
 <file format:'pdf',
     "%PDF-1.4\n"
-    pdf_output(view)
+    pdf_output(session)
 >
 ```
 
@@ -122,8 +137,8 @@ document; `render_pdf.cpp` walks the view tree through the shared
 Those calls are implemented by Lambda's own `lib/pdf_writer.c`, whose
 header describes a libharu-compatible subset.
 
-The existing exporter creates one content-sized page. It writes text with
-standard PDF fonts and uses raster fallbacks for gradients, SVG subscenes,
+The existing exporter supports continuous-view and explicit paged output.
+It writes text with standard PDF fonts and uses raster fallbacks for gradients, SVG subscenes,
 and effects. The writer emits PDF 1.4 and currently records compression
 settings without compressing streams. These are implementation observations,
 not language rulings or a target specification for future PDF features.
@@ -132,7 +147,9 @@ not language rulings or a target specification for future PDF features.
 |---|---|
 | Load input, resolve CSS, compute layout and export bounds | Radiant |
 | Expose views, resolved geometry, and resource access | Native Radiant module through virtual carriers |
-| Shared paint ordering and generic painting mechanisms | Existing Radiant rendering infrastructure |
+| Tree/fragment traversal, stacking order and scope boundaries | Existing Radiant walker, adapted to invoke Lambda callbacks |
+| Read resolved view properties and choose PDF drawing for each callback | Lambda PDF package |
+| Glyph/path/image access and admitted effect rasterization | Declared native helpers shared with existing renderers |
 | Choose PDF representation, allocate object IDs, plan resources and pages | Lambda PDF package |
 | Escape PDF names/text, format numbers, emit operators and dictionaries | Lambda PDF package |
 | Assemble stream objects, cross-reference data, trailer and metadata | Lambda PDF package |
@@ -162,7 +179,7 @@ rendered tree without inheriting a custom-layout depth cutoff.
 
 Proposed exposed data includes:
 
-- View kind, element tag and attributes, and virtual child access.
+- Current view kind, source tag/attributes and selected resolved properties.
 - Final content/border bounds and the declared coordinate space of each field.
 - Resolved paint properties, transforms, clips, and effect groups.
 - Text fragments with final positions, baselines, font identity, and available
@@ -175,25 +192,52 @@ reimplement CSS resolution or infer geometry from DOM attributes. Use
 document-scoped keys for resource deduplication; pointer identity must remain
 an implementation detail.
 
+The PDF projection is an explicitly tagged export record, rather than the
+existing DOM wrapper with its children removed. It has no tree children and
+needs no `parent`, `first_child`, `last_child`, `next_sibling` or `prev_sibling`
+fields. The native walker supplies accumulated placement, inherited font/color
+and page/fragment identity. Native text iteration likewise supplies the current
+fragment without exposing `TextRect::next`. Property references such as
+boundary/font/transform blocks still use the generic binary-schema accessor.
+Pointer annotation syntax and native binding details remain proposals in the
+phase 2 plan; this selection changes no existing formal language ruling.
+
 ### 4.2 Preserve paint order and rendering semantics
 
 DOM sibling order is not the complete paint order. Stacking contexts,
 positioned descendants, generated content, clipping, and effect boundaries
 must match the existing renderer.
 
-The proposed bridge therefore provides generic ordered paint access from the
-Velmt root, derived from the shared walker and PaintIR. Lambda owns the
-translation from those operations and view fields to PDF. Existing native
-helpers that are needed outside their current file should be promoted and
-shared, rather than copied into the bridge or rewritten as a second CSS
-painting algorithm.
+The selected bridge retains shared native tree walking and invokes Lambda
+callbacks in that order (USER, 2026-10-14). Draw callbacks receive the current
+schema-backed view/fragment and explicit traversal context. Paired transform,
+clip and effect callbacks delimit scopes; page and semantic visits carry page
+setup, links and destinations. Lambda reads resolved properties and generates
+PDF drawing operators directly. A single node-entry callback is insufficient
+to represent all painting phases.
 
-The bridge can expose operation elements in bounded batches or through an
-export-session iterator; it must specify who owns a yielded record and how
-long it remains valid. A consumer may retain a record only if its payload is
-pinned or copied into owned storage. A full duplicated tree or a complete
-Lambda array of paint commands is not required. The precise traversal API is
-an implementation design item to settle against the existing walker.
+The native adapter uses the declared host interfaces and the existing runtime
+callback path (**D7.4.4 / D5.4.1**), with precise argument/result ownership
+(**D5.3.3–D5.3.4**). Callbacks are synchronous and cannot suspend beneath a
+native barrier (**D7.4.2v2**). Output forwarding across this callback boundary
+must carry the destination explicitly under **D2.6.12v2**, preserve
+**S12.1.1v2**, and return errors without emitting the rest of a failed document.
+Exact callback signatures and the producer ABI remain implementation work.
+
+Native helpers provide glyph outlines, image bytes, path access and admitted
+effect rasterization. They may use PaintIR internally, but the Lambda PDF
+interface does not consume a PaintCmd/PaintList stream. A handled subtree must
+not also draw through ordinary descendant callbacks; retain required semantic
+visits. Promote needed static helpers to their owning module headers and share
+them instead of copying them.
+
+The continuous walker already exposes backend callbacks. The paged export
+currently builds PaintLists, so its ordered fragment traversal needs a shared
+visitor for the new backend; this is an implementation dependency, not an
+existing capability. Callback-context and helper-result records have declared
+lifetimes, and escaped scratch records must invalidate before reuse. Native
+traversal continues to cover the full rendered tree without requiring Lambda
+to navigate links or materialize a tree or command array.
 
 ### 4.3 Hold one stable export session
 
@@ -547,7 +591,7 @@ if evaluation continues past a point where an error should have propagated.
 Nested files own separate receivers. Propagated errors, early exits,
 cancellation, and native recovery must release construction-owned resources;
 C++ destructors alone are insufficient across recovery that bypasses them
-(**D5.3.6**). No output-frame restoration is needed. Phase 1 stays synchronous;
+(**D5.3.6v2**). No output-frame restoration is needed. Phase 1 stays synchronous;
 no builder is implicitly inherited by another task.
 
 ### 5.6 What the virtual list resolves and what remains
@@ -581,8 +625,8 @@ existing package facade, following **D7.2.4**. Keep shared coordinate/color
 helpers where their contracts match; input interpretation and output
 serialization have different responsibilities.
 
-The package plans stable object IDs and resource references, walks the export
-projection, and emits PDF syntax directly into file content. Resource maps,
+The package plans stable object IDs and resource references, receives ordered
+view callbacks from the native walker, and emits PDF syntax directly into file content. Resource maps,
 object metadata, and offset tables are legitimate working data. The design
 removes the array of output fragments, not every array used by the algorithm.
 
@@ -649,7 +693,7 @@ already represent multiple page objects without promising pagination.
 ## 7. Migration and acceptance
 
 The CLI retains `lambda render input -o output.pdf`. Its export adapter opens
-the session, invokes the Lambda package with the Velmt root and options,
+the session, invokes the Lambda package with the session and options,
 obtains the completed file's bytes, writes them, and closes the session on
 both success and failure. It must write raw payload bytes, not format the
 file element as Mark or XML. The existing PDF-to-PDF copy shortcut is outside
@@ -727,7 +771,7 @@ claimed by this proposal. Keep temporary artifacts under `./temp/`.
 | D2.6.5v4 and D2.6.6v3 | Document the extended List destination and representation flag; preserve the shared container prefix and content/sequence/slot distinction. |
 | D7.4.4 and D7.4.5v2 | Reuse the declared host interface and structural virtual carriers. |
 | D5.3.3–D5.3.4 and D8.2.6 | Document ownership/rooting and content-destination lowering without weakening semantic equivalence. |
-| D5.4.1 and D5.3.6 | Leave context state unchanged; preserve precise recovery and ensure construction-owned resources are released on all exits. |
+| D5.4.1 and D5.3.6v2 | Leave context state unchanged; preserve precise recovery and ensure construction-owned resources are released on all exits. |
 
 The authorized MVP subset is recorded as **S2.6.6v2/D2.6.12v2**. **SO48/DO32**
 keep the remaining decisions open. Direct scalar/array contributions, decimal
@@ -801,6 +845,30 @@ finish. Readable publication and the other SO48/DO32 contracts remain open.
   finalize exactly once, release on abort, and prevent writes after finish.
 
 ## Appendix S Superseded proposal
+
+Superseded on 2026-10-14 by the user's native-walker/callback direction in
+§4.2; implementation follows [phase 2](impl/Lambda_Impl_PDF_Output_Phase2.md):
+
+~~The proposed bridge therefore provides generic ordered paint access from the
+Velmt root, derived from the shared walker and PaintIR. Lambda owns the
+translation from those operations and view fields to PDF. Existing native
+helpers that are needed outside their current file should be promoted and
+shared, rather than copied into the bridge or rewritten as a second CSS
+painting algorithm.~~
+
+~~The bridge can expose operation elements in bounded batches or through an
+export-session iterator; it must specify who owns a yielded record and how
+long it remains valid. A consumer may retain a record only if its payload is
+pinned or copied into owned storage. A full duplicated tree or a complete
+Lambda array of paint commands is not required. The precise traversal API is
+an implementation design item to settle against the existing walker.~~
+
+~~View kind, element tag and attributes, and virtual child access.~~
+
+The native walker now supplies ordered callbacks and their current views.
+Lambda emits PDF directly from their properties. Tree links remain native;
+schema references are still used for property/resource access. Helpers may
+retain internal PaintIR use without making paint commands the Lambda API.
 
 Superseded on 2026-10-02 by the user's virtual-list direction in §5.4:
 

@@ -117,15 +117,18 @@ mkdir -p temp/photo
 The Lambda tests are auto-discovered by the core baseline. The Radiant tests
 register the 60-event editor replay and a pixel-level RGBA upload fixture with
 forced collection, poisoned frees, promotion, and clean document teardown.
-An additional 43-event replay covers crop dragging/cancellation, keyboard
-activation of Apply/Cancel, comparison, and closing with a pending frame in
-automatic and forced-JIT modes.
+An additional 55-event replay covers crop dragging/cancellation, opening and
+dismissing the aspect-ratio menu, keyboard activation of Apply/Cancel,
+comparison, and closing with a pending frame in automatic and forced-JIT modes.
 The 39-event narrow-window replay checks drawer controls, adding/dragging
 artwork, and export dialog size.
 Its small RGBA fixture is generated from numeric pixels in Lambda.
 The creative replay covers text editing, layer gestures/history, shapes and
 stickers, levels, portrait crop, recipe restoration and composition export in
-automatic and forced-JIT modes (139 events, 36 assertions). Golden tests verify layer validation, alpha
+automatic and forced-JIT modes (152 events, 43 assertions). It opens the layer,
+typeface and alignment menus through real clicks, checks that popups stay open
+across a frame, and commits choices with keyboard and pointer input.
+Golden tests verify layer validation, alpha
 preservation, effects, legacy migration and exported text/shape pixels.
 The performance replay checks color/blur cache reuse, changing filters during
 a large export, and closing with pending work. A separate forced-GC replay
@@ -138,6 +141,8 @@ delivers a frame without the replay host's surrounding state batch. It checks
 that hiding a focused panel clears focus before final interaction validation.
 `RadiantTextLayout` checks Add text's actual label geometry and shared DTNA theme
 tokens, plus inherited line-height when CSS variables are missing, cyclic or invalid.
+`RadiantFormControls` checks that a retained style reset preserves an open select's
+control identity, selectedness and hover, and that releasing the control dismisses it.
 A glyph-geometry probe checks that native button text retains authored flex/grid
 alignment instead of overlapping neighboring labels.
 IO tests check all eight EXIF orientations, malformed/oversized headers,

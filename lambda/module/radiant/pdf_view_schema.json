@@ -1,0 +1,303 @@
+{
+  "format": 1,
+  "revision": 1,
+  "outputs": {
+    "cpp": "lambda/module/radiant/pdf_view_schema.inc",
+    "lambda": "lmd/package/pdf/view_schema.ls",
+    "version": "lambda/module/radiant/pdf_view_schema_version.hpp"
+  },
+  "records": [
+    {
+      "name": "Color",
+      "cpp_type": "Color",
+      "binding": "radiant.Color",
+      "symbol": "color_schema",
+      "fields": [
+        {
+          "name": "r",
+          "type": "u8"
+        },
+        {
+          "name": "g",
+          "type": "u8"
+        },
+        {
+          "name": "b",
+          "type": "u8"
+        },
+        {
+          "name": "a",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "Spacing",
+      "cpp_type": "Spacing",
+      "binding": "radiant.Spacing",
+      "symbol": "spacing_schema",
+      "fields": [
+        {
+          "name": "top",
+          "type": "f32"
+        },
+        {
+          "name": "right",
+          "type": "f32"
+        },
+        {
+          "name": "bottom",
+          "type": "f32"
+        },
+        {
+          "name": "left",
+          "type": "f32"
+        }
+      ]
+    },
+    {
+      "name": "Background",
+      "cpp_type": "BackgroundProp",
+      "binding": "radiant.BackgroundProp",
+      "symbol": "background_schema",
+      "fields": [
+        {
+          "name": "color",
+          "type": "Color"
+        }
+      ]
+    },
+    {
+      "name": "Border",
+      "cpp_type": "BorderProp",
+      "binding": "radiant.BorderProp",
+      "symbol": "border_schema",
+      "fields": [
+        {
+          "name": "width",
+          "type": "Spacing"
+        },
+        {
+          "name": "top_color",
+          "type": "Color"
+        },
+        {
+          "name": "right_color",
+          "type": "Color"
+        },
+        {
+          "name": "bottom_color",
+          "type": "Color"
+        },
+        {
+          "name": "left_color",
+          "type": "Color"
+        }
+      ]
+    },
+    {
+      "name": "Boundary",
+      "cpp_type": "BoundaryProp",
+      "binding": "radiant.BoundaryProp",
+      "symbol": "boundary_schema",
+      "fields": [
+        {
+          "name": "background",
+          "type": "Background?",
+          "pointer": true
+        },
+        {
+          "name": "border",
+          "type": "Border?",
+          "pointer": true
+        },
+        {
+          "name": "padding",
+          "type": "Spacing"
+        }
+      ]
+    },
+    {
+      "name": "Font",
+      "cpp_type": "FontProp",
+      "binding": "radiant.FontProp",
+      "symbol": "font_schema",
+      "fields": [
+        {
+          "name": "font_size",
+          "type": "f32"
+        },
+        {
+          "name": "letter_spacing",
+          "type": "f32"
+        },
+        {
+          "name": "word_spacing",
+          "type": "f32"
+        }
+      ]
+    },
+    {
+      "name": "View",
+      "cpp_type": "DomElement",
+      "binding": "radiant.DomElement",
+      "symbol": "element_schema",
+      "fields": [
+        {
+          "name": "x",
+          "type": "f32"
+        },
+        {
+          "name": "y",
+          "type": "f32"
+        },
+        {
+          "name": "width",
+          "type": "f32"
+        },
+        {
+          "name": "height",
+          "type": "f32"
+        },
+        {
+          "name": "bound",
+          "type": "Boundary?",
+          "pointer": true
+        },
+        {
+          "name": "font",
+          "type": "Font?",
+          "pointer": true
+        }
+      ]
+    },
+    {
+      "name": "TextRect",
+      "cpp_type": "TextRect",
+      "binding": "radiant.TextRect",
+      "symbol": "text_rect_schema",
+      "fields": [
+        {
+          "name": "x",
+          "type": "f32"
+        },
+        {
+          "name": "y",
+          "type": "f32"
+        },
+        {
+          "name": "width",
+          "type": "f32"
+        },
+        {
+          "name": "height",
+          "type": "f32"
+        },
+        {
+          "name": "start_index",
+          "type": "i32"
+        },
+        {
+          "name": "length",
+          "type": "i32"
+        }
+      ]
+    },
+    {
+      "name": "Matrix",
+      "cpp_type": "RdtMatrix",
+      "binding": "radiant.RdtMatrix",
+      "symbol": "matrix_schema",
+      "fields": [
+        {
+          "name": "e11",
+          "type": "f32"
+        },
+        {
+          "name": "e12",
+          "type": "f32"
+        },
+        {
+          "name": "e13",
+          "type": "f32"
+        },
+        {
+          "name": "e21",
+          "type": "f32"
+        },
+        {
+          "name": "e22",
+          "type": "f32"
+        },
+        {
+          "name": "e23",
+          "type": "f32"
+        }
+      ]
+    },
+    {
+      "name": "Context",
+      "cpp_type": "PdfWalkFrame",
+      "binding": "radiant.PdfWalkFrame",
+      "symbol": "frame_schema",
+      "fields": [
+        {
+          "name": "x",
+          "type": "f32"
+        },
+        {
+          "name": "y",
+          "type": "f32"
+        },
+        {
+          "name": "page_width",
+          "type": "f32"
+        },
+        {
+          "name": "page_height",
+          "type": "f32"
+        },
+        {
+          "name": "baseline",
+          "type": "f32"
+        },
+        {
+          "name": "font_size",
+          "type": "f32"
+        },
+        {
+          "name": "opacity",
+          "type": "f32"
+        },
+        {
+          "name": "color",
+          "type": "Color"
+        },
+        {
+          "name": "matrix",
+          "type": "Matrix"
+        },
+        {
+          "name": "text",
+          "type": "string?"
+        },
+        {
+          "name": "clip_evenodd",
+          "type": "bool"
+        },
+        {
+          "name": "sequence",
+          "type": "i32"
+        }
+      ]
+    }
+  ],
+  "version_symbol": "RADIANT_PDF_SCHEMA_VERSION",
+  "schema_sets": {
+    "schemas": {
+      "element": "View",
+      "text_rect": "TextRect",
+      "context": "Context"
+    }
+  }
+}

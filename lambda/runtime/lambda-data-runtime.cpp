@@ -3857,6 +3857,7 @@ SymbolKeyList* item_keys(Item data) {
     }
     case LMD_TYPE_VELMT: {
         Velmt* element = data.velmt;
+        if (get_type_id(virtual_content_error(data)) == LMD_TYPE_ERROR) return NULL;
         int64_t count = velmt_attr_count(element);
         SymbolKeyList* keys = symbol_key_list_new(count > 0 ? count : 4);
         if (!keys || !element || !element->vtable) return keys;

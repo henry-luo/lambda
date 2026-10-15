@@ -1,0 +1,88 @@
+{
+  "format": 1,
+  "revision": 1,
+  "version_symbol": "NATIVE_SCHEMA_FIXTURE_VERSION",
+  "outputs": {
+    "cpp": "test/binary_schema_fixture.inc",
+    "lambda": "test/lambda/mod_binary_native_schema.ls",
+    "version": "test/binary_schema_fixture_version.hpp"
+  },
+  "records": [
+    {
+      "name": "NativeEntry",
+      "cpp_type": "NativeSchemaEntry",
+      "binding": "fixture.Entry",
+      "symbol": "native_entry_schema",
+      "fields": [
+        {
+          "name": "label",
+          "type": "string?"
+        },
+        {
+          "name": "id",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "NativeBatch",
+      "cpp_type": "NativeSchemaBatch",
+      "binding": "fixture.Batch",
+      "symbol": "native_batch_schema",
+      "fields": [
+        {
+          "name": "rows",
+          "type": "NativeEntry[count]",
+          "pointer": true,
+          "capacity": "capacity"
+        },
+        {
+          "name": "optional_rows",
+          "type": "NativeEntry[count]?",
+          "pointer": true,
+          "capacity": "capacity"
+        },
+        {
+          "name": "count",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "NativeNumbers",
+      "cpp_type": "NativeSchemaNumbers",
+      "binding": "fixture.Numbers",
+      "symbol": "native_numbers_schema",
+      "fields": [
+        {
+          "name": "values",
+          "type": "u16[count]",
+          "pointer": true,
+          "capacity": "capacity"
+        },
+        {
+          "name": "prefix",
+          "type": "u16[2]",
+          "pointer": true,
+          "capacity": "capacity"
+        },
+        {
+          "name": "bytes",
+          "type": "binary[count]",
+          "pointer": true,
+          "capacity": "capacity"
+        },
+        {
+          "name": "nullable_bytes",
+          "type": "binary[count]?",
+          "pointer": true,
+          "capacity": "capacity"
+        },
+        {
+          "name": "count",
+          "type": "i64"
+        }
+      ]
+    }
+  ]
+}

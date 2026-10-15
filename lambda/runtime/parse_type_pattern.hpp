@@ -19,8 +19,8 @@
 // the Type graph, binds names, registers constants/types, and reports
 // semantic diagnostics when the resolve pass reaches the slot.
 //
-// Grammar reference: lambda/tree-sitter-lambda/grammar.js is normative.
-// Design: vibe/Lambda_Grammar_Reduce5.md, vibe/Lambda_Type_Pattern.md §3.
+// Structural reference: lambda/tree-sitter-lambda/grammar.js (D8.1.2v3).
+// Design: vibe/Lambda_Grammar_Reduce.md, vibe/Lambda_Type_Pattern.md §3.
 
 #include "ast.hpp"
 #include "lambda-error.h"
@@ -32,6 +32,7 @@ typedef enum TypePatternMode {
     // a declaration return type: named/base atoms with one occurrence suffix,
     // joined by `|`, `&` or `!`
     TYPE_PATTERN_RETURN_VALUE,
+    TYPE_PATTERN_BINARY_FIELD,
 } TypePatternMode;
 
 // The first syntax error in a type slot. It is reported when the slot is

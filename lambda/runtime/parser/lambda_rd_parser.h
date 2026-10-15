@@ -305,6 +305,7 @@ typedef enum LambdaReductionForm {
     LAMBDA_REDUCTION_FORM_TYPE_OBJECT_CONTENT,
     LAMBDA_REDUCTION_FORM_TYPE_OBJECT_CONSTRAINT_BEGIN,
     LAMBDA_REDUCTION_FORM_TYPE_OBJECT_CONSTRAINT_END,
+    LAMBDA_REDUCTION_FORM_TYPE_OBJECT_LAYOUT,
     LAMBDA_REDUCTION_FORM_GROUP_BEGIN,
     LAMBDA_REDUCTION_FORM_GROUP_END,
     LAMBDA_REDUCTION_FORM_IF_BRANCH_BEGIN,
@@ -363,6 +364,7 @@ enum {
     LAMBDA_REDUCTION_FLAG_ANNOTATION_RANGE = 1u << 21,
     // S8.1.1v2: the `of` axis -- the for binding walks IntKeys only
     LAMBDA_REDUCTION_FLAG_INT_ONLY = 1u << 22,
+    LAMBDA_REDUCTION_FLAG_BINARY_FIELD = 1u << 23,
 };
 
 // A reduction value is whatever the sink returned for it. A sink must never
@@ -399,6 +401,7 @@ typedef struct LambdaParseSink {
 
 void lambda_lexer_init(LambdaLexer* lexer, const char* source, size_t length);
 LambdaToken lambda_lexer_next(LambdaLexer* lexer);
+bool lambda_token_is_data_name(LambdaTokenKind kind);
 // Skip a brace-delimited body from just after its `{` to the matching `}`
 // (left unconsumed). False when the body is unterminated or a quote is bad.
 bool lambda_lexer_skip_block_body(LambdaLexer* lexer);

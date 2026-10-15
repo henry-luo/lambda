@@ -19,6 +19,28 @@ pub fn fmt_num(n) {
     }
 }
 
+// PDF numbers have no exponent notation; preserve the runtime's round-trip digits.
+pub fn pdf_num(n) string^ {
+    let value = float(n);
+    if (value != value or value == inf or value == -inf) raise error("PDF output requires finite numbers")
+    else {
+        let text = string(value);
+        let parts = split(replace(text, "E", "e"), "e");
+        if (len(parts) == 1) text
+        else {
+            let negative = parts[0][0] == "-";
+            let mantissa = if (negative) slice(parts[0], 1, len(parts[0])) else parts[0];
+            let integer_part = split(mantissa, ".")[0];
+            let digits = replace(mantissa, ".", "");
+            let point = len(integer_part) + int(parts[1]);
+            let prefix = if (negative) "-" else "";
+            if (point <= 0) prefix ++ "0." ++ (fill(-point, "0") |> join("")) ++ digits
+            else if (point >= len(digits)) prefix ++ digits ++ (fill(point - len(digits), "0") |> join(""))
+            else prefix ++ slice(digits, 0, point) ++ "." ++ slice(digits, point, len(digits))
+        }
+    }
+}
+
 // Format a 6-element matrix as an SVG transform string: "matrix(a b c d e f)"
 pub fn fmt_matrix(m) {
     "matrix(" ++ fmt_num(m[0]) ++ " " ++ fmt_num(m[1]) ++ " " ++
