@@ -14088,13 +14088,15 @@ extern "C" void* dom_document_svg_element_from_point(void* doc_ptr,
 
 static DomElement* dom_offset_parent_element(DomElement* elem) {
     if (!elem) return nullptr;
+    bool static_position = !elem->position || elem->positionp()->position == CSS_VALUE_STATIC;
     DomNode* p = elem->parent;
     while (p) {
         if (p->is_element()) {
             DomElement* pe = p->as_element();
             if (pe->tag_name && str_icmp_cstr(pe->tag_name, "body") == 0)
                 return pe;
-            if (pe->tag_name &&
+            // CSSOM View §7: table ancestors are offset parents only for static elements.
+            if (static_position && pe->tag_name &&
                 (str_icmp_cstr(pe->tag_name, "table") == 0 ||
                  str_icmp_cstr(pe->tag_name, "td") == 0 ||
                  str_icmp_cstr(pe->tag_name, "th") == 0)) {

@@ -450,3 +450,63 @@ pass. `TableCaptionsUseATransparentWrapperOutsideGridDecorations` and
 still fail geometry assertions; their checks remain unchanged. This is focused
 merge verification, not an all-green aggregate or attribution of both failures
 to a particular parent. Receipts: `temp/merge_css_paged/{native,paint,export}.json`.
+
+### 2026-10-16: reported view-reuse and WPT failures
+
+**Bounded repair.** Reproduced the reported 186/490 native failures and the
+six image/thirteen position layout regressions before editing. Native trait
+admission previously ran only for fragmentable blocks, allowing invalid inline
+image traits to publish successfully. Publication now checks visible authored
+sources after the layout workspace has settled its mutation epoch. Anonymous
+table wrappers are skipped when finding an authored style parent: their
+unregistered identities cannot serve as source metadata contexts. This keeps
+edition metadata on registered sources under **D4.5.1v4 / D4.1.4v5** and uses
+the existing shared trait validators.
+
+The unchanged native suite improves to **310/490** in the baseline selection
+and **433/613** in the complete binary, with no previously passing case failing.
+The six repaired cases cover invalid image scales, FO inheritance, percentage
+indent diagnostics, intrinsic fixed-table sizing, split-table baselines and
+independent split-cell cursors. The remaining **180** cases retain their
+assertions; this repair does not complete P6/P7 or the changed-width and native
+formatting extensions. Exact remaining failures and first assertions are in
+`temp/failed_tests_remaining.json`.
+
+**WPT inputs and DOM geometry.** Independent Chromium 152 captures show that
+the six object-view-box references omitted the fixture support script, and
+the thirteen sticky references omitted its generated indicator elements.
+The companion corpus extractor now canonicalizes symlinked fixture/category
+paths, resolves its checkout from the caller's root, and reuses the existing
+reference-name helper. Nineteen independently captured Darwin references
+retain the scripts' complete DOM; baseline scores and comparison thresholds
+are unchanged. Source/reference hashes and browser identity are recorded in
+`temp/wpt-reference-provenance.json`.
+
+Eight sticky-table cases also exposed an engine defect: `offsetParent`
+incorrectly selected a static table ancestor for a positioned descendant.
+Table ancestry now applies only to static descendants, as specified by
+[CSSOM View §7](https://drafts.csswg.org/cssom-view/#dom-htmlelement-offsetparent).
+`PositionedTableDescendantsSkipStaticTableOffsetParents` checks sticky,
+relative, absolute and static controls. The WPT suites pass **56/56 images**
+and **139/139 position**; the text/layout native suite passes **128/128**.
+Receipts are under `temp/failed_tests_*`, `temp/wpt_repaired.log` and
+`temp/view_reuse_final_all.json`.
+
+**Radiant gate.** `make test-radiant-baseline` completes with **5,683 pass,
+155 accepted partial, 180 fail and one skip** of 6,019. Every failure belongs
+to the remaining native paged selection above. UI automation passes 609/609,
+DOM UI 157/157, page-load 111/111, page snapshots 51/51, and the full layout
+baseline has zero regressions. The new offset-parent regression also passes
+with forced AST and MIR execution. Aggregate report:
+`temp/failed_tests_radiant_summary.json`.
+
+**Lambda gate.** `make test-lambda-baseline` completes with **7,447/7,450**
+combined runtime/input checks passing, including 313/313 forced-GC checks.
+All three failures exercise `test/lambda/pdf/output_pages.ls`: its golden,
+the tier-parity case and the binary-schema PDF case. The PDF callback visitor
+has no `paint` consumer for retained page paint commands, so traversal fails.
+An isolated CLI relinked with the HEAD versions of the three changed production
+files reproduces the same failure on interpreter and JIT; the working CLI and
+sources are not replaced. This existing callback-integration gap remains open.
+Evidence: `temp/failed_tests_lambda_gate.log` and
+`temp/head-pdf-comparison/result.json` (revision and binary checksum).
