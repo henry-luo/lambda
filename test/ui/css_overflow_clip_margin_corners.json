@@ -1,0 +1,202 @@
+{
+  "name": "Clip-margin outsets preserve square and small corners",
+  "html": "test/ui/css_overflow_clip_margin_corners.html",
+  "viewport": {
+    "width": 560,
+    "height": 200
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#square",
+        "offset_x": -9,
+        "offset_y": -9
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#square",
+        "offset_x": -9,
+        "offset_y": -9
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "square"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#small",
+        "offset_x": -15,
+        "offset_y": -15
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#small",
+        "offset_x": -15,
+        "offset_y": -15
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "small"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#round",
+        "offset_x": -9,
+        "offset_y": -9
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#round",
+        "offset_x": 5,
+        "offset_y": 5
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#round",
+        "offset_x": 5,
+        "offset_y": 5
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "round"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#grow"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-margin",
+      "equals": "border-box 20px"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#square",
+        "offset_x": -15,
+        "offset_y": -15
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#square",
+        "offset_x": -15,
+        "offset_y": -15
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "square"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-margin",
+      "equals": "border-box 10px"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#square",
+        "offset_x": -9,
+        "offset_y": -9
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#square",
+        "offset_x": -9,
+        "offset_y": -9
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-hit",
+      "equals": "square"
+    }
+  ]
+}

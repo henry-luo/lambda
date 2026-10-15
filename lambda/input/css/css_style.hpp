@@ -228,6 +228,17 @@ bool css_compute_integer_value(const CssValue* value, const CssMathEvaluationCon
     double minimum, double maximum, double* result);
 bool css_compute_integer_result(const CssValue* value, const CssMathResult* math,
     double minimum, double maximum, double* result);
+double css_clamp_numeric_value(double value, double minimum = 0.0, double maximum = 1.0);
+bool css_compute_opacity_result(const CssMathResult* math, float* result);
+bool css_compute_nonnegative_number_result(const CssMathResult* math, float* result);
+struct CssFlexBasisValue {
+    float value = -1.0f;
+    bool is_percent = false;
+    bool is_content = false;
+    bool is_stretch = false;
+};
+bool css_compute_flex_basis_result(const CssValue* value, const CssMathResult* math,
+    CssFlexBasisValue* result);
 bool css_hyphenate_limit_components(const CssValue* value, const CssValue* components[3]);
 CssValue* css_simplify_math_value(Pool* pool, const CssValue* value);
 
@@ -903,6 +914,10 @@ CssValue* css_grid_project_resolved_template_tracks(Pool* pool, const CssValue* 
 
 const CssValue* css_container_shorthand_longhand(const CssValue* value,
     CssPropertyCode property, Pool* pool);
+
+// project borrowed components or pool-owned defaults after the shared cascade and substitution.
+const CssValue* css_project_shorthand_longhand(Pool* pool, const CssValue* value,
+    CssPropertyCode shorthand, CssPropertyCode longhand);
 
 
 // individual transforms compose in this order, independently of declaration order.

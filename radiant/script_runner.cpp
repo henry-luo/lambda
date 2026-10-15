@@ -2404,6 +2404,14 @@ static void collect_document_import_maps(Element* element,Input* input,ArrayBuil
     }
 }
 
+bool document_snapshot_is_ready(const DomDocument* document) {
+    return !document || !document->root || !document->root->has_class("reftest-wait");
+}
+
+static int document_snapshot_ready_predicate(void* user) {
+    return document_snapshot_is_ready((const DomDocument*)user);
+}
+
 extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocument* dom_doc,
                                                   Pool* pool, Url* base_url,
                                                   DocumentScriptPhaseTiming* timing) {
@@ -2700,6 +2708,16 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
             // Static one-shot render (make layout, headless smoke): no host loop
             // will pump later, so drain everything now with the 5s watchdog.
             js_event_loop_drain();
+            if (dom_doc->js.auto_close_event_loop && !document_snapshot_is_ready(dom_doc)) {
+                // explicit readiness can require more frames than the ordinary snapshot sample.
+                RuntimeExecutionScope execution_scope(document_context);
+                int settled = js_await_bounded_drain(document_snapshot_ready_predicate, dom_doc,
+                    radiant_script_exec_timeout_seconds(watchdog_source_len) * 1000, 0, 0);
+                if (settled < 0) {
+                    log_error("script snapshot readiness: explicit wait remains pending after bounded drain");
+                    result = ItemError;
+                }
+            }
             log_mem_stage("js: after event loop drain");
             log_info("execute_document_scripts: timer queue drained");
         }

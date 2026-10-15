@@ -1222,11 +1222,16 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     Bound overflow_clip; Corner overflow_radius;
     bool clipped_out = render_clip_overflow_geometry(block, &overflow_clip, &overflow_radius) &&
         !event_block_is_top_level_viewport(block) &&
-        (event->x - evcon->block.x >= overflow_clip.right ||
-         event->y - evcon->block.y >= overflow_clip.bottom ||
-         !clip_point_in_rounded_rect(event->x - evcon->block.x, event->y - evcon->block.y,
+        ((layout_block_clips_overflow_axis(block, true) &&
+            (event->x - evcon->block.x < overflow_clip.left ||
+             event->x - evcon->block.x >= overflow_clip.right)) ||
+         (layout_block_clips_overflow_axis(block, false) &&
+            (event->y - evcon->block.y < overflow_clip.top ||
+             event->y - evcon->block.y >= overflow_clip.bottom)) ||
+         (radiant_corner_has_radius(&overflow_radius) &&
+          !clip_point_in_rounded_rect(event->x - evcon->block.x, event->y - evcon->block.y,
             {overflow_clip.left, overflow_clip.top, overflow_clip.right - overflow_clip.left,
-             overflow_clip.bottom - overflow_clip.top}, &overflow_radius));
+             overflow_clip.bottom - overflow_clip.top}, &overflow_radius)));
     // target the scrollbars first
     View* view = NULL;
     bool hover = false;

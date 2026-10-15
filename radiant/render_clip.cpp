@@ -557,24 +557,56 @@ bool render_clip_push_vector_css(PaintList* paint, ViewElement* element,
 bool render_clip_overflow_geometry(ViewBlock* block, Bound* clip, Corner* radius) {
     if (!clip || !radius || !layout_block_overflow_clip(block, clip)) return false;
     *radius = {};
+    // CSS Overflow 3 §3.1.2: a clip/visible pair has straight clipping edges.
+    if (!layout_block_clips_overflow_axis(block, true) ||
+        !layout_block_clips_overflow_axis(block, false)) return true;
     BorderProp* border = block->bound ? block->boundary()->border.get() : nullptr;
     if (border) {
         resolve_border_radius_percentages(&border->radius, block->width, block->height);
-        *radius = radiant_corner_inset_edges(&border->radius, clip->top,
-            block->width - clip->right, block->height - clip->bottom, clip->left);
+        *radius = render_geometry_outset_corners(&border->radius, block->width, block->height,
+            -clip->top, clip->right - block->width, clip->bottom - block->height, -clip->left);
         constrain_corner_radii(radius, clip->right - clip->left, clip->bottom - clip->top);
     }
     return true;
 }
 
+bool render_clip_overflow_bounds(ViewBlock* block, float origin_x, float origin_y,
+        float scale, Bound visible, const RdtMatrix* transform, Bound* clip, Corner* radius) {
+    if (!render_clip_overflow_geometry(block, clip, radius)) return false;
+    clip->left = origin_x + clip->left * scale;
+    clip->right = origin_x + clip->right * scale;
+    clip->top = origin_y + clip->top * scale;
+    clip->bottom = origin_y + clip->bottom * scale;
+    *radius = radiant_corner_scaled(radius, scale);
+    bool clip_x = layout_block_clips_overflow_axis(block, true);
+    bool clip_y = layout_block_clips_overflow_axis(block, false);
+    if (clip_x && clip_y) return true;
+    // bound an open strip by the destination clip in owner space, without imposing a box edge.
+    if (transform) {
+        RdtMatrix inverse;
+        if (!rdt_matrix_inverse(transform, &inverse) ||
+            !rdt_matrix_project_rect_bounds(&inverse, visible.left, visible.top,
+                visible.right, visible.bottom, &visible.left, &visible.top,
+                &visible.right, &visible.bottom)) {
+            log_error("[OVERFLOW_CLIP] cannot bound an open axis across a projective horizon");
+            return false;
+        }
+    }
+    if (!clip_x) { clip->left = visible.left; clip->right = visible.right; }
+    if (!clip_y) { clip->top = visible.top; clip->bottom = visible.bottom; }
+    return true;
+}
+
 bool render_clip_push_vector(PaintList* paint, ViewElement* element,
-        float abs_x, float abs_y, RenderClipKind kind) {
+        float abs_x, float abs_y, RenderClipKind kind, Bound visible,
+        const RdtMatrix* transform) {
     if (kind == RENDER_CLIP_SHAPE) return render_clip_push_vector_css(paint, element, abs_x, abs_y);
     ViewBlock* block = lam::view_as_block(element);
     Bound clip; Corner radius;
-    if (!paint || !render_clip_overflow_geometry(block, &clip, &radius)) return false;
+    if (!paint || !render_clip_overflow_bounds(block, abs_x, abs_y, 1.0f,
+            visible, transform, &clip, &radius)) return false;
     RdtPath* path = render_path_create_rounded_rect(
-        {abs_x + clip.left, abs_y + clip.top, clip.right - clip.left, clip.bottom - clip.top}, &radius);
+        {clip.left, clip.top, clip.right - clip.left, clip.bottom - clip.top}, &radius);
     if (!path) return false;
     int before = paint_list_count(paint);
     paint_push_clip(paint, path, nullptr, RDT_FILL_WINDING);
@@ -608,20 +640,21 @@ RenderClipScope render_clip_push_overflow_scope(RasterRenderContext* rdcon, View
                                                float origin_x, float origin_y) {
     RenderClipScope scope = {};
     Bound clip; Corner radius;
-    if (!rdcon || !render_clip_overflow_geometry(block, &clip, &radius)) return scope;
+    if (!rdcon || !render_clip_overflow_bounds(block, origin_x, origin_y,
+            rdcon->raster_scale, rdcon->block.clip, render_state_current_transform(rdcon),
+            &clip, &radius)) return scope;
     // untransformed rectangles already constrain every primitive through the block bound;
     // a second vector mask changes image edge coverage without adding a constraint.
     if (!radiant_corner_has_radius(&radius) && !render_state_current_transform(rdcon)) return scope;
-    float scale = rdcon->raster_scale;
-    float cw = (clip.right - clip.left) * scale;
-    float ch = (clip.bottom - clip.top) * scale;
+    float cw = clip.right - clip.left;
+    float ch = clip.bottom - clip.top;
     if (cw <= 0.0f || ch <= 0.0f) return scope;
-    Corner cr = radiant_corner_scaled(&radius, scale);
+    Corner cr = radius;
 
     ClipShape inline_shape = {};
     inline_shape.type = CLIP_SHAPE_ROUNDED_RECT;
     // retain the owner's shape before scrolling or intersection with ancestor clips.
-    inline_shape.rounded_rect = {origin_x + clip.left * scale, origin_y + clip.top * scale, cw, ch,
+    inline_shape.rounded_rect = {clip.left, clip.top, cw, ch,
         cr.top_left, cr.top_right, cr.bottom_right, cr.bottom_left};
     ScratchMark mem = scratch_scope_begin(&rdcon->scratch);
     ClipShape* shape = render_clip_clone_shape(&rdcon->scratch, &mem, &inline_shape);

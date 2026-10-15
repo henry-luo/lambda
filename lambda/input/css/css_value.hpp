@@ -636,6 +636,8 @@ struct CssIntrinsicSizeAxis {
 };
 bool css_intrinsic_size_components(const CssValue* value, bool shorthand,
                                     CssIntrinsicSizeAxis axes[2]);
+bool css_overflow_clip_margin_components(const CssValue* value,
+    CssEnum* box, const CssValue** length);
 bool css_value_keyword_equals(const struct CssValue* value, CssEnum keyword);
 struct CssFunction;
 bool css_function_name_is(const CssFunction* function, const char* name);

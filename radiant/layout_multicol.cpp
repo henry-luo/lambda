@@ -216,7 +216,7 @@ static void multicol_fragment_grid_dimensions(
     *row_count = grid.row_count;
 }
 
-static float multicol_last_fragment_piece_height(float total_height,
+static float multicol_last_fragment_piece_extent(float total_height,
                                                  float fragment_capacity) {
     if (fragment_capacity <= 0.0f) return 0.0f;
     float piece = fmodf(total_height, fragment_capacity);
@@ -534,9 +534,7 @@ static void multicol_flow_margins(ViewBlock* container, ViewBlock* child,
     if (out_after) *out_after = 0.0f;
     if (!container || !child) return;
 
-    const Margin* margin = child->bound && child->boundary()->has_flow_margin
-        ? &child->boundary()->flow_margin
-        : (child->bound ? &child->boundary()->margin : nullptr);
+    const Margin* margin = view_boundary_flow_margin(child->bound ? child->boundary() : nullptr);
     if (!margin) return;
 
     if (multicol_has_vertical_inline_axis(container)) {
@@ -3540,8 +3538,13 @@ static void multicol_balance_line_to_column(ViewBlock* block, int line_index,
     }
 }
 
-static float multicol_normalize_inline_x(float x, float origin_x, float pitch) {
+static float multicol_normalize_inline_x(float x, float origin_x, float pitch,
+                                         bool preserve_line_end = false) {
     if (pitch <= 0) return x;
+    // a forced break retains the preceding line's upper endpoint at a seam.
+    if (preserve_line_end && x > origin_x) {
+        return origin_x + multicol_last_fragment_piece_extent(x - origin_x, pitch);
+    }
     float local = fmodf(x - origin_x, pitch);
     if (local < 0) local += pitch;
     return origin_x + local;
@@ -4252,7 +4255,7 @@ static bool multicol_project_fragmented_inline_descendants(
             }
         } else {
             float normalized_x = multicol_normalize_inline_x(
-                items[i].original_x, 0.0f, inner_pitch);
+                items[i].original_x, 0.0f, inner_pitch, items[i].is_forced_break);
             float line_local_delta_y = items[i].original_y - items[i].line_y;
             float fragment_line_offset = slice_start_trim && inner_fragment_index > 0
                 ? continuation_line_offset : first_fragment_line_offset;
@@ -5005,12 +5008,6 @@ static int multicol_project_fragmented_descendants(
                     local_y;
             } else {
                 int inner_fragment_index = fragment_index;
-                if (nested_descendants_local && descendant->view_type == RDT_VIEW_BR &&
-                    placement.local_offset >= 0.5f) {
-                    // css inline: a br marker at the end of a line belongs to
-                    // the next fragment's line-start edge, not the preceding slot.
-                    inner_fragment_index++;
-                }
                 int inner_column_index = inner_fragment_index % inner_column_count;
                 int parent_fragment_index = inner_fragment_index / inner_column_count;
                 int parent_column_index = parent_fragment_index % column_count;
@@ -5022,8 +5019,7 @@ static int multicol_project_fragmented_descendants(
                     local_y = projected_atomic ? placement.local_offset : 0.0f;
                     fragment_index = inner_fragment_index;
                 }
-                new_x = nested_descendants_local && descendant->view_type == RDT_VIEW_BR
-                    ? 0.0f : descendant->x;
+                new_x = descendant->x;
                 new_x += parent_column_index * (column_width + column_gap) +
                     inner_column_index * (inner_column_width + inner_column_gap);
                 new_y = parent_row_index * (fragment_height + row_gap) + local_y;
@@ -7046,7 +7042,7 @@ static float multicol_fragmented_child_union(
         if (multicol_uses_fixed_wrapped_rows(container) &&
             container->multicol_prop()->fill == COLUMN_FILL_AUTO &&
             row_count > 1) {
-            float last_piece_height = multicol_last_fragment_piece_height(
+            float last_piece_height = multicol_last_fragment_piece_extent(
                 initial_fragment_offset + item_height, fragment_capacity);
             // css multicol-2 §4.2: auto-fill exposes the final fragment's
             // visual extent, while the container still owns complete rows.
@@ -7062,7 +7058,7 @@ static float multicol_fragmented_child_union(
             union_height = max(0.0f, union_height - initial_fragment_offset);
         }
         if (zero_height_fragmentainer) {
-            float last_piece_height = multicol_last_fragment_piece_height(
+            float last_piece_height = multicol_last_fragment_piece_extent(
                 initial_fragment_offset + item_height, fragment_capacity);
             union_height = (row_count - 1) * row_gap + last_piece_height;
         }

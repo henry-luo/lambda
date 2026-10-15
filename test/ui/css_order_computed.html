@@ -1,0 +1,8 @@
+<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;background:white}button{height:24px}.stage{width:60px;height:20px;order:5}
+#flex{display:flex}#grid{display:grid;grid-template-columns:20px 20px 20px}
+.red,.blue,.green{width:20px;height:20px}.red{font-size:20px;background:red;--level:calc(1em / 10px);order:var(--level)}
+.blue{background:blue;order:3}.green{background:green;order:1}.red.inherit{order:inherit}
+</style><button id="check">Check</button><button id="change">Change</button><button id="invalid">Invalid</button><button id="inherit">Inherit</button>
+<output id="report"></output><div id="flex" class="stage"><div id="flexRed" class="red"></div><div class="blue"></div><div class="green"></div></div><div id="grid" class="stage"><div id="gridRed" class="red"></div><div class="blue"></div><div class="green"></div></div>
+<script>(function(){var a=document.getElementById('flexRed'),b=document.getElementById('gridRed'),report=document.getElementById('report');function record(prefix){report.setAttribute('data-'+prefix+'values',getComputedStyle(a).order+'|'+getComputedStyle(b).order);}document.getElementById('check').onclick=function(){record('');};document.getElementById('change').onclick=function(){a.style.fontSize='40px';b.style.fontSize='40px';record('dirty-');};document.getElementById('invalid').onclick=function(){a.style.setProperty('--level','2px');b.style.setProperty('--level','2px');record('invalid-');};document.getElementById('inherit').onclick=function(){a.className='red inherit';b.className='red inherit';record('inherited-');};})();</script>

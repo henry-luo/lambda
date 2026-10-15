@@ -2362,6 +2362,34 @@ TEST(RadiantViewTest, ContinuesLayoutBatchAfterTimedOutLoadScript) {
     shell_result_free(&shell_result);
 }
 
+TEST(RadiantViewTest, FailsUnsettledSnapshotAndContinuesLayoutBatch) {
+    RadiantViewLaunch launch = {};
+    launch.label = "unsettled-layout-batch";
+    ASSERT_TRUE(test_radiant_view_prepare_launch(&launch));
+    char output_directory[1200];
+    snprintf(output_directory, sizeof(output_directory), "%s/temp/layout", launch.cwd);
+    ASSERT_TRUE(create_dir(output_directory));
+    const char* args[] = {
+        "./lambda.exe", "layout", "test/html/layout_snapshot_unsettled.html",
+        "test/html/layout_snapshot_ready.html", "--output-dir", "temp/layout",
+        "--continue-on-error", "--auto-close", "--no-log", NULL,
+    };
+    ShellOptions options = {};
+    options.cwd = launch.cwd;
+    options.merge_stderr = true;
+    options.timeout_ms = 10000;
+    ShellResult result = shell_exec("./lambda.exe", args, &options);
+    EXPECT_FALSE(result.timed_out);
+    EXPECT_EQ(result.exit_code, 1) << (result.stdout_buf ? result.stdout_buf : "");
+    char output_path[1200];
+    snprintf(output_path, sizeof(output_path), "%s/temp/layout/html__layout_snapshot_unsettled.json", launch.cwd);
+    EXPECT_FALSE(file_exists(output_path));
+    snprintf(output_path, sizeof(output_path), "%s/temp/layout/html__layout_snapshot_ready.json", launch.cwd);
+    // the next ready document proves rejection kept the batch's ordinary teardown path.
+    EXPECT_TRUE(file_exists(output_path));
+    shell_result_free(&result);
+}
+
 TEST(RadiantViewTest, ScalesWatchdogForDenseProductionBundles) {
     EXPECT_EQ(RADIANT_SCRIPT_EXEC_TIMEOUT_BASE_SECONDS,
               radiant_script_exec_timeout_source_seconds(8192));

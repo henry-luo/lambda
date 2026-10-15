@@ -1,0 +1,25 @@
+<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;background:white}button{height:24px}
+#host{position:absolute;left:20px;top:50px;--mode:crisp-edges;image-rendering:var(--mode)}
+img{width:8px;height:8px}#main{display:block}#trans{position:absolute;left:120px;top:0;width:2px;height:2px;transform:scale(4);transform-origin:0 0}#main::before{image-rendering:inherit}
+ul{margin:20px 0 0;padding-left:24px}li{font:16px/24px Arial;list-style-image:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVQImWP4z8Dwn4Hh/38WRgiLAQA+/wYAKNOoDAAAAABJRU5ErkJggg==)}
+</style><button id="check">Check</button><button id="auto">Auto</button><button id="invalid">Invalid</button><button id="restore">Restore</button><button id="raw">Pixelated only</button><output id="report"></output>
+<div id="host"><img id="main" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVQImWP4z8Dwn4Hh/38WRgiLAQA+/wYAKNOoDAAAAABJRU5ErkJggg=="><img id="trans" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVQImWP4z8Dwn4Hh/38WRgiLAQA+/wYAKNOoDAAAAABJRU5ErkJggg=="><ul><li id="marker">X</li></ul>
+<div id="initial" style="image-rendering:initial"></div><div id="unset" style="image-rendering:unset"></div>
+<div id="bad" style="--bad:garbage;image-rendering:var(--bad)"></div>
+<div id="literal" style="image-rendering:crisp-edges;image-rendering:garbage"></div>
+<div id="priority" style="image-rendering:pixelated!important;image-rendering:auto"></div>
+<div id="upper" style="image-rendering:CRISP-EDGES"></div></div>
+<script>(function(){
+var names=['host','main','marker','initial','unset','bad','literal','priority','upper'];
+function record(){
+ var values=[];for(var i=0;i<names.length;i++)values.push(getComputedStyle(document.getElementById(names[i])).imageRendering);
+ values.push(getComputedStyle(document.getElementById('main'),'::before').imageRendering);
+ document.getElementById('report').setAttribute('data-values',values.join('|'));
+}
+document.getElementById('check').onclick=record;
+document.getElementById('auto').onclick=function(){document.getElementById('host').style.setProperty('--mode','auto');};
+document.getElementById('invalid').onclick=function(){document.getElementById('host').style.setProperty('--mode','garbage');};
+document.getElementById('restore').onclick=function(){document.getElementById('host').style.setProperty('--mode','crisp-edges');};
+document.getElementById('raw').onclick=function(){document.getElementById('host').style.setProperty('--mode','pixelated');};
+})();</script>

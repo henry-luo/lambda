@@ -202,6 +202,8 @@ TEST_P(MirGcStressTest, MatchesUnstressedRunUnderForcedGc) {
     base.quiet = true;
 
     mir_check::ProcessResult reference = mir_check::run_lambda_process(script.path, base);
+    GTEST_LOG_(INFO) << "mir-gc-stress reference completed: script=" << script.path
+                    << " exit=" << reference.exit_code;
     ASSERT_EQ(reference.exit_code, 0)
         << "reference (unstressed) run failed for " << script.path
         << "\n--- output ---\n" << reference.output;
@@ -219,7 +221,12 @@ TEST_P(MirGcStressTest, MatchesUnstressedRunUnderForcedGc) {
             spec.env.push_back(mode.env[i]);
         }
 
+        // schedule boundaries are real progress during long multi-process stress cases.
+        GTEST_LOG_(INFO) << "mir-gc-stress schedule started: script=" << script.path
+                        << " mode=" << mode.name;
         mir_check::ProcessResult stressed = mir_check::run_lambda_process(script.path, spec);
+        GTEST_LOG_(INFO) << "mir-gc-stress schedule completed: script=" << script.path
+                        << " mode=" << mode.name << " exit=" << stressed.exit_code;
 
         std::string context =
             "\nscript: " + script.path +

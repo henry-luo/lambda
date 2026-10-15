@@ -1,0 +1,30 @@
+{
+  "name":"Overflow clip margin computed boxes and owner lengths reach live paint and hit testing",
+  "html":"test/ui/css_overflow_clip_margin_computed.html",
+  "viewport":{"width":480,"height":250},
+  "events":[
+    {"type":"click","target":{"selector":"#check"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-value","equals":"content-box 22px"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-inherit","equals":"content-box 22px"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-pseudo","equals":"border-box 14px"},
+    {"type":"assert_rect","target":{"selector":"#patch"},"width":22,"height":12},
+    {"type":"assert_pixel","target":{"selector":"#child","offset_x":1,"offset_y":5},"min_r":255,"max_r":255,"min_g":255,"max_g":255,"min_b":255,"max_b":255},
+    {"type":"click","target":{"selector":"#change"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-dirty-value","equals":"content-box 32px"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-dirty-inherit","equals":"content-box 32px"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-dirty-pseudo","equals":"border-box 18px"},
+    {"type":"assert_rect","target":{"selector":"#patch"},"width":32,"height":12},
+    {"type":"assert_pixel","target":{"selector":"#child","offset_x":1,"offset_y":5},"min_r":255,"max_r":255,"min_g":0,"max_g":0,"min_b":0,"max_b":0},
+    {"type":"click","target":{"selector":"#child","offset_x":1,"offset_y":5}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-hit","equals":"yes"},
+    {"type":"click","target":{"selector":"#invalid"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-invalid-value","equals":"0px"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-invalid-inherit","equals":"0px"},
+    {"type":"click","target":{"selector":"#reset"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-reset-value","equals":"0px"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-reset-inherit","equals":"0px"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-reset-pseudo","equals":"border-box 18px"},
+    {"type":"assert_rect","target":{"selector":"#patch"},"width":0,"height":12},
+    {"type":"assert_pixel","target":{"selector":"#child","offset_x":1,"offset_y":5},"min_r":255,"max_r":255,"min_g":255,"max_g":255,"min_b":255,"max_b":255}
+  ]
+}

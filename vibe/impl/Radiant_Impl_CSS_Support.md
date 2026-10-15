@@ -1,6 +1,6 @@
 # Radiant CSS Support — Remaining Implementation Plan
 
-**Status:** Active P0–P2 implementation continues from merged `a600e59bc` (2026-10-13). Protected `native_control47q_*` qualifies nine lower-owned form/scroll/document-tick calls after shared emphasis/CSSOM delivery: core 6,797; Radiant 5,428 full /353 partial /one skipped; 1,171 scoped ASan cases; 895 live assertions per runtime. Full export passes 267/272 groups with 39 raw failed assertions; SVG passes 126 formats /2,466 assertions. The inventory records 410 names and twenty-one bounded partial families. Boundary debt is 168 deferred /31 unapproved imports, with nine removed and no additions or allowance changes. Broader P0–P2 criteria remain open. See §9 for evidence and limits.
+**Status:** P0–P1 implementation resumed on `4e3ba541c` (2026-10-14), then stopped at the user's requested checkpoint on 2026-10-15. Shared computation, layout and snapshot repairs are applied; latest scoped checks and predecessor aggregate results are distinguished below and in §9. Inventory covers 411 names and thirty bounded partial families. P0–P1 are incomplete; full Radiant, export and core qualification of the final runtime remains pending.
 
 **Predecessor:** [CSS selector/property implementation record](<Radiant_Impl_CSS_Selector_Property_Support (retired).md>), closed and retired with unfinished scope transferred here.
 
@@ -8,13 +8,15 @@
 
 **Scope:** Remaining CSS selector, cascade, value, layout, paint, motion and interaction consumers, including their CSSOM and export surfaces. This is the active CSS implementation backlog.
 
+**Latest runtime evidence (2026-10-15):** `f77ce37219bd…` rejects unsettled explicit layout snapshots while preserving batch cleanup and continuation. Scoped ASan over thirty-three production owners and four test units passes 135 computation /122 text /164 vector cases; two CLI recovery cases pass on each AST/MIR runtime. Boundary passes four strict DSOs with 137 deferred /zero unapproved imports against allowance 165; integer lint and inventory freshness pass. Full aggregates have not been rerun on this runtime. Its immediate predecessor `42f35d12d02c…` records Radiant 5,878 full /155 partial /one failed /one skipped over 6,035 inputs and ordinary export 288/293 groups, retaining the same thirty-nine raw assertions in five paint/PDF groups. The latest core/input run, on `d5006a31c061…`, records 6,963/6,964, including all 313 forced-GC and 2,112 input cases. The Markdown reference and six dashboard golden baselines are diagnosed stale expectations confirmed against Chromium; neither is changed. The preceding marker checkpoint remains the latest all-green core/Radiant aggregate. Exact configurations, raw failures and remaining limits are in §9.
+
 **Authority:** An implementation plan, not a new semantics/design ruling. Ownership follows **D4.5.1v4 / D4.1.4v5**, property identity **D4.6.1v4**, native roots/context lifetime **D5.3.3 / D5.4.1**, and module boundaries **D7.1.3 / D7.5.3 / D7.3.3–D7.3.4** in [Lambda_Formal_Design.md](../../doc/Lambda_Formal_Design.md). No formal ruling defines this CSS priority order. New unresolved architectural choices require a working design record before implementation; this draft changes no ruling.
 
 ## 1. Starting point and delivery contract
 
 The predecessor delivered substantial shared machinery: selector specificity and validation, namespace/relative/state selectors, cascade layers and nesting, custom-property substitution and bounded expansion, live CSSOM interfaces, typed math and grid lengths, logical borders/radii, animation/transition consumers, SVG presentation properties, scrolling, markers, selection and file-button paint. These are the starting implementation, not tasks to implement again.
 
-The current registry has **410 unique property definitions**, including the appended legacy orientation entry with existing NameIds preserved. The older **342 / 244 effective / 43 partial / 55 parsed-only** classification is historical; it does not classify the current registry. HTML responsive images, PDF Unicode glyph outlines and the explicit paged compositor also now exist. Remaining work must be based on a current reproducer, not an earlier progress paragraph saying a feature was absent.
+The refreshed registry has **411 unique property definitions** on the resumed 2026-10-14 source, including the appended legacy orientation entry with existing NameIds preserved. The older **342 / 244 effective / 43 partial / 55 parsed-only** classification is historical; it does not classify the current registry. HTML responsive images, PDF Unicode glyph outlines and the explicit paged compositor also now exist. Remaining work must be based on a current reproducer, not an earlier progress paragraph saying a feature was absent.
 
 Starting focused evidence was 523/523 native view/pagination tests, 112/112 vector tests, and 38 CSS Syntax files passing with six skips. The starting export audit recorded 171 passes, 29 failures requiring unavailable Poppler tools, and one Poppler-dependent skip; refreshed delivery results appear in §9. These checks do **not** establish full CSS conformance or a fresh all-green aggregate. See the support report for dated baseline inventories and output-specific limits.
 
@@ -4027,3 +4029,1496 @@ passing required core/Radiant gates, 1,172 ASan cases and 913 live assertions pe
 runtime, but export/boundary qualification and evidence sealing remain incomplete.
 SVG49 remains an unapplied draft. P0–P2 completion and support/boundary promotion
 are not claimed (**CI-18 / FT-17 / D7.1.3**).
+
+
+### 2026-10-14 — Resumed P0.2/P1.1 intrinsic computation and automatic fallbacks
+
+The resumed source is `4e3ba541c`; the older `temp/css_support_p1/` checkpoint
+artifacts are absent in this checkout. Fresh evidence is recorded under
+`temp/css_support_p0_p1_resume/`, with initial source/binary hashes and retained
+failed native/live probes. No recovered historical qualification is assumed.
+
+All five `contain-intrinsic-*` getters lacked computed accessors. The new
+full-length serializer shares layout's physical/logical component cascade and
+existing owner-font/unit math. It retains `auto none`, computes inherited
+lengths at their declaration owner, handles pseudo inheritance and shorthand
+compression, and defaults invalid substitution without reviving earlier
+declarations (**CI-18 / D4.5.1v4 / D4.1.4v5**). Repeated reads retain no scratch
+in the source pool. The native fixture helper now assigns parsed importance
+and source order through its shared application path.
+
+The causal live fixture initially fails eleven of twelve assertions; Chromium
+passes all twelve. Adding computed accessors exposes two remaining real geometry
+failures: intrinsic queries excluded every `auto` fallback even when no
+remembered size existed. Width/height fallback and empty-containment paths now
+retain the explicit fallback after checking usable memory. The expanded
+thirteen-assertion fixture passes native and Chromium; its `auto none` control
+retains zero descendant contribution. Four reference pairs compare actual
+PNG, independently rasterized SVG and PDF with explicit geometry at 1×/2×.
+
+Normal and scoped ASan computation runners pass 117 cases. Fourteen containment
+and visibility fixtures pass 226 assertions on each AST/MIR runtime, both normal
+and scoped ASan. Instrumentation covers `css_prop_table.cpp`,
+`resolve_css_style.cpp`, `intrinsic_sizing.cpp` and the computation regression
+unit; other host/vendor objects remain ordinary debug and leak detection is
+disabled. The complete native view/independent/pagination runner passes 658 cases.
+Focused intrinsic exports and the applied text-ink viewport controls pass;
+layout lint passes. The fresh required Radiant gate records 5,819 passing /156
+partial /five failing /one skipped results. Its failures are the same four
+document-editor fixtures and markdown regression as the initial native-host
+control. The full exporter passes 270/278 groups and retains 112 assertions:
+the historical 39, 72 RTL-related comparisons in two current P1 groups and one
+PDF-import group assertion covering six page regressions. The RTL comparisons
+reproduce unchanged on the preserved initial runtime; the new intrinsic export
+group fails twelve comparisons there and passes after the fix. The boundary
+audit retains 168 deferred /31 unapproved imports with allowance 165; all four
+strict DSOs link. The regenerated inventory reconciles 411 identities already
+present on the resumed source; no property was registered by this increment.
+
+The initial native-host baseline retains four document-editor UI failures and
+one markdown baseline regression, plus the new pre-fix intrinsic probe. The
+sandbox attempt also times out in macOS graphics contexts and is preserved as
+an incomplete diagnostic run. Scene3D and view cases complete on the native
+host. Existing failures, partial layout results and raw exporter assertions
+remain required. This increment does not close P0/P1 or promote checkpoint48's
+full qualification; broader intrinsic/independent/fragmentation work and SVG49
+remain outstanding (**D7.1.3 / D7.5.3**).
+
+
+### 2026-10-14 — P0.2/P0.3/P1.3 direction defaults and RTL consumers
+
+The complete current export sweep reproduces 72 RTL-related comparisons beyond
+the historical 39. All 72 reproduce on the preserved initial runtime. The
+explicit suffix reference paints its ellipsis at the wrong end because implicit
+CSS inheritance overwrites a local HTML `dir=ltr` hint with an ancestor's
+authored direction. The existing hint now terminates only the implicit fallback
+loop; authored CSS still wins. A separate native control reproduces ignored
+inline `direction:inherit`, `initial` and `unset`. Direction now uses the
+existing shared keyword-slot resolver for both inline and block owners, removing
+the divergent per-kind dispatch (**FT-14 / CI-18 / D4.5.1v4 / D4.1.4v5**).
+
+The original two RTL/spacing export groups now pass every PNG/SVG/PDF reference
+at 1×/2× without changing their assertions or thresholds. The new native
+neutral/isolate and CSS-wide control passes. Its six-assertion live direction
+change/restoration fixture agrees with Chromium; both normal and scoped ASan
+AST/MIR hosts pass it and the existing 114-assertion RTL fixture. The broader
+16-fixture containment/direction set passes 346 assertions per runtime. Normal
+and scoped ASan computation/text-query runners pass 117/113 cases. Scoped ASan
+adds the text-query regression unit to the three instrumented CSS/intrinsic
+owners; other host/vendor objects remain ordinary debug, with leak detection
+disabled. The official SVG matrix passes 126 formats /2,466 assertions; layout
+lint passes. The required Radiant refresh records 5,821 full /156 partial /
+five failed /one skipped results over 5,983 inputs. The failures remain the
+markdown regression and four document-editor PDF/EML/TSV controls. The corrected
+frozen full exporter passes 272/278 groups with 40 raw assertions: the five
+historical CSS groups retain 39, and PDF import contributes one aggregate
+assertion for six reference-page regressions. No assertion or threshold changes.
+
+Two earlier export runs are retained as invalid qualification attempts. One
+overlapped the baseline's host rebuild, which temporarily removed `lambda.exe`;
+another frozen setup omitted `builtins`, causing resource-dependent failures.
+After restoring the existing resource links, all ten affected resource controls
+pass and the complete frozen rerun above finishes. Its binaries, source hashes,
+raw log and resource controls remain under
+`temp/css_support_p0_p1_resume/export_frozen/` and the resume log directory.
+
+The fresh Lambda/input gate records 2,112/2,112 input results and 6,651/6,652 core
+results. Its only raw failure is the GC-stress runner's 180-second idle timeout
+in `regression_music_layout`; the unchanged isolated case passes in 246,635 ms.
+That proves a slow forced-GC control rather than a demonstrated lifetime crash,
+but does not make the timed-out aggregate green or qualify the unrun remainder.
+No timeout, skip, assertion, golden or baseline is changed. Broader P0/P1 work
+and module-boundary debt remain open (**D5.3.3 / D5.4.1 / D7.1.3 / D7.5.3**).
+
+The next P0.2/P1.5 probe confirms missing `overflow`/logical computed accessors
+and a real component-rollback defect: a higher-layer `overflow-x:revert-layer`
+fails to exclude that layer's shorthand. Chromium retains `visible clip` where
+the native consumer selects `clip clip`. The probe's initial cross-writing-mode
+inheritance expectation was incorrect; Chromium and the existing native
+physical-axis consumer both inherit `visible`. The original expected file and
+failed browser/native results remain under the resume artifact directory; this
+control requires no inheritance-policy change. This was the pre-implementation
+overflow probe; the continuation below records its repairs.
+
+### 2026-10-14 — P0.2/P1.5 overflow component computation and open-axis clipping
+
+The same component rollback defect affected overflow and overscroll: selecting
+each shorthand/physical/logical winner separately allowed a higher-layer
+shorthand to survive a longhand's `revert-layer`. Both families now use the
+existing component-cascade resolver. Their common keyword decoder supplies
+initial/inherited values, substitutes and validates the winning source, and
+applies overflow's opposite-axis visible/clip coupling only to that family.
+Native layout and all eight physical/logical/shorthand computed accessors share
+it. Dirty reads compute ancestor axes iteratively rather than copying stale
+scroll snapshots; writing-mode computation reuses the CSSOM owner helper, and
+formatter allocations remain scratch-owned (**CI-18 / D4.5.1v4 / D4.1.4v5**).
+
+The computed-axis repair exposed a second root: every overflow consumer used a
+two-axis box clip even when one axis was `visible`. The shared axis predicate
+now drives native clip bounds and pointer rejection. Native and vector paths
+bound an open strip by the current destination extent in owner coordinates,
+including accumulated transforms. Clip/visible pairs keep straight edges per
+[CSS Overflow 3 §3.1.2](https://www.w3.org/TR/css-overflow-3/#corner-clipping);
+paint containment still clips both axes. Automatic export bounds first collect
+finite descendant geometry and then apply the same owner strips. This avoids
+arbitrary oversized coordinates and does not manufacture scroll containers
+(**CI-18 / RSC1 / RSC7 / D4.5.1v4**).
+
+The first aggregate exposed an integration regression: resetting axes without
+an authored winner discarded existing UA/control defaults, producing 29 layout
+regressions and two additional document-wheel failures. The decoder now retains
+supplied defaults when an axis has no winner, and reports no authored computation
+when both are absent. HTML default setup records its fallback separately from
+author-computed scroll values; retained recascade resets that metadata before
+applying HTML defaults. Dirty CSSOM can therefore recover a textarea's `auto`
+after author CSS is removed, while explicit CSS `initial` remains distinct. The
+three existing HTML auto-overflow producers share one helper rather than copies.
+The failed 5,793-full /156-partial /36-failed /one-skipped aggregate remains
+preserved; the final gate restores all 31 new failures without changing checks.
+
+The new native rollback/computed/UA controls and full computation/text-query
+runners pass 119/114 cases. Repeated pseudo reads retain the document pool's
+bytes/allocation counts. The new live fixture passes all 25 style, dirty-edit,
+pixel and pointer assertions in Chromium and both native AST/MIR runtimes;
+adding existing transformed-overflow, containment/direction and the two wheel
+controls gives 20 fixtures /415 assertions per runtime. Twelve changed CSS,
+intrinsic, paint/hit, HTML-default and layout owners plus the two regression
+units are instrumented in matching scoped ASan builds; 119/114 native cases
+and 415 live assertions per runtime pass without sanitizer reports. Other
+host/vendor objects remain ordinary debug and leak detection is disabled.
+
+Four axis-aligned references pass all 24 byte-exact PNG/SVG/PDF comparisons at
+1×/2×. Four cardinal/scaled/arbitrary-angle/nested-transform scenes pass all 72
+independent interior/open-end/clipped-edge point checks through the same outputs.
+The final required Radiant gate records 5,825 full /156 partial /five failed /
+one skipped over 5,987 inputs; failures remain the markdown regression and four
+document-editor controls. The frozen complete exporter passes 274/280 groups
+with the same 40 raw assertions (39 historical CSS paint assertions plus the
+PDF-import aggregate assertion). Fresh boundary qualification retains 168
+deferred /31 unapproved imports, allowance 165, and all four strict DSOs linking.
+Layout lint passes. Source/binary hashes and logs are preserved under
+`temp/css_support_p0_p1_resume/overflow_ua_export_frozen/` and the resume log
+directory (**D7.1.3 / D7.5.3 / D7.3.3–D7.3.4**).
+
+Two arbitrary-angle reference trials retain twelve failed byte comparisons
+each, and a cardinal/scaled trial retains eight. Pre-trimmed rectangle and
+explicit clip-path references produce different antialias coverage; the latter
+also differs from overflow in Chromium's rotated control. Candidates and
+outputs remain under `temp/css_support_p0_p1_resume/angled_overflow_probe/`, with
+raw logs and browser comparisons alongside it. The new regression matrix uses
+byte-exact comparisons for axis-aligned geometry and independent interior/open-
+end/outside-edge points for transformed geometry; prior assertions stay intact.
+The browser textarea probe also finds Chromium's visible/initial/inherit/unset
+normalization to auto, a separate compatibility issue tracked by
+[Mozilla bug 2021168](https://bugzilla.mozilla.org/show_bug.cgi?id=2021168).
+The visible-value trial remains preserved under `ua_visible_probe/`; the accepted
+control checks default/hidden/removal behavior. This increment retains the
+existing generic CSS computation rather than introducing an unruled textarea
+exception. Input/select UA CSSOM breadth also remains unqualified.
+
+Byte-exact transformed fringes, projective-horizon strips, broader clip-margin
+boxes and independent/paged/effect consumers remain open. P0–P1 and the
+long-running goal remain active; the next P0 increment routes the reproduced
+upward SVG timing/value imports through the lower-owned engine provider.
+
+### 2026-10-15 — P0 host ownership and executable fixture selection
+
+The lower-owned host engine catalog now exposes 59 operations, up from 28.
+DOM callers reach native SVG timing/value/source contexts, geometry/hit tests,
+touch dispatch, animation creation and range/selection lifecycle projections
+through the existing immutable provider. The native Radiant module publishes
+the adapters; the runtime does not acquire a Radiant link dependency. Pure
+child-boundary lookup moves to the DOM node owner instead. Matrix/path/fill-rule
+POD declarations and the strongly typed path-containment callback have a shared
+lower header, with no function-pointer erasure or copied native algorithms
+(**D7.1.3 / D7.5.3 / D7.3.3–D7.3.4**).
+
+Borrowed source contexts use a lower-owned RAII scope that captures the same
+provider for entry and restoration. Native SVG scopes reuse the existing TLS
+producer, preserving nested same-document inheritance and cross-document
+isolation. Borrowed geometry is copied into scalar outputs; transient native
+text-hit objects stay in their owner. Existing Item roots and document pin
+projections remain at their call sites (**D4.5.1v4 / D4.1.4v5 / D5.3.3 /
+D5.4.1**).
+
+The unchanged boundary audit passes: 137 deferred imports, zero unapproved,
+against the existing allowance of 165; all four strict DSOs link. This removes
+all 31 newly unapproved imports from the resumed checkpoint. The remaining 137
+are explicit deferred debt, not a claim of complete module separation. Logs
+preserve every intermediate boundary count, including the final selection
+geometry caller found by the audit.
+
+Provider/range coverage passes 78 cases normally and under scoped ASan. It
+checks every operation, absent/incomplete providers, concurrent publication and
+dispatch, copied outputs, callback types and nested source restoration. A
+194-fixture DOM/SVG live sweep passes 2,034 assertions in each AST/MIR runtime,
+both normally and under scoped ASan. Six changed production owners and two
+test units are instrumented; other host/vendor objects remain ordinary debug,
+and leak detection is disabled. The native event WPT sweep separately records
+20 passed /12 skipped; it does not qualify skipped cases.
+
+The new DOM-suite touch fixture exercises the real testdriver bridge with four
+assertions, including fractional coordinates, active touch lists, targets and
+bubbling. Earlier baseline-only invocations selected zero fixtures and are
+preserved as unqualified runs. The automation CLI now exits 2 when an explicit
+fixture request selects no runnable fixtures after suite/tag/GTest filtering;
+its three scheduler unit tests remain independently runnable. No existing skip,
+assertion, timeout, golden or allowance is weakened. Final refreshed core,
+Radiant and exporter qualification is recorded separately when complete.
+
+Sources, immutable exporter/runtime copies, hashes and raw logs are under
+`temp/css_support_p0_p1_resume/`, including `dom_host_final_export_frozen/`
+and `asan_dom_host_final/`. P0–P1 and the long-running goal remain active.
+
+The refreshed core/input aggregate records 6,651/6,652 passes: input 2,112/2,112
+and core 4,539/4,540. Its unchanged forced-GC stress runner again reaches the
+180-second idle timeout; that raw failure remains. The frozen complete exporter
+again passes 274/280 groups with 40 raw assertions in the same five CSS groups
+and the PDF-import aggregate. An isolated minimal PDF probe independently
+reproduces the opaque-image edge pixel difference at 2×; clipping and padded
+soft masks produce distinct coverage rather than an accepted repair. No image
+writer workaround or assertion change is applied.
+
+### 2026-10-15 — P0.2/P1.2 pseudo grid font computation
+
+The shared declaration formatter discarded the pseudo selector before grid
+length normalization. A 5px `::before` with `grid-auto-columns:2em` consequently
+serialized `40px` using its 20px host instead of `10px`; pseudo font changes
+also remained stale. Passing the selector through the existing formatter and
+font/math resolver fixes the owner, while the existing inheritance walk still
+computes inherited lengths at the declaration owner (**CI-18 / D4.5.1v4 /
+D4.1.4v5**).
+
+The retained pre-fix native log reproduces direct/math/font-edit failures; the
+immutable pre-fix runtime passes four and fails eight of the new twelve live
+assertions. The corrected computation suite passes 120 cases normally and under
+scoped ASan, including 128 repeated direct/inherited reads with unchanged source
+pool bytes and allocation count. Chromium passes all twelve fixture checks.
+The fifteen-fixture grid family passes 1,616 live assertions per AST/MIR runtime
+under scoped ASan, with actual companion geometry and red pixels driven by the
+pseudo's computed length. All fifteen existing grid exporter groups pass using
+the immutable `grid_pseudo_export_frozen/` runtime. Twelve CSS/layout/paint
+owners and two test units are instrumented for this check; other host/vendor
+objects remain ordinary debug and leak detection is disabled.
+
+The first refreshed Radiant aggregate exposes a native initialization regression
+from the host-provider move: five SVG vector cases and one secondary-view case
+run without Jube startup and therefore have no provider. The raw run retains
+5,822 full /156 partial /eleven failed /one skipped over 5,990 inputs. The six
+new failures remain distinct from the markdown and four document-editor
+failures. Native UI and Jube startup now share
+`radiant_register_dom_engine_providers()`; standalone embedders call that same
+idempotent initializer before DOM engine queries, without starting Jube. Native
+fixtures install their engine services while preserving every existing input
+and assertion. Focused checks pass 658 secondary-view cases, 160 vector/SVG
+cases and all 78 lower-provider cases, including absence behavior (**D7.1.3 /
+D7.5.3**). The final aggregate and native initializer sanitizer checks follow
+separately. No P0–P1 tier is closed.
+
+The completed native initializer rerun records 5,829 full /156 partial /five
+failed /one skipped over 5,991 inputs. Only the same markdown and four editor
+controls fail; all six provider-initialization regressions are repaired without
+changing their geometry, lifetime or metadata expectations. Scoped ASan passes
+658 secondary-view, 160 vector/SVG and 78 provider/range cases, plus 194 live
+DOM/SVG fixtures with 2,034 assertions per AST/MIR runtime. This scope covers
+seven changed production owners and four regression units; other host/vendor
+objects remain ordinary debug, with leak detection disabled. The first native
+sanitizer build failed while attempting to remove archive members owned by
+another library; the corrected build enumerates actual archive membership and
+preserves the failed build log separately.
+
+The boundary audit still passes at 137 deferred /zero unapproved, allowance 165,
+with all four strict DSOs linking. Layout lint and the 411-name inventory check
+pass. The official SVG script on the grid checkpoint passes 126 format checks
+and 2,466 assertions. Immutable native-initializer runtime/source provenance is
+`native_provider_init_export_frozen/`; sanitizer provenance is
+`asan_native_provider_init2/`, alongside the raw qualification logs.
+
+The unchanged complete GC stress executable also finishes separately with
+313/313 passes against `dom_host_final_export_frozen/`, including all three
+forced-collection schedules for the slow music-layout input and the remaining
+corpus. This is a separate frozen-runtime result, not a conversion of the
+6,651/6,652 aggregate timeout into a pass (**D5.3.3 / D5.4.1**).
+
+The next isolated P0.2 reproducer finds pseudo `currentColor` resolving against
+the host, and dirty pseudo background reads returning no string. Its pre-fix
+runtime passes one and fails eleven of twelve live checks; Chromium passes all
+twelve. An initial receiver-context repair passes 121 native cases but still
+fails five live checks because dirty dispatch chooses an element-only derived
+serializer. Those raw trials remain preserved; the combined receiver/dispatch
+repair remains unqualified until its live and aggregate checks complete.
+
+### 2026-10-15 — P0.2 receiving pseudo colors and dirty dispatch
+
+Color-typed `currentColor` defaults and explicit/inherited values now retain the
+receiving element/pseudo while declaration inheritance walks its own owners.
+The common computed serializer selects pseudo fallback consistently before and
+after layout; unsupported element-only derived serializers can no longer
+return an empty dirty pseudo background read. The existing line-height
+serializer explicitly declares its pseudo support, preserving its shared
+font/leading computation on both paths (**D4.5.1v4 / D4.1.4v5; CI-18**).
+
+The initial receiver repair retains five failed live checks. The first dispatch
+repair then passes the new case but exposes two existing fixture regressions:
+`cssom_font_metric_units` loses two checks and `cssom_line_height_values` loses
+three because line-height's accessor lacked the pseudo capability flag. That
+raw aggregate records 5,829 full /156 partial /seven failed /one skipped over
+5,993 inputs. Declaring the existing capability restores both fixtures without
+changing their inputs, expected values or tolerance.
+
+The final scoped build passes 121 native computation cases and all 2,643 live
+assertions across 49 CSSOM/grid/decoration/emphasis/color/overflow fixtures in
+each AST/MIR runtime. Twelve changed CSS/layout/paint/default owners and two
+test units are instrumented; other host/vendor objects remain ordinary debug,
+with leak detection disabled. The ordinary 25-fixture affected-family sweep
+separately passes 1,774 assertions in each runtime. Chromium passes all twelve
+new fixture checks; its computed colors drive actual companion background and
+border pixels. Three independent literal references pass all eighteen exact
+PNG/SVG/PDF comparisons at 1×/2×, and three existing background/decoration/
+emphasis controls also pass.
+
+The refreshed core/input gate again records 6,651/6,652 passes, retaining the
+same GC-stress idle timeout. The final Radiant rerun restores the known five
+failures: 5,831 full /156 partial /five failed /one skipped over 5,993 inputs.
+The immutable complete exporter on the preceding dispatch revision passes
+275/281 groups with the same forty raw assertions. It includes the new color
+paint group; the later line-height capability flag is qualified separately by
+the 49-fixture sweep and final Radiant gate. Source/binary and scoped sanitizer
+provenance is under `pseudo_color_export_frozen/` and `asan_pseudo_color3/`.
+No CSS family or P0–P1 tier is closed.
+
+### 2026-10-15 — P0.1 focused layout exit status; P1.3 next reproducer
+
+The linked sibling test harness, `../lambda-test/layout/test_radiant_layout.js`,
+printed a failed focused comparison but returned exit 0. Its pooled pass rule
+is now a shared method used by focused execution as well. The unchanged
+`md_nuxt-readme.html` comparison returns 1, while `md_marked-readme.html` still
+returns 0; syntax validation passes. Existing reference files, thresholds,
+baseline classification and unrelated sibling changes are untouched. The
+before/after hashes and exact patch are retained in the resume directory;
+future frozen records also capture that linked source (P0.1 evidence contract).
+
+The Nuxt regression is one anchor whose font box is six pixels too low around
+a broken-image alternative. The six-case browser probe separates fallback
+text, larger leading, loaded images, explicit/tall failed boxes and empty
+alternatives. The preserved runtime passes two and fails four checks; a native
+reproducer confirms offsets of 6, 14, 6 and 42 pixels. An initial native attempt
+lacked the `result` container required by the existing loader and is retained
+as unqualified; the corrected reproducer reaches the actual geometry checks.
+The eight-check browser extension also covers a causal font/leading mutation.
+The baseline producer now identifies failed nonempty alternatives independently
+of specified box dimensions, and exports the fallback line's actual baseline
+through the shared replaced-inline path. The completed inline wrapper consumes
+the same baseline. An initial draft accidentally excluded canvas from the
+ordinary replaced-element branch; its 47 sizing mismatches and failed aggregate
+are preserved. The corrected classification keeps that branch's other replaced
+types intact (**FT-17 / CI-18**).
+
+The corrected build and matching scoped ASan pass all 115 native text cases,
+50 CSS fixtures with 2,651 live assertions per AST/MIR runtime, all 58 markdown
+baseline entries (47 full /11 partial), and all 776 sizing entries. Existing
+assertions, browser references and baseline floors are unchanged. The required
+Radiant aggregate reaches 5,834 full /156 partial /four failed /one skipped
+over 5,995 inputs. All layout categories pass; each remaining failure is an
+editor PNG capture with its content/style/geometry/pixel assertions passing.
+The matching immutable controls pass 32/33 exporter groups; the single existing
+1× sips-rasterized PDF emphasis assertion remains red. Official SVG export passes all
+126 format checks /2,466 assertions. Source records are under
+`broken_image2_export_frozen/`, with fourteen changed owners and two test units
+instrumented under `asan_broken_image2/`; other host/vendor objects are ordinary
+debug and leak detection is disabled. This is bounded baseline qualification,
+not complete inline/shaping or P0–P1 closure.
+
+### 2026-10-15 — P0.1 retained-fragment memory and editor PNG captures
+
+The four current editor failures share an allocation root cause: every empty
+retained fragment adopts the full-frame 2,048-item display-list reserve. The
+nested HTML-email fixture peaks at 2,389,035,656 tracked render bytes, exceeding
+the unchanged 768 MiB critical limit; PNG encoding then correctly refuses its
+one-row straight-alpha scratch buffer. No assertion, output path or image
+source needs changing.
+
+`dl_copy_range` now checks the complete destination item count and reserves the
+known range for an empty destination. Nonempty lists retain amortized growth,
+and payload cloning, rollback and ownership remain unchanged
+(**D4.5.1v4 / D4.1.4v5**). The new consumer regression captures and replays all
+64 small fragments and encodes PNG within a 16 MiB incremental budget. It fails
+on the preceding source and passes after the fix; the existing insufficient-row
+budget rejection/recovery control also passes. An early test draft reused an
+arena with an active scratch owner and aborted before qualification; the
+corrected test gives the replay list its own arena and enables tracking.
+
+All four unchanged editor fixtures now pass normally and with scoped ASan on
+both AST/MIR runtimes (44 live assertions per run, plus successful PNG events).
+The native vector suite passes 161/161 and retained-cache suite 30/30; scoped
+ASan also passes 161/161 vector cases. The same immutable normal editor run now
+peaks at 87,815,448 tracked render bytes, with render usage returning to zero.
+This is allocation-correctness evidence, not a debug-build performance result.
+The full required Radiant gate passes: 5,839 full /156 partial /zero failed /
+one skipped over 5,996 inputs. Frozen source/binary records
+are under `retained_reserve_export_frozen/`; `asan_retained_reserve/` instruments
+fifteen changed owners and three test units, retaining ordinary host/vendor
+objects and disabling leak detection. Broader P0–P1 criteria remain active.
+
+### 2026-10-15 — P0.2/P1.2 computed pseudo grid shorthands
+
+The next fixture passes all seventeen checks in Chromium, while the preceding
+immutable runtime passes only two: pseudo `grid-template` retains authored `em`
+tokens, `grid` becomes `none`, and placement shorthands retain calculated line
+expressions. The existing serializers already accept a pseudo selector, but
+their accessor rows omit the pseudo capability. Enabling those rows alone
+improves the fixture to six checks; it exposes a second root cause: pseudo
+definition longhands use direct property lookup and miss retained shorthand
+declarations. The failed intermediate native/live logs remain preserved.
+
+All five grid shorthands now use their shared computed-member serializer, and
+pseudo definition members use the existing component cascade against their own
+style tree. Grid member selection is axis-independent; font/math computation
+still follows the pseudo or explicitly inherited declaration owner
+(**CI-18 / D4.5.1v4 / D4.1.4v5**). No new serializer or copied resolver is added.
+The bounded fixture verifies both generated pseudos, calculated placement,
+same-handler variable/font edits, explicit inheritance and companion geometry
+and pixels. Native repeated reads retain no source-pool allocations.
+
+The corrected native computation suite passes 122/122, and all sixteen live
+grid fixtures pass 1,633 assertions. Matching scoped ASan passes 122 computation
+cases and 51 broader CSS fixtures with 2,668 assertions per AST/MIR runtime.
+All sixteen immutable grid/pseudo-color exporter groups pass their existing
+PNG/SVG/PDF controls. The full required Radiant gate passes 5,841 full /156
+partial /zero failed /one skipped over 5,998 inputs. Records
+are under `grid_pseudo_shorthand_export_frozen/` and
+`asan_grid_pseudo_shorthand2/`; fifteen changed production owners and three test
+units are instrumented, with other host/vendor objects ordinary debug and leak
+detection disabled. The 411-name inventory retains twenty-one partial families:
+pseudo used-track snapshots, broader shorthand/variable forms, independent/paged
+contexts and unfinished P0–P1 criteria remain open.
+
+### 2026-10-15 — P0.2/P1.5 overflow clip margin computed reads
+
+`overflow-clip-margin` already clips painted descendants and hit targets but
+has no computed accessor. The new eighteen-check fixture passes in Chromium;
+the preceding immutable runtime passes only five paint/hit controls, with all
+computed-value projections missing. Native controls cover the pinned WPT
+canonical box/zero cases, owner-relative math, explicit inherited lengths,
+pseudo fonts and repeated reads without source-pool growth. An early native
+test draft omitted the required typed pointer wrappers and did not compile;
+the corrected harness reaches the missing-getter failures before the repair.
+
+The existing validator's optional box/length decomposition is promoted and
+shared with layout and CSSOM before adding a third copy. The computed serializer
+reuses the owner-font numeric evaluator, retaining its public element-only API
+while allowing internal pseudo evaluation. It emits canonical default/zero
+components and preserves inherited declaration owners; dirty font/variable
+changes, invalid substitution and explicit resets reach actual clipping, pixels
+and outside-box hits (**CI-18 / D4.5.1v4 / D4.1.4v5**). The preexisting negative
+offset behavior remains intact under the working
+[CSS Overflow 4 §3.2](https://drafts.csswg.org/css-overflow-4/#overflow-clip-margin)
+model; no newer per-edge longhands or complete applicability are claimed.
+
+The first repaired candidate passes 123/123 native CSS computation cases,
+55 live fixtures /2,740 assertions per AST/MIR runtime under scoped ASan, all
+nine existing overflow/containment exporter groups, and the required Radiant
+gate with 5,843 full /156 partial /zero failed /one skipped over 6,000 inputs.
+Input qualification passes 2,112/2,112; the combined Lambda lane again records
+6,651/6,652, with its single failure the unchanged forced-GC 180-second idle
+timeout. A hit-test selector initially ran in a suite that excludes it; that
+zero-fixture exit 2 is unqualified. The owning `hit-test` suite passes its six
+existing hit assertions.
+
+A final allocation audit changes numeric-evaluator failure to propagate false
+instead of presenting an initial computed value. That correction passes all
+123 native computation cases and the 55-fixture /2,740-assertion sweep per
+AST/MIR runtime under a fresh scoped ASan build. Its normal runtime is published
+with the subsequent corner-outset increment. Candidate records
+are under `clip_margin_export_frozen/` and `asan_clip_margin2/`; sixteen changed
+owners and three regression units are instrumented, with ordinary remaining
+host/vendor objects and leak detection disabled. Inventory remains 411 names /
+twenty-one partial families. No P0–P1 tier is closed.
+
+### 2026-10-15 — P1.5 clip-margin corners and shared outer-shadow outsets
+
+The next seven-check browser probe passes in Chromium and only three checks
+on the frozen candidate: positive clip outsets turn square corners round and
+over-round small corners, losing both red pixels and outside-box hit targets.
+The extended live grow/reset fixture passes thirteen browser checks versus
+five on the preceding runtime. Native geometry controls reproduce the wrong
+0→10 and 4→24 radius expansions before the fix.
+
+Clipping and the native/shared-paint outer-shadow producers now share the
+working [CSS Backgrounds 3 §4.2](https://drafts.csswg.org/css-backgrounds-3/#corner-shaping)
+outset adjustment, including original two-dimensional edge coverage. The
+small-radius polynomial avoids cancellation near zero; negative insets retain
+their existing floor at zero. Clipping constrains used radii and passes the
+same shape to hit testing (**CI-18 / RSC1 / RSC7 / D4.5.1v4**). This extracts the
+common geometry before adding a third producer rather than copying another
+linear radius approximation.
+
+The corrected normal and scoped ASan vector suites pass 162/162, including the
+retained-budget/PNG regression. Scoped ASan also passes 123 computation cases
+and 58 CSS/overflow/shadow/hit fixtures with 2,832 live assertions per AST/MIR
+runtime. The required Radiant gate passes 5,845 full /156 partial /zero failed /
+one skipped over 6,002 inputs. The boundary audit still passes four strict DSOs
+with 137 deferred /zero unapproved imports and allowance 165; integer-cast lint
+passes (**D7.1.3 / D7.5.3 / D7.3.3–D7.3.4**).
+
+All twenty-four existing shadow/overflow/containment exporter groups pass. The
+new group initially used CSS pixel indices on a physical PDF page, then
+incorrectly inferred scale from canvases with trailing padding; those failed
+test drafts are preserved as unqualified. The corrected test uses CSS/PDF unit
+conversion and an unchanged, strongly red interior control for reader color
+profiles. It passes thirty exact positive/interior/excluded-corner samples
+through PNG, SVG and PDF at both densities. An early GTest draft also put two
+line-number-based trace macros on one line and did not compile; its correction
+does not change any existing assertion.
+
+The normal runtime and final allocation-audit getter correction are published
+under `clip_curve3_export_frozen/`; matching `asan_clip_curve/` instruments
+nineteen changed owners and three regression units. Remaining host/vendor
+objects are ordinary debug and leak detection is disabled. The complete frozen
+exporter refresh is pending; the latest core/input aggregate retains its single
+forced-GC idle timeout. Broader elliptical/asymmetric/replaced/independent and
+effect/fragmented contexts, deferred boundary debt and P0–P1 acceptance criteria
+remain open. Inventory remains 411 names and twenty-one partial families.
+
+### 2026-10-15 — P0.2/P1.3 pseudo calculated counts
+
+Calculated `line-clamp`, `-webkit-line-clamp` and `hyphenate-limit-chars` reads
+discard the pseudo selector before evaluating font-relative operands. Even an
+integer result can depend on `em` through dimensional cancellation. The
+nine-check browser probe passes in Chromium and only four checks on the frozen
+runtime; native reproducers read 40 instead of 10, 20 instead of 5, and 20/10
+instead of 5/3 before the fix.
+
+Clamp formatting now carries the pseudo selector into the shared font state,
+and hyphenation components call the existing internal numeric evaluator with
+that same selector. Explicit inheritance retains the originating declaration
+owner. No count parser, rounding rule, layout algorithm or public numeric API
+is duplicated or replaced (**CI-18 / D4.5.1v4 / D4.1.4v5**). Native controls cover
+modern/legacy counts, half-integer rounding, inherited font bases and repeated
+reads without retained source-pool growth; live edits reach companion geometry
+and paint.
+
+Native and scoped ASan computation suites pass 124/124. Fifty-nine broader live
+fixtures pass 2,841 assertions per AST/MIR sanitizer runtime, and the existing
+two calculated-count/ellipsis exporter groups pass. The required Radiant gate
+passes 5,847 full /156 partial /zero failed /one skipped over 6,004 inputs.
+Boundary validation remains four strict DSOs, 137 deferred /zero unapproved
+imports, allowance 165; integer-cast lint passes. Records are under
+`pseudo_counts_export_frozen/` and `asan_pseudo_counts/`, with nineteen changed
+owners and three regression units instrumented, remaining host/vendor objects
+ordinary debug and leak detection disabled. The inventory now has twenty-two
+bounded partial families over the unchanged 411 names, adding computed-only
+hyphenation-count evidence without claiming language-dependent hyphenation or
+complete pseudo text layout.
+
+The complete preceding corner-build exporter refresh passes 276/282 groups
+with the same forty raw assertions: five CSS paint groups and one PDF-import
+aggregate. Its exact artifacts are under `clip_curve3_export_frozen/`. Required
+Lambda/input qualification still records 6,651/6,652 with the forced-GC idle
+timeout; the separate 313/313 stress run remains a distinct older result. No
+P0–P1 tier is closed.
+
+### 2026-10-15 — P0.1/P1.3 profiled Quartz reference captures
+
+The longstanding 1× open-circle emphasis failure compares Display P3 reference
+bytes as if they were sRGB. The source glyph capture reaches alpha 213, and
+native/SVG/Poppler retain strong green pixels; `sips -g profile` and the PNG's
+ICC chunk identify the Quartz capture as Display P3. Merely tagging the PDF
+image with an sRGB profile does not change that destination profile, so no PDF
+writer change is applied.
+
+The shared reference rasterizer now requests `sips --matchTo` using the
+system-provided sRGB profile before decoding raw comparison bytes. The same
+unchanged PDF changes from zero to twelve strongly green pixels, passing the
+existing threshold and every emphasis assertion. The original PDF, failed
+profile-tagging probes and converted captures are retained under
+`emphasis_reader_probe/`. This corrects reference coordinates rather than
+changing the engine's color payload or weakening expectations (**CI-18**).
+
+All three focused emphasis/transform/corner exporter groups pass. The system
+profile is a required reader resource on this path; missing availability fails
+the capture. New immutable records include reader versions and the profile's
+SHA-256 in `reference_tools.json`. Full immutable exporter requalification passes
+277/282 groups with thirty-nine raw assertions in four CSS paint groups plus
+the PDF-import aggregate; `TextEmphasisPaintsMarksAndRespectsLonghandOrder` now
+passes unchanged. Exact records are under `srgb_reference2_export_frozen/`.
+Independent PDF-import regressions, exact pattern/edge coverage and broader
+profile-aware image input remain open. The twenty-two partial families and
+P0–P1 goal remain active.
+
+### 2026-10-15 — P0.1 aggregate forced-GC progress qualification
+
+The quiet forced-GC harness previously emitted no output across its reference
+run and three subprocess schedules. The combined music-layout case exceeded
+the runner's idle limit despite the separate complete stress sweep passing.
+The harness now reports real reference completion and schedule start/completion
+boundaries. Runtime logging stays disabled; forced collection, seeds/poisoning,
+exit assertions, byte-for-byte comparisons and the 180-second idle limit are
+unchanged (**D5.3.3 / D5.4.1**).
+
+The focused music-layout case passes all three schedules. The required combined
+Lambda/input gate now passes **6,964/6,964**: input 2,112 and Lambda 4,852,
+including the complete **313/313** forced-GC sweep. This replaces the preceding
+aggregate idle-timeout debt for this configuration; the older failed runs stay
+recorded. Raw build/run evidence is in `gc_schedule_core_final.log`, with copied
+runtime/harness sources and hashes under `gc_schedule_qualified/`, beneath
+`temp/css_support_p0_p1_resume/`. Broader P0–P1 acceptance and the five exporter
+failures remain open.
+
+### 2026-10-15 — P0.2 opacity numeric owner contexts
+
+Font-relative operands in computed opacity use an empty layout font context.
+Both pseudo reads and dirty element reads return zero instead of the declaring
+font's number. The initial nine-check probe passes in Chromium and fails every
+check on the frozen runtime. The expanded fixture also exercises inheritance,
+invalid substituted dimensions, percentage math and restoration; its direct
+pseudo and companion geometry/paint controls pass 24/24 in Chromium.
+
+CSSOM now uses the existing owner-font numeric evaluator, retaining the pseudo
+selector. A shared numeric-result helper applies percentage normalization,
+nonfinite handling and range clipping for layout, computed reads and SVG
+scalar serialization. Layout preserves percentage coefficients before that
+final policy. No geometry commit or duplicate font evaluator is introduced
+(**D4.5.1v4 / D4.1.4v5; CI-18**).
+
+Native/scoped ASan computation passes 125/125, including inherited bases, WPT
+percentage/range controls, SVG serialization and repeated reads without source
+pool growth. Scoped ASan vector controls pass 162/162, and sixty live fixtures
+pass 2,865 assertions per AST/MIR runtime. Nineteen production owners and three
+test units are instrumented; other host/vendor objects are ordinary debug and
+leak detection remains disabled. The required Radiant gate passes **5,849 full
+/156 partial /zero failed /one skipped over 6,006 inputs**. Boundary validation
+passes with 137 deferred /zero unapproved imports, allowance 165, and all four
+strict DSOs; integer-cast lint and the regenerated inventory check pass.
+
+The immutable runtime/source record is `pseudo_opacity_export_frozen/` and the
+sanitizer record is `asan_pseudo_opacity/`, beneath
+`temp/css_support_p0_p1_resume/`. Both existing opacity/overflowing-ink exporter
+controls pass; the preceding complete exporter remains the distinct
+277/282 configuration. An additional speculative native percentage-ratio case
+found a separate grammar limit: Chromium accepts `calc(25% / 50%)`, while the
+shared math parser rejects nonlinear percentage products/quotients before
+evaluation. Its failed trial and browser probe remain recorded separately.
+That broader representation gap, twenty-two partial families and P0–P1 remain
+open.
+
+The opacity checkpoint's refreshed Lambda/input gate also passes 6,964/6,964,
+including 313/313 forced-GC cases. Its runtime hash is
+`2ad3c6b0a8ce4194ce81feb5de90a9aa723ec8578f37f4c5bd49dbc6dde40794`;
+`pseudo_opacity_core_qualified/` copies both runtime/native harnesses, raw logs
+and hashes and references the matching earlier source record. The subsequent
+stack-level changes are not credited to this core run.
+
+### 2026-10-15 — P0.2 integer stack-level consumers
+
+Calculated `z-index` values remain unevaluated in CSSOM and are ignored by
+layout's literal-only integer cast. The initial browser probe passes 10/10
+against 2/10 on the frozen runtime. The expanded control adds real pointer
+targets and passes 15/15 in Chromium, against 4/15 before the repair.
+
+Stack levels now use the existing typed-integer validator and shared layout
+integer evaluator. CSSOM uses the common owner-font integer adapter, also
+removing the separate clamp-count font/evaluation setup. Explicit inheritance
+copies the parent's computed layout level; computed reads preserve `auto`
+versus integer zero for static and positioned elements. Invalid literal
+dimensions/fractions are rejected before replacing an earlier declaration,
+and invalid substituted dimensions retain computed-value defaulting. Integer
+rounding, negative zero and bounded nonfinite results agree with the separate
+Chromium controls (**D4.5.1v4 / D4.1.4v5; CI-18**).
+
+Native and scoped ASan computation pass 126/126; scoped vector controls pass
+162/162. Sixty-one live fixtures pass 2,880 assertions per AST/MIR sanitizer
+runtime. The new six-case stack-order exporter and existing calculated-clamp
+exporter pass under scoped ASan, including thirty-six exact PNG/SVG/PDF
+stack-order comparisons at 1×/2× with positive color coverage. Nineteen
+production owners and three regression units are instrumented; other
+host/vendor objects remain ordinary debug and leak detection is disabled.
+
+The required ordinary Radiant gate passes **5,851 full /156 partial /zero
+failed /one skipped over 6,008 inputs**. Boundary validation remains four
+strict DSOs, 137 deferred /zero unapproved, allowance 165; integer-cast lint
+and inventory freshness pass. The inventory adds a twenty-third bounded
+partial family for `z-index`. Exact runtime/source records are in
+`z_index_export_frozen/`, sanitizer records in `asan_z_index2/`, and sanitizer
+export copies in `z_index_asan_export_frozen/`, under
+`temp/css_support_p0_p1_resume/`. The complete ordinary exporter passes
+278/283 groups with the unchanged thirty-nine raw assertions across the same
+four CSS paint groups and PDF-import aggregate. Complete negative/zero/auto context identity, nested depth order,
+flex/grid applicability, pseudo used stacking and selected/paged contexts
+remain open.
+
+### 2026-10-15 — P0.2/P1.2 calculated flex/grid item order
+
+The `order` consumer accepts only literal number nodes, so typed math remains
+unevaluated in CSSOM and is ignored during placement. The initial Chromium
+probe passes 20/20 against 11/20 on the frozen stack-level runtime. Strengthening
+the same geometry assertions to include exact offsets relative to the flex/grid
+container leaves the frozen runtime at 5/20; Chromium and the applied runtime
+pass 20/20, including causal font, invalid-variable and inheritance changes.
+
+Item order now shares typed-integer validation and the CSSOM owner-font adapter
+with stack levels. Layout computes bounded integer math before writing flex or
+grid storage, and explicit inheritance reads the parent's computed item order.
+The existing static flex-order helper is promoted to the layout header and
+extended to tagged flex/grid storage; both sorts and inheritance share it.
+Native test fixtures also share their computed-value assertion helper instead
+of adding another per-property copy (**D4.5.1v4 / D4.1.4v5; CI-18**).
+
+Native/scoped ASan computation passes 127/127, scoped vector controls 162/162,
+and sixty-two live fixtures pass 2,900 assertions per AST/MIR sanitizer runtime.
+Twenty-one production owners and three regression units are instrumented;
+other host/vendor objects remain ordinary debug and leak detection is disabled.
+The provenance additionally records the twelve shared changed headers, checked
+against the ordinary frozen source record. Five ordinary exporter groups pass;
+three relevant groups also pass with the ASan runtime. The new six-case fixture
+runs in both layout systems at both densities: twenty-four authored/literal
+pairs produce seventy-two exact PNG/SVG/PDF comparisons, with positive red
+coverage rejecting matching omissions.
+
+The required ordinary Radiant gate passes **5,853 full /156 partial /zero
+failed /one skipped over 6,010 inputs**. Boundary validation remains four
+strict DSOs, 137 deferred /zero unapproved imports and allowance 165; integer
+lint and inventory freshness pass. The inventory adds a twenty-fourth partial
+family for `order`. `order_export_frozen/`, `order_asan_export_frozen/` and
+`asan_order/`, under `temp/css_support_p0_p1_resume/`, preserve matching sources,
+binaries, raw failures and qualification logs. The first ordinary build's
+DOM/view pointer-type mismatch is retained as an unqualified compile trial;
+the shared accessor now accepts its read-only DOM owner directly.
+
+The preceding complete stack-level exporter passes 278/283 groups with the
+same thirty-nine raw assertions in four CSS paint groups and PDF import. The
+item-order core/input refresh passes 6,964/6,964, including 313/313 forced-GC
+cases; exact logs/harnesses and hashes are in `order_core_qualified/`. Complete ordering/applicability,
+reverse/vertical/fragmented axes, animation, focus/accessibility source order,
+pseudo used item ordering, selected/paged contexts and broader P0–P1 criteria
+remain open.
+
+### 2026-10-15 — P0.2/P1.2 numeric flex-factor consumers
+
+The grow/shrink longhand consumer accepts only literal number nodes. Its
+28-check browser probe passes against 12/28 on the frozen item-order runtime;
+the final 35-check fixture adds valid negative math versus invalid-variable
+defaulting and passes against 16/35 before the repair. The applied runtime
+passes every computed value, exact width/offset and red/blue pixel check after
+font, variable and class changes.
+
+Longhands now validate as nonnegative numeric values, compute typed math and
+copy inherited factors from their tested parent's published item values.
+A shared scalar policy clamps before narrowing to float storage. The existing
+color clamp is promoted rather than copied, and color/integer/opacity/factor
+consumers share its range/NaN/zero handling. Formatting uses one owner-font
+scalar adapter, while direct committed item snapshots retain their existing
+access. A separate browser probe also catches computed opacity `-0` strings
+on the frozen runtime; both signed-zero controls now pass natively
+(**D4.5.1v4 / D4.1.4v5; CI-18**).
+
+Native/scoped ASan computation passes 128/128 and scoped vector controls pass
+162/162. Sixty-three live fixtures pass 2,935 assertions per AST/MIR sanitizer
+runtime. Twenty-two production owners, twelve shared changed headers and three
+regression units are recorded; other host/vendor objects remain ordinary
+debug and leak detection is disabled. The eight-case distribution fixture
+covers both grow and shrink at both densities: thirty-two authored/literal
+pairs produce ninety-six exact PNG/SVG/PDF comparisons, including fractional,
+negative and infinite factors. Three relevant exporter groups pass under ASan.
+
+The required ordinary Radiant gate passes **5,855 full /156 partial /zero
+failed /one skipped over 6,012 inputs**. The matching complete exporter passes
+**280/285 groups**, with the unchanged thirty-nine raw assertions in the same
+four CSS paint groups and PDF-import aggregate. Boundary validation remains
+four strict DSOs, 137 deferred /zero unapproved imports and allowance 165;
+integer lint and inventory freshness pass. The inventory adds a twenty-fifth
+partial family for the two longhands. Matching records are
+`flex_factors_export_frozen/`, `flex_factors_asan_export_frozen/` and
+`asan_flex_factors/`, beneath `temp/css_support_p0_p1_resume/`. The matching
+flex-factor core/input gate passes 6,964/6,964, including 313/313 forced-GC cases;
+`flex_factors_core_qualified/` preserves its exact logs, harnesses and hashes.
+
+A new, separate grid-parent probe passes 4/4 in Chromium and only 1/4 on this
+runtime: a grid item has no flex-item storage for its own computed factor or
+a descendant's explicit inheritance. That failure is preserved in
+`flex_grid_parent_*` records and remains active work. Shorthand/member
+competition, broader contexts/axes, animation and selected/paged qualification
+also remain open. No P0–P1 tier is closed by the longhand increment.
+
+
+### 2026-10-15 — P0.2/P1.2 flex factors across parent-item storage
+
+A grid item deliberately has no flex-item record. Substituting the global
+flex-item default therefore loses its declared computed factors, including
+when a descendant explicitly inherits them. The initial browser probe passes
+4/4 against 1/4 on the preceding runtime; the expanded fixture passes 16/16
+against 6/16. It gathers committed reads before writing attributes and checks
+both factors, causal parent-font changes, exact grow/shrink offsets and pixels.
+
+Optional item-group access now distinguishes absent storage from the default
+record. Grow/shrink rows keep their numeric snapshot access and use their
+existing derive slot only when applied storage is absent. Native inheritance
+and CSSOM share one cascade/substitution/inheritance walker with a numeric
+sink, preserving declaration-owner font bases and the grid-item tag. Initial
+values parse in their real property context; repeated reads retain no document
+pool growth (**D4.5.1v4 / D4.1.4v5; CI-18**).
+
+Native computation passes 129/129. Twenty-three production owners, twelve
+shared changed headers and four test units are recorded in the combined scoped
+ASan build: computation passes 129/129, vector controls 162/162 and sixty-four
+live fixtures pass 2,951 assertions under each AST/MIR runtime. Other host/vendor
+objects remain ordinary debug and leak detection is disabled. Each of the direct
+item and inherited grid-parent eight-case exporter fixtures covers grow/shrink
+at both densities: sixty-four authored/literal pairs produce 192 exact
+PNG/SVG/PDF comparisons with positive color coverage. Both groups and item
+ordering pass under both storage-only and combined catalog/CSS ASan configurations.
+
+The storage-only ordinary runtime is
+`354f6de9c0875286a2bcc4d175b788bedbbccc7352aaf3fbe05e40d844b5eecc`;
+`flex_storage_export_frozen/` preserves its matching sources, binaries and
+reference tools. Its initial sandboxed aggregate cannot access native media/GPU
+services and is retained as an interrupted diagnostic run. The unchanged host
+video suite passes 14/14, and the host aggregate passes 5,856 full /156 partial
+/one failed /one skipped over 6,014 inputs. That one failure is the independent
+Jube activation race described below. The complete storage-only exporter passes **281/286 groups**, retaining the same
+thirty-nine raw assertions across the four CSS paint groups and PDF-import
+aggregate. Its sandboxed WebGL stall is retained separately.
+Shorthand competition, broader axes/contexts, motion and selected/paged consumers
+remain open. Inventory stays at twenty-five bounded partial families.
+
+### 2026-10-15 — P0.1 shared Jube catalog activation race
+
+The host Radiant aggregate aborts in `s_type_records.reserve()` while parallel
+AST workers activate different native modules. Their per-module activation
+states are already synchronized, but their shared interface array and hash
+index are not. The saved pre-fix concurrency executable independently loses
+lookups while eight workers compile 512 branded types. Its initial relocated
+launch lacks the module rpath and is retained as an unqualified loader trial;
+the corrected launch uses the existing module directory and reaches the test.
+
+One private recursive catalog lock spans complete interface compilation,
+rollback/removal, cleanup and catalog/index reads. Nested base/result-type
+queries reuse it without holding the registry session lock across parsing or
+module initialization (**D7.4.4 / D7.3.3**). Record lifetime and runtime cache
+ownership keep their existing boundaries; broader concurrent heap dispatch is
+not promoted. The focused design is JA7.1 in
+`vibe/Lambda_Design_Jube_Architecture.md`.
+
+The new regression passes twenty-five ordinary and twenty-five scoped ASan
+repetitions. The original scene passes twenty-five ASan replays. A broader
+`JubeDom4.OrdinalParityCoversDeclaredMembersAndHusks` check retains the same
+170 raw assertions on the saved predecessor, ordinary repaired binary and ASan
+binary; that separate parity debt remains open. No assertion or fixture is
+weakened. The ordinary repaired runtime
+`cb130d95de2bc79c2f1b9cfaf16caf10ffba994042a15e70dbfcccb8081f95c5`
+passes the complete required Radiant gate: **5,857 full /156 partial /zero failed
+/one skipped over 6,014 inputs**. Its matching core/input gate passes 6,964/6,964,
+including 313/313 forced-GC cases. Exact runtime/harness copies, raw logs and
+hashes are in `jube_catalog_core_qualified/`.
+
+`jube_catalog_export_frozen/`, `asan_jube_catalog/`,
+`asan_flex_storage_catalog/` and `flex_storage_catalog_asan_export_frozen/`, under
+`temp/css_support_p0_p1_resume/`, preserve exact binaries, sources, commands and
+raw results. Every instrumented source and changed shared-header hash matches
+the ordinary frozen source record. Boundary validation passes all four strict
+DSOs with 137 deferred /zero unapproved imports against allowance 165; integer
+lint, inventory freshness and diff checks pass. The shorthand draft was preserved separately
+while this crash was investigated. P0–P1 remain active.
+
+### 2026-10-15 — P0.2/P1.2 typed flex shorthand components
+
+The legacy `flex` handler accepts literal numbers, has no registered members
+and writes all three item fields together. A separate ten-row browser probe
+passes 20/20 against 5/20 on the storage-qualified runtime. The expanded fixture
+uses explicit bases for browser parity and passes 55/55 against 19/55 before
+the repair. It checks component reads, important/source-order competition,
+math, invalid literals versus invalid substitution, inheritance, exact widths
+and red/blue paint after causal grow/shrink/basis font edits.
+
+The registry now names all three members. A shared borrowed descriptor validates
+the complete shorthand, while one lower projection dispatcher serves flex,
+grid and container consumers. Layout applies independent winning members after
+the owner's font; CSSOM projects and computes the same declarations. Relative
+and mathematical bases reach the existing native basis fields. The obsolete
+whole-record flex writer is removed. Omitted basis remains zero length under
+Flexbox §7.1; Chromium's observed `0%` serialization is a separately recorded
+compatibility difference, outside the explicit-basis parity fixture (**CI-18**).
+
+An unqualified first draft creates default declarations in its receiving pool.
+The added allocation control reproduces 89,728 bytes /1,280 allocations over
+128 projections against that saved owner. Borrowed immutable grammar defaults
+now retain zero receiving-pool growth and also work without a pool. CSSOM reads
+retain no document-pool allocations (**D4.5.1v4 / D4.1.4v5**). The failed draft,
+corrected source, exact link commands and raw assertions remain recorded.
+
+Ordinary and scoped ASan computation pass 130/130, scoped vector controls pass
+162/162, and sixty-five live fixtures pass 3,006 assertions per AST/MIR runtime.
+The scope is twenty-three production owners, twelve shared changed headers and
+four test units; other host/vendor objects remain ordinary debug and leak
+detection is disabled. The final ASan refresh rebuilds only the changed CSS
+property owner and computation unit against immutable scoped objects/archives;
+its provenance references the original scope and verifies every other source
+and header hash. All instrumented hashes match the ordinary frozen source.
+The new twelve-case exporter and existing grid-definition/grid-parent factor
+controls pass under ASan. The new fixture supplies twenty-four authored/literal
+pairs and seventy-two exact PNG/SVG/PDF comparisons at both densities, with
+positive color coverage. The ordinary catalog regression also passes twenty-five
+repetitions against its rebuilt current-source executable.
+
+Ordinary runtime
+`520b99c853d7e34482b60d8d80ffb7054cc784d4543b3b8a85886a075bd54144`
+and exporter
+`5b7e4a64a6a7a8203dc85d1eb23317ecd923c2280ae9787cfd855c72d32e8a36`
+are preserved in `flex_shorthand_export_frozen/`. Scoped records are in
+`asan_flex_shorthand2/` and `flex_shorthand2_asan_export_frozen/`, beneath
+`temp/css_support_p0_p1_resume/`. The required ordinary Radiant gate passes
+**5,859 full /156 partial /zero failed /one skipped over 6,016 inputs**.
+Boundary validation passes four strict DSOs with 137 deferred /zero unapproved
+imports, allowance 165; integer lint, inventory and diff checks pass. Inventory
+covers 411 names and twenty-six bounded partial families.
+
+The matching core/input attempt records 6,650/6,652 after its forced-GC suite
+hits the unchanged 180-second idle limit and one LaTeX corpus script reports
+status 124. An unchanged isolated LaTeX rerun passes. The complete exporter
+records 281/287 groups: the same thirty-nine paint/PDF raw assertions plus a
+WebGL child killed during startup, producing seven additional render/read
+assertions. The unchanged focused WebGL group passes, and all three unchanged forced-GC schedules pass. Sampling confirms active
+marking/runtime work during the quiet JIT interval. The original core adapter
+passes all **6,964/6,964** core/input cases when retried without competing builds,
+with the same 180-second idle limit, flags and assertions. `flex_shorthand_core_qualified/`
+preserves the matching runtime, native harnesses, input result, raw logs and hashes.
+The earlier failures remain in their original records. Broader shorthand CSSOM/priority contexts, mixed/intrinsic bases,
+axes, animation and selected/paged consumers remain open.
+
+A distinct grid-parent basis probe passes 4/4 in Chromium but 2/4 under the
+shorthand ASan runtime: the computed `60px` is correct, while native inheritance
+uses auto without parent flex-item storage. Its `flex_grid_basis_*` records
+define the next bounded owner-context repair. P0–P1 remain active.
+
+
+### 2026-10-15 — P0.2/P1.2 inherited basis snapshots across item storage
+
+The separate grid-parent basis probe passes 4/4 in Chromium and 2/4 on the
+shorthand checkpoint. Its CSSOM `60px` is already correct, while used inheritance
+falls back to auto because the parent has no flex record. The first expanded
+fixture passes 38/38 in Chromium against 26/38 before the repair. The final
+46-check fixture adds a font-only change whose geometry and paint are asserted
+before any reporting mutation; it passes against 30/46 on the frozen predecessor.
+The earlier 38-check source is retained in `flex_basis_control38/`.
+
+The existing small basis snapshot is promoted into the lower CSS header.
+One typed numeric/keyword policy now serves layout and declaration-owner
+computation. The shared inherited-declaration walker accepts a transient native
+consumer callback, avoiding a second ancestry/substitution traversal or a
+computed-text round trip. Explicit inheritance keeps available parent snapshots
+and computes the owner's declaration when optional flex storage is absent.
+The result contains only numbers and modes, preserving percentage bases and the
+grid-item tag without retaining declaration pointers. Repeated native/CSSOM
+reads retain no document-pool growth (**D4.5.1v4 / D4.1.4v5; CI-18**).
+
+Ordinary/scoped ASan computation passes 131/131, scoped vector controls 162/162,
+and sixty-six live fixtures pass 3,052 assertions per AST/MIR runtime. Scope is
+twenty-three production owners, twelve changed shared headers and four test
+units; other host/vendor objects remain ordinary debug and leak detection is
+disabled. All instrumented hashes match the ordinary frozen source record.
+Five ordinary exporter groups and three ASan groups pass. The shared fifteen-case
+fixture runs in both direct/grid-parent contexts at both densities: sixty
+literal-reference pairs yield 180 exact PNG/SVG/PDF comparisons, including
+relative/percentage bases, longhand and shorthand sources, inheritance and
+invalid substituted parents. Positive color coverage rejects matching omissions.
+
+The required ordinary Radiant gate passes **5,861 full /156 partial /zero failed
+/one skipped over 6,018 inputs**; input baseline passes 2,112/2,112. Boundary
+validation passes four strict DSOs, 137 deferred /zero unapproved imports against
+allowance 165. Integer lint, inventory freshness and diff checks pass. Inventory
+stays at 411 names /twenty-six bounded partial families. Ordinary runtime
+`d60601e9804fc9d247ea83e0f36a83996ff9749d7b079d1a2329102404725b7f`
+and exporter
+`14d7587c75fbcc4acee2fc3b0f65d63cfc1a52c8e3fe14432ac9aa6f3c382c4d`
+are protected in `flex_basis_export_frozen/`; scoped records are in
+`asan_flex_grid_basis/` and `flex_basis_asan_export_frozen/`, beneath
+`temp/css_support_p0_p1_resume/`. The matching core/input gate passes all **6,964/6,964** cases, including 313
+forced-GC cases, after other heavy builds/render suites finish.
+`flex_basis_core_qualified/` preserves its exact runtime, harnesses, input
+results, raw logs and hashes. The preceding shorthand full exporter retains
+281/287 groups and 46 raw assertions, with the killed WebGL child's isolated
+replay passing; that earlier failure is preserved rather than folded into a
+clean aggregate.
+
+Full shorthand reflection, broader priority/pseudo/view contexts, mixed and
+intrinsic used bases, nonfinite geometry, axes, animation and paged consumers
+remain open. This bounded storage repair does not close P0–P1.
+
+### 2026-10-15 — P0.1/P0.2/P1.4 image-rendering computation and URL markers
+
+The inherited keyword had a native consumer but no computed accessor. A final
+browser fixture passes 10/10 against 2/10 on the basis checkpoint, including
+causal mode edits whose image pixels are asserted before a reporting mutation.
+Pending substitution now reaches the shared keyword validator, and computed
+reads use the existing cascade/pseudo/default consumer. Native coverage checks
+invalid literals, initial/unset/inherit, valid and invalid custom values,
+pseudo inheritance and 128 repeated reads without source-pool growth
+(**D4.5.1v4 / D4.1.4v5; CI-18**).
+
+URL markers bypassed the shared sampling policy and always recorded linear
+images. They now use the originating item's applied policy and the existing
+resource-owning scaled/transformed painter. The helper accepts the applied DOM
+style owner directly. Twenty independent literal-color PNG pairs at both
+densities cover own/inherited crisp values, integer pixelated scaling, affine
+crisp transforms, the legacy speed keyword and retained filters. All twenty
+pairs fail on the frozen predecessor and pass after the repair; positive
+red/green/blue area rejects matching omissions. Chromium matches all sixteen
+pairs using its accepted standard keywords. The separate `smooth` and legacy
+keyword browser compatibility limits are retained. Vector/paged sampling,
+noninteger marker scaling, transformed pixelated footprints, other image
+consumers and the exploratory empty-marker baseline offset remain open
+(**RSC1 / RSC7**; [CSS Images 3 §5.2](https://www.w3.org/TR/css-images-3/#the-image-rendering)).
+
+The inventory parser also missed wrapped accessor rows and direct rows with a
+computed fallback. Its shared row expression now recognizes both forms and
+rejects duplicates; reconciliation finds all 185 row invocations instead of
+163, recovering 22 entries on this source. This changes wiring evidence without
+promoting unqualified families to supported. Inventory remains 411 names and
+now records twenty-seven bounded partial families.
+
+Ordinary/scoped ASan computation passes 132/132; scoped vector passes 162/162.
+Sixty-seven live fixtures pass 3,062 assertions on each AST/MIR runtime. Scope
+is twenty-five production owners, twelve changed shared headers and four test
+units; other host/vendor objects remain ordinary debug and leak detection is
+disabled. Every instrumented source/header hash matches the ordinary freeze.
+The required Radiant gate passes **5,863 full /156 partial /zero failed /one
+skipped over 6,020 inputs**, and input baseline passes 2,112/2,112. Four strict
+DSOs retain 137 deferred /zero unapproved imports against allowance 165.
+Integer lint, inventory freshness and diff checks pass.
+
+Ordinary runtime
+`fcad204dfb9e5e42e645bb794bf9f28b3355281756f8703e72d8d16a6c032bd6`
+and exporter
+`6376931c22b725c06745083c8a7e1b3058f71d5dab263508182d4045a2fb23d4`
+are protected in `image_rendering_export_frozen/`. Scoped records are in
+`asan_image_rendering/` and `image_rendering_asan_export_frozen/`, beneath
+`temp/css_support_p0_p1_resume/`. The complete exporter passes **284/289 groups**, retaining the same thirty-nine
+raw paint/PDF assertions in five groups; WebGL passes in this run. All five
+scoped marker/export controls pass, including existing image-set and gradient
+marker controls. The matching core/input refresh is batched with the next
+affine-pixelated repair; the preceding basis checkpoint passes all 6,964
+core/input cases, including 313 forced-GC cases. This bounded repair does not
+close P0–P1.
+
+### 2026-10-15 — P1.4 affine pixelated device footprints
+
+The protected marker checkpoint blends colors when a 2px pixelated image is
+scaled to 8px by a transform. Projection chooses the intermediate multiple from
+the untransformed box and uses ceiling, while the ordinary blitter already
+chooses the closest positive integer. The independent affine probe reproduces
+integer scaling, anisotropic scaling and quarter turns; noninteger browser
+filtering differences remain recorded separately.
+
+Both raster paths now share the closest-multiple policy. Affine projection
+uses the composed device-space axis lengths, including homogeneous normalization.
+Virtual image coordinates use double intermediates without allocating an
+intermediate bitmap; inverse mapping, clipping, ownership and alpha conversion
+retain their existing shared paths (**D4.5.1v4; CI-18; RSC1 / RSC7**).
+
+The original marker exporter is parameterized rather than copied. Its twenty
+controls still pass; forty-eight additional literal PNG pairs cover images,
+backgrounds and markers with integer scaling, anisotropic scaling, flips,
+quarter turns, inheritance, retained filters and both densities. All forty-eight
+fail on the marker checkpoint and pass after this repair. Chromium matches all
+forty-eight references exactly. Positive color coverage rejects matching
+omissions. The expanded causal UI fixture passes 17/17 against 15/17 before;
+its earlier ten-check source stays protected in the marker freeze.
+
+Two new native controls fail on the predecessor. The repaired vector suite
+passes 164/164, including straight/premultiplied alpha, homogeneous normalization
+and a hand-calculated three-source-pixel to seven-device-pixel reference that
+distinguishes nearest-integer selection from ceiling. Scoped ASan passes
+132 computation, 164 vector and 3,069 live assertions per AST/MIR runtime across
+sixty-seven fixtures. Five scoped exporter groups pass. Scope remains twenty-five
+production owners, twelve changed shared headers and four test units; other
+host/vendor objects are ordinary debug and leak detection is disabled. The
+refresh rebuilds the raster owner and vector regression unit against immutable
+parent objects/archives, verifying all other hashes. All instrumented hashes
+match the ordinary frozen source.
+
+The required Radiant gate passes **5,865 full /156 partial /zero failed /one
+skipped over 6,022 inputs**. Four strict DSOs retain 137 deferred /zero unapproved
+imports against allowance 165. Integer lint, inventory freshness and diff
+checks pass; inventory remains 411 names /twenty-seven bounded partial families.
+Ordinary runtime
+`0d9df5827f51796502e5aab807010021d9623332e60fb2ef9976b937f88728c8`
+and exporter
+`9071b62b79740230c5aa46bdb37671258c2c3505108a7b27f22427b059883a74`
+are protected in `pixelated_export_frozen/`; scoped records are in
+`asan_pixelated_affine/` and `pixelated_asan_export_frozen/`, beneath
+`temp/css_support_p0_p1_resume/`. The full exporter passes **285/290 groups**,
+retaining the same thirty-nine raw paint/PDF assertions in five groups; WebGL
+passes. The matching core/input gate passes all **6,964/6,964** cases, including
+313 forced-GC cases, after the heavy suites finish. `pixelated_core_qualified/`
+preserves the matching runtime, harnesses, input results, raw logs and hashes.
+
+Projective footprints, skew/noninteger browser filtering, noninteger marker
+scales, extreme/nonfinite geometry, image-marker baseline placement, other
+image consumers and vector/paged sampling remain open. The separate baseline
+probe matches inline images in 12/12 Chromium rows and 0/12 native rows across
+three font sizes, normal/explicit line heights and empty/nonempty text. That is
+a distinct P1.3 layout follow-up, not a sampling adjustment. P0–P1 remain active.
+
+### 2026-10-15 — P0.2/P1.3 inside image-marker baselines and pseudo identity
+
+The affine predecessor places inside image markers at the line top. A twelve-row
+probe agrees with inline images in 12/12 Chromium rows and 0/12 native rows. The
+expanded 64-row probe preserves twelve separate gradient default-size limits;
+its 52 intrinsic/density URL rows match in Chromium, against 20/52 native image
+positions and 34/52 line boxes. Final placement lacked a marker dispatch case.
+Small markers also contributed only the font strut, while generation read the
+surrounding line context before entering the owner's line.
+
+Inside image markers now share the final replaced baseline and contribute
+bottom-edge ascent plus atomic extent alongside their font/space strut. The
+current face's normal/content split and shared leading policy refresh on each
+reflow; non-normal leading comes from the owner's computed value, including
+zero. This removes raw half-leading drift without adding a paint offset.
+The expanded native probe now matches all 52 URL image positions and 50 line
+boxes. In the two remaining normal large-font controls, the marker's 37px line
+matches Chromium while the nested-inline reference is 43px; that separate P1.3
+strut defect remains recorded (**FT-18; D4.5.1v4 / D4.1.4v5**).
+
+The live fixture also exposes two P0 routing gaps: the shared declaration reader
+and DOM wrapper independently support only before/after identities. Every
+nonzero pseudo now uses the existing DOM declaration lookup. An immutable
+shared registry replaces the parser name mapping, matcher type switch and the
+wrapper's third name mapping. Numeric identities, aliases and legacy-colon
+rules remain stable, with no new core-to-input import. Native parser/matcher
+controls cover fourteen selectors; marker font and grid getters cover variables,
+relative lengths, defaults and 128 repeated reads without source-pool growth
+(**D4.6.1v4; D7.3.3 / D7.3.4; CI-18**).
+
+The 95-check causal native fixture passes against 53/95 on the frozen affine
+predecessor. Chromium passes 87/95: eight checks expose retained same-URL marker
+image-set intrinsic size despite correct computed CSS, including after 500ms
+settling. Original 81-check controls and all failed browser records remain.
+The 48-case independent inline-image exporter supplies **96 pairs and 288 exact
+PNG/SVG/PDF comparisons**, all passing at both densities with positive source
+color coverage. Its predecessor records 108 raw mismatches. The earlier sampling
+fixture moves its containing block from 24px to 128px so corrected baseline
+quarter turns remain in view; all exact comparisons and positive-color thresholds
+are preserved. The browser's refreshed 160-pair check matches 112 whole images:
+64 sampling and 48 empty baseline controls. The 48 text controls retain a
+marker-to-text spacing difference, while image bounds and line-box bounds agree
+in all 96 baseline pairs. These distinct browser limits are not merged into a
+clean conformance aggregate.
+
+Ordinary/scoped ASan computation passes **135/135**; scoped vector passes
+**164/164**. Sixty-eight live fixtures pass **3,164 assertions per AST/MIR
+runtime**. Five ordinary and five scoped exporter groups pass. ASan instruments
+28 production owners, 15 changed shared headers and four test units, now
+including selector/parser and DOM wrapper owners; other host/vendor objects are
+ordinary debug and leak detection is disabled. All instrumented hashes match
+the ordinary freeze. An earlier new-test build referenced an unimplemented
+parser declaration; it is preserved as a failed build, and the final regression
+uses the existing production combinator parser. The fresh scoped build keeps
+that failed attempt separate.
+
+The required Radiant gate passes **5,869 full /156 partial /zero failed /one
+skipped over 6,026 inputs**; input baseline passes 2,112/2,112. Boundary validation
+passes four strict DSOs with 137 deferred /zero unapproved imports against
+allowance 165. Integer lint, inventory freshness and diff checks pass. Inventory
+covers 411 names and twenty-eight bounded partial families; list-style-position
+joins the image/marker family and font-size gains bounded marker-computation
+evidence. Ordinary runtime
+`b0aefdadcec956371f27bd13d709299975f278e7162a4ab1be5cd02fff4355bf`
+and exporter
+`1c528237b2f84cd65775d308f4104cf640cdce185695245867872a5cabc41228`
+are protected in `marker_baseline_export_frozen/`; scoped records are in
+`asan_marker_baseline2/` and `marker_baseline_asan_export_frozen/`, beneath
+`temp/css_support_p0_p1_resume/`. The complete exporter passes **286/291 groups**, retaining the same thirty-nine
+raw paint/PDF assertions in five groups; WebGL passes. Matching core/input
+qualification passes all 6,964 cases, including 313 forced-GC cases, on the
+unchanged required adapter after the heavy suites finish. Runtime, harnesses,
+logs and hashes are protected in `marker_baseline_core_qualified/`.
+
+Outside/default-gradient/vertical/bidi/fragmented marker geometry, normal
+nested-font struts, broader pseudo/control applicability and paint, browser
+spacing/cache compatibility and other P0–P1 families remain open.
+
+### 2026-10-15 — P1.3 nested inline leading and occupied line struts under qualification
+
+The marker-free 24-row probe reproduces two defects on both protected
+predecessors: replaced inlines combine block font metrics with active descendant
+leading, and finalization subtracts the block's rounding excess from an already
+normalized larger-font union. Native agrees in 12/24 line boxes; Chromium agrees
+in all 24. The new 126-check causal fixture passes 115/126 on the marker
+predecessor and all 126 in Chromium.
+
+Formatting contexts now snapshot block leading with their initial font metrics.
+Root baseline, replaced descent and final line minimum use that pair while
+inline leading remains active. The existing block metric initializer replaces
+two duplicate initialization paths. Inline contribution and text initialization
+share normalized metrics; parent rounding is no longer deducted from the union.
+Platform normal leading floors the ascent half and retains the remainder below
+the baseline. USE_TYPO_METRICS now keeps typographic descent below the baseline
+instead of adding it to ascent. Existing Hasubi Mono controls catch that split
+(**FT-19; D4.5.1v4 / D4.1.4v5**).
+
+A second 24-row wrapping probe initially leaves two 48px/image-only first
+fragments with the wrong strut. Publish the ordinary baseline strut before a
+replaced/forced-break child can close the line. Initial letters, other alignment
+rules and collapsed text retain their own contribution paths. An overbroad draft
+fails 38 initial-letter controls; that raw run remains, and the corrected
+candidate passes all 169 inline baseline cases. The existing skip-ink fixture
+declares explicit leading so its unchanged 24 pixel assertions isolate ink gaps
+from normal-leading placement; its original source and failed draft remain.
+
+Native now matches all 24 original and all 24 wrapping line-box references.
+The permanent native test covers 26 pairs through initial and retained reflow.
+All 126 causal live checks pass; the marker regression retains 95/95. The new
+48 export pairs supply 144 exact PNG/SVG/PDF comparisons. Chromium matches all
+48 whole-image pairs at both densities. Six scoped ASan exporter groups pass,
+including marker and transformed image-sampling regressions. Scoped ASan also
+passes **135 computation, 116 text and 164 vector tests**, plus **3,290 live
+assertions per AST/MIR runtime across 69 fixtures**. Thirty production owners,
+four test units and fifteen changed shared headers are recorded; all hashes
+match the ordinary freeze. Other host/vendor objects remain ordinary debug and
+leak detection is disabled.
+
+Ordinary runtime
+`7a0cc902fccf438f3a30e59baf0d13481aaa1fb74ec63aa841a9d44d231a7745`
+and exporter
+`47fbca7e0d07a21596bffe33e8b07e3366189c5feab250caac3dfb5ec9aa167a`
+are protected in `nested_font4_export_frozen/`; sanitizer records are in
+`asan_nested_font4/` and `nested_font4_asan_export_frozen/`, under
+`temp/css_support_p0_p1_resume/`. Earlier draft freezes and failed required
+gates are retained separately. The full ordinary exporter passes **287/292**
+groups with the same thirty-nine raw paint/PDF assertions in five groups;
+WebGL passes. Boundary validation passes four strict DSOs with 137 deferred
+/zero unapproved imports against allowance 165. Integer lint, inventory freshness
+and diff checks pass. No current core gate is claimed for this draft; the
+preceding marker checkpoint passes all 6,964 core/input cases.
+
+The required Radiant run records **5,869 full /155 partial /three failed /one
+skipped over 6,028 inputs**. Its three layout failures are `input-width`,
+`multicol-nested-015` and `md_ky-readme`; other native/live checks pass.
+Fresh Chromium confirms the Markdown paragraph's corrected 48px height and
+1,074.9px header while the stored reference has older geometry; the reference
+and score remain unchanged. The input probe isolates a separate transitive
+empty-child margin defect in three browser-passing/native-failing pairs
+(**CI-18**, cascade §3.44). That repair is next. Broader leading/font grammar,
+vertical/bidi/ruby/fragmented contexts and P0–P1 completion remain open.
+
+### 2026-10-15 — P0.2/P1.2 adjoining empty margins and resolved snapshots under qualification
+
+Three independent references expose parent margin origins that retain the first
+empty child's margin instead of the complete adjoining chain. Chromium agrees
+in 3/3; native agrees in none. The heading is already placed correctly, but the
+parent's border edge and content height are wrong. A nested descendant extends
+the probe to four rows: restoring only the initial authored margin loses that
+descendant's larger propagated margin. Restore the exact amount consumed by
+early sibling collapse to the current margin instead.
+
+The first-content search carries positive/negative components through eligible
+self-collapsing children. Parent eligibility shares the existing boundary test;
+blocked parents retain sibling collapse. The first broad draft bypasses that
+branch in three existing root/shadow, table-cell and list/BFC controls. Those
+failed runs remain. Seven browser references now pass, including non-text
+children behind BFC, border and padding boundaries; that draft passes four.
+The original `input-width` regression passes unchanged (**CI-18**, cascade §3.44).
+
+The live fixture also reproduces consumed computed margins, then inherited 10px
+instead of the parent's resolved 8px. Getter, physical/logical spacing
+inheritance and the multicol reader share the existing owned pre-collapse
+snapshot (**D4.5.1v4 / D4.1.4v5**). Layout-dependent percentages still resolve
+through layout. Horizontal/auto reflection and percentage inheritance across
+different containing bases remain separate work.
+
+The causal fixture passes **90/90 native and Chromium assertions**, versus
+**56/90** on the font predecessor. Geometry/pixels precede computed reads, then
+positive/negative margins, a second empty child, owner-em/percentage values,
+explicit inheritance and inherited geometry change. The initial 54-check draft
+omitted the attribute comparator and did not test six values; its source/results
+remain, and accepted records use the corrected comparator. Native tests cover
+seven pairs through initial/retained reflow, 128 repeated top/bottom reads and
+no source-pool growth. Fourteen export pairs pass **42 exact PNG/SVG/PDF
+comparisons** at both densities with positive gray coverage. The predecessor
+retains 24 raw mismatches; the boundary-regressing draft retains 18 in the
+expanded fixture. Comparisons, thresholds, floors and reference files remain.
+
+Scoped ASan passes **135 computation, 117 text and 164 vector tests**, plus
+**3,380 live assertions per AST/MIR runtime across 70 fixtures** and seven
+scoped exporter groups. A fresh 31-owner/four-test build follows the header
+change; the final refresh recompiles the block owner and text unit against
+immutable private archives. Thirty-five source and fifteen header hashes match
+the ordinary freeze. Other host/vendor objects remain ordinary debug; leaks are
+disabled. The refresh helper recovers complete recipes across its immutable
+parent chain instead of losing untouched owners' compile commands.
+
+Required Radiant records **5,872 full /155 partial /two failed /one skipped over
+6,030 inputs**. Input passes **2,112/2,112**. Boundary passes four strict DSOs
+with 137 deferred /zero unapproved imports against allowance 165; integer lint,
+inventory freshness and diff checks pass. Inventory covers 411 names and
+twenty-nine bounded partial families, including vertical physical margins.
+Ordinary runtime
+`47733cbf66dc5cc3274e6eaee13cf46406fe70981af8c5472d4f88c8faa43c2c`
+and exporter
+`ed042217bce8ea8fdcb2207fefae2529d78f511aaafbc7325b456e0e28f13191`
+are protected in `empty_margin3_export_frozen/`; scoped records are in
+`asan_empty_margin3/` and `empty_margin3_asan_export_frozen/`, beneath
+`temp/css_support_p0_p1_resume/`. The full ordinary exporter passes **288/293 groups**, retaining the same
+**39 raw assertions in five paint/PDF groups**; WebGL passes. No matching core
+gate is claimed; the accepted marker checkpoint retains its
+6,964/6,964 core/input result.
+
+Required layout still fails `multicol-nested-015` and the stale `md_ky-readme`
+reference recorded above. An async list display-change fixture also fails
+standalone on both predecessor/current runtime while passing aggregate capture;
+preserve that P0.3 reproducer. Broader chain, fragmentation, logical/vertical
+and computed-value contexts remain partial. P0–P1 and the long-running goal
+remain active.
+
+### 2026-10-15 — P1.2 nested-column forced-break endpoints under qualification
+
+`multicol-nested-015` exposes a pre-existing projection dependency on font
+half-leading after FT-19 corrects normal metrics. Its original 10px line-break
+cursor wraps to zero at a column seam, and outer projection then discards that
+cursor and guesses a column from a 0.5px leading threshold. **MC1** in
+`Radiant_Layout_Multicol.md` retains the positive line endpoint using the shared
+closed-end fragment remainder and preserves it through nested projection.
+The font-dependent column adjustment is removed. Ownership and module APIs
+remain governed by **D4.5.1v4 / D4.1.4v5 / D7.3.3–D7.3.4**.
+
+The original WPT's three break boxes now match current Chromium at
+`(38,120,0,17)`. Six font/gap variants (12/16/24px normal leading, zero/2px inner
+gap) improve from **0/18 to 18/18 break rectangles** on the frozen margin
+predecessor/current runtime. Chromium agrees within 0.02px fractional-column
+rounding; native coverage also checks the atomic-inline boxes and retained
+reflow. The complete multicolumn category records **333 full /29 partial /zero
+failed**. The complete eighteen-variant probe remains available: explicit
+line-height can still discard positive leading or select the preceding
+fragment when leading is negative. These are separate open geometry cases,
+not passing coverage. References, floors and assertions remain unchanged.
+
+Ordinary runtime
+`d5006a31c061c58dd067a3abd21850b4fa70460789e8c85c2a269213f4f2e133`
+and unchanged exporter
+`ed042217bce8ea8fdcb2207fefae2529d78f511aaafbc7325b456e0e28f13191`
+are protected in `nested_br_export_frozen/`. Scoped runtime
+`7cff6857cf40a24ba06029e5e36dc499631e5e7502c0828f3bd4111ff118c34f`
+is protected in `asan_nested_br/` and `nested_br_asan_export_frozen/`.
+All thirty-five instrumented source and fifteen shared-header hashes match
+the ordinary freeze. Scoped ASan passes **135 computation /118 text /164 vector
+tests**, plus **3,380 live assertions per AST/MIR runtime across seventy
+fixtures**. Other host/vendor objects remain ordinary debug and leak detection
+is disabled. Boundary passes four strict DSOs with 137 deferred /zero unapproved
+imports against allowance 165; integer lint, inventory freshness and diff
+checks pass. Inventory covers 411 names and thirty bounded partial families.
+Seven scoped exporter groups pass. Required Radiant records **5,874 full /155
+partial /one failed /one skipped over 6,031 inputs**; only the previously
+diagnosed stale `md_ky-readme` reference fails. All 333 full /29 partial multicol
+cases pass. The full ordinary exporter passes **288/293 groups**, retaining the same
+**39 raw assertions in five paint/PDF groups**; WebGL passes. The matching core
+gate finishes **6,963/6,964**, with all 313 forced-GC and 2,112 input cases
+passing. Its sole failure is `chart_chart_dashboard`: exactly six word-cloud
+SVG text baselines change by 0.5px. The preceding marker runtime matches the
+golden byte for byte; current Chromium agrees with all six corrected native
+baselines and none of the preceding six. A new native control checks those
+font sizes through retained reflow. Preserve the unchanged golden and raw
+failure in `nested_br_core_failed/`; this is a diagnosed stale expectation,
+not an all-green core result. Artifacts are under
+`temp/css_support_p0_p1_resume/`.
+
+The next P0.3 reproducer is independently localized: one-shot auto-close drains
+stop after four turns even when an rAF continuation remains queued and the page
+still declares `reftest-wait`. The six-step list display-change fixture therefore
+captures after only four mutations when run alone. A twelve-frame control also
+stops at four, while the ordinary-page counterpart confirms that bounded ticker
+sampling must remain distinct from explicit readiness. Preserve the failed
+predecessor/current records; **SN1** in `Radiant_Design_Event.md` records the
+readiness and lifecycle contract for the next repair. P0–P1 and the long-running
+goal remain active.
+
+The baseline control also passes the complete refreshed scoped text runner at
+**119/119** (`asan_nested_br2/`); its runtime is byte-identical to the preceding
+scoped runtime. The ordinary product/exporter are likewise unchanged in
+`nested_br2_export_frozen/`. Thirty-five source and fifteen header hashes match
+that freeze. The additional test protects the diagnosed chart baseline without
+claiming a new required aggregate or rerunning the unchanged core product.
+
+### 2026-10-15 — P0.3 explicit one-shot frame readiness under qualification
+
+The six-step `change-list-descendant-display` mutation fails standalone because
+ordinary auto-close settlement stops after four turns while `reftest-wait`
+remains set. A twelve-frame control and a twenty-four-frame/cancellation
+control reproduce the same incomplete geometry; the ordinary recurring-ticker
+control passes. **SN1** in `Radiant_Design_Event.md` keeps explicit readiness
+separate from ordinary bounded sampling. After ordinary settlement, the script
+runner reuses the shared bounded-await helper while the native marker remains.
+The document's existing evaluator stays active through `RuntimeExecutionScope`
+(**D5.3.3 / D5.4.1 / D8.4.3v2**). No new queue, wrapper, evaluator or module
+interface is introduced.
+
+All three native controls now pass. The first after-build native run still
+linked an older static Radiant archive; that failure is preserved, and rebuilding
+the target's complete dependencies produces the passing result. Current Chromium
+agrees with the declared-ready 22px and 34px widths; the unchanged standalone
+lists category passes **52 full /eight partial /zero failed**. The old/new
+fixtures and native test executable/source are protected in
+`snapshot_ready_before_frozen/`, and raw diagnostics are in
+`snapshot_ready_probe/`, under `temp/css_support_p0_p1_resume/`.
+
+The reused helper retains its existing bounds, with the page watchdog as its
+wall-clock budget. An unresolved marker sets the script result to an error and
+logs a distinct diagnostic. The initial readiness runtime
+`42f35d12d02cca31c0685565aa55baa0d37475105a2805256759d24935e40888`
+is protected in `snapshot_ready_export_frozen/`. Its fresh 32-owner/four-test
+scoped ASan build passes **135 computation /122 text /164 vector tests**,
+**3,380 live assertions per AST/MIR runtime across seventy fixtures**, and seven
+scoped exporter groups. Thirty-six source and fifteen shared-header hashes
+match the ordinary freeze; other host/vendor objects remain ordinary debug
+and leak detection is disabled. Required Radiant records **5,878 full /155
+partial /one failed /one skipped over 6,035 inputs**, retaining the stale
+Markdown reference failure. Full ordinary export records **288/293 groups**,
+with the same **39 raw assertions in five paint/PDF groups**; WebGL passes.
+No matching core run is claimed. The initial stale inventory check is preserved;
+regeneration and the accepted freshness check pass.
+
+### 2026-10-15 — P0.3 unsettled layout rejection; requested stopping checkpoint
+
+The bounded script error alone still allowed the layout command to serialize
+unfinished geometry and return success. A 120-frame explicit-wait fixture
+reproduces this on the protected readiness predecessor. Promote the native
+readiness predicate to the existing Radiant header and reuse it at the layout
+serialization boundary (**D7.3.3–D7.3.4; SN1**). An unready auto-close document
+now follows ordinary unsuccessful-layout cleanup, emits no geometry, and makes
+the batch return failure while `--continue-on-error` processes the next ready
+document. The existing stream reader confirms a failed frame without payload,
+followed by a successful frame with payload. No teardown path is duplicated.
+
+The CLI regression checks exit status, absence of unfinished output and presence
+of the following ready document. Its initial filename/directory setup mistakes
+are preserved separately; the corrected pre-fix test fails and the final test
+passes. Both it and the existing timed-out-load batch recovery control pass
+**two cases per AST/MIR runtime** using the private ASan child executable; the
+parent CLI harness remains ordinary debug. Scoped ASan also passes **135
+computation /122 text /164 vector tests**. The fresh build instruments **33
+production owners and four regression units**; all **37 source and fifteen
+shared-header hashes** match the ordinary freeze. Other host/vendor objects
+remain ordinary debug and leak detection is disabled. Boundary passes four
+strict DSOs with **137 deferred /zero unapproved imports**, allowance unchanged
+at 165; integer lint, inventory freshness and diff checks pass.
+
+Final ordinary runtime
+`f77ce37219bd5a907632fda5e12fa1ae7c4604af98b43527c02a7a30351c1dd9`,
+scoped runtime
+`d41662cb4cca991f159fc3103af67b0fb18f7ce4c45afa2240d24237a9f83290`
+and unchanged exporter
+`ed042217bce8ea8fdcb2207fefae2529d78f511aaafbc7325b456e0e28f13191`
+are protected in `snapshot_reject_export_frozen/`,
+`snapshot_reject_asan_export_frozen/` and `asan_snapshot_reject/`, beneath
+`temp/css_support_p0_p1_resume/`. Raw CLI/stream reproductions are in
+`snapshot_ready_probe/`; `snapshot_reject_checkpoint_summary.json` indexes the
+final checks and pending gates.
+
+Work stops here at the user's request. **Full Radiant, export and core gates,
+the seventy-fixture live suites and scoped exporter groups have not been
+rerun on this final runtime**; the predecessor results above are not transferred
+to it. The latest core checkpoint remains **6,963/6,964**, with the
+browser-confirmed stale dashboard golden preserved in `nested_br_core_failed/`.
+On resumption, qualify this exact runtime before selecting another repair.
+Delayed/virtual timer readiness, larger chains, other capture frontends,
+broader multi-document lifecycle and the other bounded family limits remain
+open. No P0–P1 tier is closed.

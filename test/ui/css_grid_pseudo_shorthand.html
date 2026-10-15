@@ -1,0 +1,30 @@
+<!doctype html><meta charset="utf-8">
+<style>
+html,body{margin:0}button{height:24px}
+#owner{font-size:20px;grid-template:1em / 2em}
+#owner::before{content:"A";display:block;font-size:var(--pseudo-font,5px);grid-template:2em / 3em;
+    grid-column:calc(1 + 1) / span calc(1 + 2);grid-row:4 / 6}
+#owner::after{content:"B";display:block;font-size:8px;grid-template:4em / 5em}
+#owner.inherit::before{grid-template:inherit}
+#patch{height:12px;background:red}
+</style>
+<button id="check">Check</button><button id="change">Change font</button><button id="inherit">Inherit</button>
+<output id="report"></output><div id="owner"></div><div id="patch"></div>
+<script>
+(function(){
+    var owner=document.getElementById('owner'),report=document.getElementById('report');
+    function record(prefix){
+        var before=getComputedStyle(owner,'::before'),after=getComputedStyle(owner,'::after');
+        report.setAttribute('data-'+prefix+'template',before.gridTemplate);
+        report.setAttribute('data-'+prefix+'grid',before.grid);
+        report.setAttribute('data-'+prefix+'placement',[before.gridColumn,before.gridRow,before.gridArea].join('|'));
+        report.setAttribute('data-'+prefix+'after',after.gridTemplate);
+        document.getElementById('patch').style.width=before.gridTemplate.split('/')[1].trim();
+    }
+    document.getElementById('check').onclick=function(){record('');};
+    document.getElementById('change').onclick=function(){
+        owner.style.setProperty('--pseudo-font','7px');owner.style.fontSize='30px';record('dirty-');
+    };
+    document.getElementById('inherit').onclick=function(){owner.className='inherit';record('inherited-');};
+})();
+</script>

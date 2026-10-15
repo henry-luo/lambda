@@ -147,7 +147,6 @@ static bool layout_set_broken_image_alt_fallback(LayoutContext* lycon,
     if (!block->embed) block->ensure_embed(lycon);
     if (!block->embed) return false;
 
-    block->embed->broken_alt_fallback = true;
     float line_height = lycon->block.line_height;
     if (line_height <= 0.0f) {
         line_height = lycon->font.current_font_size > 0.0f ?
@@ -984,6 +983,11 @@ static inline void margin_to_chain(float margin, float* out_pos, float* out_neg)
     *out_pos = max(margin, 0.f);
     *out_neg = min(margin, 0.f);
 }
+static inline void include_margin_chain(float* positive, float* negative,
+                                       float next_positive, float next_negative) {
+    *positive = max(*positive, next_positive);
+    *negative = min(*negative, next_negative);
+}
 // CSS 2.1 §8.3.1: Check if a block's margin chain has non-trivial components
 static inline bool has_margin_chain(BoundaryProp* bound) {
     return bound && (bound->margin_chain_positive != 0 || bound->margin_chain_negative != 0);
@@ -1039,6 +1043,12 @@ static void shift_margin_collapse_floats(FloatBox* floats, ViewElement* parent,
 
 static inline bool is_root_element_block(ViewBlock* block) {
     return block && block->tag_id == MARKUP_NAME_HTML;
+}
+
+static bool parent_start_margin_has_no_boundary(ViewBlock* parent) {
+    return parent && parent->parent && !block_context_establishes_bfc(parent) &&
+        layout_axis_decoration_start(parent->bound ? parent->boundary() : nullptr,
+            LAYOUT_AXIS_Y) == 0.0f;
 }
 
 static bool layout_source_block_child_allowed(DomElement* child) {
@@ -2702,7 +2712,7 @@ static float layout_strut_below_baseline(LayoutContext* lycon) {
     if (!lycon || layout_quirks_block_ignores_line_height(lycon, nullptr)) return 0.0f;
     float ascender = lycon->block.init_ascender;
     float descender = lycon->block.init_descender;
-    layout_apply_line_height_leading(lycon->block.line_height, &ascender, &descender);
+    layout_apply_line_height_leading(lycon->block.strut_line_height, &ascender, &descender);
     return max(descender, 0.0f);
 }
 
@@ -6576,22 +6586,7 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     lycon->line.line_start_font = lycon->font;
     setup_line_height(lycon, block);
     // CSS 2.1 §10.8.1: The strut is a zero-width inline box with the block's font.
-    if (font_box_handle(&lycon->font)) {
-        if (lycon->block.line_height_is_normal) {
-            float split_asc = 0, split_desc = 0;
-            font_get_normal_lh_split(font_box_handle(&lycon->font), &split_asc, &split_desc);
-            lycon->block.init_ascender = split_asc;
-            lycon->block.init_descender = split_desc;
-        } else {
-            font_get_content_area_split(font_box_handle(&lycon->font),
-                                        &lycon->block.init_ascender,
-                                        &lycon->block.init_descender);
-        }
-    } else if (lycon->font.style && lycon->font.current_font_size == 0.0f) {
-        // a zero-size font has no face; inherited parent strut metrics must
-        // not move zero-height atomic children below their own baseline.
-        lycon->block.init_ascender = lycon->block.init_descender = 0.0f;
-    }
+    layout_setup_block_font_metrics(lycon);
     if (block->is_element() && lycon->font.style) {
         DomElement* block_element = lam::dom_require<DOM_NODE_ELEMENT>(block);
         lycon->block.first_line_font = lam::up(layout_resolve_first_line_font(
@@ -6615,7 +6610,6 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         lycon->block.is_first_line = true;
         line_reset(lycon);
     }
-    lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
 }
 
 LayoutTextRectContentKind layout_text_rect_content_kind(ViewText* text,
@@ -7521,7 +7515,8 @@ static void layout_apply_vertical_block_justify_self(ViewBlock* block,
 __attribute__((noinline))
 void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *pa_block,
                           Linebox *pa_line, float* out_original_margin_top,
-                          bool* out_sibling_margin_collapsed_before_layout) {
+                          bool* out_sibling_margin_collapsed_before_layout,
+                          float* out_sibling_consumed_margin_top) {
     layout_block_content_count++;
     if (layout_block_content_count % 5000 == 0) {
         log_notice("layout_block_content: count=%d", layout_block_content_count);
@@ -7535,6 +7530,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     bool is_float = layout_position_is_floated(block->position);
     *out_original_margin_top = 0.0f;
     *out_sibling_margin_collapsed_before_layout = false;
+    *out_sibling_consumed_margin_top = 0.0f;
     bool establishes_bfc = block_context_establishes_bfc(block);
     // CSS 2.1 Section 9.5: "The border box of a table, a block-level replaced element,
     // must not overlap the margin box of any floats in the same block formatting context
@@ -8000,11 +7996,13 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             if (image) {
                 block->embed->content_image_resolution = layout_css_image_density(
                     image, content_replacement_image.resolution);
-                block->embed->broken_alt_fallback = false;
             }
-        } else if (block->embed && block->embedp()->img) {
-            block->embed->broken_alt_fallback = false;
         }
+        const char* alternative = elmt_name == MARKUP_NAME_IMG ? block->get_attribute("alt") : nullptr;
+        if (alternative && alternative[0] && !block->embed) block->ensure_embed(lycon);
+        // alt text retains its text baseline even when explicit dimensions preserve the image box.
+        if (block->embed) block->embed->broken_alt_fallback = !block->embedp()->img &&
+            alternative && alternative[0];
         if (block->embed && block->embedp()->img) {
             ImageSurface* img = block->embedp()->img;
             float w = 0.0f;
@@ -8172,9 +8170,6 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             bool has_explicit_size = layout_axis_has_given_size(block, true) ||
                 layout_axis_has_given_size(block, false);
             if (has_explicit_size || !layout_set_broken_image_alt_fallback(lycon, block, true)) {
-                if (image_is_generated_content_child(block) && block->embed) {
-                    block->embed->broken_alt_fallback = false;
-                }
                 float fallback = image_is_generated_content_child(block) ? 16.0f : 0.0f;
                 for (LayoutAxis axis : layout_axes()) {
                     bool horizontal = layout_axis_is_horizontal(axis);
@@ -8236,9 +8231,6 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 // CSS width or aspect-ratio had sized the replaced image box.
                 layout_set_broken_image_alt_fallback(lycon, block, false);
             } else {
-                if (block->embed) {
-                    block->embed->broken_alt_fallback = false;
-                }
                 bool has_definite_width = has_css_width || has_html_width;
                 bool has_definite_height = has_css_height || has_html_height;
                 if ((!has_definite_width || !has_definite_height) &&
@@ -8969,15 +8961,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             }
             if (first_in_flow == static_cast<View*>(block)) {
                 ViewBlock* parent = layout_nearest_block_ancestor(block->parent_view());
-                bool parent_creates_bfc = parent && block_context_establishes_bfc(parent);
-                float parent_decoration_top = layout_axis_decoration_start(
-                    parent && parent->bound ? parent->boundary() : nullptr, LAYOUT_AXIS_Y);
                 float effective_mt = own_margin_top;
                 if (is_quirky_container(parent, lycon) && has_quirky_margin(block, true))
                     effective_mt = 0;
-                if (parent && parent->parent && !parent_creates_bfc &&
-                    parent_decoration_top == 0 &&
-                    effective_mt != 0) {
+                if (parent_start_margin_has_no_boundary(parent) && effective_mt != 0) {
                     float advance_y_before = block->y - own_margin_top;
                     hypothetical_y = advance_y_before;
                 }
@@ -9068,6 +9055,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             block->y -= collapse;
             block->boundary_mut()->margin.top -= collapse;
             *out_sibling_margin_collapsed_before_layout = true;
+            *out_sibling_consumed_margin_top = collapse;
         }
     }
     float collapsed_margin_top = block->bound ? block->boundary()->margin.top : 0.0f;
@@ -9724,13 +9712,15 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
     float original_margin_top = 0.0f;
     bool sibling_margin_collapsed_before_layout = false;
+    float sibling_consumed_margin_top = 0.0f;
     if (layout_block_is_out_of_flow_positioned(block)) {
         layout_abs_block(lycon, elmt, block, &pa_block, &pa_line);
         lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
     } else {
         layout_block_content(lycon, block, &pa_block, &pa_line,
                              &original_margin_top,
-                             &sibling_margin_collapsed_before_layout);
+                             &sibling_margin_collapsed_before_layout,
+                             &sibling_consumed_margin_top);
         if (has_custom_layout) {
             if (package_mathml) layout_apply_mathml(lycon, block);
             else layout_custom_apply(lycon, block, custom_layout_name);
@@ -9743,8 +9733,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         float child_line_clamp_last_line_max_ascender = block->blk ? block->block()->line_clamp_last_line_max_ascender : 0.0f;
         float child_line_clamp_last_line_max_descender = block->blk ? block->block()->line_clamp_last_line_max_descender : 0.0f;
         // CSS 2.1 Section 10.8.1: For non-replaced inline-blocks with in-flow line boxes
+        bool is_broken_alt_image = radiant::layout_image_uses_alt_text_baseline(block);
         float content_last_line_ascender;
-        if (lycon->line.max_ascender > 0) {
+        if (is_broken_alt_image) {
+            // the fallback's line, rather than its outer height, supplies the text baseline.
+            content_last_line_ascender = lycon->block.advance_y + line_baseline_position(lycon, nullptr);
+        } else if (lycon->line.max_ascender > 0) {
             content_last_line_ascender = lycon->block.advance_y + lycon->line.max_ascender;
             content_last_line_ascender =
                 fieldset_vertical_last_baseline_from_line_context(
@@ -9821,8 +9815,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         bool form_control_margin_baseline = block->tag() == MARKUP_NAME_BUTTON ||
             (block->tag() == MARKUP_NAME_INPUT && block->form &&
              block->form->control_type == FORM_CONTROL_TEXT);
-        bool is_broken_alt_image = block->tag() == MARKUP_NAME_IMG &&
-            block->embed && block->embedp()->broken_alt_fallback;
         bool textarea_uses_explicit_baseline_source =
             block->tag() == MARKUP_NAME_TEXTAREA &&
             radiant::layout_uses_explicit_baseline_source(block) &&
@@ -9831,9 +9823,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             content_last_line_ascender =
                 radiant::layout_form_control_baseline_for_source(block);
             content_has_line_boxes = true;
-        }
-        if (is_broken_alt_image) {
-            is_replaced = false;
         }
         if (is_replaced && !textarea_uses_explicit_baseline_source) {
             content_has_line_boxes = false;
@@ -10045,7 +10034,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 } else if (is_select_listbox) {
                     item_baseline = layout_select_listbox_baseline(
                         lycon, block, inline_block_box.margin.top);
-                } else if (overflow_visible && block->display.inner == RDT_DISPLAY_REPLACED &&
+                } else if (overflow_visible && !is_broken_alt_image && block->display.inner == RDT_DISPLAY_REPLACED &&
                            !block->form) {
                     // ordinary replaced inlines align their margin-box bottom edge;
                     // form controls use their dedicated baseline path above.
@@ -10277,7 +10266,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 if (is_inline_table && table_baseline >= 0) {
                     effective_baseline = table_baseline;
                 }
-                if (!is_broken_alt_image && uses_content_baseline) {
+                if (uses_content_baseline) {
                     lycon->line.max_ascender = max(lycon->line.max_ascender, effective_baseline +
                         inline_block_box.margin.top);
                     float descender_part = block->height - effective_baseline +
@@ -10409,10 +10398,21 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         shadow_formatting_parent->shadow_root_element()) == (DomNode*)block;
                 ViewElement* collapse_parent_view = shadow_formatting_parent
                     ? (ViewElement*)shadow_formatting_parent : block->parent_view();
+                ViewBlock* parent = first_shadow_child
+                    ? (collapse_parent_view && collapse_parent_view->is_block()
+                        ? lam::view_require_block(collapse_parent_view) : nullptr)
+                    : layout_nearest_block_ancestor(block->parent_view());
+                bool parent_start_adjoins = parent_start_margin_has_no_boundary(parent) &&
+                    !is_root_element_block(parent) &&
+                    !layout_inline_has_prior_in_flow_content(
+                        static_cast<DomNode*>(block->parent_view()));
                 View* first_in_flow_child = first_shadow_child
                     ? static_cast<View*>(block)
                     : (collapse_parent_view
                         ? collapse_parent_view->first_placed_child() : nullptr);
+                float preceding_margin_positive = 0.0f;
+                float preceding_margin_negative = 0.0f;
+                bool has_preceding_self_collapsing = false;
                 while (first_in_flow_child) {
                     if (first_in_flow_child->view_type == RDT_VIEW_MARKER) {
                         View* next = static_cast<View*>(first_in_flow_child->next_sibling);
@@ -10466,8 +10466,21 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         float margin_top_val = margin.top;
                         float margin_bottom_val = margin.bottom;
                         bool has_chain_margins = vb->bound && has_margin_chain(vb->bound);
+                        // a blocked parent keeps the ordinary sibling-collapse path.
+                        bool adjoining_empty = vb != block && parent_start_adjoins &&
+                            !margin_collapse_ancestor_has_clearance(parent) &&
+                            parent_margin_collapse_uses_physical_y(block) &&
+                            (!vb->bound || !vb->boundary()->clearance_in_margin_chain);
                         if (border_top == 0 && border_bottom == 0 && padding_top == 0 && padding_bottom == 0
-                            && margin_top_val == 0 && margin_bottom_val == 0 && !has_chain_margins) {
+                            && (adjoining_empty ||
+                                (margin_top_val == 0 && margin_bottom_val == 0 && !has_chain_margins))) {
+                            if (adjoining_empty) {
+                                float positive = 0.0f, negative = 0.0f;
+                                if (vb->bound) get_self_margin_chain(vb, margin_top_val, &positive, &negative);
+                                include_margin_chain(&preceding_margin_positive,
+                                    &preceding_margin_negative, positive, negative);
+                                has_preceding_self_collapsing = true;
+                            }
                             View* next = static_cast<View*>(first_in_flow_child->next_sibling);
                             next = layout_first_view_with_type(next);
                             first_in_flow_child = next;
@@ -10481,16 +10494,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     // CSS Box 4 §margin-trim: block-start trims the first child's block-start
                     // CSS 2.1 §9.5.2: If clearance was applied (saved_clear_y >= 0),
                     bool has_clearance = (lycon->block.saved_clear_y >= 0);
-                    ViewBlock* parent = nullptr;
-                    if (first_shadow_child) {
-                        parent = collapse_parent_view && collapse_parent_view->is_block()
-                            ? lam::view_require_block(collapse_parent_view) : nullptr;
-                    } else {
-                        parent = layout_nearest_block_ancestor(block->parent_view());
-                    }
-                    bool parent_creates_bfc = parent && block_context_establishes_bfc(parent);
-                    float parent_decoration_top = layout_axis_decoration_start(
-                        parent && parent->bound ? parent->boundary() : nullptr, LAYOUT_AXIS_Y);
                     float parent_margin_top = parent && parent->bound ? parent->boundary()->margin.top : 0;
                     // CSS 2.1 §8.3.1: Parent-child top margin collapse.
                     bool first_child_self_collapsing = layout_block_is_self_collapsing(block);
@@ -10501,40 +10504,42 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         !layout_block_inline_axis_is_vertical(block) &&
                         block->block()->bfc_float_avoidance_shift_y > 0.0f;
                     if (!has_clearance && parent_margin_collapse_uses_physical_y(block) &&
-                        (block->boundary()->margin.top != 0 || has_self_collapsing_margins)) {
+                        (block->boundary()->margin.top != 0 || has_self_collapsing_margins ||
+                         has_preceding_self_collapsing)) {
                         // CSS 2.1 §9.5.2: If the PARENT had clearance applied, the parent's
                         bool parent_has_clearance = parent &&
                             margin_collapse_ancestor_has_clearance(parent);
                             bool quirky_container = is_quirky_container(parent, lycon);
-                        if (parent && parent->parent && !is_root_element_block(parent) &&
-                            !parent_creates_bfc &&
-                            !layout_inline_has_prior_in_flow_content(
-                                static_cast<DomNode*>(block->parent_view())) &&
-                            parent_decoration_top == 0) {
+                        if (parent_start_adjoins) {
+                            // descendants may enlarge this margin after sibling collapse.
                             float child_mt = (quirky_container && has_quirky_margin(block, true))
-                                ? 0 : block->boundary()->margin.top;
+                                ? 0 : (has_preceding_self_collapsing
+                                    ? block->boundary()->margin.top + sibling_consumed_margin_top
+                                    : block->boundary()->margin.top);
                             if (stretch_margin_after_float_avoidance) {
                                 // CSS Sizing 4 stretch-fit clearance treats the
                                 child_mt = 0.0f;
                             }
-                            // CSS 2.1 §8.3.1: collapse child and parent margins
-                            float margin_top = layout_collapse_margins(child_mt, parent_margin_top);
+                            // empty predecessors keep their signed chain adjoining;
+                            // sibling-consumed margins cannot replace authored components.
+                            float chain_pos = max(max(child_mt, parent_margin_top), 0.f);
+                            float chain_neg = min(min(child_mt, parent_margin_top), 0.f);
+                            include_margin_chain(&chain_pos, &chain_neg,
+                                preceding_margin_positive, preceding_margin_negative);
                             // CSS 2.1 §8.3.1: For self-collapsing first children, both mt and mb
                             if (first_child_self_collapsing) {
                                 // CSS 2.1 §8.3.1: Use chain-aware 3-way collapse to avoid
-                            float child_mb = (quirky_container && has_quirky_margin(block, false))
+                                float child_mb = (quirky_container && has_quirky_margin(block, false))
                                     ? 0 : block->boundary()->margin.bottom;
-                                float chain_pos = max(max(child_mt, parent_margin_top), 0.f);
-                                chain_pos = max(chain_pos, max(child_mb, 0.f));
-                                float chain_neg = min(min(child_mt, parent_margin_top), 0.f);
-                                chain_neg = min(chain_neg, min(child_mb, 0.f));
+                                include_margin_chain(&chain_pos, &chain_neg, child_mb, child_mb);
                                 // CSS 2.1 §8.3.1: If child has a margin chain from its own
                                 if (has_margin_chain(block->bound)) {
-                                    chain_pos = max(chain_pos, block->boundary()->margin_chain_positive);
-                                    chain_neg = min(chain_neg, block->boundary()->margin_chain_negative);
+                                    include_margin_chain(&chain_pos, &chain_neg,
+                                        block->boundary()->margin_chain_positive,
+                                        block->boundary()->margin_chain_negative);
                                 }
-                                margin_top = chain_pos + chain_neg;
                             }
+                            float margin_top = chain_pos + chain_neg;
                             // CSS 2.1 §8.3.1: Parent-child collapse propagates the child's
                             if (!parent_has_clearance) {
                                 float y_delta = margin_top - parent_margin_top;
@@ -10570,13 +10575,15 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                 float sc_mb = (quirky_container && has_quirky_margin(block, false))
                                     ? 0 : block->boundary()->margin.bottom;
                                 float chain_pos = max(max(sc_mt, parent_margin_top), 0.f);
-                                chain_pos = max(chain_pos, max(sc_mb, 0.f));
                                 float chain_neg = min(min(sc_mt, parent_margin_top), 0.f);
-                                chain_neg = min(chain_neg, min(sc_mb, 0.f));
+                                include_margin_chain(&chain_pos, &chain_neg, sc_mb, sc_mb);
+                                include_margin_chain(&chain_pos, &chain_neg,
+                                    preceding_margin_positive, preceding_margin_negative);
                                 // CSS 2.1 §8.3.1: Incorporate child's existing margin chain
                                 if (has_margin_chain(block->bound)) {
-                                    chain_pos = max(chain_pos, block->boundary()->margin_chain_positive);
-                                    chain_neg = min(chain_neg, block->boundary()->margin_chain_negative);
+                                    include_margin_chain(&chain_pos, &chain_neg,
+                                        block->boundary()->margin_chain_positive,
+                                        block->boundary()->margin_chain_negative);
                                 }
                                 set_margin_chain(block->bound, chain_pos, chain_neg);
                             }

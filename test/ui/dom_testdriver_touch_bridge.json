@@ -1,0 +1,12 @@
+{
+  "name":"Native testdriver touch bridge retains coordinates, touch lists and bubbling",
+  "html":"test/ui/dom_testdriver_touch_bridge.html",
+  "viewport":{"width":300,"height":200},
+  "events":[
+    {"type":"click","target":{"selector":"#send"}},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-sent","equals":"true|true|true|false"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-events","equals":"touchstart:1:1:52.5:90.25|touchmove:1:1:60.25:96.5|touchend:0:1:60.25:96.5"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-targets","equals":"pad|pad|pad"},
+    {"type":"assert_attribute","target":{"selector":"#report"},"attribute":"data-bubbles","equals":"3"}
+  ]
+}

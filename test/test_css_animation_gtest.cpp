@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include <cstring>
+#include <limits.h>
 #include "../lib/strbuf.h"
 #include "../lib/tagged.hpp"
 
@@ -485,6 +486,7 @@ class MotionCascadeTest : public ::testing::Test {
 protected:
     Pool* pool = nullptr;
     CssEngine* engine = nullptr;
+    unsigned source_order = 0;
     DomDocument doc = {};
     DomElement element = {};
     void SetUp() override {
@@ -504,10 +506,21 @@ protected:
         css_engine_destroy(engine);
         pool_destroy(pool);
     }
-    void apply(const char* text) {
+    void apply(const char* text, DomElement* target = nullptr, int pseudo_type = 0) {
+        if (!target) target = &element;
         CssDeclaration* declaration = css_parse_declaration_text(text, strlen(text), pool);
         ASSERT_NE(declaration, nullptr);
-        ASSERT_NE(style_tree_apply_declaration(element.specified_style, declaration), nullptr);
+        declaration->specificity.important = declaration->important;
+        declaration->source_order = ++source_order;
+        StyleTree* style = pseudo_type ? dom_element_get_pseudo_style(target, pseudo_type)
+            : target->specified_style.get();
+        ASSERT_NE(style_tree_apply_declaration(style, declaration), nullptr);
+    }
+    void expect_computed(CssPropertyCode property, const char* expected, int pseudo_type = 0) {
+        char computed[160];
+        ASSERT_TRUE(css_prop_serialize_computed(&element, property,
+            pseudo_type, computed, sizeof(computed)));
+        EXPECT_STREQ(computed, expected);
     }
 };
 
@@ -815,6 +828,785 @@ TEST_F(MotionCascadeTest, IntrinsicSizeMathUsesComputedFontAndClampsNegativeResu
     resolve_css_property(declaration->property_code, declaration, &context);
     EXPECT_FLOAT_EQ(block.contain_intrinsic_height, 0.0f);
     element.blk = nullptr;
+}
+
+TEST_F(MotionCascadeTest, IntrinsicComputedReadsPreserveModesOwnerMathAndCascade) {
+    const CssPropertyCode properties[] = {CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE,
+        CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH, CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT,
+        CSS_PROPERTY_CONTAIN_INTRINSIC_INLINE_SIZE, CSS_PROPERTY_CONTAIN_INTRINSIC_BLOCK_SIZE};
+    auto expect = [&](CssPropertyCode property, const char* text) {
+        String* computed = css_prop_serialize_computed_value(pool, &element, property, 0);
+        ASSERT_NE(computed, nullptr);
+        EXPECT_STREQ(computed->chars, text);
+    };
+    for (CssPropertyCode property : properties) expect(property, "none");
+    apply("font-size:10px");
+    apply("contain-intrinsic-size:auto 2em auto 2em");
+    expect(CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, "auto 20px");
+    expect(CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH, "auto 20px");
+    apply("contain-intrinsic-height:auto none");
+    expect(CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, "auto 20px auto none");
+    apply("contain-intrinsic-width:calc(1px - 2px)");
+    expect(CSS_PROPERTY_CONTAIN_INTRINSIC_WIDTH, "0px");
+    apply("contain-intrinsic-width:80px!important");
+    apply("contain-intrinsic-size:3em 4em");
+    apply("contain-intrinsic-inline-size:60px");
+    expect(CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, "80px 40px");
+    apply("writing-mode:vertical-rl");
+    expect(CSS_PROPERTY_CONTAIN_INTRINSIC_INLINE_SIZE, "60px");
+    expect(CSS_PROPERTY_CONTAIN_INTRINSIC_BLOCK_SIZE, "80px");
+    expect(CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, "80px 60px");
+    apply("contain-intrinsic-size:var(--missing)!important");
+    expect(CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, "none");
+}
+
+TEST_F(MotionCascadeTest, OverflowComputedAxesShareCascadeCouplingAndDirtyInheritance) {
+    auto expect = [&](CssPropertyCode property, const char* expected, int pseudo = 0) {
+        char value[128];
+        ASSERT_TRUE(css_prop_serialize_computed(&element, property, pseudo, value, sizeof(value)));
+        EXPECT_STREQ(value, expected);
+    };
+    expect(CSS_PROPERTY_OVERFLOW, "visible");
+    apply("overflow:hidden visible");
+    expect(CSS_PROPERTY_OVERFLOW, "hidden auto");
+    expect(CSS_PROPERTY_OVERFLOW_INLINE, "hidden");
+    apply("overflow:clip visible");
+    apply("writing-mode:vertical-rl");
+    apply("overflow-inline:clip");
+    expect(CSS_PROPERTY_OVERFLOW, "clip");
+    expect(CSS_PROPERTY_OVERFLOW_BLOCK, "clip");
+    apply("overflow-block:visible!important");
+    expect(CSS_PROPERTY_OVERFLOW, "visible clip");
+    apply("overflow:var(--missing)");
+    expect(CSS_PROPERTY_OVERFLOW, "visible");
+    apply("overflow-inline:var(--missing)");
+    expect(CSS_PROPERTY_OVERFLOW, "visible");
+    apply("overscroll-behavior:none contain");
+    expect(CSS_PROPERTY_OVERSCROLL_BEHAVIOR, "none contain");
+    apply("overscroll-behavior-x:auto");
+    expect(CSS_PROPERTY_OVERSCROLL_BEHAVIOR, "auto contain");
+    expect(CSS_PROPERTY_OVERSCROLL_BEHAVIOR_Y, "contain");
+
+    DomElement parent = {};
+    parent.node_type = DOM_NODE_ELEMENT;
+    parent.set_synthetic(true); parent.set_styles_resolved(true);
+    parent.doc = lam::up(&doc);
+    parent.specified_style = lam::shared(style_tree_create(pool));
+    element.parent = lam::up<DomNode>(&parent); doc.root = lam::up(&parent);
+    apply("overflow:clip visible", &parent);
+    apply("overflow:inherit!important");
+    expect(CSS_PROPERTY_OVERFLOW, "clip visible");
+    expect(CSS_PROPERTY_OVERFLOW_INLINE, "visible");
+    apply("overflow:hidden clip", &parent);
+    expect(CSS_PROPERTY_OVERFLOW, "hidden");
+    apply("overscroll-behavior:contain none", &parent);
+    apply("overscroll-behavior:inherit");
+    expect(CSS_PROPERTY_OVERSCROLL_BEHAVIOR, "contain none");
+    element.set_pseudo_style(PSEUDO_STYLE_BEFORE, style_tree_create(pool));
+    apply("overflow:inherit", &element, 1);
+    expect(CSS_PROPERTY_OVERFLOW, "hidden", 1);
+    size_t bytes = 0, count = 0;
+    pool_get_stats(pool, &bytes, &count);
+    for (unsigned read = 0; read < 128; read++) expect(CSS_PROPERTY_OVERFLOW, "hidden", 1);
+    size_t after_bytes = 0, after_count = 0;
+    pool_get_stats(pool, &after_bytes, &after_count);
+    EXPECT_EQ(bytes, after_bytes); EXPECT_EQ(count, after_count);
+    element.parent = nullptr; doc.root = lam::up(&element);
+}
+
+TEST_F(MotionCascadeTest, OverflowDirtyReadsRetainUaDefaultsAndExplicitInitialResetsThem) {
+    ScrollProp control = SCROLL_PROP_DEFAULT;
+    control.default_overflow_x = control.default_overflow_y = CSS_VALUE_AUTO;
+    control.overflow_x = control.overflow_y = CSS_VALUE_HIDDEN;
+    element.scroller = lam::view_prop(&control);
+    auto expect = [&](const char* expected) {
+        char value[128];
+        ASSERT_TRUE(css_prop_serialize_computed(&element, CSS_PROPERTY_OVERFLOW, 0, value, sizeof(value)));
+        EXPECT_STREQ(value, expected);
+    };
+    expect("auto");
+    apply("overflow-y:clip");
+    expect("auto hidden");
+    apply("overflow:initial");
+    expect("visible");
+    apply("overflow:revert");
+    expect("auto");
+    element.scroller = nullptr;
+}
+
+TEST_F(MotionCascadeTest, IntrinsicComputedInheritanceAndPseudosKeepOwnerLengthsWithoutScratchGrowth) {
+    DomElement parent = {};
+    parent.node_type = DOM_NODE_ELEMENT;
+    parent.set_synthetic(true);
+    parent.set_styles_resolved(true);
+    parent.doc = lam::up(&doc);
+    parent.specified_style = lam::shared(style_tree_create(pool));
+    element.parent = lam::up<DomNode>(&parent);
+    doc.root = lam::up(&parent);
+    apply("font-size:10px", &parent);
+    apply("contain-intrinsic-size:auto 3em auto 4em", &parent);
+    apply("font-size:30px");
+    apply("contain-intrinsic-size:inherit");
+    auto expect = [&](CssPropertyCode property, int pseudo_type, const char* expected) {
+        char computed[128];
+        ASSERT_TRUE(css_prop_serialize_computed(&element, property, pseudo_type, computed, sizeof(computed)));
+        EXPECT_STREQ(computed, expected);
+    };
+    expect(CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, 0, "auto 30px auto 40px");
+    apply("font-size:20px", &parent);
+    expect(CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, 0, "auto 60px auto 80px");
+    apply("writing-mode:vertical-rl");
+    apply("contain-intrinsic-inline-size:inherit");
+    expect(CSS_PROPERTY_CONTAIN_INTRINSIC_HEIGHT, 0, "auto 60px");
+    element.set_pseudo_style(PSEUDO_STYLE_BEFORE, style_tree_create(pool));
+    apply("font-size:5px", &element, 1);
+    apply("contain-intrinsic-size:2em 3em", &element, 1);
+    expect(CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, 1, "10px 15px");
+    apply("contain-intrinsic-size:inherit", &element, 1);
+    expect(CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, 1, "auto 60px");
+    size_t before_bytes = 0, before_count = 0;
+    pool_get_stats(pool, &before_bytes, &before_count);
+    for (unsigned read = 0; read < 128; read++) {
+        expect(CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, 0, "auto 60px");
+        expect(CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE, 1, "auto 60px");
+    }
+    size_t after_bytes = 0, after_count = 0;
+    pool_get_stats(pool, &after_bytes, &after_count);
+    EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
+    element.parent = nullptr;
+    doc.root = lam::up(&element);
+}
+
+TEST_F(MotionCascadeTest, PseudoCurrentColorUsesTheReceivingPseudoAfterInheritance) {
+    apply("color:red");
+    apply("border-top-color:currentColor");
+    element.set_pseudo_style(PSEUDO_STYLE_BEFORE, style_tree_create(pool));
+    apply("color:blue", &element, 1);
+    apply("background-color:currentColor", &element, 1);
+    apply("border-top-color:currentColor", &element, 1);
+    auto expect = [&](CssPropertyCode property, const char* expected) {
+        char computed[128];
+        ASSERT_TRUE(css_prop_serialize_computed(&element, property, 1, computed, sizeof(computed)));
+        EXPECT_STREQ(computed, expected);
+    };
+    expect(CSS_PROPERTY_BACKGROUND_COLOR, "rgb(0, 0, 255)");
+    expect(CSS_PROPERTY_BORDER_TOP_COLOR, "rgb(0, 0, 255)");
+    expect(CSS_PROPERTY_BORDER_RIGHT_COLOR, "rgb(0, 0, 255)");
+    apply("color:green", &element, 1);
+    apply("border-top-color:inherit", &element, 1);
+    expect(CSS_PROPERTY_BACKGROUND_COLOR, "rgb(0, 128, 0)");
+    expect(CSS_PROPERTY_BORDER_TOP_COLOR, "rgb(0, 128, 0)");
+    expect(CSS_PROPERTY_BORDER_RIGHT_COLOR, "rgb(0, 128, 0)");
+    apply("border-top-color:red");
+    expect(CSS_PROPERTY_BORDER_TOP_COLOR, "rgb(255, 0, 0)");
+}
+
+TEST_F(MotionCascadeTest, GridComputedPseudoLengthsUseTheirDeclarationFont) {
+    apply("font-size:20px");
+    apply("grid-auto-columns:3em");
+    element.set_pseudo_style(PSEUDO_STYLE_BEFORE, style_tree_create(pool));
+    apply("font-size:5px", &element, 1);
+    apply("grid-auto-columns:2em", &element, 1);
+    apply("grid-template-rows:[start] calc(2em + 3px) [end]", &element, 1);
+    auto expect = [&](CssPropertyCode property, const char* expected) {
+        char computed[160];
+        ASSERT_TRUE(css_prop_serialize_computed(&element, property, 1, computed, sizeof(computed)));
+        EXPECT_STREQ(computed, expected);
+    };
+    expect(CSS_PROPERTY_GRID_AUTO_COLUMNS, "10px");
+    expect(CSS_PROPERTY_GRID_TEMPLATE_ROWS, "[start] 13px [end]");
+    apply("font-size:7px", &element, 1);
+    expect(CSS_PROPERTY_GRID_AUTO_COLUMNS, "14px");
+    expect(CSS_PROPERTY_GRID_TEMPLATE_ROWS, "[start] 17px [end]");
+    apply("grid-auto-columns:inherit", &element, 1);
+    expect(CSS_PROPERTY_GRID_AUTO_COLUMNS, "60px");
+    size_t before_bytes = 0, before_count = 0;
+    pool_get_stats(pool, &before_bytes, &before_count);
+    for (unsigned read = 0; read < 128; read++) {
+        expect(CSS_PROPERTY_GRID_AUTO_COLUMNS, "60px");
+        expect(CSS_PROPERTY_GRID_TEMPLATE_ROWS, "[start] 17px [end]");
+    }
+    size_t after_bytes = 0, after_count = 0;
+    pool_get_stats(pool, &after_bytes, &after_count);
+    EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
+}
+
+TEST_F(MotionCascadeTest, GridComputedPseudoShorthandsShareComputedMemberOwners) {
+    apply("font-size:20px");
+    apply("grid-template:[host-row] 1em / [host-column] 2em");
+    element.set_pseudo_style(PSEUDO_STYLE_BEFORE, style_tree_create(pool));
+    apply("font-size:5px", &element, 1);
+    apply("grid-template:[r] 2em / [c] 3em", &element, 1);
+    apply("grid-column:calc(1 + 1) / span calc(1 + 2)", &element, 1);
+    apply("grid-row:4 / 6", &element, 1);
+    auto expect = [&](CssPropertyCode property, const char* expected) {
+        char computed[256];
+        ASSERT_TRUE(css_prop_serialize_computed(&element, property, 1, computed, sizeof(computed)));
+        EXPECT_STREQ(computed, expected);
+    };
+    expect(CSS_PROPERTY_GRID_TEMPLATE, "[r] 10px / [c] 15px");
+    expect(CSS_PROPERTY_GRID_TEMPLATE_ROWS, "[r] 10px");
+    expect(CSS_PROPERTY_GRID_TEMPLATE_COLUMNS, "[c] 15px");
+    expect(CSS_PROPERTY_GRID, "[r] 10px / [c] 15px / none / row / auto / auto");
+    expect(CSS_PROPERTY_GRID_COLUMN, "2 / span 3");
+    expect(CSS_PROPERTY_GRID_ROW, "4 / 6");
+    expect(CSS_PROPERTY_GRID_AREA, "4 / 2 / 6 / span 3");
+    apply("font-size:7px", &element, 1);
+    expect(CSS_PROPERTY_GRID_TEMPLATE, "[r] 14px / [c] 21px");
+    apply("grid-template:inherit", &element, 1);
+    expect(CSS_PROPERTY_GRID_TEMPLATE, "[host-row] 20px / [host-column] 40px");
+    size_t before_bytes = 0, before_count = 0;
+    pool_get_stats(pool, &before_bytes, &before_count);
+    for (unsigned read = 0; read < 128; read++)
+        expect(CSS_PROPERTY_GRID_TEMPLATE, "[host-row] 20px / [host-column] 40px");
+    size_t after_bytes = 0, after_count = 0;
+    pool_get_stats(pool, &after_bytes, &after_count);
+    EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
+}
+
+TEST_F(MotionCascadeTest, PseudoCalculatedCountsUseTheirDeclarationFonts) {
+    apply("font-size:20px");
+    apply("line-clamp:calc(4em / 1px)");
+    apply("-webkit-line-clamp:calc(2em / 1px)");
+    apply("hyphenate-limit-chars:calc(3em / 1px)");
+    element.set_pseudo_style(PSEUDO_STYLE_BEFORE, style_tree_create(pool));
+    apply("font-size:5px", &element, 1);
+    apply("line-clamp:calc(2em / 1px)", &element, 1);
+    apply("-webkit-line-clamp:calc(1em / 1px)", &element, 1);
+    apply("hyphenate-limit-chars:calc(1em / 1px) calc(.5em / 1px) calc(.5em / 1px)", &element, 1);
+    auto expect = [&](CssPropertyCode property, const char* expected) {
+        char computed[160];
+        ASSERT_TRUE(css_prop_serialize_computed(&element, property, 1, computed, sizeof(computed)));
+        EXPECT_STREQ(computed, expected);
+    };
+    expect(CSS_PROPERTY_LINE_CLAMP, "10");
+    expect(CSS_PROPERTY_WEBKIT_LINE_CLAMP, "5");
+    expect(CSS_PROPERTY_HYPHENATE_LIMIT_CHARS, "5 3");
+    apply("font-size:7px", &element, 1);
+    expect(CSS_PROPERTY_LINE_CLAMP, "14");
+    expect(CSS_PROPERTY_WEBKIT_LINE_CLAMP, "7");
+    expect(CSS_PROPERTY_HYPHENATE_LIMIT_CHARS, "7 4");
+    apply("line-clamp:inherit", &element, 1);
+    apply("-webkit-line-clamp:inherit", &element, 1);
+    apply("hyphenate-limit-chars:inherit", &element, 1);
+    size_t before_bytes = 0, before_count = 0;
+    pool_get_stats(pool, &before_bytes, &before_count);
+    for (unsigned read = 0; read < 128; read++) {
+        expect(CSS_PROPERTY_LINE_CLAMP, "80");
+        expect(CSS_PROPERTY_WEBKIT_LINE_CLAMP, "40");
+        expect(CSS_PROPERTY_HYPHENATE_LIMIT_CHARS, "60");
+    }
+    size_t after_bytes = 0, after_count = 0;
+    pool_get_stats(pool, &after_bytes, &after_count);
+    EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
+}
+
+TEST_F(MotionCascadeTest, OpacityMathUsesDeclarationFontsAndSharedNumericRanges) {
+    apply("font-size:20px");
+    apply("opacity:calc(1em / 100px)");
+    element.set_pseudo_style(PSEUDO_STYLE_BEFORE, style_tree_create(pool));
+    apply("font-size:5px", &element, 1);
+    apply("opacity:calc(1em / 10px)", &element, 1);
+    doc.js.mutation_count = 1;
+    expect_computed(CSS_PROPERTY_OPACITY, "0.2"); expect_computed(CSS_PROPERTY_OPACITY, "0.5", 1);
+    apply("font-size:30px"); apply("font-size:7px", &element, 1);
+    expect_computed(CSS_PROPERTY_OPACITY, "0.3"); expect_computed(CSS_PROPERTY_OPACITY, "0.7", 1);
+    apply("opacity:inherit", &element, 1);
+    expect_computed(CSS_PROPERTY_OPACITY, "0.3", 1);
+    const struct { const char* specified; const char* computed; float number; } cases[] = {
+        {"50%", "0.5", .5f}, {"calc(25% * 2)", "0.5", .5f},
+        {"clamp(50%, 60%, 70%)", "0.6", .6f}, {"calc(1em / 10px)", "0.7", .7f},
+        {"calc(-50% - 50%)", "0", 0.0f}, {"calc(100% + 100%)", "1", 1.0f},
+        {"calc(-2)", "0", 0.0f}, {"-0", "0", 0.0f}, {"calc(-0)", "0", 0.0f},
+        {"calc(2)", "1", 1.0f},
+        {"calc(NaN)", "0", 0.0f}, {"calc(infinity)", "1", 1.0f},
+        {"calc(-infinity)", "0", 0.0f}, {"initial", "1", 1.0f},
+        {"unset", "1", 1.0f}
+    };
+    FontProp font = {};
+    font.font_size = 7.0f;
+    LayoutContext context = {};
+    context.pool = lam::up(pool); context.css_value_scratch = lam::up(pool);
+    context.view = lam::up(static_cast<View*>(&element)); context.elmt = lam::up(&element);
+    context.doc = lam::up(&doc); context.font.style = lam::up(&font); context.font.current_font_size = 7.0f;
+    for (const auto& value : cases) {
+        SCOPED_TRACE(value.specified);
+        char declaration[160];
+        str_fmt(declaration, sizeof(declaration), "opacity:%s", value.specified);
+        apply(declaration, &element, 1);
+        expect_computed(CSS_PROPERTY_OPACITY, value.computed, 1);
+        CssDeclaration* parsed = css_parse_declaration_text(declaration, strlen(declaration), pool);
+        ASSERT_NE(parsed, nullptr);
+        EXPECT_FLOAT_EQ(resolve_css_opacity_value(&context, parsed->value), value.number);
+    }
+    apply("opacity:calc(1em / 10px)", &element, 1);
+    size_t before_bytes = 0, before_count = 0;
+    pool_get_stats(pool, &before_bytes, &before_count);
+    for (unsigned read = 0; read < 128; read++) expect_computed(CSS_PROPERTY_OPACITY, "0.7", 1);
+    size_t after_bytes = 0, after_count = 0;
+    pool_get_stats(pool, &after_bytes, &after_count);
+    EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
+    CssDeclaration* svg = css_parse_declaration_text("fill-opacity:calc(1em / 100px)",
+        strlen("fill-opacity:calc(1em / 100px)"), pool);
+    ASSERT_NE(svg, nullptr);
+    String* svg_computed = css_prop_serialize_svg_value(pool, &element,
+        CSS_PROPERTY_FILL_OPACITY, svg->value);
+    ASSERT_NE(svg_computed, nullptr);
+    EXPECT_STREQ(svg_computed->chars, "0.3");
+}
+
+TEST_F(MotionCascadeTest, ZIndexMathPreservesIntegerAndDeclarationOwnerSemantics) {
+    apply("font-size:20px"); apply("z-index:calc(1em / 10px)");
+    element.set_pseudo_style(PSEUDO_STYLE_BEFORE, style_tree_create(pool));
+    apply("font-size:5px", &element, 1);
+    apply("z-index:calc(1em / 1px)", &element, 1);
+    doc.js.mutation_count = 1;
+    expect_computed(CSS_PROPERTY_Z_INDEX, "2"); expect_computed(CSS_PROPERTY_Z_INDEX, "5", 1);
+    apply("font-size:30px"); apply("font-size:7px", &element, 1);
+    expect_computed(CSS_PROPERTY_Z_INDEX, "3"); expect_computed(CSS_PROPERTY_Z_INDEX, "7", 1);
+    apply("z-index:inherit", &element, 1);
+    expect_computed(CSS_PROPERTY_Z_INDEX, "3", 1);
+    const struct { const char* specified; const char* computed; } cases[] = {
+        {"auto", "auto"}, {"0", "0"}, {"-0", "0"}, {"calc(-0)", "0"}, {"-2", "-2"},
+        {"calc(-1.5)", "-1"}, {"calc(1.5)", "2"},
+        {"calc(NaN)", "0"}, {"calc(infinity)", "2147483647"},
+        {"calc(-infinity)", "-2147483648"}, {"initial", "auto"}, {"unset", "auto"}
+    };
+    for (const auto& value : cases) {
+        SCOPED_TRACE(value.specified);
+        char declaration[160];
+        str_fmt(declaration, sizeof(declaration), "z-index:%s", value.specified);
+        apply(declaration, &element, 1); expect_computed(CSS_PROPERTY_Z_INDEX, value.computed, 1);
+    }
+    const char* invalid[] = {"z-index:1.5", "z-index:2px", "z-index:calc(1em)", "z-index:50%"};
+    for (const char* declaration : invalid) {
+        SCOPED_TRACE(declaration);
+        EXPECT_EQ(css_parse_declaration_text(declaration, strlen(declaration), pool), nullptr);
+    }
+    apply("z-index:calc(1em / 1px)", &element, 1);
+    size_t before_bytes = 0, before_count = 0;
+    pool_get_stats(pool, &before_bytes, &before_count);
+    for (unsigned read = 0; read < 128; read++) expect_computed(CSS_PROPERTY_Z_INDEX, "7", 1);
+    size_t after_bytes = 0, after_count = 0;
+    pool_get_stats(pool, &after_bytes, &after_count);
+    EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
+}
+
+TEST_F(MotionCascadeTest, ItemOrderMathUsesLiveAndInheritedDeclarationFonts) {
+    apply("font-size:20px"); apply("order:calc(1em / 10px)");
+    doc.js.mutation_count = 1;
+    expect_computed(CSS_PROPERTY_ORDER, "2");
+    apply("font-size:40px");
+    expect_computed(CSS_PROPERTY_ORDER, "4");
+    element.set_pseudo_style(PSEUDO_STYLE_BEFORE, style_tree_create(pool));
+    apply("font-size:7px", &element, 1);
+    apply("order:calc(1em / 1px)", &element, 1);
+    expect_computed(CSS_PROPERTY_ORDER, "7", 1);
+    apply("order:inherit", &element, 1);
+    expect_computed(CSS_PROPERTY_ORDER, "4", 1);
+    const char* invalid[] = {"order:auto", "order:1.5", "order:2px", "order:calc(2px)"};
+    for (const char* declaration : invalid) {
+        SCOPED_TRACE(declaration);
+        EXPECT_EQ(css_parse_declaration_text(declaration, strlen(declaration), pool), nullptr);
+    }
+    size_t before_bytes = 0, before_count = 0;
+    pool_get_stats(pool, &before_bytes, &before_count);
+    for (unsigned read = 0; read < 128; read++) expect_computed(CSS_PROPERTY_ORDER, "4", 1);
+    size_t after_bytes = 0, after_count = 0;
+    pool_get_stats(pool, &after_bytes, &after_count);
+    EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
+}
+
+TEST_F(MotionCascadeTest, FlexFactorsComputeOwnerNumbersAndPreserveTheirDefaults) {
+    const struct { CssPropertyCode id; const char* name; const char* initial; } properties[] = {
+        {CSS_PROPERTY_FLEX_GROW, "flex-grow", "0"}, {CSS_PROPERTY_FLEX_SHRINK, "flex-shrink", "1"}
+    };
+    element.set_pseudo_style(PSEUDO_STYLE_BEFORE, style_tree_create(pool));
+    doc.js.mutation_count = 1;
+    for (const auto& property : properties) {
+        SCOPED_TRACE(property.name);
+        char declaration[160];
+        apply("font-size:20px");
+        str_fmt(declaration, sizeof(declaration), "%s:calc(1em / 10px)", property.name);
+        apply(declaration); expect_computed(property.id, "2");
+        apply("font-size:5px", &element, 1); apply(declaration, &element, 1);
+        expect_computed(property.id, "0.5", 1);
+        apply("font-size:7px", &element, 1);
+        expect_computed(property.id, "0.7", 1);
+        str_fmt(declaration, sizeof(declaration), "%s:inherit", property.name);
+        apply(declaration, &element, 1);
+        apply("font-size:30px"); expect_computed(property.id, "3", 1);
+        const struct { const char* specified; const char* computed; } cases[] = {
+            {"1.5", "1.5"}, {"calc(-2)", "0"}, {"calc(NaN)", "0"},
+            {"calc(infinity)", "3.40282e+38"}, {"calc(-infinity)", "0"},
+            {"1e999", "3.40282e+38"}
+        };
+        for (const auto& value : cases) {
+            SCOPED_TRACE(value.specified);
+            str_fmt(declaration, sizeof(declaration), "%s:%s", property.name, value.specified);
+            apply(declaration, &element, 1); expect_computed(property.id, value.computed, 1);
+        }
+        str_fmt(declaration, sizeof(declaration), "%s:initial", property.name);
+        apply(declaration, &element, 1); expect_computed(property.id, property.initial, 1);
+        const char* invalid[] = {"-1", "2px", "25%", "calc(1em)", "auto"};
+        for (const char* value : invalid) {
+            SCOPED_TRACE(value);
+            str_fmt(declaration, sizeof(declaration), "%s:%s", property.name, value);
+            EXPECT_EQ(css_parse_declaration_text(declaration, strlen(declaration), pool), nullptr);
+        }
+        str_fmt(declaration, sizeof(declaration), "%s:calc(1em / 10px)", property.name);
+        apply(declaration, &element, 1);
+        size_t before_bytes = 0, before_count = 0;
+        pool_get_stats(pool, &before_bytes, &before_count);
+        for (unsigned read = 0; read < 128; read++) expect_computed(property.id, "0.7", 1);
+        size_t after_bytes = 0, after_count = 0;
+        pool_get_stats(pool, &after_bytes, &after_count);
+        EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
+    }
+}
+
+TEST_F(MotionCascadeTest, FlexFactorComputedReadsDoNotRequireItemStorage) {
+    apply("font-size:20px");
+    apply("flex-grow:calc(1em / 10px)"); apply("flex-shrink:calc(1em / 5px)");
+    expect_computed(CSS_PROPERTY_FLEX_GROW, "2");
+    expect_computed(CSS_PROPERTY_FLEX_SHRINK, "4");
+    apply("font-size:30px");
+    expect_computed(CSS_PROPERTY_FLEX_GROW, "3");
+    expect_computed(CSS_PROPERTY_FLEX_SHRINK, "6");
+    apply("flex-grow:initial"); apply("flex-shrink:initial");
+    expect_computed(CSS_PROPERTY_FLEX_GROW, "0");
+    expect_computed(CSS_PROPERTY_FLEX_SHRINK, "1");
+    float factor = -9.0f;
+    ASSERT_TRUE(css_prop_compute_declared_flex_factor(&element, CSS_PROPERTY_FLEX_GROW, &factor));
+    EXPECT_FLOAT_EQ(factor, 0.0f);
+    ASSERT_TRUE(css_prop_compute_declared_flex_factor(&element, CSS_PROPERTY_FLEX_SHRINK, &factor));
+    EXPECT_FLOAT_EQ(factor, 1.0f);
+    size_t before_bytes = 0, before_count = 0;
+    pool_get_stats(pool, &before_bytes, &before_count);
+    for (unsigned read = 0; read < 128; read++) {
+        ASSERT_TRUE(css_prop_compute_declared_flex_factor(&element, CSS_PROPERTY_FLEX_SHRINK, &factor));
+        EXPECT_FLOAT_EQ(factor, 1.0f);
+    }
+    size_t after_bytes = 0, after_count = 0;
+    pool_get_stats(pool, &after_bytes, &after_count);
+    EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
+    FlexItemProp cache = {};
+    cache.flex_grow = .25f; cache.flex_shrink = .5f;
+    element.set_parent_item_kind(DomElement::PARENT_ITEM_FLEX);
+    element.fi = lam::view_prop(&cache);
+    expect_computed(CSS_PROPERTY_FLEX_GROW, "0.25");
+    expect_computed(CSS_PROPERTY_FLEX_SHRINK, "0.5");
+    element.fi = nullptr;
+    element.set_parent_item_kind(DomElement::PARENT_ITEM_NONE);
+}
+
+TEST_F(MotionCascadeTest, FlexShorthandMembersShareTypedComputationAndCascade) {
+    const struct { const char* specified; const char* grow; const char* shrink; const char* basis; } cases[] = {
+        {"2 1 0%", "2", "1", "0%"},
+        {"calc(1em / 10px) calc(.5) 0%", "2", "0.5", "0%"},
+        {"30px 2 1", "2", "1", "30px"},
+        {"calc(1em + 10px) 2 1", "2", "1", "30px"},
+        {"2", "2", "1", "0px"},
+        {"2 1 0", "2", "1", "0px"},
+        {"auto", "1", "1", "auto"}, {"none", "0", "0", "auto"},
+        {"initial", "0", "1", "auto"},
+        {"calc(-2) 1 0%", "0", "1", "0%"},
+        {"var(--bad) 1 0%", "0", "1", "auto"}
+    };
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.specified);
+        element.specified_style = lam::shared(style_tree_create(pool));
+        apply("font-size:20px"); apply("--bad:garbage");
+        char declaration[160]; str_fmt(declaration, sizeof(declaration), "flex:%s", item.specified);
+        apply(declaration);
+        expect_computed(CSS_PROPERTY_FLEX_GROW, item.grow);
+        expect_computed(CSS_PROPERTY_FLEX_SHRINK, item.shrink);
+        expect_computed(CSS_PROPERTY_FLEX_BASIS, item.basis);
+    }
+    element.specified_style = lam::shared(style_tree_create(pool));
+    apply("flex-grow:4!important"); apply("flex:2 1 0%");
+    expect_computed(CSS_PROPERTY_FLEX_GROW, "4");
+    apply("flex-shrink:3"); expect_computed(CSS_PROPERTY_FLEX_SHRINK, "3");
+    apply("flex:5 2 10px"); expect_computed(CSS_PROPERTY_FLEX_SHRINK, "2");
+    expect_computed(CSS_PROPERTY_FLEX_BASIS, "10px");
+    const char* invalid[] = {"-1 1 0%", "2 0% 1", "2 1 3", "2 1 0%, 1", "none 2", "2 -1 0%"};
+    for (const char* value : invalid) {
+        SCOPED_TRACE(value);
+        EXPECT_EQ(css_parse_property_value_declaration("flex", 4, value, strlen(value), pool), nullptr);
+    }
+    apply("flex:2");
+    CssDeclaration* shorthand = style_tree_get_declaration(element.specified_style, CSS_PROPERTY_FLEX);
+    ASSERT_NE(shorthand, nullptr);
+    size_t before_bytes = 0, before_count = 0;
+    pool_get_stats(pool, &before_bytes, &before_count);
+    for (unsigned read = 0; read < 128; read++) {
+        expect_computed(CSS_PROPERTY_FLEX_SHRINK, "1");
+        expect_computed(CSS_PROPERTY_FLEX_BASIS, "0px");
+        const CssValue* basis = css_project_shorthand_longhand(pool, shorthand->value,
+            CSS_PROPERTY_FLEX, CSS_PROPERTY_FLEX_BASIS);
+        ASSERT_NE(basis, nullptr);
+        EXPECT_EQ(basis->type, CSS_VALUE_TYPE_LENGTH);
+        EXPECT_EQ(css_project_shorthand_longhand(nullptr, shorthand->value,
+            CSS_PROPERTY_FLEX, CSS_PROPERTY_FLEX_BASIS), basis);
+    }
+    size_t after_bytes = 0, after_count = 0;
+    pool_get_stats(pool, &after_bytes, &after_count);
+    EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
+}
+
+TEST_F(MotionCascadeTest, MarkerImagesUseTheFinalReplacedBaseline) {
+    ViewMarker marker = {};
+    marker.node_type = DOM_NODE_ELEMENT; marker.view_type = RDT_VIEW_MARKER;
+    marker.doc = lam::up(&doc);
+    ImageSurface image = {};
+    image.width = image.height = 2;
+    MarkerProp prop = {};
+    prop.loaded_image = lam::up(&image);
+    marker.set_marker_prop(&prop);
+    LayoutContext context = {};
+    context.block.advance_y = 20.0f;
+    context.block.line_height = 16.0f;
+    context.block.strut_line_height = 16.0f;
+    context.block.init_ascender = 12.0f; context.block.init_descender = 4.0f;
+    context.line.max_ascender = 12.0f; context.line.max_descender = 4.0f;
+    context.line.max_css_baseline_ascender = 14.0f;
+    context.line.has_replaced_content = true;
+    marker.height = 2.0f;
+    size_t before_bytes = 0, before_count = 0;
+    pool_get_stats(pool, &before_bytes, &before_count);
+    for (unsigned repeat = 0; repeat < 128; repeat++) {
+        view_vertical_align(&context, &marker);
+        EXPECT_FLOAT_EQ(marker.y, 32.0f);
+    }
+    size_t after_bytes = 0, after_count = 0;
+    pool_get_stats(pool, &after_bytes, &after_count);
+    EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
+    context.line.max_ascender = 24.0f; marker.height = 24.0f;
+    view_vertical_align(&context, &marker); EXPECT_FLOAT_EQ(marker.y, 20.0f);
+    marker.y = 7.0f; prop.is_outside = true;
+    view_vertical_align(&context, &marker); EXPECT_FLOAT_EQ(marker.y, 7.0f);
+    prop.is_outside = false; prop.loaded_image = nullptr;
+    view_vertical_align(&context, &marker); EXPECT_FLOAT_EQ(marker.y, 7.0f);
+    prop.is_image_marker = true;
+    view_vertical_align(&context, &marker); EXPECT_FLOAT_EQ(marker.y, 20.0f);
+    marker.set_marker_prop(nullptr); marker.doc = nullptr;
+}
+
+TEST_F(MotionCascadeTest, PseudoNamesPreserveParserMatcherAndCascadeIdentity) {
+    static_assert(PSEUDO_ELEMENT_MARKER == 6 && PSEUDO_ELEMENT_PLACEHOLDER == 7 &&
+        PSEUDO_ELEMENT_BACKDROP == 8 && PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON == 9,
+        "published pseudo identities must remain stable");
+    const struct { const char* selector; PseudoElementType expected; } cases[] = {
+        {"li::MARKER", PSEUDO_ELEMENT_MARKER}, {"li:marker", PSEUDO_ELEMENT_NONE},
+        {"li::before", PSEUDO_ELEMENT_BEFORE}, {"li:before", PSEUDO_ELEMENT_BEFORE},
+        {"li::first-line", PSEUDO_ELEMENT_FIRST_LINE}, {"li:first-line", PSEUDO_ELEMENT_FIRST_LINE},
+        {"input::-moz-placeholder", PSEUDO_ELEMENT_PLACEHOLDER},
+        {"input:-moz-placeholder", PSEUDO_ELEMENT_PLACEHOLDER},
+        {"input::-webkit-input-placeholder", PSEUDO_ELEMENT_PLACEHOLDER},
+        {"input:-webkit-input-placeholder", PSEUDO_ELEMENT_NONE},
+        {"dialog::backdrop", PSEUDO_ELEMENT_BACKDROP},
+        {"input::file-selector-button", PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON},
+        {"p::footnote-call", PSEUDO_ELEMENT_FOOTNOTE_CALL},
+        {"li::vendor-unknown", PSEUDO_ELEMENT_NONE}
+    };
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.selector);
+        size_t count = 0;
+        CssToken* tokens = css_tokenize(item.selector, strlen(item.selector), pool, &count);
+        ASSERT_NE(tokens, nullptr);
+        ASSERT_LE(count, (size_t)INT_MAX);
+        int position = 0;
+        CssSelector* selector = css_parse_selector_with_combinators(tokens, &position, (int)count, pool);
+        ASSERT_NE(selector, nullptr);
+        EXPECT_EQ(selector_get_pseudo_element(selector), item.expected);
+    }
+}
+
+TEST_F(MotionCascadeTest, MarkerComputedValuesUseTheirPseudoDeclarationsAndFonts) {
+    apply("font-size:24px");
+    element.set_pseudo_style(PSEUDO_STYLE_MARKER, style_tree_create(pool));
+    apply("font-size:var(--marker-font,2em)", nullptr, PSEUDO_ELEMENT_MARKER);
+    expect_computed(CSS_PROPERTY_FONT_SIZE, "48px", PSEUDO_ELEMENT_MARKER);
+    ASSERT_TRUE(dom_element_set_presentation_style(&element, "--marker-font", "32px", nullptr));
+    expect_computed(CSS_PROPERTY_FONT_SIZE, "32px", PSEUDO_ELEMENT_MARKER);
+    apply("grid-template-columns:2em", nullptr, PSEUDO_ELEMENT_MARKER);
+    expect_computed(CSS_PROPERTY_GRID_TEMPLATE_COLUMNS, "64px", PSEUDO_ELEMENT_MARKER);
+    ASSERT_TRUE(dom_element_set_presentation_style(&element, "--marker-font", "48px", nullptr));
+    expect_computed(CSS_PROPERTY_FONT_SIZE, "48px", PSEUDO_ELEMENT_MARKER);
+    apply("font-size:initial", nullptr, PSEUDO_ELEMENT_MARKER);
+    expect_computed(CSS_PROPERTY_FONT_SIZE, "16px", PSEUDO_ELEMENT_MARKER);
+    apply("font-size:inherit", nullptr, PSEUDO_ELEMENT_MARKER);
+    expect_computed(CSS_PROPERTY_FONT_SIZE, "24px", PSEUDO_ELEMENT_MARKER);
+    apply("font-size:var(--marker-font,2em)", nullptr, PSEUDO_ELEMENT_MARKER);
+    size_t before_bytes = 0, before_count = 0;
+    pool_get_stats(pool, &before_bytes, &before_count);
+    for (unsigned read = 0; read < 128; read++) {
+        expect_computed(CSS_PROPERTY_FONT_SIZE, "48px", PSEUDO_ELEMENT_MARKER);
+        expect_computed(CSS_PROPERTY_GRID_TEMPLATE_COLUMNS, "96px", PSEUDO_ELEMENT_MARKER);
+    }
+    size_t after_bytes = 0, after_count = 0;
+    pool_get_stats(pool, &after_bytes, &after_count);
+    EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
+    EXPECT_TRUE(dom_element_clear_presentation_style(&element));
+}
+
+TEST_F(MotionCascadeTest, ImageRenderingComputedValuesShareCascadeAndDefaults) {
+    expect_computed(CSS_PROPERTY_IMAGE_RENDERING, "auto");
+    const char* keywords[] = {"auto", "smooth", "high-quality", "pixelated",
+        "crisp-edges", "optimizespeed", "optimizequality"};
+    for (const char* keyword : keywords) {
+        SCOPED_TRACE(keyword);
+        char text[96]; str_fmt(text, sizeof(text), "image-rendering:%s", keyword);
+        apply(text);
+        expect_computed(CSS_PROPERTY_IMAGE_RENDERING, keyword);
+    }
+    const char* invalid[] = {"garbage", "auto pixelated", "crisp-edges,auto", "1", "calc(1)"};
+    for (const char* value : invalid) {
+        SCOPED_TRACE(value);
+        EXPECT_EQ(css_parse_property_value_declaration("image-rendering", 15,
+            value, strlen(value), pool), nullptr);
+    }
+    // custom values need the DOM's variable index as well as the declaration tree.
+    ASSERT_TRUE(dom_element_set_presentation_style(&element, "--sampling", "crisp-edges", nullptr));
+    apply("image-rendering:var(--sampling)");
+    expect_computed(CSS_PROPERTY_IMAGE_RENDERING, "crisp-edges");
+    DomElement child = {};
+    child.node_type = DOM_NODE_ELEMENT;
+    child.set_synthetic(true); child.set_styles_resolved(true);
+    child.parent = lam::up<DomNode>(&element); child.doc = lam::up(&doc);
+    child.specified_style = lam::shared(style_tree_create(pool));
+    auto expect_child = [&](const char* expected) {
+        char value[96];
+        ASSERT_TRUE(css_prop_serialize_computed(&child, CSS_PROPERTY_IMAGE_RENDERING,
+            0, value, sizeof(value)));
+        EXPECT_STREQ(value, expected);
+    };
+    apply("image-rendering:unset", &child); expect_child("crisp-edges");
+    apply("image-rendering:initial", &child); expect_child("auto");
+    apply("image-rendering:inherit", &child); expect_child("crisp-edges");
+    ASSERT_TRUE(dom_element_set_presentation_style(&element, "--sampling", "pixelated", nullptr));
+    expect_child("pixelated");
+    ASSERT_TRUE(dom_element_set_presentation_style(&child, "--bad", "garbage", nullptr));
+    apply("image-rendering:var(--bad)", &child);
+    expect_child("pixelated");
+    element.set_pseudo_style(PSEUDO_STYLE_BEFORE, style_tree_create(pool));
+    apply("image-rendering:inherit", &element, 1);
+    expect_computed(CSS_PROPERTY_IMAGE_RENDERING, "pixelated", 1);
+    ASSERT_TRUE(dom_element_set_presentation_style(&element, "--sampling", "crisp-edges", nullptr));
+    size_t before_bytes = 0, before_count = 0;
+    pool_get_stats(pool, &before_bytes, &before_count);
+    for (unsigned read = 0; read < 128; read++) {
+        expect_child("crisp-edges");
+        expect_computed(CSS_PROPERTY_IMAGE_RENDERING, "crisp-edges", 1);
+    }
+    size_t after_bytes = 0, after_count = 0;
+    pool_get_stats(pool, &after_bytes, &after_count);
+    EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
+    EXPECT_TRUE(dom_element_clear_presentation_style(&child));
+    EXPECT_TRUE(dom_element_clear_presentation_style(&element));
+    child.parent = nullptr;
+}
+
+TEST_F(MotionCascadeTest, FlexBasisComputedSnapshotsPreserveDeclarationOwners) {
+    apply("font-size:20px");
+    const struct { const char* value; float computed; bool percent = false;
+        bool content = false; bool stretch = false; } cases[] = {
+        {"2em", 40.0f}, {"calc(25%)", 25.0f, true},
+        {"auto", -1.0f}, {"content", -1.0f, false, true},
+        {"stretch", -1.0f, false, false, true}, {"calc(-2px)", 0.0f},
+        {"calc(-0px)", 0.0f}, {"initial", -1.0f}
+    };
+    CssFlexBasisValue basis = {};
+    for (const auto& item : cases) {
+        SCOPED_TRACE(item.value);
+        char declaration[160]; str_fmt(declaration, sizeof(declaration), "flex-basis:%s", item.value);
+        apply(declaration);
+        ASSERT_TRUE(css_prop_compute_declared_flex_basis(&element, &basis));
+        EXPECT_FLOAT_EQ(basis.value, item.computed);
+        EXPECT_EQ(basis.is_percent, item.percent);
+        EXPECT_EQ(basis.is_content, item.content);
+        EXPECT_EQ(basis.is_stretch, item.stretch);
+        if (basis.value == 0.0f) EXPECT_FALSE(signbit(basis.value));
+    }
+    apply("--basis:garbage"); apply("flex-basis:var(--basis)");
+    ASSERT_TRUE(css_prop_compute_declared_flex_basis(&element, &basis));
+    EXPECT_FLOAT_EQ(basis.value, -1.0f);
+
+    DomElement parent = {};
+    parent.node_type = DOM_NODE_ELEMENT;
+    parent.set_synthetic(true); parent.set_styles_resolved(true);
+    parent.doc = lam::up(&doc);
+    parent.specified_style = lam::shared(style_tree_create(pool));
+    GridItemProp grid = {};
+    parent.set_parent_item_kind(DomElement::PARENT_ITEM_GRID);
+    parent.gi = lam::view_prop(&grid);
+    element.parent = lam::up<DomNode>(&parent); doc.root = lam::up(&parent);
+    apply("font-size:30px", &parent); apply("flex:3 2 2em", &parent);
+    apply("font-size:5px"); apply("flex:inherit");
+    ASSERT_TRUE(css_prop_compute_declared_flex_basis(&element, &basis));
+    EXPECT_FLOAT_EQ(basis.value, 60.0f); expect_computed(CSS_PROPERTY_FLEX_BASIS, "60px");
+    apply("font-size:40px", &parent);
+    size_t before_bytes = 0, before_count = 0;
+    pool_get_stats(pool, &before_bytes, &before_count);
+    for (unsigned read = 0; read < 128; read++) {
+        ASSERT_TRUE(css_prop_compute_declared_flex_basis(&element, &basis));
+        EXPECT_FLOAT_EQ(basis.value, 80.0f);
+        expect_computed(CSS_PROPERTY_FLEX_BASIS, "80px");
+    }
+    size_t after_bytes = 0, after_count = 0;
+    pool_get_stats(pool, &after_bytes, &after_count);
+    EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
+    EXPECT_EQ(parent.parent_item_kind(), DomElement::PARENT_ITEM_GRID);
+    EXPECT_EQ(parent.grid_item(), &grid); EXPECT_EQ(parent.flex_item(), nullptr);
+    element.parent = nullptr; doc.root = lam::up(&element);
+    parent.gi = nullptr; parent.set_parent_item_kind(DomElement::PARENT_ITEM_NONE);
+}
+
+TEST_F(MotionCascadeTest, OverflowClipMarginComputedValuesUseTheirDeclarationOwner) {
+    apply("font-size:20px");
+    auto expect = [&](const char* expected, DomElement* target = nullptr, int pseudo = 0) {
+        char computed[160];
+        ASSERT_TRUE(css_prop_serialize_computed(target ? target : &element,
+            CSS_PROPERTY_OVERFLOW_CLIP_MARGIN, pseudo, computed, sizeof(computed)));
+        EXPECT_STREQ(computed, expected);
+    };
+    expect("0px");
+    const struct { const char* specified; const char* computed; } cases[] = {
+        {"10px", "10px"}, {"content-box", "content-box"},
+        {"content-box 0px", "content-box"}, {"10px content-box", "content-box 10px"},
+        {"padding-box", "0px"}, {"padding-box 0px", "0px"}, {"-0px", "0px"},
+        {"10px padding-box", "10px"}, {"border-box", "border-box"},
+        {"border-box 0px", "border-box"}, {"10px border-box", "border-box 10px"},
+        {"content-box calc(1em + 2px)", "content-box 22px"},
+        {"padding-box -5px", "-5px"}
+    };
+    for (const auto& value : cases) {
+        char declaration[192];
+        str_fmt(declaration, sizeof(declaration), "overflow-clip-margin:%s", value.specified);
+        apply(declaration); expect(value.computed);
+    }
+    apply("overflow-clip-margin:content-box 2em");
+    DomElement child = {};
+    child.node_type = DOM_NODE_ELEMENT;
+    child.set_synthetic(true); child.set_styles_resolved(true);
+    child.parent = lam::up(static_cast<DomNode*>(&element)); child.doc = lam::up(&doc);
+    child.specified_style = lam::shared(style_tree_create(pool));
+    apply("font-size:5px", &child);
+    apply("overflow-clip-margin:inherit", &child);
+    expect("content-box 40px", &child);
+    element.set_pseudo_style(PSEUDO_STYLE_BEFORE, style_tree_create(pool));
+    apply("font-size:7px", &element, 1);
+    apply("overflow-clip-margin:border-box 2em", &element, 1);
+    expect("border-box 14px", &element, 1);
+    size_t before_bytes = 0, before_count = 0;
+    pool_get_stats(pool, &before_bytes, &before_count);
+    for (unsigned read = 0; read < 128; read++) {
+        expect("content-box 40px", &child);
+        expect("border-box 14px", &element, 1);
+    }
+    size_t after_bytes = 0, after_count = 0;
+    pool_get_stats(pool, &after_bytes, &after_count);
+    EXPECT_EQ(after_bytes, before_bytes); EXPECT_EQ(after_count, before_count);
 }
 
 TEST_F(MotionCascadeTest, IntrinsicMeasurementsSharePhysicalLogicalCascadeAndComputedInheritance) {

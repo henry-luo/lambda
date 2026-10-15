@@ -1065,12 +1065,11 @@ void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
         float shadow_x = shadow_rect.x, shadow_y = shadow_rect.y;
         float shadow_w = shadow_rect.width, shadow_h = shadow_rect.height;
 
-        // Adjust border radius for spread
-        float spread_factor = (s_spread >= 0) ? 1.0f : 1.0f;
-        float sr_tl = max(0.0f, r_tl + s_spread * spread_factor);
-        float sr_tr = max(0.0f, r_tr + s_spread * spread_factor);
-        float sr_br = max(0.0f, r_br + s_spread * spread_factor);
-        float sr_bl = max(0.0f, r_bl + s_spread * spread_factor);
+        Corner radius = render_path_uniform_corner(r_tl, r_tr, r_br, r_bl);
+        Corner shadow_radius = render_geometry_outset_corners(&radius, rect.width, rect.height,
+            s_spread, s_spread, s_spread, s_spread);
+        float sr_tl = shadow_radius.top_left, sr_tr = shadow_radius.top_right;
+        float sr_br = shadow_radius.bottom_right, sr_bl = shadow_radius.bottom_left;
 
 
         // Serialize CSS clip-path shape (if active) for masking the shadow

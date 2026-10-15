@@ -1,0 +1,7 @@
+<!doctype html><style>html,body{margin:0}.box{width:80px;height:40px}
+@layer low,high;
+@layer low{#overflow{overflow:visible}#overscroll{overscroll-behavior:auto}}
+@layer high{#overflow{overflow:clip;overflow-x:revert-layer}
+#overscroll{overscroll-behavior:none;overscroll-behavior-x:revert-layer}}
+</style><div id="result"><div id="overflow" class="box"><div style="width:140px;height:20px;background:red"></div></div>
+<div id="overscroll" class="box"></div></div>

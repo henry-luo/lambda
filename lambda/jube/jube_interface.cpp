@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <uv.h>
 
 // engine entry points not exposed through public headers
 extern __thread EvalContext* context;
@@ -92,6 +93,29 @@ typedef struct JubeTypeIndexEntry {
 static lam::ArrayList<JubeTypeRecord*> s_type_records(MEM_CAT_CONTAINER,0);
 static int s_type_record_count = 0;
 static HashMap* s_type_index = NULL;
+
+static uv_once_t s_catalog_lock_once = UV_ONCE_INIT;
+static uv_mutex_t s_catalog_lock;
+
+static void jube_catalog_lock_init(void) {
+    int status = uv_mutex_init_recursive(&s_catalog_lock);
+    if (status != 0) {
+        log_error("JUBE_IFACE: catalog lock initialization failed: %d", status);
+        abort();
+    }
+}
+
+// distinct module activations share one mutable catalog; nested type queries reuse this lock.
+class JubeCatalogLock {
+public:
+    JubeCatalogLock() {
+        uv_once(&s_catalog_lock_once, jube_catalog_lock_init);
+        uv_mutex_lock(&s_catalog_lock);
+    }
+    ~JubeCatalogLock() { uv_mutex_unlock(&s_catalog_lock); }
+    JubeCatalogLock(const JubeCatalogLock&) = delete;
+    JubeCatalogLock& operator=(const JubeCatalogLock&) = delete;
+};
 
 typedef struct JubeMemberIndexEntry {
     const char* chars;
@@ -211,6 +235,7 @@ static char* jube_derive_camel(const char* snake) {
 }
 
 static JubeTypeRecord* jube_record_for_type(const void* host_type) {
+    JubeCatalogLock lock;
     if (!host_type || !s_type_index) return NULL;
     JubeTypeIndexEntry probe = {host_type, NULL};
     const JubeTypeIndexEntry* found = JubeTypeIndex::get(s_type_index, probe);
@@ -576,6 +601,7 @@ static uint64_t jube_digest_text(uint64_t hash, const char* text) {
 }
 
 extern "C" uint64_t jube_interface_registry_digest(void) {
+    JubeCatalogLock lock;
     uint64_t hash = 0xcbf29ce484222325ULL;
     hash = hash_combine_u64(hash, (uint64_t)JUBE_ABI_VERSION);
     hash = hash_combine_u64(hash, (uint64_t)s_type_record_count);
@@ -602,6 +628,7 @@ extern "C" uint64_t jube_interface_registry_digest(void) {
 
 extern "C" const JubeTypeDef* jube_iface_type_by_name(const char* name,
                                                        uint32_t len) {
+    JubeCatalogLock lock;
     if (!name || len == 0) return NULL;
     for (int i = 0; i < s_type_record_count; i++) {
         JubeTypeRecord* trec = s_type_records[i];
@@ -861,6 +888,7 @@ static Item jube_type_prototype_for(JubeTypeRecord* trec) {
 // and method items must drop so the next access rebuilds against the new
 // runtime's globals (roots unregister while the old heap is still alive).
 extern "C" void jube_interface_runtime_reset(void) {
+    JubeCatalogLock lock;
     for (int i = 0; i < s_type_record_count; i++) {
         JubeTypeRecord* trec = s_type_records[i];
         if (!trec) continue;
@@ -2165,6 +2193,7 @@ static bool jube_interface_record_belongs_to_module(const JubeTypeRecord* trec,
 }
 
 extern "C" void jube_interface_remove_module(const JubeModuleDef* module) {
+    JubeCatalogLock lock;
     for (int i = 0; i < s_type_record_count;) {
         JubeTypeRecord* trec = s_type_records[i];
         if (!jube_interface_record_belongs_to_module(trec, module)) {
@@ -2188,6 +2217,7 @@ extern "C" void jube_interface_remove_module(const JubeModuleDef* module) {
 // gate stays honest. Runs after GC-heap destruction, so rooted Items inside
 // records are already dead memory — only the C-side allocations are released.
 extern "C" void jube_interface_cleanup(void) {
+    JubeCatalogLock lock;
     while (s_type_record_count > 0) {
         int index = --s_type_record_count;
         jube_interface_release_record(s_type_records[index], false);
@@ -2201,6 +2231,7 @@ extern "C" void jube_interface_cleanup(void) {
 }
 
 extern "C" int jube_compile_module_interface(const JubeModuleDef* module) {
+    JubeCatalogLock lock;
     const char* decl = jube_module_interface_decl(module);
     if (!decl || !*decl) return 0;
     int32_t binding_count = 0;

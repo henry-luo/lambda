@@ -1,0 +1,1252 @@
+{
+  "name": "Inside image markers share baseline, line struts and live font/source changes",
+  "html": "test/ui/css_marker_image_baseline.html",
+  "viewport": {
+    "width": 1000,
+    "height": 240
+  },
+  "events": [
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#actual"
+      },
+      "width": 100,
+      "height": 14,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#reference"
+      },
+      "width": 100,
+      "height": 14,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#referenceImage"
+      },
+      "relative_to": "#reference",
+      "x": 0,
+      "y": 9,
+      "width": 2,
+      "height": 2,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 9
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 1,
+        "offset_y": 9
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 10
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "12px|normal|12px|14|14"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#leading"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#actual"
+      },
+      "width": 100,
+      "height": 12,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#reference"
+      },
+      "width": 100,
+      "height": 12,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#referenceImage"
+      },
+      "relative_to": "#reference",
+      "x": 0,
+      "y": 8,
+      "width": 2,
+      "height": 2,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 8
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 1,
+        "offset_y": 8
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 9
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "12px|12px|12px|12|12"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zero"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#actual"
+      },
+      "width": 100,
+      "height": 4,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#reference"
+      },
+      "width": 100,
+      "height": 4,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#referenceImage"
+      },
+      "relative_to": "#reference",
+      "x": 0,
+      "y": 2,
+      "width": 2,
+      "height": 2,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 2
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 1,
+        "offset_y": 2
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 3
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "12px|0px|12px|4|4"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#leading"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#actual"
+      },
+      "width": 100,
+      "height": 12,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#reference"
+      },
+      "width": 100,
+      "height": 12,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#referenceImage"
+      },
+      "relative_to": "#reference",
+      "x": 0,
+      "y": 8,
+      "width": 2,
+      "height": 2,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 8
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 1,
+        "offset_y": 8
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 9
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "12px|12px|12px|12|12"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#font16"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#actual"
+      },
+      "width": 100,
+      "height": 16,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#reference"
+      },
+      "width": 100,
+      "height": 16,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#referenceImage"
+      },
+      "relative_to": "#reference",
+      "x": 0,
+      "y": 11,
+      "width": 2,
+      "height": 2,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 11
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 1,
+        "offset_y": 11
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 12
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "16px|16px|16px|16|16"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#font24"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#actual"
+      },
+      "width": 100,
+      "height": 24,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#reference"
+      },
+      "width": 100,
+      "height": 24,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#referenceImage"
+      },
+      "relative_to": "#reference",
+      "x": 0,
+      "y": 18,
+      "width": 2,
+      "height": 2,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 18
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 1,
+        "offset_y": 18
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 19
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "24px|24px|24px|24|24"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#image8"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#actual"
+      },
+      "width": 100,
+      "height": 24,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#reference"
+      },
+      "width": 100,
+      "height": 24,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#referenceImage"
+      },
+      "relative_to": "#reference",
+      "x": 0,
+      "y": 12,
+      "width": 8,
+      "height": 8,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 12
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 4,
+        "offset_y": 12
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 16
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "24px|24px|24px|24|24"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#image32"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#actual"
+      },
+      "width": 100,
+      "height": 36,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#reference"
+      },
+      "width": 100,
+      "height": 36,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#referenceImage"
+      },
+      "relative_to": "#reference",
+      "x": 0,
+      "y": 0,
+      "width": 32,
+      "height": 32,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 0
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 16,
+        "offset_y": 0
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 16
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "24px|24px|24px|36|36"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#small"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#actual"
+      },
+      "width": 100,
+      "height": 24,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#reference"
+      },
+      "width": 100,
+      "height": 24,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#referenceImage"
+      },
+      "relative_to": "#reference",
+      "x": 0,
+      "y": 18,
+      "width": 2,
+      "height": 2,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 18
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 1,
+        "offset_y": 18
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 19
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "24px|24px|24px|24|24"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#marker32"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#actual"
+      },
+      "width": 100,
+      "height": 32,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#reference"
+      },
+      "width": 100,
+      "height": 32,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#referenceImage"
+      },
+      "relative_to": "#reference",
+      "x": 0,
+      "y": 25,
+      "width": 2,
+      "height": 2,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 25
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 1,
+        "offset_y": 25
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 26
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "24px|24px|32px|32|32"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#marker48"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#actual"
+      },
+      "width": 100,
+      "height": 48,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#reference"
+      },
+      "width": 100,
+      "height": 48,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#referenceImage"
+      },
+      "relative_to": "#reference",
+      "x": 0,
+      "y": 38,
+      "width": 2,
+      "height": 2,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 38
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 1,
+        "offset_y": 38
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 39
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "24px|24px|48px|48|48"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#inherit"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#actual"
+      },
+      "width": 100,
+      "height": 24,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#reference"
+      },
+      "width": 100,
+      "height": 24,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#referenceImage"
+      },
+      "relative_to": "#reference",
+      "x": 0,
+      "y": 18,
+      "width": 2,
+      "height": 2,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 18
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 1,
+        "offset_y": 18
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 19
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "24px|24px|24px|24|24"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#none"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#actual"
+      },
+      "width": 100,
+      "height": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#reference"
+      },
+      "width": 100,
+      "height": 0,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 0
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "24px|24px|24px|0|0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#restore"
+      }
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#actual"
+      },
+      "width": 100,
+      "height": 24,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#reference"
+      },
+      "width": 100,
+      "height": 24,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_rect",
+      "target": {
+        "selector": "#referenceImage"
+      },
+      "relative_to": "#reference",
+      "x": 0,
+      "y": 18,
+      "width": 2,
+      "height": 2,
+      "tolerance": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 18
+      },
+      "min_r": 255,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 1,
+        "offset_y": 18
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 0,
+      "max_g": 0,
+      "min_b": 255,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#actual",
+        "offset_x": 0,
+        "offset_y": 19
+      },
+      "min_r": 0,
+      "max_r": 0,
+      "min_g": 255,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#check"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#report"
+      },
+      "attribute": "data-values",
+      "equals": "24px|24px|24px|24|24"
+    }
+  ]
+}

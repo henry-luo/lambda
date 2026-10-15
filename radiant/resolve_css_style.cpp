@@ -955,11 +955,11 @@ static void resolve_spacing_sides(LayoutContext* lycon, ViewSpan* span, CssBoxSi
         DomElement* current = lam::dom_require_element(lycon->view);
         DomElement* parent = current ? dom_parent_element(current) : nullptr;
         const BoundaryProp* source_bound = parent ? parent->boundary() : nullptr;
+        const Margin* source_margin = is_margin ? view_boundary_flow_margin(source_bound) : nullptr;
         const Spacing* source = source_bound
-            ? (is_margin ? (const Spacing*)&source_bound->margin
+            ? (is_margin ? static_cast<const Spacing*>(source_margin)
                          : &source_bound->padding) : nullptr;
         if (source) {
-            const Margin* source_margin = is_margin ? &source_bound->margin : nullptr;
             copy_spacing_side(spacing, source, margin, source_margin,
                               first_side, specificity);
             if (second_side != first_side) {
@@ -1459,10 +1459,15 @@ static void resolve_grid_alignment_property(LayoutContext* lycon, ViewBlock* blo
 
 static void resolve_flex_item_number(LayoutContext* lycon, ViewSpan* span,
                                      CssPropertyCode property, const CssValue* value) {
-    if (value->type != CSS_VALUE_TYPE_NUMBER) return;
     if (property == CSS_PROPERTY_ORDER) {
-        // CSS order is a discrete integer even though the parser stores numbers uniformly.
-        int order = (int)value->data.number.value; // INT_CAST_OK: CSS order is an integer.
+        double computed = 0.0;
+        if (css_value_keyword_equals(value, CSS_VALUE_INHERIT)) {
+            // inherit the computed item order, including a parent's different layout-item kind.
+            computed = layout_item_order(dom_parent_element(lam::view_as_element(span)));
+        } else {
+            layout_compute_css_integer(lycon, property, value, (double)INT_MIN, (double)INT_MAX, &computed);
+        }
+        int order = (int)computed; // INT_CAST_OK: bounded discrete CSS item order
         if (span->parent_item_kind() == DomElement::PARENT_ITEM_GRID) {
             span->gi->order = order;
         } else if (span->parent_item_kind() == DomElement::PARENT_ITEM_FLEX) {
@@ -1475,7 +1480,20 @@ static void resolve_flex_item_number(LayoutContext* lycon, ViewSpan* span,
     }
     alloc_flex_item_prop(lycon, span);
     if (!span->flex_item()) return;
-    float number = (float)value->data.number.value;
+    bool grow = property == CSS_PROPERTY_FLEX_GROW;
+    float number = grow ? 0.0f : 1.0f;
+    if (css_value_keyword_equals(value, CSS_VALUE_INHERIT)) {
+        DomElement* parent = dom_parent_element(lam::view_as_element(span));
+        if (parent && parent->flex_item()) {
+            number = grow ? get_item_flex_grow(parent) : get_item_flex_shrink(parent);
+        } else if (parent) {
+            // grid parents keep their item storage while inheritance computes the declared factor.
+            css_prop_compute_declared_flex_factor(parent, property, &number);
+        }
+    } else {
+        CssMathResult math = layout_evaluate_css_math(lycon, property, value, true, true);
+        css_compute_nonnegative_number_result(&math, &number);
+    }
     if (property == CSS_PROPERTY_FLEX_GROW) span->fi->flex_grow = number;
     else span->fi->flex_shrink = number;
 }
@@ -2503,7 +2521,9 @@ static bool css_property_consumes_substitution(CssPropertyCode property) {
         case CSS_PROPERTY_TRANSFORM_ORIGIN: case CSS_PROPERTY_PERSPECTIVE_ORIGIN:
         case CSS_PROPERTY_FILTER: case CSS_PROPERTY_BACKDROP_FILTER:
         case CSS_PROPERTY_OPACITY: case CSS_PROPERTY_VISIBILITY:
-        case CSS_PROPERTY_HYPHENATE_LIMIT_CHARS:
+        case CSS_PROPERTY_HYPHENATE_LIMIT_CHARS: case CSS_PROPERTY_Z_INDEX: case CSS_PROPERTY_ORDER:
+        case CSS_PROPERTY_FLEX_GROW: case CSS_PROPERTY_FLEX_SHRINK: case CSS_PROPERTY_FLEX_BASIS:
+        case CSS_PROPERTY_FLEX:
         case CSS_PROPERTY_BACKGROUND_IMAGE: case CSS_PROPERTY_BACKGROUND_SIZE:
         case CSS_PROPERTY_BACKGROUND_COLOR: case CSS_PROPERTY_BACKGROUND_REPEAT:
         case CSS_PROPERTY_MASK_IMAGE:
@@ -2640,9 +2660,9 @@ float resolve_css_opacity_value(LayoutContext* lycon, const CssValue* value) {
         }
         return 1.0f;
     }
-    float opacity = resolve_length_value(lycon, CSS_PROPERTY_OPACITY, value);
-    // range clipping occurs at computed-value time, before keyframe interpolation.
-    return isnan(opacity) ? 0.0f : clamp_unit(opacity);
+    CssMathResult math = layout_evaluate_css_math(lycon, CSS_PROPERTY_OPACITY, value, true, true);
+    float opacity = 1.0f;
+    return css_compute_opacity_result(&math, &opacity) ? opacity : 1.0f;
 }
 
 
@@ -3689,17 +3709,19 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
         src_space->data.keyword == CSS_VALUE_INHERIT) {
         DomElement* current = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
         DomElement* parent = current ? dom_parent_element(current) : nullptr;
-        Spacing* source = nullptr;
+        const Spacing* source = nullptr;
+        const Margin* source_margin = nullptr;
         if (parent && parent->bound) {
-            source = is_margin ? &parent->boundary_mut()->margin :
-                is_padding ? &parent->boundary_mut()->padding :
-                (parent->boundary()->border ? &parent->boundary_mut()->border->width : nullptr);
+            const BoundaryProp* boundary = parent->boundary();
+            source_margin = is_margin ? view_boundary_flow_margin(boundary) : nullptr;
+            source = is_margin ? static_cast<const Spacing*>(source_margin) :
+                is_padding ? &boundary->padding :
+                (boundary->border ? &boundary->border->width : nullptr);
         }
         if (!source) {
             return;
         }
         Margin* target_margin = is_margin ? (Margin*)trg_spacing : nullptr;
-        Margin* source_margin = is_margin ? (Margin*)source : nullptr;
         for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
             copy_spacing_side(trg_spacing, source, target_margin, source_margin,
                               (CssBoxSide)side, specificity);
@@ -4123,6 +4145,8 @@ static bool resolve_property_callback(AvlNode* node, void* context, bool font_pa
     if (css_grid_property_mask(prop_id)) return true;
     if (prop_id == CSS_PROPERTY_CONTAINER || prop_id == CSS_PROPERTY_CONTAINER_NAME ||
         prop_id == CSS_PROPERTY_CONTAINER_TYPE) return true;
+    if (prop_id == CSS_PROPERTY_FLEX || prop_id == CSS_PROPERTY_FLEX_GROW ||
+        prop_id == CSS_PROPERTY_FLEX_SHRINK || prop_id == CSS_PROPERTY_FLEX_BASIS) return true;
     if (css_property_is_font(prop_id) != font_pass) return true;
     CssDeclaration* decl = style_node
         ? style_tree_get_declaration(lam::dom_require_element(lycon->view)->specified_style,
@@ -4838,46 +4862,37 @@ static CssDeclaration* winning_axis_declaration(
     const CssPropertyCode candidates[] = {
         shorthand, physical, logical
     };
-    CssDeclaration* winner = nullptr;
+    CssPropertyCode sources[4] = {CSS_PROPERTY_ALL};
+    size_t count = 1;
     for (CssPropertyCode property : candidates) {
-        if (property == CSS_PROPERTY_COUNT) continue;
-        CssDeclaration* declaration = style_tree_get_declaration(style, property);
-        if (declaration && (!winner ||
-            css_declaration_cascade_compare(declaration, winner) > 0)) {
-            winner = declaration;
-        }
+        if (property != CSS_PROPERTY_COUNT) sources[count++] = property;
     }
-    return winner;
+    // rollback filters every declaration of the axis, including overlapping shorthands.
+    return style_tree_get_component_declaration(style, sources, count);
 }
 
-static CssEnum overflow_axis_value(LayoutContext* lycon,
+static CssEnum scroll_axis_keyword_value(LayoutContext* lycon,
                                    const CssDeclaration* declaration,
-                                   bool horizontal) {
-    if (!declaration || !declaration->value) return CSS_VALUE__UNDEF;
+                                   bool horizontal, bool overscroll, CssEnum inherited) {
+    CssEnum initial = overscroll ? CSS_VALUE_AUTO : CSS_VALUE_VISIBLE;
+    if (!declaration || !declaration->value) return initial;
     const CssValue* value = resolve_var_function(lycon, declaration->value);
     CssPropertyCode source = declaration->property_code;
     if (!value || !css_property_validate_value(source, value)) {
-        return CSS_VALUE_VISIBLE;
+        return initial;
     }
-    if (source == CSS_PROPERTY_OVERFLOW && value->type == CSS_VALUE_TYPE_LIST) {
-        value = value->data.list.values[horizontal ? 0 : 1];
+    CssPropertyCode shorthand = overscroll ? CSS_PROPERTY_OVERSCROLL_BEHAVIOR : CSS_PROPERTY_OVERFLOW;
+    if (source == shorthand && value->type == CSS_VALUE_TYPE_LIST) {
+        value = value->data.list.values[horizontal ? 0 : value->data.list.count - 1];
     }
-    if (!value || value->type != CSS_VALUE_TYPE_KEYWORD) return CSS_VALUE_VISIBLE;
+    if (!value || value->type != CSS_VALUE_TYPE_KEYWORD) return initial;
     CssEnum keyword = value->data.keyword;
-    if (keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_UNSET) {
-        return CSS_VALUE_VISIBLE;
+    if (keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_UNSET ||
+        keyword == CSS_VALUE_REVERT || keyword == CSS_VALUE_REVERT_LAYER) {
+        return initial;
     }
     if (keyword == CSS_VALUE_OVERLAY) return CSS_VALUE_AUTO;
-    if (keyword == CSS_VALUE_INHERIT) {
-        DomElement* current = lam::dom_require_element(lycon->view);
-        DomElement* parent = dom_parent_element(current);
-        ViewBlock* parent_block = parent ? lam::view_as_block(parent) : nullptr;
-        if (parent_block && parent_block->scroller) {
-            return horizontal ? parent_block->scroll()->overflow_x
-                : parent_block->scroll()->overflow_y;
-        }
-        return CSS_VALUE_VISIBLE;
-    }
+    if (keyword == CSS_VALUE_INHERIT) return inherited;
     return keyword;
 }
 
@@ -4934,76 +4949,65 @@ static void resolve_line_clamp_count(DomElement* element, LayoutContext* lycon) 
     if (winner) resolve_css_property(property, winner, lycon);
 }
 
-static void resolve_overflow_axes(DomElement* element, LayoutContext* lycon) {
-    ViewBlock* block = lam::view_as_block(lycon->view);
-    if (!block || !element->specified_style) return;
-    StyleTree* style = element->specified_style;
-    bool vertical = layout_element_inline_axis_is_vertical(element);
-    CssDeclaration* x = winning_axis_declaration(style, CSS_PROPERTY_OVERFLOW,
-        CSS_PROPERTY_OVERFLOW_X,
-        vertical ? CSS_PROPERTY_OVERFLOW_BLOCK : CSS_PROPERTY_OVERFLOW_INLINE);
-    CssDeclaration* y = winning_axis_declaration(style, CSS_PROPERTY_OVERFLOW,
-        CSS_PROPERTY_OVERFLOW_Y,
-        vertical ? CSS_PROPERTY_OVERFLOW_INLINE : CSS_PROPERTY_OVERFLOW_BLOCK);
-    if (!x && !y) return;
-    block->ensure_scroll(lycon);
-    CssEnum x_value = x ? overflow_axis_value(lycon, x, true)
-        : block->scroll()->overflow_x;
-    CssEnum y_value = y ? overflow_axis_value(lycon, y, false)
-        : block->scroll()->overflow_y;
+static void resolve_flex_components(DomElement* element, LayoutContext* lycon) {
+    CssPropertyCode members[3];
+    int count = css_property_get_longhand_properties(CSS_PROPERTY_FLEX, members, 3);
+    // independent member winners preserve longhand importance and layer rollback.
+    for (int i = 0; i < count; i++) {
+        CssDeclaration* winner = layout_cascaded_physical_declaration(element, members[i]);
+        if (winner) resolve_css_property(members[i], winner, lycon);
+    }
+}
+
+bool layout_compute_scroll_keyword_axes(LayoutContext* lycon, StyleTree* style,
+        bool vertical, bool overscroll, CssEnum inherited_x, CssEnum inherited_y,
+        CssEnum* out_x, CssEnum* out_y) {
+    CssPropertyCode shorthand = overscroll ? CSS_PROPERTY_OVERSCROLL_BEHAVIOR : CSS_PROPERTY_OVERFLOW;
+    CssDeclaration* x = winning_axis_declaration(style, shorthand,
+        overscroll ? CSS_PROPERTY_OVERSCROLL_BEHAVIOR_X : CSS_PROPERTY_OVERFLOW_X,
+        overscroll ? CSS_PROPERTY_COUNT : vertical ? CSS_PROPERTY_OVERFLOW_BLOCK : CSS_PROPERTY_OVERFLOW_INLINE);
+    CssDeclaration* y = winning_axis_declaration(style, shorthand,
+        overscroll ? CSS_PROPERTY_OVERSCROLL_BEHAVIOR_Y : CSS_PROPERTY_OVERFLOW_Y,
+        overscroll ? CSS_PROPERTY_COUNT : vertical ? CSS_PROPERTY_OVERFLOW_INLINE : CSS_PROPERTY_OVERFLOW_BLOCK);
+    if (!x && !y) return false;
+    CssEnum x_value = x ? scroll_axis_keyword_value(lycon, x, true, overscroll, inherited_x) : *out_x;
+    CssEnum y_value = y ? scroll_axis_keyword_value(lycon, y, false, overscroll, inherited_y) : *out_y;
     // CSS Overflow 3 §3.1 computes visible/clip against a scrollable opposite axis.
-    bool x_scrollable = x_value == CSS_VALUE_AUTO || x_value == CSS_VALUE_SCROLL ||
-        x_value == CSS_VALUE_HIDDEN;
-    bool y_scrollable = y_value == CSS_VALUE_AUTO || y_value == CSS_VALUE_SCROLL ||
-        y_value == CSS_VALUE_HIDDEN;
+    bool x_scrollable = !overscroll && (x_value == CSS_VALUE_AUTO || x_value == CSS_VALUE_SCROLL ||
+        x_value == CSS_VALUE_HIDDEN);
+    bool y_scrollable = !overscroll && (y_value == CSS_VALUE_AUTO || y_value == CSS_VALUE_SCROLL ||
+        y_value == CSS_VALUE_HIDDEN);
     if (y_scrollable && x_value == CSS_VALUE_VISIBLE) x_value = CSS_VALUE_AUTO;
     if (x_scrollable && y_value == CSS_VALUE_VISIBLE) y_value = CSS_VALUE_AUTO;
     if (y_scrollable && x_value == CSS_VALUE_CLIP) x_value = CSS_VALUE_HIDDEN;
     if (x_scrollable && y_value == CSS_VALUE_CLIP) y_value = CSS_VALUE_HIDDEN;
-    block->scroller->overflow_x = x_value;
-    block->scroller->overflow_y = y_value;
+    *out_x = x_value;
+    *out_y = y_value;
+    return true;
 }
 
-static CssEnum overscroll_axis_value(LayoutContext* lycon,
-                                     const CssDeclaration* declaration,
-                                     bool horizontal) {
-    if (!declaration || !declaration->value) return CSS_VALUE_AUTO;
-    const CssValue* value = resolve_var_function(lycon, declaration->value);
-    if (!value || !css_property_validate_value(
-            declaration->property_code, value)) return CSS_VALUE_AUTO;
-    if (declaration->property_code == CSS_PROPERTY_OVERSCROLL_BEHAVIOR &&
-        value->type == CSS_VALUE_TYPE_LIST) {
-        value = value->data.list.values[horizontal ? 0
-            : value->data.list.count - 1];
-    }
-    if (!value || value->type != CSS_VALUE_TYPE_KEYWORD) return CSS_VALUE_AUTO;
-    if (value->data.keyword == CSS_VALUE_INHERIT) {
-        DomElement* current = lam::dom_require_element(lycon->view);
-        DomElement* parent = dom_parent_element(current);
-        return parent ? (horizontal ? parent->scroll()->overscroll_x
-            : parent->scroll()->overscroll_y) : CSS_VALUE_AUTO;
-    }
-    if (value->data.keyword == CSS_VALUE_INITIAL ||
-        value->data.keyword == CSS_VALUE_UNSET ||
-        value->data.keyword == CSS_VALUE_REVERT ||
-        value->data.keyword == CSS_VALUE_REVERT_LAYER) return CSS_VALUE_AUTO;
-    return value->data.keyword;
-}
-
-static void resolve_overscroll_axes(DomElement* element, LayoutContext* lycon) {
+static void resolve_scroll_keyword_axes(DomElement* element, LayoutContext* lycon, bool overscroll) {
     ViewBlock* block = lam::view_as_block(lycon->view);
     if (!block || !element->specified_style) return;
-    StyleTree* style = element->specified_style;
-    CssDeclaration* x = winning_axis_declaration(style,
-        CSS_PROPERTY_OVERSCROLL_BEHAVIOR,
-        CSS_PROPERTY_OVERSCROLL_BEHAVIOR_X, CSS_PROPERTY_COUNT);
-    CssDeclaration* y = winning_axis_declaration(style,
-        CSS_PROPERTY_OVERSCROLL_BEHAVIOR,
-        CSS_PROPERTY_OVERSCROLL_BEHAVIOR_Y, CSS_PROPERTY_COUNT);
-    if (!x && !y) return;
+    DomElement* parent = dom_parent_element(element);
+    const ScrollProp* inherited = parent ? parent->scroll() : &SCROLL_PROP_DEFAULT;
+    // absent authored axes retain control/UA defaults already supplied by style setup.
+    CssEnum x = overscroll ? block->scroll()->overscroll_x : block->scroll()->overflow_x;
+    CssEnum y = overscroll ? block->scroll()->overscroll_y : block->scroll()->overflow_y;
+    if (!layout_compute_scroll_keyword_axes(lycon, element->specified_style,
+        layout_element_inline_axis_is_vertical(element), overscroll,
+        overscroll ? inherited->overscroll_x : inherited->overflow_x,
+        overscroll ? inherited->overscroll_y : inherited->overflow_y, &x, &y)) return;
+    CssEnum initial = overscroll ? CSS_VALUE_AUTO : CSS_VALUE_VISIBLE;
+    if (!block->scroller && x == initial && y == initial) return;
     block->ensure_scroll(lycon);
-    block->scroller->overscroll_x = overscroll_axis_value(lycon, x, true);
-    block->scroller->overscroll_y = overscroll_axis_value(lycon, y, false);
+    if (overscroll) {
+        block->scroller->overscroll_x = x;
+        block->scroller->overscroll_y = y;
+    } else {
+        block->scroller->overflow_x = x;
+        block->scroller->overflow_y = y;
+    }
 }
 
 static void resolve_scroll_behavior(DomElement* element, LayoutContext* lycon) {
@@ -5049,23 +5053,13 @@ static void resolve_overflow_clip_margin(DomElement* element,
             value->data.keyword == CSS_VALUE_REVERT ||
             value->data.keyword == CSS_VALUE_REVERT_LAYER) return;
     }
-    int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
-    for (int i = 0; i < count; i++) {
-        const CssValue* item = value->type == CSS_VALUE_TYPE_LIST
-            ? value->data.list.values[i] : value;
-        if (item->type == CSS_VALUE_TYPE_KEYWORD) {
-            scroll->overflow_clip_box = item->data.keyword;
-        } else {
-            float length = resolve_length_value(lycon,
-                CSS_PROPERTY_OVERFLOW_CLIP_MARGIN, item);
-            if (!isfinite(length)) {
-                scroll->overflow_clip_box = CSS_VALUE_PADDING_BOX;
-                scroll->overflow_clip_margin = 0.0f;
-                return;
-            }
-            scroll->overflow_clip_margin = length;
-        }
-    }
+    CssEnum box;
+    const CssValue* component;
+    if (!css_overflow_clip_margin_components(value, &box, &component)) return;
+    float length = component ? resolve_length_value(lycon, CSS_PROPERTY_OVERFLOW_CLIP_MARGIN, component) : 0.0f;
+    // validation, layout and CSSOM share the same optional box/length decomposition.
+    scroll->overflow_clip_box = isfinite(length) ? box : CSS_VALUE_PADDING_BOX;
+    scroll->overflow_clip_margin = isfinite(length) ? length : 0.0f;
 }
 
 static void resolve_scroll_snap(DomElement* element, LayoutContext* lycon) {
@@ -5679,7 +5673,10 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 inheritance_span->font->font_size_from_medium = ancestor->font->font_size_from_medium;
                 continue;  // Move to next property
             }
-            if (prop_id == CSS_PROPERTY_DIRECTION && !dom_element_has_directionality_hint(dom_elem)) {
+            if (prop_id == CSS_PROPERTY_DIRECTION) {
+                // a local HTML dir hint supplies the value before implicit CSS inheritance;
+                // authored direction declarations have already bypassed this fallback loop.
+                if (dom_element_has_directionality_hint(dom_elem)) continue;
                 // css writing modes: direction inherits from the computed parent value;
                 // html dir can supply that value without a specified CSS declaration.
                 CssEnum inherited_direction = find_inherited_block_keyword(
@@ -5750,10 +5747,11 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     radiant_compute_stored_line_height(lycon, lam::view_require_element(lycon->view));
     resolve_background_style(dom_elem, lycon);
     resolve_grid_components(dom_elem, lycon);
+    resolve_flex_components(dom_elem, lycon);
     resolve_line_clamp_count(dom_elem, lycon);
     resolve_text_align_longhands(dom_elem, lycon);
-    resolve_overflow_axes(dom_elem, lycon);
-    resolve_overscroll_axes(dom_elem, lycon);
+    resolve_scroll_keyword_axes(dom_elem, lycon, false);
+    resolve_scroll_keyword_axes(dom_elem, lycon, true);
     resolve_scroll_behavior(dom_elem, lycon);
     resolve_overflow_clip_margin(dom_elem, lycon);
     resolve_scroll_snap(dom_elem, lycon);
@@ -6051,64 +6049,6 @@ static void css_store_self_alignment(LayoutContext* lycon, ViewSpan* span,
     if (!block) return;
     if (justify) block->justify_self = value;
     else block->align_self = value;
-}
-
-static void css_set_flex_item_values(DomElement* span,
-                                     float grow, float shrink, float basis,
-                                     bool basis_is_percent) {
-    span->fi->flex_grow = grow;
-    span->fi->flex_shrink = shrink;
-    span->fi->flex_basis = basis;
-    span->fi->flex_basis_is_percent = basis_is_percent;
-    span->fi->flex_basis_is_content = false;
-    span->fi->flex_basis_is_stretch = false;
-}
-
-struct CssFlexBasisValue {
-    float value = -1.0f;
-    bool is_percent = false;
-    bool is_content = false;
-    bool is_stretch = false;
-    bool valid = false;
-};
-
-static CssFlexBasisValue css_parse_flex_basis_value(LayoutContext* lycon,
-                                                    CssPropertyCode property,
-                                                    const CssValue* value,
-                                                    bool resolve_length,
-                                                    bool allow_content) {
-    CssFlexBasisValue result;
-    if (!value) return result;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        switch (value->data.keyword) {
-            case CSS_VALUE_AUTO:
-                result.valid = true;
-                break;
-            case CSS_VALUE_CONTENT:
-                result.is_content = allow_content;
-                result.valid = allow_content;
-                break;
-            case CSS_VALUE_STRETCH:
-                result.is_stretch = true;
-                result.valid = true;
-                break;
-            default:
-                break;
-        }
-    } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
-        result.value = resolve_length
-            ? resolve_length_value(lycon, property, value)
-            : (float)value->data.length.value;
-        result.valid = true;
-    } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-        result.value = (float)value->data.percentage.value;
-        result.is_percent = true;
-        result.valid = true;
-    } else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-        result.value = (float)value->data.number.value;
-        result.valid = true;
-    }
-    return result;
 }
 
 static void css_set_flex_basis_value(DomElement* span,
@@ -7034,6 +6974,9 @@ static const CssSimpleKeywordSpec* css_simple_keyword_spec(CssPropertyCode prope
          CSS_SIMPLE_KEYWORD_POSITIVE, offsetof(InlineProp, mix_blend_mode)},
         {CSS_PROPERTY_TEXT_TRANSFORM, CSS_SIMPLE_KEYWORD_BLOCK,
          CSS_SIMPLE_KEYWORD_POSITIVE, offsetof(BlockProp, text_transform)},
+        // inline and block direction use the same computed inheritance and CSS-wide defaults.
+        {CSS_PROPERTY_DIRECTION, CSS_SIMPLE_KEYWORD_BLOCK,
+         CSS_SIMPLE_KEYWORD_POSITIVE, offsetof(BlockProp, direction)},
         {CSS_PROPERTY_TEXT_WRAP_STYLE, CSS_SIMPLE_KEYWORD_BLOCK,
          CSS_SIMPLE_KEYWORD_POSITIVE, offsetof(BlockProp, text_wrap_style)},
         {CSS_PROPERTY_TEXT_OVERFLOW, CSS_SIMPLE_KEYWORD_BLOCK,
@@ -8583,12 +8526,20 @@ CssDeclaration* layout_cascaded_physical_declaration(DomElement* element,
     bool rtl = direction == CSS_VALUE_RTL ||
         (direction != CSS_VALUE_LTR && logical_inline_direction(element) == CSS_VALUE_RTL);
     bool vertical = layout_element_inline_axis_is_vertical(element);
+    return layout_cascaded_style_declaration(element->specified_style, property,
+        layout_logical_sides(vertical, layout_element_writing_mode(element) == WM_VERTICAL_RL, rtl));
+}
+
+CssDeclaration* layout_cascaded_style_declaration(StyleTree* style, CssPropertyCode property,
+        const LayoutLogicalSides& sides) {
+    if (!style || property <= CSS_PROPERTY_UNKNOWN || property >= CSS_PROPERTY_COUNT) return nullptr;
+    // pseudo CSSOM and layout share component winners, including all and layer rollback.
+    bool vertical = sides.inline_start == CSS_BOX_SIDE_TOP || sides.inline_start == CSS_BOX_SIDE_BOTTOM;
     CssPropertyCode sources[CSS_PROPERTY_COUNT];
-    LayoutComponentCascade query = {property, vertical,
-        layout_logical_sides(vertical, layout_element_writing_mode(element) == WM_VERTICAL_RL, rtl),
+    LayoutComponentCascade query = {property, vertical, sides,
         box_component_family(property), sources, 0};
-    style_tree_foreach(element->specified_style, collect_component_cascade_source, &query);
-    return style_tree_get_component_declaration(element->specified_style, sources, query.count);
+    style_tree_foreach(style, collect_component_cascade_source, &query);
+    return style_tree_get_component_declaration(style, sources, query.count);
 }
 
 void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, LayoutContext* lycon) {
@@ -8633,8 +8584,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
     bool vertical_block_start_is_right = current_writing_mode == WM_VERTICAL_RL;
     prop_id = css_physical_size_alias(prop_id, inline_axis_is_vertical);
     bool grid_projection = grid_mask && (css_grid_property_mask(decl->property_code) & grid_mask) && decl->property_code != prop_id;
+    bool flex_projection = decl->property_code == CSS_PROPERTY_FLEX && prop_id != CSS_PROPERTY_FLEX;
     CssPropertyCode value_property = decl->pending_shorthand_code > 0 ? decl->pending_shorthand_code : grid_projection ? decl->property_code : decl->property_code == CSS_PROPERTY_CONTAINER ||
-        decl->property_code == CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE ? decl->property_code : prop_id;
+        decl->property_code == CSS_PROPERTY_CONTAIN_INTRINSIC_SIZE || flex_projection ? decl->property_code : prop_id;
     CssComputedValueScratch value_scope(lycon, value_property, value);
     Pool* value_pool = lycon->css_value_scratch ? lycon->css_value_scratch.get() : lycon->pool.get();
     const CssValue* substituted = css_resolve_element_var_value(value_pool, current_element, value, value_property);
@@ -8653,12 +8605,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         }
     }
     ViewSpan* span = lam::view_require_element(lycon->view);
-    if (decl->pending_shorthand_code > 0 || grid_projection) {
-        value = css_grid_shorthand_longhand(value_pool, value, value_property, prop_id);
-        if (!value) return;
-    }
-    if (value_property == CSS_PROPERTY_CONTAINER) {
-        value = css_container_shorthand_longhand(value, prop_id, value_pool);
+    if (decl->pending_shorthand_code > 0 || grid_projection || flex_projection ||
+        value_property == CSS_PROPERTY_CONTAINER) {
+        value = css_project_shorthand_longhand(value_pool, value, value_property, prop_id);
         if (!value) return;
     }
     ViewBlock* block = lam::view_as_block(span);
@@ -8875,38 +8824,6 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_TEXT_WRAP_MODE:
             resolve_text_wrap_property(lycon, span, prop_id, value);
             break;
-        case CSS_PROPERTY_DIRECTION: {
-            if (!block) {
-                ViewSpan* span = lycon->view->is_element() ? lam::view_require_element(lycon->view) : nullptr;
-                if (span) {
-                    // CSS direction is inherited by inline boxes; allocate the
-                    // shared block property before storing an explicit value.
-                    span->ensure_block(lycon);
-                }
-                if (span && span->blk) {
-                    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                        CssEnum dir_value = value->data.keyword;
-                        if (dir_value == CSS_VALUE_LTR || dir_value == CSS_VALUE_RTL) {
-                            span->blk->direction = dir_value;
-                        }
-                    }
-                }
-                break;
-            }
-            block->ensure_block(lycon);
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                CssEnum dir_value = value->data.keyword;
-                if (dir_value == CSS_VALUE_INHERIT) {
-                    DomElement* dom_elem = lam::dom_require_element(lycon->view);
-                    block->blk->direction = find_inherited_block_keyword(
-                        dom_elem, CSS_PROPERTY_DIRECTION, false, false, CSS_VALUE_LTR);
-                }
-                else if (dir_value == CSS_VALUE_LTR || dir_value == CSS_VALUE_RTL) {
-                    block->blk->direction = dir_value;
-                }
-            }
-            break;
-        }
         case CSS_PROPERTY_UNICODE_BIDI: {
             BlockProp* target = block ? block->ensure_block(lycon) : nullptr;
             if (!target && lycon->view->is_element()) {
@@ -9648,11 +9565,16 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             break;
         case CSS_PROPERTY_Z_INDEX: {
             ensure_span_position(lycon, span);
-            if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                int z = (int)value->data.number.value;
-                span->position->z_index = z;
-            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
             span->position->z_index = 0;
+            if (css_value_keyword_equals(value, CSS_VALUE_INHERIT)) {
+                // inherit the parent's computed stack level instead of reusing its font-relative recipe.
+                DomElement* parent = current_element ? dom_parent_element(current_element) : nullptr;
+                if (parent) span->position->z_index = parent->positionp()->z_index;
+            } else {
+                double level = 0.0;
+                if (layout_compute_css_integer(lycon, prop_id, value,
+                        (double)INT_MIN, (double)INT_MAX, &level))
+                    span->position->z_index = (int)level; // INT_CAST_OK: bounded integer stack level
             }
             break;
         }
@@ -9988,9 +9910,29 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_FLEX_BASIS: {
             alloc_flex_item_prop(lycon, span);
             if (!span->flex_item()) break;
-            CssFlexBasisValue basis = css_parse_flex_basis_value(
-                lycon, prop_id, value, true, true);
-            if (basis.valid) css_set_flex_basis_value(span, basis);
+            CssFlexBasisValue basis = {};
+            bool valid = false;
+            if (css_value_keyword_equals(value, CSS_VALUE_INHERIT)) {
+                DomElement* parent = dom_parent_element(lam::view_as_element(span));
+                const FlexItemProp* item = parent ? parent->flex_item() : nullptr;
+                if (item) {
+                    basis.value = item->flex_basis;
+                    basis.is_percent = item->flex_basis_is_percent;
+                    basis.is_content = item->flex_basis_is_content;
+                    basis.is_stretch = item->flex_basis_is_stretch;
+                    valid = true;
+                } else {
+                    // a grid parent's declared basis computes in its own font without allocating flex storage.
+                    valid = !parent || css_prop_compute_declared_flex_basis(parent, &basis);
+                }
+            } else {
+                CssMathResult math = layout_evaluate_css_math(lycon, prop_id, value, true, true);
+                valid = css_compute_flex_basis_result(value, &math, &basis);
+            }
+            if (valid) {
+                if (!basis.is_percent) basis.value = layout_clamp_dimension(basis.value);
+                css_set_flex_basis_value(span, basis);
+            }
             break;
         }
         case CSS_PROPERTY_ALIGN_SELF:
@@ -10018,74 +9960,6 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 } else if (is_wrap(val)) {
                     block->embedp()->flex->wrap = val;
                 }
-            }
-            break;
-        }
-        case CSS_PROPERTY_FLEX: {
-            alloc_flex_item_prop(lycon, span);
-            if (!span->flex_item()) break;
-            ViewSpan* span = lam::view_require_element(lycon->view);
-            float flex_grow = 1.0f;
-            float flex_shrink = 1.0f;
-            CssFlexBasisValue basis;
-            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                if (value->data.keyword == CSS_VALUE_NONE) {
-                    flex_grow = 0;
-                    flex_shrink = 0;
-                    basis.value = -1;
-                } else if (value->data.keyword == CSS_VALUE_AUTO) {
-                    flex_grow = 1;
-                    flex_shrink = 1;
-                    basis.value = -1;
-                } else if (value->data.keyword == CSS_VALUE_INITIAL) {
-                    flex_grow = 0;
-                    flex_shrink = 1;
-                    basis.value = -1;
-                }
-                css_set_flex_item_values(span, flex_grow, flex_shrink,
-                                         basis.value, basis.is_percent);
-                break;
-            }
-            if (value->type == CSS_VALUE_TYPE_LIST) {
-                size_t count = value->data.list.count;
-                CssValue** values = value->data.list.values;
-                int value_index = 0;
-                bool found_basis = false;
-                for (size_t i = 0; i < count && i < 3; i++) {
-                    CssValue* val = values[i];
-                    if (val->type == CSS_VALUE_TYPE_NUMBER) {
-                        if (value_index < 2) {
-                            float* target = value_index++ == 0
-                                ? &flex_grow : &flex_shrink;
-                            *target = (float)val->data.number.value;
-                        } else if (value_index == 2 && val->data.number.value == 0) {
-                            basis.value = 0;
-                            basis.is_percent = false;
-                            found_basis = true;
-                        }
-                    } else {
-                        CssFlexBasisValue parsed = css_parse_flex_basis_value(
-                            lycon, prop_id, val, false, false);
-                        if (parsed.valid) {
-                            basis = parsed;
-                            found_basis = true;
-                        }
-                    }
-                }
-                if (count == 1 && value_index == 1 && !found_basis) {
-                    flex_shrink = 1.0f;
-                    basis.value = 0;
-                }
-                css_set_flex_item_values(span, flex_grow, flex_shrink,
-                                         basis.value, basis.is_percent);
-                span->fi->flex_basis_is_stretch = basis.is_stretch;
-            }
-            else if (value->type == CSS_VALUE_TYPE_NUMBER) {
-                flex_grow = (float)value->data.number.value;
-                flex_shrink = 1.0f;
-                basis.value = 0;
-                css_set_flex_item_values(span, flex_grow, flex_shrink,
-                                         basis.value, false);
             }
             break;
         }

@@ -1,0 +1,32 @@
+<!doctype html><meta charset="utf-8"><style>
+html,body{margin:0;background:white}button{height:24px}
+#wrap{position:absolute;left:0;top:80px;--font:12px;--leading:normal;--size:2px;--image:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVQImWP4z8Dwn4Hh/38WRgiLAQA+/wYAKNOoDAAAAABJRU5ErkJggg==)}
+ul{margin:0;padding:0}li{position:absolute;top:0;width:100px;font-family:Arial;font-size:var(--font);line-height:var(--leading);background:rgb(240,240,240);image-rendering:crisp-edges}
+#actual{left:20px;list-style:none inside;list-style-image:var(--image)}
+#actual::marker{font-size:var(--marker-font,var(--font))}
+#reference{left:160px;list-style:none;font-size:var(--marker-font,var(--font))}
+#reference img{width:var(--size);height:var(--size);vertical-align:baseline}
+#wrap.none #actual{list-style-image:none}#wrap.none img{display:none}
+</style><button id="check">Check</button><button id="leading">Leading</button><button id="zero">Zero leading</button><button id="font16">Font 16</button><button id="font24">Font 24</button><button id="image8">Image 8</button><button id="image32">Image 32</button><button id="small">Small</button><button id="marker32">Marker 32</button><button id="marker48">Marker 48</button><button id="inherit">Inherit</button><button id="none">None</button><button id="restore">Restore</button><output id="report"></output>
+<div id="wrap"><ul><li id="actual"></li><li id="reference"><img id="referenceImage" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVQImWP4z8Dwn4Hh/38WRgiLAQA+/wYAKNOoDAAAAABJRU5ErkJggg=="> </li></ul></div>
+<script>(function(){
+var wrap=document.getElementById('wrap');
+function set(name,value){wrap.style.setProperty(name,value);}
+function image(size){set('--image','image-set(url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVQImWP4z8Dwn4Hh/38WRgiLAQA+/wYAKNOoDAAAAABJRU5ErkJggg==") '+(2/size)+'x)');set('--size',size+'px');}
+document.getElementById('leading').onclick=function(){set('--leading','1');};
+document.getElementById('zero').onclick=function(){set('--leading','0');};
+document.getElementById('font16').onclick=function(){set('--font','16px');};
+document.getElementById('font24').onclick=function(){set('--font','24px');};
+document.getElementById('image8').onclick=function(){image(8);};
+document.getElementById('image32').onclick=function(){image(32);};
+document.getElementById('small').onclick=function(){image(2);};
+document.getElementById('marker32').onclick=function(){set('--marker-font','32px');};
+document.getElementById('marker48').onclick=function(){set('--marker-font','48px');};
+document.getElementById('inherit').onclick=function(){wrap.style.removeProperty('--marker-font');};
+document.getElementById('none').onclick=function(){wrap.classList.add('none');};
+document.getElementById('restore').onclick=function(){wrap.classList.remove('none');};
+document.getElementById('check').onclick=function(){
+ var a=document.getElementById('actual'),r=document.getElementById('reference'),s=getComputedStyle(a),m=getComputedStyle(a,'::marker');
+ document.getElementById('report').setAttribute('data-values',s.fontSize+'|'+s.lineHeight+'|'+m.fontSize+'|'+a.getBoundingClientRect().height+'|'+r.getBoundingClientRect().height);
+};
+})();</script>
