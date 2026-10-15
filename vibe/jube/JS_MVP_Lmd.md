@@ -1751,8 +1751,31 @@ user stops further testing and requests repairs; the incomplete captures remain
 explicit. Performance acceptance fails on pin47. Repairs reuse solved storage
 proofs, Lambda's array attribute face and existing primitive/constructor/RegExp
 operations (**D2.6.6v3**, **D3.4.3v5**, **D8.4.1v2**); no new helper or normality
-flag is introduced. The private release repair build compiles and links;
-post-repair correctness and speed remain unmeasured. The standalone Mandelbrot
+flag is introduced. The private release repair build compiles and links.
+The subsequent full benchmark replay attempts **88 workloads**: **84** pass
+their exact output checks, and all four jq workloads terminate with **SIGBUS**
+while the archived release passes them. Pinned release MIR and unchanged self
+timers confirm **12 performance regressions**, including eight workloads outside
+the previous confirmed list. The largest are Splay (**3.07x**), Fast-diff
+(**3.02x**), Triangl (**1.78x**) and Microdiff (**1.48x**) against Result9;
+Text Search is **14.2%** slower than the later phase-entry release. Hyphen remains
+inconclusive because identical controls vary. Results3–9 remain unchanged;
+the new capture is `temp/mvp_perf_all_20261015/REPORT.md`. Benchmark acceptance
+remains open; this replay does not refresh the archived Test262 score.
+Direct repairs identify and fix an ARM64 long-branch overflow in jq (approved
+vendor patch, **248/248** MIR emission checks), then repair a separate bare-`let`
+inference error exposed by the tokenizer. Records and mix pass on the trial
+build; records also passes on the retained build. Full jq replay is pending.
+Triangl recovers to **155.019 ms**, versus **278.262 ms** pre-fix and
+**155.083 ms** Result9 in seven paired release-MIR rounds. Optional index
+payloads reuse existing Lambda storage and ownership rules (**D2.2.5**,
+**D3.4.3v5**, **D5.2–D5.3**). An additional fixed-key literal allocation experiment
+was withdrawn: Splay and Microdiff improved in the first capture, but Fast-diff
+slowed and competing builds invalidated its confirmation. Eleven other confirmed
+regressions remain open. The final focused suite passes **650/650**, with **5/5**
+forced-GC checks. Details, broader gate caveats and immutable captures are
+recorded in the implementation plan.
+The standalone Mandelbrot
 output path retains a conservative full-storage fallback, documented in the plan.
 Detailed implementation, evidence and
 residual inventories are in [the implementation plan](../impl/JS_MVP_Lmd_Test262_90.md).

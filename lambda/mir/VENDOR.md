@@ -10,7 +10,7 @@ native reference.
 |---|---|
 | Upstream | https://github.com/vnmakarov/mir |
 | Commit | `99c65079038f3ba9242ef646f308c266cfd7a8e5` (2024-08-29) |
-| Local patches | `patches/mir-rotr.patch`, `patches/mir-alloca-branch-fix.patch`, `patches/mir-release-func-ir.patch`, `patches/mir-spilled-reg-bounds.patch`, `patches/mir-self-phi-copy.patch`, `patches/mir-conventional-ssa-self-loop.patch` |
+| Local patches | `patches/mir-rotr.patch`, `patches/mir-alloca-branch-fix.patch`, `patches/mir-release-func-ir.patch`, `patches/mir-spilled-reg-bounds.patch`, `patches/mir-self-phi-copy.patch`, `patches/mir-conventional-ssa-self-loop.patch`, `patches/mir-aarch64-long-branches.patch` |
 
 **The patches under `patches/` are already applied to the source here.** They
 are kept as the record of our delta versus upstream, so a future re-sync can
@@ -167,3 +167,21 @@ at `lambda/js/js_mir_function_class_lowering.cpp:3845`). That is fixed at the
 emission site, and LambdaJS additionally validates for NULL labels before
 linking. Across the full Lambda + Input baseline the workaround's diagnostics
 never fired.
+
+### `mir-aarch64-long-branches.patch` — relax overflowing ARM64 branches
+
+Approved 2026-10-15 after the JS MVP jq replay exposed a conditional backward
+branch spanning more than 1 MiB. Whole-function code generation masked the
+19-bit displacement without checking its range; the resulting `cbnz` jumped
+2 MiB beyond the intended label into writable non-executable memory.
+
+Re-emit the function with only overflowing short references widened, repeating
+until every displacement fits. Conditional branches invert their condition and
+skip a 26-bit unconditional jump. A distant label address uses a rebased literal.
+Re-emission recomputes labels and switch-table alignment; short functions retain
+the same instruction bytes. Unrepresentable 26-bit branches report an error.
+The basic-block generation path is unchanged.
+
+Touches only `mir-gen-aarch64.c`. The ARM64 long-branch/label-address test in
+`test/test_mir_emission_gtest.cpp` and the jq replay exercise the repair
+(D8.6.2–D8.6.3). Diagnosis: `temp/mvp_perf_repair_20261015/jq-branch/lldb.log`.
