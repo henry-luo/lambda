@@ -6399,12 +6399,23 @@ void layout_finalize_line_clamp(LayoutContext* lycon, ViewBlock* block) {
     block->blk->line_clamp_last_line_max_descender = lycon->block.line_clamp_last_line_max_descender;
 }
 
+int layout_line_clamp_count(const ViewBlock* block) {
+    return block && block->blk &&
+        (!block->block()->line_clamp_legacy || block->display.legacy_clamp)
+        ? block->block()->line_clamp : 0;
+}
+
+float layout_line_clamp_intrinsic_height(ViewBlock* block, float height, float line_height) {
+    int line_limit = layout_line_clamp_count(block);
+    // discarded lines must not enlarge an auto-height flex/grid contribution.
+    return line_limit > 0 && !layout_block_inline_axis_is_vertical(block)
+        ? fminf(height, line_limit * line_height) : height;
+}
+
 void layout_setup_line_clamp(LayoutContext* lycon, ViewBlock* block,
                               const BlockContext* parent) {
     lycon->block.line_number = 0;
-    bool own_clamp_applies = block->blk &&
-        (!block->block()->line_clamp_legacy || block->display.legacy_clamp);
-    lycon->block.line_clamp = own_clamp_applies ? block->block()->line_clamp : 0;
+    lycon->block.line_clamp = layout_line_clamp_count(block);
     lycon->block.line_clamped = false;
     lycon->block.line_clamp_advance_y = -1.0f;
     lycon->block.line_clamp_last_line_ascender = 0.0f;

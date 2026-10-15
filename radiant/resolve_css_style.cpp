@@ -7627,7 +7627,7 @@ static void resolve_inline_visibility_opacity(LayoutContext* lycon, ViewSpan* sp
     span->in_line->opacity = resolve_css_opacity_value(lycon, value);
 }
 
-static void resolve_line_count_property(LayoutContext* lycon, ViewBlock* block,
+static void resolve_line_count_property(LayoutContext* lycon, ViewSpan* block,
                                         CssPropertyCode property, const CssValue* value) {
     if (!block) return;
     block->ensure_block(lycon);
@@ -9741,7 +9741,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         }
         case CSS_PROPERTY_LINE_CLAMP:
         case CSS_PROPERTY_WEBKIT_LINE_CLAMP:
-            resolve_line_count_property(lycon, block, prop_id, value);
+            // intrinsic measurement resolves counts before the element has a block view tag.
+            resolve_line_count_property(lycon, span, prop_id, value);
             break;
         case CSS_PROPERTY_WEBKIT_BOX_ORIENT:
             // display and legacy flex routing consume the cascaded orientation directly.

@@ -6218,6 +6218,7 @@ static float intrinsic_text_br_content_height(LayoutContext* lycon, DomElement* 
     float height = compute_text_height_at_width(
         lycon, text->str, text->length, width, line_height,
         get_element_text_transform(element), get_element_font_variant(element), true);
+    height = layout_line_clamp_intrinsic_height(view, height, line_height);
     strbuf_free(text);
     return height;
 }
@@ -6686,7 +6687,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     }
 
     if (!is_grid_container && !is_flex_row &&
-        (display_inner == CSS_VALUE_FLOW || display_inner == CSS_VALUE_CONTENTS)) {
+        (display_inner == CSS_VALUE_FLOW || display_inner == CSS_VALUE_CONTENTS ||
+         (display_inner == CSS_VALUE_FLOW_ROOT && layout_line_clamp_count(view) > 0))) {
         // Flow and contents boxes expose their inline descendants to this formatting context.
         has_only_inline_content = true;
         for (DomNode* c = element->first_child; c; c = c->next_sibling) {

@@ -5102,6 +5102,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block);
 void layout_setup_text_indent(LayoutContext* lycon, ViewBlock* block, float content_width);
 void layout_intrinsic_apply_first_line_indent(float text_indent, float first_segment_min,
     float remaining_min_content, float* max_content, float* min_content);
+int layout_line_clamp_count(const ViewBlock* block);
+float layout_line_clamp_intrinsic_height(ViewBlock* block, float height, float line_height);
 void layout_setup_line_clamp(LayoutContext* lycon, ViewBlock* block,
                               const BlockContext* parent);
 void layout_finalize_line_clamp(LayoutContext* lycon, ViewBlock* block);
